@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="logo">
+        <span class="logo-icon">⬡</span>
+        <div>
+          <h1>Nest Optimizer</h1>
+          <p class="tagline">Max models • Minimal supports • Any plate</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btn-clear" class="btn btn-ghost" title="Clear everything">Clear</button>
+      </div>
+    </header>
+
+    <main>
+      <!-- Left Panel -->
+      <aside class="panel left-panel">
+        <section class="card">
+          <h2>Build Plate</h2>
+          <select id="plate-select">
+            <option value="a1mini">Bambu A1 Mini (180 × 180)</option>
+            <option value="a1">Bambu A1 / P1S / X1C (256 × 256)</option>
+            <option value="prusa">Prusa MK4 / MK3S (250 × 210)</option>
+            <option value="ender">Creality Ender 3 (220 × 220)</option>
+            <option value="custom">Custom size…</option>
+          </select>
+          <div id="custom-size" class="custom-size hidden">
+            <label>Width (mm) <input type="number" id="custom-w" value="180" min="50" max="500"></label>
+            <label>Depth (mm) <input type="number" id="custom-d" value="180" min="50" max="500"></label>
+          </div>
+          <div class="plate-info">
+            <span id="plate-dims">180 × 180 mm</span>
+            <span id="plate-area">32,400 mm²</span>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Models</h2>
+          <label id="drop-zone" class="drop-zone" for="file-input">
+            <div class="drop-content">
+              <span class="drop-icon">📁</span>
+              <p><strong>Click here</strong> to choose STL files</p>
+              <p class="hint">Select files from the dialog that opens</p>
+            </div>
+            <input type="file" id="file-input" accept=".stl" multiple />
+          </label>
+          <div id="model-list" class="model-list"></div>
+        </section>
+
+        <section class="card">
+          <h2>Optimize</h2>
+          <div class="settings">
+            <label class="checkbox">
+              <input type="checkbox" id="opt-orient" checked />
+              Auto-orient for fewer supports
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="opt-rotate" checked />
+              Allow 45° / 90° rotations while packing
+            </label>
+            <label>
+              Gap between models (mm)
+              <input type="number" id="gap" value="2" min="0" max="20" step="0.5" />
+            </label>
+          </div>
+          <button id="btn-optimize" class="btn btn-primary" disabled>
+            Optimize Plate
+          </button>
+          <p id="status" class="status"></p>
+        </section>
+      </aside>
+
+      <!-- Center – 3D View -->
+      <section class="viewport-section">
+        <div id="viewport"></div>
+        <div class="viewport-overlay">
+          <div id="stats" class="stats hidden">
+            <span id="stat-count">0 models</span>
+            <span id="stat-fill">0% fill</span>
+            <span id="stat-time">—</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Panel -->
+      <aside class="panel right-panel">
+        <section class="card">
+          <h2>Results</h2>
+          <div id="results" class="results">
+            <p class="empty">Run Optimize to see packing results.</p>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Export</h2>
+          <p class="hint">Download positioned models or a project file you can drop straight into Bambu Studio / Orca / PrusaSlicer.</p>
+          <button id="btn-export-stl" class="btn btn-secondary" disabled>Download STLs (zip)</button>
+          <button id="btn-export-3mf" class="btn btn-secondary" disabled>Download 3MF Project</button>
+          <p class="export-note">Tip: After export, open the file in your slicer. Supports are still generated there — this tool only optimizes orientation & layout.</p>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
