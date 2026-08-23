@@ -531,3 +531,17 @@ select:focus, input:focus {
   background: var(--border);
   border-radius: 3px;
 }
+
+.tool-toggle-row .btn {
+  flex: 1;
+  margin: 0;
+}
+.tool-toggle-row .btn.tool-active {
+  border-color: #ef4444;
+  color: #fecaca;
+  background: #3f1212;
+}
+#cutter-status {
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
