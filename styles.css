@@ -36,7 +36,6 @@ body {
   height: 100dvh;
 }
 
-/* Header */
 header {
   display: flex;
   align-items: center;
@@ -68,7 +67,6 @@ h1 {
   color: var(--muted);
 }
 
-/* Main layout */
 main {
   display: grid;
   grid-template-columns: 300px 1fr 280px;
@@ -94,7 +92,6 @@ main {
   border-left: 1px solid var(--border);
 }
 
-/* Mobile layout */
 @media (max-width: 900px) {
   main {
     grid-template-columns: 1fr;
@@ -146,7 +143,6 @@ main {
   margin-bottom: 12px;
 }
 
-/* Form elements */
 select, input[type="number"] {
   width: 100%;
   background: var(--bg);
@@ -190,7 +186,6 @@ select:focus, input:focus {
   margin-top: 4px;
 }
 
-/* Drop zone */
 .drop-zone {
   border: 2px dashed var(--border);
   border-radius: 8px;
@@ -233,7 +228,6 @@ select:focus, input:focus {
   margin-top: 2px;
 }
 
-/* Model list */
 .model-list {
   margin-top: 10px;
   display: flex;
@@ -284,7 +278,6 @@ select:focus, input:focus {
   color: #ef4444;
 }
 
-/* Settings */
 .settings {
   display: flex;
   flex-direction: column;
@@ -305,7 +298,6 @@ select:focus, input:focus {
   margin: 0;
 }
 
-/* Buttons */
 .btn {
   display: inline-flex;
   align-items: center;
@@ -372,7 +364,6 @@ select:focus, input:focus {
   color: #ef4444;
 }
 
-/* Viewport */
 .viewport-section {
   position: relative;
   background: #0a0c10;
@@ -407,7 +398,6 @@ select:focus, input:focus {
   display: none;
 }
 
-/* Results */
 .results {
   font-size: 13px;
 }
@@ -520,7 +510,6 @@ select:focus, input:focus {
   margin-bottom: 0;
 }
 
-/* Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -544,4 +533,18 @@ select:focus, input:focus {
 #cutter-status {
   margin-top: 4px;
   margin-bottom: 8px;
+}
+
+.btn-danger {
+  background: #7f1d1d;
+  color: #fecaca;
+  border: 1px solid #b91c1c;
+  margin-top: 8px;
+}
+.btn-danger:hover:not(:disabled) {
+  background: #991b1b;
+}
+.adjust-delete {
+  width: 100%;
+  margin-top: 8px;
 }
