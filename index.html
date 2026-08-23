@@ -66,7 +66,12 @@
 
         <section class="card" id="edit-card">
           <h2>Square cut</h2>
-          <p class="hint">Red plane is locked 90° through the part. Slide it along the length, then split. Click a model name to cut that one.</p>
+          <p class="hint">Open cutter to place the red 90° plane. Close it when you want to nest/optimize. Tools work independently.</p>
+          <div class="edit-row tool-toggle-row">
+            <button id="btn-cutter-open" class="btn btn-secondary" type="button">Open cutter</button>
+            <button id="btn-cutter-close" class="btn btn-secondary" type="button" disabled>Close cutter</button>
+          </div>
+          <p id="cutter-status" class="hint">Cutter closed — optimize freely.</p>
           <p id="edit-size" class="hint">Load an STL to see size.</p>
           <label>
             Length axis
