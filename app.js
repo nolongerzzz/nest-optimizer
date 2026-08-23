@@ -1,6 +1,6 @@
 // Full engine loader — concatenates chunk files then runs as module
 async function boot() {
-  const names = ['nest-chunk-0.js.txt', 'nest-chunk-1.js.txt', 'nest-chunk-2.js.txt'];
+  const names = ['nest-chunk-0.js.txt', 'nest-chunk-1.js.txt', 'nest-chunk-2.js.txt', 'nest-chunk-3.js.txt'];
   const texts = await Promise.all(names.map(n => fetch(n + '?v=' + Date.now()).then(r => {
     if (!r.ok) throw new Error('Missing ' + n);
     return r.text();
