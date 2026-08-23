@@ -30,7 +30,6 @@
     </header>
 
     <main>
-      <!-- Left Panel -->
       <aside class="panel left-panel">
         <section class="card">
           <h2>Build Plate</h2>
@@ -132,7 +131,6 @@
         </section>
       </aside>
 
-      <!-- Center – 3D View -->
       <section class="viewport-section">
         <div id="viewport"></div>
         <div class="viewport-overlay">
@@ -144,7 +142,6 @@
         </div>
       </section>
 
-      <!-- Right Panel -->
       <aside class="panel right-panel">
         <section class="card">
           <h2>Results</h2>
@@ -182,6 +179,9 @@
     </main>
   </div>
 
+  <div id="ctx-menu" class="ctx-menu hidden" role="menu">
+    <button type="button" id="ctx-delete" class="ctx-item ctx-danger" role="menuitem">Delete piece</button>
+  </div>
   <script type="module" src="app.js"></script>
 </body>
 </html>
