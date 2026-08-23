@@ -1,11 +1,16 @@
-// Full engine loader — concatenates chunk files then runs as module
 async function boot() {
-  const names = ['nest-chunk-0.js.txt', 'nest-chunk-1.js.txt', 'nest-chunk-2.js.txt', 'nest-chunk-3.js.txt'];
-  const texts = await Promise.all(names.map(n => fetch(n + '?v=' + Date.now()).then(r => {
+  const names = ['z0.b64', 'z1.b64', 'z2.b64'];
+  const parts = await Promise.all(names.map(n => fetch(n + '?v=' + Date.now()).then(r => {
     if (!r.ok) throw new Error('Missing ' + n);
     return r.text();
   })));
-  const code = texts.join('');
+  const b64 = parts.join('');
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const ds = new DecompressionStream('gzip');
+  const stream = new Blob([bytes]).stream().pipeThrough(ds);
+  const code = await new Response(stream).text();
   const blob = new Blob([code], { type: 'text/javascript' });
   const url = URL.createObjectURL(blob);
   await import(url);
