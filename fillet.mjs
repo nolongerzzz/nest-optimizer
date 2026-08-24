@@ -732,6 +732,9 @@ export function buildCornerAwareFillet(loop, opts = {}) {
     spacing = 0.35,
     weldTol = 1e-6,
     capSnapWeight = 0.5,
+    // When false, skip the solid ear-clip cap and return innerRing so the
+    // caller can triangulate a face-with-holes (outer rim fillet + flat slots).
+    includeCap = true,
   } = opts;
 
   if (!(radius > 0)) throw new Error('buildCornerAwareFillet: radius must be > 0');
@@ -862,13 +865,14 @@ export function buildCornerAwareFillet(loop, opts = {}) {
     }
   }
 
-  // Inner cap: welded inner ring, consecutive/wrap duplicates removed, ear-clipped.
+  // Inner ring: welded innermost ring, consecutive/wrap duplicates removed.
+  // Used as the outer boundary of the flat cut face (and for the optional cap).
   const innerW = ring[uSteps].map((vi) => remap[vi]);
   const capPoly = [];
   for (const id of innerW) if (capPoly.length === 0 || capPoly[capPoly.length - 1] !== id) capPoly.push(id);
   while (capPoly.length > 1 && capPoly[0] === capPoly[capPoly.length - 1]) capPoly.pop();
   let capComplete = true;
-  if (capPoly.length >= 3) {
+  if (includeCap && capPoly.length >= 3) {
     const capCoords = capPoly.map((id) => [vertices[id][0], vertices[id][1]]);
     const capTris = earClip(capCoords);
     for (const [a, b, c] of capTris) pushTri(capPoly[a], capPoly[b], capPoly[c]);
@@ -876,14 +880,30 @@ export function buildCornerAwareFillet(loop, opts = {}) {
     // Fewer means the cap ring was not simple (a corner fold that snapping did
     // not resolve) — the cap has a hole.
     capComplete = capTris.length === capPoly.length - 2;
+  } else if (!includeCap) {
+    // Caller supplies the face (possibly with holes). Still probe the ring for
+    // corner folds so we can fail-loud on a self-intersecting inner seam.
+    capComplete = true;
+    for (const cd of cornerData) {
+      const pts = [];
+      let last = -1;
+      for (let d = -windowSize - 2; d <= windowSize + 2; d++) {
+        const id = remap[ring[uSteps][((cd.ci + d) % n + n) % n]];
+        if (id !== last) {
+          pts.push([vertices[id][0], vertices[id][1]]);
+          last = id;
+        }
+      }
+      if (pathSelfIntersects(pts)) {
+        warnings.push({ type: 'self-intersection', corner: cd.ci });
+        capComplete = false;
+      }
+    }
   }
 
-  // 4. §4c check. Authoritative signal: did the inner cap fully close? If not,
-  // a corner fold survived (window too narrow / radius too large for that
-  // sharpness) — fail loud so the caller widens the window or shrinks the
-  // radius (spec §4c/§5) instead of shipping a hole. Attribute to the corner(s)
-  // whose welded cap sub-ring self-intersects.
-  if (!capComplete) {
+  // 4. §4c check (solid-cap path). Authoritative signal: did the inner cap fully
+  // close? If not, a corner fold survived — fail loud.
+  if (includeCap && !capComplete) {
     let attributed = false;
     for (const cd of cornerData) {
       const pts = [];
@@ -906,9 +926,13 @@ export function buildCornerAwareFillet(loop, opts = {}) {
   // Outer seam ring (welded indices of ring k=0, at depth R, inset 0). This is
   // the loop where the fillet mates with the wall; integration stitches to it.
   const outerRing = ring[0].map((vi) => remap[vi]);
+  const innerRing = capPoly.slice();
 
   const positions = meshToPositions({ vertices, triangles }, frame);
-  return { vertices, triangles, positions, outerRing, warnings, corners, radii, cornerCount: cornerData.length, loop: L };
+  return {
+    vertices, triangles, positions, outerRing, innerRing,
+    warnings, corners, radii, cornerCount: cornerData.length, loop: L,
+  };
 }
 
 // --------------------------------------------------------------------------

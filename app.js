@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
-import { buildCornerAwareFillet, detectCorners } from './fillet.mjs';
+import { buildCornerAwareFillet, detectCorners, signedArea } from './fillet.mjs';
 
 // ===================== Plate Presets =====================
 const PLATES = {
@@ -2598,9 +2598,116 @@ function walkLoops(edges, axis, plane) {
 }
 
 /**
- * Replace the flat cap on ONE axis-aligned cut with a rounded (fillet) band.
- * First pass: single loop only, locally trims the wall sliver in [cutFace, R]
- * and mates the fillet's outer seam to the trimmed wall at depth R.
+ * Ear-clip a simple 2D polygon → list of triangles as [[u,v], [u,v], [u,v]].
+ * Ensures CCW before clipping. Returns [] on failure.
+ */
+function earClip2D(poly) {
+  if (!poly || poly.length < 3) return [];
+  const clean = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    if (Math.hypot(a[0] - b[0], a[1] - b[1]) > 1e-9) clean.push([a[0], a[1]]);
+  }
+  if (clean.length < 3) return [];
+  let area = 0;
+  for (let i = 0; i < clean.length; i++) {
+    const j = (i + 1) % clean.length;
+    area += clean[i][0] * clean[j][1] - clean[j][0] * clean[i][1];
+  }
+  const pts = area < 0 ? clean.slice().reverse() : clean.slice();
+  const V = pts.map(p => ({ u: p[0], v: p[1] }));
+  const tris = [];
+  const isInside = (a, b, c, p) => {
+    const v0x = c.u - a.u, v0y = c.v - a.v;
+    const v1x = b.u - a.u, v1y = b.v - a.v;
+    const v2x = p.u - a.u, v2y = p.v - a.v;
+    const dot00 = v0x * v0x + v0y * v0y;
+    const dot01 = v0x * v1x + v0y * v1y;
+    const dot02 = v0x * v2x + v0y * v2y;
+    const dot11 = v1x * v1x + v1y * v1y;
+    const dot12 = v1x * v2x + v1y * v2y;
+    const inv = 1 / (dot00 * dot11 - dot01 * dot01 + 1e-30);
+    const u = (dot11 * dot02 - dot01 * dot12) * inv;
+    const v = (dot00 * dot12 - dot01 * dot02) * inv;
+    return u >= -1e-9 && v >= -1e-9 && (u + v) <= 1 + 1e-9;
+  };
+  const isConvex = (prev, curr, next) =>
+    (curr.u - prev.u) * (next.v - prev.v) - (curr.v - prev.v) * (next.u - prev.u) > 1e-12;
+  let guard = 0;
+  while (V.length > 3 && guard++ < 10000) {
+    let clipped = false;
+    const n = V.length;
+    for (let i = 0; i < n; i++) {
+      const prev = V[(i + n - 1) % n], curr = V[i], next = V[(i + 1) % n];
+      if (!isConvex(prev, curr, next)) continue;
+      let empty = true;
+      for (let k = 0; k < n; k++) {
+        if (k === i || k === (i + n - 1) % n || k === (i + 1) % n) continue;
+        if (isInside(prev, curr, next, V[k])) { empty = false; break; }
+      }
+      if (!empty) continue;
+      tris.push([[prev.u, prev.v], [curr.u, curr.v], [next.u, next.v]]);
+      V.splice(i, 1);
+      clipped = true;
+      break;
+    }
+    if (!clipped) {
+      for (let i = 1; i < V.length - 1; i++) {
+        tris.push([[V[0].u, V[0].v], [V[i].u, V[i].v], [V[i + 1].u, V[i + 1].v]]);
+      }
+      break;
+    }
+  }
+  if (V.length === 3) tris.push([[V[0].u, V[0].v], [V[1].u, V[1].v], [V[2].u, V[2].v]]);
+  return tris;
+}
+
+/**
+ * Triangulate a face-with-holes via keyhole bridges.
+ * `outer` and each hole are 2D polylines. Outer = material exterior (largest
+ * loop); holes = slots/inner loops — left as flat openings.
+ * Returns list of triangles as triples of [u,v] points.
+ */
+function triangulateFaceWithHoles(outer, holes) {
+  if (!outer || outer.length < 3) return [];
+  const orient = (loop, wantPositive) => {
+    const a = signedArea(loop);
+    if (wantPositive ? a < 0 : a > 0) return loop.slice().reverse();
+    return loop.slice();
+  };
+  let poly = orient(outer, true);
+  const holeList = (holes || []).filter(h => h && h.length >= 3).map(h => orient(h, false));
+
+  for (const hole of holeList) {
+    let hi = 0;
+    for (let i = 1; i < hole.length; i++) if (hole[i][0] > hole[hi][0]) hi = i;
+    const hp = hole[hi];
+    let best = -1, bestD = Infinity;
+    for (let i = 0; i < poly.length; i++) {
+      const d = Math.hypot(poly[i][0] - hp[0], poly[i][1] - hp[1]);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    if (best < 0) continue;
+    const rotated = hole.slice(hi).concat(hole.slice(0, hi));
+    const injected = [poly[best]].concat(rotated).concat([[poly[best][0], poly[best][1]]]);
+    poly = poly.slice(0, best + 1).concat(injected.slice(1)).concat(poly.slice(best + 1));
+  }
+
+  return earClip2D(poly);
+}
+
+/**
+ * Replace the flat cap on ONE axis-aligned cut with a rounded (fillet) band on
+ * the OUTER rim of the NEW cut face only.
+ *
+ * - Outer loop (largest area): corner-aware fillet.
+ * - Inner loops / slots: true flat caps — never filleted.
+ * - Existing model edges elsewhere are untouched; only this cut's new face is
+ *   modified. Radius 0 is handled by the caller (legacy flat/chamfer path).
+ *
+ * Multi-loop: depth-R trim still removes the outer end band (needed to mate the
+ * fillet seam). Slot walls that the trim also cut back are restored as flat
+ * prisms so slots stay sharp and meet their flat caps at the cut plane.
  *
  * `wallPositions` = kept walls + far geometry (no cap). Returns a flat position
  * array, or null to signal the caller to fall back to the chamfer cap.
@@ -2611,27 +2718,42 @@ function buildFilletedSide(wallPositions, edges, axis, plane, keepMin, R) {
   const into = -outward;
   const planeR = plane + into * R;
   const to2 = p => axis === 'x' ? [p[1], p[2]] : axis === 'y' ? [p[0], p[2]] : [p[0], p[1]];
-  const from2 = (u, v) => axis === 'x' ? [plane, u, v] : axis === 'y' ? [u, plane, v] : [u, v, plane];
+  const from2At = (u, v, c) => axis === 'x' ? [c, u, v] : axis === 'y' ? [u, c, v] : [u, v, c];
   const setAxis = (p, c) => { const q = [p[0], p[1], p[2]]; if (axis === 'x') q[0] = c; else if (axis === 'y') q[1] = c; else q[2] = c; return q; };
 
-  // Local depth-R wall trim (only band-crossing triangles are split).
+  const loops = walkLoops(edges, axis, plane);
+  if (!loops.length) return null;
+
+  // Outer rim = largest |area| loop on the NEW cut face. Everything else is a
+  // hole/slot and stays flat.
+  const loops2D = loops.map(L => L.map(to2));
+  let outerIdx = 0;
+  let maxAbs = -1;
+  for (let i = 0; i < loops2D.length; i++) {
+    const a = Math.abs(signedArea(loops2D[i]));
+    if (a > maxAbs) { maxAbs = a; outerIdx = i; }
+  }
+  const outer2D = loops2D[outerIdx];
+  const hole2D = loops2D.filter((_, i) => i !== outerIdx);
+  if (!outer2D || outer2D.length < 3) return null;
+
+  // Local depth-R wall trim (mates fillet outer seam). Affects the whole end
+  // band; slot walls are restored below when holes exist.
   const trim = clipFlatSide(wallPositions, axis, planeR, keepMin);
   if (!trim || trim.out.length < 9) return null;
 
-  // Single-loop only for the first pass.
-  const loops = walkLoops(edges, axis, plane);
-  if (loops.length !== 1) return null;
-  const loop2D = loops[0].map(to2);
-  if (loop2D.length < 3) return null;
-
-  const n = loop2D.length;
-  const sharp = detectCorners(loop2D, 60).length > 0;
+  const n = outer2D.length;
+  const sharp = detectCorners(outer2D, 60).length > 0;
   let windowSize = sharp ? 40 : 24;
   windowSize = Math.max(1, Math.min(windowSize, Math.floor((n - 1) / 2)));
 
+  const hasHoles = hole2D.length > 0;
   let res;
   try {
-    res = buildCornerAwareFillet(loop2D, { radius: R, uSteps: 12, windowSize, adaptive: true, capPlanePos: 0 });
+    res = buildCornerAwareFillet(outer2D, {
+      radius: R, uSteps: 12, windowSize, adaptive: true, capPlanePos: 0,
+      includeCap: !hasHoles,
+    });
   } catch (e) {
     console.warn('[fillet] builder failed', e);
     return null;
@@ -2640,31 +2762,84 @@ function buildFilletedSide(wallPositions, edges, axis, plane, keepMin, R) {
   lastFilletWarnings = res.warnings || [];
 
   // Parametric [u, v, along] -> 3D. along = 0 at the cut face, R at the wall.
-  const map3 = res.vertices.map(v => setAxis(from2(v[0], v[1]), plane + into * v[2]));
+  const map3 = res.vertices.map(v => setAxis(from2At(v[0], v[1], plane), plane + into * v[2]));
 
-  // Orientation: make the inner-cap (along≈0) faces point outward (+outward
-  // along the cut axis), matching the flat cap they replace. Flip all fillet
-  // tris if the summed cap normal points the wrong way.
+  const pushOriented = (outArr, a, b, c) => {
+    const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+    const acx = c[0] - a[0], acy = c[1] - a[1], acz = c[2] - a[2];
+    const nx = aby * acz - abz * acy, ny = abz * acx - abx * acz, nz = abx * acy - aby * acx;
+    const along = axis === 'x' ? nx : axis === 'y' ? ny : nz;
+    if (along * outward < 0) outArr.push(a[0], a[1], a[2], c[0], c[1], c[2], b[0], b[1], b[2]);
+    else outArr.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+  };
+
+  // Orientation: make along≈0 faces point outward. Prefer summing pure cut-face
+  // tris; fall back to any band normal if the solid cap was omitted.
   let capNormal = 0;
   for (const [ia, ib, ic] of res.triangles) {
     const a = map3[ia], b = map3[ib], c = map3[ic];
     const ac = axis === 'x' ? a[0] : axis === 'y' ? a[1] : a[2];
     const bc = axis === 'x' ? b[0] : axis === 'y' ? b[1] : b[2];
     const cc = axis === 'x' ? c[0] : axis === 'y' ? c[1] : c[2];
-    if (Math.abs(ac - plane) < 1e-6 && Math.abs(bc - plane) < 1e-6 && Math.abs(cc - plane) < 1e-6) {
+    if (Math.abs(ac - plane) < 1e-5 && Math.abs(bc - plane) < 1e-5 && Math.abs(cc - plane) < 1e-5) {
       const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
       const acx = c[0] - a[0], acy = c[1] - a[1], acz = c[2] - a[2];
       const nx = aby * acz - abz * acy, ny = abz * acx - abx * acz, nz = abx * acy - aby * acx;
       capNormal += axis === 'x' ? nx : axis === 'y' ? ny : nz;
     }
   }
-  const flip = capNormal * outward < 0;
+  let flip = capNormal * outward < 0;
+  if (Math.abs(capNormal) < 1e-18) {
+    // No face tris yet (holes path) — probe a band triangle.
+    const [ia, ib, ic] = res.triangles[0];
+    const a = map3[ia], b = map3[ib], c = map3[ic];
+    const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+    const acx = c[0] - a[0], acy = c[1] - a[1], acz = c[2] - a[2];
+    const nx = aby * acz - abz * acy, ny = abz * acx - abx * acz, nz = abx * acy - aby * acx;
+    const along = axis === 'x' ? nx : axis === 'y' ? ny : nz;
+    // Band normals point roughly outward from the solid; for keepMin outward=+axis.
+    flip = along * outward < 0;
+  }
 
   const out = trim.out.slice();
   for (const [ia, ib, ic] of res.triangles) {
     const a = map3[ia], b = map3[flip ? ic : ib], c = map3[flip ? ib : ic];
     out.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
   }
+
+  if (hasHoles) {
+    // Flat face = fillet inner ring minus slot holes (slots stay sharp/flat).
+    const innerRing2D = (res.innerRing || []).map(id => [res.vertices[id][0], res.vertices[id][1]]);
+    if (innerRing2D.length < 3) return null;
+    const faceTris = triangulateFaceWithHoles(innerRing2D, hole2D);
+    for (const t of faceTris) {
+      const a = from2At(t[0][0], t[0][1], plane);
+      const b = from2At(t[1][0], t[1][1], plane);
+      const c = from2At(t[2][0], t[2][1], plane);
+      pushOriented(out, a, b, c);
+    }
+
+    // Restore slot walls the depth-R trim removed. Slot openings stay open on
+    // the cut face (face-with-holes above); only the outer rim is filleted.
+    for (const hole of hole2D) {
+      const m = hole.length;
+      if (m < 3) continue;
+      for (let i = 0; i < m; i++) {
+        const j = (i + 1) % m;
+        const a0 = from2At(hole[i][0], hole[i][1], plane);
+        const a1 = from2At(hole[j][0], hole[j][1], plane);
+        const b0 = from2At(hole[i][0], hole[i][1], planeR);
+        const b1 = from2At(hole[j][0], hole[j][1], planeR);
+        // Two tris per wall quad. Winding chosen so the normal points into the
+        // cavity (away from material); reverse if watertight check complains.
+        out.push(
+          a0[0], a0[1], a0[2], a1[0], a1[1], a1[2], b1[0], b1[1], b1[2],
+          a0[0], a0[1], a0[2], b1[0], b1[1], b1[2], b0[0], b0[1], b0[2]
+        );
+      }
+    }
+  }
+
   return out;
 }
 
