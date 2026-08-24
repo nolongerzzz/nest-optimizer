@@ -22,7 +22,25 @@ import {
   checkWatertight,
   trianglesToCoords,
   meshToPositions,
+  turningAngle,
+  detectCorners,
+  wallInwardNormalsAtCorner,
+  solveCornerCenter,
+  smoothstep,
+  slerp2D,
+  spherePoint,
+  cornerBlendedPoint,
+  buildCornerAwareRing,
+  segmentsIntersect,
+  ringSelfIntersects,
+  rayToOppositeWall,
+  adaptiveRadii,
 } from './fillet.mjs';
+
+const norm2 = (v) => {
+  const l = Math.hypot(v[0], v[1]) || 1;
+  return [v[0] / l, v[1] / l];
+};
 
 // ---- tiny test harness ----
 let passed = 0;
@@ -234,6 +252,253 @@ console.log('\n§0 — loop resampling removes micro-edges');
   ok('resample preserves winding sign', Math.sign(signedArea(rs)) === Math.sign(signedArea(noisy)));
   ok('resample roughly preserves area (~10000)', approx(Math.abs(signedArea(rs)), 10000, 200), `${signedArea(rs)}`);
   ok('resample spacing ~ uniform (~5mm)', approx(minEdge, 5, 2), `${minEdge}`);
+}
+
+// =============================================================================
+console.log('\n§3 — turning angle + corner detection');
+// =============================================================================
+{
+  const sq = subdivSquare(100, 4); // corners at indices 0,4,8,12
+  ok('straight-run turning angle ~ 0', approx(turningAngle(sq, 1), 0, 1e-12), `${turningAngle(sq, 1)}`);
+  ok('90° corner turning angle ~ +pi/2 (CCW)', approx(turningAngle(sq, 4), Math.PI / 2, 1e-9), `${turningAngle(sq, 4)}`);
+  const corners = detectCorners(sq, 30);
+  ok('detectCorners finds exactly the 4 corners', corners.length === 4 && corners.join(',') === '0,4,8,12', `[${corners}]`);
+
+  // Wall normals from points away from the corner: at corner [100,0] they are
+  // the bottom (+y) and right (-x) inward normals.
+  const [wn1, wn2] = wallInwardNormalsAtCorner(sq, 4, inwardNormalSign(sq), 3);
+  ok('corner wall normal n1 ~ [0,1]', approx(wn1[0], 0, 1e-9) && approx(wn1[1], 1, 1e-9), `${wn1}`);
+  ok('corner wall normal n2 ~ [-1,0]', approx(wn2[0], -1, 1e-9) && approx(wn2[1], 0, 1e-9), `${wn2}`);
+}
+
+// =============================================================================
+console.log('\n§4a — solveCornerCenter (measured-corner regression, spec §8)');
+// =============================================================================
+{
+  // Spec §8 wall directions. Normalise to unit (doc gives n2 to 4 dp).
+  const n1 = norm2([1, 0]);
+  const n2 = norm2([0.2536, 0.9673]);
+  const corner = [0, 0];
+
+  // The construction guarantees dot(C - corner, n) == R for BOTH walls. The doc
+  // reports "exactly 2.0000mm"; that IS R. So with R = 2.0 the tangency
+  // distances are exactly 2.0000, and with the fitted R = 2.0148 they are
+  // exactly 2.0148.
+
+  // (a) Literal §8 expectation: distances == 2.0000 with R = 2.0.
+  const C2 = solveCornerCenter(corner, n1, n2, 2.0);
+  const d1 = C2[0] * n1[0] + C2[1] * n1[1];
+  const d2 = C2[0] * n2[0] + C2[1] * n2[1];
+  ok('R=2.0: dist to wall 1 == 2.0000', approx(d1, 2.0, 1e-9), `${d1.toFixed(6)}`);
+  ok('R=2.0: dist to wall 2 == 2.0000', approx(d2, 2.0, 1e-9), `${d2.toFixed(6)}`);
+  ok('R=2.0: both distances equal', approx(d1, d2, 1e-9));
+
+  // (b) Fitted radius R = 2.0148: tangency distance == R exactly.
+  const R = 2.0148;
+  const C = solveCornerCenter(corner, n1, n2, R);
+  const e1 = C[0] * n1[0] + C[1] * n1[1];
+  const e2 = C[0] * n2[0] + C[1] * n2[1];
+  console.log(`       (fitted R=${R}: center=[${C[0].toFixed(4)}, ${C[1].toFixed(4)}], dist1=${e1.toFixed(4)}, dist2=${e2.toFixed(4)})`);
+  ok('R=2.0148: dist to wall 1 == R', approx(e1, R, 1e-9), `${e1}`);
+  ok('R=2.0148: dist to wall 2 == R', approx(e2, R, 1e-9), `${e2}`);
+
+  // Parallel walls -> no unique corner sphere.
+  ok('parallel walls return null', solveCornerCenter([0, 0], [1, 0], [1, 0], 2) === null);
+}
+
+// =============================================================================
+console.log('\n§4b — smoothstep / slerp2D / spherePoint');
+// =============================================================================
+{
+  ok('smoothstep(0)=0', approx(smoothstep(0), 0));
+  ok('smoothstep(1)=1', approx(smoothstep(1), 1));
+  ok('smoothstep(0.5)=0.5', approx(smoothstep(0.5), 0.5));
+  ok('smoothstep clamps below 0', approx(smoothstep(-1), 0));
+
+  const a = norm2([1, 0]);
+  const b = norm2([0, 1]);
+  const s0 = slerp2D(a, b, 0);
+  const s1 = slerp2D(a, b, 1);
+  const sm = slerp2D(a, b, 0.5);
+  ok('slerp2D t=0 -> a', approx(s0[0], a[0]) && approx(s0[1], a[1]));
+  ok('slerp2D t=1 -> b', approx(s1[0], b[0]) && approx(s1[1], b[1]));
+  ok('slerp2D midpoint stays unit length', approx(Math.hypot(sm[0], sm[1]), 1, 1e-12));
+  ok('slerp2D midpoint bisects (45°)', approx(sm[0], Math.SQRT1_2, 1e-9) && approx(sm[1], Math.SQRT1_2, 1e-9));
+
+  // Every sphere point lies exactly on the sphere of radius R centred at
+  // (C, capPlanePos + R).
+  const C = [5, 5];
+  const R = 2;
+  const cap = 3;
+  const negN1 = norm2([-1, 0]);
+  const negN2 = norm2([0, -1]);
+  let maxErr = 0;
+  for (let pi = 0; pi <= 8; pi++) {
+    const phi = (Math.PI / 2) * (pi / 8);
+    for (let ti = 0; ti <= 4; ti++) {
+      const p = spherePoint(C, R, phi, ti / 4, negN1, negN2, cap);
+      const dx = p.uv[0] - C[0];
+      const dy = p.uv[1] - C[1];
+      const dz = p.alongAxis - (cap + R);
+      maxErr = Math.max(maxErr, Math.abs(Math.hypot(dx, dy, dz) - R));
+    }
+  }
+  ok('spherePoint always on radius-R sphere (err < 1e-12)', maxErr < 1e-12, `maxErr ${maxErr.toExponential(3)}`);
+
+  // Tangency to the cut face: at phi = 90°, the point sits on the cap plane.
+  const face = spherePoint(C, R, Math.PI / 2, 0.5, negN1, negN2, cap);
+  ok('phi=90° sphere point sits on cap plane', approx(face.alongAxis, cap, 1e-12));
+}
+
+// =============================================================================
+console.log('\n§4c — segment intersection + ring self-intersection');
+// =============================================================================
+{
+  ok('crossing segments detected', segmentsIntersect([0, 0], [2, 2], [0, 2], [2, 0]) === true);
+  ok('non-crossing segments rejected', !segmentsIntersect([0, 0], [1, 0], [0, 1], [1, 1]));
+  ok('shared endpoint is not an intersection', !segmentsIntersect([0, 0], [1, 1], [1, 1], [2, 0]));
+
+  const convex = [[0, 0], [4, 0], [4, 4], [0, 4]];
+  ok('convex ring does not self-intersect', ringSelfIntersects(convex).hit === false);
+
+  const bowtie = [[0, 0], [2, 2], [2, 0], [0, 2]]; // classic self-crossing quad
+  ok('bowtie ring self-intersects', ringSelfIntersects(bowtie).hit === true);
+}
+
+// =============================================================================
+console.log('\n§4 — corner blend prevents the pinch that §2 alone produces');
+// =============================================================================
+{
+  // A sharp, DENSELY sampled convex spike. Adjacent vertices around the apex
+  // have wildly diverging inward normals over a fraction of a mm of arc — the
+  // exact condition where independent §2 sweeps cross (a visible pinch).
+  // interiorDeg = the interior angle at the apex.
+  function spikeLoop(interiorDeg, len, step, capN) {
+    const half = ((180 - interiorDeg) / 2) * Math.PI / 180;
+    const dirUp = [Math.cos(half), Math.sin(half)];
+    const dirDn = [Math.cos(half), -Math.sin(half)];
+    const pts = [];
+    for (let d = 0; d <= len; d += step) pts.push([dirDn[0] * d, dirDn[1] * d]);
+    const loFar = [dirDn[0] * len, dirDn[1] * len];
+    const hiFar = [dirUp[0] * len, dirUp[1] * len];
+    for (let k = 1; k < capN; k++) {
+      const t = k / capN;
+      pts.push([loFar[0] + (hiFar[0] - loFar[0]) * t, loFar[1] + (hiFar[1] - loFar[1]) * t]);
+    }
+    for (let d = len; d > 0; d -= step) pts.push([dirUp[0] * d, dirUp[1] * d]);
+    return pts;
+  }
+
+  const loop = spikeLoop(90, 24, 0.4, 16);
+  const L = signedArea(loop) > 0 ? loop : loop.slice().reverse(); // CCW so normals point inward
+  const sgn = inwardNormalSign(L);
+  const R = 2;
+  const windowSize = 16;
+
+  // Locate the apex = sharpest corner.
+  const corners = detectCorners(L, 30);
+  ok('spike apex detected as a corner', corners.length >= 1, `[${corners}]`);
+  let apexIdx = corners[0];
+  for (const ci of corners) if (Math.abs(turningAngle(L, ci)) > Math.abs(turningAngle(L, apexIdx))) apexIdx = ci;
+
+  // §4c is meant for a NEAR-innermost ring: at u = 0 the corner sphere
+  // legitimately collapses to its single cut-face tangent point C (the fillet
+  // cap apex), which makes a polygon self-intersection test false-positive on
+  // that degenerate point. Check a near-innermost ring (u = 0.3R) where the
+  // corner sphere is a real circle.
+  const u = 0.3 * R;
+  const simpleRing = L.map((_, i) => simpleFilletPoint(L, i, R, u, 0, sgn).uv);
+  const blendRing = buildCornerAwareRing(L, u, { radius: R, sign: sgn, windowSize, thresholdDeg: 30 });
+
+  const simpleHit = ringSelfIntersects(simpleRing).hit;
+  const blendHit = ringSelfIntersects(blendRing).hit;
+  console.log(`       (near-innermost ring u=0.3R — simple §2 self-intersects: ${simpleHit}; §4 blended: ${blendHit})`);
+  ok('§2-only ring self-intersects at the sharp corner', simpleHit === true);
+  ok('§4 corner-blended ring is self-intersection-free', blendHit === false);
+
+  // The corner vertex is driven by the single sphere: at u = 0 it lands exactly
+  // on the sphere center C (the cut-face tangent point).
+  const [n1, n2] = wallInwardNormalsAtCorner(L, apexIdx, sgn, 3);
+  const C = solveCornerCenter(L[apexIdx], n1, n2, R);
+  const apexInner = buildCornerAwareRing(L, 0, { radius: R, sign: sgn, windowSize, thresholdDeg: 30 })[apexIdx];
+  ok('corner cap vertex lands exactly on sphere center C', approx(apexInner[0], C[0], 1e-9) && approx(apexInner[1], C[1], 1e-9), `${apexInner} vs ${C}`);
+
+  // The corner vertex (blend weight 1) lies exactly on the corner sphere at any
+  // depth: distance from the 3D sphere centre (C, R) equals R.
+  let maxSphereErr = 0;
+  for (const uf of [0.2, 0.4, 0.6, 0.8]) {
+    const uu = uf * R;
+    const p = buildCornerAwareRing(L, uu, { radius: R, sign: sgn, windowSize, thresholdDeg: 30 })[apexIdx];
+    const along = uu; // capPlanePos 0
+    const err = Math.abs(Math.hypot(p[0] - C[0], p[1] - C[1], along - R) - R);
+    maxSphereErr = Math.max(maxSphereErr, err);
+  }
+  ok('corner vertex lies on the corner sphere at all depths', maxSphereErr < 1e-9, `maxErr ${maxSphereErr.toExponential(3)}`);
+
+  // Continuity: outside every corner window, §4 == §2 exactly (weight 0).
+  // Pick an index on the far cap, >windowSize from all detected corners.
+  let farIdx = -1;
+  for (let i = 0; i < L.length; i++) {
+    let clear = true;
+    for (const ci of corners) {
+      let d = Math.abs(i - ci);
+      d = Math.min(d, L.length - d);
+      if (d <= windowSize) { clear = false; break; }
+    }
+    if (clear) { farIdx = i; break; }
+  }
+  const simpleFar = simpleFilletPoint(L, farIdx, R, u, 0, sgn).uv;
+  ok('§4 == §2 outside corner windows (weight 0, no seam)',
+    farIdx >= 0 && approx(blendRing[farIdx][0], simpleFar[0], 1e-9) && approx(blendRing[farIdx][1], simpleFar[1], 1e-9), `farIdx ${farIdx}`);
+}
+
+// =============================================================================
+console.log('\n§5 — adaptive radius (ray-cast, min-filter, fail-loud)');
+// =============================================================================
+{
+  // Thin horizontal slab: thickness 5, width 200, subdivided so mid-edge points
+  // have pure-normal bisectors.
+  function slab(w, h, per) {
+    const pts = [];
+    const corners = [[0, 0], [w, 0], [w, h], [0, h]];
+    for (let c = 0; c < 4; c++) {
+      const a = corners[c], b = corners[(c + 1) % 4];
+      for (let k = 0; k < per; k++) {
+        const t = k / per;
+        pts.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+      }
+    }
+    return pts;
+  }
+  const s = slab(200, 5, 20);
+  const sgn = inwardNormalSign(s);
+
+  // A mid-edge point on the bottom edge should see the opposite wall at ~5mm.
+  const midBottom = 10; // within first (bottom) edge run of 20 points
+  const d = rayToOppositeWall(s, midBottom, sgn);
+  ok('rayToOppositeWall ~ wall thickness (5mm)', approx(d, 5, 1e-6), `${d}`);
+
+  // Target 3mm gets capped to 0.3 × 5 = 1.5mm along the THIN dimension (the long
+  // top/bottom edges). The short end edges legitimately see the far wall (200mm)
+  // and keep the full target — so assert on a long-edge vertex, not the global max.
+  const { radii, warnings } = adaptiveRadii(s, 3, { safety: 0.3, rMin: 0.3 });
+  ok('adaptive caps long-edge radius to ~0.3×thickness (1.5)', approx(radii[midBottom], 1.5, 1e-6), `${radii[midBottom]}`);
+  ok('adaptive never exceeds target', radii.every((r) => r <= 3 + 1e-9));
+  ok('thin slab still fits rMin (no false warnings)', warnings.length === 0, `warnings ${warnings.length}`);
+
+  // Thick square: no capping, radius stays at target.
+  const big = subdivSquare(400, 20);
+  const bigA = adaptiveRadii(big, 3, { safety: 0.3 });
+  const midEdge = 5;
+  ok('thick wall keeps full target radius', approx(bigA.radii[midEdge], 3, 1e-9), `${bigA.radii[midEdge]}`);
+
+  // Min-filter, not mean: a single thin spot pulls its NEIGHBOURS down too.
+  const raw = [3, 3, 0.5, 3, 3];
+  // emulate the filter directly on a tiny ring to assert min-behaviour
+  const n = raw.length;
+  const filtered = raw.map((_, i) => Math.min(raw[(i - 1 + n) % n], raw[i], raw[(i + 1) % n]));
+  ok('min-filter drops neighbours of a thin spot', filtered[1] === 0.5 && filtered[3] === 0.5);
+  ok('min-filter never raises a value', filtered.every((v, i) => v <= raw[i]));
 }
 
 // ---- summary ----

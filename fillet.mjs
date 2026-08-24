@@ -375,6 +375,309 @@ export function trianglesToCoords(mesh) {
   return mesh.triangles.map((t) => t.map((vi) => mesh.vertices[vi]));
 }
 
+// =============================================================================
+// 3. Sharp-corner detection
+// =============================================================================
+
+/**
+ * §3 — signed turning angle at loop vertex i (radians). ~0 on a straight run;
+ * +/- for a left/right turn. |angle| beyond a threshold marks a genuine corner
+ * that needs the §4 sphere treatment instead of the §2 per-vertex sweep.
+ */
+export function turningAngle(loop, i) {
+  const n = loop.length;
+  const prev = loop[(i - 1 + n) % n];
+  const curr = loop[i];
+  const next = loop[(i + 1) % n];
+  const a1 = Math.atan2(curr[1] - prev[1], curr[0] - prev[0]);
+  const a2 = Math.atan2(next[1] - curr[1], next[0] - curr[0]);
+  let d = a2 - a1;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return d;
+}
+
+/** §3 — indices of vertices whose |turningAngle| exceeds `thresholdDeg` (default 30°). */
+export function detectCorners(loop, thresholdDeg = 30) {
+  const th = (thresholdDeg * Math.PI) / 180;
+  const out = [];
+  for (let i = 0; i < loop.length; i++) {
+    if (Math.abs(turningAngle(loop, i)) > th) out.push(i);
+  }
+  return out;
+}
+
+/**
+ * The two wall inward-normals meeting at a corner, computed from points `step`
+ * vertices away so the immediate (possibly noisy) edges around the corner do
+ * not contaminate the directions. Returns unit [n1, n2] where n1 is the
+ * incoming wall and n2 the outgoing wall.
+ */
+export function wallInwardNormalsAtCorner(loop, i, sign, step = 3) {
+  const n = loop.length;
+  const s = Math.min(step, Math.floor(n / 3) || 1);
+  const before = loop[(i - s + n) % n];
+  const curr = loop[i];
+  const after = loop[(i + s) % n];
+  const n1 = edgeInwardNormal(before, curr, sign);
+  const n2 = edgeInwardNormal(curr, after, sign);
+  return [n1, n2];
+}
+
+// =============================================================================
+// 4a. Single corner sphere center (tangent to both walls + the cut face)
+// =============================================================================
+
+/**
+ * §4a — the ONE sphere center for a corner where two walls with inward normals
+ * n1, n2 meet. Solves dot(C - corner, n1) = R and dot(C - corner, n2) = R via a
+ * 2x2 linear solve, so C is exactly distance R from BOTH wall lines (and, in
+ * 3D, from the cut face). Using one center per corner — not one per vertex — is
+ * what prevents the crease/pinch a naive independent sweep produces.
+ *
+ * Returns null if the walls are (near) parallel (no unique corner sphere).
+ * n1, n2 are assumed unit; normalise beforehand if unsure.
+ */
+export function solveCornerCenter(cornerPt, n1, n2, R) {
+  const det = n1[0] * n2[1] - n1[1] * n2[0];
+  if (Math.abs(det) < 1e-12) return null;
+  const nx = (n2[1] - n1[1]) / det; // (n2y*1 - n1y*1) / det
+  const ny = (n1[0] - n2[0]) / det; // (n1x*1 - n2x*1) / det
+  return [cornerPt[0] + R * nx, cornerPt[1] + R * ny];
+}
+
+// =============================================================================
+// 4b. Corner patch — blend the simple sweep toward the single sphere center
+// =============================================================================
+
+/** Clamped smoothstep. 0 at x<=0, 1 at x>=1, smooth in between. */
+export function smoothstep(x) {
+  x = Math.max(0, Math.min(1, x));
+  return x * x * (3 - 2 * x);
+}
+
+/** §4b — spherical (great-circle) interpolation between two unit 2D directions. */
+export function slerp2D(a, b, t) {
+  const dot = Math.max(-1, Math.min(1, a[0] * b[0] + a[1] * b[1]));
+  const theta = Math.acos(dot);
+  if (theta < 1e-8) return [a[0], a[1]];
+  const s = Math.sin(theta);
+  const wa = Math.sin((1 - t) * theta) / s;
+  const wb = Math.sin(t * theta) / s;
+  return [wa * a[0] + wb * b[0], wa * a[1] + wb * b[1]];
+}
+
+/**
+ * §4b — a point on the corner sphere.
+ *   phi     : shared ring angle (0 at the wall, 90° at the cut face)
+ *   tBlend  : position across the corner window, 0 -> negN1 side, 1 -> negN2 side
+ * The direction from the center is slerped between the two (negated) wall
+ * normals. alongAxis matches §2's convention (add capPlanePos at the caller).
+ * By construction the returned point lies on a sphere of radius R centered at
+ * (C, capPlanePos + R).
+ */
+export function spherePoint(C, R, phi, tBlend, negN1, negN2, capPlanePos = 0) {
+  const nBlend = slerp2D(negN1, negN2, tBlend);
+  const alongAxis = capPlanePos + R * (1 - Math.sin(phi));
+  const cos = R * Math.cos(phi);
+  return { alongAxis, uv: [C[0] + cos * nBlend[0], C[1] + cos * nBlend[1]] };
+}
+
+/** Signed vertex offset j - cornerIdx wrapped into [-n/2, n/2] (arc distance in vertices). */
+function relIndex(j, cornerIdx, n) {
+  let d = j - cornerIdx;
+  while (d > n / 2) d -= n;
+  while (d < -n / 2) d += n;
+  return d;
+}
+
+/**
+ * §4b — one blended fillet point at ring depth u for vertex j inside the window
+ * of the corner at cornerIdx. Blends the §2 simple-sweep point (a) with the
+ * single-sphere point (b) at weight smoothstep(1 - |rel|/windowSize): 1.0 at the
+ * corner, 0.0 at the window edge (so it rejoins §2 with C0/continuity by
+ * construction — no seam). Points outside the window should just use §2.
+ */
+export function cornerBlendedPoint(loop, j, opts) {
+  const { cornerIdx, windowSize, C, R, negN1, negN2, u, capPlanePos = 0, sign } = opts;
+  const n = loop.length;
+
+  const sinPhi = Math.min(1, Math.max(0, 1 - u / R));
+  const phi = Math.asin(sinPhi);
+
+  const rel = relIndex(j, cornerIdx, n);
+  const tBlend = Math.max(0, Math.min(1, (rel + windowSize) / (2 * windowSize)));
+
+  const simple = simpleFilletPoint(loop, j, R, u, capPlanePos, sign);
+  const sphere = spherePoint(C, R, phi, tBlend, negN1, negN2, capPlanePos);
+
+  const w = smoothstep(1 - Math.abs(rel) / windowSize);
+  return {
+    alongAxis: simple.alongAxis, // identical for both terms (same u)
+    uv: [
+      (1 - w) * simple.uv[0] + w * sphere.uv[0],
+      (1 - w) * simple.uv[1] + w * sphere.uv[1],
+    ],
+    weight: w,
+  };
+}
+
+/**
+ * Build one ring (at depth u) of 2D cut-plane points for `loop`, using the §2
+ * simple sweep everywhere and the §4 corner blend within a window around each
+ * detected corner. This is the ring whose validity §4c checks. Pure geometry;
+ * does not assemble triangles.
+ */
+export function buildCornerAwareRing(loop, u, opts = {}) {
+  const {
+    radius,
+    capPlanePos = 0,
+    sign = inwardNormalSign(loop),
+    thresholdDeg = 30,
+    windowSize = 12,
+    normalStep = 3,
+    radii = null, // optional per-vertex radius (adaptive, §5)
+  } = opts;
+
+  const n = loop.length;
+  const R0 = radius;
+  const Rof = (i) => (radii ? radii[i] : R0);
+
+  // Base: §2 simple sweep everywhere.
+  const ring = [];
+  for (let i = 0; i < n; i++) {
+    const p = simpleFilletPoint(loop, i, Rof(i), u, capPlanePos, sign);
+    ring.push(p.uv);
+  }
+
+  // Overlay: §4 corner blend within each corner's window.
+  const corners = detectCorners(loop, thresholdDeg);
+  for (const ci of corners) {
+    const R = Rof(ci);
+    const [n1, n2] = wallInwardNormalsAtCorner(loop, ci, sign, normalStep);
+    const C = solveCornerCenter(loop[ci], n1, n2, R);
+    if (!C) continue; // parallel walls: leave §2 result
+    const negN1 = [-n1[0], -n1[1]];
+    const negN2 = [-n2[0], -n2[1]];
+    for (let d = -windowSize; d <= windowSize; d++) {
+      const j = ((ci + d) % n + n) % n;
+      const bp = cornerBlendedPoint(loop, j, {
+        cornerIdx: ci, windowSize, C, R, negN1, negN2, u, capPlanePos, sign,
+      });
+      ring[j] = bp.uv;
+    }
+  }
+  return ring;
+}
+
+// =============================================================================
+// 4c. Local self-intersection check
+// =============================================================================
+
+/** §4c — proper segment/segment intersection test (open segments). */
+export function segmentsIntersect(p1, p2, p3, p4) {
+  const d1x = p2[0] - p1[0], d1y = p2[1] - p1[1];
+  const d2x = p4[0] - p3[0], d2y = p4[1] - p3[1];
+  const denom = d1x * d2y - d1y * d2x;
+  if (Math.abs(denom) < 1e-12) return false;
+  const t = ((p3[0] - p1[0]) * d2y - (p3[1] - p1[1]) * d2x) / denom;
+  const u = ((p3[0] - p1[0]) * d1y - (p3[1] - p1[1]) * d1x) / denom;
+  return t > 1e-6 && t < 1 - 1e-6 && u > 1e-6 && u < 1 - 1e-6;
+}
+
+/**
+ * §4c — does a closed ring of 2D points self-intersect? Checks all non-adjacent
+ * edge pairs (adjacent edges legitimately share an endpoint). Returns
+ * { hit, i, j } — check the innermost ring (largest inset), where crossing is
+ * most likely, before committing geometry.
+ */
+export function ringSelfIntersects(pts) {
+  const n = pts.length;
+  for (let i = 0; i < n; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % n];
+    for (let j = i + 1; j < n; j++) {
+      // skip adjacent segments (share a vertex), including the wrap pair
+      if (j === i) continue;
+      if (j === i + 1) continue;
+      if (i === 0 && j === n - 1) continue;
+      const c = pts[j];
+      const d = pts[(j + 1) % n];
+      if (segmentsIntersect(a, b, c, d)) return { hit: true, i, j };
+    }
+  }
+  return { hit: false };
+}
+
+// =============================================================================
+// 5. Adaptive radius policy (min-filter, fail-loud on impossible walls)
+// =============================================================================
+
+/**
+ * Cast a ray from loop[i] along its inward miter bisector and return the
+ * distance to the nearest opposite wall (edge not touching vertex i). Infinity
+ * if nothing is hit. Used to find local wall thickness.
+ */
+export function rayToOppositeWall(loop, i, sign) {
+  const n = loop.length;
+  const prev = loop[(i - 1 + n) % n];
+  const curr = loop[i];
+  const next = loop[(i + 1) % n];
+  const nn1 = edgeInwardNormal(prev, curr, sign);
+  const nn2 = edgeInwardNormal(curr, next, sign);
+  let bx = nn1[0] + nn2[0];
+  let by = nn1[1] + nn2[1];
+  const blen = Math.hypot(bx, by) || 1e-9;
+  bx /= blen; by /= blen;
+
+  let best = Infinity;
+  for (let e = 0; e < n; e++) {
+    const e2 = (e + 1) % n;
+    if (e === i || e2 === i) continue; // skip edges sharing this vertex
+    const a = loop[e], c = loop[e2];
+    const ex = c[0] - a[0], ey = c[1] - a[1];
+    const denom = bx * ey - by * ex;
+    if (Math.abs(denom) < 1e-12) continue;
+    // curr + t*b = a + s*e
+    const t = ((a[0] - curr[0]) * ey - (a[1] - curr[1]) * ex) / denom;
+    const s = ((a[0] - curr[0]) * by - (a[1] - curr[1]) * bx) / denom;
+    if (t > 1e-6 && s >= -1e-9 && s <= 1 + 1e-9) best = Math.min(best, t);
+  }
+  return best;
+}
+
+/**
+ * §5 — per-vertex adaptive radius. Caps the local radius to `safety` × the
+ * distance to the opposite wall (so a fillet cannot eat through a thin wall),
+ * then applies a MIN-filter across neighbours (not a mean — averaging can raise
+ * the radius back up next to a thin spot, defeating the purpose). Vertices
+ * where even `rMin` will not fit are returned in `warnings` (fail loud) rather
+ * than silently forced.
+ */
+export function adaptiveRadii(loop, targetR, opts = {}) {
+  const { sign = inwardNormalSign(loop), safety = 0.3, rMin = 0.3, minFilterRadius = 1 } = opts;
+  const n = loop.length;
+
+  const raw = [];
+  for (let i = 0; i < n; i++) {
+    const d = rayToOppositeWall(loop, i, sign);
+    const cap = isFinite(d) ? safety * d : targetR;
+    raw.push(Math.min(targetR, cap));
+  }
+
+  const radii = raw.map((_, i) => {
+    let m = raw[i];
+    for (let k = 1; k <= minFilterRadius; k++) {
+      m = Math.min(m, raw[(i - k + n) % n], raw[(i + k) % n]);
+    }
+    return m;
+  });
+
+  const warnings = [];
+  for (let i = 0; i < n; i++) if (radii[i] < rMin) warnings.push(i);
+  return { radii, raw, warnings };
+}
+
 // --------------------------------------------------------------------------
 // Three.js boundary — convert parametric [u, v, alongAxis] verts into real 3D
 // --------------------------------------------------------------------------
