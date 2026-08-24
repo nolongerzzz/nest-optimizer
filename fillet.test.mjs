@@ -35,6 +35,7 @@ import {
   ringSelfIntersects,
   rayToOppositeWall,
   adaptiveRadii,
+  buildCornerAwareFillet,
 } from './fillet.mjs';
 
 const norm2 = (v) => {
@@ -499,6 +500,128 @@ console.log('\n§5 — adaptive radius (ray-cast, min-filter, fail-loud)');
   const filtered = raw.map((_, i) => Math.min(raw[(i - 1 + n) % n], raw[i], raw[(i + 1) % n]));
   ok('min-filter drops neighbours of a thin spot', filtered[1] === 0.5 && filtered[3] === 0.5);
   ok('min-filter never raises a value', filtered.every((v, i) => v <= raw[i]));
+}
+
+// =============================================================================
+console.log('\nCombined builder — buildCornerAwareFillet');
+// =============================================================================
+{
+  // Densely-sampled convex wedge with a single sharp apex (apex at index 0),
+  // interior angle = interiorDeg.
+  function wedge(interiorDeg, len, step, capN) {
+    const half = ((180 - interiorDeg) / 2) * Math.PI / 180;
+    const dirUp = [Math.cos(half), Math.sin(half)];
+    const dirDn = [Math.cos(half), -Math.sin(half)];
+    const pts = [];
+    for (let d = 0; d <= len; d += step) pts.push([dirDn[0] * d, dirDn[1] * d]);
+    const loFar = [dirDn[0] * len, dirDn[1] * len];
+    const hiFar = [dirUp[0] * len, dirUp[1] * len];
+    for (let k = 1; k < capN; k++) {
+      const t = k / capN;
+      pts.push([loFar[0] + (hiFar[0] - loFar[0]) * t, loFar[1] + (hiFar[1] - loFar[1]) * t]);
+    }
+    for (let d = len; d > 0; d -= step) pts.push([dirUp[0] * d, dirUp[1] * d]);
+    const L = signedArea(pts) > 0 ? pts : pts.slice().reverse();
+    return L;
+  }
+
+  function ngon(radius, n) {
+    const pts = [];
+    for (let i = 0; i < n; i++) {
+      const a = (2 * Math.PI * i) / n;
+      pts.push([radius * Math.cos(a), radius * Math.sin(a)]);
+    }
+    return pts; // CCW
+  }
+
+  const outerBoundaryEdges = (mesh) => checkWatertight(trianglesToCoords(mesh)).boundaryEdgeCount;
+
+  // ---- (1) measured-corner case from §8 (turning 75.3° => interior ~104.7°, R≈2.0148) ----
+  {
+    const L = wedge(104.7, 24, 0.4, 16);
+    const R = 2.0148;
+    const res = buildCornerAwareFillet(L, { radius: R, adaptive: false, windowSize: 24, uSteps: 12 });
+    ok('§8: builder detects the sharp corner', res.cornerCount >= 1, `cornerCount ${res.cornerCount}`);
+
+    // Recompute the corner sphere via the builder's own detection path and check
+    // the §8 invariant: distance to both walls == R.
+    const sgn = inwardNormalSign(L);
+    let apex = detectCorners(L, 30)[0];
+    for (const ci of detectCorners(L, 30)) if (Math.abs(turningAngle(L, ci)) > Math.abs(turningAngle(L, apex))) apex = ci;
+    const [n1, n2] = wallInwardNormalsAtCorner(L, apex, sgn, 3);
+    const C = solveCornerCenter(L[apex], n1, n2, R);
+    const d1 = (C[0] - L[apex][0]) * n1[0] + (C[1] - L[apex][1]) * n1[1];
+    const d2 = (C[0] - L[apex][0]) * n2[0] + (C[1] - L[apex][1]) * n2[1];
+    ok('§8: sphere center is R from both walls', approx(d1, R, 1e-9) && approx(d2, R, 1e-9), `${d1.toFixed(4)}, ${d2.toFixed(4)}`);
+
+    const wt = checkWatertight(trianglesToCoords(res));
+    ok('§8: mesh watertight-with-boundary (badEdges 0, badDirs 0)', wt.badEdges === 0 && wt.badDirs === 0, `badEdges ${wt.badEdges} badDirs ${wt.badDirs}`);
+    ok('§8: only open edges are the outer seam (== n)', wt.boundaryEdgeCount === L.length, `${wt.boundaryEdgeCount} vs ${L.length}`);
+    ok('§8: 2mm-on-2.5mm-style corner produces no self-intersection warning',
+      !res.warnings.some((w) => w.type === 'self-intersection'), JSON.stringify(res.warnings));
+    ok('§8: positions is a Float32Array of triangles*9', res.positions instanceof Float32Array && res.positions.length === res.triangles.length * 9);
+  }
+
+  // ---- (2) 90° spike that self-intersects under §2-only ----
+  {
+    const L = wedge(90, 24, 0.4, 16);
+    const n = L.length;
+    const sgn = inwardNormalSign(L);
+    const R = 2;
+
+    // §2-only near-innermost ring self-intersects at the apex.
+    const simpleNear = L.map((_, i) => simpleFilletPoint(L, i, R, 0.05 * R, 0, sgn).uv);
+    ok('90° spike: §2-only near-inner ring self-intersects', ringSelfIntersects(simpleNear).hit === true);
+
+    // Combined builder resolves it into a watertight mesh: a wide enough blend
+    // window (spec §4c) lets the sharp corner cap close cleanly.
+    const res = buildCornerAwareFillet(L, { radius: R, adaptive: false, windowSize: 24, uSteps: 12 });
+    const wt = checkWatertight(trianglesToCoords(res));
+    ok('90° spike: builder mesh watertight (badEdges 0, badDirs 0)', wt.badEdges === 0 && wt.badDirs === 0, `badEdges ${wt.badEdges} badDirs ${wt.badDirs}`);
+    ok('90° spike: only open edges are the outer seam (== n)', wt.boundaryEdgeCount === n, `${wt.boundaryEdgeCount} vs ${n}`);
+    ok('90° spike: builder emits no self-intersection warning', !res.warnings.some((w) => w.type === 'self-intersection'), JSON.stringify(res.warnings));
+
+    // Fail-loud: with a too-narrow window for that sharpness the cap cannot
+    // close — the builder must WARN (spec §4c), not silently ship a hole.
+    const bad = buildCornerAwareFillet(L, { radius: R, adaptive: false, windowSize: 10, uSteps: 12 });
+    const badWt = checkWatertight(trianglesToCoords(bad));
+    ok('90° spike: too-narrow window fails loud (self-intersection warning)', bad.warnings.some((w) => w.type === 'self-intersection'), JSON.stringify(bad.warnings));
+    ok('90° spike: fail-loud case is flagged as not watertight', badWt.boundaryEdgeCount !== n);
+  }
+
+  // ---- (3) smooth loop (no corners) must match §2 exactly ----
+  {
+    const L = ngon(50, 24); // 15° turns < 30° => no corners
+    ok('smooth loop has no detected corners', detectCorners(L, 30).length === 0);
+
+    const combined = buildCornerAwareFillet(L, { radius: 2, adaptive: false, uSteps: 12 });
+    const simple = buildSimpleFillet(L, { radius: 2, uSteps: 12 });
+
+    ok('smooth: same vertex count as §2', combined.vertices.length === simple.vertices.length, `${combined.vertices.length} vs ${simple.vertices.length}`);
+    ok('smooth: same triangle count as §2', combined.triangles.length === simple.triangles.length);
+    let vEq = true;
+    for (let i = 0; i < simple.vertices.length; i++) {
+      for (let c = 0; c < 3; c++) if (!approx(combined.vertices[i][c], simple.vertices[i][c], 1e-12)) vEq = false;
+    }
+    ok('smooth: vertices identical to §2', vEq);
+    let tEq = combined.triangles.length === simple.triangles.length;
+    for (let i = 0; tEq && i < simple.triangles.length; i++) {
+      for (let c = 0; c < 3; c++) if (combined.triangles[i][c] !== simple.triangles[i][c]) tEq = false;
+    }
+    ok('smooth: triangles identical to §2', tEq);
+    ok('smooth: no warnings', combined.warnings.length === 0, JSON.stringify(combined.warnings));
+  }
+
+  // ---- (4) watertightness with adaptive radius on a mixed shape ----
+  {
+    // A rounded-rectangle-ish loop with 4 corners; adaptive on.
+    const L = subdivSquare(60, 16); // 4 real corners
+    const res = buildCornerAwareFillet(L, { radius: 2, adaptive: true, windowSize: 8, uSteps: 12 });
+    ok('square: detects 4 corners', res.cornerCount === 4, `${res.cornerCount}`);
+    const wt = checkWatertight(trianglesToCoords(res));
+    ok('square: watertight (badEdges 0, badDirs 0)', wt.badEdges === 0 && wt.badDirs === 0, `badEdges ${wt.badEdges} badDirs ${wt.badDirs}`);
+    ok('square: only open edges are the outer seam (== n)', wt.boundaryEdgeCount === L.length, `${wt.boundaryEdgeCount} vs ${L.length}`);
+  }
 }
 
 // ---- summary ----

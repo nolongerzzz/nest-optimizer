@@ -678,6 +678,235 @@ export function adaptiveRadii(loop, targetR, opts = {}) {
   return { radii, raw, warnings };
 }
 
+// =============================================================================
+// Combined corner-aware fillet builder (pure math; no app/UI wiring)
+// =============================================================================
+
+/** Self-intersection test for an OPEN polyline path (non-adjacent segment pairs). */
+function pathSelfIntersects(pts) {
+  const n = pts.length;
+  for (let i = 0; i < n - 1; i++) {
+    for (let j = i + 2; j < n - 1; j++) {
+      if (segmentsIntersect(pts[i], pts[i + 1], pts[j], pts[j + 1])) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Build ONE corner-aware fillet as a single watertight-with-boundary mesh.
+ *
+ * Pipeline (spec §2 + §3 + §4 + §5):
+ *   1. detect corners (§3)
+ *   2. adaptive per-vertex radius (§5): ray-cast to opposite wall, cap, min-filter
+ *   3. build rings (parameterised by fraction f = k/uSteps so a per-vertex radius
+ *      works) using the §2 simple sweep everywhere and the §4 single-sphere blend
+ *      inside each corner window; join rings with ruled quad strips; ear-clip the
+ *      innermost ring as the new flat cap
+ *   4. run the §4c self-intersection check per corner on a NEAR-innermost ring
+ *      (not u=0, where the corner sphere collapses to its cap-apex point)
+ *   5. return positions (Float32Array via `frame`) + fail-loud warnings
+ *
+ * The mesh's only open edge loop is the outer seam ring (where it will later
+ * mate with the existing wall). Within a corner window the radius is unified to
+ * the window's minimum so the single sphere is well-defined and fits.
+ *
+ * Returns { positions, vertices, triangles, warnings, corners, radii, cornerCount, loop }.
+ * `warnings` entries: { type:'thin-wall', vertex, radius } or { type:'self-intersection', corner }.
+ */
+export function buildCornerAwareFillet(loop, opts = {}) {
+  const {
+    radius,
+    uSteps = 12,
+    capPlanePos = 0,
+    sign = inwardNormalSign(loop),
+    thresholdDeg = 30,
+    windowSize = 12,
+    normalStep = 3,
+    adaptive = true,
+    safety = 0.3,
+    rMin = 0.3,
+    minFilterRadius = 1,
+    frame = { origin: [0, 0, 0], uAxis: [1, 0, 0], vAxis: [0, 1, 0], nAxis: [0, 0, 1] },
+    resample = false,
+    spacing = 0.35,
+    weldTol = 1e-6,
+    capSnapWeight = 0.5,
+  } = opts;
+
+  if (!(radius > 0)) throw new Error('buildCornerAwareFillet: radius must be > 0');
+
+  const L = resample ? resampleLoop(loop, spacing) : loop;
+  const n = L.length;
+  const warnings = [];
+
+  // 1. corners
+  const corners = detectCorners(L, thresholdDeg);
+
+  // 2. adaptive per-vertex radius
+  let radii;
+  if (adaptive) {
+    const a = adaptiveRadii(L, radius, { sign, safety, rMin, minFilterRadius });
+    radii = a.radii;
+    for (const wi of a.warnings) warnings.push({ type: 'thin-wall', vertex: wi, radius: radii[wi] });
+  } else {
+    radii = new Array(n).fill(radius);
+  }
+
+  // 3. per-corner sphere data; unify window radius to its minimum
+  const effR = radii.slice();
+  const cornerData = [];
+  const cornerOfVertex = new Array(n).fill(-1);
+  const relOfVertex = new Array(n).fill(0);
+  for (const ci of corners) {
+    let Rc = radii[ci];
+    for (let d = -windowSize; d <= windowSize; d++) Rc = Math.min(Rc, radii[((ci + d) % n + n) % n]);
+    const [n1, n2] = wallInwardNormalsAtCorner(L, ci, sign, normalStep);
+    const C = solveCornerCenter(L[ci], n1, n2, Rc);
+    if (!C) continue; // parallel walls: leave as simple sweep
+    const cd = { ci, R: Rc, C, negN1: [-n1[0], -n1[1]], negN2: [-n2[0], -n2[1]] };
+    const cdIdx = cornerData.length;
+    cornerData.push(cd);
+    for (let d = -windowSize; d <= windowSize; d++) {
+      const j = ((ci + d) % n + n) % n;
+      if (cornerOfVertex[j] === -1 || Math.abs(d) < Math.abs(relOfVertex[j])) {
+        cornerOfVertex[j] = cdIdx;
+        relOfVertex[j] = d;
+        effR[j] = Rc;
+      }
+    }
+  }
+
+  // one fillet point for vertex j at ring fraction f in [0,1] (f=0 wall, f=1 cap)
+  function pointAt(j, f) {
+    const cd = cornerOfVertex[j];
+    if (cd === -1) {
+      const R = effR[j];
+      const u = R * (1 - f);
+      const p = simpleFilletPoint(L, j, R, u, capPlanePos, sign);
+      return { uv: p.uv, along: p.alongAxis };
+    }
+    const { R, C, negN1, negN2 } = cornerData[cd];
+    const rel = relOfVertex[j];
+    const w = smoothstep(1 - Math.abs(rel) / windowSize);
+
+    // At the flat cap (f = 1) the corner sphere collapses to its single tangent
+    // point C. Snap the high-weight window vertices exactly onto C so the cap is
+    // a clean triangle fan (weld merges them) instead of a tangled ring that
+    // fails ear-clipping. This matches the true geometry: a sharp corner's
+    // fillet comes to the point C at the cut face.
+    if (f >= 1 - 1e-9 && w >= capSnapWeight) {
+      return { uv: [C[0], C[1]], along: capPlanePos };
+    }
+
+    const u = R * (1 - f);
+    const sinPhi = Math.min(1, Math.max(0, 1 - u / R));
+    const phi = Math.asin(sinPhi);
+    const tBlend = Math.max(0, Math.min(1, (rel + windowSize) / (2 * windowSize)));
+    const sphere = spherePoint(C, R, phi, tBlend, negN1, negN2, capPlanePos);
+    const simple = simpleFilletPoint(L, j, R, u, capPlanePos, sign);
+    return {
+      uv: [(1 - w) * simple.uv[0] + w * sphere.uv[0], (1 - w) * simple.uv[1] + w * sphere.uv[1]],
+      along: simple.alongAxis,
+    };
+  }
+
+  // 3b. rings + triangles
+  const rawVerts = [];
+  const ring = [];
+  for (let k = 0; k <= uSteps; k++) {
+    const f = k / uSteps;
+    const row = [];
+    for (let j = 0; j < n; j++) {
+      const p = pointAt(j, f);
+      row.push(rawVerts.length);
+      rawVerts.push([p.uv[0], p.uv[1], p.along]);
+    }
+    ring.push(row);
+  }
+
+  // Weld coincident vertices FIRST (the snapped corner cap apexes), so the cap
+  // is ear-clipped on a de-duplicated simple polygon rather than one containing
+  // repeated points.
+  const remap = new Array(rawVerts.length);
+  const vertices = [];
+  {
+    const map = new Map();
+    const key = (p) =>
+      `${Math.round(p[0] / weldTol)},${Math.round(p[1] / weldTol)},${Math.round(p[2] / weldTol)}`;
+    for (let i = 0; i < rawVerts.length; i++) {
+      const k = key(rawVerts[i]);
+      if (map.has(k)) remap[i] = map.get(k);
+      else {
+        const id = vertices.length;
+        map.set(k, id);
+        vertices.push(rawVerts[i]);
+        remap[i] = id;
+      }
+    }
+  }
+
+  const triangles = [];
+  const pushTri = (a, b, c) => {
+    if (a !== b && b !== c && a !== c) triangles.push([a, b, c]);
+  };
+
+  // Bands (welded indices; degenerate fan triangles at collapsed corners drop out).
+  for (let k = 0; k < uSteps; k++) {
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const a = remap[ring[k][i]], b = remap[ring[k][j]];
+      const c = remap[ring[k + 1][j]], d = remap[ring[k + 1][i]];
+      pushTri(a, b, d);
+      pushTri(b, c, d);
+    }
+  }
+
+  // Inner cap: welded inner ring, consecutive/wrap duplicates removed, ear-clipped.
+  const innerW = ring[uSteps].map((vi) => remap[vi]);
+  const capPoly = [];
+  for (const id of innerW) if (capPoly.length === 0 || capPoly[capPoly.length - 1] !== id) capPoly.push(id);
+  while (capPoly.length > 1 && capPoly[0] === capPoly[capPoly.length - 1]) capPoly.pop();
+  let capComplete = true;
+  if (capPoly.length >= 3) {
+    const capCoords = capPoly.map((id) => [vertices[id][0], vertices[id][1]]);
+    const capTris = earClip(capCoords);
+    for (const [a, b, c] of capTris) pushTri(capPoly[a], capPoly[b], capPoly[c]);
+    // A complete triangulation of a simple polygon has exactly n-2 triangles.
+    // Fewer means the cap ring was not simple (a corner fold that snapping did
+    // not resolve) — the cap has a hole.
+    capComplete = capTris.length === capPoly.length - 2;
+  }
+
+  // 4. §4c check. Authoritative signal: did the inner cap fully close? If not,
+  // a corner fold survived (window too narrow / radius too large for that
+  // sharpness) — fail loud so the caller widens the window or shrinks the
+  // radius (spec §4c/§5) instead of shipping a hole. Attribute to the corner(s)
+  // whose welded cap sub-ring self-intersects.
+  if (!capComplete) {
+    let attributed = false;
+    for (const cd of cornerData) {
+      const pts = [];
+      let last = -1;
+      for (let d = -windowSize - 2; d <= windowSize + 2; d++) {
+        const id = remap[ring[uSteps][((cd.ci + d) % n + n) % n]];
+        if (id !== last) {
+          pts.push([vertices[id][0], vertices[id][1]]);
+          last = id;
+        }
+      }
+      if (pathSelfIntersects(pts)) {
+        warnings.push({ type: 'self-intersection', corner: cd.ci });
+        attributed = true;
+      }
+    }
+    if (!attributed) warnings.push({ type: 'self-intersection', cap: true });
+  }
+
+  const positions = meshToPositions({ vertices, triangles }, frame);
+  return { vertices, triangles, positions, warnings, corners, radii, cornerCount: cornerData.length, loop: L };
+}
+
 // --------------------------------------------------------------------------
 // Three.js boundary — convert parametric [u, v, alongAxis] verts into real 3D
 // --------------------------------------------------------------------------
