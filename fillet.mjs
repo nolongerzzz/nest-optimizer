@@ -903,8 +903,12 @@ export function buildCornerAwareFillet(loop, opts = {}) {
     if (!attributed) warnings.push({ type: 'self-intersection', cap: true });
   }
 
+  // Outer seam ring (welded indices of ring k=0, at depth R, inset 0). This is
+  // the loop where the fillet mates with the wall; integration stitches to it.
+  const outerRing = ring[0].map((vi) => remap[vi]);
+
   const positions = meshToPositions({ vertices, triangles }, frame);
-  return { vertices, triangles, positions, warnings, corners, radii, cornerCount: cornerData.length, loop: L };
+  return { vertices, triangles, positions, outerRing, warnings, corners, radii, cornerCount: cornerData.length, loop: L };
 }
 
 // --------------------------------------------------------------------------

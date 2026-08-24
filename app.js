@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { STLLoader } from 'three/addons/loaders/STLLoader.js';
+import { buildCornerAwareFillet, detectCorners } from './fillet.mjs';
 
 // ===================== Plate Presets =====================
 const PLATES = {
@@ -1946,6 +1947,23 @@ function getCutSpan(model) {
   return resolveAxis(model) === 'x' ? model.size.x : model.size.z;
 }
 
+function getFilletRadius() {
+  const el = document.getElementById('fillet-radius');
+  if (!el) return 0;
+  const r = Number(el.value);
+  return isFinite(r) && r > 0 ? r : 0;
+}
+
+function summarizeFilletWarnings(warnings) {
+  if (!warnings || !warnings.length) return '';
+  const thin = warnings.filter(w => w.type === 'thin-wall').length;
+  const self = warnings.filter(w => w.type === 'self-intersection').length;
+  const parts = [];
+  if (thin) parts.push(thin + ' thin-wall spot' + (thin > 1 ? 's' : '') + ' (radius reduced)');
+  if (self) parts.push(self + ' sharp corner' + (self > 1 ? 's' : '') + ' too tight for this radius');
+  return parts.length ? ' ⚠ fillet: ' + parts.join('; ') + '.' : '';
+}
+
 function getCutMm() {
   const m = getActiveModel();
   if (!m) return 0;
@@ -2271,7 +2289,7 @@ function axisCoord(ax, x, y, z) {
   return ax === 'x' ? x : ax === 'y' ? y : z;
 }
 
-function clipGeometrySide(geometry, axis, plane, keepMin) {
+function clipGeometrySide(geometry, axis, plane, keepMin, filletRadius = 0) {
   // Always copy — never mutate the source model mesh
   let src = geometry.clone();
   if (src.index) src = src.toNonIndexed();
@@ -2401,6 +2419,22 @@ function clipGeometrySide(geometry, axis, plane, keepMin) {
     }
   }
 
+  // Edge-round (fillet) path: replace the flat cap on this cut with a rounded
+  // band. radius = 0 keeps the original chamfer/flat behavior untouched.
+  // `out` here is walls + far geometry only (cap not yet added), which is
+  // exactly what the fillet trim needs.
+  if (filletRadius > 0 && out.length >= 9 && edges.length) {
+    const filleted = buildFilletedSide(out, edges, axis, plane, keepMin, filletRadius);
+    if (filleted && filleted.length >= 9) {
+      const geoF = new THREE.BufferGeometry();
+      geoF.setAttribute('position', new THREE.Float32BufferAttribute(filleted, 3));
+      geoF.computeVertexNormals();
+      geoF.computeBoundingBox();
+      return geoF;
+    }
+    // else: fall through to the existing chamfer cap (fail-soft)
+  }
+
   const cap = capFromEdges(edges, axis, plane, keepMin);
   for (let i = 0; i < cap.length; i++) out.push(cap[i]);
 
@@ -2410,6 +2444,228 @@ function clipGeometrySide(geometry, axis, plane, keepMin) {
   geo.computeVertexNormals();
   geo.computeBoundingBox();
   return geo;
+}
+
+// Module-level channel for surfacing fillet warnings to the status line.
+let lastFilletWarnings = [];
+
+/**
+ * Clip a flat triangle-soup (9 floats/tri) to one side of an axis-aligned plane
+ * WITHOUT capping. Returns the kept triangles plus the cut-plane boundary edges.
+ * Mirrors clipGeometrySide's triangle-walk; used for the LOCAL depth-R wall trim
+ * (only triangles crossing the band are split; the rest pass through).
+ */
+function clipFlatSide(flat, axis, plane, keepMin) {
+  const out = [];
+  const edges = [];
+  const EPS = 1e-4;
+  const coord = v => axis === 'x' ? v[0] : axis === 'y' ? v[1] : v[2];
+  const classify = c => c < plane - EPS ? -1 : c > plane + EPS ? 1 : 0;
+  const isKept = side => keepMin ? side <= 0 : side >= 0;
+  const interp = (a, b, ca, cb) => {
+    const den = cb - ca;
+    const t = Math.abs(den) < 1e-12 ? 0.5 : (plane - ca) / den;
+    const tt = Math.min(1, Math.max(0, t));
+    const p = [a[0] + (b[0] - a[0]) * tt, a[1] + (b[1] - a[1]) * tt, a[2] + (b[2] - a[2]) * tt];
+    if (axis === 'x') p[0] = plane; else if (axis === 'y') p[1] = plane; else p[2] = plane;
+    return p;
+  };
+  const almostSame = (a, b) => Math.abs(a[0] - b[0]) < 1e-4 && Math.abs(a[1] - b[1]) < 1e-4 && Math.abs(a[2] - b[2]) < 1e-4;
+  const pushTri = (a, b, c) => {
+    const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+    const acx = c[0] - a[0], acy = c[1] - a[1], acz = c[2] - a[2];
+    const nx = aby * acz - abz * acy, ny = abz * acx - abx * acz, nz = abx * acy - aby * acx;
+    if (nx * nx + ny * ny + nz * nz < 1e-14) return;
+    out.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+  };
+  const triCount = Math.floor(flat.length / 9);
+  for (let t = 0; t < triCount; t++) {
+    const i0 = t * 9;
+    const verts = [
+      [flat[i0], flat[i0 + 1], flat[i0 + 2]],
+      [flat[i0 + 3], flat[i0 + 4], flat[i0 + 5]],
+      [flat[i0 + 6], flat[i0 + 7], flat[i0 + 8]]
+    ];
+    const cs = verts.map(coord);
+    const sides = cs.map(classify);
+    const kept = sides.map(isKept);
+    const nKeep = (kept[0] ? 1 : 0) + (kept[1] ? 1 : 0) + (kept[2] ? 1 : 0);
+    if (nKeep === 0) continue;
+    if (nKeep === 3) {
+      if (sides[0] === 0 && sides[1] === 0 && sides[2] === 0) continue;
+      pushTri(verts[0], verts[1], verts[2]);
+      continue;
+    }
+    const poly = [];
+    const cutPts = [];
+    for (let e = 0; e < 3; e++) {
+      const a = verts[e], b = verts[(e + 1) % 3];
+      const ca = cs[e], cb = cs[(e + 1) % 3];
+      const sa = sides[e], sb = sides[(e + 1) % 3];
+      const ka = kept[e], kb = kept[(e + 1) % 3];
+      if (ka) poly.push(a);
+      if (sa !== sb && sa * sb === -1) {
+        const p = interp(a, b, ca, cb);
+        poly.push(p);
+        cutPts.push(p);
+      } else if (sa !== sb && (sa === 0 || sb === 0)) {
+        const onPt = sa === 0 ? a : b;
+        if (ka !== kb) {
+          if (!almostSame(poly.length ? poly[poly.length - 1] : [1e9, 0, 0], onPt)) {
+            if (!ka) poly.push(onPt);
+          }
+          cutPts.push(onPt);
+        }
+      }
+    }
+    const clean = [];
+    for (let i = 0; i < poly.length; i++) {
+      const p = poly[i];
+      if (!clean.length || !almostSame(clean[clean.length - 1], p)) clean.push(p);
+    }
+    if (clean.length >= 2 && almostSame(clean[0], clean[clean.length - 1])) clean.pop();
+    if (clean.length < 3) continue;
+    for (let i = 1; i < clean.length - 1; i++) pushTri(clean[0], clean[i], clean[i + 1]);
+    if (cutPts.length >= 2) {
+      let a = cutPts[0], b = cutPts[0];
+      for (let i = 1; i < cutPts.length; i++) { if (!almostSame(a, cutPts[i])) { b = cutPts[i]; break; } }
+      if (!almostSame(a, b)) edges.push([a, b]);
+    }
+  }
+  return { out, edges };
+}
+
+/** Walk cut-plane boundary edges into closed loops (arrays of [x,y,z] on the plane). */
+function walkLoops(edges, axis, plane) {
+  const TOL = 1e-4;
+  const keyOf = p => {
+    let a, b;
+    if (axis === 'x') { a = p[1]; b = p[2]; } else if (axis === 'y') { a = p[0]; b = p[2]; } else { a = p[0]; b = p[1]; }
+    return (Math.round(a / TOL) * TOL) + '|' + (Math.round(b / TOL) * TOL);
+  };
+  const snap = p => {
+    const q = [p[0], p[1], p[2]];
+    if (axis === 'x') q[0] = plane; else if (axis === 'y') q[1] = plane; else q[2] = plane;
+    return q;
+  };
+  const nodePos = new Map(), adj = new Map();
+  const addNode = p => {
+    const s = snap(p);
+    const k = keyOf(s);
+    if (!nodePos.has(k)) nodePos.set(k, s);
+    if (!adj.has(k)) adj.set(k, new Set());
+    return k;
+  };
+  edges.forEach(pair => {
+    if (!pair || pair.length < 2) return;
+    const k0 = addNode(pair[0]), k1 = addNode(pair[1]);
+    if (k0 === k1) return;
+    adj.get(k0).add(k1);
+    adj.get(k1).add(k0);
+  });
+  const visited = new Set();
+  const ek = (a, b) => a < b ? a + '~' + b : b + '~' + a;
+  const loops = [];
+  for (const start of adj.keys()) {
+    for (const nb of adj.get(start)) {
+      const e0 = ek(start, nb);
+      if (visited.has(e0)) continue;
+      const loopKeys = [start];
+      let prev = start, cur = nb;
+      visited.add(e0);
+      let guard = 0;
+      while (cur !== start && guard++ < 100000) {
+        loopKeys.push(cur);
+        const nbs = adj.get(cur);
+        if (!nbs || !nbs.size) break;
+        let next = null;
+        for (const cand of nbs) {
+          if (cand === prev) continue;
+          const e = ek(cur, cand);
+          if (visited.has(e)) continue;
+          next = cand;
+          visited.add(e);
+          break;
+        }
+        if (next == null) break;
+        prev = cur;
+        cur = next;
+      }
+      if (cur === start && loopKeys.length >= 3) loops.push(loopKeys.map(k => nodePos.get(k)));
+    }
+  }
+  return loops;
+}
+
+/**
+ * Replace the flat cap on ONE axis-aligned cut with a rounded (fillet) band.
+ * First pass: single loop only, locally trims the wall sliver in [cutFace, R]
+ * and mates the fillet's outer seam to the trimmed wall at depth R.
+ *
+ * `wallPositions` = kept walls + far geometry (no cap). Returns a flat position
+ * array, or null to signal the caller to fall back to the chamfer cap.
+ */
+function buildFilletedSide(wallPositions, edges, axis, plane, keepMin, R) {
+  lastFilletWarnings = [];
+  const outward = keepMin ? 1 : -1;
+  const into = -outward;
+  const planeR = plane + into * R;
+  const to2 = p => axis === 'x' ? [p[1], p[2]] : axis === 'y' ? [p[0], p[2]] : [p[0], p[1]];
+  const from2 = (u, v) => axis === 'x' ? [plane, u, v] : axis === 'y' ? [u, plane, v] : [u, v, plane];
+  const setAxis = (p, c) => { const q = [p[0], p[1], p[2]]; if (axis === 'x') q[0] = c; else if (axis === 'y') q[1] = c; else q[2] = c; return q; };
+
+  // Local depth-R wall trim (only band-crossing triangles are split).
+  const trim = clipFlatSide(wallPositions, axis, planeR, keepMin);
+  if (!trim || trim.out.length < 9) return null;
+
+  // Single-loop only for the first pass.
+  const loops = walkLoops(edges, axis, plane);
+  if (loops.length !== 1) return null;
+  const loop2D = loops[0].map(to2);
+  if (loop2D.length < 3) return null;
+
+  const n = loop2D.length;
+  const sharp = detectCorners(loop2D, 60).length > 0;
+  let windowSize = sharp ? 40 : 24;
+  windowSize = Math.max(1, Math.min(windowSize, Math.floor((n - 1) / 2)));
+
+  let res;
+  try {
+    res = buildCornerAwareFillet(loop2D, { radius: R, uSteps: 12, windowSize, adaptive: true, capPlanePos: 0 });
+  } catch (e) {
+    console.warn('[fillet] builder failed', e);
+    return null;
+  }
+  if (!res || !res.triangles || !res.triangles.length) return null;
+  lastFilletWarnings = res.warnings || [];
+
+  // Parametric [u, v, along] -> 3D. along = 0 at the cut face, R at the wall.
+  const map3 = res.vertices.map(v => setAxis(from2(v[0], v[1]), plane + into * v[2]));
+
+  // Orientation: make the inner-cap (along≈0) faces point outward (+outward
+  // along the cut axis), matching the flat cap they replace. Flip all fillet
+  // tris if the summed cap normal points the wrong way.
+  let capNormal = 0;
+  for (const [ia, ib, ic] of res.triangles) {
+    const a = map3[ia], b = map3[ib], c = map3[ic];
+    const ac = axis === 'x' ? a[0] : axis === 'y' ? a[1] : a[2];
+    const bc = axis === 'x' ? b[0] : axis === 'y' ? b[1] : b[2];
+    const cc = axis === 'x' ? c[0] : axis === 'y' ? c[1] : c[2];
+    if (Math.abs(ac - plane) < 1e-6 && Math.abs(bc - plane) < 1e-6 && Math.abs(cc - plane) < 1e-6) {
+      const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
+      const acx = c[0] - a[0], acy = c[1] - a[1], acz = c[2] - a[2];
+      const nx = aby * acz - abz * acy, ny = abz * acx - abx * acz, nz = abx * acy - aby * acx;
+      capNormal += axis === 'x' ? nx : axis === 'y' ? ny : nz;
+    }
+  }
+  const flip = capNormal * outward < 0;
+
+  const out = trim.out.slice();
+  for (const [ia, ib, ic] of res.triangles) {
+    const a = map3[ia], b = map3[flip ? ic : ib], c = map3[flip ? ib : ic];
+    out.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
+  }
+  return out;
 }
 
 function capFromEdges(edges, axis, plane, keepMin) {
@@ -2950,8 +3206,12 @@ function cutActiveModel() {
   const halfKerf = KERF_MM * 0.5;
   const leftPlane = plane - halfKerf;
   const rightPlane = plane + halfKerf;
-  const left = clipGeometrySide(m.geometry, axis, leftPlane, true);
-  const right = clipGeometrySide(m.geometry, axis, rightPlane, false);
+  const filletRadius = getFilletRadius();
+  lastFilletWarnings = [];
+  const left = clipGeometrySide(m.geometry, axis, leftPlane, true, filletRadius);
+  const leftWarnings = lastFilletWarnings.slice();
+  const right = clipGeometrySide(m.geometry, axis, rightPlane, false, filletRadius);
+  const filletWarnings = leftWarnings.concat(lastFilletWarnings);
   if (!left || !right) {
     setStatus('Cut produced an empty side — nudge the plane and retry', true);
     return;
@@ -3045,10 +3305,12 @@ function cutActiveModel() {
   const sum = mL.along + mR.along;
   const loss = span - sum;
   setStatus(
-    'Cut @ ' + cutMm.toFixed(1) + ' mm (kerf ' + KERF_MM + ' mm) → ' +
+    'Cut @ ' + cutMm.toFixed(1) + ' mm (kerf ' + KERF_MM + ' mm)' +
+    (filletRadius > 0 ? ' + round ' + filletRadius + ' mm' : '') + ' → ' +
     nameA + ' ' + mL.along.toFixed(1) + ' mm + ' + nameB + ' ' + mR.along.toFixed(1) +
     ' mm. List: ' + state.models.length + ' models. Undo: ' + state.undoStack.length + '.' +
-    (Math.abs(loss) > KERF_MM + 1.5 ? ' ⚠ loss ' + loss.toFixed(1) + ' mm' : '')
+    (Math.abs(loss) > KERF_MM + 1.5 ? ' ⚠ loss ' + loss.toFixed(1) + ' mm' : '') +
+    summarizeFilletWarnings(filletWarnings)
   );
   } catch (err) {
     console.error(err);
