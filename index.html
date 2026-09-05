@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
+  <script>
+    window.addEventListener('error', function (e) {
+      var el = document.getElementById('status');
+      if (el) {
+        el.textContent = 'Load error: ' + ((e && e.message) ? e.message : 'script failed');
+        el.className = 'status error';
+      }
+    });
+  </script>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="logo">
+        <span class="logo-icon">⬡</span>
+        <div>
+          <h1>Nest Optimizer</h1>
+          <p class="tagline">Max models • Minimal supports • Any plate</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btn-clear" class="btn btn-ghost" title="Clear everything">Clear</button>
+      </div>
+    </header>
+
+    <main>
+      <!-- Left Panel -->
+      <aside class="panel left-panel">
+        <section class="card card-compact">
+          <h2>Plate</h2>
+          <select id="plate-select">
+            <option value="a1mini">A1 Mini 180</option>
+            <option value="a1">A1 / P1S / X1C 256</option>
+            <option value="prusa">Prusa 250 × 210</option>
+            <option value="ender">Ender 220</option>
+            <option value="custom">Custom…</option>
+          </select>
+          <div id="custom-size" class="custom-size hidden">
+            <label>W <input type="number" id="custom-w" value="180" min="50" max="500"></label>
+            <label>D <input type="number" id="custom-d" value="180" min="50" max="500"></label>
+          </div>
+          <div class="plate-info hidden-quiet">
+            <span id="plate-dims">180 × 180 mm</span>
+            <span id="plate-area">32,400 mm²</span>
+          </div>
+        </section>
+
+        <section class="card card-compact">
+          <h2>Library</h2>
+          <label id="drop-zone" class="drop-zone drop-zone-compact" for="file-input">
+            <div class="drop-content">
+              <p><strong>Load STL</strong></p>
+            </div>
+            <input type="file" id="file-input" accept=".stl" multiple />
+          </label>
+          <div id="model-list" class="model-list"></div>
+        </section>
+
+        <section class="card card-compact" id="edit-card">
+          <h2>Cut</h2>
+          <div class="edit-row tool-toggle-row">
+            <button id="btn-cutter-open" class="btn btn-secondary" type="button">Open</button>
+            <button id="btn-cutter-close" class="btn btn-secondary" type="button" disabled>Close</button>
+          </div>
+          <p id="cutter-status" class="hint hidden-quiet">Cutter closed</p>
+          <p id="edit-size" class="hint hidden-quiet">—</p>
+          <div id="cutter-tools" class="cutter-tools">
+            <div class="edit-row">
+              <button id="btn-cut-axis-x" class="btn btn-secondary" type="button">Cut X</button>
+              <button id="btn-cut-axis-z" class="btn btn-secondary" type="button">Cut Z</button>
+            </div>
+            <select id="edit-axis" class="hidden-quiet" aria-hidden="true">
+              <option value="auto">Longest axis</option>
+              <option value="x">X</option>
+              <option value="z">Z</option>
+            </select>
+            <div class="edit-row">
+              <button id="btn-yaw-left-90" class="btn btn-secondary" type="button">⟲ 90</button>
+              <button id="btn-yaw-left" class="btn btn-secondary" type="button">⟲ 15</button>
+              <button id="btn-yaw-right" class="btn btn-secondary" type="button">15 ⟳</button>
+              <button id="btn-yaw-right-90" class="btn btn-secondary" type="button">90 ⟳</button>
+            </div>
+            <input type="range" id="cut-slider" min="2" max="98" step="0.1" value="50" />
+            <div class="edit-row cut-mm-row">
+              <button id="btn-cut-nudge-m" class="btn btn-secondary" type="button">−1</button>
+              <input type="number" id="cut-mm" value="50" min="0.5" max="400" step="0.1" />
+              <button id="btn-cut-nudge-p" class="btn btn-secondary" type="button">+1</button>
+            </div>
+            <p id="cut-readout" class="cut-readout">—</p>
+            <button id="btn-cut" class="btn btn-cut" type="button">Split</button>
+          </div>
+          <select id="cut-finish" class="hidden-quiet" aria-hidden="true">
+            <option value="square" selected>Square</option>
+            <option value="soft">Soft</option>
+            <option value="match">Match</option>
+          </select>
+          <div class="hidden-quiet">
+            <input type="number" id="array-count" value="4" min="2" max="16" step="1" />
+            <input type="number" id="array-pitch" value="22" min="1" max="80" step="0.1" />
+            <button id="btn-array" type="button">Array</button>
+          </div>
+        </section>
+
+        <section class="card card-compact" id="soften-card">
+          <h2>Soften</h2>
+          <button id="btn-soften" class="btn btn-secondary" type="button">Soften selected</button>
+        </section>
+
+        <section class="card" id="join-card">
+          <h2>Join</h2>
+          <button id="btn-join-start" class="btn btn-secondary" type="button">Start Join</button>
+          <div class="join-slots">
+            <button type="button" class="join-slot" id="join-slot-a" data-slot="a">
+              <span class="join-badge join-badge-a">A</span>
+              <span class="join-slot-name" id="join-name-a">Pick piece A</span>
+            </button>
+            <button type="button" class="join-slot" id="join-slot-b" data-slot="b">
+              <span class="join-badge join-badge-b">B</span>
+              <span class="join-slot-name" id="join-name-b">Pick piece B</span>
+            </button>
+          </div>
+          <button id="btn-join-align" class="btn btn-secondary" type="button" disabled>Align edges</button>
+          <button id="btn-join" class="btn btn-primary" type="button" disabled>Complete Join</button>
+          <button id="btn-cap-open" class="btn btn-secondary" type="button">Cap open faces</button>
+          <button id="btn-join-clear" class="btn btn-ghost" type="button">Cancel Join</button>
+        </section>
+
+        <section class="card card-compact" id="export-card">
+          <h2>Export</h2>
+          <button id="btn-export-model" class="btn btn-primary" type="button">Download selected STL</button>
+          <button id="btn-delete-model" class="btn btn-danger" type="button">Delete model</button>
+        </section>
+
+        <section class="card card-compact">
+          <h2>Pack</h2>
+          <button id="btn-optimize" class="btn btn-primary" disabled>Optimize plate</button>
+          <details class="more-tools">
+            <summary>Pack options</summary>
+            <div class="settings">
+              <label class="checkbox">
+                <input type="checkbox" id="opt-auto-orient" />
+                Auto face-down
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" id="opt-orient" />
+                Support preview
+              </label>
+              <label class="checkbox">
+                <input type="checkbox" id="opt-rotate" checked />
+                90° / 45° spins
+              </label>
+              <label>
+                Gap mm
+                <input type="number" id="gap" value="2" min="0" max="20" step="0.5" />
+              </label>
+            </div>
+          </details>
+          <p id="status" class="status"></p>
+        </section>
+      </aside>
+
+      <!-- Center – 3D View -->
+      <section class="viewport-section">
+        <div id="viewport"></div>
+        <div class="viewport-overlay">
+          <button id="btn-undo" class="viewport-tool-btn" type="button" title="Undo (Ctrl+Z)" disabled aria-label="Undo">↶</button>
+          <div id="stats" class="stats hidden">
+            <span id="stat-count">0 models</span>
+            <span id="stat-fill">0% fill</span>
+            <span id="stat-time">—</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Panel -->
+      <aside class="panel right-panel">
+        <section class="card">
+          <h2>Results</h2>
+          <div id="results" class="results">
+            <p class="empty">Run Optimize to see packing results.</p>
+          </div>
+        </section>
+
+        <section class="card" id="adjust-card">
+          <h2>Adjust</h2>
+          <p class="hint">Left-drag to move (locked while cutter open). Right-click delete. Nudge 2 mm.</p>
+          <div class="adjust-row">
+            <button id="btn-rot-left" class="btn btn-secondary adjust-btn" disabled title="Rotate -90°">⟲ 90°</button>
+            <button id="btn-rot-right" class="btn btn-secondary adjust-btn" disabled title="Rotate +90°">90° ⟳</button>
+            <button id="btn-flip" class="btn btn-secondary adjust-btn" disabled title="Flip over">Flip</button>
+            <button id="btn-tip" class="btn btn-secondary adjust-btn" disabled title="Tip 90° — change face down">Tip</button>
+          </div>
+          <div class="adjust-row">
+            <button id="btn-nudge-left" class="btn btn-secondary adjust-btn" disabled>←</button>
+            <button id="btn-nudge-right" class="btn btn-secondary adjust-btn" disabled>→</button>
+            <button id="btn-nudge-fwd" class="btn btn-secondary adjust-btn" disabled>↑</button>
+            <button id="btn-nudge-back" class="btn btn-secondary adjust-btn" disabled>↓</button>
+          </div>
+          <div class="adjust-row">
+            <button id="btn-frame-selected" class="btn btn-secondary adjust-btn" type="button" disabled title="Point camera at selected piece">Frame selected</button>
+            <button id="btn-clear-plate" class="btn btn-secondary" type="button" title="Remove all pieces from the plate (library stays)">Clear plate</button>
+          </div>
+          <div class="edit-row" style="margin-top:8px;align-items:center;gap:8px;flex-wrap:wrap;">
+            <label for="clone-count">Clone</label>
+            <input id="clone-count" type="number" min="1" max="20" value="1" style="width:4rem;" title="Number of copies" />
+            <button id="btn-clone" class="btn btn-secondary" type="button" disabled title="Duplicate selected model into the library and onto the plate">Clone piece</button>
+          </div>
+          <button id="btn-delete-placed" class="btn btn-danger adjust-delete" type="button" disabled title="Remove selected piece from plate">Delete selected piece</button>
+          <p id="adjust-status" class="hint">No model selected</p>
+        </section>
+
+        <section class="card">
+          <h2>Export</h2>
+          <p class="hint">Downloads one combined STL with all models already oriented and placed on the plate.</p>
+          <button id="btn-export-stl" class="btn btn-secondary" disabled>Download Arranged STL</button>
+          <p class="export-note">Open the file in Bambu Studio. Supports are still generated there — this tool only handles orientation and layout.</p>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <div id="ctx-menu" class="ctx-menu hidden" role="menu">
+    <button type="button" id="ctx-delete" class="ctx-item ctx-danger" role="menuitem">Delete piece</button>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
