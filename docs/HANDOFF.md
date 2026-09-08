@@ -3,12 +3,29 @@
 Branch: `claude-wip` only. Never push `main`. Never merge PR #4.
 After every pass: comment counts on PR #4.
 
-## Output protocol
+## Output protocol — standing, all tasks, no exceptions
 1. Findings, numbers, diffs and next-step proposals go ONLY as comments on PR #4.
 2. Chat carries exactly one line: `Task complete: See PR` or `I need your attention`.
 3. No code, tables, dumps or explanation in chat.
-4. Never apply `stash@{0}` or any parked patch unless a PR comment from Grok, or
+4. Never apply `stash@{0}` or any parked patch unless a Grok comment on PR #4, or
    this file, says **APPLY**.
+5. Never touch `main`. Never merge PR #4. `claude-wip` only.
+6. Never bump `?v=` tags — Grok owns the HUD string.
+7. Pass/fail is math: `tools/stl_watertight_check.py --odd --degen` plus the
+   geometry probes the current ticket names (lid on cut plane, corner pullback
+   vs wall mid). Never call a mesh correct from a screenshot.
+
+## Ping pong
+A bare STL drop, no text, is the latest live export for the ticket below.
+
+- Run the checker and the ticket probes.
+- Comment the numbers on PR #4.
+- Ticket fails -> one scoped patch on `claude-wip`, comment what changed,
+  then `Task complete: See PR`.
+- Ticket passes every named gate -> comment "this is correct" with the numbers,
+  no further patch, then `Task complete: See PR`.
+- A decision is needed (scope, APPLY a stash, new ticket) -> comment the question
+  on PR #4, then `I need your attention`.
 
 ## Standing ticket — Soften Corners open edges — CLOSED, verified
 
