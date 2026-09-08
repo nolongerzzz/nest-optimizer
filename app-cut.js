@@ -1931,7 +1931,159 @@ function matchToRing0(marginLoop, ring0) {
   });
 }
 
-function rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, requestedR) {
+// Corner filter for the shared soften engine (Corners treatment).
+//
+// Finds the loop vertices that are genuine corners and hands back a
+// radius PER VERTEX that is full at the corner and zero everywhere else,
+// so the engine rounds the corner and leaves the straight runs as an
+// untouched sharp cap/wall edge.
+//
+// Turn angle is measured across a window of ARC LENGTH, not against the
+// immediate neighbours: a 90deg corner then reads ~90deg no matter how
+// finely the wall happens to be tessellated, and a gently curved end
+// reads small instead of being chopped into a ring of fake corners.
+//
+// A pair of R=0 transition points is inserted at +/- the blend distance
+// around each corner, so the taper always dies out within ~2R of the
+// corner even when a long wall carries no intermediate vertices at all.
+function rawCornerRadiiOnLoop2(loop2, requestedR, minTurn) {
+  const n = loop2.length;
+  if (n < 3) throw new Error('cap boundary too small for corners');
+
+  const seg = new Array(n), cum = new Array(n + 1);
+  cum[0] = 0;
+  for (let i = 0; i < n; i++) {
+    const a = loop2[i], b = loop2[(i + 1) % n];
+    seg[i] = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    cum[i + 1] = cum[i] + seg[i];
+  }
+  const total = cum[n];
+  if (!(total > 1e-6)) throw new Error('cap boundary has no length');
+
+  const pointAtArc = (s) => {
+    let x = s % total; if (x < 0) x += total;
+    let lo = 0, hi = n;
+    while (lo + 1 < hi) { const mid = (lo + hi) >> 1; if (cum[mid] <= x) lo = mid; else hi = mid; }
+    const t = seg[lo] > 1e-12 ? (x - cum[lo]) / seg[lo] : 0;
+    const a = loop2[lo], b = loop2[(lo + 1) % n];
+    return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+  };
+
+  const win = Math.max(requestedR * 1.5, total / 200, 0.25);
+  const turn = new Array(n);
+  for (let i = 0; i < n; i++) {
+    const back = pointAtArc(cum[i] - win);
+    const fwd = pointAtArc(cum[i] + win);
+    const a1 = Math.atan2(loop2[i][1] - back[1], loop2[i][0] - back[0]);
+    const a2 = Math.atan2(fwd[1] - loop2[i][1], fwd[0] - loop2[i][0]);
+    let d = a2 - a1;
+    while (d > Math.PI) d -= 2 * Math.PI;
+    while (d < -Math.PI) d += 2 * Math.PI;
+    turn[i] = d;
+  }
+
+  const hotIdx = [];
+  for (let i = 0; i < n; i++) if (Math.abs(turn[i]) > minTurn) hotIdx.push(i);
+  if (!hotIdx.length) throw new Error('no corners over ' + Math.round(minTurn * 180 / Math.PI) + 'deg on this edge');
+
+  // Group by ARC distance, not by index adjacency: hot vertices within one
+  // detection window of each other are one physical corner smeared across
+  // that window, and the sharpest of them is its apex. Vertices further
+  // apart than the window are separate corners — a plain 4-vertex
+  // rectangle is four hot vertices and must stay four corners, which
+  // index-adjacency grouping would have collapsed into one.
+  const groups = [];
+  let cur = [hotIdx[0]];
+  for (let q = 1; q < hotIdx.length; q++) {
+    if (cum[hotIdx[q]] - cum[hotIdx[q - 1]] <= win) cur.push(hotIdx[q]);
+    else { groups.push(cur); cur = [hotIdx[q]]; }
+  }
+  groups.push(cur);
+  if (groups.length > 1) {
+    const first = groups[0], last = groups[groups.length - 1];
+    if (total - cum[last[last.length - 1]] + cum[first[0]] <= win) {
+      groups[0] = last.concat(first);
+      groups.pop();
+    }
+  }
+  const apex = groups.map(g => g.reduce((best, i) => Math.abs(turn[i]) > Math.abs(turn[best]) ? i : best, g[0]));
+
+  const A = apex.length;
+  const apexR = apex.map(i => Math.min(requestedR, Math.max(0, rawLocalThickness2(loop2, i) * 0.45)));
+  const gapFwd = (t) => {
+    if (A === 1) return total;
+    let g = cum[apex[(t + 1) % A]] - cum[apex[t]];
+    if (g <= 0) g += total;
+    return g;
+  };
+  // Blend never eats more than 45% of the run to either neighbour, so two
+  // close corners taper out cleanly instead of fighting over the wall.
+  const blend = apex.map((a, t) => Math.max(0, Math.min(apexR[t] * 2, gapFwd((t - 1 + A) % A) * 0.45, gapFwd(t) * 0.45)));
+
+  const circDist = (s1, s2) => { const d = Math.abs(s1 - s2) % total; return Math.min(d, total - d); };
+  const radiusAt = (s) => {
+    let r = 0;
+    for (let t = 0; t < A; t++) {
+      if (!(blend[t] > 1e-9)) continue;
+      const d = circDist(s, cum[apex[t]]);
+      if (d >= blend[t]) continue;
+      const v = apexR[t] * (1 - d / blend[t]);
+      if (v > r) r = v;
+    }
+    return r;
+  };
+
+  const samples = [];
+  for (let i = 0; i < n; i++) samples.push({ s: cum[i], uv: loop2[i] });
+  for (let t = 0; t < A; t++) {
+    if (!(blend[t] > 1e-9)) continue;
+    const sa = cum[apex[t]];
+    for (const raw of [sa - blend[t], sa + blend[t]]) {
+      let x = raw % total; if (x < 0) x += total;
+      samples.push({ s: x, uv: pointAtArc(x) });
+    }
+  }
+  samples.sort((p, q) => p.s - q.s);
+
+  const outLoop = [], outR = [];
+  for (const smp of samples) {
+    const prev = outLoop[outLoop.length - 1];
+    if (prev && Math.hypot(smp.uv[0] - prev[0], smp.uv[1] - prev[1]) < 1e-6) continue;
+    outLoop.push([smp.uv[0], smp.uv[1]]);
+    outR.push(radiusAt(smp.s));
+  }
+  while (outLoop.length > 3 &&
+         Math.hypot(outLoop[0][0] - outLoop[outLoop.length - 1][0], outLoop[0][1] - outLoop[outLoop.length - 1][1]) < 1e-6) {
+    outLoop.pop(); outR.pop();
+  }
+  if (outLoop.length < 3) throw new Error('corner loop too small after build');
+  let maxR = 0;
+  for (const r of outR) if (r > maxR) maxR = r;
+  if (maxR < 0.02) throw new Error('no safe radius at any corner');
+  return { loop: outLoop, radii: outR };
+}
+
+// Shared cap-plane soften engine — Round, Corners and Bevel all run through
+// here. THE CAP PLANE NEVER MOVES: capPlane is read off the mesh itself,
+// the lid is rebuilt at exactly that plane, and only the wall is pulled
+// back, by R at treated vertices and by nothing anywhere else. There is
+// deliberately no marginPlane re-clip of the body in this engine — that
+// pattern retracts the whole lid by R and is what broke the earlier passes.
+//
+//   opts.profile      'round'   quarter-circle band (default)
+//                     'chamfer' single flat band across the same two points
+//   opts.cornersOnly  true -> only vertices whose windowed turn angle beats
+//                     opts.minTurnDeg carry a radius; straight runs keep
+//                     R = 0 and stay a sharp cap/wall edge
+//   opts.minTurnDeg   corner threshold in degrees (default 30)
+//
+// `plane` is accepted for signature compatibility and deliberately unused:
+// the true cap plane comes from the mesh, not from the EPS-nudged value.
+function rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, requestedR, opts) {
+  opts = opts || {};
+  const profile = opts.profile === 'chamfer' ? 'chamfer' : 'round';
+  const cornersOnly = !!opts.cornersOnly;
+  const minTurn = (opts.minTurnDeg == null ? 30 : opts.minTurnDeg) * Math.PI / 180;
   const intoBody = keepMin ? 1 : -1;
   const other = [0, 1, 2].filter(a => a !== axisIdx);
   const tol = 1e-4;
@@ -2011,14 +2163,26 @@ function rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, requestedR) {
   let poly2d = loop3d.map(p => [p[other[0]], p[other[1]]]);
   poly2d = raw2DWeldLoop(poly2d, 0.08);
   if (poly2d.length < 3) throw new Error('cap boundary too small after weld');
-  const n = poly2d.length;
 
-  const Rs = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const thick = rawLocalThickness2(poly2d, i);
-    Rs[i] = Math.min(requestedR, Math.max(0, thick * 0.45));
+  // Per-vertex radius. Corners rebuilds the loop as well, so read `n` only
+  // after this block. Either way R is capped at 45% of the local wall
+  // thickness so a thin rib can never be rounded straight through.
+  let Rs;
+  if (cornersOnly) {
+    const built = rawCornerRadiiOnLoop2(poly2d, requestedR, minTurn);
+    poly2d = built.loop;
+    Rs = built.radii;
+  } else {
+    Rs = new Array(poly2d.length);
+    for (let i = 0; i < poly2d.length; i++) {
+      const thick = rawLocalThickness2(poly2d, i);
+      Rs[i] = Math.min(requestedR, Math.max(0, thick * 0.45));
+    }
   }
-  if (Math.max(...Rs) < 0.05) throw new Error('no safe radius anywhere on this edge');
+  const n = poly2d.length;
+  let maxRs = 0;
+  for (const r of Rs) if (r > maxRs) maxRs = r;
+  if (maxRs < 0.05) throw new Error('no safe radius anywhere on this edge');
 
   let area2 = 0;
   for (let i = 0; i < n; i++) { const a=poly2d[i], b=poly2d[(i+1)%n]; area2 += a[0]*b[1]-b[0]*a[1]; }
@@ -2040,49 +2204,61 @@ function rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, requestedR) {
   };
   const from3 = (uv, along) => { const p=[0,0,0]; p[other[0]]=uv[0]; p[other[1]]=uv[1]; p[axisIdx]=along; return p; };
 
-  // true quarter-circle profile: t=0 is the wall tangent point (no inset, R deep into the body),
-  // t=1 is the cap tangent point (full inset, back on capPlane exactly)
-  const STEPS = 6;
+  // Both profiles run the same two endpoints: t=0 is the wall tangent
+  // (no inset, R deep into the body), t=1 is the cap tangent (full inset,
+  // back on capPlane exactly). Round sweeps the quarter circle between
+  // them; Bevel takes the straight line, which is the flat chamfer band.
+  const STEPS = profile === 'chamfer' ? 1 : 6;
+  const insetAt = (R, t) => profile === 'chamfer' ? R * t : R * (1 - Math.cos(Math.asin(Math.min(1, Math.max(0, t)))));
   const ringAt = (s) => {
     const t = s / STEPS;
     const ring = [];
     for (let i = 0; i < n; i++) {
       const R = Rs[i];
-      const phi = Math.asin(Math.min(1, Math.max(0, t)));
-      const inset = R * (1 - Math.cos(phi));
-      const axial = capPlane + intoBody * R * (1 - Math.sin(phi));
-      ring.push(from3(vertexOffset(i, inset), axial));
+      const axial = capPlane + intoBody * R * (1 - t);
+      ring.push(from3(vertexOffset(i, insetAt(R, t)), axial));
     }
     return ring;
   };
 
-  const outerRing3d = ringAt(0);
   const innerRing3d = ringAt(STEPS);
   const innerRing2d = innerRing3d.map(p => [p[other[0]], p[other[1]]]);
-  if (rawRingSelfIntersects2(innerRing2d)) throw new Error('edge round self-intersects at this radius');
+  if (rawRingSelfIntersects2(innerRing2d)) throw new Error('edge ' + (profile === 'chamfer' ? 'bevel' : 'round') + ' self-intersects at this radius');
 
-  const uvKey = (uv) => Math.round(uv[0]/tol)+'|'+Math.round(uv[1]/tol);
-  const outerByUV = new Map();
-  for (let i = 0; i < n; i++) outerByUV.set(uvKey(poly2d[i]), outerRing3d[i]);
-  const nearestOuter = (p3) => {
-    const uv = [p3[other[0]], p3[other[1]]];
-    const k = uvKey(uv);
-    if (outerByUV.has(k)) return outerByUV.get(k);
-    let best = null, bestD = Infinity;
+  // Pull the wall back by the LOCAL radius, keeping each wall vertex's own
+  // 2D position — only its height along the axis changes. Snapping a wall
+  // vertex onto the nearest loop vertex instead would drag the wall
+  // sideways, and under Corners it would drag untreated wall down to a
+  // corner's depth. Project onto the nearest loop SEGMENT and interpolate
+  // R along it, so an untreated run stays at capPlane and stays sharp.
+  const pullbackDepth = (p3) => {
+    const px = p3[other[0]], py = p3[other[1]];
+    let bestD = Infinity, bestR = 0;
     for (let i = 0; i < n; i++) {
-      const d = Math.hypot(poly2d[i][0]-uv[0], poly2d[i][1]-uv[1]);
-      if (d < bestD) { bestD = d; best = outerRing3d[i]; }
+      const a = poly2d[i], b = poly2d[(i+1)%n];
+      const ex = b[0]-a[0], ey = b[1]-a[1];
+      const len2 = ex*ex + ey*ey;
+      let t = len2 > 1e-18 ? ((px-a[0])*ex + (py-a[1])*ey) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const qx = a[0] + ex*t, qy = a[1] + ey*t;
+      const d = Math.hypot(px-qx, py-qy);
+      if (d < bestD) { bestD = d; bestR = Rs[i] + (Rs[(i+1)%n] - Rs[i]) * t; }
     }
-    return best;
+    return capPlane + intoBody * bestR;
   };
 
   const out = [];
   for (const t of wallTriIdx) {
     const tri = [vert(t,0), vert(t,1), vert(t,2)];
-    for (let v = 0; v < 3; v++) if (isOnCap(tri[v])) tri[v] = nearestOuter(tri[v]);
+    for (let v = 0; v < 3; v++) {
+      if (!isOnCap(tri[v])) continue;
+      const moved = tri[v].slice();
+      moved[axisIdx] = pullbackDepth(tri[v]);
+      tri[v] = moved;
+    }
     for (let v = 0; v < 3; v++) out.push(tri[v][0], tri[v][1], tri[v][2]);
   }
-  // cap-plane triangles are dropped — rebuilt below at the same plane, slightly inset
+  // cap-plane triangles are dropped — rebuilt below at the SAME plane, inset
 
   const rings = [];
   for (let s = 0; s <= STEPS; s++) rings.push(ringAt(s));
@@ -2091,6 +2267,8 @@ function rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, requestedR) {
     for (let i = 0; i < n; i++) {
       const i1 = (i+1)%n;
       const A0=a[i], A1=a[i1], B0=b[i], B1=b[i1];
+      // An untreated (R=0) run collapses the whole strip to a line; those
+      // degenerate triangles are dropped, leaving the original sharp edge.
       const same = (p,q) => Math.hypot(p[0]-q[0], p[1]-q[1], p[2]-q[2]) < 1e-9;
       if (!same(A0,A1) && !same(A1,B1) && !same(B1,A0))
         out.push(A0[0],A0[1],A0[2], A1[0],A1[1],A1[2], B1[0],B1[1],B1[2]);

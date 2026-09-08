@@ -1,153 +1,29 @@
 // ===================== Soften Selected (post-cut Edit action) =====================
-// Runs the SAME validated rawFilletCut engine as the Soft-finish post-pass,
-// but as an independent Edit action on the currently selected library
-// model — never wired into Split/splitBothSides, never touches the
-// display mesh directly (always rebuilds from rawTris). No model other
-// than the selected one is touched.
+// An independent Edit action on the currently selected library model —
+// never wired into Split/splitBothSides, never touches the display mesh
+// directly (always rebuilds from rawTris). No model other than the
+// selected one is touched.
+//
+// All three treatments run the one shared cap-plane engine in app-cut.js
+// (rawEdgeRoundInPlace), which keeps the cut face on the plane it is
+// already on and pulls the wall back only at treated edges. Round and
+// Bevel differ by profile; Corners is a per-vertex radius filter on that
+// same loop, not a second loop walker.
 //
 // A model carries no record of which face (if any) was its own cut face,
-// and Split is locked from being changed to add that. So this tries both
-// raw-X extremes of the piece independently: whichever one is an actual
-// flat cut face has a real boundary loop to round; a factory-curved end
-// simply has no meaningful boundary there and rawFilletCut fails safely,
-// so it's skipped rather than mangled. Chained, not exclusive — if only
-// one end is a real cut face, only that one changes.
+// and Split is locked from being changed to add that. So the caller picks
+// the face; a factory-curved end simply has no meaningful cap/wall
+// boundary there and the engine fails safely, before any mesh swap.
+
+// Bevel. Same loop and the same untouched cap plane as Round, with the
+// quarter circle replaced by a single flat band.
+//
+// This used to build its own body by re-clipping at
+// marginPlane = plane + outward * Rmax, which retracts the WHOLE lid by R
+// rather than just the treated edge. That is the bug that killed the
+// earlier passes; the margin clip is gone and must not come back.
 function rawChamferCut(rawTris, axisIdx, plane, keepMin, R) {
-  const outward = keepMin ? 1 : -1;
-  const other = [0, 1, 2].filter(a => a !== axisIdx);
-
-  const { cutEdges: tipEdges } = rawClipTrianglesAtPlane(rawTris, axisIdx, plane, keepMin);
-  const { loops: tipLoops, degreeIssues } = rawBuildLoopsFromCutEdges(tipEdges, axisIdx);
-  if (degreeIssues.length > 0) throw new Error('branch point in tip boundary');
-  if (!tipLoops.length) throw new Error('no tip boundary');
-  const tipLoop3d = tipLoops.reduce((a, b) => b.length > a.length ? b : a);
-  if (tipLoop3d.length < 8) throw new Error('boundary too small to chamfer');
-
-  let poly2d = tipLoop3d.map(p => [p[other[0]], p[other[1]]]);
-  poly2d = raw2DWeldLoop(poly2d, 0.08);
-  poly2d = simplifyCollinear2D(poly2d);
-  if (poly2d.length < 3) throw new Error('boundary too small to chamfer after weld');
-
-  const n = poly2d.length;
-  const Rs = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const thick = rawLocalThickness2(poly2d, i);
-    Rs[i] = Math.min(R, Math.max(0, thick * 0.45));
-  }
-  const Rmax = Math.max(...Rs);
-  if (Rmax < 0.1) throw new Error('no safe radius anywhere on this boundary');
-
-  let __area2 = 0;
-  for (let i = 0; i < n; i++) {
-    const a = poly2d[i], b = poly2d[(i + 1) % n];
-    __area2 += a[0] * b[1] - b[0] * a[1];
-  }
-  const windSign = __area2 >= 0 ? 1 : -1;
-  function inwardNormal2(a, b) {
-    const tx = b[0] - a[0], ty = b[1] - a[1];
-    let nx = -ty * windSign, ny = tx * windSign;
-    const len = Math.hypot(nx, ny) || 1e-9;
-    return [nx / len, ny / len];
-  }
-  function vertexOffset(i, radius) {
-    const prev = poly2d[(i - 1 + n) % n], curr = poly2d[i], next = poly2d[(i + 1) % n];
-    const n1 = inwardNormal2(prev, curr), n2 = inwardNormal2(curr, next);
-    let bx = n1[0] + n2[0], by = n1[1] + n2[1];
-    const blen = Math.hypot(bx, by) || 1e-9;
-    bx /= blen; by /= blen;
-    const cosHalf = Math.max(bx * n1[0] + by * n1[1], 0.3);
-    const mag = radius / cosHalf;
-    return [curr[0] + bx * mag, curr[1] + by * mag];
-  }
-
-  const innerRing2d = [];
-  for (let i = 0; i < n; i++) innerRing2d.push(vertexOffset(i, Rs[i]));
-  if (rawRingSelfIntersects2(innerRing2d)) throw new Error('chamfer band self-intersects at this radius');
-
-  const marginPlane = plane + outward * Rmax;
-  // Body is always the same keepMin as the half. !keepMin is the R-slab — never ship it.
-  const { kept: bodyTrimmed, cutEdges: marginEdges } = rawClipTrianglesAtPlane(rawTris, axisIdx, marginPlane, keepMin);
-  if (!bodyTrimmed || bodyTrimmed.length < 9) throw new Error('margin trim produced no body');
-  const { loops: marginLoops, degreeIssues: marginDegreeIssues } = rawBuildLoopsFromCutEdges(marginEdges, axisIdx);
-  if (marginDegreeIssues.length > 0) throw new Error('branch point in margin boundary');
-  if (!marginLoops.length) throw new Error('no margin boundary');
-  const outerMargin3d = marginLoops.reduce((a, b) => b.length > a.length ? b : a);
-  const marginLoop2d = outerMargin3d.map(p => [p[other[0]], p[other[1]]]);
-
-  function from3(uv, along) {
-    const p = [0, 0, 0]; p[other[0]] = uv[0]; p[other[1]] = uv[1]; p[axisIdx] = along; return p;
-  }
-
-  const out = bodyTrimmed.slice();
-
-  (function weldMarginPlane() {
-    const tol = 1e-4;
-    function wkey(p) { return Math.round(p[other[0]] / tol) + '|' + Math.round(p[other[1]] / tol); }
-    const canonical = new Map();
-    for (const p of outerMargin3d) canonical.set(wkey(p), p);
-    const triCount = out.length / 9;
-    for (let t = 0; t < triCount; t++) {
-      const i0 = t * 9;
-      const orig = [[out[i0], out[i0+1], out[i0+2]], [out[i0+3], out[i0+4], out[i0+5]], [out[i0+6], out[i0+7], out[i0+8]]];
-      const test = orig.map(v => v.slice());
-      let anySnap = false;
-      for (let v = 0; v < 3; v++) {
-        const p = orig[v];
-        if (Math.abs(p[axisIdx] - marginPlane) > tol) continue;
-        const c = canonical.get(wkey(p));
-        if (!c) continue;
-        if (Math.abs(c[0]-p[0])<1e-9 && Math.abs(c[1]-p[1])<1e-9 && Math.abs(c[2]-p[2])<1e-9) continue;
-        test[v] = c.slice();
-        anySnap = true;
-      }
-      if (!anySnap) continue;
-      const ux=test[1][0]-test[0][0], uy=test[1][1]-test[0][1], uz=test[1][2]-test[0][2];
-      const vx=test[2][0]-test[0][0], vy=test[2][1]-test[0][1], vz=test[2][2]-test[0][2];
-      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
-      if (0.5*Math.hypot(nx,ny,nz) < 1e-9) continue;
-      for (let v = 0; v < 3; v++) { out[i0+v*3]=test[v][0]; out[i0+v*3+1]=test[v][1]; out[i0+v*3+2]=test[v][2]; }
-    }
-  })();
-
-  for (const loop of marginLoops) {
-    if (loop === outerMargin3d) continue;
-    const cap = rawFlatCapLoop(loop, axisIdx, marginPlane, keepMin);
-    for (let i = 0; i < cap.length; i++) out.push(cap[i]);
-  }
-
-  const stitchTol = 1e-4;
-  const marginCanonical = new Map();
-  for (const p of outerMargin3d) {
-    marginCanonical.set(Math.round(p[other[0]] / stitchTol) + '|' + Math.round(p[other[1]] / stitchTol), p);
-  }
-  const marginLoop2dTagged = marginLoop2d.map(function (p) {
-    const c = marginCanonical.get(Math.round(p[0] / stitchTol) + '|' + Math.round(p[1] / stitchTol));
-    return c ? [c[other[0]], c[other[1]], marginPlane] : [p[0], p[1], marginPlane];
-  });
-  const innerRingTagged = innerRing2d.map(p => [p[0], p[1], plane]);
-  const stitch = rawBuildStitchStrip2(marginLoop2dTagged, innerRingTagged);
-  for (const [p1, p2, p3] of stitch) {
-    const A = from3(p1, p1[2]), B = from3(p2, p2[2]), C = from3(p3, p3[2]);
-    const ux=B[0]-A[0], uy=B[1]-A[1], uz=B[2]-A[2];
-    const vx=C[0]-A[0], vy=C[1]-A[1], vz=C[2]-A[2];
-    const cx=uy*vz-uz*vy, cy=uz*vx-ux*vz, cz=ux*vy-uy*vx;
-    if (0.5 * Math.hypot(cx, cy, cz) < 1e-7) continue;
-    out.push(A[0],A[1],A[2], B[0],B[1],B[2], C[0],C[1],C[2]);
-  }
-
-  const capTris = rawEarClip2D(innerRing2d);
-  for (const tri of capTris) {
-    let a = from3(innerRing2d[tri[0]], plane), b = from3(innerRing2d[tri[1]], plane), c = from3(innerRing2d[tri[2]], plane);
-    const ux=b[0]-a[0], uy=b[1]-a[1], uz=b[2]-a[2];
-    const vx=c[0]-a[0], vy=c[1]-a[1], vz=c[2]-a[2];
-    const nrm = [uy*vz-uz*vy, uz*vx-ux*vz, ux*vy-uy*vx];
-    const wantSign = keepMin ? -1 : 1;
-    if (Math.sign(nrm[axisIdx] || 1) !== wantSign) { const t=b; b=c; c=t; }
-    out.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
-  }
-
-  if (out.length < 9) throw new Error('chamfer produced no geometry');
-  return new Float32Array(out);
+  return rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, R, { profile: 'chamfer' });
 }
 
 function softenSelectedFace(rawTris, axisIdx, keepMinFace, R, mode) {
@@ -170,13 +46,16 @@ function softenSelectedFace(rawTris, axisIdx, keepMinFace, R, mode) {
   // piece, keep coord <= plane, i.e. keepMin=false; to soften the MIN
   // face and keep the rest, keep coord >= plane, i.e. keepMin=true.
   const keepMin = keepMinFace;
-  if (mode === 'square') {
-    throw new Error('square edge - use Cap / Seal, Soften not needed');
-  }
-  if (mode === 'chamfer' && typeof rawChamferCut === 'function') {
+
+  // Every branch leaves the lid on capPlane. Anything that throws does so
+  // before the caller swaps geometry, so a failure leaves the piece as-is.
+  if (mode === 'chamfer') {
     return rawChamferCut(rawTris, axisIdx, plane, keepMin, R);
   }
-  return rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, R);
+  if (mode === 'corners') {
+    return rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, R, { cornersOnly: true, minTurnDeg: 30 });
+  }
+  return rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, R, { profile: 'round' });
 }
 
 function dropZeroAreaTriangles(soup, epsArea) {
@@ -1225,10 +1104,12 @@ function capSelectedModel() {
   setStatus('Cap: click the face to close');
 }
 
+// fillet | corners | chamfer. Anything else (a stale saved value, an old
+// 'square' option) falls back to fillet — Soften has no square treatment.
 function getEdgeTreat() {
   const sel = document.getElementById('sel-edge-treat');
   const v = sel && sel.value ? String(sel.value) : (state.edgeTreat || 'fillet');
-  state.edgeTreat = (v === 'chamfer' || v === 'square') ? v : 'fillet';
+  state.edgeTreat = (v === 'chamfer' || v === 'corners') ? v : 'fillet';
   return state.edgeTreat;
 }
 
@@ -1243,7 +1124,7 @@ function softenSelectedModel() {
   }
   state.softenArmed = true;
   const mode = getEdgeTreat();
-  const label = mode === 'chamfer' ? 'bevel' : (mode === 'square' ? 'square cap' : 'round');
+  const label = mode === 'chamfer' ? 'bevel' : (mode === 'corners' ? 'corners' : 'round');
   setStatus('Soften (' + label + '): click the end or face');
 }
 
