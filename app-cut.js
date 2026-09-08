@@ -2247,16 +2247,71 @@ function rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, requestedR, opts)
     return capPlane + intoBody * bestR;
   };
 
+  const pullTo = (p3) => { const q = p3.slice(); q[axisIdx] = pullbackDepth(p3); return q; };
+
+  // A wall triangle's cap-plane edge has to be SPLIT at every loop vertex
+  // lying along it before the pullback. Under Corners the loop carries
+  // corner-taper vertices the original wall edge knows nothing about, so
+  // leaving that edge whole leaves the ring's outer polyline and the
+  // wall's single straight edge sharing no vertices at all — 24 open
+  // edges on the 20mm box fixture. Round and Bevel have no intermediate
+  // loop vertex along a wall run, so the chain comes back as [A, B] and
+  // their triangle set is unchanged — verified equal with winding
+  // preserved; only each triangle's vertex rotation moves, because the
+  // fan now starts at the cap edge rather than at the original v0.
+  const splitTol = 1e-3;
+  const capEdgeChain = (A, B) => {
+    const ax = A[other[0]], ay = A[other[1]];
+    const ex = B[other[0]] - ax, ey = B[other[1]] - ay;
+    const len2 = ex*ex + ey*ey;
+    if (!(len2 > 1e-18)) return [A, B];
+    const invLen = 1 / Math.sqrt(len2);
+    const mids = [];
+    for (let i = 0; i < n; i++) {
+      const px = poly2d[i][0] - ax, py = poly2d[i][1] - ay;
+      const t = (px*ex + py*ey) / len2;
+      if (t <= 1e-6 || t >= 1 - 1e-6) continue;
+      if (Math.abs(px*ey - py*ex) * invLen > splitTol) continue;
+      const q = [0,0,0];
+      q[other[0]] = ax + ex*t;
+      q[other[1]] = ay + ey*t;
+      q[axisIdx] = capPlane;
+      mids.push({ t, q });
+    }
+    if (!mids.length) return [A, B];
+    mids.sort((u, v) => u.t - v.t);
+    const chain = [A];
+    const near = (p, q) => Math.hypot(p[other[0]]-q[other[0]], p[other[1]]-q[other[1]]) < 1e-9;
+    for (const m of mids) if (!near(m.q, chain[chain.length-1])) chain.push(m.q);
+    if (!near(B, chain[chain.length-1])) chain.push(B);
+    return chain;
+  };
+
   const out = [];
   for (const t of wallTriIdx) {
     const tri = [vert(t,0), vert(t,1), vert(t,2)];
+    let capEdge = -1;
     for (let v = 0; v < 3; v++) {
-      if (!isOnCap(tri[v])) continue;
-      const moved = tri[v].slice();
-      moved[axisIdx] = pullbackDepth(tri[v]);
-      tri[v] = moved;
+      if (isOnCap(tri[v]) && isOnCap(tri[(v+1)%3])) { capEdge = v; break; }
     }
-    for (let v = 0; v < 3; v++) out.push(tri[v][0], tri[v][1], tri[v][2]);
+    if (capEdge < 0) {
+      for (let v = 0; v < 3; v++) if (isOnCap(tri[v])) tri[v] = pullTo(tri[v]);
+      for (let v = 0; v < 3; v++) out.push(tri[v][0], tri[v][1], tri[v][2]);
+      continue;
+    }
+    // (A, B, C) is a rotation of the original winding, so fanning from C
+    // along A->B keeps this triangle's orientation.
+    const A = tri[capEdge], B = tri[(capEdge+1)%3], C = tri[(capEdge+2)%3];
+    const chain = capEdgeChain(A, B).map(pullTo);
+    const Cp = isOnCap(C) ? pullTo(C) : C;
+    for (let k = 0; k + 1 < chain.length; k++) {
+      const P = chain[k], Q = chain[k+1];
+      const ux=Q[0]-P[0], uy=Q[1]-P[1], uz=Q[2]-P[2];
+      const vx=Cp[0]-P[0], vy=Cp[1]-P[1], vz=Cp[2]-P[2];
+      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+      if (0.5*Math.hypot(nx,ny,nz) < 1e-12) continue;
+      out.push(P[0],P[1],P[2], Q[0],Q[1],Q[2], Cp[0],Cp[1],Cp[2]);
+    }
   }
   // cap-plane triangles are dropped — rebuilt below at the SAME plane, inset
 
