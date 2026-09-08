@@ -4422,7 +4422,7 @@ function raw2DWeldLoop(poly2d, tol) {
 }
 
 function rawFilletCut(rawTris, axisIdx, plane, keepMin, requestedR) {
-  const outward = keepMin ? -1 : 1;
+  const outward = keepMin ? 1 : -1;
   const other = [0,1,2].filter(a => a !== axisIdx);
 
   const { cutEdges: tipEdges } = rawClipTrianglesAtPlane(rawTris, axisIdx, plane, keepMin);
@@ -4514,7 +4514,7 @@ function rawFilletCut(rawTris, axisIdx, plane, keepMin, requestedR) {
   // original plane. This is the actual fix for the self-intersecting
   // "slice and dice" look the old disabled fillet code produced.
   const marginPlane = plane + outward * Rmax;
-  const { kept: bodyTrimmed, cutEdges: marginEdges } = rawClipTrianglesAtPlane(rawTris, axisIdx, marginPlane, keepMin);
+  const { kept: bodyTrimmed, cutEdges: marginEdges } = rawClipTrianglesAtPlane(rawTris, axisIdx, marginPlane, !keepMin);
   const { loops: marginLoops, degreeIssues: marginDegreeIssues } = rawBuildLoopsFromCutEdges(marginEdges, axisIdx);
   if (marginDegreeIssues.length > 0) throw new Error('branch point in margin boundary');
   if (!marginLoops.length) throw new Error('no margin boundary');
@@ -4653,7 +4653,7 @@ function rawCheckWatertightQuick(flatTris) {
 // so it's skipped rather than mangled. Chained, not exclusive — if only
 // one end is a real cut face, only that one changes.
 function rawChamferCut(rawTris, axisIdx, plane, keepMin, R) {
-  const outward = keepMin ? -1 : 1;
+  const outward = keepMin ? 1 : -1;
   const other = [0, 1, 2].filter(a => a !== axisIdx);
 
   const { cutEdges: tipEdges } = rawClipTrianglesAtPlane(rawTris, axisIdx, plane, keepMin);
@@ -4692,7 +4692,7 @@ function rawChamferCut(rawTris, axisIdx, plane, keepMin, R) {
   if (rawRingSelfIntersects2(innerRing2d)) throw new Error('chamfer band self-intersects at this radius');
 
   const marginPlane = plane + outward * Rmax;
-  const { kept: bodyTrimmed, cutEdges: marginEdges } = rawClipTrianglesAtPlane(rawTris, axisIdx, marginPlane, keepMin);
+  const { kept: bodyTrimmed, cutEdges: marginEdges } = rawClipTrianglesAtPlane(rawTris, axisIdx, marginPlane, !keepMin);
   const { loops: marginLoops, degreeIssues: marginDegreeIssues } = rawBuildLoopsFromCutEdges(marginEdges, axisIdx);
   if (marginDegreeIssues.length > 0) throw new Error('branch point in margin boundary');
   if (!marginLoops.length) throw new Error('no margin boundary');
