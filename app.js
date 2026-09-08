@@ -4528,6 +4528,15 @@ function rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, requestedR) {
   let poly2d = loop3d.map(p => [p[other[0]], p[other[1]]]);
   poly2d = raw2DWeldLoop(poly2d, 0.08);
   if (poly2d.length < 3) throw new Error('cap boundary too small after weld');
+  const polyClean = [];
+  for (let i = 0; i < poly2d.length; i++) {
+    const a = poly2d[(i - 1 + poly2d.length) % poly2d.length];
+    const b = poly2d[i];
+    const c = poly2d[(i + 1) % poly2d.length];
+    const area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    if (Math.abs(area) > 1e-8) polyClean.push(b);
+  }
+  if (polyClean.length >= 3) poly2d = polyClean;
   const n = poly2d.length;
 
   const Rs = new Array(n);
@@ -4613,18 +4622,9 @@ function rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, requestedR) {
     }
   }
 
-  const capPoly2d = [];
-  for (let i = 0; i < innerRing2d.length; i++) {
-    const a = innerRing2d[(i - 1 + innerRing2d.length) % innerRing2d.length];
-    const b = innerRing2d[i];
-    const c = innerRing2d[(i + 1) % innerRing2d.length];
-    const area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-    if (Math.abs(area) > 1e-8) capPoly2d.push(b);
-  }
-  const capSrc = capPoly2d.length >= 3 ? capPoly2d : innerRing2d;
-  const capTris = rawEarClip2D(capSrc);
+  const capTris = rawEarClip2D(innerRing2d);
   for (const tri of capTris) {
-    let a = from3(capSrc[tri[0]], capPlane), b = from3(capSrc[tri[1]], capPlane), c = from3(capSrc[tri[2]], capPlane);
+    let a = from3(innerRing2d[tri[0]], capPlane), b = from3(innerRing2d[tri[1]], capPlane), c = from3(innerRing2d[tri[2]], capPlane);
     const ux=b[0]-a[0], uy=b[1]-a[1], uz=b[2]-a[2];
     const vx=c[0]-a[0], vy=c[1]-a[1], vz=c[2]-a[2];
     const nrm = [uy*vz-uz*vy, uz*vx-ux*vz, ux*vy-uy*vx];
