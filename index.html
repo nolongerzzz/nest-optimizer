@@ -32,9 +32,7 @@
         <button id="btn-clear" class="btn btn-ghost" title="Clear everything">Clear</button>
       </div>
     </header>
-
     <main>
-      <!-- Left Panel -->
       <aside class="panel left-panel">
         <section class="card card-compact">
           <h2>Plate</h2>
@@ -54,7 +52,6 @@
             <span id="plate-area">32,400 mm²</span>
           </div>
         </section>
-
         <section class="card card-compact">
           <h2>Library</h2>
           <input type="file" id="file-input" accept=".stl" multiple class="hidden-quiet" />
@@ -65,7 +62,6 @@
             <button id="btn-clone" class="btn btn-secondary" type="button" disabled title="Duplicate selected model">Clone piece</button>
           </div>
         </section>
-
         <section class="card card-compact" id="edit-card">
           <h2>Cut</h2>
           <div class="edit-row tool-toggle-row">
@@ -104,14 +100,7 @@
             <option value="soft">Soft</option>
             <option value="match">Match</option>
           </select>
-          <div class="hidden-quiet">
-            <input type="number" id="array-count" value="4" min="2" max="16" step="1" />
-            <input type="number" id="array-pitch" value="22" min="1" max="80" step="0.1" />
-            <button id="btn-array" type="button">Array</button>
-          </div>
         </section>
-
-
         <section class="card" id="join-card">
           <h2>Join</h2>
           <button id="btn-join-start" class="btn btn-secondary" type="button">Start Join</button>
@@ -136,45 +125,17 @@
           <button id="btn-cap-open" class="btn btn-secondary" type="button">Cap open faces</button>
           <button id="btn-join-clear" class="btn btn-ghost" type="button">Cancel Join</button>
         </section>
-
         <section class="card card-compact" id="export-card">
           <h2>Export</h2>
           <button id="btn-export-model" class="btn btn-primary" type="button">Download selected STL</button>
           <button id="btn-export-stl" class="btn btn-secondary" type="button" disabled>Export plate</button>
           <button id="btn-delete-model" class="btn btn-danger" type="button">Delete model</button>
         </section>
-
         <section class="card card-compact">
           <h2>Pack</h2>
           <button id="btn-optimize" class="btn btn-primary" disabled>Optimize plate</button>
-          <details class="more-tools">
-            <summary>Pack options</summary>
-            <div class="settings">
-              <label class="checkbox">
-                <input type="checkbox" id="opt-auto-orient" />
-                Auto face-down
-              </label>
-              <label class="checkbox">
-                <input type="checkbox" id="opt-orient" />
-                Support preview
-              </label>
-              <label class="checkbox">
-                <input type="checkbox" id="opt-rotate" checked />
-                90° / 45° spins
-              </label>
-              <label>
-                Gap mm
-                <input type="number" id="gap" value="2" min="0" max="20" step="0.5" />
-              </label>
-            </div>
-          </details>
-          <div id="results" class="results">
-            <p class="empty">Run Optimize to see packing results.</p>
-          </div>
         </section>
       </aside>
-
-      <!-- Center – 3D View -->
       <section class="viewport-section">
         <div id="viewport"></div>
         <div class="viewport-overlay viewport-overlay-topbar">
@@ -198,11 +159,6 @@
           <button id="btn-nudge-back" class="vp-bar-btn adjust-btn" disabled title="Nudge back">↓</button>
           <button id="btn-nudge-left" class="vp-bar-btn adjust-btn" disabled title="Nudge left">←</button>
           <button id="btn-nudge-right" class="vp-bar-btn adjust-btn" disabled title="Nudge right">→</button>
-          <div id="stats" class="stats hidden">
-            <span id="stat-count">0 models</span>
-            <span id="stat-fill">0% fill</span>
-            <span id="stat-time">—</span>
-          </div>
         </div>
         <div class="viewport-overlay viewport-overlay-finish">
           <details class="vp-menu vp-finish-menu">
@@ -264,13 +220,12 @@
       </section>
     </main>
   </div>
-
   <div id="ctx-menu" class="ctx-menu hidden" role="menu">
     <button type="button" id="ctx-delete" class="ctx-item ctx-danger" role="menuitem">Delete piece</button>
   </div>
-  <script src="app-core.js?v=soften2"></script>
-  <script src="app-cut.js?v=soften2"></script>
-  <script src="app-finish.js?v=soften2"></script>
-  <script src="app-join.js?v=soften2"></script>
+  <script src="app-core.js?v=soften3"></script>
+  <script src="app-cut.js?v=soften3"></script>
+  <script src="app-finish.js?v=soften3"></script>
+  <script src="app-join.js?v=soften3"></script>
 </body>
 </html>
