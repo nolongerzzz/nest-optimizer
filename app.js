@@ -4528,15 +4528,6 @@ function rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, requestedR) {
   let poly2d = loop3d.map(p => [p[other[0]], p[other[1]]]);
   poly2d = raw2DWeldLoop(poly2d, 0.08);
   if (poly2d.length < 3) throw new Error('cap boundary too small after weld');
-  const polyClean = [];
-  for (let i = 0; i < poly2d.length; i++) {
-    const a = poly2d[(i - 1 + poly2d.length) % poly2d.length];
-    const b = poly2d[i];
-    const c = poly2d[(i + 1) % poly2d.length];
-    const area = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
-    if (Math.abs(area) > 1e-8) polyClean.push(b);
-  }
-  if (polyClean.length >= 3) poly2d = polyClean;
   const n = poly2d.length;
 
   const Rs = new Array(n);
@@ -4617,14 +4608,29 @@ function rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, requestedR) {
     for (let i = 0; i < n; i++) {
       const i1 = (i+1)%n;
       const A0=a[i], A1=a[i1], B0=b[i], B1=b[i1];
-      out.push(A0[0],A0[1],A0[2], A1[0],A1[1],A1[2], B1[0],B1[1],B1[2]);
-      out.push(A0[0],A0[1],A0[2], B1[0],B1[1],B1[2], B0[0],B0[1],B0[2]);
+      const same = (p,q) => Math.hypot(p[0]-q[0], p[1]-q[1], p[2]-q[2]) < 1e-9;
+      if (!same(A0,A1) && !same(A1,B1) && !same(B1,A0))
+        out.push(A0[0],A0[1],A0[2], A1[0],A1[1],A1[2], B1[0],B1[1],B1[2]);
+      if (!same(A0,B1) && !same(B1,B0) && !same(B0,A0))
+        out.push(A0[0],A0[1],A0[2], B1[0],B1[1],B1[2], B0[0],B0[1],B0[2]);
     }
   }
 
-  const capTris = rawEarClip2D(innerRing2d);
-  for (const tri of capTris) {
-    let a = from3(innerRing2d[tri[0]], capPlane), b = from3(innerRing2d[tri[1]], capPlane), c = from3(innerRing2d[tri[2]], capPlane);
+  // Centroid fan: every cap-boundary edge (including a mid-edge notch)
+  // gets a partner triangle. Ear-clip / corner-fan drops the last wrap
+  // when three boundary points sit on one straight edge.
+  let cx = 0, cy = 0;
+  for (let i = 0; i < innerRing2d.length; i++) {
+    cx += innerRing2d[i][0];
+    cy += innerRing2d[i][1];
+  }
+  cx /= innerRing2d.length;
+  cy /= innerRing2d.length;
+  const capApex = [cx, cy];
+  for (let i = 0; i < innerRing2d.length; i++) {
+    const p0 = innerRing2d[i];
+    const p1 = innerRing2d[(i + 1) % innerRing2d.length];
+    let a = from3(p0, capPlane), b = from3(p1, capPlane), c = from3(capApex, capPlane);
     const ux=b[0]-a[0], uy=b[1]-a[1], uz=b[2]-a[2];
     const vx=c[0]-a[0], vy=c[1]-a[1], vz=c[2]-a[2];
     const nrm = [uy*vz-uz*vy, uz*vx-ux*vz, ux*vy-uy*vx];
