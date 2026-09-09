@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=mask1" />
+  <link rel="stylesheet" href="styles.css?v=corners9" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -95,11 +95,6 @@
           <button id="btn-join-cz" class="btn btn-secondary" type="button">Center Z</button>
           <button id="btn-join" class="btn btn-primary" type="button" disabled>Complete Join</button>
           <button id="btn-subtract" class="btn btn-secondary" type="button">Subtract B from A</button>
-          <div class="join-mask-row">
-            <button id="btn-mask-inc" class="btn btn-secondary" type="button">Soften selected</button>
-            <button id="btn-mask-exc" class="btn btn-secondary" type="button">Exclude selected</button>
-            <button id="btn-mask-clear" class="btn btn-ghost" type="button">Clear mask</button>
-          </div>
           <button id="btn-extract-bit" class="btn btn-secondary" type="button">Extract bit</button>
           <button id="btn-seat-flush" class="btn btn-secondary" type="button">Seat flush</button>
           <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
@@ -177,7 +172,7 @@
           <button id="btn-xray" class="viewport-tool-btn" type="button">X</button>
         </div>
         <div class="viewport-overlay viewport-overlay-br">
-          <p id="adjust-status" class="status-hud status-hud-id">HUD mask1</p>
+          <p id="adjust-status" class="status-hud status-hud-id">HUD corners9</p>
           <p id="status" class="status status-hud"></p>
         </div>
       </section>
@@ -187,12 +182,11 @@
     <button type="button" id="ctx-export" class="ctx-item" role="menuitem">Export STL</button>
     <button type="button" id="ctx-delete" class="ctx-item ctx-danger" role="menuitem">Delete piece</button>
   </div>
-  <script src="app-core.js?v=mask1"></script>
-  <script src="app-cut.js?v=mask1"></script>
-  <script src="app-finish.js?v=mask1"></script>
-  <script src="app-sel-outline.js?v=mask1"></script>
-  <script src="app-join.js?v=mask1"></script>
-  <script src="app-ux.js?v=mask1"></script>
-  <script src="app-mask.js?v=mask1"></script>
+  <script src="app-core.js?v=corners9"></script>
+  <script src="app-cut.js?v=corners9"></script>
+  <script src="app-finish.js?v=corners9"></script>
+  <script src="app-sel-outline.js?v=corners9"></script>
+  <script src="app-join.js?v=corners9"></script>
+  <script src="app-ux.js?v=corners9"></script>
 </body>
 </html>
