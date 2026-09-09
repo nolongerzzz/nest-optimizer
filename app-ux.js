@@ -1,5 +1,11 @@
-/* ux overlay — double-click closes cutter, right-click Export STL, Alt-click look */
+/* ux overlay — look lock + HUD stamp */
 (function () {
+  function stampHud() {
+    var el = document.getElementById('adjust-status');
+    if (el) el.textContent = 'HUD corners5';
+    if (typeof setStatus === 'function') setStatus('HUD corners5');
+  }
+
   function pickIdx(event) {
     if (!state.renderer || !state.camera || !state.modelGroup) return -1;
     setPointerFromEvent(event);
@@ -18,8 +24,7 @@
     state.raycaster.setFromCamera(state.pointer, state.camera);
     const hits = state.raycaster.intersectObjects(state.modelGroup.children, true);
     if (!hits.length) return false;
-    const p = hits[0].point;
-    state.controls.target.copy(p);
+    state.controls.target.copy(hits[0].point);
     state.controls.minDistance = 3;
     state.controls.update();
     if (typeof setStatus === 'function') setStatus('Look locked — orbit/pan around point');
@@ -27,6 +32,9 @@
   }
 
   function bind() {
+    stampHud();
+    setTimeout(stampHud, 0);
+    setTimeout(stampHud, 200);
     if (state.renderer && state.renderer.domElement) {
       state.renderer.domElement.addEventListener('dblclick', function (event) {
         if (!state.cutterOpen) return;
