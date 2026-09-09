@@ -502,8 +502,6 @@ function rawPerimeterFilletInPlace(rawTris, axisIdx, keepMin, requestedR, opts) 
 function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
   opts = opts || {};
   const minTurn = (opts.minTurnDeg == null ? 25 : opts.minTurnDeg) * Math.PI / 180;
-  const ARCN = 12;                       // samples per boundary arc
-  const PATCHN = 6;                      // subdivision across the patch
   const SQUARE_TOL = 12 * Math.PI / 180; // how far from 90deg a corner may be
   const intoBody = keepMin ? 1 : -1;
   const other = [0, 1, 2].filter(a => a !== axisIdx);
@@ -717,47 +715,64 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
   }
   if (!balls.length) throw new Error('no square vertex takes R=' + requestedR + ' on this face');
 
+  // ---- one radius for the whole face ----
+  // Every seam below is shared point for point between the corner blend and
+  // the two bands that leave it, so all four corners and all four edges have
+  // to run the same Rc. Take the tightest clamp on the face.
+  const Runi = balls.reduce((m, b) => Math.min(m, b.Rc), Infinity);
+  for (const b of balls) b.Rc = Runi;
+
   // ---- shared geometry per vertex ----
   //
-  // The corner is the offset of the L-shaped spine the two edge cylinders
-  // share. Each face-edge cylinder has radius Rc and its axis sits Rc in from
-  // the face and Rc in from its wall; at the vertex those two axes meet at C.
-  // The blend is therefore the sphere of the SAME radius Rc centred on C: it
-  // meets each cylinder on that cylinder's own great circle at C's station,
-  // so the join is tangent and there is no crease.
+  // corners7 put a sphere of radius Rc at the inward corner and closed the
+  // rest with a flat shelf at depth Rc. That shelf is the stub: its outer
+  // point, on the depth edge, stands sqrt(2)*Rc from the sphere centre, so it
+  // poked 0.41*Rc proud of the ball as a flat knife. No sphere can fix it -
+  // a ball tangent to both walls is always sqrt(2) times its radius from the
+  // knife they make, so it can never reach the depth edge.
   //
-  // The sqrt(2)*Rc ball corners6 used is NOT tangent here. With the cylinders
-  // present it removes nothing they have not already removed - it is swallowed
-  // whole - so keeping it would ship the crease. Radius Rc is the only sphere
-  // that touches both cylinders.
+  // The setback drops the sphere and blends the corner cross-section instead.
+  // Slice the corner with planes parallel to the clicked face. At depth a the
+  // two edge cylinders show up as two straight lines, inset R - w from their
+  // walls with w = sqrt(2*R*a - a*a), and they cross at a sharp corner. Round
+  // THAT corner, in that slice, with a radius r(a) that vanishes at both ends:
   //
-  // Rc is measured from the face and from each wall, so the sphere is tangent
-  // to all three planes: it touches the face at the mitre corner M of the
-  // inset ring and each wall at one point on that wall's trimmed edge.
+  //   a = 0    (the face)       w = 0, r = 0  -> the mitre corner M, a point
+  //   a = R    (the depth edge) w = R, r = 0  -> the knife, a point
+  //
+  // so the blend tapers to nothing at both ends and there is nothing left to
+  // stand proud. In between it is a real fillet of the slice corner, which is
+  // why the join to each band is exactly tangent: the slice arc meets the
+  // band's slice line tangentially, and the band's own normal in that slice is
+  // the same normal, for any r(a) at all.
+  //
+  // Written on the band's own profile angle phi (a = R(1-sin phi),
+  // w = R cos phi) the choice r = R sin phi cos phi gives
+  //
+  //   inset  = R(1 - cos phi)                  <- the band profile, unchanged
+  //   centre = R(1 - cos phi (1 - sin phi))    <- where the band now stops
+  //
+  // and r peaks at R/2 halfway down. Both bands and the blend read those two
+  // numbers out of the same function, so the seams cannot drift apart.
   const axisIn = [0,0,0]; axisIn[axisIdx] = intoBody;
   const lift = (uv) => from3(uv, capPlane);
-  const PROFN = 10;                       // samples across a fillet profile
-  // One profile generator for both the bands and the corner, so a band's end
-  // cross-section and the patch edge it meets are the same numbers.
-  const profilePt = (base2, nrm2, R, phi) => {
-    const inset = R * (1 - Math.cos(phi)), dep = R * (1 - Math.sin(phi));
-    return from3([base2[0] + nrm2[0]*inset, base2[1] + nrm2[1]*inset], depth(dep));
-  };
-  const profileRow = (base2, nrm2, R) => {
-    const row = [];
-    for (let k = 0; k <= PROFN; k++) row.push(profilePt(base2, nrm2, R, (Math.PI/2) * (k/PROFN)));
-    return row;   // [0] on the wall, [PROFN] on the face
-  };
+  const PROFN = 12;                       // slices down the blend / band profile
+  const ARCN = 12;                        // samples across a slice arc
   for (const b of balls) {
-    const Rc = b.Rc;
-    b.C3 = from3(b.M, depth(Rc));
-    b.Rs = Rc;
-    b.V3 = lift(b.V2);
+    const R = b.Rc;
+    // m1 = inset from the u1 edge's wall, m2 = inset from the u2 edge's wall
+    b.at = (m1, m2, a) => from3(
+      [b.V2[0] + b.n1[0]*m1 + b.n2[0]*m2, b.V2[1] + b.n1[1]*m1 + b.n2[1]*m2],
+      depth(a));
+    b.slice = (k) => {
+      const phi = (Math.PI/2) * (k/PROFN);
+      const c = Math.cos(phi), sn = Math.sin(phi);
+      return { a: R*(1-sn), inset: R*(1-c), mc: R*(1 - c*(1-sn)), r: R*sn*c };
+    };
+    b.M = [b.V2[0] + (b.n1[0]+b.n2[0])*R, b.V2[1] + (b.n1[1]+b.n2[1])*R];
     b.M3 = lift(b.M);
-    // Rc down the depth edge from the vertex: where the two walls' trimmed
-    // edges and the corner shelf all meet. The sphere stops short of it, and
-    // that gap is the shelf, not a ledge in the ball.
-    b.P3_3 = [b.V3[0] + axisIn[0]*Rc, b.V3[1] + axisIn[1]*Rc, b.V3[2] + axisIn[2]*Rc];
+    b.V3 = lift(b.V2);
+    b.tip3 = b.at(0, 0, R);               // Rc down the depth edge: the knife end
     // the two wall planes, each as (origin, u, v) with v = into the body
     b.walls = [
       { u2: b.u1, out2: [-b.n1[0], -b.n1[1]] },
@@ -776,27 +791,22 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
                        w.org[1] + w.u3[1]*uv[0] + axisIn[1]*uv[1],
                        w.org[2] + w.u3[2]*uv[0] + axisIn[2]*uv[1]];
       w.planeD = w.n3[0]*w.org[0] + w.n3[1]*w.org[1] + w.n3[2]*w.org[2];
-      w.tan2 = [Rc, Rc];                  // the single point the sphere touches
-      w.tan3 = w.to3(w.tan2);
     }
-    // the two station profiles: each IS its band's end cross-section and the
-    // circle that band and the sphere have in common
-    b.chainA = profileRow([b.V2[0] + b.u1[0]*Rc, b.V2[1] + b.u1[1]*Rc], b.n1, Rc);
-    b.chainB = profileRow([b.V2[0] + b.u2[0]*Rc, b.V2[1] + b.u2[1]*Rc], b.n2, Rc);
+    // the blend grid, and with it the two seams the bands must start on
+    b.grid = [];
+    b.seam1 = [];                          // psi = 0     -> the u1 edge's band
+    b.seam2 = [];                          // psi = pi/2  -> the u2 edge's band
+    for (let k = 0; k <= PROFN; k++) {
+      const sl = b.slice(k), row = [];
+      for (let q = 0; q <= ARCN; q++) {
+        const psi = (Math.PI/2) * (q/ARCN);
+        row.push(b.at(sl.mc - sl.r*Math.cos(psi), sl.mc - sl.r*Math.sin(psi), sl.a));
+      }
+      b.grid.push(row);
+      b.seam1.push(row[0]);
+      b.seam2.push(row[ARCN]);
+    }
   }
-  // great-circle step about a ball centre, so every patch row stays on the ball
-  const slerp = (C3, Rs, P, Q, t) => {
-    const a = [(P[0]-C3[0])/Rs, (P[1]-C3[1])/Rs, (P[2]-C3[2])/Rs];
-    const b = [(Q[0]-C3[0])/Rs, (Q[1]-C3[1])/Rs, (Q[2]-C3[2])/Rs];
-    let d = a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
-    d = Math.max(-1, Math.min(1, d));
-    const om = Math.acos(d);
-    if (om < 1e-9) return [P[0], P[1], P[2]];
-    const s = Math.sin(om), w0 = Math.sin((1-t)*om)/s, w1 = Math.sin(t*om)/s;
-    return [C3[0] + Rs*(a[0]*w0 + b[0]*w1),
-            C3[1] + Rs*(a[1]*w0 + b[1]*w1),
-            C3[2] + Rs*(a[2]*w0 + b[2]*w1)];
-  };
 
   // ---- trim one plane's triangles by the corner sectors that bite it ----
   const polyArea = (p) => {
@@ -909,31 +919,38 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
     }
     const b2 = byApex.get(j);
     if (!b2 || j === ai) continue;
-    // Station Rc, not 2Rc: the sphere is centred Rc along the edge from the
-    // vertex and meets this cylinder on the great circle there, so the band
-    // ends exactly where the sphere starts.
-    const from = b.Rc, to = run - b2.Rc;
-    if (!(to - from > 1e-6)) continue;
-    edgeJobs.push({ a: b, b2: b2, dir: b.u2, nrm: b.n2, from: from, to: to, len: run });
+    edgeJobs.push({ a: b, b2: b2, dir: b.u2, nrm: b.n2, len: run });
   }
+  // The band no longer ends on a flat station. Its two end columns ARE the
+  // corner blends' seams, taken verbatim: the corner that owns the seam hands
+  // it over, and the band only slides along the edge between them. Every row
+  // has the same inset and the same depth at both ends, so a straight slide
+  // stays exactly on the cylinder.
   for (const job of edgeJobs) {
-    const R = Math.min(job.a.Rc, job.b2.Rc);
-    const V2 = job.a.V2, u = job.dir, nrm = job.nrm;
-    const at = (t) => [V2[0] + u[0]*t, V2[1] + u[1]*t];
-    const steps = Math.max(2, Math.ceil((job.to - job.from) / Math.max(R/2, 1e-3)));
-    const rows = [];
-    for (let q = 0; q <= steps; q++) {
-      const t = job.from + (job.to - job.from) * (q / steps);
-      rows.push(profileRow(at(t), nrm, R));
+    const startCol = job.a.seam2;          // leaving corner a along its u2 edge
+    const endCol = job.b2.seam1;           // arriving at corner b2 along its u1
+    if (startCol.length !== endCol.length) continue;
+    const R = job.a.Rc;
+    const span = job.len - 2*R;
+    if (!(span > 1e-6)) continue;
+    // Cap the station count: a tiny R on a long edge would otherwise put tens
+    // of thousands of rows through the T-junction sweep and hang the tab.
+    const steps = Math.max(2, Math.min(160, Math.ceil(span / Math.max(R/2, 1e-3))));
+    job.rows = [];
+    for (let k = 0; k <= PROFN; k++) {
+      const P = startCol[k], Q = endCol[k], row = [];
+      for (let q = 0; q <= steps; q++) {
+        const t = q/steps;
+        row.push([P[0] + (Q[0]-P[0])*t, P[1] + (Q[1]-P[1])*t, P[2] + (Q[2]-P[2])*t]);
+      }
+      job.rows.push(row);
     }
-    job.endA = rows[0];
-    job.endB = rows[rows.length-1];
-    job.rows = rows;
+    job.steps = steps;
     job.tris = [];
-    for (let q = 0; q < steps; q++) {
-      for (let k = 0; k < PROFN; k++) {
-        job.tris.push([rows[q][k], rows[q+1][k], rows[q][k+1]]);
-        job.tris.push([rows[q+1][k], rows[q+1][k+1], rows[q][k+1]]);
+    for (let k = 0; k < PROFN; k++) {
+      for (let q = 0; q < steps; q++) {
+        job.tris.push([job.rows[k][q], job.rows[k+1][q], job.rows[k][q+1]]);
+        job.tris.push([job.rows[k+1][q], job.rows[k+1][q+1], job.rows[k][q+1]]);
       }
     }
   }
@@ -958,8 +975,8 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
       }
       pieces = next;
     }
-    // Nothing else comes off the face. The sphere is tangent to this plane, so
-    // it touches the ring at the mitre corner M and takes no area: the face
+    // Nothing else comes off the face. The blend tapers to nothing at depth 0,
+    // so it meets this plane at the mitre corner M and takes no area: the face
     // stays a flat inset ring with sharp mitre corners, which is what a
     // filleted box face looks like.
     let ringArea = 0;
@@ -995,17 +1012,15 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
       }
     }
     if (!mine.length) continue;
-    // every point this plane must carry a vertex at: each sphere's tangent
-    // point and each depth-edge tip sits on the trimmed edge, so the wall has
-    // to share them with the shelf that meets it there.
+    // every point this plane must carry a vertex at: the blend runs to the
+    // knife end of each depth edge, which sits on this wall's trimmed edge.
     const marks = [];
     for (const b of balls) {
       for (const w of b.walls) {
         const key = w.n3.map(x => Math.round(x*1e3)).join(',') + '|' + Math.round(w.planeD*1e3);
         const k0 = w0.n3.map(x => Math.round(x*1e3)).join(',') + '|' + Math.round(w0.planeD*1e3);
         if (key !== k0) continue;
-        marks.push(w0.to2(w.tan3));
-        marks.push(w0.to2(b.P3_3));
+        marks.push(w0.to2(b.tip3));
       }
     }
     let pieces = mine.map(t => [w0.to2(vert(t,0)), w0.to2(vert(t,1)), w0.to2(vert(t,2))]);
@@ -1017,8 +1032,8 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
       if (q.length >= 3) stripped.push(q);
     }
     pieces = stripped;
-    // Nothing else comes off this wall: the sphere is tangent to it and only
-    // touches it at (Rc, Rc), which is already on the trimmed edge.
+    // Nothing else comes off this wall. The blend runs down the cylinder to
+    // this wall's own trim line and ends on it, so it takes no wall area.
     let after = 0;
     for (const p of pieces) after += polyArea(p);
     if (!(after > 1e-9)) {
@@ -1054,64 +1069,52 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
     }
   }
 
-  // ---- the corner: the spherical octant, plus the shelf under it ----
+  // ---- the corner: the setback blend ----
   //
-  // The octant is a spherical triangle of radius Rc about C with three
-  // quarter-circle edges, each of them shared whole with a neighbour:
-  //   chainA - the band on the u1 edge, at its end station
-  //   chainB - the band on the u2 edge, at its end station
-  //   the arc at depth Rc - the shelf
-  // Each seam is a great circle at the cylinder's own station, so the ball
-  // and the band leave with the same tangent plane: no crease.
-  //
-  // The sphere stops sqrt(2)*Rc short of the depth edge, which the user is
-  // keeping as a knife, so the octant cannot close on its own. What closes it
-  // is a flat shelf in the plane at depth Rc: the curvilinear triangle between
-  // that arc, the two walls' trimmed edges, and the point Rc down the depth
-  // edge. It is a real step, area (4 - pi/... ) Rc^2 per corner, and it is the
-  // price of a knife depth edge with no setback.
-  let patchTris = 0, shelfTris = 0;
+  // One grid, (PROFN+1) slices down by (ARCN+1) across. Column 0 is seam1 and
+  // column ARCN is seam2 - the very arrays the two bands were built from - so
+  // both seams are shared point for point and are tangent by construction.
+  // Slice PROFN collapses onto the mitre corner M on the face, slice 0 onto
+  // the knife end of the depth edge, so the blend closes to a point at both
+  // ends and leaves nothing standing proud. No shelf, no stub.
+  let patchTris = 0;
   for (const b of balls) {
-    const C3 = b.C3, Rs = b.Rs;
-    const A = b.chainA, B = b.chainB;      // [0] on a wall, [PROFN] at M
-    const row = (r) => {
-      const P = A[PROFN - r], Q = B[PROFN - r];
-      if (r === 0) return [P];
-      const pts = [];
-      for (let k = 0; k <= r; k++) pts.push(k === 0 ? P : (k === r ? Q : slerp(C3, Rs, P, Q, k/r)));
-      return pts;
-    };
-    const put = (P, Q, S) => {
-      const ux=Q[0]-P[0], uy=Q[1]-P[1], uz=Q[2]-P[2];
-      const vx=S[0]-P[0], vy=S[1]-P[1], vz=S[2]-P[2];
-      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
-      if (0.5*Math.hypot(nx,ny,nz) < 1e-12) return;
-      const mx=(P[0]+Q[0]+S[0])/3 - C3[0], my=(P[1]+Q[1]+S[1])/3 - C3[1], mz=(P[2]+Q[2]+S[2])/3 - C3[2];
-      if (nx*mx + ny*my + nz*mz < 0) out.push(P[0],P[1],P[2], S[0],S[1],S[2], Q[0],Q[1],Q[2]);
-      else out.push(P[0],P[1],P[2], Q[0],Q[1],Q[2], S[0],S[1],S[2]);
-      patchTris++;
-    };
-    let lower = row(0);
-    for (let r = 0; r < PROFN; r++) {
-      const upper = row(r+1);
-      for (let k = 0; k <= r; k++) put(lower[k], upper[k], upper[k+1]);
-      for (let k = 0; k + 1 <= r; k++) put(lower[k], upper[k+1], lower[k+1]);
-      lower = upper;
+    const R = b.Rc;
+    const ref = b.at(R, R, R);            // strictly inside; the blend wraps it
+    const g = b.grid;
+    const tri = [];
+    for (let k = 0; k < PROFN; k++) {
+      for (let q = 0; q < ARCN; q++) {
+        tri.push([g[k][q], g[k+1][q], g[k+1][q+1]]);
+        tri.push([g[k][q], g[k+1][q+1], g[k][q+1]]);
+      }
     }
-    // the shelf, fanned from the depth-edge tip it is star shaped about
-    const rim = lower, tip = b.P3_3;
-    const wantOut = [-axisIn[0], -axisIn[1], -axisIn[2]];
-    for (let k = 0; k + 1 < rim.length; k++) {
-      const P = tip, Q = rim[k], S = rim[k+1];
-      const ux=Q[0]-P[0], uy=Q[1]-P[1], uz=Q[2]-P[2];
-      const vx=S[0]-P[0], vy=S[1]-P[1], vz=S[2]-P[2];
+    // One orientation test on a healthy triangle in the middle of the grid,
+    // then the same winding everywhere: the rows at either end are degenerate
+    // and cannot be trusted to vote.
+    let flip = false;
+    let bestA = 0;
+    for (const t of tri) {
+      const ux=t[1][0]-t[0][0], uy=t[1][1]-t[0][1], uz=t[1][2]-t[0][2];
+      const vx=t[2][0]-t[0][0], vy=t[2][1]-t[0][1], vz=t[2][2]-t[0][2];
+      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+      const ar = 0.5*Math.hypot(nx,ny,nz);
+      if (ar <= bestA) continue;
+      const mx=(t[0][0]+t[1][0]+t[2][0])/3 - ref[0];
+      const my=(t[0][1]+t[1][1]+t[2][1])/3 - ref[1];
+      const mz=(t[0][2]+t[1][2]+t[2][2])/3 - ref[2];
+      bestA = ar;
+      flip = (nx*mx + ny*my + nz*mz) < 0;
+    }
+    if (!(bestA > 0)) throw new Error('corner blend produced no area - left unchanged');
+    for (const t of tri) {
+      const ux=t[1][0]-t[0][0], uy=t[1][1]-t[0][1], uz=t[1][2]-t[0][2];
+      const vx=t[2][0]-t[0][0], vy=t[2][1]-t[0][1], vz=t[2][2]-t[0][2];
       const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
       if (0.5*Math.hypot(nx,ny,nz) < 1e-12) continue;
-      if (nx*wantOut[0] + ny*wantOut[1] + nz*wantOut[2] < 0)
-        out.push(P[0],P[1],P[2], S[0],S[1],S[2], Q[0],Q[1],Q[2]);
-      else
-        out.push(P[0],P[1],P[2], Q[0],Q[1],Q[2], S[0],S[1],S[2]);
-      shelfTris++;
+      if (flip) out.push(t[0][0],t[0][1],t[0][2], t[2][0],t[2][1],t[2][2], t[1][0],t[1][1],t[1][2]);
+      else out.push(t[0][0],t[0][1],t[0][2], t[1][0],t[1][1],t[1][2], t[2][0],t[2][1],t[2][2]);
+      patchTris++;
     }
   }
 
@@ -1123,6 +1126,7 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
   // up with long edges the trimmed walls have split. Split any triangle edge
   // another vertex sits on. One sweep only splits one edge per triangle, so
   // sweep until nothing moves.
+  let sweepSplits = 0, sweepPasses = 0;
   for (let pass = 0; pass < 8; pass++) {
     let splits = 0;
     const q = 1e4;
@@ -1132,33 +1136,61 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
       const k = vk(out[i], out[i+1], out[i+2]);
       if (!pts.has(k)) pts.set(k, [out[i], out[i+1], out[i+2]]);
     }
-    const all = [...pts.values()];
     const grid = new Map();
     const CELL = 1.0;
     const cell = (p) => Math.floor(p[0]/CELL)+'|'+Math.floor(p[1]/CELL)+'|'+Math.floor(p[2]/CELL);
-    for (const p of all) {
+    for (const p of pts.values()) {
       const k = cell(p);
       if (!grid.has(k)) grid.set(k, []);
       grid.get(k).push(p);
     }
+    // Walk the cells the segment actually passes through, not the whole box it
+    // spans. A long edge across the piece used to blow the box budget and fall
+    // back to scanning every point, which is what made this sweep the slowest
+    // thing in the bake.
     const near = (a, b) => {
       const seen = new Set(), res = [];
-      const x0 = Math.floor(Math.min(a[0],b[0])/CELL)-1, x1 = Math.floor(Math.max(a[0],b[0])/CELL)+1;
-      const y0 = Math.floor(Math.min(a[1],b[1])/CELL)-1, y1 = Math.floor(Math.max(a[1],b[1])/CELL)+1;
-      const z0 = Math.floor(Math.min(a[2],b[2])/CELL)-1, z1 = Math.floor(Math.max(a[2],b[2])/CELL)+1;
-      if ((x1-x0)*(y1-y0)*(z1-z0) > 4096) return all;
-      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) {
-        const g = grid.get(x+'|'+y+'|'+z);
+      const len = Math.hypot(b[0]-a[0], b[1]-a[1], b[2]-a[2]);
+      const steps = Math.max(1, Math.ceil(len / (CELL*0.5)));
+      const cells = new Set();
+      for (let q = 0; q <= steps; q++) {
+        const t = q/steps;
+        const cx = Math.floor((a[0] + (b[0]-a[0])*t)/CELL);
+        const cy = Math.floor((a[1] + (b[1]-a[1])*t)/CELL);
+        const cz = Math.floor((a[2] + (b[2]-a[2])*t)/CELL);
+        for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++)
+          cells.add((cx+dx)+'|'+(cy+dy)+'|'+(cz+dz));
+      }
+      for (const ck of cells) {
+        const g = grid.get(ck);
         if (!g) continue;
         for (const p of g) { const k = vk(p[0],p[1],p[2]); if (!seen.has(k)) { seen.add(k); res.push(p); } }
       }
       return res;
     };
+    // Only unmatched edges can be T-junctions, and on a nearly sealed bake
+    // that is a handful out of thousands. Counting edge uses first turns the
+    // whole sweep from "search every edge" into "search the few that are open".
+    const useCount = new Map();
+    for (let t = 0; t + 8 < out.length; t += 9) {
+      const K = [vk(out[t],out[t+1],out[t+2]), vk(out[t+3],out[t+4],out[t+5]), vk(out[t+6],out[t+7],out[t+8])];
+      for (let e = 0; e < 3; e++) {
+        const a = K[e], b = K[(e+1)%3];
+        const k = a < b ? a+'~'+b : b+'~'+a;
+        useCount.set(k, (useCount.get(k) || 0) + 1);
+      }
+    }
+    const openEdge = (ka, kb) => {
+      const k = ka < kb ? ka+'~'+kb : kb+'~'+ka;
+      return useCount.get(k) !== 2;
+    };
     const fixed = [];
     for (let t = 0; t + 8 < out.length; t += 9) {
       const V = [[out[t],out[t+1],out[t+2]], [out[t+3],out[t+4],out[t+5]], [out[t+6],out[t+7],out[t+8]]];
+      const VK = [vk(V[0][0],V[0][1],V[0][2]), vk(V[1][0],V[1][1],V[1][2]), vk(V[2][0],V[2][1],V[2][2])];
       let split = -1, mids = null;
       for (let e = 0; e < 3; e++) {
+        if (!openEdge(VK[e], VK[(e+1)%3])) continue;
         const a = V[e], b = V[(e+1)%3];
         const ex = b[0]-a[0], ey = b[1]-a[1], ez = b[2]-a[2];
         const len2 = ex*ex + ey*ey + ez*ez;
@@ -1193,6 +1225,8 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
     }
     out.length = 0;
     for (const v of fixed) out.push(v);
+    sweepSplits += splits;
+    sweepPasses = pass + 1;
     if (!splits) break;
   }
 
@@ -1201,11 +1235,11 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
     vertices: balls.length,
     corners: cornerCount,
     skipped: skipped,
-    radius: balls.reduce((m, b) => Math.max(m, b.Rc), 0),
+    radius: balls.reduce((m, b) => Math.min(m, b.Rc), Infinity),
     requested: requestedR,
-    ballR: balls.reduce((m, b) => Math.max(m, b.Rs), 0),
     patchTris: patchTris,
-    shelfTris: shelfTris,
+    sweepSplits: sweepSplits,
+    sweepPasses: sweepPasses,
     bands: edgeJobs.length
   };
   return result;
@@ -2215,9 +2249,9 @@ function applySoftenOnFace(face) {
   const ball = (typeof rawVertexBallCorners === 'function') ? rawVertexBallCorners.lastBuild : null;
   const perim = (typeof rawPerimeterFilletInPlace === 'function') ? rawPerimeterFilletInPlace.lastBuild : null;
   if (treat === 'corners' && ball && ball.vertices != null) {
-    setStatus('corners+edges ' + ball.vertices + ' balls + ' + ball.bands + ' edge R ' +
-              ball.radius.toFixed(2) + clamp(ball) +
-              ' (tangent, ' + ball.patchTris + ' ball tris, ' + ball.shelfTris + ' shelf tris)' +
+    setStatus('corners+edges setback R ' + ball.radius.toFixed(2) + clamp(ball) +
+              ' (' + ball.vertices + ' corners + ' + ball.bands + ' edges, ' +
+              ball.patchTris + ' blend tris, no shelf)' +
               (ball.skipped ? ' - ' + ball.skipped + ' not square, left sharp' : ''));
   } else if (perim && perim.loopPts != null) {
     setStatus('Soften ok - ' + perim.mode + ' on all ' + perim.loopPts + ' loop pts at R ' +
