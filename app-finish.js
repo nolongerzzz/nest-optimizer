@@ -53,13 +53,12 @@ function softenSelectedFace(rawTris, axisIdx, keepMinFace, R, mode) {
     return rawChamferCut(rawTris, axisIdx, plane, keepMin, R);
   }
   if (mode === 'corners') {
-    // Job A: local corner fillets only. This does NOT go through the
-    // full-loop edge engine any more — that engine drops the whole lid and
-    // rebuilds it, which is a face retract however small the radius. The
-    // corner path keeps the lid's own triangles and cuts back only the
-    // crescent at each real corner. The edge path itself is untouched and
-    // still serves Round and Bevel.
-    return rawCornerFilletInPlace(rawTris, axisIdx, keepMin, R, { minTurnDeg: 30 });
+    // Same engine as Round and Bevel — same loop walk, same quarter-circle
+    // sweep, same untouched cap plane — with a per-vertex radius: R at every
+    // vertex whose windowed turn beats 30deg, 0 everywhere else, so a wall
+    // midpoint keeps a sharp edge sitting on the cut plane. The lid is the
+    // original lid trimmed back to the ring, never a centroid fan.
+    return rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, R, { cornersOnly: true, minTurnDeg: 30 });
   }
   return rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, R, { profile: 'round' });
 }
@@ -993,12 +992,12 @@ function applySoftenOnFace(face) {
   updateUndoBtn();
   if (typeof removeFaceHelper === 'function') removeFaceHelper();
   let what = 'Soften ok';
-  const built = (getEdgeTreat() === 'corners' && typeof rawCornerFilletInPlace === 'function')
-    ? rawCornerFilletInPlace.lastBuild : null;
-  if (built) {
-    what = 'Soften ok - ' + built.corners + ' corner' + (built.corners === 1 ? '' : 's') +
-           ' at R ' + built.radius.toFixed(2) +
-           (built.radius < built.requested - 1e-6 ? ' (asked ' + built.requested.toFixed(2) + ', wall clamp)' : '');
+  const built = (typeof rawEdgeRoundInPlace === 'function') ? rawEdgeRoundInPlace.lastBuild : null;
+  if (built && built.radii) {
+    let peak = 0, treated = 0;
+    for (const r of built.radii) { if (r > peak) peak = r; if (r > 1e-6) treated++; }
+    what = 'Soften ok - ' + treated + '/' + built.radii.length + ' loop pts at R up to ' + peak.toFixed(2) +
+           (peak < built.requested - 1e-6 ? ' (asked ' + built.requested.toFixed(2) + ', wall clamp)' : '');
   }
   setStatus(sealed ? what : what + ' - not fully sealed, check slice');
 }

@@ -27,86 +27,79 @@ A bare STL drop, no text, is the latest live export for the ticket below.
 - A decision is needed (scope, APPLY a stash, new ticket) -> comment the question
   on PR #4, then `I need your attention`.
 
-## Standing ticket — Soften Corners: local corner fillets shipped, awaiting live test
+## Standing ticket — Soften Corners, second pass (corners2), awaiting live test
 
-Corners no longer runs through the shared cap-plane edge engine. It has its
-own path, `rawCornerFilletInPlace` in `app-cut.js`, wired from
-`softenSelectedFace`. The edge engine (`rawEdgeRoundInPlace`) is untouched and
-still serves Round and Bevel — verified byte-identical output before and after
-this change at R=0.5/2/3 on box-20mm.
+corners1 was measured on the exported STL of the live FAIL. What it actually
+built, on the 12.38 x 20 x 20 baked half at R=2.5:
 
-What the corner path builds, per real corner of the cap boundary (interior
-angle t, clamped radius R):
+- All FOUR cap-loop corners carried an arc of exactly radius 2.5 (tangent at
+  7.5 on each edge, centres at (+/-7.5, +/-7.5)). Watertight, 0 open, 0
+  non-manifold. So "one pair only" is not in the mesh — but the shape was
+  still wrong, in two ways that explain what it looked like:
+- **Orbit-point.** The corner surface converged radially on the ORIGINAL
+  sharp apex at depth 1.0355 — every rollover sample ran to one vertex, so
+  the corner is a cone apex, not a fillet. From any camera off the face
+  normal it reads as a point.
+- **Bite too small.** corners1 rounded the lid boundary in plan with radius
+  R but only cut the wall back by R/sin(45) - R = 0.4142 R. At R=2.5 that is
+  a 1.04mm bite where 2.5mm was asked, which is the "~0.5mm" that was seen.
 
-- `C` fillet centre, the inward mitre point: R from both edge lines,
-  R/sin(t/2) from the apex.
-- `T` two tangent points at R/tan(t/2) along each edge. Outside T..T nothing
-  moves at all.
-- `P` the new cap boundary is the ARC of radius R about C — the corner is
-  round in plan, not a mitre and not a chamfer.
-- `F` the feet, the original boundary between the tangent points.
-  h(F) = |F - C| - R is the local depth: 0 at both tangent points, largest at
-  the apex (0.4142 R for a 90deg corner).
+corners2 drops that separate path entirely and puts Corners back through
+`rawEdgeRoundInPlace`, the same engine as Round and Bevel: same loop walk,
+same quarter-circle sweep, same untouched cap plane, with one per-vertex
+radius array — R at every vertex whose windowed turn beats 30deg, 0
+everywhere else. The corner is then the intersection of the two edge fillet
+cylinders, which is what a CAD variable-radius edge fillet is: a real
+quarter-circle of radius R normal to each edge, and no point.
 
-Corner surface = the quarter round from F (depth h, on the original wall) up
-to P (depth 0, on the cap plane), swept along the arc. The lid loses only the
-crescent between the original corner and the arc; every other lid triangle is
-passed through, the bitten ones are TRIMMED by convex clipping, not re-fanned.
+The centroid fan is gone from the engine for all three treatments. The lid is
+now the ORIGINAL cap triangles trimmed back to the ring
+(`rawLidTrimToRing2`): loop2[i] pairs with ring2[i], so the strip the ring
+took is the band of quads between them, and the lid is the cap minus that
+band. Triangles the band does not reach come through untouched; the ones it
+bites are clipped, never re-fanned. Convex ring takes the direct
+intersection, anything else subtracts the band quad by quad.
 
-No second plane. No re-clip of the body. No full-loop offset. No rebuilt lid.
+### Measured
 
-### Measured on box-20mm, Square split, Corners, cut face
+20mm box fixture, Square split, cut face:
 
 ```
-R      lid area   exact      centre star  mid-edge on plane  rollover  odd edges
-0.5    399.780    399.785    none         4/4                0.2071    0
-1      399.119    399.142    none         4/4                0.4142    0
-2      396.476    396.566    none         4/4                0.8284    0
-3      392.072    392.274    none         4/4                1.2426    0
+R      tris  open  NM  star  lid off capPlane  wall-mid R  corner apex depth  groups
+0.5     88     0    0   no          0            0.0000         0.500          4
+1.0     88     0    0   no          0            0.0000         1.000          4
+2.0     88     0    0   no          0            0.0000         2.000          4
+2.5     88     0    0   no          0            0.0000         2.500          4
+3.0     88     0    0   no          0            0.0000         3.000          4
 ```
 
-"exact" is 400 - 4R^2(1 - pi/4), the area of four corner crescents; the
-residue is arc chording. Tangent point tracks R exactly: (10, 10-R). Radius
-clamps at 9.0 (0.45 x 20mm wall) and the status line now says so.
+Attached FAIL STL, its untreated face, R=2.5: 512 tris, 0 open, 0
+non-manifold, no star, lid entirely on capPlane (x = -6.1902), 4 corner
+groups, R>0 at exactly 4 loop points, peak R 2.500, corner apex depth 2.500,
+lid still reaching y/z = +/-10 with the straight span running z = -5..+5
+(blend ends at 10 - 2R exactly).
 
-Fixes found on the way, all measured:
-- `rawLocalThickness2` skips every segment within two indices of the vertex,
-  so on a 4-vertex loop it skips the whole loop and falls back to its 4mm
-  default — pinning every corner at R=1.8 whatever R was asked. The corner
-  path uses `rawCornerWallLimit2`, which skips only the two segments touching
-  the apex. `rawLocalThickness2` itself is untouched.
-- Corner detection window was `R*1.5` unbounded; at R=9 on a 20mm square the
-  window spans whole edges, mid-edge vertices read as turns and all four
-  corners merge into one group — one corner treated, three left sharp. Now
-  bounded to total/16.
-- Fanning a trimmed lid piece from vertex 0 orphans a boundary edge whenever
-  three of its points are collinear (a lid edge carrying a wall vertex). The
-  fan apex is now chosen so no fan triangle is degenerate.
-- rawCut leaves zero-area seam triangles behind (box-20mm carries one across
-  y=10) and they are load bearing. Wall triangles nothing moved are now
-  copied through verbatim, area test and all.
+Round and Bevel: lid area now 268.960 against an exact (20 - 2R)^2 = 268.960
+at their clamped R=1.80 — the trimmed lid is exact, and their radius clamp is
+unchanged (they still use `rawLocalThickness2`; only the Corners filter moved
+to `rawCornerWallLimit2`).
+
+### Two engine bugs fixed inside rawCornerRadiiOnLoop2
+- radius clamp used `rawLocalThickness2`, which skips every segment within
+  two indices of the vertex and so returns its 4mm default on a 4-vertex
+  loop, pinning every corner at R=1.8.
+- detection window was `R*1.5` unbounded; at large R it spans whole edges,
+  mid-edge vertices read as turns, and all four corners of a square merge
+  into ONE group. Bounded to total/16.
 
 ### Fail-safe
-Every refusal happens before the caller swaps geometry, so the piece is left
-untouched: no corner over 30deg, no corner that takes R, a trim that escaped
-its corner (area check against the exact crescent), and a final seal gate that
-refuses any result with more odd edges than the input. Re-running Corners on
-an already-rounded face hits that last gate and refuses, which is correct —
-the live path replays from the captured source, not from the output.
-
-### Still to test live
-20mm cube, Square split, Corners, R=2.0, one end. PASS is four rounded
-corners, four straight edges still on the cut plane, no centre star.
+Refusals all happen before the caller swaps geometry: no corner over 30deg,
+no safe radius, ring self-intersection, a lid trim that loses area, and a
+seal gate refusing any result with more odd edges than the input.
 
 ### Known, not this ticket
-`rawCapFaceContext` still throws `branch point in cap boundary` on some cut
-faces (the parked `stash@{0}` item below). Reproduced on a 20x8 slab — Round,
-Bevel and Corners all refuse there identically, so it is the shared boundary
-walker, not the corner path.
-
-### Later, not this ticket
-Edge R and corner R as two parameters over one unrounded source, one bake.
-The edge path is deliberately still in place for that.
+`branch point in cap boundary` still refuses some cut faces (parked
+`stash@{0}` below) — Round, Bevel and Corners all refuse there identically.
 
 ## Open, not authorised — need an explicit APPLY
 
