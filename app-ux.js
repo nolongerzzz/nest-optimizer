@@ -30,6 +30,7 @@
         if (typeof exportActiveModel === 'function') exportActiveModel();
       });
     }
+    if (typeof setStatus === 'function') setStatus('HUD corners3');
   }
 
   if (document.readyState === 'loading') {
