@@ -31,20 +31,27 @@ function rawChamferCut(rawTris, axisIdx, plane, keepMin, R) {
 // own plane is read off the mesh inside the engine — `plane` below is only
 // the EPS-nudged value the older call sites expect and is not what the lid
 // is built on.
-function softenSelectedFace(rawTris, axisIdx, keepMinFace, R, mode) {
+function softenSelectedFace(rawTris, axisIdx, keepMinFace, R, mode, pickPlane) {
   mode = mode || getEdgeTreat();
 
-  let minV = Infinity, maxV = -Infinity;
-  for (let i = axisIdx; i < rawTris.length; i += 3) {
-    if (rawTris[i] < minV) minV = rawTris[i];
-    if (rawTris[i] > maxV) maxV = rawTris[i];
+  // The plane is the stored pick's plane. This used to scan rawTris for its
+  // own min/max on the axis and use that — the bbox remap that let a click
+  // land on one face while the radius landed on another. The scan survives
+  // only as an ASSERTION: rawEdgeRoundInPlace builds on the outer plane of
+  // the axis it is handed, so if the picked plane is not that plane the
+  // engine physically cannot honour the click, and we refuse rather than
+  // treat whatever face it can reach.
+  const extreme = rawExtremeOf(rawTris, axisIdx, keepMinFace);
+  if (pickPlane == null || !isFinite(pickPlane) || !isFinite(extreme) ||
+      Math.abs(pickPlane - extreme) > FACE_PICK_TOL) {
+    throw new Error('clicked face is not the outer plane on that axis');
   }
-  // Clipping exactly AT the piece's own extreme finds nothing to cross —
-  // every vertex already satisfies the boundary, so no cut edges exist to
-  // build a loop from. Nudge slightly inward so the clip actually crosses
-  // the flat face's own triangles and recovers its true boundary shape.
+  // Clipping exactly AT the picked plane finds nothing to cross — every
+  // vertex already satisfies the boundary, so no cut edges exist to build a
+  // loop from. Nudge slightly inward so the clip actually crosses the
+  // clicked face's own triangles and recovers its true boundary shape.
   const EPS = 0.02;
-  const plane = keepMinFace ? minV + EPS : maxV - EPS;
+  const plane = keepMinFace ? pickPlane + EPS : pickPlane - EPS;
   // keepMin=true keeps coord >= plane (the upper/max side) in this
   // engine's convention — confirmed directly, opposite of the name's
   // surface reading. To soften the MAX face and keep the rest of the
@@ -900,6 +907,9 @@ function thickenInSelectedModel() {
   thickenSelectedModel('in', isFinite(v) && v > 0 ? v : 1.5);
 }
 
+// Round / Corners / Bevel. Reads the stored pick and nothing else — the
+// `face` argument is ignored and kept only so the app-sel-outline reapply
+// wrapper keeps working. No stored pick means no bake.
 function applySoftenOnFace(face) {
   const m = getActiveModel();
   if (!m) {
@@ -910,20 +920,20 @@ function applySoftenOnFace(face) {
     setStatus('Soften needs a Square-split or loaded raw piece', true);
     return;
   }
-  if (!face || face.axisIdx == null) {
-    setStatus('Click the end or face to soften', true);
+  const pick = getFacePick(m);
+  if (!pick) {
+    clearFacePick();
+    setStatus('Click a face', true);
     return;
   }
   const inpR = document.getElementById('inp-soften-r');
   const Rv = inpR ? parseFloat(inpR.value) : NaN;
   const R = (isFinite(Rv) && Rv > 0) ? Rv : 0.5;
-  // The clicked face's OWN plane, in raw space. Never the display index and
-  // never a default to the top.
-  const rawAxisIdx = (face.rawAxisIdx != null) ? face.rawAxisIdx : (face.axisIdx === 0 ? 0 : 1);
-  const keepMinFace = (face.rawKeepMin != null) ? face.rawKeepMin : (face.sign < 0);
+  const rawAxisIdx = pick.rawAxisIdx;
+  const keepMinFace = pick.rawKeepMin;
   let working = null;
   try {
-    working = softenSelectedFace(m.rawTris, rawAxisIdx, keepMinFace, R, getEdgeTreat());
+    working = softenSelectedFace(m.rawTris, rawAxisIdx, keepMinFace, R, getEdgeTreat(), pick.rawPlane);
   } catch (e) {
     working = null;
     if (typeof removeFaceHelper === 'function') removeFaceHelper();
@@ -988,7 +998,7 @@ function applySoftenOnFace(face) {
   updateEditSize();
   renderModelList();
   updateUndoBtn();
-  if (typeof removeFaceHelper === 'function') removeFaceHelper();
+  refreshFacePickHighlight();
   // What actually got built: corners that took R, out of the corners found,
   // and the loop points the face carries. No sealing claim.
   const b = (typeof rawEdgeRoundInPlace === 'function') ? rawEdgeRoundInPlace.lastBuild : null;
@@ -1008,14 +1018,17 @@ function applySoftenOnFace(face) {
 // rawClipTrianglesAtPlane, not re-derived here). Just skips the fillet band:
 // rawCut already does clip -> loop -> rawFlatCapLoop, which is exactly a
 // legal flat raw lid, fillet-ready input for softenSelectedFace later.
-function capSelectedFace(rawTris, axisIdx, keepMinFace) {
-  let minV = Infinity, maxV = -Infinity;
-  for (let i = axisIdx; i < rawTris.length; i += 3) {
-    if (rawTris[i] < minV) minV = rawTris[i];
-    if (rawTris[i] > maxV) maxV = rawTris[i];
+function capSelectedFace(rawTris, axisIdx, keepMinFace, pickPlane) {
+  // Same change as softenSelectedFace: the plane comes from the stored
+  // pick, and the old bbox min/max scan is now only the check that the
+  // pick still describes this axis's outer plane.
+  const extreme = rawExtremeOf(rawTris, axisIdx, keepMinFace);
+  if (pickPlane == null || !isFinite(pickPlane) || !isFinite(extreme) ||
+      Math.abs(pickPlane - extreme) > FACE_PICK_TOL) {
+    throw new Error('clicked face is not the outer plane on that axis');
   }
   const EPS = 0.02;
-  const plane = keepMinFace ? minV + EPS : maxV - EPS;
+  const plane = keepMinFace ? pickPlane + EPS : pickPlane - EPS;
   const keepMin = keepMinFace;
   return rawCut(rawTris, axisIdx, plane, keepMin);
 }
@@ -1030,14 +1043,19 @@ function applyCapOnFace(face) {
     setStatus('Cap needs a Square-split or loaded raw piece', true);
     return;
   }
-  if (!face || face.axisIdx == null) {
-    setStatus('Click the face to cap', true);
+  const pick = getFacePick(m);
+  if (!pick) {
+    clearFacePick();
+    setStatus('Click a face', true);
     return;
   }
-  const keepMinFace = face.sign < 0;
+  // The clicked face's OWN raw axis and side. This used to pass the DISPLAY
+  // axisIdx (0 or 2) and face.sign straight into the raw engine, so a
+  // display-Z wall went to raw axis 2 — the top of the piece — exactly the
+  // miss that was fixed for Soften and left standing here.
   let working = null;
   try {
-    working = capSelectedFace(m.rawTris, face.axisIdx, keepMinFace);
+    working = capSelectedFace(m.rawTris, pick.rawAxisIdx, pick.rawKeepMin, pick.rawPlane);
   } catch (e) {
     working = null;
   }
@@ -1099,7 +1117,7 @@ function applyCapOnFace(face) {
   updateEditSize();
   renderModelList();
   updateUndoBtn();
-  if (typeof removeFaceHelper === 'function') removeFaceHelper();
+  refreshFacePickHighlight();
   setStatus('Cap ok');
 }
 
@@ -1108,12 +1126,13 @@ function capSelectedModel() {
   if (!m) { setStatus('Select a piece first', true); return; }
   if (state.capArmed) {
     state.capArmed = false;
-    removeFaceHelper();
+    clearFacePick();
     setStatus('Cap cancelled');
     return;
   }
   state.capArmed = true;
-  setStatus('Cap: click the face to close');
+  clearFacePick();
+  setStatus('Cap: click a face');
 }
 
 // fillet | corners | chamfer. Anything else (a stale saved value, an old
@@ -1130,14 +1149,15 @@ function softenSelectedModel() {
   if (!m) { setStatus('Select a piece first', true); return; }
   if (state.softenArmed) {
     state.softenArmed = false;
-    removeFaceHelper();
+    clearFacePick();
     setStatus('Soften cancelled');
     return;
   }
   state.softenArmed = true;
+  clearFacePick();
   const mode = getEdgeTreat();
   const label = mode === 'chamfer' ? 'bevel' : (mode === 'corners' ? 'corners' : 'round');
-  setStatus('Soften (' + label + '): click the end or face');
+  setStatus('Soften (' + label + '): click a face');
 }
 
 function capSelectedOpenFaces() {
@@ -2065,6 +2085,267 @@ function capAllOuterHoles(soup) {
     out = capSoupNearPlane(out, faces[i][0], faces[i][1], 0.55);
   }
   return out;
+}
+
+// ===================== Durable face pick =====================
+// One click stores one plane, and every finish action downstream reads
+// that stored plane and nothing else. This exists because the bug class it
+// closes kept coming back in a new disguise: a click captured a face, then
+// some engine further down re-derived "which face was meant" from the
+// piece's own bounding box (min/max on an axis), from the largest flat
+// patch, or from the display Y-max, and the radius landed on the lid while
+// the clicked wall never moved. There is now exactly one place where a
+// face is chosen — storeFacePick — and the engines are handed the answer.
+//
+// The pick is durable on purpose: it survives a bake, so Round then
+// Corners then Cap all hit the same face without re-clicking. It is
+// re-validated against the live raw soup on every read, so a pick that no
+// longer describes a real plane on the live piece is dropped rather than
+// silently snapped onto a neighbouring face.
+
+// Tolerance for "the click landed on this plane" and for "the stored plane
+// is still this piece's plane", in mm. Wide enough for a tessellated wall,
+// far tighter than the gap between two faces of any printable piece.
+const FACE_PICK_TOL = 0.35;
+// A face has to actually be flat under the cursor. Below this the hit is on
+// a fillet or a curved end, which has no cap/wall boundary to work with.
+const FACE_PICK_FLAT = 0.92;
+
+// The display mesh is the raw soup rotated -90deg about X
+// (rawResultToDisplayGeometry): dispX = rawX, dispY = rawZ, dispZ = -rawY.
+// So a display-Z wall is raw axis 1 with the sign flipped, and the display
+// top is raw axis 2. Passing a display index straight into a raw engine is
+// what sent Soften to the top of the piece; this is the only place the
+// mapping is written down.
+function rawAxisFromDisplay(dispAxis, dispSign) {
+  if (dispAxis === 0) return { rawAxisIdx: 0, rawKeepMin: dispSign < 0 };
+  if (dispAxis === 1) return { rawAxisIdx: 2, rawKeepMin: dispSign < 0 };
+  return { rawAxisIdx: 1, rawKeepMin: dispSign > 0 };
+}
+
+// The coordinate of the outer plane on one raw axis. Used to express the
+// clicked plane in raw units and to re-validate a stored pick — never to
+// decide which face the user meant.
+function rawExtremeOf(rawTris, axisIdx, keepMin) {
+  let minV = Infinity, maxV = -Infinity;
+  for (let i = axisIdx; i < rawTris.length; i += 3) {
+    if (rawTris[i] < minV) minV = rawTris[i];
+    if (rawTris[i] > maxV) maxV = rawTris[i];
+  }
+  if (!isFinite(minV) || !isFinite(maxV)) return NaN;
+  return keepMin ? minV : maxV;
+}
+
+function rawSpanOf(rawTris, axisIdx) {
+  let minV = Infinity, maxV = -Infinity;
+  for (let i = axisIdx; i < rawTris.length; i += 3) {
+    if (rawTris[i] < minV) minV = rawTris[i];
+    if (rawTris[i] > maxV) maxV = rawTris[i];
+  }
+  return (isFinite(minV) && isFinite(maxV)) ? (maxV - minV) : NaN;
+}
+
+function clearFacePick() {
+  state.facePick = null;
+  if (typeof removeFaceHelper === 'function') removeFaceHelper();
+}
+
+// Gather the clicked face's own coplanar patch, in world space, for the
+// highlight. Purely visual: nothing reads these triangles to decide a
+// plane.
+function facePatchWorldTris(mesh, nWorld, planeW) {
+  const geo = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry;
+  const pos = geo.attributes.position;
+  const kept = [];
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const tn = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i += 3) {
+    a.fromBufferAttribute(pos, i);
+    b.fromBufferAttribute(pos, i + 1);
+    c.fromBufferAttribute(pos, i + 2);
+    mesh.localToWorld(a); mesh.localToWorld(b); mesh.localToWorld(c);
+    tn.crossVectors(b.clone().sub(a), c.clone().sub(a)).normalize();
+    if (tn.dot(nWorld) < FACE_PICK_FLAT) continue;
+    const mx = (a.x + b.x + c.x) / 3, my = (a.y + b.y + c.y) / 3, mz = (a.z + b.z + c.z) / 3;
+    if (Math.abs(nWorld.x * mx + nWorld.y * my + nWorld.z * mz - planeW) > FACE_PICK_TOL) continue;
+    kept.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+  }
+  return kept;
+}
+
+// The canvas click ray already found a triangle; this turns that triangle
+// into the stored plane. Rejects — with a reason — anything it cannot
+// describe honestly, and never substitutes a different face.
+function storeFacePick(hit) {
+  clearFacePick();
+  if (!hit || !hit.face || !hit.object || !hit.object.geometry) {
+    setStatus('Click a face', true);
+    return null;
+  }
+
+  let owner = hit.object;
+  while (owner && (!owner.userData || owner.userData.sourceId == null) && owner.parent) owner = owner.parent;
+  const modelId = (owner && owner.userData) ? owner.userData.sourceId : null;
+  const model = (modelId != null && state.models)
+    ? state.models.find(function (m) { return m && m.id === modelId; })
+    : null;
+  if (!model) {
+    setStatus('Click a face on a placed piece', true);
+    return null;
+  }
+  if (!model.rawTris || model.rawAxis !== 'zup') {
+    setStatus('Click a face - this piece has no raw soup (Square-split or load it first)', true);
+    return null;
+  }
+
+  const mesh = hit.object;
+  mesh.updateMatrixWorld();
+  // hit.face.normal is already in the mesh's own geometry space, which is
+  // display space. The world copy is only for the highlight.
+  const nLocal = hit.face.normal.clone().normalize();
+  const nWorld = nLocal.clone().transformDirection(mesh.matrixWorld).normalize();
+  const pWorld = hit.point.clone();
+  const pLocal = mesh.worldToLocal(pWorld.clone());
+
+  const nAbs = [Math.abs(nLocal.x), Math.abs(nLocal.y), Math.abs(nLocal.z)];
+  let dispAxis = 0;
+  if (nAbs[1] > nAbs[dispAxis]) dispAxis = 1;
+  if (nAbs[2] > nAbs[dispAxis]) dispAxis = 2;
+  if (nAbs[dispAxis] < FACE_PICK_FLAT) {
+    setStatus('Click a flat face - that spot is on a curve', true);
+    return null;
+  }
+  const dispSign = ([nLocal.x, nLocal.y, nLocal.z][dispAxis] >= 0) ? 1 : -1;
+
+  const geo = mesh.geometry;
+  if (!geo.boundingBox) geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  const bbLo = [bb.min.x, bb.min.y, bb.min.z][dispAxis];
+  const bbHi = [bb.max.x, bb.max.y, bb.max.z][dispAxis];
+  const localPlane = dispSign > 0 ? bbHi : bbLo;
+  const localHit = [pLocal.x, pLocal.y, pLocal.z][dispAxis];
+  // The raw engines work on the outer plane of the axis they are given —
+  // they cannot cut a recessed pocket wall. If the click is not on that
+  // outer plane, say so instead of letting an engine slide the work onto
+  // the plane it can reach.
+  if (Math.abs(localHit - localPlane) > FACE_PICK_TOL) {
+    setStatus('Click an outer face - that one is recessed ' +
+              Math.abs(localHit - localPlane).toFixed(2) + 'mm behind the outside', true);
+    return null;
+  }
+
+  const mapped = rawAxisFromDisplay(dispAxis, dispSign);
+  // Cross-check the display->raw mapping against the piece itself: the two
+  // axes must measure the same piece. A mismatch means the soup and the
+  // display mesh have drifted apart, and every plane below would be
+  // fiction.
+  const dispSpan = bbHi - bbLo;
+  const rawSpan = rawSpanOf(model.rawTris, mapped.rawAxisIdx);
+  if (!isFinite(rawSpan) || Math.abs(rawSpan - dispSpan) > Math.max(FACE_PICK_TOL, dispSpan * 0.02)) {
+    setStatus('Click a face - raw soup and display mesh disagree on this piece', true);
+    return null;
+  }
+
+  const rawPlane = rawExtremeOf(model.rawTris, mapped.rawAxisIdx, mapped.rawKeepMin);
+  if (!isFinite(rawPlane)) {
+    setStatus('Click a face - piece has no geometry on that axis', true);
+    return null;
+  }
+
+  const planeW = nWorld.dot(pWorld);
+  const worldTris = facePatchWorldTris(mesh, nWorld, planeW);
+  if (worldTris.length < 9) {
+    setStatus('Click a face - no flat patch found there', true);
+    return null;
+  }
+
+  const pick = {
+    modelId: model.id,
+    // world plane, as clicked
+    worldPoint: pWorld,
+    worldNormal: nWorld,
+    worldPlane: planeW,
+    // local (display-geometry) plane
+    localPoint: pLocal,
+    localNormal: nLocal,
+    localPlane: localPlane,
+    dispAxis: dispAxis,
+    dispSign: dispSign,
+    // the same plane in the piece's own raw 'zup' space - what the engines eat
+    rawAxisIdx: mapped.rawAxisIdx,
+    rawKeepMin: mapped.rawKeepMin,
+    rawPlane: rawPlane,
+    // display-space aliases Join's existing readers expect
+    axis: dispAxis === 0 ? 'x' : (dispAxis === 1 ? 'y' : 'z'),
+    axisIdx: dispAxis,
+    sign: dispSign,
+    point: pWorld.clone(),
+    worldTris: worldTris
+  };
+  state.facePick = pick;
+  showPlanarHighlight(mesh, pick);
+  return pick;
+}
+
+// Read the stored pick for a model, re-validated against that model's live
+// raw soup. Returns null if there is no pick, it belongs to another piece,
+// or the piece has moved on under it — callers treat null as "click a
+// face" and leave the mesh alone.
+function getFacePick(model) {
+  const pick = state.facePick;
+  if (!pick || !model || pick.modelId !== model.id) return null;
+  if (!model.rawTris || model.rawAxis !== 'zup') return null;
+  const live = rawExtremeOf(model.rawTris, pick.rawAxisIdx, pick.rawKeepMin);
+  if (!isFinite(live) || Math.abs(live - pick.rawPlane) > FACE_PICK_TOL) return null;
+  // Cap moves the plane inward by its own EPS; track that so a follow-up
+  // Soften on the same pick still lands on the face the user clicked.
+  pick.rawPlane = live;
+  return pick;
+}
+
+// After a bake the display mesh is rebuilt and re-centred, so the pick's
+// world/local record is stale even though its raw plane is not — raw space
+// is uncentred, which is why the pick is stored there. Re-derive the
+// highlight (and the stale world fields) on the new mesh so the face stays
+// visibly armed for the next treatment.
+function refreshFacePickHighlight() {
+  const pick = state.facePick;
+  if (!pick) { if (typeof removeFaceHelper === 'function') removeFaceHelper(); return; }
+  const placed = state.placed
+    ? state.placed.find(function (p) { return p && p.sourceId === pick.modelId; })
+    : null;
+  const mesh = placed ? placed.mesh : null;
+  if (!mesh || !mesh.geometry) { if (typeof removeFaceHelper === 'function') removeFaceHelper(); return; }
+  mesh.updateMatrixWorld();
+  const geo = mesh.geometry;
+  if (!geo.boundingBox) geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  const lo = [bb.min.x, bb.min.y, bb.min.z][pick.dispAxis];
+  const hi = [bb.max.x, bb.max.y, bb.max.z][pick.dispAxis];
+  pick.localPlane = pick.dispSign > 0 ? hi : lo;
+  const nLocal = new THREE.Vector3(
+    pick.dispAxis === 0 ? pick.dispSign : 0,
+    pick.dispAxis === 1 ? pick.dispSign : 0,
+    pick.dispAxis === 2 ? pick.dispSign : 0
+  );
+  const pLocal = new THREE.Vector3(
+    pick.dispAxis === 0 ? pick.localPlane : (bb.min.x + bb.max.x) / 2,
+    pick.dispAxis === 1 ? pick.localPlane : (bb.min.y + bb.max.y) / 2,
+    pick.dispAxis === 2 ? pick.localPlane : (bb.min.z + bb.max.z) / 2
+  );
+  pick.localNormal = nLocal;
+  pick.localPoint = pLocal.clone();
+  const nWorld = nLocal.clone().transformDirection(mesh.matrixWorld).normalize();
+  const pWorld = mesh.localToWorld(pLocal.clone());
+  pick.worldNormal = nWorld;
+  pick.worldPoint = pWorld;
+  pick.point = pWorld.clone();
+  pick.worldPlane = nWorld.dot(pWorld);
+  const tris = facePatchWorldTris(mesh, nWorld, pick.worldPlane);
+  if (typeof removeFaceHelper === 'function') removeFaceHelper();
+  if (tris.length < 9) return;
+  pick.worldTris = tris;
+  showPlanarHighlight(mesh, pick);
 }
 
 function captureJoinFace(hit) {

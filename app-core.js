@@ -51,6 +51,8 @@ const state = {
   faceHelper: null,
   softenArmed: false,
   capArmed: false,
+  // The one stored face pick: set by storeFacePick, read by getFacePick.
+  facePick: null,
   edgeTreat: 'fillet',
   xray: false
 };
@@ -1910,15 +1912,14 @@ function onCanvasPointerDown(event) {
       const idx = obj && obj.userData ? obj.userData.placedIndex : undefined;
       if (typeof idx === 'number' && state.placed[idx]) {
         selectPlaced(idx);
-        const face = capturePlanarFace(sHits[0]);
+        // Store the clicked plane first; applySoftenOnFace reads only that.
+        // storeFacePick highlights the loop and reports its own reason if
+        // the click cannot be described as a face.
+        const face = storeFacePick(sHits[0]);
         if (face) {
-          showPlanarHighlight(sHits[0].object, face);
           state.softenArmed = false;
           applySoftenOnFace(face);
-          event.stopPropagation();
-          return;
         }
-        setStatus('Soften: click a flat end, not the top', true);
         event.stopPropagation();
         return;
       }
@@ -1933,15 +1934,11 @@ function onCanvasPointerDown(event) {
       const idx = obj && obj.userData ? obj.userData.placedIndex : undefined;
       if (typeof idx === 'number' && state.placed[idx]) {
         selectPlaced(idx);
-        const face = capturePlanarFace(cHits[0]);
+        const face = storeFacePick(cHits[0]);
         if (face) {
-          showPlanarHighlight(cHits[0].object, face);
           state.capArmed = false;
           applyCapOnFace(face);
-          event.stopPropagation();
-          return;
         }
-        setStatus('Cap: click a flat end, not the top', true);
         event.stopPropagation();
         return;
       }
