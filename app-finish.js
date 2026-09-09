@@ -2834,9 +2834,52 @@ function applySoftenOnFace(face) {
   const R = (isFinite(Rv) && Rv > 0) ? Rv : 0.5;
   const rawAxisIdx = pick.rawAxisIdx;
   const keepMinFace = pick.rawKeepMin;
+
+  // ---- the accumulation run ----
+  // A second face must not cost you the first. Every clicked face is recorded
+  // against the piece's pre-Soften raw, and one bake replays the whole list
+  // from that base. Nothing is ever stacked mesh on mesh: the base is the only
+  // input, the previous result is thrown away and rebuilt from scratch.
+  //
+  // The run belongs to one unbroken sequence of Soften clicks. `result` is the
+  // exact array the last bake put on the piece, so if anything else has since
+  // touched it - Undo, a cut, a join, a thicken - the identity check fails and
+  // the next click starts a fresh run off whatever the piece is now.
+  const run = (m.softenRun && m.rawTris === m.softenRun.result) ? m.softenRun : {
+    base: (m.rawTris.slice ? m.rawTris.slice() : new Float32Array(m.rawTris)),
+    axis: m.rawAxis,
+    offset: m.centerOffset,
+    geometry: m.geometry,
+    size: { x: m.size.x, y: m.size.y, z: m.size.z },
+    jobs: [],
+    result: null
+  };
+  const firstOfRun = !run.result;
+  // Clicking the same face again re-bakes that face at the new R and mode
+  // rather than treating it twice.
+  const jobs = run.jobs.filter(j => !(j.axisIdx === rawAxisIdx && j.keepMin === keepMinFace));
+  jobs.push({ axisIdx: rawAxisIdx, keepMin: keepMinFace, plane: pick.rawPlane,
+              R: R, mode: getEdgeTreat() });
+
+  const countOpen = (soup) => {
+    try { return openBoundaryEdges(soup).length; } catch (e) { return null; }
+  };
   let working = null;
   try {
-    working = softenSelectedFace(m.rawTris, rawAxisIdx, keepMinFace, R, getEdgeTreat(), pick.rawPlane);
+    working = run.base;
+    for (const j of jobs) {
+      working = softenSelectedFace(working, j.axisIdx, j.keepMin, j.R, j.mode, j.plane);
+    }
+    // Two treatments on faces that share an edge can fight: the second face
+    // reads its boundary loop off a wall the first one has already carved.
+    // If replaying the list opens the piece up, this face is refused and the
+    // faces already baked are kept - never a shredded rim.
+    const openBase = countOpen(run.base), openNew = countOpen(working);
+    if (openBase != null && openNew != null && openNew > openBase) {
+      throw new Error('this face fights one already softened (open edges ' +
+                      openBase + '\u2192' + openNew + ') - kept the ' +
+                      (jobs.length - 1) + ' already baked');
+    }
   } catch (e) {
     working = null;
     if (typeof removeFaceHelper === 'function') removeFaceHelper();
@@ -2849,15 +2892,19 @@ function applySoftenOnFace(face) {
     return;
   }
 
-  pushUndo({
-    type: 'softenReplace',
-    modelId: m.id,
-    prevGeometry: m.geometry.clone(),
-    prevRawTris: m.rawTris,
-    prevRawAxis: m.rawAxis,
-    prevCenterOffset: m.centerOffset,
-    prevSize: { x: m.size.x, y: m.size.y, z: m.size.z }
-  });
+  // One undo step per run, and it lands on the piece as it was before the
+  // FIRST face was softened - not on the previous face's bake.
+  if (firstOfRun) {
+    pushUndo({
+      type: 'softenReplace',
+      modelId: m.id,
+      prevGeometry: run.geometry.clone(),
+      prevRawTris: run.base,
+      prevRawAxis: run.axis,
+      prevCenterOffset: run.offset,
+      prevSize: { x: run.size.x, y: run.size.y, z: run.size.z }
+    });
+  }
 
   const newGeo = rawResultToDisplayGeometry(working);
   newGeo.computeBoundingBox();
@@ -2866,6 +2913,10 @@ function applySoftenOnFace(face) {
 
   m.geometry = newGeo;
   m.rawTris = working;
+  run.jobs = jobs;
+  run.result = working;
+  m.softenRun = run;
+  m.softenBaseRaw = run.base;   // the outline script's view of the same base
   m.rawAxis = 'zup';
   m.centerOffset = computeCenterOffsetFromRaw(working);
   m.size = { x: size2.x, y: size2.y, z: size2.z };
@@ -2911,6 +2962,9 @@ function applySoftenOnFace(face) {
   // and the loop points the face carries. No sealing claim.
   const treat = getEdgeTreat();
   const clamp = (x) => (x.radius < x.requested - 1e-6 ? ' (asked ' + x.requested.toFixed(2) + ', wall clamp)' : '');
+  // Says how many faces this piece is carrying once there is more than one,
+  // so a second click reads as "kept the first" rather than "moved it".
+  const faces = jobs.length > 1 ? ' [' + jobs.length + ' faces baked]' : '';
   const ball = (typeof rawVertexBallCorners === 'function') ? rawVertexBallCorners.lastBuild : null;
   const only = (typeof rawVertexBallOnly === 'function') ? rawVertexBallOnly.lastBuild : null;
   const perim = (typeof rawPerimeterFilletInPlace === 'function') ? rawPerimeterFilletInPlace.lastBuild : null;
@@ -2918,16 +2972,16 @@ function applySoftenOnFace(face) {
     setStatus('corners+edges setback R ' + ball.radius.toFixed(2) + clamp(ball) +
               ' (' + ball.vertices + ' corners + ' + ball.bands + ' edges, ' +
               ball.patchTris + ' blend tris, no shelf)' +
-              (ball.skipped ? ' - ' + ball.skipped + ' not square, left sharp' : ''));
+              (ball.skipped ? ' - ' + ball.skipped + ' not square, left sharp' : '') + faces);
   } else if (treat === 'corners' && only && only.vertices != null) {
     setStatus('Corners R ' + only.radius.toFixed(2) + clamp(only) +
               ' - ' + only.vertices + ' vertices, mid-edges square' +
-              (only.skipped ? ' - ' + only.skipped + ' not square, left sharp' : ''));
+              (only.skipped ? ' - ' + only.skipped + ' not square, left sharp' : '') + faces);
   } else if (perim && perim.loopPts != null) {
     setStatus('Soften ok - ' + perim.mode + ' on all ' + perim.loopPts + ' loop pts at R ' +
-              perim.radius.toFixed(2) + clamp(perim));
+              perim.radius.toFixed(2) + clamp(perim) + faces);
   } else {
-    setStatus('Soften ok');
+    setStatus('Soften ok' + faces);
   }
 }
 

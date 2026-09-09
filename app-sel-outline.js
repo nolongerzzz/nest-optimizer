@@ -47,13 +47,6 @@
     return (typeof src.slice === 'function') ? src.slice() : new Float32Array(src);
   }
 
-  function restoreSoftenBase(m) {
-    if (!m || !m.softenBaseRaw) return;
-    m.rawTris = copyRaw(m.softenBaseRaw);
-    m.rawAxis = m.softenBaseAxis || 'zup';
-    if (m.softenBaseOffset) m.centerOffset = m.softenBaseOffset;
-  }
-
   function captureSoftenBase(m) {
     if (!m || !m.rawTris || m.softenBaseRaw) return;
     m.softenBaseRaw = copyRaw(m.rawTris);
@@ -66,11 +59,12 @@
     if (window.applySoftenOnFace._reapplyWrapped) return;
     const prevApply = window.applySoftenOnFace;
     window.applySoftenOnFace = function (face) {
+      // The finish script owns the Soften base now: it records every clicked
+      // face against it and replays the whole list in one bake, so restoring
+      // here would throw the earlier faces away on the second click. It still
+      // bakes from the base and never stacks mesh on mesh.
       const m = typeof getActiveModel === 'function' ? getActiveModel() : null;
-      if (m && m.rawTris) {
-        if (m.softenBaseRaw) restoreSoftenBase(m);
-        else captureSoftenBase(m);
-      }
+      if (m && m.rawTris && !m.softenRun) captureSoftenBase(m);
       return prevApply(face);
     };
     window.applySoftenOnFace._reapplyWrapped = true;
