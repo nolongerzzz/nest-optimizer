@@ -95,11 +95,6 @@
             <p id="cut-readout" class="cut-readout">—</p>
             <button id="btn-cut" class="btn btn-cut" type="button">Split</button>
           </div>
-          <select id="cut-finish" class="hidden-quiet" aria-hidden="true">
-            <option value="square" selected>Square</option>
-            <option value="soft">Soft</option>
-            <option value="match">Match</option>
-          </select>
         </section>
         <section class="card" id="join-card">
           <h2>Join</h2>
@@ -139,26 +134,23 @@
       <section class="viewport-section">
         <div id="viewport"></div>
         <div class="viewport-overlay viewport-overlay-topbar">
-          <button id="btn-load-stl" class="vp-bar-btn" type="button" title="Load STL">＋ Load</button>
-          <button id="btn-delete-placed" class="vp-bar-btn" type="button" title="Remove from plate">⌫ Remove</button>
-          <span class="vp-bar-div"></span>
-          <button id="btn-rot-left" class="vp-bar-btn adjust-btn" disabled title="Rotate −90°">⟲ 90°</button>
-          <button id="btn-rot-right" class="vp-bar-btn adjust-btn" disabled title="Rotate +90°">90° ⟳</button>
-          <button id="btn-flip" class="vp-bar-btn adjust-btn" disabled title="Flip 180° over X">Edge</button>
-          <button id="btn-tip" class="vp-bar-btn adjust-btn" disabled title="Tip 90° around X">Tip</button>
-          <button id="btn-roll" class="vp-bar-btn adjust-btn" disabled title="Lay flat on plate">Flat</button>
-          <span class="vp-bar-div"></span>
-          <button id="btn-tilt-up" class="vp-bar-btn adjust-btn" disabled title="Pitch +15°">Pitch +</button>
-          <button id="btn-tilt-dn" class="vp-bar-btn adjust-btn" disabled title="Pitch −15°">Pitch −</button>
-          <button id="btn-bank-up" class="vp-bar-btn adjust-btn" disabled title="Bank +15°">Bank +</button>
-          <button id="btn-bank-dn" class="vp-bar-btn adjust-btn" disabled title="Bank −15°">Bank −</button>
-          <span class="vp-bar-div"></span>
-          <button id="btn-raise" class="vp-bar-btn adjust-btn" disabled title="Raise 2 mm">Raise</button>
-          <button id="btn-lower" class="vp-bar-btn adjust-btn" disabled title="Lower 2 mm">Lower</button>
-          <button id="btn-nudge-fwd" class="vp-bar-btn adjust-btn" disabled title="Nudge forward">↑</button>
-          <button id="btn-nudge-back" class="vp-bar-btn adjust-btn" disabled title="Nudge back">↓</button>
-          <button id="btn-nudge-left" class="vp-bar-btn adjust-btn" disabled title="Nudge left">←</button>
-          <button id="btn-nudge-right" class="vp-bar-btn adjust-btn" disabled title="Nudge right">→</button>
+          <button id="btn-load-stl" class="vp-bar-btn" type="button">＋ Load</button>
+          <button id="btn-delete-placed" class="vp-bar-btn" type="button">⌫ Remove</button>
+          <button id="btn-rot-left" class="vp-bar-btn adjust-btn" disabled>⟲ 90°</button>
+          <button id="btn-rot-right" class="vp-bar-btn adjust-btn" disabled>90° ⟳</button>
+          <button id="btn-flip" class="vp-bar-btn adjust-btn" disabled>Edge</button>
+          <button id="btn-tip" class="vp-bar-btn adjust-btn" disabled>Tip</button>
+          <button id="btn-roll" class="vp-bar-btn adjust-btn" disabled>Flat</button>
+          <button id="btn-tilt-up" class="vp-bar-btn adjust-btn" disabled>Pitch +</button>
+          <button id="btn-tilt-dn" class="vp-bar-btn adjust-btn" disabled>Pitch −</button>
+          <button id="btn-bank-up" class="vp-bar-btn adjust-btn" disabled>Bank +</button>
+          <button id="btn-bank-dn" class="vp-bar-btn adjust-btn" disabled>Bank −</button>
+          <button id="btn-raise" class="vp-bar-btn adjust-btn" disabled>Raise</button>
+          <button id="btn-lower" class="vp-bar-btn adjust-btn" disabled>Lower</button>
+          <button id="btn-nudge-fwd" class="vp-bar-btn adjust-btn" disabled>↑</button>
+          <button id="btn-nudge-back" class="vp-bar-btn adjust-btn" disabled>↓</button>
+          <button id="btn-nudge-left" class="vp-bar-btn adjust-btn" disabled>←</button>
+          <button id="btn-nudge-right" class="vp-bar-btn adjust-btn" disabled>→</button>
         </div>
         <div class="viewport-overlay viewport-overlay-finish">
           <details class="vp-menu vp-finish-menu">
@@ -171,47 +163,37 @@
                 <button id="btn-soften" class="btn btn-secondary" type="button">Soften</button>
               </div>
               <div class="vp-row">
-                <span class="vp-slot" aria-hidden="true"></span>
-                <select id="sel-edge-treat" class="vp-select" title="Edge treatment">
+                <select id="sel-edge-treat" class="vp-select">
                   <option value="fillet" selected>Round</option>
                   <option value="corners">Corners</option>
                   <option value="chamfer">Bevel</option>
                 </select>
               </div>
               <div class="vp-row">
-                <label class="vp-repair" title="Formware-style repair pass with Seal">
-                  <span>Repair</span>
-                  <input type="checkbox" id="chk-seal-repair">
-                </label>
+                <label class="vp-repair"><span>Repair</span><input type="checkbox" id="chk-seal-repair"></label>
                 <button id="btn-seal" class="btn btn-secondary" type="button">Seal</button>
               </div>
               <div class="vp-row">
-                <span class="vp-slot" aria-hidden="true"></span>
-                <button id="btn-solidify" class="btn btn-secondary" type="button" title="Close large openings on selected piece">Solidify</button>
+                <button id="btn-solidify" class="btn btn-secondary" type="button">Solidify</button>
               </div>
               <div class="vp-row">
-                <label class="vp-clone" title="Thicken out offset mm">
-                  <input type="number" id="inp-thicken-mm" value="1.5" min="0.4" max="8" step="0.1">
-                </label>
-                <button id="btn-thicken-out" class="btn btn-secondary" type="button" title="Grow outer skin only">Thicken out</button>
+                <input type="number" id="inp-thicken-mm" value="1.5" min="0.4" max="8" step="0.1">
+                <button id="btn-thicken-out" class="btn btn-secondary" type="button">Thicken out</button>
               </div>
               <div class="vp-row">
-                <label class="vp-clone" title="Thicken in offset mm">
-                  <input type="number" id="inp-thicken-in" value="1.5" min="0.4" max="8" step="0.1">
-                </label>
-                <button id="btn-thicken-in" class="btn btn-secondary" type="button" title="Grow walls into cavities">Thicken in</button>
+                <input type="number" id="inp-thicken-in" value="1.5" min="0.4" max="8" step="0.1">
+                <button id="btn-thicken-in" class="btn btn-secondary" type="button">Thicken in</button>
               </div>
               <div class="vp-row">
-                <span class="vp-slot" aria-hidden="true"></span>
                 <button id="btn-clear-plate" class="btn btn-secondary" type="button">Clear plate</button>
               </div>
             </div>
           </details>
         </div>
         <div class="viewport-overlay viewport-overlay-bl">
-          <button id="btn-undo" class="viewport-tool-btn" type="button" title="Undo (Ctrl+Z)" disabled aria-label="Undo">↶</button>
-          <button id="btn-frame-view" class="viewport-tool-btn" type="button" title="Reset camera to plate view">◎</button>
-          <button id="btn-xray" class="viewport-tool-btn" type="button" title="X-ray: skeleton of pieces">X</button>
+          <button id="btn-undo" class="viewport-tool-btn" type="button" disabled>↶</button>
+          <button id="btn-frame-view" class="viewport-tool-btn" type="button">◎</button>
+          <button id="btn-xray" class="viewport-tool-btn" type="button">X</button>
         </div>
         <div class="viewport-overlay viewport-overlay-br">
           <p id="adjust-status" class="status-hud status-hud-id">No model selected</p>
@@ -223,10 +205,10 @@
   <div id="ctx-menu" class="ctx-menu hidden" role="menu">
     <button type="button" id="ctx-delete" class="ctx-item ctx-danger" role="menuitem">Delete piece</button>
   </div>
-  <script src="app-core.js?v=soften5"></script>
-  <script src="app-sel-outline.js?v=soften5"></script>
-  <script src="app-cut.js?v=soften5"></script>
-  <script src="app-finish.js?v=soften5"></script>
-  <script src="app-join.js?v=soften5"></script>
+  <script src="app-core.js?v=outline1"></script>
+  <script src="app-sel-outline.js?v=outline1"></script>
+  <script src="app-cut.js?v=outline1"></script>
+  <script src="app-finish.js?v=outline1"></script>
+  <script src="app-join.js?v=outline1"></script>
 </body>
 </html>

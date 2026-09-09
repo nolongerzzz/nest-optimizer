@@ -1,18 +1,11 @@
-/* Selected-piece white edge overlay + boot guards. Loaded after app-core.js. */
+/* Selected-piece white edge overlay. After app-core.js. */
 (function () {
   const prevUpdatePlate = window.updatePlateInfo;
   window.updatePlateInfo = function () {
-    const el = document.getElementById('plate-dims');
-    const area = document.getElementById('plate-area');
-    if (!el && !area) return;
+    if (!document.getElementById('plate-dims') && !document.getElementById('plate-area')) return;
     if (typeof prevUpdatePlate === 'function') {
       try { prevUpdatePlate(); } catch (e) { console.warn('updatePlateInfo', e); }
-      return;
     }
-    const key = (state && state.plate) || 'a1mini';
-    const p = (typeof PLATES !== 'undefined' && PLATES[key]) ? PLATES[key] : { w: 180, d: 180 };
-    if (el) el.textContent = p.w + ' × ' + p.d + ' mm';
-    if (area) area.textContent = (p.w * p.d).toLocaleString() + ' mm²';
   };
 
   function stripOutline(p) {
@@ -29,14 +22,10 @@
     if (!p.mesh || !p.mesh.geometry) return;
     if (!state || state.placed[state.selectedIndex] !== p) return;
     try {
-      const edges = new THREE.EdgesGeometry(p.mesh.geometry, 20);
-      const line = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({
-        color: 0xffffff,
-        depthTest: false,
-        transparent: true,
-        opacity: 1
-      }));
-      line.renderOrder = 9;
+      const edges = new THREE.EdgesGeometry(p.mesh.geometry, 15);
+      const mat = new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 1 });
+      const line = new THREE.LineSegments(edges, mat);
+      line.renderOrder = 12;
       line.name = 'selOutline';
       line.raycast = function () {};
       p.mesh.add(line);
