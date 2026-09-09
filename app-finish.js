@@ -2911,12 +2911,297 @@ function thickenInSelectedModel() {
   thickenSelectedModel('in', isFinite(v) && v > 0 ? v : 1.5);
 }
 
+// ===================== Whole-solid wrap =====================
+//
+// One bake, every edge and corner of the piece at once. The per-face path
+// walks one face after another, so the third face of a cube arrives at an edge
+// the first two already rounded and has nothing left to build against. This
+// path never meets that problem: it throws the old surface away and rebuilds
+// the solid from its own box, so shared edges and three-edge vertices are
+// solved once for the whole solid rather than negotiated face by face.
+//
+// A box wrapped at radius R is the offset of the box shrunk by R:
+//
+//   6 flat faces  on the original planes, inset R all round
+//   12 cylinders  radius R along the shrunk box's edges
+//   8 octants     radius R at the shrunk box's corners
+//
+// tangent to one another everywhere, by construction rather than by fitting.
+// Bevel is the SAME surface with one arc sample: a quarter circle sampled once
+// is its chord, which is the 45 degree chamfer, and the spherical octant
+// collapses to the corner facet. Corners is the odd one out - vertices only,
+// every edge left a knife - so it gets its own face and octant shapes.
+//
+// Every point of every patch comes out of one generator per mode, so the seams
+// are the same numbers on both sides and cannot drift.
+
+// A plain box, or null. Every triangle has to lie flat on one of the six bbox
+// planes AND the six faces have to add up to the box's own surface area - a
+// shell with a hole fails the area test, a dented one fails the flatness test.
+function rawSolidBox(rawTris, tol) {
+  tol = tol || 1e-3;
+  if (!rawTris || rawTris.length < 9 * 12) return null;
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < rawTris.length; i += 3) {
+    for (let k = 0; k < 3; k++) {
+      if (rawTris[i+k] < lo[k]) lo[k] = rawTris[i+k];
+      if (rawTris[i+k] > hi[k]) hi[k] = rawTris[i+k];
+    }
+  }
+  const ext = [hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]];
+  if (!(ext[0] > tol && ext[1] > tol && ext[2] > tol)) return null;
+  const area = [0, 0, 0, 0, 0, 0];
+  const n = rawTris.length / 9;
+  for (let t = 0; t < n; t++) {
+    const i = t * 9;
+    let f = -1;
+    for (let g = 0; g < 6 && f < 0; g++) {
+      const ax = g >> 1, v = (g & 1) ? hi[ax] : lo[ax];
+      if (Math.abs(rawTris[i+ax] - v) < tol &&
+          Math.abs(rawTris[i+3+ax] - v) < tol &&
+          Math.abs(rawTris[i+6+ax] - v) < tol) f = g;
+    }
+    if (f < 0) return null;
+    const ux = rawTris[i+3]-rawTris[i], uy = rawTris[i+4]-rawTris[i+1], uz = rawTris[i+5]-rawTris[i+2];
+    const vx = rawTris[i+6]-rawTris[i], vy = rawTris[i+7]-rawTris[i+1], vz = rawTris[i+8]-rawTris[i+2];
+    area[f] += 0.5 * Math.hypot(uy*vz-uz*vy, uz*vx-ux*vz, ux*vy-uy*vx);
+  }
+  for (let g = 0; g < 6; g++) {
+    const ax = g >> 1, o = [0,1,2].filter(a => a !== ax);
+    const want = ext[o[0]] * ext[o[1]];
+    if (Math.abs(area[g] - want) > Math.max(tol, want * 1e-4)) return null;
+  }
+  return { lo: lo, hi: hi, ext: ext };
+}
+
+function rawWrapSolid(rawTris, requestedR, mode) {
+  const box = rawSolidBox(rawTris);
+  if (!box) throw new Error('wrap needs a plain box - this piece is not one, left unchanged');
+  const lo = box.lo, hi = box.hi, ext = box.ext;
+  const R = Math.min(requestedR, 0.45 * Math.min(ext[0], ext[1], ext[2]));
+  if (!(R > 1e-3)) throw new Error('R=' + requestedR + ' leaves nothing to wrap - left unchanged');
+
+  const NA = (mode === 'chamfer') ? 1 : 12;   // arc samples per 90 degrees
+  const IN  = [[lo[0]+R, hi[0]-R], [lo[1]+R, hi[1]-R], [lo[2]+R, hi[2]-R]];
+  const OUT = [[lo[0], hi[0]], [lo[1], hi[1]], [lo[2], hi[2]]];
+  const S = [-1, 1];
+  const mid = [(lo[0]+hi[0])/2, (lo[1]+hi[1])/2, (lo[2]+hi[2])/2];
+  const out = [];
+  let tri = 0;
+  // The wrapped box is convex, so "away from the centre" is outward everywhere.
+  const put = (A, B, C) => {
+    const ux=B[0]-A[0], uy=B[1]-A[1], uz=B[2]-A[2];
+    const vx=C[0]-A[0], vy=C[1]-A[1], vz=C[2]-A[2];
+    const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+    if (0.5 * Math.hypot(nx, ny, nz) < 1e-12) return;
+    const mx=(A[0]+B[0]+C[0])/3-mid[0], my=(A[1]+B[1]+C[1])/3-mid[1], mz=(A[2]+B[2]+C[2])/3-mid[2];
+    if (nx*mx + ny*my + nz*mz < 0) out.push(A[0],A[1],A[2], C[0],C[1],C[2], B[0],B[1],B[2]);
+    else out.push(A[0],A[1],A[2], B[0],B[1],B[2], C[0],C[1],C[2]);
+    tri++;
+  };
+  const quad = (A, B, C, D) => { put(A, B, C); put(A, C, D); };
+
+  if (mode === 'corners') {
+    // ---- vertices only: a ball at each of the 8 corners, edges left square ----
+    // Sphere centre Rc in from all three planes, radius Rc*sqrt(2), so the
+    // circle it cuts in each of the three faces comes out at exactly Rc and
+    // dies on the tangent points Rc along each edge. Same construction the
+    // per-face Corners mode uses, run on all 8 vertices at once.
+    //
+    // The patch is the piece of that sphere still inside the box: in the ball's
+    // own frame, every direction component at most c = 1/sqrt(2). Walk it in
+    // rows of constant third component w, from w = 0 (the tangent point on the
+    // third edge, a single point) up to w = c (the whole arc in the third
+    // face). On each row the two limits n1 <= c and n2 <= c give the exact
+    // angle range, so all three boundaries come out ON their face circles.
+    // Blending the corners barycentrically instead would bulge the surface
+    // OUT through the faces - a great circle between two points of a small
+    // circle leaves it - which is what the bbox catches.
+    const Rs = R * Math.SQRT2;
+    const c = 1 / Math.SQRT2;
+    const bp = (i, j, k, m, s) => {
+      const w = c * (m / NA);
+      const rho = Math.sqrt(Math.max(0, 1 - w*w));
+      const t = Math.max(-1, Math.min(1, c / (rho || 1e-12)));
+      const a0 = Math.acos(t), a1 = Math.asin(t);
+      const al = m > 0 ? a0 + (a1 - a0) * (s / m) : a0;
+      return [IN[0][i] + S[i] * Rs * rho * Math.cos(al),
+              IN[1][j] + S[j] * Rs * rho * Math.sin(al),
+              IN[2][k] + S[k] * Rs * w];
+    };
+    // the ball's arc in face `a`, the one the face has to share with it
+    const ballArc = (a, i, j, k, q) => (a === 0 ? bp(i,j,k,q,0)
+                                     : a === 1 ? bp(i,j,k,q,q)
+                                               : bp(i,j,k,NA,q));
+    // ---- the 8 balls ----
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) for (let k = 0; k < 2; k++) {
+      for (let m = 0; m < NA; m++) {
+        for (let s = 0; s <= m; s++) put(bp(i,j,k,m,s), bp(i,j,k,m+1,s), bp(i,j,k,m+1,s+1));
+        for (let s = 0; s + 1 <= m; s++) put(bp(i,j,k,m,s), bp(i,j,k,m+1,s+1), bp(i,j,k,m,s+1));
+      }
+    }
+    // ---- the 6 faces: a rectangle with a quarter disc bitten out of each corner ----
+    for (let a = 0; a < 3; a++) {
+      const o = [0,1,2].filter(x => x !== a);
+      const b = o[0], cc = o[1];
+      for (let sa = 0; sa < 2; sa++) {
+        const P = (vb, vc) => { const p = [0,0,0]; p[a] = OUT[a][sa]; p[b] = vb; p[cc] = vc; return p; };
+        quad(P(IN[b][0], IN[cc][0]), P(IN[b][1], IN[cc][0]), P(IN[b][1], IN[cc][1]), P(IN[b][0], IN[cc][1]));
+        for (let sb = 0; sb < 2; sb++)
+          quad(P(IN[b][sb], IN[cc][0]), P(OUT[b][sb], IN[cc][0]), P(OUT[b][sb], IN[cc][1]), P(IN[b][sb], IN[cc][1]));
+        for (let sc = 0; sc < 2; sc++)
+          quad(P(IN[b][0], IN[cc][sc]), P(IN[b][0], OUT[cc][sc]), P(IN[b][1], OUT[cc][sc]), P(IN[b][1], IN[cc][sc]));
+        for (let sb = 0; sb < 2; sb++) for (let sc = 0; sc < 2; sc++) {
+          const sg = [0,0,0]; sg[a] = sa; sg[b] = sb; sg[cc] = sc;
+          const cen = P(IN[b][sb], IN[cc][sc]);
+          for (let q = 0; q < NA; q++)
+            put(cen, ballArc(a, sg[0], sg[1], sg[2], q), ballArc(a, sg[0], sg[1], sg[2], q+1));
+        }
+      }
+    }
+  } else {
+    // ---- every edge and every corner: the offset of the shrunk box ----
+    // One generator for the lot. oct(i,j,k, fi, ti) walks the ball at the
+    // shrunk box's (i,j,k) corner in spherical coordinates poled on x:
+    //   fi = NA  -> the X cylinder's profile      ti = 0   -> the Z cylinder's
+    //   fi = 0   -> the face corner (the pole)    ti = NA  -> the Y cylinder's
+    // so every cylinder rail and every face corner below is read out of the
+    // same call the ball uses, and the seams are identical numbers.
+    const oct = (i, j, k, fi, ti) => {
+      const phi = (Math.PI/2) * (fi/NA), th = (Math.PI/2) * (ti/NA);
+      const sp = Math.sin(phi);
+      return [IN[0][i] + S[i] * R * Math.cos(phi),
+              IN[1][j] + S[j] * R * sp * Math.cos(th),
+              IN[2][k] + S[k] * R * sp * Math.sin(th)];
+    };
+    // 8 balls
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) for (let k = 0; k < 2; k++)
+      for (let fi = 0; fi < NA; fi++) for (let ti = 0; ti < NA; ti++)
+        quad(oct(i,j,k,fi,ti), oct(i,j,k,fi+1,ti), oct(i,j,k,fi+1,ti+1), oct(i,j,k,fi,ti+1));
+    // 12 cylinders, four along each axis
+    for (let j = 0; j < 2; j++) for (let k = 0; k < 2; k++)
+      for (let q = 0; q < NA; q++)
+        quad(oct(0,j,k,NA,q), oct(1,j,k,NA,q), oct(1,j,k,NA,q+1), oct(0,j,k,NA,q+1));
+    for (let i = 0; i < 2; i++) for (let k = 0; k < 2; k++)
+      for (let q = 0; q < NA; q++)
+        quad(oct(i,0,k,q,NA), oct(i,1,k,q,NA), oct(i,1,k,q+1,NA), oct(i,0,k,q+1,NA));
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++)
+      for (let q = 0; q < NA; q++)
+        quad(oct(i,j,0,q,0), oct(i,j,1,q,0), oct(i,j,1,q+1,0), oct(i,j,0,q+1,0));
+    // 6 faces, each one flat quad on its own original plane
+    for (let i = 0; i < 2; i++)
+      quad(oct(i,0,0,0,0), oct(i,1,0,0,0), oct(i,1,1,0,0), oct(i,0,1,0,0));
+    for (let j = 0; j < 2; j++)
+      quad(oct(0,j,0,NA,0), oct(1,j,0,NA,0), oct(1,j,1,NA,0), oct(0,j,1,NA,0));
+    for (let k = 0; k < 2; k++)
+      quad(oct(0,0,k,NA,NA), oct(1,0,k,NA,NA), oct(1,1,k,NA,NA), oct(0,1,k,NA,NA));
+  }
+
+  if (out.length < 9 * 4) throw new Error('wrap produced no geometry - left unchanged');
+  rawWrapSolid.lastBuild = {
+    mode: mode, radius: R, requested: requestedR,
+    faces: 6, edges: (mode === 'corners' ? 0 : 12), corners: 8, tris: tri
+  };
+  return new Float32Array(out);
+}
+
 // Which engine's lastBuild belongs to a mode. The replay runs several jobs, so
 // the status has to read the one the user just clicked, not whichever ran last.
 function lastBuildFor(mode) {
   if (mode === 'cornersedges') return (typeof rawVertexBallCorners === 'function') ? rawVertexBallCorners.lastBuild : null;
   if (mode === 'corners') return (typeof rawVertexBallOnly === 'function') ? rawVertexBallOnly.lastBuild : null;
   return (typeof rawPerimeterFilletInPlace === 'function') ? rawPerimeterFilletInPlace.lastBuild : null;
+}
+
+// What a wrap actually built. Names the mode, so a photo of the HUD says which
+// of the four it was, and the face / edge / corner counts so a partial can
+// never read as a wrap.
+function wrapStatus(mode, b) {
+  if (!b) return 'Soften ok';
+  const name = mode === 'chamfer' ? 'Bevel'
+             : mode === 'cornersedges' ? 'corners+edges'
+             : mode === 'corners' ? 'Corners' : 'Round';
+  const clamp = b.radius < b.requested - 1e-6
+    ? ' (asked ' + b.requested.toFixed(2) + ', clamped to the box)' : '';
+  const what = mode === 'corners'
+    ? '6 faces baked, 8 corners, edges left square'
+    : '6 faces baked, 12 edges, 8 corners';
+  return name + ' wrap R ' + b.radius.toFixed(2) + clamp + ' - ' + what +
+         ' (' + b.tris + ' tris, one bake from source)';
+}
+
+// Install a finished bake on the piece: one undo step per run landing on the
+// piece as it was before the FIRST bake, the new geometry, the placed mesh,
+// and the pick cleanup. Shared by the per-face path and the whole-solid wrap
+// so neither can drift from the other on any of that.
+function commitSoften(m, run, working, firstOfRun, jobs, statusText) {
+  // One undo step per run, and it lands on the piece as it was before the
+  // FIRST face was softened - not on the previous face's bake.
+  if (firstOfRun) {
+    pushUndo({
+      type: 'softenReplace',
+      modelId: m.id,
+      prevGeometry: run.geometry.clone(),
+      prevRawTris: run.base,
+      prevRawAxis: run.axis,
+      prevCenterOffset: run.offset,
+      prevSize: { x: run.size.x, y: run.size.y, z: run.size.z }
+    });
+  }
+
+  const newGeo = rawResultToDisplayGeometry(working);
+  newGeo.computeBoundingBox();
+  const size2 = new THREE.Vector3();
+  newGeo.boundingBox.getSize(size2);
+
+  m.geometry = newGeo;
+  m.rawTris = working;
+  run.jobs = jobs.filter(j => !j.dead);
+  run.result = working;
+  m.softenRun = run;
+  m.softenBaseRaw = run.base;   // the outline script's view of the same base
+  m.rawAxis = 'zup';
+  m.centerOffset = computeCenterOffsetFromRaw(working);
+  m.size = { x: size2.x, y: size2.y, z: size2.z };
+
+  const placedEntry = state.placed.find(p => p && p.sourceId === m.id);
+  if (placedEntry) {
+    const px = placedEntry.x, pz = placedEntry.z;
+    if (placedEntry.mesh && state.modelGroup) {
+      state.modelGroup.remove(placedEntry.mesh);
+      if (placedEntry.mesh.material) {
+        if (Array.isArray(placedEntry.mesh.material)) placedEntry.mesh.material.forEach(mt => mt.dispose());
+        else placedEntry.mesh.material.dispose();
+      }
+    }
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0x38bdf8, metalness: 0.05, roughness: 0.4,
+      emissive: 0x0a3a5c, emissiveIntensity: 0.25
+    });
+    const mesh = new THREE.Mesh(m.geometry, mat);
+    mesh.position.set(px, m.size.y / 2 + 0.3, pz);
+    mesh.userData.sourceId = m.id;
+    mesh.userData.placedIndex = state.placed.indexOf(placedEntry);
+    state.modelGroup.add(mesh);
+    placedEntry.mesh = mesh;
+    placedEntry.geometry = m.geometry;
+    placedEntry.width = m.size.x;
+    placedEntry.depth = m.size.z;
+    placedEntry.height = m.size.y;
+  } else if (state.cutterOpen) {
+    showEditPreview();
+  }
+
+  updateEditSize();
+  renderModelList();
+  updateUndoBtn();
+  // Bake done: drop the pick and its overlay. The highlight is NOT re-derived
+  // on the baked mesh — the face the user clicked is gone, and a yellow patch
+  // left on the new geometry reads as still armed when it is not. The thin
+  // cage goes on instead, and lasts until the next pick or selection.
+  clearFacePick();
+  showInspectCage(m);
+  if (statusText) setStatus(statusText);
 }
 
 // Round / Corners / Bevel. Reads the stored pick and nothing else — the
@@ -2993,6 +3278,41 @@ function applySoftenOnFace(face) {
     use.forEach(function (c) { if (c % 2) open++; if (c > 2) nm++; });
     return { open: open, nm: nm };
   };
+  // ---- whole-solid wrap ----
+  // A box does not go through the per-face path at all. Clicking any face of
+  // one wraps every face, every edge and every corner in a single bake off the
+  // raw source, so a shared edge is never met twice and a three-edge vertex is
+  // solved once instead of negotiated face by face. A new R just re-wraps from
+  // the same source - it cannot stack.
+  const asBox = rawSolidBox(run.base);
+  if (asBox) {
+    const wrapMode = getEdgeTreat();
+    let wrapped = null;
+    try {
+      wrapped = rawWrapSolid(run.base, R, wrapMode);
+    } catch (e) {
+      if (typeof removeFaceHelper === 'function') removeFaceHelper();
+      setStatus('Soften failed - ' + (e && e.message ? e.message : e), true);
+      return;
+    }
+    if (!wrapped || wrapped.length < 9) {
+      if (typeof removeFaceHelper === 'function') removeFaceHelper();
+      setStatus('Soften failed - wrap empty. Piece unchanged', true);
+      return;
+    }
+    const sB = sealScore(run.base), sW = sealScore(wrapped);
+    if (sW.open > sB.open || sW.nm > sB.nm) {
+      if (typeof removeFaceHelper === 'function') removeFaceHelper();
+      setStatus('Soften failed - wrap did not close (open ' + sB.open + '\u2192' + sW.open +
+                ', non-manifold ' + sB.nm + '\u2192' + sW.nm + '). Piece unchanged', true);
+      return;
+    }
+    commitSoften(m, run, wrapped, firstOfRun,
+                 [{ wrap: true, R: R, mode: wrapMode }],
+                 wrapStatus(wrapMode, rawWrapSolid.lastBuild));
+    return;
+  }
+
   // Replay order is not click order. The engines are not symmetric: a face loop
   // that already carries a ball's arc cannot be offset by the perimeter engine,
   // but a face next to a finished band is fine for the ball engines. Bands
@@ -3033,8 +3353,9 @@ function applySoftenOnFace(face) {
     if (s1.open > s0.open || s1.nm > s0.nm) {
       throw new Error('this face fights one already softened (open ' +
                       s0.open + '\u2192' + s1.open + ', non-manifold ' +
-                      s0.nm + '\u2192' + s1.nm + ') - kept the ' +
-                      (jobs.length - 1) + ' already baked');
+                      s0.nm + '\u2192' + s1.nm + ') - ' +
+                      (jobs.length > 1 ? 'kept the ' + (jobs.length - 1) + ' already baked'
+                                       : 'piece unchanged'));
     }
   } catch (e) {
     working = null;
@@ -3048,72 +3369,8 @@ function applySoftenOnFace(face) {
     return;
   }
 
-  // One undo step per run, and it lands on the piece as it was before the
-  // FIRST face was softened - not on the previous face's bake.
-  if (firstOfRun) {
-    pushUndo({
-      type: 'softenReplace',
-      modelId: m.id,
-      prevGeometry: run.geometry.clone(),
-      prevRawTris: run.base,
-      prevRawAxis: run.axis,
-      prevCenterOffset: run.offset,
-      prevSize: { x: run.size.x, y: run.size.y, z: run.size.z }
-    });
-  }
+  commitSoften(m, run, working, firstOfRun, jobs.filter(j => !j.dead), null);
 
-  const newGeo = rawResultToDisplayGeometry(working);
-  newGeo.computeBoundingBox();
-  const size2 = new THREE.Vector3();
-  newGeo.boundingBox.getSize(size2);
-
-  m.geometry = newGeo;
-  m.rawTris = working;
-  run.jobs = jobs.filter(j => !j.dead);
-  run.result = working;
-  m.softenRun = run;
-  m.softenBaseRaw = run.base;   // the outline script's view of the same base
-  m.rawAxis = 'zup';
-  m.centerOffset = computeCenterOffsetFromRaw(working);
-  m.size = { x: size2.x, y: size2.y, z: size2.z };
-
-  const placedEntry = state.placed.find(p => p && p.sourceId === m.id);
-  if (placedEntry) {
-    const px = placedEntry.x, pz = placedEntry.z;
-    if (placedEntry.mesh && state.modelGroup) {
-      state.modelGroup.remove(placedEntry.mesh);
-      if (placedEntry.mesh.material) {
-        if (Array.isArray(placedEntry.mesh.material)) placedEntry.mesh.material.forEach(mt => mt.dispose());
-        else placedEntry.mesh.material.dispose();
-      }
-    }
-    const mat = new THREE.MeshStandardMaterial({
-      color: 0x38bdf8, metalness: 0.05, roughness: 0.4,
-      emissive: 0x0a3a5c, emissiveIntensity: 0.25
-    });
-    const mesh = new THREE.Mesh(m.geometry, mat);
-    mesh.position.set(px, m.size.y / 2 + 0.3, pz);
-    mesh.userData.sourceId = m.id;
-    mesh.userData.placedIndex = state.placed.indexOf(placedEntry);
-    state.modelGroup.add(mesh);
-    placedEntry.mesh = mesh;
-    placedEntry.geometry = m.geometry;
-    placedEntry.width = m.size.x;
-    placedEntry.depth = m.size.z;
-    placedEntry.height = m.size.y;
-  } else if (state.cutterOpen) {
-    showEditPreview();
-  }
-
-  updateEditSize();
-  renderModelList();
-  updateUndoBtn();
-  // Bake done: drop the pick and its overlay. The highlight is NOT re-derived
-  // on the baked mesh — the face the user clicked is gone, and a yellow patch
-  // left on the new geometry reads as still armed when it is not. The thin
-  // cage goes on instead, and lasts until the next pick or selection.
-  clearFacePick();
-  showInspectCage(m);
   // What actually got built: corners that took R, out of the corners found,
   // and the loop points the face carries. No sealing claim.
   const treat = getEdgeTreat();
