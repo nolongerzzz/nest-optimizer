@@ -1470,7 +1470,10 @@ function applySoftenOnFace(face) {
   updateEditSize();
   renderModelList();
   updateUndoBtn();
-  refreshFacePickHighlight();
+  // Bake done: drop the pick and its overlay. The highlight is NOT re-derived
+  // on the baked mesh — the face the user clicked is gone, and a yellow patch
+  // left on the new geometry reads as still armed when it is not.
+  clearFacePick();
   // What actually got built: corners that took R, out of the corners found,
   // and the loop points the face carries. No sealing claim.
   const treat = getEdgeTreat();
@@ -1594,7 +1597,8 @@ function applyCapOnFace(face) {
   updateEditSize();
   renderModelList();
   updateUndoBtn();
-  refreshFacePickHighlight();
+  // Bake done: drop the pick and its overlay, same as Soften.
+  clearFacePick();
   setStatus('Cap ok');
 }
 
@@ -1698,7 +1702,7 @@ function capSelectedOpenFaces() {
   updateEditSize();
   renderModelList();
   updateUndoBtn();
-  if (typeof removeFaceHelper === 'function') removeFaceHelper();
+  clearFacePick();
   setStatus('Cap ok');
 }
 
@@ -2780,11 +2784,10 @@ function getFacePick(model) {
   return pick;
 }
 
-// After a bake the display mesh is rebuilt and re-centred, so the pick's
-// world/local record is stale even though its raw plane is not — raw space
-// is uncentred, which is why the pick is stored there. Re-derive the
-// highlight (and the stale world fields) on the new mesh so the face stays
-// visibly armed for the next treatment.
+// Re-derive the highlight and the pick's stale world/local fields against a
+// rebuilt display mesh. NOT called after a bake any more: a bake ends with
+// clearFacePick(), so the overlay goes and the face has to be clicked again.
+// Kept for a caller that rebuilds the mesh without consuming the pick.
 function refreshFacePickHighlight() {
   const pick = state.facePick;
   if (!pick) { if (typeof removeFaceHelper === 'function') removeFaceHelper(); return; }
