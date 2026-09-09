@@ -1,4 +1,4 @@
-/* Selected-piece white edge overlay. After app-core.js. */
+/* Selected-piece white edge overlay + Soften reapply-from-source. After app-core.js. */
 (function () {
   const prevUpdatePlate = window.updatePlateInfo;
   window.updatePlateInfo = function () {
@@ -41,4 +41,42 @@
     const p = state && state.placed && state.placed[idx];
     if (p) window.refreshOutline(p);
   };
+
+  function copyRaw(src) {
+    if (!src) return null;
+    return (typeof src.slice === 'function') ? src.slice() : new Float32Array(src);
+  }
+
+  function restoreSoftenBase(m) {
+    if (!m || !m.softenBaseRaw) return;
+    m.rawTris = copyRaw(m.softenBaseRaw);
+    m.rawAxis = m.softenBaseAxis || 'zup';
+    if (m.softenBaseOffset) m.centerOffset = m.softenBaseOffset;
+  }
+
+  function captureSoftenBase(m) {
+    if (!m || !m.rawTris || m.softenBaseRaw) return;
+    m.softenBaseRaw = copyRaw(m.rawTris);
+    m.softenBaseAxis = m.rawAxis || 'zup';
+    m.softenBaseOffset = m.centerOffset;
+  }
+
+  function wrapApply() {
+    if (typeof window.applySoftenOnFace !== 'function') return;
+    if (window.applySoftenOnFace._reapplyWrapped) return;
+    const prevApply = window.applySoftenOnFace;
+    window.applySoftenOnFace = function (face) {
+      const m = typeof getActiveModel === 'function' ? getActiveModel() : null;
+      if (m && m.rawTris) {
+        if (m.softenBaseRaw) restoreSoftenBase(m);
+        else captureSoftenBase(m);
+      }
+      return prevApply(face);
+    };
+    window.applySoftenOnFace._reapplyWrapped = true;
+  }
+
+  wrapApply();
+  document.addEventListener('DOMContentLoaded', wrapApply);
+  setTimeout(wrapApply, 0);
 })();
