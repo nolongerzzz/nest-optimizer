@@ -27,31 +27,55 @@ A bare STL drop, no text, is the latest live export for the ticket below.
 - A decision is needed (scope, APPLY a stash, new ticket) -> comment the question
   on PR #4, then `I need your attention`.
 
-## Standing ticket — Soften Corners open edges — CLOSED, verified
+## Standing ticket — Soften Corners is a FAIL, REOPENED
 
-Fixed in `caf9b0c`. `rawEdgeRoundInPlace`'s wall-rewrite block now splits a wall
-triangle's cap-plane edge at every loop vertex along it (`capEdgeChain`), pulls
-each resulting vertex by its own local R, and fans from the off-cap apex.
-`(A, B, C)` is a rotation of the original winding, so orientation is preserved.
+The earlier "CLOSED, verified" verdict was wrong. Watertightness was green, but
+the shape is not corners. Confirmed by measurement at `7e97c5d`, box-20mm,
+Square split, Corners:
 
-Verified at `7b47856`, `--odd --degen`:
+```
+R=0.5  cap tris on plane 16   star vertex (0.0000,0.0000) used by 16 of 16
+R=2.0  cap tris on plane 16   star vertex (0.0000,0.0000) used by 16 of 16
+R=3.0  cap tris on plane 16   star vertex (0.0000,0.0000) used by 16 of 16
+```
 
-| file | tris | open | NM | degen |
-| --- | --- | --- | --- | --- |
-| `fixtures/box-20mm.stl` | 12 | 0 | 0 | 0 |
-| `fixtures/out-box-corners-r05.stl` | 78 -> 86 | 24 -> 0 | 0 | 0 |
-| `fixtures/out-box-round-r05.stl` | 118 | 0 | 0 | 0 |
-| `fixtures/out-box-bevel-r05.stl` | 38 | 0 | 0 | 0 |
-| live export `soften_test_01_cubeB112.stl` | 86 | 0 | 0 | 0 |
+Every cap triangle shares one interior vertex: the whole clicked face is
+discarded and recapped as a centroid star. `app-cut.js:2316` — "cap-plane
+triangles are dropped" — then rebuilt by the centroid fan at `app-cut.js:2335`.
+That is a face rebuild, not a local corner.
 
-Lid on the cut plane in all modes. Corners pulls 0.5 at the four corners and 0
-at every wall midpoint; Round and Bevel pull 0.5 everywhere. Round and Bevel
-came out as the same triangle set as before the patch, winding preserved.
+Why the earlier passes missed it: the probes only measured lid depth, outline
+extent and edge counts. None of them looked at cap TRIANGULATION, and all ran
+at R=0.5 where the corner region is 1mm of a 20mm edge. Any future Corners
+probe must assert (a) no shared apex across cap triangles, and (b) behaviour at
+R=2.0 and R=3.0, not just 0.5.
 
-Invariants still held, re-checked each pass:
-- cap-face write is `from3(p0, capPlane), from3(p1, capPlane), from3(capApex, capPlane)`
-- 0 occurrences of `marginPlane` / `rawClipTrianglesAtPlane` / `Rmax` in the engine
-- Square cut, Join, Seat, Subtract, Extract, Thicken, Solidify, pack, UI untouched
+### Required result
+- Long edges of the clicked face stay on the original cut plane.
+- Only corners get radius R, clamped to ~0.45 x local wall.
+- Face interior not moved, not re-triangulated as a star, not clipped to
+  plane +/- R.
+- Square split stays raw. Undo unchanged. Fail-safe leaves the piece untouched.
+
+### Forbidden
+- `marginPlane = plane +/- R` then re-clip.
+- Replacing the whole cap with a fan.
+- Calling a full-loop offset "Corners".
+- Changing Square cut, Join, Subtract, Thicken, pack.
+
+### Test
+20mm cube, Square split, Corners, R=2.0, one end.
+PASS: four rounded corners, four straight edges still on the cut plane, no
+centre star on that face.
+
+### BLOCKED — needs an answer on PR #4 before code
+A second-plane clip is NOT needed; local corners are buildable. The open
+question is the corner SOLID, and the two readings give different meshes:
+(a) in-plane only — face stays wholly on the plane, corner material is a
+vertical wedge running the piece length (rounds the box's vertical edge);
+(b) axial rollover local to each corner — straight spans flat on the plane,
+corners roll back by R.
+Do not write code until this is answered.
 
 ## Open, not authorised — need an explicit APPLY
 
