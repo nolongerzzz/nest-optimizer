@@ -669,6 +669,42 @@ function rawVertexBallOnly(rawTris, axisIdx, keepMin, requestedR, opts) {
 
   // ---- one ball per usable vertex ----
   const depth = (r) => capPlane + intoBody * r;
+  // A wall is only a wall if the mesh actually has one. Once another face has
+  // been softened, one of this face's boundary edges can back onto that face's
+  // fillet band instead of a flat plane - there is nothing there to cut, and
+  // cutting anyway punches a hole nothing closes. Corners whose walls are not
+  // both really there are skipped and left sharp, same as a non-square one.
+  const wallPlanes = new Map();
+  for (const t of wallTriIdx) {
+    const v0 = vert(t,0), v1 = vert(t,1), v2 = vert(t,2);
+    const ax = v1[0]-v0[0], ay = v1[1]-v0[1], az = v1[2]-v0[2];
+    const bx = v2[0]-v0[0], by = v2[1]-v0[1], bz = v2[2]-v0[2];
+    let nx = ay*bz-az*by, ny = az*bx-ax*bz, nz = ax*by-ay*bx;
+    const L = Math.hypot(nx, ny, nz);
+    if (!(L > 1e-12)) continue;
+    nx /= L; ny /= L; nz /= L;
+    const d = nx*v0[0] + ny*v0[1] + nz*v0[2];
+    const k = Math.round(nx*1e3)+','+Math.round(ny*1e3)+','+Math.round(nz*1e3)+'|'+Math.round(d*1e3);
+    if (!wallPlanes.has(k)) wallPlanes.set(k, []);
+    wallPlanes.get(k).push([v0, v1, v2]);
+  }
+  const wallThere = (out2d, V2at, reach) => {
+    const n3 = [0,0,0]; n3[other[0]] = out2d[0]; n3[other[1]] = out2d[1];
+    const V3at = from3(V2at, capPlane);
+    const d = n3[0]*V3at[0] + n3[1]*V3at[1] + n3[2]*V3at[2];
+    for (const sgn of [1, -1]) {
+      const k = Math.round(sgn*n3[0]*1e3)+','+Math.round(sgn*n3[1]*1e3)+','+Math.round(sgn*n3[2]*1e3)+'|'+Math.round(sgn*d*1e3);
+      const tris = wallPlanes.get(k);
+      if (!tris) continue;
+      for (const tr of tris) {
+        for (const p of tr) {
+          if (Math.hypot(p[0]-V3at[0], p[1]-V3at[1], p[2]-V3at[2]) <= reach) return true;
+        }
+      }
+    }
+    return false;
+  };
+
   const balls = [];
   let skipped = 0;
   for (let t = 0; t < cornerCount; t++) {
@@ -694,6 +730,8 @@ function rawVertexBallOnly(rawTris, axisIdx, keepMin, requestedR, opts) {
     const V2 = poly[ai];
     const n1 = [-u1[1]*wind*-1, u1[0]*wind*-1];   // inward normal of the u1 edge
     const n2 = [-u2[1]*wind, u2[0]*wind];         // inward normal of the u2 edge
+    if (!wallThere([-n1[0], -n1[1]], V2, Rc * 4) ||
+        !wallThere([-n2[0], -n2[1]], V2, Rc * 4)) { skipped++; continue; }
     const M = [V2[0] + (n1[0]+n2[0])*Rc, V2[1] + (n1[1]+n2[1])*Rc];
     balls.push({
       ai: ai, Rc: Rc, V2: V2, u1: u1, u2: u2, n1: n1, n2: n2, M: M,
@@ -701,7 +739,14 @@ function rawVertexBallOnly(rawTris, axisIdx, keepMin, requestedR, opts) {
       T2: [V2[0] + u2[0]*Rc, V2[1] + u2[1]*Rc]
     });
   }
-  if (!balls.length) throw new Error('no square vertex takes R=' + requestedR + ' on this face');
+  if (!balls.length) {
+    // Distinguish "cannot" from "already done": on a repeat pass over a piece
+    // whose faces have been softened already, every corner of this face can be
+    // rounded by an earlier face's bake. The caller decides which it is.
+    const e = new Error('no square vertex takes R=' + requestedR + ' on this face');
+    e.softenSkippable = true;
+    throw e;
+  }
 
   // ---- shared geometry per vertex ----
   const axisIn = [0,0,0]; axisIn[axisIdx] = intoBody;
@@ -1341,6 +1386,42 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
 
   // ---- one ball per usable vertex ----
   const depth = (r) => capPlane + intoBody * r;
+  // A wall is only a wall if the mesh actually has one. Once another face has
+  // been softened, one of this face's boundary edges can back onto that face's
+  // fillet band instead of a flat plane - there is nothing there to cut, and
+  // cutting anyway punches a hole nothing closes. Corners whose walls are not
+  // both really there are skipped and left sharp, same as a non-square one.
+  const wallPlanes = new Map();
+  for (const t of wallTriIdx) {
+    const v0 = vert(t,0), v1 = vert(t,1), v2 = vert(t,2);
+    const ax = v1[0]-v0[0], ay = v1[1]-v0[1], az = v1[2]-v0[2];
+    const bx = v2[0]-v0[0], by = v2[1]-v0[1], bz = v2[2]-v0[2];
+    let nx = ay*bz-az*by, ny = az*bx-ax*bz, nz = ax*by-ay*bx;
+    const L = Math.hypot(nx, ny, nz);
+    if (!(L > 1e-12)) continue;
+    nx /= L; ny /= L; nz /= L;
+    const d = nx*v0[0] + ny*v0[1] + nz*v0[2];
+    const k = Math.round(nx*1e3)+','+Math.round(ny*1e3)+','+Math.round(nz*1e3)+'|'+Math.round(d*1e3);
+    if (!wallPlanes.has(k)) wallPlanes.set(k, []);
+    wallPlanes.get(k).push([v0, v1, v2]);
+  }
+  const wallThere = (out2d, V2at, reach) => {
+    const n3 = [0,0,0]; n3[other[0]] = out2d[0]; n3[other[1]] = out2d[1];
+    const V3at = from3(V2at, capPlane);
+    const d = n3[0]*V3at[0] + n3[1]*V3at[1] + n3[2]*V3at[2];
+    for (const sgn of [1, -1]) {
+      const k = Math.round(sgn*n3[0]*1e3)+','+Math.round(sgn*n3[1]*1e3)+','+Math.round(sgn*n3[2]*1e3)+'|'+Math.round(sgn*d*1e3);
+      const tris = wallPlanes.get(k);
+      if (!tris) continue;
+      for (const tr of tris) {
+        for (const p of tr) {
+          if (Math.hypot(p[0]-V3at[0], p[1]-V3at[1], p[2]-V3at[2]) <= reach) return true;
+        }
+      }
+    }
+    return false;
+  };
+
   const balls = [];
   let skipped = 0;
   for (let t = 0; t < cornerCount; t++) {
@@ -1366,6 +1447,8 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
     const V2 = poly[ai];
     const n1 = [-u1[1]*wind*-1, u1[0]*wind*-1];   // inward normal of the u1 edge
     const n2 = [-u2[1]*wind, u2[0]*wind];         // inward normal of the u2 edge
+    if (!wallThere([-n1[0], -n1[1]], V2, Rc * 4) ||
+        !wallThere([-n2[0], -n2[1]], V2, Rc * 4)) { skipped++; continue; }
     const M = [V2[0] + (n1[0]+n2[0])*Rc, V2[1] + (n1[1]+n2[1])*Rc];
     balls.push({
       ai: ai, Rc: Rc, V2: V2, u1: u1, u2: u2, n1: n1, n2: n2, M: M,
@@ -1373,7 +1456,21 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
       T2: [V2[0] + u2[0]*Rc, V2[1] + u2[1]*Rc]
     });
   }
-  if (!balls.length) throw new Error('no square vertex takes R=' + requestedR + ' on this face');
+  // All four corners, or none. Every band ends on a corner blend at each end,
+  // and every blend is bounded by its two bands, so on a closed loop the
+  // treated set is either the whole loop or empty - a partial one would inset
+  // the face along edges that carry no band and leave the gap open. Refuse
+  // rather than ship that.
+  if (skipped) {
+    // Some corners free and some not: a real refusal, never a quiet no-op.
+    throw new Error('Corners+edges needs all ' + cornerCount + ' corners of this face free - ' +
+                    skipped + ' back onto something already softened');
+  }
+  if (!balls.length) {
+    const e = new Error('no square vertex takes R=' + requestedR + ' on this face');
+    e.softenSkippable = true;
+    throw e;
+  }
 
   // ---- one radius for the whole face ----
   // Every seam below is shared point for point between the corner blend and
@@ -1567,18 +1664,22 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
   const byApex = new Map();
   for (const b of balls) byApex.set(b.ai, b);
   const edgeJobs = [];
-  for (const b of balls) {
-    const ai = b.ai;
-    // walk forward along the loop to the next treated apex
-    let j = ai, guard = 0, run = 0;
-    while (guard++ < nL) {
+  // One band per loop EDGE, and only where both of that edge's own corners took
+  // a blend. Walking on to the next treated apex instead would bridge a skipped
+  // corner and lay the band along a straight line that leaves the piece.
+  for (let t = 0; t < cornerCount; t++) {
+    const ai = apex[t], aj = apex[(t + 1) % cornerCount];
+    if (ai === aj) continue;
+    const b = byApex.get(ai), b2 = byApex.get(aj);
+    if (!b || !b2) continue;
+    let run = 0;
+    for (let j = ai, guard = 0; guard < nL; guard++) {
       const k = (j + 1) % nL;
       run += Math.hypot(poly[k][0]-poly[j][0], poly[k][1]-poly[j][1]);
       j = k;
-      if (byApex.has(j)) break;
+      if (j === aj) break;
     }
-    const b2 = byApex.get(j);
-    if (!b2 || j === ai) continue;
+    if (!(run > 1e-9)) continue;
     edgeJobs.push({ a: b, b2: b2, dir: b.u2, nrm: b.n2, len: run });
   }
   // The band no longer ends on a flat station. Its two end columns ARE the
@@ -2810,6 +2911,14 @@ function thickenInSelectedModel() {
   thickenSelectedModel('in', isFinite(v) && v > 0 ? v : 1.5);
 }
 
+// Which engine's lastBuild belongs to a mode. The replay runs several jobs, so
+// the status has to read the one the user just clicked, not whichever ran last.
+function lastBuildFor(mode) {
+  if (mode === 'cornersedges') return (typeof rawVertexBallCorners === 'function') ? rawVertexBallCorners.lastBuild : null;
+  if (mode === 'corners') return (typeof rawVertexBallOnly === 'function') ? rawVertexBallOnly.lastBuild : null;
+  return (typeof rawPerimeterFilletInPlace === 'function') ? rawPerimeterFilletInPlace.lastBuild : null;
+}
+
 // Round / Corners / Bevel. Reads the stored pick and nothing else — the
 // `face` argument is ignored and kept only so the app-sel-outline reapply
 // wrapper keeps working. No stored pick means no bake.
@@ -2861,23 +2970,70 @@ function applySoftenOnFace(face) {
   jobs.push({ axisIdx: rawAxisIdx, keepMin: keepMinFace, plane: pick.rawPlane,
               R: R, mode: getEdgeTreat() });
 
-  const countOpen = (soup) => {
-    try { return openBoundaryEdges(soup).length; } catch (e) { return null; }
+  // How well sealed a soup is: unmatched edges AND edges used more than twice.
+  // openBoundaryEdges alone is not enough here - it welds at 1e-3, only reports
+  // count exactly 1, and counts the zero-length edge a sliver triangle leaves
+  // as a hole. Those slivers are harmless and some are emitted on purpose, so
+  // they are skipped; a face that clashes with an already softened one shows up
+  // as extra open edges, extra non-manifold ones, or both.
+  const sealScore = (soup) => {
+    const q = 1e4;
+    const vk = (i) => Math.round(soup[i]*q)+'|'+Math.round(soup[i+1]*q)+'|'+Math.round(soup[i+2]*q);
+    const use = new Map();
+    for (let t = 0; t + 8 < soup.length; t += 9) {
+      const K = [vk(t), vk(t+3), vk(t+6)];
+      for (let e = 0; e < 3; e++) {
+        const a = K[e], b = K[(e+1)%3];
+        if (a === b) continue;
+        const k = a < b ? a+'~'+b : b+'~'+a;
+        use.set(k, (use.get(k) || 0) + 1);
+      }
+    }
+    let open = 0, nm = 0;
+    use.forEach(function (c) { if (c % 2) open++; if (c > 2) nm++; });
+    return { open: open, nm: nm };
   };
+  // Replay order is not click order. The engines are not symmetric: a face loop
+  // that already carries a ball's arc cannot be offset by the perimeter engine,
+  // but a face next to a finished band is fine for the ball engines. Bands
+  // first, then Round and Bevel, then Corners. Same set of treatments either
+  // way - replaying from the base means the order is ours to choose.
+  const rank = (mode) => (mode === 'cornersedges' ? 0 : (mode === 'corners' ? 2 : 1));
+  const order = jobs.map((j, i) => ({ j: j, i: i }))
+                    .sort((a, b) => (rank(a.j.mode) - rank(b.j.mode)) || (a.i - b.i))
+                    .map(x => x.j);
+  const newJob = jobs[jobs.length - 1];
+  let nothingToAdd = null;
   let working = null;
   try {
     working = run.base;
-    for (const j of jobs) {
-      working = softenSelectedFace(working, j.axisIdx, j.keepMin, j.R, j.mode, j.plane);
+    for (const j of order) {
+      try {
+        working = softenSelectedFace(working, j.axisIdx, j.keepMin, j.R, j.mode, j.plane);
+        j.build = lastBuildFor(j.mode);
+      } catch (err) {
+        // "Every corner is already rounded" is a no-op, not a failure - but
+        // only when some other face is doing the work. On its own it is the
+        // honest refusal it has always been.
+        if (err && err.softenSkippable && jobs.length > 1) {
+          if (j === newJob) nothingToAdd = (err.message || 'nothing left to round');
+          j.dead = true;
+          continue;
+        }
+        throw err;
+      }
     }
+    if (working === run.base) throw new Error('nothing to soften on this piece');
     // Two treatments on faces that share an edge can fight: the second face
     // reads its boundary loop off a wall the first one has already carved.
-    // If replaying the list opens the piece up, this face is refused and the
-    // faces already baked are kept - never a shredded rim.
-    const openBase = countOpen(run.base), openNew = countOpen(working);
-    if (openBase != null && openNew != null && openNew > openBase) {
-      throw new Error('this face fights one already softened (open edges ' +
-                      openBase + '\u2192' + openNew + ') - kept the ' +
+    // If replaying the list leaves the piece worse sealed than it started,
+    // this face is refused and the faces already baked are kept - never a
+    // shredded rim.
+    const s0 = sealScore(run.base), s1 = sealScore(working);
+    if (s1.open > s0.open || s1.nm > s0.nm) {
+      throw new Error('this face fights one already softened (open ' +
+                      s0.open + '\u2192' + s1.open + ', non-manifold ' +
+                      s0.nm + '\u2192' + s1.nm + ') - kept the ' +
                       (jobs.length - 1) + ' already baked');
     }
   } catch (e) {
@@ -2913,7 +3069,7 @@ function applySoftenOnFace(face) {
 
   m.geometry = newGeo;
   m.rawTris = working;
-  run.jobs = jobs;
+  run.jobs = jobs.filter(j => !j.dead);
   run.result = working;
   m.softenRun = run;
   m.softenBaseRaw = run.base;   // the outline script's view of the same base
@@ -2964,10 +3120,15 @@ function applySoftenOnFace(face) {
   const clamp = (x) => (x.radius < x.requested - 1e-6 ? ' (asked ' + x.requested.toFixed(2) + ', wall clamp)' : '');
   // Says how many faces this piece is carrying once there is more than one,
   // so a second click reads as "kept the first" rather than "moved it".
-  const faces = jobs.length > 1 ? ' [' + jobs.length + ' faces baked]' : '';
-  const ball = (typeof rawVertexBallCorners === 'function') ? rawVertexBallCorners.lastBuild : null;
-  const only = (typeof rawVertexBallOnly === 'function') ? rawVertexBallOnly.lastBuild : null;
-  const perim = (typeof rawPerimeterFilletInPlace === 'function') ? rawPerimeterFilletInPlace.lastBuild : null;
+  const faces = run.jobs.length > 1 ? ' [' + run.jobs.length + ' faces baked]' : '';
+  const built = newJob.build || null;
+  const ball = treat === 'cornersedges' ? built : null;
+  const only = treat === 'corners' ? built : null;
+  const perim = (treat === 'fillet' || treat === 'chamfer') ? built : null;
+  if (nothingToAdd) {
+    setStatus('Soften ok - nothing to add on this face (' + nothingToAdd + ')' + faces);
+    return;
+  }
   if (treat === 'cornersedges' && ball && ball.vertices != null) {
     setStatus('corners+edges setback R ' + ball.radius.toFixed(2) + clamp(ball) +
               ' (' + ball.vertices + ' corners + ' + ball.bands + ' edges, ' +
