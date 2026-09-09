@@ -30,7 +30,7 @@
         if (typeof exportActiveModel === 'function') exportActiveModel();
       });
     }
-    if (typeof setStatus === 'function') setStatus('HUD pick1');
+    if (typeof setStatus === 'function') setStatus('HUD fillet1');
   }
 
   if (document.readyState === 'loading') {
