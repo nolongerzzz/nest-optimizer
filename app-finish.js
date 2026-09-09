@@ -718,37 +718,50 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
   if (!balls.length) throw new Error('no square vertex takes R=' + requestedR + ' on this face');
 
   // ---- shared geometry per vertex ----
+  //
+  // The corner is the offset of the L-shaped spine the two edge cylinders
+  // share. Each face-edge cylinder has radius Rc and its axis sits Rc in from
+  // the face and Rc in from its wall; at the vertex those two axes meet at C.
+  // The blend is therefore the sphere of the SAME radius Rc centred on C: it
+  // meets each cylinder on that cylinder's own great circle at C's station,
+  // so the join is tangent and there is no crease.
+  //
+  // The sqrt(2)*Rc ball corners6 used is NOT tangent here. With the cylinders
+  // present it removes nothing they have not already removed - it is swallowed
+  // whole - so keeping it would ship the crease. Radius Rc is the only sphere
+  // that touches both cylinders.
+  //
+  // Rc is measured from the face and from each wall, so the sphere is tangent
+  // to all three planes: it touches the face at the mitre corner M of the
+  // inset ring and each wall at one point on that wall's trimmed edge.
   const axisIn = [0,0,0]; axisIn[axisIdx] = intoBody;
   const lift = (uv) => from3(uv, capPlane);
-  const N = ARCN;
-  const arcPts = (cx, cy, ax, ay, bx, by) => {
-    const a0 = Math.atan2(ay-cy, ax-cx);
-    let d = Math.atan2(by-cy, bx-cx) - a0;
-    while (d > Math.PI) d -= 2*Math.PI;
-    while (d < -Math.PI) d += 2*Math.PI;
-    const r = Math.hypot(ax-cx, ay-cy);
-    const out = [];
-    for (let q = 0; q <= N; q++) {
-      const an = a0 + d*(q/N);
-      out.push([cx + r*Math.cos(an), cy + r*Math.sin(an)]);
-    }
-    return out;
+  const PROFN = 10;                       // samples across a fillet profile
+  // One profile generator for both the bands and the corner, so a band's end
+  // cross-section and the patch edge it meets are the same numbers.
+  const profilePt = (base2, nrm2, R, phi) => {
+    const inset = R * (1 - Math.cos(phi)), dep = R * (1 - Math.sin(phi));
+    return from3([base2[0] + nrm2[0]*inset, base2[1] + nrm2[1]*inset], depth(dep));
+  };
+  const profileRow = (base2, nrm2, R) => {
+    const row = [];
+    for (let k = 0; k <= PROFN; k++) row.push(profilePt(base2, nrm2, R, (Math.PI/2) * (k/PROFN)));
+    return row;   // [0] on the wall, [PROFN] on the face
   };
   for (const b of balls) {
     const Rc = b.Rc;
     b.C3 = from3(b.M, depth(Rc));
-    b.Rs = Rc * Math.SQRT2;
+    b.Rs = Rc;
     b.V3 = lift(b.V2);
-    b.T1_3 = lift(b.T1);
-    b.T2_3 = lift(b.T2);
+    b.M3 = lift(b.M);
+    // Rc down the depth edge from the vertex: where the two walls' trimmed
+    // edges and the corner shelf all meet. The sphere stops short of it, and
+    // that gap is the shelf, not a ledge in the ball.
     b.P3_3 = [b.V3[0] + axisIn[0]*Rc, b.V3[1] + axisIn[1]*Rc, b.V3[2] + axisIn[2]*Rc];
-    // face arc, in the face's own 2D
-    b.capArc2 = arcPts(b.M[0], b.M[1], b.T1[0], b.T1[1], b.T2[0], b.T2[1]);
-    b.capArc3 = b.capArc2.map(lift);
     // the two wall planes, each as (origin, u, v) with v = into the body
     b.walls = [
-      { u2: b.u1, out2: [-b.n1[0], -b.n1[1]], from: b.T1_3 },
-      { u2: b.u2, out2: [-b.n2[0], -b.n2[1]], from: b.T2_3 }
+      { u2: b.u1, out2: [-b.n1[0], -b.n1[1]] },
+      { u2: b.u2, out2: [-b.n2[0], -b.n2[1]] }
     ];
     for (const w of b.walls) {
       w.u3 = [0,0,0]; w.u3[other[0]] = w.u2[0]; w.u3[other[1]] = w.u2[1];
@@ -762,12 +775,28 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
       w.to3 = (uv) => [w.org[0] + w.u3[0]*uv[0] + axisIn[0]*uv[1],
                        w.org[1] + w.u3[1]*uv[0] + axisIn[1]*uv[1],
                        w.org[2] + w.u3[2]*uv[0] + axisIn[2]*uv[1]];
-      w.M2 = [Rc, Rc];
-      w.arc2 = arcPts(Rc, Rc, Rc, 0, 0, Rc);   // tangent on the face -> tangent down the wall edge
-      w.arc3 = w.arc2.map(w.to3);
       w.planeD = w.n3[0]*w.org[0] + w.n3[1]*w.org[1] + w.n3[2]*w.org[2];
+      w.tan2 = [Rc, Rc];                  // the single point the sphere touches
+      w.tan3 = w.to3(w.tan2);
     }
+    // the two station profiles: each IS its band's end cross-section and the
+    // circle that band and the sphere have in common
+    b.chainA = profileRow([b.V2[0] + b.u1[0]*Rc, b.V2[1] + b.u1[1]*Rc], b.n1, Rc);
+    b.chainB = profileRow([b.V2[0] + b.u2[0]*Rc, b.V2[1] + b.u2[1]*Rc], b.n2, Rc);
   }
+  // great-circle step about a ball centre, so every patch row stays on the ball
+  const slerp = (C3, Rs, P, Q, t) => {
+    const a = [(P[0]-C3[0])/Rs, (P[1]-C3[1])/Rs, (P[2]-C3[2])/Rs];
+    const b = [(Q[0]-C3[0])/Rs, (Q[1]-C3[1])/Rs, (Q[2]-C3[2])/Rs];
+    let d = a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+    d = Math.max(-1, Math.min(1, d));
+    const om = Math.acos(d);
+    if (om < 1e-9) return [P[0], P[1], P[2]];
+    const s = Math.sin(om), w0 = Math.sin((1-t)*om)/s, w1 = Math.sin(t*om)/s;
+    return [C3[0] + Rs*(a[0]*w0 + b[0]*w1),
+            C3[1] + Rs*(a[1]*w0 + b[1]*w1),
+            C3[2] + Rs*(a[2]*w0 + b[2]*w1)];
+  };
 
   // ---- trim one plane's triangles by the corner sectors that bite it ----
   const polyArea = (p) => {
@@ -795,35 +824,6 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
     }
     while (cl.length > 1 && Math.hypot(cl[0][0]-cl[cl.length-1][0], cl[0][1]-cl[cl.length-1][1]) < 1e-9) cl.pop();
     return cl.length >= 3 ? cl : [];
-  };
-  // keep = outside the sector, or inside it and inside the arc. Every slice
-  // convex, so a triangle can never explode into slivers.
-  const cutByArc = (pieces, C2, arc) => {
-    const uIn = [arc[0][0]-C2[0], arc[0][1]-C2[1]];
-    const uOut = [arc[arc.length-1][0]-C2[0], arc[arc.length-1][1]-C2[1]];
-    const li = Math.hypot(uIn[0],uIn[1])||1e-9, lo = Math.hypot(uOut[0],uOut[1])||1e-9;
-    const a = [uIn[0]/li, uIn[1]/li], b = [uOut[0]/lo, uOut[1]/lo];
-    const rot = (a[0]*b[1]-a[1]*b[0]) >= 0 ? 1 : -1;
-    const inN = [-a[1]*rot, a[0]*rot];
-    const outN = [b[1]*rot, -b[0]*rot];
-    const next = [];
-    for (const p of pieces) {
-      const before = clipHalf(p, C2[0], C2[1], -inN[0], -inN[1]);
-      if (before.length) next.push(before);
-      const side = clipHalf(p, C2[0], C2[1], inN[0], inN[1]);
-      if (!side.length) continue;
-      const after = clipHalf(side, C2[0], C2[1], -outN[0], -outN[1]);
-      if (after.length) next.push(after);
-      let core = clipHalf(side, C2[0], C2[1], outN[0], outN[1]);
-      for (let k = 0; core.length && k+1 < arc.length; k++) {
-        const P = arc[k], Q = arc[k+1];
-        let nx = -(Q[1]-P[1]), ny = Q[0]-P[0];
-        if ((C2[0]-P[0])*nx + (C2[1]-P[1])*ny < 0) { nx = -nx; ny = -ny; }
-        core = clipHalf(core, P[0], P[1], nx, ny);
-      }
-      if (core.length) next.push(core);
-    }
-    return next;
   };
   // Split every piece edge at any point of this plane that lies on it, then
   // fan from a vertex that leaves no degenerate triangle - and if there is
@@ -889,24 +889,86 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
 
   const out = [];
 
+  // ---- the four edges of the clicked face: a radius-Rc cylinder each ----
+  // The band runs between the two stations, so it stops exactly where the
+  // ball takes over, and its end cross-section IS the circle the ball and the
+  // cylinder share. Only the clicked face's own edges: the depth edges and
+  // the opposite face are never touched.
+  const byApex = new Map();
+  for (const b of balls) byApex.set(b.ai, b);
+  const edgeJobs = [];
+  for (const b of balls) {
+    const ai = b.ai;
+    // walk forward along the loop to the next treated apex
+    let j = ai, guard = 0, run = 0;
+    while (guard++ < nL) {
+      const k = (j + 1) % nL;
+      run += Math.hypot(poly[k][0]-poly[j][0], poly[k][1]-poly[j][1]);
+      j = k;
+      if (byApex.has(j)) break;
+    }
+    const b2 = byApex.get(j);
+    if (!b2 || j === ai) continue;
+    // Station Rc, not 2Rc: the sphere is centred Rc along the edge from the
+    // vertex and meets this cylinder on the great circle there, so the band
+    // ends exactly where the sphere starts.
+    const from = b.Rc, to = run - b2.Rc;
+    if (!(to - from > 1e-6)) continue;
+    edgeJobs.push({ a: b, b2: b2, dir: b.u2, nrm: b.n2, from: from, to: to, len: run });
+  }
+  for (const job of edgeJobs) {
+    const R = Math.min(job.a.Rc, job.b2.Rc);
+    const V2 = job.a.V2, u = job.dir, nrm = job.nrm;
+    const at = (t) => [V2[0] + u[0]*t, V2[1] + u[1]*t];
+    const steps = Math.max(2, Math.ceil((job.to - job.from) / Math.max(R/2, 1e-3)));
+    const rows = [];
+    for (let q = 0; q <= steps; q++) {
+      const t = job.from + (job.to - job.from) * (q / steps);
+      rows.push(profileRow(at(t), nrm, R));
+    }
+    job.endA = rows[0];
+    job.endB = rows[rows.length-1];
+    job.rows = rows;
+    job.tris = [];
+    for (let q = 0; q < steps; q++) {
+      for (let k = 0; k < PROFN; k++) {
+        job.tris.push([rows[q][k], rows[q+1][k], rows[q][k+1]]);
+        job.tris.push([rows[q+1][k], rows[q+1][k+1], rows[q][k+1]]);
+      }
+    }
+  }
   // ---- the clicked face ----
   {
     let pieces = capTriIdx.map(t => [flat2(vert(t,0)), flat2(vert(t,1)), flat2(vert(t,2))]);
     let before = 0;
     for (const p of pieces) before += polyArea(p);
-    for (const b of balls) pieces = cutByArc(pieces, b.M, b.capArc2);
-    let after = 0;
-    for (const p of pieces) after += polyArea(p);
-    let bite = 0;
-    for (const b of balls) {
-      // corner square minus the quarter disc
-      bite += b.Rc*b.Rc - Math.PI*b.Rc*b.Rc/4;
+    // The four edge cylinders inset the face by Rc: clip it to that ring
+    // first, mitre corners and all, then let each ball scallop its corner.
+    const ringR = balls.reduce((m, b) => Math.max(m, b.Rc), 0);
+    for (let i2 = 0; i2 < nL; i2++) {
+      const a = poly[i2], b2 = poly[(i2+1)%nL];
+      const ex = b2[0]-a[0], ey = b2[1]-a[1];
+      const l = Math.hypot(ex, ey) || 1e-9;
+      const nx = -ey/l*wind, ny = ex/l*wind;
+      const px = a[0] + nx*ringR, py = a[1] + ny*ringR;
+      const next = [];
+      for (const pc of pieces) {
+        const q = clipHalf(pc, px, py, nx, ny);
+        if (q.length >= 3) next.push(q);
+      }
+      pieces = next;
     }
-    if (Math.abs((before - bite) - after) > Math.max(1e-4, before*2e-3)) {
-      throw new Error('vertex ball took the wrong bite out of the face - left unchanged');
+    // Nothing else comes off the face. The sphere is tangent to this plane, so
+    // it touches the ring at the mitre corner M and takes no area: the face
+    // stays a flat inset ring with sharp mitre corners, which is what a
+    // filleted box face looks like.
+    let ringArea = 0;
+    for (const p of pieces) ringArea += polyArea(p);
+    if (!(ringArea > 1e-9)) {
+      throw new Error('R=' + requestedR + ' leaves no face - left unchanged');
     }
     const extra = [];
-    for (const b of balls) for (const q of b.capArc2) extra.push(q);
+    for (const b of balls) extra.push(b.M);
     for (const v of poly) extra.push(v);
     const wantOut = [0,0,0]; wantOut[axisIdx] = -intoBody;
     emitPlane(pieces, extra, (uv) => from3(uv, capPlane), wantOut);
@@ -917,8 +979,7 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
   for (const b of balls) {
     for (const w of b.walls) {
       const key = w.n3.map(x => Math.round(x*1e3)).join(',') + '|' + Math.round(w.planeD*1e3);
-      if (!wallJobs.has(key)) wallJobs.set(key, { w: w, cuts: [] });
-      wallJobs.get(key).cuts.push({ C2: w.M2map ? w.M2map : null, w: w });
+      if (!wallJobs.has(key)) wallJobs.set(key, { w: w });
     }
   }
   const onPlane = (p, n3, d) => Math.abs(p[0]*n3[0] + p[1]*n3[1] + p[2]*n3[2] - d) < 1e-3;
@@ -934,36 +995,36 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
       }
     }
     if (!mine.length) continue;
-    // every cut that lands on THIS plane, expressed in this plane's frame
-    const cuts = [];
+    // every point this plane must carry a vertex at: each sphere's tangent
+    // point and each depth-edge tip sits on the trimmed edge, so the wall has
+    // to share them with the shelf that meets it there.
+    const marks = [];
     for (const b of balls) {
       for (const w of b.walls) {
         const key = w.n3.map(x => Math.round(x*1e3)).join(',') + '|' + Math.round(w.planeD*1e3);
         const k0 = w0.n3.map(x => Math.round(x*1e3)).join(',') + '|' + Math.round(w0.planeD*1e3);
         if (key !== k0) continue;
-        cuts.push({ C2: w0.to2(w.to3(w.M2)), arc: w.arc3.map(w0.to2) });
+        marks.push(w0.to2(w.tan3));
+        marks.push(w0.to2(b.P3_3));
       }
     }
     let pieces = mine.map(t => [w0.to2(vert(t,0)), w0.to2(vert(t,1)), w0.to2(vert(t,2))]);
-    let before = 0;
-    for (const p of pieces) before += polyArea(p);
-    for (const c of cuts) pieces = cutByArc(pieces, c.C2, c.arc);
+    // The edge cylinder has taken the top strip of this wall down to depth Rc.
+    const stripR = balls.reduce((m, b) => Math.max(m, b.Rc), 0);
+    const stripped = [];
+    for (const pc of pieces) {
+      const q = clipHalf(pc, 0, stripR, 0, 1);
+      if (q.length >= 3) stripped.push(q);
+    }
+    pieces = stripped;
+    // Nothing else comes off this wall: the sphere is tangent to it and only
+    // touches it at (Rc, Rc), which is already on the trimmed edge.
     let after = 0;
     for (const p of pieces) after += polyArea(p);
-    let bite = 0;
-    for (const b of balls) {
-      for (const w of b.walls) {
-        const key = w.n3.map(x => Math.round(x*1e3)).join(',') + '|' + Math.round(w.planeD*1e3);
-        const k0 = w0.n3.map(x => Math.round(x*1e3)).join(',') + '|' + Math.round(w0.planeD*1e3);
-        if (key === k0) bite += b.Rc*b.Rc - Math.PI*b.Rc*b.Rc/4;
-      }
+    if (!(after > 1e-9)) {
+      throw new Error('R=' + requestedR + ' leaves no wall - left unchanged');
     }
-    if (Math.abs((before - bite) - after) > Math.max(1e-4, before*2e-3)) {
-      throw new Error('vertex ball took the wrong bite out of a wall - left unchanged');
-    }
-    const extra = [];
-    for (const c of cuts) for (const q of c.arc) extra.push(q);
-    emitPlane(pieces, extra, w0.to3, w0.n3);
+    emitPlane(pieces, marks, w0.to3, w0.n3);
   }
   for (const t of wallTriIdx) {
     if (usedWallTri.has(t)) continue;
@@ -971,88 +1032,86 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
     out.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
   }
 
-  // ---- the ball patch at each vertex ----
-  // A spherical triangle on the three shared arcs: interior points are
-  // barycentric on the three corner directions and projected onto the sphere,
-  // the three boundary rows ARE the arcs, so the patch and the three flat
-  // faces meet on exactly the same points.
-  let patchTris = 0;
+  // ---- the four edge cylinders, emitted ----
+  for (const job of edgeJobs) {
+    const R = Math.min(job.a.Rc, job.b2.Rc);
+    const V2 = job.a.V2, u = job.dir, nrm = job.nrm;
+    for (const tri of job.tris || []) {
+      const A3 = tri[0], B3 = tri[1], C3t = tri[2];
+      const mid = [(A3[0]+B3[0]+C3t[0])/3, (A3[1]+B3[1]+C3t[1])/3, (A3[2]+B3[2]+C3t[2])/3];
+      const m2 = [mid[other[0]], mid[other[1]]];
+      const t = (m2[0]-V2[0])*u[0] + (m2[1]-V2[1])*u[1];
+      const ax = from3([V2[0] + u[0]*t + nrm[0]*R, V2[1] + u[1]*t + nrm[1]*R], depth(R));
+      const ref = [mid[0]-ax[0], mid[1]-ax[1], mid[2]-ax[2]];
+      const ux=B3[0]-A3[0], uy=B3[1]-A3[1], uz=B3[2]-A3[2];
+      const vx=C3t[0]-A3[0], vy=C3t[1]-A3[1], vz=C3t[2]-A3[2];
+      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+      if (0.5*Math.hypot(nx,ny,nz) < 1e-12) continue;
+      if (nx*ref[0] + ny*ref[1] + nz*ref[2] < 0)
+        out.push(A3[0],A3[1],A3[2], C3t[0],C3t[1],C3t[2], B3[0],B3[1],B3[2]);
+      else
+        out.push(A3[0],A3[1],A3[2], B3[0],B3[1],B3[2], C3t[0],C3t[1],C3t[2]);
+    }
+  }
+
+  // ---- the corner: the spherical octant, plus the shelf under it ----
+  //
+  // The octant is a spherical triangle of radius Rc about C with three
+  // quarter-circle edges, each of them shared whole with a neighbour:
+  //   chainA - the band on the u1 edge, at its end station
+  //   chainB - the band on the u2 edge, at its end station
+  //   the arc at depth Rc - the shelf
+  // Each seam is a great circle at the cylinder's own station, so the ball
+  // and the band leave with the same tangent plane: no crease.
+  //
+  // The sphere stops sqrt(2)*Rc short of the depth edge, which the user is
+  // keeping as a knife, so the octant cannot close on its own. What closes it
+  // is a flat shelf in the plane at depth Rc: the curvilinear triangle between
+  // that arc, the two walls' trimmed edges, and the point Rc down the depth
+  // edge. It is a real step, area (4 - pi/... ) Rc^2 per corner, and it is the
+  // price of a knife depth edge with no setback.
+  let patchTris = 0, shelfTris = 0;
   for (const b of balls) {
     const C3 = b.C3, Rs = b.Rs;
-    const dirOf = (p) => {
-      const d = [p[0]-C3[0], p[1]-C3[1], p[2]-C3[2]];
-      const l = Math.hypot(d[0],d[1],d[2]) || 1e-9;
-      return [d[0]/l, d[1]/l, d[2]/l];
+    const A = b.chainA, B = b.chainB;      // [0] on a wall, [PROFN] at M
+    const row = (r) => {
+      const P = A[PROFN - r], Q = B[PROFN - r];
+      if (r === 0) return [P];
+      const pts = [];
+      for (let k = 0; k <= r; k++) pts.push(k === 0 ? P : (k === r ? Q : slerp(C3, Rs, P, Q, k/r)));
+      return pts;
     };
-    // The patch lives on the sphere AND inside all three planes: every
-    // direction has component <= Rc/Rs = 1/sqrt(2) on each outward normal, and
-    // that is exactly where the three boundary arcs are. A barycentric mix of
-    // the corner directions does not respect that - normalising pushes it past
-    // a plane and the ball pokes out through the face, 0.17mm on a 20mm cube
-    // at R=2. Anything over is put back on the plane it crossed, still on the
-    // sphere.
-    // A hair inside the plane, not exactly on it: clamping onto the boundary
-    // lands interior grid points on top of the arc points and the seam picks
-    // up edges shared by more than two triangles.
-    const LIM = (1 / Math.SQRT2) * (1 - 2e-3);
-    const nrm3 = [[0,0,0], b.walls[0].n3, b.walls[1].n3];
-    nrm3[0][axisIdx] = -intoBody;
-    const clampInside = (d) => {
-      for (let pass = 0; pass < 3; pass++) {
-        let worst = -1, wc = LIM;
-        for (let q = 0; q < 3; q++) {
-          const c = d[0]*nrm3[q][0] + d[1]*nrm3[q][1] + d[2]*nrm3[q][2];
-          if (c > wc) { wc = c; worst = q; }
-        }
-        if (worst < 0) break;
-        const nq = nrm3[worst];
-        const c = d[0]*nq[0] + d[1]*nq[1] + d[2]*nq[2];
-        const rx = d[0] - c*nq[0], ry = d[1] - c*nq[1], rz = d[2] - c*nq[2];
-        const rl = Math.hypot(rx, ry, rz);
-        if (!(rl > 1e-9)) break;
-        const keep = Math.sqrt(Math.max(0, 1 - LIM*LIM)) / rl;
-        d = [rx*keep + LIM*nq[0], ry*keep + LIM*nq[1], rz*keep + LIM*nq[2]];
-      }
-      return d;
-    };
-    const eCap = b.capArc3.map(dirOf);                 // T1 -> T2
-    const eB   = b.walls[1].arc3.map(dirOf);           // T2 -> P3
-    const eA   = b.walls[0].arc3.map(dirOf);           // T1 -> P3
-    const grid = [];
-    for (let i = 0; i <= N; i++) {
-      const row = [];
-      for (let j = 0; j <= N - i; j++) {
-        const k = N - i - j;
-        let d;
-        if (k === 0) d = eCap[j];                      // the T1..T2 edge
-        else if (j === 0) d = eA[k];                   // the T1..P3 edge
-        else if (i === 0) d = eB[k];                   // the T2..P3 edge
-        else {
-          const x = i*eCap[0][0] + j*eCap[N][0] + k*eA[N][0];
-          const y = i*eCap[0][1] + j*eCap[N][1] + k*eA[N][1];
-          const z = i*eCap[0][2] + j*eCap[N][2] + k*eA[N][2];
-          const l = Math.hypot(x,y,z) || 1e-9;
-          d = clampInside([x/l, y/l, z/l]);
-        }
-        row.push([C3[0]+d[0]*Rs, C3[1]+d[1]*Rs, C3[2]+d[2]*Rs]);
-      }
-      grid.push(row);
-    }
-    const put = (A, B, Cc) => {
-      const ux=B[0]-A[0], uy=B[1]-A[1], uz=B[2]-A[2];
-      const vx=Cc[0]-A[0], vy=Cc[1]-A[1], vz=Cc[2]-A[2];
+    const put = (P, Q, S) => {
+      const ux=Q[0]-P[0], uy=Q[1]-P[1], uz=Q[2]-P[2];
+      const vx=S[0]-P[0], vy=S[1]-P[1], vz=S[2]-P[2];
       const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
       if (0.5*Math.hypot(nx,ny,nz) < 1e-12) return;
-      const mx=(A[0]+B[0]+Cc[0])/3 - C3[0], my=(A[1]+B[1]+Cc[1])/3 - C3[1], mz=(A[2]+B[2]+Cc[2])/3 - C3[2];
-      if (nx*mx + ny*my + nz*mz < 0) out.push(A[0],A[1],A[2], Cc[0],Cc[1],Cc[2], B[0],B[1],B[2]);
-      else out.push(A[0],A[1],A[2], B[0],B[1],B[2], Cc[0],Cc[1],Cc[2]);
+      const mx=(P[0]+Q[0]+S[0])/3 - C3[0], my=(P[1]+Q[1]+S[1])/3 - C3[1], mz=(P[2]+Q[2]+S[2])/3 - C3[2];
+      if (nx*mx + ny*my + nz*mz < 0) out.push(P[0],P[1],P[2], S[0],S[1],S[2], Q[0],Q[1],Q[2]);
+      else out.push(P[0],P[1],P[2], Q[0],Q[1],Q[2], S[0],S[1],S[2]);
       patchTris++;
     };
-    for (let i = 0; i < N; i++) {
-      for (let j = 0; j < N - i; j++) {
-        put(grid[i][j], grid[i+1][j], grid[i][j+1]);
-        if (j + 1 < N - i) put(grid[i+1][j], grid[i+1][j+1], grid[i][j+1]);
-      }
+    let lower = row(0);
+    for (let r = 0; r < PROFN; r++) {
+      const upper = row(r+1);
+      for (let k = 0; k <= r; k++) put(lower[k], upper[k], upper[k+1]);
+      for (let k = 0; k + 1 <= r; k++) put(lower[k], upper[k+1], lower[k+1]);
+      lower = upper;
+    }
+    // the shelf, fanned from the depth-edge tip it is star shaped about
+    const rim = lower, tip = b.P3_3;
+    const wantOut = [-axisIn[0], -axisIn[1], -axisIn[2]];
+    for (let k = 0; k + 1 < rim.length; k++) {
+      const P = tip, Q = rim[k], S = rim[k+1];
+      const ux=Q[0]-P[0], uy=Q[1]-P[1], uz=Q[2]-P[2];
+      const vx=S[0]-P[0], vy=S[1]-P[1], vz=S[2]-P[2];
+      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+      if (0.5*Math.hypot(nx,ny,nz) < 1e-12) continue;
+      if (nx*wantOut[0] + ny*wantOut[1] + nz*wantOut[2] < 0)
+        out.push(P[0],P[1],P[2], S[0],S[1],S[2], Q[0],Q[1],Q[2]);
+      else
+        out.push(P[0],P[1],P[2], Q[0],Q[1],Q[2], S[0],S[1],S[2]);
+      shelfTris++;
     }
   }
 
@@ -1145,7 +1204,9 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
     radius: balls.reduce((m, b) => Math.max(m, b.Rc), 0),
     requested: requestedR,
     ballR: balls.reduce((m, b) => Math.max(m, b.Rs), 0),
-    patchTris: patchTris
+    patchTris: patchTris,
+    shelfTris: shelfTris,
+    bands: edgeJobs.length
   };
   return result;
 }
@@ -2154,9 +2215,9 @@ function applySoftenOnFace(face) {
   const ball = (typeof rawVertexBallCorners === 'function') ? rawVertexBallCorners.lastBuild : null;
   const perim = (typeof rawPerimeterFilletInPlace === 'function') ? rawPerimeterFilletInPlace.lastBuild : null;
   if (treat === 'corners' && ball && ball.vertices != null) {
-    setStatus('Soften ok - ball at ' + ball.vertices + '/' + ball.corners + ' vertices, R ' +
-              ball.radius.toFixed(2) + ' on the face and both walls' + clamp(ball) +
-              ' (ball ' + ball.ballR.toFixed(2) + ')' +
+    setStatus('corners+edges ' + ball.vertices + ' balls + ' + ball.bands + ' edge R ' +
+              ball.radius.toFixed(2) + clamp(ball) +
+              ' (tangent, ' + ball.patchTris + ' ball tris, ' + ball.shelfTris + ' shelf tris)' +
               (ball.skipped ? ' - ' + ball.skipped + ' not square, left sharp' : ''));
   } else if (perim && perim.loopPts != null) {
     setStatus('Soften ok - ' + perim.mode + ' on all ' + perim.loopPts + ' loop pts at R ' +
