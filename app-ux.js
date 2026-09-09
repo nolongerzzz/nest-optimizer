@@ -2,8 +2,8 @@
 (function () {
   function stampHud() {
     var el = document.getElementById('adjust-status');
-    if (el) el.textContent = 'HUD mask1';
-    if (typeof setStatus === 'function') setStatus('HUD mask1');
+    if (el) el.textContent = 'HUD corners9';
+    if (typeof setStatus === 'function') setStatus('HUD corners9');
   }
 
   function pickIdx(event) {
@@ -47,7 +47,7 @@
       state.renderer.domElement.addEventListener('pointerdown', function (event) {
         if (event.button !== 0) return;
         if (!event.altKey) return;
-        if (state.softenArmed || state.capArmed || state.joinSession || state.maskPaint) return;
+        if (state.softenArmed || state.capArmed || state.joinSession) return;
         if (lookAtHit(event)) {
           event.preventDefault();
           event.stopPropagation();
