@@ -917,10 +917,13 @@ function applySoftenOnFace(face) {
   const inpR = document.getElementById('inp-soften-r');
   const Rv = inpR ? parseFloat(inpR.value) : NaN;
   const R = (isFinite(Rv) && Rv > 0) ? Rv : 0.5;
-  const keepMinFace = face.sign < 0;
+  // The clicked face's OWN plane, in raw space. Never the display index and
+  // never a default to the top.
+  const rawAxisIdx = (face.rawAxisIdx != null) ? face.rawAxisIdx : (face.axisIdx === 0 ? 0 : 1);
+  const keepMinFace = (face.rawKeepMin != null) ? face.rawKeepMin : (face.sign < 0);
   let working = null;
   try {
-    working = softenSelectedFace(m.rawTris, face.axisIdx, keepMinFace, R, getEdgeTreat());
+    working = softenSelectedFace(m.rawTris, rawAxisIdx, keepMinFace, R, getEdgeTreat());
   } catch (e) {
     working = null;
     if (typeof removeFaceHelper === 'function') removeFaceHelper();
@@ -2097,10 +2100,24 @@ function capturePlanarFace(hit) {
   }
   if (kept.length < 9) return null;
   const axis = Math.abs(nHit.x) >= Math.abs(nHit.z) ? 'x' : 'z';
+  const sign = axis === 'x' ? (nHit.x >= 0 ? 1 : -1) : (nHit.z >= 0 ? 1 : -1);
+  // axis/axisIdx/sign stay DISPLAY space - Cap and Join read them and are not
+  // being changed here. rawAxisIdx/rawKeepMin are the same face expressed in
+  // the piece's own raw 'zup' space, which is what the soften engine works in.
+  // The display mesh is the raw soup rotated -90deg about X
+  // (rawResultToDisplayGeometry), so dispX = rawX, dispY = rawZ and
+  // dispZ = -rawY. A display-Z wall is therefore raw axis 1 with the sign
+  // flipped; passing the display index straight through sends the engine to
+  // raw axis 2, which is the TOP of the piece - the clicked face never moves
+  // and the radius lands on the lid instead.
+  const rawAxisIdx = axis === 'x' ? 0 : 1;
+  const rawKeepMin = axis === 'x' ? (nHit.x < 0) : (nHit.z > 0);
   return {
     axis: axis,
     axisIdx: axis === 'x' ? 0 : 2,
-    sign: axis === 'x' ? (nHit.x >= 0 ? 1 : -1) : (nHit.z >= 0 ? 1 : -1),
+    sign: sign,
+    rawAxisIdx: rawAxisIdx,
+    rawKeepMin: rawKeepMin,
     point: hit.point.clone(),
     worldTris: kept
   };
