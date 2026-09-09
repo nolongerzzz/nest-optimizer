@@ -1472,8 +1472,10 @@ function applySoftenOnFace(face) {
   updateUndoBtn();
   // Bake done: drop the pick and its overlay. The highlight is NOT re-derived
   // on the baked mesh — the face the user clicked is gone, and a yellow patch
-  // left on the new geometry reads as still armed when it is not.
+  // left on the new geometry reads as still armed when it is not. The thin
+  // cage goes on instead, and lasts until the next pick or selection.
   clearFacePick();
+  showInspectCage(m);
   // What actually got built: corners that took R, out of the corners found,
   // and the loop points the face carries. No sealing claim.
   const treat = getEdgeTreat();
@@ -1482,7 +1484,7 @@ function applySoftenOnFace(face) {
   const perim = (typeof rawPerimeterFilletInPlace === 'function') ? rawPerimeterFilletInPlace.lastBuild : null;
   if (treat === 'corners' && corner && corner.corners != null) {
     setStatus('Soften ok - ' + corner.rounded + '/' + corner.corners + ' corners at R ' + corner.radius.toFixed(2) +
-              clamp(corner) + ' - ' + corner.loopPts + ' loop pts');
+              clamp(corner) + ' - ' + (corner.ptsPerCorner != null ? corner.ptsPerCorner : '?') + ' pts per corner');
   } else if (perim && perim.loopPts != null) {
     setStatus('Soften ok - ' + perim.mode + ' on all ' + perim.loopPts + ' loop pts at R ' +
               perim.radius.toFixed(2) + clamp(perim));
@@ -1599,6 +1601,7 @@ function applyCapOnFace(face) {
   updateUndoBtn();
   // Bake done: drop the pick and its overlay, same as Soften.
   clearFacePick();
+  showInspectCage(m);
   setStatus('Cap ok');
 }
 
@@ -2626,9 +2629,49 @@ function rawSpanOf(rawTris, axisIdx) {
   return (isFinite(minV) && isFinite(maxV)) ? (maxV - minV) : NaN;
 }
 
+// A thin edge cage on the piece a bake just produced, so the new corners can
+// be inspected without the yellow face patch pretending the pick is still
+// armed. Purely additive: a LineSegments child on the placed mesh, never a
+// material change, so nothing about the library colours moves - and it dies
+// with the mesh on Undo.
+function clearInspectCage() {
+  const cage = state.inspectCage;
+  if (cage) {
+    if (cage.parent) cage.parent.remove(cage);
+    if (cage.geometry) cage.geometry.dispose();
+    if (cage.material) cage.material.dispose();
+  }
+  state.inspectCage = null;
+}
+
+function showInspectCage(model) {
+  clearInspectCage();
+  if (!model || !state.placed) return;
+  const placed = state.placed.find(function (p) { return p && p.sourceId === model.id; });
+  const mesh = placed ? placed.mesh : null;
+  if (!mesh || !mesh.geometry) return;
+  try {
+    // 1 degree, not the 15 the selection outline uses: at 15 a fillet's own
+    // facets are invisible and the cage shows nothing worth inspecting.
+    const edges = new THREE.EdgesGeometry(mesh.geometry, 1);
+    const mat = new THREE.LineBasicMaterial({
+      color: 0x7dd3fc, transparent: true, opacity: 0.55, depthTest: false
+    });
+    const cage = new THREE.LineSegments(edges, mat);
+    cage.renderOrder = 16;
+    cage.name = 'inspectCage';
+    cage.raycast = function () {};
+    mesh.add(cage);
+    state.inspectCage = cage;
+  } catch (e) {
+    state.inspectCage = null;
+  }
+}
+
 function clearFacePick() {
   state.facePick = null;
   if (typeof removeFaceHelper === 'function') removeFaceHelper();
+  clearInspectCage();
 }
 
 // Gather the clicked face's own coplanar patch, in world space, for the
@@ -3221,3 +3264,12 @@ function paintJoinHighlights() {
   });
 }
 
+// Selecting anything drops the inspect cage: it belongs to the bake that was
+// just made, not to whatever the user clicks next.
+(function () {
+  const prevSelect = window.selectPlaced;
+  window.selectPlaced = function () {
+    if (typeof clearInspectCage === 'function') clearInspectCage();
+    if (typeof prevSelect === 'function') return prevSelect.apply(this, arguments);
+  };
+})();
