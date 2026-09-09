@@ -26,6 +26,11 @@ function rawChamferCut(rawTris, axisIdx, plane, keepMin, R) {
   return rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, R, { profile: 'chamfer' });
 }
 
+// Corners only. Round and Bevel are still one exclusive choice on the same
+// engine; this ticket does not add a full-loop edge round. The clicked face's
+// own plane is read off the mesh inside the engine — `plane` below is only
+// the EPS-nudged value the older call sites expect and is not what the lid
+// is built on.
 function softenSelectedFace(rawTris, axisIdx, keepMinFace, R, mode) {
   mode = mode || getEdgeTreat();
 
@@ -46,21 +51,16 @@ function softenSelectedFace(rawTris, axisIdx, keepMinFace, R, mode) {
   // piece, keep coord <= plane, i.e. keepMin=false; to soften the MIN
   // face and keep the rest, keep coord >= plane, i.e. keepMin=true.
   const keepMin = keepMinFace;
-
-  // Every branch leaves the lid on capPlane. Anything that throws does so
-  // before the caller swaps geometry, so a failure leaves the piece as-is.
-  if (mode === 'chamfer') {
+  if (mode === 'square') {
+    throw new Error('square edge - use Cap / Seal, Soften not needed');
+  }
+  if (mode === 'chamfer' && typeof rawChamferCut === 'function') {
     return rawChamferCut(rawTris, axisIdx, plane, keepMin, R);
   }
-  if (mode === 'corners') {
-    // Same engine as Round and Bevel — same loop walk, same quarter-circle
-    // sweep, same untouched cap plane — with a per-vertex radius: R at every
-    // vertex whose windowed turn beats 30deg, 0 everywhere else, so a wall
-    // midpoint keeps a sharp edge sitting on the cut plane. The lid is the
-    // original lid trimmed back to the ring, never a centroid fan.
-    return rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, R, { cornersOnly: true, minTurnDeg: 30 });
-  }
-  return rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, R, { profile: 'round' });
+  // Every genuine corner of the clicked face's loop takes R; the straight
+  // spans between them keep R = 0 and stay on the plane. Anything the engine
+  // refuses throws, and the caller leaves the piece unchanged.
+  return rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, R, { minTurnDeg: 25 });
 }
 
 function dropZeroAreaTriangles(soup, epsArea) {
@@ -932,10 +932,7 @@ function applySoftenOnFace(face) {
     setStatus('Soften failed - fillet empty. Piece unchanged', true);
     return;
   }
-  const sealed = rawCheckWatertightQuick(working);
 
-
-  // Snapshot for Undo BEFORE mutating the model.
   pushUndo({
     type: 'softenReplace',
     modelId: m.id,
@@ -957,8 +954,6 @@ function applySoftenOnFace(face) {
   m.centerOffset = computeCenterOffsetFromRaw(working);
   m.size = { x: size2.x, y: size2.y, z: size2.z };
 
-  // Keep plate X/Z: if this model is currently placed, rebuild its mesh
-  // in place at the same position rather than moving it.
   const placedEntry = state.placed.find(p => p && p.sourceId === m.id);
   if (placedEntry) {
     const px = placedEntry.x, pz = placedEntry.z;
@@ -991,15 +986,16 @@ function applySoftenOnFace(face) {
   renderModelList();
   updateUndoBtn();
   if (typeof removeFaceHelper === 'function') removeFaceHelper();
-  let what = 'Soften ok';
-  const built = (typeof rawEdgeRoundInPlace === 'function') ? rawEdgeRoundInPlace.lastBuild : null;
-  if (built && built.radii) {
-    let peak = 0, treated = 0;
-    for (const r of built.radii) { if (r > peak) peak = r; if (r > 1e-6) treated++; }
-    what = 'Soften ok - ' + treated + '/' + built.radii.length + ' loop pts at R up to ' + peak.toFixed(2) +
-           (peak < built.requested - 1e-6 ? ' (asked ' + built.requested.toFixed(2) + ', wall clamp)' : '');
+  // What actually got built: corners that took R, out of the corners found,
+  // and the loop points the face carries. No sealing claim.
+  const b = (typeof rawEdgeRoundInPlace === 'function') ? rawEdgeRoundInPlace.lastBuild : null;
+  if (b && b.corners != null) {
+    setStatus('Soften ok - ' + b.rounded + '/' + b.corners + ' corners at R ' + b.radius.toFixed(2) +
+              (b.radius < b.requested - 1e-6 ? ' (asked ' + b.requested.toFixed(2) + ', wall clamp)' : '') +
+              ' - ' + b.loopPts + ' loop pts');
+  } else {
+    setStatus('Soften ok');
   }
-  setStatus(sealed ? what : what + ' - not fully sealed, check slice');
 }
 
 
