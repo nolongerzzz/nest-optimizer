@@ -477,6 +477,666 @@ function rawPerimeterFilletInPlace(rawTris, axisIdx, keepMin, requestedR, opts) 
   };
   return new Float32Array(out);
 }
+// Corners, vertex only. Restored verbatim from the corners6 bake, which is
+// what this mode has always been: a spherical octant at each vertex of the
+// clicked face and nothing else. Radius Rc*sqrt(2) centred Rc in from all
+// three planes, so the cut circle on the face and on both walls is exactly
+// Rc. Mid-edges stay a knife, there is no edge cylinder and no shelf.
+//
+// Corners+edges is the other engine, rawVertexBallCorners below, and the two
+// do not share code on purpose: this one must not drift when that one moves.
+function rawVertexBallOnly(rawTris, axisIdx, keepMin, requestedR, opts) {
+  opts = opts || {};
+  const minTurn = (opts.minTurnDeg == null ? 25 : opts.minTurnDeg) * Math.PI / 180;
+  const ARCN = 12;                       // samples per boundary arc
+  const PATCHN = 6;                      // subdivision across the patch
+  const SQUARE_TOL = 12 * Math.PI / 180; // how far from 90deg a corner may be
+  const intoBody = keepMin ? 1 : -1;
+  const other = [0, 1, 2].filter(a => a !== axisIdx);
+  const tol = 1e-4;
+
+  let minV = Infinity, maxV = -Infinity;
+  for (let i = axisIdx; i < rawTris.length; i += 3) {
+    if (rawTris[i] < minV) minV = rawTris[i];
+    if (rawTris[i] > maxV) maxV = rawTris[i];
+  }
+  const capPlane = keepMin ? minV : maxV;
+  const capTol = 1e-3;
+
+  const triCount = rawTris.length / 9;
+  const vert = (t, v) => { const i0 = t*9 + v*3; return [rawTris[i0], rawTris[i0+1], rawTris[i0+2]]; };
+  const isOnCap = (p) => Math.abs(p[axisIdx] - capPlane) < capTol;
+  const flat2 = (p3) => [p3[other[0]], p3[other[1]]];
+  const from3 = (uv, along) => { const p=[0,0,0]; p[other[0]]=uv[0]; p[other[1]]=uv[1]; p[axisIdx]=along; return p; };
+
+  const capTriIdx = [], wallTriIdx = [];
+  for (let t = 0; t < triCount; t++) {
+    const v0=vert(t,0), v1=vert(t,1), v2=vert(t,2);
+    if (isOnCap(v0) && isOnCap(v1) && isOnCap(v2)) capTriIdx.push(t);
+    else wallTriIdx.push(t);
+  }
+  if (!capTriIdx.length) throw new Error('no cap found on this face');
+
+  // ---- the clicked face's boundary loop ----
+  const vkey = (p) => Math.round(p[0]/tol)+'|'+Math.round(p[1]/tol)+'|'+Math.round(p[2]/tol);
+  const edgeMap = new Map();
+  const addEdge = (a, b, isCap) => {
+    const ka = vkey(a), kb = vkey(b);
+    const ek = ka < kb ? ka+'~'+kb : kb+'~'+ka;
+    if (!edgeMap.has(ek)) edgeMap.set(ek, []);
+    edgeMap.get(ek).push({ isCap, a, b });
+  };
+  for (const t of capTriIdx) {
+    const v0=vert(t,0), v1=vert(t,1), v2=vert(t,2);
+    addEdge(v0,v1,true); addEdge(v1,v2,true); addEdge(v2,v0,true);
+  }
+  for (const t of wallTriIdx) {
+    const v0=vert(t,0), v1=vert(t,1), v2=vert(t,2);
+    if (isOnCap(v0) && isOnCap(v1)) addEdge(v0,v1,false);
+    if (isOnCap(v1) && isOnCap(v2)) addEdge(v1,v2,false);
+    if (isOnCap(v2) && isOnCap(v0)) addEdge(v2,v0,false);
+  }
+  const boundaryEdges = [];
+  for (const entries of edgeMap.values()) {
+    if (entries.length === 2 && entries.some(e=>e.isCap) && entries.some(e=>!e.isCap)) {
+      const capEntry = entries.find(e => e.isCap);
+      boundaryEdges.push([capEntry.a, capEntry.b]);
+    }
+  }
+  if (!boundaryEdges.length) throw new Error('no cap/wall boundary found');
+  const adj = new Map(), posOf = new Map();
+  const pushAdj = (k, o) => { if (!adj.has(k)) adj.set(k, []); adj.get(k).push(o); };
+  for (const [a,b] of boundaryEdges) {
+    const ka = vkey(a), kb = vkey(b);
+    posOf.set(ka,a); posOf.set(kb,b);
+    pushAdj(ka,kb); pushAdj(kb,ka);
+  }
+  for (const list of adj.values()) if (list.length !== 2) throw new Error('branch point in cap boundary');
+  const startKey = vkey(boundaryEdges[0][0]);
+  const loopKeys = [startKey];
+  let prevKey = null, curKey = startKey;
+  do {
+    const nbrs = adj.get(curKey);
+    const nextKey = nbrs[0] === prevKey ? nbrs[1] : nbrs[0];
+    if (nextKey === startKey) break;
+    loopKeys.push(nextKey);
+    prevKey = curKey; curKey = nextKey;
+    if (loopKeys.length > adj.size + 2) throw new Error('cap boundary did not close');
+  } while (true);
+  const loop3d = loopKeys.map(k => posOf.get(k));
+  if (loop3d.length < 3) throw new Error('cap boundary too small for corners');
+  let poly = loop3d.map(flat2);
+  poly = raw2DWeldLoop(poly, 0.08);
+  const nL = poly.length;
+  if (nL < 3) throw new Error('cap boundary too small after weld');
+
+  let area2 = 0;
+  for (let i = 0; i < nL; i++) { const a=poly[i], b=poly[(i+1)%nL]; area2 += a[0]*b[1]-b[0]*a[1]; }
+  const wind = area2 >= 0 ? 1 : -1;
+
+  // ---- corners of that loop ----
+  const seg = new Array(nL), cum = new Array(nL+1);
+  cum[0] = 0;
+  for (let i = 0; i < nL; i++) {
+    const a = poly[i], b = poly[(i+1)%nL];
+    seg[i] = Math.hypot(b[0]-a[0], b[1]-a[1]);
+    cum[i+1] = cum[i] + seg[i];
+  }
+  const total = cum[nL];
+  if (!(total > 1e-6)) throw new Error('cap boundary has no length');
+  const atArc = (s) => {
+    let x = s % total; if (x < 0) x += total;
+    let lo = 0, hi = nL;
+    while (lo + 1 < hi) { const mid = (lo+hi)>>1; if (cum[mid] <= x) lo = mid; else hi = mid; }
+    const u = seg[lo] > 1e-12 ? (x - cum[lo]) / seg[lo] : 0;
+    const a = poly[lo], b = poly[(lo+1)%nL];
+    return [a[0] + (b[0]-a[0])*u, a[1] + (b[1]-a[1])*u];
+  };
+  const win = Math.max(total/200, 0.25, Math.min(requestedR*1.5, total/16));
+  const turn = new Array(nL);
+  for (let i = 0; i < nL; i++) {
+    const back = atArc(cum[i]-win), fwd = atArc(cum[i]+win);
+    const a1 = Math.atan2(poly[i][1]-back[1], poly[i][0]-back[0]);
+    const a2 = Math.atan2(fwd[1]-poly[i][1], fwd[0]-poly[i][0]);
+    let d = a2 - a1;
+    while (d > Math.PI) d -= 2*Math.PI;
+    while (d < -Math.PI) d += 2*Math.PI;
+    turn[i] = d;
+  }
+  const hot = [];
+  for (let i = 0; i < nL; i++) if (Math.abs(turn[i]) > minTurn) hot.push(i);
+  if (!hot.length) throw new Error('no corners over ' + Math.round(minTurn*180/Math.PI) + 'deg on this face');
+  const groups = [];
+  let cur = [hot[0]];
+  for (let q = 1; q < hot.length; q++) {
+    if (cum[hot[q]] - cum[hot[q-1]] <= win) cur.push(hot[q]);
+    else { groups.push(cur); cur = [hot[q]]; }
+  }
+  groups.push(cur);
+  if (groups.length > 1) {
+    const f = groups[0], l = groups[groups.length-1];
+    if (total - cum[l[l.length-1]] + cum[f[0]] <= win) { groups[0] = l.concat(f); groups.pop(); }
+  }
+  const apex = groups.map(g => g.reduce((best,i) => Math.abs(turn[i]) > Math.abs(turn[best]) ? i : best, g[0]));
+  const cornerCount = apex.length;
+
+  const COLL = Math.cos(3 * Math.PI / 180);
+  const runFrom = (i, dir) => {
+    let j = i, run = 0, d0 = null, guard = 0;
+    while (guard++ < nL) {
+      const k = dir < 0 ? (j-1+nL)%nL : (j+1)%nL;
+      const a = dir < 0 ? poly[k] : poly[j], b = dir < 0 ? poly[j] : poly[k];
+      const L = Math.hypot(b[0]-a[0], b[1]-a[1]);
+      if (L > 1e-9) {
+        const d = [(b[0]-a[0])/L, (b[1]-a[1])/L];
+        if (d0 === null) d0 = d;
+        else if (d0[0]*d[0] + d0[1]*d[1] < COLL) break;
+        run += L;
+      }
+      j = k;
+      if (j === i) break;
+    }
+    return { d: d0, run: run };
+  };
+  const wallLimitAt = (i) => {
+    const curr = poly[i];
+    const prev = poly[(i-1+nL)%nL], next = poly[(i+1)%nL];
+    const nn = rawEdgeInwardNormal2(prev, next);
+    let best = Infinity;
+    for (let j = 0; j < nL; j++) {
+      if (j === i || j === (i-1+nL)%nL) continue;
+      const a = poly[j], b = poly[(j+1)%nL];
+      const dx = b[0]-a[0], dy = b[1]-a[1];
+      const den = nn[0]*dy - nn[1]*dx;
+      if (Math.abs(den) < 1e-10) continue;
+      const t = ((a[0]-curr[0])*dy - (a[1]-curr[1])*dx) / den;
+      const u = ((a[0]-curr[0])*nn[1] - (a[1]-curr[1])*nn[0]) / -den;
+      if (t > 0.1 && t < best && u >= -0.05 && u <= 1.05) best = t;
+    }
+    for (let j = 0; j < nL; j++) {
+      if (j === i || j === (i-1+nL)%nL || j === (i+1)%nL) continue;
+      const d = Math.hypot(poly[j][0]-curr[0], poly[j][1]-curr[1]);
+      if (d < best) best = d;
+    }
+    return best === Infinity ? 4 : best;
+  };
+  const gapFwd = (t) => {
+    if (cornerCount === 1) return total;
+    let g = cum[apex[(t+1)%cornerCount]] - cum[apex[t]];
+    if (g <= 0) g += total;
+    return g;
+  };
+
+  // ---- one ball per usable vertex ----
+  const depth = (r) => capPlane + intoBody * r;
+  const balls = [];
+  let skipped = 0;
+  for (let t = 0; t < cornerCount; t++) {
+    const ai = apex[t];
+    if (turn[ai] * wind <= 0) { skipped++; continue; }
+    const back = runFrom(ai, -1), fwd = runFrom(ai, +1);
+    if (!back.d || !fwd.d) { skipped++; continue; }
+    const dIn = back.d, dOut = fwd.d;
+    const ext = Math.atan2(dIn[0]*dOut[1]-dIn[1]*dOut[0], dIn[0]*dOut[0]+dIn[1]*dOut[1]);
+    if (ext * wind <= 0) { skipped++; continue; }
+    const theta = Math.PI - Math.abs(ext);
+    // Square vertices only: the ball's three cut circles all come out at Rc
+    // because C sits at Rc from all three planes, and the wall arcs only
+    // reach the wall edge when the face corner is a right angle.
+    if (Math.abs(theta - Math.PI/2) > SQUARE_TOL) { skipped++; continue; }
+    let Rc = Math.min(requestedR, Math.max(0, wallLimitAt(ai) * 0.45));
+    const room = Math.min(back.run, fwd.run, gapFwd((t-1+cornerCount)%cornerCount), gapFwd(t));
+    Rc = Math.min(Rc, room * 0.45);
+    if (!(Rc > 0.02)) { skipped++; continue; }
+
+    // In-face frame at the vertex: u1 out along one edge, u2 along the other.
+    const u1 = [-dIn[0], -dIn[1]], u2 = [dOut[0], dOut[1]];
+    const V2 = poly[ai];
+    const n1 = [-u1[1]*wind*-1, u1[0]*wind*-1];   // inward normal of the u1 edge
+    const n2 = [-u2[1]*wind, u2[0]*wind];         // inward normal of the u2 edge
+    const M = [V2[0] + (n1[0]+n2[0])*Rc, V2[1] + (n1[1]+n2[1])*Rc];
+    balls.push({
+      ai: ai, Rc: Rc, V2: V2, u1: u1, u2: u2, n1: n1, n2: n2, M: M,
+      T1: [V2[0] + u1[0]*Rc, V2[1] + u1[1]*Rc],
+      T2: [V2[0] + u2[0]*Rc, V2[1] + u2[1]*Rc]
+    });
+  }
+  if (!balls.length) throw new Error('no square vertex takes R=' + requestedR + ' on this face');
+
+  // ---- shared geometry per vertex ----
+  const axisIn = [0,0,0]; axisIn[axisIdx] = intoBody;
+  const lift = (uv) => from3(uv, capPlane);
+  const N = ARCN;
+  const arcPts = (cx, cy, ax, ay, bx, by) => {
+    const a0 = Math.atan2(ay-cy, ax-cx);
+    let d = Math.atan2(by-cy, bx-cx) - a0;
+    while (d > Math.PI) d -= 2*Math.PI;
+    while (d < -Math.PI) d += 2*Math.PI;
+    const r = Math.hypot(ax-cx, ay-cy);
+    const out = [];
+    for (let q = 0; q <= N; q++) {
+      const an = a0 + d*(q/N);
+      out.push([cx + r*Math.cos(an), cy + r*Math.sin(an)]);
+    }
+    return out;
+  };
+  for (const b of balls) {
+    const Rc = b.Rc;
+    b.C3 = from3(b.M, depth(Rc));
+    b.Rs = Rc * Math.SQRT2;
+    b.V3 = lift(b.V2);
+    b.T1_3 = lift(b.T1);
+    b.T2_3 = lift(b.T2);
+    b.P3_3 = [b.V3[0] + axisIn[0]*Rc, b.V3[1] + axisIn[1]*Rc, b.V3[2] + axisIn[2]*Rc];
+    // face arc, in the face's own 2D
+    b.capArc2 = arcPts(b.M[0], b.M[1], b.T1[0], b.T1[1], b.T2[0], b.T2[1]);
+    b.capArc3 = b.capArc2.map(lift);
+    // the two wall planes, each as (origin, u, v) with v = into the body
+    b.walls = [
+      { u2: b.u1, out2: [-b.n1[0], -b.n1[1]], from: b.T1_3 },
+      { u2: b.u2, out2: [-b.n2[0], -b.n2[1]], from: b.T2_3 }
+    ];
+    for (const w of b.walls) {
+      w.u3 = [0,0,0]; w.u3[other[0]] = w.u2[0]; w.u3[other[1]] = w.u2[1];
+      w.n3 = [0,0,0]; w.n3[other[0]] = w.out2[0]; w.n3[other[1]] = w.out2[1];
+      w.org = b.V3;
+      w.to2 = (p) => {
+        const dx = p[0]-w.org[0], dy = p[1]-w.org[1], dz = p[2]-w.org[2];
+        return [dx*w.u3[0] + dy*w.u3[1] + dz*w.u3[2],
+                dx*axisIn[0] + dy*axisIn[1] + dz*axisIn[2]];
+      };
+      w.to3 = (uv) => [w.org[0] + w.u3[0]*uv[0] + axisIn[0]*uv[1],
+                       w.org[1] + w.u3[1]*uv[0] + axisIn[1]*uv[1],
+                       w.org[2] + w.u3[2]*uv[0] + axisIn[2]*uv[1]];
+      w.M2 = [Rc, Rc];
+      w.arc2 = arcPts(Rc, Rc, Rc, 0, 0, Rc);   // tangent on the face -> tangent down the wall edge
+      w.arc3 = w.arc2.map(w.to3);
+      w.planeD = w.n3[0]*w.org[0] + w.n3[1]*w.org[1] + w.n3[2]*w.org[2];
+    }
+  }
+
+  // ---- trim one plane's triangles by the corner sectors that bite it ----
+  const polyArea = (p) => {
+    let a = 0;
+    for (let i = 0; i < p.length; i++) { const q=p[i], r=p[(i+1)%p.length]; a += q[0]*r[1]-r[0]*q[1]; }
+    return Math.abs(a)*0.5;
+  };
+  const clipHalf = (p, px, py, nx, ny) => {
+    if (p.length < 3) return [];
+    const res = [];
+    for (let i = 0; i < p.length; i++) {
+      const a = p[i], b = p[(i+1)%p.length];
+      const da = (a[0]-px)*nx + (a[1]-py)*ny;
+      const db = (b[0]-px)*nx + (b[1]-py)*ny;
+      if (da >= -1e-12) res.push(a);
+      if ((da > 1e-12 && db < -1e-12) || (da < -1e-12 && db > 1e-12)) {
+        const u = da/(da-db);
+        res.push([a[0]+(b[0]-a[0])*u, a[1]+(b[1]-a[1])*u]);
+      }
+    }
+    const cl = [];
+    for (const q of res) {
+      const last = cl[cl.length-1];
+      if (!last || Math.hypot(q[0]-last[0], q[1]-last[1]) > 1e-9) cl.push(q);
+    }
+    while (cl.length > 1 && Math.hypot(cl[0][0]-cl[cl.length-1][0], cl[0][1]-cl[cl.length-1][1]) < 1e-9) cl.pop();
+    return cl.length >= 3 ? cl : [];
+  };
+  // keep = outside the sector, or inside it and inside the arc. Every slice
+  // convex, so a triangle can never explode into slivers.
+  const cutByArc = (pieces, C2, arc) => {
+    const uIn = [arc[0][0]-C2[0], arc[0][1]-C2[1]];
+    const uOut = [arc[arc.length-1][0]-C2[0], arc[arc.length-1][1]-C2[1]];
+    const li = Math.hypot(uIn[0],uIn[1])||1e-9, lo = Math.hypot(uOut[0],uOut[1])||1e-9;
+    const a = [uIn[0]/li, uIn[1]/li], b = [uOut[0]/lo, uOut[1]/lo];
+    const rot = (a[0]*b[1]-a[1]*b[0]) >= 0 ? 1 : -1;
+    const inN = [-a[1]*rot, a[0]*rot];
+    const outN = [b[1]*rot, -b[0]*rot];
+    const next = [];
+    for (const p of pieces) {
+      const before = clipHalf(p, C2[0], C2[1], -inN[0], -inN[1]);
+      if (before.length) next.push(before);
+      const side = clipHalf(p, C2[0], C2[1], inN[0], inN[1]);
+      if (!side.length) continue;
+      const after = clipHalf(side, C2[0], C2[1], -outN[0], -outN[1]);
+      if (after.length) next.push(after);
+      let core = clipHalf(side, C2[0], C2[1], outN[0], outN[1]);
+      for (let k = 0; core.length && k+1 < arc.length; k++) {
+        const P = arc[k], Q = arc[k+1];
+        let nx = -(Q[1]-P[1]), ny = Q[0]-P[0];
+        if ((C2[0]-P[0])*nx + (C2[1]-P[1])*ny < 0) { nx = -nx; ny = -ny; }
+        core = clipHalf(core, P[0], P[1], nx, ny);
+      }
+      if (core.length) next.push(core);
+    }
+    return next;
+  };
+  // Split every piece edge at any point of this plane that lies on it, then
+  // fan from a vertex that leaves no degenerate triangle - and if there is
+  // none, ear clip and KEEP the zero-area triangles, which carry the boundary.
+  const emitPlane = (pieces, extraPts, to3, wantOut) => {
+    const cpts = [], seen = new Set();
+    const addC = (q) => {
+      const k = Math.round(q[0]*1e4)+'|'+Math.round(q[1]*1e4);
+      if (seen.has(k)) return;
+      seen.add(k); cpts.push(q);
+    };
+    for (const p of pieces) for (const v of p) addC(v);
+    for (const q of extraPts) addC(q);
+    for (let idx = 0; idx < pieces.length; idx++) {
+      const p = pieces[idx], grown = [];
+      for (let i = 0; i < p.length; i++) {
+        const a = p[i], b = p[(i+1)%p.length];
+        grown.push(a);
+        const ex = b[0]-a[0], ey = b[1]-a[1], len2 = ex*ex+ey*ey;
+        if (!(len2 > 1e-18)) continue;
+        const inv = 1/Math.sqrt(len2);
+        const mids = [];
+        for (const q of cpts) {
+          const u = ((q[0]-a[0])*ex + (q[1]-a[1])*ey)/len2;
+          if (u <= 1e-6 || u >= 1-1e-6) continue;
+          if (Math.abs((q[0]-a[0])*ey - (q[1]-a[1])*ex)*inv > 1e-6) continue;
+          mids.push({u:u, q:q});
+        }
+        mids.sort((x,y) => x.u - y.u);
+        for (const m of mids) grown.push(m.q);
+      }
+      pieces[idx] = grown;
+    }
+    const put = (A, B, C) => {
+      const a = to3(A), b = to3(B), c = to3(C);
+      const ux=b[0]-a[0], uy=b[1]-a[1], uz=b[2]-a[2];
+      const vx=c[0]-a[0], vy=c[1]-a[1], vz=c[2]-a[2];
+      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+      if (nx*wantOut[0] + ny*wantOut[1] + nz*wantOut[2] < 0)
+        out.push(a[0],a[1],a[2], c[0],c[1],c[2], b[0],b[1],b[2]);
+      else
+        out.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
+    };
+    for (const p of pieces) {
+      const m = p.length;
+      let apexAt = -1;
+      for (let a = 0; a < m && apexAt < 0; a++) {
+        let clean = true;
+        for (let k = 1; k+1 < m && clean; k++) {
+          const P0=p[a], P1=p[(a+k)%m], P2=p[(a+k+1)%m];
+          const cr = (P1[0]-P0[0])*(P2[1]-P0[1]) - (P1[1]-P0[1])*(P2[0]-P0[0]);
+          if (Math.abs(cr)*0.5 < 1e-12) clean = false;
+        }
+        if (clean) apexAt = a;
+      }
+      if (apexAt < 0) {
+        for (const t of rawEarClip2D(p)) put(p[t[0]], p[t[1]], p[t[2]]);
+        continue;
+      }
+      for (let k = 1; k+1 < m; k++) put(p[apexAt], p[(apexAt+k)%m], p[(apexAt+k+1)%m]);
+    }
+  };
+
+  const out = [];
+
+  // ---- the clicked face ----
+  {
+    let pieces = capTriIdx.map(t => [flat2(vert(t,0)), flat2(vert(t,1)), flat2(vert(t,2))]);
+    let before = 0;
+    for (const p of pieces) before += polyArea(p);
+    for (const b of balls) pieces = cutByArc(pieces, b.M, b.capArc2);
+    let after = 0;
+    for (const p of pieces) after += polyArea(p);
+    let bite = 0;
+    for (const b of balls) {
+      // corner square minus the quarter disc
+      bite += b.Rc*b.Rc - Math.PI*b.Rc*b.Rc/4;
+    }
+    if (Math.abs((before - bite) - after) > Math.max(1e-4, before*2e-3)) {
+      throw new Error('vertex ball took the wrong bite out of the face - left unchanged');
+    }
+    const extra = [];
+    for (const b of balls) for (const q of b.capArc2) extra.push(q);
+    for (const v of poly) extra.push(v);
+    const wantOut = [0,0,0]; wantOut[axisIdx] = -intoBody;
+    emitPlane(pieces, extra, (uv) => from3(uv, capPlane), wantOut);
+  }
+
+  // ---- the two walls at each vertex ----
+  const wallJobs = new Map();
+  for (const b of balls) {
+    for (const w of b.walls) {
+      const key = w.n3.map(x => Math.round(x*1e3)).join(',') + '|' + Math.round(w.planeD*1e3);
+      if (!wallJobs.has(key)) wallJobs.set(key, { w: w, cuts: [] });
+      wallJobs.get(key).cuts.push({ C2: w.M2map ? w.M2map : null, w: w });
+    }
+  }
+  const onPlane = (p, n3, d) => Math.abs(p[0]*n3[0] + p[1]*n3[1] + p[2]*n3[2] - d) < 1e-3;
+  const usedWallTri = new Set();
+  for (const job of wallJobs.values()) {
+    const w0 = job.w;
+    const mine = [];
+    for (const t of wallTriIdx) {
+      const v0=vert(t,0), v1=vert(t,1), v2=vert(t,2);
+      if (onPlane(v0, w0.n3, w0.planeD) && onPlane(v1, w0.n3, w0.planeD) && onPlane(v2, w0.n3, w0.planeD)) {
+        mine.push(t);
+        usedWallTri.add(t);
+      }
+    }
+    if (!mine.length) continue;
+    // every cut that lands on THIS plane, expressed in this plane's frame
+    const cuts = [];
+    for (const b of balls) {
+      for (const w of b.walls) {
+        const key = w.n3.map(x => Math.round(x*1e3)).join(',') + '|' + Math.round(w.planeD*1e3);
+        const k0 = w0.n3.map(x => Math.round(x*1e3)).join(',') + '|' + Math.round(w0.planeD*1e3);
+        if (key !== k0) continue;
+        cuts.push({ C2: w0.to2(w.to3(w.M2)), arc: w.arc3.map(w0.to2) });
+      }
+    }
+    let pieces = mine.map(t => [w0.to2(vert(t,0)), w0.to2(vert(t,1)), w0.to2(vert(t,2))]);
+    let before = 0;
+    for (const p of pieces) before += polyArea(p);
+    for (const c of cuts) pieces = cutByArc(pieces, c.C2, c.arc);
+    let after = 0;
+    for (const p of pieces) after += polyArea(p);
+    let bite = 0;
+    for (const b of balls) {
+      for (const w of b.walls) {
+        const key = w.n3.map(x => Math.round(x*1e3)).join(',') + '|' + Math.round(w.planeD*1e3);
+        const k0 = w0.n3.map(x => Math.round(x*1e3)).join(',') + '|' + Math.round(w0.planeD*1e3);
+        if (key === k0) bite += b.Rc*b.Rc - Math.PI*b.Rc*b.Rc/4;
+      }
+    }
+    if (Math.abs((before - bite) - after) > Math.max(1e-4, before*2e-3)) {
+      throw new Error('vertex ball took the wrong bite out of a wall - left unchanged');
+    }
+    const extra = [];
+    for (const c of cuts) for (const q of c.arc) extra.push(q);
+    emitPlane(pieces, extra, w0.to3, w0.n3);
+  }
+  for (const t of wallTriIdx) {
+    if (usedWallTri.has(t)) continue;
+    const a = vert(t,0), b = vert(t,1), c = vert(t,2);
+    out.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
+  }
+
+  // ---- the ball patch at each vertex ----
+  // A spherical triangle on the three shared arcs: interior points are
+  // barycentric on the three corner directions and projected onto the sphere,
+  // the three boundary rows ARE the arcs, so the patch and the three flat
+  // faces meet on exactly the same points.
+  let patchTris = 0;
+  for (const b of balls) {
+    const C3 = b.C3, Rs = b.Rs;
+    const dirOf = (p) => {
+      const d = [p[0]-C3[0], p[1]-C3[1], p[2]-C3[2]];
+      const l = Math.hypot(d[0],d[1],d[2]) || 1e-9;
+      return [d[0]/l, d[1]/l, d[2]/l];
+    };
+    // The patch lives on the sphere AND inside all three planes: every
+    // direction has component <= Rc/Rs = 1/sqrt(2) on each outward normal, and
+    // that is exactly where the three boundary arcs are. A barycentric mix of
+    // the corner directions does not respect that - normalising pushes it past
+    // a plane and the ball pokes out through the face, 0.17mm on a 20mm cube
+    // at R=2. Anything over is put back on the plane it crossed, still on the
+    // sphere.
+    // A hair inside the plane, not exactly on it: clamping onto the boundary
+    // lands interior grid points on top of the arc points and the seam picks
+    // up edges shared by more than two triangles.
+    const LIM = (1 / Math.SQRT2) * (1 - 2e-3);
+    const nrm3 = [[0,0,0], b.walls[0].n3, b.walls[1].n3];
+    nrm3[0][axisIdx] = -intoBody;
+    const clampInside = (d) => {
+      for (let pass = 0; pass < 3; pass++) {
+        let worst = -1, wc = LIM;
+        for (let q = 0; q < 3; q++) {
+          const c = d[0]*nrm3[q][0] + d[1]*nrm3[q][1] + d[2]*nrm3[q][2];
+          if (c > wc) { wc = c; worst = q; }
+        }
+        if (worst < 0) break;
+        const nq = nrm3[worst];
+        const c = d[0]*nq[0] + d[1]*nq[1] + d[2]*nq[2];
+        const rx = d[0] - c*nq[0], ry = d[1] - c*nq[1], rz = d[2] - c*nq[2];
+        const rl = Math.hypot(rx, ry, rz);
+        if (!(rl > 1e-9)) break;
+        const keep = Math.sqrt(Math.max(0, 1 - LIM*LIM)) / rl;
+        d = [rx*keep + LIM*nq[0], ry*keep + LIM*nq[1], rz*keep + LIM*nq[2]];
+      }
+      return d;
+    };
+    const eCap = b.capArc3.map(dirOf);                 // T1 -> T2
+    const eB   = b.walls[1].arc3.map(dirOf);           // T2 -> P3
+    const eA   = b.walls[0].arc3.map(dirOf);           // T1 -> P3
+    const grid = [];
+    for (let i = 0; i <= N; i++) {
+      const row = [];
+      for (let j = 0; j <= N - i; j++) {
+        const k = N - i - j;
+        let d;
+        if (k === 0) d = eCap[j];                      // the T1..T2 edge
+        else if (j === 0) d = eA[k];                   // the T1..P3 edge
+        else if (i === 0) d = eB[k];                   // the T2..P3 edge
+        else {
+          const x = i*eCap[0][0] + j*eCap[N][0] + k*eA[N][0];
+          const y = i*eCap[0][1] + j*eCap[N][1] + k*eA[N][1];
+          const z = i*eCap[0][2] + j*eCap[N][2] + k*eA[N][2];
+          const l = Math.hypot(x,y,z) || 1e-9;
+          d = clampInside([x/l, y/l, z/l]);
+        }
+        row.push([C3[0]+d[0]*Rs, C3[1]+d[1]*Rs, C3[2]+d[2]*Rs]);
+      }
+      grid.push(row);
+    }
+    const put = (A, B, Cc) => {
+      const ux=B[0]-A[0], uy=B[1]-A[1], uz=B[2]-A[2];
+      const vx=Cc[0]-A[0], vy=Cc[1]-A[1], vz=Cc[2]-A[2];
+      const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+      if (0.5*Math.hypot(nx,ny,nz) < 1e-12) return;
+      const mx=(A[0]+B[0]+Cc[0])/3 - C3[0], my=(A[1]+B[1]+Cc[1])/3 - C3[1], mz=(A[2]+B[2]+Cc[2])/3 - C3[2];
+      if (nx*mx + ny*my + nz*mz < 0) out.push(A[0],A[1],A[2], Cc[0],Cc[1],Cc[2], B[0],B[1],B[2]);
+      else out.push(A[0],A[1],A[2], B[0],B[1],B[2], Cc[0],Cc[1],Cc[2]);
+      patchTris++;
+    };
+    for (let i = 0; i < N; i++) {
+      for (let j = 0; j < N - i; j++) {
+        put(grid[i][j], grid[i+1][j], grid[i][j+1]);
+        if (j + 1 < N - i) put(grid[i+1][j], grid[i+1][j+1], grid[i][j+1]);
+      }
+    }
+  }
+
+  if (out.length < 9) throw new Error('vertex ball produced no geometry');
+
+  // Global T-junction repair. Each plane is trimmed in its own frame, so a cut
+  // that crosses an edge two planes share leaves a vertex on one side and not
+  // the other - and the piece's far end, which this pass never touches, ends
+  // up with long edges the trimmed walls have split. Split any triangle edge
+  // another vertex sits on. One sweep only splits one edge per triangle, so
+  // sweep until nothing moves.
+  for (let pass = 0; pass < 8; pass++) {
+    let splits = 0;
+    const q = 1e4;
+    const vk = (x, y, z) => Math.round(x*q)+'|'+Math.round(y*q)+'|'+Math.round(z*q);
+    const pts = new Map();
+    for (let i = 0; i < out.length; i += 3) {
+      const k = vk(out[i], out[i+1], out[i+2]);
+      if (!pts.has(k)) pts.set(k, [out[i], out[i+1], out[i+2]]);
+    }
+    const all = [...pts.values()];
+    const grid = new Map();
+    const CELL = 1.0;
+    const cell = (p) => Math.floor(p[0]/CELL)+'|'+Math.floor(p[1]/CELL)+'|'+Math.floor(p[2]/CELL);
+    for (const p of all) {
+      const k = cell(p);
+      if (!grid.has(k)) grid.set(k, []);
+      grid.get(k).push(p);
+    }
+    const near = (a, b) => {
+      const seen = new Set(), res = [];
+      const x0 = Math.floor(Math.min(a[0],b[0])/CELL)-1, x1 = Math.floor(Math.max(a[0],b[0])/CELL)+1;
+      const y0 = Math.floor(Math.min(a[1],b[1])/CELL)-1, y1 = Math.floor(Math.max(a[1],b[1])/CELL)+1;
+      const z0 = Math.floor(Math.min(a[2],b[2])/CELL)-1, z1 = Math.floor(Math.max(a[2],b[2])/CELL)+1;
+      if ((x1-x0)*(y1-y0)*(z1-z0) > 4096) return all;
+      for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) {
+        const g = grid.get(x+'|'+y+'|'+z);
+        if (!g) continue;
+        for (const p of g) { const k = vk(p[0],p[1],p[2]); if (!seen.has(k)) { seen.add(k); res.push(p); } }
+      }
+      return res;
+    };
+    const fixed = [];
+    for (let t = 0; t + 8 < out.length; t += 9) {
+      const V = [[out[t],out[t+1],out[t+2]], [out[t+3],out[t+4],out[t+5]], [out[t+6],out[t+7],out[t+8]]];
+      let split = -1, mids = null;
+      for (let e = 0; e < 3; e++) {
+        const a = V[e], b = V[(e+1)%3];
+        const ex = b[0]-a[0], ey = b[1]-a[1], ez = b[2]-a[2];
+        const len2 = ex*ex + ey*ey + ez*ez;
+        if (!(len2 > 1e-12)) continue;
+        const inv = 1/Math.sqrt(len2);
+        const hits = [];
+        for (const p of near(a, b)) {
+          const u = ((p[0]-a[0])*ex + (p[1]-a[1])*ey + (p[2]-a[2])*ez)/len2;
+          if (u <= 1e-6 || u >= 1-1e-6) continue;
+          const cx = (p[1]-a[1])*ez - (p[2]-a[2])*ey;
+          const cy = (p[2]-a[2])*ex - (p[0]-a[0])*ez;
+          const cz = (p[0]-a[0])*ey - (p[1]-a[1])*ex;
+          if (Math.hypot(cx,cy,cz)*inv > 1e-4) continue;
+          hits.push({ u: u, p: p });
+        }
+        if (hits.length) { split = e; mids = hits.sort((x,y) => x.u - y.u); break; }
+      }
+      if (split < 0) {
+        fixed.push(V[0][0],V[0][1],V[0][2], V[1][0],V[1][1],V[1][2], V[2][0],V[2][1],V[2][2]);
+        continue;
+      }
+      splits++;
+      const A = V[split], B = V[(split+1)%3], C = V[(split+2)%3];
+      const chain = [A];
+      for (const m of mids) chain.push(m.p);
+      chain.push(B);
+      for (let k = 0; k + 1 < chain.length; k++) {
+        fixed.push(chain[k][0],chain[k][1],chain[k][2],
+                   chain[k+1][0],chain[k+1][1],chain[k+1][2],
+                   C[0],C[1],C[2]);
+      }
+    }
+    out.length = 0;
+    for (const v of fixed) out.push(v);
+    if (!splits) break;
+  }
+
+  const result = new Float32Array(out);
+  rawVertexBallOnly.lastBuild = {
+    vertices: balls.length,
+    corners: cornerCount,
+    skipped: skipped,
+    radius: balls.reduce((m, b) => Math.max(m, b.Rc), 0),
+    requested: requestedR,
+    ballR: balls.reduce((m, b) => Math.max(m, b.Rs), 0),
+    patchTris: patchTris
+  };
+  return result;
+}
+
+
 
 // ===================== Corners: a ball at the VERTEX =====================
 //
@@ -1297,10 +1957,15 @@ function softenSelectedFace(rawTris, axisIdx, keepMinFace, R, mode, pickPlane) {
   if (mode === 'chamfer' && typeof rawChamferCut === 'function') {
     return rawChamferCut(rawTris, axisIdx, plane, keepMin, R);
   }
-  if (mode === 'corners') {
-    // A ball at each VERTEX of the clicked face - the face and both walls get
-    // the same R - not an arc drawn on the clicked plane.
+  if (mode === 'cornersedges') {
+    // Corners+edges: the setback bake. Four vertex blends, four edge bands,
+    // no shelf. Its maths is not touched by the split into two modes.
     return rawVertexBallCorners(rawTris, axisIdx, keepMin, R, { minTurnDeg: 25 });
+  }
+  if (mode === 'corners') {
+    // Corners: a ball at each VERTEX and nothing else. The face and both walls
+    // get the same R, the mid-edges stay square, no band, no shelf.
+    return rawVertexBallOnly(rawTris, axisIdx, keepMin, R, { minTurnDeg: 25 });
   }
   // Round / fillet: a TRUE perimeter fillet — every point of the loop carries
   // R, so all four edges of a square face get the radius and none stays a
@@ -2247,12 +2912,17 @@ function applySoftenOnFace(face) {
   const treat = getEdgeTreat();
   const clamp = (x) => (x.radius < x.requested - 1e-6 ? ' (asked ' + x.requested.toFixed(2) + ', wall clamp)' : '');
   const ball = (typeof rawVertexBallCorners === 'function') ? rawVertexBallCorners.lastBuild : null;
+  const only = (typeof rawVertexBallOnly === 'function') ? rawVertexBallOnly.lastBuild : null;
   const perim = (typeof rawPerimeterFilletInPlace === 'function') ? rawPerimeterFilletInPlace.lastBuild : null;
-  if (treat === 'corners' && ball && ball.vertices != null) {
+  if (treat === 'cornersedges' && ball && ball.vertices != null) {
     setStatus('corners+edges setback R ' + ball.radius.toFixed(2) + clamp(ball) +
               ' (' + ball.vertices + ' corners + ' + ball.bands + ' edges, ' +
               ball.patchTris + ' blend tris, no shelf)' +
               (ball.skipped ? ' - ' + ball.skipped + ' not square, left sharp' : ''));
+  } else if (treat === 'corners' && only && only.vertices != null) {
+    setStatus('Corners R ' + only.radius.toFixed(2) + clamp(only) +
+              ' - ' + only.vertices + ' vertices, mid-edges square' +
+              (only.skipped ? ' - ' + only.skipped + ' not square, left sharp' : ''));
   } else if (perim && perim.loopPts != null) {
     setStatus('Soften ok - ' + perim.mode + ' on all ' + perim.loopPts + ' loop pts at R ' +
               perim.radius.toFixed(2) + clamp(perim));
@@ -2387,12 +3057,13 @@ function capSelectedModel() {
   setStatus('Cap: click a face');
 }
 
-// fillet | corners | chamfer. Anything else (a stale saved value, an old
-// 'square' option) falls back to fillet — Soften has no square treatment.
+// fillet | corners | cornersedges | chamfer. Anything else (a stale saved
+// value, an old 'square' option) falls back to fillet — Soften has no square
+// treatment. 'corners' is vertices only; 'cornersedges' is the setback bake.
 function getEdgeTreat() {
   const sel = document.getElementById('sel-edge-treat');
   const v = sel && sel.value ? String(sel.value) : (state.edgeTreat || 'fillet');
-  state.edgeTreat = (v === 'chamfer' || v === 'corners') ? v : 'fillet';
+  state.edgeTreat = (v === 'chamfer' || v === 'corners' || v === 'cornersedges') ? v : 'fillet';
   return state.edgeTreat;
 }
 
@@ -2408,7 +3079,9 @@ function softenSelectedModel() {
   state.softenArmed = true;
   clearFacePick();
   const mode = getEdgeTreat();
-  const label = mode === 'chamfer' ? 'bevel' : (mode === 'corners' ? 'corners' : 'round');
+  const label = mode === 'chamfer' ? 'bevel'
+              : mode === 'cornersedges' ? 'corners+edges'
+              : mode === 'corners' ? 'corners' : 'round';
   setStatus('Soften (' + label + '): click a face');
 }
 
