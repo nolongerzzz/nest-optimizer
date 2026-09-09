@@ -15,6 +15,469 @@
 // the face; a factory-curved end simply has no meaningful cap/wall
 // boundary there and the engine fails safely, before any mesh swap.
 
+// True perimeter fillet on the clicked face's own loop — Round and Bevel.
+//
+// Corners rolls only the vertices that turn; this rolls the WHOLE loop: every
+// loop point carries R, so all four edges of a square face get the radius and
+// none of them stays a sharp straight run. Same rules as Corners otherwise —
+// the cap plane is read off the mesh and the lid is rebuilt at exactly that
+// plane, the wall moves in depth only, and the lid is the original cap
+// triangles trimmed back to the ring rather than a re-fan. The lid boundary
+// insets by R because that is what a fillet is; the lid itself never pulls
+// back off its plane.
+//
+// opts.profile  'round' (default) quarter circle, or 'chamfer' flat band.
+function rawPerimeterFilletInPlace(rawTris, axisIdx, keepMin, requestedR, opts) {
+  opts = opts || {};
+  const chamfer = opts.profile === 'chamfer';
+  const STEPS = chamfer ? 1 : 6;
+  const intoBody = keepMin ? 1 : -1;
+  const other = [0, 1, 2].filter(a => a !== axisIdx);
+  const tol = 1e-4;
+
+  let minV = Infinity, maxV = -Infinity;
+  for (let i = axisIdx; i < rawTris.length; i += 3) {
+    if (rawTris[i] < minV) minV = rawTris[i];
+    if (rawTris[i] > maxV) maxV = rawTris[i];
+  }
+  const capPlane = keepMin ? minV : maxV;
+  const capTol = 1e-3;
+
+  const triCount = rawTris.length / 9;
+  const vert = (t, v) => { const i0 = t*9 + v*3; return [rawTris[i0], rawTris[i0+1], rawTris[i0+2]]; };
+  const isOnCap = (p) => Math.abs(p[axisIdx] - capPlane) < capTol;
+
+  const capTriIdx = [], wallTriIdx = [];
+  for (let t = 0; t < triCount; t++) {
+    const v0=vert(t,0), v1=vert(t,1), v2=vert(t,2);
+    if (isOnCap(v0) && isOnCap(v1) && isOnCap(v2)) capTriIdx.push(t);
+    else wallTriIdx.push(t);
+  }
+  if (!capTriIdx.length) throw new Error('no cap found on this face');
+
+  const vkey = (p) => Math.round(p[0]/tol)+'|'+Math.round(p[1]/tol)+'|'+Math.round(p[2]/tol);
+  const edgeMap = new Map();
+  const addEdge = (a, b, isCap) => {
+    const ka = vkey(a), kb = vkey(b);
+    const ek = ka < kb ? ka+'~'+kb : kb+'~'+ka;
+    if (!edgeMap.has(ek)) edgeMap.set(ek, []);
+    edgeMap.get(ek).push({ isCap, a, b });
+  };
+  for (const t of capTriIdx) {
+    const v0=vert(t,0), v1=vert(t,1), v2=vert(t,2);
+    addEdge(v0,v1,true); addEdge(v1,v2,true); addEdge(v2,v0,true);
+  }
+  for (const t of wallTriIdx) {
+    const v0=vert(t,0), v1=vert(t,1), v2=vert(t,2);
+    if (isOnCap(v0) && isOnCap(v1)) addEdge(v0,v1,false);
+    if (isOnCap(v1) && isOnCap(v2)) addEdge(v1,v2,false);
+    if (isOnCap(v2) && isOnCap(v0)) addEdge(v2,v0,false);
+  }
+  const boundaryEdges = [];
+  for (const entries of edgeMap.values()) {
+    if (entries.length === 2 && entries.some(e=>e.isCap) && entries.some(e=>!e.isCap)) {
+      const capEntry = entries.find(e => e.isCap);
+      boundaryEdges.push([capEntry.a, capEntry.b]);
+    }
+  }
+  if (!boundaryEdges.length) throw new Error('no cap/wall boundary found');
+
+  const adj = new Map(), posOf = new Map();
+  const pushAdj = (k, o) => { if (!adj.has(k)) adj.set(k, []); adj.get(k).push(o); };
+  for (const [a,b] of boundaryEdges) {
+    const ka = vkey(a), kb = vkey(b);
+    posOf.set(ka,a); posOf.set(kb,b);
+    pushAdj(ka,kb); pushAdj(kb,ka);
+  }
+  for (const list of adj.values()) if (list.length !== 2) throw new Error('branch point in cap boundary');
+  const startKey = vkey(boundaryEdges[0][0]);
+  const loopKeys = [startKey];
+  let prevKey = null, curKey = startKey;
+  do {
+    const nbrs = adj.get(curKey);
+    const nextKey = nbrs[0] === prevKey ? nbrs[1] : nbrs[0];
+    if (nextKey === startKey) break;
+    loopKeys.push(nextKey);
+    prevKey = curKey; curKey = nextKey;
+    if (loopKeys.length > adj.size + 2) throw new Error('cap boundary did not close');
+  } while (true);
+  const loop3d = loopKeys.map(k => posOf.get(k));
+  if (loop3d.length < 3) throw new Error('cap boundary too small to fillet');
+
+  const flat2 = (p3) => [p3[other[0]], p3[other[1]]];
+  let poly2d = loop3d.map(flat2);
+  poly2d = raw2DWeldLoop(poly2d, 0.08);
+  const n = poly2d.length;
+  if (n < 3) throw new Error('cap boundary too small after weld');
+
+  // Wall available at a loop point, skipping only the two segments that
+  // touch it. rawLocalThickness2 skips everything within two indices, so on a
+  // coarse loop it skips the whole loop and falls back to its 4mm default.
+  const wallLimitAt = (i) => {
+    const curr = poly2d[i];
+    const prev = poly2d[(i-1+n)%n], next = poly2d[(i+1)%n];
+    const nn = rawEdgeInwardNormal2(prev, next);
+    let best = Infinity;
+    for (let j = 0; j < n; j++) {
+      if (j === i || j === (i-1+n)%n) continue;
+      const a = poly2d[j], b = poly2d[(j+1)%n];
+      const dx = b[0]-a[0], dy = b[1]-a[1];
+      const den = nn[0]*dy - nn[1]*dx;
+      if (Math.abs(den) < 1e-10) continue;
+      const t = ((a[0]-curr[0])*dy - (a[1]-curr[1])*dx) / den;
+      const u = ((a[0]-curr[0])*nn[1] - (a[1]-curr[1])*nn[0]) / -den;
+      if (t > 0.1 && t < best && u >= -0.05 && u <= 1.05) best = t;
+    }
+    for (let j = 0; j < n; j++) {
+      if (j === i || j === (i-1+n)%n || j === (i+1)%n) continue;
+      const d = Math.hypot(poly2d[j][0]-curr[0], poly2d[j][1]-curr[1]);
+      if (d < best) best = d;
+    }
+    return best === Infinity ? 4 : best;
+  };
+  // Every loop point carries R — that is the whole difference from Corners.
+  const Rs = new Array(n);
+  let peakR = 0;
+  for (let i = 0; i < n; i++) {
+    Rs[i] = Math.min(requestedR, Math.max(0, wallLimitAt(i) * 0.45));
+    if (Rs[i] > peakR) peakR = Rs[i];
+  }
+  if (peakR < 0.02) throw new Error('no safe radius anywhere on this face');
+
+  let area2 = 0;
+  for (let i = 0; i < n; i++) { const a=poly2d[i], b=poly2d[(i+1)%n]; area2 += a[0]*b[1]-b[0]*a[1]; }
+  const windSign = area2 >= 0 ? 1 : -1;
+  const inwardNormal2 = (a, b) => {
+    const tx=b[0]-a[0], ty=b[1]-a[1];
+    let nx=-ty*windSign, ny=tx*windSign;
+    const len = Math.hypot(nx,ny) || 1e-9;
+    return [nx/len, ny/len];
+  };
+  const vertexOffset = (i, radius) => {
+    const prev=poly2d[(i-1+n)%n], curr=poly2d[i], next=poly2d[(i+1)%n];
+    const n1=inwardNormal2(prev,curr), n2=inwardNormal2(curr,next);
+    let bx=n1[0]+n2[0], by=n1[1]+n2[1];
+    const blen=Math.hypot(bx,by)||1e-9; bx/=blen; by/=blen;
+    const cosHalf = Math.max(bx*n1[0]+by*n1[1], 0.3);
+    return [curr[0]+bx*(radius/cosHalf), curr[1]+by*(radius/cosHalf)];
+  };
+  const from3 = (uv, along) => { const p=[0,0,0]; p[other[0]]=uv[0]; p[other[1]]=uv[1]; p[axisIdx]=along; return p; };
+  const ringAt = (s) => {
+    const t = s / STEPS;
+    const phi = Math.asin(Math.min(1, Math.max(0, t)));
+    const ring = [];
+    for (let i = 0; i < n; i++) {
+      const R = Rs[i];
+      const inset = chamfer ? R * t : R * (1 - Math.cos(phi));
+      const depth = chamfer ? R * (1 - t) : R * (1 - Math.sin(phi));
+      ring.push(from3(vertexOffset(i, inset), capPlane + intoBody * depth));
+    }
+    return ring;
+  };
+  const rings = [];
+  for (let s = 0; s <= STEPS; s++) rings.push(ringAt(s));
+  const ringTop2 = rings[STEPS].map(flat2);
+  if (rawRingSelfIntersects2(ringTop2)) throw new Error('R=' + requestedR + ' self-intersects on this face');
+
+  const out = [];
+  const polyArea = (p) => {
+    let a = 0;
+    for (let i = 0; i < p.length; i++) { const q = p[i], r = p[(i+1)%p.length]; a += q[0]*r[1] - r[0]*q[1]; }
+    return Math.abs(a) * 0.5;
+  };
+  const clipHalf = (p, px, py, nx, ny) => {
+    if (p.length < 3) return [];
+    const res = [];
+    for (let i = 0; i < p.length; i++) {
+      const a = p[i], b = p[(i+1)%p.length];
+      const da = (a[0]-px)*nx + (a[1]-py)*ny;
+      const db = (b[0]-px)*nx + (b[1]-py)*ny;
+      if (da >= -1e-12) res.push(a);
+      if ((da > 1e-12 && db < -1e-12) || (da < -1e-12 && db > 1e-12)) {
+        const u = da / (da - db);
+        res.push([a[0] + (b[0]-a[0])*u, a[1] + (b[1]-a[1])*u]);
+      }
+    }
+    const cl = [];
+    for (const q of res) {
+      const last = cl[cl.length-1];
+      if (!last || Math.hypot(q[0]-last[0], q[1]-last[1]) > 1e-9) cl.push(q);
+    }
+    while (cl.length > 1 && Math.hypot(cl[0][0]-cl[cl.length-1][0], cl[0][1]-cl[cl.length-1][1]) < 1e-9) cl.pop();
+    return cl.length >= 3 ? cl : [];
+  };
+
+  // ---------- lid: original cap triangles trimmed back to the ring ----------
+  const capPolys = capTriIdx.map(t => [flat2(vert(t,0)), flat2(vert(t,1)), flat2(vert(t,2))]);
+  let lidBefore = 0;
+  for (const p of capPolys) lidBefore += polyArea(p);
+  let convexRing = true, csign = 0;
+  for (let i = 0; i < n && convexRing; i++) {
+    const a = ringTop2[i], b = ringTop2[(i+1)%n], c = ringTop2[(i+2)%n];
+    const cr = (b[0]-a[0])*(c[1]-b[1]) - (b[1]-a[1])*(c[0]-b[0]);
+    if (Math.abs(cr) < 1e-12) continue;
+    const sg = cr > 0 ? 1 : -1;
+    if (csign === 0) csign = sg; else if (sg !== csign) convexRing = false;
+  }
+  if (csign === 0) convexRing = false;
+  let lidPieces = [];
+  if (convexRing) {
+    let ra = 0;
+    for (let i = 0; i < n; i++) { const a=ringTop2[i], b=ringTop2[(i+1)%n]; ra += a[0]*b[1]-b[0]*a[1]; }
+    const w = ra >= 0 ? 1 : -1;
+    for (const cp of capPolys) {
+      let piece = cp;
+      for (let i = 0; i < n && piece.length; i++) {
+        const a = ringTop2[i], b = ringTop2[(i+1)%n];
+        piece = clipHalf(piece, a[0], a[1], -(b[1]-a[1])*w, (b[0]-a[0])*w);
+      }
+      if (piece.length >= 3) lidPieces.push(piece);
+    }
+  } else {
+    // Non-convex face: take the band off quad by quad instead of assuming the
+    // ring can be used as a set of half planes.
+    lidPieces = capPolys.slice();
+    for (let i = 0; i < n; i++) {
+      const i1 = (i+1)%n;
+      const q = [poly2d[i], poly2d[i1], ringTop2[i1], ringTop2[i]];
+      if (polyArea(q) < 1e-12) continue;
+      let bx0=Infinity, by0=Infinity, bx1=-Infinity, by1=-Infinity;
+      for (const v of q) {
+        if (v[0] < bx0) bx0 = v[0];
+        if (v[0] > bx1) bx1 = v[0];
+        if (v[1] < by0) by0 = v[1];
+        if (v[1] > by1) by1 = v[1];
+      }
+      const cen = [0, 0];
+      for (const v of q) { cen[0] += v[0]/q.length; cen[1] += v[1]/q.length; }
+      const next = [];
+      for (const p of lidPieces) {
+        let px0=Infinity, py0=Infinity, px1=-Infinity, py1=-Infinity;
+        for (const v of p) {
+          if (v[0] < px0) px0 = v[0];
+          if (v[0] > px1) px1 = v[0];
+          if (v[1] < py0) py0 = v[1];
+          if (v[1] > py1) py1 = v[1];
+        }
+        if (px1 < bx0-1e-9 || px0 > bx1+1e-9 || py1 < by0-1e-9 || py0 > by1+1e-9) { next.push(p); continue; }
+        let inside = p;
+        for (let e = 0; e < q.length && inside.length; e++) {
+          const a = q[e], b = q[(e+1)%q.length];
+          let nx = -(b[1]-a[1]), ny = b[0]-a[0];
+          if ((cen[0]-a[0])*nx + (cen[1]-a[1])*ny < 0) { nx = -nx; ny = -ny; }
+          const outer = clipHalf(inside, a[0], a[1], -nx, -ny);
+          if (outer.length >= 3) next.push(outer);
+          inside = clipHalf(inside, a[0], a[1], nx, ny);
+        }
+      }
+      lidPieces = next;
+      if (lidPieces.length > 4096) throw new Error('lid trim did not converge');
+    }
+  }
+  // The trimmed lid must come out as exactly the ring polygon.
+  let lidAfter = 0;
+  for (const p of lidPieces) lidAfter += polyArea(p);
+  let ringArea = 0;
+  for (let i = 0; i < n; i++) { const a=ringTop2[i], b=ringTop2[(i+1)%n]; ringArea += a[0]*b[1]-b[0]*a[1]; }
+  ringArea = Math.abs(ringArea) * 0.5;
+  if (!(ringArea > 1e-9) || Math.abs(ringArea - lidAfter) > Math.max(1e-6, lidBefore * 1e-5)) {
+    throw new Error('R=' + requestedR + ' too large for this face - left unchanged');
+  }
+
+  // T-junction repair on the lid, then the splits the band has to follow.
+  const cpts = [], cseen = new Set();
+  const addC = (p) => {
+    const k = Math.round(p[0]*1e4) + '|' + Math.round(p[1]*1e4);
+    if (cseen.has(k)) return;
+    cseen.add(k);
+    cpts.push(p);
+  };
+  for (const p of lidPieces) for (const v of p) addC(v);
+  for (const v of poly2d) addC(v);
+  for (const v of loop3d) addC(flat2(v));
+  for (const v of ringTop2) addC(v);
+  for (let idx = 0; idx < lidPieces.length; idx++) {
+    const p = lidPieces[idx], grown = [];
+    for (let i = 0; i < p.length; i++) {
+      const a = p[i], b = p[(i+1)%p.length];
+      grown.push(a);
+      const ex = b[0]-a[0], ey = b[1]-a[1], len2 = ex*ex + ey*ey;
+      if (!(len2 > 1e-18)) continue;
+      const inv = 1 / Math.sqrt(len2);
+      const mids = [];
+      for (const q of cpts) {
+        const u = ((q[0]-a[0])*ex + (q[1]-a[1])*ey) / len2;
+        if (u <= 1e-6 || u >= 1-1e-6) continue;
+        if (Math.abs((q[0]-a[0])*ey - (q[1]-a[1])*ex) * inv > 1e-6) continue;
+        mids.push({ u, q });
+      }
+      mids.sort((x, y) => x.u - y.u);
+      for (const md of mids) grown.push(md.q);
+    }
+    lidPieces[idx] = grown;
+  }
+  const ringSplits = new Map();
+  for (const p of lidPieces) {
+    for (const v of p) {
+      for (let i = 0; i < n; i++) {
+        const P = ringTop2[i], Q = ringTop2[(i+1)%n];
+        const ex = Q[0]-P[0], ey = Q[1]-P[1], len2 = ex*ex + ey*ey;
+        if (!(len2 > 1e-18)) continue;
+        const u = ((v[0]-P[0])*ex + (v[1]-P[1])*ey) / len2;
+        if (u <= 1e-6 || u >= 1-1e-6) continue;
+        if (Math.abs((v[0]-P[0])*ey - (v[1]-P[1])*ex) / Math.sqrt(len2) > 1e-3) continue;
+        if (!ringSplits.has(i)) ringSplits.set(i, []);
+        const list = ringSplits.get(i);
+        if (!list.some(w => Math.abs(w - u) < 1e-6)) list.push(u);
+      }
+    }
+  }
+
+  const emitLid = (A, B, C) => {
+    let a = from3(A, capPlane), b = from3(B, capPlane), c = from3(C, capPlane);
+    const ux=b[0]-a[0], uy=b[1]-a[1], uz=b[2]-a[2];
+    const vx=c[0]-a[0], vy=c[1]-a[1], vz=c[2]-a[2];
+    const nrm = [uy*vz-uz*vy, uz*vx-ux*vz, ux*vy-uy*vx];
+    if (!(Math.hypot(nrm[0], nrm[1], nrm[2]) > 1e-10)) return;
+    const wantSign = keepMin ? -1 : 1;
+    if (Math.sign(nrm[axisIdx] || 1) !== wantSign) { const tmp=b; b=c; c=tmp; }
+    out.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
+  };
+  for (const p of lidPieces) {
+    const m = p.length;
+    let apexAt = -1;
+    for (let a = 0; a < m && apexAt < 0; a++) {
+      let clean = true;
+      for (let k = 1; k + 1 < m && clean; k++) {
+        const P0 = p[a], P1 = p[(a+k)%m], P2 = p[(a+k+1)%m];
+        const cr = (P1[0]-P0[0])*(P2[1]-P0[1]) - (P1[1]-P0[1])*(P2[0]-P0[0]);
+        if (Math.abs(cr) * 0.5 < 1e-12) clean = false;
+      }
+      if (clean) apexAt = a;
+    }
+    if (apexAt < 0) {
+      for (const t of rawEarClip2D(p)) emitLid(p[t[0]], p[t[1]], p[t[2]]);
+      continue;
+    }
+    for (let k = 1; k + 1 < m; k++) emitLid(p[apexAt], p[(apexAt+k)%m], p[(apexAt+k+1)%m]);
+  }
+
+  // ---------- wall: depth only, split at every loop vertex ----------
+  const depthOf = (uv) => {
+    let bestD = Infinity, bestR = 0;
+    for (let i = 0; i < n; i++) {
+      const a = poly2d[i], b = poly2d[(i+1)%n];
+      const ex = b[0]-a[0], ey = b[1]-a[1];
+      const len2 = ex*ex + ey*ey;
+      let u = len2 > 1e-18 ? ((uv[0]-a[0])*ex + (uv[1]-a[1])*ey) / len2 : 0;
+      u = Math.max(0, Math.min(1, u));
+      const d = Math.hypot(uv[0] - (a[0]+ex*u), uv[1] - (a[1]+ey*u));
+      if (d < bestD) { bestD = d; bestR = Rs[i] + (Rs[(i+1)%n] - Rs[i]) * u; }
+    }
+    return capPlane + intoBody * bestR;
+  };
+  const dropTo = (p3) => { const q = p3.slice(); q[axisIdx] = depthOf(flat2(p3)); return q; };
+  const splitTol = 1e-3;
+  const capEdgeChain = (A, B) => {
+    const ax = A[other[0]], ay = A[other[1]];
+    const ex = B[other[0]] - ax, ey = B[other[1]] - ay;
+    const len2 = ex*ex + ey*ey;
+    if (!(len2 > 1e-18)) return [A, B];
+    const inv = 1 / Math.sqrt(len2);
+    const mids = [];
+    for (let i = 0; i < n; i++) {
+      const px = poly2d[i][0] - ax, py = poly2d[i][1] - ay;
+      const u = (px*ex + py*ey) / len2;
+      if (u <= 1e-6 || u >= 1-1e-6) continue;
+      if (Math.abs(px*ey - py*ex) * inv > splitTol) continue;
+      const q = [0,0,0];
+      q[other[0]] = ax + ex*u;
+      q[other[1]] = ay + ey*u;
+      q[axisIdx] = capPlane;
+      mids.push({ u, q });
+    }
+    if (!mids.length) return [A, B];
+    mids.sort((x, y) => x.u - y.u);
+    const chain = [A];
+    const near = (p, q) => Math.hypot(p[other[0]]-q[other[0]], p[other[1]]-q[other[1]]) < 1e-9;
+    for (const md of mids) if (!near(md.q, chain[chain.length-1])) chain.push(md.q);
+    if (!near(B, chain[chain.length-1])) chain.push(B);
+    return chain;
+  };
+  const pushTri = (a, b, c) => {
+    const ux=b[0]-a[0], uy=b[1]-a[1], uz=b[2]-a[2];
+    const vx=c[0]-a[0], vy=c[1]-a[1], vz=c[2]-a[2];
+    const nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+    if (0.5*Math.hypot(nx,ny,nz) < 1e-12) return;
+    out.push(a[0],a[1],a[2], b[0],b[1],b[2], c[0],c[1],c[2]);
+  };
+  for (const t of wallTriIdx) {
+    const tri = [vert(t,0), vert(t,1), vert(t,2)];
+    let capEdge = -1;
+    for (let v = 0; v < 3; v++) if (isOnCap(tri[v]) && isOnCap(tri[(v+1)%3])) { capEdge = v; break; }
+    if (capEdge < 0) {
+      let moved = false;
+      for (let v = 0; v < 3; v++) {
+        if (!isOnCap(tri[v])) continue;
+        const q = dropTo(tri[v]);
+        if (q[axisIdx] !== tri[v][axisIdx]) moved = true;
+        tri[v] = q;
+      }
+      // Every wall triangle the input had is kept, area test and all. The
+      // split leaves zero-area seam triangles behind that bridge a T-junction
+      // on the piece's OTHER face; drop one and the edge it bridged is left
+      // odd. Only triangles this pass invents are area tested.
+      out.push(tri[0][0],tri[0][1],tri[0][2], tri[1][0],tri[1][1],tri[1][2], tri[2][0],tri[2][1],tri[2][2]);
+      continue;
+    }
+    const A = tri[capEdge], B = tri[(capEdge+1)%3], C = tri[(capEdge+2)%3];
+    const rawChain = capEdgeChain(A, B);
+    const chain = rawChain.map(dropTo);
+    const Cp = isOnCap(C) ? dropTo(C) : C;
+    if (rawChain.length === 2) {
+      out.push(chain[0][0],chain[0][1],chain[0][2], chain[1][0],chain[1][1],chain[1][2], Cp[0],Cp[1],Cp[2]);
+      continue;
+    }
+    for (let k = 0; k + 1 < chain.length; k++) pushTri(chain[k], chain[k+1], Cp);
+  }
+
+  // ---------- band ----------
+  const same = (p, q) => Math.hypot(p[0]-q[0], p[1]-q[1], p[2]-q[2]) < 1e-9;
+  const pushBand = (A, B, C) => {
+    if (same(A,B) || same(B,C) || same(C,A)) return;
+    out.push(A[0],A[1],A[2], B[0],B[1],B[2], C[0],C[1],C[2]);
+  };
+  for (let s = 0; s < STEPS; s++) {
+    const a = rings[s], b = rings[s+1];
+    for (let i = 0; i < n; i++) {
+      const i1 = (i+1)%n;
+      const A0=a[i], A1=a[i1], B0=b[i], B1=b[i1];
+      if (s === STEPS-1 && ringSplits.has(i) && !same(B0, B1)) {
+        const P = ringTop2[i], Q = ringTop2[i1];
+        const chain = [B0];
+        for (const u of ringSplits.get(i).slice().sort((x,y)=>x-y)) {
+          chain.push(from3([P[0] + (Q[0]-P[0])*u, P[1] + (Q[1]-P[1])*u], capPlane));
+        }
+        chain.push(B1);
+        pushBand(A0, A1, chain[chain.length-1]);
+        for (let k = chain.length-1; k > 0; k--) pushBand(A0, chain[k], chain[k-1]);
+        continue;
+      }
+      pushBand(A0, A1, B1);
+      pushBand(A0, B1, B0);
+    }
+  }
+
+  if (out.length < 9) throw new Error('perimeter fillet produced no geometry');
+  rawPerimeterFilletInPlace.lastBuild = {
+    mode: chamfer ? 'bevel' : 'fillet',
+    loopPts: n,
+    radius: peakR,
+    requested: requestedR
+  };
+  return new Float32Array(out);
+}
+
 // Bevel. Same loop and the same untouched cap plane as Round, with the
 // quarter circle replaced by a single flat band.
 //
@@ -23,7 +486,10 @@
 // rather than just the treated edge. That is the bug that killed the
 // earlier passes; the margin clip is gone and must not come back.
 function rawChamferCut(rawTris, axisIdx, plane, keepMin, R) {
-  return rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, R, { profile: 'chamfer' });
+  // rawEdgeRoundInPlace is the CORNERS engine and has no profile option — it
+  // silently ignored 'chamfer' and gave Bevel a four-corner round. The flat
+  // band belongs on the perimeter path, which is where it is now.
+  return rawPerimeterFilletInPlace(rawTris, axisIdx, keepMin, R, { profile: 'chamfer' });
 }
 
 // Corners only. Round and Bevel are still one exclusive choice on the same
@@ -64,10 +530,16 @@ function softenSelectedFace(rawTris, axisIdx, keepMinFace, R, mode, pickPlane) {
   if (mode === 'chamfer' && typeof rawChamferCut === 'function') {
     return rawChamferCut(rawTris, axisIdx, plane, keepMin, R);
   }
-  // Every genuine corner of the clicked face's loop takes R; the straight
-  // spans between them keep R = 0 and stay on the plane. Anything the engine
-  // refuses throws, and the caller leaves the piece unchanged.
-  return rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, R, { minTurnDeg: 25 });
+  if (mode === 'corners') {
+    // Every genuine corner of the clicked face's loop takes R; the straight
+    // spans between them keep R = 0 and stay on the plane. Anything the engine
+    // refuses throws, and the caller leaves the piece unchanged.
+    return rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, R, { minTurnDeg: 25 });
+  }
+  // Round / fillet: a TRUE perimeter fillet — every point of the loop carries
+  // R, so all four edges of a square face get the radius and none stays a
+  // sharp straight run. Same cap plane, same depth-only wall.
+  return rawPerimeterFilletInPlace(rawTris, axisIdx, keepMin, R, { profile: 'round' });
 }
 
 function dropZeroAreaTriangles(soup, epsArea) {
@@ -1001,11 +1473,16 @@ function applySoftenOnFace(face) {
   refreshFacePickHighlight();
   // What actually got built: corners that took R, out of the corners found,
   // and the loop points the face carries. No sealing claim.
-  const b = (typeof rawEdgeRoundInPlace === 'function') ? rawEdgeRoundInPlace.lastBuild : null;
-  if (b && b.corners != null) {
-    setStatus('Soften ok - ' + b.rounded + '/' + b.corners + ' corners at R ' + b.radius.toFixed(2) +
-              (b.radius < b.requested - 1e-6 ? ' (asked ' + b.requested.toFixed(2) + ', wall clamp)' : '') +
-              ' - ' + b.loopPts + ' loop pts');
+  const treat = getEdgeTreat();
+  const clamp = (x) => (x.radius < x.requested - 1e-6 ? ' (asked ' + x.requested.toFixed(2) + ', wall clamp)' : '');
+  const corner = (typeof rawEdgeRoundInPlace === 'function') ? rawEdgeRoundInPlace.lastBuild : null;
+  const perim = (typeof rawPerimeterFilletInPlace === 'function') ? rawPerimeterFilletInPlace.lastBuild : null;
+  if (treat === 'corners' && corner && corner.corners != null) {
+    setStatus('Soften ok - ' + corner.rounded + '/' + corner.corners + ' corners at R ' + corner.radius.toFixed(2) +
+              clamp(corner) + ' - ' + corner.loopPts + ' loop pts');
+  } else if (perim && perim.loopPts != null) {
+    setStatus('Soften ok - ' + perim.mode + ' on all ' + perim.loopPts + ' loop pts at R ' +
+              perim.radius.toFixed(2) + clamp(perim));
   } else {
     setStatus('Soften ok');
   }
