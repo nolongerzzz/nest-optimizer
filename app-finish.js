@@ -53,7 +53,13 @@ function softenSelectedFace(rawTris, axisIdx, keepMinFace, R, mode) {
     return rawChamferCut(rawTris, axisIdx, plane, keepMin, R);
   }
   if (mode === 'corners') {
-    return rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, R, { cornersOnly: true, minTurnDeg: 30 });
+    // Job A: local corner fillets only. This does NOT go through the
+    // full-loop edge engine any more — that engine drops the whole lid and
+    // rebuilds it, which is a face retract however small the radius. The
+    // corner path keeps the lid's own triangles and cuts back only the
+    // crescent at each real corner. The edge path itself is untouched and
+    // still serves Round and Bevel.
+    return rawCornerFilletInPlace(rawTris, axisIdx, keepMin, R, { minTurnDeg: 30 });
   }
   return rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, R, { profile: 'round' });
 }
@@ -986,7 +992,15 @@ function applySoftenOnFace(face) {
   renderModelList();
   updateUndoBtn();
   if (typeof removeFaceHelper === 'function') removeFaceHelper();
-  setStatus(sealed ? 'Soften ok' : 'Soften ok - not fully sealed, check slice');
+  let what = 'Soften ok';
+  const built = (getEdgeTreat() === 'corners' && typeof rawCornerFilletInPlace === 'function')
+    ? rawCornerFilletInPlace.lastBuild : null;
+  if (built) {
+    what = 'Soften ok - ' + built.corners + ' corner' + (built.corners === 1 ? '' : 's') +
+           ' at R ' + built.radius.toFixed(2) +
+           (built.radius < built.requested - 1e-6 ? ' (asked ' + built.requested.toFixed(2) + ', wall clamp)' : '');
+  }
+  setStatus(sealed ? what : what + ' - not fully sealed, check slice');
 }
 
 
