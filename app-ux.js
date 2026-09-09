@@ -1,4 +1,4 @@
-/* ux overlay — double-click closes cutter, right-click Export STL */
+/* ux overlay — double-click closes cutter, right-click Export STL, Alt-click look */
 (function () {
   function pickIdx(event) {
     if (!state.renderer || !state.camera || !state.modelGroup) return -1;
@@ -12,6 +12,20 @@
     return typeof idx === 'number' ? idx : -1;
   }
 
+  function lookAtHit(event) {
+    if (!state.renderer || !state.camera || !state.controls || !state.modelGroup) return false;
+    if (typeof setPointerFromEvent === 'function') setPointerFromEvent(event);
+    state.raycaster.setFromCamera(state.pointer, state.camera);
+    const hits = state.raycaster.intersectObjects(state.modelGroup.children, true);
+    if (!hits.length) return false;
+    const p = hits[0].point;
+    state.controls.target.copy(p);
+    state.controls.minDistance = 3;
+    state.controls.update();
+    if (typeof setStatus === 'function') setStatus('Look locked — orbit/pan around point');
+    return true;
+  }
+
   function bind() {
     if (state.renderer && state.renderer.domElement) {
       state.renderer.domElement.addEventListener('dblclick', function (event) {
@@ -22,7 +36,17 @@
         event.stopPropagation();
         if (typeof closeCutter === 'function') closeCutter(false);
       });
+      state.renderer.domElement.addEventListener('pointerdown', function (event) {
+        if (event.button !== 0) return;
+        if (!event.altKey) return;
+        if (state.softenArmed || state.capArmed || state.joinSession) return;
+        if (lookAtHit(event)) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }, true);
     }
+    if (state.controls) state.controls.minDistance = 3;
     const ctxExport = document.getElementById('ctx-export');
     if (ctxExport) {
       ctxExport.addEventListener('click', function () {
@@ -30,7 +54,6 @@
         if (typeof exportActiveModel === 'function') exportActiveModel();
       });
     }
-    if (typeof setStatus === 'function') setStatus('HUD fillet2');
   }
 
   if (document.readyState === 'loading') {
