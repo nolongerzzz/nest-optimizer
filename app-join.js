@@ -1315,6 +1315,7 @@ async function subtractBFromA() {
   pushUndo({
     type: 'subtractReplace',
     aId: idA,
+    aPrevMask: (typeof nsoMaskSnapshot === 'function') ? nsoMaskSnapshot(modelA) : undefined,
     aPrevGeometry: modelA.geometry.clone(),
     aPrevRawTris: modelA.rawTris,
     aPrevRawAxis: modelA.rawAxis,
@@ -1868,6 +1869,7 @@ async function joinSelectedModels() {
   pushUndo({
     type: 'joinReplace',
     aId: idA,
+    aPrevMask: (typeof nsoMaskSnapshot === 'function') ? nsoMaskSnapshot(modelA) : undefined,
     aPrevGeometry: modelA.geometry.clone(),
     aPrevRawTris: modelA.rawTris,
     aPrevRawAxis: modelA.rawAxis,
