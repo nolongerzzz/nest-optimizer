@@ -1031,6 +1031,7 @@ function NSO_edgeStats(soup) {
     var k = [key(o), key(o + 3), key(o + 6)];
     for (var e = 0; e < 3; e++) {
       var a = k[e], b = k[(e + 1) % 3];
+      if (a === b) continue;   // a sliver's zero-length edge is not a hole
       var ek = a < b ? (a + '|' + b) : (b + '|' + a);
       map.set(ek, (map.get(ek) || 0) + 1);
     }
@@ -1041,6 +1042,77 @@ function NSO_edgeStats(soup) {
     else if (count > 2) nm++;
   });
   return { open: open, nm: nm };
+}
+
+/* =====================================================================
+   Weld tolerance that cannot eat the piece's own detail.
+
+   Both booleans pre-weld their input so a sloppy imported STL reads as a
+   solid. A wrapped surface is far finer than those fixed tolerances: the
+   ring beside each corner ball's pole carries 0.034 mm edges, so welding a
+   wrap1 cube at 0.08 drops 128 triangles and at 0.22 drops 432. Cap the ask
+   at a third of the shortest real edge in the soup - coincident and
+   near-coincident vertices still merge, real geometry never does. An
+   imported mesh has normal-length edges and keeps the tolerance it always
+   had.
+   ===================================================================== */
+function NSO_weldEpsFor(soup, want) {
+  var n = (soup && soup.length) ? (soup.length / 9) | 0 : 0;
+  if (!n) return want;
+  var minE = Infinity;
+  for (var t = 0; t < n; t++) {
+    var o = t * 9;
+    for (var e = 0; e < 3; e++) {
+      var a = o + e * 3, b = o + ((e + 1) % 3) * 3;
+      var L = Math.hypot(soup[a] - soup[b], soup[a + 1] - soup[b + 1], soup[a + 2] - soup[b + 2]);
+      if (L > 1e-9 && L < minE) minE = L;
+    }
+  }
+  if (!isFinite(minE)) return want;
+  return Math.min(want, minE / 3);
+}
+
+/* =====================================================================
+   Union two world soups with the same kernel Subtract already uses.
+
+   Returns { ok, soup, parts, reason }. parts > 1 means the two pieces do
+   not actually touch, so there is nothing to join - the caller treats that
+   as a miss and falls back, it is not a result.
+   ===================================================================== */
+async function NSO_unionSoups(aWorld, bWorld) {
+  if (!NSO_soupLen(aWorld) || !NSO_soupLen(bWorld)) return { ok: false, reason: 'empty soup' };
+  var wasm;
+  try { wasm = await NSO_CSG.load(); }
+  catch (err) { return { ok: false, reason: 'CSG kernel failed to load: ' + NSO_errMsg(err) }; }
+  var manA = null, manB = null, out = null;
+  try {
+    var aIn = aWorld, bIn = bWorld;
+    if (typeof weldSoupVerts === 'function') {
+      try { aIn = weldSoupVerts(aWorld, NSO_weldEpsFor(aWorld, 0.08)); } catch (e0) { aIn = aWorld; }
+      try { bIn = weldSoupVerts(bWorld, NSO_weldEpsFor(bWorld, 0.08)); } catch (e1) { bIn = bWorld; }
+    }
+    manA = NSO_CSG.soupToManifold(wasm, aIn);
+    if (manA.status && manA.status() !== 'NoError') throw new Error('A rejected: ' + manA.status());
+    manB = NSO_CSG.soupToManifold(wasm, bIn);
+    if (manB.status && manB.status() !== 'NoError') throw new Error('B rejected: ' + manB.status());
+    out = manA.add(manB);
+    if (out.status() !== 'NoError') throw new Error('union rejected by kernel: ' + out.status());
+    if (out.isEmpty()) throw new Error('union produced empty solid');
+    var parts = 1;
+    if (typeof out.decompose === 'function') {
+      var bits = out.decompose();
+      parts = bits.length;
+      for (var i = 0; i < bits.length; i++) bits[i].delete();
+    }
+    return { ok: parts === 1, parts: parts, soup: NSO_CSG.manifoldToSoup(out),
+             reason: parts === 1 ? '' : 'the two pieces do not touch' };
+  } catch (err) {
+    return { ok: false, reason: NSO_errMsg(err) };
+  } finally {
+    if (manA) manA.delete();
+    if (manB) manB.delete();
+    if (out) out.delete();
+  }
 }
 
 /* =====================================================================
@@ -1072,8 +1144,8 @@ async function subtractSoupBFromA(aWorld, bWorld, opts) {
   try {
     var aIn = aWorld, bIn = bWorld;
     if (typeof weldSoupVerts === 'function') {
-      try { aIn = weldSoupVerts(aWorld, 0.08); } catch (e0) { aIn = aWorld; }
-      try { bIn = weldSoupVerts(bWorld, 0.08); } catch (e1) { bIn = bWorld; }
+      try { aIn = weldSoupVerts(aWorld, NSO_weldEpsFor(aWorld, 0.08)); } catch (e0) { aIn = aWorld; }
+      try { bIn = weldSoupVerts(bWorld, NSO_weldEpsFor(bWorld, 0.08)); } catch (e1) { bIn = bWorld; }
     }
     try { manA = NSO_CSG.soupToManifold(wasm, aIn); }
     catch (eA) { throw new Error('hull rejected: ' + ((eA && eA.message) ? eA.message : eA)); }
@@ -1607,7 +1679,7 @@ function extractBitFromSelected() {
   setStatus('Extract bit ok - solid ' + size.x.toFixed(1) + 'x' + size.y.toFixed(1) + 'x' + size.z.toFixed(1) + ' mm');
 }
 
-function joinSelectedModels() {
+async function joinSelectedModels() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
@@ -1629,7 +1701,31 @@ function joinSelectedModels() {
   // Join axis/direction from current plate positions — X is the axis
   // Split itself always uses to lay pieces out, so this matches every
   // real scenario (rejoining halves, attaching a stored end to a bar).
-  let newGeo = null;
+  // Where the two pieces start, for the seal report and for the kernel. Taken
+  // before either route runs, since the plate route may nudge the poses.
+  let joinSoupA = null, joinSoupB = null;
+  if (placedA && placedB && typeof meshToWorldSoup === 'function') {
+    try {
+      // the meshes, not the placed records - only a mesh carries matrixWorld
+      const mA = placedA.mesh || placedA, mB = placedB.mesh || placedB;
+      if (mA.updateMatrixWorld) mA.updateMatrixWorld(true);
+      if (mB.updateMatrixWorld) mB.updateMatrixWorld(true);
+      joinSoupA = meshToWorldSoup(mA);
+      joinSoupB = meshToWorldSoup(mB);
+      if (!NSO_soupLen(joinSoupA) || !NSO_soupLen(joinSoupB)) joinSoupA = joinSoupB = null;
+    } catch (e) { joinSoupA = joinSoupB = null; }
+  }
+  let before = { open: 0, nm: 0 };
+  if (joinSoupA && joinSoupB) {
+    const bA = NSO_edgeStats(joinSoupA), bB = NSO_edgeStats(joinSoupB);
+    before = { open: bA.open + bB.open, nm: bA.nm + bB.nm };
+  }
+  const score = (st) => st.open + st.nm;
+
+  // Route 1: the geometry path this has always used. It strips the facing cap
+  // off at a plane and welds, which is right for two square-split halves and
+  // is kept bit-identical for them.
+  let legacyGeo = null, legacyStats = null, legacyWhy = '';
   try {
     if (placedA && placedB) {
       const yA = placedA.mesh ? placedA.mesh.position.y : 0;
@@ -1642,28 +1738,81 @@ function joinSelectedModels() {
         let merged = new Float32Array(sa.length + sb.length);
         merged.set(sa, 0);
         merged.set(sb, sa.length);
-        if (typeof weldSoupVerts === 'function') merged = weldSoupVerts(merged, 0.22);
+        if (typeof weldSoupVerts === 'function') merged = weldSoupVerts(merged, NSO_weldEpsFor(merged, 0.22));
         if (typeof repairJoinedSoup === 'function') merged = repairJoinedSoup(merged);
         if (!merged || merged.length < 9) throw new Error('in-place join empty');
-        newGeo = soupToCenteredGeo(merged);
+        legacyGeo = soupToCenteredGeo(merged);
+        legacyStats = NSO_edgeStats(merged);
         console.log('[join] in-place weld (seated port)');
       } else {
         const axisName = detectMateAxis(placedA, placedB);
         const axisIdx = axisName === 'z' ? 2 : 0;
-        newGeo = joinHalvesOnPlate(modelA, placedA, modelB, placedB, axisIdx);
+        legacyGeo = joinHalvesOnPlate(modelA, placedA, modelB, placedB, axisIdx);
+        legacyStats = NSO_edgeStats(displayGeometryToRawSoup(legacyGeo));
       }
     } else {
       const aIsMin = poseA.x <= poseB.x;
       const rawA = getModelRawSoup(modelA);
       const rawB = getModelRawSoup(modelB);
       const joinedRaw = rawJoinPieces(aIsMin ? rawA : rawB, aIsMin ? rawB : rawA, 0);
-      newGeo = rawResultToDisplayGeometry(joinedRaw);
+      legacyGeo = rawResultToDisplayGeometry(joinedRaw);
+      legacyStats = NSO_edgeStats(joinedRaw);
     }
   } catch (err) {
-    console.warn('[join] failed:', err.message);
-    setStatus('Join failed - ' + (err && err.message ? err.message : 'pieces unchanged'), true);
+    legacyWhy = (err && err.message) ? err.message : 'failed';
+    console.warn('[join] plate route failed:', legacyWhy);
+  }
+
+  // Route 2: a real union on the same kernel Subtract uses. Cutting a wrapped
+  // face off at a plane leaves its rounded rim hanging, so the plate route
+  // reopens a wrap - the kernel does not. Only reached when the two pieces
+  // already touch; split halves parked a kerf apart come back as two parts and
+  // stay with route 1, which closes that gap by moving the far half in.
+  let kernelGeo = null, kernelStats = null, kernelWhy = '';
+  if (joinSoupA && joinSoupB && (!legacyStats || score(legacyStats) > score(before))) {
+    try {
+      setStatus('Joining (loading CSG kernel)...');
+      const u = await NSO_unionSoups(joinSoupA, joinSoupB);
+      if (u.ok && u.soup && u.soup.length >= 9) {
+        kernelGeo = soupToCenteredGeo(u.soup);
+        kernelStats = NSO_edgeStats(u.soup);
+      } else {
+        kernelWhy = u.reason || 'union missed';
+      }
+    } catch (err) {
+      kernelWhy = NSO_errMsg(err);
+      console.warn('[join] kernel union failed:', kernelWhy);
+    }
+  }
+
+  // Keep whichever route seals better; a tie goes to the plate route so the
+  // square-split rejoin it was written for comes out exactly as before.
+  let newGeo = null, after = null, route = '';
+  if (legacyGeo && (!kernelStats || score(legacyStats) <= score(kernelStats))) {
+    newGeo = legacyGeo; after = legacyStats; route = 'plate weld';
+  } else if (kernelGeo) {
+    newGeo = kernelGeo; after = kernelStats; route = 'kernel union';
+  }
+  if (!newGeo) {
+    const why = legacyWhy || kernelWhy || 'pieces unchanged';
+    setStatus('Join failed - ' + why + ' - A and B unchanged', true);
     return;
   }
+  // Two sealed pieces must not come back as an open one. The plate route
+  // always "succeeds" - it moves the far piece in to close a kerf - so on a
+  // pair that does not actually mate it would hand back a reopened wrap. If
+  // both routes leave it worse sealed than it started, that is a clean fail
+  // with A and B untouched, not a join. Pieces that arrive open keep the old
+  // permissive behaviour; the counts are reported either way.
+  if (before.open === 0 && before.nm === 0 && after && (after.open > 0 || after.nm > 0)) {
+    setStatus('Join failed - would reopen the pieces (open edges 0\u2192' + after.open +
+              ', non-manifold 0\u2192' + after.nm + ') via ' + route +
+              (kernelWhy ? '; kernel union: ' + kernelWhy : '') +
+              ' - A and B unchanged', true);
+    return;
+  }
+  console.log('[join] route', route, 'open', before.open, '->', after.open,
+    'nonManifold', before.nm, '->', after.nm);
 
   // Snapshot BOTH pieces (full state, including plate pose) before
   // mutating anything, so Undo can fully restore two separate pieces.
@@ -1754,7 +1903,8 @@ function joinSelectedModels() {
   updateAdjustUI();
   updateUndoBtn();
   removeFaceHelper();
-  setStatus('Join ok');
+  setStatus('Join ok (' + route + ') - open edges ' + before.open + '\u2192' + after.open +
+            ', non-manifold ' + before.nm + '\u2192' + after.nm);
 }
 
 
@@ -2329,7 +2479,24 @@ function setupUI() {
   if (btnThickenIn) btnThickenIn.addEventListener('click', thickenInSelectedModel);
 
   const btnJoin = document.getElementById('btn-join');
-  if (btnJoin) btnJoin.addEventListener('click', joinSelectedModels);
+  if (btnJoin) {
+    var joinBusy = false;
+    btnJoin.addEventListener('click', function () {
+      if (joinBusy) return;
+      joinBusy = true;
+      var prevLabel = btnJoin.textContent;
+      btnJoin.disabled = true;
+      btnJoin.textContent = 'Joining...';
+      Promise.resolve(joinSelectedModels()).catch(function (err) {
+        console.warn('[join] unexpected error:', err);
+        setStatus('Join failed - unexpected error', true);
+      }).then(function () {
+        joinBusy = false;
+        btnJoin.disabled = false;
+        btnJoin.textContent = prevLabel;
+      });
+    });
+  }
   const btnSubtract = document.getElementById('btn-subtract');
   if (btnSubtract) {
     var subtractBusy = false;
