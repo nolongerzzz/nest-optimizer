@@ -36,11 +36,64 @@
     return n;
   }
 
+  function soupVolumeMm3(soup) {
+    if (!soup || soup.length < 9) return 0;
+    var v = 0;
+    for (var t = 0; t < soup.length; t += 9) {
+      var ax = soup[t], ay = soup[t+1], az = soup[t+2];
+      var bx = soup[t+3], by = soup[t+4], bz = soup[t+5];
+      var cx = soup[t+6], cy = soup[t+7], cz = soup[t+8];
+      v += ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx);
+    }
+    return Math.abs(v) / 6;
+  }
+
   function statLine(label, found, remain) {
     if (found == null || remain == null) return label + ': found ?, fixed ?, remaining ?';
     var fix = found - remain;
     if (fix < 0) fix = 0;
     return label + ': found ' + found + ', fixed ' + fix + ', remaining ' + remain;
+  }
+
+  function wrapAddModelReadout() {
+    if (typeof addModel !== 'function' || addModel._statWrap) return;
+    var orig = addModel;
+    function wrapped(name, geometry, opts) {
+      var id = orig.apply(this, arguments);
+      var options = opts || {};
+      if (options.silent) return id;
+      var m = null;
+      if (typeof state !== 'undefined' && state.models) {
+        for (var i = 0; i < state.models.length; i++) {
+          if (state.models[i].id === id) { m = state.models[i]; break; }
+        }
+      }
+      if (!m) return id;
+      var soup = (m.rawTris && m.rawTris.length >= 9) ? m.rawTris : soupFromGeo(m.geometry);
+      var open = null, nm = null, deg = 0, tris = 0, vol = 0;
+      if (soup && soup.length >= 9) {
+        try { if (typeof openBoundaryEdges === 'function') open = openBoundaryEdges(soup).length; } catch (e) {}
+        try { if (typeof countNonManifoldEdges === 'function') nm = countNonManifoldEdges(soup); } catch (e) {}
+        try { deg = countDegenerateTris(soup); } catch (e) {}
+        tris = (soup.length / 9) | 0;
+        vol = soupVolumeMm3(soup);
+      }
+      var sx = (m.size && m.size.x) ? m.size.x.toFixed(0) : '?';
+      var sy = (m.size && m.size.y) ? m.size.y.toFixed(0) : '?';
+      var sz = (m.size && m.size.z) ? m.size.z.toFixed(0) : '?';
+      var leaky = (open != null && open > 0) || (nm != null && nm > 0);
+      var msg = (m.name || name || 'model') +
+        '  ' + sx + ' x ' + sy + ' x ' + sz + ' mm' +
+        '  vol ' + vol.toFixed(2) + ' mm3' +
+        '  tris ' + tris +
+        '  open ' + (open == null ? '?' : open) +
+        '  NM ' + (nm == null ? '?' : nm);
+      if (leaky) msg += '  — try Repair';
+      if (typeof setStatus === 'function') setStatus(msg, leaky);
+      return id;
+    }
+    wrapped._statWrap = true;
+    addModel = wrapped;
   }
 
   function wrapSealReadout() {
@@ -152,6 +205,7 @@
   function bind() {
     stampHud();
     bindThickenArrows();
+    wrapAddModelReadout();
     wrapSealReadout();
     setTimeout(stampHud, 0);
     setTimeout(stampHud, 200);
