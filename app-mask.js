@@ -232,7 +232,7 @@
      while a paint session is live, so the count is on the same line a photo
      of the HUD already shows. Paint never relabels itself into Done - it
      stays Paint faces and just lights up; Done is its own button. */
-  const HUD_TAG = 'HUD finish2';
+  const HUD_TAG = 'HUD finish3';
   function hud(text) {
     const el = document.getElementById('adjust-status');
     if (el) el.textContent = text;

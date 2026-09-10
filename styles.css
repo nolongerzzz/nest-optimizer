@@ -1132,7 +1132,74 @@ select:focus, input:focus {
 .vp-row-full { grid-template-columns: 1fr; }
 .vp-row-pair { grid-template-columns: 1fr 1fr; gap: 6px; }
 .vp-row-label { grid-template-columns: auto 1fr; gap: 8px; }
-.vp-row-thicken { grid-template-columns: 36px 1fr 1fr; gap: 6px; }
+/* Thicken is one row the full width of the card: Thicken out flush to the left
+   edge, Thicken in flush to the right, the mm spinner between them. The two
+   buttons keep the .vp-row .btn min-height, so they set the row height and stay
+   level with Soften and Seal; the spinner carries no height of its own and
+   stretches to that same height, which is why it cannot end up a box taller or
+   shorter than they are. Number on top, arrows beneath it, one border round the
+   pair and no filled panel behind the number. The narrow tracking and padding
+   below are what let two full labels and the spinner share 166px without the
+   right-hand button spilling past the card edge. */
+.vp-row-thicken {
+  grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr);
+  align-items: stretch;
+  gap: 4px;
+}
+.vp-row-thicken .btn {
+  padding: 2px 3px;
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+  min-width: 0;
+}
+.thick-spin {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border: 1px solid rgba(232, 238, 246, 0.45);
+  border-radius: 7px;
+  overflow: hidden;
+  background: transparent;
+}
+.vp-menu-body .thick-spin input[type="number"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #e8eef6;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+.vp-menu-body .thick-spin input[type="number"]::-webkit-outer-spin-button,
+.vp-menu-body .thick-spin input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.thick-spin-arrows {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  flex: 0 0 auto;
+  border-top: 1px solid rgba(232, 238, 246, 0.28);
+}
+.vp-menu-body .thick-arrow {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #cbd5e1;
+  font-size: 9px;
+  line-height: 10px;
+  cursor: pointer;
+}
+.vp-menu-body .thick-arrow + .thick-arrow { border-left: 1px solid rgba(232, 238, 246, 0.28); }
+.vp-menu-body .thick-arrow:hover { background: rgba(255,255,255,0.10); color: #e8eef6; }
 .vp-row-opts {
   grid-template-columns: auto auto;
   justify-content: start;
