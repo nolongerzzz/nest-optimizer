@@ -2974,6 +2974,227 @@ function rawSolidBox(rawTris, tol) {
   return { lo: lo, hi: hi, ext: ext };
 }
 
+// A plain box with ONE axis-aligned pocket cut through one of its faces, or
+// null. This is the shape a Subtract with a box bit leaves, and it is the only
+// non-box the wrap will touch: everything it returns is checked back against
+// the soup's own measured face areas, so a piece that is nearly this shape but
+// not quite is refused rather than guessed at. Returns the hull box, the
+// pocket box, and which hull face the pocket opens through.
+function rawPocketBrick(rawTris, tol) {
+  tol = tol || 1e-3;
+  if (!rawTris || rawTris.length < 9 * 12) return null;
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < rawTris.length; i += 3) {
+    for (let k = 0; k < 3; k++) {
+      if (rawTris[i+k] < lo[k]) lo[k] = rawTris[i+k];
+      if (rawTris[i+k] > hi[k]) hi[k] = rawTris[i+k];
+    }
+  }
+  const ext = [hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2]];
+  if (!(ext[0] > tol && ext[1] > tol && ext[2] > tol)) return null;
+  // group every triangle by the plane it lies on; a single triangle that is
+  // not axis aligned means this is not the shape
+  const planes = new Map();
+  const n = rawTris.length / 9;
+  for (let t = 0; t < n; t++) {
+    const i = t * 9;
+    const ux = rawTris[i+3]-rawTris[i], uy = rawTris[i+4]-rawTris[i+1], uz = rawTris[i+5]-rawTris[i+2];
+    const vx = rawTris[i+6]-rawTris[i], vy = rawTris[i+7]-rawTris[i+1], vz = rawTris[i+8]-rawTris[i+2];
+    let nx = uy*vz-uz*vy, ny = uz*vx-ux*vz, nz = ux*vy-uy*vx;
+    const L = Math.hypot(nx, ny, nz);
+    if (!(L > 1e-12)) continue;               // slivers carry no face
+    nx /= L; ny /= L; nz /= L;
+    const na = [Math.abs(nx), Math.abs(ny), Math.abs(nz)];
+    let a = 0;
+    if (na[1] > na[a]) a = 1;
+    if (na[2] > na[a]) a = 2;
+    if (na[a] < 0.999) return null;
+    const sg = ([nx, ny, nz][a] >= 0) ? 1 : -1;
+    const at = rawTris[i+a];
+    if (Math.abs(rawTris[i+3+a] - at) > tol || Math.abs(rawTris[i+6+a] - at) > tol) return null;
+    const key = a + ':' + sg + ':' + Math.round(at / tol);
+    let g = planes.get(key);
+    if (!g) { g = { a: a, sg: sg, at: at, area: 0 }; planes.set(key, g); }
+    g.area += 0.5 * L;
+  }
+  // the outer six, and whatever is left inside
+  const outer = {}, inner = [];
+  planes.forEach(function (g) {
+    const face = (g.sg > 0) ? hi[g.a] : lo[g.a];
+    if (Math.abs(g.at - face) < tol) outer[g.a + ':' + g.sg] = g;
+    else inner.push(g);
+  });
+  for (let a = 0; a < 3; a++) for (const sg of [-1, 1]) if (!outer[a + ':' + sg]) return null;
+  if (!inner.length) return null;             // a plain box - not this shape
+  if (inner.length !== 5) return null;        // one box pocket has five faces
+
+  // four walls on two axes, one floor on the third: that third axis is the
+  // one the pocket opens along
+  const byAxis = [[], [], []];
+  for (const g of inner) byAxis[g.a].push(g);
+  let mouthAxis = -1;
+  for (let a = 0; a < 3; a++) {
+    if (byAxis[a].length === 1) { if (mouthAxis >= 0) return null; mouthAxis = a; }
+    else if (byAxis[a].length !== 2) return null;
+  }
+  if (mouthAxis < 0) return null;
+
+  const plo = [0, 0, 0], phi = [0, 0, 0];
+  for (let a = 0; a < 3; a++) {
+    if (a === mouthAxis) continue;
+    const g = byAxis[a];
+    // the pocket is between them: the low wall faces up the axis, the high
+    // wall faces down it
+    const up = g.find(function (q) { return q.sg > 0; });
+    const dn = g.find(function (q) { return q.sg < 0; });
+    if (!up || !dn) return null;
+    plo[a] = up.at; phi[a] = dn.at;
+    if (!(phi[a] - plo[a] > tol)) return null;
+    if (!(plo[a] > lo[a] + tol && phi[a] < hi[a] - tol)) return null;   // must not break the side walls
+  }
+  const floor = byAxis[mouthAxis][0];
+  const mouthSide = (floor.sg > 0) ? 1 : 0;   // floor faces the way the pocket opens
+  if (mouthSide) { plo[mouthAxis] = floor.at; phi[mouthAxis] = hi[mouthAxis]; }
+  else { plo[mouthAxis] = lo[mouthAxis]; phi[mouthAxis] = floor.at; }
+  if (!(phi[mouthAxis] - plo[mouthAxis] > tol)) return null;
+
+  // now prove it: every face area the soup actually carries has to be the
+  // area this hull and this pocket would give. Anything else and the piece is
+  // some other shape that happens to have eleven flat faces.
+  const pext = [phi[0]-plo[0], phi[1]-plo[1], phi[2]-plo[2]];
+  const other = function (a) { return [0,1,2].filter(function (x) { return x !== a; }); };
+  const mouthKey = mouthAxis + ':' + (mouthSide ? 1 : -1);
+  for (let a = 0; a < 3; a++) for (const sg of [-1, 1]) {
+    const o = other(a);
+    let want = ext[o[0]] * ext[o[1]];
+    if (a + ':' + sg === mouthKey) want -= pext[o[0]] * pext[o[1]];
+    const g = outer[a + ':' + sg];
+    if (Math.abs(g.area - want) > Math.max(tol, want * 1e-4)) return null;
+  }
+  for (const g of inner) {
+    const o = other(g.a);
+    const want = pext[o[0]] * pext[o[1]];
+    if (Math.abs(g.area - want) > Math.max(tol, want * 1e-4)) return null;
+  }
+  return {
+    lo: lo, hi: hi, ext: ext,
+    plo: plo, phi: phi, pext: pext,
+    mouthAxis: mouthAxis, mouthSide: mouthSide
+  };
+}
+
+// How well sealed a soup is: unmatched edges AND edges used more than twice.
+// openBoundaryEdges alone is not enough here - it welds at 1e-3, only reports
+// count exactly 1, and counts the zero-length edge a sliver triangle leaves
+// as a hole. Those slivers are harmless and some are emitted on purpose, so
+// they are skipped; a face that clashes with an already softened one shows up
+// as extra open edges, extra non-manifold ones, or both. Lifted out of the
+// Soften click so the pocket-brick wrap is gated on exactly the same number.
+function nsoSealScore(soup) {
+  const q = 1e4;
+  const vk = (i) => Math.round(soup[i]*q)+'|'+Math.round(soup[i+1]*q)+'|'+Math.round(soup[i+2]*q);
+  const use = new Map();
+  for (let t = 0; t + 8 < soup.length; t += 9) {
+    const K = [vk(t), vk(t+3), vk(t+6)];
+    for (let e = 0; e < 3; e++) {
+      const a = K[e], b = K[(e+1)%3];
+      if (a === b) continue;
+      const k = a < b ? a+'~'+b : b+'~'+a;
+      use.set(k, (use.get(k) || 0) + 1);
+    }
+  }
+  let open = 0, nm = 0;
+  use.forEach(function (c) { if (c % 2) open++; if (c > 2) nm++; });
+  return { open: open, nm: nm };
+}
+
+// A box as soup, 12 triangles, outward wound. Feeds the wrap generator the
+// hull and the pocket as the plain boxes they are.
+function rawBoxSoup(lo, hi) {
+  const V = [[lo[0],lo[1],lo[2]],[hi[0],lo[1],lo[2]],[hi[0],hi[1],lo[2]],[lo[0],hi[1],lo[2]],
+             [lo[0],lo[1],hi[2]],[hi[0],lo[1],hi[2]],[hi[0],hi[1],hi[2]],[lo[0],hi[1],hi[2]]];
+  const F = [[0,3,2],[0,2,1],[4,5,6],[4,6,7],[0,1,5],[0,5,4],
+             [1,2,6],[1,6,5],[2,3,7],[2,7,6],[3,0,4],[3,4,7]];
+  const out = new Float32Array(F.length * 9);
+  for (let f = 0; f < F.length; f++) for (let v = 0; v < 3; v++) for (let k = 0; k < 3; k++)
+    out[f*9 + v*3 + k] = V[F[f][v]][k];
+  return out;
+}
+
+// The skip list sorted onto the two boxes the brick is made of. Every painted
+// face has to land on one of them; one that lands on neither means the paint
+// and the piece have drifted apart - an undone Subtract, say - and the caller
+// leaves the mesh alone and says so rather than wrapping the wrong thing.
+function brickSkipLists(brick, faceList) {
+  const tol = 0.05;
+  const hull = [[false,false],[false,false],[false,false]];
+  const pocket = [[false,false],[false,false],[false,false]];
+  let nHull = 0, nPocket = 0;
+  for (let i = 0; i < faceList.length; i++) {
+    const e = faceList[i], a = e.axisIdx, k = !!e.keepMin;
+    const at = k ? -e.d : e.d;
+    if (Math.abs(at - (k ? brick.lo[a] : brick.hi[a])) < tol) {
+      hull[a][k ? 0 : 1] = true; nHull++;
+    } else if (Math.abs(at - (k ? brick.phi[a] : brick.plo[a])) < tol) {
+      // a wall the material faces across: normal up the axis means the pocket
+      // is above it, so it is the pocket box's low face on that axis
+      pocket[a][k ? 1 : 0] = true; nPocket++;
+    } else {
+      return null;
+    }
+  }
+  return { hull: hull, pocket: pocket, nHull: nHull, nPocket: nPocket };
+}
+
+// Subtract one soup from another with the kernel the app already carries.
+// Nothing here reaches into the kernel; it is the same adapter Subtract and
+// Join use, called on two boxes this file generated.
+async function nsoSubtractSoups(aSoup, bSoup) {
+  if (typeof NSO_CSG === 'undefined') return { ok: false, reason: 'no CSG kernel in this build' };
+  let wasm;
+  try { wasm = await NSO_CSG.load(); }
+  catch (err) { return { ok: false, reason: 'CSG kernel failed to load: ' + (err && err.message ? err.message : err) }; }
+  let A = null, B = null, out = null;
+  try {
+    A = NSO_CSG.soupToManifold(wasm, aSoup);
+    if (A.status && A.status() !== 'NoError') throw new Error('hull rejected: ' + A.status());
+    B = NSO_CSG.soupToManifold(wasm, bSoup);
+    if (B.status && B.status() !== 'NoError') throw new Error('pocket rejected: ' + B.status());
+    out = A.subtract(B);
+    if (out.status() !== 'NoError') throw new Error('kernel refused the cut: ' + out.status());
+    if (out.isEmpty()) throw new Error('the cut left nothing');
+    return { ok: true, soup: NSO_CSG.manifoldToSoup(out) };
+  } catch (err) {
+    return { ok: false, reason: (err && err.message ? err.message : String(err)) };
+  } finally {
+    if (A) A.delete();
+    if (B) B.delete();
+    if (out) out.delete();
+  }
+}
+
+// The whole-solid wrap for a brick: the hull wrapped by the same generator a
+// plain box uses, with the pocket - wrapped by that same generator - taken
+// back out of it. No new surface is invented and the wrap modes are not
+// touched; the skip list is simply read twice, once per box. The pocket is
+// pushed out past the mouth so the generator's rounding on that end lands
+// outside the hull and the rim stays the edge the hull face makes with the
+// wall.
+async function nsoWrapBrick(brick, R, mode, skip) {
+  const hullSoup = rawWrapSolid(rawBoxSoup(brick.lo, brick.hi), R, mode, skip.hull);
+  const hullBuild = rawWrapSolid.lastBuild;
+  const plo = brick.plo.slice(), phi = brick.phi.slice();
+  const over = 2 * R + 1;
+  if (brick.mouthSide) phi[brick.mouthAxis] += over; else plo[brick.mouthAxis] -= over;
+  const pSkip = [skip.pocket[0].slice(), skip.pocket[1].slice(), skip.pocket[2].slice()];
+  pSkip[brick.mouthAxis][brick.mouthSide ? 1 : 0] = true;   // the end outside the hull
+  const pocketSoup = rawWrapSolid(rawBoxSoup(plo, phi), R, mode, pSkip);
+  const pocketBuild = rawWrapSolid.lastBuild;
+  const cut = await nsoSubtractSoups(hullSoup, pocketSoup);
+  if (!cut.ok) return cut;
+  return { ok: true, soup: cut.soup, hullBuild: hullBuild, pocketBuild: pocketBuild };
+}
+
 // The paint, read as box faces: [axis][side] with side 0 the low plane. This
 // is a read, not a derivation - nsoMaskFaces hands back the raw axis and side
 // each paint click recorded at the moment it was made, the same numbers the
@@ -3192,6 +3413,80 @@ function wrapStatus(mode, b) {
          ' (' + b.tris + ' tris, one bake from source)';
 }
 
+// The brick wrap, driven from a Soften click. Returns true when it has taken
+// the click - either it is baking, or it has refused with a reason and the
+// mesh is untouched. Returns false when this piece is not a brick at all and
+// the per-face path should have it.
+//
+// The kernel call is a promise, so this hands the click back straight away and
+// commits when the cut lands. Nothing is written to the piece until then, so a
+// refusal anywhere leaves it exactly as it was.
+function wrapPocketBrickRun(m, run, R, firstOfRun, jobs) {
+  const brick = rawPocketBrick(run.base);
+  if (!brick) return false;
+  const faceList = (typeof nsoMaskFaceList === 'function') ? nsoMaskFaceList(m) : [];
+  if (!faceList) {
+    if (typeof removeFaceHelper === 'function') removeFaceHelper();
+    setStatus('Wrap needs faces it can name - a painted patch here is not a flat face. Piece unchanged', true);
+    return true;
+  }
+  const skip = brickSkipLists(brick, faceList);
+  if (!skip) {
+    if (typeof removeFaceHelper === 'function') removeFaceHelper();
+    setStatus('Wrap stopped - a painted face is not on this piece any more (undo a Subtract and the pocket goes with it). ' +
+              'Clear paint and paint it again. Piece unchanged', true);
+    return true;
+  }
+  if (skip.nHull + skip.nPocket >= 11) {
+    if (typeof removeFaceHelper === 'function') removeFaceHelper();
+    setStatus('Every face is painted out - nothing left to wrap. Piece unchanged', true);
+    return true;
+  }
+  if (state.nsoWrapBusy) {
+    setStatus('Still wrapping the last click', true);
+    return true;
+  }
+  const wrapMode = getEdgeTreat();
+  state.nsoWrapBusy = true;
+  setStatus('Wrapping ' + (11 - skip.nHull - skip.nPocket) + ' face(s), ' +
+            (skip.nHull + skip.nPocket) + ' painted out\u2026');
+  console.log('[soften] pocket brick - hull ' + (6 - skip.nHull) + '/6, pocket ' +
+              (5 - skip.nPocket) + '/5 wrapping');
+  nsoWrapBrick(brick, R, wrapMode, skip).then(function (res) {
+    state.nsoWrapBusy = false;
+    if (!res.ok) {
+      if (typeof removeFaceHelper === 'function') removeFaceHelper();
+      setStatus('Wrap failed - ' + res.reason + '. Piece unchanged', true);
+      return;
+    }
+    // the same seal gate the plain-box wrap uses: a wrap that opens the piece
+    // up is refused and the piece is left as it was
+    const sB = nsoSealScore(run.base), sW = nsoSealScore(res.soup);
+    if (sW.open > sB.open || sW.nm > sB.nm) {
+      if (typeof removeFaceHelper === 'function') removeFaceHelper();
+      setStatus('Wrap failed - the cut did not close (open ' + sB.open + '\u2192' + sW.open +
+                ', non-manifold ' + sB.nm + '\u2192' + sW.nm + '). Piece unchanged', true);
+      return;
+    }
+    const name = wrapMode === 'chamfer' ? 'Bevel'
+               : wrapMode === 'cornersedges' ? 'corners+edges'
+               : wrapMode === 'corners' ? 'Corners' : 'Round';
+    const baked = 11 - skip.nHull - skip.nPocket;
+    commitSoften(m, run, res.soup, firstOfRun,
+                 [{ wrap: true, R: R, mode: wrapMode, brick: true }],
+                 name + ' wrap R ' + R.toFixed(2) + ' on a pocket piece - ' +
+                 baked + ' of 11 faces baked (hull ' + (6 - skip.nHull) + '/6, pocket ' +
+                 (5 - skip.nPocket) + '/5), ' + (skip.nHull + skip.nPocket) +
+                 ' painted out and left square (' + (res.soup.length / 9) +
+                 ' tris, one bake from source)');
+  }, function (err) {
+    state.nsoWrapBusy = false;
+    if (typeof removeFaceHelper === 'function') removeFaceHelper();
+    setStatus('Wrap failed - ' + (err && err.message ? err.message : err) + '. Piece unchanged', true);
+  });
+  return true;
+}
+
 // Install a finished bake on the piece: one undo step per run landing on the
 // piece as it was before the FIRST bake, the new geometry, the placed mesh,
 // and the pick cleanup. Shared by the per-face path and the whole-solid wrap
@@ -3299,7 +3594,7 @@ function applySoftenOnFace(face) {
   // A painted-out face is not baked, whatever mode is selected. Refused here,
   // before the run is touched, so the piece and the paint both stay put.
   if (typeof nsoMaskIsExcludedPick === 'function' &&
-      nsoMaskIsExcludedPick(m, rawAxisIdx, keepMinFace, pick.rawPlane)) {
+      nsoMaskIsExcludedPick(m, rawAxisIdx, keepMinFace, pick.rawPlane, pick.recessed)) {
     if (typeof removeFaceHelper === 'function') removeFaceHelper();
     setStatus('That face is painted out - include it first, or pick another face', true);
     return;
@@ -3331,29 +3626,7 @@ function applySoftenOnFace(face) {
   jobs.push({ axisIdx: rawAxisIdx, keepMin: keepMinFace, plane: pick.rawPlane,
               R: R, mode: getEdgeTreat() });
 
-  // How well sealed a soup is: unmatched edges AND edges used more than twice.
-  // openBoundaryEdges alone is not enough here - it welds at 1e-3, only reports
-  // count exactly 1, and counts the zero-length edge a sliver triangle leaves
-  // as a hole. Those slivers are harmless and some are emitted on purpose, so
-  // they are skipped; a face that clashes with an already softened one shows up
-  // as extra open edges, extra non-manifold ones, or both.
-  const sealScore = (soup) => {
-    const q = 1e4;
-    const vk = (i) => Math.round(soup[i]*q)+'|'+Math.round(soup[i+1]*q)+'|'+Math.round(soup[i+2]*q);
-    const use = new Map();
-    for (let t = 0; t + 8 < soup.length; t += 9) {
-      const K = [vk(t), vk(t+3), vk(t+6)];
-      for (let e = 0; e < 3; e++) {
-        const a = K[e], b = K[(e+1)%3];
-        if (a === b) continue;
-        const k = a < b ? a+'~'+b : b+'~'+a;
-        use.set(k, (use.get(k) || 0) + 1);
-      }
-    }
-    let open = 0, nm = 0;
-    use.forEach(function (c) { if (c % 2) open++; if (c > 2) nm++; });
-    return { open: open, nm: nm };
-  };
+  const sealScore = nsoSealScore;
   // ---- whole-solid wrap ----
   // A box does not go through the per-face path at all. Clicking any face of
   // one wraps every face, every edge and every corner in a single bake off the
@@ -3373,8 +3646,19 @@ function applySoftenOnFace(face) {
   const asBox = (fullWrap && boxBase && wrapSquare && squareCount < 6) ? boxBase : null;
   if (boxBase && !asBox) {
     if (!fullWrap) console.log('[soften] Full wrap off - baking the clicked face only');
-    else if (!wrapSquare) console.log('[soften] a painted face is a recessed wall, not one the wrap can name - per-face bake');
+    else if (!wrapSquare) console.log('[soften] a painted face has no axis and side to name - per-face bake');
     else console.log('[soften] all six faces painted out - nothing left to wrap');
+  } else if (!boxBase && fullWrap) {
+    console.log('[soften] not a plain box - trying the one-pocket wrap');
+  }
+  // A piece with one box pocket in it is still a piece the wrap can do: the
+  // hull and the pocket are each a box, and the skip list says which faces of
+  // each keep their radius. Everything below this is the plain-box path,
+  // unchanged.
+  if (!asBox && fullWrap && !boxBase) {
+    const handled = wrapPocketBrickRun(m, run, R, firstOfRun, jobs);
+    if (handled) return;
+    console.log('[soften] not one box with one box pocket either - per-face bake on the clicked face');
   }
   if (asBox) {
     const wrapMode = getEdgeTreat();
@@ -3402,6 +3686,13 @@ function applySoftenOnFace(face) {
     commitSoften(m, run, wrapped, firstOfRun,
                  [{ wrap: true, R: R, mode: wrapMode }],
                  wrapStatus(wrapMode, rawWrapSolid.lastBuild));
+    return;
+  }
+
+  if (pick.recessed) {
+    if (typeof removeFaceHelper === 'function') removeFaceHelper();
+    setStatus('That face is inside the piece - only a Full wrap can reach it, and this piece is not one ' +
+              'the wrap can name. Piece unchanged', true);
     return;
   }
 
@@ -4625,6 +4916,23 @@ function rawAxisFromDisplay(dispAxis, dispSign) {
   return { rawAxisIdx: 1, rawKeepMin: dispSign > 0 };
 }
 
+// Does the piece still carry a flat face on this axis, facing this way, on
+// this plane? The outer-plane check cannot answer that for a pocket wall.
+function rawHasPlane(rawTris, axisIdx, keepMin, at) {
+  const want = keepMin ? -1 : 1;
+  for (let t = 0; t + 8 < rawTris.length; t += 9) {
+    const ux = rawTris[t+3]-rawTris[t], uy = rawTris[t+4]-rawTris[t+1], uz = rawTris[t+5]-rawTris[t+2];
+    const vx = rawTris[t+6]-rawTris[t], vy = rawTris[t+7]-rawTris[t+1], vz = rawTris[t+8]-rawTris[t+2];
+    let nx = uy*vz-uz*vy, ny = uz*vx-ux*vz, nz = ux*vy-uy*vx;
+    const L = Math.hypot(nx, ny, nz);
+    if (!(L > 1e-12)) continue;
+    const n = [nx/L, ny/L, nz/L];
+    if (Math.abs(n[axisIdx]) < 0.999 || (n[axisIdx] >= 0 ? 1 : -1) !== want) continue;
+    if (Math.abs(rawTris[t+axisIdx] - at) < FACE_PICK_TOL) return true;
+  }
+  return false;
+}
+
 // The coordinate of the outer plane on one raw axis. Used to express the
 // clicked plane in raw units and to re-validate a stored pick — never to
 // decide which face the user meant.
@@ -4751,10 +5059,26 @@ function nsoFaceFromHit(model, mesh, hit) {
 
   const mapped = rawAxisFromDisplay(dispAxis, dispSign);
   const rawPlane = rawExtremeOf(model.rawTris, mapped.rawAxisIdx, mapped.rawKeepMin);
+  // Where a recessed face sits, in raw units. A pocket wall is a real face of
+  // the piece and has to be nameable, but it is not the outer plane, so
+  // rawExtremeOf does not reach it. This measures the piece against itself:
+  // the display span on this axis and the raw span on the axis it maps to are
+  // the same piece, and rawAxisFromDisplay already said which end matches
+  // which. No centring constant, no second copy of the mapping.
+  const rawLo = rawExtremeOf(model.rawTris, mapped.rawAxisIdx, true);
+  const rawHi = rawExtremeOf(model.rawTris, mapped.rawAxisIdx, false);
+  let rawAt = rawPlane;
+  const dSpan = bbHi - bbLo, rSpan = rawHi - rawLo;
+  if (dSpan > 1e-9 && isFinite(rSpan)) {
+    const t = (localHit - bbLo) / dSpan;
+    rawAt = mapped.rawKeepMin ? (rawHi - t * rSpan) : (rawLo + t * rSpan);
+  }
   return {
     flat: true,
     outer: Math.abs(localHit - localPlane) <= FACE_PICK_TOL,
     recessedBy: Math.abs(localHit - localPlane),
+    rawAt: rawAt,
+    localHit: localHit,
     dispAxis: dispAxis,
     dispSign: dispSign,
     localPlane: localPlane,
@@ -4811,7 +5135,15 @@ function storeFacePick(hit) {
   // they cannot cut a recessed pocket wall. If the click is not on that
   // outer plane, say so instead of letting an engine slide the work onto
   // the plane it can reach.
-  if (!face.outer) {
+  //
+  // The one exception is a Full wrap on a pocket piece. There the click is
+  // only "go" - the wrap does the whole solid and reads the skip list, not
+  // this pick - and with the hull painted out a pocket wall is the only face
+  // left to click. The pick is marked recessed so the per-face path, which
+  // really cannot use it, still refuses.
+  const wrapWhole = (typeof getFullWrap === 'function') && getFullWrap() &&
+                    !!rawPocketBrick(model.rawTris);
+  if (!face.outer && !wrapWhole) {
     setStatus('Click an outer face - that one is recessed ' +
               face.recessedBy.toFixed(2) + 'mm behind the outside', true);
     return null;
@@ -4834,7 +5166,7 @@ function storeFacePick(hit) {
     return null;
   }
 
-  const rawPlane = face.rawPlane;
+  const rawPlane = face.outer ? face.rawPlane : face.rawAt;
   if (!isFinite(rawPlane)) {
     setStatus('Click a face - piece has no geometry on that axis', true);
     return null;
@@ -4863,6 +5195,7 @@ function storeFacePick(hit) {
     rawAxisIdx: mapped.rawAxisIdx,
     rawKeepMin: mapped.rawKeepMin,
     rawPlane: rawPlane,
+    recessed: !face.outer,
     // display-space aliases Join's existing readers expect
     axis: dispAxis === 0 ? 'x' : (dispAxis === 1 ? 'y' : 'z'),
     axisIdx: dispAxis,
@@ -4883,6 +5216,13 @@ function getFacePick(model) {
   const pick = state.facePick;
   if (!pick || !model || pick.modelId !== model.id) return null;
   if (!model.rawTris || model.rawAxis !== 'zup') return null;
+  // A recessed pick names a plane inside the piece, so the outer plane is not
+  // what it should be re-validated against. It is only ever a "go" for the
+  // whole-solid wrap, which reads the skip list and not this plane, so the
+  // check is that the piece still has that face at all.
+  if (pick.recessed) {
+    return rawHasPlane(model.rawTris, pick.rawAxisIdx, pick.rawKeepMin, pick.rawPlane) ? pick : null;
+  }
   const live = rawExtremeOf(model.rawTris, pick.rawAxisIdx, pick.rawKeepMin);
   if (!isFinite(live) || Math.abs(live - pick.rawPlane) > FACE_PICK_TOL) return null;
   // Cap moves the plane inward by its own EPS; track that so a follow-up

@@ -62,8 +62,15 @@
      which has no axis and side to name, and for the bare planes Align asks
      about. */
   function sameFace(a, b) {
-    if (a.axisIdx != null && b.axisIdx != null)
-      return a.axisIdx === b.axisIdx && !!a.keepMin === !!b.keepMin;
+    if (a.axisIdx != null && b.axisIdx != null) {
+      if (a.axisIdx !== b.axisIdx || !!a.keepMin !== !!b.keepMin) return false;
+      // Outer faces are one per axis and side. A pocket has more faces on the
+      // same axis and side as the hull, so an inner face is only the same
+      // face when it is on the same plane too - that is what keeps a click on
+      // a pocket wall off the outer face behind it.
+      if (a.inner || b.inner) return Math.abs(a.d - b.d) < D_TOL;
+      return true;
+    }
     return samePlane(a, b);
   }
   function indexOfPlane(mask, pl) {
@@ -74,21 +81,22 @@
   /* ---- what everything downstream asks ---- */
 
   // A raw-space plane: outward unit normal n, offset d (n . p = d).
-  window.nsoMaskIsExcludedRaw = function (m, n, d, axisIdx, keepMin) {
+  window.nsoMaskIsExcludedRaw = function (m, n, d, axisIdx, keepMin, inner) {
     const mask = m && m.faceMask;
     if (!mask || !mask.exclude || !mask.exclude.length) return false;
     return indexOfPlane(mask, { n: n, d: d,
       axisIdx: (axisIdx == null ? null : axisIdx),
-      keepMin: (axisIdx == null ? null : !!keepMin) }) >= 0;
+      keepMin: (axisIdx == null ? null : !!keepMin),
+      inner: !!inner }) >= 0;
   };
   // The face a Soften pick names: the outer plane on rawAxisIdx, min side if
   // rawKeepMin, max side otherwise.
-  window.nsoMaskIsExcludedPick = function (m, rawAxisIdx, rawKeepMin, rawPlane) {
+  window.nsoMaskIsExcludedPick = function (m, rawAxisIdx, rawKeepMin, rawPlane, inner) {
     if (rawAxisIdx == null || rawPlane == null) return false;
     const n = [0, 0, 0];
     n[rawAxisIdx] = rawKeepMin ? -1 : 1;
     return window.nsoMaskIsExcludedRaw(m, n, rawKeepMin ? -rawPlane : rawPlane,
-                                       rawAxisIdx, rawKeepMin);
+                                       rawAxisIdx, rawKeepMin, inner);
   };
   /* The faces the paint took out, as the raw axis and side each click named:
      [axisIdx][0 for the min side]. Null if any painted face is a recessed
@@ -101,10 +109,28 @@
     if (!mask || !mask.exclude || !mask.exclude.length) return sq;
     for (let i = 0; i < mask.exclude.length; i++) {
       const e = mask.exclude[i];
-      if (e.axisIdx == null) return null;
+      if (e.axisIdx == null || e.inner) return null;
       sq[e.axisIdx][e.keepMin ? 0 : 1] = true;
     }
     return sq;
+  };
+  /* Every painted face as the click recorded it: the raw axis, the side its
+     normal points to, the plane it sits on, and whether it is a face inside
+     the piece rather than one of the outer six. This is the whole skip list -
+     a hull face and a pocket wall are the same kind of thing here, and the
+     wrap decides which is which by where the plane is, not by a second guess
+     at what the user meant. Null if any painted face has no axis and side to
+     name, which is the caller's cue to leave the wrap alone. */
+  window.nsoMaskFaceList = function (m) {
+    const mask = m && m.faceMask;
+    if (!mask || !mask.exclude) return [];
+    const out = [];
+    for (let i = 0; i < mask.exclude.length; i++) {
+      const e = mask.exclude[i];
+      if (e.axisIdx == null) return null;
+      out.push({ axisIdx: e.axisIdx, keepMin: !!e.keepMin, d: e.d, inner: !!e.inner });
+    }
+    return out;
   };
   // A wall Align found, given in world space on the piece's own mesh.
   window.nsoMaskIsExcludedWorld = function (m, mesh, wn, wp) {
@@ -129,7 +155,9 @@
              axisIdx: (p.axisIdx == null ? null : p.axisIdx),
              keepMin: (p.axisIdx == null ? null : !!p.keepMin),
              dispAxis: (p.dispAxis == null ? null : p.dispAxis),
-             dispSign: (p.dispAxis == null ? null : p.dispSign) };
+             dispSign: (p.dispAxis == null ? null : p.dispSign),
+             dispPlane: (p.dispPlane == null ? null : p.dispPlane),
+             inner: !!p.inner };
   }
   window.nsoMaskSnapshot = function (m) {
     const mask = m && m.faceMask;
@@ -239,15 +267,18 @@
     /* The faces the clicks named, in the display space this mesh is already
        in: no mapping, no centring, nothing re-derived. A triangle is painted
        when its own normal is the face's normal and it sits on that face's
-       outer plane, which is read off this mesh every time so it is still
-       right after a bake has rebuilt the piece. Recessed walls have no
-       display face to name and fall back to the stored raw plane below. */
-    const faceSet = {};
+       plane, which is read off this mesh every time so it is still right
+       after a bake has rebuilt the piece. A pocket wall names the same axis
+       and side as the hull face behind it, so it carries its own plane too
+       and only the wall lights up. A patch with no axis to name at all falls
+       back to the stored raw plane below. */
+    const faceSet = {}, innerFaces = [];
     let anyPlaneOnly = false;
     for (let i = 0; i < mask.exclude.length; i++) {
       const e = mask.exclude[i];
       if (e.dispAxis == null) { anyPlaneOnly = true; continue; }
-      faceSet[e.dispAxis + ':' + (e.dispSign > 0 ? '+' : '-')] = true;
+      if (e.inner) innerFaces.push(e);
+      else faceSet[e.dispAxis + ':' + (e.dispSign > 0 ? '+' : '-')] = true;
     }
     let glo = [Infinity, Infinity, Infinity], ghi = [-Infinity, -Infinity, -Infinity];
     for (let v = 0; v < pos.count; v++) {
@@ -257,6 +288,10 @@
         if (q[k] > ghi[k]) ghi[k] = q[k];
       }
     }
+    const onPlane = function (A, B, C, a, plane) {
+      return Math.abs(A[a] - plane) < D_TOL && Math.abs(B[a] - plane) < D_TOL &&
+             Math.abs(C[a] - plane) < D_TOL;
+    };
     const onNamedFace = function (A, B, C, nx, ny, nz) {
       const na = [Math.abs(nx), Math.abs(ny), Math.abs(nz)];
       let a = 0;
@@ -264,10 +299,17 @@
       if (na[2] > na[a]) a = 2;
       if (na[a] < 0.999) return false;
       const sg = ([nx, ny, nz][a] >= 0) ? 1 : -1;
-      if (!faceSet[a + ':' + (sg > 0 ? '+' : '-')]) return false;
-      const plane = sg > 0 ? ghi[a] : glo[a];
-      return Math.abs(A[a] - plane) < D_TOL && Math.abs(B[a] - plane) < D_TOL &&
-             Math.abs(C[a] - plane) < D_TOL;
+      // an outer face: this axis and side, on the piece's own outer plane
+      if (faceSet[a + ':' + (sg > 0 ? '+' : '-')] &&
+          onPlane(A, B, C, a, sg > 0 ? ghi[a] : glo[a])) return true;
+      // a pocket wall: this axis and side, on its own plane, which is why a
+      // click inside the pocket cannot light up the hull face behind it
+      for (let i = 0; i < innerFaces.length; i++) {
+        const e = innerFaces[i];
+        if (e.dispAxis !== a || (e.dispSign > 0 ? 1 : -1) !== sg) continue;
+        if (onPlane(A, B, C, a, e.dispPlane)) return true;
+      }
+      return false;
     };
     /* The paint sits a hair proud of the face it marks. Coincident with it
        the depth buffer cannot separate the two and the yellow comes out
@@ -337,7 +379,7 @@
      while a paint session is live, so the count is on the same line a photo
      of the HUD already shows. Paint never relabels itself into Done - it
      stays Paint faces and just lights up; Done is its own button. */
-  const HUD_TAG = 'HUD mask5';
+  const HUD_TAG = 'HUD mask6';
   function hud(text) {
     const el = document.getElementById('adjust-status');
     if (el) el.textContent = text;
@@ -411,19 +453,29 @@
     // once, so nothing downstream has to work out which face was meant.
     let entry = null, name = 'that face';
     const face = (typeof nsoFaceFromHit === 'function') ? nsoFaceFromHit(m, mesh, hit) : null;
-    if (face && face.flat && face.outer && isFinite(face.rawPlane)) {
+    if (face && face.flat && isFinite(face.rawPlane) && isFinite(face.rawAt)) {
+      // Outer face or pocket wall, one code path: the axis and side come from
+      // the same call either way, and the plane says which face on that axis
+      // and side it is. A pocket wall is a real face of the piece after a
+      // Subtract - it just is not the outer one, and after a Subtract the
+      // outer one may not even be there any more.
       const n = [0, 0, 0];
       n[face.rawAxisIdx] = face.rawKeepMin ? -1 : 1;
+      const at = face.outer ? face.rawPlane : face.rawAt;
       entry = {
-        n: n, d: face.rawKeepMin ? -face.rawPlane : face.rawPlane,
+        n: n, d: face.rawKeepMin ? -at : at,
         axisIdx: face.rawAxisIdx, keepMin: !!face.rawKeepMin,
-        dispAxis: face.dispAxis, dispSign: face.dispSign
+        dispAxis: face.dispAxis, dispSign: face.dispSign,
+        dispPlane: face.outer ? face.localPlane : face.localHit,
+        inner: !face.outer
       };
-      name = 'the ' + 'XYZ'.charAt(face.dispAxis) + (face.dispSign > 0 ? '+' : '-') + ' face';
+      name = (face.outer ? 'the ' : 'the inner ') +
+             'XYZ'.charAt(face.dispAxis) + (face.dispSign > 0 ? '+' : '-') + ' face' +
+             (face.outer ? '' : ' at ' + face.localHit.toFixed(2));
     } else {
-      // A recessed wall - a pocket floor after a boolean - is a face the
-      // paint can hold but not one the wrap can name. Stored as a plane
-      // only, and the wrap declines the whole-solid route when it sees one.
+      // Not flat enough to name an axis - a fillet, a curved end. Stored as
+      // the coplanar patch under the cursor, and the wrap declines the
+      // whole-solid route when it sees one.
       const patch = faceUnderCursor(m, mesh, hit);
       if (!patch) {
         setStatus('No face under that click - nothing changed', true);

@@ -2,8 +2,8 @@
 (function () {
   function stampHud() {
     var el = document.getElementById('adjust-status');
-    if (el) el.textContent = 'HUD mask5';
-    if (typeof setStatus === 'function') setStatus('HUD mask5');
+    if (el) el.textContent = 'HUD mask6';
+    if (typeof setStatus === 'function') setStatus('HUD mask6');
   }
 
   function pickIdx(event) {
@@ -31,6 +31,11 @@
     return true;
   }
 
+  // The Thicken mm box hides its native spin buttons so the number can sit on
+  // top and the arrows underneath, inside one border the same height as the
+  // Thicken buttons. These two drive it instead - same min, max and step the
+  // field already declares, and an input event so anything listening still
+  // hears it. Nothing else about Thicken changed.
   function bindThickenArrows() {
     var arrows = document.querySelectorAll('.thick-arrow[data-thick-step]');
     for (var i = 0; i < arrows.length; i++) {
@@ -47,6 +52,7 @@
         var now = parseFloat(box.value);
         if (!isFinite(now)) now = isFinite(min) ? min : 0;
         var next = now + dir * step;
+        // step can be fractional, so round to the step's own precision
         var dp = (String(step).split('.')[1] || '').length;
         next = parseFloat(next.toFixed(dp));
         if (next < min) next = min;
