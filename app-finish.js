@@ -4981,7 +4981,8 @@ function showInspectCage(model) {
     // facets are invisible and the cage shows nothing worth inspecting.
     const edges = new THREE.EdgesGeometry(mesh.geometry, 1);
     const mat = new THREE.LineBasicMaterial({
-      color: 0x7dd3fc, transparent: true, opacity: 0.55, depthTest: false
+      color: 0x7dd3fc, transparent: true, opacity: 0.55,
+      depthTest: false, depthWrite: false
     });
     const cage = new THREE.LineSegments(edges, mat);
     cage.renderOrder = 16;
@@ -5336,12 +5337,18 @@ function showPlanarHighlight(mesh, face) {
   if (!face || !face.worldTris || !state.scene) return;
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(face.worldTris, 3));
+  // Cyan, not the amber this used to be. Amber next to the paint's yellow is
+  // two signals that look like one: an armed face read as a painted face, and
+  // this one is drawn through the solid, so it looked like paint on a face
+  // the cursor was nowhere near. depthWrite off for the same reason the
+  // outline has it off - it must not leave depth in front of the paint.
   const hl = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-    color: 0xfacc15,
+    color: 0x38bdf8,
     side: THREE.DoubleSide,
     transparent: true,
     opacity: 0.45,
-    depthTest: false
+    depthTest: false,
+    depthWrite: false
   }));
   hl.renderOrder = 20;
   state.scene.add(hl);
@@ -5379,11 +5386,12 @@ function showFaceHighlight(hit) {
     a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z
   ], 3));
   const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
-    color: 0xfacc15,
+    color: 0x38bdf8,
     side: THREE.DoubleSide,
     transparent: true,
     opacity: 0.85,
-    depthTest: false
+    depthTest: false,
+    depthWrite: false
   }));
   mesh.renderOrder = 20;
   state.scene.add(mesh);

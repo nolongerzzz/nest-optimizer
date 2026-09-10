@@ -23,7 +23,14 @@
     if (!state || state.placed[state.selectedIndex] !== p) return;
     try {
       const edges = new THREE.EdgesGeometry(p.mesh.geometry, 15);
-      const mat = new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 1 });
+      // depthWrite off: with depthTest already off these lines pass every
+      // depth check, so writing depth would leave a hidden edge's z sitting
+      // in front of the face it crosses and reject whatever is drawn after
+      // it - which is how this outline was cutting holes in the paint.
+      const mat = new THREE.LineBasicMaterial({
+        color: 0xffffff, depthTest: false, depthWrite: false,
+        transparent: true, opacity: 1
+      });
       const line = new THREE.LineSegments(edges, mat);
       line.renderOrder = 12;
       line.name = 'selOutline';
@@ -40,6 +47,11 @@
     if (typeof prevSelect === 'function') prevSelect(idx);
     const p = state && state.placed && state.placed[idx];
     if (p) window.refreshOutline(p);
+    // Selecting writes its own line into #adjust-status, which is where the
+    // paint keeps its running count. Put the count back, so the number on
+    // screen is the length of the skip list and not whatever was clicked
+    // last.
+    if (typeof window.nsoMaskHudRefresh === 'function') window.nsoMaskHudRefresh();
   };
 
   function copyRaw(src) {
