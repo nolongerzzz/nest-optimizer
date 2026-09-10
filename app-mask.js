@@ -104,6 +104,7 @@
     if (!m) return;
     m.faceMask = { exclude: snap ? snap.map(function (p) { return { n: p.n.slice(), d: p.d }; }) : [] };
     repaint();
+    if (typeof window.nsoMaskHudRefresh === 'function') window.nsoMaskHudRefresh();
   };
 
   /* ---- picking a face ---- */
@@ -227,30 +228,52 @@
 
   /* ---- paint mode ---- */
 
+  /* The HUD line. It reads HUD mask3 at rest and gains the running count
+     while a paint session is live, so the count is on the same line a photo
+     of the HUD already shows. Paint never relabels itself into Done - it
+     stays Paint faces and just lights up; Done is its own button. */
+  const HUD_TAG = 'HUD mask3';
+  function hud(text) {
+    const el = document.getElementById('adjust-status');
+    if (el) el.textContent = text;
+  }
+  function hudPaint() {
+    const n = window.nsoMaskCount(activeModel());
+    hud(HUD_TAG + ' \u2014 ' + n + (n === 1 ? ' face excluded' : ' faces excluded'));
+  }
   function setLabel() {
     const btn = document.getElementById('btn-mask-paint');
-    if (!btn) return;
-    btn.textContent = state.maskPaint ? 'Done' : 'Paint faces';
-    btn.classList.toggle('is-armed', !!state.maskPaint);
+    if (btn) btn.classList.toggle('is-armed', !!state.maskPaint);
+    const done = document.getElementById('btn-mask-done');
+    if (done) done.disabled = !state.maskPaint;
   }
-  function togglePaint() {
+  function enterPaint() {
     const m = activeModel();
-    if (!state.maskPaint && (!m || !m.rawTris)) {
+    if (!m || !m.rawTris) {
       setStatus('Paint needs a raw piece - split, wrap or boolean it first', true);
       return;
     }
-    state.maskPaint = !state.maskPaint;
-    if (state.maskPaint) {
-      state.softenArmed = false;
-      state.capArmed = false;
-      if (typeof clearFacePick === 'function') clearFacePick();
-      repaint();
-      setStatus('Paint faces - click a face to exclude it, click again to include. Done when finished');
-    } else {
-      setStatus('Paint off - ' + window.nsoMaskCount(activeModel()) + ' face(s) excluded');
-    }
+    state.maskPaint = true;
+    state.softenArmed = false;
+    state.capArmed = false;
+    if (typeof clearFacePick === 'function') clearFacePick();
+    repaint();
     setLabel();
+    hudPaint();
+    setStatus('Paint faces - click a face to exclude it, click again to include. Done when finished');
   }
+  function exitPaint() {
+    state.maskPaint = false;
+    setLabel();
+    hud(HUD_TAG);
+    setStatus('Paint off - ' + window.nsoMaskCount(activeModel()) + ' face(s) excluded');
+  }
+  function togglePaint() {
+    if (state.maskPaint) exitPaint(); else enterPaint();
+  }
+  window.nsoMaskHudRefresh = function () {
+    if (state.maskPaint) hudPaint(); else hud(HUD_TAG);
+  };
 
   function hitFace(event) {
     if (!state.renderer || !state.camera || !state.modelGroup) return null;
@@ -286,6 +309,7 @@
       pushUndo({ type: 'maskReplace', modelId: m.id, prevMask: prev });
     }
     repaint();
+    window.nsoMaskHudRefresh();
     setStatus((at >= 0 ? 'Included' : 'Excluded') + ' that face (' + face.tris.size +
               ' tris) - ' + mask.exclude.length + ' face(s) excluded');
     return true;
@@ -294,6 +318,8 @@
   function bind() {
     const btn = document.getElementById('btn-mask-paint');
     if (btn && !btn._maskBound) { btn.addEventListener('click', togglePaint); btn._maskBound = true; }
+    const done = document.getElementById('btn-mask-done');
+    if (done && !done._maskBound) { done.addEventListener('click', exitPaint); done._maskBound = true; }
     const clr = document.getElementById('btn-mask-clear');
     if (clr && !clr._maskBound) {
       clr.addEventListener('click', function () {
@@ -303,6 +329,7 @@
         if (typeof pushUndo === 'function') pushUndo({ type: 'maskReplace', modelId: m.id, prevMask: prev });
         m.faceMask = { exclude: [] };
         repaint();
+        window.nsoMaskHudRefresh();
         setStatus('Paint cleared - 0 faces excluded');
       });
       clr._maskBound = true;
@@ -327,5 +354,5 @@
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
   else bind();
-  setTimeout(bind, 0);
+  setTimeout(function () { bind(); setLabel(); }, 0);
 })();

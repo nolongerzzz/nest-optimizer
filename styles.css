@@ -1110,3 +1110,23 @@ select:focus, input:focus {
   text-align: right;
 }
 .vp-select option { color: #0f172a; }
+
+/* Paint faces is a MODE, not an action - yellow so it reads that way at a
+   glance, and brighter still while a session is live. Done sits beside it and
+   is only live during a session; neither button ever replaces the other. */
+.vp-menu-body .btn-paint {
+  color: #fde047;
+  border-color: rgba(253, 224, 71, 0.55);
+}
+.vp-menu-body .btn-paint:hover { border-color: rgba(253, 224, 71, 0.9); }
+.vp-menu-body .btn-paint.is-armed {
+  background: #fde047;
+  color: #1a1d21;
+  border-color: #fde047;
+  font-weight: 600;
+}
+.vp-menu-body .btn-paint-done[disabled] { opacity: 0.45; }
+.vp-menu-body .btn-paint-done:not([disabled]) {
+  color: #fde047;
+  border-color: rgba(253, 224, 71, 0.55);
+}
