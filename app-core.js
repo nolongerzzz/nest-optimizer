@@ -86,6 +86,12 @@ function updateUndoBtn() {
 }
 function pushUndo(entry) {
   if (!entry || !entry.type) return;
+  // A mesh swap and the paint on it belong to the same step: snapshot the
+  // paint here so one Undo puts back both without every call site knowing.
+  if (entry.prevMask === undefined && entry.modelId != null && typeof nsoMaskSnapshot === 'function') {
+    const mm = state.models.find(x => x.id === entry.modelId);
+    if (mm) entry.prevMask = nsoMaskSnapshot(mm);
+  }
   state.undoStack.push(entry);
   if (state.undoStack.length > UNDO_MAX) state.undoStack.shift();
   updateUndoBtn();
@@ -160,6 +166,7 @@ function undoLast() {
   if (entry.type === 'joinReplace') {
     const mA = state.models.find(x => x.id === entry.aId);
     if (!mA) { setStatus('Undo: piece no longer exists'); return; }
+    if (entry.aPrevMask !== undefined && typeof nsoMaskRestore === 'function') nsoMaskRestore(mA, entry.aPrevMask);
     mA.geometry = entry.aPrevGeometry;
     mA.rawTris = entry.aPrevRawTris;
     mA.rawAxis = entry.aPrevRawAxis;
@@ -223,6 +230,7 @@ function undoLast() {
   if (entry.type === 'subtractReplace') {
     const mA = state.models.find(x => x.id === entry.aId);
     if (!mA) { setStatus('Undo: piece no longer exists'); return; }
+    if (entry.aPrevMask !== undefined && typeof nsoMaskRestore === 'function') nsoMaskRestore(mA, entry.aPrevMask);
     mA.geometry = entry.aPrevGeometry;
     mA.rawTris = entry.aPrevRawTris;
     mA.rawAxis = entry.aPrevRawAxis;
@@ -282,9 +290,21 @@ function undoLast() {
     setStatus('Undo: Subtract reverted - two pieces restored');
     return;
   }
+  if (entry.type === 'maskReplace') {
+    const m = state.models.find(x => x.id === entry.modelId);
+    if (!m) { setStatus('Undo: piece no longer exists'); return; }
+    if (typeof nsoMaskRestore === 'function') nsoMaskRestore(m, entry.prevMask);
+    else m.faceMask = { exclude: entry.prevMask || [] };
+    updateUndoBtn();
+    setStatus('Undo: paint reverted - ' +
+      ((m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length : 0) + ' face(s) excluded');
+    return;
+  }
   if (entry.type === 'softenReplace' || entry.type === 'capReplace' || entry.type === 'sealReplace' || entry.type === 'solidifyReplace' || entry.type === 'thickenReplace') {
     const m = state.models.find(x => x.id === entry.modelId);
     if (!m) { setStatus('Undo: piece no longer exists'); return; }
+    // the paint set is part of the piece's state, so one step puts back both
+    if (entry.prevMask !== undefined && typeof nsoMaskRestore === 'function') nsoMaskRestore(m, entry.prevMask);
     m.geometry = entry.prevGeometry;
     m.rawTris = entry.prevRawTris;
     m.rawAxis = entry.prevRawAxis;

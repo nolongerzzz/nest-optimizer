@@ -3229,6 +3229,15 @@ function applySoftenOnFace(face) {
   const rawAxisIdx = pick.rawAxisIdx;
   const keepMinFace = pick.rawKeepMin;
 
+  // A painted-out face is not baked, whatever mode is selected. Refused here,
+  // before the run is touched, so the piece and the paint both stay put.
+  if (typeof nsoMaskIsExcludedPick === 'function' &&
+      nsoMaskIsExcludedPick(m, rawAxisIdx, keepMinFace, pick.rawPlane)) {
+    if (typeof removeFaceHelper === 'function') removeFaceHelper();
+    setStatus('That face is painted out - include it first, or pick another face', true);
+    return;
+  }
+
   // ---- the accumulation run ----
   // A second face must not cost you the first. Every clicked face is recorded
   // against the piece's pre-Soften raw, and one bake replays the whole list
@@ -3284,7 +3293,11 @@ function applySoftenOnFace(face) {
   // raw source, so a shared edge is never met twice and a three-edge vertex is
   // solved once instead of negotiated face by face. A new R just re-wraps from
   // the same source - it cannot stack.
-  const asBox = rawSolidBox(run.base);
+  const masked = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
+  const asBox = masked ? null : rawSolidBox(run.base);
+  if (masked && rawSolidBox(run.base)) {
+    console.log('[soften] ' + masked + ' face(s) painted out - per-face bake, not a whole-solid wrap');
+  }
   if (asBox) {
     const wrapMode = getEdgeTreat();
     let wrapped = null;
@@ -3329,6 +3342,8 @@ function applySoftenOnFace(face) {
     working = run.base;
     for (const j of order) {
       try {
+        if (typeof nsoMaskIsExcludedPick === 'function' &&
+            nsoMaskIsExcludedPick(m, j.axisIdx, j.keepMin, j.plane)) { j.dead = true; continue; }
         working = softenSelectedFace(working, j.axisIdx, j.keepMin, j.R, j.mode, j.plane);
         j.build = lastBuildFor(j.mode);
       } catch (err) {
@@ -5031,10 +5046,31 @@ function alignJoinForSlide() {
   // B's corresponding edge -- both which wall (an L/step-shaped A can have
   // several) and which value to actually snap to (the true outer surface,
   // not an average of its own noise).
-  function nearestExtreme(groups, target, useMax) {
+  // A painted-out wall of A is not a mating face, so Align never lands B on
+  // one. The pocket the user painted out is skipped; the flats around it are
+  // still offered, which is why an excluded pocket cannot veto a side Join.
+  const modelA = state.models.find(function (mm) { return mm.id === idA; });
+  function wallPainted(axisName, dir, value) {
+    if (typeof nsoMaskIsExcludedWorld !== 'function' || !modelA) return false;
+    const ax = axisName === 'x' ? 0 : 2;
+    const wp = [0, 0, 0];
+    wp[ax] = value;
+    // meshBandExtent keeps any triangle roughly perpendicular to the axis and
+    // does not record which way it faces, so a wall found while probing from
+    // one side can be a face pointing the other way - a pocket floor read as a
+    // "-X" wall, say. Test both facings or a painted face slips through.
+    for (let sgn = -1; sgn <= 1; sgn += 2) {
+      const wn = [0, 0, 0];
+      wn[ax] = sgn;
+      if (nsoMaskIsExcludedWorld(modelA, placedA.mesh, wn, wp)) return true;
+    }
+    return false;
+  }
+  function nearestExtreme(groups, target, useMax, axisName, dir) {
     let best = null, bestD = Infinity;
     for (let i = 0; i < groups.length; i++) {
       const val = useMax ? groups[i].max : groups[i].min;
+      if (axisName && wallPainted(axisName, dir, val)) continue;
       const d = Math.abs(val - target);
       if (d < bestD) { bestD = d; best = val; }
     }
@@ -5055,17 +5091,17 @@ function alignJoinForSlide() {
 
   const xCands = [];
   if (xBand.groups.length) {
-    const wPlus = nearestExtreme(xBand.groups, fb.minx, true);
-    xCands.push({ axis: 'x', dir: 1, wall: wPlus, delta: wPlus - fb.minx });
-    const wMinus = nearestExtreme(xBand.groups, fb.maxx, false);
-    xCands.push({ axis: 'x', dir: -1, wall: wMinus, delta: wMinus - fb.maxx });
+    const wPlus = nearestExtreme(xBand.groups, fb.minx, true, 'x', 1);
+    if (wPlus != null) xCands.push({ axis: 'x', dir: 1, wall: wPlus, delta: wPlus - fb.minx });
+    const wMinus = nearestExtreme(xBand.groups, fb.maxx, false, 'x', -1);
+    if (wMinus != null) xCands.push({ axis: 'x', dir: -1, wall: wMinus, delta: wMinus - fb.maxx });
   }
   const zCands = [];
   if (zBand.groups.length) {
-    const wPlus = nearestExtreme(zBand.groups, fb.minz, true);
-    zCands.push({ axis: 'z', dir: 1, wall: wPlus, delta: wPlus - fb.minz });
-    const wMinus = nearestExtreme(zBand.groups, fb.maxz, false);
-    zCands.push({ axis: 'z', dir: -1, wall: wMinus, delta: wMinus - fb.maxz });
+    const wPlus = nearestExtreme(zBand.groups, fb.minz, true, 'z', 1);
+    if (wPlus != null) zCands.push({ axis: 'z', dir: 1, wall: wPlus, delta: wPlus - fb.minz });
+    const wMinus = nearestExtreme(zBand.groups, fb.maxz, false, 'z', -1);
+    if (wMinus != null) zCands.push({ axis: 'z', dir: -1, wall: wMinus, delta: wMinus - fb.maxz });
   }
 
   const bestX = pickBest(xCands);
