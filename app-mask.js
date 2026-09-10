@@ -228,11 +228,11 @@
 
   /* ---- paint mode ---- */
 
-  /* The HUD line. It reads HUD mask3 at rest and gains the running count
+  /* The HUD line. It reads the HUD tag at rest and gains the running count
      while a paint session is live, so the count is on the same line a photo
      of the HUD already shows. Paint never relabels itself into Done - it
      stays Paint faces and just lights up; Done is its own button. */
-  const HUD_TAG = 'HUD mask3';
+  const HUD_TAG = 'HUD finish2';
   function hud(text) {
     const el = document.getElementById('adjust-status');
     if (el) el.textContent = text;
@@ -241,11 +241,15 @@
     const n = window.nsoMaskCount(activeModel());
     hud(HUD_TAG + ' \u2014 ' + n + (n === 1 ? ' face excluded' : ' faces excluded'));
   }
+  /* Done is a state on this button, not a row of its own: Paint faces while
+     idle, and while a session is live it says so and how to stop. */
+  const PAINT_IDLE = 'Paint faces';
+  const PAINT_LIVE = 'Painting\u2026 click to stop';
   function setLabel() {
     const btn = document.getElementById('btn-mask-paint');
-    if (btn) btn.classList.toggle('is-armed', !!state.maskPaint);
-    const done = document.getElementById('btn-mask-done');
-    if (done) done.disabled = !state.maskPaint;
+    if (!btn) return;
+    btn.classList.toggle('is-armed', !!state.maskPaint);
+    btn.textContent = state.maskPaint ? PAINT_LIVE : PAINT_IDLE;
   }
   function enterPaint() {
     const m = activeModel();
@@ -318,8 +322,6 @@
   function bind() {
     const btn = document.getElementById('btn-mask-paint');
     if (btn && !btn._maskBound) { btn.addEventListener('click', togglePaint); btn._maskBound = true; }
-    const done = document.getElementById('btn-mask-done');
-    if (done && !done._maskBound) { done.addEventListener('click', exitPaint); done._maskBound = true; }
     const clr = document.getElementById('btn-mask-clear');
     if (clr && !clr._maskBound) {
       clr.addEventListener('click', function () {
