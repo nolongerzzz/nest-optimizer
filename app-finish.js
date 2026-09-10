@@ -2974,36 +2974,17 @@ function rawSolidBox(rawTris, tol) {
   return { lo: lo, hi: hi, ext: ext };
 }
 
-// The paint, read as box faces: [axis][side] with side 0 the low plane. The
-// planes the paint stores are raw-space planes, and on a plain box each one is
-// either +e_a at hi[a] or -e_a at -lo[a] - the very same plane the click that
-// set the yellow resolved to, so the face that goes yellow and the face the
-// wrap skips are picked out by one number, never by a second guess at which
-// side of the piece the cursor was on. Null if any painted plane is not one of
-// the six, which is the caller's cue to leave the whole-solid wrap alone.
-function maskedBoxFaces(m, box) {
-  const sq = [[false,false],[false,false],[false,false]];
-  const snap = (typeof nsoMaskSnapshot === 'function') ? nsoMaskSnapshot(m) : null;
-  if (!snap || !snap.length) return sq;
-  const N_TOL = 0.02, D_TOL = 0.05;
-  for (let p = 0; p < snap.length; p++) {
-    const n = snap[p].n, d = snap[p].d;
-    let found = false;
-    for (let a = 0; a < 3 && !found; a++) {
-      const o = [(a+1)%3, (a+2)%3];
-      if (Math.abs(n[o[0]]) > N_TOL || Math.abs(n[o[1]]) > N_TOL) continue;
-      for (let sd = 0; sd < 2 && !found; sd++) {
-        const sign = sd ? 1 : -1;
-        const want = sign * (sd ? box.hi[a] : box.lo[a]);
-        if (Math.abs(n[a] - sign) < N_TOL && Math.abs(d - want) < D_TOL) {
-          sq[a][sd] = true;
-          found = true;
-        }
-      }
-    }
-    if (!found) return null;
-  }
-  return sq;
+// The paint, read as box faces: [axis][side] with side 0 the low plane. This
+// is a read, not a derivation - nsoMaskFaces hands back the raw axis and side
+// each paint click recorded at the moment it was made, the same numbers the
+// same click would have given the Soften pick. Nothing here works out which
+// face was meant from a plane and a bounding box, because that is the second
+// mapping that put the yellow on the side and the exclude on the top.
+// Null when a painted face is a recessed wall, which has no axis and side to
+// name; the caller then leaves the whole-solid wrap alone.
+function maskedBoxFaces(m) {
+  return (typeof nsoMaskFaces === 'function') ? nsoMaskFaces(m)
+                                              : [[false,false],[false,false],[false,false]];
 }
 
 // `squareFaces` is that same paint: [axis][side], true where a face has been
@@ -3381,18 +3362,18 @@ function applySoftenOnFace(face) {
   // the same source - it cannot stack.
   const fullWrap = getFullWrap();
   const boxBase = rawSolidBox(run.base);
-  // Paint no longer vetoes the wrap - it names the faces the wrap leaves
-  // alone. The one thing that still sends this back to the per-face path is
-  // a painted plane that is not one of the six, because then it is not a
-  // face the whole-solid wrap can name; and a piece with all six painted
-  // out, where there is nothing left to wrap.
-  const wrapSquare = (boxBase && fullWrap) ? maskedBoxFaces(m, boxBase) : null;
+  // Paint does not veto the wrap - it names the faces the wrap leaves alone,
+  // and it names them with the axis and side the click itself recorded. The
+  // one thing that still sends this back to the per-face path is a painted
+  // recessed wall, which has no axis and side to name; and a piece with all
+  // six faces painted out, where there is nothing left to wrap.
+  const wrapSquare = (boxBase && fullWrap) ? maskedBoxFaces(m) : null;
   let squareCount = 0;
   if (wrapSquare) for (let a = 0; a < 3; a++) for (let sd = 0; sd < 2; sd++) if (wrapSquare[a][sd]) squareCount++;
   const asBox = (fullWrap && boxBase && wrapSquare && squareCount < 6) ? boxBase : null;
   if (boxBase && !asBox) {
     if (!fullWrap) console.log('[soften] Full wrap off - baking the clicked face only');
-    else if (!wrapSquare) console.log('[soften] a painted plane is not one of the six box faces - per-face bake');
+    else if (!wrapSquare) console.log('[soften] a painted face is a recessed wall, not one the wrap can name - per-face bake');
     else console.log('[soften] all six faces painted out - nothing left to wrap');
   }
   if (asBox) {
@@ -4734,6 +4715,59 @@ function facePatchWorldTris(mesh, nWorld, planeW) {
   return kept;
 }
 
+// One click, one answer to "which face is this?", shared by the Soften pick
+// and the paint. Reads hit.face.normal - three.js's own local normal for the
+// triangle under the cursor, correct on indexed and non-indexed geometry
+// alike - and runs it through rawAxisFromDisplay, the one place the display
+// to raw mapping is written down. Anything that wants the face a click named
+// asks this and stores what it says. Nothing re-derives it later from a
+// plane, a bounding box or a second copy of the mapping: that is the bug
+// class where the yellow lands on the side and the exclude lands on the top.
+//
+// Returns null with a reason when the click cannot be described honestly.
+// `outer` is false for a recessed wall - a pocket floor after a boolean -
+// which is a real face for the paint but not one the whole-solid wrap can
+// name, and the caller is told so rather than being handed a guess.
+function nsoFaceFromHit(model, mesh, hit) {
+  if (!model || !model.rawTris || model.rawAxis !== 'zup') return null;
+  if (!mesh || !mesh.geometry || !hit || !hit.face) return null;
+  const nLocal = hit.face.normal.clone().normalize();
+  const nAbs = [Math.abs(nLocal.x), Math.abs(nLocal.y), Math.abs(nLocal.z)];
+  let dispAxis = 0;
+  if (nAbs[1] > nAbs[dispAxis]) dispAxis = 1;
+  if (nAbs[2] > nAbs[dispAxis]) dispAxis = 2;
+  if (nAbs[dispAxis] < FACE_PICK_FLAT) return { flat: false };
+  const dispSign = ([nLocal.x, nLocal.y, nLocal.z][dispAxis] >= 0) ? 1 : -1;
+
+  const geo = mesh.geometry;
+  if (!geo.boundingBox) geo.computeBoundingBox();
+  const bb = geo.boundingBox;
+  const bbLo = [bb.min.x, bb.min.y, bb.min.z][dispAxis];
+  const bbHi = [bb.max.x, bb.max.y, bb.max.z][dispAxis];
+  const localPlane = dispSign > 0 ? bbHi : bbLo;
+  mesh.updateMatrixWorld();
+  const pLocal = mesh.worldToLocal(hit.point.clone());
+  const localHit = [pLocal.x, pLocal.y, pLocal.z][dispAxis];
+
+  const mapped = rawAxisFromDisplay(dispAxis, dispSign);
+  const rawPlane = rawExtremeOf(model.rawTris, mapped.rawAxisIdx, mapped.rawKeepMin);
+  return {
+    flat: true,
+    outer: Math.abs(localHit - localPlane) <= FACE_PICK_TOL,
+    recessedBy: Math.abs(localHit - localPlane),
+    dispAxis: dispAxis,
+    dispSign: dispSign,
+    localPlane: localPlane,
+    localNormal: nLocal,
+    localPoint: pLocal,
+    bbSpan: bbHi - bbLo,
+    rawAxisIdx: mapped.rawAxisIdx,
+    rawKeepMin: mapped.rawKeepMin,
+    rawPlane: rawPlane
+  };
+}
+window.nsoFaceFromHit = nsoFaceFromHit;
+
 // The canvas click ray already found a triangle; this turns that triangle
 // into the stored plane. Rejects — with a reason — anything it cannot
 // describe honestly, and never substitutes a different face.
@@ -4761,53 +4795,46 @@ function storeFacePick(hit) {
 
   const mesh = hit.object;
   mesh.updateMatrixWorld();
-  // hit.face.normal is already in the mesh's own geometry space, which is
-  // display space. The world copy is only for the highlight.
-  const nLocal = hit.face.normal.clone().normalize();
-  const nWorld = nLocal.clone().transformDirection(mesh.matrixWorld).normalize();
-  const pWorld = hit.point.clone();
-  const pLocal = mesh.worldToLocal(pWorld.clone());
-
-  const nAbs = [Math.abs(nLocal.x), Math.abs(nLocal.y), Math.abs(nLocal.z)];
-  let dispAxis = 0;
-  if (nAbs[1] > nAbs[dispAxis]) dispAxis = 1;
-  if (nAbs[2] > nAbs[dispAxis]) dispAxis = 2;
-  if (nAbs[dispAxis] < FACE_PICK_FLAT) {
+  // Which face the click named is nsoFaceFromHit's answer and only its
+  // answer - the same call the paint makes, so a pick and a paint on the
+  // same triangle can never name two different faces.
+  const face = nsoFaceFromHit(model, mesh, hit);
+  if (!face) {
+    setStatus('Click a face', true);
+    return null;
+  }
+  if (!face.flat) {
     setStatus('Click a flat face - that spot is on a curve', true);
     return null;
   }
-  const dispSign = ([nLocal.x, nLocal.y, nLocal.z][dispAxis] >= 0) ? 1 : -1;
-
-  const geo = mesh.geometry;
-  if (!geo.boundingBox) geo.computeBoundingBox();
-  const bb = geo.boundingBox;
-  const bbLo = [bb.min.x, bb.min.y, bb.min.z][dispAxis];
-  const bbHi = [bb.max.x, bb.max.y, bb.max.z][dispAxis];
-  const localPlane = dispSign > 0 ? bbHi : bbLo;
-  const localHit = [pLocal.x, pLocal.y, pLocal.z][dispAxis];
   // The raw engines work on the outer plane of the axis they are given —
   // they cannot cut a recessed pocket wall. If the click is not on that
   // outer plane, say so instead of letting an engine slide the work onto
   // the plane it can reach.
-  if (Math.abs(localHit - localPlane) > FACE_PICK_TOL) {
+  if (!face.outer) {
     setStatus('Click an outer face - that one is recessed ' +
-              Math.abs(localHit - localPlane).toFixed(2) + 'mm behind the outside', true);
+              face.recessedBy.toFixed(2) + 'mm behind the outside', true);
     return null;
   }
-
-  const mapped = rawAxisFromDisplay(dispAxis, dispSign);
+  const nLocal = face.localNormal;
+  const nWorld = nLocal.clone().transformDirection(mesh.matrixWorld).normalize();
+  const pWorld = hit.point.clone();
+  const pLocal = face.localPoint;
+  const dispAxis = face.dispAxis, dispSign = face.dispSign;
+  const localPlane = face.localPlane;
+  const mapped = { rawAxisIdx: face.rawAxisIdx, rawKeepMin: face.rawKeepMin };
   // Cross-check the display->raw mapping against the piece itself: the two
   // axes must measure the same piece. A mismatch means the soup and the
   // display mesh have drifted apart, and every plane below would be
   // fiction.
-  const dispSpan = bbHi - bbLo;
+  const dispSpan = face.bbSpan;
   const rawSpan = rawSpanOf(model.rawTris, mapped.rawAxisIdx);
   if (!isFinite(rawSpan) || Math.abs(rawSpan - dispSpan) > Math.max(FACE_PICK_TOL, dispSpan * 0.02)) {
     setStatus('Click a face - raw soup and display mesh disagree on this piece', true);
     return null;
   }
 
-  const rawPlane = rawExtremeOf(model.rawTris, mapped.rawAxisIdx, mapped.rawKeepMin);
+  const rawPlane = face.rawPlane;
   if (!isFinite(rawPlane)) {
     setStatus('Click a face - piece has no geometry on that axis', true);
     return null;
