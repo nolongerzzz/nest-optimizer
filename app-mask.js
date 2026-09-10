@@ -56,18 +56,30 @@
     return Math.abs(a.n[0] - b.n[0]) < N_TOL && Math.abs(a.n[1] - b.n[1]) < N_TOL &&
            Math.abs(a.n[2] - b.n[2]) < N_TOL && Math.abs(a.d - b.d) < D_TOL;
   }
+  /* Two entries are the same face when the click that made them named the
+     same raw face - axis and side, recorded at the click and never worked
+     out again. The plane comparison is the fallback for a recessed wall,
+     which has no axis and side to name, and for the bare planes Align asks
+     about. */
+  function sameFace(a, b) {
+    if (a.axisIdx != null && b.axisIdx != null)
+      return a.axisIdx === b.axisIdx && !!a.keepMin === !!b.keepMin;
+    return samePlane(a, b);
+  }
   function indexOfPlane(mask, pl) {
-    for (let i = 0; i < mask.exclude.length; i++) if (samePlane(mask.exclude[i], pl)) return i;
+    for (let i = 0; i < mask.exclude.length; i++) if (sameFace(mask.exclude[i], pl)) return i;
     return -1;
   }
 
   /* ---- what everything downstream asks ---- */
 
   // A raw-space plane: outward unit normal n, offset d (n . p = d).
-  window.nsoMaskIsExcludedRaw = function (m, n, d) {
+  window.nsoMaskIsExcludedRaw = function (m, n, d, axisIdx, keepMin) {
     const mask = m && m.faceMask;
     if (!mask || !mask.exclude || !mask.exclude.length) return false;
-    return indexOfPlane(mask, { n: n, d: d }) >= 0;
+    return indexOfPlane(mask, { n: n, d: d,
+      axisIdx: (axisIdx == null ? null : axisIdx),
+      keepMin: (axisIdx == null ? null : !!keepMin) }) >= 0;
   };
   // The face a Soften pick names: the outer plane on rawAxisIdx, min side if
   // rawKeepMin, max side otherwise.
@@ -75,7 +87,24 @@
     if (rawAxisIdx == null || rawPlane == null) return false;
     const n = [0, 0, 0];
     n[rawAxisIdx] = rawKeepMin ? -1 : 1;
-    return window.nsoMaskIsExcludedRaw(m, n, rawKeepMin ? -rawPlane : rawPlane);
+    return window.nsoMaskIsExcludedRaw(m, n, rawKeepMin ? -rawPlane : rawPlane,
+                                       rawAxisIdx, rawKeepMin);
+  };
+  /* The faces the paint took out, as the raw axis and side each click named:
+     [axisIdx][0 for the min side]. Null if any painted face is a recessed
+     wall, which has no axis and side and is not a face the whole-solid wrap
+     can name. Nothing here derives anything - it reads back what the click
+     recorded. */
+  window.nsoMaskFaces = function (m) {
+    const mask = m && m.faceMask;
+    const sq = [[false,false],[false,false],[false,false]];
+    if (!mask || !mask.exclude || !mask.exclude.length) return sq;
+    for (let i = 0; i < mask.exclude.length; i++) {
+      const e = mask.exclude[i];
+      if (e.axisIdx == null) return null;
+      sq[e.axisIdx][e.keepMin ? 0 : 1] = true;
+    }
+    return sq;
   };
   // A wall Align found, given in world space on the piece's own mesh.
   window.nsoMaskIsExcludedWorld = function (m, mesh, wn, wp) {
@@ -95,14 +124,21 @@
   window.nsoMaskCount = function (m) {
     return (m && m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length : 0;
   };
+  function copyEntry(p) {
+    return { n: p.n.slice(), d: p.d,
+             axisIdx: (p.axisIdx == null ? null : p.axisIdx),
+             keepMin: (p.axisIdx == null ? null : !!p.keepMin),
+             dispAxis: (p.dispAxis == null ? null : p.dispAxis),
+             dispSign: (p.dispAxis == null ? null : p.dispSign) };
+  }
   window.nsoMaskSnapshot = function (m) {
     const mask = m && m.faceMask;
     if (!mask || !mask.exclude) return null;
-    return mask.exclude.map(function (p) { return { n: p.n.slice(), d: p.d }; });
+    return mask.exclude.map(copyEntry);
   };
   window.nsoMaskRestore = function (m, snap) {
     if (!m) return;
-    m.faceMask = { exclude: snap ? snap.map(function (p) { return { n: p.n.slice(), d: p.d }; }) : [] };
+    m.faceMask = { exclude: snap ? snap.map(copyEntry) : [] };
     repaint();
     if (typeof window.nsoMaskHudRefresh === 'function') window.nsoMaskHudRefresh();
   };
@@ -116,9 +152,14 @@
     const geo = mesh.geometry;
     const pos = geo.attributes && geo.attributes.position;
     if (!pos || hit.faceIndex == null) return null;
-    const nTri = (pos.count / 3) | 0;
+    // Vertex n of triangle t, through the index buffer when there is one.
+    // Reading t*3+v straight out of the position buffer on indexed geometry
+    // walks off onto some unrelated triangle, and the paint lands on a face
+    // nobody clicked.
+    const idx = geo.index;
+    const nTri = ((idx ? idx.count : pos.count) / 3) | 0;
     const P = function (t, v) {
-      const i = t * 3 + v;
+      const i = idx ? idx.getX(t * 3 + v) : (t * 3 + v);
       return [pos.getX(i), pos.getY(i), pos.getZ(i)];
     };
     const nrm = function (t) {
@@ -186,15 +227,48 @@
     clearOverlay();
     const m = activeModel();
     const mask = m && m.faceMask;
-    if (!m || !mask || !mask.exclude.length) return;
+    if (!m || !mask || !mask.exclude.length) return 0;
     const placed = state.placed.find(function (p) { return p && p.sourceId === m.id && p.mesh; });
-    if (!placed) return;
+    if (!placed) return 0;
     const f = frameOf(m);
     const geo = placed.mesh.geometry;
     const pos = geo.attributes && geo.attributes.position;
-    if (!pos || !f) return;
+    if (!pos || !f) return 0;
     const verts = [];
     const nTri = (pos.count / 3) | 0;
+    /* The faces the clicks named, in the display space this mesh is already
+       in: no mapping, no centring, nothing re-derived. A triangle is painted
+       when its own normal is the face's normal and it sits on that face's
+       outer plane, which is read off this mesh every time so it is still
+       right after a bake has rebuilt the piece. Recessed walls have no
+       display face to name and fall back to the stored raw plane below. */
+    const faceSet = {};
+    let anyPlaneOnly = false;
+    for (let i = 0; i < mask.exclude.length; i++) {
+      const e = mask.exclude[i];
+      if (e.dispAxis == null) { anyPlaneOnly = true; continue; }
+      faceSet[e.dispAxis + ':' + (e.dispSign > 0 ? '+' : '-')] = true;
+    }
+    let glo = [Infinity, Infinity, Infinity], ghi = [-Infinity, -Infinity, -Infinity];
+    for (let v = 0; v < pos.count; v++) {
+      const q = [pos.getX(v), pos.getY(v), pos.getZ(v)];
+      for (let k = 0; k < 3; k++) {
+        if (q[k] < glo[k]) glo[k] = q[k];
+        if (q[k] > ghi[k]) ghi[k] = q[k];
+      }
+    }
+    const onNamedFace = function (A, B, C, nx, ny, nz) {
+      const na = [Math.abs(nx), Math.abs(ny), Math.abs(nz)];
+      let a = 0;
+      if (na[1] > na[a]) a = 1;
+      if (na[2] > na[a]) a = 2;
+      if (na[a] < 0.999) return false;
+      const sg = ([nx, ny, nz][a] >= 0) ? 1 : -1;
+      if (!faceSet[a + ':' + (sg > 0 ? '+' : '-')]) return false;
+      const plane = sg > 0 ? ghi[a] : glo[a];
+      return Math.abs(A[a] - plane) < D_TOL && Math.abs(B[a] - plane) < D_TOL &&
+             Math.abs(C[a] - plane) < D_TOL;
+    };
     /* The paint sits a hair proud of the face it marks. Coincident with it
        the depth buffer cannot separate the two and the yellow comes out
        mottled or gone; lifted along the face normal it wins cleanly, and
@@ -221,15 +295,18 @@
       const L = Math.hypot(x,y,z);
       if (!(L > 1e-12)) continue;
       x/=L; y/=L; z/=L;
-      const rn = rawDirFromLocal([x,y,z]);
-      const rp = rawPointFromLocal(f, A);
-      if (!window.nsoMaskIsExcludedRaw(m, rn, rn[0]*rp[0]+rn[1]*rp[1]+rn[2]*rp[2])) continue;
+      if (!onNamedFace(A, B, C, x, y, z)) {
+        if (!anyPlaneOnly) continue;
+        const rn = rawDirFromLocal([x,y,z]);
+        const rp = rawPointFromLocal(f, A);
+        if (!window.nsoMaskIsExcludedRaw(m, rn, rn[0]*rp[0]+rn[1]*rp[1]+rn[2]*rp[2])) continue;
+      }
       const lx = x*lift, ly = y*lift, lz = z*lift;
       verts.push(A[0]+lx, A[1]+ly, A[2]+lz,
                  B[0]+lx, B[1]+ly, B[2]+lz,
                  C[0]+lx, C[1]+ly, C[2]+lz);
     }
-    if (!verts.length) return;
+    if (!verts.length) return 0;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
     /* Flat, unlit, full strength yellow - no transparency to wash it out and
@@ -244,7 +321,13 @@
     overlay.quaternion.copy(placed.mesh.quaternion);
     overlay.scale.copy(placed.mesh.scale);
     overlay.renderOrder = 21;
+    /* The paint is paint, not a surface. It sits proud of the face it marks,
+       so without this it is the first thing any click ray meets and a Soften
+       pick on a painted face hits the yellow instead of the piece - the click
+       lands on nothing and the face never gets to say it is painted out. */
+    overlay.raycast = function () {};
     if (state.modelGroup) state.modelGroup.add(overlay);
+    return verts.length / 9;
   }
   window.nsoMaskRepaint = repaint;
 
@@ -254,7 +337,7 @@
      while a paint session is live, so the count is on the same line a photo
      of the HUD already shows. Paint never relabels itself into Done - it
      stays Paint faces and just lights up; Done is its own button. */
-  const HUD_TAG = 'HUD mask4';
+  const HUD_TAG = 'HUD mask5';
   function hud(text) {
     const el = document.getElementById('adjust-status');
     if (el) el.textContent = text;
@@ -321,23 +404,48 @@
       setStatus('Paint needs a raw piece - split, wrap or boolean it first', true);
       return false;
     }
-    const face = faceUnderCursor(m, mesh, hit);
-    if (!face) {
-      setStatus('No face under that click - nothing changed', true);
-      return false;
+    // The face under the cursor is nsoFaceFromHit's answer - the same call
+    // the Soften pick makes on the same triangle. What it says is recorded
+    // whole: the raw axis and side the wrap will skip, the display face the
+    // yellow will cover, and the plane Align reads. One pick, written down
+    // once, so nothing downstream has to work out which face was meant.
+    let entry = null, name = 'that face';
+    const face = (typeof nsoFaceFromHit === 'function') ? nsoFaceFromHit(m, mesh, hit) : null;
+    if (face && face.flat && face.outer && isFinite(face.rawPlane)) {
+      const n = [0, 0, 0];
+      n[face.rawAxisIdx] = face.rawKeepMin ? -1 : 1;
+      entry = {
+        n: n, d: face.rawKeepMin ? -face.rawPlane : face.rawPlane,
+        axisIdx: face.rawAxisIdx, keepMin: !!face.rawKeepMin,
+        dispAxis: face.dispAxis, dispSign: face.dispSign
+      };
+      name = 'the ' + 'XYZ'.charAt(face.dispAxis) + (face.dispSign > 0 ? '+' : '-') + ' face';
+    } else {
+      // A recessed wall - a pocket floor after a boolean - is a face the
+      // paint can hold but not one the wrap can name. Stored as a plane
+      // only, and the wrap declines the whole-solid route when it sees one.
+      const patch = faceUnderCursor(m, mesh, hit);
+      if (!patch) {
+        setStatus('No face under that click - nothing changed', true);
+        return false;
+      }
+      entry = { n: patch.plane.n, d: patch.plane.d,
+                axisIdx: null, keepMin: null, dispAxis: null, dispSign: null };
+      name = 'that recessed face (' + patch.tris.size + ' tris)';
     }
     const mask = maskOf(m);
     const prev = window.nsoMaskSnapshot(m);
-    const at = indexOfPlane(mask, face.plane);
+    const at = indexOfPlane(mask, entry);
     if (at >= 0) mask.exclude.splice(at, 1);
-    else mask.exclude.push(face.plane);
+    else mask.exclude.push(entry);
     if (typeof pushUndo === 'function') {
       pushUndo({ type: 'maskReplace', modelId: m.id, prevMask: prev });
     }
-    repaint();
+    const painted = repaint();
     window.nsoMaskHudRefresh();
-    setStatus((at >= 0 ? 'Included' : 'Excluded') + ' that face (' + face.tris.size +
-              ' tris) - ' + mask.exclude.length + ' face(s) excluded');
+    setStatus((at >= 0 ? 'Included ' : 'Excluded ') + name +
+              (at >= 0 ? '' : ' (' + painted + ' tris yellow)') +
+              ' - ' + mask.exclude.length + ' face(s) excluded');
     return true;
   };
 
