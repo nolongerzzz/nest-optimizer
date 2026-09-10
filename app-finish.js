@@ -5121,25 +5121,13 @@ function alignJoinForSlide() {
     return true;
   }
 
-  const dx = ((fb.minx + fb.maxx) - (fa.minx + fa.maxx)) / 2;
-  const dz = ((fb.minz + fb.maxz) - (fa.minz + fa.maxz)) / 2;
-  if (Math.abs(dx) >= Math.abs(dz)) {
-    nx = dx >= 0 ? placedB.x + (fa.maxx - fb.minx) : placedB.x + (fa.minx - fb.maxx);
-    const toMin = fa.minz - fb.minz;
-    const toMax = fa.maxz - fb.maxz;
-    nz = placedB.z + (Math.abs(toMin) <= Math.abs(toMax) ? toMin : toMax);
-    state.joinSlideAxis = 'z';
-  } else {
-    nz = dz >= 0 ? placedB.z + (fa.maxz - fb.minz) : placedB.z + (fa.minz - fb.maxz);
-    const toMin = fa.minx - fb.minx;
-    const toMax = fa.maxx - fb.maxx;
-    nx = placedB.x + (Math.abs(toMin) <= Math.abs(toMax) ? toMin : toMax);
-    state.joinSlideAxis = 'x';
-  }
-  applyPlacedXZ(placedB, nx, nz);
-  matchPlacedBottoms(placedA, placedB);
-  setStatus('Aligned to nearest corner of A');
-  return true;
+  // Nothing above found a wall face on A facing B, so there is no remaining
+  // flat to sit against - A is round on this side, or the two footprints
+  // never overlap in either band. Snapping to the bounding box here used to
+  // teleport B onto a corner that is not a surface, which then reads as a
+  // bad join. Say so and leave both poses alone.
+  setStatus('Align failed - no flat face on A facing B. Move B beside a flat side first', true);
+  return false;
 }
 
 function displayGeometryToRawSoup(geometry) {
