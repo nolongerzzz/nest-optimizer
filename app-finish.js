@@ -3294,9 +3294,11 @@ function applySoftenOnFace(face) {
   // solved once instead of negotiated face by face. A new R just re-wraps from
   // the same source - it cannot stack.
   const masked = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
-  const asBox = masked ? null : rawSolidBox(run.base);
-  if (masked && rawSolidBox(run.base)) {
-    console.log('[soften] ' + masked + ' face(s) painted out - per-face bake, not a whole-solid wrap');
+  const fullWrap = getFullWrap();
+  const asBox = (masked || !fullWrap) ? null : rawSolidBox(run.base);
+  if (rawSolidBox(run.base)) {
+    if (masked) console.log('[soften] ' + masked + ' face(s) painted out - per-face bake, not a whole-solid wrap');
+    else if (!fullWrap) console.log('[soften] Full wrap off - baking the clicked face only');
   }
   if (asBox) {
     const wrapMode = getEdgeTreat();
@@ -3392,7 +3394,8 @@ function applySoftenOnFace(face) {
   const clamp = (x) => (x.radius < x.requested - 1e-6 ? ' (asked ' + x.requested.toFixed(2) + ', wall clamp)' : '');
   // Says how many faces this piece is carrying once there is more than one,
   // so a second click reads as "kept the first" rather than "moved it".
-  const faces = run.jobs.length > 1 ? ' [' + run.jobs.length + ' faces baked]' : '';
+  const faces = run.jobs.length > 1 ? ' [' + run.jobs.length + ' faces baked]'
+              : (getFullWrap() ? '' : ' [full wrap off - this face only]');
   const built = newJob.build || null;
   const ball = treat === 'cornersedges' ? built : null;
   const only = treat === 'corners' ? built : null;
@@ -3542,6 +3545,16 @@ function capSelectedModel() {
   state.capArmed = true;
   clearFacePick();
   setStatus('Cap: click a face');
+}
+
+// Full wrap on (the default, and what a missing checkbox means) is wrap1: one
+// click wraps every face, edge and corner of a box. Off sends the same four
+// modes down the per-face path instead, so a click bakes only the face that
+// was picked. There is no third engine either way - the box wrap and the
+// per-face engines are exactly the ones already shipped.
+function getFullWrap() {
+  const el = document.getElementById('chk-full-wrap');
+  return el ? !!el.checked : true;
 }
 
 // fillet | corners | cornersedges | chamfer. Anything else (a stale saved
