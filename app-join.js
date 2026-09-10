@@ -1045,6 +1045,46 @@ function NSO_edgeStats(soup) {
 }
 
 /* =====================================================================
+   Exact topology, straight off the kernel's own indexed mesh.
+
+   NSO_edgeStats has to weld by rounded position, because a soup carries no
+   shared indices. Where two surfaces meet tangentially - two wrapped cubes
+   kissing flat on flat - the union legitimately holds distinct vertices a
+   fraction of a micron apart, and rounding merges them, so edges that are
+   each used twice read as one edge used four times. That phantom is what
+   refused a join whose result was a perfect solid: one part, genus 0,
+   volume exactly A + B, 0 open and 0 non-manifold by index.
+
+   A Manifold result already knows its own topology, so ask it instead of
+   guessing from positions.
+   ===================================================================== */
+function NSO_manifoldStats(man) {
+  var out = { open: 0, nm: 0, parts: 1, exact: false };
+  try {
+    var mesh = man.getMesh();
+    var tv = mesh.triVerts;
+    var em = new Map();
+    for (var t = 0; t < tv.length; t += 3) {
+      var k = [tv[t], tv[t + 1], tv[t + 2]];
+      for (var e = 0; e < 3; e++) {
+        var a = k[e], b = k[(e + 1) % 3];
+        if (a === b) continue;
+        var ek = a < b ? (a + '_' + b) : (b + '_' + a);
+        em.set(ek, (em.get(ek) || 0) + 1);
+      }
+    }
+    em.forEach(function (c) { if (c === 1) out.open++; else if (c > 2) out.nm++; });
+    if (typeof man.decompose === 'function') {
+      var bits = man.decompose();
+      out.parts = bits.length;
+      for (var i = 0; i < bits.length; i++) bits[i].delete();
+    }
+    out.exact = true;
+  } catch (err) { out.exact = false; }
+  return out;
+}
+
+/* =====================================================================
    Weld tolerance that cannot eat the piece's own detail.
 
    Both booleans pre-weld their input so a sloppy imported STL reads as a
@@ -1104,7 +1144,10 @@ async function NSO_unionSoups(aWorld, bWorld) {
       parts = bits.length;
       for (var i = 0; i < bits.length; i++) bits[i].delete();
     }
+    var st = NSO_manifoldStats(out);
+    parts = st.exact ? st.parts : parts;
     return { ok: parts === 1, parts: parts, soup: NSO_CSG.manifoldToSoup(out),
+             stats: st.exact ? { open: st.open, nm: st.nm } : null,
              reason: parts === 1 ? '' : 'the two pieces do not touch' };
   } catch (err) {
     return { ok: false, reason: NSO_errMsg(err) };
@@ -1182,7 +1225,8 @@ async function subtractSoupBFromA(aWorld, bWorld, opts) {
 
     var outTris = result.numTri();
     var soup = NSO_CSG.manifoldToSoup(result);
-    var after = NSO_edgeStats(soup);
+    var exact = NSO_manifoldStats(result);
+    var after = exact.exact ? { open: exact.open, nm: exact.nm } : NSO_edgeStats(soup);
 
     console.log('[subtract] kernel=manifold tris', manA.numTri(), '->', outTris,
       'open', before.open, '->', after.open, 'nonManifold', before.nm, '->', after.nm);
@@ -1768,14 +1812,16 @@ async function joinSelectedModels() {
   // reopens a wrap - the kernel does not. Only reached when the two pieces
   // already touch; split halves parked a kerf apart come back as two parts and
   // stay with route 1, which closes that gap by moving the far half in.
-  let kernelGeo = null, kernelStats = null, kernelWhy = '';
+  let kernelGeo = null, kernelStats = null, kernelWhy = '', kernelExact = false;
   if (joinSoupA && joinSoupB && (!legacyStats || score(legacyStats) > score(before))) {
     try {
       setStatus('Joining (loading CSG kernel)...');
       const u = await NSO_unionSoups(joinSoupA, joinSoupB);
       if (u.ok && u.soup && u.soup.length >= 9) {
         kernelGeo = soupToCenteredGeo(u.soup);
-        kernelStats = NSO_edgeStats(u.soup);
+        // the kernel's own count, not one rounded off the soup
+        kernelStats = u.stats || NSO_edgeStats(u.soup);
+        kernelExact = !!u.stats;
       } else {
         kernelWhy = u.reason || 'union missed';
       }
@@ -1787,11 +1833,11 @@ async function joinSelectedModels() {
 
   // Keep whichever route seals better; a tie goes to the plate route so the
   // square-split rejoin it was written for comes out exactly as before.
-  let newGeo = null, after = null, route = '';
+  let newGeo = null, after = null, route = '', exact = false;
   if (legacyGeo && (!kernelStats || score(legacyStats) <= score(kernelStats))) {
     newGeo = legacyGeo; after = legacyStats; route = 'plate weld';
   } else if (kernelGeo) {
-    newGeo = kernelGeo; after = kernelStats; route = 'kernel union';
+    newGeo = kernelGeo; after = kernelStats; route = 'kernel union'; exact = kernelExact;
   }
   if (!newGeo) {
     const why = legacyWhy || kernelWhy || 'pieces unchanged';
@@ -1804,7 +1850,10 @@ async function joinSelectedModels() {
   // both routes leave it worse sealed than it started, that is a clean fail
   // with A and B untouched, not a join. Pieces that arrive open keep the old
   // permissive behaviour; the counts are reported either way.
-  if (before.open === 0 && before.nm === 0 && after && (after.open > 0 || after.nm > 0)) {
+  // `exact` means the kernel certified this itself - one part, and open/
+  // non-manifold counted over shared indices rather than rounded positions.
+  // Nothing measured off the soup can overrule that.
+  if (!exact && before.open === 0 && before.nm === 0 && after && (after.open > 0 || after.nm > 0)) {
     setStatus('Join failed - would reopen the pieces (open edges 0\u2192' + after.open +
               ', non-manifold 0\u2192' + after.nm + ') via ' + route +
               (kernelWhy ? '; kernel union: ' + kernelWhy : '') +
