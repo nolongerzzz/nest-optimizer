@@ -6,6 +6,97 @@
     if (typeof setStatus === 'function') setStatus('HUD mask4');
   }
 
+  function soupFromGeo(geo) {
+    if (!geo || !geo.attributes || !geo.attributes.position) return null;
+    var pos = geo.attributes.position;
+    var index = geo.index;
+    var out = [];
+    if (index) {
+      for (var i = 0; i < index.count; i++) {
+        var vi = index.getX(i);
+        out.push(pos.getX(vi), pos.getY(vi), pos.getZ(vi));
+      }
+    } else {
+      for (var i = 0; i < pos.count; i++) {
+        out.push(pos.getX(i), pos.getY(i), pos.getZ(i));
+      }
+    }
+    return out.length >= 9 ? out : null;
+  }
+
+  function countDegenerateTris(soup) {
+    if (!soup || soup.length < 9) return 0;
+    var n = 0;
+    for (var t = 0; t < soup.length; t += 9) {
+      var ax = soup[t+3]-soup[t], ay = soup[t+4]-soup[t+1], az = soup[t+5]-soup[t+2];
+      var bx = soup[t+6]-soup[t], by = soup[t+7]-soup[t+1], bz = soup[t+8]-soup[t+2];
+      var cx = ay*bz - az*by, cy = az*bx - ax*bz, cz = ax*by - ay*bx;
+      if ((cx*cx + cy*cy + cz*cz) < 1e-12) n++;
+    }
+    return n;
+  }
+
+  function statLine(label, found, remain) {
+    if (found == null || remain == null) return label + ': found ?, fixed ?, remaining ?';
+    var fix = found - remain;
+    if (fix < 0) fix = 0;
+    return label + ': found ' + found + ', fixed ' + fix + ', remaining ' + remain;
+  }
+
+  function wrapSealReadout() {
+    if (typeof sealSelectedModel !== 'function' || sealSelectedModel._statWrap) return;
+    var orig = sealSelectedModel;
+    function wrapped() {
+      var repairChk = document.getElementById('chk-seal-repair');
+      var repairMode = !!(repairChk && repairChk.checked);
+      var m = typeof getActiveModel === 'function' ? getActiveModel() : null;
+      var soupIn = null;
+      if (m) {
+        if (m.rawTris && m.rawAxis === 'zup') soupIn = m.rawTris;
+        else soupIn = soupFromGeo(m.geometry);
+      }
+      var openB = null, nmB = null, degB = null, triB = 0;
+      if (soupIn && soupIn.length >= 9) {
+        try { if (typeof openBoundaryEdges === 'function') openB = openBoundaryEdges(soupIn).length; } catch (e) {}
+        try { if (typeof countNonManifoldEdges === 'function') nmB = countNonManifoldEdges(soupIn); } catch (e) {}
+        try { degB = countDegenerateTris(soupIn); } catch (e) {}
+        triB = (soupIn.length / 9) | 0;
+      }
+      orig.apply(this, arguments);
+      if (!repairMode) return;
+      var m2 = typeof getActiveModel === 'function' ? getActiveModel() : null;
+      var soupOut = null;
+      if (m2) {
+        if (m2.rawTris && m2.rawAxis === 'zup') soupOut = m2.rawTris;
+        else soupOut = soupFromGeo(m2.geometry);
+      }
+      if (!soupOut || soupOut.length < 9) return;
+      var openA = null, nmA = null, degA = null;
+      try { if (typeof openBoundaryEdges === 'function') openA = openBoundaryEdges(soupOut).length; } catch (e) {}
+      try { if (typeof countNonManifoldEdges === 'function') nmA = countNonManifoldEdges(soupOut); } catch (e) {}
+      try { degA = countDegenerateTris(soupOut); } catch (e) {}
+      var triA = (soupOut.length / 9) | 0;
+      var tight = (openA === 0 && nmA === 0) ? 'YES' : 'NO';
+      if (typeof setStatus === 'function') {
+        setStatus(
+          statLine('Open edges', openB, openA) + ' | ' +
+          statLine('Non-manifold', nmB, nmA) + ' | ' +
+          statLine('Degenerate tris', degB, degA) + ' | ' +
+          'Triangle count: ' + triB + ' \u2192 ' + triA + ' | ' +
+          'Watertight: ' + tight
+        );
+      }
+    }
+    wrapped._statWrap = true;
+    sealSelectedModel = wrapped;
+    var btn = document.getElementById('btn-seal');
+    if (btn && btn.parentNode) {
+      var clone = btn.cloneNode(true);
+      btn.parentNode.replaceChild(clone, btn);
+      clone.addEventListener('click', wrapped);
+    }
+  }
+
   function pickIdx(event) {
     if (!state.renderer || !state.camera || !state.modelGroup) return -1;
     setPointerFromEvent(event);
@@ -31,11 +122,6 @@
     return true;
   }
 
-  // The Thicken mm box hides its native spin buttons so the number can sit on
-  // top and the arrows underneath, inside one border the same height as the
-  // Thicken buttons. These two drive it instead - same min, max and step the
-  // field already declares, and an input event so anything listening still
-  // hears it. Nothing else about Thicken changed.
   function bindThickenArrows() {
     var arrows = document.querySelectorAll('.thick-arrow[data-thick-step]');
     for (var i = 0; i < arrows.length; i++) {
@@ -52,7 +138,6 @@
         var now = parseFloat(box.value);
         if (!isFinite(now)) now = isFinite(min) ? min : 0;
         var next = now + dir * step;
-        // step can be fractional, so round to the step's own precision
         var dp = (String(step).split('.')[1] || '').length;
         next = parseFloat(next.toFixed(dp));
         if (next < min) next = min;
@@ -67,6 +152,7 @@
   function bind() {
     stampHud();
     bindThickenArrows();
+    wrapSealReadout();
     setTimeout(stampHud, 0);
     setTimeout(stampHud, 200);
     if (state.renderer && state.renderer.domElement) {
