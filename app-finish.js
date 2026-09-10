@@ -3125,23 +3125,39 @@ function rawBoxSoup(lo, hi) {
 // face has to land on one of them; one that lands on neither means the paint
 // and the piece have drifted apart - an undone Subtract, say - and the caller
 // leaves the mesh alone and says so rather than wrapping the wrong thing.
-function brickSkipLists(brick, faceList) {
-  const tol = 0.05;
+function brickSkipLists(brick, faceList, soup) {
+  // Wide enough that float drift between the display span the click was
+  // measured against and the raw span it was converted to can never decide
+  // this, tight enough that it can only ever land on the face it means: the
+  // hull plane and the pocket plane on one axis and side are the pocket's
+  // depth apart, which is millimetres.
+  const span = Math.max(brick.ext[0], brick.ext[1], brick.ext[2]);
+  const tol = Math.max(0.05, 0.005 * span);
   const hull = [[false,false],[false,false],[false,false]];
   const pocket = [[false,false],[false,false],[false,false]];
   let nHull = 0, nPocket = 0;
   for (let i = 0; i < faceList.length; i++) {
     const e = faceList[i], a = e.axisIdx, k = !!e.keepMin;
     const at = k ? -e.d : e.d;
-    if (Math.abs(at - (k ? brick.lo[a] : brick.hi[a])) < tol) {
-      hull[a][k ? 0 : 1] = true; nHull++;
-    } else if (Math.abs(at - (k ? brick.phi[a] : brick.plo[a])) < tol) {
+    const dHull = Math.abs(at - (k ? brick.lo[a] : brick.hi[a]));
+    const dPocket = Math.abs(at - (k ? brick.phi[a] : brick.plo[a]));
+    if (dHull <= dPocket && dHull < tol) { hull[a][k ? 0 : 1] = true; nHull++; continue; }
+    // Not the outer plane on this axis and side, so on a piece this shape it
+    // is the pocket's - there is exactly one of each. The question the piece
+    // gets asked is the owner's: is that plane still on the soup? If it is,
+    // it is a face they really did paint and the wrap skips it. Only a plane
+    // the soup no longer carries stops the wrap.
+    if (rawHasPlane(soup, a, k, at)) {
       // a wall the material faces across: normal up the axis means the pocket
       // is above it, so it is the pocket box's low face on that axis
       pocket[a][k ? 1 : 0] = true; nPocket++;
-    } else {
-      return null;
+      if (dPocket > tol) {
+        console.log('[soften] painted plane ' + at.toFixed(4) + ' on axis ' + a +
+                    ' is live but ' + dPocket.toFixed(4) + 'mm off the pocket box - skipping it anyway');
+      }
+      continue;
     }
+    return { bad: e, at: at };
   }
   return { hull: hull, pocket: pocket, nHull: nHull, nPocket: nPocket };
 }
@@ -3430,11 +3446,15 @@ function wrapPocketBrickRun(m, run, R, firstOfRun, jobs) {
     setStatus('Wrap needs faces it can name - a painted patch here is not a flat face. Piece unchanged', true);
     return true;
   }
-  const skip = brickSkipLists(brick, faceList);
-  if (!skip) {
+  const skip = brickSkipLists(brick, faceList, run.base);
+  if (!skip || skip.bad) {
     if (typeof removeFaceHelper === 'function') removeFaceHelper();
-    setStatus('Wrap stopped - a painted face is not on this piece any more (undo a Subtract and the pocket goes with it). ' +
-              'Clear paint and paint it again. Piece unchanged', true);
+    const where = skip && skip.bad
+      ? ('the ' + 'XYZ'.charAt(skip.bad.axisIdx) + (skip.bad.keepMin ? '-' : '+') +
+         ' face at ' + skip.at.toFixed(2))
+      : 'a painted face';
+    setStatus('Wrap stopped - ' + where + ' is gone from this piece; the soup has no face on ' +
+              'that plane any more. Clear paint and paint it again. Piece unchanged', true);
     return true;
   }
   if (skip.nHull + skip.nPocket >= 11) {
@@ -5071,8 +5091,18 @@ function nsoFaceFromHit(model, mesh, hit) {
   let rawAt = rawPlane;
   const dSpan = bbHi - bbLo, rSpan = rawHi - rawLo;
   if (dSpan > 1e-9 && isFinite(rSpan)) {
+    // Which way this display axis runs against the raw one it maps to is a
+    // property of the AXIS, so it is read at a fixed sign - the display-max
+    // end of it, and whether that is the raw min end. Reading it off the
+    // clicked face's own normal instead makes the answer depend on which way
+    // that face happens to look: correct for a face whose normal points the
+    // way the axis runs, mirrored for one that points back down it. Outer
+    // faces never noticed, because they do not use this - they take their
+    // plane from rawExtremeOf. A pocket has two walls per axis, one of each,
+    // and the second was landing on the mirror of its own plane.
+    const axisFlip = rawAxisFromDisplay(dispAxis, 1).rawKeepMin;
     const t = (localHit - bbLo) / dSpan;
-    rawAt = mapped.rawKeepMin ? (rawHi - t * rSpan) : (rawLo + t * rSpan);
+    rawAt = axisFlip ? (rawHi - t * rSpan) : (rawLo + t * rSpan);
   }
   return {
     flat: true,
