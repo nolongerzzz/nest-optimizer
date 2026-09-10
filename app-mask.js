@@ -173,7 +173,7 @@
     };
   }
 
-  /* ---- the clear highlight over every excluded face ---- */
+  /* ---- the yellow over every excluded face ---- */
 
   let overlay = null;
   function clearOverlay() {
@@ -195,6 +195,22 @@
     if (!pos || !f) return;
     const verts = [];
     const nTri = (pos.count / 3) | 0;
+    /* The paint sits a hair proud of the face it marks. Coincident with it
+       the depth buffer cannot separate the two and the yellow comes out
+       mottled or gone; lifted along the face normal it wins cleanly, and
+       because it still respects depth a face painted on the far side stays
+       behind the solid instead of floating over the front of it. Scaled to
+       the piece so a 200mm plate and a 5mm chip both get a lift that reads
+       as nothing. */
+    let plo = [Infinity, Infinity, Infinity], phi = [-Infinity, -Infinity, -Infinity];
+    for (let v = 0; v < pos.count; v++) {
+      const q = [pos.getX(v), pos.getY(v), pos.getZ(v)];
+      for (let k = 0; k < 3; k++) {
+        if (q[k] < plo[k]) plo[k] = q[k];
+        if (q[k] > phi[k]) phi[k] = q[k];
+      }
+    }
+    const lift = Math.max(0.01, 0.0015 * Math.hypot(phi[0]-plo[0], phi[1]-plo[1], phi[2]-plo[2]));
     for (let t = 0; t < nTri; t++) {
       const A = [pos.getX(t*3), pos.getY(t*3), pos.getZ(t*3)];
       const B = [pos.getX(t*3+1), pos.getY(t*3+1), pos.getZ(t*3+1)];
@@ -208,15 +224,21 @@
       const rn = rawDirFromLocal([x,y,z]);
       const rp = rawPointFromLocal(f, A);
       if (!window.nsoMaskIsExcludedRaw(m, rn, rn[0]*rp[0]+rn[1]*rp[1]+rn[2]*rp[2])) continue;
-      verts.push(A[0],A[1],A[2], B[0],B[1],B[2], C[0],C[1],C[2]);
+      const lx = x*lift, ly = y*lift, lz = z*lift;
+      verts.push(A[0]+lx, A[1]+ly, A[2]+lz,
+                 B[0]+lx, B[1]+ly, B[2]+lz,
+                 C[0]+lx, C[1]+ly, C[2]+lz);
     }
     if (!verts.length) return;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-    g.computeVertexNormals();
+    /* Flat, unlit, full strength yellow - no transparency to wash it out and
+       no lighting to shade it, so a painted face is the same signal colour
+       whichever way the piece is turned and reads across a room. Front side
+       only: the paint faces out, the way the face it marks does. */
     overlay = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
-      color: 0xf43f5e, transparent: true, opacity: 0.5,
-      side: THREE.DoubleSide, depthTest: false
+      color: 0xffdd00, side: THREE.FrontSide,
+      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4
     }));
     overlay.position.copy(placed.mesh.position);
     overlay.quaternion.copy(placed.mesh.quaternion);
@@ -232,7 +254,7 @@
      while a paint session is live, so the count is on the same line a photo
      of the HUD already shows. Paint never relabels itself into Done - it
      stays Paint faces and just lights up; Done is its own button. */
-  const HUD_TAG = 'HUD finish3';
+  const HUD_TAG = 'HUD mask4';
   function hud(text) {
     const el = document.getElementById('adjust-status');
     if (el) el.textContent = text;

@@ -2974,7 +2974,42 @@ function rawSolidBox(rawTris, tol) {
   return { lo: lo, hi: hi, ext: ext };
 }
 
-function rawWrapSolid(rawTris, requestedR, mode) {
+// The paint, read as box faces: [axis][side] with side 0 the low plane. The
+// planes the paint stores are raw-space planes, and on a plain box each one is
+// either +e_a at hi[a] or -e_a at -lo[a] - the very same plane the click that
+// set the yellow resolved to, so the face that goes yellow and the face the
+// wrap skips are picked out by one number, never by a second guess at which
+// side of the piece the cursor was on. Null if any painted plane is not one of
+// the six, which is the caller's cue to leave the whole-solid wrap alone.
+function maskedBoxFaces(m, box) {
+  const sq = [[false,false],[false,false],[false,false]];
+  const snap = (typeof nsoMaskSnapshot === 'function') ? nsoMaskSnapshot(m) : null;
+  if (!snap || !snap.length) return sq;
+  const N_TOL = 0.02, D_TOL = 0.05;
+  for (let p = 0; p < snap.length; p++) {
+    const n = snap[p].n, d = snap[p].d;
+    let found = false;
+    for (let a = 0; a < 3 && !found; a++) {
+      const o = [(a+1)%3, (a+2)%3];
+      if (Math.abs(n[o[0]]) > N_TOL || Math.abs(n[o[1]]) > N_TOL) continue;
+      for (let sd = 0; sd < 2 && !found; sd++) {
+        const sign = sd ? 1 : -1;
+        const want = sign * (sd ? box.hi[a] : box.lo[a]);
+        if (Math.abs(n[a] - sign) < N_TOL && Math.abs(d - want) < D_TOL) {
+          sq[a][sd] = true;
+          found = true;
+        }
+      }
+    }
+    if (!found) return null;
+  }
+  return sq;
+}
+
+// `squareFaces` is that same paint: [axis][side], true where a face has been
+// painted out. Those faces come out exactly as they went in - flat, full size,
+// on their own plane - and every other face, edge and corner wraps as usual.
+function rawWrapSolid(rawTris, requestedR, mode, squareFaces) {
   const box = rawSolidBox(rawTris);
   if (!box) throw new Error('wrap needs a plain box - this piece is not one, left unchanged');
   const lo = box.lo, hi = box.hi, ext = box.ext;
@@ -2982,9 +3017,29 @@ function rawWrapSolid(rawTris, requestedR, mode) {
   if (!(R > 1e-3)) throw new Error('R=' + requestedR + ' leaves nothing to wrap - left unchanged');
 
   const NA = (mode === 'chamfer') ? 1 : 12;   // arc samples per 90 degrees
-  const IN  = [[lo[0]+R, hi[0]-R], [lo[1]+R, hi[1]-R], [lo[2]+R, hi[2]-R]];
+  // A painted face is not a second code path: it is a radius of zero toward
+  // that face. RR[a][s] is how far this solid rolls off toward face (a, s),
+  // so the shrunk box IN meets the outer plane OUT flush on a painted side,
+  // and the ball, the cylinder and the face patch there each degenerate on
+  // their own into the flat piece of that face. One generator still, and the
+  // seams stay the same numbers on both sides because they always were.
+  const SQ = [[0,0],[0,0],[0,0]];
+  if (squareFaces) {
+    for (let a = 0; a < 3; a++) for (let s = 0; s < 2; s++)
+      SQ[a][s] = (squareFaces[a] && squareFaces[a][s]) ? 1 : 0;
+  }
+  const RR = [[SQ[0][0] ? 0 : R, SQ[0][1] ? 0 : R],
+              [SQ[1][0] ? 0 : R, SQ[1][1] ? 0 : R],
+              [SQ[2][0] ? 0 : R, SQ[2][1] ? 0 : R]];
+  const IN  = [[lo[0]+RR[0][0], hi[0]-RR[0][1]],
+               [lo[1]+RR[1][0], hi[1]-RR[1][1]],
+               [lo[2]+RR[2][0], hi[2]-RR[2][1]]];
   const OUT = [[lo[0], hi[0]], [lo[1], hi[1]], [lo[2], hi[2]]];
   const S = [-1, 1];
+  // A ball only exists where all three of its faces wrap. Where one of them
+  // is painted out the vertex stays a box corner and the faces meeting there
+  // run full width into it.
+  const ball = (i, j, k) => !SQ[0][i] && !SQ[1][j] && !SQ[2][k];
   const mid = [(lo[0]+hi[0])/2, (lo[1]+hi[1])/2, (lo[2]+hi[2])/2];
   const out = [];
   let tri = 0;
@@ -3035,6 +3090,7 @@ function rawWrapSolid(rawTris, requestedR, mode) {
                                                : bp(i,j,k,NA,q));
     // ---- the 8 balls ----
     for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) for (let k = 0; k < 2; k++) {
+      if (!ball(i, j, k)) continue;
       for (let m = 0; m < NA; m++) {
         for (let s = 0; s <= m; s++) put(bp(i,j,k,m,s), bp(i,j,k,m+1,s), bp(i,j,k,m+1,s+1));
         for (let s = 0; s + 1 <= m; s++) put(bp(i,j,k,m,s), bp(i,j,k,m+1,s+1), bp(i,j,k,m,s+1));
@@ -3054,6 +3110,13 @@ function rawWrapSolid(rawTris, requestedR, mode) {
         for (let sb = 0; sb < 2; sb++) for (let sc = 0; sc < 2; sc++) {
           const sg = [0,0,0]; sg[a] = sa; sg[b] = sb; sg[cc] = sc;
           const cen = P(IN[b][sb], IN[cc][sc]);
+          // No ball at this vertex means nothing bit into the corner, so the
+          // corner square is solid face instead of the quarter disc plus a
+          // bite. Degenerate where the paint has already collapsed the inset.
+          if (!ball(sg[0], sg[1], sg[2])) {
+            quad(cen, P(OUT[b][sb], IN[cc][sc]), P(OUT[b][sb], OUT[cc][sc]), P(IN[b][sb], OUT[cc][sc]));
+            continue;
+          }
           for (let q = 0; q < NA; q++)
             put(cen, ballArc(a, sg[0], sg[1], sg[2], q), ballArc(a, sg[0], sg[1], sg[2], q+1));
         }
@@ -3070,9 +3133,9 @@ function rawWrapSolid(rawTris, requestedR, mode) {
     const oct = (i, j, k, fi, ti) => {
       const phi = (Math.PI/2) * (fi/NA), th = (Math.PI/2) * (ti/NA);
       const sp = Math.sin(phi);
-      return [IN[0][i] + S[i] * R * Math.cos(phi),
-              IN[1][j] + S[j] * R * sp * Math.cos(th),
-              IN[2][k] + S[k] * R * sp * Math.sin(th)];
+      return [IN[0][i] + S[i] * RR[0][i] * Math.cos(phi),
+              IN[1][j] + S[j] * RR[1][j] * sp * Math.cos(th),
+              IN[2][k] + S[k] * RR[2][k] * sp * Math.sin(th)];
     };
     // 8 balls
     for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) for (let k = 0; k < 2; k++)
@@ -3098,9 +3161,26 @@ function rawWrapSolid(rawTris, requestedR, mode) {
   }
 
   if (out.length < 9 * 4) throw new Error('wrap produced no geometry - left unchanged');
+  // What was actually wrapped, not what a full box would have been: an edge
+  // rounds only when both faces along it wrap, a corner only when all three
+  // do. The status line reads these, so a painted-out face can never be
+  // reported as baked.
+  let square = 0;
+  for (let a = 0; a < 3; a++) for (let s = 0; s < 2; s++) if (SQ[a][s]) square++;
+  let edges = 0;
+  if (mode !== 'corners') {
+    for (let a = 0; a < 3; a++) {
+      const o = [0,1,2].filter(x => x !== a);
+      for (let sb = 0; sb < 2; sb++) for (let sc = 0; sc < 2; sc++)
+        if (!SQ[o[0]][sb] && !SQ[o[1]][sc]) edges++;
+    }
+  }
+  let corners = 0;
+  for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) for (let k = 0; k < 2; k++)
+    if (ball(i, j, k)) corners++;
   rawWrapSolid.lastBuild = {
     mode: mode, radius: R, requested: requestedR,
-    faces: 6, edges: (mode === 'corners' ? 0 : 12), corners: 8, tris: tri
+    faces: 6 - square, square: square, edges: edges, corners: corners, tris: tri
   };
   return new Float32Array(out);
 }
@@ -3124,9 +3204,10 @@ function wrapStatus(mode, b) {
   const clamp = b.radius < b.requested - 1e-6
     ? ' (asked ' + b.requested.toFixed(2) + ', clamped to the box)' : '';
   const what = mode === 'corners'
-    ? '6 faces baked, 8 corners, edges left square'
-    : '6 faces baked, 12 edges, 8 corners';
-  return name + ' wrap R ' + b.radius.toFixed(2) + clamp + ' - ' + what +
+    ? b.faces + ' faces baked, ' + b.corners + ' corners, edges left square'
+    : b.faces + ' faces baked, ' + b.edges + ' edges, ' + b.corners + ' corners';
+  const painted = b.square ? ', ' + b.square + ' painted out and left square' : '';
+  return name + ' wrap R ' + b.radius.toFixed(2) + clamp + ' - ' + what + painted +
          ' (' + b.tris + ' tris, one bake from source)';
 }
 
@@ -3201,6 +3282,11 @@ function commitSoften(m, run, working, firstOfRun, jobs, statusText) {
   // cage goes on instead, and lasts until the next pick or selection.
   clearFacePick();
   showInspectCage(m);
+  // The paint is a different thing and it does survive: it is stored as
+  // planes, so it still names the same faces on the baked piece. Rebuild it
+  // against the new mesh, or the yellow keeps the shape of the face before
+  // the bake and hangs over the corners the wrap has just rounded off.
+  if (typeof nsoMaskRepaint === 'function') nsoMaskRepaint();
   if (statusText) setStatus(statusText);
 }
 
@@ -3293,18 +3379,28 @@ function applySoftenOnFace(face) {
   // raw source, so a shared edge is never met twice and a three-edge vertex is
   // solved once instead of negotiated face by face. A new R just re-wraps from
   // the same source - it cannot stack.
-  const masked = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
   const fullWrap = getFullWrap();
-  const asBox = (masked || !fullWrap) ? null : rawSolidBox(run.base);
-  if (rawSolidBox(run.base)) {
-    if (masked) console.log('[soften] ' + masked + ' face(s) painted out - per-face bake, not a whole-solid wrap');
-    else if (!fullWrap) console.log('[soften] Full wrap off - baking the clicked face only');
+  const boxBase = rawSolidBox(run.base);
+  // Paint no longer vetoes the wrap - it names the faces the wrap leaves
+  // alone. The one thing that still sends this back to the per-face path is
+  // a painted plane that is not one of the six, because then it is not a
+  // face the whole-solid wrap can name; and a piece with all six painted
+  // out, where there is nothing left to wrap.
+  const wrapSquare = (boxBase && fullWrap) ? maskedBoxFaces(m, boxBase) : null;
+  let squareCount = 0;
+  if (wrapSquare) for (let a = 0; a < 3; a++) for (let sd = 0; sd < 2; sd++) if (wrapSquare[a][sd]) squareCount++;
+  const asBox = (fullWrap && boxBase && wrapSquare && squareCount < 6) ? boxBase : null;
+  if (boxBase && !asBox) {
+    if (!fullWrap) console.log('[soften] Full wrap off - baking the clicked face only');
+    else if (!wrapSquare) console.log('[soften] a painted plane is not one of the six box faces - per-face bake');
+    else console.log('[soften] all six faces painted out - nothing left to wrap');
   }
   if (asBox) {
     const wrapMode = getEdgeTreat();
+    if (squareCount) console.log('[soften] ' + squareCount + ' face(s) painted out - wrapping the other ' + (6 - squareCount));
     let wrapped = null;
     try {
-      wrapped = rawWrapSolid(run.base, R, wrapMode);
+      wrapped = rawWrapSolid(run.base, R, wrapMode, wrapSquare);
     } catch (e) {
       if (typeof removeFaceHelper === 'function') removeFaceHelper();
       setStatus('Soften failed - ' + (e && e.message ? e.message : e), true);
