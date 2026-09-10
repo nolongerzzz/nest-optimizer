@@ -2,8 +2,8 @@
 (function () {
   function stampHud() {
     var el = document.getElementById('adjust-status');
-    if (el) el.textContent = 'HUD mask3';
-    if (typeof setStatus === 'function') setStatus('HUD mask3');
+    if (el) el.textContent = 'HUD finish2';
+    if (typeof setStatus === 'function') setStatus('HUD finish2');
   }
 
   function pickIdx(event) {
