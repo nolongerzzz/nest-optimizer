@@ -1,6 +1,7 @@
 /* CTH host — pull the plug: delete this file + its script tag in index.html.
    Mesh names (m-{model.id}) stay; they do not change Soften/Split. */
-import { createThreeHostAdapter } from 'https://cdn.jsdelivr.net/gh/nolongerzzz/click-test@d0342ed1f72b7ad5031b16cb63cc1dee7f98adac/src/three-adapter.js';
+import { mountLiveHarness } from 'https://cdn.jsdelivr.net/gh/nolongerzzz/click-test@2a44fa17c16184e04fce3327ec94b4187ba8286e/src/cth-live.js';
+import { NEST_PLATE_FIRST_BATCH } from 'https://cdn.jsdelivr.net/gh/nolongerzzz/click-test@2a44fa17c16184e04fce3327ec94b4187ba8286e/specs/nest-plate-first-batch.js';
 
 function cthOn() {
   return /(?:^|[?&])cth=1(?:&|$)/.test(String(location.search || ''));
@@ -35,31 +36,35 @@ function wrapRefresh() {
 
 function boot() {
   wrapRefresh();
-  collectRaycastables();
+  const raycastables = collectRaycastables();
   if (!cthOn()) return;
   if (!window.THREE || !window.state || !state.scene || !state.camera) {
     setTimeout(boot, 80);
     return;
   }
-  const raycastables = collectRaycastables();
-  const host = createThreeHostAdapter({
-    THREE: window.THREE,
-    scene: state.scene,
-    camera: state.camera,
-    raycastables: raycastables
-  });
-  const rawSet = host.setCameraState;
-  host.setCameraState = function (s) {
-    rawSet(s);
-    if (state.controls) state.controls.update();
-  };
-  window.__CTH_HOST__ = {
-    getCameraState: host.getCameraState,
-    setCameraState: host.setCameraState,
-    raycastAtScreenPoint: host.raycastAtScreenPoint,
-    projectToScreen: host.projectToScreen,
-    getMarkerPosition: host.getMarkerPosition
-  };
+  const renderer = state.renderer || window.renderer;
+  const canvas = (renderer && renderer.domElement) || document.querySelector('#viewport canvas');
+  if (!canvas) {
+    setTimeout(boot, 80);
+    return;
+  }
+  if (window.__CTH_HARNESS__) return;
+  try {
+    mountLiveHarness({
+      THREE: window.THREE,
+      scene: state.scene,
+      camera: state.camera,
+      renderer: renderer,
+      container: canvas,
+      raycastables: raycastables,
+      tests: NEST_PLATE_FIRST_BATCH,
+      title: 'Nest plate first batch'
+    });
+  } catch (err) {
+    console.error('[cth]', err);
+    if (typeof setStatus === 'function') setStatus('CTH mount failed');
+    return;
+  }
   window.__CTH_REBUILD__ = function () {
     collectRaycastables(raycastables);
   };
