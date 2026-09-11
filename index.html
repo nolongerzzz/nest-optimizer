@@ -120,9 +120,6 @@
             <button id="btn-library" class="vp-bar-btn" type="button"
                     aria-haspopup="true" aria-expanded="false"
                     title="Load a piece from this project's library">Library</button>
-            <!-- Starts closed in the markup itself: the hidden attribute, and an
-                 inline display:none so first paint is closed even if the
-                 stylesheet has not arrived. setOpen owns both from here on. -->
             <div id="library-list" class="library-list" role="menu" hidden
                  style="display:none"></div>
           </div>
@@ -210,5 +207,6 @@
   <script src="app-mask.js?v=inside3"></script>
   <script src="app-library.js?v=inside3"></script>
   <script src="app-ux.js?v=inside3"></script>
+  <script type="module" src="app-cth.js?v=cth1"></script>
 </body>
 </html>
