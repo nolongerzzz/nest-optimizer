@@ -63,10 +63,9 @@ async function boot() {
     banner('CTH on');
     return;
   }
-  const raycastables = collectRaycastables();
   try {
-    const live = await import('./cth/cth-live.js?v=cth6e');
-    const spec = await import('./cth/nest-plate-first-batch.js?v=cth6e');
+    const live = await import('./cth/cth-live.js?v=cth6f');
+    const spec = await import('./cth/nest-plate-first-batch.js?v=cth6f');
     const tests = spec.NEST_PLATE_FIRST_BATCH || spec.default;
     live.mountLiveHarness({
       THREE: window.THREE,
@@ -74,7 +73,7 @@ async function boot() {
       camera: st.camera,
       renderer: renderer,
       container: canvas,
-      raycastables: raycastables,
+      raycastables: function () { return collectRaycastables(); },
       tests: tests,
       title: 'Nest plate first batch'
     });
@@ -86,9 +85,7 @@ async function boot() {
     banner('CTH mount failed: ' + (err && err.message ? err.message : String(err)), true);
     return;
   }
-  window.__CTH_REBUILD__ = function () {
-    collectRaycastables(raycastables);
-  };
+  window.__CTH_REBUILD__ = function () { collectRaycastables(); };
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
