@@ -17,6 +17,10 @@
 (function () {
   const N_TOL = 0.02;   // normals this close count as the same face
   const D_TOL = 0.05;   // mm, plane offsets this close count as the same face
+  // Above every helper that draws on the piece: the selected outline (12),
+  // the inspect cage (16) and the armed-face highlight (20). The paint is the
+  // answer to "which faces did I pick", so nothing is allowed over it.
+  const PAINT_RENDER_ORDER = 40;
 
   function activeModel() {
     return (typeof getActiveModel === 'function') ? getActiveModel() : null;
@@ -311,22 +315,13 @@
       }
       return false;
     };
-    /* The paint sits a hair proud of the face it marks. Coincident with it
-       the depth buffer cannot separate the two and the yellow comes out
-       mottled or gone; lifted along the face normal it wins cleanly, and
-       because it still respects depth a face painted on the far side stays
-       behind the solid instead of floating over the front of it. Scaled to
-       the piece so a 200mm plate and a 5mm chip both get a lift that reads
-       as nothing. */
-    let plo = [Infinity, Infinity, Infinity], phi = [-Infinity, -Infinity, -Infinity];
-    for (let v = 0; v < pos.count; v++) {
-      const q = [pos.getX(v), pos.getY(v), pos.getZ(v)];
-      for (let k = 0; k < 3; k++) {
-        if (q[k] < plo[k]) plo[k] = q[k];
-        if (q[k] > phi[k]) phi[k] = q[k];
-      }
-    }
-    const lift = Math.max(0.01, 0.0015 * Math.hypot(phi[0]-plo[0], phi[1]-plo[1], phi[2]-plo[2]));
+    /* The paint is the face's own triangles, in the face's own place. It used
+       to be pushed a hair along the normal to win the depth test; polygon
+       offset does that in the depth buffer instead, without moving anything,
+       so the yellow cannot hang over the edge onto the face next door. On a
+       pocket that mattered: a floor lifted a hair stood proud of its walls
+       and put a yellow hairline on all four of them, and which walls you
+       could see changed as the piece turned. */
     for (let t = 0; t < nTri; t++) {
       const A = [pos.getX(t*3), pos.getY(t*3), pos.getZ(t*3)];
       const B = [pos.getX(t*3+1), pos.getY(t*3+1), pos.getZ(t*3+1)];
@@ -343,30 +338,40 @@
         const rp = rawPointFromLocal(f, A);
         if (!window.nsoMaskIsExcludedRaw(m, rn, rn[0]*rp[0]+rn[1]*rp[1]+rn[2]*rp[2])) continue;
       }
-      const lx = x*lift, ly = y*lift, lz = z*lift;
-      verts.push(A[0]+lx, A[1]+ly, A[2]+lz,
-                 B[0]+lx, B[1]+ly, B[2]+lz,
-                 C[0]+lx, C[1]+ly, C[2]+lz);
+      verts.push(A[0], A[1], A[2], B[0], B[1], B[2], C[0], C[1], C[2]);
     }
     if (!verts.length) return 0;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
-    /* Flat, unlit, full strength yellow - no transparency to wash it out and
-       no lighting to shade it, so a painted face is the same signal colour
-       whichever way the piece is turned and reads across a room. Front side
-       only: the paint faces out, the way the face it marks does. */
+    /* Flat, unlit, full strength yellow - no lighting to shade it, so a
+       painted face is the same signal colour whichever way the piece is
+       turned and reads across a room. Front side only: the paint faces out,
+       the way the face it marks does.
+
+       It is drawn LAST, after every helper on the piece. The white selected
+       outline, the inspect cage and the armed-face highlight are all
+       transparent, and three renders the whole transparent pass after the
+       whole opaque one - so an opaque paint, whatever its renderOrder, was
+       always painted over by lines drawn later, and which lines crossed
+       which face changed as the piece turned. Opaque-looking but in the
+       transparent pass at a renderOrder above all of them, the paint is on
+       top of them instead, and the same skip list looks the same from every
+       camera. depthWrite off so it never leaves depth of its own behind for
+       the helpers to test against; depthTest on so a face painted on the far
+       side stays behind the solid. */
     overlay = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
       color: 0xffdd00, side: THREE.FrontSide,
-      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4
+      transparent: true, opacity: 1, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8
     }));
     overlay.position.copy(placed.mesh.position);
     overlay.quaternion.copy(placed.mesh.quaternion);
     overlay.scale.copy(placed.mesh.scale);
-    overlay.renderOrder = 21;
-    /* The paint is paint, not a surface. It sits proud of the face it marks,
-       so without this it is the first thing any click ray meets and a Soften
-       pick on a painted face hits the yellow instead of the piece - the click
-       lands on nothing and the face never gets to say it is painted out. */
+    overlay.renderOrder = PAINT_RENDER_ORDER;
+    /* The paint is paint, not a surface. It sits on the face it marks, so a
+       ray can land on it as readily as on the piece, and without this a
+       Soften pick on a painted face hits the yellow instead - the click lands
+       on nothing and the face never gets to say it is painted out. */
     overlay.raycast = function () {};
     if (state.modelGroup) state.modelGroup.add(overlay);
     return verts.length / 9;
