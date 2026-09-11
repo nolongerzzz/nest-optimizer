@@ -64,8 +64,8 @@ async function boot() {
     return;
   }
   try {
-    const live = await import('./cth/cth-live.js?v=cth6f');
-    const spec = await import('./cth/nest-plate-first-batch.js?v=cth6f');
+    const live = await import('./cth/cth-live.js?v=cth7');
+    const spec = await import('./cth/nest-plate-first-batch.js?v=cth7');
     const tests = spec.NEST_PLATE_FIRST_BATCH || spec.default;
     live.mountLiveHarness({
       THREE: window.THREE,
