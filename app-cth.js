@@ -1,4 +1,4 @@
-/* CTH host — pull the plug: delete this file, cth/, and the script tag. */
+/* CTH host — pull the plug: delete this file, cth/, expose, and the script tags. */
 
 function cthOn() {
   return /(?:^|[?&])cth=1(?:&|$)/.test(String(location.search || ''));
@@ -24,7 +24,8 @@ function nameMesh(p) {
 function collectRaycastables(into) {
   const list = into || [];
   if (into) list.length = 0;
-  (window.state && state.placed ? state.placed : []).forEach(function (p) {
+  const placed = window.state && window.state.placed ? window.state.placed : [];
+  placed.forEach(function (p) {
     nameMesh(p);
     if (p && p.mesh && p.mesh.isMesh) list.push(p.mesh);
   });
@@ -32,8 +33,8 @@ function collectRaycastables(into) {
 }
 
 function wrapRefresh() {
-  if (typeof refreshOutline !== 'function' || refreshOutline._cthWrapped) return;
-  const prev = refreshOutline;
+  const prev = window.refreshOutline;
+  if (typeof prev !== 'function' || prev._cthWrapped) return;
   function wrapped(p) {
     prev(p);
     nameMesh(p);
@@ -47,11 +48,12 @@ async function boot() {
   wrapRefresh();
   if (!cthOn()) return;
   banner('CTH loading');
-  if (!window.THREE || !window.state || !state.scene || !state.camera) {
+  const st = window.state;
+  if (!window.THREE || !st || !st.scene || !st.camera) {
     setTimeout(boot, 80);
     return;
   }
-  const renderer = state.renderer || window.renderer;
+  const renderer = st.renderer || window.renderer;
   const canvas = (renderer && renderer.domElement) || document.querySelector('#viewport canvas');
   if (!canvas) {
     setTimeout(boot, 80);
@@ -68,8 +70,8 @@ async function boot() {
     const tests = spec.NEST_PLATE_FIRST_BATCH || spec.default;
     live.mountLiveHarness({
       THREE: window.THREE,
-      scene: state.scene,
-      camera: state.camera,
+      scene: st.scene,
+      camera: st.camera,
       renderer: renderer,
       container: canvas,
       raycastables: raycastables,
@@ -81,7 +83,7 @@ async function boot() {
     else banner('CTH on');
   } catch (err) {
     console.error('[cth]', err);
-    banner('CTH mount failed: ' + (err && err.message ? err.message : err), true);
+    banner('CTH mount failed: ' + (err && err.message ? err.message : String(err)), true);
     return;
   }
   window.__CTH_REBUILD__ = function () {
