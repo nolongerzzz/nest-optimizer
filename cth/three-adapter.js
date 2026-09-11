@@ -16,6 +16,17 @@ export function createThreeHostAdapter({ THREE, scene, camera, raycastables, mar
   }
   function clearMarker() { marker.visible = false; }
 
+  function catalogName(mesh) {
+    const raw = mesh && mesh.name ? String(mesh.name) : '';
+    const st = typeof window !== 'undefined' ? window.state : null;
+    if (st && st.models && raw.indexOf('m-') === 0) {
+      const id = Number(raw.slice(2));
+      const m = st.models.find(function (x) { return x && x.id === id; });
+      if (m && m.name) return String(m.name).replace(/\.stl$/i, '');
+    }
+    return raw;
+  }
+
   function raycastAtScreenPoint(point) {
     camera.updateMatrixWorld(true);
     scene.updateMatrixWorld(true);
@@ -25,7 +36,7 @@ export function createThreeHostAdapter({ THREE, scene, camera, raycastables, mar
     const h = hits[0];
     return {
       hit: true,
-      objectId: h.object.name,
+      objectId: catalogName(h.object),
       point: { x: +h.point.x.toFixed(4), y: +h.point.y.toFixed(4), z: +h.point.z.toFixed(4) },
       normal: h.face ? { x: +h.face.normal.x.toFixed(3), y: +h.face.normal.y.toFixed(3), z: +h.face.normal.z.toFixed(3) } : null,
       distance: +h.distance.toFixed(4),
