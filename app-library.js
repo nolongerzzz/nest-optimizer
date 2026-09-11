@@ -225,12 +225,13 @@
   function setOpen(open) {
     var list = listEl(), btn = btnEl();
     if (!list || !btn) return;
-    list.hidden = !open;
+    if (open) list.removeAttribute('hidden');
+    else list.setAttribute('hidden', 'hidden');
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
   function isOpen() {
     var list = listEl();
-    return !!(list && !list.hidden);
+    return !!(list && !list.hasAttribute('hidden'));
   }
 
   function build() {
@@ -270,19 +271,29 @@
         setOpen(!isOpen());
       });
     }
-    // click off, or Escape, closes it
+    /* Pointer down outside, or Escape, closes it.
+
+       On pointerdown and not click: a drag on the viewport - orbiting the
+       scene, moving a piece - never produces a click, so a click-based
+       close leaves the list hanging over the model for the whole drag. And
+       in the capture phase, because the canvas handlers stop propagation on
+       their own pointerdowns and a bubble listener never hears those at all.
+
+       Inside the list is left alone on purpose: hiding it under the pointer
+       would destroy the row before its click could fire, and the row's own
+       click is what loads. */
     if (!document._libBound) {
       document._libBound = true;
-      document.addEventListener('click', function (ev) {
+      document.addEventListener('pointerdown', function (ev) {
         if (!isOpen()) return;
         var list = listEl(), b = btnEl();
         if (list && list.contains(ev.target)) return;
         if (b && b.contains(ev.target)) return;
         setOpen(false);
-      });
+      }, true);
       document.addEventListener('keydown', function (ev) {
         if (ev.key === 'Escape' && isOpen()) setOpen(false);
-      });
+      }, true);
     }
     setOpen(false);
   }

@@ -306,6 +306,12 @@ select:focus, input:focus {
   color: #fff;
 }
 
+/* An author display rule beats the UA sheet's [hidden] { display: none },
+   so setting .hidden on this element did nothing at all and the list sat
+   open from page load. Say it here, where the display rule is, and make it
+   unconditional so a later rule cannot quietly reopen it. */
+.library-list[hidden] { display: none !important; }
+
 .library-list {
   position: absolute;
   top: calc(100% + 4px);
