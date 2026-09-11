@@ -7,10 +7,19 @@ function idMatch(wanted, got) {
   return got.indexOf(wanted + '_') === 0;
 }
 
+function wantedList(accept) {
+  if (!accept) return [];
+  if (Array.isArray(accept.objectId)) return accept.objectId;
+  if (accept.objectId) return [accept.objectId];
+  if (Array.isArray(accept.aliases)) return accept.aliases;
+  return [];
+}
+
 export function gradeHit(accept, hit) {
   if (!hit || !hit.hit) return 'miss';
-  if (!accept || !accept.objectId) return 'pass';
-  if (!idMatch(accept.objectId, hit.objectId)) return 'fail';
+  const wanted = wantedList(accept);
+  if (!wanted.length) return 'pass';
+  if (!wanted.some(function (w) { return idMatch(w, hit.objectId); })) return 'fail';
 
   if (accept.normals && accept.normals.length) {
     const hn = hit.normal;
