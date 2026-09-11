@@ -1,20 +1,10 @@
-import { createThreeHostAdapter } from './three-adapter.js';
-import { createClickTestHarness } from './harness.js';
-import { createCthOverlay, shouldMount } from './overlay.js';
+import { createThreeHostAdapter } from './three-adapter.js?v=cth6';
+import { createClickTestHarness } from './harness.js?v=cth6';
+import { createCthOverlay, shouldMount } from './overlay.js?v=cth6';
 
 export function mountLiveHarness({
-  THREE,
-  scene,
-  camera,
-  renderer,
-  container,
-  raycastables,
-  tests,
-  flag = 'cth',
-  force = false,
-  title,
-  onResult,
-  onComplete,
+  THREE, scene, camera, renderer, container, raycastables, tests,
+  flag = 'cth', force = false, title, onResult, onComplete,
 }) {
   if (!force && !shouldMount({ flag })) return null;
 
