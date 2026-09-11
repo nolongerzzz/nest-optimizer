@@ -4,7 +4,7 @@ export function shouldMount({ flag = 'cth', search } = {}) {
   const query = search ?? (typeof location !== 'undefined' ? location.search : '');
   const value = new URLSearchParams(query).get(flag);
   if (value === null) return false;
-  return value === '' || ['1', 'true', 'yes', 'on'].includes(String(value).toLowerCase());
+  return value === '' || ['1', 'true', 'yes', 'on', 'finish'].includes(String(value).toLowerCase());
 }
 
 function escapeHtml(s) {
@@ -62,7 +62,7 @@ export function createCthOverlay({ tests, onArm, title = 'Click Test Harness', m
   function setOpen(v) {
     open = !!v;
     panel.hidden = !open;
-    toggle.textContent = open ? 'CTH ✕' : 'CTH';
+    toggle.textContent = open ? 'CTH \u2715' : 'CTH';
   }
   toggle.addEventListener('click', (e) => { e.stopPropagation(); setOpen(!open); });
 
@@ -77,11 +77,11 @@ export function createCthOverlay({ tests, onArm, title = 'Click Test Harness', m
     });
     const done = current >= state.length;
     armBtn.disabled = done;
-    armBtn.textContent = done ? 'All aims recorded' : (armed ? 'Armed — click the aim' : 'Arm pick');
+    armBtn.textContent = done ? 'All aims recorded' : (armed ? 'Armed \u2014 click the aim' : 'Arm pick');
     armBtn.className = 'arm' + (armed && !done ? '' : ' idle');
     const count = (s) => state.filter((a) => a.status === s).length;
-    tallyEl.textContent = count('pass') + ' pass · ' + count('fail') + ' fail · ' + count('miss') + ' miss · ' + count('pending') + ' pending';
-    toggle.textContent = open ? 'CTH ✕' : ('CTH ' + count('pass') + '/' + state.length);
+    tallyEl.textContent = count('pass') + ' pass \u00b7 ' + count('fail') + ' fail \u00b7 ' + count('miss') + ' miss \u00b7 ' + count('pending') + ' pending';
+    toggle.textContent = open ? 'CTH \u2715' : ('CTH ' + count('pass') + '/' + state.length);
   }
 
   armBtn.addEventListener('click', (e) => { e.stopPropagation(); if (onArm) onArm(); });
@@ -99,7 +99,7 @@ export function createCthOverlay({ tests, onArm, title = 'Click Test Harness', m
         const got = entry.hit ? (entry.hit.objectId + (entry.hit.region ? '/' + entry.hit.region : '')) : 'nothing';
         const wantId = entry.expected && entry.expected.objectId ? entry.expected.objectId : 'any';
         const wantReg = entry.expected && entry.expected.region ? '/' + entry.expected.region : '';
-        aim.detail = 'got <b>' + escapeHtml(String(got)) + '</b> · wanted <b>' + escapeHtml(String(wantId) + wantReg) + '</b>';
+        aim.detail = 'got <b>' + escapeHtml(String(got)) + '</b> \u00b7 wanted <b>' + escapeHtml(String(wantId) + wantReg) + '</b>';
       }
       render();
     },
