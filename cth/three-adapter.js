@@ -32,6 +32,18 @@ export function createThreeHostAdapter({ THREE, scene, camera, raycastables, mar
     return raw;
   }
 
+  function regionOf(mesh, point) {
+    if (!mesh || !point) return null;
+    mesh.updateMatrixWorld(true);
+    const box = new THREE.Box3().setFromObject(mesh);
+    const eps = 0.7;
+    const nearOuter =
+      Math.abs(point.x - box.min.x) < eps || Math.abs(point.x - box.max.x) < eps ||
+      Math.abs(point.y - box.min.y) < eps || Math.abs(point.y - box.max.y) < eps ||
+      Math.abs(point.z - box.min.z) < eps || Math.abs(point.z - box.max.z) < eps;
+    return nearOuter ? 'hull' : 'pocket';
+  }
+
   function raycastAtScreenPoint(point) {
     camera.updateMatrixWorld(true);
     scene.updateMatrixWorld(true);
@@ -42,6 +54,7 @@ export function createThreeHostAdapter({ THREE, scene, camera, raycastables, mar
     return {
       hit: true,
       objectId: catalogName(h.object),
+      region: regionOf(h.object, h.point),
       point: { x: +h.point.x.toFixed(4), y: +h.point.y.toFixed(4), z: +h.point.z.toFixed(4) },
       normal: h.face ? { x: +h.face.normal.x.toFixed(3), y: +h.face.normal.y.toFixed(3), z: +h.face.normal.z.toFixed(3) } : null,
       distance: +h.distance.toFixed(4),
