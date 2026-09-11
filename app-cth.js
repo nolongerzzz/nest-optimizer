@@ -1,7 +1,8 @@
 /* CTH host — pull the plug: delete this file + its script tag in index.html.
    Mesh names (m-{model.id}) stay; they do not change Soften/Split. */
-import { mountLiveHarness } from 'https://cdn.jsdelivr.net/gh/nolongerzzz/click-test@2a44fa17c16184e04fce3327ec94b4187ba8286e/src/cth-live.js';
-import { NEST_PLATE_FIRST_BATCH } from 'https://cdn.jsdelivr.net/gh/nolongerzzz/click-test@2a44fa17c16184e04fce3327ec94b4187ba8286e/specs/nest-plate-first-batch.js';
+
+const CTH_PIN = '2a44fa17c16184e04fce3327ec94b4187ba8286e';
+const CTH_BASE = 'https://cdn.jsdelivr.net/gh/nolongerzzz/click-test@' + CTH_PIN;
 
 function cthOn() {
   return /(?:^|[?&])cth=1(?:&|$)/.test(String(location.search || ''));
@@ -34,7 +35,12 @@ function wrapRefresh() {
   window.refreshOutline = wrapped;
 }
 
-function boot() {
+function say(msg) {
+  if (typeof setStatus === 'function') setStatus(msg);
+  console.log('[cth]', msg);
+}
+
+async function boot() {
   wrapRefresh();
   const raycastables = collectRaycastables();
   if (!cthOn()) return;
@@ -49,26 +55,30 @@ function boot() {
     return;
   }
   if (window.__CTH_HARNESS__) return;
+  say('CTH loading');
   try {
-    mountLiveHarness({
+    const live = await import(CTH_BASE + '/src/cth-live.js');
+    const spec = await import(CTH_BASE + '/specs/nest-plate-first-batch.js');
+    const tests = spec.NEST_PLATE_FIRST_BATCH || spec.default;
+    live.mountLiveHarness({
       THREE: window.THREE,
       scene: state.scene,
       camera: state.camera,
       renderer: renderer,
       container: canvas,
       raycastables: raycastables,
-      tests: NEST_PLATE_FIRST_BATCH,
+      tests: tests,
       title: 'Nest plate first batch'
     });
   } catch (err) {
     console.error('[cth]', err);
-    if (typeof setStatus === 'function') setStatus('CTH mount failed');
+    say('CTH mount failed');
     return;
   }
   window.__CTH_REBUILD__ = function () {
     collectRaycastables(raycastables);
   };
-  if (typeof setStatus === 'function') setStatus('CTH on');
+  say('CTH on');
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
