@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=lib2" />
+  <link rel="stylesheet" href="styles.css?v=lib3" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -120,7 +120,11 @@
             <button id="btn-library" class="vp-bar-btn" type="button"
                     aria-haspopup="true" aria-expanded="false"
                     title="Load a piece from this project's library">Library</button>
-            <div id="library-list" class="library-list" role="menu" hidden></div>
+            <!-- Starts closed in the markup itself: the hidden attribute, and an
+                 inline display:none so first paint is closed even if the
+                 stylesheet has not arrived. setOpen owns both from here on. -->
+            <div id="library-list" class="library-list" role="menu" hidden
+                 style="display:none"></div>
           </div>
           <button id="btn-delete-placed" class="vp-bar-btn" type="button">⌫ Remove</button>
           <button id="btn-rot-left" class="vp-bar-btn adjust-btn" disabled>⟲ 90°</button>
@@ -188,7 +192,7 @@
           <button id="btn-xray" class="viewport-tool-btn" type="button">X</button>
         </div>
         <div class="viewport-overlay viewport-overlay-br">
-          <p id="adjust-status" class="status-hud status-hud-id">HUD lib2</p>
+          <p id="adjust-status" class="status-hud status-hud-id">HUD lib3</p>
           <p id="status" class="status status-hud"></p>
         </div>
       </section>
@@ -198,13 +202,13 @@
     <button type="button" id="ctx-export" class="ctx-item" role="menuitem">Export STL</button>
     <button type="button" id="ctx-delete" class="ctx-item ctx-danger" role="menuitem">Delete piece</button>
   </div>
-  <script src="app-core.js?v=lib2"></script>
-  <script src="app-cut.js?v=lib2"></script>
-  <script src="app-finish.js?v=lib2"></script>
-  <script src="app-sel-outline.js?v=lib2"></script>
-  <script src="app-join.js?v=lib2"></script>
-  <script src="app-mask.js?v=lib2"></script>
-  <script src="app-library.js?v=lib2"></script>
-  <script src="app-ux.js?v=lib2"></script>
+  <script src="app-core.js?v=lib3"></script>
+  <script src="app-cut.js?v=lib3"></script>
+  <script src="app-finish.js?v=lib3"></script>
+  <script src="app-sel-outline.js?v=lib3"></script>
+  <script src="app-join.js?v=lib3"></script>
+  <script src="app-mask.js?v=lib3"></script>
+  <script src="app-library.js?v=lib3"></script>
+  <script src="app-ux.js?v=lib3"></script>
 </body>
 </html>
