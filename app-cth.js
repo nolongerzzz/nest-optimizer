@@ -1,7 +1,12 @@
 /* CTH host — pull the plug: delete this file, cth/, expose, and the script tags. */
 
-function cthOn() {
-  return /(?:^|[?&])cth=1(?:&|$)/.test(String(location.search || ''));
+function cthMode() {
+  const v = new URLSearchParams(String(location.search || '')).get('cth');
+  if (v == null) return null;
+  const s = String(v).toLowerCase();
+  if (s === 'finish') return 'finish';
+  if (s === '' || s === '1' || s === 'true' || s === 'yes' || s === 'on') return 'plate';
+  return null;
 }
 
 function banner(text, bad) {
@@ -46,7 +51,8 @@ function wrapRefresh() {
 
 async function boot() {
   wrapRefresh();
-  if (!cthOn()) return;
+  const mode = cthMode();
+  if (!mode) return;
   banner('CTH loading');
   const st = window.state;
   if (!window.THREE || !st || !st.scene || !st.camera) {
@@ -64,9 +70,12 @@ async function boot() {
     return;
   }
   try {
-    const live = await import('./cth/cth-live.js?v=cth7');
-    const spec = await import('./cth/nest-plate-first-batch.js?v=cth7');
-    const tests = spec.NEST_PLATE_FIRST_BATCH || spec.default;
+    const live = await import('./cth/cth-live.js?v=cth8');
+    const specPath = mode === 'finish'
+      ? './cth/nest-finish-first-batch.js?v=cth8'
+      : './cth/nest-plate-first-batch.js?v=cth8';
+    const spec = await import(specPath);
+    const tests = spec.NEST_FINISH_FIRST_BATCH || spec.NEST_PLATE_FIRST_BATCH || spec.default;
     live.mountLiveHarness({
       THREE: window.THREE,
       scene: st.scene,
@@ -75,7 +84,7 @@ async function boot() {
       container: canvas,
       raycastables: function () { return collectRaycastables(); },
       tests: tests,
-      title: 'Nest plate first batch'
+      title: mode === 'finish' ? 'Nest finish first batch' : 'Nest plate first batch'
     });
     const fb = document.getElementById('cth-fallback');
     if (fb && window.__CTH_OVERLAY__) fb.remove();
