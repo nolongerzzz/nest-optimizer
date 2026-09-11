@@ -16,7 +16,7 @@ export function createPointerCapture({
   container,
   onClick,
   onDrag,
-  dragThresholdPx = 6,
+  dragThresholdPx = 24,
   root = typeof window !== 'undefined' ? window : null,
 }) {
   if (!container) throw new Error('createPointerCapture: container is required');
