@@ -65,8 +65,8 @@ async function boot() {
   }
   const raycastables = collectRaycastables();
   try {
-    const live = await import('./cth/cth-live.js?v=cth6d');
-    const spec = await import('./cth/nest-plate-first-batch.js?v=cth6d');
+    const live = await import('./cth/cth-live.js?v=cth6e');
+    const spec = await import('./cth/nest-plate-first-batch.js?v=cth6e');
     const tests = spec.NEST_PLATE_FIRST_BATCH || spec.default;
     live.mountLiveHarness({
       THREE: window.THREE,
