@@ -1,5 +1,5 @@
-import { gradeHit } from './grade.js?v=cth6e';
-import { createPointerCapture } from './pointer-capture.js?v=cth6e';
+import { gradeHit } from './grade.js?v=cth6f';
+import { createPointerCapture } from './pointer-capture.js?v=cth6f';
 
 export function createClickTestHarness({
   container, host, tests, onResult, onComplete, onDragIgnored, pointerMode = 'listen',
