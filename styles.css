@@ -290,6 +290,58 @@ select:focus, input:focus {
   color: #ef4444;
 }
 
+/* Library catalog - the files in library/ on this origin, one row each.
+   Reads as the model index above it does, a shade quieter, because these are
+   files you can load rather than pieces you have loaded. */
+.library-head {
+  margin: 12px 0 0;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.library-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.library-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #cbd5e1;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.library-item .name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-item:hover,
+.library-item:focus-visible {
+  border-color: #38bdf8;
+  color: #e8eef6;
+  outline: none;
+}
+
+.library-item.is-loading {
+  opacity: 0.55;
+  cursor: progress;
+}
+
 /* Settings */
 .settings {
   display: flex;
