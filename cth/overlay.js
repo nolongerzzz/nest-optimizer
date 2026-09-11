@@ -17,34 +17,54 @@ export function createCthOverlay({ tests, onArm, title = 'Click Test Harness', m
 
   const hostEl = document.createElement('div');
   hostEl.setAttribute('data-cth-overlay', '');
-  hostEl.style.cssText = 'position:fixed;top:0;right:0;z-index:2147483000;';
+  hostEl.style.cssText = 'position:fixed;top:8px;right:8px;z-index:2147483000;';
   const shadow = hostEl.attachShadow({ mode: 'open' });
   shadow.innerHTML = `<style>
-    .panel{width:310px;max-height:100vh;overflow-y:auto;margin:10px;padding:10px 12px 12px;background:rgba(20,23,27,.94);color:#e7e5e1;border:1px solid #2a3037;border-radius:8px;font:12px/1.45 ui-monospace,Menlo,monospace;box-shadow:0 6px 22px rgba(0,0,0,.45)}
+    .wrap{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+    .chip{background:#14171b;color:#e8a33d;border:1px solid #e8a33d;border-radius:6px;padding:5px 8px;font:600 11px ui-monospace,Menlo,monospace;cursor:pointer}
+    .panel{width:300px;max-height:70vh;overflow-y:auto;padding:10px 12px 12px;background:rgba(20,23,27,.94);color:#e7e5e1;border:1px solid #2a3037;border-radius:8px;font:12px/1.45 ui-monospace,Menlo,monospace}
+    .panel[hidden]{display:none}
     h1{font-size:12px;margin:0 0 2px}
     .sub{color:#9aa1a8;font-size:11px;margin-bottom:8px}
     .aim{border-top:1px solid #2a3037;padding:7px 0 6px}
     .aim.current{background:rgba(232,163,61,.08);margin:0 -12px;padding-left:12px;padding-right:12px}
     .row{display:flex;gap:8px;justify-content:space-between}
     .aim.current .name{color:#e8a33d;font-weight:600}
-    .chip{font-weight:600;text-transform:uppercase;font-size:10px}
+    .chip-status{font-weight:600;text-transform:uppercase;font-size:10px}
     .how,.detail,.note,.tally{color:#9aa1a8;font-size:11px;margin-top:4px}
     .note.warn{color:#d2694f}
-    button{width:100%;background:#e8a33d;color:#161616;border:0;border-radius:5px;padding:8px 10px;font:600 12px inherit;cursor:pointer}
-    button.idle{background:#262c33;color:#e7e5e1;border:1px solid #39414a}
+    button.arm{width:100%;background:#e8a33d;color:#161616;border:0;border-radius:5px;padding:8px 10px;font:600 12px inherit;cursor:pointer}
+    button.arm.idle{background:#262c33;color:#e7e5e1;border:1px solid #39414a}
     button:disabled{opacity:.4}
   </style>
-  <div class="panel"><h1></h1><div class="sub"></div><div class="aims"></div><div class="controls"><button type="button"></button></div><div class="note"></div><div class="tally"></div></div>`;
+  <div class="wrap">
+    <button type="button" class="chip" id="cth-toggle">CTH</button>
+    <div class="panel" id="cth-panel">
+      <h1></h1><div class="sub"></div><div class="aims"></div>
+      <div class="controls"><button type="button" class="arm idle"></button></div>
+      <div class="note"></div><div class="tally"></div>
+    </div>
+  </div>`;
 
+  const panel = shadow.getElementById('cth-panel');
+  const toggle = shadow.getElementById('cth-toggle');
   shadow.querySelector('h1').textContent = title;
   shadow.querySelector('.sub').textContent = 'Arm, then click the aim. Orbit freely when not armed.';
   const aimsEl = shadow.querySelector('.aims');
-  const armBtn = shadow.querySelector('button');
+  const armBtn = shadow.querySelector('button.arm');
   const noteEl = shadow.querySelector('.note');
   const tallyEl = shadow.querySelector('.tally');
   const state = (tests || []).map((t) => ({ id: t.id, title: t.title || t.id, instruction: t.instruction || '', status: 'pending', detail: '' }));
   let current = 0;
   let armed = false;
+  let open = true;
+
+  function setOpen(v) {
+    open = !!v;
+    panel.hidden = !open;
+    toggle.textContent = open ? 'CTH ✕' : 'CTH';
+  }
+  toggle.addEventListener('click', (e) => { e.stopPropagation(); setOpen(!open); });
 
   function render() {
     aimsEl.innerHTML = '';
@@ -52,15 +72,16 @@ export function createCthOverlay({ tests, onArm, title = 'Click Test Harness', m
       const el = document.createElement('div');
       el.className = 'aim' + (i === current ? ' current' : '');
       const colour = STATUS_COLOURS[aim.status] || STATUS_COLOURS.pending;
-      el.innerHTML = `<div class="row"><span class="name">${i + 1}. ${escapeHtml(aim.title)}</span><span class="chip" style="color:${colour}">${aim.status}</span></div>${i === current && aim.instruction ? `<div class="how">${escapeHtml(aim.instruction)}</div>` : ''}${aim.detail ? `<div class="detail">${aim.detail}</div>` : ''}`;
+      el.innerHTML = `<div class="row"><span class="name">${i + 1}. ${escapeHtml(aim.title)}</span><span class="chip-status" style="color:${colour}">${aim.status}</span></div>${i === current && aim.instruction ? `<div class="how">${escapeHtml(aim.instruction)}</div>` : ''}${aim.detail ? `<div class="detail">${aim.detail}</div>` : ''}`;
       aimsEl.appendChild(el);
     });
     const done = current >= state.length;
     armBtn.disabled = done;
     armBtn.textContent = done ? 'All aims recorded' : (armed ? 'Armed — click the aim' : 'Arm pick');
-    armBtn.className = armed && !done ? '' : 'idle';
+    armBtn.className = 'arm' + (armed && !done ? '' : ' idle');
     const count = (s) => state.filter((a) => a.status === s).length;
     tallyEl.textContent = count('pass') + ' pass · ' + count('fail') + ' fail · ' + count('miss') + ' miss · ' + count('pending') + ' pending';
+    toggle.textContent = open ? 'CTH ✕' : ('CTH ' + count('pass') + '/' + state.length);
   }
 
   armBtn.addEventListener('click', (e) => { e.stopPropagation(); if (onArm) onArm(); });
