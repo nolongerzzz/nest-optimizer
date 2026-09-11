@@ -222,11 +222,21 @@
   function listEl() { return document.getElementById('library-list'); }
   function btnEl() { return document.getElementById('btn-library'); }
 
+  /* Open and closed are written in both places that can decide it - the
+     attribute the stylesheet keys off, and the inline display that holds
+     even with no stylesheet at all - by this one function, so the two can
+     never drift. The page ships closed in the markup the same way, so the
+     list is closed at first paint without waiting for any of this to run. */
   function setOpen(open) {
     var list = listEl(), btn = btnEl();
     if (!list || !btn) return;
-    if (open) list.removeAttribute('hidden');
-    else list.setAttribute('hidden', 'hidden');
+    if (open) {
+      list.removeAttribute('hidden');
+      list.style.display = '';        // back to the flex the class asks for
+    } else {
+      list.setAttribute('hidden', 'hidden');
+      list.style.display = 'none';
+    }
     btn.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
   function isOpen() {
@@ -298,7 +308,13 @@
     setOpen(false);
   }
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build);
+  // Closed before anything else is wired, and again once the rows exist, so
+  // it never depends on a first click - or on build() having got that far.
+  setOpen(false);
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', function () {
+    setOpen(false);
+    build();
+  });
   else build();
   setTimeout(build, 0);
 })();

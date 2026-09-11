@@ -120,7 +120,11 @@
             <button id="btn-library" class="vp-bar-btn" type="button"
                     aria-haspopup="true" aria-expanded="false"
                     title="Load a piece from this project's library">Library</button>
-            <div id="library-list" class="library-list" role="menu" hidden></div>
+            <!-- Starts closed in the markup itself: the hidden attribute, and an
+                 inline display:none so first paint is closed even if the
+                 stylesheet has not arrived. setOpen owns both from here on. -->
+            <div id="library-list" class="library-list" role="menu" hidden
+                 style="display:none"></div>
           </div>
           <button id="btn-delete-placed" class="vp-bar-btn" type="button">⌫ Remove</button>
           <button id="btn-rot-left" class="vp-bar-btn adjust-btn" disabled>⟲ 90°</button>
