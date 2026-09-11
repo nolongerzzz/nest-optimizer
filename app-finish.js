@@ -3836,6 +3836,43 @@ function applySoftenOnFace(face) {
     setStatus('Soften needs a Square-split or loaded raw piece', true);
     return;
   }
+  const inpR0 = document.getElementById('inp-soften-r');
+  const Rv0 = inpR0 ? parseFloat(inpR0.value) : NaN;
+  const R0 = (isFinite(Rv0) && Rv0 > 0) ? Rv0 : 0.5;
+
+  /* Full wrap on, something painted, and a pocket on the piece: this click
+     means "wrap the pockets", and which triangle it happened to land on is
+     not part of that. Asking it to name a face is what produced the two
+     dead ends - the face under the cursor was either one of the painted
+     ones ("that face is painted out") or a wall deep inside the part
+     ("click an outer face, that one is recessed 38mm") - and neither has
+     anything to do with the job. So it does not ask.
+
+     Full wrap off is still click-a-face, and a piece with no pocket is
+     still click-a-face, so the painted-out refusal stands everywhere it
+     stood before. */
+  if (state.nsoWrapAll === m.id) {
+    state.nsoWrapAll = null;
+    const runW = (m.softenRun && m.rawTris === m.softenRun.result) ? m.softenRun : {
+      base: (m.rawTris.slice ? m.rawTris.slice() : new Float32Array(m.rawTris)),
+      axis: m.rawAxis,
+      offset: m.centerOffset,
+      geometry: m.geometry,
+      size: { x: m.size.x, y: m.size.y, z: m.size.z },
+      jobs: [],
+      result: null
+    };
+    // Same order the ordinary path uses, so this click is only skipping the
+    // face pick and nothing else: the box-and-one-pocket wrap first, which
+    // is the one that can also wrap the hull, then the cut-the-pockets wrap
+    // for a hull it cannot rebuild. Whatever those two decide - including
+    // their refusals - is the answer.
+    if (wrapPocketBrickRun(m, runW, R0, !runW.result, [])) return;
+    if (wrapPocketsInPlace(m, runW, R0, !runW.result, [])) return;
+    setStatus('Wrap found no pocket to work on. Piece unchanged', true);
+    return;
+  }
+
   const pick = getFacePick(m);
   if (!pick) {
     clearFacePick();
@@ -5372,6 +5409,7 @@ function storeFacePick(hit) {
     setStatus('Click a face', true);
     return null;
   }
+  state.nsoWrapAll = null;
 
   let owner = hit.object;
   while (owner && (!owner.userData || owner.userData.sourceId == null) && owner.parent) owner = owner.parent;
@@ -5386,6 +5424,20 @@ function storeFacePick(hit) {
   if (!model.rawTris || model.rawAxis !== 'zup') {
     setStatus('Click a face - this piece has no raw soup (Square-split or load it first)', true);
     return null;
+  }
+
+  // Before anything is asked of the triangle: if this is a Full wrap on a
+  // painted piece that has a pocket, the click is the whole job and no face
+  // needs naming. Marked here rather than answered here, so applySoftenOnFace
+  // runs it through the same run bookkeeping every other bake uses.
+  // Only for a Soften click: this same resolver serves the Cap tool, which
+  // has its own use for the clicked face and nothing to do with Full wrap.
+  if (state.softenArmed &&
+      (typeof getFullWrap === 'function') && getFullWrap() &&
+      (typeof nsoMaskCount === 'function') && nsoMaskCount(model) > 0 &&
+      rawBoxPockets(model.rawTris).length) {
+    state.nsoWrapAll = model.id;
+    return { wrapAll: true, modelId: model.id };
   }
 
   const mesh = hit.object;
