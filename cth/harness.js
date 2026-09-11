@@ -1,5 +1,5 @@
-import { gradeHit } from './grade.js?v=cth6f';
-import { createPointerCapture } from './pointer-capture.js?v=cth6f';
+import { gradeHit } from './grade.js?v=cth7';
+import { createPointerCapture } from './pointer-capture.js?v=cth7';
 
 export function createClickTestHarness({
   container, host, tests, onResult, onComplete, onDragIgnored, pointerMode = 'listen',
@@ -42,7 +42,7 @@ export function createClickTestHarness({
       reactionMs: Math.round(performance.now() - testStart),
       camera: host.getCameraState ? host.getCameraState() : null,
       clickScreen: point,
-      hit: hit && hit.hit ? { objectId: hit.objectId, point: hit.point, normal: hit.normal, distance: hit.distance } : null,
+      hit: hit && hit.hit ? { objectId: hit.objectId, region: hit.region || null, point: hit.point, normal: hit.normal, distance: hit.distance } : null,
       expected: acceptFor(t),
       result,
     };
