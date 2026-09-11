@@ -18,10 +18,10 @@ function wantedList(accept) {
 export function gradeHit(accept, hit) {
   if (!hit || !hit.hit) return 'miss';
   const wanted = wantedList(accept);
-  if (!wanted.length) return 'pass';
-  if (!wanted.some(function (w) { return idMatch(w, hit.objectId); })) return 'fail';
+  if (wanted.length && !wanted.some(function (w) { return idMatch(w, hit.objectId); })) return 'fail';
+  if (accept && accept.region && hit.region !== accept.region) return 'fail';
 
-  if (accept.normals && accept.normals.length) {
+  if (accept && accept.normals && accept.normals.length) {
     const hn = hit.normal;
     if (!hn) return 'fail';
     const tolerance = typeof accept.normalTolerance === 'number'
