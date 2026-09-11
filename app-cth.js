@@ -1,11 +1,19 @@
-/* CTH host — pull the plug: delete this file + its script tag in index.html.
-   Mesh names (m-{model.id}) stay; they do not change Soften/Split. */
-
-const CTH_PIN = '2a44fa17c16184e04fce3327ec94b4187ba8286e';
-const CTH_BASE = 'https://cdn.jsdelivr.net/gh/nolongerzzz/click-test@' + CTH_PIN;
+/* CTH host — pull the plug: delete this file, cth/, and the script tag. */
 
 function cthOn() {
   return /(?:^|[?&])cth=1(?:&|$)/.test(String(location.search || ''));
+}
+
+function banner(text, bad) {
+  let el = document.getElementById('cth-fallback');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'cth-fallback';
+    el.style.cssText = 'position:fixed;top:8px;right:8px;z-index:2147483000;max-width:280px;padding:8px 10px;background:#14171b;color:#e7e5e1;border:1px solid #e8a33d;border-radius:8px;font:12px/1.4 ui-monospace,monospace;';
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  el.style.borderColor = bad ? '#d2694f' : '#e8a33d';
 }
 
 function nameMesh(p) {
@@ -35,15 +43,10 @@ function wrapRefresh() {
   window.refreshOutline = wrapped;
 }
 
-function say(msg) {
-  if (typeof setStatus === 'function') setStatus(msg);
-  console.log('[cth]', msg);
-}
-
 async function boot() {
   wrapRefresh();
-  const raycastables = collectRaycastables();
   if (!cthOn()) return;
+  banner('CTH loading');
   if (!window.THREE || !window.state || !state.scene || !state.camera) {
     setTimeout(boot, 80);
     return;
@@ -54,11 +57,14 @@ async function boot() {
     setTimeout(boot, 80);
     return;
   }
-  if (window.__CTH_HARNESS__) return;
-  say('CTH loading');
+  if (window.__CTH_HARNESS__) {
+    banner('CTH on');
+    return;
+  }
+  const raycastables = collectRaycastables();
   try {
-    const live = await import(CTH_BASE + '/src/cth-live.js');
-    const spec = await import(CTH_BASE + '/specs/nest-plate-first-batch.js');
+    const live = await import('./cth/cth-live.js');
+    const spec = await import('./cth/nest-plate-first-batch.js');
     const tests = spec.NEST_PLATE_FIRST_BATCH || spec.default;
     live.mountLiveHarness({
       THREE: window.THREE,
@@ -70,15 +76,17 @@ async function boot() {
       tests: tests,
       title: 'Nest plate first batch'
     });
+    const fb = document.getElementById('cth-fallback');
+    if (fb && window.__CTH_OVERLAY__) fb.remove();
+    else banner('CTH on');
   } catch (err) {
     console.error('[cth]', err);
-    say('CTH mount failed');
+    banner('CTH mount failed: ' + (err && err.message ? err.message : err), true);
     return;
   }
   window.__CTH_REBUILD__ = function () {
     collectRaycastables(raycastables);
   };
-  say('CTH on');
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
