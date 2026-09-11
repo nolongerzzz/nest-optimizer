@@ -96,9 +96,10 @@ export function createCthOverlay({ tests, onArm, title = 'Click Test Harness', m
       const aim = state.find((a) => a.id === entry.testId);
       if (aim) {
         aim.status = entry.result;
-        const got = entry.hit ? entry.hit.objectId : 'nothing';
-        const want = entry.expected && entry.expected.objectId ? entry.expected.objectId : 'any';
-        aim.detail = 'got <b>' + escapeHtml(String(got)) + '</b> · wanted <b>' + escapeHtml(String(want)) + '</b>';
+        const got = entry.hit ? (entry.hit.objectId + (entry.hit.region ? '/' + entry.hit.region : '')) : 'nothing';
+        const wantId = entry.expected && entry.expected.objectId ? entry.expected.objectId : 'any';
+        const wantReg = entry.expected && entry.expected.region ? '/' + entry.expected.region : '';
+        aim.detail = 'got <b>' + escapeHtml(String(got)) + '</b> · wanted <b>' + escapeHtml(String(wantId) + wantReg) + '</b>';
       }
       render();
     },
