@@ -1924,6 +1924,16 @@ function onCanvasPointerDown(event) {
   state.raycaster.setFromCamera(state.pointer, state.camera);
   hideCtxMenu();
 
+  /* Paint mode owns a click that lands on a piece. Stand down so it cannot
+     also start a move drag - app-mask.js runs its own handler on this same
+     canvas right after this one and does the painting there. Only a click
+     that paint would actually take is given up, so orbiting the plate while
+     painting still works. */
+  if (typeof window.nsoMaskTakesClick === 'function' && window.nsoMaskTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
   if (state.softenArmed && state.modelGroup && event.button === 0) {
     const sHits = state.raycaster.intersectObjects(state.modelGroup.children, true);
     if (sHits.length) {
