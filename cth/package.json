@@ -1,0 +1,4 @@
+{
+  "//": "cth/*.js are browser ES modules. Without this the repo package.json is the nearest one, it has no \"type\" (it must not - tools/*.js are CommonJS), and Node warns MODULE_TYPELESS_PACKAGE_JSON on every import. Scoped here so the root default stays CommonJS. Goes with the rest of cth/ when the plug is pulled.",
+  "type": "module"
+}

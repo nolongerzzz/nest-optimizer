@@ -32,6 +32,26 @@ Parked modules (repair, sculpt, planar fuse) stay unwired until the owner names 
 Clean no-op mesh for repair checks is `fixtures/box-20mm.stl`, not Thingi10K 40921
 (40921 has 17 bowtie vertices; edge-based checks miss that).
 
+## CTH checks
+`npm run cth:unit` is the dependency-free suite (`tools/cth-test/*.test.mjs`,
+also runnable as `./tools/cth-test/run-all.sh`). `npm run cth:capture` drives the
+real app in headless Chromium and needs `npm ci`. `npm test` runs both. The
+capture check serves three from the `three` devDependency rather than the CDN
+`index.html` names, so it needs no network.
+
+## Parked ticket - re-vendor cth/ from click-test
+`cth/` is a vendored fork of `nolongerzzz/click-test` `src/`, and it has
+drifted: 55-278 changed lines per file. Two regressions have already been
+traced to the vendoring rather than to upstream - `escapeHtml` had its entity
+map HTML-decoded, so only the apostrophe was escaped, and the overlay lost
+upstream's always-a-list `renderAims()`. Both are fixed here now; the overlay's
+completion-only summary is a deliberate divergence for the corner card, not
+drift, and should stay.
+
+Do NOT blanket-overwrite `cth/` from upstream. Some of the drift is intentional
+nest-specific work. This needs a deliberate file-by-file review deciding, for
+each hunk, whether it is a nest change to keep or vendoring damage to drop.
+
 ## Archive — Soften Corners second pass (corners2), historical
 
 corners1 was measured on the exported STL of the live FAIL. What it actually
