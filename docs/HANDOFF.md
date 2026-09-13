@@ -115,3 +115,34 @@ seal gate refusing any result with more odd edges than the input.
 
 ## User role
 Steer + live click test only. No file upload. No snippet paste.
+
+## Sculpt tier 1 — vertex adjacency + global smoothing (landed, `app-sculpt.js`)
+
+Full write-up with numbers: `docs/SCULPT-TIER1.md`. Self-test:
+`node tools/sculpt_selftest.js`. Script tag added to `index.html` at the
+existing `?v=inside3` — tag NOT bumped.
+
+State: both tiers built and measured. Topology invariance verified on every
+fixture (same vertex count, triangle count, connectivity; only positions
+move). Global Laplacian has no feature preservation and no way to protect a
+region — that is the brush tier, and nothing in `app-sculpt.js` should grow
+a feature term.
+
+Three findings land on code this ticket did NOT touch. They matter for the
+merge-order pass because each is someone else's gate:
+
+1. `NSO_weldEpsFor` (app-join.js) caps the weld tolerance at the strict
+   minimum edge, so a handful of slivers set the tolerance for a whole mesh.
+   On the tape fixture 2 edges out of 98,586 drag it to 5e-6 and the part
+   reads as 1402 open edges; it welds to V-E+F 2, 0 open at 3e-5.
+   `NSO_sculptWeldTol` in app-sculpt.js carries the fix. Both booleans still
+   run the old rule.
+2. `NSO_edgeStats` and `rawCheckWatertightQuick` weld by coordinate
+   rounding, so neither can see a backwards-wound face: it pairs every edge
+   and reads 0 open while the volume is wrong. `NSO_buildAdjacency` counts
+   directed edges (`stackedDirs`) and requires 0 for watertight. This is a
+   second, distinct hole alongside the already-parked 208-odd-edge tolerance.
+3. `tools/stl_watertight_check.py` rounds to 1e-5, too tight for a float32
+   STL of an 82mm part: it reports 1406 false open edges on the tape fixture.
+
+None of the three touched — each wants its own scoped pass and an APPLY.
