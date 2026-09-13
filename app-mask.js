@@ -384,7 +384,7 @@
      while a paint session is live, so the count is on the same line a photo
      of the HUD already shows. Paint never relabels itself into Done - it
      stays Paint faces and just lights up; Done is its own button. */
-  const HUD_TAG = 'HUD inside3';
+  const HUD_TAG = 'HUD inside4';
   function hud(text) {
     const el = document.getElementById('adjust-status');
     if (el) el.textContent = text;
@@ -443,6 +443,22 @@
     }
     return null;
   }
+
+  /* Does paint mode own this click? Asked by app-core's pointerdown, which
+     runs first and would otherwise fall through to startMoveDrag and have the
+     click reported as "Moved model #N" over the paint's own status.
+
+     It has to be asked, not asserted: app-core binds inside initThree() while
+     the document is still parsing and this file binds at DOMContentLoaded, so
+     app-core is always the earlier listener on the same node in the same
+     capture phase. stopPropagation() from there never reached this handler,
+     and stopImmediatePropagation() would stop it dead - the paint needs the
+     event. One predicate, so "paint takes this click" is decided here, where
+     the hit test lives, and not guessed at again in app-core. */
+  window.nsoMaskTakesClick = function (event) {
+    if (!state.maskPaint || !event || event.button !== 0) return false;
+    return !!hitFace(event);
+  };
 
   // Toggle the face under the cursor. Nothing here moves the piece, and a
   // pick that resolves to no face leaves both the mesh and the paint alone.
