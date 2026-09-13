@@ -1,6 +1,6 @@
-import { createThreeHostAdapter } from './three-adapter.js?v=cth9';
-import { createClickTestHarness } from './harness.js?v=cth9';
-import { createCthOverlay, shouldMount } from './overlay.js?v=cth9';
+import { createThreeHostAdapter } from './three-adapter.js?v=cth10';
+import { createClickTestHarness } from './harness.js?v=cth10';
+import { createCthOverlay, shouldMount } from './overlay.js?v=cth10';
 
 export function mountLiveHarness({
   THREE, scene, camera, renderer, container, raycastables, tests,
