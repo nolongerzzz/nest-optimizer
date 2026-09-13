@@ -185,5 +185,18 @@
     "weldA": 0.08,
     "reps": 3,
     "note": "unclamped 0.08 -- what the guard is protecting against"
+  },
+  {
+    "name": "t3_tape_clustered",
+    "op": "subtract",
+    "a": "/fixtures/tape_welded_clustered.stl",
+    "b": "/library/box_bit_12x8x8.stl",
+    "offsetB": [
+      0,
+      0,
+      10
+    ],
+    "reps": 3,
+    "note": "tape pre-welded by NSO_buildAdjacency (clustering, tol 4.24e-5, 2 slivers dropped): watertight input"
   }
 ]

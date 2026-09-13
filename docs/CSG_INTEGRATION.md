@@ -224,11 +224,12 @@ tape_on-edge-single-B101_rounded_v8_FINAL.stl
   euler_characteristic -297   sliver_tris 1091   worst_aspect_ratio 145,272,354
 ```
 
-1,406 open edges. The existing `tools/stl_watertight_check.py --odd` would also
-fail this file, so it appears never to have been run through it.
+1,406 open edges — but see the correction below: **those are false positives**.
+`stl_watertight_check.py` quantises at 1e-5, which is too tight for a float32
+STL of an 82 mm part, so it reports the same 1,406. The part is in fact closed.
 
-Most of that is float32 precision noise between adjacent facets, not real holes.
-Sweeping the weld tolerance:
+Sweeping tolerance with the **grid-snap** weld used below (snap each coordinate
+to a tol-sized lattice):
 
 | weld tol | verts | open | nonmanifold | winding | χ |
 |---|---|---|---|---|---|
@@ -239,6 +240,32 @@ Sweeping the weld tolerance:
 | 1e-3 | 16,399 | 0 | 68 | 170 | 36 |
 | 1e-2 | 16,338 | 0 | 146 | 321 | 142 |
 | **0.08** | **15,864** | **125** | **835** | **1,932** | **749** |
+
+**Correction: the part is watertight; grid-snap welding was the wrong instrument.**
+The sweep above never reaches 0 open edges without also introducing non-manifold
+edges, which led to a first reading that the part has a small genuine hole. That
+was wrong, and it was an artifact of the weld *method*, not the mesh. Grid snap
+rounds to arbitrary lattice phase, so two vertices 1 µm apart can land in
+different cells and stay split — which is also why the sweep is non-monotonic
+(1.5e-4 is worse than both 1e-4 and 2e-4).
+
+Re-run with the **clustering** weld in `NSO_buildAdjacency` (`app-sculpt.js`,
+landed by the `sculpt1` pass), the part is unambiguously closed, and stably so
+across every tolerance tried:
+
+| weld method | tol | verts | tris | dropped | open | nonmanifold | stackedDirs | χ |
+|---|---|---|---|---|---|---|---|---|
+| grid snap (this bench) | 1e-4 | 16,434 | 32,862 | 0 | 4 | 0 | 0 | 1 |
+| grid snap | 3e-5 | 16,673 | 32,862 | 0 | 812 | 0 | 0 | −164 |
+| **clustering (`NSO_buildAdjacency`)** | 2e-5 … 1e-4 | **16,432** | **32,860** | 2 | **0** | **0** | **0** | **2** |
+
+Verified by running `NSO_buildAdjacency` directly on the part rather than taking
+the claim on trust. Its capped rule picks 4.24e-5 and drops 2 degenerate slivers.
+This independently corroborates the `sculpt1` finding (`docs/SCULPT-TIER1.md` §1),
+which reached the same conclusion from the other direction.
+
+So: **the kernel's `Not manifold` rejection was caused by the weld in front of
+it, not by a hole in the part.**
 
 **What shipped code actually does.** `subtractSoupBFromA` and `NSO_unionSoups`
 both call `weldSoupVerts(aWorld, NSO_weldEpsFor(aWorld, 0.08))`. `NSO_weldEpsFor`
@@ -257,11 +284,15 @@ tolerance for all 32,862 triangles. Verified end-to-end:
 | `t3_tape_raw` | none | `ManifoldError: Not manifold` |
 | `t3_tape_weld_live_5e-6` | **4.997e-6 — exactly what ships** | `ManifoldError: Not manifold` |
 | `t3_tape_weld_0.08` | 0.08 unclamped (what the guard prevents) | `ManifoldError: Not manifold` |
-| `t3_tape_weld_1e-4` | 1e-4 | **32,888 tris, 24,007.197416 mm³, 0 open, 0 nonmanifold, 0 winding** |
+| `t3_tape_weld_1e-4` | 1e-4 grid snap | **32,888 tris, 24,007.197416 mm³, 0 open, 0 nonmanifold, 0 winding** |
+| `t3_tape_clustered` | 4.24e-5 clustering | **32,886 tris, 24,007.197416 mm³, 0 open, 0 nonmanifold, 0 winding** |
+
+The two successful welds converge on **the identical volume, 24,007.197416 mm³**,
+from different weld algorithms and different triangle counts (32,888 vs 32,886) —
+independent cross-validation that the boolean itself is doing the right thing.
 
 So the weld stage is safe but inert on real geometry: it cannot fail destructively,
-and it also cannot close anything. A working tolerance exists (1e-4) and sits
-between the two. Nothing is changed here — this is live Subtract/Join behaviour
+and it also cannot close anything. Nothing is changed here — this is live Subtract/Join behaviour
 and outside the task's scope — but it is the single thing standing between this
 kernel and production-scale parts.
 
@@ -280,10 +311,15 @@ matters, so the welded input was measured too:
 
 | | pierce | coplanar | degenerate | worst aspect |
 |---|---|---|---|---|
-| input (welded 1e-4) | **187** | 7 | **295** | 145,272,354 |
-| output (after subtract) | **10** | 2 | **0** | 7,636,891 |
+| input (grid-snap weld 1e-4) | **187** | 7 | **295** | 145,272,354 |
+| input (clustering weld 4.24e-5) | **187** | 7 | **295** | 145,272,354 |
+| output, grid-snap path | **10** | 2 | **0** | 7,636,891 |
+| output, clustering path | **9** | 2 | **0** | 7,636,891 |
 
-The boolean **reduced** self-intersections 187 → 10 and eliminated all 295
+Both weld methods leave the same 187 piercing pairs, so these are **real defects
+in the source geometry**, not weld artifacts — the part is watertight and
+self-intersecting at the same time. The boolean **reduced** them 187 → 9 and
+eliminated all 295
 degenerate triangles. It did not introduce these; it inherited and substantially
 cleaned them. Manifold guarantees a valid manifold result, not a
 self-intersection-free one when handed a degenerate input — which is what
@@ -382,7 +418,8 @@ false positives. The numbers in this document are post-fix.
    boolean fails; and `soupToManifold` builds unindexed meshes, making
    conversion 4× the cost of the boolean at 32k triangles.
 6. **Input quality is the binding constraint, not the kernel.** The only outright
-   failure was a production part with 1,406 open edges. CSG will need a real
-   repair/weld stage in front of it for scanned or imported geometry — the one
-   currently there is safe but cannot close anything, and a working tolerance
-   for this part demonstrably exists.
+   failure was a production part that is **actually watertight** — it was the
+   weld in front of the kernel that failed it, not a hole. CSG needs a real
+   clustering weld ahead of it for scanned or imported geometry; the clustering
+   weld that `sculpt1` already landed in `app-sculpt.js` closes this part
+   cleanly, while the grid-snap rule both booleans still use cannot.
