@@ -3,7 +3,7 @@
    outer faces, Full wrap on, one Soften, grades #status.
    Pull the plug deletes this file with the rest of cth/. */
 
-import { gradeNestSoftenStatus } from './nest-status-grade.js?v=cth13';
+import { gradeNestSoftenStatus } from './nest-status-grade.js?v=cth14';
 
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
@@ -81,41 +81,66 @@ function selectModel(m) {
   if (window.state) window.state.editId = m.id;
 }
 
-function paintSixOuter(m) {
+/* Exported so tools/cth-test drives this exact function rather than a copy of
+   its maths - the copy is what let the n[0] bug sit unnoticed. */
+export function paintSixOuter(m) {
   var p = placed().find(function (x) { return x && x.sourceId === m.id && x.mesh; });
   if (!p || !p.mesh || !p.mesh.geometry) throw new Error('no mesh to paint');
-  var pos = p.mesh.geometry.attributes.position;
-  var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-  for (var v = 0; v < pos.count; v++) {
-    var q = [pos.getX(v), pos.getY(v), pos.getZ(v)];
+  if (!m.rawTris || !m.rawTris.length) throw new Error('piece has no raw soup to paint');
+
+  /* Two boxes, each read from the thing that actually owns it.
+
+     The wrap reads the RAW soup, so the plane offset d is measured there. The
+     yellow overlay reads the DISPLAY geometry, so dispPlane is measured there.
+     Deriving one from the other is what this used to do, and it cannot work:
+     handleFiles runs geometry.center() on the display copy (app-core.js:740),
+     so the display box is the raw box rotated AND shifted by m.centerOffset.
+     A display value used as a raw plane is only ever right for a piece that
+     happens to sit on the origin - which the shipped fixture does, which is
+     why nothing caught it. */
+  var rlo = [Infinity, Infinity, Infinity], rhi = [-Infinity, -Infinity, -Infinity];
+  for (var i = 0; i + 2 < m.rawTris.length; i += 3) {
     for (var k = 0; k < 3; k++) {
-      if (q[k] < lo[k]) lo[k] = q[k];
-      if (q[k] > hi[k]) hi[k] = q[k];
+      var c = m.rawTris[i + k];
+      if (c < rlo[k]) rlo[k] = c;
+      if (c > rhi[k]) rhi[k] = c;
     }
   }
-  // display X = raw X (0), display Y = raw Z (2), display Z = raw -Y (1)
-  var rawOf = [0, 2, 1];
+  var pos = p.mesh.geometry.attributes.position;
+  var dlo = [Infinity, Infinity, Infinity], dhi = [-Infinity, -Infinity, -Infinity];
+  for (var v = 0; v < pos.count; v++) {
+    var q = [pos.getX(v), pos.getY(v), pos.getZ(v)];
+    for (var j = 0; j < 3; j++) {
+      if (q[j] < dlo[j]) dlo[j] = q[j];
+      if (q[j] > dhi[j]) dhi[j] = q[j];
+    }
+  }
+
+  /* zUpToYUp is rotateX(-90): display X = raw X, display Y = raw Z, and
+     display Z = raw -Y. RAW_OF names the raw axis behind each display axis;
+     RAW_SIGN carries the flip on that third one, which the old code stated in
+     a comment and then dropped - so the display Z MIN face was filed as the
+     raw Y MIN face when it is the raw Y MAX face. */
+  var RAW_OF = [0, 2, 1];
+  var RAW_SIGN = [1, 1, -1];
+
   var snap = [];
   for (var a = 0; a < 3; a++) {
-    var axis = rawOf[a];
-    snap.push({
-      n: [axis === 0 ? -1 : 0, axis === 1 ? -1 : 0, axis === 2 ? -1 : 0],
-      d: 0, axisIdx: axis, keepMin: true, inner: false,
-      dispAxis: a, dispSign: -1, dispPlane: lo[a]
-    });
-    snap.push({
-      n: [axis === 0 ? 1 : 0, axis === 1 ? 1 : 0, axis === 2 ? 1 : 0],
-      d: 0, axisIdx: axis, keepMin: false, inner: false,
-      dispAxis: a, dispSign: 1, dispPlane: hi[a]
-    });
-  }
-  // d is the raw-space plane offset the mask contract stores: n . p = d, i.e.
-  // d = keepMin ? -at : at. The +/-1 of n lives at e.axisIdx, not at index 0 -
-  // reading n[0] here zeroed d on every face whose raw axis is not X, and
-  // brickSkipLists then refused the wrap with "the Z- face at 0.00 is gone".
-  for (var i = 0; i < snap.length; i++) {
-    var e = snap[i];
-    e.d = e.n[e.axisIdx] * (e.keepMin ? lo[e.dispAxis] : hi[e.dispAxis]);
+    for (var s = 0; s < 2; s++) {
+      var dispSign = s ? 1 : -1;                    // which display half
+      var axis = RAW_OF[a];
+      var rawSign = dispSign * RAW_SIGN[a];         // the raw half it really is
+      var keepMin = rawSign < 0;
+      var at = keepMin ? rlo[axis] : rhi[axis];     // the raw plane, from raw
+      var n = [0, 0, 0];
+      n[axis] = rawSign;
+      snap.push({
+        n: n, d: n[axis] * at,                      // the contract: n . p = d
+        axisIdx: axis, keepMin: keepMin, inner: false,
+        dispAxis: a, dispSign: dispSign,
+        dispPlane: dispSign < 0 ? dlo[a] : dhi[a]   // the plane, from display
+      });
+    }
   }
   if (typeof window.nsoMaskRestore !== 'function') throw new Error('paint API missing');
   window.nsoMaskRestore(m, snap);

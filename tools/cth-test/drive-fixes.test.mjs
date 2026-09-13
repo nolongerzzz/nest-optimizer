@@ -53,29 +53,33 @@ const rawHasPlane = (axis, keepMin, at) => {
   return !!s && [...s].some((p) => Math.abs(p - at) < FACE_PICK_TOL);
 };
 
-/* ---- paintSixOuter, both the old line and the fixed one ---- */
-// display X = raw X (0), display Y = raw Z (2), display Z = raw -Y (1)
-function buildSnap(dlo, dhi, dFormula) {
-  const rawOf = [0, 2, 1];
-  const snap = [];
-  for (let a = 0; a < 3; a++) {
-    const axis = rawOf[a];
-    const mk = (keepMin) => ({
-      n: [0, 1, 2].map((k) => (k === axis ? (keepMin ? -1 : 1) : 0)),
-      d: 0, axisIdx: axis, keepMin, inner: false,
-      dispAxis: a, dispSign: keepMin ? -1 : 1, dispPlane: keepMin ? dlo[a] : dhi[a],
-    });
-    snap.push(mk(true), mk(false));
-  }
-  for (const e of snap) e.d = dFormula(e, dlo, dhi);
-  return snap;
-}
-const OLD = (e, dlo, dhi) => e.n[0] * (e.keepMin ? dlo[e.dispAxis] : dhi[e.dispAxis]);
-const NEW = (e, dlo, dhi) => e.n[e.axisIdx] * (e.keepMin ? dlo[e.dispAxis] : dhi[e.dispAxis]);
+/* ---- paintSixOuter, the real exported function, on the real fixture ----
+   The local copy of this maths that used to live here is gone on purpose: a
+   copy is what let the n[0] bug sit unnoticed while a test agreed with it.
+   tools/cth-test/paint-six-outer.test.mjs covers the raw/display split in
+   detail; this file only asks the narrower question the drive depends on -
+   do all six painted faces land on the hull of THIS fixture, so the wrap is
+   not refused. */
+const ROT = (r) => [r[0], r[2], -r[1]];                  // zUpToYUp: rotateX(-90)
+const corners = [];
+for (const x of [lo[0], hi[0]])
+  for (const y of [lo[1], hi[1]])
+    for (const z of [lo[2], hi[2]]) corners.push([x, y, z]);
+const rot = corners.map(ROT);
+const dCtr = [0, 1, 2].map((k) => (Math.min(...rot.map((p) => p[k])) + Math.max(...rot.map((p) => p[k]))) / 2);
+const disp = rot.map((p) => p.map((v, k) => v - dCtr[k]));   // geometry.center()
 
-// display bbox after zUpToYUp + geometry.center(): X=rawX, Y=rawZ, Z=-rawY,
-// and this fixture is already centred on the origin.
-const dlo = [lo[0], lo[2], -hi[1]], dhi = [hi[0], hi[2], -lo[1]];
+const model = { id: 1, name: 'CTH_fixture.stl', rawAxis: 'zup',
+                rawTris: new Float32Array(corners.flat()), faceMask: { exclude: [] } };
+globalThis.window = {
+  state: { models: [model], placed: [{ sourceId: 1, mesh: { geometry: { attributes: { position: {
+    count: disp.length,
+    getX: (i) => disp[i][0], getY: (i) => disp[i][1], getZ: (i) => disp[i][2],
+  } } } } }] },
+  nsoMaskRestore: (m, snap) => { m.faceMask = { exclude: snap }; },
+  nsoMaskCount: (m) => m.faceMask.exclude.length,
+};
+const { paintSixOuter } = await import('../../cth/nest-paint-soften-drive.js');
 
 /* brickSkipLists' verdict for one painted entry (app-finish.js:3235). */
 const brick = { lo: [...lo], hi: [...hi] };
@@ -88,30 +92,21 @@ function entryLands(e) {
   return rawHasPlane(e.axisIdx, e.keepMin, at) ? 'pocket' : 'bad';
 }
 
-console.log('\nfixture library/CTH_fixture.stl  tris=' + nTri +
-            '  raw bbox [' + lo.map((v) => v.toFixed(1)) + '] .. [' + hi.map((v) => v.toFixed(1)) + ']');
+console.log('\npaintSixOuter on the shipped fixture');
+const n = paintSixOuter(model);
+const snap = model.faceMask.exclude;
+ok('paints six faces', n === 6 && snap.length === 6, 'n=' + n);
+ok('no entry has d === 0  (the n[0] bug zeroed four)',
+   snap.every((e) => e.d !== 0), snap.map((e) => e.d).join(','));
+ok('brickSkipLists lands all six on the hull - the wrap is not refused',
+   snap.every((e) => entryLands(e) === 'hull'), snap.map(entryLands).join(','));
+ok('no entry is rejected as a plane the soup does not carry',
+   !snap.some((e) => entryLands(e) === 'bad'));
 
-console.log('\npaintSixOuter - plane offsets');
-const before = buildSnap(dlo, dhi, OLD);
-const after = buildSnap(dlo, dhi, NEW);
-ok('old line zeroed d on 4 of 6 faces (the bug)',
-   before.filter((e) => e.d === 0).length === 4,
-   'zeros=' + before.filter((e) => e.d === 0).length);
-ok('old line: brickSkipLists rejects at least one face',
-   before.some((e) => entryLands(e) === 'bad'),
-   before.map(entryLands).join(','));
-ok('fixed line: no entry has d === 0',
-   after.every((e) => e.d !== 0),
-   after.map((e) => e.d).join(','));
-ok('fixed line: all six land on the hull',
-   after.every((e) => entryLands(e) === 'hull'),
-   after.map(entryLands).join(','));
-for (const e of after) {
-  const at = e.keepMin ? -e.d : e.d;
-  const want = e.keepMin ? lo[e.axisIdx] : hi[e.axisIdx];
-  ok('  raw axis ' + e.axisIdx + (e.keepMin ? '-' : '+') + ' plane ' + at.toFixed(2),
-     Math.abs(at - want) < 1e-6, 'wanted ' + want);
-}
+// the shape of the old failure, kept as a regression note: an entry claiming
+// plane 0.00 is exactly what brickSkipLists refuses on this piece.
+ok('a d === 0 entry would still be refused (what the old code produced)',
+   entryLands({ axisIdx: 2, keepMin: true, d: 0 }) === 'bad');
 
 /* ---- the grade rule, on the real Nest status lines ---- */
 console.log('\ngrade rule - real Nest #status strings');
