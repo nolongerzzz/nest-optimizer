@@ -1,0 +1,18 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>NSO CSG bench</title>
+<!--
+  Deliberately mirrors index.html's loading model: CLASSIC <script> tags,
+  no type="module", no bundler, no import map. The only module-ish thing in
+  the page is the dynamic import() that lives inside the NSO_CSG adapter
+  itself, which is exactly what has to be proven to work here.
+
+  The adapter is not retyped: run.js splices the real NSO_CSG source out of
+  app-join.js and serves it as adapter.js, so this page exercises shipped
+  code, not a copy of it.
+-->
+<body>
+<pre id="log">booting…</pre>
+<script src="/adapter.js"></script>
+<script src="/tools/csg_bench/bench.js"></script>
+</body>
