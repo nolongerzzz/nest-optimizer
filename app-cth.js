@@ -89,13 +89,18 @@ async function boot() {
       title: mode === 'drive' ? 'Nest paint-soften drive' : (mode === 'finish' ? 'Nest finish first batch' : 'Nest plate first batch')
     });
     if (mode === 'drive') {
-      const drive = await import('./cth/nest-paint-soften-drive.js?v=cth11');
-      const grade = await import('./cth/grade.js?v=cth11');
-      drive.mountNestDrive({ gradeHit: grade.gradeHit, overlay: window.__CTH_OVERLAY__ });
+      try {
+        const drive = await import('./cth/nest-paint-soften-drive.js?v=cth11');
+        const grade = await import('./cth/grade.js?v=cth11');
+        drive.mountNestDrive({ gradeHit: grade.gradeHit, overlay: window.__CTH_OVERLAY__ });
+      } catch (derr) {
+        console.error('[cth-drive]', derr);
+        banner('CTH on — drive script not on this deploy yet', true);
+      }
     }
     const fb = document.getElementById('cth-fallback');
-    if (fb && window.__CTH_OVERLAY__) fb.remove();
-    else banner('CTH on');
+    if (fb && window.__CTH_OVERLAY__ && mode !== 'drive') fb.remove();
+    else if (mode !== 'drive') banner('CTH on');
   } catch (err) {
     console.error('[cth]', err);
     banner('CTH mount failed: ' + (err && err.message ? err.message : String(err)), true);
