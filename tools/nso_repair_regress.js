@@ -4,9 +4,8 @@
  *   node tools/nso_repair_regress.js              # run everything
  *   node tools/nso_repair_regress.js -v           # print every checked value
  *   node tools/nso_repair_regress.js --skip-missing
- *                                                 # do not fail on fixtures that
- *                                                 # are not in the tree (see the
- *                                                 # thingi10k note below)
+ *                                                 # treat an absent fixture as a
+ *                                                 # pass instead of exit 2
  *
  * Exit code 0 only if every expectation matched. Any drift prints the case, the
  * key, expected vs actual, and exits 1. These numbers are the contract: if a
@@ -46,7 +45,7 @@ function observe(raw, result) {
     'gate.selfIntBefore': r.gate.selfIntBefore,
     'gate.selfIntAfter': r.gate.selfIntAfter
   };
-  for (const side of ['before', 'after']) {
+  for (const side of ['before', 'after', 'rejected']) {
     if (!r[side]) continue;
     for (const k of Object.keys(r[side])) flat[side + '.' + k] = r[side][k];
   }
@@ -222,51 +221,115 @@ const REPO = [
 ];
 
 /* ------------------------------------------------------------------ *
- * Thingi10K cases.
+ * Thingi10K cases. All three MEASURED against this module on the real files.
  *
- * These three files are NOT in the repo. Outbound network in the build
- * environment is restricted to a short allowlist and thingiverse.com is not on
- * it, so they could not be fetched — see docs/NSO_Repair.md "Thingi10K
- * fixtures". The expectations below are transcribed from the ticket and have
- * NOT been verified against this implementation; they are marked provisional
- * and the runner says so rather than reporting a pass it did not earn.
+ * Two of the three expectations originally transcribed from the ticket did not
+ * survive contact with the data. What the files actually are:
  *
- * Drop 40921.stl / 37825.stl / 39644.stl into fixtures/repair/thingi10k/ and
- * these run with no other change.
+ *   40921 is NOT a clean baseline. It is two shells meeting at 17 bowtie
+ *   vertices, and the proof is arithmetic: Euler characteristic V-E+F is -13
+ *   as it stands, and an odd characteristic is impossible for any closed
+ *   orientable surface. Splitting the 17 bowties gives exactly 4 = two spheres,
+ *   and takes self-intersections from 5 to 0. The ticket's "clean, watertight"
+ *   reading comes from an edge-based check - the repo's own
+ *   tools/stl_watertight_check.py calls this file OK - and an edge count cannot
+ *   see a vertex pinch. So this is a repair case, not a no-op case.
+ *
+ *   37825 and 39644 decline, exactly as the ticket says, though 39644 is
+ *   stopped by the odd-edge gate rather than the self-intersection gate. See
+ *   docs/NSO_Repair.md for why the 0->9 figure is not reproduced.
  * ------------------------------------------------------------------ */
 const THINGI_CASES = [
   {
-    name: 'thingi10k 40921 — clean baseline, must be a no-op',
+    /* Two shells joined at 17 bowtie vertices. The repair separates them and
+     * the result is two clean spheres: 186 triangles in, 186 out, 17 new
+     * vertices, self-intersections 5 -> 0. Volume moves 0.19% because each of
+     * the 34 vertex copies is nudged off the contact point; that is the cost of
+     * the separation, not an error. */
+    name: 'thingi10k 40921 — two shells at 17 bowties, separated',
     file: path.join(THINGI, '40921.stl'),
-    provisional: true,
     expect: {
-      'ok': true, 'applied': false, 'unchanged': true,
-      'before.watertight': true, 'after.watertight': true,
-      'counts.tJunctionSplits': 0, 'counts.weldedNear': 0,
-      'counts.degenerateRemoved': 0, 'counts.exactDuplicatesRemoved': 0,
-      'counts.reversedDuplicatesRemoved': 0, 'counts.flapTrisRemoved': 0,
-      'counts.holesFilled': 0, 'counts.pinchVertsSplit': 0,
-      'triDelta': 0, 'volumeDelta': approx(0, 1e-9)
+      'ok': true, 'applied': true, 'declined': false, 'unchanged': false,
+      'before.tris': 186, 'before.verts': 80, 'before.oddEdges': 0,
+      'before.watertight': true, 'before.components': 2,
+      'before.pinchVerts': 17, 'before.selfIntersections': 5,
+      'before.volume': approx(9551.05247151165, 1e-9),
+      'after.tris': 186, 'after.verts': 97, 'after.oddEdges': 0,
+      'after.watertight': true, 'after.components': 2,
+      'after.pinchVerts': 0, 'after.selfIntersections': 0,
+      'after.volume': approx(9371.584480469384, 1e-9),
+      'counts.pinchVertsSplit': 17, 'counts.holesFilled': 0,
+      'counts.tJunctionSplits': 0, 'counts.degenerateRemoved': 0,
+      'gate.blocked': '',
+      'triDelta': 0, 'volumeDelta': approx(-179.46799104226557, 1e-9)
+    },
+    /* Euler characteristic is the whole argument for this case, so assert it
+     * rather than leaving it in a comment. Also assert the repair settles:
+     * a second pass must find nothing. */
+    extra(raw, result) {
+      const b = R.inspect(raw, { selfIntersections: false });
+      const a = R.inspect(result.rawTris, { selfIntersections: false });
+      const second = R.commit(result.rawTris);
+      return {
+        'euler.before': b.verts - b.uniqueEdges + b.tris,
+        'euler.after': a.verts - a.uniqueEdges + a.tris,
+        'idempotent.applied': second.report.applied,
+        'idempotent.unchanged': second.rawTris === result.rawTris
+      };
+    },
+    expectExtra: {
+      'euler.before': -13,   // odd: impossible for a closed orientable surface
+      'euler.after': 4,      // two spheres
+      'idempotent.applied': false,
+      'idempotent.unchanged': true
     }
   },
   {
+    /* One sheet touching itself along a single 4-use edge. Separating it opens
+     * a slit, and the only way to close that slit is to bridge a neck at a
+     * width nobody specified — 0.1 mm here, straight out of NUDGE_FRAC. Hole
+     * fill refuses to close a seam this repair opened itself, the slit stays
+     * open, and the odd-edge gate then discards the whole thing. Declining is
+     * the correct result: see docs/NSO_Repair.md "37825". */
     name: 'thingi10k 37825 — self-touching single sheet, out of scope, declines',
     file: path.join(THINGI, '37825.stl'),
-    provisional: true,
     expect: {
-      'ok': true, 'applied': false, 'unchanged': true, 'triDelta': 0,
-      'volumeDelta': approx(0, 1e-9)
+      'ok': true, 'applied': false, 'declined': true, 'unchanged': true,
+      'before.tris': 162, 'before.nonManifoldEdges': 1, 'before.oddEdges': 1,
+      'before.components': 1, 'before.pinchVerts': 2,
+      'before.selfIntersections': 0,
+      'before.volume': approx(30322.464647864635, 1e-9),
+      // after === before: the caller gets the input back untouched
+      'after.tris': 162, 'after.oddEdges': 1, 'after.pinchVerts': 2,
+      'after.volume': approx(30322.464647864635, 1e-9),
+      // what was thrown away: the slit, 1 open loop, 4 odd edges
+      'rejected.oddEdges': 4, 'rejected.openEdges': 4,
+      'rejected.boundaryLoops': 1, 'rejected.components': 1,
+      'gate.blocked': 'final:oddEdges',
+      'triDelta': 0, 'volumeDelta': approx(0, 1e-12)
     }
   },
   {
-    name: 'thingi10k 39644 — 3-sheet closed solid, gate blocks 0->9',
+    /* A closed solid with an internal partition wall attached along a 30x30
+     * rectangle of 4 three-use edges — the "3-sheet closed solid". Separating
+     * the sheets detaches the wall, which takes one solid to three and opens 8
+     * odd edges. The gate discards it and the file is returned untouched. */
+    name: 'thingi10k 39644 — 3-sheet closed solid, gate blocks, file unchanged',
     file: path.join(THINGI, '39644.stl'),
-    provisional: true,
     expect: {
-      'ok': true, 'applied': false, 'unchanged': true,
-      'gate.selfIntBefore': 0,
-      'gate.blocked': 'pinch-separate:selfInt 0->9',
-      'triDelta': 0, 'volumeDelta': approx(0, 1e-9)
+      'ok': true, 'applied': false, 'declined': true, 'unchanged': true,
+      'before.tris': 290, 'before.nonManifoldEdges': 4, 'before.oddEdges': 4,
+      'before.components': 1, 'before.pinchVerts': 4,
+      'before.selfIntersections': 0,
+      'before.volume': approx(26322.32738959441, 1e-9),
+      'after.tris': 290, 'after.oddEdges': 4, 'after.components': 1,
+      'after.volume': approx(26322.32738959441, 1e-9),
+      // what was thrown away: one solid taken to three, 8 odd edges,
+      // and 7.1% of the volume with it
+      'rejected.components': 3, 'rejected.oddEdges': 8,
+      'rejected.openEdges': 8, 'rejected.tris': 292,
+      'gate.blocked': 'final:oddEdges',
+      'triDelta': 0, 'volumeDelta': approx(0, 1e-12)
     }
   }
 ];
@@ -391,7 +454,6 @@ const FAILSAFE = [
 let failures = [];
 let missing = [];
 let passed = 0;
-let provisionalSkipped = 0;
 
 function cmp(caseName, actual, expected) {
   const bad = [];
@@ -425,22 +487,9 @@ function cmp(caseName, actual, expected) {
 function runFixtureCase(c) {
   const file = path.isAbsolute(c.file) ? c.file : path.join(FX, c.file);
   if (!fs.existsSync(file)) {
-    const label = c.name + '  [file not in tree: ' + path.relative(ROOT, file) + ']';
-    if (c.provisional) {
-      provisionalSkipped++;
-      console.log('  MISS  ' + label);
-      console.log('        expectations are transcribed from the ticket and unverified;');
-      console.log('        drop the file in and this case runs as written.');
-    } else {
-      console.log('  MISS  ' + label);
-    }
+    console.log('  MISS  ' + c.name + '  [file not in tree: ' + path.relative(ROOT, file) + ']');
     missing.push(path.relative(ROOT, file));
     return;
-  }
-  if (c.provisional) {
-    console.log('  note  ' + c.name + ' — expectations are PROVISIONAL (from the ticket,');
-    console.log('        never yet run against this module). A failure here may mean the');
-    console.log('        module is wrong OR that the transcribed number is.');
   }
   const raw = readSTL(file);
   const result = R.commit(raw);

@@ -226,9 +226,21 @@
     return { comp: comp, groups: groups };
   }
 
-  /* Vertices whose incident triangle fan falls into more than one edge-connected
-   * group — bowtie / pinch points where two otherwise separate sheets meet. */
-  function pinchVertices(m) {
+  /* Vertices whose incident triangle fan falls into more than one group — the
+   * places where two or more otherwise separate sheets meet at a point.
+   *
+   * This catches both shapes of pinch, because both come out as a split fan:
+   *
+   *   bowtie vertex — two sheets touching at one point and sharing no edge at
+   *   all, so the fans were never connected in the first place.
+   *
+   *   non-manifold edge — three or more faces along one edge. The fan at each
+   *   endpoint is split because fanGroups refuses to join faces across such an
+   *   edge (see there). Splitting every vertex along the run separates the
+   *   sheets coherently: each sheet keeps its own copy of both endpoints, so
+   *   the edge between those copies ends up used by that sheet alone. */
+  function pinchVertices(m, edges) {
+    if (!edges) edges = buildEdges(m);
     var nf = faceCount(m);
     var incident = Object.create(null);
     for (var f = 0; f < nf; f++) {
@@ -242,15 +254,23 @@
     for (var vs in incident) {
       var v0 = +vs, fs = incident[v0];
       if (fs.length < 2) continue;
-      var groups = fanGroups(m, v0, fs);
+      var groups = fanGroups(m, v0, fs, edges);
       if (groups.length > 1) out.push({ v: v0, faces: fs, groups: groups });
     }
     return out;
   }
 
   /* Partition the faces around vertex v into fans: two faces are in the same fan
-   * when they share an edge that has v as an endpoint. */
-  function fanGroups(m, v, fs) {
+   * when they share an edge that has v as an endpoint AND that edge is
+   * manifold.
+   *
+   * The manifold qualifier is what makes a non-manifold edge visible here. An
+   * edge used by three or more faces does not join those faces into one
+   * surface — it is the seam where separate sheets happen to coincide — so
+   * treating it as a connection would merge every sheet into a single fan and
+   * hide the defect. A boundary edge needs no special case: it has exactly one
+   * face, so there is nothing for it to join. */
+  function fanGroups(m, v, fs, edges) {
     var index = Object.create(null);
     for (var i = 0; i < fs.length; i++) index[fs[i]] = i;
     var parent = new Array(fs.length);
@@ -266,6 +286,8 @@
       if (a === v) { others.push(b, c); } else if (b === v) { others.push(c, a); } else { others.push(a, b); }
       for (var o = 0; o < others.length; o++) {
         var key = others[o];
+        var rec = edges[ekey(v, key)];
+        if (rec && rec.count > 2) continue; // seam, not a connection
         if (!spoke[key]) spoke[key] = [];
         spoke[key].push(i);
       }
@@ -558,7 +580,7 @@
       degenerateTris: degenerate,
       components: comp.groups.length,
       boundaryLoops: boundaryLoops(m, edges).length,
-      pinchVerts: pinchVertices(m).length,
+      pinchVerts: pinchVertices(m, edges).length,
       volume: signedVolume(m),
       area: surfaceArea(m),
       watertight: (open + nonmanifold) === 0
@@ -881,12 +903,34 @@
    * Stage: hole fill
    * ------------------------------------------------------------------ */
 
-  function fillHoles(m) {
+  /* `inputVertexCount` is the vertex count of the mesh as it arrived. Any loop
+   * touching a vertex created since then was opened by an earlier stage of this
+   * same repair — pinch separation is the only stage that adds vertices — and
+   * closing it would be bridging our own seam, not filling a hole in the model.
+   *
+   * That distinction is the whole difference between repairing a mesh and
+   * reshaping it. A sheet that touches itself along an edge gets separated by
+   * the nudge and leaves a slit the width of the nudge; capping that slit
+   * yields a watertight mesh with a neck whose width came from NUDGE_FRAC
+   * rather than from the model. On Thingi10K 37825 that neck measures 0.1 mm
+   * across — well under any nozzle, and invented. Refusing here leaves the slit
+   * open, which the final odd-edge gate then sees, so the whole repair is
+   * discarded and the file is returned untouched. Bridging a neck properly
+   * means re-triangulating the neighbourhood at a chosen width; that is a
+   * different operation and a different module. */
+  function fillHoles(m, inputVertexCount) {
     var edges = buildEdges(m);
     var loops = boundaryLoops(m, edges);
-    var filled = 0, added = 0, skipped = 0;
+    var filled = 0, added = 0, skipped = 0, selfMade = 0;
     for (var i = 0; i < loops.length; i++) {
       var loop = loops[i];
+      if (inputVertexCount != null) {
+        var ours = false;
+        for (var n = 0; n < loop.length; n++) {
+          if (loop[n] >= inputVertexCount) { ours = true; break; }
+        }
+        if (ours) { selfMade++; continue; }
+      }
       if (loop.length > MAX_HOLE_EDGES) { skipped++; continue; }
       // Patch is wound opposite to the boundary walk.
       var rev = [loop[0]];
@@ -897,7 +941,7 @@
       }
       filled++;
     }
-    return { filled: filled, added: added, skipped: skipped };
+    return { filled: filled, added: added, skipped: skipped, selfMade: selfMade };
   }
 
   /* ------------------------------------------------------------------ *
@@ -1022,6 +1066,7 @@
       gate: { blockedStages: [], selfIntBefore: 0, selfIntAfter: 0, oddBefore: 0, oddAfter: 0 },
       before: null,
       after: null,
+      rejected: null,
       triDelta: 0,
       volumeDelta: 0,
       volumeDeltaRel: 0
@@ -1066,6 +1111,10 @@
        * welded mesh: it is the same surface, and every later count is relative
        * to it. The soup's own triangle count is kept for the no-op check. */
       var inputTriCount = rawTris.length / 9;
+      /* Vertex count as the mesh arrived, before any stage could add to it.
+       * hole-fill uses it to tell a hole in the model from a seam we opened
+       * ourselves. */
+      var inputVertexCount = mesh.pos.length / 3;
 
       var stageLog = report.stages;
 
@@ -1156,44 +1205,65 @@
 
       if (opts.fillHoles !== false) {
         tryStage('hole-fill', function (trial) {
-          var r = fillHoles(trial);
-          if (!r.filled) return { changed: false, info: { filled: 0, skipped: r.skipped } };
+          var r = fillHoles(trial, inputVertexCount);
+          if (!r.filled) {
+            return { changed: false, info: { filled: 0, skipped: r.skipped, selfMade: r.selfMade } };
+          }
           return {
             changed: true,
             counts: { holesFilled: r.filled, holeTrisAdded: r.added },
-            info: { filled: r.filled, added: r.added, skipped: r.skipped }
+            info: { filled: r.filled, added: r.added, skipped: r.skipped, selfMade: r.selfMade }
           };
         });
       }
 
       // --- final gate ------------------------------------------------------
-      report.after = analyze(mesh);
-      report.gate.selfIntAfter = report.after.selfIntersections;
-      report.gate.oddAfter = report.after.oddEdges;
-      report.triDelta = report.after.tris - inputTriCount;
-      report.volumeDelta = report.after.volume - report.before.volume;
-      report.volumeDeltaRel = report.before.volume !== 0
-        ? report.volumeDelta / Math.abs(report.before.volume) : 0;
+      var finalMetrics = analyze(mesh);
+      report.gate.selfIntAfter = finalMetrics.selfIntersections;
+      report.gate.oddAfter = finalMetrics.oddEdges;
 
-      if (report.after.tris === 0) {
+      /* `after` always describes the mesh the caller actually receives. When the
+       * gate rejects the repair the caller receives the INPUT, so `after` is
+       * `before` and both deltas are zero; the measurements of the mesh that was
+       * thrown away go to `rejected`, where they are useful for working out why
+       * without ever being mistaken for the result. */
+      function settle(applied) {
+        if (applied) {
+          report.after = finalMetrics;
+          report.triDelta = finalMetrics.tris - inputTriCount;
+          report.volumeDelta = finalMetrics.volume - report.before.volume;
+        } else {
+          report.after = report.before;
+          report.rejected = finalMetrics;
+          report.triDelta = 0;
+          report.volumeDelta = 0;
+        }
+        report.volumeDeltaRel = report.before.volume !== 0
+          ? report.volumeDelta / Math.abs(report.before.volume) : 0;
+      }
+
+      if (finalMetrics.tris === 0) {
         report.declined = true;
         report.reason = 'repair emptied the mesh';
+        settle(false);
         return { rawTris: rawTris, report: report, ok: true };
       }
 
       if (gateOn) {
-        if (report.after.selfIntersections > report.gate.selfIntBefore + maxIncrease) {
+        if (finalMetrics.selfIntersections > report.gate.selfIntBefore + maxIncrease) {
           report.declined = true;
           report.reason = 'final gate: self-intersections ' + report.gate.selfIntBefore +
-                          ' -> ' + report.after.selfIntersections;
+                          ' -> ' + finalMetrics.selfIntersections;
           report.gate.blockedStages.push('final:selfInt');
+          settle(false);
           return { rawTris: rawTris, report: report, ok: true };
         }
-        if (report.after.oddEdges > report.before.oddEdges) {
+        if (finalMetrics.oddEdges > report.before.oddEdges) {
           report.declined = true;
           report.reason = 'final gate: odd edges ' + report.before.oddEdges +
-                          ' -> ' + report.after.oddEdges;
+                          ' -> ' + finalMetrics.oddEdges;
           report.gate.blockedStages.push('final:oddEdges');
+          settle(false);
           return { rawTris: rawTris, report: report, ok: true };
         }
       }
@@ -1217,9 +1287,11 @@
           ? 'nothing applied (gate blocked: ' + report.gate.blockedStages.join(', ') + ')'
           : 'nothing to repair';
         report.declined = report.gate.blockedStages.length > 0;
+        settle(false);
         return { rawTris: rawTris, report: report, ok: true };
       }
 
+      settle(true);
       report.applied = true;
       report.reason = report.gate.blockedStages.length
         ? 'applied, with gate blocks: ' + report.gate.blockedStages.join(', ')

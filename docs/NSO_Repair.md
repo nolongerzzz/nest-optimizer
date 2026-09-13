@@ -27,7 +27,8 @@ node tools/nso_repair_regress.js          # exit 0 = every number still matches
 node tools/nso_repair_regress.js -v       # print every checked value
 ```
 
-Exit 1 on drift, exit 2 when a fixture is absent. The numbers it asserts are
+Exit 1 on drift, exit 2 when a fixture is absent. 22 cases, all measured
+against this module. The numbers it asserts are
 the contract. **If a change to this module moves one of them, that is the
 change asking to be looked at, not the test asking to be updated.**
 
@@ -43,12 +44,48 @@ the last three are applied to a throwaway copy and kept only if the gate passes.
 | duplicate faces | drops repeated copies of a face, keeping the one whose winding agrees with the surrounding shell |
 | flap peel | iteratively drops triangles with two or more edges that belong to nobody, then drops small open components sitting next to a closed shell |
 | T-junction *(gated)* | splits a triangle whose edge interior carries another vertex, corner-to-point so no sliver is produced |
-| pinch separation *(gated)* | splits a vertex where two or more sheets meet and nudges each copy back into its own shell |
-| hole fill *(gated)* | fans a boundary loop shut, wound to match the shell |
+| pinch separation *(gated)* | splits a vertex where two or more sheets meet and nudges each copy back into its own shell. Covers both bowtie vertices and non-manifold edges |
+| hole fill *(gated)* | fans a boundary loop shut, wound to match the shell — but only a loop that was in the input, never a seam this repair opened itself |
 
 Peeling is bounded: never more than 10% of the triangle budget, never more than
 16 rounds. Hole fill refuses any loop longer than 64 edges — a loop that long
 is missing geometry, not a hole, and fanning it is a guess.
+
+## Two kinds of pinch, one mechanism
+
+A **bowtie vertex** is two sheets touching at a point and sharing no edge. A
+**non-manifold edge** is three or more faces along one edge. Both surface as a
+split vertex fan, so one stage handles both: the fan grouping joins two faces
+only across a *manifold* edge. An edge used by three or more faces is the seam
+where separate sheets coincide, not a connection, and treating it as one would
+merge every sheet into a single fan and hide the defect.
+
+Splitting every vertex along a non-manifold run separates the sheets coherently
+— each sheet keeps its own copy of both endpoints, so the edge between those
+copies ends up used by that sheet alone.
+
+## Hole fill will not close a seam the repair opened
+
+Pinch separation is the only stage that adds vertices, so a boundary loop
+touching a vertex that did not exist in the input was opened by this repair, and
+closing it would be bridging our own seam rather than filling a hole in the
+model.
+
+That distinction is the difference between repairing a mesh and reshaping it. A
+sheet touching itself gets separated by the nudge and leaves a slit the width of
+the nudge; capping that slit gives a watertight mesh with a neck whose width came
+from `NUDGE_FRAC` rather than from the model. On 37825 that neck measures **0.1
+mm** across — under any nozzle, and invented. Refusing leaves the slit open,
+which the final odd-edge gate then sees, so the whole repair is discarded and
+the file returned untouched.
+
+## What `report.after` means
+
+`after` always describes the mesh the caller actually receives. When the gate
+rejects a repair the caller receives the **input**, so `after` equals `before`
+and both deltas are zero. The measurements of the mesh that was thrown away go
+to `report.rejected`, where they explain the refusal without ever being mistaken
+for the result.
 
 ## Why the pinch stage is gated
 
@@ -83,41 +120,60 @@ discarded and the input is returned.
 
 ## Known limits
 
+### 40921 — specified as a clean baseline; it is not one
+
+Recorded here because the correction matters more than the case does.
+
+40921 was specified as a clean, watertight no-op baseline, and the repo's own
+`tools/stl_watertight_check.py` agrees: `OK`, 0 odd edges. That check counts
+edges, and **an edge count cannot see a vertex pinch.**
+
+The arithmetic settles it. Euler characteristic `V - E + F` is
+`80 - 279 + 186 = -13`, and an odd characteristic is impossible for any closed
+orientable surface. The file is two shells meeting at 17 bowtie vertices.
+Splitting them gives `97 - 279 + 186 = 4` — exactly two spheres — and takes
+self-intersections from 5 to 0.
+
+So this is a repair case, not a no-op case, and the suite asserts the
+characteristic on both sides so the argument is itself regression-gated. It also
+asserts idempotency: a second pass must find nothing.
+
+The cost is 0.19% of volume (9551.05 -> 9371.58), from nudging the 34 vertex
+copies off the contact point. That is the price of separating the shells.
+
+`fixtures/box-20mm.stl` is the actual no-op baseline in the suite.
+
 ### 37825 — self-touching single sheet: OUT OF SCOPE
 
-Thingi10K 37825's defect is a single sheet touching itself, not two sheets
-meeting. There is no second fan to separate, so vertex splitting has nothing to
-work with. Fixing it needs local re-triangulation around the contact and
-bridging the neck that the contact forms — a different operation with a
-different failure surface.
+One sheet touching itself along a single 4-use edge. Separating it opens a slit,
+and the only way to close that slit is to bridge a neck at a width nobody
+specified — 0.1 mm here, straight out of `NUDGE_FRAC`. Hole fill refuses (see
+above), the slit stays open, and the odd-edge gate discards the repair: odd
+edges would go 1 -> 4.
 
-**That is a separate future module, not a gap in this one.** The correct result
-here is to decline, and declining is what the regression case asserts.
+Bridging a neck properly means re-triangulating the neighbourhood at a chosen
+width. **That is a separate future module, not a gap in this one.** Declining is
+the correct result and the suite asserts it.
 
-### 39644 — 3-sheet closed solid: correctly gated, not yet repaired
+### 39644 — 3-sheet closed solid: correctly gated, not repaired
 
-Thingi10K 39644 is a closed solid where three sheets meet. The pinch stage does
-generalise to more than two fans, but the nudge direction for each fan is
-derived from that fan alone, and with three fans the copies can be driven into
-one another. The gate catches it and the file is left unchanged.
+A closed solid with an internal partition wall attached along a 30x30 rectangle
+of four 3-use edges. Separating the sheets detaches the wall, which takes one
+solid to three, opens 8 odd edges and drops 7.1% of the volume. The gate
+discards it and the file is returned untouched.
 
-This is **correct behaviour, not a fix.** Making 39644 actually repairable needs
-a nudge that solves for all fans together rather than one at a time, and that
-work should not start without a dedicated 3-sheet closed-solid fixture to
-develop against — the synthetic set here has no such case, and 39644 itself is
-one sample, not a test.
+This is **correct behaviour, not a fix.** Repairing it properly means deciding
+what an internal partition *is* — weld it into the shell, delete it, or keep it
+and accept the non-manifold edge — and that decision is not one this module can
+make from the geometry alone. It should not start without a dedicated 3-sheet
+closed-solid fixture to develop against; 39644 is one sample, not a test.
 
-### The three Thingi10K fixtures are not in the tree
-
-They could not be fetched: outbound network in the build environment is
-allowlisted and `thingiverse.com` is not on it (`403` on `CONNECT`; every mirror
-tried was refused the same way). The three cases are wired into the runner but
-have **never been run**, their expectations are transcribed from the ticket
-rather than measured, and the runner labels them `PROVISIONAL` and exits
-non-zero. See `fixtures/repair/thingi10k/README.md`.
-
-The eight synthetic fixtures and the two repo meshes are the part of the suite
-that is actually earned — every number there was measured against this code.
+> The original specification expected 39644 to be stopped by the
+> **self-intersection** gate at 0 -> 9. It is stopped by the **odd-edge** gate
+> instead, at 4 -> 8: detaching the wall opens boundary rather than crossing
+> anything, so nothing ever self-intersects. The outcome the ticket asked for —
+> gate blocks, file left unchanged — holds exactly. The 0 -> 9 figure is not
+> reproduced and is recorded here as unconfirmed.
 
 ### Coplanar overlap is not counted as self-intersection
 
@@ -139,7 +195,7 @@ not a crack, and this module will not touch it. That is deliberate — splitting
 there is meddling, and on the repo's own `box_closed.stl` and `hinge_pip.stl`
 it used to fire 20 times on sound geometry. It is also what makes the stage
 affordable: on a 33k-triangle mesh, scoping the search cut a full `commit()`
-from 217 s to 2.7 s.
+from 217 s to seconds (3.9 s today — see Performance).
 
 ## Tolerance budget
 
@@ -180,11 +236,10 @@ straight off disk is the loaded case and has no scale limit worth worrying
 about. Anything this app generates — cut, joined, softened — is the strict case,
 and 512 mm is the number that matters.
 
-> The ticket that specified this module quoted "~5000 mm safe, degrades past
-> ~10,000 mm". **Neither measurement above reproduces that**, and the figure is
-> recorded here as unconfirmed rather than restated as fact. It may have come
-> from a different criterion. The measured numbers are the ones the suite
-> asserts. Either way the practical conclusion is unchanged: **the largest Bambu
+> An earlier estimate of "~5000 mm safe, degrades past ~10,000 mm" circulated
+> with this module. It does not reproduce under either criterion above and has
+> been **withdrawn**; 512 mm is the measured boundary and the one the suite
+> asserts. The practical conclusion is unchanged either way: **the largest Bambu
 > build volume is 256 mm, an order of magnitude inside even the strict
 > boundary**, so this is not a concern for this app.
 
@@ -208,7 +263,7 @@ real meshes mix triangle sizes badly — the tape fixture in this repo runs from
 for the slivers, one big triangle lands in tens of thousands of cells.
 
 Measured on `fixtures/tape_on-edge-single-B101_rounded_v8_FINAL.stl`, 32,862
-triangles: full `commit()` in 2.7 s, of which self-intersection counting is
+triangles: full `commit()` in 3.9 s, of which self-intersection counting is
 about 260 ms per pass.
 
 ## Fail-safe contract
