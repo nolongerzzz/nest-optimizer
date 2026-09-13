@@ -1,0 +1,189 @@
+[
+  {
+    "name": "t2_union_box_box",
+    "op": "union",
+    "a": "/library/box_hull_80x40x20.stl",
+    "b": "/library/box_bit_12x8x8.stl",
+    "offsetB": [
+      40,
+      0,
+      0
+    ],
+    "note": "bit half in, half out: overlap 6x8x8 = 384 mm^3; union = 64000 + 768 - 384 = 64384"
+  },
+  {
+    "name": "t2_subtract_box_box",
+    "op": "subtract",
+    "a": "/library/box_hull_80x40x20.stl",
+    "b": "/library/box_bit_12x8x8.stl",
+    "offsetB": [
+      40,
+      0,
+      0
+    ],
+    "note": "same pair; result = 64000 - 384 = 63616"
+  },
+  {
+    "name": "t2_subtract_interior",
+    "op": "subtract",
+    "a": "/library/box_hull_80x40x20.stl",
+    "b": "/library/box_bit_12x8x8.stl",
+    "offsetB": [
+      0,
+      0,
+      0
+    ],
+    "note": "bit fully enclosed -> sealed internal void; 64000 - 768 = 63232, two shells"
+  },
+  {
+    "name": "t2_subtract_coplanar",
+    "op": "subtract",
+    "a": "/library/box_hull_80x40x20.stl",
+    "b": "/library/box_bit_12x8x8.stl",
+    "offsetB": [
+      0,
+      0,
+      6
+    ],
+    "note": "bit top face EXACTLY on the hull top face z=10 -> coplanar cut, sliver risk; 64000 - 768 = 63232"
+  },
+  {
+    "name": "t2_union_touching",
+    "op": "union",
+    "a": "/library/box_hull_80x40x20.stl",
+    "b": "/library/box_bit_12x8x8.stl",
+    "offsetB": [
+      0,
+      0,
+      14
+    ],
+    "note": "zero-thickness face contact at z=10, no overlap at all -- the pathological case; 64000 + 768 = 64768"
+  },
+  {
+    "name": "t3_subtract_roundbox_box",
+    "op": "subtract",
+    "a": "/fixtures/out-box-round-r05.stl",
+    "b": "/library/box_bit_12x8x8.stl",
+    "offsetB": [
+      10,
+      0,
+      0
+    ],
+    "note": "filleted analytic shell cut by a box -- mild curvature"
+  },
+  {
+    "name": "t3_union_sphere_box",
+    "op": "union",
+    "a": "/fixtures/fixture_sphere_curved.stl",
+    "b": "/library/box_bit_12x8x8.stl",
+    "offsetB": [
+      10,
+      0,
+      0
+    ],
+    "note": "doubly-curved surface meets a flat box"
+  },
+  {
+    "name": "t3_subtract_blob_box",
+    "op": "subtract",
+    "a": "/fixtures/fixture_blob_organic.stl",
+    "b": "/library/box_bit_12x8x8.stl",
+    "offsetB": [
+      12,
+      0,
+      0
+    ],
+    "note": "freeform organic minus a box -- the actual target case"
+  },
+  {
+    "name": "t3_union_blob_sphere",
+    "op": "union",
+    "a": "/fixtures/fixture_blob_organic.stl",
+    "b": "/fixtures/fixture_sphere_curved.stl",
+    "offsetB": [
+      8,
+      0,
+      0
+    ],
+    "note": "curved against curved: no planar seam anywhere"
+  },
+  {
+    "name": "t3_subtract_blob_torus",
+    "op": "subtract",
+    "a": "/fixtures/fixture_blob_organic.stl",
+    "b": "/fixtures/fixture_groove_concave.stl",
+    "offsetB": [
+      0,
+      0,
+      0
+    ],
+    "note": "genus-1 concave cutter through an organic solid -- hardest topology here"
+  },
+  {
+    "name": "t3_subtract_tube_box",
+    "op": "subtract",
+    "a": "/library/soften_test_03_thinwall_tube.stl",
+    "b": "/library/box_bit_12x8x8.stl",
+    "offsetB": [
+      11,
+      0,
+      12
+    ],
+    "note": "thin curved wall punched through"
+  },
+  {
+    "name": "t3_tape_raw",
+    "op": "subtract",
+    "a": "/library/tape_on-edge-single-B101_rounded_v8_FINAL.stl",
+    "b": "/library/box_bit_12x8x8.stl",
+    "offsetB": [
+      0,
+      0,
+      10
+    ],
+    "reps": 3,
+    "note": "no pre-weld"
+  },
+  {
+    "name": "t3_tape_weld_live_5e-6",
+    "op": "subtract",
+    "a": "/library/tape_on-edge-single-B101_rounded_v8_FINAL.stl",
+    "b": "/library/box_bit_12x8x8.stl",
+    "offsetB": [
+      0,
+      0,
+      10
+    ],
+    "weldA": 4.997e-06,
+    "reps": 3,
+    "note": "EXACTLY what shipped code uses: NSO_weldEpsFor(soup,0.08) = min(0.08, minEdge/3) = 4.997e-6 for this part"
+  },
+  {
+    "name": "t3_tape_weld_1e-4",
+    "op": "subtract",
+    "a": "/library/tape_on-edge-single-B101_rounded_v8_FINAL.stl",
+    "b": "/library/box_bit_12x8x8.stl",
+    "offsetB": [
+      0,
+      0,
+      10
+    ],
+    "weldA": 0.0001,
+    "reps": 3,
+    "note": "tolerance that actually closes the part"
+  },
+  {
+    "name": "t3_tape_weld_0.08",
+    "op": "subtract",
+    "a": "/library/tape_on-edge-single-B101_rounded_v8_FINAL.stl",
+    "b": "/library/box_bit_12x8x8.stl",
+    "offsetB": [
+      0,
+      0,
+      10
+    ],
+    "weldA": 0.08,
+    "reps": 3,
+    "note": "unclamped 0.08 -- what the guard is protecting against"
+  }
+]
