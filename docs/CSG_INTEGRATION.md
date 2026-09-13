@@ -24,8 +24,16 @@ Commit `db1c937 "bool1 wrap-safe Subtract and Join"` introduced it. So the work
 here is **confirming and characterising an existing integration**, not starting
 one. The library choice was already made, and this report confirms it was right.
 
-**b) There is no `NSO_Repair` module, and no mesh self-intersection checker to
-reuse.** The nearest thing, `ringSelfIntersectsDetail` in `app-cut.js:872`, is a
+**b) Corrected — `NSO_Repair` exists, on a branch this one could not see.** As
+first written this said there is no `NSO_Repair` module and no mesh
+self-intersection checker to reuse. That was true of the working tree and false
+of the project: `NSO_Repair.js` lives on `claude/nso-repair-merge-ready-462u67`,
+which branched from the same `57ea86f` this work did and is merged into neither
+`claude-wip` nor `main`. It carries `triTriIntersect` and
+`countSelfIntersections` — the same job as the checker written here. See §6;
+they need reconciling, not drifting. Checking the remote branch list would have
+caught this. What remains true is only that nothing on `claude-wip` could be
+reused: the nearest thing there, `ringSelfIntersectsDetail` in `app-cut.js:872`, is a
 **2D segment/segment test on a closed polygon ring**, used by the Soften corner
 engine. It cannot look at a triangle mesh. A 3D triangle/triangle checker had to
 be written; it is in `tools/mesh_validate.py`, kept out of app code because this
@@ -423,3 +431,66 @@ false positives. The numbers in this document are post-fix.
    clustering weld ahead of it for scanned or imported geometry; the clustering
    weld that `sculpt1` already landed in `app-sculpt.js` closes this part
    cleanly, while the grid-snap rule both booleans still use cannot.
+
+
+---
+
+## 6. Two self-intersection checkers now exist — reconcile, do not let them drift
+
+`NSO_Repair.js` (on `claude/nso-repair-merge-ready-462u67`, unmerged) and
+`tools/mesh_validate.py` (here) were built independently, in the same session,
+and do the same job. Both are sound; neither is a bug. But they disagree on real
+meshes, so one has to become canonical during the merge-order regroup.
+
+### Where they differ by design
+
+| | `NSO_Repair.js` (earlier) | `tools/mesh_validate.py` (here) |
+|---|---|---|
+| runtime | JS, ships in `index.html` | Python, offline tool only |
+| narrow phase | Möller interval overlap | Möller interval overlap — **same algorithm** |
+| broad phase | median-split **BVH**; self-traversal visits each pair once, no dedupe table | **uniform spatial hash** + a `seen` set |
+| coplanar pairs | **deliberately not counted** (`max < EPS → return false`) | counted **separately**, via a 2D separating-axis overlap test |
+| interval endpoint touch | strict `<` — exact touch **counts** as an intersection | `<= … + eps` — exact touch **does not** count |
+| adjacency skip | shares a vertex index after welding at `WELD_TOL` 1e-4 | shares a welded vertex at 1e-5 |
+| output | one integer | pierce/coplanar split, example pairs, adjacent-pairs-skipped |
+
+The broad phase is the one place the earlier module is plainly better, and its
+own source comment says why: real meshes mix triangle sizes badly — the tape
+fixture runs from 5e-3 mm slivers up to a single 80 mm face — and at any grid
+pitch fine enough for the slivers, one large triangle lands in tens of thousands
+of cells. A BVH does not care about that spread. **The uniform grid used here is
+the known-weak choice.**
+
+### Measured side by side, same files
+
+| fixture | tris | `NSO_Repair` | `mesh_validate` |
+|---|---|---|---|
+| two interpenetrating cubes | 24 | **40** | 32 pierce + 12 coplanar |
+| `fixtures/box-20mm.stl` | 12 | **0** | 0 + 0 |
+| `t2_union_touching` output | 28 | **0** | 0 + 0 |
+| `t3_subtract_blob_torus` output | 6,614 | **0** | 0 + 0 |
+| `tape_welded_clustered` (input) | 32,860 | **306** | 187 + 7 |
+| `t3_tape_clustered` (output) | 32,886 | **6** | 9 + 2 |
+
+**They agree exactly on every clean mesh** — the agreement that matters, and
+mutual corroboration of the "0 self-intersections" result reported for all 12
+booleans above.
+
+They diverge only on meshes carrying degenerate geometry, and the divergence
+tracks the design differences: the strict endpoint-touch test pushes the earlier
+module's counts up (40 vs 32, 306 vs 187), while its coarser 1e-4 adjacency weld
+pushes them down by treating more pairs as adjacent (6 vs 9 on the tape output).
+Neither is wrong; they answer slightly different questions.
+
+Cost on the 32,860-triangle tape part: **1,121 ms** for the full JS `inspect`
+(weld + analyze + self-intersection) against **~2,800 ms** for the Python battery.
+
+### Recommendation
+
+Keep `NSO_Repair`'s BVH + Möller core as canonical and port the two additions
+here onto it: coplanar-overlap classification (the SAT test), and the
+pierce/coplanar split with example pairs. Then settle the two policy questions
+explicitly rather than by accident — does an exact endpoint touch count, and
+what weld tolerance defines adjacency — since those are what make the two
+disagree. `tools/mesh_validate.py` should then either call through to a single
+shared definition or be retired in favour of a node runner over `NSO_Repair.js`.
