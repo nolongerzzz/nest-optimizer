@@ -120,9 +120,6 @@
             <button id="btn-library" class="vp-bar-btn" type="button"
                     aria-haspopup="true" aria-expanded="false"
                     title="Load a piece from this project's library">Library</button>
-            <!-- Starts closed in the markup itself: the hidden attribute, and an
-                 inline display:none so first paint is closed even if the
-                 stylesheet has not arrived. setOpen owns both from here on. -->
             <div id="library-list" class="library-list" role="menu" hidden
                  style="display:none"></div>
           </div>
@@ -182,7 +179,7 @@
                 </div>
                 <button id="btn-thicken-in" class="btn btn-secondary" type="button">Thicken in</button>
               </div>
-              <div class="vp-row vp-row-full"><button id="btn-clear-plate" class="btn btn-secondary" type="button">Clear plate</button></div>
+              <div class="vp-row vp-row-full"><button id="btn-clear-plate" class="btn btn-secondary" type="button">Clear plate</button>
             </div>
           </details>
         </div>
@@ -209,7 +206,9 @@
   <script src="app-sel-outline.js?v=inside3"></script>
   <script src="app-join.js?v=inside3"></script>
   <script src="app-mask.js?v=inside3"></script>
-  <script src="app-library.js?v=inside3"></script>
+  <script src="app-library.js?v=libgit"></script>
   <script src="app-ux.js?v=inside3"></script>
+  <script src="app-cth-expose.js?v=cth12"></script>
+  <script type="module" src="app-cth.js?v=cth12"></script>
 </body>
 </html>

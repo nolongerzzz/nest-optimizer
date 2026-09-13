@@ -1,33 +1,38 @@
 # Handoff (Claude Code reads this. User does not paste code.)
 
-Branch: `claude-wip` only. Never push `main`. Never merge PR #4.
-After every pass: comment counts on PR #4.
+Branch: `claude-wip` only. Never push `main`.
 
-## Output protocol — standing, all tasks, no exceptions
-1. Findings, numbers, diffs and next-step proposals go ONLY as comments on PR #4.
-2. Chat carries exactly one line: `Task complete: See PR` or `I need your attention`.
-3. No code, tables, dumps or explanation in chat.
-4. Never apply `stash@{0}` or any parked patch unless a Grok comment on PR #4, or
-   this file, says **APPLY**.
-5. Never touch `main`. Never merge PR #4. `claude-wip` only.
-6. Never bump `?v=` tags — Grok owns the HUD string.
-7. Pass/fail is math: `tools/stl_watertight_check.py --odd --degen` plus the
-   geometry probes the current ticket names (lid on cut plane, corner pullback
-   vs wall mid). Never call a mesh correct from a screenshot.
+**PR #4 is closed and already on main** (corners1, 2026-09-08, squash `4ea5eca`).
+Do not reopen it. Do not comment on it. Do not treat it as a drop box.
+New work: commit on `claude-wip`. Open a **new** PR if a review surface is needed.
+Grok merges `claude-wip` → `main` and owns HUD / `?v=` tags.
+
+## Output protocol
+1. Findings, numbers, diffs, and next-step proposals go in the current ticket PR
+   (a new PR off `claude-wip`) or in the commit message. Never PR #4.
+2. Chat carries a short status line. No full script dumps. No `app.js` token.
+3. Never apply `stash@{0}` or any parked patch unless Grok or this file says **APPLY**.
+4. Never bump `?v=` tags — Grok owns the HUD string (`stampHud()` in the UX script).
+5. Pass/fail is math: `tools/stl_watertight_check.py --odd --degen` plus the
+   geometry probes the current ticket names. Never call a mesh correct from a screenshot.
 
 ## Ping pong
-A bare STL drop, no text, is the latest live export for the ticket below.
+A bare STL drop, no text, is the latest live export for the current ticket.
 
 - Run the checker and the ticket probes.
-- Comment the numbers on PR #4.
-- Ticket fails -> one scoped patch on `claude-wip`, comment what changed,
-  then `Task complete: See PR`.
-- Ticket passes every named gate -> comment "this is correct" with the numbers,
-  no further patch, then `Task complete: See PR`.
-- A decision is needed (scope, APPLY a stash, new ticket) -> comment the question
-  on PR #4, then `I need your attention`.
+- Commit or comment on the **current** ticket PR.
+- Ticket fails → one scoped patch on `claude-wip`, then a short status line.
+- Ticket passes every named gate → comment "this is correct" with the numbers, no further patch.
+- A decision is needed → one question, then `I need your attention`.
 
-## Standing ticket — Soften Corners, second pass (corners2), awaiting live test
+## Current factory (do not rewrite from this file)
+Live HUD is `inside3`. Finish wrap + paint + pocket bake is the open factory path.
+CTH is gated (`?cth=1` / `?cth=finish` / `?cth=drive`) and removable.
+Parked modules (repair, sculpt, planar fuse) stay unwired until the owner names a ticket.
+Clean no-op mesh for repair checks is `fixtures/box-20mm.stl`, not Thingi10K 40921
+(40921 has 17 bowtie vertices; edge-based checks miss that).
+
+## Archive — Soften Corners second pass (corners2), historical
 
 corners1 was measured on the exported STL of the live FAIL. What it actually
 built, on the 12.38 x 20 x 20 baked half at R=2.5:
@@ -42,79 +47,15 @@ built, on the 12.38 x 20 x 20 baked half at R=2.5:
   normal it reads as a point.
 - **Bite too small.** corners1 rounded the lid boundary in plan with radius
   R but only cut the wall back by R/sin(45) - R = 0.4142 R. At R=2.5 that is
-  a 1.04mm bite where 2.5mm was asked, which is the "~0.5mm" that was seen.
+  a 1.04mm bite where 2.5mm was asked.
 
-corners2 drops that separate path entirely and puts Corners back through
-`rawEdgeRoundInPlace`, the same engine as Round and Bevel: same loop walk,
-same quarter-circle sweep, same untouched cap plane, with one per-vertex
-radius array — R at every vertex whose windowed turn beats 30deg, 0
-everywhere else. The corner is then the intersection of the two edge fillet
-cylinders, which is what a CAD variable-radius edge fillet is: a real
-quarter-circle of radius R normal to each edge, and no point.
+corners2 put Corners back through `rawEdgeRoundInPlace`. That work is already
+on main as later corners tickets. Do not re-open it from this archive.
 
-The centroid fan is gone from the engine for all three treatments. The lid is
-now the ORIGINAL cap triangles trimmed back to the ring
-(`rawLidTrimToRing2`): loop2[i] pairs with ring2[i], so the strip the ring
-took is the band of quads between them, and the lid is the cap minus that
-band. Triangles the band does not reach come through untouched; the ones it
-bites are clipped, never re-fanned. Convex ring takes the direct
-intersection, anything else subtracts the band quad by quad.
-
-### Measured
-
-20mm box fixture, Square split, cut face:
-
-```
-R      tris  open  NM  star  lid off capPlane  wall-mid R  corner apex depth  groups
-0.5     88     0    0   no          0            0.0000         0.500          4
-1.0     88     0    0   no          0            0.0000         1.000          4
-2.0     88     0    0   no          0            0.0000         2.000          4
-2.5     88     0    0   no          0            0.0000         2.500          4
-3.0     88     0    0   no          0            0.0000         3.000          4
-```
-
-Attached FAIL STL, its untreated face, R=2.5: 512 tris, 0 open, 0
-non-manifold, no star, lid entirely on capPlane (x = -6.1902), 4 corner
-groups, R>0 at exactly 4 loop points, peak R 2.500, corner apex depth 2.500,
-lid still reaching y/z = +/-10 with the straight span running z = -5..+5
-(blend ends at 10 - 2R exactly).
-
-Round and Bevel: lid area now 268.960 against an exact (20 - 2R)^2 = 268.960
-at their clamped R=1.80 — the trimmed lid is exact, and their radius clamp is
-unchanged (they still use `rawLocalThickness2`; only the Corners filter moved
-to `rawCornerWallLimit2`).
-
-### Two engine bugs fixed inside rawCornerRadiiOnLoop2
-- radius clamp used `rawLocalThickness2`, which skips every segment within
-  two indices of the vertex and so returns its 4mm default on a 4-vertex
-  loop, pinning every corner at R=1.8.
-- detection window was `R*1.5` unbounded; at large R it spans whole edges,
-  mid-edge vertices read as turns, and all four corners of a square merge
-  into ONE group. Bounded to total/16.
-
-### Fail-safe
-Refusals all happen before the caller swaps geometry: no corner over 30deg,
-no safe radius, ring self-intersection, a lid trim that loses area, and a
-seal gate refusing any result with more odd edges than the input.
-
-### Known, not this ticket
+### Known, not current
 `branch point in cap boundary` still refuses some cut faces (parked
-`stash@{0}` below) — Round, Bevel and Corners all refuse there identically.
-
-## Open, not authorised — need an explicit APPLY
-
-1. **`rawCheckWatertightQuick` tolerance.** It passes a mesh with up to 208 odd
-   edges, so the in-app gate reported "Soften ok" on the old 24-open-edge result.
-   Validation gap, not geometry. Needs its own pass.
-2. **`stash@{0}` — cap/wall boundary-pairing fix.** Parked, unapplied. On some
-   real cut faces the cap boundary pairs against the wall on only part of its
-   edges (a wall triangle with a single vertex on the cap contributes no
-   cap-plane edge), so the loop walk dies with a false `branch point in cap
-   boundary` and all three treatments refuse to run on a sound mesh. Reproduced
-   on an earlier uploaded piece. Not applied — awaiting APPLY.
-
-## User role
-Steer + live click test only. No file upload. No snippet paste.
+`stash@{0}`) — Round, Bevel and Corners all refuse there identically.
+`stash@{0}` stays parked until an explicit **APPLY**.
 
 ## Sculpt tier 1 — vertex adjacency + global smoothing (landed, `app-sculpt.js`)
 
