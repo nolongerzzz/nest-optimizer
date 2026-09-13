@@ -4,7 +4,7 @@ export function shouldMount({ flag = 'cth', search } = {}) {
   const query = search ?? (typeof location !== 'undefined' ? location.search : '');
   const value = new URLSearchParams(query).get(flag);
   if (value === null) return false;
-  return value === '' || ['1', 'true', 'yes', 'on', 'finish'].includes(String(value).toLowerCase());
+  return value === '' || ['1', 'true', 'yes', 'on', 'finish', 'drive'].includes(String(value).toLowerCase());
 }
 
 function escapeHtml(s) {
