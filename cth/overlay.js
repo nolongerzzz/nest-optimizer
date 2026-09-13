@@ -17,44 +17,54 @@ export function createCthOverlay({ tests, onArm, title = 'Click Test Harness', m
 
   const hostEl = document.createElement('div');
   hostEl.setAttribute('data-cth-overlay', '');
-  hostEl.style.cssText = 'position:fixed;top:8px;right:8px;z-index:2147483000;';
+  hostEl.style.cssText = 'position:fixed;left:64px;bottom:12px;z-index:2147483000;pointer-events:auto;';
   const shadow = hostEl.attachShadow({ mode: 'open' });
   shadow.innerHTML = `<style>
-    .wrap{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
-    .chip{background:#14171b;color:#e8a33d;border:1px solid #e8a33d;border-radius:6px;padding:5px 8px;font:600 11px ui-monospace,Menlo,monospace;cursor:pointer}
-    .panel{width:300px;max-height:70vh;overflow-y:auto;padding:10px 12px 12px;background:rgba(20,23,27,.94);color:#e7e5e1;border:1px solid #2a3037;border-radius:8px;font:12px/1.45 ui-monospace,Menlo,monospace}
-    .panel[hidden]{display:none}
-    h1{font-size:12px;margin:0 0 2px}
-    .sub{color:#9aa1a8;font-size:11px;margin-bottom:8px}
-    .aim{border-top:1px solid #2a3037;padding:7px 0 6px}
-    .aim.current{background:rgba(232,163,61,.08);margin:0 -12px;padding-left:12px;padding-right:12px}
-    .row{display:flex;gap:8px;justify-content:space-between}
-    .aim.current .name{color:#e8a33d;font-weight:600}
-    .chip-status{font-weight:600;text-transform:uppercase;font-size:10px}
-    .how,.detail,.note,.tally{color:#9aa1a8;font-size:11px;margin-top:4px}
+    .dock{display:flex;flex-direction:row;align-items:flex-end;gap:6px}
+    .tab{width:248px;padding:8px 10px;background:rgba(20,23,27,.94);color:#e7e5e1;border:1px solid #2a3037;border-radius:8px;font:12px/1.4 ui-monospace,Menlo,monospace}
+    .tab[hidden]{display:none}
+    h1{font-size:12px;margin:0 0 6px;color:#e8a33d}
+    .aim-name{font-weight:600}
+    .aim-status{font-weight:600;text-transform:uppercase;font-size:10px;margin-left:8px}
+    .row{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+    .detail,.note{color:#9aa1a8;font-size:11px;margin-top:4px}
     .note.warn{color:#d2694f}
-    button.arm{width:100%;background:#e8a33d;color:#161616;border:0;border-radius:5px;padding:8px 10px;font:600 12px inherit;cursor:pointer}
-    button.arm.idle{background:#262c33;color:#e7e5e1;border:1px solid #39414a}
+    .side{display:flex;flex-direction:column;gap:6px;align-items:stretch}
+    .chip,.arm{min-width:52px;border-radius:6px;padding:7px 8px;font:600 11px ui-monospace,Menlo,monospace;cursor:pointer;border:1px solid #e8a33d;background:#14171b;color:#e8a33d}
+    .arm{background:#e8a33d;color:#161616;border:0}
+    .arm.idle{background:#262c33;color:#e7e5e1;border:1px solid #39414a}
     button:disabled{opacity:.4}
   </style>
-  <div class="wrap">
-    <button type="button" class="chip" id="cth-toggle">CTH</button>
-    <div class="panel" id="cth-panel">
-      <h1></h1><div class="sub"></div><div class="aims"></div>
-      <div class="controls"><button type="button" class="arm idle"></button></div>
-      <div class="note"></div><div class="tally"></div>
+  <div class="dock">
+    <div class="tab" id="cth-panel">
+      <h1></h1>
+      <div class="row"><span class="aim-name" id="cth-aim"></span><span class="aim-status" id="cth-status"></span></div>
+      <div class="detail" id="cth-detail"></div>
+      <div class="note" id="cth-note"></div>
+    </div>
+    <div class="side">
+      <button type="button" class="chip" id="cth-toggle">CTH ✕</button>
+      <button type="button" class="arm idle" id="cth-arm">Arm</button>
     </div>
   </div>`;
 
   const panel = shadow.getElementById('cth-panel');
   const toggle = shadow.getElementById('cth-toggle');
-  shadow.querySelector('h1').textContent = title;
-  shadow.querySelector('.sub').textContent = 'Arm, then click the aim. Orbit freely when not armed.';
-  const aimsEl = shadow.querySelector('.aims');
-  const armBtn = shadow.querySelector('button.arm');
-  const noteEl = shadow.querySelector('.note');
-  const tallyEl = shadow.querySelector('.tally');
-  const state = (tests || []).map((t) => ({ id: t.id, title: t.title || t.id, instruction: t.instruction || '', status: 'pending', detail: '' }));
+  const armBtn = shadow.getElementById('cth-arm');
+  const titleEl = shadow.querySelector('h1');
+  const aimEl = shadow.getElementById('cth-aim');
+  const statusEl = shadow.getElementById('cth-status');
+  const detailEl = shadow.getElementById('cth-detail');
+  const noteEl = shadow.getElementById('cth-note');
+  titleEl.textContent = title;
+
+  const state = (tests || []).map((t) => ({
+    id: t.id,
+    title: t.title || t.id,
+    instruction: t.instruction || '',
+    status: 'pending',
+    detail: '',
+  }));
   let current = 0;
   let armed = false;
   let open = true;
@@ -62,26 +72,35 @@ export function createCthOverlay({ tests, onArm, title = 'Click Test Harness', m
   function setOpen(v) {
     open = !!v;
     panel.hidden = !open;
-    toggle.textContent = open ? 'CTH \u2715' : 'CTH';
+    const n = state.filter((a) => a.status === 'pass').length;
+    toggle.textContent = open ? 'CTH ✕' : ('CTH ' + n + '/' + state.length);
   }
   toggle.addEventListener('click', (e) => { e.stopPropagation(); setOpen(!open); });
 
+  function currentAim() {
+    if (current >= state.length) return state[state.length - 1] || null;
+    return state[current];
+  }
+
   function render() {
-    aimsEl.innerHTML = '';
-    state.forEach((aim, i) => {
-      const el = document.createElement('div');
-      el.className = 'aim' + (i === current ? ' current' : '');
-      const colour = STATUS_COLOURS[aim.status] || STATUS_COLOURS.pending;
-      el.innerHTML = `<div class="row"><span class="name">${i + 1}. ${escapeHtml(aim.title)}</span><span class="chip-status" style="color:${colour}">${aim.status}</span></div>${i === current && aim.instruction ? `<div class="how">${escapeHtml(aim.instruction)}</div>` : ''}${aim.detail ? `<div class="detail">${aim.detail}</div>` : ''}`;
-      aimsEl.appendChild(el);
-    });
+    const aim = currentAim();
     const done = current >= state.length;
+    if (aim) {
+      const idx = done ? state.length : current + 1;
+      aimEl.textContent = idx + '. ' + aim.title;
+      statusEl.textContent = done ? 'done' : aim.status;
+      statusEl.style.color = STATUS_COLOURS[done ? 'pass' : aim.status] || STATUS_COLOURS.pending;
+      detailEl.innerHTML = aim.detail || (aim.instruction ? escapeHtml(aim.instruction) : '');
+    } else {
+      aimEl.textContent = 'No aims';
+      statusEl.textContent = '';
+      detailEl.textContent = '';
+    }
     armBtn.disabled = done;
-    armBtn.textContent = done ? 'All aims recorded' : (armed ? 'Armed \u2014 click the aim' : 'Arm pick');
+    armBtn.textContent = done ? 'Done' : (armed ? 'Armed' : 'Arm');
     armBtn.className = 'arm' + (armed && !done ? '' : ' idle');
-    const count = (s) => state.filter((a) => a.status === s).length;
-    tallyEl.textContent = count('pass') + ' pass \u00b7 ' + count('fail') + ' fail \u00b7 ' + count('miss') + ' miss \u00b7 ' + count('pending') + ' pending';
-    toggle.textContent = open ? 'CTH \u2715' : ('CTH ' + count('pass') + '/' + state.length);
+    if (open) toggle.textContent = 'CTH ✕';
+    else toggle.textContent = 'CTH ' + state.filter((a) => a.status === 'pass').length + '/' + state.length;
   }
 
   armBtn.addEventListener('click', (e) => { e.stopPropagation(); if (onArm) onArm(); });
@@ -99,7 +118,7 @@ export function createCthOverlay({ tests, onArm, title = 'Click Test Harness', m
         const got = entry.hit ? (entry.hit.objectId + (entry.hit.region ? '/' + entry.hit.region : '')) : 'nothing';
         const wantId = entry.expected && entry.expected.objectId ? entry.expected.objectId : 'any';
         const wantReg = entry.expected && entry.expected.region ? '/' + entry.expected.region : '';
-        aim.detail = 'got <b>' + escapeHtml(String(got)) + '</b> \u00b7 wanted <b>' + escapeHtml(String(wantId) + wantReg) + '</b>';
+        aim.detail = 'got <b>' + escapeHtml(String(got)) + '</b> · wanted <b>' + escapeHtml(String(wantId) + wantReg) + '</b>';
       }
       render();
     },

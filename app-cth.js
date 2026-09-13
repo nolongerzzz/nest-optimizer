@@ -14,7 +14,7 @@ function banner(text, bad) {
   if (!el) {
     el = document.createElement('div');
     el.id = 'cth-fallback';
-    el.style.cssText = 'position:fixed;top:8px;right:8px;z-index:2147483000;max-width:280px;padding:8px 10px;background:#14171b;color:#e7e5e1;border:1px solid #e8a33d;border-radius:8px;font:12px/1.4 ui-monospace,monospace;';
+    el.style.cssText = 'position:fixed;left:64px;bottom:12px;z-index:2147483000;max-width:280px;padding:8px 10px;background:#14171b;color:#e7e5e1;border:1px solid #e8a33d;border-radius:8px;font:12px/1.4 ui-monospace,monospace;';
     document.body.appendChild(el);
   }
   el.textContent = text;
@@ -70,10 +70,10 @@ async function boot() {
     return;
   }
   try {
-    const live = await import('./cth/cth-live.js?v=cth8');
+    const live = await import('./cth/cth-live.js?v=cth9');
     const specPath = mode === 'finish'
-      ? './cth/nest-finish-first-batch.js?v=cth8'
-      : './cth/nest-plate-first-batch.js?v=cth8';
+      ? './cth/nest-finish-first-batch.js?v=cth9'
+      : './cth/nest-plate-first-batch.js?v=cth9';
     const spec = await import(specPath);
     const tests = spec.NEST_FINISH_FIRST_BATCH || spec.NEST_PLATE_FIRST_BATCH || spec.default;
     live.mountLiveHarness({
