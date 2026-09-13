@@ -72,10 +72,10 @@ async function boot() {
     return;
   }
   try {
-    const live = await import('./cth/cth-live.js?v=cth11');
+    const live = await import('./cth/cth-live.js?v=cth12');
     const specPath = (mode === 'finish' || mode === 'drive')
-      ? './cth/nest-finish-first-batch.js?v=cth11'
-      : './cth/nest-plate-first-batch.js?v=cth11';
+      ? './cth/nest-finish-first-batch.js?v=cth12'
+      : './cth/nest-plate-first-batch.js?v=cth12';
     const spec = await import(specPath);
     const tests = spec.NEST_FINISH_FIRST_BATCH || spec.NEST_PLATE_FIRST_BATCH || spec.default;
     live.mountLiveHarness({
@@ -90,9 +90,8 @@ async function boot() {
     });
     if (mode === 'drive') {
       try {
-        const drive = await import('./cth/nest-paint-soften-drive.js?v=cth11');
-        const grade = await import('./cth/grade.js?v=cth11');
-        drive.mountNestDrive({ gradeHit: grade.gradeHit, overlay: window.__CTH_OVERLAY__ });
+        const drive = await import('./cth/nest-paint-soften-drive.js?v=cth12');
+        drive.mountNestDrive({ overlay: window.__CTH_OVERLAY__ });
       } catch (derr) {
         console.error('[cth-drive]', derr);
         banner('CTH on — drive script not on this deploy yet', true);
