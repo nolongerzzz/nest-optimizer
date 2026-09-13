@@ -5,6 +5,7 @@ function cthMode() {
   if (v == null) return null;
   const s = String(v).toLowerCase();
   if (s === 'finish') return 'finish';
+  if (s === 'drive') return 'drive';
   if (s === '' || s === '1' || s === 'true' || s === 'yes' || s === 'on') return 'plate';
   return null;
 }
@@ -71,10 +72,10 @@ async function boot() {
     return;
   }
   try {
-    const live = await import('./cth/cth-live.js?v=cth10');
-    const specPath = mode === 'finish'
-      ? './cth/nest-finish-first-batch.js?v=cth10'
-      : './cth/nest-plate-first-batch.js?v=cth10';
+    const live = await import('./cth/cth-live.js?v=cth11');
+    const specPath = (mode === 'finish' || mode === 'drive')
+      ? './cth/nest-finish-first-batch.js?v=cth11'
+      : './cth/nest-plate-first-batch.js?v=cth11';
     const spec = await import(specPath);
     const tests = spec.NEST_FINISH_FIRST_BATCH || spec.NEST_PLATE_FIRST_BATCH || spec.default;
     live.mountLiveHarness({
@@ -85,8 +86,13 @@ async function boot() {
       container: canvas,
       raycastables: function () { return collectRaycastables(); },
       tests: tests,
-      title: mode === 'finish' ? 'Nest finish first batch' : 'Nest plate first batch'
+      title: mode === 'drive' ? 'Nest paint-soften drive' : (mode === 'finish' ? 'Nest finish first batch' : 'Nest plate first batch')
     });
+    if (mode === 'drive') {
+      const drive = await import('./cth/nest-paint-soften-drive.js?v=cth11');
+      const grade = await import('./cth/grade.js?v=cth11');
+      drive.mountNestDrive({ gradeHit: grade.gradeHit, overlay: window.__CTH_OVERLAY__ });
+    }
     const fb = document.getElementById('cth-fallback');
     if (fb && window.__CTH_OVERLAY__) fb.remove();
     else banner('CTH on');
