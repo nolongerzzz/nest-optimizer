@@ -1,6 +1,6 @@
-import { createThreeHostAdapter } from './three-adapter.js?v=cth8';
-import { createClickTestHarness } from './harness.js?v=cth8';
-import { createCthOverlay, shouldMount } from './overlay.js?v=cth8';
+import { createThreeHostAdapter } from './three-adapter.js?v=cth9';
+import { createClickTestHarness } from './harness.js?v=cth9';
+import { createCthOverlay, shouldMount } from './overlay.js?v=cth9';
 
 export function mountLiveHarness({
   THREE, scene, camera, renderer, container, raycastables, tests,
@@ -20,7 +20,7 @@ export function mountLiveHarness({
     onArm: () => {
       harness.armOnce();
       overlay.setArmed(true);
-      overlay.setNote('Armed. The next click on the model is captured — the app will not move it.');
+      overlay.setNote('Armed. Next click on the model is captured.');
     },
   });
 
@@ -53,7 +53,7 @@ export function mountLiveHarness({
 
   harness.start();
   overlay.setCurrent(0);
-  overlay.setNote('Ready. Orbit to line up aim 1, then Arm pick.');
+  overlay.setNote('Ready. Orbit, then Arm.');
 
   if (typeof window !== 'undefined') {
     window.__CTH_HARNESS__ = harness;
