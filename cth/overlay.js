@@ -7,8 +7,46 @@ export function shouldMount({ flag = 'cth', search } = {}) {
   return value === '' || ['1', 'true', 'yes', 'on', 'finish', 'drive'].includes(String(value).toLowerCase());
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&', '<': '<', '>': '>', '"': '"', "'": '&#39;' }[c]));
+/* The map used to hold the raw characters rather than the entities, so every
+   one of & < > " came through unescaped and only the apostrophe was handled.
+   Aim detail carries hit.objectId, which is a catalog name off the user's own
+   STL filename, and it goes into innerHTML. */
+const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+export function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c]);
+}
+
+/* The whole batch as one readout, instead of whichever aim was recorded last.
+
+   Nothing new is measured here: every aim already carried its own status and
+   its got/wanted line from recordResult. The card was simply showing one aim
+   at a time and painting over the previous one, so at "all aims recorded" the
+   only result still on screen was aim 4's. Pure, so a Node test can check the
+   rows without a DOM. */
+export function buildAimSummary(aims) {
+  const list = aims || [];
+  const passed = list.filter((a) => a.status === 'pass').length;
+  const html = list.map((a, i) => {
+    const recorded = a.status && a.status !== 'pending';
+    const colour = STATUS_COLOURS[a.status] || STATUS_COLOURS.pending;
+    const mark = recorded ? String(a.status) : 'not recorded';
+    // a.detail is markup recordResult already escaped; the instruction
+    // fallback is plain text and has to be escaped here.
+    const body = a.detail || escapeHtml(a.instruction || '');
+    return '<div class="sum-row">' +
+             '<span class="sum-name">' + (i + 1) + '. ' + escapeHtml(a.title || a.id || '') + '</span>' +
+             '<span class="sum-mark" style="color:' + colour + '">' +
+               escapeHtml(mark.toUpperCase()) + '</span>' +
+           '</div>' +
+           (body ? '<div class="sum-detail">' + body + '</div>' : '');
+  }).join('');
+  return {
+    total: list.length,
+    passed: passed,
+    allPass: list.length > 0 && passed === list.length,
+    html: html,
+  };
 }
 
 function resolveMount(explicit) {
@@ -60,6 +98,12 @@ export function createCthOverlay({ tests, onArm, title = 'Click Test Harness', m
     .row{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
     .detail,.note{color:#9aa1a8;font-size:11px;margin-top:4px}
     .note.warn{color:#d2694f}
+    .tab.summary{max-height:240px}
+    .sum-row{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:6px}
+    .sum-row:first-child{margin-top:0}
+    .sum-name{color:#e7e5e1}
+    .sum-mark{font-weight:600;font-size:10px;letter-spacing:.04em}
+    .sum-detail{margin:1px 0 0 12px}
   </style>
   <div class="dock">
     <div class="side">
@@ -112,11 +156,21 @@ export function createCthOverlay({ tests, onArm, title = 'Click Test Harness', m
     const done = current >= state.length;
     const passed = state.filter((a) => a.status === 'pass').length;
     toggle.textContent = open ? 'CTH \u2715' : ('CTH\n' + passed + '/' + state.length);
-    if (aim) {
-      const idx = done ? state.length : current + 1;
-      aimEl.textContent = idx + '. ' + aim.title;
-      statusEl.textContent = done ? 'done' : aim.status;
-      statusEl.style.color = STATUS_COLOURS[done ? 'pass' : aim.status] || STATUS_COLOURS.pending;
+    panel.classList.toggle('summary', done && state.length > 0);
+    if (done && state.length) {
+      /* Every aim is in, so the card stops being a one-aim view and becomes
+         the readout for the batch. The old line showed the last aim's title
+         with a flat 'done' in the pass colour, which read as a clean sweep
+         even when an aim had failed. */
+      const sum = buildAimSummary(state);
+      aimEl.textContent = 'All ' + sum.total + ' aims';
+      statusEl.textContent = sum.passed + '/' + sum.total;
+      statusEl.style.color = sum.allPass ? STATUS_COLOURS.pass : STATUS_COLOURS.fail;
+      detailEl.innerHTML = sum.html;
+    } else if (aim) {
+      aimEl.textContent = (current + 1) + '. ' + aim.title;
+      statusEl.textContent = aim.status;
+      statusEl.style.color = STATUS_COLOURS[aim.status] || STATUS_COLOURS.pending;
       detailEl.innerHTML = aim.detail || (aim.instruction ? escapeHtml(aim.instruction) : '');
     } else {
       aimEl.textContent = 'No aims';
