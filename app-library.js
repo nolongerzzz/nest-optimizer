@@ -10,22 +10,28 @@
    listing, so the live names come from the public contents API. */
 (function () {
   var CATALOG = [
-    'USB_bit.stl',
-    'usb_a_bit.stl',
-    'usb_c_bit.stl',
-    'sd_bit.stl',
-    'microsd_bit.stl',
     'box_bit_12x8x8.stl',
-    'box_hull_80x40x20.stl',
-    'box_hull_80x40x20-2.stl',
     'box_closed.stl',
+    'box_hull_80x40x20-2.stl',
+    'box_hull_80x40x20.stl',
     'box_open.stl',
-    'lid_blank.stl',
-    'lid_strap.stl',
+    'CTH_fixture.stl',
     'hinge_knuckle_box.stl',
     'hinge_knuckle_lid.stl',
     'hinge_pip.stl',
-    'pin.stl'
+    'lid_blank.stl',
+    'lid_strap.stl',
+    'microsd_bit.stl',
+    'pin.stl',
+    'sd_bit.stl',
+    'soften_test_01_cube.stl',
+    'soften_test_03_thinwall_tube.stl',
+    'soften_test_04_slotted_block.stl',
+    'soften_test_05_star_prism.stl',
+    'tape_on-edge-single-B101_rounded_v8_FINAL.stl',
+    'USB_bit.stl',
+    'usb_a_bit.stl',
+    'usb_c_bit.stl'
   ];
 
   var DIR = 'library/';
