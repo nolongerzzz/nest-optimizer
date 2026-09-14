@@ -63,9 +63,16 @@ swapping filament presets in Bambu Studio after opening an export raises "Use
 Modified Value of Filament Preset", and "Discard Modified Value" drops the baked
 settings silently. Inherent to how Bambu reconciles a project against a preset.
 
-Still open: nobody has opened one of these in a real Bambu Studio instance, and
-the `=` vs `:` separator in the source file has not been eyeballed (NSO writes
-JSON - see the doc's "Not yet verified").
+Settled: the container is JSON with `:`. The owner pulled the keys with
+`json.load()`, which only parses valid JSON; the `key = ["value"]` form in the
+ticket was shorthand. Serialization is correct as written.
+
+Still open, and the one thing no check here can reach: **nobody has opened one of
+these in a real Bambu Studio instance.** The doc carries a key -> Cooling tab
+field table to check against, what does and does not count as coercion (the
+speed fields are stored bare and rendered with a `%` - that is expected, not a
+rewrite), and the likeliest failure mode if it fails at all: NSO writes only the
+14 cooling keys and no preset-identity envelope. Record the outcome in the doc.
 
 Out of scope here: the Grispr G-code post-processing path for multi-material.
 
@@ -74,9 +81,14 @@ Out of scope here: the Grispr G-code post-processing path for multi-material.
 real `.3mf` and reads it back with an independent ZIP reader, asserting key set,
 key order, array-of-string shape, byte-exact values including `%`, raw text
 form, determinism, and that the format guard rejects bad values.
-`npm run 3mf:drive` (38 checks) drives the real app in headless Chromium -
-fixture import, Optimize, the actual **Export plate 3MF** click, the real
-download - then takes the saved file apart. Both are in `npm test`. Like the CTH
+`npm run 3mf:drive` (39 checks) drives the real app in headless Chromium -
+fixture import, a clone so the plate carries two pieces, the actual **Export
+plate 3MF** click, the real download - then takes the saved file apart.
+It deliberately does **not** press Optimize: `runOptimize()` throws on this
+branch (it reads `#opt-orient` / `#opt-rotate`, neither of which is in
+index.html - already true at 63c5b00). An earlier draft of the check did press
+it and asserted `state.placed.length > 0`, which passed for the wrong reason,
+since `handleFiles()` already places the imported piece. Both are in `npm test`. Like the CTH
 browser checks, the drive serves three from devDependencies, not the CDN. On a
 runner whose Chromium predates the installed Playwright, set `CHROME_PATH`.
 

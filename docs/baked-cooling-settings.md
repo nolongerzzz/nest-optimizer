@@ -179,27 +179,67 @@ preset; a 3MF cannot opt out of it. Guidance for users:
 - `Metadata/nso_profile.json` inside the export records which profile was baked
   in, so a plate that came out wrong can be checked after the fact.
 
-## Not yet verified
+## Verifying in Bambu Studio
 
-Two things are not covered by the checks above.
+The one leg of validation that cannot run here. Everything above is checked
+automatically; **whether Bambu Studio itself honours the baked values needs a
+machine with Bambu Studio on it.** Until someone does this, treat the feature as
+working-but-unconfirmed.
 
-**1. A real Bambu Studio instance has not opened these exports.** The archive is
-structurally valid and third-party readers accept it, but confirming that Bambu
-Studio itself loads the plate and applies the cooling values without coercing
-them needs a machine with Bambu Studio installed. Worth doing before this ships
-to users.
+Produce a file with **Export plate 3MF**, or run `npm run 3mf:drive` and use the
+`.3mf` it saves. Open it in Bambu Studio, then read
+**Filament settings → Cooling** and compare against the table below.
 
-**2. The container format was read as JSON.** The confirmed values arrived
-transcribed in a `key = ["value"]` shorthand. A real
-`Metadata/project_settings.config` is a JSON object, and the single-element
-string array is only meaningful inside one, so NSO writes JSON:
+| key in the file | Cooling tab field (wording varies by version) | should read |
+| --- | --- | --- |
+| `enable_overhang_bridge_fan` | Force cooling for overhangs / bridges | on |
+| `overhang_fan_threshold` | Overhang cooling threshold | 50% |
+| `overhang_threshold_participating_cooling` | Overhang threshold participating cooling | 95% |
+| `overhang_fan_speed` | Overhang / bridge fan speed | 100% |
+| `pre_start_fan_time` | Pre-start fan time | 2 s |
+| `reduce_fan_stop_start_freq` | Keep fan always on | on |
+| `slow_down_for_layer_cooling` | Slow printing down for better layer cooling | on |
+| `fan_min_speed` | Fan speed — min | 60% |
+| `fan_max_speed` | Fan speed — max | 80% |
+| `fan_cooling_layer_time` | Layer time, max fan speed threshold | 80 s |
+| `slow_down_layer_time` | Layer time, slow down threshold | 6 s |
+| `slow_down_min_speed` | Min print speed | 20 mm/s |
+| `no_slow_down_for_cooling_on_outwalls` | Don't slow down outer walls | off |
+| `cooling_slowdown_logic` | Cooling slowdown logic | uniform cooling |
 
-```json
-"overhang_fan_threshold": ["50%"]
-```
+Field labels move between Bambu Studio versions; the key names in
+`project_settings.config` are the stable identity. Match on the value.
 
-If the extracted file genuinely used `=` as its separator rather than `:`, that
-is a one-line change in `serializeProjectSettings()` in
-`nso-cooling-profiles.js`, and `parseProjectSettings()` beside it. Worth
-eyeballing the real file's first line once to settle it. The key names, the
-values, the array shape and the `%` rule are unaffected either way.
+**Do not read the speed fields as coercion.** `overhang_fan_speed`,
+`fan_min_speed` and `fan_max_speed` are stored bare (`"100"`, `"60"`, `"80"`)
+and Bambu's UI renders them with a `%` sign. A UI showing `100%` for a stored
+`"100"` is correct and expected — that is the inconsistency described above,
+not a value being rewritten.
+
+What would count as a real failure:
+
+- a field shows the **stock preset value** instead of the one in the table —
+  the file was parsed but that key was ignored;
+- **every** field shows stock values — the file was very likely not read as a
+  settings source at all (see below);
+- a value is **rounded, rescaled or retyped** (`50%` arriving as `50`, `6` as
+  `6.0`, `uniform_cooling` falling back to another mode) — genuine coercion.
+
+**The most likely failure mode, if there is one.** NSO writes only the 14
+confirmed cooling keys. A `project_settings.config` written by Bambu Studio
+carries hundreds, including preset identity (`filament_settings_id`,
+`print_settings_id`, `printer_settings_id`) and a `version`. That was a
+deliberate choice — inventing values for keys nobody has confirmed is worse than
+omitting them — but it is untested. If Bambu ignores the whole file, that
+envelope is the first thing to add, and it is an additive change: the 14 keys
+and their formats stay exactly as they are.
+
+Record the outcome here when it is done.
+
+## Settled
+
+**The container is JSON, with `:`.** Confirmed by the owner — the keys were
+originally pulled out with `json.load()`, which only succeeds on valid JSON. The
+`key = ["value"]` form the values were first transcribed in was shorthand, not
+the file's syntax. `serializeProjectSettings()` is correct as written; no change
+needed.
