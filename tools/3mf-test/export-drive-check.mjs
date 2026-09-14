@@ -73,7 +73,15 @@ async function main() {
   check('the 3MF button starts disabled with an empty plate',
     await page.evaluate(() => document.getElementById('btn-export-3mf').disabled), true);
 
-  // --- import a fixture through the app's own importer, then pack it ---
+  /* --- put real pieces on the plate, through the app's own paths ---
+     Deliberately NOT via "Optimize plate". runOptimize() throws on this branch
+     before it packs anything: app-core.js reads #opt-orient and #opt-rotate,
+     and neither element exists in index.html (already true at 63c5b00, so it
+     predates the 3MF work). An earlier version of this check pressed Optimize
+     and then asserted `state.placed.length > 0` - which passed for the wrong
+     reason, because handleFiles() already places the imported piece. Importing
+     and cloning reaches the same place honestly and does not rest on a
+     function that is currently broken. */
   console.log('\n--- driving the app ---');
   const stl = Array.from(await readFile(FIXTURE));
   await page.evaluate(async (bytes) => {
@@ -81,11 +89,15 @@ async function main() {
     handleFiles([new File([buf], 'box-20mm.stl', { type: 'model/stl' })]);
   }, stl);
   await page.waitForFunction('state.models.length > 0', null, { timeout: 20000 });
+  check('importing the fixture puts one piece on the plate',
+    await page.evaluate(() => state.placed.length), 1);
 
-  await page.click('#btn-optimize');
-  await page.waitForFunction('state.placed.length > 0', null, { timeout: 20000 });
-  const placed = await page.evaluate(() => state.placed.length);
-  check('a piece is on the plate after Optimize', placed > 0, true);
+  // Clone it, so the export has to carry more than one object.
+  await page.evaluate(() => { state.selectedIndex = 0; updateAdjustUI(); });
+  await page.click('#btn-clone');
+  await page.waitForFunction('state.placed.length === 2', null, { timeout: 20000 });
+  check('cloning gives the plate a second piece',
+    await page.evaluate(() => state.placed.length), 2);
   check('the 3MF button is enabled once the plate has pieces',
     await page.evaluate(() => document.getElementById('btn-export-3mf').disabled), false);
 
