@@ -9,6 +9,7 @@
     "cth:drive": "node tools/cth-test/drive-check.mjs",
     "3mf:roundtrip": "node tools/3mf-test/roundtrip-check.js",
     "3mf:drive": "node tools/3mf-test/export-drive-check.mjs",
+    "grispr:test": "python3 -m unittest discover -s tools/grispr/tests -p \"test_*.py\"",
     "test": "sh tools/cth-test/run-all.sh && node tools/cth-test/capture-check.mjs && node tools/cth-test/drive-check.mjs && node tools/3mf-test/roundtrip-check.js && node tools/3mf-test/export-drive-check.mjs"
   },
   "devDependencies": {

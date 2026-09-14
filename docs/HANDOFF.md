@@ -92,6 +92,83 @@ since `handleFiles()` already places the imported piece. Both are in `npm test`.
 browser checks, the drive serves three from devDependencies, not the CDN. On a
 runner whose Chromium predates the installed Playwright, set `CHROME_PATH`.
 
+## Grispr - per-object fan control (G-code post-process, NOT wired in)
+
+`tools/grispr/grispr.py`, standalone Python 3, stdlib only. Full write-up:
+`tools/grispr/README.md`. Suite: `npm run grispr:test` (65 tests, 14 synthetic
+fixtures, plus 60 randomised layouts). Deliberately not in `npm test` - like
+repair / sculpt / planar fuse it is unwired, and `npm test` is all-node today.
+
+It is the advanced-mode companion to the baked cooling exporter, not an
+alternative to it. The exporter owns the single-profile whole-plate case.
+Grispr owns what the 3MF schema cannot express at all: per-object fan. It runs
+as a Bambu Studio post-processing script (Others tab), so it depends on no
+filament-preset state and cannot be dropped by "Discard Modified Value".
+
+Two decisions that must not be "tidied up":
+
+- **Boundary injection is the default.** Grispr injects at an object's start
+  marker and restores at its stop marker, and leaves every `M106`/`M107` the
+  slicer emitted INSIDE the object alone, because those include Bambu's native
+  overhang/bridge forcing (`enable_overhang_bridge_fan`, already baked in by
+  the exporter). `--hold` suppresses them and is opt-in precisely because it
+  defeats that forcing. Do not make `--hold` the default.
+- **The restore value is computed, never a constant.** At each stop marker it
+  is the fan state the UNMODIFIED file would have had at that line. Objects
+  interleave within a layer and an object can be re-entered on the same layer,
+  so restoring to "the value before the block" would leak state into whoever
+  prints next. Measured case, from the fixtures: object 2 raises the fan to
+  S255 for an overhang mid-block, object 3 then prints on the same layer and
+  correctly gets S255 back, not the S102 layer ambient.
+
+Pass/fail is the leak invariant, not eyeballing injection points: for every
+line outside a targeted object's block, the fan state in the output must equal
+the original file's state at that same line. Checked line by line, every
+fixture, every target combination, with and without `--hold`.
+
+### Flagged at the 3MF exporter: `identify_id` is not written
+
+`buildModelSettings()` in `nso-3mf.js` writes `<object id="N">`, a `name`
+metadata, and a `model_instance` carrying `object_id`. It does not write
+`identify_id`. `grep -rn identify_id` over this repo hits only this entry and
+Grispr's own docs - no code writes it.
+
+Grispr targets the G-code `unique label id`, which is Bambu's `identify_id` for
+that object. So NSO controls the object ORDER it writes into the 3MF, not the
+id Bambu stamps into the sliced G-code, and the chain
+
+    NSO internal object -> 3MF identify_id -> G-code unique label id
+
+is open at the first link. This does not block using Grispr - ids come from the
+command line, read off `--list` - but it does block automating the hand-off.
+
+Two ways to close it, exporter's call:
+
+1. Write `identify_id` explicitly in `buildModelSettings()`. Only works if
+   Bambu honours an incoming value on load instead of reassigning it.
+2. Confirm empirically that Bambu's assignment is predictable from load order,
+   then pin that as a documented assumption with a check behind it.
+
+Either is a change to the exporter, not to Grispr, and neither has been tested.
+The same real-Bambu-Studio session that verifies the baked cooling values can
+settle it in one pass: export a 3-object plate, open it, slice it, and read the
+`; start printing object, unique label id:` values back against the object
+order NSO wrote.
+
+### Pending - nothing in the suite substitutes for this
+
+`--list` has never been run on a real sliced file. The marker pattern is
+confirmed against genuine Bambu output; Grispr's parser against that pattern is
+not. Next slice off either printer:
+
+    python3 tools/grispr/grispr.py --list /path/to/plate_1.gcode
+
+Ping-pong analogue to the bare STL drop: a bare `.gcode` drop, no text, means
+"run `--list` on this". Expect the block table; a parse error or an obviously
+wrong block count IS the finding. Safe to run on anything - `--list` never
+writes, and Grispr exits non-zero without touching the file on any pattern it
+does not recognise, rather than reporting a zero-edit success.
+
 ## CTH checks
 `npm run cth:unit` is the dependency-free suite (`tools/cth-test/*.test.mjs`,
 also runnable as `./tools/cth-test/run-all.sh`). `npm run cth:capture` and
