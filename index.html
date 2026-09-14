@@ -105,6 +105,10 @@
           <h2>Export</h2>
           <button id="btn-export-model" class="btn btn-primary" type="button">Download selected STL</button>
           <button id="btn-export-stl" class="btn btn-secondary" type="button" disabled>Export plate</button>
+          <label class="hint" for="cooling-profile" style="margin-bottom:4px;display:block">Cooling profile</label>
+          <select id="cooling-profile" title="Cooling / overhang-fan settings baked into the 3MF"></select>
+          <p class="hint" id="cooling-profile-note"></p>
+          <button id="btn-export-3mf" class="btn btn-secondary" type="button" disabled title="Bambu Studio project with cooling settings baked in">Export plate 3MF</button>
           <button id="btn-delete-model" class="btn btn-secondary" type="button">Delete model</button>
         </section>
         <section class="card card-compact">
@@ -205,6 +209,8 @@
   </div>
   <script src="NSO_Repair.js?v=inside4"></script>
   <script src="nso_planar_fuse.js?v=inside4"></script>
+  <script src="nso-cooling-profiles.js"></script>
+  <script src="nso-3mf.js"></script>
   <script src="app-core.js?v=inside4"></script>
   <script src="app-cut.js?v=inside4"></script>
   <script src="app-finish.js?v=inside4"></script>

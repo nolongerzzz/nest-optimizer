@@ -2496,6 +2496,9 @@ function setupUI() {
     setStatus('Cleared - click drop zone to load an STL again');
   });
   document.getElementById('btn-export-stl').addEventListener('click', exportSTLs);
+  const btn3mf = document.getElementById('btn-export-3mf');
+  if (btn3mf) btn3mf.addEventListener('click', export3MF);
+  setupCoolingProfileUI();
 
   // Manual adjust
   document.getElementById('btn-rot-left').addEventListener('click', () => rotateSelected(-1));
