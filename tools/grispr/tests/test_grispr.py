@@ -526,7 +526,7 @@ class TestSafeFailure(GrisprTestCase):
             "nested_start": "still open",
             "mismatched_stop": "does not match",
             "no_markers": "no object print-block markers found",
-            "object_id_markers_only": "does not use the marker pattern",
+            "object_id_markers_only": "distinct object ids",
         }
         for name, needle in cases.items():
             with self.subTest(fixture=name):
@@ -791,6 +791,135 @@ class TestIntegration(GrisprTestCase):
         path = self.write("a.gcode", fixtures.two_objects())
         self.assertEqual(run_cli(["--object", "1=255", path]).returncode, 0)
         self.assertIn(f"; {grispr.SENTINEL} processed by grispr", self.read(path))
+
+
+class TestInferredBlocks(GrisprTestCase):
+    """The '; OBJECT_ID:' only shape, as emitted by the real single-object slice.
+
+    Bambu Studio does not always write the labelled start/stop pair. The
+    reference file carries 105 '; OBJECT_ID: 518' markers and no start or stop
+    marker at all, so block ends are inferred.
+    """
+
+    def test_parses_one_block_per_layer(self) -> None:
+        doc = grispr.parse_gcode(grispr.split_lines(fixtures.object_id_single()))
+        self.assertEqual(doc.marker_mode, "object_id")
+        self.assertEqual(len(doc.blocks), 3)
+        self.assertEqual({b.object_id for b in doc.blocks}, {518})
+        self.assertEqual([b.layer for b in doc.blocks], [1, 2, 3])
+
+    def test_block_starts_on_the_object_id_line(self) -> None:
+        lines = grispr.split_lines(fixtures.object_id_single())
+        doc = grispr.parse_gcode(lines)
+        for block in doc.blocks:
+            self.assertRegex(lines[block.start_index], r"OBJECT_ID: 518")
+
+    def test_block_spans_the_timelapse_block_and_the_infill_after_it(self) -> None:
+        """The object's toolpath resumes after the timelapse, so it is included."""
+        lines = grispr.split_lines(fixtures.object_id_single())
+        doc = grispr.parse_gcode(lines)
+        body = lines[doc.blocks[0].start_index : doc.blocks[0].stop_index + 1]
+        self.assertIn("; SKIPPABLE_START", body)
+        self.assertIn("; SKIPPABLE_END", body)
+        self.assertIn("; FEATURE: Sparse infill", body)
+        self.assertIn("; WIPE_END", body)
+
+    def test_block_stops_before_the_next_layer(self) -> None:
+        lines = grispr.split_lines(fixtures.object_id_single())
+        doc = grispr.parse_gcode(lines)
+        for block in doc.blocks[:-1]:
+            after = lines[block.stop_index + 1 :]
+            next_real = next(l for l in after if grispr.strip_eol(l).strip())
+            self.assertRegex(next_real, r"CHANGE_LAYER")
+
+    def test_last_block_stops_at_the_final_extruding_move(self) -> None:
+        """End-of-print fan shutdown must fall OUTSIDE the last block.
+
+        Otherwise --hold comments it out and the fan runs on after the print.
+        """
+        lines = grispr.split_lines(fixtures.object_id_single())
+        doc = grispr.parse_gcode(lines)
+        last = doc.blocks[-1]
+        self.assertEqual(last.stop_index, grispr.last_extruding_move(lines))
+        tail = lines[last.stop_index + 1 :]
+        self.assertTrue(
+            any("turn off fan" in l for l in tail),
+            "the end-gcode fan shutdown was swallowed by the last block",
+        )
+
+    def test_hold_does_not_suppress_the_end_gcode_fan_shutdown(self) -> None:
+        text = fixtures.object_id_single()
+        path = self.write("real.gcode", text)
+        result = run_cli(["--hold", "--object", "518=255", path])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        modified = self.read(path)
+        for command in (
+            "M106 S0 ; turn off fan",
+            "M106 P2 S0 ; turn off remote part cooling fan",
+            "M106 P3 S0 ; turn off chamber cooling fan",
+        ):
+            self.assertIn(
+                "\n" + command,
+                modified,
+                f"{command!r} was suppressed - the fan would run on after the print",
+            )
+
+    def test_no_leak_in_inferred_mode(self) -> None:
+        text = fixtures.object_id_single()
+        for hold in (False, True):
+            with self.subTest(hold=hold):
+                path = self.write(f"h{int(hold)}.gcode", text)
+                args = (["--hold"] if hold else []) + ["--object", "518=255", path]
+                self.assertEqual(run_cli(args).returncode, 0)
+                self.assert_no_fan_leak(text, self.read(path), [518])
+
+    def test_fractional_fan_speed_is_restored_exactly(self) -> None:
+        """Bambu writes M106 S196.35; rounding it on restore would shift the fan."""
+        text = fixtures.object_id_single()
+        path = self.write("frac.gcode", text)
+        self.assertEqual(run_cli(["--object", "518=255", path]).returncode, 0)
+        modified = self.read(path)
+        self.assertIn("M106 S196.35 ; @grispr restore", modified)
+        self.assertIn("M106 S201.45 ; @grispr restore", modified)
+        self.assertNotIn("S196.0", modified)
+
+    def test_m107_not_introduced_into_a_file_that_never_uses_it(self) -> None:
+        text = fixtures.object_id_single()
+        self.assertNotIn("M107", text)
+        path = self.write("nom107.gcode", text)
+        self.assertEqual(run_cli(["--object", "518=0", path]).returncode, 0)
+        modified = self.read(path)
+        self.assertNotIn("M107", modified)
+        self.assertIn("M106 S0 ; @grispr force obj=518", modified)
+
+    def test_m107_still_used_where_the_file_uses_it(self) -> None:
+        text = fixtures.interleaved_with_slicer_fan()
+        self.assertIn("M107", text)
+        path = self.write("m107.gcode", text)
+        self.assertEqual(run_cli(["--object", "1=0", path]).returncode, 0)
+        self.assertIn("M107 ; @grispr force obj=1", self.read(path))
+
+    def test_multi_object_inferred_write_is_refused(self) -> None:
+        text = fixtures.object_id_markers_only()
+        path = self.write("multi.gcode", text)
+        result = run_cli(["--object", "1=255", path])
+        self.assertEqual(result.returncode, grispr.EXIT_PARSE)
+        self.assertIn("distinct object ids", result.stderr)
+        self.assertIn("labelling enabled", result.stderr)
+        self.assert_unchanged(path, text)
+
+    def test_multi_object_inferred_list_still_works(self) -> None:
+        path = self.write("multi.gcode", fixtures.object_id_markers_only())
+        result = run_cli(["--list", path])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("OBJECT_ID only", result.stdout)
+        self.assertIn("NOT verified", result.stderr)
+
+    def test_list_labels_the_marker_mode(self) -> None:
+        inferred = self.write("a.gcode", fixtures.object_id_single())
+        self.assertIn("OBJECT_ID only", run_cli(["--list", inferred]).stdout)
+        labelled = self.write("b.gcode", fixtures.two_objects())
+        self.assertIn("start/stop labels", run_cli(["--list", labelled]).stdout)
 
 
 class TestRandomised(GrisprTestCase):

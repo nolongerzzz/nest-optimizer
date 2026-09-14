@@ -155,9 +155,61 @@ settle it in one pass: export a 3-object plate, open it, slice it, and read the
 `; start printing object, unique label id:` values back against the object
 order NSO wrote.
 
-### Pending - nothing in the suite substitutes for this
+### Real file, run 2026-09-14 - three defects found, all fixed
 
-`--list` has never been run on a real sliced file. The marker pattern is
+107,548 lines, 105 layers, one object (`; OBJECT_ID: 518`), stock Bambu PLA
+Basic. Findings, in order of how much they mattered:
+
+1. **The file has no start/stop object markers at all.** 105 `; OBJECT_ID: 518`
+   comments, zero `start printing object` / `stop printing object`, zero
+   `object ids of layer`. Grispr exited 3 and wrote nothing - correct
+   fail-loud behaviour, but it could not read the file. It now has a second
+   marker mode that infers block ends from `; OBJECT_ID:` / `; CHANGE_LAYER` /
+   `; EXECUTABLE_BLOCK_END`. `--list` names which mode it used.
+   Note the terminator is the layer change, NOT the timelapse block: the
+   object's toolpath resumes after `; SKIPPABLE_END` and the sparse infill
+   after it belongs to the object.
+2. **The last inferred block swallowed the end gcode**, which contains
+   `M106 S0 ; turn off fan` plus the P2/P3 shutdowns. Under `--hold` those
+   would have been commented out and the fan left running after the print.
+   Inferred blocks are now clamped to the file's last extruding move, which
+   fixes it without depending on any comment.
+3. **Fan speeds are fractional** - `M106 S196.35` appears 1222 times - and the
+   file never uses `M107`, it writes `M106 S0`. Restores were rounding to int
+   and could introduce an `M107` the file never used. Both fixed.
+
+The measured number that matters for the module's story:
+
+    105 block(s) across 1 object(s); 105 forced, 23 restored, 5694 suppressed
+
+5694 of the file's 5735 fan commands sit INSIDE object blocks - about 54 per
+layer, mostly overhang forcing driving `M106 S255` (2856 occurrences). So
+boundary injection, the default, is overridden within a few lines on real
+Bambu output. `--hold` is the only mode that does anything lasting on a file
+like this. That is measured, not estimated, and it is the opposite of what the
+default implies - see limitation 2 in `tools/grispr/README.md`.
+
+Verification on the real file: full `--hold` run, output re-parses to the same
+105 blocks, `--force` reverts byte-for-byte to the original (5823 lines
+undone), end-gcode fan shutdown still executable.
+
+### Still open on the real-file front
+
+This plate is SINGLE object, so it cannot exercise the interleaved
+multi-object case that is the whole point of the module - that still rests on
+fixtures. It also has `exclude_object = 1` yet emits no start/stop markers and
+no `M624`/`M625`, which suggests Bambu only emits the labelling machinery for
+plates with more than one object. If that holds, real multi-object plates land
+in label mode and never need the inference. Decisive test is cheap: slice a
+2-object plate and `grep -c 'start printing object'`.
+
+Grispr refuses to WRITE to an inferred-mode file with more than one distinct
+object id, because the block-end guess is verified for the single-object shape
+only. `--list` still works on it.
+
+### The original pending note, kept for the record
+
+`--list` had never been run on a real sliced file before 2026-09-14. The marker pattern is
 confirmed against genuine Bambu output; Grispr's parser against that pattern is
 not. Next slice off either printer:
 

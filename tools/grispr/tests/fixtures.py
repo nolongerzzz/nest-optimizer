@@ -202,6 +202,51 @@ def crlf_two_objects() -> str:
     return two_objects().replace("\n", "\r\n")
 
 
+def object_id_single() -> str:
+    """Single object, '; OBJECT_ID:' per layer, NO start/stop markers.
+
+    Modelled on the real Bambu Studio slice (105 layers, object 518): the
+    layer-change machinery, a fractional fan speed, an embedded timelapse
+    block with more object toolpath AFTER it, and an end-of-print section whose
+    fan shutdown must stay outside the last inferred block.
+    """
+    parts = ["; EXECUTABLE_BLOCK_START", "M190 S60", "M109 S220", "G28"]
+    for layer_number in (1, 2, 3):
+        parts += [
+            "; CHANGE_LAYER",
+            f"; Z_HEIGHT: {round(0.2 * layer_number, 2)}",
+            f"; layer num/total_layer_count: {layer_number}/3",
+            "M991 S0 P0 ;notify layer change",
+            f"M106 S{[0, 196.35, 201.45][layer_number - 1]}",
+            "; OBJECT_ID: 518",
+            "; FEATURE: Outer wall",
+            f"G1 X{50 + layer_number} Y{70 + layer_number} E.4 F1800",
+            "; SKIPPABLE_START",
+            "; SKIPTYPE: timelapse",
+            "G1 X-13.0 F3000 ; move to safe pos",
+            "M400",
+            "; SKIPPABLE_END",
+            "; FEATURE: Sparse infill",
+            f"G1 X{60 + layer_number} Y{80 + layer_number} E.8 F1800",
+            "; WIPE_START",
+            f"G1 X{61 + layer_number} Y{81 + layer_number} E-.12",
+            "; WIPE_END",
+        ]
+    parts += [
+        "; close powerlost recovery",
+        "M1003 S0",
+        "; filament end gcode",
+        "M106 S0",
+        "M104 S0",
+        "M106 S0 ; turn off fan",
+        "M106 P2 S0 ; turn off remote part cooling fan",
+        "M106 P3 S0 ; turn off chamber cooling fan",
+        "M84",
+        "; EXECUTABLE_BLOCK_END",
+    ]
+    return "\n".join(parts) + "\n"
+
+
 def no_layer_markers() -> str:
     """Object markers present, but no layer markers at all."""
     return assemble([[*object_block(1), *object_block(2)]])
@@ -287,7 +332,12 @@ def no_markers() -> str:
 
 
 def object_id_markers_only() -> str:
-    """'; OBJECT_ID:' present but no start/stop label pairs."""
+    """Several objects, '; OBJECT_ID:' only, no start/stop pairs.
+
+    Writes must be refused here: with no stop markers and more than one object,
+    where each object's toolpath ends can only be guessed, and that guess is
+    verified for the single-object shape only.
+    """
     return "\n".join(
         [
             "; HEADER_BLOCK_START",
@@ -322,6 +372,7 @@ WELL_FORMED = {
     "crlf_two_objects": crlf_two_objects,
     "no_layer_markers": no_layer_markers,
     "manifest_mismatch": manifest_mismatch,
+    "object_id_single": object_id_single,
 }
 
 MALFORMED = {

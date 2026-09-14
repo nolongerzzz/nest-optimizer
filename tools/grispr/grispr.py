@@ -92,6 +92,10 @@ RE_LAYER_NUM = re.compile(
     r"^\s*;\s*layer\s+num/total_layer_count:\s*(\d+)\s*/", re.IGNORECASE
 )
 RE_CHANGE_LAYER = re.compile(r"^\s*;\s*(?:CHANGE_LAYER|LAYER_CHANGE)\s*$", re.IGNORECASE)
+RE_EXEC_BLOCK_END = re.compile(r"^\s*;\s*EXECUTABLE_BLOCK_END\s*$", re.IGNORECASE)
+# A move that lays down material: G0-G3 with a POSITIVE E. Retractions and wipe
+# moves carry a negative E and do not count.
+RE_EXTRUDING_MOVE = re.compile(r"^\s*G[0-3]\b.*\bE\d*\.?\d+", re.IGNORECASE)
 
 # --- fan command patterns ----------------------------------------------------
 
@@ -152,7 +156,19 @@ def detect_newline(lines: Sequence[str]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def parse_fan_command(line: str) -> Optional[Tuple[int, int]]:
+def format_speed(speed: float) -> str:
+    """Render a fan speed, keeping a fractional value the slicer wrote.
+
+    Bambu emits non-integer speeds (M106 S196.35 appears 1222 times in the
+    reference file), so rounding to int on restore would silently shift the
+    fan. Integral values still print without a decimal point.
+    """
+    if float(speed).is_integer():
+        return str(int(speed))
+    return f"{speed:g}"
+
+
+def parse_fan_command(line: str) -> Optional[Tuple[int, float]]:
     """Parse a fan command into (fan_index, speed 0-255), or None.
 
     Handles the forms Bambu Studio and Marlin emit:
@@ -170,28 +186,32 @@ def parse_fan_command(line: str) -> Optional[Tuple[int, int]]:
     if RE_M107.match(code):
         m_p = RE_PARAM_P.search(code)
         index = int(m_p.group(1)) if m_p else DEFAULT_FAN_INDEX
-        return (index, 0)
+        return (index, 0.0)
 
     if RE_M106.match(code):
         m_p = RE_PARAM_P.search(code)
         index = int(m_p.group(1)) if m_p else DEFAULT_FAN_INDEX
         m_s = RE_PARAM_S.search(code)
-        if m_s is None:
-            speed = 255
-        else:
-            speed = int(round(float(m_s.group(1))))
-        return (index, max(0, min(255, speed)))
+        speed = 255.0 if m_s is None else float(m_s.group(1))
+        return (index, max(0.0, min(255.0, speed)))
 
     return None
 
 
-def format_fan_command(index: int, speed: int, syntax: str) -> str:
-    """Render a fan command in the file's dominant syntax."""
-    if speed == 0 and syntax != "indexed" and index == DEFAULT_FAN_INDEX:
+def format_fan_command(
+    index: int, speed: float, syntax: str, use_m107: bool = False
+) -> str:
+    """Render a fan command in the file's own syntax.
+
+    `use_m107` is set only when the file itself uses M107. The reference Bambu
+    file writes "M106 S0" 6 times and M107 not once, so emitting M107 there
+    would introduce a form the rest of the file never uses.
+    """
+    if speed == 0 and use_m107 and syntax != "indexed" and index == DEFAULT_FAN_INDEX:
         return "M107"
     if syntax == "bare" and index == DEFAULT_FAN_INDEX:
-        return f"M106 S{speed}"
-    return f"M106 P{index} S{speed}"
+        return f"M106 S{format_speed(speed)}"
+    return f"M106 P{index} S{format_speed(speed)}"
 
 
 def detect_fan_syntax(lines: Iterable[str], fan_index: int) -> str:
@@ -210,6 +230,10 @@ def detect_fan_syntax(lines: Iterable[str], fan_index: int) -> str:
     if bare == 0 and indexed == 0:
         return "indexed"
     return "bare" if bare >= indexed else "indexed"
+
+
+def file_uses_m107(lines: Iterable[str]) -> bool:
+    return any(RE_M107.match(code_part(line)) for line in lines)
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +263,7 @@ class Block:
 @dataclass
 class Document:
     lines: List[str]
+    marker_mode: str = "label"  # 'label' (start/stop pairs) | 'object_id'
     blocks: List[Block] = field(default_factory=list)
     layer_manifest: Dict[int, List[int]] = field(default_factory=dict)
     object_id_markers: int = 0
@@ -253,6 +278,108 @@ def _parse_id_list(raw: str) -> List[int]:
         if chunk.isdigit():
             out.append(int(chunk))
     return out
+
+
+def last_extruding_move(lines: Sequence[str]) -> Optional[int]:
+    """Index of the final move that extrudes material.
+
+    Everything after it is end-of-print machinery by definition, whatever
+    comments the slicer does or does not wrap it in.
+    """
+    for index in range(len(lines) - 1, -1, -1):
+        if RE_EXTRUDING_MOVE.match(code_part(lines[index])):
+            return index
+    return None
+
+
+def parse_object_id_only(lines: List[str]) -> Document:
+    """Parse a file that carries '; OBJECT_ID: <id>' but no start/stop pairs.
+
+    Bambu Studio does not always emit the labelled start/stop pair. The
+    reference single-object file carries 105 '; OBJECT_ID: 518' markers - one
+    per layer - and not a single start or stop marker, so the end of each
+    object block has to be inferred rather than read.
+
+    The rule, checked against that file: a block runs from its '; OBJECT_ID:'
+    line to the line before whichever comes first of the next '; OBJECT_ID:',
+    the next '; CHANGE_LAYER', or '; EXECUTABLE_BLOCK_END'. Note that the
+    object's toolpath continues *after* the embedded timelapse block
+    (';  SKIPPABLE_START' ... ';  SKIPPABLE_END'), which is why the terminator
+    is the layer change and not the timelapse marker.
+
+    This inference is only verified for the single-object shape. Callers must
+    treat a multi-object file in this mode as unverified - see run().
+    """
+    doc = Document(lines=lines, marker_mode="object_id", newline=detect_newline(lines))
+
+    starts: List[Tuple[int, int]] = []  # (line index, object id)
+    terminators: List[int] = []
+    current_layer: Optional[int] = None
+    layer_at: Dict[int, Optional[int]] = {}
+
+    for index, raw in enumerate(lines):
+        line = strip_eol(raw)
+
+        if SENTINEL in line:
+            doc.previous_run_lines.append(index)
+
+        m_layer_num = RE_LAYER_NUM.match(line)
+        if m_layer_num:
+            current_layer = int(m_layer_num.group(1))
+            continue
+
+        m_object = RE_OBJECT_ID.match(line)
+        if m_object:
+            doc.object_id_markers += 1
+            starts.append((index, int(m_object.group(1))))
+            layer_at[index] = current_layer
+            terminators.append(index)
+            continue
+
+        if RE_CHANGE_LAYER.match(line) or RE_EXEC_BLOCK_END.match(line):
+            terminators.append(index)
+
+    terminators.sort()
+
+    # An inferred block must never run past the file's final extruding move.
+    # Without this, the last block swallows the end-of-print gcode: in the
+    # reference file that means the four fan-shutdown commands, and --hold
+    # would comment them out and leave the fan running after the print.
+    print_end = last_extruding_move(lines)
+
+    for position, (start_index, object_id) in enumerate(starts):
+        # first terminator strictly after this start
+        end_index = len(lines) - 1
+        for candidate in terminators:
+            if candidate > start_index:
+                end_index = candidate - 1
+                break
+        if print_end is not None and start_index <= print_end:
+            end_index = min(end_index, print_end)
+        # back up over trailing blank lines so the restore lands right after
+        # the object's last real command
+        while end_index > start_index and not strip_eol(lines[end_index]).strip():
+            end_index -= 1
+        doc.blocks.append(
+            Block(
+                object_id=object_id,
+                start_index=start_index,
+                stop_index=end_index,
+                layer=layer_at.get(start_index),
+                ordinal=position,
+            )
+        )
+
+    doc.warnings.append(
+        "this file has no 'start/stop printing object' markers; block ends were "
+        "inferred from '; OBJECT_ID:' / '; CHANGE_LAYER' boundaries"
+    )
+    if len({object_id for _, object_id in starts}) > 1:
+        doc.warnings.append(
+            "more than one object id in a file without start/stop markers: the "
+            "inferred block ends are NOT verified for this shape"
+        )
+    return doc
 
 
 def parse_gcode(lines: List[str]) -> Document:
@@ -351,14 +478,7 @@ def parse_gcode(lines: List[str]) -> Document:
 
     if not doc.blocks:
         if doc.object_id_markers:
-            raise GrisprError(
-                f"found {doc.object_id_markers} '; OBJECT_ID:' marker(s) but no "
-                f"'; start printing object, unique label id: <id>' / "
-                f"'; stop printing object, unique label id: <id>' pairs. This file "
-                f"does not use the marker pattern Grispr targets - it may be from a "
-                f"different slicer or a Bambu Studio version that labels objects "
-                f"differently. Refusing to modify it."
-            )
+            return parse_object_id_only(lines)
         raise GrisprError(
             "no object print-block markers found. Grispr expects Bambu Studio "
             "G-code containing '; start printing object, unique label id: <id>' and "
@@ -402,14 +522,16 @@ def parse_gcode(lines: List[str]) -> Document:
 # ---------------------------------------------------------------------------
 
 
-def original_fan_timeline(lines: Sequence[str], fan_index: int) -> List[Optional[int]]:
+def original_fan_timeline(
+    lines: Sequence[str], fan_index: int
+) -> List[Optional[float]]:
     """state_after[i] = managed fan speed after executing lines[0..i].
 
     None means the file has not yet issued any command for this fan, i.e. the
     printer's power-on default (off) is still in effect.
     """
-    state_after: List[Optional[int]] = [None] * len(lines)
-    state: Optional[int] = None
+    state_after: List[Optional[float]] = [None] * len(lines)
+    state: Optional[float] = None
     for index, line in enumerate(lines):
         parsed = parse_fan_command(line)
         if parsed is not None and parsed[0] == fan_index:
@@ -418,7 +540,9 @@ def original_fan_timeline(lines: Sequence[str], fan_index: int) -> List[Optional
     return state_after
 
 
-def state_before(state_after: Sequence[Optional[int]], index: int) -> Optional[int]:
+def state_before(
+    state_after: Sequence[Optional[float]], index: int
+) -> Optional[float]:
     return state_after[index - 1] if index > 0 else None
 
 
@@ -456,11 +580,12 @@ class Plan:
 
 def build_plan(
     doc: Document,
-    targets: Dict[int, int],
+    targets: Dict[int, float],
     fan_index: int,
     syntax: str,
     hold: bool,
     layer_range: Optional[Tuple[int, int]],
+    use_m107: bool = False,
 ) -> Plan:
     """Decide every edit. Pure function - performs no I/O and mutates nothing."""
     plan = Plan()
@@ -482,13 +607,13 @@ def build_plan(
     for block in selected:
         forced = targets[block.object_id]
         prior = state_before(state_after, block.start_index)
-        prior_text = "unset" if prior is None else f"S{prior}"
+        prior_text = "unset" if prior is None else "S" + format_speed(prior)
 
         plan.insertions.append(
             Insertion(
                 index=block.start_index,
                 text=(
-                    f"{format_fan_command(fan_index, forced, syntax)} "
+                    f"{format_fan_command(fan_index, forced, syntax, use_m107)} "
                     f"; {SENTINEL} force obj={block.object_id} "
                     f"prev={prior_text} layer={block.layer}"
                 ),
@@ -500,7 +625,7 @@ def build_plan(
         # Walk the block body to find where the fan actually ends up, both in the
         # modified file and in the original. Restoring to the *original* state at
         # the stop marker is what prevents leakage into whatever prints next.
-        actual: Optional[int] = forced
+        actual: Optional[float] = forced
         body = range(block.start_index + 1, block.stop_index + 1)
         for index in body:
             parsed = parse_fan_command(doc.lines[index])
@@ -519,7 +644,7 @@ def build_plan(
         original_at_stop = state_after[block.stop_index]
 
         if actual != original_at_stop:
-            restore_value = 0 if original_at_stop is None else original_at_stop
+            restore_value = 0.0 if original_at_stop is None else original_at_stop
             suffix = (
                 " (fan had no prior state in this file; restoring to off)"
                 if original_at_stop is None
@@ -529,9 +654,9 @@ def build_plan(
                 Insertion(
                     index=block.stop_index,
                     text=(
-                        f"{format_fan_command(fan_index, restore_value, syntax)} "
+                        f"{format_fan_command(fan_index, restore_value, syntax, use_m107)} "
                         f"; {SENTINEL} restore obj={block.object_id} "
-                        f"to={'off' if original_at_stop is None else f'S{original_at_stop}'}"
+                        f"to={'off' if original_at_stop is None else 'S' + format_speed(original_at_stop)}"
                         f"{suffix}"
                     ),
                     kind="restore",
@@ -542,7 +667,7 @@ def build_plan(
             plan.notes.append(
                 f"obj {block.object_id} block at line {block.start_line}: no restore "
                 f"needed, fan already matches the original state "
-                f"({'off' if original_at_stop is None else f'S{original_at_stop}'}) "
+                f"({'off' if original_at_stop is None else 'S' + format_speed(original_at_stop)}) "
                 f"at the stop marker"
             )
 
@@ -586,6 +711,15 @@ def format_block_map(doc: Document, fan_index: int) -> str:
         f"{doc.object_id_markers} '; OBJECT_ID:' marker(s); "
         f"{len(doc.layer_manifest)} layer manifest(s)"
     )
+    rows.append(
+        "marker mode: "
+        + (
+            "start/stop labels (block ends read from the file)"
+            if doc.marker_mode == "label"
+            else "OBJECT_ID only (block ends INFERRED at the next OBJECT_ID / "
+            "CHANGE_LAYER / EXECUTABLE_BLOCK_END)"
+        )
+    )
     rows.append("")
     rows.append(
         f"{'#':>4}  {'obj':>5}  {'layer':>6}  {'lines':>15}  "
@@ -598,8 +732,8 @@ def format_block_map(doc: Document, fan_index: int) -> str:
             f"{block.ordinal:>4}  {block.object_id:>5}  "
             f"{('-' if block.layer is None else block.layer):>6}  "
             f"{f'{block.start_line}-{block.stop_line}':>15}  "
-            f"{('off*' if entry is None else f'S{entry}'):>7}  "
-            f"{('off*' if exit_state is None else f'S{exit_state}'):>7}"
+            f"{('off*' if entry is None else 'S' + format_speed(entry)):>7}  "
+            f"{('off*' if exit_state is None else 'S' + format_speed(exit_state)):>7}"
         )
     rows.append("")
     rows.append("* 'off*' = no fan command issued yet; printer power-on default.")
@@ -735,7 +869,7 @@ def strip_previous_run(lines: List[str]) -> Tuple[List[str], int]:
 # ---------------------------------------------------------------------------
 
 
-def parse_fan_value(raw: str) -> int:
+def parse_fan_value(raw: str) -> float:
     """Accept 0-255, or a percentage like '60%'."""
     text = raw.strip()
     try:
@@ -757,8 +891,8 @@ def parse_fan_value(raw: str) -> int:
     return value
 
 
-def collect_targets(args: argparse.Namespace) -> Dict[int, int]:
-    targets: Dict[int, int] = {}
+def collect_targets(args: argparse.Namespace) -> Dict[int, float]:
+    targets: Dict[int, float] = {}
 
     for spec in args.object or []:
         if "=" not in spec:
@@ -1003,11 +1137,23 @@ def run(argv: Sequence[str]) -> int:
             say("--allow-missing: no matching objects, file left unchanged")
             return EXIT_OK
 
+    if doc.marker_mode == "object_id" and len({b.object_id for b in doc.blocks}) > 1:
+        raise GrisprError(
+            "this file has no 'start/stop printing object' markers and carries "
+            f"{len({b.object_id for b in doc.blocks})} distinct object ids, so the "
+            "end of each object's toolpath can only be guessed. That inference is "
+            "verified for the single-object shape only. Re-slice with object "
+            "labelling enabled so Bambu emits 'start/stop printing object' "
+            "markers, then run again. '--list' still works on this file.",
+            code=EXIT_PARSE,
+        )
+
     syntax = (
         detect_fan_syntax(doc.lines, args.fan_index)
         if args.fan_syntax == "auto"
         else args.fan_syntax
     )
+    use_m107 = file_uses_m107(doc.lines)
 
     plan = build_plan(
         doc=doc,
@@ -1016,6 +1162,7 @@ def run(argv: Sequence[str]) -> int:
         syntax=syntax,
         hold=args.hold,
         layer_range=layer_range,
+        use_m107=use_m107,
     )
 
     for warning in doc.warnings:
@@ -1048,7 +1195,7 @@ def run(argv: Sequence[str]) -> int:
     new_lines = apply_plan(doc, plan)
     sentinel_line = (
         f"; {SENTINEL} processed by grispr {VERSION}: "
-        f"{' '.join(sorted(f'{k}=S{v}' for k, v in targets.items()))} "
+        f"{' '.join(sorted(f'{k}=S{format_speed(v)}' for k, v in targets.items()))} "
         f"fan_index={args.fan_index} hold={int(args.hold)}"
         + ("\r" if doc.newline == "\r\n" else "")
     )
