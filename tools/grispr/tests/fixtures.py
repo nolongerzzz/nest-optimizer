@@ -179,6 +179,58 @@ def interleaved_with_slicer_fan() -> str:
     )
 
 
+def interleaved_with_transition_fan() -> str:
+    """Two objects with Bambu's real object-transition machinery between blocks.
+
+    Modelled on the real 2-object slice: 273 of its 335 object transitions carry
+    a fan command, and each block is wrapped in M624/M625 object-exclusion
+    commands. The transition fan belongs to the layer-change section, not to
+    either object, so a restore must not fight it - and the exclusion commands
+    must pass through untouched.
+    """
+    def block(object_id: int, mask: str, body: Sequence[str]) -> List[str]:
+        return [
+            f"; start printing object, unique label id: {object_id}",
+            f"M624 {mask}",
+            *body,
+            f"; stop printing object, unique label id: {object_id}",
+        ]
+
+    layers: List[List[str]] = []
+    for number, ambient in ((1, 191.25), (2, 193.8)):
+        layers.append(
+            [
+                "; CHANGE_LAYER",
+                f"; layer num/total_layer_count: {number}/2",
+                f"; object ids of layer {number} start: 197,237",
+                "M624 AwAAAAAAAAA=",
+                "M106 S255",
+                "; SKIPPABLE_START",
+                "; SKIPTYPE: timelapse",
+                "M400",
+                "; SKIPPABLE_END",
+                f"; object ids of this layer{number} end: 197,237",
+                f"M106 S{ambient}",
+                "M625",
+                # object 197, left and re-entered before 237 starts
+                *block(197, "AQAAAAAAAAA=", [f"G1 X{10 + number} Y10 E.4 F1800"]),
+                f"M106 S{ambient}",
+                "M625",
+                *block(197, "AQAAAAAAAAA=", [f"G1 X{20 + number} Y20 E.2 F1800"]),
+                "M625",
+                *block(237, "AgAAAAAAAAA=", [
+                    f"G1 X{30 + number} Y30 E.6 F1800",
+                    ";TYPE:Overhang perimeter",
+                    "M106 S255",
+                    f"G1 X{40 + number} Y40 E.3 F1200",
+                ]),
+                f"M106 S{ambient}",
+                "M625",
+            ]
+        )
+    return assemble(layers)
+
+
 def aux_fan() -> str:
     """Part cooling (P1/bare) and aux fan (P2) commands side by side."""
     return assemble(
@@ -373,6 +425,7 @@ WELL_FORMED = {
     "no_layer_markers": no_layer_markers,
     "manifest_mismatch": manifest_mismatch,
     "object_id_single": object_id_single,
+    "interleaved_with_transition_fan": interleaved_with_transition_fan,
 }
 
 MALFORMED = {

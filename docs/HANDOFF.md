@@ -95,24 +95,36 @@ runner whose Chromium predates the installed Playwright, set `CHROME_PATH`.
 ## Grispr - per-object fan control (G-code post-process, NOT wired in)
 
 `tools/grispr/grispr.py`, standalone Python 3, stdlib only. Full write-up:
-`tools/grispr/README.md`. Suite: `npm run grispr:test` (78 tests, 15 synthetic
+`tools/grispr/README.md`. Suite: `npm run grispr:test` (82 tests, 16 synthetic
 fixtures, plus 60 randomised layouts). Deliberately not in `npm test` - like
 repair / sculpt / planar fuse it is unwired, and `npm test` is all-node today.
 
-**NEXT CHECK - needs a 2-object slice, nothing else.** The one real file so far
-is a single-object plate, so the interleaved multi-object case - the entire
-point of this module - is still fixtures only. The next multi-piece plate
-export settles it. One command:
+**NEXT CHECK - ANSWERED 2026-09-14, non-zero.** A real 2-object slice
+(567,481 lines, 113 layers, objects 197 and 237) carries 336 balanced
+`start/stop printing object` pairs, 113 layer manifests and 898 `M624`/`M625`
+lines. The single-object file had none of those. So Bambu emits the labelling
+machinery only for plates with more than one object, real multi-object plates
+land in LABEL mode, and the inferred path only ever sees single-object files -
+where per-object fan control is moot anyway. The write-refusal on multi-object
+inferred files stays, as a guard against a shape that may not occur rather than
+one expected to fire. Nothing had to be lifted: that refusal was always scoped
+to `marker_mode == "object_id"`, so labelled multi-object writes were never
+blocked.
 
-    grep -c 'start printing object' plate.gcode
+Validated on that file: `--list` reads 336 blocks in label mode and flags true
+interleave on essentially every layer. Targeting object 197 alone, object 237's
+116 blocks spanning 389,156 lines show ZERO fan-state leaks, every one of the
+567,482 original lines survives byte-identical and in order, and `--force`
+reverts the 13.5 MB file byte-for-byte. First real-data proof of the no-leak
+claim.
 
-Non-zero means real multi-object plates carry the labelled start/stop markers,
-the inference path is never reached for them, and the write-refusal below costs
-nothing. Zero means multi-object files DO land in inferred mode, the refusal is
-load-bearing, and the block-end inference needs verifying for that shape before
-it can be lifted. Then run `--list` on the same file and check the block table
-against what the plate actually contains. Ping-pong: a bare `.gcode` drop off a
-multi-piece plate is this check.
+**It corrected a premise this module was built on.** The kickoff said fan state
+is untouched at object transitions. It is not: 273 of that file's 335
+transitions carry a fan command. Bambu wraps the layer-change/timelapse section
+in `M106 S255` ... `M106 S<ambient>` with `M624`/`M625` masks around each block.
+Those belong to the layer change, not to either object, so they sit between
+blocks and Grispr leaves them alone - but they are one more thing overwriting a
+forced value, which reinforces the --hold finding rather than softening it.
 
 It is the advanced-mode companion to the baked cooling exporter, not an
 alternative to it. The exporter owns the single-profile whole-plate case.
@@ -210,12 +222,9 @@ undone), end-gcode fan shutdown still executable.
 
 ### Still open on the real-file front
 
-This plate is SINGLE object - see NEXT CHECK at the top of this entry for the
-one test that closes the gap. The reason to expect labelled markers on a
-multi-object plate: this file has `exclude_object = 1` yet emits no start/stop
-markers and no `M624`/`M625` at all, which reads as Bambu only emitting the
-labelling machinery when there is more than one object to label. That is a
-hypothesis from one file, not a finding.
+That plate was SINGLE object. Closed by the 2-object slice - see NEXT CHECK at
+the top of this entry. The `exclude_object = 1` with no start/stop markers and
+no `M624`/`M625` was the tell, and it held.
 
 Grispr refuses to WRITE to an inferred-mode file with more than one distinct
 object id, because the block-end guess is verified for the single-object shape

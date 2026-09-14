@@ -253,14 +253,45 @@ roughly 54 fan changes per layer, mostly Bambu's overhang forcing driving
 `M106 S255` (2856 occurrences). See limitation 2: this is measured, not
 estimated, and it decides which mode is actually useful.
 
+### Against a real 2-object slice
+
+A second real file: 567,481 lines, 113 layers, two objects (197 and 237), 336
+balanced start/stop pairs. `--list` reads it in `label` mode as 336 blocks and
+flags true interleave — an object left and re-entered on the same layer — on
+essentially every layer, including the close-proximity case where 197 stops at
+2416 and 237 starts at 2418.
+
+Targeting object 197 alone and checking object 237's 116 blocks, spanning
+389,156 lines:
+
+```
+alignment OK: all 567482 original lines byte-identical and in order
+fan-state leaks INTO object 237: 0
+fan-state leaks anywhere outside object 197: 0
+```
+
+`--force` then reverts the 13.5 MB file byte-for-byte. This is the first
+validation of the no-leak claim on real interleaved data rather than fixtures.
+
+**It also corrected a premise this module was built on.** The original
+assumption was that fan state is untouched at object boundaries. It is not:
+**273 of that file's 335 object transitions carry a fan command.** Bambu wraps
+the layer-change and timelapse section in `M106 S255` … `M106 S<ambient>`, with
+`M624`/`M625` object-exclusion masks around each block. Those commands belong
+to the layer change rather than to either object, so they fall between blocks
+and Grispr leaves them alone — but they are one more thing overwriting a forced
+value, reinforcing limitation 2.
+
 ### Against fixtures
 
-`tools/grispr/tests/` contains 78 tests over 15 synthetic fixtures (9
+`tools/grispr/tests/` contains 82 tests over 16 synthetic fixtures (10
 well-formed, 6 deliberately malformed), including an interleaved 3-object file
 where two objects are each entered twice on the same layer, and a fixture
 modelled on the real single-object slice above — layer machinery, fractional
 fan speeds, an embedded timelapse block with object toolpath after it, and an
-end-of-print fan shutdown that must stay outside the last inferred block.
+end-of-print fan shutdown that must stay outside the last inferred block —
+and one modelled on the real 2-object slice, carrying `M624`/`M625` exclusion
+masks and between-block transition fan commands.
 
 ```bash
 cd tools/grispr && python3 -m unittest discover -s tests
@@ -287,19 +318,18 @@ without touching the input.
 
 These are real and worth reading before you rely on this.
 
-1. **The multi-object case is still synthetic.** The real file validated the
-   parser, the safety rails and the inferred-block path — but it is a
-   *single-object* plate, so it cannot exercise the interleaved multi-object
-   case that is Grispr's actual reason to exist. That still rests on fixtures.
-   It is also, awkwardly, a plate on which per-object fan control has nothing to
-   do: with one object you would set the filament profile instead.
+1. **Bambu emits the labelling machinery only for multi-object plates.**
+   Confirmed across two real slices. The single-object file has
+   `exclude_object = 1` yet no start/stop markers and no `M624`/`M625` at all;
+   the 2-object file has 336 balanced start/stop pairs, 113 layer manifests and
+   898 `M624`/`M625` lines.
 
-   Worth noting: that file has `exclude_object = 1` yet emits no start/stop
-   markers and no `M624`/`M625`. The hypothesis is that Bambu only emits the
-   labelling machinery for plates with more than one object — which would mean
-   real multi-object plates land in `label` mode and never need the inference.
-   Unverified, and the decisive test is cheap: slice a 2-object plate and
-   `grep -c 'start printing object'`.
+   The practical consequence is good: **real multi-object plates land in
+   `label` mode**, where block ends are read rather than inferred. The inferred
+   path only ever sees single-object files, where per-object fan control is
+   moot anyway. The write-refusal on multi-object *inferred* files is therefore
+   a guard against a shape that may not occur in practice — it is kept because
+   it costs nothing, not because it is expected to fire.
 
 2. **Boundary injection is close to useless on real Bambu output. Measured.**
    By default the slicer's own fan commands inside the object still execute, so
