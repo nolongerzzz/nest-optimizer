@@ -2147,6 +2147,8 @@ function selectPlaced(idx) {
 function updateExportButton() {
   const exportBtn = document.getElementById('btn-export-stl');
   if (exportBtn) exportBtn.disabled = state.placed.length === 0;
+  const export3mfBtn = document.getElementById('btn-export-3mf');
+  if (export3mfBtn) export3mfBtn.disabled = state.placed.length === 0;
 }
 
 function updateAdjustUI() {
@@ -2537,6 +2539,144 @@ function exportSTLs() {
     console.error(err);
     setStatus('Export failed - check console', true);
   }
+}
+
+
+// ===================== 3MF export (baked cooling settings) =====================
+// Writes a Bambu Studio project with the selected cooling profile baked into
+// Metadata/project_settings.config. The profile table lives in
+// nso-cooling-profiles.js, the archive writer in nso-3mf.js; both are plain
+// classic scripts loaded ahead of this one, and both also run under Node so
+// tools/3mf-test can exercise the same code.
+
+const COOLING_PROFILE_STORAGE_KEY = 'nso.coolingProfile';
+
+function getCoolingProfileId() {
+  const sel = document.getElementById('cooling-profile');
+  if (sel && sel.value) return sel.value;
+  const Profiles = window.NSOCoolingProfiles;
+  return Profiles ? Profiles.DEFAULT_PROFILE_ID : 'default';
+}
+
+function updateCoolingProfileNote() {
+  const Profiles = window.NSOCoolingProfiles;
+  const note = document.getElementById('cooling-profile-note');
+  if (!Profiles || !note) return;
+  const profile = Profiles.getProfile(getCoolingProfileId());
+  if (!profile) { note.textContent = ''; return; }
+  note.textContent = profile.tuned
+    ? profile.note
+    : profile.note + ' Exports identical to Default for now.';
+}
+
+function setupCoolingProfileUI() {
+  const Profiles = window.NSOCoolingProfiles;
+  const sel = document.getElementById('cooling-profile');
+  if (!Profiles || !sel) return;
+
+  sel.innerHTML = '';
+  Profiles.listProfiles().forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.label;
+    sel.appendChild(opt);
+  });
+
+  let saved = null;
+  try { saved = localStorage.getItem(COOLING_PROFILE_STORAGE_KEY); } catch (e) {}
+  sel.value = Profiles.hasProfile(saved) ? saved : Profiles.DEFAULT_PROFILE_ID;
+
+  sel.addEventListener('change', () => {
+    try { localStorage.setItem(COOLING_PROFILE_STORAGE_KEY, sel.value); } catch (e) {}
+    updateCoolingProfileNote();
+    const profile = Profiles.getProfile(sel.value);
+    setStatus('Cooling profile: ' + (profile ? profile.label : sel.value));
+  });
+
+  updateCoolingProfileNote();
+}
+
+/**
+ * One 3MF object per placed piece, in absolute plate coordinates.
+ *
+ * The transform chain is buildCombinedGeometry()'s, kept per piece instead of
+ * merged so Bambu Studio shows separate objects. The packer works plate-centred
+ * with Three.js Y up; Bambu wants Z up with the plate origin at the front-left
+ * corner, so the same (x, y, z) -> (x, -z, y) swap applies and then a shift by
+ * half the plate.
+ */
+function buildPlacedObjects3MF() {
+  const plate = getCurrentPlate();
+  const halfW = plate.w / 2;
+  const halfD = plate.d / 2;
+
+  return state.placed.map((p, i) => {
+    const geo = p.geometry.clone();
+    const tip = (p.tipX || 0) * (Math.PI / 2) + ((p.tiltX || 0) * Math.PI / 180);
+    const flip = p.flipX ? Math.PI : 0;
+    if (tip || flip) geo.rotateX(tip + flip);
+    const rotY = p.rotY != null ? p.rotY : (p.rotated ? Math.PI / 2 : 0);
+    if (rotY) geo.rotateY(rotY);
+    const roll = (p.tipZ || 0) * (Math.PI / 2) + ((p.tiltZ || 0) * Math.PI / 180);
+    if (roll) geo.rotateZ(roll);
+    geo.translate(p.x, p.height / 2, p.z);
+
+    const pos = geo.attributes.position;
+    const flat = [];
+    for (let v = 0; v < pos.count; v++) {
+      flat.push(
+        pos.getX(v) + halfW,   // Bambu X
+        -pos.getZ(v) + halfD,  // Bambu Y
+        pos.getY(v)            // Bambu Z (height, plate at 0)
+      );
+    }
+    const mesh = window.NSO3MF.indexTriangleSoup(flat);
+    return {
+      name: p.name || ('piece_' + (i + 1)),
+      vertices: mesh.vertices,
+      triangles: mesh.triangles
+    };
+  });
+}
+
+function export3MF() {
+  if (!window.NSO3MF || !window.NSOCoolingProfiles) {
+    setStatus('3MF modules failed to load - check console', true);
+    return Promise.resolve(null);
+  }
+  if (!state.placed.length) {
+    setStatus('Nothing to export - run Optimize first', true);
+    return Promise.resolve(null);
+  }
+
+  const profileId = getCoolingProfileId();
+  setStatus('Building 3MF...');
+
+  let objects;
+  try {
+    objects = buildPlacedObjects3MF();
+  } catch (err) {
+    console.error(err);
+    setStatus('Export failed while reading the plate - check console', true);
+    return Promise.resolve(null);
+  }
+
+  const plate = getCurrentPlate();
+  return window.NSO3MF.build3MF({ objects, profileId, plateName: plate.name })
+    .then(result => {
+      const blob = new Blob([result.bytes], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' });
+      const plateName = plate.name.replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>]/g, '');
+      const filename = `nest_${plateName}_${state.placed.length}pcs.3mf`;
+      downloadBlob(blob, filename);
+      const profile = window.NSOCoolingProfiles.getProfile(result.profileId);
+      setStatus(`Downloaded ${filename} - cooling profile "${profile ? profile.label : result.profileId}" baked in`);
+      return result;
+    })
+    .catch(err => {
+      console.error(err);
+      setStatus('3MF export failed: ' + (err && err.message ? err.message : 'unknown error'), true);
+      return null;
+    });
 }
 
 

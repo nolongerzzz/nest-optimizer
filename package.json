@@ -6,8 +6,10 @@
   "scripts": {
     "cth:unit": "sh tools/cth-test/run-all.sh",
     "cth:capture": "node tools/cth-test/capture-check.mjs",
-    "test": "sh tools/cth-test/run-all.sh && node tools/cth-test/capture-check.mjs && node tools/cth-test/drive-check.mjs",
-    "cth:drive": "node tools/cth-test/drive-check.mjs"
+    "cth:drive": "node tools/cth-test/drive-check.mjs",
+    "3mf:roundtrip": "node tools/3mf-test/roundtrip-check.js",
+    "3mf:drive": "node tools/3mf-test/export-drive-check.mjs",
+    "test": "sh tools/cth-test/run-all.sh && node tools/cth-test/capture-check.mjs && node tools/cth-test/drive-check.mjs && node tools/3mf-test/roundtrip-check.js && node tools/3mf-test/export-drive-check.mjs"
   },
   "devDependencies": {
     "playwright": "^1.47.0",
