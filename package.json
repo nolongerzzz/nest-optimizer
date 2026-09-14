@@ -1,0 +1,15 @@
+{
+  "name": "nest-optimizer",
+  "version": "0.0.0",
+  "private": true,
+  "description": "3D print optimizer. Node is only used for the checks under tools/ - the app itself is plain classic scripts served as static files.",
+  "scripts": {
+    "cth:unit": "sh tools/cth-test/run-all.sh",
+    "cth:capture": "node tools/cth-test/capture-check.mjs",
+    "test": "sh tools/cth-test/run-all.sh && node tools/cth-test/capture-check.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.47.0",
+    "three": "0.147.0"
+  }
+}
