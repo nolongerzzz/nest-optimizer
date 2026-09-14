@@ -95,9 +95,24 @@ runner whose Chromium predates the installed Playwright, set `CHROME_PATH`.
 ## Grispr - per-object fan control (G-code post-process, NOT wired in)
 
 `tools/grispr/grispr.py`, standalone Python 3, stdlib only. Full write-up:
-`tools/grispr/README.md`. Suite: `npm run grispr:test` (65 tests, 14 synthetic
+`tools/grispr/README.md`. Suite: `npm run grispr:test` (78 tests, 15 synthetic
 fixtures, plus 60 randomised layouts). Deliberately not in `npm test` - like
 repair / sculpt / planar fuse it is unwired, and `npm test` is all-node today.
+
+**NEXT CHECK - needs a 2-object slice, nothing else.** The one real file so far
+is a single-object plate, so the interleaved multi-object case - the entire
+point of this module - is still fixtures only. The next multi-piece plate
+export settles it. One command:
+
+    grep -c 'start printing object' plate.gcode
+
+Non-zero means real multi-object plates carry the labelled start/stop markers,
+the inference path is never reached for them, and the write-refusal below costs
+nothing. Zero means multi-object files DO land in inferred mode, the refusal is
+load-bearing, and the block-end inference needs verifying for that shape before
+it can be lifted. Then run `--list` on the same file and check the block table
+against what the plate actually contains. Ping-pong: a bare `.gcode` drop off a
+multi-piece plate is this check.
 
 It is the advanced-mode companion to the baked cooling exporter, not an
 alternative to it. The exporter owns the single-profile whole-plate case.
@@ -195,13 +210,12 @@ undone), end-gcode fan shutdown still executable.
 
 ### Still open on the real-file front
 
-This plate is SINGLE object, so it cannot exercise the interleaved
-multi-object case that is the whole point of the module - that still rests on
-fixtures. It also has `exclude_object = 1` yet emits no start/stop markers and
-no `M624`/`M625`, which suggests Bambu only emits the labelling machinery for
-plates with more than one object. If that holds, real multi-object plates land
-in label mode and never need the inference. Decisive test is cheap: slice a
-2-object plate and `grep -c 'start printing object'`.
+This plate is SINGLE object - see NEXT CHECK at the top of this entry for the
+one test that closes the gap. The reason to expect labelled markers on a
+multi-object plate: this file has `exclude_object = 1` yet emits no start/stop
+markers and no `M624`/`M625` at all, which reads as Bambu only emitting the
+labelling machinery when there is more than one object to label. That is a
+hypothesis from one file, not a finding.
 
 Grispr refuses to WRITE to an inferred-mode file with more than one distinct
 object id, because the block-end guess is verified for the single-object shape
