@@ -922,6 +922,66 @@ class TestInferredBlocks(GrisprTestCase):
         self.assertIn("start/stop labels", run_cli(["--list", labelled]).stdout)
 
 
+class TestObjectTransitions(GrisprTestCase):
+    """Bambu's real object-transition machinery, from the 2-object slice.
+
+    The kickoff premise for this module was that fan state is untouched at
+    object boundaries. The real file says otherwise: 273 of its 335 object
+    transitions carry a fan command. Those belong to the layer-change section
+    rather than to either object, so they must survive untouched.
+    """
+
+    def test_exclusion_commands_pass_through(self) -> None:
+        text = fixtures.interleaved_with_transition_fan()
+        path = self.write("t.gcode", text)
+        self.assertEqual(run_cli(["--object", "197=255", path]).returncode, 0)
+        modified = self.read(path)
+        for mask in ("M624 AQAAAAAAAAA=", "M624 AgAAAAAAAAA=", "M624 AwAAAAAAAAA="):
+            self.assertIn(mask, modified)
+        self.assertEqual(text.count("M625"), modified.count("M625"))
+
+    def test_transition_fan_commands_are_not_touched(self) -> None:
+        """They sit between blocks, so they are outside every targeted range."""
+        text = fixtures.interleaved_with_transition_fan()
+        for target in (197, 237):
+            with self.subTest(target=target):
+                path = self.write(f"t{target}.gcode", text)
+                self.assertEqual(
+                    run_cli(["--hold", "--object", f"{target}=64", path]).returncode, 0
+                )
+                modified = self.read(path)
+                self.assertEqual(
+                    modified.count(f"; {grispr.SENTINEL} suppressed: M106 S191.25"),
+                    0,
+                    "a between-block transition fan command was suppressed",
+                )
+                self.assert_no_fan_leak(text, modified, [target])
+
+    def test_no_leak_with_close_proximity_reentry(self) -> None:
+        """197 stops and restarts before 237 begins - the real file's wrinkle."""
+        text = fixtures.interleaved_with_transition_fan()
+        doc = grispr.parse_gcode(grispr.split_lines(text))
+        layer1 = [b.object_id for b in doc.blocks if b.layer == 1]
+        self.assertEqual(layer1, [197, 197, 237])
+        for target in (197, 237):
+            with self.subTest(target=target):
+                path = self.write(f"r{target}.gcode", text)
+                self.assertEqual(
+                    run_cli(["--object", f"{target}=255", path]).returncode, 0
+                )
+                self.assert_no_fan_leak(text, self.read(path), [target])
+
+    def test_labelled_multi_object_write_is_allowed(self) -> None:
+        """The inferred-mode refusal must not catch a labelled multi-object file."""
+        text = fixtures.interleaved_with_transition_fan()
+        path = self.write("t.gcode", text)
+        result = run_cli(["--object", "197=255", "--object", "237=0", path])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotIn("distinct object ids", result.stderr)
+        self.assertIn("force obj=197", self.read(path))
+        self.assertIn("force obj=237", self.read(path))
+
+
 class TestRandomised(GrisprTestCase):
     """Property check: the no-leak invariant should hold for arbitrary layouts.
 
