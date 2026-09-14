@@ -333,12 +333,14 @@ a feature term.
 Three findings land on code this ticket did NOT touch. They matter for the
 merge-order pass because each is someone else's gate:
 
-1. `NSO_weldEpsFor` (app-join.js) caps the weld tolerance at the strict
-   minimum edge, so a handful of slivers set the tolerance for a whole mesh.
-   On the tape fixture 2 edges out of 98,586 drag it to 5e-6 and the part
-   reads as 1402 open edges; it welds to V-E+F 2, 0 open at 3e-5.
-   `NSO_sculptWeldTol` in app-sculpt.js carries the fix. Both booleans still
-   run the old rule.
+1. ~~`NSO_weldEpsFor` (app-join.js) caps the weld tolerance at the strict
+   minimum edge~~ — FIXED in weld-eps1. It now rejects the bottom 0.1% of
+   edges that sit >=4x below the next edge up, so the tape's 2 slivers no
+   longer pin the mesh: 4.997e-6 -> 4.2397e-5, and the part reads 0 open
+   instead of 1402 (NSO_buildAdjacency) / 4 (NSO_edgeStats). All five call
+   sites (2 in NSO_unionSoups, 2 in subtractSoupBFromA, 1 in
+   joinSelectedModels) inherit it. 50 of 51 repo fixtures are bit-identical.
+   `NSO_sculptWeldTol` stays for now — see docs/SCULPT-TIER1.md.
 2. `NSO_edgeStats` and `rawCheckWatertightQuick` weld by coordinate
    rounding, so neither can see a backwards-wound face: it pairs every edge
    and reads 0 open while the volume is wrong. `NSO_buildAdjacency` counts

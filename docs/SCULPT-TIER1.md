@@ -54,8 +54,12 @@ the longer population *unless* the short edges exceed 1% of the mesh, in
 which case they are the piece's real feature scale (the wrapped-surface case
 the original cap was written for) and the strict minimum is right. Tape mesh
 now welds at 4.2e-5: 0 open, 0 non-manifold, V−E+F = 2. Both branches have a
-test in section 0. **`NSO_weldEpsFor` still has the original behaviour and is
-used by both booleans — not changed here, but it is the same bug.**
+test in section 0. **`NSO_weldEpsFor` (app-join.js) carried the same bug and
+is now FIXED** (weld-eps1): it rejects slivers by the gap in the mesh's own
+edge distribution rather than by `want`, because the booleans ask 0.08/0.22 —
+far above the feature scale — where a `want`-keyed split is a no-op. It lands
+on the same 4.2e-5 for the tape. `NSO_sculptWeldTol` is unchanged and still
+correct at its 1e-4 default; see "Not fixed here" for why it stays.
 
 **2. Undirected edge pairing does not detect a backwards face.** A mesh with
 a face wound the wrong way pairs every edge and reads 0 open / 0
@@ -114,7 +118,12 @@ parameter that decides how much of a part global smoothing touches.
 
 ## Not fixed here
 
-- `NSO_weldEpsFor` (app-join.js) carries finding 1's bug for both booleans.
+- ~~`NSO_weldEpsFor` (app-join.js) carries finding 1's bug for both booleans.~~
+  FIXED in weld-eps1. `NSO_sculptWeldTol` is kept, not retired onto it: it is
+  keyed off `want`, so it still returns the sliver-poisoned 4.997e-6 for a
+  coarse ask, and app-sculpt.js loads *before* app-join.js and is loaded alone
+  by `tools/sculpt_selftest.js`. Unifying them needs the helper hoisted into a
+  file both can see (app-core.js) — its own scoped pass.
 - `NSO_edgeStats` / `rawCheckWatertightQuick` weld by coordinate rounding, so
   they cannot see finding 2 at all and they mis-report finding 1's mesh in the
   other direction (0 open at 1e-4 buckets). `NSO_sculptMetrics` reports the

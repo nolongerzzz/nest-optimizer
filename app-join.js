@@ -1095,21 +1095,56 @@ function NSO_manifoldStats(man) {
    near-coincident vertices still merge, real geometry never does. An
    imported mesh has normal-length edges and keeps the tolerance it always
    had.
+
+   The shortest edge is a MINIMUM, though, and a minimum is an outlier
+   statistic: one degenerate sliver anywhere sets the tolerance for every
+   other triangle. On fixtures/tape_on-edge-single-B101_rounded_v8_FINAL.stl
+   2 edges out of 98,586 measure 1.499e-5 while the next-shortest is
+   1.272e-4 - 8.5x longer. The strict minimum drags the cap to 4.997e-6, and
+   at that tolerance the float32 rounding in the STL keeps vertex pairs
+   apart and the part reads as 1402 open edges. It is not open: anywhere in
+   2e-5 .. 3e-4 it welds to V-E+F = 2, 0 open, 0 non-manifold. Two slivers
+   cost a sound mesh its topology, and both booleans then fail it.
+
+   So reject the slivers before taking the minimum, and tell them from real
+   fine detail by the gap that separates them: walk up the sorted edge
+   lengths and cut at the first jump of GAPx or more. Two bounds keep that
+   honest. Only the bottom 0.1% of edges may be called slivers - past that a
+   short edge is the piece's feature scale, not a defect (a wrapped surface
+   at 0.034 mm is pervasive, not an outlier), and the strict minimum is
+   right. And 0.1% is zero until a mesh has 1000 edges, so small parts keep
+   the exact tolerance they always had. GAP sits on a 3x..8x plateau where
+   the tape lands on the same 4.24e-5 that NSO_buildAdjacency picks for it
+   independently; 4 is the middle of that plateau.
+
+   Same split that NSO_sculptWeldTol (app-sculpt.js) proved - slivers apart
+   from pervasive fine detail - but keyed off the mesh's own edge
+   distribution rather than off `want`, because the booleans ask for 0.08
+   and 0.22, far above the feature scale of the meshes that carry slivers.
    ===================================================================== */
 function NSO_weldEpsFor(soup, want) {
   var n = (soup && soup.length) ? (soup.length / 9) | 0 : 0;
   if (!n) return want;
-  var minE = Infinity;
+  var lens = new Float64Array(n * 3), m = 0;
   for (var t = 0; t < n; t++) {
     var o = t * 9;
     for (var e = 0; e < 3; e++) {
       var a = o + e * 3, b = o + ((e + 1) % 3) * 3;
       var L = Math.hypot(soup[a] - soup[b], soup[a + 1] - soup[b + 1], soup[a + 2] - soup[b + 2]);
-      if (L > 1e-9 && L < minE) minE = L;
+      if (L > 1e-9) lens[m++] = L;
     }
   }
-  if (!isFinite(minE)) return want;
-  return Math.min(want, minE / 3);
+  if (!m) return want;
+  lens = lens.subarray(0, m);
+  lens.sort();
+  var SLIVER_FRAC = 0.001;   // at most the bottom 0.1% of edges may be called slivers
+  var SLIVER_GAP = 4;        // a sliver sits >= 4x below the next edge up
+  var limit = (m * SLIVER_FRAC) | 0;   // 0 below 1000 edges: small parts unchanged
+  var cut = 0;
+  for (var i = 0; i < limit; i++) {
+    if (lens[i + 1] >= lens[i] * SLIVER_GAP) { cut = i + 1; break; }
+  }
+  return Math.min(want, lens[cut] / 3);
 }
 
 /* =====================================================================
