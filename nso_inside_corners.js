@@ -44,8 +44,16 @@
    shape: the floor's four vertices and four floor edges carry the
    setback, and the four vertical wall edges stay square — which is
    what corners8 does on the outside and what neither wrap mode can
-   express. The paint / skip-list logic (mask6, inside3) is untouched:
-   this reads a pocket box and hands back a soup.
+   express.
+
+   The paint skip list
+   -------------------
+   Standing rule, owner's decision: a painted / excluded face stays
+   untouched by ANY bake mechanism, not only the one the paint system
+   shipped with. So `opts.skip` is required, not optional, and this
+   bake stands down and names the face rather than treating one that
+   was painted out. mask6's own logic is read, never re-derived — the
+   grid handed in is the one `brickSkipLists` already produces.
 
    The lid rim stays sharp for the same reason it does in the shipped
    path, and by the same mechanism: the plug is pushed 2R+1 past its
@@ -172,22 +180,109 @@ function NSO_insidePlanPlug(box, R, engine, boxSoup) {
   return { plug: plug, lo: lo, hi: hi, floorKeepMin: floorKeepMin, over: over, score: score };
 }
 
+/* ---- the mask6 paint skip list ----
+
+   Standing rule, owner's decision: a painted / excluded face stays untouched
+   by ANY bake mechanism, not only the one the paint system shipped with. So
+   this bake reads the same skip list the wrap reads, and refuses rather than
+   touching a face the owner painted out.
+
+   The skip list is the wrap's own [axis][side] grid, where side 0 is the
+   PLUG box's low face on that axis - byte for byte what `brickSkipLists`
+   returns as its `pocket` half and what `nsoWrapBrick` passes to
+   `rawWrapSolid`. It is taken as given, never re-derived here: app-mask.js is
+   explicit that working out which face was meant from a plane and a bounding
+   box is the second mapping that put the yellow on one face and the exclude
+   on another, and this module is not going to be a third one. */
+
+/* The [axis][side] cell the pocket FLOOR sits in. A pocket opening the +side
+   has its floor at the plug's low face on that axis, and vice versa. */
+function NSO_insideFloorCell(box) { return [box.axis, box.side ? 0 : 1]; }
+
+/* 'X+' / 'Z-' etc, the same face naming wrapPocketBrickRun uses in its status
+   line, so a refusal here names a face the way the rest of the app does.
+   side 1 is keepMin, which the app writes as '-'. */
+function NSO_insideFaceName(a, s) { return 'XYZ'.charAt(a) + (s ? '-' : '+'); }
+
+/* Build the grid from the faces `rawBoxPockets` already recorded, with the
+   caller's own isPainted predicate - the same two lines wrapPocketsInPlace
+   uses. For the `rawPocketBrick` path there is nothing to build: pass
+   `brickSkipLists(brick, faceList, soup).pocket` straight in. */
+function NSO_insidePocketSkip(pocket, isPainted) {
+  var skip = [[false, false], [false, false], [false, false]];
+  var faces = pocket && pocket.faces;
+  if (!faces || typeof isPainted !== 'function') return skip;
+  for (var i = 0; i < faces.length; i++) {
+    var f = faces[i];
+    if (isPainted(f.axisIdx, f.keepMin, f.at)) skip[f.axisIdx][f.keepMin ? 1 : 0] = true;
+  }
+  return skip;
+}
+
+/* Which of the faces this bake would touch are painted out.
+
+   The treatment reaches the pocket FLOOR (the plug's treated cap) and all
+   FOUR WALLS, which it trims to depth R. It does not reach the mouth - the
+   plug is pushed past it - so paint on the mouth, or anywhere on the hull, is
+   none of this bake's business and does not stop it. */
+function NSO_insidePaintCheck(box, skip) {
+  var floor = NSO_insideFloorCell(box);
+  var hit = [];
+  if (skip[floor[0]][floor[1]]) hit.push({ what: 'floor', name: NSO_insideFaceName(floor[0], floor[1]) });
+  for (var a = 0; a < 3; a++) {
+    if (a === box.axis) continue;
+    for (var s = 0; s < 2; s++)
+      if (skip[a][s]) hit.push({ what: 'wall', name: NSO_insideFaceName(a, s) });
+  }
+  return { painted: hit, any: hit.length > 0, floorCell: floor };
+}
+
 /* The bake.
 
    `ops` supplies the two kernel calls the app already carries:
    { union, subtract }, each (a, b) -> Promise<{ ok, soup, reason }>.
    In the app those are `nsoUnionSoups` and `nsoSubtractSoups`.
    `deps` supplies { engine, boxSoup } as above.
+   `opts.skip` is the pocket's [axis][side] paint grid, and is REQUIRED -
+   see NSO_insidePocketSkip. There is no default, deliberately: a default of
+   "nothing is painted" is the one a caller gets by forgetting, and the whole
+   point of the rule is that forgetting must not bake over paint. An unpainted
+   piece passes [[false,false],[false,false],[false,false]] and says so.
 
    Fail-safe contract, same as every other bake in this app: any refusal
    returns { ok:false, reason } and the caller's soup is untouched. */
-function NSO_insideCornersBake(soup, pocket, R, deps, ops) {
+function NSO_insideCornersBake(soup, pocket, R, deps, ops, opts) {
   var box = NSO_insidePocketBox(pocket);
   if (!box) return Promise.resolve({ ok: false, reason: 'not a pocket box this module can read' });
   if (!deps || typeof deps.engine !== 'function' || typeof deps.boxSoup !== 'function')
     return Promise.resolve({ ok: false, reason: 'no setback engine handed in' });
   if (!ops || typeof ops.union !== 'function' || typeof ops.subtract !== 'function')
     return Promise.resolve({ ok: false, reason: 'no CSG kernel handed in' });
+
+  var skip = opts && opts.skip;
+  if (!skip || skip.length !== 3 || !skip[0] || !skip[1] || !skip[2])
+    return Promise.resolve({ ok: false, reason: 'no paint skip list handed in - pass opts.skip ' +
+                                                '([[false,false],[false,false],[false,false]] for an ' +
+                                                'unpainted piece). A bake never assumes nothing is painted' });
+
+  /* A painted face stops the whole bake, and that is not laziness about a
+     partial treatment - it is the treatment's own rule. rawVertexBallCorners
+     already refuses a face where some corners cannot be blended ("All four
+     corners, or none... a partial one would inset the face along edges that
+     carry no band and leave the gap open"), and a painted wall is exactly
+     that case: its floor edge must carry no band while the other three do.
+     The engine cannot express a per-edge radius, so the honest answer is to
+     stand down and name the face, not to boolean a square stub back on. The
+     wrap modes CAN express it - radius zero toward a painted face - so they
+     are the route for a part that needs one wall left square. */
+  var paint = NSO_insidePaintCheck(box, skip);
+  if (paint.any) {
+    var names = paint.painted.map(function (p) { return p.what + ' ' + p.name; }).join(', ');
+    return Promise.resolve({ ok: false, painted: paint.painted,
+      reason: 'painted out and left alone: pocket ' + names + '. The setback treats the floor ' +
+              'and all four walls together or not at all, so it stands down here. Piece unchanged ' +
+              '(the Corners / Round wrap can leave a single face square)' });
+  }
 
   var clamp = NSO_insideClampR(box, R);
   if (!(clamp.R > 1e-3))
@@ -253,13 +348,17 @@ function NSO_insideCornersBake(soup, pocket, R, deps, ops) {
 function NSO_insideCornersStatus(st) {
   var clamp = st.clamped ? ' (asked ' + st.requested.toFixed(2) + ', clamped to the pocket)' : '';
   return 'corners+edges setback R ' + st.radius.toFixed(2) + clamp +
-         ' inside - 4 pocket-floor vertices, 4 floor edges, wall edges left square, rim left sharp (' +
-         st.trisAfter + ' tris, one bake from source)';
+         ' inside - 4 pocket-floor vertices, 4 floor edges, wall edges left square, rim left sharp, ' +
+         'no painted face touched (' + st.trisAfter + ' tris, one bake from source)';
 }
 
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     NSO_insideOverreach: NSO_insideOverreach,
+    NSO_insideFloorCell: NSO_insideFloorCell,
+    NSO_insideFaceName: NSO_insideFaceName,
+    NSO_insidePocketSkip: NSO_insidePocketSkip,
+    NSO_insidePaintCheck: NSO_insidePaintCheck,
     NSO_insideTriCount: NSO_insideTriCount,
     NSO_insideVolume: NSO_insideVolume,
     NSO_insideEdgeScore: NSO_insideEdgeScore,

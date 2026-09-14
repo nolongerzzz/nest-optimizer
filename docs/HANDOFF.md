@@ -7,6 +7,21 @@ Do not reopen it. Do not comment on it. Do not treat it as a drop box.
 New work: commit on `claude-wip`. Open a **new** PR if a review surface is needed.
 Grok merges `claude-wip` → `main` and owns HUD / `?v=` tags.
 
+## Standing rule — paint wins, for every bake
+Owner's decision, and it binds new work as well as old: **a painted / excluded
+face stays untouched by ANY bake mechanism**, not only the one the paint system
+shipped with. A new bake feature reads mask6's skip list and either leaves that
+face exactly as it was or stands down and says which face stopped it. It never
+assumes nothing is painted — take the skip list as a required input, not an
+optional one with an unpainted default, because unpainted is the value a caller
+gets by forgetting.
+
+Read the list, never re-derive it. `app-mask.js` hands back the raw axis and
+side each click recorded; working out which face was meant from a plane and a
+bounding box is the second mapping that put the yellow on one face and the
+exclude on another. `brickSkipLists(...).pocket` and `nsoMaskFaceList` are the
+supported ways in.
+
 ## Output protocol
 1. Findings, numbers, diffs, and next-step proposals go in the current ticket PR
    (a new PR off `claude-wip`) or in the commit message. Never PR #4.
@@ -337,7 +352,7 @@ None of the three touched — each wants its own scoped pass and an APPLY.
 ## Inside corners — the corners8 setback in a pocket (landed, `nso_inside_corners.js`)
 
 Full write-up with numbers: `docs/INSIDE-CORNERS.md`. Suite:
-`node tools/nso_inside_corners_test.js` (78 checks). **Not wired in** — no
+`node tools/nso_inside_corners_test.js` (92 checks). **Not wired in** — no
 script tag, no `getEdgeTreat` option, `?v=` NOT bumped.
 
 The ticket asked whether corners8's setback generalises to a concave pocket.
@@ -362,6 +377,16 @@ at 0.6369.
 **The mask6 both-faces rule was not touched.** The rim stays sharp by the
 mechanism already shipping — the plug is pushed 2R+1 past its own mouth, so
 only the floor end is treated.
+
+Follows the standing paint rule at the top of this file: `opts.skip` is a
+required argument, and painting the pocket floor or any of its four walls
+stands the bake down and names the face. Paint on the pocket mouth, or anywhere
+on the hull, does not stop it — this treatment never reaches those. A painted
+wall stops the *whole* bake rather than leaving that one edge square, because
+`rawVertexBallCorners` has no per-edge radius and its own rule is
+all-four-corners-or-none; giving the setback a per-face radius the way
+`rawWrapSolid` has one is a change to live corners8 code and wants its own
+ticket and an APPLY.
 
 Three findings land on code this ticket did NOT touch. Each is someone else's
 gate and wants its own scoped pass and an APPLY:

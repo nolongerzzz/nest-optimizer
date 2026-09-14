@@ -82,6 +82,7 @@ const probePocket = s => ({
     T.biteDepth(s, [x, y, 20], T.norm([x === 0 ? 1 : -1, y === 0 ? 1 : -1, -1])))
 });
 const fmt = a => a.map(x => (x === Infinity ? '   inf' : x.toFixed(4))).join('  ');
+const NOPAINT = () => [[false, false], [false, false], [false, false]];
 const all0 = a => a.every(x => x === 0);
 const allNear = (a, want, tol) => a.every(x => Math.abs(x - want) <= tol);
 
@@ -148,7 +149,7 @@ const allNear = (a, want, tol) => a.every(x => Math.abs(x - want) <= tol);
     T.check('fixture starts with every pocket feature sharp',
             all0(b0.floorVertex) && all0(b0.floorEdge) && all0(b0.wallEdge) && all0(b0.rim));
 
-    const res = await IC.NSO_insideCornersBake(base, brick, R, deps, T.ops);
+    const res = await IC.NSO_insideCornersBake(base, brick, R, deps, T.ops, { skip: NOPAINT() });
     T.check('bake succeeds', res.ok, res.ok ? '' : '(' + res.reason + ')');
     if (!res.ok) { process.exit(T.summary() ? 0 : 1); }
     baked = res.soup;
@@ -189,13 +190,13 @@ const allNear = (a, want, tol) => a.every(x => Math.abs(x - want) <= tol);
 
   console.log('\n== 2b. refusals are refusals, and leave the piece alone ==');
   {
-    const tooBig = await IC.NSO_insideCornersBake(base, brick, 40, deps, T.ops);
+    const tooBig = await IC.NSO_insideCornersBake(base, brick, 40, deps, T.ops, { skip: NOPAINT() });
     T.check('an R larger than the pocket is clamped or refused, never silently wrong',
             !tooBig.ok || tooBig.stats.clamped,
             tooBig.ok ? '(clamped to ' + tooBig.stats.radius.toFixed(2) + ')' : '(' + tooBig.reason + ')');
-    const notAPocket = await IC.NSO_insideCornersBake(base, { nope: true }, R, deps, T.ops);
+    const notAPocket = await IC.NSO_insideCornersBake(base, { nope: true }, R, deps, T.ops, { skip: NOPAINT() });
     T.check('a shape this cannot read is refused', !notAPocket.ok, '(' + notAPocket.reason + ')');
-    const noKernel = await IC.NSO_insideCornersBake(base, brick, R, deps, null);
+    const noKernel = await IC.NSO_insideCornersBake(base, brick, R, deps, null, { skip: NOPAINT() });
     T.check('no kernel is refused, not crashed', !noKernel.ok, '(' + noKernel.reason + ')');
   }
 
@@ -230,7 +231,7 @@ const allNear = (a, want, tol) => a.every(x => Math.abs(x - want) <= tol);
               !!bk && bk.mouthAxis === c.axis && bk.mouthSide === c.side,
               bk ? '(axis ' + bk.mouthAxis + ', side ' + bk.mouthSide + ')' : '(not a brick)');
       if (!bk) continue;
-      const res = await IC.NSO_insideCornersBake(made.soup, bk, c.R, deps, T.ops);
+      const res = await IC.NSO_insideCornersBake(made.soup, bk, c.R, deps, T.ops, { skip: NOPAINT() });
       T.check(c.name + ': bake succeeds', res.ok, res.ok ? '' : '(' + res.reason + ')');
       if (!res.ok) continue;
       const s = res.soup;
@@ -258,7 +259,7 @@ const allNear = (a, want, tol) => a.every(x => Math.abs(x - want) <= tol);
     const nb = narrow.ok ? E.rawPocketBrick(narrow.soup) : null;
     T.check('a 8x4mm pocket is still read as a brick', !!nb);
     if (nb) {
-      const res = await IC.NSO_insideCornersBake(narrow.soup, nb, 5.0, deps, T.ops);
+      const res = await IC.NSO_insideCornersBake(narrow.soup, nb, 5.0, deps, T.ops, { skip: NOPAINT() });
       T.check('R=5 in a 4mm-wide pocket is clamped, not forced',
               !res.ok || (res.stats.clamped && res.stats.radius <= 0.45 * 4 + 1e-9),
               res.ok ? '(clamped ' + res.stats.requested + ' -> ' + res.stats.radius.toFixed(2) + 'mm)'
@@ -306,7 +307,7 @@ const allNear = (a, want, tol) => a.every(x => Math.abs(x - want) <= tol);
       T.check('rawPocketBrick correctly refuses a two-pocket piece', !E.rawPocketBrick(distinct));
       let soup = distinct, okAll = pk.length === 2, added = 0;
       for (const p of pk) {
-        const res = await IC.NSO_insideCornersBake(soup, p, 2.0, deps, T.ops);
+        const res = await IC.NSO_insideCornersBake(soup, p, 2.0, deps, T.ops, { skip: NOPAINT() });
         if (!res.ok) { okAll = false; console.log('    pocket bake refused: ' + res.reason); break; }
         soup = res.soup; added += res.stats.volumeAdded;
       }
@@ -321,6 +322,75 @@ const allNear = (a, want, tol) => a.every(x => Math.abs(x - want) <= tol);
         T.writeSTL(soup, path.join(OUT, 'pocket-two.stl'));
       }
     }
+  }
+
+  console.log('\n== 2e. the mask6 paint skip list is respected ==');
+  {
+    /* Standing rule: a painted face stays untouched by ANY bake mechanism.
+       The skip list is the wrap's own [axis][side] grid - side 0 is the PLUG
+       box's low face - taken as given, never re-derived here. */
+    T.check('the floor cell is found on the mouth axis and the far side',
+            IC.NSO_insideFloorCell({ axis: 2, side: 1 }).join() === '2,0' &&
+            IC.NSO_insideFloorCell({ axis: 0, side: 0 }).join() === '0,1');
+    T.check('faces are named the way the app names them',
+            IC.NSO_insideFaceName(2, 0) === 'Z+' && IC.NSO_insideFaceName(0, 1) === 'X-');
+
+    /* Forgetting the skip list must not read as "nothing is painted". */
+    const noSkip = await IC.NSO_insideCornersBake(base, brick, R, deps, T.ops);
+    T.check('a bake with NO skip list is refused, not defaulted to unpainted',
+            !noSkip.ok && /no paint skip list/.test(noSkip.reason), '(' + (noSkip.reason || 'accepted') + ')');
+
+    /* Each of the five pocket faces, painted one at a time. The floor and the
+       four walls are all touched by this treatment, so each must stand it down
+       and name the face. */
+    const cell = { 'floor Z+': [2, 0], 'wall X+': [0, 0], 'wall X-': [0, 1],
+                   'wall Y+': [1, 0], 'wall Y-': [1, 1] };
+    for (const [label, [a, s]] of Object.entries(cell)) {
+      const skip = NOPAINT(); skip[a][s] = true;
+      const res = await IC.NSO_insideCornersBake(base, brick, R, deps, T.ops, { skip });
+      T.check('painting the pocket ' + label + ' stands the bake down',
+              !res.ok && res.painted && res.painted.length === 1 &&
+              res.painted[0].name === label.split(' ')[1],
+              '(' + (res.ok ? 'BAKED ANYWAY' : res.reason.split('.')[0]) + ')');
+    }
+
+    /* Paint the app cannot attribute to a face this bake touches must NOT stop
+       it: the mouth end is never treated, and hull paint is another bake's
+       business. The mouth cell is [mouthAxis][side], the opposite of the floor. */
+    const mouthSkip = NOPAINT();
+    mouthSkip[brick.mouthAxis][brick.mouthSide ? 1 : 0] = true;
+    const viaMouth = await IC.NSO_insideCornersBake(base, brick, R, deps, T.ops, { skip: mouthSkip });
+    T.check('paint on the pocket mouth end does NOT stop the bake', viaMouth.ok,
+            viaMouth.ok ? '' : '(' + viaMouth.reason + ')');
+    if (viaMouth.ok) {
+      const p = probePocket(viaMouth.soup);
+      T.check('and that bake is still correct', p.floorVertex.every(x => x > 0.5) &&
+              all0(p.wallEdge) && all0(p.rim) && all0(p.hullTop));
+    }
+
+    /* Two painted walls are both named, so the status says what was left alone. */
+    const two = NOPAINT(); two[0][0] = true; two[1][1] = true;
+    const both = await IC.NSO_insideCornersBake(base, brick, R, deps, T.ops, { skip: two });
+    T.check('two painted walls are both named in the refusal',
+            !both.ok && both.painted.length === 2 &&
+            both.painted.map(x => x.name).sort().join() === 'X+,Y-', '(' + (both.reason || '') + ')');
+
+    /* And the skip list can be built from the faces rawBoxPockets recorded,
+       with the caller's own isPainted predicate - the two lines
+       wrapPocketsInPlace uses, not a second mapping. */
+    const pk = E.rawBoxPockets(base)[0];
+    const isPainted = (a, keepMin, at) => a === 0 && keepMin === false && Math.abs(at - 10) < 0.05;
+    const built = IC.NSO_insidePocketSkip(pk, isPainted);
+    T.check('NSO_insidePocketSkip routes a painted pocket wall to the right cell',
+            built[0][0] === true && JSON.stringify(built) ===
+            JSON.stringify([[true, false], [false, false], [false, false]]), JSON.stringify(built));
+    const viaBuilt = await IC.NSO_insideCornersBake(base, pk, R, deps, T.ops, { skip: built });
+    T.check('and a bake driven by that grid stands down on the painted wall',
+            !viaBuilt.ok && /wall X\+/.test(viaBuilt.reason), '(' + (viaBuilt.reason || 'accepted') + ')');
+    const viaClean = await IC.NSO_insideCornersBake(base, pk, R, deps, T.ops,
+                        { skip: IC.NSO_insidePocketSkip(pk, () => false) });
+    T.check('an unpainted piece through the same route still bakes', viaClean.ok,
+            viaClean.ok ? '' : '(' + viaClean.reason + ')');
   }
 
   console.log('\n== 2c. the directed-edge gate sees what nsoSealScore cannot ==');
@@ -342,7 +412,7 @@ const allNear = (a, want, tol) => a.every(x => Math.abs(x - want) <= tol);
     T.check('the directed-edge score does not', d5.stacked > 0, '(backwards-wound ' + d5.stacked + ')');
     T.check('the corners8 plug is clean on both', d8.open === 0 && d8.nm === 0 && d8.stacked === 0);
     const viaC5 = await IC.NSO_insideCornersBake(base, brick, R,
-                    { engine: E.rawVertexBallOnly, boxSoup: E.rawBoxSoup }, T.ops);
+                    { engine: E.rawVertexBallOnly, boxSoup: E.rawBoxSoup }, T.ops, { skip: NOPAINT() });
     T.check('so a corners5 plug is refused with a real reason, not "Not manifold"',
             !viaC5.ok && /backwards-wound/.test(viaC5.reason), '(' + (viaC5.reason || 'accepted') + ')');
   }

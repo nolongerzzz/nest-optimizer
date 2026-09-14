@@ -1,7 +1,7 @@
 # Inside corners — the corners8 setback, taken into a pocket
 
 Module: `nso_inside_corners.js` (parked, **not wired in**)
-Suite: `node tools/nso_inside_corners_test.js` — 74 checks, all passing
+Suite: `node tools/nso_inside_corners_test.js` — 92 checks, all passing
 Outputs: `tools/out/inside-corners/*.stl`, for `tools/mesh_validate.py`
 
 Every number below is measured by that suite on synthetic fixtures. Nothing
@@ -166,6 +166,67 @@ entirely. The rim goes on being the edge the hull face makes with the wall.
 The suite asserts it as a named check on each fixture so a future change
 cannot round it quietly.
 
+### The mask6 paint skip list
+
+**Standing rule, owner's decision: a painted / excluded face stays untouched by
+any bake mechanism, not only the one the paint system shipped with.** This bake
+reads the skip list and stands down rather than treating a face that was
+painted out.
+
+`opts.skip` is **required**, not optional. There is no "nothing is painted"
+default, because that is the value a caller gets by forgetting, and the whole
+point of the rule is that forgetting must not bake over paint:
+
+```
+no paint skip list handed in - pass opts.skip
+([[false,false],[false,false],[false,false]] for an unpainted piece).
+A bake never assumes nothing is painted
+```
+
+The grid is the wrap's own `[axis][side]`, side 0 being the **plug** box's low
+face on that axis — byte for byte what `brickSkipLists` returns as its `pocket`
+half and what `nsoWrapBrick` hands `rawWrapSolid`. It is taken as given and
+never re-derived: `app-mask.js` is explicit that working out which face was
+meant from a plane and a bounding box is the second mapping that put the yellow
+on one face and the exclude on another, and this module is not going to be a
+third one. For the `rawBoxPockets` path, `NSO_insidePocketSkip(pocket,
+isPainted)` builds it from the faces that router already recorded, using the
+same two lines `wrapPocketsInPlace` uses.
+
+**A painted face stops the whole bake**, and that is the treatment's own rule
+rather than laziness about a partial one. `rawVertexBallCorners` already
+refuses a face where some corners cannot be blended — *"All four corners, or
+none… a partial one would inset the face along edges that carry no band and
+leave the gap open"* — and a painted wall is exactly that case: its floor edge
+must carry no band while the other three do. The engine has no per-edge radius
+to express that, so the honest answer is to stand down and name the face, not
+to boolean a square stub back over the band. The refusal says so and points at
+the route that *can* express it:
+
+```
+painted out and left alone: pocket wall X+, wall Y-. The setback treats the
+floor and all four walls together or not at all, so it stands down here.
+Piece unchanged (the Corners / Round wrap can leave a single face square)
+```
+
+Measured, one face painted at a time — the floor and all four walls are touched
+by this treatment, so each stands it down:
+
+| painted | result |
+|---|---|
+| pocket floor `Z+` | stood down, named |
+| pocket wall `X+` | stood down, named |
+| pocket wall `X-` | stood down, named |
+| pocket wall `Y+` | stood down, named |
+| pocket wall `Y-` | stood down, named |
+| two walls at once | stood down, **both** named |
+| pocket **mouth** end | **bakes normally** — never treated, plug is pushed past it |
+| no skip list at all | refused |
+
+Hull paint is another bake's business and does not stop this one; the mouth-end
+case bakes and still measures correct (floor vertices round, wall edges square,
+rim and hull untouched).
+
 ### Watertightness and self-intersection
 
 Every output, through `tools/mesh_validate.py` (the battery from the CSG
@@ -284,7 +345,12 @@ Not done, deliberately:
 - **The mouth end of the plug.** Only the floor end is treated. A treatment
   that reached the mouth would round the lid rim, which is the boundary the
   ticket flagged as deliberate.
-- **Nothing near mask6.** The paint / skip-list logic is read-only from here.
-  Applying the paint's skip list to *this* bake — so a painted pocket wall
-  leaves its two floor vertices sharp, the way it already does for the wrap
-  modes — is the obvious next step and needs a decision on wiring first.
+- **Nothing near mask6's own logic.** The skip list is read, never re-derived
+  or modified. The rule that a painted face is left alone is now enforced here
+  (see above), but `app-mask.js` and `brickSkipLists` are untouched.
+- **Per-face radius.** A painted wall stands the whole bake down rather than
+  leaving that one edge square, because `rawVertexBallCorners` has no per-edge
+  radius and its own rule is all-four-corners-or-none. Giving the setback a
+  per-face radius the way `rawWrapSolid` has one (`RR[a][s] = 0`) would let a
+  single wall be left square — but that is a change to live corners8 code and
+  wants its own ticket and an APPLY.
