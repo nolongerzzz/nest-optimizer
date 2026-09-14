@@ -181,3 +181,53 @@ merge-order pass because each is someone else's gate:
    STL of an 82mm part: it reports 1406 false open edges on the tape fixture.
 
 None of the three touched — each wants its own scoped pass and an APPLY.
+
+## Inside corners — the corners8 setback in a pocket (landed, `nso_inside_corners.js`)
+
+Full write-up with numbers: `docs/INSIDE-CORNERS.md`. Suite:
+`node tools/nso_inside_corners_test.js` (78 checks). **Not wired in** — no
+script tag, no `getEdgeTreat` option, `?v=` NOT bumped.
+
+The ticket asked whether corners8's setback generalises to a concave pocket.
+It does not, and the answer is measured, not argued: `softenSelectedFace`
+refuses every internal face outright (`clicked face is not the outer plane on
+that axis`); `rawVertexBallCorners` drops any corner whose turn opposes the
+loop winding and then refuses the whole face; and the blend is subtractive and
+two-edged — it closes on a point on the depth edge, which it leaves sharp.
+
+It does not need to generalise. The pocket is cut by a **plug**, and a plug is
+convex, so the unmodified engine runs on the plug's floor end and the existing
+boolean mirrors it inward. No new geometry maths.
+
+On the standard fixture at R=2: pocket-floor vertices fill **1.2779 mm**, floor
+edges **0.8284 mm** (= R(√2−1), exact), vertical wall edges **0.0000**, lid rim
+**0.0000**, +53.305 mm³, watertight, 0 self-intersections on
+`tools/mesh_validate.py`. inside3's face reporting is unchanged on all six
+paint cases, and the paint still drives geometry: painting the pocket wall
+x=10 takes exactly its two floor vertices to 0.0000 and leaves the other two
+at 0.6369.
+
+**The mask6 both-faces rule was not touched.** The rim stays sharp by the
+mechanism already shipping — the plug is pushed 2R+1 past its own mouth, so
+only the floor end is treated.
+
+Three findings land on code this ticket did NOT touch. Each is someone else's
+gate and wants its own scoped pass and an APPLY:
+
+1. `rawWrapSolid` has no setback branch — `mode === 'corners'` takes the ball
+   path and everything else, **`cornersedges` included**, falls into the
+   offset-of-the-shrunk-box branch. So in the whole-solid wrap, Corners+edges
+   and Round are the same geometry on hull and pocket alike: identical tri
+   count 3868, identical volume 21383.405746, identical probes. In the
+   per-face path they are two different engines.
+2. `rawVertexBallOnly` emits **72 inconsistently wound triangles** on a plug
+   bake that `nsoSealScore` calls 0 open / 0 non-manifold; Manifold refuses it
+   as a bare `Not manifold`. That is finding 2 above with a reproduction.
+   `NSO_insideEdgeScore` counts directed edges and sees it.
+3. `rawBoxPockets` groups faces by PLANE, not connectivity, so two pockets
+   sharing any face plane merge into a non-box cluster and **both are
+   dropped**. Two identical bays side by side at one depth → 0 found. Every
+   face plane distinct → 2 found.
+
+Also one-line and live: the setback's refusal message blames "something
+already softened" for what is actually a concave corner.
