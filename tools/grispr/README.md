@@ -50,12 +50,16 @@ Bambu Studio brackets every object's toolpath with explicit comment markers:
 ```
 
 The `unique label id` matches the `identify_id` field in the exported 3MF's
-`Metadata/model_settings.config` for that object. That is what makes the chain
+`Metadata/model_settings.config` for that object, which is what makes the chain
 addressable end to end:
 
 ```
 NSO internal object  ->  3MF identify_id  ->  G-code unique label id
 ```
+
+**The first link is not closed yet.** NSO's 3MF exporter does not currently
+write `identify_id` — Bambu assigns it on load. See limitation 4. Grispr takes
+object ids from the command line, so this does not block using it today.
 
 Objects **interleave within a single layer** — and an object can be left and
 re-entered on the same layer. Grispr treats blocks as a flat ordered sequence
@@ -250,10 +254,22 @@ These are real and worth reading before you rely on this.
    `;TYPE:Bridge infill` beforehand, so a selective mode is possible — it is not
    implemented, because it needs a real file to verify against.)
 
-4. **The NSO hand-off is not wired up yet.** The `identify_id` link requires 3MF
-   export; as of this commit NSO exports STL only, so nothing records an
-   `identify_id`. Object ids must be supplied on the command line today, read
-   off `--list`. Automating the chain depends on the 3MF exporter landing.
+4. **The NSO hand-off is not wired up yet, and the chain has a gap NSO does not
+   currently close.** The baked cooling-settings exporter (`nso-3mf.js`) writes
+   `Metadata/model_settings.config`, but it emits only `<object id="N">` and a
+   `name` — it does **not** write `identify_id`. Bambu Studio assigns
+   `identify_id` itself when it loads the project. So the chain
+
+       NSO internal object  ->  3MF identify_id  ->  G-code unique label id
+
+   is not yet deterministic from NSO's side: NSO controls the object *order* in
+   the 3MF, not the id Bambu ends up stamping into the G-code. Whether Bambu's
+   `identify_id` reliably tracks that order has not been verified. Until it is,
+   supply object ids on the command line, read off `--list` — which is why
+   `--list` prints them. Closing the gap means either having the exporter write
+   `identify_id` explicitly (if Bambu honours it on load) or confirming the
+   order-to-id mapping empirically; either way it is a change to the exporter,
+   not to Grispr.
 
 5. **Object ids are per-slice.** Re-slicing, or changing the plate, can renumber
    objects. Re-check with `--list` after any re-slice rather than reusing ids.
