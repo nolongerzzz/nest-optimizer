@@ -47,6 +47,29 @@
 // short edges are more than 1% of the mesh, in which case they are not
 // slivers, they are the piece's real feature scale (a wrapped surface at
 // 0.034 mm edges asked to weld at 0.08), and the strict minimum is right.
+//
+// LATENT: this rule is only sound at the 1e-4 default it is called with, and
+// `want` is the reason. It splits the two populations AT `want`, so as the ask
+// grows the "slivers to discard" set swallows real detail, and once it passes
+// 1% the rule falls back to the strict minimum it exists to avoid. Measured on
+// the tape fixture (NSO_buildAdjacency, rawTol):
+//
+//   want    tol returned   V-E+F  open  nm  dropped
+//   1e-4      4.2397e-5        2     0   0        2   correct
+//   1e-3      4.2824e-4        2     0   0       38   topology holds, eats 36
+//                                                     extra triangles silently
+//   1e-2      3.6650e-3       -8    32   2      162   broken
+//   0.08      4.9970e-6     -297  1402   0        0   sliver-poisoned: >1% of
+//                                                     edges are below 0.08, so
+//                                                     it takes the raw minimum
+//
+// So do NOT expose `want`/opts.tol as a knob without replacing this rule
+// first. NSO_weldEpsFor (app-join.js, weld-eps1) is the version that does not
+// have this failure mode: it splits on the gap in the mesh's own edge
+// distribution instead of on `want`, and returns 4.2397e-5 for the tape at
+// every ask above. It is not called from here because app-sculpt.js loads
+// before app-join.js and tools/sculpt_selftest.js loads this file alone in a
+// vm; unifying the two means hoisting the helper into app-core.js.
 function NSO_sculptWeldTol(rawTris, want) {
   want = (want > 0) ? want : 1e-4;
   var n = (rawTris && rawTris.length) ? (rawTris.length / 9) | 0 : 0;
