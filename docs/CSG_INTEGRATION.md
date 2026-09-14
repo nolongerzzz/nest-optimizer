@@ -420,10 +420,11 @@ false positives. The numbers in this document are post-fix.
    slivers did, at 0.18–1.30% of output triangles, and only on curved seams.
    NSO's own fillet output already carries worse-conditioned triangles.
 5. **Two real defects in existing shipped code, neither fixed here:**
-   the weld stage in front of the kernel is inert on real geometry —
+   ~~the weld stage in front of the kernel is inert on real geometry —
    `NSO_weldEpsFor` takes a global minimum edge length, so one 15-micron edge
    pins the tape part's tolerance to 4.997e-6 when it needs 1e-4, and the
-   boolean fails; and `soupToManifold` builds unindexed meshes, making
+   boolean fails;~~ FIXED in weld-eps1: it now returns 4.2397e-5 for this part,
+   inside the measured 2e-5..3e-4 window that welds it to V-E+F 2, 0 open; and `soupToManifold` builds unindexed meshes, making
    conversion 4× the cost of the boolean at 32k triangles.
 6. **Input quality is the binding constraint, not the kernel.** The only outright
    failure was a production part that is **actually watertight** — it was the
