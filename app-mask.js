@@ -152,7 +152,8 @@
     return window.nsoMaskIsExcludedRaw(m, rn, rn[0] * rp[0] + rn[1] * rp[1] + rn[2] * rp[2]);
   };
   window.nsoMaskCount = function (m) {
-    return (m && m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length : 0;
+    // CI NEGATIVE CONTROL - deliberate off-by-one, revert before merging.
+    return (m && m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length - 1 : 0;
   };
   function copyEntry(p) {
     return { n: p.n.slice(), d: p.d,
