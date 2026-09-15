@@ -79,10 +79,37 @@ Clean no-op mesh for repair checks is `fixtures/box-20mm.stl`, not Thingi10K 409
 
 ## 3MF export - baked cooling settings
 `nso-cooling-profiles.js` + `nso-3mf.js`, wired into `app-core.js` (the
-`export3MF` block) and `app-join.js` (the button), behind **Export plate 3MF**
-in the Export card. Full write-up: `docs/baked-cooling-settings.md`.
+export-format block and the `export3MF` block) and `app-join.js` / `app-ux.js`
+(the buttons and the right-click item). Full write-up:
+`docs/baked-cooling-settings.md`.
 
-Unlike repair / sculpt / planar fuse, this one **is** wired in.
+Unlike repair / sculpt / planar fuse, this one **is** wired in. The entry point
+is one **Format** selector (STL / 3MF) at the top of the Export card, remembered
+in `localStorage` as `nso.exportFormat`. It drives **Download selected**,
+**Export plate** and the right-click **Export** item alike, relabelling them; the
+cooling-profile row only shows for 3MF. There is no separate 3MF button any more
+(`#btn-export-3mf` is gone; the plate button keeps its `#btn-export-stl` id
+because app-cut.js and app-core.js enable/disable it by that id). "Download
+selected" with 3MF is `exportActiveModel3MF()`: the active model as a one-object
+project, same axis swap and bad-triangle filter as `exportActiveModel()`, set
+down centred on the current plate resting on z = 0, same filename prompt.
+
+`main` (the live site) has none of this yet - no 3MF modules, no Format
+selector; that is a `claude-wip` -> `main` merge, Grok's call.
+
+**3MF import is deliberately absent, and is a separate ticket.** `#file-input`
+carries `accept=".stl"` and `handleFiles()` filters to `.stl` ("STL files only
+for now"), which is why `.3mf` is greyed out in the picker. That is a guard, not
+an oversight: the only loader on the page is THREE's `STLLoader`, and nothing in
+the app reads a ZIP (`nso-3mf.js` is write-only; the only ZIP *reader* is the
+Node one in `tools/3mf-test/roundtrip-check.js`). Dropping the filter would feed
+a ZIP to `STLLoader.parse` and fail. A usable import needs a browser ZIP reader
+(`DecompressionStream('deflate-raw')` plus a central-directory walk), the OPC
+rels to find the model part, the 3MF core XML (objects, mesh, build items with
+3x4 transforms, `<components>`), and for files Bambu Studio writes the
+Production extension too (per-object `3D/Objects/*.model` parts referenced via
+`p:path`), then a mapping into `addModel()`'s `rawTris` / `rawAxis` /
+`centerOffset` record and a decision on multi-object files. Not started here.
 
 Two things must not be "tidied up", both confirmed against a real Bambu export
 (stock Bambu PLA Basic @BBL A1M):
@@ -126,9 +153,13 @@ Out of scope here: the Grispr G-code post-processing path for multi-material.
 real `.3mf` and reads it back with an independent ZIP reader, asserting key set,
 key order, array-of-string shape, byte-exact values including `%`, raw text
 form, determinism, and that the format guard rejects bad values.
-`npm run 3mf:drive` (39 checks) drives the real app in headless Chromium -
-fixture import, a clone so the plate carries two pieces, the actual **Export
-plate 3MF** click, the real download - then takes the saved file apart.
+`npm run 3mf:drive` (63 checks) drives the real app in headless Chromium -
+the Format selector (labels, cooling row, persistence across a reload), fixture
+import, a clone so the plate carries two pieces, the actual **Export plate**
+click with Format = 3MF, the actual **Download selected** click with Format =
+3MF (filename prompt accepted), the plate click again with Format = STL - then
+takes both saved 3MF files apart (14 keys, `%` rule, one object per piece / one
+object for the selected model, on-plate coordinates) and sanity-checks the STL.
 It deliberately does **not** press Optimize: `runOptimize()` throws on this
 branch (it reads `#opt-orient` / `#opt-rotate`, neither of which is in
 index.html - already true at 63c5b00). An earlier draft of the check did press
@@ -142,8 +173,9 @@ Concrete, as of 2026-09-15: bare `npm test` **exits 1** in the web sandbox with
 /opt/pw-browsers/chromium_headless_shell-1243/...` — playwright wants 1243, the
 box ships 1194. Not a code failure; the four dependency-free cth:unit files pass
 first and the chain then stops at `cth:capture`. Run it as
-`CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm test`, which
-exits 0. `tools/nso_app_harness.js` (the wire-* suites) already resolves this
+`CHROME_PATH=/opt/pw-browsers/chromium npm test` (that path is a symlink to the
+1194 binary), which exits 0 - re-confirmed 2026-09-15 after the Format-selector
+change. `tools/nso_app_harness.js` (the wire-* suites) already resolves this
 itself in `chromiumPath()` and needs no env var; `cth-test/browser-lib.mjs` and
 `3mf-test/export-drive-check.mjs` read `CHROME_PATH` only.
 

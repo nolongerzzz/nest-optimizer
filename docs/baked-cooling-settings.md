@@ -4,9 +4,16 @@ NSO can export the nested plate as a Bambu Studio project (`.3mf`) with the
 cooling / overhang-fan settings already baked in, so the plate arrives in Bambu
 Studio with the right fan behaviour instead of the user re-entering it per job.
 
-- **Export plate 3MF** in the Export card writes the project.
-- **Cooling profile** next to it selects which set of values gets baked in.
-- The selection is remembered in `localStorage` between sessions.
+- **Format** at the top of the Export card picks STL or 3MF for both export
+  buttons and the right-click **Export** item, and relabels them.
+- With 3MF selected, **Export plate** writes the whole nested plate as one
+  project (one object per placed piece) and **Download selected** writes the
+  active model alone as a one-object project, set down centred on the current
+  plate and resting on z = 0.
+- **Cooling profile** (shown only for 3MF) selects which set of values gets
+  baked in; both routes bake the same `project_settings.config`.
+- Both selections are remembered in `localStorage` between sessions
+  (`nso.exportFormat`, `nso.coolingProfile`).
 
 This is the *baked / global settings* path. Per-object or per-material overrides
 via G-code post-processing (the "advanced mode" Grispr approach) are out of scope
@@ -141,14 +148,25 @@ bookkeeping) and asserts, for every profile in the table:
 That is 56 checks. It is dependency-free and needs no browser.
 
 **`export-drive-check.mjs`** covers what the Node check cannot reach: the
-`<script>` tags, the profile selector, the button wiring, and
-`buildPlacedObjects3MF()` turning real packed pieces into 3MF objects. It loads
-the real `index.html` in headless Chromium, imports `fixtures/box-20mm.stl`
-through the app's own `handleFiles`, presses **Optimize plate**, presses
-**Export plate 3MF**, captures the actual browser download, and then takes the
-saved file apart off the browser entirely — every cooling value read back out of
-the archive, plus the plate-coordinate assertions (nothing negative, nothing off
-the 180 mm plate, the piece resting on `z = 0`). That is 38 checks.
+`<script>` tags, the Format and profile selectors, the button wiring, and
+`buildPlacedObjects3MF()` / `buildActiveModelObject3MF()` turning real pieces
+into 3MF objects. It loads the real `index.html` in headless Chromium, checks
+the Format selector (STL default, relabelling, cooling row, persistence across a
+reload), imports `fixtures/box-20mm.stl` through the app's own `handleFiles`,
+clones it so the plate carries two pieces, presses **Export plate** with Format
+= 3MF, presses **Download selected** with Format = 3MF (accepting the filename
+prompt), presses **Export plate** again with Format = STL, captures each actual
+browser download, and then takes the two `.3mf` files apart off the browser
+entirely — every cooling value read back out of each archive, the plate file
+holding one object per piece and the selected-model file exactly one, plus the
+plate-coordinate assertions (nothing negative, nothing off the 180 mm plate,
+resting on `z = 0`, the selected model centred). That is 63 checks. It does not
+press **Optimize plate**, which throws on this branch (see `HANDOFF.md`).
+
+Confirmed by hand on 2026-09-15 with a real library part as well
+(`library/box_hull_80x40x20.stl`, both buttons, Format = 3MF): `unzip -t`
+clean, 14 keys in table order with byte-exact values, one object of 8 vertices /
+12 triangles, bounding box 50..130 x 70..110 x 0..20 on the 180 mm plate.
 
 Like the CTH browser checks, it serves three from the `three` devDependency
 rather than the CDN `index.html` names, so it needs no network. On a runner
@@ -235,6 +253,18 @@ envelope is the first thing to add, and it is an additive change: the 14 keys
 and their formats stay exactly as they are.
 
 Record the outcome here when it is done.
+
+## 3MF import
+
+Not offered, on purpose, and **a separate ticket**. The picker and drop zone
+accept `.stl` only because the app has no 3MF reader: the only loader is THREE's
+`STLLoader`, and nothing in the browser build reads a ZIP (`nso-3mf.js` only
+writes one). Lifting the `accept` filter alone would hand a ZIP to
+`STLLoader.parse` and fail. The real work is a browser ZIP reader, the OPC rels,
+the 3MF core XML (objects, mesh, build-item transforms, components), the
+Production extension that Bambu Studio's own exports use (per-object
+`3D/Objects/*.model` parts via `p:path`), and a mapping into `addModel()`. See
+`HANDOFF.md` for the full list.
 
 ## Settled
 

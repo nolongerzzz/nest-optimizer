@@ -19,8 +19,9 @@ Smart build-plate packing for 3D printing.
 - Adjustable gap between models
 - Live 3D preview
 - Export positioned models as STL (ready to drop into Bambu Studio / Orca / PrusaSlicer)
-- Export the plate as a Bambu Studio `.3mf` project with cooling settings baked in,
-  chosen from a small table of named cooling profiles
+- Or pick **Format: 3MF** in the Export card and the same two buttons write a
+  Bambu Studio `.3mf` project with cooling settings baked in, chosen from a small
+  table of named cooling profiles - the whole plate, or the selected piece alone
 
 ## How to use
 
@@ -39,7 +40,10 @@ Smart build-plate packing for 3D printing.
   overhang-fan settings baked in - see
   [docs/baked-cooling-settings.md](docs/baked-cooling-settings.md), including a
   known limitation around Bambu's "Use Modified Value of Filament Preset" dialog.
-  3MF *import* is still planned for a future iteration.
+  3MF *import* is deliberately not offered yet: the file picker and drop zone
+  accept `.stl` only because the app has no 3MF reader (the only loader on the
+  page is THREE's STLLoader). Adding one is its own ticket - see
+  `docs/baked-cooling-settings.md`, "3MF import".
 - The packing algorithm is a solid bottom-left free-rectangle packer with rotation. It will improve over time.
 
 ## Future ideas

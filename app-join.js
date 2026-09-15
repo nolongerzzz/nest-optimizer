@@ -2535,10 +2535,9 @@ function setupUI() {
     if (fi) fi.value = '';
     setStatus('Cleared - click drop zone to load an STL again');
   });
-  document.getElementById('btn-export-stl').addEventListener('click', exportSTLs);
-  const btn3mf = document.getElementById('btn-export-3mf');
-  if (btn3mf) btn3mf.addEventListener('click', export3MF);
+  document.getElementById('btn-export-stl').addEventListener('click', exportPlate);
   setupCoolingProfileUI();
+  setupExportFormatUI();
 
   // Manual adjust
   document.getElementById('btn-rot-left').addEventListener('click', () => rotateSelected(-1));
@@ -2639,7 +2638,7 @@ function setupUI() {
   const btnArray = document.getElementById('btn-array');
   if (btnArray) btnArray.addEventListener('click', arrayActiveModel);
   const btnExportModel = document.getElementById('btn-export-model');
-  if (btnExportModel) btnExportModel.addEventListener('click', exportActiveModel);
+  if (btnExportModel) btnExportModel.addEventListener('click', exportSelected);
   const btnSoften = document.getElementById('btn-soften');
   if (btnSoften) btnSoften.addEventListener('click', softenSelectedModel);
   const btnCapFace = document.getElementById('btn-cap');
