@@ -32,8 +32,8 @@ pushes made with it deliberately do not trigger workflows in the target repo.
 
 ## One-time setup
 
-Three steps. Step 1 is done. Step 2 needs repo-admin rights, which the CI token does not
-have; step 3 is automatic.
+Three steps. Step 1 is done. Steps 2 and 3 need repo-admin rights, which
+neither the CI token nor the workflow's GITHUB_TOKEN has.
 
 ### 1. Create the preview repository -- DONE
 
@@ -61,11 +61,17 @@ Then add it to **this** repo at
 - **Name:** `WIP_PAGES_TOKEN`
 - **Value:** the token
 
-### 3. Pages turns itself on
+### 3. Enable Pages on the preview repo
 
-No Settings clicks needed. The preview repo's `pages.yml` runs
-`actions/configure-pages` with `enablement: true`, which creates the Pages site
-on the first run with GitHub Actions as its source.
+Go to <https://github.com/nolongerzzz/nest-wip/settings/pages> and set
+**Build and deployment -> Source** to **GitHub Actions**. One click, once.
+
+This cannot be automated. The deploy workflow asks `actions/configure-pages`
+to create the site with `enablement: true`, but creating a Pages site needs
+admin rights that the workflow's `GITHUB_TOKEN` does not have, so it fails with
+`Create Pages site failed. Error: Resource not accessible by integration`.
+Once the source is set by hand, `configure-pages` finds the existing site and
+succeeds on every later run.
 
 ## First run
 
@@ -84,7 +90,7 @@ creates the Pages site; later ones are faster. The site is then live at
 | `WIP_PAGES_TOKEN is not set` | Step 2 not done, or the secret is named differently |
 | Mirror push 403s | Token lacks **Contents: Read and write**, expired, or does not list `nest-wip` |
 | Mirror is green, no deploy run in the preview repo | Actions disabled in the preview repo, or the token used was a `GITHUB_TOKEN` rather than a PAT |
-| Deploy fails on `configure-pages` | The preview repo's Pages source was hand-set to "Deploy from a branch"; set it to **GitHub Actions** |
+| `Create Pages site failed ... not accessible by integration` | Step 3 not done. Set the Pages source to **GitHub Actions** by hand; the token cannot create the site |
 | Site 404s | First deploy has not finished yet; check the deploy run in the preview repo |
 
 ## Notes
