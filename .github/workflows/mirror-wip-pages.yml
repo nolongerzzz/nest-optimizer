@@ -1,0 +1,70 @@
+# Mirrors the claude-wip branch to a separate repository that serves it as a
+# GitHub Pages preview site.
+#
+# Why a second repository: GitHub Pages builds exactly one site per repository,
+# from one publishing source. It cannot serve `main` and `claude-wip` at two
+# URLs from this repo, so the preview lives in its own repo with its own site.
+#
+# Setup (one time, see docs/PREVIEW-SITE.md) requires PREVIEW_REPO to exist and
+# the WIP_PAGES_TOKEN secret to be set. This never touches `main`.
+name: Mirror claude-wip to preview site
+
+on:
+  push:
+    branches: [claude-wip]
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-wip-pages
+  cancel-in-progress: true
+
+env:
+  PREVIEW_REPO: nest-optimizer-wip
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out claude-wip
+        uses: actions/checkout@v4
+        with:
+          ref: claude-wip
+          fetch-depth: 1
+
+      - name: Assemble the preview tree
+        run: |
+          set -euo pipefail
+          rm -rf "$RUNNER_TEMP/site"
+          mkdir -p "$RUNNER_TEMP/site"
+          # Only tracked files, so nothing untracked or ignored can leak out.
+          git archive --format=tar HEAD | tar -x -C "$RUNNER_TEMP/site"
+          # CI config and the Node/Python test harness are not part of the site.
+          rm -rf "$RUNNER_TEMP/site/.github" "$RUNNER_TEMP/site/tools"
+          mkdir -p "$RUNNER_TEMP/site/.github/workflows"
+          cp .github/preview-site/pages.yml "$RUNNER_TEMP/site/.github/workflows/pages.yml"
+          sed "s|@SOURCE_SHA@|${GITHUB_SHA}|g; s|@SOURCE_REPO@|${GITHUB_REPOSITORY}|g" \
+            .github/preview-site/README.md > "$RUNNER_TEMP/site/README.md"
+
+      - name: Push to the preview repository
+        env:
+          WIP_PAGES_TOKEN: ${{ secrets.WIP_PAGES_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          if [ -z "${WIP_PAGES_TOKEN}" ]; then
+            echo "::error::WIP_PAGES_TOKEN is not set. See docs/PREVIEW-SITE.md for the one-time setup."
+            exit 1
+          fi
+          cd "$RUNNER_TEMP/site"
+          git init -q -b main
+          git config user.name "nest-optimizer preview bot"
+          git config user.email "noreply@github.com"
+          git add -A
+          git commit -q -m "Preview of claude-wip @ ${GITHUB_SHA:0:7}"
+          # Force push: the preview repo is a disposable snapshot, not history.
+          git push -q --force \
+            "https://x-access-token:${WIP_PAGES_TOKEN}@github.com/${OWNER}/${PREVIEW_REPO}.git" main
+          echo "Mirrored to https://github.com/${OWNER}/${PREVIEW_REPO}"
+          echo "Site will be live at https://${OWNER}.github.io/${PREVIEW_REPO}/"
