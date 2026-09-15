@@ -32,8 +32,8 @@ pushes made with it deliberately do not trigger workflows in the target repo.
 
 ## One-time setup
 
-Three steps. Step 1 is done. Steps 2 and 3 need repo-admin rights, which
-neither the CI token nor the workflow's GITHUB_TOKEN has.
+Three steps. Steps 1 and 3 are done. Only step 2 (the token) is outstanding;
+until it exists the mirror cannot run on its own.
 
 ### 1. Create the preview repository -- DONE
 
@@ -61,9 +61,9 @@ Then add it to **this** repo at
 - **Name:** `WIP_PAGES_TOKEN`
 - **Value:** the token
 
-### 3. Enable Pages on the preview repo
+### 3. Enable Pages on the preview repo -- DONE
 
-Go to <https://github.com/nolongerzzz/nest-wip/settings/pages> and set
+Already set. If the repo is ever recreated, go to <https://github.com/nolongerzzz/nest-wip/settings/pages> and set
 **Build and deployment -> Source** to **GitHub Actions**. One click, once.
 
 This cannot be automated. The deploy workflow asks `actions/configure-pages`
