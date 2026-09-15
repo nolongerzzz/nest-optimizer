@@ -49,8 +49,9 @@ selected" with 3MF is `exportActiveModel3MF()`: the active model as a one-object
 project, same axis swap and bad-triangle filter as `exportActiveModel()`, set
 down centred on the current plate resting on z = 0, same filename prompt.
 
-`main` (the live site) has none of this yet - no 3MF modules, no Format
-selector; that is a `claude-wip` -> `main` merge, Grok's call.
+Landed on `main` via `claude/3mf-io` (PR #45), a scoped branch: the two
+modules, the export wiring, the Format selector and the import, nothing else
+from `claude-wip`.
 
 ## 3MF import - geometry only
 `nso-3mf-read.js` (UMD, no deps, same code under Node and in the page), called
