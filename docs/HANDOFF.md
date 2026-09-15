@@ -342,13 +342,36 @@ does not recognise, rather than reporting a zero-edit success.
 
 ## CI - GitHub Actions runs `npm test` on every push
 
-`.github/workflows/test.yml`. Triggers: every push to `claude-wip`, every PR
-into `main`, plus `workflow_dispatch`. The job is named **npm test**, so that is
-the status-check name to tick in branch protection.
+`.github/workflows/test.yml`. Triggers: every PR into `main`, every push to
+`main` or `claude-wip`, plus `workflow_dispatch`. The job is named **npm test**,
+so that is the status-check name to tick in branch protection.
 
 It runs `npm test` as one step rather than listing the suites in YAML, so CI
 cannot drift from package.json. Add a suite to the `test` script and CI runs it;
 nothing to change in the workflow.
+
+**THE WORKFLOW FILE MUST EXIST ON `main`.** Learned the hard way on 2026-09-15,
+and it is invisible if you do not know it. For a `pull_request` event GitHub
+reads workflow definitions from the PR's MERGE REF - base merged with head - not
+from wherever the file happens to live. While `test.yml` was only on
+`claude-wip`, PRs into `main` queued NO run at all: not a failure, not an error,
+no entry in the Actions list to find. The required check simply sat on "Expected
+- waiting for status to be reported" forever and blocked every merge into main.
+Searching Actions for the branch returns nothing, because nothing was ever
+created. A branch may carry a newer copy, but `main` must always have one.
+
+Corollary, and the reason a PR can fix this at all: a workflow added in a
+same-repo PR IS in that PR's merge ref, so such a PR runs its own check and
+bootstraps itself out of the deadlock. PR #46 did exactly that.
+
+**The workflow deliberately does not list the suites or their check counts.**
+It used to. The inventory drifted within a single day - the commit that added
+`3mf:import` and `3mf:import-drive` to the `test` chain updated the comment's
+total but not its table, so the file shipped claiming nine suites when
+package.json ran eleven. package.json's `test` script is the one definition;
+read it there. The check NAME is what branch protection pins, and that stays
+`npm test` however the suite grows. The copy on `main` and the copy on
+`claude-wip` are byte-identical, deliberately, so they cannot conflict on merge.
 
 As of 2026-09-15 the wire-* trio is IN `npm test`, so Smooth, Seal->Repair and
 Join->Fusion are gated by CI rather than only checked by hand. They run through
@@ -360,9 +383,17 @@ appending them to the `&&` chain an actual gate rather than decoration.
 
 Still NOT in CI, because still not in `npm test`: `grispr:test` (Python) and the
 suites for modules that remain unwired - `nso_inside_corners_test.js`,
-`nso_paint_scope_test.js`, `nso_selfint_equiv_test.js`, `nso_repair_regress.js`,
-`nso_fuse_*_test.js`, `sculpt_selftest.js`. Deliberate. Add to the `test` script
-to gate them; the workflow needs no change.
+`nso_paint_scope_test.js`, `nso_repair_regress.js`, `nso_fuse_*_test.js`,
+`sculpt_selftest.js`. Deliberate. Add to the `test` script to gate them; the
+workflow needs no change.
+
+**`npm test` needs python3, not just Node and Chromium.** `selfint:equiv` spawns
+`python3` per fixture - it is the only thing keeping `tools/mesh_validate.py` and
+the transcription in `NSO_Repair.js` from drifting apart again, which is how
+three copies of that checker came to exist. There is no `setup-python` step:
+ubuntu-latest ships Python 3 on PATH and the green runs are the evidence. If a
+runner image ever drops it, this is the suite that breaks first, and the fix is a
+`setup-python` step in the workflow, not a change to the test.
 
 **No CHROME_PATH here, and that is the whole point.** `npx playwright install`
 fetches the exact revision the locked Playwright wants

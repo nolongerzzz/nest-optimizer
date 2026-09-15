@@ -1,75 +1,42 @@
-# The repo's test suite, run on every push to claude-wip and every PR into main.
+# The repo's test suite, run on pull requests into main and on pushes to the
+# working branches.
 #
-# Intended to be a REQUIRED status check on main (Settings -> Branches -> branch
+# This is the REQUIRED status check on main (Settings -> Branches -> branch
 # protection -> "Require status checks to pass before merging"). The check name
-# to select there is "npm test", which is the job name below.
+# is "npm test", from the job name below.
 #
-# Why this runs `npm test` as ONE step instead of listing the suites here:
-# package.json's "test" script is already the combined entry point, and
-# re-chaining the suites in YAML would let the two drift - a sixth suite added
-# to package.json would silently not run in CI. Running the exact command a
-# contributor runs locally is the point. As of this commit `npm test` is:
+# WHY THIS FILE HAS TO LIVE ON main
+# For a `pull_request` event, GitHub reads workflow definitions from the PR's
+# MERGE REF - base merged with head. A workflow that exists only on a side branch
+# is invisible to PRs targeting main: no run is queued, nothing ever reports, and
+# a required check sits on "Expected - waiting for status to be reported"
+# forever, blocking every merge. That is not a syntax or permissions problem and
+# it produces no error anywhere; it just silently does nothing. Keep this file on
+# main. A branch may carry a newer copy, but main must always have one.
 #
-#   cth:unit       tools/cth-test/run-all.sh         117 checks, pure Node
-#   cth:capture    capture-check.mjs                  27 checks, headless Chromium
-#   cth:drive      drive-check.mjs                    14 checks, Chromium + real WASM CSG
-#   3mf:roundtrip  3mf-test/roundtrip-check.js        56 checks, pure Node
-#   3mf:drive      3mf-test/export-drive-check.mjs    39 checks, headless Chromium
-#   wire:smooth    nso_wire_smooth_test.js            17 checks, Chromium - Smooth
-#   wire:repair    nso_wire_repair_test.js            22 checks, Chromium - Seal/Repair
-#   wire:fuse      nso_wire_fuse_test.js              19 checks, Chromium - Join/Fusion
-#   selfint:equiv  nso_selfint_equiv_test.js         111 checks, Node + python3
-#                                                    422 checks total
+# WHAT IT RUNS
+# `npm test`, as one step, exactly as a contributor runs it locally. The suite
+# list deliberately is NOT repeated here - package.json's "test" script is the
+# single definition, and a copy in this file would drift from it. Add a suite
+# there and CI picks it up with no change to this workflow.
 #
-# The wire:* three gate the features wired into production on 2026-09-15. They
-# use tools/nso_app_harness.js, NOT cth-test/browser-lib.mjs: it resolves Chromium
-# itself via chromiumPath(), which probes /opt/pw-browsers and returns undefined
-# on a runner, so Playwright falls through to its own pinned build. Verified, not
-# assumed - and they exit `fails === 0 ? 0 : 1`, so the && chain really gates.
+# Note the suite is not the same on every branch: main's `test` script is
+# narrower than the working branches'. That is fine - the check name is stable,
+# so branch protection keeps working while the suite grows.
 #
-# selfint:equiv is the odd one out and is here deliberately. It is the ONLY thing
-# stopping the two surviving self-intersection checkers - tools/mesh_validate.py
-# and the transcription in NSO_Repair.js - from drifting apart again, which is
-# exactly how three copies of that checker came to exist in the first place. A
-# drift check nothing runs is not a drift check. It spawns python3 per fixture
-# and takes ~16s on top of a ~42s green run; that is the price of the guarantee.
-#
-# It is also the first entry in `npm test` that needs python3 rather than just
-# Node and Chromium. No setup-python step: ubuntu-latest ships Python 3 on PATH,
-# and this workflow's own green run is the evidence. If the runner image ever
-# drops it, this is the suite that breaks first and the fix is a setup-python
-# step here, not a change to the test.
-#
-# Deliberately NOT here, matching docs/HANDOFF.md: `npm run grispr:test` (Python,
-# unwired) and the suites for still-unwired modules - nso_inside_corners_test.js,
-# nso_paint_scope_test.js, nso_repair_regress.js, nso_fuse_*_test.js,
-# sculpt_selftest.js. If those should gate merges, add them to the "test" script
-# and this workflow picks them up with no change here.
-#
-# The tests need no network of their own. index.html names three.js and the
-# manifold CSG kernel on cdn.jsdelivr.net; tools/cth-test/browser-lib.mjs answers
-# those requests from vendor/manifold/ and the `three` devDependency instead, and
-# drive-check.mjs ASSERTS that substitution happened ("the manifold kernel was
-# fetched", "nothing hit the CDN unrouted"). A runner does have outbound access -
-# measured, all three CDN URLs return 200 - but the hermetic path is the tested
-# path, so the vendored copy stays.
-#
-# Cost, measured 2026-09-15 on ubuntu-latest:
-#   green run  42s total - checkout 2s, node 1s, npm ci 2s,
-#                          playwright chromium 24s (114 MiB), npm test 10s
-#   red run    36s total - npm test stops at the first failing suite
-# No browser cache step: it would save ~20s of a 42s job and add a failure mode.
-#
-# Negative-controlled before being trusted, on branch ci-selftest-negative: two
-# runs differing by one line (an off-by-one in app-mask.js nsoMaskCount) went red
-# then green, and the red reproduced the local failure exactly.
+# THE TESTS NEED NO NETWORK
+# index.html names three.js and the manifold CSG kernel on cdn.jsdelivr.net;
+# tools/cth-test/browser-lib.mjs answers those requests from vendor/manifold/ and
+# the `three` devDependency instead. A runner does have outbound access - all
+# three CDN URLs return 200, measured - but the hermetic path is the tested path,
+# so a CDN outage cannot redden the build.
 name: Tests
 
 on:
-  push:
-    branches: [claude-wip]
   pull_request:
     branches: [main]
+  push:
+    branches: [main, claude-wip]
   workflow_dispatch:
 
 # One run per branch / PR. A superseded run is cancelled rather than left to burn
@@ -102,10 +69,9 @@ jobs:
 
       # The browser checks call chromium.launch() with no executablePath unless
       # CHROME_PATH is set, so Playwright must resolve its OWN pinned build. This
-      # fetches exactly the revision the locked Playwright wants
-      # (chromium_headless_shell v1243), which is why CHROME_PATH - needed in the
-      # Claude web sandbox, where the shipped Chromium predates the installed
-      # Playwright - is not needed and not set here.
+      # fetches exactly the revision the locked Playwright wants, which is why
+      # CHROME_PATH - needed in the Claude web sandbox, where the shipped
+      # Chromium predates the installed Playwright - is not needed or set here.
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
