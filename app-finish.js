@@ -2356,12 +2356,65 @@ function sealSelectedModel() {
   let working = soupIn;
   let ok = true;
   let failReason = null;
+  let repairReport = null;
+  let repairLegacy = false;
 
   if (repairMode) {
-    const result = repairForPrint(soupIn);
-    ok = result.ok;
-    working = result.soup;
-    failReason = result.reason;
+    // Paint wins (docs/HANDOFF.md). NSO_Repair welds, splits vertices, peels
+    // flaps and fans holes shut across the whole piece; it takes no skip list
+    // and has no notion of a face the user reserved. Rather than let a bake
+    // quietly walk over paint, stand down and name what stopped it.
+    const painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
+    if (painted > 0) {
+      setStatus('Repair stood down - ' + painted + ' painted face(s); repair has no skip list. ' +
+                'Clear paint to repair.', true);
+      return;
+    }
+
+    const haveModule = (typeof NSO_Repair !== 'undefined') && NSO_Repair &&
+                       typeof NSO_Repair.commit === 'function';
+    if (!haveModule) {
+      // NSO_Repair.js did not load. Fall back to the heuristic this checkbox
+      // used to run, so the control keeps working rather than dying.
+      repairLegacy = true;
+      const result = repairForPrint(soupIn);
+      ok = result.ok;
+      working = result.soup;
+      failReason = result.reason;
+    } else {
+      const r = NSO_Repair.commit(soupIn);
+      repairReport = r.report || null;
+      console.log('[seal/repair] NSO_Repair', r.ok, repairReport);
+
+      // Three distinct non-success outcomes, kept distinct in the status line.
+      // 1. ok:false - the module could not run at all. Its contract hands back
+      //    the caller's own array, so nothing has moved.
+      if (!r.ok) {
+        setStatus('Repair unavailable for this defect - piece unchanged (' +
+                  ((repairReport && repairReport.reason) || 'module declined') + ')', true);
+        return;
+      }
+      // 2. ok:true, applied:false. Two very different things wear this shape
+      //    and must not share a status line. Either the module found nothing
+      //    wrong, or it found a defect and its own safety gate refused the
+      //    fix as worse than the disease (every gated case in fixtures/repair
+      //    lands here, not on the applied-with-blocks path). Saying "nothing
+      //    to repair" to someone staring at a non-manifold readout would be a
+      //    silent no-op wearing a success message.
+      if (!repairReport || repairReport.applied !== true) {
+        const gated = (repairReport && repairReport.gate && repairReport.gate.blockedStages) || [];
+        if (gated.length) {
+          setStatus('Repair unavailable for this defect - ' + gated.length +
+                    ' stage(s) gated (' + gated.join(', ') + ') - piece unchanged', true);
+        } else {
+          setStatus('Nothing to repair - piece unchanged');
+        }
+        return;
+      }
+      // 3. applied. Gated stages, if any, are reported below.
+      working = r.rawTris;
+      ok = true;
+    }
   } else {
     try {
       working = weldSoupVerts(working);
@@ -2444,7 +2497,35 @@ function sealSelectedModel() {
     try { nmAfter = countNonManifoldEdges(working); } catch (e) {}
     const openStr = (openBefore != null && openAfter != null) ? (openBefore + '\u2192' + openAfter) : '?';
     const nmStr = (nmBefore != null && nmAfter != null) ? (nmBefore + '\u2192' + nmAfter) : '?';
-    setStatus('Repair done - open edges ' + openStr + ', non-manifold ' + nmStr);
+    // Edge counts alone can read as "nothing happened" on a repair that did
+    // real work: thingi10k/40921 is 17 bowtie VERTICES, and an edge-based
+    // check scores it 0 open / 0 non-manifold both before and after (the same
+    // blind spot docs/HANDOFF.md flags). So name the stages that actually
+    // fired, straight off the module's own tally.
+    const c = (repairReport && repairReport.counts) || {};
+    const did = [];
+    if (c.weldedNear) did.push(c.weldedNear + ' vert' + (c.weldedNear > 1 ? 's' : '') + ' welded');
+    if (c.degenerateRemoved) did.push(c.degenerateRemoved + ' degenerate');
+    if (c.exactDuplicatesRemoved + c.reversedDuplicatesRemoved) {
+      did.push((c.exactDuplicatesRemoved + c.reversedDuplicatesRemoved) + ' duplicate face(s)');
+    }
+    if (c.flapTrisRemoved) did.push(c.flapTrisRemoved + ' flap tri(s)');
+    if (c.orphanTrisRemoved) did.push(c.orphanTrisRemoved + ' orphan tri(s)');
+    if (c.tJunctionSplits) did.push(c.tJunctionSplits + ' T-junction(s)');
+    if (c.pinchVertsSplit) did.push(c.pinchVertsSplit + ' pinch vert(s) split');
+    if (c.holesFilled) did.push(c.holesFilled + ' hole(s) filled');
+    const counts = 'open edges ' + openStr + ', non-manifold ' + nmStr +
+                   (did.length ? '; ' + did.join(', ') : '');
+    const blocked = (repairReport && repairReport.gate && repairReport.gate.blockedStages) || [];
+    if (blocked.length) {
+      // A gated stage means the safe passes landed but a risky one was rolled
+      // back because it would have made the mesh worse. Say so - "Repair done"
+      // would claim more than happened.
+      setStatus('Repair partial - ' + blocked.length + ' stage(s) gated (' +
+                blocked.join(', ') + ') - ' + counts);
+    } else {
+      setStatus('Repair done - ' + counts + (repairLegacy ? ' (fallback repair)' : ''));
+    }
   } else {
     if (openBefore != null && openAfter != null) {
       setStatus('Seal ok - open edges ' + openBefore + '\u2192' + openAfter);

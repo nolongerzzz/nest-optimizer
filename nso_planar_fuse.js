@@ -396,6 +396,89 @@ function NSO_planarFuseChain(soups, opts) {
   };
 }
 
+/* ---- mating two pieces that are parked apart ----------------------------
+   NSO_findSharedFace needs both caps in ONE coordinate space, coincident.
+   Two halves of a square cut are not: each was re-centred on its own bbox
+   when the cut produced it, so both sit on the origin and overlap.
+
+   Work on RAW soups, not the placed/display ones. Measured on a real cut
+   (tools/nso_wire_fuse_test.js): a 20mm box split at 10mm has clean
+   2-triangle caps in raw space, while the same caps in display space carry
+   extra seed vertices at +/- halfKerf and a degenerate sliver, so they are
+   not congruent even though the solids are.
+
+   Which axis the cut ran across is not recorded anywhere, so rather than
+   guess it from plate poses - a second mapping, and the kind of re-derivation
+   docs/HANDOFF.md warns about - offer all six axis/side matings and let
+   congruence detection pick. That test is holistic: every cap triangle on
+   both sides must pair, so a wrong mating cannot be accepted by accident.
+   Candidates are ordered by how much of the facing plane the two bounding
+   boxes share, so the real cut axis is normally tried first.             */
+function NSO_fuseBounds(soup) {
+  var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (var i = 0; i < soup.length; i++) {
+    var k = i % 3, v = soup[i];
+    if (v < lo[k]) lo[k] = v;
+    if (v > hi[k]) hi[k] = v;
+  }
+  return { lo: lo, hi: hi };
+}
+
+/* Shifts every vertex of `soup` by d along `axis`. */
+function NSO_fuseShift(soup, axis, d) {
+  if (d === 0) return soup;
+  var out = new Float32Array(soup.length);
+  for (var i = 0; i < soup.length; i += 3) {
+    out[i] = soup[i]; out[i + 1] = soup[i + 1]; out[i + 2] = soup[i + 2];
+    out[i + axis] = soup[i + axis] + d;
+  }
+  return out;
+}
+
+function NSO_fuseCandidateMatings(soupA, soupB) {
+  var A = NSO_fuseBounds(soupA), B = NSO_fuseBounds(soupB), out = [];
+  for (var k = 0; k < 3; k++) {
+    /* how well the other two axes line up - a cut face shares its whole
+       outline, so the real axis scores near 1 */
+    var overlap = 1;
+    for (var j = 0; j < 3; j++) {
+      if (j === k) continue;
+      var lo = Math.max(A.lo[j], B.lo[j]), hi = Math.min(A.hi[j], B.hi[j]);
+      var span = Math.max(A.hi[j] - A.lo[j], B.hi[j] - B.lo[j]);
+      overlap *= (span > 0) ? Math.max(0, (hi - lo) / span) : 1;
+    }
+    /* B parked on the +k side of A, and on the -k side */
+    out.push({ axis: k, side: 1, shift: A.hi[k] - B.lo[k], score: overlap });
+    out.push({ axis: k, side: -1, shift: A.lo[k] - B.hi[k], score: overlap });
+  }
+  out.sort(function (x, y) { return y.score - x.score; });
+  return out;
+}
+
+/* Returns the first mating whose shared face is congruent, or a refusal.
+   { ok, a, b, found, axis, side, shift, tried } */
+function NSO_fuseFindMating(soupA, soupB, opts) {
+  opts = opts || {};
+  if (!NSO_fuseTriCount(soupA) || !NSO_fuseTriCount(soupB)) {
+    return { ok: false, reason: 'empty soup', tried: 0 };
+  }
+  var cands = NSO_fuseCandidateMatings(soupA, soupB);
+  var firstReason = null, tried = 0;
+  for (var i = 0; i < cands.length; i++) {
+    var c = cands[i];
+    var b = NSO_fuseShift(soupB, c.axis, c.shift);
+    /* one tolerance for the mated pair, not for the parked one */
+    var found = NSO_findSharedFace(soupA, b, opts);
+    tried++;
+    if (found.ok) {
+      return { ok: true, a: soupA, b: b, found: found,
+               axis: c.axis, side: c.side, shift: c.shift, tried: tried };
+    }
+    if (firstReason === null) firstReason = found.reason;
+  }
+  return { ok: false, reason: firstReason || 'no congruent shared face on any axis', tried: tried };
+}
+
 /* ---- signed volume (divergence theorem) --------------------------------- */
 function NSO_soupVolume(soup) {
   var n = NSO_fuseTriCount(soup), v = 0;
@@ -414,6 +497,9 @@ if (typeof module !== 'undefined' && module.exports) {
     NSO_fuseTolerance: NSO_fuseTolerance, NSO_findSharedFace: NSO_findSharedFace,
     NSO_planarFusePair: NSO_planarFusePair, NSO_planarFuseChain: NSO_planarFuseChain,
     NSO_soupVolume: NSO_soupVolume, NSO_fuseTriCount: NSO_fuseTriCount,
-    NSO_fuseVertGrid: NSO_fuseVertGrid
+    NSO_fuseVertGrid: NSO_fuseVertGrid,
+    NSO_fuseBounds: NSO_fuseBounds, NSO_fuseShift: NSO_fuseShift,
+    NSO_fuseCandidateMatings: NSO_fuseCandidateMatings,
+    NSO_fuseFindMating: NSO_fuseFindMating
   };
 }

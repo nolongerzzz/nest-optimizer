@@ -597,6 +597,20 @@ function NSO_smoothSelectedModel(opts) {
     if (typeof setStatus === 'function') setStatus('Smooth needs a raw piece - unchanged', true);
     return { ok: false, reason: 'no rawTris' };
   }
+  // Standing rule (docs/HANDOFF.md): a painted face stays untouched by ANY
+  // bake. Global Laplacian smoothing moves every unpinned vertex on the piece
+  // and has no way to hold a face still - that is the algorithm, stated at the
+  // top of this file, not something to bolt on here. So a painted piece is a
+  // stand-down, naming the count, rather than a bake that quietly ignores the
+  // paint. Clear the paint, or wait for the brush tier.
+  var paintedCount = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
+  if (paintedCount > 0) {
+    if (typeof setStatus === 'function') {
+      setStatus('Smooth stood down - ' + paintedCount + ' painted face(s); global smoothing ' +
+                'cannot hold a face still. Clear paint to smooth.', true);
+    }
+    return { ok: false, reason: 'painted faces: ' + paintedCount, painted: paintedCount };
+  }
   opts = opts || {};
   if (opts.maxVolumeChange == null) opts.maxVolumeChange = 0.25;
   var r = NSO_smoothGlobal(soupIn, opts);
@@ -610,4 +624,38 @@ function NSO_smoothSelectedModel(opts) {
     ', volume ' + (volPct >= 0 ? '+' : '') + volPct.toFixed(2) + '%';
   NSO_sculptCommitRaw(m, r.tris, 'smoothReplace', txt);
   return r;
+}
+
+
+/* ---------------------------------------------------------------------------
+   UI entry point. Self-wired here rather than in the shared button block so
+   that wiring a sculpt tool does not touch a protected fat file. Guarded on
+   `document` because this file also runs headless under
+   tools/sculpt_selftest.js.
+
+   Deliberately a bare button and no parameter panel: NSO_smoothSelectedModel
+   already carries the only default that matters for a click (maxVolumeChange
+   0.25, two-sided) and refuses loudly rather than silently mangling a piece.
+   Passes/strength stay console-only until there is a reason to surface them.
+--------------------------------------------------------------------------- */
+if (typeof document !== 'undefined') {
+  (function wireSmoothButton() {
+    function wire() {
+      var btn = document.getElementById('btn-smooth');
+      if (!btn || btn.dataset.nsoWired === '1') return;
+      btn.dataset.nsoWired = '1';
+      btn.addEventListener('click', function () {
+        try {
+          NSO_smoothSelectedModel();
+        } catch (err) {
+          console.error('[smooth]', err);
+          if (typeof setStatus === 'function') {
+            setStatus('Smooth failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
+          }
+        }
+      });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
+    else wire();
+  })();
 }
