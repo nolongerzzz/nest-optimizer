@@ -18,7 +18,8 @@
 #   wire:smooth    nso_wire_smooth_test.js            17 checks, Chromium - Smooth
 #   wire:repair    nso_wire_repair_test.js            22 checks, Chromium - Seal/Repair
 #   wire:fuse      nso_wire_fuse_test.js              19 checks, Chromium - Join/Fusion
-#                                                    311 checks total
+#   selfint:equiv  nso_selfint_equiv_test.js         111 checks, Node + python3
+#                                                    422 checks total
 #
 # The wire:* three gate the features wired into production on 2026-09-15. They
 # use tools/nso_app_harness.js, NOT cth-test/browser-lib.mjs: it resolves Chromium
@@ -26,11 +27,24 @@
 # on a runner, so Playwright falls through to its own pinned build. Verified, not
 # assumed - and they exit `fails === 0 ? 0 : 1`, so the && chain really gates.
 #
+# selfint:equiv is the odd one out and is here deliberately. It is the ONLY thing
+# stopping the two surviving self-intersection checkers - tools/mesh_validate.py
+# and the transcription in NSO_Repair.js - from drifting apart again, which is
+# exactly how three copies of that checker came to exist in the first place. A
+# drift check nothing runs is not a drift check. It spawns python3 per fixture
+# and takes ~16s on top of a ~42s green run; that is the price of the guarantee.
+#
+# It is also the first entry in `npm test` that needs python3 rather than just
+# Node and Chromium. No setup-python step: ubuntu-latest ships Python 3 on PATH,
+# and this workflow's own green run is the evidence. If the runner image ever
+# drops it, this is the suite that breaks first and the fix is a setup-python
+# step here, not a change to the test.
+#
 # Deliberately NOT here, matching docs/HANDOFF.md: `npm run grispr:test` (Python,
 # unwired) and the suites for still-unwired modules - nso_inside_corners_test.js,
-# nso_paint_scope_test.js, nso_selfint_equiv_test.js, nso_repair_regress.js,
-# nso_fuse_*_test.js, sculpt_selftest.js. If those should gate merges, add them to
-# the "test" script and this workflow picks them up with no change here.
+# nso_paint_scope_test.js, nso_repair_regress.js, nso_fuse_*_test.js,
+# sculpt_selftest.js. If those should gate merges, add them to the "test" script
+# and this workflow picks them up with no change here.
 #
 # The tests need no network of their own. index.html names three.js and the
 # manifold CSG kernel on cdn.jsdelivr.net; tools/cth-test/browser-lib.mjs answers
