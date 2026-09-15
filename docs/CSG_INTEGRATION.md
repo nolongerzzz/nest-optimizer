@@ -307,8 +307,8 @@ see it because at that tolerance the source does not weld shut at all: it reads
 570 open edges and Euler -131, and the phantom open edges mask the real defect.
 `t3_tape_clustered` is clean at every tolerance because the 4.24e-5 clustering
 weld was applied before the boolean, so the kernel resolved it. This is the same
-tolerance poisoning weld-eps1 fixed in `NSO_weldEpsFor`, seen from the
-measurement side.
+tolerance poisoning `NSO_weldEpsFor` suffers in app-join.js, addressed there
+by a separate change, seen from the measurement side.
 
 The two successful welds converge on **the identical volume, 24,007.197416 mm³**,
 from different weld algorithms and different triangle counts (32,888 vs 32,886) —

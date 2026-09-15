@@ -46,8 +46,9 @@ which branch wrote its version first:
 2. ADJACENCY WELD -- radius weld at 1e-4, not a grid snap at 1e-5.
    Two changes. (a) 1e-5 is tolerance-poisoned on real parts: the tape reads
    1,406 open edges and Euler -297 at 1e-5, and 0 open edges and Euler 2 at
-   1e-4. That is the same failure weld-eps1 fixed in NSO_weldEpsFor, whose
-   measured safe plateau -- 2e-5 .. 3e-4 -- brackets 1e-4. fixtures/repair/
+   1e-4. NSO_weldEpsFor in app-join.js suffers the same tolerance poisoning
+   from the same cause, addressed there by a separate change; the plateau
+   measured here for this checker -- 2e-5 .. 3e-4 -- brackets 1e-4. fixtures/repair/
    synth_near_dup_vertex.stl is the clean demonstration: at any tol <= 2e-5 it
    reports 3 piercing pairs and Euler -3, at any tol >= 5e-5 it reports 0 and
    Euler 2, and it is a closed box. The 3 were false. (b) a bare grid snap is
