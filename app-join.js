@@ -1767,11 +1767,89 @@ async function joinSelectedModels() {
   }
   const score = (st) => st.open + st.nm;
 
+  // Route 0: real fusion. Two halves of one square cut close their shared
+  // face with a cap each, to stay watertight on their own. When those caps
+  // are congruent, dropping both and welding the two boundary loops is a
+  // true join - the seam stops existing - instead of shoving the far piece
+  // in and hiding the caps inside the solid.
+  //
+  // NSO_findSharedFace is the gate, and it is holistic: every cap triangle
+  // on both sides must have a partner, so one unpaired triangle refuses the
+  // whole fuse rather than welding the part that lined up. A pair that does
+  // not qualify costs one failed detection and falls through to the routes
+  // below, which is the pre-existing behaviour unchanged.
+  //
+  // Runs on the RAW soups, not the placed ones. A 20mm box split at 10mm has
+  // clean 2-triangle caps in raw space; the same caps in display space carry
+  // extra seed vertices at +/- halfKerf and a degenerate sliver, so congruence
+  // detection correctly refuses them. Raw is the representation the cut
+  // actually produced.
+  let fuseGeo = null, fuseStats = null, fuseInfo = null, fuseWhy = '';
+  const paintedJoin = (typeof nsoMaskCount === 'function')
+    ? (nsoMaskCount(modelA) + nsoMaskCount(modelB)) : 0;
+  if (typeof NSO_fuseFindMating !== 'function' || typeof NSO_planarFusePair !== 'function') {
+    fuseWhy = 'fusion module not loaded';
+  } else if (paintedJoin > 0) {
+    // Paint wins (docs/HANDOFF.md), and the Paint faces button says so in as
+    // many words: excluded faces are excluded from Join. Fusion deletes the
+    // cap triangles outright and takes no skip list, so it stands down.
+    fuseWhy = paintedJoin + ' painted face(s) - fusion has no skip list';
+  } else {
+    try {
+      const rawA = getModelRawSoup(modelA), rawB = getModelRawSoup(modelB);
+      if (!NSO_soupLen(rawA) || !NSO_soupLen(rawB)) {
+        fuseWhy = 'no raw soup for one side';
+      } else {
+        const mated = NSO_fuseFindMating(rawA, rawB);
+        if (!mated.ok) {
+          fuseWhy = mated.reason + ' (tried ' + mated.tried + ' mating(s))';
+        } else {
+          const fp = NSO_planarFusePair(mated.a, mated.b, { found: mated.found });
+          if (!fp.ok) {
+            fuseWhy = fp.reason;
+          } else {
+            const fst = NSO_edgeStats(fp.soup);
+            // Same rule the other routes answer to: two sealed pieces must not
+            // come back as an open one.
+            const rawBefore = { a: NSO_edgeStats(rawA), b: NSO_edgeStats(rawB) };
+            const sealedBefore = (rawBefore.a.open + rawBefore.b.open === 0) &&
+                                 (rawBefore.a.nm + rawBefore.b.nm === 0);
+            if (sealedBefore && (fst.open > 0 || fst.nm > 0)) {
+              fuseWhy = 'fused result not watertight (open ' + fst.open +
+                        ', non-manifold ' + fst.nm + ')';
+            } else {
+              fuseGeo = rawResultToDisplayGeometry(fp.soup);
+              fuseStats = fst;
+              fuseInfo = fp.stats;
+              fuseInfo.axis = mated.axis;
+              fuseInfo.tried = mated.tried;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      fuseWhy = NSO_errMsg(err);
+      console.warn('[join] planar fuse failed:', fuseWhy);
+    }
+  }
+  if (fuseInfo) {
+    console.log('[join] planar fuse', fuseInfo.triIn + ' -> ' + fuseInfo.triOut +
+      ' tris, caps ' + fuseInfo.capA + '+' + fuseInfo.capB + ' removed, tol ' +
+      fuseInfo.tol.toExponential(3) + ', verts snapped ' + fuseInfo.vertsSnapped +
+      ', mate axis ' + 'xyz'[fuseInfo.axis] + ' (' + fuseInfo.tried + ' tried)');
+  } else {
+    console.log('[join] planar fuse declined:', fuseWhy);
+  }
+
   // Route 1: the geometry path this has always used. It strips the facing cap
   // off at a plane and welds, which is right for two square-split halves and
   // is kept bit-identical for them.
   let legacyGeo = null, legacyStats = null, legacyWhy = '';
-  try {
+  if (fuseGeo) {
+    // A real fuse already landed. Skip the plate route rather than let it
+    // nudge the poses to close a kerf that is no longer there.
+    legacyWhy = 'not needed - planar fuse succeeded';
+  } else try {
     if (placedA && placedB) {
       const yA = placedA.mesh ? placedA.mesh.position.y : 0;
       const yB = placedB.mesh ? placedB.mesh.position.y : 0;
@@ -1814,7 +1892,7 @@ async function joinSelectedModels() {
   // already touch; split halves parked a kerf apart come back as two parts and
   // stay with route 1, which closes that gap by moving the far half in.
   let kernelGeo = null, kernelStats = null, kernelWhy = '', kernelExact = false;
-  if (joinSoupA && joinSoupB && (!legacyStats || score(legacyStats) > score(before))) {
+  if (!fuseGeo && joinSoupA && joinSoupB && (!legacyStats || score(legacyStats) > score(before))) {
     try {
       setStatus('Joining (loading CSG kernel)...');
       const u = await NSO_unionSoups(joinSoupA, joinSoupB);
@@ -1835,13 +1913,15 @@ async function joinSelectedModels() {
   // Keep whichever route seals better; a tie goes to the plate route so the
   // square-split rejoin it was written for comes out exactly as before.
   let newGeo = null, after = null, route = '', exact = false;
-  if (legacyGeo && (!kernelStats || score(legacyStats) <= score(kernelStats))) {
+  if (fuseGeo) {
+    newGeo = fuseGeo; after = fuseStats; route = 'planar fuse';
+  } else if (legacyGeo && (!kernelStats || score(legacyStats) <= score(kernelStats))) {
     newGeo = legacyGeo; after = legacyStats; route = 'plate weld';
   } else if (kernelGeo) {
     newGeo = kernelGeo; after = kernelStats; route = 'kernel union'; exact = kernelExact;
   }
   if (!newGeo) {
-    const why = legacyWhy || kernelWhy || 'pieces unchanged';
+    const why = legacyWhy || kernelWhy || fuseWhy || 'pieces unchanged';
     setStatus('Join failed - ' + why + ' - A and B unchanged', true);
     return;
   }
@@ -1955,7 +2035,9 @@ async function joinSelectedModels() {
   updateUndoBtn();
   removeFaceHelper();
   setStatus('Join ok (' + route + ') - open edges ' + before.open + '\u2192' + after.open +
-            ', non-manifold ' + before.nm + '\u2192' + after.nm);
+            ', non-manifold ' + before.nm + '\u2192' + after.nm +
+            (fuseInfo ? '; seam fused, ' + fuseInfo.removed + ' cap tri(s) removed, ' +
+                        fuseInfo.triIn + '\u2192' + fuseInfo.triOut + ' tris' : ''));
 }
 
 
