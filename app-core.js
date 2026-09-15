@@ -702,13 +702,13 @@ function zUpToYUp(geometry) {
   return geometry;
 }
 
+const IMPORT_EXT_RE = /\.(stl|3mf)$/i;
+
 function handleFiles(files) {
-  const list = Array.from(files).filter(f =>
-    f.name.toLowerCase().endsWith('.stl')
-  );
+  const list = Array.from(files).filter(f => IMPORT_EXT_RE.test(f.name));
 
   if (!list.length) {
-    setStatus('Please use STL files only for now', true);
+    setStatus('Please use STL or 3MF files', true);
     return;
   }
 
@@ -716,30 +716,16 @@ function handleFiles(files) {
     const reader = new FileReader();
     reader.onerror = () => setStatus(`Could not read ${file.name}`, true);
     reader.onload = (e) => {
+      if (/\.3mf$/i.test(file.name)) {
+        import3MF(file.name, e.target.result);
+        return;
+      }
       try {
-        let geometry = loader.parse(e.target.result);
+        const geometry = loader.parse(e.target.result);
         if (!geometry.attributes || !geometry.attributes.position) {
           throw new Error('Invalid geometry');
         }
-        // Capture the raw triangle soup BEFORE rotateX/center - original
-        // file axes, untranslated. This is what the sandbox cut engine
-        // was validated against; the display mesh below is a transformed
-        // copy for viewport/UI purposes only and is never read by rawCut.
-        const rawTris = new Float32Array(geometry.attributes.position.array);
-        geometry = zUpToYUp(geometry);
-        geometry.computeVertexNormals();
-        // Compute the center offset ourselves (THREE's .center() doesn't
-        // return it) so Split can invert it later to map a display-space
-        // plane back into raw, untranslated coordinates.
-        geometry.computeBoundingBox();
-        const bb = geometry.boundingBox;
-        const centerOffset = {
-          x: (bb.min.x + bb.max.x) / 2,
-          y: (bb.min.y + bb.max.y) / 2,
-          z: (bb.min.z + bb.max.z) / 2
-        };
-        geometry.center();
-        addModel(file.name, geometry, { rawTris: rawTris, rawAxis: 'zup', centerOffset: centerOffset });
+        addModelFromZUpGeometry(file.name, geometry);
       } catch (err) {
         console.error(err);
         setStatus(`Failed to load ${file.name}. Try re-exporting as binary STL.`, true);
@@ -747,6 +733,69 @@ function handleFiles(files) {
     };
     reader.readAsArrayBuffer(file);
   });
+}
+
+/**
+ * The one ingest path for imported geometry. `geometry` is non-indexed, in the
+ * file's own axes (Z up, millimetres, untranslated) - what STLLoader hands
+ * back for an STL and what the 3MF reader builds per object.
+ */
+function addModelFromZUpGeometry(name, geometry) {
+  // Capture the raw triangle soup BEFORE rotateX/center - original
+  // file axes, untranslated. This is what the sandbox cut engine
+  // was validated against; the display mesh below is a transformed
+  // copy for viewport/UI purposes only and is never read by rawCut.
+  const rawTris = new Float32Array(geometry.attributes.position.array);
+  geometry = zUpToYUp(geometry);
+  geometry.computeVertexNormals();
+  // Compute the center offset ourselves (THREE's .center() doesn't
+  // return it) so Split can invert it later to map a display-space
+  // plane back into raw, untranslated coordinates.
+  geometry.computeBoundingBox();
+  const bb = geometry.boundingBox;
+  const centerOffset = {
+    x: (bb.min.x + bb.max.x) / 2,
+    y: (bb.min.y + bb.max.y) / 2,
+    z: (bb.min.z + bb.max.z) / 2
+  };
+  geometry.center();
+  return addModel(name, geometry, { rawTris: rawTris, rawAxis: 'zup', centerOffset: centerOffset });
+}
+
+/**
+ * 3MF import: geometry only. nso-3mf-read.js pulls one triangle soup per build
+ * item out of the archive (millimetres, Z up, transforms applied); each becomes
+ * its own model, named from the file's own object names. Print settings,
+ * materials and everything else in the archive are ignored.
+ */
+function import3MF(filename, arrayBuffer) {
+  if (!window.NSO3MFRead) {
+    setStatus('3MF reader failed to load - check console', true);
+    return Promise.resolve(null);
+  }
+  setStatus(`Reading ${filename}...`);
+  return window.NSO3MFRead.parse3MF(new Uint8Array(arrayBuffer), { name: filename })
+    .then(result => {
+      let loaded = 0;
+      result.objects.forEach(obj => {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(obj.positions, 3));
+        if (addModelFromZUpGeometry(obj.name, geometry)) loaded++;
+      });
+      result.warnings.forEach(w => console.warn(`${filename}: ${w}`));
+      if (loaded > 1) {
+        setStatus(`Loaded ${loaded} objects from ${filename}` +
+                  (result.application ? ` (${result.application})` : ''));
+      } else if (!loaded) {
+        setStatus(`${filename}: no usable geometry found`, true);
+      }
+      return result;
+    })
+    .catch(err => {
+      console.error(err);
+      setStatus(`Failed to load ${filename}: ${err && err.message ? err.message : 'not a readable 3MF'}`, true);
+      return null;
+    });
 }
 
 function addModel(name, geometry, opts) {
