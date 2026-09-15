@@ -702,13 +702,13 @@ function zUpToYUp(geometry) {
   return geometry;
 }
 
+const IMPORT_EXT_RE = /\.(stl|3mf)$/i;
+
 function handleFiles(files) {
-  const list = Array.from(files).filter(f =>
-    f.name.toLowerCase().endsWith('.stl')
-  );
+  const list = Array.from(files).filter(f => IMPORT_EXT_RE.test(f.name));
 
   if (!list.length) {
-    setStatus('Please use STL files only for now', true);
+    setStatus('Please use STL or 3MF files', true);
     return;
   }
 
@@ -716,30 +716,16 @@ function handleFiles(files) {
     const reader = new FileReader();
     reader.onerror = () => setStatus(`Could not read ${file.name}`, true);
     reader.onload = (e) => {
+      if (/\.3mf$/i.test(file.name)) {
+        import3MF(file.name, e.target.result);
+        return;
+      }
       try {
-        let geometry = loader.parse(e.target.result);
+        const geometry = loader.parse(e.target.result);
         if (!geometry.attributes || !geometry.attributes.position) {
           throw new Error('Invalid geometry');
         }
-        // Capture the raw triangle soup BEFORE rotateX/center - original
-        // file axes, untranslated. This is what the sandbox cut engine
-        // was validated against; the display mesh below is a transformed
-        // copy for viewport/UI purposes only and is never read by rawCut.
-        const rawTris = new Float32Array(geometry.attributes.position.array);
-        geometry = zUpToYUp(geometry);
-        geometry.computeVertexNormals();
-        // Compute the center offset ourselves (THREE's .center() doesn't
-        // return it) so Split can invert it later to map a display-space
-        // plane back into raw, untranslated coordinates.
-        geometry.computeBoundingBox();
-        const bb = geometry.boundingBox;
-        const centerOffset = {
-          x: (bb.min.x + bb.max.x) / 2,
-          y: (bb.min.y + bb.max.y) / 2,
-          z: (bb.min.z + bb.max.z) / 2
-        };
-        geometry.center();
-        addModel(file.name, geometry, { rawTris: rawTris, rawAxis: 'zup', centerOffset: centerOffset });
+        addModelFromZUpGeometry(file.name, geometry);
       } catch (err) {
         console.error(err);
         setStatus(`Failed to load ${file.name}. Try re-exporting as binary STL.`, true);
@@ -747,6 +733,69 @@ function handleFiles(files) {
     };
     reader.readAsArrayBuffer(file);
   });
+}
+
+/**
+ * The one ingest path for imported geometry. `geometry` is non-indexed, in the
+ * file's own axes (Z up, millimetres, untranslated) - what STLLoader hands
+ * back for an STL and what the 3MF reader builds per object.
+ */
+function addModelFromZUpGeometry(name, geometry) {
+  // Capture the raw triangle soup BEFORE rotateX/center - original
+  // file axes, untranslated. This is what the sandbox cut engine
+  // was validated against; the display mesh below is a transformed
+  // copy for viewport/UI purposes only and is never read by rawCut.
+  const rawTris = new Float32Array(geometry.attributes.position.array);
+  geometry = zUpToYUp(geometry);
+  geometry.computeVertexNormals();
+  // Compute the center offset ourselves (THREE's .center() doesn't
+  // return it) so Split can invert it later to map a display-space
+  // plane back into raw, untranslated coordinates.
+  geometry.computeBoundingBox();
+  const bb = geometry.boundingBox;
+  const centerOffset = {
+    x: (bb.min.x + bb.max.x) / 2,
+    y: (bb.min.y + bb.max.y) / 2,
+    z: (bb.min.z + bb.max.z) / 2
+  };
+  geometry.center();
+  return addModel(name, geometry, { rawTris: rawTris, rawAxis: 'zup', centerOffset: centerOffset });
+}
+
+/**
+ * 3MF import: geometry only. nso-3mf-read.js pulls one triangle soup per build
+ * item out of the archive (millimetres, Z up, transforms applied); each becomes
+ * its own model, named from the file's own object names. Print settings,
+ * materials and everything else in the archive are ignored.
+ */
+function import3MF(filename, arrayBuffer) {
+  if (!window.NSO3MFRead) {
+    setStatus('3MF reader failed to load - check console', true);
+    return Promise.resolve(null);
+  }
+  setStatus(`Reading ${filename}...`);
+  return window.NSO3MFRead.parse3MF(new Uint8Array(arrayBuffer), { name: filename })
+    .then(result => {
+      let loaded = 0;
+      result.objects.forEach(obj => {
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(obj.positions, 3));
+        if (addModelFromZUpGeometry(obj.name, geometry)) loaded++;
+      });
+      result.warnings.forEach(w => console.warn(`${filename}: ${w}`));
+      if (loaded > 1) {
+        setStatus(`Loaded ${loaded} objects from ${filename}` +
+                  (result.application ? ` (${result.application})` : ''));
+      } else if (!loaded) {
+        setStatus(`${filename}: no usable geometry found`, true);
+      }
+      return result;
+    })
+    .catch(err => {
+      console.error(err);
+      setStatus(`Failed to load ${filename}: ${err && err.message ? err.message : 'not a readable 3MF'}`, true);
+      return null;
+    });
 }
 
 function addModel(name, geometry, opts) {
@@ -2145,6 +2194,7 @@ function selectPlaced(idx) {
 }
 
 function updateExportButton() {
+  // One plate button, whichever format #export-format selects.
   const exportBtn = document.getElementById('btn-export-stl');
   if (exportBtn) exportBtn.disabled = state.placed.length === 0;
 }
@@ -2537,6 +2587,330 @@ function exportSTLs() {
     console.error(err);
     setStatus('Export failed - check console', true);
   }
+}
+
+
+// ===================== Export format (STL / 3MF) =====================
+// One choice, #export-format, drives both export buttons and the right-click
+// Export item: "Download selected" and "Export plate" each write STL or a
+// Bambu Studio 3MF project depending on it. The cooling-profile row is only
+// shown for 3MF because STL has nowhere to carry those settings.
+
+const EXPORT_FORMAT_STORAGE_KEY = 'nso.exportFormat';
+const EXPORT_FORMATS = ['stl', '3mf'];
+
+function getExportFormat() {
+  const sel = document.getElementById('export-format');
+  const v = sel && sel.value;
+  return EXPORT_FORMATS.indexOf(v) !== -1 ? v : 'stl';
+}
+
+/** Relabel the buttons and show / hide the cooling row for the current format. */
+function updateExportFormatUI() {
+  const fmt = getExportFormat();
+  const label = fmt === '3mf' ? '3MF' : 'STL';
+  const btnModel = document.getElementById('btn-export-model');
+  if (btnModel) btnModel.textContent = 'Download selected ' + label;
+  const btnPlate = document.getElementById('btn-export-stl');
+  if (btnPlate) btnPlate.textContent = 'Export plate ' + label;
+  const ctx = document.getElementById('ctx-export');
+  if (ctx) ctx.textContent = 'Export ' + label;
+  const row = document.getElementById('cooling-profile-row');
+  if (row) row.hidden = fmt !== '3mf';
+}
+
+function setupExportFormatUI() {
+  const sel = document.getElementById('export-format');
+  if (!sel) return;
+
+  let saved = null;
+  try { saved = localStorage.getItem(EXPORT_FORMAT_STORAGE_KEY); } catch (e) {}
+  // 3MF is only offered when its modules actually loaded.
+  const can3mf = !!(window.NSO3MF && window.NSOCoolingProfiles);
+  if (!can3mf) {
+    const opt = sel.querySelector('option[value="3mf"]');
+    if (opt) opt.disabled = true;
+  }
+  sel.value = (EXPORT_FORMATS.indexOf(saved) !== -1 && (saved !== '3mf' || can3mf)) ? saved : 'stl';
+
+  sel.addEventListener('change', () => {
+    try { localStorage.setItem(EXPORT_FORMAT_STORAGE_KEY, sel.value); } catch (e) {}
+    updateExportFormatUI();
+    setStatus(sel.value === '3mf'
+      ? 'Export format: 3MF - Bambu Studio project with the selected cooling profile baked in'
+      : 'Export format: STL');
+  });
+
+  updateExportFormatUI();
+}
+
+/** "Export plate" - whole nested plate in the selected format. */
+function exportPlate() {
+  return getExportFormat() === '3mf' ? export3MF() : exportSTLs();
+}
+
+/** "Download selected" and right-click Export - the active model in the selected format. */
+function exportSelected() {
+  if (getExportFormat() === '3mf') return exportActiveModel3MF();
+  // exportActiveModel lives in app-join.js; classic scripts, resolved at click time.
+  if (typeof exportActiveModel === 'function') return exportActiveModel();
+  setStatus('STL export is not available - check console', true);
+}
+
+// ===================== 3MF export (baked cooling settings) =====================
+// Writes a Bambu Studio project with the selected cooling profile baked into
+// Metadata/project_settings.config. The profile table lives in
+// nso-cooling-profiles.js, the archive writer in nso-3mf.js; both are plain
+// classic scripts loaded ahead of this one, and both also run under Node so
+// tools/3mf-test can exercise the same code.
+
+const COOLING_PROFILE_STORAGE_KEY = 'nso.coolingProfile';
+
+function getCoolingProfileId() {
+  const sel = document.getElementById('cooling-profile');
+  if (sel && sel.value) return sel.value;
+  const Profiles = window.NSOCoolingProfiles;
+  return Profiles ? Profiles.DEFAULT_PROFILE_ID : 'default';
+}
+
+function updateCoolingProfileNote() {
+  const Profiles = window.NSOCoolingProfiles;
+  const note = document.getElementById('cooling-profile-note');
+  if (!Profiles || !note) return;
+  const profile = Profiles.getProfile(getCoolingProfileId());
+  if (!profile) { note.textContent = ''; return; }
+  note.textContent = profile.tuned
+    ? profile.note
+    : profile.note + ' Exports identical to Default for now.';
+}
+
+function setupCoolingProfileUI() {
+  const Profiles = window.NSOCoolingProfiles;
+  const sel = document.getElementById('cooling-profile');
+  if (!Profiles || !sel) return;
+
+  sel.innerHTML = '';
+  Profiles.listProfiles().forEach(p => {
+    const opt = document.createElement('option');
+    opt.value = p.id;
+    opt.textContent = p.label;
+    sel.appendChild(opt);
+  });
+
+  let saved = null;
+  try { saved = localStorage.getItem(COOLING_PROFILE_STORAGE_KEY); } catch (e) {}
+  sel.value = Profiles.hasProfile(saved) ? saved : Profiles.DEFAULT_PROFILE_ID;
+
+  sel.addEventListener('change', () => {
+    try { localStorage.setItem(COOLING_PROFILE_STORAGE_KEY, sel.value); } catch (e) {}
+    updateCoolingProfileNote();
+    const profile = Profiles.getProfile(sel.value);
+    setStatus('Cooling profile: ' + (profile ? profile.label : sel.value));
+  });
+
+  updateCoolingProfileNote();
+}
+
+/**
+ * One 3MF object per placed piece, in absolute plate coordinates.
+ *
+ * The transform chain is buildCombinedGeometry()'s, kept per piece instead of
+ * merged so Bambu Studio shows separate objects. The packer works plate-centred
+ * with Three.js Y up; Bambu wants Z up with the plate origin at the front-left
+ * corner, so the same (x, y, z) -> (x, -z, y) swap applies and then a shift by
+ * half the plate.
+ */
+function buildPlacedObjects3MF() {
+  const plate = getCurrentPlate();
+  const halfW = plate.w / 2;
+  const halfD = plate.d / 2;
+
+  return state.placed.map((p, i) => {
+    const geo = p.geometry.clone();
+    const tip = (p.tipX || 0) * (Math.PI / 2) + ((p.tiltX || 0) * Math.PI / 180);
+    const flip = p.flipX ? Math.PI : 0;
+    if (tip || flip) geo.rotateX(tip + flip);
+    const rotY = p.rotY != null ? p.rotY : (p.rotated ? Math.PI / 2 : 0);
+    if (rotY) geo.rotateY(rotY);
+    const roll = (p.tipZ || 0) * (Math.PI / 2) + ((p.tiltZ || 0) * Math.PI / 180);
+    if (roll) geo.rotateZ(roll);
+    geo.translate(p.x, p.height / 2, p.z);
+
+    const pos = geo.attributes.position;
+    const flat = [];
+    for (let v = 0; v < pos.count; v++) {
+      flat.push(
+        pos.getX(v) + halfW,   // Bambu X
+        -pos.getZ(v) + halfD,  // Bambu Y
+        pos.getY(v)            // Bambu Z (height, plate at 0)
+      );
+    }
+    const mesh = window.NSO3MF.indexTriangleSoup(flat);
+    return {
+      name: p.name || ('piece_' + (i + 1)),
+      vertices: mesh.vertices,
+      triangles: mesh.triangles
+    };
+  });
+}
+
+function export3MF() {
+  if (!window.NSO3MF || !window.NSOCoolingProfiles) {
+    setStatus('3MF modules failed to load - check console', true);
+    return Promise.resolve(null);
+  }
+  if (!state.placed.length) {
+    setStatus('Nothing to export - run Optimize first', true);
+    return Promise.resolve(null);
+  }
+
+  const profileId = getCoolingProfileId();
+  setStatus('Building 3MF...');
+
+  let objects;
+  try {
+    objects = buildPlacedObjects3MF();
+  } catch (err) {
+    console.error(err);
+    setStatus('Export failed while reading the plate - check console', true);
+    return Promise.resolve(null);
+  }
+
+  const plate = getCurrentPlate();
+  return window.NSO3MF.build3MF({ objects, profileId, plateName: plate.name })
+    .then(result => {
+      const blob = new Blob([result.bytes], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' });
+      const plateName = plate.name.replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>]/g, '');
+      const filename = `nest_${plateName}_${state.placed.length}pcs.3mf`;
+      downloadBlob(blob, filename);
+      const profile = window.NSOCoolingProfiles.getProfile(result.profileId);
+      setStatus(`Downloaded ${filename} - cooling profile "${profile ? profile.label : result.profileId}" baked in`);
+      return result;
+    })
+    .catch(err => {
+      console.error(err);
+      setStatus('3MF export failed: ' + (err && err.message ? err.message : 'unknown error'), true);
+      return null;
+    });
+}
+
+/**
+ * The active model alone, as a one-object 3MF with the cooling profile baked
+ * in - the 3MF counterpart of exportActiveModel() in app-join.js.
+ *
+ * Same axis swap as the STL path, (x, y, z) -> (x, -z, y), and the same
+ * non-finite-triangle filter. Unlike STL, a 3MF project carries placement, so
+ * the piece is set down resting on z = 0 at the centre of the current plate
+ * rather than left around the model's own origin.
+ */
+function buildActiveModelObject3MF(m) {
+  let geo = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+  if (!geo.attributes || !geo.attributes.position) return null;
+  if (geo === m.geometry) geo = geo.clone();
+  const pos = geo.attributes.position;
+  const flat = [];
+  let dropped = 0;
+  const triCount = Math.floor(pos.count / 3);
+  for (let t = 0; t < triCount; t++) {
+    const tri = [];
+    let ok = true;
+    for (let k = 0; k < 3; k++) {
+      const i = t * 3 + k;
+      const x = pos.getX(i), y = pos.getY(i), z = pos.getZ(i);
+      if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) { ok = false; break; }
+      tri.push(x, -z, y);
+    }
+    if (!ok) { dropped++; continue; }
+    for (let k = 0; k < 9; k++) flat.push(tri[k]);
+  }
+  if (flat.length < 9) return null;
+
+  // Rest on the plate, centred in X/Y.
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity;
+  for (let i = 0; i < flat.length; i += 3) {
+    if (flat[i] < minX) minX = flat[i];
+    if (flat[i] > maxX) maxX = flat[i];
+    if (flat[i + 1] < minY) minY = flat[i + 1];
+    if (flat[i + 1] > maxY) maxY = flat[i + 1];
+    if (flat[i + 2] < minZ) minZ = flat[i + 2];
+  }
+  const plate = getCurrentPlate();
+  const dx = plate.w / 2 - (minX + maxX) / 2;
+  const dy = plate.d / 2 - (minY + maxY) / 2;
+  for (let i = 0; i < flat.length; i += 3) {
+    flat[i] += dx;
+    flat[i + 1] += dy;
+    flat[i + 2] -= minZ;
+  }
+
+  const mesh = window.NSO3MF.indexTriangleSoup(flat);
+  return {
+    name: m.name || 'piece',
+    vertices: mesh.vertices,
+    triangles: mesh.triangles,
+    triCount: mesh.triangles.length / 3,
+    dropped: dropped
+  };
+}
+
+function exportActiveModel3MF() {
+  if (!window.NSO3MF || !window.NSOCoolingProfiles) {
+    setStatus('3MF modules failed to load - check console', true);
+    return Promise.resolve(null);
+  }
+  const m = typeof getActiveModel === 'function' ? getActiveModel() : null;
+  if (!m || !m.geometry) {
+    setStatus('Select a model in the list first (click its name), then Download selected 3MF', true);
+    return Promise.resolve(null);
+  }
+
+  let object;
+  try {
+    object = buildActiveModelObject3MF(m);
+  } catch (err) {
+    console.error(err);
+    setStatus('Export failed while reading the model - check console', true);
+    return Promise.resolve(null);
+  }
+  if (!object) {
+    setStatus('Export failed - mesh empty or invalid', true);
+    return Promise.resolve(null);
+  }
+
+  // Same filename prompt as the STL path, so the two behave alike.
+  const safe = String(m.name || 'piece').replace(/\.stl$/i, '').replace(/[\/\\?%*:|"<>]/g, '_');
+  let filename = safe + '.3mf';
+  try {
+    const typed = window.prompt('Export as', filename);
+    if (typed == null) {
+      setStatus('Export cancelled');
+      return Promise.resolve(null);
+    }
+    filename = String(typed).trim() || filename;
+    if (!/\.3mf$/i.test(filename)) filename += '.3mf';
+    filename = filename.replace(/[\/\\?%*:|"<>]/g, '_');
+  } catch (e) {}
+
+  const profileId = getCoolingProfileId();
+  setStatus('Building 3MF...');
+  const plate = getCurrentPlate();
+  return window.NSO3MF.build3MF({ objects: [object], profileId, plateName: plate.name })
+    .then(result => {
+      const blob = new Blob([result.bytes], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' });
+      downloadBlob(blob, filename);
+      const profile = window.NSOCoolingProfiles.getProfile(result.profileId);
+      setStatus(
+        'Downloaded ' + filename + ' (' + object.triCount + ' tris' +
+        (object.dropped ? ', skipped ' + object.dropped + ' bad' : '') +
+        ') - cooling profile "' + (profile ? profile.label : result.profileId) + '" baked in'
+      );
+      return result;
+    })
+    .catch(err => {
+      console.error(err);
+      setStatus('3MF export failed: ' + (err && err.message ? err.message : 'unknown error'), true);
+      return null;
+    });
 }
 
 

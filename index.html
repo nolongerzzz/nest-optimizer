@@ -45,7 +45,7 @@
         </section>
         <section class="card card-compact">
           <h2>Library</h2>
-          <input type="file" id="file-input" accept=".stl" multiple class="hidden-quiet" />
+          <input type="file" id="file-input" accept=".stl,.3mf" multiple class="hidden-quiet" />
           <div id="model-list" class="model-list"></div>
           <div class="edit-row" style="margin-top:8px;align-items:center;gap:8px;flex-wrap:wrap;">
             <label for="clone-count">Clone</label>
@@ -103,8 +103,18 @@
         </section>
         <section class="card card-compact" id="export-card">
           <h2>Export</h2>
+          <label class="hint" for="export-format" style="margin-bottom:4px;display:block">Format</label>
+          <select id="export-format" title="File format for both export buttons">
+            <option value="stl">STL</option>
+            <option value="3mf">3MF - Bambu Studio project, cooling settings baked in</option>
+          </select>
+          <div id="cooling-profile-row" hidden>
+            <label class="hint" for="cooling-profile" style="margin-bottom:4px;display:block">Cooling profile</label>
+            <select id="cooling-profile" title="Cooling / overhang-fan settings baked into the 3MF"></select>
+            <p class="hint" id="cooling-profile-note"></p>
+          </div>
           <button id="btn-export-model" class="btn btn-primary" type="button">Download selected STL</button>
-          <button id="btn-export-stl" class="btn btn-secondary" type="button" disabled>Export plate</button>
+          <button id="btn-export-stl" class="btn btn-secondary" type="button" disabled>Export plate STL</button>
           <button id="btn-delete-model" class="btn btn-secondary" type="button">Delete model</button>
         </section>
         <section class="card card-compact">
@@ -205,6 +215,9 @@
   </div>
   <script src="NSO_Repair.js?v=inside4"></script>
   <script src="nso_planar_fuse.js?v=inside4"></script>
+  <script src="nso-cooling-profiles.js"></script>
+  <script src="nso-3mf.js"></script>
+  <script src="nso-3mf-read.js"></script>
   <script src="app-core.js?v=inside4"></script>
   <script src="app-cut.js?v=inside4"></script>
   <script src="app-finish.js?v=inside4"></script>

@@ -32,6 +32,107 @@ Parked modules (repair, sculpt, planar fuse) stay unwired until the owner names 
 Clean no-op mesh for repair checks is `fixtures/box-20mm.stl`, not Thingi10K 40921
 (40921 has 17 bowtie vertices; edge-based checks miss that).
 
+## 3MF export - baked cooling settings
+`nso-cooling-profiles.js` + `nso-3mf.js`, wired into `app-core.js` (the
+export-format block and the `export3MF` block) and `app-join.js` / `app-ux.js`
+(the buttons and the right-click item). Full write-up:
+`docs/baked-cooling-settings.md`.
+
+Unlike repair / sculpt / planar fuse, this one **is** wired in. The entry point
+is one **Format** selector (STL / 3MF) at the top of the Export card, remembered
+in `localStorage` as `nso.exportFormat`. It drives **Download selected**,
+**Export plate** and the right-click **Export** item alike, relabelling them; the
+cooling-profile row only shows for 3MF. There is no separate 3MF button any more
+(`#btn-export-3mf` is gone; the plate button keeps its `#btn-export-stl` id
+because app-cut.js and app-core.js enable/disable it by that id). "Download
+selected" with 3MF is `exportActiveModel3MF()`: the active model as a one-object
+project, same axis swap and bad-triangle filter as `exportActiveModel()`, set
+down centred on the current plate resting on z = 0, same filename prompt.
+
+Landed on `main` via `claude/3mf-io` (PR #45), a scoped branch: the two
+modules, the export wiring, the Format selector and the import, nothing else
+from `claude-wip`.
+
+## 3MF import - geometry only
+`nso-3mf-read.js` (UMD, no deps, same code under Node and in the page), called
+from `handleFiles()` in `app-core.js` for `.3mf`; `#file-input` now takes
+`.stl,.3mf`. One model per build item, transforms applied, names from Bambu's
+`model_settings.config` / `<object name>` / the file name. The STL and 3MF
+branches share `addModelFromZUpGeometry()`, so an imported 3MF object has
+`rawTris` in file axes exactly like an STL and Cut / Sculpt / both exporters
+treat it the same. Full write-up, including what is out of scope (settings,
+paint, multi-plate, `.gcode.3mf` without a model part): the "3MF import"
+section of `docs/baked-cooling-settings.md`.
+
+Real-file evidence: Bambu Studio's own calibration files (`fixtures/3mf/`,
+AGPL, two different layouts incl. ZIP64 and the Production extension) and a
+MakerWorld project saved by BambuStudio-02.07.01.62 (not committed; run it with
+`NSO_3MF_REAL=...`). Every object read back passes
+`tools/stl_watertight_check.py --odd --degen` and has positive signed volume.
+
+`npm run 3mf:import` (55 checks, +8 with `NSO_3MF_REAL`) and
+`npm run 3mf:import-drive` (21 checks, real app in headless Chromium: the two
+fixtures in, an imported object out through both export routes, NSO's own
+export re-imported corner for corner, a junk `.3mf` reported not thrown). Both
+in `npm test`.
+
+Two things must not be "tidied up", both confirmed against a real Bambu export
+(stock Bambu PLA Basic @BBL A1M):
+- every value is a single-element array of strings, `["50%"]`, never a scalar;
+- percent fields keep the literal `%`, plain numeric fields do not, even where
+  the number is semantically a percentage (`overhang_fan_speed` is `"100"`,
+  `fan_max_speed` is `"80"`). Bambu's own inconsistency. `KEY_FORMATS` in
+  `nso-cooling-profiles.js` pins this per key and `validateValues()` runs on
+  every export, so a tuned profile cannot silently add or drop a `%`.
+
+`DEFAULT_VALUES` is the confirmed stock set and is frozen. Tuned profiles are
+`overrides` layered on top of it - `breakaway-support`, `fine-detail` and
+`high-flow` are reserved and untuned, and export identical to `default` until
+someone fills them in. Adding a tuned profile means editing that one table and
+nothing else.
+
+`project_settings.config` carries only the 14 confirmed cooling keys. NSO's own
+bookkeeping lives in `Metadata/nso_profile.json` instead, because Bambu warns on
+keys it does not recognise.
+
+Known limitation, confirmed by testing and **documented rather than solved**:
+swapping filament presets in Bambu Studio after opening an export raises "Use
+Modified Value of Filament Preset", and "Discard Modified Value" drops the baked
+settings silently. Inherent to how Bambu reconciles a project against a preset.
+
+Settled: the container is JSON with `:`. The owner pulled the keys with
+`json.load()`, which only parses valid JSON; the `key = ["value"]` form in the
+ticket was shorthand. Serialization is correct as written.
+
+Still open, and the one thing no check here can reach: **nobody has opened one of
+these in a real Bambu Studio instance.** The doc carries a key -> Cooling tab
+field table to check against, what does and does not count as coercion (the
+speed fields are stored bare and rendered with a `%` - that is expected, not a
+rewrite), and the likeliest failure mode if it fails at all: NSO writes only the
+14 cooling keys and no preset-identity envelope. Record the outcome in the doc.
+
+Out of scope here: the Grispr G-code post-processing path for multi-material.
+
+## 3MF checks
+`npm run 3mf:roundtrip` is the dependency-free suite (56 checks): it exports a
+real `.3mf` and reads it back with an independent ZIP reader, asserting key set,
+key order, array-of-string shape, byte-exact values including `%`, raw text
+form, determinism, and that the format guard rejects bad values.
+`npm run 3mf:drive` (63 checks) drives the real app in headless Chromium -
+the Format selector (labels, cooling row, persistence across a reload), fixture
+import, a clone so the plate carries two pieces, the actual **Export plate**
+click with Format = 3MF, the actual **Download selected** click with Format =
+3MF (filename prompt accepted), the plate click again with Format = STL - then
+takes both saved 3MF files apart (14 keys, `%` rule, one object per piece / one
+object for the selected model, on-plate coordinates) and sanity-checks the STL.
+It deliberately does **not** press Optimize: `runOptimize()` throws on this
+branch (it reads `#opt-orient` / `#opt-rotate`, neither of which is in
+index.html - already true at 63c5b00). An earlier draft of the check did press
+it and asserted `state.placed.length > 0`, which passed for the wrong reason,
+since `handleFiles()` already places the imported piece. Both are in `npm test`. Like the CTH
+browser checks, the drive serves three from devDependencies, not the CDN. On a
+runner whose Chromium predates the installed Playwright, set `CHROME_PATH`.
+
 ## CTH checks
 `npm run cth:unit` is the dependency-free suite (`tools/cth-test/*.test.mjs`,
 also runnable as `./tools/cth-test/run-all.sh`). `npm run cth:capture` drives the

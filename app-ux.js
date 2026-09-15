@@ -87,7 +87,8 @@
     if (ctxExport) {
       ctxExport.addEventListener('click', function () {
         if (typeof hideCtxMenu === 'function') hideCtxMenu();
-        if (typeof exportActiveModel === 'function') exportActiveModel();
+        if (typeof exportSelected === 'function') exportSelected();
+        else if (typeof exportActiveModel === 'function') exportActiveModel();
       });
     }
   }
