@@ -1,0 +1,79 @@
+# The repo's test suite, run on pull requests into main and on pushes to the
+# working branches.
+#
+# This is the REQUIRED status check on main (Settings -> Branches -> branch
+# protection -> "Require status checks to pass before merging"). The check name
+# is "npm test", from the job name below.
+#
+# WHY THIS FILE HAS TO LIVE ON main
+# For a `pull_request` event, GitHub reads workflow definitions from the PR's
+# MERGE REF - base merged with head. A workflow that exists only on a side branch
+# is invisible to PRs targeting main: no run is queued, nothing ever reports, and
+# a required check sits on "Expected - waiting for status to be reported"
+# forever, blocking every merge. That is not a syntax or permissions problem and
+# it produces no error anywhere; it just silently does nothing. Keep this file on
+# main. A branch may carry a newer copy, but main must always have one.
+#
+# WHAT IT RUNS
+# `npm test`, as one step, exactly as a contributor runs it locally. The suite
+# list deliberately is NOT repeated here - package.json's "test" script is the
+# single definition, and a copy in this file would drift from it. Add a suite
+# there and CI picks it up with no change to this workflow.
+#
+# Note the suite is not the same on every branch: main's `test` script is
+# narrower than the working branches'. That is fine - the check name is stable,
+# so branch protection keeps working while the suite grows.
+#
+# THE TESTS NEED NO NETWORK
+# index.html names three.js and the manifold CSG kernel on cdn.jsdelivr.net;
+# tools/cth-test/browser-lib.mjs answers those requests from vendor/manifold/ and
+# the `three` devDependency instead. A runner does have outbound access - all
+# three CDN URLs return 200, measured - but the hermetic path is the tested path,
+# so a CDN outage cannot redden the build.
+name: Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, claude-wip]
+  workflow_dispatch:
+
+# One run per branch / PR. A superseded run is cancelled rather than left to burn
+# a runner. Note a cancelled run reads as "not passing" to branch protection
+# until the newer one finishes - that is intended.
+concurrency:
+  group: tests-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: npm test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v5
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # The browser checks call chromium.launch() with no executablePath unless
+      # CHROME_PATH is set, so Playwright must resolve its OWN pinned build. This
+      # fetches exactly the revision the locked Playwright wants, which is why
+      # CHROME_PATH - needed in the Claude web sandbox, where the shipped
+      # Chromium predates the installed Playwright - is not needed or set here.
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run the suite
+        run: npm test
