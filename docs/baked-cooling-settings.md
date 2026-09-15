@@ -256,15 +256,62 @@ Record the outcome here when it is done.
 
 ## 3MF import
 
-Not offered, on purpose, and **a separate ticket**. The picker and drop zone
-accept `.stl` only because the app has no 3MF reader: the only loader is THREE's
-`STLLoader`, and nothing in the browser build reads a ZIP (`nso-3mf.js` only
-writes one). Lifting the `accept` filter alone would hand a ZIP to
-`STLLoader.parse` and fail. The real work is a browser ZIP reader, the OPC rels,
-the 3MF core XML (objects, mesh, build-item transforms, components), the
-Production extension that Bambu Studio's own exports use (per-object
-`3D/Objects/*.model` parts via `p:path`), and a mapping into `addModel()`. See
-`HANDOFF.md` for the full list.
+`nso-3mf-read.js`, wired into `handleFiles()` in `app-core.js`. **Geometry
+only.** The picker and drop zone take `.3mf` alongside `.stl`; each build item
+in the file becomes one model, in millimetres, Z up, with every component and
+item transform applied, so the object lands where the slicer that wrote the
+file had it. The same ingest path (`addModelFromZUpGeometry`) then does what it
+does for an STL: raw triangles kept in file axes for Cut / Sculpt, display copy
+rotated and centred. Nothing else in the archive is read - not
+`project_settings.config`, not materials, colours, thumbnails or G-code.
+
+What the reader handles, each pinned by a check:
+
+- OPC root relationship -> model part (falls back to `3D/3dmodel.model`)
+- 3MF core: `<object><mesh>`, `<components>` (nested, transforms composed),
+  `<build><item transform>`; items with no transform stay put
+- Production extension: `p:path` on `<component>` and `<item>`, so Bambu
+  Studio's and PrusaSlicer's split `3D/Objects/*.model` parts resolve
+- units (`micron` .. `foot`) scaled to mm; mirroring transforms flip the
+  winding back outward; `type="other"` objects (Bambu modifiers / negative
+  volumes) skipped with a console warning
+- names: Bambu's `Metadata/model_settings.config`, else the first
+  `<object name>` down the chain, else the file name
+- ZIP: stored and deflate entries (`DecompressionStream`), ZIP64 markers,
+  data descriptors; encrypted, ZIP64-only-huge and other methods refused with
+  a message
+
+Out of scope for this first pass, deliberately: per-object print settings,
+paint / colour / material data, `<triangleset>` and beam lattices, multi-plate
+projects (all plates' items import onto one plate), G-code-only `.gcode.3mf`
+without a model part, and reading the cooling keys back out of an NSO export
+(the export side owns that format; the reader never looks at it).
+
+Tested against, all read back with the canonical checker
+(`tools/stl_watertight_check.py --odd --degen`) clean and wound outward:
+
+- **Bambu Studio's own files** in `fixtures/3mf/` (see its README): a
+  production-extension file with a non-uniform item scale, and an older
+  inline-mesh file with ten objects, material-extension colour groups and
+  ZIP64 markers. Triangle counts, names and sizes are asserted against the
+  raw XML via third-party `unzip`, never against the reader.
+- **A MakerWorld project saved by BambuStudio-02.07.01.62** (two rotated
+  objects, 21,694 + 21,386 triangles): names and counts match its
+  `model_settings.config`, both rest on z = 0 and sit inside the plate. Not
+  committed (MakerWorld licence); `NSO_3MF_REAL=/path/to/it npm run 3mf:import`
+  runs it. Through the real app it loads as two models of 39.99 x 39.99 x 52
+  and 34.97 x 34.97 x 50 mm, both placed.
+- **NSO's own exports**: four STL fixtures -> `nso-3mf.js` -> reader, corner
+  for corner within 1e-4 mm, same bounding box, same watertight verdict; and in
+  the real app, an imported Bambu cube exported with **Download selected 3MF**
+  and re-imported comes back corner for corner.
+
+```
+npm run 3mf:import        # tools/3mf-test/import-check.js        - 55 checks, +8 with NSO_3MF_REAL
+npm run 3mf:import-drive  # tools/3mf-test/import-drive-check.mjs - 21 checks, real app, headless Chromium
+```
+
+Both are in `npm test`.
 
 ## Settled
 

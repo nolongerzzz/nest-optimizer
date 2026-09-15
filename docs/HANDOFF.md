@@ -97,19 +97,28 @@ down centred on the current plate resting on z = 0, same filename prompt.
 `main` (the live site) has none of this yet - no 3MF modules, no Format
 selector; that is a `claude-wip` -> `main` merge, Grok's call.
 
-**3MF import is deliberately absent, and is a separate ticket.** `#file-input`
-carries `accept=".stl"` and `handleFiles()` filters to `.stl` ("STL files only
-for now"), which is why `.3mf` is greyed out in the picker. That is a guard, not
-an oversight: the only loader on the page is THREE's `STLLoader`, and nothing in
-the app reads a ZIP (`nso-3mf.js` is write-only; the only ZIP *reader* is the
-Node one in `tools/3mf-test/roundtrip-check.js`). Dropping the filter would feed
-a ZIP to `STLLoader.parse` and fail. A usable import needs a browser ZIP reader
-(`DecompressionStream('deflate-raw')` plus a central-directory walk), the OPC
-rels to find the model part, the 3MF core XML (objects, mesh, build items with
-3x4 transforms, `<components>`), and for files Bambu Studio writes the
-Production extension too (per-object `3D/Objects/*.model` parts referenced via
-`p:path`), then a mapping into `addModel()`'s `rawTris` / `rawAxis` /
-`centerOffset` record and a decision on multi-object files. Not started here.
+## 3MF import - geometry only
+`nso-3mf-read.js` (UMD, no deps, same code under Node and in the page), called
+from `handleFiles()` in `app-core.js` for `.3mf`; `#file-input` now takes
+`.stl,.3mf`. One model per build item, transforms applied, names from Bambu's
+`model_settings.config` / `<object name>` / the file name. The STL and 3MF
+branches share `addModelFromZUpGeometry()`, so an imported 3MF object has
+`rawTris` in file axes exactly like an STL and Cut / Sculpt / both exporters
+treat it the same. Full write-up, including what is out of scope (settings,
+paint, multi-plate, `.gcode.3mf` without a model part): the "3MF import"
+section of `docs/baked-cooling-settings.md`.
+
+Real-file evidence: Bambu Studio's own calibration files (`fixtures/3mf/`,
+AGPL, two different layouts incl. ZIP64 and the Production extension) and a
+MakerWorld project saved by BambuStudio-02.07.01.62 (not committed; run it with
+`NSO_3MF_REAL=...`). Every object read back passes
+`tools/stl_watertight_check.py --odd --degen` and has positive signed volume.
+
+`npm run 3mf:import` (55 checks, +8 with `NSO_3MF_REAL`) and
+`npm run 3mf:import-drive` (21 checks, real app in headless Chromium: the two
+fixtures in, an imported object out through both export routes, NSO's own
+export re-imported corner for corner, a junk `.3mf` reported not thrown). Both
+in `npm test`.
 
 Two things must not be "tidied up", both confirmed against a real Bambu export
 (stock Bambu PLA Basic @BBL A1M):

@@ -12,7 +12,8 @@ Smart build-plate packing for 3D printing.
   - Prusa MK4 / MK3S
   - Creality Ender 3
   - Custom size
-- Drag & drop multiple STL files
+- Drag & drop multiple STL or 3MF files (a 3MF's objects each become a model,
+  placed where the slicer had them)
 - Quantity control per model
 - Auto-orient for lower support needs
 - Auto-nest with optional 45°/90° rotations
@@ -27,7 +28,7 @@ Smart build-plate packing for 3D printing.
 
 1. Open `index.html` in Safari, Chrome, or Edge (works on iPhone too).
 2. Select your build plate.
-3. Tap / drop one or more STL files.
+3. Tap / drop one or more STL or 3MF files.
 4. Set quantities if needed.
 5. Tap **Optimize Plate**.
 6. Download the result and open it in your slicer.
@@ -40,10 +41,10 @@ Smart build-plate packing for 3D printing.
   overhang-fan settings baked in - see
   [docs/baked-cooling-settings.md](docs/baked-cooling-settings.md), including a
   known limitation around Bambu's "Use Modified Value of Filament Preset" dialog.
-  3MF *import* is deliberately not offered yet: the file picker and drop zone
-  accept `.stl` only because the app has no 3MF reader (the only loader on the
-  page is THREE's STLLoader). Adding one is its own ticket - see
-  `docs/baked-cooling-settings.md`, "3MF import".
+  3MF **import** reads geometry only: every object in the file, with its
+  transforms applied, becomes a model. Print settings, materials and colours in
+  the file are ignored. Tested against files Bambu Studio wrote as well as
+  NSO's own exports - see `docs/baked-cooling-settings.md`, "3MF import".
 - The packing algorithm is a solid bottom-left free-rectangle packer with rotation. It will improve over time.
 
 ## Future ideas
