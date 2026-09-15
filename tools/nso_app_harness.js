@@ -77,6 +77,16 @@ async function withApp(fn, opts) {
       r.fulfill({ status: 200, contentType: 'text/javascript', body: fs.readFileSync(CDN_MAP[url], 'utf8') }));
   }
 
+  // The CSG kernel is fetched from a CDN the sandbox cannot reach. A copy is
+  // vendored in the repo, so point the loader at it; this makes Join's kernel
+  // route reachable here, which the fallback assertions depend on.
+  await page.route('https://cdn.jsdelivr.net/npm/manifold-3d@3.5.3/manifold.js', r =>
+    r.fulfill({ status: 200, contentType: 'text/javascript',
+                body: fs.readFileSync(path.join(ROOT, 'vendor', 'manifold', 'manifold.js'), 'utf8') }));
+  await page.route('https://cdn.jsdelivr.net/npm/manifold-3d@3.5.3/manifold.wasm', r =>
+    r.fulfill({ status: 200, contentType: 'application/wasm',
+                body: fs.readFileSync(path.join(ROOT, 'vendor', 'manifold', 'manifold.wasm')) }));
+
   try {
     await page.goto('http://127.0.0.1:' + port + '/index.html', { waitUntil: 'load' });
     // the app is up once its own state object exists and the scene is built
