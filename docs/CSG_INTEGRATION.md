@@ -292,8 +292,23 @@ tolerance for all 32,862 triangles. Verified end-to-end:
 | `t3_tape_raw` | none | `ManifoldError: Not manifold` |
 | `t3_tape_weld_live_5e-6` | **4.997e-6 — exactly what ships** | `ManifoldError: Not manifold` |
 | `t3_tape_weld_0.08` | 0.08 unclamped (what the guard prevents) | `ManifoldError: Not manifold` |
-| `t3_tape_weld_1e-4` | 1e-4 grid snap | **32,888 tris, 24,007.197416 mm³, 0 open, 0 nonmanifold, 0 winding** |
+| `t3_tape_weld_1e-4` | 1e-4 grid snap | **32,888 tris, 24,007.197416 mm³, 0 open**, 2 nonmanifold, 5 winding † |
 | `t3_tape_clustered` | 4.24e-5 clustering | **32,886 tris, 24,007.197416 mm³, 0 open, 0 nonmanifold, 0 winding** |
+
+† The nonmanifold and winding figures read 0/0 before the checker consolidation
+of 2026-09-15 and are corrected here. They changed because the validator's own
+weld went from a 1e-5 grid snap to a 1e-4 radius weld, and they are **not an
+over-weld artifact** — the same 2 nonmanifold and 5 winding edges appear in the
+*source* part, `library/tape_on-edge-single-B101_rounded_v8_FINAL.stl`, at every
+radius-weld tolerance from 2e-5 up, with Euler 3. An odd Euler characteristic is
+impossible for a closed orientable surface, so this is a real topological defect
+in the source geometry that the boolean inherited. The old 1e-5 default did not
+see it because at that tolerance the source does not weld shut at all: it reads
+570 open edges and Euler -131, and the phantom open edges mask the real defect.
+`t3_tape_clustered` is clean at every tolerance because the 4.24e-5 clustering
+weld was applied before the boolean, so the kernel resolved it. This is the same
+tolerance poisoning weld-eps1 fixed in `NSO_weldEpsFor`, seen from the
+measurement side.
 
 The two successful welds converge on **the identical volume, 24,007.197416 mm³**,
 from different weld algorithms and different triangle counts (32,888 vs 32,886) —
@@ -319,10 +334,20 @@ matters, so the welded input was measured too:
 
 | | pierce | coplanar | degenerate | worst aspect |
 |---|---|---|---|---|
-| input (grid-snap weld 1e-4) | **187** | 7 | **295** | 145,272,354 |
-| input (clustering weld 4.24e-5) | **187** | 7 | **295** | 145,272,354 |
-| output, grid-snap path | **10** | 2 | **0** | 7,636,891 |
-| output, clustering path | **9** | 2 | **0** | 7,636,891 |
+| input (grid-snap weld 1e-4) | **187** → *185* | 7 → *6* | **295** | 145,272,354 |
+| input (clustering weld 4.24e-5) | **187** → *185* | 7 → *6* | **295** | 145,272,354 |
+| output, grid-snap path | **10** → *8* | 2 | **0** | 7,636,891 |
+| output, clustering path | **9** → *7* | 2 | **0** | 7,636,891 |
+
+Bold is as first measured; italic is the same file re-measured after the checker
+consolidation of 2026-09-15. Every row drops by exactly 2 piercing pairs, and
+the input rows by 1 coplanar. That is the unnormalised-plane-distance bug
+described in §6: pairs involving a sliver were being classified against an
+epsilon that its tiny unnormalised normal made meaningless. The argument this
+table exists to make is unaffected and if anything cleaner — both weld methods
+still leave the *same* piercing count on the input, so these remain real defects
+in the source geometry rather than weld artifacts, and the boolean still reduces
+them (185 → 7 on the clustering path) while eliminating all 295 degenerates.
 
 Both weld methods leave the same 187 piercing pairs, so these are **real defects
 in the source geometry**, not weld artifacts — the part is watertight and
@@ -455,12 +480,23 @@ meshes, so one has to become canonical during the merge-order regroup.
 | adjacency skip | shares a vertex index after welding at `WELD_TOL` 1e-4 | shares a welded vertex at 1e-5 |
 | output | one integer | pierce/coplanar split, example pairs, adjacent-pairs-skipped |
 
-The broad phase is the one place the earlier module is plainly better, and its
-own source comment says why: real meshes mix triangle sizes badly — the tape
-fixture runs from 5e-3 mm slivers up to a single 80 mm face — and at any grid
-pitch fine enough for the slivers, one large triangle lands in tens of thousands
-of cells. A BVH does not care about that spread. **The uniform grid used here is
-the known-weak choice.**
+~~The broad phase is the one place the earlier module is plainly better~~ —
+**corrected 2026-09-15, measured.** The spread is real: the tape fixture runs
+from 7.5e-3 mm slivers to a single 82.4 mm face, 1.09e4 between them. Two things
+about the conclusion drawn from it were not:
+
+- A broad phase **cannot change a count**. Both structures are conservative
+  supersets handed to the same exact narrow-phase test, so the choice is
+  performance only. The BVH was checked against brute force on 6,000 tape
+  triangles and missed 0 of 39,816 box-overlapping pairs — that is what
+  correctness rests on, not on which structure it is.
+- The grid here is **not pitched at the sliver scale**. Its cell is the *mean*
+  triangle bounding-box diagonal — 1.52 mm on the tape — so the 82.4 mm face
+  lands in 594 cells, not tens of thousands, and the whole mesh costs 90,192
+  insertions for 32,862 triangles, 2.7 per triangle.
+
+So neither structure was the weak choice, and this table's other four rows are
+what actually made the two disagree.
 
 ### Measured side by side, same files
 
@@ -472,6 +508,15 @@ the known-weak choice.**
 | `t3_subtract_blob_torus` output | 6,614 | **0** | 0 + 0 |
 | `tape_welded_clustered` (input) | 32,860 | **306** | 187 + 7 |
 | `t3_tape_clustered` (output) | 32,886 | **6** | 9 + 2 |
+
+*Post-consolidation both columns are one number: 185 + 6 on the input and 7 + 2
+on the output, from either implementation. The attribution in the paragraph
+below is confirmed — it is the endpoint test that opens the 306-vs-187 gap, and
+almost all of it. Holding weld and geometry fixed at the radius-1e-4 welded mesh
+and toggling one axis at a time: strict endpoint 306, tolerant endpoint 184,
+plus 1 from normalising the plane distances = 185. Both files were already
+scoring the welded mesh here, since the input had been welded to disk before
+being measured, so the geometry axis does not enter this particular row.*
 
 **They agree exactly on every clean mesh** — the agreement that matters, and
 mutual corroboration of the "0 self-intersections" result reported for all 12
@@ -486,12 +531,39 @@ Neither is wrong; they answer slightly different questions.
 Cost on the 32,860-triangle tape part: **1,121 ms** for the full JS `inspect`
 (weld + analyze + self-intersection) against **~2,800 ms** for the Python battery.
 
-### Recommendation
+### Recommendation — DONE (2026-09-15)
 
-Keep `NSO_Repair`'s BVH + Möller core as canonical and port the two additions
-here onto it: coplanar-overlap classification (the SAT test), and the
-pierce/coplanar split with example pairs. Then settle the two policy questions
-explicitly rather than by accident — does an exact endpoint touch count, and
-what weld tolerance defines adjacency — since those are what make the two
-disagree. `tools/mesh_validate.py` should then either call through to a single
-shared definition or be retired in favour of a node runner over `NSO_Repair.js`.
+The consolidation happened. What it settled, and where it departed from the
+recommendation as written:
+
+- **One policy, two transcriptions, held together by a test.**
+  `tools/mesh_validate.py` is the canonical definition — its module docstring
+  carries the four policy axes and the measurements behind each.
+  `NSO_Repair.js` transcribes the same predicate because the browser cannot
+  shell out to python. `tools/nso_selfint_equiv_test.js` asserts the two agree
+  pair-for-pair on every STL in the repo (111 assertions) and fails on drift.
+  Neither file was retired; a single shared *definition* with an enforced
+  equivalence is what the recommendation was reaching for.
+- **The third copy is gone.** `tools/nso_fuse_testlib.js` now delegates to the
+  canonical checker. Its own suites (12-piece chain, 23-case tolerance) pass
+  unchanged against it.
+- **Both additions landed, in both directions.** Coplanar SAT classification and
+  the pierce/coplanar split went from here into `NSO_Repair.js`; the 1e-4 radius
+  weld and welded-geometry scoring went the other way, into this file.
+- **The broad phase turned out not to be a policy question at all.** A tree and
+  a hash are both conservative supersets feeding the same narrow-phase test, so
+  neither can change a count — see the correction under "Where they differ by
+  design" below. Each kept the structure that suits it.
+- **A fourth axis dominated the three named above**, and nobody had written it
+  down: *which geometry gets tested*. `NSO_Repair` scored the welded mesh, this
+  file scored the raw soup. On the tape that is 187 piercing pairs against
+  3,073. Welded won; using the weld for adjacency but the raw coordinates for
+  intersection is incoherent and re-reports every gap the weld just closed.
+- **One real bug fell out of it**, in this file rather than the other one: plane
+  distances were zeroed against an absolute epsilon without dividing by the
+  normal's length, so a sliver's tiny unnormalised normal made every distance
+  measured against its plane vanish. `tri_tri_intersect` was therefore not
+  symmetric in its two arguments — tape triangles 21845 and 22092 answered
+  `coplanar` one way and `None` the other. That is why the two implementations
+  reported 7 coplanar pairs against 6 on the same file. Fixed by normalising;
+  the pair is now a regression case in the equivalence test.
