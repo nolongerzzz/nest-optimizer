@@ -15,12 +15,22 @@
 #   cth:drive      drive-check.mjs                    14 checks, Chromium + real WASM CSG
 #   3mf:roundtrip  3mf-test/roundtrip-check.js        56 checks, pure Node
 #   3mf:drive      3mf-test/export-drive-check.mjs    39 checks, headless Chromium
-#                                                    253 checks total
+#   wire:smooth    nso_wire_smooth_test.js            17 checks, Chromium - Smooth
+#   wire:repair    nso_wire_repair_test.js            22 checks, Chromium - Seal/Repair
+#   wire:fuse      nso_wire_fuse_test.js              19 checks, Chromium - Join/Fusion
+#                                                    311 checks total
+#
+# The wire:* three gate the features wired into production on 2026-09-15. They
+# use tools/nso_app_harness.js, NOT cth-test/browser-lib.mjs: it resolves Chromium
+# itself via chromiumPath(), which probes /opt/pw-browsers and returns undefined
+# on a runner, so Playwright falls through to its own pinned build. Verified, not
+# assumed - and they exit `fails === 0 ? 0 : 1`, so the && chain really gates.
 #
 # Deliberately NOT here, matching docs/HANDOFF.md: `npm run grispr:test` (Python,
-# unwired) and the tools/nso_wire_*.js / repair / sculpt / fuse suites, none of
-# which are in `npm test`. If those should gate merges, add them to the "test"
-# script and this workflow picks them up with no change here.
+# unwired) and the suites for still-unwired modules - nso_inside_corners_test.js,
+# nso_paint_scope_test.js, nso_selfint_equiv_test.js, nso_repair_regress.js,
+# nso_fuse_*_test.js, sculpt_selftest.js. If those should gate merges, add them to
+# the "test" script and this workflow picks them up with no change here.
 #
 # The tests need no network of their own. index.html names three.js and the
 # manifold CSG kernel on cdn.jsdelivr.net; tools/cth-test/browser-lib.mjs answers

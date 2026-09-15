@@ -309,10 +309,19 @@ It runs `npm test` as one step rather than listing the suites in YAML, so CI
 cannot drift from package.json. Add a suite to the `test` script and CI runs it;
 nothing to change in the workflow.
 
-NOT in CI because not in `npm test`: `grispr:test` (Python) and the
-`tools/nso_wire_*.js` / repair / sculpt / fuse suites. Deliberate, not an
-oversight - but note the wire-* trio now covers WIRED features, so if those
-should gate merges the fix is to add them to the `test` script.
+As of 2026-09-15 the wire-* trio is IN `npm test`, so Smooth, Seal->Repair and
+Join->Fusion are gated by CI rather than only checked by hand. They run through
+`tools/nso_app_harness.js`, not `cth-test/browser-lib.mjs`: that harness resolves
+Chromium itself in `chromiumPath()`, which probes `/opt/pw-browsers` and returns
+`undefined` on a runner, so Playwright falls through to its own pinned build.
+Checked, not assumed. They also exit `fails === 0 ? 0 : 1`, which is what makes
+appending them to the `&&` chain an actual gate rather than decoration.
+
+Still NOT in CI, because still not in `npm test`: `grispr:test` (Python) and the
+suites for modules that remain unwired - `nso_inside_corners_test.js`,
+`nso_paint_scope_test.js`, `nso_selfint_equiv_test.js`, `nso_repair_regress.js`,
+`nso_fuse_*_test.js`, `sculpt_selftest.js`. Deliberate. Add to the `test` script
+to gate them; the workflow needs no change.
 
 **No CHROME_PATH here, and that is the whole point.** `npx playwright install`
 fetches the exact revision the locked Playwright wants
@@ -328,10 +337,12 @@ sandbox-only.
 tested path and a CDN outage cannot redden the build. The vendored sizes match
 the CDN's byte for byte, so the copy is not a stale fork.
 
-Cost on ubuntu-latest: **42s green** (checkout 2s, node 1s, `npm ci` 2s,
-playwright chromium 24s / 114 MiB, `npm test` 10s); 36s red, since `npm test`
-stops at the first failing suite. No browser cache step - it saves ~20s of a 42s
-job and adds a failure mode.
+Cost on ubuntu-latest: see the commit that added the wire-* suites for the
+current figure. Before them it was **42s green** (checkout 2s, node 1s,
+`npm ci` 2s, playwright chromium 24s / 114 MiB, `npm test` 10s); the three wire
+suites add roughly 14s of browser time. Red is faster, since `npm test` stops at
+the first failing suite. No browser cache step - it saves ~20s and adds a
+failure mode.
 
 **Negative-controlled, not assumed.** Branch `ci-selftest-negative`, two runs
 differing by exactly one line - an off-by-one in `app-mask.js` `nsoMaskCount()`:
@@ -353,8 +364,8 @@ with this connector's permissions.
 `npm run cth:unit` is the dependency-free suite (`tools/cth-test/*.test.mjs`,
 also runnable as `./tools/cth-test/run-all.sh`). `npm run cth:capture` and
 `npm run cth:drive` drive the real app in headless Chromium and need `npm ci`.
-`npm test` runs these three plus the two 3MF checks - five suites, 253 checks -
-and is what CI runs. Both browser checks serve three and the manifold
+`npm test` runs these three, the two 3MF checks and the three wire-* checks -
+eight suites, 311 checks - and is what CI runs. Both browser checks serve three and the manifold
 kernel from the `three` devDependency and `vendor/manifold/` rather than the
 CDN `index.html` names, so they need no network.
 
