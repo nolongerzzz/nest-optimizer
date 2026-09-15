@@ -1,0 +1,16 @@
+--- a/app-core.js
++++ b/app-core.js
+@@ -1327,10 +1327,11 @@
+   closeCutter(true);
+ 
+   try {
+-    const autoOrientFace = document.getElementById('opt-auto-orient')?.checked;
+-    const preferSupports = document.getElementById('opt-orient').checked;
+-    const allowRotate = document.getElementById('opt-rotate').checked;
+-    const gap = Number(document.getElementById('gap').value) || 2;
++    const autoOrientFace = false; // keep face-down; #opt-auto-orient is gone
++    const preferSupports = false; // #opt-orient removed when nest was parked
++    const allowRotate = true;     // yaw 0/90/±45; #opt-rotate removed
++    const gapEl = document.getElementById('gap');
++    const gap = Number(gapEl && gapEl.value) || 2;
+     const plate = getCurrentPlate();
