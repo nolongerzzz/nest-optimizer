@@ -105,9 +105,13 @@ the shared vertex**:
   shell" points straight at the other sheet, because the other sheet is what is
   occupying that space. The fan walls sweep across it and the result
   self-intersects.
-  (`fixtures/repair/synth_pinch_2sheet_tight.stl`, 0 degrees: **0 -> 12**
+  (`fixtures/repair/synth_pinch_2sheet_tight.stl`, 0 degrees: **0 -> 4**
   intersecting triangle pairs, so the gate blocks it and the file is returned
-  untouched.)
+  untouched. This read 0 -> 12 before the checker consolidation of 2026-09-15.
+  The stage produces the same 12 candidate pairs it always did; 4 of them
+  overlap by 6.275e-2 mm and are counted, and the other 8 have an interval
+  overlap of exactly 0.0 -- they touch without penetrating -- and were counted
+  by the old strict endpoint test. The outcome is unchanged.)
 
 Nothing local to the vertex separates the two cases. The fans look the same,
 and how tight is too tight depends on the local clearance as well as the angle.
@@ -175,14 +179,23 @@ closed-solid fixture to develop against; 39644 is one sample, not a test.
 > gate blocks, file left unchanged — holds exactly. The 0 -> 9 figure is not
 > reproduced and is recorded here as unconfirmed.
 
-### Coplanar overlap is not counted as self-intersection
+### Coplanar overlap is measured, but stays out of the gate
 
-The triangle-triangle test deliberately returns false for the coplanar case.
-Two coplanar triangles that overlap are a real defect, but counting them
-reliably needs 2D polygon clipping, and a cheap test there produces false
-positives on ordinary adjacent geometry — which, in a gate, means refusing to
-repair meshes that are fine. The gate therefore under-reports on coplanar
-overlap rather than over-reporting.
+~~The triangle-triangle test deliberately returns false for the coplanar case.~~
+**Superseded by the checker consolidation of 2026-09-15.** The objection was
+that counting coplanar overlap reliably needs 2D polygon clipping, and that a
+cheap test produces false positives on ordinary adjacent geometry — which, in a
+gate, means refusing to repair meshes that are fine. `tools/mesh_validate.py`
+had the real test all along: separating-axis in the plane with strict
+separation, so triangles that merely share an edge or touch at a point have a
+separating axis and correctly do **not** overlap. That is now the test here too,
+and `analyze()` reports `selfIntersectionsCoplanar` alongside
+`selfIntersections`.
+
+The gate still counts **piercing only**, for the reason the original note gives
+second: a boolean seam legitimately produces coplanar contact, so folding it in
+would block repairs on sound meshes. The difference is that the under-report is
+now a deliberate gate policy rather than a limitation of the test.
 
 ### T-junction search only looks at cracked topology
 
@@ -259,8 +272,25 @@ Self-intersection counting is the expensive part and it runs up to five times
 per `commit()` (before, after, and once per gated stage that actually changed
 something). The broadphase is a median-split AABB tree, not a uniform grid:
 real meshes mix triangle sizes badly — the tape fixture in this repo runs from
-5e-3 mm slivers up to a single 80 mm face — and at any grid pitch fine enough
-for the slivers, one big triangle lands in tens of thousands of cells.
+7.5e-3 mm slivers up to a single 82.4 mm face, a spread of 1.09e4 — and at any
+grid pitch fine enough for the slivers, one big triangle lands in tens of
+thousands of cells.
+
+Two corrections to that last clause, from the checker consolidation of
+2026-09-15, because it was being quoted as a reason to prefer one checker's
+*results* over another's:
+
+- **The broad phase cannot change a count.** A tree and a hash are both
+  conservative supersets feeding the same exact narrow-phase test, so the choice
+  is performance only. This tree was checked against brute force on 6,000 tape
+  triangles and missed 0 of 39,816 box-overlapping pairs; correctness rests on
+  that, not on the structure.
+- **"Tens of thousands of cells" does not describe the grid actually in use.**
+  `tools/mesh_validate.py` sizes its cells by the *mean* triangle bounding-box
+  diagonal (1.52 mm on the tape), not by the smallest feature, so the 82.4 mm
+  face lands in 594 cells and the whole mesh costs 90,192 insertions for 32,862
+  triangles — 2.7 per triangle. The argument holds against a grid pitched at the
+  sliver scale; nobody pitched one there.
 
 Measured on `fixtures/tape_on-edge-single-B101_rounded_v8_FINAL.stl`, 32,862
 triangles: full `commit()` in 3.9 s, of which self-intersection counting is

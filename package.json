@@ -6,7 +6,8 @@
   "scripts": {
     "cth:unit": "sh tools/cth-test/run-all.sh",
     "cth:capture": "node tools/cth-test/capture-check.mjs",
-    "test": "sh tools/cth-test/run-all.sh && node tools/cth-test/capture-check.mjs"
+    "selfint:equiv": "node tools/nso_selfint_equiv_test.js",
+    "test": "sh tools/cth-test/run-all.sh && node tools/cth-test/capture-check.mjs && node tools/nso_selfint_equiv_test.js"
   },
   "devDependencies": {
     "playwright": "^1.47.0",

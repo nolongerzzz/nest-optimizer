@@ -346,49 +346,130 @@
   }
 
   /* ------------------------------------------------------------------ *
-   * Self-intersection (Möller interval-overlap, non-coplanar only)
+   * Self-intersection (Möller interval-overlap + coplanar SAT)
+   *
+   * CANONICAL — this is a transcription of tools/mesh_validate.py, which is
+   * the single source of truth for the policy. Do not change one without the
+   * other: tools/nso_selfint_equiv_test.js asserts the two agree pair-for-pair
+   * on every fixture in the repo, and fails if they drift. The four policy
+   * axes and the measurements that settled them are written out in that file's
+   * module docstring.
+   *
+   * Returns 'pierce', 'coplanar', or null. The repair gate counts piercing
+   * only — see countSelfIntersections.
    * ------------------------------------------------------------------ */
 
+  var SELFINT_EPS = 1e-9;
+
+  /* Do two coplanar triangles overlap with positive area? Dropped to 2D on the
+   * plane's dominant axis, then separating-axis over all six edge normals.
+   * Separation is strict, so triangles that merely share an edge or touch at a
+   * point have a separating axis and correctly do NOT overlap — which is what
+   * makes a coplanar count mean anything at a boolean seam, and what retires
+   * the objection in docs/NSO_Repair.md that a cheap coplanar test
+   * false-positives on ordinary adjacent geometry. */
+  function coplanarOverlap(T1, T2, N, eps) {
+    var drop = 0, mx = Math.abs(N[0]);
+    if (Math.abs(N[1]) > mx) { mx = Math.abs(N[1]); drop = 1; }
+    if (Math.abs(N[2]) > mx) { drop = 2; }
+    var ax = (drop + 1) % 3, ay = (drop + 2) % 3;
+    var A = [[T1[0][ax], T1[0][ay]], [T1[1][ax], T1[1][ay]], [T1[2][ax], T1[2][ay]]];
+    var B = [[T2[0][ax], T2[0][ay]], [T2[1][ax], T2[1][ay]], [T2[2][ax], T2[2][ay]]];
+    var polys = [A, B];
+    for (var pi = 0; pi < 2; pi++) {
+      var poly = polys[pi];
+      for (var i = 0; i < 3; i++) {
+        var x0 = poly[i][0], y0 = poly[i][1];
+        var x1 = poly[(i + 1) % 3][0], y1 = poly[(i + 1) % 3][1];
+        var nx = -(y1 - y0), ny = (x1 - x0);
+        var L = Math.sqrt(nx * nx + ny * ny);
+        if (L < 1e-18) continue;
+        nx /= L; ny /= L;
+        var paMin = Infinity, paMax = -Infinity, pbMin = Infinity, pbMax = -Infinity;
+        for (var k = 0; k < 3; k++) {
+          var da = nx * A[k][0] + ny * A[k][1];
+          if (da < paMin) paMin = da;
+          if (da > paMax) paMax = da;
+          var db = nx * B[k][0] + ny * B[k][1];
+          if (db < pbMin) pbMin = db;
+          if (db > pbMax) pbMax = db;
+        }
+        if (paMax <= pbMin + eps || pbMax <= paMin + eps) return false;
+      }
+    }
+    return true;
+  }
+
   function triTriIntersect(V0, V1, V2, U0, U1, U2) {
-    var E1 = sub(V1, V0), E2 = sub(V2, V0);
-    var N1 = cross(E1, E2);
+    var EPS = SELFINT_EPS;
+    var T1 = [V0, V1, V2], T2 = [U0, U1, U2];
+
+    /* Plane distances are divided by the normal's length, so EPS is a distance
+     * in mm and means the same for a 5e-3 mm sliver as for an 80 mm face.
+     * Without the division the test is not even symmetric — a sliver's
+     * unnormalised normal is tiny, so distances measured against ITS plane get
+     * zeroed while the same pair measured the other way round does not, and
+     * the answer then depends on the order the broad phase visited the pair
+     * in. See tools/mesh_validate.py tri_tri_intersect for the tape-fixture
+     * pair that exposed it. Interval arithmetic below is unaffected: it uses
+     * only ratios of distances, and the normalisation cancels. */
+    var N1 = cross(sub(V1, V0), sub(V2, V0));
+    var N2 = cross(sub(U1, U0), sub(U2, U0));
+    var L1 = Math.sqrt(dot(N1, N1)), L2 = Math.sqrt(dot(N2, N2));
+    if (L1 <= 0 || L2 <= 0) return null;            // degenerate, counted apart
+
     var d1 = -dot(N1, V0);
-    var du0 = dot(N1, U0) + d1, du1 = dot(N1, U1) + d1, du2 = dot(N1, U2) + d1;
-    var EPS = 1e-9;
+    var du0 = (dot(N1, U0) + d1) / L1, du1 = (dot(N1, U1) + d1) / L1,
+        du2 = (dot(N1, U2) + d1) / L1;
     if (Math.abs(du0) < EPS) du0 = 0;
     if (Math.abs(du1) < EPS) du1 = 0;
     if (Math.abs(du2) < EPS) du2 = 0;
     var du0du1 = du0 * du1, du0du2 = du0 * du2;
-    if (du0du1 > 0 && du0du2 > 0) return false;
+    if (du0du1 > 0 && du0du2 > 0) return null;      // tri2 entirely one side
 
-    E1 = sub(U1, U0); E2 = sub(U2, U0);
-    var N2 = cross(E1, E2);
     var d2 = -dot(N2, U0);
-    var dv0 = dot(N2, V0) + d2, dv1 = dot(N2, V1) + d2, dv2 = dot(N2, V2) + d2;
+    var dv0 = (dot(N2, V0) + d2) / L2, dv1 = (dot(N2, V1) + d2) / L2,
+        dv2 = (dot(N2, V2) + d2) / L2;
     if (Math.abs(dv0) < EPS) dv0 = 0;
     if (Math.abs(dv1) < EPS) dv1 = 0;
     if (Math.abs(dv2) < EPS) dv2 = 0;
     var dv0dv1 = dv0 * dv1, dv0dv2 = dv0 * dv2;
-    if (dv0dv1 > 0 && dv0dv2 > 0) return false;
+    if (dv0dv1 > 0 && dv0dv2 > 0) return null;      // tri1 entirely one side
 
+    /* |N1 x N2| / (|N1||N2|) is the sine of the angle between the planes, so
+     * this cutoff is an angle, not a size. Only the SAME plane can overlap,
+     * and only then if the two actually share area — being coplanar is not by
+     * itself a defect, so it is tested, not assumed. */
     var D = cross(N1, N2);
     var max = Math.abs(D[0]), index = 0;
     var bb = Math.abs(D[1]), cc = Math.abs(D[2]);
     if (bb > max) { max = bb; index = 1; }
     if (cc > max) { max = cc; index = 2; }
-    if (max < EPS) return false; // coplanar — deliberately not counted
+
+    if (max / (L1 * L2) < 1e-20) {
+      if (Math.abs(dv0) > EPS || Math.abs(dv1) > EPS || Math.abs(dv2) > EPS) return null;
+      return coplanarOverlap(T1, T2, N1, EPS) ? 'coplanar' : null;
+    }
 
     var vp0 = V0[index], vp1 = V1[index], vp2 = V2[index];
     var up0 = U0[index], up1 = U1[index], up2 = U2[index];
 
     var isectV = isect2(vp0, vp1, vp2, dv0, dv1, dv2, dv0dv1, dv0dv2);
     var isectU = isect2(up0, up1, up2, du0, du1, du2, du0du1, du0du2);
-    if (!isectV || !isectU) return false;
+    if (!isectV || !isectU) {
+      return coplanarOverlap(T1, T2, N1, EPS) ? 'coplanar' : null;
+    }
 
     if (isectV[0] > isectV[1]) isectV = [isectV[1], isectV[0]];
     if (isectU[0] > isectU[1]) isectU = [isectU[1], isectU[0]];
-    if (isectV[1] < isectU[0] || isectU[1] < isectV[0]) return false;
-    return true;
+
+    /* Touching exactly at an interval endpoint is contact, not penetration.
+     * The old test here was strict (`<` rather than `<= +EPS`), which called a
+     * zero-overlap contact a pierce. STL coordinates are float32 — ULP 9.5e-7
+     * at 8 mm — so an overlap that small is below what the file can represent.
+     * See mesh_validate.py axis 3. */
+    if (isectV[1] <= isectU[0] + EPS || isectU[1] <= isectV[0] + EPS) return null;
+    return 'pierce';
   }
 
   function isect2(vv0, vv1, vv2, d0, d1, d2, d0d1, d0d2) {
@@ -413,9 +494,18 @@
    * enough for the slivers, one big triangle lands in tens of thousands of
    * cells. A tree does not care about the spread, and its self-traversal visits
    * each unordered pair at most once, so no pair-dedupe table is needed. */
+  /* Piercing-pair count — the number the repair gate is tuned against.
+   * docs/NSO_Repair.md records why coplanar overlap stays out of the gate: a
+   * boolean seam produces legitimate coplanar contact, so folding it in would
+   * refuse to repair meshes that are fine. countSelfIntersectionsDetail()
+   * reports it alongside for callers that want the full picture. */
   function countSelfIntersections(m) {
+    return countSelfIntersectionsDetail(m).pierce;
+  }
+
+  function countSelfIntersectionsDetail(m) {
     var nf = faceCount(m);
-    if (nf < 2) return 0;
+    if (nf < 2) return { pierce: 0, coplanar: 0 };
 
     var boxes = new Float64Array(nf * 6);
     for (var f = 0; f < nf; f++) {
@@ -428,7 +518,7 @@
 
     var tree = buildBVH(nf, boxes);
     var nodes = tree.nodes, order = tree.order;
-    var hits = 0;
+    var tally = { pierce: 0, coplanar: 0 };
 
     // Pair stack. (i, i) means "this subtree against itself".
     var stack = [0, 0];
@@ -439,7 +529,7 @@
       if (ai === bi) {
         if (A.leaf) {
           for (var x = A.start; x < A.start + A.count; x++) {
-            for (var y = x + 1; y < A.start + A.count; y++) hits += testPair(m, boxes, order[x], order[y]);
+            for (var y = x + 1; y < A.start + A.count; y++) testPair(m, boxes, order[x], order[y], tally);
           }
         } else {
           stack.push(A.left, A.left, A.right, A.right, A.left, A.right);
@@ -451,7 +541,7 @@
 
       if (A.leaf && B.leaf) {
         for (var p = A.start; p < A.start + A.count; p++) {
-          for (var q = B.start; q < B.start + B.count; q++) hits += testPair(m, boxes, order[p], order[q]);
+          for (var q = B.start; q < B.start + B.count; q++) testPair(m, boxes, order[p], order[q], tally);
         }
         continue;
       }
@@ -462,22 +552,36 @@
         stack.push(ai, B.left, ai, B.right);
       }
     }
-    return hits;
+    return tally;
   }
 
-  function testPair(m, boxes, fa, fb) {
-    if (shareVertex(m, fa, fb)) return 0;
+  function testPair(m, boxes, fa, fb, tally) {
+    if (shareVertex(m, fa, fb)) return;
+    /* Box reject with EPS of slack, matching mesh_validate.py. The slack has
+     * to be here and not just in the narrow phase: a strict reject drops pairs
+     * whose boxes are separated by less than EPS, and a coplanar pair that
+     * touches within EPS in one axis can still overlap with real area in the
+     * plane. Without it this file found 6 coplanar pairs on the tape fixture
+     * where mesh_validate.py found 7. */
     for (var k = 0; k < 3; k++) {
-      if (boxes[fa * 6 + 3 + k] < boxes[fb * 6 + k]) return 0;
-      if (boxes[fb * 6 + 3 + k] < boxes[fa * 6 + k]) return 0;
+      if (boxes[fa * 6 + 3 + k] < boxes[fb * 6 + k] - SELFINT_EPS) return;
+      if (boxes[fb * 6 + 3 + k] < boxes[fa * 6 + k] - SELFINT_EPS) return;
     }
-    return triTriIntersect(vtx(m, m.faces[fa * 3]), vtx(m, m.faces[fa * 3 + 1]), vtx(m, m.faces[fa * 3 + 2]),
-                           vtx(m, m.faces[fb * 3]), vtx(m, m.faces[fb * 3 + 1]), vtx(m, m.faces[fb * 3 + 2])) ? 1 : 0;
+    var hit = triTriIntersect(vtx(m, m.faces[fa * 3]), vtx(m, m.faces[fa * 3 + 1]), vtx(m, m.faces[fa * 3 + 2]),
+                              vtx(m, m.faces[fb * 3]), vtx(m, m.faces[fb * 3 + 1]), vtx(m, m.faces[fb * 3 + 2]));
+    if (hit === 'pierce') tally.pierce++;
+    else if (hit === 'coplanar') tally.coplanar++;
   }
 
+  /* Node-level reject, and it carries the same EPS slack as the leaf-level one
+   * in testPair. It has to: a node box that clears its neighbour by less than
+   * EPS prunes the whole subtree, so a strict test here silently loses pairs
+   * the narrow phase would have counted, and no amount of slack further down
+   * gets them back. This cost one coplanar pair on the tape fixture (6 against
+   * mesh_validate.py's 7) until the slack was added in both places. */
   function boxesOverlap(boxes, A, B) {
     for (var k = 0; k < 3; k++) {
-      if (A.hi[k] < B.lo[k] || B.hi[k] < A.lo[k]) return false;
+      if (A.hi[k] < B.lo[k] - SELFINT_EPS || B.hi[k] < A.lo[k] - SELFINT_EPS) return false;
     }
     return true;
   }
@@ -585,7 +689,11 @@
       area: surfaceArea(m),
       watertight: (open + nonmanifold) === 0
     };
-    if (opts.selfIntersections !== false) out.selfIntersections = countSelfIntersections(m);
+    if (opts.selfIntersections !== false) {
+      var si = countSelfIntersectionsDetail(m);
+      out.selfIntersections = si.pierce;
+      out.selfIntersectionsCoplanar = si.coplanar;
+    }
     return out;
   }
 
@@ -1326,7 +1434,12 @@
     SPLIT_EPS: SPLIT_EPS,
     NUDGE_FRAC: NUDGE_FRAC,
     commit: commit,
-    inspect: inspect
+    inspect: inspect,
+    /* Exposed for tools/nso_selfint_equiv_test.js, which holds this
+     * implementation to tools/mesh_validate.py pair-for-pair. */
+    _selfIntersectionDetail: countSelfIntersectionsDetail,
+    _weldToIndexed: weldToIndexed,
+    _triTriIntersect: triTriIntersect
   };
 
 })(typeof window !== 'undefined' ? window : this);

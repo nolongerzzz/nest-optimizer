@@ -10,8 +10,8 @@ Reports real numbers, not pass/fail booleans:
   self-intersecting triangle pairs        (split coplanar vs piercing)
 
 Usage:
-  python3 tools/mesh_validate.py mesh.stl [--weld 1e-5] [--sliver-aspect 100]
-                                          [--no-selfint] [--json]
+  python3 tools/mesh_validate.py mesh.stl [--weld 1e-4] [--sliver-aspect 100]
+                                          [--no-selfint] [--selfint-raw] [--json]
 
 Self-intersection uses the Moller triangle/triangle overlap test over a uniform
 spatial hash. Pairs sharing at least one welded vertex are skipped: adjacent
@@ -21,6 +21,68 @@ because a boolean seam legitimately produces coplanar contact, while a piercing
 pair never is legitimate.
 
 Stdlib only, to match tools/stl_watertight_check.py.
+
+=========================================================================
+CANONICAL self-intersection checker (consolidation, 2026-09-15)
+=========================================================================
+Three independent implementations existed. This file is the canonical one;
+NSO_Repair.js carries a transcription of the same policy for the browser, and
+tools/nso_selfint_equiv_test.js asserts the two agree pair-for-pair on every
+fixture so they cannot drift again. The third copy, in tools/nso_fuse_testlib.js,
+has been deleted.
+
+Four policy axes separated the three. Each was settled by measurement, not by
+which branch wrote its version first:
+
+1. GEOMETRY UNDER TEST -- welded, not raw.
+   The dominant axis, and the one nobody had written down. NSO_Repair scored
+   the welded mesh; this file and the JS copy scored the raw soup. On the tape
+   fixture at weld 1e-4 that is 187 piercing pairs against 3,073 -- a 16x
+   spread, larger than the other three axes combined. Scoring the raw soup
+   while using the weld for adjacency is incoherent, and it re-reports every
+   hairline gap the weld just closed. Welded wins. --selfint-raw keeps the old
+   behaviour for comparison.
+
+2. ADJACENCY WELD -- radius weld at 1e-4, not a grid snap at 1e-5.
+   Two changes. (a) 1e-5 is tolerance-poisoned on real parts: the tape reads
+   1,406 open edges and Euler -297 at 1e-5, and 0 open edges and Euler 2 at
+   1e-4. NSO_weldEpsFor in app-join.js suffers the same tolerance poisoning
+   from the same cause, addressed there by a separate change; the plateau
+   measured here for this checker -- 2e-5 .. 3e-4 -- brackets 1e-4. fixtures/repair/
+   synth_near_dup_vertex.stl is the clean demonstration: at any tol <= 2e-5 it
+   reports 3 piercing pairs and Euler -3, at any tol >= 5e-5 it reports 0 and
+   Euler 2, and it is a closed box. The 3 were false. (b) a bare grid snap is
+   not a correct "within tol" test at any tol -- two vertices either side of a
+   cell boundary never merge however close they are. See weld().
+
+3. ENDPOINT TOUCH -- epsilon-tolerant, not strict.
+   Two triangles whose Moller intervals meet at exactly one endpoint touch
+   without penetrating. No existing fixture separates the two policies: they
+   agree on all 13 across eps 1e-12 .. 1e-5, and differ only on the tape, by
+   180 pairs in 3,254. The case that does separate them had to be built (see
+   tools/nso_selfint_equiv_test.js, "endpoint" cases), and it decides it:
+   strict calls a zero-overlap contact a pierce, and calls an overlap of 1e-12
+   a pierce too. STL coordinates are float32, whose ULP is 9.5e-7 at 8 mm and
+   1.2e-4 at 1500 mm, so an overlap that small is not geometry -- it is below
+   what the file can represent. Strict is reporting its own rounding.
+
+4. COPLANAR OVERLAP -- classified and reported, but kept out of the gate total.
+   NSO_Repair deliberately dropped coplanar (docs/NSO_Repair.md "Coplanar
+   overlap is not counted"), because counting it needs real 2D polygon overlap
+   and a cheap test false-positives on ordinary adjacent geometry. This file
+   has the real test -- separating-axis in the plane, strict separation, so
+   edge-sharing and point-touching correctly do not overlap -- which retires
+   that objection. Coplanar is therefore measured and reported. It stays a
+   SEPARATE number rather than being folded into the piercing count, because
+   NSO_Repair's repair gate is tuned against piercing and a boolean seam
+   produces legitimate coplanar contact.
+
+Broad phase is NOT one of the axes. A uniform hash and a BVH are both
+conservative supersets feeding the same exact narrow-phase test, so the choice
+is performance only and cannot change a count. It was verified rather than
+assumed: NSO_Repair's BVH self-traversal was checked against brute force on
+6,000 tape triangles and missed 0 of 39,816 box-overlapping pairs. Each keeps
+the structure that suits it -- a hash here, the BVH there.
 """
 from __future__ import annotations
 
@@ -31,6 +93,17 @@ import struct
 import sys
 from collections import defaultdict
 from pathlib import Path
+
+
+# ------------------------------------------------------- canonical tolerances
+
+# Vertex weld radius, mm. Matches NSO_Repair.WELD_TOL. See axis 2 above.
+WELD_TOL = 1e-4
+
+# Plane-distance / interval-overlap epsilon, mm. Below this a triangle vertex
+# counts as lying in the other triangle's plane, and an interval overlap counts
+# as contact rather than penetration. See axis 3 above.
+SELFINT_EPS = 1e-9
 
 
 # ---------------------------------------------------------------- STL parsing
@@ -118,18 +191,46 @@ def aspect_ratio(a, b, c):
 # ------------------------------------------------------------------ topology
 
 def weld(tris, tol):
-    """Map float coords -> integer vertex ids by snapping to a tol-sized grid."""
+    """Map float coords -> integer vertex ids, merging anything within `tol`.
+
+    Hash into tol-sized cells, then search the 27-cell neighbourhood and accept
+    the first vertex within a true radius `tol`. The neighbourhood search is the
+    point: a bare grid snap puts two vertices that straddle a cell boundary into
+    different cells no matter how close they are, so it under-welds by an amount
+    that depends on where the geometry happens to sit relative to the origin. On
+    the tape fixture at tol 1e-5 a bare snap leaves 16,837 vertices and 1,406
+    open edges where the radius weld leaves 16,585 and 570 -- 252 vertex pairs
+    inside tolerance that the snap refused to merge. Radius weld matches
+    NSO_Repair.weldToIndexed, which is what lets the two agree.
+    """
     inv = 1.0 / tol
-    ids, verts, index = {}, [], []
+    tol2 = tol * tol
+    cells, verts, index = defaultdict(list), [], []
     for tri in tris:
         row = []
         for p in tri:
-            k = (int(round(p[0] * inv)), int(round(p[1] * inv)), int(round(p[2] * inv)))
-            vid = ids.get(k)
-            if vid is None:
+            ci = (math.floor(p[0] * inv), math.floor(p[1] * inv), math.floor(p[2] * inv))
+            vid = -1
+            for di in (-1, 0, 1):
+                if vid >= 0:
+                    break
+                for dj in (-1, 0, 1):
+                    if vid >= 0:
+                        break
+                    for dk in (-1, 0, 1):
+                        if vid >= 0:
+                            break
+                        for cand in cells.get((ci[0] + di, ci[1] + dj, ci[2] + dk), ()):
+                            q = verts[cand]
+                            d2 = ((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 +
+                                  (p[2] - q[2]) ** 2)
+                            if d2 <= tol2:
+                                vid = cand
+                                break
+            if vid < 0:
                 vid = len(verts)
-                ids[k] = vid
                 verts.append(p)
+                cells[ci].append(vid)
             row.append(vid)
         index.append(tuple(row))
     return verts, index
@@ -215,13 +316,34 @@ def _coplanar_overlap(T1, T2, N, eps):
 
 
 def tri_tri_intersect(T1, T2, eps):
-    """Returns 'pierce', 'coplanar', or None."""
+    """Returns 'pierce', 'coplanar', or None.
+
+    Plane distances are divided by the triangle normal's length, so `eps` is a
+    distance in mm and means the same thing for a 5e-3 mm sliver as for an
+    80 mm face. Without that division the test is not even symmetric: a sliver
+    has a tiny unnormalised normal, so every distance measured against ITS
+    plane is tiny and gets zeroed, while the same pair measured against the big
+    triangle's plane is not. On the tape fixture that made pair (21845, 22092)
+    read 'coplanar' one way round and None the other, and which answer you got
+    depended on the order the broad phase happened to visit the pair in. Both
+    the hash here and the BVH in NSO_Repair.js visit pairs unordered, so the
+    two disagreed on that one pair (7 coplanar against 6) until this was fixed.
+    The interval arithmetic below is unaffected -- it uses only ratios of
+    distances, and the normalisation cancels.
+    """
     V0, V1, V2 = T1
     U0, U1, U2 = T2
 
     N1 = cross(sub(V1, V0), sub(V2, V0))
+    L1 = norm(N1)
+    N2 = cross(sub(U1, U0), sub(U2, U0))
+    L2 = norm(N2)
+    if L1 <= 0.0 or L2 <= 0.0:
+        return None                                  # degenerate, counted apart
+
     d1 = -dot(N1, V0)
-    du0, du1, du2 = dot(N1, U0) + d1, dot(N1, U1) + d1, dot(N1, U2) + d1
+    du0, du1, du2 = ((dot(N1, U0) + d1) / L1, (dot(N1, U1) + d1) / L1,
+                     (dot(N1, U2) + d1) / L1)
     if abs(du0) < eps: du0 = 0.0
     if abs(du1) < eps: du1 = 0.0
     if abs(du2) < eps: du2 = 0.0
@@ -229,9 +351,9 @@ def tri_tri_intersect(T1, T2, eps):
     if du0du1 > 0.0 and du0du2 > 0.0:
         return None                                  # tri2 entirely one side
 
-    N2 = cross(sub(U1, U0), sub(U2, U0))
     d2 = -dot(N2, U0)
-    dv0, dv1, dv2 = dot(N2, V0) + d2, dot(N2, V1) + d2, dot(N2, V2) + d2
+    dv0, dv1, dv2 = ((dot(N2, V0) + d2) / L2, (dot(N2, V1) + d2) / L2,
+                     (dot(N2, V2) + d2) / L2)
     if abs(dv0) < eps: dv0 = 0.0
     if abs(dv1) < eps: dv1 = 0.0
     if abs(dv2) < eps: dv2 = 0.0
@@ -239,9 +361,11 @@ def tri_tri_intersect(T1, T2, eps):
     if dv0dv1 > 0.0 and dv0dv2 > 0.0:
         return None                                  # tri1 entirely one side
 
+    # |N1 x N2| / (|N1||N2|) is the sine of the angle between the planes, so
+    # this cutoff is an angle and not a size, same reasoning as above.
     D = cross(N1, N2)
     axis = max(range(3), key=lambda i: abs(D[i]))
-    if abs(D[axis]) < 1e-20:
+    if abs(D[axis]) / (L1 * L2) < 1e-20:
         # Parallel planes. Only the same plane can overlap, and only then if
         # the two triangles actually share area -- being coplanar is not by
         # itself a defect, so it must be tested, not assumed.
@@ -260,8 +384,20 @@ def tri_tri_intersect(T1, T2, eps):
     return "pierce"
 
 
-def self_intersections(tris, index, eps, max_report):
-    """Spatial-hash broad phase + Moller narrow phase, skipping adjacent pairs."""
+def self_intersections(tris, index, eps, max_report, verts=None):
+    """Spatial-hash broad phase + Moller narrow phase, skipping adjacent pairs.
+
+    Geometry under test is the WELDED mesh (pass `verts`), not the raw soup.
+    Using the weld to decide adjacency but the raw coordinates to decide
+    intersection is incoherent -- it calls two vertices the same vertex for the
+    skip test and different points for the overlap test -- and it reports every
+    sub-tolerance wobble the weld just repaired. On the tape fixture at weld
+    1e-4 the raw soup scores 3,073 piercing pairs and the welded mesh 187; the
+    2,886 difference is entirely hairline gaps narrower than the weld radius.
+    Pass verts=None to score the raw soup instead (--selfint-raw).
+    """
+    if verts is not None:
+        tris = [(verts[i], verts[j], verts[k]) for i, j, k in index]
     n = len(tris)
     if n == 0:
         return {"pairs_tested": 0, "pierce": 0, "coplanar": 0, "examples": [],
@@ -325,7 +461,7 @@ def self_intersections(tris, index, eps, max_report):
 # ----------------------------------------------------------------------- main
 
 def validate(path: Path, weld_tol: float, sliver_aspect: float,
-             do_selfint: bool, eps: float):
+             do_selfint: bool, eps: float, selfint_raw: bool = False):
     tris = parse_stl(path)
     verts, index = weld(tris, weld_tol)
 
@@ -365,17 +501,22 @@ def validate(path: Path, weld_tol: float, sliver_aspect: float,
     # Euler characteristic V - E + F; a closed genus-0 solid gives 2.
     out["euler_characteristic"] = len(verts) - out["unique_edges"] + len(tris)
     if do_selfint:
-        out["self_intersection"] = self_intersections(tris, index, eps, 8)
+        out["self_intersection"] = self_intersections(
+            tris, index, eps, 8, None if selfint_raw else verts)
+        out["self_intersection"]["geometry"] = "raw" if selfint_raw else "welded"
     return out
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("stl")
-    ap.add_argument("--weld", type=float, default=1e-5)
+    ap.add_argument("--weld", type=float, default=WELD_TOL)
     ap.add_argument("--sliver-aspect", type=float, default=100.0)
-    ap.add_argument("--eps", type=float, default=1e-9)
+    ap.add_argument("--eps", type=float, default=SELFINT_EPS)
     ap.add_argument("--no-selfint", action="store_true")
+    ap.add_argument("--selfint-raw", action="store_true",
+                    help="score self-intersection on the raw soup instead of "
+                         "the welded mesh (pre-consolidation behaviour)")
     ap.add_argument("--json", action="store_true")
     args = ap.parse_args()
 
@@ -384,7 +525,8 @@ def main():
         print("missing file", path, file=sys.stderr)
         return 2
 
-    r = validate(path, args.weld, args.sliver_aspect, not args.no_selfint, args.eps)
+    r = validate(path, args.weld, args.sliver_aspect, not args.no_selfint,
+                 args.eps, args.selfint_raw)
     if args.json:
         print(json.dumps(r, indent=2))
         return 0
@@ -406,6 +548,7 @@ def main():
     print(f"worst_aspect_ratio        {r['worst_aspect_ratio']:.3f}")
     si = r.get("self_intersection")
     if si:
+        print(f"selfint_geometry          {si['geometry']}")
         print(f"selfint_pairs_tested      {si['pairs_tested']}")
         print(f"selfint_adjacent_skipped  {si['adjacent_pairs_skipped']}")
         print(f"selfint_piercing          {si['pierce']}")
