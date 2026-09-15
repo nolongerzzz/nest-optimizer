@@ -594,3 +594,13 @@ gate and wants its own scoped pass and an APPLY:
 
 Also one-line and live: the setback's refusal message blames "something
 already softened" for what is actually a concave corner.
+
+## Breakaway-support test coupons (Python, stdlib)
+`tools/breakaway_coupons.py` + `tools/meshlib.py` + `tools/nso_3mf.py`. Builds
+a 24-coupon plate (ring-tip vs crossed-rib grid x gap/overlap sweep x pause
+no/yes), exports a Bambu project 3MF with the joint-transition pauses in
+`Metadata/custom_gcode_per_layer.xml` and writes a position -> parameters map.
+Every object passes `verify()` (the `--odd --degen` gate) before export or
+nothing is written. Committed plate: `fixtures/breakaway-coupons/`; tests:
+`npm run coupons:test`; write-up: `docs/BREAKAWAY-COUPONS.md`. Not wired into
+the app - it is a bench tool, like grispr.

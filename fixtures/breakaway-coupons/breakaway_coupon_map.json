@@ -1,0 +1,2684 @@
+{
+  "generator": "tools/breakaway_coupons.py",
+  "version": "1.0.0",
+  "plate": {
+    "size_mm": [
+      256.0,
+      256.0
+    ],
+    "rows": 4,
+    "cols": 6,
+    "pitch_mm": 26.0,
+    "spacing_mm": 10.0,
+    "coupon_size_mm": 16.0,
+    "breakaway_size_mm": 14.0,
+    "layer_height_mm": 0.2,
+    "first_layer_height_mm": 0.2,
+    "print_sequence": "by layer",
+    "cooling_profile": "default",
+    "parts_in_3mf": [
+      "[Content_Types].xml",
+      "_rels/.rels",
+      "3D/3dmodel.model",
+      "Metadata/project_settings.config",
+      "Metadata/model_settings.config",
+      "Metadata/custom_gcode_per_layer.xml",
+      "Metadata/nso_coupon_map.json"
+    ]
+  },
+  "tiers": [
+    {
+      "tier": "N",
+      "joint_z_mm": 6.0,
+      "pause": false
+    },
+    {
+      "tier": "P1",
+      "joint_z_mm": 9.0,
+      "pause": true
+    },
+    {
+      "tier": "P2",
+      "joint_z_mm": 12.0,
+      "pause": true
+    }
+  ],
+  "pause": {
+    "seconds": 22.0,
+    "mode": "native",
+    "encoding": "Metadata/custom_gcode_per_layer.xml, type 1 (Bambu native pause M400 U1, resume by hand after the seconds above)",
+    "entries": [
+      {
+        "top_z_mm": 9.2,
+        "tier": "P1",
+        "joint_z_mm": 9.0,
+        "coupons": [
+          16,
+          17,
+          18,
+          22,
+          23,
+          24
+        ]
+      },
+      {
+        "top_z_mm": 12.4,
+        "tier": "P2",
+        "joint_z_mm": 12.0,
+        "coupons": [
+          13,
+          14,
+          15,
+          19,
+          20,
+          21
+        ]
+      }
+    ]
+  },
+  "geometries": {
+    "ring": {
+      "anchor": "tapered ring tip r_out 5.0, wall 0.8 -> 0.4 mm, 1.0 mm tall",
+      "breakaway": "flat bottom",
+      "nominal_contact_mm2": 11.561
+    },
+    "grid": {
+      "anchor": "4 ribs along X, 0.5 wide, 3.0 pitch, 1.0 mm tall",
+      "breakaway": "4 ribs along Y on the underside, same size; contact at the crossings only",
+      "nominal_contact_mm2": 4.0
+    }
+  },
+  "sign_convention": "gap_overlap_mm < 0: air gap of that size between anchor top and breakaway bottom; > 0: breakaway penetrates the anchor tip by that much",
+  "coupons": [
+    {
+      "coupon": 1,
+      "label": "C01_ring_g-0.20_N",
+      "position": "r1c1",
+      "row": 1,
+      "col": 1,
+      "x_mm": 63.0,
+      "y_mm": 89.0,
+      "geometry": "ring",
+      "gap_overlap_mm": -0.2,
+      "gap_kind": "gap",
+      "pause": false,
+      "pause_seconds": 0,
+      "tier": "N",
+      "joint_z_mm": 6.0,
+      "breakaway_bottom_z_mm": 6.2,
+      "predicted_touchdown_layer_z_mm": 6.4,
+      "predicted_sliced_gap_mm": -0.2,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 1,
+        "left_edge_minus_x": 1
+      },
+      "nominal_contact_mm2": 11.561,
+      "objects": {
+        "anchor": {
+          "object_id": 1,
+          "identify_id": 1001,
+          "name": "C01_ring_g-0.20_N_anchor"
+        },
+        "breakaway": {
+          "object_id": 2,
+          "identify_id": 1002,
+          "name": "C01_ring_g-0.20_N_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 2,
+      "label": "C02_ring_g-0.15_N",
+      "position": "r1c2",
+      "row": 1,
+      "col": 2,
+      "x_mm": 89.0,
+      "y_mm": 89.0,
+      "geometry": "ring",
+      "gap_overlap_mm": -0.15,
+      "gap_kind": "gap",
+      "pause": false,
+      "pause_seconds": 0,
+      "tier": "N",
+      "joint_z_mm": 6.0,
+      "breakaway_bottom_z_mm": 6.15,
+      "predicted_touchdown_layer_z_mm": 6.4,
+      "predicted_sliced_gap_mm": -0.2,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 2,
+        "left_edge_minus_x": 1
+      },
+      "nominal_contact_mm2": 11.561,
+      "objects": {
+        "anchor": {
+          "object_id": 3,
+          "identify_id": 1003,
+          "name": "C02_ring_g-0.15_N_anchor"
+        },
+        "breakaway": {
+          "object_id": 4,
+          "identify_id": 1004,
+          "name": "C02_ring_g-0.15_N_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 3,
+      "label": "C03_ring_g-0.10_N",
+      "position": "r1c3",
+      "row": 1,
+      "col": 3,
+      "x_mm": 115.0,
+      "y_mm": 89.0,
+      "geometry": "ring",
+      "gap_overlap_mm": -0.1,
+      "gap_kind": "gap",
+      "pause": false,
+      "pause_seconds": 0,
+      "tier": "N",
+      "joint_z_mm": 6.0,
+      "breakaway_bottom_z_mm": 6.1,
+      "predicted_touchdown_layer_z_mm": 6.4,
+      "predicted_sliced_gap_mm": -0.2,
+      "touchdown_ambiguous": true,
+      "notches": {
+        "front_edge_minus_y": 3,
+        "left_edge_minus_x": 1
+      },
+      "nominal_contact_mm2": 11.561,
+      "objects": {
+        "anchor": {
+          "object_id": 5,
+          "identify_id": 1005,
+          "name": "C03_ring_g-0.10_N_anchor"
+        },
+        "breakaway": {
+          "object_id": 6,
+          "identify_id": 1006,
+          "name": "C03_ring_g-0.10_N_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 4,
+      "label": "C04_ring_g-0.05_N",
+      "position": "r1c4",
+      "row": 1,
+      "col": 4,
+      "x_mm": 141.0,
+      "y_mm": 89.0,
+      "geometry": "ring",
+      "gap_overlap_mm": -0.05,
+      "gap_kind": "gap",
+      "pause": false,
+      "pause_seconds": 0,
+      "tier": "N",
+      "joint_z_mm": 6.0,
+      "breakaway_bottom_z_mm": 6.05,
+      "predicted_touchdown_layer_z_mm": 6.2,
+      "predicted_sliced_gap_mm": -0.0,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 4,
+        "left_edge_minus_x": 1
+      },
+      "nominal_contact_mm2": 11.561,
+      "objects": {
+        "anchor": {
+          "object_id": 7,
+          "identify_id": 1007,
+          "name": "C04_ring_g-0.05_N_anchor"
+        },
+        "breakaway": {
+          "object_id": 8,
+          "identify_id": 1008,
+          "name": "C04_ring_g-0.05_N_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 5,
+      "label": "C05_ring_g+0.00_N",
+      "position": "r1c5",
+      "row": 1,
+      "col": 5,
+      "x_mm": 167.0,
+      "y_mm": 89.0,
+      "geometry": "ring",
+      "gap_overlap_mm": 0.0,
+      "gap_kind": "flush",
+      "pause": false,
+      "pause_seconds": 0,
+      "tier": "N",
+      "joint_z_mm": 6.0,
+      "breakaway_bottom_z_mm": 6.0,
+      "predicted_touchdown_layer_z_mm": 6.2,
+      "predicted_sliced_gap_mm": -0.0,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 5,
+        "left_edge_minus_x": 1
+      },
+      "nominal_contact_mm2": 11.561,
+      "objects": {
+        "anchor": {
+          "object_id": 9,
+          "identify_id": 1009,
+          "name": "C05_ring_g+0.00_N_anchor"
+        },
+        "breakaway": {
+          "object_id": 10,
+          "identify_id": 1010,
+          "name": "C05_ring_g+0.00_N_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 6,
+      "label": "C06_ring_g+0.02_N",
+      "position": "r1c6",
+      "row": 1,
+      "col": 6,
+      "x_mm": 193.0,
+      "y_mm": 89.0,
+      "geometry": "ring",
+      "gap_overlap_mm": 0.02,
+      "gap_kind": "overlap",
+      "pause": false,
+      "pause_seconds": 0,
+      "tier": "N",
+      "joint_z_mm": 6.0,
+      "breakaway_bottom_z_mm": 5.98,
+      "predicted_touchdown_layer_z_mm": 6.2,
+      "predicted_sliced_gap_mm": -0.0,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 6,
+        "left_edge_minus_x": 1
+      },
+      "nominal_contact_mm2": 11.561,
+      "objects": {
+        "anchor": {
+          "object_id": 11,
+          "identify_id": 1011,
+          "name": "C06_ring_g+0.02_N_anchor"
+        },
+        "breakaway": {
+          "object_id": 12,
+          "identify_id": 1012,
+          "name": "C06_ring_g+0.02_N_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 7,
+      "label": "C07_grid_g-0.20_N",
+      "position": "r2c1",
+      "row": 2,
+      "col": 1,
+      "x_mm": 63.0,
+      "y_mm": 115.0,
+      "geometry": "grid",
+      "gap_overlap_mm": -0.2,
+      "gap_kind": "gap",
+      "pause": false,
+      "pause_seconds": 0,
+      "tier": "N",
+      "joint_z_mm": 6.0,
+      "breakaway_bottom_z_mm": 6.2,
+      "predicted_touchdown_layer_z_mm": 6.4,
+      "predicted_sliced_gap_mm": -0.2,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 1,
+        "left_edge_minus_x": 2
+      },
+      "nominal_contact_mm2": 4.0,
+      "objects": {
+        "anchor": {
+          "object_id": 13,
+          "identify_id": 1013,
+          "name": "C07_grid_g-0.20_N_anchor"
+        },
+        "breakaway": {
+          "object_id": 14,
+          "identify_id": 1014,
+          "name": "C07_grid_g-0.20_N_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 8,
+      "label": "C08_grid_g-0.15_N",
+      "position": "r2c2",
+      "row": 2,
+      "col": 2,
+      "x_mm": 89.0,
+      "y_mm": 115.0,
+      "geometry": "grid",
+      "gap_overlap_mm": -0.15,
+      "gap_kind": "gap",
+      "pause": false,
+      "pause_seconds": 0,
+      "tier": "N",
+      "joint_z_mm": 6.0,
+      "breakaway_bottom_z_mm": 6.15,
+      "predicted_touchdown_layer_z_mm": 6.4,
+      "predicted_sliced_gap_mm": -0.2,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 2,
+        "left_edge_minus_x": 2
+      },
+      "nominal_contact_mm2": 4.0,
+      "objects": {
+        "anchor": {
+          "object_id": 15,
+          "identify_id": 1015,
+          "name": "C08_grid_g-0.15_N_anchor"
+        },
+        "breakaway": {
+          "object_id": 16,
+          "identify_id": 1016,
+          "name": "C08_grid_g-0.15_N_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 9,
+      "label": "C09_grid_g-0.10_N",
+      "position": "r2c3",
+      "row": 2,
+      "col": 3,
+      "x_mm": 115.0,
+      "y_mm": 115.0,
+      "geometry": "grid",
+      "gap_overlap_mm": -0.1,
+      "gap_kind": "gap",
+      "pause": false,
+      "pause_seconds": 0,
+      "tier": "N",
+      "joint_z_mm": 6.0,
+      "breakaway_bottom_z_mm": 6.1,
+      "predicted_touchdown_layer_z_mm": 6.4,
+      "predicted_sliced_gap_mm": -0.2,
+      "touchdown_ambiguous": true,
+      "notches": {
+        "front_edge_minus_y": 3,
+        "left_edge_minus_x": 2
+      },
+      "nominal_contact_mm2": 4.0,
+      "objects": {
+        "anchor": {
+          "object_id": 17,
+          "identify_id": 1017,
+          "name": "C09_grid_g-0.10_N_anchor"
+        },
+        "breakaway": {
+          "object_id": 18,
+          "identify_id": 1018,
+          "name": "C09_grid_g-0.10_N_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 10,
+      "label": "C10_grid_g-0.05_N",
+      "position": "r2c4",
+      "row": 2,
+      "col": 4,
+      "x_mm": 141.0,
+      "y_mm": 115.0,
+      "geometry": "grid",
+      "gap_overlap_mm": -0.05,
+      "gap_kind": "gap",
+      "pause": false,
+      "pause_seconds": 0,
+      "tier": "N",
+      "joint_z_mm": 6.0,
+      "breakaway_bottom_z_mm": 6.05,
+      "predicted_touchdown_layer_z_mm": 6.2,
+      "predicted_sliced_gap_mm": -0.0,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 4,
+        "left_edge_minus_x": 2
+      },
+      "nominal_contact_mm2": 4.0,
+      "objects": {
+        "anchor": {
+          "object_id": 19,
+          "identify_id": 1019,
+          "name": "C10_grid_g-0.05_N_anchor"
+        },
+        "breakaway": {
+          "object_id": 20,
+          "identify_id": 1020,
+          "name": "C10_grid_g-0.05_N_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 11,
+      "label": "C11_grid_g+0.00_N",
+      "position": "r2c5",
+      "row": 2,
+      "col": 5,
+      "x_mm": 167.0,
+      "y_mm": 115.0,
+      "geometry": "grid",
+      "gap_overlap_mm": 0.0,
+      "gap_kind": "flush",
+      "pause": false,
+      "pause_seconds": 0,
+      "tier": "N",
+      "joint_z_mm": 6.0,
+      "breakaway_bottom_z_mm": 6.0,
+      "predicted_touchdown_layer_z_mm": 6.2,
+      "predicted_sliced_gap_mm": -0.0,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 5,
+        "left_edge_minus_x": 2
+      },
+      "nominal_contact_mm2": 4.0,
+      "objects": {
+        "anchor": {
+          "object_id": 21,
+          "identify_id": 1021,
+          "name": "C11_grid_g+0.00_N_anchor"
+        },
+        "breakaway": {
+          "object_id": 22,
+          "identify_id": 1022,
+          "name": "C11_grid_g+0.00_N_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 12,
+      "label": "C12_grid_g+0.02_N",
+      "position": "r2c6",
+      "row": 2,
+      "col": 6,
+      "x_mm": 193.0,
+      "y_mm": 115.0,
+      "geometry": "grid",
+      "gap_overlap_mm": 0.02,
+      "gap_kind": "overlap",
+      "pause": false,
+      "pause_seconds": 0,
+      "tier": "N",
+      "joint_z_mm": 6.0,
+      "breakaway_bottom_z_mm": 5.98,
+      "predicted_touchdown_layer_z_mm": 6.2,
+      "predicted_sliced_gap_mm": -0.0,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 6,
+        "left_edge_minus_x": 2
+      },
+      "nominal_contact_mm2": 4.0,
+      "objects": {
+        "anchor": {
+          "object_id": 23,
+          "identify_id": 1023,
+          "name": "C12_grid_g+0.02_N_anchor"
+        },
+        "breakaway": {
+          "object_id": 24,
+          "identify_id": 1024,
+          "name": "C12_grid_g+0.02_N_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 13,
+      "label": "C13_ring_g-0.20_P",
+      "position": "r3c1",
+      "row": 3,
+      "col": 1,
+      "x_mm": 63.0,
+      "y_mm": 141.0,
+      "geometry": "ring",
+      "gap_overlap_mm": -0.2,
+      "gap_kind": "gap",
+      "pause": true,
+      "pause_seconds": 22.0,
+      "tier": "P2",
+      "joint_z_mm": 12.0,
+      "breakaway_bottom_z_mm": 12.2,
+      "predicted_touchdown_layer_z_mm": 12.4,
+      "predicted_sliced_gap_mm": -0.2,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 1,
+        "left_edge_minus_x": 3
+      },
+      "nominal_contact_mm2": 11.561,
+      "objects": {
+        "anchor": {
+          "object_id": 25,
+          "identify_id": 1025,
+          "name": "C13_ring_g-0.20_P_anchor"
+        },
+        "breakaway": {
+          "object_id": 26,
+          "identify_id": 1026,
+          "name": "C13_ring_g-0.20_P_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 14,
+      "label": "C14_ring_g-0.15_P",
+      "position": "r3c2",
+      "row": 3,
+      "col": 2,
+      "x_mm": 89.0,
+      "y_mm": 141.0,
+      "geometry": "ring",
+      "gap_overlap_mm": -0.15,
+      "gap_kind": "gap",
+      "pause": true,
+      "pause_seconds": 22.0,
+      "tier": "P2",
+      "joint_z_mm": 12.0,
+      "breakaway_bottom_z_mm": 12.15,
+      "predicted_touchdown_layer_z_mm": 12.4,
+      "predicted_sliced_gap_mm": -0.2,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 2,
+        "left_edge_minus_x": 3
+      },
+      "nominal_contact_mm2": 11.561,
+      "objects": {
+        "anchor": {
+          "object_id": 27,
+          "identify_id": 1027,
+          "name": "C14_ring_g-0.15_P_anchor"
+        },
+        "breakaway": {
+          "object_id": 28,
+          "identify_id": 1028,
+          "name": "C14_ring_g-0.15_P_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 15,
+      "label": "C15_ring_g-0.10_P",
+      "position": "r3c3",
+      "row": 3,
+      "col": 3,
+      "x_mm": 115.0,
+      "y_mm": 141.0,
+      "geometry": "ring",
+      "gap_overlap_mm": -0.1,
+      "gap_kind": "gap",
+      "pause": true,
+      "pause_seconds": 22.0,
+      "tier": "P2",
+      "joint_z_mm": 12.0,
+      "breakaway_bottom_z_mm": 12.1,
+      "predicted_touchdown_layer_z_mm": 12.4,
+      "predicted_sliced_gap_mm": -0.2,
+      "touchdown_ambiguous": true,
+      "notches": {
+        "front_edge_minus_y": 3,
+        "left_edge_minus_x": 3
+      },
+      "nominal_contact_mm2": 11.561,
+      "objects": {
+        "anchor": {
+          "object_id": 29,
+          "identify_id": 1029,
+          "name": "C15_ring_g-0.10_P_anchor"
+        },
+        "breakaway": {
+          "object_id": 30,
+          "identify_id": 1030,
+          "name": "C15_ring_g-0.10_P_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 16,
+      "label": "C16_ring_g-0.05_P",
+      "position": "r3c4",
+      "row": 3,
+      "col": 4,
+      "x_mm": 141.0,
+      "y_mm": 141.0,
+      "geometry": "ring",
+      "gap_overlap_mm": -0.05,
+      "gap_kind": "gap",
+      "pause": true,
+      "pause_seconds": 22.0,
+      "tier": "P1",
+      "joint_z_mm": 9.0,
+      "breakaway_bottom_z_mm": 9.05,
+      "predicted_touchdown_layer_z_mm": 9.2,
+      "predicted_sliced_gap_mm": -0.0,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 4,
+        "left_edge_minus_x": 3
+      },
+      "nominal_contact_mm2": 11.561,
+      "objects": {
+        "anchor": {
+          "object_id": 31,
+          "identify_id": 1031,
+          "name": "C16_ring_g-0.05_P_anchor"
+        },
+        "breakaway": {
+          "object_id": 32,
+          "identify_id": 1032,
+          "name": "C16_ring_g-0.05_P_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 17,
+      "label": "C17_ring_g+0.00_P",
+      "position": "r3c5",
+      "row": 3,
+      "col": 5,
+      "x_mm": 167.0,
+      "y_mm": 141.0,
+      "geometry": "ring",
+      "gap_overlap_mm": 0.0,
+      "gap_kind": "flush",
+      "pause": true,
+      "pause_seconds": 22.0,
+      "tier": "P1",
+      "joint_z_mm": 9.0,
+      "breakaway_bottom_z_mm": 9.0,
+      "predicted_touchdown_layer_z_mm": 9.2,
+      "predicted_sliced_gap_mm": -0.0,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 5,
+        "left_edge_minus_x": 3
+      },
+      "nominal_contact_mm2": 11.561,
+      "objects": {
+        "anchor": {
+          "object_id": 33,
+          "identify_id": 1033,
+          "name": "C17_ring_g+0.00_P_anchor"
+        },
+        "breakaway": {
+          "object_id": 34,
+          "identify_id": 1034,
+          "name": "C17_ring_g+0.00_P_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 18,
+      "label": "C18_ring_g+0.02_P",
+      "position": "r3c6",
+      "row": 3,
+      "col": 6,
+      "x_mm": 193.0,
+      "y_mm": 141.0,
+      "geometry": "ring",
+      "gap_overlap_mm": 0.02,
+      "gap_kind": "overlap",
+      "pause": true,
+      "pause_seconds": 22.0,
+      "tier": "P1",
+      "joint_z_mm": 9.0,
+      "breakaway_bottom_z_mm": 8.98,
+      "predicted_touchdown_layer_z_mm": 9.2,
+      "predicted_sliced_gap_mm": -0.0,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 6,
+        "left_edge_minus_x": 3
+      },
+      "nominal_contact_mm2": 11.561,
+      "objects": {
+        "anchor": {
+          "object_id": 35,
+          "identify_id": 1035,
+          "name": "C18_ring_g+0.02_P_anchor"
+        },
+        "breakaway": {
+          "object_id": 36,
+          "identify_id": 1036,
+          "name": "C18_ring_g+0.02_P_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 19,
+      "label": "C19_grid_g-0.20_P",
+      "position": "r4c1",
+      "row": 4,
+      "col": 1,
+      "x_mm": 63.0,
+      "y_mm": 167.0,
+      "geometry": "grid",
+      "gap_overlap_mm": -0.2,
+      "gap_kind": "gap",
+      "pause": true,
+      "pause_seconds": 22.0,
+      "tier": "P2",
+      "joint_z_mm": 12.0,
+      "breakaway_bottom_z_mm": 12.2,
+      "predicted_touchdown_layer_z_mm": 12.4,
+      "predicted_sliced_gap_mm": -0.2,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 1,
+        "left_edge_minus_x": 4
+      },
+      "nominal_contact_mm2": 4.0,
+      "objects": {
+        "anchor": {
+          "object_id": 37,
+          "identify_id": 1037,
+          "name": "C19_grid_g-0.20_P_anchor"
+        },
+        "breakaway": {
+          "object_id": 38,
+          "identify_id": 1038,
+          "name": "C19_grid_g-0.20_P_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 20,
+      "label": "C20_grid_g-0.15_P",
+      "position": "r4c2",
+      "row": 4,
+      "col": 2,
+      "x_mm": 89.0,
+      "y_mm": 167.0,
+      "geometry": "grid",
+      "gap_overlap_mm": -0.15,
+      "gap_kind": "gap",
+      "pause": true,
+      "pause_seconds": 22.0,
+      "tier": "P2",
+      "joint_z_mm": 12.0,
+      "breakaway_bottom_z_mm": 12.15,
+      "predicted_touchdown_layer_z_mm": 12.4,
+      "predicted_sliced_gap_mm": -0.2,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 2,
+        "left_edge_minus_x": 4
+      },
+      "nominal_contact_mm2": 4.0,
+      "objects": {
+        "anchor": {
+          "object_id": 39,
+          "identify_id": 1039,
+          "name": "C20_grid_g-0.15_P_anchor"
+        },
+        "breakaway": {
+          "object_id": 40,
+          "identify_id": 1040,
+          "name": "C20_grid_g-0.15_P_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 21,
+      "label": "C21_grid_g-0.10_P",
+      "position": "r4c3",
+      "row": 4,
+      "col": 3,
+      "x_mm": 115.0,
+      "y_mm": 167.0,
+      "geometry": "grid",
+      "gap_overlap_mm": -0.1,
+      "gap_kind": "gap",
+      "pause": true,
+      "pause_seconds": 22.0,
+      "tier": "P2",
+      "joint_z_mm": 12.0,
+      "breakaway_bottom_z_mm": 12.1,
+      "predicted_touchdown_layer_z_mm": 12.4,
+      "predicted_sliced_gap_mm": -0.2,
+      "touchdown_ambiguous": true,
+      "notches": {
+        "front_edge_minus_y": 3,
+        "left_edge_minus_x": 4
+      },
+      "nominal_contact_mm2": 4.0,
+      "objects": {
+        "anchor": {
+          "object_id": 41,
+          "identify_id": 1041,
+          "name": "C21_grid_g-0.10_P_anchor"
+        },
+        "breakaway": {
+          "object_id": 42,
+          "identify_id": 1042,
+          "name": "C21_grid_g-0.10_P_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 22,
+      "label": "C22_grid_g-0.05_P",
+      "position": "r4c4",
+      "row": 4,
+      "col": 4,
+      "x_mm": 141.0,
+      "y_mm": 167.0,
+      "geometry": "grid",
+      "gap_overlap_mm": -0.05,
+      "gap_kind": "gap",
+      "pause": true,
+      "pause_seconds": 22.0,
+      "tier": "P1",
+      "joint_z_mm": 9.0,
+      "breakaway_bottom_z_mm": 9.05,
+      "predicted_touchdown_layer_z_mm": 9.2,
+      "predicted_sliced_gap_mm": -0.0,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 4,
+        "left_edge_minus_x": 4
+      },
+      "nominal_contact_mm2": 4.0,
+      "objects": {
+        "anchor": {
+          "object_id": 43,
+          "identify_id": 1043,
+          "name": "C22_grid_g-0.05_P_anchor"
+        },
+        "breakaway": {
+          "object_id": 44,
+          "identify_id": 1044,
+          "name": "C22_grid_g-0.05_P_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 23,
+      "label": "C23_grid_g+0.00_P",
+      "position": "r4c5",
+      "row": 4,
+      "col": 5,
+      "x_mm": 167.0,
+      "y_mm": 167.0,
+      "geometry": "grid",
+      "gap_overlap_mm": 0.0,
+      "gap_kind": "flush",
+      "pause": true,
+      "pause_seconds": 22.0,
+      "tier": "P1",
+      "joint_z_mm": 9.0,
+      "breakaway_bottom_z_mm": 9.0,
+      "predicted_touchdown_layer_z_mm": 9.2,
+      "predicted_sliced_gap_mm": -0.0,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 5,
+        "left_edge_minus_x": 4
+      },
+      "nominal_contact_mm2": 4.0,
+      "objects": {
+        "anchor": {
+          "object_id": 45,
+          "identify_id": 1045,
+          "name": "C23_grid_g+0.00_P_anchor"
+        },
+        "breakaway": {
+          "object_id": 46,
+          "identify_id": 1046,
+          "name": "C23_grid_g+0.00_P_breakaway"
+        }
+      }
+    },
+    {
+      "coupon": 24,
+      "label": "C24_grid_g+0.02_P",
+      "position": "r4c6",
+      "row": 4,
+      "col": 6,
+      "x_mm": 193.0,
+      "y_mm": 167.0,
+      "geometry": "grid",
+      "gap_overlap_mm": 0.02,
+      "gap_kind": "overlap",
+      "pause": true,
+      "pause_seconds": 22.0,
+      "tier": "P1",
+      "joint_z_mm": 9.0,
+      "breakaway_bottom_z_mm": 8.98,
+      "predicted_touchdown_layer_z_mm": 9.2,
+      "predicted_sliced_gap_mm": -0.0,
+      "touchdown_ambiguous": false,
+      "notches": {
+        "front_edge_minus_y": 6,
+        "left_edge_minus_x": 4
+      },
+      "nominal_contact_mm2": 4.0,
+      "objects": {
+        "anchor": {
+          "object_id": 47,
+          "identify_id": 1047,
+          "name": "C24_grid_g+0.02_P_anchor"
+        },
+        "breakaway": {
+          "object_id": 48,
+          "identify_id": 1048,
+          "name": "C24_grid_g+0.02_P_breakaway"
+        }
+      }
+    }
+  ],
+  "objects": [
+    {
+      "object_id": 1,
+      "identify_id": 1001,
+      "name": "C01_ring_g-0.20_N_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "ring_tip"
+      ],
+      "triangles": 812,
+      "volume_mm3": 1292.7951,
+      "bbox_mm": [
+        [
+          55.0,
+          81.0,
+          0.0
+        ],
+        [
+          71.0,
+          97.0,
+          6.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 812,
+        "unique_edges": 1218,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 2,
+      "identify_id": 1002,
+      "name": "C01_ring_g-0.20_N_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "body"
+      ],
+      "triangles": 44,
+      "volume_mm3": 972.0,
+      "bbox_mm": [
+        [
+          56.0,
+          82.0,
+          6.2
+        ],
+        [
+          70.0,
+          96.0,
+          11.2
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 44,
+        "unique_edges": 66,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 3,
+      "identify_id": 1003,
+      "name": "C02_ring_g-0.15_N_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "ring_tip"
+      ],
+      "triangles": 828,
+      "volume_mm3": 1288.7951,
+      "bbox_mm": [
+        [
+          81.0,
+          81.0,
+          0.0
+        ],
+        [
+          97.0,
+          97.0,
+          6.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 828,
+        "unique_edges": 1242,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 4,
+      "identify_id": 1004,
+      "name": "C02_ring_g-0.15_N_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "body"
+      ],
+      "triangles": 60,
+      "volume_mm3": 968.0,
+      "bbox_mm": [
+        [
+          82.0,
+          82.0,
+          6.15
+        ],
+        [
+          96.0,
+          96.0,
+          11.15
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 60,
+        "unique_edges": 90,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 5,
+      "identify_id": 1005,
+      "name": "C03_ring_g-0.10_N_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "ring_tip"
+      ],
+      "triangles": 844,
+      "volume_mm3": 1284.7951,
+      "bbox_mm": [
+        [
+          107.0,
+          81.0,
+          0.0
+        ],
+        [
+          123.0,
+          97.0,
+          6.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 844,
+        "unique_edges": 1266,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 6,
+      "identify_id": 1006,
+      "name": "C03_ring_g-0.10_N_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "body"
+      ],
+      "triangles": 76,
+      "volume_mm3": 964.0,
+      "bbox_mm": [
+        [
+          108.0,
+          82.0,
+          6.1
+        ],
+        [
+          122.0,
+          96.0,
+          11.1
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 76,
+        "unique_edges": 114,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 7,
+      "identify_id": 1007,
+      "name": "C04_ring_g-0.05_N_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "ring_tip"
+      ],
+      "triangles": 860,
+      "volume_mm3": 1280.7951,
+      "bbox_mm": [
+        [
+          133.0,
+          81.0,
+          0.0
+        ],
+        [
+          149.0,
+          97.0,
+          6.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 860,
+        "unique_edges": 1290,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 8,
+      "identify_id": 1008,
+      "name": "C04_ring_g-0.05_N_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "body"
+      ],
+      "triangles": 92,
+      "volume_mm3": 960.0,
+      "bbox_mm": [
+        [
+          134.0,
+          82.0,
+          6.05
+        ],
+        [
+          148.0,
+          96.0,
+          11.05
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 92,
+        "unique_edges": 138,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 9,
+      "identify_id": 1009,
+      "name": "C05_ring_g+0.00_N_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "ring_tip"
+      ],
+      "triangles": 876,
+      "volume_mm3": 1276.7951,
+      "bbox_mm": [
+        [
+          159.0,
+          81.0,
+          0.0
+        ],
+        [
+          175.0,
+          97.0,
+          6.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 876,
+        "unique_edges": 1314,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 10,
+      "identify_id": 1010,
+      "name": "C05_ring_g+0.00_N_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "body"
+      ],
+      "triangles": 108,
+      "volume_mm3": 956.0,
+      "bbox_mm": [
+        [
+          160.0,
+          82.0,
+          6.0
+        ],
+        [
+          174.0,
+          96.0,
+          11.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 108,
+        "unique_edges": 162,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 11,
+      "identify_id": 1011,
+      "name": "C06_ring_g+0.02_N_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "ring_tip"
+      ],
+      "triangles": 892,
+      "volume_mm3": 1272.7951,
+      "bbox_mm": [
+        [
+          185.0,
+          81.0,
+          0.0
+        ],
+        [
+          201.0,
+          97.0,
+          6.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 892,
+        "unique_edges": 1338,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 12,
+      "identify_id": 1012,
+      "name": "C06_ring_g+0.02_N_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "body"
+      ],
+      "triangles": 124,
+      "volume_mm3": 952.0,
+      "bbox_mm": [
+        [
+          186.0,
+          82.0,
+          5.98
+        ],
+        [
+          200.0,
+          96.0,
+          10.98
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 124,
+        "unique_edges": 186,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 13,
+      "identify_id": 1013,
+      "name": "C07_grid_g-0.20_N_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "rib_x0",
+        "rib_x1",
+        "rib_x2",
+        "rib_x3"
+      ],
+      "triangles": 108,
+      "volume_mm3": 1296.8,
+      "bbox_mm": [
+        [
+          55.0,
+          107.0,
+          0.0
+        ],
+        [
+          71.0,
+          123.0,
+          6.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 108,
+        "unique_edges": 162,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 14,
+      "identify_id": 1014,
+      "name": "C07_grid_g-0.20_N_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "rib_y0",
+        "rib_y1",
+        "rib_y2",
+        "rib_y3",
+        "body"
+      ],
+      "triangles": 108,
+      "volume_mm3": 996.8,
+      "bbox_mm": [
+        [
+          56.0,
+          108.0,
+          6.2
+        ],
+        [
+          70.0,
+          122.0,
+          12.2
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 108,
+        "unique_edges": 162,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 15,
+      "identify_id": 1015,
+      "name": "C08_grid_g-0.15_N_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "rib_x0",
+        "rib_x1",
+        "rib_x2",
+        "rib_x3"
+      ],
+      "triangles": 124,
+      "volume_mm3": 1292.8,
+      "bbox_mm": [
+        [
+          81.0,
+          107.0,
+          0.0
+        ],
+        [
+          97.0,
+          123.0,
+          6.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 124,
+        "unique_edges": 186,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 16,
+      "identify_id": 1016,
+      "name": "C08_grid_g-0.15_N_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "rib_y0",
+        "rib_y1",
+        "rib_y2",
+        "rib_y3",
+        "body"
+      ],
+      "triangles": 124,
+      "volume_mm3": 992.8,
+      "bbox_mm": [
+        [
+          82.0,
+          108.0,
+          6.15
+        ],
+        [
+          96.0,
+          122.0,
+          12.15
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 124,
+        "unique_edges": 186,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 17,
+      "identify_id": 1017,
+      "name": "C09_grid_g-0.10_N_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "rib_x0",
+        "rib_x1",
+        "rib_x2",
+        "rib_x3"
+      ],
+      "triangles": 140,
+      "volume_mm3": 1288.8,
+      "bbox_mm": [
+        [
+          107.0,
+          107.0,
+          0.0
+        ],
+        [
+          123.0,
+          123.0,
+          6.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 140,
+        "unique_edges": 210,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 18,
+      "identify_id": 1018,
+      "name": "C09_grid_g-0.10_N_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "rib_y0",
+        "rib_y1",
+        "rib_y2",
+        "rib_y3",
+        "body"
+      ],
+      "triangles": 140,
+      "volume_mm3": 988.8,
+      "bbox_mm": [
+        [
+          108.0,
+          108.0,
+          6.1
+        ],
+        [
+          122.0,
+          122.0,
+          12.1
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 140,
+        "unique_edges": 210,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 19,
+      "identify_id": 1019,
+      "name": "C10_grid_g-0.05_N_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "rib_x0",
+        "rib_x1",
+        "rib_x2",
+        "rib_x3"
+      ],
+      "triangles": 156,
+      "volume_mm3": 1284.8,
+      "bbox_mm": [
+        [
+          133.0,
+          107.0,
+          0.0
+        ],
+        [
+          149.0,
+          123.0,
+          6.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 156,
+        "unique_edges": 234,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 20,
+      "identify_id": 1020,
+      "name": "C10_grid_g-0.05_N_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "rib_y0",
+        "rib_y1",
+        "rib_y2",
+        "rib_y3",
+        "body"
+      ],
+      "triangles": 156,
+      "volume_mm3": 984.8,
+      "bbox_mm": [
+        [
+          134.0,
+          108.0,
+          6.05
+        ],
+        [
+          148.0,
+          122.0,
+          12.05
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 156,
+        "unique_edges": 234,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 21,
+      "identify_id": 1021,
+      "name": "C11_grid_g+0.00_N_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "rib_x0",
+        "rib_x1",
+        "rib_x2",
+        "rib_x3"
+      ],
+      "triangles": 172,
+      "volume_mm3": 1280.8,
+      "bbox_mm": [
+        [
+          159.0,
+          107.0,
+          0.0
+        ],
+        [
+          175.0,
+          123.0,
+          6.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 172,
+        "unique_edges": 258,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 22,
+      "identify_id": 1022,
+      "name": "C11_grid_g+0.00_N_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "rib_y0",
+        "rib_y1",
+        "rib_y2",
+        "rib_y3",
+        "body"
+      ],
+      "triangles": 172,
+      "volume_mm3": 980.8,
+      "bbox_mm": [
+        [
+          160.0,
+          108.0,
+          6.0
+        ],
+        [
+          174.0,
+          122.0,
+          12.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 172,
+        "unique_edges": 258,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 23,
+      "identify_id": 1023,
+      "name": "C12_grid_g+0.02_N_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "rib_x0",
+        "rib_x1",
+        "rib_x2",
+        "rib_x3"
+      ],
+      "triangles": 188,
+      "volume_mm3": 1276.8,
+      "bbox_mm": [
+        [
+          185.0,
+          107.0,
+          0.0
+        ],
+        [
+          201.0,
+          123.0,
+          6.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 188,
+        "unique_edges": 282,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 24,
+      "identify_id": 1024,
+      "name": "C12_grid_g+0.02_N_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "rib_y0",
+        "rib_y1",
+        "rib_y2",
+        "rib_y3",
+        "body"
+      ],
+      "triangles": 188,
+      "volume_mm3": 976.8,
+      "bbox_mm": [
+        [
+          186.0,
+          108.0,
+          5.98
+        ],
+        [
+          200.0,
+          122.0,
+          11.98
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 188,
+        "unique_edges": 282,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 25,
+      "identify_id": 1025,
+      "name": "C13_ring_g-0.20_P_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "ring_tip"
+      ],
+      "triangles": 844,
+      "volume_mm3": 2801.5951,
+      "bbox_mm": [
+        [
+          55.0,
+          133.0,
+          0.0
+        ],
+        [
+          71.0,
+          149.0,
+          12.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 844,
+        "unique_edges": 1266,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 26,
+      "identify_id": 1026,
+      "name": "C13_ring_g-0.20_P_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "body"
+      ],
+      "triangles": 76,
+      "volume_mm3": 964.0,
+      "bbox_mm": [
+        [
+          56.0,
+          134.0,
+          12.2
+        ],
+        [
+          70.0,
+          148.0,
+          17.2
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 76,
+        "unique_edges": 114,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 27,
+      "identify_id": 1027,
+      "name": "C14_ring_g-0.15_P_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "ring_tip"
+      ],
+      "triangles": 860,
+      "volume_mm3": 2792.7951,
+      "bbox_mm": [
+        [
+          81.0,
+          133.0,
+          0.0
+        ],
+        [
+          97.0,
+          149.0,
+          12.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 860,
+        "unique_edges": 1290,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 28,
+      "identify_id": 1028,
+      "name": "C14_ring_g-0.15_P_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "body"
+      ],
+      "triangles": 92,
+      "volume_mm3": 960.0,
+      "bbox_mm": [
+        [
+          82.0,
+          134.0,
+          12.15
+        ],
+        [
+          96.0,
+          148.0,
+          17.15
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 92,
+        "unique_edges": 138,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 29,
+      "identify_id": 1029,
+      "name": "C15_ring_g-0.10_P_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "ring_tip"
+      ],
+      "triangles": 876,
+      "volume_mm3": 2783.9951,
+      "bbox_mm": [
+        [
+          107.0,
+          133.0,
+          0.0
+        ],
+        [
+          123.0,
+          149.0,
+          12.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 876,
+        "unique_edges": 1314,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 30,
+      "identify_id": 1030,
+      "name": "C15_ring_g-0.10_P_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "body"
+      ],
+      "triangles": 108,
+      "volume_mm3": 956.0,
+      "bbox_mm": [
+        [
+          108.0,
+          134.0,
+          12.1
+        ],
+        [
+          122.0,
+          148.0,
+          17.1
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 108,
+        "unique_edges": 162,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 31,
+      "identify_id": 1031,
+      "name": "C16_ring_g-0.05_P_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "ring_tip"
+      ],
+      "triangles": 892,
+      "volume_mm3": 2023.9951,
+      "bbox_mm": [
+        [
+          133.0,
+          133.0,
+          0.0
+        ],
+        [
+          149.0,
+          149.0,
+          9.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 892,
+        "unique_edges": 1338,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 32,
+      "identify_id": 1032,
+      "name": "C16_ring_g-0.05_P_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "body"
+      ],
+      "triangles": 124,
+      "volume_mm3": 952.0,
+      "bbox_mm": [
+        [
+          134.0,
+          134.0,
+          9.05
+        ],
+        [
+          148.0,
+          148.0,
+          14.05
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 124,
+        "unique_edges": 186,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 33,
+      "identify_id": 1033,
+      "name": "C17_ring_g+0.00_P_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "ring_tip"
+      ],
+      "triangles": 908,
+      "volume_mm3": 2017.5951,
+      "bbox_mm": [
+        [
+          159.0,
+          133.0,
+          0.0
+        ],
+        [
+          175.0,
+          149.0,
+          9.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 908,
+        "unique_edges": 1362,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 34,
+      "identify_id": 1034,
+      "name": "C17_ring_g+0.00_P_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "body"
+      ],
+      "triangles": 140,
+      "volume_mm3": 948.0,
+      "bbox_mm": [
+        [
+          160.0,
+          134.0,
+          9.0
+        ],
+        [
+          174.0,
+          148.0,
+          14.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 140,
+        "unique_edges": 210,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 35,
+      "identify_id": 1035,
+      "name": "C18_ring_g+0.02_P_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "ring_tip"
+      ],
+      "triangles": 924,
+      "volume_mm3": 2011.1951,
+      "bbox_mm": [
+        [
+          185.0,
+          133.0,
+          0.0
+        ],
+        [
+          201.0,
+          149.0,
+          9.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 924,
+        "unique_edges": 1386,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 36,
+      "identify_id": 1036,
+      "name": "C18_ring_g+0.02_P_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "body"
+      ],
+      "triangles": 156,
+      "volume_mm3": 944.0,
+      "bbox_mm": [
+        [
+          186.0,
+          134.0,
+          8.98
+        ],
+        [
+          200.0,
+          148.0,
+          13.98
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 156,
+        "unique_edges": 234,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 37,
+      "identify_id": 1037,
+      "name": "C19_grid_g-0.20_P_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "rib_x0",
+        "rib_x1",
+        "rib_x2",
+        "rib_x3"
+      ],
+      "triangles": 140,
+      "volume_mm3": 2800.8,
+      "bbox_mm": [
+        [
+          55.0,
+          159.0,
+          0.0
+        ],
+        [
+          71.0,
+          175.0,
+          12.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 140,
+        "unique_edges": 210,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 38,
+      "identify_id": 1038,
+      "name": "C19_grid_g-0.20_P_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "rib_y0",
+        "rib_y1",
+        "rib_y2",
+        "rib_y3",
+        "body"
+      ],
+      "triangles": 140,
+      "volume_mm3": 988.8,
+      "bbox_mm": [
+        [
+          56.0,
+          160.0,
+          12.2
+        ],
+        [
+          70.0,
+          174.0,
+          18.2
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 140,
+        "unique_edges": 210,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 39,
+      "identify_id": 1039,
+      "name": "C20_grid_g-0.15_P_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "rib_x0",
+        "rib_x1",
+        "rib_x2",
+        "rib_x3"
+      ],
+      "triangles": 156,
+      "volume_mm3": 2792.0,
+      "bbox_mm": [
+        [
+          81.0,
+          159.0,
+          0.0
+        ],
+        [
+          97.0,
+          175.0,
+          12.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 156,
+        "unique_edges": 234,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 40,
+      "identify_id": 1040,
+      "name": "C20_grid_g-0.15_P_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "rib_y0",
+        "rib_y1",
+        "rib_y2",
+        "rib_y3",
+        "body"
+      ],
+      "triangles": 156,
+      "volume_mm3": 984.8,
+      "bbox_mm": [
+        [
+          82.0,
+          160.0,
+          12.15
+        ],
+        [
+          96.0,
+          174.0,
+          18.15
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 156,
+        "unique_edges": 234,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 41,
+      "identify_id": 1041,
+      "name": "C21_grid_g-0.10_P_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "rib_x0",
+        "rib_x1",
+        "rib_x2",
+        "rib_x3"
+      ],
+      "triangles": 172,
+      "volume_mm3": 2783.2,
+      "bbox_mm": [
+        [
+          107.0,
+          159.0,
+          0.0
+        ],
+        [
+          123.0,
+          175.0,
+          12.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 172,
+        "unique_edges": 258,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 42,
+      "identify_id": 1042,
+      "name": "C21_grid_g-0.10_P_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "rib_y0",
+        "rib_y1",
+        "rib_y2",
+        "rib_y3",
+        "body"
+      ],
+      "triangles": 172,
+      "volume_mm3": 980.8,
+      "bbox_mm": [
+        [
+          108.0,
+          160.0,
+          12.1
+        ],
+        [
+          122.0,
+          174.0,
+          18.1
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 172,
+        "unique_edges": 258,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 43,
+      "identify_id": 1043,
+      "name": "C22_grid_g-0.05_P_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "rib_x0",
+        "rib_x1",
+        "rib_x2",
+        "rib_x3"
+      ],
+      "triangles": 188,
+      "volume_mm3": 2025.6,
+      "bbox_mm": [
+        [
+          133.0,
+          159.0,
+          0.0
+        ],
+        [
+          149.0,
+          175.0,
+          9.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 188,
+        "unique_edges": 282,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 44,
+      "identify_id": 1044,
+      "name": "C22_grid_g-0.05_P_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "rib_y0",
+        "rib_y1",
+        "rib_y2",
+        "rib_y3",
+        "body"
+      ],
+      "triangles": 188,
+      "volume_mm3": 976.8,
+      "bbox_mm": [
+        [
+          134.0,
+          160.0,
+          9.05
+        ],
+        [
+          148.0,
+          174.0,
+          15.05
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 188,
+        "unique_edges": 282,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 45,
+      "identify_id": 1045,
+      "name": "C23_grid_g+0.00_P_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "rib_x0",
+        "rib_x1",
+        "rib_x2",
+        "rib_x3"
+      ],
+      "triangles": 204,
+      "volume_mm3": 2019.2,
+      "bbox_mm": [
+        [
+          159.0,
+          159.0,
+          0.0
+        ],
+        [
+          175.0,
+          175.0,
+          9.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 204,
+        "unique_edges": 306,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 46,
+      "identify_id": 1046,
+      "name": "C23_grid_g+0.00_P_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "rib_y0",
+        "rib_y1",
+        "rib_y2",
+        "rib_y3",
+        "body"
+      ],
+      "triangles": 204,
+      "volume_mm3": 972.8,
+      "bbox_mm": [
+        [
+          160.0,
+          160.0,
+          9.0
+        ],
+        [
+          174.0,
+          174.0,
+          15.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 204,
+        "unique_edges": 306,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 47,
+      "identify_id": 1047,
+      "name": "C24_grid_g+0.02_P_anchor",
+      "role": "anchor",
+      "parts": [
+        "body",
+        "rib_x0",
+        "rib_x1",
+        "rib_x2",
+        "rib_x3"
+      ],
+      "triangles": 220,
+      "volume_mm3": 2012.8,
+      "bbox_mm": [
+        [
+          185.0,
+          159.0,
+          0.0
+        ],
+        [
+          201.0,
+          175.0,
+          9.0
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 220,
+        "unique_edges": 330,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    },
+    {
+      "object_id": 48,
+      "identify_id": 1048,
+      "name": "C24_grid_g+0.02_P_breakaway",
+      "role": "breakaway",
+      "parts": [
+        "rib_y0",
+        "rib_y1",
+        "rib_y2",
+        "rib_y3",
+        "body"
+      ],
+      "triangles": 220,
+      "volume_mm3": 968.8,
+      "bbox_mm": [
+        [
+          186.0,
+          160.0,
+          8.98
+        ],
+        [
+          200.0,
+          174.0,
+          14.98
+        ]
+      ],
+      "verify": {
+        "ok": true,
+        "tris": 220,
+        "unique_edges": 330,
+        "open_edges": 0,
+        "nonmanifold_edges": 0,
+        "odd_edges": 0,
+        "degenerate_tris": 0,
+        "winding_inconsistent": 0
+      }
+    }
+  ],
+  "notes": [
+    "Open the .3mf as a PROJECT in Bambu Studio (File > Open Project). 'Import' drops objects to the bed and discards the pause.",
+    "Do not Arrange, move, or drop-to-bed: the breakaway objects float at their joint Z on purpose.",
+    "Check the layer height matches 0.2 mm before slicing; the pause layers and the touchdown predictions assume it.",
+    "predicted_touchdown_layer_z_mm is the first breakaway layer the slicer should extrude. With whole layers, sub-layer gaps quantise: compare predicted_sliced_gap_mm across coupons before reading the physical result.",
+    "touchdown_ambiguous = the breakaway's bottom face lies exactly on a slice plane; the slicer's tie-break decides which layer it starts on.",
+    "identify_id is written per object so the G-code object labels (tools/grispr) can be checked against this map; whether Bambu keeps a supplied identify_id on load is unverified."
+  ]
+}
