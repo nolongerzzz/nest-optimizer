@@ -2364,6 +2364,11 @@ function sealSelectedModel() {
     // flaps and fans holes shut across the whole piece; it takes no skip list
     // and has no notion of a face the user reserved. Rather than let a bake
     // quietly walk over paint, stand down and name what stopped it.
+    //
+    // PAINT SCOPE: WHOLE-PIECE. Any painted face on the piece stands this
+    // down. Repair re-topologises across the whole mesh and cannot promise a
+    // named face survives, so nsoMaskCount is the whole test. See the scoping
+    // rule in docs/HANDOFF.md.
     const painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
     if (painted > 0) {
       setStatus('Repair stood down - ' + painted + ' painted face(s); repair has no skip list. ' +

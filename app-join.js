@@ -1828,6 +1828,11 @@ async function joinSelectedModels() {
     // Paint wins (docs/HANDOFF.md), and the Paint faces button says so in as
     // many words: excluded faces are excluded from Join. Fusion deletes the
     // cap triangles outright and takes no skip list, so it stands down.
+    //
+    // PAINT SCOPE: WHOLE-PIECE, on BOTH sides. Any painted face on either
+    // piece declines this route - the mating face is only found after the
+    // fact, so there is no sub-region to scope to at the point of the check.
+    // See the scoping rule in docs/HANDOFF.md.
     fuseWhy = paintedJoin + ' painted face(s) - fusion has no skip list';
   } else {
     try {

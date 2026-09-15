@@ -626,6 +626,12 @@ function NSO_smoothSelectedModel(opts) {
   // top of this file, not something to bolt on here. So a painted piece is a
   // stand-down, naming the count, rather than a bake that quietly ignores the
   // paint. Clear the paint, or wait for the brush tier.
+  //
+  // PAINT SCOPE: WHOLE-PIECE. Any painted face on the piece stands this down.
+  // There is no sub-region to scope the check to - the smoothing touches every
+  // unpinned vertex - so nsoMaskCount is the whole test. See the scoping rule
+  // in docs/HANDOFF.md; the brush tier, when it exists, will be sub-region and
+  // must re-answer that question rather than inherit this line.
   var paintedCount = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
   if (paintedCount > 0) {
     if (typeof setStatus === 'function') {

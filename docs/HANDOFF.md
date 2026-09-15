@@ -22,6 +22,36 @@ bounding box is the second mapping that put the yellow on one face and the
 exclude on another. `brickSkipLists(...).pocket` and `nsoMaskFaceList` are the
 supported ways in.
 
+### Scoping — which faces a feature checks (added 2026-09-15)
+The rule is one rule; **how** a feature checks paint depends on its operating
+shape. Before wiring paint-awareness into a new feature, answer one question:
+
+> Does this feature act on a specific, identifiable sub-region of the piece, or
+> does it modify the whole piece with no clean sub-region?
+
+- **Whole-piece** — stand down entirely if ANY face on the piece is painted.
+  There is no sub-region to scope the check to, so this is the only coherent
+  reading. The test is `nsoMaskCount(m) > 0`.
+- **Sub-region** — check only the feature's own relevant faces. Paint elsewhere
+  on the piece (a different pocket, the outer hull) does not block it.
+
+Both are correct applications of the same rule at different scopes, **not**
+inconsistent exceptions — do not "fix" one to match the other. Every
+paint-aware feature **must state its category explicitly in its own
+documentation**, so the next ticket reads it instead of re-deriving it.
+
+Current roster, by category:
+
+| feature | category | paint test | stated in |
+|---|---|---|---|
+| Smooth (`app-sculpt.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
+| Repair (`app-finish.js`, Seal's checkbox) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
+| Fusion (`app-join.js`, Join Route 0) | whole-piece | `nsoMaskCount(A)+nsoMaskCount(B) > 0` | stand-down comment |
+| Pocket corners (`nso_inside_corners.js`) | sub-region | this pocket's floor + 4 walls | `docs/INSIDE-CORNERS.md` §2 |
+
+`node tools/nso_paint_scope_test.js` asserts every entry actually carries its
+label in source, so a deleted or drifted declaration fails rather than rotting.
+
 ## Output protocol
 1. Findings, numbers, diffs, and next-step proposals go in the current ticket PR
    (a new PR off `claude-wip`) or in the commit message. Never PR #4.
