@@ -170,7 +170,15 @@ const SYNTHETIC = [
     }
   },
   {
-    name: '2-sheet pinch, TIGHT angle — gate blocks 0->12, file left unchanged',
+    /* Was 0->12 before the self-intersection checkers were consolidated
+     * (2026-09-15). The stage produces the same 12 candidate pairs as it
+     * always did; 4 of them overlap by 6.275e-2 mm and 4 is what the gate now
+     * counts. The other 8 have an interval overlap of exactly 0.0 — the two
+     * triangles touch without penetrating — and the old strict endpoint test
+     * counted them as pierces. The outcome this case exists to pin is
+     * unchanged: the gate blocks and the file comes back untouched. See
+     * tools/mesh_validate.py, policy axis 3. */
+    name: '2-sheet pinch, TIGHT angle — gate blocks 0->4, file left unchanged',
     file: 'synth_pinch_2sheet_tight.stl',
     expect: {
       'ok': true, 'applied': false, 'declined': true,
@@ -180,7 +188,7 @@ const SYNTHETIC = [
       'before.selfIntersections': 0,
       'after.tris': 20, 'after.pinchVerts': 1, 'after.selfIntersections': 0,
       'counts.pinchVertsSplit': 0,
-      'gate.blocked': 'pinch-separate:selfInt 0->12',
+      'gate.blocked': 'pinch-separate:selfInt 0->4',
       'triDelta': 0, 'volumeDelta': approx(0, 1e-9)
     }
   }

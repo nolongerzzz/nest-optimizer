@@ -64,96 +64,41 @@ function exactEdgeAudit(soup) {
   return { uniqueEdges: m.size, openEdges: open, nonManifoldEdges: nm };
 }
 
-/* Triangle-triangle intersection count (Moller interval test, plus a 2D SAT
-   pass for the coplanar case).
-   RECONCILIATION CANDIDATE - do not add a fourth. tools/mesh_validate.py
-   (CSG thread) does the same job better: same Moller test but over a spatial
-   hash rather than brute force, and it separates coplanar contact from true
-   piercing. Both agree on every mesh this suite produces (0 piercing, 0
-   coplanar). This JS copy exists only so the node tests need no python
-   subprocess; it should collapse into mesh_validate.py at the merge-order
-   regroup. tools/stl_watertight_check.py remains the watertight authority and
-   covers edge parity and degeneracy only.
-   Pairs sharing an edge are legal surface contact and are skipped; everything
-   else must overlap with positive measure to count. */
-function selfIntersections(soup) {
-  const n = (soup.length / 9) | 0;
-  const EPS = 1e-9;
-  const sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
-  const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
-  const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
-  const tri=(t)=>{const o=t*9;return [[soup[o],soup[o+1],soup[o+2]],[soup[o+3],soup[o+4],soup[o+5]],[soup[o+6],soup[o+7],soup[o+8]]];};
-  const tris=[],boxes=[];
-  for(let t=0;t<n;t++){const T=tri(t);tris.push(T);
-    const lo=[1e30,1e30,1e30],hi=[-1e30,-1e30,-1e30];
-    for(const p of T)for(let k=0;k<3;k++){if(p[k]<lo[k])lo[k]=p[k];if(p[k]>hi[k])hi[k]=p[k];}
-    boxes.push([lo,hi]);}
-  const same=(a,b)=>Math.abs(a[0]-b[0])<1e-6&&Math.abs(a[1]-b[1])<1e-6&&Math.abs(a[2]-b[2])<1e-6;
-  const sharedVerts=(A,B)=>{let c=0;for(const a of A)for(const b of B)if(same(a,b)){c++;break;}return c;};
+/* Self-intersection count. RETIRED as a local implementation.
 
-  /* 2D SAT with strict separation: touching edges do not count */
-  function coplanarOverlap(A,B,N){
-    const ax=Math.abs(N[0]),ay=Math.abs(N[1]),az=Math.abs(N[2]);
-    let i0,i1; if(ax>ay&&ax>az){i0=1;i1=2;}else if(ay>az){i0=0;i1=2;}else{i0=0;i1=1;}
-    const P=A.map(p=>[p[i0],p[i1]]),Q=B.map(p=>[p[i0],p[i1]]);
-    const scale=Math.max(1,...P.flat().map(Math.abs),...Q.flat().map(Math.abs));
-    const tol=1e-9*scale;
-    for(const T of [P,Q]){
-      for(let e=0;e<3;e++){
-        const a=T[e],b=T[(e+1)%3];
-        const nx=-(b[1]-a[1]),ny=b[0]-a[0];
-        const L=Math.hypot(nx,ny); if(L<tol)continue;
-        let p0=Infinity,p1=-Infinity,q0=Infinity,q1=-Infinity;
-        for(const v of P){const d=((v[0]-a[0])*nx+(v[1]-a[1])*ny)/L;if(d<p0)p0=d;if(d>p1)p1=d;}
-        for(const v of Q){const d=((v[0]-a[0])*nx+(v[1]-a[1])*ny)/L;if(d<q0)q0=d;if(d>q1)q1=d;}
-        if(p1<q0+tol||q1<p0+tol)return false;
-      }
-    }
-    return true;
-  }
+   This file used to carry its own Moller + 2D-SAT copy, marked in-file as a
+   reconciliation candidate. It has been deleted in favour of the canonical
+   checker: tools/mesh_validate.py defines the policy, NSO_Repair.js carries the
+   transcription this delegates to, and tools/nso_selfint_equiv_test.js holds
+   the two together. Delegating rather than re-implementing is the whole point
+   of the consolidation, so do not inline a copy here again.
 
-  /* interval of triangle T on the intersection line, given signed dists d[] */
-  function interval(T,d,D){
-    const proj=T.map(p=>dot(D,p));
-    /* vertex alone on one side */
-    let solo=-1;
-    for(let i=0;i<3;i++){const a=d[i],b=d[(i+1)%3],c=d[(i+2)%3];
-      if((a>0&&b<=0&&c<=0)||(a<0&&b>=0&&c>=0)){solo=i;break;}}
-    if(solo<0){for(let i=0;i<3;i++)if(Math.abs(d[i])<EPS&&d[(i+1)%3]*d[(i+2)%3]>0){solo=i;break;}}
-    if(solo<0)return null;
-    const o=solo,p=(solo+1)%3,q=(solo+2)%3;
-    const t1=proj[o]+(proj[p]-proj[o])*(d[o]/(d[o]-d[p]));
-    const t2=proj[o]+(proj[q]-proj[o])*(d[o]/(d[o]-d[q]));
-    return [Math.min(t1,t2),Math.max(t1,t2)];
-  }
+   The deleted copy disagreed with both survivors, and not marginally: it
+   skipped a pair only when the two triangles shared at least TWO vertices (an
+   edge), where the canonical skips on one, and it compared coordinates at 1e-6
+   instead of welding. On fixtures/repair/thingi10k/40921.stl it reported 180
+   where the canonical reports 5 piercing; on synth_tjunction.stl and
+   out-box-square-half.stl it reported 2 where the canonical reports 0. It
+   agreed on this suite's own output only because that output is clean.
 
-  let hits=0;
-  for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){
-    const [l1,h1]=boxes[i],[l2,h2]=boxes[j];
-    if(h1[0]<l2[0]-EPS||h2[0]<l1[0]-EPS||h1[1]<l2[1]-EPS||h2[1]<l1[1]-EPS||h1[2]<l2[2]-EPS||h2[2]<l1[2]-EPS)continue;
-    const A=tris[i],B=tris[j];
-    if(sharedVerts(A,B)>=2)continue;           /* shares an edge: legal contact */
-    const N1=cross(sub(A[1],A[0]),sub(A[2],A[0])),d1=-dot(N1,A[0]);
-    const N2=cross(sub(B[1],B[0]),sub(B[2],B[0])),d2=-dot(N2,B[0]);
-    const sc=Math.max(Math.hypot(...N1),Math.hypot(...N2),1);
-    const db=B.map(p=>(dot(N1,p)+d1)/sc), da=A.map(p=>(dot(N2,p)+d2)/sc);
-    const tiny=1e-9*Math.max(1,...A.flat().map(Math.abs),...B.flat().map(Math.abs));
-    const dbz=db.map(v=>Math.abs(v)<tiny?0:v), daz=da.map(v=>Math.abs(v)<tiny?0:v);
-    if((dbz[0]>0&&dbz[1]>0&&dbz[2]>0)||(dbz[0]<0&&dbz[1]<0&&dbz[2]<0))continue;
-    if((daz[0]>0&&daz[1]>0&&daz[2]>0)||(daz[0]<0&&daz[1]<0&&daz[2]<0))continue;
-    if(dbz[0]===0&&dbz[1]===0&&dbz[2]===0){     /* coplanar */
-      if(coplanarOverlap(A,B,N1))hits++;
-      continue;
-    }
-    const D=cross(N1,N2);
-    if(Math.hypot(...D)<EPS)continue;
-    const iA=interval(A,daz,D),iB=interval(B,dbz,D);
-    if(!iA||!iB)continue;
-    const lo=Math.max(iA[0],iB[0]),hi=Math.min(iA[1],iB[1]);
-    const span=Math.max(iA[1]-iA[0],iB[1]-iB[0]);
-    if(hi-lo>1e-9*Math.max(span,1))hits++;
-  }
-  return hits;
+   Returns the piercing count, which is what the old function's return value
+   was compared against. Coplanar contact is reported separately by the
+   canonical checker and is legitimate at a fused seam; selfIntersectionsDetail
+   exposes both. */
+const { loadRepairModule } = require('./nso_stl_io.js');
+let _repair = null;
+function _canonical() {
+  if (!_repair) _repair = loadRepairModule(require('path').join(__dirname, '..', 'NSO_Repair.js'));
+  return _repair;
 }
 
-module.exports = { boxSoup, writeSTL, exactEdgeAudit, selfIntersections };
+function selfIntersectionsDetail(soup) {
+  const r = _canonical().inspect(soup);
+  return { pierce: r.selfIntersections, coplanar: r.selfIntersectionsCoplanar };
+}
+
+function selfIntersections(soup) {
+  return selfIntersectionsDetail(soup).pierce;
+}
+
+module.exports = { boxSoup, writeSTL, exactEdgeAudit, selfIntersections, selfIntersectionsDetail };
