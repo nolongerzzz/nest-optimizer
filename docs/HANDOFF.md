@@ -107,6 +107,16 @@ since `handleFiles()` already places the imported piece. Both are in `npm test`.
 browser checks, the drive serves three from devDependencies, not the CDN. On a
 runner whose Chromium predates the installed Playwright, set `CHROME_PATH`.
 
+Concrete, as of 2026-09-15: bare `npm test` **exits 1** in the web sandbox with
+`browserType.launch: Executable doesn't exist at
+/opt/pw-browsers/chromium_headless_shell-1243/...` — playwright wants 1243, the
+box ships 1194. Not a code failure; the four dependency-free cth:unit files pass
+first and the chain then stops at `cth:capture`. Run it as
+`CHROME_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm test`, which
+exits 0. `tools/nso_app_harness.js` (the wire-* suites) already resolves this
+itself in `chromiumPath()` and needs no env var; `cth-test/browser-lib.mjs` and
+`3mf-test/export-drive-check.mjs` read `CHROME_PATH` only.
+
 ## Grispr - per-object fan control (G-code post-process, NOT wired in)
 
 `tools/grispr/grispr.py`, standalone Python 3, stdlib only. Full write-up:
@@ -354,7 +364,7 @@ None of the three touched — each wants its own scoped pass and an APPLY.
 ## Inside corners — the corners8 setback in a pocket (landed, `nso_inside_corners.js`)
 
 Full write-up with numbers: `docs/INSIDE-CORNERS.md`. Suite:
-`node tools/nso_inside_corners_test.js` (92 checks). **Not wired in** — no
+`node tools/nso_inside_corners_test.js` (101 checks). **Not wired in** — no
 script tag, no `getEdgeTreat` option, `?v=` NOT bumped.
 
 The ticket asked whether corners8's setback generalises to a concave pocket.
@@ -382,8 +392,18 @@ only the floor end is treated.
 
 Follows the standing paint rule at the top of this file: `opts.skip` is a
 required argument, and painting the pocket floor or any of its four walls
-stands the bake down and names the face. Paint on the pocket mouth, or anywhere
-on the hull, does not stop it — this treatment never reaches those. A painted
+stands the bake down and names the face. The status line is the shape the three
+wired bakes adopted — `Pocket corners stood down - N painted face(s); …`,
+matching `Smooth stood down - N painted face(s); …` and `Repair stood down -
+N …` — and the result carries `painted` as the count with the detail under
+`paintedFaces`.
+
+One deliberate difference from that trio: Smooth / Repair / Fusion are
+whole-piece operations with no skip list, so ANY paint on the piece stops them
+(`nsoMaskCount(m) > 0`). This one knows which faces it touches, so it counts
+only the pocket floor and its four walls. Paint on the pocket mouth, or
+anywhere on the hull, does not stop it — this treatment never reaches those,
+and the resulting bake still measures correct. A painted
 wall stops the *whole* bake rather than leaving that one edge square, because
 `rawVertexBallCorners` has no per-edge radius and its own rule is
 all-four-corners-or-none; giving the setback a per-face radius the way

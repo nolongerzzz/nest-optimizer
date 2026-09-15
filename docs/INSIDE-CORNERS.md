@@ -1,7 +1,7 @@
 # Inside corners — the corners8 setback, taken into a pocket
 
 Module: `nso_inside_corners.js` (parked, **not wired in**)
-Suite: `node tools/nso_inside_corners_test.js` — 92 checks, all passing
+Suite: `node tools/nso_inside_corners_test.js` — 101 checks, all passing
 Outputs: `tools/out/inside-corners/*.stl`, for `tools/mesh_validate.py`
 
 Every number below is measured by that suite on synthetic fixtures. Nothing
@@ -200,14 +200,38 @@ none… a partial one would inset the face along edges that carry no band and
 leave the gap open"* — and a painted wall is exactly that case: its floor edge
 must carry no band while the other three do. The engine has no per-edge radius
 to express that, so the honest answer is to stand down and name the face, not
-to boolean a square stub back over the band. The refusal says so and points at
-the route that *can* express it:
+to boolean a square stub back over the band.
+
+The status line is the shape the other three wired bakes adopted, so the four
+read as one rule rather than four dialects — `<Feature> stood down - N painted
+face(s); <why>`:
 
 ```
-painted out and left alone: pocket wall X+, wall Y-. The setback treats the
-floor and all four walls together or not at all, so it stands down here.
-Piece unchanged (the Corners / Round wrap can leave a single face square)
+Smooth stood down - 1 painted face(s); global smoothing cannot hold a face
+                    still. Clear paint to smooth.                  (app-sculpt.js)
+Repair stood down - 1 painted face(s); repair has no skip list.
+                    Clear paint to repair.                         (app-finish.js)
+Pocket corners stood down - 2 painted face(s); pocket wall X+, wall Y-. The
+                    setback treats the floor and all four walls together or
+                    not at all. Clear paint to round this pocket (or use the
+                    Corners / Round wrap, which can leave a single face
+                    square).                                (nso_inside_corners.js)
 ```
+
+The faces are named *after* the count, because a pocket has eleven faces and
+"2 painted" alone does not say which pocket or which wall. The result object
+matches the trio too: `painted` is the count, with the detail under
+`paintedFaces`.
+
+**One deliberate difference from the trio, worth knowing.** Smooth, Repair and
+Fusion are whole-piece operations with no skip list, so *any* paint anywhere on
+the piece stops them (`nsoMaskCount(m) > 0`). This one knows exactly which
+faces it touches — the pocket floor and its four walls — so it counts only
+those. Paint on the pocket mouth, or anywhere on the hull, does not stop it,
+and the bake that results still measures correct. That is the ticket's own
+wording ("stand down entirely on that pocket if any of its *relevant* faces are
+painted"), and it is strictly more useful than a blanket refusal; but it does
+mean the trigger is scoped where the trio's is not.
 
 Measured, one face painted at a time — the floor and all four walls are touched
 by this treatment, so each stands it down:

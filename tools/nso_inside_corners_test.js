@@ -349,9 +349,12 @@ const allNear = (a, want, tol) => a.every(x => Math.abs(x - want) <= tol);
       const skip = NOPAINT(); skip[a][s] = true;
       const res = await IC.NSO_insideCornersBake(base, brick, R, deps, T.ops, { skip });
       T.check('painting the pocket ' + label + ' stands the bake down',
-              !res.ok && res.painted && res.painted.length === 1 &&
-              res.painted[0].name === label.split(' ')[1],
+              !res.ok && res.painted === 1 && res.paintedFaces &&
+              res.paintedFaces[0].name === label.split(' ')[1],
               '(' + (res.ok ? 'BAKED ANYWAY' : res.reason.split('.')[0]) + ')');
+      /* The wording the other three wired bakes use, count and all. */
+      T.check('  ...and says so in the adopted pattern',
+              !res.ok && /^Pocket corners stood down - 1 painted face\(s\); /.test(res.reason));
     }
 
     /* Paint the app cannot attribute to a face this bake touches must NOT stop
@@ -372,8 +375,23 @@ const allNear = (a, want, tol) => a.every(x => Math.abs(x - want) <= tol);
     const two = NOPAINT(); two[0][0] = true; two[1][1] = true;
     const both = await IC.NSO_insideCornersBake(base, brick, R, deps, T.ops, { skip: two });
     T.check('two painted walls are both named in the refusal',
-            !both.ok && both.painted.length === 2 &&
-            both.painted.map(x => x.name).sort().join() === 'X+,Y-', '(' + (both.reason || '') + ')');
+            !both.ok && both.painted === 2 &&
+            both.paintedFaces.map(x => x.name).sort().join() === 'X+,Y-', '(' + (both.reason || '') + ')');
+    T.check('and the count in the status line is 2, not 1',
+            !both.ok && /^Pocket corners stood down - 2 painted face\(s\); /.test(both.reason),
+            '(' + (both.reason || '').split(';')[0] + ')');
+
+    /* The four wired bakes must read as one rule, not four dialects. Smooth and
+       Repair are the two that already say it in the app; this asserts the shape
+       they share rather than any one wording. */
+    const PATTERN = /^[A-Z][A-Za-z ]* stood down - \d+ painted face\(s\); .*\.$/;
+    T.check('the stand-down line matches the shape Smooth and Repair use',
+            PATTERN.test(both.reason), '(' + both.reason + ')');
+    for (const live of ['Smooth stood down - 1 painted face(s); global smoothing cannot hold a ' +
+                        'face still. Clear paint to smooth.',
+                        'Repair stood down - 1 painted face(s); repair has no skip list. ' +
+                        'Clear paint to repair.'])
+      T.check('  ...the same shape the live app already ships', PATTERN.test(live));
 
     /* And the skip list can be built from the faces rawBoxPockets recorded,
        with the caller's own isPainted predicate - the two lines
@@ -386,7 +404,8 @@ const allNear = (a, want, tol) => a.every(x => Math.abs(x - want) <= tol);
             JSON.stringify([[true, false], [false, false], [false, false]]), JSON.stringify(built));
     const viaBuilt = await IC.NSO_insideCornersBake(base, pk, R, deps, T.ops, { skip: built });
     T.check('and a bake driven by that grid stands down on the painted wall',
-            !viaBuilt.ok && /wall X\+/.test(viaBuilt.reason), '(' + (viaBuilt.reason || 'accepted') + ')');
+            !viaBuilt.ok && viaBuilt.painted === 1 && /wall X\+/.test(viaBuilt.reason),
+            '(' + (viaBuilt.reason || 'accepted') + ')');
     const viaClean = await IC.NSO_insideCornersBake(base, pk, R, deps, T.ops,
                         { skip: IC.NSO_insidePocketSkip(pk, () => false) });
     T.check('an unpainted piece through the same route still bakes', viaClean.ok,
