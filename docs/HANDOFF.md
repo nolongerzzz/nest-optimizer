@@ -299,11 +299,62 @@ wrong block count IS the finding. Safe to run on anything - `--list` never
 writes, and Grispr exits non-zero without touching the file on any pattern it
 does not recognise, rather than reporting a zero-edit success.
 
+## CI - GitHub Actions runs `npm test` on every push
+
+`.github/workflows/test.yml`. Triggers: every push to `claude-wip`, every PR
+into `main`, plus `workflow_dispatch`. The job is named **npm test**, so that is
+the status-check name to tick in branch protection.
+
+It runs `npm test` as one step rather than listing the suites in YAML, so CI
+cannot drift from package.json. Add a suite to the `test` script and CI runs it;
+nothing to change in the workflow.
+
+NOT in CI because not in `npm test`: `grispr:test` (Python) and the
+`tools/nso_wire_*.js` / repair / sculpt / fuse suites. Deliberate, not an
+oversight - but note the wire-* trio now covers WIRED features, so if those
+should gate merges the fix is to add them to the `test` script.
+
+**No CHROME_PATH here, and that is the whole point.** `npx playwright install`
+fetches the exact revision the locked Playwright wants
+(`chromium_headless_shell` v1243) - the thing the web sandbox cannot do, which
+is the only reason CHROME_PATH exists. The sandbox workaround above stays
+sandbox-only.
+
+**A runner DOES have outbound network.** Measured 2026-09-15, not assumed:
+`cdn.jsdelivr.net` returns 200 for the manifold js (74762 B), the manifold wasm
+(541470 B) and three.min.js (607784 B). So CI *could* use the CDN. It does not:
+`browser-lib.mjs` serves `vendor/manifold/` and the `three` devDependency, and
+`drive-check.mjs` asserts the substitution happened, so the hermetic path is the
+tested path and a CDN outage cannot redden the build. The vendored sizes match
+the CDN's byte for byte, so the copy is not a stale fork.
+
+Cost on ubuntu-latest: **42s green** (checkout 2s, node 1s, `npm ci` 2s,
+playwright chromium 24s / 114 MiB, `npm test` 10s); 36s red, since `npm test`
+stops at the first failing suite. No browser cache step - it saves ~20s of a 42s
+job and adds a failure mode.
+
+**Negative-controlled, not assumed.** Branch `ci-selftest-negative`, two runs
+differing by exactly one line - an off-by-one in `app-mask.js` `nsoMaskCount()`:
+
+    run 1  FAILURE  cth:unit ALL GREEN, then cth:capture 26/27,
+                    "FAILED the face was painted (expected 1, got 0)", exit 1
+    run 2  SUCCESS  same runner, same workflow, regression removed
+
+`cth:unit` passing first in the red run is what makes it meaningful: a real
+browser launched and a real page ran, so the red came from the app, not from a
+broken setup. Branch deleted after; the pair is recorded here.
+
+**Still to do by a human with admin rights:** making it merge-blocking needs
+Settings -> Branches -> branch protection rule on `main` -> "Require status
+checks to pass before merging" -> tick **npm test**. Not doable over the API
+with this connector's permissions.
+
 ## CTH checks
 `npm run cth:unit` is the dependency-free suite (`tools/cth-test/*.test.mjs`,
 also runnable as `./tools/cth-test/run-all.sh`). `npm run cth:capture` and
 `npm run cth:drive` drive the real app in headless Chromium and need `npm ci`.
-`npm test` runs all three. Both browser checks serve three and the manifold
+`npm test` runs these three plus the two 3MF checks - five suites, 253 checks -
+and is what CI runs. Both browser checks serve three and the manifold
 kernel from the `three` devDependency and `vendor/manifold/` rather than the
 CDN `index.html` names, so they need no network.
 
