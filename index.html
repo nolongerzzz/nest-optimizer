@@ -210,13 +210,17 @@
               <div class="vp-row vp-row-full">
                 <button id="btn-cap-open" class="btn btn-secondary" type="button" title="Close every open boundary loop of the selected piece with a flat cap.">Cap open faces</button>
               </div>
-              <div class="vp-row vp-row-label">
-                <label class="vp-repair"><span>Repair</span><input type="checkbox" id="chk-seal-repair"></label>
+              <div class="vp-row vp-row-full">
+                <label class="vp-flag vp-flag-repair" title="A flag, not an action: it changes what the next Seal click does. On, Seal runs the full repair pass - weld, drop degenerate and duplicate triangles, split pinches, fix T-junctions, peel flaps and fan holes shut. Off, Seal only closes openings.">
+                  <input type="checkbox" id="chk-seal-repair"><span class="vp-flag-face">Repair</span>
+                </label>
+              </div>
+              <div class="vp-row vp-row-full">
                 <button id="btn-seal" class="btn btn-secondary" type="button">Seal</button>
               </div>
-              <div class="vp-row vp-row-label">
-                <label class="vp-repair vp-nonsolid" title="This piece is meant to be open - a vase-mode shell, a single-wall squishy, a woven sheet. Only the 'must be closed' checks stand aside: self-intersection, degenerate and winding checks still apply. Per piece, never guessed from the mesh.">
-                  <span>Non-solid</span><input type="checkbox" id="chk-non-solid" disabled>
+              <div class="vp-row vp-row-full vp-row-sep">
+                <label class="vp-flag vp-flag-nonsolid" title="This piece is meant to be open - a vase-mode shell, a single-wall squishy, a woven sheet. Only the 'must be closed' checks stand aside: self-intersection, degenerate and winding checks still apply. Per piece, never guessed from the mesh.">
+                  <input type="checkbox" id="chk-non-solid" disabled><span class="vp-flag-face">Non-solid</span>
                 </label>
               </div>
               <div class="vp-row vp-row-full"><button id="btn-solidify" class="btn btn-secondary" type="button">Solidify</button></div>

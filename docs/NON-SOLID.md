@@ -101,8 +101,11 @@ Section 4 is the first positive thin-feature check.
 Follows mask6's paint exactly, because the same reasoning applies: a
 deliberate, visible, user-set exception, never an automatic inference.
 
-- **Set** with the *Non-solid* checkbox in the Adjust card (next to Repair /
-  Seal), on the selected piece only. Disabled with no selection.
+- **Set** with the *Non-solid* toggle in the Adjust card - its own purple
+  button below Seal, apart from Repair's - on the selected piece only.
+  Disabled with no selection. It is still a plain `<input type="checkbox">`
+  (`#chk-non-solid`) under the button face, so `checked` / `disabled` are the
+  state, exactly as before.
 - **Also set by one bake, and only one** (added 2026-09-16): Skin's **free
   layer** (`app-skin.js`, the `Free` checkbox next to the layer-2 pattern)
   hands the piece back with a second, free-hanging shell - a sheet resting on
