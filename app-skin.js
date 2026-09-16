@@ -1,14 +1,25 @@
 /* app-skin.js - the Skin face button: apply a contact skin (nso_skin.js) to
    one flat face of piece A, in place, as a bake.
 
-   Which face: in a Join session with a partner B, the flat face of A that
-   looks at B (the breakaway interface). Otherwise A's top face (+Z in the raw
-   file axes, the face that points up on the plate). The pick is by direction:
-   nso_skin.js takes the planar face whose normal is within 30 degrees of it,
-   outermost if several are parallel, and refuses anything that is not a
-   rectangle. The piece is otherwise untouched: the other faces keep their
-   planes, only the wall triangles that border the skinned face are re-fanned
-   so the seam has no T-junction.
+   Which face, in this order:
+     1. the SELECTED face, if the piece has one - the target the user painted
+        with Paint Selected (app-mask.js, nsoMaskSelected). Its raw plane is
+        handed to nso_skin.js as direction AND offset, so the pick is that
+        face exactly, an inner one (a pocket floor) included.
+     2. otherwise the auto-pick by direction: in a Join session with a partner
+        B, the flat face of A that looks at B (the breakaway interface);
+        outside a Join, A's top face (+Z in the raw file axes, the face that
+        points up on the plate). nso_skin.js takes the planar face whose
+        normal is within 30 degrees of it, outermost if several are parallel.
+   An explicit selection OVERRIDES the auto-pick, it does not add to it: Skin
+   takes exactly one face, so there is nothing for the two to share. The
+   status line says which of the two named the face. Once the skin is on,
+   the selection is consumed (the face it named is now relief, not a face),
+   and Undo puts geometry and selection back together.
+   Either way the face must be a rectangle, or Skin refuses. The piece is
+   otherwise untouched: the other faces keep their planes, only the wall
+   triangles that border the skinned face are re-fanned so the seam has no
+   T-junction.
 
    PAINT SCOPE: SUB-REGION. This bake acts on one identifiable face, so it
    checks paint on THAT face only, through nsoMaskIsExcludedRaw with the raw
@@ -54,10 +65,22 @@ function NSO_skinFaceOfModel(m, opts) {
   var soupIn = (m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null;
   if (!soupIn) { say('Skin needs a raw piece - unchanged', true); return { ok: false, reason: 'no rawTris' }; }
   var pattern = opts.pattern || 'crosshatch';
-  var dir = opts.dir || NSO_skinDirForModel(m);
+  /* the target: the painted selection first, the direction auto-pick after */
+  var sel = (typeof nsoMaskSelected === 'function') ? nsoMaskSelected(m) : null;
+  var dir, plane = null, source;
+  if (opts.dir) { dir = opts.dir; source = 'given direction'; }
+  else if (sel) { dir = sel.n.slice(); plane = sel.d; source = 'selected target'; }
+  else {
+    dir = NSO_skinDirForModel(m);
+    source = (dir[2] === 1 && dir[0] === 0 && dir[1] === 0) ? 'auto-pick: top face' : 'auto-pick: faces B';
+  }
 
-  var face = NSO_Skin.findFace(soupIn, dir);
+  var face = NSO_Skin.findFace(soupIn, dir, plane);
   if (!face) {
+    if (sel && plane != null) {
+      say('Skin refused - the selected target (' + nsoMaskFaceName(sel) + ') is not a flat face of this piece any more; clear paint and select again', true);
+      return { ok: false, reason: 'selected face not found on the piece' };
+    }
     say('Skin refused - no flat face of A looks that way', true);
     return { ok: false, reason: 'no flat face within 30 degrees' };
   }
@@ -71,15 +94,24 @@ function NSO_skinFaceOfModel(m, opts) {
     return { ok: false, reason: 'target face painted', face: face };
   }
 
-  var r = NSO_Skin.applySkinToFace(soupIn, { dir: dir, pattern: pattern, params: opts.params, mode: opts.mode });
+  var r = NSO_Skin.applySkinToFace(soupIn, { dir: dir, plane: plane, pattern: pattern, params: opts.params, mode: opts.mode });
   if (!r.ok) {
     say('Skin refused - piece unchanged (' + r.reason + ')', true);
     return r;
   }
-  var txt = 'Skinned ' + (axisIdx == null ? 'face' : ((r.face.n[axisIdx] < 0 ? '-' : '+') + 'XYZ'[axisIdx] + ' face')) +
+  var inner = plane != null && !!sel.inner;
+  var txt = 'Skinned ' + (axisIdx == null ? 'face' : ((inner ? 'inner ' : '') + (r.face.n[axisIdx] < 0 ? '-' : '+') + 'XYZ'[axisIdx] + ' face')) +
     ' - ' + r.describe + ', tips ' + (r.mode === 'recess' ? 'at the old face' : '+' + r.tipHeight.toFixed(2) + 'mm') +
-    ', contact ' + r.tipArea.toFixed(1) + 'mm², ' + (r.tris.length / 9) + ' tris - Seat gap 0 puts B on the tips';
-  if (typeof NSO_sculptCommitRaw === 'function') NSO_sculptCommitRaw(m, r.tris, 'skinReplace', txt);
+    ', contact ' + r.tipArea.toFixed(1) + 'mm², ' + (r.tris.length / 9) + ' tris - Seat gap 0 puts B on the tips' +
+    ' - target: ' + source;
+  r.target = source;
+  /* The commit's undo entry snapshots the paint (pushUndo fills prevMask),
+     so the selection is consumed AFTER it and comes back with the geometry
+     on Undo. noUndo: this is part of the skin step, not a step of its own. */
+  if (typeof NSO_sculptCommitRaw === 'function') {
+    NSO_sculptCommitRaw(m, r.tris, 'skinReplace', txt);
+    if (sel && typeof nsoMaskSelectClear === 'function') nsoMaskSelectClear(m, { noUndo: true });
+  }
   return r;
 }
 

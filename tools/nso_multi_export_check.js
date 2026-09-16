@@ -39,7 +39,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
+const { withApp, loadSTL, openFinishMenu, ROOT } = require('./nso_app_harness');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 let fails = 0;
@@ -234,6 +234,7 @@ withApp(async (page, logs) => {
   check('Join session holds A2 / B2', j.session && j.a === idA2 && j.b === idB2, JSON.stringify(j));
   await moveTo(page, idB2, 45, -35);
   for (let i = 0; i < 11; i++) await page.click('#btn-raise');
+  await openFinishMenu(page);   // Skin face lives in the Finish tab
   await page.selectOption('#skin-pattern', 'crosshatch');
   await page.click('#btn-skin-face');
   await waitStatus(page, /^Skinned|^Skin /);
