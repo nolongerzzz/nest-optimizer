@@ -40,6 +40,9 @@ const state = {
   undoStack: [],
   cameraFramed: false,
   cutAxis: null,
+  // The plate lock (app-poslock.js): one flag for the whole arrangement,
+  // deliberately NOT a per-piece m.posLock. Read through nsoPlateLocked().
+  plateLock: false,
   joinPartnerId: null,
   joinHullId: null,
   joinPickMode: false,
@@ -307,6 +310,15 @@ function undoLast() {
     if (typeof nsoPosLockRefresh === 'function') nsoPosLockRefresh();
     updateUndoBtn();
     setStatus('Undo: position lock ' + (m.posLock ? 'restored' : 'cleared') + ' on ' + m.name);
+    return;
+  }
+  if (entry.type === 'plateLockReplace') {
+    state.plateLock = !!entry.prev;
+    updateAdjustUI();
+    if (typeof nsoPosLockRefresh === 'function') nsoPosLockRefresh();
+    updateUndoBtn();
+    setStatus('Undo: plate lock ' + (state.plateLock ? 'restored' : 'cleared') +
+      ' - the per-piece locks were never touched by it');
     return;
   }
   if (entry.type === 'maskReplace') {
@@ -1267,9 +1279,41 @@ function footprintsFor(geo, size, allowRotate) {
   return list;
 }
 
-function packModels(instances, plate, gap, allowRotate) {
+/* Cut a rectangle out of a list of free rectangles, keeping the (up to four)
+   strips that survive around it. Used to reserve the ground a locked piece is
+   already standing on before anything is packed. */
+function subtractFreeRect(rects, box) {
+  const EPS = 1e-6;
+  const out = [];
+  for (const r of rects) {
+    const ox0 = Math.max(r.x, box.minx);
+    const ox1 = Math.min(r.x + r.w, box.maxx);
+    const oz0 = Math.max(r.z, box.minz);
+    const oz1 = Math.min(r.z + r.d, box.maxz);
+    if (!(ox1 > ox0 + EPS && oz1 > oz0 + EPS)) { out.push(r); continue; }   // misses this rect
+    if (ox0 > r.x + EPS) out.push({ x: r.x, z: r.z, w: ox0 - r.x, d: r.d });
+    if (ox1 < r.x + r.w - EPS) out.push({ x: ox1, z: r.z, w: r.x + r.w - ox1, d: r.d });
+    if (oz0 > r.z + EPS) out.push({ x: r.x, z: r.z, w: r.w, d: oz0 - r.z });
+    if (oz1 < r.z + r.d - EPS) out.push({ x: r.x, z: oz1, w: r.w, d: r.z + r.d - oz1 });
+  }
+  return out;
+}
+
+/* `blockers` are world-space XZ footprints ({minx,maxx,minz,maxz}) that the
+   packer must not place on: the pieces the user locked, which keep the pose
+   they already have. They are inflated by `gap` so a packed piece lands the
+   same clearance away from a locked neighbour as from a packed one. */
+function packModels(instances, plate, gap, allowRotate, blockers) {
   const placed = [];
-  const freeRects = [{ x: -plate.w / 2, z: -plate.d / 2, w: plate.w, d: plate.d }];
+  let freeRects = [{ x: -plate.w / 2, z: -plate.d / 2, w: plate.w, d: plate.d }];
+  if (blockers && blockers.length) {
+    for (const b of blockers) {
+      freeRects = subtractFreeRect(freeRects, {
+        minx: b.minx - gap, maxx: b.maxx + gap, minz: b.minz - gap, maxz: b.maxz + gap
+      });
+    }
+    freeRects.sort((a, b2) => a.z - b2.z || a.x - b2.x);
+  }
 
   // Largest footprint first
   const sorted = [...instances].sort((a, b) => (b.width * b.depth) - (a.width * a.depth));
@@ -1398,16 +1442,44 @@ function applyOverhangColors(geometry) {
 // ===================== Optimize =====================
 function runOptimize() {
   const btn = document.getElementById('btn-optimize');
+  /* The plate lock holds the ARRANGEMENT, and a repack is the one operation
+     that rebuilds the arrangement wholesale - so it is the one non-move
+     operation the plate lock refuses. A per-piece lock does not refuse it;
+     it pins that piece and the rest packs around it (below). */
+  if (typeof nsoPlateLocked === 'function' && nsoPlateLocked()) {
+    setStatus('Plate locked - Optimize refused; the arrangement is held. Press Unlock plate to repack', true);
+    return;
+  }
   btn.disabled = true;
   setStatus('Optimizing...');
   closeCutter(true);
 
   try {
-    const autoOrientFace = document.getElementById('opt-auto-orient')?.checked;
-    const preferSupports = document.getElementById('opt-orient').checked;
-    const allowRotate = document.getElementById('opt-rotate').checked;
-    const gap = Number(document.getElementById('gap').value) || 2;
+    /* These four controls are optional: the Pack card ships only the button,
+       so every read has to stand on its own. Defaults are the conservative
+       ones - keep the uploaded orientation, do not yaw pieces the user
+       placed, 2 mm between neighbours. */
+    const optFlag = (id, dflt) => {
+      const el = document.getElementById(id);
+      return el ? !!el.checked : dflt;
+    };
+    const autoOrientFace = optFlag('opt-auto-orient', false);
+    const preferSupports = optFlag('opt-orient', false);
+    const allowRotate = optFlag('opt-rotate', false);
+    const gapEl = document.getElementById('gap');
+    const gap = Number(gapEl && gapEl.value) || 2;
     const plate = getCurrentPlate();
+
+    /* Locked pieces are not repacked. They keep the pose AND the mesh they
+       already have - the ground they stand on is taken out of the packer's
+       free space, and only the pieces that are not locked are laid out again
+       around them. `nsoPosLockedPlaced` is the same accessor the move gate
+       reads; nothing here re-derives a lock. */
+    const isHeld = p => typeof nsoPosLockedPlaced === 'function' && nsoPosLockedPlaced(p);
+    const held = (state.placed || []).filter(p => p && p.mesh && isHeld(p));
+    const heldPerModel = new Map();
+    held.forEach(p => heldPerModel.set(p.sourceId, (heldPerModel.get(p.sourceId) || 0) + 1));
+    const blockers = held.map(p => placedFootprint(p));
 
     // Top N orientations so packer can pick per-instance
     function topOrients(geometry, mode, n = 4) {
@@ -1434,6 +1506,10 @@ function runOptimize() {
     function buildInstances(mode) {
       const instances = [];
       for (const model of state.models) {
+        // Each locked copy of this model is already on the plate and stays
+        // there, so the packer is asked for that many fewer.
+        const want = Math.max(0, model.quantity - (heldPerModel.get(model.id) || 0));
+        if (!want) continue;
         const orients = mode ? topOrients(model.geometry, mode, 5) : [{
           geometry: (() => { const g = model.geometry.clone(); g.center(); return g; })(),
           size: model.size,
@@ -1444,7 +1520,7 @@ function runOptimize() {
           geometry: o.geometry,
           size: { x: o.size.x, y: o.size.y, z: o.size.z }
         }));
-        for (let i = 0; i < model.quantity; i++) {
+        for (let i = 0; i < want; i++) {
           instances.push({
             sourceId: model.id,
             name: model.name,
@@ -1473,7 +1549,7 @@ function runOptimize() {
     let bestMode = 'as-uploaded';
 
     for (const c of candidates) {
-      const placedTry = packModels(c.instances, plate, gap, allowRotate);
+      const placedTry = packModels(c.instances, plate, gap, allowRotate, blockers);
       const fitted = placedTry.filter(p => !p.overflow).length;
       if (fitted > bestFitted) {
         bestFitted = fitted;
@@ -1484,12 +1560,27 @@ function runOptimize() {
 
     const placed = bestPlaced;
 
-    clearDisplayMeshes();
-    state.placed = placed;
+    // Clear only what is being repacked - a held piece keeps the very mesh it
+    // has, so a bake (Skin, Soften, Repair) on a locked piece survives a
+    // repack of everything around it, and so does its lock outline, which is
+    // a child of that mesh.
+    const keepMeshes = new Set(held.map(p => p.mesh));
+    if (state.modelGroup) {
+      state.modelGroup.children.slice().forEach(child => {
+        if (keepMeshes.has(child)) return;
+        state.modelGroup.remove(child);
+        if (child.material) {
+          if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+          else child.material.dispose();
+        }
+        // Do NOT dispose geometry - it may be shared with state.models
+      });
+    }
+    state.placed = held.concat(placed);
 
     const showSupports = preferSupports; // reuse checkbox: when on, tint overhangs
 
-    placed.forEach((p, idx) => {
+    placed.forEach((p) => {
       let geo = p.geometry.clone();
       if (showSupports) {
         geo = applyOverhangColors(geo);
@@ -1508,44 +1599,65 @@ function runOptimize() {
       const yOff = p.meshOffsetY || 0;
       mesh.position.set(p.x, p.height / 2 + 0.2 + yOff, p.z);
       mesh.rotation.y = p.rotY || (p.rotated ? Math.PI / 2 : 0);
-      mesh.userData.placedIndex = idx;
       p.mesh = mesh;
       p.rotY = p.rotY || (p.rotated ? Math.PI / 2 : 0);
       state.modelGroup.add(mesh);
     });
+    // Held pieces come first in state.placed, so every index moved; the
+    // pick path reads mesh.userData.placedIndex, so restamp them all.
+    reindexPlacedMeshes();
 
     state.selectedIndex = -1;
+    renderModelList();
     updateAdjustUI();
 
     // Keep plate visible - do not reframe camera after packing
     if (!state.plateMesh || !state.plateGrid) buildPlateMesh();
 
+    // The held pieces are on the plate and count towards the plate, so every
+    // readout below is over state.placed, not over the pieces just packed.
     const totalRequested = state.models.reduce((s, m) => s + m.quantity, 0);
-    const fitted = placed.filter(p => !p.overflow).length;
+    const onPlate = state.placed.filter(p => !p.overflow);
+    const fitted = onPlate.length;
     const totalArea = plate.w * plate.d;
-    const usedArea = placed.filter(p => !p.overflow).reduce((sum, p) => sum + p.width * p.depth, 0);
+    const usedArea = onPlate.reduce((sum, p) => sum + (p.width || 0) * (p.depth || 0), 0);
     const fill = totalArea > 0 ? ((usedArea / totalArea) * 100).toFixed(1) : 0;
 
-    document.getElementById('stats').classList.remove('hidden');
-    document.getElementById('stat-count').textContent = `${fitted} models`;
-    document.getElementById('stat-fill').textContent = `${fill}% fill`;
-    document.getElementById('stat-time').textContent = `${totalRequested - fitted} left`;
+    /* The stats panel and the results table are optional, the same way the
+       four Pack controls above are: the shipped Pack card is the button
+       alone. Write to whichever of them is on the page and let the rest be -
+       the status line below carries the same numbers either way. */
+    const statsEl = document.getElementById('stats');
+    if (statsEl) statsEl.classList.remove('hidden');
+    const setText = (id, text) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    };
+    setText('stat-count', `${fitted} models`);
+    setText('stat-fill', `${fill}% fill`);
+    setText('stat-time', `${totalRequested - fitted} left`);
 
     const resultsEl = document.getElementById('results');
-    resultsEl.innerHTML = `
+    if (resultsEl) {
+      resultsEl.innerHTML = `
       <div class="result-row"><span>Placed</span><strong>${fitted} / ${totalRequested}</strong></div>
       <div class="result-row"><span>Plate fill</span><strong>${fill}%</strong></div>
       <div class="result-row"><span>Mode</span><strong>${bestMode}${showSupports ? ' + support tint' : ''}</strong></div>
       <div class="result-row"><span>Gap</span><strong>${gap} mm</strong></div>
+      <div class="result-row"><span>Locked, kept</span><strong>${held.length}</strong></div>
     `;
+    }
 
     updateExportButton();
 
-    const overflowCount = placed.filter(p => p.overflow).length;
+    const overflowCount = state.placed.filter(p => p.overflow).length;
+    const around = held.length
+      ? ` around ${held.length} locked piece${held.length === 1 ? '' : 's'}, which did not move`
+      : '';
     if (overflowCount > 0) {
-      setStatus(`${fitted} fitted, ${overflowCount} need manual place - click orange model(s) to rotate/nudge`, true);
+      setStatus(`${fitted} fitted${around}, ${overflowCount} need manual place - click orange model(s) to rotate/nudge`, true);
     } else {
-      setStatus(`Packed ${fitted} models - ready to export`, false);
+      setStatus(`Packed ${placed.length} model${placed.length === 1 ? '' : 's'}${around} - ready to export`, false);
     }
   } catch (err) {
     console.error(err);

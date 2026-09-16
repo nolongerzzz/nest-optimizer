@@ -26,7 +26,16 @@ Smart build-plate packing for 3D printing.
 - **Lock position** on a placed piece: a locked piece refuses drag, the nudge
   arrows, Raise/Lower and the pose buttons, so a stray click cannot move it
   once Seat has put it where it belongs. Seat, Center, Align and Skin still
-  work on it. Shown by a teal outline and a `locked` tag in the list.
+  work on it. Shown by a teal outline and a `locked` tag in the list. Any
+  number of pieces can be locked at once - the flag is one per piece - and the
+  pieces you did not lock stay selectable, draggable and nestable around them.
+  **Optimize plate** packs the free pieces around the locked ones, which keep
+  the exact pose and mesh they had.
+- **Lock plate** holds the whole current arrangement - every piece's position
+  relative to every other - in one action. It refuses the same moves on every
+  piece, plus a repack. It is a separate flag, not a shortcut for locking each
+  piece: it writes no per-piece lock, so unlocking the plate gives back exactly
+  the piece locks you had set.
 - Breakaway supports through minimal contact: **Skin face** puts a contact
   relief (fine crosshatch, sawtooth ridges, or a tapered ring) on one flat face
   of a support block, and **Seat flush** with gap 0 rests the part on the
