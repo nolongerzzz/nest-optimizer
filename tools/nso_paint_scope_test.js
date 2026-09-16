@@ -39,6 +39,8 @@ const ROSTER = [
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Smooth stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Repair',         file: 'app-finish.js',          scope: 'WHOLE-PIECE',
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Repair stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
+  { feature: 'Thicken',        file: 'app-finish.js',          scope: 'WHOLE-PIECE',
+    test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Thicken stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Fusion',         file: 'app-join.js',            scope: 'WHOLE-PIECE',
     test: /nsoMaskCount\s*\(\s*modelA\s*\)/,                standDown: /painted face\(s\) - fusion has no skip list/ },
   { feature: 'Pocket corners', file: 'nso_inside_corners.js',  scope: 'SUB-REGION',

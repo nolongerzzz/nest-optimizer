@@ -71,9 +71,10 @@ self-intersect). All three are reported as `applied: true`.
 ### Assumptions (no check, result only meaningful closed)
 
 Signed volume everywhere it is reported (`NSO_Repair.analyze`, Smooth's
-budget, `tools/3mf-test` "wound outward"); Thicken's voxel flood fill for
-inside/outside (`app-finish.js` `_thickenClassifyExterior`, leaks on an open
-mesh); `nso_skin.js` takes "a closed triangle soup" as a precondition and
+budget, `tools/3mf-test` "wound outward", and Thicken's winding sign in
+`app-finish.js` `_thickenOffsetSoup` - its in/out split itself is the convex
+hull plus smooth-crease growth, which needs no closure); `nso_skin.js` takes
+"a closed triangle soup" as a precondition and
 never measures it, before or after. These are documented here and left as
 they are: the flag does not make them correct, and none of them is a gate.
 
@@ -207,9 +208,12 @@ that the wall check reads exactly.
 ## 6. Not done, on purpose
 
 - The flag is not persisted to 3MF. Same as paint; the reader is geometry-only.
-- Thicken, Cap, Join and Subtract do not read the flag. Their closure
-  dependence is an algorithmic assumption (flood fill, cap loops, the kernel),
-  not a check to skip, and skipping would not make them correct on a sheet.
+- Thicken, Cap, Join and Subtract do not read the flag. Cap's and the
+  kernel's closure dependence is an algorithmic assumption (cap loops, the
+  kernel), not a check to skip, and skipping would not make them correct on
+  a sheet. Thicken (since the 2026-09-16 rewrite, a per-face / per-vertex
+  planar offset) never needed closure, so there is nothing for the flag to
+  lift; open loops go through it untouched.
 - The wall/gap check lives in the validator, not in the app. Nothing in the
   browser measures thickness yet.
 - `stl_watertight_check.py --non-solid` still rounds at 1e-5, with the known
