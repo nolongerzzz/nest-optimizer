@@ -261,7 +261,12 @@ in both `fixtures/` and `library/`, `hinge_knuckle_box` (234 piercing pairs),
 separate shells), `lid_strap` (25, Euler 4), plus `library/box_closed` (74, Euler 4).
 Those are multi-body STLs whose shells overlap; a slicer unions them, so they
 print, but they are shipped in `library/` as product files and any CSG route
-(Join, Subtract) will meet the overlaps. The `skin_*_block` samples read
+(Join, Subtract) will meet the overlaps. Resolved later the same day: the four
+hinge / strap pairs are now real boolean unions of their shells (0 piercing,
+`tools/nso_fixture_union.mjs`, numbers in `fixtures/README.md`);
+`library/box_closed` is left as is and documented as not CSG-safe in
+`library/README.md`, because the sculpt self-test and `docs/SCULPT-TIER1.md`
+measure against its two-shell layout. The `skin_*_block` samples read
 piercing pairs because their gap is exactly 0 and the checker has no
 "touching along an edge" class (same as the Seat-gap 0 case). The tape files
 are the documented CSG_INTEGRATION case.
