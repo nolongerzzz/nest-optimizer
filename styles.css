@@ -607,11 +607,18 @@ select:focus, input:focus {
   padding: 0 10px;
   font-size: 12px;
 }
+/* One fixed width, not a range. With min 168 / max 176 the card sized itself
+   to its widest row, so it sat at 176 only because the layer-2 row overflowed
+   and fell back to 168 the moment that row was made to fit - every other row
+   silently losing 8px as a side effect of a fix two rows away. 176 is the
+   width it has been rendering at all along; pinning it keeps that and makes
+   the 166px of usable row width a constant the rows can be sized against. */
 .vp-finish-menu .vp-menu-body {
   top: calc(100% + 4px);
   left: auto;
   right: 0;
-  min-width: 168px;
+  width: 176px;
+  min-width: 176px;
   max-width: 176px;
   padding: 4px;
   gap: 3px;
@@ -1263,10 +1270,24 @@ select:focus, input:focus {
 .vp-row-skin { grid-template-columns: 1fr 88px; gap: 4px; align-items: stretch; }
 .vp-row-skin .btn { font-size: 11px; padding: 2px 4px; white-space: nowrap; }
 .vp-row-skin .vp-select { min-width: 0; font-size: 11px; padding: 0 4px; }
-/* The second skin row under it: Skin wrap, the layer-2 pattern, and the Free
-   checkbox that decides whether layer 2 is composed into the same shell or
-   hangs free as its own. Three cells, the checkbox the narrowest. */
-.vp-row-skin2 { grid-template-columns: 1fr 96px auto; gap: 4px; }
+/* The second skin row under it: Skin wrap, the Free checkbox, then the layer-2
+   pattern. Free sits between the two so the select can be last and end flush
+   with the card's right edge, level with every other control in the column.
+
+   The card is capped at 176px (.vp-finish-menu .vp-menu-body), so the three
+   cells share 158px after the two gaps. The button and the checkbox take only
+   what their text needs and the select takes the rest - it is the one cell
+   that has to reach the right edge, so it is the one given `1fr`. The old
+   `1fr 96px auto` did the opposite: the select was fixed and the checkbox was
+   last on an `auto` track with nothing left to sit in, so Free hung 15px past
+   the card. The select's options dropped their "layer 2:" prefix to fit; the
+   row, the tooltip and the aria-label all still say which layer it is, and
+   the words now match the layer-1 select directly above. */
+.vp-row-skin2 { grid-template-columns: auto auto minmax(0, 1fr); gap: 4px; }
+/* Sharing the row with Skin wrap and Free leaves this select ~80px, so it
+   trades a point of type and 2px of side padding for the room to still spell
+   "crosshatch" rather than clip it under the arrow. */
+.vp-row-skin2 .vp-select { font-size: 10px; padding: 0 2px; }
 .vp-skin-free { gap: 4px; font-size: 11px; white-space: nowrap; }
 /* A hairline above a row, to break the card into groups. Non-solid uses it:
    it is a standing declaration about the piece, not another knob on Seal. */

@@ -197,15 +197,15 @@
               </div>
               <div class="vp-row vp-row-skin vp-row-skin2">
                 <button id="btn-skin-wrap" class="btn btn-secondary" type="button" title="Put the same skin on EVERY flat rectangular face of the piece at once - all six faces of a box. Faces painted excluded are left alone and named; a face that is not a rectangle is skipped and named. Not a curved wrap: a cylinder's side is still refused.">Skin wrap</button>
-                <select id="skin-layer2" class="vp-select" title="Second skin layer. off: one layer. composed (Free off): layer 2 rides on layer 1's tips in one closed shell - zigzag crests cut the contact hardest, a crosshatch mostly just makes the relief taller, and the status reports both numbers. With Free on: layer 2 becomes its own free-hanging sheet resting on the tips, a second breakaway interface, and the piece is flagged non-solid." aria-label="Skin layer 2 pattern">
-                  <option value="off">layer 2: off</option>
-                  <option value="zigzag">layer 2: zigzag</option>
-                  <option value="crosshatch">layer 2: crosshatch</option>
-                  <option value="ring">layer 2: ring</option>
-                </select>
                 <label class="vp-repair vp-skin-free" title="Layer 2 as its own free-hanging shell: a sheet resting on layer 1's tips with its own relief on top. The piece then carries two shells, so this sets the Non-solid flag on it. Undo takes the flag off with the geometry. The sheet bridges from tip to tip when it prints.">
                   <span>Free</span><input type="checkbox" id="chk-skin-free">
                 </label>
+                <select id="skin-layer2" class="vp-select" title="Second skin layer, the row's own: off means one layer. composed (Free off): layer 2 rides on layer 1's tips in one closed shell - zigzag crests cut the contact hardest, a crosshatch mostly just makes the relief taller, and the status reports both numbers. With Free on: layer 2 becomes its own free-hanging sheet resting on the tips, a second breakaway interface, and the piece is flagged non-solid." aria-label="Skin layer 2 pattern">
+                  <option value="off">off</option>
+                  <option value="zigzag">zigzag</option>
+                  <option value="crosshatch">crosshatch</option>
+                  <option value="ring">ring</option>
+                </select>
               </div>
               <div class="vp-row vp-row-full">
                 <button id="btn-cap-open" class="btn btn-secondary" type="button" title="Close every open boundary loop of the selected piece with a flat cap.">Cap open faces</button>
