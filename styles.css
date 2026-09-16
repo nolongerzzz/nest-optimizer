@@ -836,6 +836,15 @@ select:focus, input:focus {
 .model-item .tag-a { background: #fb923c; }
 .model-item .tag-b { background: #4ade80; }
 .model-item .tag-nonsolid { background: #c084fc; }
+/* Position lock (app-poslock.js): teal, the one colour no other per-piece
+   marker uses - paint is yellow, A orange, B green, non-solid purple. */
+.model-item .tag-locked { background: #2dd4bf; }
+.model-item.is-locked { box-shadow: inset 3px 0 0 #2dd4bf; }
+.vp-bar-btn.btn-lock-pos.is-locked {
+  background: #134e4a;
+  border-color: #2dd4bf;
+  color: #ccfbf1;
+}
 
 .join-step {
   font-size: 14px;

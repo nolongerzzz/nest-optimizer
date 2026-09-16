@@ -299,6 +299,16 @@ function undoLast() {
     setStatus('Undo: non-solid flag ' + (m.nonSolid ? 'restored' : 'cleared') + ' on ' + m.name);
     return;
   }
+  if (entry.type === 'posLockReplace') {
+    const m = state.models.find(x => x.id === entry.modelId);
+    if (!m) { setStatus('Undo: piece no longer exists'); return; }
+    m.posLock = !!entry.prev;
+    updateAdjustUI();
+    if (typeof nsoPosLockRefresh === 'function') nsoPosLockRefresh();
+    updateUndoBtn();
+    setStatus('Undo: position lock ' + (m.posLock ? 'restored' : 'cleared') + ' on ' + m.name);
+    return;
+  }
   if (entry.type === 'maskReplace') {
     const m = state.models.find(x => x.id === entry.modelId);
     if (!m) { setStatus('Undo: piece no longer exists'); return; }
@@ -1098,6 +1108,10 @@ function renderModelList() {
   });
   // The non-solid tag rides on the row it belongs to (app-nonsolid.js).
   if (typeof nsoNonSolidRefresh === 'function') nsoNonSolidRefresh();
+  // So does the locked tag, and the outline on the mesh (app-poslock.js) -
+  // every bake that swaps a mesh rebuilds the list, so this is where the
+  // outline lands on the new mesh.
+  if (typeof nsoPosLockRefresh === 'function') nsoPosLockRefresh();
 
   el.querySelectorAll('.model-item').forEach(row => {
     row.addEventListener('click', (e) => {
@@ -1769,6 +1783,9 @@ function startMoveDrag(idx, event) {
   }
   const p = state.placed[idx];
   if (!p || !p.mesh) return false;
+  // Position lock (app-poslock.js): a locked piece is still selectable, but
+  // the drag never starts and nothing is pushed to undo.
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'drag')) return false;
   setPointerFromEvent(event);
   const hit = hitPlateXZ();
   if (!hit) return false;
@@ -2230,6 +2247,8 @@ function updateAdjustUI() {
   if (delModel) delModel.disabled = !getActiveModel();
   if (typeof nsoNonSolidRefresh === 'function') nsoNonSolidRefresh();
   updateExportButton();
+  // Last, so a locked selection greys the move/pose buttons just enabled above.
+  if (typeof nsoPosLockRefresh === 'function') nsoPosLockRefresh();
 }
 
 function reindexPlacedMeshes() {
@@ -2369,6 +2388,7 @@ function snapshotPlacedPose(idx) {
 function rotateSelected(dir) {
   const p = state.placed[state.selectedIndex];
   if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'yaw')) return;
   pushUndo(snapshotPlacedPose(state.selectedIndex));
 
   p.rotY = (p.rotY || 0) + dir * (Math.PI / 2);
@@ -2385,6 +2405,7 @@ function flipSelected() {
     setStatus('Select a piece first', true);
     return;
   }
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'edge flip')) return;
   pushUndo(snapshotPlacedPose(state.selectedIndex));
   p.rotY = (p.rotY || 0) + Math.PI;
   applyMeshRotation(p);
@@ -2397,6 +2418,7 @@ function flipSelected() {
 function tipSelected() {
   const p = state.placed[state.selectedIndex];
   if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'tip')) return;
   pushUndo(snapshotPlacedPose(state.selectedIndex));
 
   p.tipX = ((p.tipX || 0) + 1) % 4; // 0,1,2,3 -> 0,90,180,270 deg
@@ -2409,6 +2431,7 @@ function tipSelected() {
 function rollSelected() {
   const p = state.placed[state.selectedIndex];
   if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'roll')) return;
   pushUndo(snapshotPlacedPose(state.selectedIndex));
   p.tipZ = ((p.tipZ || 0) + 1) % 4;
   applyMeshRotation(p);
@@ -2420,6 +2443,7 @@ function rollSelected() {
 function liftSelected(dir) {
   const p = state.placed[state.selectedIndex];
   if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'raise/lower')) return;
   pushUndo(snapshotPlacedPose(state.selectedIndex));
   const step = 2;
   p.liftY = Math.max(0, Math.min(80, (p.liftY || 0) + dir * step));
@@ -2431,6 +2455,7 @@ function liftSelected(dir) {
 function bankSelected(dir) {
   const p = state.placed[state.selectedIndex];
   if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'bank')) return;
   pushUndo(snapshotPlacedPose(state.selectedIndex));
   p.tiltZ = (p.tiltZ || 0) + dir * 15;
   if (p.tiltZ > 180) p.tiltZ -= 360;
@@ -2444,6 +2469,7 @@ function bankSelected(dir) {
 function tiltSelected(dir) {
   const p = state.placed[state.selectedIndex];
   if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'pitch')) return;
   pushUndo(snapshotPlacedPose(state.selectedIndex));
   p.tiltX = (p.tiltX || 0) + dir * 15;
   if (p.tiltX > 180) p.tiltX -= 360;
@@ -2487,6 +2513,7 @@ function refreshOutline(p) {
 function nudgeSelected(dx, dz) {
   const p = state.placed[state.selectedIndex];
   if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'nudge')) return;
   pushUndo({ type: 'movePlaced', index: state.selectedIndex, x: p.x, z: p.z });
   applyPlacedXZ(p, p.x + dx, p.z + dz);
   updateExportButton();

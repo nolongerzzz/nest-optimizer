@@ -23,6 +23,10 @@ Smart build-plate packing for 3D printing.
 - Or pick **Format: 3MF** in the Export card and the same two buttons write a
   Bambu Studio `.3mf` project with cooling settings baked in, chosen from a small
   table of named cooling profiles - the whole plate, or the selected piece alone
+- **Lock position** on a placed piece: a locked piece refuses drag, the nudge
+  arrows, Raise/Lower and the pose buttons, so a stray click cannot move it
+  once Seat has put it where it belongs. Seat, Center, Align and Skin still
+  work on it. Shown by a teal outline and a `locked` tag in the list.
 - Breakaway supports through minimal contact: **Skin face** puts a contact
   relief (fine crosshatch, sawtooth ridges, or a tapered ring) on one flat face
   of a support block, and **Seat flush** with gap 0 rests the part on the
