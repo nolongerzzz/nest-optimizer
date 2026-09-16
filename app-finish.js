@@ -2349,6 +2349,20 @@ function sealSelectedModel() {
   const repairChk = document.getElementById('chk-seal-repair');
   const repairMode = !!(repairChk && repairChk.checked);
 
+  // NON-SOLID SCOPE (docs/NON-SOLID.md): read through nsoNonSolid, never
+  // guessed from open-edge counts. Plain Seal's whole job is to close
+  // openings (cap loops, cap outer holes), which is the one requirement the
+  // flag lifts, so on a non-solid piece it stands down and says so. Repair
+  // still runs: NSO_Repair skips only its three closure-premised stages
+  // (flap peel, orphan drop, hole fill) and keeps welding, degenerate and
+  // duplicate removal, T-junctions, pinch separation and both final gates.
+  const nonSolid = (typeof nsoNonSolid === 'function') && nsoNonSolid(m);
+  if (nonSolid && !repairMode) {
+    setStatus('Seal stood down - ' + m.name + ' is flagged non-solid and Seal only closes ' +
+              'openings. Untick Non-solid to seal, or tick Repair to fix defects without closing.', true);
+    return;
+  }
+
   let openBefore = null, nmBefore = null;
   try { openBefore = openBoundaryEdges(soupIn).length; } catch (e) {}
   if (repairMode) { try { nmBefore = countNonManifoldEdges(soupIn); } catch (e) {} }
@@ -2387,7 +2401,7 @@ function sealSelectedModel() {
       working = result.soup;
       failReason = result.reason;
     } else {
-      const r = NSO_Repair.commit(soupIn);
+      const r = NSO_Repair.commit(soupIn, { nonSolid: nonSolid });
       repairReport = r.report || null;
       console.log('[seal/repair] NSO_Repair', r.ok, repairReport);
 
@@ -2408,11 +2422,21 @@ function sealSelectedModel() {
       //    silent no-op wearing a success message.
       if (!repairReport || repairReport.applied !== true) {
         const gated = (repairReport && repairReport.gate && repairReport.gate.blockedStages) || [];
+        // A piece the flag left alone can still carry a real defect the
+        // repair cannot fix (a pierce is not repairable here). Say it, so the
+        // flag never turns a defective piece into a clean-sounding no-op.
+        const residual = repairReport && repairReport.before ? repairReport.before.selfIntersections : 0;
+        const tail = residual > 0
+          ? ' - ' + residual + ' self-intersecting pair(s) present, not hidden by the ' +
+            (nonSolid ? 'non-solid flag' : 'repair')
+          : '';
+        const tag = nonSolid ? 'Repair (non-solid) ' : 'Repair ';
         if (gated.length) {
-          setStatus('Repair unavailable for this defect - ' + gated.length +
-                    ' stage(s) gated (' + gated.join(', ') + ') - piece unchanged', true);
+          setStatus(tag + 'unavailable for this defect - ' + gated.length +
+                    ' stage(s) gated (' + gated.join(', ') + ') - piece unchanged' + tail, true);
         } else {
-          setStatus('Nothing to repair - piece unchanged');
+          setStatus(nonSolid ? 'Nothing to repair (non-solid) - piece unchanged' + tail
+                             : 'Nothing to repair - piece unchanged' + tail, residual > 0);
         }
         return;
       }
@@ -2519,17 +2543,21 @@ function sealSelectedModel() {
     if (c.tJunctionSplits) did.push(c.tJunctionSplits + ' T-junction(s)');
     if (c.pinchVertsSplit) did.push(c.pinchVertsSplit + ' pinch vert(s) split');
     if (c.holesFilled) did.push(c.holesFilled + ' hole(s) filled');
+    const siAfter = (repairReport && repairReport.after) ? repairReport.after.selfIntersections : 0;
     const counts = 'open edges ' + openStr + ', non-manifold ' + nmStr +
-                   (did.length ? '; ' + did.join(', ') : '');
+                   (did.length ? '; ' + did.join(', ') : '') +
+                   (nonSolid ? '; open edges kept (non-solid)' : '') +
+                   (siAfter > 0 ? '; ' + siAfter + ' self-intersecting pair(s) remain' : '');
     const blocked = (repairReport && repairReport.gate && repairReport.gate.blockedStages) || [];
+    const tag = nonSolid ? 'Repair (non-solid) ' : 'Repair ';
     if (blocked.length) {
       // A gated stage means the safe passes landed but a risky one was rolled
       // back because it would have made the mesh worse. Say so - "Repair done"
       // would claim more than happened.
-      setStatus('Repair partial - ' + blocked.length + ' stage(s) gated (' +
+      setStatus(tag + 'partial - ' + blocked.length + ' stage(s) gated (' +
                 blocked.join(', ') + ') - ' + counts);
     } else {
-      setStatus('Repair done - ' + counts + (repairLegacy ? ' (fallback repair)' : ''));
+      setStatus(tag + 'done - ' + counts + (repairLegacy ? ' (fallback repair)' : ''), siAfter > 0);
     }
   } else {
     if (openBefore != null && openAfter != null) {

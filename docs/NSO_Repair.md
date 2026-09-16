@@ -51,6 +51,24 @@ Peeling is bounded: never more than 10% of the triangle budget, never more than
 16 rounds. Hole fill refuses any loop longer than 64 edges — a loop that long
 is missing geometry, not a hole, and fanning it is a guess.
 
+## `nonSolid` — a piece that is meant to be open
+
+`commit(raw, { nonSolid: true })` is the caller saying the surface is not
+supposed to be closed (`docs/NON-SOLID.md`). Three stages have no other
+premise and are skipped, each recorded in `report.stages` as
+`skipped: 'nonSolid'`: **flap peel**, **orphan-component drop** and **hole
+fill**. Everything else runs unchanged — weld, degenerate and duplicate
+removal, T-junction split, pinch separation — and **both final gates still
+apply**: a repair that adds a self-intersection or raises the odd-edge count
+is still discarded. `report.nonSolid` echoes the option. The module never sets
+it from the geometry; that is the caller's decision, and in the app it is the
+user's.
+
+Measured on `fixtures/open/` without the option: the open clip loses its two
+corner triangles to flap peel, the weave loses twenty strand ends, and both
+cup rims are fanned shut (blocked, as it happens, by the self-intersection
+gate), all reported as `applied: true`. That is what the option exists to stop.
+
 ## Two kinds of pinch, one mechanism
 
 A **bowtie vertex** is two sheets touching at a point and sharing no edge. A

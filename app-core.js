@@ -290,6 +290,15 @@ function undoLast() {
     setStatus('Undo: Subtract reverted - two pieces restored');
     return;
   }
+  if (entry.type === 'nonSolidReplace') {
+    const m = state.models.find(x => x.id === entry.modelId);
+    if (!m) { setStatus('Undo: piece no longer exists'); return; }
+    m.nonSolid = !!entry.prev;
+    if (typeof nsoNonSolidRefresh === 'function') nsoNonSolidRefresh();
+    updateUndoBtn();
+    setStatus('Undo: non-solid flag ' + (m.nonSolid ? 'restored' : 'cleared') + ' on ' + m.name);
+    return;
+  }
   if (entry.type === 'maskReplace') {
     const m = state.models.find(x => x.id === entry.modelId);
     if (!m) { setStatus('Undo: piece no longer exists'); return; }
@@ -1087,6 +1096,8 @@ function renderModelList() {
     `;
     el.appendChild(row);
   });
+  // The non-solid tag rides on the row it belongs to (app-nonsolid.js).
+  if (typeof nsoNonSolidRefresh === 'function') nsoNonSolidRefresh();
 
   el.querySelectorAll('.model-item').forEach(row => {
     row.addEventListener('click', (e) => {
@@ -2217,6 +2228,7 @@ function updateAdjustUI() {
   }
   const delModel = document.getElementById('btn-delete-model');
   if (delModel) delModel.disabled = !getActiveModel();
+  if (typeof nsoNonSolidRefresh === 'function') nsoNonSolidRefresh();
   updateExportButton();
 }
 

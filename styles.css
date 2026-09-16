@@ -835,6 +835,7 @@ select:focus, input:focus {
 }
 .model-item .tag-a { background: #fb923c; }
 .model-item .tag-b { background: #4ade80; }
+.model-item .tag-nonsolid { background: #c084fc; }
 
 .join-step {
   font-size: 14px;

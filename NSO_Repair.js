@@ -1154,6 +1154,9 @@
       version: VERSION,
       weldTol: (opts.weldTol != null ? opts.weldTol : WELD_TOL),
       splitEps: (opts.splitEps != null ? opts.splitEps : SPLIT_EPS),
+      /* Set by the caller, never inferred from the geometry. See
+       * docs/NON-SOLID.md. */
+      nonSolid: !!opts.nonSolid,
       applied: false,
       declined: false,
       reason: null,
@@ -1243,7 +1246,19 @@
       report.counts.reversedDuplicatesRemoved = dup.reversed;
       note('duplicate-faces', (dup.exact + dup.reversed) > 0, { exact: dup.exact, reversed: dup.reversed });
 
-      if (opts.peelFlaps !== false) {
+      /* NON-SOLID SCOPE (docs/NON-SOLID.md): the three stages whose whole
+       * premise is "this surface should have no boundary" are skipped when
+       * the caller flags the piece non-solid - flap peel (a triangle with two
+       * unpaired edges is a flap only if edges are meant to be paired), orphan
+       * drop (an open component next to a closed one is debris only if
+       * everything is meant to be closed) and hole fill (below). Every other
+       * stage runs unchanged, and both final gates still apply: the flag
+       * relaxes the closure requirement and nothing else. */
+      var nonSolid = !!opts.nonSolid;
+      if (nonSolid) {
+        note('flap-peel', false, { skipped: 'nonSolid' });
+        note('orphan-components', false, { skipped: 'nonSolid' });
+      } else if (opts.peelFlaps !== false) {
         var peel = peelFlaps(mesh);
         report.counts.flapTrisRemoved = peel.removed;
         note('flap-peel', peel.removed > 0, { removed: peel.removed, budgetHit: peel.budgetHit });
@@ -1311,7 +1326,9 @@
         });
       }
 
-      if (opts.fillHoles !== false) {
+      if (nonSolid) {
+        note('hole-fill', false, { skipped: 'nonSolid' });
+      } else if (opts.fillHoles !== false) {
         tryStage('hole-fill', function (trial) {
           var r = fillHoles(trial, inputVertexCount);
           if (!r.filled) {

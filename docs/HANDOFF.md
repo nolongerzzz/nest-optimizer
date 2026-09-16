@@ -53,6 +53,23 @@ Current roster, by category:
 `node tools/nso_paint_scope_test.js` asserts every entry actually carries its
 label in source, so a deleted or drifted declaration fails rather than rotting.
 
+## Standing rule — non-solid is the user's call, never the mesh's (added 2026-09-16)
+A piece can be flagged **non-solid** (the *Non-solid* checkbox, `m.nonSolid`,
+`nsoNonSolid(m)`), meaning it is meant to be open: a vase-mode clip, a
+single-wall squishy, a woven sheet of separate strands. Same shape as paint:
+per piece, user-set, visible (list tag + checkbox + status lines), undoable,
+never inferred from an edge count. What it lifts is exactly one thing, the
+"fully enclosed" requirement — hole fill, flap and orphan peel, open-edge
+verdicts, volume-based budgets. **Self-intersection, degenerate, non-manifold
+and winding checks run unchanged with the flag on.** Full audit, the split per
+consumer, and the wall/gap check for thin shells: `docs/NON-SOLID.md`. A new
+consumer states `NON-SOLID SCOPE` in its source and reads `nsoNonSolid(m)`;
+`node tools/nso_open_flag_test.js` pins it.
+
+Pass/fail for a flagged piece is `tools/mesh_validate.py --gate --non-solid`
+(open edges leave the verdict, the wall/gap check joins it), or
+`tools/stl_watertight_check.py --odd --degen --non-solid`.
+
 ## Output protocol
 1. Findings, numbers, diffs, and next-step proposals go in the current ticket PR
    (a new PR off `claude-wip`) or in the commit message. Never PR #4.

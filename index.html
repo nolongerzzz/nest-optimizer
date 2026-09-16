@@ -196,6 +196,11 @@
                 <label class="vp-repair"><span>Repair</span><input type="checkbox" id="chk-seal-repair"></label>
                 <button id="btn-seal" class="btn btn-secondary" type="button">Seal</button>
               </div>
+              <div class="vp-row vp-row-label">
+                <label class="vp-repair vp-nonsolid" title="This piece is meant to be open - a vase-mode shell, a single-wall squishy, a woven sheet. Only the 'must be closed' checks stand aside: self-intersection, degenerate and winding checks still apply. Per piece, never guessed from the mesh.">
+                  <span>Non-solid</span><input type="checkbox" id="chk-non-solid" disabled>
+                </label>
+              </div>
               <div class="vp-row vp-row-full"><button id="btn-solidify" class="btn btn-secondary" type="button">Solidify</button></div>
               <div class="vp-row vp-row-thicken">
                 <button id="btn-thicken-out" class="btn btn-secondary" type="button">Thicken out</button>
@@ -242,6 +247,7 @@
   <script src="app-join.js?v=inside4"></script>
   <script src="app-skin.js?v=skin1"></script>
   <script src="app-mask.js?v=inside4"></script>
+  <script src="app-nonsolid.js?v=inside4"></script>
   <script src="app-library.js?v=libgit"></script>
   <script src="app-ux.js?v=inside4"></script>
   <script src="app-cth-expose.js?v=cth15"></script>
