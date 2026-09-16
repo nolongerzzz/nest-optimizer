@@ -25,7 +25,7 @@
     "paint:scope": "node tools/nso_paint_scope_test.js",
     "select:test": "node tools/nso_face_select_test.js",
     "grispr:test": "python3 -m unittest discover -s tools/grispr/tests -p \"test_*.py\"",
-    "test": "sh tools/cth-test/run-all.sh && node tools/cth-test/capture-check.mjs && node tools/cth-test/drive-check.mjs && node tools/3mf-test/roundtrip-check.js && node tools/3mf-test/export-drive-check.mjs && node tools/3mf-test/import-check.js && node tools/3mf-test/import-drive-check.mjs && node tools/nso_wire_smooth_test.js && node tools/nso_wire_repair_test.js && node tools/nso_wire_fuse_test.js && node tools/nso_selfint_equiv_test.js && node tools/nso_seat_gap_test.js && node tools/nso_seat_align_test.js && node tools/nso_paint_scope_test.js && node tools/nso_skin_test.js && node tools/nso_skin_drive_check.js && node tools/nso_skin_wrap_test.js && node tools/nso_skin_wrap_drive_check.js && node tools/nso_face_select_test.js && node tools/nso_open_flag_test.js && node tools/nso_wire_nonsolid_test.js && node tools/nso_export_roundtrip_test.js && python3 tools/fixture_audit.py --gate --no-selfint && node tools/nso_multi_export_check.js && node tools/nso_poslock_test.js && node tools/nso_thicken_drive_check.js",
+    "test": "sh tools/cth-test/run-all.sh && node tools/cth-test/capture-check.mjs && node tools/cth-test/drive-check.mjs && node tools/3mf-test/roundtrip-check.js && node tools/3mf-test/export-drive-check.mjs && node tools/3mf-test/import-check.js && node tools/3mf-test/import-drive-check.mjs && node tools/nso_wire_smooth_test.js && node tools/nso_wire_repair_test.js && node tools/nso_wire_fuse_test.js && node tools/nso_selfint_equiv_test.js && node tools/nso_seat_gap_test.js && node tools/nso_seat_align_test.js && node tools/nso_paint_scope_test.js && node tools/nso_skin_test.js && node tools/nso_skin_drive_check.js && node tools/nso_skin_wrap_test.js && node tools/nso_skin_wrap_drive_check.js && node tools/nso_face_select_test.js && node tools/nso_open_flag_test.js && node tools/nso_wire_nonsolid_test.js && node tools/nso_export_roundtrip_test.js && python3 tools/fixture_audit.py --gate --no-selfint && node tools/nso_multi_export_check.js && node tools/nso_poslock_test.js && node tools/nso_multilock_test.js && node tools/nso_thicken_drive_check.js",
     "open:fixtures": "node tools/nso_open_make_fixtures.js --check",
     "open:flag": "node tools/nso_open_flag_test.js",
     "wire:nonsolid": "node tools/nso_wire_nonsolid_test.js",
@@ -33,6 +33,7 @@
     "fixtures:audit": "python3 tools/fixture_audit.py",
     "export:multi": "node tools/nso_multi_export_check.js",
     "lock:test": "node tools/nso_poslock_test.js",
+    "lock:multi": "node tools/nso_multilock_test.js",
     "thicken:drive": "node tools/nso_thicken_drive_check.js"
   },
   "devDependencies": {

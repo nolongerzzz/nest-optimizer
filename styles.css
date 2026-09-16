@@ -840,6 +840,11 @@ select:focus, input:focus {
    marker uses - paint is yellow, A orange, B green, non-solid purple. */
 .model-item .tag-locked { background: #2dd4bf; }
 .model-item.is-locked { box-shadow: inset 3px 0 0 #2dd4bf; }
+/* The plate lock is not a per-piece flag, so it marks the LIST, not a row -
+   the per-piece `locked` tags stay readable underneath it. */
+#model-list.is-plate-locked { outline: 1px solid rgba(45, 212, 191, 0.55); outline-offset: 2px; }
+#model-list.is-plate-locked .model-item { opacity: 0.82; }
+.vp-bar-btn.btn-plate-lock.is-locked,
 .vp-bar-btn.btn-lock-pos.is-locked {
   background: #134e4a;
   border-color: #2dd4bf;

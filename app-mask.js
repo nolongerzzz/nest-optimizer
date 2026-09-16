@@ -543,7 +543,15 @@
     if (state.maskPaint === mode) exitPaint(); else enterPaint(mode);
   }
   window.nsoMaskHudRefresh = function () {
-    if (state.maskPaint) hudPaint(); else hud(HUD_TAG);
+    if (state.maskPaint) { hudPaint(); return; }
+    /* At rest the line goes back to the HUD tag - unless a position lock has
+       something to say about the piece being selected, in which case it owns
+       it. This call runs AFTER updateAdjustUI (app-sel-outline.js wraps
+       selectPlaced to make sure the count survives a selection), so without
+       this the lock's "Locked #n" was overwritten by the bare tag every time
+       a piece was clicked. */
+    const lock = (typeof window.nsoPosLockHudLine === 'function') ? window.nsoPosLockHudLine() : null;
+    hud(lock || HUD_TAG);
   };
 
   function hitFace(event) {
