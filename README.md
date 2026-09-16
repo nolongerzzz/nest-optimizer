@@ -32,6 +32,18 @@ Smart build-plate packing for 3D printing.
   of a support block, and **Seat flush** with gap 0 rests the part on the
   relief's tips - never on its base plane. Print-ready two-shell samples in
   `fixtures/skin-samples/`; see `docs/HANDOFF.md`, "Contact skin on a face"
+  - **Skin wrap** puts the same relief on every flat rectangular face at once
+    (all six faces of a box), leaving painted faces alone and naming them.
+    Still flat faces only: a curved face is refused, as it always was.
+  - **Layer 2** adds a second pattern on the first one's tips. Composed (the
+    default) it stays one closed shell and cuts the contact to the two
+    patterns' overlap - a zigzag second layer takes a crosshatch from 182 to
+    52 mm², a second crosshatch mostly just makes the relief taller, and the
+    status line prints both numbers so you can tell which happened. With
+    **Free** on, layer 2 becomes its own free-hanging sheet resting on those
+    tips - a second breakaway interface - and the piece is flagged non-solid,
+    because it now carries two shells. See `docs/HANDOFF.md`, "Skin wrap +
+    the double skin"
 
 ## How to use
 

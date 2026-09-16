@@ -34,7 +34,48 @@
 
    Lifecycle is the house one, through NSO_sculptCommitRaw (app-sculpt.js):
    undo entry first ('skinReplace', wired in app-core.js undoLast), display
-   geometry rebuilt from the new rawTris, placed instance re-seated. */
+   geometry rebuilt from the new rawTris, placed instance re-seated.
+
+   ---------------------------------------------------------------------------
+   SKIN WRAP - the same skin on several faces at once
+   ---------------------------------------------------------------------------
+   `Skin wrap` (NSO_skinWrapModel) is "wrap" in this app's own sense, the one
+   Soften's Full wrap already has: one click covers all six faces of a box
+   instead of the one face you picked. It is NOT a curved wrap - every face
+   still has to be a flat rectangle, and a cylinder's side is refused exactly
+   as it always was (docs/HANDOFF.md, "Skin wrap + the double skin" and
+   its parked ticket "the OTHER wrap", which records what a curved one would
+   take and why it is a different engine).
+
+   PAINT SCOPE: SUB-REGION, per face, the same rule as the single-face bake -
+   an excluded face is left alone and NAMED in the status line, it does not
+   stand the wrap down. A face that cannot take a skin (not a rectangle, no
+   flat pick) is skipped and named too: the set the wrap acts on is "the flat
+   rectangular faces that are not painted out", so leaving one out is the
+   definition, not a half-result. A face that refuses for any other reason
+   does stand the whole wrap down with the piece untouched. The SELECT target
+   is a single-face idea and the wrap ignores it; the status says so when one
+   is set.
+
+   ---------------------------------------------------------------------------
+   DOUBLE SKIN - layer 2, composed or free
+   ---------------------------------------------------------------------------
+   The `Layer 2` select adds a second pattern; `Free` decides which kind:
+     off              one layer, as before.
+     composed         layer 2 rides on layer 1's TIPS in one pass, one closed
+                      shell, nothing else changes. The contact is the
+                      intersection of the two tip sets, so the status reports
+                      it against layer 1 alone - a second layer whose features
+                      line up with layer 1's only makes the relief taller, and
+                      that has to be visible rather than implied away.
+     free             layer 2 is its OWN shell: a sheet resting on layer 1's
+                      tips with its own relief on top, a second breakaway
+                      interface. The piece then carries two shells, so this
+                      bake SETS THE NON-SOLID FLAG on it and says so. That is
+                      the flag's own case (docs/NON-SOLID.md): a deliberate,
+                      visible declaration that this piece is not meant to be a
+                      closed solid. Undo takes the flag off with the geometry
+                      (app-core.js pushUndo snapshots it, like the paint). */
 
 /* Raw-axis direction from A toward its Join partner, or +Z (top). */
 function NSO_skinDirForModel(m) {
@@ -55,7 +96,90 @@ function NSO_skinDirForModel(m) {
   return [d.x, -d.z, d.y];
 }
 
-/* Skin the active piece. opts: { pattern, params, mode, dir }.
+/* The Layer 2 controls, read once: { pattern, free } or null for off. */
+function NSO_skinLayer2FromUI() {
+  if (typeof document === 'undefined') return null;
+  var sel = document.getElementById('skin-layer2');
+  var v = sel ? String(sel.value || 'off') : 'off';
+  if (!v || v === 'off') return null;
+  var free = document.getElementById('chk-skin-free');
+  return { pattern: v, free: !!(free && free.checked) };
+}
+
+/* A face of the piece, named the way the paint names it. */
+function NSO_skinFaceAxis(n) {
+  for (var a = 0; a < 3; a++) if (Math.abs(n[a]) > 0.999) return { axisIdx: a, keepMin: n[a] < 0 };
+  return { axisIdx: null, keepMin: false };
+}
+function NSO_skinFaceLabel(n) {
+  var ax = NSO_skinFaceAxis(n);
+  return ax.axisIdx == null ? 'a face' : ((ax.keepMin ? '-' : '+') + 'XYZ'[ax.axisIdx]);
+}
+/* Paint on THIS face - the sub-region scope, asked the same two ways the
+   single-face bake asks it (a click on an outer face records axis and side). */
+function NSO_skinFacePainted(m, n, d) {
+  if (typeof nsoMaskIsExcludedRaw !== 'function') return false;
+  var ax = NSO_skinFaceAxis(n);
+  return !!(nsoMaskIsExcludedRaw(m, n, d, ax.axisIdx, ax.keepMin, false) || nsoMaskIsExcludedRaw(m, n, d));
+}
+
+/* The faces a wrap takes: the six axis faces this piece actually has, less
+   the ones paint excludes. Each is resolved to its own plane offset first, so
+   the pick is that face exactly and cannot drift onto a rib wall of a face
+   skinned earlier in the same wrap. */
+function NSO_skinWrapFaces(m, soup) {
+  var dirs = NSO_Skin.BOX_DIRS, faces = [], painted = [], missing = [];
+  for (var i = 0; i < dirs.length; i++) {
+    var d = dirs[i];
+    var f = NSO_Skin.findFace(soup, d);
+    if (!f) { missing.push(NSO_skinFaceLabel(d)); continue; }
+    var nm = NSO_skinFaceLabel(f.n);
+    if (NSO_skinFacePainted(m, f.n, f.d)) { painted.push(nm); continue; }
+    faces.push({ dir: d, plane: f.d, name: nm });
+  }
+  return { faces: faces, painted: painted, missing: missing };
+}
+
+/* Skin every flat rectangular face of the piece that is not painted out.
+   opts: { pattern, params, mode, layer2 }. */
+function NSO_skinWrapModel(m, opts) {
+  opts = opts || {};
+  var say = function (t, err) { if (typeof setStatus === 'function') setStatus(t, err); };
+  if (!m) { say('Select a piece first', true); return { ok: false, reason: 'no selection' }; }
+  if (typeof NSO_Skin === 'undefined' || !NSO_Skin) { say('Skin module missing', true); return { ok: false, reason: 'NSO_Skin not loaded' }; }
+  var soupIn = (m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null;
+  if (!soupIn) { say('Skin wrap needs a raw piece - unchanged', true); return { ok: false, reason: 'no rawTris' }; }
+
+  var pick = NSO_skinWrapFaces(m, soupIn);
+  if (!pick.faces.length) {
+    say('Skin wrap stood down - no face left to wrap' +
+        (pick.painted.length ? ' (' + pick.painted.join(', ') + ' painted)' : '') + ' - piece unchanged', true);
+    return { ok: false, reason: 'no unpainted flat face', painted: pick.painted };
+  }
+  var r = NSO_Skin.applySkinWrap(soupIn, {
+    faces: pick.faces, pattern: opts.pattern || 'crosshatch', params: opts.params,
+    mode: opts.mode, layer2: opts.layer2, skipUnskinnable: true
+  });
+  if (!r.ok) { say('Skin wrap refused - piece unchanged (' + r.reason + ')', true); return r; }
+
+  var names = r.faces.map(function (f) { return f.name; }).join(', ');
+  var txt = 'Wrapped ' + r.count + ' face' + (r.count === 1 ? '' : 's') + ' (' + names + ') - ' +
+    r.faces[0].describe + ', tips +' + r.faces[0].tipHeight.toFixed(2) + 'mm, contact ' +
+    r.tipArea.toFixed(1) + 'mm² over all of them, ' + (r.tris.length / 9) + ' tris';
+  if (pick.painted.length) txt += ' - left painted: ' + pick.painted.join(', ');
+  if (pick.missing.length) txt += ' - no flat face that way: ' + pick.missing.join(', ');
+  if (r.skipped.length) txt += ' - skipped: ' + r.skipped.map(function (x) { return x.name + ' (' + x.reason + ')'; }).join('; ');
+  if (typeof nsoMaskSelected === 'function' && nsoMaskSelected(m)) txt += ' - the target face is a single-face idea, the wrap ignores it';
+  if (r.nonSolid) txt += ' - ' + (r.shells - 1) + ' free layer(s): flagged non-solid';
+
+  if (typeof NSO_sculptCommitRaw === 'function') {
+    NSO_sculptCommitRaw(m, r.tris, 'skinReplace', txt);
+    if (r.nonSolid && typeof window.nsoNonSolidSet === 'function') window.nsoNonSolidSet(m, true, { noUndo: true, silent: true });
+  }
+  return r;
+}
+
+/* Skin the active piece. opts: { pattern, params, mode, dir, layer2 }.
    Returns nso_skin's result (ok:false + reason on any stand-down). */
 function NSO_skinFaceOfModel(m, opts) {
   opts = opts || {};
@@ -94,7 +218,7 @@ function NSO_skinFaceOfModel(m, opts) {
     return { ok: false, reason: 'target face painted', face: face };
   }
 
-  var r = NSO_Skin.applySkinToFace(soupIn, { dir: dir, plane: plane, pattern: pattern, params: opts.params, mode: opts.mode });
+  var r = NSO_Skin.applySkinToFace(soupIn, { dir: dir, plane: plane, pattern: pattern, params: opts.params, mode: opts.mode, layer2: opts.layer2 });
   if (!r.ok) {
     say('Skin refused - piece unchanged (' + r.reason + ')', true);
     return r;
@@ -102,8 +226,20 @@ function NSO_skinFaceOfModel(m, opts) {
   var inner = plane != null && !!sel.inner;
   var txt = 'Skinned ' + (axisIdx == null ? 'face' : ((inner ? 'inner ' : '') + (r.face.n[axisIdx] < 0 ? '-' : '+') + 'XYZ'[axisIdx] + ' face')) +
     ' - ' + r.describe + ', tips ' + (r.mode === 'recess' ? 'at the old face' : '+' + r.tipHeight.toFixed(2) + 'mm') +
-    ', contact ' + r.tipArea.toFixed(1) + 'mm², ' + (r.tris.length / 9) + ' tris - Seat gap 0 puts B on the tips' +
+    ', contact ' + r.tipArea.toFixed(1) + 'mm²';
+  /* A composed layer 2 can leave the contact exactly where it was (its
+     features landing on layer 1's), so the status carries both numbers
+     rather than letting "double skin" imply a reduction. */
+  if (r.layer2 && r.layer2.mode === 'composed' && r.layer1TipArea != null) {
+    txt += ' (layer 1 alone: ' + r.layer1TipArea.toFixed(1) + 'mm²)';
+  }
+  if (r.freeLayer) {
+    txt += ', free layer ' + r.freeLayer.sheet + 'mm thick resting on layer 1\'s tips' +
+      (r.freeLayer.gap ? ' with a ' + r.freeLayer.gap + 'mm gap' : '');
+  }
+  txt += ', ' + (r.tris.length / 9) + ' tris - Seat gap 0 puts B on the tips' +
     ' - target: ' + source;
+  if (r.nonSolid) txt += ' - two shells: flagged non-solid';
   r.target = source;
   /* The commit's undo entry snapshots the paint (pushUndo fills prevMask),
      so the selection is consumed AFTER it and comes back with the geometry
@@ -111,6 +247,11 @@ function NSO_skinFaceOfModel(m, opts) {
   if (typeof NSO_sculptCommitRaw === 'function') {
     NSO_sculptCommitRaw(m, r.tris, 'skinReplace', txt);
     if (sel && typeof nsoMaskSelectClear === 'function') nsoMaskSelectClear(m, { noUndo: true });
+    /* A free layer leaves the piece with two shells. The flag is set AFTER
+       the commit, noUndo, for the same reason the selection is consumed
+       there: the commit's undo entry snapshots it (pushUndo, app-core.js),
+       so one Undo puts the geometry and the flag back together. */
+    if (r.nonSolid && typeof window.nsoNonSolidSet === 'function') window.nsoNonSolidSet(m, true, { noUndo: true, silent: true });
   }
   return r;
 }
@@ -125,12 +266,26 @@ if (typeof document !== 'undefined') {
         try {
           var sel = document.getElementById('skin-pattern');
           var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
-          NSO_skinFaceOfModel(m, { pattern: sel ? sel.value : 'crosshatch' });
+          NSO_skinFaceOfModel(m, { pattern: sel ? sel.value : 'crosshatch', layer2: NSO_skinLayer2FromUI() });
         } catch (err) {
           console.error('[skin]', err);
           if (typeof setStatus === 'function') setStatus('Skin failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
         }
       });
+      var wrapBtn = document.getElementById('btn-skin-wrap');
+      if (wrapBtn && wrapBtn.dataset.nsoWired !== '1') {
+        wrapBtn.dataset.nsoWired = '1';
+        wrapBtn.addEventListener('click', function () {
+          try {
+            var sel2 = document.getElementById('skin-pattern');
+            var m2 = (typeof getActiveModel === 'function') ? getActiveModel() : null;
+            NSO_skinWrapModel(m2, { pattern: sel2 ? sel2.value : 'crosshatch', layer2: NSO_skinLayer2FromUI() });
+          } catch (err) {
+            console.error('[skin wrap]', err);
+            if (typeof setStatus === 'function') setStatus('Skin wrap failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
+          }
+        });
+      }
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
     else wire();

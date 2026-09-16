@@ -1126,3 +1126,203 @@ Known limits, stated not solved: the overlays draw for the ACTIVE piece
 only (as the yellow always did), so a target painted on a non-active piece
 is recorded but not lit until that piece is selected; the select is
 in-memory like the paint, not in the STL or 3MF.
+
+## Skin wrap + the double skin (2026-09-16)
+`nso_skin.js` (`applySkinWrap`, `opts.layer2`, and the seam fix the wrap
+stands on), `app-skin.js` (`Skin wrap`, the layer-2 select, `Free`),
+`app-nonsolid.js` (`opts.silent`), `app-core.js` (`pushUndo` snapshots the
+non-solid flag), `index.html` / `styles.css` (the second skin row). Checks:
+`npm run skin:wrap` (`tools/nso_skin_wrap_test.js`, 83 gates, every mesh
+through `tools/mesh_validate.py`) and `npm run skin:wrap-drive`
+(`tools/nso_skin_wrap_drive_check.js`, 38 gates through the shipped
+controls), both in `npm test`.
+
+**Audit first (Task 1), and what "wrap" turned out to mean.** Skin's scope
+before this was exactly one face per press: `findFace` picks one coplanar
+group, `rectFrame` requires its boundary to reduce to 4 corners at right
+angles, and anything else is refused (`fixture_sphere_curved.stl` ->
+`face is not a rectangle (3 corners)`). Nothing in the module iterated faces
+and nothing handled a curved surface. **"Wrap" is not a new word in this
+app**: Soften's `Full wrap` checkbox is "one click wraps all six faces of a
+box. Off: one click bakes only the face you pick" (`index.html`,
+`rawWrapSolid`, `wrapPocketsInPlace`), and the paint tooltip already says
+faces are excluded "from Soften, wrap, Join and Skin". The ticket's own
+example named a cylinder, so the two readings were put to the user rather
+than guessed. **Answer: build the multi-face wrap now, write the curved one
+up as the next ticket** - it is parked below.
+
+**The defect the wrap stands on, found by measurement.** Skinning two faces
+by calling the existing bake twice looked free, and was not. Two OPPOSITE
+faces of `box-20mm` were always fine (no shared edge). Two ADJACENT faces
+left **28 open edges, 28 non-manifold edges and 28 degenerate triangles** -
+a closed piece turned into a broken one, silently, with Euler still 2. Two
+independent causes, both fixed and both pinned by a gate:
+
+1. *The seam's parameter epsilon was absolute.* `sideInsert` treated two
+   params within `1e-9` as the same point. That held while a face was only
+   ever skinned from exact corners; on a second face the soup it reads has
+   been through `Float32Array`, so a param recomputed from a stored point
+   differs from the exact one that placed it by ~1e-7 of the span. The same
+   seam point then registered twice and the fan over it emitted a zero-length
+   edge. The epsilon is now `tol / sideLength` - the same 1e-4 mm tolerance
+   the rest of the seam uses, expressed in that side's parameter - and a
+   chain collapses steps shorter than `tol`.
+2. *The relief perimeter was never subdivided.* Wall triangles were re-fanned
+   over the side's registered points; the relief's own perimeter was not, so
+   where the second face's breaks did not land on the first's, every one was
+   a T-junction. Invisible on a cube skinned with the same pattern twice
+   (both faces break their shared edge at the same params - the "nothing
+   inserted" gate), and **82 odd edges** with crosshatch on +Z and zigzag on
+   +X. `fanRelief` runs the same pass over the relief: 25 triangles re-fanned
+   on that pair, 115 on the hull with crosshatch on +Z and zigzag on +Y.
+
+`fanTri` now handles a triangle with two or three split edges by splitting it
+at its centroid first, so the corner cell where two skinned faces meet stays
+paired. A triangle with no split edge keeps its old emission bit for bit,
+which is why the whole existing single-face suite - including the
+byte-identical sample STLs - passes untouched.
+
+**What Skin wrap does.** `NSO_Skin.applySkinWrap(soup, opts)` takes
+`faces: [{dir, plane?}] | 'box'` and skins them one after another on the
+growing soup. Every face's plane is resolved UP FRONT on the original soup
+and handed to each pick explicitly, so a pick can never drift onto something
+an earlier face added. Refusal policy: strict by default - one refusal
+returns the ORIGINAL soup with the reason and the face that gave it
+(`the +Z face refused: face is not a rectangle (3 corners)`), never a
+half-wrap. With `skipUnskinnable` (what the button passes) a face that has no
+flat pick or is not a rectangle is left alone and NAMED, because the set the
+wrap acts on is "the flat rectangular faces that are not painted out".
+
+Measured, `box-20mm` wrapped crosshatch on all six faces: 25,308 triangles,
+**0 open, 0 non-manifold, Euler 2, 0 piercing, 0 coplanar, 0 degenerate**,
+volume 8,655.452 = cube + 6 x the single-face relief to 1e-3, bbox 21.2 on
+every axis, contact 1,092.4 mm² (6 x 182.07). The hull
+`box_hull_80x40x20-2` wraps 5 of 6 with the pocket face named and skipped
+(`-X: face boundary is not a single loop`): 111,380 triangles, still one
+closed shell. Recess wraps all six with the bbox unchanged. **PAINT SCOPE:
+SUB-REGION, per face** - an excluded face is left alone and named, it does
+not stand the wrap down; the SELECT target is a single-face idea and the
+wrap says so when one is set.
+
+**The double skin (Task 3), reported before it was built.** Applying two
+skins in sequence is **not** achievable with this architecture, and the
+refusal is the correct one rather than a gap: a skinned face is no longer a
+face. `applySkinToFace` on its own output answers
+`face boundary is not a single loop` - the tips are hundreds of separate rib
+tops, not one rectangle - and naming the tips plane explicitly does not help.
+Both are gates now. Two ways round it were put to the user, and **both were
+built**:
+
+- **Path A, composed (the default).** Two patterns in ONE pass over one
+  merged grid, layer 2 riding on layer 1's tips:
+  `h = h1 + (cell is a layer-1 tip ? h2 : 0)`. Composition happens in the
+  height field, where both patterns are still plans. The result is **one
+  closed shell** - Euler 2, 0 piercing - so nothing about the piece's closure
+  changes and **no flag is involved**. Volume checks analytically for two
+  flat-prism layers (cube + layer1 x h1 + composite x h2, 1e-3). Grid
+  patterns only: `ring` builds its own surface and has no height field to
+  compose, which is a named refusal pointing at the free layer instead.
+  Raise only.
+  *Honest limit, stated as a gate rather than left to be discovered:* the
+  composite contact is the INTERSECTION of the two tip sets, so how much it
+  shrinks is the second pattern's business. crosshatch + zigzag: 182.07 ->
+  **52.41 mm² (28.8%)**. zigzag + zigzag: 53.76 -> 16.64 (31.0%). crosshatch
+  + crosshatch at the stated layer-2 default: 152.08 (83.5%) - a crosshatch
+  layer 2 mostly makes the relief taller, because its tips are the union of
+  two rib directions and cover most of the face. Layer 2 at layer 1's OWN
+  parameters lands exactly on layer 1's features and leaves the contact
+  **bit for bit where it was** (182.07 -> 182.07). So the result carries
+  `layer1TipArea` next to `tipArea` and the status line prints both:
+  `contact 52.4mm² (layer 1 alone: 182.1mm²)`.
+- **Path B, free (behind the `Free` checkbox).** Layer 2 as its OWN shell: a
+  sheet resting on layer 1's tips carrying its own relief on top, a second
+  breakaway interface, built as a slab and skinned through this same engine.
+  The piece then carries two shells, **so the bake sets the non-solid flag on
+  it** - the ticket's hypothesis, and it holds: this is the flag's own case
+  (docs/NON-SOLID.md), a deliberate declaration that the piece is not meant
+  to be a closed solid, made by the user asking for a free layer rather than
+  inferred from the mesh. Measured on the cube: 7,720 triangles, 0 open, 0
+  non-manifold, **Euler 4**, exactly two edge-connected shells, each closed
+  and 0-piercing on its own, the sheet's underside equal to layer 1's tips
+  **bit for bit** (zero penetration), volume = the skinned piece + the sheet
+  + the sheet's relief to 1e-3. Control: `gap 0.3` -> 0 piercing, 0 coplanar,
+  shells 0.300 apart. As with the Seat-gap and skin samples, gap 0 reads as
+  piercing pairs in the checker because rib walls stand edge-on in the
+  sheet's plane and it has no touching-along-an-edge class; the gap control
+  and the exact equality are what separate touching from penetration.
+  The sheet is inset to layer 1's margin by default, which is where layer 1's
+  features stop anyway - and, found the hard way, keeps its side walls out of
+  the piece's own face planes: flush with them they join those faces'
+  coplanar groups and the next face pick sees two loops where it needs one.
+  *Stated, not measured:* the sheet bridges from tip to tip, so its first
+  layer prints over air.
+
+**Undo carries the flag.** `pushUndo` (app-core.js) already snapshotted the
+paint so a mesh swap and the paint on it are one step; it now snapshots
+`nonSolid` for the same reason, and the geometry-replace branch puts it back.
+One Undo after a free-layer skin returns the 12-triangle cube AND clears the
+flag, checkbox and list tag together - a gate in the drive check.
+`nsoNonSolidSet` gained `opts.silent` so the flag does not overwrite the
+status line of the bake that set it; without it the skin's own line was wiped
+and only "Flagged non-solid" remained.
+
+**Reachability (audited 2026-09-16).** `index.html` carries `#btn-skin-wrap`,
+`#skin-layer2` (off / zigzag / crosshatch / ring) and `#chk-skin-free` in a
+second `.vp-row-skin` row in the **Finish tab**, under the existing Skin face
+row; the script tags are bumped to `?v=skin2`. The drive check asserts all
+three are in `.vp-finish`, that the wrap button carries its listener, and
+that `NSO_Skin.applySkinWrap` and `NSO_skinWrapModel` are loaded.
+
+**Drive check** (`npm run skin:wrap-drive`, in `npm test`): `box-20mm`
+through the file input, the piece picked by clicking its list row, then -
+Skin wrap -> `Wrapped 6 faces (+Z, -Z, +X, -X, +Y, -Y) ... contact 1092.4mm²
+over all of them, 25308 tris`, scene 21.2 on every axis; Export plate (STL)
+-> the browser's own download through `mesh_validate.py`: one edge-connected
+shell, 0 open, 0 non-manifold, Euler 2, 0 piercing, 0 coplanar, 0 degenerate,
+bbox 21.2³, 25,308 triangles. Undo -> 12 triangles. A painted +Z (set with
+the app's own paint primitive - there is no button for a face click, and the
+step is labelled as such) -> `Wrapped 5 faces (-Z, +X, -X, +Y, -Y) ... - left
+painted: +Z`, the piece 20.6 tall in z and 21.2 in x and y, export still one
+closed shell. layer 2 = zigzag, Skin face -> the status carries both contact
+numbers, the piece is 20.9 tall, export one shell Euler 2. Free on -> status
+names the free layer and the flag, checkbox and list tag both on, export: two
+shells, Euler 4, the sheet resting on the tips to 1e-6, piece 20.6 tall and
+the free layer 1.2. One Undo -> geometry and flag back together. No page
+errors. `APP_URL=<site>` points the same check at a deployment.
+
+### Parked ticket - the OTHER wrap: a skin on a curved face
+Asked for as the follow-up when "wrap" was clarified. Not started; this is
+the audit, so whoever picks it up does not re-derive it.
+
+What blocks it today, precisely: `findFace` groups triangles by exact plane
+(`|g.d - off| < 1e-4` with parallel normals), so a tessellated cylinder is
+one group per facet, not one surface; `rectFrame` then needs a 4-corner
+right-angled boundary, which no curved patch has. The relief builders are
+2D-in-a-plane by construction - `gridRelief` lifts along a single constant
+`N`, and `boxSoup` / `ringRelief` do the same - so nothing below `rectFrame`
+survives a non-planar face either. A sphere is refused with `face is not a
+rectangle (3 corners)`; that refusal is correct and stays.
+
+The shape a curved wrap would have to take, from the same discipline:
+- a **developable-band** face finder: a run of facets whose normals turn
+  about ONE axis and whose boundary is a quad in the unrolled parameter
+  (u = arc length, v = along the axis). A cylinder side is that; a sphere is
+  not, and a sphere would still be refused rather than approximated.
+- the existing grid plans reused **unchanged** in (u, v) - the rib intervals
+  are already a 1D problem per axis - with `lift` replaced by a per-node
+  normal from the band's own frame instead of one constant `N`.
+- the seam work here is the precedent, not a rewrite: the perimeter still has
+  to be the original loop, the walls still have to be re-fanned over every
+  point the relief introduces, and `sideChain` / `fanTri` already do both in
+  any frame.
+- the numbers to gate it on: closed shell and Euler 2 after the bake, volume
+  equal to the analytic relief on an unrolled band (rib volume is
+  pitch-independent per unit area), and the arc-length pitch honoured to the
+  same 1e-3 the flat patterns are - a rib laid out in angle rather than arc
+  length is the failure mode to look for.
+- open question, not a detail: what `supportExtreme` and Seat mean against a
+  curved contact. Seat today translates B along one normal and explicitly
+  "does not tilt-fit a skin"; a curved interface has no single contact plane,
+  so either the ticket stays geometry-only or Seat grows a second mode. That
+  decision belongs to whoever takes it, and it should be made before the
+  geometry, not after.

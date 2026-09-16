@@ -92,6 +92,13 @@ function pushUndo(entry) {
     const mm = state.models.find(x => x.id === entry.modelId);
     if (mm) entry.prevMask = nsoMaskSnapshot(mm);
   }
+  // The non-solid flag is part of the same step for the same reason: a bake
+  // that hands back a piece carrying a second, free-hanging shell sets it
+  // (Skin's free layer), so one Undo has to take it off with the geometry.
+  if (entry.prevNonSolid === undefined && entry.modelId != null) {
+    const mn = state.models.find(x => x.id === entry.modelId);
+    if (mn) entry.prevNonSolid = !!mn.nonSolid;
+  }
   state.undoStack.push(entry);
   if (state.undoStack.length > UNDO_MAX) state.undoStack.shift();
   updateUndoBtn();
@@ -326,6 +333,10 @@ function undoLast() {
     if (!m) { setStatus('Undo: piece no longer exists'); return; }
     // the paint set is part of the piece's state, so one step puts back both
     if (entry.prevMask !== undefined && typeof nsoMaskRestore === 'function') nsoMaskRestore(m, entry.prevMask);
+    if (entry.prevNonSolid !== undefined && !!m.nonSolid !== entry.prevNonSolid) {
+      m.nonSolid = entry.prevNonSolid;
+      if (typeof nsoNonSolidRefresh === 'function') nsoNonSolidRefresh();
+    }
     m.geometry = entry.prevGeometry;
     m.rawTris = entry.prevRawTris;
     m.rawAxis = entry.prevRawAxis;

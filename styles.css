@@ -1245,6 +1245,11 @@ select:focus, input:focus {
 .vp-row-skin { grid-template-columns: 1fr 88px; gap: 4px; }
 .vp-row-skin .btn { font-size: 11px; padding: 2px 4px; white-space: nowrap; }
 .vp-row-skin .vp-select { min-width: 0; font-size: 11px; padding: 0 4px; }
+/* The second skin row under it: Skin wrap, the layer-2 pattern, and the Free
+   checkbox that decides whether layer 2 is composed into the same shell or
+   hangs free as its own. Three cells, the checkbox the narrowest. */
+.vp-row-skin2 { grid-template-columns: 1fr 96px auto; gap: 4px; }
+.vp-skin-free { gap: 4px; font-size: 11px; white-space: nowrap; }
 .vp-row-label { grid-template-columns: auto 1fr; gap: 8px; }
 /* Thicken is one row the full width of the card: Thicken out flush to the left
    edge, Thicken in flush to the right, the mm spinner between them. The two

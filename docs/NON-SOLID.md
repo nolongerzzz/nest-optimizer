@@ -103,11 +103,26 @@ deliberate, visible, user-set exception, never an automatic inference.
 
 - **Set** with the *Non-solid* checkbox in the Adjust card (next to Repair /
   Seal), on the selected piece only. Disabled with no selection.
+- **Also set by one bake, and only one** (added 2026-09-16): Skin's **free
+  layer** (`app-skin.js`, the `Free` checkbox next to the layer-2 pattern)
+  hands the piece back with a second, free-hanging shell - a sheet resting on
+  the skin's tips - so it sets the flag and names it in its own status line.
+  This is not the inference the last bullet rules out: nothing was measured
+  off the mesh, the user asked for a construction that has two shells and the
+  flag follows from the request. A bake that sets it must, like this one, be
+  a construction the user chose and must say so in its status. See
+  `docs/HANDOFF.md`, "Skin wrap + the double skin". `nsoNonSolidSet` takes
+  `opts.silent` for this case so the flag does not overwrite the line of the
+  bake that set it.
 - **Visible** as a purple `non-solid` tag on the piece's row in the model
   list, as the checkbox state whenever that piece is selected, and in every
   status line a consumer writes (`Repair (non-solid) done - …`,
   `Smooth done (non-solid) - …`, `Seal stood down - … is flagged non-solid`).
-- **Undoable** (`nonSolidReplace`), like paint.
+- **Undoable** (`nonSolidReplace`), like paint. When a bake sets it, the
+  BAKE's undo entry carries it: `pushUndo` (app-core.js) snapshots `nonSolid`
+  the same way it snapshots the paint, so one Undo puts the geometry and the
+  flag back together rather than leaving the flag on a piece that no longer
+  has two shells.
 - **Per object.** Not global, not per plate. `state.models[i].nonSolid`.
 - **In-memory only**, like paint. It does not survive an export/import round
   trip and the 3MF writer does not carry it; the reader is geometry-only.

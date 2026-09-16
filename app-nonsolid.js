@@ -84,7 +84,11 @@
     }
     m.nonSolid = on;
     window.nsoNonSolidRefresh();
-    if (typeof setStatus === 'function') {
+    // opts.silent: the flag is part of a bigger step that writes its own line
+    // (Skin's free layer sets the flag and names it in the same status), and
+    // a second setStatus would wipe the line that says what was actually
+    // baked. The flag itself still shows on the checkbox and the list tag.
+    if (!(opts && opts.silent) && typeof setStatus === 'function') {
       setStatus(on
         ? 'Flagged non-solid - ' + m.name + ': closure checks stand aside; ' +
           'self-intersection, degenerate and winding checks still apply'
