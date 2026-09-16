@@ -1649,6 +1649,14 @@ function showFenceLines(skipIdx) {
   state.modelGroup.add(g);
 }
 
+/* Square both pieces onto the bed baseline (world box bottom on 0.2) - the
+   Join-side step Align edges and the plate weld share. Each piece keeps its
+   own liftY: a piece Seat (support) has stacked 0.18 mm above the other, or
+   one the user Raised, stays exactly where settlePlacedOnBed put it. The
+   step used to force both bottoms onto 0.2 outright, which dropped a seated
+   bit through the hull to the plate while the record still said liftY 20.18
+   (scene and export disagreed). An unlifted piece squares as before, bit for
+   bit: 0.2 + 0 is 0.2. */
 function matchPlacedBottoms(a, b) {
   if (!a || !b || !a.mesh || !b.mesh) return;
   settlePlacedOnBed(a);
@@ -1657,8 +1665,8 @@ function matchPlacedBottoms(a, b) {
   b.mesh.updateMatrixWorld(true);
   const ba = meshLocalBox3(a.mesh);
   const bb = meshLocalBox3(b.mesh);
-  a.mesh.position.y += 0.2 - ba.min.y;
-  b.mesh.position.y += 0.2 - bb.min.y;
+  a.mesh.position.y += 0.2 + (a.liftY || 0) - ba.min.y;
+  b.mesh.position.y += 0.2 + (b.liftY || 0) - bb.min.y;
 }
 
 function applyPlacedXZ(p, x, z) {

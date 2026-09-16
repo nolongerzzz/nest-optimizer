@@ -1651,6 +1651,46 @@ function flipPortOnPunch() {
   setStatus('Port flipped 180 on punch - Seat flush again');
 }
 
+/* A bit whose underside is below the hull's top while its footprint lies
+   inside the hull's is buried in the hull. A drag along the bed puts it
+   there - drag never lifts - and so does a Raise that stops short of the
+   top. The plug frame reads the open air BELOW the plate as clear of the
+   hull and seats such a bit downward into it: the core answers "held at
+   plate level: gap NOT as requested" and the bit never moves (the live
+   "Seat does not seat" report). Nothing can ever seat below the plate, so
+   the bit is raised clear of the hull's top first and seats from above -
+   the pose the corner-ray fit is built for. XZ and the bit's quaternion are
+   untouched, only its lift; the seat then measures its own lift from the
+   result, as it always has. Returns the pose to put back on a failed seat
+   (null = nothing was moved). Not a core change: NSO_seatFlushBitToHull is
+   byte-identical, so its pinned poses hold. */
+var NSO_SEAT_CLEARANCE = 5;   /* mm above the hull's top - the staged pose the seat checks use */
+function NSO_raiseBuriedBitClear(placedA, placedB) {
+  if (!placedA || !placedB || !placedA.mesh || !placedB.mesh) return null;
+  placedA.mesh.updateMatrixWorld(true);
+  placedB.mesh.updateMatrixWorld(true);
+  const ba = meshLocalBox3(placedA.mesh);
+  const bb = meshLocalBox3(placedB.mesh);
+  const TOL = 0.05;   /* the pad meshBandExtent allows a wall */
+  const within = bb.min.x >= ba.min.x - TOL && bb.max.x <= ba.max.x + TOL
+              && bb.min.z >= ba.min.z - TOL && bb.max.z <= ba.max.z + TOL;
+  if (!within) return null;
+  if (bb.min.y >= ba.max.y - 1e-6) return null;   /* already above the hull */
+  const before = { position: placedB.mesh.position.clone(), quaternion: placedB.mesh.quaternion.clone(), liftY: placedB.liftY || 0 };
+  /* settlePlacedOnBed puts the world box bottom on 0.2 + liftY */
+  placedB.liftY = ba.max.y + NSO_SEAT_CLEARANCE - 0.2;
+  settlePlacedOnBed(placedB);
+  placedB.mesh.updateMatrixWorld(true);
+  return before;
+}
+function NSO_restoreRaisedBit(placedB, before) {
+  if (!before || !placedB || !placedB.mesh) return;
+  placedB.mesh.position.copy(before.position);
+  placedB.mesh.quaternion.copy(before.quaternion);
+  placedB.liftY = before.liftY;
+  placedB.mesh.updateMatrixWorld(true);
+}
+
 function seatFlushBitToHull() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
@@ -1668,8 +1708,10 @@ function seatFlushBitToHull() {
   // face 0.01 mm proud of A's skin, then Subtract. It never reads the gap
   // slider - that belongs to Seat (support).
   pushUndo(snapshotPlacedPose(state.placed.indexOf(placedB)));
+  const raised = NSO_raiseBuriedBitClear(placedA, placedB);
   const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { proud: 0.01 });
   if (!res || !res.ok) {
+    NSO_restoreRaisedBit(placedB, raised);
     setStatus('Seat failed - ' + ((res && res.reason) || 'pieces unchanged'), true);
     return;
   }
@@ -1750,8 +1792,12 @@ function seatBitAtGap(placedA, placedB, gap) {
   placedA.mesh.updateMatrixWorld(true);
 
   pushUndo(snapshotPlacedPose(state.placed.indexOf(placedB)));
+  // A bit buried in the hull (dragged over it along the bed) seats from
+  // above, never down into the plate - see NSO_raiseBuriedBitClear.
+  const raised = NSO_raiseBuriedBitClear(placedA, placedB);
   const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { gap: gap });
   if (!res || !res.ok) {
+    NSO_restoreRaisedBit(placedB, raised);
     setStatus('Seat failed - ' + ((res && res.reason) || 'pieces unchanged'), true);
     return;
   }
