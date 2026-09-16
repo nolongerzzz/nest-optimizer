@@ -2495,7 +2495,9 @@ function buildCombinedGeometry() {
     if (rotY) geo.rotateY(rotY);
     const roll = (p.tipZ || 0) * (Math.PI / 2) + ((p.tiltZ || 0) * Math.PI / 180);
     if (roll) geo.rotateZ(roll);
-    geo.translate(p.x, p.height / 2, p.z);
+    // liftY rides along: a piece Seated with a gap, or lifted, exports where
+    // the scene shows it, not dropped back onto the plate.
+    geo.translate(p.x, p.height / 2 + (p.liftY || 0), p.z);
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -2734,7 +2736,9 @@ function buildPlacedObjects3MF() {
     if (rotY) geo.rotateY(rotY);
     const roll = (p.tipZ || 0) * (Math.PI / 2) + ((p.tiltZ || 0) * Math.PI / 180);
     if (roll) geo.rotateZ(roll);
-    geo.translate(p.x, p.height / 2, p.z);
+    // liftY rides along: a piece Seated with a gap, or lifted, exports where
+    // the scene shows it, not dropped back onto the plate.
+    geo.translate(p.x, p.height / 2 + (p.liftY || 0), p.z);
 
     const pos = geo.attributes.position;
     const flat = [];
