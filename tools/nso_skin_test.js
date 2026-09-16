@@ -35,7 +35,7 @@ const { execFileSync } = require('child_process');
 const NSO_Skin = require('../nso_skin.js');
 const { readSTL, writeSTL } = require('./nso_stl_io.js');
 const samples = require('./nso_skin_samples.js');
-const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
+const { withApp, loadSTL, openFinishMenu, ROOT } = require('./nso_app_harness');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 let fails = 0;
@@ -301,6 +301,7 @@ withApp(async (page, logs) => {
   console.log('\n--- Skin face button on A (crosshatch, toward B) ---');
   await page.evaluate(stage, ids);
   const before = await page.evaluate(relation, ids);
+  await openFinishMenu(page);   // Skin face lives in the Finish tab
   await page.selectOption('#skin-pattern', 'crosshatch');
   await page.click('#btn-skin-face');
   await page.waitForFunction(() => /Skinned|Skin /.test(document.getElementById('status').textContent), null, { timeout: 60000 });

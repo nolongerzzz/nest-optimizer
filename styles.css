@@ -1209,11 +1209,42 @@ select:focus, input:focus {
   font-weight: 600;
 }
 
+/* Paint Selected is the other paint mode: the target, one face, pink - the
+   colour no other per-piece marker on the plate uses. Same idle / armed
+   shape as the yellow so the two read as siblings, never as one button. */
+.vp-menu-body .btn-paint-select {
+  color: #f472b6;
+  border-color: rgba(244, 114, 182, 0.55);
+}
+.vp-menu-body .btn-paint-select:hover { border-color: rgba(244, 114, 182, 0.9); }
+.vp-menu-body .btn-paint-select.is-armed {
+  background: #f472b6;
+  color: #1a1d21;
+  border-color: #f472b6;
+  font-weight: 600;
+}
+
 /* Finish is one column. Every row states its own grid, so nothing spills into
    an implicit column and every button fills its cell - no orphan half-width
    stragglers next to a full-width Soften. */
 .vp-row-full { grid-template-columns: 1fr; }
 .vp-row-pair { grid-template-columns: 1fr 1fr; gap: 6px; }
+/* The paint row: Paint Selected / Paint Excluded / Clear paint, three equal
+   cells. Two words each, so the label is allowed to wrap onto two lines and
+   the font drops a point; the cells stay level with each other. */
+.vp-row-triple { grid-template-columns: 1fr 1fr 1fr; gap: 4px; align-items: stretch; }
+.vp-row-triple .btn {
+  font-size: 11px;
+  padding: 2px 3px;
+  white-space: normal;
+  line-height: 1.15;
+  min-height: 30px;
+}
+/* Skin face with its pattern select beside it, directly under the paint row
+   (the target it reads is painted there). */
+.vp-row-skin { grid-template-columns: 1fr 88px; gap: 4px; }
+.vp-row-skin .btn { font-size: 11px; padding: 2px 4px; white-space: nowrap; }
+.vp-row-skin .vp-select { min-width: 0; font-size: 11px; padding: 0 4px; }
 .vp-row-label { grid-template-columns: auto 1fr; gap: 8px; }
 /* Thicken is one row the full width of the card: Thicken out flush to the left
    edge, Thicken in flush to the right, the mm spinner between them. The two

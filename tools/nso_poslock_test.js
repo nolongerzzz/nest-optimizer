@@ -28,7 +28,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
+const { withApp, loadSTL, openFinishMenu, ROOT } = require('./nso_app_harness');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 let fails = 0;
@@ -288,6 +288,7 @@ withApp(async (page, logs) => {
   await page.click('#btn-lock-pos');
   a = await pose(page, idA);
   check('A locked (both now locked, C free)', a.locked && a.outline && a.rawTris === 28);
+  await openFinishMenu(page);   // Skin face lives in the Finish tab
   await page.selectOption('#skin-pattern', 'crosshatch');
   await clearStatus(page);
   await page.click('#btn-skin-face');
