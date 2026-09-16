@@ -23,6 +23,11 @@ Smart build-plate packing for 3D printing.
 - Or pick **Format: 3MF** in the Export card and the same two buttons write a
   Bambu Studio `.3mf` project with cooling settings baked in, chosen from a small
   table of named cooling profiles - the whole plate, or the selected piece alone
+- Breakaway supports through minimal contact: **Skin face** puts a contact
+  relief (fine crosshatch, sawtooth ridges, or a tapered ring) on one flat face
+  of a support block, and **Seat flush** with gap 0 rests the part on the
+  relief's tips - never on its base plane. Print-ready two-shell samples in
+  `fixtures/skin-samples/`; see `docs/HANDOFF.md`, "Contact skin on a face"
 
 ## How to use
 

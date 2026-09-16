@@ -643,7 +643,50 @@ function NSO_newellNormal(pts) {
    Both modes report per-corner residuals against the requested offset.
    gap mode also reports gapAchieved / gapMin / gapMax, measured from the
    mating face after the last iteration, in the same sign convention.
+
+   REFERENCE SURFACE in gap mode: the skin's TIPS, not its base plane.
+   A hull face that carries a contact skin (nso_skin.js - a rib lattice,
+   ridges, a ring) has two surfaces: the base plane the four corner rays
+   find when a corner happens to sit over a valley, and the tips plane the
+   relief actually presents to the bit. "Gap 0" for a breakaway piece means
+   the tips just touch B's face; a seat measured from the base plane would
+   bury B in the relief by the full skin height and print a solid fuse.
+   So before fitting, gap mode measures the hull's outermost point along
+   the bit's normal over the bit's footprint (NSO_Skin.supportExtreme, every
+   hull triangle clipped to the footprint), and compares it with the plane
+   the corner rays would give. If the tips stand more than
+   NSO_SEAT_TIPS_TOL above that plane the surface is a skin: B is seated
+   against the tips, untilted, and the result says reference: 'tips' with
+   tipRise. A flat hull measures a rise of Float32 noise and takes the
+   corner-ray path unchanged, byte for byte (reference: 'plane').
    ============================================================ */
+
+/* a relief is at least one printed layer tall; Float32 flat-face noise is ~1e-6 */
+var NSO_SEAT_TIPS_TOL = 0.01;
+
+/* The tips probe: null when the hull under the bit is flat (or NSO_Skin is
+   not loaded), else { s, sPlane, rise, point, hits }. Pure - moves nothing. */
+function NSO_seatTipsProbe(hull, bitMesh, hullCenter) {
+  if (typeof NSO_Skin === 'undefined' || !NSO_Skin || !NSO_Skin.supportExtreme) return null;
+  var fr = NSO_plugFrame(bitMesh, hullCenter, hull);
+  var mating = NSO_matingFaceCorners(fr), outer = NSO_outerFaceCorners(fr);
+  var nrm = fr.outerNormal;
+  var fp = [], i;
+  for (i = 0; i < 4; i++) fp.push([mating[i].x, mating[i].y, mating[i].z]);
+  var sOuter = outer[0].dot(nrm);
+  var ext = NSO_Skin.supportExtreme(hull, fp, [nrm.x, nrm.y, nrm.z], { sMax: sOuter });
+  if (!ext) return null;
+  var hits = [], sSum = 0;
+  for (i = 0; i < 4; i++) {
+    var h = NSO_nearestSkinHit(hull, outer[i], fr.punch);
+    if (!h) return null;
+    hits.push(h);
+    sSum += h.dot(nrm);
+  }
+  var sPlane = sSum / 4;
+  return { s: ext.s, sPlane: sPlane, rise: ext.s - sPlane,
+           point: new THREE.Vector3(ext.point[0], ext.point[1], ext.point[2]), hits: hits };
+}
 
 function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
   opts = opts || {};
@@ -688,6 +731,47 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
      coupon convention (negative = air), so it flips to "outside the skin". */
   var refInner = hasGap;
   var off = hasGap ? -gap : proud;
+
+  /* gap mode: is the surface under the bit a skin? measure before moving */
+  var probe = hasGap ? NSO_seatTipsProbe(hull, bitMesh, hullCenter) : null;
+  if (probe && probe.rise > NSO_SEAT_TIPS_TOL) {
+    var frT = NSO_plugFrame(bitMesh, hullCenter, hullSoup);
+    var nT = frT.outerNormal.clone();
+    var cmT = NSO_matingFaceCorners(frT);
+    var faceS = 0;
+    for (var m0 = 0; m0 < 4; m0++) faceS += cmT[m0].dot(nT);
+    faceS /= 4;
+    /* mating face lands `off` outside the tips along the bit's own normal; no tilt */
+    bitMesh.position.addScaledVector(nT, (probe.s + off) - faceS);
+    bitMesh.updateMatrixWorld(true);
+
+    var frR = NSO_plugFrame(bitMesh, hullCenter);
+    var cmR = NSO_matingFaceCorners(frR), coR = NSO_outerFaceCorners(frR);
+    var residT = [], maxT = 0, tMin = Infinity, tMax = -Infinity, tSum = 0;
+    for (var r0 = 0; r0 < 4; r0++) {
+      var dvT = cmR[r0].dot(nT) - probe.s;      /* outside the tips = positive */
+      residT.push(dvT);
+      if (Math.abs(dvT - off) > maxT) maxT = Math.abs(dvT - off);
+      tSum += dvT; if (dvT < tMin) tMin = dvT; if (dvT > tMax) tMax = dvT;
+    }
+    return {
+      ok: true,
+      mode: 'gap',
+      reference: 'tips',
+      tipRise: probe.rise,
+      tipsPoint: probe.point,
+      normal: nT,
+      corners: coR,
+      hits: probe.hits,
+      cornerResidual: residT,
+      maxResidual: maxT,
+      undo: { position: savedPos, quaternion: savedQuat },
+      gap: gap,
+      gapAchieved: -(tSum / 4),
+      gapMin: -tMax,
+      gapMax: -tMin
+    };
+  }
 
   for (var it = 0; it < iters; it++) {
     var frame = NSO_plugFrame(bitMesh, hullCenter, hullSoup);
@@ -776,6 +860,8 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
   var out = {
     ok: true,
     mode: hasGap ? 'gap' : 'proud',
+    reference: 'plane',
+    tipRise: probe ? probe.rise : 0,
     normal: lastFit ? lastFit.clone() : frameF.outerNormal.clone(),
     corners: cf,
     hits: lastHits,
@@ -1658,6 +1744,10 @@ function seatBitAtGap(placedA, placedB, gap) {
   else what = 'touching, gap 0.00mm';
   // measured value keeps its sign so a wrong-way seat can never read as right
   let msg = 'Seated - ' + what + ' (measured ' + (got > 0 ? '+' : '') + got.toFixed(3) + 'mm, skin error ' + resid.toFixed(2) + 'mm)';
+  // A skinned hull: say so, and say how far the tips stand off the base
+  // plane, so a seat that silently measured from the wrong surface could
+  // never read the same as one that measured from the tips.
+  if (res.reference === 'tips') msg += ' - from skin tips, relief ' + res.tipRise.toFixed(2) + 'mm above the base plane';
   if (clamped) msg += ' - bit would sink below the plate, held at plate level: gap NOT as requested';
   setStatus(msg, clamped);
 }

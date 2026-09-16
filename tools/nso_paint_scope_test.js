@@ -43,6 +43,8 @@ const ROSTER = [
     test: /nsoMaskCount\s*\(\s*modelA\s*\)/,                standDown: /painted face\(s\) - fusion has no skip list/ },
   { feature: 'Pocket corners', file: 'nso_inside_corners.js',  scope: 'SUB-REGION',
     test: /NSO_insidePaintCheck/,                           standDown: /Pocket corners stood down - ' \+ [\w.]+ \+ ' painted face\(s\)/ },
+  { feature: 'Skin face',      file: 'app-skin.js',            scope: 'SUB-REGION',
+    test: /nsoMaskIsExcludedRaw\s*\(\s*m\s*,\s*face\.n\s*,\s*face\.d/, standDown: /Skin stood down - ' \+ \w+ \+ ' is painted/ },
 ];
 
 console.log('== every paint-aware feature declares its scope in its own source ==');

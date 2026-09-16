@@ -1,0 +1,123 @@
+{
+  "generated_by": "tools/nso_skin_samples.js",
+  "units": "mm, Z up",
+  "samples": {
+    "crosshatch": {
+      "files": [
+        "skin_crosshatch_block.stl",
+        "skin_crosshatch_A.stl",
+        "skin_crosshatch_B.stl"
+      ],
+      "pattern": "crosshatch",
+      "mode": "raise",
+      "params": {
+        "pitch": 1.2,
+        "rib": 0.42,
+        "height": 0.6,
+        "margin": null
+      },
+      "describe": "crosshatch lattice, rib 0.42 mm, pitch 1.2 mm, 0.6 mm tall",
+      "A_size": {
+        "x": 30,
+        "y": 30,
+        "z": 8
+      },
+      "B_size": {
+        "x": 20,
+        "y": 20,
+        "z": 6
+      },
+      "base_plane_z": 8,
+      "tips_plane_z": 8.6,
+      "tips_measured_z": 8.600000381469727,
+      "skin_height": 0.6,
+      "B_bottom_z": 8.600000381469727,
+      "gap_mm": 0,
+      "tip_area_total_mm2": 439.91640000000484,
+      "contact_area_under_B_mm2": 234.62040039858783,
+      "volume_A": 7463.950022425219,
+      "volume_B": 2400,
+      "tris_A": 9604,
+      "tris_B": 12
+    },
+    "zigzag": {
+      "files": [
+        "skin_zigzag_block.stl",
+        "skin_zigzag_A.stl",
+        "skin_zigzag_B.stl"
+      ],
+      "pattern": "zigzag",
+      "mode": "raise",
+      "params": {
+        "pitch": 2,
+        "base": 1.2,
+        "tip": 0.42,
+        "height": 0.6,
+        "margin": null
+      },
+      "describe": "sawtooth ridges, base 1.2 -> tip 0.42 mm, pitch 2 mm, 0.6 mm tall",
+      "A_size": {
+        "x": 30,
+        "y": 30,
+        "z": 8
+      },
+      "B_size": {
+        "x": 20,
+        "y": 20,
+        "z": 6
+      },
+      "base_plane_z": 8,
+      "tips_plane_z": 8.6,
+      "tips_measured_z": 8.600000381469727,
+      "skin_height": 0.6,
+      "B_bottom_z": 8.600000381469727,
+      "gap_mm": 0,
+      "tip_area_total_mm2": 141.9599999999996,
+      "contact_area_under_B_mm2": 84.00001347064972,
+      "volume_A": 7364.26813304971,
+      "volume_B": 2400,
+      "tris_A": 556,
+      "tris_B": 12
+    },
+    "ring": {
+      "files": [
+        "skin_ring_block.stl",
+        "skin_ring_A.stl",
+        "skin_ring_B.stl"
+      ],
+      "pattern": "ring",
+      "mode": "raise",
+      "params": {
+        "rOut": 5,
+        "wallBase": 0.8,
+        "wallTip": 0.4,
+        "height": 1,
+        "segments": 96,
+        "margin": null
+      },
+      "describe": "tapered ring, r 5 mm, wall 0.8 -> 0.4 mm, 1 mm tall",
+      "A_size": {
+        "x": 30,
+        "y": 30,
+        "z": 8
+      },
+      "B_size": {
+        "x": 20,
+        "y": 20,
+        "z": 6
+      },
+      "base_plane_z": 8,
+      "tips_plane_z": 9,
+      "tips_measured_z": 9,
+      "skin_height": 1,
+      "B_bottom_z": 9,
+      "gap_mm": 0,
+      "tip_area_total_mm2": 11.561060965210427,
+      "contact_area_under_B_mm2": 11.552809333329634,
+      "volume_A": 7217.329213326276,
+      "volume_B": 2400,
+      "tris_A": 966,
+      "tris_B": 12
+    }
+  }
+}

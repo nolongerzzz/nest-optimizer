@@ -1297,3 +1297,8 @@ select:focus, input:focus {
   width: 96px;
   margin: 0;
 }
+.seat-gap-row select {
+  flex: 0 0 110px;
+  width: 110px;
+  margin: 0;
+}

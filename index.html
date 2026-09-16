@@ -100,6 +100,14 @@
             <button id="btn-seat-flush" class="btn btn-secondary" type="button" title="Blank gap: flush plug seat (outer face 0.01 mm proud, then Subtract). With a gap: seat the mating face at that gap - negative = air gap, positive = overlap">Seat flush</button>
             <input type="number" id="seat-gap" step="0.01" placeholder="gap mm" title="Seat gap in mm. Negative = air gap between hull and bit (easy release: -0.15 to -0.20). Positive = bit overlaps into the hull. 0 = touching. Blank = flush plug seat." aria-label="Seat gap in mm" />
           </div>
+          <div class="seat-gap-row skin-row">
+            <button id="btn-skin-face" class="btn btn-secondary" type="button" title="Put a contact skin on piece A's flat face that looks at B (or its top face outside a Join): a relief whose tips are all B touches. Then Seat with gap 0 to rest B on the tips. Refuses a non-rectangular face; stands down if that face is painted.">Skin face</button>
+            <select id="skin-pattern" title="Skin pattern. crosshatch: fine rib lattice (0.42 mm ribs, 1.2 mm pitch, 0.6 tall). zigzag: sawtooth ridges (0.42 mm crests, 2 mm pitch). ring: one tapered ring (r 5, wall 0.8 to 0.4, 1 mm tall)." aria-label="Skin pattern">
+              <option value="crosshatch">crosshatch</option>
+              <option value="zigzag">zigzag</option>
+              <option value="ring">ring</option>
+            </select>
+          </div>
           <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
           <button id="btn-cap-open" class="btn btn-secondary" type="button">Cap open faces</button>
           <button id="btn-join-clear" class="btn btn-ghost" type="button">Cancel Join</button>
@@ -218,6 +226,7 @@
   </div>
   <script src="NSO_Repair.js?v=inside4"></script>
   <script src="nso_planar_fuse.js?v=inside4"></script>
+  <script src="nso_skin.js?v=skin1"></script>
   <script src="nso-cooling-profiles.js"></script>
   <script src="nso-3mf.js"></script>
   <script src="nso-3mf-read.js"></script>
@@ -227,6 +236,7 @@
   <script src="app-sculpt.js?v=inside4"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=inside4"></script>
+  <script src="app-skin.js?v=skin1"></script>
   <script src="app-mask.js?v=inside4"></script>
   <script src="app-library.js?v=libgit"></script>
   <script src="app-ux.js?v=inside4"></script>
