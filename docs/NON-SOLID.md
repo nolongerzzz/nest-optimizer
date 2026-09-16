@@ -101,8 +101,11 @@ Section 4 is the first positive thin-feature check.
 Follows mask6's paint exactly, because the same reasoning applies: a
 deliberate, visible, user-set exception, never an automatic inference.
 
-- **Set** with the *Non-solid* checkbox in the Adjust card (next to Repair /
-  Seal), on the selected piece only. Disabled with no selection.
+- **Set** with the *Non-solid* toggle in the Adjust card - its own purple
+  button below Seal, apart from Repair's - on the selected piece only.
+  Disabled with no selection. It is still a plain `<input type="checkbox">`
+  (`#chk-non-solid`) under the button face, so `checked` / `disabled` are the
+  state, exactly as before.
 - **Visible** as a purple `non-solid` tag on the piece's row in the model
   list, as the checkbox state whenever that piece is selected, and in every
   status line a consumer writes (`Repair (non-solid) done - …`,
