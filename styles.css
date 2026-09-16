@@ -1158,13 +1158,20 @@ select:focus, input:focus {
   width: 100%;
 }
 
+/* The viewport panel's select. The sidebar form rule above gives every select
+   an 8px bottom margin, which is right for a stacked card and wrong here: in
+   these rows the gap does the spacing, and that margin rode along inside the
+   grid item's margin box, so `align-items: center` centred a 34px box against
+   a 26px button and left Skin face sitting 4px below its pattern select. The
+   radius matches .btn so a button and a select side by side read as one pair. */
 .vp-select {
   width: 100%;
   min-height: 26px;
+  margin: 0;
   background: transparent;
   color: #e8eef6;
   border: 1px solid rgba(232, 238, 246, 0.45);
-  border-radius: 6px;
+  border-radius: 7px;
   padding: 0 6px;
   font-size: 12px;
 }
@@ -1231,8 +1238,11 @@ select:focus, input:focus {
   min-height: 30px;
 }
 /* Skin face with its pattern select beside it, directly under the paint row
-   (the target it reads is painted there). */
-.vp-row-skin { grid-template-columns: 1fr 88px; gap: 4px; }
+   (the target it reads is painted there). Stretch, like the paint and thicken
+   rows: the button sets the row height and the select takes it, so the two
+   cannot drift out of line the way they did while the select carried a margin
+   of its own. */
+.vp-row-skin { grid-template-columns: 1fr 88px; gap: 4px; align-items: stretch; }
 .vp-row-skin .btn { font-size: 11px; padding: 2px 4px; white-space: nowrap; }
 .vp-row-skin .vp-select { min-width: 0; font-size: 11px; padding: 0 4px; }
 /* A hairline above a row, to break the card into groups. Non-solid uses it:
