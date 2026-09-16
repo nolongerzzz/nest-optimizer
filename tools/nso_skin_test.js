@@ -293,7 +293,7 @@ withApp(async (page, logs) => {
   check('core on a flat hull: reference plane, tipRise ~ 0', flatCore.ok && flatCore.reference === 'plane' && Math.abs(flatCore.tipRise) < 1e-4, JSON.stringify(flatCore));
   await page.evaluate(stage, ids);
   await page.evaluate(() => { document.getElementById('seat-gap').value = '0'; });
-  await page.click('#btn-seat-flush');
+  await page.click('#btn-seat-support');
   const flat0 = await page.evaluate(relation, ids);
   check('flat A, gap 0: B rests on A\'s top (2e-6)', near(flat0.bitBottomMinusHullTop, 0, 2e-6), flat0.bitBottomMinusHullTop);
   check('flat A status does not mention tips', /^Seated - touching/.test(flat0.status) && !/tips/.test(flat0.status), flat0.status);
@@ -349,7 +349,7 @@ withApp(async (page, logs) => {
 
   await page.evaluate(stage, ids);
   await page.evaluate(() => { document.getElementById('seat-gap').value = '0'; });
-  await page.click('#btn-seat-flush');
+  await page.click('#btn-seat-support');
   const g0 = await page.evaluate(relation, ids);
   console.log('    status: ' + g0.status);
   check('button gap 0: B\'s underside on A\'s tips = A\'s world top (2e-6)', near(g0.bitBottomMinusHullTop, 0, 2e-6), g0.bitBottomMinusHullTop);
@@ -367,7 +367,7 @@ withApp(async (page, logs) => {
   console.log('\n--- gap -0.18 above the tips, exported ---');
   await page.evaluate(stage, ids);
   await page.evaluate(() => { document.getElementById('seat-gap').value = '-0.18'; });
-  await page.click('#btn-seat-flush');
+  await page.click('#btn-seat-support');
   const g18 = await page.evaluate(relation, ids);
   console.log('    status: ' + g18.status);
   check('scene: B 0.18 above the tips (2e-6)', near(g18.bitBottomMinusHullTop, 0.18, 2e-6), g18.bitBottomMinusHullTop);
@@ -384,7 +384,7 @@ withApp(async (page, logs) => {
   console.log('\n--- gap +0.05: into the relief, not through it ---');
   await page.evaluate(stage, ids);
   await page.evaluate(() => { document.getElementById('seat-gap').value = '0.05'; });
-  await page.click('#btn-seat-flush');
+  await page.click('#btn-seat-support');
   const g05 = await page.evaluate(relation, ids);
   check('scene: B 0.05 below the tips, still 0.55 above the base plane', near(g05.bitBottomMinusHullTop, -0.05, 2e-6), g05.bitBottomMinusHullTop);
   check('status names the overlap and the tips', /^Seated - overlap 0\.05mm \(measured \+0\.050mm.*from skin tips/.test(g05.status), g05.status);

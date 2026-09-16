@@ -11,7 +11,7 @@
      3. B over A: the app's own selectPlaced + nudgeSelected (what a viewport
         drag calls - there is no button for it), then the Raise button
      4. pattern select = crosshatch, Skin face -> A grows 0.6, status names it
-     5. gap field = -0.18, Seat flush -> B 0.18 above A's TIPS, status says so
+     5. gap slider = -0.18, Seat (support) -> B 0.18 above A's TIPS, status says so
      6. Format = STL, Export plate -> the downloaded STL through
         tools/mesh_validate.py: two shells 0.18 apart, 0 piercing, 0 coplanar
      7. Undo x2 (button), pattern = ring, Skin face, gap 0, Seat, Export ->
@@ -111,7 +111,7 @@ withApp(async (page, logs) => {
   const ids = [idA, idB];
   const present = await page.evaluate(() => ({
     skin: !!document.getElementById('btn-skin-face'), sel: !!document.getElementById('skin-pattern'),
-    gap: !!document.getElementById('seat-gap'), seat: !!document.getElementById('btn-seat-flush'),
+    gap: !!document.getElementById('seat-gap'), seat: !!document.getElementById('btn-seat-flush') && !!document.getElementById('btn-seat-support'),
     wired: document.getElementById('btn-skin-face') && document.getElementById('btn-skin-face').dataset.nsoWired === '1',
     module: typeof NSO_Skin !== 'undefined', appSkin: typeof NSO_skinFaceOfModel === 'function',
     options: [...document.querySelectorAll('#skin-pattern option')].map(o => o.value)
@@ -158,9 +158,9 @@ withApp(async (page, logs) => {
   check('A world height 20.6 (skin raised, scene rebuilt)', near(s.aHeight, 20.6, 1e-4), s.aHeight);
   check('Join session survived the bake', s.join.session && s.join.a === idA && s.join.b === idB);
 
-  console.log('\n=== 5. gap field = -0.18, click Seat flush ===');
+  console.log('\n=== 5. gap slider = -0.18, click Seat (support) ===');
   await page.fill('#seat-gap', '-0.18');
-  await page.click('#btn-seat-flush');
+  await page.click('#btn-seat-support');
   await waitStatus(page, /^Seated|^Seat /);
   s = await page.evaluate(scene, ids);
   const st5 = await statusOf(page);
@@ -199,7 +199,7 @@ withApp(async (page, logs) => {
   s = await page.evaluate(scene, ids);
   check('A is 21.0 tall after the ring', near(s.aSizeY, 21, 1e-4), s.aSizeY);
   await page.fill('#seat-gap', '0');
-  await page.click('#btn-seat-flush');
+  await page.click('#btn-seat-support');
   await waitStatus(page, /^Seated|^Seat /);
   const st7b = await statusOf(page);
   console.log('    status: ' + st7b);

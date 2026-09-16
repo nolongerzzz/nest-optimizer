@@ -597,9 +597,18 @@ Also one-line and live: the setback's refusal message blames "something
 already softened" for what is actually a concave corner.
 
 ## Seat with a gap (2026-09-16)
-`app-join.js`, `NSO_seatFlushBitToHull` and the **Seat flush** button, now
-with a **gap** field beside it (`#seat-gap`). Check: `npm run seat:gap`
-(`tools/nso_seat_gap_test.js`, in `npm test`).
+`app-join.js`, `NSO_seatFlushBitToHull` and two buttons in the Join card:
+**Seat flush** (the plug seat, never reads the slider) and **Seat (support)**
+with the gap **slider** `#seat-gap` (`-0.25 .. +0.05` mm by `0.01`, default
+`-0.18`, mid easy-release) and its exact readout `#seat-gap-value`. Check:
+`npm run seat:gap` (`tools/nso_seat_gap_test.js`, in `npm test`).
+
+*History:* the gap first shipped as a number field beside a single Seat flush
+button (blank = flush, number = gap). Split 2026-09-16 into the two buttons
+above so the flush path can never be reached with a stale number in a field,
+and the slider replaces typing: 0.01 steps sweep the plateau-to-weld boundary
+(`-0.25` air .. `+0.05` overlap) without sub-hundredth noise. The bullets
+below say "gap field" where they predate the split; read "slider".
 
 **What Seat did before this.** It was never flush-only and it never had a
 "gap". The core always took `opts.proud` (default 0.4): the distance the bit's
@@ -623,11 +632,16 @@ result carries `mode`, `gapAchieved`, `gapMin`, `gapMax` (coupon convention)
 alongside the old keys. The flush path (`proud`) is byte-identical: the test
 pins the pre-change pose to 1e-9 and the status line to the character.
 
-**The button.** Gap field blank = the old flush seat, unchanged (status
-`Seated - proud 0.01mm ...`). A number = gap seat, status
+**The buttons.** Seat flush = the old flush seat, unchanged (status
+`Seated - proud 0.01mm ...`), whatever the slider shows - the test drags the
+slider to +0.05 and clicks it, golden pose to 1e-9. Seat (support) = gap seat
+at the slider's value, status
 `Seated - air gap 0.18mm (measured -0.180mm, skin error 0.00mm)`; the
 measured value keeps its sign so a wrong-way seat can never read as right.
-Junk in the field is refused with a message, never seated flush.
+The slider is the control; arrow keys step 0.01, the readout shows the exact
+value the next click will use, and a value set from code outside the range
+clamps (the browser's own range sanitisation) so the readout and the seat
+can never disagree. Seat (support) with the slider missing refuses.
 
 **Two things the gap path does that the flush path does not.**
 1. It settles the hull onto the bed baseline first (`settlePlacedOnBed`, what
@@ -738,7 +752,7 @@ the exact z equality are what separate touching from penetration.
 live app, not only committed: `index.html` loads `nso_skin.js?v=skin1`
 before `app-core.js` and `app-skin.js?v=skin1` after `app-join.js`; the Join
 card carries `#btn-skin-face` + `#skin-pattern` (crosshatch / zigzag / ring)
-and, from the Seat-gap commit, `#seat-gap` beside `#btn-seat-flush`. The
+and, from the Seat-gap commit, `#seat-gap` (now a slider under `#btn-seat-support`, see "Seat with a gap"). The
 mirror workflow run for `7ed4821` succeeded and the `nest-wip` tree carries
 the same `index.html` (README source SHA matches), so the preview site at
 <https://nolongerzzz.github.io/nest-wip/> serves it once Pages finishes its
