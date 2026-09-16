@@ -315,8 +315,10 @@ function undoLast() {
     if (typeof nsoMaskRestore === 'function') nsoMaskRestore(m, entry.prevMask);
     else m.faceMask = { exclude: entry.prevMask || [] };
     updateUndoBtn();
+    const undoSel = (typeof nsoMaskSelected === 'function') ? nsoMaskSelected(m) : null;
     setStatus('Undo: paint reverted - ' +
-      ((m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length : 0) + ' face(s) excluded');
+      ((m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length : 0) + ' face(s) excluded, target ' +
+      (undoSel && typeof nsoMaskFaceName === 'function' ? nsoMaskFaceName(undoSel).replace(/^the /, '') : 'none'));
     return;
   }
   if (entry.type === 'softenReplace' || entry.type === 'capReplace' || entry.type === 'sealReplace' || entry.type === 'solidifyReplace' || entry.type === 'thickenReplace' || entry.type === 'smoothReplace' || entry.type === 'skinReplace') {

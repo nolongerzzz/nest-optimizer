@@ -123,7 +123,16 @@ const statusOf = page => page.evaluate(() => {
   return el ? el.textContent : null;
 });
 
-module.exports = { withApp, loadSTL, selectModel, statusOf, ROOT };
+/* Opens the viewport's Finish menu (a <details>) by clicking its summary, the
+   way a user does, so the controls inside it - Paint, Skin face, Cap open
+   faces, Soften... - are visible to page.click. Idempotent. */
+async function openFinishMenu(page) {
+  const open = await page.evaluate(() => { const d = document.querySelector('.vp-finish-menu'); return !!(d && d.open); });
+  if (!open) await page.click('.vp-finish-menu > summary');
+  await page.waitForFunction(() => { const d = document.querySelector('.vp-finish-menu'); return !!(d && d.open); }, null, { timeout: 5000 });
+}
+
+module.exports = { withApp, loadSTL, selectModel, statusOf, openFinishMenu, ROOT };
 
 if (require.main === module) {
   withApp(async (page, logs) => {

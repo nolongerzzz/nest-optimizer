@@ -83,9 +83,13 @@
    API
    ---------------------------------------------------------------------------
    NSO_Skin.PATTERNS                      { name: { defaults, describe } }
-   NSO_Skin.findFace(soup, dir)           -> face | null
+   NSO_Skin.findFace(soup, dir, plane?)   -> face | null
+                                          plane: optional offset n.p = plane;
+                                          given, the group on THAT plane is
+                                          taken instead of the outermost one
    NSO_Skin.applySkinToFace(soup, {
        dir: [x,y,z],                      face direction (outward normal)
+       plane: number,                     optional, see findFace
        pattern: 'crosshatch'|'zigzag'|'ring',
        params: {...},                     pattern parameters (see defaults)
        mode: 'raise'|'recess' })
@@ -99,6 +103,7 @@
 */
 (function (root) {
   'use strict';
+  var PLANE_TOL = 0.05;   /* mm - a select entry's offset vs a face group's, same D_TOL as app-mask.js */
 
   /* ------------------------------------------------------------ vectors */
   function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
@@ -166,9 +171,14 @@
   /* ------------------------------------------------------------ face pick */
 
   /* Planar faces whose normal is within 30 degrees of dir, grouped by plane. */
-  function findFace(soup, dir) {
+  function findFace(soup, dir, plane) {
     var d = unit(dir);
     if (len(d) === 0) return null;
+    /* plane (optional): the face's own offset n.p = plane, as a face select
+       records it (app-mask.js). With it, the pick is the coplanar group ON
+       that plane, not the outermost one along dir - which is what lets an
+       explicitly selected pocket floor win over the hull face above it. */
+    var wantPlane = (typeof plane === 'number' && isFinite(plane)) ? plane : null;
     var n = triCount(soup);
     var groups = [];
     for (var t = 0; t < n; t++) {
@@ -192,6 +202,7 @@
     var best = null;
     for (var k = 0; k < groups.length; k++) {
       var gk = groups[k];
+      if (wantPlane !== null && Math.abs(gk.d - wantPlane) > PLANE_TOL) continue;
       if (!best || gk.dotDir > best.dotDir + 1e-4 ||
           (Math.abs(gk.dotDir - best.dotDir) <= 1e-4 && gk.d > best.d)) best = gk;
     }
@@ -654,8 +665,13 @@
     if (!(p.height > 0)) { res.reason = 'height must be positive'; return res; }
     if (!soup || triCount(soup) < 4) { res.reason = 'empty soup'; return res; }
     var dir = opts.dir || [0, 0, 1];
-    var face = findFace(soup, dir);
-    if (!face) { res.reason = 'no flat face within 30 degrees of the requested direction'; return res; }
+    var face = findFace(soup, dir, opts.plane);
+    if (!face) {
+      res.reason = (typeof opts.plane === 'number')
+        ? 'no flat face on the selected plane (n.p = ' + opts.plane.toFixed(3) + ') within 30 degrees of its normal'
+        : 'no flat face within 30 degrees of the requested direction';
+      return res;
+    }
     var fr = rectFrame(soup, face);
     if (typeof fr === 'string') { res.reason = fr; return res; }
 

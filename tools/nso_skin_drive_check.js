@@ -22,7 +22,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
+const { withApp, loadSTL, openFinishMenu, ROOT } = require('./nso_app_harness');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 let fails = 0;
@@ -116,7 +116,12 @@ withApp(async (page, logs) => {
     module: typeof NSO_Skin !== 'undefined', appSkin: typeof NSO_skinFaceOfModel === 'function',
     options: [...document.querySelectorAll('#skin-pattern option')].map(o => o.value)
   }));
-  check('Join card has Skin face + pattern select + Seat flush + gap field', present.skin && present.sel && present.gap && present.seat, JSON.stringify(present));
+  check('Finish tab has Skin face + pattern select; Join card has Seat flush + Seat (support) + gap slider', present.skin && present.sel && present.gap && present.seat, JSON.stringify(present));
+  const where = await page.evaluate(() => ({
+    skinInFinish: !!document.querySelector('.vp-finish #btn-skin-face'), selInFinish: !!document.querySelector('.vp-finish #skin-pattern'),
+    capInFinish: !!document.querySelector('.vp-finish #btn-cap-open'), noneInJoin: !document.querySelector('#join-card #btn-skin-face, #join-card #skin-pattern, #join-card #btn-cap-open')
+  }));
+  check('Skin face, pattern select and Cap open faces live in the Finish tab, not the Join card', where.skinInFinish && where.selInFinish && where.capInFinish && where.noneInJoin, JSON.stringify(where));
   check('nso_skin.js and app-skin.js loaded, button listener attached', present.module && present.appSkin && present.wired);
   check('pattern select offers crosshatch / zigzag / ring', JSON.stringify(present.options) === '["crosshatch","zigzag","ring"]', present.options.join(','));
 
@@ -145,8 +150,9 @@ withApp(async (page, logs) => {
   check('B is above A after 11 x Raise (2 mm each)', s.overlapXZ && s.bBottomMinusATop > 0, 'B bottom - A top = ' + s.bBottomMinusATop.toFixed(3));
   check('status shows the lift', /^Lift 22 mm/.test(await statusOf(page)), await statusOf(page));
 
-  console.log('\n=== 4. pattern = crosshatch, click Skin face ===');
+  console.log('\n=== 4. open Finish, pattern = crosshatch, click Skin face ===');
   const before = s;
+  await openFinishMenu(page);
   await page.selectOption('#skin-pattern', 'crosshatch');
   await page.click('#btn-skin-face');
   await waitStatus(page, /^Skinned|^Skin /);
