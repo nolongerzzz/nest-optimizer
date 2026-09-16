@@ -18,9 +18,10 @@
     "seat:gap": "node tools/nso_seat_gap_test.js",
     "skin:test": "node tools/nso_skin_test.js",
     "skin:samples": "node tools/nso_skin_samples.js",
+    "skin:drive": "node tools/nso_skin_drive_check.js",
     "paint:scope": "node tools/nso_paint_scope_test.js",
     "grispr:test": "python3 -m unittest discover -s tools/grispr/tests -p \"test_*.py\"",
-    "test": "sh tools/cth-test/run-all.sh && node tools/cth-test/capture-check.mjs && node tools/cth-test/drive-check.mjs && node tools/3mf-test/roundtrip-check.js && node tools/3mf-test/export-drive-check.mjs && node tools/3mf-test/import-check.js && node tools/3mf-test/import-drive-check.mjs && node tools/nso_wire_smooth_test.js && node tools/nso_wire_repair_test.js && node tools/nso_wire_fuse_test.js && node tools/nso_selfint_equiv_test.js && node tools/nso_seat_gap_test.js && node tools/nso_paint_scope_test.js && node tools/nso_skin_test.js"
+    "test": "sh tools/cth-test/run-all.sh && node tools/cth-test/capture-check.mjs && node tools/cth-test/drive-check.mjs && node tools/3mf-test/roundtrip-check.js && node tools/3mf-test/export-drive-check.mjs && node tools/3mf-test/import-check.js && node tools/3mf-test/import-drive-check.mjs && node tools/nso_wire_smooth_test.js && node tools/nso_wire_repair_test.js && node tools/nso_wire_fuse_test.js && node tools/nso_selfint_equiv_test.js && node tools/nso_seat_gap_test.js && node tools/nso_paint_scope_test.js && node tools/nso_skin_test.js && node tools/nso_skin_drive_check.js"
   },
   "devDependencies": {
     "playwright": "^1.47.0",

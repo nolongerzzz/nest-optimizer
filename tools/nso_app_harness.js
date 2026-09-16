@@ -4,7 +4,10 @@
    nothing else about the page is altered.
 
    Usage:  node tools/nso_app_harness.js            (self-check)
-   Import: const { withApp } = require('./nso_app_harness');            */
+   Import: const { withApp } = require('./nso_app_harness');
+   APP_URL=https://nolongerzzz.github.io/nest-wip/  drives that deployment
+   instead of the local tree (the three.js CDN tags are still served
+   locally, so the check stays hermetic).                                  */
 
 const http = require('http');
 const fs = require('fs');
@@ -87,8 +90,11 @@ async function withApp(fn, opts) {
     r.fulfill({ status: 200, contentType: 'application/wasm',
                 body: fs.readFileSync(path.join(ROOT, 'vendor', 'manifold', 'manifold.wasm')) }));
 
+  // APP_URL (or opts.url) points the same drive at a deployed copy, e.g. the
+  // wip preview site, instead of the local tree. CDN routes still apply.
+  const url = opts.url || process.env.APP_URL || ('http://127.0.0.1:' + port + '/index.html');
   try {
-    await page.goto('http://127.0.0.1:' + port + '/index.html', { waitUntil: 'load' });
+    await page.goto(url, { waitUntil: 'load' });
     // the app is up once its own state object exists and the scene is built
     await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true,
       null, { timeout: 30000 });

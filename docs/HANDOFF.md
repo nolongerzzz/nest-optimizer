@@ -734,6 +734,31 @@ reads as piercing pairs in the checker because rib walls stand edge-on in
 B's plane and it has no touching-along-an-edge class; the -0.05 control and
 the exact z equality are what separate touching from penetration.
 
+**Reachability (audited 2026-09-16, second pass).** Both are wired in the
+live app, not only committed: `index.html` loads `nso_skin.js?v=skin1`
+before `app-core.js` and `app-skin.js?v=skin1` after `app-join.js`; the Join
+card carries `#btn-skin-face` + `#skin-pattern` (crosshatch / zigzag / ring)
+and, from the Seat-gap commit, `#seat-gap` beside `#btn-seat-flush`. The
+mirror workflow run for `7ed4821` succeeded and the `nest-wip` tree carries
+the same `index.html` (README source SHA matches), so the preview site at
+<https://nolongerzzz.github.io/nest-wip/> serves it once Pages finishes its
+deploy. Nothing needed wiring.
+
+**Drive check** (`npm run skin:drive`, `tools/nso_skin_drive_check.js`, in
+`npm test`): the whole flow through the shipped controls, on the real
+fixtures box_hull_80x40x20-2 (A) + box-20mm (B): file input, Start Join,
+Pick A / Pick B via the slot buttons and the list rows, Raise x11, pattern
+select, Skin face, `-0.18` typed into the gap field, Seat flush, Format = STL,
+Export plate - and the browser's actual download through `mesh_validate.py`:
+two shells 0.18 apart, hull 20.6 tall, 0 piercing, 0 coplanar, height 40.78.
+Then Undo x2, ring, gap 0, Seat, Export: hull top == bit bottom, coplanar
+contact, height 41. The one step that is not a click is moving B over A
+(there is no button; a viewport drag calls `selectPlaced` + `nudgeSelected`,
+which the check calls directly and labels as such). `APP_URL=<site>` points
+the same check at a deployment; the harness serves the three.js CDN tags
+locally either way. Not run against the preview site from the sandbox - its
+egress policy blocks `github.io` - so that run is the user's, or a runner's.
+
 **Through the real app** (test part 3): plain block A + box-20mm B, Seat 0 on
 the flat A -> `reference 'plane'`; Skin face -> A's raw soup replaced, 8.6
 tall, undo restores 12 tris; painted +Z stands down, paint on -Z does not;
