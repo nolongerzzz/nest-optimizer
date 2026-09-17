@@ -1290,12 +1290,74 @@
     return area;
   }
 
+  /* ------------------------------------ the relief, without a host
+
+     AUDIT (for nso_skin_patch.js, 2026-09-17): the relief IS already built as
+     an independent structure, and pattern generation is NOT welded to the
+     fusion step. crosshatchPlan / zigzagPlan are pure functions of a frame and
+     their parameters - they return a height field, not geometry - and
+     gridRelief / ringRelief read only that frame and its `sides`, never the
+     soup being skinned. Measured, not assumed: the relief triangles of the
+     same 30 x 30 +Z face come out bit-identical on a 30x30x8 block and on a
+     30x30x2 plate (9402 crosshatch / 434 zigzag / 864 ring triangles, every
+     one equal), while the host wall fans differ.
+
+     What that independent structure is NOT is a printable object. Taken on its
+     own the relief is a ZERO-THICKNESS OPEN SHEET: Euler 1, 196 / 116 / 96
+     open edges, bbox height exactly the skin height with nothing below it.
+     gridRelief emits the top surface and the walls BETWEEN cells and stops;
+     the back, and the watertightness, come from the HOST (fanWalls re-emits
+     the rest of its shell, and the host body is the floor). So "export the
+     pattern alone" cannot be a matter of keeping the relief triangles and
+     dropping the others - the thing that comes out has no thickness.
+
+     The path that works is the one freeLayerShell already takes for the free
+     second layer: give the relief A HOST OF ITS OWN and skin that. These two
+     exports are what a caller needs to do it for a host this module never
+     saw - a frame built from numbers instead of from a face's boundary loop,
+     and the height field behind it. They hand out a frame and a plan, never
+     geometry: the caller decides what closes the back. nso_skin_patch.js is
+     the first such caller. */
+
+  /* A frame for a rectangle that is not a face of any soup: rectFrame's
+     output, built from numbers. origin is the c0 corner, U/V the in-plane
+     axes (normalised here; V is squared against U), W/D the spans. */
+  function planeFrame(origin, U, V, W, D) {
+    var u = unit(U);
+    var v = unit(sub(V, scale(u, dot(u, V))));   /* V squared against U */
+    if (len(u) === 0 || len(v) === 0) return 'planeFrame: U and V must be non-zero and not parallel';
+    if (!(W > 1e-6) || !(D > 1e-6)) return 'planeFrame: W and D must be positive';
+    var N = unit(cross(u, v));
+    var c0 = [origin[0], origin[1], origin[2]];
+    return { c: [c0, add(c0, scale(u, W)), add(c0, add(scale(u, W), scale(v, D))), add(c0, scale(v, D))],
+             U: u, V: v, N: N, W: W, D: D };
+  }
+
+  /* The height field a grid pattern is, over `fr`: { breaksU, breaksV,
+     cellHeights(u0,u1,v0,v1) -> [h00,h10,h11,h01], margin, ... } or a reason
+     string. shift is applySkinToFace's own: 0 to raise, -height to recess.
+     `ring` has no height field (ringRelief builds its surface directly) and is
+     refused here by name rather than silently. */
+  function patternPlan(name, params, fr, shift) {
+    if (!PATTERNS[name]) return 'unknown pattern "' + name + '"';
+    if (name === 'ring') return 'ring has no height field - it builds its surface directly (see ringRelief)';
+    if (typeof fr === 'string' || !fr || !(fr.W > 0)) return 'patternPlan needs a frame (see planeFrame)';
+    var p = withDefaults(name, params);
+    if (!(p.height > 0)) return 'height must be positive';
+    var plan = name === 'crosshatch' ? crosshatchPlan(fr, p, shift || 0) : zigzagPlan(fr, p, shift || 0);
+    if (typeof plan === 'string') return plan;
+    plan.params = p;
+    return plan;
+  }
+
   var api = {
     PATTERNS: PATTERNS,
     withDefaults: withDefaults,
     LAYER2_DEFAULTS: LAYER2_DEFAULTS,
     BOX_DIRS: BOX_DIRS,
     findFace: findFace,
+    planeFrame: planeFrame,
+    patternPlan: patternPlan,
     applySkinToFace: applySkinToFace,
     applySkinWrap: applySkinWrap,
     withLayer2Defaults: withLayer2Defaults,
