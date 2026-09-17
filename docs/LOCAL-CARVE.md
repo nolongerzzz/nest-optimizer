@@ -157,6 +157,16 @@ through `NSO_seatFlushBitToHull` at all — not with a relaxed corner-ray gate,
 not with a larger tilt clamp. It needs its own placement step. The parts to
 reuse are below it: `NSO_plugFrame`, `NSO_CSG`, `subtractSoupBFromA`.
 
+> **Since measured, this straddle is refused** (`NSO_seatStraddle`, `app-join.js`;
+> `npm run seat:overhang`). The measurement above is what the shipped build did
+> when this audit ran, and it was taken up as a defect in its own right: the
+> silent 6 mm → 0.01 mm collapse is destructive, and the same placement one
+> corner further out already refused with `corner N missed hull along punch
+> axis`. Seat now refuses this pose too — *bit straddles that hull face -
+> 6.00mm of it stands proud and the rest is already inside* — and moves
+> nothing. Nothing below changes: a carve still needs its own placement step,
+> and now Seat will not even appear to offer one.
+
 ---
 
 ## 3. Four more constraints Task 3 has to design around
@@ -378,12 +388,13 @@ untouched to 1e-12 and turns the sweep axis a right angle to 6.1e-17.
 ### Why it does not go through Seat
 
 It cannot, and this is worth stating because "relax Seat's corner-ray gate"
-looks like the cheap answer. §2b measured what Seat does to a straddle it does
-*not* refuse: it drives 6.000 mm of overhang down to 0.0100 mm and buries the
+looks like the cheap answer. §2b measured what Seat did to a straddle it did
+*not* refuse: it drove 6.000 mm of overhang down to 0.0100 mm and buried the
 bit as a plug through the one flat face it picked, reporting `Seated`. Making
 something flush against one face is Seat's purpose, not a limitation of its
-tolerances. A carve therefore needs its own placement step over the shared
-kernel path, which is what this is.
+tolerances — and that pose is now refused outright rather than converted, so
+Seat answers a straddle with a refusal either way. A carve therefore needs its
+own placement step over the shared kernel path, which is what this is.
 
 ### Pose state: contained, by decision
 
