@@ -280,6 +280,14 @@
                   <input type="checkbox" id="chk-non-solid" disabled><span class="vp-flag-face">Non-solid</span>
                 </label>
               </div>
+              <div class="vp-row vp-row-pair">
+                <button id="btn-measure" class="btn btn-secondary btn-measure" type="button" aria-pressed="false"
+                        title="Click two points on the pieces to read the distance between them in mm, or switch to Edge and click one edge for its length. Corners and edges snap. Measuring changes nothing on the piece. Click this button again to stop; Esc clears the measurement.">Measure</button>
+                <select id="sel-measure-mode" class="vp-select" title="What a measure click means. Two points: click twice, get the distance. Edge: click once near an edge, get that edge's whole length." aria-label="Measure mode">
+                  <option value="span" selected>Two points</option>
+                  <option value="edge">Edge</option>
+                </select>
+              </div>
               <div class="vp-row vp-row-full">
                 <button id="btn-check-defects" class="btn btn-secondary btn-check-defects" type="button" disabled aria-pressed="false"
                         title="Run the canonical checker on this piece and paint what it finds ON the mesh: red lines on open edges, orange on non-manifold edges, red patches on the triangles of every piercing pair, violet on faces whose wall or gap measures under 0.42 mm. A snapshot, not a live check - it clears itself when a bake changes the piece.">Check piece</button>
@@ -341,6 +349,7 @@
   <script src="app-nonsolid.js?v=inside4"></script>
   <script src="app-poslock.js?v=lock1"></script>
   <script src="app-defects.js?v=inside5"></script>
+  <script src="app-measure.js?v=inside5"></script>
   <script src="app-library.js?v=libgit"></script>
   <script src="app-ux.js?v=inside5"></script>
   <script src="app-cth-expose.js?v=cth15"></script>
