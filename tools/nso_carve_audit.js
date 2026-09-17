@@ -11,7 +11,10 @@
    ----------------------
    1. Flush against one flat face is the shipped case and it works end to end:
       Seat flush lands 0.01 proud, Subtract removes exactly bit n hull, the
-      result gates clean.
+      result gates clean. The bit has to APPROACH the face for the seat: parked
+      part-way into it - the pose the shave below is measured from - the core
+      refuses (finding 4), and the Seat button raises such a bit clear of the
+      hull's top before the core ever sees it.
    2. Seat flush REFUSES at a top edge and at a top corner, and the reason is
       always 'corner N missed hull along punch axis'. NSO_seatFlushBitToHull
       casts a ray from each of the four corners of the bit's outer box face
@@ -23,11 +26,16 @@
       boolean removes exactly bit n hull to 1e-3 mm^3 and the result gates
       clean on the canonical checker - watertight, 0 non-manifold, 0 piercing,
       0 slivers, Euler 2. So Task 3 is placement work, not kernel work.
-   4. Where Seat does NOT refuse a straddle it SILENTLY CONVERTS it. A bit
-      centred on a vertical edge has all four outer-face rays hitting the +X
-      wall, so Seat succeeds - by sliding the bit clear of the edge and
-      seating it flush on that one face. The edge intent is destroyed with a
-      clean status line. A free-orientation tool cannot route through Seat.
+   4. Where Seat did NOT refuse a straddle it SILENTLY CONVERTED it - FIXED,
+      and this gate now pins the fix. A bit centred on a vertical edge has all
+      four outer-face rays hitting the +X wall, so Seat used to succeed, by
+      sliding the bit clear of the edge and seating it flush on that one face:
+      the edge intent destroyed with a clean status line. That was the finding
+      this audit turned up; `NSO_seatStraddle` (app-join.js, npm run
+      seat:overhang) now refuses the pose instead - "bit straddles that hull
+      face - 6.00mm of it stands proud..." - and moves nothing. Either way a
+      free-orientation tool cannot route through Seat: refusing is the right
+      answer for Seat, and placement is still this tool's own job.
    5. minWall guards ONE axis. The safety box in NSO_CSG.buildCutVolume
       measures depth by ray-casting along frame.punch only, so on a hollow
       hull the far wall it stops short of is the OPPOSITE outer wall. A corner
@@ -149,6 +157,21 @@ const measure = (page, idA, idB) => page.evaluate(async ([idA, idB]) => {
            cornerHits, wantRemoved, seat, sub };
 }, [idA, idB]);
 
+/* Seat flush alone on the pose as parked, pose restored - for a placement with
+   no intersection to subtract, where measure()'s boolean has nothing to take. */
+const seatOnly = (page, idA, idB) => page.evaluate(([idA, idB]) => {
+  const pa = state.placed.find(p => p && p.sourceId === idA && p.mesh);
+  const pb = state.placed.find(p => p && p.sourceId === idB && p.mesh);
+  pa.mesh.updateMatrixWorld(true); pb.mesh.updateMatrixWorld(true);
+  const sp = pb.mesh.position.clone(), sq = pb.mesh.quaternion.clone();
+  const s = NSO_seatFlushBitToHull(pa.mesh, pb.mesh, { proud: 0.01 });
+  pb.mesh.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(pb.mesh);
+  pb.mesh.position.copy(sp); pb.mesh.quaternion.copy(sq); pb.mesh.updateMatrixWorld(true);
+  return { ok: !!(s && s.ok), reason: s && s.reason, maxResidual: s && s.maxResidual,
+           box: { min: box.min.toArray(), max: box.max.toArray() } };
+}, [idA, idB]);
+
 const MISSED = /^corner \d missed hull along punch axis$/;
 
 (async () => {
@@ -170,14 +193,31 @@ const MISSED = /^corner \d missed hull along punch axis$/;
     check('plugFrame picks the bit\'s +Y face', r.axis === 1 && r.sign === 1,
       'axis ' + r.axis + ' sign ' + r.sign);
     check('all four outer-face rays land on the hull', r.cornerHits === 4, r.cornerHits + '/4');
-    check('Seat flush seats, skin error 0', r.seat.ok && near(r.seat.maxResidual, 0, 1e-6),
-      r.seat.ok ? 'maxResidual ' + Number(r.seat.maxResidual).toFixed(4) : r.seat.reason);
+    /* Parked 3 mm INTO the face, so the boolean below has a shave to take. That
+       pose is itself a straddle - 5 mm of the bit proud of the face, 3 mm
+       already inside - and the core refuses it since NSO_seatStraddle. Through
+       the Seat BUTTON this pose never reaches the core: NSO_raiseBuriedBitClear
+       lifts the bit clear of the hull's top first and it seats as a plug from
+       above. The flush seat itself is checked below, from the pose that
+       approaches the face rather than sitting across it. */
+    check('Seat flush refuses the sunk pose, naming what stands proud',
+      !r.seat.ok && /^bit straddles that hull face - 5\.00mm/.test(r.seat.reason || ''), r.seat.reason);
     check('Subtract removes exactly bit n hull', r.sub.ok && near(r.sub.gotRemoved, r.wantRemoved, 1e-3),
       r.sub.ok ? r.sub.gotRemoved.toFixed(3) + ' of ' + r.wantRemoved.toFixed(3) + ' mm^3' : r.sub.reason);
     let f = path.join(tmp, 'flat.stl');
     writeBinarySTL(f, Float32Array.from(r.sub.soup));
     let g = gate(f);
     check('flat local shave gates clean on the canonical checker', clean(g), gsum(g));
+
+    /* the same bit resting ON the flat face: the shipped flush seat, unchanged */
+    await park(page, idB, cx, cz, top);
+    const rest = await seatOnly(page, idA, idB);
+    check('resting on the face, Seat flush seats with skin error 0',
+      rest.ok && near(rest.maxResidual, 0, 1e-6),
+      rest.ok ? 'maxResidual ' + Number(rest.maxResidual).toFixed(4) : rest.reason);
+    check('... landing the bit 0.01 mm proud of the face - the plug seat',
+      rest.ok && near(rest.box.max[1] - A.max[1], 0.01, 2e-3),
+      (rest.box.max[1] - A.max[1]).toFixed(4) + ' mm proud');
 
     console.log('\n--- 2. a top EDGE: Seat flush refuses, the boolean does not ---');
     await park(page, idB, A.max[0], cz, top - 3);
@@ -207,22 +247,26 @@ const MISSED = /^corner \d missed hull along punch axis$/;
     g = gate(f);
     check('corner gouge gates clean on the canonical checker', clean(g), gsum(g));
 
-    console.log('\n--- 4. a VERTICAL edge: Seat does not refuse, it silently un-straddles ---');
+    console.log('\n--- 4. a VERTICAL edge: the straddle Seat used to swallow, now refused ---');
     const parked = await park(page, idB, A.max[0], cz, midY - 4);
     r = await measure(page, idA, idB);
     check('all four rays land (they all look at the +X wall)', r.cornerHits === 4, r.cornerHits + '/4');
-    check('Seat flush reports success', r.seat.ok, r.seat.ok ? 'ok' : r.seat.reason);
     /* Parked, the bit straddles the +X wall: half in, 6 mm of overhang past it.
-       Seat drives that overhang to `proud` (0.01) - it does not carve the edge,
-       it buries the bit as a plug through the one flat face it chose, and says
-       'Seated'. Straddle in, plug out, no refusal anywhere. */
+       All four rays land, so the corner-ray gate of finding 2 has nothing to
+       say, and Seat used to drive that overhang to `proud` (0.01) - not a carve
+       at the edge but the bit buried as a plug through the one flat face it
+       chose, reported as 'Seated'. NSO_seatStraddle refuses it now: the pose it
+       was handed is one the corner-ray fit is not built for, and the bit stays
+       where the user put it. */
     check('parked, the bit overhangs the +X wall by half its length',
       near(parked.max[0] - A.max[0], 6, 1e-6), (parked.max[0] - A.max[0]).toFixed(3) + ' mm past the wall');
-    check('after Seat the overhang is gone - driven to proud 0.01, the bit is a plug',
-      r.seat.ok && near(r.seat.box.max[0] - A.max[0], 0.01, 2e-3),
+    check('Seat flush REFUSES the straddle, naming the overhang',
+      !r.seat.ok && /^bit straddles that hull face - 6\.00mm/.test(r.seat.reason || ''), r.seat.reason);
+    check('the 6 mm overhang survives the refused seat - nothing was driven in',
+      near(r.seat.box.max[0] - A.max[0], 6, 1e-6),
       (r.seat.box.max[0] - A.max[0]).toFixed(4) + ' mm past the wall');
-    check('and the bit now lies inside the hull in X, not across its edge',
-      r.seat.ok && r.seat.box.min[0] > A.min[0] && r.seat.box.min[0] < A.max[0],
+    check('and the bit still lies across the hull edge, not inside it',
+      r.seat.box.min[0] < A.max[0] && r.seat.box.max[0] > A.max[0],
       'bit x ' + r.seat.box.min[0].toFixed(3) + '..' + r.seat.box.max[0].toFixed(3) +
       ' vs hull x ' + A.min[0].toFixed(1) + '..' + A.max[0].toFixed(1));
 

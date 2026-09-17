@@ -644,6 +644,10 @@ function NSO_newellNormal(pts) {
    gap mode also reports gapAchieved / gapMin / gapMax, measured from the
    mating face after the last iteration, in the same sign convention.
 
+   Either mode refuses, moving nothing, unless the bit is clear of the face it
+   is seated to (or wholly inside it): a corner ray that misses says so, and so
+   does a bit the face cuts through - see NSO_seatStraddle.
+
    REFERENCE SURFACE in gap mode: the skin's TIPS, not its base plane.
    A hull face that carries a contact skin (nso_skin.js - a rib lattice,
    ridges, a ring) has two surfaces: the base plane the four corner rays
@@ -663,6 +667,59 @@ function NSO_newellNormal(pts) {
 
 /* a relief is at least one printed layer tall; Float32 flat-face noise is ~1e-6 */
 var NSO_SEAT_TIPS_TOL = 0.01;
+
+/* How much of the bit may sit across the target face before the seat calls it
+   an overhang rather than its own handiwork. A flush seat leaves the outer
+   face 0.01 mm proud of the skin and the gap slider's overlap end (+0.05)
+   leaves the mating face 0.05 mm inside it, so both of those must re-seat,
+   not refuse; anything past this is a real protrusion the user put there. */
+var NSO_SEAT_STRADDLE_TOL = 0.1;
+
+/* The pose the corner-ray fit is built for: the bit approaches the target face
+   from OUTSIDE it (a staged plug, a bit raised clear, a side seat), or lies
+   wholly inside it (a plug being re-seated). Either way the seat slides the
+   bit along the punch axis and nothing that stood proud is lost.
+
+   A bit that STRADDLES the face - part of it standing proud, the rest already
+   inside the hull - is neither. Over the hull's TOP face that pose is the bed
+   drag NSO_raiseBuriedBitClear undoes, and where it cannot (a bit overhanging
+   the footprint) a corner ray misses and the seat refuses. Against a vertical
+   WALL nothing raises it, and when the wall happens to shadow all four corner
+   rays the fit is perfectly happy: the seat drives every millimetre that stood
+   proud into the hull, leaves the bit buried as a plug through that face, and
+   reports "Seated". One corner further out the very same placement refuses
+   with "corner N missed hull along punch axis". So refuse here too, and name
+   the overhang that is in the way.
+
+   Measured the way the fit measures, and judged one corner at a time: d is how
+   far an OUTER face corner stands outside the skin along the punch, and the
+   bit's depth along that axis is how far its mating face trails behind that
+   corner. d >= depth: that corner's column is clear of the face and only
+   approaches it. d <= what was asked for: it is at or inside the face already.
+   Between the two the face cuts through the bit there, and seating would eat
+   the difference. Per corner, because a hit BEHIND the ray's origin reads as a
+   negative d, and a corner that far off must not combine with a clear corner
+   somewhere else to look like a straddle that is not there.
+
+   Pure - moves nothing. Returns null when no corner is cut, or when a corner
+   misses the hull entirely (the fit's own refusal says so, as it always has). */
+function NSO_seatStraddle(hull, bitMesh, hullCenter, off) {
+  var fr = NSO_plugFrame(bitMesh, hullCenter, hull);
+  var corners = NSO_outerFaceCorners(fr);
+  var depth = fr.box.max.getComponent(fr.axis) - fr.box.min.getComponent(fr.axis);
+  var cut = 0, proudBy = -Infinity;
+  for (var i = 0; i < 4; i++) {
+    var h = NSO_nearestSkinHit(hull, corners[i], fr.punch);
+    if (!h) return null;
+    var d = corners[i].clone().sub(h).dot(fr.outerNormal);
+    if (d > off + NSO_SEAT_STRADDLE_TOL && d < depth - NSO_SEAT_STRADDLE_TOL) {
+      cut++;
+      if (d > proudBy) proudBy = d;
+    }
+  }
+  if (!cut) return null;
+  return { proudBy: proudBy, corners: cut, depth: depth, normal: fr.outerNormal.clone() };
+}
 
 /* The tips probe: null when the hull under the bit is flat (or NSO_Skin is
    not loaded), else { s, sPlane, rise, point, hits }. Pure - moves nothing. */
@@ -731,6 +788,16 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
      coupon convention (negative = air), so it flips to "outside the skin". */
   var refInner = hasGap;
   var off = hasGap ? -gap : proud;
+
+  /* a bit already cut by the face it is being seated to: refuse, never
+     collapse the part of it that stands proud - see NSO_seatStraddle */
+  var straddle = NSO_seatStraddle(hull, bitMesh, hullCenter, off);
+  if (straddle) {
+    return { ok: false, straddle: straddle,
+      reason: 'bit straddles that hull face - ' + straddle.proudBy.toFixed(2)
+        + 'mm of it stands proud and the rest is already inside. Move it clear of the face'
+        + ' (or fully inside) and seat again' };
+  }
 
   /* gap mode: is the surface under the bit a skin? measure before moving */
   var probe = hasGap ? NSO_seatTipsProbe(hull, bitMesh, hullCenter) : null;
