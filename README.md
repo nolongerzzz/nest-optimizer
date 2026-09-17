@@ -36,6 +36,22 @@ Smart build-plate packing for 3D printing.
   piece, plus a repack. It is a separate flag, not a shortcut for locking each
   piece: it writes no per-piece lock, so unlocking the plate gives back exactly
   the piece locks you had set.
+- **Check piece** runs the canonical mesh checker on the selected piece and
+  paints what it finds **on the mesh**, instead of only reporting numbers: red
+  lines along open edges, orange along non-manifold edges, red patches on the
+  triangles of every self-intersecting (piercing) pair, and violet on every
+  face whose wall or gap measures under the 0.42 mm nozzle floor - both sides
+  of the thin wall, so it reads as a wall and not as a skin. The status line
+  carries the verdict and the counts, including the two it counts but cannot
+  usefully paint (inconsistent winding, degenerate triangles).
+  - It is the same checker the tools use (`tools/mesh_validate.py`), not a
+    second opinion: the numbers are held to it on every fixture in the repo.
+  - On demand, and a snapshot. Press again to clear; a bake that changes the
+    piece clears it and says so. Moving, rotating or seating the piece keeps
+    it - the marks travel with the geometry.
+  - A piece flagged **Non-solid** still gets its open edges drawn - you still
+    want to see where it is open - they just stop counting against it. See
+    `docs/DEFECT-OVERLAY.md`
 - **Carve** is a local carving tool - a handheld rotary tool, not the Cutter's
   full-plane Split. Pick a blade profile, arm it, then click a face, an **edge**
   or a **corner** of a piece: the blade is aimed along the outward bisector of
