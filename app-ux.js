@@ -2,23 +2,23 @@
 (function () {
   function stampHud() {
     var el = document.getElementById('adjust-status');
-    if (el) el.textContent = 'HUD inside5';
-    if (typeof setStatus === 'function') setStatus('HUD inside5');
+    if (el) el.textContent = 'HUD inside6';
+    if (typeof setStatus === 'function') setStatus('HUD inside6');
   }
 
   // nsoMaskHudRefresh writes HUD_TAG at rest. Until that const moves with
   // the named tag, retag its line so a selection cannot snap the stamp back.
   function alignMaskHudTag() {
     var fn = window.nsoMaskHudRefresh;
-    if (typeof fn !== 'function' || fn._hudInside5) return;
+    if (typeof fn !== 'function' || fn._hudInside6) return;
     window.nsoMaskHudRefresh = function () {
       fn.apply(this, arguments);
       var el = document.getElementById('adjust-status');
       if (el && el.textContent) {
-        el.textContent = el.textContent.replace(/HUD inside4/g, 'HUD inside5');
+        el.textContent = el.textContent.replace(/HUD inside[45]/g, 'HUD inside6');
       }
     };
-    window.nsoMaskHudRefresh._hudInside5 = true;
+    window.nsoMaskHudRefresh._hudInside6 = true;
   }
 
   function pickIdx(event) {
