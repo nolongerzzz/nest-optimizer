@@ -15,6 +15,13 @@
      3. Without the flag the same clean shapes fail on open edges and Repair
         modifies them - so the flag, and only the flag, is what unblocks them,
         and it is never inferred from the geometry.
+     4. With the flag SET, a shape that is open on purpose AND carries real
+        fixable defects is actually repaired, rather than having the whole
+        repair thrown away by the odd-edge gate. Section 2b. Standing aside
+        from closure never licensed the stages that keep running to leave the
+        surface more open than they found it, and that is what used to
+        happen: deleting a degenerate sliver unpairs its neighbours, and with
+        hole fill skipped there was nothing left to put the seam back.
 
    Plus the paperwork the paint-scope suite pins for mask6: every consumer
    states NON-SOLID SCOPE in its own source and reads the flag through
@@ -86,6 +93,8 @@ console.log('\n== 1. every consumer states NON-SOLID SCOPE in source and reads n
   }
   const rep = read('NSO_Repair.js');
   check('NSO_Repair.js declares NON-SOLID SCOPE', /NON-SOLID SCOPE/.test(rep));
+  check('  ...and says the skip does not license leaving the surface more open',
+        /seam-reclose[\s\S]{0,120}?closes only boundary this run opened/.test(rep));
   check('  ...takes opts.nonSolid and reports it', /nonSolid:\s*!!opts\.nonSolid/.test(rep));
   check('  ...skips exactly flap-peel, orphan-components and hole-fill',
         /note\('flap-peel', false, \{ skipped: 'nonSolid' \}\)/.test(rep) &&
@@ -154,6 +163,133 @@ for (const name of DEFECT) {
   check('synth_hole without the flag is filled as before', h2.report.after.openEdges === 0 && h2.report.counts.holesFilled === 1);
 }
 
+/* ---- 2b. open ON PURPOSE and defective AT THE SAME TIME ---- */
+/* The case the other fixtures cannot make: standing aside from closure must
+ * not turn into standing aside from repair. thin_shell_cup_cracked is the cup,
+ * still open at its two rims by design, carrying the defects a scan-derived
+ * shell actually arrives with - 12 zero-area sliver stitches over T-junctions,
+ * 3 reversed duplicate faces, and the same fin thin_shell_cup_selfint uses.
+ *
+ * Six of the twelve stitches are cut at 4e-4 of their edge, inside the margin
+ * the T-junction split refuses to work in, so deleting those slivers leaves
+ * six three-edge cracks that no later stage can re-stitch. Until this was
+ * fixed, those 18 edges of the repair's OWN damage reached the final odd-edge
+ * gate, which correctly read the piece as more open than it arrived and threw
+ * away every genuine repair with them: odd 109 -> 118, applied false, file
+ * returned untouched, with 9 non-manifold edges still in it.
+ *
+ * Every number below is measured, and the open-edge count is the load-bearing
+ * one: 100 in, 100 out. The piece's own boundary - two 48-edge rims and the
+ * fin's 4 - is bit-for-bit what the user handed over. */
+console.log('\n== 2b. thin_shell_cup_cracked: open by design AND repairable, both at once ==');
+{
+  const raw = readSTL(path.join(FX, 'thin_shell_cup_cracked.stl'));
+  const before = R.inspect(raw);
+  check('fixture arrives open by design (2 rims + the fin) AND defective',
+        before.openEdges === 100 && before.boundaryLoops === 3 && before.nonManifoldEdges === 9 &&
+        before.degenerateTris === 12 && before.selfIntersections === 7,
+        JSON.stringify({ open: before.openEdges, loops: before.boundaryLoops, nm: before.nonManifoldEdges,
+                         degen: before.degenerateTris, pierce: before.selfIntersections }));
+
+  const on = R.commit(raw, { nonSolid: true });
+  const q = on.report, c = q.counts;
+  check('flag on -> the repair is APPLIED, not discarded by the odd-edge gate',
+        q.applied === true && q.declined === false && on.rawTris !== raw, q.reason);
+  check('flag on -> odd edges FALL, they do not rise',
+        q.gate.oddAfter < q.gate.oddBefore, q.gate.oddBefore + ' -> ' + q.gate.oddAfter);
+  check('flag on -> the piece\'s own openings come back untouched',
+        q.after.openEdges === q.before.openEdges && q.after.boundaryLoops === q.before.boundaryLoops,
+        'open ' + q.before.openEdges + ' -> ' + q.after.openEdges +
+        ', loops ' + q.before.boundaryLoops + ' -> ' + q.after.boundaryLoops);
+  check('flag on -> the 9 non-manifold edges are actually fixed',
+        q.before.nonManifoldEdges === 9 && q.after.nonManifoldEdges === 0 && c.reversedDuplicatesRemoved === 3);
+  check('flag on -> the sliver stitches are stripped and 6 of them re-stitched',
+        c.degenerateRemoved === 12 && c.tJunctionSplits === 6,
+        'degenerate ' + c.degenerateRemoved + ', T-junction ' + c.tJunctionSplits);
+  check('flag on -> and the 6 cracks the split could NOT reach are re-closed as seams',
+        c.seamsReclosed === 6 && c.seamTrisAdded === 6 && c.holesFilled === 0,
+        'seams ' + c.seamsReclosed + '/' + c.seamTrisAdded + ' tris, holes filled ' + c.holesFilled);
+  const seam = q.stages.filter(x => x.name === 'seam-reclose')[0];
+  check('flag on -> seam-reclose left the 3 loops the piece arrived with alone',
+        !!seam && seam.reclosed === 6 && seam.preexisting === 3,
+        seam ? 'reclosed ' + seam.reclosed + ', pre-existing ' + seam.preexisting : 'stage absent');
+  check('flag on -> hole fill itself is still skipped, and still says so',
+        q.stages.filter(x => x.skipped === 'nonSolid').map(x => x.name).join(',') ===
+        'flap-peel,orphan-components,hole-fill');
+  check('flag on -> the pierce is neither fixed nor hidden',
+        q.before.selfIntersections === 7 && q.after.selfIntersections === 7);
+  check('flag on -> nothing was peeled or dropped to get there',
+        c.flapTrisRemoved === 0 && c.orphanTrisRemoved === 0);
+
+  /* The repair settles: a second pass hands back the same geometry, float for
+   * float. Its COUNTERS do not go quiet, and that is worth saying plainly -
+   * the only closure a collinear crack has is a zero-area triangle, so the
+   * next pass strips the six fans as degenerates and lays the same six back
+   * down. The mesh is a fixed point; the tally is not. That trade is not new
+   * and not the flag's: without the flag, hole fill has always ended
+   * fixtures/tape_welded_clustered.stl on 7 degenerate fan triangles and
+   * re-made them on every pass since. The flag now reaches the same fixed
+   * point by the same trade, instead of refusing the repair outright. */
+  const again = R.commit(on.rawTris, { nonSolid: true });
+  const sameBytes = again.rawTris.length === on.rawTris.length &&
+                    again.rawTris.every((v, i) => v === on.rawTris[i]);
+  check('flag on -> a second pass returns the same geometry, float for float', sameBytes,
+        again.rawTris.length / 9 + ' tris vs ' + on.rawTris.length / 9);
+  check('flag on -> ...by re-laying the same 6 zero-area fans, not by finding new work',
+        again.report.counts.degenerateRemoved === 6 && again.report.counts.seamsReclosed === 6 &&
+        again.report.after.openEdges === 100 && again.report.after.nonManifoldEdges === 0,
+        'degenerate ' + again.report.counts.degenerateRemoved + ', seams ' +
+        again.report.counts.seamsReclosed + ', open ' + again.report.after.openEdges);
+
+  /* WITHOUT the flag this same shape declines, and for a reason that has
+   * nothing to do with this fix: hole fill is all-or-nothing, so fanning the
+   * two rims shut - which is what "not flagged" asks for - self-intersects at
+   * 166 pairs, the gate rolls the whole stage back including the six crack
+   * fills, and the final odd-edge gate then stops the result. Pinned as the
+   * measured behaviour it is, and as the reason an open piece wants the flag:
+   * it is not a control that should pass. */
+  const off = R.commit(raw);
+  check('flag OFF -> declines, hole fill rolled back on the rim fan (unchanged by this fix)',
+        off.report.applied === false && off.rawTris === raw &&
+        /hole-fill:selfInt 7->166/.test(off.report.gate.blockedStages.join(',')),
+        off.report.reason + ' | ' + off.report.gate.blockedStages.join(', '));
+}
+
+/* ---- 2c. the same thing on a real mesh ---- */
+/* fixtures/tape_welded_clustered.stl is a 32,860-triangle part off the repo's
+ * own bench, not a construction: 295 collinear sliver stitches, closed on
+ * arrival. It is where this was found. Flagging it non-solid used to take the
+ * odd-edge count from 0 to 15 and discard everything - 295 degenerates, 288
+ * T-junctions and a drop of 56 piercing pairs, all thrown away over 15 edges
+ * the repair had opened itself. The flag now lands on exactly the result the
+ * unflagged path lands on, which is the point: the flag was never supposed to
+ * change what the surviving stages achieve, only which stages survive. */
+console.log('\n== 2c. tape_welded_clustered (real mesh, 32,860 tris): the flag stops costing the repair ==');
+{
+  const raw = readSTL(path.join(ROOT, 'fixtures', 'tape_welded_clustered.stl'));
+  const on = R.commit(raw, { nonSolid: true }), off = R.commit(raw);
+  const qa = on.report, qb = off.report;
+  check('real mesh: 295 collinear sliver stitches, closed on arrival',
+        qa.before.degenerateTris === 295 && qa.before.oddEdges === 0 && qa.before.selfIntersections === 185,
+        'degen ' + qa.before.degenerateTris + ', odd ' + qa.before.oddEdges + ', pierce ' + qa.before.selfIntersections);
+  check('flag on -> applied (this is the case that used to go 0 -> 15 and discard)',
+        qa.applied === true && qa.gate.oddAfter === 0, qa.reason);
+  check('flag on -> the whole repair survives: 295 degenerate, 288 T-junctions',
+        qa.counts.degenerateRemoved === 295 && qa.counts.tJunctionSplits === 288);
+  check('flag on -> 4 seams re-closed, 0 holes filled, nothing peeled',
+        qa.counts.seamsReclosed === 4 && qa.counts.seamTrisAdded === 7 &&
+        qa.counts.holesFilled === 0 && qa.counts.flapTrisRemoved === 0,
+        'seams ' + qa.counts.seamsReclosed + '/' + qa.counts.seamTrisAdded + ' tris');
+  check('flag on -> 56 fewer piercing pairs, a real improvement that used to be binned',
+        qa.after.selfIntersections === 129 && qa.before.selfIntersections === 185);
+  check('flag on and flag off now reach the same mesh',
+        qa.after.oddEdges === qb.after.oddEdges && qa.after.tris === qb.after.tris &&
+        qa.after.degenerateTris === qb.after.degenerateTris &&
+        qa.after.selfIntersections === qb.after.selfIntersections,
+        'odd ' + qa.after.oddEdges + '/' + qb.after.oddEdges + ', degen ' +
+        qa.after.degenerateTris + '/' + qb.after.degenerateTris);
+}
+
 /* ---- 3. the validator's verdict ---- */
 console.log('\n== 3. mesh_validate.py --gate: clean passes with the flag, defects fail with it, clean fails without it ==');
 for (const name of CLEAN) {
@@ -168,6 +304,18 @@ for (const name of CLEAN) {
 for (const name of DEFECT) {
   const j = validate(path.join(FX, name + '.stl'), ['--non-solid']);
   check(name + ': --non-solid -> FAIL on the pierce', j.exit === 1 && /self-intersecting/.test(fails(j)), fails(j));
+}
+{
+  /* The one fixture here that is open by design AND defective: the flag must
+   * lift the open-edge count and nothing else, so all four other classes stay
+   * in the verdict. This is the validator's half of section 2b. */
+  const j = validate(path.join(FX, 'thin_shell_cup_cracked.stl'), ['--non-solid']);
+  check('thin_shell_cup_cracked: --non-solid -> FAIL, and on every class except closure',
+        j.exit === 1 && j.nonmanifold_edges === 9 && j.inconsistent_winding_edges === 9 &&
+        j.degenerate_tris === 12 && j.self_intersection.pierce === 7 && !/open edges/.test(fails(j)),
+        fails(j));
+  check('  ...its 100 open edges are measured and not counted against it',
+        j.open_edges === 100, String(j.open_edges));
 }
 {
   const j = validate(path.join(FX, 'thin_shell_cup_thin.stl'), ['--non-solid']);

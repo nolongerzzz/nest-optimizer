@@ -2356,6 +2356,10 @@ function sealSelectedModel() {
   // still runs: NSO_Repair skips only its three closure-premised stages
   // (flap peel, orphan drop, hole fill) and keeps welding, degenerate and
   // duplicate removal, T-junctions, pinch separation and both final gates.
+  // It also re-closes any seam its own earlier stages tore open, which is why
+  // a flagged piece with real defects now repairs instead of tripping the
+  // odd-edge gate on damage the repair itself did; the piece's own openings
+  // are left alone, and the status line below names the two separately.
   const nonSolid = (typeof nsoNonSolid === 'function') && nsoNonSolid(m);
   if (nonSolid && !repairMode) {
     setStatus('Seal stood down - ' + m.name + ' is flagged non-solid and Seal only closes ' +
@@ -2543,6 +2547,12 @@ function sealSelectedModel() {
     if (c.tJunctionSplits) did.push(c.tJunctionSplits + ' T-junction(s)');
     if (c.pinchVertsSplit) did.push(c.pinchVertsSplit + ' pinch vert(s) split');
     if (c.holesFilled) did.push(c.holesFilled + ' hole(s) filled');
+    // Not the same thing as a filled hole, and not shown as one: a seam is
+    // boundary an earlier stage of this same repair opened (deleting a
+    // degenerate sliver unpairs its neighbours), put back. Only the non-solid
+    // path reports these - without the flag hole fill has already covered
+    // them - and no opening the piece arrived with is ever counted here.
+    if (c.seamsReclosed) did.push(c.seamsReclosed + ' seam(s) re-closed');
     const siAfter = (repairReport && repairReport.after) ? repairReport.after.selfIntersections : 0;
     const counts = 'open edges ' + openStr + ', non-manifold ' + nmStr +
                    (did.length ? '; ' + did.join(', ') : '') +
