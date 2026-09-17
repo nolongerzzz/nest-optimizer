@@ -604,6 +604,41 @@ function NSO_nearestSkinHit(soup, o, dir) {
   return o.clone().addScaledVector(dir, bestT * sgn);
 }
 
+/* How far inside its own face a corner ray starts.
+
+   Every corner of the bit's outer face sits exactly on the bit's silhouette,
+   so a ray that leaves one runs along the edge of whatever the bit's own box
+   is flush with. Two pieces settled side by side on the bed are flush by
+   construction - settlePlacedOnBed puts both world-box bottoms on 0.2 - and
+   the bottom corner rays then travel along the hull's bottom edge, where
+   NSO_rayTri needs a strictly interior barycentric hit and misses: the seat
+   refused every horizontal seat with "corner 0 missed hull along punch axis"
+   while the very same pieces, the bit raised by any amount, seated fine.
+
+   One micron along the face's own diagonal moves the origin off that edge and
+   nowhere else. It is ~100x the Float32 vertex noise a plate-sized coordinate
+   carries (~1e-5 mm; the graze that lost the bed case measures ~1e-9), and
+   1/10 of the gap slider's 0.01 mm step, 1/100 of NSO_SEAT_STRADDLE_TOL, so
+   no offset the seat can express sees a different point. It is a fraction of
+   the way to the face centre, never a fixed step, so a sub-millimetre bit
+   still samples inside its own face rather than past it. */
+var NSO_SEAT_RAY_INSET = 0.001;
+
+function NSO_seatRayOrigins(corners) {
+  var mid = new THREE.Vector3(), i;
+  for (i = 0; i < corners.length; i++) mid.add(corners[i]);
+  mid.multiplyScalar(1 / corners.length);
+  var out = [];
+  for (i = 0; i < corners.length; i++) {
+    var dir = mid.clone().sub(corners[i]);
+    var len = dir.length();
+    out.push(len > 1e-12
+      ? corners[i].clone().addScaledVector(dir, Math.min(0.25, NSO_SEAT_RAY_INSET / len))
+      : corners[i].clone());
+  }
+  return out;
+}
+
 /* Newell normal of an ordered quad */
 function NSO_newellNormal(pts) {
   var n = new THREE.Vector3();
@@ -675,6 +710,11 @@ var NSO_SEAT_TIPS_TOL = 0.01;
    not refuse; anything past this is a real protrusion the user put there. */
 var NSO_SEAT_STRADDLE_TOL = 0.1;
 
+/* The bed baseline, in Float: a settled world-box bottom lands on 0.2 to
+   within rounding, so a lift measured back off it can come out a hair
+   negative with nothing wrong. See the clamp in seatBitAtGap. */
+var NSO_SEAT_BED_EPS = 1e-6;
+
 /* The pose the corner-ray fit is built for: the bit approaches the target face
    from OUTSIDE it (a staged plug, a bit raised clear, a side seat), or lies
    wholly inside it (a plug being re-seated). Either way the seat slides the
@@ -706,10 +746,11 @@ var NSO_SEAT_STRADDLE_TOL = 0.1;
 function NSO_seatStraddle(hull, bitMesh, hullCenter, off) {
   var fr = NSO_plugFrame(bitMesh, hullCenter, hull);
   var corners = NSO_outerFaceCorners(fr);
+  var origins = NSO_seatRayOrigins(corners);
   var depth = fr.box.max.getComponent(fr.axis) - fr.box.min.getComponent(fr.axis);
   var cut = 0, proudBy = -Infinity;
   for (var i = 0; i < 4; i++) {
-    var h = NSO_nearestSkinHit(hull, corners[i], fr.punch);
+    var h = NSO_nearestSkinHit(hull, origins[i], fr.punch);
     if (!h) return null;
     var d = corners[i].clone().sub(h).dot(fr.outerNormal);
     if (d > off + NSO_SEAT_STRADDLE_TOL && d < depth - NSO_SEAT_STRADDLE_TOL) {
@@ -734,8 +775,9 @@ function NSO_seatTipsProbe(hull, bitMesh, hullCenter) {
   var ext = NSO_Skin.supportExtreme(hull, fp, [nrm.x, nrm.y, nrm.z], { sMax: sOuter });
   if (!ext) return null;
   var hits = [], sSum = 0;
+  var oRay = NSO_seatRayOrigins(outer);
   for (i = 0; i < 4; i++) {
-    var h = NSO_nearestSkinHit(hull, outer[i], fr.punch);
+    var h = NSO_nearestSkinHit(hull, oRay[i], fr.punch);
     if (!h) return null;
     hits.push(h);
     sSum += h.dot(nrm);
@@ -843,11 +885,12 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
   for (var it = 0; it < iters; it++) {
     var frame = NSO_plugFrame(bitMesh, hullCenter, hullSoup);
     var corners = NSO_outerFaceCorners(frame);
+    var rayFrom = NSO_seatRayOrigins(corners);
     var punch = frame.punch;
 
     var hits = [];
     for (var i = 0; i < 4; i++) {
-      var h = NSO_nearestSkinHit(hull, corners[i], punch);
+      var h = NSO_nearestSkinHit(hull, rayFrom[i], punch);
       if (!h) {
         bitMesh.position.copy(savedPos);
         bitMesh.quaternion.copy(savedQuat);
@@ -908,6 +951,7 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
      the skin, against the offset that was asked for */
   var frameF = NSO_plugFrame(bitMesh, hullCenter);
   var cf = NSO_outerFaceCorners(frameF);
+  var cfRay = NSO_seatRayOrigins(cf);
   var cref = refInner ? NSO_matingFaceCorners(frameF) : cf;
   var resid = [], maxResid = 0, dMin = Infinity, dMax = -Infinity, dSum = 0, dN = 0;
   for (var r = 0; r < 4; r++) {
@@ -916,7 +960,7 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
        ray cast from a corner that sits exactly on the skin (gap 0) would
        miss that face - the hit filter rejects t = 0 - and report the far
        side of the hull instead. */
-    var hh = NSO_nearestSkinHit(hull, cf[r], frameF.punch);
+    var hh = NSO_nearestSkinHit(hull, cfRay[r], frameF.punch);
     var dv = hh ? cf[r].clone().sub(hh).dot(frameF.outerNormal) : NaN;
     if (refInner && isFinite(dv)) dv -= cf[r].clone().sub(cref[r]).dot(frameF.outerNormal);
     resid.push(dv);
@@ -1884,7 +1928,14 @@ function seatBitAtGap(placedA, placedB, gap) {
   const bb = meshLocalBox3(placedB.mesh);
   let lift = bb.min.y - 0.2;
   let clamped = false;
-  if (lift < 0) { clamped = true; lift = 0; }
+  /* A horizontal seat slides the bit along the bed and never changes its
+     height, so a bit that was already settled comes back with a lift of
+     -1e-16: the bed baseline in Float, not a piece the seat pushed into the
+     plate. Only a sink the seat could actually express is worth the warning -
+     the slider's own 0.01 mm step is the smallest of those, and this epsilon
+     is four orders below it. */
+  if (lift < -NSO_SEAT_BED_EPS) { clamped = true; lift = 0; }
+  else if (lift < 0) lift = 0;
   placedB.liftY = lift;
   applyPlacedXZ(placedB, placedB.x, placedB.z);
 
@@ -1930,9 +1981,10 @@ function reportJoinFlushGap() {
     hullCenter.applyMatrix4(placedA.mesh.matrixWorld);
     const frame = NSO_plugFrame(placedB.mesh, hullCenter, hull);
     const corners = NSO_outerFaceCorners(frame);
+    const rayFrom = NSO_seatRayOrigins(corners);
     let n = 0, sum = 0, mn = Infinity, mx = -Infinity;
     for (let i = 0; i < corners.length; i++) {
-      const h = NSO_nearestSkinHit(hull, corners[i], frame.punch);
+      const h = NSO_nearestSkinHit(hull, rayFrom[i], frame.punch);
       if (!h) continue;
       const d = corners[i].clone().sub(h).dot(frame.outerNormal);
       if (!isFinite(d)) continue;
