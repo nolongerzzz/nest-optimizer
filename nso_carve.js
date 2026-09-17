@@ -430,12 +430,30 @@
 
     var r2 = radius * radius, i;
     var clusters = [];              /* { n, area, best (sq dist), point } */
+    /* `nearest` is the closest real surface point among the triangles the
+       prefilter kept. Sound because it is only read once a cluster exists, and
+       a cluster means a triangle within `radius` was kept - so the true nearest
+       point is in that set. */
     var cp = [0, 0, 0], nearest = null, nearestD2 = Infinity;
 
+    var px = point[0], py = point[1], pz = point[2];
     for (i = 0; i < hullSoup.length; i += 9) {
-      var a = [hullSoup[i], hullSoup[i + 1], hullSoup[i + 2]];
-      var b = [hullSoup[i + 3], hullSoup[i + 4], hullSoup[i + 5]];
-      var c = [hullSoup[i + 6], hullSoup[i + 7], hullSoup[i + 8]];
+      /* Conservative AABB reject before the closest-point solve. A triangle
+         whose bounding box is more than `radius` from the aim point on ANY axis
+         cannot have a closest point within radius, so this never changes the
+         answer - it only stops a ~40-operation solve running on every triangle
+         of the piece. It matters because this is a tool for repeated clicks:
+         fixtures/tape_on-edge-single-B101_rounded_v8_FINAL.stl is 98,586
+         triangles and a blade reaches a few mm of them. */
+      var t0 = hullSoup[i], t1 = hullSoup[i + 1], t2 = hullSoup[i + 2];
+      var t3 = hullSoup[i + 3], t4 = hullSoup[i + 4], t5 = hullSoup[i + 5];
+      var t6 = hullSoup[i + 6], t7 = hullSoup[i + 7], t8 = hullSoup[i + 8];
+      if (px < Math.min(t0, t3, t6) - radius || px > Math.max(t0, t3, t6) + radius) continue;
+      if (py < Math.min(t1, t4, t7) - radius || py > Math.max(t1, t4, t7) + radius) continue;
+      if (pz < Math.min(t2, t5, t8) - radius || pz > Math.max(t2, t5, t8) + radius) continue;
+      var a = [t0, t1, t2];
+      var b = [t3, t4, t5];
+      var c = [t6, t7, t8];
       var d2 = closestOnTri(point, a, b, c, cp);
       if (d2 < nearestD2) { nearestD2 = d2; nearest = [cp[0], cp[1], cp[2]]; }
       if (d2 > r2) continue;
