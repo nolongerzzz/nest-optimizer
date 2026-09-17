@@ -219,19 +219,37 @@ branch (it reads `#opt-orient` / `#opt-rotate`, neither of which is in
 index.html - already true at 63c5b00). An earlier draft of the check did press
 it and asserted `state.placed.length > 0`, which passed for the wrong reason,
 since `handleFiles()` already places the imported piece. Both are in `npm test`. Like the CTH
-browser checks, the drive serves three from devDependencies, not the CDN. On a
-runner whose Chromium predates the installed Playwright, set `CHROME_PATH`.
+browser checks, the drive serves three from devDependencies, not the CDN.
 
-Concrete, as of 2026-09-15: bare `npm test` **exits 1** in the web sandbox with
-`browserType.launch: Executable doesn't exist at
-/opt/pw-browsers/chromium_headless_shell-1243/...` — playwright wants 1243, the
-box ships 1194. Not a code failure; the four dependency-free cth:unit files pass
-first and the chain then stops at `cth:capture`. Run it as
-`CHROME_PATH=/opt/pw-browsers/chromium npm test` (that path is a symlink to the
-1194 binary), which exits 0 - re-confirmed 2026-09-15 after the Format-selector
-change. `tools/nso_app_harness.js` (the wire-* suites) already resolves this
-itself in `chromiumPath()` and needs no env var; `cth-test/browser-lib.mjs` and
-`3mf-test/export-drive-check.mjs` read `CHROME_PATH` only.
+**No `CHROME_PATH` is needed, in the sandbox or anywhere else the browser is
+already on the box** (2026-09-17). The devDependency is pinned to an exact
+`playwright` version - `1.56.1`, not a `^` range - chosen because it is the
+Playwright whose browsers.json asks for Chromium revision **1194**, which is the
+revision the web sandbox ships at `/opt/pw-browsers` (Chromium 141.0.7390.37),
+together with `chromium_headless_shell` 1194 and `ffmpeg` 1011. A clean
+`npm install` therefore lands a Playwright that finds its browser where it
+already is, and bare `npm test` exits 0.
+
+What that pin replaced: `^1.47.0` resolved to whatever npm called latest
+(1.63.0 by 2026-09-17), which wants Chromium 1243, so `npm test` died at step 2
+on `browserType.launch: Executable doesn't exist at
+/opt/pw-browsers/chromium_headless_shell-1243/...`. Not a code failure - the
+four dependency-free cth:unit files passed first and the chain stopped at
+`cth:capture` - but every thread that hit it worked around it separately
+(`CHROME_PATH=/opt/pw-browsers/chromium npm test`, or a hand `--no-save`
+install of a matching Playwright). The sandbox cannot fetch the missing build:
+`npx playwright install` is refused by the egress proxy
+(`403 ... no rule or allowlist entry allows host "cdn.playwright.dev"`), so
+matching the pin to the box is the only fix that needs no per-run flag.
+
+If you move the sandbox image to a different Chromium revision, re-pin rather
+than re-introduce the env var: read the wanted revision out of a candidate's
+`node_modules/playwright-core/browsers.json` (or `npx playwright install
+--dry-run`, which prints the install location per browser) and pick the
+`playwright` version whose number matches the box. `CHROME_PATH` still works as
+an escape hatch - `cth-test/browser-lib.mjs` and the two `3mf-test` drive checks
+read it - and `tools/nso_app_harness.js` resolves the binary itself in
+`chromiumPath()`, so the harness suites never needed it.
 
 ## Export round trip + fixture integrity - standing checks (added 2026-09-16)
 
@@ -505,11 +523,11 @@ ubuntu-latest ships Python 3 on PATH and the green runs are the evidence. If a
 runner image ever drops it, this is the suite that breaks first, and the fix is a
 `setup-python` step in the workflow, not a change to the test.
 
-**No CHROME_PATH here, and that is the whole point.** `npx playwright install`
-fetches the exact revision the locked Playwright wants
-(`chromium_headless_shell` v1243) - the thing the web sandbox cannot do, which
-is the only reason CHROME_PATH exists. The sandbox workaround above stays
-sandbox-only.
+**No CHROME_PATH here either.** `npx playwright install` fetches the exact
+revision the pinned Playwright wants (`chromium_headless_shell` v1194 for
+`playwright` 1.56.1) and CI has the outbound access to do it. The web sandbox
+does not, which is why the pin is matched to the build that is already on that
+box - see the 3MF checks section above. Neither path sets `CHROME_PATH`.
 
 **A runner DOES have outbound network.** Measured 2026-09-15, not assumed:
 `cdn.jsdelivr.net` returns 200 for the manifold js (74762 B), the manifold wasm
@@ -1616,12 +1634,12 @@ plug pulled back out, the locked -0.18 easy-release seat with its export
 through `tools/mesh_validate.py --json` (watertight, 0 piercing, 0 coplanar,
 two shells 0.18 mm apart), +0.05 and 0 re-seated from their own results, and a
 -0.18 gap seat against a wall. `npm run seat:gap` and `npm run seat:align`
-unchanged. Every `npm test` step ran green here except the four that launch
-Playwright's own default browser build (`cth-test/capture-check.mjs`,
-`cth-test/drive-check.mjs` and the two `3mf-test` drive checks): this sandbox
-ships a Chromium that build does not match, and they fail the same way on a
-clean tree. The suites that matter here all go through
-`tools/nso_app_harness.js`, which picks the Chromium that is on disk.
+unchanged, and `npm test` green. (When this landed, the four steps that launch
+Playwright's own default browser build - `cth-test/capture-check.mjs`,
+`cth-test/drive-check.mjs` and the two `3mf-test` drive checks - could only run
+here with a hand-installed Playwright that matched the sandbox's Chromium. The
+devDependency is pinned to that version now, so a clean `npm install` runs all
+of them; see the 3MF checks section.)
 
 **Known limits, stated not solved.**
 - A bit that straddles is refused, not rescued. The vertical case has

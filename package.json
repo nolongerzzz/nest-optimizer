@@ -42,7 +42,7 @@
     "defects:drive": "node tools/nso_defect_overlay_drive_check.js"
   },
   "devDependencies": {
-    "playwright": "^1.47.0",
+    "playwright": "1.56.1",
     "three": "0.147.0"
   }
 }
