@@ -56,8 +56,27 @@ async function checkPiece(page, file, opts) {
     }, id);
   }
   await page.click('#btn-check-defects');
-  await page.waitForFunction(() => window.nsoDefectsReport() !== null, null, { timeout: 60000 });
+  await waitForCheckOn(page, id);
   return id;
+}
+
+/* Wait for THIS piece's check to be the one on screen.
+   `nsoDefectsReport()` is not per piece - it is whatever check is currently
+   drawn, and the overlay deliberately survives a selection change (app-defects.js:
+   another piece's check stays up and running this one replaces it). So after the
+   second press onwards it is already non-null, holding the PREVIOUS piece's
+   report, and "wait until it is non-null" is satisfied before this press has
+   computed anything: the button defers the battery by a task so the "Checking..."
+   line paints first. On a fast box the read that follows wins that race and sees
+   the last piece's numbers with no marks on this one - which is exactly the
+   "0 piercing, 96 open" (the cup's report) and "0 triangles" this check reported
+   in CI while the piece under test was the clip.
+   `nsoDefectsShownFor()` is the accessor that answers WHOSE check is up, so that
+   is what the wait is on. It turns over only inside nsoDefectsShow, after the
+   report is stored and the marks are parented, so once it reads this id every
+   part of what the assertions read is in place. */
+async function waitForCheckOn(page, id) {
+  await page.waitForFunction(i => window.nsoDefectsShownFor() === i, id, { timeout: 60000 });
 }
 
 /* Every mark vertex, in world space, by layer; plus the piece's own displayed
@@ -65,6 +84,14 @@ async function checkPiece(page, file, opts) {
    here rather than assumed. */
 async function readScene(page, id) {
   return page.evaluate(i => {
+    /* Never read one piece's marks against another piece's report. checkPiece
+       waits for exactly this, so a mismatch here is not a defect count to
+       argue with - it means the read got ahead of the check and every number
+       below belongs to the previous piece. Loud, not silently wrong. */
+    if (window.nsoDefectsShownFor() !== i) {
+      throw new Error('the check on screen is for model ' + window.nsoDefectsShownFor() +
+                      ', not ' + i + ' - the report and the marks would not be the same piece\'s');
+    }
     const p = state.placed.find(q => q && q.sourceId === i);
     const grp = p.mesh.children.find(c => c.name === 'nso-defect-marks');
     p.mesh.updateMatrixWorld(true);
@@ -316,7 +343,7 @@ withApp(async (page, logs) => {
 
     // and a bake that swaps the mesh drops a stale overlay
     await page.click('#btn-check-defects');
-    await page.waitForFunction(() => window.nsoDefectsReport() !== null, null, { timeout: 60000 });
+    await waitForCheckOn(page, id);
     const stale = await page.evaluate(i => {
       const p = state.placed.find(q => q && q.sourceId === i);
       const had = !!p.mesh.children.find(c => c.name === 'nso-defect-marks');
