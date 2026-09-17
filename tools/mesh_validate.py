@@ -472,11 +472,16 @@ def self_intersections(tris, index, eps, max_report, verts=None):
 # ------------------------------------------------------------ wall / gap check
 
 # One extrusion line at a 0.4 mm nozzle. nso_skin.js states the same default
-# for its thinnest rib ("thinner and the slicer drops the rib"). There is no
-# other nozzle constant in this repo - the fillet clamp in app-cut.js measures
-# a 2D cross-section and never compares against a printability floor - so this
-# is the first positive thin-feature check, and it is a stated default, not a
-# measured one.
+# for its thinnest rib ("thinner and the slicer drops the rib"). A stated
+# default, not a measured one.
+#
+# This used to be the only printability floor in the repo. It is now shared:
+# nso_thickness.js is a JS port of wall_thickness() below, with the same floor
+# (floorFor(0.4) == 0.42) and the same report, so the app can ask the question
+# this file could only answer from a CLI. That port is checked against THIS
+# implementation on every fixture in tools/nso_wall_thickness_test.js and must
+# agree to 1e-9 - if you change the algorithm here, that test will tell you.
+# See docs/WALL-THICKNESS.md.
 NOZZLE_MIN_WALL = 0.42
 WALL_PROBE = 5.0
 
