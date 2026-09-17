@@ -207,6 +207,13 @@
                   <option value="ring">ring</option>
                 </select>
               </div>
+              <div class="vp-row vp-row-skin">
+                <button id="btn-skin-patch" class="btn btn-secondary" type="button" title="Bake the skin pattern as its own printable piece instead of onto a face - the relief alone, like a washer you can test on its own. Adds a NEW piece (30 x 30 mm, the same footprint the skin samples use) and leaves every existing piece untouched. bordered: the pattern inside a solid 1.2 mm rim standing 0.6 mm proud of its tips, one closed shell. loose: the pattern's features alone, solid, no rim and no backing plate - a free-standing one-extrusion-line lattice, so this one is flagged Non-solid.">Skin patch</button>
+                <select id="skin-patch-variant" class="vp-select" title="Which standalone patch. bordered: a washer - the pattern held inside a solid rim that takes the handling, self-contained and closed. loose: the raw pattern only, no frame and no backing plate, with ties where the pattern's own features do not touch each other (the zigzag's ridges). Both are real walls, never an infinitely thin surface." aria-label="Skin patch variant">
+                  <option value="bordered">bordered</option>
+                  <option value="loose">loose</option>
+                </select>
+              </div>
               <div class="vp-row vp-row-carve">
                 <button id="btn-carve" class="btn btn-secondary btn-carve" type="button" aria-pressed="false"
                         title="Local carving tool. Arm it, then click a face, an edge or a corner of a piece: the blade is aimed along the outward bisector of whatever faces it can reach there, and just that local volume is subtracted. A corner gouge and an edge chamfer need no rotation - the blade lays its sweep axis along the edge itself. Click Carve again to stop. Unlike Subtract this consumes nothing, so the same blade carves the next edge too.">Carve</button>
@@ -280,6 +287,7 @@
   <script src="nso-defects.js?v=inside5"></script>
   <script src="nso_planar_fuse.js?v=inside4"></script>
   <script src="nso_skin.js?v=skin2"></script>
+  <script src="nso_skin_patch.js?v=skin3"></script>
   <script src="nso_carve.js?v=carve1"></script>
   <script src="nso-cooling-profiles.js"></script>
   <script src="nso-3mf.js"></script>
@@ -292,6 +300,7 @@
   <script src="app-join.js?v=inside4"></script>
   <script src="app-carve.js?v=carve1"></script>
   <script src="app-skin.js?v=skin2"></script>
+  <script src="app-skin-patch.js?v=skin3"></script>
   <script src="app-mask.js?v=inside5"></script>
   <script src="app-nonsolid.js?v=inside4"></script>
   <script src="app-poslock.js?v=lock1"></script>
