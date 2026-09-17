@@ -19,6 +19,10 @@ Smart build-plate packing for 3D printing.
 - Auto-nest with optional 45°/90° rotations
 - Adjustable gap between models
 - Live 3D preview
+- **Measure** — click two points on the pieces for the distance between them in mm,
+  or switch to Edge and click one edge for its length. Corners and edges snap, the
+  number is drawn on the piece, and it follows the piece when you move it.
+  See [docs/MEASURE.md](docs/MEASURE.md).
 - Export positioned models as STL (ready to drop into Bambu Studio / Orca / PrusaSlicer)
 - Or pick **Format: 3MF** in the Export card and the same two buttons write a
   Bambu Studio `.3mf` project with cooling settings baked in, chosen from a small
