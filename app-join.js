@@ -1408,7 +1408,16 @@ async function subtractSoupBFromA(aWorld, bWorld, opts) {
     var volBefore = manA.volume();
     var volAfter = result.volume();
     var removedVol = volBefore - volAfter;
-    var noopEps = Math.max(1e-3, volBefore * 1e-4); // absolute floor + 0.01% of hull volume
+    // The default floor is sized for a PLUG: a port cutout is a large fraction
+    // of the hull, and the guard has to be loose enough that float noise on a
+    // 64,000 mm^3 block never reads as a real cut. A local carve is legitimately
+    // smaller than that - a 1.5 mm ball gouge at a corner of the same block is
+    // ~2 mm^3, or 0.003% - so a caller whose op does not depend on this guard
+    // to protect a piece it is about to delete can set its own floor.
+    // opts.minRemoved is that override, and absent it the behaviour is
+    // unchanged: absolute floor + 0.01% of hull volume.
+    var askEps = Number(opts.minRemoved);
+    var noopEps = (isFinite(askEps) && askEps > 0) ? askEps : Math.max(1e-3, volBefore * 1e-4);
     if (removedVol <= noopEps) {
       throw new Error('removed ~0 volume (' + removedVol.toFixed(4) +
         ' mm^3) -- bit likely does not touch the hull skin; check placement');
