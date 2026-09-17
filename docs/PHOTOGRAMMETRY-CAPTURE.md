@@ -268,9 +268,26 @@ cost.
 5. The shot list in section 5 is **complete**, not approximately complete. A
    ring with a missing position is a re-shoot of that position, not a
    judgement call.
-6. Every frame is in focus at 100 % zoom on the subject. Delete and re-take
-   any frame that is not; a soft frame is worse than a missing one, because it
-   will register weakly and drag the bundle.
+6. Every frame is in focus at 100 % zoom on the subject. Re-take any frame
+   that is not.
+
+   **The usual justification for this rule is wrong, and the real behaviour is
+   worse.** Measured: Gaussian defocus out to a **4 px** radius on 4032 px
+   frames changed registration not at all (8/8 at every level), moved mean
+   track length under 4 %, and slightly *improved* reprojection error. Soft
+   frames do not "register weakly and drag the bundle" — that claim was in this
+   spec's first draft and the measurement removed it.
+
+   But at **8 px** the same capture lost 60 % of its keypoints and registered
+   **4 of 8**. Defocus does not degrade a capture gradually; it does nothing at
+   all and then it destroys it, with no useful warning band between. An
+   operator cannot distinguish 4 px from 8 px on a camera back.
+
+   So the rule is a **margin against a cliff**, not a defence against gradual
+   decay — which is why it stays absolute here. Two things this does not cover:
+   fine texture is consumed by the **dense** stage rather than by sparse
+   registration, and **motion blur is directional** where defocus is isotropic.
+   Neither was measured.
 7. The subject fills roughly **60–80 %** of the frame's short dimension in
    every ring frame.
 
