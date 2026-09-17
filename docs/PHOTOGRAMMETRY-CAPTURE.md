@@ -142,18 +142,28 @@ recorded as a named extra pass.
 every point that is visible across a 90° sweep of the object into roughly 6
 frames per ring. That is the target: the feasibility report measures mean track
 length as the statistic that actually tracks reconstruction quality, and a
-capture built this way is aiming at **track length 5 or better**, which is what
-the full reference capture achieved.
+capture built this way is aiming at **track length 5 or better**.
+
+The total is anchored to a measurement rather than to convention. The reference
+capture reached **track length 5.08 with 41 frames spanning ~169° of azimuth**
+— about **0.24 frames per degree** — while registering 41 of 41 into a single
+model. Holding that density around a full 360° gives **≈87 frames**, and this
+list specifies 93. So the size of the list is the measured density of a capture
+that demonstrably worked, extended to the full orbit the reference capture
+never made, plus a small margin.
 
 **Three rings, not one denser ring.** Measured: the reference capture's 41
 frames span 8.5° to 79.7° in elevation, and that elevation spread is doing work
 that no amount of extra azimuth density would do. A surface facing up is seen
 edge-on from ring A and face-on from ring C; only ring C can measure it.
 
-**24 per ring is above the measured failure point on purpose.** The feasibility
-report finds the reconstruction still succeeding well below this. The margin is
-not waste — it is what makes the capture deterministic rather than marginal,
-and it is what absorbs the frames that get deleted at check 8.2.6.
+**24 per ring is far above the measured failure point, on purpose.** The
+feasibility report finds registration still succeeding at 10 evenly-spread
+frames on this subject — and failing unpredictably below that, with 8 frames
+registering only 4 while 7 frames registered all 7. The specification does not
+sit near that boundary, because a capture whose success depends on which
+frames happened to land is not deterministic, whatever its average behaviour.
+The margin is also what absorbs the frames deleted at check 8.2.6.
 
 ### 5.3 The flip
 
@@ -266,9 +276,36 @@ cost.
 
 ### 8.3 Post-SfM (cheap, before committing to the dense stage)
 
-Sparse reconstruction is a small fraction of the total cost, so it is the right
-place to gate. The companion feasibility report measures what these numbers do
-as coverage degrades; the thresholds below are read off those measurements.
+Sparse reconstruction is a small fraction of the total cost — **82 s against
+13 minutes** of feature extraction and matching on the reference capture — so
+it is the right place to gate. Run the sparse reconstruction, check these five,
+and only then spend the dense stage.
+
+| # | check | threshold | where it comes from |
+|---|---|---|---|
+| 8 | **every submitted frame registered** | 100 %, no exceptions | measured: partial registration is not graceful degradation. 8 frames registered 4 while 7 frames registered all 7 |
+| 9 | **exactly one sub-model** | 1 | two sub-models are two unrelated coordinate frames; they cannot be combined into one part |
+| 10 | **mean track length** | **≥ 4.0** | measured: 20 evenly-spread frames reach 4.12, the full 41 reach 5.08, and a disciplined 11-frame capture reached 4.77. Below ~3 the average point rests on a single baseline |
+| 11 | **no azimuth gap between recovered cameras > 30°** | 30° | convention: twice the 15° design step of section 5. It is the check that catches a shot list executed incompletely, and it is the one the reference capture fails — a 166.8° gap, which is where its mesh has a hole |
+| 12 | **mean reprojection error** | report it; investigate only above ~2 px | measured, and **deliberately not a quality gate** — see below |
+
+**Check 10 and check 11 must both pass, and neither substitutes for the
+other.** This is measured, not assumed: a 23-frame capture crowded into a 90°
+wedge scored a mean track length of **4.57** — comfortably over the threshold,
+and *higher* than 24 frames spread evenly (3.91) — while reconstructing only
+the side of the object it could see. Cameras that crowd one side see the same
+surface repeatedly, which is exactly what lengthens tracks. **Track length
+measures how well the captured surface was measured; it says nothing about how
+much of the object was captured.** Check 11 is what says that, and it is
+computed from the recovered camera positions, which the sparse reconstruction
+has already produced.
+
+**On check 12.** A *low* reprojection error must never be read as success. The
+feasibility report shows the relationship inverted on real data: five frames
+gave 0.62 px and forty-one gave 1.29 px, because a two-view point can be placed
+to sit on both of its rays and contributes almost no residual while being
+almost unconstrained. The number is useful for catching gross failures — a
+mis-set focal length, a mixed-focal-length set — and for nothing else.
 
 ## 9. Textureless surfaces — the one case the shot list cannot fix
 
