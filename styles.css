@@ -1307,6 +1307,54 @@ select:focus, input:focus {
   font-weight: 600;
 }
 
+/* Measure is a MODE too, so it is coloured the way Paint is - in the colour of
+   the marks it makes. Lime, and picking it was not free choice: the marks are
+   thin lines and two dots drawn ON a piece, so they have to beat everything
+   already there. Sky blue 0x38bdf8 is what an unselected piece is made of and
+   rose 0xf43f5e is what a SELECTED one is made of (app-core's PIECE_COLOR and
+   SELECT_COLOR) - a line in either is a line on its own background, which is
+   exactly how the first cut of this failed. Yellow 0xffdd00 is Paint Excluded
+   and pink 0xf472b6 is Paint Selected; red, orange and violet are the Check
+   piece overlay's three fault classes; teal is the position lock; white is the
+   selection outline; amber is the plate ticks. Lime is what is left, and it
+   happens to be the right answer anyway - it reads hard against both piece
+   colours and against the dark plate. Button, line, end dots and the chip's
+   border are all this one colour, so the mode and its marks are one thing. */
+.vp-menu-body .btn-measure {
+  color: #a3e635;
+  border-color: rgba(163, 230, 53, 0.55);
+}
+.vp-menu-body .btn-measure:hover { border-color: rgba(163, 230, 53, 0.9); }
+.vp-menu-body .btn-measure.is-armed {
+  background: #a3e635;
+  color: #1a1d21;
+  border-color: #a3e635;
+  font-weight: 600;
+}
+
+/* The measurement itself: a chip riding the midpoint of the line, positioned
+   from script in the viewport's own coordinates. translate(-50%, -50%) keeps
+   it centred on that point as the number changes width, so it does not creep
+   sideways while a piece is dragged. pointer-events off - the next measure
+   click has to reach the canvas, not this. */
+.measure-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(163, 230, 53, 0.8);
+  background: rgba(12, 18, 26, 0.9);
+  color: #ecfccb;
+  font: 600 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+}
+.measure-label[hidden] { display: none; }
+
 /* Finish is one column. Every row states its own grid, so nothing spills into
    an implicit column and every button fills its cell - no orphan half-width
    stragglers next to a full-width Soften. */
