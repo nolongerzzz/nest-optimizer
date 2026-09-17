@@ -248,8 +248,13 @@ seeds**:
 | `count_08` | 4 / 8 | 4 / 8 | 4 / 8 |
 | every other count | identical | identical | identical |
 
-Mean track length agreed to two decimal places across all three. **The failures
-are perfectly reproducible**, so this is not a coin-flip — it is a property of
+**Registration was byte-identical across all three seeds for every one of the
+15 count subsets** — not just the failures. Mean track length was identical too
+on 13 of 15; on `count_06` and `count_24` it moved in the second decimal
+(2.47/2.48 and 3.90/3.91/3.92), which is bundle-adjustment noise and nothing
+more.
+
+So the failures are **not a coin-flip** — they are a reproducible property of
 those particular image sets.
 
 **2. The discriminator is the pair graph, not the photo count.** Counting how
@@ -617,6 +622,12 @@ The same mesh, the same call, with `{nonSolid: true}`:
 | inconsistent winding | 26 → **0** | 26 → **26** |
 | gate | passed, nothing blocked | `pinch-separate: selfInt 32→34`, `final: oddEdges` |
 | odd edges through the gate | 451 → 340 (accepted) | 451 → **474 (rejected)** |
+
+(Non-manifold edges, pinch vertices and the gate figures are from
+`commit()`'s own report; the winding figures are from
+`tools/mesh_validate.py`. The flag-on column's "unchanged" values follow by
+construction — `commit()` returned the caller's own array, verified by
+identity, so the mesh on the other side is the input.)
 
 **Setting the non-solid flag does not merely skip three stages. It causes the
 entire repair to be discarded.**

@@ -163,7 +163,7 @@ frames on this subject — and failing unpredictably below that, with 8 frames
 registering only 4 while 7 frames registered all 7. The specification does not
 sit near that boundary, because a capture whose success depends on which
 frames happened to land is not deterministic, whatever its average behaviour.
-The margin is also what absorbs the frames deleted at check 8.2.6.
+The margin is also what absorbs the frames re-taken at check 6.
 
 ### 5.3 The flip
 
