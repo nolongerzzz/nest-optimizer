@@ -207,6 +207,23 @@
                   <option value="ring">ring</option>
                 </select>
               </div>
+              <div class="vp-row vp-row-carve">
+                <button id="btn-carve" class="btn btn-secondary btn-carve" type="button" aria-pressed="false"
+                        title="Local carving tool. Arm it, then click a face, an edge or a corner of a piece: the blade is aimed along the outward bisector of whatever faces it can reach there, and just that local volume is subtracted. A corner gouge and an edge chamfer need no rotation - the blade lays its sweep axis along the edge itself. Click Carve again to stop. Unlike Subtract this consumes nothing, so the same blade carves the next edge too.">Carve</button>
+                <select id="carve-blade" class="vp-select" aria-label="Blade profile"
+                        title="Blade profile. flat: a slab, leaves a flat-bottomed local shave. ball: a hemisphere-ended cylinder, leaves a rounded gouge with no stress corner. vee: a wedge, leaves a V-groove or a chamfer - cut deeper for a wider one.">
+                  <option value="ball">ball-nose</option>
+                  <option value="flat">flat shave</option>
+                  <option value="vee">V-groove</option>
+                </select>
+              </div>
+              <div class="vp-row vp-row-carve2">
+                <label class="vp-clone" title="How deep the blade goes, along the outward bisector of the faces it meets."><span id="carve-depth-label">mm</span> <input type="number" id="carve-depth" value="1" min="0.1" max="30" step="0.1"></label>
+                <label class="vp-clone"><span id="carve-a-label">R</span> <input type="number" id="carve-a" value="2" min="0.1" max="30" step="0.1"></label>
+                <label class="vp-clone"><span id="carve-b-label">L</span> <input type="number" id="carve-b" value="10" min="0.2" max="60" step="0.1"></label>
+                <label class="vp-clone" title="Spin the blade about the outward direction. 0 lays its sweep axis along the edge, which is what a chamfer wants."><span id="carve-roll-label">&deg;</span> <input type="number" id="carve-roll" value="0" min="-180" max="180" step="5"></label>
+              </div>
+              <div class="vp-row vp-row-full"><p id="carve-readout" class="carve-readout">&mdash;</p></div>
               <div class="vp-row vp-row-full">
                 <button id="btn-cap-open" class="btn btn-secondary" type="button" title="Close every open boundary loop of the selected piece with a flat cap.">Cap open faces</button>
               </div>
@@ -263,6 +280,7 @@
   <script src="nso-defects.js?v=inside5"></script>
   <script src="nso_planar_fuse.js?v=inside4"></script>
   <script src="nso_skin.js?v=skin2"></script>
+  <script src="nso_carve.js?v=carve1"></script>
   <script src="nso-cooling-profiles.js"></script>
   <script src="nso-3mf.js"></script>
   <script src="nso-3mf-read.js"></script>
@@ -272,6 +290,7 @@
   <script src="app-sculpt.js?v=inside4"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=inside4"></script>
+  <script src="app-carve.js?v=carve1"></script>
   <script src="app-skin.js?v=skin2"></script>
   <script src="app-mask.js?v=inside5"></script>
   <script src="app-nonsolid.js?v=inside4"></script>
