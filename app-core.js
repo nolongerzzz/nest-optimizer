@@ -1137,6 +1137,10 @@ function renderModelList() {
   // every bake that swaps a mesh rebuilds the list, so this is where the
   // outline lands on the new mesh.
   if (typeof nsoPosLockRefresh === 'function') nsoPosLockRefresh();
+  // And this is where the defect overlay (app-defects.js) notices the swap and
+  // drops itself: the marks were children of the mesh the bake replaced, so a
+  // stale check can never stay drawn over new geometry.
+  if (typeof nsoDefectsRefresh === 'function') nsoDefectsRefresh();
 
   el.querySelectorAll('.model-item').forEach(row => {
     row.addEventListener('click', (e) => {
@@ -2382,6 +2386,8 @@ function updateAdjustUI() {
   updateExportButton();
   // Last, so a locked selection greys the move/pose buttons just enabled above.
   if (typeof nsoPosLockRefresh === 'function') nsoPosLockRefresh();
+  // The Check button names the selected piece, so it follows the selection.
+  if (typeof nsoDefectsRefresh === 'function') nsoDefectsRefresh();
 }
 
 function reindexPlacedMeshes() {

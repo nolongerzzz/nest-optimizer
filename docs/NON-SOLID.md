@@ -151,6 +151,7 @@ unchanged.
 | plain Seal (`app-finish.js`) | — | the whole operation stands down with a message: Seal only closes openings |
 | Smooth (`app-sculpt.js`) | triangle count, open-edge delta, non-manifold delta, degenerate delta, paint stand-down | the signed-volume sign check and the 25 % volume budget, **replaced** by the same 25 % budget on surface area |
 | `tools/mesh_validate.py --gate --non-solid` | non-manifold edges, inconsistent winding, degenerate triangles, piercing self-intersections, **plus** the wall/gap check (section 4) | the open-edge count |
+| *Check piece* (`app-defects.js` / `nso-defects.js`) — the viewport overlay | every measurement above, flag or no flag: open edges are still counted and still drawn in red, they just stop being a failure. The wall/gap check runs at 0.42 mm either way, because the overlay is a viewer and not the gate | the open-edge count, **in the verdict only** |
 | `tools/stl_watertight_check.py --odd --non-solid` | non-manifold edges (count > 2), `--degen` | open edges (count == 1) |
 
 Not skipped anywhere: **self-intersection, degenerate triangles, non-manifold
@@ -187,6 +188,16 @@ The threshold is the only nozzle-derived number in the repo, the one
 `nso_skin.js` states for its ribs. It is a default, not a measurement, and it
 is a parameter. It is a validator check, not an app gate: nothing in the app
 refuses a piece over it.
+
+Since 2026-09-17 it also runs **in the browser**: `nso-defects.js` carries a
+line-for-line transcription of `wall_thickness()` (same inward-normal ray, same
+hash walked by 3D DDA, same welded-vertex skip, same weld-radius of slack), and
+the *Check piece* button paints every face under the floor violet on the piece
+itself. `tools/nso_defect_overlay_test.js` holds the transcription to
+`mesh_validate.py` on every STL in the repo — thin and sheet counts, the
+thinnest figure, and the example faces face for face — so the browser cannot
+drift from the validator. Still not a gate: it draws and reports, and refuses
+nothing.
 
 ## 5. Validation
 
@@ -232,8 +243,13 @@ that the wall check reads exactly.
   a sheet. Thicken (since the 2026-09-16 rewrite, a per-face / per-vertex
   planar offset) never needed closure, so there is nothing for the flag to
   lift; open loops go through it untouched.
-- The wall/gap check lives in the validator, not in the app. Nothing in the
-  browser measures thickness yet.
+- ~~The wall/gap check lives in the validator, not in the app. Nothing in the
+  browser measures thickness yet.~~ **Done, 2026-09-17.** `nso-defects.js` is
+  the browser copy of `wall_thickness()`, held to this file's numbers on every
+  fixture by `tools/nso_defect_overlay_test.js`, and the *Check piece* button
+  paints the faces under the floor violet on the mesh. See
+  `docs/DEFECT-OVERLAY.md`. It is still not an app GATE: nothing in the browser
+  refuses a piece over it, exactly as section 4 says.
 - `stl_watertight_check.py --non-solid` still rounds at 1e-5, with the known
   false-open-edge mode on large float32 parts (`docs/HANDOFF.md`). Use
   `mesh_validate.py` for a real verdict.

@@ -503,9 +503,17 @@
     return countSelfIntersectionsDetail(m).pierce;
   }
 
-  function countSelfIntersectionsDetail(m) {
+  /* `opts.collect` adds `pairs` to the tally: one { a, b, kind } per counted
+   * pair, in the BVH's own traversal order. It is OFF by default and changes
+   * no count - the same testPair decides, and the collector only records what
+   * it already decided. It exists so the viewport overlay
+   * (nso-defects.js) can DRAW the pairs this checker counts rather than
+   * enumerate them a second time somewhere else; a second enumeration is
+   * exactly how the three pre-consolidation copies came to disagree. */
+  function countSelfIntersectionsDetail(m, opts) {
+    var collect = !!(opts && opts.collect);
     var nf = faceCount(m);
-    if (nf < 2) return { pierce: 0, coplanar: 0 };
+    if (nf < 2) return collect ? { pierce: 0, coplanar: 0, pairs: [] } : { pierce: 0, coplanar: 0 };
 
     var boxes = new Float64Array(nf * 6);
     for (var f = 0; f < nf; f++) {
@@ -519,6 +527,7 @@
     var tree = buildBVH(nf, boxes);
     var nodes = tree.nodes, order = tree.order;
     var tally = { pierce: 0, coplanar: 0 };
+    if (collect) tally.pairs = [];
 
     // Pair stack. (i, i) means "this subtree against itself".
     var stack = [0, 0];
@@ -571,6 +580,8 @@
                               vtx(m, m.faces[fb * 3]), vtx(m, m.faces[fb * 3 + 1]), vtx(m, m.faces[fb * 3 + 2]));
     if (hit === 'pierce') tally.pierce++;
     else if (hit === 'coplanar') tally.coplanar++;
+    else return;
+    if (tally.pairs) tally.pairs.push({ a: fa, b: fb, kind: hit });
   }
 
   /* Node-level reject, and it carries the same EPS slack as the leaf-level one
@@ -1456,7 +1467,12 @@
      * implementation to tools/mesh_validate.py pair-for-pair. */
     _selfIntersectionDetail: countSelfIntersectionsDetail,
     _weldToIndexed: weldToIndexed,
-    _triTriIntersect: triTriIntersect
+    _triTriIntersect: triTriIntersect,
+    /* Exposed for nso-defects.js, the viewport overlay, so the edge
+     * adjacency it draws is the one this file counts rather than a second
+     * transcription of the same loop. */
+    _buildEdges: buildEdges,
+    _analyze: analyze
   };
 
 })(typeof window !== 'undefined' ? window : this);

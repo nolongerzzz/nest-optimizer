@@ -25,3 +25,14 @@ node tools/nso_open_make_fixtures.js --check   # byte-diff against the tree
 Every clean form: 0 non-manifold edges, 0 inconsistent-winding edges,
 0 degenerate triangles, 0 piercing pairs. `tools/nso_open_flag_test.js` asserts
 the verdicts in `docs/NON-SOLID.md` §5.
+
+These are also what the viewport's defect overlay is validated against
+(`docs/DEFECT-OVERLAY.md`). Because every coordinate here is a literal, the
+overlay can be checked on WHERE it paints and not only on whether it paints:
+`tools/nso_defect_overlay_test.js` asserts that the red on `open_clip_selfint`
+is inside the fin's own corner of the sheet, that the red on
+`fabric_weave_selfint` is on weft 2 and none of the other nine strands, and
+that the violet on `thin_shell_cup_thin` covers the 90°–150° dented band and
+stops there — while the same cup at its designed 1.2 mm wall gets no violet at
+all. Add a defect here and its coordinates are what the overlay test should
+assert against.

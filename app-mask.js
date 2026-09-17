@@ -551,7 +551,13 @@
        this the lock's "Locked #n" was overwritten by the bare tag every time
        a piece was clicked. */
     const lock = (typeof window.nsoPosLockHudLine === 'function') ? window.nsoPosLockHudLine() : null;
-    hud(lock || HUD_TAG);
+    /* And the same for a defect check that is on screen (app-defects.js): its
+       verdict is the answer to "what is wrong with this piece", so clicking
+       the piece to look at the marks must not be what throws the verdict
+       away. It rides ALONGSIDE the lock rather than instead of it - the two
+       say different things and a locked piece can also be a checked one. */
+    const chk = (typeof window.nsoDefectsHudLine === 'function') ? window.nsoDefectsHudLine() : null;
+    hud(chk ? (lock ? lock + ' \u2014 ' + chk : chk) : (lock || HUD_TAG));
   };
 
   function hitFace(event) {

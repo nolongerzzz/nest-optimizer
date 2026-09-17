@@ -1246,6 +1246,25 @@ select:focus, input:focus {
   font-weight: 600;
 }
 
+/* Check piece (app-defects.js) is the third button in the Finish card that is
+   a STATE rather than an action: idle it offers to run, live it offers to
+   clear, and the marks stay on the mesh in between. Same idle / live shape as
+   the two paint buttons so all three read as siblings, in the red the overlay
+   itself uses for the faults that matter most - the open edges and the
+   piercing pairs. It sits under the Non-solid flag because that flag is what
+   decides whether this check's open edges are a failure or a declaration. */
+.vp-menu-body .btn-check-defects {
+  color: #ff6b6b;
+  border-color: rgba(255, 45, 45, 0.55);
+}
+.vp-menu-body .btn-check-defects:hover:not(:disabled) { border-color: rgba(255, 45, 45, 0.9); }
+.vp-menu-body .btn-check-defects.is-on {
+  background: #ff2d2d;
+  color: #fff5f5;
+  border-color: #ff2d2d;
+  font-weight: 600;
+}
+
 /* Finish is one column. Every row states its own grid, so nothing spills into
    an implicit column and every button fills its cell - no orphan half-width
    stragglers next to a full-width Soften. */
