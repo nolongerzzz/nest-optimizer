@@ -340,11 +340,13 @@ function NSO_scaleSelectedModel(spec) {
     return { ok: false, reason: 'no rawTris' };
   }
 
-  // Standing rule (docs/HANDOFF.md): a painted face stays untouched by ANY
-  // bake. PAINT SCOPE: WHOLE-PIECE. A uniform scale moves every vertex on the
-  // piece and there is no sub-region to scope the check to, so by the scoping
-  // rule any painted face stands the whole operation down - the same answer
-  // Smooth gives, for the same reason.
+  // Standing rule: a painted face stays untouched by ANY bake.
+  //
+  // PAINT SCOPE: WHOLE-PIECE. A uniform scale moves every vertex on the piece
+  // and there is no sub-region to scope the check to, so by the scoping rule
+  // in docs/HANDOFF.md any painted face stands the whole operation down - the
+  // same answer Smooth gives, for the same reason. The roster row is in that
+  // file's scoping table and in tools/nso_paint_scope_test.js.
   //
   // Worth stating why this is not merely inherited: a mask entry is a plane
   // {n, d}, and under a uniform scale about the bbox centre the normal is

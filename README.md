@@ -89,6 +89,20 @@ Smart build-plate packing for 3D printing.
     tips - a second breakaway interface - and the piece is flagged non-solid,
     because it now carries two shells. See `docs/HANDOFF.md`, "Skin wrap +
     the double skin"
+- **Delete painted** removes the geometry under the paint, rather than only
+  excluding it from bakes. **Paint Selected**, click the face, then Delete:
+  **Face** cuts that face out and leaves the rim open, **Face+seal** cuts it
+  out and lets Repair close the rim again, and **Shell** takes the whole body
+  that face belongs to - which is how a loose blob or a second shell a boolean
+  left behind goes in one click. What is pink is exactly what goes, measured
+  against the app's own highlight on every fixture.
+  - It refuses and leaves the piece untouched if the cut would empty the mesh,
+    split it into loose bodies, leave it crossing itself, or - with Face+seal -
+    if the rim cannot be closed safely. The status says which and with what
+    numbers, and one Undo puts the geometry and the paint back together.
+  - **Paint Excluded** still means hands off, here as everywhere else: a target
+    that is also painted excluded stands the delete down. See
+    `docs/PAINT-DELETE.md`
 
 ## How to use
 
