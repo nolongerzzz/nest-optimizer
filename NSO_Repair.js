@@ -912,7 +912,7 @@
       if (!suspectVert[rec.a]) { suspectVert[rec.a] = 1; suspectCount++; }
       if (!suspectVert[rec.b]) { suspectVert[rec.b] = 1; suspectCount++; }
     }
-    if (!suspectCount) return { splits: 0, overflow: false };
+    if (!suspectCount) return { splits: 0, overflow: false, subdivided: [] };
 
     var cand = [];
     for (var vs in suspectVert) cand.push(+vs);
@@ -986,9 +986,13 @@
     }
 
     var splits = 0;
+    /* Flat [parentU, parentW, insertedV, ...]: which edge each split replaced,
+     * in the order the splits happened, so a caller tracking an edge through
+     * this stage can follow it. See `inheritSplits` in commit(). */
+    var subdivided = [];
     var guard = 0, guardMax = queue.length * 64 + 4096;
     while (queue.length) {
-      if (++guard > guardMax) return { splits: -1, overflow: true };
+      if (++guard > guardMax) return { splits: -1, overflow: true, subdivided: [] };
       var tri = queue.pop();
       a = tri[0]; b = tri[1]; c = tri[2];
       var sides = [[a, b, c], [b, c, a], [c, a, b]];
@@ -1008,6 +1012,7 @@
           // corner-to-point split: never produces a sliver, unlike a fan
           queue.push([u, bestV, opp]);
           queue.push([bestV, w, opp]);
+          subdivided.push(u, w, bestV);
           splits++;
           didSplit = true;
         }
@@ -1015,7 +1020,7 @@
       if (!didSplit) outFaces.push(a, b, c);
     }
     m.faces = outFaces;
-    return { splits: splits, overflow: false };
+    return { splits: splits, overflow: false, subdivided: subdivided };
   }
 
   /* ------------------------------------------------------------------ *
@@ -1037,12 +1042,28 @@
    * discarded and the file is returned untouched. Bridging a neck properly
    * means re-triangulating the neighbourhood at a chosen width; that is a
    * different operation and a different module. */
-  function fillHoles(m, inputVertexCount) {
+
+  /* `inputOpenEdges`, when given, is the set of boundary edges the mesh ARRIVED
+   * with (see commit()). Any loop that still contains one of them is boundary
+   * the caller handed us, not boundary this repair opened, and is left exactly
+   * as it is. What remains - a loop made entirely of edges that were paired on
+   * arrival - is a seam an earlier stage of this same run tore open, and
+   * closing it puts the surface back the way it was found rather than sealing
+   * anything the model meant to leave open. Passing null fills every loop,
+   * which is what a piece meant to be a closed solid wants. */
+  function fillHoles(m, inputVertexCount, inputOpenEdges) {
     var edges = buildEdges(m);
     var loops = boundaryLoops(m, edges);
-    var filled = 0, added = 0, skipped = 0, selfMade = 0;
+    var filled = 0, added = 0, skipped = 0, selfMade = 0, preexisting = 0;
     for (var i = 0; i < loops.length; i++) {
       var loop = loops[i];
+      if (inputOpenEdges) {
+        var theirs = false;
+        for (var e = 0; e < loop.length && !theirs; e++) {
+          if (inputOpenEdges[ekey(loop[e], loop[(e + 1) % loop.length])]) theirs = true;
+        }
+        if (theirs) { preexisting++; continue; }
+      }
       if (inputVertexCount != null) {
         var ours = false;
         for (var n = 0; n < loop.length; n++) {
@@ -1060,7 +1081,8 @@
       }
       filled++;
     }
-    return { filled: filled, added: added, skipped: skipped, selfMade: selfMade };
+    return { filled: filled, added: added, skipped: skipped, selfMade: selfMade,
+             preexisting: preexisting };
   }
 
   /* ------------------------------------------------------------------ *
@@ -1091,7 +1113,11 @@
    * See docs/NSO_Repair.md "Why the pinch stage is gated". */
   function separatePinches(m, nudgeFrac) {
     var pinches = pinchVertices(m);
-    if (!pinches.length) return { split: 0, moved: 0 };
+    if (!pinches.length) return { split: 0, moved: 0, renames: [] };
+    /* Flat [originalV, copyV, ...]: which vertex each copy was made from, so a
+     * caller tracking an edge through this stage can follow the endpoint it
+     * renamed. See `inheritRenames` in commit(). */
+    var renames = [];
     var split = 0, moved = 0;
     for (var i = 0; i < pinches.length; i++) {
       var p = pinches[i];
@@ -1118,6 +1144,7 @@
             var fi = groups[g][f];
             for (var s = 0; s < 3; s++) if (m.faces[fi * 3 + s] === p.v) m.faces[fi * 3 + s] = target;
           }
+          renames.push(p.v, target);
           split++;
         }
         var rim = rims[g];
@@ -1132,7 +1159,7 @@
         moved++;
       }
     }
-    return { split: split, moved: moved };
+    return { split: split, moved: moved, renames: renames };
   }
 
   /* Centroid of the fan's rim (every vertex of the fan that is not v) and the
@@ -1183,6 +1210,8 @@
         tJunctionSplits: 0,
         holesFilled: 0,
         holeTrisAdded: 0,
+        seamsReclosed: 0,
+        seamTrisAdded: 0,
         pinchVertsSplit: 0
       },
       gate: { blockedStages: [], selfIntBefore: 0, selfIntAfter: 0, oddBefore: 0, oddAfter: 0 },
@@ -1238,6 +1267,74 @@
        * ourselves. */
       var inputVertexCount = mesh.pos.length / 3;
 
+      var nonSolid = !!opts.nonSolid;
+
+      /* THE BOUNDARY THE PIECE ARRIVED WITH, as welded vertex pairs.
+       *
+       * Several always-on stages open the surface as a side effect of doing
+       * their job: stripping a degenerate sliver deletes a triangle whose
+       * three edges were paired with real neighbours, stripping a duplicate
+       * can take an edge's last second user, and the T-junction split does not
+       * always manage to re-stitch every crack the first two left. On a piece
+       * meant to be closed none of that shows, because hole fill runs at the
+       * end and fans whatever is still open shut. On a non-solid piece hole
+       * fill is skipped - it cannot tell a rim from a crack - so that
+       * self-inflicted boundary used to survive into the final odd-edge gate,
+       * which then correctly refused the result and threw away every genuine
+       * repair with it.
+       *
+       * Recording the arrival boundary is what lets the two be told apart. A
+       * loop holding one of these edges is the caller's opening and is never
+       * touched; a loop holding none of them is a seam this run tore, and
+       * `seam-reclose` below puts it back. Only built when the flag is on,
+       * because nothing else reads it.
+       *
+       * Two later stages re-key an edge without moving it - the T-junction
+       * split subdivides one, pinch separation renames an endpoint - so each
+       * hands its work to the inheritors below and an arrival edge stays
+       * recognisable as one however it was re-cut. */
+      var inputOpenEdges = null, openNbr = null;
+
+      function markOpen(a, b) {
+        var k = ekey(a, b);
+        if (inputOpenEdges[k]) return;
+        inputOpenEdges[k] = 1;
+        (openNbr[a] || (openNbr[a] = [])).push(b);
+        (openNbr[b] || (openNbr[b] = [])).push(a);
+      }
+
+      /* One arrival edge became two, meeting at the vertex that was inserted
+       * into it. Both halves are the same boundary. */
+      function inheritSplits(list) {
+        if (!inputOpenEdges || !list) return;
+        for (var i = 0; i < list.length; i += 3) {
+          if (!inputOpenEdges[ekey(list[i], list[i + 1])]) continue;
+          markOpen(list[i], list[i + 2]);
+          markOpen(list[i + 2], list[i + 1]);
+        }
+      }
+
+      /* One vertex became several. Every copy inherits the original's arrival
+       * edges - an over-approximation by design, because a key nothing looks
+       * up costs nothing and a missed one would let a rim be fanned shut. */
+      function inheritRenames(list) {
+        if (!inputOpenEdges || !list) return;
+        for (var i = 0; i < list.length; i += 2) {
+          var nb = openNbr[list[i]];
+          if (!nb) continue;
+          for (var j = 0, n = nb.length; j < n; j++) markOpen(nb[j], list[i + 1]);
+        }
+      }
+
+      if (nonSolid) {
+        inputOpenEdges = Object.create(null);
+        openNbr = Object.create(null);
+        var arrival = buildEdges(mesh);
+        for (var k0 in arrival) {
+          if (arrival[k0].count === 1) markOpen(arrival[k0].a, arrival[k0].b);
+        }
+      }
+
       var stageLog = report.stages;
 
       function note(name, applied, extra) {
@@ -1264,8 +1361,11 @@
        * drop (an open component next to a closed one is debris only if
        * everything is meant to be closed) and hole fill (below). Every other
        * stage runs unchanged, and both final gates still apply: the flag
-       * relaxes the closure requirement and nothing else. */
-      var nonSolid = !!opts.nonSolid;
+       * relaxes the closure requirement and nothing else.
+       *
+       * Skipping those three does NOT license the stages that stay on to leave
+       * the surface more open than they found it. `seam-reclose` below is what
+       * holds them to that, and it closes only boundary this run opened. */
       if (nonSolid) {
         note('flap-peel', false, { skipped: 'nonSolid' });
         note('orphan-components', false, { skipped: 'nonSolid' });
@@ -1307,6 +1407,7 @@
         }
         mesh = trial;
         if (res.counts) for (var k in res.counts) report.counts[k] = res.counts[k];
+        if (res.inherit) res.inherit();
         note(name, true, res.info);
         return res;
       }
@@ -1320,7 +1421,8 @@
           return {
             changed: true,
             counts: { tJunctionSplits: r.splits },
-            info: { splits: r.splits, triDelta: faceCount(trial) - before }
+            info: { splits: r.splits, triDelta: faceCount(trial) - before },
+            inherit: function () { inheritSplits(r.subdivided); }
           };
         });
       }
@@ -1332,13 +1434,37 @@
           return {
             changed: true,
             counts: { pinchVertsSplit: r.split },
-            info: { split: r.split, moved: r.moved }
+            info: { split: r.split, moved: r.moved },
+            inherit: function () { inheritRenames(r.renames); }
           };
         });
       }
 
       if (nonSolid) {
         note('hole-fill', false, { skipped: 'nonSolid' });
+
+        /* Not hole fill under another name. It is handed the arrival boundary
+         * and fills only loops that contain none of it, so an opening the
+         * piece came with - a cup rim, a clip edge, a strand end, the missing
+         * triangle of synth_hole - is left exactly as the user left it, and
+         * what gets closed is the crack an earlier stage of THIS run tore. The
+         * nudge-slit refusal inside fillHoles still stands on top of that, so
+         * pinch separation's own gap is not bridged either. */
+        if (opts.recloseSeams !== false) {
+          tryStage('seam-reclose', function (trial) {
+            var r = fillHoles(trial, inputVertexCount, inputOpenEdges);
+            if (!r.filled) {
+              return { changed: false, info: { reclosed: 0, skipped: r.skipped,
+                                               selfMade: r.selfMade, preexisting: r.preexisting } };
+            }
+            return {
+              changed: true,
+              counts: { seamsReclosed: r.filled, seamTrisAdded: r.added },
+              info: { reclosed: r.filled, added: r.added, skipped: r.skipped,
+                      selfMade: r.selfMade, preexisting: r.preexisting }
+            };
+          });
+        }
       } else if (opts.fillHoles !== false) {
         tryStage('hole-fill', function (trial) {
           var r = fillHoles(trial, inputVertexCount);
@@ -1415,6 +1541,7 @@
         report.counts.orphanTrisRemoved > 0 ||
         report.counts.tJunctionSplits > 0 ||
         report.counts.holesFilled > 0 ||
+        report.counts.seamsReclosed > 0 ||
         report.counts.pinchVertsSplit > 0;
 
       if (!changedSomething) {

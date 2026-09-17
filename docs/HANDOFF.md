@@ -71,6 +71,21 @@ Pass/fail for a flagged piece is `tools/mesh_validate.py --gate --non-solid`
 (open edges leave the verdict, the wall/gap check joins it), or
 `tools/stl_watertight_check.py --odd --degen --non-solid`.
 
+**Corollary, added 2026-09-17 after it bit:** standing a closure stage down
+never licenses the stages that keep running to leave the surface **more open
+than they found it**. `NSO_Repair`'s degenerate strip opens boundary as a side
+effect of doing its job — a zero-area sliver is usually the stitch holding a
+coarse edge to the two finer ones it was split into — and with hole fill
+skipped there was nothing left to put those seams back, so the final odd-edge
+gate discarded the whole repair. On `fixtures/tape_welded_clustered.stl` that
+cost 295 degenerate strips, 288 T-junction splits and a 56-pair drop in
+self-intersections, over 15 edges the repair itself had opened. The rule the
+flag actually encodes is: **a stage may undo damage this run did; no stage may
+close, peel or drop boundary the piece arrived with.** `commit()` records the
+arrival boundary before any stage runs and `seam-reclose` closes only loops
+containing none of it. If you add a flag consumer that DELETES geometry, this
+is the half of the rule that is easy to miss.
+
 ## Standing rule — the checker has one definition, and now it draws (added 2026-09-17)
 `tools/mesh_validate.py` is still the canonical definition of every check.
 What changed is that the browser can now show you WHERE: the *Check piece*

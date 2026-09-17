@@ -21,10 +21,21 @@ node tools/nso_open_make_fixtures.js --check   # byte-diff against the tree
 | `thin_shell_cup_thin.stl` | 1056 | same, inner wall dented out to 0.25 mm over a 60° × 3-ring patch | 96 | wall under 0.42 mm on 96 faces |
 | `fabric_weave.stl` | 1600 | 5 × 5 plain weave of 1.2 mm ribbons, pitch 3, amplitude 0.8; 10 separate components, no contact | 840 | none |
 | `fabric_weave_selfint.stl` | 1600 | same, weft 2 woven at the wrong height through the warps | 840 | 52 piercing pairs |
+| `thin_shell_cup_cracked.stl` | 1085 | same cup, open at both rims by design, carrying what a scan-derived shell actually arrives with | 100 | 12 zero-area sliver stitches, 9 non-manifold edges from 3 reversed duplicate faces, 7 piercing pairs |
 
 Every clean form: 0 non-manifold edges, 0 inconsistent-winding edges,
 0 degenerate triangles, 0 piercing pairs. `tools/nso_open_flag_test.js` asserts
 the verdicts in `docs/NON-SOLID.md` §5.
+
+`thin_shell_cup_cracked.stl` is the odd one out and the only one here that is
+open by design *and* repairable. Every other fixture is open-and-clean or
+open-and-unfixable, which between them cannot catch a flag that quietly stops
+the repair working. Six of its twelve sliver stitches are cut at 4e-4 of their
+edge, inside the margin `NSO_Repair`'s T-junction split refuses to work in, so
+stripping those slivers leaves six cracks nothing downstream can re-stitch —
+the repair's own damage, which used to reach the final odd-edge gate and get
+the whole repair discarded. See `docs/NON-SOLID.md` §3, "Skipping a closure
+stage never licenses opening the surface".
 
 These are also what the viewport's defect overlay is validated against
 (`docs/DEFECT-OVERLAY.md`). Because every coordinate here is a literal, the

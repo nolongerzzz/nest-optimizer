@@ -46,6 +46,7 @@ the last three are applied to a throwaway copy and kept only if the gate passes.
 | T-junction *(gated)* | splits a triangle whose edge interior carries another vertex, corner-to-point so no sliver is produced |
 | pinch separation *(gated)* | splits a vertex where two or more sheets meet and nudges each copy back into its own shell. Covers both bowtie vertices and non-manifold edges |
 | hole fill *(gated)* | fans a boundary loop shut, wound to match the shell — but only a loop that was in the input, never a seam this repair opened itself |
+| seam re-close *(gated, `nonSolid` only)* | the mirror image of hole fill: fans shut **only** the loops that were *not* in the input — boundary this run's own earlier stages tore — and never touches an opening the piece arrived with |
 
 Peeling is bounded: never more than 10% of the triangle budget, never more than
 16 rounds. Hole fill refuses any loop longer than 64 edges — a loop that long
@@ -63,6 +64,55 @@ apply**: a repair that adds a self-intersection or raises the odd-edge count
 is still discarded. `report.nonSolid` echoes the option. The module never sets
 it from the geometry; that is the caller's decision, and in the app it is the
 user's.
+
+### Skipping closure does not license opening the surface
+
+Standing aside from the three closure stages said nothing about the stages
+that keep running, and for a while that was a hole in the design rather than a
+silence. **The degenerate strip opens the surface as a side effect of doing its
+job**: a zero-area sliver is very often the stitch holding a coarse edge to the
+two finer edges it was subdivided into, so deleting it unpairs all three. The
+duplicate strip can take an edge's last second user the same way, and the
+T-junction split does not always manage to rebuild every crack the first two
+leave — it refuses a stray vertex closer to an endpoint than `SPLIT_EPS`, which
+on a 0.01 mm leftover edge is every interior point of it.
+
+On a piece meant to be closed none of that ever showed, because hole fill runs
+last and fans whatever is still open shut. With the flag on, hole fill is gone
+and that self-inflicted boundary used to survive to the final odd-edge gate,
+which read the piece as more open than it arrived and — correctly, on the
+evidence it had — discarded the entire repair. On the repo's own
+`fixtures/tape_welded_clustered.stl` that cost 295 degenerate strips, 288
+T-junction splits and a drop of 56 piercing pairs, over 15 edges the repair had
+opened itself.
+
+**`seam-reclose` is the stage that closes the gap**, and it closes only that
+gap. `commit()` records the boundary the mesh arrived with as a set of welded
+vertex pairs, before any stage runs. A loop that still contains one of those
+edges is the caller's opening — a cup rim, a clip edge, a strand end, the
+missing triangle of `synth_hole` — and is left exactly as it is. A loop that
+contains none of them is a seam this run tore, and closing it puts the surface
+back the way it was found. The `inputVertexCount` refusal below applies on top,
+so a pinch-separation slit is still not bridged.
+
+Two stages re-key an edge without moving it, and both hand their work on so an
+arrival edge stays recognisable however it was re-cut: the T-junction split
+reports every `(parentEdge, insertedVertex)` it made, and pinch separation
+reports every vertex copy. The rename inheritance deliberately over-approximates
+— a copy inherits all of the original's arrival edges — because an unused key
+costs nothing and a missed one would let a rim be fanned shut.
+
+The counters are separate from hole fill's on purpose: `counts.seamsReclosed`
+and `counts.seamTrisAdded`, never `counts.holesFilled`, so "the flag never fills
+a hole in the model" stays literally true and greppable.
+
+**What it costs.** The only closure a *collinear* crack has is a zero-area
+triangle, so a piece can come back holding fan triangles that the next pass
+will strip as degenerates and lay down again. The mesh is a fixed point; the
+tally is not. That trade is not new and not the flag's — without the flag, hole
+fill has always ended `tape_welded_clustered.stl` on 7 such triangles and
+re-made them on every pass since. The flag now reaches the same fixed point by
+the same trade, instead of refusing the repair outright.
 
 Measured on `fixtures/open/` without the option: the open clip loses its two
 corner triangles to flap peel, the weave loses twenty strand ends, and both
