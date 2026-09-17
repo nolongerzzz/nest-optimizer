@@ -173,6 +173,21 @@ worst gap is **0.000000 mm** on every layer of every piece. It also drives the
 toggle, the move-keeps-it / bake-clears-it lifetime, the flag, and that a ray
 through a painted region still hits the piece and never a mark.
 
+One thing that drive check has to get right, and got wrong once: **what it
+waits on after pressing the button.** The press defers the battery by a task so
+the "Checking…" line paints first, and `nsoDefectsReport()` is not per piece —
+it is whatever check is currently drawn, which after the first case is the
+*previous* piece's, because the overlay deliberately survives a selection
+change. "Wait until the report is non-null" is therefore already true before
+the press has computed anything, and a fast enough box reads the last piece's
+numbers off a piece with no marks on it: on 2026-09-17 CI reported
+`open_clip_selfint` as "0 piercing, 96 open" with an empty red patch layer —
+the cup's report, one case earlier. The wait is on `nsoDefectsShownFor() === id`
+instead, which turns over inside `nsoDefectsShow` only after the report is
+stored and the marks are parented. To stress it on a slow box, widen the
+button's `setTimeout(…, 0)` in `app-defects.js` to 400 ms and run
+`npm run defects:drive`: it must still pass.
+
 ## Not done, on purpose
 
 - No live re-check. See "On demand" above.
