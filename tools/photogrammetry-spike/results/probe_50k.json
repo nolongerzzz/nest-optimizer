@@ -1,0 +1,226 @@
+{
+  "file": "/home/user/pgspike/out/task3/dec_50k.stl",
+  "inputTris": 50000,
+  "runs": {
+    "default": {
+      "ok": true,
+      "applied": true,
+      "declined": false,
+      "unchanged": false,
+      "seconds": 6.3,
+      "triDelta": -492,
+      "volumeDelta": 501.1334388553289,
+      "before": {
+        "tris": 50000,
+        "verts": 25221,
+        "uniqueEdges": 75206,
+        "openEdges": 438,
+        "nonManifoldEdges": 13,
+        "oddEdges": 451,
+        "flippedEdges": 0,
+        "degenerateTris": 0,
+        "components": 11,
+        "boundaryLoops": 4,
+        "pinchVerts": 24,
+        "volume": -2186.4993996418507,
+        "area": 784.0954527518484,
+        "watertight": false,
+        "selfIntersections": 32,
+        "selfIntersectionsCoplanar": 0
+      },
+      "after": {
+        "tris": 49508,
+        "verts": 25221,
+        "uniqueEdges": 74432,
+        "openEdges": 340,
+        "nonManifoldEdges": 0,
+        "oddEdges": 340,
+        "flippedEdges": 0,
+        "degenerateTris": 0,
+        "components": 8,
+        "boundaryLoops": 2,
+        "pinchVerts": 0,
+        "volume": -1685.3659607865218,
+        "area": 660.6072586389324,
+        "watertight": false,
+        "selfIntersections": 32,
+        "selfIntersectionsCoplanar": 0
+      },
+      "rejected": null,
+      "gate": {
+        "blockedStages": [],
+        "selfIntBefore": 32,
+        "selfIntAfter": 32,
+        "oddBefore": 451,
+        "oddAfter": 340
+      },
+      "counts": {
+        "welded": 124779,
+        "weldedNear": 0,
+        "degenerateRemoved": 0,
+        "exactDuplicatesRemoved": 0,
+        "reversedDuplicatesRemoved": 14,
+        "flapTrisRemoved": 14,
+        "orphanTrisRemoved": 484,
+        "tJunctionSplits": 0,
+        "holesFilled": 1,
+        "holeTrisAdded": 20,
+        "pinchVertsSplit": 0
+      },
+      "stages": [
+        {
+          "name": "degenerate",
+          "applied": false
+        },
+        {
+          "name": "duplicate-faces",
+          "applied": true
+        },
+        {
+          "name": "flap-peel",
+          "applied": true
+        },
+        {
+          "name": "orphan-components",
+          "applied": true
+        },
+        {
+          "name": "t-junction",
+          "applied": false
+        },
+        {
+          "name": "pinch-separate",
+          "applied": false
+        },
+        {
+          "name": "hole-fill",
+          "applied": true,
+          "skipped": 2
+        }
+      ],
+      "reason": "applied",
+      "wrote": "/home/user/pgspike/out/task3/dec_50k.default.stl"
+    },
+    "nonSolid": {
+      "ok": true,
+      "applied": false,
+      "declined": true,
+      "unchanged": true,
+      "seconds": 6,
+      "triDelta": 0,
+      "volumeDelta": 0,
+      "before": {
+        "tris": 50000,
+        "verts": 25221,
+        "uniqueEdges": 75206,
+        "openEdges": 438,
+        "nonManifoldEdges": 13,
+        "oddEdges": 451,
+        "flippedEdges": 0,
+        "degenerateTris": 0,
+        "components": 11,
+        "boundaryLoops": 4,
+        "pinchVerts": 24,
+        "volume": -2186.4993996418507,
+        "area": 784.0954527518484,
+        "watertight": false,
+        "selfIntersections": 32,
+        "selfIntersectionsCoplanar": 0
+      },
+      "after": {
+        "tris": 50000,
+        "verts": 25221,
+        "uniqueEdges": 75206,
+        "openEdges": 438,
+        "nonManifoldEdges": 13,
+        "oddEdges": 451,
+        "flippedEdges": 0,
+        "degenerateTris": 0,
+        "components": 11,
+        "boundaryLoops": 4,
+        "pinchVerts": 24,
+        "volume": -2186.4993996418507,
+        "area": 784.0954527518484,
+        "watertight": false,
+        "selfIntersections": 32,
+        "selfIntersectionsCoplanar": 0
+      },
+      "rejected": {
+        "tris": 49988,
+        "verts": 25221,
+        "uniqueEdges": 75208,
+        "openEdges": 463,
+        "nonManifoldEdges": 11,
+        "oddEdges": 474,
+        "flippedEdges": 0,
+        "degenerateTris": 0,
+        "components": 11,
+        "boundaryLoops": 6,
+        "pinchVerts": 22,
+        "volume": -2188.7906095200256,
+        "area": 783.8565985050369,
+        "watertight": false,
+        "selfIntersections": 32,
+        "selfIntersectionsCoplanar": 0
+      },
+      "gate": {
+        "blockedStages": [
+          "pinch-separate:selfInt 32->34",
+          "final:oddEdges"
+        ],
+        "selfIntBefore": 32,
+        "selfIntAfter": 32,
+        "oddBefore": 451,
+        "oddAfter": 474
+      },
+      "counts": {
+        "welded": 124779,
+        "weldedNear": 0,
+        "degenerateRemoved": 0,
+        "exactDuplicatesRemoved": 0,
+        "reversedDuplicatesRemoved": 14,
+        "flapTrisRemoved": 0,
+        "orphanTrisRemoved": 0,
+        "tJunctionSplits": 2,
+        "holesFilled": 0,
+        "holeTrisAdded": 0,
+        "pinchVertsSplit": 0
+      },
+      "stages": [
+        {
+          "name": "degenerate",
+          "applied": false
+        },
+        {
+          "name": "duplicate-faces",
+          "applied": true
+        },
+        {
+          "name": "flap-peel",
+          "applied": false,
+          "skipped": "nonSolid"
+        },
+        {
+          "name": "orphan-components",
+          "applied": false,
+          "skipped": "nonSolid"
+        },
+        {
+          "name": "t-junction",
+          "applied": true
+        },
+        {
+          "name": "pinch-separate",
+          "applied": false
+        },
+        {
+          "name": "hole-fill",
+          "applied": false,
+          "skipped": "nonSolid"
+        }
+      ],
+      "reason": "final gate: odd edges 451 -> 474",
+      "wrote": "/home/user/pgspike/out/task3/dec_50k.nonSolid.stl"
+    }
+  }
+}

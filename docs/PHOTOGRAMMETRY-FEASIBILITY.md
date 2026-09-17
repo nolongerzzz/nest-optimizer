@@ -413,49 +413,57 @@ That is the strongest argument in this report for gating on capture geometry
 rather than on reconstruction statistics — and the geometry is free, because
 the sparse reconstruction has already recovered where every camera was.
 
-### 2.4 Taking it to the mesh — 12 photographs versus 41
+### 2.4 Taking it to the mesh — 12, 24 and 41 photographs
 
-The sparse statistics stop short of the thing that actually gets used, so both
-the 12-frame subset and the full 41 were carried through the complete dense
-pipeline with identical settings.
+The sparse statistics stop short of the thing that actually gets used, so three
+subsets were carried through the complete dense pipeline with identical
+settings.
 
-| | 12 frames | 41 frames |
-|---|---|---|
-| dense point cloud | — | 2,545,145 points |
-| mesh triangles | **619,902** | **1,427,605** |
-| non-manifold edges | **0** | **0** |
-| winding consistent | yes | yes |
-| degenerate triangles | **0** | **0** |
-| boundary loops | 5 | 5 |
-| largest boundary loop | **180 edges** | **495 edges** |
-| loops over 64 edges | 2 | 3 |
-| connected components | **6** | **13** |
-| dense stage wall clock | **420 s** | **1,133 s** |
+| | 12 frames | 24 frames | 41 frames |
+|---|---|---|---|
+| mesh triangles | 619,902 | 1,126,711 | **1,427,605** |
+| **non-manifold edges** | **0** | **0** | **0** |
+| **winding consistent** | yes | yes | yes |
+| **degenerate triangles** | **0** | **0** | **0** |
+| boundary loops | 5 | 3 | 5 |
+| largest boundary loop | 180 edges | 513 edges | 495 edges |
+| loops over 64 edges | 2 | 3 | 3 |
+| connected components | 6 | 4 | 13 |
+| dense stage wall clock | 420 s | 620 s | 1,133 s |
 
-**The topological character of the output does not change with photo count.**
-Both meshes are manifold, consistently wound, free of degenerate triangles, and
-carry five boundary loops. Whatever else more photographs buy, they do not buy a
-topologically cleaner mesh — the mesher's guarantees deliver that at 12 frames
-just as at 41.
+**The topological character of the output does not change with photo count, at
+all.** Across a 3.4x range of frames every mesh is manifold, consistently wound
+and free of degenerate triangles. Whatever else more photographs buy, they do
+not buy a topologically cleaner mesh — the mesher's construction delivers that
+at 12 frames just as at 41. This is the single most load-bearing observation in
+part 3.
 
-What more photographs did buy is **2.3x the triangles** for 2.7x the dense-stage
-time, and **more debris** (13 components against 6) — because more frames also
-see more background, and the background gets reconstructed too.
+What more frames did buy is **2.3x the triangles for 2.7x the dense-stage
+time** — sampling density, more or less linearly paid for.
+
+**What did not trend, and is reported because it did not.** Debris components
+went 6, then **4**, then 13; the largest boundary loop went 180, then **513**,
+then 495. Neither is monotonic in frame count. The 41-frame run sweeping in
+more background debris is easy to rationalise — more frames see more of the
+room — but 24 frames producing *fewer* components than 12, and a *larger* hole
+than 41, is not explained by anything measured here. With one subject and three
+points these are as likely to be properties of which frames each subset drew as
+of the count. **No trend is claimed for either.**
 
 **What this comparison cannot tell you, and why.** The obvious next question is
 "how much more of the object did 41 frames actually capture", and this spike
-**cannot answer it from these two meshes.** Each reconstruction carries its own
-arbitrary scale (section 3.7), and each includes a different, unknown amount of
-connected background surface — the 41-frame mesh's main component has a bounding
-box 4.6x larger in its own units, most of which is background it swept in.
-Normalising area by bounding box does not fix this; it just moves the confound.
+**cannot answer it from these meshes.** Each reconstruction carries its own
+arbitrary scale (section 3.7) and each includes a different, unknown amount of
+connected background surface — the 41-frame mesh's main component has a
+bounding box 4.6x larger in its own units, most of it background. Normalising
+area by bounding box does not fix this; it relocates the confound.
 
-A real completeness measurement needs a scale reference in both captures and a
+A real completeness measurement needs a scale reference in the capture and a
 ground-truth model, and neither exists here. Rather than publish a
-completeness-looking number that is actually a ratio of two arbitrary units,
-this report says what it measured — triangle count, topology, debris and time —
-and leaves completeness open. It is a good candidate for the next spike, and it
-needs a capture shot to the contract, with a scale bar.
+completeness-looking number that is really a ratio of two arbitrary units, this
+report says what it measured — triangles, topology, debris, time — and leaves
+completeness open. It is the right target for the next spike, and it needs a
+capture shot to the contract, with a scale bar in frame.
 
 ### 2.5 Focus — the tolerance is far wider than the folklore, and then it is a cliff
 

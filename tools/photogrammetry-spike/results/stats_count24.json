@@ -1,0 +1,33 @@
+{
+ "file": "out/task3/raw_count24.stl",
+ "vertices_raw": 3380133,
+ "faces": 1126711,
+ "vertices_welded": 563672,
+ "open_edges": 655,
+ "non_manifold_edges": 0,
+ "odd_edges": 655,
+ "boundary_loops": 3,
+ "largest_loops": [
+  513,
+  77,
+  65
+ ],
+ "loops_over_64": 3,
+ "loops_le_64": 0,
+ "edges_in_loops_over_64": 655,
+ "components": 4,
+ "is_watertight": false,
+ "is_winding_consistent": true,
+ "euler": -11,
+ "bbox_extent": [
+  87.1862,
+  15.7863,
+  33.6396
+ ],
+ "bbox_diagonal": 94.7748,
+ "volume_signed": 214.8141,
+ "area": 375.1004,
+ "degenerate_faces": 0,
+ "mean_edge_len": 0.018418,
+ "min_edge_len": 0.00198635
+}

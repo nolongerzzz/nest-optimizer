@@ -1,0 +1,146 @@
+{
+ "count_04": {
+  "n": 4,
+  "span": 124.6,
+  "max_gap": 235.4,
+  "median_step": 45.5
+ },
+ "count_05": {
+  "n": 5,
+  "span": 128.9,
+  "max_gap": 231.1,
+  "median_step": 35.6
+ },
+ "count_06": {
+  "n": 6,
+  "span": 130.3,
+  "max_gap": 229.7,
+  "median_step": 27.7
+ },
+ "count_07": {
+  "n": 7,
+  "span": 138.9,
+  "max_gap": 221.1,
+  "median_step": 22.1
+ },
+ "count_08": {
+  "n": 8,
+  "span": 141.1,
+  "max_gap": 218.9,
+  "median_step": 21.2
+ },
+ "count_10": {
+  "n": 10,
+  "span": 141.3,
+  "max_gap": 218.7,
+  "median_step": 18.0
+ },
+ "count_12": {
+  "n": 12,
+  "span": 152.4,
+  "max_gap": 207.6,
+  "median_step": 16.8
+ },
+ "count_14": {
+  "n": 14,
+  "span": 152.4,
+  "max_gap": 207.6,
+  "median_step": 12.0
+ },
+ "count_16": {
+  "n": 16,
+  "span": 152.4,
+  "max_gap": 207.6,
+  "median_step": 11.2
+ },
+ "count_20": {
+  "n": 20,
+  "span": 319.3,
+  "max_gap": 177.9,
+  "median_step": 9.8
+ },
+ "count_24": {
+  "n": 24,
+  "span": 319.3,
+  "max_gap": 166.8,
+  "median_step": 8.0
+ },
+ "count_28": {
+  "n": 28,
+  "span": 332.6,
+  "max_gap": 180.2,
+  "median_step": 4.7
+ },
+ "count_32": {
+  "n": 32,
+  "span": 332.6,
+  "max_gap": 180.2,
+  "median_step": 4.3
+ },
+ "count_36": {
+  "n": 36,
+  "span": 332.6,
+  "max_gap": 166.8,
+  "median_step": 4.3
+ },
+ "count_41": {
+  "n": 41,
+  "span": 332.6,
+  "max_gap": 166.8,
+  "median_step": 3.3
+ },
+ "arc_90deg_n23": {
+  "n": 23,
+  "span": 87.3,
+  "max_gap": 272.7,
+  "median_step": 3.1
+ },
+ "arc_120deg_n31": {
+  "n": 31,
+  "span": 118.4,
+  "max_gap": 241.6,
+  "median_step": 3.3
+ },
+ "arc_180deg_n39": {
+  "n": 39,
+  "span": 152.4,
+  "max_gap": 207.6,
+  "median_step": 3.2
+ },
+ "arc_240deg_n39": {
+  "n": 39,
+  "span": 152.4,
+  "max_gap": 207.6,
+  "median_step": 3.2
+ },
+ "arc_300deg_n39": {
+  "n": 39,
+  "span": 152.4,
+  "max_gap": 207.6,
+  "median_step": 3.2
+ },
+ "gap_60deg_n25": {
+  "n": 25,
+  "span": 266.5,
+  "max_gap": 166.8,
+  "median_step": 3.3
+ },
+ "gap_90deg_n18": {
+  "n": 18,
+  "span": 241.1,
+  "max_gap": 166.8,
+  "median_step": 4.7
+ },
+ "gap_120deg_n10": {
+  "n": 10,
+  "span": 208.0,
+  "max_gap": 166.8,
+  "median_step": 8.6
+ },
+ "gap_150deg_n3": {
+  "n": 3,
+  "span": 180.2,
+  "max_gap": 179.8,
+  "median_step": 166.8
+ }
+}

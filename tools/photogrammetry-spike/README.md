@@ -28,3 +28,22 @@ Needs COLMAP (CPU is fine for the sparse work) and, for the dense stage,
 OpenMVS — COLMAP's own dense stage is CUDA-only and the spike machine had no
 GPU. `docs/PHOTOGRAMMETRY-FEASIBILITY.md` records the exact versions, the
 image sets and their sources.
+
+## `results/` — the raw output the report quotes
+
+Every number in `docs/PHOTOGRAMMETRY-FEASIBILITY.md` comes from one of these,
+so a figure that later looks wrong can be chased to its source rather than
+argued about.
+
+| file | what it holds |
+|---|---|
+| `poses_full41.json` | recovered camera centres, azimuth / elevation / distance for all 41 frames |
+| `subsets.json` | the exact image list for each of the 24 sweep subsets |
+| `subset_geometry.json` | per-subset azimuth span, largest camera gap and median step |
+| `sweep_results_pass1.json` | the full 24-subset sweep |
+| `sweep_results_repeats.json` | the 15 count subsets re-run on 3 seeds (45 runs) |
+| `probe_50k.json` | `NSO_Repair.commit()`'s own report, both with and without `nonSolid` |
+| `stats_raw.json`, `stats_count24.json`, `stats_count12.json` | mesh triage for the 41-, 24- and 12-frame meshes |
+| `perf_curve.jsonl` | `commit()` wall clock against triangle count |
+| `blur_sweep.txt` | the defocus sweep |
+| `sceaux.txt` | the second-dataset cross-check |

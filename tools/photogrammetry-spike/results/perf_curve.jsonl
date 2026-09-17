@@ -1,0 +1,4 @@
+{"file":"dec_200k.stl","tris":200000,"seconds":25.01,"ok":true,"applied":true,"err":null}
+{"file":"dec_400k.stl","tris":399999,"seconds":49.3,"ok":true,"applied":true,"err":null}
+{"file":"dec_800k.stl","tris":800000,"seconds":104.47,"ok":true,"applied":true,"err":null}
+{"file":"raw_full41.stl","tris":1427605,"seconds":199.21,"ok":true,"applied":true,"err":null}

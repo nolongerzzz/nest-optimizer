@@ -1,0 +1,20 @@
+[sigma=0] TAG=blur0 MIS=3200 n_images=8 mean_kp=11600 verified_pairs=18 t_extract=136s t_match=23s t_map=3s
+[sigma=0]   Registered images: 8
+[sigma=0]   Mean track length: 2.592163
+[sigma=0]   Mean reprojection error: 0.931789px
+[sigma=1] TAG=blur1 MIS=3200 n_images=8 mean_kp=10467 verified_pairs=16 t_extract=143s t_match=25s t_map=3s
+[sigma=1]   Registered images: 8
+[sigma=1]   Mean track length: 2.604458
+[sigma=1]   Mean reprojection error: 0.935666px
+[sigma=2] TAG=blur2 MIS=3200 n_images=8 mean_kp=12071 verified_pairs=17 t_extract=121s t_match=40s t_map=4s
+[sigma=2]   Registered images: 8
+[sigma=2]   Mean track length: 2.600537
+[sigma=2]   Mean reprojection error: 0.911973px
+[sigma=4] TAG=blur4 MIS=3200 n_images=8 mean_kp=14272 verified_pairs=18 t_extract=78s t_match=49s t_map=4s
+[sigma=4]   Registered images: 8
+[sigma=4]   Mean track length: 2.499070
+[sigma=4]   Mean reprojection error: 0.892997px
+[sigma=8] TAG=blur8 MIS=3200 n_images=8 mean_kp=4671 verified_pairs=13 t_extract=62s t_match=15s t_map=2s
+[sigma=8]   Registered images: 4
+[sigma=8]   Mean track length: 2.168660
+[sigma=8]   Mean reprojection error: 0.849867px

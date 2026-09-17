@@ -1,0 +1,7 @@
+SCEAUX total 154s submodels: 1
+images 11 mean_kp 10882
+verified pairs 55 of 55
+I20260917 01:44:22.024397 19201 model.cc:431] Registered images: 11
+I20260917 01:44:22.024436 19201 model.cc:433] Points: 8055
+I20260917 01:44:22.024461 19201 model.cc:436] Mean track length: 4.769336
+I20260917 01:44:22.024494 19201 model.cc:441] Mean reprojection error: 0.611219px
