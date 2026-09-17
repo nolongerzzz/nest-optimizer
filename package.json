@@ -34,7 +34,8 @@
     "export:multi": "node tools/nso_multi_export_check.js",
     "lock:test": "node tools/nso_poslock_test.js",
     "lock:multi": "node tools/nso_multilock_test.js",
-    "thicken:drive": "node tools/nso_thicken_drive_check.js"
+    "thicken:drive": "node tools/nso_thicken_drive_check.js",
+    "carve:audit": "node tools/nso_carve_audit.js"
   },
   "devDependencies": {
     "playwright": "^1.47.0",
