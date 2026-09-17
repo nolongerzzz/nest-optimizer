@@ -113,28 +113,7 @@ function rawPerimeterFilletInPlace(rawTris, axisIdx, keepMin, requestedR, opts) 
   // Wall available at a loop point, skipping only the two segments that
   // touch it. rawLocalThickness2 skips everything within two indices, so on a
   // coarse loop it skips the whole loop and falls back to its 4mm default.
-  const wallLimitAt = (i) => {
-    const curr = poly2d[i];
-    const prev = poly2d[(i-1+n)%n], next = poly2d[(i+1)%n];
-    const nn = rawEdgeInwardNormal2(prev, next);
-    let best = Infinity;
-    for (let j = 0; j < n; j++) {
-      if (j === i || j === (i-1+n)%n) continue;
-      const a = poly2d[j], b = poly2d[(j+1)%n];
-      const dx = b[0]-a[0], dy = b[1]-a[1];
-      const den = nn[0]*dy - nn[1]*dx;
-      if (Math.abs(den) < 1e-10) continue;
-      const t = ((a[0]-curr[0])*dy - (a[1]-curr[1])*dx) / den;
-      const u = ((a[0]-curr[0])*nn[1] - (a[1]-curr[1])*nn[0]) / -den;
-      if (t > 0.1 && t < best && u >= -0.05 && u <= 1.05) best = t;
-    }
-    for (let j = 0; j < n; j++) {
-      if (j === i || j === (i-1+n)%n || j === (i+1)%n) continue;
-      const d = Math.hypot(poly2d[j][0]-curr[0], poly2d[j][1]-curr[1]);
-      if (d < best) best = d;
-    }
-    return best === Infinity ? 4 : best;
-  };
+  const wallLimitAt = (i) => NSO_Thickness.cornerWall(poly2d, i).mm;
   // Every loop point carries R — that is the whole difference from Corners.
   const Rs = new Array(n);
   let peakR = 0;
@@ -638,28 +617,7 @@ function rawVertexBallOnly(rawTris, axisIdx, keepMin, requestedR, opts) {
     }
     return { d: d0, run: run };
   };
-  const wallLimitAt = (i) => {
-    const curr = poly[i];
-    const prev = poly[(i-1+nL)%nL], next = poly[(i+1)%nL];
-    const nn = rawEdgeInwardNormal2(prev, next);
-    let best = Infinity;
-    for (let j = 0; j < nL; j++) {
-      if (j === i || j === (i-1+nL)%nL) continue;
-      const a = poly[j], b = poly[(j+1)%nL];
-      const dx = b[0]-a[0], dy = b[1]-a[1];
-      const den = nn[0]*dy - nn[1]*dx;
-      if (Math.abs(den) < 1e-10) continue;
-      const t = ((a[0]-curr[0])*dy - (a[1]-curr[1])*dx) / den;
-      const u = ((a[0]-curr[0])*nn[1] - (a[1]-curr[1])*nn[0]) / -den;
-      if (t > 0.1 && t < best && u >= -0.05 && u <= 1.05) best = t;
-    }
-    for (let j = 0; j < nL; j++) {
-      if (j === i || j === (i-1+nL)%nL || j === (i+1)%nL) continue;
-      const d = Math.hypot(poly[j][0]-curr[0], poly[j][1]-curr[1]);
-      if (d < best) best = d;
-    }
-    return best === Infinity ? 4 : best;
-  };
+  const wallLimitAt = (i) => NSO_Thickness.cornerWall(poly, i).mm;
   const gapFwd = (t) => {
     if (cornerCount === 1) return total;
     let g = cum[apex[(t+1)%cornerCount]] - cum[apex[t]];
@@ -1355,28 +1313,7 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
     }
     return { d: d0, run: run };
   };
-  const wallLimitAt = (i) => {
-    const curr = poly[i];
-    const prev = poly[(i-1+nL)%nL], next = poly[(i+1)%nL];
-    const nn = rawEdgeInwardNormal2(prev, next);
-    let best = Infinity;
-    for (let j = 0; j < nL; j++) {
-      if (j === i || j === (i-1+nL)%nL) continue;
-      const a = poly[j], b = poly[(j+1)%nL];
-      const dx = b[0]-a[0], dy = b[1]-a[1];
-      const den = nn[0]*dy - nn[1]*dx;
-      if (Math.abs(den) < 1e-10) continue;
-      const t = ((a[0]-curr[0])*dy - (a[1]-curr[1])*dx) / den;
-      const u = ((a[0]-curr[0])*nn[1] - (a[1]-curr[1])*nn[0]) / -den;
-      if (t > 0.1 && t < best && u >= -0.05 && u <= 1.05) best = t;
-    }
-    for (let j = 0; j < nL; j++) {
-      if (j === i || j === (i-1+nL)%nL || j === (i+1)%nL) continue;
-      const d = Math.hypot(poly[j][0]-curr[0], poly[j][1]-curr[1]);
-      if (d < best) best = d;
-    }
-    return best === Infinity ? 4 : best;
-  };
+  const wallLimitAt = (i) => NSO_Thickness.cornerWall(poly, i).mm;
   const gapFwd = (t) => {
     if (cornerCount === 1) return total;
     let g = cum[apex[(t+1)%cornerCount]] - cum[apex[t]];

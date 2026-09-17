@@ -904,6 +904,10 @@ function capFromEdges(edges, axis, plane, keepMin) {
     return [u, v, along];
   }
 
+  // DEAD: filletLoop is never called (see the LIVE GATE below). Left as-is
+  // rather than retrofitted, but do not copy it - the canonical probe is
+  // NSO_Thickness.cornerWall / .bandWall in nso_thickness.js, which is what
+  // every live clamp in this file and app-finish.js now calls.
   function localThickness(loop2, i, sign) {
     const n = loop2.length;
     const curr = loop2[i];
@@ -1747,37 +1751,22 @@ function rawSlerp2D2(a, b, t) {
 }
 function rawSmoothstep2(x) { x = Math.max(0, Math.min(1, x)); return x*x*(3-2*x); }
 
-// Local wall thickness at loop point i, measured inward along the corner
-// bisector — same ray-cast approach validated in the sandbox.
+// Local wall thickness at loop point i: the canonical loop probe, BAND rule
+// (nso_thickness.js). Was an inline bisector ray plus a nearest-point safety
+// net — the ray looks along ONE direction and can miss a genuinely close point
+// that is not roughly in that direction (confirmed directly: two boundary
+// points 0.52 mm apart where the ray reported no nearby wall at all), so both
+// signals are taken and the tighter one wins. That is unchanged; what moved is
+// WHERE it lives, so the six copies of this measurement across app-cut.js and
+// app-finish.js are now one function with one floor.
+//
+// The historical `4` for "found nothing" is kept verbatim as
+// NSO_Thickness.LEGACY_FALLBACK_MM so no geometry moves. Note it is a CAP
+// here, not a fallback: BAND computes min(ray ?? 4, nearest ?? 4), so a miss
+// on the ray pins this to 4 mm however much wall is really there. Callers that
+// need to tell a measured 4 from a guessed one read `.measured`.
 function rawLocalThickness2(loop2, i) {
-  const n = loop2.length;
-  const curr = loop2[i];
-  const prev = loop2[(i-1+n)%n], next = loop2[(i+1)%n];
-  const nn = rawEdgeInwardNormal2(prev, next);
-  let minD = 1e9;
-  for (let j = 0; j < n; j++) {
-    if (Math.abs(j-i) < 2 || Math.abs(j-i) > n-2) continue;
-    const a = loop2[j], b = loop2[(j+1)%n];
-    const dx = b[0]-a[0], dy = b[1]-a[1];
-    const den = nn[0]*dy - nn[1]*dx;
-    if (Math.abs(den) < 1e-10) continue;
-    const t = ((a[0]-curr[0])*dy - (a[1]-curr[1])*dx) / den;
-    const u = ((a[0]-curr[0])*nn[1] - (a[1]-curr[1])*nn[0]) / -den;
-    if (t > 0.1 && t < minD && u >= -0.05 && u <= 1.05) minD = t;
-  }
-  // The ray-cast above only looks along ONE direction (the local bisector)
-  // and can miss a genuinely close point that isn't roughly in that
-  // direction — confirmed directly: two boundary points only 0.52mm apart
-  // in space, where the ray-cast reported no nearby wall at all. A direct
-  // nearest-point distance is a simpler, direction-independent safety net
-  // that catches exactly this case; take whichever signal is tighter.
-  let nearestPt = 1e9;
-  for (let j = 0; j < n; j++) {
-    if (Math.abs(j-i) < 2 || Math.abs(j-i) > n-2) continue;
-    const d = Math.hypot(loop2[j][0]-curr[0], loop2[j][1]-curr[1]);
-    if (d < nearestPt) nearestPt = d;
-  }
-  return Math.min(minD === 1e9 ? 4 : minD, nearestPt === 1e9 ? 4 : nearestPt);
+  return NSO_Thickness.bandWall(loop2, i).mm;
 }
 
 function rawRingSelfIntersects2(ring) {
@@ -2420,35 +2409,6 @@ function rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, requestedR, opts)
   const apex = groups.map(g => g.reduce((best,i) => Math.abs(turn[i]) > Math.abs(turn[best]) ? i : best, g[0]));
   const cornerCount = apex.length;
 
-  // Wall available at one corner. rawLocalThickness2 skips every segment
-  // within two indices of the vertex, so on a 4-vertex loop - the plain
-  // square face - it skips the whole loop and falls back to its default,
-  // pinning every corner at a radius the user never asked for. Here only the
-  // two segments touching the apex are skipped.
-  const wallLimitAt = (i) => {
-    const m = poly2d.length;
-    const curr = poly2d[i];
-    const prev = poly2d[(i-1+m)%m], next = poly2d[(i+1)%m];
-    const nn = rawEdgeInwardNormal2(prev, next);
-    let best = Infinity;
-    for (let j = 0; j < m; j++) {
-      if (j === i || j === (i-1+m)%m) continue;
-      const a = poly2d[j], b = poly2d[(j+1)%m];
-      const dx = b[0]-a[0], dy = b[1]-a[1];
-      const den = nn[0]*dy - nn[1]*dx;
-      if (Math.abs(den) < 1e-10) continue;
-      const t = ((a[0]-curr[0])*dy - (a[1]-curr[1])*dx) / den;
-      const u = ((a[0]-curr[0])*nn[1] - (a[1]-curr[1])*nn[0]) / -den;
-      if (t > 0.1 && t < best && u >= -0.05 && u <= 1.05) best = t;
-    }
-    for (let j = 0; j < m; j++) {
-      if (j === i || j === (i-1+m)%m || j === (i+1)%m) continue;
-      const d = Math.hypot(poly2d[j][0]-curr[0], poly2d[j][1]-curr[1]);
-      if (d < best) best = d;
-    }
-    return best === Infinity ? 4 : best;
-  };
-
   const gapFwd = (t) => {
     if (cornerCount === 1) return tab.total;
     let g = tab.cum[apex[(t+1)%cornerCount]] - tab.cum[apex[t]];
@@ -2496,6 +2456,10 @@ function rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, requestedR, opts)
   // section however fine the profile underneath.
   const SPAN_MIN = 8, SPAN_MAX = 64;
   const cornerArcs = [];
+  // Nozzle-safety bookkeeping for this build; published on lastBuild below so
+  // the UI and the checks can see it instead of it being silently absent.
+  const wallThin = [];
+  let wallUnmeasured = 0;
   for (let t = 0; t < cornerCount; t++) {
     const ai = apex[t];
     if (turn[ai] * wind0 <= 0) continue;
@@ -2508,7 +2472,22 @@ function rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, requestedR, opts)
     if (!(theta > 1e-3 && theta < Math.PI - 1e-3)) continue;
     const half = theta / 2;
     const tanH = Math.tan(half), cosH = Math.cos(half);
-    let Rc = Math.min(requestedR, Math.max(0, wallLimitAt(ai) * 0.45));
+    // The wall available at this corner, on the CORNER rule: only the two
+    // segments touching the apex are skipped. The BAND rule (bandWall) skips
+    // every segment within two indices of the vertex, so on a 4-vertex loop -
+    // the plain square face - it skips the whole loop and falls back to its
+    // default, pinning every corner at a radius the user never asked for.
+    //
+    // And - new - whether the fillet we are about to cut leaves a PRINTABLE
+    // wall behind it. safeRadius's `.r` is exactly the old
+    // Math.min(requestedR, max(0, wall * 0.45)), so the geometry is unchanged;
+    // what it adds is the floor check that never existed here, and whether the
+    // wall figure was measured at all or is the legacy 4 mm fallback.
+    const wallAt = NSO_Thickness.cornerWall(poly2d, ai);
+    const safe = NSO_Thickness.safeRadius(requestedR, wallAt.mm, { ratio: 0.45 });
+    if (!wallAt.measured) wallUnmeasured++;
+    if (safe.floored) wallThin.push({ at: ai, wall: wallAt.mm, leaves: safe.residualMM });
+    let Rc = safe.r;
     const room = Math.min(back.run, fwd.run,
                           gapFwd((t-1+cornerCount)%cornerCount), gapFwd(t)) * 0.45;
     Rc = Math.min(Rc, Math.max(0, room * tanH));
@@ -2942,7 +2921,19 @@ function rawEdgeRoundInPlace(rawTris, axisIdx, plane, keepMin, requestedR, opts)
     loopPts: n,
     ptsPerCorner: ptsPerCorner,
     radius: peakR,
-    requested: requestedR
+    requested: requestedR,
+    // Nozzle safety, from nso_thickness.js. `wall.thin` lists the corners
+    // where the clamped fillet still leaves under one extrusion line behind
+    // it - geometry this engine has always been willing to cut and has never
+    // until now reported. `unmeasured` counts corners whose wall figure is the
+    // legacy 4 mm fallback rather than a measurement.
+    wall: {
+      nozzle_mm: NSO_Thickness.NOZZLE_DEFAULT,
+      floor_mm: NSO_Thickness.floorFor(NSO_Thickness.NOZZLE_DEFAULT),
+      thin: wallThin,
+      unmeasured: wallUnmeasured,
+      pass: wallThin.length === 0
+    }
   };
   return new Float32Array(out);
 }
@@ -2990,27 +2981,7 @@ function rawPolyArea2(poly) {
 // the apex are skipped, so a 20mm square reports 28.3mm of wall and R=2
 // (or 3, or 6) is the radius that gets built.
 function rawCornerWallLimit2(loop2, i) {
-  const n = loop2.length;
-  const curr = loop2[i];
-  const prev = loop2[(i - 1 + n) % n], next = loop2[(i + 1) % n];
-  const nn = rawEdgeInwardNormal2(prev, next);
-  let best = Infinity;
-  for (let j = 0; j < n; j++) {
-    if (j === i || j === (i - 1 + n) % n) continue;
-    const a = loop2[j], b = loop2[(j + 1) % n];
-    const dx = b[0] - a[0], dy = b[1] - a[1];
-    const den = nn[0] * dy - nn[1] * dx;
-    if (Math.abs(den) < 1e-10) continue;
-    const t = ((a[0] - curr[0]) * dy - (a[1] - curr[1]) * dx) / den;
-    const u = ((a[0] - curr[0]) * nn[1] - (a[1] - curr[1]) * nn[0]) / -den;
-    if (t > 0.1 && t < best && u >= -0.05 && u <= 1.05) best = t;
-  }
-  for (let j = 0; j < n; j++) {
-    if (j === i || j === (i - 1 + n) % n || j === (i + 1) % n) continue;
-    const d = Math.hypot(loop2[j][0] - curr[0], loop2[j][1] - curr[1]);
-    if (d < best) best = d;
-  }
-  return best === Infinity ? 4 : best;
+  return NSO_Thickness.cornerWall(loop2, i).mm;
 }
 
 // Edges used an odd number of times - the cheap seal signal used to refuse
