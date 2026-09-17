@@ -6,6 +6,21 @@
     if (typeof setStatus === 'function') setStatus('HUD inside5');
   }
 
+  // nsoMaskHudRefresh writes HUD_TAG at rest. Until that const moves with
+  // the named tag, retag its line so a selection cannot snap the stamp back.
+  function alignMaskHudTag() {
+    var fn = window.nsoMaskHudRefresh;
+    if (typeof fn !== 'function' || fn._hudInside5) return;
+    window.nsoMaskHudRefresh = function () {
+      fn.apply(this, arguments);
+      var el = document.getElementById('adjust-status');
+      if (el && el.textContent) {
+        el.textContent = el.textContent.replace(/HUD inside4/g, 'HUD inside5');
+      }
+    };
+    window.nsoMaskHudRefresh._hudInside5 = true;
+  }
+
   function pickIdx(event) {
     if (!state.renderer || !state.camera || !state.modelGroup) return -1;
     setPointerFromEvent(event);
@@ -66,9 +81,10 @@
 
   function bind() {
     stampHud();
+    alignMaskHudTag();
     bindThickenArrows();
-    setTimeout(stampHud, 0);
-    setTimeout(stampHud, 200);
+    setTimeout(function () { stampHud(); alignMaskHudTag(); }, 0);
+    setTimeout(function () { stampHud(); alignMaskHudTag(); }, 200);
     if (state.renderer && state.renderer.domElement) {
       state.renderer.domElement.addEventListener('dblclick', function (event) {
         if (!state.cutterOpen) return;
