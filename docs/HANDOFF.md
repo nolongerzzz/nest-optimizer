@@ -50,7 +50,31 @@ Current roster, by category:
 | Thicken (`app-finish.js`) | whole-piece | `nsoMaskCount(m) > 0` | header comment |
 | Pocket corners (`nso_inside_corners.js`) | sub-region | this pocket's floor + 4 walls | `docs/INSIDE-CORNERS.md` §2 |
 | Skin face (`app-skin.js`) | sub-region | the one face being skinned, `nsoMaskIsExcludedRaw(m, face.n, face.d, ...)` | header comment |
+| Delete painted (`app-paint-delete.js`) | sub-region | the one TARGET face, `nsoMaskIsExcludedRaw(m, face.n, face.d, ...)` | `docs/PAINT-DELETE.md` §7 |
 | Skin patch (`app-skin-patch.js`) | **none** | — it reads no existing geometry at all | header comment |
+
+### The SELECT list is an operand; the EXCLUDE list is still only a veto
+
+Added 2026-09-17, with **Delete painted** (`docs/PAINT-DELETE.md`). Read this
+before the next ticket that wants to act ON painted geometry rather than around
+it, because the obvious reading is the wrong one.
+
+A tool that removes geometry does **not** read the yellow. The standing rule
+above is unchanged and unweakened: yellow means "no bake may touch this face",
+in a destructive tool exactly as in a bake, and a delete aimed at a yellow face
+stands down and names it. What a destructive tool reads is the **pink** — the
+SELECT list, "this face is my target" — which is the same list Skin face has
+always taken its target from. Delete is that list's second consumer, not a new
+kind of paint and not a new reading of the old kind.
+
+So the rule of thumb for a new feature is two questions, not one:
+
+> What does this act ON?   -> the SELECT list, if anything.
+> What must it not touch?  -> the EXCLUDE list, always.
+
+A feature that answers the first question with "the exclude list" is asking for
+the one colour that means *protected* to also mean *doomed*, and that is not a
+trade this file makes.
 
 `node tools/nso_paint_scope_test.js` asserts every entry actually carries its
 label in source, so a deleted or drifted declaration fails rather than rotting.

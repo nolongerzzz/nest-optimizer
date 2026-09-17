@@ -47,6 +47,8 @@ const ROSTER = [
     test: /NSO_insidePaintCheck/,                           standDown: /Pocket corners stood down - ' \+ [\w.]+ \+ ' painted face\(s\)/ },
   { feature: 'Skin face',      file: 'app-skin.js',            scope: 'SUB-REGION',
     test: /nsoMaskIsExcludedRaw\s*\(\s*m\s*,\s*face\.n\s*,\s*face\.d/, standDown: /Skin stood down - ' \+ \w+ \+ ' is painted/ },
+  { feature: 'Delete painted', file: 'app-paint-delete.js',    scope: 'SUB-REGION',
+    test: /nsoMaskIsExcludedRaw\s*\(\s*m\s*,\s*face\.n\s*,\s*face\.d/, standDown: /Delete stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
 ];
 
 console.log('== every paint-aware feature declares its scope in its own source ==');
@@ -74,6 +76,25 @@ console.log('\n== the rule itself is written down where the roster says ==');
   for (const r of ROSTER)
     check('HANDOFF roster lists ' + r.feature,
           new RegExp('\\|\\s*' + r.feature + '[^|]*\\|\\s*' + r.scope.toLowerCase() + '\\s*\\|', 'i').test(h));
+}
+
+console.log('\n== the destructive tool reads the SELECT list, never the EXCLUDE list ==');
+{
+  const d = read('docs/PAINT-DELETE.md');
+  const src = read('app-paint-delete.js');
+  const h = read('docs/HANDOFF.md');
+  check('PAINT-DELETE declares the sub-region category', /PAINT SCOPE:\s*SUB-REGION/i.test(d));
+  check('  ...and says the operand is the SELECT list, not the exclude list',
+        /faceMask\.select/.test(d) && /exclude list cannot be the operand/i.test(d));
+  check('  ...and lists what does and does not stand it down',
+        /the \*\*target face\*\* painted excluded/.test(d) && /\*\*any other face\*\*/.test(d));
+  check('  ...and says the two categories are one rule, not an exception',
+        /not\*\* a laxer reading|same rule as Smooth's whole-piece stand-down applied at a different\s*\n?scope/i.test(d));
+  check('the delete reads nsoMaskSelected for its operand', /nsoMaskSelected\s*\(\s*m\s*\)/.test(src));
+  check('  ...and never treats the exclude list as one',
+        !/nsoMaskFaceList|faceMask\.exclude/.test(src));
+  check('HANDOFF spells the operand/veto split out for the next ticket',
+        /### The SELECT list is an operand; the EXCLUDE list is still only a veto/.test(h));
 }
 
 console.log('\n== the sub-region feature documents WHICH faces it scopes to ==');
