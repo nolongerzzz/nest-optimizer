@@ -124,7 +124,8 @@ const UNDO_REPLACE_LABEL = {
   thickenReplace: 'Undo: Thicken reverted',
   smoothReplace: 'Undo: Smooth reverted',
   skinReplace: 'Undo: Skin reverted',
-  carveReplace: 'Undo: Carve reverted'
+  carveReplace: 'Undo: Carve reverted',
+  scaleReplace: 'Undo: Scale reverted'
 };
 
 function undoLast() {
