@@ -110,6 +110,23 @@ function clearUndo() {
   state.undoStack = [];
   updateUndoBtn();
 }
+/* The ops that undo by putting one piece's geometry back, and what each one
+   calls itself on the status line. It is the gate as well as the label: a type
+   absent from here is not handled by that branch, so a new op is one row, not a
+   condition in two places that can disagree. Read with hasOwnProperty, never as
+   a bare truthiness test: an entry type of 'constructor' would otherwise walk
+   the prototype chain and enter a branch that expects prevGeometry. */
+const UNDO_REPLACE_LABEL = {
+  softenReplace: 'Undo: Soften reverted',
+  capReplace: 'Undo: Cap reverted',
+  sealReplace: 'Undo: Seal reverted',
+  solidifyReplace: 'Undo: Solidify reverted',
+  thickenReplace: 'Undo: Thicken reverted',
+  smoothReplace: 'Undo: Smooth reverted',
+  skinReplace: 'Undo: Skin reverted',
+  carveReplace: 'Undo: Carve reverted'
+};
+
 function undoLast() {
   if (typeof removeFaceHelper === 'function') removeFaceHelper();
   const entry = state.undoStack.pop();
@@ -340,7 +357,10 @@ function undoLast() {
       (undoSel && typeof nsoMaskFaceName === 'function' ? nsoMaskFaceName(undoSel).replace(/^the /, '') : 'none'));
     return;
   }
-  if (entry.type === 'softenReplace' || entry.type === 'capReplace' || entry.type === 'sealReplace' || entry.type === 'solidifyReplace' || entry.type === 'thickenReplace' || entry.type === 'smoothReplace' || entry.type === 'skinReplace') {
+  /* One branch for every op that swaps a piece's geometry in place. A carve is
+     one of them: the blade is never a placed piece, so unlike Subtract there is
+     no partner to put back - only this piece's geometry. */
+  if (Object.prototype.hasOwnProperty.call(UNDO_REPLACE_LABEL, entry.type)) {
     const m = state.models.find(x => x.id === entry.modelId);
     if (!m) { setStatus('Undo: piece no longer exists'); return; }
     // the paint set is part of the piece's state, so one step puts back both
@@ -384,7 +404,7 @@ function undoLast() {
     updateEditSize();
     renderModelList();
     updateUndoBtn();
-    setStatus(entry.type === 'skinReplace' ? 'Undo: Skin reverted' : entry.type === 'smoothReplace' ? 'Undo: Smooth reverted' : (entry.type === 'thickenReplace' ? 'Undo: Thicken reverted' : (entry.type === 'solidifyReplace' ? 'Undo: Solidify reverted' : (entry.type === 'sealReplace' ? 'Undo: Seal reverted' : (entry.type === 'capReplace' ? 'Undo: Cap reverted' : 'Undo: Soften reverted')))));
+    setStatus(UNDO_REPLACE_LABEL[entry.type]);
     return;
   }
   if (entry.type === 'removeModel') {
@@ -2140,6 +2160,16 @@ function onCanvasPointerDown(event) {
      that paint would actually take is given up, so orbiting the plate while
      painting still works. */
   if (typeof window.nsoMaskTakesClick === 'function' && window.nsoMaskTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* Carve owns a click that lands on a piece, for the same reason paint does:
+     app-core binds this handler inside initThree() while the document is still
+     parsing, so it is always the earlier listener and a fall-through here would
+     start a move drag under the carve and report "Moved model #N" over its
+     status. app-carve.js decides, where its own hit test lives. */
+  if (typeof window.nsoCarveTakesClick === 'function' && window.nsoCarveTakesClick(event)) {
     setOrbitFromPlate(false);
     return;
   }

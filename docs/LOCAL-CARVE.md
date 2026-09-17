@@ -233,3 +233,387 @@ acceptance list, passing today, on hand-parked poses.
 **Task 4 (validation)** can therefore reuse this file's harness verbatim:
 `tools/nso_carve_audit.js` already writes each result to STL and gates it on
 `tools/mesh_validate.py`, with the three canonical cases in place.
+
+---
+---
+
+# The build — Tasks 2 and 3
+
+Everything below is measured by `tools/nso_carve_test.js`, which runs
+`nso_carve.js` under node and then drives the shipped tool in real Chromium
+against the real manifold kernel, putting every result mesh through the
+canonical checker:
+
+```
+node tools/nso_carve_test.js       # exit 0 = every gate below still holds
+npm run carve:test
+```
+
+Files: `nso_carve.js` (geometry core, THREE-free, node-tested), `app-carve.js`
+(app layer), a Carve block in `index.html`'s Finish menu, and three surgical
+edits to `app-core.js` plus one to `app-join.js`, each described below.
+
+## 5. What shipped, and the shape of it
+
+**`nso_carve.js` — the geometry.** The blade registry, the target probe, the
+placement, and the status-line wording. No THREE and no DOM, so the whole file
+runs under node; the app layer is the only part that needs a browser. This
+follows `nso_skin.js` exactly, including its dual `module.exports` / `window`
+export.
+
+**`app-carve.js` — the app.** Three things only a browser can do: arm a click,
+lift the core's plain-data frame into the THREE types
+`NSO_CSG.buildCutVolume` reads, and commit the result. **`app-join.js`'s boolean
+is untouched** — `subtractSoupBFromA` runs exactly as it does for Subtract, on a
+frame built elsewhere. Same pattern as `nso_inside_corners.js`, which gives a
+concave pocket a convex treatment by running the unmodified convex engine on the
+plug: keep the kernel path, change what you feed it.
+
+### The blade-local convention
+
+One convention carries the whole design, and it is why the free orientation
+costs nothing downstream:
+
+| axis | meaning |
+|---|---|
+| **+Y** | out of the material. The blade's local AABB is `y ∈ [0, height]`; `y = 0` is the cutting tip, `y = height` the shank end, which stays outside the piece. |
+| **+Z** | the blade's sweep axis — the length of a slab, the apex line of a V-groove. Placement lays it along an edge. |
+| **+X** | the cross axis, `Y × Z`. |
+
+Because local `+Y` is always the outward normal, the frame handed to the kernel
+is always `{ axis: 1, sign: 1, capCoord: height }`. Every orientation lives in
+the matrix alone, and `buildCutVolume`'s own arithmetic never learns that
+anything changed. Pinned: `tools/nso_carve_test.js` §1d asserts it over 24
+aim/roll combinations.
+
+## 6. Task 2 — the blade library
+
+`NSO_Carve.BLADES`, shaped as `{ name: { defaults, describe, build, reach } }`.
+That is `NSO_Skin.PATTERNS`'s shape, deliberately — the same per-profile
+defaults, the same human-readable `describe`, the same `withDefaults` merge that
+drops any key the profile does not declare, driven from a `<select>` in the
+viewport the same way the skin patterns are. It is **not** `app-library.js`'s
+`CATALOG`, which is a flat list of STL filenames for fixed-size connector plugs
+authored offline; a blade has to be sized to the cut, so it is built, not
+fetched.
+
+| blade | parameters | what it leaves |
+|---|---|---|
+| `flat` | `width`, `length` | a flat-bottomed local shave with square walls |
+| `ball` | `radius` | a rounded gouge with no stress corner in it |
+| `vee` | `angle`, `length` | a V-groove or a chamfer — **cut deeper for a wider one** |
+
+Two builders serve all three: `extrudeZ` (a convex polygon in local XY pushed
+along local Z — the slab and the wedge are both prisms) and `revolveY` (a
+surface of revolution from a ring list, with a radius-0 ring handled as a pole
+so the fan does not emit zero-area triangles). Each returns a closed watertight
+solid, wound outward, positive volume.
+
+`vee` takes no `width` on purpose. Its half-width is `height · tan(angle/2)`, so
+cutting to depth `d` leaves a groove `2·d·tan(angle/2)` wide: **depth is the
+size control**, and one blade gives every chamfer size.
+
+`height` is not a UI field either. `app-carve.js` derives it as
+`depth + 2 mm` (and at least `radius + 2` for a ball), so "depth deeper than the
+blade" — a real refusal the core still enforces and the tests still cover —
+cannot be reached from the controls at all.
+
+**Gated** (`§1a`): every blade, at two sizes each, is one closed solid — 0 open,
+0 non-manifold, 0 odd, 0 winding, 0 degenerate, 0 sliver, 0 piercing, Euler 2 —
+with the analytic volume to 1e-3 for the two prisms (`360.000`, `18.000`,
+`360.000`, `22.368` mm³) and just under the ideal capsule for the ball, as an
+inscribed faceted hemisphere must be: 1.559% under at 24 segments, 0.180% at 64.
+
+## 7. Task 3 — free-orientation placement
+
+This is the part the audit said would be hardest, and the audit was right about
+where the difficulty is: not in the boolean, and not in a looser Seat.
+
+### The probe: one formula for face, edge and corner
+
+`NSO_Carve.probeTarget(hullSoup, point, radius)` gathers the triangles a blade
+aimed at `point` can actually reach, clusters their normals, and lets the number
+of clusters say what the feature is. **The outward direction is the normalised
+sum of the distinct face normals** — the bisector. For one face that is the face
+normal; for two it is the direction a file would take down an edge; for three it
+is the corner diagonal. One formula, three features, and a face is the
+one-cluster case of it rather than a separate path.
+
+`radius` defaults to the blade's own `reach`, which makes the question
+self-scaling and physically honest: *which faces will this blade touch?* A 1 mm
+ball 1.5 mm in from an edge reads a face; a 2 mm ball at the same point reads the
+edge, because it will meet both.
+
+Two thresholds, because they answer different questions:
+
+- **`COS_SAME` (~5°)** groups triangles into *planes* — two triangles of one
+  flat face differ by float noise only.
+- **`DIHEDRAL_DEG` (20°)** then groups planes into *features*: is this a real
+  edge, or one smooth surface that happens to be tessellated? Transitive,
+  area-weighted.
+
+The second threshold is not decoration, it is a bug fix, and §9c records the
+measurement that forced it.
+
+The reference point snaps onto the feature: at a real edge or corner it is the
+**intersection of the planes in play**, so a click 0.5 mm off an edge still
+places the blade on the edge. That meet is bounded — see §9c.
+
+### The placement
+
+`NSO_Carve.placeBlade` builds the world matrix as columns `[X, Y, Z, origin]`:
+`Y` is the outward bisector, `Z` the sweep axis rolled by `roll` about `Y`,
+`X = Y × Z`, and `Z` is then re-derived as `X × Y` so the basis is exactly
+orthonormal. The origin is the blade's tip, `depth` mm inside the surface along
+`−Y`. It is a pure rotation plus a translation, so local mm are world mm — which
+matters, because `buildCutVolume` divides its measured world depth by the basis
+length to get back to local units and a scale here would quietly resize the
+safety box.
+
+**Gated** (`§1d`): over 6 aim points × 4 roll angles, every basis is orthogonal
+to 5.6e-17, unit to 2.2e-16, right-handed, the tip lands exactly `depth` inside,
+and the frame is always `{axis 1, sign 1, capCoord height}`. Roll leaves outward
+untouched to 1e-12 and turns the sweep axis a right angle to 6.1e-17.
+
+### Why it does not go through Seat
+
+It cannot, and this is worth stating because "relax Seat's corner-ray gate"
+looks like the cheap answer. §2b measured what Seat does to a straddle it does
+*not* refuse: it drives 6.000 mm of overhang down to 0.0100 mm and buries the
+bit as a plug through the one flat face it picked, reporting `Seated`. Making
+something flush against one face is Seat's purpose, not a limitation of its
+tolerances. A carve therefore needs its own placement step over the shared
+kernel path, which is what this is.
+
+### Pose state: contained, by decision
+
+A blade is **never a placed piece**. It is built, transformed, subtracted and
+dropped, so it never enters `state.models` or `state.placed`. Two things follow,
+both of which the audit listed as problems:
+
+- **The bit is not consumed.** `subtractBFromA` deletes model B on success —
+  right for a one-shot port plug, wrong for a tool you place at the next edge.
+  Gated (`§2g`): three carves off one armed tool, `state.models` and
+  `state.placed` unchanged, each cut landing, the piece still gating clean after
+  six.
+- **It never meets `applyMeshRotation`**, which rebuilds a piece's rotation from
+  quantised Euler fields and would destroy a free orientation the moment any
+  pose button was pressed.
+
+## 8. Task 4 — the gates
+
+Every case below is the shipped tool driven through `nsoCarveAtPoint`, with the
+result mesh read back off the plate and put through
+`tools/mesh_validate.py --gate`. "Gates clean" means the **canonical** verdict
+plus 0 open / 0 non-manifold / 0 odd / 0 inconsistent winding / 0 degenerate /
+0 piercing / Euler 2.
+
+| case | feature read | removed vs blade ∩ piece | gate |
+|---|---|---|---|
+| corner gouge, ball r2, depth 1.5 | `corner`, 3 faces | 1.9086 of 1.9086 mm³ | PASS, 166 tris |
+| edge chamfer, vee 90°, depth 1 | `edge`, 2 faces | 6.0000 of 6.0000 mm³ | PASS, 182 tris |
+| flat shave, slab 8×12, depth 1.2 | `face`, 1 face | 115.2001 of 115.2001 mm³ | PASS, 198 tris |
+| six carves on one piece | — | each exact | PASS, 756 tris |
+| dome gouge, ball r1.5 (curved) | `face`, 16 planes merged | 3.1820 of 3.1820 mm³ | PASS, 2588 tris |
+| dome V-groove on the flank | `face`, 1 feature | 1.4031 of 1.4031 mm³ | PASS, 2634 tris |
+| near-through cut, depth 19.5 on 20 mm | `face` | 304.000 of 312.000 — **8 mm³ held back** | PASS, 772 tris |
+| 2 mm tray floor, small ball | `face` | 0.3302 of 0.3302 mm³ | PASS, 358 tris |
+
+The flat shave's removal is exactly `width × length × depth`
+(`115.2001` vs `115.2000`), which is the one case with a closed form to check
+against. Undo returns the piece **vertex for vertex** (worst delta `0`) and says
+`Undo: Carve reverted`.
+
+### Slivers: introduced, measured, not gated
+
+The ticket asked for "no leftover slivers", and the honest answer is that a
+carve **does** leave high-aspect triangles, so here are the numbers rather than
+a claim:
+
+| case | over aspect 100 | worst aspect | smallest triangle area |
+|---|---|---|---|
+| box carves | 24–29 of 166–198 | 10,643 | 3.10e-05 mm² |
+| after six carves | 88 of 756 | 53,312 | 3.10e-05 mm² |
+| dome carves | 91–93 of ~2,600 | 17,864 | 6.29e-07 mm² |
+| tray gouge | 24 of 358 | 1,354 | 3.15e-03 mm² |
+
+The input fixtures have **0** slivers (worst aspect 8.4 to 14.6), so these come
+from the carve: manifold retriangulates a curved cut boundary against a
+tessellated surface, and thin triangles are what that produces. **None has
+collapsed** — every one has real area, which is asserted on every case, and
+`tools/mesh_validate.py`'s own `verdict()` reports slivers and deliberately does
+not fail on them, because a thin triangle with area is watertight and prints.
+The four that *were* topologically harmful are gone; §9b is that story.
+
+Cleaning up the survivors is real work and it is not this ticket — see §10.
+
+### minWall: still one axis, and it says so
+
+Left as-is by decision. The safety box measures depth along `frame.punch` only,
+so where the carve engages more than one face the status line names it, on every
+such carve rather than only when it goes wrong:
+
+```
+Carved corner - ball-nose gouge, r 2 mm, 4 mm tall, 24 segments, depth 1.5 mm
+  - 1.909 mm³ removed - wall checked along the cut axis only, 3 faces in play
+  - open edges 0→0, non-manifold 0→0, welded away 4 seam slivers
+```
+
+A one-face carve does **not** claim the caveat (gated). And where minWall does
+hold something back, the amount is measured and reported, not swallowed:
+
+```
+Carved face - flat shave, 4 x 4 mm face, 21.5 mm tall, depth 19.5 mm
+  - 304.000 mm³ removed (held back 8.000 mm³ to keep the wall)
+```
+
+Gated: that cut is 19.0000 mm into a 20.0 mm block, leaving **exactly 1.0000 mm**
+— minWall's promise, kept. The blade only reached 0.5 mm into the protected zone,
+which is why 8 mm³ was held back rather than the full 16 mm³ of the wall.
+
+Where the piece is thinner than the blade in *both* directions, the probe refuses
+rather than guessing which way is out:
+
+```
+the faces within 2.00 mm point opposite ways - the wall is thinner than this
+blade. Use a smaller blade or aim away from the edge
+```
+
+and a blade that fits the same 2 mm floor carves it cleanly (gated).
+
+## 9. Three things the build found, and what each cost
+
+None of these were visible from the audit; all three came out of the checker.
+
+### a) The kernel's no-op guard is calibrated for plugs
+
+`subtractSoupBFromA` refuses a boolean that removed less than
+`max(1e-3, 0.01% of hull volume)`, because `subtractBFromA` **deletes bit B on
+success** and a silent no-op would lose it. On an 80×40×20 block that floor is
+6.4 mm³ — and the corner gouge legitimately removes **1.9 mm³**, 0.003%. The
+first run of the real tool failed with
+`removed ~0 volume (1.9086 mm^3) -- bit likely does not touch the hull skin`.
+
+Fixed with `opts.minRemoved`, an override in `app-join.js`: absent it the
+behaviour is byte-identical, so Subtract is unchanged. A carve passes an absolute
+`1e-4` floor, because it deletes nothing and its real check is `removed` against
+`intended` — which it measures with one extra `intersect` and prints. A carve
+that would remove nothing is refused *before* the boolean, where the reason can
+name the blade and the depth.
+
+### b) float32 ULP seams at the cut boundary — the one real topology bug
+
+The corner gouge came back **non-manifold at the canonical weld and manifold
+below it**, which is the signature of a mesh with features finer than the
+tolerance it is judged at. The two offenders, found by measurement:
+
+```
+(40.000000, 18.639208, 19.999998)  <->  (40.000000, 18.639208, 20.000000)
+(40.000000, 20.299997, 18.339209)  <->  (40.000000, 20.299999, 18.339209)
+```
+
+1.907e-06 apart — `2^-19`, exactly one float32 ULP at magnitude 20. Where the
+cut crosses the box's own edge, a vertex that should be *on* that edge lands one
+ULP off it. Four triangles carried such an edge. They are not degenerate (they
+have area), so nothing dropped them, and the kernel's own counters read
+`0 open / 0 non-manifold` because in *its* index space the mesh is sound. But
+every gate in this project welds at 1e-4 first, and under that weld each of
+those four collapses to a line.
+
+The fix is to weld the output, with `NSO_buildAdjacency` + `NSO_adjacencyToRaw`
+— the app's own distance weld (a vertex looks in its own cell and the 26 around
+it, so a pair astride a bucket wall cannot slip through) which drops every
+triangle two of whose corners welded together.
+
+At **1e-4, the gate's own tolerance**, and not at `NSO_sculptWeldTol`'s
+feature-scale cap. That cap exists to stop a weld eating a piece's detail, which
+is right for smoothing and wrong for a mesh whose acceptance test is a fixed
+weld: whatever the gate will fuse must be fused already, or the gate is measuring
+a mesh that does not exist. Measured on a dome gouge, where the cap lands at
+5.459e-05:
+
+| weld | non-manifold | odd | winding | Euler | verdict | signed volume |
+|---|---|---|---|---|---|---|
+| none (kernel soup) | 4 | 4 | 10 | 4 | FAIL | 4155.7894 |
+| the 5.459e-05 cap | 2 | 2 | 5 | 3 | FAIL | 4155.7894 |
+| **a raw 1e-4** | **0** | **0** | **0** | **2** | **PASS** | **4155.7894** |
+
+The volume is identical to four decimals in all three: the weld fuses seams, it
+does not remove material. The cap was the worst of the three — it fused two of
+the four and left a mesh that claimed to be welded and still failed.
+
+What it costs, stated plainly: a genuine feature finer than 1e-4 mm would be
+fused. That is 0.1 micron, 4000× under a 0.4 mm nozzle and under the canonical
+checker's own resolution, so such a feature cannot survive the gate by any route.
+If the weld ever does structural damage it appears as an open or non-manifold
+edge in the adjacency's own counters, and the guard keeps the kernel soup instead
+of committing it. The weld also improves the sliver population as a side effect:
+worst aspect 53,144 → 17,597, smallest area 2.4e-08 → 6.4e-07 mm².
+
+**Deliberately not done inside `subtractSoupBFromA`.** Subtract's own outputs
+already gate clean on the inputs it ships with (§2), and widening the shipped
+boolean would move numbers other checks pin. §10 carries it as a follow-up.
+
+### c) A plane meet is not on a curved surface
+
+The first version clustered normals at 5° and treated every distinct plane as a
+distinct face. On a tessellated dome that reads three facets in reach as a
+*corner*, and then snaps the blade to the meet of three **tangent** planes —
+which for a convex surface is a point out in the air, outside the piece. The
+blade removed **0.0000 mm³** on `fixtures/fixture_sphere_curved.stl`.
+
+Two changes, both principled rather than tuned. The dihedral merge (§7) makes a
+smoothly curved region one feature, so a gouge on a dome is a `face` carve, as
+it should be, while a box corner stays a corner — the box numbers are unchanged
+by it. And the plane meet is now bounded: it has to land within the blade's own
+reach of a real surface point or it is not this feature, and the nearest surface
+point is used instead. The dome now reads `face`, 1 feature from 16 merged
+coplanar groups, and removes exactly blade ∩ piece.
+
+## 10. Deferred, deliberately
+
+Each of these is a real ticket, not a shrug.
+
+**Free orientation in the pose model.** The app's placed-piece pose is quantised
+Euler — `applyMeshRotation` composes `rotation.set(tipX·90° + tiltX + flipX·180°,
+rotY, tipZ·90° + tiltZ)` with `rotY` in 90° steps and `tiltX`/`tiltZ` in 15°
+steps — and `snapshotPlacedPose` saves those components, not `mesh.quaternion`.
+Nothing in the app can represent an arbitrary orientation, so Seat works around
+it by writing the quaternion directly (it survives a drag; any pose button
+destroys it). Carve avoids the problem entirely by never making the blade a
+piece. Threading a real quaternion through `applyMeshRotation` and
+`snapshotPlacedPose` would touch every piece and every pose button for a need
+with exactly one consumer, so it is **not** done here. When a second tool wants
+free orientation, that is the ticket: one quaternion field, carried through both
+functions and through the undo snapshot, with the Euler fields kept as the UI's
+way of driving it.
+
+**Wall thickness / nozzle safety as a reusable utility.** `minWall` guards one
+axis, which is exactly wrong at an edge or a corner where two or three faces are
+in play. Left as-is here by decision, and reported in the status line instead.
+The `fixtures/box_open.stl` corner case from §3c — 48.000 of 48.000 mm³ removed,
+a 2 mm near wall severed, the result still gating clean — is the test case that
+thread wants.
+
+**Slivers at a curved cut boundary.** Measured above: 24–93 triangles over
+aspect 100, none collapsed, not gated by canon. They are cosmetically poor and
+they make later booleans on the same piece harder. `NSO_Repair` already carries
+the machinery (T-junction repair, flap peeling). Whether a carve should run a
+targeted cleanup over just the cut boundary — and what that costs in volume — is
+its own measurement, not a line to bolt on here.
+
+**Paint scope.** Carve does not yet read the exclude mask. By the scoping rule
+in `docs/HANDOFF.md` and `nso_inside_corners.js`'s header, a carve is
+unambiguously a **sub-region** op — it touches one local spot — so the right
+behaviour is to stand down when the faces it actually engages are painted
+excluded, and to ignore paint anywhere else on the piece. That needs the probe's
+feature clusters mapped onto the mask's face entries, which is real work and not
+a line to bolt on; doing it badly would either ignore an exclusion the user set
+or refuse a carve nowhere near the painted face. Until then Carve ignores paint
+entirely, which is at least *predictable* rather than half-right. Flagged rather
+than skipped quietly.
+
+**The same weld for Subtract's output.** §9b's weld is a carve-local fix. A
+curved bit through the shipped Subtract would hit the same float32 ULP seams, and
+the audit only proved Subtract clean for *box* bits on *box* hulls. Worth
+measuring; it moves numbers other checks pin, so it needs its own run.

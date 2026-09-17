@@ -36,6 +36,23 @@ Smart build-plate packing for 3D printing.
   piece, plus a repack. It is a separate flag, not a shortcut for locking each
   piece: it writes no per-piece lock, so unlocking the plate gives back exactly
   the piece locks you had set.
+- **Carve** is a local carving tool - a handheld rotary tool, not the Cutter's
+  full-plane Split. Pick a blade profile, arm it, then click a face, an **edge**
+  or a **corner** of a piece: the blade is aimed along the outward bisector of
+  whatever faces it can reach there and just that local volume is subtracted.
+  - Three interchangeable profiles: **ball-nose** (a rounded gouge with no
+    stress corner), **flat shave** (a flat-bottomed slab cut), and **V-groove**
+    (a chamfer - cut deeper for a wider one, so one blade gives every size).
+  - A corner gouge and an edge chamfer need no rotation: the blade lays its
+    sweep axis along the edge itself. A `roll` field spins it off that if you
+    want. Depth is the size control; the blade's height follows from it.
+  - Unlike **Subtract**, which consumes bit B, Carve consumes nothing - the same
+    blade carves the next edge too.
+  - On a smoothly curved surface the tessellation is read as one feature, not as
+    a field of tiny edges, so a gouge on a dome is a face carve.
+  - `minWall` still measures along the cut axis only, and the status line says so
+    whenever more than one face is in play, plus what it held back in mm³ when
+    it held anything. See `docs/LOCAL-CARVE.md`
 - Breakaway supports through minimal contact: **Skin face** puts a contact
   relief (fine crosshatch, sawtooth ridges, or a tapered ring) on one flat face
   of a support block, and **Seat flush** with gap 0 rests the part on the
