@@ -361,10 +361,19 @@
        UNDO_REPLACE_LABEL, so Undo already knows what to call it. */
     var geo = soupToCenteredGeo(welded);
     var raw = displayGeometryToRawSoup(geo);
+    /* The nozzle-safety finding from the shared cut core, appended as one more
+       ' - ' clause on the line that already reports what the carve removed.
+       A carve is the op that MOST wants this and least wants it enforced: a
+       corner gouge severing a 2 mm wall is this tool's own use case, so the
+       warning is worded "reported, not blocked" and the commit below runs
+       unchanged. '' on a carve that leaves a printable wall. */
+    var cutWarn = (typeof NSO_Thickness !== 'undefined' && res.clearance)
+      ? NSO_Thickness.cutWarning(res.clearance) : '';
     var status = NSO_Carve.carveReport(planned, removed, intended) +
       ' - open edges ' + res.openBefore + '→' + res.openAfter +
       ', non-manifold ' + res.nmBefore + '→' + res.nmAfter +
-      (dropped ? ', welded away ' + dropped + ' seam sliver' + (dropped === 1 ? '' : 's') : '');
+      (dropped ? ', welded away ' + dropped + ' seam sliver' + (dropped === 1 ? '' : 's') : '') +
+      (cutWarn ? ' - ' + cutWarn : '');
     if (!NSO_sculptCommitRaw(model, raw, 'carveReplace', status)) {
       say('Carve: could not commit the result', true);
       return { ok: false, reason: 'commit failed', planned: planned };
@@ -375,7 +384,10 @@
     return {
       ok: true, planned: planned, removed: removed, intended: intended,
       openAfter: res.openAfter, nmAfter: res.nmAfter, status: status,
-      dropped: dropped, weldTol: weldTol, trisOut: welded.length / 9
+      dropped: dropped, weldTol: weldTol, trisOut: welded.length / 9,
+      /* the nozzle-safety report behind `status`'s warning clause, carried out
+         so a check can assert on the verdict rather than on its wording */
+      clearance: res.clearance || null
     };
   }
 

@@ -223,10 +223,24 @@ be measured".
 
 ### What this does and does not change
 
-`cutClearance` is a new capability, not a retrofit: **nothing calls it yet.**
-The cut path in `app-join.js` / `app.js` still ships its one-axis
-`buildCutVolume` check. Wiring it in would start refusing cuts the app accepts
-today, which is a product decision, not a consolidation — see *Still open*.
+`cutClearance` is a new capability, not a retrofit. It is now **wired to the
+live cut path** — `app-join.js`'s `cutClearanceFor`, called from
+`subtractSoupBFromA`, so both consumers of that core (Join / Subtract and
+Local-Carve) get the same measurement from the same place.
+
+It is wired as a **warning, never a refusal**, and that was the product
+decision the first version deferred. Refusing would have been wrong rather
+than merely strict: the case this utility was built to catch — the audit's
+corner bite on `fixtures/box_open.stl` — is *exactly* what Local-Carve's corner
+gouge does on purpose. A check that blocked it would block the feature it was
+written for. So the cut runs, the finding rides the status line, and the user
+decides.
+
+`buildCutVolume`'s own one-axis `minWall` reservation is **unchanged**: it
+still decides what gets cut, and `cutClearance` still only describes it. The
+two answer different questions and use different floors — `minWall` is a 1.0 mm
+stand-off for the safety box, the clearance floor is `floorFor(nozzle)`, what
+the slicer can actually print.
 
 ## Consumers
 
@@ -240,7 +254,9 @@ today, which is a product decision, not a consolidation — see *Still open*.
 | `app-finish.js` `rawVertexBallCorners` | `cornerWall` | retrofitted |
 | `app-cut.js` `localThickness` | — | dead code (`filletLoop` is never called); left alone, marked do-not-copy |
 | `tools/mesh_validate.py` | — | unchanged; it is the reference the JS port is checked against |
-| `app-join.js` / `app.js` `buildCutVolume` | — | **not yet**; still ships its one-axis check. `cutClearance` exists for it |
+| `app-join.js` `subtractSoupBFromA` (Join / Subtract) | `cutClearance` | **wired**, as a non-blocking status-line warning |
+| `app-carve.js` `carveAt` (Local-Carve) | `cutClearance` | **wired** via the same core; same warning on the carve's own status line |
+| `app-join.js` / `app.js` `buildCutVolume` | — | unchanged by design; it still decides what gets cut (see above) |
 | `nso_skin.js` | — | **not yet**; see below |
 
 ### What the retrofit did and did not change
@@ -273,10 +289,17 @@ separate step from changing what gets cut.
 
 ## Still open
 
-- **Nothing calls `cutClearance` yet.** The one-axis `buildCutVolume` check in
-  `app-join.js` / `app.js` is unchanged. Wiring it in is the obvious next step
-  and the reason it was built, but it will refuse cuts the app accepts today —
-  including, correctly, the audit's corner carve.
+- **`cutClearance` reports; it does not enforce.** Wired (above) as a warning
+  on the cut's status line. Making it *refuse* is deliberately NOT done and
+  should stay undone until a cut path exists that can offer the user a choice:
+  the audit's corner carve is a legitimate cut, so a blanket refusal would
+  remove a feature rather than add a guard. What is missing is a way to say
+  "this severs a wall — continue?", not a stricter check.
+- **The probe samples, it does not prove.** 5x5 lines per axis on the cut's
+  AABB (`tools/nso_cut_clearance_wire_test.js` re-runs the known case at 11x11
+  to show the verdict is not a sampling accident). A wall threatened only
+  between sample lines is still missed, and a rotated bit is measured through
+  its world AABB, which over-reports rather than under-reports.
 - **`nso_skin.js` has no guard.** `withDefaults()` accepts `rib: 0.1` silently.
   It should call `floorFor()` and either refuse or bump — the "auto-bump" the
   ticket assumed already existed. Not done here because it changes what gets
@@ -290,5 +313,6 @@ separate step from changing what gets cut.
 
 ```sh
 npm run wall:test          # the canonical checker + the retrofit's A/B proof
+npm run wall:cut           # the cut-path wiring, driven through the real app
 python3 tools/mesh_validate.py <file.stl> --non-solid   # the reference
 ```

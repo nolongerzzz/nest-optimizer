@@ -1423,6 +1423,94 @@ async function NSO_unionSoups(aWorld, bWorld) {
    Same fail-safe contract: any failure returns { ok:false, soup: aWorld },
    caller leaves A untouched.
    ===================================================================== */
+/* =====================================================================
+   NOZZLE-SAFETY READOUT FOR A CUT  (NSO_Thickness.cutClearance)
+
+   buildCutVolume reserves `minWall` along the punch axis ALONE, so at an edge
+   or a corner - where two or three faces are load-bearing - it stops short of
+   the far wall on one axis and says nothing about the others. Measured on
+   fixtures/box_open.stl: a corner bite takes the whole 2 mm near wall and the
+   result still gates clean, because SEVERING a wall removes material rather
+   than thinning it. No check on the finished mesh can see that (docs/
+   WALL-THICKNESS.md, docs/LOCAL-CARVE.md 3c) - it has to be asked before the
+   cut, against every axis.
+
+   This is a REPORT, not a veto. Nothing about whether the cut runs, what it
+   removes, or whether it is reported as ok may depend on it:
+
+     - it is computed from `aWorld`, the hull as it is BEFORE the cut, and from
+       the box the cut actually occupies, so it reads the same question the
+       cut is about to answer;
+     - every failure path returns null, because a measurement that cannot be
+       taken must not fail a cut that is otherwise sound;
+     - the caller appends NSO_Thickness.cutWarning() to its own status line and
+       commits either way.
+
+   A hard refusal would be wrong here, not merely unfriendly: a corner gouge
+   that cuts through a wall is exactly what Local-Carve's blade is FOR. The
+   honest answer is to make the cut and say what it did.
+   ===================================================================== */
+function cutClearanceFor(aWorld, cutManifold, frame, opts) {
+  try {
+    var T = (typeof NSO_Thickness !== 'undefined') ? NSO_Thickness : null;
+    if (!T || typeof T.cutClearance !== 'function') return null;
+    if (!aWorld || !aWorld.length || !cutManifold) return null;
+
+    /* The world AABB of the volume actually removed - manB n safetyBox, not the
+       raw bit, so the probe is asked about the cut that happens rather than the
+       one that was requested. For a rotated bit the AABB is conservative: it
+       can over-report a wall at risk, never under-report one. */
+    var cutSoup = NSO_CSG.manifoldToSoup(cutManifold);
+    if (!cutSoup || cutSoup.length < 9) return null;
+    var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (var i = 0; i + 2 < cutSoup.length; i += 3) {
+      for (var a = 0; a < 3; a++) {
+        var v = cutSoup[i + a];
+        if (!(v === v)) return null;              // NaN in the cut box: measure nothing
+        if (v < lo[a]) lo[a] = v;
+        if (v > hi[a]) hi[a] = v;
+      }
+    }
+    for (var b = 0; b < 3; b++) if (!isFinite(lo[b]) || !isFinite(hi[b])) return null;
+
+    /* Severing the axis the bit punches along is what a through hole IS, so
+       cutClearance reports it instead of failing it. Naming that axis is only
+       honest while the punch really is axis-aligned: a skew punch has no one
+       axis, and naming its dominant one would excuse a severance it does not
+       account for. 15 degrees is the tolerance because that is the app's own
+       pose granularity (applyMeshRotation's tilt step); past it, no axis is
+       named and a severance anywhere is reported. */
+    var through = null;
+    var punch = frame && frame.punch;
+    if (punch) {
+      var AX = ['x', 'y', 'z'], best = -1, bestV = -1;
+      for (var k = 0; k < 3; k++) {
+        var m = Math.abs(Number(punch[AX[k]]));
+        if (m === m && m > bestV) { bestV = m; best = k; }
+      }
+      if (best >= 0 && bestV >= 0.9659) through = AX[best];   // cos 15 deg
+    }
+
+    /* No minWall override: the floor here is the NOZZLE floor - what the
+       slicer can still print - which is a different quantity from the cut's
+       own `minWall` reservation (1.0 mm of stand-off for the safety box).
+       Passing the latter would ask the wrong question. */
+    var rep = T.cutClearance(aWorld, lo, hi, {
+      through: through,
+      nozzle: (opts && typeof opts.nozzle === 'number') ? opts.nozzle : T.NOZZLE_DEFAULT
+    });
+    /* The box actually measured, carried on the report so a check can re-run
+       the probe at a denser sweep - or a bug report can be reproduced - without
+       re-deriving the AABB from the kernel solids, which no longer exist by
+       the time a caller sees this. */
+    if (rep) { rep.cut_lo = lo; rep.cut_hi = hi; }
+    return rep;
+  } catch (e) {
+    console.warn('[subtract] clearance probe skipped:', (e && e.message) ? e.message : e);
+    return null;
+  }
+}
+
 async function subtractSoupBFromA(aWorld, bWorld, opts) {
   opts = opts || {};
   var na = NSO_soupLen(aWorld), nb = NSO_soupLen(bWorld);
@@ -1442,6 +1530,7 @@ async function subtractSoupBFromA(aWorld, bWorld, opts) {
   }
 
   var manA = null, manB = null, safetyBox = null, bClipped = null, result = null;
+  var clearance = null;
   try {
     var aIn = aWorld, bIn = bWorld;
     if (typeof weldSoupVerts === 'function') {
@@ -1461,6 +1550,11 @@ async function subtractSoupBFromA(aWorld, bWorld, opts) {
 
     bClipped = manB.intersect(safetyBox);
     if (bClipped.isEmpty()) throw new Error('bit does not reach hull within safe wall margin');
+
+    /* Measured here because this is the last point where the cut volume still
+       exists as a solid and the hull is still un-cut. Purely a readout - see
+       cutClearanceFor above; the cut proceeds identically whatever it says. */
+    clearance = cutClearanceFor(aWorld, bClipped, frame, opts);
 
     result = manA.subtract(bClipped);
     if (result.status() !== 'NoError') throw new Error('subtract rejected by kernel: ' + result.status());
@@ -1504,12 +1598,13 @@ async function subtractSoupBFromA(aWorld, bWorld, opts) {
       mode: 'manifold',
       hullTris: outTris,
       openBefore: before.open, nmBefore: before.nm,
-      openAfter: after.open, nmAfter: after.nm
+      openAfter: after.open, nmAfter: after.nm,
+      clearance: clearance
     };
   } catch (err) {
     var why = NSO_errMsg(err);
     console.warn('[subtract] failed:', why);
-    return { ok: false, soup: aWorld, mode: 'manifold', reason: why };
+    return { ok: false, soup: aWorld, mode: 'manifold', reason: why, clearance: clearance };
   } finally {
     if (manA) manA.delete();
     if (manB) manB.delete();
@@ -1572,6 +1667,15 @@ async function subtractBFromA() {
     window.__nestSubtractMsg = 'Subtract ok - open edges ' +
       res.openBefore + '→' + res.openAfter +
       ', non-manifold ' + res.nmBefore + '→' + res.nmAfter;
+    /* The nozzle-safety finding rides the SUCCESS line as one more ' - '
+       clause, the way the defect overlay appends "(counted, not painted)" and
+       Skin appends "two shells: flagged non-solid": the cut is done and kept,
+       and this says what it cost. isError stays false - a finding is not a
+       failure, and the cut is not reverted. cutWarning() is '' on a cut that
+       leaves a printable wall, so an ordinary cut reads exactly as before. */
+    var cutWarn = (typeof NSO_Thickness !== 'undefined' && res.clearance)
+      ? NSO_Thickness.cutWarning(res.clearance) : '';
+    if (cutWarn) window.__nestSubtractMsg += ' - ' + cutWarn;
   } catch (err) {
     const why = (err && err.message) ? String(err.message) : 'unknown';
     console.warn('[subtract] failed:', why);

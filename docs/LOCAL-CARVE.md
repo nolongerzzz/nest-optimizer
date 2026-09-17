@@ -599,12 +599,22 @@ free orientation, that is the ticket: one quaternion field, carried through both
 functions and through the undo snapshot, with the Euler fields kept as the UI's
 way of driving it.
 
-**Wall thickness / nozzle safety as a reusable utility.** `minWall` guards one
-axis, which is exactly wrong at an edge or a corner where two or three faces are
-in play. Left as-is here by decision, and reported in the status line instead.
+**Wall thickness / nozzle safety as a reusable utility.** ~~Deferred.~~ **Done**
+— `nso_thickness.js`, and its `cutClearance()` is now wired to the shared cut
+core (`subtractSoupBFromA`), so a carve reports it on the same status line that
+reports what it removed. See `docs/WALL-THICKNESS.md`.
+
+`minWall` still guards one axis, and still decides what gets cut; that is
+unchanged. What is new is that the other axes are now *measured and reported*.
 The `fixtures/box_open.stl` corner case from §3c — 48.000 of 48.000 mm³ removed,
-a 2 mm near wall severed, the result still gating clean — is the test case that
-thread wants.
+a 2 mm near wall severed, the result still gating clean — was the test case that
+thread wanted, and it is now the case the wiring is pinned on
+(`npm run wall:cut`): the cut still removes its 48.000 mm³ and the status line
+says `WALL SEVERED: cut severs the piece across z ... reported, not blocked`.
+
+Deliberately a **warning and not a refusal**, for this document's own reason: a
+corner gouge that cuts through a wall is what this tool is *for*. Blocking it
+would have retired the feature, not guarded it.
 
 **Slivers at a curved cut boundary.** Measured above: 24–93 triangles over
 aspect 100, none collapsed, not gated by canon. They are cosmetically poor and

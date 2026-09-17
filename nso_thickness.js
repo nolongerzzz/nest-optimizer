@@ -894,8 +894,38 @@
              withPreset({ fallback: LEGACY_FALLBACK_MM }, opts)));
   }
 
+  /* ------------------------------------------------- the cut-path readout */
+
+  /* The ONE wording for a cut's nozzle-safety finding, so every cut site says
+     it the same way instead of each one re-deriving a sentence from the report.
+
+     Returns '' when there is nothing to warn about, which is the common case.
+     Two things are deliberately NOT findings:
+
+       - a cut that leaves a printable wall everywhere (`pass`);
+       - a breach on its own. The entry face of EVERY cut breaches, because the
+         bit has to come from somewhere, so warning on that would fire on every
+         cut and therefore mean nothing. Breached sides are named as context
+         when something else is already wrong, never as the finding itself.
+
+     A finding here is a WARNING and never a refusal. Severing a wall is
+     precisely what Local-Carve's corner gouge does on purpose (docs/
+     LOCAL-CARVE.md 3c), so a caller's job is to say so on its status line and
+     commit the cut regardless. The verdict stays the caller's to print; this
+     function only fixes the words. */
+  function cutWarning(rep) {
+    if (!rep || rep.pass) return '';
+    var head = (rep.severed_fatal && rep.severed_fatal.length) ? 'WALL SEVERED' : 'WALL LEFT THIN';
+    var s = head + ': ' + rep.reason +
+            ' - floor ' + round3(rep.threshold_mm) +
+            ' mm at a ' + round3(rep.nozzle_mm) + ' mm nozzle';
+    if (rep.breached && rep.breached.length) s += ', open to air on ' + rep.breached.join(', ');
+    return s + ' - reported, not blocked';
+  }
+
   var api = {
     cutClearance: cutClearance,
+    cutWarning: cutWarning,
     LEGACY_FALLBACK_MM: LEGACY_FALLBACK_MM,
     cornerWall: cornerWall,
     bandWall: bandWall,
