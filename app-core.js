@@ -124,7 +124,8 @@ const UNDO_REPLACE_LABEL = {
   thickenReplace: 'Undo: Thicken reverted',
   smoothReplace: 'Undo: Smooth reverted',
   skinReplace: 'Undo: Skin reverted',
-  carveReplace: 'Undo: Carve reverted'
+  carveReplace: 'Undo: Carve reverted',
+  deleteReplace: 'Undo: Delete reverted'
 };
 
 function undoLast() {
@@ -401,6 +402,15 @@ function undoLast() {
     } else if (state.cutterOpen && state.editId === m.id) {
       showEditPreview();
     }
+    /* The paint was put back at the top of this branch, but nsoMaskRestore
+       repaints against whatever mesh was in the scene AT THAT MOMENT - the
+       post-op one, which no longer has the faces the restored lists name. The
+       overlay it built was therefore empty, and nothing rebuilt it once the
+       old mesh went back in below. So the lists came back and the yellow and
+       the pink did not, which reads as "undo lost my paint". Repaint here,
+       after the placed instance is re-seated, and it lands on the geometry the
+       clicks were made against. */
+    if (typeof nsoMaskRepaint === 'function') nsoMaskRepaint();
     updateEditSize();
     renderModelList();
     updateUndoBtn();

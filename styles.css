@@ -1379,6 +1379,12 @@ select:focus, input:focus {
 .vp-row-skin { grid-template-columns: 1fr 88px; gap: 4px; align-items: stretch; }
 .vp-row-skin .btn { font-size: 11px; padding: 2px 4px; white-space: nowrap; }
 .vp-row-skin .vp-select { min-width: 0; font-size: 11px; padding: 0 4px; }
+/* Delete painted rides the same grid - it reads the same target the paint row
+   sets - but it is the one control in this card that removes geometry rather
+   than reshaping it. A hairline above it and a little air is the whole of the
+   difference: enough that a thumb reaching for Clear paint does not land on it,
+   not so much that the row looks like a separate card. */
+.vp-row-delete { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(248, 113, 113, 0.28); }
 /* The second skin row under it: Skin wrap, the Free checkbox, then the layer-2
    pattern. Free sits between the two so the select can be last and end flush
    with the card's right edge, level with every other control in the column.
