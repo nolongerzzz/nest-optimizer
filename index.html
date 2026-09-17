@@ -187,6 +187,15 @@
                 <button id="btn-mask-clear" class="btn btn-secondary" type="button"
                         title="Include every face again and drop the target.">Clear paint</button>
               </div>
+              <div class="vp-row vp-row-skin vp-row-delete">
+                <button id="btn-mask-delete" class="btn btn-danger" type="button"
+                        title="Remove the target face's geometry from the piece (pink, from Paint Selected). Not an exclude - the triangles are gone. Refuses and leaves the piece untouched if the cut would empty it, split it into loose bodies, or self-intersect. Stands down if the target is also painted excluded.">Delete painted</button>
+                <select id="sel-mask-delete" class="vp-select" title="Face: cut the face out and leave the rim open. Face+seal: cut it out and let Repair close the rim, reverting the whole delete if it cannot. Shell: cut out the whole body that face belongs to." aria-label="Delete mode">
+                  <option value="face" selected>Face</option>
+                  <option value="face-seal">Face+seal</option>
+                  <option value="shell">Shell</option>
+                </select>
+              </div>
               <div class="vp-row vp-row-skin">
                 <button id="btn-skin-face" class="btn btn-secondary" type="button" title="Put a contact skin on the selected piece's target face (pink, from Paint Selected). With no target: on piece A's flat face that looks at B in a Join, or its top face outside one. A relief whose tips are all B touches; then Seat with gap 0 to rest B on the tips. Refuses a non-rectangular face; stands down if that face is painted excluded.">Skin face</button>
                 <select id="skin-pattern" class="vp-select" title="Skin pattern. crosshatch: fine rib lattice (0.42 mm ribs, 1.2 mm pitch, 0.6 tall). zigzag: sawtooth ridges (0.42 mm crests, 2 mm pitch). ring: one tapered ring (r 5, wall 0.8 to 0.4, 1 mm tall)." aria-label="Skin pattern">
@@ -289,6 +298,7 @@
   <script src="nso_skin.js?v=skin2"></script>
   <script src="nso_skin_patch.js?v=skin3"></script>
   <script src="nso_carve.js?v=carve1"></script>
+  <script src="nso_paint_delete.js?v=del1"></script>
   <script src="nso-cooling-profiles.js"></script>
   <script src="nso-3mf.js"></script>
   <script src="nso-3mf-read.js"></script>
@@ -302,6 +312,7 @@
   <script src="app-skin.js?v=skin2"></script>
   <script src="app-skin-patch.js?v=skin3"></script>
   <script src="app-mask.js?v=inside5"></script>
+  <script src="app-paint-delete.js?v=del1"></script>
   <script src="app-nonsolid.js?v=inside4"></script>
   <script src="app-poslock.js?v=lock1"></script>
   <script src="app-defects.js?v=inside5"></script>
