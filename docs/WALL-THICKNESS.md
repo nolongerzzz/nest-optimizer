@@ -18,8 +18,14 @@ all. The audit that opened this ticket found this:
 | `app-finish.js` `wallLimitAt` ×3 | three more verbatim copies, in `rawPerimeterFilletInPlace`, `rawVertexBallOnly`, `rawVertexBallCorners` | no |
 | `nso_skin.js` `rib: 0.42` | a **default** in the pattern table, not a guard — `withDefaults()` passes `rib: 0.1` straight through | no |
 | `app-cut.js` `localThickness()` | a seventh variant, inside the never-called `filletLoop` | no |
+| `app-join.js` / `app.js` `buildCutVolume()` | rays along the **punch axis only**, reserves `minWall` there, then inflates the cut box laterally with no wall test at all | one axis only |
 
-Two things the ticket expected to find did not exist:
+The last row was **missed by the first pass of this audit** and found later by
+the local-carve audit. It is a different shape of gap from the others: it does
+have a floor, but only along one of three axes, and at a corner two faces are
+load-bearing. See *The corner case* below.
+
+Three things the ticket expected to find did not exist:
 
 - **There is no fin generator, and no nozzle-safety auto-bump anywhere in this
   repo.** Nothing raises a too-thin feature up to a printable floor. The 0.42
@@ -27,6 +33,9 @@ Two things the ticket expected to find did not exist:
 - **The fillet clamp never had a printability floor.** Its `* 0.45` is a
   geometric rule about how much of a wall a fillet may eat; it was never
   compared against a nozzle at all.
+- **Nothing asked what a cut leaves standing on more than one axis.**
+  `buildCutVolume` reserves `minWall` along the punch direction and assumes the
+  other two.
 
 So before this module the only real thickness check in the codebase was in
 Python, reachable only through a validator CLI, and nothing in the app could
@@ -88,6 +97,7 @@ A wall built *at* the floor passes: float32 coordinates put a 0.42 mm rib at
 NSO_Thickness.floorFor(nozzle)                     // mm
 NSO_Thickness.measureMesh(rawTris, opts)           // 3D probe, whole mesh
 NSO_Thickness.measureRegion(rawTris, faces, opts)  // 3D probe, a face subset
+NSO_Thickness.cutClearance(rawTris, cutLo, cutHi, opts)  // what a PROPOSED cut leaves
 NSO_Thickness.loopWallAt(loop2, i, opts)           // 2D probe, one point
 NSO_Thickness.cornerWall(loop2, i)                 // 2D probe, CORNER preset
 NSO_Thickness.bandWall(loop2, i)                   // 2D probe, BAND preset
@@ -96,7 +106,9 @@ NSO_Thickness.safeRadius(requestedR, availableMM, opts)
 NSO_Thickness.describe(report)                     // one status line
 ```
 
-Every report has the same shape:
+The measuring calls all return the same shape. `cutClearance` is the odd one
+out — a cut is a question about several axes at once, so its report is a list of
+sides plus `severed` / `breached` / `thin`; see *The corner case* below.
 
 ```js
 {
@@ -146,6 +158,76 @@ ever tested on geometry built to be clean is not tested.
 fixtures — including the 33k one — and requires exact agreement, so the two
 cannot drift apart.
 
+## The corner case: what a cut leaves standing
+
+`measureMesh()` answers "is the wall that is there thick enough?". There is a
+second question it **cannot** answer, and the local-carve audit found it:
+
+> On `fixtures/box_open.stl` (60 × 40 × 25, 2 mm walls) a 4 × 2 × 6 bit sits in
+> the corner of the `y = 0` wall and punches `+X`. It removes **48 of 48 mm³** —
+> every cubic millimetre it asks for is solid. The one-axis `minWall` check rays
+> along the punch axis, finds **60 mm** of material (it is travelling *along*
+> the wall, not across it), reserves `minWall` and approves a 59 mm cut. That
+> cut takes the entire 2 mm wall out over its window and opens the outside
+> straight into the cavity.
+>
+> Afterwards the mesh is closed, single-component, genus 1, sound — and its
+> thinnest wall is **1 mm**. `measureMesh()` passes it, *correctly*.
+
+That is the crux: **severing a wall removes material, it does not thin it.** No
+thickness check on the finished mesh can see this, however good it is. It has
+to be caught before the cut, against both load-bearing faces.
+
+`cutClearance(soup, cutLo, cutHi, opts)` does that. For each axis it samples
+lines through the cut's cross-section, finds the **solid spans** along that
+line in the original mesh, and asks what the cut leaves of each span it touches:
+
+| verdict | meaning |
+|---|---|
+| `severed` | the cut swallows a solid span **whole** — nothing on that axis holds the member together any more |
+| `thin` | material remains but under the floor |
+| `breached` | the cut reaches open air on that side. Informational: the entry face of *every* cut breaches, because the bit has to come from somewhere |
+
+`opts.through` names the axis the bit punches along. Severing *that* axis is
+what a through hole **is**, so it is reported and not failed; severing any other
+is a cut wall. `min_mm` is the thinnest wall *left standing*, so a breached side
+contributes no `0` to it.
+
+Working from spans rather than from the cut's faces matters: an earlier version
+tested the material just outside each cut face, and silently missed severance
+whenever the cut *overshot* the wall instead of sitting flush with it. The span
+form catches both, and the suite tests the overshooting case explicitly.
+
+One artefact worth knowing about, because it produced a false positive on real
+geometry: a ray passing exactly through the diagonal two triangles of a quad
+share crosses the surface once but records **two** hits at the same distance.
+That breaks parity and yields a zero-thickness "solid span" that reads as a
+severed member — on `box_open.stl` it made a legitimate corner notch look like a
+cut-through. `allHits()` now collapses hits closer together than the weld
+tolerance, and zero-thickness spans are skipped.
+
+### Limits, stated
+
+It samples `opts.samples`² lines per axis (5×5 by default, inset from the cut's
+rim), so a wall threatened only between sample lines can still be missed. It is
+a strictly denser probe than the five points `buildCutVolume` takes — not a
+proof. Raise `samples` for a finer sweep; the suite checks that the audit case
+reaches the same verdict at 11×11, so the result is not a sampling accident.
+
+It reads the mesh as it is *before* the cut and assumes the cut volume is the
+axis-aligned box it is given. A rotated bit should be passed the world AABB of
+its cut volume, which is conservative: it can over-report, never under-report.
+Sample lines whose hit list comes back odd are counted in `grazed` and
+contribute nothing, so "nothing severed" can be told apart from "nothing could
+be measured".
+
+### What this does and does not change
+
+`cutClearance` is a new capability, not a retrofit: **nothing calls it yet.**
+The cut path in `app-join.js` / `app.js` still ships its one-axis
+`buildCutVolume` check. Wiring it in would start refusing cuts the app accepts
+today, which is a product decision, not a consolidation — see *Still open*.
+
 ## Consumers
 
 | consumer | calls | status |
@@ -158,6 +240,7 @@ cannot drift apart.
 | `app-finish.js` `rawVertexBallCorners` | `cornerWall` | retrofitted |
 | `app-cut.js` `localThickness` | — | dead code (`filletLoop` is never called); left alone, marked do-not-copy |
 | `tools/mesh_validate.py` | — | unchanged; it is the reference the JS port is checked against |
+| `app-join.js` / `app.js` `buildCutVolume` | — | **not yet**; still ships its one-axis check. `cutClearance` exists for it |
 | `nso_skin.js` | — | **not yet**; see below |
 
 ### What the retrofit did and did not change
@@ -166,9 +249,12 @@ It did **not** change any geometry. The presets reproduce each site's
 historical number bit for bit, including both meanings of the `4`, and
 `tools/nso_wall_thickness_test.js` proves it two ways: a 5446-measurement
 differential against the pre-retrofit bodies pulled from git, and an A/B that
-loads the fillet engines twice — once from git HEAD, once from the working
-tree — drives them over three shapes × five radii × three engines, and requires
-the output to match float for float.
+loads the fillet engines twice — once from the branch base, once from the
+working tree — drives them over three shapes × five radii × three engines, and
+requires the output to match float for float. (The base, not `HEAD`: once the
+retrofit is committed, `HEAD` carries the delegation and the comparison would be
+self-referential. The suite refuses to run it unless the source it pulled really
+does contain the old inline body.)
 
 What it added is `rawEdgeRoundInPlace.lastBuild.wall`:
 
@@ -187,6 +273,10 @@ separate step from changing what gets cut.
 
 ## Still open
 
+- **Nothing calls `cutClearance` yet.** The one-axis `buildCutVolume` check in
+  `app-join.js` / `app.js` is unchanged. Wiring it in is the obvious next step
+  and the reason it was built, but it will refuse cuts the app accepts today —
+  including, correctly, the audit's corner carve.
 - **`nso_skin.js` has no guard.** `withDefaults()` accepts `rib: 0.1` silently.
   It should call `floorFor()` and either refuse or bump — the "auto-bump" the
   ticket assumed already existed. Not done here because it changes what gets

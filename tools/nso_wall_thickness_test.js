@@ -3,7 +3,7 @@
    nozzle-safety check - and for the retrofit of app-cut.js / app-finish.js
    onto it.
 
-   Five parts:
+   Seven parts:
      1. the floor: floorFor() reproduces the 0.42 mm at a 0.4 nozzle that
         nso_skin.js and mesh_validate.py both already quote, and scales.
      2. the 3D probe on REAL geometry, against ground truth from two
@@ -18,9 +18,16 @@
         BIT FOR BIT, including the two different meanings its two variants
         gave the magic `4`.
      5. no regression from the retrofit, proved the strong way: the fillet
-        engines are loaded TWICE - once from git HEAD (the inline copies) and
-        once from the working tree (delegating to nso_thickness.js) - driven
-        on the same geometry, and their output compared float for float.
+        engines are loaded TWICE - once from the branch base (the inline
+        copies) and once from the working tree (delegating to
+        nso_thickness.js) - driven on the same geometry, and their output
+        compared float for float.
+     6. safeRadius: the printability floor the fillet clamp never had.
+     7. the CORNER case, from the local-carve audit: a cut that one-axis
+        minWall checking gates clean and that no thickness check on the
+        finished mesh can ever catch, because severing a wall removes
+        material rather than thinning it. This is the case cutClearance()
+        exists for.
 
    Run: node tools/nso_wall_thickness_test.js */
 
@@ -210,15 +217,45 @@ console.log('\n== 3. a region: measure one part of a mesh, against the whole of 
 /* ================ 4. the 2D probe reproduces the historical clamp maths ==== */
 console.log('\n== 4. the 2D probe is app-cut.js\'s own maths, bit for bit ==');
 
-/* The ORIGINAL bodies, pulled out of git HEAD rather than retyped, so this
-   compares against what actually shipped. */
+/* The ORIGINAL bodies, pulled out of git rather than retyped, so this compares
+   against what actually shipped.
+
+   The revision is the BASE this branch forked from, not HEAD: once the
+   retrofit is committed, HEAD carries the delegation and comparing against it
+   would prove nothing at all. `preRetrofit()` therefore resolves the merge
+   base with the integration branch, and `assertInline()` refuses to run the
+   comparison at all unless the source it pulled really does contain the old
+   inline body - a self-comparison must fail loudly, not pass quietly. */
+const BASE_REFS = ['origin/claude-wip', 'claude-wip', 'origin/main', 'main'];
+let _baseRev = null;
+function baseRev() {
+  if (_baseRev) return _baseRev;
+  for (const ref of BASE_REFS) {
+    try {
+      _baseRev = execFileSync('git', ['merge-base', 'HEAD', ref],
+                              { cwd: REPO, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+      if (_baseRev) return _baseRev;
+    } catch (e) { /* try the next ref */ }
+  }
+  throw new Error('cannot resolve a pre-retrofit base revision (tried ' + BASE_REFS.join(', ') + ')');
+}
 function headSource(file) {
-  return execFileSync('git', ['show', 'HEAD:' + file], { cwd: REPO, encoding: 'utf8', maxBuffer: 1 << 28 });
+  return execFileSync('git', ['show', baseRev() + ':' + file],
+                      { cwd: REPO, encoding: 'utf8', maxBuffer: 1 << 28 });
+}
+/* A guard, not a nicety: if the base ever stops carrying the inline maths,
+   every check below would compare the retrofit against itself and pass. */
+function assertInline(src, what) {
+  if (!/best === Infinity \? 4 : best/.test(src) || /NSO_Thickness/.test(src)) {
+    throw new Error('the base revision for ' + what + ' does not carry the pre-retrofit inline body - ' +
+                    'this comparison would be self-referential and prove nothing');
+  }
 }
 {
   let origBand, origCorner, ok = true;
   try {
     const src = headSource('app-cut.js');
+    assertInline(src, 'app-cut.js');
     const sandbox = { Math, Infinity, Number, Array };
     vm.createContext(sandbox);
     const grab = (name) => {
@@ -326,7 +363,10 @@ function loadFrom(cutSrc, finSrc, names) {
   };
   let before, after, ready = true;
   try {
-    before = loadFrom(headSource('app-cut.js'), headSource('app-finish.js'), NAMES);
+    const cutSrc = headSource('app-cut.js'), finSrc = headSource('app-finish.js');
+    assertInline(cutSrc, 'app-cut.js');
+    assertInline(finSrc, 'app-finish.js');
+    before = loadFrom(cutSrc, finSrc, NAMES);
     after = loadFrom(fs.readFileSync(path.join(REPO, 'app-cut.js'), 'utf8'),
                      fs.readFileSync(path.join(REPO, 'app-finish.js'), 'utf8'), NAMES);
   } catch (e) {
@@ -415,5 +455,163 @@ console.log('\n== 6. safeRadius: the printability floor the fillet clamp was mis
         T.safeRadius(10, 2.0, { nozzle: 2.0 }).floored === true);
 }
 
-console.log('\n' + pass + ' passed, ' + fail + ' failed');
-process.exit(fail ? 1 : 0);
+/* ============ 7. the corner case one-axis checking cannot express ========= */
+
+/* fixtures/box_open.stl: 60 x 40 x 25 outer, 2 mm walls, cavity x 2..58,
+   y 2..38, open at the top. From the local-carve audit.
+
+   A 4 x 2 x 6 bit sits in the corner of the y = 0 wall and punches +X. It
+   removes 48 of 48 mm3 - every cubic millimetre it asks for is solid. The
+   one-axis check rays along the punch axis, finds 60 mm of material (it is
+   travelling ALONG the y = 0 wall, not across it), reserves minWall and
+   approves a 59 mm cut. That cut takes the entire 2 mm wall out over its
+   window and opens the outside straight into the cavity.
+
+   Afterwards the mesh is closed, single-component and sound, and its thinnest
+   wall is 1 mm - so measureMesh() passes it, correctly. Severing removes
+   material; it does not thin it. Nothing measured on the finished mesh can
+   see this, which is the whole point: it has to be caught before the cut,
+   against BOTH load-bearing faces. */
+function boxSoup(lo, hi) {
+  const [x0, y0, z0] = lo, [x1, y1, z1] = hi;
+  const v = [[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0],[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]];
+  const q = [[0,3,2,1],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]];
+  const t = [];
+  for (const [a,b,c,d] of q) { t.push(...v[a],...v[b],...v[c]); t.push(...v[a],...v[c],...v[d]); }
+  return new Float32Array(t);
+}
+
+async function cornerCase() {
+  console.log('\n== 7. the corner case one-axis checking cannot express (box_open.stl) ==');
+  const box = readSTL(path.join(REPO, 'fixtures', 'box_open.stl'));
+
+  // the fixture is what the audit says it is
+  const base = T.measureMesh(box, { nozzle: 0.4 });
+  check('box_open.stl is a 2 mm-walled shell to start with',
+        near(base.min_mm, 2.0, 1e-4) && base.pass === true, base.reason);
+
+  const BIT_LO = [0, 0, 10], BIT_HI = [4, 2, 16];          // 4 x 2 x 6 = 48 mm3
+  const CUT_LO = [-1, 0, 10], CUT_HI = [59, 2, 16];        // what the one-axis rule approves
+  const MIN_WALL = 1.0;
+
+  const rep = T.cutClearance(box, CUT_LO, CUT_HI, { nozzle: 0.4, minWall: 0.42, through: 'x' });
+
+  /* The one-axis check, expressed as what it is: the same report, restricted
+     to the punch axis. No reimplementation of buildCutVolume - the point is
+     that the SAME measurement passes on one axis and fails on three. */
+  const punchSides = rep.sides.filter(s => s.axis === 'x');
+  /* "Clean on the punch axis" means: nothing severed along it and no wall left
+     under the floor. The entry face is open to air on every cut ever made -
+     the bit has to come from somewhere - so a breach there is not a defect. */
+  const punchClean = !rep.severed.includes('x') && punchSides.every(s => !s.thin);
+  check('restricted to the punch axis, the cut is clean - which is why it ships today',
+        punchClean, punchSides.map(s => s.label + ' ' + (s.measured ? s.remaining_mm + ' mm' : 'n/a')).join(', '));
+  check('  ...and the punch-axis figure IS the minWall reservation, 1 mm, as intended',
+        near(punchSides.find(s => s.label === 'x+').remaining_mm, MIN_WALL, 1e-9));
+
+  check('across ALL axes the same cut FAILS: the y wall is severed',
+        rep.pass === false && rep.severed_fatal.length === 1 && rep.severed_fatal[0] === 'y', rep.reason);
+  check('  ...because the cut swallows the y-wall\'s solid span whole, on every sample line',
+        rep.sides.filter(s => s.axis === 'y').every(s => s.severed_samples === 25),
+        rep.sides.find(s => s.label === 'y-').severed_samples + ' of 25 sample lines severed');
+  check('  ...and it is found even when the cut overshoots the wall rather than sitting flush',
+        T.cutClearance(box, [-1, -0.5, 10], [59, 2.5, 16], { nozzle: 0.4, through: 'x' })
+          .severed_fatal.join() === 'y');
+  check('  ...and z is untouched, so the failure is named, not a blanket refusal',
+        rep.sides.filter(s => s.axis === 'z').every(s => !s.breached && !s.thin));
+  check('the punch axis is allowed to sever - a through hole is not a defect',
+        T.cutClearance(box, [28, -1, 10], [32, 3, 14], { nozzle: 0.4, through: 'y' }).pass === true);
+  check('  ...but the SAME severance on a non-punch axis is',
+        T.cutClearance(box, [28, -1, 10], [32, 3, 14], { nozzle: 0.4, through: 'x' }).pass === false);
+
+  // ---- now prove the other half: the finished mesh cannot show this ----
+  let after = null;
+  try {
+    const r = await LIB.ops.subtract(box, boxSoup(CUT_LO, CUT_HI));
+    if (r.ok) after = r.soup;
+    else console.log('  --    kernel refused the cut (' + r.reason + ') - skipping the after-the-fact half');
+  } catch (e) {
+    console.log('  --    kernel unavailable (' + e.message + ') - skipping the after-the-fact half');
+  }
+
+  if (after) {
+    const wasm = await LIB.kernel();
+    const mk = (soup) => {
+      const n = (soup.length / 9) | 0;
+      const vp = new Float32Array(soup), tv = new Uint32Array(n * 3);
+      for (let i = 0; i < n * 3; i++) tv[i] = i;
+      const m = new wasm.Mesh({ numProp: 3, vertProperties: vp, triVerts: tv });
+      m.merge();
+      return new wasm.Manifold(m);
+    };
+    const A = mk(box), B = mk(after);
+    const bit = mk(boxSoup(BIT_LO, BIT_HI));
+    const inside = wasm.Manifold.intersection(A, bit);
+    check('the bit removes 48 of 48 mm3 - every cubic mm it asks for is solid',
+          near(inside.volume(), 48, 1e-3) && near(bit.volume(), 48, 1e-3),
+          inside.volume().toFixed(3) + ' / ' + bit.volume().toFixed(3) + ' mm3');
+    check('after the cut the mesh is still closed, sound and single-component',
+          B.decompose().length === 1 && B.status() === 'NoError',
+          'components ' + B.decompose().length + ', genus ' + B.genus() + ', status ' + B.status());
+
+    const post = T.measureMesh(after, { nozzle: 0.4 });
+    check('AND ITS THINNEST WALL IS 1 mm - measureMesh PASSES the severed piece',
+          post.pass === true && near(post.min_mm, 1.0, 1e-4), post.reason);
+    check('  ...which is correct, not a bug: severing removes material, it does not thin it',
+          post.pass === true && rep.pass === false);
+    check('  ...so a thickness check on the finished mesh can never catch this, and',
+          '      cutClearance is the only one of the two that can', post.pass !== rep.pass);
+
+    for (const m of [A, B, bit, inside]) m.delete();
+  }
+
+  // ---- and it must not cry wolf on cuts that are fine ----
+  const SAFE = [
+    ['through-hole in the y=0 wall, punch +Y', [28, -1, 10], [32, 3, 14], 'y'],
+    ['floor pocket, punch -Z, leaves 1 mm',    [20, 15, 1],  [30, 25, 26], 'z'],
+    ['blind pocket in the x=0 wall, leaves 1 mm', [-1, 15, 10], [1, 25, 16], 'x'],
+    ['corner notch - both walls continue past it', [0, 0, 13], [2, 2, 26], 'z']
+  ];
+  for (const [label, lo, hi, thru] of SAFE) {
+    const r = T.cutClearance(box, lo, hi, { nozzle: 0.4, through: thru });
+    check('no false alarm: ' + label, r.pass === true, r.reason);
+  }
+  /* The coincident-hit artefact that made a legitimate corner notch read as a
+     severed piece: a ray through the diagonal two triangles of a quad share
+     records one crossing twice. If it ever comes back, `grazed` rises and the
+     notch fails. Both are asserted so the fix cannot silently rot. */
+  const notch = T.cutClearance(box, [0, 0, 13], [2, 2, 26], { nozzle: 0.4, through: 'z' });
+  check('no ray-parity artefacts left on this fixture: 0 grazed sample lines',
+        notch.grazed === 0 && rep.grazed === 0,
+        'notch ' + notch.grazed + ', audit case ' + rep.grazed);
+  check('a denser sweep reaches the same verdict - the result is not a sampling accident',
+        T.cutClearance(box, CUT_LO, CUT_HI, { nozzle: 0.4, through: 'x', samples: 11 })
+          .severed_fatal.join() === 'y');
+
+  const empty = T.cutClearance(box, [20, 15, 10], [30, 25, 20], { nozzle: 0.4, through: 'z' });
+  check('a cut entirely inside the open cavity removes nothing and says so',
+        empty.pass === true && empty.min_mm === null, empty.reason);
+
+  const BAD = [
+    ['floor pocket leaving 0.2 mm', [20, 15, 0.2], [30, 25, 26], 'z', 'thin'],
+    ['tunnel severing the far cavity wall', [58, 10, 10], [60, 30, 16], 'y', 'severed']
+  ];
+  for (const [label, lo, hi, thru, kind] of BAD) {
+    const r = T.cutClearance(box, lo, hi, { nozzle: 0.4, through: thru });
+    check('caught: ' + label, r.pass === false &&
+          (kind === 'thin' ? r.thin.length > 0 : r.severed_fatal.length > 0), r.reason);
+  }
+
+  check('the floor still follows the nozzle here too',
+        T.cutClearance(box, [20, 15, 1], [30, 25, 26], { nozzle: 0.4, through: 'z' }).pass === true &&
+        T.cutClearance(box, [20, 15, 1], [30, 25, 26], { nozzle: 3.0, through: 'z' }).pass === false);
+}
+
+cornerCase().then(() => {
+  console.log('\n' + pass + ' passed, ' + fail + ' failed');
+  process.exit(fail ? 1 : 0);
+}).catch((e) => {
+  console.log('\n  FAIL  section 7 threw: ' + (e && e.stack || e));
+  console.log('\n' + pass + ' passed, ' + (fail + 1) + ' failed');
+  process.exit(1);
+});

@@ -29,10 +29,20 @@
        guard. withDefaults() takes whatever the caller passes, so a rib of 0.1
        goes through silently. There is no auto-bump anywhere in this repo.
 
-   So: one module, one floor, one report shape, two probes - a 3D probe for a
-   mesh and a 2D probe for a section - and no silent fallbacks. Anything that
-   needs to know whether a feature is printable calls this and gets a number it
-   can trust plus a verdict it can show.
+     app-join.js / app.js  buildCutVolume(): rays along the punch axis only,
+       reserves minWall along THAT axis, then inflates the cut box laterally
+       with no wall test at all. One axis checked, two assumed - and at a
+       corner both faces are load-bearing. See cutClearance() below.
+
+   So: one module, one floor, no silent fallbacks, and three probes - a 3D
+   probe for a mesh, a 2D probe for a section, and a clearance probe for a
+   proposed cut. Anything that needs to know whether a feature is printable
+   calls this and gets a number it can trust plus a verdict it can show.
+
+   The three answer genuinely different questions, and the third exists because
+   the first two cannot answer it: measureMesh() asks "is the wall that is
+   there thick enough?", and a cut that SEVERS a wall removes material rather
+   than thinning it, so the finished mesh has nothing thin in it to find.
 
    ---------------------------------------------------------------------------
    THE FLOOR
@@ -68,13 +78,16 @@
    floorFor(nozzle)                     -> mm, the safe floor for that nozzle
    measureMesh(rawTris, opts)           -> report (3D probe, whole mesh)
    measureRegion(rawTris, faces, opts)  -> report (3D probe, a face subset)
+   cutClearance(rawTris, cutLo, cutHi, opts) -> what a PROPOSED cut leaves standing
    loopWallAt(loop2, i, opts)           -> { mm, measured, ... } (2D probe)
    cornerWall(loop2, i) / bandWall(loop2, i) -> the fillet clamp's two shapes
    measureLoop(loop2, opts)             -> report (2D probe, whole section)
    safeRadius(requestedR, availableMM, opts) -> { r, floored, ... }
    describe(report)                     -> one status line
 
-   Every report has the same shape:
+   The measuring calls all return the same shape (cutClearance is the odd one
+   out - a cut is a question about several axes at once, so its report is a
+   list of sides plus `severed` / `breached` / `thin`; see its own comment):
      {
        kind, nozzle_mm, threshold_mm, probe_mm,
        measured, thin, sheets,          // counts
@@ -221,6 +234,41 @@
     };
   }
 
+  /* Uniform hash of triangle bounding boxes, cell = the mean triangle bbox
+     diagonal. Shared by every 3D probe in this file so they all see the same
+     broad phase; it is the structure mesh_validate.py uses. */
+  function buildGrid(tris) {
+    var n = tris.length;
+    var boxes = [], diagSum = 0;
+    for (var t = 0; t < n; t++) {
+      var A = tris[t][0], B = tris[t][1], C = tris[t][2];
+      var lo = [Math.min(A[0], B[0], C[0]), Math.min(A[1], B[1], C[1]), Math.min(A[2], B[2], C[2])];
+      var hi = [Math.max(A[0], B[0], C[0]), Math.max(A[1], B[1], C[1]), Math.max(A[2], B[2], C[2])];
+      boxes.push([lo, hi]);
+      diagSum += norm(sub(hi, lo));
+    }
+    var cell = Math.max(diagSum / (n || 1), 1e-9);
+    var invC = 1 / cell;
+    var grid = new Map();
+    for (var g = 0; g < n; g++) {
+      var b = boxes[g];
+      var x0 = Math.floor(b[0][0] * invC), x1 = Math.floor(b[1][0] * invC);
+      var y0 = Math.floor(b[0][1] * invC), y1 = Math.floor(b[1][1] * invC);
+      var z0 = Math.floor(b[0][2] * invC), z1 = Math.floor(b[1][2] * invC);
+      for (var ix = x0; ix <= x1; ix++) {
+        for (var iy = y0; iy <= y1; iy++) {
+          for (var iz = z0; iz <= z1; iz++) {
+            var k = ix + ',' + iy + ',' + iz;
+            var bucket = grid.get(k);
+            if (!bucket) { bucket = []; grid.set(k, bucket); }
+            bucket.push(g);
+          }
+        }
+      }
+    }
+    return { grid: grid, cell: cell, invC: invC, boxes: boxes };
+  }
+
   /* ------------------------------------------------------- 3D probe: a mesh */
 
   /* Cast from every selected face's centroid along its inward normal and stop
@@ -257,35 +305,8 @@
       want = null;   // all of them
     }
 
-    /* cell size = mean triangle bbox diagonal, and the grid over every face */
-    var boxes = [], diagSum = 0;
-    for (var t = 0; t < n; t++) {
-      var A = tris[t][0], B = tris[t][1], C = tris[t][2];
-      var lo = [Math.min(A[0], B[0], C[0]), Math.min(A[1], B[1], C[1]), Math.min(A[2], B[2], C[2])];
-      var hi = [Math.max(A[0], B[0], C[0]), Math.max(A[1], B[1], C[1]), Math.max(A[2], B[2], C[2])];
-      boxes.push([lo, hi]);
-      diagSum += norm(sub(hi, lo));
-    }
-    var cell = Math.max(diagSum / n, 1e-9);
-    var invC = 1 / cell;
-
-    var grid = new Map();
-    for (var g = 0; g < n; g++) {
-      var b = boxes[g];
-      var x0 = Math.floor(b[0][0] * invC), x1 = Math.floor(b[1][0] * invC);
-      var y0 = Math.floor(b[0][1] * invC), y1 = Math.floor(b[1][1] * invC);
-      var z0 = Math.floor(b[0][2] * invC), z1 = Math.floor(b[1][2] * invC);
-      for (var ix = x0; ix <= x1; ix++) {
-        for (var iy = y0; iy <= y1; iy++) {
-          for (var iz = z0; iz <= z1; iz++) {
-            var k = ix + ',' + iy + ',' + iz;
-            var bucket = grid.get(k);
-            if (!bucket) { bucket = []; grid.set(k, bucket); }
-            bucket.push(g);
-          }
-        }
-      }
-    }
+    var G = buildGrid(tris);
+    var cell = G.cell, invC = G.invC, grid = G.grid;
 
     var rep = emptyReport('mesh', o, '');
     var bestAll = null;
@@ -370,6 +391,256 @@
     o.faces = faces;
     return measureMesh(rawTris, o);
   }
+
+  /* --------------------------------------------- 3D probe: a proposed cut */
+
+  /* Every hit along a ray, sorted, using the same uniform hash as the wall
+     probe. Unlike the wall probe this does not stop at the nearest hit: the
+     clearance check needs to know where the material ENDS, not just where the
+     next surface is. */
+  function allHits(G, tris, orig, d, maxT, eps) {
+    var cell = G.cell, invC = G.invC, grid = G.grid;
+    var ci = [Math.floor(orig[0] * invC), Math.floor(orig[1] * invC), Math.floor(orig[2] * invC)];
+    var step = [0, 0, 0], tMax = [Infinity, Infinity, Infinity], tDelta = [Infinity, Infinity, Infinity];
+    for (var a = 0; a < 3; a++) {
+      if (d[a] > 1e-15) {
+        step[a] = 1; tMax[a] = ((ci[a] + 1) * cell - orig[a]) / d[a]; tDelta[a] = cell / d[a];
+      } else if (d[a] < -1e-15) {
+        step[a] = -1; tMax[a] = (ci[a] * cell - orig[a]) / d[a]; tDelta[a] = -cell / d[a];
+      }
+    }
+    var hits = [], seen = new Set(), entry = 0;
+    while (entry <= maxT) {
+      var bucket = grid.get(ci[0] + ',' + ci[1] + ',' + ci[2]);
+      if (bucket) {
+        for (var i = 0; i < bucket.length; i++) {
+          var u = bucket[i];
+          if (seen.has(u)) continue;
+          seen.add(u);
+          var t = rayTri(orig, d, tris[u], eps);
+          if (t !== null && t <= maxT) hits.push(t);
+        }
+      }
+      var k = (tMax[0] < tMax[1]) ? (tMax[0] < tMax[2] ? 0 : 2) : (tMax[1] < tMax[2] ? 1 : 2);
+      if (!isFinite(tMax[k])) break;
+      entry = tMax[k];
+      ci[k] += step[k];
+      tMax[k] += tDelta[k];
+    }
+    hits.sort(function (x, y) { return x - y; });
+    /* Collapse coincident hits. A ray that passes exactly through the diagonal
+       two triangles of a quad share crosses the surface ONCE but records two
+       hits at the same distance, which breaks parity and - worse - produces a
+       zero-thickness "solid span" that reads as a member the cut severed. Seen
+       for real on box_open.stl: the corner samples hit z = 25 twice and a
+       legitimate corner notch was reported as severing the piece.
+
+       The merge radius is the weld tolerance this module uses everywhere else
+       for "the same point". Anything thinner than that is not a feature; it is
+       two records of one surface. */
+    var merged = [];
+    for (var m = 0; m < hits.length; m++) {
+      if (!merged.length || hits[m] - merged[merged.length - 1] > WELD_TOL) merged.push(hits[m]);
+    }
+    return merged;
+  }
+
+  /* How much wall a PROPOSED CUT leaves standing, on every axis.
+
+     This is the check the app-join.js / app.js cut path does not have. That one
+     rays along frame.punch only, finds the far wall, and reserves `minWall`
+     along THAT axis - then inflates the cut box laterally by `lateralPad` with
+     no wall test of any kind. One axis is checked; the other two are assumed.
+
+     At a corner, or anywhere a bit travels ALONG a wall rather than across it,
+     that assumption is wrong and the failure is invisible afterwards. On
+     fixtures/box_open.stl (60x40x25, 2 mm walls) a 4x2x6 bit in the corner of
+     the y=0 wall, punching +X, removes 48 of 48 mm3. The punch-axis ray
+     measures 60 mm of material - because it is tunnelling along the wall, not
+     through it - so the check approves a 59 mm cut that takes the whole 2 mm
+     wall out over that window, opening the outside into the cavity. The result
+     is a closed, sound, single-component mesh whose thinnest wall is still
+     1 mm. measureMesh() passes it, and correctly so: severing REMOVES material
+     rather than thinning it, so no thickness check on the finished mesh can
+     see it. It has to be caught before the cut, against both load-bearing
+     faces, which is what this does.
+
+     For each of the six faces of the cut box, sample across the face, and at
+     each sample ask two questions of the ORIGINAL mesh:
+       - just inside the cut boundary, was there material here at all? If not,
+         this sample has nothing to say and is skipped (a cut reaching through
+         open cavity is not eating a wall).
+       - just outside it, is there material, and how far does it run before the
+         solid ends? That length is the wall this cut leaves standing on that
+         side.
+     The worst sample wins, the same way buildCutVolume takes the worst of its
+     five, and every side is reported.
+
+     A side with material but under the floor is `thin`. A side with none at
+     all is `breached`. An axis breached on BOTH sides is `severed`: the cut
+     spans the full thickness of the member there and nothing is left holding
+     it. That is the corner case, and it is exactly what one-axis checking
+     cannot express.
+
+     `opts.through` names the axis the bit is meant to punch along (0/1/2 or
+     'x'/'y'/'z'). Severing THAT axis is the whole point of a through cut, so
+     it is reported and not failed; severing any other is a cut wall. Omit it
+     and every axis is held to the floor.
+
+     cutLo/cutHi are the cut volume's world-axis-aligned bounds - for the app
+     path, the box buildCutVolume actually hands to the kernel, lateral pad
+     included, not the bit's own footprint.
+
+     LIMITS, stated rather than implied. This samples `opts.samples` squared
+     lines per axis (5x5 by default, inset from the cut's rim), so a wall
+     threatened only in a gap between sample lines can still be missed; raise
+     `samples` for a finer sweep. It is a strictly denser probe than the five
+     points buildCutVolume takes, not a proof. It also reads the mesh as it is
+     BEFORE the cut and assumes the cut volume is the axis-aligned box given;
+     a rotated bit should be passed the world AABB of its cut volume, which is
+     conservative (it can over-report, never under-report). Sample lines whose
+     hit list comes back odd are counted in `grazed` and contribute nothing. */
+  function cutClearance(rawTris, cutLo, cutHi, opts) {
+    var o = resolveOpts(opts);
+    opts = opts || {};
+    var AX = ['x', 'y', 'z'];
+    var through = opts.through;
+    if (typeof through === 'string') through = AX.indexOf(through);
+    if (typeof through !== 'number' || through < 0 || through > 2) through = -1;
+    var nSamp = (typeof opts.samples === 'number' && opts.samples >= 1) ? (opts.samples | 0) : 5;
+
+    var rep = {
+      kind: 'cut', nozzle_mm: o.nozzle, threshold_mm: o.minWall,
+      through: through >= 0 ? AX[through] : null,
+      sides: [], severed: [], severed_fatal: [], breached: [], thin: [],
+      samples: nSamp * nSamp, grazed: 0,
+      min_mm: null, pass: true, reason: ''
+    };
+    if (!rawTris || !rawTris.length) { rep.reason = 'empty mesh - nothing measured'; return rep; }
+
+    var idx = indexSoup(rawTris, o.weldTol);
+    var tris = idx.tris;
+    var G = buildGrid(tris);
+
+    var mlo = [Infinity, Infinity, Infinity], mhi = [-Infinity, -Infinity, -Infinity];
+    for (var t = 0; t < tris.length; t++) {
+      for (var c = 0; c < 3; c++) {
+        for (var a0 = 0; a0 < 3; a0++) {
+          if (tris[t][c][a0] < mlo[a0]) mlo[a0] = tris[t][c][a0];
+          if (tris[t][c][a0] > mhi[a0]) mhi[a0] = tris[t][c][a0];
+        }
+      }
+    }
+    var span = norm(sub(mhi, mlo)) * 2 + 1;
+    var eps = o.eps;
+    var tol = WELD_TOL;
+
+    for (var ax = 0; ax < 3; ax++) {
+      var b1 = (ax + 1) % 3, b2 = (ax + 2) % 3;
+      var dir = [0, 0, 0]; dir[ax] = 1;
+      var c0 = Math.min(cutLo[ax], cutHi[ax]), c1 = Math.max(cutLo[ax], cutHi[ax]);
+
+      var minus = { axis: AX[ax], sign: -1, label: AX[ax] + '-', measured: 0,
+                    remaining_mm: null, breached: false, thin: false, is_through: ax === through };
+      var plus = { axis: AX[ax], sign: 1, label: AX[ax] + '+', measured: 0,
+                   remaining_mm: null, breached: false, thin: false, is_through: ax === through };
+      var severedHere = 0, grazedHere = 0;
+
+      for (var i = 0; i < nSamp; i++) {
+        for (var j = 0; j < nSamp; j++) {
+          var f1 = nSamp === 1 ? 0.5 : (0.1 + 0.8 * i / (nSamp - 1));
+          var f2 = nSamp === 1 ? 0.5 : (0.1 + 0.8 * j / (nSamp - 1));
+          var org = [0, 0, 0];
+          org[ax] = mlo[ax] - 1;
+          org[b1] = cutLo[b1] + (cutHi[b1] - cutLo[b1]) * f1;
+          org[b2] = cutLo[b2] + (cutHi[b2] - cutLo[b2]) * f2;
+
+          var hits = allHits(G, tris, org, dir, span, eps);
+          if (hits.length < 2 || hits.length % 2 !== 0) { grazedHere++; continue; }   // this line says nothing
+
+          /* Solid spans along this line, in world coordinates on `ax`. */
+          for (var h = 0; h + 1 < hits.length; h += 2) {
+            var s0 = org[ax] + hits[h], s1 = org[ax] + hits[h + 1];
+            if (s1 - s0 <= tol) continue;                            // zero-thickness: a grazed surface, not a member
+            if (c1 <= s0 + tol || c0 >= s1 - tol) continue;          // cut misses this span
+
+            /* Does the cut swallow this span whole? Then nothing on this line
+               holds the member together any more - that is severance, and it
+               is the thing a one-axis check cannot express. */
+            if (c0 <= s0 + tol && c1 >= s1 - tol) { severedHere++; continue; }
+
+            /* Otherwise, what is left on each side of the cut WITHIN this span.
+               A side whose material the cut starts at or before simply has
+               none - that is the face the bit entered through, normal for any
+               cut - and is recorded as breached, not as a thin wall. */
+            if (c0 > s0 + tol) {
+              minus.measured++;
+              var below = c0 - s0;
+              if (minus.remaining_mm === null || below < minus.remaining_mm) minus.remaining_mm = below;
+            } else {
+              minus.measured++;
+              minus.remaining_mm = 0;
+            }
+            if (c1 < s1 - tol) {
+              plus.measured++;
+              var above = s1 - c1;
+              if (plus.remaining_mm === null || above < plus.remaining_mm) plus.remaining_mm = above;
+            } else {
+              plus.measured++;
+              plus.remaining_mm = 0;
+            }
+          }
+        }
+      }
+
+      [minus, plus].forEach(function (side) {
+        if (!side.measured) return;
+        if (side.remaining_mm === 0) { side.breached = true; rep.breached.push(side.label); }
+        else if (side.remaining_mm < o.minWall - WELD_TOL) { side.thin = true; rep.thin.push(side.label); }
+        /* min_mm is the thinnest wall LEFT STANDING, so a breached side does
+           not contribute a 0 to it. A breach is not a thin wall, it is the
+           absence of one, and the entry face of any cut breaches by design. */
+        if (!side.breached && (rep.min_mm === null || side.remaining_mm < rep.min_mm)) {
+          rep.min_mm = side.remaining_mm;
+        }
+      });
+      minus.severed_samples = plus.severed_samples = severedHere;
+      /* Lines whose hit list came back odd after the coincident-hit merge: the
+         ray still grazed something and that line is not evidence either way.
+         Counted rather than swallowed, so "nothing severed" can be told apart
+         from "nothing could be measured". */
+      minus.grazed_samples = plus.grazed_samples = grazedHere;
+      rep.grazed += grazedHere;
+      rep.sides.push(minus, plus);
+      if (severedHere) rep.severed.push(AX[ax]);
+    }
+
+    /* Severing the declared punch axis is what a through cut IS; severing any
+       other axis is a wall cut in half. */
+    rep.severed_fatal = rep.severed.filter(function (a) { return a !== rep.through; });
+    rep.pass = rep.severed_fatal.length === 0 && rep.thin.length === 0;
+    var anyMeasured = rep.sides.some(function (x) { return x.measured > 0; }) || rep.severed.length > 0;
+
+    if (rep.severed_fatal.length) {
+      rep.reason = 'cut severs the piece across ' + rep.severed_fatal.join(' and ') +
+                   ' - it removes the full thickness there' +
+                   (rep.through ? ' (punch axis is ' + rep.through + ')' : '');
+    } else if (rep.thin.length) {
+      rep.reason = 'cut leaves under ' + round3(o.minWall) + ' mm on ' + rep.thin.join(', ') +
+                   ' (thinnest ' + round3(rep.min_mm) + ' mm)';
+    } else if (!anyMeasured) {
+      rep.reason = 'cut removes no material - nothing measured';
+    } else {
+      rep.reason = (rep.min_mm === null
+                      ? 'no wall left standing anywhere the cut removed material'
+                      : 'thinnest wall left standing ' + round3(rep.min_mm) + ' mm, floor ' +
+                        round3(o.minWall) + ' mm') +
+                   (rep.severed.length ? ' (through cut on ' + rep.severed.join(', ') + ', as intended)' : '') +
+                   (rep.breached.length ? ' (open to air on ' + rep.breached.join(', ') + ')' : '');
+    }
+    return rep;
+  }
+
 
   /* ---------------------------------------------- 2D probe: a section loop */
 
@@ -624,6 +895,7 @@
   }
 
   var api = {
+    cutClearance: cutClearance,
     LEGACY_FALLBACK_MM: LEGACY_FALLBACK_MM,
     cornerWall: cornerWall,
     bandWall: bandWall,
