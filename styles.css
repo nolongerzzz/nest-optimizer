@@ -1280,3 +1280,54 @@ select:focus, input:focus {
   padding: 2px 0 4px;
 }
 .vp-row-opts .vp-clone input[type="number"] { width: 52px; }
+
+/* ---------------------------------------------------------------------------
+   Toolpath card - the line-level scrub for an imported sliced .gcode.3mf.
+   The card is hidden until something is imported. Note the repo has NO generic
+   .hidden rule (see the .library-list note above for the trap that caused), so
+   this says it for this card and says it unconditionally.
+   --------------------------------------------------------------------------- */
+#toolpath-card.hidden { display: none !important; }
+
+#toolpath-card input[type="range"] {
+  width: 100%;
+  margin: 8px 0 4px;
+  accent-color: #ff3b30;   /* same red the scrub highlight uses in the viewport */
+}
+
+/* Two step rows, not one: lines on top, layers below. They are two different
+   granularities and the sidebar is too narrow to hold all five controls on one
+   line without clipping the last button. The layer row's two buttons split the
+   width evenly so the pair reads as one unit. */
+.tp-step-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.tp-step-row + .tp-step-row .btn { flex: 1 1 0; }
+.tp-step-row .btn {
+  flex: 0 0 auto;
+  padding: 6px 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+/* The line number has to stay readable at four digits, so it gets a floor
+   rather than `min-width: 0` - with the flex default it collapsed to nothing
+   between the step buttons and showed no number at all. */
+.tp-step-row input[type="number"] {
+  flex: 1 1 auto;
+  min-width: 52px;
+  padding: 6px 2px;
+  margin: 0;
+  text-align: center;
+}
+
+/* The per-line measurements. Tabular figures so the numbers do not jitter as
+   the slider moves, which is the whole point of reading them while scrubbing. */
+.tp-detail {
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  margin: 2px 0 8px;
+  word-break: break-word;
+}

@@ -101,6 +101,31 @@
           <button id="btn-cap-open" class="btn btn-secondary" type="button">Cap open faces</button>
           <button id="btn-join-clear" class="btn btn-ghost" type="button">Cancel Join</button>
         </section>
+        <section class="card hidden" id="toolpath-card" tabindex="0">
+          <h2>Toolpath</h2>
+          <p class="hint">An already-sliced <code>.gcode.3mf</code> from Bambu Studio, drawn as real
+            geometry. Scrub to a single line, then Extract Line.</p>
+          <input type="range" id="tp-slider" min="0" max="0" step="1" value="0"
+                 title="Scrub through the toolpath one extrusion move at a time" />
+          <div class="edit-row tp-step-row">
+            <button id="btn-tp-prev" class="btn btn-secondary" type="button" title="Previous line (Left arrow)">&minus;1 line</button>
+            <input type="number" id="tp-index" value="0" min="0" max="0" step="1" title="Jump to a line by number" />
+            <button id="btn-tp-next" class="btn btn-secondary" type="button" title="Next line (Right arrow)">+1 line</button>
+          </div>
+          <div class="edit-row tp-step-row">
+            <button id="btn-tp-layer-down" class="btn btn-secondary" type="button" title="First line of the previous layer (Shift+Left)">&#9660; layer</button>
+            <button id="btn-tp-layer-up" class="btn btn-secondary" type="button" title="First line of the next layer (Shift+Right)">&#9650; layer</button>
+          </div>
+          <p id="tp-readout" class="cut-readout">&mdash;</p>
+          <p id="tp-detail" class="hint tp-detail">&mdash;</p>
+          <label class="hint" for="tp-scope" style="margin-bottom:4px;display:block">Extract scope</label>
+          <select id="tp-scope" title="How much of the toolpath Extract Line pulls out">
+            <option value="move">This line only</option>
+            <option value="feature">This feature, on this layer</option>
+            <option value="layer">This whole layer</option>
+          </select>
+          <button id="btn-tp-extract" class="btn btn-primary" type="button">Extract Line</button>
+        </section>
         <section class="card card-compact" id="export-card">
           <h2>Export</h2>
           <label class="hint" for="export-format" style="margin-bottom:4px;display:block">Format</label>
@@ -218,6 +243,7 @@
   <script src="nso-cooling-profiles.js"></script>
   <script src="nso-3mf.js"></script>
   <script src="nso-3mf-read.js"></script>
+  <script src="nso-gcode-lines.js"></script>
   <script src="app-core.js?v=inside4"></script>
   <script src="app-cut.js?v=inside4"></script>
   <script src="app-finish.js?v=inside4"></script>
@@ -226,6 +252,7 @@
   <script src="app-join.js?v=inside4"></script>
   <script src="app-mask.js?v=inside4"></script>
   <script src="app-library.js?v=libgit"></script>
+  <script src="app-toolpath.js?v=toolpath1"></script>
   <script src="app-ux.js?v=inside4"></script>
   <script src="app-cth-expose.js?v=cth15"></script>
   <script type="module" src="app-cth.js?v=cth15"></script>

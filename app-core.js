@@ -717,6 +717,13 @@ function handleFiles(files) {
     reader.onerror = () => setStatus(`Could not read ${file.name}`, true);
     reader.onload = (e) => {
       if (/\.3mf$/i.test(file.name)) {
+        // A sliced project (`*.gcode.3mf`) carries a toolpath as well as - or
+        // instead of - a model part, and the toolpath is the interesting half.
+        // Route it to the toolpath importer; anything else is geometry only.
+        if (window.NSO_TOOLPATH && window.NSO_TOOLPATH.looksSliced(file.name)) {
+          window.NSO_TOOLPATH.importSliced3MF(file.name, e.target.result);
+          return;
+        }
         import3MF(file.name, e.target.result);
         return;
       }
