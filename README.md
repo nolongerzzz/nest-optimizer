@@ -100,6 +100,17 @@ Smart build-plate packing for 3D printing.
     tips - a second breakaway interface - and the piece is flagged non-solid,
     because it now carries two shells. See `docs/HANDOFF.md`, "Skin wrap +
     the double skin"
+  - **Trace a raster into flat printed lines** (command line, not a button yet)
+    for the case the reliefs above cannot do: a real printed line's section.
+    `node tools/nso_raster_lines_cli.js pattern.pbm out.stl --size 30` takes a
+    black-and-white picture of a toolpath, vectorises the lines and extrudes
+    each one flat and thin - 0.3 mm tall and 0.42 mm wide by default, the
+    measured Bambu line, both parameters - into a watertight STL you can drop
+    straight back in. Why it exists, in one number: two stacked, 90°-crossed
+    copies of the shipped sawtooth relief bond over 0.5040 mm² at every
+    crossing, because a standing ridge meets the interface with its 1.20 mm
+    base; two traced flat layers bond over 0.1764 mm², in 225 isolated dots
+    with no weld anywhere. See [docs/RASTER-LINES.md](docs/RASTER-LINES.md)
 - **Delete painted** removes the geometry under the paint, rather than only
   excluding it from bakes. **Paint Selected**, click the face, then Delete:
   **Face** cuts that face out and leaves the rim open, **Face+seal** cuts it
