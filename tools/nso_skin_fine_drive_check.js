@@ -59,10 +59,35 @@ withApp(async (page, logs) => {
   for (const f of fine.CATALOG_FILES) {
     check(f + ': a row in the shipped Library list', rows.indexOf(f) !== -1);
   }
-  check('the list is built from CATALOG in order, patches last',
-    rows.length >= fine.CATALOG_FILES.length &&
-    rows.slice(-fine.CATALOG_FILES.length).join(',') === fine.CATALOG_FILES.join(','),
-    rows.slice(-fine.CATALOG_FILES.length).join(', '));
+  /* This used to read "the list is built from CATALOG in order, patches
+     last" and compare the final ten rows against CATALOG_FILES. The list is
+     grouped by category now, and the ten do not sit together in it: the four
+     _bordered patches are washers and file under Washers, the six _loose and
+     _sandwich ones under Skins. A tail comparison cannot survive that and
+     should not - it was pinning the flat list's shape, which no longer
+     exists.
+
+     What it was actually for does survive, and is asserted harder below: the
+     shipped Library offers exactly the files the sample generator writes,
+     no more and no fewer, and each one under the category it belongs to.
+     That catches the drift the tail comparison caught (a file generated but
+     never registered, or registered under a name that does not exist) plus
+     one it could not: a patch filed in the wrong place. */
+  const shipped = rows.filter(r => r.startsWith('patch_')).slice().sort();
+  check('the Library offers exactly the generated patches, no more, no fewer',
+    shipped.join(',') === fine.CATALOG_FILES.slice().sort().join(','),
+    shipped.join(', '));
+  const cats = await page.evaluate(() => {
+    const out = {};
+    document.querySelectorAll('#library-list .library-item').forEach(r => {
+      out[r.querySelector('.name').textContent] = r.dataset.category;
+    });
+    return out;
+  });
+  for (const f of fine.CATALOG_FILES) {
+    const want = /_bordered\.stl$/.test(f) ? 'Washers' : 'Skins';
+    check(f + ': filed under ' + want, cats[f] === want, cats[f]);
+  }
 
   console.log('\n=== each one loaded by CLICKING its row ===');
   for (const f of fine.CATALOG_FILES) {

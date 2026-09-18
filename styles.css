@@ -387,6 +387,25 @@ select:focus, input:focus {
   outline: none;
 }
 
+/* The library browser's category groups. Same <details> + .vp-sec-head
+   convention as the Finish menu's groups, so the two read as one system;
+   what differs is only what this list needs of it. The dropdown is wider
+   than the Finish column and its rows carry their own padding, so the body
+   is flush and the heading gets a little room above it. */
+.library-sec { width: 100%; }
+.library-sec + .library-sec { margin-top: 4px; }
+.library-sec > .vp-sec-head { padding: 2px 8px; }
+.library-sec > .vp-sec-body { padding: 3px 0 0; gap: 2px; }
+/* How many pieces are in the group, so a shut group still says what it has. */
+.library-sec-count {
+  margin-left: auto;
+  padding-left: 8px;
+  color: #64748b;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.library-sec[open] > .vp-sec-head > .library-sec-count { color: #94a3b8; }
+
 .library-item.is-loading {
   opacity: 0.55;
   cursor: progress;
