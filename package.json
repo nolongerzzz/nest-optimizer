@@ -39,6 +39,7 @@
     "skin:fine-fixtures": "node tools/nso_skin_fine_samples.js --check",
     "skin:fine-drive": "node tools/nso_skin_fine_drive_check.js",
     "raster:audit": "node tools/nso_raster_line_audit.js",
+    "raster:angle": "node tools/nso_line_angle.js fixtures/raster-lines/zigzag-layer.stl fixtures/raster-lines/crosshatch.stl",
     "raster:fixtures": "node tools/nso_raster_fixtures.js --check",
     "raster:test": "node tools/nso_raster_lines_test.js",
     "paint:scope": "node tools/nso_paint_scope_test.js",

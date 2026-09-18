@@ -25,6 +25,7 @@ const path = require('path');
 const RL = require('../nso_raster_lines.js');
 const { writePGM, writePBM } = require('./nso_pnm.js');
 const { writeSTL } = require('./nso_stl_io.js');
+const ANG = require('./nso_line_angle.js');
 
 const OUT = path.resolve(__dirname, '..', 'fixtures', 'raster-lines');
 
@@ -51,7 +52,57 @@ const FIRST = 1.0;        /* the first ridge's centre: start 0.4 + rib 1.2 / 2 *
  *                 w x w, widest patch one line width across
  * So 0.25. tools/nso_raster_lines_test.js holds all three. */
 const INSET = 0.25;
-const PPMM = 20;          /* px per mm - 600 x 600 for a 30 mm patch */
+const PPMM = 20;          /* px per mm */
+
+/* THE ANGLE THE LINES RUN AT, and the bug this constant exists to have fixed.
+ *
+ * A slicer prints an interface layer at 45 degrees to the part's axes, and the
+ * next layer at 135, which is where the 90 degrees between them comes from.
+ * The first committed reference here was drawn AXIS-ALIGNED - vertical lines
+ * joined by horizontal turns - so the two layers still crossed at 90 degrees
+ * and every number the suite measured (line width, height, watertightness,
+ * contact per crossing, the patch count) was correct, because all of them are
+ * angle-blind. Measured on that output with tools/nso_line_angle.js: the
+ * dominant band was 89 +/-1 deg at 94.03% of the wall length and 45 +/-1 deg
+ * held 0.00%. It was simply the wrong orientation, and nothing looked.
+ *
+ * The fix is a rigid turn of the whole pattern, not a redraw: the path shapes
+ * below are laid out in the pattern's own 30 x 30 frame exactly as before and
+ * `turned` maps that frame into the canvas at ANGLE. Rigid is the point -
+ * layer 2 is still layer 1 turned 90 degrees, so the two-layer assembly is the
+ * old assembly turned 45 degrees as a whole, and every contact figure is
+ * therefore expected to be IDENTICAL rather than merely similar. The check
+ * asserts that equality instead of assuming it (part 5), which is a stronger
+ * statement about the geometry than the old fixture could make.
+ *
+ * The canvas has to grow, because a 30 mm square turned 45 degrees needs
+ * 30 * sqrt(2) = 42.43 mm of room. CANVAS is derived from ANGLE and SIZE so the
+ * two cannot drift apart, plus MARGIN for the widest stroke's half width. */
+/* ANGLE is the angle THE LINES RUN AT, which is the thing being asserted, not
+ * the rotation applied. The path shapes below lay their lines out VERTICAL
+ * (along +Y, 90 degrees), so the rotation is ANGLE - 90 and the end turns,
+ * which are perpendicular to the lines by construction, land at ANGLE + 90.
+ * Naming the rotation instead is how the first attempt at this fix put the
+ * lines at 135 and the turns at 45 - the right diagonal, the wrong one of the
+ * two - so the constant names the measured quantity. */
+const ANGLE = 45;         /* degrees the LINES run at, relative to the canvas edges */
+const TURN = ANGLE - 90;  /* the rotation that gets them there, from vertical */
+const MARGIN = 0.8;       /* mm of clear canvas around the turned pattern */
+const CANVAS = Math.ceil(SIZE * (Math.abs(Math.cos(TURN * Math.PI / 180)) +
+                                 Math.abs(Math.sin(TURN * Math.PI / 180))) + 2 * MARGIN);
+
+/* The pattern's own frame mapped into the canvas: turned so its lines run at
+ * ANGLE, then centred in the canvas. */
+function turned(paths) {
+  const th = TURN * Math.PI / 180, c = Math.cos(th), s = Math.sin(th);
+  const mid = SIZE / 2, o = CANVAS / 2;
+  return paths.map(function (pl) {
+    return pl.map(function (q) {
+      const x = q[0] - mid, y = q[1] - mid;
+      return [x * c - y * s + o, x * s + y * c + o];
+    });
+  });
+}
 
 /* ------------------------------------------------------------ rasterising */
 
@@ -61,31 +112,45 @@ const PPMM = 20;          /* px per mm - 600 x 600 for a 30 mm patch */
 function stroke(polylines, opts) {
   const o = opts || {};
   const ppmm = o.ppmm || PPMM;
-  const w = Math.round((o.size || SIZE) * ppmm), h = w;
+  const size = o.size || CANVAS;
+  const w = Math.round(size * ppmm), h = w;
   const r = (o.strokePx || 5) / 2;
   const data = new Uint8Array(w * h).fill(255);
   const segs = [];
   for (const pl of polylines) {
     for (let k = 0; k + 1 < pl.length; k++) {
-      segs.push([pl[k][0] * ppmm, (o.size || SIZE) * ppmm - pl[k][1] * ppmm,
-                 pl[k + 1][0] * ppmm, (o.size || SIZE) * ppmm - pl[k + 1][1] * ppmm]);
+      segs.push([pl[k][0] * ppmm, size * ppmm - pl[k][1] * ppmm,
+                 pl[k + 1][0] * ppmm, size * ppmm - pl[k + 1][1] * ppmm]);
     }
   }
-  for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
-    const px = i + 0.5, py = j + 0.5;
-    let best = Infinity;
-    for (const s of segs) {
-      const dx = s[2] - s[0], dy = s[3] - s[1], L2 = dx * dx + dy * dy;
+  /* Nearest-segment distance per pixel, but only over each segment's own
+     neighbourhood. The whole-canvas double loop was w * h * segs, which the
+     45 degree canvas and the 480-segment crosshatch together turn into 400M
+     distance evaluations; visiting each segment's band instead is linear in
+     the ink. `best` starts at Infinity everywhere, so a pixel no segment
+     reaches keeps it and stays background. */
+  const band = r + 1.5;                       /* + the aa ramp's own reach */
+  const best = new Float64Array(w * h).fill(Infinity);
+  for (const s of segs) {
+    const i0 = Math.max(0, Math.floor(Math.min(s[0], s[2]) - band));
+    const i1 = Math.min(w - 1, Math.ceil(Math.max(s[0], s[2]) + band));
+    const j0 = Math.max(0, Math.floor(Math.min(s[1], s[3]) - band));
+    const j1 = Math.min(h - 1, Math.ceil(Math.max(s[1], s[3]) + band));
+    const dx = s[2] - s[0], dy = s[3] - s[1], L2 = dx * dx + dy * dy;
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const px = i + 0.5, py = j + 0.5;
       let t = L2 > 0 ? ((px - s[0]) * dx + (py - s[1]) * dy) / L2 : 0;
       t = t < 0 ? 0 : (t > 1 ? 1 : t);
       const d = Math.hypot(px - (s[0] + t * dx), py - (s[1] + t * dy));
-      if (d < best) best = d;
+      if (d < best[j * w + i]) best[j * w + i] = d;
     }
+  }
+  for (let k = 0; k < w * h; k++) {
     if (o.aa) {
-      const f = Math.max(0, Math.min(1, best - r + 0.5));   /* 0 inside, 1 outside */
-      data[j * w + i] = Math.round(255 * f);
-    } else if (best <= r) {
-      data[j * w + i] = 0;
+      const f = Math.max(0, Math.min(1, best[k] - r + 0.5));   /* 0 inside, 1 outside */
+      data[k] = Math.round(255 * f);
+    } else if (best[k] <= r) {
+      data[k] = 0;
     }
   }
   return { width: w, height: h, data: data, channels: 1, ppmm: ppmm };
@@ -104,7 +169,7 @@ function zigzagPath(inset) {
     const x = FIRST + k * PITCH;
     if (k % 2 === 0) { pts.push([x, y0], [x, y1]); } else { pts.push([x, y1], [x, y0]); }
   }
-  return [pts];
+  return turned([pts]);
 }
 
 /* 15 lines each way in ONE picture: what the shipped crosshatch draws, and the
@@ -117,7 +182,7 @@ function crosshatchPath() {
     out.push([[c, a], [c, b]]);
     out.push([[a, c], [b, c]]);
   }
-  return out;
+  return turned(out);
 }
 
 const RASTERS = [
@@ -151,6 +216,8 @@ function meta(rec) {
     note: rec.spec.note,
     raster_px: [rec.img.width, rec.img.height],
     px_per_mm: rec.img.ppmm,
+    canvas_mm: CANVAS,
+    drawn_at_deg: ANGLE,
     stroke_px: rec.spec.strokePx,
     antialiased: !!rec.spec.aa,
     mm_per_px: r.mmPerPixel,
@@ -168,6 +235,13 @@ function meta(rec) {
     unique_edges: r.uniqueEdges, open_edges: r.openEdges, nonmanifold_edges: r.nonManifoldEdges,
     closed: r.closed,
     extent_mm: r.extent.map(x => +x.toFixed(6)),
+    /* the orientation, measured off the mesh that ships - see
+       tools/nso_line_angle.js for why this is recorded and not assumed */
+    line_angle_deg: ANG.dominantBand(ANG.wallHistogram(rec.build.tris), 1).centre,
+    angle_bands: ANG.bands(ANG.wallHistogram(rec.build.tris), 1)
+      .map(b => ({ deg: b.centre, share: +b.share.toFixed(5) })),
+    axis_aligned_share: +(ANG.bandShare(ANG.wallHistogram(rec.build.tris), 0, 1) +
+      ANG.bandShare(ANG.wallHistogram(rec.build.tris), 90, 1)).toFixed(5),
     describe: r.describe
   };
 }
@@ -226,5 +300,6 @@ function main() {
   console.log('\n' + (check ? 'fixtures match' : 'fixtures written'));
 }
 
-module.exports = { stroke, zigzagPath, crosshatchPath, RASTERS, buildAll, SIZE, PITCH, LINES, FIRST, INSET, PPMM, OUT };
+module.exports = { stroke, turned, zigzagPath, crosshatchPath, RASTERS, buildAll,
+  SIZE, PITCH, LINES, FIRST, INSET, PPMM, ANGLE, TURN, MARGIN, CANVAS, OUT };
 if (require.main === module) main();

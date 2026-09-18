@@ -376,6 +376,85 @@
     return [a[0] + t * r[0], a[1] + t * r[1]];
   }
 
+  /* Weld graph NODES closer together than `minLen` into one, and drop the
+     stubs between them.
+
+     collapseShort above fixes a short segment INSIDE a polyline, where one end
+     is a free vertex it may move. It cannot fix a short segment whose BOTH ends
+     are junctions, and a diagonal crossing is exactly that case: an X of two 45
+     degree strokes does not thin to one clean degree-4 pixel the way a
+     right-angled X does - Zhang-Suen leaves a little cluster of Y-junctions
+     joined by one-pixel bridges. Measured on the 45 degree crosshatch reference,
+     15 lines each way at 0.05 mm/px: 960 graph nodes where a clean lattice has
+     225 junctions and 60 line ends, 900 paths shorter than 0.1 mm, closest node
+     pair exactly one pixel apart. extrudeFlat then refuses the lot, correctly -
+     a 0.05 mm segment cannot carry a 0.42 mm line's joins.
+
+     So: cluster the endpoints within `minLen` of each other, move every one of
+     them to its cluster's centroid, and drop the paths that collapse to nothing.
+     The four arms of a crossing then meet at ONE point and the junction is the
+     degree-4 node it always was. Iterated, because welding two clusters can
+     bring a third within reach, with a guard so a pathological input cannot
+     spin. Endpoints DO move here, unlike in collapseShort - that is the whole
+     operation - but only by under one line width, and only onto the centroid of
+     the cluster they were already part of. */
+  function weldNodes(paths, minLen) {
+    if (!(minLen > 0)) return paths.map(function (p) { return p.slice(); });
+    var out = paths.map(function (p) { return p.map(function (q) { return [q[0], q[1]]; }); });
+    for (var pass = 0; pass < 8; pass++) {
+      var ends = [], i, k;
+      for (i = 0; i < out.length; i++) {
+        if (out[i].length < 2) continue;
+        ends.push({ p: out[i][0], path: i, at: 0 });
+        ends.push({ p: out[i][out[i].length - 1], path: i, at: out[i].length - 1 });
+      }
+      if (!ends.length) break;
+      /* cluster by proximity, bucketed so this does not go quadratic */
+      var parent = ends.map(function (_, ix) { return ix; });
+      function find(a) { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; }
+      var cell = minLen, buckets = new Map();
+      for (i = 0; i < ends.length; i++) {
+        var cx = Math.floor(ends[i].p[0] / cell), cy = Math.floor(ends[i].p[1] / cell);
+        for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) {
+          var bk = (cx + dx) + ':' + (cy + dy);
+          var list = buckets.get(bk);
+          if (!list) continue;
+          for (k = 0; k < list.length; k++) {
+            var j = list[k];
+            if (Math.hypot(ends[i].p[0] - ends[j].p[0], ends[i].p[1] - ends[j].p[1]) >= minLen) continue;
+            var ra = find(i), rb = find(j);
+            if (ra !== rb) parent[ra] = rb;
+          }
+        }
+        var ok = cx + ':' + cy;
+        if (!buckets.has(ok)) buckets.set(ok, []);
+        buckets.get(ok).push(i);
+      }
+      /* the centroid of each cluster, and whether anything moved at all */
+      var sum = new Map(), moved = false;
+      for (i = 0; i < ends.length; i++) {
+        var r = find(i), acc = sum.get(r);
+        if (!acc) { acc = [0, 0, 0]; sum.set(r, acc); }
+        acc[0] += ends[i].p[0]; acc[1] += ends[i].p[1]; acc[2]++;
+      }
+      for (i = 0; i < ends.length; i++) {
+        var c = sum.get(find(i));
+        var nx = c[0] / c[2], ny = c[1] / c[2];
+        if (Math.abs(nx - ends[i].p[0]) > 1e-12 || Math.abs(ny - ends[i].p[1]) > 1e-12) moved = true;
+        out[ends[i].path][ends[i].at] = [nx, ny];
+      }
+      /* drop what collapsed: a path with no length left to carry a line */
+      out = out.filter(function (p) {
+        if (p.length < 2) return false;
+        var L = 0;
+        for (var q = 0; q + 1 < p.length; q++) L += Math.hypot(p[q + 1][0] - p[q][0], p[q + 1][1] - p[q][1]);
+        return L >= minLen;
+      });
+      if (!moved) break;
+    }
+    return out;
+  }
+
   /* Drop a vertex whose turn is straight to within `eps` radians. DP leaves
      these only where two traced paths were joined end to end; a pad of zero
      area is correct geometry (the two quads then share their end edge
@@ -397,6 +476,39 @@
 
   var QUANT = 1e7;   /* vertex identity, 1e-7 mm - two orders under the weld */
   function vkey(p) { return Math.round(p[0] * QUANT) + '_' + Math.round(p[1] * QUANT); }
+
+  /* How close a pad's own wedge point may come to a shared attach point before
+     it is dropped as the same point, as a fraction of the line width. See the
+     pad builder: 2% of a line is a sixth of a pixel at the reference raster's
+     0.05 mm/px, and it is only ever the pad's private vertices that move. */
+  var WEDGE_SNAP = 0.02;
+
+  /* An incident edge's two attach corners, stored ON the inc entry so the pad
+     and the quad that meet there read the SAME two points rather than each
+     recomputing them from the same formula. Identical either way until the pad
+     merges a pair (see the pad builder) - and then the quad follows for free,
+     which is the whole reason they live here. */
+  function cornersOf(nd, ic, a) {
+    var nn = left2(ic.u), t = ic.t;
+    ic.R = [nd.p[0] - a * nn[0] + t * ic.u[0], nd.p[1] - a * nn[1] + t * ic.u[1]];
+    ic.L = [nd.p[0] + a * nn[0] + t * ic.u[0], nd.p[1] + a * nn[1] + t * ic.u[1]];
+  }
+
+  /* Drop the tagged-droppable points that sit on top of a kept neighbour. */
+  function snapWedges(tagged, eps) {
+    var n = tagged.length, out = [], i;
+    var near2 = function (a, b) {
+      return Math.abs(a[0] - b[0]) <= eps && Math.abs(a[1] - b[1]) <= eps;
+    };
+    for (i = 0; i < n; i++) {
+      var cur = tagged[i];
+      if (cur.keep) { out.push(cur.p); continue; }
+      var prev = tagged[(i - 1 + n) % n], next = tagged[(i + 1) % n];
+      if ((prev.keep && near2(cur.p, prev.p)) || (next.keep && near2(cur.p, next.p))) continue;
+      out.push(cur.p);
+    }
+    return out;
+  }
 
   /* extrudeFlat(paths, opts) -> { ok, tris, ... }
      paths: arrays of [x, y] in millimetres, already in the plane.
@@ -434,6 +546,7 @@
       }
     }
     var a = wid / 2;
+    var corners = function (nd, ic) { cornersOf(nd, ic, a); };
 
     /* ---- the graph: interned nodes, segments between them */
     var nodeOf = new Map(), nodes = [];
@@ -471,7 +584,7 @@
       if (deg >= 3) junctions++;
       inc.sort(function (x, y) { return Math.atan2(x.u[1], x.u[0]) - Math.atan2(y.u[1], y.u[0]); });
       for (var e = 0; e < deg; e++) inc[e].t = 0;
-      if (deg === 1) continue;                        /* butt cap, attach at 0 */
+      if (deg === 1) { corners(nd, inc[0]); continue; }   /* butt cap, attach at 0 */
       var wedges = [];
       for (var e2 = 0; e2 < deg; e2++) {
         var cu = inc[e2], nu = inc[(e2 + 1) % deg];
@@ -499,21 +612,53 @@
         if (s2 > nu.t) nu.t = s2;
       }
       /* the pad polygon, CCW: out along each line's right boundary to its
-         attach edge, across, back in along its left boundary, then the wedge */
+         attach edge, across, back in along its left boundary, then the wedge.
+
+         Each point is tagged, because the two kinds are NOT interchangeable.
+         An ATTACH point is shared, bit for bit, with the end of the quad that
+         meets the pad there - move or drop one and the mesh opens. A WEDGE
+         point is the pad's alone.
+
+         When a junction's arms are exactly perpendicular the wedge point lands
+         exactly ON the attach point and dedupe drops it as a duplicate. When
+         they are a fraction of a degree off - which is what a junction welded
+         from a thinning cluster always is (see weldNodes) - it lands a few
+         microns away instead and leaves a sliver: measured on the 45 degree
+         crosshatch, 776 triangles over aspect 100, the worst a 0.0037 mm edge
+         against a 0.30 mm one. So a wedge point within WEDGE_SNAP of the point
+         beside it is dropped, and an attach point never is. The pad then
+         changes shape by at most WEDGE_SNAP, which is 2% of a line width. */
+      var snap = wid * WEDGE_SNAP, e3;
+      for (e3 = 0; e3 < deg; e3++) corners(nd, inc[e3]);
+      /* Where the wedge between edge i and edge i+1 all but vanishes, edge i's
+         LEFT corner and edge i+1's RIGHT corner are the same corner of the
+         junction and miss each other only by the arms' angular error. Both are
+         shared with a quad, so neither can be dropped - they are MERGED, to
+         their midpoint, on the inc entries the quads read their own corners
+         from. One corner, two quads, no sliver, and watertight by the same
+         argument as before because there is still exactly one point. */
+      for (e3 = 0; e3 < deg; e3++) {
+        var A1 = inc[e3], B1 = inc[(e3 + 1) % deg];
+        if (deg < 2 || Math.hypot(A1.L[0] - B1.R[0], A1.L[1] - B1.R[1]) > snap) continue;
+        var mx = (A1.L[0] + B1.R[0]) / 2, my = (A1.L[1] + B1.R[1]) / 2;
+        A1.L = [mx, my];
+        B1.R = [mx, my];
+        wedges[e3].merged = true;
+      }
       var poly = [];
-      for (var e3 = 0; e3 < deg; e3++) {
-        var ic = inc[e3], nn = left2(ic.u), t3 = ic.t;
-        poly.push([nd.p[0] - a * nn[0] + t3 * ic.u[0], nd.p[1] - a * nn[1] + t3 * ic.u[1]]);
-        poly.push([nd.p[0] + a * nn[0] + t3 * ic.u[0], nd.p[1] + a * nn[1] + t3 * ic.u[1]]);
+      for (e3 = 0; e3 < deg; e3++) {
+        var ic = inc[e3], nn = left2(ic.u);
+        poly.push({ p: ic.R, keep: true });
+        poly.push({ p: ic.L, keep: true });
         var wg = wedges[e3], jn = inc[(e3 + 1) % deg], nj = left2(jn.u);
-        if (wg.bevel) {
-          poly.push([nd.p[0] + a * nn[0] + wg.t * ic.u[0], nd.p[1] + a * nn[1] + wg.t * ic.u[1]]);
-          poly.push([nd.p[0] - a * nj[0] + wg.s * jn.u[0], nd.p[1] - a * nj[1] + wg.s * jn.u[1]]);
-        } else {
-          poly.push([nd.p[0] + a * nn[0] + wg.t * ic.u[0], nd.p[1] + a * nn[1] + wg.t * ic.u[1]]);
+        if (!wg.merged) {
+          poly.push({ p: [nd.p[0] + a * nn[0] + wg.t * ic.u[0], nd.p[1] + a * nn[1] + wg.t * ic.u[1]], keep: false });
+          if (wg.bevel) {
+            poly.push({ p: [nd.p[0] - a * nj[0] + wg.s * jn.u[0], nd.p[1] - a * nj[1] + wg.s * jn.u[1]], keep: false });
+          }
         }
       }
-      pads.push({ centre: nd.p, poly: dedupe(poly) });
+      pads.push({ centre: nd.p, poly: dedupe(snapWedges(poly, snap)) });
     }
 
     /* ---- the quads, and the two things that can go wrong */
@@ -523,12 +668,11 @@
       var ta = incOf(sg.A, sg).t, tb = incOf(sg.B, sg).t;
       if (sg.L < minSeg) minSeg = sg.L;
       if (ta + tb >= sg.L - 1e-9) { tight.push({ seg: sg, need: ta + tb }); continue; }
-      var u = sg.u, n2 = left2(u);
-      var Rp = [sg.A.p[0] - a * n2[0] + ta * u[0], sg.A.p[1] - a * n2[1] + ta * u[1]];
-      var Rq = [sg.B.p[0] - a * n2[0] - tb * u[0], sg.B.p[1] - a * n2[1] - tb * u[1]];
-      var Lq = [sg.B.p[0] + a * n2[0] - tb * u[0], sg.B.p[1] + a * n2[1] - tb * u[1]];
-      var Lp = [sg.A.p[0] + a * n2[0] + ta * u[0], sg.A.p[1] + a * n2[1] + ta * u[1]];
-      quads.push({ poly: [Rp, Rq, Lq, Lp] });
+      /* the four corners the two pads published. At B the incident entry's own
+         direction is -u, so its left and right are this segment's right and
+         left - hence the crossed read, which is the only subtlety here. */
+      var iA = incOf(sg.A, sg), iB = incOf(sg.B, sg);
+      quads.push({ poly: [iA.R, iB.L, iB.R, iA.L] });
     }
     if (tight.length) {
       var t0 = tight[0].seg;
@@ -811,6 +955,14 @@
       paths.push(s);
     }
     if (!paths.length) return { ok: false, reason: 'every traced path was a single point' };
+    /* the graph-level pass: junction clusters a diagonal crossing leaves behind
+       (see weldNodes), then the per-path cleanup again, because welding moves
+       endpoints and can leave a short first or last segment behind it */
+    var beforeWeld = paths.length;
+    paths = weldNodes(paths, minSeg).map(function (q) {
+      return dropCollinear(collapseShort(q, minSeg));
+    }).filter(function (q) { return q.length >= 2; });
+    if (!paths.length) return { ok: false, reason: 'welding the junction clusters left no path' };
     var r = extrudeFlat(paths, o);
     if (!r.ok) return r;
     r.image = { w: mask.w, h: mask.h, inkPixels: mask.ink, skeletonPixels: sk.ink,
@@ -821,6 +973,7 @@
     r.tracedPaths = px.length;
     r.traceVertices = vertsIn;
     r.pathVertices = vertsOut;
+    r.weldedPaths = beforeWeld - paths.length;   /* stubs the node weld removed */
     r.describe = 'flat lines ' + r.width + ' mm wide x ' + r.height + ' mm tall from a ' +
       mask.w + ' x ' + mask.h + ' raster at ' + scale + ' mm/px - ' + r.paths + ' path(s), ' +
       r.segments + ' segment(s), ' + r.junctions + ' junction(s), ' +
@@ -834,7 +987,8 @@
     LINE_HEIGHT: LINE_HEIGHT, LINE_WIDTH: LINE_WIDTH, LINE_WIDTH_MAX: LINE_WIDTH_MAX,
     MITER_LIMIT: MITER_LIMIT,
     toMask: toMask, thin: thin, tracePaths: tracePaths,
-    simplify: simplify, collapseShort: collapseShort, dropCollinear: dropCollinear,
+    simplify: simplify, collapseShort: collapseShort, weldNodes: weldNodes,
+    dropCollinear: dropCollinear,
     extrudeFlat: extrudeFlat, buildFromImage: buildFromImage,
     extentOf: extentOf, countComponents: countComponents, edgeCensus: edgeCensus
   };

@@ -126,7 +126,10 @@ Smart build-plate packing for 3D printing.
     copies of the shipped sawtooth relief bond over 0.5040 mm² at every
     crossing, because a standing ridge meets the interface with its 1.20 mm
     base; two traced flat layers bond over 0.1764 mm², in 225 isolated dots
-    with no weld anywhere. See [docs/RASTER-LINES.md](docs/RASTER-LINES.md)
+    with no weld anywhere. The reference raster is drawn at 45° to the canvas,
+    where a slicer prints it, and the orientation is measured off the shipped
+    mesh rather than assumed (`npm run raster:angle`).
+    See [docs/RASTER-LINES.md](docs/RASTER-LINES.md)
 - **Delete painted** removes the geometry under the paint, rather than only
   excluding it from bakes. **Paint Selected**, click the face, then Delete:
   **Face** cuts that face out and leaves the rim open, **Face+seal** cuts it

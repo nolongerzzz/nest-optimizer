@@ -45,6 +45,7 @@ const F = require('./nso_raster_fixtures.js');
 const { readPNM } = require('./nso_pnm.js');
 const { writeSTL } = require('./nso_stl_io.js');
 const { interfaceContact, rotateZ, faceAreaAt } = require('./nso_contact_area.js');
+const ANG = require('./nso_line_angle.js');
 
 const ROOT = path.resolve(__dirname, '..');
 let fails = 0;
@@ -314,8 +315,8 @@ const REF = {};
 {
   const file = path.join(F.OUT, 'zigzag-layer.pbm');
   const img = readPNM(file);
-  check('the committed raster reads back as a ' + (F.SIZE * F.PPMM) + ' px square, 1 bit',
-    img.width === F.SIZE * F.PPMM && img.height === F.SIZE * F.PPMM && img.format === 'P4',
+  check('the committed raster reads back as a ' + (F.CANVAS * F.PPMM) + ' px square, 1 bit',
+    img.width === F.CANVAS * F.PPMM && img.height === F.CANVAS * F.PPMM && img.format === 'P4',
     img.format + ' ' + img.width + ' x ' + img.height);
   const L1 = RL.buildFromImage(img, { mmPerPixel: 1 / F.PPMM, simplify: 1.5 });
   REF.L1 = L1;
@@ -326,9 +327,19 @@ const REF = {};
   check('the section is tonight\'s measured line: ' + RL.LINE_WIDTH + ' mm wide, ' + RL.LINE_HEIGHT + ' mm tall',
     near(L1.width, 0.42, 0) && near(L1.height, 0.3, 0) && near(L1.extent[2], 0.3, 1e-7),
     L1.width + ' x ' + L1.height + ' mm asked, ' + f(L1.extent[2], 7) + ' mm measured in Z');
-  check('and the footprint is the ' + F.SIZE + ' mm patch the shipped sample is, to a line width',
-    near(L1.extent[0], F.SIZE - 2 * F.FIRST + RL.LINE_WIDTH, 0.15) && L1.extent[1] < F.SIZE + 1e-9,
-    L1.extent.map(x => f(x, 3)).join(' x ') + ' mm');
+  /* The pattern's own footprint is (LINES-1) x PITCH across the lines by
+     SIZE - 2 x INSET along them; turned 45 degrees, a W x H rectangle's
+     bounding box is (W + H) / sqrt(2) in BOTH axes, so the solid's bbox must
+     come out SQUARE however oblong the pattern is. That squareness is an angle
+     measurement in its own right - it holds at 45 and at no other angle - and
+     it is checked here before the histogram in part 5b confirms it directly. */
+  const PW = (F.LINES - 1) * F.PITCH + RL.LINE_WIDTH;
+  const PH = F.SIZE - 2 * F.INSET + RL.LINE_WIDTH;
+  const DIAG = (PW + PH) / Math.SQRT2;
+  check('the footprint is the ' + F.SIZE + ' mm pattern turned 45 deg: a SQUARE bbox of (W+H)/sqrt2',
+    near(L1.extent[0], L1.extent[1], 0.3) && near(L1.extent[0], DIAG, 0.5),
+    L1.extent.map(x => f(x, 3)).join(' x ') + ' mm, against ' + f(DIAG, 3) +
+    ' from a ' + f(PW, 2) + ' x ' + f(PH, 2) + ' mm pattern');
 
   const v = meshValidate(L1.tris, 'ref-layer1');
   check('the STL is watertight with no self-intersection: ' + summary(v), clean(v) && v.euler_characteristic === 2);
@@ -345,7 +356,7 @@ const REF = {};
     'threshold ' + RL.LINE_HEIGHT + ' mm, thin faces ' + g30.wall.thin_faces + ': ' + verdictOf(g30));
 
   /* ---- the interface: the same layer, turned 90 degrees, set down on it */
-  const L2 = rotateZ(L1.tris, 90, F.SIZE / 2, F.SIZE / 2, L1.height);
+  const L2 = rotateZ(L1.tris, 90, F.CANVAS / 2, F.CANVAS / 2, L1.height);
   const ct = interfaceContact(L1.tris, L2, { plane: L1.height });
   REF.ct = ct;
   const crossings = F.LINES * F.LINES;
@@ -361,20 +372,23 @@ const REF = {};
     'min ' + f(Math.min.apply(null, ct.patchAreas), 6) + ', max ' + f(Math.max.apply(null, ct.patchAreas), 6));
   check('the total is the ' + crossings + ' crossings and nothing else',
     near(ct.area, ideal, 1e-3), f(ct.area, 4) + ' vs ' + f(ideal, 4) + ' mm^2');
-  /* SPAN_TOL: a traced line is not perfectly axis-aligned - Douglas-Peucker
-     places its ends on skeleton pixels, so a 29 mm line can carry a tenth of a
-     degree of skew and a crossing patch's bounding box is then 0.2% wider than
-     the line. The AREA is exact regardless (asserted above); this is the box. */
+  /* A crossing patch is a w x w square, and at 45 degrees that square is itself
+     turned 45 degrees, so its AXIS-ALIGNED bounding box spans its diagonal,
+     w x sqrt(2). SPAN: a traced line carries a tenth of a degree of skew -
+     Douglas-Peucker places its ends on skeleton pixels - so the box is a
+     fraction over. The AREA is exact regardless (asserted above); this is the
+     box, and the sqrt(2) in it is the fourth place the 45 degrees shows up. */
   const SPAN_TOL = 1.005;
-  check('no patch is longer than one line width - there is no weld anywhere',
-    ct.maxPatchSpan <= RL.LINE_WIDTH * SPAN_TOL, f(ct.maxPatchSpan, 4) + ' mm vs ' +
-    f(RL.LINE_WIDTH, 2) + ' mm + 0.5%');
+  const SPAN = RL.LINE_WIDTH * Math.SQRT2;
+  check('no patch spans more than one crossing square\'s diagonal - there is no weld anywhere',
+    ct.maxPatchSpan <= SPAN * SPAN_TOL, f(ct.maxPatchSpan, 4) + ' mm vs w x sqrt2 = ' +
+    f(SPAN, 4) + ' + 0.5%');
   check('the interface is ' + f(2 * RL.LINE_HEIGHT, 2) + ' mm thick - two real layers, not more',
     near(L1.height * 2, 2 * RL.LINE_HEIGHT, 1e-9), f(L1.height * 2, 3) + ' mm');
 
   /* the controls the repo's other contact checks use: a gap, and an overlap */
-  const apart = rotateZ(L1.tris, 90, F.SIZE / 2, F.SIZE / 2, L1.height + 0.05);
-  const into = rotateZ(L1.tris, 90, F.SIZE / 2, F.SIZE / 2, L1.height - 0.05);
+  const apart = rotateZ(L1.tris, 90, F.CANVAS / 2, F.CANVAS / 2, L1.height + 0.05);
+  const into = rotateZ(L1.tris, 90, F.CANVAS / 2, F.CANVAS / 2, L1.height - 0.05);
   const vApart = meshValidate(concat(L1.tris, apart), 'ref-apart');
   const vTouch = meshValidate(concat(L1.tris, L2), 'ref-touch');
   const vInto = meshValidate(concat(L1.tris, into), 'ref-into');
@@ -399,7 +413,7 @@ const REF = {};
   check('the traced flat lines bond over ' + f(pct.area / ct.area, 2) + 'x LESS than the relief patch',
     pct.area / ct.area > 2.8, f(ct.area, 3) + ' vs ' + f(pct.area, 3) + ' mm^2');
   check('the relief patch welds continuously over 30 mm; the traced lines nowhere over one line width',
-    near(pct.maxPatchSpan, NSO_SkinPatch.SIZE, 1e-4) && ct.maxPatchSpan <= RL.LINE_WIDTH * 1.005,
+    near(pct.maxPatchSpan, NSO_SkinPatch.SIZE, 1e-4) && ct.maxPatchSpan <= SPAN * SPAN_TOL,
     f(pct.maxPatchSpan, 2) + ' mm vs ' + f(ct.maxPatchSpan, 4) + ' mm');
   check('and the interface is ' + f((patch.tipsZ + patch.extent[2]) / (2 * RL.LINE_HEIGHT), 2) + 'x thinner',
     near(patch.tipsZ + patch.extent[2], 2.04, 1e-6) && near(L1.height * 2, 0.6, 1e-9),
@@ -407,15 +421,47 @@ const REF = {};
 
   /* the widest measured line, through the same reference raster */
   const wide = RL.buildFromImage(img, { mmPerPixel: 1 / F.PPMM, simplify: 1.5, width: RL.LINE_WIDTH_MAX });
-  const wB = rotateZ(wide.tris, 90, F.SIZE / 2, F.SIZE / 2, wide.height);
+  const wB = rotateZ(wide.tris, 90, F.CANVAS / 2, F.CANVAS / 2, wide.height);
   const wct = interfaceContact(wide.tris, wB, { plane: wide.height });
   check('at the WIDEST measured line, ' + RL.LINE_WIDTH_MAX + ' mm, still ' + crossings +
     ' isolated crossings of exactly ' + f(RL.LINE_WIDTH_MAX * RL.LINE_WIDTH_MAX, 6) + ' mm^2',
     wct.patches === crossings && wct.patchAreas.every(a => near(a, RL.LINE_WIDTH_MAX * RL.LINE_WIDTH_MAX, 1e-5)) &&
-    wct.maxPatchSpan <= RL.LINE_WIDTH_MAX * 1.005,
+    wct.maxPatchSpan <= RL.LINE_WIDTH_MAX * Math.SQRT2 * 1.005,
     f(wct.area, 4) + ' mm^2, widest patch ' + f(wct.maxPatchSpan, 4) + ' mm');
   check('and it is STILL less contact than the relief patch at the narrow line',
     wct.area < pct.area, f(wct.area, 3) + ' vs ' + f(pct.area, 3) + ' mm^2');
+
+  /* ---- 5b: the ANGLE, which nothing measured until it was wrong.
+     A slicer prints an interface layer at 45 degrees to the part's axes. The
+     first committed reference here was drawn AXIS-ALIGNED and every number
+     above still held, because every one of them is angle-blind: the section,
+     the closure, the contact per crossing and the patch count are all
+     invariant under a rigid turn. So the orientation needs its own
+     measurement, and this is it - the histogram of the SHIPPED MESH's vertical
+     wall directions, weighted by length. Measured on the old fixture: 89 +/-1
+     deg held 94.03% and 45 +/-1 deg held 0.00%. */
+  const hw = ANG.wallHistogram(L1.tris);
+  const dom = ANG.dominantBand(hw, 1);
+  console.log('    the line angle, off the mesh: ' + ANG.describe(hw, 1));
+  check('the DOMINANT band is 45 +/-1 deg, not 90 - the whole point of this fixture',
+    dom.centre === F.ANGLE && dom.share > 0.9,
+    'dominant ' + dom.centre + ' +/-1 deg at ' + f(dom.share * 100, 2) + '%');
+  check('and the axis-aligned bands are EMPTY: 0 deg and 90 deg hold nothing at all',
+    ANG.bandShare(hw, 0, 1) < 1e-9 && ANG.bandShare(hw, 90, 1) < 1e-9,
+    '0 +/-1 ' + f(ANG.bandShare(hw, 0, 1) * 100, 2) + '%, 90 +/-1 ' +
+    f(ANG.bandShare(hw, 90, 1) * 100, 2) + '%');
+  check('the rest is the end turns, perpendicular to the lines by construction, at ' +
+    (F.ANGLE + 90) + ' deg',
+    ANG.bandShare(hw, F.ANGLE + 90, 3) > 0.9 - dom.share && ANG.bandShare(hw, F.ANGLE, 1) +
+      ANG.bandShare(hw, F.ANGLE + 90, 3) > 0.99,
+    f(ANG.bandShare(hw, F.ANGLE + 90, 3) * 100, 2) + '% at ' + (F.ANGLE + 90) +
+    ' +/-3 deg; the two families are ' +
+    f((ANG.bandShare(hw, F.ANGLE, 1) + ANG.bandShare(hw, F.ANGLE + 90, 3)) * 100, 2) + '% of the whole');
+  /* the mesh and the tracer must agree about what was drawn */
+  const hp = ANG.pathHistogram(F.zigzagPath());
+  check('the source raster\'s own paths are at ' + F.ANGLE + ' deg too - mesh and drawing agree',
+    ANG.dominantBand(hp, 1).centre === F.ANGLE,
+    'drawn ' + ANG.describe(hp, 1) + '; built ' + dom.centre + ' deg');
 }
 function concat(a, b) {
   const out = new Float32Array(a.length + b.length);
@@ -429,18 +475,31 @@ console.log('\n=== 6. the picture supplies the centreline, never the section ===
   const thin = RL.buildFromImage(readPNM(path.join(F.OUT, 'zigzag-layer.pbm')), { mmPerPixel: 1 / F.PPMM, simplify: 1.5 });
   const fat = RL.buildFromImage(readPNM(path.join(F.OUT, 'zigzag-layer-fat.pbm')), { mmPerPixel: 1 / F.PPMM, simplify: 1.5 });
   const aa = RL.buildFromImage(readPNM(path.join(F.OUT, 'zigzag-layer-aa.pgm')), { mmPerPixel: 1 / 10, simplify: 1.5 });
+  const all = [thin, fat, aa];
   check('a 0.25 mm stroke and a 0.65 mm stroke both come out as a ' + RL.LINE_WIDTH + ' mm line',
-    thin.ok && fat.ok && thin.width === RL.LINE_WIDTH && fat.width === RL.LINE_WIDTH &&
-    near(thin.extent[0], fat.extent[0], 1e-9) &&
-    near(thin.extent[0], (F.LINES - 1) * F.PITCH + RL.LINE_WIDTH, 1e-5),
-    'ink ' + thin.image.inkPixels + ' vs ' + fat.image.inkPixels + ' px (2.3x), both ' + f(thin.width, 2) +
-    ' mm wide; the run ACROSS the lines is ' + f(thin.extent[0], 3) + ' vs ' + f(fat.extent[0], 3) +
-    ' mm = 14 x ' + F.PITCH + ' + one line width');
-  check('and both trace to the same path: ' + thin.segments + ' segments either way',
-    thin.segments === fat.segments && thin.tris_count === fat.tris_count,
-    thin.segments + '/' + fat.segments + ' segments, ' + thin.tris_count + '/' + fat.tris_count + ' triangles');
-  check('an anti-aliased grayscale raster at HALF the resolution traces the same path too',
-    aa.ok && aa.segments === thin.segments && aa.tris_count === thin.tris_count && aa.mmPerPixel === 0.1,
+    thin.ok && fat.ok && thin.width === RL.LINE_WIDTH && fat.width === RL.LINE_WIDTH,
+    'ink ' + thin.image.inkPixels + ' vs ' + fat.image.inkPixels + ' px (' +
+    f(fat.image.inkPixels / thin.image.inkPixels, 1) + 'x), both ' + f(thin.width, 2) + ' mm wide');
+  /* The claim this fixture set exists to make is that the picture's stroke
+     width never reaches the SECTION, and the measurement of it is the traced
+     LINE LENGTH and the footprint - not the segment count, which the old
+     axis-aligned fixtures happened to make identical (29 either way) and the
+     45 degree ones do not. Zhang-Suen chamfers a diagonal corner more heavily
+     the fatter the stroke, so a fat diagonal boustrophedon keeps a few extra
+     corner vertices. Reported, because it is real, and gated on the numbers
+     that matter rather than on the one that was a coincidence. */
+  const lens = all.map(b => b.lineLength);
+  const spread = (Math.max.apply(null, lens) - Math.min.apply(null, lens)) / Math.min.apply(null, lens);
+  check('and all three trace the same LINE, to ' + f(spread * 100, 2) + '% of its length',
+    spread < 0.01,
+    lens.map(x => f(x, 2)).join(' / ') + ' mm of line from ' +
+    all.map(b => b.segments).join(' / ') + ' segments (the extra ones are thinning chamfers ' +
+    'at the corners, which a fatter diagonal stroke leaves more of)');
+  check('and the same footprint, to a third of a millimetre',
+    all.every(b => near(b.extent[0], thin.extent[0], 0.35) && near(b.extent[1], thin.extent[1], 0.35)),
+    all.map(b => b.extent.slice(0, 2).map(x => f(x, 2)).join('x')).join('  '));
+  check('an anti-aliased grayscale raster at HALF the resolution traces the same line too',
+    aa.ok && aa.width === RL.LINE_WIDTH && aa.mmPerPixel === 0.1,
     aa.segments + ' segments, ' + aa.tris_count + ' triangles at ' + aa.mmPerPixel + ' mm/px');
   /* the anti-aliased raster really is grey, and the threshold really reads it:
      the shaded fringe is about as many pixels again as the solid core */
@@ -449,8 +508,13 @@ console.log('\n=== 6. the picture supplies the centreline, never the section ===
   check('the threshold really is what reads the grey: ink rises with it, 1 < 128 < 254',
     ink(1) < ink(128) && ink(128) < ink(254),
     'threshold 1 -> ' + ink(1) + ', 128 -> ' + ink(128) + ', 254 -> ' + ink(254) + ' ink px');
-  check('and the fringe is real geometry, not a rounding artefact - it nearly doubles the ink',
-    ink(254) > ink(128) * 1.8, f(ink(254) / ink(128), 2) + 'x');
+  /* How MUCH the fringe adds is a property of the drawing, not of the tracer:
+     a 3 px diagonal stroke at 10 px/mm has a smaller core against its ramp than
+     the 5 px axis-aligned one did (1.91x then, 1.33x now). What matters is that
+     it is a real grey band and not one stray pixel, so the gate is on it being
+     a substantial fraction and the figure is printed rather than pinned. */
+  check('and the fringe is real geometry, not a rounding artefact - it adds a third again',
+    ink(254) > ink(128) * 1.2, f(ink(254) / ink(128), 2) + 'x');
   for (const b of [thin, fat, aa]) {
     const v = meshValidate(b.tris, 'stroke-' + b.image.w + '-' + b.image.inkPixels);
     check('  ' + b.image.w + ' px raster, ' + b.image.inkPixels + ' ink: watertight, no self-intersection',
@@ -474,6 +538,12 @@ console.log('\n=== 7. the crosshatch raster: crossings become junctions ===');
     ' = the ' + (F.LINES - 1) + ' x ' + (F.LINES - 1) + ' holes in the lattice',
     clean(v) && v.euler_characteristic === 2 - 2 * genus, summary(v));
   check('exactly ' + RL.LINE_HEIGHT + ' mm tall', near(v.bbox_size[2], RL.LINE_HEIGHT, 1e-7), f(v.bbox_size[2], 7));
+  const hx = ANG.wallHistogram(r.tris);
+  check('its TWO families are both diagonal - ' + F.ANGLE + ' and ' + (F.ANGLE + 90) +
+    ' deg - and 0/90 hold nothing',
+    ANG.bandShare(hx, F.ANGLE, 1) > 0.45 && ANG.bandShare(hx, F.ANGLE + 90, 1) > 0.45 &&
+    ANG.bandShare(hx, 0, 1) < 1e-9 && ANG.bandShare(hx, 90, 1) < 1e-9,
+    ANG.describe(hx, 1));
   const top = faceAreaAt(r.tris, [0, 0, 1], RL.LINE_HEIGHT, +1, 1e-6);
   check('volume == top area x height: a flat prism, no taper anywhere',
     near(v.signed_volume, top * RL.LINE_HEIGHT, 2e-3), f(v.signed_volume, 5) + ' vs ' + f(top * RL.LINE_HEIGHT, 5));
@@ -487,7 +557,7 @@ console.log('\n=== 8. the end turn is a rail, and where it sits is measured ==='
     const img = F.stroke(F.zigzagPath(inset), { strokePx: 5 });
     const r = RL.buildFromImage(img, { mmPerPixel: 1 / F.PPMM, simplify: 1.5 });
     if (!r.ok) { check('inset ' + inset + ' builds', false, r.reason); continue; }
-    const B = rotateZ(r.tris, 90, F.SIZE / 2, F.SIZE / 2, r.height);
+    const B = rotateZ(r.tris, 90, F.CANVAS / 2, F.CANVAS / 2, r.height);
     const ct = interfaceContact(r.tris, B, { plane: r.height });
     rows.push({ inset: inset, ct: ct });
     console.log('    inset ' + f(inset, 2) + ' mm -> contact ' + f(ct.area, 3) + ' mm^2 in ' + ct.patches +
@@ -504,14 +574,15 @@ console.log('\n=== 8. the end turn is a rail, and where it sits is measured ==='
   {
     const img = F.stroke(F.zigzagPath(0.5), { strokePx: 5 });
     const r = RL.buildFromImage(img, { mmPerPixel: 1 / F.PPMM, simplify: 1.5, width: RL.LINE_WIDTH_MAX });
-    const B = rotateZ(r.tris, 90, F.SIZE / 2, F.SIZE / 2, r.height);
+    const B = rotateZ(r.tris, 90, F.CANVAS / 2, F.CANVAS / 2, r.height);
     const c2 = interfaceContact(r.tris, B, { plane: r.height });
     check('  ... and NOT clean at ' + RL.LINE_WIDTH_MAX + ' mm, because 0.5 < 0.61',
       c2.patches < F.LINES * F.LINES && c2.maxPatchSpan > 2,
       c2.patches + ' patches, widest ' + f(c2.maxPatchSpan, 3) + ' mm, ' + f(c2.area, 3) + ' mm^2');
   }
   check('inset ' + F.INSET + ' - the committed one - clears the WIDEST measured line and is clean at both',
-    good && good.ct.patches === F.LINES * F.LINES && good.ct.maxPatchSpan <= RL.LINE_WIDTH * 1.005,
+    good && good.ct.patches === F.LINES * F.LINES &&
+      good.ct.maxPatchSpan <= RL.LINE_WIDTH * Math.SQRT2 * 1.005,
     good ? good.ct.patches + ' patches, widest ' + f(good.ct.maxPatchSpan, 4) + ' mm' : 'missing');
   check('the finding, stated as a rule: the turn must clear one line width of the layer above\'s outer line',
     F.FIRST - F.INSET > RL.LINE_WIDTH_MAX,
