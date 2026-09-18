@@ -11,8 +11,17 @@
     "grid:wire": "node tools/nso_wire_grid_test.js",
     "measure": "node tools/nso_measure_test.js",
     "wire:scale": "node tools/nso_wire_scale_test.js",
-    "test": "sh tools/cth-test/run-all.sh && node tools/cth-test/capture-check.mjs && node tools/nso_selfint_equiv_test.js && node tools/nso_surface_grid_test.js && node tools/nso_wire_grid_test.js && node tools/nso_measure_test.js && node tools/nso_wire_scale_test.js"
+    "test": "node tools/run-tests.mjs"
   },
+  "testSteps": [
+    "cth:unit",
+    "cth:capture",
+    "selfint:equiv",
+    "grid:math",
+    "grid:wire",
+    "measure",
+    "wire:scale"
+  ],
   "devDependencies": {
     "playwright": "1.56.1",
     "three": "0.147.0"
