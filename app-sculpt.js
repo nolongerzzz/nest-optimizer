@@ -607,6 +607,25 @@ function NSO_sculptCommitRaw(m, working, undoType, statusText) {
     placedEntry.width = m.size.x;
     placedEntry.depth = m.size.z;
     placedEntry.height = m.size.y;
+
+    /* A bake replaces the GEOMETRY. It does not move the piece, so the pose
+       the adjust buttons recorded on the placed entry - rotY, tipX/tiltX,
+       flipX, tipZ/tiltZ, liftY - still stands, and the fresh mesh above is
+       built at identity. Left there the two disagree silently: the viewport
+       draws the piece unrotated while buildCombinedGeometry() and the 3MF
+       writer keep reading the record, so the file comes out posed and the
+       screen does not. Nothing says so until a piece is posed, baked, and
+       exported in that order, which is why it stayed invisible.
+
+       applyMeshRotation is the one definition of that record -> mesh
+       mapping, and it re-measures width/depth/height off the POSED box,
+       which the three lines above can only do for an unposed piece. Only
+       called when there IS a pose to put back: an unposed piece keeps the
+       exact placement this has always given it. */
+    var posed = !!(placedEntry.rotY || placedEntry.tipX || placedEntry.tiltX ||
+                   placedEntry.flipX || placedEntry.tipZ || placedEntry.tiltZ ||
+                   placedEntry.liftY);
+    if (posed && typeof applyMeshRotation === 'function') applyMeshRotation(placedEntry);
   }
 
   if (typeof updateEditSize === 'function') updateEditSize();

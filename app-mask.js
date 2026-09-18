@@ -535,6 +535,54 @@
       btn.textContent = on ? LABELS[mode].live : LABELS[mode].idle;
     });
   }
+  /* One picking mode at a time, the same contract app-measure.js states and
+     app-brush.js, app-center-lock.js and app-seat-surface.js all keep. Paint
+     is asked FIRST in app-core's pointerdown routing - ahead of Carve, Seat
+     here, the brush and Measure - so anything still armed when paint goes
+     live is not merely second in line, it never fires again: paint takes
+     every click that lands on a piece and the other button stays lit and
+     dead. This used to name only the three flag-only modes, which left those
+     four tools exactly there.
+
+     The ones with a button go off THROUGH the button, so aria-pressed and
+     the armed class follow; a flag written behind a button's back leaves it
+     lit and doing nothing. None of those four runs a disarm on its way OUT,
+     so clicking them here cannot bounce back and toggle paint off again.
+     Order follows app-core's routing order, for no reason but that it is the
+     order a reader can check this list against.
+
+     Paint itself is not in the list. Switching between Paint Excluded and
+     Paint Selected is a mode change, not a conflict, and clicking the other
+     paint button would only switch modes again. state.centerLockArmed stays
+     a flag write on purpose: btn-center-lock-pick refuses to cancel once the
+     Join pair it needs is gone, so the button is the less reliable way in. */
+  function disarmOthers() {
+    const el = (id) => document.getElementById(id);
+    if (state.carveArmed) {
+      const carveBtn = el('btn-carve');
+      if (carveBtn) carveBtn.click();
+      else state.carveArmed = false;
+    }
+    if (state.seatHereArmed) {
+      const seatBtn = el('btn-seat-here');
+      if (seatBtn) seatBtn.click();
+      else state.seatHereArmed = false;
+    }
+    if (typeof window.nsoBrushArmed === 'function' && window.nsoBrushArmed()) {
+      const brushBtn = el('btn-brush');
+      if (brushBtn) brushBtn.click();
+      else if (typeof window.nsoBrushSetArmed === 'function') window.nsoBrushSetArmed(false);
+    }
+    if (state.measureOn) {
+      const measureBtn = el('btn-measure');
+      if (measureBtn) measureBtn.click();
+      else state.measureOn = false;
+    }
+    state.softenArmed = false;
+    state.capArmed = false;
+    state.centerLockArmed = false;
+  }
+
   function enterPaint(mode) {
     const m = activeModel();
     if (!m || !m.rawTris) {
@@ -542,9 +590,7 @@
       return;
     }
     state.maskPaint = mode;
-    state.softenArmed = false;
-    state.capArmed = false;
-    state.centerLockArmed = false;
+    disarmOthers();
     if (typeof clearFacePick === 'function') clearFacePick();
     repaint();
     setLabel();
