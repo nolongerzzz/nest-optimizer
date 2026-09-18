@@ -1593,11 +1593,39 @@ a second layer (composed would drop in; a free layer needs `freeLayerShell`
 rewritten as a cylindrical shell), a cone or a torus, and several bands on one
 piece - `findBand` reads the whole soup as one cylinder by design.
 
-**Not done: a browser drive check.** Every other wired feature has one
-(`npm run skin:drive`, `wire:smooth`, ...). This ticket's suite proves the
-engine and the reachability of the controls by reading `index.html`, but it
-does not click the button in Chromium. That is the next scoped pass, and it
-is the one thing between this and the bar the other wired bakes are held to.
+**Drive check** (`npm run texture:drive`, `tools/nso_texture_drive_check.js`,
+in `npm test`): the same standard as `skin:wrap-drive`. The cylinder fixture
+through the browser's own file input, the piece picked by clicking its list
+row, then - Texture -> `Textured the curved side - crosshatch lattice ... 52
+repeats around at 1.208 mm arc pitch, tips +0.60mm (pitch snapped 1.20 →
+1.208mm so the wrap closes), contact 1058.3mm² on the curve (998.4mm²
+unrolled), 30912 tris - caps untouched`, the scene 21.2 across where it was 20
+and still 30 long. Export plate (STL) -> the browser's download through
+`mesh_validate.py`: one edge-connected shell, 0 open, 0 non-manifold, 0 odd, 0
+inconsistent winding, Euler 2, 0 piercing, 0 coplanar, 0 degenerate, 30,912
+triangles, bbox 21.2 x 21.2 x 30 with the axial extent bit for bit what it was
+before the bake.
+
+**The engine suite's headline numbers are then re-measured on those downloaded
+bytes**, against a band fitted to the plain cylinder exported from the same
+session - so they are taken in the exported frame, not the builder's. Every one
+of 54,720 tips stands **0.6 mm off the ORIGINAL curved surface to 4.5e-7 mm**;
+max radius 10.60000 where a single-normal lift would read 20.6; the floor
+between the ribs is still 9.98798, the prism's own apothem; and the contact
+measures **1057.8826 mm²**, the engine suite's number to the fourth decimal.
+That is the gate that says the button bakes and exports what the engine
+proves, rather than something that merely looks similar.
+
+Also driven: Undo -> 256 triangles and `Undo: Texture reverted`. A painted
+SIDE facet (set with the app's own paint primitive - there is no button for a
+face click, and the step is labelled as such) -> `Texture stood down - 1
+painted facet(s) ...`, piece untouched at 256 triangles. A painted CAP instead
+-> it textures anyway, with the paint still on the piece, which is the
+sub-region rule driven through the shipped button rather than asserted in a
+unit test. zigzag -> 1,900 triangles and one closed shell on export. The prism
+fixture -> `Texture refused - ... an 8-sided prism, not a cylinder ... which
+Skin wrap already covers one face at a time`, 32 triangles untouched. No page
+errors. `APP_URL=<site>` points the same check at a deployment.
 
 ## A skin pattern as its own printable object - the patch (2026-09-17)
 `nso_skin.js` (two additive exports, `planeFrame` and `patternPlan`, plus the

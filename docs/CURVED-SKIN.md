@@ -6,7 +6,9 @@
 its numbers), `app-core.js` (one undo label),
 `tools/nso_texture_fixtures.js` + `fixtures/cylinder_r10h30_s64.stl`,
 `fixtures/cylinder_r6h12_s96.stl`, `fixtures/prism_r10h30_s8.stl`.
-Check: `npm run texture:test` (`tools/nso_texture_test.js`), in `npm test`.
+Checks: `npm run texture:test` (`tools/nso_texture_test.js`, the engine) and
+`npm run texture:drive` (`tools/nso_texture_drive_check.js`, the button in real
+Chromium), both in `npm test`.
 
 This is the ticket `docs/HANDOFF.md` parked as **"the OTHER wrap: a skin on a
 curved face"**, built to the shape that audit laid out. Read that section
@@ -259,6 +261,40 @@ the UI on purpose:
 
 The suite gates that `#chk-full-wrap` is still there and still says "Full
 wrap", and that nothing in the UI calls Texture a wrap.
+
+## 8b. The button, driven in real Chromium
+
+`npm run texture:drive` (`tools/nso_texture_drive_check.js`), the same standard
+as `skin:wrap-drive`: every step is a click on the shipped UI and the file
+judged is the one the **browser downloaded**.
+
+The engine suite (§1–§8) proves the geometry. This one proves the wiring — and
+it does it by re-measuring the engine suite's own headline numbers on the
+downloaded bytes, against a band fitted to the plain cylinder exported from the
+same session, so the measurements are taken in the exported frame rather than
+the builder's:
+
+| on the browser download | measured |
+|---|---|
+| closure | one edge-connected shell, 0 open / 0 non-manifold / 0 odd / 0 winding, Euler 2, 0 piercing, 0 coplanar, 0 degenerate |
+| triangles | 30,912 — the engine suite's count |
+| bbox | 21.2 × 21.2 × 30, axial extent bit for bit what it was before the bake |
+| every tip off the original surface | **0.6 mm to 4.5e-7 mm**, over 54,720 tips |
+| max radius | 10.60000 (a single-normal lift would read 20.6) |
+| floor between the ribs | 9.98798 — still the prism's apothem |
+| **contact** | **1057.8826 mm²** — the engine suite's number to the fourth decimal |
+
+Also driven: the status line (both contact numbers, the curved one first, and
+the pitch snap declared); Undo → 256 triangles and `Undo: Texture reverted`; a
+painted **side facet** → stands down and names the count, piece untouched; a
+painted **cap** → textures anyway with the paint still on the piece, which is
+§7's sub-region rule driven through the shipped button rather than asserted;
+zigzag → 1,900 triangles, one closed shell on export; the prism fixture →
+refused, naming Skin wrap, 32 triangles untouched. No page errors.
+
+The two steps that are not clicks are the paints: there is no button for a face
+click, so the check calls the app's own paint primitive and is labelled as
+such, the same way the Skin and Skin-wrap drive checks do it.
 
 ## 9. Out of scope, deliberately
 
