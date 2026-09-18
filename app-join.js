@@ -1915,6 +1915,31 @@ function NSO_restoreRaisedBit(placedB, before) {
   placedB.mesh.updateMatrixWorld(true);
 }
 
+/* Seat flush's proud value. One constant so the seat, the status line and the
+   record the scene block reads cannot say three different numbers. */
+const SEAT_FLUSH_PROUD = 0.01;
+
+/* What a Seat leaves behind on the piece it moved.
+
+   Neither seat could be read back before this: the gap lived on the slider and
+   the result lived in the pose. The record is what the 3MF scene block writes
+   (nso-3mf-scene.js) so a reopened plate says which gap a pair was seated at
+   instead of only where the two pieces happen to sit. It is descriptive - the
+   pose is still the truth, and nothing re-seats from it. Cleared by a fresh
+   seat, which overwrites it. */
+function NSO_recordSeat(placedB, placedA, info) {
+  if (!placedB || !info || !isFinite(Number(info.gap))) return;
+  placedB.seat = {
+    gap: Number(info.gap),
+    kind: info.kind === 'flush' ? 'flush' : 'support',
+    partnerName: (placedA && placedA.name) ? placedA.name : '',
+    partnerIndex: (typeof state !== 'undefined' && state.placed) ? state.placed.indexOf(placedA) : null,
+    measured: isFinite(Number(info.measured)) ? Number(info.measured) : null,
+    residual: isFinite(Number(info.residual)) ? Number(info.residual) : null,
+    reference: info.reference === 'tips' ? 'tips' : 'face'
+  };
+}
+
 function seatFlushBitToHull() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
@@ -1933,7 +1958,7 @@ function seatFlushBitToHull() {
   // slider - that belongs to Seat (support).
   pushUndo(snapshotPlacedPose(state.placed.indexOf(placedB)));
   const raised = NSO_raiseBuriedBitClear(placedA, placedB);
-  const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { proud: 0.01 });
+  const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { proud: SEAT_FLUSH_PROUD });
   if (!res || !res.ok) {
     NSO_restoreRaisedBit(placedB, raised);
     setStatus('Seat failed - ' + ((res && res.reason) || 'pieces unchanged'), true);
@@ -1945,7 +1970,10 @@ function seatFlushBitToHull() {
   placedB.liftY = Math.max(0, placedB.mesh.position.y - baseY);
   applyPlacedXZ(placedB, placedB.x, placedB.z);
   var resid = (res.maxResidual != null && isFinite(res.maxResidual)) ? res.maxResidual : 0;
-  setStatus('Seated - proud 0.01mm, skin error ' + resid.toFixed(2) + 'mm - Subtract');
+  NSO_recordSeat(placedB, placedA, {
+    gap: SEAT_FLUSH_PROUD, kind: 'flush', measured: null, residual: resid, reference: res.reference
+  });
+  setStatus('Seated - proud ' + SEAT_FLUSH_PROUD + 'mm, skin error ' + resid.toFixed(2) + 'mm - Subtract');
 }
 
 /* Seat (support): B's mating face at the gap the slider shows, coupon sign
@@ -2045,6 +2073,9 @@ function seatBitAtGap(placedA, placedB, gap) {
 
   const resid = (res.maxResidual != null && isFinite(res.maxResidual)) ? res.maxResidual : 0;
   const got = isFinite(res.gapAchieved) ? res.gapAchieved : gap;
+  NSO_recordSeat(placedB, placedA, {
+    gap: gap, kind: 'support', measured: got, residual: resid, reference: res.reference
+  });
   let what;
   if (gap < 0) what = 'air gap ' + Math.abs(gap).toFixed(2) + 'mm';
   else if (gap > 0) what = 'overlap ' + gap.toFixed(2) + 'mm';

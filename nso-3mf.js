@@ -12,11 +12,15 @@
  *   Metadata/project_settings.config   <- the baked cooling settings
  *   Metadata/model_settings.config     Bambu object/plate names
  *   Metadata/nso_profile.json          NSO provenance (see note below)
+ *   Metadata/nso_scene.json            NSO scene state, when a scene is given
  *
  * Note on provenance: NSO's own bookkeeping deliberately lives in a separate
  * part, NOT as extra keys inside project_settings.config. Bambu Studio warns on
  * keys it does not recognise, so project_settings.config contains the confirmed
- * cooling keys and nothing else.
+ * cooling keys and nothing else. Metadata/nso_scene.json - the whole working
+ * plate, written only when the caller passes one - sits alongside for the same
+ * reason; nso-3mf-scene.js owns its schema and this writer only stores the
+ * bytes it is handed.
  *
  * No third-party dependencies -- the ZIP writer is below. Runs in the browser
  * and in Node (both have CompressionStream), so the round-trip validator
@@ -293,12 +297,16 @@
   var PART_MODEL = '3D/3dmodel.model';
   var PART_MODEL_SETTINGS = 'Metadata/model_settings.config';
   var PART_NSO_PROFILE = 'Metadata/nso_profile.json';
+  var PART_NSO_SCENE = 'Metadata/nso_scene.json';
 
   /**
    * @param {object} opts
    * @param {{name:string, vertices:number[], triangles:number[]}[]} opts.objects
    * @param {string} [opts.profileId]   cooling profile to bake in
    * @param {string} [opts.plateName]
+   * @param {string} [opts.sceneJson]   serialized NSO scene block; written as
+   *        Metadata/nso_scene.json when given, omitted entirely when not, so
+   *        an export without one is byte-identical to what this wrote before
    * @returns {Promise<{bytes:Uint8Array, profileId:string, values:object, settingsText:string}>}
    */
   function build3MF(opts) {
@@ -333,12 +341,20 @@
       { name: PART_NSO_PROFILE, data: utf8(provenance) }
     ];
 
+    // The scene block is optional and opaque here: nso-3mf-scene.js validated
+    // it on the way in. A caller that has no scene gets exactly the archive
+    // this writer produced before the block existed.
+    if (opts.sceneJson != null && String(opts.sceneJson).length) {
+      entries.push({ name: PART_NSO_SCENE, data: utf8(String(opts.sceneJson)) });
+    }
+
     return buildZip(entries).then(function (bytes) {
       return {
         bytes: bytes,
         profileId: profileId,
         values: values,
-        settingsText: settingsText
+        settingsText: settingsText,
+        scene: (opts.sceneJson != null && String(opts.sceneJson).length) ? true : false
       };
     });
   }
@@ -380,6 +396,7 @@
     PART_PROJECT_SETTINGS: PART_PROJECT_SETTINGS,
     PART_MODEL: PART_MODEL,
     PART_MODEL_SETTINGS: PART_MODEL_SETTINGS,
-    PART_NSO_PROFILE: PART_NSO_PROFILE
+    PART_NSO_PROFILE: PART_NSO_PROFILE,
+    PART_NSO_SCENE: PART_NSO_SCENE
   };
 });
