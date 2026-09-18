@@ -25,6 +25,12 @@
  * a flat plate covering everything, and wrong when B is itself a patterned
  * piece whose underside is mostly air.
  *
+ * THE FIX FOR EACH IS NAMED IN PART 4 AND BUILT IN PART 5: nso_raster_lines.js
+ * gives the zigzag its flat section, and nso_crosshatch.js gives the crosshatch
+ * its one-direction path. Part 5 measures the crosshatch's, at the shipped
+ * pattern's own pitch and rib and with this same instrument, so the before and
+ * the after are one table.
+ *
  * THE NUMBERS ARE THE TICKET'S, NOT INVENTED HERE. LINE_H 0.3 mm and
  * LINE_W 0.42 / 0.61 mm are tonight's measured Bambu values, carried in
  * nso_raster_lines.js as its defaults; 0.42 is also this repo's own
@@ -37,6 +43,7 @@
 const NSO_Skin = require('../nso_skin.js');
 const NSO_SkinPatch = require('../nso_skin_patch.js');
 const RL = require('../nso_raster_lines.js');
+const NSO_Crosshatch = require('../nso_crosshatch.js');
 const { interfaceContact, rotateZ, bbox } = require('./nso_contact_area.js');
 
 let fails = 0;
@@ -272,6 +279,34 @@ console.log('\n=== 4. the verdict ===');
     near(shipped.crosshatch.patch.minWall, 0.42, 1e-9) &&
     near(shipped.crosshatch.patch.tipWall, 0.42, 1e-9),
     'wall ' + shipped.crosshatch.patch.minWall + ' -> tip ' + shipped.crosshatch.patch.tipWall + ' mm');
+}
+
+/* ------------------------------------------------------------------ part 5 */
+console.log('\n=== 5. the crosshatch\'s one-direction path, built ===');
+console.log('  nso_crosshatch.js takes the verdict above literally: one direction per layer, two');
+console.log('  layers, the second crossing the first. Same pitch, same rib, same footprint, same');
+console.log('  instrument - so this line and the one above differ in the CONSTRUCTION alone.');
+{
+  const fixed = NSO_Crosshatch.build({ W: SIZE, D: SIZE });
+  if (!fixed.ok) throw new Error('nso_crosshatch: ' + fixed.reason);
+  const ct = interfaceContact(fixed.layers[0].tris, fixed.layers[1].tris, { plane: fixed.interfaceZ });
+  const bad = shipped.crosshatch.contact;
+  console.log('    ribs both ways, ONE layer   ' + f(bad.area, 3).padStart(8) + ' mm^2 in ' +
+    String(bad.patches).padStart(3) + ' patch, widest ' + f(bad.maxPatchSpan, 2) + ' mm');
+  console.log('    one direction, TWO layers   ' + f(ct.area, 3).padStart(8) + ' mm^2 in ' +
+    String(ct.patches).padStart(3) + ' patches, widest ' + f(ct.maxPatchSpan, 4) + ' mm');
+  check('the fix is the same pattern at the same numbers - pitch, rib and height all unmoved',
+    fixed.pitch === NSO_Skin.PATTERNS.crosshatch.defaults.pitch &&
+    fixed.width === NSO_Skin.PATTERNS.crosshatch.defaults.rib,
+    'pitch ' + fixed.pitch + ', line ' + fixed.width + ' x ' + fixed.height + ' mm');
+  check('and the weld is gone: ' + ct.patches + ' isolated crossings of ' + f(FLAT_CROSS, 6) +
+    ' mm^2, none wider than one line\'s diagonal',
+    ct.patches === fixed.crossings && ct.patchAreas.every(a => near(a, FLAT_CROSS, 1e-5)) &&
+    ct.maxPatchSpan <= LINE_W * Math.SQRT2 * 1.005,
+    f(ct.area, 3) + ' mm^2 total, widest patch ' + f(ct.maxPatchSpan, 4) + ' mm');
+  check('the guard refuses the bidirectional layer by name, so it cannot come back quietly',
+    typeof NSO_Crosshatch.oneDirection(require('./nso_raster_fixtures.js').crosshatchPath()) === 'string',
+    'tools/nso_crosshatch_test.js part 2 measures it - 50 / 50 by line length');
 }
 
 console.log('\n' + (fails ? fails + ' CHECK(S) FAILED' : 'all checks held') + '\n');
