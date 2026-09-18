@@ -53,6 +53,8 @@ const ROSTER = [
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Scale stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Texture',        file: 'app-texture.js',         scope: 'SUB-REGION',
     test: /nsoMaskIsExcludedRaw\s*\(\s*m\s*,\s*face\.n\s*,\s*face\.d/, standDown: /Texture stood down - ' \+ \w+ \+ ' painted facet\(s\)/ },
+  { feature: 'Seat here',      file: 'app-seat-surface.js',    scope: 'WHOLE-PIECE',
+    test: /nsoMaskCount\s*\(\s*modelB\s*\)/,                standDown: /Seat here stood down - ' \+ \w+ \+ ' painted face\(s\) on B/ },
 ];
 
 console.log('== every paint-aware feature declares its scope in its own source ==');

@@ -722,6 +722,11 @@
       if (clockBtn) clockBtn.click();
       else state.centerLockArmed = false;
     }
+    if (state.seatHereArmed) {
+      var seatBtn = el('btn-seat-here');
+      if (seatBtn) seatBtn.click();
+      else state.seatHereArmed = false;
+    }
     state.softenArmed = false;
     state.capArmed = false;
     if (typeof clearFacePick === 'function') clearFacePick();

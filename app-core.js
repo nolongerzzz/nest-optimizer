@@ -139,7 +139,8 @@ const UNDO_REPLACE_LABEL = {
   textureReplace: 'Undo: Texture reverted',
   carveReplace: 'Undo: Carve reverted',
   scaleReplace: 'Undo: Scale reverted',
-  deleteReplace: 'Undo: Delete reverted'
+  deleteReplace: 'Undo: Delete reverted',
+  seatSurfaceReplace: 'Undo: Seat here reverted'
 };
 
 function undoLast() {
@@ -426,6 +427,25 @@ function undoLast() {
        after the placed instance is re-seated, and it lands on the geometry the
        clicks were made against. */
     if (typeof nsoMaskRepaint === 'function') nsoMaskRepaint();
+    /* An op that moved the piece as well as reshaping it puts the pose back
+       here, in the SAME entry, so it is still one Undo per op. Seat here is
+       the first: it bakes a free rotation into the soup (the pose model
+       cannot hold one - see app-seat-surface.js) and then re-fits x / z /
+       liftY to it, so restoring the geometry alone would leave the piece
+       in the seated position with its old shape. */
+    if (entry.prevPose && placedEntry) {
+      placedEntry.x = entry.prevPose.x; placedEntry.z = entry.prevPose.z;
+      placedEntry.rotY = entry.prevPose.rotY || 0;
+      placedEntry.flipX = !!entry.prevPose.flipX;
+      placedEntry.tipX = entry.prevPose.tipX || 0;
+      placedEntry.tipZ = entry.prevPose.tipZ || 0;
+      placedEntry.liftY = entry.prevPose.liftY || 0;
+      placedEntry.tiltX = entry.prevPose.tiltX || 0;
+      placedEntry.tiltZ = entry.prevPose.tiltZ || 0;
+      applyMeshRotation(placedEntry);
+      if (typeof refreshOutline === 'function') refreshOutline(placedEntry);
+      applyPlacedXZ(placedEntry, placedEntry.x, placedEntry.z);
+    }
     updateEditSize();
     renderModelList();
     updateUndoBtn();
@@ -2231,6 +2251,16 @@ function onCanvasPointerDown(event) {
      start a move drag under the carve and report "Moved model #N" over its
      status. app-carve.js decides, where its own hit test lives. */
   if (typeof window.nsoCarveTakesClick === 'function' && window.nsoCarveTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* Seat here owns a click that lands on a piece, on the same terms as paint
+     and carve: app-seat-surface.js decides, where its own hit test lives, and
+     a fall-through would start a move drag under the seat. Asked after carve
+     and before measure because it bakes, and a measurement must never
+     swallow a click a baking tool would have taken. */
+  if (typeof window.nsoSeatHereTakesClick === 'function' && window.nsoSeatHereTakesClick(event)) {
     setOrbitFromPlate(false);
     return;
   }
