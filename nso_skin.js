@@ -49,6 +49,21 @@
                0.6 tall (three 0.2 layers). NOTE: the physical reference
                (v8_FINAL's printed interface) is not in this repo as geometry,
                so these are stated defaults, every one a parameter.
+               RIBS BOTH WAYS IN ONE LAYER IS A RELIEF, NOT A PRINTED
+               LAYER, and the difference only shows when something is STACKED
+               on it. Here it is right: the mating piece is a flat plate, so
+               the tip area IS the contact and tipContactArea measures it. Set
+               a second PATTERNED layer on it and it is wrong - a 90 degree
+               copy's underside is the same lattice as the tips beneath it, so
+               the two coincide instead of crossing and 519.750 mm^2, every
+               square millimetre of tip, welds in a SINGLE patch; no other
+               crossing angle rescues it either (measured,
+               tools/nso_raster_line_audit.js parts 4-5). For a two-layer
+               breakaway interface use nso_crosshatch.js, which builds this
+               same pattern at this same pitch and rib the way a printer does -
+               one direction per layer, two layers, the second crossing the
+               first: 110.2500 mm^2 in 625 isolated crossings.
+               docs/CROSSHATCH.md.
    crosshatch-fine
                the same lattice at 0.84 pitch instead of 1.2 - a PRESET, not a
                second builder (see `family` at PATTERNS). 1.43x the ribs per

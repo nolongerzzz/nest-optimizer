@@ -130,6 +130,20 @@ Smart build-plate packing for 3D printing.
     where a slicer prints it, and the orientation is measured off the shipped
     mesh rather than assumed (`npm run raster:angle`).
     See [docs/RASTER-LINES.md](docs/RASTER-LINES.md)
+  - **The crosshatch, as two one-direction layers** (a module, not a button yet).
+    The relief above is a lattice that runs ribs *both* ways in one layer, which
+    is right against a flat mating face and wrong when it is stacked: turn a
+    copy 90° across it and the upper copy's underside is the same lattice as
+    the tips beneath it, so **519.75 mm² - the entire tip area - welds in one
+    patch**, and no other angle fixes it either (the best is still
+    248 mm² in patches millimetres long). `nso_crosshatch.js` builds the same
+    pattern the way a printer does - one direction per layer, two layers, the
+    second crossing the first - at the same 1.2 mm pitch and 0.42 mm rib:
+    **110.25 mm² in 625 isolated crossings**, every one exactly 0.1764 mm², none
+    wider than one line's diagonal. Resizing it **re-tiles** rather than scales:
+    whole repeats are added or removed and the pitch, the rib and the channel
+    stay bit-identical, so every line the smaller pattern had is in the same
+    place in the larger one. See [docs/CROSSHATCH.md](docs/CROSSHATCH.md)
 - **Delete painted** removes the geometry under the paint, rather than only
   excluding it from bakes. **Paint Selected**, click the face, then Delete:
   **Face** cuts that face out and leaves the rim open, **Face+seal** cuts it

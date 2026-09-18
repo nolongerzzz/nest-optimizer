@@ -65,3 +65,28 @@ zigzag variants trace within 0.8% of the same 469 mm of line — not the same
 triangle count any more, which was an axis-aligned artefact: Zhang–Suen chamfers
 a diagonal corner more heavily the fatter the stroke. `crosshatch.stl` is Euler
 −390 = genus 196 = the 14 × 14 holes in the lattice. See `docs/RASTER-LINES.md`.
+
+`crosshatch.pbm` is a picture of a *finished* interface seen from above, and it
+is a **tracer** fixture, not a printable layer: a layer with lines both ways
+cannot be crossed by the layer above it. What a printable crosshatch layer looks
+like is in `crosshatch/` below.
+
+## crosshatch/ — the crosshatch as two one-direction layers (2026-09-18)
+
+Four STLs and `crosshatch.json`, regenerated and byte-diffed by
+`npm run crosshatch:fixtures` (`tools/nso_crosshatch_fixtures.js`). Built by
+`nso_crosshatch.js` at the shipped crosshatch relief's **own** numbers — 1.2 mm
+pitch, a 0.42 mm line, 0.3 mm per layer — so these and the shipped loose patch
+the audit measures are the same pattern differing in the construction alone.
+
+| file | what it is |
+|------|------------|
+| `layer1.stl` / `layer2.stl` | one printed layer on its own: a boustrophedon at 45° / 135°, 972 tris, closed, Euler 2, 0 piercing |
+| `interface.stl` | the two of them, layer 2 set down on layer 1 — 1944 tris, two shells touching at z = 0.3, Euler 4 |
+| `interface-45.stl` | **the re-tile**: a 45 mm target instead of 30. Same pitch, same line, same channel, 37 repeats instead of 25, and the first 25 line centres identical bit for bit |
+
+The number they exist to hold: **110.2500 mm² of contact in 625 isolated patches,
+every one exactly 0.176400 mm², none spanning more than one line width's
+diagonal** — against the bidirectional lattice's 519.750 mm² in a single patch
+across the whole footprint. `crosshatch.json` records both sizes' contact,
+per-layer angle histograms and line centres. See `docs/CROSSHATCH.md`.

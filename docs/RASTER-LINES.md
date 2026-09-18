@@ -7,7 +7,9 @@ thin, watertight solid** whose section is a real printed line's: 0.3 mm tall,
 - module: `nso_raster_lines.js` (classic script → `window.NSO_RasterLines`, and
   a Node module)
 - command line: `node tools/nso_raster_lines_cli.js IN.pbm OUT.stl [options]`
-- audit: `npm run raster:audit` (`tools/nso_raster_line_audit.js`, 21 checks)
+- audit: `npm run raster:audit` (`tools/nso_raster_line_audit.js`, 24 checks —
+  the diagnosis in parts 1-4, and the crosshatch's fix measured beside it in
+  part 5)
 - line angle: `npm run raster:angle` (`tools/nso_line_angle.js`) — the
   orientation histogram, off the shipped mesh
 - checks: `npm run raster:test` (`tools/nso_raster_lines_test.js`, 134 checks)
@@ -48,6 +50,13 @@ runs lines in one direction and gets its crossing from the next layer. So the
 crosshatch needs a one-direction path and the zigzag needs a flat section — and
 a raster of a real toolpath supplies the first while two numbers supply the
 second.
+
+That one-direction path is now built, on this module's own `extrudeFlat`:
+`nso_crosshatch.js`, **110.2500 mm² in 625 isolated crossings** at the same pitch
+and the same rib, against the lattice's 519.750 in one weld. Part 5 of the audit
+measures the two side by side, and [docs/CROSSHATCH.md](CROSSHATCH.md) carries the
+rest — including why *no* crossing angle rescues a bidirectional layer, and why
+its footprint is **re-tiled** rather than scaled.
 
 ## The measured line
 
