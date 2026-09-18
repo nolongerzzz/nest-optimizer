@@ -8,7 +8,9 @@ thin, watertight solid** whose section is a real printed line's: 0.3 mm tall,
   a Node module)
 - command line: `node tools/nso_raster_lines_cli.js IN.pbm OUT.stl [options]`
 - audit: `npm run raster:audit` (`tools/nso_raster_line_audit.js`, 21 checks)
-- checks: `npm run raster:test` (`tools/nso_raster_lines_test.js`, 128 checks)
+- line angle: `npm run raster:angle` (`tools/nso_line_angle.js`) — the
+  orientation histogram, off the shipped mesh
+- checks: `npm run raster:test` (`tools/nso_raster_lines_test.js`, 134 checks)
   and `npm run raster:fixtures` (byte-diff of `fixtures/raster-lines/`)
 - all three are in `npm test`
 
@@ -156,12 +158,24 @@ Two things the construction can be asked to do and cannot. Both are **measured**
 `fixtures/raster-lines/` carries four rasters, the STL each builds and
 `raster-lines.json` with every number; `npm run raster:fixtures` byte-diffs them.
 
+All four are drawn with their lines at **45° to the canvas edges**, which is
+where a slicer prints them — see *The angle* below. The canvas is 45 mm because
+the 30 mm pattern turned 45° needs 30·√2 = 42.43 mm of room.
+
 | fixture | raster | traced | solid |
 |---|---|---|---|
-| `zigzag-layer` | 600² px, 1-bit, 0.25 mm stroke | 1 path, 29 segments (15 lines + 14 end turns), 0 junctions | 572 tris, Euler 2, 1 component |
-| `zigzag-layer-fat` | the same centrelines, 0.65 mm stroke | the same 29 segments | the same 572 tris |
-| `zigzag-layer-aa` | 300² px, 8-bit anti-aliased | the same 29 segments | the same 572 tris |
-| `crosshatch` | 600² px, 15 lines each way | 480 segments, **225 four-way junctions** | 5760 tris, **Euler −390 = genus 196** = the 14 × 14 holes |
+| `zigzag-layer` | 900² px, 1-bit, 0.25 mm stroke | 1 path, 29 segments (15 lines + 14 end turns), 0 junctions | 572 tris, Euler 2, 1 component |
+| `zigzag-layer-fat` | the same centrelines, 0.65 mm stroke | 54 segments — the same line, more corner chamfer | 1072 tris |
+| `zigzag-layer-aa` | 450² px, 8-bit anti-aliased | 34 segments | 672 tris |
+| `crosshatch` | 900² px, 15 lines each way | 480 segments, **225 four-way junctions** | 5824 tris, **Euler −390 = genus 196** = the 14 × 14 holes |
+
+The three zigzag variants no longer come out as the same triangle count, and
+that was an artefact of the old axis-aligned drawing rather than a property
+worth keeping: Zhang–Suen chamfers a *diagonal* corner more heavily the fatter
+the stroke, so a fat diagonal boustrophedon keeps a few extra corner vertices.
+What is invariant, and what the check now gates on, is the line itself — all
+three trace **within 0.8% of the same 469 mm of line** at the same 0.42 mm
+width and the same footprint to a third of a millimetre.
 
 All four: 0 open edges, 0 non-manifold, 0 degenerate, 0 sliver, 0 inconsistent
 winding, **0 piercing, 0 coplanar**, exactly 0.300 mm tall, and
@@ -172,19 +186,103 @@ the repo-wide `python3 tools/fixture_audit.py --gate`.
 
 `zigzag-layer` traced, then the same layer turned 90° and set down on it:
 
-**39.6900 mm² of contact in 225 patches, every one exactly 0.176400 mm², none
-spanning more than one line width.** 225 = 15 lines crossed by 15. The total is
-the crossings and nothing else. The interface is 0.600 mm thick.
+**39.6901 mm² of contact in 225 patches, every one exactly 0.176400 mm², none
+spanning more than one crossing square's diagonal.** 225 = 15 lines crossed by
+15. The total is the crossings and nothing else. The interface is 0.600 mm thick.
 
 At the widest measured line, 0.61 mm: **225 patches of exactly 0.372100 mm²**,
-83.7226 mm² — still less than the relief patch's 115.020 mm² at the *narrow*
+83.7225 mm² — still less than the relief patch's 115.020 mm² at the *narrow*
 line.
+
+A crossing patch's *bounding box* spans w·√2 rather than w, because at 45° the
+w × w square is itself turned 45° and the box catches its diagonal: 0.5943 mm
+measured against 0.5940 predicted. That √2 is one of four places the
+orientation shows up in the numbers.
 
 The controls are the ones the repo's other contact checks use. 0.05 mm apart:
 two closed shells, Euler 4, 0 piercing, 0 coplanar. At gap 0: coplanar contact
 on exactly 900 triangle pairs = 225 crossings × 4, which an air gap never
 produces, and layer 1's top z equals layer 2's bottom z bit for bit. 0.05 mm
 *into* the layer below: piercing, as penetration must.
+
+### The angle — the bug the rest of the suite could not see
+
+A slicer prints an interface layer at **45° to the part's axes**, and the next
+layer at 135°, which is where the 90° between them comes from. The first
+committed reference here was drawn **axis-aligned** — vertical lines joined by
+horizontal turns — and *every other number in this document still held*, because
+every one of them is angle-blind: the section, the closure, the contact per
+crossing and the patch count are all invariant under a rigid turn. Two layers
+90° apart cross at 90° whatever absolute angle they sit at. Nothing looked, so
+nothing caught it.
+
+Measured with `npm run raster:angle` on the old fixture and the new one — the
+histogram of the shipped mesh's vertical wall directions, weighted by length:
+
+| | dominant band | 45°±1 | 90°±1 | 0°±1 |
+|---|---|---|---|---|
+| old, axis-aligned | **89°±1 at 94.03%** | **0.00%** | 94.03% | 3.85% |
+| now | **45°±1 at 93.99%** | **93.99%** | **0.00%** | **0.00%** |
+
+The remaining 6.01% is the end turns, which are perpendicular to the lines by
+construction and therefore land at 135°; the two families together are 100.00%
+of the wall length. The `crosshatch` fixture, which has two line families rather
+than one, reads 48.87% at 45° and 49.52% at 135°, and 0.00% at both axes.
+
+**The fix is a rigid turn of the whole pattern, not a redraw.** The path shapes
+are still laid out in the pattern's own 30 × 30 frame exactly as before, and
+`turned()` maps that frame into the canvas at `ANGLE`. Rigid is the point: layer
+2 is still layer 1 turned 90°, so the two-layer assembly is the old assembly
+turned 45° as a whole, and every contact figure is therefore expected to be
+*identical* rather than merely similar. The check asserts that equality instead
+of assuming it — 39.6900 mm² before, 39.6901 after, 225 patches of exactly
+0.176400 mm² either way — which is a stronger statement about the geometry than
+the old fixture could make.
+
+`ANGLE` names **the angle the lines run at**, not the rotation applied, because
+the first attempt at this fix rotated by +45° from vertical and put the lines at
+135° and the turns at 45° — the right diagonal, the wrong one of the two.
+
+The orientation now has four independent gates, so it cannot drift back:
+
+1. the wall-direction histogram above, on the shipped mesh;
+2. the same histogram on the tracer's own paths, which must agree with it;
+3. the solid's bounding box, which is **square** — a W × H rectangle turned 45°
+   has a bbox of (W+H)/√2 in *both* axes, and that holds at 45° and at no other
+   angle (40.947 × 41.191 mm measured, 41.253 predicted);
+4. the crossing patch's bbox spanning w·√2 rather than w.
+
+### Two tracer fixes the angle change uncovered
+
+Neither was reachable with axis-aligned input, and both are real:
+
+**Junction clusters at diagonal crossings** (`weldNodes`). A right-angled X
+thins to one clean degree-4 pixel; a **45° X does not** — Zhang–Suen leaves a
+little cluster of Y-junctions joined by one-pixel bridges. Measured on the 45°
+crosshatch: **960 graph nodes where a clean lattice has 225 junctions and 60
+line ends, 900 traced paths shorter than 0.1 mm, closest node pair exactly one
+pixel apart.** `extrudeFlat` refused the lot, correctly — a 0.05 mm segment
+cannot carry a 0.42 mm line's joins. `collapseShort` could not help: it fixes a
+short segment *inside* a polyline, where one end is a free vertex it may move,
+and here **both** ends are junctions. So the graph-level pass clusters endpoints
+within one line width, moves each to its cluster's centroid, and drops what
+collapses. The four arms of a crossing then meet at one point and the junction
+is the degree-4 node it always was: 480 segments, **225 junctions**, one
+component.
+
+**Slivers at welded junctions** (the pad's attach corners). A welded junction's
+arms are a fraction of a degree off perpendicular, so the pad's wedge point no
+longer lands exactly *on* its attach point the way it does at a true right
+angle — it lands a few microns away and leaves a sliver: **776 triangles over
+aspect 100, the worst a 0.0037 mm edge against a 0.30 mm one.** Two changes fix
+it. A wedge point within 2% of a line width of the corner beside it is dropped
+(it is the pad's own vertex and nothing else references it). And where edge *i*'s
+left corner and edge *i+1*'s right corner are the same corner of the junction,
+they are **merged to their midpoint on the `inc` entries that both the pad and
+the quads read their corners from** — so one corner serves two quads, and
+watertightness survives because there is still exactly one point. Result: **0
+slivers on all four fixtures, worst aspect on the crosshatch down from 115 to
+16**, with Euler, closure and piercing unchanged.
 
 ### One finding about the path, not the section
 

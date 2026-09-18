@@ -41,18 +41,27 @@ builds from them.
 
 Netpbm rather than PNG on purpose — uncompressed, stdlib-only to read, and the
 one raster format a text editor can still open. The binary ones are P4 (packed
-1-bit, 45 KB for 600²); `zigzag-layer-aa.pgm` is P5 grayscale because a
+1-bit, 99 KB for 900²); `zigzag-layer-aa.pgm` is P5 grayscale because a
 threshold is exactly what it exists to exercise.
+
+**Every one is drawn with its lines at 45° to the canvas edges**, which is where
+a slicer prints an interface layer. The first committed set was drawn
+axis-aligned — measured at 94.03% of its wall length in the 89–91° band and
+0.00% at 45° — and nothing caught it, because every other number in the suite is
+invariant under a rigid turn. `npm run raster:angle` is the instrument that does
+catch it, `raster-lines.json` records each fixture's measured angle, and the
+canvas is 45 mm because a 30 mm pattern turned 45° needs 30·√2 = 42.43 mm.
 
 | file | what it is |
 |------|------------|
-| `zigzag-layer.pbm` | the reference: one layer of the real two-layer zigzag, 15 lines at 2.0 mm pitch over 30 mm, drawn with a 0.25 mm stroke |
-| `zigzag-layer-fat.pbm` | the same centrelines drawn 0.65 mm wide, 2.3× the ink — must trace to the same path |
+| `zigzag-layer.pbm` | the reference: one layer of the real two-layer zigzag, 15 lines at 2.0 mm pitch over 30 mm, at 45°, drawn with a 0.25 mm stroke |
+| `zigzag-layer-fat.pbm` | the same centrelines drawn 0.65 mm wide, 2.3× the ink — must trace to the same line |
 | `zigzag-layer-aa.pgm` | the same centrelines, anti-aliased, at half the resolution |
-| `crosshatch.pbm` | 15 lines each way in one picture — 225 four-way junctions |
+| `crosshatch.pbm` | 15 lines each way in one picture — 225 four-way junctions, at 45° and 135° |
 
 Every STL: 0 open, 0 non-manifold, 0 degenerate, 0 sliver, 0 piercing, 0
 coplanar, exactly 0.300 mm tall, volume = top-face area × height. The three
-zigzag variants all come out as the same 572 triangles, which is the point of
-having three. `crosshatch.stl` is Euler −390 = genus 196 = the 14 × 14 holes in
-the lattice. See `docs/RASTER-LINES.md`.
+zigzag variants trace within 0.8% of the same 469 mm of line — not the same
+triangle count any more, which was an axis-aligned artefact: Zhang–Suen chamfers
+a diagonal corner more heavily the fatter the stroke. `crosshatch.stl` is Euler
+−390 = genus 196 = the 14 × 14 holes in the lattice. See `docs/RASTER-LINES.md`.
