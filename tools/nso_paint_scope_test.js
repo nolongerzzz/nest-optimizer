@@ -37,6 +37,8 @@ const read = f => fs.readFileSync(path.join(REPO, f), 'utf8');
 const ROSTER = [
   { feature: 'Smooth',         file: 'app-sculpt.js',          scope: 'WHOLE-PIECE',
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Smooth stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
+  { feature: 'Extend',         file: 'app-extend.js',          scope: 'WHOLE-PIECE',
+    test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Extend stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Repair',         file: 'app-finish.js',          scope: 'WHOLE-PIECE',
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Repair stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Fusion',         file: 'app-join.js',            scope: 'WHOLE-PIECE',

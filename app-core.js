@@ -300,7 +300,7 @@ function undoLast() {
       ((m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length : 0) + ' face(s) excluded');
     return;
   }
-  if (entry.type === 'softenReplace' || entry.type === 'capReplace' || entry.type === 'sealReplace' || entry.type === 'solidifyReplace' || entry.type === 'thickenReplace' || entry.type === 'smoothReplace') {
+  if (entry.type === 'softenReplace' || entry.type === 'capReplace' || entry.type === 'sealReplace' || entry.type === 'solidifyReplace' || entry.type === 'thickenReplace' || entry.type === 'smoothReplace' || entry.type === 'extendReplace') {
     const m = state.models.find(x => x.id === entry.modelId);
     if (!m) { setStatus('Undo: piece no longer exists'); return; }
     // the paint set is part of the piece's state, so one step puts back both
@@ -340,7 +340,17 @@ function undoLast() {
     updateEditSize();
     renderModelList();
     updateUndoBtn();
-    setStatus(entry.type === 'smoothReplace' ? 'Undo: Smooth reverted' : (entry.type === 'thickenReplace' ? 'Undo: Thicken reverted' : (entry.type === 'solidifyReplace' ? 'Undo: Solidify reverted' : (entry.type === 'sealReplace' ? 'Undo: Seal reverted' : (entry.type === 'capReplace' ? 'Undo: Cap reverted' : 'Undo: Soften reverted')))));
+    // One row per bake that goes through this branch. A new bake registers
+    // here as well as pushing its own undo type, or the piece reverts while
+    // the status line says 'unknown action'.
+    setStatus(({
+      smoothReplace:   'Undo: Smooth reverted',
+      extendReplace:   'Undo: Extend reverted',
+      thickenReplace:  'Undo: Thicken reverted',
+      solidifyReplace: 'Undo: Solidify reverted',
+      sealReplace:     'Undo: Seal reverted',
+      capReplace:      'Undo: Cap reverted'
+    })[entry.type] || 'Undo: Soften reverted');
     return;
   }
   if (entry.type === 'removeModel') {

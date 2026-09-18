@@ -171,6 +171,12 @@
                 <button id="btn-smooth" class="btn btn-secondary" type="button"
                         title="Global Laplacian smoothing over the whole piece. No feature preservation - sharp edges round off too. Refuses if volume moves more than 25% either way, or if any face is painted.">Smooth</button>
               </div>
+              <div class="vp-row vp-row-extend">
+                <button id="btn-extend" class="btn btn-secondary" type="button"
+                        title="Lengthen the piece along its one dominant straight axis, holding the cross-section perpendicular to that axis exactly fixed. Detects the axis itself; refuses a tapered, curved or ambiguous piece by name. Leave the box blank and press once to read the current length.">Extend</button>
+                <input type="number" id="inp-extend-mm" min="0.1" max="2000" step="0.1"
+                       placeholder="mm" aria-label="Extend to length, mm">
+              </div>
               <div class="vp-row vp-row-pair">
                 <button id="btn-mask-paint" class="btn btn-secondary btn-paint" type="button"
                         title="Click faces to exclude them from Soften, wrap and Join. Click a face again to include it. Click this button again to stop.">Paint faces</button>
@@ -222,6 +228,7 @@
   <script src="app-cut.js?v=inside4"></script>
   <script src="app-finish.js?v=inside4"></script>
   <script src="app-sculpt.js?v=inside4"></script>
+  <script src="app-extend.js?v=inside4"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=inside4"></script>
   <script src="app-mask.js?v=inside4"></script>

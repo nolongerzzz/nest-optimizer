@@ -1225,6 +1225,39 @@ select:focus, input:focus {
   white-space: nowrap;
   min-width: 0;
 }
+/* Extend: a button and the target length it reads. Two columns, not the
+   thicken row's three - that one is button / spinner / button and would drop
+   this input into its 24px middle column. */
+.vp-row-extend {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 72px);
+  align-items: stretch;
+  gap: 6px;
+}
+.vp-row-extend .btn {
+  padding: 2px 3px;
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+  min-width: 0;
+}
+.vp-menu-body .vp-row-extend input[type="number"] {
+  min-height: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0 6px;
+  border: 1px solid rgba(232, 238, 246, 0.45);
+  border-radius: 7px;
+  background: transparent;
+  color: #e8eef6;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+.vp-menu-body .vp-row-extend input[type="number"]::-webkit-outer-spin-button,
+.vp-menu-body .vp-row-extend input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
 .thick-spin {
   display: flex;
   flex-direction: column;
