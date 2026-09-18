@@ -53,6 +53,8 @@ const ROSTER = [
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Scale stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Texture',        file: 'app-texture.js',         scope: 'SUB-REGION',
     test: /nsoMaskIsExcludedRaw\s*\(\s*m\s*,\s*face\.n\s*,\s*face\.d/, standDown: /Texture stood down - ' \+ \w+ \+ ' painted facet\(s\)/ },
+  { feature: 'Brush',          file: 'app-brush.js',           scope: 'SUB-REGION',
+    test: /NSO_brushPaintCheck/,                            standDown: /Brush stood down - ' \+ [\w.]+ \+ ' painted face\(s\)/ },
 ];
 
 console.log('== every paint-aware feature declares its scope in its own source ==');
@@ -113,12 +115,22 @@ console.log('\n== the curved-band feature documents WHICH facets it scopes to ==
         /Seat against a curved contact is a separate ticket/.test(d));
 }
 
-console.log('\n== the sub-region feature documents WHICH faces it scopes to ==');
+console.log('\n== each sub-region feature documents WHICH faces it scopes to ==');
 {
   const d = read('docs/INSIDE-CORNERS.md');
   check('INSIDE-CORNERS declares the sub-region category', /PAINT SCOPE:\s*sub[- ]region/i.test(d));
   check('  ...and lists what does and does not stand it down',
         /this pocket's floor/.test(d) && /a \*different\* pocket/.test(d) && /any hull face/.test(d));
+  check('  ...and says the two categories are one rule, not an exception',
+        /not\*\* a laxer reading|same rule applied at a different scope/i.test(d));
+}
+{
+  const d = read('docs/BRUSH.md');
+  check('BRUSH declares the sub-region category', /PAINT SCOPE:\s*sub[- ]region/i.test(d));
+  check('  ...and lists what does and does not stand it down',
+        /the faces the stroke lands on/i.test(d) && /paint on any other face/i.test(d));
+  check('  ...and says the seam band counts as part of the affected set',
+        /seam band/i.test(d) && /affected set/i.test(d));
   check('  ...and says the two categories are one rule, not an exception',
         /not\*\* a laxer reading|same rule applied at a different scope/i.test(d));
 }

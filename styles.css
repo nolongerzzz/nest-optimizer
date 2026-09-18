@@ -622,6 +622,21 @@ select:focus, input:focus {
   max-width: 176px;
   padding: 4px;
   gap: 3px;
+  /* The Finish menu grows every time a feature lands in it, and it had run
+     out of viewport: opened on a 720px-tall window it was taller than the
+     space below its summary, so clicking a control inside it made the PAGE
+     scroll to bring the control into view. That drags the canvas up under the
+     fixed header, and a click aimed at the piece then lands on the header
+     instead - measured, adding four rows moved the scroll from -157px to
+     -251px and put the target 6px under it.
+
+     Bounding the body and letting IT scroll fixes that for every row, not
+     just the ones added last: the menu can no longer be taller than the space
+     it has, so the page never scrolls to reach a control and the viewport
+     stays where the user put it. */
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .vp-icon-btn {
   pointer-events: auto;
@@ -1644,4 +1659,38 @@ select:focus, input:focus {
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text);
+}
+
+/* Brush rows - a label, a slider that takes the slack, and the live value.
+   The value column is fixed so the row does not reflow as the number changes
+   width, which is what made the first draft twitch while dragging. */
+.vp-row-brush {
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+.vp-row-brush .vp-brush-tag {
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  opacity: .78;
+}
+.vp-row-brush input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  accent-color: #e8a33d;
+}
+.vp-row-brush .vp-brush-out {
+  min-width: 48px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  opacity: .9;
+}
+/* Armed brush reads the same as armed paint, so "a tool is live" looks the
+   same whichever tool it is. */
+.btn-brush.is-armed {
+  background: #e8a33d;
+  color: #1a1206;
+  border-color: #e8a33d;
 }

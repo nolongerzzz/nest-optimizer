@@ -162,6 +162,29 @@
     }
     return out;
   };
+  /* The painted faces as PLANES, exactly as each click recorded them.
+
+     nsoMaskFaceList above is the axis-and-side view and returns null the
+     moment one entry is a recessed patch, because the whole-solid wrap has no
+     way to name one. A sub-region feature (the brush) needs the opposite: it
+     has a set of points and wants to know which painted faces they lie on, so
+     a recessed patch is perfectly usable and must not drop the whole list.
+     Same rule either way - read back what the click wrote down, never work
+     out which face was meant from a normal and a bounding box. */
+  window.nsoMaskPlaneList = function (m) {
+    const mask = m && m.faceMask;
+    if (!mask || !mask.exclude) return [];
+    const out = [];
+    for (let i = 0; i < mask.exclude.length; i++) {
+      const e = mask.exclude[i];
+      out.push({ n: e.n.slice(), d: e.d,
+                 axisIdx: (e.axisIdx == null ? null : e.axisIdx),
+                 keepMin: (e.axisIdx == null ? null : !!e.keepMin),
+                 inner: !!e.inner,
+                 recessed: e.axisIdx == null });
+    }
+    return out;
+  };
   // A wall Align found, given in world space on the piece's own mesh.
   window.nsoMaskIsExcludedWorld = function (m, mesh, wn, wp) {
     const mask = m && m.faceMask;

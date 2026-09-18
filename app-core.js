@@ -139,7 +139,8 @@ const UNDO_REPLACE_LABEL = {
   textureReplace: 'Undo: Texture reverted',
   carveReplace: 'Undo: Carve reverted',
   scaleReplace: 'Undo: Scale reverted',
-  deleteReplace: 'Undo: Delete reverted'
+  deleteReplace: 'Undo: Delete reverted',
+  brushReplace: 'Undo: Brush reverted'
 };
 
 function undoLast() {
@@ -374,7 +375,9 @@ function undoLast() {
   }
   /* One branch for every op that swaps a piece's geometry in place. A carve is
      one of them: the blade is never a placed piece, so unlike Subtract there is
-     no partner to put back - only this piece's geometry. */
+     no partner to put back - only this piece's geometry. A brush stroke is
+     another: the whole drag is one swap, so one entry puts the whole stroke
+     back rather than one dab of it. */
   if (Object.prototype.hasOwnProperty.call(UNDO_REPLACE_LABEL, entry.type)) {
     const m = state.models.find(x => x.id === entry.modelId);
     if (!m) { setStatus('Undo: piece no longer exists'); return; }
@@ -2235,15 +2238,29 @@ function onCanvasPointerDown(event) {
     return;
   }
 
+  /* The brush owns a PRESS that lands on a piece, on the same terms again.
+     app-brush.js binds its own handler on this canvas after this one, and a
+     fall-through here would start a move drag UNDER the stroke and report
+     "Moved model #N" over the brush's own status.
+
+     Asked alongside Carve and ahead of Measure, on the ordering rule stated
+     just below: the brush bakes, so it wins a contested click over the one
+     tool that cannot change the piece. Unlike the other three it owns the
+     whole drag, not just the press - the stroke runs until pointerup. */
+  if (typeof window.nsoBrushTakesPointer === 'function' && window.nsoBrushTakesPointer(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
   /* Measure owns a click that lands on a piece, on the same terms again -
      app-measure.js binds its own handler on this canvas after this one and
      takes the measurement there. Measuring changes nothing on the piece, so a
      measure click must not also drag it across the plate.
 
-     It is asked LAST of the three because it is the only one that cannot
+     It is asked LAST of the four because it is the only one that cannot
      change the piece: if two modes are somehow armed at once, the one that
      bakes should win the click rather than have a measurement swallow it.
-     app-measure.js's enter() disarms the other four anyway, so this is the
+     app-measure.js's enter() disarms the others anyway, so this is the
      backstop, not the mechanism. */
   if (typeof window.nsoMeasureTakesClick === 'function' && window.nsoMeasureTakesClick(event)) {
     setOrbitFromPlate(false);

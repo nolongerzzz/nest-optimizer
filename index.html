@@ -214,11 +214,33 @@
                 <button id="btn-smooth" class="btn btn-secondary" type="button"
                         title="Global Laplacian smoothing over the whole piece. No feature preservation - sharp edges round off too. Refuses if volume moves more than 25% either way, or if any face is painted.">Smooth</button>
               </div>
+              <div class="vp-row vp-row-pair">
+                <button id="btn-brush" class="btn btn-secondary btn-brush" type="button" aria-pressed="false"
+                        title="Freehand local deformation. Drag on the piece; the whole drag is one operation with one undo. Carve pushes in along the surface normal, Emboss pushes out, Smooth relaxes just the area under the brush. Refuses and reverts if the stroke would add a self-intersection, a sliver or a T-junction. Stands down on a face painted excluded.">Brush</button>
+                <select id="sel-brush-mode" class="vp-select" title="Carve in, Emboss out, or smooth only the area under the brush.">
+                  <option value="carve" selected>Carve</option>
+                  <option value="emboss">Emboss</option>
+                  <option value="smooth">Smooth here</option>
+                </select>
+              </div>
+              <div class="vp-row vp-row-brush">
+                <span class="vp-brush-tag">Size</span>
+                <input type="range" id="inp-brush-size" min="5" max="50" step="1" value="12" aria-label="Brush radius mm">
+                <output id="out-brush-size" class="vp-brush-out">12 mm</output>
+              </div>
+              <div class="vp-row vp-row-brush">
+                <span class="vp-brush-tag">Force</span>
+                <input type="range" id="inp-brush-intensity" min="0" max="1" step="0.05" value="0.5" aria-label="Brush intensity">
+                <output id="out-brush-intensity" class="vp-brush-out">0.50</output>
+              </div>
+              <div class="vp-row vp-row-full">
+                <label class="vp-clone" title="Soft is a smoothstep dish. Hard keeps the floor of the dab nearly flat and makes the wall steep - the seam band is relaxed either way."><input type="checkbox" id="chk-brush-hard"> Hard falloff</label>
+              </div>
               <div class="vp-row vp-row-triple vp-row-paint">
                 <button id="btn-mask-select" class="btn btn-secondary btn-paint btn-paint-select" type="button" aria-pressed="false"
                         title="Click ONE face to make it the target (pink). Skin face uses it instead of its own pick. A click on another face moves the target; a click on the target clears it. Click this button again to stop.">Paint Selected</button>
                 <button id="btn-mask-paint" class="btn btn-secondary btn-paint" type="button" aria-pressed="false"
-                        title="Click faces to exclude them (yellow) from Soften, wrap, Join and Skin. Click a face again to include it. Click this button again to stop.">Paint Excluded</button>
+                        title="Click faces to exclude them (yellow) from Soften, wrap, Join, Skin and the Brush. Click a face again to include it. Click this button again to stop.">Paint Excluded</button>
                 <button id="btn-mask-clear" class="btn btn-secondary" type="button"
                         title="Include every face again and drop the target.">Clear paint</button>
               </div>
@@ -365,6 +387,7 @@
   <script src="app-finish.js?v=inside6"></script>
   <script src="app-sculpt.js?v=inside4"></script>
   <script src="app-scale.js?v=inside6"></script>
+  <script src="app-brush.js?v=inside6"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=wallcut1"></script>
   <script src="app-center-lock.js?v=clock1"></script>

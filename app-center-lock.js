@@ -244,6 +244,11 @@
       if (measureBtn) measureBtn.click();
       else state.measureOn = false;
     }
+    if (typeof window.nsoBrushArmed === 'function' && window.nsoBrushArmed()) {
+      var brushBtn = el('btn-brush');
+      if (brushBtn) brushBtn.click();
+      else if (typeof window.nsoBrushSetArmed === 'function') window.nsoBrushSetArmed(false);
+    }
     state.softenArmed = false;
     state.capArmed = false;
     if (typeof clearFacePick === 'function') clearFacePick();
