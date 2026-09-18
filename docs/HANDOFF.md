@@ -53,6 +53,7 @@ Current roster, by category:
 | Delete painted (`app-paint-delete.js`) | sub-region | the one TARGET face, `nsoMaskIsExcludedRaw(m, face.n, face.d, ...)` | `docs/PAINT-DELETE.md` §7 |
 | Scale (`app-scale.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
 | Skin patch (`app-skin-patch.js`) | **none** | — it reads no existing geometry at all | header comment |
+| Texture (`app-texture.js`, the curved band) | sub-region | the band's own facets, `nsoMaskIsExcludedRaw(m, face.n, face.d)` per facet; the caps do not block it | `docs/CURVED-SKIN.md` §7 |
 
 ### The SELECT list is an operand; the EXCLUDE list is still only a veto
 
@@ -1455,42 +1456,148 @@ shells, Euler 4, the sheet resting on the tips to 1e-6, piece 20.6 tall and
 the free layer 1.2. One Undo -> geometry and flag back together. No page
 errors. `APP_URL=<site>` points the same check at a deployment.
 
-### Parked ticket - the OTHER wrap: a skin on a curved face
-Asked for as the follow-up when "wrap" was clarified. Not started; this is
-the audit, so whoever picks it up does not re-derive it.
+### The OTHER wrap - Texture, a conformal skin on a curved face (LANDED 2026-09-18)
+Was parked here as the follow-up when "wrap" was clarified. Built. Full
+write-up with every number: `docs/CURVED-SKIN.md`. Files: `nso_skin_band.js`
+and `app-texture.js` (both new), `index.html` / `styles.css` (a fourth
+`.vp-row-skin` row in the Finish tab plus its two numbers), `app-core.js` (one
+undo label), `tools/nso_texture_fixtures.js` and three committed cylinders.
+Check: `npm run texture:test` (`tools/nso_texture_test.js`), in `npm test`.
+`?v=` NOT bumped - the two new script tags ride the existing `?v=skin2`.
 
-What blocks it today, precisely: `findFace` groups triangles by exact plane
-(`|g.d - off| < 1e-4` with parallel normals), so a tessellated cylinder is
-one group per facet, not one surface; `rectFrame` then needs a 4-corner
-right-angled boundary, which no curved patch has. The relief builders are
-2D-in-a-plane by construction - `gridRelief` lifts along a single constant
-`N`, and `boxSoup` / `ringRelief` do the same - so nothing below `rectFrame`
-survives a non-planar face either. A sphere is refused with `face is not a
-rectangle (3 corners)`; that refusal is correct and stays.
+**Audit first (Task 1), and all three blockers were real.** The parked note
+named plane-exact grouping, the rectangle requirement and single-normal
+lifting. Each is demonstrated in part 1 of the suite rather than asserted:
 
-The shape a curved wrap would have to take, from the same discipline:
-- a **developable-band** face finder: a run of facets whose normals turn
-  about ONE axis and whose boundary is a quad in the unrolled parameter
-  (u = arc length, v = along the axis). A cylinder side is that; a sphere is
-  not, and a sphere would still be refused rather than approximated.
-- the existing grid plans reused **unchanged** in (u, v) - the rib intervals
-  are already a 1D problem per axis - with `lift` replaced by a per-node
-  normal from the band's own frame instead of one constant `N`.
-- the seam work here is the precedent, not a rewrite: the perimeter still has
-  to be the original loop, the walls still have to be re-fanned over every
-  point the relief introduces, and `sideChain` / `fanTri` already do both in
-  any frame.
-- the numbers to gate it on: closed shell and Euler 2 after the bake, volume
-  equal to the analytic relief on an unrolled band (rib volume is
-  pitch-independent per unit area), and the arc-length pitch honoured to the
-  same 1e-3 the flat patterns are - a rib laid out in angle rather than arc
-  length is the failure mode to look for.
-- open question, not a detail: what `supportExtreme` and Seat mean against a
-  curved contact. Seat today translates B along one normal and explicitly
-  "does not tilt-fit a skin"; a curved interface has no single contact plane,
-  so either the ticket stays geometry-only or Seat grows a second mode. That
-  decision belongs to whoever takes it, and it should be made before the
-  geometry, not after.
+- `findFace` on the cylinder's side returns **2 triangles, 29.44 mm² of 1885**
+  - one facet of 64. "The side" is not a face that finder can name.
+- the rectangle rule is **worse than a refusal**, and this is the one thing
+  the parked note understated: a facet IS a rectangle. At the default pattern
+  `applySkinToFace` refuses the cylinder for being too NARROW (`face too small
+  for the crosshatch`), not for being curved - and at a fine enough pattern it
+  **succeeds**, skinning one stripe of sixty-four (15.04 mm² of 1885). Silent,
+  plausible, wrong. A user would have had to count ribs to notice.
+- a relief lifted along one constant `N` reaches **20.6 mm** from the axis on
+  the far side of an R 10 cylinder. The built article reaches **10.600000**,
+  gated.
+
+**Scope (Task 2): one curved primitive, a cylinder.** Not an arbitrary
+developable band and not free-form. The axis is FITTED (area-weighted normal
+covariance, all three eigenvectors tried), so a cylinder tipped 30°/20° and
+moved anywhere is the same band - gated, r and D to 2e-3. Refused and named:
+a sphere and the organic blob (`not a cylinder about this axis - the rim
+points are off a circle by 2.39 / 4.33 mm`), a side tessellated into more than
+one ring up the axis, and anything under 12 facets around. That floor is a
+real boundary, not neatness: **a 20 mm cube passes every other test** about a
+face axis, because its eight corners genuinely do lie on a cylinder of radius
+r√2. Below it the refusal points at the engine that does cover the shape -
+`a 4-sided prism, not a cylinder - its sides are flat rectangular faces, which
+Skin wrap already covers one face at a time`. `fixtures/prism_r10h30_s8.stl`
+is committed as that case. Raise only, and it says why.
+
+**What was built (Task 3).** `NSO_Skin.patternPlan` is reused **unchanged**,
+on a `planeFrame` whose W is the circumference and whose D is the axial
+length - the rib intervals were always a 1D problem per axis. Two adapters
+sit between it and the band, and they are the only places this touches the
+pattern:
+
+1. **The seam is not a margin.** A band has no edges in u, so a margin there
+   is a bald stripe - the opposite of a wrap. The plan is built with
+   `margin: 0` and the pitch is SNAPPED to an exact divisor of the
+   circumference (`k = round(C / pitch)`, `pitch = C / k`). `ribIntervals`
+   then leaves exactly half a gap at each end, so the wrap-around gap is one
+   full `pitch - rib` and the layout is periodic. The snap is reported and the
+   status line says it: 1.2 → 1.208305 mm over 52 repeats.
+2. **The axial margin is the band engine's own**, as two rim rows at height 0.
+   That is what keeps the relief's perimeter on the ORIGINAL rim loops, which
+   is what lets the caps stay where they are.
+
+`bandRelief` is `gridRelief` with two changes and nothing else: u wraps (node
+column `nu` IS column 0 - no seam column, no duplicated ring), and every lift
+takes the node's OWN radial normal, with a normal at each end of a wall. The
+base is the original faceted surface, not an idealised cylinder, and
+`breaksU` is merged with the band's facet angles so no rim vertex is skipped.
+Cap triangles that own a piece of a rim are re-fanned (`fanCapTri`, which is
+`fanTri` for a closed polyline).
+
+**Validation (Task 5), all of it on a real exported binary STL read back off
+disk and judged by `tools/mesh_validate.py`:**
+
+- `cylinder_r10h30_s64` + crosshatch: **30,912 tris, 0 open, 0 non-manifold,
+  0 odd, 0 inconsistent winding, Euler 2, 0 piercing, 0 coplanar, 0
+  degenerate**, one edge-connected shell. Axial extent 30.00000 unchanged,
+  radial 21.200001 = 2(R + depth), cap area unchanged to 1.6e-6 mm².
+- **Conformal, measured:** every one of 54,720 tip vertices stands
+  **0.6000000 mm off the ORIGINAL surface** (the inscribed prism, derived by
+  the test, not asked of the engine) - worst error **4.6e-7 mm**. Max radius
+  anywhere 10.600000 where a single-normal lift reads 20.6; min radius on the
+  side 9.987977, the prism's own apothem, so the piece under the skin is
+  untouched. 3,904 tip triangles straddle a facet edge - it is one surface
+  over the band, not a tile per facet.
+- **The wrap closes:** 104 rib-side walls for 52 repeats, every boundary one
+  pitch from its partner **including across the seam** (worst 5.1e-7 rad),
+  arc pitch on the file 1.208305 mm to 2.1e-9. The repeat count comes from
+  the ARC (52); a planar diameter reading would have given 17, which is the
+  failure mode the parked note said to look for.
+- **Contact area, the number that is easy to get wrong:** measured
+  **1057.882588 mm²** against a closed form of 1057.882648. The flat
+  (unrolled) reading - exactly what the existing engine's `tipArea` would
+  say - is **998.40, 6.0% low**, and the status line prints both:
+  `contact 1058.3mm² on the curve (998.4mm² unrolled)`.
+- **Volume:** +616.4094 mm³ against the curved closed form 617.0128 (0.098%);
+  the FLAT form 599.0415 is 2.90% out, thirty times further. The curvature
+  term is `m2 / 2r` with `m1 = ∫h`, `m2 = ∫h²`, both by 2×2 Gauss - not
+  `area·h·(1 + h/2r)`, which overstates a sawtooth threefold. The 0.098%
+  residual is the inscribed prism, and it is gated by refinement rather than
+  argument: crosshatch 0.161 → 0.049 → 0.015 → 0.004% and zigzag 0.951 →
+  0.704 → 0.398 → 0.135% over 48/96/192/384 facets.
+- zigzag and a second cylinder (r 6 × 12, 96 facets) carry the same gates.
+
+**Paint: SUB-REGION, the curved band.** A click on a cylinder's side records
+ONE facet's plane, so the check is `nsoMaskIsExcludedRaw(m, face.n, face.d)`
+over the band's distinct facet planes - mask6's own answer, per facet, never a
+second mapping. ANY painted facet stands the whole bake down, because the
+relief is periodic around the full circumference and the engine has no
+per-facet height; skipping a painted facet would leave a bald stripe, which is
+a different feature. A painted CAP does **not** stand it down - the caps keep
+their planes and boundary loops and only get re-fanned, the same thing
+`applySkinToFace` already does to the walls beside a skinned face. All three
+behaviours are gated headlessly against a stubbed `nsoMaskIsExcludedRaw`.
+
+**The name.** The button is **Texture**, deliberately not a third "wrap".
+Soften's `Full wrap` checkbox is edge treatment on a box and is untouched;
+`Skin wrap` is flat rectangular faces one at a time and still refuses a
+cylinder. The suite gates that `#chk-full-wrap` is still there and still says
+"Full wrap", and that nothing in the UI calls Texture a wrap.
+
+**One defect found and fixed on the way** (in the new file, not the old one):
+`wallBetween`'s quad emission assumes both ends of a wall have height. A
+sawtooth flank starts at zero on every ridge, so one end is a POINT, and
+emitting a quad there puts a zero-area triangle in the soup and uses one of
+its edges three times - **124 odd and 124 non-manifold edges** on the zigzag
+band, measured, until `wallBetween2` learned to emit a triangle. The flat
+`gridRelief` reaches the equivalent branch 32 times on a 20 mm cube and comes
+out clean, so this is not a report against `nso_skin.js`.
+
+**Seat against a curved contact is OUT OF SCOPE (Task 4)** and is its own
+ticket, dispatched separately. Nothing here answers it and nothing here calls
+into it - gated: neither new file calls `supportExtreme`, `tipContactArea` or
+any Seat entry point. The parked note's open question stands as written: Seat
+translates B along one normal and explicitly "does not tilt-fit a skin", a
+curved interface has no single contact plane, so either that ticket stays
+geometry-only or Seat grows a second mode. The `tipArea` this bake reports is
+the tip-surface area, not a promise that Seat can land a part on it.
+
+**Still open after this, each its own question** (in `docs/CURVED-SKIN.md` §9):
+a second layer (composed would drop in; a free layer needs `freeLayerShell`
+rewritten as a cylindrical shell), a cone or a torus, and several bands on one
+piece - `findBand` reads the whole soup as one cylinder by design.
+
+**Not done: a browser drive check.** Every other wired feature has one
+(`npm run skin:drive`, `wire:smooth`, ...). This ticket's suite proves the
+engine and the reachability of the controls by reading `index.html`, but it
+does not click the button in Chromium. That is the next scoped pass, and it
+is the one thing between this and the bar the other wired bakes are held to.
 
 ## A skin pattern as its own printable object - the patch (2026-09-17)
 `nso_skin.js` (two additive exports, `planeFrame` and `patternPlan`, plus the

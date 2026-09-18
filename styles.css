@@ -1404,6 +1404,13 @@ select:focus, input:focus {
    "crosshatch" rather than clip it under the arrow. */
 .vp-row-skin2 .vp-select { font-size: 10px; padding: 0 2px; }
 .vp-skin-free { gap: 4px; font-size: 11px; white-space: nowrap; }
+/* Texture rides the same two-cell skin grid - a button and a pattern select -
+   because it is the same kind of control as Skin face and Skin wrap and should
+   read as one of them, not as a separate card. Its two numbers go on their own
+   .vp-row-opts line underneath, the way Soften's R does: four cells would not
+   fit the 176px card, and the pitch is the one number a user retypes. */
+.vp-row-texture-opts { padding-top: 0; }
+.vp-row-texture-opts .vp-clone input[type="number"] { width: 46px; }
 /* A hairline above a row, to break the card into groups. Non-solid uses it:
    it is a standing declaration about the piece, not another knob on Seal. */
 .vp-row-sep {

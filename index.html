@@ -247,6 +247,17 @@
                   <option value="loose">loose</option>
                 </select>
               </div>
+              <div class="vp-row vp-row-skin vp-row-texture">
+                <button id="btn-texture" class="btn btn-secondary" type="button" title="Cover a CYLINDER's curved side with one conformal relief that wraps all the way round - no seam and no bald stripe. Not Soften's Full wrap (that is edge treatment on a box) and not Skin wrap (that is flat rectangular faces one at a time). The caps keep their planes. Refuses anything that is not a cylinder and says what it saw; stands down if any facet of the curved side is painted excluded.">Texture</button>
+                <select id="sel-texture-pattern" class="vp-select" title="Pattern laid out on the unrolled band: u is arc length round the cylinder, v is along its axis. crosshatch: rib lattice. zigzag: sawtooth ridges. (ring builds its own surface and has no height field to unroll, so it is not offered here.)" aria-label="Texture pattern">
+                  <option value="crosshatch">crosshatch</option>
+                  <option value="zigzag">zigzag</option>
+                </select>
+              </div>
+              <div class="vp-row vp-row-opts vp-row-texture-opts">
+                <label class="vp-clone" title="Target arc pitch in mm, measured along the curve. It is snapped to an exact divisor of the circumference so the pattern closes on itself; the status line says what it was snapped to.">Pitch <input type="number" id="inp-texture-pitch" value="1.2" min="0.3" max="10" step="0.1"></label>
+                <label class="vp-clone" title="How far the relief stands off the curved surface, in mm.">Depth <input type="number" id="inp-texture-depth" value="0.6" min="0.1" max="4" step="0.1"></label>
+              </div>
               <div class="vp-row vp-row-carve">
                 <button id="btn-carve" class="btn btn-secondary btn-carve" type="button" aria-pressed="false"
                         title="Local carving tool. Arm it, then click a face, an edge or a corner of a piece: the blade is aimed along the outward bisector of whatever faces it can reach there, and just that local volume is subtracted. A corner gouge and an edge chamfer need no rotation - the blade lays its sweep axis along the edge itself. Click Carve again to stop. Unlike Subtract this consumes nothing, so the same blade carves the next edge too.">Carve</button>
@@ -332,6 +343,7 @@
   <script src="nso_carve.js?v=carve1"></script>
   <script src="nso_thickness.js?v=wallcut1"></script>
   <script src="nso_paint_delete.js?v=del1"></script>
+  <script src="nso_skin_band.js?v=skin2"></script>
   <script src="nso-cooling-profiles.js"></script>
   <script src="nso-3mf.js"></script>
   <script src="nso-3mf-read.js"></script>
@@ -347,6 +359,7 @@
   <script src="app-skin-patch.js?v=skin3"></script>
   <script src="app-mask.js?v=inside6"></script>
   <script src="app-paint-delete.js?v=del1"></script>
+  <script src="app-texture.js?v=skin2"></script>
   <script src="app-nonsolid.js?v=inside4"></script>
   <script src="app-poslock.js?v=lock1"></script>
   <script src="app-defects.js?v=inside5"></script>

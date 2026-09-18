@@ -51,6 +51,8 @@ const ROSTER = [
     test: /nsoMaskIsExcludedRaw\s*\(\s*m\s*,\s*face\.n\s*,\s*face\.d/, standDown: /Delete stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Scale',          file: 'app-scale.js',           scope: 'WHOLE-PIECE',
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Scale stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
+  { feature: 'Texture',        file: 'app-texture.js',         scope: 'SUB-REGION',
+    test: /nsoMaskIsExcludedRaw\s*\(\s*m\s*,\s*face\.n\s*,\s*face\.d/, standDown: /Texture stood down - ' \+ \w+ \+ ' painted facet\(s\)/ },
 ];
 
 console.log('== every paint-aware feature declares its scope in its own source ==');
@@ -97,6 +99,18 @@ console.log('\n== the destructive tool reads the SELECT list, never the EXCLUDE 
         !/nsoMaskFaceList|faceMask\.exclude/.test(src));
   check('HANDOFF spells the operand/veto split out for the next ticket',
         /### The SELECT list is an operand; the EXCLUDE list is still only a veto/.test(h));
+}
+
+console.log('\n== the curved-band feature documents WHICH facets it scopes to ==');
+{
+  const d = read('docs/CURVED-SKIN.md');
+  check('CURVED-SKIN declares the sub-region category', /PAINT SCOPE:\s*SUB-REGION/i.test(d));
+  check('  ...and lists what does and does not stand it down',
+        /any facet of the curved side/i.test(d) && /either cap/i.test(d));
+  check('  ...and says the two categories are one rule, not an exception',
+        /not\*\* a laxer reading/i.test(d));
+  check('  ...and keeps Seat against a curved contact out of scope',
+        /Seat against a curved contact is a separate ticket/.test(d));
 }
 
 console.log('\n== the sub-region feature documents WHICH faces it scopes to ==');

@@ -124,6 +124,7 @@ const UNDO_REPLACE_LABEL = {
   thickenReplace: 'Undo: Thicken reverted',
   smoothReplace: 'Undo: Smooth reverted',
   skinReplace: 'Undo: Skin reverted',
+  textureReplace: 'Undo: Texture reverted',
   carveReplace: 'Undo: Carve reverted',
   scaleReplace: 'Undo: Scale reverted',
   deleteReplace: 'Undo: Delete reverted'
