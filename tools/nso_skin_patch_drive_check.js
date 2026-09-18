@@ -99,7 +99,7 @@ withApp(async (page, logs) => {
     }));
     check('nso_skin_patch.js and app-skin-patch.js loaded, button listener attached',
       wired.module && wired.skin && wired.app && wired.btn, JSON.stringify(wired));
-    check('the variant select offers exactly bordered and loose', wired.sel === 'bordered,loose', wired.sel);
+    check('the variant select offers exactly bordered, loose and sandwich', wired.sel === 'bordered,loose,sandwich', wired.sel);
   }
 
   console.log('\n=== the six standalone patches, each through the shipped button ===');
