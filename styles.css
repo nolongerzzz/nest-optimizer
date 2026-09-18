@@ -1199,6 +1199,48 @@ select:focus, input:focus {
   font-weight: 600;
 }
 
+/* Measure is a MODE too, so it is coloured the way Paint is - in the colour of
+   the marks it makes. Rose, because the other two were taken: yellow is the
+   paint's and a second yellow signal reads as paint, and cyan is what every
+   piece is already made of (placeModelMovable's 0x38bdf8), so a cyan line on a
+   piece is a cyan line on cyan - which a screenshot of the first cut showed
+   plainly. The button, the line, the end dots and the chip's border are all
+   this one colour, so the mode and its marks are obviously the same thing. */
+.vp-menu-body .btn-measure {
+  color: #fb7185;
+  border-color: rgba(251, 113, 133, 0.55);
+}
+.vp-menu-body .btn-measure:hover { border-color: rgba(251, 113, 133, 0.9); }
+.vp-menu-body .btn-measure.is-armed {
+  background: #fb7185;
+  color: #1a1d21;
+  border-color: #fb7185;
+  font-weight: 600;
+}
+
+/* The measurement itself: a chip riding the midpoint of the line, positioned
+   from script in the viewport's own coordinates. translate(-50%, -50%) keeps
+   it centred on that point as the number changes width, so it does not creep
+   sideways while a piece is dragged. pointer-events off - the next measure
+   click has to reach the canvas, not this. */
+.measure-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(251, 113, 133, 0.8);
+  background: rgba(12, 18, 26, 0.9);
+  color: #ffe4e6;
+  font: 600 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+}
+.measure-label[hidden] { display: none; }
+
 /* Finish is one column. Every row states its own grid, so nothing spills into
    an implicit column and every button fills its cell - no orphan half-width
    stragglers next to a full-width Soften. */
