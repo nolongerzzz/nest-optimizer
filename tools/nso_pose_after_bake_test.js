@@ -101,9 +101,21 @@ const setPose = (page, id, pose) => page.evaluate(a => {
   applyMeshRotation(p);
 }, { id, pose });
 
-const openFinish = page => page.evaluate(() => {
-  document.querySelectorAll('details').forEach(d => { d.open = true; });
-});
+const openFinish = page => page.evaluate(async () => {
+    document.querySelectorAll('details').forEach(d => { d.open = true; });
+    /* `.vp-menu` is an EXCLUSIVE accordion: the toggle handler in app-join.js
+       closes every other menu when one opens, and `toggle` fires
+       ASYNCHRONOUSLY - so the blanket open above is partly undone a task
+       later, and re-opening a menu that is still `open` at this instant is a
+       no-op that the queued handlers then override. Let them settle, then set
+       the accordion explicitly to the menu whose buttons this suite clicks.
+       This was invisible while Finish was the only .vp-menu on the page. */
+    await new Promise(r => setTimeout(r, 0));
+    document.querySelectorAll('.vp-menu').forEach(m => {
+      m.open = m.classList.contains('vp-finish-menu');
+    });
+    await new Promise(r => setTimeout(r, 0));
+  });
 const plateSoup = page => page.evaluate(() =>
   Array.from(buildCombinedGeometry().attributes.position.array));
 /* the exporter's own Z-up view of where the piece sits on the bed */

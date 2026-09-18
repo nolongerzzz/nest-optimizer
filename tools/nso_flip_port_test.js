@@ -89,7 +89,21 @@ withApp(async (page, logs) => {
   console.log('\n=== 1. a real Join session: box_hull_80x40x20-2 as A, pin as B ===');
   const idA = await loadSTL(page, fx('box_hull_80x40x20-2.stl'));
   const idB = await loadSTL(page, fx('pin.stl'));
-  await page.evaluate(() => { document.querySelectorAll('details').forEach(d => { d.open = true; }); });
+  await page.evaluate(async () => {
+    document.querySelectorAll('details').forEach(d => { d.open = true; });
+    /* `.vp-menu` is an EXCLUSIVE accordion: the toggle handler in app-join.js
+       closes every other menu when one opens, and `toggle` fires
+       ASYNCHRONOUSLY - so the blanket open above is partly undone a task
+       later, and re-opening a menu that is still `open` at this instant is a
+       no-op that the queued handlers then override. Let them settle, then set
+       the accordion explicitly to the menu whose buttons this suite clicks.
+       This was invisible while Finish was the only .vp-menu on the page. */
+    await new Promise(r => setTimeout(r, 0));
+    document.querySelectorAll('.vp-menu').forEach(m => {
+      m.open = m.classList.contains('vp-finish-menu');
+    });
+    await new Promise(r => setTimeout(r, 0));
+  });
   const sess = await joinAB(page, idA, idB);
   check('join session live with A and B picked',
     sess.session === true && sess.a === idA && sess.b === idB, JSON.stringify(sess));

@@ -147,7 +147,8 @@ const UNDO_REPLACE_LABEL = {
   deleteReplace: 'Undo: Delete reverted',
   brushReplace: 'Undo: Brush reverted',
   seatSurfaceReplace: 'Undo: Seat here reverted',
-  extendReplace: 'Undo: Extend reverted'
+  extendReplace: 'Undo: Extend reverted',
+  wheelReplace: 'Undo: Pottery Wheel reverted'
 };
 
 function undoLast() {
@@ -979,10 +980,14 @@ function buildPlateMesh() {
 
 function getCurrentPlate() {
   if (state.plate === 'custom') {
+    var ch = document.getElementById('custom-h');
     return {
       name: 'Custom',
       w: Number(document.getElementById('custom-w').value) || 180,
-      d: Number(document.getElementById('custom-d').value) || 180
+      d: Number(document.getElementById('custom-d').value) || 180,
+      // Build height. PLATES has never carried one - the packer only ever
+      // needed a footprint - and nso_printer.js is the thing that does.
+      h: Number(ch && ch.value) || 180
     };
   }
   return PLATES[state.plate];

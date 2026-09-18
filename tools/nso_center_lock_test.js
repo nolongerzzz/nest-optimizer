@@ -145,7 +145,21 @@ const poseOf = (page, id, mode) => page.evaluate(([i, m]) => {
 
 async function main(page) {
   await page.evaluate(PROBE);
-  await page.evaluate(() => { for (const d of document.querySelectorAll('details')) d.open = true; });
+  await page.evaluate(async () => {
+    document.querySelectorAll('details').forEach(d => { d.open = true; });
+    /* `.vp-menu` is an EXCLUSIVE accordion: the toggle handler in app-join.js
+       closes every other menu when one opens, and `toggle` fires
+       ASYNCHRONOUSLY - so the blanket open above is partly undone a task
+       later, and re-opening a menu that is still `open` at this instant is a
+       no-op that the queued handlers then override. Let them settle, then set
+       the accordion explicitly to the menu whose buttons this suite clicks.
+       This was invisible while Finish was the only .vp-menu on the page. */
+    await new Promise(r => setTimeout(r, 0));
+    document.querySelectorAll('.vp-menu').forEach(m => {
+      m.open = m.classList.contains('vp-finish-menu');
+    });
+    await new Promise(r => setTimeout(r, 0));
+  });
 
   /* ---- 1. the control is wired at all ---- */
   console.log('\n[1] control is present and gated like its siblings');

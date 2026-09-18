@@ -46,6 +46,7 @@ Current roster, by category:
 |---|---|---|---|
 | Smooth (`app-sculpt.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
 | Extend (`app-extend.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/EXTEND.md` |
+| Pottery Wheel (`app-wheel.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/POTTERY-WHEEL.md` |
 | Repair (`app-finish.js`, Seal's checkbox) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
 | Fusion (`app-join.js`, Join Route 0) | whole-piece | `nsoMaskCount(A)+nsoMaskCount(B) > 0` | stand-down comment |
 | Thicken (`app-finish.js`) | whole-piece | `nsoMaskCount(m) > 0` | header comment |
@@ -361,6 +362,160 @@ Three things a later ticket should read before touching this:
 `tools/mesh_validate.py` before/after, machine-compared) and
 `npm run wire:extend` (28 checks, real app). All three in `npm test`, along
 with `npm run paint:scope`, which was written but never wired into the suite.
+
+## Pottery Wheel - throw a vessel on an axis
+`app-wheel.js` + `app-fit.js` + `nso_printer.js`, wired on their own
+`?v=wheel1` tag (new files, so no existing tag was bumped) after `app-sculpt.js`
+(it reuses `NSO_sculptCommitRaw`) and after `app-extend.js` (rim extension
+calls it). UI is a **Wheel** menu in the viewport, beside Finish. Full
+write-up, with every number: `docs/POTTERY-WHEEL.md`.
+
+Four moves in the order a potter makes them - **Ball** (sized from a target
+height by Pappus's centroid theorem), **Open** (one push; the single outer
+profile becomes outer + inner and the piece is a shell from there), **Pull**
+(drag-shape the profile at ANY height, spline-fitted, revolved to a clean
+solid each update), **Trim** - plus **Rim +**, which is `NSO_extendRaw` and
+not a second copy of it.
+
+The piece is held as its MERIDIAN PROFILE and revolved fresh every update.
+That is the decision everything else follows from: the two live constraints
+are a scan of ~100 samples rather than a mesh query, which is what makes them
+affordable per frame of a drag.
+
+Four things a later ticket should read before touching this:
+- **The cavity is not `outer(z) - wall`.** A radial subtraction leaves a
+  perpendicular wall of `wall * cos(slope)` - measured at 1.446 mm where 3.00
+  was asked, 51.8% under, worst near the base. Open bisects for the locus at
+  perpendicular distance `wall` instead, which also sets the cavity floor and
+  the rim for free. `docs/POTTERY-WHEEL.md` finding 2.
+- **The wall floor is `NSO_Thickness.floorFor` and nothing else.** No `0.42`
+  in this file, no default: loaded without `nso_thickness.js` it throws on the
+  first move. The MEASUREMENT is this file's own exact scan, though, because
+  `measureLoop`'s ray pass under-reports a meridian by 1.47 mm on a 3 mm wall
+  (its `u in [-0.05, 1.05]` slop against short cavity-floor segments). Finding
+  5 - and it is pinned by a test, so a fix to `loopWallAt` shows up here.
+- **A vertical outside is not a vertical inside.** Pull carries the inner wall
+  radially by default (cheap, exact in the radial gap). Pulling a wall
+  straight that way leaves Extend refusing at 384/384 straddling triangles
+  oblique; `opts.reshapeWall` rebuilds the inside from the outside and gives
+  an 8.85 mm clean band. Finding 3.
+- **`tools/nso_wheel_canonical_check.js` earns its place.** It caught a pulled
+  bowl claiming a base at z = 0 while the mesh started at z = 0.112 - a Pull
+  clamping radii to zero leaves a run of axis points the revolve drops, and
+  nothing inside the wheel could see it. `NSO_wheelTidy` is the fix; the bbox
+  comparison is a permanent gate. Finding 6.
+
+Explicitly out of scope for this first version, and both real: **non-symmetric
+appendages** (handles, spouts, feet - a meridian profile cannot express one;
+that is a Join ticket) and **centring an arbitrary / asymmetric starting
+mesh** (there is deliberately no entry point that takes a mesh in). The
+self-test greps for both and fails if either appears.
+
+`npm run wheel` (94 checks, headless), `npm run wheel:canonical` (80 checks,
+`tools/mesh_validate.py` over every revolved piece, machine-compared, budget
+included) and `npm run wire:wheel` (53 checks, real app). All in `npm test`.
+
+## Build volume - does the piece fit the machine?
+`nso_printer.js` (the per-printer profiles and the fit arithmetic, no deps,
+Node and browser) + `app-fit.js` (the live watcher). Wired at `?v=wheel1`.
+Full write-up: `docs/BUILD-VOLUME.md`.
+
+Strictly "will this bounding box fit inside that machine". **Not** a
+printability check: bridging, overhangs, wall thickness and severed
+connections are separate, already-existing concerns, and a piece that fits and
+cannot be printed produces no warning here. `tools/nso_printer_fit_test.js`
+asserts that structurally - strip the comments and no code in `nso_printer.js`
+mentions any of them, and it references no other NSO module at all.
+
+Profiles are keyed to `app-core.js`'s `PLATES` ids one for one, so the plate
+selector resolves straight into a profile. `PLATES` carries bed X/Y only; this
+adds the **build height**, which is the axis the plate picker never modelled
+and the one a thrown vessel runs out of first. Where one id covers several
+machines the height is the LOWEST (`prusa` takes the MK3S's 210, not the MK4's
+220): a warning that fires early on the taller machine is a warning, one that
+stays silent on the shorter machine is a failed print. `custom` gained an
+`#custom-h` field and `getCurrentPlate()` now returns `h`.
+
+Two things a later ticket should read:
+- **The live check is a poll, deliberately.** A bbox changes from a dozen
+  places, and hooking all of them means every future tool has to remember to
+  call it. `app-fit.js` runs one rAF loop over a cheap signature - plate id,
+  custom fields, each model's three sizes - and recomputes only on a change.
+  A tool that changes a piece's size gets the warning whether or not its
+  author heard of the file. It is also why this is not an export-time gate.
+- **Only the 90 degree turn is offered.** `rotatedFits` is exact in a line. An
+  arbitrary-angle placement is out of scope and named: a 260 x 20 mm bar does
+  fit diagonally on a 256 mm bed and this says it does not. Placement is
+  `packModels()`; a piece that only fits on the diagonal deserves a human.
+
+The real case it was built against is in `npm run fit` section 5: a 320 mm
+floor vase actually thrown on the wheel, raised 30 mm at a time, whose BALL
+still fits an A1 Mini and which trips the warning at stage 4 (180.278 mm, 0.278
+over). The revolved solid is then put through the canonical checker and the
+checker's own bbox asserted to give the same verdict. `npm run fit` (70
+checks) and `npm run wire:wheel` sections 9-10 (the warning appearing
+mid-throw and clearing when the plate changes, nobody pressing Export).
+
+## Standing rule - a second viewport menu, and the accordion that bit
+Found at the Pottery Wheel merge, and it will bite the next person who adds a
+viewport `<details class="vp-menu">`.
+
+`.vp-menu` is an **exclusive accordion**: the `toggle` handler in
+`app-join.js` closes every other menu when one opens. Correct for users - the
+menu bodies overlap - and invisible for as long as **Finish was the only
+`.vp-menu` on the page**. The Wheel menu is the second one, and five suites
+broke the moment it landed:
+
+    nso_paint_arming_test   nso_pose_after_bake_test   nso_center_lock_test
+    nso_flip_port_test      nso_wire_fuse_test
+
+All five did `querySelectorAll('details').forEach(d => d.open = true)` and
+then clicked a button inside Finish. With one menu that worked; with two, the
+last toggle to fire closes Finish and the button is `not visible`.
+
+**The subtlety that matters, because the obvious fix does not work.** `toggle`
+on a `<details>` fires **asynchronously**. So re-opening Finish in the same
+evaluate is a no-op - it is still `open` at that instant - and the queued
+accordion handlers then close it anyway. The fix has to let the toggles settle
+first:
+
+```js
+document.querySelectorAll('details').forEach(d => { d.open = true; });
+await new Promise(r => setTimeout(r, 0));          // let the accordion settle
+document.querySelectorAll('.vp-menu').forEach(m => {
+  m.open = m.classList.contains('vp-finish-menu'); // then say which one
+});
+await new Promise(r => setTimeout(r, 0));
+```
+
+All five now do exactly that, so a **third** menu will not break them again.
+A new drive check should open the menu it needs by name rather than opening
+everything - the pattern `nso_wire_smooth_test.js`, `nso_wire_extend_test.js`
+and `nso_wire_wheel_test.js` already use (walk up from the button to its
+`DETAILS` and open that chain) is accordion-proof and needs no settle.
+
+## The wheel's wall floor - the vendoring is over, resolved at the merge
+The Pottery Wheel branch carried a VENDORED copy of `nso_thickness.js` (from
+`claude/wall-thickness-nozzle-safety-axpwtt` at `a017e12`), because the wall
+floor had to be the canonical one and that branch was not merged at the time.
+
+**Both have now landed on `claude-wip`, and the vendoring is resolved.** The
+wall-thickness branch's own version won the add/add conflict, deliberately: it
+is `80caaa6`, a strict superset of what the wheel vendored - same `floorFor`,
+same `measureLoop` (checked call-for-call, identical output on a meridian),
+plus `cutClearance()` / `cutWarning()`, which the older copy did not have. The
+wheel's copy would have been a silent regression.
+
+So there is now ONE `nso_thickness.js` and one `docs/WALL-THICKNESS.md`, and
+`tools/nso_wall_thickness_test.js` - which the wheel branch could not carry,
+since most of it A/Bs the retrofit of `app-cut.js` / `app-finish.js` - is in
+`npm test` alongside `npm run wheel`. Nothing is duplicated and nothing is
+pinned to an old revision.
+
+What the wheel adds on top is unchanged by any of that: it takes its floor
+from `NSO_Thickness.floorFor()` and carries no literal, and it deliberately
+does NOT use `measureLoop` as its live gate - see finding 5 in
+`docs/POTTERY-WHEEL.md` for the 1.47 mm the ray pass loses on a meridian.
 
 ## 3MF import - geometry only
 `nso-3mf-read.js` (UMD, no deps, same code under Node and in the page), called
