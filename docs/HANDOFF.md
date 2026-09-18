@@ -196,8 +196,8 @@ The groups, and what decides which one a row belongs to:
 | **Paint** | the mask itself: Paint Selected / Excluded / Clear, Delete painted, Extract selection |
 | **Surface** | adds relief to a face: Skin face / wrap / patch, Texture |
 | **Sculpt** | freehand and local: Brush, Carve |
-| **Measure** | read-only inspection. Nothing here may mutate the piece |
-| **Check & repair** | finds or fixes defects: Check piece, Cap open faces, Repair, Seal, Non-solid, Solidify |
+| **Measure & check** | read-only inspection: Measure, Check piece. Nothing here may mutate the piece — that is the line the group is drawn on, so a tool that bakes does not belong in it however diagnostic it feels |
+| **Check & repair** | finds or fixes defects: Cap open faces, Repair, Seal, Non-solid, Solidify |
 
 *Clear plate* is outside every group on purpose: it is the only control that
 is not about the selected piece, and it must never be a click hidden behind a

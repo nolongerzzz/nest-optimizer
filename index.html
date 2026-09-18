@@ -366,7 +366,7 @@
                 </div>
               </details>
               <details class="vp-sec" data-sec="measure">
-                <summary class="vp-sec-head">Measure</summary>
+                <summary class="vp-sec-head">Measure &amp; check</summary>
                 <div class="vp-sec-body">
                   <div class="vp-row vp-row-pair">
                     <button id="btn-measure" class="btn btn-secondary btn-measure" type="button" aria-pressed="false"
@@ -376,15 +376,15 @@
                       <option value="edge">Edge</option>
                     </select>
                   </div>
+                  <div class="vp-row vp-row-full">
+                    <button id="btn-check-defects" class="btn btn-secondary btn-check-defects" type="button" disabled aria-pressed="false"
+                            title="Run the canonical checker on this piece and paint what it finds ON the mesh: red lines on open edges, orange on non-manifold edges, red patches on the triangles of every piercing pair, violet on faces whose wall or gap measures under 0.42 mm. A snapshot, not a live check - it clears itself when a bake changes the piece.">Check piece</button>
+                  </div>
                 </div>
               </details>
               <details class="vp-sec" data-sec="repair">
                 <summary class="vp-sec-head">Check &amp; repair</summary>
                 <div class="vp-sec-body">
-                  <div class="vp-row vp-row-full">
-                    <button id="btn-check-defects" class="btn btn-secondary btn-check-defects" type="button" disabled aria-pressed="false"
-                            title="Run the canonical checker on this piece and paint what it finds ON the mesh: red lines on open edges, orange on non-manifold edges, red patches on the triangles of every piercing pair, violet on faces whose wall or gap measures under 0.42 mm. A snapshot, not a live check - it clears itself when a bake changes the piece.">Check piece</button>
-                  </div>
                   <div class="vp-row vp-row-full">
                     <button id="btn-cap-open" class="btn btn-secondary" type="button" title="Close every open boundary loop of the selected piece with a flat cap.">Cap open faces</button>
                   </div>
