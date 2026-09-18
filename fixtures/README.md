@@ -30,3 +30,29 @@ originals to 3e-7 mm², so they slice exactly as before. `hinge_pip` stays a
 multi-body file on purpose: the pin has clearance inside the knuckles.
 
 `library/box_closed.stl` is NOT regenerated; see `library/README.md`.
+
+## raster-lines/ — the flat-printed-line importer's inputs and outputs (2026-09-18)
+
+Four rasters and the STL each one builds, regenerated and byte-diffed by
+`npm run raster:fixtures` (`tools/nso_raster_fixtures.js`); `raster-lines.json`
+carries every number. These are **inputs** as well as outputs: the `.pbm` /
+`.pgm` files are what `nso_raster_lines.js` is fed, the `.stl` files are what it
+builds from them.
+
+Netpbm rather than PNG on purpose — uncompressed, stdlib-only to read, and the
+one raster format a text editor can still open. The binary ones are P4 (packed
+1-bit, 45 KB for 600²); `zigzag-layer-aa.pgm` is P5 grayscale because a
+threshold is exactly what it exists to exercise.
+
+| file | what it is |
+|------|------------|
+| `zigzag-layer.pbm` | the reference: one layer of the real two-layer zigzag, 15 lines at 2.0 mm pitch over 30 mm, drawn with a 0.25 mm stroke |
+| `zigzag-layer-fat.pbm` | the same centrelines drawn 0.65 mm wide, 2.3× the ink — must trace to the same path |
+| `zigzag-layer-aa.pgm` | the same centrelines, anti-aliased, at half the resolution |
+| `crosshatch.pbm` | 15 lines each way in one picture — 225 four-way junctions |
+
+Every STL: 0 open, 0 non-manifold, 0 degenerate, 0 sliver, 0 piercing, 0
+coplanar, exactly 0.300 mm tall, volume = top-face area × height. The three
+zigzag variants all come out as the same 572 triangles, which is the point of
+having three. `crosshatch.stl` is Euler −390 = genus 196 = the 14 × 14 holes in
+the lattice. See `docs/RASTER-LINES.md`.
