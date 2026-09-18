@@ -615,6 +615,33 @@ select:focus, input:focus {
   max-width: 176px;
   padding: 4px;
   gap: 3px;
+  /* The Finish menu grows every time a feature lands in it, and unbounded it
+     eventually runs out of viewport: once the open menu is taller than the
+     space below its summary, clicking a control inside it makes the PAGE
+     scroll to bring that control into view. That drags the canvas up under
+     the fixed header, and the next click aimed at the piece lands on the
+     header instead.
+
+     Bounding the body and letting IT scroll fixes that for every row, not
+     just the ones added last: the menu can no longer be taller than the space
+     it has, so the page never scrolls to reach a control and the viewport
+     stays where the user put it.
+
+     This is a bound, not a behaviour change on today's menu. Measured at
+     1200x720 the open menu is 334px tall against a 600px cap, so nothing
+     moves until roughly 266px more of rows land in it. It is here so that
+     the row that would have crossed the line simply cannot.
+
+     The 120px is this menu's own geometry, not a round number: the body
+     opens at y=112 at that size, so 100vh-120px leaves its bottom 8px inside
+     the viewport. The working branch carries 96px, which was right for where
+     the menu sat there; here it overshoots by 16px and leaves the canvas
+     still shifting 15px on reach. Measured with the menu's rows tripled:
+     unbounded the canvas is dragged 375px up under the header, at 96px it
+     is 15px, at 120px it is 0. */
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .vp-icon-btn {
   pointer-events: auto;
