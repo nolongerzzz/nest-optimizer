@@ -1873,7 +1873,13 @@ function flipPortOnPunch() {
   if (!hull.geometry.boundingBox) hull.geometry.computeBoundingBox();
   hull.geometry.boundingBox.getCenter(hc);
   hc.applyMatrix4(hull.matrixWorld);
-  const aWorld = (typeof meshToWorldSoup === 'function') ? meshToWorldSoup(placedA) : null;
+  /* The MESH, not the placed record. meshToWorldSoup bakes matrixWorld into
+     the soup, so only a mesh can answer it - a placed record carries a
+     `geometry` (which gets it past the guard) but no updateWorldMatrix, and
+     the call died on `placed.updateWorldMatrix is not a function` before
+     NSO_plugFrame ever saw a hull. `hull` is placedA.mesh and was already
+     updated two lines up, which is the same pair reportJoinFlushGap uses. */
+  const aWorld = (typeof meshToWorldSoup === 'function') ? meshToWorldSoup(hull) : null;
   const frame = NSO_plugFrame(bit, hc, aWorld);
   const axis = frame.outerNormal && frame.outerNormal.lengthSq() > 1e-8
     ? frame.outerNormal.clone().normalize()
