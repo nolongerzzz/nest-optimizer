@@ -54,6 +54,10 @@ const state = {
   faceHelper: null,
   softenArmed: false,
   capArmed: false,
+  // Center lock: armed = the next canvas click picks the target point on A;
+  // target = the point it picked, tagged with the piece it was picked on.
+  centerLockArmed: false,
+  centerLockTarget: null,
   // The one stored face pick: set by storeFacePick, read by getFacePick.
   facePick: null,
   edgeTreat: 'fillet',
@@ -2285,6 +2289,17 @@ function onCanvasPointerDown(event) {
         return;
       }
     }
+  }
+
+  /* Center lock with a target pick armed owns a click that lands on a piece.
+     It has to come before the Join block: by the time Center lock is useful A
+     and B are both picked, and Join deliberately lets that click fall through
+     so B can be dragged. */
+  if (state.centerLockArmed && typeof window.nsoCenterLockTakesClick === 'function'
+      && window.nsoCenterLockTakesClick(event)) {
+    setOrbitFromPlate(false);
+    event.stopPropagation();
+    return;
   }
 
   if (state.joinSession && state.modelGroup) {

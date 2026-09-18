@@ -717,6 +717,11 @@
       if (carveBtn) carveBtn.click();
       else state.carveArmed = false;
     }
+    if (state.centerLockArmed) {
+      var clockBtn = el('btn-center-lock-pick');
+      if (clockBtn) clockBtn.click();
+      else state.centerLockArmed = false;
+    }
     state.softenArmed = false;
     state.capArmed = false;
     if (typeof clearFacePick === 'function') clearFacePick();

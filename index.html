@@ -117,6 +117,16 @@
           <button id="btn-join-align" class="btn btn-secondary" type="button">Align edges</button>
           <button id="btn-join-cx" class="btn btn-secondary" type="button">Center X</button>
           <button id="btn-join-cz" class="btn btn-secondary" type="button">Center Z</button>
+          <div class="edit-row">
+            <button id="btn-center-lock" class="btn btn-secondary" type="button"
+                    title="Slide B in XZ until its centre sits on the target point on A. Rough placement - Seat / Align still do the fine work.">Center lock</button>
+            <button id="btn-center-lock-pick" class="btn btn-secondary" type="button"
+                    title="Click a point on A to lock onto instead of A's own centre. Right-click this button to drop a stored target.">Pick target</button>
+          </div>
+          <select id="center-lock-ref" title="Which point on each piece Center lock reads, seen top-down">
+            <option value="bbox">Lock on bounding-box centre</option>
+            <option value="centroid">Lock on centroid</option>
+          </select>
           <button id="btn-join" class="btn btn-primary" type="button" disabled>Complete Join</button>
           <button id="btn-subtract" class="btn btn-secondary" type="button">Subtract B from A</button>
           <button id="btn-extract-bit" class="btn btn-secondary" type="button">Extract bit</button>
@@ -355,6 +365,7 @@
   <script src="app-scale.js?v=inside6"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=wallcut1"></script>
+  <script src="app-center-lock.js?v=clock1"></script>
   <script src="app-carve.js?v=wallcut1"></script>
   <script src="app-skin.js?v=skin2"></script>
   <script src="app-skin-patch.js?v=skin3"></script>
