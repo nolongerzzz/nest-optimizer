@@ -1934,6 +1934,15 @@ function onCanvasPointerDown(event) {
     return;
   }
 
+  /* Measure mode owns a click that lands on a piece, on the same terms and
+     for the same reason - app-measure.js binds its own handler on this canvas
+     after this one and takes the measurement there. Measuring changes nothing
+     on the piece, so a measure click must not also drag it across the plate. */
+  if (typeof window.nsoMeasureTakesClick === 'function' && window.nsoMeasureTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
   if (state.softenArmed && state.modelGroup && event.button === 0) {
     const sHits = state.raycaster.intersectObjects(state.modelGroup.children, true);
     if (sHits.length) {

@@ -168,6 +168,14 @@
                 <button id="btn-mask-clear" class="btn btn-secondary" type="button"
                         title="Include every face again.">Clear paint</button>
               </div>
+              <div class="vp-row vp-row-pair">
+                <button id="btn-measure" class="btn btn-secondary btn-measure" type="button"
+                        title="Click two points on the pieces to read the distance between them in mm, or switch to Edge and click one edge for its length. Corners and edges snap. Click this button again to stop; Esc clears the measurement.">Measure</button>
+                <select id="sel-measure-mode" class="vp-select" title="What a measure click means">
+                  <option value="span" selected>Two points</option>
+                  <option value="edge">Edge</option>
+                </select>
+              </div>
               <div class="vp-row vp-row-label">
                 <label class="vp-repair"><span>Repair</span><input type="checkbox" id="chk-seal-repair"></label>
                 <button id="btn-seal" class="btn btn-secondary" type="button">Seal</button>
@@ -215,6 +223,7 @@
   <script src="app-join.js?v=inside4"></script>
   <script src="app-mask.js?v=inside4"></script>
   <script src="app-seat-grid.js?v=inside4"></script>
+  <script src="app-measure.js?v=inside4"></script>
   <script src="app-library.js?v=libgit"></script>
   <script src="app-ux.js?v=inside4"></script>
   <script src="app-cth-expose.js?v=cth14"></script>

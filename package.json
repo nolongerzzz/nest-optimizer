@@ -9,7 +9,8 @@
     "selfint:equiv": "node tools/nso_selfint_equiv_test.js",
     "grid:math": "node tools/nso_surface_grid_test.js",
     "grid:wire": "node tools/nso_wire_grid_test.js",
-    "test": "sh tools/cth-test/run-all.sh && node tools/cth-test/capture-check.mjs && node tools/nso_selfint_equiv_test.js && node tools/nso_surface_grid_test.js && node tools/nso_wire_grid_test.js"
+    "measure": "node tools/nso_measure_test.js",
+    "test": "sh tools/cth-test/run-all.sh && node tools/cth-test/capture-check.mjs && node tools/nso_selfint_equiv_test.js && node tools/nso_surface_grid_test.js && node tools/nso_wire_grid_test.js && node tools/nso_measure_test.js"
   },
   "devDependencies": {
     "playwright": "^1.47.0",
