@@ -140,6 +140,31 @@ function NSO_skinWrapFaces(m, soup) {
   return { faces: faces, painted: painted, missing: missing };
 }
 
+/* What a Skin bake leaves behind on the piece.
+
+   The bake rewrites rawTris and nothing else: which pattern made that relief,
+   at what parameters, over which faces, was only ever in the status line. The
+   record is what the 3MF scene block writes (nso-3mf-scene.js) so a reopened
+   plate can say "crosshatch, wrapped, +Z and -Z" instead of showing a relief
+   nobody can name.
+
+   It is PROVENANCE, not a replay buffer: the geometry in the file already
+   carries the skin, nothing re-bakes from this, and a later bake overwrites
+   it. Undo restores the geometry; the record goes with it, below. */
+function NSO_recordSkin(m, info) {
+  if (!m || !info || !info.pattern) return;
+  m.skin = {
+    pattern: String(info.pattern),
+    scope: info.scope === 'wrap' ? 'wrap' : 'face',
+    mode: info.mode == null ? null : String(info.mode),
+    faces: Array.isArray(info.faces) ? info.faces.map(String) : [],
+    layer2: (info.layer2 && info.layer2.pattern)
+      ? { pattern: String(info.layer2.pattern), free: !!info.layer2.free }
+      : null,
+    params: (info.params && typeof info.params === 'object') ? info.params : null
+  };
+}
+
 /* Skin every flat rectangular face of the piece that is not painted out.
    opts: { pattern, params, mode, layer2 }. */
 function NSO_skinWrapModel(m, opts) {
@@ -174,6 +199,11 @@ function NSO_skinWrapModel(m, opts) {
 
   if (typeof NSO_sculptCommitRaw === 'function') {
     NSO_sculptCommitRaw(m, r.tris, 'skinReplace', txt);
+    NSO_recordSkin(m, {
+      pattern: opts.pattern || 'crosshatch', scope: 'wrap', mode: opts.mode,
+      faces: r.faces.map(function (f) { return f.name; }),
+      layer2: opts.layer2, params: opts.params
+    });
     if (r.nonSolid && typeof window.nsoNonSolidSet === 'function') window.nsoNonSolidSet(m, true, { noUndo: true, silent: true });
   }
   return r;
@@ -246,6 +276,11 @@ function NSO_skinFaceOfModel(m, opts) {
      on Undo. noUndo: this is part of the skin step, not a step of its own. */
   if (typeof NSO_sculptCommitRaw === 'function') {
     NSO_sculptCommitRaw(m, r.tris, 'skinReplace', txt);
+    NSO_recordSkin(m, {
+      pattern: pattern, scope: 'face', mode: opts.mode,
+      faces: [axisIdx == null ? 'face' : ((r.face.n[axisIdx] < 0 ? '-' : '+') + 'XYZ'[axisIdx])],
+      layer2: opts.layer2, params: opts.params
+    });
     if (sel && typeof nsoMaskSelectClear === 'function') nsoMaskSelectClear(m, { noUndo: true });
     /* A free layer leaves the piece with two shells. The flag is set AFTER
        the commit, noUndo, for the same reason the selection is consumed

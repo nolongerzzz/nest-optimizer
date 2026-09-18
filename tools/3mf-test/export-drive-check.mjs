@@ -224,9 +224,14 @@ async function main() {
 
   const names = execFileSync('unzip', ['-Z1', file], { encoding: 'utf8' })
     .trim().split('\n').sort();
+  // Metadata/nso_scene.json is the plate's own state (nso-3mf-scene.js). The
+  // plate export always writes it; an export with no scene to write leaves it
+  // out entirely, which tools/3mf-test/scene-check.js pins against this same
+  // six-part list.
   check('every OPC part is present', names, [
     '3D/3dmodel.model', 'Metadata/model_settings.config',
-    'Metadata/nso_profile.json', 'Metadata/project_settings.config',
+    'Metadata/nso_profile.json', 'Metadata/nso_scene.json',
+    'Metadata/project_settings.config',
     '[Content_Types].xml', '_rels/.rels',
   ].sort());
 

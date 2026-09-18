@@ -30,6 +30,13 @@ Smart build-plate packing for 3D printing.
 - Or pick **Format: 3MF** in the Export card and the same two buttons write a
   Bambu Studio `.3mf` project with cooling settings baked in, chosen from a small
   table of named cooling profiles - the whole plate, or the selected piece alone
+- **Save and reopen a plate.** A 3MF NSO writes also carries the working scene -
+  every piece's position and pose, the position and plate locks, the gap a pair
+  was seated at, the skin pattern that made a relief, the painted faces and the
+  non-solid flags. Drop that file back in and the plate comes back as you left
+  it, not just the shapes. Files from Bambu Studio or MakerWorld have no such
+  block and import as plain geometry, exactly as before.
+  See [docs/SCENE-3MF.md](docs/SCENE-3MF.md).
 - **Lock position** on a placed piece: a locked piece refuses drag, the nudge
   arrows, Raise/Lower and the pose buttons, so a stray click cannot move it
   once Seat has put it where it belongs. Seat, Center, Align and Skin still
@@ -125,10 +132,12 @@ Smart build-plate packing for 3D printing.
   overhang-fan settings baked in - see
   [docs/baked-cooling-settings.md](docs/baked-cooling-settings.md), including a
   known limitation around Bambu's "Use Modified Value of Filament Preset" dialog.
-  3MF **import** reads geometry only: every object in the file, with its
-  transforms applied, becomes a model. Print settings, materials and colours in
-  the file are ignored. Tested against files Bambu Studio wrote as well as
-  NSO's own exports - see `docs/baked-cooling-settings.md`, "3MF import".
+  3MF **import** reads geometry - every object in the file, with its transforms
+  applied, becomes a model - and, when the file is one NSO wrote, the scene
+  block that restores the whole plate (`docs/SCENE-3MF.md`). Print settings,
+  materials and colours in the file are still ignored. Tested against files
+  Bambu Studio wrote as well as NSO's own exports - see
+  `docs/baked-cooling-settings.md`, "3MF import".
 - The packing algorithm is a solid bottom-left free-rectangle packer with rotation. It will improve over time.
 
 ## Future ideas

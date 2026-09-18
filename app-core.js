@@ -102,6 +102,14 @@ function pushUndo(entry) {
     const mn = state.models.find(x => x.id === entry.modelId);
     if (mn) entry.prevNonSolid = !!mn.nonSolid;
   }
+  // And the skin provenance record (app-skin.js), for the third time the same
+  // reason: a Skin bake writes it about the geometry it just made, so undoing
+  // that geometry has to take the record with it or the piece would claim a
+  // relief it no longer has.
+  if (entry.prevSkin === undefined && entry.modelId != null) {
+    const ms = state.models.find(x => x.id === entry.modelId);
+    if (ms) entry.prevSkin = ms.skin || null;
+  }
   state.undoStack.push(entry);
   if (state.undoStack.length > UNDO_MAX) state.undoStack.shift();
   updateUndoBtn();
@@ -372,6 +380,7 @@ function undoLast() {
       m.nonSolid = entry.prevNonSolid;
       if (typeof nsoNonSolidRefresh === 'function') nsoNonSolidRefresh();
     }
+    if (entry.prevSkin !== undefined) m.skin = entry.prevSkin;
     m.geometry = entry.prevGeometry;
     m.rawTris = entry.prevRawTris;
     m.rawAxis = entry.prevRawAxis;
@@ -816,7 +825,7 @@ function handleFiles(files) {
  * file's own axes (Z up, millimetres, untranslated) - what STLLoader hands
  * back for an STL and what the 3MF reader builds per object.
  */
-function addModelFromZUpGeometry(name, geometry) {
+function addModelFromZUpGeometry(name, geometry, opts) {
   // Capture the raw triangle soup BEFORE rotateX/center - original
   // file axes, untranslated. This is what the sandbox cut engine
   // was validated against; the display mesh below is a transformed
@@ -835,14 +844,30 @@ function addModelFromZUpGeometry(name, geometry) {
     z: (bb.min.z + bb.max.z) / 2
   };
   geometry.center();
-  return addModel(name, geometry, { rawTris: rawTris, rawAxis: 'zup', centerOffset: centerOffset });
+  // Extra options ride through untouched, so the scene restore can ingest a
+  // piece without the auto-placement and status line a fresh upload wants.
+  const options = Object.assign({}, opts || {},
+    { rawTris: rawTris, rawAxis: 'zup', centerOffset: centerOffset });
+  return addModel(name, geometry, options);
 }
 
 /**
- * 3MF import: geometry only. nso-3mf-read.js pulls one triangle soup per build
- * item out of the archive (millimetres, Z up, transforms applied); each becomes
- * its own model, named from the file's own object names. Print settings,
- * materials and everything else in the archive are ignored.
+ * 3MF import. nso-3mf-read.js pulls one triangle soup per build item out of the
+ * archive (millimetres, Z up, transforms applied); each becomes its own model,
+ * named from the file's own object names.
+ *
+ * TWO ROUTES, decided by what the file carries:
+ *
+ *   an NSO scene block   Metadata/nso_scene.json, written by this app's own
+ *                        export. The plate comes back as it was left: pose,
+ *                        locks, seat gaps, skin, paint, the non-solid flags.
+ *   anything else        geometry only, exactly as before - a file straight
+ *                        from Bambu Studio or MakerWorld has no such part and
+ *                        nothing here assumes one. A block this build cannot
+ *                        read takes the same route, with a console warning.
+ *
+ * Print settings, materials and everything else in the archive are still
+ * ignored on both routes.
  */
 function import3MF(filename, arrayBuffer) {
   if (!window.NSO3MFRead) {
@@ -852,13 +877,29 @@ function import3MF(filename, arrayBuffer) {
   setStatus(`Reading ${filename}...`);
   return window.NSO3MFRead.parse3MF(new Uint8Array(arrayBuffer), { name: filename })
     .then(result => {
+      result.warnings.forEach(w => console.warn(`${filename}: ${w}`));
+
+      const scene = readSceneBlock(filename, result);
+      if (scene) {
+        const restored = restoreSceneFrom3MF(filename, result, scene);
+        if (restored != null) {
+          if (restored) {
+            setStatus(`Restored ${restored} piece(s) from ${filename} - ` +
+                      (scene.scope === 'plate' ? 'plate, poses and per-piece state as saved'
+                                               : 'piece and its state as saved'));
+          } else {
+            setStatus(`${filename}: the saved scene had nothing this build could rebuild`, true);
+          }
+          return result;
+        }
+      }
+
       let loaded = 0;
       result.objects.forEach(obj => {
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.BufferAttribute(obj.positions, 3));
         if (addModelFromZUpGeometry(obj.name, geometry)) loaded++;
       });
-      result.warnings.forEach(w => console.warn(`${filename}: ${w}`));
       if (loaded > 1) {
         setStatus(`Loaded ${loaded} objects from ${filename}` +
                   (result.application ? ` (${result.application})` : ''));
@@ -2993,6 +3034,339 @@ function buildPlacedObjects3MF() {
   });
 }
 
+// ===================== 3MF scene state =====================
+// Save and restore the whole working plate through the same archive, in
+// Metadata/nso_scene.json. nso-3mf-scene.js owns the schema and the transform
+// maths; everything here is the app side of it - reading the live state out on
+// export, and putting it back on import.
+//
+// WHERE EACH VALUE COMES FROM. Nothing below re-derives a value that the app
+// already holds; each one is read through the accessor its own module
+// publishes, so a change there reaches the file without a second definition
+// drifting behind it:
+//
+//   position / pose   the placed entry's own fields, the ones every exporter
+//                     already reads (x, z, liftY, rotY, flipX, tipX, tipZ,
+//                     tiltX, tiltZ, yaw, rotated)
+//   piece lock        nsoPosLocked(m)          app-poslock.js
+//   plate lock        nsoPlateLocked()         app-poslock.js
+//   seat gap          p.seat                   app-join.js, recorded by Seat
+//   skin              m.skin                   app-skin.js, recorded by a bake
+//   paint             nsoMaskSnapshot(m)       app-mask.js
+//   non-solid         nsoNonSolid(m)           app-nonsolid.js
+//
+// A module that is not loaded simply contributes nothing - every read below is
+// guarded, so the scene block degrades to "geometry and pose" rather than
+// failing the export.
+
+/** The model a placed piece was made from, or null. */
+function modelOfPlaced(p) {
+  if (!p || p.sourceId == null) return null;
+  return state.models.find(m => m.id === p.sourceId) || null;
+}
+
+/** The centre of a geometry's own bounding box, without disturbing its cache. */
+function geometryCenter(geo) {
+  const bb = new THREE.Box3().setFromBufferAttribute(geo.attributes.position);
+  const c = new THREE.Vector3();
+  bb.getCenter(c);
+  return c;
+}
+
+/**
+ * The transform the export baked into one piece, expressed against the piece's
+ * CENTRED geometry - which is what addModel hands back on the way in, so the
+ * inverse lands on exactly the geometry a restore can re-ingest.
+ *
+ * NSO3MFScene.poseBasis() is the one definition of the chain; this only
+ * re-anchors its origin onto the geometry's own centre.
+ */
+function pieceBasis3MF(p, plate) {
+  const Scene = window.NSO3MFScene;
+  const M = Scene.poseBasis({
+    x: p.x, z: p.z,
+    rotY: p.rotY, rotated: p.rotated, flipX: p.flipX,
+    tipX: p.tipX, tipZ: p.tipZ, tiltX: p.tiltX, tiltZ: p.tiltZ,
+    liftY: p.liftY, height: p.height
+  }, plate);
+  const c = geometryCenter(p.geometry);
+  const t = Scene.apply12(M, c.x, c.y, c.z);
+  return M.slice(0, 9).concat([t[0], t[1], t[2]]);
+}
+
+/** Everything the scene block records for one placed piece. */
+function capturePieceState(p, i, plate) {
+  const m = modelOfPlaced(p);
+  const paint = (m && typeof window.nsoMaskSnapshot === 'function')
+    ? window.nsoMaskSnapshot(m) : null;
+  return {
+    name: p.name || ('piece_' + (i + 1)),
+    sourceId: p.sourceId,
+    basis: pieceBasis3MF(p, plate),
+    centerOffset: (m && m.centerOffset) ? m.centerOffset : null,
+    pose: {
+      x: p.x, z: p.z, liftY: p.liftY || 0, overflow: !!p.overflow,
+      rotY: (p.rotY != null ? p.rotY : (p.rotated ? Math.PI / 2 : 0)),
+      yaw: p.yaw || 0, flipX: !!p.flipX,
+      tipX: p.tipX || 0, tipZ: p.tipZ || 0,
+      tiltX: p.tiltX || 0, tiltZ: p.tiltZ || 0,
+      rotated: !!p.rotated,
+      width: p.width, depth: p.depth, height: p.height
+    },
+    locked: !!(m && typeof window.nsoPosLocked === 'function' && window.nsoPosLocked(m)),
+    seat: p.seat || null,
+    skin: (m && m.skin) ? m.skin : null,
+    paint: paint ? { exclude: paint.exclude, select: paint.select } : null,
+    nonSolid: !!(m && typeof window.nsoNonSolid === 'function' && window.nsoNonSolid(m))
+  };
+}
+
+/** The serialized scene block for the current plate, or null if unavailable. */
+function buildPlateSceneJson() {
+  const Scene = window.NSO3MFScene;
+  if (!Scene) return null;
+  const plate = getCurrentPlate();
+  try {
+    const block = Scene.capture({
+      scope: 'plate',
+      plate: {
+        id: state.plate,
+        name: plate.name,
+        w: plate.w,
+        d: plate.d,
+        locked: !!(typeof window.nsoPlateLocked === 'function' && window.nsoPlateLocked())
+      },
+      selection: { placedIndex: state.selectedIndex, editId: state.editId },
+      pieces: state.placed.map((p, i) => capturePieceState(p, i, plate))
+    });
+    return Scene.serialize(block);
+  } catch (err) {
+    // A scene block is an addition to the export, never a reason to lose it.
+    console.error('3MF scene capture failed; exporting geometry only', err);
+    return null;
+  }
+}
+
+/**
+ * The scene block for the one-model export route. The piece has no plate pose
+ * on this route - buildActiveModelObject3MF centres it on the plate resting on
+ * z = 0 - so `basis` is that placement and the pose fields are the identity.
+ * Its model state (paint, skin, non-solid, lock) is the real thing.
+ */
+function buildModelSceneJson(m, basis) {
+  const Scene = window.NSO3MFScene;
+  if (!Scene || !basis) return null;
+  const plate = getCurrentPlate();
+  const paint = (typeof window.nsoMaskSnapshot === 'function') ? window.nsoMaskSnapshot(m) : null;
+  try {
+    const block = Scene.capture({
+      scope: 'model',
+      plate: { id: state.plate, name: plate.name, w: plate.w, d: plate.d, locked: false },
+      selection: { placedIndex: null, editId: m.id },
+      pieces: [{
+        name: m.name || 'piece',
+        sourceId: m.id,
+        basis: basis,
+        centerOffset: m.centerOffset || null,
+        pose: {
+          x: 0, z: 0, liftY: 0, overflow: false,
+          rotY: 0, yaw: 0, flipX: false, tipX: 0, tipZ: 0, tiltX: 0, tiltZ: 0,
+          rotated: false,
+          width: m.size.x, depth: m.size.z, height: m.size.y
+        },
+        locked: !!(typeof window.nsoPosLocked === 'function' && window.nsoPosLocked(m)),
+        seat: null,
+        skin: m.skin || null,
+        paint: paint ? { exclude: paint.exclude, select: paint.select } : null,
+        nonSolid: !!(typeof window.nsoNonSolid === 'function' && window.nsoNonSolid(m))
+      }]
+    });
+    return Scene.serialize(block);
+  } catch (err) {
+    console.error('3MF scene capture failed; exporting geometry only', err);
+    return null;
+  }
+}
+
+/* ---- restore ---- */
+
+/**
+ * The per-model half of a scene entry: the flags and lists that belong to the
+ * piece itself rather than to where it sits. Each goes back through the setter
+ * its own module publishes, so the indicators, the HUD and the undo stack all
+ * see it the way a user setting it would.
+ *
+ * The lock is applied last: it blocks the move surface, and putting a piece
+ * where it belongs is exactly what that surface does.
+ */
+function applyModelSceneState(m, so) {
+  // Paint only when there is some: restoring an empty snapshot would leave a
+  // piece that was never painted carrying a faceMask, where a fresh import
+  // leaves it with none. The same thing to every consumer, but not the same
+  // object, and the round-trip check compares objects.
+  if (so.paint && (so.paint.exclude.length || so.paint.select.length) &&
+      typeof window.nsoMaskRestore === 'function') {
+    window.nsoMaskRestore(m, { exclude: so.paint.exclude, select: so.paint.select });
+  }
+  if (so.skin) m.skin = so.skin;
+  if (so.nonSolid && typeof window.nsoNonSolidSet === 'function') {
+    window.nsoNonSolidSet(m, true, { noUndo: true, silent: true });
+  }
+  if (so.locked && typeof window.nsoPosLockSet === 'function') {
+    window.nsoPosLockSet(m, true, { noUndo: true, silent: true });
+  }
+}
+
+/**
+ * Rebuild one piece from its imported geometry and its scene entry.
+ *
+ * The imported soup is in plate coordinates. Inverting `basis` gives the
+ * piece's centred display geometry back; adding the model's own centerOffset
+ * and swapping Y up -> Z up gives its rawTris back IN THE FRAME IT HAD, which
+ * is what makes the raw-space paint planes and the skin record meaningful
+ * again rather than approximately right.
+ *
+ * @returns {object|null} the placed entry
+ */
+function restoreSceneObject(so, positions) {
+  const Scene = window.NSO3MFScene;
+  const disp = Scene.transformSoup(so.inverse, positions);
+  const C = so.centerOffset || { x: 0, y: 0, z: 0 };
+  const raw = new Float32Array(disp.length);
+  for (let i = 0; i + 2 < disp.length; i += 3) {
+    const a = disp[i] + C.x, b = disp[i + 1] + C.y, c = disp[i + 2] + C.z;
+    raw[i] = a;            // zUpToYUp is (x, y, z) -> (x, z, -y); this inverts it
+    raw[i + 1] = -c;
+    raw[i + 2] = b;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(raw, 3));
+  const id = addModelFromZUpGeometry(so.name, geometry, { silent: true });
+  if (id == null) return null;
+  const m = state.models.find(x => x.id === id);
+  if (!m) return null;
+
+  // ---- put it on the plate, then pose it ----
+  const entry = placeModelMovable(m, so.pose.x, so.pose.z);
+  if (!entry) return null;
+  entry.name = so.name;
+  entry.yaw = so.pose.yaw;
+  entry.rotated = so.pose.rotated;
+  applyPlacedOrientation(entry, so.pose);
+  entry.overflow = !!so.pose.overflow;
+  if (so.seat) entry.seat = so.seat;
+  applyModelSceneState(m, so);
+  return entry;
+}
+
+/**
+ * Restore a whole plate from a scene block.
+ *
+ * Replacing the plate is the point of the feature - a half-restore into a
+ * plate that already has pieces reproduces nothing - so a populated plate is
+ * confirmed first, and a decline falls back to the plain geometry import.
+ *
+ * @returns {number|null} pieces restored, or null when the caller should do
+ *          the ordinary geometry-only import instead
+ */
+function restoreSceneFrom3MF(filename, result, scene) {
+  if (scene.objects.length !== result.objects.length) {
+    console.warn(filename + ': scene block lists ' + scene.objects.length +
+                 ' object(s) but the model has ' + result.objects.length +
+                 ' - importing geometry only');
+    return null;
+  }
+
+  const replacing = scene.scope === 'plate' && state.placed.length > 0;
+  if (replacing) {
+    const ok = window.confirm(
+      filename + ' carries a saved NSO plate (' + scene.objects.length + ' piece(s)).\n\n' +
+      'Restore it? The ' + state.placed.length + ' piece(s) now on the plate are removed. ' +
+      'Cancel imports the geometry alongside them instead.');
+    if (!ok) return null;
+  }
+  if (scene.scope === 'plate') {
+    clearPlaced();
+    restoreScenePlate(scene.plate);
+  }
+
+  let restored = 0;
+  scene.objects.forEach((so, i) => {
+    try {
+      if (scene.scope === 'model') {
+        // A one-model file has no plate arrangement to rebuild - the geometry
+        // IS the model. It takes the ordinary import path, untouched, so this
+        // route keeps the placement contract nso_export_roundtrip_test.js pins
+        // for it; the block adds the piece's own flags and lists and nothing
+        // else.
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(result.objects[i].positions, 3));
+        const id = addModelFromZUpGeometry(so.name, geometry);
+        if (id == null) return;
+        const m = state.models.find(x => x.id === id);
+        if (!m) return;
+        applyModelSceneState(m, so);
+        restored++;
+      } else if (restoreSceneObject(so, result.objects[i].positions)) {
+        restored++;
+      }
+    } catch (err) {
+      console.error(filename + ': piece "' + so.name + '" could not be restored', err);
+    }
+  });
+
+  if (scene.scope === 'plate' && typeof window.nsoPlateLockSet === 'function') {
+    window.nsoPlateLockSet(!!scene.plate.locked, { noUndo: true, silent: true });
+  }
+  if (scene.selection.editId != null && restored) {
+    // ids are handed out fresh on import, so the saved one cannot be reused;
+    // select the piece that held it by its position in the file instead.
+    const idx = scene.objects.findIndex(o => o.sourceId === scene.selection.editId);
+    if (idx >= 0 && state.placed[idx]) selectPlaced(idx);
+  }
+  if (typeof updateAdjustUI === 'function') updateAdjustUI();
+  if (typeof renderModelList === 'function') renderModelList();
+  return restored;
+}
+
+/**
+ * Put the plate preset back. The piece coordinates in a scene block are
+ * plate-centred, so they only mean what they meant on the plate they were
+ * saved from. Unknown preset ids are left alone rather than guessed at - the
+ * pieces still land where the file says, on whatever plate is selected.
+ */
+function restoreScenePlate(saved) {
+  if (!saved || !saved.id) return;
+  const sel = document.getElementById('plate-select');
+  if (saved.id === 'custom') {
+    const w = document.getElementById('custom-w');
+    const d = document.getElementById('custom-d');
+    if (w && saved.w) w.value = saved.w;
+    if (d && saved.d) d.value = saved.d;
+  } else if (!PLATES[saved.id]) {
+    return;
+  }
+  state.plate = saved.id;
+  if (sel) sel.value = saved.id;
+  const custom = document.getElementById('custom-size');
+  if (custom) custom.classList.toggle('hidden', state.plate !== 'custom');
+  if (typeof updatePlateInfo === 'function') updatePlateInfo();
+}
+
+/** The scene block of an imported 3MF, or null when there is none to use. */
+function readSceneBlock(filename, result) {
+  if (!result || !result.sceneJson || !window.NSO3MFScene) return null;
+  try {
+    return window.NSO3MFScene.parse(result.sceneJson);
+  } catch (err) {
+    // A block this build cannot read is a warning, never a failed import: the
+    // geometry in the file is still good.
+    console.warn(filename + ': ' + err.message + ' - importing geometry only');
+    return null;
+  }
+}
+
 function export3MF() {
   if (!window.NSO3MF || !window.NSOCoolingProfiles) {
     setStatus('3MF modules failed to load - check console', true);
@@ -3016,14 +3390,16 @@ function export3MF() {
   }
 
   const plate = getCurrentPlate();
-  return window.NSO3MF.build3MF({ objects, profileId, plateName: plate.name })
+  const sceneJson = buildPlateSceneJson();
+  return window.NSO3MF.build3MF({ objects, profileId, plateName: plate.name, sceneJson })
     .then(result => {
       const blob = new Blob([result.bytes], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' });
       const plateName = plate.name.replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>]/g, '');
       const filename = `nest_${plateName}_${state.placed.length}pcs.3mf`;
       downloadBlob(blob, filename);
       const profile = window.NSOCoolingProfiles.getProfile(result.profileId);
-      setStatus(`Downloaded ${filename} - cooling profile "${profile ? profile.label : result.profileId}" baked in`);
+      setStatus(`Downloaded ${filename} - cooling profile "${profile ? profile.label : result.profileId}" baked in` +
+                (result.scene ? ' - scene saved, reopen this file to get the plate back' : ''));
       return result;
     })
     .catch(err => {
@@ -3083,12 +3459,23 @@ function buildActiveModelObject3MF(m) {
   }
 
   const mesh = window.NSO3MF.indexTriangleSoup(flat);
+  // The same placement as a 12-number transform, for the scene block: model
+  // space (x, y, z) -> file (x + dx, -z + dy, y - minZ), re-anchored onto the
+  // geometry's own centre so inverting it lands on what addModel hands back.
+  let basis = null;
+  if (window.NSO3MFScene) {
+    const M = [1, 0, 0, 0, 0, 1, 0, -1, 0, dx, dy, -minZ];
+    const c = geometryCenter(geo);
+    const t = window.NSO3MFScene.apply12(M, c.x, c.y, c.z);
+    basis = M.slice(0, 9).concat([t[0], t[1], t[2]]);
+  }
   return {
     name: m.name || 'piece',
     vertices: mesh.vertices,
     triangles: mesh.triangles,
     triCount: mesh.triangles.length / 3,
-    dropped: dropped
+    dropped: dropped,
+    basis: basis
   };
 }
 
@@ -3133,7 +3520,8 @@ function exportActiveModel3MF() {
   const profileId = getCoolingProfileId();
   setStatus('Building 3MF...');
   const plate = getCurrentPlate();
-  return window.NSO3MF.build3MF({ objects: [object], profileId, plateName: plate.name })
+  const sceneJson = buildModelSceneJson(m, object.basis);
+  return window.NSO3MF.build3MF({ objects: [object], profileId, plateName: plate.name, sceneJson })
     .then(result => {
       const blob = new Blob([result.bytes], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' });
       downloadBlob(blob, filename);

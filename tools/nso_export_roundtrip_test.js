@@ -288,6 +288,14 @@ withApp(async (page, logs) => {
     ['selected STL', files.selSTL, selSTL && [selSTL]],
     ['selected 3MF', files.sel3MF, sel3MF && sel3MF.map(o => o.soup)]
   ];
+  /* All four re-imports are geometry imports, and the two 3MF ones stay that
+     way on purpose. A plate 3MF now carries an NSO scene block, and re-opening
+     one onto a plate that still has pieces asks first (app-core.js,
+     restoreSceneFrom3MF); nothing accepts the prompt here, so the import takes
+     the documented geometry-only fallback and the file soup below is still
+     what lands. The selected-model route never restores placement at all. The
+     scene route itself is driven end to end by
+     tools/nso_scene_roundtrip_test.js. */
   for (const [label, file, soups] of reimports) {
     if (!file || !soups) { check(label + ': nothing to re-import', false); continue; }
     const models = await reimport(page, file);
