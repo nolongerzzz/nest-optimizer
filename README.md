@@ -14,6 +14,9 @@ Smart build-plate packing for 3D printing.
   - Custom size
 - Drag & drop multiple STL files
 - Quantity control per model
+- Resize a piece to a real dimension - pick X, height, Z or the longest edge,
+  type the mm you want, and the uniform factor is solved and applied (or scale
+  by a plain multiplier)
 - Auto-orient for lower support needs
 - Auto-nest with optional 45°/90° rotations
 - Adjustable gap between models
