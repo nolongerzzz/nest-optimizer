@@ -300,7 +300,7 @@ function undoLast() {
       ((m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length : 0) + ' face(s) excluded');
     return;
   }
-  if (entry.type === 'softenReplace' || entry.type === 'capReplace' || entry.type === 'sealReplace' || entry.type === 'solidifyReplace' || entry.type === 'thickenReplace' || entry.type === 'smoothReplace') {
+  if (entry.type === 'softenReplace' || entry.type === 'capReplace' || entry.type === 'sealReplace' || entry.type === 'solidifyReplace' || entry.type === 'thickenReplace' || entry.type === 'smoothReplace' || entry.type === 'brushReplace') {
     const m = state.models.find(x => x.id === entry.modelId);
     if (!m) { setStatus('Undo: piece no longer exists'); return; }
     // the paint set is part of the piece's state, so one step puts back both
@@ -340,7 +340,7 @@ function undoLast() {
     updateEditSize();
     renderModelList();
     updateUndoBtn();
-    setStatus(entry.type === 'smoothReplace' ? 'Undo: Smooth reverted' : (entry.type === 'thickenReplace' ? 'Undo: Thicken reverted' : (entry.type === 'solidifyReplace' ? 'Undo: Solidify reverted' : (entry.type === 'sealReplace' ? 'Undo: Seal reverted' : (entry.type === 'capReplace' ? 'Undo: Cap reverted' : 'Undo: Soften reverted')))));
+    setStatus(entry.type === 'brushReplace' ? 'Undo: Brush reverted' : (entry.type === 'smoothReplace' ? 'Undo: Smooth reverted' : (entry.type === 'thickenReplace' ? 'Undo: Thicken reverted' : (entry.type === 'solidifyReplace' ? 'Undo: Solidify reverted' : (entry.type === 'sealReplace' ? 'Undo: Seal reverted' : (entry.type === 'capReplace' ? 'Undo: Cap reverted' : 'Undo: Soften reverted'))))));
     return;
   }
   if (entry.type === 'removeModel') {
@@ -1979,6 +1979,17 @@ function onCanvasPointerDown(event) {
      that paint would actually take is given up, so orbiting the plate while
      painting still works. */
   if (typeof window.nsoMaskTakesClick === 'function' && window.nsoMaskTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* The brush owns a drag that starts on a piece, for the same reason and in
+     the same shape as the paint above: app-brush.js binds its own handler on
+     this canvas right after this one, and without standing down here the
+     stroke would also start a move drag and report "Moved model #N" over the
+     brush's own status. Only a press the brush would actually take is given
+     up, so orbiting the plate with the brush armed still works. */
+  if (typeof window.nsoBrushTakesPointer === 'function' && window.nsoBrushTakesPointer(event)) {
     setOrbitFromPlate(false);
     return;
   }

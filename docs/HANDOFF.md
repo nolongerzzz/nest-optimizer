@@ -48,9 +48,45 @@ Current roster, by category:
 | Repair (`app-finish.js`, Seal's checkbox) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
 | Fusion (`app-join.js`, Join Route 0) | whole-piece | `nsoMaskCount(A)+nsoMaskCount(B) > 0` | stand-down comment |
 | Pocket corners (`nso_inside_corners.js`) | sub-region | this pocket's floor + 4 walls | `docs/INSIDE-CORNERS.md` §2 |
+| Brush (`app-brush.js`) | sub-region | the faces the stroke + its seam band land on | `docs/BRUSH.md` §paint scope |
 
 `node tools/nso_paint_scope_test.js` asserts every entry actually carries its
 label in source, so a deleted or drifted declaration fails rather than rotting.
+
+## Local brush - freehand surface deformation
+`app-brush.js`, wired at `?v=inside4`. Carve / Emboss / Smooth-here on one
+brush mechanism: size 5-50mm, one intensity slider, hard/soft falloff, a ring
+on hover. Full write-up: `docs/BRUSH.md`.
+
+It is the first drag-to-paint interaction in this app and the first live
+uncommitted preview. Before it, **every** paint / overlay / bake mechanism was
+single-click-and-done and the only drags in the repo (move-on-plate, the cutter
+helper, yaw) touched no geometry. The audit is in `docs/BRUSH.md` and at the
+top of `app-brush.js`; read it before adding a second dragging tool, because
+the three mechanisms it had to invent - an unpressed pointermove path, a stroke
+session that commits once, and a light live refresh - are reusable and worth
+not writing twice.
+
+Three things that bind new work:
+
+- **`app-core.js` now asks `window.nsoBrushTakesPointer(event)`** before it
+  starts a move drag, the same way it asks `nsoMaskTakesClick`. A third tool
+  that claims a press on a piece adds its own ask there; it cannot bind a
+  canvas listener and expect to win, because app-core binds during parse.
+- **PAINT SCOPE: SUB-REGION**, and the affected set is the brush disc PLUS the
+  one-ring seam band the relax moves. A feature that moves a vertex counts that
+  vertex as its own.
+- **`nsoMaskPlaneList(m)`** is the new supported way in for a sub-region paint
+  check - the painted faces as raw planes, recessed patches included.
+  `nsoMaskFaceList` still returns null the moment one entry is recessed, which
+  is right for the whole-solid wrap and wrong for anything that has a set of
+  points and wants to know which faces they lie on.
+
+`npm run brush` (91 checks, headless geometry, canonical checker before/after
+on a flat face, a curved surface and a 2.4mm thin wall) and `npm run wire:brush`
+(56 checks, real pointer events in the real app). Both in `npm test`, along
+with `npm run paint:scope`, which was written to stop the scoping rule rotting
+and was not previously in the gate.
 
 ## Output protocol
 1. Findings, numbers, diffs, and next-step proposals go in the current ticket PR

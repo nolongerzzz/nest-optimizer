@@ -1280,3 +1280,37 @@ select:focus, input:focus {
   padding: 2px 0 4px;
 }
 .vp-row-opts .vp-clone input[type="number"] { width: 52px; }
+
+/* Brush rows - a label, a slider that takes the slack, and the live value.
+   The value column is fixed so the row does not reflow as the number changes
+   width, which is what made the first draft twitch while dragging. */
+.vp-row-brush {
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+.vp-row-brush .vp-brush-tag {
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  opacity: .78;
+}
+.vp-row-brush input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  accent-color: #e8a33d;
+}
+.vp-row-brush .vp-brush-out {
+  min-width: 48px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  opacity: .9;
+}
+/* Armed brush reads the same as armed paint, so "a tool is live" looks the
+   same whichever tool it is. */
+.btn-brush.is-armed {
+  background: #e8a33d;
+  color: #1a1206;
+  border-color: #e8a33d;
+}
