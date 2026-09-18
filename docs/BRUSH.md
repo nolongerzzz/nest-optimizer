@@ -283,8 +283,9 @@ dab never reached. Same test, same wording, two moments.
   `false | 'exclude' | 'select'` since the paint grew its target list, so the
   click goes to whichever of `btn-mask-select` / `btn-mask-paint` is actually
   live — clicking the other would *switch* paint modes rather than stop it,
-  which is exactly what the pre-merge draft of this function did. Measure and
-  Center-lock turn the brush off through `btn-brush` in return.
+  which is exactly what the pre-merge draft of this function did. It stands
+  Carve, Measure, Center-lock and Seat here down too; Measure and Center-lock
+  turn the brush off through `btn-brush` in return.
 - **Hover** shows a ring at the cursor, oriented to the surface normal, at the
   brush radius. It lives in the scene rather than the model group and has its
   `raycast` stubbed out, so it is never picked, never exported, and never walks
@@ -297,8 +298,9 @@ dab never reached. Same test, same wording, two moments.
 - **Escape**, a lost pointer, or disarming mid-stroke all cancel cleanly.
 
 `app-core.js` asks `window.nsoBrushTakesPointer(event)` before it starts a move
-drag, alongside the `nsoMaskTakesClick` and `nsoCarveTakesClick` asks and
-**ahead of** `nsoMeasureTakesClick`, on the ordering rule stated there: if two
+drag, alongside the `nsoMaskTakesClick`, `nsoCarveTakesClick` and
+`nsoSeatHereTakesClick` asks and **ahead of** `nsoMeasureTakesClick`, on the
+ordering rule all of them cite: if two
 modes are somehow armed at once, the one that bakes should win the click rather
 than have a measurement swallow it. It has to be asked, not asserted:
 `app-core` binds inside `initThree()` while the document is still parsing, so

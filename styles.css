@@ -1693,4 +1693,15 @@ select:focus, input:focus {
   background: #e8a33d;
   color: #1a1206;
   border-color: #e8a33d;
+  font-weight: 600;
+}
+
+/* Seat here shares that slider and arms a click, so it needs the same armed
+   state the other click-owning tools have. */
+#btn-seat-here { margin-top: 4px; }
+#btn-seat-here.is-armed {
+  background: #4ade80;
+  color: #0b1a33;
+  border-color: #4ade80;
+  font-weight: 600;
 }

@@ -1659,6 +1659,11 @@ if (typeof document !== 'undefined') (function () {
       if (measureBtn) measureBtn.click();
       else state.measureOn = false;
     }
+    if (state.seatHereArmed) {
+      var seatBtn = el('btn-seat-here');
+      if (seatBtn) seatBtn.click();
+      else state.seatHereArmed = false;
+    }
     if (state.centerLockArmed) {
       var clockBtn = el('btn-center-lock-pick');
       if (clockBtn) clockBtn.click();

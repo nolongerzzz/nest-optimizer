@@ -140,7 +140,8 @@ const UNDO_REPLACE_LABEL = {
   carveReplace: 'Undo: Carve reverted',
   scaleReplace: 'Undo: Scale reverted',
   deleteReplace: 'Undo: Delete reverted',
-  brushReplace: 'Undo: Brush reverted'
+  brushReplace: 'Undo: Brush reverted',
+  seatSurfaceReplace: 'Undo: Seat here reverted'
 };
 
 function undoLast() {
@@ -429,6 +430,25 @@ function undoLast() {
        after the placed instance is re-seated, and it lands on the geometry the
        clicks were made against. */
     if (typeof nsoMaskRepaint === 'function') nsoMaskRepaint();
+    /* An op that moved the piece as well as reshaping it puts the pose back
+       here, in the SAME entry, so it is still one Undo per op. Seat here is
+       the first: it bakes a free rotation into the soup (the pose model
+       cannot hold one - see app-seat-surface.js) and then re-fits x / z /
+       liftY to it, so restoring the geometry alone would leave the piece
+       in the seated position with its old shape. */
+    if (entry.prevPose && placedEntry) {
+      placedEntry.x = entry.prevPose.x; placedEntry.z = entry.prevPose.z;
+      placedEntry.rotY = entry.prevPose.rotY || 0;
+      placedEntry.flipX = !!entry.prevPose.flipX;
+      placedEntry.tipX = entry.prevPose.tipX || 0;
+      placedEntry.tipZ = entry.prevPose.tipZ || 0;
+      placedEntry.liftY = entry.prevPose.liftY || 0;
+      placedEntry.tiltX = entry.prevPose.tiltX || 0;
+      placedEntry.tiltZ = entry.prevPose.tiltZ || 0;
+      applyMeshRotation(placedEntry);
+      if (typeof refreshOutline === 'function') refreshOutline(placedEntry);
+      applyPlacedXZ(placedEntry, placedEntry.x, placedEntry.z);
+    }
     updateEditSize();
     renderModelList();
     updateUndoBtn();
@@ -2238,15 +2258,25 @@ function onCanvasPointerDown(event) {
     return;
   }
 
+  /* Seat here owns a click that lands on a piece, on the same terms as paint
+     and carve: app-seat-surface.js decides, where its own hit test lives, and
+     a fall-through would start a move drag under the seat. Asked after carve
+     and before measure because it bakes, and a measurement must never
+     swallow a click a baking tool would have taken. */
+  if (typeof window.nsoSeatHereTakesClick === 'function' && window.nsoSeatHereTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
   /* The brush owns a PRESS that lands on a piece, on the same terms again.
      app-brush.js binds its own handler on this canvas after this one, and a
      fall-through here would start a move drag UNDER the stroke and report
      "Moved model #N" over the brush's own status.
 
-     Asked alongside Carve and ahead of Measure, on the ordering rule stated
-     just below: the brush bakes, so it wins a contested click over the one
-     tool that cannot change the piece. Unlike the other three it owns the
-     whole drag, not just the press - the stroke runs until pointerup. */
+     Asked with Carve and Seat here, ahead of Measure, on the same rule they
+     cite: the brush bakes, so it wins a contested click over the one tool
+     that cannot change the piece. Unlike the other three it owns the whole
+     drag, not just the press - the stroke runs until pointerup. */
   if (typeof window.nsoBrushTakesPointer === 'function' && window.nsoBrushTakesPointer(event)) {
     setOrbitFromPlate(false);
     return;
@@ -2257,7 +2287,7 @@ function onCanvasPointerDown(event) {
      takes the measurement there. Measuring changes nothing on the piece, so a
      measure click must not also drag it across the plate.
 
-     It is asked LAST of the four because it is the only one that cannot
+     It is asked LAST of the five because it is the only one that cannot
      change the piece: if two modes are somehow armed at once, the one that
      bakes should win the click rather than have a measurement swallow it.
      app-measure.js's enter() disarms the others anyway, so this is the

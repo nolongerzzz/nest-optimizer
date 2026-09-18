@@ -112,9 +112,12 @@ function clearJoinSlots() {
   state.joinUseFaces = false;
   state.joinSlideAxis = null;
   // The Center lock target was picked on a piece in slot A; leaving Join
-  // retires it with the slot.
+  // retires it with the slot. Seat here aims at a point on slot A the same
+  // way, so it goes with it.
   state.centerLockArmed = false;
   state.centerLockTarget = null;
+  if (typeof window.nsoSeatHereDisarm === 'function') window.nsoSeatHereDisarm();
+  else state.seatHereArmed = false;
   removeFaceHelper();
   renderModelList();
   updateEditSize();

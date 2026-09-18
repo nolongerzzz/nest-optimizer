@@ -137,6 +137,7 @@
               <input type="range" id="seat-gap" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Seat gap in mm, 0.01 steps. -0.25 (air) to +0.05 (overlap); default -0.18, mid easy-release. Arrow keys step 0.01." aria-label="Seat gap in mm" />
               <output id="seat-gap-value" for="seat-gap" title="Exact gap the next Seat (support) will use">-0.18 mm</output>
             </div>
+            <button id="btn-seat-here" class="btn btn-secondary" type="button" aria-pressed="false" title="Seat here: click a point on A - curved, irregular or flat - and B is turned to face it and set at the slider's gap. The gap is the true minimum distance between the two surfaces.">Seat here</button>
           </div>
           <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
           <button id="btn-seat-grid" class="btn btn-secondary" type="button" title="Faint grid on the top surface of the target piece (A), to line up what goes above it">Surface grid: auto</button>
@@ -374,6 +375,7 @@
   <script src="nso_skin.js?v=skin2"></script>
   <script src="nso_skin_patch.js?v=skin3"></script>
   <script src="nso_carve.js?v=carve1"></script>
+  <script src="nso_seat_surface.js?v=seatsurf1"></script>
   <script src="nso_thickness.js?v=wallcut1"></script>
   <script src="nso_paint_delete.js?v=del1"></script>
   <script src="nso_skin_band.js?v=skin2"></script>
@@ -392,6 +394,7 @@
   <script src="app-join.js?v=wallcut1"></script>
   <script src="app-center-lock.js?v=clock1"></script>
   <script src="app-carve.js?v=wallcut1"></script>
+  <script src="app-seat-surface.js?v=seatsurf1"></script>
   <script src="app-skin.js?v=skin2"></script>
   <script src="app-skin-patch.js?v=skin3"></script>
   <script src="app-mask.js?v=inside6"></script>
