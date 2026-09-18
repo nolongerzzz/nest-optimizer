@@ -53,6 +53,7 @@ Current roster, by category:
 | Seat here (`app-seat-surface.js`) | whole-piece | `nsoMaskCount(modelB)`, only when the seat must turn B | `docs/SEAT-SURFACE.md` §3 |
 | Skin face (`app-skin.js`) | sub-region | the one face being skinned, `nsoMaskIsExcludedRaw(m, face.n, face.d, ...)` | header comment |
 | Delete painted (`app-paint-delete.js`) | sub-region | the one TARGET face, `nsoMaskIsExcludedRaw(m, face.n, face.d, ...)` | `docs/PAINT-DELETE.md` §7 |
+| Extract selection (`app-extract-sel.js`) | sub-region | the one TARGET face, `nsoMaskIsExcludedRaw(m, face.n, face.d, ...)` | header comment |
 | Scale (`app-scale.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
 | Skin patch (`app-skin-patch.js`) | **none** | — it reads no existing geometry at all | header comment |
 | Texture (`app-texture.js`, the curved band) | sub-region | the band's own facets, `nsoMaskIsExcludedRaw(m, face.n, face.d)` per facet; the caps do not block it | `docs/CURVED-SKIN.md` §7 |
@@ -87,8 +88,30 @@ still reads the EXCLUDE list, because the second question always has an answer.
 A tool whose operand is a gesture rather than a face is not an exception to the
 two questions; it is the first question answered honestly.
 
+**Extract selection answers it "the SELECT list", like Delete.** Added
+2026-09-18, it is the pink list's third consumer and Delete painted's
+non-destructive twin: same target, same exclude veto, same stand-down wording,
+but it COPIES the target's region onto the plate as a new piece and writes
+nothing back to the source. "Acts on" does not have to mean "damages" - the
+first question asks what the operand is, not what happens to it. A feature that
+only reads is still answering it, and still owes the second question an answer.
+
 `node tools/nso_paint_scope_test.js` asserts every entry actually carries its
 label in source, so a deleted or drifted declaration fails rather than rotting.
+Its ROSTER covers the features with a stand-down to keep honest; add a row
+there as well as here when you add one.
+
+### Reading the target face as geometry
+`NSO_PaintDelete.select(rawTris, entries)` is the one selector that turns a
+painted entry list into the triangles it covers, in raw space. Delete painted
+owns the file; Extract selection reads it too, and neither has a second copy of
+"which triangles did that click cover". Hand it `[nsoMaskSelected(m)]` for the
+pink target - the header there notes the shape is the same for either list.
+
+It can legitimately resolve to zero triangles on a face that IS painted: a
+click on a curved top names the Y+ face, and a sphere has no triangle lying on
+that plane. The overlay shows nothing there either, so a caller must handle an
+empty result rather than assume a painted face implies painted triangles.
 
 **"none" is a category, not a gap.** Skin patch ADDS a piece built from the
 pattern's own parameters and never touches a face of any existing one, so there
@@ -653,6 +676,23 @@ package.json ran eleven. package.json's `test` script is the one definition;
 read it there. The check NAME is what branch protection pins, and that stays
 `npm test` however the suite grows. The copy on `main` and the copy on
 `claude-wip` are byte-identical, deliberately, so they cannot conflict on merge.
+
+As of 2026-09-18 `nso_wire_extract_sel_test.js` is in that chain too, for
+Extract selection, through the same harness as the rest of the wire-* set. It
+targets through the app's own select-paint hit path, clicks the real button,
+runs `NSO_edgeStats` on what lands on the plate, and hashes the source piece
+either side of the extraction so "the original is untouched" is measured rather
+than asserted.
+
+One gate in it is worth keeping when that file is next edited: the shell
+builder is called DIRECTLY with a patch that turns a corner, because the SELECT
+list holds one face and the UI cannot aim that case. It is not padding - it is
+the gate that caught the mitre reading 1227.2mm^3 where the answer is 931.2,
+from area-weighting vertex normals by triangle instead of by distinct face
+direction. Every UI-reachable case passed while that was wrong, because a
+single flat face has one normal and cannot tell the two apart. A feature whose
+UI can only reach the easy half of its own maths needs the other half called by
+hand, or the bug ships green.
 
 As of 2026-09-15 the wire-* trio is IN `npm test`, so Smooth, Seal->Repair and
 Join->Fusion are gated by CI rather than only checked by hand. They run through
