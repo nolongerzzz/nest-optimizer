@@ -146,7 +146,8 @@ const UNDO_REPLACE_LABEL = {
   scaleReplace: 'Undo: Scale reverted',
   deleteReplace: 'Undo: Delete reverted',
   brushReplace: 'Undo: Brush reverted',
-  seatSurfaceReplace: 'Undo: Seat here reverted'
+  seatSurfaceReplace: 'Undo: Seat here reverted',
+  extendReplace: 'Undo: Extend reverted'
 };
 
 function undoLast() {
