@@ -42,6 +42,9 @@ function updateJoinUI() {
   const cz = document.getElementById('btn-join-cz');
   if (cx) cx.disabled = !readyJoin;
   if (cz) cz.disabled = !readyJoin;
+  // Center lock rides the same A+B precondition; its own module owns the
+  // armed/target label on the pick button.
+  if (window.NSO_CenterLock) window.NSO_CenterLock.syncUI();
   if (step) {
     if (!state.joinSession) step.textContent = '1. Start Join';
     else if (state.joinArmed === 'a') step.textContent = '2. Click piece A on the plate or list';
@@ -108,6 +111,10 @@ function clearJoinSlots() {
   state.joinFaceB = null;
   state.joinUseFaces = false;
   state.joinSlideAxis = null;
+  // The Center lock target was picked on a piece in slot A; leaving Join
+  // retires it with the slot.
+  state.centerLockArmed = false;
+  state.centerLockTarget = null;
   removeFaceHelper();
   renderModelList();
   updateEditSize();

@@ -412,6 +412,7 @@
     state.maskPaint = true;
     state.softenArmed = false;
     state.capArmed = false;
+    state.centerLockArmed = false;
     if (typeof clearFacePick === 'function') clearFacePick();
     repaint();
     setLabel();
