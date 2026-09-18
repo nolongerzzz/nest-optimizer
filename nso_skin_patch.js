@@ -41,6 +41,12 @@
                here. Self-contained and handleable: the rim is solid, stands
                PROUD of the tips, and takes the handling so the relief does
                not. One closed shell, Euler 2.
+   'sandwich'  the double-sided washer, for a sandwich test. The same
+               prismatic rib lattice, with NO FLOOR MEMBRANE ANYWHERE and a
+               perimeter FRAME rib instead of a proud rim, so the pattern
+               faces outward on BOTH the +Z and the -Z face and the two
+               contacts are equal by construction. See "why bordered is the
+               wrong piece for a sandwich" below.
    'loose'     the raw patch. The pattern's own features as SOLID BODIES and
                nothing else: no rim, no backing plate, matching the sample
                footprint. Built from the height field patternPlan hands out -
@@ -59,6 +65,51 @@
                than a second thing resting on it. ties: 0 turns them off and
                a zigzag patch then comes back as its ridges, separately,
                which buildPatch reports as `components` rather than hiding.
+
+   ---------------------------------------------------------------------------
+   WHY 'bordered' IS THE WRONG PIECE FOR A SANDWICH TEST, AND 'sandwich' IS
+   ---------------------------------------------------------------------------
+   The bordered washer is a closed TRAY: a solid 0.6 mm floor membrane with
+   the relief on ONE side of it. Put it between two cubes and only the top
+   cube meets rib tips - the bottom cube meets a flat solid plate 30 x 30 mm
+   across, which welds on contact area alone no matter how the pattern
+   performs. The measurement that comes back is the floor's, not the
+   pattern's. bordered is unchanged and stays exactly what it is; it is simply
+   a one-sided piece and a sandwich needs a two-sided one.
+
+   'sandwich' is that piece, and it is two-sided BY CONSTRUCTION rather than
+   by being built twice:
+
+     no floor       every cell is either empty top-to-bottom or solid
+                    top-to-bottom. There is no membrane to weld against.
+     prismatic      a crosshatch rib has a rectangular section, so the solid
+                    is a straight extrusion of the rib footprint. Its z = 0
+                    face and its z = height face are THE SAME SET. The two
+                    contact areas are therefore not merely similar, they are
+                    one number, and the test asserts them equal rather than
+                    trusting the symmetry.
+     frame, not rim the perimeter is closed by one more RIB, at the pattern's
+                    own rib width and the pattern's own height - not by a rim
+                    standing proud. A proud rim would hold the two cubes off
+                    the pattern entirely and measure itself; a rim flush with
+                    the tips would add ~138 mm2 of solid contact per face on a
+                    30 x 30 piece and swamp the lattice. A 0.42 mm frame rib
+                    adds what any other rib adds, and its job is only to stop
+                    the outermost ribs ending in free air.
+     no sliver      ribIntervals CENTRES its ribs in the free span, so the
+                    leftover at each end is generally not zero - at 0.84 pitch
+                    on 30 mm it is 0.09 mm, which would be an unprintable
+                    channel between the frame and the first rib. The frame is
+                    therefore widened to MEET the first rib (plan.ivU/ivV say
+                    where that is) instead of being left at its nominal width.
+                    Reported as `frame` so the number that got built is the
+                    number you can read.
+
+   Prismatic is a real restriction and it is enforced, not assumed: the
+   zigzag tapers from a 1.2 mm base to a 0.42 mm tip, so its underside is a
+   wide flat base and its two faces are NOT the same pattern; the ring has no
+   height field at all. Both are refused by name with that reason rather than
+   built lopsided.
 
    ---------------------------------------------------------------------------
    THICKNESS - every figure reused, none invented
@@ -171,7 +222,7 @@
      crosshatch still fills it edge to edge: a cell at u < the first rib is
      raised anyway when its v falls in a V rib, so the lattice spans the whole
      footprint rather than stopping at the outermost rib.) */
-  var VARIANT_MARGIN = { bordered: MIN_WALL, loose: 0 };
+  var VARIANT_MARGIN = { bordered: MIN_WALL, loose: 0, sandwich: 0 };
 
   /* loose only: a vertical FOOT of `back` mm under each feature's own base
      footprint - not a plate, nothing in the gaps between features, so the
@@ -199,11 +250,13 @@
        ring        0     taper 0.2 mm over 1.0 mm, 11 degrees off vertical,
                          reads 0.566 as it is
      Every one is a parameter; `back` overrides. */
+  /* keyed by FAMILY, read through fam() - a preset inherits its family's foot */
   var LOOSE_BACK = { crosshatch: 0, zigzag: MIN_WALL, ring: 0 };
 
   var VARIANTS = {
     bordered: 'the pattern inside a solid rim - a washer, one closed shell',
-    loose: 'the pattern\'s features alone, solid, no rim and no backing plate'
+    loose: 'the pattern\'s features alone, solid, no rim and no backing plate',
+    sandwich: 'double-sided - the pattern on BOTH faces, no floor, a frame rib instead of a rim'
   };
 
   var DEFAULTS = {
@@ -217,7 +270,8 @@
     margin: null,        /* relief inset; null = the variant's own, see VARIANT_MARGIN */
     back: null,          /* loose: vertical foot under the features; null = LOOSE_BACK */
     ties: null,          /* loose: cross-ribs. null = as many as the pattern needs */
-    tie: null            /* loose: tie width; null = MIN_WALL, one extrusion line */
+    tie: null,           /* loose: tie width; null = MIN_WALL, one extrusion line */
+    frame: null          /* sandwich: perimeter rib width; null = MIN_WALL, widened to meet rib 1 */
   };
 
   function withDefaults(opts) {
@@ -237,9 +291,16 @@
      never gated: mesh_validate.py's wall/gap check measures from face
      centroids and is the authority on what a taper actually prints as. */
   function featureWall(name, p) {
-    if (name === 'crosshatch') return { base: p.rib, tip: p.rib };
-    if (name === 'zigzag') return { base: p.base, tip: p.tip };
+    var f = fam(name);
+    if (f === 'crosshatch') return { base: p.rib, tip: p.rib };
+    if (f === 'zigzag') return { base: p.base, tip: p.tip };
     return { base: p.wallBase, tip: p.wallTip };   /* ring */
+  }
+
+  /* Every dispatch below is on the FAMILY, so a preset name like
+     `crosshatch-fine` needs no entry of its own anywhere in this file. */
+  function fam(name) {
+    return (Skin && Skin.familyOf) ? Skin.familyOf(name) : name;
   }
 
   /* ------------------------------------------------- the bordered tray */
@@ -568,7 +629,7 @@
       return 'loose: the pattern\'s feature wall is ' + fw.base + ' mm at the base, under the ' + MIN_WALL +
         ' mm one line - a loose patch has nothing else holding it';
     }
-    var back = o.back == null ? (LOOSE_BACK[name] || 0) : o.back;
+    var back = o.back == null ? (LOOSE_BACK[fam(name)] || 0) : o.back;
     if (!(back >= 0)) return 'loose: back must not be negative';
     if (back > 0 && back < MIN_WALL - 1e-9) {
       return 'loose: the foot is a wall of its own - ' + back + ' mm is under the ' + MIN_WALL + ' mm one line';
@@ -576,7 +637,7 @@
     var fr = Skin.planeFrame([0, 0, 0], [1, 0, 0], [0, 1, 0], o.W, o.D);
     if (typeof fr === 'string') return 'loose: ' + fr;
     var out = [], info, ties = [], tieW = 0;
-    if (name === 'ring') {
+    if (fam(name) === 'ring') {
       info = looseRing(fr, p, out, back);
       if (typeof info === 'string') return 'loose: ' + info;
     } else {
@@ -585,7 +646,7 @@
       /* Ties. A crosshatch's ribs cross, so it needs none; a zigzag's ridges
          are parallel and need two to be one patch. Explicit ties: 0 turns
          them off and the result reports the components that leaves. */
-      var n = o.ties == null ? (name === 'zigzag' ? 2 : 0) : (o.ties | 0);
+      var n = o.ties == null ? (fam(name) === 'zigzag' ? 2 : 0) : (o.ties | 0);
       /* a tie is a rib, so it is one extrusion line wide - the crosshatch's
          own rib figure - not the ridge's base width it crosses */
       tieW = o.tie == null ? MIN_WALL : o.tie;
@@ -628,6 +689,106 @@
       info: info
     };
   }
+
+  /* ------------------------------------------------ the sandwich washer
+
+     Double-sided: the pattern on the +Z face AND the -Z face, nothing solid
+     in between. The whole piece is one height field with a common base at
+     z = 0 - every solid cell runs the full height, every empty cell is empty
+     the whole way through - so it is built by looseGrid, unmodified, with
+     back 0, and it is watertight for exactly the reason the loose variant is.
+
+     That common base is the entire design. A rim standing proud, or a frame
+     recessed below the tips, would need a per-cell FLOOR as well as a per-cell
+     top, which looseGrid does not have and which would mean two exposed
+     strips per grid edge instead of one. A prismatic lattice needs neither:
+     hold every solid cell at the same height and the piece is symmetric about
+     its own mid-plane for free. */
+  function buildSandwich(o) {
+    var name = o.pattern;
+    if (!Skin.PATTERNS[name]) return 'unknown pattern "' + name + '"';
+    /* Prismatic only, and refused by name rather than built lopsided. */
+    if (fam(name) === 'ring') {
+      return 'sandwich: ring has no height field - it builds its own surface, and a floorless ' +
+        'frame would leave the annulus floating. Use bordered for the ring.';
+    }
+    if (fam(name) !== 'crosshatch') {
+      return 'sandwich: "' + name + '" is not prismatic - it tapers, so its underside is a wide ' +
+        'flat base and its two faces are not the same pattern. A sandwich piece has to present ' +
+        'the SAME contact on both faces; only the crosshatch family does.';
+    }
+    var p = Skin.withDefaults(name, o.params);
+    if (!(p.height > 0)) return 'height must be positive';
+    var fw = featureWall(name, p);
+    if (!(fw.base >= MIN_WALL - 1e-9)) {
+      return 'sandwich: the pattern\'s rib is ' + fw.base + ' mm, under the ' + MIN_WALL +
+        ' mm one line - nothing else is holding this piece together';
+    }
+    var frame0 = o.frame == null ? MIN_WALL : o.frame;
+    if (!(frame0 >= MIN_WALL - 1e-9)) {
+      return 'sandwich: the frame is a rib of its own - ' + frame0 + ' mm is under the ' +
+        MIN_WALL + ' mm one line';
+    }
+    var fr = Skin.planeFrame([0, 0, 0], [1, 0, 0], [0, 1, 0], o.W, o.D);
+    if (typeof fr === 'string') return 'sandwich: ' + fr;
+
+    /* The lattice, inset by the nominal frame width. */
+    var plan = Skin.patternPlan(name, Object.assign({}, o.params || {}, { margin: frame0 }), fr, 0);
+    if (typeof plan === 'string') return 'sandwich: ' + plan;
+    if (!plan.ivU || !plan.ivU.length || !plan.ivV || !plan.ivV.length) {
+      return 'sandwich: no ribs fit a ' + o.W + ' x ' + o.D + ' mm patch at pitch ' + p.pitch;
+    }
+    /* ...widened to MEET the outermost rib, so the centring leftover does not
+       become a sliver channel between the frame and rib 1. */
+    var fU = plan.ivU[0][0], fV = plan.ivV[0][0];
+    if (!(fU * 2 < o.W) || !(fV * 2 < o.D)) {
+      return 'sandwich: a ' + round3(fU) + ' mm frame leaves no lattice in ' + o.W + ' x ' + o.D + ' mm';
+    }
+    var h = p.height, cells = plan.cellHeights;
+    var W = o.W, D = o.D;
+    function sandwichCells(u0, u1, v0, v1) {
+      var um = (u0 + u1) / 2, vm = (v0 + v1) / 2;
+      if (um < fU || um > W - fU || vm < fV || vm > D - fV) return [h, h, h, h];
+      return cells(u0, u1, v0, v1);
+    }
+    var out = [];
+    var info = looseGrid(fr, plan.breaksU, plan.breaksV, sandwichCells, out, 0);
+    info.margin = 0;
+    info.ribsU = plan.ribsU; info.ribsV = plan.ribsV;
+    var tris = new Float32Array(out);
+
+    /* The frame's own share of the contact, analytically - so the pattern's
+       share is a number and not "the rest of it". */
+    var frameArea = W * D - (W - 2 * fU) * (D - 2 * fV);
+    return {
+      tris: tris,
+      variant: 'sandwich',
+      pattern: name, params: p,
+      describe: Skin.PATTERNS[name].describe(p),
+      W: W, D: D, margin: 0,
+      height: info.hmax, tipHeight: info.hmax, tipsZ: info.hmax,
+      /* ONE contact number, because the top face set and the bottom face set
+         are the same set - the solid is a straight extrusion of it. The test
+         measures both off the mesh rather than taking this on trust. */
+      tipArea: info.tipArea,
+      topArea: info.tipArea, bottomArea: info.tipArea,
+      frame: fU, frameV: fV, frameNominal: frame0, frameArea: frameArea,
+      patternArea: info.tipArea - frameArea,
+      back: 0, ties: 0, tieWidth: 0,
+      floor: 0, proud: 0,
+      minWall: Math.min(fw.base, fU, fV),
+      tipWall: fw.tip,
+      closed: true,
+      components: countComponents(tris),
+      /* Same call as loose, and for the same reason: a free-standing
+         one-extrusion-line lattice is docs/NON-SOLID.md's printable-fabric
+         case, and the flag is what stands Repair's trimming stages down. */
+      nonSolidAdvised: true,
+      info: info
+    };
+  }
+
+  function round3(x) { return Math.round(x * 1000) / 1000; }
 
   /* The soup's bounding-box size, measured. */
   function extentOf(soup) {
@@ -676,7 +837,7 @@
     var o = withDefaults(opts);
     if (!Skin || !Skin.PATTERNS) return { ok: false, reason: 'NSO_Skin not loaded' };
     if (!VARIANTS[o.variant]) {
-      return { ok: false, reason: 'unknown variant "' + o.variant + '" (bordered or loose)' };
+      return { ok: false, reason: 'unknown variant "' + o.variant + '" (bordered, loose or sandwich)' };
     }
     if (!(o.W > 0) || !(o.D > 0)) return { ok: false, reason: 'the patch footprint must be positive' };
     if (o.margin != null && !(o.margin >= 0)) return { ok: false, reason: 'margin must not be negative' };
@@ -685,7 +846,17 @@
       return { ok: false, reason: 'a bordered patch needs margin > 0 - at margin 0 the pattern\'s ' +
         'end walls land in the pocket wall\'s own plane (see VARIANT_MARGIN)' };
     }
-    var r = o.variant === 'bordered' ? buildBordered(o) : buildLoose(o);
+    /* The sandwich has no empty inset to set: the band a margin would leave
+       open is exactly what its FRAME fills. Taking a `margin` here and
+       quietly ignoring it would be the worse of the two options, so it is
+       refused by name and pointed at the knob that does the job. */
+    if (o.variant === 'sandwich' && opts && opts.margin != null) {
+      return { ok: false, reason: 'a sandwich patch has no margin - the band a margin would leave ' +
+        'open is what its frame fills. Use `frame` to set the perimeter rib\'s width.' };
+    }
+    var r = o.variant === 'bordered' ? buildBordered(o)
+          : o.variant === 'sandwich' ? buildSandwich(o)
+          : buildLoose(o);
     if (typeof r === 'string') return { ok: false, reason: r };
     r.ok = true;
     r.variantDescribe = VARIANTS[o.variant];
@@ -696,6 +867,12 @@
     r.describeFull = r.variant === 'bordered'
       ? (r.describe + ', in a ' + r.rim + ' mm rim ' + r.proud + ' mm proud of the tips, on a ' +
          r.floor + ' mm floor - ' + r.W + ' x ' + r.D + ' x ' + r.rimTopZ.toFixed(2) + ' mm')
+      : r.variant === 'sandwich'
+      ? (r.describe + ', double-sided in a ' + round3(r.frame) + ' mm frame rib, no floor - ' +
+         r.extent.map(function (x) { return x.toFixed(2); }).join(' x ') + ' mm, ' +
+         r.tipArea.toFixed(2) + ' mm\u00b2 contact on EACH face (' +
+         r.patternArea.toFixed(2) + ' pattern + ' + r.frameArea.toFixed(2) + ' frame), ' +
+         r.components + ' component(s), walls ' + round3(r.minWall) + ' mm')
       : (r.describe + ', loose' + (r.ties ? ' on ' + r.ties + ' tie(s) ' + r.tieWidth + ' mm wide' : ', untied') +
          (r.back ? ' over a ' + r.back + ' mm foot' : '') +
          ' - ' + r.extent.map(function (x) { return x.toFixed(2); }).join(' x ') + ' mm, ' + r.components + ' component(s), walls ' +
@@ -706,6 +883,7 @@
   var api = {
     MIN_WALL: MIN_WALL, FLOOR: FLOOR, RIM: RIM, PROUD: PROUD, SIZE: SIZE,
     VARIANTS: VARIANTS, VARIANT_MARGIN: VARIANT_MARGIN, LOOSE_BACK: LOOSE_BACK, DEFAULTS: DEFAULTS,
+    familyOf: fam,
     withDefaults: withDefaults,
     traySoup: traySoup,
     buildPatch: buildPatch,

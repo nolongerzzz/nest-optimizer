@@ -140,8 +140,9 @@ withApp(async (page, logs) => {
   check('Skin wrap, the layer-2 select and Free all live in the Finish tab next to Skin face',
     present.wrap && present.layer2 && present.free && present.face, JSON.stringify(present));
   check('the wrap button has its listener, and both modules are loaded', present.wired && present.fns && present.core);
-  check('layer 2 offers off / zigzag / crosshatch / ring',
-    JSON.stringify(present.options) === '["off","zigzag","crosshatch","ring"]', present.options.join(','));
+  check('layer 2 offers off / zigzag / crosshatch / crosshatch-fine / ring',
+    JSON.stringify(present.options) === '["off","zigzag","crosshatch","crosshatch-fine","ring"]',
+    present.options.join(','));
 
   console.log('\n=== 3. pattern = crosshatch, click Skin wrap ===');
   await page.selectOption('#skin-pattern', 'crosshatch');

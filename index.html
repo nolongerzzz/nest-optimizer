@@ -268,8 +268,9 @@
               </div>
               <div class="vp-row vp-row-skin">
                 <button id="btn-skin-face" class="btn btn-secondary" type="button" title="Put a contact skin on the selected piece's target face (pink, from Paint Selected). With no target: on piece A's flat face that looks at B in a Join, or its top face outside one. A relief whose tips are all B touches; then Seat with gap 0 to rest B on the tips. Refuses a non-rectangular face; stands down if that face is painted excluded.">Skin face</button>
-                <select id="skin-pattern" class="vp-select" title="Skin pattern. crosshatch: fine rib lattice (0.42 mm ribs, 1.2 mm pitch, 0.6 tall). zigzag: sawtooth ridges (0.42 mm crests, 2 mm pitch). ring: one tapered ring (r 5, wall 0.8 to 0.4, 1 mm tall)." aria-label="Skin pattern">
+                <select id="skin-pattern" class="vp-select" title="Skin pattern. crosshatch: rib lattice (0.42 mm ribs, 1.2 mm pitch, 0.6 tall) - the pitch that still prints on a 0.6 nozzle, which is why it is the default. crosshatch-fine: the same lattice at 0.84 mm pitch, 1.43x the ribs, leaving a 0.42 mm channel = exactly one 0.4 mm-nozzle extrusion line - 0.4 NOZZLE ONLY, a 0.6 nozzle fuses it. zigzag: sawtooth ridges (0.42 mm crests, 2 mm pitch). ring: one tapered ring (r 5, wall 0.8 to 0.4, 1 mm tall)." aria-label="Skin pattern">
                   <option value="crosshatch">crosshatch</option>
+                  <option value="crosshatch-fine">crosshatch-fine</option>
                   <option value="zigzag">zigzag</option>
                   <option value="ring">ring</option>
                 </select>
@@ -283,14 +284,16 @@
                   <option value="off">off</option>
                   <option value="zigzag">zigzag</option>
                   <option value="crosshatch">crosshatch</option>
+                  <option value="crosshatch-fine">crosshatch-fine</option>
                   <option value="ring">ring</option>
                 </select>
               </div>
               <div class="vp-row vp-row-skin">
-                <button id="btn-skin-patch" class="btn btn-secondary" type="button" title="Bake the skin pattern as its own printable piece instead of onto a face - the relief alone, like a washer you can test on its own. Adds a NEW piece (30 x 30 mm, the same footprint the skin samples use) and leaves every existing piece untouched. bordered: the pattern inside a solid 1.2 mm rim standing 0.6 mm proud of its tips, one closed shell. loose: the pattern's features alone, solid, no rim and no backing plate - a free-standing one-extrusion-line lattice, so this one is flagged Non-solid.">Skin patch</button>
-                <select id="skin-patch-variant" class="vp-select" title="Which standalone patch. bordered: a washer - the pattern held inside a solid rim that takes the handling, self-contained and closed. loose: the raw pattern only, no frame and no backing plate, with ties where the pattern's own features do not touch each other (the zigzag's ridges). Both are real walls, never an infinitely thin surface." aria-label="Skin patch variant">
+                <button id="btn-skin-patch" class="btn btn-secondary" type="button" title="Bake the skin pattern as its own printable piece instead of onto a face - the relief alone, like a washer you can test on its own. Adds a NEW piece (30 x 30 mm, the same footprint the skin samples use) and leaves every existing piece untouched. bordered: the pattern inside a solid 1.2 mm rim standing 0.6 mm proud of its tips, one closed shell. loose: the pattern's features alone, solid, no rim and no backing plate - a free-standing one-extrusion-line lattice, so this one is flagged Non-solid. sandwich: double-sided - the pattern on BOTH faces with no floor between them, for a coupon that goes between two parts; also flagged Non-solid.">Skin patch</button>
+                <select id="skin-patch-variant" class="vp-select" title="Which standalone patch. bordered: a washer - the pattern held inside a solid rim that takes the handling, self-contained and closed, with the pattern on ONE side of a solid floor. loose: the raw pattern only, no frame and no backing plate, with ties where the pattern's own features do not touch each other (the zigzag's ridges). sandwich: double-sided - the pattern facing outward on BOTH faces with no floor between them, closed by a frame rib at the pattern's own width instead of a proud rim. Use it when the piece goes BETWEEN two parts: a bordered washer would present its solid floor to one of them and weld on area alone. Crosshatch family only - the zigzag and the ring taper, so their two faces are not the same pattern. All three are real walls, never an infinitely thin surface." aria-label="Skin patch variant">
                   <option value="bordered">bordered</option>
                   <option value="loose">loose</option>
+                  <option value="sandwich">sandwich</option>
                 </select>
               </div>
               <div class="vp-row vp-row-skin vp-row-texture">

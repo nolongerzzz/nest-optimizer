@@ -100,6 +100,22 @@ Smart build-plate packing for 3D printing.
     tips - a second breakaway interface - and the piece is flagged non-solid,
     because it now carries two shells. See `docs/HANDOFF.md`, "Skin wrap +
     the double skin"
+  - **Skin patch** bakes the relief as its own printable piece instead of onto
+    a face - a 30 x 30 mm coupon you can test on its own. `bordered` is a
+    washer: the pattern inside a solid rim that takes the handling. `loose` is
+    the pattern's features alone, no rim and no backing plate. `sandwich` is
+    double-sided - the pattern facing outward on BOTH faces with no floor
+    between them, which is the piece to use when the coupon goes *between* two
+    parts (a bordered washer would present its solid floor to one of them and
+    weld on area alone). All of them are in the **Library** tab, ready to load.
+  - **crosshatch-fine** is the same lattice at a 0.84 mm pitch instead of 1.2 -
+    1.43x the ribs, leaving a 0.42 mm channel, which is exactly one extrusion
+    line at a 0.4 nozzle. **0.4 nozzle only**: at a 0.6 nozzle one line is
+    0.63 mm and that channel fuses, which is also why the 1.2 mm default stays
+    the default. Tighter than 0.84 is not a tuning question - the channel goes
+    under one line and the slicer fills it in. The measurements, including why
+    the canonical mesh checker cannot see this and what does, are in
+    `docs/SKIN-CROSSHATCH-PITCH.md`
 - **Delete painted** removes the geometry under the paint, rather than only
   excluding it from bakes. **Paint Selected**, click the face, then Delete:
   **Face** cuts that face out and leaves the rim open, **Face+seal** cuts it

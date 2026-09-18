@@ -49,6 +49,15 @@
                0.6 tall (three 0.2 layers). NOTE: the physical reference
                (v8_FINAL's printed interface) is not in this repo as geometry,
                so these are stated defaults, every one a parameter.
+   crosshatch-fine
+               the same lattice at 0.84 pitch instead of 1.2 - a PRESET, not a
+               second builder (see `family` at PATTERNS). 1.43x the ribs per
+               axis, leaving a 0.42 channel between them, which is exactly one
+               extrusion line at a 0.4 nozzle and therefore the floor: tighter
+               and the slicer fills the gap in. 0.4 NOZZLE ONLY - at a 0.6
+               nozzle one line is 0.63, so 0.42 of air fuses, which is why
+               `crosshatch` at 1.2 is still the default.
+               docs/SKIN-CROSSHATCH-PITCH.md has the measurements.
    zigzag      parallel ridges with a trapezoid (sawtooth) section: `base`
                wide at the floor, `tip` wide at the crest, `height` tall,
                `pitch` apart, running along the face's second axis. Contact =
@@ -134,7 +143,7 @@
    NSO_Skin.applySkinToFace(soup, {
        dir: [x,y,z],                      face direction (outward normal)
        plane: number,                     optional, see findFace
-       pattern: 'crosshatch'|'zigzag'|'ring',
+       pattern: 'crosshatch'|'crosshatch-fine'|'zigzag'|'ring',
        params: {...},                     pattern parameters (see defaults)
        mode: 'raise'|'recess',
        layer2: {                          optional second layer
@@ -198,27 +207,81 @@
     return Math.round(p[0] * 1e4) + '_' + Math.round(p[1] * 1e4) + '_' + Math.round(p[2] * 1e4);
   }
 
-  /* ------------------------------------------------------------ patterns */
+  /* ------------------------------------------------------------ patterns
+
+     `family` says which builder a pattern name uses, so a name can be a
+     PRESET - the same geometry at different numbers - instead of a fourth
+     builder. Everything downstream dispatches on the family, never on the
+     name, which is what lets `crosshatch-fine` exist without touching
+     crosshatchPlan, gridRelief or any caller that already handles the three
+     shipped names.
+
+     WHY A PRESET AND NOT A UI FIELD. `pitch` was ALREADY a parameter here -
+     PATTERNS.crosshatch.defaults.pitch, merged by withDefaults, read by
+     crosshatchPlan - and nothing was hardcoded. What was missing is a way to
+     REACH it: index.html's #skin-pattern is a name-only select and no caller
+     in app-skin.js or app-skin-patch.js has ever passed `params`, so from the
+     app's seat 1.2 was the only pitch there was. A named preset is therefore
+     the smallest thing that closes the gap: it arrives through the select
+     every Skin control already reads, and the 1.2 default is untouched.
+
+     crosshatch-fine's 0.84 is NOT a taste figure. The open channel a
+     crosshatch leaves is pitch - rib, and with the rib held at one extrusion
+     line the tightest pitch that still leaves a full line of air is
+     rib + line = 0.42 + 0.42. Measured on the built mesh rather than
+     asserted - see tools/nso_skin_fine_test.js, which rays the channel
+     directly - and it is a 0.4-NOZZLE FIGURE: at a 0.6 nozzle one line is
+     0.63 (nso_thickness.floorFor) and the same sum is 1.05, which is why the
+     shipped 1.2 default is where it is and why it is the one that stays
+     default. docs/SKIN-CROSSHATCH-PITCH.md carries the whole table. */
   var PATTERNS = {
     crosshatch: {
+      family: 'crosshatch',
       defaults: { pitch: 1.2, rib: 0.42, height: 0.6, margin: null },
       describe: function (p) {
         return 'crosshatch lattice, rib ' + p.rib + ' mm, pitch ' + p.pitch + ' mm, ' + p.height + ' mm tall';
       }
     },
+    /* The tighter-pitch preset. Same builder, same rib, same height as
+       `crosshatch`; only the pitch moves, 1.2 -> 0.84, which is 1.43x the rib
+       density and leaves exactly one 0.4-nozzle extrusion line of air between
+       neighbouring ribs. 0.4 nozzle only. */
+    'crosshatch-fine': {
+      family: 'crosshatch',
+      defaults: { pitch: 0.84, rib: 0.42, height: 0.6, margin: null },
+      describe: function (p) {
+        return 'fine crosshatch lattice, rib ' + p.rib + ' mm, pitch ' + p.pitch + ' mm (' +
+          round3(p.pitch - p.rib) + ' mm channel), ' + p.height + ' mm tall';
+      }
+    },
     zigzag: {
+      family: 'zigzag',
       defaults: { pitch: 2.0, base: 1.2, tip: 0.42, height: 0.6, margin: null },
       describe: function (p) {
         return 'sawtooth ridges, base ' + p.base + ' -> tip ' + p.tip + ' mm, pitch ' + p.pitch + ' mm, ' + p.height + ' mm tall';
       }
     },
     ring: {
+      family: 'ring',
       defaults: { rOut: 5.0, wallBase: 0.8, wallTip: 0.4, height: 1.0, segments: 96, margin: null },
       describe: function (p) {
         return 'tapered ring, r ' + p.rOut + ' mm, wall ' + p.wallBase + ' -> ' + p.wallTip + ' mm, ' + p.height + ' mm tall';
       }
     }
   };
+
+  function round3(x) { return Math.round(x * 1000) / 1000; }
+
+  /* Which builder a pattern name uses. An unknown name answers with itself so
+     every caller's existing "unknown pattern" refusal still fires. */
+  function familyOf(name) {
+    return (PATTERNS[name] && PATTERNS[name].family) || name;
+  }
+
+  /* The one grid dispatch, by family. */
+  function gridPlan(name, fr, p, shift) {
+    return familyOf(name) === 'crosshatch' ? crosshatchPlan(fr, p, shift) : zigzagPlan(fr, p, shift);
+  }
 
   /* Layer 2 of a double skin: the same patterns at a smaller scale, so the
      second layer lands several features across one of layer 1's tips instead
@@ -229,6 +292,13 @@
      margin; it needs no rim of its own. */
   var LAYER2_DEFAULTS = {
     crosshatch: { pitch: 0.7, rib: 0.42, height: 0.3, margin: 0 },
+    /* Stated rather than left to the PATTERNS fallback, which would hand
+       layer 2 a null margin where the layer-2 convention is 0. The pitch does
+       NOT tighten further: layer 2 is meant to land several features across
+       one of layer 1's tips, and a fine crosshatch's tip is already one
+       extrusion line wide, so there is nothing to land across. It stays at
+       its own 0.84 and only the height halves. */
+    'crosshatch-fine': { pitch: 0.84, rib: 0.42, height: 0.3, margin: 0 },
     zigzag: { pitch: 0.9, base: 0.5, tip: 0.25, height: 0.3, margin: 0 },
     ring: { rOut: 2.5, wallBase: 0.6, wallTip: 0.3, height: 0.5, margin: 0 }
   };
@@ -662,7 +732,14 @@
         var z = (raised ? h : 0) + shift;
         return [z, z, z, z];
       },
-      ribsU: ivU.length, ribsV: ivV.length, margin: margin
+      ribsU: ivU.length, ribsV: ivV.length, margin: margin,
+      /* The rib spans themselves, published so a caller that has to BUTT
+         something against the outermost rib can find it instead of guessing
+         from breaksU. ribIntervals centres k ribs in the free span, so the
+         first one starts at ivU[0][0] >= margin and the leftover is split
+         evenly at the two ends - a sliver channel a frame has to swallow.
+         Read-only: the plan owns these. */
+      ivU: ivU, ivV: ivV
     };
   }
 
@@ -969,22 +1046,22 @@
     var p2 = null;
     if (layered && !freeReq) {
       if (mode !== 'raise') { res.reason = 'a composed second layer is raise-only (it is built on layer 1\'s tips)'; return res; }
-      if (name === 'ring' || l2name === 'ring') {
+      if (familyOf(name) === 'ring' || familyOf(l2name) === 'ring') {
         res.reason = 'a composed second layer needs two grid patterns (crosshatch or zigzag); ring has no height field to compose - use a free layer for it';
         return res;
       }
       p2 = withLayer2Defaults(l2name, l2.params);
       if (!(p2.height > 0)) { res.reason = 'layer 2 height must be positive'; return res; }
     }
-    if (name === 'ring') {
+    if (familyOf(name) === 'ring') {
       if (mode === 'recess') { res.reason = 'ring is raise-only'; return res; }
       info = ringRelief(fr, sides, p, relief);
       if (typeof info === 'string') { res.reason = info; return res; }
     } else {
-      var plan = name === 'crosshatch' ? crosshatchPlan(fr, p, shift) : zigzagPlan(fr, p, shift);
+      var plan = gridPlan(name, fr, p, shift);
       if (typeof plan === 'string') { res.reason = plan; return res; }
       if (p2) {
-        var plan2 = l2name === 'crosshatch' ? crosshatchPlan(fr, p2, 0) : zigzagPlan(fr, p2, 0);
+        var plan2 = gridPlan(l2name, fr, p2, 0);
         if (typeof plan2 === 'string') { res.reason = 'layer 2: ' + plan2; return res; }
         var cells1 = plan.cellHeights;
         plan = composePlans(plan, plan2, p.height, tol);
@@ -1340,11 +1417,11 @@
      refused here by name rather than silently. */
   function patternPlan(name, params, fr, shift) {
     if (!PATTERNS[name]) return 'unknown pattern "' + name + '"';
-    if (name === 'ring') return 'ring has no height field - it builds its surface directly (see ringRelief)';
+    if (familyOf(name) === 'ring') return 'ring has no height field - it builds its surface directly (see ringRelief)';
     if (typeof fr === 'string' || !fr || !(fr.W > 0)) return 'patternPlan needs a frame (see planeFrame)';
     var p = withDefaults(name, params);
     if (!(p.height > 0)) return 'height must be positive';
-    var plan = name === 'crosshatch' ? crosshatchPlan(fr, p, shift || 0) : zigzagPlan(fr, p, shift || 0);
+    var plan = gridPlan(name, fr, p, shift || 0);
     if (typeof plan === 'string') return plan;
     plan.params = p;
     return plan;
@@ -1352,6 +1429,7 @@
 
   var api = {
     PATTERNS: PATTERNS,
+    familyOf: familyOf,
     withDefaults: withDefaults,
     LAYER2_DEFAULTS: LAYER2_DEFAULTS,
     BOX_DIRS: BOX_DIRS,

@@ -123,7 +123,8 @@ withApp(async (page, logs) => {
   }));
   check('Skin face, pattern select and Cap open faces live in the Finish tab, not the Join card', where.skinInFinish && where.selInFinish && where.capInFinish && where.noneInJoin, JSON.stringify(where));
   check('nso_skin.js and app-skin.js loaded, button listener attached', present.module && present.appSkin && present.wired);
-  check('pattern select offers crosshatch / zigzag / ring', JSON.stringify(present.options) === '["crosshatch","zigzag","ring"]', present.options.join(','));
+  check('pattern select offers crosshatch / crosshatch-fine / zigzag / ring',
+    JSON.stringify(present.options) === '["crosshatch","crosshatch-fine","zigzag","ring"]', present.options.join(','));
 
   console.log('\n=== 2. Start Join, Pick A, Pick B - by clicking ===');
   await page.click('#btn-join-start');

@@ -95,8 +95,14 @@ function edgeShells(soup) {
 console.log('=== 1. nso_skin.js on the 20 mm cube ===');
 const cube = readSTL(fx('box-20mm.stl'));
 const cubeV = meshValidate(fx('box-20mm.stl')).signed_volume;
+/* Keyed by pattern NAME, and this loop walks every name in PATTERNS - so a new
+   preset lands here rather than being skipped, which is what caught
+   crosshatch-fine the moment it was added. A preset shares its family's
+   formula: the ribs are prismatic either way, so the relief is contact x
+   height whatever the pitch. */
 const expectedVolume = {
   crosshatch: r => cubeV + r.tipArea * r.tipHeight,
+  'crosshatch-fine': r => cubeV + r.tipArea * r.tipHeight,
   zigzag: r => {
     const p = r.params, L = r.face.D - 2 * r.info.margin;
     return cubeV + r.info.ridges * ((p.base + p.tip) / 2 * p.height) * L;
