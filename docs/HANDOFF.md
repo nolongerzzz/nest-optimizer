@@ -48,9 +48,40 @@ Current roster, by category:
 | Repair (`app-finish.js`, Seal's checkbox) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
 | Fusion (`app-join.js`, Join Route 0) | whole-piece | `nsoMaskCount(A)+nsoMaskCount(B) > 0` | stand-down comment |
 | Pocket corners (`nso_inside_corners.js`) | sub-region | this pocket's floor + 4 walls | `docs/INSIDE-CORNERS.md` §2 |
+| Extract selection (`app-extract-sel.js`) | read-only consumer | none — paint is its input | header comment |
 
 `node tools/nso_paint_scope_test.js` asserts every entry actually carries its
 label in source, so a deleted or drifted declaration fails rather than rotting.
+Its ROSTER covers the four **bake** features: they are the ones with a
+stand-down to keep honest. The read-only consumer below has no stand-down on
+paint to assert, so it is listed here but not in that ROSTER.
+
+#### A third shape: read-only consumers (added 2026-09-18)
+`Extract selection` is the first feature that takes the paint as its **input**
+rather than as a skip list. It reads the painted region, copies it onto the
+plate as a new piece, and never writes to the source — so "a painted face stays
+untouched by ANY bake mechanism" is satisfied by construction, not by a
+stand-down, and neither whole-piece nor sub-region describes it. It stands down
+on the *absence* of paint instead (`nsoMaskCount(m) === 0`).
+
+If you add another feature of this shape, say so in its own header the way
+`app-extract-sel.js` does, and add a row above. Do not force it into one of the
+two bake categories — a stand-down that can never fire is worse than no label.
+
+### Reading the painted region as geometry
+`window.nsoMaskPaintedTris(model, mesh)` hands back the painted triangles
+themselves, in the display space `mesh` is already in, as a flat 9-per-triangle
+soup. It is the exact set the yellow overlay covers: `repaint()` was split so
+both read one function, and neither may re-derive "which triangles are painted"
+on its own. `nsoMaskFaceList` still answers "which FACES", which is what the
+bakes want; this answers "which TRIANGLES", which is what anything copying or
+measuring the region wants.
+
+It returns `[]` when nothing is painted, and can legitimately return `[]` when
+something IS painted: a click on a curved top names the Y+ face, and a sphere
+has no triangle lying on that plane. That is the paint's existing behaviour —
+the yellow shows nothing there either — so a caller must handle an empty result
+rather than assume a painted face implies painted triangles.
 
 ## Output protocol
 1. Findings, numbers, diffs, and next-step proposals go in the current ticket PR
@@ -372,6 +403,13 @@ package.json ran eleven. package.json's `test` script is the one definition;
 read it there. The check NAME is what branch protection pins, and that stays
 `npm test` however the suite grows. The copy on `main` and the copy on
 `claude-wip` are byte-identical, deliberately, so they cannot conflict on merge.
+
+As of 2026-09-18 the wire-* set is a quartet: `nso_wire_extract_sel_test.js`
+joined it with Extract selection, and runs the same way through the same
+harness. It is the drive check for that feature - it paints through the app's
+own hit path, clicks the real button, runs `NSO_edgeStats` on what lands on the
+plate, and hashes the source piece either side of the extraction so "the
+original is untouched" is measured rather than asserted.
 
 As of 2026-09-15 the wire-* trio is IN `npm test`, so Smooth, Seal->Repair and
 Join->Fusion are gated by CI rather than only checked by hand. They run through

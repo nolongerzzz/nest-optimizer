@@ -255,17 +255,20 @@
     if (overlay && overlay.material) overlay.material.dispose();
     overlay = null;
   }
-  function repaint() {
-    clearOverlay();
-    const m = activeModel();
+  /* The painted triangles themselves, in the display space `mesh` is already
+     in - the exact geometry the yellow covers, handed back as a flat soup so
+     something other than the overlay can read it. Split out of repaint()
+     unchanged: the yellow and anything that consumes the selection have to
+     agree on which triangles are painted, and one function is how that stays
+     true. Returns an empty array when nothing is painted. */
+  window.nsoMaskPaintedTris = function (m, mesh) {
     const mask = m && m.faceMask;
-    if (!m || !mask || !mask.exclude.length) return 0;
-    const placed = state.placed.find(function (p) { return p && p.sourceId === m.id && p.mesh; });
-    if (!placed) return 0;
+    if (!m || !mask || !mask.exclude || !mask.exclude.length) return [];
+    if (!mesh || !mesh.geometry) return [];
     const f = frameOf(m);
-    const geo = placed.mesh.geometry;
+    const geo = mesh.geometry;
     const pos = geo.attributes && geo.attributes.position;
-    if (!pos || !f) return 0;
+    if (!pos || !f) return [];
     const verts = [];
     const nTri = (pos.count / 3) | 0;
     /* The faces the clicks named, in the display space this mesh is already
@@ -340,6 +343,17 @@
       }
       verts.push(A[0], A[1], A[2], B[0], B[1], B[2], C[0], C[1], C[2]);
     }
+    return verts;
+  };
+
+  function repaint() {
+    clearOverlay();
+    const m = activeModel();
+    const mask = m && m.faceMask;
+    if (!m || !mask || !mask.exclude.length) return 0;
+    const placed = state.placed.find(function (p) { return p && p.sourceId === m.id && p.mesh; });
+    if (!placed) return 0;
+    const verts = window.nsoMaskPaintedTris(m, placed.mesh);
     if (!verts.length) return 0;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
