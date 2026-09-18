@@ -667,6 +667,74 @@ select:focus, input:focus {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+/* ---- Finish menu: the six collapsible groups ----------------------------
+   The menu had grown to 29 rows and 49 controls in a 176px column - 988px of
+   content, of which a 720px-tall window could show 63%. Five threads each
+   added a row and none of them could see the whole thing.
+
+   Grouped, the rows that only matter to one tool stop paying rent: Soften's
+   R / Full wrap, Texture's pitch and depth, Carve's four numbers and its
+   readout are 217px that sat in the column whether or not their tool was in
+   use. All six groups shut is ~169px; the tallest one open is ~418px, which
+   clears a 720px window.
+
+   <details>, not tabs and not a JS show/hide: at 176px a tab strip cannot
+   carry six labels, and <details> is what the drive checks already know how
+   to open - five of them walk up the ancestors opening every one they find,
+   so they reach a control inside a group without being touched at all.
+
+   Open state is per session and lives in the DOM (the `open` attribute); it
+   is deliberately not persisted, matching the paint and the non-solid flag.
+   Groups are independent - paint a face in one, skin it in another - and the
+   body keeps its max-height and scroll as the backstop for the all-open case.
+
+   A group is a heading with a rule under it, NOT a box: no side border and no
+   side padding anywhere on this path. Every row in this menu is sized against
+   the 166px the body gives it - .vp-row-skin2 in particular is fitted to the
+   pixel so "crosshatch" clears the select's arrow - and a bordered, padded
+   group would have quietly taken 10px off all 29 of them. */
+.vp-sec { width: 100%; }
+.vp-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(232, 238, 246, 0.12);
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.vp-sec-head::-webkit-details-marker { display: none; }
+/* The twisty, drawn rather than inherited, so it is the same glyph in every
+   engine and rotates instead of swapping character. */
+.vp-sec-head::before {
+  content: "";
+  flex: none;
+  width: 0;
+  height: 0;
+  margin-left: 2px;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform 0.12s ease;
+}
+.vp-sec[open] > .vp-sec-head::before { transform: rotate(90deg); }
+.vp-sec[open] > .vp-sec-head { color: #e8eef6; }
+.vp-sec-head:hover { color: #e8eef6; }
+.vp-sec-head:focus-visible { outline: 2px solid #7dd3fc; outline-offset: -2px; }
+.vp-sec-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 0 2px;
+}
+
 .vp-icon-btn {
   pointer-events: auto;
   width: 40px;
