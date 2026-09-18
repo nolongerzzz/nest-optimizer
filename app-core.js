@@ -20,6 +20,11 @@ const state = {
   controls: null,
   plateMesh: null,
   plateGrid: null,
+  // Plate grid: 'on' | 'off' | 'auto'. auto = visible only while a piece is
+  // actually being positioned. Snap is a separate, off-by-default assist.
+  plateGridMode: 'auto',
+  plateGridSnap: false,
+  plateGridAutoHoldUntil: 0,
   plateBorder: null,
   plateTicks: [],
   modelGroup: null,
@@ -703,9 +708,187 @@ function animate() {
   requestAnimationFrame(animate);
   if (state.controls) state.controls.update();
   updatePlateByView();
+  applyPlateGridVisibility();
   if (state.renderer && state.scene && state.camera) {
     state.renderer.render(state.scene, state.camera);
   }
+}
+
+/* ===================== Plate reference grid =====================
+   A flat, world-aligned grid owned by the build plate. It is plate furniture,
+   exactly like plateMesh / plateBorder / plateTicks: built by buildPlateMesh,
+   added straight to state.scene and never to state.modelGroup, so no piece
+   transform can move or rotate it. It sits in the plate's own plane, which is
+   why a piece resting flat on the bed shows it on its underside for free - the
+   two surfaces coincide.
+
+   The bed is a plane at y = 0 (hitPlateXZ intersects exactly that plane), so
+   the grid is a plane too. There is no curvature anywhere on this path and
+   nothing here needs to handle any.
+
+   It is drawn but never picked. raycast() is a no-op on both line sets, and
+   hitPlateSurface does not list the grid among its targets - plateMesh already
+   covers the same footprint, so plate-drag orbit is unaffected. The one and
+   only way this grid can move a piece is grid-snap, a separate control that
+   is off by default. */
+const PLATE_GRID_STEP_MM = 10;        // minor spacing, and the snap lattice pitch
+const PLATE_GRID_MAJOR_EVERY = 5;     // a heavier line every 5th minor line (50 mm)
+const PLATE_GRID_Y = 0.15;            // above the bed at 0, below the border at 0.3
+const PLATE_GRID_AUTO_HOLD_MS = 900;  // how long 'auto' lingers after a nudge
+
+/* Put onto each line set in place of Object3D.prototype.raycast, so no ray
+   can ever report a hit on the grid. */
+function plateGridNeverRaycast() {}
+
+function buildPlateGrid(p) {
+  const hw = p.w / 2;
+  const hd = p.d / 2;
+  const minor = [];
+  const major = [];
+  const line = (arr, x1, z1, x2, z2) => arr.push(x1, 0, z1, x2, 0, z2);
+
+  // Lines on the world lattice (multiples of the step from the plate centre),
+  // clipped to the real plate - w and d, not a square of max(w, d).
+  const kx = Math.floor(hw / PLATE_GRID_STEP_MM);
+  for (let k = -kx; k <= kx; k++) {
+    const x = k * PLATE_GRID_STEP_MM;
+    line(k % PLATE_GRID_MAJOR_EVERY === 0 ? major : minor, x, -hd, x, hd);
+  }
+  const kz = Math.floor(hd / PLATE_GRID_STEP_MM);
+  for (let k = -kz; k <= kz; k++) {
+    const z = k * PLATE_GRID_STEP_MM;
+    line(k % PLATE_GRID_MAJOR_EVERY === 0 ? major : minor, -hw, z, hw, z);
+  }
+
+  const group = new THREE.Group();
+  group.position.y = PLATE_GRID_Y;
+  group.userData.plateGrid = true;
+  const addSet = (verts, color, opacity) => {
+    if (!verts.length) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    const seg = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
+      color: color, transparent: true, opacity: opacity, depthWrite: false
+    }));
+    seg.raycast = plateGridNeverRaycast;   // purely visual - invisible to every pick
+    seg.userData.skipXray = true;
+    group.add(seg);
+  };
+  addSet(minor, 0x363d49, 0.8);
+  addSet(major, 0x5a6578, 0.95);
+  return group;
+}
+
+function disposePlateGrid(group) {
+  if (!group) return;
+  group.children.forEach(function (c) {
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) c.material.dispose();
+  });
+}
+
+function plateGridNow() {
+  return (typeof performance !== 'undefined' && performance.now)
+    ? performance.now() : Date.now();
+}
+
+/* 'auto' asks one question: is a piece being positioned right now? A pointer
+   drag is the clear case; a nudge or a rotate is a positioning act too, but an
+   instantaneous one, so those hold the grid up for a beat afterwards. */
+function plateGridAutoActive() {
+  if (state.moveDragging) return true;
+  return plateGridNow() < (state.plateGridAutoHoldUntil || 0);
+}
+
+function plateGridWantsVisible() {
+  if (state.plateGridMode === 'on') return true;
+  if (state.plateGridMode === 'off') return false;
+  return plateGridAutoActive();
+}
+
+function applyPlateGridVisibility() {
+  if (state.plateGrid) state.plateGrid.visible = plateGridWantsVisible();
+}
+
+function holdPlateGridAuto(ms) {
+  state.plateGridAutoHoldUntil = Math.max(
+    state.plateGridAutoHoldUntil || 0,
+    plateGridNow() + (ms || PLATE_GRID_AUTO_HOLD_MS)
+  );
+  applyPlateGridVisibility();
+}
+
+function syncPlateGridUI() {
+  const sel = document.getElementById('plate-grid-show');
+  if (sel && sel.value !== state.plateGridMode) sel.value = state.plateGridMode;
+  const chk = document.getElementById('chk-plate-grid-snap');
+  if (chk) chk.checked = !!state.plateGridSnap;
+}
+
+function setPlateGridMode(mode) {
+  if (mode !== 'on' && mode !== 'off' && mode !== 'auto') return;
+  state.plateGridMode = mode;
+  applyPlateGridVisibility();
+  syncPlateGridUI();
+}
+
+function setPlateGridSnap(on) {
+  state.plateGridSnap = !!on;
+  let note = state.plateGridSnap ? 'Grid snap on' : 'Grid snap off';
+  /* Snap with the grid switched off is a legal state and stays reachable - the
+     two controls are genuinely independent - but it is not one to fall into by
+     accident, because the assist would pull pieces toward lines nobody can
+     see. So turning snap on while the grid is off promotes the grid to auto,
+     once, and says so. Set the grid back to off afterwards and snap keeps
+     working: this is a signpost, not a constraint. */
+  if (state.plateGridSnap && state.plateGridMode === 'off') {
+    setPlateGridMode('auto');
+    note += ' - grid shown while positioning so the lattice is visible';
+  }
+  syncPlateGridUI();
+  setStatus(note);
+}
+
+/* ---- grid-snap: a soft pull, never a lock ----------------------------------
+   Within the pull radius R, the cursor's offset d from the nearest lattice
+   line maps to
+
+       f(d) = sign(d) * R * ((1 - S) * u + S * u^2),   u = |d| / R
+
+   Three properties are what make this an assist rather than a constraint:
+
+     f(R) = R    - continuous with the untouched region outside the radius,
+                   so nothing jumps as the pull starts or stops.
+     f(0) = 0    - the lattice line is exactly reachable, not merely approached.
+     f'(d) >= 1 - S > 0 everywhere - strictly increasing. The piece moves
+                   whenever the cursor moves, in the same direction, so a drag
+                   away from a line can never be blocked or reversed.
+
+   S is how hard the detent bites. At S = 0.8 the piece tracks the cursor at
+   20% speed right on the line, and the largest offset the assist can ever
+   apply is max(d - f(d)) = S*R/4 = 1 mm. R = half the step, so every point on
+   the bed is inside exactly one line's pull and the field has no seams. */
+const PLATE_GRID_SNAP_STRENGTH = 0.8;
+const PLATE_GRID_SNAP_RADIUS_MM = PLATE_GRID_STEP_MM / 2;
+
+function plateGridSnapAxis(v) {
+  const near = Math.round(v / PLATE_GRID_STEP_MM) * PLATE_GRID_STEP_MM;
+  const d = v - near;
+  const a = Math.abs(d);
+  if (a >= PLATE_GRID_SNAP_RADIUS_MM) return v;
+  const u = a / PLATE_GRID_SNAP_RADIUS_MM;
+  const pulled = PLATE_GRID_SNAP_RADIUS_MM *
+    ((1 - PLATE_GRID_SNAP_STRENGTH) * u + PLATE_GRID_SNAP_STRENGTH * u * u);
+  return near + (d < 0 ? -pulled : pulled);
+}
+
+/* Applied to the piece's own placement origin (p.x / p.z), so the pull is
+   toward the nearest grid intersection under the piece's own centre. Returns
+   the point untouched when snap is off - this is the whole of the coupling
+   between the grid and anything that moves. */
+function plateGridSnapXZ(x, z) {
+  if (!state.plateGridSnap) return { x: x, z: z };
+  return { x: plateGridSnapAxis(x), z: plateGridSnapAxis(z) };
 }
 
 function buildPlateMesh() {
@@ -715,6 +898,7 @@ function buildPlateMesh() {
   }
   if (state.plateGrid) {
     state.scene.remove(state.plateGrid);
+    disposePlateGrid(state.plateGrid);
     state.plateGrid = null;
   }
   if (state.plateBorder) {
@@ -749,11 +933,10 @@ function buildPlateMesh() {
   state.plateMesh.receiveShadow = true;
   state.scene.add(state.plateMesh);
 
-  // Grid on the floor - not a child of the rotated plate
-  const grid = new THREE.GridHelper(Math.max(p.w, p.d), 18, 0x3a3d44, 0x22252a);
-  grid.position.y = 0.15;
-  state.scene.add(grid);
-  state.plateGrid = grid;
+  // Reference grid on the floor - plate furniture, not a child of any piece
+  state.plateGrid = buildPlateGrid(p);
+  state.scene.add(state.plateGrid);
+  applyPlateGridVisibility();
 
   // Bright cyan border so plate edge is obvious
   const edges = new THREE.EdgesGeometry(geo);
@@ -2009,7 +2192,12 @@ function clampToApproachWalls(p, selfIdx, fromX, fromZ, toX, toZ) {
 }
 
 function resolveDragPose(p, selfIdx, fromX, fromZ, toX, toZ) {
-  const mag = magnetTowardNeighbors(p, selfIdx, toX, toZ);
+  /* Grid first, neighbours last. The neighbour magnet closes a contact gap
+     outright, and touching the piece next door is a stronger intent than
+     lining up on the bed, so it gets the final word - a piece pulled into
+     contact stays in contact even when that lands it off the lattice. */
+  const g = plateGridSnapXZ(toX, toZ);
+  const mag = magnetTowardNeighbors(p, selfIdx, g.x, g.z);
   applyPlacedXZ(p, mag.x, mag.z);
 }
 
@@ -2028,6 +2216,7 @@ function startMoveDrag(idx, event) {
   if (!hit) return false;
   state.moveDragging = true;
   state.moveIndex = idx;
+  applyPlateGridVisibility();
   state.moveUndoFrom = { index: idx, x: p.x, z: p.z };
   state.moveGrab.x = p.x - hit.x;
   state.moveGrab.z = p.z - hit.z;
@@ -2155,6 +2344,7 @@ function setOrbitFromPlate(allow) {
 function isPlateObject(obj) {
   if (!obj) return false;
   if (obj === state.plateMesh || obj === state.plateGrid || obj === state.plateBorder) return true;
+  if (state.plateGrid && obj.parent === state.plateGrid) return true;
   if (state.plateTicks && state.plateTicks.indexOf(obj) >= 0) return true;
   return false;
 }
@@ -2165,7 +2355,9 @@ function hitPlateSurface(event) {
   state.raycaster.setFromCamera(state.pointer, state.camera);
   const targets = [];
   if (state.plateMesh) targets.push(state.plateMesh);
-  if (state.plateGrid) targets.push(state.plateGrid);
+  // plateGrid is deliberately absent: it is purely visual and must not be
+  // pickable. plateMesh covers the same footprint, so plate-drag orbit is
+  // unchanged by its absence.
   if (state.plateBorder) targets.push(state.plateBorder);
   if (state.plateTicks && state.plateTicks.length) targets.push(...state.plateTicks);
   if (!targets.length) return false;
@@ -2815,6 +3007,7 @@ function nudgeSelected(dx, dz) {
   if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'nudge')) return;
   pushUndo({ type: 'movePlaced', index: state.selectedIndex, x: p.x, z: p.z });
   applyPlacedXZ(p, p.x + dx, p.z + dz);
+  holdPlateGridAuto();
   updateExportButton();
   if (!reportJoinFlushGap()) setStatus(`Moved model #${state.selectedIndex + 1}`);
 }

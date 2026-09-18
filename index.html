@@ -42,6 +42,18 @@
             <span id="plate-dims">180 × 180 mm</span>
             <span id="plate-area">32,400 mm²</span>
           </div>
+          <div class="plate-grid-controls">
+            <label class="hint" for="plate-grid-show">Bed grid (10 mm)</label>
+            <select id="plate-grid-show" title="A flat reference grid fixed to the plate. It is drawn only - it never takes a click.">
+              <option value="auto">Auto - while positioning</option>
+              <option value="on">Always on</option>
+              <option value="off">Off</option>
+            </select>
+            <label class="plate-grid-snap-row" for="chk-plate-grid-snap"
+                   title="A soft pull toward the nearest grid intersection while you drag. It assists, it does not lock - drag away from a line at any time.">
+              <input type="checkbox" id="chk-plate-grid-snap"> Snap to grid
+            </label>
+          </div>
         </section>
         <section class="card card-compact">
           <h2>Library</h2>

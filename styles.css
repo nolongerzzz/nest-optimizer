@@ -188,6 +188,35 @@ select:focus, input:focus {
   gap: 4px;
 }
 
+.plate-grid-controls {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.plate-grid-controls .hint {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.plate-grid-controls select {
+  margin-bottom: 4px;
+}
+
+.plate-grid-snap-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.plate-grid-snap-row input {
+  width: auto;
+  margin: 0;
+}
+
 .plate-info {
   display: flex;
   justify-content: space-between;
