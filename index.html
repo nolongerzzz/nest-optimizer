@@ -272,6 +272,10 @@
                   <option value="shell">Shell</option>
                 </select>
               </div>
+              <div class="vp-row vp-row-skin vp-row-delete">
+                <button id="btn-extract-sel" class="btn btn-secondary" type="button"
+                        title="Copy the target face's region (pink, from Paint Selected) onto the plate as its own piece, ready to move, export or print on its own. The opposite of Delete painted: nothing is removed and the piece you painted is left exactly as it was. Stands down if the target is also painted excluded.">Extract selection</button>
+              </div>
               <div class="vp-row vp-row-skin">
                 <button id="btn-skin-face" class="btn btn-secondary" type="button" title="Put a contact skin on the selected piece's target face (pink, from Paint Selected). With no target: on piece A's flat face that looks at B in a Join, or its top face outside one. A relief whose tips are all B touches; then Seat with gap 0 to rest B on the tips. Refuses a non-rectangular face; stands down if that face is painted excluded.">Skin face</button>
                 <select id="skin-pattern" class="vp-select" title="Skin pattern. crosshatch: rib lattice (0.42 mm ribs, 1.2 mm pitch, 0.6 tall) - the pitch that still prints on a 0.6 nozzle, which is why it is the default. crosshatch-fine: the same lattice at 0.84 mm pitch, 1.43x the ribs, leaving a 0.42 mm channel = exactly one 0.4 mm-nozzle extrusion line - 0.4 NOZZLE ONLY, a 0.6 nozzle fuses it. zigzag: sawtooth ridges (0.42 mm crests, 2 mm pitch). ring: one tapered ring (r 5, wall 0.8 to 0.4, 1 mm tall)." aria-label="Skin pattern">
@@ -422,6 +426,7 @@
   <script src="app-mask.js?v=inside6"></script>
   <script src="app-seat-grid.js?v=inside6"></script>
   <script src="app-paint-delete.js?v=del1"></script>
+  <script src="app-extract-sel.js?v=inside6"></script>
   <script src="app-texture.js?v=skin2"></script>
   <script src="app-nonsolid.js?v=inside4"></script>
   <script src="app-poslock.js?v=lock1"></script>
