@@ -19,6 +19,13 @@ Smart build-plate packing for 3D printing.
 - Auto-nest with optional 45°/90° rotations
 - Adjustable gap between models
 - Live 3D preview
+- **Pottery Wheel**: throw a vessel on an axis - a centred ball sized by
+  Pappus's centroid theorem, one opening push, drag-shaped pulls at any
+  height, and a base trim, with a live clay budget and the nozzle-safety wall
+  floor enforced on every update ([docs/POTTERY-WHEEL.md](docs/POTTERY-WHEEL.md))
+- **Build-volume warning**: a live check against the selected printer's bed
+  and build height, per-printer profiles any tool can query
+  ([docs/BUILD-VOLUME.md](docs/BUILD-VOLUME.md))
 - Export positioned models as STL (ready to drop into Bambu Studio / Orca / PrusaSlicer)
 - Or pick **Format: 3MF** in the Export card and the same two buttons write a
   Bambu Studio `.3mf` project with cooling settings baked in, chosen from a small
@@ -46,6 +53,9 @@ Smart build-plate packing for 3D printing.
   the file are ignored. Tested against files Bambu Studio wrote as well as
   NSO's own exports - see `docs/baked-cooling-settings.md`, "3MF import".
 - The packing algorithm is a solid bottom-left free-rectangle packer with rotation. It will improve over time.
+- The build-volume warning answers **"does it fit the machine"** and nothing
+  else. It is not a printability check - bridging, wall thickness and severed
+  connections are separate concerns with their own checks.
 
 ## Future ideas
 

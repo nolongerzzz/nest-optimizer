@@ -300,7 +300,7 @@ function undoLast() {
       ((m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length : 0) + ' face(s) excluded');
     return;
   }
-  if (entry.type === 'softenReplace' || entry.type === 'capReplace' || entry.type === 'sealReplace' || entry.type === 'solidifyReplace' || entry.type === 'thickenReplace' || entry.type === 'smoothReplace' || entry.type === 'extendReplace') {
+  if (entry.type === 'softenReplace' || entry.type === 'capReplace' || entry.type === 'sealReplace' || entry.type === 'solidifyReplace' || entry.type === 'thickenReplace' || entry.type === 'smoothReplace' || entry.type === 'extendReplace' || entry.type === 'wheelReplace') {
     const m = state.models.find(x => x.id === entry.modelId);
     if (!m) { setStatus('Undo: piece no longer exists'); return; }
     // the paint set is part of the piece's state, so one step puts back both
@@ -346,6 +346,7 @@ function undoLast() {
     setStatus(({
       smoothReplace:   'Undo: Smooth reverted',
       extendReplace:   'Undo: Extend reverted',
+      wheelReplace:    'Undo: Pottery Wheel reverted',
       thickenReplace:  'Undo: Thicken reverted',
       solidifyReplace: 'Undo: Solidify reverted',
       sealReplace:     'Undo: Seal reverted',
@@ -693,10 +694,14 @@ function buildPlateMesh() {
 
 function getCurrentPlate() {
   if (state.plate === 'custom') {
+    var ch = document.getElementById('custom-h');
     return {
       name: 'Custom',
       w: Number(document.getElementById('custom-w').value) || 180,
-      d: Number(document.getElementById('custom-d').value) || 180
+      d: Number(document.getElementById('custom-d').value) || 180,
+      // Build height. PLATES has never carried one - the packer only ever
+      // needed a footprint - and nso_printer.js is the thing that does.
+      h: Number(ch && ch.value) || 180
     };
   }
   return PLATES[state.plate];

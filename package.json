@@ -19,8 +19,12 @@
     "extend": "node tools/nso_extend_test.js",
     "extend:canonical": "node tools/nso_extend_canonical_check.js",
     "wire:extend": "node tools/nso_wire_extend_test.js",
+    "wheel": "node tools/nso_wheel_test.js",
+    "wheel:canonical": "node tools/nso_wheel_canonical_check.js",
+    "wire:wheel": "node tools/nso_wire_wheel_test.js",
+    "fit": "node tools/nso_printer_fit_test.js",
     "grispr:test": "python3 -m unittest discover -s tools/grispr/tests -p \"test_*.py\"",
-    "test": "sh tools/cth-test/run-all.sh && node tools/cth-test/capture-check.mjs && node tools/cth-test/drive-check.mjs && node tools/3mf-test/roundtrip-check.js && node tools/3mf-test/export-drive-check.mjs && node tools/3mf-test/import-check.js && node tools/3mf-test/import-drive-check.mjs && node tools/nso_wire_smooth_test.js && node tools/nso_wire_repair_test.js && node tools/nso_wire_fuse_test.js && node tools/nso_selfint_equiv_test.js && node tools/nso_paint_scope_test.js && node tools/nso_extend_test.js && node tools/nso_extend_canonical_check.js && node tools/nso_wire_extend_test.js"
+    "test": "sh tools/cth-test/run-all.sh && node tools/cth-test/capture-check.mjs && node tools/cth-test/drive-check.mjs && node tools/3mf-test/roundtrip-check.js && node tools/3mf-test/export-drive-check.mjs && node tools/3mf-test/import-check.js && node tools/3mf-test/import-drive-check.mjs && node tools/nso_wire_smooth_test.js && node tools/nso_wire_repair_test.js && node tools/nso_wire_fuse_test.js && node tools/nso_selfint_equiv_test.js && node tools/nso_paint_scope_test.js && node tools/nso_extend_test.js && node tools/nso_extend_canonical_check.js && node tools/nso_wire_extend_test.js && node tools/nso_wheel_test.js && node tools/nso_wheel_canonical_check.js && node tools/nso_printer_fit_test.js && node tools/nso_wire_wheel_test.js"
   },
   "devDependencies": {
     "playwright": "^1.47.0",
