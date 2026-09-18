@@ -310,6 +310,16 @@ Concretely, and gated: neither `nso_skin_band.js` nor `app-texture.js` calls
 bake reports is the tip-surface area, **not** a promise that Seat can land a
 part on it. Do not wire Seat to this button without doing that ticket.
 
+**That ticket has since landed** — `docs/SEAT-SURFACE.md`, the **Seat here**
+button, a new module (`nso_seat_surface.js`, `app-seat-surface.js`). It took
+the second option: Seat grew a second mode. It changes nothing above. Both
+files here are untouched, the gate in the paragraph above still holds and
+still should, and a Texture band is still **not** a Seat target — that seat
+measures an interface between two pieces, and a relief's tip surface is a
+third thing, listed under "Deferred: contact geometry" in that document. So
+the sentence this section opens with stays true of THIS file, which is what it
+was ever about.
+
 Also not done, and each its own question:
 
 - **a second layer** (composed or free) on a band. `composePlans` works in the
