@@ -2038,7 +2038,7 @@ of them; see the 3MF checks section.)
 `app-join.js` `NSO_SEAT_RAY_INSET` / `NSO_seatRayOrigins` (every corner ray in
 the seat now leaves from those origins), and `NSO_SEAT_BED_EPS` in
 `seatBitAtGap`'s lift clamp. Check: `npm run seat:side`
-(`tools/nso_seat_side_test.js`, in `npm test`, 52 gates). This closes the
+(`tools/nso_seat_side_test.js`, in `npm test`, 72 gates). This closes the
 limit the vertical-stacking work stated and did not solve: "Two pieces resting
 side by side on the bed never seat horizontally - `Seat failed - corner 0
 missed hull along punch axis`."
@@ -2063,6 +2063,21 @@ missing at every inset out to 0.01 mm - a bit that overhangs the target face
 must still refuse, and it does. No recovered ray reports the far side of the
 hull: every one measures the near wall, `d = 20 + the staged distance`, exact
 to 1e-6.
+
+*The sweep is a gate now, not an audit number (2026-09-18).* It first landed as
+a measurement quoted here and nowhere else, which left the inset's value
+resting on a number no check could reproduce. It is section 10 of
+`tools/nso_seat_side_test.js` - 20 of that suite's gates - staged through the
+app's own `settlePlacedOnBed` / `nudgeSelected` path so the bed baseline is the
+one the seat sees, and run as corner-ray arithmetic over the 60 poses rather
+than 60 clicks, so it costs one page round trip instead of a minute. It pins
+every number in the paragraph above: 60 placements, the 10 that overhang
+derived from the geometry rather than hardcoded, all 60 losing a ray at inset 0
+and at 1e-9, 50 recovering and those same 10 still refusing at each of 1e-7 /
+1e-5 / 0.001 / 0.01, every recovered ray measuring the near wall, and 0
+straddle flags throughout. Load-bearing, checked the way section 2 checks the
+fix: with the inset taken back out of `NSO_seatRayOrigins`, four of the gates
+fail.
 
 **False-positive straddle - the thing to get wrong.** The overhang gate
 (`NSO_seatStraddle`, "Seat refuses a bit the target face cuts through") reads

@@ -27,7 +27,14 @@
    8. The bed-epsilon clamp: a seat that really would sink the bit below the
       plate still says so; the Float noise a settled bit carries does not.
    9. The inset is a sample-point change only: the ray origins keep the
-      corners' own offset along the punch axis and stay inside the face. */
+      corners' own offset along the punch axis and stay inside the face.
+  10. The 60-placement sweep the inset was MEASURED from, pinned rather than
+      left as an audit number: four walls x five distances off the wall x
+      three slides along it. Every one loses a corner ray at the bare corner
+      and at a 1e-9 inset; from 1e-7 up the 50 that sit over the target face
+      recover all four and measure the near wall, while the 10 that hang 3 mm
+      past the hull's own edge go on refusing out to a 0.01 mm inset. No
+      placement is ever flagged as a straddle, at any inset in that range. */
 
 const fs = require('fs');
 const os = require('os');
@@ -375,8 +382,132 @@ withApp(async (page, logs) => {
   check('on this pose the bare corners miss and the inset origins hit - the whole defect',
     geom.hitsCorner.some(h => !h) && geom.hitsInset.every(h => h), JSON.stringify([geom.hitsCorner, geom.hitsInset]));
 
-  /* ---------- 10. the vertical case the side seat must not have cost ---------- */
-  console.log('\n--- 10. stacking still works: the bit dragged OVER the hull ---');
+  /* ---------- 10. the sweep the inset was measured from, pinned ---------- */
+  /* docs/HANDOFF.md carried this as an audit number. It is a gate here for the
+     same reason every other measurement in this project is one: 0.001 mm is
+     only defensible while the band it was chosen from still holds. Four walls
+     x five distances off the wall x three slides along it. The third slide
+     hangs the bit 3 mm past the hull's own +Z edge on the +-X walls - that is
+     a real overhang, and it must go on refusing however big the inset gets,
+     so the sweep pins the refusals as tightly as the rescues.
+     It is corner-ray arithmetic over real staged poses rather than 60 clicks:
+     the staging goes through the app's own nudge/settle path, so the bed
+     baseline is the one the seat sees, and the whole sweep is a single page
+     round trip. */
+  console.log('\n--- 10. the 60-placement sweep the inset was measured from ---');
+  const SWEEP_DISTS = [0, 0.18, 1, 3, 10];             /* mm clear of the wall */
+  const SWEEP_SLIDES = [0, -6, 13];                    /* along it; 13 overhangs the +-X walls */
+  const SWEEP_INSETS = [0, 1e-9, 1e-7, 1e-5, 0.001, 0.01];
+  const BIT_DEPTH = 20;                                /* box-20mm, along whichever axis it punches */
+  const sweep = await page.evaluate(([idA, idB, dists, slides, insets]) => {
+    const A = state.placed.find(p => p && p.sourceId === idA);
+    const B = state.placed.find(p => p && p.sourceId === idB);
+    A.mesh.updateMatrixWorld(true);
+    const hb = new THREE.Box3().setFromObject(A.mesh);
+    if (!A.mesh.geometry.boundingBox) A.mesh.geometry.computeBoundingBox();
+    const hc = new THREE.Vector3();
+    A.mesh.geometry.boundingBox.getCenter(hc);
+    hc.applyMatrix4(A.mesh.matrixWorld);
+
+    const walls = [
+      { name: '+X', slide: 'z', at: (d, s) => [hb.max.x + 10 + d, s], face: bb => bb.min.x - hb.max.x },
+      { name: '-X', slide: 'z', at: (d, s) => [hb.min.x - 10 - d, s], face: bb => hb.min.x - bb.max.x },
+      { name: '+Z', slide: 'x', at: (d, s) => [s, hb.max.z + 10 + d], face: bb => bb.min.z - hb.max.z },
+      { name: '-Z', slide: 'x', at: (d, s) => [s, hb.min.z - 10 - d], face: bb => hb.min.z - bb.max.z }
+    ];
+    const shipped = NSO_SEAT_RAY_INSET;
+    const out = [];
+    try {
+      for (const w of walls) for (const d of dists) for (const s of slides) {
+        /* stage through the app: settle on the bed, then its own move primitive */
+        B.liftY = 0;
+        settlePlacedOnBed(B);
+        const at = w.at(d, s);
+        selectPlaced(state.placed.indexOf(B));
+        nudgeSelected(at[0] - B.x, at[1] - B.z);
+        B.mesh.updateMatrixWorld(true);
+        const bb = new THREE.Box3().setFromObject(B.mesh);
+        const hull = meshToWorldSoup(A.mesh);
+        const k = w.slide;
+        const per = [];
+        for (const ins of insets) {
+          NSO_SEAT_RAY_INSET = ins;
+          const fr = NSO_plugFrame(B.mesh, hc, hull);
+          const origins = NSO_seatRayOrigins(NSO_outerFaceCorners(fr));
+          let hits = 0;
+          const ds = [];
+          for (let i = 0; i < 4; i++) {
+            const h = NSO_nearestSkinHit(hull, origins[i], fr.punch);
+            if (h) { hits++; ds.push(origins[i].clone().sub(h).dot(fr.outerNormal)); }
+          }
+          per.push({ inset: ins, hits: hits, ds: ds, straddle: !!NSO_seatStraddle(hull, B.mesh, hc, -0.18) });
+        }
+        NSO_SEAT_RAY_INSET = shipped;
+        out.push({
+          wall: w.name, d: d, s: s,
+          over: bb.min[k] < hb.min[k] - 1e-9 || bb.max[k] > hb.max[k] + 1e-9,
+          staged: w.face(bb), bed: bb.min.y === hb.min.y, per: per
+        });
+      }
+    } finally { NSO_SEAT_RAY_INSET = shipped; }
+    return { rows: out, insetRestored: NSO_SEAT_RAY_INSET };
+  }, [idA, idB, SWEEP_DISTS, SWEEP_SLIDES, SWEEP_INSETS]);
+
+  const rows = sweep.rows;
+  const at = i => rows.map(r => r.per[i]);
+  const overRows = rows.filter(r => r.over);
+  for (let i = 0; i < SWEEP_INSETS.length; i++) {
+    const p = at(i);
+    console.log('  inset ' + String(SWEEP_INSETS[i]).padEnd(8) +
+      ' all four rays: ' + String(p.filter(x => x.hits === 4).length).padEnd(3) +
+      ' lost at least one: ' + String(p.filter(x => x.hits < 4).length).padEnd(3) +
+      ' straddle flags: ' + p.filter(x => x.straddle).length);
+  }
+
+  check('the sweep is 60 placements: 4 walls x 5 distances x 3 slides',
+    rows.length === SWEEP_DISTS.length * SWEEP_SLIDES.length * 4, rows.length);
+  check('every placement is staged at the distance asked, on the bed baseline (1e-9)',
+    rows.every(r => near(r.staged, r.d, 1e-9) && r.bed),
+    rows.filter(r => !(near(r.staged, r.d, 1e-9) && r.bed)).map(r => r.wall + '/d' + r.d + '/s' + r.s).slice(0, 4).join(' '));
+  check('exactly 10 of them hang past the target face - the +-X walls at the 13 mm slide',
+    overRows.length === 10 && overRows.every(r => r.wall[1] === 'X' && r.s === 13),
+    overRows.length + ': ' + overRows.map(r => r.wall + '/d' + r.d).join(' '));
+
+  /* the defect, at the two insets that do not rescue it */
+  for (const ins of [0, 1e-9]) {
+    const i = SWEEP_INSETS.indexOf(ins);
+    check('at a ' + ins + ' inset every one of the 60 loses at least one corner ray',
+      at(i).every(x => x.hits < 4), at(i).filter(x => x.hits === 4).length + ' unexpectedly kept all four');
+  }
+
+  /* the rescue, at every inset from 1e-7 up - and the refusals it must not touch */
+  const RESCUING = SWEEP_INSETS.filter(v => v >= 1e-7);
+  for (const ins of RESCUING) {
+    const i = SWEEP_INSETS.indexOf(ins);
+    const p = at(i);
+    check('at a ' + ins + ' inset the 50 placements over the target face recover all four rays',
+      rows.filter((r, n) => !r.over && p[n].hits === 4).length === 50,
+      rows.filter((r, n) => !r.over && p[n].hits < 4).map(r => r.wall + '/d' + r.d + '/s' + r.s).slice(0, 4).join(' '));
+    check('... and the 10 that overhang it still refuse - an inset rescues a graze, never an overhang',
+      rows.every((r, n) => !r.over || p[n].hits < 4),
+      rows.filter((r, n) => r.over && p[n].hits === 4).map(r => r.wall + '/d' + r.d).join(' '));
+    check('... every recovered ray measures the NEAR wall, d = 20 + the staged distance (1e-6)',
+      rows.every((r, n) => p[n].hits < 4 || p[n].ds.every(v => near(v, BIT_DEPTH + r.d, 1e-6))),
+      JSON.stringify(rows.filter((r, n) => p[n].hits === 4 && p[n].ds.some(v => !near(v, BIT_DEPTH + r.d, 1e-6)))
+        .map(r => r.wall + '/d' + r.d).slice(0, 4)));
+  }
+
+  /* the thing to get wrong: a side-by-side pose is never a straddle */
+  check('0 straddle flags across all 60 placements at every inset from 0 to 0.01',
+    rows.every(r => r.per.every(x => !x.straddle)),
+    rows.filter(r => r.per.some(x => x.straddle)).map(r => r.wall + '/d' + r.d + '/s' + r.s).slice(0, 4).join(' '));
+  check('the shipped inset sits inside the band the sweep recovers on',
+    RESCUING.includes(geom.inset) && geom.inset === 0.001,
+    geom.inset);
+  check('the sweep put the shipped inset back', sweep.insetRestored === geom.inset, sweep.insetRestored);
+
+  /* ---------- 11. the vertical case the side seat must not have cost ---------- */
+  console.log('\n--- 11. stacking still works: the bit dragged OVER the hull ---');
   await page.evaluate(id => { const p = state.placed.find(q => q && q.sourceId === id); p.liftY = 0; settlePlacedOnBed(p); }, idB);
   await dragTo(page, idB, a.x, a.z);
   await clickSeat(page);
