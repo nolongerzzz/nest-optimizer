@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 node_modules/
 tools/wheel-out/
+tools/support-aim-out/
