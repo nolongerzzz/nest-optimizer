@@ -150,6 +150,14 @@
               <output id="seat-gap-value" for="seat-gap" title="Exact gap the next Seat (support) will use">-0.18 mm</output>
             </div>
           </div>
+          <div class="seat-gap-row skin-row">
+            <button id="btn-skin-face" class="btn btn-secondary" type="button" title="Put a contact skin on piece A's flat face that looks at B (or its top face outside a Join): a relief whose tips are all B touches. Then Seat with gap 0 to rest B on the tips. Refuses a non-rectangular face; stands down if that face is painted.">Skin face</button>
+            <select id="skin-pattern" title="Skin pattern. crosshatch: fine rib lattice (0.42 mm ribs, 1.2 mm pitch, 0.6 tall). zigzag: sawtooth ridges (0.42 mm crests, 2 mm pitch). ring: one tapered ring (r 5, wall 0.8 to 0.4, 1 mm tall)." aria-label="Skin pattern">
+              <option value="crosshatch">crosshatch</option>
+              <option value="zigzag">zigzag</option>
+              <option value="ring">ring</option>
+            </select>
+          </div>
           <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
           <button id="btn-cap-open" class="btn btn-secondary" type="button">Cap open faces</button>
           <button id="btn-seat-grid" class="btn btn-secondary" type="button" title="Faint grid on the top surface of the target piece (A), to line up what goes above it">Surface grid: auto</button>
@@ -290,6 +298,7 @@
   <script src="nso_planar_fuse.js?v=inside4"></script>
   <script src="nso-surface-grid.js?v=inside4"></script>
   <script src="nso_carve.js?v=carve1"></script>
+  <script src="nso_skin.js?v=skin1"></script>
   <script src="nso-cooling-profiles.js"></script>
   <script src="nso-3mf.js"></script>
   <script src="app-core.js?v=inside4"></script>
@@ -301,6 +310,7 @@
   <script src="app-join.js?v=inside4"></script>
   <script src="app-center-lock.js?v=inside4"></script>
   <script src="app-carve.js?v=carve1"></script>
+  <script src="app-skin.js?v=skin1"></script>
   <script src="app-mask.js?v=inside4"></script>
   <script src="app-seat-grid.js?v=inside4"></script>
   <script src="app-measure.js?v=inside4"></script>

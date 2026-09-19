@@ -1477,3 +1477,9 @@ select:focus, input:focus {
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
+
+.seat-gap-row select {
+  flex: 0 0 110px;
+  width: 110px;
+  margin: 0;
+}
