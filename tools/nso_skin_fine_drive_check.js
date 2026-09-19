@@ -72,7 +72,11 @@ withApp(async (page, logs) => {
      no more and no fewer, and each one under the category it belongs to.
      That catches the drift the tail comparison caught (a file generated but
      never registered, or registered under a name that does not exist) plus
-     one it could not: a patch filed in the wrong place. */
+     one it could not: a patch filed in the wrong place.
+
+     Since the four _bordered washers were deleted, the six that remain are
+     all Skins - but the category is still read per file rather than asserted
+     as a constant, so re-shipping a washer would have to say so here too. */
   const shipped = rows.filter(r => r.startsWith('patch_')).slice().sort();
   check('the Library offers exactly the generated patches, no more, no fewer',
     shipped.join(',') === fine.CATALOG_FILES.slice().sort().join(','),
