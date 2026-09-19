@@ -131,6 +131,12 @@
       btn.classList.toggle('is-armed', state.carveArmed);
     }
     if (state.carveArmed) {
+      /* one click-owning mode at a time, the way Measure's disarmOthers does it */
+      if (state.seatHereArmed) {
+        var seatBtn = $('btn-seat-here');
+        if (seatBtn) seatBtn.click();
+        else state.seatHereArmed = false;
+      }
       say('Carve armed - click a face, an edge or a corner. Click Carve again to stop.');
     } else {
       say('Carve off');

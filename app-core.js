@@ -309,7 +309,7 @@ function undoLast() {
       ((m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length : 0) + ' face(s) excluded');
     return;
   }
-  if (entry.type === 'softenReplace' || entry.type === 'capReplace' || entry.type === 'sealReplace' || entry.type === 'solidifyReplace' || entry.type === 'thickenReplace' || entry.type === 'smoothReplace' || entry.type === 'scaleReplace' || entry.type === 'carveReplace' || entry.type === 'skinReplace') {
+  if (entry.type === 'softenReplace' || entry.type === 'capReplace' || entry.type === 'sealReplace' || entry.type === 'solidifyReplace' || entry.type === 'thickenReplace' || entry.type === 'smoothReplace' || entry.type === 'scaleReplace' || entry.type === 'carveReplace' || entry.type === 'skinReplace' || entry.type === 'seatSurfaceReplace') {
     const m = state.models.find(x => x.id === entry.modelId);
     if (!m) { setStatus('Undo: piece no longer exists'); return; }
     // the paint set is part of the piece's state, so one step puts back both
@@ -346,10 +346,29 @@ function undoLast() {
     } else if (state.cutterOpen && state.editId === m.id) {
       showEditPreview();
     }
+    /* An op that moved the piece as well as reshaping it puts the pose back
+       here, in the SAME entry, so it is still one Undo per op. Seat here is
+       the first: it bakes a free rotation into the soup (the pose model
+       cannot hold one - see app-seat-surface.js) and then re-fits x / z /
+       liftY to it, so restoring the geometry alone would leave the piece
+       in the seated position with its old shape. */
+    if (entry.prevPose && placedEntry) {
+      placedEntry.x = entry.prevPose.x; placedEntry.z = entry.prevPose.z;
+      placedEntry.rotY = entry.prevPose.rotY || 0;
+      placedEntry.flipX = !!entry.prevPose.flipX;
+      placedEntry.tipX = entry.prevPose.tipX || 0;
+      placedEntry.tipZ = entry.prevPose.tipZ || 0;
+      placedEntry.liftY = entry.prevPose.liftY || 0;
+      placedEntry.tiltX = entry.prevPose.tiltX || 0;
+      placedEntry.tiltZ = entry.prevPose.tiltZ || 0;
+      applyMeshRotation(placedEntry);
+      if (typeof refreshOutline === 'function') refreshOutline(placedEntry);
+      applyPlacedXZ(placedEntry, placedEntry.x, placedEntry.z);
+    }
     updateEditSize();
     renderModelList();
     updateUndoBtn();
-    setStatus(entry.type === 'skinReplace' ? 'Undo: Skin reverted' : (entry.type === 'carveReplace' ? 'Undo: Carve reverted' : (entry.type === 'scaleReplace' ? 'Undo: Scale reverted' : (entry.type === 'smoothReplace' ? 'Undo: Smooth reverted' : (entry.type === 'thickenReplace' ? 'Undo: Thicken reverted' : (entry.type === 'solidifyReplace' ? 'Undo: Solidify reverted' : (entry.type === 'sealReplace' ? 'Undo: Seal reverted' : (entry.type === 'capReplace' ? 'Undo: Cap reverted' : 'Undo: Soften reverted'))))))));
+    setStatus(entry.type === 'seatSurfaceReplace' ? 'Undo: Seat here reverted' : (entry.type === 'skinReplace' ? 'Undo: Skin reverted' : (entry.type === 'carveReplace' ? 'Undo: Carve reverted' : (entry.type === 'scaleReplace' ? 'Undo: Scale reverted' : (entry.type === 'smoothReplace' ? 'Undo: Smooth reverted' : (entry.type === 'thickenReplace' ? 'Undo: Thicken reverted' : (entry.type === 'solidifyReplace' ? 'Undo: Solidify reverted' : (entry.type === 'sealReplace' ? 'Undo: Seal reverted' : (entry.type === 'capReplace' ? 'Undo: Cap reverted' : 'Undo: Soften reverted')))))))));
     return;
   }
   if (entry.type === 'removeModel') {
@@ -2144,6 +2163,16 @@ function onCanvasPointerDown(event) {
      start a move drag under the carve and report "Moved model #N" over its
      status. app-carve.js decides, where its own hit test lives. */
   if (typeof window.nsoCarveTakesClick === 'function' && window.nsoCarveTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* Seat here owns a click that lands on a piece, on the same terms as paint
+     and carve: app-seat-surface.js decides, where its own hit test lives, and
+     a fall-through would start a move drag under the seat. Asked after carve
+     and before measure because it bakes, and a measurement must never
+     swallow a click a baking tool would have taken. */
+  if (typeof window.nsoSeatHereTakesClick === 'function' && window.nsoSeatHereTakesClick(event)) {
     setOrbitFromPlate(false);
     return;
   }
