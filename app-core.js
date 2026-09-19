@@ -1350,22 +1350,62 @@ function cloneSelectedModel() {
   }
   let cursor = 0;
   const newIds = [];
+  let firstPlaced = null;
   for (let i = 0; i < n; i++) {
     const geo = src.geometry.clone();
     geo.computeBoundingBox();
     const name = src.name.replace(/-copy\d+$/i, '') + '-copy' + (i + 1);
-    const id = addModel(name, geo, { keepSelection: true, silent: true });
+    /* A CLONE OF A RAW PIECE IS A RAW PIECE.
+       addModel() only records rawTris when it is handed them, and this call
+       used to hand it the display geometry alone - so every clone arrived
+       with rawTris null and every raw tool refused it by name: "Fatten needs
+       a raw piece", "Hollow needs a raw piece", "Smooth needs a raw piece".
+       Honest refusals about a piece that should never have been in that
+       state, because src.rawTris was in hand the whole time.
+
+       The three fields transfer verbatim: the clone's display geometry is
+       src.geometry.clone(), addModel() re-centres it and the source was
+       already centred, so that is a no-op and the same centerOffset still
+       maps the same raw soup onto it. The soup is COPIED rather than shared -
+       two models pointing at one buffer is an aliasing bug waiting for the
+       first tool that writes in place, and clone already pays the same order
+       of memory for geometry.clone(). */
+    const id = addModel(name, geo, {
+      keepSelection: true,
+      silent: true,
+      rawTris: (src.rawTris && src.rawTris.length) ? new Float32Array(src.rawTris) : null,
+      rawAxis: src.rawAxis || null,
+      centerOffset: src.centerOffset
+        ? { x: src.centerOffset.x, y: src.centerOffset.y, z: src.centerOffset.z }
+        : null
+    });
     if (id == null) continue;
     newIds.push(id);
     const model = state.models.find(x => x.id === id);
     if (!model) continue;
     const cell = nextFreeCell(cursor);
     cursor = cell.k;
-    placeModelMovable(model, cell.x, cell.z);
+    const entry = placeModelMovable(model, cell.x, cell.z);
+    if (entry && firstPlaced === null) firstPlaced = state.placed.indexOf(entry);
   }
   if (newIds.length) {
+    /* The undo entry records the editId as it was BEFORE the selection moves,
+       so it must be pushed first - it is what Undo puts back. */
     pushUndo({ type: 'addModels', ids: newIds.slice(), editId: state.editId, cutT: state.cutT });
-    state.editId = newIds[0];
+    /* SELECT THE CLONE THROUGH THE APP'S ONE SELECTION PATH.
+       This used to set state.editId = newIds[0] behind selectPlaced's back,
+       which left the two halves of "what is selected" naming different
+       pieces: the Edit card, the model list and every getActiveModel() tool
+       followed the clone, while the red outline in the viewport - and
+       state.selectedIndex, which the pose buttons and Attach read - stayed on
+       the ORIGINAL. Measured: five tools in a row acted on a piece the user
+       could not see was selected. selectPlaced moves both, and clears the
+       outline it is taking the selection away from. */
+    if (firstPlaced != null && firstPlaced >= 0 && typeof selectPlaced === 'function') {
+      selectPlaced(firstPlaced);
+    } else {
+      state.editId = newIds[0];
+    }
   }
   renderModelList();
   updateOptimizeButton();
