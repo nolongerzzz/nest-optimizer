@@ -152,7 +152,8 @@ const UNDO_REPLACE_LABEL = {
   hollowReplace: 'Undo: Hollow reverted',
   fillReplace: 'Undo: Fill reverted',
   fattenReplace: 'Undo: Fatten reverted',
-  attachReplace: 'Undo: Attach reverted'
+  attachReplace: 'Undo: Attach reverted',
+  stockReplace: 'Undo: Stock adjustment reverted'
 };
 
 function undoLast() {

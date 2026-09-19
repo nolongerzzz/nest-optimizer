@@ -307,16 +307,124 @@ plate holding **52877.6 / 52929.6 / 52891.8 mm³** — a 0.098% spread, which is
 entirely their own tessellation deficits from finding 1 and is exactly zero in
 the profile.
 
-## PAINT SCOPE: NONE
+## PAINT SCOPE: NONE for the create path, WHOLE-PIECE for the update path
+
+Two paths, two answers to the same question, both written down. This section
+is the **create** path — the New stock button. The live update is
+**whole-piece**, for the reason given in "The session ends rather than
+overwriting somebody else's work" above: an adjustment re-generates the whole
+block, so there is no face it can hold still, and any paint anywhere stands it
+down naming the count. Both rows are in the HANDOFF roster.
 
 Per the scoping rule in `docs/HANDOFF.md`: the question is whether the feature
-acts on an identifiable sub-region of a piece. It acts on **no piece at all** —
-it adds one. Nothing is replaced, no geometry is read except a reference
+acts on an identifiable sub-region of a piece. The create path acts on **no
+piece at all** — it adds one. Nothing is replaced, no geometry is read except a reference
 piece's bounding box when `Match` is ticked, and no face of any piece is
 written to. That is a stronger statement than "paint is respected", and it is
 the same category `app-skin-patch.js` is in: `none`, which is why neither file
 is in `tools/nso_paint_scope_test.js`'s roster — that roster is the
 paint-**aware** features, and a row in it needs a paint test to assert.
+
+## Live editing — the card adjusts the piece it made
+
+`npm run stock:live` (`tools/nso_stock_live_test.js`), in `npm test`.
+
+**New stock ADDS.** That is right the first time and wrong every time after.
+Measured on the shipped behaviour before this change: press it, then press it
+again with a different waste margin, and you have **two** blocks — two models,
+two meshes, the second placed 31.96 mm to the side — with your positioning,
+your pose and your selection all still on the first. Changing a card field on
+its own did nothing at all, so "try 50% instead of 30%" meant pressing the
+button again and then deleting the old block.
+
+So the button now opens a **session** on the piece it made, and every control
+on the card edits that piece in place. This is the Pottery Wheel's pattern,
+deliberately and not by coincidence:
+
+| | the wheel | here |
+|---|---|---|
+| what is held | `NSO_wheelSession` — the profile | `session` — the model id and a fingerprint of the soup this file last wrote |
+| what a move does | derives a new profile, revolves it | re-sizes from the card |
+| how it lands | `NSO_sculptCommitRaw` onto the same model | the same call, onto the same model |
+
+### What survives an adjustment, and what does not
+
+Everything below is asserted in the drive check, on the ticket's own scenario:
+place a block, move it to (40, −25), yaw it 90° and tilt it one step, then
+change the waste margin from 0% to 50%.
+
+| | |
+|---|---|
+| the model id, and its index in the model list | **survives** |
+| the placed entry and its index | **survives** |
+| its x / z on the plate | **survives** — 40, −25 |
+| its pose fields — `rotY`, `tipX`, `tiltX`, `flipX` | **survives** |
+| the selection, both halves of it | **survives** |
+| the block's size | changes, which is the point — 26.070 → 29.843 mm |
+| the number of pieces on the plate | **1, before and after** |
+| the `THREE.Mesh` instance | **rebuilt** |
+
+That last row is stated rather than hidden. `NSO_sculptCommitRaw` disposes and
+rebuilds the mesh, for Stock exactly as it does for Smooth, Extend, Fatten,
+Hollow and the wheel. **"The same object" here means the same PIECE, not the
+same Mesh**; keeping the Mesh itself would be a change to every bake in the
+app and is not this ticket. The drive check asserts the uuid *changes*, so
+nobody later reads a check that claims otherwise.
+
+### One undo entry per session, not one per keystroke
+
+`NSO_sculptCommitRaw` pushes an undo entry every time, which is right for a
+bake somebody pressed a button for and wrong for a number field being nudged.
+So the **first** adjustment of a session keeps its entry — the one that takes
+the block back to the way it was made — and every later one drops the entry it
+just pushed. Measured: seven adjustments in a row leave **one** `stockReplace`
+on the stack, with the two `posePlaced` entries from the person's own yaw and
+tilt still underneath it, untouched.
+
+Done locally in `app-stock.js` rather than by teaching `NSO_sculptCommitRaw` a
+mode, because this is the first tool in the app that edits on a field change
+and one caller is not yet a pattern. The wheel's live drag has the same
+problem and does push per frame; if a second tool wants this, it moves into
+`pushUndo` as a coalesce flag and both take it.
+
+### A `change` goes straight through; typing waits to settle
+
+A number field fires `input` on every keystroke, and typing `45` in an empty
+box goes through `4` on the way. The live update waits **160 ms** of quiet
+before re-generating, so the piece is rebuilt once per value the person meant
+rather than once per digit — a 96-segment sphere is 18,240 triangles, so the
+difference is visible. `change` (blur, or a spinner click) is already the
+settled value and goes straight through.
+
+Deliberately not the wheel's per-frame cadence: a drag has no keystrokes to
+wait for, and a number box is not a drag.
+
+### The session ends rather than overwriting somebody else's work
+
+This is the one that would cost a person real work. Make a block, **Hollow**
+it, then nudge the waste margin: the card must not throw the hollow away. So
+the fingerprint of what this file last wrote — a triangle count and a
+coordinate sum — is checked before every update, and a piece that no longer
+matches has been baked by another tool.
+
+Five ways the session ends or stands down, each with its own negative control
+in the drive check:
+
+| | |
+|---|---|
+| the piece was baked by another tool | session ends, the work is kept, and it says so: *"…has been changed by another tool, so the card has stopped editing it — your work is kept."* |
+| another piece is selected | session ends silently; the card edits nothing. The Match checkbox in particular is about the selection, so an update that fired here would resize the wrong block |
+| the piece was deleted | session ends silently |
+| a painted face | stands down naming the count, and ends the session — an update re-generates the whole block and cannot hold a face still |
+| the new size cannot be printed | **refused, block unchanged, session stays live** — the same build-volume gate New stock applies, so the next valid value still works |
+
+### New stock now selects the piece it made
+
+It did not before: `editId` stayed `null` and nothing was outlined. The session
+needs the piece selected to be editable from the card, and it goes through
+`selectPlaced` — the app's one selection path — rather than writing `editId`
+behind its back, which is the split `docs/INTEGRATION.md` finding 3 was about
+in Clone.
 
 ## The UI
 
