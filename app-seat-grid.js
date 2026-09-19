@@ -23,11 +23,26 @@
    the piece, and no reach into the piece's geometry, rawTris, or anything
    export reads. Removing every line changes nothing but the picture.
 
-   Drawn as a CHILD of the placed mesh, the way app-sel-outline.js hangs the
-   white selected outline: a child follows the piece being dragged, nudged or
-   turned with no hook of its own and no per-frame work. That is also why the
-   lines are computed in the piece's own space and on the piece's own axes -
-   stuck to the piece, so what a square reads stays true as the piece turns. */
+   NOT A CHILD OF THE PIECE, and that is the whole of why.
+   app-sel-outline.js, app-poslock.js and app-defects.js all hang their helper
+   off `p.mesh`, and get "it follows a drag" for free. They can: an outline,
+   a lock cage and a defect mark all lie exactly on the geometry, so they add
+   nothing to it. This one cannot. Its lines are lifted a hair off the face to
+   keep out of the depth fight (below), and `THREE.Box3.setFromObject` walks
+   children - so a grid parented to the piece makes the piece MEASURE bigger
+   by the lift. That is not hypothetical: it moved seven Seat gates by exactly
+   0.1375mm, the lift on an 80x40x20 hull. The app itself is immune (it asks
+   meshLocalBox3, which reads the mesh's own geometry), but "the piece's box"
+   is a thing anything may reasonably ask for, and a drawing that changes the
+   answer is a drawing that is not purely visual.
+
+   So the grid sits in state.modelGroup with the piece's transform copied onto
+   it, which is what app-mask.js's paint does and, it turns out, why. Nothing
+   under the piece has volume, and `setFromObject` reads the same with the
+   grid up as down. The price is the one thing a child got free - keeping up
+   with a move - and it is paid by copying the pose, not by rebuilding: see
+   syncPose below. The lines are still computed in the piece's own space and
+   on its own axes, so what a square reads stays true as the piece turns. */
 (function () {
   'use strict';
 
@@ -146,12 +161,13 @@
     });
     var line = new THREE.LineSegments(g, m);
     line.renderOrder = GRID_RENDER_ORDER;
-    /* The grid is a picture of the surface, not a surface. Without this a
-       Join pick, a Soften pick or a paint click that lands on a grid line
-       hits the line instead of the piece: the walk up to placedIndex would
-       still find the piece, but the hit has no face on it, so the face lock
-       Join stores would come back empty. Same reason app-mask.js's paint and
-       app-sel-outline.js's outline are both deaf to rays. */
+    /* The grid is a picture of the surface, not a surface. app-core.js picks
+       with intersectObjects(modelGroup.children, TRUE), so without this a
+       Join, Soften or paint click that lands on a grid line hits the line
+       instead of the piece - and since the grid stands beside the piece
+       rather than under it, the walk up to placedIndex finds nothing at all
+       and the click is simply lost. Same reason app-mask.js's paint,
+       app-poslock.js's cage and app-defects.js's marks are all deaf. */
     line.raycast = noop;
     line.userData.nsoHelper = true;
     line.userData.skipXray = true;
@@ -193,14 +209,15 @@
     group.name = 'seatGrid';
     group.renderOrder = GRID_RENDER_ORDER;
     group.userData.nsoHelper = true;
-    group.userData.seatGrid = { spacing: res.spacing, segments: res.count, faces: res.faces };
+    group.userData.seatGrid = { sourceId: placed.sourceId, spacing: res.spacing,
+                                segments: res.count, faces: res.faces };
     addLines(group, res.grid, GRID_COLOR, GRID_OPACITY);
     addLines(group, res.axis, AXIS_COLOR, AXIS_OPACITY);
     if (!group.children.length) return null;
     return group;
   }
 
-  var current = null;   // { group, key, sourceId }
+  var current = null;   // { group, key, mesh, sourceId }
 
   function clear() {
     if (!current) return;
@@ -214,10 +231,20 @@
     current = null;
   }
 
+  /* The grid stands beside the piece rather than under it, so it has to be
+     told when the piece moves. This is the whole of that: three copies, no
+     geometry touched, cheap enough to sit on a pointermove. */
+  function syncPose() {
+    if (!current || !current.mesh) return;
+    current.group.position.copy(current.mesh.position);
+    current.group.quaternion.copy(current.mesh.quaternion);
+    current.group.scale.copy(current.mesh.scale);
+  }
+
   /* What the grid was built from. Anything in here changing means the lines
      would come out different, so they are built again; nothing else does. A
-     drag or a nudge changes none of it - the grid is a child of the mesh and
-     rides along. */
+     drag or a nudge changes none of it - only the pose, which syncPose copies
+     without rebuilding a line. */
   function keyOf(placed) {
     var mesh = placed.mesh, geo = mesh.geometry;
     var pos = geo && geo.attributes && geo.attributes.position;
@@ -231,10 +258,15 @@
     var placed = targetPlaced();
     if (!placed) { clear(); return null; }
     var key = keyOf(placed);
-    if (current && current.key === key && current.group.parent === placed.mesh) {
+    /* Still in the scene, still the same piece: a repack empties modelGroup,
+       so being in it is part of being current. */
+    if (current && current.key === key && current.mesh === placed.mesh &&
+        current.group.parent === state.modelGroup) {
+      syncPose();
       return current.group;
     }
     clear();
+    if (!state.modelGroup) return null;
     var group;
     try {
       group = build(placed);
@@ -243,8 +275,9 @@
       return null;
     }
     if (!group) return null;
-    placed.mesh.add(group);
-    current = { group: group, key: key, sourceId: placed.sourceId };
+    current = { group: group, key: key, mesh: placed.mesh, sourceId: placed.sourceId };
+    syncPose();
+    state.modelGroup.add(group);
     return group;
   }
 
@@ -318,6 +351,9 @@
     wrap('selectPlaced', refresh);
     wrap('applyMeshRotation', refresh);
     wrap('clearPlaced', clear);
+    // Every drag, nudge, magnet and bed settle goes through applyPlacedXZ.
+    // Nothing is rebuilt here - the pose is copied and that is all.
+    wrap('applyPlacedXZ', syncPose);
   }
 
   function bind() {

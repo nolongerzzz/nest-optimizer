@@ -39,21 +39,49 @@ surface". What it does, and what the grid copies:
   about it. It gets the same effect with the smallest thing that works: each
   emitted point is lifted along **its own triangle's normal** by
   `max(0.03mm, diag x 0.0015)`, which on a 35mm piece is 0.05mm. That is the
-  overlay's own vertices; the piece is not touched.
+  overlay's own vertices; the piece is not touched. It is also the reason the
+  grid cannot be a child of the piece — see below.
+- The overlay lives in `state.modelGroup` with `placed.mesh`'s transform
+  copied onto it, not under the mesh. The grid needed the same, for a reason
+  the paint's own comments do not give: see below.
 - Render order in the transparent pass, above the helpers it must not be
   hidden by. The paint claims 40 and says why. The grid sits at 24: above the
   inspect cage (16) and the armed-face highlight (20), below the paint, since
   a face that is both painted out and under the grid should read as painted
   out.
 
-### app-sel-outline.js — the white selected outline
+### app-sel-outline.js, app-poslock.js, app-defects.js — helpers on a piece
 
-`refreshOutline()` hangs its helper as a **child of the placed mesh** and
-disposes it on every rebuild. A child follows the piece being dragged, nudged
-or turned with no hook of its own and no per-frame work. The grid is built the
-same way, which is also why its lines are computed in the piece's own space
-and on the piece's own axes: stuck to the piece, so what a square reads stays
-true as the piece turns.
+All three hang their helper as a **child of the placed mesh** and dispose it on
+every rebuild. A child follows the piece being dragged, nudged or turned with
+no hook of its own and no per-frame work. They can afford it: an outline, a
+lock cage and a defect mark all lie exactly on the geometry, so they add
+nothing to it.
+
+The grid cannot, and this is the one place it has to differ. Its lines are
+lifted a hair off the face to stay out of the depth fight (below), and
+`THREE.Box3.setFromObject` walks children — so a grid parented to the piece
+makes the piece **measure** bigger by the lift. That is not hypothetical: it
+moved seven Seat gates by exactly 0.1375mm, the lift on an 80x40x20 hull. The
+app is immune (it asks `meshLocalBox3`, which reads the mesh's own geometry),
+but "the piece's box" is a thing anything may reasonably ask for, and a
+drawing that changes the answer is not purely visual.
+
+So the grid sits in `state.modelGroup` with the piece's transform copied onto
+it — which is what app-mask.js's paint does, and, it turns out, why. Nothing
+under the piece has volume. The price is the one thing a child got free,
+keeping up with a move, and it is paid by copying the pose rather than
+rebuilding: `syncPose()` off `applyPlacedXZ`, the path every drag, nudge,
+magnet and bed settle already takes. The lines are still computed in the
+piece's own space and on its own axes, so what a square reads stays true as
+the piece turns.
+
+app-defects.js is also the answer to why the grid keeps `depthTest` on where
+the defect marks turn it off. The marks answer "where is the problem", and a
+piercing pair is usually inside the piece, so they show through. The grid
+answers "where will this land", so a piece placed above it must hide the part
+it covers — and with depth testing on and no polygon offset available for
+lines, the small lift is what is left.
 
 ### app-join.js — `NSO_nearestSkinHit` and `NSO_plugFrame`
 
@@ -157,8 +185,13 @@ known in closed form rather than shipped as an STL:
   to within the lift (0.052mm), and never finds the line sunk into the piece;
 - picking is untouched — every ray over the target lands on the mesh, with the
   face the pick needs, and no ray ever reaches the grid;
-- with the grid up versus down: same geometry object, same vertices, same
-  `rawTris`, same plate-export triangle count, piece unmoved;
+- with the grid up versus down: the piece **measures** the same through
+  `Box3.setFromObject`, the tape four other suites use on it, and it is the
+  same geometry object with the same vertices, the same `rawTris`, the same
+  plate-export triangle count and an unmoved piece;
+- the grid is a child of `modelGroup`, nothing with volume hangs under the
+  mesh, the grid wears the piece's pose, and a move through `applyPlacedXZ`
+  carries it along;
 - roles: the grid appears on A, not B; follows a swap of A and B; clicking B
   does not move it; Cancel Join takes it away; `on` grids a merely selected
   piece and a pairing still outranks the selection; `off` means off.
