@@ -26,6 +26,8 @@ Smart build-plate packing for 3D printing.
   number is drawn on the piece, and it follows the piece when you move it.
   See [docs/MEASURE.md](docs/MEASURE.md).
 - Export positioned models as STL (ready to drop into Bambu Studio / Orca / PrusaSlicer)
+- Export the plate as a Bambu Studio `.3mf` project with cooling settings baked in,
+  chosen from a small table of named cooling profiles
 - **Carve** is a local carving tool - a handheld rotary tool, not the Cutter's
   full-plane Split. Pick a blade profile, arm it, then click a face, an **edge**
   or a **corner** of a piece: the blade is aimed along the outward bisector of
@@ -57,7 +59,11 @@ Smart build-plate packing for 3D printing.
 
 - This tool optimizes **orientation + layout only**.  
   Support generation and actual slicing still happen in Bambu Studio (or Orca / PrusaSlicer).
-- 3MF import/export is planned for the next iteration.
+- 3MF **export** ships the plate as a Bambu Studio project with cooling /
+  overhang-fan settings baked in - see
+  [docs/baked-cooling-settings.md](docs/baked-cooling-settings.md), including a
+  known limitation around Bambu's "Use Modified Value of Filament Preset" dialog.
+  3MF *import* is still planned for a future iteration.
 - The packing algorithm is a solid bottom-left free-rectangle packer with rotation. It will improve over time.
 
 ## Future ideas
