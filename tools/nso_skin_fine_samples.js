@@ -11,12 +11,24 @@
    `fixtures/skin-patches/` and are generated and byte-gated by
    tools/nso_skin_patch_samples.js; this tool does not touch them. It copies
    them into `library/` under the same names so the catalog can reach them,
-   and it BUILDS the four new pieces there:
+   and it BUILDS the new pieces there:
 
-     patch_crosshatch-fine_bordered.stl   the comparison washer (Task 4)
      patch_crosshatch-fine_loose.stl      the fine lattice alone
      patch_crosshatch-fine_sandwich.stl   double-sided, fine pitch
      patch_crosshatch_sandwich.stl        double-sided at the shipped 1.2 pitch
+
+   NO _bordered PIECE IS SHIPPED TO library/ ANY MORE. The bordered variant
+   set the pattern in a solid rim on a 0.6 mm floor, and that construction
+   bonds to a stacked part at 2.857x the contact of a true flat line, which
+   makes it useless as a separating washer. The four that used to be here -
+   crosshatch, crosshatch-fine, zigzag and ring - were deleted from library/
+   and from app-library.js's CATALOG together. This tool no longer builds or
+   copies them, so --check no longer demands them.
+
+   The variant itself is untouched: NSO_SkinPatch.buildPatch still builds it,
+   fixtures/skin-patches/ still holds and gates the three bordered fixtures,
+   and tools/nso_skin_patch_samples.js still writes them. What changed is only
+   which samples the Library tab ships.
 
    The last one is not decoration: a sandwich test needs its own A/B, and the
    1.2 sandwich is the control the fine one is measured against. The copies
@@ -49,18 +61,17 @@ const MANIFEST = path.join(ROOT, 'fixtures', 'skin-fine', 'skin-fine.json');
 
 /* built here */
 const BUILDS = [
-  { pattern: 'crosshatch-fine', variant: 'bordered' },
   { pattern: 'crosshatch-fine', variant: 'loose' },
   { pattern: 'crosshatch-fine', variant: 'sandwich' },
   { pattern: 'crosshatch', variant: 'sandwich' }
 ];
 
-/* copied from the gated fixtures so the Library tab can reach them */
+/* copied from the gated fixtures so the Library tab can reach them. `loose`
+   only - the `bordered` fixtures are still generated and gated over in
+   fixtures/skin-patches/, they are just no longer shipped as library pieces. */
 const COPIES = [];
 for (const pattern of ['crosshatch', 'zigzag', 'ring']) {
-  for (const variant of ['bordered', 'loose']) {
-    COPIES.push('patch_' + pattern + '_' + variant + '.stl');
-  }
+  COPIES.push('patch_' + pattern + '_loose.stl');
 }
 
 /* Every file this tool puts in library/, in the order app-library.js's CATALOG
@@ -68,15 +79,11 @@ for (const pattern of ['crosshatch', 'zigzag', 'ring']) {
    it. tools/nso_skin_fine_drive_check.js asserts the shipped list matches this
    exactly, so the two cannot drift. */
 const CATALOG_FILES = [
-  'patch_crosshatch_bordered.stl',
   'patch_crosshatch_loose.stl',
   'patch_crosshatch_sandwich.stl',
-  'patch_crosshatch-fine_bordered.stl',
   'patch_crosshatch-fine_loose.stl',
   'patch_crosshatch-fine_sandwich.stl',
-  'patch_zigzag_bordered.stl',
   'patch_zigzag_loose.stl',
-  'patch_ring_bordered.stl',
   'patch_ring_loose.stl'
 ];
 

@@ -23,3 +23,21 @@ numbers. If you need the CSG-clean version:
 `hinge_knuckle_box.stl`, `hinge_knuckle_lid.stl`, `hinge_pip.stl` and
 `lid_strap.stl` were regenerated as real boolean unions of their shells and
 measure 0 piercing pairs. See `fixtures/README.md` for the numbers.
+
+## Deleting from here
+
+The Library browser has a `×` on every row. It removes the row's `CATALOG`
+entry from `app-library.js` **and** the file from this directory, as two
+commits on the real repository, behind a confirmation dialog — it needs a
+GitHub token with `contents: write`, pasted at the time. See
+`docs/LIBRARY-DELETE.md` for what is and is not possible from a static page,
+and for the permission gate that is architected but deliberately not built.
+
+## Removed: the four `_bordered` washers
+
+`patch_crosshatch_bordered.stl`, `patch_crosshatch-fine_bordered.stl`,
+`patch_zigzag_bordered.stl` and `patch_ring_bordered.stl` were deleted — the
+bordered construction bonds to a stacked part at 2.857x the contact of a true
+flat line, which makes it unusable as a separating washer. The variant itself
+is untouched: `NSO_SkinPatch` still builds it and `fixtures/skin-patches/`
+still gates the three bordered fixtures. Only the shipped library samples went.

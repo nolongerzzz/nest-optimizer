@@ -14,12 +14,14 @@
         library/", not "is a string" - scheme + host + path, parseable by
         URL(), same origin as the page today, and pointing inside the
         source's own base. This is what makes a second library repo a data
-        change later instead of a migration, so it is checked on all 26.
+        change later instead of a migration, so it is checked on every one.
      3. The browser is grouped, and every category's pieces load THROUGH IT -
         one real click per category, on a real row, with the piece arriving
         on the plate.
-     4. All 26 catalog entries are reachable and correctly categorized, and
-        the category set matches the declared taxonomy.
+     4. Every catalog entry is reachable and correctly categorized, and the
+        category set matches the declared taxonomy - including that a
+        category with no entries left in it (Washers, since the four bordered
+        washers were deleted) stays in the taxonomy and is not drawn.
 
    node tools/nso_library_browser_test.js        exit 0 = every gate held  */
 
@@ -182,12 +184,25 @@ withApp(async (page, logs) => {
   Object.keys(byCat).sort().forEach(c =>
     console.log('   ' + c.padEnd(15) + byCat[c].length + '  ' + byCat[c].slice(0, 3).join(', ') +
                 (byCat[c].length > 3 ? ', …' : '')));
+  /* Six skin patches, all Skins. There were ten, four of them _bordered
+     washers; those were deleted - catalog entry and library file together -
+     when the bordered construction was measured bonding to a stacked part at
+     2.857x a flat line's contact. The tagging rule they demonstrated still
+     holds and is still asserted: a patch's category comes from its variant,
+     not from the block it arrived in. */
   const patches = urls.filter(e => e.file.startsWith('patch_'));
-  check('the ten skin patches split washers from skins, as tagged',
-    patches.length === 10 &&
-    patches.filter(e => /_bordered\.stl$/.test(e.file)).every(e => e.category === 'Washers') &&
+  check('the six skin patches are all tagged Skins, by variant',
+    patches.length === 6 &&
     patches.filter(e => /_(loose|sandwich)\.stl$/.test(e.file)).every(e => e.category === 'Skins'),
     patches.map(e => e.file.replace('patch_', '') + ':' + e.category).join(' '));
+  check('no _bordered washer is left in the catalog',
+    patches.every(e => !/_bordered\.stl$/.test(e.file)),
+    patches.filter(e => /_bordered\.stl$/.test(e.file)).map(e => e.file).join(', ') || 'none');
+  check('and Washers is still in the taxonomy, just empty and undrawn',
+    ui.taxonomy.indexOf('Washers') !== -1 &&
+    ui.groups.every(g => g.name !== 'Washers') &&
+    urls.every(e => e.category !== 'Washers'),
+    ui.groups.map(g => g.name).join(', '));
 
   /* ---------------------------------------------------------------- 5 */
   console.log('\n=== 5. one real click per category actually loads a piece ===');
