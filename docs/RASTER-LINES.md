@@ -351,22 +351,76 @@ z = 0.3** — 0 open edges, 0 non-manifold, Euler 4. That is what two stacked
 pieces are; the coplanar pairs the checker then reports are the contact, and the
 0.05 mm controls above are what separate contact from penetration.
 
-Image decoding is netpbm only, because the module decodes nothing: in the browser
-a canvas hands it an `ImageData` for every format the browser can open. To bring
-a PNG or JPEG through the command line, convert it first.
+Image decoding stays outside the module, because it decodes nothing: in the browser
+a canvas hands it an `ImageData` for every format the browser can open, and
+`app-raster.js` uses exactly that. The command line reads PNG through
+`tools/nso_png.js` (zlib and the five PNG filters, stdlib only) and netpbm
+through `tools/nso_pnm.js`, chosen by the file's own magic. For a JPEG, use the
+button — the browser's decoder is the one that ships.
+
+## Trace raster — the button
+
+It is wired into the app. **Finish → Trace raster** takes a picture off disk and
+adds the traced lines as a **new piece**, leaving every existing piece alone.
+
+- `app-raster.js` is the app side. The file goes into an `<img>` through an
+  ObjectURL, onto a canvas, and `getImageData` hands `buildFromImage` an
+  `ImageData` unconverted — so the module still decodes nothing and still has no
+  DOM in it. Everything the browser can open works: PNG, JPEG, WebP, GIF, BMP.
+- A transparent PNG is flattened onto white first. `alphaFloor` would otherwise
+  drop the background, and white paper is what the person drew on.
+- Anything over 1600 px is downscaled on the canvas before thinning.
+  Zhang-Suen is O(passes × pixels) and a phone photo is twelve megapixels; the
+  skeleton of a downscaled copy is the same centreline.
+- **mm** is the finished piece's width. A raster has pixels, not millimetres, so
+  this is the one number the picture cannot supply. **Thr** is the ink
+  threshold, **W** and **H** the printed section, **Invert** for white on black.
+- The piece is flagged **Non-solid**, for the reason the loose skin patch is:
+  the solid is closed and watertight, but every wall in it is a single 0.42 mm
+  extrusion line, which is exactly this repo's `--min-wall`.
+
+Three traced pieces ship in the Library under **Traced Lines**, built from the
+real images by `tools/nso_raster_library_samples.js`.
+
+## Validated against images this repo did not draw
+
+`tools/nso_raster_lines_test.js` is fed `tools/nso_raster_fixtures.js`'s output:
+this repo's `stroke()`, at this repo's constants, at the angle the tracer was
+built around. It is a good regression pin and it is not evidence.
+
+`fixtures/raster-real/` is the evidence — six images rasterised by **Chromium's
+own Skia**, antialiased, at 23°, 67° and 113°, as real PNG and real JPEG, drawn
+by `tools/nso_raster_real_fixtures.mjs`. Every claim is checked against two
+witnesses that never called the tracer: the ground truth (where the endpoints
+were put when the picture was drawn) and `tools/nso_raster_image_probe.js`,
+which measures the same facts back off the source *pixels* — a Hough transform
+for the angles, 8-connected labelling of the raw ink for connectivity, ink run
+lengths for the drawn stroke width, and a principal axis for a curved stroke
+that a straight-line Hough cannot honestly describe.
+
+| check | what it drives |
+| --- | --- |
+| `npm run raster:real` | the five PNGs in Node, 90 checks |
+| `npm run raster:real-drive` | the shipped button in real Chromium, including the JPEG |
+| `npm run raster:library` | the three Library pieces, byte-diffed |
+
+**What it caught.** `skew-cross.png` — two strokes crossing exactly once — came
+back as **5 paths and 2 junctions**: an X read as an H. The bridge Zhang-Suen
+leaves where two strokes cross is bounded by `w / sin(t)` for drawn width `w`
+at crossing angle `t`, and `weldNodes`' radius is the *printed* line width,
+0.42 mm. Every synthetic reference crosses at 90° with a 5 px stroke, where that
+bridge is 0.25 mm and the weld swallows it. This one crosses at 44° with a 12 px
+stroke, where it is **0.89 mm** and survives. `collapseBridges` is the fix: the
+ruler is the *drawn* stroke width, measured off the mask as ink pixels over
+skeleton pixels, and the gate is the **degree** — a junction at *both* ends, so
+a free line end can never be caught. The merged node goes at the **intersection
+of the two through-lines**, not the centroid, for the same reason
+`collapseShort` already does: the centroid sits at the middle of the bridge
+rather than where the strokes cross and tilts both arms, which measured a whole
+degree of skew on a 23° line.
 
 ## Scope, explicitly
 
-**Flat line tracing only** — binary or thresholded input, uniform extrusion
-height. There is no grayscale height-map relief mode: a grey picture is
+There is still **no grayscale height-map relief mode**: a grey picture is
 thresholded to ink or not-ink and every line comes out the same height. That is
 a separate idea and is not started here.
-
-Also not done, and deliberately: **this is not wired into the app's UI.** It is a
-module plus a command-line importer, and the STL it writes drops into Nest
-through the ordinary file input like any other. A **Trace raster** button in the
-Finish tab — next to Skin patch, adding a piece rather than replacing one, with
-`ImageData` from a canvas and a drive check through real Chromium — is the
-obvious next ticket and nothing here is in its way, and part 9 of the check
-proves it: the module is loaded in a `vm` sandbox, built through
-`window.NSO_RasterLines`, and handed an RGBA `ImageData` unconverted.
