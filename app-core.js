@@ -150,7 +150,8 @@ const UNDO_REPLACE_LABEL = {
   extendReplace: 'Undo: Extend reverted',
   wheelReplace: 'Undo: Pottery Wheel reverted',
   hollowReplace: 'Undo: Hollow reverted',
-  fillReplace: 'Undo: Fill reverted'
+  fillReplace: 'Undo: Fill reverted',
+  fattenReplace: 'Undo: Fatten reverted'
 };
 
 function undoLast() {
