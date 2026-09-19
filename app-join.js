@@ -1559,46 +1559,76 @@ function seatFlushBitToHull() {
     setStatus('Both hull and bit must be on the plate', true);
     return;
   }
-  // The gap field decides the mode. Blank = the flush plug seat this button
-  // has always done (outer face 0.01 mm proud, then Subtract). A number =
-  // seat the mating face at that gap, coupon sign convention: negative is
-  // an air gap, positive is overlap. A field that is neither is refused
-  // rather than quietly seated flush.
-  const gapReq = readSeatGapInput();
-  if (gapReq !== null && !isFinite(gapReq)) {
-    setStatus('Seat gap must be a number of mm - negative = air gap, positive = overlap, blank = flush', true);
+  // Seat flush is the flush plug seat this button has always done: outer
+  // face 0.01 mm proud of A's skin, then Subtract. It never reads the gap
+  // slider - that belongs to Seat (support).
+  pushUndo(snapshotPlacedPose(state.placed.indexOf(placedB)));
+  const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { proud: 0.01 });
+  if (!res || !res.ok) {
+    setStatus('Seat failed - ' + ((res && res.reason) || 'pieces unchanged'), true);
     return;
   }
-  if (gapReq === null) {
-    pushUndo(snapshotPlacedPose(state.placed.indexOf(placedB)));
-    const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { proud: 0.01 });
-    if (!res || !res.ok) {
-      setStatus('Seat failed - ' + ((res && res.reason) || 'pieces unchanged'), true);
-      return;
-    }
-    placedB.x = placedB.mesh.position.x;
-    placedB.z = placedB.mesh.position.z;
-    const baseY = (placedB.height || placedB.mesh.geometry.boundingBox && (placedB.mesh.geometry.boundingBox.max.y - placedB.mesh.geometry.boundingBox.min.y) || 10) / 2 + 0.2;
-    placedB.liftY = Math.max(0, placedB.mesh.position.y - baseY);
-    applyPlacedXZ(placedB, placedB.x, placedB.z);
-    var resid = (res.maxResidual != null && isFinite(res.maxResidual)) ? res.maxResidual : 0;
-    setStatus('Seated - proud 0.01mm, skin error ' + resid.toFixed(2) + 'mm - Subtract');
-    return;
-  }
-  seatBitAtGap(placedA, placedB, gapReq);
+  placedB.x = placedB.mesh.position.x;
+  placedB.z = placedB.mesh.position.z;
+  const baseY = (placedB.height || placedB.mesh.geometry.boundingBox && (placedB.mesh.geometry.boundingBox.max.y - placedB.mesh.geometry.boundingBox.min.y) || 10) / 2 + 0.2;
+  placedB.liftY = Math.max(0, placedB.mesh.position.y - baseY);
+  applyPlacedXZ(placedB, placedB.x, placedB.z);
+  var resid = (res.maxResidual != null && isFinite(res.maxResidual)) ? res.maxResidual : 0;
+  setStatus('Seated - proud 0.01mm, skin error ' + resid.toFixed(2) + 'mm - Subtract');
 }
 
-/* The Seat gap field: null when blank (flush), NaN when it holds junk. */
+/* Seat (support): B's mating face at the gap the slider shows, coupon sign
+   convention - negative = air gap, positive = overlap, 0 = touching. */
+function seatSupportBitToHull() {
+  const idA = state.editId;
+  const idB = state.joinPartnerId;
+  if (!state.joinSession || idA == null || idB == null || idA === idB) {
+    setStatus('Start Join, A = hull, B = bit, then Seat (support)', true);
+    return;
+  }
+  const placedA = state.placed.find(function (p) { return p && p.sourceId === idA && p.mesh; });
+  const placedB = state.placed.find(function (p) { return p && p.sourceId === idB && p.mesh; });
+  if (!placedA || !placedB) {
+    setStatus('Both hull and bit must be on the plate', true);
+    return;
+  }
+  const gap = readSeatGapInput();
+  if (!isFinite(gap)) {
+    setStatus('Seat gap slider is missing or out of range - nothing seated', true);
+    return;
+  }
+  seatBitAtGap(placedA, placedB, gap);
+}
+
+/* The gap slider's value in mm, or NaN when the slider is missing or its
+   value is outside its own range (a range input clamps user input, so that
+   only happens to a value set from code). Never a silent fallback. */
 function readSeatGapInput() {
   const el = document.getElementById('seat-gap');
-  if (!el) return null;
-  // A number field reports '' for a half-typed "-" or "1e" and flags it in
-  // validity.badInput. That must read as junk, not as blank, or a slip of
-  // the finger would seat the bit flush and bury it.
-  if (el.validity && el.validity.badInput) return NaN;
-  const s = String(el.value == null ? '' : el.value).trim();
-  if (!s) return null;
-  return Number(s);
+  if (!el) return NaN;
+  const v = Number(el.value);
+  const lo = Number(el.min), hi = Number(el.max);
+  if (!isFinite(v)) return NaN;
+  if (isFinite(lo) && v < lo - 1e-9) return NaN;
+  if (isFinite(hi) && v > hi + 1e-9) return NaN;
+  // step is 0.01: snap what we send so the seat asks for exactly the number
+  // the readout shows, not -0.18000000000000002
+  return Math.round(v * 100) / 100;
+}
+
+function NSO_formatSeatGap(v) {
+  if (!isFinite(v)) return '-';
+  const r = Math.round(v * 100) / 100;
+  const s = r.toFixed(2);
+  return (r > 0 ? '+' : '') + (r === 0 ? '0.00' : s) + ' mm';
+}
+
+/* Keep the readout on the exact slider value; called on every input event
+   and once at start-up so the default (-0.18, mid easy-release) is shown. */
+function updateSeatGapReadout() {
+  const out = document.getElementById('seat-gap-value');
+  if (!out) return;
+  out.textContent = NSO_formatSeatGap(readSeatGapInput());
 }
 
 /* Seat B's mating face `gap` mm off A's skin (coupon convention) and make
@@ -2811,6 +2841,14 @@ function setupUI() {
   if (btnExtract) btnExtract.addEventListener('click', extractBitFromSelected);
   const btnSeat = document.getElementById('btn-seat-flush');
   if (btnSeat) btnSeat.addEventListener('click', seatFlushBitToHull);
+  const btnSeatSupport = document.getElementById('btn-seat-support');
+  if (btnSeatSupport) btnSeatSupport.addEventListener('click', seatSupportBitToHull);
+  const seatGapSlider = document.getElementById('seat-gap');
+  if (seatGapSlider) {
+    seatGapSlider.addEventListener('input', updateSeatGapReadout);
+    seatGapSlider.addEventListener('change', updateSeatGapReadout);
+    updateSeatGapReadout();
+  }
   const btnFlipPort = document.getElementById('btn-flip-port');
   if (btnFlipPort) btnFlipPort.addEventListener('click', flipPortOnPunch);
   const btnCap = document.getElementById('btn-cap-open');

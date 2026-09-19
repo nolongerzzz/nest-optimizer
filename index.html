@@ -142,9 +142,13 @@
           <button id="btn-join" class="btn btn-primary" type="button" disabled>Complete Join</button>
           <button id="btn-subtract" class="btn btn-secondary" type="button">Subtract B from A</button>
           <button id="btn-extract-bit" class="btn btn-secondary" type="button">Extract bit</button>
-          <div class="seat-gap-row">
-            <button id="btn-seat-flush" class="btn btn-secondary" type="button" title="Blank gap: flush plug seat (outer face 0.01 mm proud, then Subtract). With a gap: seat the mating face at that gap - negative = air gap, positive = overlap">Seat flush</button>
-            <input type="number" id="seat-gap" step="0.01" placeholder="gap mm" title="Seat gap in mm. Negative = air gap between hull and bit (easy release: -0.15 to -0.20). Positive = bit overlaps into the hull. 0 = touching. Blank = flush plug seat." aria-label="Seat gap in mm" />
+          <button id="btn-seat-flush" class="btn btn-secondary" type="button" title="Flush plug seat: bury B in A with its outer face 0.01 mm proud of A's skin, then Subtract. Ignores the gap slider.">Seat flush</button>
+          <div class="seat-support">
+            <button id="btn-seat-support" class="btn btn-secondary" type="button" title="Seat B's mating face at the slider's gap off A's skin (or off the skin tips of a skinned face). Negative = air gap, easy release is -0.15 to -0.20. Positive = B overlaps into A. 0 = touching.">Seat (support)</button>
+            <div class="seat-support-row">
+              <input type="range" id="seat-gap" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Seat gap in mm, 0.01 steps. -0.25 (air) to +0.05 (overlap); default -0.18, mid easy-release. Arrow keys step 0.01." aria-label="Seat gap in mm" />
+              <output id="seat-gap-value" for="seat-gap" title="Exact gap the next Seat (support) will use">-0.18 mm</output>
+            </div>
           </div>
           <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
           <button id="btn-cap-open" class="btn btn-secondary" type="button">Cap open faces</button>

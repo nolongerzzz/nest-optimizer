@@ -1447,3 +1447,33 @@ select:focus, input:focus {
   width: 96px;
   margin: 0;
 }
+
+/* Join card: Seat (support) with its gap slider. The slider is the control;
+   the readout shows the exact 0.01-step value it will seat at. */
+.seat-support {
+  margin: 8px 0;
+}
+.seat-support .btn {
+  width: 100%;
+}
+.seat-support-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.seat-support-row input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  accent-color: #4ade80;
+  cursor: pointer;
+}
+.seat-support-row output {
+  flex: 0 0 66px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}

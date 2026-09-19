@@ -4,11 +4,18 @@
    Hull = fixtures/box_hull_80x40x20-2.stl (80 x 40, 20 tall on the plate),
    bit = fixtures/box-20mm.stl, staged centred above the hull's top face.
 
+   Controls: Seat flush (the plug seat, never reads the slider) and
+   Seat (support) with the gap slider #seat-gap (-0.25 .. +0.05 by 0.01,
+   default -0.18) and its readout #seat-gap-value.
+
    What is pinned:
    1. Regression - the flush plug seat the Seat flush button has always done
-      ({ proud: 0.01 }, blank gap field) lands on the pose captured before
-      this change, to 1e-9, with the same status line and the same liftY.
-   2. The locked easy-release case - gap -0.18 through the real button. The
+      ({ proud: 0.01 }) lands on the pose captured before the gap work, to
+      1e-9, with the same status line and the same liftY - with the slider
+      at its default and again with it dragged to +0.05, because Seat flush
+      must not read it.
+   2. The locked easy-release case - gap -0.18 through Seat (support) with
+      the slider untouched at its default. The
       scene shows the bit's mating face 0.18 mm above the hull skin, the
       plate export (buildCombinedGeometry, what "Export plate STL" writes)
       is run through tools/mesh_validate.py --json: two closed shells, no
@@ -17,7 +24,10 @@
    3. Sign convention matches tools/breakaway_coupons.py: +0.05 puts the bit
       into the hull (the checker sees piercing pairs), 0 puts it touching
       (coplanar contact, which an air gap never produces).
-   4. Misuse fails loudly: gap + proud together, a non-numeric field. */
+   4. The slider: exact min / max / step / default, the readout tracks it,
+      arrow keys step 0.01, a value set from code outside the range clamps,
+      and both ends (-0.25 and +0.05) seat and export as asked.
+   5. Misuse fails loudly: gap + proud together, a non-numeric gap. */
 
 const fs = require('fs');
 const os = require('os');
@@ -148,10 +158,21 @@ const exportPlate = () => {
   return { stl: btoa(bin), mf };
 };
 
+/* Set the slider the way a drag would (value + input event) and click
+   Seat (support). */
 async function seatThroughButton(page, value) {
-  await page.evaluate(v => { document.getElementById('seat-gap').value = v; }, value);
-  await page.click('#btn-seat-flush');
+  await page.evaluate(v => {
+    const el = document.getElementById('seat-gap');
+    el.value = v;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  }, value);
+  await page.click('#btn-seat-support');
 }
+const sliderState = () => {
+  const el = document.getElementById('seat-gap');
+  const out = document.getElementById('seat-gap-value');
+  return { type: el.type, min: el.min, max: el.max, step: el.step, value: el.value, readout: out ? out.textContent : null };
+};
 
 withApp(async (page, logs) => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-seat-'));
@@ -163,14 +184,19 @@ withApp(async (page, logs) => {
   const ids = [idA, idB];
 
   const wired = await page.evaluate(() => ({
-    input: !!document.getElementById('seat-gap'),
-    btn: !!document.getElementById('btn-seat-flush'),
+    slider: document.getElementById('seat-gap') && document.getElementById('seat-gap').type === 'range',
+    readout: !!document.getElementById('seat-gap-value'),
+    flush: !!document.getElementById('btn-seat-flush'),
+    support: !!document.getElementById('btn-seat-support'),
     core: typeof NSO_seatFlushBitToHull === 'function'
   }));
-  check('Seat gap field and button are in the Join card', wired.input && wired.btn && wired.core);
+  check('Join card has Seat flush, Seat (support), the gap slider and its readout', wired.slider && wired.readout && wired.flush && wired.support && wired.core, JSON.stringify(wired));
+  const sl0 = await page.evaluate(sliderState);
+  check('slider range is -0.25 .. +0.05 in 0.01 steps', sl0.min === '-0.25' && sl0.max === '0.05' && sl0.step === '0.01', JSON.stringify(sl0));
+  check('slider default is -0.18 (mid easy-release) and the readout says so', sl0.value === '-0.18' && sl0.readout === '-0.18 mm', JSON.stringify(sl0));
 
   /* ---------- 1. regression: the flush plug seat is unchanged ---------- */
-  console.log('\n--- flush seat (blank gap field) - must match the pre-change build ---');
+  console.log('\n--- Seat flush - must match the pre-change build, whatever the slider says ---');
   await page.evaluate(stage, ids);
   const core = await page.evaluate(([a, b]) => {
     const pA = state.placed.find(p => p && p.sourceId === a && p.mesh);
@@ -191,7 +217,7 @@ withApp(async (page, logs) => {
   }
 
   await page.evaluate(stage, ids);
-  await seatThroughButton(page, '');
+  await page.click('#btn-seat-flush');             // slider still at its -0.18 default
   const flush = await page.evaluate(relation, ids);
   check('button status line is byte-identical', flush.status === GOLDEN_FLUSH.status, flush.status);
   check('button pose equals the golden pose (1e-9)',
@@ -205,11 +231,22 @@ withApp(async (page, logs) => {
   check('bit is buried to 0.01 mm from the hull floor - the plug seat, not a surface seat',
     near(flush.bitBottomMinusHullTop, -19.99, 2e-6), flush.bitBottomMinusHullTop);
 
+  // drag the slider to the overlap end, then Seat flush again: it must not care
+  await page.evaluate(stage, ids);
+  await page.evaluate(() => { const el = document.getElementById('seat-gap'); el.value = '0.05'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.click('#btn-seat-flush');
+  const flush2 = await page.evaluate(relation, ids);
+  check('Seat flush ignores the slider (+0.05 set): same golden pose and status',
+    flush2.status === GOLDEN_FLUSH.status && flush2.bitPos.every((v, i) => near(v, GOLDEN_FLUSH.position[i], 1e-9)) && near(flush2.bitLiftY, GOLDEN_FLUSH.liftY, 1e-9),
+    flush2.status + ' ' + JSON.stringify(flush2.bitPos));
+  await page.evaluate(() => { const el = document.getElementById('seat-gap'); el.value = '-0.18'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+
   /* ---------- 2. the locked easy-release case: gap -0.18 ---------- */
-  console.log('\n--- gap -0.18 (easy release) through the real button ---');
+  console.log('\n--- gap -0.18 (easy release): slider untouched at its default, click Seat (support) ---');
   const staged = await page.evaluate(stage, ids);
   const undoBefore = (await page.evaluate(relation, ids)).undoDepth;
-  await seatThroughButton(page, '-0.18');
+  check('slider reads -0.18 before the click', (await page.evaluate(sliderState)).value === '-0.18');
+  await page.click('#btn-seat-support');
   const g18 = await page.evaluate(relation, ids);
   console.log('  status: ' + g18.status);
   check('status names an air gap of 0.18 mm with the measured value', /^Seated - air gap 0\.18mm \(measured -0\.180mm/.test(g18.status), g18.status);
@@ -312,18 +349,52 @@ withApp(async (page, logs) => {
   }, ids);
   check('non-numeric gap is refused by the core', nan.ok === false, nan.reason);
 
+  /* ---------- 5. the slider itself ---------- */
+  console.log('\n--- slider: keys, readout, clamp, both ends ---');
+  await page.evaluate(() => { const el = document.getElementById('seat-gap'); el.value = '-0.18'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await page.focus('#seat-gap');
+  await page.keyboard.press('ArrowLeft');
+  let sl = await page.evaluate(sliderState);
+  check('ArrowLeft steps -0.18 -> -0.19 and the readout follows', sl.value === '-0.19' && sl.readout === '-0.19 mm', JSON.stringify(sl));
+  await page.keyboard.press('ArrowRight'); await page.keyboard.press('ArrowRight');
+  sl = await page.evaluate(sliderState);
+  check('two ArrowRight -> -0.17, readout -0.17 mm', sl.value === '-0.17' && sl.readout === '-0.17 mm', JSON.stringify(sl));
+  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowRight');
+  sl = await page.evaluate(sliderState);
+  check('cannot key past +0.05; readout shows the sign', sl.value === '0.05' && sl.readout === '+0.05 mm', JSON.stringify(sl));
+  await page.evaluate(() => { const el = document.getElementById('seat-gap'); el.value = '5'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  sl = await page.evaluate(sliderState);
+  check('a value set from code outside the range clamps to +0.05', sl.value === '0.05' && sl.readout === '+0.05 mm', JSON.stringify(sl));
+  await page.evaluate(() => { const el = document.getElementById('seat-gap'); el.value = '-9'; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  sl = await page.evaluate(sliderState);
+  check('... and to -0.25 at the other end', sl.value === '-0.25' && sl.readout === '-0.25 mm', JSON.stringify(sl));
+  const zeroRead = await page.evaluate(() => { const el = document.getElementById('seat-gap'); el.value = '0'; el.dispatchEvent(new Event('input', { bubbles: true })); return document.getElementById('seat-gap-value').textContent; });
+  check('readout at 0 is "0.00 mm"', zeroRead === '0.00 mm', zeroRead);
+
+  await page.evaluate(stage, ids);
+  await seatThroughButton(page, '-0.25');
+  const g25 = await page.evaluate(relation, ids);
+  check('-0.25 (slider min) status names an air gap of 0.25 mm', /^Seated - air gap 0\.25mm \(measured -0\.250mm/.test(g25.status), g25.status);
+  check('-0.25 scene: mating face 0.25 mm above the hull skin (2e-6)', near(g25.bitBottomMinusHullTop, 0.25, 2e-6), g25.bitBottomMinusHullTop);
+  const exp25 = await page.evaluate(exportPlate);
+  const stl25 = path.join(tmp, 'seat_gap_-0.25.stl');
+  fs.writeFileSync(stl25, Buffer.from(exp25.stl, 'base64'));
+  const v25 = meshValidate(stl25);
+  const sh25 = shells(parseBinarySTL(fs.readFileSync(stl25)));
+  console.log('  mesh_validate: open ' + v25.open_edges + ', pierce ' + v25.self_intersection.pierce + ', coplanar ' + v25.self_intersection.coplanar + ', bbox_size ' + JSON.stringify(v25.bbox_size) + ', shells ' + sh25.length);
+  check('-0.25 export: watertight, 0 piercing, 0 coplanar', v25.open_edges === 0 && v25.self_intersection.pierce === 0 && v25.self_intersection.coplanar === 0);
+  check('-0.25 export: two shells 0.25 mm apart (1e-5)', sh25.length === 2 && near(sh25[1].zmin - sh25[0].zmax, 0.25, 1e-5), sh25.length === 2 ? sh25[1].zmin - sh25[0].zmax : sh25.length);
+  check('-0.25 export height is 40.25 (1e-5)', near(v25.bbox_size[2], 40.25, 1e-5), v25.bbox_size[2]);
+
+  // the support button with the slider gone: refuses, nothing moves
   await page.evaluate(stage, ids);
   const posBefore = (await page.evaluate(relation, ids)).bitPos;
-  // a number input drops junk to '' - drive the handler with the raw string instead
-  await page.evaluate(() => {
-    const el = document.getElementById('seat-gap');
-    const saved = readSeatGapInput;
-    window.readSeatGapInput = () => Number('abc');
-    try { seatFlushBitToHull(); } finally { window.readSeatGapInput = saved; }
-  });
-  const junk = await page.evaluate(relation, ids);
-  check('junk in the gap field is refused with a message, not seated flush', /Seat gap must be a number/.test(junk.status), junk.status);
-  check('junk in the gap field leaves the bit where it was', junk.bitPos.every((v, i) => v === posBefore[i]));
+  await page.evaluate(() => { const el = document.getElementById('seat-gap'); el.id = 'seat-gap-hidden'; });
+  await page.click('#btn-seat-support');
+  const gone = await page.evaluate(relation, ids);
+  await page.evaluate(() => { document.getElementById('seat-gap-hidden').id = 'seat-gap'; });
+  check('Seat (support) without a slider refuses with a message', /Seat gap slider is missing/.test(gone.status), gone.status);
+  check('... and leaves the bit where it was', gone.bitPos.every((v, i) => v === posBefore[i]));
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   check('no page errors', errs.length === 0, errs.join(' | '));
