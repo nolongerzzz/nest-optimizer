@@ -334,6 +334,17 @@
                     </div>
                     <button id="btn-thicken-in" class="btn btn-secondary" type="button">Thicken in</button>
                   </div>
+                  <div class="vp-row vp-row-thicken">
+                    <button id="btn-hollow" class="btn btn-secondary" type="button"
+                            title="Carve the interior out of a solid, following the outer surface inward and leaving a shell of the wall thickness in the box. Perpendicular distance, not a radial shrink, so a sloped wall comes out the thickness asked for. Refuses a wall under the nozzle-safety floor from nso_thickness.js, and refuses again if the wall it actually leaves measures under it. Outer surface untouched.">Hollow</button>
+                    <input type="number" id="inp-hollow-mm" value="2" min="0.42" max="20" step="0.1" aria-label="Hollow wall thickness, mm">
+                    <button id="btn-hollow-safe" class="btn btn-secondary" type="button"
+                            title="Hollow back out to the SAFEST minimum wall rather than to the number in the box. For reversing a Thicken in: the wall goes back down, but it stops at the nozzle-safety floor even when the wall was thinner than that before. Restoring an unprintable wall because it used to be unprintable is not a restore.">Hollow to safe min</button>
+                  </div>
+                  <div class="vp-row vp-row-full">
+                    <button id="btn-fill" class="btn btn-secondary" type="button"
+                            title="Fill a hollow piece's interior cavity solid - the inverse of Hollow. Drops the shells that bound enclosed cavities and touches nothing else, so the outer surface comes back exactly as it was. A captive separate solid is not a cavity and is never removed.">Fill / Densify</button>
+                  </div>
                 </div>
               </details>
               <details class="vp-sec" data-sec="paint">
@@ -521,7 +532,8 @@
   <script src="nso_skin_patch.js?v=skin3"></script>
   <script src="nso_carve.js?v=carve1"></script>
   <script src="nso_seat_surface.js?v=seatsurf1"></script>
-  <script src="nso_thickness.js?v=wallcut1"></script>
+  <script src="nso_thickness.js?v=hollow1"></script>
+  <script src="nso_hollow.js?v=hollow1"></script>
   <script src="nso_support_aim.js?v=support1"></script>
   <script src="nso_printer.js?v=wheel2"></script>
   <script src="nso_paint_delete.js?v=del1"></script>
@@ -539,13 +551,14 @@
   <script src="app-sculpt.js?v=inside4"></script>
   <script src="app-extend.js?v=inside6"></script>
   <script src="app-scale.js?v=inside6"></script>
-  <script src="app-brush.js?v=inside6"></script>
+  <script src="app-brush.js?v=hollow1"></script>
   <script src="app-wheel.js?v=wheel2"></script>
   <script src="app-fit.js?v=wheel2"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=wallcut1"></script>
   <script src="app-center-lock.js?v=clock1"></script>
-  <script src="app-carve.js?v=wallcut1"></script>
+  <script src="app-carve.js?v=hollow1"></script>
+  <script src="app-hollow.js?v=hollow1"></script>
   <script src="app-seat-surface.js?v=seatsurf1"></script>
   <script src="app-skin.js?v=skin2"></script>
   <script src="app-skin-patch.js?v=skin3"></script>

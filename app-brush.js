@@ -1006,6 +1006,114 @@ function NSO_brushGate(before, after, opts) {
 }
 
 /* =====================================================================
+   6c. THE LIVE WALL GATE - proactive, per dab, before the surface moves
+
+   A SECOND AND INDEPENDENT LAYER, not a restatement of the one above.
+
+   What already exists: NSO_brushFacing, the area-weighted front-facing filter
+   at section 2. A stamp's vertices are kept only when their (area-weighted)
+   vertex normal faces the way the stamp does, so a dab on the near wall of a
+   thin piece cannot reach round and drag the FAR wall's vertices with it. That
+   is the "the stroke reaches through to the other side" failure and it is
+   fixed.
+
+   What it does not cover, at all: a dab that only ever touches the near face
+   and still leaves 0.2 mm of wall behind it. The far face never moved, the
+   facing filter never had an opinion, the mesh that comes out is closed, sound,
+   manifold and unprintable. Every check in NSO_brushGate above is a TOPOLOGY
+   check - self-intersections, open edges, T-junctions, slivers, a volume budget
+   - and none of them has any notion of how thick a wall is. A 0.2 mm wall
+   passes all of them.
+
+   So this gate asks the one question none of the others do, and asks it BEFORE
+   the dab lands rather than after: how much wall is under this point, and what
+   does a dab this deep leave of it? The answer comes from
+   NSO_Thickness.prepare(), built once per stroke at pointerdown and walked per
+   dab - which is the whole reason that entry point exists; measureMesh() would
+   re-weld the piece on every pointermove.
+
+   CHECKED THREE TIMES, deliberately, in the shape section 7's paint stand-down
+   already uses: on the first dab, so a stroke that cannot land is refused
+   before the user drags a groove they will not get; on every dab after it, so
+   a drag that travels onto a thin wall is stopped at the wall rather than
+   through it; and once over the whole stroke at pointerup, against the RESULT
+   rather than the input, because the dabs overlap and the deepest point of the
+   finished stroke is not the deepest point of any one dab.
+
+   CARVE ONLY. Emboss moves the surface outward - it can only make a wall
+   thicker - and local Smooth moves vertices along no fixed direction and by an
+   amount the Laplacian decides, so there is no "depth" to gate. Both are
+   reported as not gated rather than silently waved through.
+   ===================================================================== */
+
+/* How deep the CENTRE of one dab cuts, in mm. This is NSO_brushDeform's own
+   arithmetic - w * intensity * depthScale * radius at w = 1 - named once here
+   so the gate cannot drift from what the deformation actually does. */
+function NSO_brushDabDepth(opts) {
+  opts = opts || {};
+  if (opts.mode === 'emboss' || opts.mode === 'smooth') return 0;
+  var intensity = (opts.intensity == null) ? 0.5 : +opts.intensity;
+  var radius = opts.radius > 0 ? opts.radius : 1;
+  var scale = (opts.depthScale == null) ? 0.25 : +opts.depthScale;
+  return Math.max(0, intensity * scale * radius);
+}
+
+/* One dab against the canonical floor. `probe` is an NSO_Thickness.prepare()
+   result over the piece's raw soup; `point` and `normal` are in that same raw
+   frame. Returns the gate report, whose `.ok` is the verdict and whose
+   `.reason` is already worded. */
+function NSO_brushWallGate(probe, point, normal, opts) {
+  opts = opts || {};
+  var depth = (opts.depth != null) ? +opts.depth : NSO_brushDabDepth(opts);
+  if (!probe) {
+    return { ok: true, skipped: true, kind: 'stroke', label: 'brush',
+             reason: 'wall gate unavailable - nso_thickness.js is not loaded' };
+  }
+  if (!(depth > 0)) {
+    return { ok: true, skipped: true, kind: 'stroke', label: 'brush',
+             reason: 'not gated - ' + (opts.mode === 'emboss' ? 'Emboss adds material' :
+                     (opts.mode === 'smooth' ? 'Smooth has no cut depth' : 'nothing to remove')) };
+  }
+  return probe.strokeGate({
+    point: point, normal: normal, depth: depth, label: 'brush stroke',
+    nozzle: opts.nozzle, minWall: opts.minWall
+  });
+}
+
+/* The pointerup layer: the FINISHED stroke, measured on the result.
+
+   The per-dab gate reads the piece as it was; the dabs overlap, so the deepest
+   point of the finished stroke is deeper than any single dab's arithmetic
+   predicts. This measures what actually came out, at the places the stroke
+   touched, and is the layer that catches an overlap the per-dab gate let by
+   one at a time. */
+function NSO_brushWallGateResult(outTris, stamps, opts) {
+  opts = opts || {};
+  var TH = (typeof NSO_Thickness !== 'undefined') ? NSO_Thickness : null;
+  if (!TH || typeof TH.prepare !== 'function' || !stamps || !stamps.length) {
+    return { ok: true, skipped: true, reason: 'wall gate unavailable', thin: 0 };
+  }
+  if (NSO_brushDabDepth(opts) <= 0) {
+    return { ok: true, skipped: true, reason: 'not gated - this mode removes nothing', thin: 0 };
+  }
+  var P = TH.prepare(outTris, { nozzle: opts.nozzle, minWall: opts.minWall });
+  if (!P) return { ok: true, skipped: true, reason: 'wall gate unavailable', thin: 0 };
+  var worst = null, thin = 0;
+  for (var i = 0; i < stamps.length; i++) {
+    /* depth 0: the cut has already happened, so the question is no longer
+       "what would this leave" but "what did it leave". */
+    var g = P.strokeGate({ point: stamps[i].c, depth: 0, label: 'brush stroke',
+                           nozzle: opts.nozzle, minWall: opts.minWall });
+    if (!g.measured) continue;
+    if (worst === null || g.wall_mm < worst.wall_mm) worst = g;
+    if (!g.ok) thin++;
+  }
+  if (!worst) return { ok: true, skipped: true, reason: 'nothing measurable under the stroke', thin: 0 };
+  worst.thin = thin;
+  return worst;
+}
+
+/* =====================================================================
    6b. One stroke, start to finish, headless
 
    The app wiring in section 7 does this incrementally so it can show a live
@@ -1459,6 +1567,27 @@ if (typeof document !== 'undefined') (function () {
     return true;
   }
 
+  /* The live wall gate, per dab. See section 6c for why this exists alongside
+     the front-facing filter rather than instead of it.
+
+     The probe is built ONCE, at pointerdown, and walked here - which is the
+     whole point of NSO_Thickness.prepare(). A refused dab is simply not added:
+     the stroke carries on, the user can keep dragging somewhere the wall can
+     take it, and the thin spot is never cut. The first dab is the exception -
+     a stroke that cannot even start is refused outright, so nobody drags a
+     groove they are not going to get. */
+  function wallRefusal(s, rawPoint, rawNormal) {
+    if (!s.probe) return null;
+    var g = NSO_brushWallGate(s.probe, rawPoint, rawNormal, {
+      mode: s.opts.mode, intensity: s.opts.intensity, radius: s.opts.radius
+    });
+    if (g.ok || g.skipped) return null;
+    s.lastGate = g;
+    return (typeof NSO_Thickness !== 'undefined' && NSO_Thickness.strokeRefusal)
+      ? NSO_Thickness.strokeRefusal(g)
+      : 'Brush refused - wall too thin here, Thicken first: ' + g.reason;
+  }
+
   function addStamp(s, rawPoint, rawNormal) {
     var grew = ensureRefined(s, rawPoint);
     var st = { c: rawPoint, n: rawNormal, r: s.opts.radius,
@@ -1513,6 +1642,15 @@ if (typeof document !== 'undefined') (function () {
       previewGeo: null, lastStamp: null, pointerId: event ? event.pointerId : null,
       moves: 0
     };
+    /* Build once, ask many. measureMesh() would re-weld the piece on every
+       pointermove; prepare() pays the weld and the triangle hash here, at
+       pointerdown, and every dab after this is a DDA walk. */
+    session.probe = null;
+    if (typeof NSO_Thickness !== 'undefined' && typeof NSO_Thickness.prepare === 'function') {
+      try { session.probe = NSO_Thickness.prepare(m.rawTris, {}); }
+      catch (e) { session.probe = null; }
+    }
+    session.wallRefused = 0;
     session.normals = NSO_brushVertexNormals(base);
     session.dirtySeen = new Uint8Array(base.vertCount);
     session.pos = new Float64Array(session.basePos);
@@ -1524,6 +1662,19 @@ if (typeof document !== 'undefined') (function () {
 
     if (state.controls) state.controls.enabled = false;
     try { if (event && event.target.setPointerCapture) event.target.setPointerCapture(event.pointerId); } catch (e) {}
+    /* The first dab, gated BEFORE it lands: the preview never shows a cut the
+       commit is going to refuse. Torn down in the same three steps onDown uses
+       for the paint stand-down, and in that order - session cleared, controls
+       handed back, THEN reverted - so there is one shape for "this stroke does
+       not start" and not two. */
+    var refused = wallRefusal(session, rawPoint, rn);
+    if (refused) {
+      var dead = session;
+      session = null;
+      if (state.controls) state.controls.enabled = true;
+      revert(dead, refused, true);
+      return false;
+    }
     addStamp(session, rawPoint, rn);
     say(labelOf(o.mode) + ' - drag to work the surface, let go to bake');
     return true;
@@ -1547,7 +1698,19 @@ if (typeof document !== 'undefined') (function () {
       if (d < s.opts.radius * SPACING) return;
     }
     var ln = p.hit.face.normal.clone().normalize();
-    addStamp(s, rawPoint, rawDirFromLocal([ln.x, ln.y, ln.z]));
+    var rn2 = rawDirFromLocal([ln.x, ln.y, ln.z]);
+    var refused = wallRefusal(s, rawPoint, rn2);
+    if (refused) {
+      /* The dab is dropped, not the stroke: the wall here cannot take it, the
+         wall two centimetres along may well be able to. Nothing is cut here
+         and the user is told why while they are still holding the button. */
+      s.wallRefused++;
+      s.lastStamp = rawPoint;
+      say(refused, true);
+      showRing(p.hit.point, ln.clone().transformDirection(s.mesh.matrixWorld), s.opts.radius);
+      return;
+    }
+    addStamp(s, rawPoint, rn2);
     s.moves++;
     showRing(p.hit.point, ln.clone().transformDirection(s.mesh.matrixWorld), s.opts.radius);
   }
@@ -1601,6 +1764,19 @@ if (typeof document !== 'undefined') (function () {
       return;
     }
 
+    /* The third layer (section 6c): the FINISHED stroke, measured on the
+       result. Overlapping dabs cut deeper than any one dab's arithmetic
+       predicts, so this is not a restatement of the per-dab gate. */
+    var wall = NSO_brushWallGateResult(outTris, s.stamps, {
+      mode: s.opts.mode, intensity: s.opts.intensity, radius: s.opts.radius
+    });
+    if (!wall.ok) {
+      revert(s, (typeof NSO_Thickness !== 'undefined' && NSO_Thickness.strokeRefusal)
+        ? NSO_Thickness.strokeRefusal(wall)
+        : 'Brush refused - wall too thin here, Thicken first: ' + wall.reason, true);
+      return;
+    }
+
     // Put the ORIGINAL geometry back on the mesh before committing, so the
     // undo entry NSO_sculptCommitRaw pushes carries the piece as it was and
     // not a throwaway preview.
@@ -1616,6 +1792,11 @@ if (typeof document !== 'undefined') (function () {
       ', T-junctions ' + before.tJunctions + '→' + after.tJunctions +
       ', self-int ' + before.pierce + '→' + after.pierce +
       ', volume ' + (volPct >= 0 ? '+' : '') + volPct.toFixed(2) + '%';
+    if (wall && wall.measured && wall.wall_mm != null) {
+      txt += ', thinnest wall under the stroke ' + (Math.round(wall.wall_mm * 1000) / 1000) +
+             ' mm (floor ' + (Math.round(wall.threshold_mm * 1000) / 1000) + ')';
+    }
+    if (s.wallRefused) txt += ', ' + s.wallRefused + ' dab(s) refused - wall too thin there';
     if (typeof NSO_sculptCommitRaw === 'function') {
       NSO_sculptCommitRaw(s.m, outTris, 'brushReplace', txt);
     } else {

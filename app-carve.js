@@ -250,6 +250,38 @@
     var planned = NSO_Carve.plan(hullSoup, [pt.x, pt.y, pt.z], blade, params, { depth: depth, roll: roll });
     if (!planned.ok) { say('Carve: ' + planned.reason, true); return { ok: false, reason: planned.reason }; }
 
+    /* THE LIVE WALL GATE - proactive, before the kernel is even loaded.
+
+       This is a SECOND layer, independent of the cutClearance() warning below,
+       and the two catch different failures. cutClearance() asks whether the cut
+       SEVERS a member - whether the bit runs out the far side - and is
+       deliberately a warning and never a refusal, because Local-Carve's corner
+       gouge severs a wall on purpose (docs/LOCAL-CARVE.md 3c). This asks the
+       question nothing in the carve path asks at all: how much wall is under
+       this point, and does a cut this deep leave enough of it to print? A cut
+       that stops well short of the far face, severs nothing, and leaves 0.2 mm
+       standing passes every check that already exists and comes out of the
+       slicer as a hole.
+
+       So this one REFUSES, and it does so here - before the CSG kernel is
+       loaded and before anything is committed - rather than reporting after
+       the fact. The probe is NSO_Thickness.prepare() on the piece's own world
+       soup: one weld, one grid, one query, all on this click. */
+    var gate = null;
+    if (typeof NSO_Thickness !== 'undefined' && typeof NSO_Thickness.prepare === 'function') {
+      try {
+        var probe = NSO_Thickness.prepare(hullSoup, {});
+        if (probe) {
+          gate = probe.strokeGate({ point: [pt.x, pt.y, pt.z], depth: depth, label: 'carve' });
+        }
+      } catch (e) { gate = null; }
+    }
+    if (gate && !gate.ok) {
+      var refusal = NSO_Thickness.strokeRefusal(gate);
+      say(refusal, true);
+      return { ok: false, reason: refusal, gate: gate, planned: planned };
+    }
+
     var wasm;
     try { wasm = await NSO_CSG.load(); }
     catch (err) {
@@ -375,10 +407,16 @@
        unchanged. '' on a carve that leaves a printable wall. */
     var cutWarn = (typeof NSO_Thickness !== 'undefined' && res.clearance)
       ? NSO_Thickness.cutWarning(res.clearance) : '';
+    var wallNote = (gate && gate.measured)
+      ? 'wall ' + (Math.round(gate.wall_mm * 1000) / 1000) + ' mm, ' +
+        (Math.round(gate.residual_mm * 1000) / 1000) + ' mm left (floor ' +
+        (Math.round(gate.threshold_mm * 1000) / 1000) + ')'
+      : '';
     var status = NSO_Carve.carveReport(planned, removed, intended) +
       ' - open edges ' + res.openBefore + '→' + res.openAfter +
       ', non-manifold ' + res.nmBefore + '→' + res.nmAfter +
       (dropped ? ', welded away ' + dropped + ' seam sliver' + (dropped === 1 ? '' : 's') : '') +
+      (wallNote ? ' - ' + wallNote : '') +
       (cutWarn ? ' - ' + cutWarn : '');
     if (!NSO_sculptCommitRaw(model, raw, 'carveReplace', status)) {
       say('Carve: could not commit the result', true);
