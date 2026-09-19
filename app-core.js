@@ -148,6 +148,7 @@ const UNDO_REPLACE_LABEL = {
   brushReplace: 'Undo: Brush reverted',
   seatSurfaceReplace: 'Undo: Seat here reverted',
   extendReplace: 'Undo: Extend reverted',
+  fattenReplace: 'Undo: Fatten reverted',
   wheelReplace: 'Undo: Pottery Wheel reverted'
 };
 

@@ -1722,6 +1722,40 @@ select:focus, input:focus {
   -webkit-appearance: none;
   margin: 0;
 }
+/* Fatten: button / mm / button. The thicken row's three-column shape, but its
+   middle column is a 24px spinner strip and this one holds a real number box,
+   so the middle track is wider and the input borrows the extend row's styling
+   rather than a second copy of it. */
+.vp-row-fatten {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 46px) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 4px;
+}
+.vp-row-fatten .btn {
+  padding: 2px 3px;
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+  min-width: 0;
+}
+.vp-menu-body .vp-row-fatten input[type="number"] {
+  min-height: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0 4px;
+  border: 1px solid rgba(232, 238, 246, 0.45);
+  border-radius: 7px;
+  background: transparent;
+  color: #e8eef6;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+.vp-menu-body .vp-row-fatten input[type="number"]::-webkit-outer-spin-button,
+.vp-menu-body .vp-row-fatten input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
 .thick-spin {
   display: flex;
   flex-direction: column;

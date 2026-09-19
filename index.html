@@ -334,6 +334,14 @@
                     </div>
                     <button id="btn-thicken-in" class="btn btn-secondary" type="button">Thicken in</button>
                   </div>
+                  <div class="vp-row vp-row-fatten">
+                    <button id="btn-fatten-grow" class="btn btn-secondary" type="button"
+                            title="Grow the cross-section of an axis-aligned straight piece and hold its length. Detects the axis the way Extend does and offsets only the faces parallel to it, so a pin gets thicker without getting longer. Leave the box blank and press once to read the piece.">Fatten</button>
+                    <input type="number" id="inp-fatten-mm" min="0.05" max="8" step="0.05"
+                           placeholder="mm" aria-label="Fatten offset, mm">
+                    <button id="btn-fatten-shrink" class="btn btn-secondary" type="button"
+                            title="Fatten in reverse: the same offset inward, so the cross-section shrinks and the length is still held. Refused if the amount taken off is more than the wall it eats.">Shrink</button>
+                  </div>
                 </div>
               </details>
               <details class="vp-sec" data-sec="paint">
@@ -535,6 +543,7 @@
   <script src="app-finish.js?v=inside6"></script>
   <script src="app-sculpt.js?v=inside4"></script>
   <script src="app-extend.js?v=inside6"></script>
+  <script src="app-fatten.js?v=fatten1"></script>
   <script src="app-scale.js?v=inside6"></script>
   <script src="app-brush.js?v=inside6"></script>
   <script src="app-wheel.js?v=wheel2"></script>

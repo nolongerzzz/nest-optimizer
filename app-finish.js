@@ -2911,8 +2911,33 @@ function _thickenSolveVertex(planes, offset) {
   return { d, approx };
 }
 
-/* The offset. Returns { soup, moved, held, approx } or { reason } when refused. */
-function _thickenOffsetSoup(soup, mode, offsetMm) {
+/* The offset. Returns { soup, moved, held, approx } or { reason } when refused.
+
+   opts.mayMove   optional Uint8Array, one entry per INPUT TRIANGLE (face f is
+                  triangle f of the soup, because _thickenIndex welds positions
+                  only and never reorders or merges faces). A 0 forbids that
+                  face from moving; it becomes a HELD plane like any other, so
+                  the vertex solve pins it exactly as it pins the far side of a
+                  Thicken out. The filter only ever NARROWS: a face still has to
+                  be on the asked side first. Omit it and nothing changes -
+                  every existing caller passes two arguments and gets the
+                  identical whole-surface offset it always got.
+
+                  Added for Fatten (app-fatten.js), which restricts the offset
+                  to the faces parallel to a piece's dominant axis so the length
+                  stays fixed. The axis is entirely the caller's business: this
+                  file offsets surfaces and has no notion of an axis, and giving
+                  it one would be the wrong place to put it.
+
+   offsetMm may be NEGATIVE here and always could be: every step below is
+   linear in it and the sign simply reverses the push. Only the UI entry point
+   gates it positive, which is why that gate is the one that had to learn about
+   signed callers rather than this function. A shrink is refused by the same
+   inversion check that refuses an over-large grow - a wall thinner than the
+   amount taken off it turns inside out and is caught there. */
+function _thickenOffsetSoup(soup, mode, offsetMm, opts) {
+  opts = opts || {};
+  const mayMove = opts.mayMove || null;
   const { pos, tri } = _thickenIndex(soup);
   const nf = tri.length / 3, nv = pos.length / 3;
   const fn = _thickenFaceNormals(pos, tri);
@@ -2920,13 +2945,17 @@ function _thickenOffsetSoup(soup, mode, offsetMm) {
   const sign = fn.signedVolume < 0 ? -1 : 1;
   const outer = _thickenClassifyOuter(pos, tri, fn, sign);
   const moving = new Uint8Array(nf);
-  let moved = 0, held = 0;
+  let moved = 0, held = 0, filtered = 0;
   for (let f = 0; f < nf; f++) {
     if (!fn.ok[f]) continue;
     moving[f] = (mode === 'out') ? outer[f] : (outer[f] ? 0 : 1);
+    if (moving[f] && mayMove && !mayMove[f]) { moving[f] = 0; filtered++; }
     if (moving[f]) moved++; else held++;
   }
   if (moved === 0) {
+    if (filtered > 0) {
+      return { reason: 'no face on the asked side survives the caller\'s filter (' + filtered + ' were filtered out)' };
+    }
     return { reason: mode === 'out' ? 'no outer face found' : 'no inner face on this piece (every face is on the outside)' };
   }
   const incident = new Array(nv);
@@ -2983,7 +3012,7 @@ function _thickenOffsetSoup(soup, mode, offsetMm) {
     const v = tri[i] * 3;
     res[i * 3] = out[v]; res[i * 3 + 1] = out[v + 1]; res[i * 3 + 2] = out[v + 2];
   }
-  return { soup: res, moved, held, approx, signedVolume: fn.signedVolume };
+  return { soup: res, moved, held, approx, filtered, signedVolume: fn.signedVolume };
 }
 
 function _thickenSignedVolume(soup) {
@@ -2998,16 +3027,57 @@ function _thickenSignedVolume(soup) {
 
 // ---- main entry ----
 
-function thickenSelectedModel(mode, offsetMm) {
+/* The UI / commit half.
+
+   opts is optional and every field of it defaults to exactly what the two
+   Thicken buttons have always got, so `thickenSelectedModel(mode, mm)` is
+   unchanged in behaviour and in the text it writes to the status line:
+
+     opts.mayMove    narrow the moving face set - forwarded to
+                     _thickenOffsetSoup, see its comment
+     opts.signed     accept a negative offsetMm. The offset maths never cared
+                     about the sign; this gate did, because the two Thicken
+                     buttons only ever mean "outward" and a negative number in
+                     their box is a typo. A caller that means "inward by this
+                     much" says so here.
+     opts.gate       extra refusal, called as gate(soupIn, working) after the
+                     piercing check and before anything is committed. Returns a
+                     reason string to refuse, or a falsy value to allow. This is
+                     where a caller's own promise is proved - Fatten measures
+                     the axial length on `working` here and refuses if it moved.
+     opts.label      name for the status line, default 'Thicken'
+     opts.modeLabel  the word after the label, default `mode`
+     opts.mmLabel    the figure after that, default `offsetMm`. A caller whose
+                     direction is already in the mode word ("shrink") says the
+                     size as a plain magnitude here rather than printing a
+                     minus sign the user never typed.
+     opts.sideWord   'outer' / 'inner' in the status line, default from `mode`
+     opts.undoType   undo entry type, default 'thickenReplace'. A new type needs
+                     its row in UNDO_REPLACE_LABEL (app-core.js) or undo will
+                     not handle it - that table is the gate as well as the label.
+     opts.note       note(result, working) -> a string appended to the status
+                     line after every figure Thicken reports, so a wrapper can
+                     add its own without re-composing the whole message.
+
+   Returns { ok, reason, ... } so a wrapper can report; the two buttons ignore
+   it, as they always have. */
+function thickenSelectedModel(mode, offsetMm, opts) {
+  opts = opts || {};
+  const label = opts.label || 'Thicken';
+  const tag = label + ' ' + (opts.modeLabel || mode) + ' ' + (opts.mmLabel != null ? opts.mmLabel : offsetMm);
+  const sideWord = opts.sideWord || (mode === 'out' ? 'outer' : 'inner');
   const m = getActiveModel();
-  if (!m) { setStatus('Select a piece first', true); return; }
-  if (!(offsetMm > 0)) { setStatus('Thicken failed - enter a positive mm value', true); return; }
+  if (!m) { setStatus('Select a piece first', true); return { ok: false, reason: 'no selection' }; }
+  if (!(opts.signed ? (isFinite(offsetMm) && offsetMm !== 0) : offsetMm > 0)) {
+    setStatus(label + ' failed - enter a ' + (opts.signed ? 'non-zero' : 'positive') + ' mm value', true);
+    return { ok: false, reason: 'offset out of range' };
+  }
 
   const paintedCount = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
   if (paintedCount > 0) {
     setStatus('Thicken stood down - ' + paintedCount + ' painted face(s); the rim of the moving side ' +
               'is shared with the held faces, so no face can be promised untouched. Clear paint to thicken.', true);
-    return;
+    return { ok: false, reason: 'painted faces: ' + paintedCount, painted: paintedCount };
   }
 
   function localSoupFromGeometry(geo) {
@@ -3028,7 +3098,7 @@ function thickenSelectedModel(mode, offsetMm) {
 
   const usingRaw = !!(m.rawTris && m.rawAxis === 'zup');
   const soupIn = usingRaw ? m.rawTris : localSoupFromGeometry(m.geometry);
-  if (!soupIn || soupIn.length < 9) { setStatus('Thicken failed - piece unchanged', true); return; }
+  if (!soupIn || soupIn.length < 9) { setStatus(label + ' failed - piece unchanged', true); return { ok: false, reason: 'no soup' }; }
 
   let openBefore = null, nmBefore = null;
   try { openBefore = openBoundaryEdges(soupIn).length; } catch (e) {}
@@ -3038,10 +3108,10 @@ function thickenSelectedModel(mode, offsetMm) {
   // needed closure, so nothing is welded or capped first and the held side
   // comes out exactly as it went in.
   let result = null;
-  try { result = _thickenOffsetSoup(soupIn, mode, offsetMm); } catch (e) { result = { reason: (e && e.message) || 'error' }; }
+  try { result = _thickenOffsetSoup(soupIn, mode, offsetMm, opts); } catch (e) { result = { reason: (e && e.message) || 'error' }; }
   if (!result || !result.soup || result.soup.length < 9) {
-    setStatus('Thicken ' + mode + ' ' + offsetMm + ' failed - ' + ((result && result.reason) || 'piece unchanged') + '; piece unchanged', true);
-    return;
+    setStatus(tag + ' failed - ' + ((result && result.reason) || 'piece unchanged') + '; piece unchanged', true);
+    return { ok: false, reason: (result && result.reason) || 'piece unchanged' };
   }
   const working = result.soup;
 
@@ -3055,13 +3125,23 @@ function thickenSelectedModel(mode, offsetMm) {
     }
   } catch (e) { pierceBefore = pierceAfter = null; }
   if (pierceBefore != null && pierceAfter != null && pierceAfter > pierceBefore) {
-    setStatus('Thicken ' + mode + ' ' + offsetMm + ' failed - the moved faces would cross the piece (piercing pairs ' +
+    setStatus(tag + ' failed - the moved faces would cross the piece (piercing pairs ' +
               pierceBefore + '→' + pierceAfter + '); piece unchanged', true);
-    return;
+    return { ok: false, reason: 'piercing ' + pierceBefore + '->' + pierceAfter };
+  }
+
+  // The caller's own promise, proved on the result and before any commit.
+  if (typeof opts.gate === 'function') {
+    let why = null;
+    try { why = opts.gate(soupIn, working, result); } catch (e) { why = (e && e.message) || 'gate threw'; }
+    if (why) {
+      setStatus(tag + ' failed - ' + why + '; piece unchanged', true);
+      return { ok: false, reason: why };
+    }
   }
 
   pushUndo({
-    type: 'thickenReplace',
+    type: opts.undoType || 'thickenReplace',
     modelId: m.id,
     prevGeometry: m.geometry.clone(),
     prevRawTris: m.rawTris,
@@ -3114,7 +3194,7 @@ function thickenSelectedModel(mode, offsetMm) {
   let openAfter = null, nmAfter = null;
   try { openAfter = openBoundaryEdges(working).length; } catch (e) {}
   try { if (typeof countNonManifoldEdges === 'function') nmAfter = countNonManifoldEdges(working); } catch (e) {}
-  let msg = 'Thicken ' + mode + ' ' + offsetMm + ' - ' + result.moved + ' ' + (mode === 'out' ? 'outer' : 'inner') +
+  let msg = tag + ' - ' + result.moved + ' ' + sideWord +
     ' face(s) moved, ' + result.held + ' held; open ' + (openBefore == null ? '?' : openBefore) + '\u2192' + (openAfter == null ? '?' : openAfter);
   if (nmBefore != null && nmAfter != null) msg += ', NM ' + nmBefore + '\u2192' + nmAfter;
   if (pierceBefore != null && pierceAfter != null) msg += ', piercing ' + pierceBefore + '\u2192' + pierceAfter;
@@ -3123,7 +3203,9 @@ function thickenSelectedModel(mode, offsetMm) {
     msg += ', vol ' + (sgn * result.signedVolume).toFixed(1) + '\u2192' + (sgn * _thickenSignedVolume(working)).toFixed(1) + ' mm\u00b3';
   } catch (e) {}
   if (result.approx > 0) msg += '; ' + result.approx + ' vertex(es) on tangent creases placed approximately';
+  if (opts.note) msg += opts.note(result, working);
   setStatus(msg);
+  return { ok: true, result, tris: working, status: msg };
 }
 
 function thickenOutSelectedModel() {
