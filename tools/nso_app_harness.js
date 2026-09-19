@@ -87,6 +87,20 @@ async function withApp(fn, opts) {
     r.fulfill({ status: 200, contentType: 'application/wasm',
                 body: fs.readFileSync(path.join(ROOT, 'vendor', 'manifold', 'manifold.wasm')) }));
 
+  // app-library.js asks the public GitHub contents API for library/*.stl on
+  // boot, so the row list matches what is actually on main. The sandbox has no
+  // outbound network, and a request that fails - or a 404 from an unauthorised
+  // read of a private repo - puts a "Failed to load resource" line in
+  // the console that any suite gating on a clean console sees, at whatever
+  // moment the attempt gives up. Answered from the tree this harness is already
+  // serving: the same directory, the shape the API returns, deterministic.
+  await page.route('https://api.github.com/repos/**/contents/library**', r => {
+    let names = [];
+    try { names = fs.readdirSync(path.join(ROOT, 'library')); } catch (e) { names = []; }
+    r.fulfill({ status: 200, contentType: 'application/json',
+                body: JSON.stringify(names.map(n => ({ name: n, type: 'file' }))) });
+  });
+
   try {
     await page.goto('http://127.0.0.1:' + port + '/index.html', { waitUntil: 'load' });
     // the app is up once its own state object exists and the scene is built
