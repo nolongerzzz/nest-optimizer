@@ -45,6 +45,11 @@ Smart build-plate packing for 3D printing.
   - `minWall` still measures along the cut axis only, and the status line says so
     whenever more than one face is in play, plus what it held back in mm³ when
     it held anything. See `docs/LOCAL-CARVE.md`
+- Breakaway supports through minimal contact: **Skin face** puts a contact
+  relief (fine crosshatch, sawtooth ridges, or a tapered ring) on one flat face
+  of a support block, and **Seat flush** with gap 0 rests the part on the
+  relief's tips - never on its base plane. Print-ready two-shell samples in
+  `fixtures/skin-samples/`; see `docs/HANDOFF.md`, "Contact skin on a face"
 
 ## How to use
 
