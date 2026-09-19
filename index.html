@@ -342,6 +342,10 @@
                 <button id="btn-stock-make" class="btn btn-secondary" type="button"
                         title="Put a correctly-sized blank on the plate: the material the target needs, plus the waste margin, solved for this shape's defining measurement. Refuses before anything is added if the target cannot be printed on the current plate.">New stock</button>
               </div>
+              <div class="vp-row vp-row-full">
+                <button id="btn-stock-attach" class="btn btn-secondary btn-attach" type="button" aria-pressed="false"
+                        title="Generate the same blank and attach it to a piece in one go: click the point on the piece where it should go, and straight-line auto-aim works out which way it leaves that face, seats it deep enough for the whole rim to bite, and unions the two into one solid. Nothing is left on the plate to tidy up. See docs/ASSEMBLE.md.">Attach</button>
+              </div>
             </div>
           </details>
         </div>
@@ -615,6 +619,10 @@
   <script src="nso_thickness.js?v=hollow1"></script>
   <script src="nso_hollow.js?v=hollow1"></script>
   <script src="nso_support_aim.js?v=support1"></script>
+  <!-- Attach: the connective tissue between Stock, auto-aim and Join's union.
+       After nso_support_aim.js, whose nearestBase and place it calls. See
+       docs/ASSEMBLE.md. -->
+  <script src="nso_assemble.js?v=asm1"></script>
   <script src="nso_printer.js?v=wheel2"></script>
   <!-- New stock: the shape-agnostic sizing app-wheel.js's Ball now calls,
        so it loads ahead of it. See docs/STOCK.md. -->
@@ -642,6 +650,7 @@
   <script src="app-wheel.js?v=wheel3"></script>
   <script src="app-fit.js?v=wheel2"></script>
   <script src="app-stock.js?v=stock1"></script>
+  <script src="app-assemble.js?v=asm1"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=wallcut1"></script>
   <script src="app-center-lock.js?v=clock1"></script>
