@@ -29,16 +29,33 @@ const check = (name, cond, detail) => {
 
 /* ---- what the page is asked ---- */
 
-/** Which placed pieces are carrying a grid right now, by source id. */
+/** Every grid in the scene, and the piece each one says it belongs to. The
+    grid stands beside its piece in modelGroup rather than under it, so this
+    reads the scene, not the piece's children - and a grid that ended up on
+    the wrong piece, or two on one, has nowhere to hide. */
 const gridsOn = (page) => page.evaluate(() => {
   const out = [];
-  (state.placed || []).forEach(function (p) {
-    if (!p || !p.mesh) return;
-    const g = p.mesh.children.filter(function (c) { return c.name === 'seatGrid'; });
-    if (g.length) out.push({ sourceId: p.sourceId, groups: g.length, lines: g[0].children.length });
+  (state.modelGroup ? state.modelGroup.children : []).forEach(function (c) {
+    if (!c || c.name !== 'seatGrid') return;
+    out.push({ sourceId: c.userData.seatGrid.sourceId, lines: c.children.length });
   });
   return out;
 });
+
+/** The grid object for a piece, and its pose, read off the scene. */
+const gridFor = (page, sid) => page.evaluate((id) => {
+  const g = state.modelGroup.children.filter(function (c) {
+    return c.name === 'seatGrid' && c.userData.seatGrid.sourceId === id;
+  })[0];
+  if (!g) return null;
+  const p = state.placed.find(function (x) { return x && x.sourceId === id; });
+  return {
+    pose: [g.position.x, g.position.y, g.position.z],
+    meshPose: [p.mesh.position.x, p.mesh.position.y, p.mesh.position.z],
+    parentIsModelGroup: g.parent === state.modelGroup,
+    meshChildGrids: p.mesh.children.filter(function (c) { return c.name === 'seatGrid'; }).length
+  };
+}, sid);
 
 /** Pick A and B the way the panel does: arm the slot, click the piece. */
 const pickJoin = (page, idA, idB) => page.evaluate(([a, b]) => {
@@ -61,7 +78,13 @@ const untouched = (page, id) => page.evaluate((sid) => {
   let sum = 0;
   for (let i = 0; i < pos.count; i++) sum += pos.getX(i) + pos.getY(i) + pos.getZ(i);
   const exp = buildCombinedGeometry();
+  // The measuring tape four other suites use on a piece. It walks children,
+  // so anything with volume hung under the mesh changes what the piece
+  // measures - which is how the grid is forbidden to be visible.
+  const r6 = function (n) { return Math.round(n * 1e6) / 1e6; };
+  const bb = new THREE.Box3().setFromObject(p.mesh);
   return {
+    box: [r6(bb.min.x), r6(bb.min.y), r6(bb.min.z), r6(bb.max.x), r6(bb.max.y), r6(bb.max.z)].join(','),
     geoUuid: geo.uuid,
     verts: pos.count,
     vertSum: Math.round(sum * 1e6) / 1e6,
@@ -110,15 +133,19 @@ withApp(async (page, logs) => {
   console.log('\n=== 4. the lines are ON the curved skin, by the app\'s own raycaster ===');
   const follow = await page.evaluate(() => {
     const p = state.placed.find(function (x) { return x && x.sourceId === state.editId; });
-    const grid = p.mesh.children.filter(function (c) { return c.name === 'seatGrid'; })[0];
+    const grid = state.modelGroup.children.filter(function (c) {
+      return c.name === 'seatGrid' && c.userData.seatGrid.sourceId === p.sourceId;
+    })[0];
     p.mesh.updateMatrixWorld(true);
-    // Every grid point, in world space
+    grid.updateMatrixWorld(true);
+    // Every grid point, in world space, through the GRID's own matrix - if the
+    // pose it carries were not the piece's, the rays below would land nowhere.
     const world = [];
     grid.children.forEach(function (line) {
       const pos = line.geometry.attributes.position;
       for (let i = 0; i < pos.count; i++) {
         world.push(new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i))
-          .applyMatrix4(p.mesh.matrixWorld));
+          .applyMatrix4(grid.matrixWorld));
       }
     });
     // Drop a ray straight down onto the piece over each one and compare. The
@@ -195,7 +222,9 @@ withApp(async (page, logs) => {
       }
     }
     // and the flat statement of it: the line objects are deaf to rays
-    const grid = p.mesh.children.filter(function (c) { return c.name === 'seatGrid'; })[0];
+    const grid = state.modelGroup.children.filter(function (c) {
+      return c.name === 'seatGrid' && c.userData.seatGrid.sourceId === p.sourceId;
+    })[0];
     const sink = [];
     grid.children.forEach(function (line) { line.raycast(rc, sink); });
     out.deaf = sink.length === 0;
@@ -216,6 +245,9 @@ withApp(async (page, logs) => {
   check('mode auto puts it back on A', (await gridsOn(page)).map((g) => g.sourceId).join() === String(idDome));
   const backOn = await untouched(page, idDome);
 
+  check('the piece MEASURES the same with the grid up',
+    withGrid.box === noGrid.box && backOn.box === noGrid.box,
+    withGrid.box + ' vs ' + noGrid.box);
   check('the display geometry is the same object', withGrid.geoUuid === noGrid.geoUuid);
   check('with the same vertices', withGrid.verts === noGrid.verts && withGrid.vertSum === noGrid.vertSum,
     withGrid.verts + ' vs ' + noGrid.verts);
@@ -228,6 +260,24 @@ withApp(async (page, logs) => {
     noGrid.exportVerts === await page.evaluate(() => state.placed.reduce(
       function (n, p) { return n + p.geometry.attributes.position.count; }, 0)));
   check('the piece did not move', withGrid.meshY === noGrid.meshY);
+
+  console.log('\n=== 6b. it stands beside the piece, and keeps up with it ===');
+  const place = await gridFor(page, idDome);
+  check('the grid is a child of modelGroup, not of the piece', place.parentIsModelGroup);
+  check('nothing with volume hangs under the mesh', place.meshChildGrids === 0);
+  check('and it wears the piece\'s pose', place.pose.join() === place.meshPose.join(),
+    place.pose.join() + ' vs ' + place.meshPose.join());
+  const moved = await page.evaluate((sid) => {
+    const p = state.placed.find(function (x) { return x && x.sourceId === sid; });
+    applyPlacedXZ(p, p.x + 17, p.z - 9);          // the path every drag and nudge takes
+    const g = state.modelGroup.children.filter(function (c) {
+      return c.name === 'seatGrid' && c.userData.seatGrid.sourceId === sid;
+    })[0];
+    return { pose: [g.position.x, g.position.y, g.position.z].join(),
+             meshPose: [p.mesh.position.x, p.mesh.position.y, p.mesh.position.z].join() };
+  }, idDome);
+  check('a move carries the grid with it', moved.pose === moved.meshPose,
+    moved.pose + ' vs ' + moved.meshPose);
 
   console.log('\n=== 7. it changes hands when the roles do ===');
   await pickJoin(page, idBox, idDome);
