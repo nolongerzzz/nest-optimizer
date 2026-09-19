@@ -11,6 +11,8 @@
     "grid:wire": "node tools/nso_wire_grid_test.js",
     "grid:plate": "node tools/nso_plate_grid_test.js",
     "centerlock:test": "node tools/nso_center_lock_test.js",
+    "carve:audit": "node tools/nso_carve_audit.js",
+    "carve:test": "node tools/nso_carve_test.js",
     "measure": "node tools/nso_measure_test.js",
     "wire:scale": "node tools/nso_wire_scale_test.js",
     "test": "node tools/run-tests.mjs"
@@ -23,6 +25,7 @@
     "grid:wire",
     "grid:plate",
     "centerlock:test",
+    "carve:test",
     "measure",
     "wire:scale"
   ],

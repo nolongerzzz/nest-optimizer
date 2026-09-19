@@ -309,7 +309,7 @@ function undoLast() {
       ((m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length : 0) + ' face(s) excluded');
     return;
   }
-  if (entry.type === 'softenReplace' || entry.type === 'capReplace' || entry.type === 'sealReplace' || entry.type === 'solidifyReplace' || entry.type === 'thickenReplace' || entry.type === 'smoothReplace' || entry.type === 'scaleReplace') {
+  if (entry.type === 'softenReplace' || entry.type === 'capReplace' || entry.type === 'sealReplace' || entry.type === 'solidifyReplace' || entry.type === 'thickenReplace' || entry.type === 'smoothReplace' || entry.type === 'scaleReplace' || entry.type === 'carveReplace') {
     const m = state.models.find(x => x.id === entry.modelId);
     if (!m) { setStatus('Undo: piece no longer exists'); return; }
     // the paint set is part of the piece's state, so one step puts back both
@@ -349,7 +349,7 @@ function undoLast() {
     updateEditSize();
     renderModelList();
     updateUndoBtn();
-    setStatus(entry.type === 'scaleReplace' ? 'Undo: Scale reverted' : (entry.type === 'smoothReplace' ? 'Undo: Smooth reverted' : (entry.type === 'thickenReplace' ? 'Undo: Thicken reverted' : (entry.type === 'solidifyReplace' ? 'Undo: Solidify reverted' : (entry.type === 'sealReplace' ? 'Undo: Seal reverted' : (entry.type === 'capReplace' ? 'Undo: Cap reverted' : 'Undo: Soften reverted'))))));
+    setStatus(entry.type === 'carveReplace' ? 'Undo: Carve reverted' : (entry.type === 'scaleReplace' ? 'Undo: Scale reverted' : (entry.type === 'smoothReplace' ? 'Undo: Smooth reverted' : (entry.type === 'thickenReplace' ? 'Undo: Thicken reverted' : (entry.type === 'solidifyReplace' ? 'Undo: Solidify reverted' : (entry.type === 'sealReplace' ? 'Undo: Seal reverted' : (entry.type === 'capReplace' ? 'Undo: Cap reverted' : 'Undo: Soften reverted')))))));
     return;
   }
   if (entry.type === 'removeModel') {
@@ -2126,6 +2126,16 @@ function onCanvasPointerDown(event) {
      that paint would actually take is given up, so orbiting the plate while
      painting still works. */
   if (typeof window.nsoMaskTakesClick === 'function' && window.nsoMaskTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* Carve owns a click that lands on a piece, for the same reason paint does:
+     app-core binds this handler inside initThree() while the document is still
+     parsing, so it is always the earlier listener and a fall-through here would
+     start a move drag under the carve and report "Moved model #N" over its
+     status. app-carve.js decides, where its own hit test lives. */
+  if (typeof window.nsoCarveTakesClick === 'function' && window.nsoCarveTakesClick(event)) {
     setOrbitFromPlate(false);
     return;
   }

@@ -864,6 +864,48 @@ select:focus, input:focus {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- Carve: the local carving tool ----
+
+   Two rows plus a readout, in the Finish column. Row one is the arm button and
+   the blade select, laid out on .vp-row-skin's grid so Carve reads as a sibling
+   of Skin face rather than a new kind of control. Row two is four numbers, and
+   it is FLEX, not the card's usual grid: the ball-nose exposes one shape field
+   where the slab and the wedge expose two, so one cell is hidden at runtime and
+   a fixed four-column grid would leave a dead track where it was. Flex children
+   drop out of the flow when hidden, which is exactly what is wanted.
+
+   Teal for the armed state, matching the position lock rather than either
+   paint: a carve is destructive geometry like a lock is a hard refusal, and
+   yellow and pink already mean "exclude" and "target" on the same faces. */
+.vp-row-carve { grid-template-columns: 1fr 88px; gap: 4px; align-items: stretch; }
+.vp-row-carve .btn { font-size: 11px; padding: 2px 4px; white-space: nowrap; }
+.vp-row-carve .vp-select { min-width: 0; font-size: 11px; padding: 0 4px; }
+.vp-menu-body .btn-carve {
+  color: #2dd4bf;
+  border-color: rgba(45, 212, 191, 0.55);
+}
+.vp-menu-body .btn-carve:hover { border-color: rgba(45, 212, 191, 0.9); }
+.vp-menu-body .btn-carve.is-armed {
+  background: #2dd4bf;
+  color: #1a1d21;
+  border-color: #2dd4bf;
+  font-weight: 600;
+}
+.vp-row-carve2 { display: flex; gap: 3px; }
+.vp-row-carve2 .vp-clone { flex: 1 1 0; min-width: 0; justify-self: stretch; }
+.vp-row-carve2 .vp-clone input { width: 100%; font-size: 10px; padding: 3px 0; }
+/* The blade the next click will build, in the registry's own words. Slate while
+   it is valid - .cut-readout's red is reserved for a refusal, and this line is
+   showing for the whole time the tool is armed. */
+.carve-readout {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0 0 6px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+.carve-readout.carve-bad { color: #f87171; }
+
 .btn-cut {
   background: #dc2626;
   color: white;
