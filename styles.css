@@ -27,7 +27,7 @@
      button ends up under a menu. */
   --vp-menu-gap: 8px;      /* margin at the edge, and between menus */
   --vp-menu-w: 64px;       /* one menu summary: min-width 64px in .vp-menu */
-  --vp-menu-count: 2;      /* Finish + Wheel */
+  --vp-menu-count: 3;      /* Finish + Wheel + Stock */
 }
 
 * {
@@ -2091,6 +2091,65 @@ select:focus, input:focus {
   padding: 4px;
   gap: 3px;
 }
+
+/* ---------------------------------------------------------------------------
+   New stock - menu 3, the third and innermost of the top-right stack. Same
+   shape as the Wheel's card beside it, one menu width further in; the offset
+   is derived from --vp-menu-gap / --vp-menu-w so adding this menu was a
+   --vp-menu-count bump and nothing else, exactly as the note in :root says.
+   `npm run overlay:test` measures the rendered strip and fails if a topbar
+   button ends up underneath.
+--------------------------------------------------------------------------- */
+.viewport-overlay-stock {
+  top: 8px;
+  right: calc(var(--vp-menu-gap) * 3 + var(--vp-menu-w) * 2);
+  left: auto;
+  bottom: auto;
+  flex-direction: column;
+  align-items: flex-end;
+  z-index: 90;
+  pointer-events: none;
+}
+.vp-stock-menu {
+  pointer-events: auto;
+}
+.vp-stock-menu > summary {
+  width: auto;
+  min-width: 64px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.vp-stock-menu .vp-menu-body {
+  top: calc(100% + 4px);
+  left: auto;
+  right: 0;
+  min-width: 168px;
+  max-width: 176px;
+  padding: 4px;
+  gap: 3px;
+}
+.vp-stock-menu select { width: 100%; }
+/* The shape-specific box goes away for a sphere. `.vp-clone` sets
+   `display: flex`, which beats the UA's `[hidden] { display: none }` on
+   specificity, so the attribute needs a rule of its own or the field stays on
+   screen with nothing to type in it. */
+.vp-menu-body [hidden] { display: none; }
+.vp-stock-menu .vp-row-opts .vp-clone input[type="text"] { width: 62px; }
+/* A checkbox row is a label, not a grid: the box and its words want to sit
+   together at the left rather than in two columns of a 36px / 1fr layout. */
+.vp-check {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #cbd5e1;
+  cursor: pointer;
+  padding: 1px 0;
+}
+.vp-check input[type="checkbox"] { margin: 0; }
+.vp-check:has(input:disabled) { opacity: 0.45; cursor: default; }
 
 /* ---------------------------------------------------------------------------
    Build-volume warning. It sits under the plate dimensions because that is
