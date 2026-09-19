@@ -48,9 +48,74 @@ import { dirname, join } from 'node:path';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 const scripts = pkg.scripts || {};
-const declared = pkg.testSteps;
+const allSteps = pkg.testSteps;
+const weights = pkg.testStepWeights || {};
 
 const SELF = 'run-tests.mjs';
+
+/* SHARDING - `--shard=i/n` runs a balanced i-th slice of the same list.
+
+   Why not slice by index: the suite is nowhere near uniform. One step
+   (defects:test) is 15% of the wall clock on its own, the ten slowest are
+   46%, and 27 of the steps together are under 2%. Cutting the list into n
+   equal-length pieces would hand one runner the long tail and another the
+   whole of defects:test, so the slowest shard - which is what CI actually
+   waits for - would barely improve.
+
+   So the split is packed by measured cost. `testStepWeights` holds the
+   milliseconds each step took on a real run; anything absent from it (a suite
+   added since that run) gets the median, which keeps a new step from being
+   dropped or from distorting the packing. Longest-processing-time first, and
+   ties broken by name, so every runner computes the SAME partition from the
+   same package.json without talking to any other runner.
+
+   The partition is asserted, not assumed: every declared step lands in exactly
+   one shard, and `--shard-plan` prints the whole thing. Re-measure with
+   `--shard-plan` after the suite grows and the weights drift. */
+function shardPlan(n) {
+  const known = allSteps.map((s) => weights[s]).filter((w) => typeof w === 'number' && w > 0).sort((a, b) => a - b);
+  const median = known.length ? known[Math.floor(known.length / 2)] : 1000;
+  const cost = (s) => (typeof weights[s] === 'number' && weights[s] > 0 ? weights[s] : median);
+
+  const bins = Array.from({ length: n }, () => ({ steps: [], total: 0 }));
+  const order = allSteps.slice().sort((a, b) => cost(b) - cost(a) || (a < b ? -1 : a > b ? 1 : 0));
+  for (const step of order) {
+    const bin = bins.reduce((lo, b) => (b.total < lo.total ? b : lo), bins[0]);
+    bin.steps.push(step);
+    bin.total += cost(step);
+  }
+  /* Run each shard in the declared order, so a shard's log reads the way the
+     whole suite does and a step that depends on ordering within its own shard
+     is not reordered under it. */
+  const rank = new Map(allSteps.map((s, i) => [s, i]));
+  bins.forEach((b) => b.steps.sort((x, y) => rank.get(x) - rank.get(y)));
+
+  const seen = bins.flatMap((b) => b.steps);
+  if (seen.length !== allSteps.length || new Set(seen).size !== allSteps.length) {
+    console.error(`test runner: shard plan covers ${new Set(seen).size} of ${allSteps.length} steps - refusing to run a partial suite`);
+    process.exit(2);
+  }
+  return bins;
+}
+
+function parseShard(argv) {
+  const arg = argv.find((a) => a.startsWith('--shard='));
+  if (!arg) return null;
+  const m = /^--shard=(\d+)\/(\d+)$/.exec(arg);
+  if (!m) {
+    console.error(`test runner: ${arg} is not --shard=i/n`);
+    process.exit(2);
+  }
+  const i = Number(m[1]), n = Number(m[2]);
+  if (!(n >= 1) || !(i >= 1 && i <= n)) {
+    console.error(`test runner: --shard=${i}/${n} is out of range`);
+    process.exit(2);
+  }
+  return { i, n };
+}
+
+const shard = parseShard(process.argv);
+const declared = shard ? shardPlan(shard.n)[shard.i - 1].steps : allSteps;
 
 /* Refuse to start on a list that cannot be run as written. Every one of these
    would otherwise surface as a step that silently did not happen. */
@@ -113,12 +178,23 @@ async function main() {
     process.exit(2);
   }
 
+  if (process.argv.includes('--shard-plan')) {
+    const n = shard ? shard.n : Number(process.argv[process.argv.indexOf('--shard-plan') + 1]) || 6;
+    shardPlan(n).forEach((b, k) => {
+      console.log(`shard ${k + 1}/${n}  ${(b.total / 1000).toFixed(0)}s over ${b.steps.length} steps`);
+      b.steps.forEach((s) => console.log(`    ${s}`));
+    });
+    return;
+  }
+
   if (process.argv.includes('--list')) {
     declared.forEach((n, i) => console.log(`${i + 1}. ${n}  ->  ${scripts[n]}`));
     return;
   }
 
-  console.log(`test runner: ${declared.length} steps, every step runs even if an earlier one fails\n`);
+  console.log(`test runner: ${declared.length} steps` +
+    (shard ? ` (shard ${shard.i}/${shard.n} of ${allSteps.length})` : '') +
+    `, every step runs even if an earlier one fails\n`);
 
   const results = [];
   for (const [i, name] of declared.entries()) {

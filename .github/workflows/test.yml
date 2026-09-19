@@ -15,10 +15,34 @@
 # main. A branch may carry a newer copy, but main must always have one.
 #
 # WHAT IT RUNS
-# `npm test`, as one step, exactly as a contributor runs it locally. The suite
-# list deliberately is NOT repeated here - package.json's "test" script is the
+# The suite, in six parallel shards, through tools/run-tests.mjs. The suite
+# list deliberately is NOT repeated here - package.json's "testSteps" is the
 # single definition, and a copy in this file would drift from it. Add a suite
-# there and CI picks it up with no change to this workflow.
+# there and CI picks it up with no change to this workflow: the runner packs it
+# into a shard on its own.
+#
+# WHY SIX, AND WHY A PACKED SPLIT
+# Measured, not guessed. The 104 steps are 697s of work locally and the shape
+# is lopsided: defects:test alone is 15% of it, the ten slowest are 46%, and 27
+# steps together are under 2%. Slicing the list into six equal-LENGTH pieces
+# would leave one runner holding defects:test and another holding the tail, so
+# the slowest shard - the only number CI waits on - would hardly move. The
+# runner packs by measured cost instead (package.json "testStepWeights"),
+# which lands all six shards at 116s.
+#
+# Six because that is where the gain stops. Four shards is ~5.9 min of runner
+# time, six is ~3.9, eight is ~3.5 - past six the longest single step
+# (defects:test, 104s) is the floor, and buying a seventh runner to save 24
+# seconds is not worth the queue time. If this ever needs to go lower, split
+# defects:test rather than adding shards.
+#
+# THE REQUIRED CHECK IS THE "npm test" JOB BELOW, NOT THE SHARDS
+# Branch protection on main requires a check called "npm test". A bare matrix
+# would report as "shard 1 of 6", "shard 2 of 6" and so on, and the required
+# check would never report at all - the same silent forever-pending failure
+# this file warns about above. So the shards do the work and a final job named
+# "npm test" gates on all of them. Renaming that job breaks main's protection;
+# adding or removing shards does not.
 #
 # Note the suite is not the same on every branch: main's `test` script is
 # narrower than the working branches'. That is fine - the check name is stable,
@@ -47,18 +71,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    name: npm test
+  shard:
+    name: shard ${{ matrix.shard }} of 6
     runs-on: ubuntu-latest
-    # Wall time, not a budget: the suite is one long chain and it grows with
-    # every feature. It was 15, which the chain outgrew - a local run is
-    # ~13 minutes and a runner is slower, so runs were being killed mid-suite
-    # and reporting a timeout instead of a real pass or fail. 25 is room to
-    # keep growing into. If this needs raising again, split the chain into
-    # parallel jobs rather than chasing it with a bigger number.
-    timeout-minutes: 25
+    # A shard is ~4 minutes of runner time; this is room for a slow runner and
+    # for the suite to grow before the split needs revisiting.
+    timeout-minutes: 15
     permissions:
       contents: read
+    strategy:
+      # Every shard reports. One shard failing must not cancel the other five -
+      # that would put back exactly the blindness the failure-tolerant runner
+      # was written to remove.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
 
     steps:
       - name: Check out
@@ -81,5 +108,28 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Run the suite
-        run: npm test
+      - name: Run this shard
+        run: node tools/run-tests.mjs --shard=${{ matrix.shard }}/6
+
+  # The required status check. Named "npm test" because that is the name main's
+  # branch protection asks for; it gates on the shards and runs no tests itself.
+  # if: always() so that it REPORTS a failure when a shard fails, rather than
+  # being skipped - a skipped required check blocks a PR just as hard as a
+  # failing one, and says less about why.
+  test:
+    name: npm test
+    runs-on: ubuntu-latest
+    needs: shard
+    if: always()
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+      - name: Every shard passed
+        run: |
+          echo "shards: ${{ needs.shard.result }}"
+          if [ "${{ needs.shard.result }}" != "success" ]; then
+            echo "at least one shard did not pass - open the shard jobs above for the failing steps"
+            exit 1
+          fi
