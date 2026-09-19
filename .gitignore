@@ -8,3 +8,4 @@ tools/support-aim-out/
 tools/stock-out/
 tools/assemble-out/
 tools/integration-out/
+.test-run/

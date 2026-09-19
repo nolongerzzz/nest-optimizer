@@ -96,6 +96,7 @@
     "gcode:zfilter": "node tools/gcode-test/gcode-zfilter-check.js",
     "gcode:fixture": "node tools/gcode-test/make-fixture.js",
     "test": "node tools/run-tests.mjs",
+    "test:par": "node tools/run-tests-parallel.mjs",
     "open:fixtures": "node tools/nso_open_make_fixtures.js --check",
     "open:flag": "node tools/nso_open_flag_test.js",
     "wire:nonsolid": "node tools/nso_wire_nonsolid_test.js",
