@@ -68,6 +68,20 @@
             <button id="btn-clone" class="btn btn-secondary" type="button" disabled>Clone piece</button>
           </div>
         </section>
+        <section class="card card-compact" id="photoset-card">
+          <h2>Photo set</h2>
+          <p class="hint">Check a photogrammetry capture against the capture contract
+             before any reconstruction time is spent on it. Nothing is reconstructed here.</p>
+          <input type="file" id="photoset-input" accept="image/*" multiple class="hidden-quiet" />
+          <div class="edit-row" style="align-items:center;gap:8px;flex-wrap:wrap;">
+            <button id="btn-photoset-pick" class="btn btn-secondary" type="button"
+                    title="Pick the whole shoot at once. Each frame is read for EXIF and measured for focus and framing; nothing is uploaded anywhere.">Choose photos&hellip;</button>
+            <button id="btn-photoset-report" class="btn btn-secondary" type="button" disabled>Report</button>
+            <button id="btn-photoset-clear" class="btn btn-ghost" type="button" disabled>Clear</button>
+          </div>
+          <p id="photoset-progress" class="hint" hidden></p>
+          <p id="photoset-verdict" class="photoset-verdict" hidden></p>
+        </section>
         <section class="card card-compact" id="scale-card">
           <h2>Size</h2>
           <p id="scale-readout" class="hint">Select a piece to resize.</p>
@@ -539,6 +553,13 @@
           <p id="adjust-status" class="status-hud status-hud-id">HUD inside7</p>
           <p id="status" class="status status-hud"></p>
         </div>
+        <div id="photoset-drawer" class="photoset-drawer" hidden>
+          <div class="photoset-drawer-head">
+            <h2>Capture report</h2>
+            <button id="btn-photoset-close" class="btn btn-ghost" type="button">Close</button>
+          </div>
+          <div id="photoset-report" class="photoset-report"></div>
+        </div>
       </section>
     </main>
   </div>
@@ -560,6 +581,8 @@
   <script src="nso_paint_delete.js?v=del1"></script>
   <script src="nso_skin_band.js?v=skin2"></script>
   <script src="nso_path_sweep.js?v=inside4"></script>
+  <script src="nso_exif.js?v=photoset1"></script>
+  <script src="nso_photoset.js?v=photoset1"></script>
   <script src="nso-cooling-profiles.js"></script>
   <script src="nso-3mf.js"></script>
   <script src="nso-3mf-read.js"></script>
@@ -597,6 +620,7 @@
   <script src="app-measure.js?v=inside6"></script>
   <script src="app-library-delete.js?v=libdel1"></script>
   <script src="app-library.js?v=libdel1"></script>
+  <script src="app-photoset.js?v=photoset1"></script>
   <script src="app-toolpath.js?v=toolpath1"></script>
   <script src="app-ux.js?v=inside7"></script>
   <!-- Live watch: off until its button is pressed, and it patches nothing

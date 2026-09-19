@@ -169,6 +169,28 @@ Smart build-plate packing for 3D printing.
   - **Paint Excluded** still means hands off, here as everywhere else: a target
     that is also painted excluded stands the delete down. See
     `docs/PAINT-DELETE.md`
+- **Photo set** checks a photogrammetry capture against the capture contract
+  *before* any reconstruction time is spent on it. Drop the whole shoot in and
+  it grades every clause it can: the 93-frame shot list and its six passes,
+  duplicate frames, and the fixed-optics rules off EXIF - one focal length, one
+  lens (it catches a phone flipping to its ultra-wide), fixed aperture, ISO,
+  shutter against the hand-hold limit, no flash, no HDR / portrait / night
+  mode, one frame size, one camera body, one continuous session - plus a focus
+  outlier statistic and a subject-framing estimate measured off the pixels.
+  - **It is explicit about what it cannot know.** Eleven clauses are ticks you
+    confirm, not checks it runs, because no amount of image analysis settles
+    them: diffuse static lighting above all - a shadow fixed to the object and
+    one fixed to the camera look identical in any single frame - and the scale
+    reference, whose *length* is knowledge you have and the photograph does
+    not. An unticked box blocks "ready" exactly as hard as a failure. A missing
+    EXIF tag reads `NO DATA`, never `PASS`.
+  - **It reconstructs nothing.** No COLMAP, no Meshroom, no hosted API, no
+    network call at all - the photos never leave the browser. The five
+    post-reconstruction gates from the contract are listed unanswered rather
+    than quietly omitted. It ends at "this set is worth a reconstruction's
+    time". See [docs/PHOTOGRAMMETRY-ONRAMP.md](docs/PHOTOGRAMMETRY-ONRAMP.md)
+    and the contract it implements,
+    [docs/PHOTOGRAMMETRY-CAPTURE.md](docs/PHOTOGRAMMETRY-CAPTURE.md).
 
 ## How to use
 
