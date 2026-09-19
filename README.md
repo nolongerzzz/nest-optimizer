@@ -123,9 +123,13 @@ Smart build-plate packing for 3D printing.
     under one line and the slicer fills it in. The measurements, including why
     the canonical mesh checker cannot see this and what does, are in
     `docs/SKIN-CROSSHATCH-PITCH.md`
-  - **Trace a raster into flat printed lines** (command line, not a button yet)
-    for the case the reliefs above cannot do: a real printed line's section.
-    `node tools/nso_raster_lines_cli.js pattern.pbm out.stl --size 30` takes a
+  - **Trace a raster into flat printed lines** - **Finish -> Trace raster**, or
+    the command line - for the case the reliefs above cannot do: a real printed
+    line's section. Pick any picture the browser can open (PNG, JPEG, WebP) and
+    the traced lines are added as a NEW piece, flagged Non-solid because every
+    wall in it is one 0.42 mm extrusion line. Three traced pieces ship in the
+    Library under **Traced Lines**. On the command line,
+    `node tools/nso_raster_lines_cli.js pattern.png out.stl --size 30` takes a
     black-and-white picture of a toolpath, vectorises the lines and extrudes
     each one flat and thin - 0.3 mm tall and 0.42 mm wide by default, the
     measured Bambu line, both parameters - into a watertight STL you can drop

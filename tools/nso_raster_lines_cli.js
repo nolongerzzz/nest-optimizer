@@ -1,6 +1,6 @@
 /* A raster of line art -> a flat, thin, watertight STL. Node only.
  *
- *   node tools/nso_raster_lines_cli.js IN.(pbm|pgm|ppm) OUT.stl [options]
+ *   node tools/nso_raster_lines_cli.js IN.(png|pbm|pgm|ppm) OUT.stl [options]
  *
  *   --width MM        printed line width (default 0.42, the measured Bambu
  *                     line and one extrusion line at a 0.4 nozzle; the
@@ -20,16 +20,32 @@
  *                     construction, in one file (default 1)
  *   --json            print the report as JSON instead of prose
  *
- * The image decoding is netpbm only, because nso_raster_lines.js decodes
- * nothing: in the browser a canvas hands it an ImageData for every format the
- * browser can open. To bring a PNG or a JPEG through here, convert it first
- * (`magick in.png out.pgm`, or any viewer's "export as PGM").
+ * PNG and netpbm. nso_raster_lines.js still decodes nothing itself - in the
+ * browser a canvas hands it an ImageData for every format the browser can open,
+ * and app-raster.js uses exactly that. Node has no decoder, so PNG is read by
+ * tools/nso_png.js (zlib and the five PNG filters, stdlib only) and netpbm by
+ * tools/nso_pnm.js. The format is chosen by the file's own magic, not its
+ * extension. For a JPEG, use the app's Trace raster button - that is the
+ * browser's decoder, which is the one that ships - or convert it first
+ * (`magick in.jpg out.png`).
  */
 'use strict';
 
 const path = require('path');
 const RL = require('../nso_raster_lines.js');
 const { readPNM } = require('./nso_pnm.js');
+const { readPNG } = require('./nso_png.js');
+
+/* by magic, not by extension: a .pgm that is really a PNG should still work */
+function readImage(file) {
+  const head = require('fs').readFileSync(file, { flag: 'r' }).subarray(0, 8);
+  if (head[0] === 0x89 && head[1] === 0x50) return readPNG(file);
+  if (head[0] === 0x50) return readPNM(file);
+  if (head[0] === 0xff && head[1] === 0xd8) {
+    throw new Error(file + ': JPEG is not decoded here - use the app\'s Trace raster button, or convert to PNG first');
+  }
+  throw new Error(file + ': not a PNG or a netpbm file');
+}
 const { writeSTL } = require('./nso_stl_io.js');
 
 function usage(msg) {
@@ -58,7 +74,7 @@ function main(argv) {
   const [inFile, outFile] = pos;
   const num = (k, d) => (opt[k] === undefined ? d : Number(opt[k]));
 
-  const img = readPNM(inFile);
+  const img = readImage(inFile);
   const layers = Math.max(1, num('layers', 1) | 0);
   const build = {
     width: num('width', RL.LINE_WIDTH),
@@ -113,5 +129,15 @@ function main(argv) {
   }
 }
 
-if (require.main === module) main(process.argv.slice(2));
+if (require.main === module) {
+  /* A file this cannot decode is an ordinary answer to an ordinary request, not
+     a crash: say it the way usage() says everything else and exit 2. The stack
+     behind it is noise to someone who picked the wrong file. */
+  try {
+    main(process.argv.slice(2));
+  } catch (err) {
+    console.error('error: ' + ((err && err.message) || err));
+    process.exit(2);
+  }
+}
 module.exports = { main };

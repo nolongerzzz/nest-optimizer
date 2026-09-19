@@ -128,6 +128,13 @@
      spike across the piece. */
   var MITER_LIMIT = 4;
 
+  /* How many DRAWN stroke widths a skeleton bridge may be and still be read as
+     a crossing artefact rather than a feature - see collapseBridges. The bound
+     a crossing of angle t can produce is 1 / sin(t) stroke widths, so 2.5
+     covers every crossing down to about 24 degrees; shallower than that and
+     two strokes genuinely do merge into one in the ink. */
+  var BRIDGE_STROKES = 2.5;
+
   /* ---------------------------------------------------------- vectors */
   function unit2(d) { var L = Math.hypot(d[0], d[1]); return L > 0 ? [d[0] / L, d[1] / L] : [0, 0]; }
   function cross2(a, b) { return a[0] * b[1] - a[1] * b[0]; }
@@ -451,6 +458,143 @@
         return L >= minLen;
       });
       if (!moved) break;
+    }
+    return out;
+  }
+
+  /* --------------------------------------------------- skeleton bridges */
+
+  /* A path whose BOTH ends are junctions and which is too short to be a drawn
+     feature is not a feature: it is what Zhang-Suen leaves where two strokes
+     CROSS, and it has to go or the crossing reads as two junctions with a
+     little rail between them instead of the one X the picture shows.
+
+     weldNodes above is the same repair at a different scale and does not reach
+     this case. Its radius is `minLen` - the PRINTED line width, 0.42 mm - and
+     that was calibrated on the synthetic references, every one of which crosses
+     at 90 degrees. The bridge a crossing leaves is not that size. Two strokes
+     of drawn width w meeting at angle t overlap in a rhombus whose long
+     diagonal is w / sin(t), and the bridge lies inside it, so:
+
+         bridge <= w / sin(t)
+
+     At 90 degrees that is w, and w on the synthetic references is a 5 px
+     stroke - 0.25 mm, comfortably under the 0.42 mm weld, which is why nothing
+     caught this. Measured on fixtures/raster-real/skew-cross.png, a picture
+     drawn by Chromium rather than by this repo: mean drawn width 12.1 px, the
+     two strokes 44 degrees apart, so the bound is 12.1 / sin(44) = 17.4 px and
+     the bridge really there is 17.8 px - 0.890 mm, twice the weld radius. It
+     survived, and one crossing came back as 5 paths and 2 junctions.
+
+     So the scale of this repair is the DRAWN stroke width, which the rest of
+     the module throws away on purpose (the picture gives the centreline, the
+     caller gives the section) and which is exactly the right ruler here. It is
+     measured off the mask - ink pixels over skeleton pixels is the mean width
+     of the stroke - and never guessed.
+
+     The gate that makes this safe is not the length, it is the DEGREE. A free
+     line end has degree 1 and a T's stem has degree 1 at its far end, so
+     neither can ever be caught: both ends must already be junctions. What is
+     left after that is a rail between two junctions shorter than one crossing
+     can make, and in line art that is a skeletonisation artefact every time.
+
+     Runs AFTER weldNodes, so the short clusters are already gone and this sees
+     only the long bridges weldNodes cannot reach - which is also why it does
+     not disturb any existing fixture. */
+  function collapseBridges(paths, maxLen) {
+    if (!(maxLen > 0)) return paths.map(function (p) { return p.slice(); });
+    var out = paths.map(function (p) { return p.map(function (q) { return [q[0], q[1]]; }); });
+    var base = function (e) { return out[e.path][e.at]; };
+    /* the vertex next to the node along that arm - the arm's direction at the
+       node, and the far end of the baseline the through-line is drawn through */
+    var adj = function (e) { var q = out[e.path]; return e.at === 0 ? q[1] : q[q.length - 2]; };
+    var away = function (e) { var a = base(e), b = adj(e); return unit2([b[0] - a[0], b[1] - a[1]]); };
+
+    /* WHERE THE MERGED NODE GOES, and this is the part that had to be measured.
+       The centroid of the two ends is the obvious answer and it is wrong in
+       exactly the way collapseShort's dropped vertex was wrong above: it sits
+       at the MIDDLE OF THE BRIDGE rather than where the two strokes actually
+       cross, and both arms tilt to reach it. Measured on skew-cross.png, whose
+       lines are drawn at 23 and 67 degrees: the centroid brings the mesh back
+       at 22 degrees - a whole degree of skew on a 9.5 mm arm - and the module's
+       own contact figures are sensitive to half of that.
+       So pair the four arms into the two through-lines - each arm at one end
+       continues into the arm at the other end that points back at it - and put
+       the node where those two lines MEET. That is the crossing the picture
+       has. Returns null when the arms do not pair into two through-lines (not
+       an X: a degree-4 node, a Y-cluster, two near-parallel strokes), and the
+       caller falls back to the centroid, which is honest for those. */
+    function crossing(A, B, bridge) {
+      if (A.ends.length !== 3 || B.ends.length !== 3) return null;
+      var notBridge = function (e) { return e.path !== bridge; };
+      var a = A.ends.filter(notBridge), b = B.ends.filter(notBridge);
+      if (a.length !== 2 || b.length !== 2) return null;
+      /* arm a[0] continues into whichever of b points most nearly back at it */
+      var d0 = away(a[0]);
+      var s0 = dot2(d0, away(b[0])), s1 = dot2(d0, away(b[1]));
+      var j = s0 <= s1 ? 0 : 1;
+      /* -0.5 is 120 degrees: anything blunter than that is not one line
+         carrying on through the crossing, it is a corner */
+      if (Math.min(s0, s1) > -0.5) return null;
+      if (dot2(away(a[1]), away(b[1 - j])) > -0.5) return null;
+      var x = lineMeet(adj(a[0]), adj(b[j]), adj(a[1]), adj(b[1 - j]));
+      if (!x) return null;                              /* the two lines are parallel */
+      /* and it has to land ON the crossing: a glancing pair meets far away */
+      var mx = (A.p[0] + B.p[0]) / 2, my = (A.p[1] + B.p[1]) / 2;
+      if (Math.hypot(x[0] - mx, x[1] - my) > maxLen) return null;
+      return x;
+    }
+
+    for (var pass = 0; pass < 16; pass++) {
+      var i, k, e;
+      /* every path end, grouped by the node it sits on. Endpoints are exact
+         here: simplify, collapseShort and dropCollinear all leave them where
+         the trace put them, on purpose, so identity is the vertex key. */
+      var nodes = new Map();
+      for (i = 0; i < out.length; i++) {
+        if (out[i].length < 2) continue;
+        for (e = 0; e < 2; e++) {
+          var at = e === 0 ? 0 : out[i].length - 1;
+          var kk = vkey(out[i][at]), nd = nodes.get(kk);
+          if (!nd) { nd = { p: [out[i][at][0], out[i][at][1]], ends: [] }; nodes.set(kk, nd); }
+          nd.ends.push({ path: i, at: at });
+        }
+      }
+
+      /* Collapse every qualifying bridge whose two nodes are still free this
+         pass. One bridge per merged pair keeps the geometry above exact and
+         unambiguous; a chain of bridges resolves over the passes instead. */
+      var claimed = new Set(), drop = new Uint8Array(out.length), moves = [];
+      for (i = 0; i < out.length; i++) {
+        var pth = out[i];
+        if (pth.length < 2) continue;
+        var ka = vkey(pth[0]), kb = vkey(pth[pth.length - 1]);
+        if (ka === kb) continue;                       /* a closed loop is not a bridge */
+        if (claimed.has(ka) || claimed.has(kb)) continue;
+        var A = nodes.get(ka), B = nodes.get(kb);
+        if (A.ends.length < 3 || B.ends.length < 3) continue;
+        var L = 0;
+        for (k = 0; k + 1 < pth.length; k++) {
+          L += Math.hypot(pth[k + 1][0] - pth[k][0], pth[k + 1][1] - pth[k][1]);
+        }
+        if (L > maxLen) continue;
+        var x = crossing(A, B, i);
+        if (!x) x = [(A.p[0] + B.p[0]) / 2, (A.p[1] + B.p[1]) / 2];
+        claimed.add(ka); claimed.add(kb);
+        drop[i] = 1;
+        moves.push({ A: A, B: B, to: x });
+      }
+      if (!moves.length) break;
+
+      /* the arms that ended at either node now end at the crossing */
+      moves.forEach(function (m) {
+        [m.A, m.B].forEach(function (n) {
+          for (var q = 0; q < n.ends.length; q++) {
+            out[n.ends[q].path][n.ends[q].at] = [m.to[0], m.to[1]];
+          }
+        });
+      });
+      out = out.filter(function (q, ix) { return !drop[ix] && q.length >= 2; });
     }
     return out;
   }
@@ -959,7 +1103,18 @@
        (see weldNodes), then the per-path cleanup again, because welding moves
        endpoints and can leave a short first or last segment behind it */
     var beforeWeld = paths.length;
-    paths = weldNodes(paths, minSeg).map(function (q) {
+    paths = weldNodes(paths, minSeg);
+    var afterWeld = paths.length;
+    /* then the bridges weldNodes cannot reach - see collapseBridges. The ruler
+       is the DRAWN stroke width, measured: ink pixels over skeleton pixels is
+       the stroke's mean width in pixels. BRIDGE_STROKES of those is the bound
+       for a crossing down to about 24 degrees, and the degree gate - a
+       junction at BOTH ends - is what keeps it off real line ends. */
+    var strokePx = sk.ink > 0 ? mask.ink / sk.ink : 0;
+    var bridge = o.bridge != null ? o.bridge : BRIDGE_STROKES * strokePx * scale;
+    paths = collapseBridges(paths, bridge);
+    var afterBridge = paths.length;
+    paths = paths.map(function (q) {
       return dropCollinear(collapseShort(q, minSeg));
     }).filter(function (q) { return q.length >= 2; });
     if (!paths.length) return { ok: false, reason: 'welding the junction clusters left no path' };
@@ -973,7 +1128,12 @@
     r.tracedPaths = px.length;
     r.traceVertices = vertsIn;
     r.pathVertices = vertsOut;
-    r.weldedPaths = beforeWeld - paths.length;   /* stubs the node weld removed */
+    r.weldedPaths = beforeWeld - afterWeld;      /* stubs the node weld removed */
+    r.bridgedPaths = afterWeld - afterBridge;    /* crossing bridges collapsed after it */
+    /* both reported, because both are conveniences derived from the picture
+       rather than figures the caller gave, and neither may be mistaken for one */
+    r.strokePx = strokePx;
+    r.bridgeAsked = bridge;
     r.describe = 'flat lines ' + r.width + ' mm wide x ' + r.height + ' mm tall from a ' +
       mask.w + ' x ' + mask.h + ' raster at ' + scale + ' mm/px - ' + r.paths + ' path(s), ' +
       r.segments + ' segment(s), ' + r.junctions + ' junction(s), ' +
@@ -985,10 +1145,10 @@
 
   var api = {
     LINE_HEIGHT: LINE_HEIGHT, LINE_WIDTH: LINE_WIDTH, LINE_WIDTH_MAX: LINE_WIDTH_MAX,
-    MITER_LIMIT: MITER_LIMIT,
+    MITER_LIMIT: MITER_LIMIT, BRIDGE_STROKES: BRIDGE_STROKES,
     toMask: toMask, thin: thin, tracePaths: tracePaths,
     simplify: simplify, collapseShort: collapseShort, weldNodes: weldNodes,
-    dropCollinear: dropCollinear,
+    dropCollinear: dropCollinear, collapseBridges: collapseBridges,
     extrudeFlat: extrudeFlat, buildFromImage: buildFromImage,
     extentOf: extentOf, countComponents: countComponents, edgeCensus: edgeCensus
   };

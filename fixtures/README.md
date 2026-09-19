@@ -31,6 +31,26 @@ multi-body file on purpose: the pin has clearance inside the knuckles.
 
 `library/box_closed.stl` is NOT regenerated; see `library/README.md`.
 
+## raster-real/ — real images the tracer did not draw (2026-09-19)
+
+Six pictures rasterised by **Chromium's own Canvas 2D**, not by anything in this
+repo, written by `tools/nso_raster_real_fixtures.mjs`: antialiased, at 23°, 67°
+and 113°, as real PNG and one real JPEG, with a hand-drawn wobbly stroke on
+off-white paper among them. `ground-truth.json` records what each one really
+contains — taken from where the endpoints were put when it was drawn, never from
+anything the tracer reported.
+
+They are committed as fixed artefacts and **not** byte-diff gated: Skia's
+antialiasing is not promised to be stable across Chromium versions and a
+byte-diff on it would fail for the wrong reason. The generator is kept for
+provenance. `npm run raster:real` measures them in Node against the ground truth
+and against an independent pixel probe (`tools/nso_raster_image_probe.js`);
+`npm run raster:real-drive` opens two of them through the shipped file input in
+real Chromium, which is the only place the JPEG is decoded.
+
+`skew-cross.png` is the picture that found the crossing-bridge bug — see
+`docs/RASTER-LINES.md`.
+
 ## raster-lines/ — the flat-printed-line importer's inputs and outputs (2026-09-18)
 
 Four rasters and the STL each one builds, regenerated and byte-diffed by
@@ -39,8 +59,10 @@ carries every number. These are **inputs** as well as outputs: the `.pbm` /
 `.pgm` files are what `nso_raster_lines.js` is fed, the `.stl` files are what it
 builds from them.
 
-Netpbm rather than PNG on purpose — uncompressed, stdlib-only to read, and the
-one raster format a text editor can still open. The binary ones are P4 (packed
+Netpbm rather than PNG here on purpose — uncompressed, stdlib-only to read, and
+the one raster format a text editor can still open. (PNG *is* readable now, by
+`tools/nso_png.js`; these predate it and stay as they are, because their whole
+value is being byte-reviewable in a diff.) The binary ones are P4 (packed
 1-bit, 99 KB for 900²); `zigzag-layer-aa.pgm` is P5 grayscale because a
 threshold is exactly what it exists to exercise.
 

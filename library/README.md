@@ -23,3 +23,18 @@ numbers. If you need the CSG-clean version:
 `hinge_knuckle_box.stl`, `hinge_knuckle_lid.stl`, `hinge_pip.stl` and
 `lid_strap.stl` were regenerated as real boolean unions of their shells and
 measure 0 piercing pairs. See `fixtures/README.md` for the numbers.
+
+## Traced Lines: `traced_cross_23-67`, `traced_parallel_113`, `traced_hand_stroke`
+
+Built by `tools/nso_raster_library_samples.js` (`npm run raster:library` to
+byte-diff) from the real images in `fixtures/raster-real/` — pictures Chromium
+drew, not this repo. The generator refuses to write any piece whose component
+and junction counts disagree with what the source picture actually contains.
+
+All three are a **one-extrusion-line lattice**: closed and watertight, but every
+wall is 0.42 mm, which is this repo's own `--min-wall`. They are flagged
+non-solid for the reason the loose skin patches are — do not expect a wall-
+thickness check to pass them.
+
+30 × 30 mm, the skin patches' footprint. `traced_cross_23-67` is the piece that
+found the crossing-bridge bug; see `docs/RASTER-LINES.md`.
