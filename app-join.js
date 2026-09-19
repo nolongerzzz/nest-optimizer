@@ -2721,6 +2721,22 @@ const btnFrameView = document.getElementById('btn-frame-view');
   if (btnFrameView) btnFrameView.addEventListener('click', frameSelectedPiece);
   const btnXray = document.getElementById('btn-xray');
   if (btnXray) btnXray.addEventListener('click', toggleXrayView);
+  // Bed grid: two controls, deliberately independent of one another.
+  const selGrid = document.getElementById('plate-grid-show');
+  if (selGrid) {
+    selGrid.value = state.plateGridMode;
+    selGrid.addEventListener('change', function () {
+      setPlateGridMode(selGrid.value);
+      setStatus('Bed grid ' + (state.plateGridMode === 'auto'
+        ? 'auto - shown while a piece is being positioned'
+        : state.plateGridMode));
+    });
+  }
+  const chkGridSnap = document.getElementById('chk-plate-grid-snap');
+  if (chkGridSnap) {
+    chkGridSnap.checked = !!state.plateGridSnap;
+    chkGridSnap.addEventListener('change', function () { setPlateGridSnap(chkGridSnap.checked); });
+  }
   const btnJoinFaces = document.getElementById('btn-join-faces');
   if (btnJoinFaces) btnJoinFaces.style.display = 'none';
   const slotA = document.getElementById('join-slot-a');
