@@ -1993,3 +1993,139 @@ select:focus, input:focus {
 .build-warning[hidden] {
   display: none;
 }
+
+/* =====================================================================
+   Photogrammetry upload onramp - the capture card and its report drawer.
+
+   The report is a drawer over the viewport rather than a .vp-menu popover:
+   that row reserves width per menu through --vp-menu-count, and a 30-row
+   report with a per-frame assignment list does not fit a 320px popover.
+   Colour is doing real work here, so it is never the only signal - every
+   row also carries a word (PASS / FAIL / CONFIRM / LATER) for the same
+   reason a status light has a label.
+   ===================================================================== */
+.photoset-verdict {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.45;
+  background: rgba(148, 163, 184, 0.10);
+}
+.photoset-verdict.is-ready   { border-color: var(--success); background: rgba(34, 197, 94, 0.12); }
+.photoset-verdict.is-warn    { border-color: var(--warning); background: rgba(245, 158, 11, 0.12); }
+.photoset-verdict.is-blocked { border-color: #ef4444;        background: rgba(239, 68, 68, 0.12); }
+
+/* `hidden` must win over the display below - an author rule beats the UA
+   stylesheet's [hidden] { display: none }, so the drawer shipped visible
+   until this line existed. The drive check caught it. */
+.photoset-drawer[hidden] { display: none; }
+.photoset-drawer {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: min(560px, calc(100% - 24px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(23, 26, 33, 0.97);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+  z-index: 70;
+  pointer-events: auto;
+}
+.photoset-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.photoset-drawer-head h2 { margin: 0; font-size: 14px; }
+.photoset-report {
+  overflow-y: auto;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.photoset-report .ps-section { margin-top: 16px; }
+.photoset-report h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+.ps-blurb { margin: 0 0 8px; color: var(--muted); }
+
+.ps-counts, .ps-tally, .ps-tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.ps-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.ps-chip.ps-pass     { border-color: var(--success); color: #86efac; }
+.ps-chip.ps-fail     { border-color: #ef4444;        color: #fca5a5; }
+.ps-chip.ps-warn     { border-color: var(--warning); color: #fcd34d; }
+.ps-chip.ps-todo     { border-color: #38bdf8;        color: #7dd3fc; }
+.ps-chip.ps-unknown  { border-color: var(--muted);   color: var(--muted); }
+.ps-chip.ps-deferred { border-color: #a78bfa;        color: #c4b5fd; }
+
+.ps-row {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  background: rgba(15, 17, 21, 0.5);
+}
+.ps-row.ps-pass     { border-left-color: var(--success); }
+.ps-row.ps-fail     { border-left-color: #ef4444; }
+.ps-row.ps-warn     { border-left-color: var(--warning); }
+.ps-row.ps-todo     { border-left-color: #38bdf8; }
+.ps-row.ps-unknown  { border-left-color: var(--muted); }
+.ps-row.ps-deferred { border-left-color: #a78bfa; }
+
+.ps-row-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ps-title { font-weight: 600; flex: 1 1 auto; }
+.ps-tick { display: flex; align-items: baseline; gap: 6px; flex: 1 1 auto; cursor: pointer; font-weight: 600; }
+.ps-tick input { margin: 0; }
+.ps-status { font-size: 10px; letter-spacing: 0.06em; font-weight: 700; }
+.ps-pass .ps-status     { color: #86efac; }
+.ps-fail .ps-status     { color: #fca5a5; }
+.ps-warn .ps-status     { color: #fcd34d; }
+.ps-todo .ps-status     { color: #7dd3fc; }
+.ps-unknown .ps-status  { color: var(--muted); }
+.ps-deferred .ps-status { color: #c4b5fd; }
+.ps-clause { font-size: 10px; color: var(--muted); }
+.ps-detail { margin: 4px 0 0; }
+/* The "why a machine cannot decide this" sentence. Muted, never hidden -
+   it is the reason the tick is a tick and not a green light. */
+.ps-why { margin: 4px 0 0; color: var(--muted); font-style: italic; }
+
+.ps-frames {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.ps-frame {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border-bottom: 1px solid rgba(42, 48, 60, 0.6);
+}
+.ps-frame:last-child { border-bottom: none; }
+.ps-frame-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.ps-frame-pass { flex: 0 0 auto; font-size: 11px; max-width: 46%; }
