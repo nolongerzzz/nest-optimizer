@@ -1897,6 +1897,20 @@ select:focus, input:focus {
   text-align: center;
 }
 
+/* The Z filter's own toggle. One layer at a time is the reason the card can show
+   a single layer's construction at all, so it sits above Extract scope.
+
+   Placed BEFORE .tp-detail deliberately: .tp-detail's block is unclosed (see the
+   note on it below), so anything between it and the next `}` is swallowed. */
+.tp-check-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 4px;
+  cursor: pointer;
+}
+.tp-check-row input[type="checkbox"] { margin: 0; flex: 0 0 auto; }
+
 /* The per-line measurements. Tabular figures so the numbers do not jitter as
    the slider moves, which is the whole point of reading them while scrubbing. */
 .tp-detail {
@@ -1904,6 +1918,14 @@ select:focus, input:focus {
   line-height: 1.5;
   margin: 2px 0 8px;
   word-break: break-word;
+/* NOTE - this block is missing its closing brace, and that is load-bearing as
+   things stand. The brace is absent on `claude-wip` too, so the `}` that closes
+   `.viewport-overlay-wheel` below closes THIS rule instead, and the wheel rule
+   itself is discarded. Adding the brace revives it, which moves the Pottery
+   Wheel menu (z-index 90) over the viewport topbar (z-index 50) and makes it
+   swallow clicks on #btn-lock-pos - `npm run lock:test` fails outright. So the
+   fix is a Pottery Wheel LAYOUT decision, not a one-character edit, and it is
+   not this change's to make. Left exactly as found. */
 /* ---------------------------------------------------------------------------
    Pottery Wheel - its own menu beside Finish, same shape, its own corner so
    the two do not overlap when both are open.

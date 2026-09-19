@@ -166,9 +166,18 @@ async function main() {
   check('the slider spans every move, one step per move',
     sliderRange, { min: '0', max: '50', step: '1', value: '0' });
 
+  // The default Extract scope is the standing extraction unit: a whole layer at
+  // one Z, every feature at that height - NOT one move. Scrubbing is still per
+  // move; what the button takes is a layer.
+  check('the default Extract scope is the whole layer at one Z',
+    await page.evaluate(() => document.getElementById('tp-scope').value), 'zlayer');
+
   // Walk the first layer move by move and confirm each stop is ONE move, and
   // that consecutive stops are different moves on the same layer - which is
-  // exactly what "not just jumping whole layers" has to mean.
+  // exactly what "not just jumping whole layers" has to mean. The scope is
+  // pinned to 'move' here because this block is about the SCRUB, not about how
+  // much Extract takes.
+  await page.selectOption('#tp-scope', 'move');
   const walk = await page.evaluate(() => {
     const T = window.NSO_TOOLPATH;
     const s = T.getSession();
@@ -188,7 +197,8 @@ async function main() {
   });
   check('six consecutive stops are six different lines',
     walk.map((w) => w.cursor), [0, 1, 2, 3, 4, 5]);
-  check('every stop selects exactly ONE move', walk.every((w) => w.sel === 1), true);
+  check('with scope "this line only", every stop selects exactly ONE move',
+    walk.every((w) => w.sel === 1), true);
   check('every stop is still on layer 1 - it stepped within the layer, not past it',
     walk.every((w) => w.layer === 0), true);
   check('the highlight is exactly one line solid (12 triangles) at every stop',
@@ -238,6 +248,207 @@ async function main() {
     await page.evaluate(() => state.models.map((m) => m.rawTris.length).join(',')), modelsBefore);
   check('scrubbing pushes nothing onto the undo stack',
     await page.evaluate(() => state.undoStack.length), imported.undo);
+
+  // -----------------------------------------------------------------------
+  console.log('\n--- Isolate Z: one layer alone, through the real checkbox ---');
+  // The gap this closes: a feature model holds every layer of that feature at
+  // once, so on screen they are stacked and overlaid and a single layer's
+  // construction cannot be read off it. Isolate Z hides the models and redraws
+  // only the window, so one layer stands alone from the rest of its own feature.
+  const beforeZ = await page.evaluate(() => ({
+    undo: state.undoStack.length,
+    tris: state.models.map((m) => m.rawTris.length).join(','),
+    visible: state.placed.filter((e) => e.mesh && e.mesh.visible !== false).length
+  }));
+
+  // Park on a feature that really does span more than one layer, so "isolated
+  // from every other layer of the same feature" has something to be true about.
+  const spread = await page.evaluate(() => {
+    const T = window.NSO_TOOLPATH;
+    const s = T.getSession();
+    const byFeat = {};
+    s.moves.forEach((m) => {
+      byFeat[m.feature] = byFeat[m.feature] || new Set();
+      byFeat[m.feature].add(m.z.toFixed(6));
+    });
+    const name = Object.keys(byFeat).find((k) => byFeat[k].size > 1);
+    const i = s.moves.findIndex((m) => m.feature === name);
+    T.setCursor(i);
+    return { name, layers: byFeat[name].size, all: s.moves.filter((m) => m.feature === name).length };
+  });
+  check('parked on a feature that spans several layers',
+    spread.layers > 1, true);
+  console.log(`       ${spread.name}: ${spread.all} moves over ${spread.layers} layers`);
+
+  await page.check('#tp-zfilter');
+  const isoOn = await page.evaluate(() => {
+    const T = window.NSO_TOOLPATH;
+    const s = T.getSession();
+    const win = T.zWindowNow();
+    const iso = s.overlay.children[2];
+    const inWin = T.movesInWindow();
+    const mv = s.moves[s.cursor];
+    return {
+      on: s.zFilter.on,
+      win,
+      layersInWin: T.layersInWindow(),
+      hiddenCount: s.hidden.length,
+      stillVisible: state.placed.filter((e) => e.mesh && e.mesh.visible !== false).length,
+      isoVisible: iso.visible,
+      isoMeshes: iso.children.length,
+      isoTris: iso.children.reduce((a, m) => a + m.geometry.attributes.position.count / 3, 0),
+      inWin: inWin.length,
+      // this feature, at this Z, vs this feature over all Z
+      featHere: inWin.filter((m) => m.feature === mv.feature).length,
+      contextVisible: s.overlay.children[0].visible,
+      readout: document.getElementById('tp-zreadout').textContent,
+      undo: state.undoStack.length,
+      tris: state.models.map((m) => m.rawTris.length).join(',')
+    };
+  });
+  check('the checkbox turns the Z filter on', isoOn.on, true);
+  check('the window is exactly one layer', isoOn.layersInWin, 1);
+  check('the imported feature models are hidden while it is on',
+    isoOn.hiddenCount > 0 && isoOn.stillVisible === 0, true);
+  check('the window is drawn instead, one mesh per feature at that height',
+    isoOn.isoVisible && isoOn.isoMeshes > 0, true);
+  check('the isolation body is 12 triangles per move in the window',
+    isoOn.isoTris, isoOn.inWin * 12);
+  check('this feature at this Z is a STRICT subset of the whole feature',
+    isoOn.featHere > 0 && isoOn.featHere < spread.all, true);
+  check('the faint layer context is dropped - the window already IS this layer',
+    isoOn.contextVisible, false);
+  check('the readout names the isolated layer',
+    /one layer, isolated/.test(isoOn.readout), true);
+  check('turning the filter on edits no model geometry', isoOn.tris, beforeZ.tris);
+  check('turning the filter on pushes nothing onto the undo stack',
+    isoOn.undo, beforeZ.undo);
+  console.log('       ' + isoOn.readout);
+
+  // A thicker window takes a slab, and the readout stops claiming one layer.
+  await page.fill('#tp-zhalf', '0.25');
+  await page.dispatchEvent('#tp-zhalf', 'input');
+  const slab = await page.evaluate(() => ({
+    layers: window.NSO_TOOLPATH.layersInWindow(),
+    readout: document.getElementById('tp-zreadout').textContent
+  }));
+  check('raising the half-extent takes a slab of more than one layer',
+    slab.layers > 1, true);
+  check('and the readout no longer claims one isolated layer',
+    /one layer, isolated/.test(slab.readout), false);
+  await page.fill('#tp-zhalf', '0');
+  await page.dispatchEvent('#tp-zhalf', 'input');
+  check('back to zero is back to one layer',
+    await page.evaluate(() => window.NSO_TOOLPATH.layersInWindow()), 1);
+
+  // -----------------------------------------------------------------------
+  console.log('\n--- extract the isolated layer and export it as its own STL ---');
+  // Default scope: the whole layer at one Z, every feature at that height.
+  await page.selectOption('#tp-scope', 'zlayer');
+  const zsel = await page.evaluate(() => {
+    const T = window.NSO_TOOLPATH;
+    T.setCursor(T.getSession().cursor);
+    const s = T.getSession();
+    const sel = T.selection();
+    const mv = s.moves[s.cursor];
+    const zs = new Set(sel.map((i) => s.moves[i].z.toFixed(6)));
+    const feats = new Set(sel.map((i) => s.moves[i].feature));
+    return { n: sel.length, zCount: zs.size, feats: feats.size,
+             atZ: s.moves.filter((m) => Math.abs(m.z - mv.z) <= 1e-6).length,
+             label: document.getElementById('btn-tp-extract').textContent };
+  });
+  check('the selection is at exactly ONE Z', zsel.zCount, 1);
+  check('and it takes every feature at that height', zsel.feats > 1, true);
+  check('which is every move at that Z, nothing less', zsel.n, zsel.atZ);
+  check('the button says how many lines that is',
+    zsel.label, `Extract Line (${zsel.n} lines)`);
+
+  const zUndoBefore = await page.evaluate(() => state.undoStack.length);
+  await page.click('#btn-tp-extract');
+  const zExtracted = await page.evaluate(() => {
+    const m = state.models[state.models.length - 1];
+    state.editId = m.id;
+    return { name: m.name, tris: m.rawTris.length / 9, axis: m.rawAxis,
+             undo: state.undoStack.length,
+             status: (document.getElementById('status') || {}).textContent || '' };
+  });
+  check('the isolated layer extracted as its own model', zExtracted.tris, zsel.n * 12);
+  check('it is named for the Z it came from', /Z \d+\.\d{3} mm/.test(zExtracted.name), true);
+  check('it is an ordinary model in file axes', zExtracted.axis, 'zup');
+  check('extracting it is undoable', zExtracted.undo, zUndoBefore + 1);
+  check('the app reports it as ONE layer', / 1 layer\)/.test(zExtracted.status), true);
+  console.log('       ' + zExtracted.status);
+
+  // The real proof: write it through the app's own button and re-read the file.
+  await page.selectOption('#export-format', 'stl');
+  page.once('dialog', (d) => d.accept());
+  const [zdl] = await Promise.all([
+    page.waitForEvent('download', { timeout: 30000 }),
+    page.click('#btn-export-model')
+  ]);
+  const zPath = join(outDir, 'isolated-layer.stl');
+  await zdl.saveAs(zPath);
+  const zBuf = await readFile(zPath);
+  const zTris = zBuf.readUInt32LE(80);
+  check('the exported STL is a valid binary STL', zBuf.length, 84 + zTris * 50);
+  check('it holds exactly the isolated layer and nothing else', zTris, zsel.n * 12);
+
+  // Z span of one layer, measured off the file on disk.
+  let zLo = Infinity, zHi = -Infinity;
+  for (let t = 0; t < zTris; t++) {
+    const base = 84 + t * 50 + 12;
+    for (let v = 0; v < 3; v++) {
+      const z = zBuf.readFloatLE(base + v * 12 + 8);
+      if (z < zLo) zLo = z;
+      if (z > zHi) zHi = z;
+    }
+  }
+  const zSpan = zHi - zLo;
+  const layerH = await page.evaluate(() => {
+    const s = window.NSO_TOOLPATH.getSession();
+    return s.moves[s.cursor].height;
+  });
+  check('the exported Z span is ONE layer height - no other layer came with it',
+    Math.abs(zSpan - layerH) < 1e-4, true);
+  console.log(`       ${zTris} triangles, Z span ${zSpan.toFixed(4)} mm (one layer = ${layerH} mm)`);
+
+  // No leaks in the real exported file.
+  const zVerts = new Map();
+  const zEdges = new Map();
+  for (let t = 0; t < zTris; t++) {
+    const base = 84 + t * 50 + 12;
+    const ids = [];
+    for (let v = 0; v < 3; v++) {
+      const o = base + v * 12;
+      const k = [0, 1, 2].map((c) => zBuf.readFloatLE(o + c * 4).toFixed(4)).join(',');
+      if (!zVerts.has(k)) zVerts.set(k, zVerts.size);
+      ids.push(zVerts.get(k));
+    }
+    for (const [a, b] of [[0, 1], [1, 2], [2, 0]]) {
+      const k = ids[a] < ids[b] ? `${ids[a]}|${ids[b]}` : `${ids[b]}|${ids[a]}`;
+      zEdges.set(k, (zEdges.get(k) || 0) + 1);
+    }
+  }
+  let zOpen = 0;
+  zEdges.forEach((c) => { if (c === 1) zOpen++; });
+  check('the exported isolated layer has no open edges - nothing leaks', zOpen, 0);
+
+  // Undo the extraction and turn the filter back off, so the block below starts
+  // from the same state it always did.
+  await page.click('#btn-undo');
+  await page.uncheck('#tp-zfilter');
+  const zOff = await page.evaluate(() => ({
+    on: window.NSO_TOOLPATH.getSession().zFilter.on,
+    visible: state.placed.filter((e) => e.mesh && e.mesh.visible !== false).length,
+    isoVisible: window.NSO_TOOLPATH.getSession().overlay.children[2].visible,
+    tris: state.models.map((m) => m.rawTris.length).join(',')
+  }));
+  check('unchecking it turns the filter off', zOff.on, false);
+  check('and gives every imported model its visibility back',
+    zOff.visible, beforeZ.visible);
+  check('the isolation body is put away', zOff.isoVisible, false);
+  check('the whole round trip left every model geometry untouched',
+    zOff.tris, beforeZ.tris);
 
   // -----------------------------------------------------------------------
   console.log('\n--- scrub to the Support interface and Extract Line ---');
@@ -376,6 +587,101 @@ async function main() {
   await page.waitForFunction(`state.models.length === ${modelsWas + 1}`, null, { timeout: 20000 });
   check('a plain .3mf still goes to the geometry importer',
     await page.evaluate(() => state.models[state.models.length - 1].name), 'Cube');
+
+  // -----------------------------------------------------------------------
+  console.log('\n--- a REAL Bambu slice, through the real app ---');
+  // Everything above runs on the generated fixture. This runs the same loop on
+  // a file Bambu Studio actually wrote: import it, isolate one layer, extract
+  // that layer. The smaller of the two committed slices, to keep CI quick -
+  // tools/gcode-test/gcode-zfilter-check.js does the heavy measurements on both.
+  await page.evaluate(() => { window.NSO_TOOLPATH.reset(); });
+  const realBytes = Array.from(await readFile('fixtures/3mf/supportwithinsupport.gcode.3mf'));
+  const real = await page.evaluate(async ([b]) => {
+    const s = await window.NSO_TOOLPATH.importSliced3MF(
+      'supportwithinsupport.gcode.3mf', new Uint8Array(b).buffer);
+    return s ? { moves: s.moves.length, layers: s.layers.length,
+                 groups: s.modelIds.length, assumed: s.result.parsed.meta.assumed,
+                 features: s.result.parsed.features.map((f) => f.name) } : null;
+  }, [realBytes]);
+  check('the real slice imports', !!real, true);
+  check('it reads as 50 layers of 2895 moves', [real.layers, real.moves], [50, 2895]);
+  check('nothing was assumed - every number came from the file', real.assumed, false);
+  check('one model per feature, and it found ten', real.groups, 10);
+
+  // Isolate one layer of a feature that really spans several, on the real file.
+  const realIso = await page.evaluate(() => {
+    const T = window.NSO_TOOLPATH;
+    const s = T.getSession();
+    const byFeat = {};
+    s.moves.forEach((m) => {
+      byFeat[m.feature] = byFeat[m.feature] || new Set();
+      byFeat[m.feature].add(m.z.toFixed(6));
+    });
+    // the feature spread over the most layers - the worst case for overlaying
+    const name = Object.keys(byFeat).sort((a, b) => byFeat[b].size - byFeat[a].size)[0];
+    const i = s.moves.findIndex((m) => m.feature === name);
+    T.setCursor(i);
+    T.setZFilter(true, 0);
+    const all = s.moves.filter((m) => m.feature === name).length;
+    const inWin = T.movesInWindow();
+    // Two counts, deliberately. The filter must hide every model THIS import
+    // added, and must leave every OTHER model on the plate alone - by now the
+    // fixture's groups and the objects extracted from it are still there.
+    const mine = s.modelIds.map((id) =>
+      state.placed.find((e) => e.sourceId === id)).filter(Boolean);
+    const others = state.placed.filter((e) => s.modelIds.indexOf(e.sourceId) === -1);
+    return {
+      name, spread: byFeat[name].size, all,
+      layersInWin: T.layersInWindow(),
+      featHere: inWin.filter((m) => m.feature === name).length,
+      inWin: inWin.length,
+      isoMeshes: s.overlay.children[2].children.length,
+      mineVisible: mine.filter((e) => e.mesh && e.mesh.visible !== false).length,
+      othersTotal: others.length,
+      othersVisible: others.filter((e) => e.mesh && e.mesh.visible !== false).length,
+      sel: T.selection().length,
+      z: s.moves[s.cursor].z
+    };
+  });
+  check('on the real file the window is still exactly one layer', realIso.layersInWin, 1);
+  check('the isolated layer is a strict subset of its own feature',
+    realIso.featHere > 0 && realIso.featHere < realIso.all, true);
+  check('every model of THIS import is hidden while it is on', realIso.mineVisible, 0);
+  check('and every other object on the plate is left alone',
+    [realIso.othersVisible, realIso.othersTotal],
+    [realIso.othersTotal, realIso.othersTotal]);
+  check('the window draws a mesh per feature at that height', realIso.isoMeshes > 0, true);
+
+  // Back to the default scope - earlier blocks moved it to look at one line and
+  // one feature.
+  await page.selectOption('#tp-scope', 'zlayer');
+  const realSel = await page.evaluate(() => {
+    const T = window.NSO_TOOLPATH;
+    T.setCursor(T.getSession().cursor);
+    const s = T.getSession();
+    const sel = T.selection();
+    return { n: sel.length, zs: new Set(sel.map((i) => s.moves[i].z.toFixed(6))).size,
+             feats: new Set(sel.map((i) => s.moves[i].feature)).size };
+  });
+  check('the default scope takes every move at that Z', realSel.n, realIso.inWin);
+  check('at exactly one Z', realSel.zs, 1);
+  check('across every feature at that height', realSel.feats > 1, true);
+  console.log(`       ${realIso.name}: ${realIso.all} moves over ${realIso.spread} layers`
+            + ` -> ${realIso.featHere} at Z ${realIso.z}`);
+
+  const realEx = await page.evaluate(() => {
+    const before = state.models.length;
+    window.NSO_TOOLPATH.extractSelection();
+    const m = state.models[state.models.length - 1];
+    return { added: state.models.length - before, name: m.name, tris: m.rawTris.length / 9,
+             status: (document.getElementById('status') || {}).textContent || '' };
+  });
+  check('the isolated real layer extracts as its own model', realEx.added, 1);
+  check('it is named for the Z it came from, not for one feature',
+    /Z \d+\.\d{3} mm/.test(realEx.name), true);
+  check('it is 12 triangles per line, nothing else', realEx.tris, realSel.n * 12);
+  check('the app reports it as ONE layer', / 1 layer\)/.test(realEx.status), true);
+  console.log('       ' + realEx.status);
 
   check('no uncaught page errors', errors, []);
 

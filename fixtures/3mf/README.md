@@ -36,7 +36,23 @@ retractions, Z hops, the trailing config block - so the parser meets the same
 shapes. The geometry is a test pattern and no claim is made that Bambu would
 slice anything this way. Regenerate with `npm run gcode:fixture`.
 
-**No real sliced `.gcode.3mf` is committed here, and none exists in this repo's
-history.** `npm run gcode:lines` runs a real-file tier when
-`NSO_GCODE_REAL=/path/to/a.gcode.3mf` is set; it is skipped otherwise. See
-`docs/GCODE-TOOLPATH-IMPORT.md`.
+## Real sliced files - the toolpath importer's real-file tier
+
+Two projects sliced by Bambu Studio, committed so the toolpath importer is
+measured against files a slicer actually wrote and not only against the fixture
+above:
+
+| file | structure |
+| --- | --- |
+| `tabletop.gcode.3mf` | 73 layers, 202,877 moves, 9 features. A tree-support tower under a tabletop, whose support interface is **exactly two stacked layers** zigzagging in opposite directions at a 0.61 mm strand width, with no border feature. The three hand-verified measurements off this file are asserted in `tools/gcode-test/gcode-zfilter-check.js`. |
+| `supportwithinsupport.gcode.3mf` | 50 layers, 2,895 moves, 10 features. The only one of the two that exercises `Floating vertical shell`, and small enough to read by hand. |
+
+Both are the user's own sliced projects, staged on `nolongerzzz/nest-wip`
+(branch `source-files`, folder `uploads`). They are not Bambu Lab or MakerWorld
+content, so the licence note above that keeps a MakerWorld project out of this
+directory does not apply to them.
+
+`npm run gcode:lines` and `npm run gcode:zfilter` both read these by default -
+the real-file tier no longer skips. `NSO_GCODE_REAL=/path/to/a.gcode.3mf`
+overrides, to run the same measurements over another slice. See
+`docs/GCODE-TOOLPATH-IMPORT.md` and `docs/GCODE-FEATURE-AUDIT.md`.
