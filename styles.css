@@ -2170,6 +2170,16 @@ select:focus, input:focus {
    screen with nothing to type in it. */
 .vp-menu-body [hidden] { display: none; }
 .vp-stock-menu .vp-row-opts .vp-clone input[type="text"] { width: 62px; }
+/* Attach arms a click, so it needs the lit state every other click-owning
+   button in this app has - Paint, Carve, Measure, Seat here. Same shape as
+   .btn-measure.is-armed; a different hue only so two armed tools are never
+   mistaken for one. */
+.vp-menu-body .btn-attach.is-armed {
+  background: #38bdf8;
+  color: #0b1220;
+  border-color: #38bdf8;
+  font-weight: 600;
+}
 /* A checkbox row is a label, not a grid: the box and its words want to sit
    together at the left rather than in two columns of a 36px / 1fr layout. */
 .vp-check {

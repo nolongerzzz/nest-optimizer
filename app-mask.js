@@ -204,6 +204,21 @@
     return (m && m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length : 0;
   };
 
+  /* The raw <-> local display mapping, exported rather than copied.
+
+     It is eight lines and this app already carries two of it (here and in
+     app-brush.js), which is two too many: the -90 deg X rotation and the
+     centre it is measured about have to mean the same thing everywhere or a
+     click lands on one face and the bake lands on another - the exact failure
+     the "read the list, never re-derive it" rule in docs/HANDOFF.md was
+     written about. app-assemble.js needs it to turn a raycast hit into the
+     piece's own raw axes, and takes these rather than growing a third. */
+  window.nsoRawFrameOf = frameOf;
+  window.nsoRawPointFromLocal = rawPointFromLocal;
+  window.nsoRawDirFromLocal = rawDirFromLocal;
+  window.nsoLocalPointFromRaw = localPointFromRaw;
+  window.nsoLocalDirFromRaw = localDirFromRaw;
+
   /* ---- the SELECT list: "is this my target face" ---- */
 
   // The one selected face, as a copy of what the click recorded (raw plane

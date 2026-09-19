@@ -151,7 +151,8 @@ const UNDO_REPLACE_LABEL = {
   wheelReplace: 'Undo: Pottery Wheel reverted',
   hollowReplace: 'Undo: Hollow reverted',
   fillReplace: 'Undo: Fill reverted',
-  fattenReplace: 'Undo: Fatten reverted'
+  fattenReplace: 'Undo: Fatten reverted',
+  attachReplace: 'Undo: Attach reverted'
 };
 
 function undoLast() {
@@ -2472,6 +2473,15 @@ function onCanvasPointerDown(event) {
      and before measure because it bakes, and a measurement must never
      swallow a click a baking tool would have taken. */
   if (typeof window.nsoSeatHereTakesClick === 'function' && window.nsoSeatHereTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* Attach owns a click that lands on a piece, on the same terms: the click
+     names the point a generated blank is seated at, and app-assemble.js
+     decides, where its own hit test lives. Asked here for the same reason
+     Seat here is - it bakes, so it must be ahead of measure. */
+  if (typeof window.nsoAttachTakesClick === 'function' && window.nsoAttachTakesClick(event)) {
     setOrbitFromPlate(false);
     return;
   }
