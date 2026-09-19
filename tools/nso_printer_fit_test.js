@@ -194,7 +194,8 @@ console.log('\n== 5. a real wheel-thrown piece, thrown past an A1 Mini ==');
     NSO_Printer: P
   };
   vm.createContext(ctx);
-  for (const f of ['app-sculpt.js', 'app-extend.js', 'app-wheel.js']) {
+  /* nso_stock.js first: app-wheel.js's BALL calls it. */
+  for (const f of ['nso_stock.js', 'app-sculpt.js', 'app-extend.js', 'app-wheel.js']) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
   }
   const W = ctx;

@@ -18,6 +18,11 @@ Smart build-plate packing for 3D printing.
 - Resize a piece to a real dimension - pick X, height, Z or the longest edge,
   type the mm you want, and the uniform factor is solved and applied (or scale
   by a plain multiplier)
+- **New stock**: a correctly-sized blank to start from, before Carve, Hollow,
+  Cut or anything else that begins with a blank block - sphere, box or
+  cylinder, sized from the target piece by a Pappus thin-shell estimate plus a
+  tunable waste margin, and refused outright if the target cannot physically
+  exist on the current plate ([docs/STOCK.md](docs/STOCK.md))
 - Auto-orient for lower support needs
 - Auto-nest with optional 45°/90° rotations
 - Adjustable gap between models

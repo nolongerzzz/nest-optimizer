@@ -39,6 +39,12 @@
 //     added - everything trimmed away. The live form can never exceed it.
 //     Refusing says what to do next: extend the rim, or add clay here.
 //
+//   MATERIAL SIZING   the ball's size comes from nso_stock.js - the same
+//     shape-agnostic "target -> shell estimate -> waste margin -> solve for the
+//     defining measurement" New stock uses for a box or a cylinder. NOT a copy
+//     of it: loaded without that module this file refuses by name rather than
+//     re-deriving Pappus. See docs/STOCK.md.
+//
 //   WALL FLOOR        the canonical nozzle-safety floor from nso_thickness.js.
 //     NOT a second opinion, NOT a copy of the number: NSO_Thickness.floorFor()
 //     is the only place the floor comes from, and this file refuses to load a
@@ -260,76 +266,59 @@ function NSO_wheelPappus(piece) {
 
 /* ------------------------------------------------------- 3a. ball sizing */
 
-/* Defaults, every one of them STATED rather than measured, and every one
-   overridable. They are called out individually because a stated default that
-   reads like a measured constant is how this repo ended up with a `4` that
-   meant two different things.
+/* THE SIZING IS NOT THIS FILE'S ANY MORE, and that is deliberate.
 
-   WALL_DEFAULT 3.0 mm: a typical thrown stoneware wall, and comfortably clear
-     of the 0.42 mm nozzle floor, so the floor is a guard and not the default.
-   WASTE_DEFAULT 0.30: real throwing waste - the hump left on the wheel head,
-     the trimmings off the foot, water take-up, and the clay the potter's
-     hands keep. 30% is the low end of what a production potter allows. It is
-     a margin, not a fudge: without it the budget runs out mid-pull on a
-     vessel the arithmetic said was exactly sized, which is the worst possible
-     moment to find out.
-   ASPECT_DEFAULT 0.5: target radius = height/2 when no radius is stated, i.e.
-     a vessel as wide as it is tall. */
-var NSO_WHEEL_WALL_DEFAULT = 3.0;
-var NSO_WHEEL_WASTE_DEFAULT = 0.30;
-var NSO_WHEEL_ASPECT_DEFAULT = 0.5;
+   "Target dimension -> estimated shell volume -> waste margin -> solve for the
+   primitive's defining measurement" was never about spheres. It is now
+   nso_stock.js, shape-agnostic, and BALL is one call into it with shape
+   'sphere'. The defaults went with it - the 3.0 mm wall, the 30% waste, the
+   0.5 aspect are stated once, in NSO_Stock.DEFAULTS, instead of once here and
+   once there. See docs/STOCK.md.
+
+   What stays here is the wheel's own vocabulary: `ball_radius` rather than
+   `measure.radius`, and a reason line that says "ball" because a potter reads
+   it. Byte-for-byte the same line it always said - tools/nso_stock_test.js
+   pins it against the figures docs/POTTERY-WHEEL.md published before the
+   move, and tools/nso_wheel_test.js still checks every number in it.
+
+   No build volume is asked for here. The wheel has its own LIVE build-volume
+   readout (NSO_wheelStatus -> NSO_wheelFitReport), which runs on every update
+   rather than only at the ball, so passing a printer into the sizing would
+   put the same warning in twice and change what BALL says. */
+function NSO_wheelStock() {
+  if (typeof NSO_Stock !== 'undefined' && NSO_Stock) return NSO_Stock;
+  if (typeof window !== 'undefined' && window.NSO_Stock) return window.NSO_Stock;
+  throw new Error('nso_stock.js is not loaded - the ball sizing is NSO_Stock.size() and ' +
+                  'this file does not carry its own copy of the Pappus arithmetic');
+}
 
 /* opts: height (required, mm), radius, wall, waste, nozzle. */
 function NSO_wheelSizeBall(opts) {
   opts = opts || {};
-  var H = opts.height;
-  if (!(typeof H === 'number' && isFinite(H) && H > 0)) {
-    return { ok: false, reason: 'target height must be a positive number of millimetres' };
-  }
-  var R = (typeof opts.radius === 'number' && opts.radius > 0)
-    ? opts.radius : H * NSO_WHEEL_ASPECT_DEFAULT;
-  var t = (typeof opts.wall === 'number' && opts.wall > 0) ? opts.wall : NSO_WHEEL_WALL_DEFAULT;
-  var waste = (typeof opts.waste === 'number' && opts.waste >= 0) ? opts.waste : NSO_WHEEL_WASTE_DEFAULT;
+  /* The floor first, and from NSO_Thickness as it has always been: a context
+     with no nso_thickness.js must still refuse by naming that module, not the
+     next one down the chain. */
   var floor = NSO_wheelFloor(opts.nozzle);
+  var sized = NSO_wheelStock().size({
+    shape: 'sphere',
+    height: opts.height, radius: opts.radius, wall: opts.wall,
+    waste: opts.waste, floor: floor, what: 'thrown'
+  });
+  if (!sized.ok) return { ok: false, reason: sized.reason };
 
-  if (t < floor) {
-    return {
-      ok: false,
-      reason: 'a ' + t.toFixed(3) + ' mm wall is under the ' + floor.toFixed(3) +
-        ' mm nozzle floor - nothing thrown at that wall could be printed. ' +
-        'Ask for a thicker wall, or a finer nozzle.'
-    };
-  }
-  if (2 * t >= 2 * R) {
-    return {
-      ok: false,
-      reason: 'a ' + t.toFixed(3) + ' mm wall leaves no cavity in a ' + R.toFixed(3) +
-        ' mm radius vessel - that is a solid rod, not a pot'
-    };
-  }
-
-  /* Pappus on the wall strip: L = H (a straight wall of the target height),
-     centroid radius = R - t/2 (the strip's mid-thickness), A = L*t. */
-  var wallRho = R - t / 2;
-  var wallV = 2 * Math.PI * wallRho * (H * t);
-  /* Pappus on the floor rectangle: r in [0, R], z in [0, t]. */
-  var floorRho = R / 2;
-  var floorV = 2 * Math.PI * floorRho * (R * t);
-
-  var shell = wallV + floorV;
-  var need = shell * (1 + waste);
-  var a = Math.cbrt(3 * need / (4 * Math.PI));
-
+  var a = sized.measure.radius;
   return {
     ok: true,
-    height: H, radius: R, wall: t, waste: waste, nozzle_floor: floor,
-    wall_volume: wallV, floor_volume: floorV,
-    shell_volume: shell,
-    ball_volume: need,
+    height: sized.height, radius: sized.radius, wall: sized.wall,
+    waste: sized.waste, nozzle_floor: sized.nozzle_floor,
+    wall_volume: sized.wall_volume, floor_volume: sized.floor_volume,
+    shell_volume: sized.shell_volume,
+    ball_volume: sized.need_volume,
     ball_radius: a,
-    reason: 'target ' + H.toFixed(1) + ' x ' + (2 * R).toFixed(1) + ' mm, ' +
-      t.toFixed(2) + ' mm wall: shell ' + shell.toFixed(1) + ' mm^3, +' +
-      Math.round(waste * 100) + '% waste = ' + need.toFixed(1) + ' mm^3, ' +
+    stock: sized,
+    reason: 'target ' + sized.height.toFixed(1) + ' x ' + (2 * sized.radius).toFixed(1) + ' mm, ' +
+      sized.wall.toFixed(2) + ' mm wall: shell ' + sized.shell_volume.toFixed(1) + ' mm^3, +' +
+      Math.round(sized.waste * 100) + '% waste = ' + sized.need_volume.toFixed(1) + ' mm^3, ' +
       'ball radius ' + a.toFixed(3) + ' mm'
   };
 }
@@ -389,22 +378,16 @@ function NSO_wheelBall(opts) {
 /* =====================================================================
    5. Revolve
 
-   Profile -> a closed triangle soup, Z up, rebuilt from scratch on every
-   update. The band rule is one rule and the degenerate cases fall out of it
-   rather than being special-cased by shape.
+   Meridian -> a closed triangle soup, Z up, rebuilt from scratch on every
+   update.
 
-   For consecutive meridian points i, i+1 and angular steps j, j+1:
-
-       A = P(i, j)      B = P(i, j+1)
-       D = P(i+1, j)    C = P(i+1, j+1)
-
-   emit (A, B, C) and (A, C, D), dropping whichever is degenerate when a ring
-   sits on the axis. The outward normal that falls out of that ordering is
-   (dz, -dr) in the (r, z) half-plane, which is correct for every part of the
-   loop at once: the outer wall (dz > 0, dr = 0) faces out, the rim annulus
-   (dz = 0, dr < 0) faces up, the base (dz = 0, dr > 0) faces down, and the
-   inner wall - traversed downward, so dz < 0 - faces in. Nothing in the
-   revolve knows which part of the vessel it is building.
+   THE TESSELLATOR IS NSO_Stock.revolve, not a copy of it. This file builds
+   the meridian - up the outside, across the rim, down the inside - and hands
+   that loop over; the band rule, the winding and the axis special cases are
+   all one function now, shared with the primitives nso_stock.js generates.
+   That is what makes "a sphere from new stock and a ball from the wheel are
+   the same mesh" a structural fact rather than a coincidence two tests happen
+   to agree on. The band rule itself is documented where it lives.
    ===================================================================== */
 
 /* opts.precise returns the soup as a plain Array of float64 instead of a
@@ -417,38 +400,7 @@ function NSO_wheelBall(opts) {
 function NSO_wheelRevolve(piece, opts) {
   opts = opts || {};
   var seg = Math.max(12, Math.round(opts.segments || piece.segments || NSO_WHEEL_SEGMENTS));
-  var loop = NSO_wheelMeridian(piece);
-  var n = loop.length;
-
-  var cos = new Array(seg), sin = new Array(seg);
-  for (var j = 0; j < seg; j++) {
-    var th = 2 * Math.PI * j / seg;
-    cos[j] = Math.cos(th); sin[j] = Math.sin(th);
-  }
-
-  var tris = [];
-  function push(p, q, s) {
-    tris.push(p[0], p[1], p[2], q[0], q[1], q[2], s[0], s[1], s[2]);
-  }
-  function pt(k, j) {
-    var L = loop[k];
-    return [L.r * cos[j], L.r * sin[j], L.z];
-  }
-
-  for (var i = 0; i + 1 < n; i++) {
-    var r0 = loop[i].r, r1 = loop[i + 1].r;
-    if (r0 <= NSO_WHEEL_EPS && r1 <= NSO_WHEEL_EPS) continue;   // both on the axis
-    for (var jj = 0; jj < seg; jj++) {
-      var k = (jj + 1) % seg;
-      var A = pt(i, jj), B = pt(i, k), C = pt(i + 1, k), D = pt(i + 1, jj);
-      if (r0 > NSO_WHEEL_EPS) push(A, B, C);
-      if (r1 > NSO_WHEEL_EPS) push(A, C, D);
-    }
-  }
-  /* The closing segment from the last loop point back to the first runs along
-     the axis (both ends have r = 0 by construction), so it generates nothing
-     and the surface is already closed. */
-  return opts.precise ? tris : new Float32Array(tris);
+  return NSO_wheelStock().revolve(NSO_wheelMeridian(piece), seg, { precise: !!opts.precise });
 }
 
 /* =====================================================================

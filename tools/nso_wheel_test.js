@@ -32,7 +32,9 @@ const ctx = {
   NSO_Printer: require(path.join(ROOT, 'nso_printer.js'))
 };
 vm.createContext(ctx);
-for (const f of ['app-sculpt.js', 'app-extend.js', 'app-wheel.js']) {
+/* The ball's sizing and the revolve both live in nso_stock.js now - loaded as
+   a classic script, the same load order index.html has. See docs/STOCK.md. */
+for (const f of ['nso_stock.js', 'app-sculpt.js', 'app-extend.js', 'app-wheel.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
 const W = ctx;
@@ -119,6 +121,29 @@ console.log('== 0. the wall floor comes from nso_thickness.js and nowhere else =
   try { bare.NSO_wheelBall({ height: 60 }); } catch (e) { threw = e.message; }
   check('without nso_thickness.js the wheel refuses to start, loudly',
     threw !== null && /nso_thickness/.test(threw), threw ? threw.slice(0, 64) + '...' : 'did NOT throw');
+
+  /* And the same contract on the OTHER module BALL now leans on. The sizing
+     moved to nso_stock.js (docs/STOCK.md); loaded without it the wheel says so
+     by name rather than growing a second copy of the Pappus arithmetic - the
+     same refusal app-extend.js gets in section 7. The thickness module is
+     present here, so the message that comes back can only be the stock one. */
+  const noStock = {
+    Math, Map, Set, console: { log() {}, warn() {}, error() {} },
+    Array, Object, Number, String, JSON, isFinite, Error,
+    Float32Array, Float64Array, Int32Array, Uint32Array, Uint8Array, ArrayBuffer,
+    NSO_Thickness: require(path.join(ROOT, 'nso_thickness.js'))
+  };
+  vm.createContext(noStock);
+  for (const f of ['app-sculpt.js', 'app-extend.js', 'app-wheel.js']) {
+    vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), noStock, { filename: f });
+  }
+  let noStockThrew = null;
+  try { noStock.NSO_wheelBall({ height: 60 }); } catch (e) { noStockThrew = e.message; }
+  check('without nso_stock.js the wheel refuses rather than re-deriving the sizing',
+    noStockThrew !== null && /nso_stock\.js is not loaded/.test(noStockThrew),
+    noStockThrew ? noStockThrew.slice(0, 72) + '...' : 'did NOT throw');
+  check('...and the file carries no second copy of the ball arithmetic',
+    !/Math\.cbrt\s*\(/.test(fs.readFileSync(path.join(ROOT, 'app-wheel.js'), 'utf8')));
 }
 
 /* =====================================================================
@@ -682,7 +707,7 @@ let tall;
     Float32Array, Float64Array, Int32Array, Uint32Array, Uint8Array, ArrayBuffer,
     NSO_Thickness: require(path.join(ROOT, 'nso_thickness.js')) };
   vm.createContext(noExt);
-  for (const f of ['app-sculpt.js', 'app-wheel.js']) {
+  for (const f of ['nso_stock.js', 'app-sculpt.js', 'app-wheel.js']) {
     vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), noExt, { filename: f });
   }
   const orphan = noExt.NSO_wheelOpen(noExt.NSO_wheelBall({ height: 60 }).piece, {});

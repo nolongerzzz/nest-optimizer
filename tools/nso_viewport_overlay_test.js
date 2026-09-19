@@ -3,9 +3,9 @@
 
    WHY THIS EXISTS
 
-   The viewport's top strip is four absolutely positioned overlays sharing one
-   line: `.viewport-overlay-topbar` on the left, and the `Wheel` and `Finish`
-   menus in the top-right corner. The topbar has to RESERVE room for the menus,
+   The viewport's top strip is several absolutely positioned overlays sharing
+   one line: `.viewport-overlay-topbar` on the left, and the `Stock`, `Wheel`
+   and `Finish` menus in the top-right corner. The topbar has to RESERVE room for the menus,
    because the menus sit at a higher z-index and their summaries have
    `pointer-events: auto` - so a topbar button underneath one of them is visible,
    enabled, and unclickable.
@@ -97,6 +97,19 @@ function cssStructure() {
   // And the rule that bug silently deleted is actually present.
   check('.viewport-overlay-wheel survives parsing as a rule of its own',
         /\n\.viewport-overlay-wheel \{/.test(stripComments(src)), 'declared at top level');
+  check('.viewport-overlay-stock does too - menu 3 is the same trap',
+        /\n\.viewport-overlay-stock \{/.test(stripComments(src)), 'declared at top level');
+
+  // Every offset in the strip is derived from --vp-menu-count, so a menu added
+  // without bumping it is the bug of 2 all over again. Count the menu overlays
+  // in the markup and check the variable agrees.
+  {
+    const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    const menus = (html.match(/class="viewport-overlay viewport-overlay-(finish|wheel|stock)"/g) || []).length;
+    const declared = (stripComments(src).match(/--vp-menu-count:\s*(\d+)/) || [])[1];
+    check('--vp-menu-count matches the number of top-right menus in the markup',
+          menus > 0 && String(menus) === declared, menus + ' menus, --vp-menu-count: ' + declared);
+  }
 }
 
 // ===========================================================================
@@ -131,6 +144,7 @@ async function rendered() {
       return {
         topbar: box('.viewport-overlay-topbar'),
         wheel: box('.vp-wheel-menu'),
+        stock: box('.vp-stock-menu'),
         finish: box('.vp-finish-menu'),
         // Every topbar button, and what is actually on top at its click point -
         // which is the only thing that decides whether a click lands.
@@ -152,6 +166,8 @@ async function rendered() {
           m.wheel && 'x ' + Math.round(m.wheel.x) + '..' + Math.round(m.wheel.right));
     check('the Finish menu is on screen', !!m.finish,
           m.finish && 'x ' + Math.round(m.finish.x) + '..' + Math.round(m.finish.right));
+    check('the Stock menu is on screen', !!m.stock,
+          m.stock && 'x ' + Math.round(m.stock.x) + '..' + Math.round(m.stock.right));
 
     // The Wheel rule actually applies. Without it the overlay collapses to the
     // base .viewport-overlay with no offsets, which is exactly what the missing
@@ -169,13 +185,26 @@ async function rendered() {
           !overlap(m.wheel, m.finish),
           (() => { const o = overlap(m.wheel, m.finish); return o ? o.x + 'x' + o.y + ' px' : 'clear'; })());
 
+    // Menu 3, the same two claims the Wheel makes about Finish.
+    check('the Stock menu sits immediately LEFT of the Wheel - its own corner',
+          !!m.stock && !!m.wheel && m.stock.right <= m.wheel.x,
+          m.stock && m.wheel &&
+            'stock ends ' + Math.round(m.stock.right) + ', Wheel starts ' + Math.round(m.wheel.x));
+    check('and it overlaps neither of the other two',
+          !overlap(m.stock, m.wheel) && !overlap(m.stock, m.finish),
+          (() => { const o = overlap(m.stock, m.wheel) || overlap(m.stock, m.finish);
+                   return o ? o.x + 'x' + o.y + ' px' : 'clear'; })());
+
     // THE ONE THAT BROKE. The topbar must end before the menus begin.
     const vsWheel = overlap(m.topbar, m.wheel);
     const vsFinish = overlap(m.topbar, m.finish);
+    const vsStock = overlap(m.topbar, m.stock);
     check('the topbar reserves room for the Wheel menu and does not run under it',
           !vsWheel, vsWheel ? vsWheel.x + 'x' + vsWheel.y + ' px overlap' : 'clear');
     check('the topbar reserves room for the Finish menu too',
           !vsFinish, vsFinish ? vsFinish.x + 'x' + vsFinish.y + ' px overlap' : 'clear');
+    check('...and for the Stock menu, which is what --vp-menu-count exists to do',
+          !vsStock, vsStock ? vsStock.x + 'x' + vsStock.y + ' px overlap' : 'clear');
 
     // The invariant that actually matters to a user: every button is clickable.
     const covered = m.buttons.filter((b) => b.covered);
@@ -192,6 +221,7 @@ async function rendered() {
                   Math.round(lock.x) + '..' + Math.round(lock.right)) : 'button not found');
 
     console.log('       topbar x ' + Math.round(m.topbar.x) + '..' + Math.round(m.topbar.right) +
+                ' | Stock ' + Math.round(m.stock.x) + '..' + Math.round(m.stock.right) +
                 ' | Wheel ' + Math.round(m.wheel.x) + '..' + Math.round(m.wheel.right) +
                 ' | Finish ' + Math.round(m.finish.x) + '..' + Math.round(m.finish.right));
   });

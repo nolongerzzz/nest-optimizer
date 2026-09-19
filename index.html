@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=libdel1" />
+  <link rel="stylesheet" href="styles.css?v=stock1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -307,6 +307,44 @@
             </div>
           </details>
         </div>
+        <div class="viewport-overlay viewport-overlay-stock">
+          <details class="vp-menu vp-stock-menu">
+            <summary>Stock</summary>
+            <div class="vp-menu-body vp-stock">
+              <div class="vp-row vp-row-full">
+                <select id="sel-stock-shape" title="What shape the blank is. The sizing is the same for all three - only the last step, solving for the shape's own defining measurement, differs.">
+                  <option value="sphere">Sphere</option>
+                  <option value="box">Box</option>
+                  <option value="cylinder">Cylinder</option>
+                </select>
+              </div>
+              <div class="vp-row vp-row-opts">
+                <label class="vp-clone" title="The finished piece's height. The stock is sized from it by Pappus's centroid theorem: a thin-shell estimate of the piece plus the waste margin below.">H <input type="number" id="inp-stock-height" min="1" max="900" step="1" placeholder="mm"></label>
+                <label class="vp-clone" title="The finished piece's radius. Blank means half the height.">R <input type="number" id="inp-stock-radius" min="0.5" max="450" step="1" placeholder="mm"></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+                <label class="vp-clone" title="Wall thickness of the finished piece - what the shell estimate is built on. Default 3 mm. Refused under the nozzle-safety floor from nso_thickness.js.">W <input type="number" id="inp-stock-wall" min="0.1" max="30" step="0.1" placeholder="3"></label>
+                <label class="vp-clone" title="Nozzle diameter. Sets the wall floor: nozzle x 1.05.">N <input type="number" id="inp-stock-nozzle" min="0.1" max="2" step="0.05" placeholder="0.4"></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+                <label class="vp-clone" title="Waste margin, per cent. Real material allowance - the skin a carve takes off, the trimmings, the bit the process keeps. Default 30%. 0 means exactly the shell estimate and no allowance.">% <input type="number" id="inp-stock-waste" min="0" max="500" step="1" placeholder="30"></label>
+                <label class="vp-clone" id="row-stock-prop" hidden><span id="lab-stock-prop">x:y:z</span> <input type="text" id="inp-stock-prop" placeholder="e.g. 2:1:1"></label>
+              </div>
+              <label class="vp-check"
+                     title="Take the block's proportions from the selected piece, via the same dominant-axis detection Extend uses. It reads that piece's bounding box only and writes to none of it. Box and Cylinder only.">
+                <input type="checkbox" id="chk-stock-match"> Match selected piece
+              </label>
+              <label class="vp-check"
+                     title="Generate a block bigger than the build volume anyway, to split with Cut before printing. A TARGET that does not fit the machine is refused either way - no setting makes a piece that cannot physically exist.">
+                <input type="checkbox" id="chk-stock-oversize"> Allow oversize block
+              </label>
+              <div class="vp-row vp-row-full">
+                <button id="btn-stock-make" class="btn btn-secondary" type="button"
+                        title="Put a correctly-sized blank on the plate: the material the target needs, plus the waste margin, solved for this shape's defining measurement. Refuses before anything is added if the target cannot be printed on the current plate.">New stock</button>
+              </div>
+            </div>
+          </details>
+        </div>
         <div class="viewport-overlay viewport-overlay-finish">
           <details class="vp-menu vp-finish-menu">
             <summary>Finish</summary>
@@ -578,6 +616,9 @@
   <script src="nso_hollow.js?v=hollow1"></script>
   <script src="nso_support_aim.js?v=support1"></script>
   <script src="nso_printer.js?v=wheel2"></script>
+  <!-- New stock: the shape-agnostic sizing app-wheel.js's Ball now calls,
+       so it loads ahead of it. See docs/STOCK.md. -->
+  <script src="nso_stock.js?v=stock1"></script>
   <script src="nso_paint_delete.js?v=del1"></script>
   <script src="nso_skin_band.js?v=skin2"></script>
   <script src="nso_path_sweep.js?v=inside4"></script>
@@ -600,6 +641,7 @@
   <script src="app-brush.js?v=hollow1"></script>
   <script src="app-wheel.js?v=wheel2"></script>
   <script src="app-fit.js?v=wheel2"></script>
+  <script src="app-stock.js?v=stock1"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=wallcut1"></script>
   <script src="app-center-lock.js?v=clock1"></script>

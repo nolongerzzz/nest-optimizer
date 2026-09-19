@@ -3,8 +3,9 @@
 `app-wheel.js`, wired into `index.html` at the existing `?v=inside4` tag,
 loaded after `app-sculpt.js` (whose commit half it reuses) and after
 `app-extend.js` (which it calls for rim extension), and after
-`nso_thickness.js` (which owns the wall floor) and `nso_printer.js` (which
-owns the build volume).
+`nso_thickness.js` (which owns the wall floor), `nso_printer.js` (which owns
+the build volume) and `nso_stock.js` (which owns the sizing and the revolve -
+see `docs/STOCK.md`).
 
 ```
 node tools/nso_wheel_test.js             headless: geometry, the two gates, refusals
@@ -77,6 +78,7 @@ is measured. See finding 5.
 ```
 NSO_wheelFloor(nozzle)                -> mm, via NSO_Thickness.floorFor
 NSO_wheelSizeBall(opts)               -> the Pappus arithmetic, no geometry
+                                         (now one call into NSO_Stock.size)
 NSO_wheelBall(opts)                   -> { ok, reason, piece }
 NSO_wheelOpen(piece, opts)            -> { ok, reason, piece }
 NSO_wheelPull(piece, opts)            -> { ok, reason, piece }
@@ -98,6 +100,24 @@ NSO_wheelRun(move, opts, head)        -> paint check + move + bake + undo entry
 ```
 
 ## Pappus's centroid theorem, both ways round
+
+**The sizing half lives in `nso_stock.js` now.** It was never about spheres -
+"target dimension -> shell estimate -> waste margin -> solve for the
+primitive's defining measurement" is the same arithmetic for a box and a
+cylinder, and New stock (`docs/STOCK.md`) is the general tool built on it.
+`NSO_wheelSizeBall` is one call into `NSO_Stock.size({ shape: 'sphere', ... })`
+and carries no copy; the three defaults below are stated once, in
+`NSO_Stock.DEFAULTS`. Loaded without `nso_stock.js` the wheel refuses by name
+rather than re-deriving it, the same contract rim extension has on
+`app-extend.js` (finding 8).
+
+The revolve moved with it, for the same reason: `NSO_wheelRevolve` builds the
+meridian and hands it to `NSO_Stock.revolve`, so there is one tessellator and a
+stock sphere is bit-identical to a ball, not merely the same size.
+
+Everything below is unchanged, and pinned: `tools/nso_stock_test.js` section 1
+asserts every figure on this page against the shipped code, including BALL's
+status line character for character.
 
 **Sizing.** The target vessel is approximated as a thin shell: a wall of
 thickness `t` swept along the meridian, plus a floor of the same thickness.
