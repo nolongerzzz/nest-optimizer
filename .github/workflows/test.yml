@@ -50,7 +50,13 @@ jobs:
   test:
     name: npm test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Wall time, not a budget: the suite is one long chain and it grows with
+    # every feature. It was 15, which the chain outgrew - a local run is
+    # ~13 minutes and a runner is slower, so runs were being killed mid-suite
+    # and reporting a timeout instead of a real pass or fail. 25 is room to
+    # keep growing into. If this needs raising again, split the chain into
+    # parallel jobs rather than chasing it with a bigger number.
+    timeout-minutes: 25
     permissions:
       contents: read
 
