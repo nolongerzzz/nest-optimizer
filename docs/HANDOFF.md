@@ -77,6 +77,62 @@ Parked modules (repair, sculpt, planar fuse) stay unwired until the owner names 
 Clean no-op mesh for repair checks is `fixtures/box-20mm.stl`, not Thingi10K 40921
 (40921 has 17 bowtie vertices; edge-based checks miss that).
 
+## Live watch - the eye button
+
+`nso-watch.js`, one toggle next to Undo, off by default. Full write-up:
+`docs/WATCH.md`. Two watchers over an ordinary session:
+
+1. Errors, failed loads and every `setStatus` line, timestamped, with the
+   refusals and stand-downs marked as such.
+2. After every Undo, bake and tool switch, the rendered scene against the
+   app's own logical state - `state.placed` / `state.models` /
+   `modelGroup.children` / `faceMask.exclude`. A mismatch is reported the
+   moment it appears as `phantom object / wall / paint / pose / footprint`,
+   with the operation that preceded it, read off the app's own `pushUndo`
+   type rather than guessed from a button.
+
+Two things about it that must not be "tidied up":
+
+- **It never repairs what it finds.** No bake, no repaint, no undo of its own.
+  A watcher that fixes a mismatch destroys the evidence it exists to capture.
+- **It re-derives nothing.** Pose comes from `applyMeshRotation()`, the bed
+  from `settlePlacedOnBed()`, the footprint from `meshLocalBox3()`, the paint
+  from `nsoMaskCount()` and the overlay object's own identity. A second,
+  drifting copy of those rules would rot into false alarms, which is the one
+  failure mode that makes a watcher worthless.
+
+`npm run watch:test` (52 checks, real app in headless Chromium), in `npm test`.
+Half of it asserts an ordinary session - load, clone, move, rotate, flip, tip,
+raise, cutter, split, join, paint, x-ray, undo, clear - raises **zero**
+findings. The other half reproduces the three bugs below and asserts they are
+caught, named and timestamped.
+
+### Three found on its first run - open, not fixed
+
+This ticket is the watcher, not the repairs. Each check fails loudly if its
+bug is fixed, which is the cue to retire the check with the fix.
+
+1. **Every bake loses the placed pose.** `applyMeshRotation` occurs nowhere in
+   `app-finish.js` or `app-sculpt.js`: Seal, Solidify, Thicken, Cap, Soften
+   and Smooth all rebuild the placed mesh with
+   `mesh.position.set(px, m.size.y / 2 + 0.3, pz)` and no rotation, so a yawed
+   piece snaps to 0 deg on screen while its entry still says 90, and `width` /
+   `depth` are then taken from the unrotated `m.size`. The bake-undo branch in
+   `app-core.js` does the same for all six types.
+2. **Paint outlives the geometry it was drawn from.** `nsoMaskRepaint()` is
+   called from exactly two commits, `commitSoften` and `NSO_sculptCommitRaw`.
+   Seal, Solidify, Thicken and Cap replace the mesh without it, so the yellow
+   is triangles copied off a mesh that no longer exists. Turning a painted
+   piece does the same - the overlay is a sibling of the piece mesh and
+   `applyMeshRotation()` does not move it.
+3. **Undoing a delete brings back the piece but not its model.**
+   `deleteSelectedPlaced()` drops the model from `state.models` when it was
+   the last instance, but pushes only a `removePlaced` entry. Undo restores a
+   piece whose `sourceId` is no longer in the registry - absent from the
+   Library list, unreachable by `getActiveModel()`, so Cut / Finish / Join
+   have nothing to work on - and the rebuilt mesh carries no
+   `userData.sourceId` at all.
+
 ## 3MF export - baked cooling settings
 `nso-cooling-profiles.js` + `nso-3mf.js`, wired into `app-core.js` (the
 export-format block and the `export3MF` block) and `app-join.js` / `app-ux.js`

@@ -45,6 +45,12 @@ Smart build-plate packing for 3D printing.
   transforms applied, becomes a model. Print settings, materials and colours in
   the file are ignored. Tested against files Bambu Studio wrote as well as
   NSO's own exports - see `docs/baked-cooling-settings.md`, "3MF import".
+- The eye button in the viewport's bottom-left corner turns on a live watch:
+  it logs errors, failed loads and NSO's own status and refusal lines, and
+  after every Undo, bake and tool switch it checks the scene you are looking at
+  against the app's own idea of what is on the plate, flagging any mismatch on
+  the spot. Off by default, and it never changes anything it finds - see
+  [docs/WATCH.md](docs/WATCH.md).
 - The packing algorithm is a solid bottom-left free-rectangle packer with rotation. It will improve over time.
 
 ## Future ideas

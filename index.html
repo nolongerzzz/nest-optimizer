@@ -201,6 +201,9 @@
           <button id="btn-undo" class="viewport-tool-btn" type="button" disabled>↶</button>
           <button id="btn-frame-view" class="viewport-tool-btn" type="button">◎</button>
           <button id="btn-xray" class="viewport-tool-btn" type="button">X</button>
+          <button id="btn-watch" class="viewport-tool-btn" type="button"
+                  aria-pressed="false"
+                  title="Watch: log errors / failed loads / status lines, and check the rendered scene against the app state after every Undo, bake and tool switch.">&#128065;</button>
         </div>
         <div class="viewport-overlay viewport-overlay-br">
           <p id="adjust-status" class="status-hud status-hud-id">HUD inside4</p>
@@ -227,6 +230,10 @@
   <script src="app-mask.js?v=inside4"></script>
   <script src="app-library.js?v=libgit"></script>
   <script src="app-ux.js?v=inside4"></script>
+  <!-- Live watch: off until its button is pressed, and it patches nothing
+       until then. Deleting this tag and the #btn-watch button above removes
+       the feature completely. -->
+  <script src="nso-watch.js"></script>
   <script src="app-cth-expose.js?v=cth15"></script>
   <script type="module" src="app-cth.js?v=cth15"></script>
 </body>
