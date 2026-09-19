@@ -558,7 +558,10 @@ function NSO_plugFrame(bitMesh, hullCenterWorld, aWorld) {
   };
 }
 
-function NSO_outerFaceCorners(frame) {
+/* The four corners of the plug's local box face at `coord` on the frame
+   axis, in world space. Outer face = capCoord; mating face = the opposite
+   face of the same box. */
+function NSO_faceCornersAt(frame, coord) {
   var a = frame.axis, u = (a + 1) % 3, v = (a + 2) % 3;
   var lo = [frame.box.min.x, frame.box.min.y, frame.box.min.z];
   var hi = [frame.box.max.x, frame.box.max.y, frame.box.max.z];
@@ -566,12 +569,23 @@ function NSO_outerFaceCorners(frame) {
   var out = [];
   for (var i = 0; i < 4; i++) {
     var p = new THREE.Vector3();
-    p.setComponent(a, frame.capCoord);
+    p.setComponent(a, coord);
     p.setComponent(u, quad[i][0]);
     p.setComponent(v, quad[i][1]);
     out.push(p.applyMatrix4(frame.matrix));
   }
   return out;
+}
+
+function NSO_outerFaceCorners(frame) {
+  return NSO_faceCornersAt(frame, frame.capCoord);
+}
+
+/* The face that looks at the hull - the one a breakaway piece rests on. */
+function NSO_matingFaceCorners(frame) {
+  var coord = (frame.sign > 0) ? frame.box.min.getComponent(frame.axis)
+                               : frame.box.max.getComponent(frame.axis);
+  return NSO_faceCornersAt(frame, coord);
 }
 
 /* ---- ray vs soup, nearest hit either direction ---- */
@@ -613,6 +627,29 @@ function NSO_newellNormal(pts) {
 /* ============================================================
    SEAT — corner projection + best-fit tilt on a curved hull
    opts: { proud:0.4, maxTiltDeg:20, iterations:3, liftHull, liftBit }
+         or { gap: -0.18, ... }
+
+   Two ways to say where the bit goes, never both:
+
+   proud  The bit's OUTER face (the one facing away from the hull) ends up
+          this far outside the hull skin. This is the plug workflow: the bit
+          is buried in the hull with its face just proud, then Subtract
+          carves the pocket. The Seat flush button has always called this
+          with proud 0.01 - that is the only thing "Seat 0.01" ever set.
+
+   gap    The bit's MATING face (the one facing the hull) ends up off the
+          hull skin by this much, in the breakaway-coupon sign convention
+          locked in tools/breakaway_coupons.py:
+              negative = air gap of that size between skin and bit
+              positive = the bit penetrates the hull by that much
+              0        = touching
+          So a breakaway piece at the locked easy-release value is
+          { gap: -0.18 }. Nothing else is different: same corner rays, same
+          tilt fit, same translate-along-the-fitted-normal.
+
+   Both modes report per-corner residuals against the requested offset.
+   gap mode also reports gapAchieved / gapMin / gapMax, measured from the
+   mating face after the last iteration, in the same sign convention.
    ============================================================ */
 
 function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
@@ -620,6 +657,13 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
   var proud = (opts.proud === undefined) ? 0.4 : opts.proud;
   var maxTilt = ((opts.maxTiltDeg === undefined) ? 20 : opts.maxTiltDeg) * Math.PI / 180;
   var iters = opts.iterations || 3;
+
+  var hasGap = (opts.gap !== undefined && opts.gap !== null);
+  var gap = hasGap ? Number(opts.gap) : null;
+  if (hasGap && !isFinite(gap)) return { ok: false, reason: 'gap must be a finite number of mm' };
+  if (hasGap && (opts.proud !== undefined || opts.lip !== undefined)) {
+    return { ok: false, reason: 'give gap or proud/lip, not both' };
+  }
 
   if (!hullMesh || !bitMesh) return { ok: false, reason: 'missing mesh' };
 
@@ -645,6 +689,12 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
     bitDepth = frame0.box.max.getComponent(frame0.axis) - frame0.box.min.getComponent(frame0.axis);
     proud = -(Math.max(bitDepth, lip) - lip);
   }
+
+  /* The face the offset is measured from, and how far outside the skin it
+     must land. A gap is measured from the mating face and its sign is the
+     coupon convention (negative = air), so it flips to "outside the skin". */
+  var refInner = hasGap;
+  var off = hasGap ? -gap : proud;
 
   for (var it = 0; it < iters; it++) {
     var frame = NSO_plugFrame(bitMesh, hullCenter, hullSoup);
@@ -693,7 +743,7 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
 
     /* ---- translate along the fitted normal only (preserves Center X/Z) ---- */
     var frame2 = NSO_plugFrame(bitMesh, hullCenter, hullSoup);
-    var corners2 = NSO_outerFaceCorners(frame2);
+    var corners2 = refInner ? NSO_matingFaceCorners(frame2) : NSO_outerFaceCorners(frame2);
     var faceC = new THREE.Vector3();
     for (var c2 = 0; c2 < 4; c2++) faceC.add(corners2[c2]);
     faceC.multiplyScalar(0.25);
@@ -702,7 +752,7 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
     for (var h2 = 0; h2 < 4; h2++) hitC.add(hits[h2]);
     hitC.multiplyScalar(0.25);
 
-    var target = hitC.clone().addScaledVector(nFit, proud);
+    var target = hitC.clone().addScaledVector(nFit, off);
     var along = target.clone().sub(faceC).dot(nFit);
     bitMesh.position.addScaledVector(nFit, along);
     bitMesh.updateMatrixWorld(true);
@@ -710,19 +760,29 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
     lastFit = nFit; lastCorners = corners2; lastHits = hits;
   }
 
-  /* residual report: how far each corner ends up from the skin */
+  /* residual report: how far each corner of the reference face ends up from
+     the skin, against the offset that was asked for */
   var frameF = NSO_plugFrame(bitMesh, hullCenter);
   var cf = NSO_outerFaceCorners(frameF);
-  var resid = [], maxResid = 0;
+  var cref = refInner ? NSO_matingFaceCorners(frameF) : cf;
+  var resid = [], maxResid = 0, dMin = Infinity, dMax = -Infinity, dSum = 0, dN = 0;
   for (var r = 0; r < 4; r++) {
+    /* Rays leave the OUTER corners, as they did in the fit, and the mating
+       face is read off by subtracting the bit's depth along the normal. A
+       ray cast from a corner that sits exactly on the skin (gap 0) would
+       miss that face - the hit filter rejects t = 0 - and report the far
+       side of the hull instead. */
     var hh = NSO_nearestSkinHit(hull, cf[r], frameF.punch);
     var dv = hh ? cf[r].clone().sub(hh).dot(frameF.outerNormal) : NaN;
+    if (refInner && isFinite(dv)) dv -= cf[r].clone().sub(cref[r]).dot(frameF.outerNormal);
     resid.push(dv);
-    if (isFinite(dv) && Math.abs(dv - proud) > maxResid) maxResid = Math.abs(dv - proud);
+    if (isFinite(dv) && Math.abs(dv - off) > maxResid) maxResid = Math.abs(dv - off);
+    if (isFinite(dv)) { dN++; dSum += dv; if (dv < dMin) dMin = dv; if (dv > dMax) dMax = dv; }
   }
 
-  return {
+  var out = {
     ok: true,
+    mode: hasGap ? 'gap' : 'proud',
     normal: lastFit ? lastFit.clone() : frameF.outerNormal.clone(),
     corners: cf,
     hits: lastHits,
@@ -730,6 +790,16 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
     maxResidual: maxResid,
     undo: { position: savedPos, quaternion: savedQuat }
   };
+  if (hasGap) {
+    /* back into the coupon convention: outside the skin = negative gap */
+    out.gap = gap;
+    out.gapAchieved = dN ? -(dSum / dN) : NaN;
+    out.gapMin = dN ? -dMax : NaN;
+    out.gapMax = dN ? -dMin : NaN;
+  } else {
+    out.proud = proud;
+  }
+  return out;
 }
 
 
@@ -1489,19 +1559,88 @@ function seatFlushBitToHull() {
     setStatus('Both hull and bit must be on the plate', true);
     return;
   }
+  // The gap field decides the mode. Blank = the flush plug seat this button
+  // has always done (outer face 0.01 mm proud, then Subtract). A number =
+  // seat the mating face at that gap, coupon sign convention: negative is
+  // an air gap, positive is overlap. A field that is neither is refused
+  // rather than quietly seated flush.
+  const gapReq = readSeatGapInput();
+  if (gapReq !== null && !isFinite(gapReq)) {
+    setStatus('Seat gap must be a number of mm - negative = air gap, positive = overlap, blank = flush', true);
+    return;
+  }
+  if (gapReq === null) {
+    pushUndo(snapshotPlacedPose(state.placed.indexOf(placedB)));
+    const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { proud: 0.01 });
+    if (!res || !res.ok) {
+      setStatus('Seat failed - ' + ((res && res.reason) || 'pieces unchanged'), true);
+      return;
+    }
+    placedB.x = placedB.mesh.position.x;
+    placedB.z = placedB.mesh.position.z;
+    const baseY = (placedB.height || placedB.mesh.geometry.boundingBox && (placedB.mesh.geometry.boundingBox.max.y - placedB.mesh.geometry.boundingBox.min.y) || 10) / 2 + 0.2;
+    placedB.liftY = Math.max(0, placedB.mesh.position.y - baseY);
+    applyPlacedXZ(placedB, placedB.x, placedB.z);
+    var resid = (res.maxResidual != null && isFinite(res.maxResidual)) ? res.maxResidual : 0;
+    setStatus('Seated - proud 0.01mm, skin error ' + resid.toFixed(2) + 'mm - Subtract');
+    return;
+  }
+  seatBitAtGap(placedA, placedB, gapReq);
+}
+
+/* The Seat gap field: null when blank (flush), NaN when it holds junk. */
+function readSeatGapInput() {
+  const el = document.getElementById('seat-gap');
+  if (!el) return null;
+  // A number field reports '' for a half-typed "-" or "1e" and flags it in
+  // validity.badInput. That must read as junk, not as blank, or a slip of
+  // the finger would seat the bit flush and bury it.
+  if (el.validity && el.validity.badInput) return NaN;
+  const s = String(el.value == null ? '' : el.value).trim();
+  if (!s) return null;
+  return Number(s);
+}
+
+/* Seat B's mating face `gap` mm off A's skin (coupon convention) and make
+   the plate record match, so the export writes the same relation the
+   scene shows. */
+function seatBitAtGap(placedA, placedB, gap) {
+  // Both pieces on the bed baseline settlePlacedOnBed uses, the way Align
+  // edges does through matchPlacedBottoms. A piece that was dropped and never
+  // moved sits 0.1 mm higher than a settled one; liftY is measured from the
+  // settled baseline and is what the exports write, so with A left where it
+  // was dropped that 0.1 would land in the exported gap. Not acceptable when
+  // the whole easy-release window is 0.05 mm wide.
+  settlePlacedOnBed(placedA);
+  placedA.mesh.updateMatrixWorld(true);
+
   pushUndo(snapshotPlacedPose(state.placed.indexOf(placedB)));
-  const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { proud: 0.01 });
+  const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { gap: gap });
   if (!res || !res.ok) {
     setStatus('Seat failed - ' + ((res && res.reason) || 'pieces unchanged'), true);
     return;
   }
   placedB.x = placedB.mesh.position.x;
   placedB.z = placedB.mesh.position.z;
-  const baseY = (placedB.height || placedB.mesh.geometry.boundingBox && (placedB.mesh.geometry.boundingBox.max.y - placedB.mesh.geometry.boundingBox.min.y) || 10) / 2 + 0.2;
-  placedB.liftY = Math.max(0, placedB.mesh.position.y - baseY);
+  // liftY is exactly what settlePlacedOnBed needs to put the bit back where
+  // Seat left it: it sets y so the world box bottom lands on 0.2 + liftY.
+  const bb = meshLocalBox3(placedB.mesh);
+  let lift = bb.min.y - 0.2;
+  let clamped = false;
+  if (lift < 0) { clamped = true; lift = 0; }
+  placedB.liftY = lift;
   applyPlacedXZ(placedB, placedB.x, placedB.z);
-  var resid = (res.maxResidual != null && isFinite(res.maxResidual)) ? res.maxResidual : 0;
-  setStatus('Seated - proud 0.01mm, skin error ' + resid.toFixed(2) + 'mm - Subtract');
+
+  const resid = (res.maxResidual != null && isFinite(res.maxResidual)) ? res.maxResidual : 0;
+  const got = isFinite(res.gapAchieved) ? res.gapAchieved : gap;
+  let what;
+  if (gap < 0) what = 'air gap ' + Math.abs(gap).toFixed(2) + 'mm';
+  else if (gap > 0) what = 'overlap ' + gap.toFixed(2) + 'mm';
+  else what = 'touching, gap 0.00mm';
+  // measured value keeps its sign so a wrong-way seat can never read as right
+  let msg = 'Seated - ' + what + ' (measured ' + (got > 0 ? '+' : '') + got.toFixed(3) + 'mm, skin error ' + resid.toFixed(2) + 'mm)';
+  if (clamped) msg += ' - bit would sink below the plate, held at plate level: gap NOT as requested';
+  setStatus(msg, clamped);
 }
 
 
