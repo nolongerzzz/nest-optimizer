@@ -11,6 +11,23 @@
   --warning: #f59e0b;
   --radius: 10px;
   --font: "Inter", system-ui, -apple-system, sans-serif;
+
+  /* The top-right menu gutter. The Finish and Wheel menus both live in the
+     viewport's top-right corner, and `.viewport-overlay-topbar` has to reserve
+     room for BOTH or its last button ends up underneath one of them and cannot
+     be clicked. Deriving all three offsets from these two numbers is the point:
+     they were three independent literals (8px, 80px, 88px), the 88px accounted
+     for one menu, and when the Wheel menu was added beside Finish nothing
+     widened it - so the Wheel sat on top of #btn-lock-pos. Add a third menu and
+     only --vp-menu-count changes.
+
+     This reserves --vp-menu-w PER MENU, so a menu whose label grows past that
+     width would under-reserve again. That is not left to inspection:
+     `npm run overlay:test` measures the rendered strip and fails if any topbar
+     button ends up under a menu. */
+  --vp-menu-gap: 8px;      /* margin at the edge, and between menus */
+  --vp-menu-w: 64px;       /* one menu summary: min-width 64px in .vp-menu */
+  --vp-menu-count: 2;      /* Finish + Wheel */
 }
 
 * {
@@ -601,7 +618,10 @@ select:focus, input:focus {
 .viewport-overlay-topbar {
   top: 8px;
   left: 8px;
-  right: 88px;
+  /* Room for every top-right menu plus a gap either side of each. Was a bare
+     88px, which fitted Finish alone. */
+  right: calc(var(--vp-menu-gap) * (var(--vp-menu-count) + 1) +
+              var(--vp-menu-w) * var(--vp-menu-count));
   bottom: auto;
   flex-direction: row;
   flex-wrap: wrap;
@@ -637,7 +657,7 @@ select:focus, input:focus {
 }
 .viewport-overlay-finish {
   top: 8px;
-  right: 8px;
+  right: var(--vp-menu-gap);                                   /* menu 1, outermost */
   left: auto;
   bottom: auto;
   flex-direction: column;
@@ -1898,10 +1918,7 @@ select:focus, input:focus {
 }
 
 /* The Z filter's own toggle. One layer at a time is the reason the card can show
-   a single layer's construction at all, so it sits above Extract scope.
-
-   Placed BEFORE .tp-detail deliberately: .tp-detail's block is unclosed (see the
-   note on it below), so anything between it and the next `}` is swallowed. */
+   a single layer's construction at all, so it sits above Extract scope. */
 .tp-check-row {
   display: flex;
   align-items: center;
@@ -1918,21 +1935,17 @@ select:focus, input:focus {
   line-height: 1.5;
   margin: 2px 0 8px;
   word-break: break-word;
-/* NOTE - this block is missing its closing brace, and that is load-bearing as
-   things stand. The brace is absent on `claude-wip` too, so the `}` that closes
-   `.viewport-overlay-wheel` below closes THIS rule instead, and the wheel rule
-   itself is discarded. Adding the brace revives it, which moves the Pottery
-   Wheel menu (z-index 90) over the viewport topbar (z-index 50) and makes it
-   swallow clicks on #btn-lock-pos - `npm run lock:test` fails outright. So the
-   fix is a Pottery Wheel LAYOUT decision, not a one-character edit, and it is
-   not this change's to make. Left exactly as found. */
+}
 /* ---------------------------------------------------------------------------
    Pottery Wheel - its own menu beside Finish, same shape, its own corner so
    the two do not overlap when both are open.
 --------------------------------------------------------------------------- */
 .viewport-overlay-wheel {
   top: 8px;
-  right: 80px;
+  /* Menu 2, immediately left of Finish - one menu width and one more gap in.
+     This rule was DEAD until the `.tp-detail` block above it was closed, so the
+     wheel menu had no positioning at all; see --vp-menu-gap in :root. */
+  right: calc(var(--vp-menu-gap) * 2 + var(--vp-menu-w));
   left: auto;
   bottom: auto;
   flex-direction: column;

@@ -545,6 +545,20 @@ refused by name rather than defaulted to unpainted, and a `null` from
 calls it). UI is a **Wheel** menu in the viewport, beside Finish. Full
 write-up, with every number: `docs/POTTERY-WHEEL.md`.
 
+"Beside Finish" was the intent but not the truth until now. `.tp-detail` in
+`styles.css` was missing its closing brace, so the parser swallowed the whole
+`.viewport-overlay-wheel` rule as a nested block and discarded it - the Wheel
+overlay had no positioning at all beyond the base `.viewport-overlay`. Closing
+the brace then exposed a second bug: `.viewport-overlay-topbar` reserved a bare
+`right: 88px`, which fitted Finish alone, so the revived Wheel menu landed on top
+of `#btn-lock-pos` and swallowed its clicks (`npm run lock:test` died on a
+pointer-interception timeout). Both are fixed: the three offsets now derive from
+`--vp-menu-gap` / `--vp-menu-w` / `--vp-menu-count` in `:root`, and
+**`npm run overlay:test`** pins it - it scans the stylesheet for unclosed blocks
+without a browser, then renders the page and fails if any topbar button is
+covered. Adding a third top-right menu means changing `--vp-menu-count` and
+nothing else.
+
 Four moves in the order a potter makes them - **Ball** (sized from a target
 height by Pappus's centroid theorem), **Open** (one push; the single outer
 profile becomes outer + inner and the piece is a shell from there), **Pull**
