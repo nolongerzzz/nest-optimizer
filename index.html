@@ -142,7 +142,10 @@
           <button id="btn-join" class="btn btn-primary" type="button" disabled>Complete Join</button>
           <button id="btn-subtract" class="btn btn-secondary" type="button">Subtract B from A</button>
           <button id="btn-extract-bit" class="btn btn-secondary" type="button">Extract bit</button>
-          <button id="btn-seat-flush" class="btn btn-secondary" type="button">Seat flush</button>
+          <div class="seat-gap-row">
+            <button id="btn-seat-flush" class="btn btn-secondary" type="button" title="Blank gap: flush plug seat (outer face 0.01 mm proud, then Subtract). With a gap: seat the mating face at that gap - negative = air gap, positive = overlap">Seat flush</button>
+            <input type="number" id="seat-gap" step="0.01" placeholder="gap mm" title="Seat gap in mm. Negative = air gap between hull and bit (easy release: -0.15 to -0.20). Positive = bit overlaps into the hull. 0 = touching. Blank = flush plug seat." aria-label="Seat gap in mm" />
+          </div>
           <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
           <button id="btn-cap-open" class="btn btn-secondary" type="button">Cap open faces</button>
           <button id="btn-seat-grid" class="btn btn-secondary" type="button" title="Faint grid on the top surface of the target piece (A), to line up what goes above it">Surface grid: auto</button>

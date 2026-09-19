@@ -1430,3 +1430,20 @@ select:focus, input:focus {
   padding: 2px 0 4px;
 }
 .vp-row-opts .vp-clone input[type="number"] { width: 52px; }
+
+/* Join card: Seat flush button with its gap field. Blank = flush plug seat,
+   a number = seat the mating face at that gap (negative = air, positive =
+   overlap). */
+.seat-gap-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.seat-gap-row .btn {
+  flex: 1 1 auto;
+}
+.seat-gap-row input[type="number"] {
+  flex: 0 0 96px;
+  width: 96px;
+  margin: 0;
+}
