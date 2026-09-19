@@ -1427,9 +1427,31 @@ function NSO_weldEpsFor(soup, want) {
 /* =====================================================================
    Union two world soups with the same kernel Subtract already uses.
 
-   Returns { ok, soup, parts, reason }. parts > 1 means the two pieces do
-   not actually touch, so there is nothing to join - the caller treats that
-   as a miss and falls back, it is not a result.
+   Returns { ok, soup, parts, partsA, partsB, reason }.
+
+   "DID THEY TOUCH" IS A DROP IN THE COMPONENT COUNT, NOT A COUNT OF ONE.
+
+   This used to gate on `parts === 1`, and that was wrong for any piece with
+   an internal void. Manifold's decompose() counts topologically disconnected
+   components, and a hollowed piece is TWO of them - the outer skin and the
+   cavity skin - before anything is joined to it at all. Measured: the shell
+   nso_hollow.js makes from a 26 mm Stock box, unioned with a cube 100 mm
+   away that it plainly does not touch, decomposes into THREE. So a sound
+   union of a hollowed body with an arm came back as 2 and was rejected with
+   "the two pieces do not touch", which was false: the volume showed the
+   overlap correctly subtracted and the checker passed the result.
+
+   That refusal reached Join's kernel route and Attach alike, so Hollow and
+   Join were two independently-correct tools that could never be used
+   together - see docs/INTEGRATION.md, finding 1.
+
+   The question the gate actually means to ask is "did A and B become one
+   thing", and the answer is that the union has fewer components than the two
+   inputs had between them. On two solids that is the old test exactly
+   (1 + 1 -> 1); on a hollow body it is 2 + 1 -> 2; and a genuine miss still
+   fails it, because nothing merged and the counts simply add.
+
+   A caller with its own opinion gets partsA / partsB reported alongside.
    ===================================================================== */
 async function NSO_unionSoups(aWorld, bWorld) {
   if (!NSO_soupLen(aWorld) || !NSO_soupLen(bWorld)) return { ok: false, reason: 'empty soup' };
@@ -1458,9 +1480,27 @@ async function NSO_unionSoups(aWorld, bWorld) {
     }
     var st = NSO_manifoldStats(out);
     parts = st.exact ? st.parts : parts;
-    return { ok: parts === 1, parts: parts, soup: NSO_CSG.manifoldToSoup(out),
+
+    /* What the two inputs were worth on their own, asked of the kernel in
+       exactly the same way. Without these the result's count means nothing:
+       2 is a miss between two solids and a clean join on a hollow body. */
+    var sa = NSO_manifoldStats(manA), sb = NSO_manifoldStats(manB);
+    var partsA = sa.exact ? sa.parts : 1;
+    var partsB = sb.exact ? sb.parts : 1;
+    /* Fall back to the old test only when the kernel could not tell us what
+       an input was worth - a guessed 1 is not evidence, and refusing is the
+       safe side of a guess. */
+    var merged = (st.exact && sa.exact && sb.exact)
+      ? (parts < partsA + partsB)
+      : (parts === 1);
+    return { ok: merged, parts: parts, partsA: partsA, partsB: partsB,
+             soup: NSO_CSG.manifoldToSoup(out),
              stats: st.exact ? { open: st.open, nm: st.nm } : null,
-             reason: parts === 1 ? '' : 'the two pieces do not touch' };
+             reason: merged ? '' : 'the two pieces do not touch' +
+               ((partsA + partsB > 2)
+                 ? ' (A is ' + partsA + ' shell(s), B is ' + partsB + '; the union is still ' +
+                   parts + ', so nothing merged)'
+                 : '') };
   } catch (err) {
     return { ok: false, reason: NSO_errMsg(err) };
   } finally {
