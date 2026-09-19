@@ -12,6 +12,18 @@ Reports real numbers, not pass/fail booleans:
 Usage:
   python3 tools/mesh_validate.py mesh.stl [--weld 1e-4] [--sliver-aspect 100]
                                           [--no-selfint] [--selfint-raw] [--json]
+                                          [--gate] [--non-solid]
+                                          [--min-wall 0.42] [--wall-probe 5]
+
+--gate turns the numbers into a verdict (exit 1 on any failing check).
+--non-solid declares the piece intentionally open (docs/NON-SOLID.md): the
+  open-edge count leaves the verdict and the wall/gap check joins it. Nothing
+  else changes - non-manifold edges, inconsistent winding, degenerate
+  triangles and piercing self-intersections still fail, flag or no flag.
+--min-wall enables the wall/gap check (see wall_thickness) at that threshold;
+  --non-solid switches it on at 0.42 mm, one extrusion line at a 0.4 nozzle,
+  the same figure nso_skin.js uses for its thinnest rib. --min-wall 0 turns
+  it off again.
 
 Self-intersection uses the Moller triangle/triangle overlap test over a uniform
 spatial hash. Pairs sharing at least one welded vertex are skipped: adjacent
@@ -46,9 +58,8 @@ which branch wrote its version first:
 2. ADJACENCY WELD -- radius weld at 1e-4, not a grid snap at 1e-5.
    Two changes. (a) 1e-5 is tolerance-poisoned on real parts: the tape reads
    1,406 open edges and Euler -297 at 1e-5, and 0 open edges and Euler 2 at
-   1e-4. NSO_weldEpsFor in app-join.js suffers the same tolerance poisoning
-   from the same cause, addressed there by a separate change; the plateau
-   measured here for this checker -- 2e-5 .. 3e-4 -- brackets 1e-4. fixtures/repair/
+   1e-4. That is the same failure weld-eps1 fixed in NSO_weldEpsFor, whose
+   measured safe plateau -- 2e-5 .. 3e-4 -- brackets 1e-4. fixtures/repair/
    synth_near_dup_vertex.stl is the clean demonstration: at any tol <= 2e-5 it
    reports 3 piercing pairs and Euler -3, at any tol >= 5e-5 it reports 0 and
    Euler 2, and it is a closed box. The 3 were false. (b) a bare grid snap is
@@ -458,10 +469,191 @@ def self_intersections(tris, index, eps, max_report, verts=None):
             "adjacent_pairs_skipped": adjacent, "examples": examples}
 
 
+# ------------------------------------------------------------ wall / gap check
+
+# One extrusion line at a 0.4 mm nozzle. nso_skin.js states the same default
+# for its thinnest rib ("thinner and the slicer drops the rib"). A stated
+# default, not a measured one.
+#
+# This used to be the only printability floor in the repo. It is now shared:
+# nso_thickness.js is a JS port of wall_thickness() below, with the same floor
+# (floorFor(0.4) == 0.42) and the same report, so the app can ask the question
+# this file could only answer from a CLI. That port is checked against THIS
+# implementation on every fixture in tools/nso_wall_thickness_test.js and must
+# agree to 1e-9 - if you change the algorithm here, that test will tell you.
+# See docs/WALL-THICKNESS.md.
+NOZZLE_MIN_WALL = 0.42
+WALL_PROBE = 5.0
+
+
+def _ray_tri(orig, d, T, eps):
+    """Moller-Trumbore. Distance along `d` (unit) to triangle T, or None."""
+    a, b, c = T
+    e1 = sub(b, a)
+    e2 = sub(c, a)
+    p = cross(d, e2)
+    det = dot(e1, p)
+    if -1e-14 < det < 1e-14:
+        return None
+    inv = 1.0 / det
+    s = sub(orig, a)
+    u = dot(s, p) * inv
+    if u < -eps or u > 1.0 + eps:
+        return None
+    q = cross(s, e1)
+    v = dot(d, q) * inv
+    if v < -eps or u + v > 1.0 + eps:
+        return None
+    t = dot(e2, q) * inv
+    return t if t > eps else None
+
+
+def wall_thickness(index, verts, min_wall, probe, eps, max_report):
+    """Distance from each face to the nearest surface BEHIND it.
+
+    From every triangle's centroid a ray is cast along the inward normal (the
+    side the material is on for an outward-wound surface) and stopped at the
+    first triangle it meets within `probe` mm, ignoring the source triangle
+    and anything sharing a welded vertex with it. On a shell with two coherent
+    sides - a cup, a thin-walled toy - that distance is the wall thickness,
+    measured on the dimension that matters for an open piece instead of the
+    closure it was never meant to have. A face that meets nothing within the
+    probe is a SHEET: a single-surface vase-mode wall whose width the slicer
+    decides, or a wall thicker than the probe. Sheets are counted, not failed.
+
+    The ray does not ask which way the hit triangle faces. Behind a real wall
+    the nearest surface is always its far side, so a thin wall can never be
+    missed; what the test can additionally report is a thin GAP - two sheets
+    closer than a line width, which an FDM printer fuses into one. On a woven
+    sheet that number is the crossing clearance, and it matters for the same
+    reason. The name is `wall` because that is what it is on a shell; read it
+    as "nearest surface behind" on anything else.
+
+    Below `min_wall` (less one weld radius of float32 slack) counts as thin.
+    Broad phase is the same uniform hash as
+    the self-intersection test, walked cell by cell along the ray (3D DDA) and
+    stopped as soon as the next cell starts beyond the closest hit so far.
+    """
+    tris = [(verts[i], verts[j], verts[k]) for i, j, k in index]
+    n = len(tris)
+    out = {"threshold_mm": min_wall, "probe_mm": probe, "faces_measured": 0,
+           "thin_faces": 0, "sheet_faces": 0, "min_wall_mm": None,
+           "examples": []}
+    if n == 0 or not (probe > 0):
+        return out
+
+    diag_sum, boxes = 0.0, []
+    for a, b, c in tris:
+        lo = (min(a[0], b[0], c[0]), min(a[1], b[1], c[1]), min(a[2], b[2], c[2]))
+        hi = (max(a[0], b[0], c[0]), max(a[1], b[1], c[1]), max(a[2], b[2], c[2]))
+        boxes.append((lo, hi))
+        diag_sum += norm(sub(hi, lo))
+    cell = max(diag_sum / n, 1e-9)
+    inv = 1.0 / cell
+
+    grid = defaultdict(list)
+    for t, (lo, hi) in enumerate(boxes):
+        for ix in range(int(math.floor(lo[0] * inv)), int(math.floor(hi[0] * inv)) + 1):
+            for iy in range(int(math.floor(lo[1] * inv)), int(math.floor(hi[1] * inv)) + 1):
+                for iz in range(int(math.floor(lo[2] * inv)), int(math.floor(hi[2] * inv)) + 1):
+                    grid[(ix, iy, iz)].append(t)
+
+    vsets = [set(row) for row in index]
+    best_all = None
+    for t in range(n):
+        a, b, c = tris[t]
+        N = cross(sub(b, a), sub(c, a))
+        L = norm(N)
+        if L <= 0.0:
+            continue                                   # degenerate, counted apart
+        d = (-N[0] / L, -N[1] / L, -N[2] / L)          # inward
+        o = ((a[0] + b[0] + c[0]) / 3.0, (a[1] + b[1] + c[1]) / 3.0, (a[2] + b[2] + c[2]) / 3.0)
+
+        # 3D DDA along o + d*s for s in [0, probe]
+        ci = [int(math.floor(o[k] * inv)) for k in range(3)]
+        step, t_max, t_delta = [0, 0, 0], [float("inf")] * 3, [float("inf")] * 3
+        for k in range(3):
+            if d[k] > 1e-15:
+                step[k] = 1
+                t_max[k] = ((ci[k] + 1) * cell - o[k]) / d[k]
+                t_delta[k] = cell / d[k]
+            elif d[k] < -1e-15:
+                step[k] = -1
+                t_max[k] = (ci[k] * cell - o[k]) / d[k]
+                t_delta[k] = -cell / d[k]
+
+        best, best_u = None, None
+        seen = set()
+        entry = 0.0
+        while entry <= probe:
+            if best is not None and entry > best:
+                break
+            for u in grid.get((ci[0], ci[1], ci[2]), ()):
+                if u == t or u in seen:
+                    continue
+                seen.add(u)
+                if vsets[u] & vsets[t]:
+                    continue
+                s = _ray_tri(o, d, tris[u], eps)
+                if s is not None and s <= probe and (best is None or s < best):
+                    best, best_u = s, u
+            k = min(range(3), key=lambda i: t_max[i])
+            entry = t_max[k]
+            ci[k] += step[k]
+            t_max[k] += t_delta[k]
+
+        out["faces_measured"] += 1
+        if best is None:
+            out["sheet_faces"] += 1
+            continue
+        if best_all is None or best < best_all:
+            best_all = best
+        # A wall built AT the threshold passes: float32 coordinates put a
+        # 0.42 mm rib at 0.419998, and that is the file's rounding, not a
+        # thin wall. One weld radius of slack, the same figure used everywhere
+        # else in this file for "the same point".
+        if best < min_wall - WELD_TOL:
+            out["thin_faces"] += 1
+            if len(out["examples"]) < max_report:
+                out["examples"].append({"face": t, "hit": best_u, "mm": round(best, 5)})
+    out["min_wall_mm"] = best_all
+    return out
+
+
+# ------------------------------------------------------------------- verdict
+
+def verdict(r, non_solid):
+    """The checks that decide pass/fail, and the ONE that the flag removes.
+
+    Kept as a list so the split is readable in one place and cannot drift
+    into a blanket bypass: every entry but `open edges` applies whether or
+    not the piece is declared non-solid. See docs/NON-SOLID.md.
+    """
+    fails = []
+    if r["nonmanifold_edges"]:
+        fails.append("non-manifold edges %d" % r["nonmanifold_edges"])
+    if r["inconsistent_winding_edges"]:
+        fails.append("inconsistent winding %d" % r["inconsistent_winding_edges"])
+    if r["degenerate_tris"]:
+        fails.append("degenerate triangles %d" % r["degenerate_tris"])
+    si = r.get("self_intersection")
+    if si and si["pierce"]:
+        fails.append("self-intersecting (piercing) pairs %d" % si["pierce"])
+    if not non_solid and r["open_edges"]:
+        fails.append("open edges %d (declare --non-solid if intentional)" % r["open_edges"])
+    w = r.get("wall")
+    if w and w["thin_faces"]:
+        fails.append("wall/gap under %g mm on %d face(s), thinnest %.3f mm"
+                     % (w["threshold_mm"], w["thin_faces"], w["min_wall_mm"]))
+    return fails
+
+
 # ----------------------------------------------------------------------- main
 
 def validate(path: Path, weld_tol: float, sliver_aspect: float,
-             do_selfint: bool, eps: float, selfint_raw: bool = False):
+             do_selfint: bool, eps: float, selfint_raw: bool = False,
+             non_solid: bool = False, min_wall: float = 0.0,
+             wall_probe: float = WALL_PROBE):
     tris = parse_stl(path)
     verts, index = weld(tris, weld_tol)
 
@@ -504,6 +696,11 @@ def validate(path: Path, weld_tol: float, sliver_aspect: float,
         out["self_intersection"] = self_intersections(
             tris, index, eps, 8, None if selfint_raw else verts)
         out["self_intersection"]["geometry"] = "raw" if selfint_raw else "welded"
+    out["non_solid"] = bool(non_solid)
+    if min_wall and min_wall > 0:
+        out["wall"] = wall_thickness(index, verts, min_wall, wall_probe, eps, 8)
+    out["verdict_fails"] = verdict(out, non_solid)
+    out["verdict"] = "PASS" if not out["verdict_fails"] else "FAIL"
     return out
 
 
@@ -518,7 +715,20 @@ def main():
                     help="score self-intersection on the raw soup instead of "
                          "the welded mesh (pre-consolidation behaviour)")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--gate", action="store_true",
+                    help="exit 1 if any verdict check fails")
+    ap.add_argument("--non-solid", action="store_true",
+                    help="the piece is intentionally open: open edges leave the "
+                         "verdict, the wall/gap check joins it (docs/NON-SOLID.md)")
+    ap.add_argument("--min-wall", type=float, default=None,
+                    help="wall/gap threshold in mm (default off; --non-solid "
+                         "defaults it to %g; 0 disables)" % NOZZLE_MIN_WALL)
+    ap.add_argument("--wall-probe", type=float, default=WALL_PROBE,
+                    help="how far behind a face to look for the far wall, mm")
     args = ap.parse_args()
+    min_wall = args.min_wall
+    if min_wall is None:
+        min_wall = NOZZLE_MIN_WALL if args.non_solid else 0.0
 
     path = Path(args.stl)
     if not path.exists():
@@ -526,10 +736,12 @@ def main():
         return 2
 
     r = validate(path, args.weld, args.sliver_aspect, not args.no_selfint,
-                 args.eps, args.selfint_raw)
+                 args.eps, args.selfint_raw, args.non_solid, min_wall,
+                 args.wall_probe)
+    rc = 1 if (args.gate and r["verdict_fails"]) else 0
     if args.json:
         print(json.dumps(r, indent=2))
-        return 0
+        return rc
 
     print(f"file                      {r['file']}")
     print(f"triangles                 {r['triangles']}")
@@ -555,7 +767,19 @@ def main():
         print(f"selfint_coplanar          {si['coplanar']}")
         for ex in si["examples"]:
             print(f"  example {ex['kind']}: tri {ex['a']} vs tri {ex['b']}")
-    return 0
+    w = r.get("wall")
+    if w:
+        mw = "none within probe" if w["min_wall_mm"] is None else f"{w['min_wall_mm']:.4f} mm"
+        print(f"wall_threshold            {w['threshold_mm']:g} mm (probe {w['probe_mm']:g} mm)")
+        print(f"wall_min                  {mw}")
+        print(f"wall_thin_faces           {w['thin_faces']}")
+        print(f"wall_sheet_faces          {w['sheet_faces']}  (nothing behind within probe)")
+        for ex in w["examples"]:
+            print(f"  example thin: tri {ex['face']} -> tri {ex['hit']} at {ex['mm']} mm")
+    print(f"non_solid                 {'yes' if r['non_solid'] else 'no'}")
+    print(f"verdict                   {r['verdict']}" +
+          (("  [" + "; ".join(r["verdict_fails"]) + "]") if r["verdict_fails"] else ""))
+    return rc
 
 
 if __name__ == "__main__":
