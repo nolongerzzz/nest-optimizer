@@ -26,6 +26,23 @@ Smart build-plate packing for 3D printing.
   number is drawn on the piece, and it follows the piece when you move it.
   See [docs/MEASURE.md](docs/MEASURE.md).
 - Export positioned models as STL (ready to drop into Bambu Studio / Orca / PrusaSlicer)
+- **Carve** is a local carving tool - a handheld rotary tool, not the Cutter's
+  full-plane Split. Pick a blade profile, arm it, then click a face, an **edge**
+  or a **corner** of a piece: the blade is aimed along the outward bisector of
+  whatever faces it can reach there and just that local volume is subtracted.
+  - Three interchangeable profiles: **ball-nose** (a rounded gouge with no
+    stress corner), **flat shave** (a flat-bottomed slab cut), and **V-groove**
+    (a chamfer - cut deeper for a wider one, so one blade gives every size).
+  - A corner gouge and an edge chamfer need no rotation: the blade lays its
+    sweep axis along the edge itself. A `roll` field spins it off that if you
+    want. Depth is the size control; the blade's height follows from it.
+  - Unlike **Subtract**, which consumes bit B, Carve consumes nothing - the same
+    blade carves the next edge too.
+  - On a smoothly curved surface the tessellation is read as one feature, not as
+    a field of tiny edges, so a gouge on a dome is a face carve.
+  - `minWall` still measures along the cut axis only, and the status line says so
+    whenever more than one face is in play, plus what it held back in mm³ when
+    it held anything. See `docs/LOCAL-CARVE.md`
 
 ## How to use
 
