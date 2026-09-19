@@ -1015,6 +1015,16 @@ select:focus, input:focus {
   color: #fecaca;
   background: #3f1212;
 }
+/* Center lock's Pick target sits in an .edit-row, not a .tool-toggle-row, so
+   it needs the same armed treatment spelled out for its own row. */
+.edit-row .btn.tool-active {
+  border-color: #ef4444;
+  color: #fecaca;
+  background: #3f1212;
+}
+#center-lock-ref {
+  margin-bottom: 8px;
+}
 #cutter-status {
   margin-top: 4px;
   margin-bottom: 8px;
