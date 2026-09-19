@@ -6,6 +6,8 @@
   "scripts": {
     "cth:unit": "sh tools/cth-test/run-all.sh",
     "cth:capture": "node tools/cth-test/capture-check.mjs",
+    "3mf:roundtrip": "node tools/3mf-test/roundtrip-check.js",
+    "3mf:drive": "node tools/3mf-test/export-drive-check.mjs",
     "selfint:equiv": "node tools/nso_selfint_equiv_test.js",
     "grid:math": "node tools/nso_surface_grid_test.js",
     "grid:wire": "node tools/nso_wire_grid_test.js",
@@ -20,6 +22,8 @@
   "testSteps": [
     "cth:unit",
     "cth:capture",
+    "3mf:roundtrip",
+    "3mf:drive",
     "selfint:equiv",
     "grid:math",
     "grid:wire",

@@ -32,6 +32,54 @@ Parked modules (repair, sculpt, planar fuse) stay unwired until the owner names 
 Clean no-op mesh for repair checks is `fixtures/box-20mm.stl`, not Thingi10K 40921
 (40921 has 17 bowtie vertices; edge-based checks miss that).
 
+## 3MF export - baked cooling settings
+`nso-cooling-profiles.js` + `nso-3mf.js`, wired into `app-core.js` (the
+`export3MF` block) and `app-join.js` (the button), behind **Export plate 3MF**
+in the Export card. Full write-up: `docs/baked-cooling-settings.md`.
+
+Unlike repair / sculpt / planar fuse, this one **is** wired in.
+
+Two things must not be "tidied up", both confirmed against a real Bambu export
+(stock Bambu PLA Basic @BBL A1M):
+- every value is a single-element array of strings, `["50%"]`, never a scalar;
+- percent fields keep the literal `%`, plain numeric fields do not, even where
+  the number is semantically a percentage (`overhang_fan_speed` is `"100"`,
+  `fan_max_speed` is `"80"`). Bambu's own inconsistency. `KEY_FORMATS` in
+  `nso-cooling-profiles.js` pins this per key and `validateValues()` runs on
+  every export, so a tuned profile cannot silently add or drop a `%`.
+
+`DEFAULT_VALUES` is the confirmed stock set and is frozen. Tuned profiles are
+`overrides` layered on top of it - `breakaway-support`, `fine-detail` and
+`high-flow` are reserved and untuned, and export identical to `default` until
+someone fills them in. Adding a tuned profile means editing that one table and
+nothing else.
+
+`project_settings.config` carries only the 14 confirmed cooling keys. NSO's own
+bookkeeping lives in `Metadata/nso_profile.json` instead, because Bambu warns on
+keys it does not recognise.
+
+Known limitation, confirmed by testing and **documented rather than solved**:
+swapping filament presets in Bambu Studio after opening an export raises "Use
+Modified Value of Filament Preset", and "Discard Modified Value" drops the baked
+settings silently. Inherent to how Bambu reconciles a project against a preset.
+
+Still open: nobody has opened one of these in a real Bambu Studio instance, and
+the `=` vs `:` separator in the source file has not been eyeballed (NSO writes
+JSON - see the doc's "Not yet verified").
+
+Out of scope here: the Grispr G-code post-processing path for multi-material.
+
+## 3MF checks
+`npm run 3mf:roundtrip` is the dependency-free suite (56 checks): it exports a
+real `.3mf` and reads it back with an independent ZIP reader, asserting key set,
+key order, array-of-string shape, byte-exact values including `%`, raw text
+form, determinism, and that the format guard rejects bad values.
+`npm run 3mf:drive` (38 checks) drives the real app in headless Chromium -
+fixture import, Optimize, the actual **Export plate 3MF** click, the real
+download - then takes the saved file apart. Both are in `npm test`. Like the CTH
+browser checks, the drive serves three from devDependencies, not the CDN. On a
+runner whose Chromium predates the installed Playwright, set `CHROME_PATH`.
+
 ## CTH checks
 `npm run cth:unit` is the dependency-free suite (`tools/cth-test/*.test.mjs`,
 also runnable as `./tools/cth-test/run-all.sh`). `npm run cth:capture` drives the
