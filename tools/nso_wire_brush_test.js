@@ -362,6 +362,25 @@ withApp(async (page, logs) => {
   await setCtl(page, 'inp-brush-size', 6);
   await page.waitForTimeout(120);
 
+  /* THE WALL GATE NOW FIRES FIRST, and this section used to record the older
+     answer. A 20 mm hard brush at full force cuts 5 mm deep (intensity *
+     0.25 * radius); the lid is 2.4 mm thick. Before the live wall gate landed,
+     the only thing that caught this was the self-intersection count at
+     pointerup - the stroke was fully computed, the far face was reached, the
+     result was scored, and THEN it was thrown away, with a status line that
+     said "self-intersections rose 0->N".
+
+     That was a true statement about a symptom. The cause is that a 5 mm cut
+     into a 2.4 mm wall leaves nothing, and a user reading "self-intersections
+     rose" has no way to know that the answer is Thicken. The wall gate asks
+     that question before the first dab lands and says so, so the refusal now
+     arrives earlier and names the wall and the floor.
+
+     The self-intersection gate is UNCHANGED and still runs - it is now the
+     third layer rather than the first, and section 6 above still drives it.
+     What is checked here is that the stroke is refused, that the refusal is
+     actionable, and that the piece is untouched, which were always the three
+     things that mattered. */
   console.log('\n=== 10. THE GATE, through a real drag on a real thin wall ===');
   await page.click('#btn-brush');                 // disarm before switching piece
   const lidId = await loadSTL(page, fx('lid_blank.stl'));
@@ -384,9 +403,14 @@ withApp(async (page, logs) => {
   const lidStatus = await statusOf(page);
   console.log('   status: ' + lidStatus);
   check('a stroke that would punch through the wall is REFUSED',
-        /Brush refused/.test(lidStatus), lidStatus);
-  check('...and the refusal names the self-intersection count it caught',
-        /self-intersections rose \d+→\d+/.test(lidStatus), lidStatus);
+        /refused/i.test(lidStatus), lidStatus);
+  check('...and it is the WALL gate that catches it, before the stroke lands',
+        /wall too thin here/i.test(lidStatus), lidStatus);
+  check('...and the refusal names the wall, the floor and the nozzle it came from',
+        /2\.4 mm wall/.test(lidStatus) && /0\.42 mm floor/.test(lidStatus) &&
+        /0\.4 mm nozzle/.test(lidStatus), lidStatus);
+  check('...and tells the user what to do about it',
+        /Thicken first/i.test(lidStatus), lidStatus);
   check('...and the piece is byte-for-byte unchanged',
         lidAfter.tris === lidBefore.tris && Math.abs(lidAfter.volume - lidBefore.volume) < 1e-9,
         'tris ' + lidBefore.tris + ' -> ' + lidAfter.tris +

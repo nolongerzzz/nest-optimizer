@@ -104,7 +104,47 @@ NSO_Thickness.bandWall(loop2, i)                   // 2D probe, BAND preset
 NSO_Thickness.measureLoop(loop2, opts)             // 2D probe, whole section
 NSO_Thickness.safeRadius(requestedR, availableMM, opts)
 NSO_Thickness.describe(report)                     // one status line
+
+// the LIVE probe — build once, ask many (added with Hollow / the stroke gate)
+NSO_Thickness.prepare(rawTris, opts)               // -> a probe, or null
+NSO_Thickness.strokeRefusal(gate)                  // the one wording for a refusal
 ```
+
+### The live probe
+
+Everything above answers a question about a mesh **once**: hand it a soup, get a
+report. That shape is right for a batch check and wrong for a live one, and the
+difference is not style — it is the weld and the grid. Every 3D entry point
+starts with `indexSoup()` (a welded rebuild of the whole soup, a 27-cell
+neighbour scan per vertex) and `buildGrid()` (a bbox hash of every triangle). On
+a piece of any size that *is* the cost, and it is paid again on every call.
+Asking `measureMesh()` per `pointermove` would re-weld a hundred-thousand-
+triangle piece sixty times a second.
+
+`prepare()` pays both once and hands back an object whose queries are a DDA walk
+and nothing else:
+
+```js
+const P = NSO_Thickness.prepare(rawTris, { nozzle: 0.4 });
+
+P.nearest(point, maxDist)       // { face, point, dist } — closest point on the surface
+P.wallAt(point, { normal, probe })   // the wall thickness AT a point
+P.hitsAlong(orig, dir, maxT)    // every crossing, sorted, coincident hits merged
+P.inside(point)                 // parity — is this point in material?
+P.strokeGate({ point, normal, depth, label })   // what a cut of `depth` LEAVES
+```
+
+This is **not a second opinion**. The ray code, the vertex-sharing exclusion
+rule and the threshold resolution are the same ones `measureMesh()` uses, with
+the setup hoisted out — `tools/nso_live_gate_test.js` part 1 compares the two
+face for face on `fixtures/box_open.stl` and gets exact agreement on all 68.
+
+`strokeGate` returns `{ ok, wall_mm, residual_mm, threshold_mm, measured, sheet,
+reason }`. It **refuses**, where `cutWarning` only warns, and the two cover
+different failures — see `docs/HOLLOW.md` §3. Unmeasured is not a pass in
+disguise here either: the probe is widened to `depth + floor + 1 mm` before the
+question is asked, so "nothing behind it" is a measurement about a wall deeper
+than the stroke needs rather than a shrug.
 
 The measuring calls all return the same shape. `cutClearance` is the odd one
 out — a cut is a question about several axes at once, so its report is a list of
@@ -257,6 +297,9 @@ the slicer can actually print.
 | `app-join.js` `subtractSoupBFromA` (Join / Subtract) | `cutClearance` | **wired**, as a non-blocking status-line warning |
 | `app-carve.js` `carveAt` (Local-Carve) | `cutClearance` | **wired** via the same core; same warning on the carve's own status line |
 | `app-join.js` / `app.js` `buildCutVolume` | — | unchanged by design; it still decides what gets cut (see above) |
+| `app-carve.js` `carveAt` (Local-Carve) | `prepare` + `strokeGate` | **wired**, and this one **refuses**, before the kernel loads |
+| `app-brush.js` (Freehand Brush) | `prepare` + `strokeGate` | **wired**, three times: first dab, every dab, and the result at pointerup |
+| `nso_hollow.js` (Hollow / Fill) | `floorFor`, `prepare`, `measureRegion` | **wired**; the floor and every ray it casts come from here |
 | `nso_skin.js` | — | **not yet**; see below |
 
 ### What the retrofit did and did not change
@@ -294,7 +337,10 @@ separate step from changing what gets cut.
   should stay undone until a cut path exists that can offer the user a choice:
   the audit's corner carve is a legitimate cut, so a blanket refusal would
   remove a feature rather than add a guard. What is missing is a way to say
-  "this severs a wall — continue?", not a stricter check.
+  "this severs a wall — continue?", not a stricter check. `strokeGate` does
+  refuse, and that is not a change of mind about this one: it asks a different
+  question (what the cut *leaves* at the point, not whether it *severs* a
+  member) and the corner gouge passes it.
 - **The probe samples, it does not prove.** 5x5 lines per axis on the cut's
   AABB (`tools/nso_cut_clearance_wire_test.js` re-runs the known case at 11x11
   to show the verdict is not a sampling accident). A wall threatened only
@@ -314,5 +360,8 @@ separate step from changing what gets cut.
 ```sh
 npm run wall:test          # the canonical checker + the retrofit's A/B proof
 npm run wall:cut           # the cut-path wiring, driven through the real app
+npm run live:gate          # the live probe, and the Carve / Brush stroke gate
+npm run hollow             # Hollow and Fill, canonical checker before and after
+npm run wire:hollow        # the Hollow / Fill buttons, driven through the real app
 python3 tools/mesh_validate.py <file.stl> --non-solid   # the reference
 ```

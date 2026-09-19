@@ -79,6 +79,10 @@
    measureMesh(rawTris, opts)           -> report (3D probe, whole mesh)
    measureRegion(rawTris, faces, opts)  -> report (3D probe, a face subset)
    cutClearance(rawTris, cutLo, cutHi, opts) -> what a PROPOSED cut leaves standing
+   prepare(rawTris, opts)               -> a LIVE probe: weld and grid once, then
+                                           .nearest / .wallAt / .hitsAlong /
+                                           .inside / .strokeGate per query
+   strokeRefusal(gate)                  -> the one wording for a refused stroke
    loopWallAt(loop2, i, opts)           -> { mm, measured, ... } (2D probe)
    cornerWall(loop2, i) / bandWall(loop2, i) -> the fillet clamp's two shapes
    measureLoop(loop2, opts)             -> report (2D probe, whole section)
@@ -266,7 +270,18 @@
         }
       }
     }
-    return { grid: grid, cell: cell, invC: invC, boxes: boxes };
+    /* The occupied cell range, so a closest-point search with no caller bound
+       still has one. Costs one pass over the boxes and nothing at query time. */
+    var loCell = [Infinity, Infinity, Infinity], hiCell = [-Infinity, -Infinity, -Infinity];
+    for (var q2 = 0; q2 < n; q2++) {
+      for (var a3 = 0; a3 < 3; a3++) {
+        var c0 = Math.floor(boxes[q2][0][a3] * invC), c1 = Math.floor(boxes[q2][1][a3] * invC);
+        if (c0 < loCell[a3]) loCell[a3] = c0;
+        if (c1 > hiCell[a3]) hiCell[a3] = c1;
+      }
+    }
+    if (!n) { loCell = [0, 0, 0]; hiCell = [0, 0, 0]; }
+    return { grid: grid, cell: cell, invC: invC, boxes: boxes, loCell: loCell, hiCell: hiCell };
   }
 
   /* ------------------------------------------------------- 3D probe: a mesh */
@@ -894,6 +909,408 @@
              withPreset({ fallback: LEGACY_FALLBACK_MM }, opts)));
   }
 
+  /* ============================================================ LIVE PROBE
+
+     Everything above answers a question about a mesh ONCE: hand it a soup, get
+     a report. That shape is right for a batch check and wrong for a live one,
+     and the difference is not style - it is the weld and the grid. Every 3D
+     entry point above starts with indexSoup() (a welded rebuild of the whole
+     soup, a 27-cell neighbour scan per vertex) and buildGrid() (a bbox hash of
+     every triangle). On a piece of any size that is the entire cost, and it is
+     paid again on every single call. Asking measureMesh() per pointermove
+     would re-weld a hundred-thousand-triangle piece sixty times a second.
+
+     So: build once, ask many. prepare() pays the weld and the grid exactly
+     once and hands back an object whose queries are a DDA walk and nothing
+     else. The ray code, the exclusion rule and the threshold are the SAME ones
+     measureMesh() uses - this is not a second opinion, it is the same probe
+     with the setup hoisted out - so a live answer and a batch answer about the
+     same spot agree.
+
+     The three queries, and who they are for:
+
+       nearest(point)        closest point on the surface, and which face.
+       wallAt(point, o)      the wall thickness AT a point: nearest surface
+                             point, its inward normal, first surface behind.
+                             Task: "how thick is the wall right here?"
+       hitsAlong(o, d, maxT) every surface a ray crosses, sorted and coincident
+                             hits merged - allHits() made public, because a
+                             solid voxelisation is a parity question and
+                             nothing else in this repo can answer it.
+
+     plus the gate the two live tools need:
+
+       strokeGate(req)       what a stroke/cut of `depth` at a point LEAVES.
+
+     A NOTE ON WHAT THE GATE IS FOR. cutWarning() above is deliberately a
+     warning and never a refusal, because severing a wall is what Local-Carve's
+     corner gouge does on purpose. strokeGate() is the opposite: it is a
+     REFUSAL, and it covers a different failure. The brush's area-weighted
+     front-facing filter (NSO_brushFacing) already stops a stamp grabbing the
+     vertices of the FAR face - that is the "stroke reaches through" failure.
+     It says nothing at all about a stroke that only ever touches the near face
+     and still leaves 0.2 mm of wall behind it. That is this gate's failure,
+     and the two are independent: either can fire without the other.
+     ============================================================ */
+
+  /* Closest point on a triangle to p (Ericson, Real-Time Collision Detection
+     5.1.5). Returns the point; squared distance is the caller's. */
+  function closestOnTri(p, T) {
+    var a = T[0], b = T[1], c = T[2];
+    var ab = sub(b, a), ac = sub(c, a), ap = sub(p, a);
+    var d1 = dot(ab, ap), d2 = dot(ac, ap);
+    if (d1 <= 0 && d2 <= 0) return a;
+    var bp = sub(p, b);
+    var d3 = dot(ab, bp), d4 = dot(ac, bp);
+    if (d3 >= 0 && d4 <= d3) return b;
+    var vc = d1 * d4 - d3 * d2;
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+      var v1 = d1 / (d1 - d3);
+      return [a[0] + v1 * ab[0], a[1] + v1 * ab[1], a[2] + v1 * ab[2]];
+    }
+    var cp = sub(p, c);
+    var d5 = dot(ab, cp), d6 = dot(ac, cp);
+    if (d6 >= 0 && d5 <= d6) return c;
+    var vb = d5 * d2 - d1 * d6;
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+      var w1 = d2 / (d2 - d6);
+      return [a[0] + w1 * ac[0], a[1] + w1 * ac[1], a[2] + w1 * ac[2]];
+    }
+    var va = d3 * d6 - d5 * d4;
+    if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+      var w2 = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+      return [b[0] + w2 * (c[0] - b[0]), b[1] + w2 * (c[1] - b[1]), b[2] + w2 * (c[2] - b[2])];
+    }
+    var den = 1 / (va + vb + vc);
+    var vv = vb * den, ww = vc * den;
+    return [a[0] + ab[0] * vv + ac[0] * ww,
+            a[1] + ab[1] * vv + ac[1] * ww,
+            a[2] + ab[2] * vv + ac[2] * ww];
+  }
+
+  function dist2(a, b) {
+    var dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+    return dx * dx + dy * dy + dz * dz;
+  }
+
+  /* The nearest surface point, found by widening rings of grid cells around
+     `point` until the next ring cannot beat what we already have.
+
+     `maxDist` is not an optimisation, it is how the field sampler stays cheap:
+     a caller that already knows an upper bound on the answer (a distance
+     transform's approximation, say) passes it and the search stops one ring
+     out instead of spiralling over the whole grid. Without one the search is
+     unbounded and still correct, just slower. */
+  function nearestIn(G, tris, point, maxDist) {
+    var cell = G.cell, invC = G.invC, grid = G.grid;
+    var bx = Math.floor(point[0] * invC), by = Math.floor(point[1] * invC), bz = Math.floor(point[2] * invC);
+    var best = Infinity, bestF = -1, bestP = null;
+    var cap = (typeof maxDist === 'number' && maxDist > 0) ? maxDist : Infinity;
+
+    /* A POINT OFF THE PIECE IS SCANNED, NOT SPIRALLED FOR.
+
+       Widening rings is the right structure when the answer is a cell or two
+       away, which is the case for every caller here - a surface point, or an
+       interior point with a distance-transform bound. It is the wrong one when
+       the point is nowhere near the piece: the rings are empty until the
+       widening reaches the geometry, and each one costs O(r^2) cells to find
+       nothing in. Measured on fixtures/box_open.stl with a point 8.6 m away:
+       4.7 seconds, for an answer a linear pass over 68 triangles gives in
+       microseconds.
+
+       So when the query cell is outside the grid's occupied range, sweep every
+       triangle instead. It is O(n), it is exact, and it cannot be the hot path
+       by construction - being outside the piece's own bounding box is what
+       selects it. */
+    var cell0 = [bx, by, bz], outside = false;
+    for (var ax = 0; ax < 3; ax++) {
+      if (cell0[ax] < G.loCell[ax] - 1 || cell0[ax] > G.hiCell[ax] + 1) { outside = true; break; }
+    }
+    if (outside) {
+      for (var lf = 0; lf < tris.length; lf++) {
+        var lq = closestOnTri(point, tris[lf]);
+        var ld = dist2(point, lq);
+        if (ld < best) { best = ld; bestF = lf; bestP = lq; }
+      }
+      if (bestF < 0 || (isFinite(cap) && Math.sqrt(best) > cap)) return null;
+      return { face: bestF, point: bestP, dist: Math.sqrt(best) };
+    }
+
+    /* Inside the occupied range the widening is bounded by that range, so it
+       terminates whether or not the caller gave a distance. */
+    var extent = Math.max(G.hiCell[0] - G.loCell[0], G.hiCell[1] - G.loCell[1],
+                          G.hiCell[2] - G.loCell[2]) + 3;
+    var ringCap = isFinite(cap) ? Math.min(extent, Math.ceil(cap * invC) + 2) : extent;
+    for (var ring = 0; ring <= ringCap; ring++) {
+      /* Everything in ring r is at least (r-1)*cell away, so once the best hit
+         beats that, no later ring can improve on it. */
+      if (bestF >= 0 && Math.sqrt(best) <= (ring - 1) * cell) break;
+      var found = false;
+      for (var ix = bx - ring; ix <= bx + ring; ix++) {
+        for (var iy = by - ring; iy <= by + ring; iy++) {
+          for (var iz = bz - ring; iz <= bz + ring; iz++) {
+            /* Only the shell of the box; the interior was done last ring. */
+            if (ring > 0 &&
+                Math.abs(ix - bx) !== ring && Math.abs(iy - by) !== ring && Math.abs(iz - bz) !== ring) continue;
+            var bucket = grid.get(ix + ',' + iy + ',' + iz);
+            if (!bucket) continue;
+            found = true;
+            for (var i = 0; i < bucket.length; i++) {
+              var f = bucket[i];
+              var q = closestOnTri(point, tris[f]);
+              var d2v = dist2(point, q);
+              if (d2v < best) { best = d2v; bestF = f; bestP = q; }
+            }
+          }
+        }
+      }
+      /* An empty ring is not a stopping point: a cell with no triangles in it
+         says nothing about the next one out. The bound above ends the loop. */
+      void found;
+    }
+    /* A bounded search that found nothing within its bound answers "not within
+       maxDist", which is a real answer and not a failure to look. */
+    if (bestF < 0) return null;
+    return { face: bestF, point: bestP, dist: Math.sqrt(best) };
+  }
+
+  /* Nearest surface hit along a ray, with measureMesh's exclusion rule: the
+     source face never counts, and neither does anything sharing a welded
+     vertex with it (an adjacent face is the same surface, not the wall
+     behind). `from` is the source face index, or -1 for none. */
+  function firstHitFrom(G, tris, vids, orig, d, maxT, eps, from) {
+    var cell = G.cell, invC = G.invC, grid = G.grid;
+    var ci = [Math.floor(orig[0] * invC), Math.floor(orig[1] * invC), Math.floor(orig[2] * invC)];
+    var step = [0, 0, 0], tMax = [Infinity, Infinity, Infinity], tDelta = [Infinity, Infinity, Infinity];
+    for (var a = 0; a < 3; a++) {
+      if (d[a] > 1e-15) {
+        step[a] = 1; tMax[a] = ((ci[a] + 1) * cell - orig[a]) / d[a]; tDelta[a] = cell / d[a];
+      } else if (d[a] < -1e-15) {
+        step[a] = -1; tMax[a] = (ci[a] * cell - orig[a]) / d[a]; tDelta[a] = -cell / d[a];
+      }
+    }
+    var mine = (from >= 0 && vids[from]) ? vids[from] : null;
+    var best = null, bestU = null, seen = new Set(), entry = 0;
+    while (entry <= maxT) {
+      if (best !== null && entry > best) break;
+      var bucket = grid.get(ci[0] + ',' + ci[1] + ',' + ci[2]);
+      if (bucket) {
+        for (var i = 0; i < bucket.length; i++) {
+          var u = bucket[i];
+          if (u === from || seen.has(u)) continue;
+          seen.add(u);
+          if (mine) {
+            var other = vids[u];
+            if (other[0] === mine[0] || other[0] === mine[1] || other[0] === mine[2] ||
+                other[1] === mine[0] || other[1] === mine[1] || other[1] === mine[2] ||
+                other[2] === mine[0] || other[2] === mine[1] || other[2] === mine[2]) continue;
+          }
+          var s = rayTri(orig, d, tris[u], eps);
+          if (s !== null && s <= maxT && (best === null || s < best)) { best = s; bestU = u; }
+        }
+      }
+      var k = (tMax[0] < tMax[1]) ? (tMax[0] < tMax[2] ? 0 : 2) : (tMax[1] < tMax[2] ? 1 : 2);
+      if (!isFinite(tMax[k])) break;
+      entry = tMax[k];
+      ci[k] += step[k];
+      tMax[k] += tDelta[k];
+    }
+    return best === null ? null : { t: best, face: bestU };
+  }
+
+  /* Pay the weld and the grid once. Everything hung off the result is a walk. */
+  function prepare(rawTris, opts) {
+    var o = resolveOpts(opts);
+    if (!rawTris || rawTris.length < 9) return null;
+    var idx = indexSoup(rawTris, o.weldTol);
+    var tris = idx.tris, vids = idx.vids;
+    if (!tris.length) return null;
+    var G = buildGrid(tris);
+
+    var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (var t = 0; t < tris.length; t++) {
+      for (var k = 0; k < 3; k++) {
+        var P = tris[t][k];
+        for (var a = 0; a < 3; a++) {
+          if (P[a] < lo[a]) lo[a] = P[a];
+          if (P[a] > hi[a]) hi[a] = P[a];
+        }
+      }
+    }
+
+    /* The face's own outward unit normal, or null when it is degenerate. */
+    function faceNormal(f) {
+      var P = tris[f];
+      var N = cross(sub(P[1], P[0]), sub(P[2], P[0]));
+      var L = norm(N);
+      if (!(L > 0)) return null;
+      return [N[0] / L, N[1] / L, N[2] / L];
+    }
+
+    var self = {
+      kind: 'probe',
+      nozzle_mm: o.nozzle,
+      threshold_mm: o.minWall,
+      probe_mm: o.probe,
+      faceCount: tris.length,
+      lo: lo, hi: hi,
+      tris: tris,
+      vids: vids,
+
+      faceNormal: faceNormal,
+
+      nearest: function (point, maxDist) { return nearestIn(G, tris, point, maxDist); },
+
+      hitsAlong: function (orig, d, maxT) {
+        return allHits(G, tris, orig, d, (typeof maxT === 'number') ? maxT : Infinity, o.eps);
+      },
+
+      /* Is this point inside the solid? Parity of the crossings on a +Z ray.
+         Coincident hits are already merged by allHits, which is what keeps a
+         ray that grazes the diagonal of a quad from flipping parity twice. */
+      inside: function (point) {
+        var reach = (hi[2] - point[2]) + 1;
+        if (reach <= 0) return false;
+        var hits = allHits(G, tris, point, [0, 0, 1], reach, o.eps);
+        return (hits.length & 1) === 1;
+      },
+
+      /* The wall thickness at a point.
+
+         `o2.normal` (outward) short-circuits the nearest-face lookup when the
+         caller already has one - a raycast hit carries one, and using it keeps
+         the measurement on the face the user actually pointed at instead of a
+         neighbour that happens to be a hair closer.
+
+         `o2.probe` widens the look-behind. A caller gating a cut of depth d
+         needs to distinguish "thicker than the probe" from "thick enough",
+         and the default 5 mm cannot do that once d approaches it; strokeGate()
+         widens it for exactly that reason. */
+      wallAt: function (point, o2) {
+        o2 = o2 || {};
+        var reach = (typeof o2.probe === 'number' && o2.probe > 0) ? o2.probe : o.probe;
+        var near = nearestIn(G, tris, point, o2.maxDist);
+        if (!near) {
+          return { mm: null, measured: false, sheet: false, reason: 'nothing to measure - empty mesh' };
+        }
+        var N = null;
+        if (o2.normal) {
+          var L = norm(o2.normal);
+          if (L > 0) N = [o2.normal[0] / L, o2.normal[1] / L, o2.normal[2] / L];
+        }
+        if (!N) N = faceNormal(near.face);
+        if (!N) {
+          return { mm: null, measured: false, sheet: false, surface: near.point, face: near.face,
+                   reason: 'the face at this point is degenerate - nothing measured' };
+        }
+        var d = [-N[0], -N[1], -N[2]];
+        var hit = firstHitFrom(G, tris, vids, near.point, d, reach, o.eps, near.face);
+        if (!hit) {
+          return {
+            mm: null, measured: false, sheet: true,
+            surface: near.point, normal: N, face: near.face, probe_mm: reach,
+            reason: 'no surface behind this one within ' + round3(reach) + ' mm'
+          };
+        }
+        return {
+          mm: hit.t, measured: true, sheet: false,
+          surface: near.point, normal: N, face: near.face, hit: hit.face, probe_mm: reach,
+          reason: 'wall ' + round3(hit.t) + ' mm'
+        };
+      },
+
+      /* What a stroke or cut of `depth` at this point LEAVES standing. */
+      strokeGate: function (req) { return strokeGate(self, req, o); }
+    };
+    return self;
+  }
+
+  /* The live gate.
+
+     req: { point, normal?, depth, minWall?, nozzle?, label? }
+
+     `depth` is how far the operation moves the surface INWARD at this point -
+     for the brush that is intensity * depthScale * radius at the stamp centre,
+     for a carve it is the blade depth. Zero is legal and asks the plain
+     question, "is the wall here already printable?".
+
+     THE UNMEASURED CASE is where a careless gate would go wrong in the unsafe
+     direction. A face with nothing behind it within the probe is not a pass -
+     it is an unknown, and measureMesh() is right to count those as `sheets`
+     rather than failures. But an unknown is only safe to wave through when the
+     probe itself already proves the answer, so the probe is widened to
+     depth + floor + 1 mm first. Past that distance "nothing found" genuinely
+     means "more than enough", and letting it through is a measurement, not an
+     assumption. */
+  function strokeGate(P, req, base) {
+    req = req || {};
+    var o = resolveOpts({
+      nozzle: (req.nozzle != null) ? req.nozzle : (base ? base.nozzle : undefined),
+      minWall: (req.minWall != null) ? req.minWall : (base ? base.minWall : undefined),
+      probe: (base ? base.probe : undefined)
+    });
+    var depth = (typeof req.depth === 'number' && req.depth > 0) ? req.depth : 0;
+    var out = {
+      kind: 'stroke', label: req.label || 'stroke',
+      nozzle_mm: o.nozzle, threshold_mm: o.minWall,
+      depth_mm: depth, wall_mm: null, residual_mm: null,
+      measured: false, sheet: false, ok: true, reason: ''
+    };
+    if (!P) { out.reason = 'nothing to measure - no piece'; return out; }
+    if (!req.point) { out.reason = 'nothing to measure - no point'; return out; }
+
+    var reach = Math.max(o.probe, depth + o.minWall + 1);
+    var w = P.wallAt(req.point, { normal: req.normal, probe: reach });
+    out.surface = w.surface || null;
+    out.normal = w.normal || null;
+
+    if (!w.measured) {
+      out.sheet = !!w.sheet;
+      /* The probe was widened past depth + floor before asking, so "nothing
+         behind" here is a measured statement about a wall deeper than the
+         stroke needs, not a shrug. */
+      out.reason = w.sheet
+        ? 'no surface within ' + round3(reach) + ' mm behind this one - deeper than this ' +
+          round3(depth) + ' mm ' + out.label + ' needs'
+        : w.reason;
+      return out;
+    }
+
+    out.measured = true;
+    out.wall_mm = w.mm;
+    out.residual_mm = w.mm - depth;
+
+    if (w.mm < o.minWall - WELD_TOL) {
+      out.ok = false;
+      out.reason = 'the wall here is already ' + round3(w.mm) + ' mm, under the ' +
+                   round3(o.minWall) + ' mm floor for a ' + round3(o.nozzle) + ' mm nozzle';
+      return out;
+    }
+    if (out.residual_mm < o.minWall - WELD_TOL) {
+      out.ok = false;
+      out.reason = 'a ' + round3(depth) + ' mm ' + out.label + ' into a ' + round3(w.mm) +
+                   ' mm wall leaves ' + round3(out.residual_mm) + ' mm, under the ' +
+                   round3(o.minWall) + ' mm floor for a ' + round3(o.nozzle) + ' mm nozzle';
+      return out;
+    }
+    out.reason = 'leaves ' + round3(out.residual_mm) + ' mm of wall, floor ' + round3(o.minWall) + ' mm';
+    return out;
+  }
+
+  /* The ONE wording for a refused stroke, so Carve and the Brush say it
+     identically. Returns '' when there is nothing to refuse.
+
+     Unlike cutWarning() this is a REFUSAL and says so: the caller's job is to
+     abandon the stroke and print this, not to commit and warn. The lead phrase
+     is fixed because it is the instruction - the way out of this is Thicken,
+     and a user who is told only "too thin" has to guess that. */
+  function strokeRefusal(gate) {
+    if (!gate || gate.ok) return '';
+    var head = (gate.label ? (gate.label.charAt(0).toUpperCase() + gate.label.slice(1)) : 'Stroke') +
+               ' refused - wall too thin here, Thicken first';
+    return head + ': ' + gate.reason + ' - piece unchanged';
+  }
+
   /* ------------------------------------------------- the cut-path readout */
 
   /* The ONE wording for a cut's nozzle-safety finding, so every cut site says
@@ -924,6 +1341,9 @@
   }
 
   var api = {
+    prepare: prepare,
+    strokeRefusal: strokeRefusal,
+    closestOnTri: closestOnTri,
     cutClearance: cutClearance,
     cutWarning: cutWarning,
     LEGACY_FALLBACK_MM: LEGACY_FALLBACK_MM,

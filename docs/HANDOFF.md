@@ -59,6 +59,7 @@ Current roster, by category:
 | Skin patch (`app-skin-patch.js`) | **none** | — it reads no existing geometry at all | header comment |
 | Texture (`app-texture.js`, the curved band) | sub-region | the band's own facets, `nsoMaskIsExcludedRaw(m, face.n, face.d)` per facet; the caps do not block it | `docs/CURVED-SKIN.md` §7 |
 | Brush (`app-brush.js`) | sub-region | every face the stroke **and its seam band** land on, `nsoMaskPlaneList(m)` | `docs/BRUSH.md` §paint scope |
+| Hollow / Fill (`app-hollow.js`) | whole-piece | `nsoMaskCount(m) > 0` | `docs/HOLLOW.md` §5 |
 
 ### The SELECT list is an operand; the EXCLUDE list is still only a veto
 
