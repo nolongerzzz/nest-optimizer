@@ -2023,7 +2023,14 @@ select:focus, input:focus {
 .photoset-drawer[hidden] { display: none; }
 .photoset-drawer {
   position: absolute;
-  top: 12px;
+  /* Below the viewport's top-right menu row, not on top of it. Measured: the
+     Finish menu summary runs 8..48px from the top of .viewport-section, so 56
+     clears it with the same 8px gap the menus use between themselves. Without
+     this the drawer's own heading and its Close button sat underneath Finish
+     and could not be clicked. The top button bar can wrap to a second row on a
+     narrow viewport and will then overlap the drawer's first rows - it keeps
+     its higher z-index and stays clickable, which is the right way round. */
+  top: 56px;
   right: 12px;
   bottom: 12px;
   width: min(560px, calc(100% - 24px));
@@ -2061,6 +2068,8 @@ select:focus, input:focus {
 .ps-blurb { margin: 0 0 8px; color: var(--muted); }
 
 .ps-counts, .ps-tally, .ps-tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+/* .btn is width:100% globally, which stacks these two one per row. */
+.ps-tools .btn { width: auto; }
 .ps-chip {
   padding: 2px 8px;
   border-radius: 999px;

@@ -203,19 +203,20 @@
   function renderCounts(into) {
     var r = STATE.report;
     var row = el('div', 'ps-counts');
+    /* [status, count, label, singular label where it differs] */
     var bits = [
       ['pass', r.counts.pass, 'in contract'],
       ['fail', r.counts.fail, 'out of contract'],
-      ['warn', r.counts.warn, 'warnings'],
+      ['warn', r.counts.warn, 'warnings', 'warning'],
       ['todo', r.counts.todo, 'to confirm'],
       ['unknown', r.counts.unknown, 'no data'],
-      ['deferred', r.counts.deferred, 'need a reconstruction']
+      ['deferred', r.counts.deferred, 'need a reconstruction', 'needs a reconstruction']
     ];
     bits.forEach(function (b) {
       if (!b[1]) return;
       var chip = el('span', 'ps-chip ps-' + b[0]);
       chip.appendChild(el('b', null, b[1]));
-      chip.appendChild(document.createTextNode(' ' + b[2]));
+      chip.appendChild(document.createTextNode(' ' + (b[1] === 1 && b[3] ? b[3] : b[2])));
       row.appendChild(chip);
     });
     into.appendChild(row);
