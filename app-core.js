@@ -364,6 +364,15 @@ function undoLast() {
     } else if (state.cutterOpen && state.editId === m.id) {
       showEditPreview();
     }
+    /* The paint was put back at the top of this branch, but nsoMaskRestore
+       repaints against whatever mesh was in the scene AT THAT MOMENT - the
+       post-op one, which no longer has the faces the restored lists name. The
+       overlay it built was therefore empty, and nothing rebuilt it once the
+       old mesh went back in below. So the lists came back and the yellow and
+       the pink did not, which reads as "undo lost my paint". Repaint here,
+       after the placed instance is re-seated, and it lands on the geometry the
+       clicks were made against. */
+    if (typeof nsoMaskRepaint === 'function') nsoMaskRepaint();
     /* An op that moved the piece as well as reshaping it puts the pose back
        here, in the SAME entry, so it is still one Undo per op. Seat here is
        the first: it bakes a free rotation into the soup (the pose model
