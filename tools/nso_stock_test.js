@@ -651,7 +651,15 @@ console.log('\n== 9. what this first version does not do, and says so ==');
     !/document\.|window\.[a-z]|getActiveModel|setStatus|\bstate\./.test(stripComments(src)));
 
   const app = fs.readFileSync(path.join(ROOT, 'app-stock.js'), 'utf8');
-  check('app-stock.js declares its paint scope', /PAINT SCOPE:\s*NONE/.test(app));
+  /* Two paths, two answers, and both have to be written down. The button adds
+     a piece and reads no face of any other, which is `none`; a card adjustment
+     re-generates the whole block in place, which is `whole-piece` - see the
+     "Live editing" section of docs/STOCK.md. Asserting only one of them would
+     let the other rot. */
+  check('app-stock.js declares the CREATE path\'s paint scope',
+    /PAINT SCOPE, THE CREATE PATH:\s*NONE/.test(app));
+  check('app-stock.js declares the UPDATE path\'s paint scope',
+    /PAINT SCOPE:\s*WHOLE-PIECE/.test(app));
   check('...and carries no arithmetic of its own - it reads controls and calls the module',
     !/Math\.cbrt|Math\.PI/.test(stripComments(app)));
 

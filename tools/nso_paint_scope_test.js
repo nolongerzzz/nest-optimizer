@@ -65,6 +65,8 @@ const ROSTER = [
     test: /NSO_brushPaintCheck/,                            standDown: /Brush stood down - ' \+ [\w.]+ \+ ' painted face\(s\)/ },
   { feature: 'Attach',         file: 'app-assemble.js',        scope: 'WHOLE-PIECE',
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Attach stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
+  { feature: 'Stock update',   file: 'app-stock.js',           scope: 'WHOLE-PIECE',
+    test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Stock stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
 ];
 
 console.log('== every paint-aware feature declares its scope in its own source ==');
