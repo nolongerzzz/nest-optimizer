@@ -12,9 +12,12 @@
  *     back must match the width, height, angle, length and feature it was
  *     written with, and the built geometry must MEASURE that width and angle.
  *     Nothing here is a default: the check asserts meta.assumed is false.
- *  3. REAL FILE. Set NSO_GCODE_REAL=/path/to/a.gcode.3mf to run the same
- *     measurements over a real Bambu Studio slice. Skipped, loudly, when unset
- *     - it needs a file that is not in this repo.
+ *  3. REAL FILE. The same measurements over real Bambu Studio slices. Two are
+ *     committed (fixtures/3mf/tabletop.gcode.3mf and
+ *     supportwithinsupport.gcode.3mf) so this tier runs by default;
+ *     NSO_GCODE_REAL=/path/to/a.gcode.3mf points it at others instead. The
+ *     hand-verified measurements off those two files live in
+ *     tools/gcode-test/gcode-zfilter-check.js.
  *
  * Run: node tools/gcode-test/gcode-lines-check.js
  */
@@ -475,10 +478,16 @@ async function refusals() {
 section('7. Real Bambu Studio slice (NSO_GCODE_REAL)');
 // ===========================================================================
 async function realFile() {
-  const p = process.env.NSO_GCODE_REAL;
+  // Two real sliced files are now committed, so this tier runs by default
+  // instead of skipping - it was the documented open item. NSO_GCODE_REAL still
+  // overrides, to point the same measurements at any other slice.
+  const COMMITTED = [
+    path.join(REPO, 'fixtures', '3mf', 'tabletop.gcode.3mf'),
+    path.join(REPO, 'fixtures', '3mf', 'supportwithinsupport.gcode.3mf')
+  ].filter(f => fs.existsSync(f));
+  const p = process.env.NSO_GCODE_REAL || COMMITTED.join(path.delimiter);
   if (!p) {
-    console.log('  SKIPPED - set NSO_GCODE_REAL=/path/to/a.gcode.3mf to run this tier.');
-    console.log('  It needs a real sliced project, which is not in this repo.');
+    console.log('  SKIPPED - no real slice found and NSO_GCODE_REAL is unset.');
     return;
   }
   for (const one of p.split(path.delimiter).filter(Boolean)) {
@@ -490,13 +499,17 @@ async function realFile() {
     ok(res.parsed.features.length > 0, label + ': feature groups found (' + res.parsed.features.length + ')');
     ok(res.parsed.meta.filamentDiameterFromFile, label + ': filament diameter read from the file');
     ok(res.parsed.meta.assumed === false, label + ': nothing assumed - all numbers came from the file');
-    const ws = res.parsed.moves.map(m => m.width);
-    const lo = Math.min(...ws), hi = Math.max(...ws);
+    // Fold, never spread: a real slice is hundreds of thousands of moves and
+    // `Math.min(...arr)` blows the argument limit long before that.
+    const span = (key) => res.parsed.moves.reduce(
+      (a, m) => (m[key] < a[0] ? a[0] = m[key] : 0, m[key] > a[1] ? a[1] = m[key] : 0, a),
+      [Infinity, -Infinity]);
+    const [lo, hi] = span('width');
     ok(lo > 0.05 && hi < 3.0, label + ': widths are physically plausible (' +
        lo.toFixed(3) + ' .. ' + hi.toFixed(3) + ' mm)');
-    const hs = res.parsed.moves.map(m => m.height);
-    ok(Math.min(...hs) > 0.01 && Math.max(...hs) < 1.5, label + ': heights are plausible (' +
-       Math.min(...hs).toFixed(3) + ' .. ' + Math.max(...hs).toFixed(3) + ' mm)');
+    const [hLo, hHi] = span('height');
+    ok(hLo > 0.01 && hHi < 1.5, label + ': heights are plausible (' +
+       hLo.toFixed(3) + ' .. ' + hHi.toFixed(3) + ' mm)');
     console.log('  ' + label + ': features = ' + res.parsed.features.map(f => f.name).join(', '));
     console.log('  ' + label + ': ' + res.parsed.layers.length + ' layers, ' +
                 res.parsed.moves.length + ' moves, widths ' + lo.toFixed(3) + '-' + hi.toFixed(3) + ' mm');

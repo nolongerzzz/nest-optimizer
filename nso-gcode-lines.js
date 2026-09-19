@@ -467,6 +467,203 @@
   }
 
   // ===========================================================================
+  // Z-height filtering - one layer in true isolation
+  // ===========================================================================
+  //
+  // Feature grouping alone answers "which moves are Outer wall". It does NOT
+  // answer "which moves are Outer wall ON THIS LAYER": a feature group is every
+  // move of that feature at every height, so 73 layers of wall arrive stacked
+  // and overlaid and a single layer's construction cannot be read off it, let
+  // alone selected. The filter below adds the missing axis.
+  //
+  // A move prints at one Z (the nozzle Z, which is the TOP of its bead), so a
+  // window is a Z interval and a move is in it when its printing Z is inside.
+  // Testing the printing Z and not the bead's span is deliberate: the bead
+  // hangs DOWN into the layer below, so a span test would pull every layer's
+  // beads into its neighbour's window and defeat the isolation.
+  //
+  // The window is the same shape the reference capture box in
+  // `docs/reference/joint_microscope_3d.html` uses - a centre and a vertical
+  // half-extent, `|mz - cz| <= h` - so a window can be one layer or a slab
+  // several layers thick, and one layer is just the case where it is tight.
+
+  var Z_EPS = 1e-6;    // mm; Z values come out of text, so compare with slack
+
+  /**
+   * A Z window. `zLo`/`zHi` are inclusive bounds on a move's printing Z.
+   * @param {number} zLo
+   * @param {number} zHi
+   * @returns {{zLo: number, zHi: number}}
+   */
+  function zWindow(zLo, zHi) {
+    return zLo <= zHi ? { zLo: zLo, zHi: zHi } : { zLo: zHi, zHi: zLo };
+  }
+
+  /**
+   * The window a centre and a vertical half-extent describe - the reference
+   * capture box's `|mz - cz| <= h` written as an interval.
+   */
+  function zWindowAround(z, half) {
+    var h = half > 0 ? half : 0;
+    return zWindow(z - h, z + h);
+  }
+
+  /**
+   * The window that holds exactly one layer and nothing else: that layer's own
+   * printing Z, with only comparison slack either side.
+   * @param {object} parsed  a parseGcode() result
+   * @param {number} li      layer index
+   * @returns {{zLo: number, zHi: number}|null}
+   */
+  function layerZWindow(parsed, li) {
+    var L = parsed && parsed.layers && parsed.layers[li];
+    if (!L) return null;
+    // The layer's Z as its own moves report it, not the CHANGE_LAYER tag's
+    // guess - the moves are what the window has to match.
+    var z = L.z;
+    for (var i = L.moveStart; i < L.moveEnd; i++) {
+      if (parsed.moves[i]) { z = parsed.moves[i].z; break; }
+    }
+    return zWindow(z - Z_EPS, z + Z_EPS);
+  }
+
+  /** True when a move prints inside the window. */
+  function moveInZWindow(mv, win) {
+    if (!mv || !win) return false;
+    return mv.z >= win.zLo - Z_EPS && mv.z <= win.zHi + Z_EPS;
+  }
+
+  /** The moves of a list that print inside the window, in path order. */
+  function movesInZWindow(moves, win) {
+    var out = [];
+    if (!moves || !win) return out;
+    for (var i = 0; i < moves.length; i++) {
+      if (moveInZWindow(moves[i], win)) out.push(moves[i]);
+    }
+    return out;
+  }
+
+  /**
+   * The distinct printing heights in the file, ascending. On a real Bambu slice
+   * this is one Z per layer - `tools/gcode-test/gcode-zfilter-check.js` asserts
+   * that 1:1 against the two committed real files.
+   */
+  function zLevels(parsed) {
+    var seen = [];
+    var moves = (parsed && parsed.moves) || [];
+    for (var i = 0; i < moves.length; i++) {
+      var z = moves[i].z;
+      var found = false;
+      for (var k = 0; k < seen.length; k++) {
+        if (Math.abs(seen[k] - z) <= Z_EPS) { found = true; break; }
+      }
+      if (!found) seen.push(z);
+    }
+    seen.sort(function (a, b) { return a - b; });
+    return seen;
+  }
+
+  /** The layer whose printing Z is nearest `z`, or -1 when there are none. */
+  function layerIndexAtZ(parsed, z) {
+    var layers = (parsed && parsed.layers) || [];
+    var best = -1, bestD = Infinity;
+    for (var i = 0; i < layers.length; i++) {
+      var w = layerZWindow(parsed, i);
+      if (!w) continue;
+      var d = Math.abs((w.zLo + w.zHi) / 2 - z);
+      if (d < bestD) { bestD = d; best = i; }
+    }
+    return best;
+  }
+
+  /**
+   * Group an arbitrary move list by feature, in the order the slicer printed
+   * them - the same shape `parseGcode()` puts in `features`, so a Z-filtered
+   * grouping and an unfiltered one are interchangeable to a caller.
+   */
+  function groupMovesByFeature(moves) {
+    var byName = new Map();
+    var order = [];
+    (moves || []).forEach(function (mv) {
+      var g = byName.get(mv.feature);
+      if (!g) {
+        g = { name: mv.feature, moves: [], length: 0 };
+        byName.set(mv.feature, g);
+        order.push(g);
+      }
+      g.moves.push(mv.index);
+      g.length += mv.length;
+    });
+    return order;
+  }
+
+  /**
+   * Feature groups restricted to a Z window, each with its flat-line geometry
+   * already built - the Z-filtered counterpart of `readSlicedGcode3MF()`'s
+   * `groups`. This is the isolation unit: one layer of one feature, with every
+   * other layer of that same feature left out.
+   *
+   * @param {object} parsed  a parseGcode() result
+   * @param {{zLo: number, zHi: number}} win
+   * @returns {{name: string, moves: object[], built: object}[]}
+   */
+  function featuresInZWindow(parsed, win) {
+    var kept = movesInZWindow((parsed && parsed.moves) || [], win);
+    var out = [];
+    groupMovesByFeature(kept).forEach(function (g) {
+      var mvs = g.moves.map(function (i) { return parsed.moves[i]; });
+      out.push({ name: g.name, moves: mvs, length: g.length, built: buildLineGeometry(mvs) });
+    });
+    return out;
+  }
+
+  /**
+   * Every move at one printing height, whatever feature printed it - the
+   * extraction unit: a whole layer at one Z, all features at that height.
+   */
+  function movesAtZ(parsed, z) {
+    return movesInZWindow((parsed && parsed.moves) || [], zWindow(z - Z_EPS, z + Z_EPS));
+  }
+
+  // ===========================================================================
+  // The feature categories a Bambu slice names
+  // ===========================================================================
+  //
+  // Grouping is data-driven - whatever string follows `; FEATURE:` becomes a
+  // group - so the reader never has to be taught a new category. This table
+  // adds nothing to that; it only gives the categories the reference tool
+  // isolates a stable colour, so a Z-filtered layer reads the same way there
+  // and here. An unlisted feature still groups, and draws in `OTHER_COLOR`.
+  //
+  // `Travel` is in the table for completeness and can never appear in a group:
+  // a travel carries no extrusion, so it has no width and no bead, and
+  // `pushMove()` drops it. See docs/GCODE-FEATURE-AUDIT.md.
+
+  var FEATURE_COLORS = {
+    'Bottom surface':          0x8f8f8f,
+    'Bridge':                  0xc25bd1,
+    'Floating vertical shell': 0xf5d76e,
+    'Gap infill':              0x7a7a7a,
+    'Inner wall':              0x5bb3ff,
+    'Internal solid infill':   0x3aa66f,
+    'Outer wall':              0x5b8cff,
+    'Overhang wall':           0xe05bcf,
+    'Sparse infill':           0x4ecf8f,
+    'Support':                 0xff6b5b,
+    'Support interface':       0xff9d4d,
+    'Top surface':             0xc9c9c9,
+    'Custom':                  0x999999,
+    'Travel':                  0xffffff
+  };
+  var OTHER_COLOR = 0x666666;
+
+  /** The colour for a feature name; `OTHER_COLOR` for one not in the table. */
+  function colorForFeature(name) {
+    return Object.prototype.hasOwnProperty.call(FEATURE_COLORS, name)
+      ? FEATURE_COLORS[name] : OTHER_COLOR;
+  }
+
+  // ===========================================================================
   // Top level: a sliced 3MF in, groups of flat-line geometry out
   // ===========================================================================
 
@@ -531,6 +728,20 @@
     buildLineGeometry: buildLineGeometry,
     moveOfTriangle: moveOfTriangle,
     readSlicedGcode3MF: readSlicedGcode3MF,
+    zWindow: zWindow,
+    zWindowAround: zWindowAround,
+    layerZWindow: layerZWindow,
+    moveInZWindow: moveInZWindow,
+    movesInZWindow: movesInZWindow,
+    movesAtZ: movesAtZ,
+    zLevels: zLevels,
+    layerIndexAtZ: layerIndexAtZ,
+    groupMovesByFeature: groupMovesByFeature,
+    featuresInZWindow: featuresInZWindow,
+    colorForFeature: colorForFeature,
+    FEATURE_COLORS: FEATURE_COLORS,
+    OTHER_COLOR: OTHER_COLOR,
+    Z_EPS: Z_EPS,
     TRIS_PER_MOVE: TRIS_PER_MOVE,
     FLOATS_PER_MOVE: FLOATS_PER_MOVE,
     DEFAULT_FILAMENT_DIAMETER: DEFAULT_FILAMENT_DIAMETER

@@ -161,7 +161,8 @@
         <section class="card hidden" id="toolpath-card" tabindex="0">
           <h2>Toolpath</h2>
           <p class="hint">An already-sliced <code>.gcode.3mf</code> from Bambu Studio, drawn as real
-            geometry. Scrub to a single line, then Extract Line.</p>
+            geometry. Scrub to a single line, isolate its Z to see that one layer alone,
+            then Extract Line.</p>
           <input type="range" id="tp-slider" min="0" max="0" step="1" value="0"
                  title="Scrub through the toolpath one extrusion move at a time" />
           <div class="edit-row tp-step-row">
@@ -175,8 +176,20 @@
           </div>
           <p id="tp-readout" class="cut-readout">&mdash;</p>
           <p id="tp-detail" class="hint tp-detail">&mdash;</p>
+          <label class="tp-check-row" for="tp-zfilter" title="Hide every layer but the one at the scrubbed line's Z, so a single layer's construction stands alone from the rest of its own feature">
+            <input type="checkbox" id="tp-zfilter" />
+            <span>Isolate Z (one layer at a time)</span>
+          </label>
+          <div class="edit-row tp-step-row">
+            <label class="hint" for="tp-zhalf" style="margin:0">&plusmn; mm</label>
+            <input type="number" id="tp-zhalf" value="0" min="0" max="15" step="0.05"
+                   title="Half-thickness of the Z window. 0 is exactly one layer; raise it to take a slab of several." />
+          </div>
+          <p id="tp-zreadout" class="hint tp-detail">&mdash;</p>
           <label class="hint" for="tp-scope" style="margin-bottom:4px;display:block">Extract scope</label>
           <select id="tp-scope" title="How much of the toolpath Extract Line pulls out">
+            <option value="zlayer">This whole layer at one Z (all features)</option>
+            <option value="zfeature">This feature, at this Z</option>
             <option value="move">This line only</option>
             <option value="feature">This feature, on this layer</option>
             <option value="layer">This whole layer</option>

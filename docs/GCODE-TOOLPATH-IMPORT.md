@@ -1,8 +1,8 @@
 # Sliced-G-code toolpath import
 
 Import an **already-sliced** Bambu Studio project (`*.gcode.3mf`) and render its
-real toolpath as genuine, editable NSO geometry — then scrub to one line and
-pull that line out as its own object.
+real toolpath as genuine, editable NSO geometry — then isolate one layer, in true
+isolation from every other layer, and pull it out as its own object.
 
 The problem this answers: **Bambu Studio cannot scope a print job to a single
 line or a single interface.** It slices a model; it does not let you say "print
@@ -147,15 +147,84 @@ stack — the checks assert both. The selected move is solid red and grown by
 0.02 mm so it reads on top of the bead it marks; the rest of that layer is faint
 blue context.
 
+## The Z filter — the second axis
+
+The line slider steps along the path. It does not change **what is drawn**, and
+what is drawn is every layer at once: a `FEATURE` group is every move of that
+feature at *every* height, so on `tabletop.gcode.3mf` the `Outer wall` model is
+73 layers stacked and overlaid in one object. A single layer's construction
+cannot be read off that, which is the gap the audit in
+`docs/GCODE-FEATURE-AUDIT.md` found.
+
+**Isolate Z** adds the missing axis. Feature grouping says *which feature*; the
+Z window says *at what height*. Together they name one layer of one feature,
+which is what "in isolation" has to mean and what neither says alone.
+
+    Isolate Z (one layer at a time)     checkbox
+    ± mm                                half-extent of the window; 0 is one layer
+
+The window is a centre and a vertical half-extent — the same shape the reference
+tool's capture box uses (`|mz − cz| ≤ h`), centred on the scrubbed line's Z. At
+`± 0` it holds exactly one layer; raise it and it takes a slab of several. The
+readout names what is in it:
+
+    Z 19.500 .. 19.500 mm  -  1 layer, 359 lines of 202877  (one layer, isolated)
+
+### It is a view, not an edit
+
+While the filter is on, the imported feature models are **hidden** and the
+window's moves are redrawn in the overlay instead, one mesh per feature in that
+feature's own colour. Hiding and redrawing is the whole mechanism, and it keeps
+the invariant the scrub highlight already held: no geometry is rebuilt, no model
+is dirtied, nothing reaches the undo stack. `npm run gcode:drive` asserts all
+three across a full on-extract-export-off round trip, and asserts that
+unchecking gives every model its visibility back.
+
+### The printing Z, not the bead's span
+
+A move is in the window when its **printing Z** is inside it:
+
+    mv.z >= win.zLo − Z_EPS && mv.z <= win.zHi + Z_EPS
+
+Not its bead's span. The nozzle Z is the *top* of the bead, so a bead hangs down
+into the layer below: a bead printed at 5.1 with a 0.3 mm height spans 4.8 … 5.1,
+and its underside sits exactly *on* the 4.8 layer's printing Z. A span test would
+therefore pull it into 4.8's window, and every layer would carry its neighbour's
+beads — no isolation left to have.
+
+`gcode:zfilter` pins that with exactly this case, and it has teeth: swapping the
+printing-Z test for a span test breaks not just that check but the partition
+invariant below, which then counts 85 moves across a 51-move toolpath.
+
+### Layer index and Z are 1:1 on real output
+
+The filter is keyed on Z, the layer table on `; CHANGE_LAYER`. On both committed
+real slices those agree exactly — 73 layers / 73 distinct heights, and 50 / 50,
+with no layer holding two heights and no height spanning two layers. `gcode:zfilter`
+asserts it per file rather than assuming it, and also asserts that the isolated
+layers *partition* the toolpath: every move in exactly one layer, none twice,
+none lost.
+
 ## Extract Line
 
 **Extract scope** decides how much the button takes:
 
 | Scope | Takes |
 | --- | --- |
+| **This whole layer at one Z (all features)** | **every move at the scrubbed line's printing height, whatever feature printed it — the default** |
+| This feature, at this Z | that feature, at that height: the two axes together |
 | This line only | the one scrubbed move |
-| This feature, on this layer | every move of that feature on that layer |
-| This whole layer | every move on that layer |
+| This feature, on this layer | every move of that feature on that layer, by layer index |
+| This whole layer | every move on that layer, by layer index |
+
+The default is **a whole layer at one Z**, not a single move. That is the
+extraction unit: the thing you send to Bambu Studio on an empty plate is a
+layer, and a lone 1.5 mm strand is not a print. The narrower scopes are kept
+because they are still the right answer when you want to look at one strand.
+
+The two Z-keyed scopes are keyed on the printing height, so what Extract takes
+is exactly what the Z filter shows. The two layer-index scopes are kept as they
+were; on real Bambu output the two keyings agree (see above).
 
 The selection is pulled out **exactly as imported** — same flat line solids,
 same widths, nothing re-fitted — and lands in `state.models` through the
@@ -174,11 +243,12 @@ single-line print.
 
 ## Checks
 
-    npm run gcode:lines      # 81 checks, no browser
-    npm run gcode:drive      # 58 checks, the real app in headless Chromium
+    npm run gcode:lines      # 95 checks, no browser
+    npm run gcode:zfilter    # 103 checks, the Z filter + the real files
+    npm run gcode:drive      # 106 checks, the real app in headless Chromium
     npm run gcode:fixture    # regenerate the ground-truth fixture
 
-Both are in `npm test`.
+All three are in `npm test`.
 
 `gcode:lines` runs in tiers: the flow model (exact inverses, hand-computable
 cases, degenerate inputs), the parser state machine (relative vs absolute E,
@@ -208,23 +278,62 @@ retractions, Z hops, the trailing config block) so the parser is exercised on
 the same structures, but the geometry is a test pattern and no claim is made
 that Bambu would slice anything this way.
 
-### Real files
+### Real files — the tier that used to be skipped
 
-    NSO_GCODE_REAL=/path/to/a.gcode.3mf npm run gcode:lines
+Two real sliced projects are now committed, so this tier **runs by default** in
+both `gcode:lines` and `gcode:zfilter`:
 
-Runs the same measurements over a real Bambu Studio slice: moves, layers and
-features found, filament diameter read from the file, `meta.assumed` false, and
-widths and heights inside physically plausible bounds. Several files can be
-given, separated by `:`. It is **skipped, loudly**, when the variable is unset,
-because it needs a file that is not in this repo — same convention as
-`NSO_3MF_REAL` for the geometry importer.
+| file | what it brings |
+| --- | --- |
+| `fixtures/3mf/tabletop.gcode.3mf` | 73 layers, 202,877 moves, 9 features; a two-layer support interface over a tree-support tower |
+| `fixtures/3mf/supportwithinsupport.gcode.3mf` | 50 layers, 2,895 moves, 10 features; the only one of the two with `Floating vertical shell` |
 
-**This tier has never been run.** No real sliced `.gcode.3mf` exists anywhere in
-this repository or its history, and neither does a recorded hand measurement to
-check against. Everything above is proven against synthetic ground truth and the
-real app; the one thing no check here can reach is a file Bambu Studio actually
-wrote. Point `NSO_GCODE_REAL` at one and record the outcome here — that is the
-open item.
+`NSO_GCODE_REAL=/path/to/a.gcode.3mf` still overrides, to point the same
+measurements at another slice; several can be given, separated by `:`.
+
+#### The hand-verified measurements
+
+The synthetic fixture proves the importer recovers numbers *this repo computed*.
+It cannot prove the importer reads a structure Bambu Studio writes and this repo
+never thought to generate. So `gcode:zfilter` checks the importer's measurements
+against three facts hand-verified off `tabletop.gcode.3mf` itself, independently
+of any code here. All three now pass:
+
+| hand-verified | measured | check |
+| --- | --- | --- |
+| support-interface strand width ≈ **0.61 mm** | **0.6089 mm** length-weighted over 8,992 mm of path; every move between 0.6072 and 0.6094 | pass |
+| **exactly 2** stacked support-interface layers, zigzagging in **opposite** directions | layers 64 and 65, Z 19.500 and 19.800, one 0.300 mm layer height apart and consecutive; dominant raster **135° then 45°** — 90° apart, with >95 % of each layer's path on its own axis | pass |
+| **no separate border / perimeter feature** — only branch-tip convergence at the interface edge | no feature in the file is named border, perimeter, contour, brim, raft or loop. The 4.4 % of path that is off-axis is **154 isolated single moves**, longest consecutive run **1** — zigzag turnarounds, not a contour, which would be one unbroken run round the outline | pass |
+
+On branch-tip convergence specifically: the support layer directly below covers
+the same 69.8 × 69.7 mm footprint in **6,972 short moves** (0.33 mm mean) while
+the interface covers it in **311 long strokes** (14.5 mm mean). Many fine branch
+tips converging into a sparse sheet, at one shared footprint — so the interface
+*caps* the branches rather than outlining them, and no border is needed. The
+footprint match and the mean-length inversion are both assertions.
+
+#### What the real files caught that the fixture could not
+
+Three things, all of them structures only a real slicer writes:
+
+1. **`Math.min(...widths)` overflowed the stack.** The real tier had never been
+   run, and its first contact with a 202,877-move file threw
+   `RangeError: Maximum call stack size exceeded` — an argument-spread limit,
+   not a parser bug. It folds now.
+2. **Bambu rounds its own `; LAYER_HEIGHT:` tag.** `tabletop.gcode.3mf` writes
+   `0.3`, `0.299999` *and* `0.300001` for what is a uniform 0.3 mm Z step, so the
+   declared height and the measured step legitimately disagree at the 1e-6 level.
+   The generated fixture writes exact values and would never have shown this.
+3. **`Custom` is tagged but lays nothing down.** Both files tag a `Custom`
+   section (start/end G-code) that produces no group, because those moves are
+   purge and prime with no XY distance. See `docs/GCODE-FEATURE-AUDIT.md`.
+
+#### Licence
+
+Both files are the user's own sliced projects, staged on `nolongerzzz/nest-wip`
+(branch `source-files`, folder `uploads`) and committed here as test data. They
+are not Bambu Lab or MakerWorld content, so the licence note that keeps a
+MakerWorld project out of `fixtures/3mf/` does not apply.
 
 ## Files
 
@@ -234,4 +343,6 @@ open item.
 | `app-toolpath.js` | `NSO_TOOLPATH`: import, reseating, the scrub overlay, the card, Extract Line. |
 | `index.html` / `styles.css` | the Toolpath card |
 | `app-core.js` | `handleFiles()` routes `*.gcode.3mf` here; everything else unchanged |
-| `tools/gcode-test/` | the two suites and the fixture generator |
+| `tools/gcode-test/` | the three suites and the fixture generator |
+| `docs/GCODE-FEATURE-AUDIT.md` | the reference tool vs this importer, category by category |
+| `docs/reference/joint_microscope_3d.html` | the reference inspector, parked; nothing loads it |

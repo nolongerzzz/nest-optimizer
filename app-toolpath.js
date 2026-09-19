@@ -25,6 +25,20 @@
  * toolpath feature is an ordinary NSO model from that point on: undo, paint,
  * Cut, Join and both exporters treat it like anything else, with no
  * special-casing anywhere.
+ *
+ * THE Z FILTER - THE SECOND AXIS
+ * A feature group is every move of that feature at EVERY height, so on a real
+ * slice it arrives as dozens of layers stacked and overlaid, and a single
+ * layer's construction cannot be read off it. `Isolate Z` adds the missing
+ * axis: it hides the imported feature models and redraws only the moves inside
+ * a Z window, each feature in its own colour, so one layer stands alone from
+ * every other layer of the same feature. The window is the same centre + half
+ * extent the reference capture box in `docs/reference/joint_microscope_3d.html`
+ * uses, and at its tightest it is exactly one layer.
+ *
+ * The filter is a VIEW. It hides and redraws; it never edits, rebuilds or
+ * dirties the imported models, and it never touches the undo stack. What it
+ * changes is what you can see and what Extract takes - not the geometry.
  */
 /* global THREE, state, setStatus, addModelFromZUpGeometry, pushUndo */
 'use strict';
@@ -94,7 +108,11 @@ var NSO_TOOLPATH = (function () {
           modelIds: ids,
           frame: frame,
           cursor: 0,
-          overlay: null
+          overlay: null,
+          // half-extent in mm around the cursor layer's Z; 0 = exactly one
+          // layer. `on` false leaves every layer drawn, as before.
+          zFilter: { on: false, half: 0 },
+          hidden: []
         };
         buildOverlay();
         mountUI();
@@ -217,6 +235,13 @@ var NSO_TOOLPATH = (function () {
     }
     g.add(lineMesh(CONTEXT_COLOR, 0.35));    // child 0: the rest of this layer
     g.add(lineMesh(HIGHLIGHT_COLOR, 1.0));   // child 1: the one selected move
+    // child 2: the Z-isolation body - one solid mesh per feature inside the Z
+    // window, in that feature's own colour. Empty and hidden until the filter
+    // is on, and it stands in for the imported models while it is.
+    var iso = new THREE.Group();
+    iso.name = 'nso-toolpath-zwindow';
+    iso.visible = false;
+    g.add(iso);
     // Same datum reseat() puts the groups on, so the highlight lands exactly on
     // the bead it marks. Derived from the one axis mapping above:
     //   (gx, gy, gz) -> (gx - cx, gz - minZ + lift, -gy + cy)
@@ -244,6 +269,153 @@ var NSO_TOOLPATH = (function () {
     geo.rotateX(-Math.PI / 2);
     if (mesh.geometry) mesh.geometry.dispose();
     mesh.geometry = geo;
+  }
+
+  // =========================================================================
+  // The Z filter
+  // =========================================================================
+  //
+  // Feature grouping and Z filtering are two independent axes. Grouping says
+  // WHICH FEATURE; the Z window says AT WHAT HEIGHT. Together they name one
+  // layer of one feature, which is what "in true isolation" means here and what
+  // neither axis can say on its own.
+  //
+  // Implementation: the imported feature models cover every layer, so while the
+  // filter is on they are hidden and the window's moves are redrawn in the
+  // overlay instead, one mesh per feature in that feature's own colour. Hiding
+  // and redrawing keeps the models untouched - no rebuild, no dirty flag, no
+  // undo entry - which is the same invariant the scrub highlight already holds.
+
+  /** The Z window the filter currently describes, or null when it is off. */
+  function zWindowNow() {
+    if (!session || !session.zFilter.on) return null;
+    var G = window.NSOGcodeLines;
+    var mv = session.moves[session.cursor];
+    if (!mv) return null;
+    return G.zWindowAround(mv.z, session.zFilter.half);
+  }
+
+  /**
+   * The window Extract should take from: the filter's window while it is on, and
+   * otherwise just the cursor's own printing height. So a Z-keyed scope means
+   * "one layer" whether or not the filter is showing it.
+   */
+  function extractWindow(mv) {
+    var G = window.NSOGcodeLines;
+    return zWindowNow() || G.zWindow(mv.z - G.Z_EPS, mv.z + G.Z_EPS);
+  }
+
+  /** Moves inside the current window; every move when the filter is off. */
+  function movesInWindow() {
+    var win = zWindowNow();
+    if (!win) return session ? session.moves : [];
+    return window.NSOGcodeLines.movesInZWindow(session.moves, win);
+  }
+
+  /** The placed scene entry for one of our imported models. */
+  function entryOf(modelId) {
+    if (!state || !state.placed) return null;
+    for (var i = state.placed.length - 1; i >= 0; i--) {
+      if (state.placed[i].sourceId === modelId) return state.placed[i];
+    }
+    return null;
+  }
+
+  /**
+   * Hide or re-show the imported feature models. Only models THIS session
+   * imported are touched, and only ones this function itself hid are re-shown,
+   * so nothing else on the plate is disturbed.
+   */
+  function setImportedVisible(vis) {
+    if (!session) return;
+    if (!vis) {
+      // ACCUMULATE, never rebuild. Hiding runs again on every change while the
+      // filter is already on (the thickness box alone does it on each keystroke),
+      // and by then the meshes are already invisible - so rebuilding the list
+      // from "what is still visible" would come back empty and there would be
+      // nothing left to restore. The list is what we hid, not what is hidden.
+      session.modelIds.forEach(function (id) {
+        var e = entryOf(id);
+        if (!e || !e.mesh) return;
+        if (session.hidden.indexOf(id) === -1) session.hidden.push(id);
+        e.mesh.visible = false;
+      });
+    } else {
+      session.hidden.forEach(function (id) {
+        var e = entryOf(id);
+        if (e && e.mesh) e.mesh.visible = true;
+      });
+      session.hidden = [];
+    }
+  }
+
+  function isoGroup() {
+    return session && session.overlay ? session.overlay.children[2] : null;
+  }
+
+  function clearIso() {
+    var iso = isoGroup();
+    if (!iso) return;
+    for (var i = iso.children.length - 1; i >= 0; i--) {
+      var c = iso.children[i];
+      iso.remove(c);
+      if (c.geometry) c.geometry.dispose();
+      if (c.material) c.material.dispose();
+    }
+  }
+
+  /** Redraw the Z window: one solid mesh per feature inside it. */
+  function buildIso() {
+    var iso = isoGroup();
+    if (!iso) return;
+    clearIso();
+    var win = zWindowNow();
+    if (!win) { iso.visible = false; return; }
+    var G = window.NSOGcodeLines;
+    // featuresInZWindow() is the reader's own Z-filtered grouping - the same
+    // function gcode-zfilter-check.js covers - so the view and the checks build
+    // the window from one piece of code rather than two that can drift.
+    G.featuresInZWindow({ moves: session.moves, layers: session.layers }, win).forEach(function (g) {
+      if (!g.built.positions.length) return;
+      var geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(g.built.positions, 3));
+      geo.rotateX(-Math.PI / 2);
+      // Same material family the app gives its own models (app-core.js), so the
+      // isolation body reads as the geometry it stands in for rather than as an
+      // overlay - only the colour differs, and it is the feature's own.
+      var mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+        color: G.colorForFeature(g.name), metalness: 0.05, roughness: 0.4
+      }));
+      mesh.userData.feature = g.name;
+      iso.add(mesh);
+    });
+    iso.visible = true;
+  }
+
+  /** Turn the Z filter on or off. */
+  function setZFilter(on, half) {
+    if (!session) return;
+    session.zFilter.on = !!on;
+    if (half != null && isFinite(half) && half >= 0) session.zFilter.half = +half;
+    setImportedVisible(!session.zFilter.on);
+    setCursor(session.cursor);
+  }
+
+  /** The distinct printing heights in a move list, ascending. */
+  function distinctZ(moves) {
+    var seen = [];
+    (moves || []).forEach(function (m) {
+      for (var i = 0; i < seen.length; i++) if (Math.abs(seen[i] - m.z) <= 1e-6) return;
+      seen.push(m.z);
+    });
+    return seen.sort(function (a, b) { return a - b; });
+  }
+
+  /** How many distinct printing heights the window covers. */
+  function layersInWindow() {
+    if (!session) return 0;
+    if (!session.zFilter.on) return session.layers.length;
+    return distinctZ(movesInWindow()).length;
   }
 
   // =========================================================================
@@ -277,11 +449,19 @@ var NSO_TOOLPATH = (function () {
     if (session.overlay) {
       // Everything else on this layer, faint; the selected move, solid and
       // slightly grown so it reads on top of the model it sits in.
-      var rest = [];
-      for (var k = lr[0]; k < lr[1]; k++) if (k !== session.cursor) rest.push(session.moves[k]);
-      setOverlayMoves(session.overlay.children[0], rest, 0);
+      // While the filter is on the context layer is redundant - the isolation
+      // body IS this layer - so it is not drawn at all. Skipping the BUILD and
+      // not just the draw matters: a layer of a real slice is thousands of
+      // moves, and this runs on every scrub step.
+      session.overlay.children[0].visible = !session.zFilter.on;
+      if (!session.zFilter.on) {
+        var rest = [];
+        for (var k = lr[0]; k < lr[1]; k++) if (k !== session.cursor) rest.push(session.moves[k]);
+        setOverlayMoves(session.overlay.children[0], rest, 0);
+      }
       setOverlayMoves(session.overlay.children[1], [mv], 0.02);
       session.overlay.visible = true;
+      buildIso();
     }
     syncUI();
   }
@@ -294,17 +474,36 @@ var NSO_TOOLPATH = (function () {
     setCursor(session.layers[li].moveStart);
   }
 
-  /** The move indices the user has scrubbed to, for extraction. */
+  /**
+   * The move indices the user has scrubbed to, for extraction.
+   *
+   * `zlayer` is the unit that matters and the default: EVERY move at the
+   * cursor's printing height, whatever feature printed it - a whole layer at
+   * one Z. It is keyed on Z and not on the layer index, so what comes out is
+   * exactly what the Z filter shows. The narrower scopes are kept because they
+   * are still the right answer when you want one strand or one feature.
+   */
   function selection() {
     if (!session) return null;
-    var mode = ($('tp-scope') || {}).value || 'move';
+    var mode = ($('tp-scope') || {}).value || 'zlayer';
     if (mode === 'move') return [session.cursor];
     var mv = session.moves[session.cursor];
     var out = [];
+    var i;
+    if (mode === 'zlayer' || mode === 'zfeature') {
+      var G = window.NSOGcodeLines;
+      var win = extractWindow(mv);
+      var thisFeatureOnly = mode === 'zfeature';
+      for (i = 0; i < session.moves.length; i++) {
+        if (thisFeatureOnly && session.moves[i].feature !== mv.feature) continue;
+        if (G.moveInZWindow(session.moves[i], win)) out.push(i);
+      }
+      return out;
+    }
     if (mode === 'layer') {
       var lr = layerRange(mv.layer);
       for (var k = lr[0]; k < lr[1]; k++) out.push(k);
-    } else { // 'feature' - this feature on this layer, which is the useful unit
+    } else { // 'feature' - this feature on this layer, by layer index
       var lr2 = layerRange(mv.layer);
       for (var j = lr2[0]; j < lr2[1]; j++) {
         if (session.moves[j].feature === mv.feature) out.push(j);
@@ -346,6 +545,16 @@ var NSO_TOOLPATH = (function () {
     var scope = $('tp-scope');
     if (scope) scope.addEventListener('change', function () { setCursor(session.cursor); });
 
+    var zOn = $('tp-zfilter');
+    if (zOn) zOn.addEventListener('change', function () { setZFilter(zOn.checked, null); });
+    var zHalf = $('tp-zhalf');
+    if (zHalf) {
+      zHalf.addEventListener('input', function () {
+        var v = parseFloat(zHalf.value);
+        setZFilter(session.zFilter.on, isFinite(v) ? v : 0);
+      });
+    }
+
     // Arrow keys step lines, shift+arrows step layers - but only while the
     // card has focus, so they never fight the viewport's own bindings.
     card.addEventListener('keydown', function (ev) {
@@ -383,6 +592,29 @@ var NSO_TOOLPATH = (function () {
         ' mm tall, ' + mv.length.toFixed(2) + ' mm long, ' +
         (mv.angle * 180 / Math.PI).toFixed(1) + ' deg, Z ' + mv.z.toFixed(3);
     }
+    var zOn = $('tp-zfilter');
+    if (zOn) zOn.checked = !!session.zFilter.on;
+    var zHalf = $('tp-zhalf');
+    if (zHalf && document.activeElement !== zHalf) zHalf.value = String(session.zFilter.half);
+
+    var zread = $('tp-zreadout');
+    if (zread) {
+      if (!session.zFilter.on) {
+        zread.textContent = 'All ' + session.layers.length + ' layers drawn - no Z filter.';
+      } else {
+        // One scan, reused for both numbers. On a 200k-move slice this runs on
+        // every scrub step, so scanning twice for the same readout is not free.
+        var win = zWindowNow();
+        var inWin = movesInWindow();
+        var nIn = inWin.length;
+        var nl = distinctZ(inWin).length;
+        zread.textContent =
+          'Z ' + win.zLo.toFixed(3) + ' .. ' + win.zHi.toFixed(3) + ' mm  -  ' +
+          nl + ' layer' + (nl === 1 ? '' : 's') + ', ' + nIn + ' line' + (nIn === 1 ? '' : 's') +
+          ' of ' + n + (nl === 1 ? '  (one layer, isolated)' : '');
+      }
+    }
+
     var sel = selection();
     var btn = $('btn-tp-extract');
     if (btn && sel) {
@@ -411,8 +643,14 @@ var NSO_TOOLPATH = (function () {
     if (!built.positions.length) { say('Extract Line failed - the selection has no geometry', true); return null; }
 
     var mv = session.moves[session.cursor];
-    var label = baseName(session.file) + ' - ' + mv.feature +
-                ' L' + (mv.layer + 1) + (moves.length === 1 ? ' line ' + (session.cursor + 1) : ' x' + moves.length);
+    var mode = ($('tp-scope') || {}).value || 'zlayer';
+    // A whole-layer-at-one-Z extraction spans every feature at that height, so
+    // naming it after the cursor's feature would misdescribe it. Name the Z.
+    var label = baseName(session.file) + ' - ' +
+      (mode === 'zlayer'
+        ? 'Z ' + mv.z.toFixed(3) + ' mm (L' + (mv.layer + 1) + ', x' + moves.length + ')'
+        : mv.feature + ' L' + (mv.layer + 1) +
+          (moves.length === 1 ? ' line ' + (session.cursor + 1) : ' x' + moves.length));
 
     var geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(built.positions, 3));
@@ -421,12 +659,22 @@ var NSO_TOOLPATH = (function () {
     if (typeof pushUndo === 'function') {
       pushUndo({ type: 'addModels', ids: [id], editId: state.editId, cutT: state.cutT });
     }
+    var zs = [];
+    moves.forEach(function (m) {
+      for (var q = 0; q < zs.length; q++) if (Math.abs(zs[q] - m.z) <= 1e-6) return;
+      zs.push(m.z);
+    });
     say('Extract Line ok - "' + label + '" is its own object (' + moves.length + ' line' +
-        (moves.length === 1 ? '' : 's') + ', ' + (built.positions.length / 9) + ' triangles)');
+        (moves.length === 1 ? '' : 's') + ', ' + (built.positions.length / 9) + ' triangles, ' +
+        zs.length + ' layer' + (zs.length === 1 ? '' : 's') + ')');
     return id;
   }
 
   function reset() {
+    // Give back any visibility the Z filter took, or the models would stay
+    // invisible with nothing left to turn them back on.
+    setImportedVisible(true);
+    clearIso();
     disposeOverlay();
     session = null;
     var card = $('toolpath-card');
@@ -441,6 +689,10 @@ var NSO_TOOLPATH = (function () {
     stepLayer: stepLayer,
     selection: selection,
     extractSelection: extractSelection,
+    setZFilter: setZFilter,
+    zWindowNow: zWindowNow,
+    movesInWindow: movesInWindow,
+    layersInWindow: layersInWindow,
     reset: reset,
     getSession: function () { return session; }
   };
