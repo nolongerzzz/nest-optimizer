@@ -1,0 +1,203 @@
+{
+  "generated_by": "tools/nso_crosshatch_fixtures.js",
+  "entries": [
+    {
+      "stl": "interface.stl",
+      "note": "the reference: two one-direction layers at the shipped crosshatch's own 1.2 mm pitch and 0.42 mm rib, a 30 mm target. layer1.stl and layer2.stl are its two layers on their own.",
+      "pitch_mm": 1.2,
+      "line_width_mm": 0.42,
+      "line_height_mm": 0.3,
+      "channel_mm": 0.78,
+      "lines_deg": [
+        45,
+        135
+      ],
+      "ends": "turn",
+      "end_turn_offset_mm": 0.6,
+      "end_turn_clearance_mm": 0.18,
+      "repeats": [
+        25,
+        25
+      ],
+      "span_mm": [
+        30.42,
+        30.42
+      ],
+      "span_asked_mm": [
+        30,
+        30
+      ],
+      "residual_mm": [
+        0.42,
+        0.42
+      ],
+      "line_centres_mm": [
+        0.81,
+        2.01,
+        3.21,
+        4.41,
+        5.61,
+        6.81,
+        8.01,
+        9.21,
+        10.41,
+        11.61,
+        12.81,
+        14.01,
+        15.21,
+        16.41,
+        17.61,
+        18.81,
+        20.01,
+        21.21,
+        22.41,
+        23.61,
+        24.81,
+        26.01,
+        27.21,
+        28.41,
+        29.61
+      ],
+      "crossings": 625,
+      "tris": 1944,
+      "shells": 2,
+      "components": 2,
+      "open_edges": 0,
+      "nonmanifold_edges": 0,
+      "extent_mm": [
+        41.874862,
+        42.171849,
+        0.6
+      ],
+      "interface_z_mm": 0.3,
+      "total_height_mm": 0.6,
+      "contact": {
+        "contact_mm2": 110.249955,
+        "contact_patches": 625,
+        "patch_area_min_mm2": 0.176398,
+        "patch_area_max_mm2": 0.176401,
+        "widest_patch_span_mm": 0.593971
+      },
+      "layer1_angle": {
+        "dominant_deg": 45,
+        "dominant_share": 0.9625,
+        "share_45": 0.9625,
+        "share_135": 0.0375,
+        "axis_aligned_share": 0
+      },
+      "layer2_angle": {
+        "dominant_deg": 135,
+        "dominant_share": 0.9625,
+        "share_45": 0.0375,
+        "share_135": 0.9625,
+        "axis_aligned_share": 0
+      },
+      "describe": "crosshatch interface, two layers of 0.42 x 0.3 mm flat lines at 1.2 mm pitch (0.78 mm channel), lines at 45 and 135 deg - 25 x 25 lines over 30.42 x 30.42 mm, 625 crossings of 0.176400 mm^2 = 110.2500 mm^2, 1944 tris in 2 shell(s), closed"
+    },
+    {
+      "stl": "interface-45.stl",
+      "note": "the SAME pattern re-tiled to a 45 mm target: more repeats, pitch / width / channel and every shared line centre unchanged.",
+      "pitch_mm": 1.2,
+      "line_width_mm": 0.42,
+      "line_height_mm": 0.3,
+      "channel_mm": 0.78,
+      "lines_deg": [
+        45,
+        135
+      ],
+      "ends": "turn",
+      "end_turn_offset_mm": 0.6,
+      "end_turn_clearance_mm": 0.18,
+      "repeats": [
+        37,
+        37
+      ],
+      "span_mm": [
+        44.82,
+        44.82
+      ],
+      "span_asked_mm": [
+        45,
+        45
+      ],
+      "residual_mm": [
+        -0.18,
+        -0.18
+      ],
+      "line_centres_mm": [
+        0.81,
+        2.01,
+        3.21,
+        4.41,
+        5.61,
+        6.81,
+        8.01,
+        9.21,
+        10.41,
+        11.61,
+        12.81,
+        14.01,
+        15.21,
+        16.41,
+        17.61,
+        18.81,
+        20.01,
+        21.21,
+        22.41,
+        23.61,
+        24.81,
+        26.01,
+        27.21,
+        28.41,
+        29.61,
+        30.81,
+        32.01,
+        33.21,
+        34.41,
+        35.61,
+        36.81,
+        38.01,
+        39.21,
+        40.41,
+        41.61,
+        42.81,
+        44.01
+      ],
+      "crossings": 1369,
+      "tris": 2904,
+      "shells": 2,
+      "components": 2,
+      "open_edges": 0,
+      "nonmanifold_edges": 0,
+      "extent_mm": [
+        62.239539,
+        62.536523,
+        0.6
+      ],
+      "interface_z_mm": 0.3,
+      "total_height_mm": 0.6,
+      "contact": {
+        "contact_mm2": 241.491669,
+        "contact_patches": 1369,
+        "patch_area_min_mm2": 0.176398,
+        "patch_area_max_mm2": 0.176401,
+        "widest_patch_span_mm": 0.593971
+      },
+      "layer1_angle": {
+        "dominant_deg": 45,
+        "dominant_share": 0.97413,
+        "share_45": 0.97413,
+        "share_135": 0.02587,
+        "axis_aligned_share": 0
+      },
+      "layer2_angle": {
+        "dominant_deg": 135,
+        "dominant_share": 0.97413,
+        "share_45": 0.02587,
+        "share_135": 0.97413,
+        "axis_aligned_share": 0
+      },
+      "describe": "crosshatch interface, two layers of 0.42 x 0.3 mm flat lines at 1.2 mm pitch (0.78 mm channel), lines at 45 and 135 deg - 37 x 37 lines over 44.82 x 44.82 mm, 1369 crossings of 0.176400 mm^2 = 241.4916 mm^2, 2904 tris in 2 shell(s), closed"
+    }
+  ]
+}

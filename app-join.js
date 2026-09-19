@@ -42,6 +42,9 @@ function updateJoinUI() {
   const cz = document.getElementById('btn-join-cz');
   if (cx) cx.disabled = !readyJoin;
   if (cz) cz.disabled = !readyJoin;
+  // Center lock rides the same A+B precondition; its own module owns the
+  // armed/target label on the pick button.
+  if (window.NSO_CenterLock) window.NSO_CenterLock.syncUI();
   if (step) {
     if (!state.joinSession) step.textContent = '1. Start Join';
     else if (state.joinArmed === 'a') step.textContent = '2. Click piece A on the plate or list';
@@ -108,6 +111,13 @@ function clearJoinSlots() {
   state.joinFaceB = null;
   state.joinUseFaces = false;
   state.joinSlideAxis = null;
+  // The Center lock target was picked on a piece in slot A; leaving Join
+  // retires it with the slot. Seat here aims at a point on slot A the same
+  // way, so it goes with it.
+  state.centerLockArmed = false;
+  state.centerLockTarget = null;
+  if (typeof window.nsoSeatHereDisarm === 'function') window.nsoSeatHereDisarm();
+  else state.seatHereArmed = false;
   removeFaceHelper();
   renderModelList();
   updateEditSize();
@@ -551,7 +561,10 @@ function NSO_plugFrame(bitMesh, hullCenterWorld, aWorld) {
   };
 }
 
-function NSO_outerFaceCorners(frame) {
+/* The four corners of the plug's local box face at `coord` on the frame
+   axis, in world space. Outer face = capCoord; mating face = the opposite
+   face of the same box. */
+function NSO_faceCornersAt(frame, coord) {
   var a = frame.axis, u = (a + 1) % 3, v = (a + 2) % 3;
   var lo = [frame.box.min.x, frame.box.min.y, frame.box.min.z];
   var hi = [frame.box.max.x, frame.box.max.y, frame.box.max.z];
@@ -559,12 +572,23 @@ function NSO_outerFaceCorners(frame) {
   var out = [];
   for (var i = 0; i < 4; i++) {
     var p = new THREE.Vector3();
-    p.setComponent(a, frame.capCoord);
+    p.setComponent(a, coord);
     p.setComponent(u, quad[i][0]);
     p.setComponent(v, quad[i][1]);
     out.push(p.applyMatrix4(frame.matrix));
   }
   return out;
+}
+
+function NSO_outerFaceCorners(frame) {
+  return NSO_faceCornersAt(frame, frame.capCoord);
+}
+
+/* The face that looks at the hull - the one a breakaway piece rests on. */
+function NSO_matingFaceCorners(frame) {
+  var coord = (frame.sign > 0) ? frame.box.min.getComponent(frame.axis)
+                               : frame.box.max.getComponent(frame.axis);
+  return NSO_faceCornersAt(frame, coord);
 }
 
 /* ---- ray vs soup, nearest hit either direction ---- */
@@ -590,6 +614,41 @@ function NSO_nearestSkinHit(soup, o, dir) {
   return o.clone().addScaledVector(dir, bestT * sgn);
 }
 
+/* How far inside its own face a corner ray starts.
+
+   Every corner of the bit's outer face sits exactly on the bit's silhouette,
+   so a ray that leaves one runs along the edge of whatever the bit's own box
+   is flush with. Two pieces settled side by side on the bed are flush by
+   construction - settlePlacedOnBed puts both world-box bottoms on 0.2 - and
+   the bottom corner rays then travel along the hull's bottom edge, where
+   NSO_rayTri needs a strictly interior barycentric hit and misses: the seat
+   refused every horizontal seat with "corner 0 missed hull along punch axis"
+   while the very same pieces, the bit raised by any amount, seated fine.
+
+   One micron along the face's own diagonal moves the origin off that edge and
+   nowhere else. It is ~100x the Float32 vertex noise a plate-sized coordinate
+   carries (~1e-5 mm; the graze that lost the bed case measures ~1e-9), and
+   1/10 of the gap slider's 0.01 mm step, 1/100 of NSO_SEAT_STRADDLE_TOL, so
+   no offset the seat can express sees a different point. It is a fraction of
+   the way to the face centre, never a fixed step, so a sub-millimetre bit
+   still samples inside its own face rather than past it. */
+var NSO_SEAT_RAY_INSET = 0.001;
+
+function NSO_seatRayOrigins(corners) {
+  var mid = new THREE.Vector3(), i;
+  for (i = 0; i < corners.length; i++) mid.add(corners[i]);
+  mid.multiplyScalar(1 / corners.length);
+  var out = [];
+  for (i = 0; i < corners.length; i++) {
+    var dir = mid.clone().sub(corners[i]);
+    var len = dir.length();
+    out.push(len > 1e-12
+      ? corners[i].clone().addScaledVector(dir, Math.min(0.25, NSO_SEAT_RAY_INSET / len))
+      : corners[i].clone());
+  }
+  return out;
+}
+
 /* Newell normal of an ordered quad */
 function NSO_newellNormal(pts) {
   var n = new THREE.Vector3();
@@ -606,13 +665,150 @@ function NSO_newellNormal(pts) {
 /* ============================================================
    SEAT — corner projection + best-fit tilt on a curved hull
    opts: { proud:0.4, maxTiltDeg:20, iterations:3, liftHull, liftBit }
+         or { gap: -0.18, ... }
+
+   Two ways to say where the bit goes, never both:
+
+   proud  The bit's OUTER face (the one facing away from the hull) ends up
+          this far outside the hull skin. This is the plug workflow: the bit
+          is buried in the hull with its face just proud, then Subtract
+          carves the pocket. The Seat flush button has always called this
+          with proud 0.01 - that is the only thing "Seat 0.01" ever set.
+
+   gap    The bit's MATING face (the one facing the hull) ends up off the
+          hull skin by this much, in the breakaway-coupon sign convention
+          locked in tools/breakaway_coupons.py:
+              negative = air gap of that size between skin and bit
+              positive = the bit penetrates the hull by that much
+              0        = touching
+          So a breakaway piece at the locked easy-release value is
+          { gap: -0.18 }. Nothing else is different: same corner rays, same
+          tilt fit, same translate-along-the-fitted-normal.
+
+   Both modes report per-corner residuals against the requested offset.
+   gap mode also reports gapAchieved / gapMin / gapMax, measured from the
+   mating face after the last iteration, in the same sign convention.
+
+   Either mode refuses, moving nothing, unless the bit is clear of the face it
+   is seated to (or wholly inside it): a corner ray that misses says so, and so
+   does a bit the face cuts through - see NSO_seatStraddle.
+
+   REFERENCE SURFACE in gap mode: the skin's TIPS, not its base plane.
+   A hull face that carries a contact skin (nso_skin.js - a rib lattice,
+   ridges, a ring) has two surfaces: the base plane the four corner rays
+   find when a corner happens to sit over a valley, and the tips plane the
+   relief actually presents to the bit. "Gap 0" for a breakaway piece means
+   the tips just touch B's face; a seat measured from the base plane would
+   bury B in the relief by the full skin height and print a solid fuse.
+   So before fitting, gap mode measures the hull's outermost point along
+   the bit's normal over the bit's footprint (NSO_Skin.supportExtreme, every
+   hull triangle clipped to the footprint), and compares it with the plane
+   the corner rays would give. If the tips stand more than
+   NSO_SEAT_TIPS_TOL above that plane the surface is a skin: B is seated
+   against the tips, untilted, and the result says reference: 'tips' with
+   tipRise. A flat hull measures a rise of Float32 noise and takes the
+   corner-ray path unchanged, byte for byte (reference: 'plane').
    ============================================================ */
+
+/* a relief is at least one printed layer tall; Float32 flat-face noise is ~1e-6 */
+var NSO_SEAT_TIPS_TOL = 0.01;
+
+/* How much of the bit may sit across the target face before the seat calls it
+   an overhang rather than its own handiwork. A flush seat leaves the outer
+   face 0.01 mm proud of the skin and the gap slider's overlap end (+0.05)
+   leaves the mating face 0.05 mm inside it, so both of those must re-seat,
+   not refuse; anything past this is a real protrusion the user put there. */
+var NSO_SEAT_STRADDLE_TOL = 0.1;
+
+/* The bed baseline, in Float: a settled world-box bottom lands on 0.2 to
+   within rounding, so a lift measured back off it can come out a hair
+   negative with nothing wrong. See the clamp in seatBitAtGap. */
+var NSO_SEAT_BED_EPS = 1e-6;
+
+/* The pose the corner-ray fit is built for: the bit approaches the target face
+   from OUTSIDE it (a staged plug, a bit raised clear, a side seat), or lies
+   wholly inside it (a plug being re-seated). Either way the seat slides the
+   bit along the punch axis and nothing that stood proud is lost.
+
+   A bit that STRADDLES the face - part of it standing proud, the rest already
+   inside the hull - is neither. Over the hull's TOP face that pose is the bed
+   drag NSO_raiseBuriedBitClear undoes, and where it cannot (a bit overhanging
+   the footprint) a corner ray misses and the seat refuses. Against a vertical
+   WALL nothing raises it, and when the wall happens to shadow all four corner
+   rays the fit is perfectly happy: the seat drives every millimetre that stood
+   proud into the hull, leaves the bit buried as a plug through that face, and
+   reports "Seated". One corner further out the very same placement refuses
+   with "corner N missed hull along punch axis". So refuse here too, and name
+   the overhang that is in the way.
+
+   Measured the way the fit measures, and judged one corner at a time: d is how
+   far an OUTER face corner stands outside the skin along the punch, and the
+   bit's depth along that axis is how far its mating face trails behind that
+   corner. d >= depth: that corner's column is clear of the face and only
+   approaches it. d <= what was asked for: it is at or inside the face already.
+   Between the two the face cuts through the bit there, and seating would eat
+   the difference. Per corner, because a hit BEHIND the ray's origin reads as a
+   negative d, and a corner that far off must not combine with a clear corner
+   somewhere else to look like a straddle that is not there.
+
+   Pure - moves nothing. Returns null when no corner is cut, or when a corner
+   misses the hull entirely (the fit's own refusal says so, as it always has). */
+function NSO_seatStraddle(hull, bitMesh, hullCenter, off) {
+  var fr = NSO_plugFrame(bitMesh, hullCenter, hull);
+  var corners = NSO_outerFaceCorners(fr);
+  var origins = NSO_seatRayOrigins(corners);
+  var depth = fr.box.max.getComponent(fr.axis) - fr.box.min.getComponent(fr.axis);
+  var cut = 0, proudBy = -Infinity;
+  for (var i = 0; i < 4; i++) {
+    var h = NSO_nearestSkinHit(hull, origins[i], fr.punch);
+    if (!h) return null;
+    var d = corners[i].clone().sub(h).dot(fr.outerNormal);
+    if (d > off + NSO_SEAT_STRADDLE_TOL && d < depth - NSO_SEAT_STRADDLE_TOL) {
+      cut++;
+      if (d > proudBy) proudBy = d;
+    }
+  }
+  if (!cut) return null;
+  return { proudBy: proudBy, corners: cut, depth: depth, normal: fr.outerNormal.clone() };
+}
+
+/* The tips probe: null when the hull under the bit is flat (or NSO_Skin is
+   not loaded), else { s, sPlane, rise, point, hits }. Pure - moves nothing. */
+function NSO_seatTipsProbe(hull, bitMesh, hullCenter) {
+  if (typeof NSO_Skin === 'undefined' || !NSO_Skin || !NSO_Skin.supportExtreme) return null;
+  var fr = NSO_plugFrame(bitMesh, hullCenter, hull);
+  var mating = NSO_matingFaceCorners(fr), outer = NSO_outerFaceCorners(fr);
+  var nrm = fr.outerNormal;
+  var fp = [], i;
+  for (i = 0; i < 4; i++) fp.push([mating[i].x, mating[i].y, mating[i].z]);
+  var sOuter = outer[0].dot(nrm);
+  var ext = NSO_Skin.supportExtreme(hull, fp, [nrm.x, nrm.y, nrm.z], { sMax: sOuter });
+  if (!ext) return null;
+  var hits = [], sSum = 0;
+  var oRay = NSO_seatRayOrigins(outer);
+  for (i = 0; i < 4; i++) {
+    var h = NSO_nearestSkinHit(hull, oRay[i], fr.punch);
+    if (!h) return null;
+    hits.push(h);
+    sSum += h.dot(nrm);
+  }
+  var sPlane = sSum / 4;
+  return { s: ext.s, sPlane: sPlane, rise: ext.s - sPlane,
+           point: new THREE.Vector3(ext.point[0], ext.point[1], ext.point[2]), hits: hits };
+}
 
 function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
   opts = opts || {};
   var proud = (opts.proud === undefined) ? 0.4 : opts.proud;
   var maxTilt = ((opts.maxTiltDeg === undefined) ? 20 : opts.maxTiltDeg) * Math.PI / 180;
   var iters = opts.iterations || 3;
+
+  var hasGap = (opts.gap !== undefined && opts.gap !== null);
+  var gap = hasGap ? Number(opts.gap) : null;
+  if (hasGap && !isFinite(gap)) return { ok: false, reason: 'gap must be a finite number of mm' };
+  if (hasGap && (opts.proud !== undefined || opts.lip !== undefined)) {
+    return { ok: false, reason: 'give gap or proud/lip, not both' };
+  }
 
   if (!hullMesh || !bitMesh) return { ok: false, reason: 'missing mesh' };
 
@@ -639,14 +835,72 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
     proud = -(Math.max(bitDepth, lip) - lip);
   }
 
+  /* The face the offset is measured from, and how far outside the skin it
+     must land. A gap is measured from the mating face and its sign is the
+     coupon convention (negative = air), so it flips to "outside the skin". */
+  var refInner = hasGap;
+  var off = hasGap ? -gap : proud;
+
+  /* a bit already cut by the face it is being seated to: refuse, never
+     collapse the part of it that stands proud - see NSO_seatStraddle */
+  var straddle = NSO_seatStraddle(hull, bitMesh, hullCenter, off);
+  if (straddle) {
+    return { ok: false, straddle: straddle,
+      reason: 'bit straddles that hull face - ' + straddle.proudBy.toFixed(2)
+        + 'mm of it stands proud and the rest is already inside. Move it clear of the face'
+        + ' (or fully inside) and seat again' };
+  }
+
+  /* gap mode: is the surface under the bit a skin? measure before moving */
+  var probe = hasGap ? NSO_seatTipsProbe(hull, bitMesh, hullCenter) : null;
+  if (probe && probe.rise > NSO_SEAT_TIPS_TOL) {
+    var frT = NSO_plugFrame(bitMesh, hullCenter, hullSoup);
+    var nT = frT.outerNormal.clone();
+    var cmT = NSO_matingFaceCorners(frT);
+    var faceS = 0;
+    for (var m0 = 0; m0 < 4; m0++) faceS += cmT[m0].dot(nT);
+    faceS /= 4;
+    /* mating face lands `off` outside the tips along the bit's own normal; no tilt */
+    bitMesh.position.addScaledVector(nT, (probe.s + off) - faceS);
+    bitMesh.updateMatrixWorld(true);
+
+    var frR = NSO_plugFrame(bitMesh, hullCenter);
+    var cmR = NSO_matingFaceCorners(frR), coR = NSO_outerFaceCorners(frR);
+    var residT = [], maxT = 0, tMin = Infinity, tMax = -Infinity, tSum = 0;
+    for (var r0 = 0; r0 < 4; r0++) {
+      var dvT = cmR[r0].dot(nT) - probe.s;      /* outside the tips = positive */
+      residT.push(dvT);
+      if (Math.abs(dvT - off) > maxT) maxT = Math.abs(dvT - off);
+      tSum += dvT; if (dvT < tMin) tMin = dvT; if (dvT > tMax) tMax = dvT;
+    }
+    return {
+      ok: true,
+      mode: 'gap',
+      reference: 'tips',
+      tipRise: probe.rise,
+      tipsPoint: probe.point,
+      normal: nT,
+      corners: coR,
+      hits: probe.hits,
+      cornerResidual: residT,
+      maxResidual: maxT,
+      undo: { position: savedPos, quaternion: savedQuat },
+      gap: gap,
+      gapAchieved: -(tSum / 4),
+      gapMin: -tMax,
+      gapMax: -tMin
+    };
+  }
+
   for (var it = 0; it < iters; it++) {
     var frame = NSO_plugFrame(bitMesh, hullCenter, hullSoup);
     var corners = NSO_outerFaceCorners(frame);
+    var rayFrom = NSO_seatRayOrigins(corners);
     var punch = frame.punch;
 
     var hits = [];
     for (var i = 0; i < 4; i++) {
-      var h = NSO_nearestSkinHit(hull, corners[i], punch);
+      var h = NSO_nearestSkinHit(hull, rayFrom[i], punch);
       if (!h) {
         bitMesh.position.copy(savedPos);
         bitMesh.quaternion.copy(savedQuat);
@@ -686,7 +940,7 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
 
     /* ---- translate along the fitted normal only (preserves Center X/Z) ---- */
     var frame2 = NSO_plugFrame(bitMesh, hullCenter, hullSoup);
-    var corners2 = NSO_outerFaceCorners(frame2);
+    var corners2 = refInner ? NSO_matingFaceCorners(frame2) : NSO_outerFaceCorners(frame2);
     var faceC = new THREE.Vector3();
     for (var c2 = 0; c2 < 4; c2++) faceC.add(corners2[c2]);
     faceC.multiplyScalar(0.25);
@@ -695,7 +949,7 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
     for (var h2 = 0; h2 < 4; h2++) hitC.add(hits[h2]);
     hitC.multiplyScalar(0.25);
 
-    var target = hitC.clone().addScaledVector(nFit, proud);
+    var target = hitC.clone().addScaledVector(nFit, off);
     var along = target.clone().sub(faceC).dot(nFit);
     bitMesh.position.addScaledVector(nFit, along);
     bitMesh.updateMatrixWorld(true);
@@ -703,19 +957,32 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
     lastFit = nFit; lastCorners = corners2; lastHits = hits;
   }
 
-  /* residual report: how far each corner ends up from the skin */
+  /* residual report: how far each corner of the reference face ends up from
+     the skin, against the offset that was asked for */
   var frameF = NSO_plugFrame(bitMesh, hullCenter);
   var cf = NSO_outerFaceCorners(frameF);
-  var resid = [], maxResid = 0;
+  var cfRay = NSO_seatRayOrigins(cf);
+  var cref = refInner ? NSO_matingFaceCorners(frameF) : cf;
+  var resid = [], maxResid = 0, dMin = Infinity, dMax = -Infinity, dSum = 0, dN = 0;
   for (var r = 0; r < 4; r++) {
-    var hh = NSO_nearestSkinHit(hull, cf[r], frameF.punch);
+    /* Rays leave the OUTER corners, as they did in the fit, and the mating
+       face is read off by subtracting the bit's depth along the normal. A
+       ray cast from a corner that sits exactly on the skin (gap 0) would
+       miss that face - the hit filter rejects t = 0 - and report the far
+       side of the hull instead. */
+    var hh = NSO_nearestSkinHit(hull, cfRay[r], frameF.punch);
     var dv = hh ? cf[r].clone().sub(hh).dot(frameF.outerNormal) : NaN;
+    if (refInner && isFinite(dv)) dv -= cf[r].clone().sub(cref[r]).dot(frameF.outerNormal);
     resid.push(dv);
-    if (isFinite(dv) && Math.abs(dv - proud) > maxResid) maxResid = Math.abs(dv - proud);
+    if (isFinite(dv) && Math.abs(dv - off) > maxResid) maxResid = Math.abs(dv - off);
+    if (isFinite(dv)) { dN++; dSum += dv; if (dv < dMin) dMin = dv; if (dv > dMax) dMax = dv; }
   }
 
-  return {
+  var out = {
     ok: true,
+    mode: hasGap ? 'gap' : 'proud',
+    reference: 'plane',
+    tipRise: probe ? probe.rise : 0,
     normal: lastFit ? lastFit.clone() : frameF.outerNormal.clone(),
     corners: cf,
     hits: lastHits,
@@ -723,6 +990,16 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
     maxResidual: maxResid,
     undo: { position: savedPos, quaternion: savedQuat }
   };
+  if (hasGap) {
+    /* back into the coupon convention: outside the skin = negative gap */
+    out.gap = gap;
+    out.gapAchieved = dN ? -(dSum / dN) : NaN;
+    out.gapMin = dN ? -dMax : NaN;
+    out.gapMax = dN ? -dMin : NaN;
+  } else {
+    out.proud = proud;
+  }
+  return out;
 }
 
 
@@ -1200,6 +1477,94 @@ async function NSO_unionSoups(aWorld, bWorld) {
    Same fail-safe contract: any failure returns { ok:false, soup: aWorld },
    caller leaves A untouched.
    ===================================================================== */
+/* =====================================================================
+   NOZZLE-SAFETY READOUT FOR A CUT  (NSO_Thickness.cutClearance)
+
+   buildCutVolume reserves `minWall` along the punch axis ALONE, so at an edge
+   or a corner - where two or three faces are load-bearing - it stops short of
+   the far wall on one axis and says nothing about the others. Measured on
+   fixtures/box_open.stl: a corner bite takes the whole 2 mm near wall and the
+   result still gates clean, because SEVERING a wall removes material rather
+   than thinning it. No check on the finished mesh can see that (docs/
+   WALL-THICKNESS.md, docs/LOCAL-CARVE.md 3c) - it has to be asked before the
+   cut, against every axis.
+
+   This is a REPORT, not a veto. Nothing about whether the cut runs, what it
+   removes, or whether it is reported as ok may depend on it:
+
+     - it is computed from `aWorld`, the hull as it is BEFORE the cut, and from
+       the box the cut actually occupies, so it reads the same question the
+       cut is about to answer;
+     - every failure path returns null, because a measurement that cannot be
+       taken must not fail a cut that is otherwise sound;
+     - the caller appends NSO_Thickness.cutWarning() to its own status line and
+       commits either way.
+
+   A hard refusal would be wrong here, not merely unfriendly: a corner gouge
+   that cuts through a wall is exactly what Local-Carve's blade is FOR. The
+   honest answer is to make the cut and say what it did.
+   ===================================================================== */
+function cutClearanceFor(aWorld, cutManifold, frame, opts) {
+  try {
+    var T = (typeof NSO_Thickness !== 'undefined') ? NSO_Thickness : null;
+    if (!T || typeof T.cutClearance !== 'function') return null;
+    if (!aWorld || !aWorld.length || !cutManifold) return null;
+
+    /* The world AABB of the volume actually removed - manB n safetyBox, not the
+       raw bit, so the probe is asked about the cut that happens rather than the
+       one that was requested. For a rotated bit the AABB is conservative: it
+       can over-report a wall at risk, never under-report one. */
+    var cutSoup = NSO_CSG.manifoldToSoup(cutManifold);
+    if (!cutSoup || cutSoup.length < 9) return null;
+    var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (var i = 0; i + 2 < cutSoup.length; i += 3) {
+      for (var a = 0; a < 3; a++) {
+        var v = cutSoup[i + a];
+        if (!(v === v)) return null;              // NaN in the cut box: measure nothing
+        if (v < lo[a]) lo[a] = v;
+        if (v > hi[a]) hi[a] = v;
+      }
+    }
+    for (var b = 0; b < 3; b++) if (!isFinite(lo[b]) || !isFinite(hi[b])) return null;
+
+    /* Severing the axis the bit punches along is what a through hole IS, so
+       cutClearance reports it instead of failing it. Naming that axis is only
+       honest while the punch really is axis-aligned: a skew punch has no one
+       axis, and naming its dominant one would excuse a severance it does not
+       account for. 15 degrees is the tolerance because that is the app's own
+       pose granularity (applyMeshRotation's tilt step); past it, no axis is
+       named and a severance anywhere is reported. */
+    var through = null;
+    var punch = frame && frame.punch;
+    if (punch) {
+      var AX = ['x', 'y', 'z'], best = -1, bestV = -1;
+      for (var k = 0; k < 3; k++) {
+        var m = Math.abs(Number(punch[AX[k]]));
+        if (m === m && m > bestV) { bestV = m; best = k; }
+      }
+      if (best >= 0 && bestV >= 0.9659) through = AX[best];   // cos 15 deg
+    }
+
+    /* No minWall override: the floor here is the NOZZLE floor - what the
+       slicer can still print - which is a different quantity from the cut's
+       own `minWall` reservation (1.0 mm of stand-off for the safety box).
+       Passing the latter would ask the wrong question. */
+    var rep = T.cutClearance(aWorld, lo, hi, {
+      through: through,
+      nozzle: (opts && typeof opts.nozzle === 'number') ? opts.nozzle : T.NOZZLE_DEFAULT
+    });
+    /* The box actually measured, carried on the report so a check can re-run
+       the probe at a denser sweep - or a bug report can be reproduced - without
+       re-deriving the AABB from the kernel solids, which no longer exist by
+       the time a caller sees this. */
+    if (rep) { rep.cut_lo = lo; rep.cut_hi = hi; }
+    return rep;
+  } catch (e) {
+    console.warn('[subtract] clearance probe skipped:', (e && e.message) ? e.message : e);
+    return null;
+  }
+}
+
 async function subtractSoupBFromA(aWorld, bWorld, opts) {
   opts = opts || {};
   var na = NSO_soupLen(aWorld), nb = NSO_soupLen(bWorld);
@@ -1219,6 +1584,7 @@ async function subtractSoupBFromA(aWorld, bWorld, opts) {
   }
 
   var manA = null, manB = null, safetyBox = null, bClipped = null, result = null;
+  var clearance = null;
   try {
     var aIn = aWorld, bIn = bWorld;
     if (typeof weldSoupVerts === 'function') {
@@ -1239,6 +1605,11 @@ async function subtractSoupBFromA(aWorld, bWorld, opts) {
     bClipped = manB.intersect(safetyBox);
     if (bClipped.isEmpty()) throw new Error('bit does not reach hull within safe wall margin');
 
+    /* Measured here because this is the last point where the cut volume still
+       exists as a solid and the hull is still un-cut. Purely a readout - see
+       cutClearanceFor above; the cut proceeds identically whatever it says. */
+    clearance = cutClearanceFor(aWorld, bClipped, frame, opts);
+
     result = manA.subtract(bClipped);
     if (result.status() !== 'NoError') throw new Error('subtract rejected by kernel: ' + result.status());
     if (result.isEmpty()) throw new Error('subtract produced empty solid');
@@ -1252,7 +1623,16 @@ async function subtractSoupBFromA(aWorld, bWorld, opts) {
     var volBefore = manA.volume();
     var volAfter = result.volume();
     var removedVol = volBefore - volAfter;
-    var noopEps = Math.max(1e-3, volBefore * 1e-4); // absolute floor + 0.01% of hull volume
+    // The default floor is sized for a PLUG: a port cutout is a large fraction
+    // of the hull, and the guard has to be loose enough that float noise on a
+    // 64,000 mm^3 block never reads as a real cut. A local carve is legitimately
+    // smaller than that - a 1.5 mm ball gouge at a corner of the same block is
+    // ~2 mm^3, or 0.003% - so a caller whose op does not depend on this guard
+    // to protect a piece it is about to delete can set its own floor.
+    // opts.minRemoved is that override, and absent it the behaviour is
+    // unchanged: absolute floor + 0.01% of hull volume.
+    var askEps = Number(opts.minRemoved);
+    var noopEps = (isFinite(askEps) && askEps > 0) ? askEps : Math.max(1e-3, volBefore * 1e-4);
     if (removedVol <= noopEps) {
       throw new Error('removed ~0 volume (' + removedVol.toFixed(4) +
         ' mm^3) -- bit likely does not touch the hull skin; check placement');
@@ -1272,12 +1652,13 @@ async function subtractSoupBFromA(aWorld, bWorld, opts) {
       mode: 'manifold',
       hullTris: outTris,
       openBefore: before.open, nmBefore: before.nm,
-      openAfter: after.open, nmAfter: after.nm
+      openAfter: after.open, nmAfter: after.nm,
+      clearance: clearance
     };
   } catch (err) {
     var why = NSO_errMsg(err);
     console.warn('[subtract] failed:', why);
-    return { ok: false, soup: aWorld, mode: 'manifold', reason: why };
+    return { ok: false, soup: aWorld, mode: 'manifold', reason: why, clearance: clearance };
   } finally {
     if (manA) manA.delete();
     if (manB) manB.delete();
@@ -1340,6 +1721,15 @@ async function subtractBFromA() {
     window.__nestSubtractMsg = 'Subtract ok - open edges ' +
       res.openBefore + '→' + res.openAfter +
       ', non-manifold ' + res.nmBefore + '→' + res.nmAfter;
+    /* The nozzle-safety finding rides the SUCCESS line as one more ' - '
+       clause, the way the defect overlay appends "(counted, not painted)" and
+       Skin appends "two shells: flagged non-solid": the cut is done and kept,
+       and this says what it cost. isError stays false - a finding is not a
+       failure, and the cut is not reverted. cutWarning() is '' on a cut that
+       leaves a printable wall, so an ordinary cut reads exactly as before. */
+    var cutWarn = (typeof NSO_Thickness !== 'undefined' && res.clearance)
+      ? NSO_Thickness.cutWarning(res.clearance) : '';
+    if (cutWarn) window.__nestSubtractMsg += ' - ' + cutWarn;
   } catch (err) {
     const why = (err && err.message) ? String(err.message) : 'unknown';
     console.warn('[subtract] failed:', why);
@@ -1483,7 +1873,13 @@ function flipPortOnPunch() {
   if (!hull.geometry.boundingBox) hull.geometry.computeBoundingBox();
   hull.geometry.boundingBox.getCenter(hc);
   hc.applyMatrix4(hull.matrixWorld);
-  const aWorld = (typeof meshToWorldSoup === 'function') ? meshToWorldSoup(placedA) : null;
+  /* The MESH, not the placed record. meshToWorldSoup bakes matrixWorld into
+     the soup, so only a mesh can answer it - a placed record carries a
+     `geometry` (which gets it past the guard) but no updateWorldMatrix, and
+     the call died on `placed.updateWorldMatrix is not a function` before
+     NSO_plugFrame ever saw a hull. `hull` is placedA.mesh and was already
+     updated two lines up, which is the same pair reportJoinFlushGap uses. */
+  const aWorld = (typeof meshToWorldSoup === 'function') ? meshToWorldSoup(hull) : null;
   const frame = NSO_plugFrame(bit, hc, aWorld);
   const axis = frame.outerNormal && frame.outerNormal.lengthSq() > 1e-8
     ? frame.outerNormal.clone().normalize()
@@ -1493,6 +1889,71 @@ function flipPortOnPunch() {
   bit.updateMatrixWorld(true);
   if (placedB.rotY == null) placedB.rotY = 0;
   setStatus('Port flipped 180 on punch - Seat flush again');
+}
+
+/* A bit whose underside is below the hull's top while its footprint lies
+   inside the hull's is buried in the hull. A drag along the bed puts it
+   there - drag never lifts - and so does a Raise that stops short of the
+   top. The plug frame reads the open air BELOW the plate as clear of the
+   hull and seats such a bit downward into it: the core answers "held at
+   plate level: gap NOT as requested" and the bit never moves (the live
+   "Seat does not seat" report). Nothing can ever seat below the plate, so
+   the bit is raised clear of the hull's top first and seats from above -
+   the pose the corner-ray fit is built for. XZ and the bit's quaternion are
+   untouched, only its lift; the seat then measures its own lift from the
+   result, as it always has. Returns the pose to put back on a failed seat
+   (null = nothing was moved). Not a core change: NSO_seatFlushBitToHull is
+   byte-identical, so its pinned poses hold. */
+var NSO_SEAT_CLEARANCE = 5;   /* mm above the hull's top - the staged pose the seat checks use */
+function NSO_raiseBuriedBitClear(placedA, placedB) {
+  if (!placedA || !placedB || !placedA.mesh || !placedB.mesh) return null;
+  placedA.mesh.updateMatrixWorld(true);
+  placedB.mesh.updateMatrixWorld(true);
+  const ba = meshLocalBox3(placedA.mesh);
+  const bb = meshLocalBox3(placedB.mesh);
+  const TOL = 0.05;   /* the pad meshBandExtent allows a wall */
+  const within = bb.min.x >= ba.min.x - TOL && bb.max.x <= ba.max.x + TOL
+              && bb.min.z >= ba.min.z - TOL && bb.max.z <= ba.max.z + TOL;
+  if (!within) return null;
+  if (bb.min.y >= ba.max.y - 1e-6) return null;   /* already above the hull */
+  const before = { position: placedB.mesh.position.clone(), quaternion: placedB.mesh.quaternion.clone(), liftY: placedB.liftY || 0 };
+  /* settlePlacedOnBed puts the world box bottom on 0.2 + liftY */
+  placedB.liftY = ba.max.y + NSO_SEAT_CLEARANCE - 0.2;
+  settlePlacedOnBed(placedB);
+  placedB.mesh.updateMatrixWorld(true);
+  return before;
+}
+function NSO_restoreRaisedBit(placedB, before) {
+  if (!before || !placedB || !placedB.mesh) return;
+  placedB.mesh.position.copy(before.position);
+  placedB.mesh.quaternion.copy(before.quaternion);
+  placedB.liftY = before.liftY;
+  placedB.mesh.updateMatrixWorld(true);
+}
+
+/* Seat flush's proud value. One constant so the seat, the status line and the
+   record the scene block reads cannot say three different numbers. */
+const SEAT_FLUSH_PROUD = 0.01;
+
+/* What a Seat leaves behind on the piece it moved.
+
+   Neither seat could be read back before this: the gap lived on the slider and
+   the result lived in the pose. The record is what the 3MF scene block writes
+   (nso-3mf-scene.js) so a reopened plate says which gap a pair was seated at
+   instead of only where the two pieces happen to sit. It is descriptive - the
+   pose is still the truth, and nothing re-seats from it. Cleared by a fresh
+   seat, which overwrites it. */
+function NSO_recordSeat(placedB, placedA, info) {
+  if (!placedB || !info || !isFinite(Number(info.gap))) return;
+  placedB.seat = {
+    gap: Number(info.gap),
+    kind: info.kind === 'flush' ? 'flush' : 'support',
+    partnerName: (placedA && placedA.name) ? placedA.name : '',
+    partnerIndex: (typeof state !== 'undefined' && state.placed) ? state.placed.indexOf(placedA) : null,
+    measured: isFinite(Number(info.measured)) ? Number(info.measured) : null,
+    residual: isFinite(Number(info.residual)) ? Number(info.residual) : null,
+    reference: info.reference === 'tips' ? 'tips' : 'face'
+  };
 }
 
 function seatFlushBitToHull() {
@@ -1508,9 +1969,14 @@ function seatFlushBitToHull() {
     setStatus('Both hull and bit must be on the plate', true);
     return;
   }
+  // Seat flush is the flush plug seat this button has always done: outer
+  // face 0.01 mm proud of A's skin, then Subtract. It never reads the gap
+  // slider - that belongs to Seat (support).
   pushUndo(snapshotPlacedPose(state.placed.indexOf(placedB)));
-  const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { proud: 0.01 });
+  const raised = NSO_raiseBuriedBitClear(placedA, placedB);
+  const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { proud: SEAT_FLUSH_PROUD });
   if (!res || !res.ok) {
+    NSO_restoreRaisedBit(placedB, raised);
     setStatus('Seat failed - ' + ((res && res.reason) || 'pieces unchanged'), true);
     return;
   }
@@ -1520,7 +1986,124 @@ function seatFlushBitToHull() {
   placedB.liftY = Math.max(0, placedB.mesh.position.y - baseY);
   applyPlacedXZ(placedB, placedB.x, placedB.z);
   var resid = (res.maxResidual != null && isFinite(res.maxResidual)) ? res.maxResidual : 0;
-  setStatus('Seated - proud 0.01mm, skin error ' + resid.toFixed(2) + 'mm - Subtract');
+  NSO_recordSeat(placedB, placedA, {
+    gap: SEAT_FLUSH_PROUD, kind: 'flush', measured: null, residual: resid, reference: res.reference
+  });
+  setStatus('Seated - proud ' + SEAT_FLUSH_PROUD + 'mm, skin error ' + resid.toFixed(2) + 'mm - Subtract');
+}
+
+/* Seat (support): B's mating face at the gap the slider shows, coupon sign
+   convention - negative = air gap, positive = overlap, 0 = touching. */
+function seatSupportBitToHull() {
+  const idA = state.editId;
+  const idB = state.joinPartnerId;
+  if (!state.joinSession || idA == null || idB == null || idA === idB) {
+    setStatus('Start Join, A = hull, B = bit, then Seat (support)', true);
+    return;
+  }
+  const placedA = state.placed.find(function (p) { return p && p.sourceId === idA && p.mesh; });
+  const placedB = state.placed.find(function (p) { return p && p.sourceId === idB && p.mesh; });
+  if (!placedA || !placedB) {
+    setStatus('Both hull and bit must be on the plate', true);
+    return;
+  }
+  const gap = readSeatGapInput();
+  if (!isFinite(gap)) {
+    setStatus('Seat gap slider is missing or out of range - nothing seated', true);
+    return;
+  }
+  seatBitAtGap(placedA, placedB, gap);
+}
+
+/* The gap slider's value in mm, or NaN when the slider is missing or its
+   value is outside its own range (a range input clamps user input, so that
+   only happens to a value set from code). Never a silent fallback. */
+function readSeatGapInput() {
+  const el = document.getElementById('seat-gap');
+  if (!el) return NaN;
+  const v = Number(el.value);
+  const lo = Number(el.min), hi = Number(el.max);
+  if (!isFinite(v)) return NaN;
+  if (isFinite(lo) && v < lo - 1e-9) return NaN;
+  if (isFinite(hi) && v > hi + 1e-9) return NaN;
+  // step is 0.01: snap what we send so the seat asks for exactly the number
+  // the readout shows, not -0.18000000000000002
+  return Math.round(v * 100) / 100;
+}
+
+function NSO_formatSeatGap(v) {
+  if (!isFinite(v)) return '-';
+  const r = Math.round(v * 100) / 100;
+  const s = r.toFixed(2);
+  return (r > 0 ? '+' : '') + (r === 0 ? '0.00' : s) + ' mm';
+}
+
+/* Keep the readout on the exact slider value; called on every input event
+   and once at start-up so the default (-0.18, mid easy-release) is shown. */
+function updateSeatGapReadout() {
+  const out = document.getElementById('seat-gap-value');
+  if (!out) return;
+  out.textContent = NSO_formatSeatGap(readSeatGapInput());
+}
+
+/* Seat B's mating face `gap` mm off A's skin (coupon convention) and make
+   the plate record match, so the export writes the same relation the
+   scene shows. */
+function seatBitAtGap(placedA, placedB, gap) {
+  // Both pieces on the bed baseline settlePlacedOnBed uses, the way Align
+  // edges does through matchPlacedBottoms. A piece that was dropped and never
+  // moved sits 0.1 mm higher than a settled one; liftY is measured from the
+  // settled baseline and is what the exports write, so with A left where it
+  // was dropped that 0.1 would land in the exported gap. Not acceptable when
+  // the whole easy-release window is 0.05 mm wide.
+  settlePlacedOnBed(placedA);
+  placedA.mesh.updateMatrixWorld(true);
+
+  pushUndo(snapshotPlacedPose(state.placed.indexOf(placedB)));
+  // A bit buried in the hull (dragged over it along the bed) seats from
+  // above, never down into the plate - see NSO_raiseBuriedBitClear.
+  const raised = NSO_raiseBuriedBitClear(placedA, placedB);
+  const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { gap: gap });
+  if (!res || !res.ok) {
+    NSO_restoreRaisedBit(placedB, raised);
+    setStatus('Seat failed - ' + ((res && res.reason) || 'pieces unchanged'), true);
+    return;
+  }
+  placedB.x = placedB.mesh.position.x;
+  placedB.z = placedB.mesh.position.z;
+  // liftY is exactly what settlePlacedOnBed needs to put the bit back where
+  // Seat left it: it sets y so the world box bottom lands on 0.2 + liftY.
+  const bb = meshLocalBox3(placedB.mesh);
+  let lift = bb.min.y - 0.2;
+  let clamped = false;
+  /* A horizontal seat slides the bit along the bed and never changes its
+     height, so a bit that was already settled comes back with a lift of
+     -1e-16: the bed baseline in Float, not a piece the seat pushed into the
+     plate. Only a sink the seat could actually express is worth the warning -
+     the slider's own 0.01 mm step is the smallest of those, and this epsilon
+     is four orders below it. */
+  if (lift < -NSO_SEAT_BED_EPS) { clamped = true; lift = 0; }
+  else if (lift < 0) lift = 0;
+  placedB.liftY = lift;
+  applyPlacedXZ(placedB, placedB.x, placedB.z);
+
+  const resid = (res.maxResidual != null && isFinite(res.maxResidual)) ? res.maxResidual : 0;
+  const got = isFinite(res.gapAchieved) ? res.gapAchieved : gap;
+  NSO_recordSeat(placedB, placedA, {
+    gap: gap, kind: 'support', measured: got, residual: resid, reference: res.reference
+  });
+  let what;
+  if (gap < 0) what = 'air gap ' + Math.abs(gap).toFixed(2) + 'mm';
+  else if (gap > 0) what = 'overlap ' + gap.toFixed(2) + 'mm';
+  else what = 'touching, gap 0.00mm';
+  // measured value keeps its sign so a wrong-way seat can never read as right
+  let msg = 'Seated - ' + what + ' (measured ' + (got > 0 ? '+' : '') + got.toFixed(3) + 'mm, skin error ' + resid.toFixed(2) + 'mm)';
+  // A skinned hull: say so, and say how far the tips stand off the base
+  // plane, so a seat that silently measured from the wrong surface could
+  // never read the same as one that measured from the tips.
+  if (res.reference === 'tips') msg += ' - from skin tips, relief ' + res.tipRise.toFixed(2) + 'mm above the base plane';
+  if (clamped) msg += ' - bit would sink below the plate, held at plate level: gap NOT as requested';
+  setStatus(msg, clamped);
 }
 
 
@@ -1549,9 +2132,10 @@ function reportJoinFlushGap() {
     hullCenter.applyMatrix4(placedA.mesh.matrixWorld);
     const frame = NSO_plugFrame(placedB.mesh, hullCenter, hull);
     const corners = NSO_outerFaceCorners(frame);
+    const rayFrom = NSO_seatRayOrigins(corners);
     let n = 0, sum = 0, mn = Infinity, mx = -Infinity;
     for (let i = 0; i < corners.length; i++) {
-      const h = NSO_nearestSkinHit(hull, corners[i], frame.punch);
+      const h = NSO_nearestSkinHit(hull, rayFrom[i], frame.punch);
       if (!h) continue;
       const d = corners[i].clone().sub(h).dot(frame.outerNormal);
       if (!isFinite(d)) continue;
@@ -2695,6 +3279,14 @@ function setupUI() {
   if (btnExtract) btnExtract.addEventListener('click', extractBitFromSelected);
   const btnSeat = document.getElementById('btn-seat-flush');
   if (btnSeat) btnSeat.addEventListener('click', seatFlushBitToHull);
+  const btnSeatSupport = document.getElementById('btn-seat-support');
+  if (btnSeatSupport) btnSeatSupport.addEventListener('click', seatSupportBitToHull);
+  const seatGapSlider = document.getElementById('seat-gap');
+  if (seatGapSlider) {
+    seatGapSlider.addEventListener('input', updateSeatGapReadout);
+    seatGapSlider.addEventListener('change', updateSeatGapReadout);
+    updateSeatGapReadout();
+  }
   const btnFlipPort = document.getElementById('btn-flip-port');
   if (btnFlipPort) btnFlipPort.addEventListener('click', flipPortOnPunch);
   const btnCap = document.getElementById('btn-cap-open');
@@ -2763,6 +3355,22 @@ const btnFrameView = document.getElementById('btn-frame-view');
   if (btnFrameView) btnFrameView.addEventListener('click', frameSelectedPiece);
   const btnXray = document.getElementById('btn-xray');
   if (btnXray) btnXray.addEventListener('click', toggleXrayView);
+  // Bed grid: two controls, deliberately independent of one another.
+  const selGrid = document.getElementById('plate-grid-show');
+  if (selGrid) {
+    selGrid.value = state.plateGridMode;
+    selGrid.addEventListener('change', function () {
+      setPlateGridMode(selGrid.value);
+      setStatus('Bed grid ' + (state.plateGridMode === 'auto'
+        ? 'auto - shown while a piece is being positioned'
+        : state.plateGridMode));
+    });
+  }
+  const chkGridSnap = document.getElementById('chk-plate-grid-snap');
+  if (chkGridSnap) {
+    chkGridSnap.checked = !!state.plateGridSnap;
+    chkGridSnap.addEventListener('change', function () { setPlateGridSnap(chkGridSnap.checked); });
+  }
   const btnJoinFaces = document.getElementById('btn-join-faces');
   if (btnJoinFaces) btnJoinFaces.style.display = 'none';
   const slotA = document.getElementById('join-slot-a');

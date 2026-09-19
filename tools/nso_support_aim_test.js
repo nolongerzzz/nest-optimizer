@@ -1,0 +1,450 @@
+#!/usr/bin/env node
+// Headless self-test for nso_support_aim.js: overhang detection, and a
+// straight support aimed from the nearest viable base and grown to reach it.
+//
+//   node tools/nso_support_aim_test.js      exit 0 = every gate held
+//
+// Loads the shipped files with vm, in index.html's own order, so the browser
+// files stay free of any node idiom - the same way tools/nso_extend_test.js
+// and tools/sculpt_selftest.js do. app-sculpt.js is loaded because Extend
+// reuses NSO_buildAdjacency / NSO_sculptMetrics for its topology evidence, and
+// loading it here means the STRONGER set of Extend's gates runs on every grow
+// step below rather than the weaker set.
+//
+// Writes tools/support-aim-out/*.stl for tools/nso_support_aim_canonical_check.js,
+// which puts the same solids through tools/mesh_validate.py.
+//
+// The numbers worth reading are the exact ones. "cross-section drift 0" is a
+// coordinate-by-coordinate comparison against the input buffer, not a rounded
+// zero, and the area spread across the sections of a finished, turned strut is
+// quoted in full rather than as "uniform".
+
+const fs = require('fs');
+const path = require('path');
+const vm = require('vm');
+
+const ROOT = path.join(__dirname, '..');
+const OUT = path.join(ROOT, 'tools', 'support-aim-out');
+const { readSTL, writeSTL } = require('./nso_stl_io.js');
+
+const ctx = {
+  Math, Map, Set, console, Array, Object, Number, String, JSON, isFinite,
+  Float32Array, Float64Array, Int32Array, Uint32Array, Uint8Array, ArrayBuffer
+};
+vm.createContext(ctx);
+for (const f of ['nso_thickness.js', 'nso_seat_surface.js', 'app-sculpt.js',
+                 'app-extend.js', 'nso_support_aim.js']) {
+  vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
+}
+const SA = ctx.NSO_SupportAim;
+const TH = ctx.NSO_Thickness;
+
+let pass = 0, fail = 0;
+const FAILS = [];
+function check(name, cond, detail) {
+  if (cond) { pass++; console.log('  ok    ' + name + (detail ? '   ' + detail : '')); }
+  else { fail++; FAILS.push(name); console.log('  FAIL  ' + name + (detail ? '   ' + detail : '')); }
+}
+const fx = f => path.join(ROOT, f);
+const near = (a, b, tol) => Math.abs(a - b) <= tol;
+
+/* ---- shapes built here, so the arithmetic is checkable by hand ---------- */
+
+function box(lo, hi) {
+  const v = [[lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]], [hi[0], hi[1], lo[2]], [lo[0], hi[1], lo[2]],
+             [lo[0], lo[1], hi[2]], [hi[0], lo[1], hi[2]], [hi[0], hi[1], hi[2]], [lo[0], hi[1], hi[2]]];
+  const f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4],
+             [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]];
+  const out = [];
+  for (const t of f) for (const i of t) out.push(...v[i]);
+  return out;
+}
+const soupOf = (...parts) => new Float32Array([].concat(...parts));
+
+/* A post with an arm jutting off it. The arm's underside, 200 mm^2 at z = 16,
+   has nothing beneath it: the canonical cantilever. */
+const CANTILEVER = soupOf(box([0, 0, 0], [10, 10, 20]), box([10, 0, 16], [30, 10, 20]));
+/* The same arm with a pillar already under its far half. Everything about the
+   arm's underside is unchanged - same normals, same angle, same area - and
+   half of it is now held up. */
+const CANTILEVER_PROPPED = soupOf(box([0, 0, 0], [10, 10, 20]),
+                                  box([10, 0, 16], [30, 10, 20]),
+                                  box([20, 0, 0], [30, 10, 16]));
+
+/* A wedge whose sloping underside sits at a stated angle off the build plate:
+   run = rise / tan(deg). Used to pin the threshold itself. */
+function rampUnder(deg, z0, rise) {
+  const run = rise / Math.tan(deg * Math.PI / 180);
+  const v = [[0, 0, z0], [run, 0, z0 + rise], [run, 0, z0 + rise + 4], [0, 0, z0 + 4],
+             [0, 10, z0], [run, 10, z0 + rise], [run, 10, z0 + rise + 4], [0, 10, z0 + 4]];
+  const f = [[0, 1, 2], [0, 2, 3], [4, 6, 5], [4, 7, 6], [0, 5, 1], [0, 4, 5],
+             [1, 5, 6], [1, 6, 2], [2, 6, 7], [2, 7, 3], [3, 7, 4], [3, 4, 0]];
+  const out = [];
+  for (const t of f) for (const i of t) out.push(...v[i]);
+  return new Float32Array(out);
+}
+
+console.log('\n=== 1. DETECTION: the angle, and the half that makes it a detector ===');
+
+{
+  const d = SA.detectOverhangs(CANTILEVER, { skipList: [] });
+  check('cantilever: detected', d.ok, d.reason);
+  check('cantilever: one region', d.regions.length === 1, `${d.regions.length} region(s)`);
+  const r = d.regions[0];
+  check('cantilever: region area is the arm underside, 20 x 10 mm',
+    near(r.areaMm2, 200, 1e-3), `${r.areaMm2.toFixed(4)} mm^2`);
+  check('cantilever: aim point is the centre of that face',
+    near(r.point[0], 20, 1e-4) && near(r.point[1], 5, 1e-4) && near(r.point[2], 16, 1e-4),
+    `[${r.point.map(c => c.toFixed(4)).join(', ')}]`);
+  check('cantilever: the drop to the plate is the arm height',
+    near(r.dropMm, 16, 1e-4), `${r.dropMm.toFixed(4)} mm`);
+  check('cantilever: the post\'s own bottom face is not flagged - it is ON the plate',
+    d.trisOnPlate === 2 && d.trisDownward === 4 && d.trisFlagged === 2,
+    `downward ${d.trisDownward}, onPlate ${d.trisOnPlate}, flagged ${d.trisFlagged}`);
+}
+
+{
+  /* THE test. Same faces, same normals, same angle - a tint cannot tell these
+     two shapes apart, and a detector must. */
+  const bare = SA.detectOverhangs(CANTILEVER, { skipList: [] });
+  const prop = SA.detectOverhangs(CANTILEVER_PROPPED, { skipList: [] });
+  check('propped: the arm underside is still 4 downward faces on both shapes',
+    prop.trisDownward >= bare.trisDownward,
+    `bare ${bare.trisDownward}, propped ${prop.trisDownward}`);
+  check('propped: the half with a pillar under it is dropped as self-supported',
+    prop.trisSelfSupported > 0, `${prop.trisSelfSupported} self-supported`);
+  const propArea = prop.regions.reduce((s, r) => s + r.areaMm2, 0);
+  check('propped: the unsupported area halves, 200 -> 100 mm^2',
+    near(propArea, 100, 1e-3), `${propArea.toFixed(4)} mm^2`);
+}
+
+{
+  /* The tint's own predicate, written out, so the difference is a measurement
+     and not a claim. applyOverhangColors (app-core.js) flags n.up < cos(45),
+     which is every face more than 45 deg off UP. */
+  const tint = soup => {
+    let n = 0;
+    for (let t = 0; t < soup.length / 9; t++) {
+      const o = t * 9;
+      const ux = soup[o + 3] - soup[o], uy = soup[o + 4] - soup[o + 1], uz = soup[o + 5] - soup[o + 2];
+      const vx = soup[o + 6] - soup[o], vy = soup[o + 7] - soup[o + 1], vz = soup[o + 8] - soup[o + 2];
+      let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const L = Math.hypot(nx, ny, nz);
+      if (!(L > 1e-15)) continue;
+      if (nz / L < Math.cos(45 * Math.PI / 180)) n++;
+    }
+    return n;
+  };
+  const d = SA.detectOverhangs(CANTILEVER, { skipList: [] });
+  check('the viewport tint is not the detector: it flags every vertical wall too',
+    tint(CANTILEVER) === 20 && d.trisFlagged === 2,
+    `tint ${tint(CANTILEVER)} of ${CANTILEVER.length / 9} faces, detector ${d.trisFlagged}`);
+}
+
+for (const [deg, expect] of [[30, true], [44, true], [46, false], [60, false]]) {
+  const d = SA.detectOverhangs(rampUnder(deg, 6, 8), { skipList: [], minAreaMm2: 0 });
+  const got = d.regions.length > 0;
+  check(`threshold: an underside ${deg} deg off the plate ${expect ? 'needs' : 'does not need'} support at the 45 deg default`,
+    got === expect, `${d.regions.length} region(s), ${d.trisFlagged} face(s) flagged`);
+}
+{
+  const d = SA.detectOverhangs(rampUnder(30, 6, 8), { skipList: [], minAreaMm2: 0, angleDeg: 20 });
+  check('threshold: the same 30 deg underside passes once the threshold drops to 20 deg',
+    d.regions.length === 0, d.reason);
+}
+
+console.log('\n=== 2. DETECTION on real fixtures ===');
+
+{
+  for (const f of ['library/box_closed.stl', 'library/soften_test_01_cube.stl',
+                   'library/box_hull_80x40x20-2.stl', 'fixtures/lid_strap.stl']) {
+    const d = SA.detectOverhangs(readSTL(fx(f)), { skipList: [] });
+    check(`${f}: sits on its own base, needs no support`,
+      d.ok && d.regions.length === 0, d.reason);
+  }
+}
+{
+  const f = 'fixtures/tape_on-edge-single-B101_rounded_v8_FINAL.stl';
+  const soup = readSTL(fx(f));
+  const t0 = Date.now();
+  const d = SA.detectOverhangs(soup, { skipList: [] });
+  const ms = Date.now() - t0;
+  check(`${f}: a real 32862-triangle part, scanned`, d.ok, d.reason);
+  check('tape: the biggest unsupported region is the on-edge underside, ~1188 mm^2 at ~18 mm up',
+    d.regions.length > 0 && near(d.regions[0].areaMm2, 1187.86, 0.5) && near(d.regions[0].dropMm, 18.04, 0.05),
+    d.regions.length ? `${d.regions[0].areaMm2.toFixed(2)} mm^2, drop ${d.regions[0].dropMm.toFixed(2)} mm` : 'none');
+  check('tape: 5204 downward faces reduce to ' + d.trisFlagged + ' genuinely unsupported',
+    d.trisDownward === 5204 && d.trisFlagged < d.trisDownward,
+    `downward ${d.trisDownward}, self-supported ${d.trisSelfSupported}, on the plate ${d.trisOnPlate}`);
+  check('tape: the whole scan is under 2 s (one ray per triangle, brute force, is 169 s)',
+    ms < 2000, ms + ' ms');
+}
+
+console.log('\n=== 3. The vertical-ray grid is exactly the brute-force answer ===');
+
+for (const [f, stride] of [['fixtures/fixture_groove_concave.stl', 1],
+                           ['fixtures/hinge_pip.stl', 1],
+                           ['fixtures/fixture_blob_organic.stl', 1],
+                           ['fixtures/tape_on-edge-single-B101_rounded_v8_FINAL.stl', 37]]) {
+  const s = readSTL(fx(f));
+  const n = (s.length / 9) | 0;
+  const grid = SA._buildDownGrid([s]);
+  let diff = 0, rays = 0, hits = 0;
+  for (let t = 0; t < n; t += stride) {
+    const o = t * 9;
+    const c = [(s[o] + s[o + 3] + s[o + 6]) / 3,
+               (s[o + 1] + s[o + 4] + s[o + 7]) / 3,
+               (s[o + 2] + s[o + 5] + s[o + 8]) / 3];
+    const orig = [c[0], c[1], c[2] - 1e-3];
+    const g = SA._nearestHitDown(grid, orig, 1e-3, 1e9);
+    const b = SA._nearestHit([s], orig, [0, 0, -1], 1e-3, 1e9);
+    rays++;
+    if (g > 0) hits++;
+    if (Math.abs((g < 0 ? -1 : g) - (b < 0 ? -1 : b)) > 1e-9) diff++;
+  }
+  check(`${path.basename(f)}: ${rays} vertical rays agree ray for ray`,
+    diff === 0, `${diff} disagreement(s), ${hits} of ${rays} rays hit something`);
+}
+
+console.log('\n=== 4. Paint scope: the skip list is required, and it is obeyed ===');
+
+{
+  const noList = SA.detectOverhangs(CANTILEVER, {});
+  check('a caller who forgets the skip list is refused, not given an unpainted default',
+    !noList.ok && /skipList/.test(noList.reason), noList.reason);
+
+  const nullList = SA.detectOverhangs(CANTILEVER, { skipList: null });
+  check('a painted face with no axis to name it by is refused by name',
+    !nullList.ok && /no axis and side/.test(nullList.reason), nullList.reason);
+
+  const empty = SA.detectOverhangs(CANTILEVER, { skipList: [] });
+  check('[] states that nothing is painted, and the scan runs',
+    empty.ok && empty.regions.length === 1, empty.reason);
+
+  /* The arm underside is the -Z face at z = 16. nsoMaskFaceList spells that
+     { axisIdx: 2, keepMin: true, d: 16 }; the list is read as recorded, and
+     never re-derived from a bounding box. */
+  const painted = SA.detectOverhangs(CANTILEVER,
+    { skipList: [{ axisIdx: 2, keepMin: true, d: 16, inner: false }] });
+  check('painting the arm underside takes it out of the scan',
+    painted.ok && painted.regions.length === 0 && painted.trisPainted === 2,
+    `${painted.trisPainted} face(s) skipped, ${painted.regions.length} region(s)`);
+
+  /* Sub-region scope: paint somewhere else on the piece must NOT stand the
+     whole scan down. The post's own bottom is the -Z face at z = 0. */
+  const elsewhere = SA.detectOverhangs(CANTILEVER,
+    { skipList: [{ axisIdx: 2, keepMin: true, d: 0, inner: false }] });
+  check('paint elsewhere on the piece does not stand the scan down (sub-region scope)',
+    elsewhere.ok && elsewhere.regions.length === 1, elsewhere.reason);
+}
+
+console.log('\n=== 5. THE AIM: one straight line, from the nearest viable base ===');
+
+{
+  const d = SA.detectOverhangs(CANTILEVER, { skipList: [] });
+  const target = d.regions[0].point;
+  const nb = SA.nearestBase(target, [{ kind: 'plate', z: 0 }], { obstacles: [CANTILEVER] });
+  check('plate base: the foot is straight below the target', nb.ok &&
+    near(nb.from[0], 20, 1e-6) && near(nb.from[1], 5, 1e-6) && near(nb.from[2], 0, 1e-6),
+    nb.ok ? `[${nb.from.map(c => c.toFixed(4)).join(', ')}]` : nb.reason);
+  check('plate base: the direction is straight up and the length is the drop',
+    nb.ok && near(nb.dir[2], 1, 1e-9) && near(nb.length, 16, 1e-6),
+    nb.ok ? `dir [${nb.dir.map(c => c.toFixed(6)).join(', ')}], ${nb.length.toFixed(4)} mm` : nb.reason);
+}
+
+{
+  /* A second piece already on the plate, under the arm but off to one side.
+     Its nearest surface point is closer than the plate, so it wins - and the
+     direction that comes out is oblique, which is the case the whole "bake,
+     do not pose" finding exists for. */
+  const prop = new Float32Array(box([22, 2, 0], [26, 6, 10]));
+  const d = SA.detectOverhangs(CANTILEVER, { skipList: [] });
+  const target = d.regions[0].point;                       /* [20, 5, 16] */
+  const nb = SA.nearestBase(target, [{ kind: 'plate', z: 0 }, { kind: 'piece', soup: prop, id: 'prop' }],
+    { obstacles: [CANTILEVER] });
+  check('another piece wins when it is nearer than the plate',
+    nb.ok && nb.base.kind === 'piece' && nb.base.id === 'prop',
+    nb.ok ? `${nb.base.kind}, ${nb.length.toFixed(4)} mm (plate was 16)` : nb.reason);
+  check('the aim off a piece is oblique, not vertical',
+    nb.ok && nb.dir[2] < 0.999 && nb.dir[2] > 0,
+    nb.ok ? `dir [${nb.dir.map(c => c.toFixed(6)).join(', ')}]` : nb.reason);
+  /* Nothing of the prop sits directly under [20, 5, 16] - it spans x 22..26 -
+     so the foot is its nearest EDGE, at x = 22, z = 10: hypot(2, 0, 6). A
+     straight-down reading would have found no prop at all and fallen back to
+     the plate. */
+  check('nearest means nearest on the surface, not straight down from the target',
+    nb.ok && near(nb.length, Math.hypot(2, 0, 6), 1e-4),
+    nb.ok ? `${nb.length.toFixed(4)} mm, expected ${Math.hypot(2, 0, 6).toFixed(4)}` : nb.reason);
+}
+
+{
+  /* A blocked line is refused, not routed around. The target is the far end
+     of a pocket whose mouth the piece itself closes over. */
+  const wall = soupOf(box([0, 0, 0], [30, 10, 4]), box([0, 0, 8], [30, 10, 12]));
+  const target = [15, 5, 8];                               /* the upper slab's underside */
+  const blocked = SA.nearestBase(target, [{ kind: 'plate', z: 0 }], { obstacles: [wall] });
+  check('a blocked straight line refuses rather than bending',
+    !blocked.ok && /blocked/.test(blocked.considered[0].why),
+    blocked.considered[0].why);
+  check('the refusal names curving as out of scope rather than implying it will be tried',
+    !blocked.ok && /curving path/.test(blocked.reason), blocked.reason);
+}
+
+console.log('\n=== 6. THE GROWTH: Extend does it, and the cross-section holds ===');
+
+const CASES = [];
+{
+  const p = SA.plan(CANTILEVER, { skipList: [] });
+  check('cantilever: plan() runs detect -> aim -> build -> grow -> place', p.ok, p.reason);
+  check('cantilever: the grow step is Extend, with its own gates passing',
+    p.ok && p.aim.grow.ok && p.aim.grow.axis === 'z', p.ok ? p.aim.grow.reason || 'ok' : '');
+  check('cantilever: Extend reports cross-section drift of exactly 0 coordinates',
+    p.ok && p.aim.grow.crossSectionDrift === 0, p.ok ? String(p.aim.grow.crossSectionDrift) : '');
+  check('cantilever: the strut is grown to the length the aim asked for',
+    p.ok && near(p.aim.grow.lengthAfter, 16, p.aim.grow.residualUlpTol),
+    p.ok ? `${p.aim.grow.lengthAfter} mm, residual ${p.aim.grow.residual.toExponential(3)} mm ` +
+           `(tolerance ${p.aim.grow.residualUlpTol.toExponential(3)})` : '');
+  check('cantilever: the strut tip lands on the point that needed support',
+    p.ok && Math.abs(p.aim.reachErrorMm) < 1e-4,
+    p.ok ? `${p.aim.reachErrorMm.toExponential(3)} mm off` : '');
+  check('cantilever: a straight-up aim meets the flat underside square, so nothing goes past it',
+    p.ok && p.aim.tipPenetrationMm === 0,
+    p.ok ? `${p.aim.tipPenetrationMm} mm past the face` : '');
+  if (p.ok) CASES.push(['cantilever_strut', p, CANTILEVER]);
+}
+
+{
+  /* The oblique case: the same overhang, supported off a second piece, so the
+     strut is turned through a real angle before it is measured. */
+  const prop = new Float32Array(box([22, 2, 0], [26, 6, 10]));
+  const p = SA.plan(CANTILEVER, {
+    skipList: [],
+    bases: [{ kind: 'plate', z: 0 }, { kind: 'piece', soup: prop, id: 'prop' }],
+    obstacles: [CANTILEVER, prop]
+  });
+  check('oblique: plan() aims off the second piece', p.ok && p.aim.base.base.kind === 'piece', p.reason);
+  check('oblique: the strut is turned through a real angle, baked into its triangles',
+    p.ok && p.aim.place.turnedDeg > 5,
+    p.ok ? `${p.aim.place.turnedDeg.toFixed(3)} deg` : '');
+  check('oblique: Extend still reports cross-section drift of exactly 0',
+    p.ok && p.aim.grow.crossSectionDrift === 0, p.ok ? String(p.aim.grow.crossSectionDrift) : '');
+  check('oblique: the tip still lands on the target after the turn',
+    p.ok && Math.abs(p.aim.reachErrorMm) < 1e-4,
+    p.ok ? `${p.aim.reachErrorMm.toExponential(3)} mm off` : '');
+  /* The flat cap on a tilted aim: the corner stands (side/2) * sin(tilt) past
+     the face it meets. Pinned against the closed form, not against a
+     tolerance, because this is the number that separates "a cap that is not
+     shaped to the contact" from "a support driven through the piece". */
+  const predicted = (p.ok ? p.aim.sideMm / 2 : 0) *
+    Math.sin((p.ok ? p.aim.place.turnedDeg : 0) * Math.PI / 180);
+  check('oblique: the cap corner stands (side/2) x sin(tilt) past the target face',
+    p.ok && near(p.aim.tipPenetrationMm, predicted, 1e-5),
+    p.ok ? `${p.aim.tipPenetrationMm.toFixed(6)} mm, closed form ${predicted.toFixed(6)} mm ` +
+           `at ${p.aim.place.turnedDeg.toFixed(3)} deg` : '');
+  if (p.ok) CASES.push(['oblique_strut', p, CANTILEVER]);
+}
+
+{
+  /* A real part. The tape's on-edge underside, 18 mm up, supported off the plate. */
+  const soup = readSTL(fx('fixtures/tape_on-edge-single-B101_rounded_v8_FINAL.stl'));
+  const p = SA.plan(soup, { skipList: [] });
+  check('tape: plan() aims a support at the real part\'s biggest unsupported region',
+    p.ok, p.reason);
+  check('tape: Extend reports cross-section drift of exactly 0',
+    p.ok && p.aim.grow.crossSectionDrift === 0, p.ok ? String(p.aim.grow.crossSectionDrift) : '');
+  check('tape: the tip lands on the target',
+    p.ok && Math.abs(p.aim.reachErrorMm) < 1e-4,
+    p.ok ? `${p.aim.reachErrorMm.toExponential(3)} mm off, ${p.aim.lengthMm.toFixed(3)} mm long` : '');
+  if (p.ok) CASES.push(['tape_strut', p, soup]);
+}
+
+console.log('\n=== 7. Cross-section uniformity, measured on the FINISHED solid ===');
+
+for (const [name, p] of CASES) {
+  const u = SA.uniformity(p.soup, p.aim.from, p.aim.dir, { stations: 15 });
+  check(`${name}: 15 sections perpendicular to the aim all close`, u.ok, u.reason);
+  check(`${name}: section area is uniform along the aimed direction`,
+    u.ok && u.areaRelSpread < 1e-6,
+    u.ok ? `${u.areaMin.toFixed(9)} .. ${u.areaMax.toFixed(9)} mm^2, ` +
+           `spread ${(u.areaRelSpread * 100).toExponential(3)}%` : '');
+  check(`${name}: section perimeter is uniform too`,
+    u.ok && u.perimeterRelSpread < 1e-6,
+    u.ok ? `spread ${(u.perimeterRelSpread * 100).toExponential(3)}%` : '');
+  check(`${name}: the section really is the strut's own square cross-section`,
+    u.ok && near(u.areaMin, p.aim.sideMm * p.aim.sideMm, 1e-4),
+    u.ok ? `${u.areaMin.toFixed(6)} vs side^2 = ${(p.aim.sideMm * p.aim.sideMm).toFixed(6)} mm^2` : '');
+}
+
+console.log('\n=== 8. The wall-thickness / nozzle-safety floor ===');
+
+{
+  const fl = SA._resolveFloor({});
+  check('the floor comes from NSO_Thickness.floorFor and nowhere else',
+    fl.ok && fl.source === 'NSO_Thickness.floorFor' && fl.floor === TH.floorFor(),
+    `${fl.floor} mm from ${fl.source}`);
+  check('at the default 0.4 nozzle that is 0.42 mm - the figure mesh_validate.py uses',
+    fl.floor === 0.42, String(fl.floor));
+
+  const thin = SA.buildStrut({ sideMm: 0.1 });
+  check('a strut asked for thinner than the floor is raised to it, and says so',
+    thin.ok && thin.sideMm === 0.42 && thin.flooredUp, thin.reason);
+
+  const fat = SA.buildStrut({ sideMm: 1.2 });
+  check('a strut already clear of the floor is left alone',
+    fat.ok && fat.sideMm === 1.2 && !fat.flooredUp, fat.reason);
+
+  const big = SA.buildStrut({ sideMm: 0.1, nozzle: 0.8 });
+  check('a 0.8 nozzle moves the floor to 0.84 and the strut with it',
+    big.ok && big.sideMm === 0.84, `${big.sideMm} mm`);
+
+  /* No thickness module and no measured width: refuse, do not invent one. */
+  const orphan = { detectOverhangs: null };
+  const saved = ctx.NSO_Thickness;
+  ctx.NSO_Thickness = undefined;
+  const noFloor = SA.buildStrut({ sideMm: 1.2, thickness: null });
+  ctx.NSO_Thickness = saved;
+  check('with no floor available the build refuses rather than defaulting',
+    !noFloor.ok && /cannot be established/.test(noFloor.reason), noFloor.reason);
+
+  const measured = SA.buildStrut({ sideMm: 0.3, minWall: 0.3 });
+  check('a caller passing a measured extrusion width steps the floor aside',
+    measured.ok && measured.sideMm === 0.3 && measured.floorSource === 'caller-supplied minWall',
+    measured.reason);
+}
+
+for (const [name, p] of CASES) {
+  const rep = TH.measureMesh(p.soup);
+  check(`${name}: the finished strut passes the canonical wall-thickness probe`,
+    rep.pass, TH.describe(rep));
+  check(`${name}: its measured minimum wall is at or above the ${rep.threshold_mm} mm floor`,
+    rep.min_mm == null || rep.min_mm >= rep.threshold_mm - 1e-4,
+    rep.min_mm == null ? `no opposing surface within the probe (${rep.sheets} sheets)`
+                       : `${rep.min_mm.toFixed(5)} mm`);
+}
+
+console.log('\n=== 9. Detection reads the piece; it never writes to it ===');
+
+for (const [name, , host] of CASES) {
+  /* The buffer that went in, byte for byte, after a full plan() over it. A
+     detector that quietly normalised or welded its input would be changing the
+     piece to answer a question about it. */
+  const before = Buffer.from(new Float32Array(host).buffer);
+  SA.plan(host, { skipList: [] });
+  const after = Buffer.from(new Float32Array(host).buffer);
+  check(`${name}: the host soup is byte-identical after plan()`,
+    before.equals(after), `${before.length} bytes`);
+}
+
+console.log('\n=== 10. STLs for the canonical checker ===');
+
+fs.mkdirSync(OUT, { recursive: true });
+for (const [name, p, host] of CASES) {
+  writeSTL(path.join(OUT, name + '.stl'), p.soup, 'NSO support strut ' + name);
+  writeSTL(path.join(OUT, name + '_host.stl'), host, 'NSO support host ' + name);
+  console.log(`  wrote ${name}.stl (${(p.soup.length / 9) | 0} tris) ` +
+              `and ${name}_host.stl (${(host.length / 9) | 0} tris)`);
+}
+check('every planned case was written out', CASES.length === 3, `${CASES.length} case(s)`);
+
+console.log('\n' + (fail ? `FAILED  ${fail} of ${pass + fail}` : `PASSED  all ${pass}`));
+if (fail) { console.log('  ' + FAILS.join('\n  ')); process.exit(1); }

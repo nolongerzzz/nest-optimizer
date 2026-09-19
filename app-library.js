@@ -13,26 +13,111 @@
    and debug. They are the owner's list, spelled the way the files on disk
    are spelled. */
 (function () {
+  /* ---- where a library lives ----------------------------------------
+
+     A SOURCE is a library: a label and the base URL its files hang off.
+     Every entry names one, and every entry resolves through resolve() to a
+     FULL ABSOLUTE URL - scheme, host and all - never a bare 'library/name'.
+
+     Today that is a distinction without a difference: there is one source,
+     it is this origin, and the URL it produces is the same bytes the old
+     DIR + name concatenation fetched. The difference is what it costs to
+     add the SECOND library later. With a relative path, "the library" and
+     "this repo" are the same statement, and every consumer - the fetch, the
+     row's title, anything that later wants to show where a piece came from -
+     has quietly assumed it; splitting them means finding all of those. With
+     a base URL per source, a library in another repo is a new row in this
+     object and nothing else:
+
+         'nso-extras': { label: 'Extras', base: 'https://someone.github.io/nso-extras/library/' }
+
+     and an entry that names it. No new code, no fetch changes, no UI change.
+
+     The base itself is resolved against document.baseURI rather than written
+     as a literal, because a literal https://...github.io/... would be a
+     different origin under the local test harness and on any fork. Resolved,
+     it is absolute on every origin the page is served from and correct on all
+     of them. */
+  var SOURCES = {
+    local: {
+      label: 'This project',
+      base: new URL('library/', document.baseURI).href
+    }
+  };
+
+  /* The taxonomy. Deliberately a rough first cut and expected to grow -
+     Supports is here with nothing in it yet because the shape of the list
+     matters more than today's membership, and the UI simply does not draw a
+     category that has no entries.
+
+     NOT a home for templates. A template would store generator parameters,
+     not a file, and resolve() has nothing to say about it; that is a
+     different concept and it stays out of this list rather than being bent
+     to fit. */
+  var CATEGORIES = ['Skins', 'Supports', 'Washers', 'Shaped Pieces', 'Test Fixtures'];
+
+  /* One row per file, as before, now carrying the category it belongs to and
+     the source it lives in. The file names are still the owner's list,
+     spelled the way the files on disk are spelled, and they are still
+     written as plain quoted literals - tools/nso_skin_fine_test.js greps
+     this file for "'<name>'" to prove the shipped catalog has not drifted
+     from what the sample generator writes.
+
+     On the patches: _bordered is the pattern set in a solid rim, which is
+     the washer, and it is filed as one. _loose and _sandwich are the relief
+     itself with no rim, which is the skin. The ten came in as one block
+     called "skin patches" and split across two categories on the way in,
+     which is the point of tagging them rather than inheriting a name. */
   var CATALOG = [
-    'USB_bit.stl',
-    'usb_a_bit.stl',
-    'usb_c_bit.stl',
-    'sd_bit.stl',
-    'microsd_bit.stl',
-    'box_bit_12x8x8.stl',
-    'box_hull_80x40x20.stl',
-    'box_hull_80x40x20-2.stl',
-    'box_closed.stl',
-    'box_open.stl',
-    'lid_blank.stl',
-    'lid_strap.stl',
-    'hinge_knuckle_box.stl',
-    'hinge_knuckle_lid.stl',
-    'hinge_pip.stl',
-    'pin.stl'
+    { file: 'USB_bit.stl',                        category: 'Shaped Pieces', source: 'local' },
+    { file: 'usb_a_bit.stl',                      category: 'Shaped Pieces', source: 'local' },
+    { file: 'usb_c_bit.stl',                      category: 'Shaped Pieces', source: 'local' },
+    { file: 'sd_bit.stl',                         category: 'Shaped Pieces', source: 'local' },
+    { file: 'microsd_bit.stl',                    category: 'Shaped Pieces', source: 'local' },
+    { file: 'box_bit_12x8x8.stl',                 category: 'Shaped Pieces', source: 'local' },
+    { file: 'box_hull_80x40x20.stl',              category: 'Shaped Pieces', source: 'local' },
+    { file: 'box_hull_80x40x20-2.stl',            category: 'Shaped Pieces', source: 'local' },
+    { file: 'box_closed.stl',                     category: 'Test Fixtures', source: 'local' },
+    { file: 'box_open.stl',                       category: 'Test Fixtures', source: 'local' },
+    { file: 'lid_blank.stl',                      category: 'Shaped Pieces', source: 'local' },
+    { file: 'lid_strap.stl',                      category: 'Shaped Pieces', source: 'local' },
+    { file: 'hinge_knuckle_box.stl',              category: 'Shaped Pieces', source: 'local' },
+    { file: 'hinge_knuckle_lid.stl',              category: 'Shaped Pieces', source: 'local' },
+    { file: 'hinge_pip.stl',                      category: 'Shaped Pieces', source: 'local' },
+    { file: 'pin.stl',                            category: 'Shaped Pieces', source: 'local' },
+    /* Skin patches - a pattern as its own printable piece, loadable here so a
+       test coupon does not have to be baked through the Finish tab every time.
+       Generated by tools/nso_skin_fine_samples.js, which also byte-checks the
+       six `bordered`/`loose` files against the gated fixtures in
+       fixtures/skin-patches/ so this list can never drift from them.
+       All 30 x 30 mm, the footprint the skin samples use - except the loose
+       ring, which is 2 x rOut = 10 x 10 and says so in its own manifest.
+         _bordered  the washer: the pattern in a solid rim, ONE side patterned
+         _loose     the pattern's features alone, no rim, no backing plate
+         _sandwich  double-sided: the pattern on BOTH faces, no floor between
+                    them - the piece a sandwich test needs, where a bordered
+                    washer would present its solid floor to one of the cubes
+         -fine      the tighter 0.84 mm pitch (0.42 mm channel, one 0.4-nozzle
+                    extrusion line) against the shipped 1.2 mm default */
+    { file: 'patch_crosshatch_bordered.stl',      category: 'Washers', source: 'local' },
+    { file: 'patch_crosshatch_loose.stl',         category: 'Skins',   source: 'local' },
+    { file: 'patch_crosshatch_sandwich.stl',      category: 'Skins',   source: 'local' },
+    { file: 'patch_crosshatch-fine_bordered.stl', category: 'Washers', source: 'local' },
+    { file: 'patch_crosshatch-fine_loose.stl',    category: 'Skins',   source: 'local' },
+    { file: 'patch_crosshatch-fine_sandwich.stl', category: 'Skins',   source: 'local' },
+    { file: 'patch_zigzag_bordered.stl',          category: 'Washers', source: 'local' },
+    { file: 'patch_zigzag_loose.stl',             category: 'Skins',   source: 'local' },
+    { file: 'patch_ring_bordered.stl',            category: 'Washers', source: 'local' },
+    { file: 'patch_ring_loose.stl',               category: 'Skins',   source: 'local' }
   ];
 
-  var DIR = 'library/';
+  /* The one way a file name becomes something fetchable. Absolute, always. */
+  function resolve(entry) {
+    var src = SOURCES[entry && entry.source];
+    if (!src) return null;
+    return new URL(encodeURIComponent(entry.file), src.base).href;
+  }
+
   var GAP = 2;        // mm of clear plate between a new piece and anything placed
 
   function say(text, bad) {
@@ -155,7 +240,8 @@
      there, the origin refused it, the body is empty - says the same thing
      and leaves the plate alone, because from the owner's side they are the
      same fact: that row did not come in. The console keeps the detail. */
-  function loadOne(name, row) {
+  function loadOne(entry, row) {
+    var name = entry.file;
     if (row) {
       if (row._libBusy) return;
       row._libBusy = true;
@@ -172,7 +258,8 @@
       done();
     };
     say('Loading ' + name + '…');
-    var url = DIR + encodeURIComponent(name);
+    var url = resolve(entry);
+    if (!url) { fail('no source named ' + entry.source); return; }
     fetch(url, { cache: 'no-store' }).then(function (res) {
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return res.arrayBuffer();
@@ -244,33 +331,85 @@
     return !!(list && !list.hasAttribute('hidden'));
   }
 
+  /* One row. Same element, same class, same .name span holding the file's
+     own name - nso_skin_fine_drive_check finds rows by that name and clicks
+     them, and a row is still a row wherever it now sits. */
+  function makeRow(entry) {
+    var row = document.createElement('div');
+    row.className = 'library-item';
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+    row.dataset.category = entry.category;
+    row.dataset.source = entry.source;
+    // The full URL, so hovering a row tells you exactly what will be fetched
+    // and from where - which is the question that matters the moment there
+    // is more than one library.
+    row.title = 'Load ' + resolve(entry);
+    var label = document.createElement('span');
+    label.className = 'name';
+    label.textContent = entry.file;   // the file's own name, never a prettied one
+    row.appendChild(label);
+    row.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      setOpen(false);
+      loadOne(entry, row);
+    });
+    row.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault(); setOpen(false); loadOne(entry, row);
+      }
+    });
+    return row;
+  }
+
   function build() {
     var host = document.getElementById('library-list');
     if (!host || host._libBuilt) return;
     host._libBuilt = true;
+
+    /* Grouped by category, in CATEGORIES order, using the same <details>
+       convention the Finish menu's groups use so the two read as one system.
+       A category with no entries is not drawn at all - Supports is in the
+       taxonomy before it has members, and an empty heading is just a dead
+       row to scroll past.
+
+       Every group ships OPEN. The Finish menu's groups start shut because it
+       is a tool palette you return to all day; this is a browser you opened
+       to find one piece, and hiding all 26 behind five more clicks is the
+       opposite of what the button was pressed for. The grouping is here to
+       make the list scannable, not shorter. */
+    var byCat = {};
     for (var i = 0; i < CATALOG.length; i++) {
-      (function (name) {
-        var row = document.createElement('div');
-        row.className = 'library-item';
-        row.setAttribute('role', 'button');
-        row.setAttribute('tabindex', '0');
-        row.title = 'Load ' + DIR + name;
-        var label = document.createElement('span');
-        label.className = 'name';
-        label.textContent = name;     // the file's own name, never a prettied one
-        row.appendChild(label);
-        row.addEventListener('click', function (ev) {
-          ev.stopPropagation();
-          setOpen(false);
-          loadOne(name, row);
-        });
-        row.addEventListener('keydown', function (ev) {
-          if (ev.key === 'Enter' || ev.key === ' ') {
-            ev.preventDefault(); setOpen(false); loadOne(name, row);
-          }
-        });
-        host.appendChild(row);
-      })(CATALOG[i]);
+      var e = CATALOG[i];
+      (byCat[e.category] = byCat[e.category] || []).push(e);
+    }
+    // A category that is in no entry would silently vanish; say so instead.
+    for (var k in byCat) {
+      if (CATEGORIES.indexOf(k) === -1)
+        console.warn('[library] entries tagged "' + k + '", which is not in CATEGORIES');
+    }
+
+    for (var c = 0; c < CATEGORIES.length; c++) {
+      var cat = CATEGORIES[c];
+      var rows = byCat[cat];
+      if (!rows || !rows.length) continue;
+      var sec = document.createElement('details');
+      sec.className = 'vp-sec library-sec';
+      sec.dataset.sec = cat;
+      sec.open = true;
+      var head = document.createElement('summary');
+      head.className = 'vp-sec-head';
+      head.textContent = cat;
+      var count = document.createElement('span');
+      count.className = 'library-sec-count';
+      count.textContent = rows.length;
+      head.appendChild(count);
+      sec.appendChild(head);
+      var body = document.createElement('div');
+      body.className = 'vp-sec-body';
+      for (var r = 0; r < rows.length; r++) body.appendChild(makeRow(rows[r]));
+      sec.appendChild(body);
+      host.appendChild(sec);
     }
 
     var btn = btnEl();
@@ -307,6 +446,21 @@
     }
     setOpen(false);
   }
+
+  /* The catalog, readable from outside. The drive check proves every entry
+     resolves to a full absolute URL and that each category holds what it
+     should; neither is provable from the DOM alone, and neither should be
+     re-derived by a test guessing at the base. */
+  window.nsoLibrary = {
+    categories: CATEGORIES.slice(),
+    sources: SOURCES,
+    entries: function () { return CATALOG.slice(); },
+    urlFor: function (file) {
+      for (var i = 0; i < CATALOG.length; i++)
+        if (CATALOG[i].file === file) return resolve(CATALOG[i]);
+      return null;
+    }
+  };
 
   // Closed before anything else is wired, and again once the rows exist, so
   // it never depends on a first click - or on build() having got that far.

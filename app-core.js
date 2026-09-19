@@ -20,6 +20,11 @@ const state = {
   controls: null,
   plateMesh: null,
   plateGrid: null,
+  // Plate grid: 'on' | 'off' | 'auto'. auto = visible only while a piece is
+  // actually being positioned. Snap is a separate, off-by-default assist.
+  plateGridMode: 'auto',
+  plateGridSnap: false,
+  plateGridAutoHoldUntil: 0,
   plateBorder: null,
   plateTicks: [],
   modelGroup: null,
@@ -40,6 +45,9 @@ const state = {
   undoStack: [],
   cameraFramed: false,
   cutAxis: null,
+  // The plate lock (app-poslock.js): one flag for the whole arrangement,
+  // deliberately NOT a per-piece m.posLock. Read through nsoPlateLocked().
+  plateLock: false,
   joinPartnerId: null,
   joinHullId: null,
   joinPickMode: false,
@@ -51,6 +59,10 @@ const state = {
   faceHelper: null,
   softenArmed: false,
   capArmed: false,
+  // Center lock: armed = the next canvas click picks the target point on A;
+  // target = the point it picked, tagged with the piece it was picked on.
+  centerLockArmed: false,
+  centerLockTarget: null,
   // The one stored face pick: set by storeFacePick, read by getFacePick.
   facePick: null,
   edgeTreat: 'fillet',
@@ -92,6 +104,21 @@ function pushUndo(entry) {
     const mm = state.models.find(x => x.id === entry.modelId);
     if (mm) entry.prevMask = nsoMaskSnapshot(mm);
   }
+  // The non-solid flag is part of the same step for the same reason: a bake
+  // that hands back a piece carrying a second, free-hanging shell sets it
+  // (Skin's free layer), so one Undo has to take it off with the geometry.
+  if (entry.prevNonSolid === undefined && entry.modelId != null) {
+    const mn = state.models.find(x => x.id === entry.modelId);
+    if (mn) entry.prevNonSolid = !!mn.nonSolid;
+  }
+  // And the skin provenance record (app-skin.js), for the third time the same
+  // reason: a Skin bake writes it about the geometry it just made, so undoing
+  // that geometry has to take the record with it or the piece would claim a
+  // relief it no longer has.
+  if (entry.prevSkin === undefined && entry.modelId != null) {
+    const ms = state.models.find(x => x.id === entry.modelId);
+    if (ms) entry.prevSkin = ms.skin || null;
+  }
   state.undoStack.push(entry);
   if (state.undoStack.length > UNDO_MAX) state.undoStack.shift();
   updateUndoBtn();
@@ -100,6 +127,30 @@ function clearUndo() {
   state.undoStack = [];
   updateUndoBtn();
 }
+/* The ops that undo by putting one piece's geometry back, and what each one
+   calls itself on the status line. It is the gate as well as the label: a type
+   absent from here is not handled by that branch, so a new op is one row, not a
+   condition in two places that can disagree. Read with hasOwnProperty, never as
+   a bare truthiness test: an entry type of 'constructor' would otherwise walk
+   the prototype chain and enter a branch that expects prevGeometry. */
+const UNDO_REPLACE_LABEL = {
+  softenReplace: 'Undo: Soften reverted',
+  capReplace: 'Undo: Cap reverted',
+  sealReplace: 'Undo: Seal reverted',
+  solidifyReplace: 'Undo: Solidify reverted',
+  thickenReplace: 'Undo: Thicken reverted',
+  smoothReplace: 'Undo: Smooth reverted',
+  skinReplace: 'Undo: Skin reverted',
+  textureReplace: 'Undo: Texture reverted',
+  carveReplace: 'Undo: Carve reverted',
+  scaleReplace: 'Undo: Scale reverted',
+  deleteReplace: 'Undo: Delete reverted',
+  brushReplace: 'Undo: Brush reverted',
+  seatSurfaceReplace: 'Undo: Seat here reverted',
+  extendReplace: 'Undo: Extend reverted',
+  wheelReplace: 'Undo: Pottery Wheel reverted'
+};
+
 function undoLast() {
   if (typeof removeFaceHelper === 'function') removeFaceHelper();
   const entry = state.undoStack.pop();
@@ -290,21 +341,61 @@ function undoLast() {
     setStatus('Undo: Subtract reverted - two pieces restored');
     return;
   }
+  if (entry.type === 'nonSolidReplace') {
+    const m = state.models.find(x => x.id === entry.modelId);
+    if (!m) { setStatus('Undo: piece no longer exists'); return; }
+    m.nonSolid = !!entry.prev;
+    if (typeof nsoNonSolidRefresh === 'function') nsoNonSolidRefresh();
+    updateUndoBtn();
+    setStatus('Undo: non-solid flag ' + (m.nonSolid ? 'restored' : 'cleared') + ' on ' + m.name);
+    return;
+  }
+  if (entry.type === 'posLockReplace') {
+    const m = state.models.find(x => x.id === entry.modelId);
+    if (!m) { setStatus('Undo: piece no longer exists'); return; }
+    m.posLock = !!entry.prev;
+    updateAdjustUI();
+    if (typeof nsoPosLockRefresh === 'function') nsoPosLockRefresh();
+    updateUndoBtn();
+    setStatus('Undo: position lock ' + (m.posLock ? 'restored' : 'cleared') + ' on ' + m.name);
+    return;
+  }
+  if (entry.type === 'plateLockReplace') {
+    state.plateLock = !!entry.prev;
+    updateAdjustUI();
+    if (typeof nsoPosLockRefresh === 'function') nsoPosLockRefresh();
+    updateUndoBtn();
+    setStatus('Undo: plate lock ' + (state.plateLock ? 'restored' : 'cleared') +
+      ' - the per-piece locks were never touched by it');
+    return;
+  }
   if (entry.type === 'maskReplace') {
     const m = state.models.find(x => x.id === entry.modelId);
     if (!m) { setStatus('Undo: piece no longer exists'); return; }
     if (typeof nsoMaskRestore === 'function') nsoMaskRestore(m, entry.prevMask);
     else m.faceMask = { exclude: entry.prevMask || [] };
     updateUndoBtn();
+    const undoSel = (typeof nsoMaskSelected === 'function') ? nsoMaskSelected(m) : null;
     setStatus('Undo: paint reverted - ' +
-      ((m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length : 0) + ' face(s) excluded');
+      ((m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length : 0) + ' face(s) excluded, target ' +
+      (undoSel && typeof nsoMaskFaceName === 'function' ? nsoMaskFaceName(undoSel).replace(/^the /, '') : 'none'));
     return;
   }
-  if (entry.type === 'softenReplace' || entry.type === 'capReplace' || entry.type === 'sealReplace' || entry.type === 'solidifyReplace' || entry.type === 'thickenReplace' || entry.type === 'smoothReplace') {
+  /* One branch for every op that swaps a piece's geometry in place. A carve is
+     one of them: the blade is never a placed piece, so unlike Subtract there is
+     no partner to put back - only this piece's geometry. A brush stroke is
+     another: the whole drag is one swap, so one entry puts the whole stroke
+     back rather than one dab of it. */
+  if (Object.prototype.hasOwnProperty.call(UNDO_REPLACE_LABEL, entry.type)) {
     const m = state.models.find(x => x.id === entry.modelId);
     if (!m) { setStatus('Undo: piece no longer exists'); return; }
     // the paint set is part of the piece's state, so one step puts back both
     if (entry.prevMask !== undefined && typeof nsoMaskRestore === 'function') nsoMaskRestore(m, entry.prevMask);
+    if (entry.prevNonSolid !== undefined && !!m.nonSolid !== entry.prevNonSolid) {
+      m.nonSolid = entry.prevNonSolid;
+      if (typeof nsoNonSolidRefresh === 'function') nsoNonSolidRefresh();
+    }
+    if (entry.prevSkin !== undefined) m.skin = entry.prevSkin;
     m.geometry = entry.prevGeometry;
     m.rawTris = entry.prevRawTris;
     m.rawAxis = entry.prevRawAxis;
@@ -337,10 +428,38 @@ function undoLast() {
     } else if (state.cutterOpen && state.editId === m.id) {
       showEditPreview();
     }
+    /* The paint was put back at the top of this branch, but nsoMaskRestore
+       repaints against whatever mesh was in the scene AT THAT MOMENT - the
+       post-op one, which no longer has the faces the restored lists name. The
+       overlay it built was therefore empty, and nothing rebuilt it once the
+       old mesh went back in below. So the lists came back and the yellow and
+       the pink did not, which reads as "undo lost my paint". Repaint here,
+       after the placed instance is re-seated, and it lands on the geometry the
+       clicks were made against. */
+    if (typeof nsoMaskRepaint === 'function') nsoMaskRepaint();
+    /* An op that moved the piece as well as reshaping it puts the pose back
+       here, in the SAME entry, so it is still one Undo per op. Seat here is
+       the first: it bakes a free rotation into the soup (the pose model
+       cannot hold one - see app-seat-surface.js) and then re-fits x / z /
+       liftY to it, so restoring the geometry alone would leave the piece
+       in the seated position with its old shape. */
+    if (entry.prevPose && placedEntry) {
+      placedEntry.x = entry.prevPose.x; placedEntry.z = entry.prevPose.z;
+      placedEntry.rotY = entry.prevPose.rotY || 0;
+      placedEntry.flipX = !!entry.prevPose.flipX;
+      placedEntry.tipX = entry.prevPose.tipX || 0;
+      placedEntry.tipZ = entry.prevPose.tipZ || 0;
+      placedEntry.liftY = entry.prevPose.liftY || 0;
+      placedEntry.tiltX = entry.prevPose.tiltX || 0;
+      placedEntry.tiltZ = entry.prevPose.tiltZ || 0;
+      applyMeshRotation(placedEntry);
+      if (typeof refreshOutline === 'function') refreshOutline(placedEntry);
+      applyPlacedXZ(placedEntry, placedEntry.x, placedEntry.z);
+    }
     updateEditSize();
     renderModelList();
     updateUndoBtn();
-    setStatus(entry.type === 'smoothReplace' ? 'Undo: Smooth reverted' : (entry.type === 'thickenReplace' ? 'Undo: Thicken reverted' : (entry.type === 'solidifyReplace' ? 'Undo: Solidify reverted' : (entry.type === 'sealReplace' ? 'Undo: Seal reverted' : (entry.type === 'capReplace' ? 'Undo: Cap reverted' : 'Undo: Soften reverted')))));
+    setStatus(UNDO_REPLACE_LABEL[entry.type]);
     return;
   }
   if (entry.type === 'removeModel') {
@@ -591,9 +710,187 @@ function animate() {
   requestAnimationFrame(animate);
   if (state.controls) state.controls.update();
   updatePlateByView();
+  applyPlateGridVisibility();
   if (state.renderer && state.scene && state.camera) {
     state.renderer.render(state.scene, state.camera);
   }
+}
+
+/* ===================== Plate reference grid =====================
+   A flat, world-aligned grid owned by the build plate. It is plate furniture,
+   exactly like plateMesh / plateBorder / plateTicks: built by buildPlateMesh,
+   added straight to state.scene and never to state.modelGroup, so no piece
+   transform can move or rotate it. It sits in the plate's own plane, which is
+   why a piece resting flat on the bed shows it on its underside for free - the
+   two surfaces coincide.
+
+   The bed is a plane at y = 0 (hitPlateXZ intersects exactly that plane), so
+   the grid is a plane too. There is no curvature anywhere on this path and
+   nothing here needs to handle any.
+
+   It is drawn but never picked. raycast() is a no-op on both line sets, and
+   hitPlateSurface does not list the grid among its targets - plateMesh already
+   covers the same footprint, so plate-drag orbit is unaffected. The one and
+   only way this grid can move a piece is grid-snap, a separate control that
+   is off by default. */
+const PLATE_GRID_STEP_MM = 10;        // minor spacing, and the snap lattice pitch
+const PLATE_GRID_MAJOR_EVERY = 5;     // a heavier line every 5th minor line (50 mm)
+const PLATE_GRID_Y = 0.15;            // above the bed at 0, below the border at 0.3
+const PLATE_GRID_AUTO_HOLD_MS = 900;  // how long 'auto' lingers after a nudge
+
+/* Put onto each line set in place of Object3D.prototype.raycast, so no ray
+   can ever report a hit on the grid. */
+function plateGridNeverRaycast() {}
+
+function buildPlateGrid(p) {
+  const hw = p.w / 2;
+  const hd = p.d / 2;
+  const minor = [];
+  const major = [];
+  const line = (arr, x1, z1, x2, z2) => arr.push(x1, 0, z1, x2, 0, z2);
+
+  // Lines on the world lattice (multiples of the step from the plate centre),
+  // clipped to the real plate - w and d, not a square of max(w, d).
+  const kx = Math.floor(hw / PLATE_GRID_STEP_MM);
+  for (let k = -kx; k <= kx; k++) {
+    const x = k * PLATE_GRID_STEP_MM;
+    line(k % PLATE_GRID_MAJOR_EVERY === 0 ? major : minor, x, -hd, x, hd);
+  }
+  const kz = Math.floor(hd / PLATE_GRID_STEP_MM);
+  for (let k = -kz; k <= kz; k++) {
+    const z = k * PLATE_GRID_STEP_MM;
+    line(k % PLATE_GRID_MAJOR_EVERY === 0 ? major : minor, -hw, z, hw, z);
+  }
+
+  const group = new THREE.Group();
+  group.position.y = PLATE_GRID_Y;
+  group.userData.plateGrid = true;
+  const addSet = (verts, color, opacity) => {
+    if (!verts.length) return;
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+    const seg = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
+      color: color, transparent: true, opacity: opacity, depthWrite: false
+    }));
+    seg.raycast = plateGridNeverRaycast;   // purely visual - invisible to every pick
+    seg.userData.skipXray = true;
+    group.add(seg);
+  };
+  addSet(minor, 0x363d49, 0.8);
+  addSet(major, 0x5a6578, 0.95);
+  return group;
+}
+
+function disposePlateGrid(group) {
+  if (!group) return;
+  group.children.forEach(function (c) {
+    if (c.geometry) c.geometry.dispose();
+    if (c.material) c.material.dispose();
+  });
+}
+
+function plateGridNow() {
+  return (typeof performance !== 'undefined' && performance.now)
+    ? performance.now() : Date.now();
+}
+
+/* 'auto' asks one question: is a piece being positioned right now? A pointer
+   drag is the clear case; a nudge or a rotate is a positioning act too, but an
+   instantaneous one, so those hold the grid up for a beat afterwards. */
+function plateGridAutoActive() {
+  if (state.moveDragging) return true;
+  return plateGridNow() < (state.plateGridAutoHoldUntil || 0);
+}
+
+function plateGridWantsVisible() {
+  if (state.plateGridMode === 'on') return true;
+  if (state.plateGridMode === 'off') return false;
+  return plateGridAutoActive();
+}
+
+function applyPlateGridVisibility() {
+  if (state.plateGrid) state.plateGrid.visible = plateGridWantsVisible();
+}
+
+function holdPlateGridAuto(ms) {
+  state.plateGridAutoHoldUntil = Math.max(
+    state.plateGridAutoHoldUntil || 0,
+    plateGridNow() + (ms || PLATE_GRID_AUTO_HOLD_MS)
+  );
+  applyPlateGridVisibility();
+}
+
+function syncPlateGridUI() {
+  const sel = document.getElementById('plate-grid-show');
+  if (sel && sel.value !== state.plateGridMode) sel.value = state.plateGridMode;
+  const chk = document.getElementById('chk-plate-grid-snap');
+  if (chk) chk.checked = !!state.plateGridSnap;
+}
+
+function setPlateGridMode(mode) {
+  if (mode !== 'on' && mode !== 'off' && mode !== 'auto') return;
+  state.plateGridMode = mode;
+  applyPlateGridVisibility();
+  syncPlateGridUI();
+}
+
+function setPlateGridSnap(on) {
+  state.plateGridSnap = !!on;
+  let note = state.plateGridSnap ? 'Grid snap on' : 'Grid snap off';
+  /* Snap with the grid switched off is a legal state and stays reachable - the
+     two controls are genuinely independent - but it is not one to fall into by
+     accident, because the assist would pull pieces toward lines nobody can
+     see. So turning snap on while the grid is off promotes the grid to auto,
+     once, and says so. Set the grid back to off afterwards and snap keeps
+     working: this is a signpost, not a constraint. */
+  if (state.plateGridSnap && state.plateGridMode === 'off') {
+    setPlateGridMode('auto');
+    note += ' - grid shown while positioning so the lattice is visible';
+  }
+  syncPlateGridUI();
+  setStatus(note);
+}
+
+/* ---- grid-snap: a soft pull, never a lock ----------------------------------
+   Within the pull radius R, the cursor's offset d from the nearest lattice
+   line maps to
+
+       f(d) = sign(d) * R * ((1 - S) * u + S * u^2),   u = |d| / R
+
+   Three properties are what make this an assist rather than a constraint:
+
+     f(R) = R    - continuous with the untouched region outside the radius,
+                   so nothing jumps as the pull starts or stops.
+     f(0) = 0    - the lattice line is exactly reachable, not merely approached.
+     f'(d) >= 1 - S > 0 everywhere - strictly increasing. The piece moves
+                   whenever the cursor moves, in the same direction, so a drag
+                   away from a line can never be blocked or reversed.
+
+   S is how hard the detent bites. At S = 0.8 the piece tracks the cursor at
+   20% speed right on the line, and the largest offset the assist can ever
+   apply is max(d - f(d)) = S*R/4 = 1 mm. R = half the step, so every point on
+   the bed is inside exactly one line's pull and the field has no seams. */
+const PLATE_GRID_SNAP_STRENGTH = 0.8;
+const PLATE_GRID_SNAP_RADIUS_MM = PLATE_GRID_STEP_MM / 2;
+
+function plateGridSnapAxis(v) {
+  const near = Math.round(v / PLATE_GRID_STEP_MM) * PLATE_GRID_STEP_MM;
+  const d = v - near;
+  const a = Math.abs(d);
+  if (a >= PLATE_GRID_SNAP_RADIUS_MM) return v;
+  const u = a / PLATE_GRID_SNAP_RADIUS_MM;
+  const pulled = PLATE_GRID_SNAP_RADIUS_MM *
+    ((1 - PLATE_GRID_SNAP_STRENGTH) * u + PLATE_GRID_SNAP_STRENGTH * u * u);
+  return near + (d < 0 ? -pulled : pulled);
+}
+
+/* Applied to the piece's own placement origin (p.x / p.z), so the pull is
+   toward the nearest grid intersection under the piece's own centre. Returns
+   the point untouched when snap is off - this is the whole of the coupling
+   between the grid and anything that moves. */
+function plateGridSnapXZ(x, z) {
+  if (!state.plateGridSnap) return { x: x, z: z };
+  return { x: plateGridSnapAxis(x), z: plateGridSnapAxis(z) };
 }
 
 function buildPlateMesh() {
@@ -603,6 +900,7 @@ function buildPlateMesh() {
   }
   if (state.plateGrid) {
     state.scene.remove(state.plateGrid);
+    disposePlateGrid(state.plateGrid);
     state.plateGrid = null;
   }
   if (state.plateBorder) {
@@ -637,11 +935,10 @@ function buildPlateMesh() {
   state.plateMesh.receiveShadow = true;
   state.scene.add(state.plateMesh);
 
-  // Grid on the floor - not a child of the rotated plate
-  const grid = new THREE.GridHelper(Math.max(p.w, p.d), 18, 0x3a3d44, 0x22252a);
-  grid.position.y = 0.15;
-  state.scene.add(grid);
-  state.plateGrid = grid;
+  // Reference grid on the floor - plate furniture, not a child of any piece
+  state.plateGrid = buildPlateGrid(p);
+  state.scene.add(state.plateGrid);
+  applyPlateGridVisibility();
 
   // Bright cyan border so plate edge is obvious
   const edges = new THREE.EdgesGeometry(geo);
@@ -683,10 +980,14 @@ function buildPlateMesh() {
 
 function getCurrentPlate() {
   if (state.plate === 'custom') {
+    var ch = document.getElementById('custom-h');
     return {
       name: 'Custom',
       w: Number(document.getElementById('custom-w').value) || 180,
-      d: Number(document.getElementById('custom-d').value) || 180
+      d: Number(document.getElementById('custom-d').value) || 180,
+      // Build height. PLATES has never carried one - the packer only ever
+      // needed a footprint - and nso_printer.js is the thing that does.
+      h: Number(ch && ch.value) || 180
     };
   }
   return PLATES[state.plate];
@@ -717,6 +1018,13 @@ function handleFiles(files) {
     reader.onerror = () => setStatus(`Could not read ${file.name}`, true);
     reader.onload = (e) => {
       if (/\.3mf$/i.test(file.name)) {
+        // A sliced project (`*.gcode.3mf`) carries a toolpath as well as - or
+        // instead of - a model part, and the toolpath is the interesting half.
+        // Route it to the toolpath importer; anything else is geometry only.
+        if (window.NSO_TOOLPATH && window.NSO_TOOLPATH.looksSliced(file.name)) {
+          window.NSO_TOOLPATH.importSliced3MF(file.name, e.target.result);
+          return;
+        }
         import3MF(file.name, e.target.result);
         return;
       }
@@ -740,7 +1048,7 @@ function handleFiles(files) {
  * file's own axes (Z up, millimetres, untranslated) - what STLLoader hands
  * back for an STL and what the 3MF reader builds per object.
  */
-function addModelFromZUpGeometry(name, geometry) {
+function addModelFromZUpGeometry(name, geometry, opts) {
   // Capture the raw triangle soup BEFORE rotateX/center - original
   // file axes, untranslated. This is what the sandbox cut engine
   // was validated against; the display mesh below is a transformed
@@ -759,14 +1067,30 @@ function addModelFromZUpGeometry(name, geometry) {
     z: (bb.min.z + bb.max.z) / 2
   };
   geometry.center();
-  return addModel(name, geometry, { rawTris: rawTris, rawAxis: 'zup', centerOffset: centerOffset });
+  // Extra options ride through untouched, so the scene restore can ingest a
+  // piece without the auto-placement and status line a fresh upload wants.
+  const options = Object.assign({}, opts || {},
+    { rawTris: rawTris, rawAxis: 'zup', centerOffset: centerOffset });
+  return addModel(name, geometry, options);
 }
 
 /**
- * 3MF import: geometry only. nso-3mf-read.js pulls one triangle soup per build
- * item out of the archive (millimetres, Z up, transforms applied); each becomes
- * its own model, named from the file's own object names. Print settings,
- * materials and everything else in the archive are ignored.
+ * 3MF import. nso-3mf-read.js pulls one triangle soup per build item out of the
+ * archive (millimetres, Z up, transforms applied); each becomes its own model,
+ * named from the file's own object names.
+ *
+ * TWO ROUTES, decided by what the file carries:
+ *
+ *   an NSO scene block   Metadata/nso_scene.json, written by this app's own
+ *                        export. The plate comes back as it was left: pose,
+ *                        locks, seat gaps, skin, paint, the non-solid flags.
+ *   anything else        geometry only, exactly as before - a file straight
+ *                        from Bambu Studio or MakerWorld has no such part and
+ *                        nothing here assumes one. A block this build cannot
+ *                        read takes the same route, with a console warning.
+ *
+ * Print settings, materials and everything else in the archive are still
+ * ignored on both routes.
  */
 function import3MF(filename, arrayBuffer) {
   if (!window.NSO3MFRead) {
@@ -776,13 +1100,29 @@ function import3MF(filename, arrayBuffer) {
   setStatus(`Reading ${filename}...`);
   return window.NSO3MFRead.parse3MF(new Uint8Array(arrayBuffer), { name: filename })
     .then(result => {
+      result.warnings.forEach(w => console.warn(`${filename}: ${w}`));
+
+      const scene = readSceneBlock(filename, result);
+      if (scene) {
+        const restored = restoreSceneFrom3MF(filename, result, scene);
+        if (restored != null) {
+          if (restored) {
+            setStatus(`Restored ${restored} piece(s) from ${filename} - ` +
+                      (scene.scope === 'plate' ? 'plate, poses and per-piece state as saved'
+                                               : 'piece and its state as saved'));
+          } else {
+            setStatus(`${filename}: the saved scene had nothing this build could rebuild`, true);
+          }
+          return result;
+        }
+      }
+
       let loaded = 0;
       result.objects.forEach(obj => {
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.BufferAttribute(obj.positions, 3));
         if (addModelFromZUpGeometry(obj.name, geometry)) loaded++;
       });
-      result.warnings.forEach(w => console.warn(`${filename}: ${w}`));
       if (loaded > 1) {
         setStatus(`Loaded ${loaded} objects from ${filename}` +
                   (result.application ? ` (${result.application})` : ''));
@@ -1087,6 +1427,16 @@ function renderModelList() {
     `;
     el.appendChild(row);
   });
+  // The non-solid tag rides on the row it belongs to (app-nonsolid.js).
+  if (typeof nsoNonSolidRefresh === 'function') nsoNonSolidRefresh();
+  // So does the locked tag, and the outline on the mesh (app-poslock.js) -
+  // every bake that swaps a mesh rebuilds the list, so this is where the
+  // outline lands on the new mesh.
+  if (typeof nsoPosLockRefresh === 'function') nsoPosLockRefresh();
+  // And this is where the defect overlay (app-defects.js) notices the swap and
+  // drops itself: the marks were children of the mesh the bake replaced, so a
+  // stale check can never stay drawn over new geometry.
+  if (typeof nsoDefectsRefresh === 'function') nsoDefectsRefresh();
 
   el.querySelectorAll('.model-item').forEach(row => {
     row.addEventListener('click', (e) => {
@@ -1240,9 +1590,41 @@ function footprintsFor(geo, size, allowRotate) {
   return list;
 }
 
-function packModels(instances, plate, gap, allowRotate) {
+/* Cut a rectangle out of a list of free rectangles, keeping the (up to four)
+   strips that survive around it. Used to reserve the ground a locked piece is
+   already standing on before anything is packed. */
+function subtractFreeRect(rects, box) {
+  const EPS = 1e-6;
+  const out = [];
+  for (const r of rects) {
+    const ox0 = Math.max(r.x, box.minx);
+    const ox1 = Math.min(r.x + r.w, box.maxx);
+    const oz0 = Math.max(r.z, box.minz);
+    const oz1 = Math.min(r.z + r.d, box.maxz);
+    if (!(ox1 > ox0 + EPS && oz1 > oz0 + EPS)) { out.push(r); continue; }   // misses this rect
+    if (ox0 > r.x + EPS) out.push({ x: r.x, z: r.z, w: ox0 - r.x, d: r.d });
+    if (ox1 < r.x + r.w - EPS) out.push({ x: ox1, z: r.z, w: r.x + r.w - ox1, d: r.d });
+    if (oz0 > r.z + EPS) out.push({ x: r.x, z: r.z, w: r.w, d: oz0 - r.z });
+    if (oz1 < r.z + r.d - EPS) out.push({ x: r.x, z: oz1, w: r.w, d: r.z + r.d - oz1 });
+  }
+  return out;
+}
+
+/* `blockers` are world-space XZ footprints ({minx,maxx,minz,maxz}) that the
+   packer must not place on: the pieces the user locked, which keep the pose
+   they already have. They are inflated by `gap` so a packed piece lands the
+   same clearance away from a locked neighbour as from a packed one. */
+function packModels(instances, plate, gap, allowRotate, blockers) {
   const placed = [];
-  const freeRects = [{ x: -plate.w / 2, z: -plate.d / 2, w: plate.w, d: plate.d }];
+  let freeRects = [{ x: -plate.w / 2, z: -plate.d / 2, w: plate.w, d: plate.d }];
+  if (blockers && blockers.length) {
+    for (const b of blockers) {
+      freeRects = subtractFreeRect(freeRects, {
+        minx: b.minx - gap, maxx: b.maxx + gap, minz: b.minz - gap, maxz: b.maxz + gap
+      });
+    }
+    freeRects.sort((a, b2) => a.z - b2.z || a.x - b2.x);
+  }
 
   // Largest footprint first
   const sorted = [...instances].sort((a, b) => (b.width * b.depth) - (a.width * a.depth));
@@ -1371,16 +1753,44 @@ function applyOverhangColors(geometry) {
 // ===================== Optimize =====================
 function runOptimize() {
   const btn = document.getElementById('btn-optimize');
+  /* The plate lock holds the ARRANGEMENT, and a repack is the one operation
+     that rebuilds the arrangement wholesale - so it is the one non-move
+     operation the plate lock refuses. A per-piece lock does not refuse it;
+     it pins that piece and the rest packs around it (below). */
+  if (typeof nsoPlateLocked === 'function' && nsoPlateLocked()) {
+    setStatus('Plate locked - Optimize refused; the arrangement is held. Press Unlock plate to repack', true);
+    return;
+  }
   btn.disabled = true;
   setStatus('Optimizing...');
   closeCutter(true);
 
   try {
-    const autoOrientFace = document.getElementById('opt-auto-orient')?.checked;
-    const preferSupports = document.getElementById('opt-orient').checked;
-    const allowRotate = document.getElementById('opt-rotate').checked;
-    const gap = Number(document.getElementById('gap').value) || 2;
+    /* These four controls are optional: the Pack card ships only the button,
+       so every read has to stand on its own. Defaults are the conservative
+       ones - keep the uploaded orientation, do not yaw pieces the user
+       placed, 2 mm between neighbours. */
+    const optFlag = (id, dflt) => {
+      const el = document.getElementById(id);
+      return el ? !!el.checked : dflt;
+    };
+    const autoOrientFace = optFlag('opt-auto-orient', false);
+    const preferSupports = optFlag('opt-orient', false);
+    const allowRotate = optFlag('opt-rotate', false);
+    const gapEl = document.getElementById('gap');
+    const gap = Number(gapEl && gapEl.value) || 2;
     const plate = getCurrentPlate();
+
+    /* Locked pieces are not repacked. They keep the pose AND the mesh they
+       already have - the ground they stand on is taken out of the packer's
+       free space, and only the pieces that are not locked are laid out again
+       around them. `nsoPosLockedPlaced` is the same accessor the move gate
+       reads; nothing here re-derives a lock. */
+    const isHeld = p => typeof nsoPosLockedPlaced === 'function' && nsoPosLockedPlaced(p);
+    const held = (state.placed || []).filter(p => p && p.mesh && isHeld(p));
+    const heldPerModel = new Map();
+    held.forEach(p => heldPerModel.set(p.sourceId, (heldPerModel.get(p.sourceId) || 0) + 1));
+    const blockers = held.map(p => placedFootprint(p));
 
     // Top N orientations so packer can pick per-instance
     function topOrients(geometry, mode, n = 4) {
@@ -1407,6 +1817,10 @@ function runOptimize() {
     function buildInstances(mode) {
       const instances = [];
       for (const model of state.models) {
+        // Each locked copy of this model is already on the plate and stays
+        // there, so the packer is asked for that many fewer.
+        const want = Math.max(0, model.quantity - (heldPerModel.get(model.id) || 0));
+        if (!want) continue;
         const orients = mode ? topOrients(model.geometry, mode, 5) : [{
           geometry: (() => { const g = model.geometry.clone(); g.center(); return g; })(),
           size: model.size,
@@ -1417,7 +1831,7 @@ function runOptimize() {
           geometry: o.geometry,
           size: { x: o.size.x, y: o.size.y, z: o.size.z }
         }));
-        for (let i = 0; i < model.quantity; i++) {
+        for (let i = 0; i < want; i++) {
           instances.push({
             sourceId: model.id,
             name: model.name,
@@ -1446,7 +1860,7 @@ function runOptimize() {
     let bestMode = 'as-uploaded';
 
     for (const c of candidates) {
-      const placedTry = packModels(c.instances, plate, gap, allowRotate);
+      const placedTry = packModels(c.instances, plate, gap, allowRotate, blockers);
       const fitted = placedTry.filter(p => !p.overflow).length;
       if (fitted > bestFitted) {
         bestFitted = fitted;
@@ -1457,12 +1871,27 @@ function runOptimize() {
 
     const placed = bestPlaced;
 
-    clearDisplayMeshes();
-    state.placed = placed;
+    // Clear only what is being repacked - a held piece keeps the very mesh it
+    // has, so a bake (Skin, Soften, Repair) on a locked piece survives a
+    // repack of everything around it, and so does its lock outline, which is
+    // a child of that mesh.
+    const keepMeshes = new Set(held.map(p => p.mesh));
+    if (state.modelGroup) {
+      state.modelGroup.children.slice().forEach(child => {
+        if (keepMeshes.has(child)) return;
+        state.modelGroup.remove(child);
+        if (child.material) {
+          if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+          else child.material.dispose();
+        }
+        // Do NOT dispose geometry - it may be shared with state.models
+      });
+    }
+    state.placed = held.concat(placed);
 
     const showSupports = preferSupports; // reuse checkbox: when on, tint overhangs
 
-    placed.forEach((p, idx) => {
+    placed.forEach((p) => {
       let geo = p.geometry.clone();
       if (showSupports) {
         geo = applyOverhangColors(geo);
@@ -1481,44 +1910,65 @@ function runOptimize() {
       const yOff = p.meshOffsetY || 0;
       mesh.position.set(p.x, p.height / 2 + 0.2 + yOff, p.z);
       mesh.rotation.y = p.rotY || (p.rotated ? Math.PI / 2 : 0);
-      mesh.userData.placedIndex = idx;
       p.mesh = mesh;
       p.rotY = p.rotY || (p.rotated ? Math.PI / 2 : 0);
       state.modelGroup.add(mesh);
     });
+    // Held pieces come first in state.placed, so every index moved; the
+    // pick path reads mesh.userData.placedIndex, so restamp them all.
+    reindexPlacedMeshes();
 
     state.selectedIndex = -1;
+    renderModelList();
     updateAdjustUI();
 
     // Keep plate visible - do not reframe camera after packing
     if (!state.plateMesh || !state.plateGrid) buildPlateMesh();
 
+    // The held pieces are on the plate and count towards the plate, so every
+    // readout below is over state.placed, not over the pieces just packed.
     const totalRequested = state.models.reduce((s, m) => s + m.quantity, 0);
-    const fitted = placed.filter(p => !p.overflow).length;
+    const onPlate = state.placed.filter(p => !p.overflow);
+    const fitted = onPlate.length;
     const totalArea = plate.w * plate.d;
-    const usedArea = placed.filter(p => !p.overflow).reduce((sum, p) => sum + p.width * p.depth, 0);
+    const usedArea = onPlate.reduce((sum, p) => sum + (p.width || 0) * (p.depth || 0), 0);
     const fill = totalArea > 0 ? ((usedArea / totalArea) * 100).toFixed(1) : 0;
 
-    document.getElementById('stats').classList.remove('hidden');
-    document.getElementById('stat-count').textContent = `${fitted} models`;
-    document.getElementById('stat-fill').textContent = `${fill}% fill`;
-    document.getElementById('stat-time').textContent = `${totalRequested - fitted} left`;
+    /* The stats panel and the results table are optional, the same way the
+       four Pack controls above are: the shipped Pack card is the button
+       alone. Write to whichever of them is on the page and let the rest be -
+       the status line below carries the same numbers either way. */
+    const statsEl = document.getElementById('stats');
+    if (statsEl) statsEl.classList.remove('hidden');
+    const setText = (id, text) => {
+      const el = document.getElementById(id);
+      if (el) el.textContent = text;
+    };
+    setText('stat-count', `${fitted} models`);
+    setText('stat-fill', `${fill}% fill`);
+    setText('stat-time', `${totalRequested - fitted} left`);
 
     const resultsEl = document.getElementById('results');
-    resultsEl.innerHTML = `
+    if (resultsEl) {
+      resultsEl.innerHTML = `
       <div class="result-row"><span>Placed</span><strong>${fitted} / ${totalRequested}</strong></div>
       <div class="result-row"><span>Plate fill</span><strong>${fill}%</strong></div>
       <div class="result-row"><span>Mode</span><strong>${bestMode}${showSupports ? ' + support tint' : ''}</strong></div>
       <div class="result-row"><span>Gap</span><strong>${gap} mm</strong></div>
+      <div class="result-row"><span>Locked, kept</span><strong>${held.length}</strong></div>
     `;
+    }
 
     updateExportButton();
 
-    const overflowCount = placed.filter(p => p.overflow).length;
+    const overflowCount = state.placed.filter(p => p.overflow).length;
+    const around = held.length
+      ? ` around ${held.length} locked piece${held.length === 1 ? '' : 's'}, which did not move`
+      : '';
     if (overflowCount > 0) {
-      setStatus(`${fitted} fitted, ${overflowCount} need manual place - click orange model(s) to rotate/nudge`, true);
+      setStatus(`${fitted} fitted${around}, ${overflowCount} need manual place - click orange model(s) to rotate/nudge`, true);
     } else {
-      setStatus(`Packed ${fitted} models - ready to export`, false);
+      setStatus(`Packed ${placed.length} model${placed.length === 1 ? '' : 's'}${around} - ready to export`, false);
     }
   } catch (err) {
     console.error(err);
@@ -1622,6 +2072,14 @@ function showFenceLines(skipIdx) {
   state.modelGroup.add(g);
 }
 
+/* Square both pieces onto the bed baseline (world box bottom on 0.2) - the
+   Join-side step Align edges and the plate weld share. Each piece keeps its
+   own liftY: a piece Seat (support) has stacked 0.18 mm above the other, or
+   one the user Raised, stays exactly where settlePlacedOnBed put it. The
+   step used to force both bottoms onto 0.2 outright, which dropped a seated
+   bit through the hull to the plate while the record still said liftY 20.18
+   (scene and export disagreed). An unlifted piece squares as before, bit for
+   bit: 0.2 + 0 is 0.2. */
 function matchPlacedBottoms(a, b) {
   if (!a || !b || !a.mesh || !b.mesh) return;
   settlePlacedOnBed(a);
@@ -1630,8 +2088,8 @@ function matchPlacedBottoms(a, b) {
   b.mesh.updateMatrixWorld(true);
   const ba = meshLocalBox3(a.mesh);
   const bb = meshLocalBox3(b.mesh);
-  a.mesh.position.y += 0.2 - ba.min.y;
-  b.mesh.position.y += 0.2 - bb.min.y;
+  a.mesh.position.y += 0.2 + (a.liftY || 0) - ba.min.y;
+  b.mesh.position.y += 0.2 + (b.liftY || 0) - bb.min.y;
 }
 
 function applyPlacedXZ(p, x, z) {
@@ -1747,7 +2205,12 @@ function clampToApproachWalls(p, selfIdx, fromX, fromZ, toX, toZ) {
 }
 
 function resolveDragPose(p, selfIdx, fromX, fromZ, toX, toZ) {
-  const mag = magnetTowardNeighbors(p, selfIdx, toX, toZ);
+  /* Grid first, neighbours last. The neighbour magnet closes a contact gap
+     outright, and touching the piece next door is a stronger intent than
+     lining up on the bed, so it gets the final word - a piece pulled into
+     contact stays in contact even when that lands it off the lattice. */
+  const g = plateGridSnapXZ(toX, toZ);
+  const mag = magnetTowardNeighbors(p, selfIdx, g.x, g.z);
   applyPlacedXZ(p, mag.x, mag.z);
 }
 
@@ -1758,11 +2221,15 @@ function startMoveDrag(idx, event) {
   }
   const p = state.placed[idx];
   if (!p || !p.mesh) return false;
+  // Position lock (app-poslock.js): a locked piece is still selectable, but
+  // the drag never starts and nothing is pushed to undo.
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'drag')) return false;
   setPointerFromEvent(event);
   const hit = hitPlateXZ();
   if (!hit) return false;
   state.moveDragging = true;
   state.moveIndex = idx;
+  applyPlateGridVisibility();
   state.moveUndoFrom = { index: idx, x: p.x, z: p.z };
   state.moveGrab.x = p.x - hit.x;
   state.moveGrab.z = p.z - hit.z;
@@ -1890,6 +2357,7 @@ function setOrbitFromPlate(allow) {
 function isPlateObject(obj) {
   if (!obj) return false;
   if (obj === state.plateMesh || obj === state.plateGrid || obj === state.plateBorder) return true;
+  if (state.plateGrid && obj.parent === state.plateGrid) return true;
   if (state.plateTicks && state.plateTicks.indexOf(obj) >= 0) return true;
   return false;
 }
@@ -1900,7 +2368,9 @@ function hitPlateSurface(event) {
   state.raycaster.setFromCamera(state.pointer, state.camera);
   const targets = [];
   if (state.plateMesh) targets.push(state.plateMesh);
-  if (state.plateGrid) targets.push(state.plateGrid);
+  // plateGrid is deliberately absent: it is purely visual and must not be
+  // pickable. plateMesh covers the same footprint, so plate-drag orbit is
+  // unchanged by its absence.
   if (state.plateBorder) targets.push(state.plateBorder);
   if (state.plateTicks && state.plateTicks.length) targets.push(...state.plateTicks);
   if (!targets.length) return false;
@@ -1983,6 +2453,55 @@ function onCanvasPointerDown(event) {
     return;
   }
 
+  /* Carve owns a click that lands on a piece, for the same reason paint does:
+     app-core binds this handler inside initThree() while the document is still
+     parsing, so it is always the earlier listener and a fall-through here would
+     start a move drag under the carve and report "Moved model #N" over its
+     status. app-carve.js decides, where its own hit test lives. */
+  if (typeof window.nsoCarveTakesClick === 'function' && window.nsoCarveTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* Seat here owns a click that lands on a piece, on the same terms as paint
+     and carve: app-seat-surface.js decides, where its own hit test lives, and
+     a fall-through would start a move drag under the seat. Asked after carve
+     and before measure because it bakes, and a measurement must never
+     swallow a click a baking tool would have taken. */
+  if (typeof window.nsoSeatHereTakesClick === 'function' && window.nsoSeatHereTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* The brush owns a PRESS that lands on a piece, on the same terms again.
+     app-brush.js binds its own handler on this canvas after this one, and a
+     fall-through here would start a move drag UNDER the stroke and report
+     "Moved model #N" over the brush's own status.
+
+     Asked with Carve and Seat here, ahead of Measure, on the same rule they
+     cite: the brush bakes, so it wins a contested click over the one tool
+     that cannot change the piece. Unlike the other three it owns the whole
+     drag, not just the press - the stroke runs until pointerup. */
+  if (typeof window.nsoBrushTakesPointer === 'function' && window.nsoBrushTakesPointer(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* Measure owns a click that lands on a piece, on the same terms again -
+     app-measure.js binds its own handler on this canvas after this one and
+     takes the measurement there. Measuring changes nothing on the piece, so a
+     measure click must not also drag it across the plate.
+
+     It is asked LAST of the five because it is the only one that cannot
+     change the piece: if two modes are somehow armed at once, the one that
+     bakes should win the click rather than have a measurement swallow it.
+     app-measure.js's enter() disarms the others anyway, so this is the
+     backstop, not the mechanism. */
+  if (typeof window.nsoMeasureTakesClick === 'function' && window.nsoMeasureTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
   if (state.softenArmed && state.modelGroup && event.button === 0) {
     const sHits = state.raycaster.intersectObjects(state.modelGroup.children, true);
     if (sHits.length) {
@@ -2022,6 +2541,17 @@ function onCanvasPointerDown(event) {
         return;
       }
     }
+  }
+
+  /* Center lock with a target pick armed owns a click that lands on a piece.
+     It has to come before the Join block: by the time Center lock is useful A
+     and B are both picked, and Join deliberately lets that click fall through
+     so B can be dragged. */
+  if (state.centerLockArmed && typeof window.nsoCenterLockTakesClick === 'function'
+      && window.nsoCenterLockTakesClick(event)) {
+    setOrbitFromPlate(false);
+    event.stopPropagation();
+    return;
   }
 
   if (state.joinSession && state.modelGroup) {
@@ -2217,7 +2747,12 @@ function updateAdjustUI() {
   }
   const delModel = document.getElementById('btn-delete-model');
   if (delModel) delModel.disabled = !getActiveModel();
+  if (typeof nsoNonSolidRefresh === 'function') nsoNonSolidRefresh();
   updateExportButton();
+  // Last, so a locked selection greys the move/pose buttons just enabled above.
+  if (typeof nsoPosLockRefresh === 'function') nsoPosLockRefresh();
+  // The Check button names the selected piece, so it follows the selection.
+  if (typeof nsoDefectsRefresh === 'function') nsoDefectsRefresh();
 }
 
 function reindexPlacedMeshes() {
@@ -2357,6 +2892,7 @@ function snapshotPlacedPose(idx) {
 function rotateSelected(dir) {
   const p = state.placed[state.selectedIndex];
   if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'yaw')) return;
   pushUndo(snapshotPlacedPose(state.selectedIndex));
 
   p.rotY = (p.rotY || 0) + dir * (Math.PI / 2);
@@ -2373,6 +2909,7 @@ function flipSelected() {
     setStatus('Select a piece first', true);
     return;
   }
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'edge flip')) return;
   pushUndo(snapshotPlacedPose(state.selectedIndex));
   p.rotY = (p.rotY || 0) + Math.PI;
   applyMeshRotation(p);
@@ -2385,6 +2922,7 @@ function flipSelected() {
 function tipSelected() {
   const p = state.placed[state.selectedIndex];
   if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'tip')) return;
   pushUndo(snapshotPlacedPose(state.selectedIndex));
 
   p.tipX = ((p.tipX || 0) + 1) % 4; // 0,1,2,3 -> 0,90,180,270 deg
@@ -2397,6 +2935,7 @@ function tipSelected() {
 function rollSelected() {
   const p = state.placed[state.selectedIndex];
   if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'roll')) return;
   pushUndo(snapshotPlacedPose(state.selectedIndex));
   p.tipZ = ((p.tipZ || 0) + 1) % 4;
   applyMeshRotation(p);
@@ -2408,6 +2947,7 @@ function rollSelected() {
 function liftSelected(dir) {
   const p = state.placed[state.selectedIndex];
   if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'raise/lower')) return;
   pushUndo(snapshotPlacedPose(state.selectedIndex));
   const step = 2;
   p.liftY = Math.max(0, Math.min(80, (p.liftY || 0) + dir * step));
@@ -2419,6 +2959,7 @@ function liftSelected(dir) {
 function bankSelected(dir) {
   const p = state.placed[state.selectedIndex];
   if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'bank')) return;
   pushUndo(snapshotPlacedPose(state.selectedIndex));
   p.tiltZ = (p.tiltZ || 0) + dir * 15;
   if (p.tiltZ > 180) p.tiltZ -= 360;
@@ -2432,6 +2973,7 @@ function bankSelected(dir) {
 function tiltSelected(dir) {
   const p = state.placed[state.selectedIndex];
   if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'pitch')) return;
   pushUndo(snapshotPlacedPose(state.selectedIndex));
   p.tiltX = (p.tiltX || 0) + dir * 15;
   if (p.tiltX > 180) p.tiltX -= 360;
@@ -2475,8 +3017,10 @@ function refreshOutline(p) {
 function nudgeSelected(dx, dz) {
   const p = state.placed[state.selectedIndex];
   if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'nudge')) return;
   pushUndo({ type: 'movePlaced', index: state.selectedIndex, x: p.x, z: p.z });
   applyPlacedXZ(p, p.x + dx, p.z + dz);
+  holdPlateGridAuto();
   updateExportButton();
   if (!reportJoinFlushGap()) setStatus(`Moved model #${state.selectedIndex + 1}`);
 }
@@ -2495,7 +3039,9 @@ function buildCombinedGeometry() {
     if (rotY) geo.rotateY(rotY);
     const roll = (p.tipZ || 0) * (Math.PI / 2) + ((p.tiltZ || 0) * Math.PI / 180);
     if (roll) geo.rotateZ(roll);
-    geo.translate(p.x, p.height / 2, p.z);
+    // liftY rides along: a piece Seated with a gap, or lifted, exports where
+    // the scene shows it, not dropped back onto the plate.
+    geo.translate(p.x, p.height / 2 + (p.liftY || 0), p.z);
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -2734,7 +3280,9 @@ function buildPlacedObjects3MF() {
     if (rotY) geo.rotateY(rotY);
     const roll = (p.tipZ || 0) * (Math.PI / 2) + ((p.tiltZ || 0) * Math.PI / 180);
     if (roll) geo.rotateZ(roll);
-    geo.translate(p.x, p.height / 2, p.z);
+    // liftY rides along: a piece Seated with a gap, or lifted, exports where
+    // the scene shows it, not dropped back onto the plate.
+    geo.translate(p.x, p.height / 2 + (p.liftY || 0), p.z);
 
     const pos = geo.attributes.position;
     const flat = [];
@@ -2752,6 +3300,339 @@ function buildPlacedObjects3MF() {
       triangles: mesh.triangles
     };
   });
+}
+
+// ===================== 3MF scene state =====================
+// Save and restore the whole working plate through the same archive, in
+// Metadata/nso_scene.json. nso-3mf-scene.js owns the schema and the transform
+// maths; everything here is the app side of it - reading the live state out on
+// export, and putting it back on import.
+//
+// WHERE EACH VALUE COMES FROM. Nothing below re-derives a value that the app
+// already holds; each one is read through the accessor its own module
+// publishes, so a change there reaches the file without a second definition
+// drifting behind it:
+//
+//   position / pose   the placed entry's own fields, the ones every exporter
+//                     already reads (x, z, liftY, rotY, flipX, tipX, tipZ,
+//                     tiltX, tiltZ, yaw, rotated)
+//   piece lock        nsoPosLocked(m)          app-poslock.js
+//   plate lock        nsoPlateLocked()         app-poslock.js
+//   seat gap          p.seat                   app-join.js, recorded by Seat
+//   skin              m.skin                   app-skin.js, recorded by a bake
+//   paint             nsoMaskSnapshot(m)       app-mask.js
+//   non-solid         nsoNonSolid(m)           app-nonsolid.js
+//
+// A module that is not loaded simply contributes nothing - every read below is
+// guarded, so the scene block degrades to "geometry and pose" rather than
+// failing the export.
+
+/** The model a placed piece was made from, or null. */
+function modelOfPlaced(p) {
+  if (!p || p.sourceId == null) return null;
+  return state.models.find(m => m.id === p.sourceId) || null;
+}
+
+/** The centre of a geometry's own bounding box, without disturbing its cache. */
+function geometryCenter(geo) {
+  const bb = new THREE.Box3().setFromBufferAttribute(geo.attributes.position);
+  const c = new THREE.Vector3();
+  bb.getCenter(c);
+  return c;
+}
+
+/**
+ * The transform the export baked into one piece, expressed against the piece's
+ * CENTRED geometry - which is what addModel hands back on the way in, so the
+ * inverse lands on exactly the geometry a restore can re-ingest.
+ *
+ * NSO3MFScene.poseBasis() is the one definition of the chain; this only
+ * re-anchors its origin onto the geometry's own centre.
+ */
+function pieceBasis3MF(p, plate) {
+  const Scene = window.NSO3MFScene;
+  const M = Scene.poseBasis({
+    x: p.x, z: p.z,
+    rotY: p.rotY, rotated: p.rotated, flipX: p.flipX,
+    tipX: p.tipX, tipZ: p.tipZ, tiltX: p.tiltX, tiltZ: p.tiltZ,
+    liftY: p.liftY, height: p.height
+  }, plate);
+  const c = geometryCenter(p.geometry);
+  const t = Scene.apply12(M, c.x, c.y, c.z);
+  return M.slice(0, 9).concat([t[0], t[1], t[2]]);
+}
+
+/** Everything the scene block records for one placed piece. */
+function capturePieceState(p, i, plate) {
+  const m = modelOfPlaced(p);
+  const paint = (m && typeof window.nsoMaskSnapshot === 'function')
+    ? window.nsoMaskSnapshot(m) : null;
+  return {
+    name: p.name || ('piece_' + (i + 1)),
+    sourceId: p.sourceId,
+    basis: pieceBasis3MF(p, plate),
+    centerOffset: (m && m.centerOffset) ? m.centerOffset : null,
+    pose: {
+      x: p.x, z: p.z, liftY: p.liftY || 0, overflow: !!p.overflow,
+      rotY: (p.rotY != null ? p.rotY : (p.rotated ? Math.PI / 2 : 0)),
+      yaw: p.yaw || 0, flipX: !!p.flipX,
+      tipX: p.tipX || 0, tipZ: p.tipZ || 0,
+      tiltX: p.tiltX || 0, tiltZ: p.tiltZ || 0,
+      rotated: !!p.rotated,
+      width: p.width, depth: p.depth, height: p.height
+    },
+    locked: !!(m && typeof window.nsoPosLocked === 'function' && window.nsoPosLocked(m)),
+    seat: p.seat || null,
+    skin: (m && m.skin) ? m.skin : null,
+    paint: paint ? { exclude: paint.exclude, select: paint.select } : null,
+    nonSolid: !!(m && typeof window.nsoNonSolid === 'function' && window.nsoNonSolid(m))
+  };
+}
+
+/** The serialized scene block for the current plate, or null if unavailable. */
+function buildPlateSceneJson() {
+  const Scene = window.NSO3MFScene;
+  if (!Scene) return null;
+  const plate = getCurrentPlate();
+  try {
+    const block = Scene.capture({
+      scope: 'plate',
+      plate: {
+        id: state.plate,
+        name: plate.name,
+        w: plate.w,
+        d: plate.d,
+        locked: !!(typeof window.nsoPlateLocked === 'function' && window.nsoPlateLocked())
+      },
+      selection: { placedIndex: state.selectedIndex, editId: state.editId },
+      pieces: state.placed.map((p, i) => capturePieceState(p, i, plate))
+    });
+    return Scene.serialize(block);
+  } catch (err) {
+    // A scene block is an addition to the export, never a reason to lose it.
+    console.error('3MF scene capture failed; exporting geometry only', err);
+    return null;
+  }
+}
+
+/**
+ * The scene block for the one-model export route. The piece has no plate pose
+ * on this route - buildActiveModelObject3MF centres it on the plate resting on
+ * z = 0 - so `basis` is that placement and the pose fields are the identity.
+ * Its model state (paint, skin, non-solid, lock) is the real thing.
+ */
+function buildModelSceneJson(m, basis) {
+  const Scene = window.NSO3MFScene;
+  if (!Scene || !basis) return null;
+  const plate = getCurrentPlate();
+  const paint = (typeof window.nsoMaskSnapshot === 'function') ? window.nsoMaskSnapshot(m) : null;
+  try {
+    const block = Scene.capture({
+      scope: 'model',
+      plate: { id: state.plate, name: plate.name, w: plate.w, d: plate.d, locked: false },
+      selection: { placedIndex: null, editId: m.id },
+      pieces: [{
+        name: m.name || 'piece',
+        sourceId: m.id,
+        basis: basis,
+        centerOffset: m.centerOffset || null,
+        pose: {
+          x: 0, z: 0, liftY: 0, overflow: false,
+          rotY: 0, yaw: 0, flipX: false, tipX: 0, tipZ: 0, tiltX: 0, tiltZ: 0,
+          rotated: false,
+          width: m.size.x, depth: m.size.z, height: m.size.y
+        },
+        locked: !!(typeof window.nsoPosLocked === 'function' && window.nsoPosLocked(m)),
+        seat: null,
+        skin: m.skin || null,
+        paint: paint ? { exclude: paint.exclude, select: paint.select } : null,
+        nonSolid: !!(typeof window.nsoNonSolid === 'function' && window.nsoNonSolid(m))
+      }]
+    });
+    return Scene.serialize(block);
+  } catch (err) {
+    console.error('3MF scene capture failed; exporting geometry only', err);
+    return null;
+  }
+}
+
+/* ---- restore ---- */
+
+/**
+ * The per-model half of a scene entry: the flags and lists that belong to the
+ * piece itself rather than to where it sits. Each goes back through the setter
+ * its own module publishes, so the indicators, the HUD and the undo stack all
+ * see it the way a user setting it would.
+ *
+ * The lock is applied last: it blocks the move surface, and putting a piece
+ * where it belongs is exactly what that surface does.
+ */
+function applyModelSceneState(m, so) {
+  // Paint only when there is some: restoring an empty snapshot would leave a
+  // piece that was never painted carrying a faceMask, where a fresh import
+  // leaves it with none. The same thing to every consumer, but not the same
+  // object, and the round-trip check compares objects.
+  if (so.paint && (so.paint.exclude.length || so.paint.select.length) &&
+      typeof window.nsoMaskRestore === 'function') {
+    window.nsoMaskRestore(m, { exclude: so.paint.exclude, select: so.paint.select });
+  }
+  if (so.skin) m.skin = so.skin;
+  if (so.nonSolid && typeof window.nsoNonSolidSet === 'function') {
+    window.nsoNonSolidSet(m, true, { noUndo: true, silent: true });
+  }
+  if (so.locked && typeof window.nsoPosLockSet === 'function') {
+    window.nsoPosLockSet(m, true, { noUndo: true, silent: true });
+  }
+}
+
+/**
+ * Rebuild one piece from its imported geometry and its scene entry.
+ *
+ * The imported soup is in plate coordinates. Inverting `basis` gives the
+ * piece's centred display geometry back; adding the model's own centerOffset
+ * and swapping Y up -> Z up gives its rawTris back IN THE FRAME IT HAD, which
+ * is what makes the raw-space paint planes and the skin record meaningful
+ * again rather than approximately right.
+ *
+ * @returns {object|null} the placed entry
+ */
+function restoreSceneObject(so, positions) {
+  const Scene = window.NSO3MFScene;
+  const disp = Scene.transformSoup(so.inverse, positions);
+  const C = so.centerOffset || { x: 0, y: 0, z: 0 };
+  const raw = new Float32Array(disp.length);
+  for (let i = 0; i + 2 < disp.length; i += 3) {
+    const a = disp[i] + C.x, b = disp[i + 1] + C.y, c = disp[i + 2] + C.z;
+    raw[i] = a;            // zUpToYUp is (x, y, z) -> (x, z, -y); this inverts it
+    raw[i + 1] = -c;
+    raw[i + 2] = b;
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(raw, 3));
+  const id = addModelFromZUpGeometry(so.name, geometry, { silent: true });
+  if (id == null) return null;
+  const m = state.models.find(x => x.id === id);
+  if (!m) return null;
+
+  // ---- put it on the plate, then pose it ----
+  const entry = placeModelMovable(m, so.pose.x, so.pose.z);
+  if (!entry) return null;
+  entry.name = so.name;
+  entry.yaw = so.pose.yaw;
+  entry.rotated = so.pose.rotated;
+  applyPlacedOrientation(entry, so.pose);
+  entry.overflow = !!so.pose.overflow;
+  if (so.seat) entry.seat = so.seat;
+  applyModelSceneState(m, so);
+  return entry;
+}
+
+/**
+ * Restore a whole plate from a scene block.
+ *
+ * Replacing the plate is the point of the feature - a half-restore into a
+ * plate that already has pieces reproduces nothing - so a populated plate is
+ * confirmed first, and a decline falls back to the plain geometry import.
+ *
+ * @returns {number|null} pieces restored, or null when the caller should do
+ *          the ordinary geometry-only import instead
+ */
+function restoreSceneFrom3MF(filename, result, scene) {
+  if (scene.objects.length !== result.objects.length) {
+    console.warn(filename + ': scene block lists ' + scene.objects.length +
+                 ' object(s) but the model has ' + result.objects.length +
+                 ' - importing geometry only');
+    return null;
+  }
+
+  const replacing = scene.scope === 'plate' && state.placed.length > 0;
+  if (replacing) {
+    const ok = window.confirm(
+      filename + ' carries a saved NSO plate (' + scene.objects.length + ' piece(s)).\n\n' +
+      'Restore it? The ' + state.placed.length + ' piece(s) now on the plate are removed. ' +
+      'Cancel imports the geometry alongside them instead.');
+    if (!ok) return null;
+  }
+  if (scene.scope === 'plate') {
+    clearPlaced();
+    restoreScenePlate(scene.plate);
+  }
+
+  let restored = 0;
+  scene.objects.forEach((so, i) => {
+    try {
+      if (scene.scope === 'model') {
+        // A one-model file has no plate arrangement to rebuild - the geometry
+        // IS the model. It takes the ordinary import path, untouched, so this
+        // route keeps the placement contract nso_export_roundtrip_test.js pins
+        // for it; the block adds the piece's own flags and lists and nothing
+        // else.
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(result.objects[i].positions, 3));
+        const id = addModelFromZUpGeometry(so.name, geometry);
+        if (id == null) return;
+        const m = state.models.find(x => x.id === id);
+        if (!m) return;
+        applyModelSceneState(m, so);
+        restored++;
+      } else if (restoreSceneObject(so, result.objects[i].positions)) {
+        restored++;
+      }
+    } catch (err) {
+      console.error(filename + ': piece "' + so.name + '" could not be restored', err);
+    }
+  });
+
+  if (scene.scope === 'plate' && typeof window.nsoPlateLockSet === 'function') {
+    window.nsoPlateLockSet(!!scene.plate.locked, { noUndo: true, silent: true });
+  }
+  if (scene.selection.editId != null && restored) {
+    // ids are handed out fresh on import, so the saved one cannot be reused;
+    // select the piece that held it by its position in the file instead.
+    const idx = scene.objects.findIndex(o => o.sourceId === scene.selection.editId);
+    if (idx >= 0 && state.placed[idx]) selectPlaced(idx);
+  }
+  if (typeof updateAdjustUI === 'function') updateAdjustUI();
+  if (typeof renderModelList === 'function') renderModelList();
+  return restored;
+}
+
+/**
+ * Put the plate preset back. The piece coordinates in a scene block are
+ * plate-centred, so they only mean what they meant on the plate they were
+ * saved from. Unknown preset ids are left alone rather than guessed at - the
+ * pieces still land where the file says, on whatever plate is selected.
+ */
+function restoreScenePlate(saved) {
+  if (!saved || !saved.id) return;
+  const sel = document.getElementById('plate-select');
+  if (saved.id === 'custom') {
+    const w = document.getElementById('custom-w');
+    const d = document.getElementById('custom-d');
+    if (w && saved.w) w.value = saved.w;
+    if (d && saved.d) d.value = saved.d;
+  } else if (!PLATES[saved.id]) {
+    return;
+  }
+  state.plate = saved.id;
+  if (sel) sel.value = saved.id;
+  const custom = document.getElementById('custom-size');
+  if (custom) custom.classList.toggle('hidden', state.plate !== 'custom');
+  if (typeof updatePlateInfo === 'function') updatePlateInfo();
+}
+
+/** The scene block of an imported 3MF, or null when there is none to use. */
+function readSceneBlock(filename, result) {
+  if (!result || !result.sceneJson || !window.NSO3MFScene) return null;
+  try {
+    return window.NSO3MFScene.parse(result.sceneJson);
+  } catch (err) {
+    // A block this build cannot read is a warning, never a failed import: the
+    // geometry in the file is still good.
+    console.warn(filename + ': ' + err.message + ' - importing geometry only');
+    return null;
+  }
 }
 
 function export3MF() {
@@ -2777,14 +3658,16 @@ function export3MF() {
   }
 
   const plate = getCurrentPlate();
-  return window.NSO3MF.build3MF({ objects, profileId, plateName: plate.name })
+  const sceneJson = buildPlateSceneJson();
+  return window.NSO3MF.build3MF({ objects, profileId, plateName: plate.name, sceneJson })
     .then(result => {
       const blob = new Blob([result.bytes], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' });
       const plateName = plate.name.replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>]/g, '');
       const filename = `nest_${plateName}_${state.placed.length}pcs.3mf`;
       downloadBlob(blob, filename);
       const profile = window.NSOCoolingProfiles.getProfile(result.profileId);
-      setStatus(`Downloaded ${filename} - cooling profile "${profile ? profile.label : result.profileId}" baked in`);
+      setStatus(`Downloaded ${filename} - cooling profile "${profile ? profile.label : result.profileId}" baked in` +
+                (result.scene ? ' - scene saved, reopen this file to get the plate back' : ''));
       return result;
     })
     .catch(err => {
@@ -2844,12 +3727,23 @@ function buildActiveModelObject3MF(m) {
   }
 
   const mesh = window.NSO3MF.indexTriangleSoup(flat);
+  // The same placement as a 12-number transform, for the scene block: model
+  // space (x, y, z) -> file (x + dx, -z + dy, y - minZ), re-anchored onto the
+  // geometry's own centre so inverting it lands on what addModel hands back.
+  let basis = null;
+  if (window.NSO3MFScene) {
+    const M = [1, 0, 0, 0, 0, 1, 0, -1, 0, dx, dy, -minZ];
+    const c = geometryCenter(geo);
+    const t = window.NSO3MFScene.apply12(M, c.x, c.y, c.z);
+    basis = M.slice(0, 9).concat([t[0], t[1], t[2]]);
+  }
   return {
     name: m.name || 'piece',
     vertices: mesh.vertices,
     triangles: mesh.triangles,
     triCount: mesh.triangles.length / 3,
-    dropped: dropped
+    dropped: dropped,
+    basis: basis
   };
 }
 
@@ -2894,7 +3788,8 @@ function exportActiveModel3MF() {
   const profileId = getCoolingProfileId();
   setStatus('Building 3MF...');
   const plate = getCurrentPlate();
-  return window.NSO3MF.build3MF({ objects: [object], profileId, plateName: plate.name })
+  const sceneJson = buildModelSceneJson(m, object.basis);
+  return window.NSO3MF.build3MF({ objects: [object], profileId, plateName: plate.name, sceneJson })
     .then(result => {
       const blob = new Blob([result.bytes], { type: 'application/vnd.ms-package.3dmanufacturing-3dmodel+xml' });
       downloadBlob(blob, filename);

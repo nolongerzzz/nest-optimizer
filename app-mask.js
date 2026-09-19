@@ -1,5 +1,19 @@
-/* Face exclude paint. Runs after the boolean; Soften, the wrap replay and
-   Align all read the same set.
+/* Face paint: EXCLUDE and SELECT. Runs after the boolean; Soften, the wrap
+   replay and Align all read the same exclude set.
+
+   Two lists on the piece, two questions, never one flag with two meanings:
+     faceMask.exclude  "is this face excluded from bakes"  - any number of
+                       faces, the yellow, the skip list every bake reads
+                       (nsoMaskIsExcludedRaw / nsoMaskFaceList / nsoMaskCount).
+     faceMask.select   "is this my target face"            - at most ONE
+                       face, the pink, read by the one consumer that takes a
+                       target today, Skin face (nsoMaskSelected). Painting a
+                       second face replaces the first; painting the selected
+                       face again deselects it.
+   A face can be on both lists. That is not a conflict: paint wins, so a bake
+   aimed at a selected face that is also excluded stands down and says so.
+   Both entries are recorded by the same pick (nsoFaceFromHit) in the same
+   shape, and both survive a bake the same way, as planes.
 
    A face is stored as a PLANE in the piece's own raw space, never as a list
    of triangles. Triangle marks do not survive anything: a bake and a boolean
@@ -27,7 +41,8 @@
   }
   function maskOf(m) {
     if (!m) return null;
-    if (!m.faceMask || !Array.isArray(m.faceMask.exclude)) m.faceMask = { exclude: [] };
+    if (!m.faceMask || !Array.isArray(m.faceMask.exclude)) m.faceMask = { exclude: [], select: [] };
+    if (!Array.isArray(m.faceMask.select)) m.faceMask.select = [];
     return m.faceMask;
   }
 
@@ -77,10 +92,21 @@
     }
     return samePlane(a, b);
   }
-  function indexOfPlane(mask, pl) {
-    for (let i = 0; i < mask.exclude.length; i++) if (sameFace(mask.exclude[i], pl)) return i;
+  function indexIn(list, pl) {
+    if (!list) return -1;
+    for (let i = 0; i < list.length; i++) if (sameFace(list[i], pl)) return i;
     return -1;
   }
+  function indexOfPlane(mask, pl) { return indexIn(mask.exclude, pl); }
+  /* The name a status line gives an entry - the display axis and side the
+     click recorded, nothing re-derived. */
+  function faceName(e) {
+    if (!e) return 'no face';
+    if (e.dispAxis == null) return 'that recessed face';
+    return (e.inner ? 'the inner ' : 'the ') + 'XYZ'.charAt(e.dispAxis) + (e.dispSign > 0 ? '+' : '-') +
+           ' face' + (e.inner && e.dispPlane != null ? ' at ' + Number(e.dispPlane).toFixed(2) : '');
+  }
+  window.nsoMaskFaceName = faceName;
 
   /* ---- what everything downstream asks ---- */
 
@@ -136,6 +162,29 @@
     }
     return out;
   };
+  /* The painted faces as PLANES, exactly as each click recorded them.
+
+     nsoMaskFaceList above is the axis-and-side view and returns null the
+     moment one entry is a recessed patch, because the whole-solid wrap has no
+     way to name one. A sub-region feature (the brush) needs the opposite: it
+     has a set of points and wants to know which painted faces they lie on, so
+     a recessed patch is perfectly usable and must not drop the whole list.
+     Same rule either way - read back what the click wrote down, never work
+     out which face was meant from a normal and a bounding box. */
+  window.nsoMaskPlaneList = function (m) {
+    const mask = m && m.faceMask;
+    if (!mask || !mask.exclude) return [];
+    const out = [];
+    for (let i = 0; i < mask.exclude.length; i++) {
+      const e = mask.exclude[i];
+      out.push({ n: e.n.slice(), d: e.d,
+                 axisIdx: (e.axisIdx == null ? null : e.axisIdx),
+                 keepMin: (e.axisIdx == null ? null : !!e.keepMin),
+                 inner: !!e.inner,
+                 recessed: e.axisIdx == null });
+    }
+    return out;
+  };
   // A wall Align found, given in world space on the piece's own mesh.
   window.nsoMaskIsExcludedWorld = function (m, mesh, wn, wp) {
     const mask = m && m.faceMask;
@@ -154,6 +203,42 @@
   window.nsoMaskCount = function (m) {
     return (m && m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length : 0;
   };
+
+  /* ---- the SELECT list: "is this my target face" ---- */
+
+  // The one selected face, as a copy of what the click recorded (raw plane
+  // n.p = d, raw axis and side when axis-aligned, display face for the
+  // pink), or null when the piece has no target. Skin face reads this.
+  window.nsoMaskSelected = function (m) {
+    const mask = m && m.faceMask;
+    if (!mask || !mask.select || !mask.select.length) return null;
+    return copyEntry(mask.select[0]);
+  };
+  window.nsoMaskSelectCount = function (m) {
+    return (m && m.faceMask && m.faceMask.select) ? m.faceMask.select.length : 0;
+  };
+  window.nsoMaskIsSelectedRaw = function (m, n, d, axisIdx, keepMin, inner) {
+    const mask = m && m.faceMask;
+    if (!mask || !mask.select || !mask.select.length) return false;
+    return indexIn(mask.select, { n: n, d: d,
+      axisIdx: (axisIdx == null ? null : axisIdx),
+      keepMin: (axisIdx == null ? null : !!keepMin),
+      inner: !!inner }) >= 0;
+  };
+  /* Drop the target. A consumer calls this once it has USED the face (Skin
+     replaces it with relief, so the plane it recorded is no longer a face),
+     with noUndo because its own undo entry already carries the snapshot. */
+  window.nsoMaskSelectClear = function (m, opts) {
+    const mask = maskOf(m);
+    if (!mask || !mask.select.length) return false;
+    if (!(opts && opts.noUndo) && typeof pushUndo === 'function') {
+      pushUndo({ type: 'maskReplace', modelId: m.id, prevMask: window.nsoMaskSnapshot(m) });
+    }
+    mask.select = [];
+    repaint();
+    if (typeof window.nsoMaskHudRefresh === 'function') window.nsoMaskHudRefresh();
+    return true;
+  };
   function copyEntry(p) {
     return { n: p.n.slice(), d: p.d,
              axisIdx: (p.axisIdx == null ? null : p.axisIdx),
@@ -163,14 +248,21 @@
              dispPlane: (p.dispPlane == null ? null : p.dispPlane),
              inner: !!p.inner };
   }
+  /* Both lists in one snapshot, so one undo step puts back the exclude AND
+     the target together. Restore also takes the older bare-array form (the
+     exclude list alone, no target) - the tests and the old undo entries hand
+     that in. */
   window.nsoMaskSnapshot = function (m) {
     const mask = m && m.faceMask;
     if (!mask || !mask.exclude) return null;
-    return mask.exclude.map(copyEntry);
+    return { exclude: mask.exclude.map(copyEntry),
+             select: (mask.select || []).map(copyEntry) };
   };
   window.nsoMaskRestore = function (m, snap) {
     if (!m) return;
-    m.faceMask = { exclude: snap ? snap.map(copyEntry) : [] };
+    if (Array.isArray(snap)) m.faceMask = { exclude: snap.map(copyEntry), select: [] };
+    else m.faceMask = { exclude: (snap && snap.exclude) ? snap.exclude.map(copyEntry) : [],
+                        select: (snap && snap.select) ? snap.select.map(copyEntry) : [] };
     repaint();
     if (typeof window.nsoMaskHudRefresh === 'function') window.nsoMaskHudRefresh();
   };
@@ -246,26 +338,54 @@
     };
   }
 
-  /* ---- the yellow over every excluded face ---- */
+  /* ---- the yellow over every excluded face, the pink over the target ---- */
 
-  let overlay = null;
-  function clearOverlay() {
-    if (overlay && overlay.parent) overlay.parent.remove(overlay);
-    if (overlay && overlay.geometry) overlay.geometry.dispose();
-    if (overlay && overlay.material) overlay.material.dispose();
-    overlay = null;
+  // Pink: the one per-piece colour nothing else on the plate uses. Paint is
+  // yellow, A orange, B green, non-solid purple, the lock teal, the armed
+  // face cyan. Drawn over the yellow (order 41 vs 40, offset -9 vs -8) and
+  // translucent, so a face that is both selected and excluded shows both.
+  const SELECT_COLOR = 0xf472b6;
+  const SELECT_RENDER_ORDER = 41;
+
+  let excludeOverlay = null;   // the yellow
+  let selectOverlay = null;    // the pink
+  let selPainted = 0;          // triangles the pink covered on the last repaint
+  function dropOverlay(o) {
+    if (o && o.parent) o.parent.remove(o);
+    if (o && o.geometry) o.geometry.dispose();
+    if (o && o.material) o.material.dispose();
   }
+  function clearOverlay() {
+    dropOverlay(excludeOverlay); excludeOverlay = null;
+    dropOverlay(selectOverlay); selectOverlay = null;
+    selPainted = 0;
+  }
+  /* Rebuild both overlays for the active piece. Returns the triangle count
+     under the YELLOW (the number the exclude status line reports); the pink's
+     count is kept in selPainted for the select status line. */
   function repaint() {
     clearOverlay();
     const m = activeModel();
     const mask = m && m.faceMask;
-    if (!m || !mask || !mask.exclude.length) return 0;
+    if (!m || !mask) return 0;
     const placed = state.placed.find(function (p) { return p && p.sourceId === m.id && p.mesh; });
     if (!placed) return 0;
+    let painted = 0;
+    if (mask.exclude && mask.exclude.length) {
+      const r = buildOverlay(m, placed, mask.exclude, 0xffdd00, 1, PAINT_RENDER_ORDER, -8);
+      if (r) { excludeOverlay = r.mesh; painted = r.tris; }
+    }
+    if (mask.select && mask.select.length) {
+      const r = buildOverlay(m, placed, mask.select, SELECT_COLOR, 0.7, SELECT_RENDER_ORDER, -9);
+      if (r) { selectOverlay = r.mesh; selPainted = r.tris; }
+    }
+    return painted;
+  }
+  function buildOverlay(m, placed, entries, color, opacity, order, offset) {
     const f = frameOf(m);
     const geo = placed.mesh.geometry;
     const pos = geo.attributes && geo.attributes.position;
-    if (!pos || !f) return 0;
+    if (!pos || !f) return null;
     const verts = [];
     const nTri = (pos.count / 3) | 0;
     /* The faces the clicks named, in the display space this mesh is already
@@ -278,8 +398,8 @@
        back to the stored raw plane below. */
     const faceSet = {}, innerFaces = [];
     let anyPlaneOnly = false;
-    for (let i = 0; i < mask.exclude.length; i++) {
-      const e = mask.exclude[i];
+    for (let i = 0; i < entries.length; i++) {
+      const e = entries[i];
       if (e.dispAxis == null) { anyPlaneOnly = true; continue; }
       if (e.inner) innerFaces.push(e);
       else faceSet[e.dispAxis + ':' + (e.dispSign > 0 ? '+' : '-')] = true;
@@ -336,11 +456,11 @@
         if (!anyPlaneOnly) continue;
         const rn = rawDirFromLocal([x,y,z]);
         const rp = rawPointFromLocal(f, A);
-        if (!window.nsoMaskIsExcludedRaw(m, rn, rn[0]*rp[0]+rn[1]*rp[1]+rn[2]*rp[2])) continue;
+        if (indexIn(entries, { n: rn, d: rn[0]*rp[0]+rn[1]*rp[1]+rn[2]*rp[2], axisIdx: null }) < 0) continue;
       }
       verts.push(A[0], A[1], A[2], B[0], B[1], B[2], C[0], C[1], C[2]);
     }
-    if (!verts.length) return 0;
+    if (!verts.length) return null;
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
     /* Flat, unlit, full strength yellow - no lighting to shade it, so a
@@ -359,22 +479,22 @@
        camera. depthWrite off so it never leaves depth of its own behind for
        the helpers to test against; depthTest on so a face painted on the far
        side stays behind the solid. */
-    overlay = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
-      color: 0xffdd00, side: THREE.FrontSide,
-      transparent: true, opacity: 1, depthWrite: false,
-      polygonOffset: true, polygonOffsetFactor: -8, polygonOffsetUnits: -8
+    const overlay = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+      color: color, side: THREE.FrontSide,
+      transparent: true, opacity: opacity, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: offset, polygonOffsetUnits: offset
     }));
     overlay.position.copy(placed.mesh.position);
     overlay.quaternion.copy(placed.mesh.quaternion);
     overlay.scale.copy(placed.mesh.scale);
-    overlay.renderOrder = PAINT_RENDER_ORDER;
+    overlay.renderOrder = order;
     /* The paint is paint, not a surface. It sits on the face it marks, so a
        ray can land on it as readily as on the piece, and without this a
        Soften pick on a painted face hits the yellow instead - the click lands
        on nothing and the face never gets to say it is painted out. */
     overlay.raycast = function () {};
     if (state.modelGroup) state.modelGroup.add(overlay);
-    return verts.length / 9;
+    return { mesh: overlay, tris: verts.length / 9 };
   }
   window.nsoMaskRepaint = repaint;
 
@@ -390,45 +510,124 @@
     if (el) el.textContent = text;
   }
   function hudPaint() {
-    const n = window.nsoMaskCount(activeModel());
-    hud(HUD_TAG + ' \u2014 ' + n + (n === 1 ? ' face excluded' : ' faces excluded'));
+    const m = activeModel();
+    const n = window.nsoMaskCount(m);
+    const sel = window.nsoMaskSelected(m);
+    hud(HUD_TAG + ' \u2014 ' + n + (n === 1 ? ' face excluded' : ' faces excluded') +
+        (sel ? ', target ' + faceName(sel).replace(/^the /, '') : ''));
   }
-  /* Done is a state on this button, not a row of its own: Paint faces while
-     idle, and while a session is live it says so and how to stop. */
-  const PAINT_IDLE = 'Paint faces';
-  const PAINT_LIVE = 'Painting\u2026 click to stop';
+  /* state.maskPaint is the live mode: false, 'exclude' (the yellow) or
+     'select' (the pink). Truthy while either session is live, which is all
+     app-core's click routing and the older checks ask. Each button is a
+     state of its own: idle it names its mode, live it says how to stop;
+     neither ever relabels itself into the other. */
+  const LABELS = {
+    exclude: { id: 'btn-mask-paint',  idle: 'Paint Excluded', live: 'Stop painting' },
+    select:  { id: 'btn-mask-select', idle: 'Paint Selected', live: 'Stop selecting' }
+  };
   function setLabel() {
-    const btn = document.getElementById('btn-mask-paint');
-    if (!btn) return;
-    btn.classList.toggle('is-armed', !!state.maskPaint);
-    btn.textContent = state.maskPaint ? PAINT_LIVE : PAINT_IDLE;
+    Object.keys(LABELS).forEach(function (mode) {
+      const btn = document.getElementById(LABELS[mode].id);
+      if (!btn) return;
+      const on = state.maskPaint === mode;
+      btn.classList.toggle('is-armed', on);
+      btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      btn.textContent = on ? LABELS[mode].live : LABELS[mode].idle;
+    });
   }
-  function enterPaint() {
+  /* One picking mode at a time, the same contract app-measure.js states and
+     app-brush.js, app-center-lock.js and app-seat-surface.js all keep. Paint
+     is asked FIRST in app-core's pointerdown routing - ahead of Carve, Seat
+     here, the brush and Measure - so anything still armed when paint goes
+     live is not merely second in line, it never fires again: paint takes
+     every click that lands on a piece and the other button stays lit and
+     dead. This used to name only the three flag-only modes, which left those
+     four tools exactly there.
+
+     The ones with a button go off THROUGH the button, so aria-pressed and
+     the armed class follow; a flag written behind a button's back leaves it
+     lit and doing nothing. None of those four runs a disarm on its way OUT,
+     so clicking them here cannot bounce back and toggle paint off again.
+     Order follows app-core's routing order, for no reason but that it is the
+     order a reader can check this list against.
+
+     Paint itself is not in the list. Switching between Paint Excluded and
+     Paint Selected is a mode change, not a conflict, and clicking the other
+     paint button would only switch modes again. state.centerLockArmed stays
+     a flag write on purpose: btn-center-lock-pick refuses to cancel once the
+     Join pair it needs is gone, so the button is the less reliable way in. */
+  function disarmOthers() {
+    const el = (id) => document.getElementById(id);
+    if (state.carveArmed) {
+      const carveBtn = el('btn-carve');
+      if (carveBtn) carveBtn.click();
+      else state.carveArmed = false;
+    }
+    if (state.seatHereArmed) {
+      const seatBtn = el('btn-seat-here');
+      if (seatBtn) seatBtn.click();
+      else state.seatHereArmed = false;
+    }
+    if (typeof window.nsoBrushArmed === 'function' && window.nsoBrushArmed()) {
+      const brushBtn = el('btn-brush');
+      if (brushBtn) brushBtn.click();
+      else if (typeof window.nsoBrushSetArmed === 'function') window.nsoBrushSetArmed(false);
+    }
+    if (state.measureOn) {
+      const measureBtn = el('btn-measure');
+      if (measureBtn) measureBtn.click();
+      else state.measureOn = false;
+    }
+    state.softenArmed = false;
+    state.capArmed = false;
+    state.centerLockArmed = false;
+  }
+
+  function enterPaint(mode) {
     const m = activeModel();
     if (!m || !m.rawTris) {
       setStatus('Paint needs a raw piece - split, wrap or boolean it first', true);
       return;
     }
-    state.maskPaint = true;
-    state.softenArmed = false;
-    state.capArmed = false;
+    state.maskPaint = mode;
+    disarmOthers();
     if (typeof clearFacePick === 'function') clearFacePick();
     repaint();
     setLabel();
     hudPaint();
-    setStatus('Paint faces - click a face to exclude it, click again to include. Done when finished');
+    setStatus(mode === 'select'
+      ? 'Paint Selected - click a face to make it the target (one face; a second click elsewhere moves it, on the same face clears it). Stop selecting when finished'
+      : 'Paint Excluded - click a face to exclude it, click again to include. Stop painting when finished');
   }
   function exitPaint() {
+    const was = state.maskPaint;
+    const m = activeModel();
     state.maskPaint = false;
     setLabel();
     hud(HUD_TAG);
-    setStatus('Paint off - ' + window.nsoMaskCount(activeModel()) + ' face(s) excluded');
+    const sel = window.nsoMaskSelected(m);
+    setStatus((was === 'select' ? 'Select off - ' : 'Paint off - ') +
+              window.nsoMaskCount(m) + ' face(s) excluded, target ' + (sel ? faceName(sel).replace(/^the /, '') : 'none'));
   }
-  function togglePaint() {
-    if (state.maskPaint) exitPaint(); else enterPaint();
+  function togglePaint(mode) {
+    if (state.maskPaint === mode) exitPaint(); else enterPaint(mode);
   }
   window.nsoMaskHudRefresh = function () {
-    if (state.maskPaint) hudPaint(); else hud(HUD_TAG);
+    if (state.maskPaint) { hudPaint(); return; }
+    /* At rest the line goes back to the HUD tag - unless a position lock has
+       something to say about the piece being selected, in which case it owns
+       it. This call runs AFTER updateAdjustUI (app-sel-outline.js wraps
+       selectPlaced to make sure the count survives a selection), so without
+       this the lock's "Locked #n" was overwritten by the bare tag every time
+       a piece was clicked. */
+    const lock = (typeof window.nsoPosLockHudLine === 'function') ? window.nsoPosLockHudLine() : null;
+    /* And the same for a defect check that is on screen (app-defects.js): its
+       verdict is the answer to "what is wrong with this piece", so clicking
+       the piece to look at the marks must not be what throws the verdict
+       away. It rides ALONGSIDE the lock rather than instead of it - the two
+       say different things and a locked piece can also be a checked one. */
+    const chk = (typeof window.nsoDefectsHudLine === 'function') ? window.nsoDefectsHudLine() : null;
+    hud(chk ? (lock ? lock + ' \u2014 ' + chk : chk) : (lock || HUD_TAG));
   };
 
   function hitFace(event) {
@@ -437,7 +636,7 @@
     state.raycaster.setFromCamera(state.pointer, state.camera);
     const hits = state.raycaster.intersectObjects(state.modelGroup.children, true);
     for (let i = 0; i < hits.length; i++) {
-      if (hits[i].object === overlay) continue;
+      if (hits[i].object === excludeOverlay || hits[i].object === selectOverlay) continue;
       if (hits[i].faceIndex == null) continue;
       return hits[i];
     }
@@ -460,12 +659,13 @@
     return !!hitFace(event);
   };
 
-  // Toggle the face under the cursor. Nothing here moves the piece, and a
-  // pick that resolves to no face leaves both the mesh and the paint alone.
-  window.nsoMaskToggleAt = function (m, mesh, hit) {
+  /* The face under the cursor as an entry, one resolver for both lists.
+     Returns null (with the reason on the status line) when the click cannot
+     be described as a face. */
+  function entryFromHit(m, mesh, hit) {
     if (!m || !m.rawTris) {
       setStatus('Paint needs a raw piece - split, wrap or boolean it first', true);
-      return false;
+      return null;
     }
     // The face under the cursor is nsoFaceFromHit's answer - the same call
     // the Soften pick makes on the same triangle. What it says is recorded
@@ -500,12 +700,22 @@
       const patch = faceUnderCursor(m, mesh, hit);
       if (!patch) {
         setStatus('No face under that click - nothing changed', true);
-        return false;
+        return null;
       }
       entry = { n: patch.plane.n, d: patch.plane.d,
                 axisIdx: null, keepMin: null, dispAxis: null, dispSign: null };
       name = 'that recessed face (' + patch.tris.size + ' tris)';
     }
+    return { entry: entry, name: name };
+  }
+
+  // Toggle the face under the cursor on the EXCLUDE list. Nothing here moves
+  // the piece, and a pick that resolves to no face leaves both the mesh and
+  // the paint alone.
+  window.nsoMaskToggleAt = function (m, mesh, hit) {
+    const r = entryFromHit(m, mesh, hit);
+    if (!r) return false;
+    const entry = r.entry, name = r.name;
     const mask = maskOf(m);
     const prev = window.nsoMaskSnapshot(m);
     const at = indexOfPlane(mask, entry);
@@ -522,9 +732,39 @@
     return true;
   };
 
+  /* Make the face under the cursor THE target (SELECT list). One face at a
+     time: a click on a different face replaces the target, a click on the
+     current one clears it. The exclude list is not touched either way. */
+  window.nsoMaskSelectAt = function (m, mesh, hit) {
+    const r = entryFromHit(m, mesh, hit);
+    if (!r) return false;
+    const entry = r.entry, name = r.name;
+    const mask = maskOf(m);
+    const prev = window.nsoMaskSnapshot(m);
+    const same = indexIn(mask.select, entry) >= 0;
+    const replaced = !same && mask.select.length > 0 ? faceName(mask.select[0]) : null;
+    mask.select = same ? [] : [entry];
+    if (typeof pushUndo === 'function') {
+      pushUndo({ type: 'maskReplace', modelId: m.id, prevMask: prev });
+    }
+    repaint();
+    window.nsoMaskHudRefresh();
+    const alsoExcluded = !same && indexOfPlane(mask, entry) >= 0;
+    setStatus(same
+      ? 'Deselected ' + name + ' - no target face'
+      : 'Selected ' + name + ' as the target (' + selPainted + ' tris pink)' +
+        (replaced ? ' - replaces ' + replaced : '') +
+        (alsoExcluded ? ' - it is also painted excluded, so a bake on it stands down until that paint is cleared' : '') +
+        ' - Skin face will use it');
+    return true;
+  };
+
   function bind() {
     const btn = document.getElementById('btn-mask-paint');
-    if (btn && !btn._maskBound) { btn.addEventListener('click', togglePaint); btn._maskBound = true; }
+    if (btn && !btn._maskBound) { btn.addEventListener('click', function () { togglePaint('exclude'); }); btn._maskBound = true; }
+    const sel = document.getElementById('btn-mask-select');
+    if (sel && !sel._maskBound) { sel.addEventListener('click', function () { togglePaint('select'); }); sel._maskBound = true; }
+    // Clear paint takes both lists off the piece: every exclude and the target.
     const clr = document.getElementById('btn-mask-clear');
     if (clr && !clr._maskBound) {
       clr.addEventListener('click', function () {
@@ -532,10 +772,10 @@
         if (!m) return;
         const prev = window.nsoMaskSnapshot(m);
         if (typeof pushUndo === 'function') pushUndo({ type: 'maskReplace', modelId: m.id, prevMask: prev });
-        m.faceMask = { exclude: [] };
+        m.faceMask = { exclude: [], select: [] };
         repaint();
         window.nsoMaskHudRefresh();
-        setStatus('Paint cleared - 0 faces excluded');
+        setStatus('Paint cleared - 0 faces excluded, no target face');
       });
       clr._maskBound = true;
     }
@@ -553,7 +793,8 @@
       if (typeof idx !== 'number' || !state.placed[idx]) return;
       const placed = state.placed[idx];
       const m = state.models.find(function (mm) { return mm.id === placed.sourceId; });
-      window.nsoMaskToggleAt(m, placed.mesh, hit);
+      if (state.maskPaint === 'select') window.nsoMaskSelectAt(m, placed.mesh, hit);
+      else window.nsoMaskToggleAt(m, placed.mesh, hit);
     }, true);
   }
 

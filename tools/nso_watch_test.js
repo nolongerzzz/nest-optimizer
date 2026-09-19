@@ -11,12 +11,18 @@
    B. It must catch the shapes already found by accident. Each of the three
       is reproduced here through the app's own buttons and functions, and the
       watcher has to name it, with the operation that preceded it:
-        1. pose lost across a bake   - rotate a piece, then Seal it
+        1. pose lost across an app-finish.js bake - rotate a piece, then Seal
+           it. This is the half `nso_pose_after_bake_test.js` does not cover:
+           that gate is on NSO_sculptCommitRaw, which now puts the pose back.
         2. paint left on screen      - paint a face, then Seal it
         3. a piece restored without its model - Delete, then Undo
       If a case is ever fixed in the app, its assertion here fails loudly -
       which is the point. The check is then to be retired with the fix, not
       before.
+
+   Every button here is pressed with element.click() inside the page rather
+   than a Playwright click, so the viewport accordion (docs/HANDOFF.md, "a
+   second viewport menu") cannot hide a control out from under this suite.
 
    Usage: node tools/nso_watch_test.js   (npm run watch:test)              */
 
@@ -92,6 +98,16 @@ async function partA(page) {
     ['paint mode off', () => page.evaluate(() => document.getElementById('btn-mask-paint').click())],
     ['x-ray on', () => page.evaluate(() => document.getElementById('btn-xray').click())],
     ['x-ray off', () => page.evaluate(() => document.getElementById('btn-xray').click())],
+    /* The click-owning modes and the read-only tools that came later. Each is
+       switched on and straight back off, because a tool switch is exactly
+       when the scene and the state have a chance to part company. */
+    ...[
+      'btn-measure', 'btn-check-defects', 'btn-seat-grid', 'btn-mask-select',
+      'btn-brush', 'btn-carve', 'btn-lock-pos', 'btn-plate-lock', 'btn-frame-view'
+    ].flatMap(id => [
+      [id + ' on', () => page.evaluate(b => { const e = document.getElementById(b); if (e) e.click(); }, id)],
+      [id + ' off', () => page.evaluate(b => { const e = document.getElementById(b); if (e) e.click(); }, id)]
+    ]),
     ['split undone', () => page.evaluate(() => undoLast())],
     ['plate cleared', () => page.evaluate(() => document.getElementById('btn-clear-plate').click())]
   ];

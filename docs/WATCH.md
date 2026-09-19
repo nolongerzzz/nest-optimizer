@@ -6,7 +6,7 @@ drive the app exactly as you would anyway.
 
     nso-watch.js                the whole feature
     #btn-watch in index.html    the toggle
-    node tools/nso_watch_test.js   52 checks, in npm test
+    node tools/nso_watch_test.js   70 checks, in npm test
 
 ## Why
 
@@ -146,25 +146,35 @@ Three, all of the same shape, all reproduced in `tools/nso_watch_test.js`. None
 is fixed here - this ticket is the watcher, not the repairs. Each check fails
 loudly if its bug is fixed, which is the cue to retire the check with the fix.
 
-1. **A pose is lost across every bake.** Yaw a piece 90 deg, then Seal it (or
-   Thicken, Solidify, Smooth, Soften - they all commit the same way). The
-   commit blocks rebuild the placed mesh with
-   `mesh.position.set(px, m.size.y / 2 + 0.3, pz)` and never call
-   `applyMeshRotation()` - the name does not occur anywhere in `app-finish.js`
-   or `app-sculpt.js` - so the piece snaps back to 0 deg on screen while its
-   entry still says 90. `width` and `depth` are then taken from the unrotated
-   `m.size`, so the packer reserves the wrong footprint too. The same is true
-   of the undo path for all six bake types in `app-core.js`.
+1. **The `app-finish.js` bakes lose the placed pose.** Yaw a piece 90 deg,
+   then Seal it. `applyMeshRotation` occurs nowhere in `app-finish.js`: its
+   six commit sites - `sealSelectedModel`, `solidifySelectedModel`,
+   `thickenSelectedModel`, `commitSoften`, `applyCapOnFace` and
+   `capSelectedOpenFaces` - all rebuild the placed mesh with
+   `mesh.position.set(px, m.size.y / 2 + 0.3, pz)` and no rotation, so the
+   piece snaps back to 0 deg on screen while its entry still says 90. `width`
+   and `depth` are then taken from the unrotated `m.size`, so the packer
+   reserves the wrong footprint too. The shared bake-undo branch in
+   `app-core.js` (line 419) does the same for all six undo types.
+
+   Measured, on a yawed `box_hull_80x40x20-2`: Seal, Solidify and Thicken out
+   each raise the phantom. Cap and Soften need a pick or an open face and were
+   not driven; they are the same block, read rather than measured.
+
+   This is the **other half** of the thread `tools/nso_pose_after_bake_test.js`
+   already closed. That gate covers `NSO_sculptCommitRaw` - Smooth, Skin,
+   Scale, Extend, Brush, Carve, Texture, Paint delete, Seat (surface) - which
+   now calls `applyMeshRotation` and passes clean here. The `app-finish.js`
+   commit half was never in its scope.
 
 2. **Paint outlives the geometry it was drawn from.** Paint a face, then Seal.
    Seal replaces `m.geometry` and the placed mesh but never repaints, so the
    yellow on screen is triangles copied off a mesh that no longer exists.
    Turning a painted piece does the same thing - `applyMeshRotation()` moves
    the piece and nothing moves the overlay, so the yellow stays behind on the
-   face it used to mark. `applyMeshRotation` appears in neither
-   `app-finish.js` nor `app-sculpt.js`, and `nsoMaskRepaint()` is called from
-   exactly two commits - `commitSoften` and `NSO_sculptCommitRaw`. Seal,
-   Solidify, Thicken and Cap call neither.
+   face it used to mark. `nsoMaskRepaint()` is called from exactly two
+   commits, `commitSoften` and `NSO_sculptCommitRaw`; Seal, Solidify, Thicken
+   and Cap call neither it nor `applyMeshRotation`.
 
 3. **Undoing a delete brings back the piece but not its model.**
    `deleteSelectedPlaced()` removes the placed entry and, when it was the last

@@ -1,0 +1,179 @@
+{
+  "generator": "tools/nso_skin_fine_samples.js",
+  "units": "mm",
+  "up": "Z",
+  "patches": {
+    "crosshatch-fine_bordered": {
+      "file": "patch_crosshatch-fine_bordered.stl",
+      "pattern": "crosshatch-fine",
+      "variant": "bordered",
+      "describe": "fine crosshatch lattice, rib 0.42 mm, pitch 0.84 mm (0.42 mm channel), 0.6 mm tall",
+      "describe_full": "fine crosshatch lattice, rib 0.42 mm, pitch 0.84 mm (0.42 mm channel), 0.6 mm tall, in a 1.2 mm rim 0.6 mm proud of the tips, on a 0.6 mm floor - 30 x 30 x 1.80 mm",
+      "params": {
+        "pitch": 0.84,
+        "rib": 0.42,
+        "height": 0.6,
+        "margin": 0.42
+      },
+      "pitch_mm": 0.84,
+      "rib_mm": 0.42,
+      "channel_mm": 0.42,
+      "extent_mm": [
+        30,
+        30,
+        1.8
+      ],
+      "min_wall_mm": 0.42,
+      "tip_wall_mm": 0.42,
+      "tip_height_mm": 0.6,
+      "tips_z": 1.2,
+      "tip_area_mm2": 538.675178,
+      "volume": 1029.0932063708417,
+      "tris": 18012,
+      "components": 1,
+      "closed": true,
+      "non_solid_advised": false,
+      "floor_mm": 0.6,
+      "rim_mm": 1.2,
+      "proud_mm": 0.6,
+      "rim_top_z": 1.8,
+      "pocket_mm": {
+        "W": 27.6,
+        "D": 27.6,
+        "floor_z": 0.6
+      },
+      "margin_mm": 0.42
+    },
+    "crosshatch-fine_loose": {
+      "file": "patch_crosshatch-fine_loose.stl",
+      "pattern": "crosshatch-fine",
+      "variant": "loose",
+      "describe": "fine crosshatch lattice, rib 0.42 mm, pitch 0.84 mm (0.42 mm channel), 0.6 mm tall",
+      "describe_full": "fine crosshatch lattice, rib 0.42 mm, pitch 0.84 mm (0.42 mm channel), 0.6 mm tall, loose, untied - 30.00 x 30.00 x 0.60 mm, 1 component(s), walls 0.42 mm",
+      "params": {
+        "pitch": 0.84,
+        "rib": 0.42,
+        "height": 0.6,
+        "margin": null
+      },
+      "pitch_mm": 0.84,
+      "rib_mm": 0.42,
+      "channel_mm": 0.42,
+      "extent_mm": [
+        30,
+        30,
+        0.6
+      ],
+      "min_wall_mm": 0.42,
+      "tip_wall_mm": 0.42,
+      "tip_height_mm": 0.6,
+      "tips_z": 0.6,
+      "tip_area_mm2": 678.5856,
+      "volume": 407.1513757317757,
+      "tris": 26784,
+      "components": 1,
+      "closed": true,
+      "non_solid_advised": true,
+      "back_mm": 0,
+      "ties": 0,
+      "tie_width_mm": 0,
+      "margin_mm": 0
+    },
+    "crosshatch-fine_sandwich": {
+      "file": "patch_crosshatch-fine_sandwich.stl",
+      "pattern": "crosshatch-fine",
+      "variant": "sandwich",
+      "describe": "fine crosshatch lattice, rib 0.42 mm, pitch 0.84 mm (0.42 mm channel), 0.6 mm tall",
+      "describe_full": "fine crosshatch lattice, rib 0.42 mm, pitch 0.84 mm (0.42 mm channel), 0.6 mm tall, double-sided in a 0.51 mm frame rib, no floor - 30.00 x 30.00 x 0.60 mm, 696.08 mm² contact on EACH face (635.92 pattern + 60.16 frame), 1 component(s), walls 0.42 mm",
+      "params": {
+        "pitch": 0.84,
+        "rib": 0.42,
+        "height": 0.6,
+        "margin": null
+      },
+      "pitch_mm": 0.84,
+      "rib_mm": 0.42,
+      "channel_mm": 0.42,
+      "extent_mm": [
+        30,
+        30,
+        0.6
+      ],
+      "min_wall_mm": 0.42,
+      "tip_wall_mm": 0.42,
+      "tip_height_mm": 0.6,
+      "tips_z": 0.6,
+      "tip_area_mm2": 696.0816,
+      "volume": 417.64897810749426,
+      "tris": 26524,
+      "components": 1,
+      "closed": true,
+      "non_solid_advised": true,
+      "frame_mm": 0.51,
+      "frame_nominal_mm": 0.42,
+      "frame_area_mm2": 60.1596,
+      "pattern_area_mm2": 635.922,
+      "top_area_mm2": 696.0816,
+      "bottom_area_mm2": 696.0816,
+      "floor_mm": 0
+    },
+    "crosshatch_sandwich": {
+      "file": "patch_crosshatch_sandwich.stl",
+      "pattern": "crosshatch",
+      "variant": "sandwich",
+      "describe": "crosshatch lattice, rib 0.42 mm, pitch 1.2 mm, 0.6 mm tall",
+      "describe_full": "crosshatch lattice, rib 0.42 mm, pitch 1.2 mm, 0.6 mm tall, double-sided in a 0.99 mm frame rib, no floor - 30.00 x 30.00 x 0.60 mm, 578.16 mm² contact on EACH face (463.28 pattern + 114.88 frame), 1 component(s), walls 0.42 mm",
+      "params": {
+        "pitch": 1.2,
+        "rib": 0.42,
+        "height": 0.6,
+        "margin": null
+      },
+      "pitch_mm": 1.2,
+      "rib_mm": 0.42,
+      "channel_mm": 0.78,
+      "extent_mm": [
+        30,
+        30,
+        0.6
+      ],
+      "min_wall_mm": 0.42,
+      "tip_wall_mm": 0.42,
+      "tip_height_mm": 0.6,
+      "tips_z": 0.6,
+      "tip_area_mm2": 578.1564,
+      "volume": 346.8937935267065,
+      "tris": 12928,
+      "components": 1,
+      "closed": true,
+      "non_solid_advised": true,
+      "frame_mm": 0.99,
+      "frame_nominal_mm": 0.42,
+      "frame_area_mm2": 114.8796,
+      "pattern_area_mm2": 463.2768,
+      "top_area_mm2": 578.1564,
+      "bottom_area_mm2": 578.1564,
+      "floor_mm": 0
+    }
+  },
+  "copied_from_fixtures": [
+    "patch_crosshatch_bordered.stl",
+    "patch_crosshatch_loose.stl",
+    "patch_zigzag_bordered.stl",
+    "patch_zigzag_loose.stl",
+    "patch_ring_bordered.stl",
+    "patch_ring_loose.stl"
+  ],
+  "catalog_files": [
+    "patch_crosshatch_bordered.stl",
+    "patch_crosshatch_loose.stl",
+    "patch_crosshatch_sandwich.stl",
+    "patch_crosshatch-fine_bordered.stl",
+    "patch_crosshatch-fine_loose.stl",
+    "patch_crosshatch-fine_sandwich.stl",
+    "patch_zigzag_bordered.stl",
+    "patch_zigzag_loose.stl",
+    "patch_ring_bordered.stl",
+    "patch_ring_loose.stl"
+  ]
+}

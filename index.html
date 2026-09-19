@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=inside4" />
+  <link rel="stylesheet" href="styles.css?v=inside7" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -37,11 +37,26 @@
           <div id="custom-size" class="custom-size hidden">
             <label>W <input type="number" id="custom-w" value="180" min="50" max="500"></label>
             <label>D <input type="number" id="custom-d" value="180" min="50" max="500"></label>
+            <label>H <input type="number" id="custom-h" value="180" min="20" max="900"
+                          title="Build height. The plate picker has never carried one; the build-volume warning needs it."></label>
           </div>
           <div class="plate-info hidden-quiet">
             <span id="plate-dims">180 × 180 mm</span>
             <span id="plate-area">32,400 mm²</span>
           </div>
+          <div class="plate-grid-controls">
+            <label class="hint" for="plate-grid-show">Bed grid (10 mm)</label>
+            <select id="plate-grid-show" title="A flat reference grid fixed to the plate. It is drawn only - it never takes a click.">
+              <option value="auto">Auto - while positioning</option>
+              <option value="on">Always on</option>
+              <option value="off">Off</option>
+            </select>
+            <label class="plate-grid-snap-row" for="chk-plate-grid-snap"
+                   title="A soft pull toward the nearest grid intersection while you drag. It assists, it does not lock - drag away from a line at any time.">
+              <input type="checkbox" id="chk-plate-grid-snap"> Snap to grid
+            </label>
+          </div>
+          <p id="build-volume-warning" class="build-warning" hidden></p>
         </section>
         <section class="card card-compact">
           <h2>Library</h2>
@@ -51,6 +66,30 @@
             <label for="clone-count">Clone</label>
             <input id="clone-count" type="number" min="1" max="20" value="1" style="width:4rem;" />
             <button id="btn-clone" class="btn btn-secondary" type="button" disabled>Clone piece</button>
+          </div>
+        </section>
+        <section class="card card-compact" id="scale-card">
+          <h2>Size</h2>
+          <p id="scale-readout" class="hint">Select a piece to resize.</p>
+          <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+            <label for="scale-axis">Set</label>
+            <select id="scale-axis" title="Which dimension the target applies to">
+              <option value="longest">Longest edge</option>
+              <option value="x">X</option>
+              <option value="y">Height</option>
+              <option value="z">Z</option>
+            </select>
+            <input id="scale-target" type="number" min="0.1" max="1000" step="0.1" value="50" style="width:5rem;" aria-label="Target size in mm" />
+            <span class="hint">mm</span>
+            <button id="btn-scale-dim" class="btn btn-secondary" type="button"
+                    title="Solve the factor that makes the chosen dimension exactly this many mm, and apply it to all three axes.">Set size</button>
+          </div>
+          <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+            <label for="scale-factor">Scale by</label>
+            <input id="scale-factor" type="number" min="0.0001" max="10000" step="0.01" value="1" style="width:5rem;" aria-label="Scale factor" />
+            <span class="hint">&times;</span>
+            <button id="btn-scale-factor" class="btn btn-secondary" type="button"
+                    title="Plain uniform multiplier on all three axes.">Scale</button>
           </div>
         </section>
         <section class="card card-compact" id="edit-card">
@@ -93,13 +132,69 @@
           <button id="btn-join-align" class="btn btn-secondary" type="button">Align edges</button>
           <button id="btn-join-cx" class="btn btn-secondary" type="button">Center X</button>
           <button id="btn-join-cz" class="btn btn-secondary" type="button">Center Z</button>
+          <div class="edit-row">
+            <button id="btn-center-lock" class="btn btn-secondary" type="button"
+                    title="Slide B in XZ until its centre sits on the target point on A. Rough placement - Seat / Align still do the fine work.">Center lock</button>
+            <button id="btn-center-lock-pick" class="btn btn-secondary" type="button"
+                    title="Click a point on A to lock onto instead of A's own centre. Right-click this button to drop a stored target.">Pick target</button>
+          </div>
+          <select id="center-lock-ref" title="Which point on each piece Center lock reads, seen top-down">
+            <option value="bbox">Lock on bounding-box centre</option>
+            <option value="centroid">Lock on centroid</option>
+          </select>
           <button id="btn-join" class="btn btn-primary" type="button" disabled>Complete Join</button>
           <button id="btn-subtract" class="btn btn-secondary" type="button">Subtract B from A</button>
           <button id="btn-extract-bit" class="btn btn-secondary" type="button">Extract bit</button>
-          <button id="btn-seat-flush" class="btn btn-secondary" type="button">Seat flush</button>
+          <button id="btn-seat-flush" class="btn btn-secondary" type="button" title="Flush plug seat: bury B in A with its outer face 0.01 mm proud of A's skin, then Subtract. Ignores the gap slider.">Seat flush</button>
+          <div class="seat-support">
+            <button id="btn-seat-support" class="btn btn-secondary" type="button" title="Seat B's mating face at the slider's gap off A's skin (or off the skin tips of a skinned face). Negative = air gap, easy release is -0.15 to -0.20. Positive = B overlaps into A. 0 = touching.">Seat (support)</button>
+            <div class="seat-support-row">
+              <input type="range" id="seat-gap" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Seat gap in mm, 0.01 steps. -0.25 (air) to +0.05 (overlap); default -0.18, mid easy-release. Arrow keys step 0.01." aria-label="Seat gap in mm" />
+              <output id="seat-gap-value" for="seat-gap" title="Exact gap the next Seat (support) will use">-0.18 mm</output>
+            </div>
+            <button id="btn-seat-here" class="btn btn-secondary" type="button" aria-pressed="false" title="Seat here: click a point on A - curved, irregular or flat - and B is turned to face it and set at the slider's gap. The gap is the true minimum distance between the two surfaces.">Seat here</button>
+          </div>
           <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
-          <button id="btn-cap-open" class="btn btn-secondary" type="button">Cap open faces</button>
+          <button id="btn-seat-grid" class="btn btn-secondary" type="button" title="Faint grid on the top surface of the target piece (A), to line up what goes above it">Surface grid: auto</button>
           <button id="btn-join-clear" class="btn btn-ghost" type="button">Cancel Join</button>
+        </section>
+        <section class="card hidden" id="toolpath-card" tabindex="0">
+          <h2>Toolpath</h2>
+          <p class="hint">An already-sliced <code>.gcode.3mf</code> from Bambu Studio, drawn as real
+            geometry. Scrub to a single line, isolate its Z to see that one layer alone,
+            then Extract Line.</p>
+          <input type="range" id="tp-slider" min="0" max="0" step="1" value="0"
+                 title="Scrub through the toolpath one extrusion move at a time" />
+          <div class="edit-row tp-step-row">
+            <button id="btn-tp-prev" class="btn btn-secondary" type="button" title="Previous line (Left arrow)">&minus;1 line</button>
+            <input type="number" id="tp-index" value="0" min="0" max="0" step="1" title="Jump to a line by number" />
+            <button id="btn-tp-next" class="btn btn-secondary" type="button" title="Next line (Right arrow)">+1 line</button>
+          </div>
+          <div class="edit-row tp-step-row">
+            <button id="btn-tp-layer-down" class="btn btn-secondary" type="button" title="First line of the previous layer (Shift+Left)">&#9660; layer</button>
+            <button id="btn-tp-layer-up" class="btn btn-secondary" type="button" title="First line of the next layer (Shift+Right)">&#9650; layer</button>
+          </div>
+          <p id="tp-readout" class="cut-readout">&mdash;</p>
+          <p id="tp-detail" class="hint tp-detail">&mdash;</p>
+          <label class="tp-check-row" for="tp-zfilter" title="Hide every layer but the one at the scrubbed line's Z, so a single layer's construction stands alone from the rest of its own feature">
+            <input type="checkbox" id="tp-zfilter" />
+            <span>Isolate Z (one layer at a time)</span>
+          </label>
+          <div class="edit-row tp-step-row">
+            <label class="hint" for="tp-zhalf" style="margin:0">&plusmn; mm</label>
+            <input type="number" id="tp-zhalf" value="0" min="0" max="15" step="0.05"
+                   title="Half-thickness of the Z window. 0 is exactly one layer; raise it to take a slab of several." />
+          </div>
+          <p id="tp-zreadout" class="hint tp-detail">&mdash;</p>
+          <label class="hint" for="tp-scope" style="margin-bottom:4px;display:block">Extract scope</label>
+          <select id="tp-scope" title="How much of the toolpath Extract Line pulls out">
+            <option value="zlayer">This whole layer at one Z (all features)</option>
+            <option value="zfeature">This feature, at this Z</option>
+            <option value="move">This line only</option>
+            <option value="feature">This feature, on this layer</option>
+            <option value="layer">This whole layer</option>
+          </select>
+          <button id="btn-tp-extract" class="btn btn-primary" type="button">Extract Line</button>
         </section>
         <section class="card card-compact" id="export-card">
           <h2>Export</h2>
@@ -125,11 +220,12 @@
       <section class="viewport-section">
         <div id="viewport"></div>
         <div class="viewport-overlay viewport-overlay-topbar">
-          <button id="btn-load-stl" class="vp-bar-btn" type="button">＋ Load</button>
+          <button id="btn-load-stl" class="vp-bar-btn" type="button"
+                  title="Load an STL or 3MF from this computer">＋ From File</button>
           <div class="vp-library">
             <button id="btn-library" class="vp-bar-btn" type="button"
                     aria-haspopup="true" aria-expanded="false"
-                    title="Load a piece from this project's library">Library</button>
+                    title="Browse the piece library by category">From Library</button>
             <div id="library-list" class="library-list" role="menu" hidden
                  style="display:none"></div>
           </div>
@@ -149,51 +245,253 @@
           <button id="btn-nudge-back" class="vp-bar-btn adjust-btn" disabled>↓</button>
           <button id="btn-nudge-left" class="vp-bar-btn adjust-btn" disabled>←</button>
           <button id="btn-nudge-right" class="vp-bar-btn adjust-btn" disabled>→</button>
+          <button id="btn-lock-pos" class="vp-bar-btn btn-lock-pos" type="button" disabled aria-pressed="false" title="Lock the selected piece's position. A locked piece refuses drag, the nudge arrows, Raise/Lower and the pose buttons, so a stray click cannot move it. Seat, Center, Align and Skin still place it. Shown by a teal outline and a 'locked' tag.">🔒 Lock position</button>
+          <button id="btn-plate-lock" class="vp-bar-btn btn-plate-lock" type="button" disabled aria-pressed="false" title="Lock the plate configuration: hold every piece where it is, in their current relative positions, in one action. Separate from the per-piece lock - it sets no piece flag, so unlocking the plate gives back exactly the piece locks you had.">🔒 Lock plate</button>
+        </div>
+        <div class="viewport-overlay viewport-overlay-wheel">
+          <details class="vp-menu vp-wheel-menu">
+            <summary>Wheel</summary>
+            <div class="vp-menu-body vp-wheel">
+              <div class="vp-row vp-row-opts">
+                <label class="vp-clone" title="The finished vessel's height. The ball is sized from it by Pappus's centroid theorem: a thin-shell estimate of the vessel plus a real waste margin.">H <input type="number" id="inp-wheel-height" min="10" max="900" step="1" placeholder="mm"></label>
+                <label class="vp-clone" title="The finished vessel's radius. Blank means half the height.">R <input type="number" id="inp-wheel-radius" min="5" max="450" step="1" placeholder="mm"></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+                <label class="vp-clone" title="Wall thickness. Default 3 mm - a typical thrown wall. Refused under the nozzle-safety floor from nso_thickness.js.">W <input type="number" id="inp-wheel-wall" min="0.4" max="30" step="0.1" placeholder="3"></label>
+                <label class="vp-clone" title="Nozzle diameter. Sets the wall floor: nozzle x 1.05.">N <input type="number" id="inp-wheel-nozzle" min="0.1" max="2" step="0.05" placeholder="0.4"></label>
+              </div>
+              <div class="vp-row vp-row-full">
+                <button id="btn-wheel-ball" class="btn btn-secondary" type="button"
+                        title="Centre a smooth ball of clay, sized from the target height by Pappus's centroid theorem.">Ball</button>
+              </div>
+              <div class="vp-row vp-row-extend">
+                <button id="btn-wheel-open" class="btn btn-secondary" type="button"
+                        title="One push down the middle. Turns the single outer profile into two - outer and inner - and everything after this is a shell.">Open</button>
+                <input type="number" id="inp-wheel-depth" min="1" max="900" step="1"
+                       placeholder="deep" aria-label="Opening depth, mm">
+              </div>
+              <div class="vp-row vp-row-opts">
+                <label class="vp-clone" title="Height on the piece to pull at - any height, not only the rim.">Z <input type="number" id="inp-wheel-pull-z" step="0.5" placeholder="mm"></label>
+                <label class="vp-clone" title="How far out (or in, if negative) to move the wall there.">Δr <input type="number" id="inp-wheel-pull-dr" step="0.5" placeholder="mm"></label>
+              </div>
+              <div class="vp-row vp-row-full">
+                <button id="btn-wheel-pull" class="btn btn-secondary" type="button"
+                        title="Drag-shape the profile at that height. The drag points are spline-fitted and the form is revolved to a clean solid. Refuses if it would run past the clay on the wheel or take the wall under the nozzle floor - and says which.">Pull</button>
+              </div>
+              <div class="vp-row vp-row-extend">
+                <button id="btn-wheel-trim" class="btn btn-secondary" type="button"
+                        title="Level the base once the form is set. The clay taken off comes off the budget too.">Trim</button>
+                <input type="number" id="inp-wheel-trim-z" min="0" max="900" step="0.5"
+                       placeholder="base z" aria-label="Trim base to height, mm">
+              </div>
+              <div class="vp-row vp-row-extend">
+                <button id="btn-wheel-rim" class="btn btn-secondary" type="button"
+                        title="Add height at the rim. This is Extend - the same axis-preserving stretch, on the same gate - not a second copy of it. Needs a straight-walled band to insert into.">Rim +</button>
+                <input type="number" id="inp-wheel-rim-mm" min="0.1" max="900" step="0.5"
+                       placeholder="mm" aria-label="Extend rim by, mm">
+              </div>
+            </div>
+          </details>
         </div>
         <div class="viewport-overlay viewport-overlay-finish">
           <details class="vp-menu vp-finish-menu">
             <summary>Finish</summary>
             <div class="vp-menu-body vp-finish">
-              <div class="vp-row vp-row-opts">
-                <label class="vp-clone">R <input type="number" id="inp-soften-r" value="0.5" min="0.05" max="5" step="0.05"></label>
-                <label class="vp-clone" title="On: one click wraps all six faces of a box. Off: one click bakes only the face you pick."><input type="checkbox" id="chk-full-wrap" checked> Full wrap</label>
-              </div>
-              <div class="vp-row vp-row-full"><button id="btn-soften" class="btn btn-secondary" type="button">Soften</button></div>
-              <div class="vp-row vp-row-full">
-                <select id="sel-edge-treat" class="vp-select">
-                  <option value="fillet" selected>Round</option>
-                  <option value="corners">Corners</option>
-                  <option value="cornersedges">Corners+edges</option>
-                  <option value="chamfer">Bevel</option>
-                </select>
-              </div>
-              <div class="vp-row vp-row-full">
-                <button id="btn-smooth" class="btn btn-secondary" type="button"
-                        title="Global Laplacian smoothing over the whole piece. No feature preservation - sharp edges round off too. Refuses if volume moves more than 25% either way, or if any face is painted.">Smooth</button>
-              </div>
-              <div class="vp-row vp-row-pair">
-                <button id="btn-mask-paint" class="btn btn-secondary btn-paint" type="button"
-                        title="Click faces to exclude them from Soften, wrap and Join. Click a face again to include it. Click this button again to stop.">Paint faces</button>
-                <button id="btn-mask-clear" class="btn btn-secondary" type="button"
-                        title="Include every face again.">Clear paint</button>
-              </div>
-              <div class="vp-row vp-row-label">
-                <label class="vp-repair"><span>Repair</span><input type="checkbox" id="chk-seal-repair"></label>
-                <button id="btn-seal" class="btn btn-secondary" type="button">Seal</button>
-              </div>
-              <div class="vp-row vp-row-full"><button id="btn-solidify" class="btn btn-secondary" type="button">Solidify</button></div>
-              <div class="vp-row vp-row-thicken">
-                <button id="btn-thicken-out" class="btn btn-secondary" type="button">Thicken out</button>
-                <div class="thick-spin">
-                  <input type="number" id="inp-thicken-mm" value="1.5" min="0.4" max="8" step="0.1" aria-label="Thicken mm">
-                  <div class="thick-spin-arrows">
-                    <button type="button" class="thick-arrow" data-thick-step="-1" aria-label="Less mm" title="Less">&#9662;</button>
-                    <button type="button" class="thick-arrow" data-thick-step="1" aria-label="More mm" title="More">&#9652;</button>
+              <details class="vp-sec" data-sec="shape" open>
+                <summary class="vp-sec-head">Shape</summary>
+                <div class="vp-sec-body">
+                  <div class="vp-row vp-row-opts">
+                    <label class="vp-clone">R <input type="number" id="inp-soften-r" value="0.5" min="0.05" max="5" step="0.05"></label>
+                    <label class="vp-clone" title="On: one click wraps all six faces of a box. Off: one click bakes only the face you pick."><input type="checkbox" id="chk-full-wrap" checked> Full wrap</label>
+                  </div>
+                  <div class="vp-row vp-row-full"><button id="btn-soften" class="btn btn-secondary" type="button">Soften</button></div>
+                  <div class="vp-row vp-row-full">
+                    <select id="sel-edge-treat" class="vp-select">
+                      <option value="fillet" selected>Round</option>
+                      <option value="corners">Corners</option>
+                      <option value="cornersedges">Corners+edges</option>
+                      <option value="chamfer">Bevel</option>
+                    </select>
+                  </div>
+                  <div class="vp-row vp-row-full">
+                    <button id="btn-smooth" class="btn btn-secondary" type="button"
+                            title="Global Laplacian smoothing over the whole piece. No feature preservation - sharp edges round off too. Refuses if volume moves more than 25% either way, or if any face is painted.">Smooth</button>
+                  </div>
+                  <div class="vp-row vp-row-extend">
+                    <button id="btn-extend" class="btn btn-secondary" type="button"
+                            title="Lengthen the piece along its one dominant straight axis, holding the cross-section perpendicular to that axis exactly fixed. Detects the axis itself; refuses a tapered, curved or ambiguous piece by name. Leave the box blank and press once to read the current length.">Extend</button>
+                    <input type="number" id="inp-extend-mm" min="0.1" max="2000" step="0.1"
+                           placeholder="mm" aria-label="Extend to length, mm">
+                  </div>
+                  <div class="vp-row vp-row-thicken">
+                    <button id="btn-thicken-out" class="btn btn-secondary" type="button">Thicken out</button>
+                    <div class="thick-spin">
+                      <input type="number" id="inp-thicken-mm" value="1.5" min="0.4" max="8" step="0.1" aria-label="Thicken mm">
+                      <div class="thick-spin-arrows">
+                        <button type="button" class="thick-arrow" data-thick-step="-1" aria-label="Less mm" title="Less">&#9662;</button>
+                        <button type="button" class="thick-arrow" data-thick-step="1" aria-label="More mm" title="More">&#9652;</button>
+                      </div>
+                    </div>
+                    <button id="btn-thicken-in" class="btn btn-secondary" type="button">Thicken in</button>
                   </div>
                 </div>
-                <button id="btn-thicken-in" class="btn btn-secondary" type="button">Thicken in</button>
-              </div>
-              <div class="vp-row vp-row-full"><button id="btn-clear-plate" class="btn btn-secondary" type="button">Clear plate</button>
+              </details>
+              <details class="vp-sec" data-sec="paint">
+                <summary class="vp-sec-head">Paint</summary>
+                <div class="vp-sec-body">
+                  <div class="vp-row vp-row-triple vp-row-paint">
+                    <button id="btn-mask-select" class="btn btn-secondary btn-paint btn-paint-select" type="button" aria-pressed="false"
+                            title="Click ONE face to make it the target (pink). Skin face uses it instead of its own pick. A click on another face moves the target; a click on the target clears it. Click this button again to stop.">Paint Selected</button>
+                    <button id="btn-mask-paint" class="btn btn-secondary btn-paint" type="button" aria-pressed="false"
+                            title="Click faces to exclude them (yellow) from Soften, wrap, Join, Skin and the Brush. Click a face again to include it. Click this button again to stop.">Paint Excluded</button>
+                    <button id="btn-mask-clear" class="btn btn-secondary" type="button"
+                            title="Include every face again and drop the target.">Clear paint</button>
+                  </div>
+                  <div class="vp-row vp-row-skin vp-row-delete">
+                    <button id="btn-mask-delete" class="btn btn-danger" type="button"
+                            title="Remove the target face's geometry from the piece (pink, from Paint Selected). Not an exclude - the triangles are gone. Refuses and leaves the piece untouched if the cut would empty it, split it into loose bodies, or self-intersect. Stands down if the target is also painted excluded.">Delete painted</button>
+                    <select id="sel-mask-delete" class="vp-select" title="Face: cut the face out and leave the rim open. Face+seal: cut it out and let Repair close the rim, reverting the whole delete if it cannot. Shell: cut out the whole body that face belongs to." aria-label="Delete mode">
+                      <option value="face" selected>Face</option>
+                      <option value="face-seal">Face+seal</option>
+                      <option value="shell">Shell</option>
+                    </select>
+                  </div>
+                  <div class="vp-row vp-row-skin vp-row-delete">
+                    <button id="btn-extract-sel" class="btn btn-secondary" type="button"
+                            title="Copy the target face's region (pink, from Paint Selected) onto the plate as its own piece, ready to move, export or print on its own. The opposite of Delete painted: nothing is removed and the piece you painted is left exactly as it was. Stands down if the target is also painted excluded.">Extract selection</button>
+                  </div>
+                </div>
+              </details>
+              <details class="vp-sec" data-sec="surface">
+                <summary class="vp-sec-head">Surface</summary>
+                <div class="vp-sec-body">
+                  <div class="vp-row vp-row-skin">
+                    <button id="btn-skin-face" class="btn btn-secondary" type="button" title="Put a contact skin on the selected piece's target face (pink, from Paint Selected). With no target: on piece A's flat face that looks at B in a Join, or its top face outside one. A relief whose tips are all B touches; then Seat with gap 0 to rest B on the tips. Refuses a non-rectangular face; stands down if that face is painted excluded.">Skin face</button>
+                    <select id="skin-pattern" class="vp-select" title="Skin pattern. crosshatch: rib lattice (0.42 mm ribs, 1.2 mm pitch, 0.6 tall) - the pitch that still prints on a 0.6 nozzle, which is why it is the default. crosshatch-fine: the same lattice at 0.84 mm pitch, 1.43x the ribs, leaving a 0.42 mm channel = exactly one 0.4 mm-nozzle extrusion line - 0.4 NOZZLE ONLY, a 0.6 nozzle fuses it. zigzag: sawtooth ridges (0.42 mm crests, 2 mm pitch). ring: one tapered ring (r 5, wall 0.8 to 0.4, 1 mm tall)." aria-label="Skin pattern">
+                      <option value="crosshatch">crosshatch</option>
+                      <option value="crosshatch-fine">crosshatch-fine</option>
+                      <option value="zigzag">zigzag</option>
+                      <option value="ring">ring</option>
+                    </select>
+                  </div>
+                  <div class="vp-row vp-row-skin vp-row-skin2">
+                    <button id="btn-skin-wrap" class="btn btn-secondary" type="button" title="Put the same skin on EVERY flat rectangular face of the piece at once - all six faces of a box. Faces painted excluded are left alone and named; a face that is not a rectangle is skipped and named. Not a curved wrap: a cylinder's side is still refused.">Skin wrap</button>
+                    <label class="vp-repair vp-skin-free" title="Layer 2 as its own free-hanging shell: a sheet resting on layer 1's tips with its own relief on top. The piece then carries two shells, so this sets the Non-solid flag on it. Undo takes the flag off with the geometry. The sheet bridges from tip to tip when it prints.">
+                      <span>Free</span><input type="checkbox" id="chk-skin-free">
+                    </label>
+                    <select id="skin-layer2" class="vp-select" title="Second skin layer, the row's own: off means one layer. composed (Free off): layer 2 rides on layer 1's tips in one closed shell - zigzag crests cut the contact hardest, a crosshatch mostly just makes the relief taller, and the status reports both numbers. With Free on: layer 2 becomes its own free-hanging sheet resting on the tips, a second breakaway interface, and the piece is flagged non-solid." aria-label="Skin layer 2 pattern">
+                      <option value="off">off</option>
+                      <option value="zigzag">zigzag</option>
+                      <option value="crosshatch">crosshatch</option>
+                      <option value="crosshatch-fine">crosshatch-fine</option>
+                      <option value="ring">ring</option>
+                    </select>
+                  </div>
+                  <div class="vp-row vp-row-skin">
+                    <button id="btn-skin-patch" class="btn btn-secondary" type="button" title="Bake the skin pattern as its own printable piece instead of onto a face - the relief alone, like a washer you can test on its own. Adds a NEW piece (30 x 30 mm, the same footprint the skin samples use) and leaves every existing piece untouched. bordered: the pattern inside a solid 1.2 mm rim standing 0.6 mm proud of its tips, one closed shell. loose: the pattern's features alone, solid, no rim and no backing plate - a free-standing one-extrusion-line lattice, so this one is flagged Non-solid. sandwich: double-sided - the pattern on BOTH faces with no floor between them, for a coupon that goes between two parts; also flagged Non-solid.">Skin patch</button>
+                    <select id="skin-patch-variant" class="vp-select" title="Which standalone patch. bordered: a washer - the pattern held inside a solid rim that takes the handling, self-contained and closed, with the pattern on ONE side of a solid floor. loose: the raw pattern only, no frame and no backing plate, with ties where the pattern's own features do not touch each other (the zigzag's ridges). sandwich: double-sided - the pattern facing outward on BOTH faces with no floor between them, closed by a frame rib at the pattern's own width instead of a proud rim. Use it when the piece goes BETWEEN two parts: a bordered washer would present its solid floor to one of them and weld on area alone. Crosshatch family only - the zigzag and the ring taper, so their two faces are not the same pattern. All three are real walls, never an infinitely thin surface." aria-label="Skin patch variant">
+                      <option value="bordered">bordered</option>
+                      <option value="loose">loose</option>
+                      <option value="sandwich">sandwich</option>
+                    </select>
+                  </div>
+                  <div class="vp-row vp-row-skin vp-row-texture">
+                    <button id="btn-texture" class="btn btn-secondary" type="button" title="Cover a CYLINDER's curved side with one conformal relief that wraps all the way round - no seam and no bald stripe. Not Soften's Full wrap (that is edge treatment on a box) and not Skin wrap (that is flat rectangular faces one at a time). The caps keep their planes. Refuses anything that is not a cylinder and says what it saw; stands down if any facet of the curved side is painted excluded.">Texture</button>
+                    <select id="sel-texture-pattern" class="vp-select" title="Pattern laid out on the unrolled band: u is arc length round the cylinder, v is along its axis. crosshatch: rib lattice. zigzag: sawtooth ridges. (ring builds its own surface and has no height field to unroll, so it is not offered here.)" aria-label="Texture pattern">
+                      <option value="crosshatch">crosshatch</option>
+                      <option value="zigzag">zigzag</option>
+                    </select>
+                  </div>
+                  <div class="vp-row vp-row-opts vp-row-texture-opts">
+                    <label class="vp-clone" title="Target arc pitch in mm, measured along the curve. It is snapped to an exact divisor of the circumference so the pattern closes on itself; the status line says what it was snapped to.">Pitch <input type="number" id="inp-texture-pitch" value="1.2" min="0.3" max="10" step="0.1"></label>
+                    <label class="vp-clone" title="How far the relief stands off the curved surface, in mm.">Depth <input type="number" id="inp-texture-depth" value="0.6" min="0.1" max="4" step="0.1"></label>
+                  </div>
+                </div>
+              </details>
+              <details class="vp-sec" data-sec="sculpt">
+                <summary class="vp-sec-head">Sculpt</summary>
+                <div class="vp-sec-body">
+                  <div class="vp-row vp-row-pair">
+                    <button id="btn-brush" class="btn btn-secondary btn-brush" type="button" aria-pressed="false"
+                            title="Freehand local deformation. Drag on the piece; the whole drag is one operation with one undo. Carve pushes in along the surface normal, Emboss pushes out, Smooth relaxes just the area under the brush. Refuses and reverts if the stroke would add a self-intersection, a sliver or a T-junction. Stands down on a face painted excluded.">Brush</button>
+                    <select id="sel-brush-mode" class="vp-select" title="Carve in, Emboss out, or smooth only the area under the brush.">
+                      <option value="carve" selected>Carve</option>
+                      <option value="emboss">Emboss</option>
+                      <option value="smooth">Smooth here</option>
+                    </select>
+                  </div>
+                  <div class="vp-row vp-row-brush">
+                    <span class="vp-brush-tag">Size</span>
+                    <input type="range" id="inp-brush-size" min="5" max="50" step="1" value="12" aria-label="Brush radius mm">
+                    <output id="out-brush-size" class="vp-brush-out">12 mm</output>
+                  </div>
+                  <div class="vp-row vp-row-brush">
+                    <span class="vp-brush-tag">Force</span>
+                    <input type="range" id="inp-brush-intensity" min="0" max="1" step="0.05" value="0.5" aria-label="Brush intensity">
+                    <output id="out-brush-intensity" class="vp-brush-out">0.50</output>
+                  </div>
+                  <div class="vp-row vp-row-full">
+                    <label class="vp-clone" title="Soft is a smoothstep dish. Hard keeps the floor of the dab nearly flat and makes the wall steep - the seam band is relaxed either way."><input type="checkbox" id="chk-brush-hard"> Hard falloff</label>
+                  </div>
+                  <div class="vp-row vp-row-carve">
+                    <button id="btn-carve" class="btn btn-secondary btn-carve" type="button" aria-pressed="false"
+                            title="Local carving tool. Arm it, then click a face, an edge or a corner of a piece: the blade is aimed along the outward bisector of whatever faces it can reach there, and just that local volume is subtracted. A corner gouge and an edge chamfer need no rotation - the blade lays its sweep axis along the edge itself. Click Carve again to stop. Unlike Subtract this consumes nothing, so the same blade carves the next edge too.">Carve</button>
+                    <select id="carve-blade" class="vp-select" aria-label="Blade profile"
+                            title="Blade profile. flat: a slab, leaves a flat-bottomed local shave. ball: a hemisphere-ended cylinder, leaves a rounded gouge with no stress corner. vee: a wedge, leaves a V-groove or a chamfer - cut deeper for a wider one.">
+                      <option value="ball">ball-nose</option>
+                      <option value="flat">flat shave</option>
+                      <option value="vee">V-groove</option>
+                    </select>
+                  </div>
+                  <div class="vp-row vp-row-carve2">
+                    <label class="vp-clone" title="How deep the blade goes, along the outward bisector of the faces it meets."><span id="carve-depth-label">mm</span> <input type="number" id="carve-depth" value="1" min="0.1" max="30" step="0.1"></label>
+                    <label class="vp-clone"><span id="carve-a-label">R</span> <input type="number" id="carve-a" value="2" min="0.1" max="30" step="0.1"></label>
+                    <label class="vp-clone"><span id="carve-b-label">L</span> <input type="number" id="carve-b" value="10" min="0.2" max="60" step="0.1"></label>
+                    <label class="vp-clone" title="Spin the blade about the outward direction. 0 lays its sweep axis along the edge, which is what a chamfer wants."><span id="carve-roll-label">&deg;</span> <input type="number" id="carve-roll" value="0" min="-180" max="180" step="5"></label>
+                  </div>
+                  <div class="vp-row vp-row-full"><p id="carve-readout" class="carve-readout">&mdash;</p></div>
+                </div>
+              </details>
+              <details class="vp-sec" data-sec="measure">
+                <summary class="vp-sec-head">Measure &amp; check</summary>
+                <div class="vp-sec-body">
+                  <div class="vp-row vp-row-pair">
+                    <button id="btn-measure" class="btn btn-secondary btn-measure" type="button" aria-pressed="false"
+                            title="Click two points on the pieces to read the distance between them in mm, or switch to Edge and click one edge for its length. Corners and edges snap. Measuring changes nothing on the piece. Click this button again to stop; Esc clears the measurement.">Measure</button>
+                    <select id="sel-measure-mode" class="vp-select" title="What a measure click means. Two points: click twice, get the distance. Edge: click once near an edge, get that edge's whole length." aria-label="Measure mode">
+                      <option value="span" selected>Two points</option>
+                      <option value="edge">Edge</option>
+                    </select>
+                  </div>
+                  <div class="vp-row vp-row-full">
+                    <button id="btn-check-defects" class="btn btn-secondary btn-check-defects" type="button" disabled aria-pressed="false"
+                            title="Run the canonical checker on this piece and paint what it finds ON the mesh: red lines on open edges, orange on non-manifold edges, red patches on the triangles of every piercing pair, violet on faces whose wall or gap measures under 0.42 mm. A snapshot, not a live check - it clears itself when a bake changes the piece.">Check piece</button>
+                  </div>
+                </div>
+              </details>
+              <details class="vp-sec" data-sec="repair">
+                <summary class="vp-sec-head">Check &amp; repair</summary>
+                <div class="vp-sec-body">
+                  <div class="vp-row vp-row-full">
+                    <button id="btn-cap-open" class="btn btn-secondary" type="button" title="Close every open boundary loop of the selected piece with a flat cap.">Cap open faces</button>
+                  </div>
+                  <div class="vp-row vp-row-full">
+                    <label class="vp-flag vp-flag-repair" title="A flag, not an action: it changes what the next Seal click does. On, Seal runs the full repair pass - weld, drop degenerate and duplicate triangles, split pinches, fix T-junctions, peel flaps and fan holes shut. Off, Seal only closes openings.">
+                      <input type="checkbox" id="chk-seal-repair"><span class="vp-flag-face">Repair</span>
+                    </label>
+                  </div>
+                  <div class="vp-row vp-row-full">
+                    <button id="btn-seal" class="btn btn-secondary" type="button">Seal</button>
+                  </div>
+                  <div class="vp-row vp-row-full vp-row-sep">
+                    <label class="vp-flag vp-flag-nonsolid" title="This piece is meant to be open - a vase-mode shell, a single-wall squishy, a woven sheet. Only the 'must be closed' checks stand aside: self-intersection, degenerate and winding checks still apply. Per piece, never guessed from the mesh.">
+                      <input type="checkbox" id="chk-non-solid" disabled><span class="vp-flag-face">Non-solid</span>
+                    </label>
+                  </div>
+                  <div class="vp-row vp-row-full"><button id="btn-solidify" class="btn btn-secondary" type="button">Solidify</button></div>
+                </div>
+              </details>
+              <div class="vp-row vp-row-full"><button id="btn-clear-plate" class="btn btn-secondary" type="button">Clear plate</button></div>
             </div>
           </details>
         </div>
@@ -206,7 +504,7 @@
                   title="Watch: log errors / failed loads / status lines, and check the rendered scene against the app state after every Undo, bake and tool switch.">&#128065;</button>
         </div>
         <div class="viewport-overlay viewport-overlay-br">
-          <p id="adjust-status" class="status-hud status-hud-id">HUD inside4</p>
+          <p id="adjust-status" class="status-hud status-hud-id">HUD inside7</p>
           <p id="status" class="status status-hud"></p>
         </div>
       </section>
@@ -217,19 +515,52 @@
     <button type="button" id="ctx-delete" class="ctx-item ctx-danger" role="menuitem">Delete piece</button>
   </div>
   <script src="NSO_Repair.js?v=inside4"></script>
+  <script src="nso-defects.js?v=inside5"></script>
   <script src="nso_planar_fuse.js?v=inside4"></script>
+  <script src="nso_skin.js?v=skin2"></script>
+  <script src="nso_skin_patch.js?v=skin3"></script>
+  <script src="nso_carve.js?v=carve1"></script>
+  <script src="nso_seat_surface.js?v=seatsurf1"></script>
+  <script src="nso_thickness.js?v=wallcut1"></script>
+  <script src="nso_support_aim.js?v=support1"></script>
+  <script src="nso_printer.js?v=wheel2"></script>
+  <script src="nso_paint_delete.js?v=del1"></script>
+  <script src="nso_skin_band.js?v=skin2"></script>
+  <script src="nso_path_sweep.js?v=inside4"></script>
   <script src="nso-cooling-profiles.js"></script>
   <script src="nso-3mf.js"></script>
   <script src="nso-3mf-read.js"></script>
+  <script src="nso-3mf-scene.js?v=scene1"></script>
+  <script src="nso-surface-grid.js?v=inside6"></script>
+  <script src="nso-gcode-lines.js"></script>
   <script src="app-core.js?v=inside4"></script>
-  <script src="app-cut.js?v=inside4"></script>
-  <script src="app-finish.js?v=inside4"></script>
+  <script src="app-cut.js?v=inside6"></script>
+  <script src="app-finish.js?v=inside6"></script>
   <script src="app-sculpt.js?v=inside4"></script>
+  <script src="app-extend.js?v=inside6"></script>
+  <script src="app-scale.js?v=inside6"></script>
+  <script src="app-brush.js?v=inside6"></script>
+  <script src="app-wheel.js?v=wheel2"></script>
+  <script src="app-fit.js?v=wheel2"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
-  <script src="app-join.js?v=inside4"></script>
-  <script src="app-mask.js?v=inside4"></script>
-  <script src="app-library.js?v=libgit"></script>
-  <script src="app-ux.js?v=inside4"></script>
+  <script src="app-join.js?v=wallcut1"></script>
+  <script src="app-center-lock.js?v=clock1"></script>
+  <script src="app-carve.js?v=wallcut1"></script>
+  <script src="app-seat-surface.js?v=seatsurf1"></script>
+  <script src="app-skin.js?v=skin2"></script>
+  <script src="app-skin-patch.js?v=skin3"></script>
+  <script src="app-mask.js?v=inside6"></script>
+  <script src="app-seat-grid.js?v=inside6"></script>
+  <script src="app-paint-delete.js?v=del1"></script>
+  <script src="app-extract-sel.js?v=inside6"></script>
+  <script src="app-texture.js?v=skin2"></script>
+  <script src="app-nonsolid.js?v=inside4"></script>
+  <script src="app-poslock.js?v=lock1"></script>
+  <script src="app-defects.js?v=inside5"></script>
+  <script src="app-measure.js?v=inside6"></script>
+  <script src="app-library.js?v=lib2"></script>
+  <script src="app-toolpath.js?v=toolpath1"></script>
+  <script src="app-ux.js?v=inside7"></script>
   <!-- Live watch: off until its button is pressed, and it patches nothing
        until then. Deleting this tag and the #btn-watch button above removes
        the feature completely. -->

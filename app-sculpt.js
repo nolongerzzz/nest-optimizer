@@ -513,6 +513,22 @@ function NSO_smoothGlobal(rawTris, opts) {
     else if (after.openPos > res.before.openPos) bad = 'open edges rose ' + res.before.openPos + '->' + after.openPos;
     else if (after.nmPos > res.before.nmPos) bad = 'non-manifold edges rose ' + res.before.nmPos + '->' + after.nmPos;
     else if (after.degenerate > res.before.degenerate) bad = 'degenerate triangles rose ' + res.before.degenerate + '->' + after.degenerate;
+    else if (opts.nonSolid) {
+      // NON-SOLID SCOPE (docs/NON-SOLID.md): a signed volume has no meaning
+      // without an inside, so on a piece the user flagged non-solid the two
+      // volume checks are replaced by the same budget on surface area. The
+      // topology checks above run unchanged - they are about tearing, not
+      // closure - and the open-edge check above is a delta, so a piece that
+      // arrives open passes it either way.
+      if (!isFinite(after.area)) bad = 'area not finite';
+      else if (opts.maxVolumeChange > 0 && res.before.area > 0) {
+        var achange = after.area / res.before.area - 1;
+        if (Math.abs(achange) > opts.maxVolumeChange) {
+          bad = 'surface area ' + (achange < 0 ? 'loss ' : 'gain ') +
+            Math.abs(achange * 100).toFixed(2) + '% over budget (non-solid)';
+        }
+      }
+    }
     else if (!isFinite(after.volume)) bad = 'volume not finite';
     else if (res.before.volume !== 0 && Math.sign(after.volume) !== Math.sign(res.before.volume)) bad = 'volume flipped sign';
     else if (opts.maxVolumeChange > 0 && res.before.volume !== 0) {
@@ -591,6 +607,25 @@ function NSO_sculptCommitRaw(m, working, undoType, statusText) {
     placedEntry.width = m.size.x;
     placedEntry.depth = m.size.z;
     placedEntry.height = m.size.y;
+
+    /* A bake replaces the GEOMETRY. It does not move the piece, so the pose
+       the adjust buttons recorded on the placed entry - rotY, tipX/tiltX,
+       flipX, tipZ/tiltZ, liftY - still stands, and the fresh mesh above is
+       built at identity. Left there the two disagree silently: the viewport
+       draws the piece unrotated while buildCombinedGeometry() and the 3MF
+       writer keep reading the record, so the file comes out posed and the
+       screen does not. Nothing says so until a piece is posed, baked, and
+       exported in that order, which is why it stayed invisible.
+
+       applyMeshRotation is the one definition of that record -> mesh
+       mapping, and it re-measures width/depth/height off the POSED box,
+       which the three lines above can only do for an unposed piece. Only
+       called when there IS a pose to put back: an unposed piece keeps the
+       exact placement this has always given it. */
+    var posed = !!(placedEntry.rotY || placedEntry.tipX || placedEntry.tiltX ||
+                   placedEntry.flipX || placedEntry.tipZ || placedEntry.tiltZ ||
+                   placedEntry.liftY);
+    if (posed && typeof applyMeshRotation === 'function') applyMeshRotation(placedEntry);
   }
 
   if (typeof updateEditSize === 'function') updateEditSize();
@@ -642,15 +677,27 @@ function NSO_smoothSelectedModel(opts) {
   }
   opts = opts || {};
   if (opts.maxVolumeChange == null) opts.maxVolumeChange = 0.25;
+  // NON-SOLID SCOPE (docs/NON-SOLID.md): read the user's flag through
+  // nsoNonSolid and hand it to the gate, which swaps its volume budget for a
+  // surface-area budget. Nothing here infers it from the open-edge count.
+  if (opts.nonSolid == null) opts.nonSolid = (typeof nsoNonSolid === 'function') && nsoNonSolid(m);
   var r = NSO_smoothGlobal(soupIn, opts);
   if (!r.ok) {
     if (typeof setStatus === 'function') setStatus('Smooth refused - piece unchanged (' + r.reason + ')', true);
     return r;
   }
-  var volPct = r.before.volume ? (100 * (Math.abs(r.after.volume) / Math.abs(r.before.volume) - 1)) : 0;
-  var txt = 'Smooth done - verts ' + r.after.verts +
-    ', open ' + r.before.openPos + '\u2192' + r.after.openPos +
-    ', volume ' + (volPct >= 0 ? '+' : '') + volPct.toFixed(2) + '%';
+  var txt;
+  if (opts.nonSolid) {
+    var areaPct = r.before.area ? (100 * (r.after.area / r.before.area - 1)) : 0;
+    txt = 'Smooth done (non-solid) - verts ' + r.after.verts +
+      ', open ' + r.before.openPos + '\u2192' + r.after.openPos +
+      ', area ' + (areaPct >= 0 ? '+' : '') + areaPct.toFixed(2) + '%';
+  } else {
+    var volPct = r.before.volume ? (100 * (Math.abs(r.after.volume) / Math.abs(r.before.volume) - 1)) : 0;
+    txt = 'Smooth done - verts ' + r.after.verts +
+      ', open ' + r.before.openPos + '\u2192' + r.after.openPos +
+      ', volume ' + (volPct >= 0 ? '+' : '') + volPct.toFixed(2) + '%';
+  }
   NSO_sculptCommitRaw(m, r.tris, 'smoothReplace', txt);
   return r;
 }

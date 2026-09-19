@@ -4,7 +4,10 @@
    nothing else about the page is altered.
 
    Usage:  node tools/nso_app_harness.js            (self-check)
-   Import: const { withApp } = require('./nso_app_harness');            */
+   Import: const { withApp } = require('./nso_app_harness');
+   APP_URL=https://nolongerzzz.github.io/nest-wip/  drives that deployment
+   instead of the local tree (the three.js CDN tags are still served
+   locally, so the check stays hermetic).                                  */
 
 const http = require('http');
 const fs = require('fs');
@@ -87,8 +90,11 @@ async function withApp(fn, opts) {
     r.fulfill({ status: 200, contentType: 'application/wasm',
                 body: fs.readFileSync(path.join(ROOT, 'vendor', 'manifold', 'manifold.wasm')) }));
 
+  // APP_URL (or opts.url) points the same drive at a deployed copy, e.g. the
+  // wip preview site, instead of the local tree. CDN routes still apply.
+  const url = opts.url || process.env.APP_URL || ('http://127.0.0.1:' + port + '/index.html');
   try {
-    await page.goto('http://127.0.0.1:' + port + '/index.html', { waitUntil: 'load' });
+    await page.goto(url, { waitUntil: 'load' });
     // the app is up once its own state object exists and the scene is built
     await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true,
       null, { timeout: 30000 });
@@ -117,7 +123,36 @@ const statusOf = page => page.evaluate(() => {
   return el ? el.textContent : null;
 });
 
-module.exports = { withApp, loadSTL, selectModel, statusOf, ROOT };
+/* Opens the viewport's Finish menu (a <details>) by clicking its summary, the
+   way a user does, so the controls inside it - Paint, Skin face, Cap open
+   faces, Soften... - are visible to page.click. Idempotent.
+
+   The menu's rows live in six collapsible groups, all but Shape shut when the
+   page loads, so opening the menu alone no longer makes every control
+   clickable. Every group is opened here too: a drive check is asserting what
+   a control DOES, not which fold the user found it in, and a check that had
+   to name its group would have to be edited again the next time a row moves
+   between them. Clicking a control the user would first have to unfold is the
+   one thing this hides, and no check in the suite is making that claim. */
+async function openFinishMenu(page) {
+  const open = await page.evaluate(() => { const d = document.querySelector('.vp-finish-menu'); return !!(d && d.open); });
+  if (!open) await page.click('.vp-finish-menu > summary');
+  await page.waitForFunction(() => { const d = document.querySelector('.vp-finish-menu'); return !!(d && d.open); }, null, { timeout: 5000 });
+  await openFinishSections(page);
+}
+
+/* Unfolds every group inside the Finish menu. Separate from the above so a
+   check that opens the menu its own way can still reach the rows. */
+async function openFinishSections(page) {
+  await page.evaluate(() => {
+    document.querySelectorAll('.vp-finish-menu .vp-sec').forEach(d => { d.open = true; });
+  });
+  await page.waitForFunction(
+    () => [...document.querySelectorAll('.vp-finish-menu .vp-sec')].every(d => d.open),
+    null, { timeout: 5000 });
+}
+
+module.exports = { withApp, loadSTL, selectModel, statusOf, openFinishMenu, openFinishSections, ROOT };
 
 if (require.main === module) {
   withApp(async (page, logs) => {

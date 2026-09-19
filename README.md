@@ -15,14 +15,156 @@ Smart build-plate packing for 3D printing.
 - Drag & drop multiple STL or 3MF files (a 3MF's objects each become a model,
   placed where the slicer had them)
 - Quantity control per model
+- Resize a piece to a real dimension - pick X, height, Z or the longest edge,
+  type the mm you want, and the uniform factor is solved and applied (or scale
+  by a plain multiplier)
 - Auto-orient for lower support needs
 - Auto-nest with optional 45°/90° rotations
 - Adjustable gap between models
 - Live 3D preview
+- **Measure** — click two points on the pieces for the distance between them in mm,
+  or switch to Edge and click one edge for its length. Corners and edges snap, the
+  number is drawn on the piece, and it follows the piece when you move it.
+  See [docs/MEASURE.md](docs/MEASURE.md).
+- **Pottery Wheel**: throw a vessel on an axis - a centred ball sized by
+  Pappus's centroid theorem, one opening push, drag-shaped pulls at any
+  height, and a base trim, with a live clay budget and the nozzle-safety wall
+  floor enforced on every update ([docs/POTTERY-WHEEL.md](docs/POTTERY-WHEEL.md))
+- **Build-volume warning**: a live check against the selected printer's bed
+  and build height, per-printer profiles any tool can query
+  ([docs/BUILD-VOLUME.md](docs/BUILD-VOLUME.md))
 - Export positioned models as STL (ready to drop into Bambu Studio / Orca / PrusaSlicer)
 - Or pick **Format: 3MF** in the Export card and the same two buttons write a
   Bambu Studio `.3mf` project with cooling settings baked in, chosen from a small
   table of named cooling profiles - the whole plate, or the selected piece alone
+- **Save and reopen a plate.** A 3MF NSO writes also carries the working scene -
+  every piece's position and pose, the position and plate locks, the gap a pair
+  was seated at, the skin pattern that made a relief, the painted faces and the
+  non-solid flags. Drop that file back in and the plate comes back as you left
+  it, not just the shapes. Files from Bambu Studio or MakerWorld have no such
+  block and import as plain geometry, exactly as before.
+  See [docs/SCENE-3MF.md](docs/SCENE-3MF.md).
+- **Lock position** on a placed piece: a locked piece refuses drag, the nudge
+  arrows, Raise/Lower and the pose buttons, so a stray click cannot move it
+  once Seat has put it where it belongs. Seat, Center, Align and Skin still
+  work on it. Shown by a teal outline and a `locked` tag in the list. Any
+  number of pieces can be locked at once - the flag is one per piece - and the
+  pieces you did not lock stay selectable, draggable and nestable around them.
+  **Optimize plate** packs the free pieces around the locked ones, which keep
+  the exact pose and mesh they had.
+- **Lock plate** holds the whole current arrangement - every piece's position
+  relative to every other - in one action. It refuses the same moves on every
+  piece, plus a repack. It is a separate flag, not a shortcut for locking each
+  piece: it writes no per-piece lock, so unlocking the plate gives back exactly
+  the piece locks you had set.
+- **Check piece** runs the canonical mesh checker on the selected piece and
+  paints what it finds **on the mesh**, instead of only reporting numbers: red
+  lines along open edges, orange along non-manifold edges, red patches on the
+  triangles of every self-intersecting (piercing) pair, and violet on every
+  face whose wall or gap measures under the 0.42 mm nozzle floor - both sides
+  of the thin wall, so it reads as a wall and not as a skin. The status line
+  carries the verdict and the counts, including the two it counts but cannot
+  usefully paint (inconsistent winding, degenerate triangles).
+  - It is the same checker the tools use (`tools/mesh_validate.py`), not a
+    second opinion: the numbers are held to it on every fixture in the repo.
+  - On demand, and a snapshot. Press again to clear; a bake that changes the
+    piece clears it and says so. Moving, rotating or seating the piece keeps
+    it - the marks travel with the geometry.
+  - A piece flagged **Non-solid** still gets its open edges drawn - you still
+    want to see where it is open - they just stop counting against it. See
+    `docs/DEFECT-OVERLAY.md`
+- **Carve** is a local carving tool - a handheld rotary tool, not the Cutter's
+  full-plane Split. Pick a blade profile, arm it, then click a face, an **edge**
+  or a **corner** of a piece: the blade is aimed along the outward bisector of
+  whatever faces it can reach there and just that local volume is subtracted.
+  - Three interchangeable profiles: **ball-nose** (a rounded gouge with no
+    stress corner), **flat shave** (a flat-bottomed slab cut), and **V-groove**
+    (a chamfer - cut deeper for a wider one, so one blade gives every size).
+  - A corner gouge and an edge chamfer need no rotation: the blade lays its
+    sweep axis along the edge itself. A `roll` field spins it off that if you
+    want. Depth is the size control; the blade's height follows from it.
+  - Unlike **Subtract**, which consumes bit B, Carve consumes nothing - the same
+    blade carves the next edge too.
+  - On a smoothly curved surface the tessellation is read as one feature, not as
+    a field of tiny edges, so a gouge on a dome is a face carve.
+  - `minWall` still measures along the cut axis only, and the status line says so
+    whenever more than one face is in play, plus what it held back in mm³ when
+    it held anything. See `docs/LOCAL-CARVE.md`
+- Breakaway supports through minimal contact: **Skin face** puts a contact
+  relief (fine crosshatch, sawtooth ridges, or a tapered ring) on one flat face
+  of a support block, and **Seat flush** with gap 0 rests the part on the
+  relief's tips - never on its base plane. Print-ready two-shell samples in
+  `fixtures/skin-samples/`; see `docs/HANDOFF.md`, "Contact skin on a face"
+  - **Skin wrap** puts the same relief on every flat rectangular face at once
+    (all six faces of a box), leaving painted faces alone and naming them.
+    Still flat faces only: a curved face is refused, as it always was.
+  - **Layer 2** adds a second pattern on the first one's tips. Composed (the
+    default) it stays one closed shell and cuts the contact to the two
+    patterns' overlap - a zigzag second layer takes a crosshatch from 182 to
+    52 mm², a second crosshatch mostly just makes the relief taller, and the
+    status line prints both numbers so you can tell which happened. With
+    **Free** on, layer 2 becomes its own free-hanging sheet resting on those
+    tips - a second breakaway interface - and the piece is flagged non-solid,
+    because it now carries two shells. See `docs/HANDOFF.md`, "Skin wrap +
+    the double skin"
+  - **Skin patch** bakes the relief as its own printable piece instead of onto
+    a face - a 30 x 30 mm coupon you can test on its own. `bordered` is a
+    washer: the pattern inside a solid rim that takes the handling. `loose` is
+    the pattern's features alone, no rim and no backing plate. `sandwich` is
+    double-sided - the pattern facing outward on BOTH faces with no floor
+    between them, which is the piece to use when the coupon goes *between* two
+    parts (a bordered washer would present its solid floor to one of them and
+    weld on area alone). All of them are in the **Library** tab, ready to load.
+  - **crosshatch-fine** is the same lattice at a 0.84 mm pitch instead of 1.2 -
+    1.43x the ribs, leaving a 0.42 mm channel, which is exactly one extrusion
+    line at a 0.4 nozzle. **0.4 nozzle only**: at a 0.6 nozzle one line is
+    0.63 mm and that channel fuses, which is also why the 1.2 mm default stays
+    the default. Tighter than 0.84 is not a tuning question - the channel goes
+    under one line and the slicer fills it in. The measurements, including why
+    the canonical mesh checker cannot see this and what does, are in
+    `docs/SKIN-CROSSHATCH-PITCH.md`
+  - **Trace a raster into flat printed lines** (command line, not a button yet)
+    for the case the reliefs above cannot do: a real printed line's section.
+    `node tools/nso_raster_lines_cli.js pattern.pbm out.stl --size 30` takes a
+    black-and-white picture of a toolpath, vectorises the lines and extrudes
+    each one flat and thin - 0.3 mm tall and 0.42 mm wide by default, the
+    measured Bambu line, both parameters - into a watertight STL you can drop
+    straight back in. Why it exists, in one number: two stacked, 90°-crossed
+    copies of the shipped sawtooth relief bond over 0.5040 mm² at every
+    crossing, because a standing ridge meets the interface with its 1.20 mm
+    base; two traced flat layers bond over 0.1764 mm², in 225 isolated dots
+    with no weld anywhere. The reference raster is drawn at 45° to the canvas,
+    where a slicer prints it, and the orientation is measured off the shipped
+    mesh rather than assumed (`npm run raster:angle`).
+    See [docs/RASTER-LINES.md](docs/RASTER-LINES.md)
+  - **The crosshatch, as two one-direction layers** (a module, not a button yet).
+    The relief above is a lattice that runs ribs *both* ways in one layer, which
+    is right against a flat mating face and wrong when it is stacked: turn a
+    copy 90° across it and the upper copy's underside is the same lattice as
+    the tips beneath it, so **519.75 mm² - the entire tip area - welds in one
+    patch**, and no other angle fixes it either (the best is still
+    248 mm² in patches millimetres long). `nso_crosshatch.js` builds the same
+    pattern the way a printer does - one direction per layer, two layers, the
+    second crossing the first - at the same 1.2 mm pitch and 0.42 mm rib:
+    **110.25 mm² in 625 isolated crossings**, every one exactly 0.1764 mm², none
+    wider than one line's diagonal. Resizing it **re-tiles** rather than scales:
+    whole repeats are added or removed and the pitch, the rib and the channel
+    stay bit-identical, so every line the smaller pattern had is in the same
+    place in the larger one. See [docs/CROSSHATCH.md](docs/CROSSHATCH.md)
+- **Delete painted** removes the geometry under the paint, rather than only
+  excluding it from bakes. **Paint Selected**, click the face, then Delete:
+  **Face** cuts that face out and leaves the rim open, **Face+seal** cuts it
+  out and lets Repair close the rim again, and **Shell** takes the whole body
+  that face belongs to - which is how a loose blob or a second shell a boolean
+  left behind goes in one click. What is pink is exactly what goes, measured
+  against the app's own highlight on every fixture.
+  - It refuses and leaves the piece untouched if the cut would empty the mesh,
+    split it into loose bodies, leave it crossing itself, or - with Face+seal -
+    if the rim cannot be closed safely. The status says which and with what
+    numbers, and one Undo puts the geometry and the paint back together.
+  - **Paint Excluded** still means hands off, here as everywhere else: a target
+    that is also painted excluded stands the delete down. See
+    `docs/PAINT-DELETE.md`
 
 ## How to use
 
@@ -41,10 +183,12 @@ Smart build-plate packing for 3D printing.
   overhang-fan settings baked in - see
   [docs/baked-cooling-settings.md](docs/baked-cooling-settings.md), including a
   known limitation around Bambu's "Use Modified Value of Filament Preset" dialog.
-  3MF **import** reads geometry only: every object in the file, with its
-  transforms applied, becomes a model. Print settings, materials and colours in
-  the file are ignored. Tested against files Bambu Studio wrote as well as
-  NSO's own exports - see `docs/baked-cooling-settings.md`, "3MF import".
+  3MF **import** reads geometry - every object in the file, with its transforms
+  applied, becomes a model - and, when the file is one NSO wrote, the scene
+  block that restores the whole plate (`docs/SCENE-3MF.md`). Print settings,
+  materials and colours in the file are still ignored. Tested against files
+  Bambu Studio wrote as well as NSO's own exports - see
+  `docs/baked-cooling-settings.md`, "3MF import".
 - The eye button in the viewport's bottom-left corner turns on a live watch:
   it logs errors, failed loads and NSO's own status and refusal lines, and
   after every Undo, bake and tool switch it checks the scene you are looking at
@@ -52,6 +196,9 @@ Smart build-plate packing for 3D printing.
   the spot. Off by default, and it never changes anything it finds - see
   [docs/WATCH.md](docs/WATCH.md).
 - The packing algorithm is a solid bottom-left free-rectangle packer with rotation. It will improve over time.
+- The build-volume warning answers **"does it fit the machine"** and nothing
+  else. It is not a printability check - bridging, wall thickness and severed
+  connections are separate concerns with their own checks.
 
 ## Future ideas
 

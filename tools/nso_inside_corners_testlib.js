@@ -55,6 +55,10 @@ function loadEngines() {
     console, Math, Number, Array, Float32Array, Uint32Array, Map, Set, JSON, Error,
     Infinity, NaN, isFinite, isNaN, String, Object, Promise,
     FACE_PICK_TOL: fp ? Number(fp[1]) : 0.35,
+    // The clamp inside these engines calls the canonical wall probe
+    // (nso_thickness.js) instead of its own inline copy, so the sandbox needs
+    // the real module - not a stub, or the test would only prove the stub.
+    NSO_Thickness: require(path.join(REPO, 'nso_thickness.js')),
     state: { edgeTreat: 'fillet' },
     getEdgeTreat() { return sandbox.state.edgeTreat; },
     nsoMaskFaces() { return [[false, false], [false, false], [false, false]]; }

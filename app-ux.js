@@ -2,8 +2,23 @@
 (function () {
   function stampHud() {
     var el = document.getElementById('adjust-status');
-    if (el) el.textContent = 'HUD inside4';
-    if (typeof setStatus === 'function') setStatus('HUD inside4');
+    if (el) el.textContent = 'HUD inside7';
+    if (typeof setStatus === 'function') setStatus('HUD inside7');
+  }
+
+  // nsoMaskHudRefresh writes HUD_TAG at rest. Until that const moves with
+  // the named tag, retag its line so a selection cannot snap the stamp back.
+  function alignMaskHudTag() {
+    var fn = window.nsoMaskHudRefresh;
+    if (typeof fn !== 'function' || fn._hudInside7) return;
+    window.nsoMaskHudRefresh = function () {
+      fn.apply(this, arguments);
+      var el = document.getElementById('adjust-status');
+      if (el && el.textContent) {
+        el.textContent = el.textContent.replace(/HUD inside[456]/g, 'HUD inside7');
+      }
+    };
+    window.nsoMaskHudRefresh._hudInside7 = true;
   }
 
   function pickIdx(event) {
@@ -66,9 +81,10 @@
 
   function bind() {
     stampHud();
+    alignMaskHudTag();
     bindThickenArrows();
-    setTimeout(stampHud, 0);
-    setTimeout(stampHud, 200);
+    setTimeout(function () { stampHud(); alignMaskHudTag(); }, 0);
+    setTimeout(function () { stampHud(); alignMaskHudTag(); }, 200);
     if (state.renderer && state.renderer.domElement) {
       state.renderer.domElement.addEventListener('dblclick', function (event) {
         if (!state.cutterOpen) return;
@@ -81,7 +97,7 @@
       state.renderer.domElement.addEventListener('pointerdown', function (event) {
         if (event.button !== 0) return;
         if (!event.altKey) return;
-        if (state.softenArmed || state.capArmed || state.joinSession) return;
+        if (state.softenArmed || state.capArmed || state.centerLockArmed || state.joinSession) return;
         if (lookAtHit(event)) {
           event.preventDefault();
           event.stopPropagation();
