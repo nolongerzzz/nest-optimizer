@@ -682,6 +682,15 @@
       var paintBtn = el('btn-mask-paint');
       if (paintBtn) paintBtn.click();
     }
+    /* Center lock is the same story: its pick owns a click on a piece too. It
+       goes off THROUGH its button, not by writing the flag, because the button
+       carries the armed label and a flag set behind its back leaves a lit
+       button that does nothing. */
+    if (state.centerLockArmed) {
+      var clockBtn = el('btn-center-lock-pick');
+      if (clockBtn) clockBtn.click();
+      else state.centerLockArmed = false;
+    }
     state.softenArmed = false;
     state.capArmed = false;
     if (typeof clearFacePick === 'function') clearFacePick();

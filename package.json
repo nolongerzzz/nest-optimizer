@@ -10,6 +10,7 @@
     "grid:math": "node tools/nso_surface_grid_test.js",
     "grid:wire": "node tools/nso_wire_grid_test.js",
     "grid:plate": "node tools/nso_plate_grid_test.js",
+    "centerlock:test": "node tools/nso_center_lock_test.js",
     "measure": "node tools/nso_measure_test.js",
     "wire:scale": "node tools/nso_wire_scale_test.js",
     "test": "node tools/run-tests.mjs"
@@ -21,6 +22,7 @@
     "grid:math",
     "grid:wire",
     "grid:plate",
+    "centerlock:test",
     "measure",
     "wire:scale"
   ],

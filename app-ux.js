@@ -75,7 +75,7 @@
       state.renderer.domElement.addEventListener('pointerdown', function (event) {
         if (event.button !== 0) return;
         if (!event.altKey) return;
-        if (state.softenArmed || state.capArmed || state.joinSession) return;
+        if (state.softenArmed || state.capArmed || state.centerLockArmed || state.joinSession) return;
         if (lookAtHit(event)) {
           event.preventDefault();
           event.stopPropagation();
