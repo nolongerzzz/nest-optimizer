@@ -109,6 +109,24 @@ function clearUndo() {
   state.undoStack = [];
   updateUndoBtn();
 }
+/* The ops that undo by putting one piece's geometry back, and what each one
+   calls itself on the status line. It is the gate as well as the label: a type
+   absent from here is not handled by that branch, so a new op is one row, not a
+   condition in two places that can disagree. Read with hasOwnProperty, never as
+   a bare truthiness test: an entry type of 'constructor' would otherwise walk
+   the prototype chain and enter a branch that expects prevGeometry. */
+const UNDO_REPLACE_LABEL = {
+  softenReplace: 'Undo: Soften reverted',
+  capReplace: 'Undo: Cap reverted',
+  sealReplace: 'Undo: Seal reverted',
+  solidifyReplace: 'Undo: Solidify reverted',
+  thickenReplace: 'Undo: Thicken reverted',
+  smoothReplace: 'Undo: Smooth reverted',
+  skinReplace: 'Undo: Skin reverted',
+  carveReplace: 'Undo: Carve reverted',
+  scaleReplace: 'Undo: Scale reverted',
+  seatSurfaceReplace: 'Undo: Seat here reverted'
+};
 function undoLast() {
   if (typeof removeFaceHelper === 'function') removeFaceHelper();
   const entry = state.undoStack.pop();
@@ -309,7 +327,7 @@ function undoLast() {
       ((m.faceMask && m.faceMask.exclude) ? m.faceMask.exclude.length : 0) + ' face(s) excluded');
     return;
   }
-  if (entry.type === 'softenReplace' || entry.type === 'capReplace' || entry.type === 'sealReplace' || entry.type === 'solidifyReplace' || entry.type === 'thickenReplace' || entry.type === 'smoothReplace' || entry.type === 'scaleReplace' || entry.type === 'carveReplace' || entry.type === 'skinReplace' || entry.type === 'seatSurfaceReplace') {
+  if (Object.prototype.hasOwnProperty.call(UNDO_REPLACE_LABEL, entry.type)) {
     const m = state.models.find(x => x.id === entry.modelId);
     if (!m) { setStatus('Undo: piece no longer exists'); return; }
     // the paint set is part of the piece's state, so one step puts back both
@@ -346,6 +364,15 @@ function undoLast() {
     } else if (state.cutterOpen && state.editId === m.id) {
       showEditPreview();
     }
+    /* The paint was put back at the top of this branch, but nsoMaskRestore
+       repaints against whatever mesh was in the scene AT THAT MOMENT - the
+       post-op one, which no longer has the faces the restored lists name. The
+       overlay it built was therefore empty, and nothing rebuilt it once the
+       old mesh went back in below. So the lists came back and the yellow and
+       the pink did not, which reads as "undo lost my paint". Repaint here,
+       after the placed instance is re-seated, and it lands on the geometry the
+       clicks were made against. */
+    if (typeof nsoMaskRepaint === 'function') nsoMaskRepaint();
     /* An op that moved the piece as well as reshaping it puts the pose back
        here, in the SAME entry, so it is still one Undo per op. Seat here is
        the first: it bakes a free rotation into the soup (the pose model
@@ -368,7 +395,7 @@ function undoLast() {
     updateEditSize();
     renderModelList();
     updateUndoBtn();
-    setStatus(entry.type === 'seatSurfaceReplace' ? 'Undo: Seat here reverted' : (entry.type === 'skinReplace' ? 'Undo: Skin reverted' : (entry.type === 'carveReplace' ? 'Undo: Carve reverted' : (entry.type === 'scaleReplace' ? 'Undo: Scale reverted' : (entry.type === 'smoothReplace' ? 'Undo: Smooth reverted' : (entry.type === 'thickenReplace' ? 'Undo: Thicken reverted' : (entry.type === 'solidifyReplace' ? 'Undo: Solidify reverted' : (entry.type === 'sealReplace' ? 'Undo: Seal reverted' : (entry.type === 'capReplace' ? 'Undo: Cap reverted' : 'Undo: Soften reverted')))))))));
+    setStatus(UNDO_REPLACE_LABEL[entry.type]);
     return;
   }
   if (entry.type === 'removeModel') {
