@@ -1994,6 +1994,13 @@ select:focus, input:focus {
   outline-offset: 1px;
 }
 .vp-flag input:disabled + .vp-flag-face { opacity: 0.45; }
+/* The two rotation locks, in the Rotate dropdown under the 90° buttons.
+   Same .vp-flag toggle the Repair and Non-solid flags use - a flag is a flag
+   wherever it sits - in the axis colours the handles are drawn in, so the
+   checkbox and the ball it governs are the same object by eye. */
+.vp-flag-rotlock { --flag-accent: #f472b6; --flag-line: rgba(244,114,182,0.5); --flag-fill: rgba(244,114,182,0.16); }
+.vp-flag-rotlock + .vp-flag-rotlock { --flag-accent: #38bdf8; --flag-line: rgba(56,189,248,0.5); --flag-fill: rgba(56,189,248,0.16); }
+
 .vp-flag-repair {
   --flag-accent: #fbbf24;
   --flag-line: rgba(251, 191, 36, 0.5);

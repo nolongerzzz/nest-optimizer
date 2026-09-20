@@ -2349,6 +2349,11 @@ function cutTFromPointer() {
 }
 
 function onCanvasPointerMove(event) {
+  if (typeof nsoRotate !== 'undefined' && nsoRotate.dragging()) {
+    event.preventDefault();
+    nsoRotate.moveDrag(event.clientX, event.clientY);
+    return;
+  }
   if (state.cutDragging) {
     event.preventDefault();
     setPointerFromEvent(event);
@@ -2380,6 +2385,7 @@ function clearPointerState() {
 }
 
 function onCanvasPointerUp() {
+  if (typeof nsoRotate !== 'undefined' && nsoRotate.dragging()) nsoRotate.endDrag();
   if (state.cutDragging) {
     state.cutDragging = false;
     if (state.controls) state.controls.enabled = true;
@@ -2472,6 +2478,31 @@ function onCanvasContextMenu(event) {
 }
 
 function onCanvasPointerDown(event) {
+  /* The rotation handle is hit-tested first and swallows the event. That is
+     the point of Task 1's separate grab target: a click on the PIECE still
+     means select-and-move, exactly as before, and only the ball rotates. */
+  if (typeof nsoRotate !== 'undefined' && typeof state !== 'undefined' &&
+      state.raycaster && state.camera && event.button === 0) {
+    var rotG = state.scene && state.scene.getObjectByName('nso-rotate-handles');
+    if (rotG && rotG.visible && rotG.children.length) {
+      setPointerFromEvent(event);
+      state.raycaster.setFromCamera(state.pointer, state.camera);
+      var rh = state.raycaster.intersectObjects(rotG.children, true)
+        .find(function (h) { return h.object && h.object.userData.nsoRotateHandle; });
+      if (rh) {
+        var axis = rh.object.userData.nsoRotateHandle;
+        var c = state.renderer.domElement.getBoundingClientRect();
+        var o = rotG.position.clone().project(state.camera);
+        var cx = c.left + (o.x * 0.5 + 0.5) * c.width;
+        var cy = c.top + (-o.y * 0.5 + 0.5) * c.height;
+        if (nsoRotate.beginDrag(axis, event.clientX, event.clientY, cx, cy)) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+      }
+    }
+  }
   if (!state.renderer || !state.camera) return;
 
   // Right-click: highlight only (menu comes from contextmenu event)
@@ -2769,6 +2800,8 @@ function selectPlaced(idx) {
   clearSelectionOutline();
 
   state.selectedIndex = idx;
+  // the rotation handles belong to whatever is selected, so they move with it
+  if (typeof nsoRotate !== 'undefined') setTimeout(function () { nsoRotate.refresh(); }, 0);
   const p = state.placed[idx];
   if (p && p.mesh) {
     p.mesh.material.emissive = new THREE.Color(0xdc2626);
