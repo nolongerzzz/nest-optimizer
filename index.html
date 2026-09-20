@@ -224,8 +224,12 @@
           <details class="vp-menu vp-top-menu" id="menu-move">
             <summary class="vp-bar-btn" title="Raise, lower and nudge the selected piece">Move</summary>
             <div class="vp-menu-body vp-top-body">
-              <button id="btn-raise" class="vp-bar-btn adjust-btn" disabled>Raise</button>
-              <button id="btn-lower" class="vp-bar-btn adjust-btn" disabled>Lower</button>
+              <!-- Raise / Lower are gone: the checkbox below is the vertical
+                   control now, with the slider and the arrow keys. liftSelected()
+                   itself is untouched and still has its other callers. -->
+              <label class="vp-flag vp-flag-movevert" title="Vertical placement: the camera drops to eye level with the piece from outside the plate, a slider appears beside it, and the arrow keys move it 0.25 mm at a time - up/down to raise, left/right across the line to the nearest piece. Free drag is off while this is on.">
+                <input type="checkbox" id="chk-move-vertical"><span class="vp-flag-face">Vertical</span>
+              </label>
               <button id="btn-nudge-fwd" class="vp-bar-btn adjust-btn" disabled>↑</button>
               <button id="btn-nudge-back" class="vp-bar-btn adjust-btn" disabled>↓</button>
               <button id="btn-nudge-left" class="vp-bar-btn adjust-btn" disabled>←</button>
@@ -632,6 +636,11 @@
             </div>
           </details>
         </div>
+        <div id="move-vert-wrap" class="move-vert-wrap" hidden>
+          <input type="range" id="move-vert-slider" min="0" max="80" step="0.25" value="0"
+                 orient="vertical" aria-label="Lift the piece, mm">
+          <span id="move-vert-read" class="move-vert-read">0.00 mm</span>
+        </div>
         <div class="viewport-overlay viewport-overlay-bl">
           <button id="btn-undo" class="viewport-tool-btn" type="button" disabled>↶</button>
           <button id="btn-frame-view" class="viewport-tool-btn" type="button">◎</button>
@@ -786,7 +795,7 @@
   <script src="nso-surface-grid.js?v=inside6"></script>
   <script src="nso-gcode-lines.js"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
-  <script src="app-core.js?v=integ1"></script>
+  <script src="app-core.js?v=inmode1"></script>
   <script src="app-cut.js?v=inside6"></script>
   <script src="app-finish.js?v=inside7"></script>
   <script src="app-sculpt.js?v=inside4"></script>
@@ -799,7 +808,7 @@
   <script src="app-stock.js?v=stock2"></script>
   <script src="app-assemble.js?v=asm1"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
-  <script src="app-join.js?v=libsave1"></script>
+  <script src="app-join.js?v=inmode1"></script>
   <script src="app-center-lock.js?v=clock1"></script>
   <script src="app-carve.js?v=hollow1"></script>
   <script src="app-hollow.js?v=hollow1"></script>
@@ -807,15 +816,20 @@
   <script src="app-skin.js?v=skin2"></script>
   <script src="app-skin-patch.js?v=skin3"></script>
   <script src="app-raster.js?v=raster1"></script>
-  <script src="app-mask.js?v=inside7"></script>
+  <script src="app-mask.js?v=inmode1"></script>
   <script src="app-seat-grid.js?v=inside6"></script>
   <script src="app-paint-delete.js?v=del1"></script>
   <script src="app-extract-sel.js?v=inside6"></script>
   <script src="app-texture.js?v=skin2"></script>
   <script src="app-nonsolid.js?v=inside4"></script>
   <script src="app-poslock.js?v=lock1"></script>
-  <script src="app-tip-orient.js?v=tip1"></script>
-  <script src="app-rotate-handles.js?v=rot1"></script>
+  <!-- The arbiter first: the three menu tools below register with it as
+       they bind, and it is what makes "one menu owns the input" true
+       rather than three modules each hoping the other two are shut. -->
+  <script src="app-input-mode.js?v=inmode1"></script>
+  <script src="app-tip-orient.js?v=tip2"></script>
+  <script src="app-rotate-handles.js?v=rot2"></script>
+  <script src="app-move-vertical.js?v=mv2"></script>
   <script src="app-defects.js?v=inside5"></script>
   <script src="app-measure.js?v=inside6"></script>
   <!-- The library write features. access first: it holds the gate, the

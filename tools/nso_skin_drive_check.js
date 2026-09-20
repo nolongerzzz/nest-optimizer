@@ -146,11 +146,14 @@ withApp(async (page, logs) => {
     selectPlaced(iB);
     nudgeSelected(pA.x - pB.x, pA.z - pB.z);
   }, ids);
-  const raiseEnabled = await page.evaluate(() => !document.getElementById('btn-raise').disabled);
+  /* was: btn-raise's disabled state. That button is retired; the piece
+     being selected is what it was standing in for. */
+  const raiseEnabled = await page.evaluate(() => state.selectedIndex >= 0);
   check('Raise button is enabled for the selected piece', raiseEnabled);
-  // btn-raise moved into the top bar's Move dropdown; unfold it first.
-  await page.evaluate(() => { const e = document.getElementById('btn-raise'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-  for (let i = 0; i < 11; i++) await page.click('#btn-raise');
+  /* Raise/Lower are gone - the Move menu's Vertical checkbox, its slider and
+     the arrow keys are the vertical control now. liftSelected() is untouched,
+     so what this check actually wanted - the piece 22 mm up - is one call. */
+  await page.evaluate(() => { for (let i = 0; i < 11; i++) liftSelected(1); });
   s = await page.evaluate(scene, ids);
   check('B is above A after 11 x Raise (2 mm each)', s.overlapXZ && s.bBottomMinusATop > 0, 'B bottom - A top = ' + s.bBottomMinusATop.toFixed(3));
   check('status shows the lift', /^Lift 22 mm/.test(await statusOf(page)), await statusOf(page));

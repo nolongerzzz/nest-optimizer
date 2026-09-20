@@ -3306,10 +3306,9 @@ function setupUI() {
      btn-roll / "Flat" is retired: Tip on face reaches the same orientation
      by picking the bottom face, and rollSelected() stays for its callers. */
   /* btn-tip is "Stand" now; app-tip-orient.js owns its click. */
-  const btnRaise = document.getElementById('btn-raise');
-  if (btnRaise) btnRaise.addEventListener('click', () => liftSelected(1));
-  const btnLower = document.getElementById('btn-lower');
-  if (btnLower) btnLower.addEventListener('click', () => liftSelected(-1));
+  /* Raise / Lower retired: the Move menu's Vertical checkbox owns the
+     vertical axis now - slider and arrow keys, in app-move-vertical.js.
+     liftSelected() is unchanged and still called from there and elsewhere. */
   const btnTiltUp = document.getElementById('btn-tilt-up');
   if (btnTiltUp) btnTiltUp.addEventListener('click', () => tiltSelected(1));
   const btnTiltDn = document.getElementById('btn-tilt-dn');

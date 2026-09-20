@@ -85,7 +85,7 @@ async function partA(page) {
     ['yawed 90', () => page.evaluate(() => rotateSelected(1))],
     ['flipped', () => page.evaluate(() => flipSelected())],
     ['tipped', () => page.evaluate(() => document.getElementById('btn-tip').click())],
-    ['raised', () => page.evaluate(() => document.getElementById('btn-raise').click())],
+    ['raised', () => page.evaluate(() => liftSelected(1))],
     ['cutter opened', () => page.evaluate(() => openCutter())],
     ['cut plane moved', () => page.evaluate(() => setCutMm(20))],
     ['split', () => page.evaluate(() => cutActiveModel())],
