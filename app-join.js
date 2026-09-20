@@ -3393,6 +3393,8 @@ function setupUI() {
   if (btnRaise) btnRaise.addEventListener('click', () => liftSelected(1));
   const btnLower = document.getElementById('btn-lower');
   if (btnLower) btnLower.addEventListener('click', () => liftSelected(-1));
+  const btnToPlate = document.getElementById('btn-to-plate');
+  if (btnToPlate) btnToPlate.addEventListener('click', () => bringSelectedToPlate());
   const btnTiltUp = document.getElementById('btn-tilt-up');
   if (btnTiltUp) btnTiltUp.addEventListener('click', () => tiltSelected(1));
   const btnTiltDn = document.getElementById('btn-tilt-dn');

@@ -4412,9 +4412,31 @@ this fix in either direction.
   `tiltX`, `tipZ`, `tiltZ`), which carry no free rotation, so one press of
   Raise or Lower on a piece the seat laid on a slope throws that angle away -
   and `snapshotPlacedPose` carries the same fields, so **Undo cannot put it
-  back**. Pre-existing, and the same gap `seat:curved-audit` section 6 pins on
-  the export side.
+  back**. Pre-existing, the same gap `seat:curved-audit` section 6 pins on the
+  export side, and pinned now on the pose side in
+  `tools/nso_bring_to_plate_test.js` section 4.
 
 **`?v=` NOT bumped** - rule 4, Grok owns those. `app-join.js` still ships at
 `?v=libsave1`, `app-core.js` at `?v=integ1`, `app-poslock.js` at `?v=lock1`.
 
+## To plate - put a piece back down on the bed, in one press (2026-09-20)
+`bringSelectedToPlate` (`app-core.js`) behind `#btn-to-plate` in the viewport
+**Move** menu, beside Raise and Lower. Check: `npm run to-plate`
+(`tools/nso_bring_to_plate_test.js`, in `npm test`).
+
+Nothing put a piece back on the plate. Raise and Lower step 2 mm a press, so a
+piece Seat (support) has stacked on a 20 mm target - `liftY` 20.18 - is eleven
+presses from the bed, and a piece a seat left in the air over a target that has
+since been moved or deleted has nothing under it at all. Lower also goes through
+`applyMeshRotation`, so on a piece the seat laid on a slope its first press
+throws that angle away (see the known-unfixed note above) and the piece is
+still in the air.
+
+This goes through `settlePlacedOnBed`, which measures the piece's own world box
+and only ever writes `y`: the lowest point of the piece lands on the bed
+baseline from any pose, `liftY` is set to 0 so the record agrees afterwards, and
+`x`, `z` and the piece's rotation are untouched. A piece pushed out of the build
+volume comes back inside it, because `settlePlacedOnBed` clears `overflow` and
+`meshOffsetY` with it. One Undo, like every other pose button; a piece already
+on the plate is told so and pushes no undo entry; a locked piece refuses it the
+way it refuses Raise and Lower, button greyed and action standing down.
