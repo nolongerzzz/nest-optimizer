@@ -53,66 +53,90 @@
    capability, whatever the absence of a permission gate below might suggest.
 
    See docs/LIBRARY-DELETE.md for the full audit, including why the catalog is
-   edited as source text rather than read from a data file.  */
+   edited as source text rather than read from a data file.
+
+   ---------------------------------------------------------------------------
+   WHAT THIS FILE NO LONGER OWNS
+   ---------------------------------------------------------------------------
+   app-library-save.js adds a piece the same way this one removes it, against
+   the same repository, with the same token, under the same rule. Three things
+   are therefore NOT decided here any more - they live in
+   app-library-access.js and this file reads them:
+
+     - the target owner / repo / branch / API host
+     - the sessionStorage key the operator's token is held under
+     - THE PERMISSION GATE (see mayDelete below)
+
+   so that a real access check is one edit covering both features rather than
+   two that can disagree. See docs/LIBRARY-SAVE.md section 4.  */
 (function (root) {
   'use strict';
 
-  /* ---- what repository this writes to --------------------------------
+  /* ---- the shared access module ---------------------------------------
 
-     Literals, deliberately, and NOT derived from location.host.
+     Where these writes go, who may make them, and which sessionStorage key
+     the operator's token lives under are all questions Save asks too, and a
+     Save aimed at one repository while a Delete aims at another - or allowed
+     by one rule while the other refuses - is a bug nobody would think to look
+     for. So all three live in app-library-access.js and this module reads
+     them from there. It decides none of them itself.
 
-     The page you are looking at is very probably NOT served from the repo
-     that owns these files. .github/workflows/mirror-wip-pages.yml force-pushes
-     a snapshot of claude-wip into a SECOND repository (nest-wip) and Pages
-     serves the site from there. Deriving the target from the URL would aim
-     every delete at that snapshot, where it would survive exactly until the
-     next mirror run overwrote it. The source of truth is named here instead.
-
-     configure() exists for the one case the literals cannot cover: driving
-     this against a scratch repo from a test or from the console. */
-  var TARGET = {
-    owner:   'nolongerzzz',
-    repo:    'nest-optimizer',
-    branch:  'claude-wip',
-    dir:     'library/',
-    catalog: 'app-library.js',
-    api:     'https://api.github.com'
-  };
-
-  function configure(patch) {
-    if (!patch) return;
-    for (var k in patch) if (Object.prototype.hasOwnProperty.call(patch, k) &&
-      Object.prototype.hasOwnProperty.call(TARGET, k)) TARGET[k] = patch[k];
+     Resolved lazily rather than at load time so script order cannot matter,
+     and resolved through require() under Node so the unit test can load this
+     file on its own. */
+  function access() {
+    if (root && root.nsoLibraryAccess) return root.nsoLibraryAccess;
+    if (typeof module !== 'undefined' && module.exports) {
+      try { return require('./app-library-access.js'); } catch (err) { /* not on disk */ }
+    }
+    return null;
   }
-  function target() {
-    var out = {};
-    for (var k in TARGET) if (Object.prototype.hasOwnProperty.call(TARGET, k)) out[k] = TARGET[k];
-    return out;
+
+  /* The LIVE target object, not a copy, so configure() through either module
+     moves both features together. Throws rather than falling back to literals
+     of its own: a second copy of owner/repo/branch is exactly the drift this
+     is here to prevent, and mayDelete() below has already refused - in words,
+     to the operator - before anything reaches this. */
+  function TGT() {
+    var a = access();
+    if (!a) throw new Error('app-library-access.js is not loaded - refusing to write');
+    return a.TARGET;
   }
+
+  function configure(patch) { var a = access(); if (a) a.configure(patch); }
+  function target() { var a = access(); return a ? a.target() : null; }
 
   /* =====================================================================
      THE PERMISSION GATE
      =====================================================================
 
-     This is the ONE place that decides whether a delete is allowed to
-     proceed, and it is the only question requestDelete() asks before it
-     starts. Nothing else in this file, and nothing at all in app-library.js,
-     re-decides it inline.
+     This is the ONE place in this file that decides whether a delete is
+     allowed to proceed, and it is the only question requestDelete() asks
+     before it starts. Nothing else here, and nothing at all in
+     app-library.js, re-decides it inline.
 
-     TODAY IT ALWAYS SAYS YES. There is no user, session, role or permission
-     concept anywhere in this app - there is nothing to check against - and
-     for the stated temporary testing use that is the accepted position.
-     Deleting is gated by holding a repository write token, not by anything
-     this code knows.
+     It no longer decides anything itself either: it asks the shared gate in
+     app-library-access.js, which Save's maySave() asks in exactly the same
+     way. TODAY IT ALWAYS SAYS YES, for both - there is no user, session, role
+     or permission concept anywhere in this app, there is nothing to check
+     against, and for the stated temporary testing use that is the accepted
+     position. Deleting is gated by holding a repository write token, not by
+     anything this code knows.
 
-     It is written as a function returning a verdict object rather than a
-     `return true` so that the shape a real check needs is already here: a
-     yes/no plus the sentence to show the operator when it is no. Adding a
-     real access check later is an edit to this function's body - it is not a
-     change to the dialog, the API calls, the row wiring or the catalog
-     editor, none of which ask who you are. */
+     The verdict is an object rather than a boolean so the shape a real check
+     needs is already here: a yes/no plus the sentence to show the operator
+     when it is no. A missing access module is a NO, not a yes - a gate that
+     fails open the moment a script tag is dropped is not a gate.
+
+     ADDING A REAL ACCESS CHECK LATER IS AN EDIT TO may()'s BODY IN
+     app-library-access.js - one edit, covering Delete and Save together, not
+     two separately-hardened paths. It is not a change to the dialog, the API
+     calls, the row wiring or the catalog editor, none of which ask who you
+     are. */
   function mayDelete(entry) {
-    return { allowed: true, reason: '' };
+    var a = access();
+    if (!a) return { allowed: false, reason: 'the library access gate did not load - refusing to delete' };
+    return a.may('delete', entry);
   }
 
   /* ---- names ---------------------------------------------------------
@@ -228,21 +252,24 @@
      tab is a write credential sitting on disk on a shared machine. It is read
      back only to prefill the dialog, so a run of deletes is not a run of
      pastes, and forget() is there for the operator who wants it gone now. */
-  var TOKEN_KEY = 'nso.library.delete.token';
+  function tokenKey() {
+    var a = access();
+    return (a && a.TOKEN_KEY) || 'nso.library.token';
+  }
   function storedToken() {
-    try { return sessionStorage.getItem(TOKEN_KEY) || ''; } catch (err) { return ''; }
+    try { return sessionStorage.getItem(tokenKey()) || ''; } catch (err) { return ''; }
   }
   function rememberToken(tok) {
-    try { if (tok) sessionStorage.setItem(TOKEN_KEY, tok); } catch (err) { /* private mode */ }
+    try { if (tok) sessionStorage.setItem(tokenKey(), tok); } catch (err) { /* private mode */ }
   }
   function forgetToken() {
-    try { sessionStorage.removeItem(TOKEN_KEY); } catch (err) { /* private mode */ }
+    try { sessionStorage.removeItem(tokenKey()); } catch (err) { /* private mode */ }
   }
 
   /* ---- the API --------------------------------------------------------- */
 
   function contentsUrl(path) {
-    return TARGET.api + '/repos/' + TARGET.owner + '/' + TARGET.repo +
+    return TGT().api + '/repos/' + TGT().owner + '/' + TGT().repo +
            '/contents/' + path.split('/').map(encodeURIComponent).join('/');
   }
 
@@ -268,7 +295,7 @@
   function apiError(what, r) {
     var msg = (r.body && r.body.message) ? r.body.message : ('HTTP ' + r.status);
     if (r.status === 401) msg = 'the token was rejected (401) - expired, or not a token for this repo';
-    if (r.status === 403) msg = 'the token lacks contents:write on ' + TARGET.owner + '/' + TARGET.repo + ' (403)';
+    if (r.status === 403) msg = 'the token lacks contents:write on ' + TGT().owner + '/' + TGT().repo + ' (403)';
     if (r.status === 404) msg = 'not found (404) - wrong repo, wrong branch, or the token cannot see it';
     if (r.status === 409) msg = 'the branch moved under us (409) - reload and try again';
     return new Error(what + ': ' + msg);
@@ -280,33 +307,33 @@
      it. */
   function performDelete(entry, token) {
     var file = entry.file;
-    var blobPath = TARGET.dir + file;
+    var blobPath = TGT().dir + file;
     var why = 'Library: delete ' + file;
     var done = { file: file, catalog: null, blob: null };
 
     return Promise.resolve().then(function () {
       if (!safeName(file)) throw new Error('refusing to delete "' + file + '" - not a plain library file name');
       if (!token) throw new Error('no GitHub token - nothing was sent');
-      return ghFetch(contentsUrl(TARGET.catalog) + '?ref=' + encodeURIComponent(TARGET.branch), token).then(ghJson);
+      return ghFetch(contentsUrl(TGT().catalog) + '?ref=' + encodeURIComponent(TGT().branch), token).then(ghJson);
     }).then(function (r) {
-      if (!r.ok || !r.body || !r.body.content) throw apiError('reading ' + TARGET.catalog, r);
+      if (!r.ok || !r.body || !r.body.content) throw apiError('reading ' + TGT().catalog, r);
       var edit = removeCatalogEntry(b64decode(r.body.content), file);
       if (!edit.ok) throw new Error('the catalog entry could not be removed cleanly: ' + edit.reason +
                                     ' - nothing was deleted');
-      return ghFetch(contentsUrl(TARGET.catalog), token, {
+      return ghFetch(contentsUrl(TGT().catalog), token, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: why + ' (catalog entry)',
           content: b64encode(edit.text),
           sha: r.body.sha,
-          branch: TARGET.branch
+          branch: TGT().branch
         })
       }).then(ghJson);
     }).then(function (r) {
-      if (!r.ok) throw apiError('rewriting ' + TARGET.catalog, r);
+      if (!r.ok) throw apiError('rewriting ' + TGT().catalog, r);
       done.catalog = (r.body && r.body.commit) ? r.body.commit.sha : 'written';
-      return ghFetch(contentsUrl(blobPath) + '?ref=' + encodeURIComponent(TARGET.branch), token).then(ghJson);
+      return ghFetch(contentsUrl(blobPath) + '?ref=' + encodeURIComponent(TGT().branch), token).then(ghJson);
     }).then(function (r) {
       /* The catalog entry is already gone, so a blob that is not there is the
          state we were asking for, not a failure. Say so and stop. */
@@ -315,7 +342,7 @@
       return ghFetch(contentsUrl(blobPath), token, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: why + ' (file)', sha: r.body.sha, branch: TARGET.branch })
+        body: JSON.stringify({ message: why + ' (file)', sha: r.body.sha, branch: TGT().branch })
       }).then(ghJson);
     }).then(function (r) {
       if (r === null) return done;
@@ -416,9 +443,9 @@
       strong.textContent = entry.file;
       d.body.appendChild(strong);
       d.body.appendChild(document.createTextNode('?'));
-      d.note.textContent = 'This removes its CATALOG entry from ' + TARGET.catalog +
+      d.note.textContent = 'This removes its CATALOG entry from ' + TGT().catalog +
         ' and deletes library/' + entry.file + ' from ' +
-        TARGET.owner + '/' + TARGET.repo + ' on ' + TARGET.branch +
+        TGT().owner + '/' + TGT().repo + ' on ' + TGT().branch +
         '. Two commits, on the real repository. There is no undo from here.';
       d.err.setAttribute('hidden', 'hidden');
       d.err.textContent = '';

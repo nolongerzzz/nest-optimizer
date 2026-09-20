@@ -186,8 +186,17 @@ console.log('\n=== 4. one entry point, and the browser knows no other route ==='
     !/api\.github\.com/.test(lib) && !/method:\s*'DELETE'/.test(lib));
   check('app-library.js raises no confirmation of its own',
     !/window\.confirm|[^.\w]confirm\(/.test(lib));
-  check('the module holds the only api.github.com reference',
-    /api\.github\.com/.test(mod));
+  /* The API host, the repository and the branch now live in ONE place -
+     app-library-access.js - because Save writes to the same repository and
+     two copies of owner/repo/branch is a drift nobody would think to look
+     for. So the assertion is no longer "delete owns the host" but the
+     stronger "nothing but the access module names it". */
+  const acc = codeOnly(fs.readFileSync(path.join(ROOT, 'app-library-access.js'), 'utf8'));
+  check('app-library-access.js is the only place that names api.github.com',
+    /api\.github\.com/.test(acc) && !/api\.github\.com/.test(mod) && !/api\.github\.com/.test(lib));
+  check('...and the only place that names the target owner/repo/branch',
+    /nolongerzzz/.test(acc) && !/nolongerzzz/.test(mod),
+    'delete module mentions: ' + (mod.match(/nolongerzzz/g) || []).length);
   check('requestDelete is the only exported way in - performDelete and the ' +
     'dialog are not reachable from outside',
     typeof del.request === 'function' && typeof del.performDelete !== 'function' &&

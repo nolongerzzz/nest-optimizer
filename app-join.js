@@ -2974,17 +2974,29 @@ function arrayActiveModel() {
   setStatus('Arrayed ' + count + ' at ' + pitch + ' mm on ' + axis + '. Download that new model.');
 }
 
-function exportActiveModel() {
+/* The bytes half of "Download selected STL", with the download taken off it.
+
+   Everything from "which model" to "which triangles survive" to the Y-up ->
+   Z-up turn is export policy, and the Library's Save As has to produce the
+   SAME bytes the download button produces or a saved piece is not the piece
+   that was tested. So the policy lives here once and both callers run it:
+   exportActiveModel() below adds the filename prompt and the download,
+   app-library-save.js adds the catalog entry and the commit.
+
+   Returns { buffer, tris, dropped, name } or null. On null it has already put
+   the reason on the status line, because the two callers would word it
+   identically anyway. */
+function activeModelSTL() {
   const m = getActiveModel();
   if (!m || !m.geometry) {
     setStatus('Select a model in the list first (click its name), then Download selected model STL', true);
-    return;
+    return null;
   }
   try {
     let geo = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
     if (!geo.attributes || !geo.attributes.position) {
       setStatus('Model has no mesh data to export', true);
-      return;
+      return null;
     }
     // Work on a clean non-indexed clone
     if (geo === m.geometry) geo = geo.clone();
@@ -3011,14 +3023,30 @@ function exportActiveModel() {
     }
     if (mapped.length < 9) {
       setStatus('Export failed - mesh empty or invalid after cut', true);
-      return;
+      return null;
     }
     const out = new THREE.BufferGeometry();
     out.setAttribute('position', new THREE.Float32BufferAttribute(mapped, 3));
-    const buffer = geometryToBinarySTL(out);
+    return {
+      buffer: geometryToBinarySTL(out),
+      tris: Math.floor(mapped.length / 9),
+      dropped,
+      name: String(m.name || 'piece').replace(/[\/\?%*:|"<>]/g, '_')
+    };
+  } catch (err) {
+    console.error(err);
+    setStatus('Export failed: ' + (err && err.message ? err.message : 'unknown error'), true);
+    return null;
+  }
+}
+
+function exportActiveModel() {
+  const stl = activeModelSTL();
+  if (!stl) return;
+  try {
+    const { buffer, tris, dropped } = stl;
     const blob = new Blob([buffer], { type: 'application/octet-stream' });
-    const safe = String(m.name || 'piece').replace(/[\/\?%*:|"<>]/g, '_');
-    let filename = safe + '.stl';
+    let filename = stl.name + '.stl';
     try {
       const typed = window.prompt('Export as', filename);
       if (typed == null) {
@@ -3031,7 +3059,7 @@ function exportActiveModel() {
     } catch (e) {}
     downloadBlob(blob, filename);
     setStatus(
-      'Downloaded ' + filename + ' (' + Math.floor(mapped.length / 9) + ' tris' +
+      'Downloaded ' + filename + ' (' + tris + ' tris' +
       (dropped ? ', skipped ' + dropped + ' bad' : '') + '). Open in Bambu Studio.'
     );
   } catch (err) {

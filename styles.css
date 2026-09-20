@@ -521,6 +521,26 @@ select:focus, input:focus {
   word-break: break-word;
 }
 .nso-confirm-err[hidden] { display: none !important; }
+
+/* The Save dialog (app-library-save.js) reuses the confirmation's shell, its
+   title, its note and its field styling, so the two read as one system - the
+   only additions are the category select and the "+ New category" row it
+   reveals, neither of which the delete dialog needs. */
+.nso-confirm-tok select {
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12.5px;
+  color: #e2e8f0;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 4px;
+}
+.nso-confirm-tok select:focus-visible,
+.nso-confirm-tok input:focus-visible { outline: 2px solid #38bdf8; outline-offset: 1px; }
+.nso-confirm-tok[hidden] { display: none !important; }
+.nso-confirm-tok input[type="text"] { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .nso-confirm-row { display: flex; justify-content: flex-end; gap: 8px; }
 .nso-confirm-btn {
   padding: 6px 14px;
@@ -545,6 +565,21 @@ select:focus, input:focus {
   opacity: 0.4;
   cursor: not-allowed;
   border-color: rgba(248, 113, 113, 0.35);
+}
+/* Save is the affirmative action, not the dangerous one - it must not wear
+   the delete button's red. Disabled until a name, a category AND a token are
+   all present: no single click on anything can write. */
+.nso-confirm-btn.is-go {
+  border-color: #0284c7;
+  background: rgba(2, 132, 199, 0.22);
+  color: #e0f2fe;
+  font-weight: 600;
+}
+.nso-confirm-btn.is-go:hover:not(:disabled) { background: rgba(2, 132, 199, 0.36); }
+.nso-confirm-btn.is-go:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: rgba(2, 132, 199, 0.35);
 }
 
 /* Settings */

@@ -167,6 +167,15 @@ function mayDelete(entry) {
 }
 ```
 
+> **Updated by the Save ticket.** `Save As` needed the same gate, and two
+> separately-hardened paths was exactly what to avoid, so the body above now
+> delegates to a shared one — `may('delete', entry)` in
+> `app-library-access.js`, which Save's `maySave` also calls. Everything this
+> section says about the gate still holds; it is now one function for both
+> features rather than one per feature, and the target repository and the
+> `sessionStorage` token key moved there with it. See
+> [docs/LIBRARY-SAVE.md](LIBRARY-SAVE.md) §4.
+
 - It is declared once and consulted once, at the top of `requestDelete`, before
   the dialog is raised.
 - It returns a **verdict object, not a boolean**, so the shape a real check
@@ -180,8 +189,9 @@ declaration, one call site, one mention of `nsoLibraryDelete` in
 `app-library.js`, no `api.github.com` and no `confirm(` outside the module, and
 `performDelete`/`runConfirm` not reachable from outside.
 
-**Adding a real access check later is an edit to that function's body.** Nothing
-else in the feature asks who you are.
+**Adding a real access check later is an edit to that function's body** — now
+`may()`'s body in `app-library-access.js`, one edit covering Delete and Save
+together. Nothing else in either feature asks who you are.
 
 ---
 
@@ -192,6 +202,11 @@ call needs a write credential, which cannot exist in CI, and a test that really
 deleted files would delete them from the repository it is testing. So the tests
 prove the **request sequence, its payloads and its ordering** — not that GitHub
 accepts them.
+
+The inverse operation — putting a piece **into** the library — is
+[docs/LIBRARY-SAVE.md](LIBRARY-SAVE.md), which reuses this mechanism, this
+credential and this dialog pattern, and writes its two commits in the opposite
+order for the same fail-safe reason.
 
 The one-time manual check, with a real token:
 

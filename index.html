@@ -223,6 +223,11 @@
             <p class="hint" id="cooling-profile-note"></p>
           </div>
           <button id="btn-export-model" class="btn btn-primary" type="button">Download selected STL</button>
+          <!-- Save As: the same selected piece, the same STL bytes, into the
+               Library instead of onto your disk. app-library-save.js binds it;
+               deleting this button and that script tag removes the feature. -->
+          <button id="btn-library-save" class="btn btn-secondary" type="button"
+                  title="Save the selected piece into the Library catalog">Save selected to Library</button>
           <button id="btn-export-stl" class="btn btn-secondary" type="button" disabled>Export plate STL</button>
           <button id="btn-delete-model" class="btn btn-secondary" type="button">Delete model</button>
         </section>
@@ -669,8 +674,12 @@
   <script src="app-poslock.js?v=lock1"></script>
   <script src="app-defects.js?v=inside5"></script>
   <script src="app-measure.js?v=inside6"></script>
-  <script src="app-library-delete.js?v=libdel1"></script>
-  <script src="app-library.js?v=libdel1"></script>
+  <!-- The library write features. access first: it holds the gate, the
+       target repository and the token key that the other two read. -->
+  <script src="app-library-access.js?v=libsave1"></script>
+  <script src="app-library-delete.js?v=libsave1"></script>
+  <script src="app-library-save.js?v=libsave1"></script>
+  <script src="app-library.js?v=libsave1"></script>
   <script src="app-photoset.js?v=photoset1"></script>
   <script src="app-toolpath.js?v=toolpath1"></script>
   <script src="app-ux.js?v=inside7"></script>

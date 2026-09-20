@@ -465,6 +465,65 @@
     }
   }
 
+  /* The local half of a SAVE - the mirror of forget() above, and called under
+     exactly the same rule: only after the repository side has actually
+     succeeded, so the browser never shows a piece as saved that is not there.
+
+     A category the taxonomy has not seen before is appended to it, because
+     build() does not draw a category it does not know and a piece filed under
+     one would simply be invisible. Its section is created on the spot, at the
+     end, which is where CATEGORIES just put it.
+
+     Like forget(), this touches this page and nothing else. The repository
+     side is app-library-save.js's, and this file does not know that module
+     exists - it does not call it, and the Save button is not wired here. */
+  function remember(entry) {
+    if (!entry || !entry.file) return null;
+    var i;
+    for (i = 0; i < CATALOG.length; i++) if (CATALOG[i].file === entry.file) return CATALOG[i];
+    var e = { file: entry.file, category: entry.category, source: entry.source || 'local' };
+    CATALOG.push(e);
+    if (CATEGORIES.indexOf(e.category) === -1) {
+      CATEGORIES.push(e.category);
+      /* The exported list is a copy, deliberately, so push the same name onto
+         it rather than handing the live array out. */
+      if (window.nsoLibrary && window.nsoLibrary.categories &&
+          window.nsoLibrary.categories.indexOf(e.category) === -1)
+        window.nsoLibrary.categories.push(e.category);
+    }
+
+    var host = document.getElementById('library-list');
+    if (!host || !host._libBuilt) return e;   // nothing drawn yet; build() will
+
+    var secs = host.querySelectorAll('.library-sec'), sec = null;
+    for (i = 0; i < secs.length; i++) {
+      if (secs[i].dataset.sec === e.category) { sec = secs[i]; break; }
+    }
+    if (!sec) {
+      sec = document.createElement('details');
+      sec.className = 'vp-sec library-sec';
+      sec.dataset.sec = e.category;
+      sec.open = true;
+      var head = document.createElement('summary');
+      head.className = 'vp-sec-head';
+      head.textContent = e.category;
+      var badge = document.createElement('span');
+      badge.className = 'library-sec-count';
+      badge.textContent = '0';
+      head.appendChild(badge);
+      sec.appendChild(head);
+      var fresh = document.createElement('div');
+      fresh.className = 'vp-sec-body';
+      sec.appendChild(fresh);
+      host.appendChild(sec);
+    }
+    var body = sec.querySelector('.vp-sec-body');
+    if (body) body.appendChild(makeRow(e));
+    var count = sec.querySelector('.library-sec-count');
+    if (count) count.textContent = sec.querySelectorAll('.library-item').length;
+    return e;
+  }
+
   function build() {
     var host = document.getElementById('library-list');
     if (!host || host._libBuilt) return;
@@ -566,7 +625,11 @@
     /* The local half of a delete, exposed so the drive check can watch the
        browser actually lose the row. NOT a delete: it touches this page and
        nothing else. The repository side is app-library-delete.js's. */
-    forget: forget
+    forget: forget,
+    /* And the local half of a save. Same rule, same non-claim: it touches
+       this page and nothing else. app-library-save.js calls it once the two
+       commits have really landed. */
+    add: remember
   };
 
   // Closed before anything else is wired, and again once the rows exist, so
