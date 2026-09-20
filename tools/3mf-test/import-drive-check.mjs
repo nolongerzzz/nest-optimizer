@@ -101,6 +101,7 @@ async function main() {
   await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   const outDir = await mkdtemp(join(tmpdir(), 'nso-3mf-import-drive-'));
 
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', 'stl');
   page.once('dialog', (d) => d.accept());
   const [stlDl] = await Promise.all([
@@ -117,6 +118,7 @@ async function main() {
   check('and it passes the canonical watertight checker (exit 0)',
     wt.status === 0 ? 'clean' : (wt.stdout + wt.stderr).trim(), 'clean');
 
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', '3mf');
   page.once('dialog', (d) => d.accept());
   const [mfDl] = await Promise.all([

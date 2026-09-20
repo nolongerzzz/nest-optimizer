@@ -336,6 +336,7 @@ withApp(async (page, logs) => {
     await page.evaluate(() => { const e = document.getElementById('btn-wheel-ball'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-wheel-ball');
     await setF(page, { 'inp-wheel-depth': 20 });
+    await page.evaluate(() => { const e = document.getElementById('btn-wheel-open'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-wheel-open');
     const idV = await page.evaluate(() => state.editId);
     const v0 = await info(page, idV);

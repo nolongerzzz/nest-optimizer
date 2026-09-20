@@ -97,7 +97,9 @@ withApp(async (page, logs) => {
   console.log('   box before  tris ' + boxBefore.tris + '  vol ' + boxBefore.volume.toFixed(1) +
               '  bbox ' + JSON.stringify(boxBefore.size));
 
+  await page.evaluate(() => { const e = document.getElementById('inp-wheel-height'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.fill('#inp-wheel-height', '60');
+  await page.evaluate(() => { const e = document.getElementById('btn-wheel-ball'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.click('#btn-wheel-ball');
   await page.waitForFunction(() => /Ball centred/.test(document.getElementById('status').textContent),
     null, { timeout: 30000 });
@@ -137,7 +139,9 @@ withApp(async (page, logs) => {
   // inp-wheel-pull-z moved into the top bar's Gen dropdown; unfold it first.
   await page.evaluate(() => { const e = document.getElementById('inp-wheel-pull-z'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.fill('#inp-wheel-pull-z', '12');
+  await page.evaluate(() => { const e = document.getElementById('inp-wheel-pull-dr'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.fill('#inp-wheel-pull-dr', '1.5');
+  await page.evaluate(() => { const e = document.getElementById('btn-wheel-pull'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.click('#btn-wheel-pull');
   await page.waitForFunction(() => /Pulled|would take/.test(document.getElementById('status').textContent),
     null, { timeout: 30000 });
@@ -201,6 +205,7 @@ withApp(async (page, logs) => {
   // inp-wheel-trim-z moved into the top bar's Gen dropdown; unfold it first.
   await page.evaluate(() => { const e = document.getElementById('inp-wheel-trim-z'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.fill('#inp-wheel-trim-z', '2');
+  await page.evaluate(() => { const e = document.getElementById('btn-wheel-trim'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.click('#btn-wheel-trim');
   await page.waitForFunction(() => /Trimmed/.test(document.getElementById('status').textContent),
     null, { timeout: 30000 });
@@ -214,7 +219,9 @@ withApp(async (page, logs) => {
   check('the piece is shorter', trimmed.size.y < pulled.size.y,
     pulled.size.y + ' -> ' + trimmed.size.y + ' mm');
 
+  await page.evaluate(() => { const e = document.getElementById('inp-wheel-rim-mm'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.fill('#inp-wheel-rim-mm', '10');
+  await page.evaluate(() => { const e = document.getElementById('btn-wheel-rim'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.click('#btn-wheel-rim');
   await page.waitForFunction(() => /Rim extended|Rim extension refused/.test(document.getElementById('status').textContent),
     null, { timeout: 30000 });

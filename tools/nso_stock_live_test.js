@@ -115,6 +115,7 @@ withApp(async (page, logs) => {
     // btn-rot-right moved into the top bar's Rotate dropdown; unfold it first.
     await page.evaluate(() => { const e = document.getElementById('btn-rot-right'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-rot-right');   /* yaw 90 */
+    await page.evaluate(() => { const e = document.getElementById('btn-tilt-up'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-tilt-up');     /* pitch one step */
     posed = await shot(page, id);
     check('the block has been moved and posed by hand',

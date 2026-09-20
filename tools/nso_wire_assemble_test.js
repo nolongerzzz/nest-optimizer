@@ -137,6 +137,7 @@ withApp(async (page, logs) => {
     await page.evaluate(() => { const e = document.getElementById('btn-stock-attach'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     check('app-join.js\'s union is the boolean it will use', w.union === 'function');
 
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-attach'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-attach');
     const armed = await page.evaluate(() => ({
       pressed: document.getElementById('btn-stock-attach').getAttribute('aria-pressed'),

@@ -176,6 +176,7 @@ withApp(async (page, logs) => {
     check('it says what it does', shape && /save/i.test(shape.text) && /librar/i.test(shape.text), shape && shape.text);
 
     // Nothing selected yet: it must say so and send nothing.
+    await page.evaluate(() => { const e = document.getElementById('btn-library-save'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-library-save');
     await page.waitForTimeout(200);
     check('with no piece selected it refuses, in words',

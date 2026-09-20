@@ -89,6 +89,7 @@ async function main() {
   check('with STL selected the cooling row is hidden',
     await page.evaluate(() => document.getElementById('cooling-profile-row').hidden), true);
 
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', '3mf');
   check('switching to 3MF relabels both buttons and the right-click item',
     await page.evaluate(() => [
@@ -207,6 +208,7 @@ async function main() {
     stlBytes.length === 84 + 50 * stlBytes.readUInt32LE(80) && stlBytes.readUInt32LE(80) > 0, true);
 
   // --- the choice survives a reload ---
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', '3mf');
   await page.reload({ waitUntil: 'load' });
   await page.waitForFunction('window.state && window.state.ready', null, { timeout: 20000 });

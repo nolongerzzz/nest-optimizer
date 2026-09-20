@@ -378,6 +378,7 @@ withApp(async (page, logs) => {
     // inp-wheel-height moved into the top bar's Gen dropdown; unfold it first.
     await page.evaluate(() => { const e = document.getElementById('inp-wheel-height'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.fill('#inp-wheel-height', '60');
+    await page.evaluate(() => { const e = document.getElementById('btn-wheel-ball'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-wheel-ball');
     await page.waitForFunction(() => /Ball centred/.test(document.getElementById('status').textContent),
       null, { timeout: 30000 });

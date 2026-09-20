@@ -3217,17 +3217,28 @@ function setupUI() {
 
   const btnFrame = document.getElementById('btn-frame-selected');
   if (btnFrame) btnFrame.addEventListener('click', frameSelectedPiece);
-  /* One menu open at a time. Opening a menu shuts the others, so the bar's
-     nine dropdowns and the Finish menu never stack over each other.
+  /* One menu open at a time WITHIN AN OVERLAY. Opening one of the top bar's
+     dropdowns shuts the other eight, so they never stack over each other,
+     and Gen+'s two - Wheel and Stock - are exclusive with one another.
 
-     A menu that CONTAINS the one being opened, or sits inside it, is left
-     alone: Gen+ holds the Wheel and Stock menus, and the old blanket rule
-     would have had Wheel's own opening shut the Gen+ it lives in - the click
-     would open a menu and hide it in the same breath. */
+     Scoped to the overlay rather than the whole page, for two reasons.
+
+     A menu that contains the one being opened is left alone: Gen+ holds
+     Wheel and Stock, and a blanket rule has Wheel's own opening shut the
+     Gen+ it lives in - a click that opens a menu and hides it in the same
+     breath.
+
+     And the Finish menu is a different overlay on the far side of the
+     viewport, overlapping none of them. Under the blanket rule, reaching
+     the top bar for anything at all shut it: with Export in the bar now,
+     every check that opened Finish, exported, and came back to a Finish
+     control found it closed. That was eleven suites. The bar and Finish are
+     independent because on screen they do not collide. */
   document.querySelectorAll('.vp-menu').forEach(function (d) {
     d.addEventListener('toggle', function () {
       if (!d.open) return;
-      document.querySelectorAll('.vp-menu').forEach(function (o) {
+      var scope = d.closest('.viewport-overlay') || document;
+      scope.querySelectorAll('.vp-menu').forEach(function (o) {
         if (o === d || o.contains(d) || d.contains(o)) return;
         o.open = false;
       });
