@@ -2488,10 +2488,20 @@ function onCanvasContextMenu(event) {
 
 function onCanvasPointerDown(event) {
   /* The rotation handle is hit-tested first and swallows the event. That is
-     the point of Task 1's separate grab target: a click on the PIECE still
-     means select-and-move, exactly as before, and only the ball rotates. */
+     the point of the separate grab target: a click on the PIECE still means
+     select-and-move, exactly as before, and only the ball rotates.
+
+     ONLY WHILE ROTATE OWNS THE INPUT. Being hit-tested first is a strong
+     claim on the pointer, and it used to be made on nothing but the group
+     being visible - which it was for as long as anything was selected. A drag
+     that landed on the ball rotated the piece from the Tip menu and from the
+     Move menu, where the user had asked for neither and the guide had drawn
+     itself unbidden. app-rotate-handles now empties the group when it loses
+     the menu, so there is nothing here to hit; the check is repeated here
+     because this is the code doing the claiming. */
   if (typeof nsoRotate !== 'undefined' && typeof state !== 'undefined' &&
-      state.raycaster && state.camera && event.button === 0) {
+      state.raycaster && state.camera && event.button === 0 &&
+      (typeof nsoInputMode === 'undefined' || !nsoInputMode || nsoInputMode.owns('menu-rotate'))) {
     var rotG = state.scene && state.scene.getObjectByName('nso-rotate-handles');
     if (rotG && rotG.visible && rotG.children.length) {
       setPointerFromEvent(event);
@@ -2809,8 +2819,16 @@ function selectPlaced(idx) {
   clearSelectionOutline();
 
   state.selectedIndex = idx;
-  // the rotation handles belong to whatever is selected, so they move with it
-  if (typeof nsoRotate !== 'undefined') setTimeout(function () { nsoRotate.refresh(); }, 0);
+  /* The open menu's guides belong to whatever is selected, so they move with
+     it. Through nsoInputMode rather than by naming a module: this line used
+     to call nsoRotate.refresh() alone, so Move's arrows were never told the
+     selection had changed and stayed drawn around the piece before - or
+     around nothing at all, once it was deselected. Asking the arbiter to
+     refresh whoever owns the input covers every tool that draws one, and the
+     next one added does not have to remember to edit this line. */
+  if (typeof nsoInputMode !== 'undefined' && nsoInputMode)
+    setTimeout(function () { nsoInputMode.refresh(); }, 0);
+  else if (typeof nsoRotate !== 'undefined') setTimeout(function () { nsoRotate.refresh(); }, 0);
   const p = state.placed[idx];
   if (p && p.mesh) {
     p.mesh.material.emissive = new THREE.Color(0xdc2626);

@@ -33,7 +33,13 @@
     return (p && p.mesh) ? p : null;
   }
   function say(t, bad) { if (typeof setStatus === 'function') setStatus(t, !!bad); }
+  /* Whether this menu owns the input right now - asked of nsoInputMode, not
+     read off `#menu-move.open`. Rotate and Tilt claim the same four arrows
+     off two other <details>; the accordion meant to keep one open runs off
+     `toggle`, which arrives a task late, so all three guards could be true at
+     once. The arbiter answers synchronously and collapses that state. */
   function menuOpen() {
+    if (window.nsoInputMode) return window.nsoInputMode.owns('menu-move');
     var d = document.getElementById('menu-move');
     return !!(d && d.open);
   }
@@ -185,10 +191,13 @@
   /* ---- the slider --------------------------------------------------------- */
   function sliderEl() { return document.getElementById('move-vert-slider'); }
 
+  /* The slider is an overlay over the viewport with pointer-events on, so it
+     has to go when this menu stops owning the input and not merely when the
+     mode does - a panel left hanging there eats clicks aimed at the plate. */
   function syncSlider() {
     var el = sliderEl(), p = piece();
     if (!el) return;
-    if (!on() || !p) { el.parentElement.hidden = true; return; }
+    if (!on() || !p || !menuOpen()) { el.parentElement.hidden = true; return; }
     el.parentElement.hidden = false;
     el.value = String(p.liftY || 0);
     var out = document.getElementById('move-vert-read');
@@ -282,6 +291,25 @@
     if (!document._mvKeysBound) {
       document._mvKeysBound = true;
       document.addEventListener('keydown', onKeyDown);
+    }
+    /* Leaving the menu takes the mode down with it, and says so once.
+
+       It used to survive: state.moveVertical is read by app-core's
+       startMoveDrag, which belongs to no menu, so free drag went on being
+       refused from every other menu - with a message naming a mode the user
+       had left and a box they could not see to clear. A refusal nobody can
+       act on is indistinguishable from the app being stuck, and that is a
+       large part of what the lag report was. Turning it off through setOn is
+       what keeps the checkbox, the slider and the camera honest about it. */
+    if (window.nsoInputMode) {
+      window.nsoInputMode.register('menu-move', {
+        activate: function () { refreshArrows(); syncSlider(); },
+        teardown: function () {
+          if (on()) setOn(false);
+          refreshArrows();
+          syncSlider();
+        }
+      });
     }
     refreshArrows();
     syncSlider();

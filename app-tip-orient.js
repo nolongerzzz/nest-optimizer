@@ -154,6 +154,12 @@
      the button carries is-armed plus aria-pressed. */
   function setArmed(on) {
     if (typeof state === 'undefined' || !state) return;
+    /* The others go away FIRST, and the order is load-bearing now. This tool
+       is itself listed in disarmOthers - it has to be, or arming Paint or the
+       Brush leaves it armed behind them and app-core routes it first - so
+       calling that list AFTER setting the flag had it disarm itself on the
+       way up. Same call, one line earlier, and arming is idempotent again. */
+    if (on && typeof window.nsoMaskDisarmOthers === 'function') window.nsoMaskDisarmOthers();
     state.tipFaceArmed = !!on;
     var b = document.getElementById('btn-tip-face');
     if (b) {
@@ -161,10 +167,7 @@
       b.setAttribute('aria-pressed', on ? 'true' : 'false');
       b.textContent = on ? 'Click a face…' : 'Tip on face';
     }
-    if (on) {
-      if (typeof window.nsoMaskDisarmOthers === 'function') window.nsoMaskDisarmOthers();
-      say('Tip on face - click the face to rest it on');
-    }
+    if (on) say('Tip on face - click the face to rest it on');
   }
   function toggleArmed() {
     var p = piece();
@@ -199,7 +202,19 @@
     return true;
   }
 
+  /* Whether this menu owns the input right now - asked of nsoInputMode, not
+     read off `#menu-tip.open`. Rotate's arrows and Move's arrows are the same
+     four keys off two other <details>, and three handlers each reading their
+     own element are exclusive only if something guarantees one is open. The
+     accordion that was meant to is driven by `toggle`, which arrives a task
+     late, so two menus open in one turn had one ArrowUp tilting 15 degrees
+     and nudging a degree of yaw at the same time. The arbiter answers from
+     the DOM at the moment it is asked and ends the ambiguity on the spot.
+
+     menuOpen stays the exported name because that is what it means to a
+     caller outside this file, and the checks read it. */
   function menuOpen() {
+    if (window.nsoInputMode) return window.nsoInputMode.owns('menu-tip');
     var d = document.getElementById('menu-tip');
     return !!(d && d.open);
   }
@@ -236,6 +251,19 @@
     if (!document._tipKeysBound) {
       document._tipKeysBound = true;
       document.addEventListener('keydown', onKeyDown);
+    }
+    /* Leaving the menu disarms Tip on face, THROUGH setArmed, so the button
+       stops being lit and aria-pressed follows. It used to stay armed: the
+       flag is read by app-core's pointerdown, which is not scoped to any
+       menu, so a left click on a piece from the Rotate or Move menu re-seated
+       it onto the face clicked - a piece turning over with nothing on screen
+       to say why. An armed picker belongs to the menu it was armed from. */
+    if (window.nsoInputMode) {
+      window.nsoInputMode.register('menu-tip', {
+        teardown: function () {
+          if (typeof state !== 'undefined' && state && state.tipFaceArmed) setArmed(false);
+        }
+      });
     }
   }
 

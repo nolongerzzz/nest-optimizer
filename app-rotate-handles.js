@@ -228,13 +228,23 @@
   var KEYS = { ArrowLeft: ['x', -1], ArrowRight: ['x', 1],
                ArrowUp: ['y', -1], ArrowDown: ['y', 1] };
 
-  /* Which menu the arrows belong to. app-tip-orient.js does the same against
-     #menu-tip, and it has to be both or neither: Tilt uses plain arrows too,
-     so an unscoped handler here would nudge the piece about X or Y at the
-     same time Tip tilted it, off one key press, with no modifier to tell the
-     two apart. Scoping each to its own open menu is what lets both tools have
-     the bare arrow keys at all. */
-  function menuOpen() {
+  /* Whether this menu owns the input right now. Asked of nsoInputMode rather
+     than read off `#menu-rotate.open` directly, and the difference is the
+     whole of the collision this file used to be half of.
+
+     Tilt in app-tip-orient.js claims the same four arrows off #menu-tip. Two
+     handlers each reading their own <details> are only exclusive if something
+     guarantees one <details> - and the toggle-driven accordion does not, since
+     toggle arrives a task later. Opening two menus in one turn left both open,
+     and one ArrowUp then nudged AND tilted the same piece. nsoInputMode
+     resolves the owner synchronously and collapses that state on the spot, so
+     both handlers asking in the same turn get one answer between them.
+
+     Without the arbiter on the page this falls back to the old read, which is
+     right whenever the bar is in a sane state and is better than the tool
+     going dead. */
+  function menuOwnsInput() {
+    if (window.nsoInputMode) return window.nsoInputMode.owns('menu-rotate');
     var d = document.getElementById('menu-rotate');
     return !!(d && d.open);
   }
@@ -243,7 +253,7 @@
     var k = KEYS[ev.key];
     if (!k) return;
     if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-    if (!menuOpen()) return;                       // the scope rule, in one line
+    if (!menuOwnsInput()) return;                  // the scope rule, in one line
     var t = ev.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' ||
               t.isContentEditable)) return;
@@ -330,13 +340,23 @@
     return l;
   }
 
+  /* The guide and its grab target exist only while this menu owns the input.
+
+     They used to be drawn on whatever was selected, for as long as it was
+     selected, and app-core's pointerdown hit-tests this group AHEAD of
+     select-and-drag - so the ball was a live rotation control in the Tip menu
+     and in the Move menu, where the user had asked for neither. Emptying the
+     group is the teardown: clearGroup disposes every geometry and material,
+     so there is nothing left in the scene for a ray to find. Hiding it would
+     not have been enough, because `visible` is exactly the flag the picker
+     was already trusting. */
   function refresh() {
     var g = ensureGroup();
     if (!g) return;
     clearGroup(g);
     var p = piece();
     var m = mode();
-    if (!p || m === 'none') { g.visible = false; return; }
+    if (!p || m === 'none' || !menuOwnsInput()) { g.visible = false; return; }
     g.visible = true;
     var r = Math.max(8, (Math.max(p.width || 0, p.depth || 0, p.height || 0) / 2) * 1.45);
     g.position.copy(p.mesh.position);
@@ -365,6 +385,15 @@
     if (!document._rotKeysBound) {
       document._rotKeysBound = true;
       document.addEventListener('keydown', onKeyDown);
+    }
+    /* Losing the menu ends any drag in flight before the guide goes: endDrag
+       is what gives OrbitControls back, and a drag abandoned mid-way would
+       otherwise leave the camera frozen with no handle left to release it. */
+    if (window.nsoInputMode) {
+      window.nsoInputMode.register('menu-rotate', {
+        activate: refresh,
+        teardown: function () { if (drag) endDrag(); refresh(); }
+      });
     }
     refresh();
   }

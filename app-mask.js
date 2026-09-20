@@ -593,6 +593,18 @@
       if (measureBtn) measureBtn.click();
       else state.measureOn = false;
     }
+    /* Tip on face is a click-on-a-piece picker like the rest and belongs in
+       this list. It goes off through its own setArmed so the button stops
+       being lit and aria-pressed follows - the contract stated at the top of
+       this block. It was missing: arming Paint, Carve or the Brush left Tip
+       on face armed behind them, and app-core routes its block first, so the
+       click meant for the new tool re-seated the piece instead. */
+    if (state.tipFaceArmed && typeof window.nsoTipOrient !== 'undefined' &&
+        typeof window.nsoTipOrient.setArmed === 'function') {
+      window.nsoTipOrient.setArmed(false);
+    } else {
+      state.tipFaceArmed = false;
+    }
     state.softenArmed = false;
     state.capArmed = false;
     state.centerLockArmed = false;

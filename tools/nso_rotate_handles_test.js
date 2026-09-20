@@ -32,6 +32,13 @@ withApp(async (page, logs) => {
 
   const api = await page.evaluate(() => typeof window.nsoRotate);
   check('the module is on the page', api === 'object', 'typeof = ' + api);
+
+  /* The Rotate menu open for the sections that count handles. The guide and
+     its grab target belong to this menu now - "both axes locked leaves no
+     handle at all" in section 4 says nothing unless there would have been
+     one otherwise. Section 5 shuts it again on purpose, as its own subject. */
+  await page.evaluate(() => { document.getElementById('menu-rotate').open = true; });
+  await page.waitForTimeout(100);
   const K = await page.evaluate(() => window.nsoRotate.constants);
 
   /* ------------------------------------------------------------------ 1 */
@@ -337,8 +344,15 @@ withApp(async (page, logs) => {
   /* ------------------------------------------------------------------ 7 */
   console.log('\n=== 7. the handle is a separate grab target from the piece ===');
   {
+    /* Open first, and that is part of the subject now rather than setup.
+       The guide used to be drawn on whatever was selected for as long as it
+       was selected - and app-core hit-tests it AHEAD of select-and-drag, so
+       it was a live rotation control in the Tip and Move menus too, where
+       nobody had asked for one. It belongs to this menu; see
+       nso_input_mode_test.js for the cross-menu half of that. */
     const h = await page.evaluate(() => {
       const a = window.nsoRotate;
+      document.getElementById('menu-rotate').open = true;
       a.setLock('x', false); a.setLock('y', false);
       a.refresh();
       const g = state.scene.getObjectByName('nso-rotate-handles');
@@ -350,6 +364,18 @@ withApp(async (page, logs) => {
     check('the handles are in the scene as their own object', h.exists && h.visible);
     check('there is a ball to grab', h.balls >= 1, h.balls + ' ball(s), ' + h.kids + ' parts');
     check('the group sits on the selected piece', near(h.follows, 0, 1e-6), h.follows);
+
+    /* And gone when the menu is - EMPTIED, not hidden. `visible` is the flag
+       app-core's picker was already trusting, so hiding the group would have
+       left the same grab target live under another menu. */
+    const shut = await page.evaluate(() => {
+      document.getElementById('menu-rotate').open = false;
+      window.nsoRotate.refresh();
+      const g = state.scene.getObjectByName('nso-rotate-handles');
+      return { visible: !!(g && g.visible), kids: g ? g.children.length : 0 };
+    });
+    check('with the menu shut there is no handle left in the scene at all',
+      !shut.visible && shut.kids === 0, JSON.stringify(shut));
   }
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
