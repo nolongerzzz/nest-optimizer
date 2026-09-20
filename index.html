@@ -188,10 +188,16 @@
             </div>
           </details>
           <details class="vp-menu vp-top-menu" id="menu-rotate">
-            <summary class="vp-bar-btn" title="Turn the selected piece 90 degrees">Rotate</summary>
+            <summary class="vp-bar-btn" title="Turn the selected piece: 90° steps, or freehand by its handle">Rotate</summary>
             <div class="vp-menu-body vp-top-body">
               <button id="btn-rot-left" class="vp-bar-btn adjust-btn" disabled>⟲ 90°</button>
               <button id="btn-rot-right" class="vp-bar-btn adjust-btn" disabled>90° ⟳</button>
+              <label class="vp-flag vp-flag-rotlock" title="Lock rotation about X (pitch). A locked axis has no handle to grab and its arrow keys do nothing. The 90° buttons are not affected.">
+                <input type="checkbox" id="chk-rot-lock-x"><span class="vp-flag-face">Lock X</span>
+              </label>
+              <label class="vp-flag vp-flag-rotlock" title="Lock rotation about Y (yaw). A locked axis has no handle to grab and its arrow keys do nothing. The 90° buttons are not affected.">
+                <input type="checkbox" id="chk-rot-lock-y"><span class="vp-flag-face">Lock Y</span>
+              </label>
             </div>
           </details>
           <details class="vp-menu vp-top-menu" id="menu-tip">
@@ -799,6 +805,7 @@
   <script src="app-texture.js?v=skin2"></script>
   <script src="app-nonsolid.js?v=inside4"></script>
   <script src="app-poslock.js?v=lock1"></script>
+  <script src="app-rotate-handles.js?v=rot1"></script>
   <script src="app-defects.js?v=inside5"></script>
   <script src="app-measure.js?v=inside6"></script>
   <!-- The library write features. access first: it holds the gate, the
