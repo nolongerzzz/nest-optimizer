@@ -368,6 +368,33 @@
     return !!(list && !list.hasAttribute('hidden'));
   }
 
+  /* The menu the list is sitting in. Found by walking up rather than named,
+     because the list has already moved once - it was its own popover off a
+     bar button before the Import dropdown existed - and this should keep
+     working wherever it lands next. */
+  function menuEl() {
+    var list = listEl();
+    return list ? list.closest('details') : null;
+  }
+
+  /* Dismissal: the list AND the dropdown holding it.
+
+     Deliberately NOT folded into setOpen. setOpen is the From Library
+     button's own toggle, and collapsing the list with that button must not
+     tear down the whole Import dropdown around it - the From File button is
+     in there too. Dismissal is the other thing: the user is done with the
+     menu, by loading a piece, by pressing Escape, or by pointing somewhere
+     else entirely. */
+  function dismiss() {
+    setOpen(false);
+    var m = menuEl();
+    if (m) m.open = false;
+  }
+  function anyOpen() {
+    var m = menuEl();
+    return isOpen() || !!(m && m.open);
+  }
+
   /* One row. Same element, same class, same .name span holding the file's
      own name - nso_skin_fine_drive_check finds rows by that name and clicks
      them, and a row is still a row wherever it now sits. */
@@ -390,12 +417,12 @@
     row.appendChild(makeDeleteBtn(entry, row));
     row.addEventListener('click', function (ev) {
       ev.stopPropagation();
-      setOpen(false);
+      dismiss();
       loadOne(entry, row);
     });
     row.addEventListener('keydown', function (ev) {
       if (ev.key === 'Enter' || ev.key === ' ') {
-        ev.preventDefault(); setOpen(false); loadOne(entry, row);
+        ev.preventDefault(); dismiss(); loadOne(entry, row);
       }
     });
     return row;
@@ -558,7 +585,17 @@
       var sec = document.createElement('details');
       sec.className = 'vp-sec library-sec';
       sec.dataset.sec = cat;
-      sec.open = true;
+      /* Shut, like the Finish menu's groups. They shipped open on the theory
+         that a browser you opened to find one piece should show you the
+         pieces - but that was written when the list was its own popover. In
+         the Import dropdown it means every category's rows are in front of
+         you before you have said which category you want, and you scroll
+         past all of them to reach the one you do. Closed, the four headings
+         and their counts fit at a glance and one click gets you there.
+         Independent of each other, again like Finish: opening Skins does not
+         shut Washers, because picking a skin and a washer for the same job
+         is one task. */
+      sec.open = false;
       var head = document.createElement('summary');
       head.className = 'vp-sec-head';
       head.textContent = cat;
@@ -582,28 +619,34 @@
         setOpen(!isOpen());
       });
     }
-    /* Pointer down outside, or Escape, closes it.
+    /* Pointer down outside, or Escape, dismisses it. This handler already
+       did that for the bare list; it now covers the dropdown holding it, so
+       pointing at the plate, at a placed piece, or anywhere else puts the
+       whole thing away.
 
        On pointerdown and not click: a drag on the viewport - orbiting the
        scene, moving a piece - never produces a click, so a click-based
-       close leaves the list hanging over the model for the whole drag. And
+       close leaves the menu hanging over the model for the whole drag. And
        in the capture phase, because the canvas handlers stop propagation on
        their own pointerdowns and a bubble listener never hears those at all.
 
-       Inside the list is left alone on purpose: hiding it under the pointer
-       would destroy the row before its click could fire, and the row's own
-       click is what loads. */
+       Anywhere INSIDE the menu is left alone, which now means the panel and
+       not just the list: From File, a category heading and a row are all
+       things you point at while still using the menu, and hiding it under
+       the pointer would destroy a row before its own click could fire. The
+       row's click is what loads, and loading dismisses on its own. */
     if (!document._libBound) {
       document._libBound = true;
       document.addEventListener('pointerdown', function (ev) {
-        if (!isOpen()) return;
-        var list = listEl(), b = btnEl();
+        if (!anyOpen()) return;
+        var list = listEl(), b = btnEl(), m = menuEl();
         if (list && list.contains(ev.target)) return;
         if (b && b.contains(ev.target)) return;
-        setOpen(false);
+        if (m && m.contains(ev.target)) return;
+        dismiss();
       }, true);
       document.addEventListener('keydown', function (ev) {
-        if (ev.key === 'Escape' && isOpen()) setOpen(false);
+        if (ev.key === 'Escape' && anyOpen()) dismiss();
       }, true);
     }
     setOpen(false);

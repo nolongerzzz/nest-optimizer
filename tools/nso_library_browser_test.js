@@ -229,6 +229,190 @@ withApp(async (page, logs) => {
       m.name === pieceName(file) && m.tris === want, m.name + ' / ' + m.tris + ' vs ' + want);
   }
 
+  /* ---------------------------------------------------------------- 6 */
+  console.log('\n=== 6. the Import dropdown sizes to its own content, and starts shut ===');
+  {
+    /* Two bugs from the live site, both only visible with the menu open.
+
+       The list was built as a popover off the old From Library bar button:
+       position:absolute, its own border, its own scroll box. Absolutely
+       positioned means OUT OF FLOW, so inside the Import panel it added
+       nothing to the panel's height - the panel measured the two buttons
+       above it, 80px, while holding 394px of list, and clipped the rest into
+       a slot you had to scroll. And every category shipped open, so the
+       first thing the dropdown showed was every row in the catalogue.
+
+       Measured from the rendered page, because neither is visible in the
+       markup and neither was caught by anything that reads it. */
+    await page.setViewportSize({ width: 1400, height: 720 });   // a short window
+    /* A FRESH page. Sections 1-5 drive the browser through openLib, which
+       forces every category open to reach a row - so by here the list is open
+       because this file opened it. Asking a page in that state what its
+       initial state is answers the question the test itself set up. Reload,
+       and measure the dropdown as a user meets it. */
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true,
+      null, { timeout: 30000 });
+    await page.evaluate(() => {
+      /* The BAR's menus only - ':scope > details'. '.viewport-overlay-topbar
+         details' also matches the four category sections inside Import, and
+         shutting those here is the test closing them itself: "every category
+         starts shut" then passes whatever the app does, which is worse than
+         no check at all. Verified by reverting the fix - these assertions go
+         red without it. */
+      document.querySelectorAll('.viewport-overlay-topbar > details').forEach(d => { d.open = false; });
+      document.getElementById('menu-import').open = true;
+      const b = document.getElementById('btn-library');
+      if (b && b.getAttribute('aria-expanded') !== 'true') b.click();
+    });
+    await page.waitForFunction(() => {
+      const l = document.getElementById('library-list');
+      return l && !l.hasAttribute('hidden');
+    }, null, { timeout: 5000 });
+
+    const d = await page.evaluate(() => {
+      const body = document.querySelector('#menu-import > .vp-top-body');
+      const list = document.getElementById('library-list');
+      const btn = document.getElementById('btn-library');
+      const pb = body.getBoundingClientRect(), lb = list.getBoundingClientRect(),
+            bb = btn.getBoundingClientRect();
+      return {
+        panelH: +pb.height.toFixed(1), panelBottom: +pb.bottom.toFixed(1),
+        clipped: body.scrollHeight > body.clientHeight + 1,
+        listPos: getComputedStyle(list).position,
+        listH: +lb.height.toFixed(1),
+        listUnderButton: lb.top >= bb.bottom - 1,
+        listInPanel: lb.right <= pb.right + 1 && lb.left >= pb.left - 1,
+        winH: window.innerHeight,
+        pageScrolls: document.documentElement.scrollHeight > window.innerHeight,
+        secs: [...document.querySelectorAll('#library-list .library-sec')]
+          .map(x => ({ name: x.dataset.sec, open: x.open })),
+        paintedRows: [...document.querySelectorAll('#library-list .library-item')]
+          .filter(r => r.checkVisibility ? r.checkVisibility() : false).length
+      };
+    });
+
+    check('the list is in flow, so the panel can measure it', d.listPos === 'static', d.listPos);
+    check('the panel grew past the two buttons it used to be stuck at',
+      d.panelH > 100, d.panelH + 'px tall, list ' + d.listH + 'px');
+    check('nothing is clipped into a scroll box inside the panel', !d.clipped);
+    check('the panel fits on a 720px window without running off the bottom',
+      d.panelBottom <= d.winH, 'bottom ' + d.panelBottom + ' vs window ' + d.winH);
+    check('opening it does not put the PAGE into a scroll', !d.pageScrolls);
+    check('the list sits under its button, inside the panel',
+      d.listUnderButton && d.listInPanel);
+
+    check('every category starts shut', d.secs.length > 0 && d.secs.every(x => !x.open),
+      d.secs.map(x => x.name + '=' + (x.open ? 'OPEN' : 'shut')).join(', '));
+    check('...so no row is on screen before a category is picked',
+      d.paintedRows === 0, d.paintedRows + ' painted');
+
+    /* The interaction, against the Finish menu's own precedent: its groups
+       are independent, so opening one does not shut another. Same here -
+       picking a skin and a washer for one job is a single task. */
+    const one = await page.evaluate(() => {
+      const before = document.querySelector('#menu-import > .vp-top-body').getBoundingClientRect().height;
+      document.querySelector('#library-list .library-sec[data-sec="Skins"] summary').click();
+      const body = document.querySelector('#menu-import > .vp-top-body');
+      return {
+        before: +before.toFixed(1), after: +body.getBoundingClientRect().height.toFixed(1),
+        secs: [...document.querySelectorAll('#library-list .library-sec')]
+          .map(x => ({ name: x.dataset.sec, open: x.open })),
+        pageScrolls: document.documentElement.scrollHeight > window.innerHeight,
+        onScreen: body.getBoundingClientRect().bottom <= window.innerHeight
+      };
+    });
+    const skins = one.secs.find(x => x.name === 'Skins');
+    check('clicking a category opens it', !!skins && skins.open);
+    check('...and leaves the others shut - independent, like Finish\'s groups',
+      one.secs.filter(x => x.name !== 'Skins').every(x => !x.open),
+      one.secs.map(x => x.name + '=' + (x.open ? 'OPEN' : 'shut')).join(', '));
+    check('...and the panel grows to fit what it now shows',
+      one.after > one.before, one.before + ' -> ' + one.after + 'px');
+    check('...still without scrolling the page or leaving the window',
+      !one.pageScrolls && one.onScreen);
+  }
+
+  /* ---------------------------------------------------------------- 7 */
+  console.log('\n=== 7. the Import dropdown dismisses itself ===');
+  {
+    /* Reusing what was already there rather than writing new dismissal:
+       app-library.js has had a capture-phase pointerdown listener and an
+       Escape handler since the list was its own popover off a bar button.
+       Both now close the dropdown holding the list as well as the list.
+
+       Capture phase and pointerdown, not click, because the canvas handlers
+       stop propagation on their own pointerdowns and a drag never produces a
+       click at all - so a bubbling click listener would leave the menu
+       hanging over the model for the length of an orbit. */
+    const state = () => page.evaluate(() => ({
+      menu: document.getElementById('menu-import').open,
+      list: !document.getElementById('library-list').hasAttribute('hidden')
+    }));
+    const openBoth = () => page.evaluate(() => {
+      document.getElementById('menu-import').open = true;
+      const b = document.getElementById('btn-library');
+      if (b.getAttribute('aria-expanded') !== 'true') b.click();
+      document.querySelectorAll('#library-list .library-sec').forEach(d => { d.open = true; });
+    });
+    const canvasAt = f => page.evaluate(fr => {
+      const r = document.getElementById('viewport').getBoundingClientRect();
+      return { x: Math.round(r.x + r.width * fr), y: Math.round(r.y + r.height * 0.75) };
+    }, f);
+    const poke = async pt => { await page.mouse.move(pt.x, pt.y); await page.mouse.down();
+                               await page.mouse.up(); await page.waitForTimeout(200); };
+
+    // picking a piece puts the menu away
+    await openBoth();
+    const n0 = await page.evaluate(() => state.models.length);
+    await page.click('#library-list .library-item[data-file="pin.stl"]');
+    await page.waitForFunction(n => state.models.length > n, n0, { timeout: 30000 });
+    let st = await state();
+    check('loading a piece closes the dropdown it was picked from',
+      !st.menu && !st.list, JSON.stringify(st));
+
+    // pointing at the plate puts it away
+    await openBoth();
+    await poke(await canvasAt(0.72));
+    st = await state();
+    check('a pointer down on the plate closes it', !st.menu && !st.list, JSON.stringify(st));
+
+    // pointing at a placed piece puts it away
+    await openBoth();
+    await poke(await canvasAt(0.5));
+    st = await state();
+    check('a pointer down on a placed piece closes it', !st.menu && !st.list, JSON.stringify(st));
+
+    // Escape puts it away
+    await openBoth();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    st = await state();
+    check('Escape closes it', !st.menu && !st.list, JSON.stringify(st));
+
+    /* The other half, and the one a blunter fix gets wrong: everything the
+       user points at while still USING the menu has to leave it alone. */
+    await openBoth();
+    await page.evaluate(() => document.querySelectorAll('#library-list .library-sec')
+      .forEach(d => { d.open = false; }));
+    await page.click('#library-list .library-sec[data-sec="Skins"] summary');
+    await page.waitForTimeout(200);
+    st = await state();
+    const skinsOpen = await page.evaluate(() =>
+      document.querySelector('#library-list .library-sec[data-sec="Skins"]').open);
+    check('clicking a category heading expands it and does NOT dismiss',
+      st.menu && st.list && skinsOpen, JSON.stringify(st) + ' skins=' + skinsOpen);
+
+    /* And From Library stays a toggle for its own list. Folding dismissal
+       into setOpen would have made that button tear down the dropdown
+       around it - with From File still sitting in there. */
+    await page.evaluate(() => { document.getElementById('btn-library').click(); });
+    await page.waitForTimeout(200);
+    st = await state();
+    check('From Library still collapses only its list, leaving the menu open',
+      st.menu && !st.list, JSON.stringify(st));
+  }
+
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   if (errs.length) { console.log('\npage errors:\n' + errs.join('\n')); fails++; }
   console.log('\n' + (fails ? fails + ' FAILED' : 'all gates held'));
