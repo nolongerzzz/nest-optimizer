@@ -229,6 +229,110 @@ withApp(async (page, logs) => {
       m.name === pieceName(file) && m.tris === want, m.name + ' / ' + m.tris + ' vs ' + want);
   }
 
+  /* ---------------------------------------------------------------- 6 */
+  console.log('\n=== 6. the Import dropdown sizes to its own content, and starts shut ===');
+  {
+    /* Two bugs from the live site, both only visible with the menu open.
+
+       The list was built as a popover off the old From Library bar button:
+       position:absolute, its own border, its own scroll box. Absolutely
+       positioned means OUT OF FLOW, so inside the Import panel it added
+       nothing to the panel's height - the panel measured the two buttons
+       above it, 80px, while holding 394px of list, and clipped the rest into
+       a slot you had to scroll. And every category shipped open, so the
+       first thing the dropdown showed was every row in the catalogue.
+
+       Measured from the rendered page, because neither is visible in the
+       markup and neither was caught by anything that reads it. */
+    await page.setViewportSize({ width: 1400, height: 720 });   // a short window
+    /* A FRESH page. Sections 1-5 drive the browser through openLib, which
+       forces every category open to reach a row - so by here the list is open
+       because this file opened it. Asking a page in that state what its
+       initial state is answers the question the test itself set up. Reload,
+       and measure the dropdown as a user meets it. */
+    await page.reload({ waitUntil: 'load' });
+    await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true,
+      null, { timeout: 30000 });
+    await page.evaluate(() => {
+      /* The BAR's menus only - ':scope > details'. '.viewport-overlay-topbar
+         details' also matches the four category sections inside Import, and
+         shutting those here is the test closing them itself: "every category
+         starts shut" then passes whatever the app does, which is worse than
+         no check at all. Verified by reverting the fix - these assertions go
+         red without it. */
+      document.querySelectorAll('.viewport-overlay-topbar > details').forEach(d => { d.open = false; });
+      document.getElementById('menu-import').open = true;
+      const b = document.getElementById('btn-library');
+      if (b && b.getAttribute('aria-expanded') !== 'true') b.click();
+    });
+    await page.waitForFunction(() => {
+      const l = document.getElementById('library-list');
+      return l && !l.hasAttribute('hidden');
+    }, null, { timeout: 5000 });
+
+    const d = await page.evaluate(() => {
+      const body = document.querySelector('#menu-import > .vp-top-body');
+      const list = document.getElementById('library-list');
+      const btn = document.getElementById('btn-library');
+      const pb = body.getBoundingClientRect(), lb = list.getBoundingClientRect(),
+            bb = btn.getBoundingClientRect();
+      return {
+        panelH: +pb.height.toFixed(1), panelBottom: +pb.bottom.toFixed(1),
+        clipped: body.scrollHeight > body.clientHeight + 1,
+        listPos: getComputedStyle(list).position,
+        listH: +lb.height.toFixed(1),
+        listUnderButton: lb.top >= bb.bottom - 1,
+        listInPanel: lb.right <= pb.right + 1 && lb.left >= pb.left - 1,
+        winH: window.innerHeight,
+        pageScrolls: document.documentElement.scrollHeight > window.innerHeight,
+        secs: [...document.querySelectorAll('#library-list .library-sec')]
+          .map(x => ({ name: x.dataset.sec, open: x.open })),
+        paintedRows: [...document.querySelectorAll('#library-list .library-item')]
+          .filter(r => r.checkVisibility ? r.checkVisibility() : false).length
+      };
+    });
+
+    check('the list is in flow, so the panel can measure it', d.listPos === 'static', d.listPos);
+    check('the panel grew past the two buttons it used to be stuck at',
+      d.panelH > 100, d.panelH + 'px tall, list ' + d.listH + 'px');
+    check('nothing is clipped into a scroll box inside the panel', !d.clipped);
+    check('the panel fits on a 720px window without running off the bottom',
+      d.panelBottom <= d.winH, 'bottom ' + d.panelBottom + ' vs window ' + d.winH);
+    check('opening it does not put the PAGE into a scroll', !d.pageScrolls);
+    check('the list sits under its button, inside the panel',
+      d.listUnderButton && d.listInPanel);
+
+    check('every category starts shut', d.secs.length > 0 && d.secs.every(x => !x.open),
+      d.secs.map(x => x.name + '=' + (x.open ? 'OPEN' : 'shut')).join(', '));
+    check('...so no row is on screen before a category is picked',
+      d.paintedRows === 0, d.paintedRows + ' painted');
+
+    /* The interaction, against the Finish menu's own precedent: its groups
+       are independent, so opening one does not shut another. Same here -
+       picking a skin and a washer for one job is a single task. */
+    const one = await page.evaluate(() => {
+      const before = document.querySelector('#menu-import > .vp-top-body').getBoundingClientRect().height;
+      document.querySelector('#library-list .library-sec[data-sec="Skins"] summary').click();
+      const body = document.querySelector('#menu-import > .vp-top-body');
+      return {
+        before: +before.toFixed(1), after: +body.getBoundingClientRect().height.toFixed(1),
+        secs: [...document.querySelectorAll('#library-list .library-sec')]
+          .map(x => ({ name: x.dataset.sec, open: x.open })),
+        pageScrolls: document.documentElement.scrollHeight > window.innerHeight,
+        onScreen: body.getBoundingClientRect().bottom <= window.innerHeight
+      };
+    });
+    const skins = one.secs.find(x => x.name === 'Skins');
+    check('clicking a category opens it', !!skins && skins.open);
+    check('...and leaves the others shut - independent, like Finish\'s groups',
+      one.secs.filter(x => x.name !== 'Skins').every(x => !x.open),
+      one.secs.map(x => x.name + '=' + (x.open ? 'OPEN' : 'shut')).join(', '));
+    check('...and the panel grows to fit what it now shows',
+      one.after > one.before, one.before + ' -> ' + one.after + 'px');
+    check('...still without scrolling the page or leaving the window',
+      !one.pageScrolls && one.onScreen);
+  }
+
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   if (errs.length) { console.log('\npage errors:\n' + errs.join('\n')); fails++; }
   console.log('\n' + (fails ? fails + ' FAILED' : 'all gates held'));

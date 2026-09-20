@@ -434,6 +434,47 @@ select:focus, input:focus {
   backdrop-filter: blur(12px);
   box-shadow: 0 10px 24px rgba(0,0,0,0.45);
 }
+/* .vp-library wraps the From Library button and its list. It is inline-flex,
+   which put the two side by side the moment the list came back into flow -
+   the categories appeared in a narrow column to the RIGHT of the button and
+   ran past the panel's edge. In the dropdown they stack: button, then the
+   list under it, both the full width of the panel. */
+.vp-top-body .vp-library {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+/* The library list inside the Import dropdown.
+
+   It was built as a popover hanging off the old From Library bar button:
+   position:absolute, its own border, its own 320px scroll box. Inside the
+   Import panel that is wrong in a way that is invisible until you open it -
+   an absolutely positioned child is OUT OF FLOW, so it adds nothing to the
+   panel's height. The panel sized itself to the two buttons above it, 80px,
+   while holding 394px of list, and since the panel scrolls its own overflow
+   the list was clipped into an 80px slot you had to scroll to read.
+
+   In flow, the panel measures what it is actually holding and grows to it,
+   which is what a dropdown is supposed to do. Its own max-height and scroll
+   then bound the whole thing against the viewport, once, instead of two
+   scroll boxes nested inside one another. The chrome goes too: a panel
+   inside a panel drew a second border and a second shadow. */
+.vp-top-body .library-list {
+  position: static;
+  width: 100%;
+  min-width: 0;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
 /* A dropdown near the right edge opens leftwards so it stays on screen. */
 .vp-top-menu.vp-top-right > .vp-top-body { left: auto; right: 0; }
 /* The sidebar controls that moved in here were full-width in a card and

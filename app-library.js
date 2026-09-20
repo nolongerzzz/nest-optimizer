@@ -558,7 +558,17 @@
       var sec = document.createElement('details');
       sec.className = 'vp-sec library-sec';
       sec.dataset.sec = cat;
-      sec.open = true;
+      /* Shut, like the Finish menu's groups. They shipped open on the theory
+         that a browser you opened to find one piece should show you the
+         pieces - but that was written when the list was its own popover. In
+         the Import dropdown it means every category's rows are in front of
+         you before you have said which category you want, and you scroll
+         past all of them to reach the one you do. Closed, the four headings
+         and their counts fit at a glance and one click gets you there.
+         Independent of each other, again like Finish: opening Skins does not
+         shut Washers, because picking a skin and a washer for the same job
+         is one task. */
+      sec.open = false;
       var head = document.createElement('summary');
       head.className = 'vp-sec-head';
       head.textContent = cat;
