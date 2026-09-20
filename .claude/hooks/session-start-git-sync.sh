@@ -34,9 +34,26 @@ log()  { LOG+="${1}"$'\n'; }
 note() { STATUS="attention"; }
 
 # stdin is the hook payload; .source tells us why the session started.
+#
+# Reading it needs jq. Without jq the event type is simply unknowable, and
+# guessing "startup" would hand back MAY_ADVANCE=1 for every event - including
+# 'compact', where fast-forwarding rewrites files underneath work already in
+# progress. That is the exact race this hook is built to avoid, so a missing
+# jq degrades to a value that never advances: fetch, report, leave the tree be.
 INPUT="$(cat 2>/dev/null || true)"
-SOURCE="$(printf '%s' "$INPUT" | jq -r '.source // "startup"' 2>/dev/null || echo startup)"
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)}"
+HAVE_JQ=0
+command -v jq >/dev/null 2>&1 && HAVE_JQ=1
+
+if [ "$HAVE_JQ" -eq 1 ]; then
+  SOURCE="$(printf '%s' "$INPUT" | jq -r '.source // "startup"' 2>/dev/null || echo startup)"
+else
+  SOURCE="unknown-no-jq"
+fi
+
+PROJECT_DIR="${CLAUDE_PROJECT_DIR:-}"
+if [ -z "$PROJECT_DIR" ] && [ "$HAVE_JQ" -eq 1 ]; then
+  PROJECT_DIR="$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)"
+fi
 [ -n "${PROJECT_DIR:-}" ] && cd "$PROJECT_DIR" 2>/dev/null
 
 emit() {
@@ -150,7 +167,8 @@ fi
 
 # Only move the working tree when the session is actually beginning. On
 # 'compact'/'clear'/'fork' the agent is mid-task and changing files underneath
-# it would be worse than being behind.
+# it would be worse than being behind. "unknown-no-jq" lands in the default
+# arm on purpose: an unread event type is treated as possibly mid-task.
 case "$SOURCE" in
   startup|resume) MAY_ADVANCE=1 ;;
   *)              MAY_ADVANCE=0 ;;
@@ -169,10 +187,20 @@ fi
 if [ "$MAY_ADVANCE" -ne 1 ]; then
   note
   log "Fetched origin OK. '$BRANCH' is $BEHIND commit(s) behind $UPSTREAM.$STALE_NOTE"
-  log "Not fast-forwarding because this is a '$SOURCE' event, not a session start -"
-  log "the files would change underneath work already in progress."
+  if [ "$HAVE_JQ" -eq 1 ]; then
+    log "Not fast-forwarding because this is a '$SOURCE' event, not a session start -"
+    log "the files would change underneath work already in progress."
+    REASON="not advanced on '$SOURCE'"
+  else
+    log "Not fast-forwarding because jq is not installed, so the event type could not"
+    log "be read from the hook payload. It may well be a 'compact'/'clear'/'fork'"
+    log "event mid-task, and moving files underneath work in progress is worse than"
+    log "being behind - so this reports instead of advancing. Install jq to get the"
+    log "fast-forward on 'startup'/'resume' back."
+    REASON="not advanced - jq missing, event type unknown"
+  fi
   log "The working tree is $BEHIND commit(s) behind origin; account for that."
-  emit "[session-start git sync] $LOG" "$BEHIND commit(s) behind $UPSTREAM (not advanced on '$SOURCE')"
+  emit "[session-start git sync] $LOG" "$BEHIND commit(s) behind $UPSTREAM ($REASON)"
 fi
 
 if [ "$DIRTY" -eq 1 ]; then
