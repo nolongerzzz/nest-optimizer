@@ -333,6 +333,86 @@ withApp(async (page, logs) => {
       !one.pageScrolls && one.onScreen);
   }
 
+  /* ---------------------------------------------------------------- 7 */
+  console.log('\n=== 7. the Import dropdown dismisses itself ===');
+  {
+    /* Reusing what was already there rather than writing new dismissal:
+       app-library.js has had a capture-phase pointerdown listener and an
+       Escape handler since the list was its own popover off a bar button.
+       Both now close the dropdown holding the list as well as the list.
+
+       Capture phase and pointerdown, not click, because the canvas handlers
+       stop propagation on their own pointerdowns and a drag never produces a
+       click at all - so a bubbling click listener would leave the menu
+       hanging over the model for the length of an orbit. */
+    const state = () => page.evaluate(() => ({
+      menu: document.getElementById('menu-import').open,
+      list: !document.getElementById('library-list').hasAttribute('hidden')
+    }));
+    const openBoth = () => page.evaluate(() => {
+      document.getElementById('menu-import').open = true;
+      const b = document.getElementById('btn-library');
+      if (b.getAttribute('aria-expanded') !== 'true') b.click();
+      document.querySelectorAll('#library-list .library-sec').forEach(d => { d.open = true; });
+    });
+    const canvasAt = f => page.evaluate(fr => {
+      const r = document.getElementById('viewport').getBoundingClientRect();
+      return { x: Math.round(r.x + r.width * fr), y: Math.round(r.y + r.height * 0.75) };
+    }, f);
+    const poke = async pt => { await page.mouse.move(pt.x, pt.y); await page.mouse.down();
+                               await page.mouse.up(); await page.waitForTimeout(200); };
+
+    // picking a piece puts the menu away
+    await openBoth();
+    const n0 = await page.evaluate(() => state.models.length);
+    await page.click('#library-list .library-item[data-file="pin.stl"]');
+    await page.waitForFunction(n => state.models.length > n, n0, { timeout: 30000 });
+    let st = await state();
+    check('loading a piece closes the dropdown it was picked from',
+      !st.menu && !st.list, JSON.stringify(st));
+
+    // pointing at the plate puts it away
+    await openBoth();
+    await poke(await canvasAt(0.72));
+    st = await state();
+    check('a pointer down on the plate closes it', !st.menu && !st.list, JSON.stringify(st));
+
+    // pointing at a placed piece puts it away
+    await openBoth();
+    await poke(await canvasAt(0.5));
+    st = await state();
+    check('a pointer down on a placed piece closes it', !st.menu && !st.list, JSON.stringify(st));
+
+    // Escape puts it away
+    await openBoth();
+    await page.keyboard.press('Escape');
+    await page.waitForTimeout(200);
+    st = await state();
+    check('Escape closes it', !st.menu && !st.list, JSON.stringify(st));
+
+    /* The other half, and the one a blunter fix gets wrong: everything the
+       user points at while still USING the menu has to leave it alone. */
+    await openBoth();
+    await page.evaluate(() => document.querySelectorAll('#library-list .library-sec')
+      .forEach(d => { d.open = false; }));
+    await page.click('#library-list .library-sec[data-sec="Skins"] summary');
+    await page.waitForTimeout(200);
+    st = await state();
+    const skinsOpen = await page.evaluate(() =>
+      document.querySelector('#library-list .library-sec[data-sec="Skins"]').open);
+    check('clicking a category heading expands it and does NOT dismiss',
+      st.menu && st.list && skinsOpen, JSON.stringify(st) + ' skins=' + skinsOpen);
+
+    /* And From Library stays a toggle for its own list. Folding dismissal
+       into setOpen would have made that button tear down the dropdown
+       around it - with From File still sitting in there. */
+    await page.evaluate(() => { document.getElementById('btn-library').click(); });
+    await page.waitForTimeout(200);
+    st = await state();
+    check('From Library still collapses only its list, leaving the menu open',
+      st.menu && !st.list, JSON.stringify(st));
+  }
+
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   if (errs.length) { console.log('\npage errors:\n' + errs.join('\n')); fails++; }
   console.log('\n' + (fails ? fails + ' FAILED' : 'all gates held'));
