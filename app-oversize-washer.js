@@ -54,6 +54,12 @@
        no corner rays and therefore no footprint limit, which is the whole
        reason the oversized case goes through it.
 
+   One consequence of reusing that path rather than copying it, said plainly:
+   a washer that is not already facing the target gets TURNED onto it and
+   baked into its own axes, exactly as Seat here does and under Seat here's
+   own paint guard. A washer Center lock has just put flat on a flat top is
+   the case this mode is for, and there the turn is zero and nothing is baked.
+
    ---------------------------------------------------------------------------
    THE REPORT, AND WHY IT IS A REPORT
    ---------------------------------------------------------------------------

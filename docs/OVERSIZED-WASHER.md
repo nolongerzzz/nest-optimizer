@@ -102,6 +102,13 @@ Seat flush, Seat here, Align, Skin, Subtract and both exporters are not routed.
 With the checkbox clear the feature's only effect on the app is the single
 `armed()` call `seatSupportBitToHull()` makes.
 
+One consequence of reusing that path rather than copying it: a washer that is
+not already facing the target gets **turned** onto it and baked into its own
+axes, exactly as Seat here does and under Seat here's own paint guard. A washer
+Center lock has just put flat on a flat top is the case this mode is for, and
+there the turn is zero and nothing is baked — the suite pins the quaternion at
+identity through every placement.
+
 ---
 
 ## 3. The report, and why it is a report
