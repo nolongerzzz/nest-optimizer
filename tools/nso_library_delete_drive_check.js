@@ -88,6 +88,10 @@ const ghCalls = page => page.evaluate(() => window.__gh.calls.map(c => ({
   method: c.method, url: c.url, body: c.body, auth: c.auth })));
 const resetGh = page => page.evaluate(() => { window.__gh.calls = []; window.__gh.fail = null; });
 const openLib = page => page.evaluate(() => {
+  // #library-list sits inside the top bar's Import dropdown now, so the
+  // list is not laid out until that menu is open. Unfold it first.
+  for (let n = document.getElementById('library-list'); n; n = n.parentElement)
+    if (n.tagName === 'DETAILS') n.open = true;
   const b = document.getElementById('btn-library');
   if (b && b.getAttribute('aria-expanded') !== 'true') b.click();
   document.querySelectorAll('#library-list .library-sec').forEach(d => { d.open = true; });

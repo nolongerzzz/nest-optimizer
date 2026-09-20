@@ -27,7 +27,7 @@
      button ends up under a menu. */
   --vp-menu-gap: 8px;      /* margin at the edge, and between menus */
   --vp-menu-w: 64px;       /* one menu summary: min-width 64px in .vp-menu */
-  --vp-menu-count: 3;      /* Finish + Wheel + Stock */
+  --vp-menu-count: 1;      /* Finish. Wheel and Stock moved into the bar's Gen+ */
 }
 
 * {
