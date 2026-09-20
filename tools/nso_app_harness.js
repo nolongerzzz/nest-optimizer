@@ -152,7 +152,41 @@ async function openFinishSections(page) {
     null, { timeout: 5000 });
 }
 
-module.exports = { withApp, loadSTL, selectModel, statusOf, openFinishMenu, openFinishSections, ROOT };
+/* Opens whatever menus a control is buried in: walks up from the element and
+   opens every <details> on the way, which is the idiom the wire checks already
+   use for the Finish menu.
+
+   Needed because the bar's controls moved into dropdowns - Import, Export,
+   Rotate, Tip, Move, Gen+, Photo, Scale, Cut - and a <details> that is shut
+   hides its contents from page.click.
+
+   One menu at a time, not all of them: app-join makes .vp-menu an exclusive
+   accordion, so opening every menu would leave exactly one open anyway, and
+   an open panel hangs over the top of the viewport where the paint, brush and
+   measure checks click. Ask for the control you are about to use. */
+async function openMenuFor(page, selector) {
+  await page.evaluate(sel => {
+    const el = document.querySelector(sel);
+    if (!el) throw new Error('openMenuFor: no ' + sel);
+    for (let n = el; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
+  }, selector);
+  await page.waitForFunction(sel => {
+    const el = document.querySelector(sel);
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 0 && r.height > 0;
+  }, selector, { timeout: 5000 });
+}
+
+/* Shuts the bar's menus again, for a check that needs the canvas clear. */
+async function closeTopMenus(page) {
+  await page.evaluate(() => {
+    document.querySelectorAll('.viewport-overlay-topbar details').forEach(d => { d.open = false; });
+  });
+}
+
+module.exports = { withApp, loadSTL, selectModel, statusOf, openFinishMenu, openFinishSections,
+                   openMenuFor, closeTopMenus, ROOT };
 
 if (require.main === module) {
   withApp(async (page, logs) => {

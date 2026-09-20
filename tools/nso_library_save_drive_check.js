@@ -109,6 +109,10 @@ const ghCalls = page => page.evaluate(() => window.__gh.calls.map(c => ({
   method: c.method, url: c.url, body: c.body, auth: c.auth })));
 const resetGh = page => page.evaluate(() => { window.__gh.calls = []; window.__gh.fail = null; });
 const openLib = page => page.evaluate(() => {
+  // #library-list sits inside the top bar's Import dropdown now, so the
+  // list is not laid out until that menu is open. Unfold it first.
+  for (let n = document.getElementById('library-list'); n; n = n.parentElement)
+    if (n.tagName === 'DETAILS') n.open = true;
   const b = document.getElementById('btn-library');
   if (b && b.getAttribute('aria-expanded') !== 'true') b.click();
   document.querySelectorAll('#library-list .library-sec').forEach(d => { d.open = true; });
@@ -128,6 +132,22 @@ const pathOf = c => decodeURIComponent(c.url.split('/contents/')[1].split('?')[0
 const seq = calls => calls.map(c => c.method + ' ' + pathOf(c));
 
 async function openSave(page) {
+  /* Save to Library moved into the top bar's Export dropdown. Unfold it, and
+     shut the Import one on the way: the bar's menus are exclusive, section 10
+     leaves the library list open, and the two racing each other is exactly
+     the kind of order dependence this check should not have. Then wait for the
+     button to actually have a box rather than assuming the fold took. */
+  await page.evaluate(() => {
+    document.querySelectorAll('.viewport-overlay-topbar details').forEach(d => { d.open = false; });
+    for (let n = document.getElementById('btn-library-save'); n; n = n.parentElement)
+      if (n.tagName === 'DETAILS') n.open = true;
+  });
+  await page.waitForFunction(() => {
+    const e = document.getElementById('btn-library-save');
+    if (!e) return false;
+    const r = e.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && !e.closest('details:not([open])');
+  }, null, { timeout: 5000 });
   await page.click('#btn-library-save');
   await page.waitForFunction(() => {
     const b = document.getElementById('nso-save-back');
@@ -169,9 +189,12 @@ withApp(async (page, logs) => {
     });
     check('there is a Save-to-Library button', !!shape, JSON.stringify(shape));
     check('it is a real <button type=button>', shape && shape.tag === 'BUTTON' && shape.type === 'button');
+    // btn-library-save moved into the top bar's Export dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-library-save'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     check('it says what it does', shape && /save/i.test(shape.text) && /librar/i.test(shape.text), shape && shape.text);
 
     // Nothing selected yet: it must say so and send nothing.
+    await page.evaluate(() => { const e = document.getElementById('btn-library-save'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-library-save');
     await page.waitForTimeout(200);
     check('with no piece selected it refuses, in words',

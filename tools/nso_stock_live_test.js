@@ -86,6 +86,8 @@ withApp(async (page, logs) => {
     await setF(page, { 'sel-stock-shape': 'box', 'inp-stock-height': 40, 'inp-stock-radius': 20,
       'inp-stock-wall': 3, 'inp-stock-waste': 0, 'inp-stock-prop': null,
       'chk-stock-match': false, 'chk-stock-oversize': false });
+    // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-make');
     id = await page.evaluate(() => state.models[state.models.length - 1].id);
     made = await shot(page, id);
@@ -110,7 +112,10 @@ withApp(async (page, logs) => {
       selectPlaced(k);
       applyPlacedXZ(state.placed[k], 40, -25);
     }, id);
+    // btn-rot-right moved into the top bar's Rotate dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-rot-right'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-rot-right');   /* yaw 90 */
+    await page.evaluate(() => { const e = document.getElementById('btn-tilt-up'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-tilt-up');     /* pitch one step */
     posed = await shot(page, id);
     check('the block has been moved and posed by hand',
@@ -239,6 +244,8 @@ withApp(async (page, logs) => {
     await setF(page, { 'sel-stock-shape': 'box', 'inp-stock-height': 40, 'inp-stock-waste': 0,
       'inp-stock-prop': null });
     await openStock(page);
+    // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-make');
     const id2 = await page.evaluate(() => state.models[state.models.length - 1].id);
     const b2 = await shot(page, id2);
@@ -264,6 +271,8 @@ withApp(async (page, logs) => {
        same one New stock applies, and it has to fire on an adjustment too. */
     await setF(page, { 'sel-stock-shape': 'box', 'inp-stock-height': 40, 'inp-stock-waste': 0 });
     await openStock(page);
+    // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-make');
     const id3 = await page.evaluate(() => state.models[state.models.length - 1].id);
     const b3 = await shot(page, id3);

@@ -140,7 +140,20 @@ async function rendered() {
         return { sel, x: b.x, y: b.y, right: b.right, bottom: b.bottom,
                  w: Math.round(b.width), h: Math.round(b.height) };
       };
-      const btns = Array.from(document.querySelectorAll('.viewport-overlay-topbar .vp-bar-btn'));
+      /* Only the controls the bar is actually SHOWING: not inside a folded
+         dropdown, and not hidden outright (Remove). The invariant this file
+         exists for is unchanged and still applies to those - a bar control on
+         screen must be clickable where it is drawn.
+
+         The fold state is read directly rather than inferred from the box.
+         A panel inside a closed <details> is position:absolute, and Chromium
+         still computes a rect for it: #btn-rot-left measures 172x31 with its
+         menu shut. It is not hit-testable - elementFromPoint over it returns
+         the canvas, so it intercepts nothing - but "has a box" would have let
+         seventeen folded controls back into this check, every one of them
+         reported as covered by the canvas they are not in front of. */
+      const btns = Array.from(document.querySelectorAll('.viewport-overlay-topbar .vp-bar-btn'))
+        .filter((e) => !e.closest('details:not([open])') && !e.hidden);
       return {
         topbar: box('.viewport-overlay-topbar'),
         wheel: box('.vp-wheel-menu'),
@@ -162,49 +175,28 @@ async function rendered() {
     });
 
     check('the topbar is on screen', !!m.topbar, m.topbar && m.topbar.w + 'px wide');
-    check('the Wheel menu is on screen', !!m.wheel,
-          m.wheel && 'x ' + Math.round(m.wheel.x) + '..' + Math.round(m.wheel.right));
     check('the Finish menu is on screen', !!m.finish,
           m.finish && 'x ' + Math.round(m.finish.x) + '..' + Math.round(m.finish.right));
-    check('the Stock menu is on screen', !!m.stock,
-          m.stock && 'x ' + Math.round(m.stock.x) + '..' + Math.round(m.stock.right));
 
-    // The Wheel rule actually applies. Without it the overlay collapses to the
-    // base .viewport-overlay with no offsets, which is exactly what the missing
-    // brace caused - so pin that the wheel is in the top-RIGHT corner, left of
-    // Finish, rather than wherever the document flow put it.
-    check('the Wheel menu is positioned in the top-right corner, not left where an ' +
+    /* Finish is the only top-right menu now. The Wheel and Stock overlays are
+       gone - both menus moved into the bar's Gen+ dropdown - so the claims
+       that used to stand here, that each sat in its own corner immediately
+       left of the next, are claims about markup that no longer exists.
+       --vp-menu-count went 3 -> 1 with them, and the check above that it
+       matches the overlays in index.html is what keeps the two in step.
+
+       What is NOT dropped is the bug this file was written for: the topbar
+       must still end before the menu begins, or a bar control sits under a
+       higher-z menu summary - visible, enabled and unclickable. */
+    check('the Finish menu is positioned in the top-right corner, not left where an ' +
           'unstyled overlay lands',
-          !!m.wheel && !!m.finish && m.wheel.x > m.topbar.x,
-          m.wheel && 'wheel x ' + Math.round(m.wheel.x) + ' vs topbar x ' + Math.round(m.topbar.x));
-    check('the Wheel menu sits immediately LEFT of Finish - its own corner',
-          !!m.wheel && !!m.finish && m.wheel.right <= m.finish.x,
-          m.wheel && m.finish &&
-            'wheel ends ' + Math.round(m.wheel.right) + ', Finish starts ' + Math.round(m.finish.x));
-    check('and the two menus do not overlap each other',
-          !overlap(m.wheel, m.finish),
-          (() => { const o = overlap(m.wheel, m.finish); return o ? o.x + 'x' + o.y + ' px' : 'clear'; })());
-
-    // Menu 3, the same two claims the Wheel makes about Finish.
-    check('the Stock menu sits immediately LEFT of the Wheel - its own corner',
-          !!m.stock && !!m.wheel && m.stock.right <= m.wheel.x,
-          m.stock && m.wheel &&
-            'stock ends ' + Math.round(m.stock.right) + ', Wheel starts ' + Math.round(m.wheel.x));
-    check('and it overlaps neither of the other two',
-          !overlap(m.stock, m.wheel) && !overlap(m.stock, m.finish),
-          (() => { const o = overlap(m.stock, m.wheel) || overlap(m.stock, m.finish);
-                   return o ? o.x + 'x' + o.y + ' px' : 'clear'; })());
+          !!m.finish && m.finish.x > m.topbar.x,
+          m.finish && 'finish x ' + Math.round(m.finish.x) + ' vs topbar x ' + Math.round(m.topbar.x));
 
     // THE ONE THAT BROKE. The topbar must end before the menus begin.
-    const vsWheel = overlap(m.topbar, m.wheel);
     const vsFinish = overlap(m.topbar, m.finish);
-    const vsStock = overlap(m.topbar, m.stock);
-    check('the topbar reserves room for the Wheel menu and does not run under it',
-          !vsWheel, vsWheel ? vsWheel.x + 'x' + vsWheel.y + ' px overlap' : 'clear');
-    check('the topbar reserves room for the Finish menu too',
+    check('the topbar reserves room for the Finish menu and does not run under it',
           !vsFinish, vsFinish ? vsFinish.x + 'x' + vsFinish.y + ' px overlap' : 'clear');
-    check('...and for the Stock menu, which is what --vp-menu-count exists to do',
-          !vsStock, vsStock ? vsStock.x + 'x' + vsStock.y + ' px overlap' : 'clear');
 
     // The invariant that actually matters to a user: every button is clickable.
     const covered = m.buttons.filter((b) => b.covered);

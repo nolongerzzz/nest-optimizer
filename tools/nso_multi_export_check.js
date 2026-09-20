@@ -155,6 +155,8 @@ async function pickPair(page, idA, idB) {
   return page.evaluate(() => ({ session: state.joinSession, a: state.editId, b: state.joinPartnerId }));
 }
 async function exportPlate(page, format, label) {
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', format);
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 30000 }),
@@ -215,6 +217,8 @@ withApp(async (page, logs) => {
   let j = await pickPair(page, idA1, idB1);
   check('Join session holds A1 / B1', j.session && j.a === idA1 && j.b === idB1, JSON.stringify(j));
   await moveTo(page, idB1, -45, -35);
+  // btn-raise moved into the top bar's Move dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-raise'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   for (let i = 0; i < 11; i++) await page.click('#btn-raise');
   check('status shows the lift', /^Lift 22 mm/.test(await statusOf(page)), await statusOf(page));
   await page.fill('#seat-gap', '-0.18');
@@ -233,6 +237,8 @@ withApp(async (page, logs) => {
   j = await pickPair(page, idA2, idB2);
   check('Join session holds A2 / B2', j.session && j.a === idA2 && j.b === idB2, JSON.stringify(j));
   await moveTo(page, idB2, 45, -35);
+  // btn-raise moved into the top bar's Move dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-raise'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   for (let i = 0; i < 11; i++) await page.click('#btn-raise');
   await openFinishMenu(page);   // Skin face lives in the Finish tab
   await page.selectOption('#skin-pattern', 'crosshatch');

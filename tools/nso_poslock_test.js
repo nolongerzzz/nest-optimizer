@@ -138,11 +138,16 @@ async function moveTo(page, id, x, z) {
 }
 const selectRow = (page, id) => page.click(`.model-item[data-edit-id="${id}"]`);
 async function exportPlate(page, format, label) {
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', format);
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 30000 }),
     page.click('#btn-export-stl')
   ]);
+  // folded back: this check clicks the canvas, and an open panel
+  // hangs over the top of the viewport where some of those land.
+  await page.evaluate(() => document.querySelectorAll('.viewport-overlay-topbar details').forEach(d => { d.open = false; }));
   const file = path.join(out, label + '_' + download.suggestedFilename());
   await download.saveAs(file);
   check(label + ': "Export plate" (' + format.toUpperCase() + ') downloaded ' + download.suggestedFilename(),
@@ -268,7 +273,12 @@ withApp(async (page, logs) => {
   check('Join session holds A / B', j.session && j.a === idA && j.b === idB, JSON.stringify(j));
   a = await pose(page, idA);
   await moveTo(page, idB, a.x, a.z);
+  // btn-raise moved into the top bar's Move dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-raise'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   for (let i = 0; i < 11; i++) await page.click('#btn-raise');
+  // folded back: this check clicks the canvas, and an open panel
+  // hangs over the top of the viewport where some of those land.
+  await page.evaluate(() => document.querySelectorAll('.viewport-overlay-topbar details').forEach(d => { d.open = false; }));
   b = await pose(page, idB);
   check('B staged over A, lifted 22', near(b.x, a.x, 1e-9) && near(b.z, a.z, 1e-9) && near(b.liftY, 22, 1e-9), b.liftY);
   await page.click('#btn-lock-pos');          // B selected (the Raise clicks kept it) -> lock it

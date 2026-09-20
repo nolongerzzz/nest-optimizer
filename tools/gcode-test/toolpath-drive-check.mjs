@@ -377,9 +377,12 @@ async function main() {
   check('it is an ordinary model in file axes', zExtracted.axis, 'zup');
   check('extracting it is undoable', zExtracted.undo, zUndoBefore + 1);
   check('the app reports it as ONE layer', / 1 layer\)/.test(zExtracted.status), true);
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   console.log('       ' + zExtracted.status);
 
   // The real proof: write it through the app's own button and re-read the file.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', 'stl');
   page.once('dialog', (d) => d.accept());
   const [zdl] = await Promise.all([
@@ -503,8 +506,11 @@ async function main() {
     state.editId = m.id;
   });
   const activeName = await page.evaluate(() => getActiveModel().name);
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   check('the extracted object is the active model', /Support interface L1 x3$/.test(activeName), true);
 
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', 'stl');
   page.once('dialog', (d) => d.accept());
   const [dl] = await Promise.all([
@@ -556,9 +562,12 @@ async function main() {
   }
   let open = 0; counts.forEach((c) => { if (c === 1) open++; });
   check('the exported object has no open edges - nothing leaks', open, 0);
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   check('it is 3 separate bead solids, 8 corners each', vid.size, 24);
 
   // The same object out through the 3MF route, since Export offers both.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', '3mf');
   page.once('dialog', (d) => d.accept());
   const [dl3] = await Promise.all([

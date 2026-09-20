@@ -1,9 +1,19 @@
 /* ux overlay — look lock + HUD stamp */
 (function () {
-  function stampHud() {
+  /* The build marker. Writes the HUD element, and on the FIRST stamp only,
+     the status line too - so opening the page says which build it is.
+
+     The re-stamps below used to call setStatus as well, and that is a real
+     bug rather than a cosmetic one: they land 0ms and 200ms after bind, so
+     any action taken in that window had its status line overwritten with the
+     build tag. It cost a drive check a status assertion - Stock reported
+     "HUD inside7" where it had just written what it made - and it would have
+     done the same to a person who clicked fast. The tag is a stamp, not a
+     result, and it stops speaking over results. */
+  function stampHud(alsoStatus) {
     var el = document.getElementById('adjust-status');
     if (el) el.textContent = 'HUD inside7';
-    if (typeof setStatus === 'function') setStatus('HUD inside7');
+    if (alsoStatus && typeof setStatus === 'function') setStatus('HUD inside7');
   }
 
   // nsoMaskHudRefresh writes HUD_TAG at rest. Until that const moves with
@@ -80,11 +90,13 @@
   }
 
   function bind() {
-    stampHud();
+    stampHud(true);
     alignMaskHudTag();
     bindThickenArrows();
-    setTimeout(function () { stampHud(); alignMaskHudTag(); }, 0);
-    setTimeout(function () { stampHud(); alignMaskHudTag(); }, 200);
+    // HUD only: these exist to put the tag back after other code rewrites the
+    // HUD element, not to say the build tag again over whatever the user did.
+    setTimeout(function () { stampHud(false); alignMaskHudTag(); }, 0);
+    setTimeout(function () { stampHud(false); alignMaskHudTag(); }, 200);
     if (state.renderer && state.renderer.domElement) {
       state.renderer.domElement.addEventListener('dblclick', function (event) {
         if (!state.cutterOpen) return;

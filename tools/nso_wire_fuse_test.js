@@ -31,6 +31,8 @@ async function splitFixture(page, file) {
     });
     await new Promise(r => setTimeout(r, 0));
   });
+  // btn-cutter-open moved into the top bar's Cut dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-cutter-open'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   if (!(await page.evaluate(() => state.cutterOpen))) await page.click('#btn-cutter-open');
   await selectModel(page, id);
   return await page.evaluate(() => {

@@ -156,11 +156,16 @@ const selectRow = (page, id) => page.click(`.model-item[data-edit-id="${id}"]`);
 const lockPiece = async (page, id) => { await selectRow(page, id); await page.click('#btn-lock-pos'); };
 
 async function exportPlate(page, label) {
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', 'stl');
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 30000 }),
     page.click('#btn-export-stl')
   ]);
+  // folded back: this check clicks the canvas, and an open panel
+  // hangs over the top of the viewport where some of those land.
+  await page.evaluate(() => document.querySelectorAll('.viewport-overlay-topbar details').forEach(d => { d.open = false; }));
   const file = path.join(out, label + '_' + download.suggestedFilename());
   await download.saveAs(file);
   return file;

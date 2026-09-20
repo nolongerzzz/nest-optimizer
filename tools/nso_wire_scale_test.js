@@ -122,6 +122,8 @@ withApp(async (page, logs) => {
     document.getElementById('scale-axis').value = 'y';
     document.getElementById('scale-target').value = String(t);
   }, TARGET);
+  // btn-scale-dim moved into the top bar's Scale dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-scale-dim'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.click('#btn-scale-dim');
   await page.waitForFunction(() => /Scale/.test(document.getElementById('status').textContent),
     null, { timeout: 30000 });
@@ -229,6 +231,8 @@ withApp(async (page, logs) => {
     document.getElementById('scale-axis').value = 'longest';
     document.getElementById('scale-target').value = '120';
   });
+  // btn-scale-dim moved into the top bar's Scale dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-scale-dim'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.click('#btn-scale-dim');
   await page.waitForFunction(() => /Scale done/.test(document.getElementById('status').textContent),
     null, { timeout: 30000 });
@@ -251,6 +255,8 @@ withApp(async (page, logs) => {
   console.log('\n=== 7b. the plain factor button ===');
   const facBefore = await soupOf(page);
   await page.evaluate(() => { document.getElementById('scale-factor').value = '0.5'; });
+  // btn-scale-factor moved into the top bar's Scale dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-scale-factor'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.click('#btn-scale-factor');
   await page.waitForFunction(() => /Scale done/.test(document.getElementById('status').textContent),
     null, { timeout: 30000 });
@@ -285,6 +291,8 @@ withApp(async (page, logs) => {
     document.getElementById('scale-axis').value = 'z';
     document.getElementById('scale-target').value = '12.7';
   });
+  // btn-scale-dim moved into the top bar's Scale dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-scale-dim'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.click('#btn-scale-dim');
   await page.waitForFunction(() => /Scale/.test(document.getElementById('status').textContent),
     null, { timeout: 30000 });

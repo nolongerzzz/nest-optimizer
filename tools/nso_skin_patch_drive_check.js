@@ -111,6 +111,8 @@ withApp(async (page, logs) => {
     return { tris: m.rawTris ? m.rawTris.length / 9 : null, size: m.size };
   }, cubeId);
   await openFinishMenu(page);
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', 'stl');
 
   for (const pattern of PATTERNS) {
@@ -167,6 +169,8 @@ withApp(async (page, logs) => {
          would. Playwright dismisses dialogs by default, which the app reads
          as "Export cancelled". */
       page.once('dialog', d => d.accept());
+      // btn-export-model moved into the top bar's Export dropdown; unfold it first.
+      await page.evaluate(() => { const e = document.getElementById('btn-export-model'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
       const [download] = await Promise.all([
         page.waitForEvent('download', { timeout: 30000 }),
         page.click('#btn-export-model')

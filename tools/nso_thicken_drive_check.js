@@ -81,6 +81,8 @@ const statusOf = page => page.evaluate(() => document.getElementById('status').t
 
 async function download(page, label) {
   page.once('dialog', d => d.accept());
+  // btn-export-model moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-export-model'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.click('#btn-export-model')]);
   const file = path.join(out, label + '.stl');
   await dl.saveAs(file);

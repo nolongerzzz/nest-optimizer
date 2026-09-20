@@ -27,7 +27,7 @@
      button ends up under a menu. */
   --vp-menu-gap: 8px;      /* margin at the edge, and between menus */
   --vp-menu-w: 64px;       /* one menu summary: min-width 64px in .vp-menu */
-  --vp-menu-count: 3;      /* Finish + Wheel + Stock */
+  --vp-menu-count: 1;      /* Finish. Wheel and Stock moved into the bar's Gen+ */
 }
 
 * {
@@ -341,6 +341,131 @@ select:focus, input:focus {
    so the card is the model index and Clone and nothing else. The list is a
    popover anchored under the button; the bar itself is pointer-events none,
    so both the button and the list have to opt back in. */
+/* ---- the top bar's dropdowns -------------------------------------------
+   The bar had grown to twenty-one controls in one row - two loads, Remove,
+   two rotates, seven pose buttons, six move buttons and two locks - beside a
+   sidebar holding Photo set, Size, Cut and Export. Nine dropdowns now stand
+   in for all of it: Import, Export, Rotate, Tip, Move, Gen+, Photo, Scale,
+   Cut.
+
+   Every control inside them is the ORIGINAL element - same id, same classes,
+   same handler, moved and not rebuilt - so app-core's enable/disable roster,
+   every binding and every test that reaches a control by id still finds it.
+   What changed is which box it sits in.
+
+   <details>, like the Finish menu's groups and the Wheel and Stock menus, so
+   there is one way a menu opens in this app and the drive checks already
+   know it. The summary wears .vp-bar-btn so a closed dropdown is the same
+   object as the plain bar buttons beside it. */
+.vp-top-menu {
+  pointer-events: auto;
+  position: relative;
+  display: inline-flex;
+}
+/* The class is doubled to out-specify `.vp-menu > summary`, which sizes the
+   viewport's icon menus at a 40px square. These summaries are bar buttons,
+   not icons: they carry a word, so they take .vp-bar-btn's height and let
+   their label set the width. Left as 40px squares the labels overflow their
+   own boxes and the bar reads as one smear of text. */
+.vp-top-menu.vp-top-menu > summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: auto;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.45);
+  background: rgba(15, 23, 42, 0.72);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  backdrop-filter: blur(10px);
+  box-shadow: none;
+}
+.vp-top-menu.vp-top-menu > summary::-webkit-details-marker { display: none; }
+/* The twisty, drawn rather than inherited - same shape the Finish groups use,
+   rotated a quarter turn because this menu opens downwards. */
+.vp-top-menu.vp-top-menu > summary::after {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 4px solid currentColor;
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  opacity: 0.75;
+}
+.vp-top-menu.vp-top-menu[open] > summary {
+  border-color: #7dd3fc;
+  background: rgba(30, 58, 84, 0.92);
+}
+.vp-top-menu.vp-top-menu > summary:hover { border-color: #7dd3fc; }
+.vp-top-menu.vp-top-menu > summary:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 1px; }
+/* The panel. Anchored under its own button, not at the bar's left edge, and
+   allowed to be wider than the Finish column because what moved in here -
+   the Cut tool, the Export card - was built for the sidebar's width. It is
+   bounded and scrolls for the same reason the Finish menu is: a menu taller
+   than the window makes the PAGE scroll, which drags the canvas under the
+   header and sends the next click somewhere the user did not aim it. */
+.vp-top-menu > .vp-top-body {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: auto;
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: max-content;
+  min-width: 190px;
+  max-width: 300px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #3a4558;
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.45);
+}
+/* A dropdown near the right edge opens leftwards so it stays on screen. */
+.vp-top-menu.vp-top-right > .vp-top-body { left: auto; right: 0; }
+/* The sidebar controls that moved in here were full-width in a card and
+   should stay full-width in the panel. */
+.vp-top-body .btn,
+.vp-top-body select,
+.vp-top-body input[type="range"],
+.vp-top-body > p { width: 100%; }
+.vp-top-body .vp-bar-btn { width: 100%; justify-content: center; }
+/* Gen+ holds the Wheel and Stock menus, which are <details> of their own and
+   keep their own summaries as the two headings inside it. */
+.vp-top-body .vp-menu { width: 100%; }
+.vp-top-body .vp-menu > summary {
+  width: 100%;
+  height: 26px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+/* Nested, they open in flow rather than flying out to the side - a popover
+   hanging off a popover lands off screen. */
+.vp-top-body .vp-menu > .vp-menu-body {
+  position: static;
+  left: auto;
+  top: auto;
+  right: auto;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  margin-top: 4px;
+  box-shadow: none;
+}
+
 .vp-library {
   position: relative;
   pointer-events: auto;

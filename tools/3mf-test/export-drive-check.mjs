@@ -84,9 +84,12 @@ async function main() {
       document.getElementById('btn-export-stl').textContent,
       document.getElementById('ctx-export').textContent]),
     ['Download selected STL', 'Export plate STL', 'Export STL']);
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   check('with STL selected the cooling row is hidden',
     await page.evaluate(() => document.getElementById('cooling-profile-row').hidden), true);
 
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', '3mf');
   check('switching to 3MF relabels both buttons and the right-click item',
     await page.evaluate(() => [
@@ -141,6 +144,8 @@ async function main() {
 
   // --- press the real plate button, Format = 3MF, and catch the real download ---
   const outDir = await mkdtemp(join(tmpdir(), 'nso-3mf-drive-'));
+  // btn-export-stl moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-export-stl'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 30000 }),
     page.click('#btn-export-stl'),
@@ -167,6 +172,8 @@ async function main() {
   // names on import, so it is "box-20mm-copy1"); read it rather than assume it.
   const activeName = await page.evaluate(() => getActiveModel().name);
   page.once('dialog', (d) => d.accept());
+  // btn-export-model moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-export-model'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   const [pieceDownload] = await Promise.all([
     page.waitForEvent('download', { timeout: 30000 }),
     page.click('#btn-export-model'),
@@ -183,6 +190,8 @@ async function main() {
 
   // --- Format back to STL: the same plate button now writes STL ---
   console.log('\n--- the STL route is still wired ---');
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', 'stl');
   const [stlDownload] = await Promise.all([
     page.waitForEvent('download', { timeout: 30000 }),
@@ -193,10 +202,13 @@ async function main() {
   const stlFile = join(outDir, stlDownload.suggestedFilename());
   await stlDownload.saveAs(stlFile);
   const stlBytes = await readFile(stlFile);
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   check('the STL is binary STL with the plate\'s triangles',
     stlBytes.length === 84 + 50 * stlBytes.readUInt32LE(80) && stlBytes.readUInt32LE(80) > 0, true);
 
   // --- the choice survives a reload ---
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', '3mf');
   await page.reload({ waitUntil: 'load' });
   await page.waitForFunction('window.state && window.state.ready', null, { timeout: 20000 });
