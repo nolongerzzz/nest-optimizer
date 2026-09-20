@@ -24,6 +24,7 @@ It **only advances the checkout by fast-forward**, and only when `source` is
 | Detached HEAD | Fetch only — a detached checkout is a deliberate revision |
 | No upstream configured | Fetch only, and says so |
 | Fetch failed | Reports the refs as untrustworthy |
+| `jq` not installed | Fetch only — the event type is unreadable, so it is assumed mid-task |
 
 Every case it declines to advance is reported through `additionalContext`, so
 the agent is told how stale the tree is instead of silently assuming it is
@@ -41,6 +42,11 @@ block the session from starting.
 - Cloud sessions do not read `~/.claude/settings.json`, which is why this lives
   in the repo. It only applies to sessions started from a branch that contains
   it — once on the default branch, it applies everywhere.
+- `jq` is the only dependency, and it is only needed to read `source` from the
+  payload and to emit the JSON. Without it the hook still fetches and still
+  reports, but it never fast-forwards: an unreadable event type is treated as
+  possibly `compact`, because defaulting to `startup` would re-enable exactly
+  the mid-task file rewrite the `source` check exists to prevent.
 
 ### Testing
 
@@ -50,4 +56,16 @@ Point it at a deliberately rewound clone:
 git clone <url> /tmp/stale && cd /tmp/stale && git reset --hard HEAD~5
 printf '{"source":"startup","cwd":"/tmp/stale"}' \
   | CLAUDE_PROJECT_DIR=/tmp/stale bash .claude/hooks/session-start-git-sync.sh
+```
+
+To exercise the `jq`-missing path, run it against a `PATH` built from
+everything it needs *except* `jq`. It should report the lag and leave `HEAD`
+exactly where it is, even on `source=startup`:
+
+```sh
+d=$(mktemp -d)
+for b in bash git cat head awk date sleep timeout; do ln -s "$(command -v $b)" "$d/$b"; done
+printf '{"source":"startup","cwd":"/tmp/stale"}' \
+  | env -i HOME="$HOME" PATH="$d" CLAUDE_PROJECT_DIR=/tmp/stale \
+      bash .claude/hooks/session-start-git-sync.sh
 ```
