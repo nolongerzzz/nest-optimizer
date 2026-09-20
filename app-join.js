@@ -2236,6 +2236,16 @@ function seatSupportBitToHull() {
     setStatus('Both hull and bit must be on the plate', true);
     return;
   }
+  /* The oversized-washer export mode, and only while it is explicitly armed:
+     a washer wider than its target has corner rays standing over open air, so
+     the corner-ray fit below refuses it whatever gap is asked for. Armed, the
+     placement goes through the measured-clearance seat instead and that
+     refusal becomes a line on the status line - see app-oversize-washer.js.
+     Unarmed, this is one property read and everything below is unchanged. */
+  if (window.NSO_OversizeWasher && window.NSO_OversizeWasher.armed()) {
+    window.NSO_OversizeWasher.seat(placedA, placedB);
+    return;
+  }
   const gap = readSeatGapInput();
   if (!isFinite(gap)) {
     setStatus('Seat gap slider is missing or out of range - nothing seated', true);

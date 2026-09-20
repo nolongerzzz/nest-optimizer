@@ -99,6 +99,16 @@
               <output id="seat-gap-value" for="seat-gap" title="Exact gap the next Seat (support) will use">-0.18 mm</output>
             </div>
             <button id="btn-seat-here" class="btn btn-secondary" type="button" aria-pressed="false" title="Seat here: click a point on A - curved, irregular or flat - and B is turned to face it and set at the slider's gap. The gap is the true minimum distance between the two surfaces.">Seat here</button>
+            <label class="vp-check" for="chk-oversize-washer"
+                   title="Oversized washer: for a deliberately close-contact washer or shim WIDER than the piece it sits on. Seat (support) then places B at the typed gap below through the measured-clearance solve instead of the corner-ray fit - which refuses an overhanging piece with 'corner N missed hull along punch axis' - and reports the true minimum distance, the overhang and that verdict on the status line instead of refusing. Off: Seat (support) is exactly the seat it has always been.">
+              <input type="checkbox" id="chk-oversize-washer"> Oversized washer
+            </label>
+            <div class="seat-support-row oversize-row">
+              <label for="oversize-gap" title="The gap Seat (support) places at while Oversized washer is on, in mm, coupon sign convention: negative = air gap, 0 = touching, positive = the washer overlaps into the target. Typed, not the slider, so a deliberate squeeze past the slider's +0.05 can be asked for at all.">Gap</label>
+              <input type="number" id="oversize-gap" min="-5" max="5" step="0.01" value="0"
+                     aria-label="Oversized washer gap in mm" />
+              <span class="oversize-unit">mm</span>
+            </div>
           </div>
           <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
           <button id="btn-seat-grid" class="btn btn-secondary" type="button" title="Faint grid on the top surface of the target piece (A), to line up what goes above it">Surface grid: auto</button>
@@ -812,6 +822,7 @@
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=inmode1"></script>
   <script src="app-center-lock.js?v=clock1"></script>
+  <script src="app-oversize-washer.js?v=oversize1"></script>
   <script src="app-carve.js?v=hollow1"></script>
   <script src="app-hollow.js?v=hollow1"></script>
   <script src="app-seat-surface.js?v=seatsurf1"></script>
