@@ -134,6 +134,8 @@ withApp(async (page, logs) => {
   const before = await modelCount(page);
   await setFields(page, { 'sel-stock-shape': 'sphere', 'inp-stock-height': 60,
     'inp-stock-radius': null, 'inp-stock-wall': null, 'inp-stock-waste': null });
+  // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.click('#btn-stock-make');
   await page.waitForFunction(n => state.models.length > n, before, { timeout: 30000 });
   const sphereId = await page.evaluate(() => state.models[state.models.length - 1].id);
@@ -159,6 +161,8 @@ withApp(async (page, logs) => {
     const n = await modelCount(page);
     await setFields(page, { 'sel-stock-shape': shape, 'inp-stock-height': 60,
       'inp-stock-radius': null, 'inp-stock-prop': null });
+    // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-make');
     await page.waitForFunction(k => state.models.length > k, n, { timeout: 30000 });
     const id = await page.evaluate(() => state.models[state.models.length - 1].id);
@@ -186,6 +190,8 @@ withApp(async (page, logs) => {
   {
     const n = await modelCount(page);
     await setFields(page, { 'sel-stock-shape': 'sphere', 'inp-stock-height': 60, 'inp-stock-waste': 0 });
+    // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-make');
     await page.waitForFunction(k => state.models.length > k, n, { timeout: 30000 });
     await selectModel(page, await page.evaluate(() => state.models[state.models.length - 1].id));
@@ -204,6 +210,8 @@ withApp(async (page, logs) => {
     const n = await modelCount(page);
     await setFields(page, { 'sel-stock-shape': 'box', 'inp-stock-height': 60,
       'inp-stock-waste': null, 'inp-stock-prop': '4:2:1' });
+    // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-make');
     await page.waitForFunction(k => state.models.length > k, n, { timeout: 30000 });
     await selectModel(page, await page.evaluate(() => state.models[state.models.length - 1].id));
@@ -221,6 +229,8 @@ withApp(async (page, logs) => {
     const n2 = await modelCount(page);
     await setFields(page, { 'sel-stock-shape': 'box', 'inp-stock-height': 40,
       'inp-stock-radius': 12, 'inp-stock-wall': 2, 'inp-stock-prop': null, 'chk-stock-match': true });
+    // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-make');
     await page.waitForFunction(k => state.models.length > k, n2, { timeout: 30000 });
     const matchStatus = await statusOf(page);
@@ -244,6 +254,8 @@ withApp(async (page, logs) => {
     const curved = await loadSTL(page, fx('fixture_sphere_curved.stl'));
     await selectModel(page, curved);
     const n3 = await modelCount(page);
+    // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-make');
     await page.waitForFunction(() => /refused/i.test(document.getElementById('status').textContent),
       null, { timeout: 30000 });
@@ -262,6 +274,8 @@ withApp(async (page, logs) => {
     const n = await modelCount(page);
     await setFields(page, { 'sel-stock-shape': 'cylinder', 'inp-stock-height': 260,
       'inp-stock-radius': 40, 'inp-stock-wall': 3, 'inp-stock-prop': null });
+    // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-make');
     await page.waitForFunction(() => /refused/i.test(document.getElementById('status').textContent),
       null, { timeout: 30000 });
@@ -280,6 +294,8 @@ withApp(async (page, logs) => {
     await page.selectOption('#plate-select', 'custom');
     await setFields(page, { 'custom-w': 400, 'custom-d': 400, 'custom-h': 400 });
     const n2 = await modelCount(page);
+    // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-make');
     await page.waitForFunction(k => state.models.length > k, n2, { timeout: 30000 });
     check('...while a 400 mm custom machine takes the same target, target untouched',
@@ -289,6 +305,8 @@ withApp(async (page, logs) => {
        live against the Plate card and not read once at load. */
     await setFields(page, { 'custom-h': 50 });
     const n3 = await modelCount(page);
+    // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-make');
     await page.waitForFunction(() => /refused/i.test(document.getElementById('status').textContent),
       null, { timeout: 30000 });
@@ -299,6 +317,8 @@ withApp(async (page, logs) => {
        that cannot be printed stays refused whatever is ticked. */
     await setFields(page, { 'chk-stock-oversize': true });
     const n4 = await modelCount(page);
+    // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-make');
     await page.waitForFunction(() => /refused/i.test(document.getElementById('status').textContent),
       null, { timeout: 30000 });
@@ -313,6 +333,8 @@ withApp(async (page, logs) => {
     await setFields(page, { 'sel-stock-shape': 'sphere', 'inp-stock-height': 40,
       'inp-stock-radius': null, 'inp-stock-wall': null });
     const n = await modelCount(page);
+    // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-make');
     await page.waitForFunction(k => state.models.length > k, n, { timeout: 30000 });
     const id = await page.evaluate(() => state.models[state.models.length - 1].id);
@@ -353,6 +375,8 @@ withApp(async (page, logs) => {
       const b = document.getElementById('btn-wheel-ball');
       for (let n = b; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
     });
+    // inp-wheel-height moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('inp-wheel-height'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.fill('#inp-wheel-height', '60');
     await page.click('#btn-wheel-ball');
     await page.waitForFunction(() => /Ball centred/.test(document.getElementById('status').textContent),

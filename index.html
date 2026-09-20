@@ -68,74 +68,6 @@
             <button id="btn-clone" class="btn btn-secondary" type="button" disabled>Clone piece</button>
           </div>
         </section>
-        <section class="card card-compact" id="photoset-card">
-          <h2>Photo set</h2>
-          <p class="hint">Check a photogrammetry capture against the capture contract
-             before any reconstruction time is spent on it. Nothing is reconstructed here.</p>
-          <input type="file" id="photoset-input" accept="image/*" multiple class="hidden-quiet" />
-          <div class="edit-row" style="align-items:center;gap:8px;flex-wrap:wrap;">
-            <button id="btn-photoset-pick" class="btn btn-secondary" type="button"
-                    title="Pick the whole shoot at once. Each frame is read for EXIF and measured for focus and framing; nothing is uploaded anywhere.">Choose photos&hellip;</button>
-            <button id="btn-photoset-report" class="btn btn-secondary" type="button" disabled>Report</button>
-            <button id="btn-photoset-clear" class="btn btn-ghost" type="button" disabled>Clear</button>
-          </div>
-          <p id="photoset-progress" class="hint" hidden></p>
-          <p id="photoset-verdict" class="photoset-verdict" hidden></p>
-        </section>
-        <section class="card card-compact" id="scale-card">
-          <h2>Size</h2>
-          <p id="scale-readout" class="hint">Select a piece to resize.</p>
-          <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
-            <label for="scale-axis">Set</label>
-            <select id="scale-axis" title="Which dimension the target applies to">
-              <option value="longest">Longest edge</option>
-              <option value="x">X</option>
-              <option value="y">Height</option>
-              <option value="z">Z</option>
-            </select>
-            <input id="scale-target" type="number" min="0.1" max="1000" step="0.1" value="50" style="width:5rem;" aria-label="Target size in mm" />
-            <span class="hint">mm</span>
-            <button id="btn-scale-dim" class="btn btn-secondary" type="button"
-                    title="Solve the factor that makes the chosen dimension exactly this many mm, and apply it to all three axes.">Set size</button>
-          </div>
-          <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
-            <label for="scale-factor">Scale by</label>
-            <input id="scale-factor" type="number" min="0.0001" max="10000" step="0.01" value="1" style="width:5rem;" aria-label="Scale factor" />
-            <span class="hint">&times;</span>
-            <button id="btn-scale-factor" class="btn btn-secondary" type="button"
-                    title="Plain uniform multiplier on all three axes.">Scale</button>
-          </div>
-        </section>
-        <section class="card card-compact" id="edit-card">
-          <h2>Cut</h2>
-          <div class="edit-row tool-toggle-row">
-            <button id="btn-cutter-open" class="btn btn-secondary" type="button">Open</button>
-            <button id="btn-cutter-close" class="btn btn-secondary" type="button" disabled>Close</button>
-          </div>
-          <p id="cutter-status" class="hint hidden-quiet">Cutter closed</p>
-          <p id="edit-size" class="hint hidden-quiet">—</p>
-          <div id="cutter-tools" class="cutter-tools">
-            <div class="edit-row">
-              <button id="btn-cut-axis-x" class="btn btn-secondary" type="button">Cut X</button>
-              <button id="btn-cut-axis-z" class="btn btn-secondary" type="button">Cut Z</button>
-            </div>
-            <select id="edit-axis" class="hidden-quiet"><option value="auto">Longest axis</option><option value="x">X</option><option value="z">Z</option></select>
-            <div class="edit-row">
-              <button id="btn-yaw-left-90" class="btn btn-secondary" type="button">⟲ 90</button>
-              <button id="btn-yaw-left" class="btn btn-secondary" type="button">⟲ 15</button>
-              <button id="btn-yaw-right" class="btn btn-secondary" type="button">15 ⟳</button>
-              <button id="btn-yaw-right-90" class="btn btn-secondary" type="button">90 ⟳</button>
-            </div>
-            <input type="range" id="cut-slider" min="2" max="98" step="0.1" value="50" />
-            <div class="edit-row cut-mm-row">
-              <button id="btn-cut-nudge-m" class="btn btn-secondary" type="button">−1</button>
-              <input type="number" id="cut-mm" value="50" min="0.5" max="400" step="0.1" />
-              <button id="btn-cut-nudge-p" class="btn btn-secondary" type="button">+1</button>
-            </div>
-            <p id="cut-readout" class="cut-readout">—</p>
-            <button id="btn-cut" class="btn btn-cut" type="button">Split</button>
-          </div>
-        </section>
         <section class="card" id="join-card">
           <h2>Join</h2>
           <button id="btn-join-start" class="btn btn-secondary" type="button">Start Join</button>
@@ -210,27 +142,6 @@
           </select>
           <button id="btn-tp-extract" class="btn btn-primary" type="button">Extract Line</button>
         </section>
-        <section class="card card-compact" id="export-card">
-          <h2>Export</h2>
-          <label class="hint" for="export-format" style="margin-bottom:4px;display:block">Format</label>
-          <select id="export-format" title="File format for both export buttons">
-            <option value="stl">STL</option>
-            <option value="3mf">3MF - Bambu Studio project, cooling settings baked in</option>
-          </select>
-          <div id="cooling-profile-row" hidden>
-            <label class="hint" for="cooling-profile" style="margin-bottom:4px;display:block">Cooling profile</label>
-            <select id="cooling-profile" title="Cooling / overhang-fan settings baked into the 3MF"></select>
-            <p class="hint" id="cooling-profile-note"></p>
-          </div>
-          <button id="btn-export-model" class="btn btn-primary" type="button">Download selected STL</button>
-          <!-- Save As: the same selected piece, the same STL bytes, into the
-               Library instead of onto your disk. app-library-save.js binds it;
-               deleting this button and that script tag removes the feature. -->
-          <button id="btn-library-save" class="btn btn-secondary" type="button"
-                  title="Save the selected piece into the Library catalog">Save selected to Library</button>
-          <button id="btn-export-stl" class="btn btn-secondary" type="button" disabled>Export plate STL</button>
-          <button id="btn-delete-model" class="btn btn-secondary" type="button">Delete model</button>
-        </section>
         <section class="card card-compact">
           <h2>Pack</h2>
           <button id="btn-optimize" class="btn btn-primary" disabled>Optimize plate</button>
@@ -239,120 +150,238 @@
       <section class="viewport-section">
         <div id="viewport"></div>
         <div class="viewport-overlay viewport-overlay-topbar">
-          <button id="btn-load-stl" class="vp-bar-btn" type="button"
-                  title="Load an STL or 3MF from this computer">＋ From File</button>
-          <div class="vp-library">
-            <button id="btn-library" class="vp-bar-btn" type="button"
-                    aria-haspopup="true" aria-expanded="false"
-                    title="Browse the piece library by category">From Library</button>
-            <div id="library-list" class="library-list" role="menu" hidden
-                 style="display:none"></div>
-          </div>
-          <button id="btn-delete-placed" class="vp-bar-btn" type="button">⌫ Remove</button>
-          <button id="btn-rot-left" class="vp-bar-btn adjust-btn" disabled>⟲ 90°</button>
-          <button id="btn-rot-right" class="vp-bar-btn adjust-btn" disabled>90° ⟳</button>
-          <button id="btn-flip" class="vp-bar-btn adjust-btn" disabled>Edge</button>
-          <button id="btn-tip" class="vp-bar-btn adjust-btn" disabled>Tip</button>
-          <button id="btn-roll" class="vp-bar-btn adjust-btn" disabled>Flat</button>
-          <button id="btn-tilt-up" class="vp-bar-btn adjust-btn" disabled>Pitch +</button>
-          <button id="btn-tilt-dn" class="vp-bar-btn adjust-btn" disabled>Pitch −</button>
-          <button id="btn-bank-up" class="vp-bar-btn adjust-btn" disabled>Bank +</button>
-          <button id="btn-bank-dn" class="vp-bar-btn adjust-btn" disabled>Bank −</button>
-          <button id="btn-raise" class="vp-bar-btn adjust-btn" disabled>Raise</button>
-          <button id="btn-lower" class="vp-bar-btn adjust-btn" disabled>Lower</button>
-          <button id="btn-nudge-fwd" class="vp-bar-btn adjust-btn" disabled>↑</button>
-          <button id="btn-nudge-back" class="vp-bar-btn adjust-btn" disabled>↓</button>
-          <button id="btn-nudge-left" class="vp-bar-btn adjust-btn" disabled>←</button>
-          <button id="btn-nudge-right" class="vp-bar-btn adjust-btn" disabled>→</button>
+          <details class="vp-menu vp-top-menu" id="menu-import">
+            <summary class="vp-bar-btn" title="Bring a piece in: from a file on this computer, or from the library">Import</summary>
+            <div class="vp-menu-body vp-top-body">
+              <button id="btn-load-stl" class="vp-bar-btn" type="button"
+              title="Load an STL or 3MF from this computer">＋ From File</button>
+              <div class="vp-library">
+              <button id="btn-library" class="vp-bar-btn" type="button"
+              aria-haspopup="true" aria-expanded="false"
+              title="Browse the piece library by category">From Library</button>
+              <div id="library-list" class="library-list" role="menu" hidden
+              style="display:none"></div>
+              </div>
+            </div>
+          </details>
+          <details class="vp-menu vp-top-menu" id="menu-export">
+            <summary class="vp-bar-btn" title="Everything the Export card held: format, cooling profile, downloads, Save to Library, Delete model">Export</summary>
+            <div class="vp-menu-body vp-top-body" id="export-card">
+              <label class="hint" for="export-format" style="margin-bottom:4px;display:block">Format</label>
+              <select id="export-format" title="File format for both export buttons">
+              <option value="stl">STL</option>
+              <option value="3mf">3MF - Bambu Studio project, cooling settings baked in</option>
+              </select>
+              <div id="cooling-profile-row" hidden>
+              <label class="hint" for="cooling-profile" style="margin-bottom:4px;display:block">Cooling profile</label>
+              <select id="cooling-profile" title="Cooling / overhang-fan settings baked into the 3MF"></select>
+              <p class="hint" id="cooling-profile-note"></p>
+              </div>
+              <button id="btn-export-model" class="btn btn-primary" type="button">Download selected STL</button>
+              <!-- Save As: the same selected piece, the same STL bytes, into the
+              Library instead of onto your disk. app-library-save.js binds it;
+              deleting this button and that script tag removes the feature. -->
+              <button id="btn-library-save" class="btn btn-secondary" type="button"
+              title="Save the selected piece into the Library catalog">Save selected to Library</button>
+              <button id="btn-export-stl" class="btn btn-secondary" type="button" disabled>Export plate STL</button>
+              <button id="btn-delete-model" class="btn btn-secondary" type="button">Delete model</button>
+            </div>
+          </details>
+          <details class="vp-menu vp-top-menu" id="menu-rotate">
+            <summary class="vp-bar-btn" title="Turn the selected piece 90 degrees">Rotate</summary>
+            <div class="vp-menu-body vp-top-body">
+              <button id="btn-rot-left" class="vp-bar-btn adjust-btn" disabled>⟲ 90°</button>
+              <button id="btn-rot-right" class="vp-bar-btn adjust-btn" disabled>90° ⟳</button>
+            </div>
+          </details>
+          <details class="vp-menu vp-top-menu" id="menu-tip">
+            <summary class="vp-bar-btn" title="Stand the piece on an edge, a tip or flat, and pitch or bank it">Tip</summary>
+            <div class="vp-menu-body vp-top-body">
+              <button id="btn-flip" class="vp-bar-btn adjust-btn" disabled>Edge</button>
+              <button id="btn-tip" class="vp-bar-btn adjust-btn" disabled>Tip</button>
+              <button id="btn-roll" class="vp-bar-btn adjust-btn" disabled>Flat</button>
+              <button id="btn-tilt-up" class="vp-bar-btn adjust-btn" disabled>Pitch +</button>
+              <button id="btn-tilt-dn" class="vp-bar-btn adjust-btn" disabled>Pitch −</button>
+              <button id="btn-bank-up" class="vp-bar-btn adjust-btn" disabled>Bank +</button>
+              <button id="btn-bank-dn" class="vp-bar-btn adjust-btn" disabled>Bank −</button>
+            </div>
+          </details>
+          <details class="vp-menu vp-top-menu" id="menu-move">
+            <summary class="vp-bar-btn" title="Raise, lower and nudge the selected piece">Move</summary>
+            <div class="vp-menu-body vp-top-body">
+              <button id="btn-raise" class="vp-bar-btn adjust-btn" disabled>Raise</button>
+              <button id="btn-lower" class="vp-bar-btn adjust-btn" disabled>Lower</button>
+              <button id="btn-nudge-fwd" class="vp-bar-btn adjust-btn" disabled>↑</button>
+              <button id="btn-nudge-back" class="vp-bar-btn adjust-btn" disabled>↓</button>
+              <button id="btn-nudge-left" class="vp-bar-btn adjust-btn" disabled>←</button>
+              <button id="btn-nudge-right" class="vp-bar-btn adjust-btn" disabled>→</button>
+            </div>
+          </details>
+          <details class="vp-menu vp-top-menu" id="menu-gen">
+            <summary class="vp-bar-btn" title="Generate a piece: stock to carve from, or a vessel on the wheel">Gen+</summary>
+            <div class="vp-menu-body vp-top-body">
+              <details class="vp-menu vp-wheel-menu">
+              <summary>Wheel</summary>
+              <div class="vp-menu-body vp-wheel">
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="The finished vessel's height. The ball is sized from it by Pappus's centroid theorem: a thin-shell estimate of the vessel plus a real waste margin.">H <input type="number" id="inp-wheel-height" min="10" max="900" step="1" placeholder="mm"></label>
+              <label class="vp-clone" title="The finished vessel's radius. Blank means half the height.">R <input type="number" id="inp-wheel-radius" min="5" max="450" step="1" placeholder="mm"></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Wall thickness. Default 3 mm - a typical thrown wall. Refused under the nozzle-safety floor from nso_thickness.js.">W <input type="number" id="inp-wheel-wall" min="0.4" max="30" step="0.1" placeholder="3"></label>
+              <label class="vp-clone" title="Nozzle diameter. Sets the wall floor: nozzle x 1.05.">N <input type="number" id="inp-wheel-nozzle" min="0.1" max="2" step="0.05" placeholder="0.4"></label>
+              </div>
+              <div class="vp-row vp-row-full">
+              <button id="btn-wheel-ball" class="btn btn-secondary" type="button"
+              title="Centre a smooth ball of clay, sized from the target height by Pappus's centroid theorem.">Ball</button>
+              </div>
+              <div class="vp-row vp-row-extend">
+              <button id="btn-wheel-open" class="btn btn-secondary" type="button"
+              title="One push down the middle. Turns the single outer profile into two - outer and inner - and everything after this is a shell.">Open</button>
+              <input type="number" id="inp-wheel-depth" min="1" max="900" step="1"
+              placeholder="deep" aria-label="Opening depth, mm">
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Height on the piece to pull at - any height, not only the rim.">Z <input type="number" id="inp-wheel-pull-z" step="0.5" placeholder="mm"></label>
+              <label class="vp-clone" title="How far out (or in, if negative) to move the wall there.">Δr <input type="number" id="inp-wheel-pull-dr" step="0.5" placeholder="mm"></label>
+              </div>
+              <div class="vp-row vp-row-full">
+              <button id="btn-wheel-pull" class="btn btn-secondary" type="button"
+              title="Drag-shape the profile at that height. The drag points are spline-fitted and the form is revolved to a clean solid. Refuses if it would run past the clay on the wheel or take the wall under the nozzle floor - and says which.">Pull</button>
+              </div>
+              <div class="vp-row vp-row-extend">
+              <button id="btn-wheel-trim" class="btn btn-secondary" type="button"
+              title="Level the base once the form is set. The clay taken off comes off the budget too.">Trim</button>
+              <input type="number" id="inp-wheel-trim-z" min="0" max="900" step="0.5"
+              placeholder="base z" aria-label="Trim base to height, mm">
+              </div>
+              <div class="vp-row vp-row-extend">
+              <button id="btn-wheel-rim" class="btn btn-secondary" type="button"
+              title="Add height at the rim. This is Extend - the same axis-preserving stretch, on the same gate - not a second copy of it. Needs a straight-walled band to insert into.">Rim +</button>
+              <input type="number" id="inp-wheel-rim-mm" min="0.1" max="900" step="0.5"
+              placeholder="mm" aria-label="Extend rim by, mm">
+              </div>
+              </div>
+              </details>
+              <details class="vp-menu vp-stock-menu">
+              <summary>Stock</summary>
+              <div class="vp-menu-body vp-stock">
+              <div class="vp-row vp-row-full">
+              <select id="sel-stock-shape" title="What shape the blank is. The sizing is the same for all three - only the last step, solving for the shape's own defining measurement, differs.">
+              <option value="sphere">Sphere</option>
+              <option value="box">Box</option>
+              <option value="cylinder">Cylinder</option>
+              </select>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="The finished piece's height. The stock is sized from it by Pappus's centroid theorem: a thin-shell estimate of the piece plus the waste margin below.">H <input type="number" id="inp-stock-height" min="1" max="900" step="1" placeholder="mm"></label>
+              <label class="vp-clone" title="The finished piece's radius. Blank means half the height.">R <input type="number" id="inp-stock-radius" min="0.5" max="450" step="1" placeholder="mm"></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Wall thickness of the finished piece - what the shell estimate is built on. Default 3 mm. Refused under the nozzle-safety floor from nso_thickness.js.">W <input type="number" id="inp-stock-wall" min="0.1" max="30" step="0.1" placeholder="3"></label>
+              <label class="vp-clone" title="Nozzle diameter. Sets the wall floor: nozzle x 1.05.">N <input type="number" id="inp-stock-nozzle" min="0.1" max="2" step="0.05" placeholder="0.4"></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Waste margin, per cent. Real material allowance - the skin a carve takes off, the trimmings, the bit the process keeps. Default 30%. 0 means exactly the shell estimate and no allowance.">% <input type="number" id="inp-stock-waste" min="0" max="500" step="1" placeholder="30"></label>
+              <label class="vp-clone" id="row-stock-prop" hidden><span id="lab-stock-prop">x:y:z</span> <input type="text" id="inp-stock-prop" placeholder="e.g. 2:1:1"></label>
+              </div>
+              <label class="vp-check"
+              title="Take the block's proportions from the selected piece, via the same dominant-axis detection Extend uses. It reads that piece's bounding box only and writes to none of it. Box and Cylinder only.">
+              <input type="checkbox" id="chk-stock-match"> Match selected piece
+              </label>
+              <label class="vp-check"
+              title="Generate a block bigger than the build volume anyway, to split with Cut before printing. A TARGET that does not fit the machine is refused either way - no setting makes a piece that cannot physically exist.">
+              <input type="checkbox" id="chk-stock-oversize"> Allow oversize block
+              </label>
+              <div class="vp-row vp-row-full">
+              <button id="btn-stock-make" class="btn btn-secondary" type="button"
+              title="Put a correctly-sized blank on the plate: the material the target needs, plus the waste margin, solved for this shape's defining measurement. Refuses before anything is added if the target cannot be printed on the current plate.">New stock</button>
+              </div>
+              <div class="vp-row vp-row-full">
+              <button id="btn-stock-attach" class="btn btn-secondary btn-attach" type="button" aria-pressed="false"
+              title="Generate the same blank and attach it to a piece in one go: click the point on the piece where it should go, and straight-line auto-aim works out which way it leaves that face, seats it deep enough for the whole rim to bite, and unions the two into one solid. Nothing is left on the plate to tidy up. See docs/ASSEMBLE.md.">Attach</button>
+              </div>
+              </div>
+              </details>
+            </div>
+          </details>
+          <details class="vp-menu vp-top-menu" id="menu-photo">
+            <summary class="vp-bar-btn" title="Check a photogrammetry capture against the capture contract">Photo</summary>
+            <div class="vp-menu-body vp-top-body" id="photoset-card">
+              <p class="hint">Check a photogrammetry capture against the capture contract
+              before any reconstruction time is spent on it. Nothing is reconstructed here.</p>
+              <input type="file" id="photoset-input" accept="image/*" multiple class="hidden-quiet" />
+              <div class="edit-row" style="align-items:center;gap:8px;flex-wrap:wrap;">
+              <button id="btn-photoset-pick" class="btn btn-secondary" type="button"
+              title="Pick the whole shoot at once. Each frame is read for EXIF and measured for focus and framing; nothing is uploaded anywhere.">Choose photos&hellip;</button>
+              <button id="btn-photoset-report" class="btn btn-secondary" type="button" disabled>Report</button>
+              <button id="btn-photoset-clear" class="btn btn-ghost" type="button" disabled>Clear</button>
+              </div>
+              <p id="photoset-progress" class="hint" hidden></p>
+              <p id="photoset-verdict" class="photoset-verdict" hidden></p>
+            </div>
+          </details>
+          <details class="vp-menu vp-top-menu" id="menu-scale">
+            <summary class="vp-bar-btn" title="Set the piece to a real dimension, or scale it by a factor">Scale</summary>
+            <div class="vp-menu-body vp-top-body" id="scale-card">
+              <p id="scale-readout" class="hint">Select a piece to resize.</p>
+              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+              <label for="scale-axis">Set</label>
+              <select id="scale-axis" title="Which dimension the target applies to">
+              <option value="longest">Longest edge</option>
+              <option value="x">X</option>
+              <option value="y">Height</option>
+              <option value="z">Z</option>
+              </select>
+              <input id="scale-target" type="number" min="0.1" max="1000" step="0.1" value="50" style="width:5rem;" aria-label="Target size in mm" />
+              <span class="hint">mm</span>
+              <button id="btn-scale-dim" class="btn btn-secondary" type="button"
+              title="Solve the factor that makes the chosen dimension exactly this many mm, and apply it to all three axes.">Set size</button>
+              </div>
+              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+              <label for="scale-factor">Scale by</label>
+              <input id="scale-factor" type="number" min="0.0001" max="10000" step="0.01" value="1" style="width:5rem;" aria-label="Scale factor" />
+              <span class="hint">&times;</span>
+              <button id="btn-scale-factor" class="btn btn-secondary" type="button"
+              title="Plain uniform multiplier on all three axes.">Scale</button>
+              </div>
+            </div>
+          </details>
+          <details class="vp-menu vp-top-menu" id="menu-cut">
+            <summary class="vp-bar-btn" title="Open the cutter and split the selected piece">Cut</summary>
+            <div class="vp-menu-body vp-top-body" id="edit-card">
+              <div class="edit-row tool-toggle-row">
+              <button id="btn-cutter-open" class="btn btn-secondary" type="button">Open</button>
+              <button id="btn-cutter-close" class="btn btn-secondary" type="button" disabled>Close</button>
+              </div>
+              <p id="cutter-status" class="hint hidden-quiet">Cutter closed</p>
+              <p id="edit-size" class="hint hidden-quiet">—</p>
+              <div id="cutter-tools" class="cutter-tools">
+              <div class="edit-row">
+              <button id="btn-cut-axis-x" class="btn btn-secondary" type="button">Cut X</button>
+              <button id="btn-cut-axis-z" class="btn btn-secondary" type="button">Cut Z</button>
+              </div>
+              <select id="edit-axis" class="hidden-quiet"><option value="auto">Longest axis</option><option value="x">X</option><option value="z">Z</option></select>
+              <div class="edit-row">
+              <button id="btn-yaw-left-90" class="btn btn-secondary" type="button">⟲ 90</button>
+              <button id="btn-yaw-left" class="btn btn-secondary" type="button">⟲ 15</button>
+              <button id="btn-yaw-right" class="btn btn-secondary" type="button">15 ⟳</button>
+              <button id="btn-yaw-right-90" class="btn btn-secondary" type="button">90 ⟳</button>
+              </div>
+              <input type="range" id="cut-slider" min="2" max="98" step="0.1" value="50" />
+              <div class="edit-row cut-mm-row">
+              <button id="btn-cut-nudge-m" class="btn btn-secondary" type="button">−1</button>
+              <input type="number" id="cut-mm" value="50" min="0.5" max="400" step="0.1" />
+              <button id="btn-cut-nudge-p" class="btn btn-secondary" type="button">+1</button>
+              </div>
+              <p id="cut-readout" class="cut-readout">—</p>
+              <button id="btn-cut" class="btn btn-cut" type="button">Split</button>
+              </div>
+            </div>
+          </details>
+          <button id="btn-delete-placed" class="vp-bar-btn" type="button" hidden>⌫ Remove</button>
           <button id="btn-lock-pos" class="vp-bar-btn btn-lock-pos" type="button" disabled aria-pressed="false" title="Lock the selected piece's position. A locked piece refuses drag, the nudge arrows, Raise/Lower and the pose buttons, so a stray click cannot move it. Seat, Center, Align and Skin still place it. Shown by a teal outline and a 'locked' tag.">🔒 Lock position</button>
           <button id="btn-plate-lock" class="vp-bar-btn btn-plate-lock" type="button" disabled aria-pressed="false" title="Lock the plate configuration: hold every piece where it is, in their current relative positions, in one action. Separate from the per-piece lock - it sets no piece flag, so unlocking the plate gives back exactly the piece locks you had.">🔒 Lock plate</button>
-        </div>
-        <div class="viewport-overlay viewport-overlay-wheel">
-          <details class="vp-menu vp-wheel-menu">
-            <summary>Wheel</summary>
-            <div class="vp-menu-body vp-wheel">
-              <div class="vp-row vp-row-opts">
-                <label class="vp-clone" title="The finished vessel's height. The ball is sized from it by Pappus's centroid theorem: a thin-shell estimate of the vessel plus a real waste margin.">H <input type="number" id="inp-wheel-height" min="10" max="900" step="1" placeholder="mm"></label>
-                <label class="vp-clone" title="The finished vessel's radius. Blank means half the height.">R <input type="number" id="inp-wheel-radius" min="5" max="450" step="1" placeholder="mm"></label>
-              </div>
-              <div class="vp-row vp-row-opts">
-                <label class="vp-clone" title="Wall thickness. Default 3 mm - a typical thrown wall. Refused under the nozzle-safety floor from nso_thickness.js.">W <input type="number" id="inp-wheel-wall" min="0.4" max="30" step="0.1" placeholder="3"></label>
-                <label class="vp-clone" title="Nozzle diameter. Sets the wall floor: nozzle x 1.05.">N <input type="number" id="inp-wheel-nozzle" min="0.1" max="2" step="0.05" placeholder="0.4"></label>
-              </div>
-              <div class="vp-row vp-row-full">
-                <button id="btn-wheel-ball" class="btn btn-secondary" type="button"
-                        title="Centre a smooth ball of clay, sized from the target height by Pappus's centroid theorem.">Ball</button>
-              </div>
-              <div class="vp-row vp-row-extend">
-                <button id="btn-wheel-open" class="btn btn-secondary" type="button"
-                        title="One push down the middle. Turns the single outer profile into two - outer and inner - and everything after this is a shell.">Open</button>
-                <input type="number" id="inp-wheel-depth" min="1" max="900" step="1"
-                       placeholder="deep" aria-label="Opening depth, mm">
-              </div>
-              <div class="vp-row vp-row-opts">
-                <label class="vp-clone" title="Height on the piece to pull at - any height, not only the rim.">Z <input type="number" id="inp-wheel-pull-z" step="0.5" placeholder="mm"></label>
-                <label class="vp-clone" title="How far out (or in, if negative) to move the wall there.">Δr <input type="number" id="inp-wheel-pull-dr" step="0.5" placeholder="mm"></label>
-              </div>
-              <div class="vp-row vp-row-full">
-                <button id="btn-wheel-pull" class="btn btn-secondary" type="button"
-                        title="Drag-shape the profile at that height. The drag points are spline-fitted and the form is revolved to a clean solid. Refuses if it would run past the clay on the wheel or take the wall under the nozzle floor - and says which.">Pull</button>
-              </div>
-              <div class="vp-row vp-row-extend">
-                <button id="btn-wheel-trim" class="btn btn-secondary" type="button"
-                        title="Level the base once the form is set. The clay taken off comes off the budget too.">Trim</button>
-                <input type="number" id="inp-wheel-trim-z" min="0" max="900" step="0.5"
-                       placeholder="base z" aria-label="Trim base to height, mm">
-              </div>
-              <div class="vp-row vp-row-extend">
-                <button id="btn-wheel-rim" class="btn btn-secondary" type="button"
-                        title="Add height at the rim. This is Extend - the same axis-preserving stretch, on the same gate - not a second copy of it. Needs a straight-walled band to insert into.">Rim +</button>
-                <input type="number" id="inp-wheel-rim-mm" min="0.1" max="900" step="0.5"
-                       placeholder="mm" aria-label="Extend rim by, mm">
-              </div>
-            </div>
-          </details>
-        </div>
-        <div class="viewport-overlay viewport-overlay-stock">
-          <details class="vp-menu vp-stock-menu">
-            <summary>Stock</summary>
-            <div class="vp-menu-body vp-stock">
-              <div class="vp-row vp-row-full">
-                <select id="sel-stock-shape" title="What shape the blank is. The sizing is the same for all three - only the last step, solving for the shape's own defining measurement, differs.">
-                  <option value="sphere">Sphere</option>
-                  <option value="box">Box</option>
-                  <option value="cylinder">Cylinder</option>
-                </select>
-              </div>
-              <div class="vp-row vp-row-opts">
-                <label class="vp-clone" title="The finished piece's height. The stock is sized from it by Pappus's centroid theorem: a thin-shell estimate of the piece plus the waste margin below.">H <input type="number" id="inp-stock-height" min="1" max="900" step="1" placeholder="mm"></label>
-                <label class="vp-clone" title="The finished piece's radius. Blank means half the height.">R <input type="number" id="inp-stock-radius" min="0.5" max="450" step="1" placeholder="mm"></label>
-              </div>
-              <div class="vp-row vp-row-opts">
-                <label class="vp-clone" title="Wall thickness of the finished piece - what the shell estimate is built on. Default 3 mm. Refused under the nozzle-safety floor from nso_thickness.js.">W <input type="number" id="inp-stock-wall" min="0.1" max="30" step="0.1" placeholder="3"></label>
-                <label class="vp-clone" title="Nozzle diameter. Sets the wall floor: nozzle x 1.05.">N <input type="number" id="inp-stock-nozzle" min="0.1" max="2" step="0.05" placeholder="0.4"></label>
-              </div>
-              <div class="vp-row vp-row-opts">
-                <label class="vp-clone" title="Waste margin, per cent. Real material allowance - the skin a carve takes off, the trimmings, the bit the process keeps. Default 30%. 0 means exactly the shell estimate and no allowance.">% <input type="number" id="inp-stock-waste" min="0" max="500" step="1" placeholder="30"></label>
-                <label class="vp-clone" id="row-stock-prop" hidden><span id="lab-stock-prop">x:y:z</span> <input type="text" id="inp-stock-prop" placeholder="e.g. 2:1:1"></label>
-              </div>
-              <label class="vp-check"
-                     title="Take the block's proportions from the selected piece, via the same dominant-axis detection Extend uses. It reads that piece's bounding box only and writes to none of it. Box and Cylinder only.">
-                <input type="checkbox" id="chk-stock-match"> Match selected piece
-              </label>
-              <label class="vp-check"
-                     title="Generate a block bigger than the build volume anyway, to split with Cut before printing. A TARGET that does not fit the machine is refused either way - no setting makes a piece that cannot physically exist.">
-                <input type="checkbox" id="chk-stock-oversize"> Allow oversize block
-              </label>
-              <div class="vp-row vp-row-full">
-                <button id="btn-stock-make" class="btn btn-secondary" type="button"
-                        title="Put a correctly-sized blank on the plate: the material the target needs, plus the waste margin, solved for this shape's defining measurement. Refuses before anything is added if the target cannot be printed on the current plate.">New stock</button>
-              </div>
-              <div class="vp-row vp-row-full">
-                <button id="btn-stock-attach" class="btn btn-secondary btn-attach" type="button" aria-pressed="false"
-                        title="Generate the same blank and attach it to a piece in one go: click the point on the piece where it should go, and straight-line auto-aim works out which way it leaves that face, seats it deep enough for the whole rim to bite, and unions the two into one solid. Nothing is left on the plate to tidy up. See docs/ASSEMBLE.md.">Attach</button>
-              </div>
-            </div>
-          </details>
         </div>
         <div class="viewport-overlay viewport-overlay-finish">
           <details class="vp-menu vp-finish-menu">

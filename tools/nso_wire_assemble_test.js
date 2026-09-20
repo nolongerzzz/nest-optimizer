@@ -133,6 +133,8 @@ withApp(async (page, logs) => {
     check('it answers app-core\'s click question', w.hook === 'function');
     check('app-mask.js exports the raw <-> local mapping rather than a copy living here',
       w.mapping);
+    // btn-stock-attach moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-attach'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     check('app-join.js\'s union is the boolean it will use', w.union === 'function');
 
     await page.click('#btn-stock-attach');
@@ -145,6 +147,8 @@ withApp(async (page, logs) => {
     check('one click arms it and says what to do',
       armed.pressed === 'true' && armed.cls && armed.flag &&
       /click the point on a piece/i.test(armed.status), JSON.stringify(armed));
+    // btn-stock-attach moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-attach'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-attach');
     check('a second click disarms it', !(await page.evaluate(() => !!state.attachArmed)));
   }

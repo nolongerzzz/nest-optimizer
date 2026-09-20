@@ -245,6 +245,8 @@ withApp(async (page, logs) => {
     sel.value = '3mf';
     sel.dispatchEvent(new Event('change', { bubbles: true }));
   });
+  // btn-export-stl moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-export-stl'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   const [dl] = await Promise.all([
     page.waitForEvent('download', { timeout: 60000 }),
     page.click('#btn-export-stl')

@@ -128,6 +128,8 @@ const pathOf = c => decodeURIComponent(c.url.split('/contents/')[1].split('?')[0
 const seq = calls => calls.map(c => c.method + ' ' + pathOf(c));
 
 async function openSave(page) {
+  // btn-library-save moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-library-save'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.click('#btn-library-save');
   await page.waitForFunction(() => {
     const b = document.getElementById('nso-save-back');
@@ -169,6 +171,8 @@ withApp(async (page, logs) => {
     });
     check('there is a Save-to-Library button', !!shape, JSON.stringify(shape));
     check('it is a real <button type=button>', shape && shape.tag === 'BUTTON' && shape.type === 'button');
+    // btn-library-save moved into the top bar's Export dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-library-save'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     check('it says what it does', shape && /save/i.test(shape.text) && /librar/i.test(shape.text), shape && shape.text);
 
     // Nothing selected yet: it must say so and send nothing.

@@ -92,6 +92,8 @@ const scene = ([a, b]) => {
 };
 
 async function exportPlateSTL(page, label) {
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', 'stl');
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 30000 }),
@@ -146,6 +148,8 @@ withApp(async (page, logs) => {
   }, ids);
   const raiseEnabled = await page.evaluate(() => !document.getElementById('btn-raise').disabled);
   check('Raise button is enabled for the selected piece', raiseEnabled);
+  // btn-raise moved into the top bar's Move dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-raise'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   for (let i = 0; i < 11; i++) await page.click('#btn-raise');
   s = await page.evaluate(scene, ids);
   check('B is above A after 11 x Raise (2 mm each)', s.overlapXZ && s.bBottomMinusATop > 0, 'B bottom - A top = ' + s.bBottomMinusATop.toFixed(3));

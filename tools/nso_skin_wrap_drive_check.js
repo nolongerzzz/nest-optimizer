@@ -105,6 +105,8 @@ const piece = id => {
 };
 
 async function exportPlateSTL(page, label) {
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', 'stl');
   const [download] = await Promise.all([
     page.waitForEvent('download', { timeout: 60000 }),

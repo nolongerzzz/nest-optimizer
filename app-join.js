@@ -3217,11 +3217,19 @@ function setupUI() {
 
   const btnFrame = document.getElementById('btn-frame-selected');
   if (btnFrame) btnFrame.addEventListener('click', frameSelectedPiece);
+  /* One menu open at a time. Opening a menu shuts the others, so the bar's
+     nine dropdowns and the Finish menu never stack over each other.
+
+     A menu that CONTAINS the one being opened, or sits inside it, is left
+     alone: Gen+ holds the Wheel and Stock menus, and the old blanket rule
+     would have had Wheel's own opening shut the Gen+ it lives in - the click
+     would open a menu and hide it in the same breath. */
   document.querySelectorAll('.vp-menu').forEach(function (d) {
     d.addEventListener('toggle', function () {
       if (!d.open) return;
       document.querySelectorAll('.vp-menu').forEach(function (o) {
-        if (o !== d) o.open = false;
+        if (o === d || o.contains(d) || d.contains(o)) return;
+        o.open = false;
       });
     });
   });

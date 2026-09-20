@@ -202,6 +202,8 @@ withApp(async (page, logs) => {
 
   /* ---------- 1. Export plate, Format = STL ---------- */
   console.log('\n--- Export plate STL ---');
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', 'stl');
   files.plateSTL = await download(page, '#btn-export-stl', tmp);
   check('downloads a .stl', /\.stl$/i.test(files.plateSTL), path.basename(files.plateSTL));
@@ -222,6 +224,8 @@ withApp(async (page, logs) => {
 
   /* ---------- 2. Export plate, Format = 3MF ---------- */
   console.log('\n--- Export plate 3MF ---');
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', '3mf');
   files.plate3MF = await download(page, '#btn-export-stl', tmp);
   check('downloads a .3mf', /\.3mf$/i.test(files.plate3MF), path.basename(files.plate3MF));
@@ -245,6 +249,8 @@ withApp(async (page, logs) => {
   console.log('\n--- Download selected STL (model A, the yawed + lifted piece) ---');
   await selectModel(page, idA);
   const mA = await page.evaluate(modelSoup, idA);
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', 'stl');
   files.selSTL = await download(page, '#btn-export-model', tmp, { dialog: true, prefix: 'selected-' });
   check('downloads a .stl named after the model', path.basename(files.selSTL) === 'selected-' + mA.name + '.stl', path.basename(files.selSTL));
@@ -259,6 +265,8 @@ withApp(async (page, logs) => {
 
   /* ---------- 4. Download selected, Format = 3MF ---------- */
   console.log('\n--- Download selected 3MF (model A) ---');
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.selectOption('#export-format', '3mf');
   files.sel3MF = await download(page, '#btn-export-model', tmp, { dialog: true, prefix: 'selected-' });
   check('downloads a .3mf named after the model', path.basename(files.sel3MF) === 'selected-' + mA.name + '.3mf', path.basename(files.sel3MF));

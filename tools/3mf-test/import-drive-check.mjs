@@ -97,6 +97,8 @@ async function main() {
     document.querySelector(`[data-edit-id="${m.id}"]`).click();
   });
   check('the cube is the active model', await page.evaluate(() => getActiveModel().name), 'Cube');
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   const outDir = await mkdtemp(join(tmpdir(), 'nso-3mf-import-drive-'));
 
   await page.selectOption('#export-format', 'stl');
@@ -110,6 +112,8 @@ async function main() {
     [stlDl.suggestedFilename(), stl.readUInt32LE(80), stl.length], ['Cube.stl', 12, 84 + 50 * 12]);
   const wt = spawnSync('python3', ['tools/stl_watertight_check.py', stlFile, '--odd', '--degen'],
     { encoding: 'utf8' });
+  // export-format moved into the top bar's Export dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('export-format'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   check('and it passes the canonical watertight checker (exit 0)',
     wt.status === 0 ? 'clean' : (wt.stdout + wt.stderr).trim(), 'clean');
 

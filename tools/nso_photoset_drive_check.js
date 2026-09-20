@@ -123,6 +123,10 @@ const detailOf = (rep, id) => (rep.results.find(x => x.id === id) || {}).detail 
 withApp(async (page, logs) => {
   console.log('== the onramp, driven through the shipped controls ==');
 
+  // Photo set is a top-bar dropdown now, so the panel is only laid out once
+  // its menu is open. Unfold it, then ask the same question of the same id.
+  await page.evaluate(() => { const e = document.getElementById('photoset-card');
+    for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   check('the card is on the page', await page.isVisible('#photoset-card'));
   check('  ...and the modules loaded', await page.evaluate(
     () => typeof window.NSO_PhotoSet === 'object' && typeof window.NSO_Exif === 'object'));

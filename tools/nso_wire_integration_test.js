@@ -275,6 +275,8 @@ withApp(async (page, logs) => {
     await openMenuOf(page, 'btn-stock-make');
     await setF(page, { 'sel-stock-shape': 'box', 'inp-stock-height': 40, 'inp-stock-radius': 20,
       'inp-stock-wall': 3, 'inp-stock-waste': 0, 'chk-stock-match': false, 'chk-stock-oversize': false });
+    // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-stock-make');
     const idBody = await page.evaluate(() => state.models[state.models.length - 1].id);
     await selectPiece(page, idBody);
@@ -330,6 +332,8 @@ withApp(async (page, logs) => {
     await selectPiece(page, seed);
     await openMenuOf(page, 'btn-wheel-ball');
     await setF(page, { 'inp-wheel-height': 60, 'inp-wheel-radius': 30, 'inp-wheel-wall': 3 });
+    // btn-wheel-ball moved into the top bar's Gen dropdown; unfold it first.
+    await page.evaluate(() => { const e = document.getElementById('btn-wheel-ball'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
     await page.click('#btn-wheel-ball');
     await setF(page, { 'inp-wheel-depth': 20 });
     await page.click('#btn-wheel-open');
