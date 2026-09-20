@@ -195,15 +195,24 @@
             </div>
           </details>
           <details class="vp-menu vp-top-menu" id="menu-tip">
-            <summary class="vp-bar-btn" title="Stand the piece on an edge, a tip or flat, and pitch or bank it">Tip</summary>
+            <summary class="vp-bar-btn" title="Set which way up the piece rests, and tilt it by degrees">Tip</summary>
             <div class="vp-menu-body vp-top-body">
-              <button id="btn-flip" class="vp-bar-btn adjust-btn" disabled>Edge</button>
-              <button id="btn-tip" class="vp-bar-btn adjust-btn" disabled>Tip</button>
-              <button id="btn-roll" class="vp-bar-btn adjust-btn" disabled>Flat</button>
-              <button id="btn-tilt-up" class="vp-bar-btn adjust-btn" disabled>Pitch +</button>
-              <button id="btn-tilt-dn" class="vp-bar-btn adjust-btn" disabled>Pitch −</button>
-              <button id="btn-bank-up" class="vp-bar-btn adjust-btn" disabled>Bank +</button>
-              <button id="btn-bank-dn" class="vp-bar-btn adjust-btn" disabled>Bank −</button>
+              <button id="btn-flip" class="vp-bar-btn adjust-btn" disabled
+                      title="Lay the piece down on its long horizontal edge - a quarter turn about whichever axis that edge runs along.">Tip on side</button>
+              <button id="btn-tip" class="vp-bar-btn adjust-btn" disabled
+                      title="Stand the piece up on its end. Each press takes the next face round to the plate.">Stand</button>
+              <button id="btn-flip-over" class="vp-bar-btn adjust-btn" disabled
+                      title="Turn the piece upside down from wherever it is now - a half turn about a horizontal axis, so the face on the plate ends up on top.">Flip</button>
+              <button id="btn-tip-face" class="vp-bar-btn adjust-btn" disabled aria-pressed="false"
+                      title="Click a face or an edge on the piece and it re-seats to rest on it. Picking the bottom face lays it flat, which is what the old Flat button did.">Tip on face</button>
+              <!-- Tilt lifts ONE EDGE by degrees. That is a different motion from
+                   Rotate, which spins the piece about its own centre; the two are
+                   separate controls on purpose and neither calls the other. -->
+              <button id="btn-tilt-up" class="vp-bar-btn adjust-btn" disabled title="Tilt: lift the far edge 15°">Tilt ↑</button>
+              <button id="btn-tilt-dn" class="vp-bar-btn adjust-btn" disabled title="Tilt: lift the near edge 15°">Tilt ↓</button>
+              <button id="btn-bank-up" class="vp-bar-btn adjust-btn" disabled title="Tilt: lift the left edge 15°">Tilt →</button>
+              <button id="btn-bank-dn" class="vp-bar-btn adjust-btn" disabled title="Tilt: lift the right edge 15°">Tilt ←</button>
+              <p class="hint" style="margin:2px 0 0">Arrow keys tilt while this menu is open.</p>
             </div>
           </details>
           <details class="vp-menu vp-top-menu" id="menu-move">
@@ -799,6 +808,7 @@
   <script src="app-texture.js?v=skin2"></script>
   <script src="app-nonsolid.js?v=inside4"></script>
   <script src="app-poslock.js?v=lock1"></script>
+  <script src="app-tip-orient.js?v=tip1"></script>
   <script src="app-defects.js?v=inside5"></script>
   <script src="app-measure.js?v=inside6"></script>
   <!-- The library write features. access first: it holds the gate, the

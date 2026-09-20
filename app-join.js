@@ -3300,10 +3300,12 @@ function setupUI() {
   // Manual adjust
   document.getElementById('btn-rot-left').addEventListener('click', () => rotateSelected(-1));
   document.getElementById('btn-rot-right').addEventListener('click', () => rotateSelected(1));
-  document.getElementById('btn-flip').addEventListener('click', () => flipSelected());
-  document.getElementById('btn-tip').addEventListener('click', () => tipSelected());
-  const btnRoll = document.getElementById('btn-roll');
-  if (btnRoll) btnRoll.addEventListener('click', () => rollSelected());
+  /* btn-flip is "Tip on side" now and app-tip-orient.js owns its click -
+     bound there so the orientation maths lives in one file. flipSelected()
+     (a 180 degree yaw) keeps its other callers and is not wired to a button.
+     btn-roll / "Flat" is retired: Tip on face reaches the same orientation
+     by picking the bottom face, and rollSelected() stays for its callers. */
+  /* btn-tip is "Stand" now; app-tip-orient.js owns its click. */
   const btnRaise = document.getElementById('btn-raise');
   if (btnRaise) btnRaise.addEventListener('click', () => liftSelected(1));
   const btnLower = document.getElementById('btn-lower');

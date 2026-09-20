@@ -598,6 +598,11 @@
     state.centerLockArmed = false;
   }
 
+  /* The same contract, reachable by the other pickers rather than copied
+     into each of them. Tip on face is one; anything that arms a click on a
+     piece should put the rest away through this and not by hand. */
+  window.nsoMaskDisarmOthers = disarmOthers;
+
   function enterPaint(mode) {
     const m = activeModel();
     if (!m || !m.rawTris) {
