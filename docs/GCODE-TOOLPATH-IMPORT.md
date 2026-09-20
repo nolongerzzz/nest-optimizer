@@ -24,6 +24,34 @@ Everything on screen came out of the file. Where a number did not, the reader
 says so (see *Nothing is assumed* below) rather than quietly filling in a
 default.
 
+## How you get in
+
+The rail down the viewport's bottom-left corner, under X-ray:
+
+> **G**🔬
+
+It opens a file chooser for an already-sliced `*.gcode.3mf`; picking one reads
+the toolpath, adds a model per feature group, opens the Toolpath card and gives
+it the keyboard, so the arrow keys scrub from the first press. The button stays
+lit while a session is open.
+
+This is a door on a route that already existed, not a second one. `handleFiles()`
+has routed a `*.gcode.3mf` here since the importer landed, so dropping one on the
+Library file box still works and still does exactly the same thing — the button
+calls the same `importSliced3MF()` with the same bytes. What it changes is that
+you no longer have to already know the feature is there: the Toolpath card is
+`hidden` until an import succeeds, so before the button there was nothing on
+screen, anywhere, that named it.
+
+A plain `.3mf` chosen at this button is **refused by name**, with a line saying
+the microscope wants the `.gcode.3mf` Bambu Studio writes for a sliced plate.
+It is not quietly imported as geometry: `accept=".3mf"` is as narrow as a file
+input can be made here (`.gcode.3mf` is not a single extension), so the filter
+lets a model through and the handler is what says no. Drop that same model on the
+Library box and it imports as geometry exactly as before.
+
+`npm run gcode:entry` drives all of it through the DOM — see *Checks*.
+
 ## What it reads
 
 | Part | Used for |
@@ -246,9 +274,23 @@ single-line print.
     npm run gcode:lines      # 95 checks, no browser
     npm run gcode:zfilter    # 103 checks, the Z filter + the real files
     npm run gcode:drive      # 106 checks, the real app in headless Chromium
+    npm run gcode:entry      # 55 checks, the rail button, through the DOM
     npm run gcode:fixture    # regenerate the ground-truth fixture
 
-All three are in `npm test`.
+All four are in `npm test`.
+
+`gcode:entry` is the one that starts where a user starts. `gcode:drive` proves
+the pipeline by calling `handleFiles()` from page script, which is the right
+shape for testing an importer and is exactly how this feature came to be
+finished, green and unreachable at once: no check had ever touched a control
+you can see. So `gcode:entry` never calls `handleFiles()`, `importSliced3MF()`
+or anything else in page script to get a file in. It asserts the button's place
+in the rail from the rendered boxes — same column as X-ray, 8px under it, the
+same 44px square, both glyphs inside it — then clicks it, answers the file
+chooser Chromium really opens, and drives the advertised flow through the DOM:
+scrub, `Isolate Z`, Extract, Undo, uncheck. Both files it opens are real Bambu
+slices. It ends on `tabletop.gcode.3mf` — 202,877 moves, 73 layers — imported
+in ~7s, Z filter handler 48 ms, and the isolated layer out as 50,028 triangles.
 
 `gcode:lines` runs in tiers: the flow model (exact inverses, hand-computable
 cases, degenerate inputs), the parser state machine (relative vs absolute E,
@@ -341,8 +383,8 @@ MakerWorld project out of `fixtures/3mf/` does not apply.
 | --- | --- |
 | `nso-gcode-lines.js` | UMD, no deps; parser, flow model, flat-line geometry. Same code in the page and under Node. |
 | `app-toolpath.js` | `NSO_TOOLPATH`: import, reseating, the scrub overlay, the card, Extract Line. |
-| `index.html` / `styles.css` | the Toolpath card |
+| `index.html` / `styles.css` | the Toolpath card, and the `G🔬` rail button + its file input |
 | `app-core.js` | `handleFiles()` routes `*.gcode.3mf` here; everything else unchanged |
-| `tools/gcode-test/` | the three suites and the fixture generator |
+| `tools/gcode-test/` | the four suites and the fixture generator |
 | `docs/GCODE-FEATURE-AUDIT.md` | the reference tool vs this importer, category by category |
 | `docs/reference/joint_microscope_3d.html` | the reference inspector, parked; nothing loads it |

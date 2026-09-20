@@ -1398,6 +1398,21 @@ select:focus, input:focus {
   color: #38bdf8;
 }
 
+/* The G-code microscope's rail button carries TWO glyphs - a letter and an
+   emoji - where every other tool button carries one, so the rail's 22px would
+   overflow the 44px box. Its own size rather than a smaller rail for all. */
+.viewport-tool-btn.btn-gcode {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+/* Lit while a toolpath session is open, the same signal X-ray gives. */
+#btn-gcode.is-on {
+  border-color: #38bdf8;
+  color: #38bdf8;
+}
+
 .vp-top-btn {
   pointer-events: auto;
   padding: 7px 12px;
