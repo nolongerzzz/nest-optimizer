@@ -2264,6 +2264,15 @@ function startMoveDrag(idx, event) {
     setStatus('Cutter open - close cutter to move pieces');
     return false;
   }
+  /* Vertical placement owns the piece while it is on. A drag on an eye-level
+     view moves it in a plane you cannot judge from there, which is the
+     opposite of what the mode is for - the arrows and the slider are the
+     whole input. Refused here, beside every other reason a drag does not
+     start, rather than by unbinding anything. */
+  if (state.moveVertical) {
+    setStatus('Vertical placement is on - use the arrows or the slider, or clear the box');
+    return false;
+  }
   const p = state.placed[idx];
   if (!p || !p.mesh) return false;
   // Position lock (app-poslock.js): a locked piece is still selectable, but
@@ -2841,7 +2850,7 @@ function updateExportButton() {
 function updateAdjustUI() {
   if (typeof applyXrayView === 'function') applyXrayView();
   const has = state.selectedIndex >= 0 && state.placed[state.selectedIndex];
-  ['btn-rot-left', 'btn-rot-right', 'btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face', 'btn-raise', 'btn-lower', 'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn', 'btn-nudge-left', 'btn-nudge-right', 'btn-nudge-fwd', 'btn-nudge-back', 'btn-delete-placed', 'btn-frame-selected']
+  ['btn-rot-left', 'btn-rot-right', 'btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face', 'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn', 'btn-nudge-left', 'btn-nudge-right', 'btn-nudge-fwd', 'btn-nudge-back', 'btn-delete-placed', 'btn-frame-selected']
     .forEach(id => {
       const el = document.getElementById(id);
       if (el) el.disabled = !has;
