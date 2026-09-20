@@ -80,7 +80,7 @@ const statusOf = page => page.evaluate(() => document.getElementById('status').t
 const clearStatus = page => page.evaluate(() => { document.getElementById('status').textContent = ''; });
 const waitStatus = (page, re) => page.waitForFunction(src => new RegExp(src).test(document.getElementById('status').textContent), re.source, { timeout: 60000 });
 
-const ADJ = ['btn-rot-left', 'btn-rot-right', 'btn-flip', 'btn-tip', 'btn-roll', 'btn-raise', 'btn-lower',
+const ADJ = ['btn-rot-left', 'btn-rot-right', 'btn-flip', 'btn-tip', 'btn-roll', 
              'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn', 'btn-nudge-left', 'btn-nudge-right', 'btn-nudge-fwd', 'btn-nudge-back'];
 /* everything the lock touches, for one piece */
 const pose = (page, id) => page.evaluate(([id, ADJ]) => {
@@ -273,9 +273,10 @@ withApp(async (page, logs) => {
   check('Join session holds A / B', j.session && j.a === idA && j.b === idB, JSON.stringify(j));
   a = await pose(page, idA);
   await moveTo(page, idB, a.x, a.z);
-  // btn-raise moved into the top bar's Move dropdown; unfold it first.
-  await page.evaluate(() => { const e = document.getElementById('btn-raise'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-  for (let i = 0; i < 11; i++) await page.click('#btn-raise');
+  /* Raise/Lower are gone - the Move menu's Vertical checkbox, its slider
+     and the arrow keys are the vertical control now. liftSelected() is
+     untouched, so the 22 mm this wanted is one call. */
+  await page.evaluate(() => { for (let i = 0; i < 11; i++) liftSelected(1); });
   // folded back: this check clicks the canvas, and an open panel
   // hangs over the top of the viewport where some of those land.
   await page.evaluate(() => document.querySelectorAll('.viewport-overlay-topbar details').forEach(d => { d.open = false; }));
