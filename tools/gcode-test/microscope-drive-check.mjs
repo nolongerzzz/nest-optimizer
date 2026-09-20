@@ -173,6 +173,45 @@ async function main() {
   await page.click('#ms-legend .ms-legend-item:first-child');   // back on
 
   // =======================================================================
+  console.log('\n--- the axis map, through the shipped code ---');
+  // =======================================================================
+  // gcode:scope proves the determinant, but against a RESTATED toThree, so it
+  // cannot see app-microscope.js change. This file can, but only halfway, and
+  // the half it misses is the likely edit. Measured, by reverting the map and
+  // re-running:
+  //
+  //   toThree alone -> the round-trip check below FAILS. gcodeBoxes hardcodes
+  //     the inverse, so flipping one side breaks the pair. Caught already.
+  //   toThree AND that inverse -> round-trip PASSES, because the two flips
+  //     cancel. 106/108 green without the two checks here. Nothing else sees
+  //     it: a reflection leaves triangle counts alone, and selection runs in
+  //     G-code space, so box membership is unmoved too. The export is mirrored
+  //     and every other assertion agrees it is fine.
+  //
+  // The second is what a well-meant edit looks like - gcodeBoxes' comment
+  // names toThree, so whoever changes one changes both. So this pins the
+  // ABSOLUTE orientation rather than the two sides' agreement with each other.
+  //
+  // addBoxAt maps its argument with the view's OWN toThree and keeps the
+  // result on b.point, so reading it back is the shipped mapping and not a
+  // copy of it. Offsets are exact small integers, so no tolerance is needed
+  // beyond rounding away float noise.
+  const axis = await page.evaluate(() => {
+    const M = window.NSO_MICROSCOPE, d = M.getDoc();
+    const r = (v) => Math.round(v * 1e6) / 1e6;
+    M.clearBoxes();
+    const b = M.addBoxAt(d.cx + 10, d.cy + 4, 2, 0.01, 0.01);
+    const p = { x: r(b.point.x), y: r(b.point.y), z: r(b.point.z) };
+    M.clearBoxes();
+    return p;
+  });
+  // (dx, dy, dz) = (10, 4, 2) -> (x, z, -y) = (10, 2, -4)
+  check('a G-code point maps by the app\'s (x, z, -y), not the reference tool\'s (x, z, y)',
+    [axis.x, axis.y, axis.z], [10, 2, -4]);
+  check('and z carries the minus - the reflection would put +4 here',
+    axis.z, -4);
+
+  // =======================================================================
   console.log('\n--- selection mode 1: the sphere-to-box blob crop ---');
   // =======================================================================
   const boxSel = await page.evaluate(() => {

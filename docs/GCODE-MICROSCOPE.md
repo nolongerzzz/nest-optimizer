@@ -294,7 +294,7 @@ Both are in `npm test`.
 | | `npm run gcode:scope` | `npm run gcode:scope-drive` |
 | --- | --- | --- |
 | file | `microscope-check.js` | `microscope-drive-check.mjs` |
-| checks | 52 | 106 |
+| checks | 52 | 108 |
 | time | ~4.5 s | ~31 s |
 | needs a browser | no | headless Chromium |
 
