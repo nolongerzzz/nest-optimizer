@@ -592,6 +592,10 @@
           <button id="btn-undo" class="viewport-tool-btn" type="button" disabled>↶</button>
           <button id="btn-frame-view" class="viewport-tool-btn" type="button">◎</button>
           <button id="btn-xray" class="viewport-tool-btn" type="button">X</button>
+          <button id="btn-gcode" class="viewport-tool-btn btn-gcode" type="button"
+                  aria-label="G-code microscope"
+                  title="G-code microscope: open an already-sliced .gcode.3mf from Bambu Studio, draw its toolpath as real geometry, scrub to a single extrusion line, isolate one Z layer, and extract what you are looking at as its own piece.">G&#128300;</button>
+          <input type="file" id="gcode-input" accept=".3mf" class="hidden-quiet" />
           <button id="btn-watch" class="viewport-tool-btn" type="button"
                   aria-pressed="false"
                   title="Watch: log errors / failed loads / status lines, and check the rendered scene against the app state after every Undo, bake and tool switch.">&#128065;</button>

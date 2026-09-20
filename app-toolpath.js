@@ -520,6 +520,7 @@ var NSO_TOOLPATH = (function () {
     var card = $('toolpath-card');
     if (!card) return;
     card.classList.remove('hidden');
+    setEntryLit(true);
     if (card.dataset.wired === '1') return;
     card.dataset.wired = '1';
 
@@ -677,12 +678,91 @@ var NSO_TOOLPATH = (function () {
     clearIso();
     disposeOverlay();
     session = null;
+    setEntryLit(false);
     var card = $('toolpath-card');
     if (card) card.classList.add('hidden');
   }
 
+  // =========================================================================
+  // Entry point
+  // =========================================================================
+  //
+  // handleFiles() already routes a `*.gcode.3mf` here, so the pipeline below
+  // this line has been reachable all along - but only by knowing that dropping
+  // a sliced project on the Library file box does something different from
+  // dropping a model, and nothing on screen says so. The toolpath card is
+  // `hidden` until an import succeeds, so there is nothing to find first
+  // either. This is that same route with a door on it: one rail button, no
+  // second ingest path, no change to what happens after the bytes arrive.
+
+  /** Lit while a session is open, so the rail says the microscope is engaged. */
+  function setEntryLit(on) {
+    var btn = $('btn-gcode');
+    if (btn) btn.classList.toggle('is-on', !!on);
+  }
+
+  /** Ask for a file. Clearing `value` first so re-picking one still fires. */
+  function openPicker() {
+    var input = $('gcode-input');
+    if (!input) { say('G-code microscope is missing its file input', true); return; }
+    input.value = '';
+    input.click();
+  }
+
+  function onPicked(ev) {
+    var input = ev.target;
+    var file = input.files && input.files[0];
+    if (!file) return;
+    // A plain .3mf is a model, not a toolpath, and the accept filter cannot
+    // tell the two apart - `.gcode.3mf` is not a single extension. Say which
+    // one this needs rather than silently importing geometry from the G-code
+    // button, or silently doing nothing.
+    if (!looksSliced(file.name)) {
+      say(file.name + ' is not a sliced project - the microscope needs the ' +
+          '.gcode.3mf Bambu Studio writes when it exports a sliced plate', true);
+      return;
+    }
+    var reader = new FileReader();
+    reader.onerror = function () { say('Could not read ' + file.name, true); };
+    reader.onload = function (e) {
+      importSliced3MF(file.name, e.target.result).then(function (s) {
+        if (!s) return;
+        var card = $('toolpath-card');
+        if (!card) return;
+        // Put the card where it can be seen and give it the keyboard, so the
+        // arrow keys its own handler binds scrub from the first press.
+        if (card.scrollIntoView) card.scrollIntoView({ block: 'nearest' });
+        card.focus();
+      });
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function mountEntry() {
+    var btn = $('btn-gcode');
+    if (btn && btn.dataset.wired !== '1') {
+      btn.dataset.wired = '1';
+      btn.addEventListener('click', openPicker);
+    }
+    var input = $('gcode-input');
+    if (input && input.dataset.wired !== '1') {
+      input.dataset.wired = '1';
+      input.addEventListener('change', onPicked);
+    }
+  }
+
+  if (typeof document !== 'undefined') {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', mountEntry);
+    } else {
+      mountEntry();
+    }
+  }
+
   return {
     looksSliced: looksSliced,
+    openPicker: openPicker,
+    mountEntry: mountEntry,
     importSliced3MF: importSliced3MF,
     setCursor: setCursor,
     stepMove: stepMove,
