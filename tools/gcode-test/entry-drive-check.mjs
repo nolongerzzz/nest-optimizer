@@ -95,8 +95,12 @@ async function main() {
   });
   const xray = rail.all.find((b) => b.id === 'btn-xray');
   const gbtn = rail.all.find((b) => b.id === 'btn-gcode');
+  // The Microscope VIEW's own button sits below this one - a different
+  // feature (docs/GCODE-MICROSCOPE.md), and it must not have pushed G off its
+  // own spot under X-ray, which the two checks after this one measure.
   check('the rail renders top-to-bottom with G directly under X-ray',
-    rail.drawn, ['btn-undo', 'btn-frame-view', 'btn-xray', 'btn-gcode', 'btn-watch']);
+    rail.drawn,
+    ['btn-undo', 'btn-frame-view', 'btn-xray', 'btn-gcode', 'btn-microscope', 'btn-watch']);
   check('same left edge as X-ray - one column, not a second one',
     gbtn.x, xray.x);
   check('below X-ray, by the rail\'s own 8px gap and nothing more',

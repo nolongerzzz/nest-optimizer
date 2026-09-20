@@ -596,6 +596,16 @@
                   aria-label="G-code microscope"
                   title="G-code microscope: open an already-sliced .gcode.3mf from Bambu Studio, draw its toolpath as real geometry, scrub to a single extrusion line, isolate one Z layer, and extract what you are looking at as its own piece.">G&#128300;</button>
           <input type="file" id="gcode-input" accept=".3mf" class="hidden-quiet" />
+          <!-- The Microscope VIEW. Distinct from G-code-onto-the-plate above:
+               that one imports a sliced project as models you then scrub on
+               the plate; this one opens a dedicated inspector - the reference
+               tool's own view - over an STL, a 3MF or a sliced .gcode.3mf, and
+               hands a selection back out either onto the plate or to a file.
+               See docs/GCODE-MICROSCOPE.md. -->
+          <button id="btn-microscope" class="viewport-tool-btn" type="button"
+                  aria-label="Microscope view"
+                  title="Microscope: open an STL, a 3MF or a sliced .gcode.3mf in its own inspector. Feature colours, a capture box with independent footprint and thickness, and whole-layer selection - then send what you selected to the plate or straight to an STL file.">&#128300;</button>
+          <input type="file" id="ms-input" accept=".stl,.3mf" class="hidden-quiet" />
           <button id="btn-watch" class="viewport-tool-btn" type="button"
                   aria-pressed="false"
                   title="Watch: log errors / failed loads / status lines, and check the rendered scene against the app state after every Undo, bake and tool switch.">&#128065;</button>
@@ -617,6 +627,90 @@
   <div id="ctx-menu" class="ctx-menu hidden" role="menu">
     <button type="button" id="ctx-export" class="ctx-item" role="menuitem">Export STL</button>
     <button type="button" id="ctx-delete" class="ctx-item ctx-danger" role="menuitem">Delete piece</button>
+  </div>
+
+  <!-- ===================================================================
+       The Microscope view. app-microscope.js owns it; deleting this block,
+       the #btn-microscope button and that script tag removes the feature
+       whole. The layout is the reference tool's - sidebar left, viewport
+       right, badges over the canvas - because the view is reused rather
+       than redesigned. docs/GCODE-MICROSCOPE.md has the audit.
+       =================================================================== -->
+  <div id="microscope" class="ms-panel" tabindex="0" hidden>
+    <div id="ms-sidebar" class="ms-sidebar">
+      <h1 id="ms-title">Microscope</h1>
+      <p class="ms-sub" id="ms-sub">Open an STL, a 3MF or a sliced .gcode.3mf.</p>
+
+      <div class="ms-section">
+        <div class="ms-section-title">File</div>
+        <div class="ms-btn-row">
+          <button id="ms-btn-open" type="button">Import&hellip;</button>
+          <button id="ms-close" type="button">Close</button>
+        </div>
+        <p class="ms-note">STL and plain 3MF open too. They are not sliced, so
+          they have no layers and no features and draw as whole parts.</p>
+      </div>
+
+      <div class="ms-section">
+        <div class="ms-section-title">View</div>
+        <div class="ms-btn-row">
+          <button id="ms-mode-orbit" type="button">Orbit whole part</button>
+          <button id="ms-mode-select" type="button" class="active">Click to select region</button>
+        </div>
+        <div id="ms-select-controls">
+          <p class="ms-note">Click empty space to drop a flat box. Drag its
+            <b>blue centre dot</b> to move it. Drag its <b>side/face</b> to resize
+            the footprint. Drag the <b>small orange dot on top</b> to control how
+            thick (tall) it is &mdash; keep it thin to avoid grabbing unrelated
+            layers above/below.</p>
+          <div class="ms-btn-row">
+            <button id="ms-btn-isolate" type="button" disabled>Isolate all boxes &rarr;</button>
+            <button id="ms-btn-clear" type="button">Clear all boxes</button>
+          </div>
+        </div>
+        <div id="ms-detail-controls" class="ms-btn-row" data-flex="1" style="display:none;">
+          <button id="ms-btn-back" type="button">&larr; Back to whole part</button>
+        </div>
+      </div>
+
+      <div class="ms-section" id="ms-layer-row" style="display:none;">
+        <div class="ms-section-title">Whole layer</div>
+        <div class="ms-btn-row">
+          <button id="ms-layer-prev" type="button" title="Previous layer">&#9660;</button>
+          <input type="number" id="ms-layer-index" value="0" min="0" max="0" step="1"
+                 title="Layer index, counted from the bed" />
+          <button id="ms-layer-next" type="button" title="Next layer">&#9650;</button>
+          <button id="ms-btn-layer-select" type="button"
+                  title="Select every move at this layer's printing height, whatever feature printed it">Select layer</button>
+        </div>
+        <p class="ms-note" id="ms-layer-note">&mdash;</p>
+      </div>
+
+      <div class="ms-section" id="ms-export-row" data-flex="0" style="display:none;">
+        <div class="ms-section-title">Export selection</div>
+        <div class="ms-btn-row">
+          <button id="ms-btn-export-plate" type="button"
+                  title="Leave the microscope and put the selection on the plate in the main Nest 3D viewport, as a standalone object with undo wired">Export to plate</button>
+          <button id="ms-btn-export-stl" type="button"
+                  title="Download just the selection as a binary STL - the same geometry Export to plate would add">Export as STL</button>
+        </div>
+      </div>
+
+      <div class="ms-section">
+        <div class="ms-section-title" id="ms-legend-title">Features (click to isolate)</div>
+        <div id="ms-legend"></div>
+      </div>
+
+      <div class="ms-section">
+        <div class="ms-section-title" id="ms-info-title">Selection / segment info</div>
+        <div id="ms-info">No file open.</div>
+      </div>
+    </div>
+
+    <div id="ms-viewport" class="ms-viewport">
+      <div id="ms-mode-badge">Whole part</div>
+      <div id="ms-hint-badge"></div>
+    </div>
   </div>
   <script src="NSO_Repair.js?v=inside4"></script>
   <script src="nso-defects.js?v=inside5"></script>
@@ -686,6 +780,7 @@
   <script src="app-library.js?v=libsave1"></script>
   <script src="app-photoset.js?v=photoset1"></script>
   <script src="app-toolpath.js?v=toolpath2"></script>
+  <script src="app-microscope.js?v=scope1"></script>
   <script src="app-ux.js?v=inside7"></script>
   <!-- Live watch: off until its button is pressed, and it patches nothing
        until then. Deleting this tag and the #btn-watch button above removes

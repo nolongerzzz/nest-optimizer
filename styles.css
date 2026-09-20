@@ -2410,3 +2410,167 @@ select:focus, input:focus {
   font-size: 11px;
 }
 .ps-frame-pass { flex: 0 0 auto; font-size: 11px; max-width: 46%; }
+
+/* ===================================================================
+   The Microscope view (app-microscope.js)
+
+   The layout and the type scale are the reference tool's own
+   (docs/reference/joint_microscope_3d.html) - sidebar left, viewport
+   right, two badges over the canvas - because the view is reused
+   rather than redesigned. Its colour literals are replaced by this
+   app's variables, which carry the same values where it matters:
+   the reference tool's --bg #0d0f13 against ours #0f1115, its accent
+   #5b8cff against our #3b82f6. Nothing else differs.
+   =================================================================== */
+
+.ms-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  overflow: hidden;
+}
+.ms-panel[hidden] { display: none; }
+
+.ms-sidebar {
+  width: 290px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 16px;
+  overflow-y: auto;
+}
+.ms-sidebar h1 { font-size: 15px; margin: 0 0 4px 0; }
+.ms-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 14px 0;
+  line-height: 1.4;
+}
+.ms-note {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin: 0 0 8px 0;
+  line-height: 1.4;
+}
+.ms-note b { color: var(--text); }
+
+.ms-section { margin-bottom: 16px; }
+.ms-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.ms-btn-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  align-items: center;
+}
+.ms-sidebar button {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ms-sidebar button:hover:not(:disabled) { border-color: var(--accent); }
+.ms-sidebar button.active {
+  border-color: var(--accent);
+  background: rgba(59, 130, 246, 0.15);
+}
+.ms-sidebar button:disabled { opacity: 0.4; cursor: default; }
+.ms-sidebar input[type="number"] {
+  width: 62px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 5px 6px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.ms-sidebar input[type="number"]:disabled { opacity: 0.4; }
+
+/* The two exports are the point of this view, so they read as the one
+   real choice rather than as two more grey buttons in a row. */
+#ms-btn-export-plate,
+#ms-btn-export-stl {
+  flex: 1 1 auto;
+  border-color: var(--accent);
+  background: rgba(59, 130, 246, 0.15);
+}
+#ms-btn-export-plate:hover,
+#ms-btn-export-stl:hover { background: rgba(59, 130, 246, 0.28); }
+
+.ms-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 5px;
+  cursor: pointer;
+  user-select: none;
+  padding: 3px 4px;
+  border-radius: 4px;
+}
+.ms-legend-item:hover { background: rgba(255, 255, 255, 0.04); }
+.ms-legend-item.dim { opacity: 0.3; }
+.ms-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+#ms-info {
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.5;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  min-height: 60px;
+}
+#ms-info b { color: var(--text); }
+
+.ms-viewport { flex: 1; position: relative; min-width: 0; }
+.ms-viewport canvas { display: block; }
+
+#ms-mode-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  background: rgba(23, 26, 33, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 5;
+}
+#ms-hint-badge {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  background: rgba(23, 26, 33, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  z-index: 5;
+  max-width: 420px;
+  line-height: 1.4;
+}

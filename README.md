@@ -196,6 +196,29 @@ Smart build-plate packing for 3D printing.
     time". See [docs/PHOTOGRAMMETRY-ONRAMP.md](docs/PHOTOGRAMMETRY-ONRAMP.md)
     and the contract it implements,
     [docs/PHOTOGRAMMETRY-CAPTURE.md](docs/PHOTOGRAMMETRY-CAPTURE.md).
+- **Microscope** (the 🔬 button in the viewport's bottom-left rail) opens a
+  file in its own inspector instead of onto the plate, and hands a selection
+  back out. It takes an **STL**, a **3MF** or an already-sliced **`.gcode.3mf`**,
+  and which route a 3MF takes is decided by what is inside it, never by its
+  name.
+  - A sliced project draws as its toolpath, one colour per `; FEATURE:` group
+    the slicer named, with the legend built from the groups the file actually
+    has. Click a row to isolate that feature.
+  - **Two ways to select.** Drop a **capture box** on the model and drag it:
+    the blue centre dot moves it, a side resizes the footprint, and the small
+    orange dot on top sets how *thick* it is - a separate control from the
+    footprint, so you can reach across the plate without dragging in twenty
+    layers you did not want. Or take a **whole layer** at one printing height,
+    every feature at that height included.
+  - **Two ways out, and they write the same geometry.** *Export to plate*
+    closes the microscope and drops the selection into the main viewport as a
+    standalone piece with Undo wired; *Export as STL* downloads just the
+    selection.
+  - A plain STL or 3MF is not sliced, so it has no layers and no features: it
+    draws as one whole part per build object (an STL is always exactly one),
+    the capture box selects whole parts, and the layer control is **disabled
+    with the reason on screen** rather than inventing a layer height the file
+    never stated. See [docs/GCODE-MICROSCOPE.md](docs/GCODE-MICROSCOPE.md).
 
 ## How to use
 

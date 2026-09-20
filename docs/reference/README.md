@@ -19,6 +19,14 @@ It is self-contained and opens in a browser, but it loads three.js from
 `cdn.jsdelivr.net`, so it needs network access to render. It is committed as
 received, unmodified.
 
+Its view has since been **lifted into the app** as the Microscope
+(`app-microscope.js`, `docs/GCODE-MICROSCOPE.md`) - the renderer reused rather
+than reinterpreted. That write-up also records what could NOT be reused (there
+is no parser in here at all) and the one place the port deviates on purpose
+(the axis map in here is a reflection, so it draws every slice mirrored).
+This file is still a document: nothing loads it, and the app does not depend
+on it.
+
 Two things in it were worth auditing, and both are written up in
 `docs/GCODE-FEATURE-AUDIT.md`:
 
