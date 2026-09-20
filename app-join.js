@@ -500,8 +500,77 @@ function NSO_signedDistToHull(grid, x, y, z) {
 
 /* ---- plug frame: which local box face is the outer face ---- */
 
+/* Does a corner ray from this face find the hull at all?
+
+   The same existence question NSO_nearestSkinHit answers - a hit at t > 0
+   along the punch or back along it - but it stops at the first one instead of
+   ranking them, because the axis chooser only needs to know whether the face
+   can see the hull, not where. */
+function NSO_seatRayReaches(soup, o, dir) {
+  var i, t;
+  for (i = 0; i < soup.length; i += 9) {
+    t = NSO_rayTri(o.x, o.y, o.z, dir.x, dir.y, dir.z,
+      soup[i], soup[i + 1], soup[i + 2], soup[i + 3], soup[i + 4], soup[i + 5],
+      soup[i + 6], soup[i + 7], soup[i + 8]);
+    if (t > 0) return true;
+  }
+  for (i = 0; i < soup.length; i += 9) {
+    t = NSO_rayTri(o.x, o.y, o.z, -dir.x, -dir.y, -dir.z,
+      soup[i], soup[i + 1], soup[i + 2], soup[i + 3], soup[i + 4], soup[i + 5],
+      soup[i + 6], soup[i + 7], soup[i + 8]);
+    if (t > 0) return true;
+  }
+  return false;
+}
+
+/* Would the corner-ray fit be able to work off this candidate face? Asked the
+   way the fit itself asks it: the four corners of that face, inset by
+   NSO_SEAT_RAY_INSET exactly as NSO_seatRayOrigins does, each cast along that
+   candidate's punch. All four, because the fit refuses on the first miss. */
+function NSO_seatFaceReaches(matrix, box, axis, sign, normal, aWorld) {
+  var corners = NSO_outerFaceCorners({
+    matrix: matrix, box: box, axis: axis, sign: sign,
+    capCoord: (sign > 0) ? box.max.getComponent(axis) : box.min.getComponent(axis)
+  });
+  var origins = NSO_seatRayOrigins(corners);
+  var punch = normal.clone().negate();
+  for (var i = 0; i < origins.length; i++) {
+    if (!NSO_seatRayReaches(aWorld, origins[i], punch)) return false;
+  }
+  return true;
+}
+
 /* ============================================================
    NSO_plugFrame  (patched — shape-agnostic axis selection)
+
+   THE CENTROID VECTOR IS A TIE-BREAK, NOT A DIRECTION.
+
+   The six candidate faces are ranked by what a step out of and into each one
+   meets: out of the hull and into it is a real seat axis (2), out of it only
+   is a bit standing clear (1), and into it is the wrong way round (-1). Only
+   when two candidates share a rank does `outward` - hull bbox centre to bit
+   centre - decide, and it is scaled to 0.01 to say so.
+
+   A bit standing clear of the hull puts ALL SIX candidates on rank 1: nothing
+   steps into a hull the bit is nowhere near. That is not an unusual pose, it
+   is the pose the seat deliberately creates - NSO_raiseBuriedBitClear lifts a
+   dragged bit 5 mm above the hull's top before every seat - so the whole
+   decision fell to the tie-break, and the tie-break is a centroid vector. Drag
+   the bit across a wide flat target and the plan offset overtakes the height
+   difference: on the 80 x 40 x 20 library hull with the 12 x 8 x 8 library
+   bit, past 19 mm off centre `outward` leans +X, the chooser calls the bit's
+   +X face the outer face, and the fit punches sideways through empty air ~13
+   mm above the hull. Every corner ray misses and the seat refuses with
+   "corner 0 missed hull along punch axis" - corner 0 only because it is the
+   one tested first. Over half of that target's top face was unseatable, with
+   both Seat buttons, for any bit. See tools/nso_seat_box_on_box_test.js.
+
+   So when the rank ties at the top, ask the question the fit is about to ask:
+   can the corner rays off this face find the hull at all? A face whose rays
+   all land stays in; one whose rays fly off into space is dropped, and
+   `outward` breaks whatever tie is left, exactly as before. Ranks are
+   untouched, the reach test only ever runs on a tie, and it can only change
+   the answer where the losing face was one the fit would have refused.
    ============================================================ */
 function NSO_plugFrame(bitMesh, hullCenterWorld, aWorld) {
   bitMesh.updateWorldMatrix(true, false);
@@ -521,16 +590,15 @@ function NSO_plugFrame(bitMesh, hullCenterWorld, aWorld) {
   outward.normalize();
 
   var haveSoup = aWorld && NSO_soupLen(aWorld);
-  var axis = 1, sign = 1, bestN = new THREE.Vector3(0, 1, 0);
   var cand = new THREE.Vector3(), probeOut = new THREE.Vector3(), probeIn = new THREE.Vector3();
-  var bestScore = -Infinity;
+  var cands = [];
 
   for (var a = 0; a < 3; a++) {
     var half = Math.max(extent.getComponent(a) * 0.5, 0.5);
     var margin = half + Math.max(0.75, half * 0.25);
     for (var s = -1; s <= 1; s += 2) {
       cand.set(0, 0, 0).setComponent(a, s).applyMatrix3(nm).normalize();
-      var score;
+      var rank, tie;
       if (haveSoup) {
         probeOut.copy(plugCenterWorld).addScaledVector(cand, margin);
         probeIn.copy(plugCenterWorld).addScaledVector(cand, -margin);
@@ -539,14 +607,34 @@ function NSO_plugFrame(bitMesh, hullCenterWorld, aWorld) {
         /* real seat axis: stepping out clears the hull AND stepping in stays
            inside it. Local + shape-agnostic, so it holds on a stepped/
            non-convex hull, unlike a single whole-hull centroid vector. */
-        score = (outOK && inOK) ? 2 : (outOK ? 1 : -1);
-        score += cand.dot(outward) * 0.01; // tie-break only
+        rank = (outOK && inOK) ? 2 : (outOK ? 1 : -1);
+        tie = cand.dot(outward) * 0.01; // tie-break only
       } else {
-        score = cand.dot(outward);
+        rank = 0;
+        tie = cand.dot(outward);
       }
-      if (score > bestScore) { bestScore = score; axis = a; sign = s; bestN.copy(cand); }
+      cands.push({ a: a, s: s, n: cand.clone(), rank: rank, tie: tie });
     }
   }
+
+  /* the top rank, and - when more than one candidate shares it - only those
+     of them whose corner rays actually find the hull */
+  var i, topRank = -Infinity;
+  for (i = 0; i < cands.length; i++) if (cands[i].rank > topRank) topRank = cands[i].rank;
+  var pool = [];
+  for (i = 0; i < cands.length; i++) if (cands[i].rank === topRank) pool.push(cands[i]);
+  if (haveSoup && pool.length > 1) {
+    var reaching = [];
+    for (i = 0; i < pool.length; i++) {
+      if (NSO_seatFaceReaches(M, box, pool[i].a, pool[i].s, pool[i].n, aWorld)) reaching.push(pool[i]);
+    }
+    if (reaching.length) pool = reaching;
+  }
+
+  /* first of the best, in the candidate order the loop above built */
+  var best = pool[0];
+  for (i = 1; i < pool.length; i++) if (pool[i].tie > best.tie) best = pool[i];
+  var axis = best.a, sign = best.s, bestN = best.n;
 
   return {
     matrix: M,
@@ -864,7 +952,9 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
     bitMesh.position.addScaledVector(nT, (probe.s + off) - faceS);
     bitMesh.updateMatrixWorld(true);
 
-    var frR = NSO_plugFrame(bitMesh, hullCenter);
+    /* the same hull the fit was given, so the read-back cannot pick a
+       different face than the seat just used - see the note on frameF */
+    var frR = NSO_plugFrame(bitMesh, hullCenter, hullSoup);
     var cmR = NSO_matingFaceCorners(frR), coR = NSO_outerFaceCorners(frR);
     var residT = [], maxT = 0, tMin = Infinity, tMax = -Infinity, tSum = 0;
     for (var r0 = 0; r0 < 4; r0++) {
@@ -959,7 +1049,23 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
 
   /* residual report: how far each corner of the reference face ends up from
      the skin, against the offset that was asked for */
-  var frameF = NSO_plugFrame(bitMesh, hullCenter);
+  /* THE READ-BACK ASKS THE HULL, EXACTLY AS THE FIT DID.
+
+     This call used to omit the hull soup. Without it NSO_plugFrame has no
+     hull to probe and falls all the way back to the raw centroid rule - bit
+     centre minus hull bbox centre - which is the rule the fit itself stopped
+     trusting. So the report could name a different face than the seat had
+     just worked off: on the 80 x 40 library hull, a bit seated 25 mm off
+     centre was measured against its +X face, every corner ray missed, and
+     every number below went quietly soft - cornerResidual all NaN, maxResidual
+     left at its initial 0, gapAchieved NaN. seatBitAtGap then prints the gap
+     that was ASKED for as the one it MEASURED, and "skin error 0.00mm", on a
+     seat nothing checked. A wrong seat and a right one read identically.
+
+     Handing it hullSoup is the whole fix: the read-back and the fit now ask
+     one question of one hull, so the residuals describe the face the bit was
+     actually seated against. */
+  var frameF = NSO_plugFrame(bitMesh, hullCenter, hullSoup);
   var cf = NSO_outerFaceCorners(frameF);
   var cfRay = NSO_seatRayOrigins(cf);
   var cref = refInner ? NSO_matingFaceCorners(frameF) : cf;
