@@ -1397,6 +1397,7 @@ select:focus, input:focus {
 }
 .join-slot.filled-a { border-color: #fb923c; background: #3a2410; }
 .join-slot.filled-b { border-color: #4ade80; background: #102418; }
+.join-slot.filled-c { border-color: #60a5fa; background: #0f1e33; }
 .join-slot.armed { box-shadow: 0 0 0 3px #f8fafc; cursor: pointer; }
 .join-slot { cursor: pointer; }
 .join-badge {
@@ -1411,6 +1412,7 @@ select:focus, input:focus {
 }
 .join-badge-a { background: #fb923c; }
 .join-badge-b { background: #4ade80; }
+.join-badge-c { background: #60a5fa; }
 .join-slot-name {
   font-size: 13px;
   font-weight: 600;
@@ -2231,6 +2233,53 @@ select:focus, input:focus {
   accent-color: #4ade80;
   cursor: pointer;
 }
+/* Triple join: the two per-junction gaps, side by side, so a mixed pair
+   (a real air gap at one seam, a weld at the other) reads as two numbers at
+   a glance rather than one slider used twice. */
+.triple-join {
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+}
+.triple-join.triple-ready {
+  border-color: #60a5fa;
+}
+.triple-join select,
+.triple-join .btn {
+  width: 100%;
+}
+.triple-gap-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.triple-gap-row label {
+  flex: 0 0 28px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.triple-gap-row input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  accent-color: #60a5fa;
+  cursor: pointer;
+}
+.triple-gap-row output {
+  flex: 0 0 66px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.triple-join .btn {
+  margin-top: 8px;
+}
+
 .seat-support-row output {
   flex: 0 0 66px;
   text-align: right;

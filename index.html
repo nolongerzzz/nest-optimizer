@@ -74,6 +74,7 @@
           <div class="join-slots">
             <button type="button" class="join-slot" id="join-slot-a" data-slot="a"><span class="join-badge join-badge-a">A</span><span class="join-slot-name" id="join-name-a">Pick piece A</span></button>
             <button type="button" class="join-slot" id="join-slot-b" data-slot="b"><span class="join-badge join-badge-b">B</span><span class="join-slot-name" id="join-name-b">Pick piece B</span></button>
+            <button type="button" class="join-slot" id="join-slot-c" data-slot="c"><span class="join-badge join-badge-c">C</span><span class="join-slot-name" id="join-name-c">Pick piece C (optional)</span></button>
           </div>
           <button id="btn-join-align" class="btn btn-secondary" type="button">Align edges</button>
           <button id="btn-join-cx" class="btn btn-secondary" type="button">Center X</button>
@@ -99,6 +100,23 @@
               <output id="seat-gap-value" for="seat-gap" title="Exact gap the next Seat (support) will use">-0.18 mm</output>
             </div>
             <button id="btn-seat-here" class="btn btn-secondary" type="button" aria-pressed="false" title="Seat here: click a point on A - curved, irregular or flat - and B is turned to face it and set at the slider's gap. The gap is the true minimum distance between the two surfaces.">Seat here</button>
+          </div>
+          <div class="triple-join" id="triple-join">
+            <select id="triple-mode" title="Vertical stack: each piece is centred over the one before it and seated down onto it. Horizontal sequence: each piece keeps its place along the run and is centred on the cross axis, then seated sideways against the one before it.">
+              <option value="vertical">A-B-C: vertical stack</option>
+              <option value="horizontal">A-B-C: horizontal sequence</option>
+            </select>
+            <div class="triple-gap-row">
+              <label for="triple-gap-ab">A-B</label>
+              <input type="range" id="triple-gap-ab" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Gap at the A-B junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = B overlaps into A. Independent of the B-C gap." aria-label="A to B junction gap in mm" />
+              <output id="triple-gap-ab-value" for="triple-gap-ab" title="Exact gap the A-B junction will be seated at">-0.18 mm</output>
+            </div>
+            <div class="triple-gap-row">
+              <label for="triple-gap-bc">B-C</label>
+              <input type="range" id="triple-gap-bc" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Gap at the B-C junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = C overlaps into B. Independent of the A-B gap." aria-label="B to C junction gap in mm" />
+              <output id="triple-gap-bc-value" for="triple-gap-bc" title="Exact gap the B-C junction will be seated at">-0.18 mm</output>
+            </div>
+            <button id="btn-join-triple" class="btn btn-secondary" type="button" disabled title="Center lock then Seat (support) at A-B, then Center lock then Seat (support) at B-C, each junction at its own gap.">Join A-B-C</button>
           </div>
           <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
           <button id="btn-seat-grid" class="btn btn-secondary" type="button" title="Faint grid on the top surface of the target piece (A), to line up what goes above it">Surface grid: auto</button>
@@ -812,6 +830,7 @@
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=inmode1"></script>
   <script src="app-center-lock.js?v=clock1"></script>
+  <script src="app-join-triple.js?v=triple1"></script>
   <script src="app-carve.js?v=hollow1"></script>
   <script src="app-hollow.js?v=hollow1"></script>
   <script src="app-seat-surface.js?v=seatsurf1"></script>
