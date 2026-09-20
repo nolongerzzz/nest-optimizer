@@ -80,7 +80,7 @@ const statusOf = page => page.evaluate(() => document.getElementById('status').t
 const clearStatus = page => page.evaluate(() => { document.getElementById('status').textContent = ''; });
 const waitStatus = (page, re) => page.waitForFunction(src => new RegExp(src).test(document.getElementById('status').textContent), re.source, { timeout: 60000 });
 
-const ADJ = ['btn-rot-left', 'btn-rot-right', 'btn-flip', 'btn-tip', 'btn-roll', 'btn-raise', 'btn-lower',
+const ADJ = ['btn-rot-left', 'btn-rot-right', 'btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face', 'btn-raise', 'btn-lower',
              'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn', 'btn-nudge-left', 'btn-nudge-right', 'btn-nudge-fwd', 'btn-nudge-back'];
 /* everything the lock touches, for one piece */
 const pose = (page, id) => page.evaluate(([id, ADJ]) => {

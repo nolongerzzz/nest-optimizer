@@ -2597,6 +2597,28 @@ function onCanvasPointerDown(event) {
     }
   }
 
+  /* Tip on face, armed. Same shape as the Cap and Soften blocks above and
+     in the same routing order they established: raycast the model group,
+     resolve the hit to a placed piece, select it, act, and swallow the
+     click. What differs is only what is done with the hit - the triangle's
+     world normal, which is all "put that face on the plate" needs and the
+     one thing that works for a curved pick or an edge too. */
+  if (state.tipFaceArmed && state.modelGroup && event.button === 0) {
+    const tHits = state.raycaster.intersectObjects(state.modelGroup.children, true);
+    if (tHits.length) {
+      let obj = tHits[0].object;
+      while (obj && obj.userData.placedIndex == null && obj.parent) obj = obj.parent;
+      const idx = obj && obj.userData ? obj.userData.placedIndex : undefined;
+      if (typeof idx === 'number' && state.placed[idx]) {
+        selectPlaced(idx);
+        if (typeof nsoTipOrient !== 'undefined' && nsoTipOrient.tipOnFaceFromHit(tHits[0]))
+          nsoTipOrient.setArmed(false);
+        event.stopPropagation();
+        return;
+      }
+    }
+  }
+
   /* Center lock with a target pick armed owns a click that lands on a piece.
      It has to come before the Join block: by the time Center lock is useful A
      and B are both picked, and Join deliberately lets that click fall through
@@ -2786,7 +2808,7 @@ function updateExportButton() {
 function updateAdjustUI() {
   if (typeof applyXrayView === 'function') applyXrayView();
   const has = state.selectedIndex >= 0 && state.placed[state.selectedIndex];
-  ['btn-rot-left', 'btn-rot-right', 'btn-flip', 'btn-tip', 'btn-roll', 'btn-raise', 'btn-lower', 'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn', 'btn-nudge-left', 'btn-nudge-right', 'btn-nudge-fwd', 'btn-nudge-back', 'btn-delete-placed', 'btn-frame-selected']
+  ['btn-rot-left', 'btn-rot-right', 'btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face', 'btn-raise', 'btn-lower', 'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn', 'btn-nudge-left', 'btn-nudge-right', 'btn-nudge-fwd', 'btn-nudge-back', 'btn-delete-placed', 'btn-frame-selected']
     .forEach(id => {
       const el = document.getElementById(id);
       if (el) el.disabled = !has;
