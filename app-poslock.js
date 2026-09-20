@@ -176,7 +176,7 @@
   /* ---- the indicator in the list, the button, the toolbar ---- */
 
   var ADJUST_IDS = ['btn-rot-left', 'btn-rot-right', 'btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face',
-                    'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn',
+                    'btn-to-plate', 'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn',
                     'btn-nudge-left', 'btn-nudge-right', 'btn-nudge-fwd', 'btn-nudge-back'];
 
   function syncListTags() {

@@ -230,6 +230,8 @@
               <label class="vp-flag vp-flag-movevert" title="Vertical placement: the camera drops to eye level with the piece from outside the plate, a slider appears beside it, and the arrow keys move it 0.25 mm at a time - up/down to raise, left/right across the line to the nearest piece. Free drag is off while this is on.">
                 <input type="checkbox" id="chk-move-vertical"><span class="vp-flag-face">Vertical</span>
               </label>
+              <button id="btn-to-plate" class="vp-bar-btn adjust-btn" disabled
+                      title="Bring the selected piece straight down to rest on the plate, in one press - whatever raised it. The Vertical slider and arrows only write the lift, 0.25 mm a press, so a piece Seat stacked on a 20 mm target is eighty presses from the plate - and on a piece Seat laid on a slope the first step throws that angle away, because it rebuilds the pose from the record. This reads the piece's own box instead and puts its lowest point on the bed, keeping its place on the plate and its rotation. Refused on a locked piece, and one Undo puts it back.">To plate</button>
               <button id="btn-nudge-fwd" class="vp-bar-btn adjust-btn" disabled>↑</button>
               <button id="btn-nudge-back" class="vp-bar-btn adjust-btn" disabled>↓</button>
               <button id="btn-nudge-left" class="vp-bar-btn adjust-btn" disabled>←</button>

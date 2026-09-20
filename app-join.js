@@ -808,6 +808,31 @@ var NSO_SEAT_TIPS_TOL = 0.01;
    not refuse; anything past this is a real protrusion the user put there. */
 var NSO_SEAT_STRADDLE_TOL = 0.1;
 
+/* How far off a GAP seat may end up and still be called a seat.
+
+   The gap slider runs -0.25 .. +0.05, so 0.25 mm is the largest offset the
+   control can ask for at all. A seat whose own read-back says the reference
+   face landed further than that from the offset requested has not done what
+   the slider said, whatever else it did, and "Seated" is the wrong word for
+   it. Every seat the suites pin measures 0.00; this only ever fires where the
+   fit did not converge.
+
+   Gap mode only. `proud` mode is the plug seat, and its residual on a curve is
+   a measured, deliberately-pinned limitation (docs/SEAT-SURFACE.md finding c,
+   tools/nso_seat_curved_audit.js section 3) rather than a failure to place -
+   changing it would retire a finding this repo is still carrying. */
+var NSO_SEAT_GAP_RESIDUAL_LIMIT = 0.25;
+
+/* What a gap seat says when it did not land where it was asked to. Names the
+   two numbers, because "Seat failed" on its own says nothing about whether the
+   pieces or the pose are the problem. */
+function NSO_seatResidualReason(resid, gap) {
+  return 'the fit ended ' + resid.toFixed(2) + ' mm off the '
+    + Math.abs(Number(gap)).toFixed(2) + ' mm that was asked for - the surface under '
+    + 'the bit is too steeply angled to the bit for the corner-ray fit to settle on it. '
+    + 'Square the two up (Tip on face, or the Tilt arrows) and seat again';
+}
+
 /* The bed baseline, in Float: a settled world-box bottom lands on 0.2 to
    within rounding, so a lift measured back off it can come out a hair
    negative with nothing wrong. See the clamp in seatBitAtGap. */
@@ -861,7 +886,41 @@ function NSO_seatStraddle(hull, bitMesh, hullCenter, off) {
 }
 
 /* The tips probe: null when the hull under the bit is flat (or NSO_Skin is
-   not loaded), else { s, sPlane, rise, point, hits }. Pure - moves nothing. */
+   not loaded), else { s, sPlane, rise, point, hits }. Pure - moves nothing.
+
+   THE RELIEF IS MEASURED AGAINST THE PLANE OF THE FOUR HITS, NOT THEIR MEAN.
+
+   `rise` picks which of the two seats runs. Over NSO_SEAT_TIPS_TOL the bit is
+   set against the tips UNTILTED; under it the corner-ray fit runs and tilts
+   the bit onto the face. So `rise` has to answer one question and only that
+   one: does the surface under the bit stand proud of the face the corner rays
+   found?
+
+   It used to be `ext.s - mean(hit . n)` - an extreme height against an AVERAGE
+   height, both along the BIT's own normal. Those two agree only while the face
+   is square to that normal. Tilt either piece by one press of the Tilt arrows
+   and the four hits sit at four different heights along n, their mean lands at
+   the middle of the face, and the highest point of that same FLAT face stands
+   above the mean by half the face's rise across the footprint: 1.07 mm at 15
+   degrees, 2.31 mm at 30, 4.00 mm at 45, on the plain flat top of
+   library/box_hull_80x40x20.stl. Every one of those is a hundred times
+   NSO_SEAT_TIPS_TOL, so a flat box top was called a contact skin and seated
+   with the tilt fit skipped: the bit left parallel to the plate, hanging off
+   the high edge of the slope and touching nothing, at a true shell-to-shell
+   separation of 0.174 / 0.156 / 0.127 mm while the status line read
+   `measured -0.180mm, skin error 0.00mm`. The tips path measures its own
+   residuals against the very extreme it positioned from, so that wrong seat
+   read exactly like a right one. See tools/nso_seat_tilted_face_test.js.
+
+   The plane through the four hits is the quantity that was meant, and the fit
+   already builds it - NSO_newellNormal of the hit quad is the plane it tilts
+   onto. A flat face at ANY angle puts its own extreme point IN that plane, so
+   the rise comes out as Float32 noise and the corner-ray path runs, byte for
+   byte as it did before the tips reference existed. A real relief still stands
+   its tip height proud of the plane its valleys' rays found, so the skin case
+   is untouched. A hit quad with no Newell normal, or one so edge-on to the
+   bit's own normal that the projection means nothing, keeps the old mean -
+   which is what a four-hit average is for. */
 function NSO_seatTipsProbe(hull, bitMesh, hullCenter) {
   if (typeof NSO_Skin === 'undefined' || !NSO_Skin || !NSO_Skin.supportExtreme) return null;
   var fr = NSO_plugFrame(bitMesh, hullCenter, hull);
@@ -881,8 +940,19 @@ function NSO_seatTipsProbe(hull, bitMesh, hullCenter) {
     sSum += h.dot(nrm);
   }
   var sPlane = sSum / 4;
-  return { s: ext.s, sPlane: sPlane, rise: ext.s - sPlane,
-           point: new THREE.Vector3(ext.point[0], ext.point[1], ext.point[2]), hits: hits };
+  var extPt = new THREE.Vector3(ext.point[0], ext.point[1], ext.point[2]);
+  var rise = ext.s - sPlane;              /* the fallback, and what it used to be */
+  var nFit = NSO_newellNormal(hits);
+  if (nFit) {
+    if (nFit.dot(nrm) < 0) nFit.negate();
+    if (nFit.dot(nrm) > 1e-3) {
+      var hitC = new THREE.Vector3();
+      for (i = 0; i < 4; i++) hitC.add(hits[i]);
+      hitC.multiplyScalar(0.25);
+      rise = extPt.clone().sub(hitC).dot(nFit);
+    }
+  }
+  return { s: ext.s, sPlane: sPlane, rise: rise, point: extPt, hits: hits };
 }
 
 function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
@@ -962,6 +1032,12 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
       residT.push(dvT);
       if (Math.abs(dvT - off) > maxT) maxT = Math.abs(dvT - off);
       tSum += dvT; if (dvT < tMin) tMin = dvT; if (dvT > tMax) tMax = dvT;
+    }
+    if (maxT > NSO_SEAT_GAP_RESIDUAL_LIMIT) {
+      bitMesh.position.copy(savedPos);
+      bitMesh.quaternion.copy(savedQuat);
+      bitMesh.updateMatrixWorld(true);
+      return { ok: false, residual: maxT, reason: NSO_seatResidualReason(maxT, gap) };
     }
     return {
       ok: true,
@@ -1082,6 +1158,13 @@ function NSO_seatFlushBitToHull(hullMesh, bitMesh, opts) {
     resid.push(dv);
     if (isFinite(dv) && Math.abs(dv - off) > maxResid) maxResid = Math.abs(dv - off);
     if (isFinite(dv)) { dN++; dSum += dv; if (dv < dMin) dMin = dv; if (dv > dMax) dMax = dv; }
+  }
+
+  if (hasGap && maxResid > NSO_SEAT_GAP_RESIDUAL_LIMIT) {
+    bitMesh.position.copy(savedPos);
+    bitMesh.quaternion.copy(savedQuat);
+    bitMesh.updateMatrixWorld(true);
+    return { ok: false, residual: maxResid, reason: NSO_seatResidualReason(maxResid, gap) };
   }
 
   var out = {
@@ -3307,8 +3390,14 @@ function setupUI() {
      by picking the bottom face, and rollSelected() stays for its callers. */
   /* btn-tip is "Stand" now; app-tip-orient.js owns its click. */
   /* Raise / Lower retired: the Move menu's Vertical checkbox owns the
-     vertical axis now - slider and arrow keys, in app-move-vertical.js.
-     liftSelected() is unchanged and still called from there and elsewhere. */
+     vertical axis now - slider and arrow keys, in app-move-vertical.js, which
+     writes liftY through its own step. liftSelected() is unchanged and still
+     has its callers; the suites drive the vertical step through it directly.
+
+     To plate is the one-press recovery those two never had, and it does NOT
+     go through liftSelected: see bringSelectedToPlate in app-core.js. */
+  const btnToPlate = document.getElementById('btn-to-plate');
+  if (btnToPlate) btnToPlate.addEventListener('click', () => bringSelectedToPlate());
   const btnTiltUp = document.getElementById('btn-tilt-up');
   if (btnTiltUp) btnTiltUp.addEventListener('click', () => tiltSelected(1));
   const btnTiltDn = document.getElementById('btn-tilt-dn');

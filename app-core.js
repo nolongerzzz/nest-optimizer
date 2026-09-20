@@ -2868,7 +2868,7 @@ function updateExportButton() {
 function updateAdjustUI() {
   if (typeof applyXrayView === 'function') applyXrayView();
   const has = state.selectedIndex >= 0 && state.placed[state.selectedIndex];
-  ['btn-rot-left', 'btn-rot-right', 'btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face', 'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn', 'btn-nudge-left', 'btn-nudge-right', 'btn-nudge-fwd', 'btn-nudge-back', 'btn-delete-placed', 'btn-frame-selected']
+  ['btn-rot-left', 'btn-rot-right', 'btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face', 'btn-to-plate', 'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn', 'btn-nudge-left', 'btn-nudge-right', 'btn-nudge-fwd', 'btn-nudge-back', 'btn-delete-placed', 'btn-frame-selected']
     .forEach(id => {
       const el = document.getElementById(id);
       if (el) el.disabled = !has;
@@ -3090,6 +3090,60 @@ function liftSelected(dir) {
   applyMeshRotation(p);
   refreshOutline(p);
   setStatus(p.liftY ? ('Lift ' + p.liftY.toFixed(0) + ' mm') : 'On plate');
+}
+
+/* Bring the selected piece down to rest on the plate, in one press.
+
+   The vertical control is a ladder, and a ladder is useless for recovery. It
+   was Raise and Lower at 2 mm a press when this was written; those buttons are
+   retired and the Move menu's Vertical slider and arrows own the axis now, at
+   0.25 mm a press. That made the arithmetic worse, not better: a piece Seat
+   (support) has stacked on a 20 mm target comes back with liftY 20.18, which is
+   eighty presses of the arrow. The slider can be dragged to zero in one go, but
+   only for a piece whose record still agrees with where it is - a piece a seat
+   left in the air over a target that has since been deleted or moved has liftY
+   0 already and nothing under it at all.
+
+   Which is the second half of it, and the half no vertical control can fix.
+   Every one of them - liftSelected, the Vertical arrows, the slider - writes
+   liftY and then calls applyMeshRotation, which rebuilds the mesh's rotation
+   from the placed record's pose fields: rotY, flipX, tipX, tipZ, tiltX, tiltZ.
+   A piece the seat laid on a slope carries a free quaternion none of those
+   fields can hold, so the first step throws the angle the seat gave it away,
+   and the piece is still in the air. (Undo cannot put it back either:
+   snapshotPlacedPose carries the same fields. Both measured in
+   tools/nso_bring_to_plate_test.js section 4.)
+
+   This goes through settlePlacedOnBed instead, which measures the piece's own
+   world box and only ever writes y: the lowest point of the piece lands on the
+   bed baseline from any pose - a tilted piece on its lowest corner, a piece
+   pushed out of the build volume back inside it, because settlePlacedOnBed
+   clears the overflow flag and the offset with it.
+
+   The vertical half of a move and nothing else - x, z and the piece's own
+   rotation are untouched. One Undo, like every other pose button, and a
+   locked piece refuses it exactly as it refuses the vertical step: btn-to-plate
+   is in app-poslock's ADJUST_IDS and in updateAdjustUI's roster. */
+function bringSelectedToPlate() {
+  const p = state.placed[state.selectedIndex];
+  if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'bring to plate')) return;
+  p.mesh.updateMatrixWorld(true);
+  const wasAt = meshLocalBox3(p.mesh).min.y;
+  /* already resting on it, and the record agrees: say so and touch nothing,
+     so the Undo stack does not collect entries that undo nothing */
+  if (!(p.liftY || 0) && Math.abs(wasAt - 0.2) <= 1e-6) {
+    setStatus('Already on the plate');
+    return;
+  }
+  pushUndo(snapshotPlacedPose(state.selectedIndex));
+  p.liftY = 0;
+  settlePlacedOnBed(p);
+  p.mesh.updateMatrixWorld(true);
+  refreshOutline(p);
+  updateExportButton();
+  const moved = wasAt - 0.2;
+  setStatus('On the plate - ' + (moved < 0 ? 'up ' : 'down ') + Math.abs(moved).toFixed(2) + ' mm');
 }
 
 function bankSelected(dir) {

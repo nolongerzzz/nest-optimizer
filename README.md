@@ -49,8 +49,15 @@ Smart build-plate packing for 3D printing.
   it, not just the shapes. Files from Bambu Studio or MakerWorld have no such
   block and import as plain geometry, exactly as before.
   See [docs/SCENE-3MF.md](docs/SCENE-3MF.md).
+- **To plate** (Move menu, beside the Vertical box) puts a piece back down on
+  the bed in one press, whatever put it in the air - a Seat that stacked it 20
+  mm up, a lift, a target since moved or deleted. It reads the piece's own box,
+  so the lowest point of it lands on the bed from any pose; where the Vertical
+  slider and arrows only write the lift and rebuild the piece's rotation from
+  the plate record, this keeps the rotation and only moves it down. Its place on
+  the plate is untouched and one Undo puts it back.
 - **Lock position** on a placed piece: a locked piece refuses drag, the nudge
-  arrows, Raise/Lower and the pose buttons, so a stray click cannot move it
+  arrows, the vertical controls, To plate and the pose buttons, so a stray click cannot move it
   once Seat has put it where it belongs. Seat, Center, Align and Skin still
   work on it. Shown by a teal outline and a `locked` tag in the list. Any
   number of pieces can be locked at once - the flag is one per piece - and the
