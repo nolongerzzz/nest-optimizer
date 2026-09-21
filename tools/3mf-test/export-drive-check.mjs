@@ -162,6 +162,10 @@ async function main() {
 
   // --- the piece the app packed actually made it into the archive ---
   const expectedObjects = await page.evaluate(() => state.placed.length);
+  // The names the app gave the placed pieces, in placement order -- what
+  // buildPlacedObjects3MF() should have written onto each <object>.
+  const placedNames = await page.evaluate(() =>
+    state.placed.map((p, i) => p.name || ('piece_' + (i + 1))));
 
   // --- "Download selected", Format = 3MF: the active model alone ---
   console.log('\n--- the selected-model export ---');
@@ -274,6 +278,23 @@ async function main() {
   const model = execFileSync('unzip', ['-p', file, NSO3MF.PART_MODEL], { encoding: 'utf8' });
   check('an object per packed piece reached the model part',
     (model.match(/<object /g) || []).length, expectedObjects);
+
+  // Per-object identity, on the file the app itself wrote. A name that lives
+  // only in model_settings.config does not survive into the slice: Bambu folds
+  // the plate into one object. See docs/3MF-OBJECT-IDENTITY.md.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  check('the production extension is declared',
+    model.includes('xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"'), true);
+  check('every object carries a name on the <object> element',
+    (model.match(/<object [^>]*name="[^"]*"/g) || []).length, expectedObjects);
+  check('the names are the pieces the app placed',
+    [...model.matchAll(/<object [^>]*name="([^"]*)"/g)].map((m) => m[1]), placedNames);
+  const modelUuids = [...model.matchAll(/p:UUID="([^"]*)"/g)].map((m) => m[1]);
+  check('object, build and item all carry a UUID',
+    modelUuids.length, expectedObjects * 2 + 1);
+  check('every UUID is a well-formed RFC 4122 v4',
+    modelUuids.filter((u) => !UUID_RE.test(u)), []);
+  check('no two UUIDs collide', new Set(modelUuids).size, modelUuids.length);
   check('the model part has vertices', (model.match(/<vertex /g) || []).length > 0, true);
   check('the model part has triangles', (model.match(/<triangle /g) || []).length > 0, true);
 
