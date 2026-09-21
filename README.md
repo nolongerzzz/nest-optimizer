@@ -56,6 +56,16 @@ Smart build-plate packing for 3D printing.
   slider and arrows only write the lift and rebuild the piece's rotation from
   the plate record, this keeps the rotation and only moves it down. Its place on
   the plate is untouched and one Undo puts it back.
+- **Triple join** (Join card) joins three pieces in one press: pick A, B and C,
+  choose a **vertical stack** or a **horizontal sequence**, and each of the two
+  junctions (A-B, B-C) gets Center lock then Seat (support) at **its own gap**.
+  Both gaps span the Seat slider's full range - a real air gap at -0.18, zero
+  for touching, up to +0.05 for a solid welded penetration - and they are
+  independent, so a test gap at one seam and a weld at the other is one
+  operation rather than two passes with the slider moved in between. It adds no
+  positioning math of its own: the poses it leaves are bit-for-bit the poses the
+  Center lock and Seat buttons leave by hand, and Undo is the same four steps.
+  See [docs/JOIN-TRIPLE.md](docs/JOIN-TRIPLE.md).
 - **Lock position** on a placed piece: a locked piece refuses drag, the nudge
   arrows, the vertical controls, To plate and the pose buttons, so a stray click cannot move it
   once Seat has put it where it belongs. Seat, Center, Align and Skin still

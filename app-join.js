@@ -1,10 +1,13 @@
 function updateJoinUI() {
   const a = state.models.find(function (x) { return x.id === state.editId && state.joinSession; });
   const b = state.models.find(function (x) { return x.id === state.joinPartnerId; });
+  const c = state.models.find(function (x) { return x.id === state.joinThirdId; });
   const nameA = document.getElementById('join-name-a');
   const nameB = document.getElementById('join-name-b');
+  const nameC = document.getElementById('join-name-c');
   const slotA = document.getElementById('join-slot-a');
   const slotB = document.getElementById('join-slot-b');
+  const slotC = document.getElementById('join-slot-c');
   const step = document.getElementById('join-step');
   const btn = document.getElementById('btn-join');
   if (nameA) {
@@ -19,6 +22,12 @@ function updateJoinUI() {
       ? (b.name + (face ? ' · ' + face.axis.toUpperCase() + (face.sign > 0 ? '+' : '-') : ''))
       : 'Pick piece B';
   }
+  if (nameC) {
+    const face = state.joinFaceC;
+    nameC.textContent = c
+      ? (c.name + (face ? ' · ' + face.axis.toUpperCase() + (face.sign > 0 ? '+' : '-') : ''))
+      : 'Pick piece C (optional)';
+  }
   const faceBtn = document.getElementById('btn-join-faces');
   if (faceBtn) {
     faceBtn.classList.toggle('tool-active', !!state.joinUseFaces);
@@ -31,6 +40,10 @@ function updateJoinUI() {
   if (slotB) {
     slotB.classList.toggle('filled-b', !!state.joinPartnerId);
     slotB.classList.toggle('armed', state.joinArmed === 'b');
+  }
+  if (slotC) {
+    slotC.classList.toggle('filled-c', !!state.joinThirdId);
+    slotC.classList.toggle('armed', state.joinArmed === 'c');
   }
   if (btn) btn.disabled = !(state.joinSession && state.editId && state.joinPartnerId && state.editId !== state.joinPartnerId);
   const btnSub = document.getElementById('btn-subtract');
@@ -45,12 +58,17 @@ function updateJoinUI() {
   // Center lock rides the same A+B precondition; its own module owns the
   // armed/target label on the pick button.
   if (window.NSO_CenterLock) window.NSO_CenterLock.syncUI();
+  // Same for the triple sequence: it owns the enabled state of its own
+  // Run button and gap rows, off the very same A/B/C slots.
+  if (window.NSO_TripleJoin) window.NSO_TripleJoin.syncUI();
   if (step) {
     if (!state.joinSession) step.textContent = '1. Start Join';
     else if (state.joinArmed === 'a') step.textContent = '2. Click piece A on the plate or list';
     else if (!state.editId) step.textContent = '2. Click Pick A';
     else if (state.joinArmed === 'b') step.textContent = '3. Click piece B on the plate or list';
     else if (!state.joinPartnerId) step.textContent = '3. Click Pick B';
+    else if (state.joinArmed === 'c') step.textContent = '4. Click piece C on the plate or list';
+    else if (state.joinThirdId) step.textContent = '4. Set a gap per junction, then Join A-B-C';
     else step.textContent = '4. Align / slide B along the wall, then Complete Join';
   }
   paintJoinHighlights();
@@ -62,6 +80,7 @@ function assignJoinClick(id, face) {
   const useFace = face || null;
   if (state.joinArmed === 'a') {
     if (id === state.joinPartnerId) { state.joinPartnerId = null; state.joinFaceB = null; }
+    if (id === state.joinThirdId) { state.joinThirdId = null; state.joinFaceC = null; }
     state.editId = id;
     state.joinHullId = id;
     state.joinFaceA = useFace;
@@ -69,8 +88,18 @@ function assignJoinClick(id, face) {
     state.joinArmed = null;
   } else if (state.joinArmed === 'b') {
     if (id === state.editId) return;
+    if (id === state.joinThirdId) { state.joinThirdId = null; state.joinFaceC = null; }
     state.joinPartnerId = id;
     state.joinFaceB = useFace;
+    state.joinArmed = null;
+  } else if (state.joinArmed === 'c') {
+    /* Three DISTINCT pieces, or the sequence is not a sequence: C == A would
+       ask the second junction to seat A onto B having just seated B onto A,
+       and C == B would ask B to seat onto itself. Refusing the click leaves
+       the slot armed, so the next click can be the right piece. */
+    if (id === state.editId || id === state.joinPartnerId) return;
+    state.joinThirdId = id;
+    state.joinFaceC = useFace;
     state.joinArmed = null;
   }
   renderModelList();
@@ -86,6 +115,8 @@ function startJoinSession() {
   state.joinHullId = null;
   state.joinFaceA = null;
   state.joinFaceB = null;
+  state.joinThirdId = null;
+  state.joinFaceC = null;
   state.joinSlideAxis = null;
   if (typeof removeFaceHelper === 'function') removeFaceHelper();
   state.editId = null;
@@ -109,6 +140,8 @@ function clearJoinSlots() {
   state.joinHullId = null;
   state.joinFaceA = null;
   state.joinFaceB = null;
+  state.joinThirdId = null;
+  state.joinFaceC = null;
   state.joinUseFaces = false;
   state.joinSlideAxis = null;
   // The Center lock target was picked on a piece in slot A; leaving Join
@@ -2013,6 +2046,8 @@ async function subtractBFromA() {
   reindexPlacedMeshes();
 
   state.joinPartnerId = null;
+  state.joinThirdId = null;
+  state.joinFaceC = null;
   state.joinSession = false;
   state.joinArmed = null;
 
@@ -2251,14 +2286,19 @@ function seatSupportBitToHull() {
     setStatus('Seat gap slider is missing or out of range - nothing seated', true);
     return;
   }
-  seatBitAtGap(placedA, placedB, gap);
+  return seatBitAtGap(placedA, placedB, gap);
 }
 
 /* The gap slider's value in mm, or NaN when the slider is missing or its
    value is outside its own range (a range input clamps user input, so that
-   only happens to a value set from code). Never a silent fallback. */
-function readSeatGapInput() {
-  const el = document.getElementById('seat-gap');
+   only happens to a value set from code). Never a silent fallback.
+
+   `id` names which gap input to read, defaulting to the card's own slider.
+   Triple join's two per-junction gaps go through this same reader rather
+   than a copy of these rules: two inputs that disagreed with the slider
+   about what -0.18 means is not a bug anyone would think to look for. */
+function readSeatGapInput(id) {
+  const el = document.getElementById(id || 'seat-gap');
   if (!el) return NaN;
   const v = Number(el.value);
   const lo = Number(el.min), hi = Number(el.max);
@@ -2279,15 +2319,23 @@ function NSO_formatSeatGap(v) {
 
 /* Keep the readout on the exact slider value; called on every input event
    and once at start-up so the default (-0.18, mid easy-release) is shown. */
-function updateSeatGapReadout() {
-  const out = document.getElementById('seat-gap-value');
+function updateSeatGapReadout(id, outId) {
+  const out = document.getElementById(outId || 'seat-gap-value');
   if (!out) return;
-  out.textContent = NSO_formatSeatGap(readSeatGapInput());
+  out.textContent = NSO_formatSeatGap(readSeatGapInput(id));
 }
 
 /* Seat B's mating face `gap` mm off A's skin (coupon convention) and make
    the plate record match, so the export writes the same relation the
-   scene shows. */
+   scene shows.
+
+   Returns what it did: { ok, gap, measured, residual, reference, clamped } on
+   a seat, { ok: false, reason } on a refusal. The button never needed a
+   return value - the status line IS its report - but a caller that chains
+   seats (app-join-triple.js) has to know whether to run the next one, and
+   scraping the status text for that would make the wording load-bearing.
+   Purely additive: the status line and every pose this writes are unchanged,
+   which is what the Seat suites pin. */
 function seatBitAtGap(placedA, placedB, gap) {
   // Both pieces on the bed baseline settlePlacedOnBed uses, the way Align
   // edges does through matchPlacedBottoms. A piece that was dropped and never
@@ -2305,8 +2353,9 @@ function seatBitAtGap(placedA, placedB, gap) {
   const res = NSO_seatFlushBitToHull(placedA.mesh, placedB.mesh, { gap: gap });
   if (!res || !res.ok) {
     NSO_restoreRaisedBit(placedB, raised);
-    setStatus('Seat failed - ' + ((res && res.reason) || 'pieces unchanged'), true);
-    return;
+    const why = (res && res.reason) || 'pieces unchanged';
+    setStatus('Seat failed - ' + why, true);
+    return { ok: false, reason: why };
   }
   placedB.x = placedB.mesh.position.x;
   placedB.z = placedB.mesh.position.z;
@@ -2343,6 +2392,14 @@ function seatBitAtGap(placedA, placedB, gap) {
   if (res.reference === 'tips') msg += ' - from skin tips, relief ' + res.tipRise.toFixed(2) + 'mm above the base plane';
   if (clamped) msg += ' - bit would sink below the plate, held at plate level: gap NOT as requested';
   setStatus(msg, clamped);
+  /* A clamped seat did NOT land on the gap it was asked for, and says so. A
+     chained caller must treat that as a failure, not a seat with a caveat -
+     the whole point of a per-junction gap is that the junction is at it. */
+  return {
+    ok: !clamped, gap: gap, measured: got, residual: resid,
+    reference: res.reference, clamped: clamped,
+    reason: clamped ? 'bit would sink below the plate, held at plate level: gap NOT as requested' : ''
+  };
 }
 
 
@@ -2858,6 +2915,8 @@ async function joinSelectedModels() {
     reindexPlacedMeshes();
   }
   state.joinPartnerId = null;
+  state.joinThirdId = null;
+  state.joinFaceC = null;
   state.joinSession = false;
   state.joinArmed = null;
 
@@ -3104,6 +3163,8 @@ function cutActiveModel() {
   const sizeB = modelB ? (axis === 'x' ? modelB.size.x : modelB.size.z) : 0;
   state.selectedIndex = -1;
   state.joinPartnerId = null;
+  state.joinThirdId = null;
+  state.joinFaceC = null;
   state.joinSession = false;
   state.joinArmed = null;
   state.cutT = 0.5;
@@ -3576,8 +3637,12 @@ function setupUI() {
   if (btnSeatSupport) btnSeatSupport.addEventListener('click', seatSupportBitToHull);
   const seatGapSlider = document.getElementById('seat-gap');
   if (seatGapSlider) {
-    seatGapSlider.addEventListener('input', updateSeatGapReadout);
-    seatGapSlider.addEventListener('change', updateSeatGapReadout);
+    /* Named wrapper, not updateSeatGapReadout itself: a listener is called
+       with the Event as its first argument, and the first argument is now
+       the id of the input to read. */
+    const syncSeatGap = function () { updateSeatGapReadout(); };
+    seatGapSlider.addEventListener('input', syncSeatGap);
+    seatGapSlider.addEventListener('change', syncSeatGap);
     updateSeatGapReadout();
   }
   const btnFlipPort = document.getElementById('btn-flip-port');

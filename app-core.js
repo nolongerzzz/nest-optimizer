@@ -55,6 +55,12 @@ const state = {
   joinSession: false,
   joinFaceA: null,
   joinFaceB: null,
+  /* Triple join's third slot. Held here with the rest of the Join slots so
+     the one place that clears a Join session clears this too - a stale C is
+     exactly the kind of leftover that makes a pair tool act on a piece the
+     user thinks they retired. See app-join-triple.js. */
+  joinThirdId: null,
+  joinFaceC: null,
   joinUseFaces: false,
   faceHelper: null,
   softenArmed: false,
@@ -2937,6 +2943,7 @@ function deleteSelectedPlaced() {
     state.models = state.models.filter(function (m) { return m.id !== sourceId; });
     if (state.editId === sourceId) state.editId = null;
     if (state.joinPartnerId === sourceId) state.joinPartnerId = null;
+    if (state.joinThirdId === sourceId) { state.joinThirdId = null; state.joinFaceC = null; }
     renderModelList();
   }
   reindexPlacedMeshes();
