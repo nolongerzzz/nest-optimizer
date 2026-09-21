@@ -2239,6 +2239,23 @@ select:focus, input:focus {
   color: var(--text);
 }
 
+/* Oversized washer: the typed gap that replaces the slider while the mode is
+   on. Same row rhythm as the slider above it, with the number field taking
+   the slack so the label and the unit stay put as digits are typed. */
+.oversize-row input[type="number"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.oversize-row label,
+.oversize-row .oversize-unit {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* Brush rows - a label, a slider that takes the slack, and the live value.
    The value column is fixed so the row does not reflow as the number changes
    width, which is what made the first draft twitch while dragging. */

@@ -127,6 +127,18 @@ Smart build-plate packing for 3D printing.
     between them, which is the piece to use when the coupon goes *between* two
     parts (a bordered washer would present its solid floor to one of them and
     weld on area alone). All of them are in the **Library** tab, ready to load.
+  - **Oversized washer** (the checkbox under Seat here) is for the case those
+    patches are built for and the seat could not express: a washer or shim
+    *wider* than the piece it sits on, in deliberate close contact. Center lock
+    puts it in XZ, a typed mm field says how far off the target it sits - the
+    coupon sign convention, and past the slider's own +0.05 end if you want a
+    squeeze - and Seat (support) places it through the measured-clearance solve
+    instead of the corner-ray fit, which refuses any overhanging piece with
+    "corner N missed hull along punch axis". The status line reports the true
+    minimum surface-to-surface distance, the overhang in X and Z and the
+    corner-ray verdict it stood down on, the way the cut readout does:
+    reported, not blocked. Off by default, and off it changes nothing.
+    See [docs/OVERSIZED-WASHER.md](docs/OVERSIZED-WASHER.md)
   - **crosshatch-fine** is the same lattice at a 0.84 mm pitch instead of 1.2 -
     1.43x the ribs, leaving a 0.42 mm channel, which is exactly one extrusion
     line at a 0.4 nozzle. **0.4 nozzle only**: at a 0.6 nozzle one line is
