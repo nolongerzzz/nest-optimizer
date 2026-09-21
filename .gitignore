@@ -1,5 +1,6 @@
 out/
 tools/extend-out/
+tools/mirror-out/
 __pycache__/
 *.pyc
 node_modules/
