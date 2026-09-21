@@ -45,12 +45,32 @@
  *
  * TWO KINDS OF DOCUMENT
  *   'toolpath'  a sliced `.gcode.3mf`. Segments, feature colours, real layers.
- *   'mesh'      a plain STL or 3MF. Triangles and build objects, no layers and
- *               no features, because the file has none. An STL is one object,
- *               so it renders as one whole unsegmented part. See
- *               docs/GCODE-MICROSCOPE.md for why full-layer selection is
- *               refused rather than faked, and why the capture box selects
- *               whole objects rather than loose triangles.
+ *   'mesh'      triangles in named groups, no layers and no features, because
+ *               the source has none. See docs/GCODE-MICROSCOPE.md for why
+ *               full-layer selection is refused rather than faked, and why the
+ *               capture box selects whole objects rather than loose triangles.
+ *
+ * THREE SOURCES, ONE VIEW
+ * A document's KIND is what it holds; its SOURCE is where it came from, and
+ * the view does not care. A mesh document can be built from
+ *   a file        an STL or a plain 3MF - one group per build object, an STL
+ *                 being one object because the format has no object structure;
+ *   the plate     `openPlate()` - one group per placed piece, read through
+ *                 meshToWorldSoup, so the microscope button is an OVERLAY on
+ *                 whatever is already there, exactly as X-ray is, and not a
+ *                 door to a file dialog;
+ *   any producer  `openObjects()` - any named Z-up triangle groups at all.
+ * The third is the seam the support-isolation work grows through: a producer
+ * that splits one support tree into its branches, or lifts one interface
+ * layer out of a print, hands its groups to `openObjects()` and inherits the
+ * legend, the capture box, Isolate and both exports with no change here.
+ *
+ * WHERE A `.gcode.3mf` LANDS
+ * Importing one puts you in this view, coloured by feature, without a button
+ * press - app-core.js's `handleFiles()` hands the ALREADY-PARSED result to
+ * `openToolpathResult()` (no second parse) after the toolpath import has run.
+ * The plate import behind the overlay is untouched, so Close drops you onto
+ * the Toolpath card exactly as before.
  *
  * SCOPE
  * A VIEW plus an import and an export. Nothing here slices, nothing here
@@ -60,7 +80,7 @@
  * this way is an ordinary NSO model from that point on.
  */
 /* global THREE, state, setStatus, addModelFromZUpGeometry, pushUndo,
-          geometryToBinarySTL, downloadBlob, loader */
+          geometryToBinarySTL, downloadBlob, loader, meshToWorldSoup */
 'use strict';
 
 var NSO_MICROSCOPE = (function () {
@@ -100,8 +120,21 @@ var NSO_MICROSCOPE = (function () {
   ];
 
   function colorForGroup(name, i) {
-    if (doc && doc.kind === 'toolpath' && window.NSOGcodeLines) {
-      return window.NSOGcodeLines.colorForFeature(name);
+    var G = window.NSOGcodeLines;
+    if (doc && doc.kind === 'toolpath' && G) return G.colorForFeature(name);
+    // A mesh group that IS a slicer feature gets the slicer's colour for it.
+    // That is not a guess: a `.gcode.3mf` imported to the plate arrives as one
+    // piece per feature named "<file> - Outer wall", so reading the plate back
+    // gives the feature colouring for free, and a group named for a feature by
+    // anything else - a support-isolation producer, say - inherits it too.
+    // Anything the table does not know falls through to the object palette
+    // rather than to the table's grey "other", so unrelated parts stay
+    // distinguishable from one another.
+    if (G && G.FEATURE_COLORS) {
+      var tail = String(name).split(' - ').pop();
+      if (Object.prototype.hasOwnProperty.call(G.FEATURE_COLORS, tail)) {
+        return G.FEATURE_COLORS[tail];
+      }
     }
     return OBJECT_COLORS[i % OBJECT_COLORS.length];
   }
@@ -200,6 +233,125 @@ var NSO_MICROSCOPE = (function () {
       cy: isFinite(minY) ? (minY + maxY) / 2 : 0,
       unit: 'triangle'
     };
+  }
+
+  // ===========================================================================
+  // The plate as a document - the overlay route
+  // ===========================================================================
+  //
+  // The file routes above answer "what is in this file". This one answers
+  // "what is on the plate right now", which is the question X-ray answers and
+  // the one this view could not ask until now. X-ray's pattern, exactly: a
+  // rail button that acts on whatever is already there, with the main
+  // viewport left where it stands underneath - the panel is `position: fixed`
+  // over it, not a route away from it, so Close puts you back on the same
+  // plate with the same selection.
+  //
+  // What comes out is the SAME mesh document the STL/3MF route builds - one
+  // named group per part, whole parts caught by the capture box, Isolate and
+  // both exports unchanged - so nothing below `meshDoc` needs to know, or can
+  // tell, where the triangles came from.
+  //
+  // COORDINATES. `meshToWorldSoup` (app-join.js) is the app's one way to read
+  // a placed piece as world triangles, and it hands back the VIEWPORT's Y-up
+  // space. A microscope document is in the FILE's Z-up millimetres, because
+  // that is what the capture box, the layer window and both exports speak.
+  // The remap is the inverse of `toThree`:
+  //
+  //     three (X, Y, Z)  ->  z-up (X, -Z, Y)
+  //
+  // so a piece read off the plate and a piece read out of a file land in the
+  // same space, and Export to plate puts one back down where the other would.
+
+  /** One placed mesh as a Z-up millimetre triangle soup, or null. */
+  function zUpSoupOf(placedMesh) {
+    if (typeof meshToWorldSoup !== 'function') return null;
+    var soup = meshToWorldSoup(placedMesh);
+    if (!soup || soup.length < 9) return null;
+    var out = new Float32Array(soup.length);
+    for (var i = 0; i < soup.length; i += 3) {
+      out[i] = soup[i];                 //  x  <-  X
+      out[i + 1] = -soup[i + 2];        //  y  <- -Z
+      out[i + 2] = soup[i + 1];         //  z  <-  Y
+    }
+    return out;
+  }
+
+  /**
+   * Every piece on the plate, as microscope objects.
+   *
+   * Names are made unique because `doc.groups` and the legend are keyed by
+   * name, and two pieces cut from one file share theirs. The plate index and
+   * source model id ride along so a caller can tell an object back to the
+   * piece it was read from.
+   */
+  function plateObjects() {
+    if (typeof state === 'undefined' || !state || !state.placed) return [];
+    var used = {};
+    var out = [];
+    state.placed.forEach(function (p, i) {
+      if (!p || !p.mesh) return;
+      var soup = zUpSoupOf(p.mesh);
+      if (!soup) return;
+      var base = p.name || ('Piece ' + (i + 1));
+      var name = base, n = 2;
+      while (used[name]) { name = base + ' #' + n; n++; }
+      used[name] = 1;
+      out.push({ name: name, positions: soup, placedIndex: i, sourceId: p.sourceId });
+    });
+    return out;
+  }
+
+  /**
+   * Open any set of named Z-up triangle groups as a mesh document.
+   *
+   * THIS IS THE SEAM, and it is deliberately wider than its one caller needs.
+   * `openPlate()` below passes one group per plate piece. Anything that can
+   * name and separate triangles can be the next caller - a support tree split
+   * into its branches, a single strut, one interface layer, one web - and the
+   * view, the legend, the capture box, Isolate and both exports take it
+   * without a change, because from `meshDoc` down nothing knows or asks who
+   * grouped the triangles. Growing the isolation library is a matter of
+   * writing a producer that hands this function better groups; it is not a
+   * matter of touching anything in this file below this line.
+   */
+  function openObjects(label, objects, opts) {
+    if (!objects || !objects.length) {
+      say('Nothing to put under the microscope', true);
+      return null;
+    }
+    var o = opts || {};
+    openPanel();
+    if (!view) return null;
+    var d = meshDoc(label, objects);
+    d.source = o.source || 'objects';
+    d.subtitle = o.subtitle || null;
+    return open(d);
+  }
+
+  /** Whatever is on the plate, under the lens. The overlay route. */
+  function openPlate() {
+    var objs = plateObjects();
+    if (!objs.length) return null;
+    return openObjects('Plate', objs, {
+      source: 'plate',
+      subtitle: 'The plate as it stands, read off the pieces themselves. ' +
+                'Not a sliced file: no layers and no slicer features, so each ' +
+                'piece draws whole. Click one to drop a capture box over it.'
+    });
+  }
+
+  /**
+   * A slice that has ALREADY been parsed, opened without parsing it twice.
+   * `res` is `NSOGcodeLines.readSlicedGcode3MF()`'s own result - the same
+   * object `NSO_TOOLPATH`'s session keeps on `.result` - which is how a
+   * `.gcode.3mf` import can land here for free on its way to the plate.
+   */
+  function openToolpathResult(filename, res) {
+    if (!res || !res.parsed || !res.parsed.moves || !res.parsed.moves.length) return null;
+    openPanel();
+    if (!view) return null;
+    return open(toolpathDoc(filename, res));
   }
 
   /**
@@ -825,8 +977,16 @@ var NSO_MICROSCOPE = (function () {
     show('ms-detail-controls', true);
     show('ms-select-controls', false);
 
-    // orbit target: centroid of all boxes
-    if (balls.length > 0) {
+    // The reference tool only re-TARGETS here, on the centroid of the boxes,
+    // and leaves the camera where the whole part put it. That is the whole
+    // part's zoom, which on a plate of twelve pieces leaves one isolated
+    // support interface a thumbnail in the middle of the grid. Isolate is the
+    // zoom - so frame the selection itself, and fall back to the reference
+    // tool's target when there is nothing measurable to frame.
+    var selBox = selectionBox();
+    if (selBox) {
+      frameBox(selBox);
+    } else if (balls.length > 0) {
       var centre = new THREE.Vector3();
       balls.forEach(function (b) { centre.add(b.point); });
       v.controls.target.copy(centre.divideScalar(balls.length));
@@ -839,6 +999,7 @@ var NSO_MICROSCOPE = (function () {
     var v = view;
     v.detailGroup.visible = false;
     v.overviewGroup.visible = true;
+    frame();                      // Isolate zoomed in; Back is the way out of that
     balls.forEach(function (b) {
       b.boxMesh.visible = true; b.handle.visible = true; b.heightHandle.visible = true;
     });
@@ -957,9 +1118,12 @@ var NSO_MICROSCOPE = (function () {
   function exportLabel() {
     var base = baseName(doc.name);
     if (doc.kind !== 'toolpath') {
-      return base + ' - ' + (currentSelection.length === 1
+      var what = currentSelection.length === 1
         ? currentSelection[0].name
-        : currentSelection.length + ' objects');
+        : currentSelection.length + ' ' + (doc.source === 'plate' ? 'pieces' : 'objects');
+      // A piece read off the plate already carries the plate's own name for
+      // it; prefixing "Plate - " onto that says nothing and reads worse.
+      return doc.source === 'plate' ? what : base + ' - ' + what;
     }
     if (selectionSource === 'layer') {
       var z = currentSelection.length ? currentSelection[0].z : 0;
@@ -1066,18 +1230,51 @@ var NSO_MICROSCOPE = (function () {
     }
     var sub = $('ms-sub');
     if (!sub) return;
-    if (!doc) { sub.textContent = 'Open an STL, a 3MF or a sliced .gcode.3mf.'; return; }
+    if (!doc) { sub.textContent = 'The plate, or an STL, a 3MF or a sliced .gcode.3mf.'; return; }
     if (doc.kind === 'toolpath') {
       sub.textContent = doc.name + ' - ' + doc.segments.length + ' extrusion moves, ' +
         doc.parsed.layers.length + ' layers, true layer heights. ' +
         'Drag to orbit, scroll to zoom, right-drag to pan.';
-    } else {
-      var tris = doc.objects.reduce(function (a, o) { return a + o.triangles; }, 0);
-      sub.textContent = doc.name + ' - ' + doc.objects.length + ' object' +
-        (doc.objects.length === 1 ? '' : 's') + ', ' + tris + ' triangles. ' +
-        'Not sliced: no layers and no features, so it draws as ' +
-        (doc.objects.length === 1 ? 'one whole part.' : 'one whole part per object.');
+      return;
     }
+    var tris = doc.objects.reduce(function (a, o) { return a + o.triangles; }, 0);
+    var unitName = doc.source === 'plate' ? 'piece' : 'object';
+    var count = doc.name + ' - ' + doc.objects.length + ' ' + unitName +
+      (doc.objects.length === 1 ? '' : 's') + ', ' + tris + ' triangles. ';
+    // A document built from groups somebody else named says what it is in its
+    // own words; a file says the one thing a file can say about being sliced.
+    sub.textContent = count + (doc.subtitle ||
+      ('Not sliced: no layers and no features, so it draws as ' +
+       (doc.objects.length === 1 ? 'one whole part.' : 'one whole part per object.')));
+  }
+
+  /**
+   * The current selection's extent in VIEW space, or null.
+   *
+   * Computed from the document rather than from the detail group, because the
+   * toolpath detail group is InstancedMesh: its geometry bounding box is the
+   * unit cylinder every instance shares, and reading that would frame a 1 mm
+   * cylinder at the origin however far away the selection is.
+   */
+  function selectionBox() {
+    if (!doc || !currentSelection.length) return null;
+    var box = new THREE.Box3();
+    if (doc.kind === 'toolpath') {
+      currentSelection.forEach(function (s) {
+        var w = (s.w || 0) / 2;
+        box.expandByPoint(toThree(s.x0 - doc.cx - w, s.y0 - doc.cy - w, s.z - w));
+        box.expandByPoint(toThree(s.x0 - doc.cx + w, s.y0 - doc.cy + w, s.z + w));
+        box.expandByPoint(toThree(s.x1 - doc.cx - w, s.y1 - doc.cy - w, s.z - w));
+        box.expandByPoint(toThree(s.x1 - doc.cx + w, s.y1 - doc.cy + w, s.z + w));
+      });
+    } else {
+      currentSelection.forEach(function (o) {
+        var b = o.bounds;
+        box.expandByPoint(toThree(b.minX - doc.cx, b.minY - doc.cy, b.minZ));
+        box.expandByPoint(toThree(b.maxX - doc.cx, b.maxY - doc.cy, b.maxZ));
+      });
+    }
+    return box.isEmpty() ? null : box;
   }
 
   /** Put the camera where the loaded file is actually visible. */
@@ -1088,14 +1285,30 @@ var NSO_MICROSCOPE = (function () {
       c.geometry.computeBoundingBox();
       box.union(c.geometry.boundingBox.clone().applyMatrix4(c.matrixWorld));
     });
-    if (box.isEmpty()) return;
+    frameBox(box);
+  }
+
+  /** Point the camera at one box, with air around it. Empty box: no move. */
+  function frameBox(box) {
+    var v = view;
+    if (!box || box.isEmpty()) return;
     var size = new THREE.Vector3(), centre = new THREE.Vector3();
     box.getSize(size); box.getCenter(centre);
     var span = Math.max(size.x, size.y, size.z) || 20;
+    // Fit the bounding SPHERE, not the longest edge. Viewed from a corner a
+    // box presents its diagonal, so framing on the longest edge crops a
+    // compact part off both sides of the canvas - which is what it did to a
+    // piece read off the plate, the one document that is reliably compact.
+    // The vertical FOV governs whenever the canvas is wider than it is tall,
+    // and this panel always is.
+    var radius = (size.length() / 2) || 10;
+    var half = (v.camera.fov * Math.PI / 180) / 2;
+    var dist = (radius / Math.sin(half)) * 1.1;          // 10% air around it
+    var step = dist / Math.sqrt(3);                      // equal on all three axes
     v.controls.target.copy(centre);
-    v.camera.position.set(centre.x + span, centre.y + span, centre.z + span);
+    v.camera.position.set(centre.x + step, centre.y + step, centre.z + step);
     v.camera.near = Math.max(0.01, span / 1000);
-    v.camera.far = span * 100;
+    v.camera.far = Math.max(span, dist) * 100;
     v.camera.updateProjectionMatrix();
     v.controls.update();
   }
@@ -1121,7 +1334,8 @@ var NSO_MICROSCOPE = (function () {
     syncLayerRow();
     info(doc.kind === 'toolpath'
       ? 'Click the model to drop a capture box, or take a whole layer.'
-      : 'Click a part to drop a capture box over it.');
+      : ('Click a ' + (doc.source === 'plate' ? 'piece' : 'part') +
+         ' to drop a capture box over it.'));
     syncExportRow();
     return doc;
   }
@@ -1206,13 +1420,22 @@ var NSO_MICROSCOPE = (function () {
   }
 
   function mount() {
+    // X-ray's pattern: one rail button, a toggle, and it acts on what is
+    // ALREADY on the plate rather than sending you off to fetch something
+    // first. The file picker is what an empty plate falls back to, not the
+    // front door. A file already in the view is left alone on reopen - the
+    // sidebar's "Read the plate" is how you go back to the plate from one.
     bind('btn-microscope', 'click', function () {
       if (isOpen()) { close(); return; }
+      if ((!doc || doc.source === 'plate') && openPlate()) return;
       openPanel();
       if (!doc) openPicker();
     });
     bind('ms-input', 'change', onPicked);
     bind('ms-btn-open', 'click', openPicker);
+    bind('ms-btn-plate', 'click', function () {
+      if (!openPlate()) say('Nothing on the plate to look at - import a file instead', true);
+    });
     bind('ms-close', 'click', close);
     bind('ms-mode-orbit', 'click', function () { setMode('orbit'); });
     bind('ms-mode-select', 'click', function () { setMode('select'); });
@@ -1266,6 +1489,10 @@ var NSO_MICROSCOPE = (function () {
     isOpen: isOpen,
     reset: reset,
     load: load,
+    openPlate: openPlate,
+    openObjects: openObjects,
+    openToolpathResult: openToolpathResult,
+    plateObjects: plateObjects,
     openPicker: openPicker,
     setMode: function (m) { setMode(m); },
     addBoxAt: function (gx, gy, gz, r, h) {
