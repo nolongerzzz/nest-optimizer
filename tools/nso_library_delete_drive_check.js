@@ -105,6 +105,17 @@ const entryNames = page => page.evaluate(() => window.nsoLibrary.entries().map(e
 const rowNames = page => page.evaluate(() =>
   Array.from(document.querySelectorAll('#library-list .library-item')).map(r => r.dataset.file));
 const statusOf = page => page.evaluate(() => document.getElementById('status').textContent);
+/* The rows a category is holding right now, and how many. Read off the page
+   every time rather than written down: this check used to assert that Test
+   Fixtures held exactly two, which was true on the day it was written and
+   false the next time somebody added a fixture. What it is actually about -
+   the badge tracking the rows, and a group that empties disappearing - is
+   true at any membership, so it is asked that way. */
+const groupFiles = (page, cat) => page.evaluate(c => Array.from(
+  document.querySelectorAll('#library-list .library-sec[data-sec="' + c + '"] .library-item'))
+  .map(r => r.dataset.file), cat);
+const groupSize = async (page, cat) => (await groupFiles(page, cat)).length;
+let FIXTURES_BEFORE = 0;
 
 /* Raise the dialog on one row through the real x. */
 async function openConfirm(page, file) {
@@ -220,6 +231,10 @@ withApp(async (page, logs) => {
   let calls = [];
   {
     const victim = 'box_closed.stl';
+    /* How big its group is BEFORE the delete, read off the page rather than
+       written down. "The badge followed the row out" is a DECREMENT, and a
+       decrement needs a before. */
+    FIXTURES_BEFORE = await groupSize(page, 'Test Fixtures');
     await openConfirm(page, victim);
     await page.fill('#nso-confirm-token', 'github_pat_pretend');
     const armed = await page.evaluate(() => document.getElementById('nso-confirm-go').disabled);
@@ -280,17 +295,27 @@ withApp(async (page, logs) => {
                    rows: s.querySelectorAll('.library-item').length } : null;
     });
     check('the group\'s count badge followed the row out',
-      badge && badge.count === badge.rows && badge.count === 1, JSON.stringify(badge));
+      badge && badge.count === badge.rows && badge.count === FIXTURES_BEFORE - 1,
+      JSON.stringify(badge) + ', down from ' + FIXTURES_BEFORE);
     check('the status says what happened', /Deleted box_closed\.stl/.test(await statusOf(page)),
       (await statusOf(page)).slice(0, 70));
 
-    // the last row of a group: the group itself must go
-    await resetGh(page);
-    await openConfirm(page, 'box_open.stl');
-    await page.fill('#nso-confirm-token', 'github_pat_pretend');
-    await page.click('#nso-confirm-go');
-    await page.waitForFunction(() => !document.querySelector('#library-list .library-item[data-file="box_open.stl"]'),
-      null, { timeout: 15000 });
+    /* THE LAST ROW OF A GROUP: the group itself must go, rather than being
+       left drawn and empty at zero. Which files that takes is whatever the
+       category is holding - seven when this was last run, two when the check
+       was written - so they are read off the page and deleted one at a time
+       through the same real dialog. */
+    const left = await groupFiles(page, 'Test Fixtures');
+    check('...and the group still has rows to be emptied of', left.length > 0,
+      left.length + ': ' + left.join(', '));
+    for (const f of left) {
+      await resetGh(page);
+      await openConfirm(page, f);
+      await page.fill('#nso-confirm-token', 'github_pat_pretend');
+      await page.click('#nso-confirm-go');
+      await page.waitForFunction(n => !document.querySelector(
+        '#library-list .library-item[data-file="' + n + '"]'), f, { timeout: 15000 });
+    }
     await openLib(page);
     const secs = await page.evaluate(() => Array.from(
       document.querySelectorAll('#library-list .library-sec')).map(s => s.dataset.sec));

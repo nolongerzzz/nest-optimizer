@@ -11,13 +11,25 @@
 // WHAT IS ASSERTED, and why each one:
 //
 //   open / nonmanifold / odd edges          A blank is a closed solid or it is
-//   inconsistent_winding, euler = 2         not stock. Three shapes go through
-//                                           here, two of them built by one
+//   inconsistent_winding                    not stock. Eight shapes go through
+//                                           here, seven of them built by one
 //                                           revolve and one by six flat faces,
 //                                           so this is the check that the band
 //                                           rule holds at a pole, at a rim
-//                                           annulus and at a base at once AND
-//                                           that the box's winding is right.
+//                                           annulus, at a cone apex, at an
+//                                           annulus that never meets the axis
+//                                           and at a base at once AND that the
+//                                           box's winding is right.
+//   euler = 2, or 0 for a shape with a      Genus is a PROPERTY OF THE SHAPE,
+//   hole through it                         not a tolerance. A torus and a tube
+//                                           have a hole through them and are
+//                                           genus 1, so their Euler
+//                                           characteristic is 0 and asserting 2
+//                                           on them would be asserting they are
+//                                           not the shape they are. GENUS below
+//                                           says which is which, per shape, so
+//                                           a sphere that came out with a
+//                                           handle in it still fails.
 //   degenerate_tris = 0                     No sliver ring where a profile
 //                                           point sits on the axis.
 //   self-intersection pierce/coplanar = 0   A primitive that crosses itself is
@@ -79,6 +91,14 @@ const validate = f => JSON.parse(execFileSync('python3',
 const CLEAN = ['open_edges', 'nonmanifold_edges', 'odd_edges',
   'inconsistent_winding_edges', 'degenerate_tris'];
 
+/* The genus each shape is SUPPOSED to have, and so the Euler characteristic
+   2 - 2g its closed surface must come out at. Written down per shape rather
+   than inferred from the mesh, which would make the check agree with whatever
+   was generated. A tube and a torus have a hole through them; everything else
+   here is a ball with the corners pushed around. */
+const GENUS = { sphere: 0, box: 0, cylinder: 0, cone: 0, ellipsoid: 0, capsule: 0,
+                tube: 1, torus: 1 };
+
 const byShape = {};
 for (const m of MANIFEST) {
   console.log('\n== ' + m.name + '  (' + m.shape + ', ' + m.measure_text + ') ==');
@@ -87,8 +107,11 @@ for (const m of MANIFEST) {
     v.unique_edges + ' edges, euler ' + v.euler_characteristic);
 
   for (const k of CLEAN) check(k + ' = 0', v[k] === 0, String(v[k]));
-  check('euler characteristic is 2 - one closed shell, no handles',
-    v.euler_characteristic === 2, String(v.euler_characteristic));
+  const genus = GENUS[m.shape];
+  check('the shape is one closed shell of the genus it claims to be',
+    genus != null && v.euler_characteristic === 2 - 2 * genus,
+    'euler ' + v.euler_characteristic + ', want ' + (2 - 2 * genus) +
+    ' (genus ' + genus + ')');
   check('no self-intersecting triangle pairs',
     v.self_intersection.pierce === 0 && v.self_intersection.coplanar === 0,
     v.self_intersection.pierce + ' pierce, ' + v.self_intersection.coplanar + ' coplanar over ' +
@@ -157,7 +180,7 @@ for (const m of MANIFEST) {
 /* Every shape this version makes has to have been put through the checker, or
    the suite is passing on a shape nobody generated. */
 console.log('');
-for (const shape of ['sphere', 'box', 'cylinder']) {
+for (const shape of Object.keys(GENUS)) {
   check('the checker saw real ' + shape + ' pieces, at several sizes',
     (byShape[shape] || 0) >= 3, (byShape[shape] || 0) + ' piece(s)');
 }

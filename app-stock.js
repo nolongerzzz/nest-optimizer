@@ -30,6 +30,13 @@
    a loaded file does and every later tool - Carve, Hollow, Cut, Seat, Skin,
    auto-aim support, both exporters - sees an ordinary piece.
 
+   THE SHAPE LIST IS nso_stock.js's, NOT THIS FILE'S. The <option> values in
+   index.html are NSO_Stock.SHAPES spelled out, and what each shape's one
+   free-text box means lives in the PROP table below - one row per shape,
+   read by the parse, by the label and by the Match checkbox alike. Adding a
+   shape is a closed form and a meridian in the module, a row here and an
+   <option> there; nothing in this file solves for anything.
+
    ---------------------------------------------------------------------------
    LIVE EDITING - the card adjusts the piece it made, it does not make another
    ---------------------------------------------------------------------------
@@ -110,18 +117,49 @@
     return (typeof v === 'number' && v > 0) ? v : undefined;
   }
 
-  /* The shape-specific box: "x:y:z" for a box, a single height/diameter
-     number for a cylinder, ignored for a sphere. One field rather than three,
-     because two of the three would be blank at any moment. */
+  /* ------------------------------------------------ the shape-specific box
+
+     ONE field, not one per shape, because all but one of them would be blank
+     at any moment. What it means follows the selector, and this table is the
+     only place that mapping is written down - the parse below, the label and
+     the placeholder in syncShape(), and the Match checkbox's own answer all
+     read it rather than each carrying a switch of their own.
+
+     A box is the exception and keeps its own branch: three numbers rather than
+     one or two, and they are proportions rather than ratios.
+
+       first / second   the nso_stock.js option each number fills
+       zeroOk           whether the SECOND number may be 0. A cone's taper of
+                        0 is a true point and is the default; a tube with no
+                        wall is not a tube.
+       ref              whether "Match selected piece" means anything here. A
+                        sphere has one measurement and a torus's tube ratio is
+                        not something a bounding box can say, so both refuse a
+                        reference by name in nso_stock.js and the checkbox is
+                        disabled rather than left to fail on the press. */
+  var PROP = {
+    cylinder:  { first: 'ratio', label: 'h/d', ph: 'e.g. 2', ref: true,
+                 hint: 'Cylinder height over diameter. Blank means the target\'s own height over its diameter.' },
+    cone:      { first: 'ratio', second: 'taper', zeroOk: true, label: 'h/d[:taper]', ph: 'e.g. 2 or 2:0.4', ref: true,
+                 hint: 'Cone height over base diameter, optionally followed by a taper - the top radius over the base radius, 0 for a true point and under 1 always. Blank means the target\'s own height over its diameter, to a point.' },
+    tube:      { first: 'ratio', second: 'tubeWall', label: 'h/d[:wall]', ph: 'e.g. 2 or 2:0.25', ref: true,
+                 hint: 'Tube height over outer diameter, optionally followed by the wall as a fraction of the outer radius (default 0.25). Blank means the target\'s own height over its diameter.' },
+    torus:     { first: 'tubeRatio', label: 'tube/ring', ph: 'e.g. 0.35', ref: false,
+                 hint: 'Torus tube radius over ring radius, strictly between 0 and 1 - at 1 the hole closes up. Blank means 0.35. A torus is never as tall as it is wide, so there is no height-over-diameter to read off the target.' },
+    capsule:   { first: 'ratio', label: 'h/d', ph: 'e.g. 2', ref: true,
+                 hint: 'Capsule total height over diameter, more than 1 - at exactly 1 it is a sphere. Blank means the target\'s own height over its diameter when the target is taller than it is wide, and 2 when it is not.' },
+    ellipsoid: { first: 'ratio', label: 'h/d', ph: 'e.g. 1.5', ref: true,
+                 hint: 'Ellipsoid height over diameter. 1 is a sphere, under 1 is squashed, over 1 is stretched. Blank means the target\'s own height over its diameter.' },
+    box:       { label: 'x:y:z', ph: 'e.g. 2:1:1', ref: true,
+                 hint: 'Box proportions, any scale - the block is grown or shrunk until it holds the material the target needs. Blank means the target\'s own bounding box.' }
+  };
+
   function proportionsOf(shape) {
+    var spec = PROP[shape];
     var raw = ($('inp-stock-prop') || {}).value;
     if (!raw || !String(raw).trim()) return {};
     var txt = String(raw).trim();
-    if (shape === 'cylinder') {
-      var k = parseFloat(txt);
-      if (!(isFinite(k) && k > 0)) return { error: 'the cylinder ratio box wants one positive number - height over diameter, e.g. 2 for twice as tall as it is wide' };
-      return { ratio: k };
-    }
+    if (!spec) return {};                       // sphere: the box is hidden
     if (shape === 'box') {
       var parts = txt.split(/[:x,\s]+/).filter(function (s) { return s.length; }).map(parseFloat);
       if (parts.length !== 3 || !parts.every(function (n) { return isFinite(n) && n > 0; })) {
@@ -129,7 +167,27 @@
       }
       return { proportions: { x: parts[0], y: parts[1], z: parts[2] } };
     }
-    return {};
+    /* One or two plain numbers, "a" or "a:b", for every other shape. */
+    var nums = txt.split(/[:x,\s]+/).filter(function (s) { return s.length; }).map(parseFloat);
+    var max = spec.second ? 2 : 1;
+    if (!nums.length || nums.length > max || !nums.every(function (n) { return isFinite(n); })) {
+      return { error: 'the ' + shape + ' box wants ' + (spec.second ? 'one or two numbers' : 'one number') +
+        ' - ' + spec.label + ', e.g. ' + spec.ph.replace(/^e\.g\. /, '') };
+    }
+    if (!(nums[0] > 0)) {
+      return { error: 'the first number in the ' + shape + ' box (' + spec.label +
+        ') has to be positive - got ' + nums[0] };
+    }
+    var out = {};
+    out[spec.first] = nums[0];
+    if (nums.length > 1) {
+      if (!(nums[1] > 0 || (spec.zeroOk && nums[1] === 0))) {
+        return { error: 'the second number in the ' + shape + ' box (' + spec.label + ') has to be ' +
+          (spec.zeroOk ? 'zero or more' : 'positive') + ' - got ' + nums[1] };
+      }
+      out[spec.second] = nums[1];
+    }
+    return out;
   }
 
   /* The selected piece's raw soup, for "match the selected piece". The same
@@ -161,14 +219,23 @@
     var w = num('inp-stock-waste');
     if (typeof w === 'number' && w >= 0) o.waste = w / 100;
 
+    /* Whatever the shape box parsed, verbatim. Copied as a whole rather than
+       field by field: a per-field list here is a list that has to be extended
+       every time a shape gains an option, and the way it fails is silent -
+       the field parses, nothing complains, and the module quietly uses its
+       default instead. PROP already says which options exist; this does not
+       need a second opinion. */
     var p = proportionsOf(shape);
     if (p.error) return { error: p.error };
-    if (p.proportions) o.proportions = p.proportions;
-    if (p.ratio) o.ratio = p.ratio;
+    for (var pk in p) if (Object.prototype.hasOwnProperty.call(p, pk)) o[pk] = p[pk];
 
     var match = $('chk-stock-match');
     if (match && match.checked) {
-      if (shape === 'sphere') return { error: 'A sphere has one measurement, so there are no proportions to match - pick Box or Cylinder, or untick Match' };
+      if (!(PROP[shape] && PROP[shape].ref)) {
+        return { error: shape === 'sphere'
+          ? 'A sphere has one measurement, so there are no proportions to match - pick another shape, or untick Match'
+          : 'A torus is measured by its tube radius over its ring radius, which a reference piece\'s bounding box cannot say - give the tube ratio directly, or untick Match' };
+      }
       var ref = referenceSoup();
       if (ref.error) return { error: ref.error };
       o.like = ref.soup;
@@ -385,34 +452,39 @@
     return r;
   }
 
-  /* The proportions box means something different per shape, so its label and
-     its placeholder follow the selector, and it goes away entirely for a
-     sphere - which has one measurement and nothing to proportion. A field that
-     says "x:y:z" while a cylinder is picked is a field that gets filled in
-     wrong. Only that one label is hidden: the wall, the nozzle and the waste
-     margin apply to all three shapes and stay put. */
+  /* The proportions box means something different per shape, so its label, its
+     placeholder and its tooltip follow the selector, and it goes away entirely
+     for a sphere - which has one measurement and nothing to proportion. A
+     field that says "x:y:z" while a cylinder is picked is a field that gets
+     filled in wrong. Only that one label changes: the wall, the nozzle and the
+     waste margin apply to every shape and stay put.
+
+     All of it comes off PROP, so adding a shape is a row in that table and an
+     <option> in index.html. The one thing NOT in the table is which shapes
+     hide the row: that is "has no second measurement at all", which is the
+     sphere alone and is the absence of a PROP entry. */
   function syncShape() {
     var shape = (($('sel-stock-shape') || {}).value) || 'sphere';
     var lab = $('lab-stock-prop'), inp = $('inp-stock-prop'), row = $('row-stock-prop');
     if (!lab || !inp || !row) return;
-    if (shape === 'box') {
+    var spec = PROP[shape];
+    if (spec) {
       row.hidden = false;
-      lab.textContent = 'x:y:z';
-      inp.placeholder = 'e.g. 2:1:1';
-      inp.title = 'Box proportions, any scale - the block is grown or shrunk until it holds the material the target needs. Blank means the target\'s own bounding box.';
-    } else if (shape === 'cylinder') {
-      row.hidden = false;
-      lab.textContent = 'h/d';
-      inp.placeholder = 'e.g. 2';
-      inp.title = 'Cylinder height over diameter. Blank means the target\'s own height over its diameter.';
+      lab.textContent = spec.label;
+      inp.placeholder = spec.ph;
+      inp.title = spec.hint;
     } else {
       row.hidden = true;
       inp.value = '';
     }
+    /* Match is about reading a height over a diameter off a piece's bounding
+       box, so it is offered exactly where that means something. Cleared as
+       well as disabled, so switching to a sphere or a torus cannot leave a
+       ticked box that the next press would refuse on. */
     var match = $('chk-stock-match');
     if (match) {
-      match.disabled = (shape === 'sphere');
-      if (shape === 'sphere') match.checked = false;
+      match.disabled = !(spec && spec.ref);
+      if (match.disabled) match.checked = false;
     }
   }
 

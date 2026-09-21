@@ -316,10 +316,15 @@
               <summary>Stock</summary>
               <div class="vp-menu-body vp-stock">
               <div class="vp-row vp-row-full">
-              <select id="sel-stock-shape" title="What shape the blank is. The sizing is the same for all three - only the last step, solving for the shape's own defining measurement, differs.">
+              <select id="sel-stock-shape" title="What shape the blank is. The sizing is the same for all of them - only the last step, solving for the shape's own defining measurement, differs. Every shape here solves that step in closed form; see docs/STOCK.md for the ones that cannot and are deferred.">
               <option value="sphere">Sphere</option>
               <option value="box">Box</option>
               <option value="cylinder">Cylinder</option>
+              <option value="cone">Cone</option>
+              <option value="tube">Tube</option>
+              <option value="torus">Torus</option>
+              <option value="capsule">Capsule</option>
+              <option value="ellipsoid">Ellipsoid</option>
               </select>
               </div>
               <div class="vp-row vp-row-opts">
@@ -335,7 +340,7 @@
               <label class="vp-clone" id="row-stock-prop" hidden><span id="lab-stock-prop">x:y:z</span> <input type="text" id="inp-stock-prop" placeholder="e.g. 2:1:1"></label>
               </div>
               <label class="vp-check"
-              title="Take the block's proportions from the selected piece, via the same dominant-axis detection Extend uses. It reads that piece's bounding box only and writes to none of it. Box and Cylinder only.">
+              title="Take the block's proportions from the selected piece, via the same dominant-axis detection Extend uses. It reads that piece's bounding box only and writes to none of it. Not Sphere, which has one measurement, and not Torus, whose tube ratio a bounding box cannot say.">
               <input type="checkbox" id="chk-stock-match"> Match selected piece
               </label>
               <label class="vp-check"
@@ -817,7 +822,7 @@
   <script src="nso_printer.js?v=wheel2"></script>
   <!-- New stock: the shape-agnostic sizing app-wheel.js's Ball now calls,
        so it loads ahead of it. See docs/STOCK.md. -->
-  <script src="nso_stock.js?v=stock1"></script>
+  <script src="nso_stock.js?v=stock2"></script>
   <script src="nso_paint_delete.js?v=del1"></script>
   <script src="nso_skin_band.js?v=skin2"></script>
   <script src="nso_path_sweep.js?v=inside4"></script>
@@ -840,7 +845,7 @@
   <script src="app-brush.js?v=hollow1"></script>
   <script src="app-wheel.js?v=wheel3"></script>
   <script src="app-fit.js?v=wheel2"></script>
-  <script src="app-stock.js?v=stock2"></script>
+  <script src="app-stock.js?v=stock3"></script>
   <script src="app-assemble.js?v=asm1"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=inmode1"></script>

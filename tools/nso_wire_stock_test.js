@@ -77,6 +77,10 @@ withApp(async (page, logs) => {
          button must not be inside the wheel's card. */
       insideWheelMenu: !!(wheelMenu && btn && wheelMenu.contains(btn)),
       shapes: [...document.querySelectorAll('#sel-stock-shape option')].map(o => o.value),
+      /* The <option> list and NSO_Stock.SHAPES are two lists of the same
+         thing. Read both here, from the live page, so a shape added to one
+         and not the other is an <option> that refuses on the press. */
+      moduleShapes: (typeof NSO_Stock !== 'undefined') ? NSO_Stock.SHAPES.slice() : [],
       modules: {
         stock: typeof NSO_Stock !== 'undefined',
         printer: typeof NSO_Printer !== 'undefined',
@@ -94,7 +98,12 @@ withApp(async (page, logs) => {
   check('every stock control is in the DOM', ui.missingInputs.length === 0, ui.missingInputs.join(','));
   check('it has its own menu, separate from the Pottery Wheel\'s', ui.ownMenu);
   check('...and the button is NOT inside the wheel\'s menu', !ui.insideWheelMenu);
-  check('all three shapes are offered', ui.shapes.join(',') === 'sphere,box,cylinder', ui.shapes.join(','));
+  check('the card offers exactly the module\'s shape list, in its order',
+    ui.shapes.join(',') === ui.moduleShapes.join(','),
+    ui.shapes.join(',') + ' vs ' + ui.moduleShapes.join(','));
+  check('...and that list is the eight this version makes',
+    ui.shapes.join(',') === 'sphere,box,cylinder,cone,tube,torus,capsule,ellipsoid',
+    ui.shapes.join(','));
   check('nso_stock.js, nso_printer.js and nso_thickness.js are all loaded by index.html',
     ui.modules.stock && ui.modules.printer && ui.modules.thickness);
   check('the build-volume resolver and the axis detector are reachable from the page',
@@ -130,6 +139,35 @@ withApp(async (page, logs) => {
   check('a cylinder shows it, labelled h/d', pCyl.shown && pCyl.label === 'h/d', pCyl.label);
   check('...and both re-enable Match', !pBox.matchDisabled && !pCyl.matchDisabled);
 
+  /* Every added shape, in the rendered page: the box is shown, its label is
+     what that shape's second measurement is actually called, and Match is
+     offered exactly where a height over a diameter can be read off a bounding
+     box. A torus's is a tube radius over a ring radius, which no bounding box
+     can say, so it is the one added shape that disables Match. */
+  const LABELS = { cone: 'h/d[:taper]', tube: 'h/d[:wall]', torus: 'tube/ring',
+                   capsule: 'h/d', ellipsoid: 'h/d' };
+  for (const shape of Object.keys(LABELS)) {
+    const p = await propRow(shape);
+    check('a ' + shape + ' shows the box, labelled ' + LABELS[shape],
+      p.shown && p.label === LABELS[shape], p.label);
+    const wantMatch = (shape !== 'torus');
+    check('...and Match is ' + (wantMatch ? 'offered' : 'disabled') + ' for it',
+      p.matchDisabled !== wantMatch, 'disabled: ' + p.matchDisabled);
+  }
+  /* Switching to a shape that cannot match must CLEAR the tick, not only grey
+     it out: a ticked-but-disabled box would be a press that refuses for a
+     reason the card is no longer showing. */
+  const cleared = await page.evaluate(() => {
+    const sel = document.getElementById('sel-stock-shape');
+    const m = document.getElementById('chk-stock-match');
+    sel.value = 'cylinder'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+    m.checked = true;
+    sel.value = 'torus'; sel.dispatchEvent(new Event('change', { bubbles: true }));
+    return { checked: m.checked, disabled: m.disabled };
+  });
+  check('a ticked Match is cleared, not just greyed, when the shape cannot use it',
+    !cleared.checked && cleared.disabled, JSON.stringify(cleared));
+
   console.log('\n=== 2. a click really puts a sphere on the plate ===');
   const before = await modelCount(page);
   await setFields(page, { 'sel-stock-shape': 'sphere', 'inp-stock-height': 60,
@@ -155,9 +193,9 @@ withApp(async (page, logs) => {
     /shell/.test(await statusOf(page)) && /waste/.test(await statusOf(page)), await statusOf(page));
   check('the piece is named for what it is', /^stock_sphere_60mm/.test(sph.name), sph.name);
 
-  console.log('\n=== 3. box and cylinder, same target, same material ===');
+  console.log('\n=== 3. every other shape, same target, same material ===');
   const made = {};
-  for (const shape of ['box', 'cylinder']) {
+  for (const shape of ['box', 'cylinder', 'cone', 'tube', 'torus', 'capsule', 'ellipsoid']) {
     const n = await modelCount(page);
     await setFields(page, { 'sel-stock-shape': shape, 'inp-stock-height': 60,
       'inp-stock-radius': null, 'inp-stock-prop': null });
@@ -176,15 +214,72 @@ withApp(async (page, logs) => {
   }
   check('a box for a 60 mm target is 12 triangles and nothing more',
     made.box.tris === 12, made.box.tris + ' triangles');
-  /* The whole claim of the extraction, visible on the plate: three different
+  /* A torus and a tube have a hole through them, and on the plate that is
+     visible as a bounding box wider than it is tall for the torus - the one
+     shape here that can never be as tall as it is wide, at any tube ratio. */
+  /* THE BBOX HERE IS THE APP'S, AND THE APP IS Y-UP. handleFiles rotates the
+     Z-up raw soup by -90 degrees about X on the way in, so a piece's HEIGHT is
+     size.y on the plate - the same reading section 5's 4 : 2 : 1 box gets. */
+  check('a torus comes off the plate wider than it is tall, as only a torus can',
+    made.torus.size.y < made.torus.size.x,
+    made.torus.size.y + ' tall vs ' + made.torus.size.x + ' across');
+  check('a capsule comes off twice as tall as it is wide - its ratio is 2 by default',
+    Math.abs(made.capsule.size.y / made.capsule.size.x - 2) < 1e-3,
+    (made.capsule.size.y / made.capsule.size.x).toFixed(4));
+
+  /* The whole claim of the extraction, visible on the plate: eight different
      shapes, one material figure. The meshes differ by their own inscribed
-     polygon deficits and nothing else, so 0.1% is generous slack on a
-     statement that is exact in the profile. */
-  const vols = [sph.volume, made.box.volume, made.cylinder.volume];
+     polygon deficits and nothing else - the box is exact and the torus is the
+     furthest under, by the 0.0714% finding 1 measures, so the spread across
+     all eight is that deficit and not slack in this check. */
+  const vols = [sph.volume].concat(Object.keys(made).map(k => made[k].volume));
   const spread = (Math.max(...vols) - Math.min(...vols)) / Math.max(...vols);
-  check('all three hold the same material for the same target, to within their tessellation',
-    spread < 1e-3, vols.map(v => v.toFixed(1)).join(' / ') + ' mm^3 (' +
+  check('all eight hold the same material for the same target, to within their tessellation',
+    spread < 2e-3, vols.map(v => v.toFixed(1)).join(' / ') + ' mm^3 (' +
     (spread * 100).toFixed(3) + '% spread)');
+  check('...and the spread is the torus\'s own meridian deficit, nothing else',
+    Math.abs(spread - (1 - made.torus.volume / made.box.volume)) < 1e-9,
+    (spread * 100).toFixed(4) + '% vs the torus\'s ' +
+    ((1 - made.torus.volume / made.box.volume) * 100).toFixed(4) + '% under the exact box');
+
+  /* And the shape-specific box really reaches the module through the card: a
+     cone with a taper typed into it comes back a frustum, not a point. */
+  {
+    const n = await modelCount(page);
+    await setFields(page, { 'sel-stock-shape': 'cone', 'inp-stock-height': 60,
+      'inp-stock-radius': null, 'inp-stock-prop': '2:0.5' });
+    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+    await page.click('#btn-stock-make');
+    await page.waitForFunction(k => state.models.length > k, n, { timeout: 30000 });
+    await selectModel(page, await page.evaluate(() => state.models[state.models.length - 1].id));
+    const frustum = await measure(page);
+    const sizing = await page.evaluate(() => window.nsoStockReadUI());
+    check('a "2:0.5" in the shape box reaches the module as ratio 2 and taper 0.5',
+      sizing.opts && sizing.opts.ratio === 2 && sizing.opts.taper === 0.5,
+      JSON.stringify(sizing.opts));
+    check('...and the piece it builds is a closed frustum, twice as tall as it is wide',
+      frustum.open === 0 && frustum.nm === 0 &&
+      Math.abs(frustum.size.y / frustum.size.x - 2) < 1e-3,
+      JSON.stringify(frustum.size));
+    /* An out-of-range taper is refused, and it is refused where the ranges
+       live: the card parses "2:3" perfectly well - two numbers is two numbers
+       - and nso_stock.js is what knows that a taper of 3 is not a cone. The
+       refusal names the shape it would be instead, and nothing lands. */
+    const n2 = await modelCount(page);
+    const bad = await page.evaluate(() => {
+      const el = document.getElementById('inp-stock-prop');
+      el.value = '2:3';
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      return { read: window.nsoStockReadUI(), run: window.nsoStockRun(null) };
+    });
+    check('the card parses "2:3" and hands it on - ranges are the module\'s to rule on',
+      !bad.read.error && bad.read.opts.taper === 3, JSON.stringify(bad.read.opts || bad.read.error));
+    check('...and the module refuses a taper of 3, naming what it would have to be',
+      bad.run && bad.run.ok === false && /taper/.test(bad.run.reason),
+      (bad.run && bad.run.reason || '').slice(0, 110));
+    check('...with nothing added to the plate', (await modelCount(page)) === n2,
+      (await modelCount(page)) + ' vs ' + n2);
+  }
 
   console.log('\n=== 4. the waste margin is a real control, not a constant ===');
   {
