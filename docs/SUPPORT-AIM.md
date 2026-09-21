@@ -272,6 +272,16 @@ is the whole objective.
    search. Both belong in the next ticket, **together** — that pairing is the
    finding, not the restriction.
 
+   **The rest of it landed later.** `nso_support_tree.js`
+   (`NSO_SupportTree`, `docs/SUPPORT-TREE.md`) is the path search and the
+   attachment: it derives the contact points an overhang needs from the
+   overhang's own geometry, computes where the trunk has to stop, calls
+   `aim()` for the trunk and `NSO_PathSweep` for every branch, and unions the
+   lot with `NSO_unionSoups`. It builds **one** trunk and its fan; a field of
+   trunks is still item 3 below. It does not route around a blockage either —
+   a branch whose line is blocked is still refused, by rail as well as by
+   axis.
+
    **Half of that landed in the same merge.** `nso_path_sweep.js`
    (`NSO_PathSweep`, `docs/CURVING-PATH.md`) is a mitred polyline sweep built
    on Extend's correctness argument carried round a corner, and it is the
@@ -290,11 +300,24 @@ is the whole objective.
 3. **Support density / layout.** One region gets one strut, aimed at one point.
    How many struts a large overhang wants, and where they sit relative to each
    other, is a layout question this file does not ask.
+
+   **How many is now answered**, by `nso_support_tree.js`: a square lattice at
+   a span measured off a real Bambu tree support, topped up until the region
+   is covered, with the achieved covering radius reported. **Where a field of
+   trunks should stand relative to each other is still open** — that module
+   builds one trunk, and when one is not enough it refuses and names how many
+   the region would take.
 4. **Bridging.** A ceiling spanning two walls is flagged whenever nothing sits
    under it, because nothing sits under it. Whether the slicer could bridge it
    unsupported is a span-and-material judgement no angle test can make. Callers
    wanting it gate on `region.spanMm` themselves; detection reports the span and
    takes no view.
+
+   `nso_support_tree.js` is that caller, and the view it takes is a **contact
+   pitch** rather than a droop model — because the reference does not contain
+   a droop model either. Bambu never lets anything span air: the 67 mm
+   `Bridge` moves in `fixtures/3mf/tabletop.gcode.3mf` are all bridging over
+   the support interface directly beneath them. See docs/SUPPORT-TREE.md §1.
 
 ---
 

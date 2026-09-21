@@ -5,6 +5,7 @@ __pycache__/
 node_modules/
 tools/wheel-out/
 tools/support-aim-out/
+tools/support-tree-out/
 tools/stock-out/
 tools/assemble-out/
 tools/integration-out/

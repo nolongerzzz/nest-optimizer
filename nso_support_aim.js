@@ -91,6 +91,15 @@
       modules are parked unwired, which is the right order: the primitive
       first, the routing that drives it second. See docs/CURVING-PATH.md.
 
+      AND THE OTHER HALF LANDED LATER: nso_support_tree.js (NSO_SupportTree,
+      docs/SUPPORT-TREE.md) is the routing and the attachment. It derives the
+      contact points an overhang needs from the overhang's own geometry,
+      computes where a trunk has to stop, calls aim() below for the trunk and
+      NSO_PathSweep for every branch, and unions them with NSO_unionSoups. It
+      still does not route around a blockage - a blocked branch is refused
+      there too, by rail as well as by axis - and it builds ONE trunk. A field
+      of trunks is still OUT OF SCOPE 3 below.
+
    2. SUPPORT INTERFACE / CONTACT GEOMETRY. The strut ends in its own flat
       cap. A breakaway tip, a contact layer, a tapered head that widens into
       the overhang - none of them are here. nso_seat_surface.js deferred the
@@ -100,6 +109,10 @@
    3. SUPPORT DENSITY / LAYOUT. One region gets one strut, aimed at one point.
       How many struts a large overhang wants, and where they should sit
       relative to each other, is a layout question this file does not ask.
+      HOW MANY is now answered by nso_support_tree.js, at a span measured off
+      a real Bambu tree support. WHERE A FIELD OF TRUNKS SHOULD STAND is not:
+      that module builds one trunk, and refuses by name - naming the count -
+      when one is not enough.
 
    4. BRIDGING. A ceiling spanning two walls is flagged as an overhang here
       whenever nothing sits under it, because nothing sits under it. Whether
