@@ -7,7 +7,7 @@ which now calls it, and the app layer after `app-fit.js`, whose
 `NSO_fitCurrentPrinter()` it uses.
 
 ```
-node tools/nso_stock_test.js             headless: the extraction, the three shapes, the gates
+node tools/nso_stock_test.js             headless: the extraction, the eight shapes, the gates
 node tools/nso_stock_canonical_check.js  canonical checker over every generated piece
 node tools/nso_wire_stock_test.js        the real app, real clicks, real refusals
 ```
@@ -24,8 +24,14 @@ right size for the piece you mean to make.
 |---|---|
 | the target's **height** (and radius, and wall) | how much material that piece needs — Pappus's centroid theorem on a thin shell |
 | a **waste margin** | how much more than that to start with |
-| a **shape** — sphere, box or cylinder | the one measurement that shape needs to hold exactly that much |
+| a **shape** — one of eight | the one measurement that shape needs to hold exactly that much |
 | the **plate** you are pointed at | whether any of it can physically be printed, *before* anything is generated |
+
+The eight shapes are **sphere, box, cylinder, cone, tube, torus, capsule and
+ellipsoid**. Only the last arrow differs between them; the estimate, the
+margin and the plate gate are one piece of arithmetic that does not know what
+shape it is for. Which shapes are *eligible* to be on that list, and which are
+deferred and why, is audited in "Which shapes are cheap" below.
 
 ## Where it came from
 
@@ -87,19 +93,136 @@ With `need` mm³ of stock to make:
 | sphere | `need = 4/3 π a³` | `a = ∛(3·need / 4π)` |
 | box | sides in proportion `x:y:z`, scale `s`; `need = s³·x·y·z` | `s = ∛(need / xyz)` |
 | cylinder | ratio `k = h/2r`, so `h = 2kr`; `need = 2πk r³` | `r = ∛(need / 2πk)` |
+| cone | `k` as above, taper `t = rTop/r ∈ [0,1)`; `need = (2πk/3)(1+t+t²) r³` | `r = ∛(3·need / 2πk(1+t+t²))` |
+| tube | `k` as above, wall fraction `w ∈ (0,1)` of the outer radius; `need = 2πk(1−(1−w)²) r³` | `r = ∛(need / 2πk(1−(1−w)²))` |
+| torus | tube ratio `q = a/R ∈ (0,1)`; `need = 2π²R a² = 2π²q² R³` | `R = ∛(need / 2π²q²)` |
+| capsule | `k = H/2r`, strictly `> 1`; barrel `2r(k−1)` plus two caps; `need = 2π(k − ⅓) r³` | `r = ∛(need / 2π(k − ⅓))` |
+| ellipsoid | `k` as above, semi-axes `r, r, c` with `c = kr`; `need = 4/3 πk r³` | `r = ∛(3·need / 4πk)` |
 
-All three are exact: the primitive's analytic volume **is** `need`, to the last
-bit the cube root allows, asserted per shape rather than trusted to the algebra.
+**Every one is exact**: the primitive's analytic volume **is** `need`, to the
+last bit the cube root allows, asserted per shape rather than trusted to the
+algebra. That exactness is the entry fee — see "Which shapes are cheap".
 
-**The second measurement, for the two shapes that have one**, comes from one of
-three places, in order:
+### Where the second measurement comes from
 
-1. **explicit** — `proportions: {x, y, z}` for a box, `ratio` for a cylinder;
+Five shapes take a **height over a diameter**, and all five read it the same
+way, through one `ratioFor()`:
+
+1. **explicit** — `ratio`;
 2. **a reference piece** — `like: rawTris`, read through
    `NSO_extendDetectAxis` (see finding 4);
-3. **the target's own bounding box** — `2R × 2R × H` for a box, `H / 2R` for a
-   cylinder. A default that needs no inventing, because it is the thing being
-   aimed at rather than a number picked to look reasonable.
+3. **the target's own** — `H / 2R`. A default that needs no inventing, because
+   it is the thing being aimed at rather than a number picked to look
+   reasonable.
+
+A **box**'s second measurement is three numbers rather than one and keeps its
+own copy of that order, ending at the target's own bounding box `2R × 2R × H`.
+
+Three second measurements are **not** a height over a diameter and take a
+stated default rather than the target's proportions, because the target has
+nothing to say about them:
+
+| option | shape | default | why not the target's |
+|---|---|---|---|
+| `taper` | cone | `0` — a true point | the target has a height and a radius, not a draft angle |
+| `tubeWall` | tube | `0.25` of the outer radius | likewise: the target's own wall is the *finished piece's*, not the blank's |
+| `tubeRatio` | torus | `0.35` | **a torus is never as tall as it is wide** — `h/d = q/(1+q) < 1` for every legal `q` — so there is no `H/2R` to read, at any size |
+
+A **capsule** is where the two rules meet. It cannot be as short as it is wide
+either (at `h/d = 1` it *is* a sphere), so it takes the target's own ratio only
+when the target is taller than it is wide, and `DEFAULTS.capsuleRatio = 2` when
+it is not — saying which in `ratio_from` either way. An explicitly asked-for
+ratio at or under 1 is **refused** rather than rounded up: that is somebody
+asking for something the shape cannot be.
+
+### Where a range ends is another shape, and is refused as one
+
+`taper = 1` is a cylinder. `tubeWall = 1` is a cylinder. `tubeRatio = 1` is a
+torus whose hole has closed up. `capsule` at `ratio = 1` is a sphere. All four
+are refused by name, because a second entry that makes the same solid as an
+existing one is two definitions that drift apart the moment either is edited.
+
+`ellipsoid` at `ratio = 1` is the exception and is **allowed**: a sphere is the
+*middle* of that continuous family rather than a second name at the end of it,
+and refusing the middle of a range is the worse surprise. It really is the same
+mesh — `profileSphere` delegates to `profileEllipsoid`, and the self-test
+compares the two soups float for float rather than taking it on trust.
+
+## Which shapes are cheap
+
+The audit this list came out of. The question asked of each candidate was not
+"would this be nice to have" but two narrower ones, both of which have to be
+yes:
+
+1. **Does its volume solve *exactly* for one defining measurement?** Not
+   "can its volume be computed" — every shape here can — but: given `need`
+   mm³, is there a closed form for the measurement that makes the volume come
+   out at exactly that? For everything on the list, the answer is a cube root.
+2. **Is its surface one `r`-as-a-function-of-`z` meridian?** If so, the
+   `revolve` that has been here since the Pottery Wheel already builds it, and
+   the addition is a profile and a formula rather than a mechanism.
+
+A shape that fails either one is deferred. Approximating the first would put a
+block on the plate that quietly holds the wrong amount of material, which is
+the whole thing this module exists not to do.
+
+### Built — cheap on both counts
+
+| shape | solves for | tessellation | notes |
+|---|---|---|---|
+| **cone** | cube root, and a truncated cone (a frustum) for free — the `(1+t+t²)` term is exactly 1 at `t = 0` | 4-point meridian | a true point's apex band is two coincident profile points, which the revolve already drops as degenerate |
+| **tube** | cube root | 5-point meridian | the first profile here whose loop never touches the axis, so it writes its closing segment down instead of leaving the revolve to infer one |
+| **torus** | cube root — Pappus again, this time on the primitive rather than the target | sampled circle | genus 1 |
+| **capsule** | cube root | two half-meridians and a barrel | `k > 1` strictly |
+| **ellipsoid** | cube root | sampled half-ellipse | `profileSphere` is its `c = r` case and delegates to it |
+
+Measured, at a 60 mm target needing **52929.553 mm³** at the default 30% margin:
+
+| shape | what you get | as built | tris | genus |
+|---|---|---|---|---|
+| `sphere` | radius 23.292 mm | 52915.383 (0.0268% under) | 18240 | 0 |
+| `box` | 37.546 × 37.546 × 37.546 mm | 52929.553 (exact) | 12 | 0 |
+| `cylinder` | radius 20.347 × 40.695 mm tall | 52929.553 (exact) | 384 | 0 |
+| `cone` | base radius 29.346 × 58.692 mm tall | 52929.553 (exact) | 192 | 0 |
+| `tube` | outer radius 26.803, bore 20.102, 53.606 mm tall | 52929.553 (exact) | 768 | **1** |
+| `torus` | ring radius 27.973, tube radius 9.791, 75.528 mm across | 52891.772 (0.0714% under) | 18432 | **1** |
+| `capsule` | radius 17.162 × 68.646 mm tall | 52923.885 (0.0107% under) | 18432 | 0 |
+| `ellipsoid` | radius 23.292 × 46.584 mm tall | 52915.383 (0.0268% under) | 18240 | 0 |
+
+The "as built" column is finding 1's second deficit and nothing else: a
+straight meridian is exact, a curved one is an inscribed polygon and comes out
+under. **The torus is under by exactly the polygon factor**, `0.999286206`,
+which is not a coincidence — Pappus on a regular n-gon inscribed in the tube
+circle puts its centroid at the circle's own centre, so the as-built torus is
+`n·sin(2π/n)/(2π)` of the true one, the same expression as the cross-section's
+evaluated at `profileN` instead of at `segments`. The self-test asserts that
+identity rather than the measured number.
+
+**Genus is a property of the shape, not a tolerance.** A tube and a torus have
+a hole through them, so their Euler characteristic is 0 and not 2. The
+canonical checker carries a per-shape `GENUS` table and asserts `2 − 2g`, so a
+sphere that came out with a handle in it still fails.
+
+### Deferred — and which of the two questions each one fails
+
+| candidate | exact closed form? | one meridian? | verdict |
+|---|---|---|---|
+| **rounded block** (box ⊕ sphere) | volume is closed-form — `lwh + 2r(lw+lh+wh) + πr²(l+w+h) + 4/3 πr³` — but solving it for a *scale* with a **fixed** fillet radius is a general cubic, not a cube root | no — needs a real fillet mesher | **deferred, both counts** |
+| **superellipsoid** | needs the Beta function. A closed form only if a special function counts as one; it does not here | yes, in principle | deferred |
+| **swept / helical** (coil, screw, spring) | no — the swept volume has no closed form once the sweep overlaps itself, so it needs real numerical estimation | no | **deferred, both counts** |
+| **lattice / gyroid block** | no closed form at all; the volume fraction is *measured*, not solved | no | **deferred, both counts** |
+| **Platonic solid, n-gon prism, pyramid** | **yes** — each is `c·a³` for a known `c` | no — each needs its own vertex table | deferred on tessellation alone. A prism is also very nearly `cylinder` at a low segment count, which is a reason to want it spelled that way rather than added twice |
+| **stock shaped like a reference *mesh*** | not a primitive at all | n/a | out of scope 3, unchanged |
+
+The two rows marked "both counts" are the ones that would need genuine
+numerical estimation — Monte-Carlo or voxel integration of the swept or
+patterned volume, then a solve by iteration rather than by formula. That is a
+real ticket with a real tolerance to argue about, and it is deliberately not
+folded in here as a cube root with a fudge on it.
+
+Nothing deferred is half-built: none of these names generates anything, and
+asking for one by name gets the ordinary unknown-shape refusal, which the
+self-test checks for each of them individually.
 
 ## The waste margin is a parameter
 
@@ -162,16 +285,26 @@ Pappus arithmetic.
 ## API
 
 ```
-NSO_Stock.SHAPES                          ['sphere', 'box', 'cylinder']
-NSO_Stock.DEFAULTS                        wall 3.0, waste 0.30, aspect 0.5, segments 96, profileN 96
+NSO_Stock.SHAPES                          sphere, box, cylinder, cone, tube,
+                                          torus, capsule, ellipsoid
+NSO_Stock.DEFAULTS                        wall 3.0, waste 0.30, aspect 0.5,
+                                          segments 96, profileN 96, taper 0,
+                                          tubeWall 0.25, torusTube 0.35,
+                                          capsuleRatio 2
 NSO_Stock.floor(nozzle)                   -> mm, via NSO_Thickness.floorFor
 NSO_Stock.shell(opts)                     -> the Pappus thin-shell estimate alone
 NSO_Stock.size(opts)                      -> the full sizing report, no geometry
 NSO_Stock.make(opts)                      -> { ok, reason, soup, sizing, fit, warnings }
 NSO_Stock.proportionsFrom(rawTris, opts)  -> proportions off a reference piece
 NSO_Stock.revolve(loop, segments, opts)   -> a closed meridian loop, revolved
+NSO_Stock.polygonFactor(segments)         -> n*sin(2pi/n)/(2pi)
 NSO_Stock.profileSphere(a, n)             -> the sphere meridian
 NSO_Stock.profileCylinder(r, h)           -> the cylinder meridian
+NSO_Stock.profileCone(r, h, rTop)         -> the cone / frustum meridian
+NSO_Stock.profileTube(rOut, rIn, h)       -> the tube meridian, closed off the axis
+NSO_Stock.profileTorus(R, a, n)           -> the torus meridian, closed off the axis
+NSO_Stock.profileCapsule(r, h, n)         -> the capsule meridian
+NSO_Stock.profileEllipsoid(r, c, n)       -> the spheroid meridian
 NSO_Stock.boxSoup(sx, sy, sz, opts)       -> twelve triangles, centred, on z = 0
 ```
 
@@ -190,16 +323,23 @@ a solid-of-revolution volume integral is an `r²` term, so the mesh holds
 `n·sin(2π/n)/(2π)` of the solid — `0.999286…` at n = 96. That is
 `polygon_factor`, and a box's is exactly `1`: six flat faces **are** the solid.
 
-A sphere has a second, independent deficit. Its *meridian* is also an n-gon,
-inscribed in a semicircle, so the solid as built is under the sphere that was
-asked for by a further **0.0268%** at n = 96. A cylinder's meridian is four
-straight segments and a box's is not a meridian at all, so for those two the
-as-built figure *is* the analytic one.
+A **curved meridian** has a second, independent deficit. It is also an n-gon,
+inscribed in the curve, so the solid as built is under the one that was asked
+for by a further amount — 0.0268% for a sphere or an ellipsoid at n = 96,
+0.0107% for a capsule (half its meridian is straight), and for a torus exactly
+the polygon factor again. A **straight** meridian is exact, so the cylinder,
+the cone and the tube — and the box, which is not a meridian at all — have no
+second deficit.
 
 | shape | analytic = `need` | as built | polygon factor |
 |---|---|---|---|
 | sphere | 52929.553 mm³ | 52915.383 mm³ (0.0268% under) | 0.999286 |
+| ellipsoid | 52929.553 mm³ | 52915.383 mm³ (0.0268% under) | 0.999286 |
+| capsule | 52929.553 mm³ | 52923.885 mm³ (0.0107% under — half its meridian is straight) | 0.999286 |
+| torus | 52929.553 mm³ | 52891.772 mm³ (0.0714% under — exactly the polygon factor again) | 0.999286 |
 | cylinder | 52929.553 mm³ | 52929.553 mm³ (exact) | 0.999286 |
+| cone | 52929.553 mm³ | 52929.553 mm³ (exact) | 0.999286 |
+| tube | 52929.553 mm³ | 52929.553 mm³ (exact) | 0.999286 |
 | box | 52929.553 mm³ | 52929.553 mm³ (exact) | 1 |
 
 Keeping them apart matters because the mesh holds `built_volume ×
@@ -299,13 +439,15 @@ A big enough margin does enclose it, and that is reported the same way. The
 canonical checker cross-checks the claim against the bounding box it measured
 off the mesh, so a block cannot claim to enclose a target it does not.
 
-### 6. Three shapes, one material figure — visible on the plate
+### 6. Eight shapes, one material figure — visible on the plate
 
 The claim of the whole extraction, measured end to end in the real app: a
 sphere, a box and a cylinder generated for the same 60 mm target come off the
 plate holding **52877.6 / 52929.6 / 52891.8 mm³** — a 0.098% spread, which is
 entirely their own tessellation deficits from finding 1 and is exactly zero in
-the profile.
+the profile. The five shapes added since land in the same band, for the same
+reason and by the same arithmetic: the spread across all eight is their
+`built_volume × polygon_factor` and nothing else.
 
 ## PAINT SCOPE: NONE for the create path, WHOLE-PIECE for the update path
 
@@ -434,8 +576,26 @@ The wheel's Ball starts a wheel *session* and bakes a vessel onto the
 selection; this puts a block on the plate. Different acts, different menus.
 
 The card is the shape selector, `H` / `R`, `W` / `%`, one shape-specific box
-whose label follows the selector (`x:y:z` for a box, `h/d` for a cylinder,
-hidden for a sphere), `N`, two checkboxes and the button. Adding the third menu
+whose label follows the selector, `N`, two checkboxes and the button. That one
+box carries every shape's second measurement, because all but one of eight
+fields would be blank at any moment:
+
+| shape | label | means |
+|---|---|---|
+| sphere | *hidden* | one measurement, nothing to proportion |
+| box | `x:y:z` | three proportions, any scale |
+| cylinder, capsule, ellipsoid | `h/d` | height over diameter |
+| cone | `h/d[:taper]` | …and optionally the top radius over the base radius |
+| tube | `h/d[:wall]` | …and optionally the wall as a fraction of the outer radius |
+| torus | `tube/ring` | the tube radius over the ring radius |
+
+That mapping lives in one table in `app-stock.js` (`PROP`), read by the parse,
+by the label and by the **Match selected piece** checkbox alike — Match is
+offered exactly where a height over a diameter can be read off a bounding box,
+so it is disabled and cleared for a sphere and for a torus. Adding a shape is
+a closed form and a meridian in `nso_stock.js`, a row in that table and an
+`<option>` in `index.html`; the self-test asserts the `<option>` list *is*
+`NSO_Stock.SHAPES`, in order, so the two cannot drift. Adding the third menu
 was a `--vp-menu-count` bump in `styles.css` and nothing else — the offsets
 were already derived from `--vp-menu-gap` and `--vp-menu-w` for exactly this,
 and `npm run overlay:test` measures the rendered strip and fails if a topbar
@@ -449,12 +609,14 @@ not through a bake-style `stockReplace` step, because nothing was replaced.
 
 ## Out of scope for this first version, named
 
-1. **Cones, tubes and rounded blocks.** Three shapes, each with one closed form
-   and one tessellation, is the whole of this version. A cone is two lines in
-   `profileCylinder`'s place and a tube is three; neither is here, because
-   neither has been asked for and an unused shape is an untested shape. The
-   revolve underneath takes any `r`-as-a-function-of-`z` meridian, so adding
-   one is a profile and a closed form, not a new mechanism.
+1. **The shapes that cannot solve a closed form.** Cones and tubes *were* on
+   this list and are now built, along with the torus, the capsule and the
+   ellipsoid — each turned out to be one exact closed form and one meridian,
+   which is the bar. What is still out and why is the table in "Which shapes
+   are cheap" above: the rounded block, the superellipsoid, swept and helical
+   shapes, lattice and gyroid blocks, and the polyhedra. None of them is
+   half-built, and asking for one by name gets the ordinary unknown-shape
+   refusal.
 2. **Placing the stock.** Everything is generated centred on the axis and
    resting on z = 0. Where it goes on the plate is the packer's business
    (`packModels` in `app-core.js`), and a piece that only fits the machine on

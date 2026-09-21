@@ -320,7 +320,7 @@ console.log('\n== 3. the waste margin is tunable, and it is real clay ==');
 /* =====================================================================
    4. Each shape solves its own closed form, exactly
    ===================================================================== */
-console.log('\n== 4. three shapes, three closed forms, all exact ==');
+console.log('\n== 4. one closed form per shape, every one exact ==');
 {
   const H = 80, R = 25, t = 2.5;
   const sph = S.size({ shape: 'sphere', height: H, radius: R, wall: t });
@@ -367,6 +367,103 @@ console.log('\n== 4. three shapes, three closed forms, all exact ==');
   const nope = S.size({ shape: 'pyramid', height: H });
   check('an unknown shape refuses, and names the ones there are',
     !nope.ok && /sphere, box, cylinder/.test(nope.reason), nope.reason);
+
+  /* ------------------------------------------------------------------
+     THE FIVE ADDED SHAPES, each against its closed form written out here
+     rather than read back off the module. Every one of them is on the list
+     because it solves EXACTLY - see the audit in docs/STOCK.md - so "exact"
+     is the assertion, not "close".
+     ------------------------------------------------------------------ */
+  const cone = S.size({ shape: 'cone', height: H, radius: R, wall: t });
+  check('cone: pi r^2 h / 3 is the material figure',
+    Math.abs(Math.PI * cone.measure.radius * cone.measure.radius * cone.measure.height / 3 -
+      cone.need_volume) < 1e-6, cone.measure_text);
+  const frust = S.size({ shape: 'cone', height: H, radius: R, wall: t, taper: 0.4 });
+  const fr = frust.measure.radius, ft = frust.measure.top_radius;
+  check('...and a truncated one is (pi h / 3)(r^2 + r*rTop + rTop^2), same solve',
+    Math.abs(Math.PI * frust.measure.height / 3 * (fr * fr + fr * ft + ft * ft) -
+      frust.need_volume) < 1e-6, frust.measure_text);
+  check('...with the taper really held: top radius / base radius is what was asked',
+    Math.abs(ft / fr - 0.4) < 1e-12, (ft / fr).toFixed(12));
+
+  const tube = S.size({ shape: 'tube', height: H, radius: R, wall: t });
+  const to = tube.measure.radius, ti = tube.measure.inner_radius;
+  check('tube: pi (rOut^2 - rIn^2) h is the material figure',
+    Math.abs(Math.PI * (to * to - ti * ti) * tube.measure.height - tube.need_volume) < 1e-6,
+    tube.measure_text);
+  check('...and the wall really is the asked-for fraction of the outer radius',
+    Math.abs((to - ti) / to - S.DEFAULTS.tubeWall) < 1e-12,
+    ((to - ti) / to).toFixed(12) + ' vs ' + S.DEFAULTS.tubeWall);
+
+  const tor = S.size({ shape: 'torus', height: H, radius: R, wall: t });
+  check('torus: 2 pi^2 R a^2 is the material figure - Pappus on the primitive now',
+    Math.abs(2 * Math.PI * Math.PI * tor.measure.ring_radius *
+      tor.measure.tube_radius * tor.measure.tube_radius - tor.need_volume) < 1e-6,
+    tor.measure_text);
+  check('...and a torus is never as tall as it is wide, at any legal tube ratio',
+    [0.05, 0.35, 0.8, 0.99].every(q => {
+      const r = S.size({ shape: 'torus', height: H, radius: R, wall: t, tubeRatio: q });
+      return r.ok && r.size.z < r.size.x;
+    }), 'which is why it takes a stated default and not the target\'s h/d');
+
+  const cap = S.size({ shape: 'capsule', height: H, radius: R, wall: t, ratio: 2.5 });
+  const cr = cap.measure.radius;
+  check('capsule: pi r^2 * barrel + 4/3 pi r^3 is the material figure',
+    Math.abs(Math.PI * cr * cr * cap.measure.barrel + 4 / 3 * Math.PI * cr * cr * cr -
+      cap.need_volume) < 1e-6, cap.measure_text);
+  check('...and its total height over its diameter is the ratio asked for',
+    Math.abs(cap.measure.height / cap.measure.diameter - 2.5) < 1e-12,
+    (cap.measure.height / cap.measure.diameter).toFixed(12));
+
+  const ell = S.size({ shape: 'ellipsoid', height: H, radius: R, wall: t, ratio: 1.6 });
+  check('ellipsoid: 4/3 pi r^2 c is the material figure',
+    Math.abs(4 / 3 * Math.PI * ell.measure.radius * ell.measure.radius * ell.measure.semi_height -
+      ell.need_volume) < 1e-6, ell.measure_text);
+
+  check('every one of the eight reports its analytic volume as exactly the material figure',
+    S.SHAPES.every(shape => {
+      const r = S.size({ shape, height: H, radius: R, wall: t });
+      return r.ok && Math.abs(r.volume - r.need_volume) / r.need_volume < 1e-12;
+    }), S.SHAPES.join(', '));
+
+  /* A SPHERE IS THE k = 1 ELLIPSOID, and that is not a resemblance: the
+     sphere profile delegates to the ellipsoid one, so the two come out the
+     same float32 bytes. If they ever stop doing so, one of them has grown a
+     second copy of the arithmetic. */
+  {
+    const a = S.make({ shape: 'sphere', height: 60 }).soup;
+    const e = S.make({ shape: 'ellipsoid', height: 60, ratio: 1 }).soup;
+    let same = a.length === e.length;
+    if (same) for (let i = 0; i < a.length; i++) if (a[i] !== e[i]) { same = false; break; }
+    check('a sphere and an ellipsoid at ratio 1 are bit-identical, not merely alike',
+      same, (a.length / 9) + ' triangles, ' + a.length + ' floats compared');
+  }
+
+  /* The ranges, and the shape each end of them turns into. Refusing a second
+     name for a shape that already has one is the point - two entries that
+     make the same solid drift apart the moment one of them is edited. */
+  const conePt = S.size({ shape: 'cone', height: H, taper: 1 });
+  check('a cone taper of 1 refuses - that is a cylinder, which has its own entry',
+    !conePt.ok && /cylinder/.test(conePt.reason), conePt.reason.slice(0, 96));
+  const tubeSolid = S.size({ shape: 'tube', height: H, tubeWall: 1 });
+  check('a tube wall of the whole radius refuses - no hole left, so it is a cylinder',
+    !tubeSolid.ok && /cylinder/.test(tubeSolid.reason), tubeSolid.reason.slice(0, 96));
+  const torHorn = S.size({ shape: 'torus', height: H, tubeRatio: 1 });
+  check('a torus tube ratio of 1 refuses - the hole has closed up',
+    !torHorn.ok && /hole closes up/.test(torHorn.reason), torHorn.reason.slice(0, 96));
+  const capBall = S.size({ shape: 'capsule', height: H, radius: R, wall: t, ratio: 1 });
+  check('an asked-for capsule ratio of 1 refuses - at 1 it IS a sphere',
+    !capBall.ok && /it is a sphere/.test(capBall.reason), capBall.reason.slice(0, 110));
+  const ellBall = S.size({ shape: 'ellipsoid', height: H, radius: R, wall: t, ratio: 1 });
+  check('...but an ELLIPSOID at ratio 1 is allowed: a sphere is the middle of that family',
+    ellBall.ok, ellBall.measure_text);
+
+  /* A squat target has no capsule ratio to give, so the stated default stands
+     in - and says in ratio_from that it did, rather than looking like a read. */
+  const squat = S.size({ shape: 'capsule', height: 60 });          // target h/d = 1
+  check('a capsule for a target no taller than it is wide falls to the stated default',
+    squat.ok && squat.measure.ratio === S.DEFAULTS.capsuleRatio &&
+    /stated default/.test(squat.measure.ratio_from), squat.measure.ratio_from);
 }
 
 /* =====================================================================
@@ -552,11 +649,37 @@ console.log('\n== 7. one tessellator - the stock sphere IS the wheel\'s ball =='
      segments and a box is not revolved at all, so for those two the solid as
      built IS the figure asked for; only the sphere's meridian is itself an
      inscribed polygon, and only it is under. */
-  for (const shape of ['box', 'cylinder']) {
+  for (const shape of ['box', 'cylinder', 'cone', 'tube']) {
     const r = S.size({ shape, height: 70, radius: 22, wall: 3 });
     check(shape + ': as-built IS the analytic volume - its profile is exact',
       Math.abs(r.built_volume - r.volume) / r.volume < 1e-12,
       r.built_volume.toFixed(9));
+  }
+  /* And the other way for the curved ones: a meridian that samples a curve is
+     an inscribed polygon, so it is UNDER, and it is under by an amount that
+     shrinks as the profile gets finer. Both halves are the assertion - "under"
+     alone would also pass for a mesh that was simply wrong. */
+  for (const shape of ['sphere', 'ellipsoid', 'capsule', 'torus']) {
+    const coarse = S.size({ shape, height: 70, radius: 22, wall: 3 });
+    const fine = S.size({ shape, height: 70, radius: 22, wall: 3, profileN: 960 });
+    check(shape + ': a curved meridian is UNDER, and a finer one closes the gap',
+      coarse.built_volume < coarse.volume &&
+      fine.built_volume > coarse.built_volume && fine.built_volume < fine.volume,
+      ((1 - coarse.built_volume / coarse.volume) * 100).toFixed(4) + '% under at 96, ' +
+      ((1 - fine.built_volume / fine.volume) * 100).toFixed(4) + '% at 960');
+  }
+  /* A TORUS IS UNDER BY EXACTLY THE POLYGON FACTOR, which is not a
+     coincidence and is the one place the two deficits meet numerically:
+     Pappus on a regular n-gon inscribed in the tube circle puts its centroid
+     at the circle's own centre, so the as-built torus is n*sin(2pi/n)/(2pi)
+     of the true one - the same expression as the cross-section's, evaluated
+     at profileN rather than at segments. */
+  {
+    const t = S.size({ shape: 'torus', height: 70, radius: 22, wall: 3 });
+    check('torus: as-built / analytic is exactly the polygon factor at profileN',
+      Math.abs(t.built_volume / t.volume - S.polygonFactor(t.profileN)) < 1e-12,
+      (t.built_volume / t.volume).toFixed(12) + ' vs ' +
+      S.polygonFactor(t.profileN).toFixed(12));
   }
   const sp96 = S.size({ shape: 'sphere', height: 60 });
   check('sphere: the as-built solid is a shade UNDER the sphere asked for',
@@ -634,19 +757,34 @@ console.log('\n== 8. real generated pieces, every shape, several sizes ==');
 /* =====================================================================
    9. Out of scope, refused by name
    ===================================================================== */
-console.log('\n== 9. what this first version does not do, and says so ==');
+console.log('\n== 9. what this version does not do, and says so ==');
 {
   const src = fs.readFileSync(path.join(ROOT, 'nso_stock.js'), 'utf8');
-  check('cones, tubes and rounded blocks are named as out of scope in the source',
-    /CONES, TUBES AND ROUNDED BLOCKS/.test(src));
+  check('the shapes that cannot solve a closed form are named as out of scope',
+    /THE SHAPES THAT CANNOT SOLVE A CLOSED FORM/.test(src));
+  check('...and each one is named with WHY, not just listed',
+    /rounded block/.test(src) && /general cubic/.test(src) &&
+    /superellipsoid/.test(src) && /Beta function/.test(src) &&
+    /lattice \/ gyroid/.test(src) && /polyhedra/.test(src) && /vertex table/.test(src),
+    'rounded block, superellipsoid, swept/helical, lattice/gyroid, polyhedra');
+  check('...and the bar for being in the list at all is stated once, in the source',
+    /solves EXACTLY for one defining measurement/.test(src));
   check('placing the stock is named as somebody else\'s job',
     /PLACING THE STOCK/.test(src));
   check('sizing from a target MESH is named as a different ticket',
     /SIZING FROM A TARGET MESH/.test(src));
   check('the revolution estimate\'s shortfall on a box target is named, with its direction',
     /A SHELL ESTIMATE FOR A NON-REVOLVED TARGET/.test(src) && /18-20% UNDER/.test(src));
-  check('there is no cone, torus or tube generator hiding in here',
-    !/function\s+(profileCone|profileTorus|profileTube)/.test(src));
+  /* The deferred shapes are deferred, not half-built: nothing generates one,
+     and asking for one by name is an ordinary unknown-shape refusal rather
+     than a quiet fall through to something else. */
+  check('there is no rounded-block, superellipsoid or helix generator hiding in here',
+    !/function\s+(profileRoundedBox|roundedBoxSoup|profileSuperellipsoid|profileHelix|profileGyroid)/.test(src));
+  for (const nope of ['roundedbox', 'superellipsoid', 'helix', 'gyroid', 'pyramid', 'prism']) {
+    const r = S.size({ shape: nope, height: 60 });
+    check('"' + nope + '" is refused as an unknown shape, not silently made',
+      !r.ok && /unknown stock shape/.test(r.reason) && S.SHAPES.indexOf(nope) < 0);
+  }
   check('the module has no DOM and no app state, like nso_printer.js beside it',
     !/document\.|window\.[a-z]|getActiveModel|setStatus|\bstate\./.test(stripComments(src)));
 
@@ -664,10 +802,30 @@ console.log('\n== 9. what this first version does not do, and says so ==');
     !/Math\.cbrt|Math\.PI/.test(stripComments(app)));
 
   const doc = fs.readFileSync(path.join(ROOT, 'docs', 'STOCK.md'), 'utf8');
-  check('docs/STOCK.md names the deferred shapes', /cones?, tubes?/i.test(doc));
+  check('docs/STOCK.md carries the audit of which shapes are cheap',
+    /## Which shapes are cheap/.test(doc));
   check('...and declares the paint scope', /PAINT SCOPE:\s*NONE/.test(doc));
-  check('...and names the three shapes this version makes',
-    /sphere/i.test(doc) && /box/i.test(doc) && /cylinder/i.test(doc));
+  check('...and names every shape this version makes',
+    S.SHAPES.every(sh => new RegExp('\\b' + sh + '\\b', 'i').test(doc)),
+    S.SHAPES.filter(sh => !new RegExp('\\b' + sh + '\\b', 'i').test(doc)).join(', ') || 'all present');
+  check('...and names the deferred ones too, so the audit is not half a list',
+    /rounded block/i.test(doc) && /superellipsoid/i.test(doc) &&
+    /gyroid/i.test(doc) && /helic/i.test(doc));
+
+  /* The card and the module must offer the same shapes. Two lists that drift
+     apart show up as an <option> that refuses on the press. */
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const block = (html.match(/<select id="sel-stock-shape"[\s\S]*?<\/select>/) || [''])[0];
+  const opts = (block.match(/value="([a-z]+)"/g) || []).map(x => x.slice(7, -1));
+  check('index.html offers exactly NSO_Stock.SHAPES, in the same order',
+    opts.join(',') === S.SHAPES.join(','), opts.join(',') + ' vs ' + S.SHAPES.join(','));
+  /* And every shape with a second measurement has a row in app-stock.js's
+     PROP table - the sphere, which has none, is the one that must NOT. */
+  for (const sh of S.SHAPES) {
+    const has = new RegExp('^\\s*' + sh + ':\\s*\\{', 'm').test(app);
+    check('app-stock.js ' + (sh === 'sphere' ? 'has NO' : 'has a') + ' PROP row for ' + sh,
+      has === (sh !== 'sphere'));
+  }
 }
 
 fs.writeFileSync(path.join(OUT, 'manifest.json'), JSON.stringify(MANIFEST, null, 2));
