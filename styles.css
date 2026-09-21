@@ -11,6 +11,23 @@
   --warning: #f59e0b;
   --radius: 10px;
   --font: "Inter", system-ui, -apple-system, sans-serif;
+
+  /* The top-right menu gutter. The Finish and Wheel menus both live in the
+     viewport's top-right corner, and `.viewport-overlay-topbar` has to reserve
+     room for BOTH or its last button ends up underneath one of them and cannot
+     be clicked. Deriving all three offsets from these two numbers is the point:
+     they were three independent literals (8px, 80px, 88px), the 88px accounted
+     for one menu, and when the Wheel menu was added beside Finish nothing
+     widened it - so the Wheel sat on top of #btn-lock-pos. Add a third menu and
+     only --vp-menu-count changes.
+
+     This reserves --vp-menu-w PER MENU, so a menu whose label grows past that
+     width would under-reserve again. That is not left to inspection:
+     `npm run overlay:test` measures the rendered strip and fails if any topbar
+     button ends up under a menu. */
+  --vp-menu-gap: 8px;      /* margin at the edge, and between menus */
+  --vp-menu-w: 64px;       /* one menu summary: min-width 64px in .vp-menu */
+  --vp-menu-count: 1;      /* Finish. Wheel and Stock moved into the bar's Gen+ */
 }
 
 * {
@@ -188,6 +205,35 @@ select:focus, input:focus {
   gap: 4px;
 }
 
+.plate-grid-controls {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.plate-grid-controls .hint {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.plate-grid-controls select {
+  margin-bottom: 4px;
+}
+
+.plate-grid-snap-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.plate-grid-snap-row input {
+  width: auto;
+  margin: 0;
+}
+
 .plate-info {
   display: flex;
   justify-content: space-between;
@@ -295,6 +341,172 @@ select:focus, input:focus {
    so the card is the model index and Clone and nothing else. The list is a
    popover anchored under the button; the bar itself is pointer-events none,
    so both the button and the list have to opt back in. */
+/* ---- the top bar's dropdowns -------------------------------------------
+   The bar had grown to twenty-one controls in one row - two loads, Remove,
+   two rotates, seven pose buttons, six move buttons and two locks - beside a
+   sidebar holding Photo set, Size, Cut and Export. Nine dropdowns now stand
+   in for all of it: Import, Export, Rotate, Tip, Move, Gen+, Photo, Scale,
+   Cut.
+
+   Every control inside them is the ORIGINAL element - same id, same classes,
+   same handler, moved and not rebuilt - so app-core's enable/disable roster,
+   every binding and every test that reaches a control by id still finds it.
+   What changed is which box it sits in.
+
+   <details>, like the Finish menu's groups and the Wheel and Stock menus, so
+   there is one way a menu opens in this app and the drive checks already
+   know it. The summary wears .vp-bar-btn so a closed dropdown is the same
+   object as the plain bar buttons beside it. */
+.vp-top-menu {
+  pointer-events: auto;
+  position: relative;
+  display: inline-flex;
+}
+/* The class is doubled to out-specify `.vp-menu > summary`, which sizes the
+   viewport's icon menus at a 40px square. These summaries are bar buttons,
+   not icons: they carry a word, so they take .vp-bar-btn's height and let
+   their label set the width. Left as 40px squares the labels overflow their
+   own boxes and the bar reads as one smear of text. */
+.vp-top-menu.vp-top-menu > summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  width: auto;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.45);
+  background: rgba(15, 23, 42, 0.72);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  backdrop-filter: blur(10px);
+  box-shadow: none;
+}
+.vp-top-menu.vp-top-menu > summary::-webkit-details-marker { display: none; }
+/* The twisty, drawn rather than inherited - same shape the Finish groups use,
+   rotated a quarter turn because this menu opens downwards. */
+.vp-top-menu.vp-top-menu > summary::after {
+  content: "";
+  width: 0;
+  height: 0;
+  border-top: 4px solid currentColor;
+  border-left: 3.5px solid transparent;
+  border-right: 3.5px solid transparent;
+  opacity: 0.75;
+}
+.vp-top-menu.vp-top-menu[open] > summary {
+  border-color: #7dd3fc;
+  background: rgba(30, 58, 84, 0.92);
+}
+.vp-top-menu.vp-top-menu > summary:hover { border-color: #7dd3fc; }
+.vp-top-menu.vp-top-menu > summary:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 1px; }
+/* The panel. Anchored under its own button, not at the bar's left edge, and
+   allowed to be wider than the Finish column because what moved in here -
+   the Cut tool, the Export card - was built for the sidebar's width. It is
+   bounded and scrolls for the same reason the Finish menu is: a menu taller
+   than the window makes the PAGE scroll, which drags the canvas under the
+   header and sends the next click somewhere the user did not aim it. */
+.vp-top-menu > .vp-top-body {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: auto;
+  z-index: 95;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: max-content;
+  min-width: 190px;
+  max-width: 300px;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #3a4558;
+  background: rgba(15, 23, 42, 0.94);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 10px 24px rgba(0,0,0,0.45);
+}
+/* .vp-library wraps the From Library button and its list. It is inline-flex,
+   which put the two side by side the moment the list came back into flow -
+   the categories appeared in a narrow column to the RIGHT of the button and
+   ran past the panel's edge. In the dropdown they stack: button, then the
+   list under it, both the full width of the panel. */
+.vp-top-body .vp-library {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+/* The library list inside the Import dropdown.
+
+   It was built as a popover hanging off the old From Library bar button:
+   position:absolute, its own border, its own 320px scroll box. Inside the
+   Import panel that is wrong in a way that is invisible until you open it -
+   an absolutely positioned child is OUT OF FLOW, so it adds nothing to the
+   panel's height. The panel sized itself to the two buttons above it, 80px,
+   while holding 394px of list, and since the panel scrolls its own overflow
+   the list was clipped into an 80px slot you had to scroll to read.
+
+   In flow, the panel measures what it is actually holding and grows to it,
+   which is what a dropdown is supposed to do. Its own max-height and scroll
+   then bound the whole thing against the viewport, once, instead of two
+   scroll boxes nested inside one another. The chrome goes too: a panel
+   inside a panel drew a second border and a second shadow. */
+.vp-top-body .library-list {
+  position: static;
+  width: 100%;
+  min-width: 0;
+  max-height: none;
+  overflow: visible;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  backdrop-filter: none;
+}
+
+/* A dropdown near the right edge opens leftwards so it stays on screen. */
+.vp-top-menu.vp-top-right > .vp-top-body { left: auto; right: 0; }
+/* The sidebar controls that moved in here were full-width in a card and
+   should stay full-width in the panel. */
+.vp-top-body .btn,
+.vp-top-body select,
+.vp-top-body input[type="range"],
+.vp-top-body > p { width: 100%; }
+.vp-top-body .vp-bar-btn { width: 100%; justify-content: center; }
+/* Gen+ holds the Wheel and Stock menus, which are <details> of their own and
+   keep their own summaries as the two headings inside it. */
+.vp-top-body .vp-menu { width: 100%; }
+.vp-top-body .vp-menu > summary {
+  width: 100%;
+  height: 26px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+/* Nested, they open in flow rather than flying out to the side - a popover
+   hanging off a popover lands off screen. */
+.vp-top-body .vp-menu > .vp-menu-body {
+  position: static;
+  left: auto;
+  top: auto;
+  right: auto;
+  min-width: 0;
+  max-width: none;
+  width: 100%;
+  margin-top: 4px;
+  box-shadow: none;
+}
+
 .vp-library {
   position: relative;
   pointer-events: auto;
@@ -358,9 +570,182 @@ select:focus, input:focus {
   outline: none;
 }
 
+/* The library browser's category groups. Same <details> + .vp-sec-head
+   convention as the Finish menu's groups, so the two read as one system;
+   what differs is only what this list needs of it. The dropdown is wider
+   than the Finish column and its rows carry their own padding, so the body
+   is flush and the heading gets a little room above it. */
+.library-sec { width: 100%; }
+.library-sec + .library-sec { margin-top: 4px; }
+.library-sec > .vp-sec-head { padding: 2px 8px; }
+.library-sec > .vp-sec-body { padding: 3px 0 0; gap: 2px; }
+/* How many pieces are in the group, so a shut group still says what it has. */
+.library-sec-count {
+  margin-left: auto;
+  padding-left: 8px;
+  color: #64748b;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.library-sec[open] > .vp-sec-head > .library-sec-count { color: #94a3b8; }
+
 .library-item.is-loading {
   opacity: 0.55;
   cursor: progress;
+}
+
+/* The row's delete affordance. Dim until the row is hovered or the button
+   itself has focus, so a list you are scanning is a list of names and not a
+   column of x's inviting a mis-click; full strength and red the moment it is
+   actually the thing under the pointer. It is a real <button> inside the
+   row's role="button" so it is reachable from the keyboard on its own. */
+.library-del {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  line-height: 1;
+  font-size: 14px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #64748b;
+  cursor: pointer;
+  opacity: 0;
+}
+.library-item:hover .library-del,
+.library-item:focus-visible .library-del,
+.library-del:focus-visible { opacity: 1; }
+.library-del:hover,
+.library-del:focus-visible {
+  background: rgba(248, 113, 113, 0.16);
+  border-color: #f87171;
+  color: #fecaca;
+  outline: none;
+}
+
+/* The delete confirmation. Built by app-library-delete.js, not in the markup,
+   because nothing else on the page raises it. Above every viewport overlay
+   (those top out in the 90s) so no popover can sit over the question. */
+.nso-confirm-back[hidden] { display: none !important; }
+.nso-confirm-back {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(2, 6, 23, 0.62);
+  backdrop-filter: blur(3px);
+}
+.nso-confirm {
+  width: min(420px, 100%);
+  padding: 18px 20px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(248, 113, 113, 0.5);
+  background: #0f172a;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.6);
+  color: #e8eef6;
+}
+.nso-confirm-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fecaca;
+}
+.nso-confirm-body { margin: 0 0 8px; font-size: 13px; }
+.nso-confirm-body strong { color: #fff; word-break: break-all; }
+.nso-confirm-note { margin: 0 0 12px; font-size: 11.5px; line-height: 1.5; color: #94a3b8; }
+.nso-confirm-tok {
+  display: block;
+  margin: 0 0 12px;
+  font-size: 11.5px;
+  color: #cbd5e1;
+}
+.nso-confirm-tok span { color: #64748b; }
+.nso-confirm-tok input {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  border: 1px solid rgba(255,255,255,0.22);
+  background: rgba(2, 6, 23, 0.8);
+  color: #e8eef6;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.nso-confirm-err {
+  margin: 0 0 12px;
+  padding: 7px 9px;
+  border-radius: 5px;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  background: rgba(248, 113, 113, 0.12);
+  font-size: 11.5px;
+  color: #fecaca;
+  word-break: break-word;
+}
+.nso-confirm-err[hidden] { display: none !important; }
+
+/* The Save dialog (app-library-save.js) reuses the confirmation's shell, its
+   title, its note and its field styling, so the two read as one system - the
+   only additions are the category select and the "+ New category" row it
+   reveals, neither of which the delete dialog needs. */
+.nso-confirm-tok select {
+  width: 100%;
+  margin-top: 4px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 12.5px;
+  color: #e2e8f0;
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 4px;
+}
+.nso-confirm-tok select:focus-visible,
+.nso-confirm-tok input:focus-visible { outline: 2px solid #38bdf8; outline-offset: 1px; }
+.nso-confirm-tok[hidden] { display: none !important; }
+.nso-confirm-tok input[type="text"] { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.nso-confirm-row { display: flex; justify-content: flex-end; gap: 8px; }
+.nso-confirm-btn {
+  padding: 6px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.28);
+  background: rgba(255,255,255,0.06);
+  color: #e8eef6;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.nso-confirm-btn:hover { background: rgba(255,255,255,0.12); }
+.nso-confirm-btn:focus-visible { outline: 2px solid #38bdf8; outline-offset: 1px; }
+.nso-confirm-btn.is-danger {
+  border-color: #f87171;
+  background: rgba(248, 113, 113, 0.18);
+  color: #fecaca;
+  font-weight: 600;
+}
+.nso-confirm-btn.is-danger:hover:not(:disabled) { background: rgba(248, 113, 113, 0.3); }
+/* Disabled until a token is typed: no single click on anything can delete. */
+.nso-confirm-btn.is-danger:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: rgba(248, 113, 113, 0.35);
+}
+/* Save is the affirmative action, not the dangerous one - it must not wear
+   the delete button's red. Disabled until a name, a category AND a token are
+   all present: no single click on anything can write. */
+.nso-confirm-btn.is-go {
+  border-color: #0284c7;
+  background: rgba(2, 132, 199, 0.22);
+  color: #e0f2fe;
+  font-weight: 600;
+}
+.nso-confirm-btn.is-go:hover:not(:disabled) { background: rgba(2, 132, 199, 0.36); }
+.nso-confirm-btn.is-go:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  border-color: rgba(2, 132, 199, 0.35);
 }
 
 /* Settings */
@@ -553,7 +938,10 @@ select:focus, input:focus {
 .viewport-overlay-topbar {
   top: 8px;
   left: 8px;
-  right: 88px;
+  /* Room for every top-right menu plus a gap either side of each. Was a bare
+     88px, which fitted Finish alone. */
+  right: calc(var(--vp-menu-gap) * (var(--vp-menu-count) + 1) +
+              var(--vp-menu-w) * var(--vp-menu-count));
   bottom: auto;
   flex-direction: row;
   flex-wrap: wrap;
@@ -589,7 +977,7 @@ select:focus, input:focus {
 }
 .viewport-overlay-finish {
   top: 8px;
-  right: 8px;
+  right: var(--vp-menu-gap);                                   /* menu 1, outermost */
   left: auto;
   bottom: auto;
   flex-direction: column;
@@ -607,15 +995,105 @@ select:focus, input:focus {
   padding: 0 10px;
   font-size: 12px;
 }
+/* One fixed width, not a range. With min 168 / max 176 the card sized itself
+   to its widest row, so it sat at 176 only because the layer-2 row overflowed
+   and fell back to 168 the moment that row was made to fit - every other row
+   silently losing 8px as a side effect of a fix two rows away. 176 is the
+   width it has been rendering at all along; pinning it keeps that and makes
+   the 166px of usable row width a constant the rows can be sized against. */
 .vp-finish-menu .vp-menu-body {
   top: calc(100% + 4px);
   left: auto;
   right: 0;
-  min-width: 168px;
+  width: 176px;
+  min-width: 176px;
   max-width: 176px;
   padding: 4px;
   gap: 3px;
+  /* The Finish menu grows every time a feature lands in it, and it had run
+     out of viewport: opened on a 720px-tall window it was taller than the
+     space below its summary, so clicking a control inside it made the PAGE
+     scroll to bring the control into view. That drags the canvas up under the
+     fixed header, and a click aimed at the piece then lands on the header
+     instead - measured, adding four rows moved the scroll from -157px to
+     -251px and put the target 6px under it.
+
+     Bounding the body and letting IT scroll fixes that for every row, not
+     just the ones added last: the menu can no longer be taller than the space
+     it has, so the page never scrolls to reach a control and the viewport
+     stays where the user put it. */
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
+/* ---- Finish menu: the six collapsible groups ----------------------------
+   The menu had grown to 29 rows and 49 controls in a 176px column - 988px of
+   content, of which a 720px-tall window could show 63%. Five threads each
+   added a row and none of them could see the whole thing.
+
+   Grouped, the rows that only matter to one tool stop paying rent: Soften's
+   R / Full wrap, Texture's pitch and depth, Carve's four numbers and its
+   readout are 217px that sat in the column whether or not their tool was in
+   use. All six groups shut is ~169px; the tallest one open is ~418px, which
+   clears a 720px window.
+
+   <details>, not tabs and not a JS show/hide: at 176px a tab strip cannot
+   carry six labels, and <details> is what the drive checks already know how
+   to open - five of them walk up the ancestors opening every one they find,
+   so they reach a control inside a group without being touched at all.
+
+   Open state is per session and lives in the DOM (the `open` attribute); it
+   is deliberately not persisted, matching the paint and the non-solid flag.
+   Groups are independent - paint a face in one, skin it in another - and the
+   body keeps its max-height and scroll as the backstop for the all-open case.
+
+   A group is a heading with a rule under it, NOT a box: no side border and no
+   side padding anywhere on this path. Every row in this menu is sized against
+   the 166px the body gives it - .vp-row-skin2 in particular is fitted to the
+   pixel so "crosshatch" clears the select's arrow - and a bordered, padded
+   group would have quietly taken 10px off all 29 of them. */
+.vp-sec { width: 100%; }
+.vp-sec-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 22px;
+  padding: 2px 0;
+  border-bottom: 1px solid rgba(232, 238, 246, 0.12);
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.vp-sec-head::-webkit-details-marker { display: none; }
+/* The twisty, drawn rather than inherited, so it is the same glyph in every
+   engine and rotates instead of swapping character. */
+.vp-sec-head::before {
+  content: "";
+  flex: none;
+  width: 0;
+  height: 0;
+  margin-left: 2px;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform 0.12s ease;
+}
+.vp-sec[open] > .vp-sec-head::before { transform: rotate(90deg); }
+.vp-sec[open] > .vp-sec-head { color: #e8eef6; }
+.vp-sec-head:hover { color: #e8eef6; }
+.vp-sec-head:focus-visible { outline: 2px solid #7dd3fc; outline-offset: -2px; }
+.vp-sec-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 0 2px;
+}
+
 .vp-icon-btn {
   pointer-events: auto;
   width: 40px;
@@ -808,6 +1286,48 @@ select:focus, input:focus {
   font-variant-numeric: tabular-nums;
 }
 
+/* ---- Carve: the local carving tool ----
+
+   Two rows plus a readout, in the Finish column. Row one is the arm button and
+   the blade select, laid out on .vp-row-skin's grid so Carve reads as a sibling
+   of Skin face rather than a new kind of control. Row two is four numbers, and
+   it is FLEX, not the card's usual grid: the ball-nose exposes one shape field
+   where the slab and the wedge expose two, so one cell is hidden at runtime and
+   a fixed four-column grid would leave a dead track where it was. Flex children
+   drop out of the flow when hidden, which is exactly what is wanted.
+
+   Teal for the armed state, matching the position lock rather than either
+   paint: a carve is destructive geometry like a lock is a hard refusal, and
+   yellow and pink already mean "exclude" and "target" on the same faces. */
+.vp-row-carve { grid-template-columns: 1fr 88px; gap: 4px; align-items: stretch; }
+.vp-row-carve .btn { font-size: 11px; padding: 2px 4px; white-space: nowrap; }
+.vp-row-carve .vp-select { min-width: 0; font-size: 11px; padding: 0 4px; }
+.vp-menu-body .btn-carve {
+  color: #2dd4bf;
+  border-color: rgba(45, 212, 191, 0.55);
+}
+.vp-menu-body .btn-carve:hover { border-color: rgba(45, 212, 191, 0.9); }
+.vp-menu-body .btn-carve.is-armed {
+  background: #2dd4bf;
+  color: #1a1d21;
+  border-color: #2dd4bf;
+  font-weight: 600;
+}
+.vp-row-carve2 { display: flex; gap: 3px; }
+.vp-row-carve2 .vp-clone { flex: 1 1 0; min-width: 0; justify-self: stretch; }
+.vp-row-carve2 .vp-clone input { width: 100%; font-size: 10px; padding: 3px 0; }
+/* The blade the next click will build, in the registry's own words. Slate while
+   it is valid - .cut-readout's red is reserved for a refusal, and this line is
+   showing for the whole time the tool is armed. */
+.carve-readout {
+  font-size: 11px;
+  color: #94a3b8;
+  margin: 0 0 6px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+.carve-readout.carve-bad { color: #f87171; }
+
 .btn-cut {
   background: #dc2626;
   color: white;
@@ -835,6 +1355,21 @@ select:focus, input:focus {
 }
 .model-item .tag-a { background: #fb923c; }
 .model-item .tag-b { background: #4ade80; }
+.model-item .tag-nonsolid { background: #c084fc; }
+/* Position lock (app-poslock.js): teal, the one colour no other per-piece
+   marker uses - paint is yellow, A orange, B green, non-solid purple. */
+.model-item .tag-locked { background: #2dd4bf; }
+.model-item.is-locked { box-shadow: inset 3px 0 0 #2dd4bf; }
+/* The plate lock is not a per-piece flag, so it marks the LIST, not a row -
+   the per-piece `locked` tags stay readable underneath it. */
+#model-list.is-plate-locked { outline: 1px solid rgba(45, 212, 191, 0.55); outline-offset: 2px; }
+#model-list.is-plate-locked .model-item { opacity: 0.82; }
+.vp-bar-btn.btn-plate-lock.is-locked,
+.vp-bar-btn.btn-lock-pos.is-locked {
+  background: #134e4a;
+  border-color: #2dd4bf;
+  color: #ccfbf1;
+}
 
 .join-step {
   font-size: 14px;
@@ -959,6 +1494,16 @@ select:focus, input:focus {
   color: #fecaca;
   background: #3f1212;
 }
+/* Center lock's Pick target sits in an .edit-row, not a .tool-toggle-row, so
+   it needs the same armed treatment spelled out for its own row. */
+.edit-row .btn.tool-active {
+  border-color: #ef4444;
+  color: #fecaca;
+  background: #3f1212;
+}
+#center-lock-ref {
+  margin-bottom: 8px;
+}
 #cutter-status {
   margin-top: 4px;
   margin-bottom: 8px;
@@ -1019,6 +1564,21 @@ select:focus, input:focus {
   color: #38bdf8;
 }
 
+/* The G-code microscope's rail button carries TWO glyphs - a letter and an
+   emoji - where every other tool button carries one, so the rail's 22px would
+   overflow the 44px box. Its own size rather than a smaller rail for all. */
+.viewport-tool-btn.btn-gcode {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+}
+
+/* Lit while a toolpath session is open, the same signal X-ray gives. */
+#btn-gcode.is-on {
+  border-color: #38bdf8;
+  color: #38bdf8;
+}
+
 .vp-top-btn {
   pointer-events: auto;
   padding: 7px 12px;
@@ -1055,6 +1615,9 @@ select:focus, input:focus {
   gap: 6px;
 }
 .vp-pad #btn-nudge-fwd { grid-column: 1 / 3; justify-self: center; width: 44px; }
+/* Repair and Non-solid left this class behind when they became .vp-flag
+   buttons; Skin's `Free` checkbox (the layer-2 row) still wears it, so the
+   rule stays and now describes that control alone. */
 .vp-repair {
   display: flex;
   align-items: center;
@@ -1158,13 +1721,20 @@ select:focus, input:focus {
   width: 100%;
 }
 
+/* The viewport panel's select. The sidebar form rule above gives every select
+   an 8px bottom margin, which is right for a stacked card and wrong here: in
+   these rows the gap does the spacing, and that margin rode along inside the
+   grid item's margin box, so `align-items: center` centred a 34px box against
+   a 26px button and left Skin face sitting 4px below its pattern select. The
+   radius matches .btn so a button and a select side by side read as one pair. */
 .vp-select {
   width: 100%;
   min-height: 26px;
+  margin: 0;
   background: transparent;
   color: #e8eef6;
   border: 1px solid rgba(232, 238, 246, 0.45);
-  border-radius: 6px;
+  border-radius: 7px;
   padding: 0 6px;
   font-size: 12px;
 }
@@ -1199,12 +1769,281 @@ select:focus, input:focus {
   font-weight: 600;
 }
 
+/* Paint Selected is the other paint mode: the target, one face, pink - the
+   colour no other per-piece marker on the plate uses. Same idle / armed
+   shape as the yellow so the two read as siblings, never as one button. */
+.vp-menu-body .btn-paint-select {
+  color: #f472b6;
+  border-color: rgba(244, 114, 182, 0.55);
+}
+.vp-menu-body .btn-paint-select:hover { border-color: rgba(244, 114, 182, 0.9); }
+.vp-menu-body .btn-paint-select.is-armed {
+  background: #f472b6;
+  color: #1a1d21;
+  border-color: #f472b6;
+  font-weight: 600;
+}
+
+/* Check piece (app-defects.js) is the third button in the Finish card that is
+   a STATE rather than an action: idle it offers to run, live it offers to
+   clear, and the marks stay on the mesh in between. Same idle / live shape as
+   the two paint buttons so all three read as siblings, in the red the overlay
+   itself uses for the faults that matter most - the open edges and the
+   piercing pairs. It sits under the Non-solid flag because that flag is what
+   decides whether this check's open edges are a failure or a declaration. */
+.vp-menu-body .btn-check-defects {
+  color: #ff6b6b;
+  border-color: rgba(255, 45, 45, 0.55);
+}
+.vp-menu-body .btn-check-defects:hover:not(:disabled) { border-color: rgba(255, 45, 45, 0.9); }
+.vp-menu-body .btn-check-defects.is-on {
+  background: #ff2d2d;
+  color: #fff5f5;
+  border-color: #ff2d2d;
+  font-weight: 600;
+}
+
+/* Measure is a MODE too, so it is coloured the way Paint is - in the colour of
+   the marks it makes. Lime, and picking it was not free choice: the marks are
+   thin lines and two dots drawn ON a piece, so they have to beat everything
+   already there. Sky blue 0x38bdf8 is what an unselected piece is made of and
+   rose 0xf43f5e is what a SELECTED one is made of (app-core's PIECE_COLOR and
+   SELECT_COLOR) - a line in either is a line on its own background, which is
+   exactly how the first cut of this failed. Yellow 0xffdd00 is Paint Excluded
+   and pink 0xf472b6 is Paint Selected; red, orange and violet are the Check
+   piece overlay's three fault classes; teal is the position lock; white is the
+   selection outline; amber is the plate ticks. Lime is what is left, and it
+   happens to be the right answer anyway - it reads hard against both piece
+   colours and against the dark plate. Button, line, end dots and the chip's
+   border are all this one colour, so the mode and its marks are one thing. */
+.vp-menu-body .btn-measure {
+  color: #a3e635;
+  border-color: rgba(163, 230, 53, 0.55);
+}
+.vp-menu-body .btn-measure:hover { border-color: rgba(163, 230, 53, 0.9); }
+.vp-menu-body .btn-measure.is-armed {
+  background: #a3e635;
+  color: #1a1d21;
+  border-color: #a3e635;
+  font-weight: 600;
+}
+
+/* The measurement itself: a chip riding the midpoint of the line, positioned
+   from script in the viewport's own coordinates. translate(-50%, -50%) keeps
+   it centred on that point as the number changes width, so it does not creep
+   sideways while a piece is dragged. pointer-events off - the next measure
+   click has to reach the canvas, not this. */
+.measure-label {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  padding: 2px 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(163, 230, 53, 0.8);
+  background: rgba(12, 18, 26, 0.9);
+  color: #ecfccb;
+  font: 600 12px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.45);
+}
+.measure-label[hidden] { display: none; }
+
 /* Finish is one column. Every row states its own grid, so nothing spills into
    an implicit column and every button fills its cell - no orphan half-width
    stragglers next to a full-width Soften. */
 .vp-row-full { grid-template-columns: 1fr; }
 .vp-row-pair { grid-template-columns: 1fr 1fr; gap: 6px; }
-.vp-row-label { grid-template-columns: auto 1fr; gap: 8px; }
+/* The paint row: Paint Selected / Paint Excluded / Clear paint, three equal
+   cells. Two words each, so the label is allowed to wrap onto two lines and
+   the font drops a point; the cells stay level with each other. */
+.vp-row-triple { grid-template-columns: 1fr 1fr 1fr; gap: 4px; align-items: stretch; }
+.vp-row-triple .btn {
+  font-size: 11px;
+  padding: 2px 3px;
+  white-space: normal;
+  line-height: 1.15;
+  min-height: 30px;
+}
+/* Skin face with its pattern select beside it, directly under the paint row
+   (the target it reads is painted there). Stretch, like the paint and thicken
+   rows: the button sets the row height and the select takes it, so the two
+   cannot drift out of line the way they did while the select carried a margin
+   of its own. */
+.vp-row-skin { grid-template-columns: 1fr 88px; gap: 4px; align-items: stretch; }
+.vp-row-skin .btn { font-size: 11px; padding: 2px 4px; white-space: nowrap; }
+.vp-row-skin .vp-select { min-width: 0; font-size: 11px; padding: 0 4px; }
+/* Delete painted rides the same grid - it reads the same target the paint row
+   sets - but it is the one control in this card that removes geometry rather
+   than reshaping it. A hairline above it and a little air is the whole of the
+   difference: enough that a thumb reaching for Clear paint does not land on it,
+   not so much that the row looks like a separate card. */
+.vp-row-delete { margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(248, 113, 113, 0.28); }
+/* The second skin row under it: Skin wrap, the Free checkbox, then the layer-2
+   pattern. Free sits between the two so the select can be last and end flush
+   with the card's right edge, level with every other control in the column.
+
+   The card is capped at 176px (.vp-finish-menu .vp-menu-body), so the three
+   cells share 158px after the two gaps. The button and the checkbox take only
+   what their text needs and the select takes the rest - it is the one cell
+   that has to reach the right edge, so it is the one given `1fr`. The old
+   `1fr 96px auto` did the opposite: the select was fixed and the checkbox was
+   last on an `auto` track with nothing left to sit in, so Free hung 15px past
+   the card. The select's options dropped their "layer 2:" prefix to fit; the
+   row, the tooltip and the aria-label all still say which layer it is, and
+   the words now match the layer-1 select directly above. */
+.vp-row-skin2 { grid-template-columns: auto auto minmax(0, 1fr); gap: 4px; }
+/* Sharing the row with Skin wrap and Free leaves this select ~80px, so it
+   trades a point of type and 2px of side padding for the room to still spell
+   "crosshatch" rather than clip it under the arrow. */
+.vp-row-skin2 .vp-select { font-size: 10px; padding: 0 2px; }
+.vp-skin-free { gap: 4px; font-size: 11px; white-space: nowrap; }
+/* Texture rides the same two-cell skin grid - a button and a pattern select -
+   because it is the same kind of control as Skin face and Skin wrap and should
+   read as one of them, not as a separate card. Its two numbers go on their own
+   .vp-row-opts line underneath, the way Soften's R does: four cells would not
+   fit the 176px card, and the pitch is the one number a user retypes. */
+.vp-row-texture-opts { padding-top: 0; }
+.vp-row-texture-opts .vp-clone input[type="number"] { width: 46px; }
+/* A hairline above a row, to break the card into groups. Non-solid uses it:
+   it is a standing declaration about the piece, not another knob on Seal. */
+.vp-row-sep {
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(232, 238, 246, 0.18);
+}
+
+/* Repair and Non-solid are flags, and they are not the same flag: Repair
+   changes what the next Seal click does, Non-solid is a standing statement
+   about the piece that several tools read. They used to be two bare
+   checkboxes with 9px labels in the 36px gutter - Repair sharing Seal's row,
+   Non-solid directly beneath it in the identical style - so the pair read as
+   one control with two ticks and Repair looked like part of the Seal button.
+   Each is now its own full-width toggle button with its own accent: Repair
+   amber, Non-solid the purple its list tag and piece marker already use. Seal
+   sits between them and a hairline sets Non-solid apart.
+
+   The checkbox is still the control, not an ornament beside one. It covers
+   the whole button, transparent and on top, so a click, a tap or the keyboard
+   lands on the real input - `checked` and `disabled` stay the plain checkbox
+   state that app-finish.js and app-nonsolid.js already read, and nothing
+   about the wiring changes. The span behind it only draws the state. */
+.vp-flag {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 26px;
+  margin: 0;
+}
+.vp-flag input[type="checkbox"] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  z-index: 1;
+  cursor: pointer;
+}
+.vp-flag input[type="checkbox"]:disabled { cursor: default; }
+.vp-flag-face {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 26px;
+  padding: 2px 6px;
+  border: 1px solid var(--flag-line);
+  border-radius: 7px;
+  background: transparent;
+  color: #e8eef6;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+/* The tick box in front of the label keeps the button reading as a flag with
+   a state, rather than as an action button that does something when pressed. */
+.vp-flag-face::before {
+  content: "";
+  flex: none;
+  width: 11px;
+  height: 11px;
+  border: 1px solid var(--flag-line);
+  border-radius: 3px;
+  background: transparent;
+}
+.vp-flag input:checked + .vp-flag-face {
+  background: var(--flag-fill);
+  border-color: var(--flag-accent);
+  color: var(--flag-accent);
+}
+.vp-flag input:checked + .vp-flag-face::before {
+  background: var(--flag-accent);
+  border-color: var(--flag-accent);
+}
+.vp-flag input:not(:disabled):hover + .vp-flag-face { border-color: var(--flag-accent); }
+.vp-flag input:focus-visible + .vp-flag-face {
+  outline: 2px solid var(--flag-accent);
+  outline-offset: 1px;
+}
+.vp-flag input:disabled + .vp-flag-face { opacity: 0.45; }
+/* The two rotation locks, in the Rotate dropdown under the 90° buttons.
+   Same .vp-flag toggle the Repair and Non-solid flags use - a flag is a flag
+   wherever it sits - in the axis colours the handles are drawn in, so the
+   checkbox and the ball it governs are the same object by eye. */
+.vp-flag-rotlock { --flag-accent: #f472b6; --flag-line: rgba(244,114,182,0.5); --flag-fill: rgba(244,114,182,0.16); }
+.vp-flag-rotlock + .vp-flag-rotlock { --flag-accent: #38bdf8; --flag-line: rgba(56,189,248,0.5); --flag-fill: rgba(56,189,248,0.16); }
+/* The vertical-placement checkbox, and the column beside the piece. */
+.vp-flag-movevert { --flag-accent: #34d399; --flag-line: rgba(52,211,153,0.5); --flag-fill: rgba(52,211,153,0.16); }
+/* Positioned from script against the piece's projected position, so it is
+   absolute within the viewport rather than laid out in the bar. */
+.move-vert-wrap {
+  position: absolute;
+  z-index: 92;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(52, 211, 153, 0.5);
+  background: rgba(15, 23, 42, 0.9);
+  backdrop-filter: blur(8px);
+}
+.move-vert-wrap[hidden] { display: none; }
+.move-vert-wrap input[type="range"] {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 22px;
+  height: 150px;
+  margin: 0;
+  accent-color: #34d399;
+}
+.move-vert-read {
+  color: #e8eef6;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.vp-flag-repair {
+  --flag-accent: #fbbf24;
+  --flag-line: rgba(251, 191, 36, 0.5);
+  --flag-fill: rgba(251, 191, 36, 0.16);
+}
+.vp-flag-nonsolid {
+  --flag-accent: #c084fc;
+  --flag-line: rgba(192, 132, 252, 0.5);
+  --flag-fill: rgba(192, 132, 252, 0.18);
+}
 /* Thicken is one row the full width of the card: Thicken out flush to the left
    edge, Thicken in flush to the right, the mm spinner between them. The two
    buttons keep the .vp-row .btn min-height, so they set the row height and stay
@@ -1224,6 +2063,73 @@ select:focus, input:focus {
   letter-spacing: -0.3px;
   white-space: nowrap;
   min-width: 0;
+}
+/* Extend: a button and the target length it reads. Two columns, not the
+   thicken row's three - that one is button / spinner / button and would drop
+   this input into its 24px middle column. */
+.vp-row-extend {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 72px);
+  align-items: stretch;
+  gap: 6px;
+}
+.vp-row-extend .btn {
+  padding: 2px 3px;
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+  min-width: 0;
+}
+.vp-menu-body .vp-row-extend input[type="number"] {
+  min-height: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0 6px;
+  border: 1px solid rgba(232, 238, 246, 0.45);
+  border-radius: 7px;
+  background: transparent;
+  color: #e8eef6;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+.vp-menu-body .vp-row-extend input[type="number"]::-webkit-outer-spin-button,
+.vp-menu-body .vp-row-extend input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* Fatten: button / mm / button. The thicken row's three-column shape, but its
+   middle column is a 24px spinner strip and this one holds a real number box,
+   so the middle track is wider and the input borrows the extend row's styling
+   rather than a second copy of it. */
+.vp-row-fatten {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 46px) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 4px;
+}
+.vp-row-fatten .btn {
+  padding: 2px 3px;
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+  min-width: 0;
+}
+.vp-menu-body .vp-row-fatten input[type="number"] {
+  min-height: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0 4px;
+  border: 1px solid rgba(232, 238, 246, 0.45);
+  border-radius: 7px;
+  background: transparent;
+  color: #e8eef6;
+  font-size: 11px;
+  line-height: 1;
+  text-align: center;
+  -moz-appearance: textfield;
+}
+.vp-menu-body .vp-row-fatten input[type="number"]::-webkit-outer-spin-button,
+.vp-menu-body .vp-row-fatten input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 .thick-spin {
   display: flex;
@@ -1280,3 +2186,597 @@ select:focus, input:focus {
   padding: 2px 0 4px;
 }
 .vp-row-opts .vp-clone input[type="number"] { width: 52px; }
+
+/* Join card: Seat flush button with its gap field. Blank = flush plug seat,
+   a number = seat the mating face at that gap (negative = air, positive =
+   overlap). */
+.seat-gap-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.seat-gap-row .btn {
+  flex: 1 1 auto;
+}
+.seat-gap-row input[type="number"] {
+  flex: 0 0 96px;
+  width: 96px;
+  margin: 0;
+}
+.seat-gap-row select {
+  flex: 0 0 110px;
+  width: 110px;
+  margin: 0;
+}
+
+/* Join card: Seat (support) with its gap slider. The slider is the control;
+   the readout shows the exact 0.01-step value it will seat at. */
+.seat-support {
+  margin: 8px 0;
+}
+.seat-support .btn {
+  width: 100%;
+}
+.seat-support-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+.seat-support-row input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  accent-color: #4ade80;
+  cursor: pointer;
+}
+.seat-support-row output {
+  flex: 0 0 66px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+/* Brush rows - a label, a slider that takes the slack, and the live value.
+   The value column is fixed so the row does not reflow as the number changes
+   width, which is what made the first draft twitch while dragging. */
+.vp-row-brush {
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+.vp-row-brush .vp-brush-tag {
+  font-size: 11px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  opacity: .78;
+}
+.vp-row-brush input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  accent-color: #e8a33d;
+}
+.vp-row-brush .vp-brush-out {
+  min-width: 48px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  opacity: .9;
+}
+/* Armed brush reads the same as armed paint, so "a tool is live" looks the
+   same whichever tool it is. */
+.btn-brush.is-armed {
+  background: #e8a33d;
+  color: #1a1206;
+  border-color: #e8a33d;
+  font-weight: 600;
+}
+
+/* Seat here shares that slider and arms a click, so it needs the same armed
+   state the other click-owning tools have. */
+#btn-seat-here { margin-top: 4px; }
+#btn-seat-here.is-armed {
+  background: #4ade80;
+  color: #0b1a33;
+  border-color: #4ade80;
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+   Toolpath card - the line-level scrub for an imported sliced .gcode.3mf.
+   The card is hidden until something is imported. Note the repo has NO generic
+   .hidden rule (see the .library-list note above for the trap that caused), so
+   this says it for this card and says it unconditionally.
+   --------------------------------------------------------------------------- */
+#toolpath-card.hidden { display: none !important; }
+
+#toolpath-card input[type="range"] {
+  width: 100%;
+  margin: 8px 0 4px;
+  accent-color: #ff3b30;   /* same red the scrub highlight uses in the viewport */
+}
+
+/* Two step rows, not one: lines on top, layers below. They are two different
+   granularities and the sidebar is too narrow to hold all five controls on one
+   line without clipping the last button. The layer row's two buttons split the
+   width evenly so the pair reads as one unit. */
+.tp-step-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.tp-step-row + .tp-step-row .btn { flex: 1 1 0; }
+.tp-step-row .btn {
+  flex: 0 0 auto;
+  padding: 6px 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+/* The line number has to stay readable at four digits, so it gets a floor
+   rather than `min-width: 0` - with the flex default it collapsed to nothing
+   between the step buttons and showed no number at all. */
+.tp-step-row input[type="number"] {
+  flex: 1 1 auto;
+  min-width: 52px;
+  padding: 6px 2px;
+  margin: 0;
+  text-align: center;
+}
+
+/* The Z filter's own toggle. One layer at a time is the reason the card can show
+   a single layer's construction at all, so it sits above Extract scope. */
+.tp-check-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 4px;
+  cursor: pointer;
+}
+.tp-check-row input[type="checkbox"] { margin: 0; flex: 0 0 auto; }
+
+/* The per-line measurements. Tabular figures so the numbers do not jitter as
+   the slider moves, which is the whole point of reading them while scrubbing. */
+.tp-detail {
+  font-variant-numeric: tabular-nums;
+  line-height: 1.5;
+  margin: 2px 0 8px;
+  word-break: break-word;
+}
+/* ---------------------------------------------------------------------------
+   Pottery Wheel - its own menu beside Finish, same shape, its own corner so
+   the two do not overlap when both are open.
+--------------------------------------------------------------------------- */
+.viewport-overlay-wheel {
+  top: 8px;
+  /* Menu 2, immediately left of Finish - one menu width and one more gap in.
+     This rule was DEAD until the `.tp-detail` block above it was closed, so the
+     wheel menu had no positioning at all; see --vp-menu-gap in :root. */
+  right: calc(var(--vp-menu-gap) * 2 + var(--vp-menu-w));
+  left: auto;
+  bottom: auto;
+  flex-direction: column;
+  align-items: flex-end;
+  z-index: 90;
+  pointer-events: none;
+}
+.vp-wheel-menu {
+  pointer-events: auto;
+}
+.vp-wheel-menu > summary {
+  width: auto;
+  min-width: 64px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.vp-wheel-menu .vp-menu-body {
+  top: calc(100% + 4px);
+  left: auto;
+  right: 0;
+  min-width: 168px;
+  max-width: 176px;
+  padding: 4px;
+  gap: 3px;
+}
+
+/* ---------------------------------------------------------------------------
+   New stock - menu 3, the third and innermost of the top-right stack. Same
+   shape as the Wheel's card beside it, one menu width further in; the offset
+   is derived from --vp-menu-gap / --vp-menu-w so adding this menu was a
+   --vp-menu-count bump and nothing else, exactly as the note in :root says.
+   `npm run overlay:test` measures the rendered strip and fails if a topbar
+   button ends up underneath.
+--------------------------------------------------------------------------- */
+.viewport-overlay-stock {
+  top: 8px;
+  right: calc(var(--vp-menu-gap) * 3 + var(--vp-menu-w) * 2);
+  left: auto;
+  bottom: auto;
+  flex-direction: column;
+  align-items: flex-end;
+  z-index: 90;
+  pointer-events: none;
+}
+.vp-stock-menu {
+  pointer-events: auto;
+}
+.vp-stock-menu > summary {
+  width: auto;
+  min-width: 64px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.vp-stock-menu .vp-menu-body {
+  top: calc(100% + 4px);
+  left: auto;
+  right: 0;
+  min-width: 168px;
+  max-width: 176px;
+  padding: 4px;
+  gap: 3px;
+}
+.vp-stock-menu select { width: 100%; }
+/* The shape-specific box goes away for a sphere. `.vp-clone` sets
+   `display: flex`, which beats the UA's `[hidden] { display: none }` on
+   specificity, so the attribute needs a rule of its own or the field stays on
+   screen with nothing to type in it. */
+.vp-menu-body [hidden] { display: none; }
+.vp-stock-menu .vp-row-opts .vp-clone input[type="text"] { width: 62px; }
+/* Attach arms a click, so it needs the lit state every other click-owning
+   button in this app has - Paint, Carve, Measure, Seat here. Same shape as
+   .btn-measure.is-armed; a different hue only so two armed tools are never
+   mistaken for one. */
+.vp-menu-body .btn-attach.is-armed {
+  background: #38bdf8;
+  color: #0b1220;
+  border-color: #38bdf8;
+  font-weight: 600;
+}
+/* A checkbox row is a label, not a grid: the box and its words want to sit
+   together at the left rather than in two columns of a 36px / 1fr layout. */
+.vp-check {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #cbd5e1;
+  cursor: pointer;
+  padding: 1px 0;
+}
+.vp-check input[type="checkbox"] { margin: 0; }
+.vp-check:has(input:disabled) { opacity: 0.45; cursor: default; }
+
+/* ---------------------------------------------------------------------------
+   Build-volume warning. It sits under the plate dimensions because that is
+   where the machine is chosen, and it is amber rather than red: the piece is
+   too big for this printer, which is a fact about the pairing, not an error
+   in the piece. Hidden entirely when everything fits - a warning that is
+   always on screen is not a warning.
+--------------------------------------------------------------------------- */
+.build-warning {
+  margin: 6px 0 0;
+  padding: 5px 7px;
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  border-radius: 7px;
+  background: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
+  font-size: 11px;
+  line-height: 1.35;
+}
+.build-warning[hidden] {
+  display: none;
+}
+
+/* =====================================================================
+   Photogrammetry upload onramp - the capture card and its report drawer.
+
+   The report is a drawer over the viewport rather than a .vp-menu popover:
+   that row reserves width per menu through --vp-menu-count, and a 30-row
+   report with a per-frame assignment list does not fit a 320px popover.
+   Colour is doing real work here, so it is never the only signal - every
+   row also carries a word (PASS / FAIL / CONFIRM / LATER) for the same
+   reason a status light has a label.
+   ===================================================================== */
+.photoset-verdict {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.45;
+  background: rgba(148, 163, 184, 0.10);
+}
+.photoset-verdict.is-ready   { border-color: var(--success); background: rgba(34, 197, 94, 0.12); }
+.photoset-verdict.is-warn    { border-color: var(--warning); background: rgba(245, 158, 11, 0.12); }
+.photoset-verdict.is-blocked { border-color: #ef4444;        background: rgba(239, 68, 68, 0.12); }
+
+/* `hidden` must win over the display below - an author rule beats the UA
+   stylesheet's [hidden] { display: none }, so the drawer shipped visible
+   until this line existed. The drive check caught it. */
+.photoset-drawer[hidden] { display: none; }
+.photoset-drawer {
+  position: absolute;
+  /* Below the viewport's top-right menu row, not on top of it. Measured: the
+     Finish menu summary runs 8..48px from the top of .viewport-section, so 56
+     clears it with the same 8px gap the menus use between themselves. Without
+     this the drawer's own heading and its Close button sat underneath Finish
+     and could not be clicked. The top button bar can wrap to a second row on a
+     narrow viewport and will then overlap the drawer's first rows - it keeps
+     its higher z-index and stays clickable, which is the right way round. */
+  top: 56px;
+  right: 12px;
+  bottom: 12px;
+  width: min(560px, calc(100% - 24px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(23, 26, 33, 0.97);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+  z-index: 70;
+  pointer-events: auto;
+}
+.photoset-drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.photoset-drawer-head h2 { margin: 0; font-size: 14px; }
+.photoset-report {
+  overflow-y: auto;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.photoset-report .ps-section { margin-top: 16px; }
+.photoset-report h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+}
+.ps-blurb { margin: 0 0 8px; color: var(--muted); }
+
+.ps-counts, .ps-tally, .ps-tools { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+/* .btn is width:100% globally, which stacks these two one per row. */
+.ps-tools .btn { width: auto; }
+.ps-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.ps-chip.ps-pass     { border-color: var(--success); color: #86efac; }
+.ps-chip.ps-fail     { border-color: #ef4444;        color: #fca5a5; }
+.ps-chip.ps-warn     { border-color: var(--warning); color: #fcd34d; }
+.ps-chip.ps-todo     { border-color: #38bdf8;        color: #7dd3fc; }
+.ps-chip.ps-unknown  { border-color: var(--muted);   color: var(--muted); }
+.ps-chip.ps-deferred { border-color: #a78bfa;        color: #c4b5fd; }
+
+.ps-row {
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  background: rgba(15, 17, 21, 0.5);
+}
+.ps-row.ps-pass     { border-left-color: var(--success); }
+.ps-row.ps-fail     { border-left-color: #ef4444; }
+.ps-row.ps-warn     { border-left-color: var(--warning); }
+.ps-row.ps-todo     { border-left-color: #38bdf8; }
+.ps-row.ps-unknown  { border-left-color: var(--muted); }
+.ps-row.ps-deferred { border-left-color: #a78bfa; }
+
+.ps-row-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ps-title { font-weight: 600; flex: 1 1 auto; }
+.ps-tick { display: flex; align-items: baseline; gap: 6px; flex: 1 1 auto; cursor: pointer; font-weight: 600; }
+.ps-tick input { margin: 0; }
+.ps-status { font-size: 10px; letter-spacing: 0.06em; font-weight: 700; }
+.ps-pass .ps-status     { color: #86efac; }
+.ps-fail .ps-status     { color: #fca5a5; }
+.ps-warn .ps-status     { color: #fcd34d; }
+.ps-todo .ps-status     { color: #7dd3fc; }
+.ps-unknown .ps-status  { color: var(--muted); }
+.ps-deferred .ps-status { color: #c4b5fd; }
+.ps-clause { font-size: 10px; color: var(--muted); }
+.ps-detail { margin: 4px 0 0; }
+/* The "why a machine cannot decide this" sentence. Muted, never hidden -
+   it is the reason the tick is a tick and not a green light. */
+.ps-why { margin: 4px 0 0; color: var(--muted); font-style: italic; }
+
+.ps-frames {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.ps-frame {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border-bottom: 1px solid rgba(42, 48, 60, 0.6);
+}
+.ps-frame:last-child { border-bottom: none; }
+.ps-frame-name {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.ps-frame-pass { flex: 0 0 auto; font-size: 11px; max-width: 46%; }
+
+/* ===================================================================
+   The Microscope view (app-microscope.js)
+
+   The layout and the type scale are the reference tool's own
+   (docs/reference/joint_microscope_3d.html) - sidebar left, viewport
+   right, two badges over the canvas - because the view is reused
+   rather than redesigned. Its colour literals are replaced by this
+   app's variables, which carry the same values where it matters:
+   the reference tool's --bg #0d0f13 against ours #0f1115, its accent
+   #5b8cff against our #3b82f6. Nothing else differs.
+   =================================================================== */
+
+.ms-panel {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  overflow: hidden;
+}
+.ms-panel[hidden] { display: none; }
+
+.ms-sidebar {
+  width: 290px;
+  flex-shrink: 0;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  padding: 16px;
+  overflow-y: auto;
+}
+.ms-sidebar h1 { font-size: 15px; margin: 0 0 4px 0; }
+.ms-sub {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 14px 0;
+  line-height: 1.4;
+}
+.ms-note {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin: 0 0 8px 0;
+  line-height: 1.4;
+}
+.ms-note b { color: var(--text); }
+
+.ms-section { margin-bottom: 16px; }
+.ms-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.ms-btn-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+  align-items: center;
+}
+.ms-sidebar button {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ms-sidebar button:hover:not(:disabled) { border-color: var(--accent); }
+.ms-sidebar button.active {
+  border-color: var(--accent);
+  background: rgba(59, 130, 246, 0.15);
+}
+.ms-sidebar button:disabled { opacity: 0.4; cursor: default; }
+.ms-sidebar input[type="number"] {
+  width: 62px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 5px 6px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.ms-sidebar input[type="number"]:disabled { opacity: 0.4; }
+
+/* The two exports are the point of this view, so they read as the one
+   real choice rather than as two more grey buttons in a row. */
+#ms-btn-export-plate,
+#ms-btn-export-stl {
+  flex: 1 1 auto;
+  border-color: var(--accent);
+  background: rgba(59, 130, 246, 0.15);
+}
+#ms-btn-export-plate:hover,
+#ms-btn-export-stl:hover { background: rgba(59, 130, 246, 0.28); }
+
+.ms-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 5px;
+  cursor: pointer;
+  user-select: none;
+  padding: 3px 4px;
+  border-radius: 4px;
+}
+.ms-legend-item:hover { background: rgba(255, 255, 255, 0.04); }
+.ms-legend-item.dim { opacity: 0.3; }
+.ms-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+#ms-info {
+  font-size: 11.5px;
+  color: var(--muted);
+  line-height: 1.5;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+  min-height: 60px;
+}
+#ms-info b { color: var(--text); }
+
+.ms-viewport { flex: 1; position: relative; min-width: 0; }
+.ms-viewport canvas { display: block; }
+
+#ms-mode-badge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  background: rgba(23, 26, 33, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 5;
+}
+#ms-hint-badge {
+  position: absolute;
+  bottom: 12px;
+  left: 12px;
+  background: rgba(23, 26, 33, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  z-index: 5;
+  max-width: 420px;
+  line-height: 1.4;
+}

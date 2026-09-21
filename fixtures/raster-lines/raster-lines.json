@@ -1,0 +1,213 @@
+{
+  "generated_by": "tools/nso_raster_fixtures.js",
+  "entries": [
+    {
+      "raster": "zigzag-layer.pbm",
+      "note": "the reference: one layer of the real two-layer zigzag, 15 lines at 2.0 mm pitch, stroked 5 px = 0.25 mm",
+      "raster_px": [
+        900,
+        900
+      ],
+      "px_per_mm": 20,
+      "canvas_mm": 45,
+      "drawn_at_deg": 45,
+      "stroke_px": 5,
+      "antialiased": false,
+      "mm_per_px": 0.05,
+      "threshold": 128,
+      "ink_px": 46552,
+      "skeleton_px": 6652,
+      "traced_paths": 1,
+      "trace_vertices": 6652,
+      "simplify_px": 1.5,
+      "path_vertices": 30,
+      "nodes": 30,
+      "segments": 29,
+      "junctions": 0,
+      "max_degree": 2,
+      "line_length_mm": 469.860684,
+      "line_width_mm": 0.42,
+      "line_height_mm": 0.3,
+      "tris": 572,
+      "components": 1,
+      "unique_edges": 858,
+      "open_edges": 0,
+      "nonmanifold_edges": 0,
+      "closed": true,
+      "extent_mm": [
+        40.946805,
+        41.191024,
+        0.3
+      ],
+      "line_angle_deg": 45,
+      "angle_bands": [
+        {
+          "deg": 45,
+          "share": 0.93993
+        },
+        {
+          "deg": 136,
+          "share": 0.06007
+        }
+      ],
+      "axis_aligned_share": 0,
+      "describe": "flat lines 0.42 mm wide x 0.3 mm tall from a 900 x 900 raster at 0.05 mm/px - 1 path(s), 29 segment(s), 0 junction(s), 469.86 mm of line, 40.95 x 41.19 x 0.30 mm, 1 component(s), closed"
+    },
+    {
+      "raster": "zigzag-layer-fat.pbm",
+      "note": "the same centrelines drawn 13 px = 0.65 mm wide - the traced line must still come out 0.42 mm",
+      "raster_px": [
+        900,
+        900
+      ],
+      "px_per_mm": 20,
+      "canvas_mm": 45,
+      "drawn_at_deg": 45,
+      "stroke_px": 13,
+      "antialiased": false,
+      "mm_per_px": 0.05,
+      "threshold": 128,
+      "ink_px": 122636,
+      "skeleton_px": 10172,
+      "traced_paths": 1,
+      "trace_vertices": 10172,
+      "simplify_px": 1.5,
+      "path_vertices": 55,
+      "nodes": 55,
+      "segments": 54,
+      "junctions": 0,
+      "max_degree": 2,
+      "line_length_mm": 466.636763,
+      "line_width_mm": 0.42,
+      "line_height_mm": 0.3,
+      "tris": 1072,
+      "components": 1,
+      "unique_edges": 1608,
+      "open_edges": 0,
+      "nonmanifold_edges": 0,
+      "closed": true,
+      "extent_mm": [
+        40.946626,
+        41.049091,
+        0.3
+      ],
+      "line_angle_deg": 45,
+      "angle_bands": [
+        {
+          "deg": 45,
+          "share": 0.93085
+        },
+        {
+          "deg": 135,
+          "share": 0.04341
+        }
+      ],
+      "axis_aligned_share": 0.0121,
+      "describe": "flat lines 0.42 mm wide x 0.3 mm tall from a 900 x 900 raster at 0.05 mm/px - 1 path(s), 54 segment(s), 0 junction(s), 466.64 mm of line, 40.95 x 41.05 x 0.30 mm, 1 component(s), closed"
+    },
+    {
+      "raster": "zigzag-layer-aa.pgm",
+      "note": "the same centrelines, anti-aliased grayscale at 10 px/mm - only a threshold can read it",
+      "raster_px": [
+        450,
+        450
+      ],
+      "px_per_mm": 10,
+      "canvas_mm": 45,
+      "drawn_at_deg": 45,
+      "stroke_px": 3,
+      "antialiased": true,
+      "mm_per_px": 0.1,
+      "threshold": 128,
+      "ink_px": 13932,
+      "skeleton_px": 5946,
+      "traced_paths": 1,
+      "trace_vertices": 5946,
+      "simplify_px": 1.5,
+      "path_vertices": 35,
+      "nodes": 35,
+      "segments": 34,
+      "junctions": 0,
+      "max_degree": 2,
+      "line_length_mm": 470.217374,
+      "line_width_mm": 0.42,
+      "line_height_mm": 0.3,
+      "tris": 672,
+      "components": 1,
+      "unique_edges": 1008,
+      "open_edges": 0,
+      "nonmanifold_edges": 0,
+      "closed": true,
+      "extent_mm": [
+        40.796983,
+        41.182985,
+        0.3
+      ],
+      "line_angle_deg": 45,
+      "angle_bands": [
+        {
+          "deg": 45,
+          "share": 0.93664
+        },
+        {
+          "deg": 134,
+          "share": 0.04509
+        }
+      ],
+      "axis_aligned_share": 0.00531,
+      "describe": "flat lines 0.42 mm wide x 0.3 mm tall from a 450 x 450 raster at 0.1 mm/px - 1 path(s), 34 segment(s), 0 junction(s), 470.22 mm of line, 40.80 x 41.18 x 0.30 mm, 1 component(s), closed"
+    },
+    {
+      "raster": "crosshatch.pbm",
+      "note": "15 lines each way in one raster - 225 four-way junctions",
+      "raster_px": [
+        900,
+        900
+      ],
+      "px_per_mm": 20,
+      "canvas_mm": 45,
+      "drawn_at_deg": 45,
+      "stroke_px": 5,
+      "antialiased": false,
+      "mm_per_px": 0.05,
+      "threshold": 128,
+      "ink_px": 82680,
+      "skeleton_px": 13312,
+      "traced_paths": 1380,
+      "trace_vertices": 15112,
+      "simplify_px": 1.5,
+      "path_vertices": 2760,
+      "nodes": 285,
+      "segments": 480,
+      "junctions": 225,
+      "max_degree": 4,
+      "line_length_mm": 883.510559,
+      "line_width_mm": 0.42,
+      "line_height_mm": 0.3,
+      "tris": 5824,
+      "components": 1,
+      "unique_edges": 8736,
+      "open_edges": 0,
+      "nonmanifold_edges": 0,
+      "closed": true,
+      "extent_mm": [
+        40.946984,
+        40.946984,
+        0.3
+      ],
+      "line_angle_deg": 135,
+      "angle_bands": [
+        {
+          "deg": 135,
+          "share": 0.49521
+        },
+        {
+          "deg": 45,
+          "share": 0.48875
+        }
+      ],
+      "axis_aligned_share": 0,
+      "describe": "flat lines 0.42 mm wide x 0.3 mm tall from a 900 x 900 raster at 0.05 mm/px - 480 path(s), 480 segment(s), 225 junction(s), 883.51 mm of line, 40.95 x 40.95 x 0.30 mm, 1 component(s), closed"
+    }
+  ]
+}

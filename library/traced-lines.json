@@ -1,0 +1,75 @@
+{
+  "note": "Built from fixtures/raster-real/, which tools/nso_raster_real_test.js validates against its own ground truth first.",
+  "sizeMM": 30,
+  "lineWidth": 0.42,
+  "lineHeight": 0.3,
+  "pieces": [
+    {
+      "file": "traced_cross_23-67.stl",
+      "from": "skew-cross.png",
+      "shows": "two straight strokes crossing once, at 23 and 67 degrees, drawn 9 px and 15 px wide",
+      "tris": 112,
+      "paths": 4,
+      "junctions": 1,
+      "components": 1,
+      "closed": true,
+      "lineLength": 47.807,
+      "extent": [
+        22.184,
+        22.184,
+        0.3
+      ],
+      "meshAngles": [
+        67,
+        23
+      ],
+      "bridgedPaths": 1,
+      "nonSolid": true
+    },
+    {
+      "file": "traced_parallel_113.stl",
+      "from": "two-apart.png",
+      "shows": "two parallel strokes at 113 degrees, 140 px apart, touching nothing",
+      "tris": 24,
+      "paths": 2,
+      "junctions": 0,
+      "components": 2,
+      "closed": true,
+      "lineLength": 43.072,
+      "extent": [
+        16.527,
+        23.264,
+        0.3
+      ],
+      "meshAngles": [
+        113
+      ],
+      "bridgedPaths": 0,
+      "nonSolid": true
+    },
+    {
+      "file": "traced_hand_stroke.stl",
+      "from": "hand-stroke.png",
+      "shows": "the same hand-drawn wobbly stroke as hand-stroke.jpg, saved losslessly as PNG",
+      "tris": 212,
+      "paths": 1,
+      "junctions": 0,
+      "components": 1,
+      "closed": true,
+      "lineLength": 23.204,
+      "extent": [
+        20.934,
+        9.769,
+        0.3
+      ],
+      "meshAngles": [
+        34,
+        13,
+        6,
+        19
+      ],
+      "bridgedPaths": 0,
+      "nonSolid": true
+    }
+  ]
+}

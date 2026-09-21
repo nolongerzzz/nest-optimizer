@@ -13,6 +13,11 @@
  *                               p:path on <component> / <item> (Bambu Studio
  *                               and PrusaSlicer write their meshes this way)
  *   Metadata/model_settings.config   Bambu object names, when present
+ *   Metadata/nso_scene.json          NSO's own scene block, handed back
+ *                                    verbatim as `sceneJson` when the archive
+ *                                    has one - this reader does not interpret
+ *                                    it (nso-3mf-scene.js owns that schema),
+ *                                    and a file without it simply reports null
  *
  * Output is one triangle soup per build item, in millimetres, Z up, with every
  * component and item transform applied - i.e. where the object sits on the
@@ -284,6 +289,8 @@
   // 3MF model part
   // ===========================================================================
 
+  var PART_NSO_SCENE = 'Metadata/nso_scene.json';
+
   var UNIT_TO_MM = {
     micron: 0.001, millimeter: 1, centimeter: 10, inch: 25.4, foot: 304.8, meter: 1000
   };
@@ -480,7 +487,8 @@
    * @param {{name?: string}} [opts]         name of the file, for fallback names
    * @returns {Promise<{objects: {id: string, name: string, positions: Float32Array,
    *                              triangleCount: number}[],
-   *                    unit: string, application: string, warnings: string[]}>}
+   *                    unit: string, application: string, sceneJson: string|null,
+   *                    warnings: string[]}>}
    *   positions is a triangle soup [x,y,z, x,y,z, x,y,z, ...] per triangle, in
    *   millimetres, Z up, with all transforms applied - one entry per build item.
    */
@@ -516,8 +524,21 @@
         })
       : Promise.resolve({});
 
-    return Promise.all([rootRels, bambuNames]).then(function (r) {
-      var rootPart = r[0], names = r[1];
+    // Optional, and optional all the way down: a plain Bambu or MakerWorld
+    // file has no such part, and an unreadable one is a warning rather than a
+    // failed import - geometry does not depend on it.
+    var sceneJson = zip.has(PART_NSO_SCENE)
+      ? zip.read(PART_NSO_SCENE).then(function (d) {
+          try { return decoder.decode(d); }
+          catch (e) { warnings.push('nso_scene.json unreadable: ' + e.message); return null; }
+        }).catch(function (e) {
+          warnings.push('nso_scene.json could not be read: ' + e.message);
+          return null;
+        })
+      : Promise.resolve(null);
+
+    return Promise.all([rootRels, bambuNames, sceneJson]).then(function (r) {
+      var rootPart = r[0], names = r[1], scene = r[2];
       return loadPart(rootPart).then(function (root) {
         var items = root.build.slice();
         if (!items.length) {
@@ -593,6 +614,7 @@
             objects: out,
             unit: root.unit,
             application: root.metadata.Application || '',
+            sceneJson: scene,
             warnings: warnings
           };
         });
@@ -632,6 +654,7 @@
     parseTransform: parseTransform,
     mul: mul,
     det3: det3,
-    UNIT_TO_MM: UNIT_TO_MM
+    UNIT_TO_MM: UNIT_TO_MM,
+    PART_NSO_SCENE: PART_NSO_SCENE
   };
 });

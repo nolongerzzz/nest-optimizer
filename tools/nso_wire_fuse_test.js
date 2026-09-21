@@ -16,7 +16,23 @@ const check = (name, cond, detail) => {
 async function splitFixture(page, file) {
   await page.evaluate(() => { state.models = []; state.placed = []; state.undoStack = []; });
   const id = await loadSTL(page, file);
-  await page.evaluate(() => { for (const d of document.querySelectorAll('details')) d.open = true; });
+  await page.evaluate(async () => {
+    document.querySelectorAll('details').forEach(d => { d.open = true; });
+    /* `.vp-menu` is an EXCLUSIVE accordion: the toggle handler in app-join.js
+       closes every other menu when one opens, and `toggle` fires
+       ASYNCHRONOUSLY - so the blanket open above is partly undone a task
+       later, and re-opening a menu that is still `open` at this instant is a
+       no-op that the queued handlers then override. Let them settle, then set
+       the accordion explicitly to the menu whose buttons this suite clicks.
+       This was invisible while Finish was the only .vp-menu on the page. */
+    await new Promise(r => setTimeout(r, 0));
+    document.querySelectorAll('.vp-menu').forEach(m => {
+      m.open = m.classList.contains('vp-finish-menu');
+    });
+    await new Promise(r => setTimeout(r, 0));
+  });
+  // btn-cutter-open moved into the top bar's Cut dropdown; unfold it first.
+  await page.evaluate(() => { const e = document.getElementById('btn-cutter-open'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   if (!(await page.evaluate(() => state.cutterOpen))) await page.click('#btn-cutter-open');
   await selectModel(page, id);
   return await page.evaluate(() => {

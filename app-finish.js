@@ -113,28 +113,7 @@ function rawPerimeterFilletInPlace(rawTris, axisIdx, keepMin, requestedR, opts) 
   // Wall available at a loop point, skipping only the two segments that
   // touch it. rawLocalThickness2 skips everything within two indices, so on a
   // coarse loop it skips the whole loop and falls back to its 4mm default.
-  const wallLimitAt = (i) => {
-    const curr = poly2d[i];
-    const prev = poly2d[(i-1+n)%n], next = poly2d[(i+1)%n];
-    const nn = rawEdgeInwardNormal2(prev, next);
-    let best = Infinity;
-    for (let j = 0; j < n; j++) {
-      if (j === i || j === (i-1+n)%n) continue;
-      const a = poly2d[j], b = poly2d[(j+1)%n];
-      const dx = b[0]-a[0], dy = b[1]-a[1];
-      const den = nn[0]*dy - nn[1]*dx;
-      if (Math.abs(den) < 1e-10) continue;
-      const t = ((a[0]-curr[0])*dy - (a[1]-curr[1])*dx) / den;
-      const u = ((a[0]-curr[0])*nn[1] - (a[1]-curr[1])*nn[0]) / -den;
-      if (t > 0.1 && t < best && u >= -0.05 && u <= 1.05) best = t;
-    }
-    for (let j = 0; j < n; j++) {
-      if (j === i || j === (i-1+n)%n || j === (i+1)%n) continue;
-      const d = Math.hypot(poly2d[j][0]-curr[0], poly2d[j][1]-curr[1]);
-      if (d < best) best = d;
-    }
-    return best === Infinity ? 4 : best;
-  };
+  const wallLimitAt = (i) => NSO_Thickness.cornerWall(poly2d, i).mm;
   // Every loop point carries R — that is the whole difference from Corners.
   const Rs = new Array(n);
   let peakR = 0;
@@ -638,28 +617,7 @@ function rawVertexBallOnly(rawTris, axisIdx, keepMin, requestedR, opts) {
     }
     return { d: d0, run: run };
   };
-  const wallLimitAt = (i) => {
-    const curr = poly[i];
-    const prev = poly[(i-1+nL)%nL], next = poly[(i+1)%nL];
-    const nn = rawEdgeInwardNormal2(prev, next);
-    let best = Infinity;
-    for (let j = 0; j < nL; j++) {
-      if (j === i || j === (i-1+nL)%nL) continue;
-      const a = poly[j], b = poly[(j+1)%nL];
-      const dx = b[0]-a[0], dy = b[1]-a[1];
-      const den = nn[0]*dy - nn[1]*dx;
-      if (Math.abs(den) < 1e-10) continue;
-      const t = ((a[0]-curr[0])*dy - (a[1]-curr[1])*dx) / den;
-      const u = ((a[0]-curr[0])*nn[1] - (a[1]-curr[1])*nn[0]) / -den;
-      if (t > 0.1 && t < best && u >= -0.05 && u <= 1.05) best = t;
-    }
-    for (let j = 0; j < nL; j++) {
-      if (j === i || j === (i-1+nL)%nL || j === (i+1)%nL) continue;
-      const d = Math.hypot(poly[j][0]-curr[0], poly[j][1]-curr[1]);
-      if (d < best) best = d;
-    }
-    return best === Infinity ? 4 : best;
-  };
+  const wallLimitAt = (i) => NSO_Thickness.cornerWall(poly, i).mm;
   const gapFwd = (t) => {
     if (cornerCount === 1) return total;
     let g = cum[apex[(t+1)%cornerCount]] - cum[apex[t]];
@@ -1355,28 +1313,7 @@ function rawVertexBallCorners(rawTris, axisIdx, keepMin, requestedR, opts) {
     }
     return { d: d0, run: run };
   };
-  const wallLimitAt = (i) => {
-    const curr = poly[i];
-    const prev = poly[(i-1+nL)%nL], next = poly[(i+1)%nL];
-    const nn = rawEdgeInwardNormal2(prev, next);
-    let best = Infinity;
-    for (let j = 0; j < nL; j++) {
-      if (j === i || j === (i-1+nL)%nL) continue;
-      const a = poly[j], b = poly[(j+1)%nL];
-      const dx = b[0]-a[0], dy = b[1]-a[1];
-      const den = nn[0]*dy - nn[1]*dx;
-      if (Math.abs(den) < 1e-10) continue;
-      const t = ((a[0]-curr[0])*dy - (a[1]-curr[1])*dx) / den;
-      const u = ((a[0]-curr[0])*nn[1] - (a[1]-curr[1])*nn[0]) / -den;
-      if (t > 0.1 && t < best && u >= -0.05 && u <= 1.05) best = t;
-    }
-    for (let j = 0; j < nL; j++) {
-      if (j === i || j === (i-1+nL)%nL || j === (i+1)%nL) continue;
-      const d = Math.hypot(poly[j][0]-curr[0], poly[j][1]-curr[1]);
-      if (d < best) best = d;
-    }
-    return best === Infinity ? 4 : best;
-  };
+  const wallLimitAt = (i) => NSO_Thickness.cornerWall(poly, i).mm;
   const gapFwd = (t) => {
     if (cornerCount === 1) return total;
     let g = cum[apex[(t+1)%cornerCount]] - cum[apex[t]];
@@ -2349,6 +2286,24 @@ function sealSelectedModel() {
   const repairChk = document.getElementById('chk-seal-repair');
   const repairMode = !!(repairChk && repairChk.checked);
 
+  // NON-SOLID SCOPE (docs/NON-SOLID.md): read through nsoNonSolid, never
+  // guessed from open-edge counts. Plain Seal's whole job is to close
+  // openings (cap loops, cap outer holes), which is the one requirement the
+  // flag lifts, so on a non-solid piece it stands down and says so. Repair
+  // still runs: NSO_Repair skips only its three closure-premised stages
+  // (flap peel, orphan drop, hole fill) and keeps welding, degenerate and
+  // duplicate removal, T-junctions, pinch separation and both final gates.
+  // It also re-closes any seam its own earlier stages tore open, which is why
+  // a flagged piece with real defects now repairs instead of tripping the
+  // odd-edge gate on damage the repair itself did; the piece's own openings
+  // are left alone, and the status line below names the two separately.
+  const nonSolid = (typeof nsoNonSolid === 'function') && nsoNonSolid(m);
+  if (nonSolid && !repairMode) {
+    setStatus('Seal stood down - ' + m.name + ' is flagged non-solid and Seal only closes ' +
+              'openings. Untick Non-solid to seal, or tick Repair to fix defects without closing.', true);
+    return;
+  }
+
   let openBefore = null, nmBefore = null;
   try { openBefore = openBoundaryEdges(soupIn).length; } catch (e) {}
   if (repairMode) { try { nmBefore = countNonManifoldEdges(soupIn); } catch (e) {} }
@@ -2387,7 +2342,7 @@ function sealSelectedModel() {
       working = result.soup;
       failReason = result.reason;
     } else {
-      const r = NSO_Repair.commit(soupIn);
+      const r = NSO_Repair.commit(soupIn, { nonSolid: nonSolid });
       repairReport = r.report || null;
       console.log('[seal/repair] NSO_Repair', r.ok, repairReport);
 
@@ -2408,11 +2363,21 @@ function sealSelectedModel() {
       //    silent no-op wearing a success message.
       if (!repairReport || repairReport.applied !== true) {
         const gated = (repairReport && repairReport.gate && repairReport.gate.blockedStages) || [];
+        // A piece the flag left alone can still carry a real defect the
+        // repair cannot fix (a pierce is not repairable here). Say it, so the
+        // flag never turns a defective piece into a clean-sounding no-op.
+        const residual = repairReport && repairReport.before ? repairReport.before.selfIntersections : 0;
+        const tail = residual > 0
+          ? ' - ' + residual + ' self-intersecting pair(s) present, not hidden by the ' +
+            (nonSolid ? 'non-solid flag' : 'repair')
+          : '';
+        const tag = nonSolid ? 'Repair (non-solid) ' : 'Repair ';
         if (gated.length) {
-          setStatus('Repair unavailable for this defect - ' + gated.length +
-                    ' stage(s) gated (' + gated.join(', ') + ') - piece unchanged', true);
+          setStatus(tag + 'unavailable for this defect - ' + gated.length +
+                    ' stage(s) gated (' + gated.join(', ') + ') - piece unchanged' + tail, true);
         } else {
-          setStatus('Nothing to repair - piece unchanged');
+          setStatus(nonSolid ? 'Nothing to repair (non-solid) - piece unchanged' + tail
+                             : 'Nothing to repair - piece unchanged' + tail, residual > 0);
         }
         return;
       }
@@ -2519,17 +2484,27 @@ function sealSelectedModel() {
     if (c.tJunctionSplits) did.push(c.tJunctionSplits + ' T-junction(s)');
     if (c.pinchVertsSplit) did.push(c.pinchVertsSplit + ' pinch vert(s) split');
     if (c.holesFilled) did.push(c.holesFilled + ' hole(s) filled');
+    // Not the same thing as a filled hole, and not shown as one: a seam is
+    // boundary an earlier stage of this same repair opened (deleting a
+    // degenerate sliver unpairs its neighbours), put back. Only the non-solid
+    // path reports these - without the flag hole fill has already covered
+    // them - and no opening the piece arrived with is ever counted here.
+    if (c.seamsReclosed) did.push(c.seamsReclosed + ' seam(s) re-closed');
+    const siAfter = (repairReport && repairReport.after) ? repairReport.after.selfIntersections : 0;
     const counts = 'open edges ' + openStr + ', non-manifold ' + nmStr +
-                   (did.length ? '; ' + did.join(', ') : '');
+                   (did.length ? '; ' + did.join(', ') : '') +
+                   (nonSolid ? '; open edges kept (non-solid)' : '') +
+                   (siAfter > 0 ? '; ' + siAfter + ' self-intersecting pair(s) remain' : '');
     const blocked = (repairReport && repairReport.gate && repairReport.gate.blockedStages) || [];
+    const tag = nonSolid ? 'Repair (non-solid) ' : 'Repair ';
     if (blocked.length) {
       // A gated stage means the safe passes landed but a risky one was rolled
       // back because it would have made the mesh worse. Say so - "Repair done"
       // would claim more than happened.
-      setStatus('Repair partial - ' + blocked.length + ' stage(s) gated (' +
+      setStatus(tag + 'partial - ' + blocked.length + ' stage(s) gated (' +
                 blocked.join(', ') + ') - ' + counts);
     } else {
-      setStatus('Repair done - ' + counts + (repairLegacy ? ' (fallback repair)' : ''));
+      setStatus(tag + 'done - ' + counts + (repairLegacy ? ' (fallback repair)' : ''), siAfter > 0);
     }
   } else {
     if (openBefore != null && openAfter != null) {
@@ -2645,224 +2620,465 @@ function solidifySelectedModel() {
   }
 }
 
-// ---- Thicken: voxel dilate/erode helpers (new, not used by Solidify) ----
+// ---- Thicken: one-sided planar offset ----
+//
+// Thicken out / in moves ONE side of the piece's skin by the asked distance
+// and leaves the other side exactly as it was:
+//   out - the OUTER faces (the ones the outside world touches) move outward
+//   in  - the INNER faces (pocket, slot, cavity, bore) move into their void
+// Which side a face is on is a property of the face, not of where air can
+// reach. A face whose plane supports the piece's convex hull (no vertex of
+// the piece lies beyond it) is OUTER, and so is every face reached from one
+// of those across creases shallower than THICKEN_SMOOTH_DEG - the rest of a
+// tessellated curve, a rounded edge, a knuckle's far side. Everything else
+// is INNER: an open cup's cavity floor and walls are inner even though the
+// open top lets air in, because the rim is a sharp crease. That sharp crease
+// is also what makes the offset well posed: the moving / held boundary only
+// ever sits on an edge where the two planes meet at THICKEN_SMOOTH_DEG or
+// more, never on the near-flat step between two facets of one curve. A
+// pocket whose rim is rounded therefore reads as outside skin - Thicken in
+// wants a sharp rim. The earlier voxel version decided in/out by flood-
+// filling from the grid border, so every open cavity read as "exterior":
+// Thicken in found nothing to grow into, Thicken out ate the slot as well as
+// growing the outside, and both re-sampled the whole piece into cubes,
+// which moved the held side too.
+//
+// The offset itself is the intersection of offset planes. Every vertex moves
+// to the point that satisfies n.p' = n.p + d for each incident face on the
+// moving side and n.p' = n.p for each face on the held side: exact when up to
+// three plane directions meet, an area-weighted normal push when more than
+// three all move together (a vertex on a coarse curve; least squares if their
+// targets differ), minimum-norm when fewer (a vertex inside a flat face moves
+// straight along the normal, a vertex on a box edge slides to the offset edge). Incident faces whose
+// normals lie within THICKEN_CLUSTER_DEG of each other and share a target are
+// merged into one plane first, so a tessellated curve moves along its vertex
+// normal instead of chasing the intersection of near-parallel facets. Planar
+// faces stay planar, box corners stay sharp, the triangle count does not
+// change, and a held face's vertices that touch no moving face do not move at
+// all - the held side is bit-identical to the input.
+//
+// Refused, piece unchanged: an offset that inverts a face (bigger than the
+// slot or wall it grows into), one that raises the piercing self-intersection
+// count, or a piece with no face on the asked side (Thicken in on a solid).
+// A moving/held crease of only a few degrees (THICKEN_RESOLVE_RATIO; a fillet
+// running tangent into a held face) cannot be placed exactly; those vertices move
+// along the resolved directions only and are counted in the status line.
+//
+// PAINT SCOPE: WHOLE-PIECE. Any painted face on the piece stands this down.
+// The moving side's rim vertices are shared with the held faces, so a painted
+// held face would still change outline; there is no clean sub-region to scope
+// to. nsoMaskCount is the whole test, as for Smooth - see the scoping rule in
+// docs/HANDOFF.md.
+//
+// Non-solid flag: not read (docs/NON-SOLID.md section 6). The offset is per
+// face and per vertex and never needed closure; open loops stay open and the
+// status line still reports open / NM before and after.
 
-const THICKEN_MAX_DIM = 110;
-const THICKEN_TARGET_STEPS = 4;
-const THICKEN_PAD_VOX = 3;
+const THICKEN_HULL_EPS = 1e-3;       // mm past a face plane a vertex may sit and the face still count as outer
+const THICKEN_SMOOTH_DEG = 45;       // creases shallower than this are one surface; sharper ones bound a pocket
+const THICKEN_CLUSTER_DEG = 15;      // incident faces this close in normal, same target, share one plane
+const THICKEN_RESOLVE_RATIO = 1e-3;  // eigenvalue / largest below which a direction is left unresolved
+const THICKEN_MAX_MOVE = 6;          // safety cap on a vertex's move, in offsets
+const THICKEN_VOTE_AREA = 1e-3;      // mm2: a face smaller than this is a seam sliver and gets no vote on where a vertex goes
+const THICKEN_FLIP_AREA = 1e-2;      // mm2: a face smaller than this (or thinner than THICKEN_SLIVER_WIDTH) may fold without an
+const THICKEN_SLIVER_WIDTH = 0.1;    // mm   inversion verdict - it is well under a nozzle width; the piercing check still stands
+const THICKEN_MIN_POCKET_AREA = 0.16; // mm2: an inner patch smaller than a nozzle-width square is surface noise, not a pocket
 
-function _thickenBBoxOfSoup(soup) {
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+/* Weld the soup for topology only (1e-4 mm cells); positions are kept verbatim. */
+function _thickenIndex(soup) {
+  const inv = 1e4;
+  const map = new Map();
+  const pos = [];
+  const tri = [];
   for (let i = 0; i < soup.length; i += 3) {
     const x = soup[i], y = soup[i + 1], z = soup[i + 2];
-    if (x < minX) minX = x; if (x > maxX) maxX = x;
-    if (y < minY) minY = y; if (y > maxY) maxY = y;
-    if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+    const k = Math.round(x * inv) + ',' + Math.round(y * inv) + ',' + Math.round(z * inv);
+    let id = map.get(k);
+    if (id === undefined) { id = pos.length / 3; pos.push(x, y, z); map.set(k, id); }
+    tri.push(id);
   }
-  return { minX, minY, minZ, maxX, maxY, maxZ };
+  return { pos, tri };
 }
 
-function _thickenChoosePitch(bb, offsetMm) {
-  const spanX = Math.max(1e-3, bb.maxX - bb.minX);
-  const spanY = Math.max(1e-3, bb.maxY - bb.minY);
-  const spanZ = Math.max(1e-3, bb.maxZ - bb.minZ);
-  let pitch = Math.max(offsetMm / THICKEN_TARGET_STEPS, 0.05);
-  function dims(p) {
-    return [
-      Math.ceil(spanX / p) + THICKEN_PAD_VOX * 2,
-      Math.ceil(spanY / p) + THICKEN_PAD_VOX * 2,
-      Math.ceil(spanZ / p) + THICKEN_PAD_VOX * 2
-    ];
+/* Unit normals and areas per face from an indexed mesh; ok[f] = 0 for degenerate faces. */
+function _thickenFaceNormals(pos, tri) {
+  const nf = tri.length / 3;
+  const n = new Float64Array(nf * 3);
+  const area = new Float64Array(nf);
+  const alt = new Float64Array(nf); // shortest altitude: the width of a sliver
+  const ok = new Uint8Array(nf);
+  let vol6 = 0;
+  for (let f = 0; f < nf; f++) {
+    const a = tri[f * 3] * 3, b = tri[f * 3 + 1] * 3, c = tri[f * 3 + 2] * 3;
+    const ax = pos[a], ay = pos[a + 1], az = pos[a + 2];
+    const e1x = pos[b] - ax, e1y = pos[b + 1] - ay, e1z = pos[b + 2] - az;
+    const e2x = pos[c] - ax, e2y = pos[c + 1] - ay, e2z = pos[c + 2] - az;
+    const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    vol6 += ax * (pos[b + 1] * pos[c + 2] - pos[b + 2] * pos[c + 1])
+          + ay * (pos[b + 2] * pos[c] - pos[b] * pos[c + 2])
+          + az * (pos[b] * pos[c + 1] - pos[b + 1] * pos[c]);
+    if (!(len > 1e-12)) continue;
+    n[f * 3] = nx / len; n[f * 3 + 1] = ny / len; n[f * 3 + 2] = nz / len;
+    area[f] = len / 2;
+    const e3x = pos[c] - pos[b], e3y = pos[c + 1] - pos[b + 1], e3z = pos[c + 2] - pos[b + 2];
+    const longest = Math.sqrt(Math.max(e1x * e1x + e1y * e1y + e1z * e1z, e2x * e2x + e2y * e2y + e2z * e2z, e3x * e3x + e3y * e3y + e3z * e3z));
+    alt[f] = len / longest;
+    ok[f] = 1;
   }
-  let [nx, ny, nz] = dims(pitch);
-  let guard = 0;
-  while ((nx > THICKEN_MAX_DIM || ny > THICKEN_MAX_DIM || nz > THICKEN_MAX_DIM) && guard < 60) {
-    pitch *= 1.25;
-    [nx, ny, nz] = dims(pitch);
-    guard++;
-  }
-  return pitch;
+  return { n, area, alt, ok, signedVolume: vol6 / 6 };
 }
 
-function _thickenPointInTri2D(px, py, ax, ay, bx, by, cx, cy) {
-  const d1 = (px - bx) * (ay - by) - (ax - bx) * (py - by);
-  const d2 = (px - cx) * (by - cy) - (bx - cx) * (py - cy);
-  const d3 = (px - ax) * (cy - ay) - (cx - ax) * (py - ay);
-  const hasNeg = (d1 < 0) || (d2 < 0) || (d3 < 0);
-  const hasPos = (d1 > 0) || (d2 > 0) || (d3 > 0);
-  return !(hasNeg && hasPos);
-}
-
-function _thickenVoxelize(soup, pitch) {
-  const bb = _thickenBBoxOfSoup(soup);
-  const pad = THICKEN_PAD_VOX * pitch;
-  const ox = bb.minX - pad, oy = bb.minY - pad, oz = bb.minZ - pad;
-  const nx = Math.max(1, Math.ceil((bb.maxX - bb.minX) / pitch) + THICKEN_PAD_VOX * 2);
-  const ny = Math.max(1, Math.ceil((bb.maxY - bb.minY) / pitch) + THICKEN_PAD_VOX * 2);
-  const nz = Math.max(1, Math.ceil((bb.maxZ - bb.minZ) / pitch) + THICKEN_PAD_VOX * 2);
-
-  const grid = new Uint8Array(nx * ny * nz);
-  const idx = (ix, iy, iz) => (ix * ny + iy) * nz + iz;
-
-  const buckets = new Array(nx * ny);
-  const triCount = (soup.length / 9) | 0;
-  for (let t = 0; t < triCount; t++) {
-    const i = t * 9;
-    const ax = soup[i], ay = soup[i + 1];
-    const bx = soup[i + 3], by = soup[i + 4];
-    const cxp = soup[i + 6], cyp = soup[i + 7];
-    const minXt = Math.min(ax, bx, cxp), maxXt = Math.max(ax, bx, cxp);
-    const minYt = Math.min(ay, by, cyp), maxYt = Math.max(ay, by, cyp);
-    const ix0 = Math.max(0, Math.floor((minXt - ox) / pitch) - 1);
-    const ix1 = Math.min(nx - 1, Math.ceil((maxXt - ox) / pitch) + 1);
-    const iy0 = Math.max(0, Math.floor((minYt - oy) / pitch) - 1);
-    const iy1 = Math.min(ny - 1, Math.ceil((maxYt - oy) / pitch) + 1);
-    for (let ix = ix0; ix <= ix1; ix++) {
-      for (let iy = iy0; iy <= iy1; iy++) {
-        const bi = ix * ny + iy;
-        if (!buckets[bi]) buckets[bi] = [];
-        buckets[bi].push(t);
+/* outer[f] = 1 when the face plane supports the convex hull (no vertex of the
+   piece lies more than THICKEN_HULL_EPS beyond it; coplanar faces share one
+   test), or when a chain of creases shallower than THICKEN_SMOOTH_DEG leads
+   to such a face. Every other face is inner. */
+function _thickenClassifyOuter(pos, tri, fn, sign) {
+  const outer = _thickenHullFaces(pos, tri, fn, sign);
+  const nf = tri.length / 3, nv = pos.length / 3;
+  // faces around each vertex: adjacency through shared vertices, so a
+  // T-junction or a non-manifold edge still connects what it touches
+  const vertFaces = new Array(nv);
+  for (let f = 0; f < nf; f++) {
+    if (!fn.ok[f]) continue;
+    for (let k = 0; k < 3; k++) {
+      const v = tri[f * 3 + k];
+      (vertFaces[v] || (vertFaces[v] = [])).push(f);
+    }
+  }
+  const cosSmooth = Math.cos(THICKEN_SMOOTH_DEG * Math.PI / 180);
+  const queue = [];
+  for (let f = 0; f < nf; f++) if (outer[f]) queue.push(f);
+  while (queue.length) {
+    const f = queue.pop();
+    const nx = fn.n[f * 3], ny = fn.n[f * 3 + 1], nz = fn.n[f * 3 + 2];
+    for (let k = 0; k < 3; k++) {
+      const list = vertFaces[tri[f * 3 + k]];
+      for (let i = 0; i < list.length; i++) {
+        const g = list[i];
+        if (g === f || outer[g]) continue;
+        if (nx * fn.n[g * 3] + ny * fn.n[g * 3 + 1] + nz * fn.n[g * 3 + 2] > cosSmooth) { outer[g] = 1; queue.push(g); }
       }
     }
   }
+  // an inner patch smaller than THICKEN_MIN_POCKET_AREA (a hairline ledge or
+  // seam sliver left by a CAD export) is not a pocket: it rides with the skin
+  const seen = new Uint8Array(nf);
+  for (let f0 = 0; f0 < nf; f0++) {
+    if (!fn.ok[f0] || outer[f0] || seen[f0]) continue;
+    const comp = [f0]; seen[f0] = 1;
+    let area = 0;
+    for (let qi = 0; qi < comp.length; qi++) {
+      const f = comp[qi];
+      area += fn.area[f];
+      for (let k = 0; k < 3; k++) {
+        const list = vertFaces[tri[f * 3 + k]];
+        for (let i = 0; i < list.length; i++) {
+          const g = list[i];
+          if (outer[g] || seen[g]) continue;
+          seen[g] = 1; comp.push(g);
+        }
+      }
+    }
+    if (area < THICKEN_MIN_POCKET_AREA) for (let i = 0; i < comp.length; i++) outer[comp[i]] = 1;
+  }
+  return outer;
+}
 
-  const EPS = 1e-6;
-  for (let ix = 0; ix < nx; ix++) {
-    const cx = ox + (ix + 0.5) * pitch;
-    for (let iy = 0; iy < ny; iy++) {
-      const list = buckets[ix * ny + iy];
-      if (!list || !list.length) continue;
-      const cy = oy + (iy + 0.5) * pitch;
-      const zs = [];
-      for (let li = 0; li < list.length; li++) {
-        const i = list[li] * 9;
-        const ax = soup[i], ay = soup[i + 1], az = soup[i + 2];
-        const bx = soup[i + 3], by = soup[i + 4], bz = soup[i + 5];
-        const cxp = soup[i + 6], cyp = soup[i + 7], cz = soup[i + 8];
-        if (!_thickenPointInTri2D(cx, cy, ax, ay, bx, by, cxp, cyp)) continue;
-        const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
-        const e2x = cxp - ax, e2y = cyp - ay, e2z = cz - az;
-        const nX = e1y * e2z - e1z * e2y;
-        const nY = e1z * e2x - e1x * e2z;
-        const nZ = e1x * e2y - e1y * e2x;
-        if (Math.abs(nZ) < EPS) continue;
-        zs.push(az - (nX * (cx - ax) + nY * (cy - ay)) / nZ);
+function _thickenHullFaces(pos, tri, fn, sign) {
+  const nf = tri.length / 3, nv = pos.length / 3;
+  const outer = new Uint8Array(nf);
+  const cache = new Map();
+  for (let f = 0; f < nf; f++) {
+    if (!fn.ok[f]) continue;
+    const nx = fn.n[f * 3] * sign, ny = fn.n[f * 3 + 1] * sign, nz = fn.n[f * 3 + 2] * sign;
+    const a = tri[f * 3] * 3;
+    const d = nx * pos[a] + ny * pos[a + 1] + nz * pos[a + 2];
+    const key = Math.round(nx * 1e4) + ',' + Math.round(ny * 1e4) + ',' + Math.round(nz * 1e4) + ',' + Math.round(d * 1e3);
+    let r = cache.get(key);
+    if (r === undefined) {
+      r = 1;
+      for (let v = 0; v < nv; v++) {
+        if (nx * pos[v * 3] + ny * pos[v * 3 + 1] + nz * pos[v * 3 + 2] - d > THICKEN_HULL_EPS) { r = 0; break; }
       }
-      if (zs.length < 2) continue;
-      zs.sort((a, b) => a - b);
-      const uniq = [];
-      for (let k = 0; k < zs.length; k++) {
-        if (k === 0 || zs[k] - uniq[uniq.length - 1] > pitch * 0.1) uniq.push(zs[k]);
-        else uniq[uniq.length - 1] = zs[k];
+      cache.set(key, r);
+    }
+    outer[f] = r;
+  }
+  return outer;
+}
+
+/* Eigen-decomposition of a symmetric 3x3 (Jacobi). Returns { val: [3], vec: [9] column-major }. */
+function _thickenEigSym3(m) {
+  const a = [m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]];
+  const v = [1, 0, 0, 0, 1, 0, 0, 0, 1];
+  for (let sweep = 0; sweep < 30; sweep++) {
+    const off = Math.abs(a[1]) + Math.abs(a[2]) + Math.abs(a[5]);
+    if (off < 1e-15) break;
+    for (const [p, q] of [[0, 1], [0, 2], [1, 2]]) {
+      const apq = a[p * 3 + q];
+      if (Math.abs(apq) < 1e-18) continue;
+      const app = a[p * 3 + p], aqq = a[q * 3 + q];
+      const theta = (aqq - app) / (2 * apq);
+      const t = (theta >= 0 ? 1 : -1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+      const c = 1 / Math.sqrt(t * t + 1), s = t * c;
+      for (let k = 0; k < 3; k++) {
+        const akp = a[k * 3 + p], akq = a[k * 3 + q];
+        a[k * 3 + p] = c * akp - s * akq; a[k * 3 + q] = s * akp + c * akq;
       }
-      const pairCount = uniq.length - (uniq.length % 2);
-      for (let k = 0; k < pairCount; k += 2) {
-        const z0 = uniq[k], z1 = uniq[k + 1];
-        const iz0 = Math.max(0, Math.ceil((z0 - oz) / pitch - 0.5));
-        const iz1 = Math.min(nz - 1, Math.floor((z1 - oz) / pitch - 0.5));
-        for (let iz = iz0; iz <= iz1; iz++) grid[idx(ix, iy, iz)] = 1;
+      for (let k = 0; k < 3; k++) {
+        const apk = a[p * 3 + k], aqk = a[q * 3 + k];
+        a[p * 3 + k] = c * apk - s * aqk; a[q * 3 + k] = s * apk + c * aqk;
+      }
+      for (let k = 0; k < 3; k++) {
+        const vkp = v[k * 3 + p], vkq = v[k * 3 + q];
+        v[k * 3 + p] = c * vkp - s * vkq; v[k * 3 + q] = s * vkp + c * vkq;
       }
     }
   }
-  return { grid, nx, ny, nz, ox, oy, oz, pitch, idx };
+  return { val: [a[0], a[4], a[8]], vec: v };
 }
 
-function _thickenClassifyExterior(vox) {
-  const { grid, nx, ny, nz, idx } = vox;
-  const exterior = new Uint8Array(nx * ny * nz);
-  const total = nx * ny * nz;
-  const qx = new Int32Array(total), qy = new Int32Array(total), qz = new Int32Array(total);
-  let qh = 0, qt = 0;
-  function tryPush(ix, iy, iz) {
-    if (ix < 0 || iy < 0 || iz < 0 || ix >= nx || iy >= ny || iz >= nz) return;
-    const id = idx(ix, iy, iz);
-    if (grid[id] === 1 || exterior[id] === 1) return;
-    exterior[id] = 1;
-    qx[qt] = ix; qy[qt] = iy; qz[qt] = iz; qt++;
-  }
-  for (let ix = 0; ix < nx; ix++) for (let iy = 0; iy < ny; iy++) { tryPush(ix, iy, 0); tryPush(ix, iy, nz - 1); }
-  for (let ix = 0; ix < nx; ix++) for (let iz = 0; iz < nz; iz++) { tryPush(ix, 0, iz); tryPush(ix, ny - 1, iz); }
-  for (let iy = 0; iy < ny; iy++) for (let iz = 0; iz < nz; iz++) { tryPush(0, iy, iz); tryPush(nx - 1, iy, iz); }
-  while (qh < qt) {
-    const ix = qx[qh], iy = qy[qh], iz = qz[qh]; qh++;
-    tryPush(ix + 1, iy, iz); tryPush(ix - 1, iy, iz);
-    tryPush(ix, iy + 1, iz); tryPush(ix, iy - 1, iz);
-    tryPush(ix, iy, iz + 1); tryPush(ix, iy, iz - 1);
-  }
-  return exterior;
-}
-
-function _thickenDilateInto(vox, allowMask, steps) {
-  const { grid, nx, ny, nz, idx } = vox;
-  let frontier = [];
-  for (let ix = 0; ix < nx; ix++) for (let iy = 0; iy < ny; iy++) for (let iz = 0; iz < nz; iz++) {
-    const id = idx(ix, iy, iz);
-    if (grid[id] !== 1) continue;
-    if (
-      (ix + 1 < nx && grid[idx(ix + 1, iy, iz)] === 0 && allowMask[idx(ix + 1, iy, iz)]) ||
-      (ix - 1 >= 0 && grid[idx(ix - 1, iy, iz)] === 0 && allowMask[idx(ix - 1, iy, iz)]) ||
-      (iy + 1 < ny && grid[idx(ix, iy + 1, iz)] === 0 && allowMask[idx(ix, iy + 1, iz)]) ||
-      (iy - 1 >= 0 && grid[idx(ix, iy - 1, iz)] === 0 && allowMask[idx(ix, iy - 1, iz)]) ||
-      (iz + 1 < nz && grid[idx(ix, iy, iz + 1)] === 0 && allowMask[idx(ix, iy, iz + 1)]) ||
-      (iz - 1 >= 0 && grid[idx(ix, iy, iz - 1)] === 0 && allowMask[idx(ix, iy, iz - 1)])
-    ) frontier.push(id);
-  }
-  for (let s = 0; s < steps && frontier.length; s++) {
-    const next = [];
-    const seen = new Set();
-    for (let fi = 0; fi < frontier.length; fi++) {
-      const id = frontier[fi];
-      const iz = id % nz;
-      const iy = ((id - iz) / nz) % ny;
-      const ix = (id - iz - iy * nz) / (nz * ny);
-      const nb = [[ix + 1, iy, iz], [ix - 1, iy, iz], [ix, iy + 1, iz], [ix, iy - 1, iz], [ix, iy, iz + 1], [ix, iy, iz - 1]];
-      for (let k = 0; k < 6; k++) {
-        const nxp = nb[k][0], nyp = nb[k][1], nzp = nb[k][2];
-        if (nxp < 0 || nyp < 0 || nzp < 0 || nxp >= nx || nyp >= ny || nzp >= nz) continue;
-        const nid = idx(nxp, nyp, nzp);
-        if (grid[nid] === 1 || !allowMask[nid] || seen.has(nid)) continue;
-        seen.add(nid);
-        grid[nid] = 1;
-        next.push(nid);
-      }
+/* One vertex: cluster its incident planes, solve the offset-plane intersection.
+   Returns { d: [dx,dy,dz], approx: 0|1 }. */
+function _thickenSolveVertex(planes, offset) {
+  const cosTol = Math.cos(THICKEN_CLUSTER_DEG * Math.PI / 180);
+  const clusters = [];
+  planes.sort((p, q) => q.w - p.w);
+  for (const p of planes) {
+    let hit = null;
+    for (const c of clusters) {
+      if (c.t !== p.t) continue;
+      const len = Math.sqrt(c.sx * c.sx + c.sy * c.sy + c.sz * c.sz) || 1;
+      if ((c.sx * p.nx + c.sy * p.ny + c.sz * p.nz) / len >= cosTol) { hit = c; break; }
     }
-    frontier = next;
+    if (hit) { hit.sx += p.w * p.nx; hit.sy += p.w * p.ny; hit.sz += p.w * p.nz; hit.w += p.w; }
+    else clusters.push({ t: p.t, sx: p.w * p.nx, sy: p.w * p.ny, sz: p.w * p.nz, w: p.w });
   }
+  // more than three plane directions, all moving (a vertex on a coarse
+  // curve): the planes meet at no single point, and least squares would let
+  // the odd one out drag the vertex sideways - move along the area-weighted
+  // normal instead, scaled so the planes are offset by d on average
+  if (clusters.length > 3 && clusters.every(c => c.t === clusters[0].t)) {
+    let sx = 0, sy = 0, sz = 0;
+    for (const c of clusters) { sx += c.sx; sy += c.sy; sz += c.sz; }
+    const len = Math.sqrt(sx * sx + sy * sy + sz * sz);
+    if (len > 1e-12) {
+      sx /= len; sy /= len; sz /= len;
+      let cosSum = 0, cnt = 0;
+      for (const c of clusters) {
+        const cl = Math.sqrt(c.sx * c.sx + c.sy * c.sy + c.sz * c.sz);
+        if (cl > 1e-12) { cosSum += (c.sx * sx + c.sy * sy + c.sz * sz) / cl; cnt++; }
+      }
+      const scale = clusters[0].t / Math.max(cosSum / cnt, 0.2);
+      return { d: [sx * scale, sy * scale, sz * scale], approx: 0 };
+    }
+  }
+  // area weights average the normal inside a cluster; across clusters every
+  // plane is one geometric constraint, so a small chamfer counts like a big face
+  const A = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  const b = [0, 0, 0];
+  for (const c of clusters) {
+    const len = Math.sqrt(c.sx * c.sx + c.sy * c.sy + c.sz * c.sz);
+    if (!(len > 1e-12)) continue;
+    const nx = c.sx / len, ny = c.sy / len, nz = c.sz / len;
+    const w = 1 / clusters.length;
+    A[0] += w * nx * nx; A[1] += w * nx * ny; A[2] += w * nx * nz;
+    A[4] += w * ny * ny; A[5] += w * ny * nz; A[8] += w * nz * nz;
+    b[0] += w * nx * c.t; b[1] += w * ny * c.t; b[2] += w * nz * c.t;
+  }
+  A[3] = A[1]; A[6] = A[2]; A[7] = A[5];
+  const e = _thickenEigSym3(A);
+  const lmax = Math.max(e.val[0], e.val[1], e.val[2]);
+  const d = [0, 0, 0];
+  let approx = 0;
+  for (let k = 0; k < 3; k++) {
+    const lam = e.val[k];
+    const ex = e.vec[k], ey = e.vec[3 + k], ez = e.vec[6 + k];
+    const proj = ex * b[0] + ey * b[1] + ez * b[2];
+    if (lam <= THICKEN_RESOLVE_RATIO * lmax) {
+      // no plane pins this direction (flat face, edge line) - stay put along it;
+      // if the planes disagreed here it is a tangent crease, count it
+      if (Math.abs(proj) > 1e-6 * Math.abs(offset)) approx = 1;
+      continue;
+    }
+    const s = proj / lam;
+    d[0] += s * ex; d[1] += s * ey; d[2] += s * ez;
+  }
+  const mag = Math.sqrt(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+  const cap = THICKEN_MAX_MOVE * Math.abs(offset);
+  if (mag > cap) { const s = cap / mag; d[0] *= s; d[1] *= s; d[2] *= s; approx = 1; }
+  return { d, approx };
 }
 
-function _thickenSoupFromVoxels(vox) {
-  const { grid, nx, ny, nz, ox, oy, oz, pitch, idx } = vox;
-  const out = [];
-  function solidAt(ix, iy, iz) {
-    if (ix < 0 || iy < 0 || iz < 0 || ix >= nx || iy >= ny || iz >= nz) return 0;
-    return grid[idx(ix, iy, iz)];
+/* The offset. Returns { soup, moved, held, approx } or { reason } when refused.
+
+   opts.mayMove   optional Uint8Array, one entry per INPUT TRIANGLE (face f is
+                  triangle f of the soup, because _thickenIndex welds positions
+                  only and never reorders or merges faces). A 0 forbids that
+                  face from moving; it becomes a HELD plane like any other, so
+                  the vertex solve pins it exactly as it pins the far side of a
+                  Thicken out. The filter only ever NARROWS: a face still has to
+                  be on the asked side first. Omit it and nothing changes -
+                  every existing caller passes two arguments and gets the
+                  identical whole-surface offset it always got.
+
+                  Added for Fatten (app-fatten.js), which restricts the offset
+                  to the faces parallel to a piece's dominant axis so the length
+                  stays fixed. The axis is entirely the caller's business: this
+                  file offsets surfaces and has no notion of an axis, and giving
+                  it one would be the wrong place to put it.
+
+   offsetMm may be NEGATIVE here and always could be: every step below is
+   linear in it and the sign simply reverses the push. Only the UI entry point
+   gates it positive, which is why that gate is the one that had to learn about
+   signed callers rather than this function. A shrink is refused by the same
+   inversion check that refuses an over-large grow - a wall thinner than the
+   amount taken off it turns inside out and is caught there. */
+function _thickenOffsetSoup(soup, mode, offsetMm, opts) {
+  opts = opts || {};
+  const mayMove = opts.mayMove || null;
+  const { pos, tri } = _thickenIndex(soup);
+  const nf = tri.length / 3, nv = pos.length / 3;
+  const fn = _thickenFaceNormals(pos, tri);
+  // STLs wound inward (negative signed volume) still thicken outward
+  const sign = fn.signedVolume < 0 ? -1 : 1;
+  const outer = _thickenClassifyOuter(pos, tri, fn, sign);
+  const moving = new Uint8Array(nf);
+  let moved = 0, held = 0, filtered = 0;
+  for (let f = 0; f < nf; f++) {
+    if (!fn.ok[f]) continue;
+    moving[f] = (mode === 'out') ? outer[f] : (outer[f] ? 0 : 1);
+    if (moving[f] && mayMove && !mayMove[f]) { moving[f] = 0; filtered++; }
+    if (moving[f]) moved++; else held++;
   }
-  function push6(v0, v1, v2, v3) {
-    out.push(v0[0], v0[1], v0[2], v1[0], v1[1], v1[2], v2[0], v2[1], v2[2]);
-    out.push(v0[0], v0[1], v0[2], v2[0], v2[1], v2[2], v3[0], v3[1], v3[2]);
+  if (moved === 0) {
+    if (filtered > 0) {
+      return { reason: 'no face on the asked side survives the caller\'s filter (' + filtered + ' were filtered out)' };
+    }
+    return { reason: mode === 'out' ? 'no outer face found' : 'no inner face on this piece (every face is on the outside)' };
   }
-  for (let ix = 0; ix < nx; ix++) for (let iy = 0; iy < ny; iy++) for (let iz = 0; iz < nz; iz++) {
-    if (!solidAt(ix, iy, iz)) continue;
-    const x0 = ox + ix * pitch, x1 = x0 + pitch;
-    const y0 = oy + iy * pitch, y1 = y0 + pitch;
-    const z0 = oz + iz * pitch, z1 = z0 + pitch;
-    if (!solidAt(ix + 1, iy, iz)) push6([x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]);
-    if (!solidAt(ix - 1, iy, iz)) push6([x0, y0, z1], [x0, y1, z1], [x0, y1, z0], [x0, y0, z0]);
-    if (!solidAt(ix, iy + 1, iz)) push6([x1, y1, z0], [x0, y1, z0], [x0, y1, z1], [x1, y1, z1]);
-    if (!solidAt(ix, iy - 1, iz)) push6([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]);
-    if (!solidAt(ix, iy, iz + 1)) push6([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]);
-    if (!solidAt(ix, iy, iz - 1)) push6([x0, y1, z0], [x1, y1, z0], [x1, y0, z0], [x0, y0, z0]);
+  const incident = new Array(nv);
+  for (let f = 0; f < nf; f++) {
+    if (!fn.ok[f]) continue;
+    for (let k = 0; k < 3; k++) {
+      const v = tri[f * 3 + k];
+      (incident[v] || (incident[v] = [])).push(f);
+    }
   }
-  return out.length >= 9 ? new Float32Array(out) : null;
+  const out = new Float64Array(pos.length);
+  let approx = 0;
+  for (let v = 0; v < nv; v++) {
+    out[v * 3] = pos[v * 3]; out[v * 3 + 1] = pos[v * 3 + 1]; out[v * 3 + 2] = pos[v * 3 + 2];
+    const list = incident[v];
+    if (!list) continue;
+    // a sliver's normal is noise; where a real face is present, slivers under
+    // THICKEN_VOTE_AREA do not get a say in where the vertex goes
+    let wmax = 0;
+    for (const f of list) if (fn.area[f] > wmax) wmax = fn.area[f];
+    const floor = wmax >= THICKEN_VOTE_AREA ? THICKEN_VOTE_AREA : 0;
+    let any = 0;
+    const planes = [];
+    for (const f of list) {
+      if (fn.area[f] < floor) continue;
+      if (moving[f]) any = 1;
+      planes.push({ nx: fn.n[f * 3] * sign, ny: fn.n[f * 3 + 1] * sign, nz: fn.n[f * 3 + 2] * sign,
+                    w: fn.area[f], t: moving[f] ? offsetMm : 0 });
+    }
+    if (!any) continue; // touches no moving face: does not move, by construction
+    const r = _thickenSolveVertex(planes, offsetMm);
+    out[v * 3] += r.d[0]; out[v * 3 + 1] += r.d[1]; out[v * 3 + 2] += r.d[2];
+    approx += r.approx;
+  }
+  // a face whose normal turned round grew past the feature it sits in
+  // (a sliver - under THICKEN_FLIP_AREA, or thinner than THICKEN_SLIVER_WIDTH
+  // - is tessellation noise, not a feature; it may fold without a verdict)
+  let flipped = 0;
+  const flipArea2 = 2 * THICKEN_FLIP_AREA;
+  for (let f = 0; f < nf; f++) {
+    if (!fn.ok[f] || fn.area[f] < THICKEN_FLIP_AREA || fn.alt[f] < THICKEN_SLIVER_WIDTH) continue;
+    const a = tri[f * 3] * 3, b = tri[f * 3 + 1] * 3, c = tri[f * 3 + 2] * 3;
+    const e1x = out[b] - out[a], e1y = out[b + 1] - out[a + 1], e1z = out[b + 2] - out[a + 2];
+    const e2x = out[c] - out[a], e2y = out[c + 1] - out[a + 1], e2z = out[c + 2] - out[a + 2];
+    const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+    const dot = nx * fn.n[f * 3] + ny * fn.n[f * 3 + 1] + nz * fn.n[f * 3 + 2];
+    if (dot <= 0 && Math.sqrt(nx * nx + ny * ny + nz * nz) > flipArea2) flipped++;
+  }
+  if (flipped > 0) {
+    return { reason: offsetMm + ' mm is more than the feature it grows into (' + flipped + ' face(s) would turn inside out)' };
+  }
+  const res = new Float32Array(tri.length * 3);
+  for (let i = 0; i < tri.length; i++) {
+    const v = tri[i] * 3;
+    res[i * 3] = out[v]; res[i * 3 + 1] = out[v + 1]; res[i * 3 + 2] = out[v + 2];
+  }
+  return { soup: res, moved, held, approx, filtered, signedVolume: fn.signedVolume };
+}
+
+function _thickenSignedVolume(soup) {
+  let v6 = 0;
+  for (let i = 0; i + 8 < soup.length; i += 9) {
+    v6 += soup[i] * (soup[i + 4] * soup[i + 8] - soup[i + 5] * soup[i + 7])
+        + soup[i + 1] * (soup[i + 5] * soup[i + 6] - soup[i + 3] * soup[i + 8])
+        + soup[i + 2] * (soup[i + 3] * soup[i + 7] - soup[i + 4] * soup[i + 6]);
+  }
+  return v6 / 6;
 }
 
 // ---- main entry ----
 
-function thickenSelectedModel(mode, offsetMm) {
+/* The UI / commit half.
+
+   opts is optional and every field of it defaults to exactly what the two
+   Thicken buttons have always got, so `thickenSelectedModel(mode, mm)` is
+   unchanged in behaviour and in the text it writes to the status line:
+
+     opts.mayMove    narrow the moving face set - forwarded to
+                     _thickenOffsetSoup, see its comment
+     opts.signed     accept a negative offsetMm. The offset maths never cared
+                     about the sign; this gate did, because the two Thicken
+                     buttons only ever mean "outward" and a negative number in
+                     their box is a typo. A caller that means "inward by this
+                     much" says so here.
+     opts.gate       extra refusal, called as gate(soupIn, working) after the
+                     piercing check and before anything is committed. Returns a
+                     reason string to refuse, or a falsy value to allow. This is
+                     where a caller's own promise is proved - Fatten measures
+                     the axial length on `working` here and refuses if it moved.
+     opts.label      name for the status line, default 'Thicken'
+     opts.modeLabel  the word after the label, default `mode`
+     opts.mmLabel    the figure after that, default `offsetMm`. A caller whose
+                     direction is already in the mode word ("shrink") says the
+                     size as a plain magnitude here rather than printing a
+                     minus sign the user never typed.
+     opts.sideWord   'outer' / 'inner' in the status line, default from `mode`
+     opts.undoType   undo entry type, default 'thickenReplace'. A new type needs
+                     its row in UNDO_REPLACE_LABEL (app-core.js) or undo will
+                     not handle it - that table is the gate as well as the label.
+     opts.note       note(result, working) -> a string appended to the status
+                     line after every figure Thicken reports, so a wrapper can
+                     add its own without re-composing the whole message.
+
+   Returns { ok, reason, ... } so a wrapper can report; the two buttons ignore
+   it, as they always have. */
+function thickenSelectedModel(mode, offsetMm, opts) {
+  opts = opts || {};
+  const label = opts.label || 'Thicken';
+  const tag = label + ' ' + (opts.modeLabel || mode) + ' ' + (opts.mmLabel != null ? opts.mmLabel : offsetMm);
+  const sideWord = opts.sideWord || (mode === 'out' ? 'outer' : 'inner');
   const m = getActiveModel();
-  if (!m) { setStatus('Select a piece first', true); return; }
-  if (!(offsetMm > 0)) { setStatus('Thicken failed - enter a positive mm value', true); return; }
+  if (!m) { setStatus('Select a piece first', true); return { ok: false, reason: 'no selection' }; }
+  if (!(opts.signed ? (isFinite(offsetMm) && offsetMm !== 0) : offsetMm > 0)) {
+    setStatus(label + ' failed - enter a ' + (opts.signed ? 'non-zero' : 'positive') + ' mm value', true);
+    return { ok: false, reason: 'offset out of range' };
+  }
+
+  const paintedCount = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
+  if (paintedCount > 0) {
+    setStatus('Thicken stood down - ' + paintedCount + ' painted face(s); the rim of the moving side ' +
+              'is shared with the held faces, so no face can be promised untouched. Clear paint to thicken.', true);
+    return { ok: false, reason: 'painted faces: ' + paintedCount, painted: paintedCount };
+  }
 
   function localSoupFromGeometry(geo) {
     if (!geo || !geo.attributes || !geo.attributes.position) return null;
@@ -2882,52 +3098,50 @@ function thickenSelectedModel(mode, offsetMm) {
 
   const usingRaw = !!(m.rawTris && m.rawAxis === 'zup');
   const soupIn = usingRaw ? m.rawTris : localSoupFromGeometry(m.geometry);
-  if (!soupIn || soupIn.length < 9) { setStatus('Thicken failed - piece unchanged', true); return; }
+  if (!soupIn || soupIn.length < 9) { setStatus(label + ' failed - piece unchanged', true); return { ok: false, reason: 'no soup' }; }
 
   let openBefore = null, nmBefore = null;
   try { openBefore = openBoundaryEdges(soupIn).length; } catch (e) {}
   try { if (typeof countNonManifoldEdges === 'function') nmBefore = countNonManifoldEdges(soupIn); } catch (e) {}
 
-  let closedSoup = soupIn;
-  try { closedSoup = weldSoupVerts(closedSoup); } catch (e) {}
-  try { if (typeof capSmallOpenLoops === 'function') closedSoup = capSmallOpenLoops(closedSoup, 28); } catch (e) {}
-
-  let openCheck = null;
-  try { openCheck = openBoundaryEdges(closedSoup).length; } catch (e) {}
-  // Slots (cups, USB) are leftover open loops on purpose. Only refuse
-  // a shredded soup (no triangles) — not a bar that still has holes.
-  if (!closedSoup || closedSoup.length < 9) {
-    setStatus('Thicken ' + mode + ' ' + offsetMm + ' failed - piece unchanged', true);
-    return;
+  // Slots (cups, USB) are leftover open loops on purpose; the offset never
+  // needed closure, so nothing is welded or capped first and the held side
+  // comes out exactly as it went in.
+  let result = null;
+  try { result = _thickenOffsetSoup(soupIn, mode, offsetMm, opts); } catch (e) { result = { reason: (e && e.message) || 'error' }; }
+  if (!result || !result.soup || result.soup.length < 9) {
+    setStatus(tag + ' failed - ' + ((result && result.reason) || 'piece unchanged') + '; piece unchanged', true);
+    return { ok: false, reason: (result && result.reason) || 'piece unchanged' };
   }
+  const working = result.soup;
 
-  let working = null;
+  // Piercing self-intersections may not go up: the canonical policy lives in
+  // NSO_Repair (held to tools/mesh_validate.py by nso_selfint_equiv_test).
+  let pierceBefore = null, pierceAfter = null;
   try {
-    const bb = _thickenBBoxOfSoup(closedSoup);
-    const pitch = _thickenChoosePitch(bb, offsetMm);
-    const vox = _thickenVoxelize(closedSoup, pitch);
-    const exterior = _thickenClassifyExterior(vox);
-    const steps = Math.max(1, Math.round(offsetMm / pitch));
-    if (mode === 'out') {
-      _thickenDilateInto(vox, exterior, steps);
-    } else {
-      const interior = new Uint8Array(exterior.length);
-      for (let i = 0; i < interior.length; i++) interior[i] = (vox.grid[i] === 0 && exterior[i] === 0) ? 1 : 0;
-      _thickenDilateInto(vox, interior, steps);
+    if (typeof NSO_Repair !== 'undefined' && NSO_Repair && typeof NSO_Repair.inspect === 'function') {
+      pierceBefore = NSO_Repair.inspect(soupIn).selfIntersections;
+      pierceAfter = NSO_Repair.inspect(working).selfIntersections;
     }
-    working = _thickenSoupFromVoxels(vox);
-    if (working) { try { working = weldSoupVerts(working); } catch (e) {} }
-  } catch (e) {
-    working = null;
+  } catch (e) { pierceBefore = pierceAfter = null; }
+  if (pierceBefore != null && pierceAfter != null && pierceAfter > pierceBefore) {
+    setStatus(tag + ' failed - the moved faces would cross the piece (piercing pairs ' +
+              pierceBefore + '→' + pierceAfter + '); piece unchanged', true);
+    return { ok: false, reason: 'piercing ' + pierceBefore + '->' + pierceAfter };
   }
 
-  if (!working || working.length < 9) {
-    setStatus('Thicken ' + mode + ' ' + offsetMm + ' failed - piece unchanged', true);
-    return;
+  // The caller's own promise, proved on the result and before any commit.
+  if (typeof opts.gate === 'function') {
+    let why = null;
+    try { why = opts.gate(soupIn, working, result); } catch (e) { why = (e && e.message) || 'gate threw'; }
+    if (why) {
+      setStatus(tag + ' failed - ' + why + '; piece unchanged', true);
+      return { ok: false, reason: why };
+    }
   }
 
   pushUndo({
-    type: 'thickenReplace',
+    type: opts.undoType || 'thickenReplace',
     modelId: m.id,
     prevGeometry: m.geometry.clone(),
     prevRawTris: m.rawTris,
@@ -2980,9 +3194,18 @@ function thickenSelectedModel(mode, offsetMm) {
   let openAfter = null, nmAfter = null;
   try { openAfter = openBoundaryEdges(working).length; } catch (e) {}
   try { if (typeof countNonManifoldEdges === 'function') nmAfter = countNonManifoldEdges(working); } catch (e) {}
-  let msg = 'Thicken ' + mode + ' ' + offsetMm + ' - open ' + (openBefore == null ? '?' : openBefore) + '\u2192' + (openAfter == null ? '?' : openAfter);
+  let msg = tag + ' - ' + result.moved + ' ' + sideWord +
+    ' face(s) moved, ' + result.held + ' held; open ' + (openBefore == null ? '?' : openBefore) + '\u2192' + (openAfter == null ? '?' : openAfter);
   if (nmBefore != null && nmAfter != null) msg += ', NM ' + nmBefore + '\u2192' + nmAfter;
+  if (pierceBefore != null && pierceAfter != null) msg += ', piercing ' + pierceBefore + '\u2192' + pierceAfter;
+  try {
+    const sgn = result.signedVolume < 0 ? -1 : 1;
+    msg += ', vol ' + (sgn * result.signedVolume).toFixed(1) + '\u2192' + (sgn * _thickenSignedVolume(working)).toFixed(1) + ' mm\u00b3';
+  } catch (e) {}
+  if (result.approx > 0) msg += '; ' + result.approx + ' vertex(es) on tangent creases placed approximately';
+  if (opts.note) msg += opts.note(result, working);
   setStatus(msg);
+  return { ok: true, result, tris: working, status: msg };
 }
 
 function thickenOutSelectedModel() {

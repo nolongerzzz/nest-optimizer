@@ -13,26 +13,148 @@
    and debug. They are the owner's list, spelled the way the files on disk
    are spelled. */
 (function () {
+  /* ---- where a library lives ----------------------------------------
+
+     A SOURCE is a library: a label and the base URL its files hang off.
+     Every entry names one, and every entry resolves through resolve() to a
+     FULL ABSOLUTE URL - scheme, host and all - never a bare 'library/name'.
+
+     Today that is a distinction without a difference: there is one source,
+     it is this origin, and the URL it produces is the same bytes the old
+     DIR + name concatenation fetched. The difference is what it costs to
+     add the SECOND library later. With a relative path, "the library" and
+     "this repo" are the same statement, and every consumer - the fetch, the
+     row's title, anything that later wants to show where a piece came from -
+     has quietly assumed it; splitting them means finding all of those. With
+     a base URL per source, a library in another repo is a new row in this
+     object and nothing else:
+
+         'nso-extras': { label: 'Extras', base: 'https://someone.github.io/nso-extras/library/' }
+
+     and an entry that names it. No new code, no fetch changes, no UI change.
+
+     The base itself is resolved against document.baseURI rather than written
+     as a literal, because a literal https://...github.io/... would be a
+     different origin under the local test harness and on any fork. Resolved,
+     it is absolute on every origin the page is served from and correct on all
+     of them. */
+  var SOURCES = {
+    local: {
+      label: 'This project',
+      base: new URL('library/', document.baseURI).href
+    }
+  };
+
+  /* The taxonomy. Deliberately a rough first cut and expected to grow -
+     Supports is here with nothing in it yet because the shape of the list
+     matters more than today's membership, and the UI simply does not draw a
+     category that has no entries.
+
+     NOT a home for templates. A template would store generator parameters,
+     not a file, and resolve() has nothing to say about it; that is a
+     different concept and it stays out of this list rather than being bent
+     to fit. */
+  var CATEGORIES = ['Skins', 'Supports', 'Washers', 'Traced Lines', 'Shaped Pieces', 'Test Fixtures'];
+
+  /* One row per file, as before, now carrying the category it belongs to and
+     the source it lives in. The file names are still the owner's list,
+     spelled the way the files on disk are spelled, and they are still
+     written as plain quoted literals - tools/nso_skin_fine_test.js greps
+     this file for "'<name>'" to prove the shipped catalog has not drifted
+     from what the sample generator writes.
+
+     On the patches: _loose and _sandwich are the relief itself with no rim,
+     which is the skin. They came in as one block called "skin patches" and
+     split across categories on the way in, which is the point of tagging them
+     rather than inheriting a name.
+
+     The other half of that split, the four _bordered washers, is GONE - see
+     the note on the patch block below. Washers stays in CATEGORIES with
+     nothing in it, exactly as Supports does: the taxonomy is what the list
+     should be able to hold, not an inventory, and build() simply does not
+     draw a category with no entries. */
   var CATALOG = [
-    'USB_bit.stl',
-    'usb_a_bit.stl',
-    'usb_c_bit.stl',
-    'sd_bit.stl',
-    'microsd_bit.stl',
-    'box_bit_12x8x8.stl',
-    'box_hull_80x40x20.stl',
-    'box_hull_80x40x20-2.stl',
-    'box_closed.stl',
-    'box_open.stl',
-    'lid_blank.stl',
-    'lid_strap.stl',
-    'hinge_knuckle_box.stl',
-    'hinge_knuckle_lid.stl',
-    'hinge_pip.stl',
-    'pin.stl'
+    { file: 'USB_bit.stl',                        category: 'Shaped Pieces', source: 'local' },
+    { file: 'usb_a_bit.stl',                      category: 'Shaped Pieces', source: 'local' },
+    { file: 'usb_c_bit.stl',                      category: 'Shaped Pieces', source: 'local' },
+    { file: 'sd_bit.stl',                         category: 'Shaped Pieces', source: 'local' },
+    { file: 'microsd_bit.stl',                    category: 'Shaped Pieces', source: 'local' },
+    { file: 'box_bit_12x8x8.stl',                 category: 'Shaped Pieces', source: 'local' },
+    { file: 'box_hull_80x40x20.stl',              category: 'Shaped Pieces', source: 'local' },
+    { file: 'box_hull_80x40x20-2.stl',            category: 'Shaped Pieces', source: 'local' },
+    { file: 'box_closed.stl',                     category: 'Test Fixtures', source: 'local' },
+    { file: 'box_open.stl',                       category: 'Test Fixtures', source: 'local' },
+    { file: 'lid_blank.stl',                      category: 'Shaped Pieces', source: 'local' },
+    { file: 'lid_strap.stl',                      category: 'Shaped Pieces', source: 'local' },
+    { file: 'hinge_knuckle_box.stl',              category: 'Shaped Pieces', source: 'local' },
+    { file: 'hinge_knuckle_lid.stl',              category: 'Shaped Pieces', source: 'local' },
+    { file: 'hinge_pip.stl',                      category: 'Shaped Pieces', source: 'local' },
+    { file: 'pin.stl',                            category: 'Shaped Pieces', source: 'local' },
+    /* Skin patches - a pattern as its own printable piece, loadable here so a
+       test coupon does not have to be baked through the Finish tab every time.
+       Generated by tools/nso_skin_fine_samples.js, which also byte-checks the
+       `loose` files against the gated fixtures in fixtures/skin-patches/ so
+       this list can never drift from them.
+       All 30 x 30 mm, the footprint the skin samples use - except the loose
+       ring, which is 2 x rOut = 10 x 10 and says so in its own manifest.
+         _loose     the pattern's features alone, no rim, no backing plate
+         _sandwich  double-sided: the pattern on BOTH faces, no floor between
+                    them - the piece a sandwich test needs
+         -fine      the tighter 0.84 mm pitch (0.42 mm channel, one 0.4-nozzle
+                    extrusion line) against the shipped 1.2 mm default
+
+       THE FOUR _bordered WASHERS ARE NOT HERE ANY MORE. `bordered` set the
+       pattern in a solid rim on a 0.6 mm floor, and the rim plus the standing
+       ribs it enclosed bonded to whatever was stacked on them far too well to
+       be usable as a separating washer - measured at 2.857x the contact of a
+       true flat line. patch_crosshatch_bordered, patch_crosshatch-fine_bordered,
+       patch_zigzag_bordered and patch_ring_bordered were removed from this
+       catalog and from library/ together, so there is no dangling row.
+
+       Only the SHIPPED SAMPLES went. NSO_SkinPatch still builds the bordered
+       variant, the Finish tab still offers it, and fixtures/skin-patches/
+       still gates it - nso_skin_patch_test.js proves that geometry and would
+       have to be rewritten to drop it, which is a different ticket from
+       "these four coupons are not worth printing". */
+    { file: 'patch_crosshatch_loose.stl',         category: 'Skins',   source: 'local' },
+    { file: 'patch_crosshatch_sandwich.stl',      category: 'Skins',   source: 'local' },
+    { file: 'patch_crosshatch-fine_loose.stl',    category: 'Skins',   source: 'local' },
+    { file: 'patch_crosshatch-fine_sandwich.stl', category: 'Skins',   source: 'local' },
+    { file: 'patch_zigzag_loose.stl',             category: 'Skins',   source: 'local' },
+    { file: 'patch_ring_loose.stl',               category: 'Skins',   source: 'local' },
+    /* Traced lines - a picture of line art built as flat printed lines by
+       nso_raster_lines.js, the Finish tab's Trace raster button. Their own
+       category and not Skins: a skin is a pattern this repo generates over a
+       face, and these are whatever somebody drew.
+
+       Generated by tools/nso_raster_library_samples.js, which builds each from
+       a file in fixtures/raster-real/ - pictures Chromium drew, not this repo -
+       and refuses to write any piece whose component and junction counts
+       disagree with what the picture actually contains.
+       tools/nso_raster_real_test.js validates those pictures first, against
+       their own ground truth and against an independent pixel probe, and
+       tools/nso_raster_real_drive_check.js opens two of them through the
+       shipped file input in real Chromium.
+
+       All 30 x 30 mm, the skin patches' footprint, and all three a
+       one-extrusion-line lattice at 0.42 mm - the repo's own minimum wall - so
+       all three are non-solid for the reason the loose patches are.
+         _cross_23-67    the interface crossing, at an angle no synthetic
+                         fixture used; the piece that found the bridge bug
+         _parallel_113   two strokes that touch nothing - the width coupon
+         _hand_stroke    a hand-drawn wobble, followed rather than straightened */
+    { file: 'traced_cross_23-67.stl',             category: 'Traced Lines', source: 'local' },
+    { file: 'traced_parallel_113.stl',            category: 'Traced Lines', source: 'local' },
+    { file: 'traced_hand_stroke.stl',             category: 'Traced Lines', source: 'local' }
   ];
 
-  var DIR = 'library/';
+  /* The one way a file name becomes something fetchable. Absolute, always. */
+  function resolve(entry) {
+    var src = SOURCES[entry && entry.source];
+    if (!src) return null;
+    return new URL(encodeURIComponent(entry.file), src.base).href;
+  }
+
   var GAP = 2;        // mm of clear plate between a new piece and anything placed
 
   function say(text, bad) {
@@ -155,7 +277,8 @@
      there, the origin refused it, the body is empty - says the same thing
      and leaves the plate alone, because from the owner's side they are the
      same fact: that row did not come in. The console keeps the detail. */
-  function loadOne(name, row) {
+  function loadOne(entry, row) {
+    var name = entry.file;
     if (row) {
       if (row._libBusy) return;
       row._libBusy = true;
@@ -172,7 +295,8 @@
       done();
     };
     say('Loading ' + name + '…');
-    var url = DIR + encodeURIComponent(name);
+    var url = resolve(entry);
+    if (!url) { fail('no source named ' + entry.source); return; }
     fetch(url, { cache: 'no-store' }).then(function (res) {
       if (!res.ok) throw new Error('HTTP ' + res.status);
       return res.arrayBuffer();
@@ -244,33 +368,247 @@
     return !!(list && !list.hasAttribute('hidden'));
   }
 
+  /* The menu the list is sitting in. Found by walking up rather than named,
+     because the list has already moved once - it was its own popover off a
+     bar button before the Import dropdown existed - and this should keep
+     working wherever it lands next. */
+  function menuEl() {
+    var list = listEl();
+    return list ? list.closest('details') : null;
+  }
+
+  /* Dismissal: the list AND the dropdown holding it.
+
+     Deliberately NOT folded into setOpen. setOpen is the From Library
+     button's own toggle, and collapsing the list with that button must not
+     tear down the whole Import dropdown around it - the From File button is
+     in there too. Dismissal is the other thing: the user is done with the
+     menu, by loading a piece, by pressing Escape, or by pointing somewhere
+     else entirely. */
+  function dismiss() {
+    setOpen(false);
+    var m = menuEl();
+    if (m) m.open = false;
+  }
+  function anyOpen() {
+    var m = menuEl();
+    return isOpen() || !!(m && m.open);
+  }
+
+  /* One row. Same element, same class, same .name span holding the file's
+     own name - nso_skin_fine_drive_check finds rows by that name and clicks
+     them, and a row is still a row wherever it now sits. */
+  function makeRow(entry) {
+    var row = document.createElement('div');
+    row.className = 'library-item';
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+    row.dataset.category = entry.category;
+    row.dataset.source = entry.source;
+    row.dataset.file = entry.file;
+    // The full URL, so hovering a row tells you exactly what will be fetched
+    // and from where - which is the question that matters the moment there
+    // is more than one library.
+    row.title = 'Load ' + resolve(entry);
+    var label = document.createElement('span');
+    label.className = 'name';
+    label.textContent = entry.file;   // the file's own name, never a prettied one
+    row.appendChild(label);
+    row.appendChild(makeDeleteBtn(entry, row));
+    row.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      dismiss();
+      loadOne(entry, row);
+    });
+    row.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' || ev.key === ' ') {
+        ev.preventDefault(); dismiss(); loadOne(entry, row);
+      }
+    });
+    return row;
+  }
+
+  /* ---- the delete affordance ------------------------------------------
+
+     A row's own small x, rather than a mode or a second menu: the thing being
+     deleted is the row, and anything that makes you first say "now I am
+     deleting" and then pick is a mode you can forget you are in.
+
+     This is the ONLY place in the app that starts a delete, and all it knows
+     how to do is hand the entry to window.nsoLibraryDelete.request. It does
+     not ask whether deleting is allowed, does not raise the confirmation,
+     does not know a token or an API exists. app-library-delete.js owns every
+     one of those, behind that one call, so a real permission check later is
+     an edit inside that module and not a hunt through this one.
+
+     If the module is not on the page there is simply no x - the browser
+     degrades to what it was, rather than growing a button that throws. */
+  function makeDeleteBtn(entry, row) {
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'library-del';
+    btn.textContent = '\u00d7';
+    btn.title = 'Delete ' + entry.file + ' from the library';
+    btn.setAttribute('aria-label', 'Delete ' + entry.file);
+    btn.addEventListener('click', function (ev) {
+      // Never let the click reach the row: clicking x must not also load.
+      ev.stopPropagation();
+      ev.preventDefault();
+      var del = window.nsoLibraryDelete;
+      if (!del || typeof del.request !== 'function') {
+        say('Deleting is not available on this page', true);
+        return;
+      }
+      del.request(entry, { onDeleted: function (e) { forget(e.file); } });
+    });
+    // The row answers Enter and Space; the button is inside the row, so stop
+    // those here too or the x's own Enter would load the piece as well.
+    btn.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter' || ev.key === ' ') ev.stopPropagation();
+    });
+    return btn;
+  }
+
+  /* The local half of a delete: drop the entry from the in-memory catalog and
+     take its row out of the list. Called only after the repository side has
+     actually succeeded, so the browser never shows a piece as gone that is
+     still there. A group that loses its last row is removed outright, which
+     is the same rule build() applies - an empty category is not drawn. */
+  function forget(file) {
+    var i;
+    for (i = CATALOG.length - 1; i >= 0; i--) {
+      if (CATALOG[i].file === file) CATALOG.splice(i, 1);
+    }
+    var rows = document.querySelectorAll('#library-list .library-item');
+    for (i = 0; i < rows.length; i++) {
+      if (rows[i].dataset.file !== file) continue;
+      var sec = rows[i].closest ? rows[i].closest('.library-sec') : null;
+      rows[i].parentNode.removeChild(rows[i]);
+      if (!sec) continue;
+      var left = sec.querySelectorAll('.library-item').length;
+      if (!left) { sec.parentNode.removeChild(sec); continue; }
+      var badge = sec.querySelector('.library-sec-count');
+      if (badge) badge.textContent = left;
+    }
+  }
+
+  /* The local half of a SAVE - the mirror of forget() above, and called under
+     exactly the same rule: only after the repository side has actually
+     succeeded, so the browser never shows a piece as saved that is not there.
+
+     A category the taxonomy has not seen before is appended to it, because
+     build() does not draw a category it does not know and a piece filed under
+     one would simply be invisible. Its section is created on the spot, at the
+     end, which is where CATEGORIES just put it.
+
+     Like forget(), this touches this page and nothing else. The repository
+     side is app-library-save.js's, and this file does not know that module
+     exists - it does not call it, and the Save button is not wired here. */
+  function remember(entry) {
+    if (!entry || !entry.file) return null;
+    var i;
+    for (i = 0; i < CATALOG.length; i++) if (CATALOG[i].file === entry.file) return CATALOG[i];
+    var e = { file: entry.file, category: entry.category, source: entry.source || 'local' };
+    CATALOG.push(e);
+    if (CATEGORIES.indexOf(e.category) === -1) {
+      CATEGORIES.push(e.category);
+      /* The exported list is a copy, deliberately, so push the same name onto
+         it rather than handing the live array out. */
+      if (window.nsoLibrary && window.nsoLibrary.categories &&
+          window.nsoLibrary.categories.indexOf(e.category) === -1)
+        window.nsoLibrary.categories.push(e.category);
+    }
+
+    var host = document.getElementById('library-list');
+    if (!host || !host._libBuilt) return e;   // nothing drawn yet; build() will
+
+    var secs = host.querySelectorAll('.library-sec'), sec = null;
+    for (i = 0; i < secs.length; i++) {
+      if (secs[i].dataset.sec === e.category) { sec = secs[i]; break; }
+    }
+    if (!sec) {
+      sec = document.createElement('details');
+      sec.className = 'vp-sec library-sec';
+      sec.dataset.sec = e.category;
+      sec.open = true;
+      var head = document.createElement('summary');
+      head.className = 'vp-sec-head';
+      head.textContent = e.category;
+      var badge = document.createElement('span');
+      badge.className = 'library-sec-count';
+      badge.textContent = '0';
+      head.appendChild(badge);
+      sec.appendChild(head);
+      var fresh = document.createElement('div');
+      fresh.className = 'vp-sec-body';
+      sec.appendChild(fresh);
+      host.appendChild(sec);
+    }
+    var body = sec.querySelector('.vp-sec-body');
+    if (body) body.appendChild(makeRow(e));
+    var count = sec.querySelector('.library-sec-count');
+    if (count) count.textContent = sec.querySelectorAll('.library-item').length;
+    return e;
+  }
+
   function build() {
     var host = document.getElementById('library-list');
     if (!host || host._libBuilt) return;
     host._libBuilt = true;
+
+    /* Grouped by category, in CATEGORIES order, using the same <details>
+       convention the Finish menu's groups use so the two read as one system.
+       A category with no entries is not drawn at all - Supports is in the
+       taxonomy before it has members, and an empty heading is just a dead
+       row to scroll past.
+
+       Every group ships OPEN. The Finish menu's groups start shut because it
+       is a tool palette you return to all day; this is a browser you opened
+       to find one piece, and hiding all 26 behind five more clicks is the
+       opposite of what the button was pressed for. The grouping is here to
+       make the list scannable, not shorter. */
+    var byCat = {};
     for (var i = 0; i < CATALOG.length; i++) {
-      (function (name) {
-        var row = document.createElement('div');
-        row.className = 'library-item';
-        row.setAttribute('role', 'button');
-        row.setAttribute('tabindex', '0');
-        row.title = 'Load ' + DIR + name;
-        var label = document.createElement('span');
-        label.className = 'name';
-        label.textContent = name;     // the file's own name, never a prettied one
-        row.appendChild(label);
-        row.addEventListener('click', function (ev) {
-          ev.stopPropagation();
-          setOpen(false);
-          loadOne(name, row);
-        });
-        row.addEventListener('keydown', function (ev) {
-          if (ev.key === 'Enter' || ev.key === ' ') {
-            ev.preventDefault(); setOpen(false); loadOne(name, row);
-          }
-        });
-        host.appendChild(row);
-      })(CATALOG[i]);
+      var e = CATALOG[i];
+      (byCat[e.category] = byCat[e.category] || []).push(e);
+    }
+    // A category that is in no entry would silently vanish; say so instead.
+    for (var k in byCat) {
+      if (CATEGORIES.indexOf(k) === -1)
+        console.warn('[library] entries tagged "' + k + '", which is not in CATEGORIES');
+    }
+
+    for (var c = 0; c < CATEGORIES.length; c++) {
+      var cat = CATEGORIES[c];
+      var rows = byCat[cat];
+      if (!rows || !rows.length) continue;
+      var sec = document.createElement('details');
+      sec.className = 'vp-sec library-sec';
+      sec.dataset.sec = cat;
+      /* Shut, like the Finish menu's groups. They shipped open on the theory
+         that a browser you opened to find one piece should show you the
+         pieces - but that was written when the list was its own popover. In
+         the Import dropdown it means every category's rows are in front of
+         you before you have said which category you want, and you scroll
+         past all of them to reach the one you do. Closed, the four headings
+         and their counts fit at a glance and one click gets you there.
+         Independent of each other, again like Finish: opening Skins does not
+         shut Washers, because picking a skin and a washer for the same job
+         is one task. */
+      sec.open = false;
+      var head = document.createElement('summary');
+      head.className = 'vp-sec-head';
+      head.textContent = cat;
+      var count = document.createElement('span');
+      count.className = 'library-sec-count';
+      count.textContent = rows.length;
+      head.appendChild(count);
+      sec.appendChild(head);
+      var body = document.createElement('div');
+      body.className = 'vp-sec-body';
+      for (var r = 0; r < rows.length; r++) body.appendChild(makeRow(rows[r]));
+      sec.appendChild(body);
+      host.appendChild(sec);
     }
 
     var btn = btnEl();
@@ -281,32 +619,61 @@
         setOpen(!isOpen());
       });
     }
-    /* Pointer down outside, or Escape, closes it.
+    /* Pointer down outside, or Escape, dismisses it. This handler already
+       did that for the bare list; it now covers the dropdown holding it, so
+       pointing at the plate, at a placed piece, or anywhere else puts the
+       whole thing away.
 
        On pointerdown and not click: a drag on the viewport - orbiting the
        scene, moving a piece - never produces a click, so a click-based
-       close leaves the list hanging over the model for the whole drag. And
+       close leaves the menu hanging over the model for the whole drag. And
        in the capture phase, because the canvas handlers stop propagation on
        their own pointerdowns and a bubble listener never hears those at all.
 
-       Inside the list is left alone on purpose: hiding it under the pointer
-       would destroy the row before its click could fire, and the row's own
-       click is what loads. */
+       Anywhere INSIDE the menu is left alone, which now means the panel and
+       not just the list: From File, a category heading and a row are all
+       things you point at while still using the menu, and hiding it under
+       the pointer would destroy a row before its own click could fire. The
+       row's click is what loads, and loading dismisses on its own. */
     if (!document._libBound) {
       document._libBound = true;
       document.addEventListener('pointerdown', function (ev) {
-        if (!isOpen()) return;
-        var list = listEl(), b = btnEl();
+        if (!anyOpen()) return;
+        var list = listEl(), b = btnEl(), m = menuEl();
         if (list && list.contains(ev.target)) return;
         if (b && b.contains(ev.target)) return;
-        setOpen(false);
+        if (m && m.contains(ev.target)) return;
+        dismiss();
       }, true);
       document.addEventListener('keydown', function (ev) {
-        if (ev.key === 'Escape' && isOpen()) setOpen(false);
+        if (ev.key === 'Escape' && anyOpen()) dismiss();
       }, true);
     }
     setOpen(false);
   }
+
+  /* The catalog, readable from outside. The drive check proves every entry
+     resolves to a full absolute URL and that each category holds what it
+     should; neither is provable from the DOM alone, and neither should be
+     re-derived by a test guessing at the base. */
+  window.nsoLibrary = {
+    categories: CATEGORIES.slice(),
+    sources: SOURCES,
+    entries: function () { return CATALOG.slice(); },
+    urlFor: function (file) {
+      for (var i = 0; i < CATALOG.length; i++)
+        if (CATALOG[i].file === file) return resolve(CATALOG[i]);
+      return null;
+    },
+    /* The local half of a delete, exposed so the drive check can watch the
+       browser actually lose the row. NOT a delete: it touches this page and
+       nothing else. The repository side is app-library-delete.js's. */
+    forget: forget,
+    /* And the local half of a save. Same rule, same non-claim: it touches
+       this page and nothing else. app-library-save.js calls it once the two
+       commits have really landed. */
+    add: remember
+  };
 
   // Closed before anything else is wired, and again once the rows exist, so
   // it never depends on a first click - or on build() having got that far.

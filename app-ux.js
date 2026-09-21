@@ -1,9 +1,34 @@
 /* ux overlay — look lock + HUD stamp */
 (function () {
-  function stampHud() {
+  /* The build marker. Writes the HUD element, and on the FIRST stamp only,
+     the status line too - so opening the page says which build it is.
+
+     The re-stamps below used to call setStatus as well, and that is a real
+     bug rather than a cosmetic one: they land 0ms and 200ms after bind, so
+     any action taken in that window had its status line overwritten with the
+     build tag. It cost a drive check a status assertion - Stock reported
+     "HUD inside7" where it had just written what it made - and it would have
+     done the same to a person who clicked fast. The tag is a stamp, not a
+     result, and it stops speaking over results. */
+  function stampHud(alsoStatus) {
     var el = document.getElementById('adjust-status');
-    if (el) el.textContent = 'HUD inside4';
-    if (typeof setStatus === 'function') setStatus('HUD inside4');
+    if (el) el.textContent = 'HUD inside7';
+    if (alsoStatus && typeof setStatus === 'function') setStatus('HUD inside7');
+  }
+
+  // nsoMaskHudRefresh writes HUD_TAG at rest. Until that const moves with
+  // the named tag, retag its line so a selection cannot snap the stamp back.
+  function alignMaskHudTag() {
+    var fn = window.nsoMaskHudRefresh;
+    if (typeof fn !== 'function' || fn._hudInside7) return;
+    window.nsoMaskHudRefresh = function () {
+      fn.apply(this, arguments);
+      var el = document.getElementById('adjust-status');
+      if (el && el.textContent) {
+        el.textContent = el.textContent.replace(/HUD inside[456]/g, 'HUD inside7');
+      }
+    };
+    window.nsoMaskHudRefresh._hudInside7 = true;
   }
 
   function pickIdx(event) {
@@ -65,10 +90,13 @@
   }
 
   function bind() {
-    stampHud();
+    stampHud(true);
+    alignMaskHudTag();
     bindThickenArrows();
-    setTimeout(stampHud, 0);
-    setTimeout(stampHud, 200);
+    // HUD only: these exist to put the tag back after other code rewrites the
+    // HUD element, not to say the build tag again over whatever the user did.
+    setTimeout(function () { stampHud(false); alignMaskHudTag(); }, 0);
+    setTimeout(function () { stampHud(false); alignMaskHudTag(); }, 200);
     if (state.renderer && state.renderer.domElement) {
       state.renderer.domElement.addEventListener('dblclick', function (event) {
         if (!state.cutterOpen) return;
@@ -81,7 +109,7 @@
       state.renderer.domElement.addEventListener('pointerdown', function (event) {
         if (event.button !== 0) return;
         if (!event.altKey) return;
-        if (state.softenArmed || state.capArmed || state.joinSession) return;
+        if (state.softenArmed || state.capArmed || state.centerLockArmed || state.joinSession) return;
         if (lookAtHit(event)) {
           event.preventDefault();
           event.stopPropagation();
