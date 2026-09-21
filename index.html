@@ -653,13 +653,15 @@
           <input type="file" id="gcode-input" accept=".3mf" class="hidden-quiet" />
           <!-- The Microscope VIEW. Distinct from G-code-onto-the-plate above:
                that one imports a sliced project as models you then scrub on
-               the plate; this one opens a dedicated inspector - the reference
-               tool's own view - over an STL, a 3MF or a sliced .gcode.3mf, and
-               hands a selection back out either onto the plate or to a file.
+               the plate; this one lays a dedicated inspector - the reference
+               tool's own view - OVER whatever is on the plate, the same way
+               X-ray acts on what is already there, and hands a selection back
+               out either onto the plate or to a file. It takes a file too,
+               and a .gcode.3mf import lands in it without a button press.
                See docs/GCODE-MICROSCOPE.md. -->
           <button id="btn-microscope" class="viewport-tool-btn" type="button"
                   aria-label="Microscope view"
-                  title="Microscope: open an STL, a 3MF or a sliced .gcode.3mf in its own inspector. Feature colours, a capture box with independent footprint and thickness, and whole-layer selection - then send what you selected to the plate or straight to an STL file.">&#128300;</button>
+                  title="Microscope: put whatever is on the plate under the lens, the way X-ray does - or Import an STL, a 3MF or a sliced .gcode.3mf instead. Colour per part or per slicer feature, a capture box with independent footprint and thickness, whole-layer selection on a slice - then send what you isolated to the plate or straight to an STL file.">&#128300;</button>
           <input type="file" id="ms-input" accept=".stl,.3mf" class="hidden-quiet" />
           <button id="btn-watch" class="viewport-tool-btn" type="button"
                   aria-pressed="false"
@@ -694,16 +696,19 @@
   <div id="microscope" class="ms-panel" tabindex="0" hidden>
     <div id="ms-sidebar" class="ms-sidebar">
       <h1 id="ms-title">Microscope</h1>
-      <p class="ms-sub" id="ms-sub">Open an STL, a 3MF or a sliced .gcode.3mf.</p>
+      <p class="ms-sub" id="ms-sub">The plate, or an STL, a 3MF or a sliced .gcode.3mf.</p>
 
       <div class="ms-section">
-        <div class="ms-section-title">File</div>
+        <div class="ms-section-title">Source</div>
         <div class="ms-btn-row">
+          <button id="ms-btn-plate" type="button"
+                  title="Read the pieces that are on the plate right now, as placed, and put them under the lens. The plate itself is not changed.">Read the plate</button>
           <button id="ms-btn-open" type="button">Import&hellip;</button>
           <button id="ms-close" type="button">Close</button>
         </div>
-        <p class="ms-note">STL and plain 3MF open too. They are not sliced, so
-          they have no layers and no features and draw as whole parts.</p>
+        <p class="ms-note">The rail button opens the plate. Import opens a
+          file instead: STL and plain 3MF are not sliced, so they have no
+          layers and no features and draw as whole parts.</p>
       </div>
 
       <div class="ms-section">
@@ -797,7 +802,7 @@
   <script src="nso-surface-grid.js?v=inside6"></script>
   <script src="nso-gcode-lines.js"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
-  <script src="app-core.js?v=inmode1"></script>
+  <script src="app-core.js?v=scope2"></script>
   <script src="app-cut.js?v=inside6"></script>
   <script src="app-finish.js?v=inside7"></script>
   <script src="app-sculpt.js?v=inside4"></script>
@@ -842,7 +847,7 @@
   <script src="app-library.js?v=libsave1"></script>
   <script src="app-photoset.js?v=photoset1"></script>
   <script src="app-toolpath.js?v=toolpath2"></script>
-  <script src="app-microscope.js?v=scope1"></script>
+  <script src="app-microscope.js?v=scope2"></script>
   <script src="app-ux.js?v=inside7"></script>
   <!-- Live watch: off until its button is pressed, and it patches nothing
        until then. Deleting this tag and the #btn-watch button above removes

@@ -338,11 +338,130 @@ the file rather than from a default.
 | `app-toolpath.js` | **unchanged.** The plate-side import and line scrubber are a different feature and keep working |
 | `tools/gcode-test/microscope-check.js` | the selection predicates and the export geometry, under Node |
 | `tools/gcode-test/microscope-drive-check.mjs` | the real view in headless Chromium, over all four file kinds |
+| `tools/gcode-test/microscope-overlay-drive-check.mjs` | the view as an **overlay** on the plate, the `.gcode.3mf` landing, and the screenshots - see the last section |
 
 ### The two rail buttons are not the same door
 
 `G`🔬 (`#btn-gcode`, unchanged) imports a sliced project **onto the plate** as
 models you then scrub with the Toolpath card. 🔬 (`#btn-microscope`) opens the
-**inspector** over one file and hands a selection back out. They should not be
-merged: one adds every feature group to the plate, the other adds nothing until
-you choose what to take.
+**inspector** - over the plate by default, or over one file - and hands a
+selection back out. They should not be merged: one adds every feature group to
+the plate, the other adds nothing until you choose what to take.
+
+> The section below is later work and supersedes this one on where
+> `#btn-microscope` gets its document from.
+
+---
+
+## The overlay: the same view, over whatever is already there
+
+Everything above is about **files**. The view as first shipped could only be
+asked what is in one, which made the rail button a door to a file dialog
+rather than a tool — and put it out of step with the button directly above it.
+
+**X-ray is the pattern.** `#btn-xray` takes no file, opens no dialog and goes
+nowhere: it acts on what is on the plate, lights while it is on, and clicking
+it again puts everything back. The microscope panel was already the right
+shape for that — `.ms-panel` is `position: fixed; inset: 0`, so it is laid
+**over** the main viewport, which is never torn down, and Close puts you back
+on the same plate with the same selection. What was missing was the source.
+
+### Three sources, one view
+
+A document's **kind** is what it holds. Its **source** is where it came from,
+and the view does not care:
+
+| source | built by | groups are |
+| --- | --- | --- |
+| a file | `load()` | build objects, or slicer features on a `.gcode.3mf` |
+| the plate | `openPlate()` | one per placed piece, read through `meshToWorldSoup` |
+| any producer | `openObjects()` | whatever the producer named and separated |
+
+`openPlate()` is `openObjects()`'s first caller and adds nothing to it. That
+is deliberate: **`openObjects()` is the seam the support-isolation work grows
+through.** A producer that splits one support tree into its branches, or lifts
+one interface layer out of a print, hands its named groups to that one call
+and inherits the legend, the capture box, Isolate and both exports without a
+line changing in this file. Nothing below `meshDoc()` knows, or can ask, who
+grouped the triangles.
+
+### Coordinates
+
+`meshToWorldSoup` (app-join.js) is the app's one way to read a placed piece as
+world triangles, and it returns the **viewport's** Y-up space. A microscope
+document is in the **file's** Z-up millimetres, because that is what the
+capture box, the layer window and both exports speak. The remap is the inverse
+of `toThree`:
+
+```
+three (X, Y, Z)  ->  z-up (X, -Z, Y)
+```
+
+so a piece read off the plate and a piece read out of a file land in the same
+space, and Export to plate puts one back down where the other would. Measured
+in `gcode:scope-overlay`: same triangle count as the plate piece, same size to
+1&nbsp;µm, and `minZ` at the 0.3&nbsp;mm hover `placeModelMovable()` gives it.
+
+### A `.gcode.3mf` import lands here
+
+A slice is not a part you position — it is something you go looking through,
+and this is the view that does that. So `handleFiles()` (app-core.js) hands
+the **already-parsed** result to `openToolpathResult()` once the toolpath
+import settles. One parse, not two: the session's own `.result` is passed, not
+the bytes.
+
+This is additive. The plate import still runs underneath, so Close drops onto
+the Toolpath card with the scrub exactly as before, and `#btn-gcode` is
+untouched — it is still the deliberate "put it on the plate and let me scrub"
+door, and `gcode:entry` still drives it end to end.
+
+### Features survive the round trip
+
+A `.gcode.3mf` import puts one piece per slicer feature on the plate, named
+`<file> - Outer wall` and so on. So reading the plate back gives
+**feature-named groups**, and `colorForGroup()` gives a mesh group whose name
+ends in a known feature the slicer's own colour for it rather than a palette
+slot. Support reads as Support on the plate route too — which is how
+`gcode:scope-overlay` takes one support interface layer out of a twelve-group
+plate, with none of the model's own walls or infill in it, using nothing
+written for the purpose.
+
+### Framing
+
+Two deviations from the reference tool's camera, both on top of the one its
+own comment already marks unfinished:
+
+- **the whole part** fits the bounding **sphere**, not the longest edge. Seen
+  from a corner a box presents its diagonal, so framing on the longest edge
+  crops a compact part off both sides — which is exactly what a piece read off
+  the plate is.
+- **Isolate frames the selection.** The reference tool only re-targets, on the
+  centroid of the capture boxes, and leaves the camera at the whole part's
+  zoom; on a twelve-piece plate that leaves one isolated interface a thumbnail
+  in the middle of the grid. Isolate *is* the zoom. `Back` re-frames the whole
+  part, so it remains the way out. The selection's extent is computed from the
+  **document**, not from the detail group, because the toolpath detail group is
+  `InstancedMesh` and its geometry bounding box is the unit cylinder every
+  instance shares.
+
+### What proves it
+
+`gcode:scope-overlay` (`tools/gcode-test/microscope-overlay-drive-check.mjs`),
+81 checks in headless Chromium, and it is the one that takes screenshots —
+four of them, each asserted to be a **drawn** view by reading the back buffer
+with `gl.readPixels` in the same task as the render, because the canvas has no
+`preserveDrawingBuffer` and `drawImage` off it reads blank whatever is on
+screen. What it drives:
+
+| | |
+| --- | --- |
+| the rail button on a plain STL | opens the plate with **no file dialog**, source `plate`, one group per piece, plate untouched underneath |
+| the capture box on a plate piece | catches it, misses when moved away, exports its exact triangles |
+| Isolate | one `Mesh`, framed on itself |
+| Export as STL / Export to plate | the **same** triangles, re-read from disk; one undo entry; `rawAxis: 'zup'` |
+| two pieces of one name | two legend rows — the second is made unique, not folded into the first |
+| a `.gcode.3mf` through the app's own `#file-input` | the microscope open on it, per-feature colours from `NSOGcodeLines`, layer selection live, **no microscope button pressed** |
+| reading that plate back | feature-named groups, the interface isolated alone and put back on the plate as its own piece |
+
+`gcode:drive` pins the same landing from the other side, in the check that
+owns the import route.

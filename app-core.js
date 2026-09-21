@@ -1026,8 +1026,23 @@ function handleFiles(files) {
         // A sliced project (`*.gcode.3mf`) carries a toolpath as well as - or
         // instead of - a model part, and the toolpath is the interesting half.
         // Route it to the toolpath importer; anything else is geometry only.
+        //
+        // And then LAND IN THE MICROSCOPE. A slice is not a part you position,
+        // it is something you go looking through, and the view that does that
+        // is the microscope's - colour per slicer feature, a capture box, and
+        // whole-layer isolation. Making that the default costs nothing and
+        // takes nothing away: the plate import above still runs, so Close
+        // drops you onto the Toolpath card with the scrub exactly as before.
+        // The session's own `result` is handed over rather than the bytes, so
+        // the file is parsed once and not twice.
         if (window.NSO_TOOLPATH && window.NSO_TOOLPATH.looksSliced(file.name)) {
-          window.NSO_TOOLPATH.importSliced3MF(file.name, e.target.result);
+          const done = window.NSO_TOOLPATH.importSliced3MF(file.name, e.target.result);
+          if (done && done.then) {
+            done.then((session) => {
+              if (!session || !window.NSO_MICROSCOPE) return;
+              window.NSO_MICROSCOPE.openToolpathResult(file.name, session.result);
+            });
+          }
           return;
         }
         import3MF(file.name, e.target.result);
