@@ -217,9 +217,10 @@ withApp(async (page, logs) => {
   let j = await pickPair(page, idA1, idB1);
   check('Join session holds A1 / B1', j.session && j.a === idA1 && j.b === idB1, JSON.stringify(j));
   await moveTo(page, idB1, -45, -35);
-  // btn-raise moved into the top bar's Move dropdown; unfold it first.
-  await page.evaluate(() => { const e = document.getElementById('btn-raise'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-  for (let i = 0; i < 11; i++) await page.click('#btn-raise');
+  /* Raise/Lower are gone - the Move menu's Vertical checkbox, its slider
+     and the arrow keys are the vertical control now. liftSelected() is
+     untouched, so the 22 mm this wanted is one call. */
+  await page.evaluate(() => { for (let i = 0; i < 11; i++) liftSelected(1); });
   check('status shows the lift', /^Lift 22 mm/.test(await statusOf(page)), await statusOf(page));
   await page.fill('#seat-gap', '-0.18');
   await page.click('#btn-seat-support');
@@ -237,9 +238,10 @@ withApp(async (page, logs) => {
   j = await pickPair(page, idA2, idB2);
   check('Join session holds A2 / B2', j.session && j.a === idA2 && j.b === idB2, JSON.stringify(j));
   await moveTo(page, idB2, 45, -35);
-  // btn-raise moved into the top bar's Move dropdown; unfold it first.
-  await page.evaluate(() => { const e = document.getElementById('btn-raise'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-  for (let i = 0; i < 11; i++) await page.click('#btn-raise');
+  /* Raise/Lower are gone - the Move menu's Vertical checkbox, its slider
+     and the arrow keys are the vertical control now. liftSelected() is
+     untouched, so the 22 mm this wanted is one call. */
+  await page.evaluate(() => { for (let i = 0; i < 11; i++) liftSelected(1); });
   await openFinishMenu(page);   // Skin face lives in the Finish tab
   await page.selectOption('#skin-pattern', 'crosshatch');
   await page.click('#btn-skin-face');

@@ -49,8 +49,25 @@ Smart build-plate packing for 3D printing.
   it, not just the shapes. Files from Bambu Studio or MakerWorld have no such
   block and import as plain geometry, exactly as before.
   See [docs/SCENE-3MF.md](docs/SCENE-3MF.md).
+- **To plate** (Move menu, beside the Vertical box) puts a piece back down on
+  the bed in one press, whatever put it in the air - a Seat that stacked it 20
+  mm up, a lift, a target since moved or deleted. It reads the piece's own box,
+  so the lowest point of it lands on the bed from any pose; where the Vertical
+  slider and arrows only write the lift and rebuild the piece's rotation from
+  the plate record, this keeps the rotation and only moves it down. Its place on
+  the plate is untouched and one Undo puts it back.
+- **Triple join** (Join card) joins three pieces in one press: pick A, B and C,
+  choose a **vertical stack** or a **horizontal sequence**, and each of the two
+  junctions (A-B, B-C) gets Center lock then Seat (support) at **its own gap**.
+  Both gaps span the Seat slider's full range - a real air gap at -0.18, zero
+  for touching, up to +0.05 for a solid welded penetration - and they are
+  independent, so a test gap at one seam and a weld at the other is one
+  operation rather than two passes with the slider moved in between. It adds no
+  positioning math of its own: the poses it leaves are bit-for-bit the poses the
+  Center lock and Seat buttons leave by hand, and Undo is the same four steps.
+  See [docs/JOIN-TRIPLE.md](docs/JOIN-TRIPLE.md).
 - **Lock position** on a placed piece: a locked piece refuses drag, the nudge
-  arrows, Raise/Lower and the pose buttons, so a stray click cannot move it
+  arrows, the vertical controls, To plate and the pose buttons, so a stray click cannot move it
   once Seat has put it where it belongs. Seat, Center, Align and Skin still
   work on it. Shown by a teal outline and a `locked` tag in the list. Any
   number of pieces can be locked at once - the flag is one per piece - and the
@@ -120,6 +137,18 @@ Smart build-plate packing for 3D printing.
     between them, which is the piece to use when the coupon goes *between* two
     parts (a bordered washer would present its solid floor to one of them and
     weld on area alone). All of them are in the **Library** tab, ready to load.
+  - **Oversized washer** (the checkbox under Seat here) is for the case those
+    patches are built for and the seat could not express: a washer or shim
+    *wider* than the piece it sits on, in deliberate close contact. Center lock
+    puts it in XZ, a typed mm field says how far off the target it sits - the
+    coupon sign convention, and past the slider's own +0.05 end if you want a
+    squeeze - and Seat (support) places it through the measured-clearance solve
+    instead of the corner-ray fit, which refuses any overhanging piece with
+    "corner N missed hull along punch axis". The status line reports the true
+    minimum surface-to-surface distance, the overhang in X and Z and the
+    corner-ray verdict it stood down on, the way the cut readout does:
+    reported, not blocked. Off by default, and off it changes nothing.
+    See [docs/OVERSIZED-WASHER.md](docs/OVERSIZED-WASHER.md)
   - **crosshatch-fine** is the same lattice at a 0.84 mm pitch instead of 1.2 -
     1.43x the ribs, leaving a 0.42 mm channel, which is exactly one extrusion
     line at a 0.4 nozzle. **0.4 nozzle only**: at a 0.6 nozzle one line is

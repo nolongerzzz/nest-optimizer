@@ -56,7 +56,7 @@ const out = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-multilock-'));
 const statusOf = page => page.evaluate(() => document.getElementById('status').textContent);
 const clearStatus = page => page.evaluate(() => { document.getElementById('status').textContent = ''; });
 
-const ADJ = ['btn-rot-left', 'btn-rot-right', 'btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face', 'btn-raise', 'btn-lower',
+const ADJ = ['btn-rot-left', 'btn-rot-right', 'btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face', 'btn-to-plate',
              'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn',
              'btn-nudge-left', 'btn-nudge-right', 'btn-nudge-fwd', 'btn-nudge-back'];
 

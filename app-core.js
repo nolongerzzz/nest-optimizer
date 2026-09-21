@@ -55,6 +55,12 @@ const state = {
   joinSession: false,
   joinFaceA: null,
   joinFaceB: null,
+  /* Triple join's third slot. Held here with the rest of the Join slots so
+     the one place that clears a Join session clears this too - a stale C is
+     exactly the kind of leftover that makes a pair tool act on a piece the
+     user thinks they retired. See app-join-triple.js. */
+  joinThirdId: null,
+  joinFaceC: null,
   joinUseFaces: false,
   faceHelper: null,
   softenArmed: false,
@@ -1026,8 +1032,23 @@ function handleFiles(files) {
         // A sliced project (`*.gcode.3mf`) carries a toolpath as well as - or
         // instead of - a model part, and the toolpath is the interesting half.
         // Route it to the toolpath importer; anything else is geometry only.
+        //
+        // And then LAND IN THE MICROSCOPE. A slice is not a part you position,
+        // it is something you go looking through, and the view that does that
+        // is the microscope's - colour per slicer feature, a capture box, and
+        // whole-layer isolation. Making that the default costs nothing and
+        // takes nothing away: the plate import above still runs, so Close
+        // drops you onto the Toolpath card with the scrub exactly as before.
+        // The session's own `result` is handed over rather than the bytes, so
+        // the file is parsed once and not twice.
         if (window.NSO_TOOLPATH && window.NSO_TOOLPATH.looksSliced(file.name)) {
-          window.NSO_TOOLPATH.importSliced3MF(file.name, e.target.result);
+          const done = window.NSO_TOOLPATH.importSliced3MF(file.name, e.target.result);
+          if (done && done.then) {
+            done.then((session) => {
+              if (!session || !window.NSO_MICROSCOPE) return;
+              window.NSO_MICROSCOPE.openToolpathResult(file.name, session.result);
+            });
+          }
           return;
         }
         import3MF(file.name, e.target.result);
@@ -2264,6 +2285,15 @@ function startMoveDrag(idx, event) {
     setStatus('Cutter open - close cutter to move pieces');
     return false;
   }
+  /* Vertical placement owns the piece while it is on. A drag on an eye-level
+     view moves it in a plane you cannot judge from there, which is the
+     opposite of what the mode is for - the arrows and the slider are the
+     whole input. Refused here, beside every other reason a drag does not
+     start, rather than by unbinding anything. */
+  if (state.moveVertical) {
+    setStatus('Vertical placement is on - use the arrows or the slider, or clear the box');
+    return false;
+  }
   const p = state.placed[idx];
   if (!p || !p.mesh) return false;
   // Position lock (app-poslock.js): a locked piece is still selectable, but
@@ -2479,10 +2509,20 @@ function onCanvasContextMenu(event) {
 
 function onCanvasPointerDown(event) {
   /* The rotation handle is hit-tested first and swallows the event. That is
-     the point of Task 1's separate grab target: a click on the PIECE still
-     means select-and-move, exactly as before, and only the ball rotates. */
+     the point of the separate grab target: a click on the PIECE still means
+     select-and-move, exactly as before, and only the ball rotates.
+
+     ONLY WHILE ROTATE OWNS THE INPUT. Being hit-tested first is a strong
+     claim on the pointer, and it used to be made on nothing but the group
+     being visible - which it was for as long as anything was selected. A drag
+     that landed on the ball rotated the piece from the Tip menu and from the
+     Move menu, where the user had asked for neither and the guide had drawn
+     itself unbidden. app-rotate-handles now empties the group when it loses
+     the menu, so there is nothing here to hit; the check is repeated here
+     because this is the code doing the claiming. */
   if (typeof nsoRotate !== 'undefined' && typeof state !== 'undefined' &&
-      state.raycaster && state.camera && event.button === 0) {
+      state.raycaster && state.camera && event.button === 0 &&
+      (typeof nsoInputMode === 'undefined' || !nsoInputMode || nsoInputMode.owns('menu-rotate'))) {
     var rotG = state.scene && state.scene.getObjectByName('nso-rotate-handles');
     if (rotG && rotG.visible && rotG.children.length) {
       setPointerFromEvent(event);
@@ -2800,8 +2840,16 @@ function selectPlaced(idx) {
   clearSelectionOutline();
 
   state.selectedIndex = idx;
-  // the rotation handles belong to whatever is selected, so they move with it
-  if (typeof nsoRotate !== 'undefined') setTimeout(function () { nsoRotate.refresh(); }, 0);
+  /* The open menu's guides belong to whatever is selected, so they move with
+     it. Through nsoInputMode rather than by naming a module: this line used
+     to call nsoRotate.refresh() alone, so Move's arrows were never told the
+     selection had changed and stayed drawn around the piece before - or
+     around nothing at all, once it was deselected. Asking the arbiter to
+     refresh whoever owns the input covers every tool that draws one, and the
+     next one added does not have to remember to edit this line. */
+  if (typeof nsoInputMode !== 'undefined' && nsoInputMode)
+    setTimeout(function () { nsoInputMode.refresh(); }, 0);
+  else if (typeof nsoRotate !== 'undefined') setTimeout(function () { nsoRotate.refresh(); }, 0);
   const p = state.placed[idx];
   if (p && p.mesh) {
     p.mesh.material.emissive = new THREE.Color(0xdc2626);
@@ -2841,7 +2889,7 @@ function updateExportButton() {
 function updateAdjustUI() {
   if (typeof applyXrayView === 'function') applyXrayView();
   const has = state.selectedIndex >= 0 && state.placed[state.selectedIndex];
-  ['btn-rot-left', 'btn-rot-right', 'btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face', 'btn-raise', 'btn-lower', 'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn', 'btn-nudge-left', 'btn-nudge-right', 'btn-nudge-fwd', 'btn-nudge-back', 'btn-delete-placed', 'btn-frame-selected']
+  ['btn-rot-left', 'btn-rot-right', 'btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face', 'btn-to-plate', 'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn', 'btn-nudge-left', 'btn-nudge-right', 'btn-nudge-fwd', 'btn-nudge-back', 'btn-delete-placed', 'btn-frame-selected']
     .forEach(id => {
       const el = document.getElementById(id);
       if (el) el.disabled = !has;
@@ -2910,6 +2958,7 @@ function deleteSelectedPlaced() {
     state.models = state.models.filter(function (m) { return m.id !== sourceId; });
     if (state.editId === sourceId) state.editId = null;
     if (state.joinPartnerId === sourceId) state.joinPartnerId = null;
+    if (state.joinThirdId === sourceId) { state.joinThirdId = null; state.joinFaceC = null; }
     renderModelList();
   }
   reindexPlacedMeshes();
@@ -3063,6 +3112,60 @@ function liftSelected(dir) {
   applyMeshRotation(p);
   refreshOutline(p);
   setStatus(p.liftY ? ('Lift ' + p.liftY.toFixed(0) + ' mm') : 'On plate');
+}
+
+/* Bring the selected piece down to rest on the plate, in one press.
+
+   The vertical control is a ladder, and a ladder is useless for recovery. It
+   was Raise and Lower at 2 mm a press when this was written; those buttons are
+   retired and the Move menu's Vertical slider and arrows own the axis now, at
+   0.25 mm a press. That made the arithmetic worse, not better: a piece Seat
+   (support) has stacked on a 20 mm target comes back with liftY 20.18, which is
+   eighty presses of the arrow. The slider can be dragged to zero in one go, but
+   only for a piece whose record still agrees with where it is - a piece a seat
+   left in the air over a target that has since been deleted or moved has liftY
+   0 already and nothing under it at all.
+
+   Which is the second half of it, and the half no vertical control can fix.
+   Every one of them - liftSelected, the Vertical arrows, the slider - writes
+   liftY and then calls applyMeshRotation, which rebuilds the mesh's rotation
+   from the placed record's pose fields: rotY, flipX, tipX, tipZ, tiltX, tiltZ.
+   A piece the seat laid on a slope carries a free quaternion none of those
+   fields can hold, so the first step throws the angle the seat gave it away,
+   and the piece is still in the air. (Undo cannot put it back either:
+   snapshotPlacedPose carries the same fields. Both measured in
+   tools/nso_bring_to_plate_test.js section 4.)
+
+   This goes through settlePlacedOnBed instead, which measures the piece's own
+   world box and only ever writes y: the lowest point of the piece lands on the
+   bed baseline from any pose - a tilted piece on its lowest corner, a piece
+   pushed out of the build volume back inside it, because settlePlacedOnBed
+   clears the overflow flag and the offset with it.
+
+   The vertical half of a move and nothing else - x, z and the piece's own
+   rotation are untouched. One Undo, like every other pose button, and a
+   locked piece refuses it exactly as it refuses the vertical step: btn-to-plate
+   is in app-poslock's ADJUST_IDS and in updateAdjustUI's roster. */
+function bringSelectedToPlate() {
+  const p = state.placed[state.selectedIndex];
+  if (!p || !p.mesh) return;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'bring to plate')) return;
+  p.mesh.updateMatrixWorld(true);
+  const wasAt = meshLocalBox3(p.mesh).min.y;
+  /* already resting on it, and the record agrees: say so and touch nothing,
+     so the Undo stack does not collect entries that undo nothing */
+  if (!(p.liftY || 0) && Math.abs(wasAt - 0.2) <= 1e-6) {
+    setStatus('Already on the plate');
+    return;
+  }
+  pushUndo(snapshotPlacedPose(state.selectedIndex));
+  p.liftY = 0;
+  settlePlacedOnBed(p);
+  p.mesh.updateMatrixWorld(true);
+  refreshOutline(p);
+  updateExportButton();
+  const moved = wasAt - 0.2;
+  setStatus('On the plate - ' + (moved < 0 ? 'up ' : 'down ') + Math.abs(moved).toFixed(2) + ' mm');
 }
 
 function bankSelected(dir) {

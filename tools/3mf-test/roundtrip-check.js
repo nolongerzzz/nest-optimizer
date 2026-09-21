@@ -208,6 +208,23 @@ async function validateProfile(profileId, outDir) {
         ' triangles, ' + iCount + ' build items)',
     vCount === 16 && tCount === 24 && iCount === 2);
 
+  // --- per-object identity ---------------------------------------------
+  // Without a name on the <object> element and a production-extension UUID,
+  // Bambu Studio collapses the plate into one object and the slice comes back
+  // with a single OBJECT_ID. See docs/3MF-OBJECT-IDENTITY.md.
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  check('the production extension is declared',
+    model.includes('xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06"'));
+  check('each object carries its own name on the <object> element',
+    [...model.matchAll(/<object [^>]*name="([^"]*)"/g)].map((m) => m[1]).join(),
+    objects.map((o) => o.name).join());
+  const uuids = [...model.matchAll(/p:UUID="([^"]*)"/g)].map((m) => m[1]);
+  check('object, build and item all carry a UUID (' + uuids.length + ' of them)',
+    uuids.length, objects.length * 2 + 1);
+  check('every UUID is a well-formed RFC 4122 v4',
+    uuids.filter((u) => !UUID_RE.test(u)), []);
+  check('no two UUIDs collide', new Set(uuids).size, uuids.length);
+
   console.log('  wrote ' + file + ' (' + built.bytes.length + ' bytes)');
 }
 

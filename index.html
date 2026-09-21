@@ -74,6 +74,7 @@
           <div class="join-slots">
             <button type="button" class="join-slot" id="join-slot-a" data-slot="a"><span class="join-badge join-badge-a">A</span><span class="join-slot-name" id="join-name-a">Pick piece A</span></button>
             <button type="button" class="join-slot" id="join-slot-b" data-slot="b"><span class="join-badge join-badge-b">B</span><span class="join-slot-name" id="join-name-b">Pick piece B</span></button>
+            <button type="button" class="join-slot" id="join-slot-c" data-slot="c"><span class="join-badge join-badge-c">C</span><span class="join-slot-name" id="join-name-c">Pick piece C (optional)</span></button>
           </div>
           <button id="btn-join-align" class="btn btn-secondary" type="button">Align edges</button>
           <button id="btn-join-cx" class="btn btn-secondary" type="button">Center X</button>
@@ -99,6 +100,33 @@
               <output id="seat-gap-value" for="seat-gap" title="Exact gap the next Seat (support) will use">-0.18 mm</output>
             </div>
             <button id="btn-seat-here" class="btn btn-secondary" type="button" aria-pressed="false" title="Seat here: click a point on A - curved, irregular or flat - and B is turned to face it and set at the slider's gap. The gap is the true minimum distance between the two surfaces.">Seat here</button>
+            <label class="vp-check" for="chk-oversize-washer"
+                   title="Oversized washer: for a deliberately close-contact washer or shim WIDER than the piece it sits on. Seat (support) then places B at the typed gap below through the measured-clearance solve instead of the corner-ray fit - which refuses an overhanging piece with 'corner N missed hull along punch axis' - and reports the true minimum distance, the overhang and that verdict on the status line instead of refusing. Off: Seat (support) is exactly the seat it has always been.">
+              <input type="checkbox" id="chk-oversize-washer"> Oversized washer
+            </label>
+            <div class="seat-support-row oversize-row">
+              <label for="oversize-gap" title="The gap Seat (support) places at while Oversized washer is on, in mm, coupon sign convention: negative = air gap, 0 = touching, positive = the washer overlaps into the target. Typed, not the slider, so a deliberate squeeze past the slider's +0.05 can be asked for at all.">Gap</label>
+              <input type="number" id="oversize-gap" min="-5" max="5" step="0.01" value="0"
+                     aria-label="Oversized washer gap in mm" />
+              <span class="oversize-unit">mm</span>
+            </div>
+          </div>
+          <div class="triple-join" id="triple-join">
+            <select id="triple-mode" title="Vertical stack: each piece is centred over the one before it and seated down onto it. Horizontal sequence: each piece keeps its place along the run and is centred on the cross axis, then seated sideways against the one before it.">
+              <option value="vertical">A-B-C: vertical stack</option>
+              <option value="horizontal">A-B-C: horizontal sequence</option>
+            </select>
+            <div class="triple-gap-row">
+              <label for="triple-gap-ab">A-B</label>
+              <input type="range" id="triple-gap-ab" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Gap at the A-B junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = B overlaps into A. Independent of the B-C gap." aria-label="A to B junction gap in mm" />
+              <output id="triple-gap-ab-value" for="triple-gap-ab" title="Exact gap the A-B junction will be seated at">-0.18 mm</output>
+            </div>
+            <div class="triple-gap-row">
+              <label for="triple-gap-bc">B-C</label>
+              <input type="range" id="triple-gap-bc" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Gap at the B-C junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = C overlaps into B. Independent of the A-B gap." aria-label="B to C junction gap in mm" />
+              <output id="triple-gap-bc-value" for="triple-gap-bc" title="Exact gap the B-C junction will be seated at">-0.18 mm</output>
+            </div>
+            <button id="btn-join-triple" class="btn btn-secondary" type="button" disabled title="Center lock then Seat (support) at A-B, then Center lock then Seat (support) at B-C, each junction at its own gap.">Join A-B-C</button>
           </div>
           <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
           <button id="btn-seat-grid" class="btn btn-secondary" type="button" title="Faint grid on the top surface of the target piece (A), to line up what goes above it">Surface grid: auto</button>
@@ -224,8 +252,14 @@
           <details class="vp-menu vp-top-menu" id="menu-move">
             <summary class="vp-bar-btn" title="Raise, lower and nudge the selected piece">Move</summary>
             <div class="vp-menu-body vp-top-body">
-              <button id="btn-raise" class="vp-bar-btn adjust-btn" disabled>Raise</button>
-              <button id="btn-lower" class="vp-bar-btn adjust-btn" disabled>Lower</button>
+              <!-- Raise / Lower are gone: the checkbox below is the vertical
+                   control now, with the slider and the arrow keys. liftSelected()
+                   itself is untouched and still has its other callers. -->
+              <label class="vp-flag vp-flag-movevert" title="Vertical placement: the camera drops to eye level with the piece from outside the plate, a slider appears beside it, and the arrow keys move it 0.25 mm at a time - up/down to raise, left/right across the line to the nearest piece. Free drag is off while this is on.">
+                <input type="checkbox" id="chk-move-vertical"><span class="vp-flag-face">Vertical</span>
+              </label>
+              <button id="btn-to-plate" class="vp-bar-btn adjust-btn" disabled
+                      title="Bring the selected piece straight down to rest on the plate, in one press - whatever raised it. The Vertical slider and arrows only write the lift, 0.25 mm a press, so a piece Seat stacked on a 20 mm target is eighty presses from the plate - and on a piece Seat laid on a slope the first step throws that angle away, because it rebuilds the pose from the record. This reads the piece's own box instead and puts its lowest point on the bed, keeping its place on the plate and its rotation. Refused on a locked piece, and one Undo puts it back.">To plate</button>
               <button id="btn-nudge-fwd" class="vp-bar-btn adjust-btn" disabled>↑</button>
               <button id="btn-nudge-back" class="vp-bar-btn adjust-btn" disabled>↓</button>
               <button id="btn-nudge-left" class="vp-bar-btn adjust-btn" disabled>←</button>
@@ -632,6 +666,11 @@
             </div>
           </details>
         </div>
+        <div id="move-vert-wrap" class="move-vert-wrap" hidden>
+          <input type="range" id="move-vert-slider" min="0" max="80" step="0.25" value="0"
+                 orient="vertical" aria-label="Lift the piece, mm">
+          <span id="move-vert-read" class="move-vert-read">0.00 mm</span>
+        </div>
         <div class="viewport-overlay viewport-overlay-bl">
           <button id="btn-undo" class="viewport-tool-btn" type="button" disabled>↶</button>
           <button id="btn-frame-view" class="viewport-tool-btn" type="button">◎</button>
@@ -642,13 +681,15 @@
           <input type="file" id="gcode-input" accept=".3mf" class="hidden-quiet" />
           <!-- The Microscope VIEW. Distinct from G-code-onto-the-plate above:
                that one imports a sliced project as models you then scrub on
-               the plate; this one opens a dedicated inspector - the reference
-               tool's own view - over an STL, a 3MF or a sliced .gcode.3mf, and
-               hands a selection back out either onto the plate or to a file.
+               the plate; this one lays a dedicated inspector - the reference
+               tool's own view - OVER whatever is on the plate, the same way
+               X-ray acts on what is already there, and hands a selection back
+               out either onto the plate or to a file. It takes a file too,
+               and a .gcode.3mf import lands in it without a button press.
                See docs/GCODE-MICROSCOPE.md. -->
           <button id="btn-microscope" class="viewport-tool-btn" type="button"
                   aria-label="Microscope view"
-                  title="Microscope: open an STL, a 3MF or a sliced .gcode.3mf in its own inspector. Feature colours, a capture box with independent footprint and thickness, and whole-layer selection - then send what you selected to the plate or straight to an STL file.">&#128300;</button>
+                  title="Microscope: put whatever is on the plate under the lens, the way X-ray does - or Import an STL, a 3MF or a sliced .gcode.3mf instead. Colour per part or per slicer feature, a capture box with independent footprint and thickness, whole-layer selection on a slice - then send what you isolated to the plate or straight to an STL file.">&#128300;</button>
           <input type="file" id="ms-input" accept=".stl,.3mf" class="hidden-quiet" />
           <button id="btn-watch" class="viewport-tool-btn" type="button"
                   aria-pressed="false"
@@ -683,16 +724,19 @@
   <div id="microscope" class="ms-panel" tabindex="0" hidden>
     <div id="ms-sidebar" class="ms-sidebar">
       <h1 id="ms-title">Microscope</h1>
-      <p class="ms-sub" id="ms-sub">Open an STL, a 3MF or a sliced .gcode.3mf.</p>
+      <p class="ms-sub" id="ms-sub">The plate, or an STL, a 3MF or a sliced .gcode.3mf.</p>
 
       <div class="ms-section">
-        <div class="ms-section-title">File</div>
+        <div class="ms-section-title">Source</div>
         <div class="ms-btn-row">
+          <button id="ms-btn-plate" type="button"
+                  title="Read the pieces that are on the plate right now, as placed, and put them under the lens. The plate itself is not changed.">Read the plate</button>
           <button id="ms-btn-open" type="button">Import&hellip;</button>
           <button id="ms-close" type="button">Close</button>
         </div>
-        <p class="ms-note">STL and plain 3MF open too. They are not sliced, so
-          they have no layers and no features and draw as whole parts.</p>
+        <p class="ms-note">The rail button opens the plate. Import opens a
+          file instead: STL and plain 3MF are not sliced, so they have no
+          layers and no features and draw as whole parts.</p>
       </div>
 
       <div class="ms-section">
@@ -786,7 +830,7 @@
   <script src="nso-surface-grid.js?v=inside6"></script>
   <script src="nso-gcode-lines.js"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
-  <script src="app-core.js?v=integ1"></script>
+  <script src="app-core.js?v=scope2"></script>
   <script src="app-cut.js?v=inside6"></script>
   <script src="app-finish.js?v=inside7"></script>
   <script src="app-sculpt.js?v=inside4"></script>
@@ -799,23 +843,30 @@
   <script src="app-stock.js?v=stock2"></script>
   <script src="app-assemble.js?v=asm1"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
-  <script src="app-join.js?v=libsave1"></script>
+  <script src="app-join.js?v=inmode1"></script>
   <script src="app-center-lock.js?v=clock1"></script>
+  <script src="app-oversize-washer.js?v=oversize1"></script>
+  <script src="app-join-triple.js?v=triple1"></script>
   <script src="app-carve.js?v=hollow1"></script>
   <script src="app-hollow.js?v=hollow1"></script>
   <script src="app-seat-surface.js?v=seatsurf1"></script>
   <script src="app-skin.js?v=skin2"></script>
   <script src="app-skin-patch.js?v=skin3"></script>
   <script src="app-raster.js?v=raster1"></script>
-  <script src="app-mask.js?v=inside7"></script>
+  <script src="app-mask.js?v=inmode1"></script>
   <script src="app-seat-grid.js?v=inside6"></script>
   <script src="app-paint-delete.js?v=del1"></script>
   <script src="app-extract-sel.js?v=inside6"></script>
   <script src="app-texture.js?v=skin2"></script>
   <script src="app-nonsolid.js?v=inside4"></script>
   <script src="app-poslock.js?v=lock1"></script>
-  <script src="app-tip-orient.js?v=tip1"></script>
-  <script src="app-rotate-handles.js?v=rot1"></script>
+  <!-- The arbiter first: the three menu tools below register with it as
+       they bind, and it is what makes "one menu owns the input" true
+       rather than three modules each hoping the other two are shut. -->
+  <script src="app-input-mode.js?v=inmode1"></script>
+  <script src="app-tip-orient.js?v=tip2"></script>
+  <script src="app-rotate-handles.js?v=rot2"></script>
+  <script src="app-move-vertical.js?v=mv2"></script>
   <script src="app-defects.js?v=inside5"></script>
   <script src="app-measure.js?v=inside6"></script>
   <!-- The library write features. access first: it holds the gate, the
@@ -826,7 +877,7 @@
   <script src="app-library.js?v=libsave1"></script>
   <script src="app-photoset.js?v=photoset1"></script>
   <script src="app-toolpath.js?v=toolpath2"></script>
-  <script src="app-microscope.js?v=scope1"></script>
+  <script src="app-microscope.js?v=scope2"></script>
   <script src="app-ux.js?v=inside7"></script>
   <!-- Live watch: off until its button is pressed, and it patches nothing
        until then. Deleting this tag and the #btn-watch button above removes

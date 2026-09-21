@@ -8,7 +8,8 @@
  *
  *   [Content_Types].xml            OPC part types
  *   _rels/.rels                    root relationship -> the model part
- *   3D/3dmodel.model               core 3MF geometry (millimetres, Z up)
+ *   3D/3dmodel.model               core 3MF geometry (millimetres, Z up), one
+ *                                  named object per piece so the slicer keeps them apart
  *   Metadata/project_settings.config   <- the baked cooling settings
  *   Metadata/model_settings.config     Bambu object/plate names
  *   Metadata/nso_profile.json          NSO provenance (see note below)
@@ -222,21 +223,71 @@
     return s === '-0' ? '0' : s;
   }
 
+  /** The name an object is written under, in both the model and the settings part. */
+  function objectName(obj, i) {
+    return (obj && obj.name) || ('object_' + (i + 1));
+  }
+
+  // 3MF's production extension wants a UUID on every object, on <build> and on
+  // every <item>. Ours are derived from the object's own identity rather than
+  // generated, because the same plate + profile must keep producing byte-
+  // identical archives (see the determinism check in tools/3mf-test). Bambu
+  // Studio does the same thing -- its own files carry counter-shaped UUIDs like
+  // "00000001-61cb-4c03-9d28-80fed5dfa1dc" -- so a derived UUID is precedented,
+  // not a shortcut. Uniqueness only has to hold inside the one package.
+  function hash32(str, seed) {
+    var h = (seed >>> 0) ^ 0x811C9DC5;
+    for (var i = 0; i < str.length; i++) {
+      var c = str.charCodeAt(i);
+      h = Math.imul(h ^ (c & 0xFF), 0x01000193) >>> 0;
+      h = Math.imul(h ^ ((c >>> 8) & 0xFF), 0x01000193) >>> 0;
+    }
+    return h >>> 0;
+  }
+
+  function hex8(v) {
+    return ('0000000' + (v >>> 0).toString(16)).slice(-8);
+  }
+
+  /** A stable RFC 4122 v4-shaped UUID for `seed`. Same seed, same UUID, always. */
+  function uuidFor(seed) {
+    var h = hex8(hash32(seed, 0x9E3779B9)) + hex8(hash32(seed, 0x85EBCA6B)) +
+            hex8(hash32(seed, 0xC2B2AE35)) + hex8(hash32(seed, 0x27D4EB2F));
+    // Version nibble 4, and the variant nibble forced into 8/9/a/b.
+    var variant = '89ab'.charAt(parseInt(h.charAt(16), 16) & 3);
+    return h.slice(0, 8) + '-' + h.slice(8, 12) + '-4' + h.slice(13, 16) +
+           '-' + variant + h.slice(17, 20) + '-' + h.slice(20, 32);
+  }
+
+  function objectUuid(obj, i) {
+    return uuidFor('object:' + i + ':' + objectName(obj, i) + ':' +
+                   obj.vertices.length + ':' + obj.triangles.length);
+  }
+
   /**
    * Build 3D/3dmodel.model.
    * @param {{name:string, vertices:number[], triangles:number[]}[]} objects
    *        vertices are flat [x,y,z,...] in millimetres, Z up, plate coordinates.
+   *
+   * Each piece is written as its own <object> carrying its name and a UUID, with
+   * its own <item> in <build>. The name has to be on the <object> element: a name
+   * that lives only in Metadata/model_settings.config does not reliably reach the
+   * slicer, and without per-object identity Bambu Studio collapses the plate into
+   * a single object -- one OBJECT_ID for the whole print instead of one per piece.
+   * Confirmed against a real slice; see docs/3MF-OBJECT-IDENTITY.md.
    */
   function buildModelXml(objects) {
     var out = [];
     out.push('<?xml version="1.0" encoding="UTF-8"?>');
     out.push('<model unit="millimeter" xml:lang="en-US" ' +
-             'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">');
+             'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" ' +
+             'xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06">');
     out.push(' <metadata name="Application">Nest Optimizer</metadata>');
     out.push(' <resources>');
     objects.forEach(function (obj, i) {
       var id = i + 1;
-      out.push('  <object id="' + id + '" type="model">');
+      out.push('  <object id="' + id + '" name="' + xmlEscape(objectName(obj, i)) +
+               '" type="model" p:UUID="' + objectUuid(obj, i) + '">');
       out.push('   <mesh>');
       out.push('    <vertices>');
       for (var v = 0; v < obj.vertices.length; v += 3) {
@@ -256,9 +307,10 @@
       out.push('  </object>');
     });
     out.push(' </resources>');
-    out.push(' <build>');
+    out.push(' <build p:UUID="' + uuidFor('build') + '">');
     objects.forEach(function (obj, i) {
-      out.push('  <item objectid="' + (i + 1) + '" transform="1 0 0 0 1 0 0 0 1 0 0 0"/>');
+      out.push('  <item objectid="' + (i + 1) + '" transform="1 0 0 0 1 0 0 0 1 0 0 0"' +
+               ' p:UUID="' + uuidFor('item:' + i + ':' + objectName(obj, i)) + '"/>');
     });
     out.push(' </build>');
     out.push('</model>');
@@ -272,7 +324,7 @@
     out.push('<config>');
     objects.forEach(function (obj, i) {
       out.push('  <object id="' + (i + 1) + '">');
-      out.push('    <metadata key="name" value="' + xmlEscape(obj.name || ('object_' + (i + 1))) + '"/>');
+      out.push('    <metadata key="name" value="' + xmlEscape(objectName(obj, i)) + '"/>');
       out.push('  </object>');
     });
     out.push('  <plate>');

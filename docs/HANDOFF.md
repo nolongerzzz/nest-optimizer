@@ -4292,3 +4292,235 @@ is no half-loaded state to land in.
 - The reach test costs up to 24 ray casts per `NSO_plugFrame` call, and only on
   a top-rank tie. On a plug straddling a face (rank 2, usually one candidate) it
   costs nothing.
+
+## Seat onto a face that is not square to the bit - the relief measure was reading the angle (2026-09-20)
+`app-join.js` `NSO_seatTipsProbe` (how `rise` is measured), plus a residual
+floor on gap mode (`NSO_SEAT_GAP_RESIDUAL_LIMIT`, `NSO_seatResidualReason`).
+Check: `npm run seat:tilted` (`tools/nso_seat_tilted_face_test.js`, in
+`npm test`).
+
+**The report.** "Seat (support), box to box, leaves the piece elevated in
+mid-air rather than positioned relative to the join. The same wrong placement
+happens box to bordered-washer."
+
+**Reproduced** at the two simplest library pieces through the real library
+browser - `box_hull_80x40x20.stl` as the target, `box_bit_12x8x8.stl` as the
+bit, dragged over it on the bed, Seat (support) at the slider default - with
+**one extra step: a single press of the Tilt arrow**, on either piece. The bit
+is left parallel to the plate, hanging off the high edge of the slope and
+touching nothing, while the status line reads
+`Seated - air gap 0.18mm (measured -0.180mm, skin error 0.00mm) - from skin
+tips, relief 1.07mm above the base plane`. The true shell-to-shell distance
+(`tools/nso_soup_distance.js`, which the status line cannot fake) is
+**0.1739 mm** at one press and **0.1559 mm** at two, against the 0.18 asked
+for.
+
+**Not the corner-ray / outward tie-break issue** fixed in `404b996`, and not
+from any of that night's placement merges: the same case measures identically
+at `060b685`, the commit immediately before that fix. It came in with the
+skin-tips reference (2026-09-16); `app-join.js` at `2a6d07a` (2026-09-15)
+carries no tips probe at all.
+
+**The cause.** `NSO_seatTipsProbe` decides whether the surface under the bit is
+a contact skin, and `NSO_seatFlushBitToHull` sends gap mode down one of two
+completely different paths on that answer: over `NSO_SEAT_TIPS_TOL` (0.01 mm)
+the bit is set against the tips **untilted**, under it the corner-ray fit runs
+and **tilts the bit onto the face**. The probe measured the relief as
+
+    ext.s - mean(hit . n)
+
+an extreme height against an AVERAGE height, both along the BIT's own normal.
+Those two agree only while the face is square to that normal. Tilt either piece
+and the four corner-ray hits sit at four different heights along `n`, their mean
+lands at the middle of the face, and the highest point of that same FLAT face
+stands above the mean by half the face's rise across the footprint: **1.07 mm at
+15 degrees, 2.31 mm at 30, 4.00 mm at 45**, on a plain flat box top. Every one
+of those is a hundred times the tolerance, so a flat face was called a contact
+skin and the tilt fit was skipped.
+
+And it could not be caught from the status line: the tips path measures its own
+residuals against the very extreme it positioned from, so it reported
+`skin error 0.00mm` on a seat that was 0.006 mm out and, with the bit itself
+tilted 45 degrees, `skin error 8.00mm` and `measured -4.180mm` under the word
+"Seated". The same class of defect the read-back fix in `404b996` removed from
+the plane path.
+
+**Fix.** Measure the relief against the **plane of the four hits** - the plane
+the fit itself tilts onto, `NSO_newellNormal` of the hit quad - instead of the
+mean of their heights:
+
+    rise = (extreme point - centroid of the hits) . nFit
+
+A flat face at any angle puts its own extreme point in that plane, so the rise
+is Float32 noise and the corner-ray path runs, byte for byte as it did before
+the tips reference existed. A real relief still stands its tip height proud of
+the plane its rays found, so the skin case is untouched - `skin:drive` still
+pins `from skin tips, relief 0.60mm`, and `seat:curved-audit` still reads a
+bare sphere as a 3.11 mm relief. A degenerate hit quad, or one so edge-on to the
+bit's normal that the projection means nothing, keeps the old mean.
+
+**Second change, from measuring the first.** Three presses of Tilt (45 degrees)
+is past where the corner-ray fit converges: the bit slides past the target's
+uppermost edge part way through and the fit oscillates (4.75 mm off the 0.18 at
+the shipped three iterations, 0.06 at six, 2.37 at ten). Before, that reported a
+clean seat 0.053 mm out; on the plane path it would now report `skin error
+4.74mm` and still say "Seated". So **gap mode refuses when its own read-back is
+further off than the gap slider's whole range** (0.25 mm,
+`NSO_SEAT_GAP_RESIDUAL_LIMIT`), restores the pose and names both numbers. Gap
+mode only: `proud` mode's residual on a curve is a measured, deliberately-pinned
+limitation (`docs/SEAT-SURFACE.md` finding (c), `seat:curved-audit` section 3),
+not a failure to place. Every seat the suites pin measures 0.00.
+
+**The washers, measured** (`npm run seat:tilted` does not cover these; the
+numbers are from the same drive, true distances via `nso_soup_distance.js`):
+
+| target | bit | result | true distance |
+|---|---|---|---|
+| loose washer (skin patch, 30x30) | box bit, stacked | Seated | **0.1800** |
+| bordered washer | box bit, stacked | Seated | **0.1800** |
+| sandwich patch | box bit, stacked | Seated | **0.1800** |
+| box hull | any of the three, stacked | Seated | **0.1800** |
+| any washer | box bit, **side by side** | refuses, `corner 1 missed hull along punch axis` | - |
+| 12x8 box | 30x30 washer, stacked | refuses, `corner 0 missed hull along punch axis` | - |
+| 30x30 washer | 80x40 box, stacked | refuses, `corner 0 missed hull along punch axis` | - |
+
+So **loose-washer seating works and always did** - it is exact in every
+direction where the bit's footprint sits over the target, before this fix as
+well as after. The two refusals are the corner-ray fit's own stated contract
+(all four corner rays must land, and it returns on the first that does not),
+and both are the thin-flat-geometry limitation already on record, not this
+bug: an 8 mm bit seated against a 0.6 mm washer edge has two of its four rays
+leaving above the top of that edge, and a 30x30 bit over a 12x8 target has no
+target under its corners at all. Both refuse **without moving anything**.
+
+**One thing the bordered washer does that reads as a wrong placement and is
+not.** A 12x8 bit centred on a 30x30 bordered washer lands with its underside
+at 1.58 while the washer's rim top is at 2.00 - 0.42 mm *below* what a user
+sees as the top of the washer. The true distance is exactly 0.18: the bit is
+seated on the crosshatch inside the rim, because the rim is not under its
+footprint. That is the footprint rule, `docs/SEAT-SURFACE.md` finding (d),
+and a bit wide enough to cover the rim seats on the rim instead. Unchanged by
+this fix in either direction.
+
+### Known, unfixed, measured here
+- **45 degrees and past** the corner-ray fit does not converge on a tilted flat
+  face. It now refuses rather than reporting a seat it did not make. Making it
+  converge means reordering rotate-and-translate inside the fit, which moves
+  every pinned curved-seat pose; not this ticket's.
+- **A free rotation does not survive a pose button.** `applyMeshRotation`
+  rebuilds the mesh's rotation from the placed record's fields (`rotY`, `tipX`,
+  `tiltX`, `tipZ`, `tiltZ`), which carry no free rotation, so one press of
+  Raise or Lower on a piece the seat laid on a slope throws that angle away -
+  and `snapshotPlacedPose` carries the same fields, so **Undo cannot put it
+  back**. Pre-existing, the same gap `seat:curved-audit` section 6 pins on the
+  export side, and pinned now on the pose side in
+  `tools/nso_bring_to_plate_test.js` section 4.
+
+**`?v=` NOT bumped** - rule 4, Grok owns those. `app-join.js` still ships at
+`?v=libsave1`, `app-core.js` at `?v=integ1`, `app-poslock.js` at `?v=lock1`.
+
+## To plate - put a piece back down on the bed, in one press (2026-09-20)
+`bringSelectedToPlate` (`app-core.js`) behind `#btn-to-plate` in the viewport
+**Move** menu. Check: `npm run to-plate`
+(`tools/nso_bring_to_plate_test.js`, in `npm test`).
+
+> **AT MERGE (claude-wip, 2026-09-20).** This ticket was written against a Move
+> menu that still had Raise and Lower in it. The Move-vertical ticket retired
+> both while this branch was out, so every "beside Raise and Lower" and "2 mm a
+> press" below reads against the tree this was built on, not the tree it landed
+> in: the vertical axis is the Vertical checkbox, its slider and the arrow keys
+> now, at 0.25 mm a press. The argument for To plate survives the change intact
+> and gets stronger - eighty arrow presses rather than eleven - because the
+> thing it is for is the free rotation no vertical control can restore, and the
+> slider writes `liftY` through `applyMeshRotation` exactly as Lower did.
+> `#btn-to-plate` was added to app-poslock's `ADJUST_IDS` and to
+> `updateAdjustUI`'s roster on the versions of those lines that no longer name
+> `btn-raise` / `btn-lower`; section 4's Lower control and section 7 now drive
+> `liftSelected` directly, which is the surviving function and the idiom the
+> other suites already use.
+
+Nothing put a piece back on the plate. Raise and Lower step 2 mm a press, so a
+piece Seat (support) has stacked on a 20 mm target - `liftY` 20.18 - is eleven
+presses from the bed, and a piece a seat left in the air over a target that has
+since been moved or deleted has nothing under it at all. Lower also goes through
+`applyMeshRotation`, so on a piece the seat laid on a slope its first press
+throws that angle away (see the known-unfixed note above) and the piece is
+still in the air.
+
+This goes through `settlePlacedOnBed`, which measures the piece's own world box
+and only ever writes `y`: the lowest point of the piece lands on the bed
+baseline from any pose, `liftY` is set to 0 so the record agrees afterwards, and
+`x`, `z` and the piece's rotation are untouched. A piece pushed out of the build
+volume comes back inside it, because `settlePlacedOnBed` clears `overflow` and
+`meshOffsetY` with it. One Undo, like every other pose button; a piece already
+on the plate is told so and pushes no undo entry; a locked piece refuses it the
+way it refuses Raise and Lower, button greyed and action standing down.
+
+## Triple join - A-B-C in one press, two junctions, two gaps (2026-09-20)
+`app-join-triple.js` behind **Join A-B-C** in the Join card, with a third slot
+beside A and B, a vertical/horizontal mode select and one gap input per
+junction. Check: `npm run join:triple`
+(`tools/nso_join_triple_test.js`, in `npm test`).
+
+A three-piece stack was already possible by hand - pick A and B, Center lock,
+Seat (support), then re-pick B and C and do it again - and two things went
+wrong every time. The re-pick is easy to get backwards, because "C onto B" is
+not "B onto C" and the slots do not say which way round the last press left
+them. And there is one gap slider, so the second seam silently inherited
+whatever the first seam was set to: a coupon with a real 0.18 mm release gap at
+one seam and a solid weld at the other could not be built in one pass at all.
+
+This adds no positioning math. Each junction is Center lock followed by Seat
+(support), called exactly as their own buttons call them; all the sequence
+decides is the order and which gap goes with which seam. The two load-bearing
+gates in the check are the ones that say so: the pose the triple leaves B in is
+bit-for-bit the pose `Center lock` + `Seat (support)` leave B in by hand
+(vertical), and `Center Z` + `Seat (support)` leave B in by hand (horizontal) -
+same `mesh.position`, same quaternion, same `x`/`z`/`liftY`, compared with `===`
+rather than a tolerance.
+
+The two modes differ in one step: which rough placement runs before the seat.
+**Vertical stack** is Center lock as its button runs it - the mover's reference
+point onto the host's, in X and Z - so the mover lands over the host,
+`NSO_raiseBuriedBitClear` lifts it clear of the host's top and the seat punches
+down. **Horizontal sequence** takes the same Center lock reference points (its
+exported `refPointXZ`, honouring the same bbox/centroid selector) and applies
+the delta on the CROSS axis only, leaving the axis the two are separated along
+alone, so they stay side by side and the seat punches sideways. Which axis that
+is, is the question Center X / Center Z already answer (`centerJoinAxis`'s
+`punchIsX`): the run axis is the one with the larger separation, and centring on
+it is what would pull the mover into the host. The seat still chooses its own
+punch axis from the pose it is handed; the mode chooses the pose, it does not
+overrule the seat.
+
+Chaining is safe by construction, and the check pins it rather than arguing it.
+The second junction seats C onto B, and `seatBitAtGap` starts by calling
+`settlePlacedOnBed` on its host - B, which is at that moment floating on top of
+A. B does not fall: the seat that put it there wrote `liftY = boxBottom - 0.2`,
+and `settlePlacedOnBed` puts the box bottom back on `0.2 + liftY`, so the settle
+is a no-op on a seated piece and the first seam survives the second untouched.
+
+Three small additions outside the new file, all of them additive:
+`seatBitAtGap` now RETURNS what it did (`{ ok, gap, measured, residual,
+reference, clamped }`, or `{ ok: false, reason }`), because a caller that chains
+seats has to know whether to run the next one and scraping the status line for
+that would make the wording load-bearing - a clamped seat counts as a failure,
+since the whole point of a per-junction gap is that the junction is at it.
+`readSeatGapInput(id)` and `updateSeatGapReadout(id, outId)` take an input id
+and default to the card's own slider, so the two junction gaps go through the
+same reader rather than a copy of its rules. And `NSO_CenterLock.lastError()`
+reports why the last refusal was a refusal, so the sequence can say which seam
+stopped and why.
+
+Known and deliberate: **a weld is an intersection.** At a positive gap the two
+shells really do penetrate, and `tools/mesh_validate.py` reports piercing pairs
+for that seam - the check asserts that it does, as the proof the weld is solid,
+and exports a second, all-air-gap row to demand `verdict: PASS` with 0 piercing
+and 0 coplanar pairs. Also deliberate: **Seat's limits are still Seat's
+limits.** A piece whose footprint does not lie within its host's is not raised
+clear and the corner-ray fit may refuse it, so a vertical stack wants each piece
+no wider than the one under it. The sequence surfaces that refusal, names the
+seam it stopped at and says the earlier seam is seated and was left alone,
+rather than papering over it. Undo is four entries - lock, seat, lock, seat -
+the same four the two junctions leave by hand, and backing all four out puts
+every piece back.

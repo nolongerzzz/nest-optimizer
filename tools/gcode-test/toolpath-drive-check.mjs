@@ -79,6 +79,26 @@ async function main() {
   }, [bytes, 'toolpath-ground-truth.gcode.3mf']);
   await page.waitForFunction('window.NSO_TOOLPATH.getSession() !== null', null, { timeout: 20000 });
 
+  // Importing a slice now LANDS in the microscope - see app-core.js's
+  // handleFiles(). That is a view laid over this one, not instead of it: the
+  // plate import below ran exactly as it always did, and Close drops onto the
+  // Toolpath card. Asserted here, in the check that owns this import route,
+  // and then closed so the card's own controls are clickable again.
+  await page.waitForFunction(
+    () => window.NSO_MICROSCOPE && window.NSO_MICROSCOPE.isOpen(), null, { timeout: 20000 });
+  const landed = await page.evaluate(() => {
+    const d = window.NSO_MICROSCOPE.getDoc();
+    return { kind: d.kind, name: d.name, moves: d.segments.length };
+  });
+  check('a .gcode.3mf import lands in the microscope, with no button press',
+    landed.kind, 'toolpath');
+  check('on the file that was imported', landed.name, 'toolpath-ground-truth.gcode.3mf');
+  check('parsed once, not twice - the same 51 moves the session holds',
+    landed.moves, 51);
+  await page.evaluate(() => window.NSO_MICROSCOPE.close());
+  check('and Close hands back the plate import underneath it',
+    await page.isVisible('#microscope'), false);
+
   const imported = await page.evaluate(() => {
     const s = window.NSO_TOOLPATH.getSession();
     return {

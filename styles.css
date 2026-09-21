@@ -1397,6 +1397,7 @@ select:focus, input:focus {
 }
 .join-slot.filled-a { border-color: #fb923c; background: #3a2410; }
 .join-slot.filled-b { border-color: #4ade80; background: #102418; }
+.join-slot.filled-c { border-color: #60a5fa; background: #0f1e33; }
 .join-slot.armed { box-shadow: 0 0 0 3px #f8fafc; cursor: pointer; }
 .join-slot { cursor: pointer; }
 .join-badge {
@@ -1411,6 +1412,7 @@ select:focus, input:focus {
 }
 .join-badge-a { background: #fb923c; }
 .join-badge-b { background: #4ade80; }
+.join-badge-c { background: #60a5fa; }
 .join-slot-name {
   font-size: 13px;
   font-weight: 600;
@@ -2000,6 +2002,39 @@ select:focus, input:focus {
    checkbox and the ball it governs are the same object by eye. */
 .vp-flag-rotlock { --flag-accent: #f472b6; --flag-line: rgba(244,114,182,0.5); --flag-fill: rgba(244,114,182,0.16); }
 .vp-flag-rotlock + .vp-flag-rotlock { --flag-accent: #38bdf8; --flag-line: rgba(56,189,248,0.5); --flag-fill: rgba(56,189,248,0.16); }
+/* The vertical-placement checkbox, and the column beside the piece. */
+.vp-flag-movevert { --flag-accent: #34d399; --flag-line: rgba(52,211,153,0.5); --flag-fill: rgba(52,211,153,0.16); }
+/* Positioned from script against the piece's projected position, so it is
+   absolute within the viewport rather than laid out in the bar. */
+.move-vert-wrap {
+  position: absolute;
+  z-index: 92;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(52, 211, 153, 0.5);
+  background: rgba(15, 23, 42, 0.9);
+  backdrop-filter: blur(8px);
+}
+.move-vert-wrap[hidden] { display: none; }
+.move-vert-wrap input[type="range"] {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  width: 22px;
+  height: 150px;
+  margin: 0;
+  accent-color: #34d399;
+}
+.move-vert-read {
+  color: #e8eef6;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 
 .vp-flag-repair {
   --flag-accent: #fbbf24;
@@ -2198,12 +2233,76 @@ select:focus, input:focus {
   accent-color: #4ade80;
   cursor: pointer;
 }
+/* Triple join: the two per-junction gaps, side by side, so a mixed pair
+   (a real air gap at one seam, a weld at the other) reads as two numbers at
+   a glance rather than one slider used twice. */
+.triple-join {
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px solid #334155;
+  border-radius: 8px;
+}
+.triple-join.triple-ready {
+  border-color: #60a5fa;
+}
+.triple-join select,
+.triple-join .btn {
+  width: 100%;
+}
+.triple-gap-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.triple-gap-row label {
+  flex: 0 0 28px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+.triple-gap-row input[type="range"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  accent-color: #60a5fa;
+  cursor: pointer;
+}
+.triple-gap-row output {
+  flex: 0 0 66px;
+  text-align: right;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+.triple-join .btn {
+  margin-top: 8px;
+}
+
 .seat-support-row output {
   flex: 0 0 66px;
   text-align: right;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--text);
+}
+
+/* Oversized washer: the typed gap that replaces the slider while the mode is
+   on. Same row rhythm as the slider above it, with the number field taking
+   the slack so the label and the unit stay put as digits are typed. */
+.oversize-row input[type="number"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.oversize-row label,
+.oversize-row .oversize-unit {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 /* Brush rows - a label, a slider that takes the slack, and the live value.
