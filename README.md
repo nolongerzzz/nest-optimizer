@@ -19,10 +19,16 @@ Smart build-plate packing for 3D printing.
   type the mm you want, and the uniform factor is solved and applied (or scale
   by a plain multiplier)
 - **New stock**: a correctly-sized blank to start from, before Carve, Hollow,
-  Cut or anything else that begins with a blank block - sphere, box or
-  cylinder, sized from the target piece by a Pappus thin-shell estimate plus a
-  tunable waste margin, and refused outright if the target cannot physically
-  exist on the current plate ([docs/STOCK.md](docs/STOCK.md))
+  Cut or anything else that begins with a blank block - sphere, box, cylinder,
+  cone, tube, torus, capsule or ellipsoid, sized from the target piece by a
+  Pappus thin-shell estimate plus a tunable waste margin, and refused outright
+  if the target cannot physically exist on the current plate. Every shape in
+  that list solves its defining measurement in closed form, exactly; the ones
+  that cannot - a rounded block, a superellipsoid, anything swept or
+  latticed - are audited and deferred rather than approximated
+  ([docs/STOCK.md](docs/STOCK.md)). One of each ships in the Library under
+  **Stock Blanks**, all eight sized from one target so picking between them is
+  picking a shape and nothing else.
 - Auto-orient for lower support needs
 - Auto-nest with optional 45°/90° rotations
 - Adjustable gap between models

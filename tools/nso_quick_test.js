@@ -238,7 +238,7 @@ console.log('\n== 6. the pieces the Library offers are these pieces ==');
   const cats = [...new Set(quick.map(r => r.category))];
   check('...and they are categorized, in a category the taxonomy declares',
     cats.length > 0 && cats.every(c => new RegExp("'" + c + "'").test(
-      (cat.match(/var CATEGORIES = \[[^\]]*\]/) || [''])[0])),
+      (cat.match(/^\s*var CATEGORIES = \[[^\]]*\]/m) || [''])[0])),
     cats.join(', '));
 }
 
