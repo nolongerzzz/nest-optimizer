@@ -826,6 +826,11 @@
   <script src="nso_paint_delete.js?v=del1"></script>
   <script src="nso_skin_band.js?v=skin2"></script>
   <script src="nso_path_sweep.js?v=inside4"></script>
+  <!-- Trunk-then-branches: the routing that drives the sweep, on top of
+       auto-aim's detection and base search. After BOTH of them, because it
+       calls into both by name and refuses when either is missing. Unwired,
+       like the two modules it sits on. See docs/SUPPORT-TREE.md. -->
+  <script src="nso_support_tree.js?v=tree1"></script>
   <script src="nso_exif.js?v=photoset1"></script>
   <script src="nso_photoset.js?v=photoset1"></script>
   <script src="nso-cooling-profiles.js"></script>
