@@ -6,6 +6,7 @@
   "scripts": {
     "cth:unit": "sh tools/cth-test/run-all.sh",
     "cth:capture": "node tools/cth-test/capture-check.mjs",
+    "cth:drive": "node tools/cth-test/drive-check.mjs",
     "3mf:roundtrip": "node tools/3mf-test/roundtrip-check.js",
     "3mf:drive": "node tools/3mf-test/export-drive-check.mjs",
     "selfint:equiv": "node tools/nso_selfint_equiv_test.js",
@@ -31,6 +32,7 @@
   "testSteps": [
     "cth:unit",
     "cth:capture",
+    "cth:drive",
     "3mf:roundtrip",
     "3mf:drive",
     "selfint:equiv",
