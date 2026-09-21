@@ -3,7 +3,7 @@
    outer faces, Full wrap on, one Soften, grades #status.
    Pull the plug deletes this file with the rest of cth/. */
 
-import { gradeNestSoftenStatus } from './nest-status-grade.js?v=cth14';
+import { gradeNestSoftenStatus } from './nest-status-grade.js?v=cth15';
 
 function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
