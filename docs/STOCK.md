@@ -209,16 +209,18 @@ sphere that came out with a handle in it still fails.
 |---|---|---|---|
 | **rounded block** (box ⊕ sphere) | volume is closed-form — `lwh + 2r(lw+lh+wh) + πr²(l+w+h) + 4/3 πr³` — but solving it for a *scale* with a **fixed** fillet radius is a general cubic, not a cube root | no — needs a real fillet mesher | **deferred, both counts** |
 | **superellipsoid** | needs the Beta function. A closed form only if a special function counts as one; it does not here | yes, in principle | deferred |
-| **swept / helical** (coil, screw, spring) | no — the swept volume has no closed form once the sweep overlaps itself, so it needs real numerical estimation | no | **deferred, both counts** |
-| **lattice / gyroid block** | no closed form at all; the volume fraction is *measured*, not solved | no | **deferred, both counts** |
+| **swept / helical** (coil, screw, spring) | *conditionally* — a constant section swept along a polyline holds `A × centreline length` exactly, and the mitre wedges cancel, **while the sweep does not overlap itself or fold a mitre inside out**. A coil at a tight pitch does both, and then it needs real numerical estimation | no — that is `NSO_PathSweep`'s job, a different tessellator, and the path is three more inputs (radius, pitch, turns) before there is one defining measurement to solve for | deferred |
+| **lattice / gyroid block** | **no** — no closed form at all; the volume fraction is *measured*, not solved | no | **deferred, both counts** |
 | **Platonic solid, n-gon prism, pyramid** | **yes** — each is `c·a³` for a known `c` | no — each needs its own vertex table | deferred on tessellation alone. A prism is also very nearly `cylinder` at a low segment count, which is a reason to want it spelled that way rather than added twice |
 | **stock shaped like a reference *mesh*** | not a primitive at all | n/a | out of scope 3, unchanged |
 
-The two rows marked "both counts" are the ones that would need genuine
-numerical estimation — Monte-Carlo or voxel integration of the swept or
-patterned volume, then a solve by iteration rather than by formula. That is a
-real ticket with a real tolerance to argue about, and it is deliberately not
-folded in here as a cube root with a fudge on it.
+**The ones that would need genuine numerical estimation** are the lattice
+block outright, and the sweep the moment its condition fails — Monte-Carlo or
+voxel integration of the patterned or self-overlapping volume, then a solve by
+iteration rather than by formula. That is a real ticket with a real tolerance
+to argue about, and it is deliberately not folded in here as a cube root with a
+fudge on it. The rounded block is the third kind: its volume is exact and its
+*solve* is the problem, a general cubic rather than a cube root.
 
 Nothing deferred is half-built: none of these names generates anything, and
 asking for one by name gets the ordinary unknown-shape refusal, which the

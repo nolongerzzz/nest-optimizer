@@ -203,9 +203,15 @@
                           either one enough.
         superellipsoid    volume needs the Beta function. A closed form only if
                           a special function counts as one; it does not here.
-        swept / helical   a coil, a screw, a spring. The swept volume has no
-                          closed form once the sweep overlaps itself, so it
-                          needs real numerical estimation.
+        swept / helical   a coil, a screw, a spring. Its volume is closed-form
+                          only CONDITIONALLY - a constant section swept along a
+                          polyline holds A x centreline length exactly, and the
+                          mitre wedges cancel, while the sweep does not overlap
+                          itself or fold a mitre inside out; a coil at a tight
+                          pitch does both. And it is not a meridian either way:
+                          that is nso_path_sweep.js's job, and the path is
+                          three more inputs before there is one defining
+                          measurement to solve for.
         lattice / gyroid  no closed form at all; the volume fraction is
                           measured, not solved.
         polyhedra         a Platonic solid or an n-gon prism DOES have an exact
