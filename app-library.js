@@ -197,7 +197,8 @@
     { file: 'cube-9mm.stl',                       category: 'Test Fixtures', source: 'local' },
     { file: 'cube-12mm.stl',                      category: 'Test Fixtures', source: 'local' },
     { file: 'plate-20x20x2.stl',                  category: 'Test Fixtures', source: 'local' },
-    { file: 'bar-20x5x5.stl',                     category: 'Test Fixtures', source: 'local' }
+    { file: 'bar-20x5x5.stl',                     category: 'Test Fixtures', source: 'local' },
+    { file: 'tape_on-edge-single.stl',            category: 'Test Fixtures', source: 'local' }
   ];
 
   /* The one way a file name becomes something fetchable. Absolute, always. */
