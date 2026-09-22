@@ -2069,18 +2069,21 @@ select:focus, input:focus {
 /* Extend: a button and the target length it reads. Two columns, not the
    thicken row's three - that one is button / spinner / button and would drop
    this input into its 24px middle column. */
-.vp-row-extend {
+.vp-row-extend,
+.vp-row-mirror {
   grid-template-columns: minmax(0, 1fr) minmax(0, 72px);
   align-items: stretch;
   gap: 6px;
 }
-.vp-row-extend .btn {
+.vp-row-extend .btn,
+.vp-row-mirror .btn {
   padding: 2px 3px;
   letter-spacing: -0.3px;
   white-space: nowrap;
   min-width: 0;
 }
-.vp-menu-body .vp-row-extend input[type="number"] {
+.vp-menu-body .vp-row-extend input[type="number"],
+.vp-menu-body .vp-row-mirror input[type="number"] {
   min-height: 0;
   width: 100%;
   margin: 0;
@@ -2095,7 +2098,9 @@ select:focus, input:focus {
   -moz-appearance: textfield;
 }
 .vp-menu-body .vp-row-extend input[type="number"]::-webkit-outer-spin-button,
-.vp-menu-body .vp-row-extend input[type="number"]::-webkit-inner-spin-button {
+.vp-menu-body .vp-row-extend input[type="number"]::-webkit-inner-spin-button,
+.vp-menu-body .vp-row-mirror input[type="number"]::-webkit-outer-spin-button,
+.vp-menu-body .vp-row-mirror input[type="number"]::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }

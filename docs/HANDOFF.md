@@ -46,6 +46,7 @@ Current roster, by category:
 |---|---|---|---|
 | Smooth (`app-sculpt.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
 | Extend (`app-extend.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/EXTEND.md` |
+| Mirror (`app-mirror.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/MIRROR.md` |
 | Fatten (`app-fatten.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/FATTEN.md` |
 | Pottery Wheel (`app-wheel.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/POTTERY-WHEEL.md` |
 | Repair (`app-finish.js`, Seal's checkbox) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
@@ -233,7 +234,7 @@ The groups, and what decides which one a row belongs to:
 
 | Group | Holds |
 |---|---|
-| **Shape** | changes the form: Soften, Smooth, Extend, Thicken, Fatten |
+| **Shape** | changes the form: Soften, Smooth, Extend, Mirror, Thicken, Fatten |
 | **Paint** | the mask itself: Paint Selected / Excluded / Clear, Delete painted, Extract selection |
 | **Surface** | adds relief to a face: Skin face / wrap / patch, Texture |
 | **Sculpt** | freehand and local: Brush, Carve |
@@ -567,9 +568,33 @@ Three things a later ticket should read before touching this:
 `npm run wire:extend` (28 checks, real app). All three in `npm test`, along
 with `npm run paint:scope`, which was written but never wired into the suite.
 
+## Mirror - exact reflection across one plane (2026-09-21)
+`app-mirror.js`, loaded at `?v=mirror1` straight after `app-extend.js`. It
+calls that file's axis detector and band cut; it does not carry a copy. UI is
+a **Mirror** button plus a plane box in the Finish menu's Shape group, directly
+under Extend. Full write-up: `docs/MIRROR.md`.
+
+Reflects a piece across a plane perpendicular to one axis. The other two
+coordinates are bit for bit, and reflecting again returns the original soup.
+A plane that does not round-trip in float32 is refused rather than snapped.
+Winding is swapped so the solid stays outward-wound. The result is an ordinary
+piece — `rawTris`, no mirror flag — so Align and Join need no Mirror branch.
+
+The opposite-end sequence is cut at a clean band, mirror the **low** half
+across that plane, align (the raw shift is 0), join the coincident caps.
+Soften is not in it. On `library/soften_test_04_slotted_block.stl` the joined
+ends are the same triangles after one is reflected back, and Join snaps 0
+seam vertices. `fixtures/tape_on-edge-single-B101_rounded_v8_FINAL.stl` has no
+clean band; the midpoint mirror is exact, and Join refuses that cut on its own
+tolerance rail. Details and the reason the low half is the one to mirror:
+`docs/MIRROR.md`.
+
+`npm run mirror`, `npm run mirror:canonical`, `npm run wire:mirror`. All three
+in `npm test`.
+
 ## Fatten - grow or shrink the cross-section, hold the length (2026-09-19)
-`app-fatten.js`, loaded at `?v=fatten1` straight after `app-extend.js` (it
-calls that file's axis detector). UI is a **Fatten** / mm /
+`app-fatten.js`, loaded at `?v=fatten1` straight after `app-mirror.js` (Mirror
+sits between it and `app-extend.js`; Fatten still calls Extend's axis detector). UI is a **Fatten** / mm /
 **Shrink** row in the Finish menu's Shape group, directly under the Thicken
 row - the same three-control shape, so the kinship reads off the panel. Full write-up: `docs/FATTEN.md`.
 

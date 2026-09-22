@@ -467,6 +467,12 @@
                     <input type="number" id="inp-extend-mm" min="0.1" max="2000" step="0.1"
                            placeholder="mm" aria-label="Extend to length, mm">
                   </div>
+                  <div class="vp-row vp-row-mirror">
+                    <button id="btn-mirror" class="btn btn-secondary" type="button"
+                            title="Reflect the piece across a plane perpendicular to its dominant axis. The other two axes stay bit for bit. Default plane is the clean-band cut Extend would use; type 0 for X→−X. Refuses a plane that is not an exact float32 mirror. Leave the box blank and press once to read the axis and the plane.">Mirror</button>
+                    <input type="number" id="inp-mirror-plane" step="any"
+                           placeholder="plane" aria-label="Mirror plane, mm">
+                  </div>
                   <div class="vp-row vp-row-thicken">
                     <button id="btn-thicken-out" class="btn btn-secondary" type="button">Thicken out</button>
                     <div class="thick-spin">
@@ -845,6 +851,9 @@
   <script src="app-finish.js?v=inside7"></script>
   <script src="app-sculpt.js?v=inside4"></script>
   <script src="app-extend.js?v=inside6"></script>
+  <!-- Mirror: exact reflection across the cut plane. After app-extend.js,
+       whose axis detector and band cut it calls. See docs/MIRROR.md. -->
+  <script src="app-mirror.js?v=mirror1"></script>
   <script src="app-fatten.js?v=fatten1"></script>
   <script src="app-scale.js?v=inside6"></script>
   <script src="app-brush.js?v=hollow1"></script>
