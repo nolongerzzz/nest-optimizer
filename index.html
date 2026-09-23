@@ -380,7 +380,14 @@
               </details>
             </div>
           </details>
-          <details class="vp-menu vp-top-menu" id="menu-scale">
+          <!-- Forces Scale, Cut and the lock buttons onto their own line
+               unconditionally (flex-basis: 100%), so Photo and Gen+ are
+               always flush against the topbar's own right edge - right up
+               against Finish beyond it - at any window width, not only
+               when the window happens to be narrow enough to wrap there on
+               its own. -->
+          <div class="vp-bar-break" aria-hidden="true"></div>
+          <details class="vp-menu vp-top-menu vp-bar-row2-start" id="menu-scale">
             <summary class="vp-bar-btn" title="Set the piece to a real dimension, or scale it by a factor">Scale</summary>
             <div class="vp-menu-body vp-top-body" id="scale-card">
               <p id="scale-readout" class="hint">Select a piece to resize.</p>

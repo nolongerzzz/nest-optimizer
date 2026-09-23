@@ -985,6 +985,27 @@ select:focus, input:focus {
   align-self: stretch;
   pointer-events: none;
 }
+/* An unconditional line break: 100% of the flex line's width, so Scale, Cut
+   and the two lock buttons always start a fresh row instead of only
+   wrapping there when the window happens to be narrow enough. Keeps Photo
+   and Gen+ flush against the topbar's own right edge - and so against the
+   Finish menu just beyond it - at any window width. */
+.vp-bar-break {
+  flex-basis: 100%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+/* Scale always opens this second row now (the break above forces it), which
+   would otherwise start at the same x=8..60 strip .viewport-rail occupies
+   down the left edge of the viewport - so Scale's dropdown, open, sat right
+   on top of the rail and swallowed its clicks (Undo among them). 60px is
+   the rail's own left offset (8px) plus its width (52px): enough to clear
+   it, so both the button and the dropdown anchored under it (which opens
+   at its own left edge) land past the rail instead of over it. */
+.vp-bar-row2-start {
+  margin-left: 60px;
+}
 .viewport-overlay-finish {
   top: 8px;
   right: var(--vp-menu-gap);                                   /* menu 1, outermost */
