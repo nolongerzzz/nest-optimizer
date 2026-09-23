@@ -287,7 +287,7 @@
               <p id="photoset-verdict" class="photoset-verdict" hidden></p>
             </div>
           </details>
-          <details class="vp-menu vp-top-menu" id="menu-gen">
+          <details class="vp-menu vp-top-menu vp-top-right" id="menu-gen">
             <summary class="vp-bar-btn" title="Generate a piece: stock to carve from, or a vessel on the wheel">Gen+</summary>
             <div class="vp-menu-body vp-top-body">
               <details class="vp-menu vp-wheel-menu">
@@ -380,14 +380,6 @@
               </details>
             </div>
           </details>
-          <!-- Forces Scale, Cut and the lock buttons onto their own line
-               unconditionally (flex-basis: 100%), rather than only wrapping
-               when the window happens to run out of room. That keeps Photo
-               and Gen+ always immediately against the topbar's right edge -
-               right up against the Finish menu beyond it - instead of the
-               gap between them changing (or vanishing into whatever fits on
-               line one) with window width. -->
-          <div class="vp-bar-break" aria-hidden="true"></div>
           <details class="vp-menu vp-top-menu" id="menu-scale">
             <summary class="vp-bar-btn" title="Set the piece to a real dimension, or scale it by a factor">Scale</summary>
             <div class="vp-menu-body vp-top-body" id="scale-card">
