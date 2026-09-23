@@ -26,7 +26,7 @@
      `npm run overlay:test` measures the rendered strip and fails if any topbar
      button ends up under a menu. */
   --vp-menu-gap: 8px;      /* margin at the edge, and between menus */
-  --vp-menu-w: 84px;       /* one menu summary: min-width 72px in .vp-finish-menu, plus border/margin */
+  --vp-menu-w: 72px;       /* one menu summary: min-width 72px in .vp-finish-menu */
   --vp-menu-count: 1;      /* Finish. Wheel and Stock moved into the bar's Gen+ */
 }
 
@@ -983,6 +983,17 @@ select:focus, input:focus {
   flex: 1 1 24px;
   min-width: 8px;
   align-self: stretch;
+  pointer-events: none;
+}
+/* An unconditional line break: 100% of the flex line's width, so Scale, Cut
+   and the two lock buttons always start a fresh row instead of only
+   wrapping there when the window happens to be narrow enough. Keeps Photo
+   and Gen+ flush against the topbar's own right edge - and so against the
+   Finish menu just beyond it - at any window width. */
+.vp-bar-break {
+  flex-basis: 100%;
+  width: 0;
+  height: 0;
   pointer-events: none;
 }
 .viewport-overlay-finish {
