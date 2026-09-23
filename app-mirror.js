@@ -128,9 +128,18 @@ function NSO_mirrorResolve(rawTris, opts) {
   var trip = NSO_mirrorRoundTrips(rawTris, k, plane);
   out.roundTrip = trip;
   if (!trip.ok) {
-    var where = (source === 'given') ? 'opts.plane ' + plane
-      : (source === 'band') ? 'the clean-band cut at ' + plane
-      : 'the midpoint plane at ' + plane;
+    if (source === 'midpoint') {
+      out.reason = 'the bounding-box midpoint at ' + plane + ' is not an exact float32 mirror plane along ' +
+        det.axis + ' - ' + trip.misses + ' coordinate(s) do not round-trip (worst residual ' +
+        trip.worst.toExponential(3) + ' mm, example ' + trip.example +
+        '). This piece has no clean-band cut (a prior cut likely removed its symmetry), so Mirror fell back ' +
+        'to the raw midpoint of its bounding box - that midpoint almost never lands on an exact float32 ' +
+        'mirror plane. Mirror does not snap the plane. Pass opts.plane explicitly: 0 for ' +
+        det.axis.toUpperCase() + '→−' + det.axis.toUpperCase() + ' if the piece should straddle the origin, ' +
+        'or the exact plane you cut it at.';
+      return out;
+    }
+    var where = (source === 'given') ? 'opts.plane ' + plane : 'the clean-band cut at ' + plane;
     out.reason = where + ' is not an exact float32 mirror plane along ' + det.axis +
       ' - ' + trip.misses + ' coordinate(s) do not round-trip (worst residual ' +
       trip.worst.toExponential(3) + ' mm, example ' + trip.example +

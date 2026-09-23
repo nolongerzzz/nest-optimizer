@@ -135,6 +135,61 @@ withApp(async (page, logs) => {
     'btn-mask-paint', 'btn-smooth', 'btn-extend'].filter(i => !document.getElementById(i)));
   check('existing buttons all still present', stillThere.length === 0, stillThere.join(','));
 
+  console.log('\n=== 8. cut twice, then Mirror a 2nd-generation child (tape_on-edge-single) ===');
+  {
+    /* Drives the real Split button path, same shape as
+       tools/nso_wire_fuse_test.js's splitFixture, kept local to this file
+       since only this section needs it. */
+    async function splitOnce(page, id) {
+      await page.evaluate(() => { const e = document.getElementById('btn-cutter-open'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+      if (!(await page.evaluate(() => state.cutterOpen))) await page.click('#btn-cutter-open');
+      await selectModel(page, id);
+      return await page.evaluate(() => {
+        if (typeof updateCutHelper === 'function') updateCutHelper();
+        cutActiveModel();
+        return {
+          status: document.getElementById('status').textContent,
+          models: state.models.map(m => ({
+            id: m.id, name: m.name,
+            hasRaw: !!(m.rawTris && m.rawTris.length),
+            rawAxis: m.rawAxis || null
+          }))
+        };
+      });
+    }
+
+    await page.evaluate(() => { state.models = []; state.placed = []; state.undoStack = []; });
+    const tapeId = await loadSTL(page, path.join(ROOT, 'library', 'tape_on-edge-single.stl'));
+
+    const cut1 = await splitOnce(page, tapeId);
+    check('cut #1: both halves carry rawTris', cut1.models.length === 2 && cut1.models.every(m => m.hasRaw),
+      JSON.stringify(cut1.models));
+
+    const parentB = cut1.models[1];
+    const childId = cut1.models[0].id;
+    const cut2 = await splitOnce(page, childId);
+    const grandkids = cut2.models.filter(m => m.id !== parentB.id);
+    check('cut #2 (on an already-split child) also produced rawTris on both grandchildren',
+      grandkids.length === 2 && grandkids.every(m => m.hasRaw && m.rawAxis === 'zup'),
+      JSON.stringify(grandkids));
+
+    await selectModel(page, grandkids[0].id);
+    await openFinishMenu(page);
+    await page.fill('#inp-mirror-plane', '');
+    await page.click('#btn-mirror');
+    await page.waitForFunction(() => /Mirror/.test(document.getElementById('status').textContent),
+      null, { timeout: 30000 });
+    const mirrorStatus = await statusOf(page);
+    console.log('   mirror status on 2nd-gen child: ' + mirrorStatus);
+    check('Mirror no longer refuses this grandchild with "Select a raw piece first"',
+      !/Select a raw piece first/.test(mirrorStatus), mirrorStatus);
+    if (/refused/.test(mirrorStatus) && /midpoint/.test(mirrorStatus)) {
+      check('and the midpoint refusal names the missing clean band and how to fix it',
+        /no clean-band cut/.test(mirrorStatus) && /Pass opts\.plane explicitly/.test(mirrorStatus),
+        mirrorStatus);
+    }
+  }
+
   console.log('\n----------------------------------------------------------');
   console.log(fails === 0 ? 'PASS' : fails + ' FAILED');
   process.exit(fails === 0 ? 0 : 1);

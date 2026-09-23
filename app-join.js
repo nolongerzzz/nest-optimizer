@@ -2964,11 +2964,16 @@ async function joinSelectedModels() {
 
 
 function splitBothSides(model, axis, leftPlane, rightPlane) {
-  const alreadySplit = /-[AB]\d+$/i.test(model.name || '');
-  // 2nd+ cuts: clip the DISPLAY mesh at the slider plane. Raw mapping on a
-  // half still in original-file coordinates misses the plane and looks like
-  // "Split does nothing."
-  if (!alreadySplit && model.rawTris && model.rawAxis === 'zup' && model.centerOffset) {
+  // Try the raw-mesh engine whenever this model carries a self-consistent
+  // raw triple (rawTris/rawAxis/centerOffset), regardless of whether its
+  // name looks like a prior split's child ("-A12"/"-B12"). mapPlaneToRaw
+  // (app-cut.js) only ever reads THIS model's own rawTris/rawAxis/
+  // centerOffset, and addModel (app-core.js) stores a raw-engine child's
+  // triple verbatim, so a 2nd/3rd+ cut on such a child maps correctly too.
+  // The try/catch below is the real safety net: if mapPlaneToRaw/rawCut
+  // ever disagrees with the slider plane for some piece, it falls back to
+  // the display-mesh clip instead of failing the whole Cut.
+  if (model.rawTris && model.rawAxis === 'zup' && model.centerOffset) {
     try {
       const mapL = mapPlaneToRaw(model, axis, leftPlane, true);
       const mapR = mapPlaneToRaw(model, axis, rightPlane, false);
