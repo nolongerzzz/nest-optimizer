@@ -73,6 +73,38 @@ withApp(async (page, logs) => {
       r.rows.map(x => x.id + ' @ ' + x.left).join('  vs  '));
     check('...and it is zero by rule, not by accident of content',
       r.indent === '0px', 'margin-left ' + r.indent);
+
+    /* The indent that used to align-break the rows was load-bearing for a
+       reason its own comment got wrong: Scale's open panel covers the
+       viewport's bottom-left tool column, Undo included. That column grows
+       upward from the bottom, so at 900px tall the two clear each other
+       and nothing looks broken - which is exactly how the first pass of
+       this change shipped a buried Undo past every drive check that ran at
+       900. Checked at a short viewport on purpose. */
+    for (const h of [720, 900]) {
+      await page.setViewportSize({ width: 1280, height: h });
+      await page.waitForTimeout(250);
+      const reach = await page.evaluate(() => {
+        document.querySelectorAll('.vp-top-menu').forEach(d => { d.open = false; });
+        document.getElementById('menu-scale').open = true;
+        const blocked = [];
+        ['btn-undo', 'btn-frame-view', 'btn-xray', 'btn-gcode'].forEach(id => {
+          const e = document.getElementById(id);
+          if (!e) return;
+          const b = e.getBoundingClientRect();
+          if (b.width < 1) return;
+          const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+          if (!hit || hit.id !== id) blocked.push(id + ' (covered by ' +
+            (hit ? (hit.id || hit.className) : 'nothing') + ')');
+        });
+        document.getElementById('menu-scale').open = false;
+        return blocked;
+      });
+      check('with Scale open at ' + h + 'px tall, the bottom-left tools stay clickable',
+        reach.length === 0, reach.length ? reach.join('; ') : 'undo, frame, x-ray, g-code all reachable');
+    }
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.waitForTimeout(250);
   }
 
   /* ------------------------------------------------------------------ 2 */
