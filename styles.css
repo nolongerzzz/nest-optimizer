@@ -477,6 +477,11 @@ select:focus, input:focus {
 
 /* A dropdown near the right edge opens leftwards so it stays on screen. */
 .vp-top-menu.vp-top-right > .vp-top-body { left: auto; right: 0; }
+/* The last menu opened paints over any that are still open - which happens
+   only when one is pinned (Cut, while the cutter tool is live). Every panel
+   otherwise sits at 95 and DOM order decides, which put Cut, last in the
+   bar, over whatever you had just reached for. */
+.vp-top-menu.is-front > .vp-top-body { z-index: 96; }
 /* The sidebar controls that moved in here were full-width in a card and
    should stay full-width in the panel. */
 .vp-top-body .btn,
@@ -877,6 +882,10 @@ select:focus, input:focus {
   align-items: flex-start;
   gap: 8px;
 }
+/* No markup builds a .viewport-rail any more - the buttons it held moved
+   into the top bar. Left in place deliberately: it is the only record of
+   what the rail's geometry was, and .vp-bar-row2-start above refers to it.
+   Styles nothing as it stands. */
 .viewport-rail {
   top: 8px;
   left: 8px;
@@ -996,15 +1005,20 @@ select:focus, input:focus {
   height: 0;
   pointer-events: none;
 }
-/* Scale always opens this second row now (the break above forces it), which
-   would otherwise start at the same x=8..60 strip .viewport-rail occupies
-   down the left edge of the viewport - so Scale's dropdown, open, sat right
-   on top of the rail and swallowed its clicks (Undo among them). 60px is
-   the rail's own left offset (8px) plus its width (52px): enough to clear
-   it, so both the button and the dropdown anchored under it (which opens
-   at its own left edge) land past the rail instead of over it. */
+/* Scale opens the second row (the break above forces it), and that row's
+   left edge lines up with the first row's - both flush against the
+   topbar's own padding, the way two rows of the same bar should read.
+
+   It used to carry margin-left: 60px to clear .viewport-rail, a column of
+   buttons down the left edge of the viewport that Scale's open dropdown
+   would otherwise have covered, swallowing its clicks. That rail is gone -
+   no markup anywhere builds one, and the strip it held is outside the
+   viewport overlay entirely now - so the indent was guarding nothing and
+   only left the two rows visibly out of step. Kept as an explicit zero
+   rather than deleted, so the next person to wonder why row two is not
+   indented finds this note instead of the removed rule's ghost. */
 .vp-bar-row2-start {
-  margin-left: 60px;
+  margin-left: 0;
 }
 .viewport-overlay-finish {
   top: 8px;

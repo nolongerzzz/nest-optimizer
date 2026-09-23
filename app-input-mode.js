@@ -68,27 +68,59 @@
     return Array.prototype.slice.call(bar.querySelectorAll('.vp-top-menu'));
   }
 
+  /* PINNED: open on screen, but not a candidate for input.
+
+     Cut is the one, and only while the cutter TOOL is live - not merely
+     while its dropdown is open. Once the cutter is running, the controls
+     that drive it (Split, Close, the plane's readout) live in that
+     dropdown, and you need them to stay reachable while you step over to
+     another menu to line the piece up. So it is exempt from the closing
+     below.
+
+     It is exempt from OWNING, too, and that is the part that keeps this
+     file's guarantee intact. A pinned menu open alongside another is two
+     panels on screen but still exactly one owner of input, so a key press
+     is still answered once - the thing this whole file exists to promise.
+     It costs nothing here because the cutter registers no owner at all:
+     its input is a drag on the red plane, hit-tested in app-core against
+     state.cutterOpen, and it never went through ownership. Were that to
+     change, a pinned owner would need a rule of its own, and this comment
+     is where to start.
+
+     state may not exist yet when a stray toggle fires during load, hence
+     the guard rather than a bare read. */
+  function isPinned(d) {
+    return d && d.id === 'menu-cut' &&
+           typeof state !== 'undefined' && state && !!state.cutterOpen;
+  }
+
   /* The owner, decided now, from the DOM.
 
-     More than one open is not a state this returns an answer about: it is a
-     state it ENDS. The newcomer - the open menu that is not the one already
-     holding ownership - keeps it and the rest are shut here, in this turn,
-     before the caller gets its answer. Falling back to the last in document
-     order when every open menu is a newcomer keeps it deterministic rather
-     than dependent on which handler happened to ask first. */
+     More than one CONTENDER open is not a state this returns an answer
+     about: it is a state it ENDS. The newcomer - the open menu that is not
+     the one already holding ownership - keeps it and the rest are shut
+     here, in this turn, before the caller gets its answer. Falling back to
+     the last in document order when every open menu is a newcomer keeps it
+     deterministic rather than dependent on which handler happened to ask
+     first. Pinned menus sit outside all of it: never closed, never kept,
+     and never the answer unless nothing else is open. */
   function resolve() {
     var open = menus().filter(function (d) { return d.open; });
     if (!open.length) return null;
-    if (open.length > 1) {
+    var live = open.filter(function (d) { return !isPinned(d); });
+    /* Only the pinned menu is open, so it is the owner by default - there
+       is nothing for it to collide with. */
+    if (!live.length) return open[0].id || null;
+    if (live.length > 1) {
       var keep = null;
-      for (var i = open.length - 1; i >= 0; i--) {
-        if (open[i].id !== current) { keep = open[i]; break; }
+      for (var i = live.length - 1; i >= 0; i--) {
+        if (live[i].id !== current) { keep = live[i]; break; }
       }
-      if (!keep) keep = open[open.length - 1];
-      open.forEach(function (d) { if (d !== keep) d.open = false; });
+      if (!keep) keep = live[live.length - 1];
+      live.forEach(function (d) { if (d !== keep) d.open = false; });
       return keep.id || null;
     }
-    return open[0].id || null;
+    return live[0].id || null;
   }
 
   /* Hand ownership over. Every registered owner that is not the new one is

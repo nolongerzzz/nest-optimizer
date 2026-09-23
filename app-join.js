@@ -3489,6 +3489,21 @@ function setupUI() {
 
   const btnFrame = document.getElementById('btn-frame-selected');
   if (btnFrame) btnFrame.addEventListener('click', frameSelectedPiece);
+  /* A menu the accordion is not allowed to close. Cut is the only one, and
+     only while the cutter tool is actually live - the tool, not the menu.
+     You open the Cut dropdown to reach "Open cutter", so before that click
+     it is an ordinary member of the accordion and closes like any other.
+     Once the cutter is live the dropdown holds the controls that drive it
+     (Split, Close cutter, the plane's own readout), and those have to stay
+     reachable while you go to another menu to line the piece up first.
+
+     Only automatic closing is blocked. A deliberate click on Cut's own
+     summary still collapses it, because that click toggles the <details>
+     directly and never reaches this code. */
+  function menuIsPinned(el) {
+    return el.id === 'menu-cut' && !!state.cutterOpen;
+  }
+
   /* One menu open at a time WITHIN AN OVERLAY. Opening one of the top bar's
      dropdowns shuts the other eight, so they never stack over each other,
      and Gen+'s two - Wheel and Stock - are exclusive with one another.
@@ -3512,8 +3527,20 @@ function setupUI() {
       var scope = d.closest('.viewport-overlay') || document;
       scope.querySelectorAll('.vp-menu').forEach(function (o) {
         if (o === d || o.contains(d) || d.contains(o)) return;
+        if (menuIsPinned(o)) return;
         o.open = false;
       });
+      /* Whichever menu was opened last paints over the rest. It only
+         matters while a pinned menu is also open - two panels on screen at
+         once - but it is written as a general rule rather than a special
+         case for Cut. Without it the winner is DOM order, and Cut is last
+         in the bar, so the menu you had just opened came up UNDER it:
+         Export's and Scale's panels overlap Cut's footprint exactly, and
+         Cut would have covered the controls you were reaching for. */
+      scope.querySelectorAll('.vp-menu.is-front').forEach(function (o) {
+        if (o !== d) o.classList.remove('is-front');
+      });
+      d.classList.add('is-front');
     });
   });
 
