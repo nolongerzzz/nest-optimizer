@@ -26,7 +26,7 @@
      `npm run overlay:test` measures the rendered strip and fails if any topbar
      button ends up under a menu. */
   --vp-menu-gap: 8px;      /* margin at the edge, and between menus */
-  --vp-menu-w: 64px;       /* one menu summary: min-width 64px in .vp-menu */
+  --vp-menu-w: 84px;       /* one menu summary: min-width 72px in .vp-finish-menu, plus border/margin */
   --vp-menu-count: 1;      /* Finish. Wheel and Stock moved into the bar's Gen+ */
 }
 
@@ -975,6 +975,16 @@ select:focus, input:focus {
   margin: 0 2px;
   pointer-events: none;
 }
+/* Empty and flex-grow: on whichever line it lands, it eats the leftover
+   width and pushes everything after it (Photo, Gen+, and the Finish menu
+   beyond them) to that line's right edge, away from the Import..Move
+   cluster. Never a click target itself. */
+.vp-bar-spacer {
+  flex: 1 1 24px;
+  min-width: 8px;
+  align-self: stretch;
+  pointer-events: none;
+}
 .viewport-overlay-finish {
   top: 8px;
   right: var(--vp-menu-gap);                                   /* menu 1, outermost */
@@ -988,12 +998,39 @@ select:focus, input:focus {
 .vp-finish-menu {
   pointer-events: auto;
 }
-.vp-finish-menu > summary {
+/* Doubled to out-specify `.vp-menu > summary`'s 40px icon-square base - the
+   same trap documented above .vp-top-menu, and the reason this button used
+   to render at 40x40/18px instead of the values declared here. Height and
+   padding match .vp-bar-btn exactly: Photo and Gen+ now sit right beside
+   this button at the end of the top row, and a size mismatch would read as
+   a different kind of control instead of the last one in the same row. The
+   bolder weight, wider box and accent border are what make it read as the
+   row's prominent "done" button; the height/padding stay the shared size
+   class. */
+.vp-finish-menu.vp-finish-menu > summary {
   width: auto;
-  min-width: 64px;
+  min-width: 72px;
   height: 28px;
-  padding: 0 10px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid rgba(125, 211, 252, 0.65);
+  background: rgba(30, 58, 84, 0.88);
+  color: #fff;
   font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  white-space: nowrap;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
+}
+.vp-finish-menu.vp-finish-menu > summary:hover { border-color: #7dd3fc; }
+.vp-finish-menu.vp-finish-menu[open] > summary {
+  border-color: #7dd3fc;
+  background: rgba(30, 58, 84, 0.97);
 }
 /* One fixed width, not a range. With min 168 / max 176 the card sized itself
    to its widest row, so it sat at 176 only because the layer-2 row overflowed

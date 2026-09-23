@@ -266,6 +266,27 @@
               <button id="btn-nudge-right" class="vp-bar-btn adjust-btn" disabled>→</button>
             </div>
           </details>
+          <!-- Pushes Photo, Gen+ (and the Finish menu beyond them, in its own
+               top-right overlay) to the end of the row, away from the
+               Import..Move cluster. flex-grow on an empty, pointer-events:
+               none spacer - nothing to click, just room. -->
+          <div class="vp-bar-spacer" aria-hidden="true"></div>
+          <details class="vp-menu vp-top-menu" id="menu-photo">
+            <summary class="vp-bar-btn" title="Check a photogrammetry capture against the capture contract">Photo</summary>
+            <div class="vp-menu-body vp-top-body" id="photoset-card">
+              <p class="hint">Check a photogrammetry capture against the capture contract
+              before any reconstruction time is spent on it. Nothing is reconstructed here.</p>
+              <input type="file" id="photoset-input" accept="image/*" multiple class="hidden-quiet" />
+              <div class="edit-row" style="align-items:center;gap:8px;flex-wrap:wrap;">
+              <button id="btn-photoset-pick" class="btn btn-secondary" type="button"
+              title="Pick the whole shoot at once. Each frame is read for EXIF and measured for focus and framing; nothing is uploaded anywhere.">Choose photos&hellip;</button>
+              <button id="btn-photoset-report" class="btn btn-secondary" type="button" disabled>Report</button>
+              <button id="btn-photoset-clear" class="btn btn-ghost" type="button" disabled>Clear</button>
+              </div>
+              <p id="photoset-progress" class="hint" hidden></p>
+              <p id="photoset-verdict" class="photoset-verdict" hidden></p>
+            </div>
+          </details>
           <details class="vp-menu vp-top-menu" id="menu-gen">
             <summary class="vp-bar-btn" title="Generate a piece: stock to carve from, or a vessel on the wheel">Gen+</summary>
             <div class="vp-menu-body vp-top-body">
@@ -357,22 +378,6 @@
               </div>
               </div>
               </details>
-            </div>
-          </details>
-          <details class="vp-menu vp-top-menu" id="menu-photo">
-            <summary class="vp-bar-btn" title="Check a photogrammetry capture against the capture contract">Photo</summary>
-            <div class="vp-menu-body vp-top-body" id="photoset-card">
-              <p class="hint">Check a photogrammetry capture against the capture contract
-              before any reconstruction time is spent on it. Nothing is reconstructed here.</p>
-              <input type="file" id="photoset-input" accept="image/*" multiple class="hidden-quiet" />
-              <div class="edit-row" style="align-items:center;gap:8px;flex-wrap:wrap;">
-              <button id="btn-photoset-pick" class="btn btn-secondary" type="button"
-              title="Pick the whole shoot at once. Each frame is read for EXIF and measured for focus and framing; nothing is uploaded anywhere.">Choose photos&hellip;</button>
-              <button id="btn-photoset-report" class="btn btn-secondary" type="button" disabled>Report</button>
-              <button id="btn-photoset-clear" class="btn btn-ghost" type="button" disabled>Clear</button>
-              </div>
-              <p id="photoset-progress" class="hint" hidden></p>
-              <p id="photoset-verdict" class="photoset-verdict" hidden></p>
             </div>
           </details>
           <details class="vp-menu vp-top-menu" id="menu-scale">

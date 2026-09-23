@@ -631,6 +631,29 @@
         console.warn('[library] entries tagged "' + k + '", which is not in CATEGORIES');
     }
 
+    /* Accordion: at most one category open at a time, so the panel stays a
+       fixed handful of rows tall instead of growing to every category's
+       combined length and dragging the whole page into a scroll. Bound to
+       the summary's CLICK, not the <details> 'toggle' event or its 'open'
+       property - a test (or any other caller) that forces every section
+       open with `sec.open = true` to reach a row across categories is not a
+       user working the accordion and must keep working exactly as before;
+       only an actual click on a heading closes the others. preventDefault
+       stops the native toggle so this function is the only thing that sets
+       .open, and it decides all of it in one place: already open -> close
+       it; otherwise -> close every other section, then open this one. */
+    function armAccordion(sec, head) {
+      head.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        var willOpen = !sec.open;
+        var secs = host.querySelectorAll('.library-sec');
+        for (var i = 0; i < secs.length; i++) {
+          if (secs[i] !== sec) secs[i].open = false;
+        }
+        sec.open = willOpen;
+      });
+    }
+
     for (var c = 0; c < CATEGORIES.length; c++) {
       var cat = CATEGORIES[c];
       var rows = byCat[cat];
@@ -645,9 +668,9 @@
          you before you have said which category you want, and you scroll
          past all of them to reach the one you do. Closed, the four headings
          and their counts fit at a glance and one click gets you there.
-         Independent of each other, again like Finish: opening Skins does not
-         shut Washers, because picking a skin and a washer for the same job
-         is one task. */
+         Unlike Finish's groups, these are an ACCORDION: opening one closes
+         whichever other category was open, so the list never stacks two
+         categories' rows (and the page-level scroll that caused) at once. */
       sec.open = false;
       var head = document.createElement('summary');
       head.className = 'vp-sec-head';
@@ -662,6 +685,7 @@
       for (var r = 0; r < rows.length; r++) body.appendChild(makeRow(rows[r]));
       sec.appendChild(body);
       host.appendChild(sec);
+      armAccordion(sec, head);
     }
 
     var btn = btnEl();
