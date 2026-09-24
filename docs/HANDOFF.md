@@ -420,6 +420,15 @@ piece is the paint-aware one and inherits the rule then.
    moment it appears as `phantom object / wall / paint / pose / footprint`,
    with the operation that preceded it, read off the app's own `pushUndo`
    type rather than guessed from a button.
+3. Every selection change (`state.selectedIndex` / `state.editId`, however
+   assigned) as its own event, logged before the operation that follows it;
+   every operation as `preview` / `discard` / `commit` / `undo`, carrying the
+   selection it acted on; build-volume warnings, which `app-fit.js` now
+   routes through `setStatus` when they change. The brush announces its
+   preview's two ends as a `nso:op` DOM event.
+4. The history is kept in `localStorage` (`nso.watch.store`), one run per
+   start, across reloads, and browsed in an in-app **Report** view - no
+   download, no backend.
 
 Two things about it that must not be "tidied up":
 
@@ -431,7 +440,7 @@ Two things about it that must not be "tidied up":
   drifting copy of those rules would rot into false alarms, which is the one
   failure mode that makes a watcher worthless.
 
-`npm run watch:test` (70 checks, real app in headless Chromium), in `npm test`.
+`npm run watch:test` (109 checks, real app in headless Chromium), in `npm test`.
 Half of it asserts an ordinary session - load, clone, move, rotate, flip, tip,
 raise, cutter, split, join, paint, x-ray, undo, clear, and Measure / Check
 piece / Surface grid / Select / Brush / Carve / the two locks switched on and

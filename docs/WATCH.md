@@ -6,7 +6,7 @@ drive the app exactly as you would anyway.
 
     nso-watch.js                the whole feature
     #btn-watch in index.html    the toggle
-    node tools/nso_watch_test.js   70 checks, in npm test
+    node tools/nso_watch_test.js   109 checks, in npm test
 
 ## Why
 
@@ -40,9 +40,48 @@ first". That is a first-class signal here, not an error: every wired bake can
 stand down (`docs/HANDOFF.md`, "paint wins"), and a stand-down nobody noticed
 reads exactly like a bake that silently did nothing.
 
+Build-volume warnings are status lines too. `app-fit.js` routes each one
+through `setStatus` when it changes - a new or different warning, and
+"every piece fits again" when the last one clears - never per frame. It is
+APPENDED to the current status line (`<op's line> | Build volume: ...`), with
+that line's class kept, because a warning is usually caused by the operation
+that just ran and replacing that operation's result would hide what it did.
+The log marks these `build-volume` (level `warn`) by the `Build volume:`
+marker, so they are not mistaken for a plain status line or a refusal.
+
 The status bar itself is never touched - the line the app wrote is the line you
 read, error class and all. Neither is the HUD (`#adjust-status`); Grok owns
 that string.
+
+## Selection, and preview vs commit
+
+A logged operation is only useful if you know what it was done to, and whether
+it was kept.
+
+**select** - every change of `state.selectedIndex` or `state.editId`, however
+it was made: `selectPlaced()`, a click on a piece, or one of the dozens of
+direct assignments in the app. The two properties are turned into accessors
+while the watch is on (plain data properties again on stop), the setter notes
+the change, and one line is written per change at the end of the tick. A
+reselect of what is already selected is not a change. The line lands before
+any operation that follows it in the same tick, and the baseline selection is
+logged at start. "selection now ..." (rather than "selected ...") means the
+plate changed under the same index without an assignment.
+
+**op** - one line per operation, each carrying the selection it acted on:
+
+| phase | what it is | where it comes from |
+|---|---|---|
+| `preview` | shown, not kept | `showEditPreview`, `previewModelOnPlate`, a brush stroke under the pointer |
+| `discard` | a preview dropped with no commit | a brush stroke cancelled or refused |
+| `commit` | the app changed something | every `pushUndo`, with the app's own type (`brushReplace`, `movePlaced`, ...) |
+| `undo` | a commit reverted | `undoLast`, with the type it reverts |
+
+Status lines written in the same tick as an operation carry its phase, so the
+brush's "Carve - drag to work the surface" reads `preview` and its "Carve done
+..." reads `commit`. The brush's two ends live inside its closure, so
+`app-brush.js` announces them as a `nso:op` DOM event - one dispatch per
+stroke, nothing listening when the watch is off.
 
 ## 2. The state-consistency watcher
 
@@ -123,8 +162,16 @@ patches nothing until you do.
 ## Using it
 
 Click the eye. The panel lists events live, red for a phantom, green when one
-clears, and the button carries a count. **Save** writes the whole session to a
-JSON file, **Copy** puts a text report on the clipboard and in the console.
+clears, and the button carries a count. **Copy** puts a text report on the
+clipboard and in the console.
+
+**Report** opens the in-app history. Every event is also kept in this browser
+(`localStorage`, key `nso.watch.store`), one run per start, across reloads -
+there is no backend and none is needed. The view groups events by run and
+filters by run, by kind (click a count in the summary row) and by text; it
+follows a live session while open. **Clear history** forgets every stored run
+but the live one. The newest 6000 events are kept; older ones are dropped
+first, and a full quota drops the oldest half.
 
 From the console, or a check:
 
@@ -134,7 +181,10 @@ From the console, or a check:
     NSOWatch.events()         everything seen, oldest first
     NSOWatch.summary()        counts by kind
     NSOWatch.report()         the text report
-    NSOWatch.save()           download the JSON
+    NSOWatch.stored()         the persisted history: {runs, events, dropped}
+    NSOWatch.query({run, cat, q})   filtered history
+    NSOWatch.showReport() / .hideReport() / .clearStored()
+    NSOWatch.save()           download the current run as JSON (console only)
 
 `?watch=1` on the URL starts it at load, and the on/off state is remembered in
 `localStorage` as `nso.watch`, so it survives the reload a bug needs to
