@@ -20,6 +20,32 @@
                  event carrying the timestamp and the operation that preceded
                  it. Subjects: object, wall, paint, pose, footprint.
 
+   3. SELECT / OP - what the operations were done TO, and what kind of
+                 operation each one was:
+                   select   every change of state.selectedIndex / state.editId,
+                            however it was made (selectPlaced, a click, one of
+                            the many direct assignments), coalesced to one line
+                            per change and always logged BEFORE the operation
+                            that follows it in the same tick.
+                   op       preview / discard / commit / undo. A commit is a
+                            pushUndo - the app's own record that it changed
+                            something. A preview is shown but not kept (the
+                            cutter's edit preview, the plate preview, a brush
+                            stroke still under the pointer); a discard is a
+                            preview dropped without a commit. Every op line
+                            carries the selection it acted on, and every
+                            status line written in the same tick carries its
+                            phase, so "Carve - drag..." and "Carve done" no
+                            longer read alike.
+                 Build-volume warnings arrive as status lines (app-fit.js
+                 routes them through setStatus) and are marked as such.
+
+   4. REPORT   - every event is also kept in this browser (localStorage,
+                 "nso.watch.store"), across reloads, one run per start(). The
+                 Report button opens an in-app view of the whole history -
+                 filter by run, by kind, by text - instead of downloading a
+                 file. There is no backend and this does not need one.
+
    Why this exists: two mismatches of exactly this shape have been found by
    accident (a pose lost across a bake, paint left on screen after an undo).
    Both are invisible until an unrelated test happens to trip over them,
@@ -45,7 +71,7 @@
 (function (global) {
   'use strict';
 
-  var VERSION = 'watch1';
+  var VERSION = 'watch2';
   var MAX_EVENTS = 4000;
   /* An operation is checked more than once: a bake is synchronous, but Join
      and Subtract resolve a promise, and a few paths finish inside a rAF. The
@@ -54,6 +80,10 @@
   var CHECK_DELAYS = [0, 150, 700, 2000];
   var IDLE_MS = 4000;          // sweep, for anything not driven by a click
   var OP_HISTORY = 6;
+  var STORE_KEY = 'nso.watch.store';
+  var MAX_STORED = 6000;       // events kept across runs; oldest go first
+  var SAVE_MS = 250;           // persistence is batched, and flushed on pagehide / stop
+  var REPORT_ROWS = 1500;      // rows the report view draws at once
 
   /* tolerances */
   var TOL_MM = 0.05;           // mm - positions, sizes
@@ -88,6 +118,14 @@
   var raw = {};                // untouched console methods, for our own output
 
   var el = {};                 // panel elements
+
+  var selCur = null;           // the selection as last logged
+  var selPending = false;      // a setter fired; the line is written at the end of the tick
+  var task = null;             // {phase, events} for the current synchronous tick
+  var store = null;            // the persisted history: {v, runs, events, dropped}
+  var runId = null;            // this start()'s entry in store.runs
+  var saveTimer = 0;
+  var reportTimer = 0;
 
   /* ---------------- small helpers ---------------- */
   function stateRef() {
@@ -146,17 +184,80 @@
   function opLabel() { return ops.length ? ops[ops.length - 1] : '(nothing yet)'; }
 
   function push(ev) {
+    /* A selection change made earlier in this tick is written first, so the
+       log always reads "selected X" before "commit Y" and never the other
+       way round. */
+    if (ev.kind !== 'select') flushSelection();
     ev.seq = ++seqN;
     ev.at = new Date();
     ev.time = clock(ev.at);
     ev.op = ev.op || opLabel();
     events.push(ev);
     if (events.length > MAX_EVENTS) { events.shift(); dropped++; }
+    persist(ev);
     row(ev);
     counts();
     echo(ev);
+    if (el.report && el.report.classList.contains('is-on')) reportSoon();
     return ev;
   }
+  /* ---------------- the persisted history ---------------- */
+  function emptyStore() { return { v: 1, runs: [], events: [], dropped: 0 }; }
+  function loadStore() {
+    try {
+      var saved = global.localStorage.getItem(STORE_KEY);
+      var st = saved ? JSON.parse(saved) : null;
+      if (st && st.v === 1 && Array.isArray(st.runs) && Array.isArray(st.events)) {
+        st.dropped = st.dropped || 0;
+        return st;
+      }
+    } catch (e) { /* unreadable or blocked: start a fresh history */ }
+    return emptyStore();
+  }
+  function currentRun() {
+    if (!store || !runId) return null;
+    for (var i = store.runs.length - 1; i >= 0; i--) if (store.runs[i].id === runId) return store.runs[i];
+    return null;
+  }
+  function persist(ev) {
+    if (!store || !runId) return;
+    var r = {
+      run: runId, seq: ev.seq, iso: ev.at.toISOString(), time: ev.time, kind: ev.kind,
+      level: ev.level, phase: ev.phase || null, source: ev.source || null, msg: ev.msg,
+      op: ev.op, sel: ev.sel || null, detail: ev.detail || null, trail: ev.trail || null
+    };
+    ev._rec = r;
+    store.events.push(r);
+    if (store.events.length > MAX_STORED) {
+      var n = store.events.length - MAX_STORED;
+      store.events.splice(0, n);
+      store.dropped += n;
+    }
+    var run = currentRun();
+    if (run) { run.events = (run.events || 0) + 1; run.last = r.iso; }
+    saveSoon();
+  }
+  function saveSoon() {
+    if (saveTimer || !store) return;
+    saveTimer = global.setTimeout(flushStore, SAVE_MS);
+  }
+  /* A full quota is met by dropping the oldest half and trying again - the
+     newest events are the ones a person is about to look for. */
+  function flushStore() {
+    if (saveTimer) { global.clearTimeout(saveTimer); saveTimer = 0; }
+    if (!store) return false;
+    for (var tries = 0; tries < 5; tries++) {
+      try { global.localStorage.setItem(STORE_KEY, JSON.stringify(store)); return true; }
+      catch (e) {
+        if (!store.events.length) return false;
+        var n = Math.ceil(store.events.length / 2);
+        store.events.splice(0, n);
+        store.dropped += n;
+      }
+    }
+    return false;
+  }
+
   function log(kind, level, msg, detail) {
     return push({ kind: kind, level: level || 'info', msg: msg, detail: detail || null });
   }
@@ -171,6 +272,149 @@
       else fn.call(console, line);
     } catch (e) { /* never let logging throw into the app */ }
     busy = false;
+  }
+
+  function nextTick(fn) {
+    if (typeof global.queueMicrotask === 'function') global.queueMicrotask(fn);
+    else Promise.resolve().then(fn);
+  }
+
+  /* ---------------- selection ---------------- */
+  function selSnap() {
+    var S = stateRef();
+    var out = { index: -1, piece: null, sourceId: null, editId: null, model: null };
+    if (!S) return out;
+    out.index = (typeof S.selectedIndex === 'number') ? S.selectedIndex : -1;
+    var p = (out.index >= 0 && S.placed) ? S.placed[out.index] : null;
+    if (p) { out.piece = p.name || null; out.sourceId = (p.sourceId != null) ? p.sourceId : null; }
+    out.editId = (S.editId != null) ? S.editId : null;
+    var models = S.models || [];
+    for (var i = 0; i < models.length; i++) {
+      if (models[i] && models[i].id === out.editId) { out.model = models[i].name || null; break; }
+    }
+    return out;
+  }
+  function selKey(s) { return s ? [s.index, s.sourceId, s.editId].join('|') : ''; }
+  function selText(s) {
+    if (!s) return '?';
+    var parts = [];
+    if (s.index >= 0) {
+      parts.push('placed[' + s.index + ']' + (s.piece ? ' "' + s.piece + '"' : '') +
+                 (s.sourceId != null ? ' (model #' + s.sourceId + ')' : (s.piece ? '' : ' - an empty index')));
+    } else parts.push('no piece');
+    if (s.editId != null && (s.index < 0 || s.editId !== s.sourceId)) {
+      parts.push('active model #' + s.editId + (s.model ? ' "' + s.model + '"' : ' (not in the registry)'));
+    }
+    return parts.join(', ');
+  }
+  function flushSelection() {
+    if (!on) return;
+    var wasSetter = selPending;
+    selPending = false;
+    var now = selSnap();
+    if (selKey(now) === selKey(selCur)) return;
+    var from = selCur;
+    selCur = now;
+    var cleared = now.index < 0 && now.editId == null;
+    /* "selected" when the app assigned the selection; "selection now" when
+       it moved without an assignment - the plate changed under the same
+       index, which is still a change in what the next operation acts on. */
+    push({ kind: 'select', level: 'info',
+           msg: (cleared ? 'selection cleared' : ((wasSetter ? 'selected ' : 'selection now ') + selText(now))) +
+                ' (was ' + selText(from) + ')',
+           detail: { from: from, to: now, cause: wasSetter ? 'assigned' : 'plate changed' },
+           sel: now });
+  }
+  function noteSelection() {
+    if (selPending || !on) return;
+    selPending = true;
+    nextTick(function () { if (selPending) flushSelection(); });
+  }
+  /* state.selectedIndex and state.editId are assigned directly in dozens of
+     places, not only through selectPlaced(), so the change is caught on the
+     property itself: an accessor with the same value behind it, put back to a
+     plain data property on stop(). The setter only notes that something
+     changed; the line is written once, at the end of the tick. */
+  function installSelection() {
+    var S = stateRef();
+    if (!S) return;
+    ['selectedIndex', 'editId'].forEach(function (key) {
+      var d = Object.getOwnPropertyDescriptor(S, key);
+      if (!d || !d.configurable || !('value' in d)) return;
+      var val = d.value;
+      var acc = {
+        configurable: true, enumerable: d.enumerable,
+        get: function () { return val; },
+        set: function (v) { var ch = v !== val; val = v; if (ch) noteSelection(); }
+      };
+      Object.defineProperty(S, key, acc);
+      restores.push(function () {
+        var now = Object.getOwnPropertyDescriptor(S, key);
+        if (!now || now.get !== acc.get) return;
+        Object.defineProperty(S, key, { value: val, writable: true, enumerable: d.enumerable, configurable: true });
+      });
+    });
+  }
+
+  /* ---------------- operations: preview / discard / commit / undo ---------------- */
+  var PHASE_RANK = { preview: 1, discard: 2, undo: 3, commit: 3 };
+  function tick() {
+    if (!task) {
+      task = { phase: null, events: [] };
+      nextTick(function () { task = null; });
+    }
+    return task;
+  }
+  /* The status lines written in the same tick as an operation belong to it:
+     the brush's "drag to work the surface" is a preview's line, its "Carve
+     done" a commit's. A commit can land after its own status line (setStatus
+     first, pushUndo second), so the tag is applied backwards too. */
+  function opEvent(phase, name, detail) {
+    if (!on) return null;
+    var t = tick();
+    if ((PHASE_RANK[phase] || 0) >= (PHASE_RANK[t.phase] || 0)) {
+      t.phase = phase;
+      t.events.forEach(function (e) {
+        if ((PHASE_RANK[e.phase] || 0) <= PHASE_RANK[phase]) retag(e, phase);
+      });
+    }
+    flushSelection();
+    return push({ kind: 'op', level: 'info', phase: phase, msg: phase + ' ' + name,
+                  detail: detail || null, sel: selCur });
+  }
+  function retag(ev, phase) {
+    ev.phase = phase;
+    if (ev._rec) { ev._rec.phase = phase; saveSoon(); }
+    if (ev._row) paintPhase(ev._row, phase);
+  }
+  function installOps() {
+    /* The two previews that are plain globals. Wrapped by name, as setStatus is. */
+    wrapGlobal('showEditPreview', function (orig) {
+      return function () {
+        var m = activeModel();
+        var r = orig.apply(this, arguments);
+        try { opEvent('preview', 'cutter edit preview' + (m ? ' of "' + m.name + '"' : '')); } catch (e) {}
+        return r;
+      };
+    });
+    wrapGlobal('previewModelOnPlate', function (orig) {
+      return function () {
+        var r = orig.apply(this, arguments);
+        try { opEvent('preview', 'plate preview'); } catch (e) {}
+        return r;
+      };
+    });
+    /* Previews that live inside a module's closure announce themselves
+       (app-brush.js: a stroke under the pointer, and a stroke dropped). */
+    function onOp(ev) {
+      try {
+        var d = (ev && ev.detail) || {};
+        if (!PHASE_RANK[d.phase]) return;
+        opEvent(d.phase, String(d.op || 'operation') + (d.reason ? ' - ' + shorten(d.reason, 160) : ''), d);
+      } catch (e) {}
+    }
+    global.addEventListener('nso:op', onOp);
+    restores.push(function () { global.removeEventListener('nso:op', onOp); });
   }
 
   function markOp(name) {
@@ -286,8 +530,15 @@
       return function (msg, isError) {
         try {
           var txt = String(msg == null ? '' : msg);
-          var refusal = (isError === true) || REFUSAL.test(txt);
-          log('status', refusal ? 'refusal' : 'info', txt);
+          /* app-fit.js's warnings, and the line that says they cleared -
+             on their own, or appended to the line they followed */
+          var bv = /(^|\| )Build volume: /.test(txt);
+          var refusal = !bv && ((isError === true) || REFUSAL.test(txt));
+          var t = tick();
+          var ev = push({ kind: 'status', msg: txt, phase: t.phase,
+                          level: bv ? (/fits again/.test(txt) ? 'info' : 'warn') : (refusal ? 'refusal' : 'info'),
+                          source: bv ? 'build-volume' : null });
+          t.events.push(ev);
         } catch (e) {}
         return orig.apply(this, arguments);
       };
@@ -315,6 +566,7 @@
        that beats guessing it from a button. */
     wrapGlobal('pushUndo', function (orig) {
       return function (entry) {
+        try { opEvent('commit', (entry && entry.type) || 'unknown'); } catch (e) {}
         var r = orig.apply(this, arguments);
         try { markOp('op ' + ((entry && entry.type) || 'unknown')); } catch (e) {}
         return r;
@@ -332,6 +584,7 @@
         } catch (e) {}
         ops.push('undo ' + kind);
         if (ops.length > OP_HISTORY) ops.shift();
+        try { opEvent('undo', kind); } catch (e) {}
         var r = orig.apply(this, arguments);
         scheduleChecks('undo ' + kind, true);
         return r;
@@ -375,6 +628,7 @@
         var t = ev.target;
         if (!t || !t.closest) return;
         if (el.panel && el.panel.contains(t)) return;       // our own UI
+        if (el.report && el.report.contains(t)) return;
         var c = t.closest('button, [role="menuitem"], summary');
         if (!c) return;
         markOp('click ' + (c.id || shorten((c.textContent || '').trim(), 24) || c.tagName));
@@ -385,6 +639,7 @@
         var t = ev.target;
         if (!t || !t.id) return;
         if (el.panel && el.panel.contains(t)) return;
+        if (el.report && el.report.contains(t)) return;
         markOp('set ' + t.id + '=' + shorten(t.value, 24));
       } catch (e) {}
     }
@@ -676,7 +931,34 @@
     '#btn-watch .nso-watch-dot{position:absolute;top:-4px;right:-4px;min-width:17px;height:17px;',
     'border-radius:999px;background:#ef4444;color:#fff;font:600 10px/17px ui-sans-serif,system-ui;',
     'text-align:center;padding:0 3px;display:none}',
-    '#btn-watch .nso-watch-dot.is-on{display:block}'
+    '#btn-watch .nso-watch-dot.is-on{display:block}',
+    '.nso-watch-row.k-select{border-left-color:#38bdf8;color:#bae6fd}',
+    '.nso-watch-row.k-commit{border-left-color:#22c55e;color:#bbf7d0}',
+    '.nso-watch-row.k-undo{border-left-color:#14b8a6;color:#99f6e4}',
+    '.nso-watch-row.k-preview{border-left-color:#64748b;color:#cbd5e1;font-style:italic}',
+    '.nso-watch-row.k-discard{border-left-color:#64748b;color:#94a3b8;text-decoration:line-through}',
+    '.nso-watch-row.k-build-volume{border-left-color:#eab308;color:#fde68a}',
+    '.nso-watch-row.k-warning{border-left-color:#f59e0b;color:#fcd34d}',
+    '.nso-watch-row .ph{font-style:normal;flex:0 0 auto;font-size:10px;padding:0 5px;border-radius:4px;border:1px solid #3a4558;color:#cbd5e1}',
+    '.nso-watch-row .ph-commit{border-color:#22c55e;color:#86efac}',
+    '.nso-watch-row .ph-undo{border-color:#14b8a6;color:#5eead4}',
+    '#nso-watch-report{position:absolute;inset:12px 12px 68px 12px;display:none;flex-direction:column;z-index:121;',
+    'background:#090c12;border:1px solid #3a4558;border-radius:10px;box-shadow:0 10px 36px rgba(0,0,0,.6);',
+    'color:#e5edf7;font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;pointer-events:auto;min-height:0}',
+    '#nso-watch-report.is-on{display:flex}',
+    '#nso-watch-report .wr-head,#nso-watch-report .wr-filt{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:7px 9px;border-bottom:1px solid #26303f}',
+    '#nso-watch-report .wr-head b{font-weight:600;color:#f8fafc}',
+    '#nso-watch-report .wr-meta{color:#94a3b8;flex:1 1 auto;min-width:0}',
+    '#nso-watch-report button,#nso-watch-report select,#nso-watch-report input{background:rgba(255,255,255,.08);border:1px solid #3a4558;',
+    'color:#e5edf7;border-radius:6px;font:inherit;font-size:11px;padding:2px 7px}',
+    '#nso-watch-report button{cursor:pointer}',
+    '#nso-watch-report button:hover{border-color:#38bdf8}',
+    '#nso-watch-report input{flex:1 1 140px;min-width:0}',
+    '#nso-watch-report .wr-sum{display:flex;flex-wrap:wrap;gap:5px;padding:6px 9px;border-bottom:1px solid #26303f}',
+    '#nso-watch-report .wr-sum button.is-on{border-color:#38bdf8;background:rgba(56,189,248,.18)}',
+    '#nso-watch-report .wr-list{overflow:auto;flex:1 1 auto;padding:4px 0;overscroll-behavior:contain;min-height:0}',
+    '#nso-watch-report .wr-run{padding:6px 9px 2px;color:#94a3b8;border-top:1px solid #26303f;margin-top:4px}',
+    '#nso-watch-report .wr-note{padding:6px 9px;color:#94a3b8}'
   ].join('');
 
   function buildPanel() {
@@ -697,7 +979,7 @@
           '<span class="nso-watch-pill" id="nso-watch-n-phantom">0 phantom</span>' +
           '<span class="nso-watch-pill" id="nso-watch-n-error">0 error</span>' +
         '</span>' +
-        '<button type="button" id="nso-watch-save">Save</button>' +
+        '<button type="button" id="nso-watch-report-btn">Report</button>' +
         '<button type="button" id="nso-watch-copy">Copy</button>' +
         '<button type="button" id="nso-watch-clear">Clear</button>' +
       '</div>' +
@@ -707,32 +989,236 @@
     el.list = p.querySelector('#nso-watch-list');
     el.nPhantom = p.querySelector('#nso-watch-n-phantom');
     el.nError = p.querySelector('#nso-watch-n-error');
-    p.querySelector('#nso-watch-save').addEventListener('click', function () { api.save(); });
+    p.querySelector('#nso-watch-report-btn').addEventListener('click', function () { api.showReport(); });
     p.querySelector('#nso-watch-copy').addEventListener('click', function () { api.copy(); });
     p.querySelector('#nso-watch-clear').addEventListener('click', function () { api.clear(); });
   }
 
+  /* One classification, shared by the live panel and the report. */
+  function category(ev) {
+    if (ev.kind === 'op') return ev.phase || 'op';
+    if (ev.kind === 'status') return ev.source === 'build-volume' ? 'build-volume' : (ev.level === 'refusal' ? 'refusal' : 'status');
+    if (ev.kind === 'console') return ev.level === 'error' ? 'error' : 'warning';
+    if (ev.kind === 'net') return 'error';
+    return ev.kind;          // phantom, cleared, error, select, watch
+  }
+  function paintPhase(d, phase) {
+    var b = d.querySelector('.ph');
+    if (!b) {
+      b = document.createElement('em');
+      b.className = 'ph';
+      d.insertBefore(b, d.children[1] || null);
+    }
+    b.textContent = phase;
+    b.className = 'ph ph-' + phase;
+  }
   function row(ev) {
     if (!el.list) return;
-    var kind = (ev.level === 'refusal') ? 'refusal' : ev.kind;
     var d = document.createElement('div');
-    d.className = 'nso-watch-row k-' + kind;
+    d.className = 'nso-watch-row k-' + category(ev);
     var t = document.createElement('time');
     t.textContent = ev.time;
     var s = document.createElement('span');
     s.textContent = ev.msg;
     d.appendChild(t);
     d.appendChild(s);
+    if (ev.phase && ev.kind === 'status') paintPhase(d, ev.phase);
+    ev._row = d;
     if (ev.kind === 'phantom') {
       var o = document.createElement('span');
       o.className = 'op';
       o.textContent = 'after ' + ev.op;
       d.appendChild(o);
+    } else if (ev.kind === 'op' && ev.sel) {
+      var on2 = document.createElement('span');
+      on2.className = 'op';
+      on2.textContent = 'on ' + selText(ev.sel);
+      d.appendChild(on2);
     }
     var stick = el.list.scrollTop + el.list.clientHeight >= el.list.scrollHeight - 24;
     el.list.appendChild(d);
     while (el.list.childElementCount > 400) el.list.removeChild(el.list.firstChild);
     if (stick) el.list.scrollTop = el.list.scrollHeight;
+  }
+
+  /* ---------------- the report view ----------------
+     The whole persisted history, in the app, browsable. Read from `store`,
+     which is the same object persist() writes, so an open report follows the
+     session live; when the watch is off it is read back from localStorage. */
+  var REPORT_CATS = ['phantom', 'error', 'select', 'preview', 'discard', 'commit', 'undo',
+                     'build-volume', 'refusal', 'status', 'warning', 'cleared', 'watch'];
+  var rf = { run: 'all', cat: 'all', q: '' };
+
+  function buildReport() {
+    if (el.report) return;
+    var host = document.querySelector('.viewport-section') || document.body;
+    var r = document.createElement('div');
+    r.id = 'nso-watch-report';
+    r.setAttribute('role', 'dialog');
+    r.setAttribute('aria-label', 'Watch report');
+    r.innerHTML =
+      '<div class="wr-head"><b>Watch report</b><span class="wr-meta" id="nso-wr-meta"></span>' +
+        '<button type="button" id="nso-wr-copy">Copy</button>' +
+        '<button type="button" id="nso-wr-wipe">Clear history</button>' +
+        '<button type="button" id="nso-wr-close">Close</button></div>' +
+      '<div class="wr-filt"><select id="nso-wr-run" aria-label="Run"></select>' +
+        '<input type="search" id="nso-wr-q" placeholder="filter text" aria-label="Filter text"></div>' +
+      '<div class="wr-sum" id="nso-wr-sum"></div>' +
+      '<div class="wr-list" id="nso-wr-list"></div>';
+    host.appendChild(r);
+    el.report = r;
+    ['pointerdown', 'wheel', 'keydown'].forEach(function (t) {
+      r.addEventListener(t, function (e) { e.stopPropagation(); });
+    });
+    r.querySelector('#nso-wr-close').addEventListener('click', function () { api.hideReport(); });
+    r.querySelector('#nso-wr-copy').addEventListener('click', function () { api.copyReport(); });
+    r.querySelector('#nso-wr-wipe').addEventListener('click', function () { api.clearStored(); });
+    r.querySelector('#nso-wr-run').addEventListener('change', function (e) { rf.run = e.target.value; renderReport(); });
+    r.querySelector('#nso-wr-q').addEventListener('input', function (e) { rf.q = e.target.value; renderReport(); });
+    r.querySelector('#nso-wr-sum').addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('button[data-cat]');
+      if (!b) return;
+      var c = b.getAttribute('data-cat');
+      rf.cat = (rf.cat === c) ? 'all' : c;
+      renderReport();
+    });
+  }
+
+  function reportSoon() {
+    if (reportTimer) return;
+    reportTimer = global.setTimeout(function () { reportTimer = 0; renderReport(); }, 200);
+  }
+
+  function runLabel(run, i) {
+    var d = run.started ? new Date(run.started) : null;
+    return '#' + (i + 1) + ' ' + (d ? d.toLocaleDateString() + ' ' + clock(d) : '?') +
+           ' (' + (run.events || 0) + ')' + (run.id === runId && on ? ' - live' : '');
+  }
+
+  /* The events a filter selects, oldest first. Exposed as api.query(). */
+  function query(f) {
+    var st = store || loadStore();
+    f = f || {};
+    var q = String(f.q || '').toLowerCase();
+    return st.events.filter(function (e) {
+      if (f.run && f.run !== 'all' && e.run !== f.run) return false;
+      if (f.cat && f.cat !== 'all' && category(e) !== f.cat) return false;
+      if (q && (e.msg + ' ' + (e.op || '') + ' ' + (e.sel ? selText(e.sel) : '')).toLowerCase().indexOf(q) < 0) return false;
+      return true;
+    });
+  }
+
+  function renderReport() {
+    if (!el.report) return;
+    if (!store) store = loadStore();
+    var runs = store.runs;
+    var runNo = {};
+    runs.forEach(function (r, i) { runNo[r.id] = i + 1; });
+    if (rf.run !== 'all' && !runNo[rf.run]) rf.run = 'all';
+
+    var sel = el.report.querySelector('#nso-wr-run');
+    sel.innerHTML = '';
+    var all = document.createElement('option');
+    all.value = 'all';
+    all.textContent = 'All runs (' + runs.length + ')';
+    sel.appendChild(all);
+    runs.forEach(function (r, i) {
+      var o = document.createElement('option');
+      o.value = r.id;
+      o.textContent = runLabel(r, i);
+      sel.appendChild(o);
+    });
+    sel.value = rf.run;
+
+    var inRun = query({ run: rf.run });
+    var by = {};
+    inRun.forEach(function (e) { var c = category(e); by[c] = (by[c] || 0) + 1; });
+    var sum = el.report.querySelector('#nso-wr-sum');
+    sum.innerHTML = '';
+    REPORT_CATS.forEach(function (c) {
+      if (!by[c] && rf.cat !== c) return;
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('data-cat', c);
+      b.className = (rf.cat === c) ? 'is-on' : '';
+      b.textContent = (by[c] || 0) + ' ' + c;
+      sum.appendChild(b);
+    });
+
+    var rows = query(rf);
+    el.report.querySelector('#nso-wr-meta').textContent =
+      store.events.length + ' event(s) in ' + runs.length + ' run(s), kept in this browser' +
+      (store.dropped ? ' - ' + store.dropped + ' older dropped' : '') +
+      (rows.length !== store.events.length ? ' - ' + rows.length + ' shown' : '');
+
+    var list = el.report.querySelector('#nso-wr-list');
+    var stick = list.scrollTop + list.clientHeight >= list.scrollHeight - 24;
+    list.innerHTML = '';
+    if (!rows.length) {
+      var n = document.createElement('div');
+      n.className = 'wr-note';
+      n.textContent = store.events.length ? 'Nothing matches this filter.' :
+        'Nothing recorded yet. Turn the watch on and use the app - every event lands here, across reloads.';
+      list.appendChild(n);
+      return;
+    }
+    var from = Math.max(0, rows.length - REPORT_ROWS);
+    if (from) {
+      var more = document.createElement('div');
+      more.className = 'wr-note';
+      more.textContent = 'Showing the newest ' + REPORT_ROWS + ' of ' + rows.length + ' - narrow the filter to see older ones.';
+      list.appendChild(more);
+    }
+    var lastRun = null;
+    var frag = document.createDocumentFragment();
+    for (var i = from; i < rows.length; i++) {
+      var e = rows[i];
+      if (e.run !== lastRun) {
+        lastRun = e.run;
+        var h = document.createElement('div');
+        h.className = 'wr-run';
+        var rr = runs[runNo[e.run] - 1];
+        h.textContent = 'run ' + (rr ? runLabel(rr, runNo[e.run] - 1) : '(pruned)');
+        frag.appendChild(h);
+      }
+      var d = document.createElement('div');
+      d.className = 'nso-watch-row k-' + category(e);
+      var t = document.createElement('time');
+      t.textContent = e.time;
+      t.title = e.iso;
+      var sp = document.createElement('span');
+      sp.textContent = e.msg;
+      d.appendChild(t);
+      d.appendChild(sp);
+      if (e.kind === 'status' && e.phase) paintPhase(d, e.phase);
+      var sub = null;
+      if (e.kind === 'phantom') sub = 'after ' + e.op;
+      else if (e.kind === 'op' && e.sel) sub = 'on ' + selText(e.sel);
+      if (sub) {
+        var o = document.createElement('span');
+        o.className = 'op';
+        o.textContent = sub;
+        d.appendChild(o);
+      }
+      frag.appendChild(d);
+    }
+    list.appendChild(frag);
+    if (stick) list.scrollTop = list.scrollHeight;
+  }
+
+  function reportText(rows) {
+    var st = store || loadStore();
+    var runNo = {};
+    st.runs.forEach(function (r, i) { runNo[r.id] = i + 1; });
+    var out = ['# NSO watch history (' + VERSION + ') - ' + rows.length + ' event(s), ' + st.runs.length + ' run(s)' +
+               (st.dropped ? ', ' + st.dropped + ' older dropped' : ''), ''];
+    rows.forEach(function (e) {
+      out.push('#' + (runNo[e.run] || '?') + ' ' + e.time + '  ' + category(e) +
+               (e.kind === 'status' && e.phase ? '/' + e.phase : '') + '  ' + e.msg +
+               (e.kind === 'phantom' ? '   [after ' + e.op + ']' : '') +
+               (e.kind === 'op' && e.sel ? '   [on ' + selText(e.sel) + ']' : ''));
+    });
+    return out.join('\n');
   }
 
   function counts() {
@@ -777,14 +1263,35 @@
       openF = Object.create(null);
       restores = [];
       startedWall = Date.now();
+      /* Taken before anything is logged, so the first line cannot read as a
+         change from an unknown selection. */
+      selPending = false; task = null;
+      /* One run per start(), appended to whatever this browser already holds. */
+      store = loadStore();
+      runId = startedWall.toString(36) + '-' + Math.floor(Math.random() * 1296).toString(36);
+      store.runs.push({ id: runId, started: new Date(startedWall).toISOString(), ended: null, events: 0,
+                        page: (global.location ? global.location.pathname + global.location.search : '') });
+      var liveRuns = {};
+      store.events.forEach(function (e) { liveRuns[e.run] = true; });
+      store.runs = store.runs.filter(function (r) { return r.id === runId || liveRuns[r.id]; }).slice(-200);
       on = true;
+      selCur = selSnap();
       buildPanel();
       if (el.panel) el.panel.classList.add('is-on');
       if (el.list) el.list.innerHTML = '';
       installLogger();
       installConsistency();
+      installSelection();
+      installOps();
+      global.addEventListener('pagehide', flushStore);
+      restores.push(function () { global.removeEventListener('pagehide', flushStore); });
       paintButton();
-      log('watch', 'info', 'watch on - ' + VERSION + ' - error/status log and state-consistency checks are live');
+      log('watch', 'info', 'watch on - ' + VERSION + ' - error/status log, selection and preview/commit tracking, and state-consistency checks are live');
+      /* What is selected when watching starts, so the first operation in the
+         log is never one whose target is unknown. */
+      flushSelection();
+      push({ kind: 'select', level: 'info', msg: 'selection at start: ' + selText(selCur),
+             detail: { from: null, to: selCur, cause: 'baseline' }, sel: selCur });
       /* A baseline pass: anything already broken when watching starts is
          reported now rather than being blamed on the next operation. */
       check('watch start (baseline)');
@@ -794,6 +1301,7 @@
 
     stop: function () {
       if (!on) return false;
+      flushSelection();
       log('watch', 'info', 'watch off - ' + events.length + ' event(s), ' +
           Object.keys(openF).length + ' mismatch(es) still open');
       on = false;
@@ -802,9 +1310,14 @@
         try { restores[i](); } catch (e) {}
       }
       restores = [];
+      task = null; selPending = false;
+      var run = currentRun();
+      if (run) run.ended = new Date().toISOString();
+      flushStore();
       if (el.panel) el.panel.classList.remove('is-on');
       paintButton();
       try { global.localStorage.removeItem('nso.watch'); } catch (e) {}
+      if (el.report && el.report.classList.contains('is-on')) renderReport();
       return true;
     },
 
@@ -818,7 +1331,9 @@
     events: function () {
       return events.map(function (e) {
         return { seq: e.seq, time: e.time, iso: e.at.toISOString(), kind: e.kind,
-                 level: e.level, msg: e.msg, op: e.op, detail: e.detail, trail: e.trail };
+                 level: e.level, phase: e.phase || null, source: e.source || null,
+                 category: category(e), msg: e.msg, op: e.op, sel: e.sel || null,
+                 detail: e.detail, trail: e.trail };
       });
     },
 
@@ -833,7 +1348,7 @@
       var by = {};
       events.forEach(function (e) {
         var k = (e.kind === 'phantom') ? ('phantom ' + e.msg.split(' - ')[0].replace('phantom ', ''))
-              : (e.level === 'refusal') ? 'refusal' : e.kind;
+              : category(e);
         by[k] = (by[k] || 0) + 1;
       });
       return { on: on, started: new Date(startedWall).toISOString(),
@@ -854,6 +1369,41 @@
       return out.join('\n');
     },
 
+    /* The persisted history, across runs and reloads: {runs, events, dropped}.
+       Events are the stored records - plain JSON, oldest first. */
+    stored: function () {
+      var st = store || loadStore();
+      return JSON.parse(JSON.stringify(st));
+    },
+    /* Filtered history: {run: id|'all', cat: category|'all', q: text}. */
+    query: function (f) { return JSON.parse(JSON.stringify(query(f))); },
+    showReport: function () {
+      buildReport();
+      if (!store) store = loadStore();
+      el.report.classList.add('is-on');
+      renderReport();
+      return true;
+    },
+    hideReport: function () { if (el.report) el.report.classList.remove('is-on'); },
+    copyReport: function () {
+      var txt = reportText(query(rf));
+      if (global.navigator && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).catch(function () {});
+      }
+      return txt;
+    },
+    /* Forget every stored run. A live run carries on, with a clean slate. */
+    clearStored: function () {
+      var keep = on ? currentRun() : null;
+      store = emptyStore();
+      if (keep) { keep.events = 0; store.runs.push(keep); }
+      flushStore();
+      if (!on) { try { global.localStorage.removeItem(STORE_KEY); } catch (e) {} }
+      if (el.report && el.report.classList.contains('is-on')) renderReport();
+    },
+
+    /* Console-only, kept for anyone who wants a file: the in-app report is
+       the way to browse. */
     save: function () {
       var blob = new Blob([JSON.stringify({
         version: VERSION, started: new Date(startedWall).toISOString(),

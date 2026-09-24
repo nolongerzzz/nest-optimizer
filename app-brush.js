@@ -1605,6 +1605,21 @@ if (typeof document !== 'undefined') (function () {
     s.lastStamp = rawPoint;
   }
 
+  /* The live preview's two ends, announced as a plain DOM event so anything
+     listening (the watch log in nso-watch.js) can tell a preview from a
+     commit: the commit itself is already on record through pushUndo, but a
+     stroke that is shown and then dropped leaves no other trace. Costs one
+     dispatch per stroke with nobody listening, and changes nothing. */
+  function note(phase, s, why) {
+    try {
+      window.dispatchEvent(new CustomEvent('nso:op', { detail: {
+        phase: phase, op: 'brush ' + ((s && s.opts && s.opts.mode) || '?') + ' stroke',
+        model: s && s.m ? s.m.id : null, stamps: s && s.stamps ? s.stamps.length : 0,
+        reason: why || null
+      } }));
+    } catch (e) { /* never let the announcement touch the stroke */ }
+  }
+
   function rebuildPreviewGeometry(s) {
     var old = s.previewGeo;
     s.previewGeo = makePreviewGeometry(s);
@@ -1659,6 +1674,7 @@ if (typeof document !== 'undefined') (function () {
     session.triSeen = new Int32Array(base.triCount);
     writeDisplay(session);
     rebuildPreviewGeometry(session);
+    note('preview', session);
 
     if (state.controls) state.controls.enabled = false;
     try { if (event && event.target.setPointerCapture) event.target.setPointerCapture(event.pointerId); } catch (e) {}
@@ -1732,6 +1748,7 @@ if (typeof document !== 'undefined') (function () {
   }
 
   function revert(s, text, bad) {
+    note('discard', s, text);
     if (s.mesh && s.origGeometry) s.mesh.geometry = s.origGeometry;
     if (s.previewGeo) { s.previewGeo.dispose(); s.previewGeo = null; }
     if (text) say(text, bad !== false);

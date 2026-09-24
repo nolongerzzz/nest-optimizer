@@ -20,6 +20,21 @@
       which is the point. The check is then to be retired with the fix, not
       before.
 
+   C/D. The error and status log, and the button.
+
+   E. What the log records AROUND the phantom checks, driven for real:
+        1. every selection change is its own event - selectPlaced(), a real
+           click on a piece in the viewport, a bare state.selectedIndex write -
+           and lands BEFORE the operation that follows it, which carries the
+           selection it acted on;
+        2. a preview and a commit read differently - a real brush drag
+           (preview, then commit) and one abandoned with Escape (preview, then
+           discard), with their status lines tagged the same way;
+        3. a build-volume warning reaches the log through setStatus, and so
+           does its clearing;
+        4. the history is kept in this browser across a reload, one run per
+           start, and the in-app Report view shows and filters all of it.
+
    Every button here is pressed with element.click() inside the page rather
    than a Playwright click, so the viewport accordion (docs/HANDOFF.md, "a
    second viewport menu") cannot hide a control out from under this suite.
@@ -291,6 +306,287 @@ async function partD(page) {
   ok(hud === 'sentinel-do-not-touch', 'the watcher never writes to the HUD line', JSON.stringify(hud));
 }
 
+/* ---------------- E ---------------- */
+const lastOf = (evs, kind) => evs.filter(e => e.kind === kind).slice(-1)[0] || null;
+const evs = page => page.evaluate(() => NSOWatch.events());
+
+/* Client pixels for a point on the piece at placed[idx], projected through
+   the app's own camera. */
+const pieceTopPx = (page, idx, dx, dz) => page.evaluate(([i, ox, oz]) => {
+  const p = state.placed[i];
+  p.mesh.updateMatrixWorld(true);
+  const bb = meshLocalBox3(p.mesh);
+  const v = new THREE.Vector3(p.mesh.position.x + (ox || 0), bb.max.y - 0.02, p.mesh.position.z + (oz || 0));
+  v.project(state.camera);
+  const r = state.renderer.domElement.getBoundingClientRect();
+  return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height };
+}, [idx, dx, dz]);
+
+async function partE1(page) {
+  console.log('\nE1. selection changes are events, and ops carry what they acted on');
+  await loadSTL(page, SLAB);
+  await loadSTL(page, BOX);
+  const nPlaced = await page.evaluate(() => state.placed.filter(p => p && p.mesh).length);
+  ok(nPlaced >= 2, 'two pieces are on the plate', 'placed: ' + nPlaced);
+  await page.evaluate(() => { selectPlaced(-1); state.editId = null; NSOWatch.start(); });
+
+  let ev = await evs(page);
+  const base = ev.find(e => e.kind === 'select');
+  ok(!!base && /selection at start: no piece/.test(base.msg), 'the selection at start is logged',
+     base ? base.msg : '(none)');
+
+  await page.evaluate(() => selectPlaced(0));
+  await page.waitForTimeout(30);
+  ev = await evs(page);
+  let sel = ev.filter(e => e.kind === 'select');
+  ok(sel.length === 2 && /^selected placed\[0\]/.test(sel[1].msg),
+     'selectPlaced(0) produces a selection event naming placed[0]', sel.map(e => e.msg).join(' | '));
+  ok(sel.length === 2 && sel[1].sel && sel[1].sel.index === 0 && sel[1].sel.editId != null,
+     'it records the index and the active model', JSON.stringify(sel[1] && sel[1].sel));
+
+  await page.evaluate(() => { selectPlaced(0); });
+  await page.waitForTimeout(30);
+  ok((await evs(page)).filter(e => e.kind === 'select').length === 2,
+     'selecting what is already selected is not a change');
+
+  /* A real click on the other piece, through the canvas. */
+  await page.evaluate(() => { if (state.controls) state.controls.update(); });
+  const px = await pieceTopPx(page, 1, 0, 0);
+  await page.mouse.click(px.x, px.y);
+  await page.waitForTimeout(80);
+  ev = await evs(page);
+  const clickSel = lastOf(ev, 'select');
+  const nowIdx = await page.evaluate(() => state.selectedIndex);
+  ok(nowIdx === 1 && clickSel && clickSel.sel.index === 1 && /was placed\[0\]/.test(clickSel.msg),
+     'a real click on placed[1] is logged as a change from placed[0]',
+     'selectedIndex ' + nowIdx + '; ' + (clickSel ? clickSel.msg : '(none)'));
+
+  await page.evaluate(() => { state.selectedIndex = -1; state.editId = null; });
+  await page.waitForTimeout(30);
+  ok(/^selection cleared/.test((lastOf(await evs(page), 'select') || {}).msg || ''),
+     'a bare state write that clears the selection is logged too',
+     (lastOf(await evs(page), 'select') || {}).msg);
+
+  /* Select, then act, in the SAME tick: the select line must come first and
+     the commit must carry it. */
+  await page.evaluate(() => { selectPlaced(0); nudgeSelected(4, 4); });
+  await page.waitForTimeout(50);
+  ev = await evs(page);
+  const s2 = lastOf(ev, 'select');
+  const c2 = ev.filter(e => e.kind === 'op' && e.phase === 'commit').slice(-1)[0];
+  ok(!!c2, 'the nudge is logged as a commit', c2 ? c2.msg : JSON.stringify(ev.slice(-4).map(e => e.msg)));
+  ok(!!(s2 && c2 && s2.seq < c2.seq && s2.sel.index === 0),
+     'the selection event lands before the operation that follows it',
+     s2 && c2 ? 'select #' + s2.seq + ', commit #' + c2.seq : '');
+  ok(!!(c2 && c2.sel && c2.sel.index === 0 && c2.sel.sourceId != null),
+     'and the commit records what it acted on', JSON.stringify(c2 && c2.sel));
+  ok((await page.evaluate(() => NSOWatch.open())).length === 0, 'none of this raises a phantom');
+}
+
+async function partE2(page) {
+  console.log('\nE2. a preview and a commit read differently');
+  /* The brush on the box: its drag is the app's live preview. */
+  const boxIdx = await page.evaluate(() => {
+    const m = state.models[state.models.length - 1];
+    return state.placed.findIndex(p => p && p.sourceId === m.id);
+  });
+  await page.evaluate(i => selectPlaced(i), boxIdx);
+  await page.evaluate(() => {
+    const b = document.getElementById('btn-brush');
+    for (let n = b; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
+    document.querySelectorAll('.vp-finish-menu .vp-sec').forEach(d => { d.open = true; });
+    const set = (id, v) => { const e = document.getElementById(id); e.value = String(v);
+      e.dispatchEvent(new Event('input', { bubbles: true })); e.dispatchEvent(new Event('change', { bubbles: true })); };
+    set('inp-brush-size', 6); set('inp-brush-intensity', 0.6); set('sel-brush-mode', 'carve');
+    if (!window.nsoBrushArmed()) document.getElementById('btn-brush').click();
+  });
+  const mark = (await evs(page)).length;
+  const a = await pieceTopPx(page, boxIdx, -4, 0);
+  const b = await pieceTopPx(page, boxIdx, 4, 0);
+  async function drag(escape) {
+    await page.mouse.move(a.x, a.y);
+    await page.mouse.down();
+    for (let i = 1; i <= 8; i++) {
+      await page.mouse.move(a.x + (b.x - a.x) * i / 8, a.y + (b.y - a.y) * i / 8);
+      if (escape && i === 4) await page.keyboard.press('Escape');
+    }
+    await page.mouse.up();
+    await page.waitForTimeout(200);
+  }
+  await drag(false);
+  let ev = (await evs(page)).slice(mark);
+  const ops = ev.filter(e => e.kind === 'op');
+  const pv = ops.find(e => e.phase === 'preview');
+  const cm = ops.find(e => e.phase === 'commit');
+  ok(!!pv && /brush carve stroke/.test(pv.msg), 'the drag is logged as a preview', JSON.stringify(ops.map(e => e.msg)));
+  ok(!!cm && /brushReplace/.test(cm.msg), 'letting go is logged as a commit', JSON.stringify(ops.map(e => e.msg)));
+  ok(!!(pv && cm && pv.seq < cm.seq), 'preview first, commit second');
+  ok(!!(pv && cm && pv.sel && cm.sel && pv.sel.index === cm.sel.index),
+     'both carry the piece they worked on', JSON.stringify([pv && pv.sel, cm && cm.sel]));
+  const st = ev.filter(e => e.kind === 'status');
+  const stPv = st.find(e => /drag to work the surface/.test(e.msg));
+  const stCm = st.find(e => /Carve done/.test(e.msg));
+  ok(!!stPv && stPv.phase === 'preview', "the brush's live status line is tagged preview",
+     JSON.stringify(st.map(e => e.phase + '|' + e.msg.slice(0, 40))));
+  ok(!!stCm && stCm.phase === 'commit', 'its result line is tagged commit - the two no longer read alike',
+     JSON.stringify(st.map(e => e.phase + '|' + e.msg.slice(0, 40))));
+
+  const mark2 = (await evs(page)).length;
+  await drag(true);
+  ev = (await evs(page)).slice(mark2);
+  const ops2 = ev.filter(e => e.kind === 'op').map(e => e.phase);
+  ok(JSON.stringify(ops2) === '["preview","discard"]',
+     'a stroke abandoned with Escape is a preview then a discard, and never a commit', JSON.stringify(ops2));
+  const cancelLine = ev.find(e => e.kind === 'status' && /cancelled/.test(e.msg));
+  ok(!!cancelLine && cancelLine.phase === 'discard', 'and its status line says discard',
+     cancelLine ? cancelLine.phase : '(no line)');
+
+  await page.evaluate(() => { if (window.nsoBrushArmed()) document.getElementById('btn-brush').click(); });
+
+  /* Undo is its own phase, not a commit. */
+  await page.evaluate(() => undoLast());
+  await page.waitForTimeout(50);
+  const u = lastOf(await evs(page), 'op');
+  ok(!!u && u.phase === 'undo' && /brushReplace/.test(u.msg), 'Undo is logged as an undo of what it reverts',
+     u ? u.msg : '(none)');
+  ok((await page.evaluate(() => NSOWatch.open())).length === 0, 'none of this raises a phantom');
+}
+
+async function partE3(page) {
+  console.log('\nE3. build-volume warnings reach the log');
+  const setPlate = (h) => page.evaluate(v => {
+    const sel = document.getElementById('plate-select');
+    if (sel.value !== 'custom') { sel.value = 'custom'; sel.dispatchEvent(new Event('change', { bubbles: true })); }
+    const e = document.getElementById('custom-h');
+    e.value = String(v);
+    e.dispatchEvent(new Event('input', { bubbles: true }));
+  }, h);
+  const mark = (await evs(page)).length;
+  await setPlate(5);
+  await page.waitForFunction(() => !document.getElementById('build-volume-warning').hidden, null, { timeout: 15000 });
+  await page.waitForTimeout(50);
+  let ev = (await evs(page)).slice(mark);
+  const w = ev.filter(e => e.kind === 'status' && e.source === 'build-volume');
+  const shown = await page.evaluate(() => document.getElementById('build-volume-warning').textContent.trim());
+  ok(w.length >= 1 && w[0].level === 'warn' && w[0].category === 'build-volume',
+     'a build volume too short for the pieces is logged as a build-volume warning', JSON.stringify(w.map(e => e.msg)));
+  const statusNow = await page.evaluate(() => document.getElementById('status').textContent);
+  ok(w.length >= 1 && w[0].msg.endsWith('Build volume: ' + shown) && w[0].msg === statusNow,
+     'the logged line is the status line, carrying the warning the page shows', w.length ? w[0].msg : shown);
+  const again = (await evs(page)).length;
+  await page.waitForTimeout(300);
+  ok((await evs(page)).length === again, 'an unchanged warning is not re-logged every frame');
+
+  await setPlate(300);
+  await page.waitForFunction(() => document.getElementById('build-volume-warning').hidden, null, { timeout: 15000 });
+  await page.waitForTimeout(50);
+  ev = (await evs(page)).slice(mark);
+  ok(ev.some(e => e.source === 'build-volume' && /fits again/.test(e.msg)),
+     'and its clearing is logged too', JSON.stringify(ev.filter(e => e.source).map(e => e.msg)));
+}
+
+async function partE4(page) {
+  console.log('\nE4. the history persists in the browser, and the Report view shows it');
+  const before = await page.evaluate(() => {
+    const st = NSOWatch.stored();
+    const run = st.runs[st.runs.length - 1].id;
+    return { runs: st.runs.length, n: st.events.length, run,
+             inRun: st.events.filter(e => e.run === run).length, live: NSOWatch.events().length };
+  });
+  ok(before.inRun === before.live && before.live > 10, 'every live event is also in the stored history',
+     'stored for this run ' + before.inRun + ', live ' + before.live);
+
+  /* The watch stays on across a reload (nso.watch in localStorage), which
+     starts a new run on top of the old one. */
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true);
+  await page.waitForFunction(() => window.NSOWatch && NSOWatch.isOn());
+  await page.evaluate(() => { console.warn('a warning in the second run'); });
+  await page.waitForTimeout(400);
+  const after = await page.evaluate(run => {
+    const st = NSOWatch.stored();
+    return { runs: st.runs.map(r => r.id), n: st.events.length,
+             old: st.events.filter(e => e.kind === 'select').length,
+             oldRun: st.events.filter(e => e.run === run).length };
+  }, before.run);
+  ok(after.runs.length === before.runs + 1, 'a reload with the watch on starts a second run',
+     after.runs.length + ' run(s)');
+  ok(after.runs.includes(before.run) && after.oldRun >= before.inRun && after.n > before.n,
+     'the first run\'s events survive the reload, and the new ones are added',
+     'that run: ' + before.inRun + ' -> ' + after.oldRun + '; all runs: ' + before.n + ' -> ' + after.n);
+
+  const ui = await page.evaluate(() => {
+    const noSave = !document.getElementById('nso-watch-save');
+    document.getElementById('nso-watch-report-btn').click();
+    const r = document.getElementById('nso-watch-report');
+    const rows = r.querySelectorAll('.nso-watch-row').length;
+    const runs = r.querySelectorAll('.wr-run').length;
+    const opts = r.querySelectorAll('#nso-wr-run option').length;
+    const sum = Array.from(r.querySelectorAll('#nso-wr-sum button')).map(b => b.textContent);
+    return { noSave, open: r.classList.contains('is-on') && r.offsetHeight > 100, rows, runs, opts, sum };
+  });
+  ok(ui.noSave, 'the panel no longer offers a download button');
+  ok(ui.open, 'the Report button opens the in-app report view');
+  ok(ui.rows >= after.n - 2 && ui.runs >= 2 && ui.opts === after.runs.length + 1,
+     'it lists the whole history, grouped by run', JSON.stringify(ui));
+  ok(ui.sum.some(t => /\d+ select/.test(t)) && ui.sum.some(t => /\d+ commit/.test(t)) &&
+     ui.sum.some(t => /\d+ preview/.test(t)) && ui.sum.some(t => /\d+ build-volume/.test(t)),
+     'its summary counts selections, previews, commits and build-volume lines', ui.sum.join(', '));
+
+  const filt = await page.evaluate(() => {
+    const r = document.getElementById('nso-watch-report');
+    r.querySelector('#nso-wr-sum button[data-cat="select"]').click();
+    const rows = Array.from(r.querySelectorAll('.nso-watch-row'));
+    const onlySel = rows.length > 0 && rows.every(d => d.classList.contains('k-select'));
+    const selN = rows.length;
+    r.querySelector('#nso-wr-sum button[data-cat="select"]').click();       // off again
+    const runSel = r.querySelector('#nso-wr-run');
+    runSel.value = runSel.options[runSel.options.length - 1].value;
+    runSel.dispatchEvent(new Event('change', { bubbles: true }));
+    const liveRows = r.querySelectorAll('.nso-watch-row').length;
+    const liveRuns = r.querySelectorAll('.wr-run').length;
+    const q = r.querySelector('#nso-wr-q');
+    q.value = 'second run';
+    q.dispatchEvent(new Event('input', { bubbles: true }));
+    const hits = Array.from(r.querySelectorAll('.nso-watch-row')).map(d => d.textContent);
+    q.value = ''; q.dispatchEvent(new Event('input', { bubbles: true }));
+    runSel.value = 'all'; runSel.dispatchEvent(new Event('change', { bubbles: true }));
+    return { onlySel, selN, liveRows, liveRuns, hits };
+  });
+  ok(filt.onlySel, 'filtering by kind shows only that kind', filt.selN + ' row(s)');
+  ok(filt.liveRuns === 1 && filt.liveRows > 0, 'picking one run shows only that run', JSON.stringify(filt));
+  ok(filt.hits.length === 1 && /a warning in the second run/.test(filt.hits[0]),
+     'text search finds the one line', JSON.stringify(filt.hits));
+
+  /* Live: an event in the running session shows up in the open report. */
+  const live = await page.evaluate(async () => {
+    const r = document.getElementById('nso-watch-report');
+    const n0 = r.querySelectorAll('.nso-watch-row').length;
+    selectPlaced(0);
+    await new Promise(res => setTimeout(res, 400));
+    return r.querySelectorAll('.nso-watch-row').length - n0;
+  });
+  ok(live >= 1, 'the open report follows the session live', '+' + live + ' row(s)');
+
+  const wiped = await page.evaluate(() => {
+    document.getElementById('nso-wr-wipe').click();
+    const st = NSOWatch.stored();
+    const r = document.getElementById('nso-watch-report');
+    document.getElementById('nso-wr-close').click();
+    return { n: st.events.length, runs: st.runs.length, closed: !r.classList.contains('is-on') };
+  });
+  ok(wiped.n === 0 && wiped.runs === 1, 'Clear history empties it, keeping only the live run', JSON.stringify(wiped));
+  ok(wiped.closed, 'and Close hides the view');
+
+  const restored = await page.evaluate(() => {
+    NSOWatch.stop();
+    const d = Object.getOwnPropertyDescriptor(state, 'selectedIndex');
+    const e = Object.getOwnPropertyDescriptor(state, 'editId');
+    return { plain: 'value' in d && d.writable && 'value' in e && e.writable };
+  });
+  ok(restored.plain, 'stop() puts state.selectedIndex and state.editId back as plain properties');
+}
+
 withApp(async (page, logs) => {
   await partA(page);
   await page.reload({ waitUntil: 'load' });
@@ -306,6 +602,12 @@ withApp(async (page, logs) => {
   await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true);
   await partC(page);
   await partD(page);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true);
+  await partE1(page);
+  await partE2(page);
+  await partE3(page);
+  await partE4(page);
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   if (fail) {
