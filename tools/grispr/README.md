@@ -65,6 +65,33 @@ Objects **interleave within a single layer** — and an object can be left and
 re-entered on the same layer. Grispr treats blocks as a flat ordered sequence
 and never assumes one block per object per layer.
 
+### Two marker modes
+
+Bambu Studio does not always emit the labelled start/stop pair. The reference
+single-object slice carries 105 `; OBJECT_ID: 518` comments — one per layer —
+and **not a single start or stop marker**. Grispr handles both shapes and says
+which one it used:
+
+* **`label` mode** — start/stop pairs are present, so block ends are *read*
+  from the file. Multi-object and interleave are fully supported.
+* **`object_id` mode** — only `; OBJECT_ID:` is present, so block ends are
+  *inferred*: a block runs from its `; OBJECT_ID:` line to the line before
+  whichever comes first of the next `; OBJECT_ID:`, the next `; CHANGE_LAYER`,
+  or `; EXECUTABLE_BLOCK_END`. Note the terminator is the layer change, not the
+  timelapse block — the object's toolpath *resumes* after the embedded
+  `; SKIPPABLE_START`…`; SKIPPABLE_END` section, and the sparse infill that
+  follows it belongs to the object.
+
+An inferred block additionally never extends past the file's **last extruding
+move**. Without that clamp the final block swallows the end-of-print gcode,
+and `--hold` would comment out `M106 S0 ; turn off fan` and leave the part
+cooling fan running after the print finishes.
+
+Because that inference is only verified for the single-object shape, Grispr
+**refuses to write** to an `object_id`-mode file carrying more than one
+distinct object id, and tells you to re-slice with object labelling enabled.
+`--list` still works on it.
+
 ## Install
 
 Python 3.8+, standard library only. No dependencies.
@@ -204,9 +231,36 @@ Running twice on the same file is refused rather than stacking injections;
 
 ## Validation
 
-`tools/grispr/tests/` contains 65 tests over 14 synthetic fixtures (8
+### Against a real sliced file
+
+Verified against a real Bambu Studio slice: 107,548 lines, 105 layers, one
+object (`; OBJECT_ID: 518`), stock Bambu PLA Basic, `enable_overhang_bridge_fan
+= 1`, `overhang_fan_threshold = 50%`, `overhang_fan_speed = 100`.
+
+`--list` parses it as 105 blocks, one per layer, with the correct line ranges,
+layer numbers and entry/exit fan states. A full `--hold` run then reverts
+byte-for-byte identically to the original via `--force`, and the modified file
+re-parses to the same 105 blocks.
+
+What that run reported is the important part:
+
+```
+105 block(s) across 1 object(s); 105 forced, 23 restored, 5694 suppressed
+```
+
+**5694 of the file's 5735 fan commands lie inside the object's own blocks** —
+roughly 54 fan changes per layer, mostly Bambu's overhang forcing driving
+`M106 S255` (2856 occurrences). See limitation 2: this is measured, not
+estimated, and it decides which mode is actually useful.
+
+### Against fixtures
+
+`tools/grispr/tests/` contains 78 tests over 15 synthetic fixtures (9
 well-formed, 6 deliberately malformed), including an interleaved 3-object file
-where two objects are each entered twice on the same layer.
+where two objects are each entered twice on the same layer, and a fixture
+modelled on the real single-object slice above — layer machinery, fractional
+fan speeds, an embedded timelapse block with object toolpath after it, and an
+end-of-print fan shutdown that must stay outside the last inferred block.
 
 ```bash
 cd tools/grispr && python3 -m unittest discover -s tests
@@ -233,20 +287,32 @@ without touching the input.
 
 These are real and worth reading before you rely on this.
 
-1. **Not yet verified against a real sliced file.** The marker pattern was
-   confirmed against genuine Bambu Studio output, and Grispr implements exactly
-   that pattern — but the parser itself has so far only been run against
-   synthetic fixtures. Run `--list` on a real file as the first check; it prints
-   the block map without modifying anything, and a mismatch shows up immediately
-   as either a parse error or an obviously wrong block count.
+1. **The multi-object case is still synthetic.** The real file validated the
+   parser, the safety rails and the inferred-block path — but it is a
+   *single-object* plate, so it cannot exercise the interleaved multi-object
+   case that is Grispr's actual reason to exist. That still rests on fixtures.
+   It is also, awkwardly, a plate on which per-object fan control has nothing to
+   do: with one object you would set the filament profile instead.
 
-2. **Boundary injection is a baseline, not a guarantee.** By default the
-   slicer's own fan commands inside the object still execute, so a forced value
-   holds only until the next slicer-emitted `M106`. Bambu emits fan changes at
-   feature and layer transitions, so on a real file the forced value's effective
-   duration may be much shorter than a whole object. The `fan in`/`fan out`
-   columns in `--list` show where this bites. `--hold` removes the ambiguity at
-   the cost of point 3.
+   Worth noting: that file has `exclude_object = 1` yet emits no start/stop
+   markers and no `M624`/`M625`. The hypothesis is that Bambu only emits the
+   labelling machinery for plates with more than one object — which would mean
+   real multi-object plates land in `label` mode and never need the inference.
+   Unverified, and the decisive test is cheap: slice a 2-object plate and
+   `grep -c 'start printing object'`.
+
+2. **Boundary injection is close to useless on real Bambu output. Measured.**
+   By default the slicer's own fan commands inside the object still execute, so
+   a forced value holds only until the next slicer-emitted `M106`. On the
+   reference file that is 5694 fan commands inside object blocks across 105
+   layers — about 54 per layer. A value forced at a block start is overridden
+   within a handful of lines.
+
+   So on this kind of file `--hold` is not a niche option, it is the only mode
+   that does anything lasting, and point 3 is the price. The `fan in`/`fan out`
+   columns in `--list` show the per-block picture before you commit to either.
+   Do not read the default as "the safe useful mode" — it is the safe mode, and
+   on this evidence it is barely a useful one.
 
 3. **`--hold` defeats overhang fan forcing for the targeted object.** There is
    no way to distinguish an overhang-triggered `M106` from any other `M106` by
@@ -279,9 +345,16 @@ These are real and worth reading before you rely on this.
    restores to off at the stop marker. True for Bambu part cooling; verify
    before using `--fan-index` for a chamber fan.
 
-7. **Plain `.gcode` only.** Multi-plate `.gcode.3mf` containers are not
+7. **Fan values can be fractional and the file's own syntax varies.** Bambu
+   writes `M106 S196.35` (1222 times in the reference file) and never uses
+   `M107` there — it writes `M106 S0`. Grispr preserves a fractional speed
+   exactly on restore rather than rounding it, and only emits `M107` into a
+   file that already uses `M107`. Both were found on the real file, not
+   anticipated.
+
+8. **Plain `.gcode` only.** Multi-plate `.gcode.3mf` containers are not
    unpacked. This matches what Bambu Studio hands a post-processing script.
 
-8. **Interaction with printer-side features is untested.** Object skipping
+9. **Interaction with printer-side features is untested.** Object skipping
    (`M624`/`M625`) and similar are passed through untouched but have not been
    exercised against a real print.
