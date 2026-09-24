@@ -1608,7 +1608,11 @@ function rawSplitDegenerates(f32) {
   return new Float32Array(out);
 }
 
-function rawCut(rawTris, axisIdx, plane, keepMin) {
+// The open half of rawCut: everything up to, but not including, the cap.
+// Returns the kept walls (a number[], on-plane points welded and exactly on
+// the plane) or null when nothing is kept. Crop (app-crop.js) calls this for
+// both of its planes and seals the joint itself; rawCut caps it.
+function rawCutOpen(rawTris, axisIdx, plane, keepMin) {
   const soup = rawWeldSoup(rawTris, RAW_CUT_WELD_TOL);
   // A vertex within the weld radius of the plane IS on it as far as any
   // checker is concerned; leave it a hair off and the cap and that vertex
@@ -1618,7 +1622,12 @@ function rawCut(rawTris, axisIdx, plane, keepMin) {
   }
   const clipped = rawClipTrianglesAtPlane(soup, axisIdx, plane, keepMin);
   const kept = rawSnapPlanePoints(clipped.kept, axisIdx, plane, keepMin, RAW_CUT_WELD_TOL);
-  if (!kept.length) return null;
+  return kept.length ? kept : null;
+}
+
+function rawCut(rawTris, axisIdx, plane, keepMin) {
+  const kept = rawCutOpen(rawTris, axisIdx, plane, keepMin);
+  if (!kept) return null;
   // Points are already welded and snapped, so walk the loop on exact keys; a
   // second grid round here could re-merge two distinct representatives that
   // share a 1e-4 cell (up to 1.41e-4 apart) and reopen the mismatch.
