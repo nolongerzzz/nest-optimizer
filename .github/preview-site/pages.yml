@@ -1,0 +1,41 @@
+# Deployed into the preview repository by the mirror workflow in the source
+# repo. Do not edit it there -- every mirror run overwrites it.
+name: Deploy preview site
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # enablement: true turns the Pages site on for this repo on the first
+      # run, so nobody has to click through Settings -> Pages by hand.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      # upload-pages-artifact excludes .git and .github from the tarball, so
+      # the repo root is exactly the site root.
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - id: deployment
+        uses: actions/deploy-pages@v4
