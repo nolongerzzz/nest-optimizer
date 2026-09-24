@@ -34,6 +34,7 @@ const NSO_SkinPatch = require('../nso_skin_patch.js');
 const NSO_Thickness = require('../nso_thickness.js');
 const { writeSTL } = require('./nso_stl_io.js');
 const fine = require('./nso_skin_fine_samples.js');
+const LIBDIR = require('./nso_library_dir');
 
 const ROOT = path.resolve(__dirname, '..');
 let fails = 0;
@@ -329,6 +330,7 @@ console.log('\n=== 5. the library files are what this code builds ===');
     const want = mf.patches[key];
     check(key + ': in the manifest', !!want);
     if (!want) continue;
+    if (!fine.LIB) { LIBDIR.skip(key + ': library/' + want.file + ' committed, byte-identical, and gated'); continue; }
     const f = path.join(fine.LIB, want.file);
     check(key + ': library/' + want.file + ' committed', fs.existsSync(f));
     if (!fs.existsSync(f)) continue;
@@ -346,6 +348,7 @@ console.log('\n=== 5. the library files are what this code builds ===');
     check(key + ': the committed file passes --gate --non-solid', v.verdict_fails.length === 0, verdictOf(v));
   }
   for (const f of fine.COPIES) {
+    if (!fine.LIB) { LIBDIR.skip(f + ': library copy is byte-identical to the gated fixture'); continue; }
     const a = path.join(ROOT, 'fixtures', 'skin-patches', f);
     const b = path.join(fine.LIB, f);
     check(f + ': library copy is byte-identical to the gated fixture',

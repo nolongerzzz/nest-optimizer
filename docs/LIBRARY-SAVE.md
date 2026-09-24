@@ -4,6 +4,20 @@ The inverse of [deleting from it](LIBRARY-DELETE.md): take a piece that is on
 the plate right now and put it into the Library catalog, under a category, so a
 generated or test piece can be kept and loaded again later.
 
+> **Update — the file half of a row now lives in
+> [nolongerzzz/nest-library](https://github.com/nolongerzzz/nest-library).**
+> The catalog line is still `app-library.js` here, on `claude-wip`; the STL is
+> `<name>.stl` at the root of nest-library, on `main`, which is what the page's
+> `nest-library` source fetches from
+> (`https://raw.githubusercontent.com/nolongerzzz/nest-library/main/<name>`).
+> `app-library-access.js` names both sides (`repo`/`branch`/`catalog` and
+> `fileRepo`/`fileBranch`/`dir`), so the token must have Contents: Read and
+> write on **both** repositories. The write order and the reasoning below are
+> unchanged — the rule is about which reference exists, not where. Where this
+> document says `library/x.stl`, read nest-library's `x.stl`. This repo's
+> `library/` now holds only fixtures that checks load by name
+> ([library/README.md](../library/README.md)).
+
 ---
 
 ## 1. The audit: the mechanism is Delete's mechanism, unchanged
@@ -52,8 +66,8 @@ A Library row is two things in the repository:
 
 | # | Where | What |
 |---|-------|------|
-| 1 | `app-library.js`, `var CATALOG` | one authored line: `{ file: 'x.stl', category: '…', source: 'local' }` |
-| 2 | `library/x.stl` | the actual mesh the row fetches |
+| 1 | `app-library.js`, `var CATALOG` (this repo) | one authored line: `{ file: 'x.stl', category: '…', source: 'nest-library' }` |
+| 2 | `x.stl` in nest-library | the actual mesh the row fetches |
 
 Delete writes **catalog first, blob second**. Save writes **blob first,
 catalog second**. That is not an inconsistency — it is the same rule applied to
@@ -88,10 +102,10 @@ The file write only starts once the catalog edit is known to be possible.
 The request sequence, in full:
 
 ```
-GET  /contents/app-library.js?ref=claude-wip        read + compute the edit
-GET  /contents/library/<name>?ref=claude-wip        is the name free? (404 = yes)
-PUT  /contents/library/<name>                       "Library: save <name> (file)"
-PUT  /contents/app-library.js                       "Library: save <name> (catalog entry)"
+GET  nest-optimizer/contents/app-library.js?ref=claude-wip   read + compute the edit
+GET  nest-library/contents/<name>?ref=main                   is the name free? (404 = yes)
+PUT  nest-library/contents/<name>          branch main       "Library: save <name> (file)"
+PUT  nest-optimizer/contents/app-library.js  branch claude-wip "Library: save <name> (catalog entry)"
 ```
 
 The catalog `PUT` carries the `sha` the first `GET` returned, so a branch that
@@ -224,10 +238,11 @@ verification with a real token stays a documented, separate step:
 1. Open the app, load or generate a throwaway piece, select it in the model
    list, click **Save selected to Library**.
 2. Give it a name and a category, paste a fine-grained PAT
-   (`nolongerzzz/nest-optimizer`, Contents: Read and write), press Save.
-3. `git fetch && git log origin/claude-wip` — two commits, `(file)` then
-   `(catalog entry)`, **in that order**.
-4. `curl -I https://raw.githubusercontent.com/nolongerzzz/nest-optimizer/claude-wip/library/<name>`
+   (`nolongerzzz/nest-optimizer` **and** `nolongerzzz/nest-library`, Contents:
+   Read and write), press Save.
+3. The `(file)` commit is on nest-library's `main`, the `(catalog entry)`
+   commit on nest-optimizer's `claude-wip`, and the file's is the earlier.
+4. `curl -I https://raw.githubusercontent.com/nolongerzzz/nest-library/main/<name>`
    → 200.
 5. Reload the app — the row is there, under its category, and clicking it loads
    the piece.

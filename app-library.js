@@ -1,4 +1,4 @@
-/* Library catalog - the owner's STLs that live in library/ on this origin.
+/* Library catalog - the owner's STLs, served from the nest-library repo.
 
    One row per file. A row click fetches that file and hands it to
    handleFiles, which is the same function the file input and the drop
@@ -8,10 +8,10 @@
    touches pack, Subtract, wrap or Finish.
 
    The names below are the catalog. They are not derived from a directory
-   listing - Pages does not serve one - and they are not generated from
-   anything, because a name this file invents is a 404 the owner has to go
-   and debug. They are the owner's list, spelled the way the files on disk
-   are spelled. */
+   listing - neither Pages nor raw.githubusercontent.com serves one - and they
+   are not generated from anything, because a name this file invents is a 404
+   the owner has to go and debug. They are the owner's list, spelled the way
+   the files in nolongerzzz/nest-library are spelled. */
 (function () {
   /* ---- where a library lives ----------------------------------------
 
@@ -19,10 +19,9 @@
      Every entry names one, and every entry resolves through resolve() to a
      FULL ABSOLUTE URL - scheme, host and all - never a bare 'library/name'.
 
-     Today that is a distinction without a difference: there is one source,
-     it is this origin, and the URL it produces is the same bytes the old
-     DIR + name concatenation fetched. The difference is what it costs to
-     add the SECOND library later. With a relative path, "the library" and
+     That was written when there was one source, this origin, and it was a
+     distinction without a difference. It is what made the SECOND library -
+     nest-library, below - cheap to add. With a relative path, "the library" and
      "this repo" are the same statement, and every consumer - the fetch, the
      row's title, anything that later wants to show where a piece came from -
      has quietly assumed it; splitting them means finding all of those. With
@@ -33,7 +32,7 @@
 
      and an entry that names it. No new code, no fetch changes, no UI change.
 
-     The base itself is resolved against document.baseURI rather than written
+     The local base is resolved against document.baseURI rather than written
      as a literal, because a literal https://...github.io/... would be a
      different origin under the local test harness and on any fork. Resolved,
      it is absolute on every origin the page is served from and correct on all
@@ -42,6 +41,25 @@
     local: {
       label: 'This project',
       base: new URL('library/', document.baseURI).href
+    },
+    /* The catalog's own repository. Every row lives here. The 31 pieces only
+       the catalog needed (4.6 MB) left this repo's library/; what stayed is
+       the fixtures the checks load by name (see library/README.md), nine of
+       them also catalog rows with a byte-identical copy in nest-library.
+
+       A literal, not resolved against document.baseURI, and that is the one
+       place the note above does not apply: this is not "a path on whatever
+       origin serves the page" but one fixed repository, and it answers the
+       same on Pages, on the wip mirror, on a fork and under the test harness.
+       raw.githubusercontent.com sends Access-Control-Allow-Origin: *, so the
+       fetch in loadOne() needs nothing added. The branch is main - the branch
+       app-library-access.js writes saved pieces to, so a save is loadable the
+       moment it lands. tools/nso_library_dir.js carries the same string for
+       the harness that answers these requests offline, and
+       tools/nso_library_browser_test.js asserts the two are equal. */
+    'nest-library': {
+      label: 'nest-library',
+      base: 'https://raw.githubusercontent.com/nolongerzzz/nest-library/main/'
     }
   };
 
@@ -79,22 +97,22 @@
      should be able to hold, not an inventory, and build() simply does not
      draw a category with no entries. */
   var CATALOG = [
-    { file: 'USB_bit.stl',                        category: 'Shaped Pieces', source: 'local' },
-    { file: 'usb_a_bit.stl',                      category: 'Shaped Pieces', source: 'local' },
-    { file: 'usb_c_bit.stl',                      category: 'Shaped Pieces', source: 'local' },
-    { file: 'sd_bit.stl',                         category: 'Shaped Pieces', source: 'local' },
-    { file: 'microsd_bit.stl',                    category: 'Shaped Pieces', source: 'local' },
-    { file: 'box_bit_12x8x8.stl',                 category: 'Shaped Pieces', source: 'local' },
-    { file: 'box_hull_80x40x20.stl',              category: 'Shaped Pieces', source: 'local' },
-    { file: 'box_hull_80x40x20-2.stl',            category: 'Shaped Pieces', source: 'local' },
-    { file: 'box_closed.stl',                     category: 'Test Fixtures', source: 'local' },
-    { file: 'box_open.stl',                       category: 'Test Fixtures', source: 'local' },
-    { file: 'lid_blank.stl',                      category: 'Shaped Pieces', source: 'local' },
-    { file: 'lid_strap.stl',                      category: 'Shaped Pieces', source: 'local' },
-    { file: 'hinge_knuckle_box.stl',              category: 'Shaped Pieces', source: 'local' },
-    { file: 'hinge_knuckle_lid.stl',              category: 'Shaped Pieces', source: 'local' },
-    { file: 'hinge_pip.stl',                      category: 'Shaped Pieces', source: 'local' },
-    { file: 'pin.stl',                            category: 'Shaped Pieces', source: 'local' },
+    { file: 'USB_bit.stl',                        category: 'Shaped Pieces', source: 'nest-library' },
+    { file: 'usb_a_bit.stl',                      category: 'Shaped Pieces', source: 'nest-library' },
+    { file: 'usb_c_bit.stl',                      category: 'Shaped Pieces', source: 'nest-library' },
+    { file: 'sd_bit.stl',                         category: 'Shaped Pieces', source: 'nest-library' },
+    { file: 'microsd_bit.stl',                    category: 'Shaped Pieces', source: 'nest-library' },
+    { file: 'box_bit_12x8x8.stl',                 category: 'Shaped Pieces', source: 'nest-library' },
+    { file: 'box_hull_80x40x20.stl',              category: 'Shaped Pieces', source: 'nest-library' },
+    { file: 'box_hull_80x40x20-2.stl',            category: 'Shaped Pieces', source: 'nest-library' },
+    { file: 'box_closed.stl',                     category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'box_open.stl',                       category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'lid_blank.stl',                      category: 'Shaped Pieces', source: 'nest-library' },
+    { file: 'lid_strap.stl',                      category: 'Shaped Pieces', source: 'nest-library' },
+    { file: 'hinge_knuckle_box.stl',              category: 'Shaped Pieces', source: 'nest-library' },
+    { file: 'hinge_knuckle_lid.stl',              category: 'Shaped Pieces', source: 'nest-library' },
+    { file: 'hinge_pip.stl',                      category: 'Shaped Pieces', source: 'nest-library' },
+    { file: 'pin.stl',                            category: 'Shaped Pieces', source: 'nest-library' },
     /* Skin patches - a pattern as its own printable piece, loadable here so a
        test coupon does not have to be baked through the Finish tab every time.
        Generated by tools/nso_skin_fine_samples.js, which also byte-checks the
@@ -121,12 +139,12 @@
        still gates it - nso_skin_patch_test.js proves that geometry and would
        have to be rewritten to drop it, which is a different ticket from
        "these four coupons are not worth printing". */
-    { file: 'patch_crosshatch_loose.stl',         category: 'Skins',   source: 'local' },
-    { file: 'patch_crosshatch_sandwich.stl',      category: 'Skins',   source: 'local' },
-    { file: 'patch_crosshatch-fine_loose.stl',    category: 'Skins',   source: 'local' },
-    { file: 'patch_crosshatch-fine_sandwich.stl', category: 'Skins',   source: 'local' },
-    { file: 'patch_zigzag_loose.stl',             category: 'Skins',   source: 'local' },
-    { file: 'patch_ring_loose.stl',               category: 'Skins',   source: 'local' },
+    { file: 'patch_crosshatch_loose.stl',         category: 'Skins',   source: 'nest-library' },
+    { file: 'patch_crosshatch_sandwich.stl',      category: 'Skins',   source: 'nest-library' },
+    { file: 'patch_crosshatch-fine_loose.stl',    category: 'Skins',   source: 'nest-library' },
+    { file: 'patch_crosshatch-fine_sandwich.stl', category: 'Skins',   source: 'nest-library' },
+    { file: 'patch_zigzag_loose.stl',             category: 'Skins',   source: 'nest-library' },
+    { file: 'patch_ring_loose.stl',               category: 'Skins',   source: 'nest-library' },
     /* Traced lines - a picture of line art built as flat printed lines by
        nso_raster_lines.js, the Finish tab's Trace raster button. Their own
        category and not Skins: a skin is a pattern this repo generates over a
@@ -148,9 +166,9 @@
                          fixture used; the piece that found the bridge bug
          _parallel_113   two strokes that touch nothing - the width coupon
          _hand_stroke    a hand-drawn wobble, followed rather than straightened */
-    { file: 'traced_cross_23-67.stl',             category: 'Traced Lines', source: 'local' },
-    { file: 'traced_parallel_113.stl',            category: 'Traced Lines', source: 'local' },
-    { file: 'traced_hand_stroke.stl',             category: 'Traced Lines', source: 'local' },
+    { file: 'traced_cross_23-67.stl',             category: 'Traced Lines', source: 'nest-library' },
+    { file: 'traced_parallel_113.stl',            category: 'Traced Lines', source: 'nest-library' },
+    { file: 'traced_hand_stroke.stl',             category: 'Traced Lines', source: 'nest-library' },
     /* Stock Blanks - the eight primitives NSO_Stock makes, one of each, all
        sized from ONE target: a 10 mm piece with a 1 mm wall, which needs
        469.668 mm^3 at the default 30% waste margin. That is the whole reason
@@ -170,14 +188,14 @@
        copied here, the same way the hinge and strap fixtures are in both
        places. tools/nso_quick_test.js section 6 byte-compares every row below
        against its fixture, so the two copies cannot drift apart. */
-    { file: 'shape-sphere.stl',                   category: 'Stock Blanks',  source: 'local' },
-    { file: 'shape-box.stl',                      category: 'Stock Blanks',  source: 'local' },
-    { file: 'shape-cylinder.stl',                 category: 'Stock Blanks',  source: 'local' },
-    { file: 'shape-cone.stl',                     category: 'Stock Blanks',  source: 'local' },
-    { file: 'shape-tube.stl',                     category: 'Stock Blanks',  source: 'local' },
-    { file: 'shape-torus.stl',                    category: 'Stock Blanks',  source: 'local' },
-    { file: 'shape-capsule.stl',                  category: 'Stock Blanks',  source: 'local' },
-    { file: 'shape-ellipsoid.stl',                category: 'Stock Blanks',  source: 'local' },
+    { file: 'shape-sphere.stl',                   category: 'Stock Blanks',  source: 'nest-library' },
+    { file: 'shape-box.stl',                      category: 'Stock Blanks',  source: 'nest-library' },
+    { file: 'shape-cylinder.stl',                 category: 'Stock Blanks',  source: 'nest-library' },
+    { file: 'shape-cone.stl',                     category: 'Stock Blanks',  source: 'nest-library' },
+    { file: 'shape-tube.stl',                     category: 'Stock Blanks',  source: 'nest-library' },
+    { file: 'shape-torus.stl',                    category: 'Stock Blanks',  source: 'nest-library' },
+    { file: 'shape-capsule.stl',                  category: 'Stock Blanks',  source: 'nest-library' },
+    { file: 'shape-ellipsoid.stl',                category: 'Stock Blanks',  source: 'nest-library' },
     /* Test Fixtures - the fast half of fixtures/quick/. Twelve triangles each
        and a minute and a half to eight and a half minutes to print SOLID,
        which is the worst case; fixtures/quick/quick.json carries the model
@@ -193,13 +211,13 @@
        These rest on z = 0, like everything NSO_Stock makes. box_open.stl and
        box_closed.stl above do not, and neither does fixtures/box-20mm.stl -
        they predate this and the Soften gate measures against that placement. */
-    { file: 'cube-6mm.stl',                       category: 'Test Fixtures', source: 'local' },
-    { file: 'cube-9mm.stl',                       category: 'Test Fixtures', source: 'local' },
-    { file: 'cube-12mm.stl',                      category: 'Test Fixtures', source: 'local' },
-    { file: 'plate-20x20x2.stl',                  category: 'Test Fixtures', source: 'local' },
-    { file: 'bar-20x5x5.stl',                     category: 'Test Fixtures', source: 'local' },
-    { file: 'tape_on-edge-single.stl',            category: 'Test Fixtures', source: 'local' },
-    { file: 'v9_mirror_factory.stl',              category: 'Test Fixtures', source: 'local' }
+    { file: 'cube-6mm.stl',                       category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'cube-9mm.stl',                       category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'cube-12mm.stl',                      category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'plate-20x20x2.stl',                  category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'bar-20x5x5.stl',                     category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'tape_on-edge-single.stl',            category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'v9_mirror_factory.stl',              category: 'Test Fixtures', source: 'nest-library' }
   ];
 
   /* The one way a file name becomes something fetchable. Absolute, always. */

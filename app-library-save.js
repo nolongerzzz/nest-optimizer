@@ -20,7 +20,8 @@
        needs a server to hold the client secret; the device flow's token
        endpoint sends no CORS headers so a browser cannot complete it; Pages
        has no function runtime.
-     - So the credential is a fine-grained PAT, scoped to this one repository,
+     - So the credential is a fine-grained PAT, scoped to nest-optimizer and
+       nest-library (a row spans both - see app-library-access.js),
        PASTED BY THE OPERATOR AT THE MOMENT OF THE SAVE, held in
        sessionStorage so it dies with the tab, never written anywhere this
        code can commit.
@@ -37,10 +38,10 @@
    ---------------------------------------------------------------------------
    2. THE ORDER OF THE TWO WRITES - AND WHY IT IS THE REVERSE OF DELETE'S
    ---------------------------------------------------------------------------
-   A Library row is two things in the repository, not one:
+   A Library row is two things, not one, in two repositories:
 
-     1. a line in `var CATALOG` in app-library.js
-     2. a file in library/
+     1. a line in `var CATALOG` in app-library.js   (this repo)
+     2. the STL itself                              (nolongerzzz/nest-library)
 
    Delete does the catalog FIRST and the blob second. Save does the blob
    FIRST and the catalog second. That is not an inconsistency - it is the same
@@ -74,13 +75,17 @@
    ---------------------------------------------------------------------------
    3. WHAT IT REFUSES TO DO, ON PURPOSE
    ---------------------------------------------------------------------------
-   It will not overwrite an existing library/ file, even one with no catalog
-   entry. library/ holds files that are NOT catalog rows - CTH_fixture.stl,
-   soften_test_*.stl and friends are fixtures other checks load by name - so
-   "no catalog entry" does not mean "spare". A name that is already taken is
-   refused with the reason, and the operator picks another; that also refuses
-   a retry of a save that half-finished earlier, which is the right trade
-   against silently clobbering a fixture.
+   It will not overwrite an existing file in nest-library, even one with no
+   catalog entry. "No catalog entry" does not mean "spare": it is what a save
+   that died between its two writes leaves behind, and what a row removed by
+   hand leaves too, and neither is this code's to clobber. A name that is
+   already taken is refused with the reason, and the operator picks another;
+   that also refuses a retry of a save that half-finished earlier, which is
+   the right trade against silently overwriting somebody's piece.
+
+   (The fixtures the checks load by name - CTH_fixture.stl, soften_test_*.stl
+   and friends - stayed in this repo's library/ and are not in nest-library at
+   all, so a save can no longer reach them. The refusal is kept regardless.)
 
    See docs/LIBRARY-SAVE.md for the full write-up.                          */
 (function (root) {
@@ -147,7 +152,7 @@
      Everything typed by the operator reaches either an API path or a JS
      source file, so both go through these first.
 
-     A file name is a flat name in library/ - no slashes, no '..', no query -
+     A file name is a flat name in nest-library - no slashes, no '..', no query -
      so nothing can aim a PUT at a path this feature has no business touching.
      It is the SAME rule app-library-delete.js enforces, so a piece that can
      be saved can always be deleted again.
@@ -369,9 +374,11 @@
 
   /* ---- the API --------------------------------------------------------- */
 
-  function contentsUrl(path) {
+  /* `repo` is t.repo for the catalog line and t.fileRepo for the file - the
+     two halves of a row live in different repositories. */
+  function contentsUrl(repo, path) {
     var t = TGT();
-    return t.api + '/repos/' + t.owner + '/' + t.repo +
+    return t.api + '/repos/' + t.owner + '/' + repo +
            '/contents/' + path.split('/').map(encodeURIComponent).join('/');
   }
 
@@ -394,11 +401,11 @@
     });
   }
 
-  function apiError(what, r) {
+  function apiError(what, r, repo) {
     var t = TGT();
     var msg = (r.body && r.body.message) ? r.body.message : ('HTTP ' + r.status);
     if (r.status === 401) msg = 'the token was rejected (401) - expired, or not a token for this repo';
-    if (r.status === 403) msg = 'the token lacks contents:write on ' + t.owner + '/' + t.repo + ' (403)';
+    if (r.status === 403) msg = 'the token lacks contents:write on ' + t.owner + '/' + repo + ' (403)';
     if (r.status === 404) msg = 'not found (404) - wrong repo, wrong branch, or the token cannot see it';
     if (r.status === 409) msg = 'the branch moved under us (409) - reload and try again';
     return new Error(what + ': ' + msg);
@@ -411,7 +418,7 @@
 
      The catalog is read and its edit computed BEFORE either write, so the
      likely refusals - a name already in the catalog, a file already in
-     library/ - cost nothing at all. Resolves with a report of what it
+     nest-library - cost nothing at all. Resolves with a report of what it
      actually did; rejects with the first thing that went wrong, having done
      nothing after it. */
   function performSave(entry, bytes, token) {
@@ -419,7 +426,7 @@
     var file = entry.file;
     var blobPath = t.dir + file;
     var why = 'Library: save ' + file;
-    var done = { file: file, category: entry.category, blob: null, catalog: null, newCategory: false };
+    var done = { file: file, category: entry.category, source: t.source, blob: null, catalog: null, newCategory: false };
     var catSha = null, catText = null;
 
     return Promise.resolve().then(function () {
@@ -427,38 +434,41 @@
       if (!safeCategory(entry.category)) throw new Error('refusing to save into "' + entry.category + '" - not a usable category name');
       if (!bytes || !bytes.byteLength) throw new Error('the piece produced no STL bytes - nothing was sent');
       if (!token) throw new Error('no GitHub token - nothing was sent');
-      return ghFetch(contentsUrl(t.catalog) + '?ref=' + encodeURIComponent(t.branch), token).then(ghJson);
+      return ghFetch(contentsUrl(t.repo, t.catalog) + '?ref=' + encodeURIComponent(t.branch), token).then(ghJson);
     }).then(function (r) {
-      if (!r.ok || !r.body || !r.body.content) throw apiError('reading ' + t.catalog, r);
-      var edit = addCatalogEntry(b64decode(r.body.content), entry);
+      if (!r.ok || !r.body || !r.body.content) throw apiError('reading ' + t.catalog, r, t.repo);
+      /* The row is filed under the file side's source, whatever the caller
+         said: the file is about to be written to t.fileRepo, and a row that
+         pointed anywhere else would 404. */
+      var edit = addCatalogEntry(b64decode(r.body.content),
+        { file: file, category: entry.category, source: t.source });
       if (!edit.ok) throw new Error('the catalog entry could not be added cleanly: ' + edit.reason +
                                     ' - nothing was saved');
       catSha = r.body.sha;
       catText = edit.text;
       done.newCategory = edit.newCategory;
-      /* Is the name free? library/ holds files that are not catalog rows -
-         other checks load fixtures from here by name - so "no catalog entry"
-         does not make a file spare. A taken name is refused, never
+      /* Is the name free? A file with no catalog row is a leftover, not a
+         spare (section 3 of the header). A taken name is refused, never
          overwritten, and that refusal costs no write at all. */
-      return ghFetch(contentsUrl(blobPath) + '?ref=' + encodeURIComponent(t.branch), token).then(ghJson);
+      return ghFetch(contentsUrl(t.fileRepo, blobPath) + '?ref=' + encodeURIComponent(t.fileBranch), token).then(ghJson);
     }).then(function (r) {
-      if (r.ok) throw new Error(blobPath + ' already exists (it is not a catalog row - it may be a ' +
-        'fixture another check loads, or a leftover from an interrupted save). ' +
+      if (r.ok) throw new Error(blobPath + ' already exists in ' + t.fileRepo + ' (it is not a catalog ' +
+        'row - it may be a leftover from an interrupted save, or a row removed by hand). ' +
         'Nothing was written. Choose a different name.');
-      if (r.status !== 404) throw apiError('checking ' + blobPath, r);
-      return ghFetch(contentsUrl(blobPath), token, {
+      if (r.status !== 404) throw apiError('checking ' + blobPath, r, t.fileRepo);
+      return ghFetch(contentsUrl(t.fileRepo, blobPath), token, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: why + ' (file)',
           content: b64bytes(bytes),
-          branch: t.branch
+          branch: t.fileBranch
         })
       }).then(ghJson);
     }).then(function (r) {
-      if (!r.ok) throw apiError('writing ' + blobPath, r);
+      if (!r.ok) throw apiError('writing ' + blobPath, r, t.fileRepo);
       done.blob = (r.body && r.body.commit) ? r.body.commit.sha : 'written';
-      return ghFetch(contentsUrl(t.catalog), token, {
+      return ghFetch(contentsUrl(t.repo, t.catalog), token, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -469,7 +479,7 @@
         })
       }).then(ghJson);
     }).then(function (r) {
-      if (!r.ok) throw apiError('rewriting ' + t.catalog, r);
+      if (!r.ok) throw apiError('rewriting ' + t.catalog, r, t.repo);
       done.catalog = (r.body && r.body.commit) ? r.body.commit.sha : 'written';
       return done;
     });
@@ -526,7 +536,7 @@
           '<input id="nso-save-newcat" type="text" autocomplete="off" spellcheck="false"' +
           ' placeholder="Jigs"></label>' +
         '<label class="nso-confirm-tok" for="nso-save-token">GitHub token' +
-          ' <span>fine-grained, contents:write on this repo</span>' +
+          ' <span>fine-grained, contents:write on nest-optimizer + nest-library</span>' +
           '<input id="nso-save-token" type="password" autocomplete="off"' +
           ' spellcheck="false" placeholder="github_pat_…"></label>' +
         '<p class="nso-confirm-note" id="nso-save-note"></p>' +
@@ -639,7 +649,7 @@
         return {
           file: normaliseName(d.name.value),
           category: cat,
-          source: 'local',
+          source: t.source,
           token: d.token.value.trim()
         };
       }
@@ -657,11 +667,12 @@
             ? 'Type a category name - letters, digits, spaces, - and _.'
             : 'Choose a category.';
         } else {
-          d.note.textContent = 'This writes library/' + c.file + ' and adds a CATALOG entry in ' +
-            t.catalog + ' under ' + c.category +
-            (d.cat.value === NEW_CAT ? ' (a new category)' : '') + ', to ' +
+          d.note.textContent = 'This writes ' + t.dir + c.file + ' to ' +
+            t.owner + '/' + t.fileRepo + ' on ' + t.fileBranch +
+            ', then adds a CATALOG entry in ' + t.catalog + ' under ' + c.category +
+            (d.cat.value === NEW_CAT ? ' (a new category)' : '') + ', in ' +
             t.owner + '/' + t.repo + ' on ' + t.branch +
-            '. Two commits, on the real repository.';
+            '. Two commits, on the real repositories.';
         }
       }
 
@@ -819,7 +830,7 @@
            repository really took it, never before. */
         var lib = root && root.nsoLibrary;
         if (lib && typeof lib.add === 'function') {
-          lib.add({ file: report.file, category: report.category, source: 'local' });
+          lib.add({ file: report.file, category: report.category, source: report.source });
         }
         if (typeof o.onSaved === 'function') o.onSaved(report);
         say('Saved ' + report.file + ' to the library under ' + report.category +

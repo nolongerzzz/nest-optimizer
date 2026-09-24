@@ -2,8 +2,15 @@
 /* The tighter-pitch and double-sided skin patches, written where the Library
    tab can load them.
 
-     node tools/nso_skin_fine_samples.js            -> library/ + the manifest
+     node tools/nso_skin_fine_samples.js            -> nest-library + the manifest
      node tools/nso_skin_fine_samples.js --check     byte-diff, writes nothing
+
+   WHERE "library/" IS NOW. The Library's pieces moved to the nest-library
+   repo, and this tool writes to (and --check compares against) a checkout of
+   it, found by tools/nso_library_dir.js: $NSO_LIBRARY_DIR, else a sibling
+   ../nest-library. Without one, --check still byte-checks the manifest - which
+   carries every number the pieces are built to - and SKIPs the STL compares
+   out loud; writing refuses outright. Read "library/" below as that checkout.
 
    WHY library/ AND NOT fixtures/. app-library.js's CATALOG is a list of FLAT
    FILENAMES served from `library/` - that is the only place the Library tab
@@ -55,7 +62,9 @@ const NSO_SkinPatch = require('../nso_skin_patch.js');
 const { writeSTL } = require('./nso_stl_io.js');
 
 const ROOT = path.resolve(__dirname, '..');
-const LIB = path.join(ROOT, 'library');
+const LIBDIR = require('./nso_library_dir');
+/* the nest-library checkout, or null - see the header */
+const LIB = LIBDIR.libraryDir();
 const PATCHES = path.join(ROOT, 'fixtures', 'skin-patches');
 const MANIFEST = path.join(ROOT, 'fixtures', 'skin-fine', 'skin-fine.json');
 
@@ -167,8 +176,8 @@ function buildOne(pattern, variant, opts) {
 
 function writeSamples(opts) {
   const check = !!(opts && opts.check);
+  if (!check && !LIB) throw new Error('nowhere to write the pieces: ' + LIBDIR.HOW_TO);
   if (!check) {
-    fs.mkdirSync(LIB, { recursive: true });
     fs.mkdirSync(path.dirname(MANIFEST), { recursive: true });
   }
   const manifest = { generator: 'tools/nso_skin_fine_samples.js', units: 'mm', up: 'Z', patches: {} };
@@ -179,12 +188,14 @@ function writeSamples(opts) {
     const { tris, meta } = buildOne(b.pattern, b.variant);
     const key = b.pattern + '_' + b.variant;
     manifest.patches[key] = meta;
-    const dest = path.join(LIB, meta.file);
-    const tmp = dest + '.tmp';
+    const dest = LIB ? path.join(LIB, meta.file) : null;
+    const tmp = path.join(require('os').tmpdir(), 'nso-skin-fine-' + process.pid + '-' + meta.file);
     writeSTL(tmp, tris, key);
     const fresh = fs.readFileSync(tmp);
     fs.unlinkSync(tmp);
-    if (check) {
+    if (check && !LIB) {
+      LIBDIR.skip('library/' + meta.file + ' byte-identical to a fresh build');
+    } else if (check) {
       const same = fs.existsSync(dest) && Buffer.compare(fresh, fs.readFileSync(dest)) === 0;
       if (!same) { diffs++; console.log('DIFF library/' + meta.file); }
     } else {
@@ -202,8 +213,10 @@ function writeSamples(opts) {
   /* the six already-gated patches, copied in so the catalog can reach them */
   for (const f of COPIES) {
     const src = fs.readFileSync(path.join(PATCHES, f));
-    const dest = path.join(LIB, f);
-    if (check) {
+    const dest = LIB ? path.join(LIB, f) : null;
+    if (check && !LIB) {
+      LIBDIR.skip('library/' + f + ' byte-identical to fixtures/skin-patches/');
+    } else if (check) {
       const same = fs.existsSync(dest) && Buffer.compare(src, fs.readFileSync(dest)) === 0;
       if (!same) { diffs++; console.log('DIFF library/' + f + ' (against fixtures/skin-patches/)'); }
     } else {
@@ -218,12 +231,13 @@ function writeSamples(opts) {
     const same = fs.existsSync(MANIFEST) && fs.readFileSync(MANIFEST, 'utf8') === text;
     if (!same) { diffs++; console.log('DIFF ' + path.relative(ROOT, MANIFEST)); }
     console.log(diffs === 0
-      ? '\nall ' + (CATALOG_FILES.length + 1) + ' files byte-identical'
+      ? (LIB ? '\nall ' + (CATALOG_FILES.length + 1) + ' files byte-identical'
+             : '\nthe manifest is byte-identical; ' + CATALOG_FILES.length + ' STL compare(s) SKIPPED')
       : '\n' + diffs + ' file(s) differ');
     if (diffs) process.exitCode = 1;
   } else {
     fs.writeFileSync(MANIFEST, text);
-    console.log('\nwrote ' + CATALOG_FILES.length + ' STL(s) to library/ and ' + path.relative(ROOT, MANIFEST));
+    console.log('\nwrote ' + CATALOG_FILES.length + ' STL(s) to ' + LIB + ' and ' + path.relative(ROOT, MANIFEST));
   }
   return manifest;
 }

@@ -16,7 +16,9 @@
         confirm.
      5. The four bordered washers this ticket deleted are gone from the
         catalog, gone from library/, and referenced by nothing that would
-        404.
+        404. "Every row has a file" is checked against the nest-library
+        checkout (nso_library_dir.js) - the catalog's files live there now -
+        and SKIPped, out loud, without one.
 
    node tools/nso_library_delete_test.js       exit 0 = every gate held  */
 'use strict';
@@ -26,6 +28,7 @@ const path = require('path');
 const vm = require('vm');
 
 const ROOT = path.resolve(__dirname, '..');
+const LIB = require('./nso_library_dir');
 const del = require(path.join(ROOT, 'app-library-delete.js'));
 const SRC = fs.readFileSync(path.join(ROOT, 'app-library.js'), 'utf8');
 
@@ -143,9 +146,9 @@ console.log('\n=== 2b. what it refuses ===');
     del.removeCatalogEntry('var x = 1;\n', 'pin.stl').ok === false);
   check('refuses an unterminated CATALOG block',
     del.removeCatalogEntry("var CATALOG = [\n  { file: 'pin.stl' },\n", 'pin.stl').ok === false);
-  const twice = SRC.replace("    { file: 'pin.stl',                            category: 'Shaped Pieces', source: 'local' },",
-    "    { file: 'pin.stl',                            category: 'Shaped Pieces', source: 'local' },\n" +
-    "    { file: 'pin.stl',                            category: 'Shaped Pieces', source: 'local' },");
+  const twice = SRC.replace("    { file: 'pin.stl',                            category: 'Shaped Pieces', source: 'nest-library' },",
+    "    { file: 'pin.stl',                            category: 'Shaped Pieces', source: 'nest-library' },\n" +
+    "    { file: 'pin.stl',                            category: 'Shaped Pieces', source: 'nest-library' },");
   const dup = del.removeCatalogEntry(twice, 'pin.stl');
   check('refuses a name on two entry lines rather than guessing',
     dup.ok === false && /two|2 CATALOG/.test(dup.reason), dup.reason);
@@ -220,14 +223,38 @@ console.log('\n=== 5. the four bordered washers are really gone ===');
   check('...and no entry is tagged with it any more',
     !/\{\s*file:[^}]*category:\s*'Washers'/.test(SRC));
 
-  /* NO DANGLING REFERENCE ANYWHERE. Every catalog entry must have a file on
-     disk, and every patch file on disk must have a catalog entry - the two
-     directions fail apart and both are what "no dangling reference" means. */
-  const missing = BASE.filter(f => !fs.existsSync(path.join(ROOT, 'library', f)));
-  check('every catalog entry has a file in library/', missing.length === 0, missing.join(', '));
-  const onDisk = fs.readdirSync(path.join(ROOT, 'library')).filter(f => /^patch_.*\.stl$/.test(f));
-  const orphan = onDisk.filter(f => BASE.indexOf(f) === -1);
-  check('every patch file in library/ has a catalog entry', orphan.length === 0, orphan.join(', '));
+  /* NO DANGLING REFERENCE ANYWHERE. Every catalog entry must have a file in
+     nest-library, and every patch file there must have a catalog entry - the
+     two directions fail apart and both are what "no dangling reference"
+     means. Both need the checkout; without one they SKIP and say so. */
+  const NL = LIB.libraryDir();
+  for (const f of GONE) {
+    if (NL) check(f + ': not a file in nest-library', !fs.existsSync(path.join(NL, f)));
+  }
+  if (NL) {
+    const missing = BASE.filter(f => !fs.existsSync(path.join(NL, f)));
+    check('every catalog entry has a file in nest-library', missing.length === 0, missing.join(', '));
+    const onDisk = fs.readdirSync(NL).filter(f => /^patch_.*\.stl$/.test(f));
+    const orphan = onDisk.filter(f => BASE.indexOf(f) === -1);
+    check('every patch file in nest-library has a catalog entry', orphan.length === 0, orphan.join(', '));
+    /* The fixtures kept in this repo's library/ that are ALSO catalog rows
+       (pin, box_closed, v9_mirror_factory...) exist twice. The harness
+       serves the library/ copy when there is no checkout, so the two must
+       be the same bytes or an offline run would be testing a different piece. */
+    const both = BASE.filter(f => fs.existsSync(path.join(ROOT, 'library', f)) && fs.existsSync(path.join(NL, f)));
+    const differ = both.filter(f => !fs.readFileSync(path.join(ROOT, 'library', f)).equals(fs.readFileSync(path.join(NL, f))));
+    check('the ' + both.length + ' rows kept in library/ as fixtures are byte-identical to nest-library\'s copy',
+      both.length > 0 && differ.length === 0, differ.join(', ') || both.join(', '));
+  } else {
+    LIB.skip('every catalog entry has a file in nest-library');
+    LIB.skip('every patch file in nest-library has a catalog entry');
+    LIB.skip('fixtures kept in library/ are byte-identical to nest-library\'s copy');
+  }
+  /* And the other half of the move: nothing the catalog alone needed is left
+     behind in this repo. library/ keeps a catalog row only because a check
+     loads that file by name (library/README.md lists them). */
+  const leftPatches = fs.readdirSync(path.join(ROOT, 'library')).filter(f => /^(patch_|traced_|shape-|cube-)/.test(f));
+  check('no catalog-only piece is left in this repo\'s library/', leftPatches.length === 0, leftPatches.join(', '));
 
   /* The generator that writes library/ must not still be asking for them. */
   const fine = require(path.join(ROOT, 'tools', 'nso_skin_fine_samples.js'));

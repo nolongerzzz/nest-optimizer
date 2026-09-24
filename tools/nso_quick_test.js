@@ -21,8 +21,10 @@
  *   DISTINCT   no two pieces the same bytes. A set with a duplicate in it is
  *              a set that tests one thing twice and claims two.
  *   HONEST     the manifest describes the files, measured off the files.
- *   LOADABLE   every piece the Library offers really is in library/ and really
- *              is what fixtures/quick/ holds, byte for byte.
+ *   LOADABLE   every piece the Library offers really is in nest-library and
+ *              really is what fixtures/quick/ holds, byte for byte. Read from a
+ *              nest-library checkout (tools/nso_library_dir.js); SKIPped, out
+ *              loud, without one.
  */
 'use strict';
 
@@ -33,6 +35,7 @@ const { readSTL } = require('./nso_stl_io.js');
 const G = require('./nso_quick_fixtures.js');
 
 const ROOT = path.resolve(__dirname, '..');
+const LIBDIR = require('./nso_library_dir');
 const OUT = G.OUT;
 
 let pass = 0, fail = 0;
@@ -224,17 +227,22 @@ console.log('\n== 6. the pieces the Library offers are these pieces ==');
   check('the catalog carries rows for pieces from this set', quick.length > 0,
     quick.length + ' row(s): ' + quick.map(r => r.file).join(', '));
   let mismatched = [], missing = [];
-  for (const r of quick) {
-    const lib = path.join(ROOT, 'library', r.file);
+  const NL = LIBDIR.libraryDir();
+  for (const r of NL ? quick : []) {
+    const lib = path.join(NL, r.file);
     if (!fs.existsSync(lib)) { missing.push(r.file); continue; }
     if (!fs.readFileSync(lib).equals(fs.readFileSync(path.join(OUT, r.file)))) {
       mismatched.push(r.file);
     }
   }
-  check('...and every one of them is really in library/, where the catalog fetches from',
-    missing.length === 0, missing.join(', ') || 'all present');
-  check('...byte-identical to the fixture it was taken from, so they cannot drift apart',
-    mismatched.length === 0, mismatched.join(', ') || 'all identical');
+  if (NL) {
+    check('...and every one of them is really in nest-library, where the catalog fetches from',
+      missing.length === 0, missing.join(', ') || 'all present');
+    check('...byte-identical to the fixture it was taken from, so they cannot drift apart',
+      mismatched.length === 0, mismatched.join(', ') || 'all identical');
+  } else {
+    LIBDIR.skip('...every one of them is really in nest-library, byte-identical to its fixture');
+  }
   const cats = [...new Set(quick.map(r => r.category))];
   check('...and they are categorized, in a category the taxonomy declares',
     cats.length > 0 && cats.every(c => new RegExp("'" + c + "'").test(

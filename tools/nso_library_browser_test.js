@@ -12,12 +12,17 @@
         against a remembered number.
      2. EVERY entry resolves to a FULL ABSOLUTE URL. Not "starts with
         library/", not "is a string" - scheme + host + path, parseable by
-        URL(), same origin as the page today, and pointing inside the
-        source's own base. This is what makes a second library repo a data
-        change later instead of a migration, so it is checked on every one.
+        URL(), and pointing inside the source's own base - which for every
+        row is now nest-library on raw.githubusercontent.com, the second
+        library repo this was built to make a data change. Checked on every
+        one.
      3. The browser is grouped, and every category's pieces load THROUGH IT -
         one real click per category, on a real row, with the piece arriving
-        on the plate.
+        on the plate. The page's requests to raw.githubusercontent.com are
+        answered from disk by the harness (nso_library_dir.js): a category
+        whose pieces are only in nest-library SKIPs, out loud, when there is
+        no nest-library checkout. tools/nso_library_live_check.js is the one
+        that goes to the real repository.
      4. Every catalog entry is reachable and correctly categorized, and the
         category set matches the declared taxonomy - including that a
         category with no entries left in it (Washers, since the four bordered
@@ -28,6 +33,7 @@
 const path = require('path');
 const fs = require('fs');
 const { withApp, loadSTL, selectModel, statusOf, ROOT } = require('./nso_app_harness');
+const LIB = require('./nso_library_dir');
 
 let fails = 0;
 const check = (name, cond, detail) => {
@@ -112,8 +118,14 @@ withApp(async (page, logs) => {
   check('each sits under its own source\'s base', outside.length === 0, outside.join(', '));
   console.log('   e.g. ' + urls[0].file + ' -> ' + urls[0].url);
   const srcBase = await page.evaluate(() => window.nsoLibrary.sources.local.base);
-  check('the source base is itself absolute (not "library/")',
+  check('the local source base is itself absolute (not "library/")',
     /^https?:\/\/[^/]+\/.*library\/$/.test(srcBase), srcBase);
+  const nlBase = await page.evaluate(() =>
+    window.nsoLibrary.sources['nest-library'] && window.nsoLibrary.sources['nest-library'].base);
+  check('the nest-library source is the raw.githubusercontent.com base the harness answers',
+    nlBase === LIB.RAW_BASE, nlBase + ' vs ' + LIB.RAW_BASE);
+  const notNL = urls.filter(e => e.source !== 'nest-library').map(e => e.file);
+  check('every catalog row is served from nest-library', notNL.length === 0, notNL.join(', '));
 
   /* the resolved URL is the one actually fetched: it must really serve */
   const probe = await page.evaluate(async u => {
@@ -122,6 +134,8 @@ withApp(async (page, logs) => {
   }, urls[0].url);
   check('fetching a resolved URL really serves the file',
     probe.ok && probe.bytes > 84, JSON.stringify(probe));
+  check('...and that request really went to the nest-library URL',
+    page.__libraryServed.some(r => r.name === urls[0].file && r.file), JSON.stringify(page.__libraryServed));
 
   /* ---------------------------------------------------------------- 3 */
   console.log('\n=== 3. the browser is grouped, and the groups match the taxonomy ===');
@@ -206,8 +220,12 @@ withApp(async (page, logs) => {
 
   /* ---------------------------------------------------------------- 5 */
   console.log('\n=== 5. one real click per category actually loads a piece ===');
+  console.log('   nest-library: ' + (LIB.libraryDir() || '(no checkout - fixtures kept in library/ only)'));
   for (const cat of ui.groups.map(g => g.name)) {
-    const file = byCat[cat][0];
+    /* The category's first row with bytes on disk: with a checkout that is
+       simply its first row, and without one it is a fixture this repo kept. */
+    const file = byCat[cat].find(f => LIB.catalogFile(f));
+    if (!file) { LIB.skip(cat + ': one real click loads a piece (' + byCat[cat].join(', ') + ')'); continue; }
     const before = await page.evaluate(() => state.models.length);
     await openLib(page);
     await page.evaluate(name => {
@@ -224,7 +242,7 @@ withApp(async (page, logs) => {
       const mm = state.models[state.models.length - 1];
       return { name: mm.name, tris: mm.rawTris ? mm.rawTris.length / 9 : 0 };
     });
-    const want = triCountOf(path.join(ROOT, 'library', file));
+    const want = triCountOf(LIB.catalogFile(file));
     check(cat + ': ' + file + ' loaded, ' + m.tris + ' tris',
       m.name === pieceName(file) && m.tris === want, m.name + ' / ' + m.tris + ' vs ' + want);
   }

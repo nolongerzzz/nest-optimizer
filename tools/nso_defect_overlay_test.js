@@ -35,6 +35,7 @@ const { execFileSync } = require('child_process');
 const { readSTL } = require('./nso_stl_io.js');
 
 const ROOT = path.join(__dirname, '..');
+const LIBDIR = require('./nso_library_dir');
 const MV = path.join(ROOT, 'tools', 'mesh_validate.py');
 
 /* Load both browser scripts the way the page does: classic scripts that find a
@@ -141,11 +142,15 @@ function sameSet(got, want, label) {
  * ====================================================================== */
 
 console.log('\n1. locate() vs tools/mesh_validate.py --min-wall 0.42, every fixture');
-const files = [].concat(stlsUnder(path.join(ROOT, 'fixtures')), stlsUnder(path.join(ROOT, 'library')));
+const files = [].concat(stlsUnder(path.join(ROOT, 'fixtures')), stlsUnder(path.join(ROOT, 'library')),
+                        LIBDIR.extraStls());
 if (!files.length) { console.log('  no STL fixtures found'); fail++; }
+/* The catalog's pieces moved to nest-library; walk them from a checkout when
+   there is one (nso_library_dir.js), and say so when there is not. */
+if (!LIBDIR.libraryDir()) LIBDIR.skip('the catalog-only STLs in nest-library');
 
 for (const f of files) {
-  const rel = path.relative(ROOT, f);
+  const rel = LIBDIR.labelOf(f);
   let soup;
   try { soup = readSTL(f); } catch (e) { console.log('  skip  ' + rel + ' (' + e.message + ')'); continue; }
   if (!soup.length) { console.log('  skip  ' + rel + ' (empty)'); continue; }

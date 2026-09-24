@@ -13,7 +13,7 @@
      app-library-save.js     add a piece      (file, then catalog entry)
 
    Both are gated today by exactly one thing: holding a fine-grained PAT with
-   contents:write on this repository. There is no user, session or role
+   contents:write on both repositories a row spans (TARGET below). There is no user, session or role
    concept anywhere in this app, so there is nothing else to check against -
    see docs/LIBRARY-DELETE.md for the full audit of why, and why a
    credential-free write is not possible without a backend.
@@ -42,6 +42,25 @@
      every write at that snapshot, where it would survive exactly until the
      next mirror run overwrote it. The source of truth is named here instead.
 
+     TWO REPOSITORIES, ONE PER HALF OF A ROW. A Library row is a catalog line
+     and a file, and since the catalog's STLs moved to nest-library those two
+     halves no longer live in the same repo:
+
+       the catalog line   app-library.js      nest-optimizer, on claude-wip
+       the file           <name>.stl          nest-library,   on main
+
+     Both halves are named HERE, side by side, and neither feature names
+     either: a Save that wrote the file to nest-library while a Delete removed
+     it from this repo's library/ is exactly the bug the paragraph below is
+     about, one level down. `source` is the app-library.js SOURCES key the file
+     side serves - Save files a new row under it, and Delete refuses a row
+     whose source is anything else, because it cannot say which repository
+     that row's file is in.
+
+     The file side's branch is main because main is what the catalog's
+     raw.githubusercontent.com base reads from: a piece saved anywhere else
+     would be a row that 404s until somebody merged it.
+
      This lives beside the gate rather than inside either feature because
      "which repository" and "may I write to it" are the same question asked
      twice, and a Save aimed at one repo while a Delete aims at another is a
@@ -49,12 +68,17 @@
      the literals cannot cover: driving this against a scratch repo from a
      test or from the console. */
   var TARGET = {
-    owner:   'nolongerzzz',
-    repo:    'nest-optimizer',
-    branch:  'claude-wip',
-    dir:     'library/',
-    catalog: 'app-library.js',
-    api:     'https://api.github.com'
+    owner:      'nolongerzzz',
+    api:        'https://api.github.com',
+    /* the catalog line */
+    repo:       'nest-optimizer',
+    branch:     'claude-wip',
+    catalog:    'app-library.js',
+    /* the file */
+    fileRepo:   'nest-library',
+    fileBranch: 'main',
+    dir:        '',
+    source:     'nest-library'
   };
 
   function configure(patch) {
@@ -73,7 +97,7 @@
      ONE key for both features, on purpose: a run of library housekeeping is
      one session's work, and making someone paste the same token again because
      they went from deleting a piece to saving one is friction with no safety
-     bought by it. The token is the same token, for the same repository, with
+     bought by it. The token is the same token, for the same two repositories, with
      the same scope.
 
      sessionStorage, never localStorage: a write credential that outlives the
