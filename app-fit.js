@@ -112,11 +112,29 @@ if (typeof document !== 'undefined') {
       return parts.join('|');
     }
 
+    var lastTxt = '';
+
+    /* The warning also goes to the status line, once per CHANGE and never per
+       frame: a new or different warning, and the moment the last one clears.
+       setStatus is the app's one channel for "something happened", and the
+       only one the watch log (nso-watch.js) reads - a warning written to its
+       own element alone is invisible to it. The "Build volume" prefix is how
+       that log tells these lines apart from an operation's own status. */
+    function announce(txt) {
+      if (txt === lastTxt) return;
+      var was = lastTxt;
+      lastTxt = txt;
+      if (typeof setStatus !== 'function') return;
+      if (txt) setStatus('Build volume: ' + txt);
+      else if (was) setStatus('Build volume: every piece fits again');
+    }
+
     function render() {
       var el = document.getElementById('build-volume-warning');
       if (!el) return;
       var all = NSO_fitCheckAll();
       var txt = NSO_fitWarningText(all);
+      announce(txt);
       if (!txt) {
         el.hidden = true;
         el.textContent = '';
