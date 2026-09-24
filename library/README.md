@@ -32,6 +32,23 @@ All thirteen **rest on z = 0**, which is what `NSO_Stock` produces.
 See `fixtures/README.md` for the full table, and for the print-time model the
 minutes above come from.
 
+## Damaged on purpose: copies of `fixtures/damage/`
+
+Six **Test Fixtures** are clean `fixtures/quick/` pieces with one controlled
+defect each. The name is `<clean>_<defect>`: `shape-sphere_hole`,
+`shape-sphere_holes-shredded`, `shape-tube_severed`,
+`shape-sphere_nm-duplicate`, `shape-sphere_winding-flip` and
+`shape-torus_weld-collide`. `tools/nso_damage_make_fixtures.js` writes them
+into `fixtures/damage/` and copies them here. `tools/nso_damage_test.js`
+byte-compares every row against its fixture, and holds each one to the exact
+numbers `fixtures/damage/damage.json` says the canonical checker must report.
+Load one to try a repair on a defect whose size is known in advance. See
+`docs/DAMAGE.md`.
+
+**Do not expect them to pass the checker.** That is the point, except for
+`shape-tube_severed`. It is a valid solid, and only its genus says the ring
+was cut.
+
 ## Not CSG-safe: `box_closed.stl`
 
 `box_closed.stl` is an overlapping-shell concatenation from the early
