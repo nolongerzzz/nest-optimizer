@@ -2540,16 +2540,24 @@ function sealSelectedModel() {
 //      vertices closer than that) and 0 by exact vertex, and nothing in this
 //      pipeline is a non-manifold repair anyway - Repair is.
 //   2. result gate: the output is committed only if it has no more open,
-//      non-manifold or degenerate edges/faces than the input. Otherwise the
+//      non-manifold, mis-wound or degenerate edges/faces than the input. Otherwise the
 //      piece is unchanged and the status names the count that rose - the
 //      same "gate on the result, not the request" rule Hollow uses.
-// tools/nso_wire_solidify_test.js drives both through the real button and
+//   3. progress gate: not worse is not enough. If the result has as many
+//      open edges as the input, nothing was closed, and Solidify refuses
+//      instead of committing an unchanged piece under "Solidify ok" with an
+//      Undo entry (driver-testing round 1: "open 16->16", byte-identical).
+//      Fewer but not zero commits as "Solidify partial" and names what was
+//      left open and why.
+// Between the pipeline and the gates, solidifyCloseLoops closes the loops the
+// two cappers cannot (pinched loops, loops folded over an edge of the piece).
+// tools/nso_wire_solidify_test.js drives all of it through the real button and
 // re-measures with mesh_validate.py.
 function solidifyCensus(soup) {
   if (typeof NSO_Repair === 'undefined' || !NSO_Repair || typeof NSO_Repair.inspect !== 'function') return null;
   try {
     const r = NSO_Repair.inspect(soup, { selfIntersections: false });
-    return { open: r.openEdges, nm: r.nonManifoldEdges, degen: r.degenerateTris, tris: r.tris };
+    return { open: r.openEdges, nm: r.nonManifoldEdges, degen: r.degenerateTris, wind: r.flippedEdges, tris: r.tris };
   } catch (e) {
     return null;
   }
@@ -2561,7 +2569,235 @@ function solidifyRegressions(before, after) {
   if (after.nm > before.nm) worse.push('non-manifold ' + before.nm + '\u2192' + after.nm);
   if (after.open > before.open) worse.push('open ' + before.open + '\u2192' + after.open);
   if (after.degen > before.degen) worse.push('degenerate ' + before.degen + '\u2192' + after.degen);
+  // Winding too: on shape-sphere_holes-shredded the coarse welds + repairJoinedSoup
+  // turned 0 mis-wound edges into 21 (canonical checker) while closing 13 open
+  // ones, and without this line that committed as progress.
+  if (after.wind != null && before.wind != null && after.wind > before.wind) {
+    worse.push('mis-wound ' + before.wind + '\u2192' + after.wind);
+  }
   return worse;
+}
+
+// ---- Solidify: close the loops the bbox-plane cappers cannot ----
+//
+// capSmallOpenLoops walks the boundary as an UNDIRECTED graph and gives up on
+// any loop that touches a vertex of degree != 2; capAllOuterHoles only caps
+// openings lying on one of the piece's outer bounding-box planes. Found by
+// driver-testing round 1 (nso_damage.hole on fixtures/quick/shape-cylinder,
+// severity light, seed 7 - 16 open edges in 2 loops), the two cases neither
+// one closes:
+//
+//   1. PINCHED LOOP. Two holes in a fan cap that meet at the cap's centre
+//      vertex make one boundary component with a degree-4 vertex - a figure
+//      eight. Walked as DIRECTED half-edges (each open edge in the direction
+//      its one face runs it) the figure eight is two simple cycles that share
+//      a vertex; each is split off and closed on its own.
+//   2. FOLDED LOOP. Three top-cap faces and the side-wall face below them
+//      make one loop that folds 90 degrees over the top rim and reaches down
+//      to z = 0 - on no plane at all, let alone a bounding-box one. It is
+//      triangulated by solidifyFillLoop, which scores every triangulation of
+//      the loop's own vertices by its sharpest fold against the surface
+//      around it, and so puts the crease back on the rim.
+//
+// Only vertices already on the loop are used - nothing is invented - and a
+// loop is left open, with a reason, rather than guessed at when:
+//   - its walk dead-ends (an open edge whose neighbour is not open-once),
+//   - it is longer than SOLIDIFY_LOOP_MAX_EDGES (the same cap NSO_Repair's
+//     fillHoles uses: a loop that long is missing geometry, not a hole),
+//   - it has no non-degenerate triangulation, or every one of them folds
+//     sharper than SOLIDIFY_FOLD_MAX somewhere.
+// The result still goes through solidifyRegressions and the progress gate in
+// solidifySelectedModel, so a patch that made anything worse never lands.
+const SOLIDIFY_LOOP_MAX_EDGES = 64;
+// A fill whose worst fold is sharper than this is refused, not committed:
+// 150 degrees still admits a real 90-degree crease with room to spare.
+const SOLIDIFY_FOLD_MAX = 150 * Math.PI / 180;
+
+function solidifyDirectedLoops(mesh, edges) {
+  // Open edges, as directed half-edges u -> v in their one face's winding.
+  const out = new Map();
+  let total = 0;
+  const nf = mesh.faces.length / 3;
+  for (let f = 0; f < nf; f++) {
+    const a = mesh.faces[f * 3], b = mesh.faces[f * 3 + 1], c = mesh.faces[f * 3 + 2];
+    const tri = [[a, b], [b, c], [c, a]];
+    for (let e = 0; e < 3; e++) {
+      const u = tri[e][0], v = tri[e][1];
+      const k = u < v ? u + '_' + v : v + '_' + u;
+      if (!edges[k] || edges[k].count !== 1) continue;
+      if (!out.has(u)) out.set(u, []);
+      out.get(u).push(v);
+      total++;
+    }
+  }
+  const loops = [];
+  let deadEnds = 0;
+  for (const start of Array.from(out.keys())) {
+    let path = [start];
+    let cur = start;
+    while (true) {
+      const nexts = out.get(cur);
+      if (!nexts || !nexts.length) {
+        // Walk stranded mid-path: an open chain, not a closable loop.
+        if (path.length > 1) deadEnds++;
+        break;
+      }
+      const nxt = nexts.pop();
+      const at = path.indexOf(nxt);
+      if (at >= 0) {
+        // Closed a cycle. At a pinch the path revisits a vertex; the cycle is
+        // the stretch since that visit, and the walk carries on from there.
+        const cyc = path.slice(at);
+        if (cyc.length >= 3) loops.push(cyc);
+        path = path.slice(0, at + 1);
+        cur = nxt;
+        if (path.length === 1 && !(out.get(cur) || []).length) break;
+        continue;
+      }
+      path.push(nxt);
+      cur = nxt;
+    }
+  }
+  return { loops: loops, deadEnds: deadEnds, openHalfEdges: total };
+}
+
+// Triangulate one loop with the fewest, flattest folds: Liepa's hole-filling
+// weight (P. Liepa, "Filling Holes in Meshes", SGP 2003) - over every
+// triangulation that uses only the loop's own vertices, minimise first the
+// worst dihedral angle between neighbouring triangles (patch-patch, and
+// patch-to-surface across each loop edge), then total area. Exact O(n^3)
+// dynamic programme, n <= SOLIDIFY_LOOP_MAX_EDGES.
+//
+// Why not a flat fill in one best-fit plane: a loop that folds over an edge
+// of the piece (round 1's second loop: three top-cap faces and the wall face
+// below them) has no plane. Projected onto one, it triangulates into
+// chords that cut through the solid - measured on that fixture, checker-clean
+// but 1% of the cylinder's volume gone. Scoring folds against the faces
+// around the hole puts the crease back where the surface had it.
+//
+// `loop` is in boundary order; the patch runs the other way, so its edges
+// pair with the boundary. `rimNormal(a, b)` gives the unit normal of the one
+// face on the open edge a->b. Returns index triples, or a string saying why
+// not.
+function solidifyFillLoop(pos, loop, rimNormal) {
+  const R = loop.slice().reverse();
+  const n = R.length;
+  const P = R.map(i => [pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]]);
+  function triN(a, b, c) {
+    const A = P[a], B = P[b], C = P[c];
+    const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2];
+    const vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+    const x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx;
+    const l = Math.hypot(x, y, z);
+    return { n: l > 0 ? [x / l, y / l, z / l] : null, area: l / 2 };
+  }
+  const ang = (p, q) => Math.acos(Math.max(-1, Math.min(1, p[0] * q[0] + p[1] * q[1] + p[2] * q[2])));
+  // The patch edge R[i]->R[i+1] is the boundary edge R[i+1]->R[i] of the mesh.
+  const rim = [];
+  for (let i = 0; i < n; i++) rim.push(rimNormal(R[(i + 1) % n], R[i]));
+  let span = 0;
+  for (let i = 0; i < n; i++) for (let j = 0; j < 3; j++) span = Math.max(span, Math.abs(P[i][j]));
+  const AREA_EPS = 1e-12 * Math.max(1, span * span);
+  const ANG_EPS = 1e-9;
+  // W[i][j]: best patch over R[i..j], closed by the chord i-j. K: its apex.
+  const W = [], K = [];
+  for (let i = 0; i < n; i++) { W.push(new Array(n).fill(null)); K.push(new Array(n).fill(-1)); }
+  for (let i = 0; i + 1 < n; i++) W[i][i + 1] = { ang: 0, area: 0 };
+  const better = (a, b) => !b || a.ang < b.ang - ANG_EPS || (Math.abs(a.ang - b.ang) <= ANG_EPS && a.area < b.area);
+  // Normal of the triangle that sits on the chord i-j inside W[i][j], or the
+  // rim face when i-j is a loop edge.
+  function across(i, j) {
+    if (j === i + 1) return rim[i];
+    const k = K[i][j];
+    return k < 0 ? null : triN(i, k, j).n;
+  }
+  for (let len = 2; len < n; len++) {
+    for (let i = 0; i + len < n; i++) {
+      const j = i + len;
+      let best = null, bestK = -1;
+      for (let k = i + 1; k < j; k++) {
+        const L = W[i][k], Rr = W[k][j];
+        if (!L || !Rr) continue;
+        const t = triN(i, k, j);
+        if (!t.n || t.area <= AREA_EPS) continue;
+        let a = Math.max(L.ang, Rr.ang);
+        const nl = across(i, k), nr = across(k, j);
+        if (nl) a = Math.max(a, ang(t.n, nl));
+        if (nr) a = Math.max(a, ang(t.n, nr));
+        if (i === 0 && j === n - 1 && rim[n - 1]) a = Math.max(a, ang(t.n, rim[n - 1]));
+        const cand = { ang: a, area: L.area + Rr.area + t.area };
+        if (better(cand, best)) { best = cand; bestK = k; }
+      }
+      W[i][j] = best;
+      K[i][j] = bestK;
+    }
+  }
+  if (!W[0][n - 1]) return 'no non-degenerate triangulation';
+  // A patch that has to fold back on itself (a dihedral near 180) is not a
+  // hole fill, it is a guess; leave it open.
+  if (W[0][n - 1].ang > SOLIDIFY_FOLD_MAX) {
+    return 'every fill folds ' + Math.round(W[0][n - 1].ang * 180 / Math.PI) + '° somewhere';
+  }
+  const tris = [];
+  const stack = [[0, n - 1]];
+  while (stack.length) {
+    const [i, j] = stack.pop();
+    if (j - i < 2) continue;
+    const k = K[i][j];
+    tris.push([R[i], R[k], R[j]]);
+    stack.push([i, k], [k, j]);
+  }
+  return tris;
+}
+
+// Close every open loop the directed walk finds. Returns the soup with the
+// patches appended (the input soup untouched), and what it did and did not do.
+function solidifyCloseLoops(soup) {
+  const res = { soup: soup, loops: 0, closed: 0, added: 0, left: [] };
+  if (typeof NSO_Repair === 'undefined' || !NSO_Repair ||
+      typeof NSO_Repair._weldToIndexed !== 'function' || typeof NSO_Repair._buildEdges !== 'function') {
+    res.left.push('mesh checker not loaded');
+    return res;
+  }
+  const w = NSO_Repair._weldToIndexed(soup, NSO_Repair.WELD_TOL);
+  const mesh = w.mesh;
+  const edges = NSO_Repair._buildEdges(mesh);
+  const walk = solidifyDirectedLoops(mesh, edges);
+  res.loops = walk.loops.length;
+  if (walk.deadEnds) res.left.push(walk.deadEnds + ' open chain(s) that do not close');
+  // Unit normal of the one face on open edge a-b (either direction).
+  function rimNormal(a, b) {
+    const e = edges[a < b ? a + '_' + b : b + '_' + a];
+    if (!e || !e.faces.length) return null;
+    const f = e.faces[0], P = mesh.pos, F = mesh.faces;
+    const i0 = F[f * 3] * 3, i1 = F[f * 3 + 1] * 3, i2 = F[f * 3 + 2] * 3;
+    const ux = P[i1] - P[i0], uy = P[i1 + 1] - P[i0 + 1], uz = P[i1 + 2] - P[i0 + 2];
+    const vx = P[i2] - P[i0], vy = P[i2 + 1] - P[i0 + 1], vz = P[i2 + 2] - P[i0 + 2];
+    const x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx;
+    const l = Math.hypot(x, y, z);
+    return l > 0 ? [x / l, y / l, z / l] : null;
+  }
+  const patch = [];
+  for (const loop of walk.loops) {
+    if (loop.length > SOLIDIFY_LOOP_MAX_EDGES) {
+      res.left.push('a ' + loop.length + '-edge loop (over ' + SOLIDIFY_LOOP_MAX_EDGES + ': missing geometry, not a hole)');
+      continue;
+    }
+    const t = solidifyFillLoop(mesh.pos, loop, rimNormal);
+    if (typeof t === 'string') { res.left.push('a ' + loop.length + '-edge loop: ' + t); continue; }
+    for (const tri of t) {
+      for (const vi of tri) patch.push(mesh.pos[vi * 3], mesh.pos[vi * 3 + 1], mesh.pos[vi * 3 + 2]);
+    }
+    res.closed++;
+    res.added += t.length;
+  }
+  if (patch.length) {
+    const outSoup = new Float32Array(soup.length + patch.length);
+    outSoup.set(soup, 0);
+    outSoup.set(patch, soup.length);
+    res.soup = outSoup;
+  }
+  return res;
 }
 
 function solidifySelectedModel() {
@@ -2612,6 +2848,14 @@ function solidifySelectedModel() {
     setStatus('Solidify failed - piece unchanged', true);
     return;
   }
+  // Whatever the cappers above left open: pinched loops, and loops folded over an edge.
+  let closeLoops = null;
+  try {
+    closeLoops = solidifyCloseLoops(working);
+    working = closeLoops.soup;
+  } catch (e) {
+    closeLoops = null;
+  }
   if (!working || working.length < 9) {
     setStatus('Solidify failed - piece unchanged', true);
     return;
@@ -2625,6 +2869,17 @@ function solidifySelectedModel() {
   if (worse.length) {
     setStatus('Solidify refused - it would make the mesh worse (' + worse.join(', ') +
               '; ' + censusBefore.tris + '\u2192' + censusAfter.tris + ' tris); piece unchanged', true);
+    return;
+  }
+  // Progress gate. Not worse is not enough: Solidify exists to close
+  // openings, so a result with as many open edges as the input is a refusal,
+  // not an "ok" with an Undo entry for a change that did not happen. Driver
+  // testing round 1 caught exactly that: "Solidify ok - open 16->16" on a
+  // result byte-identical to its input.
+  const leftWhy = (closeLoops && closeLoops.left.length) ? ' - left open: ' + closeLoops.left.join('; ') : '';
+  if (censusAfter.open >= censusBefore.open) {
+    setStatus('Solidify refused - closed none of the ' + censusBefore.open + ' open edges (open ' +
+              censusBefore.open + '\u2192' + censusAfter.open + ')' + leftWhy + '; piece unchanged', true);
     return;
   }
   pushUndo({
@@ -2675,9 +2930,14 @@ function solidifySelectedModel() {
     placedEntry.height = m.size.y;
     settlePlacedOnBed(placedEntry);
   }
-  setStatus('Solidify ok - open ' + censusBefore.open + '\u2192' + censusAfter.open +
+  // "ok" only when every opening closed; fewer but not zero is "partial" and
+  // says what was left and why.
+  const closedNote = (closeLoops && closeLoops.closed) ? '; ' + closeLoops.closed + ' loop(s) closed in place' : '';
+  setStatus('Solidify ' + (censusAfter.open === 0 ? 'ok' : 'partial') +
+            ' - open ' + censusBefore.open + '\u2192' + censusAfter.open +
             ', NM ' + censusBefore.nm + '\u2192' + censusAfter.nm +
-            (censusAfter.degen ? ', degenerate ' + censusBefore.degen + '\u2192' + censusAfter.degen : ''));
+            (censusAfter.degen ? ', degenerate ' + censusBefore.degen + '\u2192' + censusAfter.degen : '') +
+            closedNote + (censusAfter.open ? leftWhy : ''));
 }
 
 // ---- Thicken: one-sided planar offset ----
