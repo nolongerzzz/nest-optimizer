@@ -99,7 +99,11 @@ so Crop takes them out and seals the section like any other.
   with crossings at the joint. Every result passes, and its volume matches
   the flux. Where rawCut's own capped halves pass the checker, it also
   matches their sum.
-- **v9 sweep** (not in the suite, run while building this): see below.
+- **v9 sweep** (not in the suite, run while building this): 328 boxes over
+  `v9_mirror_factory.stl`, 1, 7, 23 and 60 mm wide, stepped every 2 mm along
+  X. 263 were cropped and **all 263 pass** the checker (0 fail). The other 65
+  were refused by name, all for the same reason: a step face that would need
+  a hole. None came back ok-but-broken.
 
 ## Refusals
 
