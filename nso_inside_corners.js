@@ -48,6 +48,16 @@
 
    The paint skip list
    -------------------
+   PAINT SCOPE: SUB-REGION — this pocket's own floor and its four
+   walls. Paint elsewhere on the piece (a different pocket, the outer
+   hull, this pocket's mouth) does NOT stand this down, because the
+   treatment provably never reaches those faces: only the plug's
+   floor end is baked, and the mouth end is pushed clear of the hull.
+   That is the sub-region half of the scoping rule in docs/HANDOFF.md,
+   and it is a different scope from Smooth / Repair / Fusion — which
+   are whole-piece and stand down on any paint at all — not a laxer
+   reading of the same rule. Do not "fix" one to match the other.
+
    Standing rule, owner's decision: a painted / excluded face stays
    untouched by ANY bake mechanism, not only the one the paint system
    shipped with. So `opts.skip` is required, not optional, and this
