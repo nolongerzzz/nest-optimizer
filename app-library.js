@@ -217,7 +217,28 @@
     { file: 'plate-20x20x2.stl',                  category: 'Test Fixtures', source: 'nest-library' },
     { file: 'bar-20x5x5.stl',                     category: 'Test Fixtures', source: 'nest-library' },
     { file: 'tape_on-edge-single.stl',            category: 'Test Fixtures', source: 'nest-library' },
-    { file: 'v9_mirror_factory.stl',              category: 'Test Fixtures', source: 'nest-library' }
+    { file: 'v9_mirror_factory.stl',              category: 'Test Fixtures', source: 'nest-library' },
+    /* Damaged on purpose - a clean fixtures/quick/ piece with ONE controlled
+       defect each, named <clean>_<defect>. Made by tools/nso_damage.js through
+       tools/nso_damage_make_fixtures.js; fixtures/damage/damage.json carries
+       the exact numbers tools/mesh_validate.py must read off each, and
+       tools/nso_damage_test.js holds them to it and byte-compares each row's
+       file in nest-library against fixtures/damage/. Load one to try a repair on a defect whose
+       size is known in advance. docs/DAMAGE.md has the table.
+         _hole / _holes-shredded   real holes: open edges and nothing else
+         _severed                  ring wall cut through and capped: valid,
+                                   only genus moves (the cutClearance case)
+         _nm-duplicate             a patch doubled in place: non-manifold,
+                                   nothing missing
+         _winding-flip             a patch flipped in place: winding only
+         _weld-collide             a vertex 5e-5 mm from a distinct one,
+                                   inside the 1e-4 weld (rawCut's seam bug) */
+    { file: 'shape-sphere_hole.stl',              category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'shape-sphere_holes-shredded.stl',    category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'shape-tube_severed.stl',             category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'shape-sphere_nm-duplicate.stl',      category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'shape-sphere_winding-flip.stl',      category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'shape-torus_weld-collide.stl',       category: 'Test Fixtures', source: 'nest-library' }
   ];
 
   /* The one way a file name becomes something fetchable. Absolute, always. */
