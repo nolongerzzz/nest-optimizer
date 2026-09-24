@@ -62,6 +62,11 @@ Smart build-plate packing for 3D printing.
   slider and arrows only write the lift and rebuild the piece's rotation from
   the plate record, this keeps the rotation and only moves it down. Its place on
   the plate is untouched and one Undo puts it back.
+- **Crop** (Cut menu, under Split) takes a middle section out of a piece: set
+  the box by two distances along the cut axis (or tick **Box** and drag it on
+  the piece), press Crop, and the slab inside the box is removed, the far part
+  slides back by the box length, and the joint is sealed into one closed piece.
+  Stage 1 of two: no sideways alignment yet. See [docs/CROP.md](docs/CROP.md).
 - **Triple join** (Join card) joins three pieces in one press: pick A, B and C,
   choose a **vertical stack** or a **horizontal sequence**, and each of the two
   junctions (A-B, B-C) gets Center lock then Seat (support) at **its own gap**.

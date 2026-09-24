@@ -155,6 +155,7 @@ const UNDO_REPLACE_LABEL = {
   seatSurfaceReplace: 'Undo: Seat here reverted',
   extendReplace: 'Undo: Extend reverted',
   mirrorReplace: 'Undo: Mirror reverted',
+  cropReplace: 'Undo: Crop reverted',
   wheelReplace: 'Undo: Pottery Wheel reverted',
   hollowReplace: 'Undo: Hollow reverted',
   fillReplace: 'Undo: Fill reverted',

@@ -1353,6 +1353,19 @@ select:focus, input:focus {
   margin: 0;
 }
 
+/* Crop, under Split in the Cut menu (app-crop.js) */
+.crop-tools {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+}
+.crop-row { align-items: center; }
+.crop-row input[type="number"] {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
 #edit-card input[type="range"] {
   width: 100%;
   margin: 6px 0 4px;
