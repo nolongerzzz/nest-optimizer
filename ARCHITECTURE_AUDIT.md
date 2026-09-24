@@ -38,11 +38,11 @@ tools/                Node-run test/probe/audit scripts (the bulk of package.jso
 
 **Two things worth flagging explicitly:**
 
-- **`app.js` (9934 lines) and `app.full.js` are dead code.** Neither is referenced by any
-  `<script>` tag in `index.html`; `app.js` is a stale pre-refactor monolith (missing fields
-  `app-core.js` later grew, e.g. `plateGridMode`, `plateLock`) and `app.full.js` is a 16-byte
-  placeholder. They should be deleted or clearly marked archival — anyone grepping the repo for
-  "the app" will land on the wrong 10,000-line file first.
+- **`app.js` (9934 lines) and `app.full.js` were dead code — deleted 2026-09-24.** Neither was
+  referenced by any `<script>` tag in `index.html`, by anything under `tools/`, or by any config;
+  `app.js` was a stale pre-refactor monolith (missing fields `app-core.js` later grew, e.g.
+  `plateGridMode`, `plateLock`) and `app.full.js` a 16-byte placeholder. Older docs that cite
+  "the legacy `app.js`" refer to that file; it survives only in git history.
 - **The real entry point lives inside `app-join.js`, not `app-core.js` or `index.html`.** Its tail
   (`setupUI()` at line 3349, `// ===== Boot =====` near line 3792) is what actually calls
   `initThree(); setupUI(); updatePlateInfo();` and wires dozens of unrelated buttons (frame-view,
@@ -380,4 +380,4 @@ test scripts.
 `app-mirror.js`, `cth/*.js`, `app-cth.js`, `app-cth-expose.js`, `docs/WATCH.md`; grep sampling
 across ~47 `app-*.js` files for refusal/validation patterns. Areas flagged for a deeper pass:
 `app-core.js`'s pack/nest algorithm, `app-join.js`'s full mesh-boolean internals, and the parallel
-`app.js`/`app.full.js` dead-code question (recommend deleting or archiving explicitly).*
+`app.js`/`app.full.js` dead-code question (resolved: both deleted 2026-09-24).*

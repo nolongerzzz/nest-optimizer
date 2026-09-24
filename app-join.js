@@ -3831,7 +3831,7 @@ try {
       const m = String(url).match(/[?&]v=([^&]+)/);
       return m ? m[1] : fallback;
     }
-    const appSrc = (document.querySelector('script[src*="app-join.js"], script[src*="app.js"]') || {}).src || '';
+    const appSrc = (document.querySelector('script[src*="app-join.js"]') || {}).src || '';
     const cssHref = (document.querySelector('link[rel="stylesheet"][href*="styles"]') || {}).href || '';
     const appV = tagFrom(appSrc, 'no-tag');
     const cssV = tagFrom(cssHref, 'no-tag');
