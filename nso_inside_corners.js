@@ -237,6 +237,31 @@ function NSO_insidePaintCheck(box, skip) {
   return { painted: hit, any: hit.length > 0, floorCell: floor };
 }
 
+/* The stand-down status line.
+
+   Same shape the other three wired bakes use, so the four read as one rule
+   rather than four dialects:
+
+     Smooth stood down - 1 painted face(s); global smoothing cannot hold a
+                         face still. Clear paint to smooth.
+     Repair stood down - 1 painted face(s); repair has no skip list.
+                         Clear paint to repair.
+     Pocket corners stood down - 2 painted face(s); ...
+
+   Those three are whole-piece operations with no skip list, so ANY paint on
+   the piece stops them. This one knows which faces it touches - the pocket
+   floor and its four walls - so it counts only those, and paint elsewhere on
+   the piece does not stop it. The faces are named after the count because a
+   pocket has eleven faces and "2 painted" alone does not say which pocket or
+   which wall. */
+function NSO_insideStandDownStatus(paint) {
+  var names = paint.painted.map(function (p) { return p.what + ' ' + p.name; }).join(', ');
+  return 'Pocket corners stood down - ' + paint.painted.length + ' painted face(s); ' +
+         'pocket ' + names + '. The setback treats the floor and all four walls together ' +
+         'or not at all. Clear paint to round this pocket ' +
+         '(or use the Corners / Round wrap, which can leave a single face square).';
+}
+
 /* The bake.
 
    `ops` supplies the two kernel calls the app already carries:
@@ -277,11 +302,8 @@ function NSO_insideCornersBake(soup, pocket, R, deps, ops, opts) {
      are the route for a part that needs one wall left square. */
   var paint = NSO_insidePaintCheck(box, skip);
   if (paint.any) {
-    var names = paint.painted.map(function (p) { return p.what + ' ' + p.name; }).join(', ');
-    return Promise.resolve({ ok: false, painted: paint.painted,
-      reason: 'painted out and left alone: pocket ' + names + '. The setback treats the floor ' +
-              'and all four walls together or not at all, so it stands down here. Piece unchanged ' +
-              '(the Corners / Round wrap can leave a single face square)' });
+    return Promise.resolve({ ok: false, painted: paint.painted.length,
+      paintedFaces: paint.painted, reason: NSO_insideStandDownStatus(paint) });
   }
 
   var clamp = NSO_insideClampR(box, R);
@@ -359,6 +381,7 @@ if (typeof module !== 'undefined' && module.exports) {
     NSO_insideFaceName: NSO_insideFaceName,
     NSO_insidePocketSkip: NSO_insidePocketSkip,
     NSO_insidePaintCheck: NSO_insidePaintCheck,
+    NSO_insideStandDownStatus: NSO_insideStandDownStatus,
     NSO_insideTriCount: NSO_insideTriCount,
     NSO_insideVolume: NSO_insideVolume,
     NSO_insideEdgeScore: NSO_insideEdgeScore,
