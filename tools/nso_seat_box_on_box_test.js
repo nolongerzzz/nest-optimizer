@@ -59,6 +59,7 @@
    fetched by the library browser itself, so the test cannot load a file the
    shipped catalog does not actually offer. */
 const { withApp } = require('./nso_app_harness');
+const LIBDIR = require('./nso_library_dir');
 
 let fails = 0;
 const check = (name, cond, detail) => {
@@ -286,17 +287,25 @@ withApp(async (page, logs) => {
 
   /* ---------- 5. a second bit shape ---------- */
   console.log('\n--- 5. the crosshatch washer patch as the bit (30 x 30 lattice) ---');
-  const idC = await loadFromLibrary(page, 'patch_crosshatch_loose.stl');
-  const j2 = await joinAB(page, idA, idC);
-  check('Join holds A = the box target, B = the patch', j2.session && j2.a === idA && j2.b === idC, JSON.stringify(j2));
-  /* 80 wide, patch 30 wide: 25 is the furthest it goes while staying on the face */
-  await sweepSupport(page, idA, idC, 'the patch seats at every offset too - the fix is bit-shape-blind',
-    [0, 10, 19, 20, 25]);
+  /* The patch is a catalog-only piece: its row fetches from nest-library,
+     which the harness can only answer from a checkout (nso_library_dir.js).
+     Without one this section and the patch half of section 6 SKIP. */
+  let idC = null;
+  if (!LIBDIR.catalogFile('patch_crosshatch_loose.stl')) {
+    LIBDIR.skip('section 5 and the patch half of section 6 (patch_crosshatch_loose.stl)');
+  } else {
+    idC = await loadFromLibrary(page, 'patch_crosshatch_loose.stl');
+    const j2 = await joinAB(page, idA, idC);
+    check('Join holds A = the box target, B = the patch', j2.session && j2.a === idA && j2.b === idC, JSON.stringify(j2));
+    /* 80 wide, patch 30 wide: 25 is the furthest it goes while staying on the face */
+    await sweepSupport(page, idA, idC, 'the patch seats at every offset too - the fix is bit-shape-blind',
+      [0, 10, 19, 20, 25]);
+  }
 
   /* ---------- 6. negative control ---------- */
   console.log('\n--- 6. negative control: switch the reach test off and the report comes back ---');
   await setReach(page, false);
-  for (const [id, what] of [[idB, 'box bit'], [idC, 'patch']]) {
+  for (const [id, what] of [[idB, 'box bit'], [idC, 'patch']].filter(p => p[0] !== null)) {
     await joinAB(page, idA, id);
     let missed = 0, seated = 0, moved = 0;
     for (const x of X_USED_TO_FAIL.filter(v => v <= (id === idC ? 25 : 34))) {

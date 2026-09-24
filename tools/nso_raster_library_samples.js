@@ -1,6 +1,12 @@
 /* The traced-line pieces in the Library, built from the REAL images.
- *     node tools/nso_raster_library_samples.js            write library/traced_*.stl
+ *     node tools/nso_raster_library_samples.js            write traced_*.stl to nest-library
  *     node tools/nso_raster_library_samples.js --check    byte-diff, writes nothing
+ *
+ * The pieces and traced-lines.json live in the nest-library repo, and this
+ * writes to (and --check compares against) a checkout of it, found by
+ * tools/nso_library_dir.js: $NSO_LIBRARY_DIR, else a sibling ../nest-library.
+ * Without one, --check still BUILDS all three - so every refusal in build()
+ * below still runs - and SKIPs the byte compares, out loud. Writing refuses.
  *
  * These are catalog entries, so the one thing that matters is where they come
  * from. Every one is built by nso_raster_lines.js from a file in
@@ -48,7 +54,8 @@ const { writeSTL } = require('./nso_stl_io.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const SRC = path.join(ROOT, 'fixtures', 'raster-real');
-const OUT = path.join(ROOT, 'library');
+const LIBDIR = require('./nso_library_dir');
+const OUT = LIBDIR.libraryDir();     // the nest-library checkout, or null
 const TRUTH = JSON.parse(fs.readFileSync(path.join(SRC, 'ground-truth.json'), 'utf8'));
 
 const SIZE_MM = 30;
@@ -78,6 +85,7 @@ function build(spec) {
 
 function main() {
   const checkOnly = process.argv.includes('--check');
+  if (!checkOnly && !OUT) throw new Error('nowhere to write the pieces: ' + LIBDIR.HOW_TO);
   let drift = 0;
   const manifest = {
     note: 'Built from fixtures/raster-real/, which tools/nso_raster_real_test.js validates against its own ground truth first.',
@@ -86,7 +94,7 @@ function main() {
 
   for (const spec of SAMPLES) {
     const { r, src } = build(spec);
-    const file = path.join(OUT, spec.out);
+    const file = OUT ? path.join(OUT, spec.out) : null;
     /* writeSTL only writes to a path, so --check builds into a temp file and
        byte-diffs that rather than trusting the one already on disk */
     const tmp = path.join(os.tmpdir(), 'nso-raster-' + spec.out);
@@ -103,7 +111,10 @@ function main() {
       meshAngles: bands, bridgedPaths: r.bridgedPaths, nonSolid: true
     });
 
-    if (checkOnly) {
+    if (checkOnly && !OUT) {
+      LIBDIR.skip(spec.out + ' byte-identical to a fresh build (built: ' + r.tris_count + ' tris, ' +
+        r.paths + ' path(s), ' + r.junctions + ' junction(s))');
+    } else if (checkOnly) {
       const have = fs.existsSync(file) ? fs.readFileSync(file) : null;
       const same = have && have.equals(fresh);
       console.log('  ' + (same ? 'ok   ' : 'DRIFT') + ' ' + spec.out +
@@ -111,24 +122,27 @@ function main() {
       if (!same) drift++;
     } else {
       fs.writeFileSync(file, fresh);
-      console.log('  wrote library/' + spec.out + ' - ' + r.describe);
+      console.log('  wrote ' + file + ' - ' + r.describe);
     }
   }
 
-  const mf = path.join(OUT, 'traced-lines.json');
+  const mf = OUT ? path.join(OUT, 'traced-lines.json') : null;
   const text = JSON.stringify(manifest, null, 2) + '\n';
-  if (checkOnly) {
+  if (checkOnly && !OUT) {
+    LIBDIR.skip('traced-lines.json byte-identical to a fresh build');
+  } else if (checkOnly) {
     const have = fs.existsSync(mf) ? fs.readFileSync(mf, 'utf8') : null;
     const same = have === text;
     console.log('  ' + (same ? 'ok   ' : 'DRIFT') + ' traced-lines.json');
     if (!same) drift++;
   } else {
     fs.writeFileSync(mf, text);
-    console.log('  wrote library/traced-lines.json');
+    console.log('  wrote ' + mf);
   }
 
   if (checkOnly) {
-    console.log(drift ? '\n' + drift + ' file(s) DRIFTED from what this code builds' : '\nlibrary traced lines match');
+    console.log(drift ? '\n' + drift + ' file(s) DRIFTED from what this code builds'
+      : OUT ? '\nlibrary traced lines match' : '\nall three built and passed their refusals; byte compares SKIPPED');
     process.exit(drift ? 1 : 0);
   }
 }

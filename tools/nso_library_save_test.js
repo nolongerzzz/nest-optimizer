@@ -105,7 +105,7 @@ const BASE = libraryOf(SRC);
 console.log('\n=== 1. addCatalogEntry on the real app-library.js ===');
 check('the shipped catalog loads and lists files', BASE.files.length > 0, BASE.files.length + ' entries');
 {
-  const entry = { file: 'drive_check_piece.stl', category: 'Test Fixtures', source: 'local' };
+  const entry = { file: 'drive_check_piece.stl', category: 'Test Fixtures', source: 'nest-library' };
   const r = save.addCatalogEntry(SRC, entry);
   check('saving ' + entry.file + ' succeeds', r.ok, r.reason);
   if (r.ok) {
@@ -117,7 +117,7 @@ check('the shipped catalog loads and lists files', BASE.files.length > 0, BASE.f
     check('under the category it was given',
       (after.entries.find(e => e.file === entry.file) || {}).category === entry.category);
     check('and with the source it was given',
-      (after.entries.find(e => e.file === entry.file) || {}).source === 'local');
+      (after.entries.find(e => e.file === entry.file) || {}).source === 'nest-library');
     check('every pre-existing entry is still there',
       BASE.files.every(f => after.files.indexOf(f) !== -1));
     check('exactly one line was added',
@@ -134,7 +134,7 @@ check('the shipped catalog loads and lists files', BASE.files.length > 0, BASE.f
       d.changed.length === 1 && d.changed[0].from + ',' === d.changed[0].to,
       JSON.stringify(d.changed));
     check('the new line is the last entry in the block',
-      /\{ file: 'drive_check_piece\.stl',\s+category: 'Test Fixtures', source: 'local' \}\n {2}\];/.test(r.text));
+      /\{ file: 'drive_check_piece\.stl',\s+category: 'Test Fixtures', source: 'nest-library' \}\n {2}\];/.test(r.text));
     check('the new line is aligned with the ones above it',
       r.line.indexOf('category:') === SRC.split('\n').filter(l => /^\s*\{ file: 'pin\.stl'/.test(l))[0].indexOf('category:'),
       JSON.stringify(r.line));
@@ -144,7 +144,7 @@ check('the shipped catalog loads and lists files', BASE.files.length > 0, BASE.f
 /* ------------------------------------------------------------------ 2 */
 console.log('\n=== 2. save and delete are inverses, and the array stays well formed ===');
 {
-  const entry = { file: 'round_trip.stl', category: 'Skins', source: 'local' };
+  const entry = { file: 'round_trip.stl', category: 'Skins', source: 'nest-library' };
   const added = save.addCatalogEntry(SRC, entry);
   check('a save applies', added.ok, added.reason);
   if (added.ok) {
@@ -327,6 +327,32 @@ console.log('\n=== 4. ONE gate, for both features ===');
   check('save and delete report the same write target',
     JSON.stringify(save.target()) === JSON.stringify(del.target()),
     JSON.stringify(save.target()));
+  /* TWO REPOSITORIES, ONE PER HALF OF A ROW. The catalog line is this repo's
+     app-library.js; the file is in nest-library. Pinned here, from the
+     target itself, and against the catalog's own source: a file side that
+     named a repo or branch the catalog does not read from would save pieces
+     that 404, and nothing else in the suite would say why. */
+  const t = access.target();
+  check('the catalog line is written to this repo, on the working branch',
+    t.repo === 'nest-optimizer' && t.branch === 'claude-wip' && t.catalog === 'app-library.js',
+    t.repo + '@' + t.branch + ':' + t.catalog);
+  check('the file is written to nest-library, on main, at its root',
+    t.fileRepo === 'nest-library' && t.fileBranch === 'main' && t.dir === '',
+    t.fileRepo + '@' + t.fileBranch + ':' + JSON.stringify(t.dir));
+  const srcDecl = (SRC.match(/'nest-library':\s*\{[\s\S]*?base:\s*'([^']+)'/) || [])[1];
+  check('...which is exactly what the catalog\'s "' + t.source + '" source reads from',
+    t.source === 'nest-library' &&
+    srcDecl === 'https://raw.githubusercontent.com/' + t.owner + '/' + t.fileRepo + '/' + t.fileBranch + '/' + t.dir,
+    srcDecl);
+  check('...and every shipped row is filed under that source',
+    BASE.entries.every(e => e.source === t.source),
+    BASE.entries.filter(e => e.source !== t.source).map(e => e.file).join(', ') || 'all ' + BASE.entries.length);
+  check('save names the file side for the blob and the catalog side for the entry',
+    /contentsUrl\(t\.fileRepo, blobPath\)/.test(mod) && /contentsUrl\(t\.repo, t\.catalog\)/.test(mod) &&
+    !/contentsUrl\(t\.repo, blobPath\)/.test(mod) && !/contentsUrl\(t\.fileRepo, t\.catalog\)/.test(mod));
+  check('delete does the same, the other way round',
+    /contentsUrl\(t\.fileRepo, blobPath\)/.test(delMod) && /contentsUrl\(t\.repo, t\.catalog\)/.test(delMod) &&
+    !/contentsUrl\(t\.repo, blobPath\)/.test(delMod) && !/contentsUrl\(t\.fileRepo, t\.catalog\)/.test(delMod));
   check('one token key, shared, published by the access module',
     /TOKEN_KEY/.test(mod) && /TOKEN_KEY/.test(delMod) &&
     !/'nso\.library\.[a-z]+\.token'/.test(mod) && !/'nso\.library\.[a-z]+\.token'/.test(delMod));
