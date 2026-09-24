@@ -86,6 +86,30 @@
       "boundary_loops": 1
     },
     {
+      "stl": "shape-cylinder_holes-light.stl",
+      "source": "shape-cylinder.stl",
+      "type": "hole",
+      "params": {
+        "severity": "light",
+        "seed": 7
+      },
+      "what": "four sites, 10 faces: a loop pinched at the cap centre and a loop folded over the top rim",
+      "library": false,
+      "expected": {
+        "triangles": 118,
+        "welded_vertices": 66,
+        "open_edges": 16,
+        "nonmanifold_edges": 0,
+        "odd_edges": 16,
+        "inconsistent_winding_edges": 0,
+        "euler_characteristic": -1,
+        "degenerate_tris": 0,
+        "piercing": 0
+      },
+      "removed_faces": 10,
+      "boundary_loops": 2
+    },
+    {
       "stl": "shape-tube_severed.stl",
       "source": "shape-tube.stl",
       "type": "sever",

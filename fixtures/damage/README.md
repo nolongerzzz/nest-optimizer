@@ -19,6 +19,7 @@ node tools/nso_damage_test.js                    # hold every file to damage.jso
 | `shape-sphere_hole.stl` | 1979 | one small hole, 5 faces, 1 loop | 7 | 0 | 0 | 1 | yes |
 | `shape-sphere_holes-shredded.stl` | 1015 | 12 sites grown together: 969 faces gone, 2 loops | 221 | 0 | 0 | −3 | yes |
 | `shape-sphere_hole-painted.stl` | 1976 | faces 0–7 removed as a painted selection | 10 | 0 | 0 | 1 | |
+| `shape-cylinder_holes-light.stl` | 118 | 4 sites, 10 faces, 2 loops: one pinched at the cap centre, one folded over the top rim onto the wall (Solidify regression, driver-testing round 1) | 16 | 0 | 0 | −1 | |
 | `shape-tube_severed.stl` | 260 | one 1 mm slot through the ring wall, capped: a C, genus 1 → 0 | 0 | 0 | 0 | 2 | yes |
 | `shape-tube_severed-apart.stl` | 264 | two slots: two bodies | 0 | 0 | 0 | 4 | |
 | `shape-sphere_nm-duplicate.stl` | 1985 | one face duplicated in place | 0 | 3 | 3 | 3 | yes |

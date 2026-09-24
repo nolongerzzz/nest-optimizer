@@ -43,6 +43,13 @@ const FIXTURES = [
    'twelve sites grown into each other - half the sphere gone, 2 boundary loops', true],
   ['shape-sphere_hole-painted.stl', 'shape-sphere.stl', 'hole', { region: { faces: [0, 1, 2, 3, 4, 5, 6, 7] } },
    'faces 0-7 removed as a painted selection', false],
+  /* Driver-testing round 1: the fixture Solidify said "ok - open 16->16" on,
+     committing a byte-identical piece. One loop pinches at the bottom cap's
+     centre vertex; the other folds over the top rim (three cap faces and the
+     wall face below them) and lies on no plane. tools/nso_wire_solidify_test.js
+     section 4. */
+  ['shape-cylinder_holes-light.stl', 'shape-cylinder.stl', 'hole', { severity: 'light', seed: 7 },
+   'four sites, 10 faces: a loop pinched at the cap centre and a loop folded over the top rim', false],
   ['shape-tube_severed.stl', 'shape-tube.stl', 'sever', { slots: 1, width: 1.0 },
    'ring wall severed by one 1 mm slot, capped: a C, genus 1 -> 0', true],
   ['shape-tube_severed-apart.stl', 'shape-tube.stl', 'sever', { slots: 2, width: 1.0 },

@@ -97,7 +97,7 @@ collide and 8 slots cut a ring into 8 bodies. Explicit parameters override it.
 
 ## Committed fixtures
 
-`fixtures/damage/` holds eleven files and `damage.json`. See
+`fixtures/damage/` holds twelve files and `damage.json`. See
 `fixtures/damage/README.md` for the table. Six of them are also in
 [nest-library](https://github.com/nolongerzzz/nest-library), where the Library
 fetches every row from, and listed under **Test Fixtures**: one per defect
