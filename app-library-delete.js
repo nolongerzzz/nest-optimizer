@@ -9,8 +9,8 @@
    ---------------------------------------------------------------------------
    A Library row is two things in the repository, not one:
 
-     1. a line in `var CATALOG` in app-library.js
-     2. a file in library/
+     1. a line in `var CATALOG` in app-library.js   (this repo)
+     2. the STL itself                              (nolongerzzz/nest-library)
 
    Dropping only (1) leaves an orphan blob nobody can reach. Dropping only (2)
    leaves a row that 404s when clicked - a DANGLING CATALOG REFERENCE, which is
@@ -45,7 +45,8 @@
        CORS headers, so a browser cannot complete it either.
 
    So the credential is SUPPLIED BY THE OPERATOR AT THE MOMENT OF THE DELETE -
-   a fine-grained PAT, scoped to this one repository, pasted into the confirm
+   a fine-grained PAT, scoped to nest-optimizer and nest-library (the two
+   repositories a row spans - see app-library-access.js), pasted into the confirm
    dialog. It is held in sessionStorage (not localStorage) so it dies with the
    tab, and it is never written anywhere this code can commit. That is the
    honest state of things: the delete works today, and it works because a human
@@ -63,7 +64,8 @@
    are therefore NOT decided here any more - they live in
    app-library-access.js and this file reads them:
 
-     - the target owner / repo / branch / API host
+     - the target owner / repos / branches / API host - one repo for the
+       catalog line, another for the file
      - the sessionStorage key the operator's token is held under
      - THE PERMISSION GATE (see mayDelete below)
 
@@ -142,7 +144,7 @@
   /* ---- names ---------------------------------------------------------
 
      Every name that reaches an API path or a regex goes through this first.
-     A catalog file name is a flat name in library/ - no slashes, no '..', no
+     A catalog file name is a flat name in nest-library - no slashes, no '..', no
      query, nothing that could aim a DELETE at a path this feature has no
      business touching, and nothing that could turn into a metacharacter in
      the catalog edit below. */
@@ -268,8 +270,10 @@
 
   /* ---- the API --------------------------------------------------------- */
 
-  function contentsUrl(path) {
-    return TGT().api + '/repos/' + TGT().owner + '/' + TGT().repo +
+  /* `repo` is TGT().repo for the catalog line and TGT().fileRepo for the
+     file - the two halves of a row live in different repositories. */
+  function contentsUrl(repo, path) {
+    return TGT().api + '/repos/' + TGT().owner + '/' + repo +
            '/contents/' + path.split('/').map(encodeURIComponent).join('/');
   }
 
@@ -292,10 +296,10 @@
     });
   }
 
-  function apiError(what, r) {
+  function apiError(what, r, repo) {
     var msg = (r.body && r.body.message) ? r.body.message : ('HTTP ' + r.status);
     if (r.status === 401) msg = 'the token was rejected (401) - expired, or not a token for this repo';
-    if (r.status === 403) msg = 'the token lacks contents:write on ' + TGT().owner + '/' + TGT().repo + ' (403)';
+    if (r.status === 403) msg = 'the token lacks contents:write on ' + TGT().owner + '/' + repo + ' (403)';
     if (r.status === 404) msg = 'not found (404) - wrong repo, wrong branch, or the token cannot see it';
     if (r.status === 409) msg = 'the branch moved under us (409) - reload and try again';
     return new Error(what + ': ' + msg);
@@ -304,49 +308,62 @@
   /* The whole repository side of one delete. Catalog entry first, blob
      second - see the header. Resolves with a report of what it actually did;
      rejects with the first thing that went wrong, having done nothing after
-     it. */
+     it.
+
+     The two writes go to two repositories: the catalog line to TGT().repo,
+     the file to TGT().fileRepo. The order rule does not care - it is about
+     which reference exists, not where - so it holds across the split
+     unchanged. */
   function performDelete(entry, token) {
     var file = entry.file;
-    var blobPath = TGT().dir + file;
+    var t = TGT();
+    var blobPath = t.dir + file;
     var why = 'Library: delete ' + file;
     var done = { file: file, catalog: null, blob: null };
 
     return Promise.resolve().then(function () {
       if (!safeName(file)) throw new Error('refusing to delete "' + file + '" - not a plain library file name');
+      /* A row from any other source has its file somewhere this module does
+         not write to - deleting its catalog line would leave that file
+         orphaned in a repo nobody is looking at, or worse, a DELETE would be
+         aimed at a same-named file in the wrong one. */
+      if (entry.source !== t.source) throw new Error('refusing to delete "' + file + '" - it is served from "' +
+        entry.source + '", and only rows from "' + t.source + '" (' + t.owner + '/' + t.fileRepo +
+        ') can be deleted here - nothing was sent');
       if (!token) throw new Error('no GitHub token - nothing was sent');
-      return ghFetch(contentsUrl(TGT().catalog) + '?ref=' + encodeURIComponent(TGT().branch), token).then(ghJson);
+      return ghFetch(contentsUrl(t.repo, t.catalog) + '?ref=' + encodeURIComponent(t.branch), token).then(ghJson);
     }).then(function (r) {
-      if (!r.ok || !r.body || !r.body.content) throw apiError('reading ' + TGT().catalog, r);
+      if (!r.ok || !r.body || !r.body.content) throw apiError('reading ' + t.catalog, r, t.repo);
       var edit = removeCatalogEntry(b64decode(r.body.content), file);
       if (!edit.ok) throw new Error('the catalog entry could not be removed cleanly: ' + edit.reason +
                                     ' - nothing was deleted');
-      return ghFetch(contentsUrl(TGT().catalog), token, {
+      return ghFetch(contentsUrl(t.repo, t.catalog), token, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           message: why + ' (catalog entry)',
           content: b64encode(edit.text),
           sha: r.body.sha,
-          branch: TGT().branch
+          branch: t.branch
         })
       }).then(ghJson);
     }).then(function (r) {
-      if (!r.ok) throw apiError('rewriting ' + TGT().catalog, r);
+      if (!r.ok) throw apiError('rewriting ' + t.catalog, r, t.repo);
       done.catalog = (r.body && r.body.commit) ? r.body.commit.sha : 'written';
-      return ghFetch(contentsUrl(blobPath) + '?ref=' + encodeURIComponent(TGT().branch), token).then(ghJson);
+      return ghFetch(contentsUrl(t.fileRepo, blobPath) + '?ref=' + encodeURIComponent(t.fileBranch), token).then(ghJson);
     }).then(function (r) {
       /* The catalog entry is already gone, so a blob that is not there is the
          state we were asking for, not a failure. Say so and stop. */
       if (r.status === 404) { done.blob = 'already gone'; return null; }
-      if (!r.ok || !r.body || !r.body.sha) throw apiError('reading ' + blobPath, r);
-      return ghFetch(contentsUrl(blobPath), token, {
+      if (!r.ok || !r.body || !r.body.sha) throw apiError('reading ' + blobPath, r, t.fileRepo);
+      return ghFetch(contentsUrl(t.fileRepo, blobPath), token, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: why + ' (file)', sha: r.body.sha, branch: TGT().branch })
+        body: JSON.stringify({ message: why + ' (file)', sha: r.body.sha, branch: t.fileBranch })
       }).then(ghJson);
     }).then(function (r) {
       if (r === null) return done;
-      if (!r.ok) throw apiError('deleting ' + blobPath, r);
+      if (!r.ok) throw apiError('deleting ' + blobPath, r, t.fileRepo);
       done.blob = (r.body && r.body.commit) ? r.body.commit.sha : 'deleted';
       return done;
     });
@@ -391,7 +408,7 @@
         '<p class="nso-confirm-body" id="nso-confirm-body"></p>' +
         '<p class="nso-confirm-note" id="nso-confirm-note"></p>' +
         '<label class="nso-confirm-tok" for="nso-confirm-token">GitHub token' +
-          ' <span>fine-grained, contents:write on this repo</span>' +
+          ' <span>fine-grained, contents:write on nest-optimizer + nest-library</span>' +
           '<input id="nso-confirm-token" type="password" autocomplete="off"' +
           ' spellcheck="false" placeholder="github_pat_…"></label>' +
         '<p class="nso-confirm-err" id="nso-confirm-err" hidden></p>' +
@@ -443,10 +460,11 @@
       strong.textContent = entry.file;
       d.body.appendChild(strong);
       d.body.appendChild(document.createTextNode('?'));
-      d.note.textContent = 'This removes its CATALOG entry from ' + TGT().catalog +
-        ' and deletes library/' + entry.file + ' from ' +
-        TGT().owner + '/' + TGT().repo + ' on ' + TGT().branch +
-        '. Two commits, on the real repository. There is no undo from here.';
+      var t = TGT();
+      d.note.textContent = 'This removes its CATALOG entry from ' + t.catalog + ' in ' +
+        t.owner + '/' + t.repo + ' on ' + t.branch + ', then deletes ' + t.dir + entry.file +
+        ' from ' + t.owner + '/' + t.fileRepo + ' on ' + t.fileBranch +
+        '. Two commits, on the real repositories. There is no undo from here.';
       d.err.setAttribute('hidden', 'hidden');
       d.err.textContent = '';
       d.token.value = storedToken();

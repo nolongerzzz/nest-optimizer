@@ -115,6 +115,7 @@
     "gcode:scope-drive": "node tools/gcode-test/microscope-drive-check.mjs",
     "gcode:scope-overlay": "node tools/gcode-test/microscope-overlay-drive-check.mjs",
     "gcode:fixture": "node tools/gcode-test/make-fixture.js",
+    "library:live": "node tools/nso_library_live_check.js",
     "test": "node tools/run-tests.mjs",
     "test:par": "node tools/run-tests-parallel.mjs",
     "open:fixtures": "node tools/nso_open_make_fixtures.js --check",

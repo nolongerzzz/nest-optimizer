@@ -98,13 +98,16 @@ collide and 8 slots cut a ring into 8 bodies. Explicit parameters override it.
 ## Committed fixtures
 
 `fixtures/damage/` holds eleven files and `damage.json`. See
-`fixtures/damage/README.md` for the table. Six of them are also in `library/`
-and listed in the Library under **Test Fixtures**, one per defect class plus
-the shredded extreme. `npm run damage:test` holds each committed file to its
-manifest through the checker. It also checks that each Library row points at
-a byte-identical copy.
+`fixtures/damage/README.md` for the table. Six of them are also in
+[nest-library](https://github.com/nolongerzzz/nest-library), where the Library
+fetches every row from, and listed under **Test Fixtures**: one per defect
+class plus the shredded extreme. `npm run damage:test` holds each committed
+file to its manifest through the checker. With a nest-library checkout
+(`NSO_LIBRARY_DIR`, or `../nest-library`, as CI has) it also checks that each
+Library row's file there is byte-identical; without one it SKIPs that, out
+loud. The generator copies the six into the checkout when there is one.
 
-Because they sit under `fixtures/` and `library/`, the repo-wide scanners pick
+Because they sit under `fixtures/`, the repo-wide scanners pick
 them up on their own. `selfint:equiv` holds `NSO_Repair.js` to the checker on
 them, `defects:test` holds the viewport overlay's `locate()` to it, and
 `fixtures:gate` checks their format.

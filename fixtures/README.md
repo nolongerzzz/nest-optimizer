@@ -96,15 +96,17 @@ Everything **rests on z = 0** and is centred on x and y, which is what
 origin-centred instead; it predates this and stays as it is, because
 `tools/sculpt_selftest.js` and the Soften gate measure against that placement.
 
-All thirteen are also in `library/`, as real catalog rows - the eight
+All thirteen are also real catalog rows, in the nest-library repo - the eight
 primitives under **Stock Blanks**, the five boxes under **Test Fixtures**.
 `tools/nso_quick_test.js` section 6 byte-compares every row against its fixture
-here, so the two copies cannot drift apart.
+here (given a nest-library checkout - see `library/README.md`), so the two
+copies cannot drift apart.
 
 ## Hinge and strap fixtures: real boolean unions since 2026-09-16
 
 `hinge_knuckle_box.stl`, `hinge_knuckle_lid.stl`, `hinge_pip.stl` and
-`lid_strap.stl` (identical copies in `library/`) were first written by an
+`lid_strap.stl` (identical copies in nest-library; `hinge_knuckle_box.stl`
+also in `library/`) were first written by an
 early generator that concatenated closed shells with deliberate overlap. That
 slices correctly (a slicer union-fills the overlap) but every overlap was a
 real piercing pair, so Join / Subtract could not be run on them cleanly.

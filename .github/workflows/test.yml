@@ -48,6 +48,18 @@
 # narrower than the working branches'. That is fine - the check name is stable,
 # so branch protection keeps working while the suite grows.
 #
+# THE LIBRARY'S PIECES ARE IN A SECOND REPO, AND IT IS CHECKED OUT HERE
+# The catalog's STLs live in nolongerzzz/nest-library; this repo's library/
+# keeps only the fixtures checks load by name. The checks about the catalog
+# itself - every row has a file, the generators' output is byte-identical to
+# the shipped piece, every category really loads - read a nest-library
+# checkout through tools/nso_library_dir.js and SKIP, out loud, without one.
+# A SKIP is not a pass, and CI is the one place that must never be quietly
+# skipping them, so every shard checks nest-library out beside the suite and
+# points NSO_LIBRARY_DIR at it. It is main that is checked out, because main
+# is what the page's raw.githubusercontent.com base serves: the comparison
+# is against what users actually load.
+#
 # THE TESTS NEED NO NETWORK
 # index.html names three.js and the manifold CSG kernel on cdn.jsdelivr.net;
 # tools/cth-test/browser-lib.mjs answers those requests from vendor/manifold/ and
@@ -79,6 +91,8 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    env:
+      NSO_LIBRARY_DIR: ${{ github.workspace }}/nest-library
     strategy:
       # Every shard reports. One shard failing must not cancel the other five -
       # that would put back exactly the blindness the failure-tolerant runner
@@ -90,6 +104,15 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@v5
+
+      # After the main checkout, never before: that one cleans the workspace.
+      # nest-library is public, so the job's own token reads it.
+      - name: Check out nest-library
+        uses: actions/checkout@v5
+        with:
+          repository: nolongerzzz/nest-library
+          ref: main
+          path: nest-library
 
       - name: Set up Node
         uses: actions/setup-node@v5

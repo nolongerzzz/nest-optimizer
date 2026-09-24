@@ -28,12 +28,17 @@
      4. confirming sends exactly four requests in the one safe order: read
         the catalog, write the catalog WITHOUT the entry, read the blob,
         delete the blob - catalog before blob, so a half-finished run can
-        never leave a row pointing at a file that is gone
+        never leave a row pointing at a file that is gone. The catalog pair
+        goes to nest-optimizer on claude-wip and the blob pair to
+        nest-library on main: a row's two halves live in two repositories
+        (app-library-access.js), and each request is checked for which.
      5. the row and the catalog entry then disappear from the browser, and a
         group that loses its last row is removed
      6. a refused write removes nothing: the error is shown, the row stays,
         and no blob DELETE is sent
-     7. no page errors  */
+     7. a row served from any other source is refused before a single
+        request - Delete cannot say which repository its file is in
+     8. no page errors  */
 'use strict';
 
 const fs = require('fs');
@@ -180,8 +185,9 @@ withApp(async (page, logs) => {
     check('Delete is DISABLED on arrival - no single click can delete',
       d.goDisabled === true);
     check('it names the file', /pin\.stl/.test(d.names), d.names);
-    check('and names the repository and branch it would write to',
-      /nolongerzzz\/nest-optimizer/.test(d.note) && /claude-wip/.test(d.note), d.note.slice(0, 90));
+    check('and names both repositories and branches it would write to',
+      /nolongerzzz\/nest-optimizer on claude-wip/.test(d.note) &&
+      /nolongerzzz\/nest-library on main/.test(d.note), d.note);
     check('nothing has been sent yet', (await ghCalls(page)).length === 0);
   }
 
@@ -243,17 +249,19 @@ withApp(async (page, logs) => {
     await page.waitForFunction(f => !document.querySelector('#library-list .library-item[data-file="' + f + '"]'),
       victim, { timeout: 15000 });
     calls = await ghCalls(page);
-    const seq = calls.map(c => c.method + ' ' + c.url.replace('https://api.github.com/repos/nolongerzzz/nest-optimizer/contents/', ''));
+    const seq = calls.map(c => c.method + ' ' + c.url.replace('https://api.github.com/repos/nolongerzzz/', ''));
     seq.forEach(s => console.log('     ' + s));
     check('exactly four requests', calls.length === 4, calls.length + '');
-    check('1. GET the catalog source on the target branch',
-      /^GET app-library\.js\?ref=claude-wip$/.test(seq[0] || ''), seq[0]);
-    check('2. PUT the catalog source back',
-      /^PUT app-library\.js$/.test(seq[1] || ''), seq[1]);
-    check('3. GET the blob for its sha',
-      /^GET library\/box_closed\.stl\?ref=claude-wip$/.test(seq[2] || ''), seq[2]);
-    check('4. DELETE the blob',
-      /^DELETE library\/box_closed\.stl$/.test(seq[3] || ''), seq[3]);
+    check('1. GET the catalog source from nest-optimizer, on claude-wip',
+      /^GET nest-optimizer\/contents\/app-library\.js\?ref=claude-wip$/.test(seq[0] || ''), seq[0]);
+    check('2. PUT the catalog source back to nest-optimizer',
+      /^PUT nest-optimizer\/contents\/app-library\.js$/.test(seq[1] || ''), seq[1]);
+    check('3. GET the blob for its sha from nest-library, on main',
+      /^GET nest-library\/contents\/box_closed\.stl\?ref=main$/.test(seq[2] || ''), seq[2]);
+    check('4. DELETE the blob from nest-library',
+      /^DELETE nest-library\/contents\/box_closed\.stl$/.test(seq[3] || ''), seq[3]);
+    check('nothing is sent to this repo\'s library/ - the fixture copy kept there is not the row',
+      calls.every(c => c.url.indexOf('/contents/library/') === -1));
     check('the catalog write happens BEFORE the blob delete - a half-run can ' +
       'orphan a file but never dangle a row',
       seq.findIndex(s => s.startsWith('PUT')) < seq.findIndex(s => s.startsWith('DELETE')));
@@ -270,8 +278,8 @@ withApp(async (page, logs) => {
     check('it is a real conditional write - the sha it read is sent back',
       put.sha === 'catsha' && put.branch === 'claude-wip', JSON.stringify({ sha: put.sha, branch: put.branch }));
     const kill = JSON.parse(calls[3].body);
-    check('the DELETE sends the blob sha it read, on the same branch',
-      kill.sha === 'blobsha' && kill.branch === 'claude-wip', JSON.stringify(kill));
+    check('the DELETE sends the blob sha it read, on nest-library\'s branch',
+      kill.sha === 'blobsha' && kill.branch === 'main', JSON.stringify(kill));
     check('both commit messages name the file',
       put.message.indexOf(victim) !== -1 && kill.message.indexOf(victim) !== -1,
       put.message + ' / ' + kill.message);
@@ -374,7 +382,37 @@ withApp(async (page, logs) => {
   }
 
   /* ---------------------------------------------------------------- 7 */
-  console.log('\n=== 7. no page errors ===');
+  /* ---------------------------------------------------------------- 7 */
+  console.log('\n=== 7. a row from another source is refused, with nothing sent ===');
+  {
+    await resetGh(page);
+    /* Every shipped row is nest-library's, so this is a hand-made row on the
+       'local' source - the shape a future local row would have. Through the
+       module's one entry point, the same call the row's x makes. */
+    await page.evaluate(() => {
+      window.nsoLibraryDelete.request({ file: 'pin.stl', category: 'Shaped Pieces', source: 'local' }, {});
+    });
+    await page.waitForFunction(() => {
+      const b = document.getElementById('nso-confirm-back');
+      return !!(b && !b.hasAttribute('hidden'));
+    }, null, { timeout: 5000 });
+    await page.fill('#nso-confirm-token', 'github_pat_pretend');
+    await page.click('#nso-confirm-go');
+    await page.waitForFunction(() => {
+      const e = document.getElementById('nso-confirm-err');
+      return e && !e.hasAttribute('hidden');
+    }, null, { timeout: 15000 });
+    const shown = await page.evaluate(() => document.getElementById('nso-confirm-err').textContent);
+    const c = await ghCalls(page);
+    check('it is refused, and the reason names both sources',
+      /refusing to delete/.test(shown) && /"local"/.test(shown) && /"nest-library"/.test(shown), shown);
+    check('ZERO requests were sent', c.length === 0, c.map(x => x.method + ' ' + x.url).join(', ') || 'none');
+    await page.click('#nso-confirm-cancel');
+    await page.waitForFunction(() => document.getElementById('nso-confirm-back').hasAttribute('hidden'),
+      null, { timeout: 5000 });
+  }
+
+  console.log('\n=== 8. no page errors ===');
   {
     const bad = logs.filter(l => l.startsWith('[pageerror]'));
     check('no uncaught page errors', bad.length === 0, bad.slice(0, 3).join(' | ') || 'clean');

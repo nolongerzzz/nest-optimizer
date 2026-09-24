@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Fixture / library integrity audit: every .stl under fixtures/ and library/.
+"""Fixture / library integrity audit: every .stl under fixtures/ and library/,
+and the catalog's own pieces in a nest-library checkout when there is one.
 
     python3 tools/fixture_audit.py                 # table, exit 0
     python3 tools/fixture_audit.py --gate          # exit 1 on any FORMAT failure
@@ -28,6 +29,12 @@ Three checks per file, in this order:
      a vertex pinch that no edge count can see - the 40921 bowtie case, which
      stl_watertight_check.py passed. Reported as PINCH.
 
+The catalog's STLs live in the nest-library repo now; library/ keeps only the
+fixtures checks load by name. The checkout is found the way
+tools/nso_library_dir.js finds it - $NSO_LIBRARY_DIR (or "none"), else a
+sibling ../nest-library - and its files that library/ does not also carry are
+audited as nest-library/<name>. Without one they are SKIPped, and it says so.
+
 Only FORMAT gates: fixtures/repair/ and fixtures/open/ hold meshes that are
 defective on purpose, so CANONICAL and EULER are reported per file for the
 reader to judge, never failed. A mesh that fails CANONICAL is not a bad
@@ -45,6 +52,21 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import mesh_validate as mv  # noqa: E402
 
 ROOTS = ("fixtures", "library")
+
+
+def nest_library_dir(root: Path) -> Path | None:
+    """Same rule as tools/nso_library_dir.js - keep the two in step."""
+    import os
+    env = os.environ.get("NSO_LIBRARY_DIR")
+    if env == "none":
+        return None
+    if env:
+        p = Path(env).resolve()
+        if not p.is_dir():
+            raise SystemExit(f"NSO_LIBRARY_DIR={env} is not a directory")
+        return p
+    sib = (root / ".." / "nest-library").resolve()
+    return sib if sib.is_dir() else None
 
 
 def format_check(path: Path) -> dict:
@@ -127,6 +149,14 @@ def main() -> int:
         if base.is_dir():
             files += sorted(p for p in base.rglob("*.stl") if p.is_file())
     rows = [audit_file(p, str(p.relative_to(root)), not args.no_selfint) for p in files]
+    nl = nest_library_dir(root)
+    if nl is None:
+        if not args.json:
+            print("  SKIP the catalog-only STLs in nest-library - no nest-library checkout - "
+                  "set NSO_LIBRARY_DIR or clone https://github.com/nolongerzzz/nest-library beside this repo")
+    else:
+        extra = sorted(p for p in nl.glob("*.stl") if p.is_file() and not (root / "library" / p.name).exists())
+        rows += [audit_file(p, "nest-library/" + p.name, not args.no_selfint) for p in extra]
 
     if args.json:
         print(json.dumps({"root": str(root), "files": rows}, indent=1))
@@ -149,7 +179,8 @@ def main() -> int:
     pinch = [r for r in rows if r.get("pinch")]
     geo_fail = [r for r in rows if r.get("verdict") == "FAIL"]
     if not args.json:
-        print(f"\n{len(rows)} files under {', '.join(ROOTS)} in {root}")
+        print(f"\n{len(rows)} files under {', '.join(ROOTS)} in {root}" +
+              (f", and nest-library at {nl}" if nl else ""))
         print(f"  FORMAT failures : {len(fmt_fail)}" + (" - " + ", ".join(r['file'] for r in fmt_fail) if fmt_fail else ""))
         print(f"  PINCH (closed by edge count, odd Euler): {len(pinch)}" + (" - " + ", ".join(r['file'] for r in pinch) if pinch else ""))
         print(f"  canonical verdict FAIL: {len(geo_fail)} (reported, not gated - see the docstring)")

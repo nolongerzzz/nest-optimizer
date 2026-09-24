@@ -28,6 +28,7 @@ const path = require('path');
 const fs = require('fs');
 const { withApp, selectModel, openFinishMenu, ROOT } = require('./nso_app_harness');
 const fine = require('./nso_skin_fine_samples.js');
+const LIBDIR = require('./nso_library_dir');
 
 let fails = 0;
 const check = (name, cond, detail) => {
@@ -94,7 +95,11 @@ withApp(async (page, logs) => {
   }
 
   console.log('\n=== each one loaded by CLICKING its row ===');
+  /* The row fetches from nest-library; the harness answers from the checkout
+     (nso_library_dir.js). None of these pieces is a fixture kept in this
+     repo, so without a checkout there is nothing to answer with - SKIP. */
   for (const f of fine.CATALOG_FILES) {
+    if (!LIBDIR.catalogFile(f)) { LIBDIR.skip(f + ': loaded from the Library tab'); continue; }
     const before = await page.evaluate(() => state.models.length);
     await page.evaluate(() => { const b = document.getElementById('btn-library'); if (b) b.click(); });
     await page.evaluate(name => {

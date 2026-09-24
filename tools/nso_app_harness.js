@@ -13,6 +13,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
+const LIB = require('./nso_library_dir');
 
 /* The sandbox ships a pinned Chromium that may not match this playwright
    build's expected revision, so prefer whatever is actually on disk. */
@@ -66,9 +67,17 @@ async function withApp(fn, opts) {
   opts = opts || {};
   const srv = await serve();
   const port = srv.address().port;
+  const live = !!(opts.liveLibrary || process.env.NSO_LIBRARY_LIVE === '1');
+  /* A live run is the one run whose page really goes out to the network, so
+     it is the one that must honour an egress proxy when the box has one.
+     Every other run is answered locally and gets no proxy at all. And https
+     ONLY: the app itself is served over plain http from 127.0.0.1, which
+     Playwright's own proxy option would send through the proxy too. */
+  const proxyUrl = live && (process.env.HTTPS_PROXY || process.env.https_proxy);
   const browser = await chromium.launch({
     executablePath: chromiumPath(),
     args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox']
+      .concat(proxyUrl ? ['--proxy-server=https=' + proxyUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '')] : [])
   });
   const page = await browser.newPage();
   const logs = [];
@@ -89,6 +98,29 @@ async function withApp(fn, opts) {
   await page.route('https://cdn.jsdelivr.net/npm/manifold-3d@3.5.3/manifold.wasm', r =>
     r.fulfill({ status: 200, contentType: 'application/wasm',
                 body: fs.readFileSync(path.join(ROOT, 'vendor', 'manifold', 'manifold.wasm')) }));
+
+  /* The Library catalog's rows fetch from nest-library on
+     raw.githubusercontent.com. Answered here from disk, like the CDN above:
+     the nest-library checkout when there is one, else this repo's library/
+     copy for the fixtures kept here (nso_library_dir.catalogFile), else a
+     404 - which the page reports as "Library load failed", exactly as it
+     would a file missing from the live repo. Every request is recorded on
+     page.__libraryServed so a check can prove where its bytes came from.
+
+     opts.liveLibrary (or NSO_LIBRARY_LIVE=1) leaves these requests alone and
+     lets them go to the real repository - tools/nso_library_live_check.js. */
+  page.__libraryServed = [];
+  if (!live) {
+    await page.route(LIB.RAW_BASE + '**', r => {
+      const name = decodeURIComponent(r.request().url().slice(LIB.RAW_BASE.length).split('?')[0]);
+      const file = /^[^/\\]+$/.test(name) ? LIB.catalogFile(name) : null;
+      page.__libraryServed.push({ name, file });
+      if (!file) return r.fulfill({ status: 404, contentType: 'text/plain', body: '404: Not Found' });
+      return r.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8',
+                         headers: { 'access-control-allow-origin': '*' },
+                         body: fs.readFileSync(file) });
+    });
+  }
 
   // APP_URL (or opts.url) points the same drive at a deployed copy, e.g. the
   // wip preview site, instead of the local tree. CDN routes still apply.

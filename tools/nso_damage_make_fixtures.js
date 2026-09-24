@@ -2,7 +2,7 @@
 /* Deterministic generator for fixtures/damage/: known-clean fixtures with ONE
  * controlled defect each, injected by tools/nso_damage.js.
  *
- *   node tools/nso_damage_make_fixtures.js            # write fixtures/damage/ + library copies
+ *   node tools/nso_damage_make_fixtures.js            # write fixtures/damage/ + nest-library copies
  *   node tools/nso_damage_make_fixtures.js --check    # regenerate to a temp dir and byte-diff
  *
  * The same arrangement as tools/nso_open_make_fixtures.js (PR #82): a clean
@@ -23,14 +23,18 @@ const path = require('path');
 const os = require('os');
 const D = require('./nso_damage.js');
 const { readSTL, writeSTL } = require('./nso_stl_io.js');
+const LIBDIR = require('./nso_library_dir.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const OUT = path.join(ROOT, 'fixtures', 'damage');
-const LIB = path.join(ROOT, 'library');
+/* The Library's files live in nolongerzzz/nest-library (app-library.js,
+   source 'nest-library'). The library-flagged pieces are copied into a
+   checkout of it when there is one; with none, the copy is skipped out loud. */
+const LIB = LIBDIR.libraryDir();
 const SRC = f => path.join(ROOT, 'fixtures', 'quick', f);
 
 /* [file, source, type, params, what, library?]
-   `library` marks the ones copied into library/ and listed in the Library
+   `library` marks the ones copied into nest-library and listed in the Library
    under Test Fixtures - one per defect class, plus the shredded extreme. */
 const FIXTURES = [
   ['shape-sphere_hole.stl', 'shape-sphere.stl', 'hole', { severity: 'one', seed: 1 },
@@ -103,14 +107,16 @@ async function main() {
     };
     for (const spec of FIXTURES) {
       cmp(path.join(tmp, spec[0]), path.join(OUT, spec[0]), 'fixtures/damage/' + spec[0]);
-      if (spec[5]) cmp(path.join(tmp, spec[0]), path.join(LIB, spec[0]), 'library/' + spec[0]);
+      if (spec[5] && LIB) cmp(path.join(tmp, spec[0]), path.join(LIB, spec[0]), 'nest-library/' + spec[0]);
+      else if (spec[5]) LIBDIR.skip('nest-library/' + spec[0] + ' byte-identical to fixtures/damage/');
     }
     cmp(path.join(tmp, 'damage.json'), path.join(OUT, 'damage.json'), 'fixtures/damage/damage.json');
     fs.rmSync(tmp, { recursive: true, force: true });
     process.exit(bad ? 1 : 0);
   }
+  if (!LIB) LIBDIR.skip('copying the Library pieces into nest-library (no checkout)');
   for (const e of await build(OUT, LIB)) {
-    console.log('  wrote ' + e.stl + '  ' + e.expected.triangles + ' tris' + (e.library ? '  (+ library/)' : ''));
+    console.log('  wrote ' + e.stl + '  ' + e.expected.triangles + ' tris' + (e.library && LIB ? '  (+ nest-library/)' : ''));
   }
 }
 

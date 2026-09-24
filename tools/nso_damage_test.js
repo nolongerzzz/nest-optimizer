@@ -22,7 +22,8 @@
  *   6. SEVERITY  more severity is more damage, and the same call is the same
  *                bytes.
  *   7. FIXTURES  every committed file in fixtures/damage/ still reads as its
- *                manifest says, and the Library rows are those files.
+ *                manifest says, and the Library rows (served from
+ *                nest-library) are those files.
  *
  * Run: node tools/nso_damage_test.js */
 'use strict';
@@ -35,6 +36,7 @@ const D = require('./nso_damage.js');
 const G = require('./nso_damage_make_fixtures.js');
 const T = require('../nso_thickness.js');
 const { readSTL, writeSTL } = require('./nso_stl_io.js');
+const LIBDIR = require('./nso_library_dir.js');
 
 const ROOT = path.resolve(__dirname, '..');
 const MV = path.join(__dirname, 'mesh_validate.py');
@@ -305,9 +307,20 @@ function throws(fn) { try { fn(); return null; } catch (e) { return e.message; }
     const unflagged = rows.filter(r => manifest.entries.some(e => e.stl === r.file && !e.library));
     check('...and nothing the manifest keeps out of the Library is in it', unflagged.length === 0,
           unflagged.map(r => r.file).join(', '));
-    const drift = want.filter(f => !fs.existsSync(path.join(ROOT, 'library', f)) ||
-      !fs.readFileSync(path.join(ROOT, 'library', f)).equals(fs.readFileSync(path.join(G.OUT, f))));
-    check('...and library/ holds each one byte-identical to fixtures/damage/', drift.length === 0, drift.join(', '));
+    const src = f => ((cat.match(new RegExp("\\{\\s*file:\\s*'" + f.replace(/[.]/g, '\\.') + "'[^}]*source:\\s*'([^']+)'")) || [])[1]);
+    check('...each served from nest-library, where the catalog fetches from',
+          want.every(f => src(f) === 'nest-library'), want.map(src).join(', '));
+    const NL = LIBDIR.libraryDir();
+    if (NL) {
+      const drift = want.filter(f => !fs.existsSync(path.join(NL, f)) ||
+        !fs.readFileSync(path.join(NL, f)).equals(fs.readFileSync(path.join(G.OUT, f))));
+      check('...and nest-library holds each one byte-identical to fixtures/damage/', drift.length === 0, drift.join(', '));
+    } else {
+      LIBDIR.skip('...nest-library holds each one byte-identical to fixtures/damage/');
+    }
+    const stray = want.filter(f => fs.existsSync(path.join(ROOT, 'library', f)));
+    check('...and none of them is copied into this repo\'s library/ (no check loads them from there)',
+          stray.length === 0, stray.join(', '));
   }
 
   fs.rmSync(TMP, { recursive: true, force: true });

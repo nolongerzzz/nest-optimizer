@@ -6,7 +6,7 @@ convention: the name is `<clean>_<defect>.stl`, the STL header starts with
 `NSO damage fixture:`, and every file is generated rather than hand-made.
 
 ```sh
-node tools/nso_damage_make_fixtures.js           # rewrite them (and the library/ copies)
+node tools/nso_damage_make_fixtures.js           # rewrite them (and the nest-library copies, given a checkout)
 node tools/nso_damage_make_fixtures.js --check   # byte-diff against the tree
 node tools/nso_damage_test.js                    # hold every file to damage.json via the checker
 ```

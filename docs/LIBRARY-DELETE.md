@@ -5,6 +5,22 @@ static, client-side app to delete a file from this repository, and does it need
 something that is not in place?* This is that answer, plus how the feature that
 was built on it works and what is deliberately not built.
 
+> **Update — the file half of a row now lives in
+> [nolongerzzz/nest-library](https://github.com/nolongerzzz/nest-library).**
+> The catalog line is still `app-library.js` here, on `claude-wip`; the STL is
+> `<name>.stl` at the root of nest-library, on `main`, which is what the page's
+> `nest-library` source fetches from
+> (`https://raw.githubusercontent.com/nolongerzzz/nest-library/main/<name>`).
+> `app-library-access.js` names both sides (`repo`/`branch`/`catalog` and
+> `fileRepo`/`fileBranch`/`dir`), so the token must have Contents: Read and
+> write on **both** repositories. The write order and the reasoning below are
+> unchanged — the rule is about which reference exists, not where. Where this
+> document says `library/x.stl`, read nest-library's `x.stl`. This repo's
+> `library/` now holds only fixtures that checks load by name
+> ([library/README.md](../library/README.md)). Delete also refuses, before
+> sending anything, a row whose `source` is not `nest-library`: it cannot say
+> which repository that row's file is in.
+
 ---
 
 ## 1. What a Library row is, in the repository
@@ -13,8 +29,8 @@ A row is **two** things, not one:
 
 | # | Where | What |
 |---|-------|------|
-| 1 | `app-library.js`, `var CATALOG` | one authored line: `{ file: 'x.stl', category: '…', source: 'local' }` |
-| 2 | `library/x.stl` | the actual mesh the row fetches |
+| 1 | `app-library.js`, `var CATALOG` (this repo) | one authored line: `{ file: 'x.stl', category: '…', source: 'nest-library' }` |
+| 2 | `x.stl` in nest-library | the actual mesh the row fetches |
 
 `library/` is **not** a directory listing — GitHub Pages does not serve one, and
 `app-library.js` says so at length. The catalog is the only index that exists.
@@ -211,9 +227,9 @@ order for the same fail-safe reason.
 The one-time manual check, with a real token:
 
 1. Open the app, click `×` on a throwaway library row, confirm.
-2. `git fetch && git log origin/claude-wip` — two commits, "(catalog entry)" and
-   "(file)".
-3. `curl -I https://raw.githubusercontent.com/nolongerzzz/nest-optimizer/claude-wip/library/<file>`
+2. "(catalog entry)" is on nest-optimizer's `claude-wip`, "(file)" on
+   nest-library's `main`, and the catalog one is the earlier.
+3. `curl -I https://raw.githubusercontent.com/nolongerzzz/nest-library/main/<file>`
    → 404.
 4. Reload the app — the row is gone.
 

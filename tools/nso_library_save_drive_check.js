@@ -28,20 +28,22 @@
         leave the library and the repository untouched, with ZERO requests
      3. no single click can save - Save stays disabled until a name, a
         category AND a token are all present, and the keyboard lands on Cancel
-     4. the dialog names the exact file, category, repository and branch, and
-        keeps naming the right ones as they are typed
+     4. the dialog names the exact file, category, BOTH repositories and
+        branches, and keeps naming the right ones as they are typed
      5. confirming sends exactly four requests in the one safe order: read the
         catalog, check the name is free, WRITE THE FILE, then write the
         catalog - file before catalog, so a half-finished run can never leave
-        a row pointing at a file that is not there
+        a row pointing at a file that is not there. The file pair goes to
+        nest-library on main and the catalog pair to nest-optimizer on
+        claude-wip (app-library-access.js); every request is checked for which
      6. the bytes committed are byte-for-byte the shipped exporter's bytes
      7. the catalog it commits really parses and really contains the piece
      8. the row and the entry then appear in the browser, and a new category
         gets its own section
      9. a refused catalog write leaves NO row and NO entry - the failure
         orphans a file, which is the harmless shape
-    10. a duplicate name and a taken file name are each refused before any
-        write is sent at all
+    10. a duplicate name and a taken file name - the orphan check 9 left in
+        nest-library - are each refused before any write is sent at all
     11. no page errors  */
 'use strict';
 
@@ -59,9 +61,10 @@ const LIB_SRC = fs.readFileSync(path.join(ROOT, 'app-library.js'), 'utf8');
 
 /* Stand in for api.github.com inside the page, recording every request.
 
-   `have` is the set of paths the stub pretends already exist. app-library.js
-   is in it; library/ files are not, which is what makes a save of a new name
-   the normal path and lets check 10 put one back to prove the refusal. */
+   `have` is the set of repo/path pairs the stub pretends already exist.
+   nest-optimizer's app-library.js is in it; nest-library files are not, which
+   is what makes a save of a new name the normal path. A PUT adds its path, so
+   the file section 10 orphans is really there for section 11 to trip over. */
 async function installStub(page, source) {
   await page.evaluate(src => {
     const enc = t => {
@@ -70,7 +73,7 @@ async function installStub(page, source) {
       for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
       return btoa(s);
     };
-    window.__gh = { calls: [], src: src, fail: null, have: ['app-library.js'] };
+    window.__gh = { calls: [], src: src, fail: null, have: ['nest-optimizer/app-library.js'] };
     const real = window.fetch.bind(window);
     window.fetch = function (url, init) {
       const u = String(url);
@@ -88,9 +91,10 @@ async function installStub(page, source) {
         return Promise.resolve(new Response(JSON.stringify({ message: f.message || 'nope' }),
           { status: f.status || 403 }));
       }
-      const pathPart = decodeURIComponent(u.split('/contents/')[1].split('?')[0]);
+      const repo = u.split('/repos/nolongerzzz/')[1].split('/')[0];
+      const pathPart = repo + '/' + decodeURIComponent(u.split('/contents/')[1].split('?')[0]);
       if (method === 'GET') {
-        if (pathPart === 'app-library.js')
+        if (pathPart === 'nest-optimizer/app-library.js')
           return Promise.resolve(new Response(JSON.stringify({ content: enc(window.__gh.src), sha: 'catsha' }),
             { status: 200 }));
         if (window.__gh.have.indexOf(pathPart) !== -1)
@@ -128,7 +132,11 @@ const statusOf = page => page.evaluate(() => document.getElementById('status').t
 
 /* The path a PUT/GET was aimed at, which is what the ordering assertions are
    really about. */
-const pathOf = c => decodeURIComponent(c.url.split('/contents/')[1].split('?')[0]);
+/* repo/path, e.g. 'nest-optimizer/app-library.js' or 'nest-library/pin.stl' -
+   the repository is part of what is asserted, not stripped off. */
+const pathOf = c => c.url.split('/repos/nolongerzzz/')[1].split('/')[0] + '/' +
+  decodeURIComponent(c.url.split('/contents/')[1].split('?')[0]);
+const refOf = c => (c.url.split('?ref=')[1] || null);
 const seq = calls => calls.map(c => c.method + ' ' + pathOf(c));
 
 async function openSave(page) {
@@ -253,22 +261,23 @@ withApp(async (page, logs) => {
     await page.waitForTimeout(60);
     const travel = await page.evaluate(() => document.getElementById('nso-save-note').textContent);
     check('a traversal is flattened, and the note shows the flat name it will write',
-      /library\/etcpasswd\.stl/.test(travel) && !/\.\./.test(travel), travel.slice(0, 110));
+      /writes etcpasswd\.stl to/.test(travel) && !/\.\./.test(travel), travel.slice(0, 110));
     check('an empty new-category -> still disabled', await arm('drive_piece.stl', 'Jigs_new_x', null) === false
       ? await (async () => { await page.fill('#nso-save-newcat', ''); await page.waitForTimeout(60);
           return await page.evaluate(() => document.getElementById('nso-save-go').disabled); })()
       : true);
     check('all three present -> armed', (await arm('drive_piece.stl', 'Test Fixtures', 'github_pat_pretend')) === false);
     const note = await page.evaluate(() => document.getElementById('nso-save-note').textContent);
-    check('the note names the file it will write', /library\/drive_piece\.stl/.test(note), note.slice(0, 120));
+    check('the note names the file it will write, and where',
+      /writes drive_piece\.stl to nolongerzzz\/nest-library on main/.test(note), note);
     check('...the category', /Test Fixtures/.test(note));
-    check('...and the repository and branch',
-      /nolongerzzz\/nest-optimizer/.test(note) && /claude-wip/.test(note));
+    check('...and where the catalog entry goes',
+      /app-library\.js under Test Fixtures, in nolongerzzz\/nest-optimizer on claude-wip/.test(note), note);
     // and it re-reads live rather than describing a stale answer
     await page.fill('#nso-save-name', 'renamed_piece.stl');
     await page.waitForTimeout(60);
     const note2 = await page.evaluate(() => document.getElementById('nso-save-note').textContent);
-    check('retyping the name re-reads the note', /library\/renamed_piece\.stl/.test(note2) &&
+    check('retyping the name re-reads the note', /writes renamed_piece\.stl to/.test(note2) &&
       !/drive_piece/.test(note2), note2.slice(0, 90));
     check('still nothing sent', (await ghCalls(page)).length === 0);
   }
@@ -328,13 +337,17 @@ withApp(async (page, logs) => {
     saved = calls;
 
     check('exactly four requests', calls.length === 4, seq(calls).join(' | '));
-    check('1. read the catalog', calls[0] && calls[0].method === 'GET' && pathOf(calls[0]) === 'app-library.js');
-    check('2. check the file name is free',
-      calls[1] && calls[1].method === 'GET' && pathOf(calls[1]) === 'library/drive_check_piece.stl');
-    check('3. WRITE THE FILE',
-      calls[2] && calls[2].method === 'PUT' && pathOf(calls[2]) === 'library/drive_check_piece.stl');
-    check('4. and only then write the catalog entry',
-      calls[3] && calls[3].method === 'PUT' && pathOf(calls[3]) === 'app-library.js');
+    check('1. read the catalog, from nest-optimizer on claude-wip',
+      calls[0] && calls[0].method === 'GET' && pathOf(calls[0]) === 'nest-optimizer/app-library.js' &&
+      refOf(calls[0]) === 'claude-wip', seq(calls)[0] + ' ref=' + (calls[0] && refOf(calls[0])));
+    check('2. check the file name is free, in nest-library on main',
+      calls[1] && calls[1].method === 'GET' && pathOf(calls[1]) === 'nest-library/drive_check_piece.stl' &&
+      refOf(calls[1]) === 'main', seq(calls)[1] + ' ref=' + (calls[1] && refOf(calls[1])));
+    check('3. WRITE THE FILE, to nest-library',
+      calls[2] && calls[2].method === 'PUT' && pathOf(calls[2]) === 'nest-library/drive_check_piece.stl');
+    check('4. and only then write the catalog entry, to nest-optimizer',
+      calls[3] && calls[3].method === 'PUT' && pathOf(calls[3]) === 'nest-optimizer/app-library.js');
+    check('nothing is sent to this repo\'s library/', calls.every(c => pathOf(c).indexOf('nest-optimizer/library/') !== 0));
 
     /* THE ORDERING INVARIANT, stated as the thing it protects rather than as
        a position: the write that CREATES the catalog reference is the last
@@ -342,14 +355,15 @@ withApp(async (page, logs) => {
        of leaving a row that 404s (the broken shape). */
     const puts = calls.filter(c => c.method === 'PUT');
     check('the catalog write is the LAST write - a crash orphans a file, never a row',
-      puts.length === 2 && pathOf(puts[0]).indexOf('library/') === 0 && pathOf(puts[1]) === 'app-library.js',
+      puts.length === 2 && pathOf(puts[0]).indexOf('nest-library/') === 0 && pathOf(puts[1]) === 'nest-optimizer/app-library.js',
       seq(puts).join(' then '));
     check('every request carried the token', calls.every(c => c.auth === 'Bearer github_pat_pretend'),
       calls.map(c => c.auth).join(','));
     check('both commits say what they are',
       /\(file\)/.test(puts[0].body) && /\(catalog entry\)/.test(puts[1].body));
-    check('both commits name the branch',
-      JSON.parse(puts[0].body).branch === 'claude-wip' && JSON.parse(puts[1].body).branch === 'claude-wip');
+    check('each commit names its own repository\'s branch - main for the file, claude-wip for the entry',
+      JSON.parse(puts[0].body).branch === 'main' && JSON.parse(puts[1].body).branch === 'claude-wip',
+      JSON.parse(puts[0].body).branch + ' / ' + JSON.parse(puts[1].body).branch);
     check('the catalog write is conditional on the sha it read',
       JSON.parse(puts[1].body).sha === 'catsha');
     check('the file write is NOT conditional on a sha - it is a creation',
@@ -375,7 +389,7 @@ withApp(async (page, logs) => {
       committed.split('\n').length === LIB_SRC.split('\n').length + 1,
       (committed.split('\n').length - LIB_SRC.split('\n').length) + ' lines');
     check('with the new entry in it, spelled as an entry',
-      /\{ file: 'drive_check_piece\.stl',\s+category: 'Test Fixtures', source: 'local' \}/.test(committed));
+      /\{ file: 'drive_check_piece\.stl',\s+category: 'Test Fixtures', source: 'nest-library' \}/.test(committed));
     /* Run it, rather than believing a regex. */
     const ran = await page.evaluate(src => {
       try {
@@ -486,7 +500,7 @@ withApp(async (page, logs) => {
     check('the status line says it failed', /failed/i.test(await statusOf(page)),
       (await statusOf(page)).slice(0, 80));
     check('the file WAS written - that is the orphan, and it is the harmless half',
-      calls.some(c => c.method === 'PUT' && pathOf(c) === 'library/never_listed.stl'));
+      calls.some(c => c.method === 'PUT' && pathOf(c) === 'nest-library/never_listed.stl'));
 
     await page.click('#nso-save-cancel');
     await page.waitForFunction(() => document.getElementById('nso-save-back').hasAttribute('hidden'),
@@ -516,11 +530,14 @@ withApp(async (page, logs) => {
       calls.length === 1 && calls[0].method === 'GET', seq(calls).join(' | '));
     check('  ...so not even a file was orphaned', !calls.some(c => c.method === 'PUT'));
 
-    /* And a name that is free in the catalog but taken in library/ - which is
-       real: library/ holds fixtures that are not catalog rows. */
+    /* And a name that is free in the catalog but taken in nest-library -
+       which is real: section 10 left exactly that behind, the file a save wrote
+       before its catalog write was refused. Retrying that save must not
+       clobber it. */
     await resetGh(page);
-    await page.evaluate(() => { window.__gh.have.push('library/CTH_fixture.stl'); });
-    await fillSave(page, 'CTH_fixture.stl', null, null);
+    const orphaned = await page.evaluate(() => window.__gh.have.indexOf('nest-library/never_listed.stl') !== -1);
+    check('the orphan section 10 left is in nest-library', orphaned);
+    await fillSave(page, 'never_listed.stl', null, null);
     await page.click('#nso-save-go');
     await page.waitForFunction(() => {
       const e = document.getElementById('nso-save-err');
@@ -528,9 +545,9 @@ withApp(async (page, logs) => {
     }, null, { timeout: 20000 });
     shown = await page.evaluate(() => document.getElementById('nso-save-err').textContent);
     calls = await ghCalls(page);
-    check('a file name already in library/ is refused, not overwritten',
-      /already exists/i.test(shown), shown.slice(0, 120));
-    check('  ...and it says why that matters', /fixture|interrupted/i.test(shown));
+    check('a file name already in nest-library is refused, not overwritten',
+      /already exists in nest-library/i.test(shown), shown.slice(0, 120));
+    check('  ...and it says why that matters', /interrupted/i.test(shown));
     check('  ...with no PUT sent at all', !calls.some(c => c.method === 'PUT'), seq(calls).join(' | '));
     await page.click('#nso-save-cancel');
     await page.waitForFunction(() => document.getElementById('nso-save-back').hasAttribute('hidden'),
