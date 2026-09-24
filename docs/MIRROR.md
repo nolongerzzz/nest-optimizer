@@ -122,6 +122,39 @@ So the tape confirms the mirror. It does not confirm a join, because there is
 nowhere clean to cut. A bar whose finished end is separated from the rest by a
 straight span — the slotted block — is the case the four steps complete.
 
+## Cutting a Mirror-Join result again
+
+`library/v9_mirror_factory.stl` is a Mirror-Join result. The Join's boolean
+re-triangulated its seams (raw X = 87.537 and X = −88.565) into long slivers
+running seam to seam across the flat faces, and left a vertex pair 7e-5 mm
+apart at the +seam. The file is closed at a 1e-6 weld and fails the canonical
+checker at 1e-4 (2 non-manifold edges, 5 inconsistent), before any cut.
+
+Sequential cutting through that geometry used to break almost every piece.
+It was not only the pieces that touched a seam: nearly every plane slices one
+of the seam-to-seam slivers. In a 1 mm sweep over the whole part, 372 of 374
+`rawCut` halves failed the checker. The cause was `rawCut` itself, not the
+`-A#/-B#` veto that 86a70a2 removed: a first cut on a freshly loaded copy
+never had the veto and failed the same way. The cap was welded at 1e-4 while
+the walls kept the raw cut points, so cap and walls stopped sharing vertices
+wherever a sliver was thinner than the weld radius at the plane. `rawCut` now
+welds its input, snaps near-plane vertices onto the plane, welds and snaps
+the on-plane points on their float32 positions, reads the cap edges off the
+kept surface's own boundary, and splits away any zero-area triangle
+(app-cut.js, comment above `RAW_CUT_WELD_TOL`). After the fix, 374 of 374
+pass. So does a 16-piece sequential cut through the real app, raw and
+exported. `tools/nso_rawcut_seam_test.js` (`npm run rawcut:seam`) gates the
+planes that failed for each distinct reason. Run against the old `rawCut`,
+23 of its gates fail.
+
+What remains: the checker's self-intersection pass reports 1 "piercing" pair
+in some mid-body pieces. Both triangles come from the Join's top-face sliver
+fan. In the source they share a seam vertex, so the checker skips them as
+adjacent; the cut removes that vertex. Exact rational arithmetic shows they
+are disjoint: one lies in the other's plane, 9e-4 mm to its side, tilted by
+about 8e-7 rad. The float Möller test in `tri_tri_intersect` misreads
+near-parallel planes. That is a checker limit, not cut damage.
+
 ## UI
 
 A **Mirror** button and a plane box in the Finish menu, Shape group, directly
