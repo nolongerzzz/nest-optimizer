@@ -120,10 +120,13 @@ Each refusal names its reason and hands back the input soup object untouched:
 
 ## Known limits, for the next ticket
 
-- **A step face with a hole.** It needs a bridged-hole cap. The same gap is
-  why `rawCut` itself mis-caps a section with a hole: each loop is
-  ear-clipped on its own, so a tube section comes out with inconsistent
-  winding. Crop never hits this when the two sections match, tube included.
+- **A step face with a hole.** It needs a bridged-hole cap. Cut now has
+  one: `rawFlatCapLoops` (app-cut.js) classes a section's loops by nesting
+  and bridges each hole into its outline, which fixed `rawCut` mis-capping a
+  section with a hole (tube, hinge knuckle; `tools/nso_rawcut_bore_test.js`).
+  Crop still caps each step-face loop with `rawFlatCapLoop` and still
+  refuses a step face with a hole; switching it to `rawFlatCapLoops` is the
+  follow-up that would lift that refusal.
 - **Stage 2: repositioning and alignment.** Nothing here moves a part
   sideways.
 - **Self-intersection is inherited, not repaired.** On
