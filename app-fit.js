@@ -119,14 +119,28 @@ if (typeof document !== 'undefined') {
        setStatus is the app's one channel for "something happened", and the
        only one the watch log (nso-watch.js) reads - a warning written to its
        own element alone is invisible to it. The "Build volume" prefix is how
-       that log tells these lines apart from an operation's own status. */
+       that log tells these lines apart from an operation's own status.
+
+       APPENDED, never replacing: a warning is usually caused by the operation
+       that just ran (Scale to a height that makes the piece too wide), and
+       overwriting that operation's own result line would hide what it did.
+       The line it joins keeps its class, so a refusal stays red; an older
+       build-volume tail is swapped out rather than stacked. */
+    var SEP = ' | Build volume: ';
     function announce(txt) {
       if (txt === lastTxt) return;
       var was = lastTxt;
       lastTxt = txt;
       if (typeof setStatus !== 'function') return;
-      if (txt) setStatus('Build volume: ' + txt);
-      else if (was) setStatus('Build volume: every piece fits again');
+      if (!txt && !was) return;
+      var st = document.getElementById('status');
+      var cur = st ? String(st.textContent || '') : '';
+      var i = cur.indexOf(SEP);
+      if (i >= 0) cur = cur.slice(0, i);
+      if (/^Build volume: /.test(cur)) cur = '';
+      var tail = txt || 'every piece fits again';
+      setStatus(cur ? cur + SEP + tail : 'Build volume: ' + tail,
+                !!(st && /\berror\b/.test(st.className)));
     }
 
     function render() {

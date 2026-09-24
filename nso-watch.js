@@ -530,8 +530,9 @@
       return function (msg, isError) {
         try {
           var txt = String(msg == null ? '' : msg);
-          /* app-fit.js's warnings, and the line that says they cleared */
-          var bv = /^Build volume\b/.test(txt);
+          /* app-fit.js's warnings, and the line that says they cleared -
+             on their own, or appended to the line they followed */
+          var bv = /(^|\| )Build volume: /.test(txt);
           var refusal = !bv && ((isError === true) || REFUSAL.test(txt));
           var t = tick();
           var ev = push({ kind: 'status', msg: txt, phase: t.phase,

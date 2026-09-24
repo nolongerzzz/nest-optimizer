@@ -470,8 +470,9 @@ async function partE3(page) {
   const shown = await page.evaluate(() => document.getElementById('build-volume-warning').textContent.trim());
   ok(w.length >= 1 && w[0].level === 'warn' && w[0].category === 'build-volume',
      'a build volume too short for the pieces is logged as a build-volume warning', JSON.stringify(w.map(e => e.msg)));
-  ok(w.length >= 1 && w[0].msg === 'Build volume: ' + shown,
-     'the logged line is the warning the page shows', shown);
+  const statusNow = await page.evaluate(() => document.getElementById('status').textContent);
+  ok(w.length >= 1 && w[0].msg.endsWith('Build volume: ' + shown) && w[0].msg === statusNow,
+     'the logged line is the status line, carrying the warning the page shows', w.length ? w[0].msg : shown);
   const again = (await evs(page)).length;
   await page.waitForTimeout(300);
   ok((await evs(page)).length === again, 'an unchanged warning is not re-logged every frame');

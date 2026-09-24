@@ -42,10 +42,12 @@ reads exactly like a bake that silently did nothing.
 
 Build-volume warnings are status lines too. `app-fit.js` routes each one
 through `setStatus` when it changes - a new or different warning, and
-"Build volume: every piece fits again" when the last one clears - never per
-frame. The log marks them `build-volume` (level `warn`) by their
-`Build volume:` prefix, so they are not mistaken for an operation's own line
-or for a refusal.
+"every piece fits again" when the last one clears - never per frame. It is
+APPENDED to the current status line (`<op's line> | Build volume: ...`), with
+that line's class kept, because a warning is usually caused by the operation
+that just ran and replacing that operation's result would hide what it did.
+The log marks these `build-volume` (level `warn`) by the `Build volume:`
+marker, so they are not mistaken for a plain status line or a refusal.
 
 The status bar itself is never touched - the line the app wrote is the line you
 read, error class and all. Neither is the HUD (`#adjust-status`); Grok owns
