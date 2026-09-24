@@ -16,6 +16,8 @@
    purpose. This suite is cheap insurance against that. It does not test
    geometry and it launches no browser - it reads source and asserts each
    roster entry still carries its label, near the code that implements it.
+   The HANDOFF table is the complete roster: a missing row fails, and so does
+   an extra one. Listing a row is not enough if the table and this list disagree.
 
    Run: node tools/nso_paint_scope_test.js */
 
@@ -43,7 +45,32 @@ const ROSTER = [
     test: /nsoMaskCount\s*\(\s*modelA\s*\)/,                standDown: /painted face\(s\) - fusion has no skip list/ },
   { feature: 'Pocket corners', file: 'nso_inside_corners.js',  scope: 'SUB-REGION',
     test: /NSO_insidePaintCheck/,                           standDown: /Pocket corners stood down - ' \+ [\w.]+ \+ ' painted face\(s\)/ },
+  { feature: 'Skin',           file: 'app-skin.js',            scope: 'SUB-REGION',
+    test: /nsoMaskIsExcludedRaw\s*\(/,                      standDown: /Skin stood down - ' \+ faceName \+ ' is painted/ },
+  { feature: 'Seat here',      file: 'app-seat-surface.js',    scope: 'WHOLE-PIECE',
+    test: /nsoMaskCount\s*\(\s*modelB\s*\)/,                standDown: /Seat here stood down - ' \+ painted \+ ' painted face\(s\) on B/ },
 ];
+
+/* Rows of the "Current roster" table, in order. The feature cell is the name
+   before the parenthetical file cite. */
+function handoffRoster(h) {
+  const start = h.indexOf('Current roster, by category:');
+  if (start < 0) return null;
+  const lines = h.slice(start).split('\n');
+  const rows = [];
+  let inTable = false;
+  for (const line of lines) {
+    if (line.startsWith('|')) {
+      inTable = true;
+      const cells = line.split('|').slice(1, -1).map(s => s.trim());
+      if (cells.length < 2) continue;
+      if (cells[0] === 'feature' || cells[0].includes('---')) continue;
+      const feature = cells[0].replace(/\s*\(.*$/, '').trim();
+      rows.push({ feature: feature, scope: cells[1].toLowerCase() });
+    } else if (inTable) break;
+  }
+  return rows;
+}
 
 console.log('== every paint-aware feature declares its scope in its own source ==');
 for (const r of ROSTER) {
@@ -70,6 +97,19 @@ console.log('\n== the rule itself is written down where the roster says ==');
   for (const r of ROSTER)
     check('HANDOFF roster lists ' + r.feature,
           new RegExp('\\|\\s*' + r.feature + '[^|]*\\|\\s*' + r.scope.toLowerCase() + '\\s*\\|', 'i').test(h));
+
+  const rows = handoffRoster(h);
+  check('HANDOFF roster table parsed', Array.isArray(rows) && rows.length > 0,
+        rows ? rows.map(r => r.feature).join(', ') : 'missing table');
+  const want = ROSTER.map(r => r.feature + '=' + r.scope.toLowerCase());
+  const got = (rows || []).map(r => r.feature + '=' + r.scope);
+  check('HANDOFF roster is exactly the expected set, no missing and no extra row',
+        want.length === got.length && want.every((w, i) => w === got[i]),
+        'want [' + want.join('; ') + '] got [' + got.join('; ') + ']');
+  check('HANDOFF prose still scopes Skin to the skinned face',
+        /skinReplace`\.\s*\*\*PAINT SCOPE:\s*sub-region\*\*/i.test(h));
+  check('HANDOFF prose still scopes Seat here to whole-piece',
+        /## Seat here[\s\S]*?\*\*PAINT SCOPE:\s*WHOLE-PIECE\*\*/.test(h));
 }
 
 console.log('\n== the sub-region feature documents WHICH faces it scopes to ==');

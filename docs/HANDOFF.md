@@ -48,9 +48,14 @@ Current roster, by category:
 | Repair (`app-finish.js`, Seal's checkbox) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
 | Fusion (`app-join.js`, Join Route 0) | whole-piece | `nsoMaskCount(A)+nsoMaskCount(B) > 0` | stand-down comment |
 | Pocket corners (`nso_inside_corners.js`) | sub-region | this pocket's floor + 4 walls | `docs/INSIDE-CORNERS.md` §2 |
+| Skin (`app-skin.js`) | sub-region | `nsoMaskIsExcludedRaw` on the skinned face | stand-down comment |
+| Seat here (`app-seat-surface.js`) | whole-piece | `nsoMaskCount(modelB) > 0` when the seat turns B | stand-down comment |
 
-`node tools/nso_paint_scope_test.js` asserts every entry actually carries its
-label in source, so a deleted or drifted declaration fails rather than rotting.
+`node tools/nso_paint_scope_test.js` asserts this table is the complete roster:
+every row must still carry its label in source, and a missing or extra row
+fails. Skin and Seat here were already documented in this file (sub-region on
+the skinned face; whole-piece on the piece being seated, and only when the
+seat turns it) and are in the table for that reason.
 
 ## Output protocol
 1. Findings, numbers, diffs, and next-step proposals go in the current ticket PR
