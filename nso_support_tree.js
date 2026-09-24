@@ -43,9 +43,10 @@
      exact by the same argument Extend makes.
    - NSO_Thickness.floorFor, through NSO_SupportAim.buildStrut. There is still
      exactly one wall-thickness floor in this repo and a branch is held to it
-     by the same call the trunk is: the branch profile is a square of the side
-     buildStrut settled on, so trunk and branch have the SAME cross-section
-     and one floor check covers both.
+     by the same call the trunk is. buildStrut's side is the PLANNING section
+     (roots, spread, clearance of the plan); the solids themselves are round
+     and tapered by the measured diameter law by default - see SECTIONS - and
+     'square' keeps the planning square as the solid too.
    - NSO_unionSoups (app-join.js). Not reimplemented, not approximated, and
      not skipped: unionParts() refuses by name when it is not loaded.
 
@@ -182,9 +183,11 @@
    opts.branchStyle                      'square' (default) or 'gecko-hand', see 3b
    planTree(rawTris, opts)               -> detect + contacts + trunk + fan
    unionParts(parts, opts)               -> Promise of the app's own union
-   opts.hollow                           planTree also hollows every part, see 6
+   opts.section                          'round' (default: tapered by the measured
+                                         law) or 'square', see SECTIONS
+   opts.hollow                           planTree also bores every part, see 6
    hollowParts(plan, opts)               -> { ok, parts, hollowed, solid, ... }
-   hollowTree(plan, opts)                -> Promise of the solid union + bores
+   hollowTree(plan, opts)                -> Promise of union(parts) - union(bores)
    describe(result)                      -> one status line
    ============================================================ */
 (function (root) {
@@ -260,6 +263,40 @@
      tools/nso_support_tree_test.js section 7b asserts the two plans are
      identical in every one of those numbers on every fixture. */
   var BRANCH_STYLES = ['square', 'gecko-hand'];
+
+  /* SECTIONS - what a trunk or branch is in cross-section, along its length.
+
+     'round' is the default: a regular ROUND_SIDES-gon of the same AREA as a
+     circle of the law's diameter, tapering along the part by the law below.
+     'square' is the constant 1.2 mm strut this file shipped first, kept so
+     the two can be compared and so the square facts the older suites pin
+     stay pinned.
+
+     Neither changes the PLAN. Contacts, the split, the trunk's base and axis,
+     every branch's root, heading, length and tilt are decided first, on the
+     planning side buildStrut settled (1.2 mm), exactly as before; the
+     section is read only when the solids are made. The one thing a fatter
+     solid can change is clearance - a round part is tested on its own
+     rails, and one that would run into the piece keeps the square section
+     the plan already cleared, named in plan.sectionFallback. Nothing planned
+     moves and nothing is dropped. */
+  var SECTIONS = ['round', 'square'];
+  var ROUND_SIDES = 24;
+
+  /* THE DIAMETER LAW, measured off the real reference and re-derived on every
+     run by tools/nso_support_tree_shape_check.js (docs/SUPPORT-TREE-SHAPE.md):
+
+        d = TIP_DIAMETER_MM + 2 tan(DIAMETER_ANGLE_DEG) x (height below the tip)
+
+     one linear law for trunk AND branch (eqD = 1.97 + 0.172 x depth, r2
+     0.988, on 1,824 slices of tabletop.gcode.3mf). Both numbers are that
+     slice's own settings - tree_support_branch_diameter = 2 and
+     tree_support_branch_diameter_angle = 5 - which is what the toolpath
+     turned out to honour. A caller passes tipDiameterMm / diameterAngleDeg to
+     use its own. The base foot the reference also has (+1.35 mm at the
+     plate, gone by z 1.8) is NOT this law and is not built here. */
+  var TIP_DIAMETER_MM = 2;
+  var DIAMETER_ANGLE_DEG = 5;
 
   /* The hand's proportions, as multiples of the shared cross-section side so
      the hand scales with the strut it grows from. Chosen, not measured - this
@@ -664,6 +701,49 @@
      its own ring.
      ===================================================================== */
 
+  function sectionOf(opts) {
+    var s = (opts && opts.section != null) ? String(opts.section) : 'round';
+    return SECTIONS.indexOf(s) >= 0 ? s : null;
+  }
+
+  /* d(z) for a part whose tip is at zTip: the law, never under the tip
+     diameter (a point above its own tip - a tip engaged past the contact -
+     is at the tip diameter). */
+  function lawOf(opts) {
+    var tipD = (opts && opts.tipDiameterMm != null) ? +opts.tipDiameterMm : TIP_DIAMETER_MM;
+    var ang = (opts && opts.diameterAngleDeg != null) ? +opts.diameterAngleDeg : DIAMETER_ANGLE_DEG;
+    var per = 2 * Math.tan(ang * Math.PI / 180);
+    return {
+      tipMm: tipD, angleDeg: ang, perMm: per,
+      at: function (z, zTip) { return tipD + per * Math.max(0, zTip - z); }
+    };
+  }
+
+  /* A regular n-gon with the AREA of a circle of diameter d - the reference's
+     diameter is an area-equivalent one, so this is the like-for-like shape. */
+  function roundProfile(d, n) {
+    n = n || ROUND_SIDES;
+    var R = (d / 2) * Math.sqrt((2 * Math.PI / n) / Math.sin(2 * Math.PI / n));
+    var out = [];
+    for (var k = 0; k < n; k++) {
+      var a = 2 * Math.PI * k / n;
+      out.push([R * Math.cos(a), R * Math.sin(a)]);
+    }
+    return { profile: out, circumMm: R, apothemMm: R * Math.cos(Math.PI / n) };
+  }
+
+  /* A straight round frustum from `from` (diameter dFrom) to `to` (dTo),
+     through NSO_PathSweep's taper. */
+  function roundPart(PS, from, to, dFrom, dTo) {
+    var rp = roundProfile(dFrom);
+    var sw = PS.sweep({ points: [from, to], profile: rp.profile, scales: [1, dTo / dFrom] });
+    return {
+      sweep: sw, ok: sw.ok, reason: sw.reason, soup: sw.tris,
+      axis: { from: from.slice(), to: to.slice(), a0: rp.apothemMm, a1: rp.apothemMm * dTo / dFrom },
+      dFromMm: dFrom, dToMm: dTo
+    };
+  }
+
   function squareProfile(side) {
     var h = side / 2;
     return [[-h, -h], [h, -h], [h, h], [-h, h]];
@@ -696,6 +776,11 @@
         BRANCH_STYLES.join(', ');
       return out;
     }
+    var section = sectionOf(opts);
+    if (!section) {
+      out.reason = 'unknown section ' + JSON.stringify(opts.section) + ' - one of ' + SECTIONS.join(', ');
+      return out;
+    }
 
     var run = sub(tip, rootPoint), L0 = len(run);
     if (!(L0 > 0)) { out.reason = 'branch root and tip coincide'; return out; }
@@ -709,8 +794,24 @@
       return out;
     }
 
-    var sw = PS.sweep({ points: [rootPoint, end], profile: squareProfile(side) });
+    /* The tip of the law is the CONTACT, not the engaged end: a caller that
+       pushes the tip past the surface gets the tip diameter there, not a
+       narrower one. */
+    var sw, law = null;
+    if (section === 'round') {
+      law = lawOf(opts);
+      var zTip = (opts.zTipMm == null) ? tip[2] : +opts.zTipMm;
+      var rp = roundPart(PS, rootPoint, end, law.at(rootPoint[2], zTip), law.at(end[2], zTip));
+      sw = rp.sweep;
+      out.axis = rp.axis;
+      out.dFromMm = rp.dFromMm;
+      out.dToMm = rp.dToMm;
+    } else {
+      sw = PS.sweep({ points: [rootPoint, end], profile: squareProfile(side) });
+      out.axis = { from: rootPoint.slice(), to: end.slice(), a0: side / 2, a1: side / 2 };
+    }
     out.sweep = sw;
+    out.section = section;
     if (!sw.ok) { out.reason = 'the branch would not sweep: ' + sw.reason; return out; }
 
     out.ok = true;
@@ -751,6 +852,11 @@
       /* The hand is ADDED at the tip the square branch already reaches: the
          shaft above is the default branch, byte for byte, so the contact, the
          axis, the tilt and the flat cap's own overshoot are all unchanged. */
+      /* At the PLANNING side whatever the section: the hand is the tip shape
+         tree:test 7b validated, and it stays byte for byte that hand. Sized
+         to a round tip's 2 mm instead, its fingers reach 2 mm and bridge
+         into the neighbouring contacts 3.29 mm away - measured as through-
+         holes (Euler -74 on the shelf) closing loops through the tree. */
       var hand = geckoHand(end, d, side, {
         normal: opts.targetNormal, floorMm: opts.floorMm, shaftMm: L, pathSweep: PS
       });
@@ -759,7 +865,9 @@
       out.parts = out.parts.concat(hand.fingers.map(function (f) { return f.soup; }));
       out.fingerPenetrationMm = tn ? handPenetration(hand, tip, tn) : null;
     }
-    out.reason = 'a ' + side.toFixed(3) + ' mm branch, ' + L.toFixed(3) + ' mm long, ' +
+    out.reason = (section === 'round'
+        ? 'a round branch ' + out.dFromMm.toFixed(3) + ' -> ' + out.dToMm.toFixed(3) + ' mm across, '
+        : 'a ' + side.toFixed(3) + ' mm branch, ') + L.toFixed(3) + ' mm long, ' +
       out.tiltDeg.toFixed(2) + ' deg off vertical' +
       (out.hand ? ', ending in a ' + out.hand.fingers.length + '-finger gecko hand' : '');
     return out;
@@ -925,6 +1033,27 @@
     return hand;
   }
 
+  /* probeClear for a TAPERED part: the rails of a frustum converge, so each
+     is cast along its own line - ring 0 to ring 1 - rather than parallel to
+     the axis from ring 0, which would test a wider solid than the one built.
+     The last capMm of each rail is the cap's business, as in probeClear. */
+  function probeRails(SA, obstacles, from, dir, lengthMm, rings, capMm) {
+    var probes = [[from, dir, lengthMm - EPS_MM, 'the axis']];
+    var A = rings[0], B = rings[rings.length - 1];
+    for (var j = 0; j < A.length; j++) {
+      var v = sub(B[j], A[j]), Lr = len(v), shaft = Lr - capMm;
+      if (shaft > 2 * EPS_MM) probes.push([A[j], mul(v, 1 / Lr), shaft - EPS_MM, 'rail ' + j]);
+    }
+    for (j = 0; j < probes.length; j++) {
+      var hit = SA._nearestHit(obstacles, probes[j][0], probes[j][1], EPS_MM, probes[j][2]);
+      if (hit > 0) {
+        return { at: hit, why: probes[j][3] + ' is blocked ' + hit.toFixed(3) + ' mm along, ' +
+                 (probes[j][2] - hit).toFixed(3) + ' mm short of the end of its run' };
+      }
+    }
+    return null;
+  }
+
   function styleOf(opts) {
     var s = (opts && opts.branchStyle != null) ? String(opts.branchStyle) : 'square';
     return BRANCH_STYLES.indexOf(s) >= 0 ? s : null;
@@ -968,6 +1097,26 @@
       return out;
     }
     out.style = style;
+    var section = sectionOf(opts);
+    if (!section) {
+      out.reason = 'unknown section ' + JSON.stringify(opts.section) + ' - one of ' + SECTIONS.join(', ');
+      return out;
+    }
+    out.section = section;
+    /* Every part's axis and the apothem of its section at each end, aligned
+       with out.parts: what the exact bores of section 6 are built from. */
+    out.partAxes = [];
+    out.sectionFallback = [];
+    function addPart(soup, axis) { out.parts.push(soup); out.partAxes.push(axis); }
+    function sectionNote() {
+      if (section !== 'round') return '; square section';
+      return '; round, ' + (out.trunk.section === 'round'
+        ? 'trunk ' + out.trunk.dFromMm.toFixed(3) + ' -> ' + out.trunk.dToMm.toFixed(3) + ' mm' : 'trunk square') +
+        (out.sectionFallback.length ? ', ' + out.sectionFallback.length + ' part(s) kept square where round would hit the piece' : '');
+    }
+    function fingerAxis(hand, f) {
+      return { from: f.from.slice(), to: f.to.slice(), a0: hand.widthMm / 2, a1: hand.widthMm / 2 };
+    }
 
     var det = SA.detectOverhangs(rawTris, opts);
     out.detect = det;
@@ -1058,8 +1207,50 @@
         ': ' + trunk.reason;
       return out;
     }
-    out.parts.push(trunk.soup);
     out.sideMm = trunk.sideMm;
+
+    /* THE ROUND TRUNK. aim() settled the base, the axis and the reach on the
+       planning strut, and all of that is kept; only the solid along that axis
+       is remade, as a frustum under the diameter law. Its tip is the highest
+       contact it serves - on the reference every tip is at one height - so
+       the trunk is never narrower at the collar than a branch leaving it. */
+    var zTipTrunk = -Infinity;
+    for (i = 0; i < cp.points.length; i++) if (cp.points[i].p[2] > zTipTrunk) zTipTrunk = cp.points[i].p[2];
+    out.zTipMm = zTipTrunk;
+    var trunkAxis = { from: trunk.from.slice(), to: trunk.tip.slice(), a0: trunk.sideMm / 2, a1: trunk.sideMm / 2 };
+    if (section === 'round') {
+      var PSt = sweepModule(opts);
+      if (!PSt || typeof PSt.sweep !== 'function') {
+        out.reason = 'nso_path_sweep.js is not loaded - a round trunk is a swept frustum';
+        return out;
+      }
+      var law = lawOf(opts);
+      out.law = { tipMm: law.tipMm, angleDeg: law.angleDeg, perMm: law.perMm };
+      var rt = roundPart(PSt, trunk.from, trunk.tip, law.at(trunk.from[2], zTipTrunk), law.at(trunk.tip[2], zTipTrunk));
+      if (!rt.ok) { out.reason = 'the round trunk would not sweep: ' + rt.reason; return out; }
+      /* Its own rails against the piece: aim() tested the axis, and a 5 mm
+         trunk has a body the axis does not. The cap is excluded only where
+         the trunk ends ON a contact, as a branch's is. */
+      var tStop = probeRails(SA, obstacles, trunk.from, trunk.dir, trunk.lengthMm, rt.sweep.rings,
+        (single || carried >= 0) ? rt.dToMm : 0);
+      if (tStop) {
+        /* THE SQUARE FALLBACK. A round part whose own body would run into the
+           piece keeps the planning section aim() already cleared, and says
+           so - the tree is not refused, and nothing planned moves. */
+        out.sectionFallback.push({ role: 'trunk', label: 'trunk', why: 'the round trunk (' +
+          rt.dFromMm.toFixed(3) + ' -> ' + rt.dToMm.toFixed(3) + ' mm) would run into the piece: ' + tStop.why });
+        out.trunk = trunk = Object.assign({}, trunk, { section: 'square', roundRefused: tStop.why });
+      } else {
+        trunkAxis = rt.axis;
+        out.trunk = trunk = Object.assign({}, trunk, {
+          soup: rt.soup, squareSoup: trunk.soup, section: 'round', sweep: rt.sweep,
+          dFromMm: rt.dFromMm, dToMm: rt.dToMm, axis: rt.axis
+        });
+      }
+    } else {
+      out.trunk = trunk = Object.assign({}, trunk, { section: 'square' });
+    }
+    addPart(trunk.soup, trunkAxis);
 
     /* A trunk that ends ON a contact - the single strut, or the one carrying
        the contact on its own axis - gets the same hand a branch would, so
@@ -1076,14 +1267,16 @@
 
     if (single) {
       if (out.trunkHand) {
-        for (i = 0; i < out.trunkHand.fingers.length; i++) out.parts.push(out.trunkHand.fingers[i].soup);
+        for (i = 0; i < out.trunkHand.fingers.length; i++) {
+          addPart(out.trunkHand.fingers[i].soup, fingerAxis(out.trunkHand, out.trunkHand.fingers[i]));
+        }
         out.fingers = out.trunkHand.fingers.length;
         out.fingersDropped = out.trunkHand.dropped.length;
       }
       out.ok = true;
       out.stage = 'done';
       out.single = true;
-      out.reason = det.reason + '; one contact point, so no split: ' + trunk.reason +
+      out.reason = det.reason + '; one contact point, so no split: ' + trunk.reason + sectionNote() +
         (out.trunkHand ? '; a gecko hand of ' + out.fingers + ' finger(s)' : '');
       return out;
     }
@@ -1114,7 +1307,7 @@
       var rootPoint = across ? add(collar, mul(across, spread)) : collar;
 
       var br = branch(rootPoint, q, Object.assign({}, opts, {
-        sideMm: trunk.sideMm, targetNormal: region.normal, floorMm: trunk.floorMm
+        sideMm: trunk.sideMm, targetNormal: region.normal, floorMm: trunk.floorMm, section: section
       }));
       if (!br.ok) { blocked.push({ index: i, why: br.reason }); continue; }
 
@@ -1141,8 +1334,26 @@
          A branch shorter than one cross-section has no shaft and is tested on
          its axis alone; it is also a branch that is almost entirely cap, and
          the tip measurement is the one that means anything about it. */
-      var stop = probeClear(SA, obstacles, rootPoint, br.dir, br.lengthMm,
-        br.sweep.rings[0], trunk.sideMm);
+      var stop = (section === 'round')
+        ? probeRails(SA, obstacles, rootPoint, br.dir, br.lengthMm, br.sweep.rings, br.dToMm)
+        : probeClear(SA, obstacles, rootPoint, br.dir, br.lengthMm, br.sweep.rings[0], trunk.sideMm);
+      if (stop && section === 'round') {
+        /* The square fallback, as for the trunk: the same branch at the
+           planning section, under the square plan's own clearance test. */
+        var sqb = branch(rootPoint, q, Object.assign({}, opts, {
+          sideMm: trunk.sideMm, targetNormal: region.normal, floorMm: trunk.floorMm, section: 'square'
+        }));
+        var sqStop = sqb.ok ? probeClear(SA, obstacles, rootPoint, sqb.dir, sqb.lengthMm, sqb.sweep.rings[0], trunk.sideMm)
+                            : { why: sqb.reason };
+        if (!sqStop) {
+          out.sectionFallback.push({ role: 'branch', label: 'branch ' + out.branches.length + ' (contact ' + i + ')',
+            contactIndex: i, why: 'the round branch (' + br.dFromMm.toFixed(3) + ' -> ' + br.dToMm.toFixed(3) +
+              ' mm) would run into the piece: ' + stop.why });
+          br = sqb;
+          br.roundRefused = stop.why;
+          stop = null;
+        }
+      }
       if (stop) {
         blocked.push({ index: i, at: stop.at, why: stop.why });
         continue;
@@ -1155,10 +1366,11 @@
 
       br.contactIndex = i;
       out.branches.push(br);
-      out.parts.push(br.soup);
+      addPart(br.soup, br.axis);
     }
     out.blocked = blocked;
-    out.probesPerBranch = 1 + squareProfile(trunk.sideMm).length;   /* the axis, and one per rail */
+    /* the axis, and one per rail */
+    out.probesPerBranch = 1 + (section === 'round' ? ROUND_SIDES : squareProfile(trunk.sideMm).length);
     /* THE FINGERS GO ON AFTER EVERY SHAFT, not beside their own. The fold is
        left to right, so this makes the first 1 + branches steps of the union
        the default tree's own steps, in the default's own order - the trunk
@@ -1171,13 +1383,15 @@
       var fingers = 0, dropped = 0;
       for (i = 0; i < out.branches.length; i++) {
         for (var f = 0; f < out.branches[i].hand.fingers.length; f++) {
-          out.parts.push(out.branches[i].hand.fingers[f].soup);
+          addPart(out.branches[i].hand.fingers[f].soup, fingerAxis(out.branches[i].hand, out.branches[i].hand.fingers[f]));
         }
         fingers += out.branches[i].hand.fingers.length;
         dropped += out.branches[i].hand.dropped.length;
       }
       if (out.trunkHand) {
-        for (i = 0; i < out.trunkHand.fingers.length; i++) out.parts.push(out.trunkHand.fingers[i].soup);
+        for (i = 0; i < out.trunkHand.fingers.length; i++) {
+          addPart(out.trunkHand.fingers[i].soup, fingerAxis(out.trunkHand, out.trunkHand.fingers[i]));
+        }
         fingers += out.trunkHand.fingers.length;
         dropped += out.trunkHand.dropped.length;
       }
@@ -1206,7 +1420,7 @@
     out.stage = 'done';
     out.reason = det.reason + '; ' + cp.reason + '; ' + out.split.reason + '; ' +
       out.branches.length + ' branch(es)' + (blocked.length ? ', ' + blocked.length + ' refused' : '') +
-      ', ' + out.tiltDeg.min.toFixed(2) + '..' + out.tiltDeg.max.toFixed(2) + ' deg off vertical' +
+      ', ' + out.tiltDeg.min.toFixed(2) + '..' + out.tiltDeg.max.toFixed(2) + ' deg off vertical' + sectionNote() +
       (style === 'gecko-hand' ? '; gecko hands, ' + out.fingers + ' finger(s)' +
         (out.fingersDropped ? ', ' + out.fingersDropped + ' left off where they met the piece' : '') : '');
     return out;
@@ -1264,272 +1478,202 @@
   }
 
   /* =====================================================================
-     6. HOLLOW - the trunk and every branch as a tube, part by part, with a
-        solid fallback for any part that cannot safely take one
+     6. HOLLOW - exact bores: union(parts) - union(each part shrunk by a wall)
 
-     THE PHYSICAL GROUND TRUTH, because it decides the shape of this section.
-     A real Bambu tree support, cut open, is hollow in the trunk AND in the
-     smallest branches. And a nozzle cannot lay a line meaningfully thinner
-     than itself: a wall asked for under that is not printed thin, it is
-     DROPPED from the toolpath with no warning (a 0.5 mm fin on a 0.4 mm
-     nozzle produced no toolpath at all, and what fixed it was a 0.6 mm
-     nozzle, not a thickness change). So an unsafely thin hollow wall is not a weaker
-     support, it is a support that silently is not there. Every wall here is
-     therefore NSO_Thickness.floorFor's, reached through nso_hollow.js, and a
-     part that cannot be hollowed at that floor is LEFT SOLID - never hollowed
-     thinner, and never allowed to refuse the tree.
+     THE PHYSICS, unchanged: a real Bambu tree, cut open, is hollow in the
+     trunk and in the smallest branches, with ONE line of wall
+     (docs/SUPPORT-TREE-SHAPE.md, Finding 2); and a wall under the nozzle's
+     floor is not printed thin, it is silently dropped. So the wall is
+     NSO_Thickness.floorFor(nozzle), through the floor the trunk was built to.
 
-     THE MECHANISM IS nso_hollow.js. Each part - the trunk, each branch
-     shaft, each gecko finger - goes to NSO_Hollow.hollow() on its own, in its
-     'exact' mode, at the floor the trunk was built to. Per part, not once
-     over the unioned tree, and both reasons were measured:
-       - one erosion of the whole shelf tree took 334 s and was then refused
-         by hollow()'s own gate, 0.032 mm walls in 7148 places, in the crotches
-         where sixteen branches leave one collar;
-       - per part, the fallback is per part by construction: the part whose
-         hollow() refuses is the part that stays solid, named, with hollow()'s
-         own reason. Nothing is inferred back out of a merged field.
+     THE CONSTRUCTION is the one the real toolpath shows (Finding 4): the tree
+     is a union of swept solids, and a merged contour is one wall around ONE
+     merged bore. So:
 
-     THE KEEP REGION: WHERE PARTS FUSE, THE TREE STAYS SOLID. Hollowing each
-     part blind and subtracting all the cavities from the union was the first
-     version, and it failed the canonical checker on every multi-branch
-     fixture - 2993 faces under the floor on the shelf, thinnest 0.001 mm,
-     every one of them between z 3 and 6: the collar. Sixteen branch roots
-     sit inside the trunk within 0.48 mm of each other, so sixteen cavities,
-     each a sampled surface of its own, overlap there, and what is left
-     between two of them is a membrane of whatever thickness their sampling
-     errors happen to leave. So each part is hollowed with a KEEP region
-     (hollow()'s opts.keep): every point within a wall - plus one sample
-     pitch of slack - of ANY OTHER part stays material. Two consequences, and
-     both are the point:
-       - no cavity comes within a wall of another part, and every cavity is a
-         wall inside its own, so two cavities are at least two walls apart:
-         there is no membrane to be thin;
-       - every cavity lies where the union IS its own part, so its own part's
-         surface is the only surface near it. The cavities therefore go into
-         the unioned solid exactly the way hollow() puts one into a piece:
-         the solid's own triangles, untouched, plus the cavity shells. There
-         is no second boolean, and the union that tree:canonical already
-         passes is the outer surface, byte for byte.
-     What it costs is stated rather than hidden: the junction - the collar
-     and the first stretch of each branch, until it has pulled clear of its
-     neighbours - is a solid knot, where a sliced Bambu tree has one merged
-     bore. Each part's cavity volume is reported, so how much of it is tube
-     is a number, not an impression.
+         hollow tree = union(outer parts) - union(inner parts)
 
-     THE FALLBACK. A part stays solid, and is listed in `solid` with the
-     reason, when hollow() refuses it:
-       'too-small'   narrower than two floor walls: hollow()'s "thicker than
-                     half this piece" on an axis-aligned part, or "leaves no
-                     cavity anywhere" on a tilted one (whose bounding box is
-                     wider than its section, so the first check cannot fire)
-       'fused'       no point of it is both two walls deep and clear of every
-                     other part - it is all junction
-       'under-floor' the wall asked for, or the wall hollow() measured on the
-                     result, is under the floor
-       'other'       anything else hollow() refuses, by its own words
+     where each part's INNER is that part shrunk inward by exactly one wall:
+     every side face moved in by `wall` along its own normal, and each end cap
+     moved in by `wall` along the axis. Every part here is a straight prism or
+     frustum of a regular polygon, so that inner is again one: the section at
+     each end is the same polygon with its apothem reduced by
+     wall / cos(alpha), alpha the taper's half-angle - the face leans alpha
+     off the axis, so moving it `wall` along its normal moves it
+     wall / cos(alpha) across the section. (A radial wall - apothem minus
+     wall - would leave wall x cos(alpha) perpendicular: the cos(slope)
+     shortfall NSO_wheelInnerAt measured, in miniature.)
+
+     WHY THE WALL IS EXACT, NOT SAMPLED. A convex solid shrunk face by face
+     by `wall` is exactly the set of its points at least `wall` from its
+     surface - the erosion nso_hollow.js samples on a grid, here in closed
+     form. So every bore point lies at least `wall` inside its own part, hence
+     inside the union, and no point of the union's outer surface is nearer
+     than `wall` to any bore. There is no grid, no level set, no keep region,
+     and no tolerance but the kernel's. What replaces the sampled version's
+     solid knot: bores that overlap become ONE bore, as the reference's do.
+
+     WHAT IT DOES NOT PROMISE. Where two bores diverge they part before their
+     tubes do, and for a short run the material between them is thinner than
+     a wall. That is a membrane BETWEEN TWO BORES, not a wall to the outside:
+     a slicer offsetting the two holes by half a line merges them, which is
+     the single merged bore the reference shows at the same place. It is
+     measured and reported, never counted as a wall.
+
+     THE FALLBACK. A part stays solid, named, when its bore would be narrower
+     than one line (minBoreMm, default the floor: two lines laid side by side
+     round a hole thinner than one of them leave no hole a slicer keeps - and
+     the reference's own ~2 mm tips close up), or it is too short for two end
+     walls, or the wall asked for is under the floor. Never the whole tree.
      ===================================================================== */
 
-  function hollowModule(opts) {
-    return (opts && opts.hollowModule) || (root && root.NSO_Hollow) ||
-           (typeof NSO_Hollow !== 'undefined' ? NSO_Hollow : null);
-  }
   function thicknessModule(opts) {
     return (opts && opts.thickness) || (root && root.NSO_Thickness) ||
            (typeof NSO_Thickness !== 'undefined' ? NSO_Thickness : null);
   }
 
-  /* What each entry of plan.parts is, by identity - planTree pushes the
-     trunk, then the branch shafts in contact order, then the fingers. */
+  /* What each entry of plan.parts is, by identity. */
   function partLabels(plan) {
     var by = new Map(), i, f;
-    if (plan.trunk && plan.trunk.soup) {
-      by.set(plan.trunk.soup, { role: 'trunk', label: 'trunk', acrossMm: plan.trunk.sideMm });
-    }
+    if (plan.trunk && plan.trunk.soup) by.set(plan.trunk.soup, { role: 'trunk', label: 'trunk' });
     var brs = plan.branches || [];
     for (i = 0; i < brs.length; i++) {
-      by.set(brs[i].soup, { role: 'branch', label: 'branch ' + i + ' (contact ' + brs[i].contactIndex + ')',
-                            branch: i, acrossMm: brs[i].sideMm });
+      by.set(brs[i].soup, { role: 'branch', label: 'branch ' + i + ' (contact ' + brs[i].contactIndex + ')', branch: i });
       var h = brs[i].hand;
       if (h) for (f = 0; f < h.fingers.length; f++) {
-        by.set(h.fingers[f].soup, { role: 'finger', branch: i, acrossMm: h.widthMm,
-          label: 'finger ' + h.fingers[f].index + ' of branch ' + i });
+        by.set(h.fingers[f].soup, { role: 'finger', branch: i, label: 'finger ' + h.fingers[f].index + ' of branch ' + i });
       }
     }
     if (plan.trunkHand) for (f = 0; f < plan.trunkHand.fingers.length; f++) {
-      by.set(plan.trunkHand.fingers[f].soup, { role: 'finger', acrossMm: plan.trunkHand.widthMm,
-        label: 'finger ' + plan.trunkHand.fingers[f].index + ' of the trunk' });
+      by.set(plan.trunkHand.fingers[f].soup, { role: 'finger', label: 'finger ' + plan.trunkHand.fingers[f].index + ' of the trunk' });
     }
-    return (plan.parts || []).map(function (s, k) {
-      return by.get(s) || { role: 'part', label: 'part ' + k };
-    });
+    return (plan.parts || []).map(function (s, k) { return by.get(s) || { role: 'part', label: 'part ' + k }; });
   }
 
-  function fallbackKind(reason, held) {
-    if (/thicker than half/.test(reason)) return 'too-small';
-    if (/leaves no cavity/.test(reason)) return held ? 'fused' : 'too-small';
-    if (/under the .* floor|came out at/.test(reason)) return 'under-floor';
-    return 'other';
-  }
-
-  /* "Within `clear` of part j", exactly: inside it, or nearer its surface
-     than `clear`. A box test first, because nearly every node of a branch's
-     field is nowhere near most of the other parts. */
-  function nearAnyOf(probes, clear) {
-    return function (x, y, z) {
-      var p = [x, y, z];
-      for (var j = 0; j < probes.length; j++) {
-        var P = probes[j];
-        if (x < P.lo[0] - clear || x > P.hi[0] + clear || y < P.lo[1] - clear ||
-            y > P.hi[1] + clear || z < P.lo[2] - clear || z > P.hi[2] + clear) continue;
-        if (P.inside(p)) return true;
-        var nr = P.nearest(p, clear);
-        if (nr && nr.dist < clear) return true;
-      }
-      return false;
-    };
-  }
-
-  /* Closed shells in a cavity soup, by shared vertex. Usually one per part;
-     two where a keep region crosses a part in the middle - a trunk that
-     carries a contact past its collar has a bore below the collar and
-     another above it. */
-  function shellCount(soup) {
-    var id = new Map(), par = [];
-    function find(x) { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; }
-    for (var t = 0; t < soup.length; t += 9) {
-      var r = -1;
-      for (var k = 0; k < 3; k++) {
-        var o = t + 3 * k, key = soup[o] + ',' + soup[o + 1] + ',' + soup[o + 2];
-        var v = id.get(key);
-        if (v === undefined) { v = par.length; par.push(v); id.set(key, v); }
-        if (r < 0) r = find(v); else par[find(v)] = r;
-      }
+  /* One part's inner: its own vertices, each moved to the end station a wall
+     in from its end and scaled about the axis to the shrunk section there.
+     Same triangles, same winding, so a closed solid in gives a closed solid
+     out. Refuses (with the numbers) when there is no bore to make. */
+  function innerOf(soup, axis, wall, minBore) {
+    var u = sub(axis.to, axis.from), L = len(u);
+    if (!(L > 0)) return { ok: false, kind: 'other', why: 'the part has no length' };
+    u = mul(u, 1 / L);
+    if (!(L > 2 * wall + minBore)) {
+      return { ok: false, kind: 'too-small', why: 'a ' + L.toFixed(3) + ' mm part is too short for two ' +
+        wall.toFixed(3) + ' mm end walls and a bore' };
     }
-    var roots = new Set();
-    for (var i = 0; i < par.length; i++) roots.add(find(i));
-    return roots.size;
+    var a0 = axis.a0, a1 = axis.a1;
+    var tanA = (a0 - a1) / L, cosA = 1 / Math.sqrt(1 + tanA * tanA), delta = wall / cosA;
+    var aAt = function (s) { return a0 + (a1 - a0) * s / L; };
+    var b0 = aAt(wall) - delta, b1 = aAt(L - wall) - delta;
+    var bore = 2 * Math.min(b0, b1);
+    if (!(bore >= minBore - 1e-9)) {
+      return { ok: false, kind: 'too-small', boreMm: bore,
+        why: 'its bore would be ' + (bore > 0 ? bore.toFixed(3) + ' mm across' : 'nothing') + ' - ' +
+          (2 * Math.min(a0, a1)).toFixed(3) + ' mm across the flats less two ' + wall.toFixed(3) +
+          ' mm walls is under the ' + minBore.toFixed(3) + ' mm a slicer keeps as a hole' };
+    }
+    var k0 = b0 / a0, k1 = b1 / a1;
+    var out = new Float32Array(soup.length), worstEnd = 0;
+    for (var v = 0; v < soup.length; v += 3) {
+      var p = [soup[v], soup[v + 1], soup[v + 2]], d = sub(p, axis.from), t = dot(d, u);
+      var atEnd = t > L / 2, rad = sub(d, mul(u, t));
+      var off = atEnd ? Math.abs(t - L) : Math.abs(t);
+      if (off > worstEnd) worstEnd = off;
+      var q = add(add(axis.from, mul(u, atEnd ? L - wall : wall)), mul(rad, atEnd ? k1 : k0));
+      out[v] = q[0]; out[v + 1] = q[1]; out[v + 2] = q[2];
+    }
+    /* Every vertex of these parts is on one of the two end sections. A part
+       that is not (a finger's hexagon is; so is every sweep and every aim()
+       prism) is refused rather than shrunk into something else. */
+    if (worstEnd > 1e-3) return { ok: false, kind: 'other', why: 'the part is not a two-ended prism or frustum (a vertex ' + worstEnd.toFixed(4) + ' mm off its end sections)' };
+    return { ok: true, soup: out, boreFromMm: 2 * b0, boreToMm: 2 * b1, deltaMm: delta, halfAngleDeg: Math.atan(tanA) * 180 / Math.PI };
   }
 
-  // opts.hollowWallMm  the wall; default the floor the trunk was built to,
-  //                    NSO_Thickness.floorFor(nozzle), via buildStrut
-  // opts.nozzle        passed through to hollow()'s floor
+  // opts.hollowWallMm  the wall; default the floor the trunk was built to
+  // opts.minBoreMm     the narrowest bore kept; default the same floor
   function hollowParts(plan, opts) {
     opts = opts || {};
     var out = { ok: false, reason: '', parts: [], hollowed: 0, solid: [] };
-    var H = hollowModule(opts), TH = thicknessModule(opts);
-    if (!H || typeof H.hollow !== 'function') {
-      out.reason = 'nso_hollow.js is not loaded - it is the one Hollow, and nothing here carves a cavity itself';
-      return out;
-    }
-    if (!TH || typeof TH.prepare !== 'function') {
-      out.reason = 'nso_thickness.js is not loaded - the keep region is measured with its probe';
-      return out;
-    }
-    if (!plan || !plan.ok || !plan.parts || !plan.parts.length) {
+    if (!plan || !plan.ok || !plan.parts || !plan.parts.length || !plan.partAxes) {
       out.reason = 'hollowParts needs a planned tree';
       return out;
     }
     var floor = plan.trunk && plan.trunk.floorMm;
     var wall = (opts.hollowWallMm == null) ? floor : +opts.hollowWallMm;
+    var minBore = (opts.minBoreMm == null) ? floor : +opts.minBoreMm;
     if (!(wall > 0)) { out.reason = 'no wall to hollow to - pass hollowWallMm, or plan with a floor'; return out; }
-    out.wallMm = wall;
-    out.floorMm = floor;
-    /* A wall, plus one sample pitch: the cavity surface is a level set
-       sampled at wall / STEPS_PER_WALL, and can sit up to a pitch past the
-       node that bounds it. */
-    var steps = H.STEPS_PER_WALL || 3;
-    out.clearMm = wall + wall / steps;
-
-    var probes = plan.parts.map(function (s) { return TH.prepare(s, { nozzle: opts.nozzle }); });
+    out.wallMm = wall; out.floorMm = floor; out.minBoreMm = minBore;
     var labels = partLabels(plan);
     for (var i = 0; i < plan.parts.length; i++) {
-      var part = plan.parts[i];
-
-      /* hollow()'s own "thicker than half this piece" rule, asked of the
-         part's real SECTION rather than its bounding box. Every part here is
-         a straight prism whose section this file built, so its width across
-         the flats is known exactly - and a tilted part's bounding box is
-         wider than its section, which is the one case where hollow()'s box
-         test cannot fire and the field has to be computed to find nothing.
-         Same rule, same refusal, the right measurement. */
-      var across = labels[i].acrossMm;
-      if (across > 0 && across <= 2 * wall + 1e-9) {
-        var why = 'a ' + across.toFixed(3) + ' mm ' + labels[i].role + ' is not wider than two ' +
-          wall.toFixed(3) + ' mm walls (' + (2 * wall).toFixed(3) + ' mm) - a wall thicker than half ' +
-          'its section leaves no interior to carve, so it stays solid';
-        out.parts.push({ index: i, role: labels[i].role, label: labels[i].label, branch: labels[i].branch,
-                         hollow: false, kind: 'too-small', reason: why, acrossMm: across, heldNodes: 0 });
-        out.solid.push({ index: i, label: labels[i].label, role: labels[i].role, kind: 'too-small', why: why });
-        continue;
+      var rec = { index: i, role: labels[i].role, label: labels[i].label, branch: labels[i].branch, hollow: false };
+      var r;
+      if (wall < floor - 1e-9) {
+        r = { ok: false, kind: 'under-floor', why: 'a ' + wall.toFixed(3) + ' mm wall is under the ' + floor.toFixed(3) +
+          ' mm nozzle floor - a wall that thin is dropped from the toolpath, not printed thin' };
+      } else {
+        r = innerOf(plan.parts[i], plan.partAxes[i], wall, minBore);
       }
-
-      var others = probes.filter(function (P, j) { return j !== i && P; });
-      var h = H.hollow(part, {
-        wall: wall, nozzle: opts.nozzle, minWall: floor,
-        keep: others.length ? nearAnyOf(others, out.clearMm) : null,
-        /* A part is slender: small in two axes, long in one. The node cap
-           still bounds the work; the per-axis cap would only coarsen a long
-           trunk for nothing. */
-        maxDim: 4096
-      });
-      var rec = { index: i, role: labels[i].role, label: labels[i].label,
-                  branch: labels[i].branch, hollow: false, reason: h.reason,
-                  acrossMm: across, heldNodes: h.held_nodes || 0 };
-      if (h.ok) {
-        rec.hollow = true;
-        rec.cavity = h.soup.subarray ? h.soup.subarray(part.length) : h.soup.slice(part.length);
-        rec.hollowSoup = h.soup;
-        rec.bores = shellCount(rec.cavity);
-        rec.cavityMm3 = h.cavity_volume;
-        rec.pitchMm = h.pitch_mm;
-        rec.measuredMm = h.measured_mm;
-        rec.measuredCavityMm = h.measured_cavity_mm;
+      if (r.ok) {
+        rec.hollow = true; rec.inner = r.soup; rec.boreFromMm = r.boreFromMm; rec.boreToMm = r.boreToMm;
+        rec.halfAngleDeg = r.halfAngleDeg; rec.deltaMm = r.deltaMm;
         out.hollowed++;
       } else {
-        rec.kind = fallbackKind(h.reason || '', rec.heldNodes);
-        out.solid.push({ index: i, label: rec.label, role: rec.role, kind: rec.kind, why: h.reason });
+        rec.kind = r.kind; rec.reason = r.why; rec.boreMm = r.boreMm;
+        out.solid.push({ index: i, label: rec.label, role: rec.role, kind: r.kind, why: r.why });
       }
       out.parts.push(rec);
     }
     out.ok = true;
     var kinds = {};
-    out.solid.forEach(function (s) { kinds[s.kind] = (kinds[s.kind] || 0) + 1; });
-    out.reason = out.hollowed + ' of ' + plan.parts.length + ' part(s) hollowed to a ' +
-      wall.toFixed(3) + ' mm wall' +
+    out.solid.forEach(function (x) { kinds[x.kind] = (kinds[x.kind] || 0) + 1; });
+    out.reason = out.hollowed + ' of ' + plan.parts.length + ' part(s) get a bore inside a ' + wall.toFixed(3) + ' mm wall' +
       (out.solid.length ? '; ' + out.solid.length + ' left solid (' +
         Object.keys(kinds).map(function (k) { return kinds[k] + ' ' + k; }).join(', ') + ')' : '');
     return out;
   }
 
   /* The whole hollow tree: the solid union exactly as unionParts builds it,
-     then every cavity stapled on inside it - see THE KEEP REGION for why
-     that needs no second boolean. */
+     then every inner taken out of it by the kernel, one at a time.
+     opts.subtractSoups  default NSO_subtractSoups (app-join.js)
+     opts.unionSoups     as unionParts */
   function hollowTree(plan, opts) {
     opts = opts || {};
+    var S = opts.subtractSoups || (root && root.NSO_subtractSoups) ||
+            (typeof NSO_subtractSoups !== 'undefined' ? NSO_subtractSoups : null);
+    if (typeof S !== 'function') {
+      return Promise.resolve({ ok: false, soup: null,
+        reason: 'app-join.js is not loaded - NSO_subtractSoups is the kernel subtract the bores go through' });
+    }
     var hp = (plan && plan.hollow && plan.hollow.ok) ? plan.hollow : hollowParts(plan, opts);
     if (!hp.ok) return Promise.resolve({ ok: false, soup: null, hollow: hp, reason: hp.reason });
     return unionParts(plan.parts, opts).then(function (u) {
       if (!u.ok) return { ok: false, soup: null, hollow: hp, reason: 'the solid union failed: ' + u.reason };
+      var acc = u.soup, removed = 0, cut = 0, parts = null;
       var recs = hp.parts.filter(function (r) { return r.hollow; });
-      var n = u.soup.length, i;
-      for (i = 0; i < recs.length; i++) n += recs[i].cavity.length;
-      var soup = new Float32Array(n), at = u.soup.length, vol = 0, bores = 0;
-      soup.set(u.soup, 0);
-      for (i = 0; i < recs.length; i++) {
-        soup.set(recs[i].cavity, at);
-        at += recs[i].cavity.length;
-        vol += recs[i].cavityMm3;
-        bores += recs[i].bores;
+      function next(k) {
+        if (k >= recs.length) {
+          var bores = parts == null ? 0 : parts - 1;
+          return {
+            ok: true, soup: acc, solidSoup: u.soup, hollow: hp, solid: hp.solid,
+            boresCut: cut, boreShells: bores, removedMm3: removed,
+            reason: 'hollow tree: ' + cut + ' of ' + plan.parts.length + ' part(s) bored at a ' +
+              hp.wallMm.toFixed(3) + ' mm wall, joined into ' + bores + ' bore(s), ' + removed.toFixed(3) + ' mm^3 removed' +
+              (hp.solid.length ? '; ' + hp.solid.length + ' left solid - ' +
+                hp.solid.map(function (x) { return x.label + ' (' + x.kind + ')'; }).join(', ') : '')
+          };
+        }
+        var r = recs[k];
+        return S(acc, r.inner).then(function (d) {
+          if (d && d.ok) { acc = d.soup; cut++; removed += d.removedMm3; parts = d.parts; r.cut = true; }
+          else {
+            r.hollow = false; r.cut = false; r.kind = 'kernel';
+            r.reason = 'the kernel would not remove its bore: ' + ((d && d.reason) || 'no reason given');
+            hp.solid.push({ index: r.index, label: r.label, role: r.role, kind: 'kernel', why: r.reason });
+          }
+          return next(k + 1);
+        });
       }
-      return {
-        ok: true, soup: soup, solidSoup: u.soup, hollow: hp, solid: hp.solid,
-        cavities: recs.length, bores: bores, cavityMm3: vol,
-        reason: 'hollow tree: ' + recs.length + ' of ' + plan.parts.length + ' part(s) are tubes at a ' +
-          hp.wallMm.toFixed(3) + ' mm wall, ' + bores + ' bore(s), ' + vol.toFixed(3) + ' mm^3' +
-          (hp.solid.length ? '; ' + hp.solid.length + ' left solid - ' +
-            hp.solid.map(function (s) { return s.label + ' (' + s.kind + ')'; }).join(', ') : '')
-      };
+      return next(0);
     });
   }
 
@@ -1555,6 +1699,15 @@
     unionParts: unionParts,
     hollowParts: hollowParts,
     hollowTree: hollowTree,
+    SECTIONS: SECTIONS.slice(),
+    ROUND_SIDES: ROUND_SIDES,
+    TIP_DIAMETER_MM: TIP_DIAMETER_MM,
+    DIAMETER_ANGLE_DEG: DIAMETER_ANGLE_DEG,
+    _lawOf: lawOf,
+    _roundProfile: roundProfile,
+    _roundPart: roundPart,
+    _innerOf: innerOf,
+    _probeRails: probeRails,
     describe: describe,
     /* exposed for the tests, not for callers */
     _zOnTriAt: zOnTriAt,

@@ -418,6 +418,19 @@
    *   up         [x,y,z]                  optional frame seed on segment 0
    *   seamUlps   number (default 8)       joint-ring agreement gate, in float32 ULPs
    *   minRailUlps number (default 8)      per-rail forward-progress floor, in ULPs
+   *   scales     [s0, s1]                 optional, a STRAIGHT (2-point) path only:
+   *                                       the profile is scaled by s0 at the start
+   *                                       and s1 at the end - a frustum. Exact for
+   *                                       the same reason the prism is: every rail
+   *                                       j runs from P0 + s0*o_j to P1 + s1*o_j,
+   *                                       all of them pass through the one apex
+   *                                       where the scale reaches 0, so each wall
+   *                                       quad lies in a plane through that apex
+   *                                       and is planar (wallPlanarity measures
+   *                                       it). Refused on a path with joints: a
+   *                                       mitre ring is computed from rails that
+   *                                       are parallel to their segment, and a
+   *                                       tapered rail is not.
    *
    * Returns { ok, reason, tris, rings, stats }. On refusal `tris` is null and
    * `reason` names the specific rail or joint that stopped it - never a bare
@@ -434,6 +447,17 @@
 
     var pts = fr.pts, segs = fr.segs, frames = fr.frames, joints = fr.joints;
     var M = prof.length, N = pts.length;
+    var scales = null;
+    if (opts.scales != null) {
+      if (N !== 2) {
+        return { ok: false, tris: null, reason: 'scales (a taper) is only exact on a straight 2-point path; ' +
+          'this one has ' + N + ' points, and a mitre ring needs rails parallel to their segment' };
+      }
+      scales = [+opts.scales[0], +opts.scales[1]];
+      if (!(scales[0] > 0 && scales[1] > 0)) {
+        return { ok: false, tris: null, reason: 'scales must both be positive, got ' + JSON.stringify(opts.scales) };
+      }
+    }
     var seamUlps = opts.seamUlps == null ? 8 : opts.seamUlps;
     var minRailUlps = opts.minRailUlps == null ? 8 : opts.minRailUlps;
 
@@ -450,7 +474,8 @@
     var worstSeam = 0, worstSeamUlp = 0, worstSeamAt = -1;
 
     var r0 = [];
-    for (var j0 = 0; j0 < M; j0++) r0.push(add(pts[0], off(0, j0)));
+    var sc0 = scales ? scales[0] : 1, sc1 = scales ? scales[1] : 1;
+    for (var j0 = 0; j0 < M; j0++) r0.push(add(pts[0], mul(off(0, j0), sc0)));
     rings.push(r0);
 
     for (var v = 1; v + 1 < N; v++) {
@@ -491,7 +516,7 @@
 
     var rL = [];
     var lastK = segs.length - 1;
-    for (var jL = 0; jL < M; jL++) rL.push(add(pts[N - 1], off(lastK, jL)));
+    for (var jL = 0; jL < M; jL++) rL.push(add(pts[N - 1], mul(off(lastK, jL), sc1)));
     rings.push(rL);
 
     // --- the one self-intersection gate that is not a proof -----------------
@@ -569,6 +594,7 @@
         rings: rings.length,
         profilePts: M,
         profileArea: pc.area,
+        scales: scales ? scales.slice() : null,
         pathLength: pathLen,
         worstSeamMm: worstSeam,
         worstSeamUlps: worstSeamUlp,

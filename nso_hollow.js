@@ -64,8 +64,6 @@
    ---------------------------------------------------------------------------
    safeMinWall(requested, opts)  -> { mm, floor_mm, floored, reason }
    hollow(rawTris, opts)         -> { ok, soup, reason, ... }
-                                    opts.keep(x, y, z) -> true holds a point as
-                                    material (it can only shrink the cavity);
                                     the result's wall is measured from BOTH
                                     sides - measured_outer_mm, measured_cavity_mm
    fill(rawTris, opts)           -> { ok, soup, reason, ... }
@@ -417,11 +415,13 @@
      across a diagonal alone. Where two cavity nodes meet only corner to
      corner, or only edge to edge, the one vertex of the cell between them is
      shared by two sheets of surface, and the edges around it are used three
-     or four times. A smooth erosion rarely does that. A cavity with a keep
-     region cut out of it does it routinely: measured on the support tree's
-     tall fixture, 17 of 28 branch cavities came out with 1 to 2 non-manifold
-     edges, two with 4 open edges, and eleven with loose specks of 1 to 8
-     nodes where the keep boundary grazed the tube.
+     or four times. A smooth erosion rarely does that; a field with a sharp
+     edge cut into it does it routinely. Measured on an earlier support-tree
+     version that clipped each branch's cavity where it met its neighbours:
+     on the tall fixture 17 of 28 branch cavities came out with 1 to 2
+     non-manifold edges, two with 4 open edges, and eleven with loose specks
+     of 1 to 8 nodes. (Trees now get exact bores - nso_support_tree.js,
+     section 6 - but any piece with a thin neck can pinch the same way.)
 
      So the node set is made WELL-COMPOSED first - no 2x2 face with its
      cavity nodes on one diagonal and material on the other, and no 2x2x2
@@ -518,9 +518,6 @@
            restore       safe-min only: the pre-Thicken wall to aim for
            nozzle/minWall  the floor, resolved by nso_thickness.js
            stepsPerWall / pitch / maxDim   field resolution
-           keep          optional function (x, y, z) -> true where the
-                         caller needs MATERIAL to stay, whatever the field
-                         says - see "the keep region" below
   */
   function hollow(rawTris, opts) {
     var TH = needThickness();
@@ -636,18 +633,6 @@
        function of d2[id] and inside[id] alone, and each node is visited once,
        so nothing is read after it is overwritten - and a 160^3 grid does not
        need a third 33 MB array to say so. */
-    /* THE KEEP REGION. A caller that knows something the field cannot - the
-       support tree knows where one part fuses into the next, and that a
-       cavity there would meet a neighbour's cavity across a membrane thinner
-       than the floor - marks those points as material that must stay. It can
-       only SHRINK the cavity: a node it claims is set a full wall inside the
-       material, so the level set falls between it and the cavity node beside
-       it, never past it. Shrinking the cavity only thickens every wall, so
-       nothing here can take one under the floor; the gate below still
-       measures the result regardless. Asked only of nodes that would
-       otherwise be cavity, so it costs nothing where there is no cavity. */
-    var keep = (typeof opts.keep === 'function') ? opts.keep : null;
-    var held = 0;
     var refined = 0;
     for (var kk = 0; kk < nz; kk++) {
       for (var jj = 0; jj < ny; jj++) {
@@ -663,11 +648,6 @@
             if (nr) { approx = nr.dist; refined++; }
           }
           F[id] = approx - wall;
-          if (keep && F[id] > 0 &&
-              keep(org[0] + ii * pitch, org[1] + jj * pitch, org[2] + kk * pitch)) {
-            F[id] = -wall;
-            held++;
-          }
         }
       }
     }
@@ -680,9 +660,8 @@
     if (!anyCavity) {
       return { fail: 'a ' + round3(wall) + ' mm wall leaves no cavity anywhere in this piece - ' +
         'every point inside it is within ' + round3(wall) + ' mm of the surface' +
-        (held ? ', or in the keep region the caller holds solid (' + held + ' node(s) held)' : '') +
         (tidy.specks ? ', or in a speck of cavity too small to keep (' + tidy.specks + ')' : '') +
-        '. Hollow thinner, or leave it solid.', held: held };
+        '. Hollow thinner, or leave it solid.' };
     }
 
     /* --- step 4: the level set --- */
@@ -715,7 +694,7 @@
     merged.set(rawTris, 0);
     merged.set(cavity, rawTris.length);
     return { soup: merged, cavVol: cavVol, rewound: rewound, pitch: pitch,
-             band: refined, held: held, tidied: tidy.critical, specks: tidy.specks,
+             band: refined, tidied: tidy.critical, specks: tidy.specks,
              cavityTris: (cavity.length / 9) | 0 };
     }
 
@@ -773,7 +752,7 @@
     while (tries < maxTries) {
       tries++;
       attempt = pass(pitch);
-      if (attempt.fail) { out.reason = attempt.fail; out.held_nodes = attempt.held || 0; return out; }
+      if (attempt.fail) { out.reason = attempt.fail; return out; }
       if (!verify) break;
       check = measureBoth(attempt.soup);
       if (check.pass) break;
@@ -791,7 +770,6 @@
     out.pitch_mm = attempt.pitch;
     out.tries = tries;
     out.band_nodes = attempt.band;
-    out.held_nodes = attempt.held;
     out.tidied_nodes = attempt.tidied;
     out.specks_dropped = attempt.specks;
     out.rewound = attempt.rewound;

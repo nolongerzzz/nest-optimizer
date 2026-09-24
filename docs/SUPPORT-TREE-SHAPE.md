@@ -114,6 +114,9 @@ fork is a local union.
 
 ## Scoping the next geometry change, against the measurements
 
+**Status:** 1 and 2 are built. See `docs/SUPPORT-TREE.md` §6b and
+`npm run tree:round`. 3 is next.
+
 What this repo builds today: a **square** 1.2 mm strut and branches of **one
 constant section**, the trunk split **once** at a collar with the branches
 rooted inside it, unioned with `NSO_unionSoups`. Hollowing is per part with a
