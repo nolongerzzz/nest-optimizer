@@ -155,7 +155,9 @@
       make it grow a Y: union the strands instead.
    3. CONTACT GEOMETRY. A branch ends in the same flat cap the strut does, so
       it inherits the same tipPenetrationMm, measured here per branch and
-      reported. nso_support_aim.js's OUT OF SCOPE 2 and nso_seat_surface.js's
+      reported. The 'gecko-hand' style (3b) is a shape option layered on
+      that cap, not an answer to this: it claims nothing about printing.
+      nso_support_aim.js's OUT OF SCOPE 2 and nso_seat_surface.js's
       deferred contact layer are still one unsolved thing, and this file adds
       a third caller for it rather than a third opinion.
    4. WHETHER THE SLICER COULD BRIDGE IT ANYWAY. MAX_SPAN_MM is what the
@@ -176,7 +178,8 @@
    ---------------------------------------------------------------------------
    contactPoints(rawTris, region, opts)  -> { ok, points, pitchMm, ... }
    splitPoint(from, apex, contacts, opts)-> { ok, point, trunkMm, ... }
-   branch(rootPoint, tip, opts)          -> { ok, soup, tiltDeg, ... }
+   branch(rootPoint, tip, opts)          -> { ok, soup, parts, tiltDeg, ... }
+   opts.branchStyle                      'square' (default) or 'gecko-hand', see 3b
    planTree(rawTris, opts)               -> detect + contacts + trunk + fan
    unionParts(parts, opts)               -> Promise of the app's own union
    describe(result)                      -> one status line
@@ -245,6 +248,50 @@
   var MAX_CONTACTS = 512;
 
   var EPS_MM = 1e-3;                       /* same ray epsilon as the aim */
+
+  /* BRANCH STYLES - what a contact's tip LOOKS like, and nothing else.
+     'square' is the shipped shape, and the default. 'gecko-hand' adds a hand
+     at each contact point - see 3b. GECKO HAND. Neither one moves a contact,
+     the split point, the trunk, a branch's root, heading, length or tilt: the
+     style is read only after all of that is decided, and
+     tools/nso_support_tree_test.js section 7b asserts the two plans are
+     identical in every one of those numbers on every fixture. */
+  var BRANCH_STYLES = ['square', 'gecko-hand'];
+
+  /* The hand's proportions, as multiples of the shared cross-section side so
+     the hand scales with the strut it grows from. Chosen, not measured - this
+     is the shape option, and the reference slice has no opinion on it.
+       FINGERS          five, the gecko's own count
+       FAN_DEG          the arc the fingers splay over, centred on the
+                        branch's outward heading (a hand reaching, not a
+                        star); a vertical tip has no heading and gets the
+                        full circle instead
+       KNUCKLE_SIDES    how far back down the shaft the fingers leave it
+       REACH_SIDES      how far out from the contact the fingertips land, in
+                        the plane of the surface being supported
+       ROOT_SIDES       how far off the shaft axis each finger's root sits,
+                        toward its own fingertip - the same no-shared-start-
+                        point reason as ROOT_SPREAD_SIDES. Small, because it
+                        is the root CAP that has to stay inside the shaft,
+                        not just its centre: offset plus the hexagon's
+                        circumradius must be under the 0.5 half-width, and
+                        geckoHand refuses by name when it is not. At 0.25
+                        the first version put the cap 0.646 mm out on a
+                        0.6 mm half-width, poking through the shaft wall
+                        beside a rail; on the shelf fixture the union then
+                        carried a cluster of vertices microns apart along
+                        that rail, and the default 1e-4 weld read 2 open
+                        edges there - measured, and gone at 0.1
+       WIDTH_SIDES      the finger's hexagon, across its flats; never under
+                        the wall-thickness floor the trunk was held to */
+  var GECKO = {
+    FINGERS: 5,
+    FAN_DEG: 216,
+    KNUCKLE_SIDES: 1,
+    REACH_SIDES: 1,
+    ROOT_SIDES: 0.1,
+    WIDTH_SIDES: 0.5
+  };
 
   function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
   function add(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
@@ -625,6 +672,8 @@
   //                    short). Same name and same sign as aim()'s own, so a
   //                    caller pulling every tip back off the surface says it
   //                    once and means it for the trunk and the branches alike.
+  // opts.branchStyle   'square' (default) or 'gecko-hand' - see 3b
+  // opts.floorMm       gecko-hand only: the floor a finger may not go under
   function branch(rootPoint, tip, opts) {
     opts = opts || {};
     var out = { ok: false, reason: '' };
@@ -638,6 +687,12 @@
     }
     var side = (opts.sideMm == null) ? 0 : +opts.sideMm;
     if (!(side > 0)) { out.reason = 'branch needs a positive sideMm - pass the one buildStrut settled on'; return out; }
+    var style = styleOf(opts);
+    if (!style) {
+      out.reason = 'unknown branchStyle ' + JSON.stringify(opts.branchStyle) + ' - one of ' +
+        BRANCH_STYLES.join(', ');
+      return out;
+    }
 
     var run = sub(tip, rootPoint), L0 = len(run);
     if (!(L0 > 0)) { out.reason = 'branch root and tip coincide'; return out; }
@@ -687,9 +742,189 @@
       }
       out.tipPenetrationMm = worst;
     }
+    out.style = style;
+    out.parts = [out.soup];
+    if (style === 'gecko-hand') {
+      /* The hand is ADDED at the tip the square branch already reaches: the
+         shaft above is the default branch, byte for byte, so the contact, the
+         axis, the tilt and the flat cap's own overshoot are all unchanged. */
+      var hand = geckoHand(end, d, side, {
+        normal: opts.targetNormal, floorMm: opts.floorMm, shaftMm: L, pathSweep: PS
+      });
+      if (!hand.ok) { out.ok = false; out.reason = 'the gecko hand would not build: ' + hand.reason; return out; }
+      out.hand = hand;
+      out.parts = out.parts.concat(hand.fingers.map(function (f) { return f.soup; }));
+      out.fingerPenetrationMm = tn ? handPenetration(hand, tip, tn) : null;
+    }
     out.reason = 'a ' + side.toFixed(3) + ' mm branch, ' + L.toFixed(3) + ' mm long, ' +
-      out.tiltDeg.toFixed(2) + ' deg off vertical';
+      out.tiltDeg.toFixed(2) + ' deg off vertical' +
+      (out.hand ? ', ending in a ' + out.hand.fingers.length + '-finger gecko hand' : '');
     return out;
+  }
+
+  /* =====================================================================
+     3b. GECKO HAND - an alternate tip, and ONLY a tip
+
+     What the 'gecko-hand' style adds at a contact point. The square branch
+     is built first, exactly as the default builds it, and still ends on the
+     contact with its flat cap; the hand is GECKO.FINGERS extra swept
+     solids that leave the shaft a knuckle's depth below the tip and splay
+     out to fingertips lying in the plane of the surface being held up,
+     centred on the contact. So the contact point, and the count of them, is
+     the default's - the hand is that one contact's pad, drawn as a hand.
+
+     Every finger is one more two-point NSO_PathSweep, for the reason the
+     branch is: one segment, no mitre, an exact cross-section. The section is
+     a regular HEXAGON - convex, counter-clockwise, containing its origin, so
+     profileCheck takes it - and its across-flats width is never under the
+     wall-thickness floor the trunk was held to, so a finger is not a feature
+     the thickness check would call too thin to print.
+
+     The fingers are separate parts, not welded into the branch here: the
+     union is still NSO_unionSoups, folded left, and each finger's root sits
+     inside the shaft so every one genuinely overlaps what it is unioned
+     against. Roots are spread off the axis toward their own fingertip for
+     ROOT_SPREAD_SIDES' reason - two sweeps sharing a start point pinch.
+     ===================================================================== */
+
+  function hexProfile(acrossFlats) {
+    var r = acrossFlats / Math.sqrt(3), p = [];
+    for (var k = 0; k < 6; k++) {
+      var a = (30 + 60 * k) * Math.PI / 180;
+      p.push([r * Math.cos(a), r * Math.sin(a)]);
+    }
+    return p;
+  }
+  function cross(a, b) {
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  }
+
+  // end     the point the shaft ends at (the contact, plus any tipEngageMm)
+  // dir     the shaft's unit heading
+  // side    the shaft's cross-section side
+  // opts.normal    the supported surface's normal - the fingertips lie in its
+  //                plane; without one, the plane square to the shaft
+  // opts.floorMm   the wall-thickness floor a finger may not go under
+  // opts.shaftMm   the shaft's own length; the knuckle stays inside its half
+  function geckoHand(end, dir, side, opts) {
+    opts = opts || {};
+    var out = { ok: false, reason: '', fingers: [] };
+    var PS = sweepModule(opts);
+    if (!PS || typeof PS.sweep !== 'function') { out.reason = 'nso_path_sweep.js is not loaded'; return out; }
+    var d = unit(dir);
+    if (!finite3(end) || !d || !(side > 0)) { out.reason = 'a hand needs a finite tip, a heading and a side'; return out; }
+
+    /* The fingertips' plane. A surface normal nearly square to the shaft
+       would lay the fingers along the shaft itself, so that one falls back. */
+    var n = unit(opts.normal || []);
+    if (!n || Math.abs(dot(n, d)) < 0.1) n = mul(d, -1);
+
+    /* The heading the fan is centred on: the shaft's own lean, laid into the
+       plane. A shaft standing square to the plane has none, and gets the
+       full circle rather than an arbitrary half of it. */
+    var h = sub(d, mul(n, dot(d, n))), full = false;
+    if (len(h) < 1e-6) {
+      full = true;
+      var ax = Math.abs(n[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0];
+      h = sub(ax, mul(n, dot(ax, n)));
+    }
+    h = unit(h);
+    var g = cross(n, h);
+
+    var width = Math.max(GECKO.WIDTH_SIDES * side, (opts.floorMm > 0) ? +opts.floorMm : 0);
+    var profile = hexProfile(width);
+    var rootOff = GECKO.ROOT_SIDES * side;
+    if (!(rootOff + width / Math.sqrt(3) < side / 2)) {
+      out.reason = 'a ' + width.toFixed(3) + ' mm finger cannot start inside a ' + side.toFixed(3) +
+        ' mm shaft - its root cap would stand out through the shaft wall';
+      return out;
+    }
+    var knuckle = GECKO.KNUCKLE_SIDES * side;
+    if (opts.shaftMm > 0) knuckle = Math.min(knuckle, opts.shaftMm / 2);
+    var reach = GECKO.REACH_SIDES * side;
+    var base = add(end, mul(d, -knuckle));
+
+    var F = GECKO.FINGERS;
+    for (var k = 0; k < F; k++) {
+      var deg = full ? k * 360 / F : -GECKO.FAN_DEG / 2 + k * GECKO.FAN_DEG / (F - 1);
+      var a = deg * Math.PI / 180;
+      var u = add(mul(h, Math.cos(a)), mul(g, Math.sin(a)));
+      var tipPt = add(end, mul(u, reach));
+      var rad = unit(sub(u, mul(d, dot(u, d))));
+      var from = rad ? add(base, mul(rad, rootOff)) : base;
+      var sw = PS.sweep({ points: [from, tipPt], profile: profile });
+      if (!sw.ok) { out.reason = 'finger ' + k + ' would not sweep: ' + sw.reason; return out; }
+      var run = sub(tipPt, from), L = len(run);
+      out.fingers.push({
+        index: k, soup: sw.tris, sweep: sw, from: from, to: tipPt,
+        dir: mul(run, 1 / L), lengthMm: L, fanDeg: deg
+      });
+    }
+    out.ok = true;
+    out.widthMm = width;
+    out.sectionAreaMm2 = 1.5 * Math.sqrt(3) * Math.pow(width / Math.sqrt(3), 2);
+    out.knuckleMm = knuckle;
+    out.reachMm = reach;
+    out.fullCircle = full;
+    out.normal = n;
+    out.reason = F + ' fingers, ' + width.toFixed(3) + ' mm across, reaching ' + reach.toFixed(3) +
+      ' mm from the contact';
+    return out;
+  }
+
+  /* The flat-cap overshoot of section 3, measured over every finger: how far
+     any finger vertex stands past the supported surface's plane. */
+  function handPenetration(hand, tip, tn) {
+    var worst = 0;
+    for (var f = 0; f < hand.fingers.length; f++) {
+      var s = hand.fingers[f].soup;
+      for (var v = 0; v < s.length; v += 3) {
+        var past = -((s[v] - tip[0]) * tn[0] + (s[v + 1] - tip[1]) * tn[1] + (s[v + 2] - tip[2]) * tn[2]);
+        if (past > worst) worst = past;
+      }
+    }
+    return worst;
+  }
+
+  /* The clearance probe of section 4, for any one swept part: its axis over
+     the whole run, and its rails over the shaft - everything but the last
+     cross-section, which is the cap's business. Returns null when clear. */
+  function probeClear(SA, obstacles, from, dir, lengthMm, rails, capMm) {
+    var probes = [[from, dir, lengthMm - EPS_MM, 'the axis']];
+    var shaft = lengthMm - capMm;
+    if (shaft > 2 * EPS_MM) {
+      for (var j = 0; j < rails.length; j++) probes.push([rails[j], dir, shaft - EPS_MM, 'rail ' + j]);
+    }
+    for (j = 0; j < probes.length; j++) {
+      var hit = SA._nearestHit(obstacles, probes[j][0], probes[j][1], EPS_MM, probes[j][2]);
+      if (hit > 0) {
+        return { at: hit, why: probes[j][3] + ' is blocked ' + hit.toFixed(3) + ' mm along, ' +
+                 (probes[j][2] - hit).toFixed(3) + ' mm short of the end of its run' };
+      }
+    }
+    return null;
+  }
+
+  /* A hand's fingers are clearance-tested like a branch, and one that would
+     run into the piece is LEFT OFF rather than refusing the branch: the
+     fingers are the tip's shape, not its contact, so losing one changes what
+     the tip looks like and nothing about what holds the overhang up. */
+  function clearFingers(SA, obstacles, hand) {
+    var kept = [], dropped = [];
+    for (var f = 0; f < hand.fingers.length; f++) {
+      var fi = hand.fingers[f];
+      var stop = probeClear(SA, obstacles, fi.from, fi.dir, fi.lengthMm, fi.sweep.rings[0], hand.widthMm);
+      if (stop) dropped.push({ index: fi.index, at: stop.at, why: 'finger ' + fi.index + ': ' + stop.why });
+      else kept.push(fi);
+    }
+    hand.fingers = kept;
+    hand.dropped = dropped;
+    return hand;
+  }
+
+  function styleOf(opts) {
+    var s = (opts && opts.branchStyle != null) ? String(opts.branchStyle) : 'square';
+    return BRANCH_STYLES.indexOf(s) >= 0 ? s : null;
   }
 
   /* =====================================================================
@@ -710,6 +945,14 @@
         'and the strut, and none of them is reimplemented here';
       return out;
     }
+
+    var style = styleOf(opts);
+    if (!style) {
+      out.reason = 'unknown branchStyle ' + JSON.stringify(opts.branchStyle) + ' - one of ' +
+        BRANCH_STYLES.join(', ');
+      return out;
+    }
+    out.style = style;
 
     var det = SA.detectOverhangs(rawTris, opts);
     out.detect = det;
@@ -803,11 +1046,30 @@
     out.parts.push(trunk.soup);
     out.sideMm = trunk.sideMm;
 
+    /* A trunk that ends ON a contact - the single strut, or the one carrying
+       the contact on its own axis - gets the same hand a branch would, so
+       under 'gecko-hand' every contact point has one. The trunk's own soup
+       is untouched: the fingers are parts beside it, as on a branch. */
+    if (style === 'gecko-hand' && (single || carried >= 0)) {
+      var th = geckoHand(trunk.tip, trunk.dir, trunk.sideMm, {
+        normal: region.normal, floorMm: trunk.floorMm, shaftMm: trunk.lengthMm
+      });
+      if (!th.ok) { out.reason = 'the trunk\'s gecko hand would not build: ' + th.reason; return out; }
+      clearFingers(SA, obstacles, th);
+      out.trunkHand = th;
+    }
+
     if (single) {
+      if (out.trunkHand) {
+        for (i = 0; i < out.trunkHand.fingers.length; i++) out.parts.push(out.trunkHand.fingers[i].soup);
+        out.fingers = out.trunkHand.fingers.length;
+        out.fingersDropped = out.trunkHand.dropped.length;
+      }
       out.ok = true;
       out.stage = 'done';
       out.single = true;
-      out.reason = det.reason + '; one contact point, so no split: ' + trunk.reason;
+      out.reason = det.reason + '; one contact point, so no split: ' + trunk.reason +
+        (out.trunkHand ? '; a gecko hand of ' + out.fingers + ' finger(s)' : '');
       return out;
     }
 
@@ -837,7 +1099,7 @@
       var rootPoint = across ? add(collar, mul(across, spread)) : collar;
 
       var br = branch(rootPoint, q, Object.assign({}, opts, {
-        sideMm: trunk.sideMm, targetNormal: region.normal
+        sideMm: trunk.sideMm, targetNormal: region.normal, floorMm: trunk.floorMm
       }));
       if (!br.ok) { blocked.push({ index: i, why: br.reason }); continue; }
 
@@ -864,25 +1126,16 @@
          A branch shorter than one cross-section has no shaft and is tested on
          its axis alone; it is also a branch that is almost entirely cap, and
          the tip measurement is the one that means anything about it. */
-      var rings = br.sweep.rings, j;
-      var shaft = br.lengthMm - trunk.sideMm;
-      var probes = [[rootPoint, br.dir, br.lengthMm - EPS_MM, 'the axis']];
-      if (shaft > 2 * EPS_MM) {
-        for (j = 0; j < rings[0].length; j++) {
-          probes.push([rings[0][j], br.dir, shaft - EPS_MM, 'rail ' + j]);
-        }
-      }
-      var stop = null;
-      for (j = 0; j < probes.length && !stop; j++) {
-        var hit = SA._nearestHit(obstacles, probes[j][0], probes[j][1], EPS_MM, probes[j][2]);
-        if (hit > 0) {
-          stop = { at: hit, why: probes[j][3] + ' is blocked ' + hit.toFixed(3) + ' mm along, ' +
-                   (probes[j][2] - hit).toFixed(3) + ' mm short of the end of its run' };
-        }
-      }
+      var stop = probeClear(SA, obstacles, rootPoint, br.dir, br.lengthMm,
+        br.sweep.rings[0], trunk.sideMm);
       if (stop) {
         blocked.push({ index: i, at: stop.at, why: stop.why });
         continue;
+      }
+      if (br.hand) {
+        clearFingers(SA, obstacles, br.hand);
+        br.parts = [br.soup].concat(br.hand.fingers.map(function (fi) { return fi.soup; }));
+        br.fingerPenetrationMm = handPenetration(br.hand, q, unit(region.normal));
       }
 
       br.contactIndex = i;
@@ -891,6 +1144,31 @@
     }
     out.blocked = blocked;
     out.probesPerBranch = 1 + squareProfile(trunk.sideMm).length;   /* the axis, and one per rail */
+    /* THE FINGERS GO ON AFTER EVERY SHAFT, not beside their own. The fold is
+       left to right, so this makes the first 1 + branches steps of the union
+       the default tree's own steps, in the default's own order - the trunk
+       and fan the canonical checker already passes - and every finger is then
+       unioned against a solid that has its shaft in it. Interleaved, the
+       boolean re-rounds the fan's roots to float32 between branches in a
+       different order, and on the tall fixture that alone was measured as 2
+       piercing pairs down at the branch roots, nowhere near a hand. */
+    if (style === 'gecko-hand') {
+      var fingers = 0, dropped = 0;
+      for (i = 0; i < out.branches.length; i++) {
+        for (var f = 0; f < out.branches[i].hand.fingers.length; f++) {
+          out.parts.push(out.branches[i].hand.fingers[f].soup);
+        }
+        fingers += out.branches[i].hand.fingers.length;
+        dropped += out.branches[i].hand.dropped.length;
+      }
+      if (out.trunkHand) {
+        for (i = 0; i < out.trunkHand.fingers.length; i++) out.parts.push(out.trunkHand.fingers[i].soup);
+        fingers += out.trunkHand.fingers.length;
+        dropped += out.trunkHand.dropped.length;
+      }
+      out.fingers = fingers;
+      out.fingersDropped = dropped;
+    }
 
     if (!out.branches.length) {
       out.reason = 'the trunk reached ' + (carried >= 0 ? 'its own contact' : 'its split point') +
@@ -913,7 +1191,9 @@
     out.stage = 'done';
     out.reason = det.reason + '; ' + cp.reason + '; ' + out.split.reason + '; ' +
       out.branches.length + ' branch(es)' + (blocked.length ? ', ' + blocked.length + ' refused' : '') +
-      ', ' + out.tiltDeg.min.toFixed(2) + '..' + out.tiltDeg.max.toFixed(2) + ' deg off vertical';
+      ', ' + out.tiltDeg.min.toFixed(2) + '..' + out.tiltDeg.max.toFixed(2) + ' deg off vertical' +
+      (style === 'gecko-hand' ? '; gecko hands, ' + out.fingers + ' finger(s)' +
+        (out.fingersDropped ? ', ' + out.fingersDropped + ' left off where they met the piece' : '') : '');
     return out;
   }
 
@@ -981,6 +1261,8 @@
     ROOT_OVERLAP_SIDES: ROOT_OVERLAP_SIDES,
     ROOT_SPREAD_SIDES: ROOT_SPREAD_SIDES,
     MAX_CONTACTS: MAX_CONTACTS,
+    BRANCH_STYLES: BRANCH_STYLES.slice(),
+    GECKO: Object.assign({}, GECKO),     /* a copy: the proportions are not a setting */
     contactPoints: contactPoints,
     splitPoint: splitPoint,
     branch: branch,
@@ -989,7 +1271,9 @@
     describe: describe,
     /* exposed for the tests, not for callers */
     _zOnTriAt: zOnTriAt,
-    _squareProfile: squareProfile
+    _squareProfile: squareProfile,
+    _hexProfile: hexProfile,
+    _geckoHand: geckoHand
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.NSO_SupportTree = api;

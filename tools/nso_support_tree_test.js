@@ -377,6 +377,165 @@ for (const [name, host] of CASES) {
     before.equals(after), `${before.length} bytes`);
 }
 
+console.log('\n=== 7b. GECKO HAND: a different tip, and the same tree ===');
+
+/* The 'gecko-hand' style may change what a contact's tip LOOKS like and
+   nothing else. So every number the default plan decides - the contacts,
+   the split, the trunk, each branch's root, heading, length and tilt, what
+   was refused - is compared here EXACTLY, not to a tolerance: the style is
+   read after all of it is settled, so any difference at all is a bug. */
+const sameVec = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+const sameBytes = (a, b) => Buffer.from(new Float32Array(a).buffer)
+  .equals(Buffer.from(new Float32Array(b).buffer));
+
+function parity(name, host, extra) {
+  const base = Object.assign({ skipList: [] }, extra || {});
+  const d = ST.planTree(host, base);
+  const g = ST.planTree(host, Object.assign({}, base, { branchStyle: 'gecko-hand' }));
+  check(`${name}: both styles plan, or neither does`, d.ok === g.ok && d.ok,
+    `square: ${d.ok}, gecko-hand: ${g.ok}` + (g.ok ? '' : ' - ' + g.reason));
+  if (!d.ok || !g.ok) return null;
+
+  check(`${name}: the same contact points, count and placement, exactly`,
+    d.contacts.points.length === g.contacts.points.length &&
+    d.contacts.points.every((c, i) => sameVec(c.p, g.contacts.points[i].p) &&
+                                      c.source === g.contacts.points[i].source),
+    `${g.contacts.points.length} contacts, coverage ${g.contacts.coverageMm.toFixed(4)} mm`);
+
+  check(`${name}: the same trunk, byte for byte, from the same base to the same split`,
+    sameBytes(d.trunk.soup, g.trunk.soup) && sameVec(d.trunk.tip, g.trunk.tip) &&
+    (d.split ? d.split.trunkMm === g.split.trunkMm && sameVec(d.split.point, g.split.point)
+             : !g.split) &&
+    d.trunkCarriesContact === g.trunkCarriesContact,
+    d.split ? `split ${g.split.trunkMm.toFixed(6)} mm, trunk ${g.trunk.lengthMm.toFixed(6)} mm`
+            : `single strut, ${g.trunk.lengthMm.toFixed(6)} mm`);
+
+  check(`${name}: the same branches - count, contact, root, heading, length, tilt`,
+    d.branches.length === g.branches.length &&
+    d.branches.every((b, i) => {
+      const e = g.branches[i];
+      return b.contactIndex === e.contactIndex && sameVec(b.from, e.from) &&
+             sameVec(b.tip, e.tip) && sameVec(b.dir, e.dir) &&
+             b.lengthMm === e.lengthMm && b.tiltDeg === e.tiltDeg && b.sideMm === e.sideMm;
+    }),
+    `${g.branches.length} branches, ${g.tiltDeg ? g.tiltDeg.min.toFixed(2) + '..' +
+      g.tiltDeg.max.toFixed(2) + ' deg' : 'none'}`);
+
+  check(`${name}: the same contacts refused, for the same reasons`,
+    (d.blocked || []).length === (g.blocked || []).length &&
+    (d.blocked || []).every((b, i) => b.index === g.blocked[i].index && b.why === g.blocked[i].why),
+    `${(g.blocked || []).length} refused`);
+
+  check(`${name}: each shaft is the default branch byte for byte - the flat cap included`,
+    d.branches.every((b, i) => sameBytes(b.soup, g.branches[i].soup) &&
+                               b.tipPenetrationMm === g.branches[i].tipPenetrationMm),
+    `${g.branches.length} shafts`);
+
+  /* The fold is left to right, so the default's parts leading the list, in
+     the default's order, is what makes the default's union a prefix of this
+     one - see planTree, THE FINGERS GO ON AFTER EVERY SHAFT. */
+  check(`${name}: the default's parts lead the list, in the default's order`,
+    d.parts.every((p, i) => sameBytes(p, g.parts[i])) &&
+    g.parts.length === d.parts.length + g.fingers,
+    `${d.parts.length} default part(s), then ${g.fingers} finger(s)`);
+
+  /* Every contact point has a hand: each branch's, and the trunk's own when
+     it ends on one. */
+  const hands = g.branches.map(b => ({ hand: b.hand, end: b.tip }));
+  if (g.single || g.trunkCarriesContact >= 0) hands.push({ hand: g.trunkHand, end: g.trunk.tip });
+  const contactsHeld = g.branches.length + ((g.single || g.trunkCarriesContact >= 0) ? 1 : 0);
+  check(`${name}: one hand per contact point held, and no hand anywhere else`,
+    hands.length === contactsHeld && hands.every(h => h.hand && h.hand.ok) &&
+    (g.single || g.trunkCarriesContact >= 0 ? !!g.trunkHand : !g.trunkHand),
+    `${hands.length} hands over ${contactsHeld} contacts`);
+
+  let bad = [];
+  let kept = 0, dropped = 0;
+  for (const { hand, end } of hands) {
+    kept += hand.fingers.length; dropped += hand.dropped.length;
+    if (hand.fingers.length + hand.dropped.length !== ST.GECKO.FINGERS) bad.push('finger count');
+    if (!(hand.widthMm >= g.trunk.floorMm)) bad.push('width under the floor');
+    for (const f of hand.fingers) {
+      const r = [f.to[0] - end[0], f.to[1] - end[1], f.to[2] - end[2]];
+      const out = Math.hypot(r[0], r[1], r[2]);
+      const off = r[0] * hand.normal[0] + r[1] * hand.normal[1] + r[2] * hand.normal[2];
+      if (!near(out, hand.reachMm, 1e-9)) bad.push(`finger ${f.index} reaches ${out}`);
+      if (!near(off, 0, 1e-9)) bad.push(`finger ${f.index} is ${off} off the surface plane`);
+      if (!(f.sweep.stats.rings === 2 && f.sweep.stats.maxTurnDeg === 0)) bad.push('a finger with a joint');
+      if (f.soup.length / 9 !== 2 * 6 + 6 + 6) bad.push(`finger ${f.index} is ${f.soup.length / 9} tris`);
+    }
+  }
+  check(`${name}: every finger is one hexagonal segment, ending ON the surface plane at the reach`,
+    bad.length === 0,
+    bad.length ? bad.slice(0, 3).join('; ')
+               : `${kept} kept, ${dropped} left off; ${hands[0].hand.widthMm.toFixed(3)} mm across ` +
+                 `(floor ${g.trunk.floorMm} mm), reach ${hands[0].hand.reachMm.toFixed(3)} mm`);
+
+  check(`${name}: the plan's finger tally is the hands' own`,
+    g.fingers === kept && g.fingersDropped === dropped, `${g.fingers} + ${g.fingersDropped}`);
+  return { d, g };
+}
+
+for (const [name, host] of [['shelf', SHELF], ['tall', TALL], ['tab', TAB], ['tiny', TINY]]) {
+  parity(name, host);
+}
+
+{
+  /* Section 4's wall, planned both ways: the rail refusals are the default's
+     exactly, because the shaft is tested before a finger exists. */
+  const b0 = planSHELF.branches[planSHELF.branches.length - 1];
+  const tMid = b0.lengthMm / 2;
+  const M = [0, 1, 2].map(k => b0.from[k] + b0.dir[k] * tMid);
+  const halfWin = 0.4, zLo = M[2] - 0.25, zHi = M[2] + 0.25, R = 1.5;
+  const WALL = soupOf(
+    box([M[0] - R, M[1] - R, zLo], [M[0] + R, M[1] - halfWin, zHi]),
+    box([M[0] - R, M[1] + halfWin, zLo], [M[0] + R, M[1] + R, zHi]),
+    box([M[0] - R, M[1] - halfWin, zLo], [M[0] - halfWin, M[1] + halfWin, zHi]),
+    box([M[0] + halfWin, M[1] - halfWin, zLo], [M[0] + R, M[1] + halfWin, zHi]));
+  parity('shelf + wall', SHELF, { obstacles: [SHELF, WALL] });
+}
+
+{
+  const exp = ST.planTree(SHELF, { skipList: [], branchStyle: 'square' });
+  check('naming the default style explicitly is the default, part for part',
+    exp.ok && exp.parts.length === planSHELF.parts.length &&
+    exp.parts.every((p, i) => sameBytes(p, planSHELF.parts[i])) && exp.fingers === undefined,
+    `${exp.parts.length} parts`);
+
+  const unk = ST.planTree(SHELF, { skipList: [], branchStyle: 'gecko' });
+  check('an unknown style is refused by name, before anything is planned',
+    !unk.ok && /unknown branchStyle/.test(unk.reason) && /gecko-hand/.test(unk.reason), unk.reason);
+  const unkB = ST.branch([0, 0, 0], [1, 1, 10], { sideMm: 1.2, branchStyle: 'claw' });
+  check('and so is one handed to branch() directly', !unkB.ok && /unknown branchStyle/.test(unkB.reason),
+    unkB.reason);
+
+  /* The fingers the post is in the way of are left off, and the tip keeps
+     its contact: the shelf's inner column heads back toward the post. */
+  const g = ST.planTree(SHELF, { skipList: [], branchStyle: 'gecko-hand' });
+  const lost = [].concat(...g.branches.map(b => b.hand.dropped));
+  check('a finger that would run into the piece is left off, and says where',
+    lost.length > 0 && lost.every(x => /^finger \d: (the axis|rail \d) is blocked/.test(x.why)) &&
+    g.branches.every(b => b.parts.length === 1 + b.hand.fingers.length),
+    lost.length ? `${lost.length} left off, e.g. ${lost[0].why}` : 'none - the post was not in the way');
+
+  /* A finger's root cap has to be inside the shaft, not just its centre -
+     see GECKO.ROOT_SIDES. A floor that forces a finger this wide is refused
+     by name rather than built poking out through the wall. */
+  const fat = ST._geckoHand([0, 0, 10], [0, 0, 1], 1.2, { floorMm: 0.9, normal: [0, 0, -1] });
+  check('a finger too wide to start inside its shaft is refused by name',
+    !fat.ok && /cannot start inside/.test(fat.reason), fat.reason);
+  const fits = ST._geckoHand([0, 0, 10], [0, 0, 1], 1.2, { floorMm: 0.42, normal: [0, 0, -1] });
+  check('and at the shipped proportions every root cap is inside the shaft',
+    fits.ok && ST.GECKO.ROOT_SIDES * 1.2 + fits.widthMm / Math.sqrt(3) < 0.6 && fits.fullCircle,
+    `${(ST.GECKO.ROOT_SIDES * 1.2 + fits.widthMm / Math.sqrt(3)).toFixed(4)} mm of a 0.6 mm half-width; ` +
+    `a vertical tip gets the full circle`);
+
+  check('the hand\'s fingertip overshoot is measured and reported, like the cap\'s',
+    g.branches.every(b => b.fingerPenetrationMm >= 0 && b.fingerPenetrationMm <= b.hand.widthMm),
+    `worst ${Math.max(...g.branches.map(b => b.fingerPenetrationMm)).toFixed(4)} mm; ` +
+    `flat cap ${g.worstTipPenetrationMm.toFixed(4)} mm`);
+}
+
 console.log('\n=== 8. THE UNION: the app\'s own boolean, and nothing else ===');
 
 (async () => {
@@ -388,8 +547,13 @@ console.log('\n=== 8. THE UNION: the app\'s own boolean, and nothing else ===');
   const csg = csgContext();
   fs.mkdirSync(OUT, { recursive: true });
 
+  const RUNS = [];
   for (const [name, host] of CASES) {
-    const p = ST.planTree(host, { skipList: [] });
+    RUNS.push([name, host, {}]);
+    RUNS.push([name + '_gecko', host, { branchStyle: 'gecko-hand' }]);
+  }
+  for (const [name, host, style] of RUNS) {
+    const p = ST.planTree(host, Object.assign({ skipList: [] }, style));
     if (!p.ok) { check(`${name}: plans`, false, p.reason); continue; }
 
     /* Every step is a genuine merge. NSO_unionSoups only reports ok when the
@@ -421,6 +585,15 @@ console.log('\n=== 8. THE UNION: the app\'s own boolean, and nothing else ===');
     if (p.branches.length) {
       writeSTL(path.join(OUT, name + '_branch0.stl'), p.branches[0].soup, 'NSO branch ' + name);
     }
+    /* And one finger, for the same reason: a hand is only as clean as the
+       sweeps it is made of. The first kept finger of the first hand. */
+    const hands = p.branches.map(b => b.hand).concat(p.trunkHand ? [p.trunkHand] : [])
+      .filter(h => h && h.fingers.length);
+    if (hands.length) {
+      writeSTL(path.join(OUT, name + '_finger0.stl'), hands[0].fingers[0].soup, 'NSO finger ' + name);
+    }
+    let fingerVolumeMm3 = 0;
+    for (const h of hands) for (const f of h.fingers) fingerVolumeMm3 += h.sectionAreaMm2 * f.lengthMm;
     fs.writeFileSync(path.join(OUT, name + '.json'), JSON.stringify({
       contacts: p.contacts.points.length,
       lattice: p.contacts.lattice,
@@ -436,6 +609,11 @@ console.log('\n=== 8. THE UNION: the app\'s own boolean, and nothing else ===');
       tiltDeg: p.tiltDeg || null,
       branchLengthMm: p.branchLengthMm || null,
       worstTipPenetrationMm: p.worstTipPenetrationMm == null ? null : p.worstTipPenetrationMm,
+      style: p.style,
+      fingers: p.fingers || 0,
+      fingersDropped: p.fingersDropped || 0,
+      fingerSectionMm2: hands.length ? hands[0].sectionAreaMm2 : null,
+      fingerVolumeMm3: fingerVolumeMm3,
       parts: p.parts.length,
       unionTris: (whole.soup.length / 9) | 0
     }, null, 2) + '\n');

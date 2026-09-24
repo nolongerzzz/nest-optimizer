@@ -112,7 +112,12 @@ const WELD_DEFAULT = 1e-4;          /* mesh_validate.py's own, = NSO_Repair.WELD
 const ZERO = ['open_edges', 'nonmanifold_edges', 'odd_edges',
               'inconsistent_winding_edges', 'degenerate_tris'];
 
-const CASES = ['shelf', 'tall', 'tab', 'tiny'];
+/* Every case twice: the default square tip, and the 'gecko-hand' style,
+   which must pass exactly the same gates. The gecko run's parts are the
+   default's plus a hexagonal finger per kept finger, so the part check gains
+   one finger, and the union's volume ceiling gains the fingers' volume. */
+const BASES = ['shelf', 'tall', 'tab', 'tiny'];
+const CASES = [].concat(...BASES.map(n => [n, n + '_gecko']));
 
 for (const name of CASES) {
   console.log('\n== ' + name + ' ==');
@@ -122,9 +127,13 @@ for (const name of CASES) {
     `${meta.branches} branch(es), ${meta.parts} parts -> ${meta.unionTris} triangles`);
 
   /* ---- the parts, at the canonical weld, with nothing excused ---------- */
-  const parts = [['trunk', meta.trunkMm]];
-  if (meta.branches) parts.push(['branch0', meta.branchLengthMm ? null : null]);
-  for (const [part] of parts) {
+  /* Each part with its own cross-section area: side^2 for the square trunk
+     and branch, the hexagon's for a finger. */
+  const sq = meta.sideMm * meta.sideMm;
+  const parts = [['trunk', sq]];
+  if (meta.branches) parts.push(['branch0', sq]);
+  if (meta.fingers) parts.push(['finger0', meta.fingerSectionMm2]);
+  for (const [part, area] of parts) {
     const file = path.join(OUT, name + '_' + part + '.stl');
     if (!fs.existsSync(file)) continue;
     const v = validate(file);
@@ -141,13 +150,13 @@ for (const name of CASES) {
     /* The cross-section claim, on a SWEPT solid this time. The length is read
        back off the solid itself: volume / side^2 must equal the extent along
        the part's own axis, and the bounding-box diagonal bounds that extent. */
-    const L = v.signed_volume / (meta.sideMm * meta.sideMm);
+    const L = v.signed_volume / area;
     const diag = Math.hypot(v.bbox_max[0] - v.bbox_min[0],
                             v.bbox_max[1] - v.bbox_min[1],
                             v.bbox_max[2] - v.bbox_min[2]);
-    check(`${name}/${part}: signed volume is side^2 x a length inside its own diagonal`,
+    check(`${name}/${part}: signed volume is its section x a length inside its own diagonal`,
       L > 0 && L <= diag + 1e-6,
-      `${v.signed_volume.toFixed(6)} mm^3 = ${meta.sideMm}^2 x ${L.toFixed(6)} mm, ` +
+      `${v.signed_volume.toFixed(6)} mm^3 = ${area.toFixed(6)} mm^2 x ${L.toFixed(6)} mm, ` +
       `diagonal ${diag.toFixed(6)} mm`);
   }
 
@@ -209,7 +218,7 @@ for (const name of CASES) {
   check(`${name}: the union is bigger than its trunk and smaller than the parts summed`,
     v.signed_volume > trunk.signed_volume - 1e-9 &&
     v.signed_volume < trunk.signed_volume + meta.branches * meta.sideMm * meta.sideMm *
-      (meta.branchLengthMm ? meta.branchLengthMm.max : 0) + 1e-6,
+      (meta.branchLengthMm ? meta.branchLengthMm.max : 0) + (meta.fingerVolumeMm3 || 0) + 1e-6,
     `${v.signed_volume.toFixed(4)} mm^3, trunk alone ${trunk.signed_volume.toFixed(4)} mm^3`);
 
   /* ---- the piece it was aimed at ---------------------------------------- */
@@ -218,6 +227,22 @@ for (const name of CASES) {
     host.open_edges === 0,
     `${host.triangles} tris, ${host.open_edges} open, ${host.nonmanifold_edges} ` +
     `non-manifold (the shape's own - a post with an arm overlapping it)`);
+}
+
+/* ---- the gecko hand changes the tip and nothing it stands on ----------- */
+console.log('\n== gecko-hand against the default, case by case ==');
+const SAME = ['contacts', 'lattice', 'topUp', 'pitchMm', 'coverageMm', 'branches', 'blocked',
+              'sideMm', 'trunkMm', 'splitMm', 'trunkFraction', 'tiltDeg', 'branchLengthMm',
+              'worstTipPenetrationMm'];
+for (const n of BASES) {
+  const d = JSON.parse(fs.readFileSync(path.join(OUT, n + '.json'), 'utf8'));
+  const g = JSON.parse(fs.readFileSync(path.join(OUT, n + '_gecko.json'), 'utf8'));
+  const diff = SAME.filter(k => JSON.stringify(d[k]) !== JSON.stringify(g[k]));
+  check(`${n}: gecko-hand has the default's contact count, split, trunk and fan, exactly`,
+    diff.length === 0 && g.style === 'gecko-hand' && d.style === 'square',
+    diff.length ? 'differs in ' + diff.join(', ')
+                : `${g.contacts} contacts, ${g.branches} branches; ${g.fingers} finger(s) added, ` +
+                  `${g.fingersDropped} left off; ${d.parts} -> ${g.parts} parts`);
 }
 
 console.log('\n' + (fail ? `FAILED  ${fail} of ${pass + fail}` : `PASSED  all ${pass}`));

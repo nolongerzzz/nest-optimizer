@@ -323,6 +323,87 @@ for every branch, which is the honest statement. Worst measured: **0.3878 mm**
 on the shelf, at a 27.24° lean. `opts.tipEngageMm` pulls every tip back off the
 surface by the same name and the same sign `aim()` already uses.
 
+### An alternate tip: `branchStyle: 'gecko-hand'`
+
+A **shape option only**. `opts.branchStyle` is `'square'` (the default, and
+everything above) or `'gecko-hand'`; anything else is refused by name.
+
+**What the default tip actually is.** The audit that came first here:
+each branch is `NSO_PathSweep.sweep` over a two-point path with
+`squareProfile(side)`, a 4-vertex square of the trunk's own `sideMm`
+(1.2 mm, floored at 0.42). It ends in the sweep's flat end cap, which is
+perpendicular to the branch and fanned from the path endpoint. That makes
+16 triangles per branch. The trunk is `buildStrut`'s square prism, with the
+same flat end.
+
+**What `gecko-hand` changes.** Nothing that decides the tree. The contacts,
+the split point, the trunk, each branch's root, heading, length and tilt, and
+the refusals are all settled before the style is read. The square shaft is
+still built, byte for byte, flat cap included. The style then **adds** a hand
+at every contact point: at each branch tip, and at the trunk's tip when the
+trunk ends on a contact (the single strut, or the carried one).
+
+| `GECKO.` | value | what it sets |
+|---|---|---|
+| `FINGERS` | 5 | fingers per hand |
+| `FAN_DEG` | 216 | the arc they splay over, centred on the branch's outward lean (a vertical tip has no lean and gets the full circle) |
+| `KNUCKLE_SIDES` | 1 | how far back down the shaft they leave it |
+| `REACH_SIDES` | 1 | how far from the contact the fingertips land, **in the plane of the supported surface** |
+| `ROOT_SIDES` | 0.1 | root offset off the shaft axis toward the fingertip |
+| `WIDTH_SIDES` | 0.5 | hexagon across-flats, never under the wall floor (0.6 mm on the fixtures, floor 0.42) |
+
+Each finger is one more two-point `NSO_PathSweep` with a regular **hexagon**
+profile: one segment, no mitre, an exact section, 24 triangles. Fingers are
+separate parts that go through the same `NSO_unionSoups` fold.
+
+- **The fingers go on after every shaft.** The fold is left to right, so the
+  union's first `1 + branches` steps are the default tree's own steps. With
+  the fingers interleaved instead, `tall` picked up 2 piercing pairs down at
+  the branch roots, nowhere near a hand. The only change was the order in
+  which the boolean re-rounds to float32.
+- **A finger's root cap sits inside the shaft, not just its centre.** At
+  `ROOT_SIDES` 0.25 the cap reached 0.646 mm on a 0.6 mm half-width. The
+  union on `shelf` then carried a vertex cluster along the rail next to it,
+  and the default weld read 2 open edges. At 0.1 the cap reaches 0.466 mm and
+  the cluster is gone. `geckoHand` refuses by name any width that cannot fit.
+- **Reach is 1 × side, not more.** At 1.25 × side, neighbouring hands on a
+  3.29 mm lattice touched each other, and the union came out with handles
+  (Euler −6 on `shelf`, −18 on `tall`).
+- **A finger that would run into the piece is left off.** The finger's axis
+  and rails are cast by the same probe as a branch's. A blocked finger is
+  dropped and reported in `hand.dropped` and `fingersDropped`, and the branch
+  and its contact stay. Losing a finger changes only the tip's shape.
+- `fingerPenetrationMm` measures the fingers against the surface, the way
+  `tipPenetrationMm` measures the cap. Worst on `shelf`: 0.2861 mm, against
+  the cap's 0.3878 mm.
+
+**Validated, not assumed.** `tree:test` section 7b plans every fixture both
+ways, the section-4 wall case included, and compares **exactly**, with no
+tolerance: contact points and their order, split, trunk bytes, every branch's
+root, tip, heading, length and tilt, refusals, and shaft bytes. The
+default's parts must lead the gecko part list in the default's order.
+`tree:canonical` runs every gecko solid through `mesh_validate.py` with the
+same gates as the default (trunk, `branch0`, `finger0` with volume equal to
+hexagon area × length, and the union), then checks that each gecko plan's
+contact count, split, trunk and fan are the default's:
+
+| fixture | contacts | branches | fingers kept / left off | union tris (square → gecko) |
+|---|---|---|---|---|
+| shelf | 16 | 16 | 76 / 4 | 780 → 4776 |
+| tall | 28 | 28 | 128 / 12 | 1746 → 8354 |
+| tab | 9 | 8 + trunk | 40 / 5 | 310 → 1982 |
+| tiny | 1 | 0 (strut) | 5 / 0 | 12 → 158 |
+
+At the default 1e-4 weld, the gecko unions merge more near-coincident
+vertices than the square ones (shelf 13 vs 5, tall 34 vs 7). These are the
+same boolean-output merges §6 describes, and the same gate covers them:
+0 open, 0 degenerate and 0 piercing either way.
+
+**Not claimed:** printability of the fingers themselves. They splay close
+to the surface plane, so they lean well past 45°. This style is a
+visual/shape option. Whether a hand prints better or worse than a flat cap
+is §8.3's contact-geometry question, still unanswered.
+
 ---
 
 ## 6. The union, and the one thing that needed settling
@@ -432,13 +513,14 @@ is out of the scan before this file ever sees the region. Pinned in the suite.
 ```js
 contactPoints(rawTris, region, opts)   // { ok, points, pitchMm, coverageMm, nnMm, ... }
 splitPoint(from, apex, contacts, opts) // { ok, point, trunkMm, widestDeg, trunksNeeded }
-branch(rootPoint, tip, opts)           // { ok, soup, lengthMm, tiltDeg, tipPenetrationMm }
+branch(rootPoint, tip, opts)           // { ok, soup, parts, lengthMm, tiltDeg, tipPenetrationMm, hand? }
 planTree(rawTris, opts)                // detect + contacts + trunk + fan
 unionParts(parts, opts)                // Promise of the app's own union
 describe(result)                       // one status line
 ```
 
 `opts` is everything `detectOverhangs` and `aim` take, plus `maxSpanMm`,
-`branchTiltDeg`, `maxContacts`, `regionId`, `stations` and `tipEngageMm`.
+`branchTiltDeg`, `maxContacts`, `regionId`, `stations`, `tipEngageMm` and
+`branchStyle` (`'square'` default, or `'gecko-hand'`, see §5).
 Soups are the app's raw convention: 9 floats per triangle, **Z up**,
 millimetres.
