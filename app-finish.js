@@ -2516,6 +2516,54 @@ function sealSelectedModel() {
 }
 
 
+// ---- Solidify ----
+//
+// weld (0.2 mm grid snap) -> cap small loops -> cap outer holes ->
+// repairJoinedSoup (its own 0.3 mm weld) -> weld. The two coarse welds are the
+// risky part: a grid snap that size merges every pair of distinct vertices
+// sharing a 0.2 mm cell and drops each triangle they collapse, so a finely
+// tessellated piece loses real surface. Measured on library/v9_mirror_factory.stl
+// - exact-vertex clean, 0 open / 0 non-manifold - the pipeline went 49,026 ->
+// 31,199 triangles and the canonical checker (tools/mesh_validate.py) read
+// 35 open / 55 non-manifold / 69 degenerate on the result. The hole fill never
+// fired: the piece had no holes. The welds did all of it, and the old status
+// line still said "Solidify ok".
+//
+// So two guards, both measured by NSO_Repair.inspect - the in-page
+// transcription of the canonical checker's weld (radius 1e-4 mm) and edge
+// census - not by the grid-snap counters above, which read that same clean
+// piece as 76 non-manifold edges and shift with where the piece sits:
+//   1. nothing to do: a piece with no open edge is left exactly as it is.
+//      Solidify closes openings; with none, every stage is risk and no
+//      reward. Keyed on open edges alone, not on non-manifold too: that
+//      factory piece reads NM 2 at the 1e-4 weld (one pair of distinct
+//      vertices closer than that) and 0 by exact vertex, and nothing in this
+//      pipeline is a non-manifold repair anyway - Repair is.
+//   2. result gate: the output is committed only if it has no more open,
+//      non-manifold or degenerate edges/faces than the input. Otherwise the
+//      piece is unchanged and the status names the count that rose - the
+//      same "gate on the result, not the request" rule Hollow uses.
+// tools/nso_wire_solidify_test.js drives both through the real button and
+// re-measures with mesh_validate.py.
+function solidifyCensus(soup) {
+  if (typeof NSO_Repair === 'undefined' || !NSO_Repair || typeof NSO_Repair.inspect !== 'function') return null;
+  try {
+    const r = NSO_Repair.inspect(soup, { selfIntersections: false });
+    return { open: r.openEdges, nm: r.nonManifoldEdges, degen: r.degenerateTris, tris: r.tris };
+  } catch (e) {
+    return null;
+  }
+}
+
+/* Which canonical counts got worse, as status-line fragments. Empty = none. */
+function solidifyRegressions(before, after) {
+  const worse = [];
+  if (after.nm > before.nm) worse.push('non-manifold ' + before.nm + '\u2192' + after.nm);
+  if (after.open > before.open) worse.push('open ' + before.open + '\u2192' + after.open);
+  if (after.degen > before.degen) worse.push('degenerate ' + before.degen + '\u2192' + after.degen);
+  return worse;
+}
+
 function solidifySelectedModel() {
   const m = getActiveModel();
   if (!m) { setStatus('Select a piece first', true); return; }
@@ -2542,9 +2590,17 @@ function solidifySelectedModel() {
     setStatus('Solidify failed - piece unchanged', true);
     return;
   }
-  let openBefore = null, nmBefore = null;
-  try { openBefore = openBoundaryEdges(soupIn).length; } catch (e) {}
-  try { if (typeof countNonManifoldEdges === 'function') nmBefore = countNonManifoldEdges(soupIn); } catch (e) {}
+  const censusBefore = solidifyCensus(soupIn);
+  if (!censusBefore) {
+    // No canonical census means no way to prove the result is not worse, and
+    // an unprovable Solidify is the one that shipped a broken mesh as "ok".
+    setStatus('Solidify unavailable - the mesh checker (NSO_Repair) is not loaded; piece unchanged', true);
+    return;
+  }
+  if (censusBefore.open === 0) {
+    setStatus('Solidify: already closed - 0 open edges, nothing to fill; piece unchanged');
+    return;
+  }
   let working = soupIn;
   try {
     working = weldSoupVerts(working);
@@ -2558,6 +2614,17 @@ function solidifySelectedModel() {
   }
   if (!working || working.length < 9) {
     setStatus('Solidify failed - piece unchanged', true);
+    return;
+  }
+  const censusAfter = solidifyCensus(working);
+  if (!censusAfter) {
+    setStatus('Solidify failed - result could not be measured; piece unchanged', true);
+    return;
+  }
+  const worse = solidifyRegressions(censusBefore, censusAfter);
+  if (worse.length) {
+    setStatus('Solidify refused - it would make the mesh worse (' + worse.join(', ') +
+              '; ' + censusBefore.tris + '\u2192' + censusAfter.tris + ' tris); piece unchanged', true);
     return;
   }
   pushUndo({
@@ -2608,16 +2675,9 @@ function solidifySelectedModel() {
     placedEntry.height = m.size.y;
     settlePlacedOnBed(placedEntry);
   }
-  let openAfter = null, nmAfter = null;
-  try { openAfter = openBoundaryEdges(working).length; } catch (e) {}
-  try { if (typeof countNonManifoldEdges === 'function') nmAfter = countNonManifoldEdges(working); } catch (e) {}
-  if (openBefore != null && openAfter != null) {
-    let msg = 'Solidify ok - open ' + openBefore + '\u2192' + openAfter;
-    if (nmBefore != null && nmAfter != null) msg += ', NM ' + nmBefore + '\u2192' + nmAfter;
-    setStatus(msg);
-  } else {
-    setStatus('Solidify ok');
-  }
+  setStatus('Solidify ok - open ' + censusBefore.open + '\u2192' + censusAfter.open +
+            ', NM ' + censusBefore.nm + '\u2192' + censusAfter.nm +
+            (censusAfter.degen ? ', degenerate ' + censusBefore.degen + '\u2192' + censusAfter.degen : ''));
 }
 
 // ---- Thicken: one-sided planar offset ----
