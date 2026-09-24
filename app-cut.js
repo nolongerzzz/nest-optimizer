@@ -1215,6 +1215,13 @@ function rawEarClip2D(poly2d) {
     const hasNeg=d1<0||d2<0||d3<0, hasPos=d1>0||d2>0||d3>0;
     return !(hasNeg && hasPos);
   }
+  function onOpenSegment(p, a, c, eps) {
+    const ex = c[0]-a[0], ey = c[1]-a[1];
+    const cr = ex*(p[1]-a[1]) - ey*(p[0]-a[0]);
+    if (Math.abs(cr) >= eps) return false;
+    const t = ex*(p[0]-a[0]) + ey*(p[1]-a[1]);
+    return t > 0 && t < ex*ex + ey*ey;
+  }
   let pts = poly2d;
   const area = signedArea2D(pts);
   const ccwIdxs = area >= 0 ? pts.map((_,i)=>i) : pts.map((_,i)=>i).reverse();
@@ -1235,6 +1242,10 @@ function rawEarClip2D(poly2d) {
       for (const j of work) {
         if (j===ip||j===ic||j===inx) continue;
         if (pointInTri(pts[j], a, b, c, 1e-7)) { blocked = true; break; }
+        // A loop vertex lying ON the new diagonal a-c must block too: clipping
+        // over it strands a run of collinear loop points that can only be
+        // closed with zero-area triangles (a straight wall in a cut section).
+        if (onOpenSegment(pts[j], a, c, 1e-7)) { blocked = true; break; }
       }
       if (blocked) continue;
       tris.push([ip, ic, inx]);
@@ -1380,18 +1391,246 @@ function rawFlatCapLoop(loop3d, axisIdx, planeVal, keepMin) {
 // Returns a Float32Array of the resulting watertight, flat-capped half,
 // still in raw (uncentered, original-file-axis) coordinates — or null if
 // the cut produced nothing.
+//
+// Seam safety (v9_mirror_factory.stl, tools/nso_rawcut_seam_test.js): a
+// Join's boolean re-triangulates the seam region into long slivers running
+// seam-to-seam, and can leave vertex pairs (and whole seam rings) within the
+// 1e-4 weld radius of each other or of a plane the user cuts at. The old
+// clip-and-cap broke on all of it — 372 of 374 pieces in a 1 mm sweep failed
+// tools/mesh_validate.py:
+//  - the plane slices a sliver where it is narrower than the weld radius, so
+//    its two cut points sit < 1e-4 apart. rawBuildLoopsFromCutEdges merged
+//    them for the cap while the walls kept both: cap and walls stopped sharing
+//    vertices (open edges even at weld 1e-6), and the walls kept a needle the
+//    checker collapses into non-manifold edges / inconsistent winding;
+//  - the input's own sub-tolerance pairs were passed through verbatim;
+//  - edges already ON the plane (a seam ring) never became cap edges, since
+//    the cut-edge list came only from edge/plane crossings.
+// rawCut therefore: welds the input (rawWeldSoup); puts vertices within the
+// weld radius of the plane exactly on it; clips; welds all on-plane points on
+// their float32 positions and rewrites the walls to them (rawSnapPlanePoints);
+// reads the cap edges off the kept surface's own open boundary
+// (rawPlaneBoundaryEdges); and finally splits away any triangle float32 made
+// zero-area (rawSplitDegenerates). Every collapse moves geometry by at most
+// the weld radius, which is the resolution mesh_validate.py already assumes.
+const RAW_CUT_WELD_TOL = 1e-4;
+
+// Transitive radius weld over a flat xyz point list (union-find over a
+// tol-sized hash, 27-cell neighbourhood, so pairs straddling a cell boundary
+// still merge). Returns, per point, the index of its cluster's first point.
+function rawWeldPoints(pts, tol) {
+  const n = (pts.length / 3) | 0;
+  // A soup repeats every vertex ~6 times; weld the distinct positions only.
+  // Numeric sort + integer cell hash: string keys cost ~5x on a 50k-tri part.
+  const order = new Int32Array(n);
+  for (let i = 0; i < n; i++) order[i] = i;
+  order.sort((i, j) => (pts[i*3] - pts[j*3]) || (pts[i*3+1] - pts[j*3+1]) || (pts[i*3+2] - pts[j*3+2]));
+  const uid = new Int32Array(n);
+  const firstOf = [];
+  for (let s = 0; s < n; s++) {
+    const i = order[s];
+    if (s > 0) {
+      const j = order[s - 1];
+      if (pts[i*3] === pts[j*3] && pts[i*3+1] === pts[j*3+1] && pts[i*3+2] === pts[j*3+2]) { uid[i] = uid[j]; continue; }
+    }
+    uid[i] = firstOf.length;
+    firstOf.push(i);
+  }
+  const m = firstOf.length;
+  const parent = new Int32Array(m);
+  for (let i = 0; i < m; i++) parent[i] = i;
+  function find(i) { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; }
+  // Collisions only lump cells together; the true distance test below decides.
+  function cellKey(cx, cy, cz) { return ((cx * 73856093) ^ (cy * 19349663) ^ (cz * 83492791)) | 0; }
+  const inv = 1 / tol, tol2 = tol * tol;
+  const cells = new Map();
+  for (let u = 0; u < m; u++) {
+    const o = firstOf[u] * 3;
+    const x = pts[o], y = pts[o+1], z = pts[o+2];
+    const cx = Math.floor(x * inv), cy = Math.floor(y * inv), cz = Math.floor(z * inv);
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) for (let c = -1; c <= 1; c++) {
+      const list = cells.get(cellKey(cx+a, cy+b, cz+c));
+      if (!list) continue;
+      for (const w of list) {
+        const q = firstOf[w] * 3;
+        const dx = x - pts[q], dy = y - pts[q+1], dz = z - pts[q+2];
+        if (dx*dx + dy*dy + dz*dz > tol2) continue;
+        const ru = find(u), rw = find(w);
+        if (ru !== rw) { if (ru < rw) parent[rw] = ru; else parent[ru] = rw; }
+      }
+    }
+    const k = cellKey(cx, cy, cz);
+    const list = cells.get(k);
+    if (list) list.push(u); else cells.set(k, [u]);
+  }
+  const rep = new Int32Array(n);
+  for (let i = 0; i < n; i++) rep[i] = firstOf[find(uid[i])];
+  return rep;
+}
+
+// Welds a flat triangle soup with rawWeldPoints and drops triangles with two
+// equal corners afterwards. Returns a plain number[].
+function rawWeldSoup(tris, tol) {
+  const rep = rawWeldPoints(tris, tol);
+  const out = [];
+  for (let t = 0; t < rep.length; t += 3) {
+    const a = rep[t], b = rep[t+1], c = rep[t+2];
+    if (a === b || b === c || a === c) continue;
+    out.push(tris[a*3], tris[a*3+1], tris[a*3+2], tris[b*3], tris[b*3+1], tris[b*3+2], tris[c*3], tris[c*3+1], tris[c*3+2]);
+  }
+  return out;
+}
+
+// Weld every kept vertex lying exactly on the cut plane (clip intersections
+// and on-plane corners) with rawWeldPoints and rewrite the walls to the shared
+// representatives. Triangles collapsing to a line are dropped, and so is a
+// triangle lying IN the plane unless it faces the discarded side (it is then
+// already part of the cap; facing the kept side it is the skin of material
+// that was cut away and would double the cap). Returns a number[].
+function rawSnapPlanePoints(kept, axisIdx, planeVal, keepMin, tol) {
+  // Weld and emit float32-rounded positions: rawCut returns a Float32Array,
+  // and two points just over tol apart in double can land at or under it
+  // after rounding. The 2x radius keeps a margin for the further rounding of
+  // rawResultToDisplayGeometry's re-centring on export.
+  const pts = [];
+  for (let i = 0; i < kept.length; i += 3) {
+    if (kept[i + axisIdx] === planeVal) pts.push(kept[i], kept[i+1], kept[i+2]);
+  }
+  const f32 = pts.map((c, i) => (i % 3 === axisIdx ? c : Math.fround(c)));
+  const repIdx = rawWeldPoints(f32, 2 * tol);
+  const rep = new Map();
+  for (let i = 0; i < repIdx.length; i++) {
+    const r = repIdx[i];
+    rep.set(pts[i*3] + ',' + pts[i*3+1] + ',' + pts[i*3+2], [f32[r*3], f32[r*3+1], f32[r*3+2]]);
+  }
+  const capSign = keepMin ? -1 : 1;
+  const out = [];
+  for (let t = 0; t < kept.length; t += 9) {
+    const v = [];
+    let onPlane = 0;
+    for (let k = 0; k < 3; k++) {
+      const o = t + k * 3;
+      if (kept[o + axisIdx] === planeVal) { onPlane++; v.push(rep.get(kept[o] + ',' + kept[o+1] + ',' + kept[o+2])); }
+      else v.push([kept[o], kept[o+1], kept[o+2]]);
+    }
+    if (rawSamePt(v[0], v[1]) || rawSamePt(v[1], v[2]) || rawSamePt(v[0], v[2])) continue;
+    if (onPlane === 3) {
+      const o1 = (axisIdx + 1) % 3, o2 = (axisIdx + 2) % 3;
+      const n = (v[1][o1]-v[0][o1])*(v[2][o2]-v[0][o2]) - (v[1][o2]-v[0][o2])*(v[2][o1]-v[0][o1]);
+      if (Math.sign(n) !== capSign) continue;
+    }
+    out.push(...v[0], ...v[1], ...v[2]);
+  }
+  return out;
+}
+
+function rawSamePt(a, b) { return a[0] === b[0] && a[1] === b[1] && a[2] === b[2]; }
+
+// The cap's edges, read off the kept surface itself: every kept edge with no
+// reverse twin whose ends both lie on the plane. Unlike the clipper's own
+// intersection list this also sees an edge whose two ends were already on the
+// plane (a seam ring snapped onto it), and it cannot disagree with the walls.
+function rawPlaneBoundaryEdges(kept, axisIdx, planeVal) {
+  function k(o) { return kept[o] + ',' + kept[o+1] + ',' + kept[o+2]; }
+  const directed = new Map();
+  for (let t = 0; t < kept.length; t += 9) {
+    for (let e = 0; e < 3; e++) {
+      const oa = t + e * 3, ob = t + ((e + 1) % 3) * 3;
+      if (kept[oa + axisIdx] !== planeVal || kept[ob + axisIdx] !== planeVal) continue;
+      const fwd = k(oa) + '>' + k(ob), rev = k(ob) + '>' + k(oa);
+      if (directed.has(rev)) directed.delete(rev);
+      else directed.set(fwd, [[kept[oa], kept[oa+1], kept[oa+2]], [kept[ob], kept[ob+1], kept[ob+2]]]);
+    }
+  }
+  return Array.from(directed.values());
+}
+
+// Removes zero-area triangles (three distinct but collinear corners, e.g. a
+// sliver thinner than float32 resolution near the plane) without opening the
+// mesh: the neighbour across the long edge u-v is split at the middle corner c,
+// which gives the triangle's two short edges their twins, then the triangle is
+// dropped. Works on the float32 output so it sees what a checker will see.
+function rawSplitDegenerates(f32) {
+  const LIMIT = 4e-20; // |2A|^2 for area 1e-10, well under any real facet
+  let any = false;
+  for (let t = 0; t < f32.length && !any; t += 9) {
+    const ux = f32[t+3]-f32[t], uy = f32[t+4]-f32[t+1], uz = f32[t+5]-f32[t+2];
+    const vx = f32[t+6]-f32[t], vy = f32[t+7]-f32[t+1], vz = f32[t+8]-f32[t+2];
+    const x = uy*vz-uz*vy, y = uz*vx-ux*vz, z = ux*vy-uy*vx;
+    if (x*x + y*y + z*z < LIMIT) any = true;
+  }
+  if (!any) return f32;
+  const tris = [];
+  for (let t = 0; t < f32.length; t += 9) tris.push([[f32[t], f32[t+1], f32[t+2]], [f32[t+3], f32[t+4], f32[t+5]], [f32[t+6], f32[t+7], f32[t+8]]]);
+  function area2(T) {
+    const ux = T[1][0]-T[0][0], uy = T[1][1]-T[0][1], uz = T[1][2]-T[0][2];
+    const vx = T[2][0]-T[0][0], vy = T[2][1]-T[0][1], vz = T[2][2]-T[0][2];
+    const x = uy*vz-uz*vy, y = uz*vx-ux*vz, z = ux*vy-uy*vx;
+    return x*x + y*y + z*z;
+  }
+  function pk(p) { return p[0] + ',' + p[1] + ',' + p[2]; }
+  function d2(a, b) { return (a[0]-b[0])**2 + (a[1]-b[1])**2 + (a[2]-b[2])**2; }
+  const owner = new Map();
+  function own(i, on) {
+    const T = tris[i];
+    for (let e = 0; e < 3; e++) {
+      const k = pk(T[e]) + '>' + pk(T[(e+1)%3]);
+      if (on) owner.set(k, i); else if (owner.get(k) === i) owner.delete(k);
+    }
+  }
+  for (let i = 0; i < tris.length; i++) own(i, true);
+  const work = [];
+  for (let i = 0; i < tris.length; i++) if (area2(tris[i]) < LIMIT) work.push(i);
+  let guard = 0;
+  while (work.length && guard++ < 100000) {
+    const i = work.pop();
+    const T = tris[i];
+    if (!T || area2(T) >= LIMIT) continue;
+    let e = 0;
+    for (let k = 1; k < 3; k++) if (d2(T[k], T[(k+1)%3]) > d2(T[e], T[(e+1)%3])) e = k;
+    const u = T[e], v = T[(e+1)%3], c = T[(e+2)%3];
+    const j = owner.get(pk(v) + '>' + pk(u));
+    if (j == null || j === i || !tris[j]) continue;   // no twin: leave it
+    const N = tris[j];
+    const ev = N.findIndex(p => pk(p) === pk(v));
+    const d = N[(ev+2)%3];
+    own(i, false); own(j, false);
+    tris[i] = null;
+    tris[j] = [v, c, d];
+    tris.push([c, u, d]);
+    own(j, true); own(tris.length - 1, true);
+    // The halves are degenerate only if N was; then they get their own turn.
+    if (area2(tris[j]) < LIMIT) work.push(j);
+    if (area2(tris[tris.length - 1]) < LIMIT) work.push(tris.length - 1);
+  }
+  const out = [];
+  for (const T of tris) if (T) out.push(...T[0], ...T[1], ...T[2]);
+  return new Float32Array(out);
+}
+
 function rawCut(rawTris, axisIdx, plane, keepMin) {
-  const clipped = rawClipTrianglesAtPlane(rawTris, axisIdx, plane, keepMin);
-  if (!clipped.kept.length) return null;
-  const walked = rawBuildLoopsFromCutEdges(clipped.cutEdges, axisIdx);
+  const soup = rawWeldSoup(rawTris, RAW_CUT_WELD_TOL);
+  // A vertex within the weld radius of the plane IS on it as far as any
+  // checker is concerned; leave it a hair off and the cap and that vertex
+  // collapse into each other downstream. Put it exactly on the plane instead.
+  for (let i = axisIdx; i < soup.length; i += 3) {
+    if (Math.abs(soup[i] - plane) <= RAW_CUT_WELD_TOL) soup[i] = plane;
+  }
+  const clipped = rawClipTrianglesAtPlane(soup, axisIdx, plane, keepMin);
+  const kept = rawSnapPlanePoints(clipped.kept, axisIdx, plane, keepMin, RAW_CUT_WELD_TOL);
+  if (!kept.length) return null;
+  // Points are already welded and snapped, so walk the loop on exact keys; a
+  // second grid round here could re-merge two distinct representatives that
+  // share a 1e-4 cell (up to 1.41e-4 apart) and reopen the mismatch.
+  const walked = rawBuildLoopsFromCutEdges(rawPlaneBoundaryEdges(kept, axisIdx, plane), axisIdx, 1e-9);
   if (walked.degreeIssues.length > 0) throw new Error(walked.degreeIssues.length + ' branch point(s) in raw cut boundary');
-  const out = clipped.kept.slice();
+  const out = kept;
   for (const loop of walked.loops) {
     const cap = rawFlatCapLoop(loop, axisIdx, plane, keepMin);
     for (let i = 0; i < cap.length; i++) out.push(cap[i]);
   }
   if (out.length < 9) return null;
-  return new Float32Array(out);
+  return rawSplitDegenerates(new Float32Array(out));
 }
 
 /** Lay out every model in the library on the plate (inspection / multi-piece view). Not a pack. */
