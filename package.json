@@ -26,6 +26,7 @@
     "carve:test": "node tools/nso_carve_test.js",
     "measure": "node tools/nso_measure_test.js",
     "wire:scale": "node tools/nso_wire_scale_test.js",
+    "grispr:test": "python3 -m unittest discover -s tools/grispr/tests -p \"test_*.py\"",
     "test": "node tools/run-tests.mjs"
   },
   "testSteps": [
