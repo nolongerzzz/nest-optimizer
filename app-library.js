@@ -42,10 +42,10 @@
       label: 'This project',
       base: new URL('library/', document.baseURI).href
     },
-    /* The catalog's own repository. Every row lives here: the STLs moved out
-       of this repo's library/ so the app's clone stops carrying ~9 MB of
-       pieces nobody's checks read. library/ still holds the fixtures the
-       tests load by name (see library/README.md), and that is ALL it holds.
+    /* The catalog's own repository. Every row lives here. The 31 pieces only
+       the catalog needed (4.6 MB) left this repo's library/; what stayed is
+       the fixtures the checks load by name (see library/README.md), nine of
+       them also catalog rows with a byte-identical copy in nest-library.
 
        A literal, not resolved against document.baseURI, and that is the one
        place the note above does not apply: this is not "a path on whatever
