@@ -22,6 +22,16 @@
         canonical checker passes the result, the status numbers match it,
         and Undo puts the open box back.
 
+     4. driver-testing round 1 (fixtures/damage/shape-cylinder_holes-light.stl):
+        a loop pinched at the cap centre and a loop folded over the top rim
+        onto the wall, which the bbox-plane cappers cannot close -
+        solidifyCloseLoops does, the checker passes it, and the volume is
+        the clean cylinder's.
+     5. a tilted open tube nothing can close: the progress gate refuses
+        rather than committing an unchanged piece as "Solidify ok".
+     6. fixtures/damage/shape-sphere_holes-shredded.stl: fewer open edges
+        bought with mis-wound ones is refused - winding is in the result gate.
+
    node tools/nso_wire_solidify_test.js        exit 0 = every gate held */
 
 const fs = require('fs');
@@ -180,6 +190,136 @@ withApp(async (page, logs) => {
   await page.waitForFunction(() => /Undo/.test(document.getElementById('status').textContent),
                              null, { timeout: 30000 });
   check('Undo puts the open box back', sameSoup(s3, await soupOf(page)));
+
+  console.log('\n=== 4. driver-testing round 1: pinched loop + loop folded over the top rim ===');
+  // fixtures/damage/shape-cylinder_holes-light.stl - nso_damage.hole on
+  // shape-cylinder, severity light, seed 7. Before the fix Solidify committed
+  // it byte-identical under "Solidify ok - open 16→16" and pushed an Undo.
+  const dmgFile = path.join(ROOT, 'fixtures', 'damage', 'shape-cylinder_holes-light.stl');
+  const dmgMan = JSON.parse(fs.readFileSync(path.join(ROOT, 'fixtures', 'damage', 'damage.json'), 'utf8'))
+    .entries.find(e => e.stl === 'shape-cylinder_holes-light.stl');
+  await load(page, dmgFile);
+  const s4 = await soupOf(page);
+  const c4 = canonical(s4, 'cyl-before');
+  console.log('   before  ' + fmt(c4));
+  check('precondition: the app holds what damage.json predicts',
+        c4.tris === dmgMan.expected.triangles && c4.open === dmgMan.expected.open_edges &&
+        c4.nm === dmgMan.expected.nonmanifold_edges && c4.wind === dmgMan.expected.inconsistent_winding_edges,
+        'open ' + c4.open + ' (predicted ' + dmgMan.expected.open_edges + ')');
+  // The two failure modes, named and shown to be real on this input.
+  const modes = await page.evaluate(() => {
+    const s = getActiveModel().rawTris;
+    const w = NSO_Repair._weldToIndexed(s, NSO_Repair.WELD_TOL);
+    const L = solidifyDirectedLoops(w.mesh, NSO_Repair._buildEdges(w.mesh));
+    const z = i => w.mesh.pos[i * 3 + 2];
+    let zMin = Infinity, zMax = -Infinity;
+    for (let i = 2; i < s.length; i += 3) { zMin = Math.min(zMin, s[i]); zMax = Math.max(zMax, s[i]); }
+    const loops = L.loops.map(l => ({ n: l.length, zs: [Math.min(...l.map(z)), Math.max(...l.map(z))], verts: l }));
+    const shared = [];
+    for (let a = 0; a < loops.length; a++) for (let b = a + 1; b < loops.length; b++) {
+      if (loops[a].verts.some(v => loops[b].verts.indexOf(v) >= 0)) shared.push([a, b]);
+    }
+    let old = s;
+    old = weldSoupVerts(old); old = capSmallOpenLoops(old, 28); old = capAllOuterHoles(old);
+    old = repairJoinedSoup(old); old = weldSoupVerts(old);
+    return { loops: loops.map(l => ({ n: l.n, zs: l.zs })), shared: shared, dead: L.deadEnds,
+             zMin: zMin, zMax: zMax, oldOpen: solidifyCensus(old).open };
+  });
+  console.log('   directed loops ' + JSON.stringify(modes.loops) + ', sharing a vertex: ' + JSON.stringify(modes.shared));
+  check('the pre-fix stages alone leave all of it open', modes.oldOpen === c4.open, 'open ' + modes.oldOpen);
+  check('failure mode 1 is present: two directed loops share a vertex (the pinch at the cap centre)',
+        modes.shared.length === 1 && modes.dead === 0);
+  check('failure mode 2 is present: a loop folds over the top rim down to z = 0 (on no plane)',
+        modes.loops.some(l => l.zs[0] === modes.zMin && l.zs[1] === modes.zMax));
+  const st4 = await solidify(page);
+  const s4b = await soupOf(page);
+  const c4b = canonical(s4b, 'cyl-after');
+  console.log('   after   ' + fmt(c4b));
+  console.log('   status: ' + st4);
+  check('Solidify committed and said ok', /Solidify ok/.test(st4), st4);
+  check('THE CANONICAL CHECKER PASSES THE RESULT', c4b.verdict === 'PASS' && c4b.open === 0 && c4b.nm === 0 &&
+        c4b.wind === 0 && c4b.degen === 0, c4b.verdict);
+  check('...and by the exact census too', c4b.exact.open === 0 && c4b.exact.nm === 0 && c4b.exact.degen === 0);
+  check('the status numbers are the canonical ones',
+        st4.indexOf('open ' + c4.open + '→' + c4b.open) >= 0 && st4.indexOf('NM ' + c4.nm + '→' + c4b.nm) >= 0, st4);
+  check('nothing invented: exactly the 10 removed faces come back (118 -> 128 tris)', c4b.tris === c4.tris + dmgMan.removed_faces,
+        c4.tris + ' -> ' + c4b.tris);
+  // Self-intersection and volume, against the clean source it was damaged from.
+  const full = f => JSON.parse(execFileSync('python3', [path.join(ROOT, 'tools', 'mesh_validate.py'), f, '--json'],
+                                            { encoding: 'utf8' }));
+  const cylAfterFile = path.join(TMP, 'cyl-after-full.stl');
+  writeSTL(cylAfterFile, s4b);
+  const v4b = full(cylAfterFile);
+  const v4c = full(path.join(ROOT, 'fixtures', 'quick', 'shape-cylinder.stl'));
+  console.log('   volume  ' + v4b.signed_volume.toFixed(4) + ' mm3 (clean source ' + v4c.signed_volume.toFixed(4) + ')');
+  check('no piercing pairs in the result', v4b.self_intersection.pierce === 0, 'pierce ' + v4b.self_intersection.pierce);
+  // Every loop is closed from its own vertices; the flat ones (the pinched
+  // pair, the cap part of the folded one) re-triangulate in their own plane
+  // and the wall face comes back exactly, so the volume is the clean one.
+  // A flat best-fit-plane fill of the folded loop was measured at -1.04%.
+  check('volume is the clean cylinder\'s (to 1e-6 relative)',
+        Math.abs(v4b.signed_volume - v4c.signed_volume) <= 1e-6 * v4c.signed_volume,
+        (v4b.signed_volume - v4c.signed_volume).toExponential(2) + ' mm3');
+  check('it went on the undo stack once',
+        await page.evaluate(() => (state.undoStack || []).filter(u => u && u.type === 'solidifyReplace').length) === 1);
+
+  console.log('\n=== 5. nothing Solidify can close: the progress gate refuses ===');
+  // A tilted, uncapped tube, 80 segments round: two rims of 80 edges each.
+  // Too long to be a hole (the 64-edge cap NSO_Repair uses too), on no
+  // bounding-box plane, and coarse enough that the grid-snap welds do not
+  // touch it - so the result is neither worse nor better. Before the fix that
+  // committed as "Solidify ok".
+  const tube = [];
+  const SEG = 80, RAD = 20, H = 10, tilt = Math.PI / 6;
+  const rot = (x, y, z) => [x, y * Math.cos(tilt) - z * Math.sin(tilt), y * Math.sin(tilt) + z * Math.cos(tilt) + 20];
+  for (let i = 0; i < SEG; i++) {
+    const a0 = 2 * Math.PI * i / SEG, a1 = 2 * Math.PI * (i + 1) / SEG;
+    const p00 = rot(RAD * Math.cos(a0), RAD * Math.sin(a0), 0), p10 = rot(RAD * Math.cos(a1), RAD * Math.sin(a1), 0);
+    const p01 = rot(RAD * Math.cos(a0), RAD * Math.sin(a0), H), p11 = rot(RAD * Math.cos(a1), RAD * Math.sin(a1), H);
+    tube.push(...p00, ...p10, ...p11, ...p00, ...p11, ...p01);
+  }
+  const tubeFile = path.join(TMP, 'tube-open-tilted.stl');
+  writeSTL(tubeFile, new Float32Array(tube));
+  await load(page, tubeFile);
+  const s5 = await soupOf(page);
+  const c5 = canonical(s5, 'tube-before');
+  console.log('   before  ' + fmt(c5));
+  check('precondition: two 80-edge rims, nothing non-manifold', c5.open === 2 * SEG && c5.nm === 0, 'open ' + c5.open);
+  const undo5 = await page.evaluate(() => (state.undoStack || []).length);
+  const st5 = await solidify(page);
+  const s5b = await soupOf(page);
+  console.log('   status: ' + st5);
+  check('Solidify refused - not "ok"', /Solidify refused/.test(st5) && !/Solidify ok/.test(st5), st5);
+  check('...saying none of the open edges closed', st5.indexOf('closed none of the ' + c5.open + ' open edges') >= 0);
+  check('...and why', /80-edge loop \(over 64/.test(st5));
+  check('the piece is bit-identical', sameSoup(s5, s5b));
+  check('nothing went on the undo stack', await page.evaluate(() => (state.undoStack || []).length) === undo5);
+
+  console.log('\n=== 6. progress that costs winding is not progress ===');
+  // fixtures/damage/shape-sphere_holes-shredded.stl: the coarse welds and
+  // repairJoinedSoup close 13 of 221 open edges and mis-wind 21. Open went
+  // down, so before the winding line in solidifyRegressions this committed.
+  const shredFile = path.join(ROOT, 'fixtures', 'damage', 'shape-sphere_holes-shredded.stl');
+  await load(page, shredFile);
+  const s6 = await soupOf(page);
+  const c6 = canonical(s6, 'shred-before');
+  console.log('   before  ' + fmt(c6));
+  const raw6 = new Float32Array(await page.evaluate(() => {
+    let w = getActiveModel().rawTris;
+    w = weldSoupVerts(w); w = capSmallOpenLoops(w, 28); w = capAllOuterHoles(w);
+    w = repairJoinedSoup(w); w = weldSoupVerts(w);
+    return Array.from(solidifyCloseLoops(w).soup);
+  }));
+  const c6raw = canonical(raw6, 'shred-ungated');
+  console.log('   ungated ' + fmt(c6raw));
+  check('the ungated result really does close some and mis-wind some',
+        c6raw.open < c6.open && c6raw.wind > c6.wind, 'open ' + c6.open + '->' + c6raw.open + ', wind ' + c6.wind + '->' + c6raw.wind);
+  const undo6 = await page.evaluate(() => (state.undoStack || []).length);
+  const st6 = await solidify(page);
+  console.log('   status: ' + st6);
+  check('Solidify refused, naming the winding', /Solidify refused/.test(st6) && /mis-wound \d+→\d+/.test(st6), st6);
+  check('the piece is bit-identical', sameSoup(s6, await soupOf(page)));
+  check('nothing went on the undo stack', await page.evaluate(() => (state.undoStack || []).length) === undo6);
 
   const errs = logs.filter(l => /pageerror/.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
