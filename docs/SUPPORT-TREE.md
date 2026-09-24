@@ -454,6 +454,114 @@ length`, put to `mesh_validate.py` rather than to our own sectioning code.
 
 ---
 
+## 6b. Hollow: the trunk and every branch as a tube
+
+`planTree(host, { hollow: true })` then `hollowTree(plan)` — or
+`hollowParts(plan)` alone for the per-part report without the union.
+`npm run tree:hollow`, `tree:hollow-tall`, `tree:hollow-tall-gecko`.
+
+**Why.** A real Bambu tree support, cut open, is hollow — the trunk *and* the
+smallest branches (confirmed by physical dissection of a real print). And the
+solid strut this repo handed to a real Bambu slice came back classified as
+Brim / Outer wall rather than Support; a tube is the shape difference that may
+change that. `tools/nso_support_slice_artifact.js --hollow [--tree]` writes the
+same auto-aimed strut, hollow, for exactly that test.
+
+**The floor is the physics, not a margin.** A nozzle cannot lay a line
+meaningfully thinner than itself, and a wall asked for under that is not
+printed thin — it is **dropped from the toolpath with no warning** (a 0.5 mm fin
+on a 0.4 mm nozzle produced no toolpath at all, and what fixed it was a 0.6 mm
+nozzle, not a thickness change). So every wall is `NSO_Thickness.floorFor(nozzle)` —
+0.42 mm at 0.4 — through `nso_hollow.js`, and a part that cannot take a tube at
+that floor is **left solid**. It is never hollowed thinner and it never refuses
+the tree.
+
+### The audit: does `nso_hollow.js` apply to these prisms?
+
+Yes — its definition (erosion by a ball of radius `wall`) is dimension-free and
+the trunk and branch prisms are closed solids. Two things did not carry over,
+both measured and both fixed in `nso_hollow.js` for every caller:
+
+1. **Its wall gate was blind on a coarse prism.** It probed from the *outer*
+   faces' centroids. A prism side is two triangles whose centroids sit a third
+   of the way across — outside a 0.36 mm bore — so on a 1.2 mm strut hollowed to
+   0.42 mm the gate read **1.2 mm** (the far wall). It now measures from the
+   cavity faces too and keeps the thinner reading: **0.420 mm**.
+2. **Surface nets is not manifold on a diagonal-only contact.** A smooth erosion
+   rarely produces one; a cavity with a keep region cut out of it (below) does:
+   17 of 28 tall-fixture branch bores came out with 1–2 non-manifold edges, two
+   with open edges, eleven with loose specks. The cavity's node set is now made
+   *well-composed* before meshing — only ever by turning a cavity node back into
+   material, so walls can only thicken — and specks under 3³ nodes are dropped.
+
+And one thing about the existing refusal: its "wall thicker than half this
+piece" test reads the **bounding box**, which on a *tilted* thin part is wider
+than the section, so it cannot fire; the field's "leaves no cavity" refusal
+catches it instead. The tree asks the same rule of each part's **true section**
+(it built them, so it knows it) before calling `hollow()` at all.
+
+### Per part, with a keep region — and why not the obvious two
+
+| approach | shelf fixture, measured |
+|---|---|
+| one erosion of the whole unioned tree | **334 s**, then refused by `hollow()`'s own gate: 0.032 mm in 7148 places, in the crotches at the collar |
+| hollow each part blind, subtract every bore from the union | 2993 faces under the floor, thinnest **0.001 mm**, all at z 3–6: sixteen bores overlapping at the collar leave membranes of whatever their sampling errors happen to leave |
+| **each part hollowed with a keep region** | 0 faces under the floor, thinnest **0.420 mm**, 4.4 s |
+
+The keep region (`hollow()`'s new `opts.keep`): every point within a wall — plus
+one sample pitch — of **any other part** stays material. So no bore comes within
+a wall of another part, and bores are at least two walls apart; and every bore
+lies where the union *is* its own part, so the bores go into the unioned solid
+the way `hollow()` puts one into a piece: the union's own triangles, untouched,
+plus the bore shells. No second boolean. **The cost, stated:** the junction —
+the collar and each branch's first stretch until it clears its neighbours — is
+a solid knot, where a sliced Bambu tree has one merged bore.
+
+### The fallback
+
+A part stays solid, and is listed in `solid` with its reason and a `kind`:
+
+| kind | when |
+|---|---|
+| `too-small` | not wider than two floor walls (the section precheck, or `hollow()`'s own "thicker than half" / "leaves no cavity") |
+| `fused` | no point of it is both two walls deep and clear of every other part |
+| `under-floor` | the wall asked for (`hollowWallMm`), or the wall `hollow()` measured, is under the floor |
+| `other` | anything else `hollow()` refuses, in its own words |
+
+Every gecko finger (0.6 mm across) is `too-small` and stays solid. A 0.8 mm
+branch added to the shelf tree stays solid, named, while the other 17 parts are
+tubes; `hollow()` asked directly agrees. At a **0.6 mm nozzle** the floor is
+0.63 mm and a 1.2 mm strut is not wider than two of those, so the whole tree
+stays solid — the floor scales with the nozzle, as the physics says it should.
+
+### What is checked
+
+- **Parity, exactly** (tree:test 7b's standard): contacts, trunk bytes, split,
+  every branch's root / heading / length / tilt, the refusals, and every part
+  byte for byte are the solid plan's; the hollow tree's outer surface **is** the
+  solid union, byte for byte.
+- **The canonical checker** on every hollow tree at the derived weld: 0 open /
+  non-manifold / odd / mis-wound / degenerate, 0 self-intersections, **Euler =
+  2 + 2 × bores**, volume = solid − bores, every bore face ≥ 0.42 mm from the
+  next surface, and no wall under the floor the solid tree did not already
+  have. (The gecko solids already carry finger gaps under 0.42 mm — 1 face on
+  shelf, 7 on tall, down to 0.001 mm — measured identically with and without
+  the bores. Pre-existing, and not this change's.)
+
+| case | parts hollowed | bores | bore volume |
+|---|---|---|---|
+| shelf | 17 of 17 | 17 | 13.64 mm³ |
+| tall | 29 of 29 | 29 | 35.47 mm³ |
+| tab | 9 of 9 | 10 — the trunk carries a contact past its collar, so it has a bore either side | 5.85 mm³ |
+| tiny | 1 of 1 | 1 | 1.22 mm³ |
+
+The bore of a 1.2 mm strut at a 0.42 mm wall is **0.36 mm** across — narrower
+than the nozzle. The slicer sees it as a real hole (it is far above Bambu's
+default 0.049 mm slice-closing radius), which leaves exactly one 0.42 mm line
+each side; whether Bambu keeps it is what the slice test will show.
+
+---
+
 ## 7. What the reference check compares
 
 `npm run tree:reference`, 21 checks, ~5 s, no browser.
@@ -516,11 +624,15 @@ splitPoint(from, apex, contacts, opts) // { ok, point, trunkMm, widestDeg, trunk
 branch(rootPoint, tip, opts)           // { ok, soup, parts, lengthMm, tiltDeg, tipPenetrationMm, hand? }
 planTree(rawTris, opts)                // detect + contacts + trunk + fan
 unionParts(parts, opts)                // Promise of the app's own union
+hollowParts(plan, opts)                // each part hollowed at the floor, or left solid and why (§6b)
+hollowTree(plan, opts)                 // Promise: the solid union plus every bore (§6b)
 describe(result)                       // one status line
 ```
 
 `opts` is everything `detectOverhangs` and `aim` take, plus `maxSpanMm`,
 `branchTiltDeg`, `maxContacts`, `regionId`, `stations`, `tipEngageMm` and
-`branchStyle` (`'square'` default, or `'gecko-hand'`, see §5).
+`branchStyle` (`'square'` default, or `'gecko-hand'`, see §5), `hollow`
+(`true` runs `hollowParts` after planning, §6b) and `hollowWallMm` (default
+the floor).
 Soups are the app's raw convention: 9 floats per triangle, **Z up**,
 millimetres.

@@ -64,6 +64,10 @@
    ---------------------------------------------------------------------------
    safeMinWall(requested, opts)  -> { mm, floor_mm, floored, reason }
    hollow(rawTris, opts)         -> { ok, soup, reason, ... }
+                                    opts.keep(x, y, z) -> true holds a point as
+                                    material (it can only shrink the cavity);
+                                    the result's wall is measured from BOTH
+                                    sides - measured_outer_mm, measured_cavity_mm
    fill(rawTris, opts)           -> { ok, soup, reason, ... }
 
    Refusals follow the house contract the sculpt tier set and the Wheel kept:
@@ -406,6 +410,106 @@
     return soup;
   }
 
+  /* Make the cavity's node set one surface nets meshes as a MANIFOLD.
+
+     surfaceNets() puts ONE vertex in each sign-changing cell. That is
+     watertight, and it is manifold only when the cavity's nodes never touch
+     across a diagonal alone. Where two cavity nodes meet only corner to
+     corner, or only edge to edge, the one vertex of the cell between them is
+     shared by two sheets of surface, and the edges around it are used three
+     or four times. A smooth erosion rarely does that. A cavity with a keep
+     region cut out of it does it routinely: measured on the support tree's
+     tall fixture, 17 of 28 branch cavities came out with 1 to 2 non-manifold
+     edges, two with 4 open edges, and eleven with loose specks of 1 to 8
+     nodes where the keep boundary grazed the tube.
+
+     So the node set is made WELL-COMPOSED first - no 2x2 face with its
+     cavity nodes on one diagonal and material on the other, and no 2x2x2
+     cube whose only two cavity nodes (or only two material nodes) are
+     opposite corners - and it is done in the one direction that is safe:
+     by turning a cavity node back into MATERIAL, never the reverse. The
+     cavity can only shrink, so no wall can get thinner for it. The node
+     given up is the one nearest the surface (smallest field value), which
+     is the one that carries least of the cavity. Repeated to a fixpoint,
+     which terminates because every change removes a cavity node.
+
+     Then SPECKS go: a connected piece of cavity under `minNodes` nodes
+     (STEPS_PER_WALL^3 by default - smaller than a wall in every direction)
+     is not a bore anyone could print or see, and a slicer closes it; it is
+     turned back into material too. Well-composed, 6- and 26-connectivity
+     agree, so removing one whole piece cannot create a diagonal contact
+     with another. */
+  function tidyCavity(F, nx, ny, nz, wall, minNodes) {
+    var CO = [[0,0,0],[1,0,0],[1,1,0],[0,1,0],[0,0,1],[1,0,1],[1,1,1],[0,1,1]];
+    /* The six faces of a cell, each as a 4-cycle of CO indices, and the four
+       body diagonals. */
+    var FACES = [[0,1,2,3],[4,5,6,7],[0,1,5,4],[1,2,6,5],[2,3,7,6],[3,0,4,7]];
+    var DIAG = [[0,6],[1,7],[2,4],[3,5]];
+    var sx = 1, sy = nx, sz = nx * ny;
+    var off = CO.map(function (c) { return c[0] * sx + c[1] * sy + c[2] * sz; });
+    var critical = 0, changed = true, guard = 0;
+    var id = new Int32Array(8), pos = new Uint8Array(8);
+    function drop(n) { F[n] = -wall; critical++; changed = true; }
+    function weaker(a, b) { return F[a] <= F[b] ? a : b; }
+    while (changed && guard++ < 1000) {
+      changed = false;
+      for (var k = 0; k < nz - 1; k++) for (var j = 0; j < ny - 1; j++) for (var i = 0; i < nx - 1; i++) {
+        var base = (k * ny + j) * nx + i, np = 0, c;
+        for (c = 0; c < 8; c++) { id[c] = base + off[c]; pos[c] = F[id[c]] > 0 ? 1 : 0; np += pos[c]; }
+        if (np === 0 || np === 8) continue;
+        var fixed = false;
+        for (var f = 0; f < 6 && !fixed; f++) {
+          var q = FACES[f];
+          if (pos[q[0]] === pos[q[2]] && pos[q[1]] === pos[q[3]] && pos[q[0]] !== pos[q[1]]) {
+            drop(pos[q[0]] ? weaker(id[q[0]], id[q[2]]) : weaker(id[q[1]], id[q[3]]));
+            fixed = true;
+          }
+        }
+        if (fixed) continue;
+        if (np === 2 || np === 6) {
+          var want = (np === 2) ? 1 : 0;
+          for (var d = 0; d < 4; d++) {
+            var a = DIAG[d][0], b = DIAG[d][1];
+            if (pos[a] === want && pos[b] === want) {
+              if (np === 2) { drop(weaker(id[a], id[b])); }
+              else {
+                /* Six cavity corners around two opposite material ones: give
+                   up the weakest cavity corner, which breaks the pattern. */
+                var w = -1;
+                for (c = 0; c < 8; c++) if (pos[c] && (w < 0 || F[id[c]] < F[w])) w = id[c];
+                drop(w);
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    var min = (minNodes > 0) ? minNodes : STEPS_PER_WALL * STEPS_PER_WALL * STEPS_PER_WALL;
+    var N = nx * ny * nz, seen = new Uint8Array(N), stack = [], specks = 0;
+    for (var s0 = 0; s0 < N; s0++) {
+      if (seen[s0] || !(F[s0] > 0)) continue;
+      var comp = [s0];
+      seen[s0] = 1; stack.push(s0);
+      while (stack.length) {
+        var n = stack.pop();
+        var x = n % nx, y = ((n / nx) | 0) % ny, z = (n / sz) | 0;
+        var nb = [x > 0 ? n - 1 : -1, x < nx - 1 ? n + 1 : -1, y > 0 ? n - sy : -1,
+                  y < ny - 1 ? n + sy : -1, z > 0 ? n - sz : -1, z < nz - 1 ? n + sz : -1];
+        for (var e = 0; e < 6; e++) {
+          var m = nb[e];
+          if (m >= 0 && !seen[m] && F[m] > 0) { seen[m] = 1; stack.push(m); comp.push(m); }
+        }
+      }
+      if (comp.length < min) {
+        for (var r = 0; r < comp.length; r++) F[comp[r]] = -wall;
+        specks++;
+      }
+    }
+    return { critical: critical, specks: specks };
+  }
+
   /* Carve the interior out of a solid, following the outer surface inward.
 
      opts: wall          the target wall thickness, mm
@@ -414,6 +518,9 @@
            restore       safe-min only: the pre-Thicken wall to aim for
            nozzle/minWall  the floor, resolved by nso_thickness.js
            stepsPerWall / pitch / maxDim   field resolution
+           keep          optional function (x, y, z) -> true where the
+                         caller needs MATERIAL to stay, whatever the field
+                         says - see "the keep region" below
   */
   function hollow(rawTris, opts) {
     var TH = needThickness();
@@ -529,6 +636,18 @@
        function of d2[id] and inside[id] alone, and each node is visited once,
        so nothing is read after it is overwritten - and a 160^3 grid does not
        need a third 33 MB array to say so. */
+    /* THE KEEP REGION. A caller that knows something the field cannot - the
+       support tree knows where one part fuses into the next, and that a
+       cavity there would meet a neighbour's cavity across a membrane thinner
+       than the floor - marks those points as material that must stay. It can
+       only SHRINK the cavity: a node it claims is set a full wall inside the
+       material, so the level set falls between it and the cavity node beside
+       it, never past it. Shrinking the cavity only thickens every wall, so
+       nothing here can take one under the floor; the gate below still
+       measures the result regardless. Asked only of nodes that would
+       otherwise be cavity, so it costs nothing where there is no cavity. */
+    var keep = (typeof opts.keep === 'function') ? opts.keep : null;
+    var held = 0;
     var refined = 0;
     for (var kk = 0; kk < nz; kk++) {
       for (var jj = 0; jj < ny; jj++) {
@@ -544,16 +663,26 @@
             if (nr) { approx = nr.dist; refined++; }
           }
           F[id] = approx - wall;
+          if (keep && F[id] > 0 &&
+              keep(org[0] + ii * pitch, org[1] + jj * pitch, org[2] + kk * pitch)) {
+            F[id] = -wall;
+            held++;
+          }
         }
       }
     }
+
+    /* --- step 3b: a cavity surface nets can mesh as a manifold --- */
+    var tidy = tidyCavity(F, nx, ny, nz, wall, opts.minCavityNodes);
 
     var anyCavity = false;
     for (var z2 = 0; z2 < N; z2++) if (F[z2] > 0) { anyCavity = true; break; }
     if (!anyCavity) {
       return { fail: 'a ' + round3(wall) + ' mm wall leaves no cavity anywhere in this piece - ' +
-        'every point inside it is within ' + round3(wall) + ' mm of the surface. Hollow thinner, ' +
-        'or leave it solid.' };
+        'every point inside it is within ' + round3(wall) + ' mm of the surface' +
+        (held ? ', or in the keep region the caller holds solid (' + held + ' node(s) held)' : '') +
+        (tidy.specks ? ', or in a speck of cavity too small to keep (' + tidy.specks + ')' : '') +
+        '. Hollow thinner, or leave it solid.', held: held };
     }
 
     /* --- step 4: the level set --- */
@@ -586,7 +715,8 @@
     merged.set(rawTris, 0);
     merged.set(cavity, rawTris.length);
     return { soup: merged, cavVol: cavVol, rewound: rewound, pitch: pitch,
-             band: refined, cavityTris: (cavity.length / 9) | 0 };
+             band: refined, held: held, tidied: tidy.critical, specks: tidy.specks,
+             cavityTris: (cavity.length / 9) | 0 };
     }
 
     /* THE GATE IS ON THE RESULT, NOT ONLY ON THE REQUEST.
@@ -606,6 +736,17 @@
        wall the floor is about and a fraction of the work of measuring the whole
        piece - and a pass that comes in thin is re-run at half the pitch before
        it is refused. A refusal names the number it actually got. */
+    /* AND FROM BOTH SIDES. The outer faces alone are blind on a coarse piece,
+       and the blindness is measured, not argued: the probe fires from each
+       face's centroid, and a square prism's side is two triangles whose
+       centroids sit a third of the way across. On a 1.2 mm support strut
+       hollowed to 0.42 mm the cavity spans 0.42..0.78 of the width, every
+       centroid at 0.40 or 0.80 misses it, and the gate read "1.2 mm" - the
+       far outer wall - on a piece whose real wall was 0.42. The cavity faces
+       are the dense side (one per sample cell), and a probe fired from one of
+       them, into the material, lands on the outer surface at exactly the
+       wall. So both are measured and the thinner reading is the one that
+       counts. */
     var maxTries = (typeof opts.maxTries === 'number' && opts.maxTries >= 1) ? (opts.maxTries | 0) : 3;
     var verify = opts.verify !== false;
     var pitch = cp.pitch, tries = 0, attempt = null, check = null;
@@ -613,13 +754,28 @@
     var outerFaces = new Array(nOuter);
     for (var of2 = 0; of2 < nOuter; of2++) outerFaces[of2] = of2;
 
+    function measureBoth(soup) {
+      var mo = { nozzle: nozzle, minWall: floor, probe: Math.max(TH.PROBE_DEFAULT, wall * 4) };
+      var outer = TH.measureRegion(soup, outerFaces, mo);
+      var nAll = (soup.length / 9) | 0, cav = new Array(nAll - nOuter);
+      for (var cf = nOuter; cf < nAll; cf++) cav[cf - nOuter] = cf;
+      var inner = TH.measureRegion(soup, cav, mo);
+      var mins = [outer.min_mm, inner.min_mm].filter(function (m) { return m !== null && m !== undefined; });
+      return {
+        pass: outer.pass && inner.pass,
+        thin: outer.thin + inner.thin,
+        min_mm: mins.length ? Math.min.apply(null, mins) : null,
+        outer_mm: outer.min_mm,
+        cavity_mm: inner.min_mm
+      };
+    }
+
     while (tries < maxTries) {
       tries++;
       attempt = pass(pitch);
-      if (attempt.fail) { out.reason = attempt.fail; return out; }
+      if (attempt.fail) { out.reason = attempt.fail; out.held_nodes = attempt.held || 0; return out; }
       if (!verify) break;
-      check = TH.measureRegion(attempt.soup, outerFaces,
-                               { nozzle: nozzle, minWall: floor, probe: Math.max(TH.PROBE_DEFAULT, wall * 4) });
+      check = measureBoth(attempt.soup);
       if (check.pass) break;
       if (tries < maxTries) { pitch = pitch / 2; continue; }
       out.measured_mm = check.min_mm;
@@ -635,6 +791,9 @@
     out.pitch_mm = attempt.pitch;
     out.tries = tries;
     out.band_nodes = attempt.band;
+    out.held_nodes = attempt.held;
+    out.tidied_nodes = attempt.tidied;
+    out.specks_dropped = attempt.specks;
     out.rewound = attempt.rewound;
     out.cavity_tris = attempt.cavityTris;
     out.tris_after = (attempt.soup.length / 9) | 0;
@@ -642,6 +801,8 @@
     out.volume_after = out.volume_before + attempt.cavVol;
     out.cavity_volume = -attempt.cavVol;
     out.measured_mm = check ? check.min_mm : null;
+    out.measured_outer_mm = check ? check.outer_mm : null;
+    out.measured_cavity_mm = check ? check.cavity_mm : null;
     out.reason = 'Hollowed to a ' + round3(wall) + ' mm wall - ' + out.cavity_tris +
       ' cavity triangle(s) at a ' + round3(attempt.pitch) + ' mm pitch, ' +
       round3(-attempt.cavVol) + ' mm³ of interior removed' +

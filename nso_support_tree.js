@@ -182,6 +182,9 @@
    opts.branchStyle                      'square' (default) or 'gecko-hand', see 3b
    planTree(rawTris, opts)               -> detect + contacts + trunk + fan
    unionParts(parts, opts)               -> Promise of the app's own union
+   opts.hollow                           planTree also hollows every part, see 6
+   hollowParts(plan, opts)               -> { ok, parts, hollowed, solid, ... }
+   hollowTree(plan, opts)                -> Promise of the solid union + bores
    describe(result)                      -> one status line
    ============================================================ */
 (function (root) {
@@ -935,7 +938,19 @@
   //   opts.maxSpanMm      permitted span between contacts
   //   opts.branchTiltDeg  the branch limit
   //   opts.regionId       which region, default the largest
+  //   opts.hollow         true: also hollow every part - see 6. HOLLOW. The
+  //                       plan itself is planned first, exactly as without
+  //                       it; hollowing is read after all of it is settled
   function planTree(rawTris, opts) {
+    var p = planSolid(rawTris, opts);
+    if (p.ok && opts && opts.hollow) {
+      p.hollow = hollowParts(p, opts);
+      p.reason += '; ' + (p.hollow.ok ? p.hollow.reason : 'NOT hollowed - ' + p.hollow.reason);
+    }
+    return p;
+  }
+
+  function planSolid(rawTris, opts) {
     opts = opts || {};
     var out = { ok: false, reason: '', stage: 'detect', parts: [], branches: [] };
 
@@ -1248,6 +1263,276 @@
     return Promise.resolve(next(1));
   }
 
+  /* =====================================================================
+     6. HOLLOW - the trunk and every branch as a tube, part by part, with a
+        solid fallback for any part that cannot safely take one
+
+     THE PHYSICAL GROUND TRUTH, because it decides the shape of this section.
+     A real Bambu tree support, cut open, is hollow in the trunk AND in the
+     smallest branches. And a nozzle cannot lay a line meaningfully thinner
+     than itself: a wall asked for under that is not printed thin, it is
+     DROPPED from the toolpath with no warning (a 0.5 mm fin on a 0.4 mm
+     nozzle produced no toolpath at all, and what fixed it was a 0.6 mm
+     nozzle, not a thickness change). So an unsafely thin hollow wall is not a weaker
+     support, it is a support that silently is not there. Every wall here is
+     therefore NSO_Thickness.floorFor's, reached through nso_hollow.js, and a
+     part that cannot be hollowed at that floor is LEFT SOLID - never hollowed
+     thinner, and never allowed to refuse the tree.
+
+     THE MECHANISM IS nso_hollow.js. Each part - the trunk, each branch
+     shaft, each gecko finger - goes to NSO_Hollow.hollow() on its own, in its
+     'exact' mode, at the floor the trunk was built to. Per part, not once
+     over the unioned tree, and both reasons were measured:
+       - one erosion of the whole shelf tree took 334 s and was then refused
+         by hollow()'s own gate, 0.032 mm walls in 7148 places, in the crotches
+         where sixteen branches leave one collar;
+       - per part, the fallback is per part by construction: the part whose
+         hollow() refuses is the part that stays solid, named, with hollow()'s
+         own reason. Nothing is inferred back out of a merged field.
+
+     THE KEEP REGION: WHERE PARTS FUSE, THE TREE STAYS SOLID. Hollowing each
+     part blind and subtracting all the cavities from the union was the first
+     version, and it failed the canonical checker on every multi-branch
+     fixture - 2993 faces under the floor on the shelf, thinnest 0.001 mm,
+     every one of them between z 3 and 6: the collar. Sixteen branch roots
+     sit inside the trunk within 0.48 mm of each other, so sixteen cavities,
+     each a sampled surface of its own, overlap there, and what is left
+     between two of them is a membrane of whatever thickness their sampling
+     errors happen to leave. So each part is hollowed with a KEEP region
+     (hollow()'s opts.keep): every point within a wall - plus one sample
+     pitch of slack - of ANY OTHER part stays material. Two consequences, and
+     both are the point:
+       - no cavity comes within a wall of another part, and every cavity is a
+         wall inside its own, so two cavities are at least two walls apart:
+         there is no membrane to be thin;
+       - every cavity lies where the union IS its own part, so its own part's
+         surface is the only surface near it. The cavities therefore go into
+         the unioned solid exactly the way hollow() puts one into a piece:
+         the solid's own triangles, untouched, plus the cavity shells. There
+         is no second boolean, and the union that tree:canonical already
+         passes is the outer surface, byte for byte.
+     What it costs is stated rather than hidden: the junction - the collar
+     and the first stretch of each branch, until it has pulled clear of its
+     neighbours - is a solid knot, where a sliced Bambu tree has one merged
+     bore. Each part's cavity volume is reported, so how much of it is tube
+     is a number, not an impression.
+
+     THE FALLBACK. A part stays solid, and is listed in `solid` with the
+     reason, when hollow() refuses it:
+       'too-small'   narrower than two floor walls: hollow()'s "thicker than
+                     half this piece" on an axis-aligned part, or "leaves no
+                     cavity anywhere" on a tilted one (whose bounding box is
+                     wider than its section, so the first check cannot fire)
+       'fused'       no point of it is both two walls deep and clear of every
+                     other part - it is all junction
+       'under-floor' the wall asked for, or the wall hollow() measured on the
+                     result, is under the floor
+       'other'       anything else hollow() refuses, by its own words
+     ===================================================================== */
+
+  function hollowModule(opts) {
+    return (opts && opts.hollowModule) || (root && root.NSO_Hollow) ||
+           (typeof NSO_Hollow !== 'undefined' ? NSO_Hollow : null);
+  }
+  function thicknessModule(opts) {
+    return (opts && opts.thickness) || (root && root.NSO_Thickness) ||
+           (typeof NSO_Thickness !== 'undefined' ? NSO_Thickness : null);
+  }
+
+  /* What each entry of plan.parts is, by identity - planTree pushes the
+     trunk, then the branch shafts in contact order, then the fingers. */
+  function partLabels(plan) {
+    var by = new Map(), i, f;
+    if (plan.trunk && plan.trunk.soup) {
+      by.set(plan.trunk.soup, { role: 'trunk', label: 'trunk', acrossMm: plan.trunk.sideMm });
+    }
+    var brs = plan.branches || [];
+    for (i = 0; i < brs.length; i++) {
+      by.set(brs[i].soup, { role: 'branch', label: 'branch ' + i + ' (contact ' + brs[i].contactIndex + ')',
+                            branch: i, acrossMm: brs[i].sideMm });
+      var h = brs[i].hand;
+      if (h) for (f = 0; f < h.fingers.length; f++) {
+        by.set(h.fingers[f].soup, { role: 'finger', branch: i, acrossMm: h.widthMm,
+          label: 'finger ' + h.fingers[f].index + ' of branch ' + i });
+      }
+    }
+    if (plan.trunkHand) for (f = 0; f < plan.trunkHand.fingers.length; f++) {
+      by.set(plan.trunkHand.fingers[f].soup, { role: 'finger', acrossMm: plan.trunkHand.widthMm,
+        label: 'finger ' + plan.trunkHand.fingers[f].index + ' of the trunk' });
+    }
+    return (plan.parts || []).map(function (s, k) {
+      return by.get(s) || { role: 'part', label: 'part ' + k };
+    });
+  }
+
+  function fallbackKind(reason, held) {
+    if (/thicker than half/.test(reason)) return 'too-small';
+    if (/leaves no cavity/.test(reason)) return held ? 'fused' : 'too-small';
+    if (/under the .* floor|came out at/.test(reason)) return 'under-floor';
+    return 'other';
+  }
+
+  /* "Within `clear` of part j", exactly: inside it, or nearer its surface
+     than `clear`. A box test first, because nearly every node of a branch's
+     field is nowhere near most of the other parts. */
+  function nearAnyOf(probes, clear) {
+    return function (x, y, z) {
+      var p = [x, y, z];
+      for (var j = 0; j < probes.length; j++) {
+        var P = probes[j];
+        if (x < P.lo[0] - clear || x > P.hi[0] + clear || y < P.lo[1] - clear ||
+            y > P.hi[1] + clear || z < P.lo[2] - clear || z > P.hi[2] + clear) continue;
+        if (P.inside(p)) return true;
+        var nr = P.nearest(p, clear);
+        if (nr && nr.dist < clear) return true;
+      }
+      return false;
+    };
+  }
+
+  /* Closed shells in a cavity soup, by shared vertex. Usually one per part;
+     two where a keep region crosses a part in the middle - a trunk that
+     carries a contact past its collar has a bore below the collar and
+     another above it. */
+  function shellCount(soup) {
+    var id = new Map(), par = [];
+    function find(x) { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; }
+    for (var t = 0; t < soup.length; t += 9) {
+      var r = -1;
+      for (var k = 0; k < 3; k++) {
+        var o = t + 3 * k, key = soup[o] + ',' + soup[o + 1] + ',' + soup[o + 2];
+        var v = id.get(key);
+        if (v === undefined) { v = par.length; par.push(v); id.set(key, v); }
+        if (r < 0) r = find(v); else par[find(v)] = r;
+      }
+    }
+    var roots = new Set();
+    for (var i = 0; i < par.length; i++) roots.add(find(i));
+    return roots.size;
+  }
+
+  // opts.hollowWallMm  the wall; default the floor the trunk was built to,
+  //                    NSO_Thickness.floorFor(nozzle), via buildStrut
+  // opts.nozzle        passed through to hollow()'s floor
+  function hollowParts(plan, opts) {
+    opts = opts || {};
+    var out = { ok: false, reason: '', parts: [], hollowed: 0, solid: [] };
+    var H = hollowModule(opts), TH = thicknessModule(opts);
+    if (!H || typeof H.hollow !== 'function') {
+      out.reason = 'nso_hollow.js is not loaded - it is the one Hollow, and nothing here carves a cavity itself';
+      return out;
+    }
+    if (!TH || typeof TH.prepare !== 'function') {
+      out.reason = 'nso_thickness.js is not loaded - the keep region is measured with its probe';
+      return out;
+    }
+    if (!plan || !plan.ok || !plan.parts || !plan.parts.length) {
+      out.reason = 'hollowParts needs a planned tree';
+      return out;
+    }
+    var floor = plan.trunk && plan.trunk.floorMm;
+    var wall = (opts.hollowWallMm == null) ? floor : +opts.hollowWallMm;
+    if (!(wall > 0)) { out.reason = 'no wall to hollow to - pass hollowWallMm, or plan with a floor'; return out; }
+    out.wallMm = wall;
+    out.floorMm = floor;
+    /* A wall, plus one sample pitch: the cavity surface is a level set
+       sampled at wall / STEPS_PER_WALL, and can sit up to a pitch past the
+       node that bounds it. */
+    var steps = H.STEPS_PER_WALL || 3;
+    out.clearMm = wall + wall / steps;
+
+    var probes = plan.parts.map(function (s) { return TH.prepare(s, { nozzle: opts.nozzle }); });
+    var labels = partLabels(plan);
+    for (var i = 0; i < plan.parts.length; i++) {
+      var part = plan.parts[i];
+
+      /* hollow()'s own "thicker than half this piece" rule, asked of the
+         part's real SECTION rather than its bounding box. Every part here is
+         a straight prism whose section this file built, so its width across
+         the flats is known exactly - and a tilted part's bounding box is
+         wider than its section, which is the one case where hollow()'s box
+         test cannot fire and the field has to be computed to find nothing.
+         Same rule, same refusal, the right measurement. */
+      var across = labels[i].acrossMm;
+      if (across > 0 && across <= 2 * wall + 1e-9) {
+        var why = 'a ' + across.toFixed(3) + ' mm ' + labels[i].role + ' is not wider than two ' +
+          wall.toFixed(3) + ' mm walls (' + (2 * wall).toFixed(3) + ' mm) - a wall thicker than half ' +
+          'its section leaves no interior to carve, so it stays solid';
+        out.parts.push({ index: i, role: labels[i].role, label: labels[i].label, branch: labels[i].branch,
+                         hollow: false, kind: 'too-small', reason: why, acrossMm: across, heldNodes: 0 });
+        out.solid.push({ index: i, label: labels[i].label, role: labels[i].role, kind: 'too-small', why: why });
+        continue;
+      }
+
+      var others = probes.filter(function (P, j) { return j !== i && P; });
+      var h = H.hollow(part, {
+        wall: wall, nozzle: opts.nozzle, minWall: floor,
+        keep: others.length ? nearAnyOf(others, out.clearMm) : null,
+        /* A part is slender: small in two axes, long in one. The node cap
+           still bounds the work; the per-axis cap would only coarsen a long
+           trunk for nothing. */
+        maxDim: 4096
+      });
+      var rec = { index: i, role: labels[i].role, label: labels[i].label,
+                  branch: labels[i].branch, hollow: false, reason: h.reason,
+                  acrossMm: across, heldNodes: h.held_nodes || 0 };
+      if (h.ok) {
+        rec.hollow = true;
+        rec.cavity = h.soup.subarray ? h.soup.subarray(part.length) : h.soup.slice(part.length);
+        rec.hollowSoup = h.soup;
+        rec.bores = shellCount(rec.cavity);
+        rec.cavityMm3 = h.cavity_volume;
+        rec.pitchMm = h.pitch_mm;
+        rec.measuredMm = h.measured_mm;
+        rec.measuredCavityMm = h.measured_cavity_mm;
+        out.hollowed++;
+      } else {
+        rec.kind = fallbackKind(h.reason || '', rec.heldNodes);
+        out.solid.push({ index: i, label: rec.label, role: rec.role, kind: rec.kind, why: h.reason });
+      }
+      out.parts.push(rec);
+    }
+    out.ok = true;
+    var kinds = {};
+    out.solid.forEach(function (s) { kinds[s.kind] = (kinds[s.kind] || 0) + 1; });
+    out.reason = out.hollowed + ' of ' + plan.parts.length + ' part(s) hollowed to a ' +
+      wall.toFixed(3) + ' mm wall' +
+      (out.solid.length ? '; ' + out.solid.length + ' left solid (' +
+        Object.keys(kinds).map(function (k) { return kinds[k] + ' ' + k; }).join(', ') + ')' : '');
+    return out;
+  }
+
+  /* The whole hollow tree: the solid union exactly as unionParts builds it,
+     then every cavity stapled on inside it - see THE KEEP REGION for why
+     that needs no second boolean. */
+  function hollowTree(plan, opts) {
+    opts = opts || {};
+    var hp = (plan && plan.hollow && plan.hollow.ok) ? plan.hollow : hollowParts(plan, opts);
+    if (!hp.ok) return Promise.resolve({ ok: false, soup: null, hollow: hp, reason: hp.reason });
+    return unionParts(plan.parts, opts).then(function (u) {
+      if (!u.ok) return { ok: false, soup: null, hollow: hp, reason: 'the solid union failed: ' + u.reason };
+      var recs = hp.parts.filter(function (r) { return r.hollow; });
+      var n = u.soup.length, i;
+      for (i = 0; i < recs.length; i++) n += recs[i].cavity.length;
+      var soup = new Float32Array(n), at = u.soup.length, vol = 0, bores = 0;
+      soup.set(u.soup, 0);
+      for (i = 0; i < recs.length; i++) {
+        soup.set(recs[i].cavity, at);
+        at += recs[i].cavity.length;
+        vol += recs[i].cavityMm3;
+        bores += recs[i].bores;
+      }
+      return {
+        ok: true, soup: soup, solidSoup: u.soup, hollow: hp, solid: hp.solid,
+        cavities: recs.length, bores: bores, cavityMm3: vol,
+        reason: 'hollow tree: ' + recs.length + ' of ' + plan.parts.length + ' part(s) are tubes at a ' +
+          hp.wallMm.toFixed(3) + ' mm wall, ' + bores + ' bore(s), ' + vol.toFixed(3) + ' mm^3' +
+          (hp.solid.length ? '; ' + hp.solid.length + ' left solid - ' +
+            hp.solid.map(function (s) { return s.label + ' (' + s.kind + ')'; }).join(', ') : '')
+      };
+    });
+  }
+
   function describe(res) {
     if (!res) return 'no result';
     if (!res.ok) return 'Support tree refused - ' + (res.reason || 'no reason given');
@@ -1268,6 +1553,8 @@
     branch: branch,
     planTree: planTree,
     unionParts: unionParts,
+    hollowParts: hollowParts,
+    hollowTree: hollowTree,
     describe: describe,
     /* exposed for the tests, not for callers */
     _zOnTriAt: zOnTriAt,
