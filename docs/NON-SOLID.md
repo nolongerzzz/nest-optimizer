@@ -86,6 +86,12 @@ only), Thicken (deliberately: "slots are leftover open loops on purpose"),
 every export path (STL, plate STL, 3MF), Optimize. **An open piece already
 exports.** Nothing needed unblocking there, and the flag does not touch export.
 
+Solidify has since gained a result gate, but it is not a closure check and
+does not read the flag: it refuses (piece unchanged) any result with more
+open, non-manifold or degenerate edges/faces than its input, measured by
+`NSO_Repair.inspect`, and leaves a piece with no open edge untouched. See the
+comment above `solidifySelectedModel()` in `app-finish.js`.
+
 ### Nozzle-safety guard: there isn't one
 
 The word "nozzle" appears in two prose comments and one default. `nso_skin.js`

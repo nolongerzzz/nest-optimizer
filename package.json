@@ -145,6 +145,7 @@
     "hollow": "node tools/nso_hollow_test.js",
     "live:gate": "node tools/nso_live_gate_test.js",
     "wire:hollow": "node tools/nso_wire_hollow_test.js",
+    "wire:solidify": "node tools/nso_wire_solidify_test.js",
     "fixtures:gate": "python3 tools/fixture_audit.py --gate --no-selfint",
     "thicken:check": "node tools/nso_thicken_drive_check.js",
     "measure:test": "node tools/nso_measure_test.js"
@@ -227,6 +228,7 @@
     "hollow",
     "live:gate",
     "wire:hollow",
+    "wire:solidify",
     "wall:cut",
     "delete:test",
     "delete:drive",
@@ -389,6 +391,7 @@
     "hollow": 9300,
     "live:gate": 318,
     "wire:hollow": 12400,
+    "wire:solidify": 33000,
     "wall:cut": 2000,
     "delete:test": 653,
     "delete:drive": 3400,
