@@ -146,13 +146,13 @@ async function main() {
       return { id, cls: el.className, x: Math.round(r.left), w: Math.round(r.width) };
     });
   });
-  check('both are plain rail buttons in the same column',
-    rail.map((b) => b.cls), ['viewport-tool-btn', 'viewport-tool-btn']);
+  check('both are rail buttons in the same column (G-scope sized for its two glyphs)',
+    rail.map((b) => b.cls), ['viewport-tool-btn', 'viewport-tool-btn btn-gscope']);
   check('and the same width, in the same left-hand rail',
     [rail[0].x === rail[1].x, rail[0].w === rail[1].w], [true, true]);
-  check('X-ray takes no file and asks for none',
+  check('X-ray takes no file and asks for none - the next control is G-scope itself',
     await page.evaluate(() => document.getElementById('btn-xray').nextElementSibling.id),
-    'btn-gcode');
+    'btn-microscope');
 
   // =======================================================================
   console.log('\n--- a piece with no G-code anywhere near it ---');
@@ -398,7 +398,7 @@ async function main() {
         (c) => c.material.color.getHex() === G.colorForFeature(c.userData.feature)),
       layerBtn: !document.getElementById('ms-btn-layer-select').disabled,
       models: state.models.length,
-      session: !!window.NSO_TOOLPATH.getSession(),
+      oldDoor: typeof window.NSO_TOOLPATH,
     };
   });
   check('importing a .gcode.3mf lands in the microscope - no button pressed',
@@ -407,78 +407,49 @@ async function main() {
   check('with its real moves and layers', [landed.moves, landed.layers], [2895, 50]);
   check('coloured by the slicer\'s own feature table, every group of it',
     landed.coloured, true);
-  check('drawn the reference tool\'s way', landed.drawn, ['LineSegments']);
+  check('drawn the reference tool\'s way (one LineSegments per feature, plus nothing else)',
+    landed.drawn, ['LineSegments']);
   check('Travel off by default, as the reference tool has it', landed.hidden, ['Travel']);
   check('whole-layer selection is live, because this one really is sliced',
     landed.layerBtn, true);
   check('the support interface is one of the groups it found',
     landed.groups.includes('Support interface'), true);
-  // The plate import underneath is untouched - the view is over it, not
-  // instead of it, so Close drops onto the Toolpath card exactly as before.
-  check('and the plate import ran underneath it all the same',
-    landed.models > before3mf, true);
-  check('with a toolpath session behind the panel', landed.session, true);
+  // G-scope is the one G-code tool: a slice is looked THROUGH, and nothing
+  // reaches the plate until Export or Crop says so.
+  check('and NOTHING was put on the plate by the import', landed.models, before3mf);
+  check('the old plate-side toolpath importer is gone', landed.oldDoor, 'undefined');
   await shot(page, '3-gcode-3mf-import-lands-here.png', 'a .gcode.3mf import, unassisted');
 
   // =======================================================================
-  console.log('\n--- support, alone: the library\'s first step, with shipped controls ---');
+  console.log('\n--- support, alone: feature isolation, with shipped controls ---');
   // =======================================================================
-  // Not the isolation library - that is later work. This is the check that it
-  // is REACHABLE from here, which is the thing Tasks 2-4 were asked to keep
-  // true: the plate now holds one piece per slicer feature, so reading the
-  // plate back gives feature-named groups, and Support comes out of the model
-  // on its own, as an ordinary piece, through nothing written for it.
-  await page.click('#ms-btn-plate');
-  const fromPlate = await page.evaluate(() => {
-    const M = window.NSO_MICROSCOPE, d = M.getDoc(), v = M.getView();
-    const G = window.NSOGcodeLines;
-    const support = M.groups().filter((n) => /Support/.test(n));
-    return {
-      source: d.source,
-      groups: M.groups(),
-      support,
-      // The slicer's colour for a feature, carried onto a plate piece named
-      // for that feature - so Support reads as Support on the plate route too.
-      supportColour: support.length
-        ? v.overviewMeshes[support[0]].material.color.getHex() : null,
-      wantColour: G.colorForFeature('Support interface'),
-    };
-  });
-  check('reading the plate back gives one group per slicer feature',
-    fromPlate.groups.length >= 5, true);
-  check('the source is the plate', fromPlate.source, 'plate');
-  check('the support geometry is among them, by the slicer\'s name for it',
-    fromPlate.support.map((n) => n.replace(/^.* - /, '')), ['Support interface']);
-  check('and it wears the slicer\'s own colour for it, not a palette slot',
-    fromPlate.supportColour, fromPlate.wantColour);
-
+  // The support interface out of the slice on its own, through the legend's
+  // "only" button and Select shown - no box, nothing written for it - then
+  // onto the plate as an ordinary piece, and read back off the plate in the
+  // slicer's own colour for it.
+  const supportRow = page.locator('#ms-legend .ms-legend-item[data-group="Support interface"]');
+  await supportRow.hover();
+  await supportRow.locator('.ms-legend-only').click();
+  await page.click('#ms-btn-select-visible');
   const supportOnly = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, d = M.getDoc();
-    const name = M.groups().find((n) => /- Support interface$/.test(n));
-    const o = d.objects.find((x) => x.name === name);
-    const b = o.bounds;
-    // One box around the interface's own bounds, nothing else asked for.
-    M.clearBoxes();
-    M.addBoxAt((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, (b.minZ + b.maxZ) / 2,
-               Math.max(b.maxX - b.minX, b.maxY - b.minY) / 2 + 0.01,
-               (b.maxZ - b.minZ) / 2 + 0.01);
     const sel = M.selection();
     return {
-      name,
-      picked: sel.map((s) => s.name),
-      isSupportOnly: sel.length === 1 && sel[0].name === name,
+      hidden: M.hidden().sort(),
+      n: sel.length,
+      want: d.segments.filter((s) => s.feature === 'Support interface').length,
+      isSupportOnly: sel.length > 0 && sel.every((s) => s.feature === 'Support interface'),
       tris: M.geometry().attributes.position.count / 3,
-      supportTris: o.triangles,
       label: M.exportLabel(),
     };
   });
-  check('a box on the interface\'s own footprint takes it and nothing else - ' +
-        'no walls, no infill, none of the model\'s own mesh',
+  check('"only" leaves the support interface as the one group shown',
+    supportOnly.hidden.includes('Support interface'), false);
+  check('Select shown takes it and nothing else - no walls, no infill',
     supportOnly.isSupportOnly, true);
-  check('and what comes out is exactly the interface\'s triangles',
-    supportOnly.tris, supportOnly.supportTris);
-  console.log(`       ${supportOnly.name}: ${supportOnly.tris} triangles, ` +
-    `alone out of ${fromPlate.groups.length} groups on the plate`);
+  check('every support interface move, all of them', supportOnly.n, supportOnly.want);
+  check('and what comes out is 12 triangles per move', supportOnly.tris, supportOnly.n * 12);
+  console.log(`       ${supportOnly.label}: ${supportOnly.tris} triangles`);
 
   await page.click('#ms-btn-isolate');
   check('and it isolates on screen as one body',
@@ -487,14 +458,35 @@ async function main() {
       return [v.detailGroup.visible, v.detailGroup.children.length];
     }), [true, 1]);
   await shot(page, '4-support-isolated-from-the-model.png',
-    'support geometry alone, off the plate');
+    'support geometry alone, out of the slice');
 
   const supportBefore = await page.evaluate(() => state.models.length);
   await page.click('#ms-btn-export-plate');
-  check('and it goes back onto the plate as its own piece',
+  check('and it goes onto the plate as its own piece',
     await page.evaluate(() => state.models.length), supportBefore + 1);
   check('carrying the feature\'s name with it',
     await page.evaluate(() => state.models[state.models.length - 1].name), supportOnly.label);
+
+  // The rail button reopens the slice that is still loaded; the sidebar's
+  // "Read the plate" is the way from a file back to the plate.
+  await page.click('#btn-microscope');
+  check('the rail button reopens G-scope on the slice it left',
+    await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().kind), 'toolpath');
+  await page.click('#ms-btn-plate');
+  const fromPlate = await page.evaluate(() => {
+    const M = window.NSO_MICROSCOPE, v = M.getView(), G = window.NSOGcodeLines;
+    const name = M.groups().find((n) => /Support interface/.test(n));
+    return {
+      source: M.getDoc().source,
+      name,
+      colour: name ? v.overviewMeshes[name].material.color.getHex() : null,
+      want: G.colorForFeature('Support interface'),
+    };
+  });
+  check('reading the plate back finds it by the slicer\'s name', !!fromPlate.name, true);
+  check('the source is the plate', fromPlate.source, 'plate');
+  check('and it wears the slicer\'s own colour for it, not a palette slot',
+    fromPlate.colour, fromPlate.want);
 
   // =======================================================================
   console.log('\n--- the build ---');

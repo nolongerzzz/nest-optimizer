@@ -62,6 +62,11 @@ Smart build-plate packing for 3D printing.
   slider and arrows only write the lift and rebuild the piece's rotation from
   the plate record, this keeps the rotation and only moves it down. Its place on
   the plate is untouched and one Undo puts it back.
+- **Crop** (Cut menu, under Split) takes a middle section out of a piece: set
+  the box by two distances along the cut axis (or tick **Box** and drag it on
+  the piece), press Crop, and the slab inside the box is removed, the far part
+  slides back by the box length, and the joint is sealed into one closed piece.
+  Stage 1 of two: no sideways alignment yet. See [docs/CROP.md](docs/CROP.md).
 - **Triple join** (Join card) joins three pieces in one press: pick A, B and C,
   choose a **vertical stack** or a **horizontal sequence**, and each of the two
   junctions (A-B, B-C) gets Center lock then Seat (support) at **its own gap**.
@@ -231,11 +236,21 @@ Smart build-plate packing for 3D printing.
     time". See [docs/PHOTOGRAMMETRY-ONRAMP.md](docs/PHOTOGRAMMETRY-ONRAMP.md)
     and the contract it implements,
     [docs/PHOTOGRAMMETRY-CAPTURE.md](docs/PHOTOGRAMMETRY-CAPTURE.md).
-- **Microscope** (the 🔬 button in the viewport's bottom-left rail) opens a
-  file in its own inspector instead of onto the plate, and hands a selection
-  back out. It takes an **STL**, a **3MF** or an already-sliced **`.gcode.3mf`**,
-  and which route a 3MF takes is decided by what is inside it, never by its
-  name.
+- **G-scope** (the G🔬 button in the viewport's bottom-left rail - the one
+  G-code tool) opens the plate, or a file, in its own inspector instead of onto
+  the plate, and hands a selection back out. It takes an **STL**, a **3MF** or
+  an already-sliced **`.gcode.3mf`**, and which route a 3MF takes is decided by
+  what is inside it, never by its name. Importing a sliced project anywhere in
+  the app lands here and adds nothing to the plate.
+  - **Pick a line** isolates one extrusion move at a time (click, Shift-click,
+    arrow keys); a legend row's **only** isolates one feature; **Select shown**
+    makes what is on screen the selection. **Clear from view** hides a piece or
+    lines - view only, the plate is never touched.
+  - A **layer-range slider** on the viewport's right edge sets the lower and
+    upper Z drawn: one layer, a chunk, or everything.
+  - **Crop out band** removes the slider's Z band and rejoins the rest through
+    the Crop tool: a plate piece in place, or a slice's selection as a new
+    piece.
   - A sliced project draws as its toolpath, one colour per `; FEATURE:` group
     the slicer named, with the legend built from the groups the file actually
     has. Click a row to isolate that feature.

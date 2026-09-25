@@ -86,13 +86,16 @@ function cssStructure() {
         stray.length ? 'at line(s) ' + stray.join(', ') : '0 stray');
 
   // The check has teeth: the historical bug must be caught by it. Drop the brace
-  // that closes `.tp-detail` and the scan has to notice.
-  const broken = src.replace(
-    /(\.tp-detail \{[^}]*?word-break: break-word;\n)\}/,
-    '$1');
+  // that closes whatever rule precedes `.viewport-overlay-wheel` - the shape of
+  // the original bug (it was `.tp-detail`, removed with the Toolpath card when
+  // G-scope absorbed it) - and the scan has to notice.
+  const wheelAt = src.indexOf('\n.viewport-overlay-wheel {');
+  const braceAt = src.lastIndexOf('\n}', wheelAt);
+  const broken = wheelAt > 0 && braceAt > 0
+    ? src.slice(0, braceAt + 1) + src.slice(braceAt + 2) : src;
   check('the scan would catch the bug it was written for',
         broken !== src && unclosedBlocks(broken).open.length === 1,
-        'removing .tp-detail\'s closing brace is detected');
+        'removing the closing brace of the rule before .viewport-overlay-wheel is detected');
 
   // And the rule that bug silently deleted is actually present.
   check('.viewport-overlay-wheel survives parsing as a rule of its own',

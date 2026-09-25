@@ -1,5 +1,11 @@
 # Sliced-G-code toolpath import
 
+> **Superseded 2026-09-25.** The plate-side importer this describes
+> (`app-toolpath.js`, the G🔬 `#btn-gcode` door and the sidebar Toolpath card)
+> was merged into G-scope and removed. The parser and geometry builder
+> (`nso-gcode-lines.js`) and everything said here about them still hold. For
+> the tool, read `docs/GCODE-MICROSCOPE.md`, "G-scope: one tool".
+
 Import an **already-sliced** Bambu Studio project (`*.gcode.3mf`) and render its
 real toolpath as genuine, editable NSO geometry — then isolate one layer, in true
 isolation from every other layer, and pull it out as its own object.

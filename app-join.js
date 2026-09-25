@@ -1733,6 +1733,59 @@ async function NSO_unionSoups(aWorld, bWorld) {
 }
 
 /* =====================================================================
+   Subtract one world soup from another - the plain boolean, no plug frame.
+
+   Returns { ok, soup, parts, removedMm3, reason }.
+
+   subtractSoupBFromA below is a PUNCH: it clips the bit to a safety box built
+   from a plug frame and reserves a wall along the punch axis, which is right
+   for a port cut and meaningless for a volume already known to be safe to
+   remove. This is the other case. Its caller is the hollow support tree
+   (nso_support_tree.js, hollowTree): every bore it removes is its own part
+   shrunk inward by exactly one wall, so the removal needs no second opinion
+   about walls - only the kernel, the same welds as the union, and proof that
+   something was removed.
+
+   A result that removed nothing is refused rather than reported ok, for the
+   reason subtractSoupBFromA refuses one: a caller that believes a bore went
+   in when it did not is the silent failure worth guarding.
+   ===================================================================== */
+async function NSO_subtractSoups(aWorld, bWorld) {
+  if (!NSO_soupLen(aWorld) || !NSO_soupLen(bWorld)) return { ok: false, soup: aWorld, reason: 'empty soup' };
+  var wasm;
+  try { wasm = await NSO_CSG.load(); }
+  catch (err) { return { ok: false, soup: aWorld, reason: 'CSG kernel failed to load: ' + NSO_errMsg(err) }; }
+  var manA = null, manB = null, out = null;
+  try {
+    var aIn = aWorld, bIn = bWorld;
+    if (typeof weldSoupVerts === 'function') {
+      try { aIn = weldSoupVerts(aWorld, NSO_weldEpsFor(aWorld, 0.08)); } catch (e0) { aIn = aWorld; }
+      try { bIn = weldSoupVerts(bWorld, NSO_weldEpsFor(bWorld, 0.08)); } catch (e1) { bIn = bWorld; }
+    }
+    manA = NSO_CSG.soupToManifold(wasm, aIn);
+    if (manA.status && manA.status() !== 'NoError') throw new Error('A rejected: ' + manA.status());
+    manB = NSO_CSG.soupToManifold(wasm, bIn);
+    if (manB.status && manB.status() !== 'NoError') throw new Error('B rejected: ' + manB.status());
+    out = manA.subtract(manB);
+    if (out.status() !== 'NoError') throw new Error('subtract rejected by kernel: ' + out.status());
+    if (out.isEmpty()) throw new Error('subtract produced an empty solid');
+    var removed = manA.volume() - out.volume();
+    if (!(removed > 1e-9)) {
+      throw new Error('removed ~0 volume (' + removed.toExponential(3) + ' mm^3) - B is not inside A');
+    }
+    var st = NSO_manifoldStats(out);
+    return { ok: true, soup: NSO_CSG.manifoldToSoup(out), parts: st.exact ? st.parts : null,
+             removedMm3: removed, stats: st.exact ? { open: st.open, nm: st.nm } : null, reason: '' };
+  } catch (err) {
+    return { ok: false, soup: aWorld, reason: NSO_errMsg(err) };
+  } finally {
+    if (manA) manA.delete();
+    if (manB) manB.delete();
+    if (out) out.delete();
+  }
+}
+
+/* =====================================================================
    REPLACEMENT: subtractSoupBFromA
    Was: homemade ray/AABB pocket clipper (centroid filter + wall raycast).
    Now: real solid boolean via Manifold. Async (WASM load + compute).

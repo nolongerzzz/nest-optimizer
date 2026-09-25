@@ -1353,6 +1353,19 @@ select:focus, input:focus {
   margin: 0;
 }
 
+/* Crop, under Split in the Cut menu (app-crop.js) */
+.crop-tools {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(148, 163, 184, 0.25);
+}
+.crop-row { align-items: center; }
+.crop-row input[type="number"] {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+
 #edit-card input[type="range"] {
   width: 100%;
   margin: 6px 0 4px;
@@ -1647,17 +1660,17 @@ select:focus, input:focus {
   color: #38bdf8;
 }
 
-/* The G-code microscope's rail button carries TWO glyphs - a letter and an
-   emoji - where every other tool button carries one, so the rail's 22px would
-   overflow the 44px box. Its own size rather than a smaller rail for all. */
-.viewport-tool-btn.btn-gcode {
+/* G-scope's rail button carries TWO glyphs - a letter and an emoji - where
+   every other tool button carries one, so the rail's 22px would overflow the
+   44px box. Its own size rather than a smaller rail for all. */
+.viewport-tool-btn.btn-gscope {
   font-size: 15px;
   font-weight: 700;
   letter-spacing: -0.5px;
 }
 
-/* Lit while a toolpath session is open, the same signal X-ray gives. */
-#btn-gcode.is-on {
+/* Lit while G-scope is open, the same signal X-ray gives. */
+#btn-microscope.is-on {
   border-color: #38bdf8;
   color: #38bdf8;
 }
@@ -2437,75 +2450,14 @@ select:focus, input:focus {
 }
 
 /* ---------------------------------------------------------------------------
-   Toolpath card - the line-level scrub for an imported sliced .gcode.3mf.
-   The card is hidden until something is imported. Note the repo has NO generic
-   .hidden rule (see the .library-list note above for the trap that caused), so
-   this says it for this card and says it unconditionally.
-   --------------------------------------------------------------------------- */
-#toolpath-card.hidden { display: none !important; }
-
-#toolpath-card input[type="range"] {
-  width: 100%;
-  margin: 8px 0 4px;
-  accent-color: #ff3b30;   /* same red the scrub highlight uses in the viewport */
-}
-
-/* Two step rows, not one: lines on top, layers below. They are two different
-   granularities and the sidebar is too narrow to hold all five controls on one
-   line without clipping the last button. The layer row's two buttons split the
-   width evenly so the pair reads as one unit. */
-.tp-step-row {
-  display: flex;
-  gap: 4px;
-  align-items: center;
-  margin-bottom: 4px;
-}
-.tp-step-row + .tp-step-row .btn { flex: 1 1 0; }
-.tp-step-row .btn {
-  flex: 0 0 auto;
-  padding: 6px 7px;
-  font-size: 11px;
-  white-space: nowrap;
-}
-/* The line number has to stay readable at four digits, so it gets a floor
-   rather than `min-width: 0` - with the flex default it collapsed to nothing
-   between the step buttons and showed no number at all. */
-.tp-step-row input[type="number"] {
-  flex: 1 1 auto;
-  min-width: 52px;
-  padding: 6px 2px;
-  margin: 0;
-  text-align: center;
-}
-
-/* The Z filter's own toggle. One layer at a time is the reason the card can show
-   a single layer's construction at all, so it sits above Extract scope. */
-.tp-check-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 6px 0 4px;
-  cursor: pointer;
-}
-.tp-check-row input[type="checkbox"] { margin: 0; flex: 0 0 auto; }
-
-/* The per-line measurements. Tabular figures so the numbers do not jitter as
-   the slider moves, which is the whole point of reading them while scrubbing. */
-.tp-detail {
-  font-variant-numeric: tabular-nums;
-  line-height: 1.5;
-  margin: 2px 0 8px;
-  word-break: break-word;
-}
-/* ---------------------------------------------------------------------------
    Pottery Wheel - its own menu beside Finish, same shape, its own corner so
    the two do not overlap when both are open.
 --------------------------------------------------------------------------- */
 .viewport-overlay-wheel {
   top: 8px;
   /* Menu 2, immediately left of Finish - one menu width and one more gap in.
-     This rule was DEAD until the `.tp-detail` block above it was closed, so the
-     wheel menu had no positioning at all; see --vp-menu-gap in :root. */
+     This rule was once DEAD behind an unclosed block above it, so the wheel
+     menu had no positioning at all; see --vp-menu-gap in :root. */
   right: calc(var(--vp-menu-gap) * 2 + var(--vp-menu-w));
   left: auto;
   bottom: auto;
@@ -2932,3 +2884,87 @@ select:focus, input:focus {
   max-width: 420px;
   line-height: 1.4;
 }
+
+/* ---------------------------------------------------------------------------
+   G-scope additions: the legend's "only" button and the layer-range slider
+   docked to the viewport's right edge.
+   --------------------------------------------------------------------------- */
+.ms-legend-label { flex: 1 1 auto; min-width: 0; }
+.ms-sidebar button.ms-legend-only {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  font-size: 10.5px;
+  opacity: 0;
+}
+.ms-legend-item:hover .ms-legend-only,
+.ms-legend-only:focus { opacity: 1; }
+
+.ms-zr {
+  position: absolute;
+  top: 56px;
+  right: 12px;
+  bottom: 56px;
+  width: 64px;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  background: rgba(23, 26, 33, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 0;
+  user-select: none;
+}
+.ms-zr[hidden] { display: none; }
+.ms-zr-read, .ms-zr-count {
+  font-size: 10.5px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ms-zr-count { color: var(--muted); }
+.ms-zr-track {
+  position: relative;
+  flex: 1 1 auto;
+  width: 6px;
+  margin: 8px 0;
+  border-radius: 3px;
+  background: var(--border);
+  cursor: pointer;
+  touch-action: none;
+}
+.ms-zr-fill {
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  border-radius: 4px;
+  background: var(--accent);
+  cursor: grab;
+  min-height: 2px;
+}
+.ms-zr-handle {
+  position: absolute;
+  left: 50%;
+  width: 22px;
+  height: 14px;
+  margin-left: -11px;
+  margin-bottom: -7px;
+  border-radius: 4px;
+  border: 2px solid var(--accent);
+  background: #0f1115;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.ms-zr-handle:focus-visible { outline: 2px solid #ffb35b; outline-offset: 1px; }
+.ms-zr-handle-hi { border-color: #ffb35b; }
+.ms-zr-all {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.ms-zr-all:hover { border-color: var(--accent); }

@@ -1383,6 +1383,134 @@ function rawFlatCapLoop(loop3d, axisIdx, planeVal, keepMin) {
   return out;
 }
 
+// Caps ALL of a section's loops together. rawFlatCapLoop fills one simple
+// outline; a section through a tube or a hinge knuckle is an outline with a
+// bore inside it, and capping each loop on its own fills the bore as a second
+// disk (double-covering it, the winding inconsistent against the bore wall).
+// Here loops are classed by nesting depth (even = an outer boundary, odd = a
+// hole in the smallest loop around it), each hole is joined to its outer
+// boundary by a bridge edge walked both ways (the standard hole-to-polygon
+// reduction), and the resulting single outline goes to rawFlatCapLoop. The
+// section's loops come from a manifold cut, so they never cross or share a
+// point (rawBuildLoopsFromCutEdges refuses branch points), which makes one
+// vertex enough to decide containment. A loop with no holes is capped exactly
+// as before.
+function rawFlatCapLoops(loops3d, axisIdx, planeVal, keepMin) {
+  const other = [0,1,2].filter(a => a !== axisIdx);
+  const L = loops3d.map(l => {
+    const p2 = l.map(p => [p[other[0]], p[other[1]]]);
+    let a = 0;
+    for (let i = 0; i < p2.length; i++) { const p = p2[i], q = p2[(i+1) % p2.length]; a += p[0]*q[1] - q[0]*p[1]; }
+    return { p3: l, p2: p2, area: a / 2, depth: 0, parent: -1, holes: [] };
+  });
+  function inside(pt, poly) {
+    let c = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const a = poly[i], b = poly[j];
+      if ((a[1] > pt[1]) !== (b[1] > pt[1]) && pt[0] < (b[0]-a[0]) * (pt[1]-a[1]) / (b[1]-a[1]) + a[0]) c = !c;
+    }
+    return c;
+  }
+  const holders = L.map(() => []);
+  for (let i = 0; i < L.length; i++) {
+    for (let j = 0; j < L.length; j++) {
+      if (i !== j && Math.abs(L[j].area) > Math.abs(L[i].area) && inside(L[i].p2[0], L[j].p2)) holders[i].push(j);
+    }
+    L[i].depth = holders[i].length;
+  }
+  for (let i = 0; i < L.length; i++) {
+    if (L[i].depth % 2 === 0) continue;
+    let best = -1;
+    for (const j of holders[i]) if (L[j].depth === L[i].depth - 1 && (best < 0 || Math.abs(L[j].area) < Math.abs(L[best].area))) best = j;
+    if (best < 0) throw new Error('cap: a hole in the cut section has no outline around it');
+    L[i].parent = best;
+    L[best].holes.push(i);
+  }
+  const out = [];
+  for (let i = 0; i < L.length; i++) {
+    if (L[i].depth % 2 !== 0) continue;
+    const merged = L[i].holes.length ? rawBridgeHoles(L[i], L[i].holes.map(h => L[h])) : L[i].p3;
+    const cap = rawFlatCapLoop(merged, axisIdx, planeVal, keepMin);
+    for (let k = 0; k < cap.length; k++) out.push(cap[k]);
+  }
+  return out;
+}
+
+// One outline from an outer loop and the holes inside it: outer counter-
+// clockwise, each hole clockwise, spliced in through a bridge from a hole
+// vertex M to an outline vertex P that sees it (the open segment M-P crosses
+// no edge of the outline built so far or of a hole still waiting, and leaves
+// P into the material rather than into another hole or the outside). M and P
+// then appear twice, and the bridge is walked once each way, so the fill
+// shares exactly the loop points with the walls and adds no vertex. Loop
+// entries are {p2, p3, area} as built by rawFlatCapLoops.
+function rawBridgeHoles(outer, holes) {
+  function oriented(l, ccw) {
+    const idx = l.p2.map((_, i) => i);
+    if ((l.area > 0) !== ccw) idx.reverse();
+    return idx.map(i => ({ p2: l.p2[i], p3: l.p3[i] }));
+  }
+  function cross(o, a, b) { return (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0]); }
+  function same(a, b) { return a[0] === b[0] && a[1] === b[1]; }
+  // Open segment p-q against closed segment a-b; touching counts, except at a
+  // shared endpoint of the two.
+  function hits(p, q, a, b) {
+    if ((same(a, p) || same(a, q)) && (same(b, p) || same(b, q))) return true;
+    const pShared = same(a, p) || same(b, p), qShared = same(a, q) || same(b, q);
+    const d1 = cross(a, b, p), d2 = cross(a, b, q), d3 = cross(p, q, a), d4 = cross(p, q, b);
+    if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
+    function on(x, s, e) {
+      return Math.min(s[0], e[0]) <= x[0] && x[0] <= Math.max(s[0], e[0]) && Math.min(s[1], e[1]) <= x[1] && x[1] <= Math.max(s[1], e[1]);
+    }
+    if (d3 === 0 && !same(a, p) && !same(a, q) && on(a, p, q)) return true;
+    if (d4 === 0 && !same(b, p) && !same(b, q) && on(b, p, q)) return true;
+    if (d1 === 0 && !pShared && on(p, a, b)) return true;
+    if (d2 === 0 && !qShared && on(q, a, b)) return true;
+    return false;
+  }
+  // Does direction P->m leave P into the material of a CCW outline whose
+  // neighbours of P are a (before) and b (after)?
+  function inWedge(a, P, b, m) {
+    const l1 = cross(a, P, m) > 0, l2 = cross(P, b, m) > 0;
+    return cross(a, P, b) >= 0 ? (l1 && l2) : (l1 || l2);
+  }
+  let poly = oriented(outer, true);
+  const pending = holes.map(h => oriented(h, false));
+  // Rightmost holes first: their bridges tend to run short and clear.
+  pending.sort((A, B) => Math.max(...B.map(v => v.p2[0])) - Math.max(...A.map(v => v.p2[0])));
+  while (pending.length) {
+    const hole = pending.shift();
+    const mOrder = hole.map((_, i) => i).sort((i, j) => hole[j].p2[0] - hole[i].p2[0]);
+    let done = false;
+    for (const mi of mOrder) {
+      const M = hole[mi].p2;
+      const cand = poly.map((_, i) => i).sort((i, j) => {
+        const a = poly[i].p2, b = poly[j].p2;
+        return ((a[0]-M[0])**2 + (a[1]-M[1])**2) - ((b[0]-M[0])**2 + (b[1]-M[1])**2);
+      });
+      for (const pi of cand) {
+        const P = poly[pi].p2;
+        if (!inWedge(poly[(pi - 1 + poly.length) % poly.length].p2, P, poly[(pi + 1) % poly.length].p2, M)) continue;
+        let blocked = false;
+        for (const ring of [poly, hole].concat(pending)) {
+          for (let e = 0; e < ring.length && !blocked; e++) {
+            if (hits(M, P, ring[e].p2, ring[(e + 1) % ring.length].p2)) blocked = true;
+          }
+          if (blocked) break;
+        }
+        if (blocked) continue;
+        const h = hole.slice(mi).concat(hole.slice(0, mi + 1));
+        poly = poly.slice(0, pi + 1).concat(h, poly.slice(pi));
+        done = true;
+        break;
+      }
+      if (done) break;
+    }
+    if (!done) throw new Error('cap: no clear bridge from a hole in the cut section to its outline');
+  }
+  return poly.map(v => v.p3);
+}
+
 // rawCut(rawTris, axisIdx, plane, keepMin)
 // rawTris: Float32Array/number[] flat triangle soup, original file axes.
 // axisIdx: 0/1/2 in that RAW frame (not the display axis letter).
@@ -1608,7 +1736,11 @@ function rawSplitDegenerates(f32) {
   return new Float32Array(out);
 }
 
-function rawCut(rawTris, axisIdx, plane, keepMin) {
+// The open half of rawCut: everything up to, but not including, the cap.
+// Returns the kept walls (a number[], on-plane points welded and exactly on
+// the plane) or null when nothing is kept. Crop (app-crop.js) calls this for
+// both of its planes and seals the joint itself; rawCut caps it.
+function rawCutOpen(rawTris, axisIdx, plane, keepMin) {
   const soup = rawWeldSoup(rawTris, RAW_CUT_WELD_TOL);
   // A vertex within the weld radius of the plane IS on it as far as any
   // checker is concerned; leave it a hair off and the cap and that vertex
@@ -1618,17 +1750,20 @@ function rawCut(rawTris, axisIdx, plane, keepMin) {
   }
   const clipped = rawClipTrianglesAtPlane(soup, axisIdx, plane, keepMin);
   const kept = rawSnapPlanePoints(clipped.kept, axisIdx, plane, keepMin, RAW_CUT_WELD_TOL);
-  if (!kept.length) return null;
+  return kept.length ? kept : null;
+}
+
+function rawCut(rawTris, axisIdx, plane, keepMin) {
+  const kept = rawCutOpen(rawTris, axisIdx, plane, keepMin);
+  if (!kept) return null;
   // Points are already welded and snapped, so walk the loop on exact keys; a
   // second grid round here could re-merge two distinct representatives that
   // share a 1e-4 cell (up to 1.41e-4 apart) and reopen the mismatch.
   const walked = rawBuildLoopsFromCutEdges(rawPlaneBoundaryEdges(kept, axisIdx, plane), axisIdx, 1e-9);
   if (walked.degreeIssues.length > 0) throw new Error(walked.degreeIssues.length + ' branch point(s) in raw cut boundary');
   const out = kept;
-  for (const loop of walked.loops) {
-    const cap = rawFlatCapLoop(loop, axisIdx, plane, keepMin);
-    for (let i = 0; i < cap.length; i++) out.push(cap[i]);
-  }
+  const cap = rawFlatCapLoops(walked.loops, axisIdx, plane, keepMin);
+  for (let i = 0; i < cap.length; i++) out.push(cap[i]);
   if (out.length < 9) return null;
   return rawSplitDegenerates(new Float32Array(out));
 }

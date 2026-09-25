@@ -102,15 +102,16 @@ async function main() {
   // =======================================================================
   check('the microscope rail button exists and is visible',
     await page.isVisible('#btn-microscope'), true);
-  check('it wears the same rail class as the other viewport tools',
-    await page.getAttribute('#btn-microscope', 'class'), 'viewport-tool-btn');
+  check('it wears the rail class of the other viewport tools (sized for G + lens)',
+    await page.getAttribute('#btn-microscope', 'class'), 'viewport-tool-btn btn-gscope');
   check('it says what it does on hover',
     /capture box/i.test(await page.getAttribute('#btn-microscope', 'title') || ''), true);
   check('the panel starts closed', await page.isVisible('#microscope'), false);
   check('and no file is open yet',
     await page.evaluate(() => window.NSO_MICROSCOPE.getDoc()), null);
-  check('the G-code-onto-the-plate button is untouched and still there',
-    await page.isVisible('#btn-gcode'), true);
+  check('it is the ONE G-code tool - the old G-code-onto-the-plate door is gone',
+    await page.evaluate(() => [!!document.getElementById('btn-gcode'), typeof window.NSO_TOOLPATH]),
+    [false, 'undefined']);
 
   // =======================================================================
   console.log('\n--- a real slice, through the view\'s own Import ---');
@@ -272,12 +273,17 @@ async function main() {
       // is what names it - `type` would read 'Mesh' for both.
       kinds: [...new Set(v.detailGroup.children.map(
         (c) => (c.isInstancedMesh ? 'InstancedMesh' : c.type)))],
+      tris: v.detailGroup.children.reduce((a, c) => a + c.geometry.attributes.position.count / 3, 0),
+      segs: window.NSO_MICROSCOPE.selection().length,
       badge: document.getElementById('ms-mode-badge').textContent,
     };
   });
   check('Isolate shows the detail group', isolated.detail, true);
   check('and hides the overview', isolated.overview, false);
-  check('drawn the reference tool\'s way - instanced cylinders', isolated.kinds, ['InstancedMesh']);
+  // G-scope's one deliberate change to the reference tool's detail view: the
+  // per-move extrudeFlatLine prism, the solid Export writes, not a cylinder.
+  check('drawn as each move\'s own printed prism (extrudeFlatLine)', isolated.kinds, ['Mesh']);
+  check('12 triangles per move - the exported solid, on screen', isolated.tris, isolated.segs * 12);
   check('the badge says what is on screen', /^Detail: \d+ segments$/.test(isolated.badge), true);
   await page.click('#ms-btn-back');
   check('Back returns to the whole part',
