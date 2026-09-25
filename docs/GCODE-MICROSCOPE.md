@@ -86,7 +86,7 @@ Two buttons in the View section, `#ms-cam-normal` and `#ms-cam-close`:
 
 | mode | framing | controls |
 | --- | --- | --- |
-| **Normal** | the whole part (what G-scope opens on and Back returns to) | free orbit, zoom, pan |
+| **Normal** | the whole part, **once**, on entering (what G-scope opens on and Back returns to); never re-locked after that | unrestricted: free orbit, zoom, pan, no distance limits, clip planes that follow the camera (see below) |
 | **Close inspection** | tight on the selection's own extent; with nothing selected, the capture boxes; with neither, the whole part | orbit and zoom about it, **pan off**, so the target stays locked on it |
 
 Close inspection is the view Isolate has always put you in, and Isolate still
@@ -99,9 +99,63 @@ enters it. What's new is that it's a mode, not a side effect:
 - A filter redraw inside the isolation (the slider, the legend) keeps
   whichever mode, and camera position, you were in. `isolate({ keepCamera })`
   replaces the old save-and-restore of the camera.
-- Back returns to Normal. Reopening the panel re-frames in the mode it was
-  left in.
+- Back returns to Normal. Reopening the panel re-frames Close inspection;
+  it leaves a Normal camera where it was.
 - API: `NSO_MICROSCOPE.setCameraMode('normal' | 'close')`, `cameraMode()`.
+
+#### Normal made unrestricted (branch `claude/gscope-normal-camera`)
+
+**Audit.** Measured in the real app with real wheel scrolls:
+
+- **Both modes were one camera.** They used the same `OrbitControls` and the
+  same `frameBox()`, from the same fixed (1,1,1) diagonal. They differed only
+  in the box being framed and in pan being off in Close. That is the "same
+  screen, panned out" that was reported.
+- **Normal's limit was the frustum, not the controls.** The controls were
+  never clamped (`minDistance` 0, `maxDistance` Infinity), and the wheel
+  reached 0.02 mm and 16,700 km. But `frameBox()` sets near / far once, for
+  the box it frames, and Normal kept those planes. Beyond 100x the framed
+  distance (about 5.7 m on the test slice) the whole part fell behind the far
+  plane and vanished: 0 lit pixels. The near plane stayed at the part's
+  size / 1000 however close you zoomed.
+- **The plate's camera is not the unrestricted one.** `app-core.js`
+  `onViewportWheel` clamps the distance to 15–1200 mm, near / far are fixed at
+  1 / 2000, orbit only works while dragging empty plate, and there is no
+  right-drag pan. Reusing it would have added a 15 mm floor to G-scope. The
+  decision was to keep G-scope's own controls and remove Normal's limits.
+  The plate is unchanged.
+
+**Fix.** Normal's clip planes follow the camera every frame (`followClip()`).
+Near is 1/100 of the distance to the target. Far reaches past the far side of
+everything drawn (the document plus the bed grid). No distance is refused and
+nothing drawn is clipped. Normal frames the whole part once when entered, and
+nothing re-locks it after that. `frameBox()`, Close inspection's code, is
+untouched.
+
+**Proof.** `gcode:gscope-normalcam`
+(`tools/gcode-test/gscope-normal-camera-drive-check.mjs`), 40 checks, driven
+with real wheel scrolls, drags and clicks:
+
+- **Zoom:** in to 0.00026 mm, and out past the old limit to 6.1 m, where the
+  part is still drawn.
+- **Distance:** out past 1,000 km. The frustum holds everything drawn at
+  every step.
+- **Orbit:** a full 360° round, straight down onto the top, and straight up
+  from under the bed.
+- **Pan:** a right-drag pans.
+- **No re-lock:** a slider redraw and a panel reopen don't move the camera.
+
+For Close inspection, target, position and near / far match the
+`frameBox()` formula recomputed in the check, and pan stays locked.
+
+A/B against the commit before the fix, with the same scripted session:
+Close inspection's camera is identical to 9 decimals after framing, a
+right-drag, the wheel, an orbit and Isolate. Normal at 6.1 m drew **0** lit
+pixels before and **218** after. Screenshots: `tools/gscope-out/nc-*.png`.
+
+OrbitControls, here and on the plate, still stops orbit at the poles (straight
+down, straight up) rather than turning past them. That is the control
+scheme, not a limit this change adds.
 
 ### Validation
 

@@ -1210,6 +1210,7 @@ var NSO_MICROSCOPE = (function () {
     if (!view || !view.running || gen !== loop) return;
     requestAnimationFrame(function () { animate(gen); });
     view.controls.update();
+    if (cameraMode === 'normal') followClip();
     // The corner dot follows the camera round to the near corner.
     balls.forEach(function (b) { b.cornerHandle.position.copy(cornerPoint(b)); });
     view.renderer.render(view.scene, view.camera);
@@ -2262,15 +2263,51 @@ var NSO_MICROSCOPE = (function () {
     return box.isEmpty() ? null : box;
   }
 
-  /** Put the camera where the loaded file is actually visible. */
-  function frame() {
-    var v = view;
+  /** Everything the view draws, as one box: the document and the bed grid. */
+  function worldBox() {
     var box = new THREE.Box3();
-    v.overviewGroup.children.forEach(function (c) {
+    view.overviewGroup.children.forEach(function (c) {
       c.geometry.computeBoundingBox();
       box.union(c.geometry.boundingBox.clone().applyMatrix4(c.matrixWorld));
     });
+    return box;
+  }
+
+  /** Put the camera where the loaded file is actually visible. */
+  function frame() {
+    var v = view;
+    var box = worldBox();
+    // Cached for Normal's clip planes (followClip), which need the extent
+    // every frame and must not recompute it every frame. The grid is 120 mm.
+    v.worldSphere = box.clone().union(new THREE.Box3(
+      new THREE.Vector3(-60, 0, -60), new THREE.Vector3(60, 0, 60))).getBoundingSphere(new THREE.Sphere());
     frameBox(box);
+  }
+
+  /**
+   * Normal mode's clip planes, re-fitted to wherever the camera is, every frame.
+   *
+   * frameBox() sets near / far ONCE, for the box it frames, and that is right
+   * for Close inspection, which stays on it. It was also all Normal had, and
+   * it made two artificial limits out of the framing: past 100x the framed
+   * distance the whole part fell behind the far plane and vanished, and near
+   * stayed at the whole part's size / 1000 however close you zoomed. The
+   * controls themselves were never clamped (minDistance 0, maxDistance
+   * Infinity) - the frustum was. So in Normal it follows the camera: near a
+   * hundredth of the distance to the target, far out past the far side of
+   * everything drawn. No distance is refused and nothing drawn is clipped.
+   */
+  function followClip() {
+    var v = view, c = v.camera, sph = v.worldSphere;
+    if (!sph) return;
+    var d = c.position.distanceTo(v.controls.target);
+    var reach = c.position.distanceTo(sph.center) + sph.radius;
+    var near = Math.max(1e-9, d / 100);
+    var far = Math.max(reach * 1.05, d * 2, near * 10);
+    if (near !== c.near || far !== c.far) {
+      c.near = near; c.far = far;
+      c.updateProjectionMatrix();
+    }
   }
 
   /** Point the camera at one box, with air around it. Empty box: no move. */
@@ -2353,8 +2390,15 @@ var NSO_MICROSCOPE = (function () {
         if (box) frameBox(box); else frame();
         v.controls.enablePan = false;
       } else {
+        // Normal is G-scope's OrbitControls with nothing held back: pan on,
+        // no distance limits, clip planes that follow the camera (followClip,
+        // every frame). Entering it frames the whole part once - the default
+        // view - and from then on nothing re-locks it: no filter, redraw or
+        // panel reopen moves the camera. frameBox() itself is Close
+        // inspection's code and is not changed here.
         frame();
         v.controls.enablePan = true;
+        followClip();
       }
     }
     var n = $('ms-cam-normal'), c = $('ms-cam-close');
@@ -2418,7 +2462,10 @@ var NSO_MICROSCOPE = (function () {
     // the frame rate and the damping with it.
     if (!view.running) { view.running = true; animate(++loop); }
     resize();
-    setCameraMode(cameraMode);    // re-frame for the size it opened at, in the mode it was left in
+    // Close inspection re-frames for the size it opened at. Normal is never
+    // re-locked: a reopen leaves the camera where it was left. A NEW document
+    // is framed by open(), which every route calls after this.
+    if (cameraMode === 'close') setCameraMode('close');
     // The panel owns the keyboard while it is up, so its own Escape handler is
     // reachable without clicking into it first.
     if (panel.focus) panel.focus();
