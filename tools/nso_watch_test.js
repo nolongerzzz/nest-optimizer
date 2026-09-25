@@ -12,8 +12,12 @@
       is reproduced here through the app's own buttons and functions, and the
       watcher has to name it, with the operation that preceded it:
         1. pose lost across an app-finish.js bake - rotate a piece, then Seal
-           it. This is the half `nso_pose_after_bake_test.js` does not cover:
-           that gate is on NSO_sculptCommitRaw, which now puts the pose back.
+           it. FIXED 2026-09-25 and retired as below: the app-finish.js bakes
+           now put the pose back (nsoReseatPlacedPose, app-core.js), the
+           same way NSO_sculptCommitRaw does. It was one half of the Mirror
+           180-degree turn (tools/nso_wire_mirror_orient_test.js). Seal must
+           now report nothing, and a mesh reset under a posed record is the
+           negative control
         2. paint left on screen      - paint a face, then Seal it. FIXED
                                        2026-09-24 and retired as below: now
                                        it must report nothing, and a stray
@@ -147,7 +151,7 @@ async function partA(page) {
 }
 
 async function partB1(page) {
-  console.log('\nB1. a pose lost across a bake (rotate, then Seal)');
+  console.log('\nB1. a pose kept across a bake (rotate, then Seal) - fixed, with a negative control');
   const id = await loadSTL(page, SLAB);
   await selectModel(page, id);
   await page.evaluate(() => { NSOWatch.start(); state.selectedIndex = 0; });
@@ -158,9 +162,31 @@ async function partB1(page) {
   let found = await after(page, 'rotate', () => rotateSelected(1));
   ok(found.length === 0, 'a plain 90 yaw stays consistent', texts(found));
 
+  /* FIXED in the app (2026-09-25) and retired here the way this file says a
+     fixed case is. Seal rebuilt the mesh at identity and left the record at
+     90 deg; it now re-seats the pose (nsoReseatPlacedPose). So Seal must
+     leave nothing to report, and the mesh must still be turned 90 deg,
+     which is the half that proves the pose was kept, not just the record
+     dropped to match. */
   found = await after(page, 'seal', () => sealSelectedModel());
+  ok(found.filter(f => f.subject === 'pose').length === 0,
+     'Seal on a yawed piece leaves no phantom pose (fixed: the bake re-seats the pose)', texts(found));
+  const yaw = await page.evaluate(() => {
+    const pm = state.placed.find(p => p && p.mesh && p.sourceId === getActiveModel().id);
+    return { mesh: pm.mesh.rotation.y * 180 / Math.PI, record: (pm.rotY || 0) * 180 / Math.PI };
+  });
+  ok(Math.abs(yaw.mesh - 90) < 1e-6 && Math.abs(yaw.record - 90) < 1e-6,
+     'the piece is still drawn at the 90 deg its record claims', JSON.stringify(yaw));
+
+  /* The pose check still fires: a mesh put back at identity under a record
+     that says 90 deg is exactly what Seal used to do. */
+  found = await after(page, 'a bake that drops the pose', () => {
+    const pm = state.placed.find(p => p && p.mesh && p.sourceId === getActiveModel().id);
+    pm.mesh.rotation.set(0, 0, 0);
+    pm.mesh.updateMatrixWorld(true);
+  });
   const pose = found.filter(f => f.subject === 'pose');
-  ok(pose.length === 1, 'Seal on a yawed piece raises exactly one phantom pose',
+  ok(pose.length === 1, 'negative control: a mesh reset under a yawed record raises exactly one phantom pose',
      'subjects: ' + subjects(found).join(', '));
   ok(/logical pose is \(0\.0, 90\.0, 0\.0\)deg/.test(pose.length ? pose[0].msg : ''),
      'the finding names the 90 deg the entry still claims',
@@ -168,9 +194,12 @@ async function partB1(page) {
 
   const ev = await page.evaluate(() => NSOWatch.events().filter(e => e.kind === 'phantom'));
   ok(ev.length >= 1, 'it is logged as a phantom event');
-  ok(ev.length >= 1 && /seal/i.test(ev[0].op),
+  // Whichever check sees it first names it: the watcher's own, with the
+  // last committed op (Seal - the reset above is not an app operation), or
+  // the labelled check after() runs. Either is the operation that preceded it.
+  ok(ev.length >= 1 && /seal|drops the pose/i.test(ev[0].op),
      'the event carries the operation that preceded it',
-     ev.length ? 'op was: ' + ev[0].op : '');
+     ev.length ? 'op was: ' + JSON.stringify(ev.map(e => e.op)) : '');
   ok(ev.length >= 1 && /^\d\d:\d\d:\d\d\.\d\d\d$/.test(ev[0].time),
      'and a timestamp', ev.length ? ev[0].time : '');
 

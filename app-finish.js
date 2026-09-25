@@ -2457,6 +2457,7 @@ function sealSelectedModel() {
     placedEntry.width = m.size.x;
     placedEntry.depth = m.size.z;
     settlePlacedOnBed(placedEntry);
+    if (typeof nsoReseatPlacedPose === 'function') nsoReseatPlacedPose(placedEntry);   // bake is in the piece's own frame: its pose still stands
   }
 
   let openAfter = null;
@@ -2929,6 +2930,7 @@ function solidifySelectedModel() {
     placedEntry.depth = m.size.z;
     placedEntry.height = m.size.y;
     settlePlacedOnBed(placedEntry);
+    if (typeof nsoReseatPlacedPose === 'function') nsoReseatPlacedPose(placedEntry);   // bake is in the piece's own frame: its pose still stands
   }
   // "ok" only when every opening closed; fewer but not zero is "partial" and
   // says what was left and why.
@@ -3509,6 +3511,7 @@ function thickenSelectedModel(mode, offsetMm, opts) {
     placedEntry.depth = m.size.z;
     placedEntry.height = m.size.y;
     settlePlacedOnBed(placedEntry);
+    if (typeof nsoReseatPlacedPose === 'function') nsoReseatPlacedPose(placedEntry);   // bake is in the piece's own frame: its pose still stands
   }
 
   let openAfter = null, nmAfter = null;
@@ -4431,6 +4434,7 @@ function commitSoften(m, run, working, firstOfRun, jobs, statusText) {
     placedEntry.width = m.size.x;
     placedEntry.depth = m.size.z;
     placedEntry.height = m.size.y;
+    if (typeof nsoReseatPlacedPose === 'function') nsoReseatPlacedPose(placedEntry);   // bake is in the piece's own frame: its pose still stands
   } else if (state.cutterOpen) {
     showEditPreview();
   }
@@ -4835,6 +4839,7 @@ function applyCapOnFace(face) {
     placedEntry.width = m.size.x;
     placedEntry.depth = m.size.z;
     placedEntry.height = m.size.y;
+    if (typeof nsoReseatPlacedPose === 'function') nsoReseatPlacedPose(placedEntry);   // bake is in the piece's own frame: its pose still stands
   } else if (state.cutterOpen) {
     showEditPreview();
   }
@@ -4976,6 +4981,7 @@ function capSelectedOpenFaces() {
     placed.width = m.size.x;
     placed.depth = m.size.z;
     placed.height = m.size.y;
+    if (typeof nsoReseatPlacedPose === 'function') nsoReseatPlacedPose(placed);   // bake is in the piece's own frame: its pose still stands
   }
   updateEditSize();
   renderModelList();
