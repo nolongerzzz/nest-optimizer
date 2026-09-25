@@ -274,16 +274,24 @@ async function main() {
   check('the solid needs a third fewer triangles than the prisms for the same beads', gS.tris < gT.tris * 0.75, true);
   await page.click('#ms-render-toolpath');
   await page.evaluate(() => window.NSO_MICROSCOPE.isolate());
-  const dT = await groupVolume(page, 'detail');
+  // The toolpath view's Isolate draws the selection as-is: its lines, one per move.
+  const dT = await page.evaluate(() => {
+    const M = window.NSO_MICROSCOPE, v = M.getView();
+    return { kinds: [...new Set(v.detailGroup.children.map((c) => c.type))],
+      verts: v.detailGroup.children.reduce((a, c) => a + c.geometry.attributes.position.count, 0),
+      n: M.selection().length };
+  });
   await page.evaluate(() => window.NSO_MICROSCOPE.back());
   await page.click('#ms-render-solid');
   await page.evaluate(() => window.NSO_MICROSCOPE.isolate());
   const dS = await groupVolume(page, 'detail');
   await shot(page, 'solid-05-isolate-inner-wall.png', 'Isolate in the solid view: 45 Inner wall loops');
   await page.evaluate(() => window.NSO_MICROSCOPE.back());
-  console.log(`       Isolate detail: toolpath ${dT.vol.toFixed(4)} mm3 | solid ${dS.vol.toFixed(4)} mm3`);
-  check('Isolate in each view holds what that view exports (rel < 1e-5)',
-    [Math.abs(dT.vol - gT.vol) / gT.vol < 1e-5, Math.abs(dS.vol - gS.vol) / gS.vol < 1e-5], [true, true]);
+  console.log(`       Isolate detail: toolpath ${dT.n} moves as lines | solid ${dS.vol.toFixed(4)} mm3`);
+  check('Isolate in the toolpath view draws the selection as-is: one line per move',
+    [dT.kinds, dT.verts], [['LineSegments'], dT.n * 2]);
+  check('Isolate in the solid view holds what that view exports (rel < 1e-5)',
+    Math.abs(dS.vol - gS.vol) / gS.vol < 1e-5, true);
 
   // =======================================================================
   console.log('\n--- 4. export as solid, end to end ---');

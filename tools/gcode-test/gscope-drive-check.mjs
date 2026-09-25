@@ -500,28 +500,48 @@ async function main() {
   await page.keyboard.press('ArrowLeft');
   check('Left arrow steps back', await page.evaluate(() => window.NSO_MICROSCOPE.selection().map((s) => s.mv.index)), [aim.idx]);
 
-  // Isolate the line: extrudeFlatLine's prism, and nothing else.
+  // Isolate the line: that one move alone, as-is - its line, nothing else.
   await page.click('#ms-btn-isolate-line');
+  const lineAlone = await page.evaluate((idx) => {
+    const M = window.NSO_MICROSCOPE, d = M.getDoc(), v = M.getView(), mv = d.parsed.moves[idx];
+    const p = [];
+    v.detailGroup.children.forEach((c) => { p.push(...c.geometry.attributes.position.array); });
+    const g = [];
+    for (let i = 0; i < p.length; i += 3) g.push([p[i] + d.cx, -p[i + 2] + d.cy, p[i + 1]]);
+    const err = g.length === 2 ? Math.max(
+      Math.abs(g[0][0] - mv.x0), Math.abs(g[0][1] - mv.y0), Math.abs(g[0][2] - mv.z),
+      Math.abs(g[1][0] - mv.x1), Math.abs(g[1][1] - mv.y1), Math.abs(g[1][2] - mv.z)) : Infinity;
+    return { kinds: v.detailGroup.children.map((c) => c.type), n: g.length, err,
+      overview: v.overviewGroup.visible, badge: document.getElementById('ms-mode-badge').textContent };
+  }, aim.idx);
+  check('Isolate shows the one move alone, as its line', [lineAlone.kinds, lineAlone.n], [['LineSegments'], 2]);
+  check('and it is that move, endpoint for endpoint (to the micron)', lineAlone.err < 1e-3, true);
+  check('the overview is hidden and the badge says one segment', [lineAlone.overview, lineAlone.badge], [false, 'Detail: 1 segments']);
+  await shot(page, '07-line-isolated.png', 'one line isolated, alone, as-is');
+
+  // Close inspection on it: its extrudeFlatLine prism, highlighted in context.
+  await page.click('#ms-cam-close');
   const lineIso = await page.evaluate((idx) => {
     const M = window.NSO_MICROSCOPE, d = M.getDoc(), v = M.getView(), G = window.NSOGcodeLines;
     const mv = d.parsed.moves[idx];
     const want = G.extrudeFlatLine(mv, []);
     const got = [];
-    v.detailGroup.children.forEach((c) => { got.push(...c.geometry.attributes.position.array); });
+    v.highlightGroup.children.forEach((c) => { got.push(...c.geometry.attributes.position.array); });
     // Detail positions are view space; take them back to G-code space.
     let maxErr = 0;
     for (let i = 0; i < got.length; i += 3) {
       const gx = got[i] + d.cx, gy = -got[i + 2] + d.cy, gz = got[i + 1];
       maxErr = Math.max(maxErr, Math.abs(gx - want[i]), Math.abs(gy - want[i + 1]), Math.abs(gz - want[i + 2]));
     }
-    return { kinds: v.detailGroup.children.map((c) => c.type), tris: got.length / 9, wantTris: want.length / 9, maxErr,
+    return { kinds: v.highlightGroup.children.map((c) => c.type), tris: got.length / 9, wantTris: want.length / 9, maxErr,
       overview: v.overviewGroup.visible, badge: document.getElementById('ms-mode-badge').textContent };
   }, aim.idx);
-  check('Isolate shows the one line as ONE solid', lineIso.kinds, ['Mesh']);
+  check('Close inspection highlights the one line as ONE solid', lineIso.kinds, ['Mesh']);
   check('12 triangles - one prism, one move', [lineIso.tris, lineIso.wantTris], [12, 12]);
   check('and it IS extrudeFlatLine\'s prism of that move, to the micron', lineIso.maxErr < 1e-3, true);
-  check('the overview is hidden and the badge says one segment', [lineIso.overview, lineIso.badge], [false, 'Detail: 1 segments']);
-  await shot(page, '07-line-isolated.png', 'one line isolated as its printed prism');
+  check('with the rest of the part drawn round it', [lineIso.overview, lineIso.badge], [true, 'Close inspection (isolated)']);
+  await shot(page, '07b-line-close-inspection.png', 'the same line in Close inspection, its printed prism in context');
+  await page.click('#ms-cam-normal');
 
   const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.click('#ms-btn-export-stl')]);
   const lineStl = join(TMP, 'line.stl');

@@ -262,29 +262,43 @@ async function main() {
     await page.isVisible('#ms-export-row'), true);
   check('and Isolate is live', await page.isEnabled('#ms-btn-isolate'), true);
 
-  // Isolate / Back, the reference tool's two-state view.
+  // Isolate / Back. Isolate (Normal camera) shows the selection ALONE and
+  // AS-IS: each move as the same line the overview draws, nothing else.
   await page.click('#ms-btn-isolate');
   const isolated = await page.evaluate(() => {
     const v = window.NSO_MICROSCOPE.getView();
     return {
       detail: v.detailGroup.visible,
       overview: v.overviewGroup.visible,
-      // InstancedMesh extends Mesh and does not override `type`, so the flag
-      // is what names it - `type` would read 'Mesh' for both.
-      kinds: [...new Set(v.detailGroup.children.map(
-        (c) => (c.isInstancedMesh ? 'InstancedMesh' : c.type)))],
-      tris: v.detailGroup.children.reduce((a, c) => a + c.geometry.attributes.position.count / 3, 0),
+      kinds: [...new Set(v.detailGroup.children.map((c) => c.type))],
+      verts: v.detailGroup.children.reduce((a, c) => a + c.geometry.attributes.position.count, 0),
       segs: window.NSO_MICROSCOPE.selection().length,
+      mode: window.NSO_MICROSCOPE.cameraMode(),
       badge: document.getElementById('ms-mode-badge').textContent,
     };
   });
-  check('Isolate shows the detail group', isolated.detail, true);
+  check('Isolate shows the detail group, in Normal', [isolated.detail, isolated.mode], [true, 'normal']);
   check('and hides the overview', isolated.overview, false);
-  // G-scope's one deliberate change to the reference tool's detail view: the
-  // per-move extrudeFlatLine prism, the solid Export writes, not a cylinder.
-  check('drawn as each move\'s own printed prism (extrudeFlatLine)', isolated.kinds, ['Mesh']);
-  check('12 triangles per move - the exported solid, on screen', isolated.tris, isolated.segs * 12);
+  check('drawn as-is: the moves\' own lines, as the overview draws them', isolated.kinds, ['LineSegments']);
+  check('two vertices per move - exactly the selection, nothing else', isolated.verts, isolated.segs * 2);
   check('the badge says what is on screen', /^Detail: \d+ segments$/.test(isolated.badge), true);
+  // Close inspection, still isolated: the whole view with the selection
+  // highlighted over it as each move's printed prism (extrudeFlatLine) -
+  // the solid Export writes, on screen.
+  await page.click('#ms-cam-close');
+  const closeIso = await page.evaluate(() => {
+    const v = window.NSO_MICROSCOPE.getView();
+    return {
+      overview: v.overviewGroup.visible, detail: v.detailGroup.visible, hl: v.highlightGroup.visible,
+      kinds: [...new Set(v.highlightGroup.children.map((c) => c.type))],
+      tris: v.highlightGroup.children.reduce((a, c) => a + c.geometry.attributes.position.count / 3, 0),
+    };
+  });
+  check('Close inspection while isolated: the whole view and the highlight together',
+    [closeIso.overview, closeIso.detail, closeIso.hl], [true, false, true]);
+  check('the highlight is each move\'s own printed prism, 12 triangles per move',
+    [closeIso.kinds, closeIso.tris], [['Mesh'], isolated.segs * 12]);
+  await page.click('#ms-cam-normal');
   await page.click('#ms-btn-back');
   check('Back returns to the whole part',
     await page.evaluate(() => window.NSO_MICROSCOPE.getView().overviewGroup.visible), true);

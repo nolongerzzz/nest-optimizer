@@ -2,8 +2,9 @@
 /**
  * nest-optimizer / tools/gcode-test / gscope-corner-camera-drive-check.mjs
  *
- * G-scope's capture-box corner handle and its two camera modes, driven
- * through the real app in headless Chromium with real mouse drags and clicks:
+ * G-scope's capture-box corner handle, driven through the real app in
+ * headless Chromium with real mouse drags and clicks. (The camera modes and
+ * Isolate are gscope-normal-camera-drive-check.mjs.)
  *
  *   1  CORNER DRAG. The green corner dot, dragged with the mouse, sizes the
  *      box's footprint along G-code X and Y INDEPENDENTLY - one axis grows
@@ -11,12 +12,7 @@
  *      thickness do not move, and what the box catches is exactly the
  *      rectangle predicate recomputed here from the parsed moves. A face drag
  *      afterwards scales the rectangle and keeps its shape.
- *   2  CAMERA MODES. Normal (free orbit / zoom / pan, whole-part framing) and
- *      Close inspection (framed tight on the selection, pan locked). Switched
- *      by the two buttons before Isolate, inside it and after Back: each
- *      switch moves the camera and nothing else - the selection, the boxes
- *      and the isolation are compared before and after every one.
- *   3  SCREENSHOTS of both, each asserted to be a drawn view.
+ *   2  SCREENSHOTS of each drag, each asserted to be a drawn view.
  *
  * Usage:
  *   node tools/gcode-test/gscope-corner-camera-drive-check.mjs
@@ -95,23 +91,6 @@ const boxState = (page) => page.evaluate(() => {
   };
 });
 
-/** Everything a camera switch must NOT change. */
-const nonCamera = (page) => page.evaluate(() => {
-  const M = window.NSO_MICROSCOPE, v = M.getView();
-  return JSON.stringify({
-    sel: M.selection().map((s) => s.id),
-    src: M.selectionSource(),
-    boxes: M.boxes(),
-    detail: v.detailGroup.visible,
-    overview: v.overviewGroup.visible,
-    detailN: v.detailGroup.children.length,
-    badge: document.getElementById('ms-mode-badge').textContent,
-    back: getComputedStyle(document.getElementById('ms-detail-controls')).display,
-    models: state.models.length,
-    undo: state.undoStack.length,
-  });
-});
-
 const camera = (page) => page.evaluate(() => {
   const M = window.NSO_MICROSCOPE, v = M.getView();
   const t = v.controls.target, c = v.camera.position;
@@ -123,23 +102,6 @@ const camera = (page) => page.evaluate(() => {
     normalOn: document.getElementById('ms-cam-normal').classList.contains('active'),
     closeOn: document.getElementById('ms-cam-close').classList.contains('active'),
   };
-});
-
-/** Centre of the current selection's extent, in view space. */
-const selCentre = (page) => page.evaluate(() => {
-  const M = window.NSO_MICROSCOPE, d = M.getDoc();
-  const box = new THREE.Box3();
-  // Each move's endpoints padded by half its bead width, as G-scope measures a selection.
-  const P = (x, y, z) => new THREE.Vector3(x - d.cx, z, -(y - d.cy));
-  M.selection().forEach((s) => {
-    const w = (s.w || 0) / 2;
-    [[s.x0, s.y0], [s.x1, s.y1]].forEach(([x, y]) => {
-      box.expandByPoint(P(x - w, y - w, s.z - w));
-      box.expandByPoint(P(x + w, y + w, s.z + w));
-    });
-  });
-  const c = new THREE.Vector3(); box.getCenter(c);
-  return [c.x, c.y, c.z];
 });
 
 const near = (a, b, tol) => a.every((x, i) => Math.abs(x - b[i]) <= tol);
@@ -185,7 +147,6 @@ async function main() {
   const opened = await camera(page);
   check('G-scope opens in Normal: its button lit, pan free', [opened.mode, opened.normalOn, opened.closeOn, opened.pan],
     ['normal', true, false, true]);
-  const normalDist = opened.dist, normalTarget = opened.target;
 
   // One box at a move in the middle of the print, 3 x 3 mm, 1 mm thick.
   const at = await page.evaluate(() => {
@@ -296,121 +257,6 @@ async function main() {
   }, [...at, b2.box.rx, b2.box.ry]);
   const b4 = await boxState(page);
   check('addBoxAt takes a rectangle too, and catches the same moves as the drag', b4.n, b2.n);
-
-  // =======================================================================
-  console.log('\n--- 2. camera modes: Normal <-> Close inspection ---');
-  // =======================================================================
-  const selMid = await selCentre(page);
-  let keep = await nonCamera(page);
-  await page.click('#ms-cam-close');
-  await frames(page, 3);
-  let cam = await camera(page);
-  check('Close inspection (before Isolate): mode, button lit, pan locked',
-    [cam.mode, cam.closeOn, cam.normalOn, cam.pan], ['close', true, false, false]);
-  check('Close inspection frames the selection: target on its centre', near(cam.target, selMid, 1e-3), true);
-  check('and much closer than Normal', cam.dist < normalDist * 0.5, true);
-  console.log(`       Normal distance ${normalDist.toFixed(1)}, Close ${cam.dist.toFixed(1)}`);
-  check('switching to Close changed nothing but the camera (selection, boxes, not isolated)',
-    await nonCamera(page), keep);
-  await shot(page, 'cc-04-close-before-isolate.png', 'Close inspection on the rectangle, not isolated');
-
-  // A right-drag (pan) in Close inspection does not move the locked target.
-  const tClose = cam.target;
-  const mid = await page.evaluate(() => {
-    const r = window.NSO_MICROSCOPE.getView().renderer.domElement.getBoundingClientRect();
-    return [r.left + r.width * 0.3, r.top + r.height * 0.3];
-  });
-  await page.mouse.move(mid[0], mid[1]);
-  await page.mouse.down({ button: 'right' });
-  await page.mouse.move(mid[0] + 120, mid[1] + 60, { steps: 10 });
-  await page.mouse.up({ button: 'right' });
-  await frames(page, 4);
-  check('Close inspection: a right-drag pan does not move the target', near((await camera(page)).target, tClose, 1e-6), true);
-
-  await page.click('#ms-cam-normal');
-  await frames(page, 3);
-  cam = await camera(page);
-  check('back to Normal: mode, button lit, pan free', [cam.mode, cam.normalOn, cam.closeOn, cam.pan],
-    ['normal', true, false, true]);
-  check('Normal is the whole-part framing G-scope opened with',
-    near(cam.target, normalTarget, 1e-6) && Math.abs(cam.dist - normalDist) < 1e-6, true);
-  check('switching to Normal changed nothing but the camera', await nonCamera(page), keep);
-
-  // A right-drag in Normal does pan.
-  await page.mouse.move(mid[0], mid[1]);
-  await page.mouse.down({ button: 'right' });
-  await page.mouse.move(mid[0] + 120, mid[1] + 60, { steps: 10 });
-  await page.mouse.up({ button: 'right' });
-  await frames(page, 4);
-  check('Normal: a right-drag pans (the target moves)', !near((await camera(page)).target, normalTarget, 1e-3), true);
-
-  // Isolate: it enters Close inspection, as it always zoomed in.
-  await page.click('#ms-btn-isolate');
-  await frames(page, 3);
-  cam = await camera(page);
-  const isoState = await page.evaluate(() => {
-    const v = window.NSO_MICROSCOPE.getView();
-    return [v.detailGroup.visible, v.overviewGroup.visible, v.detailGroup.children.length > 0];
-  });
-  check('Isolate: detail view up, overview hidden', isoState, [true, false, true]);
-  check('Isolate enters Close inspection, framed on the selection',
-    [cam.mode, cam.closeOn, cam.pan, near(cam.target, selMid, 1e-3)], ['close', true, false, true]);
-  const isoCloseDist = cam.dist;
-  keep = await nonCamera(page);
-  await shot(page, 'cc-05-isolated-close.png', 'isolated, Close inspection');
-
-  // Switch to Normal WHILE isolated: still isolated, whole-part framing.
-  await page.click('#ms-cam-normal');
-  await frames(page, 3);
-  cam = await camera(page);
-  check('isolated -> Normal: mode Normal, pan free, whole-part framing',
-    [cam.mode, cam.normalOn, cam.pan, near(cam.target, normalTarget, 1e-6), Math.abs(cam.dist - normalDist) < 1e-6],
-    ['normal', true, true, true, true]);
-  check('isolated -> Normal: STILL isolated, same selection, same boxes, Back still offered',
-    await nonCamera(page), keep);
-  await shot(page, 'cc-06-isolated-normal.png', 'isolated, Normal camera');
-
-  // A filter redraw inside the isolation keeps the mode the user picked.
-  const zr = await page.evaluate(() => window.NSO_MICROSCOPE.zRange());
-  await page.evaluate(() => { const M = window.NSO_MICROSCOPE, z = M.zRange(); M.setZRange(z.lo, z.hi - 1); M.flushView(); });
-  await frames(page);
-  cam = await camera(page);
-  check('a slider redraw while isolated in Normal stays Normal, camera not moved',
-    [cam.mode, cam.pan, near(cam.target, normalTarget, 1e-6)], ['normal', true, true]);
-  await page.evaluate((z) => { const M = window.NSO_MICROSCOPE; M.setZRange(z.lo, z.hi); M.flushView(); }, zr);
-  await frames(page);
-
-  // And back to Close, still isolated.
-  keep = await nonCamera(page);
-  await page.click('#ms-cam-close');
-  await frames(page, 3);
-  cam = await camera(page);
-  check('isolated -> Close again: framed on the selection as Isolate framed it',
-    [cam.mode, cam.pan, near(cam.target, selMid, 1e-3), Math.abs(cam.dist - isoCloseDist) < 1e-6],
-    ['close', false, true, true]);
-  check('isolated -> Close: still isolated, nothing else changed', await nonCamera(page), keep);
-
-  // Back leaves the isolation and returns to Normal; the selection survives.
-  const selBefore = await page.evaluate(() => window.NSO_MICROSCOPE.selection().map((s) => s.id).join());
-  await page.click('#ms-btn-back');
-  await frames(page, 3);
-  cam = await camera(page);
-  const afterBack = await page.evaluate(() => {
-    const M = window.NSO_MICROSCOPE, v = M.getView();
-    return [v.detailGroup.visible, v.overviewGroup.visible, M.selection().map((s) => s.id).join(), M.boxes().length];
-  });
-  check('Back: overview again, Normal camera', [afterBack[0], afterBack[1], cam.mode, cam.pan], [false, true, 'normal', true]);
-  check('Back: the selection and the box survive', [afterBack[2] === selBefore, afterBack[3]], [true, 1]);
-
-  // After Back, Close inspection is still one click away.
-  await page.click('#ms-cam-close');
-  await frames(page, 3);
-  cam = await camera(page);
-  check('after Back -> Close: framed on the selection, not isolated',
-    [cam.mode, near(cam.target, selMid, 1e-3),
-      await page.evaluate(() => window.NSO_MICROSCOPE.getView().detailGroup.visible)], ['close', true, false]);
-  await page.click('#ms-cam-normal');
-  await frames(page);
 
   // =======================================================================
   console.log('\n--- the build ---');
