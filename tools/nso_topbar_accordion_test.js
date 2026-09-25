@@ -88,7 +88,7 @@ withApp(async (page, logs) => {
         document.querySelectorAll('.vp-top-menu').forEach(d => { d.open = false; });
         document.getElementById('menu-scale').open = true;
         const blocked = [];
-        ['btn-undo', 'btn-frame-view', 'btn-xray', 'btn-gcode'].forEach(id => {
+        ['btn-undo', 'btn-frame-view', 'btn-xray', 'btn-microscope'].forEach(id => {
           const e = document.getElementById(id);
           if (!e) return;
           const b = e.getBoundingClientRect();

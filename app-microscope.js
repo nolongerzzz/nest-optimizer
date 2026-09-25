@@ -1,5 +1,7 @@
 /*
- * The Microscope view - the reference tool, lifted, with a way in and a way out
+ * G-scope (the Microscope view) - the reference tool, lifted, with a way in
+ * and a way out. The ONE G-code tool: the rail button and every sliced import
+ * land here, and nowhere else.
  * ----------------------------------------------------------------------------
  *
  * `docs/reference/joint_microscope_3d.html` is a working standalone G-code
@@ -67,10 +69,20 @@
  *
  * WHERE A `.gcode.3mf` LANDS
  * Importing one puts you in this view, coloured by feature, without a button
- * press - app-core.js's `handleFiles()` hands the ALREADY-PARSED result to
- * `openToolpathResult()` (no second parse) after the toolpath import has run.
- * The plate import behind the overlay is untouched, so Close drops you onto
- * the Toolpath card exactly as before.
+ * press - app-core.js's `handleFiles()` asks `isSliced()` (by CONTENT: the
+ * archive holds `Metadata/plate_N.gcode`) and hands the bytes to `openFile()`.
+ * Nothing goes onto the plate: the old plate-side importer (app-toolpath.js,
+ * the G🔬 #btn-gcode door and the sidebar Toolpath card) was merged into this
+ * view and removed. Its line scrub is `Pick a line` here; its Z filter is the
+ * layer-range slider; its Extract is Export.
+ *
+ * G-SCOPE ADDITIONS (docs/GCODE-MICROSCOPE.md, "G-scope")
+ *   view filters  legend (with "only"), Clear from view, the layer-range
+ *                 slider. VIEW ONLY - none of them writes to `state`.
+ *   line picking  one move at a time, isolated as its extrudeFlatLine prism.
+ *   Crop          the slider's Z band, cut out through app-crop.js.
+ *   the seam      setSelection() / selectionRegion() / onSelection() - where a
+ *                 later support-generation step reads what was isolated.
  *
  * SCOPE
  * A VIEW plus an import and an export. Nothing here slices, nothing here
@@ -131,7 +143,10 @@ var NSO_MICROSCOPE = (function () {
     // rather than to the table's grey "other", so unrelated parts stay
     // distinguishable from one another.
     if (G && G.FEATURE_COLORS) {
-      var tail = String(name).split(' - ').pop();
+      // "<file> - Support interface" or, from G-scope's own export,
+      // "<file> - Support interface (x120, 3 layers)": the feature is the
+      // last " - " part with any trailing count dropped.
+      var tail = String(name).split(' - ').pop().replace(/\s*\([^)]*\)$/, '');
       if (Object.prototype.hasOwnProperty.call(G.FEATURE_COLORS, tail)) {
         return G.FEATURE_COLORS[tail];
       }
@@ -163,14 +178,36 @@ var NSO_MICROSCOPE = (function () {
    * carrying a back-pointer to the parsed move so Export can build its bead.
    */
   function toolpathDoc(filename, res) {
-    var segs = res.parsed.moves.map(function (m) {
+    var G = window.NSOGcodeLines;
+    // The distinct printing heights, bed first. The layer-range slider steps
+    // over THESE, not over layer indices, for the reason selectLayer() gives:
+    // a move belongs to the Z it prints at.
+    var zLevels = G.zLevels(res.parsed);
+    function zIndex(z) {
+      var lo = 0, hi = zLevels.length - 1;
+      while (lo < hi) {
+        var mid = (lo + hi) >> 1;
+        if (zLevels[mid] < z - 1e-6) lo = mid + 1; else hi = mid;
+      }
+      return lo;
+    }
+    var segs = res.parsed.moves.map(function (m, i) {
       return {
+        id: i,
         x0: m.x0, y0: m.y0, x1: m.x1, y1: m.y1,
-        z: m.z, w: m.width,
+        z: m.z, w: m.width, zi: zIndex(m.z),
         feature: m.feature, obj: m.objectId, layer: m.layer,
         mv: m
       };
     });
+    // The bottom of each Z level's beads: a bead hangs down from its printing
+    // Z, so the band a slider step covers starts at the lowest bead bottom.
+    var zBottom = zLevels.slice();
+    segs.forEach(function (s) {
+      var b = s.z - beadHeight(s);
+      if (b < zBottom[s.zi]) zBottom[s.zi] = b;
+    });
+    function beadHeight(s) { return s.mv.height > 0 ? s.mv.height : 0; }
     // The reference tool's centroid, verbatim: the mean of every segment
     // endpoint, not the bounding box. Kept because the framing is its framing.
     var cx = 0, cy = 0;
@@ -181,6 +218,8 @@ var NSO_MICROSCOPE = (function () {
       kind: 'toolpath',
       name: filename,
       segments: segs,
+      zLevels: zLevels,
+      zBottom: zBottom,
       parsed: res.parsed,
       objects: null,
       cx: cx / n2,
@@ -192,6 +231,7 @@ var NSO_MICROSCOPE = (function () {
   /** A plain mesh: one group per build object, triangles as read. */
   function meshDoc(filename, objects) {
     var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    var minZ = Infinity, maxZ = -Infinity;
     objects.forEach(function (o) {
       var p = o.positions;
       // Triangle centroids, once, so the capture box never re-derives them.
@@ -219,9 +259,13 @@ var NSO_MICROSCOPE = (function () {
       if (b.maxX > maxX) maxX = b.maxX;
       if (b.minY < minY) minY = b.minY;
       if (b.maxY > maxY) maxY = b.maxY;
+      if (b.minZ < minZ) minZ = b.minZ;
+      if (b.maxZ > maxZ) maxZ = b.maxZ;
     });
     return {
       kind: 'mesh',
+      zMin: isFinite(minZ) ? minZ : 0,
+      zMax: isFinite(maxZ) ? maxZ : 0,
       name: filename,
       segments: null,
       parsed: null,
@@ -472,6 +516,14 @@ var NSO_MICROSCOPE = (function () {
   var currentSelection = [];  // segments (toolpath) or objects (mesh)
   var selectionSource = 'box';
 
+  // --- G-scope's view filters. All three are VIEW state: they decide what is
+  // drawn and what a click can catch, and nothing else. None of them writes
+  // to `state`, the plate or the undo stack - see clearFromView().
+  var CLEARED = new Set();    // toolpath: segment ids cleared from view
+  var zr = null;              // layer-range slider, in steps: { lo, hi, n }
+  var lineCursor = -1;        // position in shownSegments() of the picked line
+  var selectionListeners = [];
+
   function buildWorld() {
     if (view) return view;
     var host = $('ms-viewport');
@@ -510,6 +562,12 @@ var NSO_MICROSCOPE = (function () {
     var detailGroup = new THREE.Group();
     detailGroup.visible = false;
     scene.add(detailGroup);
+    // The current selection, drawn over the overview so a picked line or a
+    // caught region can be seen before anything is isolated or exported.
+    var highlightGroup = new THREE.Group();
+    scene.add(highlightGroup);
+    // The layer-range slider clips a mesh document with two planes.
+    renderer.localClippingEnabled = true;
 
     var raycaster = new THREE.Raycaster();
     raycaster.params.Line.threshold = 0.6;
@@ -517,7 +575,8 @@ var NSO_MICROSCOPE = (function () {
     view = {
       scene: scene, camera: camera, renderer: renderer, controls: controls,
       host: host,
-      overviewGroup: overviewGroup, detailGroup: detailGroup,
+      overviewGroup: overviewGroup, detailGroup: detailGroup, highlightGroup: highlightGroup,
+      clip: [new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Plane(new THREE.Vector3(0, -1, 0), 0)],
       overviewMeshes: {},
       raycaster: raycaster,
       dragRaycaster: new THREE.Raycaster(),
@@ -564,9 +623,11 @@ var NSO_MICROSCOPE = (function () {
         if (!byFeature[s.feature]) byFeature[s.feature] = [];
         byFeature[s.feature].push(s);
       });
+      // The legend counts every move the file has; what is DRAWN is only the
+      // moves inside the layer range and not cleared from view.
       doc.groups = byFeature;
       Object.keys(byFeature).forEach(function (feature, gi) {
-        var segs = byFeature[feature];
+        var segs = byFeature[feature].filter(function (s) { return !CLEARED.has(s.id) && inZRange(s); });
         var positions = new Float32Array(segs.length * 6);
         segs.forEach(function (s, i) {
           var p0 = toThree(s.x0 - doc.cx, s.y0 - doc.cy, s.z);
@@ -583,6 +644,8 @@ var NSO_MICROSCOPE = (function () {
           opacity: isTravel ? 0.35 : 1.0
         }));
         mesh.userData.feature = feature;
+        // Line i of this mesh is segs[i] - how a picked line finds its move.
+        mesh.userData.segs = segs;
         v.overviewMeshes[feature] = mesh;
         v.overviewGroup.add(mesh);
       });
@@ -600,9 +663,11 @@ var NSO_MICROSCOPE = (function () {
       geo.rotateX(-Math.PI / 2);          // the same (x,y,z) -> (x,z,-y) as toThree
       geo.computeVertexNormals();
       var mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-        color: colorForGroup(o.name, gi), metalness: 0.05, roughness: 0.4
+        color: colorForGroup(o.name, gi), metalness: 0.05, roughness: 0.4,
+        clippingPlanes: clipPlanes()
       }));
       mesh.userData.feature = o.name;
+      mesh.userData.object = o;
       v.overviewMeshes[o.name] = mesh;
       v.overviewGroup.add(mesh);
     });
@@ -677,8 +742,13 @@ var NSO_MICROSCOPE = (function () {
   function selectByBox() {
     var boxes = gcodeBoxes();
     if (!boxes.length) return [];
+    // What you can see is what a box catches: a feature switched off in the
+    // legend, a line cleared from view or a layer outside the slider's range
+    // is not caught. That is what makes feature-level isolation compose with
+    // the box - hide everything but Support, drop a box, get only Support.
     if (doc.kind === 'toolpath') {
       return doc.segments.filter(function (s) {
+        if (!segShown(s)) return false;
         var mx = (s.x0 + s.x1) / 2, my = (s.y0 + s.y1) / 2, mz = s.z;
         return boxes.some(function (b) { return inBox(b, mx, my, mz); });
       });
@@ -687,6 +757,7 @@ var NSO_MICROSCOPE = (function () {
     // the box holds any of its triangle centroids. See docs/GCODE-MICROSCOPE.md
     // for why the granularity is the object and not the triangle.
     return doc.objects.filter(function (o) {
+      if (!objectShown(o)) return false;
       var hit = boxes.filter(function (b) {
         return o.bounds.minX <= b.gx + b.r && o.bounds.maxX >= b.gx - b.r &&
                o.bounds.minY <= b.gy + b.r && o.bounds.maxY >= b.gy - b.r &&
@@ -707,12 +778,12 @@ var NSO_MICROSCOPE = (function () {
     if (!doc) { currentSelection = []; return; }
     if (selectionSource === 'box') {
       if (!balls.length) {
-        currentSelection = [];
+        setSelection([], 'box');
         info('No boxes placed yet.');
-        syncExportRow();
         return;
       }
-      currentSelection = selectByBox();
+      setSelection(selectByBox(), 'box');
+      return;
     }
     describeSelection();
     syncExportRow();
@@ -720,24 +791,31 @@ var NSO_MICROSCOPE = (function () {
 
   function describeSelection() {
     if (!currentSelection.length) {
-      info(selectionSource === 'layer'
-        ? 'That layer holds nothing.'
-        : '<b>' + balls.length + ' box(es)</b>, nothing caught.');
+      info(selectionSource === 'layer' ? 'That layer holds nothing.'
+         : selectionSource === 'line' ? 'No line picked.'
+         : selectionSource === 'visible' ? 'Nothing is shown to take.'
+         : '<b>' + balls.length + ' box(es)</b>, nothing caught.');
+      return;
+    }
+    if (doc.kind === 'toolpath' && selectionSource === 'line' && currentSelection.length === 1) {
+      info(describeLine(currentSelection[0]));
       return;
     }
     if (doc.kind === 'toolpath') {
       var layers = {};
       currentSelection.forEach(function (s) { layers[s.layer] = 1; });
       var keys = Object.keys(layers).map(Number).sort(function (a, b) { return a - b; });
-      info((selectionSource === 'layer'
-              ? '<b>whole layer</b>, '
-              : '<b>' + balls.length + ' box(es)</b>, ') +
+      info((selectionSource === 'layer' ? '<b>whole layer</b>, '
+          : selectionSource === 'line' ? '<b>picked lines</b>, '
+          : selectionSource === 'visible' ? '<b>everything shown</b>, '
+          : '<b>' + balls.length + ' box(es)</b>, ') +
            '<b>' + currentSelection.length + ' segment(s)</b> total<br>' +
            'across ' + keys.length + ' layer(s): ' + keys.join(', '));
       return;
     }
     var tris = currentSelection.reduce(function (a, o) { return a + o.triangles; }, 0);
-    info('<b>' + balls.length + ' box(es)</b>, <b>' + currentSelection.length +
+    info((selectionSource === 'visible' ? '<b>everything shown</b>, '
+          : '<b>' + balls.length + ' box(es)</b>, ') + '<b>' + currentSelection.length +
          ' object(s)</b>, ' + tris + ' triangle(s)<br>' +
          currentSelection.map(function (o) { return o.name; }).join(', '));
   }
@@ -768,12 +846,24 @@ var NSO_MICROSCOPE = (function () {
       swatch.className = 'ms-swatch';
       swatch.style.background = '#' + ('000000' + colorForGroup(name, gi).toString(16)).slice(-6);
       var label = document.createElement('span');
+      label.className = 'ms-legend-label';
       label.textContent = name + ' (' + count + unit + ')';
-      item.appendChild(swatch); item.appendChild(label);
+      // Feature-level isolation in one click: this group alone, every other
+      // one switched off. A view action like the row click - nothing is
+      // selected, exported or written anywhere.
+      var only = document.createElement('button');
+      only.type = 'button';
+      only.className = 'ms-legend-only';
+      only.textContent = 'only';
+      only.title = 'Show ' + name + ' alone (view only - click Show all to bring the rest back)';
+      only.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        soloGroup(name);
+      });
+      item.appendChild(swatch); item.appendChild(label); item.appendChild(only);
       item.addEventListener('click', function () {
         if (HIDDEN.has(name)) HIDDEN.delete(name); else HIDDEN.add(name);
-        buildLegend();
-        applyFeatureVisibility();
+        viewChanged();
       });
       legend.appendChild(item);
     });
@@ -782,17 +872,23 @@ var NSO_MICROSCOPE = (function () {
   // --- viewport interaction -------------------------------------------------
 
   function setMode(newMode) {
+    // Picking a line needs lines; a mesh document has none.
+    if (newMode === 'line' && !(doc && doc.kind === 'toolpath')) newMode = 'select';
     mode = newMode;
-    var o = $('ms-mode-orbit'), s = $('ms-mode-select');
+    var o = $('ms-mode-orbit'), s = $('ms-mode-select'), l = $('ms-mode-line');
     if (o) o.classList.toggle('active', mode === 'orbit');
     if (s) s.classList.toggle('active', mode === 'select');
+    if (l) l.classList.toggle('active', mode === 'line');
     var ctl = $('ms-select-controls');
     if (ctl) ctl.style.display = mode === 'select' ? 'block' : 'none';
+    show('ms-line-controls', mode === 'line');
     var hint = $('ms-hint-badge');
     if (hint) {
       hint.textContent = mode === 'select'
         ? 'Click empty space to drop a flat box. Drag its blue centre dot to move it, a side to resize the footprint, the orange top dot to set how thick it is.'
-        : '';
+        : mode === 'line'
+          ? 'Click a line to pick that one move. Shift-click adds or removes a line. Left / Right arrows step to the neighbouring move.'
+          : '';
     }
   }
 
@@ -894,10 +990,15 @@ var NSO_MICROSCOPE = (function () {
     });
 
     el.addEventListener('pointerup', function (e) {
-      if (mode !== 'select' || !doc) return;
+      if ((mode !== 'select' && mode !== 'line') || !doc) return;
       if (v.dragState) return;                       // was a move/resize drag
       if (!v.mouseDownPos) return;
       if (Math.hypot(e.clientX - v.mouseDownPos[0], e.clientY - v.mouseDownPos[1]) > 4) return;
+      if (mode === 'line') {
+        var q = ndc(e);
+        pickLineAt(q[0], q[1], e.shiftKey);
+        return;
+      }
 
       var p = ndc(e);
       v.mouse.set(p[0], p[1]);
@@ -927,30 +1028,19 @@ var NSO_MICROSCOPE = (function () {
         if (!bySel[s.feature]) bySel[s.feature] = [];
         bySel[s.feature].push(s);
       });
+      // G-scope departs from the reference tool here, on purpose. Its detail
+      // view is one 8-sided cylinder per move - not the shape a bead prints
+      // and not exportable. The detail view is now extrudeFlatLine's
+      // per-move prism (NSOGcodeLines.buildLineGeometry): the SAME triangles
+      // Export writes, at each move's own measured width and height, so what
+      // Isolate shows is exactly what leaves the view. No new geometry code -
+      // this is the builder the export already used.
       Object.keys(bySel).forEach(function (feature, gi) {
-        var segs = bySel[feature];
-        var dummy = new THREE.Object3D();
-        var geo = new THREE.CylinderGeometry(1, 1, 1, 8, 1, false);
-        var inst = new THREE.InstancedMesh(geo, new THREE.MeshStandardMaterial({
-          color: new THREE.Color(colorForGroup(feature, gi))
-        }), segs.length);
-        segs.forEach(function (s, i) {
-          var p0 = toThree(s.x0 - doc.cx, s.y0 - doc.cy, s.z);
-          var p1 = toThree(s.x1 - doc.cx, s.y1 - doc.cy, s.z);
-          var mid = p0.clone().add(p1).multiplyScalar(0.5);
-          var dir = p1.clone().sub(p0);
-          var len = dir.length() || 0.001;
-          dummy.position.copy(mid);
-          dummy.scale.set(s.w / 2, len, s.w / 2);
-          dummy.up.set(0, 1, 0);
-          dummy.quaternion.copy(new THREE.Quaternion()
-            .setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize()));
-          dummy.updateMatrix();
-          inst.setMatrixAt(i, dummy.matrix);
-        });
-        inst.instanceMatrix.needsUpdate = true;
-        inst.userData.feature = feature;
-        v.detailGroup.add(inst);
+        var mesh = prismMesh(bySel[feature].filter(function (s) {
+          return !CLEARED.has(s.id) && inZRange(s);
+        }), colorForGroup(feature, gi));
+        mesh.userData.feature = feature;
+        v.detailGroup.add(mesh);
       });
     } else {
       currentSelection.forEach(function (o, gi) {
@@ -960,7 +1050,8 @@ var NSO_MICROSCOPE = (function () {
         geo.rotateX(-Math.PI / 2);
         geo.computeVertexNormals();
         var mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-          color: colorForGroup(o.name, gi), metalness: 0.05, roughness: 0.4
+          color: colorForGroup(o.name, gi), metalness: 0.05, roughness: 0.4,
+          clippingPlanes: clipPlanes()
         }));
         mesh.userData.feature = o.name;
         v.detailGroup.add(mesh);
@@ -969,6 +1060,7 @@ var NSO_MICROSCOPE = (function () {
 
     v.overviewGroup.visible = false;
     v.detailGroup.visible = true;
+    v.highlightGroup.visible = false;
     balls.forEach(function (b) {
       b.boxMesh.visible = false; b.handle.visible = false; b.heightHandle.visible = false;
     });
@@ -999,6 +1091,7 @@ var NSO_MICROSCOPE = (function () {
     var v = view;
     v.detailGroup.visible = false;
     v.overviewGroup.visible = true;
+    v.highlightGroup.visible = true;
     frame();                      // Isolate zoomed in; Back is the way out of that
     balls.forEach(function (b) {
       b.boxMesh.visible = true; b.handle.visible = true; b.heightHandle.visible = true;
@@ -1069,13 +1162,625 @@ var NSO_MICROSCOPE = (function () {
     var wanted = G.movesInZWindow(doc.parsed.moves, win);
     var keep = {};
     wanted.forEach(function (m) { keep[m.index] = 1; });
-    selectionSource = 'layer';
-    currentSelection = doc.segments.filter(function (s) { return keep[s.mv.index] === 1; });
     doc.layerIndex = li;
-    describeSelection();
-    syncExportRow();
+    setSelection(doc.segments.filter(function (s) { return keep[s.mv.index] === 1; }), 'layer');
     syncLayerRow();
     return currentSelection;
+  }
+
+  // ===========================================================================
+  // G-scope: the selection seam, the view filters, line picking, the layer
+  // range and Crop
+  // ===========================================================================
+  //
+  // THE SELECTION IS ONE THING. Whatever produced it - a capture box, a whole
+  // layer, a picked line, "everything shown" - it is an array of segments
+  // (toolpath) or of objects (mesh), and it reaches the rest of the view
+  // through setSelection() and nowhere else. Isolate, the highlight, both
+  // exports and Crop read `currentSelection`; none of them knows or asks which
+  // control made it. docs/GCODE-MICROSCOPE.md, "The selection seam", is where
+  // a future support-generation step plugs in.
+
+  function setSelection(items, source) {
+    currentSelection = items || [];
+    selectionSource = source || selectionSource;
+    if (selectionSource !== 'line') lineCursor = -1;
+    if (doc) describeSelection();
+    syncExportRow();
+    refreshHighlightSoon();
+    syncCropRow();
+    if (!selectionListeners.length) return;
+    var region = selectionRegion();
+    selectionListeners.forEach(function (fn) {
+      try { fn(region); } catch (err) { console.error('[g-scope] selection listener', err); }
+    });
+  }
+
+  /**
+   * The current selection as a plain description, in the file's own Z-up
+   * millimetres: what a consumer of the selection reads. Moves carry the
+   * parsed move records (x0 y0 x1 y1 z width height feature layer index), so
+   * nothing downstream has to know about the view's segment wrappers.
+   */
+  function selectionRegion() {
+    if (!doc || !currentSelection.length) return null;
+    var lo = Infinity, hi = -Infinity;
+    var out = {
+      kind: doc.kind,
+      source: doc.source || 'file',
+      document: doc.name,
+      by: selectionSource,
+      boxes: gcodeBoxes(),
+      zBand: null
+    };
+    if (doc.kind === 'toolpath') {
+      out.moves = currentSelection.map(function (s) {
+        if (s.z - s.mv.height < lo) lo = s.z - s.mv.height;
+        if (s.z > hi) hi = s.z;
+        return s.mv;
+      });
+    } else {
+      out.objects = currentSelection.map(function (o) {
+        if (o.bounds.minZ < lo) lo = o.bounds.minZ;
+        if (o.bounds.maxZ > hi) hi = o.bounds.maxZ;
+        return { name: o.name, positions: o.positions, placedIndex: o.placedIndex, sourceId: o.sourceId };
+      });
+    }
+    out.zExtent = [lo, hi];
+    out.zBand = zBandMm();
+    return out;
+  }
+
+  // --- view filters -----------------------------------------------------------
+
+  function inZRange(s) { return !zr || (s.zi >= zr.lo && s.zi <= zr.hi); }
+
+  function segShown(s) {
+    return !HIDDEN.has(s.feature) && !CLEARED.has(s.id) && inZRange(s);
+  }
+
+  function objectShown(o) {
+    if (HIDDEN.has(o.name)) return false;
+    var band = zBandMm();
+    if (!band || zRangeFull()) return true;
+    return o.bounds.maxZ >= band[0] - 1e-6 && o.bounds.minZ <= band[1] + 1e-6;
+  }
+
+  /** Every segment drawn right now, in print order. */
+  function shownSegments() {
+    if (!doc || doc.kind !== 'toolpath') return [];
+    return doc.segments.filter(segShown);
+  }
+
+  function clipPlanes() { return view ? view.clip : []; }
+
+  /** Set the two clipping planes from the slider. Mesh documents only. */
+  function applyClip() {
+    if (!view) return;
+    var lo = -1e9, hi = 1e9;
+    if (doc && doc.kind === 'mesh' && zr && !zRangeFull()) {
+      var band = zBandMm();
+      lo = band[0] - 1e-4; hi = band[1] + 1e-4;
+    }
+    view.clip[0].constant = -lo;     // keep y >= lo  (three Y is the file's Z)
+    view.clip[1].constant = hi;      // keep y <= hi
+  }
+
+  /** The legend, a clear or the slider changed what is shown: redraw it. */
+  var viewPending = false;
+  function viewChanged() {
+    if (!view || !doc) return;
+    buildLegend();
+    if (doc.kind === 'toolpath') {
+      buildOverview();
+      if (view.detailGroup.visible) isolateRedraw();
+    } else {
+      applyClip();
+    }
+    applyFeatureVisibility();
+    refreshHighlight();
+    syncZRangeUI();
+    syncCropRow();
+    syncLineRead();
+  }
+  /** Coalesce a burst of slider moves into one redraw per frame. */
+  function viewChangedSoon() {
+    if (viewPending) return;
+    viewPending = true;
+    var run = function () { viewPending = false; viewChanged(); };
+    if (typeof requestAnimationFrame === 'function' && isOpen()) requestAnimationFrame(run); else run();
+  }
+
+  /** Redraw the detail view in place after a filter changed under it. */
+  function isolateRedraw() {
+    var sel = currentSelection.slice();
+    var cam = view.camera.position.clone(), tgt = view.controls.target.clone();
+    if (!sel.length) return;
+    isolate();
+    // Filtering is not a re-zoom: keep the camera where the user left it.
+    view.camera.position.copy(cam); view.controls.target.copy(tgt); view.controls.update();
+  }
+
+  /** One legend group alone. Feature-level isolation; view only. */
+  function soloGroup(name) {
+    if (!doc || !doc.groups[name]) return false;
+    HIDDEN = new Set(Object.keys(doc.groups).filter(function (g) { return g !== name; }));
+    viewChanged();
+    return true;
+  }
+
+  /**
+   * Clear the selection FROM VIEW. Hides it - a piece, a feature's lines, a
+   * picked line - and stops there: no export, no plate change, no undo entry.
+   * `Show all` brings it back. This is the view-only answer to "get this out
+   * of my way", and it is deliberately not wired to anything that writes.
+   */
+  function clearFromView() {
+    if (!doc || !currentSelection.length) return 0;
+    var n = currentSelection.length;
+    if (view && view.detailGroup.visible) back();
+    if (doc.kind === 'toolpath') {
+      currentSelection.forEach(function (s) { CLEARED.add(s.id); });
+    } else {
+      currentSelection.forEach(function (o) { HIDDEN.add(o.name); });
+    }
+    removeAllBalls();
+    setSelection([], selectionSource === 'line' ? 'line' : 'box');
+    viewChanged();
+    info('<b>' + n + ' ' + (doc.kind === 'toolpath' ? 'line(s)' : 'piece(s)') +
+         '</b> cleared from view. Nothing was exported and the plate is unchanged. ' +
+         '<b>Show all</b> brings them back.');
+    return n;
+  }
+
+  /** Every legend group back on, nothing cleared. The slider is left alone. */
+  function showAll() {
+    if (!doc) return;
+    CLEARED.clear();
+    HIDDEN = new Set(doc.kind === 'toolpath' ? ['Travel'] : []);
+    viewChanged();
+  }
+
+  /** Everything the filters leave on screen, as the selection. */
+  function selectVisible() {
+    if (!doc) return [];
+    removeAllBalls();
+    if (doc.kind === 'toolpath') setSelection(shownSegments(), 'visible');
+    else setSelection(doc.objects.filter(objectShown), 'visible');
+    return currentSelection;
+  }
+
+  // --- the selection highlight --------------------------------------------------
+
+  var HIGHLIGHT_COLOR = 0xff3b30;       // the red the old Toolpath scrub used
+  // Moves. A picked line or a handful reads best as its solid prism; a box
+  // or a layer of hundreds reads as red lines, and costs a fraction as much
+  // to rebuild on every step of a drag.
+  var HIGHLIGHT_PRISM_CAP = 200;
+
+  /** One highlight rebuild per frame, however many selection steps a drag makes. */
+  var highlightPending = false;
+  function refreshHighlightSoon() {
+    if (highlightPending) return;
+    highlightPending = true;
+    var run = function () { highlightPending = false; refreshHighlight(); };
+    if (typeof requestAnimationFrame === 'function' && isOpen()) requestAnimationFrame(run); else run();
+  }
+
+  /** The per-move prisms of `segs`, in view space. extrudeFlatLine, reused. */
+  function prismMesh(segs, color) {
+    var built = window.NSOGcodeLines.buildLineGeometry(segs.map(function (s) { return s.mv; }));
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(built.positions, 3));
+    geo.translate(-doc.cx, -doc.cy, 0);
+    geo.rotateX(-Math.PI / 2);            // the same (x,y,z) -> (x,z,-y) as toThree
+    geo.computeVertexNormals();
+    var mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+      color: color, metalness: 0.05, roughness: 0.5
+    }));
+    mesh.userData.moveIds = built.moveIds;
+    return mesh;
+  }
+
+  function refreshHighlight() {
+    if (!view) return;
+    var g = view.highlightGroup;
+    clearGroup(g);
+    Object.keys(view.overviewMeshes).forEach(function (k) {
+      var m = view.overviewMeshes[k];
+      if (m.isMesh && m.material && m.material.emissive) m.material.emissive.setHex(0x000000);
+    });
+    if (!doc || !currentSelection.length) return;
+    if (doc.kind === 'toolpath') {
+      var segs = currentSelection.filter(segShown);
+      if (!segs.length) return;
+      if (segs.length <= HIGHLIGHT_PRISM_CAP) {
+        var mesh = prismMesh(segs, HIGHLIGHT_COLOR);
+        mesh.material.emissive = new THREE.Color(0x551010);
+        g.add(mesh);
+      } else {
+        var pos = new Float32Array(segs.length * 6);
+        segs.forEach(function (s, i) {
+          var p0 = toThree(s.x0 - doc.cx, s.y0 - doc.cy, s.z), p1 = toThree(s.x1 - doc.cx, s.y1 - doc.cy, s.z);
+          pos.set([p0.x, p0.y, p0.z, p1.x, p1.y, p1.z], i * 6);
+        });
+        var lg = new THREE.BufferGeometry();
+        lg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        g.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: HIGHLIGHT_COLOR })));
+      }
+      return;
+    }
+    currentSelection.forEach(function (o) {
+      var m = view.overviewMeshes[o.name];
+      if (m && m.material && m.material.emissive) m.material.emissive.setHex(0x3a1010);
+    });
+  }
+
+  // --- line-level isolation -----------------------------------------------------
+  //
+  // One move at a time, the granularity the old sidebar Toolpath card had,
+  // now inside the one tool. A pick is a raycast against the overview's own
+  // LineSegments (line i of a feature mesh is `userData.segs[i]`), so it can
+  // only land on a line that is actually drawn. Isolate then shows that move
+  // as its extrudeFlatLine prism - the solid Export writes.
+
+  function pickLineAt(nx, ny, additive) {
+    if (!view || !doc || doc.kind !== 'toolpath') return null;
+    var v = view;
+    v.raycaster.setFromCamera(new THREE.Vector2(nx, ny), v.camera);
+    // A threshold in world units that tracks the zoom, so a pick means "the
+    // line under the cursor" whether the whole part or one layer fills the view.
+    var d = v.camera.position.distanceTo(v.controls.target);
+    v.raycaster.params.Line.threshold = Math.max(0.05, d * 0.006);
+    var targets = Object.keys(v.overviewMeshes)
+      .map(function (k) { return v.overviewMeshes[k]; })
+      .filter(function (m) { return m.visible && m.userData.segs && m.userData.segs.length; });
+    var hits = v.raycaster.intersectObjects(targets, false);
+    if (!hits.length) return null;
+    // Closest to the cursor ray wins, not first along it: with a threshold,
+    // many lines are "hit" and the nearest in depth is often a neighbour.
+    var ray = v.raycaster.ray, best = null, bestScore = Infinity;
+    hits.forEach(function (h) {
+      var sc = ray.distanceToPoint(h.point) + h.distance * 1e-4;
+      if (sc < bestScore) { bestScore = sc; best = h; }
+    });
+    var seg = best.object.userData.segs[Math.floor(best.index / 2)];
+    if (!seg) return null;
+    pickLine(seg, additive);
+    return seg;
+  }
+
+  function pickLine(seg, additive) {
+    removeAllBalls();
+    var sel;
+    if (additive && selectionSource === 'line') {
+      var at = currentSelection.indexOf(seg);
+      sel = currentSelection.slice();
+      if (at >= 0) sel.splice(at, 1); else sel.push(seg);
+    } else {
+      sel = [seg];
+    }
+    var shown = shownSegments();
+    setSelection(sel, 'line');
+    lineCursor = shown.indexOf(seg);
+    syncLineRead();
+  }
+
+  /** Step the picked line to the next / previous move that is drawn. */
+  function stepLine(d) {
+    var shown = shownSegments();
+    if (!shown.length) return null;
+    var at = lineCursor;
+    if (!(selectionSource === 'line' && at >= 0 && shown[at] === currentSelection[currentSelection.length - 1])) {
+      at = (selectionSource === 'line' && currentSelection.length)
+        ? shown.indexOf(currentSelection[currentSelection.length - 1]) : -1;
+    }
+    var next = at < 0 ? (d >= 0 ? 0 : shown.length - 1) : Math.max(0, Math.min(shown.length - 1, at + d));
+    pickLine(shown[next], false);
+    if (view && view.detailGroup.visible) isolateRedraw();
+    return shown[next];
+  }
+
+  function describeLine(s) {
+    var m = s.mv;
+    return '<b>Move ' + (m.index + 1) + '</b> - ' + s.feature + ', layer ' + (s.layer + 1) +
+      ', Z ' + s.z.toFixed(3) + ' mm<br>' +
+      m.width.toFixed(3) + ' mm wide x ' + m.height.toFixed(3) + ' mm tall, ' +
+      m.length.toFixed(2) + ' mm long, ' + (m.angle * 180 / Math.PI).toFixed(1) + ' deg';
+  }
+
+  function syncLineRead() {
+    var el = $('ms-line-read');
+    if (!el) return;
+    var shown = shownSegments();
+    if (selectionSource === 'line' && currentSelection.length && lineCursor >= 0) {
+      el.textContent = 'Line ' + (lineCursor + 1) + ' of ' + shown.length + ' shown' +
+        (currentSelection.length > 1 ? ' (' + currentSelection.length + ' picked)' : '');
+    } else {
+      el.textContent = shown.length + ' line(s) shown - click one, or step with the arrows';
+    }
+  }
+
+  // --- the layer-range slider ---------------------------------------------------
+  //
+  // Two handles on one vertical track, docked to the viewport's right edge:
+  // the lower and upper Z the view draws. On a slice the steps are the file's
+  // own printing heights, so both handles on one step is one layer, and
+  // spread apart is a chunk of layers; on a mesh (no layers - see syncLayerRow)
+  // the steps are millimetres across the part and the view is clipped. A VIEW:
+  // it changes what is drawn and what a click can catch. Crop reads the band.
+
+  var MESH_Z_STEPS = 201;
+
+  function zSteps() {
+    if (!doc) return 0;
+    if (doc.kind === 'toolpath') return doc.zLevels.length;
+    return doc.zMax > doc.zMin ? MESH_Z_STEPS : 1;
+  }
+
+  /** The Z, in mm, of step i. */
+  function zAt(i) {
+    if (!doc) return 0;
+    if (doc.kind === 'toolpath') return doc.zLevels[Math.max(0, Math.min(doc.zLevels.length - 1, i))];
+    var n = zSteps();
+    return n > 1 ? doc.zMin + (doc.zMax - doc.zMin) * (i / (n - 1)) : doc.zMin;
+  }
+
+  function zRangeFull() { return !zr || (zr.lo === 0 && zr.hi === zr.n - 1); }
+
+  /**
+   * The band the slider holds, in mm, bottom to top - what Crop removes. On a
+   * slice the bottom is the BOTTOM of the lowest layer's beads (a bead hangs
+   * down from its printing Z), so the band covers exactly the beads drawn.
+   */
+  function zBandMm() {
+    if (!doc || !zr) return null;
+    var hi = zAt(zr.hi);
+    if (doc.kind !== 'toolpath') return [zAt(zr.lo), hi];
+    return [doc.zBottom[zr.lo], hi];
+  }
+
+  function setZRange(lo, hi) {
+    if (!doc) return null;
+    var n = zSteps();
+    lo = Math.round(Number(lo)); hi = Math.round(Number(hi));
+    if (!isFinite(lo)) lo = 0;
+    if (!isFinite(hi)) hi = n - 1;
+    lo = Math.max(0, Math.min(n - 1, lo));
+    hi = Math.max(0, Math.min(n - 1, hi));
+    if (lo > hi) { var t = lo; lo = hi; hi = t; }
+    if (zr && zr.lo === lo && zr.hi === hi && zr.n === n) return zRange();
+    zr = { lo: lo, hi: hi, n: n };
+    viewChangedSoon();
+    syncZRangeUI();
+    return zRange();
+  }
+
+  /** The step whose Z is nearest `z` mm. */
+  function stepAtZ(z) {
+    var n = zSteps(), best = 0, bd = Infinity;
+    for (var i = 0; i < n; i++) {
+      var d = Math.abs(zAt(i) - z);
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  }
+
+  function zRange() {
+    if (!doc || !zr) return null;
+    var band = zBandMm();
+    return {
+      lo: zr.lo, hi: zr.hi, steps: zr.n,
+      zLo: zAt(zr.lo), zHi: zAt(zr.hi),
+      bandMm: band, full: zRangeFull(),
+      unit: doc.kind === 'toolpath' ? 'layer' : 'mm'
+    };
+  }
+
+  function stepLabel(i) {
+    if (!doc) return '';
+    if (doc.kind === 'toolpath') return 'Z ' + zAt(i).toFixed(2);
+    return zAt(i).toFixed(1) + ' mm';
+  }
+
+  function syncZRangeUI() {
+    var box = $('ms-zr');
+    if (!box) return;
+    var n = zr ? zr.n : 0;
+    box.hidden = !(doc && n > 1);
+    if (box.hidden) return;
+    var pct = function (i) { return (n > 1 ? (i / (n - 1)) * 100 : 0); };
+    var lo = $('ms-zr-lo'), hi = $('ms-zr-hi'), fill = $('ms-zr-fill');
+    if (lo) { lo.style.bottom = pct(zr.lo) + '%'; lo.setAttribute('aria-valuenow', String(zr.lo)); lo.setAttribute('aria-valuemax', String(n - 1)); lo.setAttribute('aria-valuetext', stepLabel(zr.lo)); }
+    if (hi) { hi.style.bottom = pct(zr.hi) + '%'; hi.setAttribute('aria-valuenow', String(zr.hi)); hi.setAttribute('aria-valuemax', String(n - 1)); hi.setAttribute('aria-valuetext', stepLabel(zr.hi)); }
+    if (fill) { fill.style.bottom = pct(zr.lo) + '%'; fill.style.height = (pct(zr.hi) - pct(zr.lo)) + '%'; }
+    var rl = $('ms-zr-lo-read'), rh = $('ms-zr-hi-read'), cnt = $('ms-zr-count');
+    if (rl) rl.textContent = stepLabel(zr.lo);
+    if (rh) rh.textContent = stepLabel(zr.hi);
+    if (cnt) {
+      cnt.textContent = doc.kind === 'toolpath'
+        ? (zr.hi - zr.lo + 1) + ' / ' + n + ' layer' + (n === 1 ? '' : 's')
+        : (zAt(zr.hi) - zAt(zr.lo)).toFixed(1) + ' mm';
+    }
+  }
+
+  function wireZRange() {
+    var box = $('ms-zr'), track = $('ms-zr-track');
+    if (!box || !track || box.dataset.wired === '1') return;
+    box.dataset.wired = '1';
+    var drag = null;
+    function stepFromY(clientY) {
+      var r = track.getBoundingClientRect();
+      var f = r.height > 0 ? (r.bottom - clientY) / r.height : 0;
+      f = Math.max(0, Math.min(1, f));
+      return Math.round(f * ((zr ? zr.n : 1) - 1));
+    }
+    function begin(e, which) {
+      if (!zr) return;
+      drag = { which: which, start: stepFromY(e.clientY), lo: zr.lo, hi: zr.hi };
+      if (e.target.setPointerCapture) { try { e.target.setPointerCapture(e.pointerId); } catch (err) { /* synthetic */ } }
+      e.preventDefault(); e.stopPropagation();
+    }
+    ['lo', 'hi'].forEach(function (w) {
+      var h = $('ms-zr-' + w);
+      if (!h) return;
+      h.addEventListener('pointerdown', function (e) { begin(e, w); });
+      h.addEventListener('keydown', function (e) {
+        if (!zr) return;
+        var d = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1, PageUp: 10, PageDown: -10 }[e.key];
+        if (e.key === 'Home') d = -zr.n; else if (e.key === 'End') d = zr.n;
+        if (!d) return;
+        e.preventDefault(); e.stopPropagation();
+        if (e.shiftKey) {
+          // Shift moves the whole window, keeping its width: scrub a chunk.
+          var width = zr.hi - zr.lo;
+          var lo = Math.max(0, Math.min(zr.n - 1 - width, zr.lo + d));
+          setZRange(lo, lo + width);
+        } else if (w === 'lo') {
+          setZRange(Math.min(zr.lo + d, zr.hi), zr.hi);
+        } else {
+          setZRange(zr.lo, Math.max(zr.hi + d, zr.lo));
+        }
+      });
+    });
+    var fill = $('ms-zr-fill');
+    if (fill) fill.addEventListener('pointerdown', function (e) { begin(e, 'both'); });
+    track.addEventListener('pointerdown', function (e) {
+      if (!zr || e.target !== track) return;
+      // A press on bare track moves the nearer handle there.
+      var at = stepFromY(e.clientY);
+      if (Math.abs(at - zr.lo) <= Math.abs(at - zr.hi)) setZRange(at, zr.hi); else setZRange(zr.lo, at);
+      begin(e, Math.abs(at - zr.lo) <= Math.abs(at - zr.hi) ? 'lo' : 'hi');
+    });
+    window.addEventListener('pointermove', function (e) {
+      if (!drag || !zr) return;
+      var at = stepFromY(e.clientY);
+      if (drag.which === 'lo') setZRange(Math.min(at, zr.hi), zr.hi);
+      else if (drag.which === 'hi') setZRange(zr.lo, Math.max(at, zr.lo));
+      else {
+        var width = drag.hi - drag.lo;
+        var lo = Math.max(0, Math.min(zr.n - 1 - width, drag.lo + (at - drag.start)));
+        setZRange(lo, lo + width);
+      }
+    });
+    window.addEventListener('pointerup', function () { drag = null; });
+    var all = $('ms-zr-all');
+    if (all) all.addEventListener('click', function () { if (zr) setZRange(0, zr.n - 1); });
+  }
+
+  // --- Crop, through the real Crop tool ----------------------------------------
+  //
+  // Crop out the slider's Z band and rejoin what is above onto what is below.
+  // G-scope does not crop anything itself: every route ends in app-crop.js -
+  // NSO_cropRaw (Cut's clip, the joint seal, the gate) and NSO_cropModel (the
+  // painted-face stand-down, the in-page canonical checker, the commit with
+  // its 'cropReplace' undo) - the functions behind the Cut menu's Crop row.
+  //
+  //   plate piece   crops THAT piece in place. The band is mapped from the
+  //                 view's Z to the piece's raw Z by the offset between the
+  //                 two, and refused if the piece was tilted (spans differ).
+  //   slice         the selection's beads (buildLineGeometry - one closed
+  //                 prism per move) become a piece on the plate, and that
+  //                 piece is cropped. Beads are touching closed shells, not one
+  //                 closed solid, so Crop runs with `shells` - see NSO_cropRaw.
+  //   file mesh     as a slice, without `shells`.
+  // A refusal is checked BEFORE anything reaches the plate, so a refused crop
+  // leaves the plate exactly as it was.
+
+  function cropAvailable() {
+    return typeof NSO_cropRaw === 'function' && typeof NSO_cropModel === 'function';
+  }
+
+  function cropReason() {
+    if (!doc) return 'Open something first';
+    if (!cropAvailable()) return 'The Crop tool (app-crop.js) is not loaded';
+    if (!currentSelection.length) return 'Select what to crop first';
+    if (!zr || zRangeFull()) return 'Narrow the layer range to the band to remove';
+    if (doc.source === 'plate' && currentSelection.length !== 1) return 'Crop edits one plate piece at a time';
+    return '';
+  }
+
+  function syncCropRow() {
+    var row = $('ms-crop-row');
+    if (!row) return;
+    row.style.display = doc ? 'block' : 'none';
+    var btn = $('ms-btn-crop'), read = $('ms-crop-read');
+    var why = cropReason();
+    if (btn) btn.disabled = !!why;
+    if (!read) return;
+    if (why) { read.textContent = why + '.'; return; }
+    var band = zBandMm();
+    read.textContent = 'Removes Z ' + band[0].toFixed(2) + ' - ' + band[1].toFixed(2) + ' mm (' +
+      (band[1] - band[0]).toFixed(2) + ' mm) from ' +
+      (doc.source === 'plate' ? '"' + currentSelection[0].name + '", in place'
+        : 'the selection, as a new piece on the plate') + ', and joins the rest.';
+  }
+
+  function cropLabel(band) {
+    return 'removed Z ' + band[0].toFixed(2) + '–' + band[1].toFixed(2) + ' mm (G-scope)';
+  }
+
+  function cropZBand() {
+    var why = cropReason();
+    if (why) { say('Crop: ' + why, true); return { ok: false, reason: why }; }
+    var band = zBandMm();
+    var label = cropLabel(band);
+
+    if (doc.source === 'plate') {
+      var o = currentSelection[0];
+      var p = state.placed && state.placed[o.placedIndex];
+      var m = p && (state.models || []).find(function (mm) { return mm && mm.id === p.sourceId; });
+      if (!m || !m.rawTris) { say('Crop: that piece has no raw mesh to crop', true); return { ok: false, reason: 'no raw piece' }; }
+      var rb = NSO_cropBounds(m.rawTris);
+      var spanRaw = rb.hi[2] - rb.lo[2], spanView = o.bounds.maxZ - o.bounds.minZ;
+      if (Math.abs(spanRaw - spanView) > 1e-3) {
+        var why2 = 'the piece was tilted since it was loaded, so its raw Z no longer matches the view';
+        say('Crop refused - piece unchanged (' + why2 + ')', true);
+        return { ok: false, reason: why2 };
+      }
+      var off = o.bounds.minZ - rb.lo[2];
+      var r = NSO_cropModel(m, { axisIdx: 2, lo: band[0] - off, hi: band[1] - off }, { label: label });
+      if (r.ok) {
+        // Read the plate again so the view shows the piece as it now is.
+        // The status line keeps Crop's own report.
+        openPlate();
+      }
+      r.modelId = m.id;
+      return r;
+    }
+
+    var shells = doc.kind === 'toolpath';
+    var geo = microscopeGeometry();
+    if (!geo) { say('Crop: the selection has no geometry', true); return { ok: false, reason: 'empty' }; }
+    var soup = geo.attributes.position.array;
+    // Dry run first, on the same soup and with the same two gates
+    // NSO_cropModel applies, so a refusal never leaves a stray piece behind.
+    var dry = NSO_cropRaw(soup, { axisIdx: 2, lo: band[0], hi: band[1], shells: shells });
+    if (dry.ok && typeof NSO_cropCensus === 'function') {
+      var cb = NSO_cropCensus(soup), ca = NSO_cropCensus(dry.tris);
+      if (cb && ca && (ca.open || ca.nm > cb.nm || ca.degen > cb.degen)) {
+        dry.ok = false;
+        dry.reason = 'checker: open ' + ca.open + ', non-manifold ' + cb.nm + '→' + ca.nm +
+          ', degenerate ' + cb.degen + '→' + ca.degen;
+      }
+    }
+    if (!dry.ok) {
+      say('Crop refused - nothing added to the plate (' + dry.reason + ')', true);
+      return dry;
+    }
+    var name = exportLabel() + ' - cropped';
+    var id = addModelFromZUpGeometry(name, geo);
+    if (!id) { say('Crop failed - nothing was added', true); return { ok: false, reason: 'ingest failed' }; }
+    if (typeof pushUndo === 'function') {
+      pushUndo({ type: 'addModels', ids: [id], editId: state.editId, cutT: state.cutT });
+    }
+    var model = state.models.find(function (mm) { return mm && mm.id === id; });
+    var res = NSO_cropModel(model, { axisIdx: 2, lo: band[0], hi: band[1] }, { shells: shells, label: label });
+    res.modelId = id;
+    // Crop's own status line stands: it says what was removed and what the
+    // checker found. Back to the plate, where the new piece is.
+    if (res.ok) close();
+    return res;
   }
 
   // ===========================================================================
@@ -1124,6 +1829,20 @@ var NSO_MICROSCOPE = (function () {
       // A piece read off the plate already carries the plate's own name for
       // it; prefixing "Plate - " onto that says nothing and reads worse.
       return doc.source === 'plate' ? what : base + ' - ' + what;
+    }
+    if (selectionSource === 'line' && currentSelection.length === 1) {
+      var s1 = currentSelection[0];
+      return base + ' - ' + s1.feature + ' L' + (s1.layer + 1) + ' move ' + (s1.mv.index + 1);
+    }
+    if (selectionSource === 'visible' || selectionSource === 'line') {
+      var feats = {};
+      currentSelection.forEach(function (s) { feats[s.feature] = 1; });
+      var fk = Object.keys(feats);
+      var zs2 = {};
+      currentSelection.forEach(function (s) { zs2[s.zi] = 1; });
+      var nl = Object.keys(zs2).length;
+      return base + ' - ' + (fk.length === 1 ? fk[0] : fk.length + ' features') + ' (x' +
+             currentSelection.length + ', ' + nl + ' layer' + (nl === 1 ? '' : 's') + ')';
     }
     if (selectionSource === 'layer') {
       var z = currentSelection.length ? currentSelection[0].z : 0;
@@ -1190,6 +1909,14 @@ var NSO_MICROSCOPE = (function () {
     show('ms-export-row', !!(doc && currentSelection.length));
     var iso = $('ms-btn-isolate');
     if (iso) iso.disabled = !currentSelection.length;
+    var iso2 = $('ms-btn-isolate-line');
+    if (iso2) iso2.disabled = !currentSelection.length;
+    var clr = $('ms-btn-clear-view');
+    if (clr) clr.disabled = !currentSelection.length;
+    var sv = $('ms-btn-select-visible');
+    if (sv) sv.disabled = !doc;
+    var sa = $('ms-btn-show-all');
+    if (sa) sa.disabled = !doc;
   }
 
   function syncLayerRow() {
@@ -1317,12 +2044,18 @@ var NSO_MICROSCOPE = (function () {
     if (!buildWorld()) { say('Microscope failed to start - check console', true); return null; }
     doc = d;
     HIDDEN = new Set(doc.kind === 'toolpath' ? ['Travel'] : []);
+    CLEARED = new Set();
+    lineCursor = -1;
     removeAllBalls();
     currentSelection = [];
     selectionSource = 'box';
     clearGroup(view.detailGroup);
+    clearGroup(view.highlightGroup);
     view.detailGroup.visible = false;
     view.overviewGroup.visible = true;
+    view.highlightGroup.visible = true;
+    zr = { lo: 0, hi: zSteps() - 1, n: zSteps() };
+    applyClip();
     buildOverview();
     buildLegend();
     applyFeatureVisibility();
@@ -1333,10 +2066,15 @@ var NSO_MICROSCOPE = (function () {
     syncHeader();
     syncLayerRow();
     info(doc.kind === 'toolpath'
-      ? 'Click the model to drop a capture box, or take a whole layer.'
+      ? 'Click the model to drop a capture box, pick a single line, or take a whole layer.'
       : ('Click a ' + (doc.source === 'plate' ? 'piece' : 'part') +
          ' to drop a capture box over it.'));
+    var lineBtn = $('ms-mode-line');
+    if (lineBtn) lineBtn.disabled = doc.kind !== 'toolpath';
     syncExportRow();
+    syncZRangeUI();
+    syncCropRow();
+    syncLineRead();
     return doc;
   }
 
@@ -1380,6 +2118,11 @@ var NSO_MICROSCOPE = (function () {
     }
     doc = null;
     currentSelection = [];
+    CLEARED = new Set();
+    zr = null;
+    if (view) clearGroup(view.highlightGroup);
+    syncZRangeUI();
+    syncCropRow();
     buildLegend();
     syncHeader();
     syncLayerRow();
@@ -1445,7 +2188,22 @@ var NSO_MICROSCOPE = (function () {
       computeSelectionInfo();
     });
     bind('ms-btn-isolate', 'click', isolate);
+    bind('ms-btn-isolate-line', 'click', isolate);
     bind('ms-btn-back', 'click', back);
+    bind('ms-mode-line', 'click', function () { setMode('line'); });
+    bind('ms-line-prev', 'click', function () { stepLine(-1); });
+    bind('ms-line-next', 'click', function () { stepLine(1); });
+    bind('ms-btn-clear-view', 'click', clearFromView);
+    bind('ms-btn-show-all', 'click', showAll);
+    bind('ms-btn-select-visible', 'click', selectVisible);
+    bind('ms-btn-crop', 'click', function () {
+      try { cropZBand(); }
+      catch (err) {
+        console.error('[g-scope crop]', err);
+        say('Crop failed - nothing changed (' + ((err && err.message) || err) + ')', true);
+      }
+    });
+    wireZRange();
     bind('ms-btn-export-plate', 'click', exportToPlate);
     bind('ms-btn-export-stl', 'click', exportAsSTL);
     bind('ms-layer-prev', 'click', function () { stepLayer(-1); });
@@ -1462,7 +2220,16 @@ var NSO_MICROSCOPE = (function () {
     if (panel && panel.dataset.wired !== '1') {
       panel.dataset.wired = '1';
       panel.addEventListener('keydown', function (ev) {
-        if (ev.key === 'Escape') { close(); ev.preventDefault(); }
+        if (ev.key === 'Escape') { close(); ev.preventDefault(); return; }
+        // Left / Right step the picked line, the way the old Toolpath card's
+        // arrows did - unless a text field or the slider has the keys.
+        var t = ev.target;
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || (t.getAttribute && t.getAttribute('role') === 'slider'))) return;
+        if (doc && doc.kind === 'toolpath' && (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft') &&
+            (mode === 'line' || selectionSource === 'line')) {
+          stepLine(ev.key === 'ArrowRight' ? 1 : -1);
+          ev.preventDefault();
+        }
       });
     }
   }
@@ -1482,9 +2249,26 @@ var NSO_MICROSCOPE = (function () {
     else mount();
   }
 
+  /**
+   * A file handed over by the app's own Import (app-core.js handleFiles):
+   * into G-scope, and NOT onto the plate. A slice is something you look
+   * through; what leaves the view does so through Export or Crop, by choice.
+   */
+  function openFile(filename, arrayBuffer) {
+    openPanel();
+    return load(filename, arrayBuffer).then(function (d) {
+      if (d) say('G-scope: ' + filename + ' open - nothing was added to the plate');
+      return d;
+    });
+  }
+
   return {
     mount: mount,
     open: openPanel,
+    openFile: openFile,
+    isSliced: function (arrayBuffer) {
+      return threeMFHasToolpath(arrayBuffer instanceof Uint8Array ? arrayBuffer : new Uint8Array(arrayBuffer));
+    },
     close: close,
     isOpen: isOpen,
     reset: reset,
@@ -1515,6 +2299,47 @@ var NSO_MICROSCOPE = (function () {
     selection: function () { return currentSelection.slice(); },
     selectionSource: function () { return selectionSource; },
     geometry: microscopeGeometry,
+    // --- G-scope: the selection seam and the view filters ---
+    selectionRegion: selectionRegion,
+    onSelection: function (fn) {
+      if (typeof fn === 'function') selectionListeners.push(fn);
+      return function () { selectionListeners = selectionListeners.filter(function (f) { return f !== fn; }); };
+    },
+    setSelectionMoves: function (moveIndices) {
+      // Select by parsed-move index - the other half of the seam, for a
+      // producer that knows moves and not the view's segment wrappers.
+      if (!doc || doc.kind !== 'toolpath') return [];
+      var want = new Set(moveIndices || []);
+      removeAllBalls();
+      setSelection(doc.segments.filter(function (s) { return want.has(s.mv.index); }), 'line');
+      return currentSelection;
+    },
+    soloGroup: soloGroup,
+    showAll: showAll,
+    clearFromView: clearFromView,
+    cleared: function () { return Array.from(CLEARED); },
+    selectVisible: selectVisible,
+    shownCount: function () {
+      if (!doc) return 0;
+      return doc.kind === 'toolpath' ? shownSegments().length : doc.objects.filter(objectShown).length;
+    },
+    pickLineAt: pickLineAt,
+    pickLine: function (moveIndex, additive) {
+      if (!doc || doc.kind !== 'toolpath') return null;
+      var seg = doc.segments.find(function (s) { return s.mv.index === moveIndex; });
+      if (seg) pickLine(seg, !!additive);
+      return seg || null;
+    },
+    stepLine: stepLine,
+    setZRange: setZRange,
+    setZRangeMm: function (zLo, zHi) { return setZRange(stepAtZ(zLo), stepAtZ(zHi)); },
+    zRange: zRange,
+    flushView: function () {
+      if (viewPending) { viewPending = false; viewChanged(); }
+      if (highlightPending) { highlightPending = false; refreshHighlight(); }
+    },
+    cropZBand: cropZBand,
+    cropReason: cropReason,
     exportLabel: function () { return doc && currentSelection.length ? exportLabel() : null; },
     exportToPlate: exportToPlate,
     exportAsSTL: exportAsSTL,

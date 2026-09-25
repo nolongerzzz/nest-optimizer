@@ -317,6 +317,38 @@ try {
     check('pin: every face accounted for', ps.ok && ps.faces.removed + ps.faces.clipped + ps.faces.kept === pin.length / 9,
       JSON.stringify(ps.faces));
   }
+
+  console.log('\n=== 7. a toolpath\'s beads: touching closed shells (opts.shells, G-scope) ===');
+  {
+    // Ten layers of a 20 mm square perimeter, four moves a layer, 0.2 mm
+    // beads - built by extrudeFlatLine, the same builder G-scope exports with.
+    // Stacked layers share faces exactly and each corner's two moves overlap,
+    // so the soup carries repeated edges before Crop touches it.
+    const G = require(path.join(ROOT, 'nso-gcode-lines.js'));
+    const H = 0.2, W = 0.45, moves = [];
+    for (let L = 1; L <= 10; L++) {
+      const z = +(L * H).toFixed(6);
+      [[0, 0, 20, 0], [20, 0, 20, 20], [20, 20, 0, 20], [0, 20, 0, 0]].forEach(([x0, y0, x1, y1]) =>
+        moves.push({ x0, y0, x1, y1, z, width: W, height: H }));
+    }
+    const soup = new Float32Array(moves.reduce((a, m) => G.extrudeFlatLine(m, a), []));
+    const lo = 3 * H, hi = 6 * H;              // layers 4..6 out, at bead boundaries
+    const plain = NSO_cropRaw(soup, { axisIdx: 2, lo, hi });
+    check('without shells: refused, because the input already repeats edges', !plain.ok && /repeated/.test(plain.reason), plain.reason);
+    const r = NSO_cropRaw(soup, { axisIdx: 2, lo, hi, shells: true });
+    check('with shells: cropped', r.ok, r.reason);
+    check('still closed, nothing degenerate', r.ok && r.census.open === 0 && r.census.degenerate === 0, JSON.stringify(r.census));
+    check('no MORE repeated edges than the input brought', r.ok && r.census.repeated <= r.inputCensus.repeated,
+      r.ok ? r.census.repeated + ' <= ' + r.inputCensus.repeated : '');
+    check('shorter by exactly the band', r.ok && Math.abs((r.lengthBefore - r.lengthAfter) - (hi - lo)) < 1e-5,
+      r.ok ? r.lengthBefore + ' -> ' + r.lengthAfter : '');
+    const keptVol = moves.filter((m) => !(m.z > lo + 1e-6 && m.z <= hi + 1e-6))
+      .reduce((a, m) => a + volume(new Float32Array(G.extrudeFlatLine(m, []))), 0);
+    check('encloses exactly the beads outside the band', r.ok && Math.abs(volume(r.tris) - keptVol) < 1e-4 * keptVol,
+      r.ok ? volume(r.tris) + ' vs ' + keptVol : '');
+    const mid = NSO_cropRaw(soup, { axisIdx: 2, lo: lo + 0.1, hi: hi + 0.1, shells: true });
+    check('a band through the middle of the beads also seals', mid.ok && mid.census.open === 0, mid.reason);
+  }
 } finally {
   fs.rmSync(TMP, { recursive: true, force: true });
 }

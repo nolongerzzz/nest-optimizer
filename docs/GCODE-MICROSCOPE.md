@@ -9,6 +9,287 @@ The ticket's framing: **the reference tool's own view is correct and stays as
 it is.** The gap is that nothing goes in and nothing comes out. It opens one
 baked slice, and its only way out is `Export .json`.
 
+> **Read "G-scope: one tool" first.** It is the current state and it
+> supersedes the older sections below wherever they disagree - in particular
+> on the second rail button, on the Toolpath card, and on a `.gcode.3mf`
+> import adding pieces to the plate. Those are gone.
+
+---
+
+## G-scope: one tool (2026-09-25)
+
+Branch `claude/gscope-consolidate`, off `claude-wip`. The microscope is now
+**G-scope**, the only G-code tool in the app. Support generation / editing is
+out of scope; the selection it would plug into is described in
+[The selection seam](#the-selection-seam-where-support-generation-plugs-in).
+
+### 1. Audit - the two entry points, measured in the real app
+
+Driven in headless Chromium against the committed files before anything was
+changed:
+
+| entry point | on an empty plate | with a valid `supportwithinsupport.gcode.3mf` | with the same slice renamed `plate.3mf` |
+| --- | --- | --- | --- |
+| **G**🔬 `#btn-gcode` → `app-toolpath.js` | a file chooser, and nothing else | **10 feature models added to the plate**, the sidebar Toolpath card shown, **the microscope never opens** | refused: "not a sliced project" |
+| 🔬 `#btn-microscope` → `app-microscope.js` | the panel **and** a file chooser; with a piece on the plate, the panel over the plate at once, no dialog | opens on it | opens on it (content-sniffed) |
+| app Import (`#file-input`, drop) → `handleFiles()` | - | the microscope opens on it **and** 10 feature models are added to the plate underneath | fails: "No objects found in this 3MF" |
+
+So:
+
+- **Which one "pops up right away":** 🔬 `#btn-microscope`. Its click handler
+  (`mount()`) opens the panel over the plate with `openPlate()`, falling back
+  to the panel plus a picker only when the plate is empty.
+- **Why the other forced a manual upload and did nothing otherwise:**
+  `#btn-gcode`'s only handler was `NSO_TOOLPATH.openPicker()`, which does one
+  thing - `input.click()` on `#gcode-input`. There was no code path in that
+  button that did not start with a file dialog, and `onPicked()` then checked
+  the **file name** against `/\.gcode\.3mf$/` and, on success, called
+  `importSliced3MF()` only. It never called `NSO_MICROSCOPE` at all - the
+  auto-landing lived in `handleFiles()`, which this button did not go through.
+  Cancel the dialog and nothing happens; pick a file and you get plate models
+  and a sidebar card, not the view.
+- **Real state of `gcode.3mf` auto-recognition:** partly working. Import did
+  land in the microscope, but (a) only for files literally named `*.gcode.3mf`
+  - `handleFiles()` sniffed the name while the microscope's own Import already
+  sniffed the content - and (b) always as a side effect of the plate import,
+  which put one model per slicer feature on the plate first.
+- **Feature-level isolation, as found:** the legend's click toggled a group's
+  visibility (view only) and the capture box / whole-layer selection existed,
+  but a box still caught moves of hidden features, and there was no way to
+  turn "only this feature" into a selection. Isolate drew the reference tool's
+  8-sided instanced cylinders, which are not what Export writes.
+
+### 2. Consolidated to one tool
+
+Removed: `#btn-gcode`, `#gcode-input`, the sidebar `#toolpath-card`,
+`app-toolpath.js`, its CSS, and its two drive checks (`gcode:drive`,
+`gcode:entry`). What that door did lives on inside G-scope:
+
+| old Toolpath card | G-scope |
+| --- | --- |
+| scrub one line at a time, arrow keys | **Pick a line**, ◀ / ▶ and Left / Right |
+| Isolate Z (± mm window) | the **layer-range slider** |
+| Extract Line / Extract scope | **Export to plate** / **Export as STL** of whatever is selected |
+| the whole import on the plate as feature models | nothing on the plate until Export or Crop |
+
+Routing now, one tool whichever way in:
+
+| way in | what happens |
+| --- | --- |
+| G🔬 rail button (`#btn-microscope`, now labelled G-scope) | open: on the plate if it has pieces, else the panel + a file picker; a file already loaded is reopened |
+| app Import / drop / Library box, a sliced project | `handleFiles()` asks `NSO_MICROSCOPE.isSliced(bytes)` - **content**: the archive holds `Metadata/plate_N.gcode` - and calls `openFile()`. G-scope opens on it; **the plate is not touched** |
+| app Import, a plain 3MF / STL | the plate, as before; G-scope stays shut |
+| G-scope's own Import | `load()`, content-sniffed, as before |
+
+A renamed slice, a dropped slice and a slice picked from G-scope's own dialog
+now all take the same route. There is no second importer left to drift.
+
+### 3. "Clear from view" - view only, by construction
+
+**Clear from view** hides the current selection: a plate piece (it joins the
+legend's hidden set) or picked / caught lines (a `CLEARED` set of move ids).
+**Show all** brings everything back. The same holds for the legend's row
+click and its new **only** button, the slider, Isolate / Back and
+**Select shown**. None of these functions calls `addModelFromZUpGeometry`,
+`pushUndo`, `downloadBlob`, or writes `state.*`; they rebuild the view's own
+line buffers or clipping planes and nothing else. `gcode:gscope` proves it by
+snapshotting every model id / name / raw-mesh length / vertex count, every
+placement (x, y, z, yaw, visibility) and the undo stack before and after, and
+counting downloads.
+
+### 4. Line-level and feature-level isolation
+
+- **Line:** `Pick a line` raycasts the overview's own `LineSegments` (line *i*
+  of a feature buffer is `userData.segs[i]`, so a pick can only land on a line
+  that is drawn) and takes the hit nearest the cursor ray, not the first one
+  along it. Shift-click adds / removes; ◀ ▶ step through the moves that are
+  drawn, in print order.
+- **Rendering reuse, confirmed:** the highlight of a small selection and the
+  whole Isolate detail view are `NSOGcodeLines.buildLineGeometry()` -
+  `extrudeFlatLine()` per move - the builder Export already used. No new
+  geometry. This replaces the reference tool's 8-sided `InstancedMesh`
+  cylinders in the detail view, so **what Isolate shows is the solid Export
+  writes**, 12 triangles per move (checked against `extrudeFlatLine` to the
+  micron, and the downloaded STL triangle for triangle).
+- **Feature:** each legend row now has an **only** button (this group alone).
+  **Select shown** turns whatever the filters leave on screen into the
+  selection, and the capture box now catches only what is drawn - so "only
+  Inner wall" plus a box, or plus the slider, gives exactly that feature in
+  that region.
+
+### 5. The layer-range slider
+
+Docked to the viewport's right edge: two handles on one vertical track, the
+lower (blue) and upper (orange) Z bound. On a slice the steps are the file's
+own printing heights (`NSOGcodeLines.zLevels`), so one step apart is one layer
+(exactly the moves `movesAtZ` finds), apart is a chunk, the ends are
+everything. Drag either handle, drag the band between them to move it, press
+the bare track to bring the nearer handle there; on a focused handle
+Up/Down/PageUp/PageDown/Home/End, with **Shift** moving the whole window at a
+fixed width. **All** resets. On a mesh document (plate / STL / 3MF - no
+layers) the steps are 0.1 mm-ish across the part and the view is clipped by
+two planes instead. Redraws are coalesced to one per frame.
+
+### 6. Crop - through the Crop tool, not beside it
+
+**Crop out band** removes the slider's Z band from the selection and joins what
+is above onto what is below. G-scope does no cropping of its own; every route
+ends in `app-crop.js`:
+
+| document | what is cropped | how |
+| --- | --- | --- |
+| the plate | the one selected piece, **in place** | the view Z band mapped to the piece's raw Z by the offset between them (refused if the piece was tilted, as the Cut-menu Crop refuses a turned one), then `NSO_cropModel(m, box)` - paint stand-down, `NSO_cropRaw`, the in-page canonical checker, the `cropReplace` commit with its undo. G-scope re-reads the plate and stays open |
+| a slice | the selection's beads | a dry run of `NSO_cropRaw` + the checker on `buildLineGeometry()`; only if it passes, the selection lands on the plate (`addModelFromZUpGeometry` + `addModels` undo) and `NSO_cropModel` crops it. Two undo steps |
+| an STL / 3MF | the selected objects | as a slice, without `shells` |
+
+Two changes to `app-crop.js`, both small:
+
+- **`NSO_cropModel(m, box, opts)`** - the commit half of
+  `NSO_cropSelectedModel`, factored out so the Cut menu's Crop row and G-scope
+  run one gate and one commit. The Cut-menu behaviour and status line are
+  unchanged (`crop:test`, `wire:crop`).
+- **`opts.shells`** on `NSO_cropRaw`. A toolpath's beads are *touching closed
+  shells*, not one closed solid: stacked layers and collinear moves share faces
+  exactly, so the input already carries repeated directed edges (2,940 on 12
+  layers of `supportwithinsupport`) and Crop's "no repeated edge" gate could
+  never pass. With `shells` the gate is: still closed, nothing degenerate, **no
+  more repeated edges than the input brought**, and the unchanged volume gate.
+  Measured: without it, every toolpath crop is refused; with it, the seal needs
+  no cap at bead boundaries (the in-plane faces pair up), the result encloses
+  exactly the volume of the beads outside the band, and a band through the
+  middle of beads also seals. `nso_crop_test.js` §7 pins all of that on
+  synthetic beads.
+
+Refusals are Crop's own, by name, and nothing reaches the plate first: a band
+over the bottom or top is "a trim - use Cut"; a selection wholly inside the
+band keeps nothing on one side; a plate crop needs exactly one piece.
+
+**Known limits.** G-scope crops along **Z** only - that is the slider's axis.
+X/Y slabs stay in the Cut menu's Crop row (which, conversely, cannot crop along
+raw Z). The selection must extend past both ends of the band. A cropped
+toolpath piece is still a set of touching bead shells, so the in-page checker
+reports non-manifold edges where shells meet (as the uncropped export does);
+Crop only gates that it adds none.
+
+### 7. Validation
+
+`npm run gcode:gscope` (`tools/gcode-test/gscope-drive-check.mjs`, **91
+checks**, in `npm test`), headless Chromium, real clicks / drags / keys:
+
+- **one tool:** no `#btn-gcode` / `#gcode-input` / Toolpath card /
+  `app-toolpath.js` / `NSO_TOOLPATH`; exactly one 🔬 button; the rail button on
+  an empty plate (panel + real file chooser → slice opens, plate empty), with a
+  piece (no dialog, plate document); `#file-input` with a `.gcode.3mf`, with
+  the slice **renamed** `.3mf`, and a real **drop** on the viewport - all in
+  G-scope, plate empty; a plain 3MF still goes to the plate and G-scope stays
+  shut.
+- **view only:** Clear from view on a plate piece, only / Select shown /
+  Isolate / Back / Show all, the mesh slider, a refused crop, and everything on
+  the slice - the plate snapshot is identical and no download fires (except the
+  one STL the test asks for).
+- **line vs feature:** a real mouse click at a projected line picks exactly
+  that move; → / ← step in print order; its isolated solid and its STL are
+  `extrudeFlatLine`'s prism to 1 µm; "only Inner wall" + Select shown is every
+  Inner wall move (180) and nothing else; with the slider at 5 layers, exactly
+  the Inner wall moves in that band (20).
+- **slider:** real drags narrow the range and exactly the moves in the band are
+  drawn (one GL line each, none outside); Home collapses to one layer =
+  `movesAtZ`; Shift+↑ moves a 5-layer window; All = 2,895.
+- **crop E2E:** plate cube 20 → 16 mm in place (`cropReplace`), passing
+  `tools/mesh_validate.py` (open 0, non-manifold 0, winding 0, pierce 0), one
+  Undo restores it; the slice's Outer wall 15.30 → 12.30 mm (band 3.00-6.00),
+  volume equal to the kept beads, open 0, undo `addModels` + `cropReplace`,
+  read back in G-scope at the new height, two Undos restore the plate.
+
+Screenshots, each asserted to be a drawn frame by `gl.readPixels`, are written
+to `tools/gscope-out/` (git-ignored): `01` a plate piece cleared from view,
+`02` a mesh clipped to a Z band, `03` a cube cropped in place beside its twin,
+`04` a slice with the slider, `05` one layer, `06` a picked line, `07` it
+isolated as a prism, `08` it cleared, `09` one feature alone, `10` the cropped
+slice piece on the plate, `11` it back under G-scope.
+
+Updated: `gcode:scope-drive` (the door, the detail view is now prisms: 109
+checks) and `gcode:scope-overlay` (the import leaves the plate empty; support
+isolated through "only" + Select shown + Export, then read back off the plate
+in the slicer's colour: 83 checks); `nso_topbar_accordion_test.js` (the rail
+button it checks is `#btn-microscope`).
+
+### The selection seam: where support generation plugs in
+
+Not built - described, so the later phase adds a producer and a consumer, not
+a rewrite.
+
+**The data structure.** The selection is one array, `currentSelection`, of
+segments (slice) or objects (mesh). Every control that selects - capture box,
+whole layer, picked line, Select shown - goes through **one function,
+`setSelection(items, source)`**, and nothing else writes it. Isolate, the
+highlight, both exports and Crop only read it.
+
+**Reading it: `NSO_MICROSCOPE.selectionRegion()`** returns a plain, view-free
+description in the file's own Z-up millimetres:
+
+```js
+{
+  kind: 'toolpath' | 'mesh',
+  source: 'plate' | 'file' | 'objects',
+  document: 'supportwithinsupport.gcode.3mf',
+  by: 'box' | 'layer' | 'line' | 'visible',
+  boxes: [{ gx, gy, gz, r, h }],          // the capture boxes, if any
+  zBand: [zLo, zHi],                      // the slider's band, in mm
+  zExtent: [zLo, zHi],                    // the selection's own extent
+  moves:   [/* parsed move records: x0 y0 x1 y1 z width height feature layer index objectId */],
+  objects: [/* mesh: { name, positions (Z-up soup), placedIndex, sourceId } */]
+}
+```
+
+**Listening: `NSO_MICROSCOPE.onSelection(fn)`** calls `fn(region)` on every
+change (and returns an unsubscribe). It costs nothing until someone listens.
+
+**Writing it: `NSO_MICROSCOPE.setSelectionMoves(moveIndices)`** selects by
+parsed-move index, for a producer that works in moves.
+
+**Where "generate / add / remove a support here" hooks in:**
+
+1. *Here* is `selectionRegion()`: `moves` / `objects` for what was picked,
+   `boxes` and `zBand` for where. A "generate support here" action reads that
+   and nothing else - it does not reach into the view.
+2. The generator is the existing support pipeline (`nso_support_aim.js`,
+   `nso_support_tree.js`), fed the region's footprint and Z band instead of
+   a whole piece.
+3. Its result goes back out through doors that already exist:
+   `addModelFromZUpGeometry()` + `pushUndo()` to put it on the plate (what
+   Export does), or `NSO_MICROSCOPE.openObjects(label, groups)` to show it
+   under the lens as named groups (a tree split into branches, one interface
+   layer) with the legend, box, slider, Isolate and Export inherited.
+4. *Remove a support here* on a slice is a selection of `Support` /
+   `Support interface` moves; today **Clear from view** is its view-only
+   stand-in. A real removal needs an editing path that writes - G-code
+   rewriting is out of scope, and on the mesh route it is Crop (a Z band) or
+   Paint-delete - and must be a new, explicit, undoable action beside the
+   view-only one, never a change to Clear from view.
+
+What the later phase should **not** do: keep a second selection store, or
+read the view's segment wrappers / `doc.segments` directly. Go through
+`selectionRegion()` / `onSelection()` / `setSelectionMoves()`, so the view
+stays free to change underneath.
+
+### Files
+
+| file | change |
+| --- | --- |
+| `app-microscope.js` | G-scope: the selection seam, view filters, Clear from view, line picking, the slider, Crop routing, `isSliced` / `openFile` |
+| `app-crop.js` | `NSO_cropModel` factored out; `opts.shells` on `NSO_cropRaw` |
+| `app-core.js` | `handleFiles()` routes a sliced project to G-scope by content, not onto the plate |
+| `index.html` | one rail button (G🔬, G-scope); the Pick-a-line, Visibility, Crop rows; the slider; `#btn-gcode`, `#gcode-input`, the Toolpath card and `app-toolpath.js` removed |
+| `styles.css` | `.btn-gscope`, the slider, the legend's "only"; the Toolpath card rules removed |
+| `app-toolpath.js` | **deleted** |
+| `tools/gcode-test/gscope-drive-check.mjs` | new, `gcode:gscope` |
+| `tools/nso_crop_test.js` | §7, toolpath beads with `shells` |
+
+**`?v=` not bumped** (HANDOFF rule 4). `app-microscope.js`, `app-crop.js` and
+`app-core.js` changed together and `app-toolpath.js` is gone, so a browser
+holding old copies will mix them: **they need a bump at merge.**
+
 ---
 
 ## 1. Audit: can the reference tool's pipeline be adopted wholesale?
@@ -340,7 +621,10 @@ the file rather than from a default.
 | `tools/gcode-test/microscope-drive-check.mjs` | the real view in headless Chromium, over all four file kinds |
 | `tools/gcode-test/microscope-overlay-drive-check.mjs` | the view as an **overlay** on the plate, the `.gcode.3mf` landing, and the screenshots - see the last section |
 
-### The two rail buttons are not the same door
+### The two rail buttons are not the same door (superseded - there is one now)
+
+> Superseded 2026-09-25 by "G-scope: one tool" above: `#btn-gcode` was
+> merged into this view and removed. Kept for the history.
 
 `G`🔬 (`#btn-gcode`, unchanged) imports a sliced project **onto the plate** as
 models you then scrub with the Toolpath card. 🔬 (`#btn-microscope`) opens the
@@ -403,6 +687,9 @@ in `gcode:scope-overlay`: same triangle count as the plate piece, same size to
 1&nbsp;µm, and `minZ` at the 0.3&nbsp;mm hover `placeModelMovable()` gives it.
 
 ### A `.gcode.3mf` import lands here
+
+> Updated 2026-09-25: it still lands here, now recognised by content, and it
+> no longer runs the plate import underneath - see "G-scope: one tool".
 
 A slice is not a part you position — it is something you go looking through,
 and this is the view that does that. So `handleFiles()` (app-core.js) hands
