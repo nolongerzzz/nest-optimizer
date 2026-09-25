@@ -65,6 +65,7 @@ Current roster, by category:
 | Brush (`app-brush.js`) | sub-region | every face the stroke **and its seam band** land on, `nsoMaskPlaneList(m)` | `docs/BRUSH.md` §paint scope |
 | Hollow / Fill (`app-hollow.js`) | whole-piece | `nsoMaskCount(m) > 0` | `docs/HOLLOW.md` §5 |
 | Attach (`app-assemble.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/ASSEMBLE.md` |
+| G-scope supports (`app-gscope-support.js`) | sub-region | the marker scan's skipList, `nsoMaskFaceList(m)` shifted into the world frame; refused by name when the piece is painted and turned. Generating adds a piece (none); removing or changing one acts on the whole support piece | header comment + `docs/GCODE-SUPPORTS.md` |
 
 ### The SELECT list is an operand; the EXCLUDE list is still only a veto
 
@@ -482,6 +483,33 @@ bug is fixed, which is the cue to retire the check with the fix.
 PAINT SCOPE: **not applicable** - it reads the skip list and bakes nothing, so
 it takes no row in the roster. `nsoMaskCount()` is an input to a check, never a
 gate on an operation.
+
+## G-scope supports - overhang markers, point-click generation, per-support edit (2026-09-25)
+Branch `claude/overhang-point-support`, off `claude-wip` after PR #99. Full
+write-up: **`docs/GCODE-SUPPORTS.md`**.
+
+- **Markers** are auto-aim's own `detectOverhangs` regions: the region's own
+  triangles tinted, and a ping at `region.point`. Red means unsupported, green
+  means it has a support.
+- **Click a marker** to choose Straight strut / Tree / Gecko-hand and a size.
+  Generate calls `NSO_SupportAim.plan` or `NSO_SupportTree.planTree` +
+  `unionParts` with the marker's own inputs. No new geometry code.
+- **Each support is its own plate piece**, placed exactly: the placement is
+  read back off the scene and compared value for value. It is one `addModels`
+  step.
+- **Click a support** to select it through G-scope's seam. Apply (regenerate)
+  or Remove is one step each, under the new `supportSwap` undo type in
+  `app-core.js`, which restores both the model and its exact pose.
+- **Paint scope:** detection is sub-region (`skipList`, shifted into the world
+  frame, and refused by name on a piece that is painted and turned); editing a
+  support is whole-piece, on the support.
+- **Checks:** `gcode:gscope-support` (52). Markers are checked against the
+  direct detection call; generated supports against the direct generator calls,
+  value for value; strut, tree and gecko-hand through the canonical checker at
+  the tree check's derived weld; Undo on add, change and remove. Plus
+  `paint:scope` (new roster row). **`?v=` not bumped** - `app-gscope-support.js`
+  is new at `?v=gsup1`, and `app-microscope.js` / `app-core.js` need a bump at
+  merge.
 
 ## G-scope - one G-code tool, with line isolation, a layer slider and Crop (2026-09-25)
 Branch `claude/gscope-consolidate`, off `claude-wip`. Full write-up:

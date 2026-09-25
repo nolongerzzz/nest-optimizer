@@ -216,6 +216,12 @@ button it checks is `#btn-microscope`).
 
 ### The selection seam: where support generation plugs in
 
+> **Built on 2026-09-25:** `app-gscope-support.js`, see
+> `docs/GCODE-SUPPORTS.md`. Overhang markers, point-click generation, and
+> editing or removing one support. It uses this seam as described, plus four
+> small hooks for a layer drawn over the view: `addClickHook`, `onDocument`,
+> `toView` and `selectObjects` (which is `setSelection`).
+
 Not built - described, so the later phase adds a producer and a consumer, not
 a rewrite.
 

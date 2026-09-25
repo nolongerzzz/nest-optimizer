@@ -523,6 +523,8 @@ var NSO_MICROSCOPE = (function () {
   var zr = null;              // layer-range slider, in steps: { lo, hi, n }
   var lineCursor = -1;        // position in shownSegments() of the picked line
   var selectionListeners = [];
+  var clickHooks = [];        // fn(ndcX, ndcY, event) -> true when it took the click
+  var docListeners = [];      // fn(doc) after every open()
 
   function buildWorld() {
     if (view) return view;
@@ -815,6 +817,7 @@ var NSO_MICROSCOPE = (function () {
     }
     var tris = currentSelection.reduce(function (a, o) { return a + o.triangles; }, 0);
     info((selectionSource === 'visible' ? '<b>everything shown</b>, '
+          : selectionSource === 'pick' ? '<b>picked</b>, '
           : '<b>' + balls.length + ' box(es)</b>, ') + '<b>' + currentSelection.length +
          ' object(s)</b>, ' + tris + ' triangle(s)<br>' +
          currentSelection.map(function (o) { return o.name; }).join(', '));
@@ -990,10 +993,17 @@ var NSO_MICROSCOPE = (function () {
     });
 
     el.addEventListener('pointerup', function (e) {
-      if ((mode !== 'select' && mode !== 'line') || !doc) return;
-      if (v.dragState) return;                       // was a move/resize drag
-      if (!v.mouseDownPos) return;
+      if (!doc || v.dragState || !v.mouseDownPos) return;
       if (Math.hypot(e.clientX - v.mouseDownPos[0], e.clientY - v.mouseDownPos[1]) > 4) return;
+      // A click hook (app-gscope-support.js's markers and supports) gets the
+      // click first, in every mode: a marker is a thing you click, not a
+      // region you box. A hook that takes the click returns true.
+      var h = ndc(e);
+      for (var hk = 0; hk < clickHooks.length; hk++) {
+        try { if (clickHooks[hk](h[0], h[1], e)) return; }
+        catch (err) { console.error('[g-scope] click hook', err); }
+      }
+      if (mode !== 'select' && mode !== 'line') return;
       if (mode === 'line') {
         var q = ndc(e);
         pickLineAt(q[0], q[1], e.shiftKey);
@@ -2075,6 +2085,9 @@ var NSO_MICROSCOPE = (function () {
     syncZRangeUI();
     syncCropRow();
     syncLineRead();
+    docListeners.forEach(function (fn) {
+      try { fn(doc); } catch (err) { console.error('[g-scope] document listener', err); }
+    });
     return doc;
   }
 
@@ -2349,6 +2362,19 @@ var NSO_MICROSCOPE = (function () {
     hidden: function () { return HIDDEN ? Array.from(HIDDEN) : []; },
     groups: function () { return doc ? Object.keys(doc.groups) : []; },
     getDoc: function () { return doc; },
+    // --- for layers drawn over the view (app-gscope-support.js) ---
+    addClickHook: function (fn) { if (typeof fn === 'function') clickHooks.push(fn); },
+    onDocument: function (fn) { if (typeof fn === 'function') docListeners.push(fn); },
+    /** A point in the file's Z-up millimetres, in view space. */
+    toView: function (x, y, z) { return doc ? toThree(x - doc.cx, y - doc.cy, z) : null; },
+    /** Select mesh-document objects by name, through the one seam. */
+    selectObjects: function (names, source) {
+      if (!doc || doc.kind !== 'mesh') return [];
+      var want = new Set(names || []);
+      removeAllBalls();
+      setSelection(doc.objects.filter(function (o) { return want.has(o.name); }), source || 'pick');
+      return currentSelection;
+    },
     getView: function () { return view; }
   };
 })();

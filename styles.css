@@ -2968,3 +2968,51 @@ select:focus, input:focus {
   cursor: pointer;
 }
 .ms-zr-all:hover { border-color: var(--accent); }
+
+/* G-scope supports: the popover a marker or a support opens. It sits over the
+   canvas, beside the click, above the slider. */
+.ms-pop {
+  position: absolute;
+  z-index: 8;
+  width: 250px;
+  background: rgba(23, 26, 33, 0.97);
+  border: 1px solid #ff2d2d;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+}
+.ms-pop[hidden] { display: none; }
+.ms-pop-title { font-weight: 600; margin-bottom: 4px; }
+.ms-pop-field {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  color: var(--muted);
+}
+.ms-pop select, .ms-pop input[type="number"] {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: inherit;
+  width: 120px;
+}
+.ms-pop button {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 5px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.ms-pop button:hover { border-color: var(--accent); }
+#ms-sp-generate, #ms-sp-apply { border-color: #ff2d2d; background: rgba(255, 45, 45, 0.15); }
+#ms-sp-remove { border-color: #ef4444; }
+#ms-overhang-angle { width: 48px; }
