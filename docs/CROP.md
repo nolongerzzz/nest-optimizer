@@ -28,7 +28,7 @@ sections that do not line up (a lateral offset, a twist) are **Stage 2**.
 | step | reused from | how |
 | --- | --- | --- |
 | clip at each box face | Cut: `rawCutOpen` (`app-cut.js`) | `rawCut` is now `rawCutOpen` plus the cap, so Cut and Crop run the same seam-safe clip: weld input, snap near-plane vertices onto the plane, clip, weld the on-plane points on float32 positions |
-| cap for a step face | Cut: `rawFlatCapLoop` / `rawEarClip2D` | fed one loop, the same way `rawCut` feeds it |
+| cap for a step face | Cut: `rawFlatCapLoops` (→ `rawFlatCapLoop` / `rawEarClip2D`) | fed all of one class's loops at once, the same way `rawCut` feeds a section; holes are found by nesting and bridged into their outline |
 | zero-area clean-up | Cut: `rawSplitDegenerates` | |
 | joint-point weld | Cut: `rawWeldPoints` | 2 x the weld radius, as `rawSnapPlanePoints` does for one cut |
 | commit + undo | `NSO_sculptCommitRaw` | undo type `cropReplace`, "Undo: Crop reverted" |
@@ -60,10 +60,17 @@ one plane:
    straight through. No cap is built.
 3. **Cap only the step faces.** An edge that is still open borders either the
    near section outside the far one (a step facing +axis) or the reverse
-   (facing −axis). Each edge is classed by its midpoint, the edges are walked
-   into loops per class, and each loop goes to Cut's `rawFlatCapLoop`. Where
-   two step faces of one class touch at a point, the walk keeps to the face
-   it is on.
+   (facing −axis). Each edge is classed by its midpoint and the edges are
+   walked into loops per class. All of a class's loops go to Cut's
+   `rawFlatCapLoops` in one call. A loop running against wall order is a
+   hole in the step face (the far section sits inside the near one or the
+   reverse, e.g. around a bore); `rawFlatCapLoops` finds holes by nesting, so
+   direction does not matter to it, and bridges each into its outline with
+   no new vertex. The cap's area must equal |sum of the loops' signed areas|
+   for that class: holes run the other way, so the signed sum is already the
+   outlines minus their holes. Where two step faces of one class touch at a
+   point, the walk keeps to the face it is on; if a hole is one of the loops
+   through such a point, Crop refuses (see below).
 
 Then the result is gated on the float32 values it will be saved as:
 
@@ -92,18 +99,31 @@ so Crop takes them out and seals the section like any other.
 - **stepped bar** (12 × 8 then 12 × 4), both ways round: one step face of
   48 mm², facing +X or −X as it should, volume 2880 exactly.
 - **tube**: the section is an annulus. The sections match, so no cap is
-  needed; the result is still a tube (χ 0), 20/25 of the volume.
+  needed; the result is still a tube (χ 0), 20/25 of the volume. rawCut's own
+  two halves (bore bridged into the outline) pass the checker, and the
+  result's volume matches their sum.
+- **hinge X 5.4..9.9**: the far section is a square with a bore, the near
+  section a 2 mm strip, so the step face goes around the bore. It is capped
+  as one outline with one hole bridged in; the result passes with
+  self-intersection included and its volume matches the open-wall flux and
+  rawCut's two halves.
 - **library**: pin, slotted block, star prism, hinge, CTH fixture and
   `v9_mirror_factory.stl`. The v9 cases include a box ending exactly on each
   Mirror-Join seam ring, one through the +seam's sub-tolerance pair, and one
   with crossings at the joint. Every result passes, and its volume matches
-  the flux. Where rawCut's own capped halves pass the checker, it also
-  matches their sum.
-- **v9 sweep** (not in the suite, run while building this): 328 boxes over
-  `v9_mirror_factory.stl`, 1, 7, 23 and 60 mm wide, stepped every 2 mm along
-  X. 263 were cropped and **all 263 pass** the checker (0 fail). The other 65
-  were refused by name, all for the same reason: a step face that would need
-  a hole. None came back ok-but-broken.
+  the flux. rawCut's own capped halves must pass the checker too (holes
+  included), and the volume matches their sum.
+- **v9 sweep** (not in the suite, run while building this): boxes over
+  `v9_mirror_factory.stl`, 1, 7, 23 and 60 mm wide, starting on every
+  second whole millimetre along X. Before step faces with holes were capped,
+  the old per-loop cap cropped 264 of 329 and refused the other 65 by name,
+  all for the same reason: a step face that would need a hole. With
+  `rawFlatCapLoops` **all 329 are cropped and all 329 pass** the checker, with
+  the enclosed volume equal to the open-wall flux (0 refused, 0 fail).
+  None came back ok-but-broken.
+- **in the app** (`nso_wire_crop_test.js` §7b): hinge X 5.4..9.9 commits,
+  the status names the hole, the kept `rawTris` pass the checker, and undo
+  puts the piece back.
 
 ## Refusals
 
@@ -113,20 +133,17 @@ Each refusal names its reason and hands back the input soup object untouched:
 | --- | --- |
 | box not strictly inside the piece | that is a trim; use Cut |
 | box does not cover the whole cross-section | that would be a pocket, which is Carve's job |
-| step face would need a hole | Cut's cap fills simple outlines only. Example: hinge X 5.4..9.9, where the far section is a square with a bore and the near section a 2 mm strip, so the step face goes around the bore |
+| a hole in a step face touches its outline at a point | two step faces of one class meet at a single point and a hole is one of the loops through it; `rawFlatCapLoops` needs holes clear of their outline, so no clean bridge. (A step face with a hole that stays clear is capped, e.g. hinge X 5.4..9.9.) |
 | the two parts overlap along the joint | the input has overlapping shells (`box_closed.stl`, 74 piercing pairs in the source) |
 | painted faces (app) | whole-piece paint scope, as Extend: everything past the box slides |
 | raw frame no longer matches the view (app) | the piece was turned (yaw) since it was loaded |
 
 ## Known limits, for the next ticket
 
-- **A step face with a hole.** It needs a bridged-hole cap. Cut now has
-  one: `rawFlatCapLoops` (app-cut.js) classes a section's loops by nesting
-  and bridges each hole into its outline, which fixed `rawCut` mis-capping a
-  section with a hole (tube, hinge knuckle; `tools/nso_rawcut_bore_test.js`).
-  Crop still caps each step-face loop with `rawFlatCapLoop` and still
-  refuses a step face with a hole; switching it to `rawFlatCapLoops` is the
-  follow-up that would lift that refusal.
+- **A hole touching its outline at a point.** A step face with a hole is
+  capped (`rawFlatCapLoops`), but only when the hole shares no point with
+  another loop; the touching case is refused by name. Handling it would
+  mean splitting the touching point or bridging through it.
 - **Stage 2: repositioning and alignment.** Nothing here moves a part
   sideways.
 - **Self-intersection is inherited, not repaired.** On

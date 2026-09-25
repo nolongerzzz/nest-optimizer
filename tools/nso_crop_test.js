@@ -14,10 +14,13 @@
    2. sections that differ: a stepped bar, both ways round. The step face is
       capped with Cut's rawFlatCapLoop and faces the right way.
    3. a tube: the section has a hole. Both sections match, so no cap is
-      needed and Cut's simple-outline cap never runs.
+      needed; rawCut's own capped halves (the bore bridged into the
+      outline) pass the checker and are a volume reference.
    4. library pieces, including the Mirror-Join seams of v9_mirror_factory
       and boxes ending exactly on a seam ring. Volume is checked against
       rawCut's own two capped halves, an independent route to the same number.
+      The hinge at X 5.4..9.9 needs a step face with a hole in it (it goes
+      around the bore) and is capped with Cut's rawFlatCapLoops.
    5. refusals: each names its reason and hands back the input untouched.
       A box face landing exactly on a flat face of the piece is NOT one of
       them (2b): that face is part of the section and is sealed like any other.
@@ -231,11 +234,20 @@ try {
     const v = validate(r.tris, { selfint: true });
     check('result PASSES, self-intersection included; still a tube (chi 0)',
       v.verdict === 'PASS' && v.euler_characteristic === 0, v.summary);
-    check('no cap needed, so Cut\'s simple-outline cap never runs', r.joint.capLoops === 0);
+    check('no cap needed: the sections match', r.joint.capLoops === 0);
     check('length 25 -> 20', r.lengthBefore === 25 && r.lengthAfter === 20, r.lengthBefore + ' -> ' + r.lengthAfter);
     const want = volume(src) * 20 / 25;
     check('volume is 20/25 of the source (a pure prism)', Math.abs(volume(r.tris) - want) / want < 1e-6,
       volume(r.tris).toFixed(4) + ' vs ' + want.toFixed(4));
+    // rawCut caps an annulus by bridging the bore into the outline, so its
+    // two halves are a reference here too.
+    const nearHalf = rawCut(src, 2, 10, false), farHalf = rawCut(src, 2, 15, true);
+    const vn = validate(nearHalf), vf = validate(farHalf);
+    check('rawCut\'s two capped halves PASS the checker', vn.verdict === 'PASS' && vf.verdict === 'PASS',
+      vn.summary + ' | ' + vf.summary);
+    const halves = volume(nearHalf) + volume(farHalf);
+    check('volume = rawCut\'s two capped halves', Math.abs(volume(r.tris) - halves) / halves < 1e-5,
+      volume(r.tris).toFixed(4) + ' vs ' + halves.toFixed(4));
   }
 
   console.log('\n=== 4. library pieces ===');
@@ -243,6 +255,7 @@ try {
     ['pin.stl', 0, 8, 12, true],
     ['soften_test_04_slotted_block.stl', 0, 4.8, 32.4, true],       // step face through the slot
     ['soften_test_05_star_prism.stl', null, 0.3, 0.55, true],        // two step faces
+    ['hinge_knuckle_box.stl', 0, 5.4, 9.9, true, 1],                 // step face around the bore: a cap with a hole
     ['hinge_knuckle_box.stl', 0, 7.2, 10.8, true],
     ['hinge_knuckle_box.stl', 0, 2.16, 14.58, true],
     ['CTH_fixture.stl', null, 0.12, 0.81, true],
@@ -252,7 +265,7 @@ try {
     ['v9_mirror_factory.stl', 0, 0, 88, false],                      // through the +seam's sub-tolerance pair
     ['v9_mirror_factory.stl', null, 0.12, 0.81, false]               // crossings at the joint
   ];
-  for (const [file, ax, a, b, selfint] of CASES) {
+  for (const [file, ax, a, b, selfint, holes] of CASES) {
     const src = readSTL(path.join(ROOT, 'library', file));
     let k = ax, lo = a, hi = b;
     const bb = bounds(src);
@@ -265,27 +278,25 @@ try {
     if (!r.ok) { check(tag + ': crop ok', false, r.reason); continue; }
     const v = validate(r.tris, { selfint });
     check(tag + ': PASS' + (selfint ? ' (self-intersection included)' : ''), v.verdict === 'PASS',
-      v.summary + '  [' + r.joint.capLoops + ' cap loop(s), ' + r.joint.crossings + ' crossing(s)]');
+      v.summary + '  [' + r.joint.capLoops + ' cap loop(s), ' + r.joint.capHoles + ' hole(s), ' + r.joint.crossings + ' crossing(s)]');
+    if (holes !== undefined) check(tag + ': ' + holes + ' step-face hole(s) bridged into the cap', r.joint.capHoles === holes, JSON.stringify(r.joint));
     const d = Math.fround(hi) - Math.fround(lo);
     check(tag + ': length shortened by the box', Math.abs((r.lengthBefore - r.lengthAfter) - d) < 1e-4,
       r.lengthBefore.toFixed(4) + ' -> ' + r.lengthAfter.toFixed(4) + ', box ' + d.toFixed(4));
     // Two independent references. The open-wall flux needs no cap at all.
-    // rawCut's two capped halves are Cut's own answer, and count only where
-    // Cut's cap is right: a section with a hole in it is Cut's known
-    // limitation (one ear-clip per loop), and its halves fail the checker.
+    // rawCut's two capped halves are Cut's own answer; they must pass the
+    // checker themselves, sections with a hole included.
     const fL = Math.fround(lo), fH = Math.fround(hi);
     const flux = openVolume(ctx.rawCutOpen(src, k, fL, false), k, fL) + openVolume(ctx.rawCutOpen(src, k, fH, true), k, fH);
     check(tag + ': volume = the two kept parts (open-wall flux)', Math.abs(volume(r.tris) - flux) / Math.abs(flux) < 1e-5,
       volume(r.tris).toFixed(3) + ' vs ' + flux.toFixed(3));
     const nearHalf = rawCut(src, k, fL, false), farHalf = rawCut(src, k, fH, true);
-    const halvesOk = validate(nearHalf).verdict === 'PASS' && validate(farHalf).verdict === 'PASS';
-    if (halvesOk) {
-      const want = volume(nearHalf) + volume(farHalf);
-      check(tag + ': volume = rawCut\'s two capped halves', Math.abs(volume(r.tris) - want) / Math.abs(want) < 1e-5,
-        volume(r.tris).toFixed(3) + ' vs ' + want.toFixed(3));
-    } else {
-      console.log('        (rawCut\'s own halves fail the checker here - a section with a hole, Cut\'s cap limitation - so they are not a reference)');
-    }
+    const vn = validate(nearHalf), vf = validate(farHalf);
+    check(tag + ': rawCut\'s two capped halves PASS', vn.verdict === 'PASS' && vf.verdict === 'PASS',
+      vn.summary + ' | ' + vf.summary);
+    const want = volume(nearHalf) + volume(farHalf);
+    check(tag + ': volume = rawCut\'s two capped halves', Math.abs(volume(r.tris) - want) / Math.abs(want) < 1e-5,
+      volume(r.tris).toFixed(3) + ' vs ' + want.toFixed(3));
   }
 
   console.log('\n=== 5. refusals name the reason and hand back the input untouched ===');
@@ -295,8 +306,6 @@ try {
       ['box over an end', src, { axisIdx: 0, lo: -1, hi: 10 }, /inside the piece/],
       ['box not covering the cross-section', src,
         { box: { axisIdx: 0, min: [20, 0, 0], max: [30, 6, 8] } }, /whole cross-section/],
-      ['step face that would need a hole (hinge bore)',
-        readSTL(path.join(ROOT, 'library', 'hinge_knuckle_box.stl')), { axisIdx: 0, lo: 5.4, hi: 9.9 }, /hole/],
       ['two overlapping shells at the joint (box_closed.stl, 74 piercing pairs in the source)',
         readSTL(path.join(ROOT, 'library', 'box_closed.stl')), { axisIdx: 0, lo: 24, hi: 36 }, /overlap/]
     ];

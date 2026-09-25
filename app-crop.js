@@ -350,11 +350,11 @@ function NSO_cropSeal(trisA, trisB, k, plane, tol, info) {
     tris = tris.filter(function (T, i) { return !drop.has(i); }).concat(add);
   }
 
-  // c. class the edges still open, walk them into loops, cap each loop
+  // c. class the edges still open, walk them into loops, cap each class
   var rest = openEdges().open;
   info.stepEdges = rest.length;
   var caps = [];
-  info.capLoops = 0; info.capTris = 0;
+  info.capLoops = 0; info.capHoles = 0; info.capTris = 0;
   if (rest.length) {
     // Each part's own outline, for point-in-region tests.
     var own = [[], []];
@@ -401,6 +401,7 @@ function NSO_cropSeal(trisA, trisB, k, plane, tol, info) {
         if (L) L.push(i); else outs.set(kk, [i]);
       });
       var used = new Uint8Array(edges.length);
+      var loops = [], touching = new Set();
       for (var s = 0; s < edges.length; s++) {
         if (used[s]) continue;
         var loop = [], cur = s, guard = 0;
@@ -411,6 +412,7 @@ function NSO_cropSeal(trisA, trisB, k, plane, tol, info) {
           var cand = (outs.get(key(E.b)) || []).filter(function (j) { return !used[j] || j === s; });
           if (!cand.length) { cur = -1; break; }
           if (cand.length > 1) {
+            touching.add(key(E.b));
             // Two step faces of one class touch at this point. Keep to the
             // face being walked: the next edge is the one that turns least
             // away from it (face on the right for +1 in wall order, left
@@ -431,31 +433,59 @@ function NSO_cropSeal(trisA, trisB, k, plane, tol, info) {
         }
         if (cur !== s) throw new Error('a step-face outline at the joint does not close');
         if (loop.length < 3) throw new Error('a step-face outline at the joint has ' + loop.length + ' point(s)');
-        // Wall order runs clockwise seen from +k for a +k face, counter-
-        // clockwise for a -k face. A loop the other way round is a hole.
+        loops.push(loop);
+      }
+      // Wall order runs clockwise seen from +k for a +k face, counter-
+      // clockwise for a -k face. A loop the other way round is a hole in the
+      // step face (the far section sits inside the near one or the reverse,
+      // e.g. around a bore). rawFlatCapLoops works holes out by nesting and
+      // bridges each into its outline, so all of a class's loops go to it
+      // together; the signed areas then sum to the outlines minus the holes.
+      var sum = 0, holes = [];
+      loops.forEach(function (L, li) {
         var area = 0;
-        for (var i = 0; i < loop.length; i++) {
-          var p = to2(loop[i]), q = to2(loop[(i + 1) % loop.length]);
+        for (var i = 0; i < L.length; i++) {
+          var p = to2(L[i]), q = to2(L[(i + 1) % L.length]);
           area += p[0] * q[1] - q[0] * p[1];
         }
         area /= 2;
-        if (area * cls > 0) {
-          throw new Error('the joint needs a step face with a hole in it (the far section sits inside the near one ' +
-            'or the reverse); Cut’s cap fills simple outlines only');
-        }
-        var cap = rawFlatCapLoop(loop, k, plane, cls < 0);
-        var capArea = 0;
-        for (var c = 0; c < cap.length; c += 9) {
-          var A2 = to2([cap[c], cap[c+1], cap[c+2]]), B2 = to2([cap[c+3], cap[c+4], cap[c+5]]), C2 = to2([cap[c+6], cap[c+7], cap[c+8]]);
-          capArea += Math.abs(orient(A2, B2, C2)) / 2;
-        }
-        if (Math.abs(capArea - Math.abs(area)) > 1e-6 * Math.max(1, Math.abs(area))) {
-          throw new Error('a step face did not triangulate cleanly (cap ' + capArea + ' vs outline ' + Math.abs(area) + ' mm^2)');
-        }
-        caps.push(cap);
-        info.capLoops++;
-        info.capTris += cap.length / 9;
+        sum += area;
+        if (area * cls > 0) holes.push(li);
+      });
+      // rawFlatCapLoops assumes loops that share no point. The walk above
+      // splits two faces touching at one point into loops that do. Two
+      // outlines sharing a point still cap as before, provided the nesting
+      // test does not start on that point, so each loop is turned to start
+      // elsewhere. A hole touching another loop has no clean bridge: refuse
+      // it by name.
+      loops = loops.map(function (L) {
+        for (var i = 0; i < L.length; i++) if (!touching.has(key(L[i]))) return L.slice(i).concat(L.slice(0, i));
+        return L;
+      });
+      if (holes.length && touching.size) {
+        holes.forEach(function (li) {
+          loops[li].forEach(function (pt) {
+            if (touching.has(key(pt))) {
+              throw new Error('a hole in a step face at the joint touches its outline (or another hole) at a point; ' +
+                'Cut’s cap needs holes clear of their outline');
+            }
+          });
+        });
       }
+      var cap = rawFlatCapLoops(loops, k, plane, cls < 0);
+      var capArea = 0;
+      for (var c = 0; c < cap.length; c += 9) {
+        var A2 = to2([cap[c], cap[c+1], cap[c+2]]), B2 = to2([cap[c+3], cap[c+4], cap[c+5]]), C2 = to2([cap[c+6], cap[c+7], cap[c+8]]);
+        capArea += Math.abs(orient(A2, B2, C2)) / 2;
+      }
+      sum = Math.abs(sum);
+      if (Math.abs(capArea - sum) > 1e-6 * Math.max(1, sum)) {
+        throw new Error('a step face did not triangulate cleanly (cap ' + capArea + ' vs outline ' + sum + ' mm^2)');
+      }
+      caps.push(cap);
+      info.capLoops += loops.length;
+      info.capHoles += holes.length;
+      info.capTris += cap.length / 9;
     });
   }
 
@@ -864,7 +894,8 @@ function NSO_cropSelectedModel() {
     setStatus('Crop refused - piece unchanged (' + r.reason + ')', true);
     return r;
   }
-  var cap = r.joint.capLoops ? r.joint.capLoops + ' step face(s) capped' : 'sections matched, no cap needed';
+  var cap = r.joint.capLoops ? r.joint.capLoops + ' step-face loop(s) capped' +
+    (r.joint.capHoles ? ', ' + r.joint.capHoles + ' of them a hole' : '') : 'sections matched, no cap needed';
   var txt = 'Crop done - removed ' + slab.axis.toUpperCase() + ' ' + slab.startMm.toFixed(1) + '–' +
     slab.endMm.toFixed(1) + ' mm; piece ' + r.lengthBefore.toFixed(2) + ' → ' + r.lengthAfter.toFixed(2) +
     ' mm, one closed piece (' + cap + '; open 0, non-manifold ' + after.nm + ')';

@@ -6,7 +6,8 @@
    reachable, the box is drawn and really moves under a mouse drag, the
    button commits a piece that passes tools/mesh_validate.py - both the
    rawTris the app keeps and the STL it exports - undo names Crop and puts
-   the soup back, paint stands it down, a refusal leaves the piece alone,
+   the soup back, paint stands it down, a refusal leaves the piece alone, a
+   step face with a hole (hinge bore) is capped,
    and Split still cuts the cropped piece cleanly. */
 
 const fs = require('fs');
@@ -176,7 +177,19 @@ withApp(async (page, logs) => {
   check('piece unchanged', JSON.stringify(await rawOf(page)) === JSON.stringify(before));
   await page.evaluate(() => { getActiveModel().faceMask = null; });
 
-  console.log('\n=== 7. a refusal leaves the piece alone (hinge bore: step face with a hole) ===');
+  console.log('\n=== 7. a refusal leaves the piece alone (box_closed: two overlapping shells at the joint) ===');
+  const bid = await loadSTL(page, path.join(ROOT, 'library', 'box_closed.stl'));
+  await selectModel(page, bid);
+  await page.evaluate(() => { showEditPreview(); updateCutterUI(); });
+  const bBefore = await rawOf(page);
+  await setBox(page, 24, 36);
+  await page.click('#btn-crop');
+  await page.waitForFunction(() => /Crop (done|refused)/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  const bs = await statusOf(page);
+  check('refused, naming the overlap', /Crop refused/.test(bs) && /overlap/.test(bs), bs);
+  check('piece unchanged', JSON.stringify(await rawOf(page)) === JSON.stringify(bBefore));
+
+  console.log('\n=== 7b. a step face with a hole (hinge bore) is capped ===');
   const hid = await loadSTL(page, path.join(ROOT, 'library', 'hinge_knuckle_box.stl'));
   await selectModel(page, hid);
   await page.evaluate(() => { showEditPreview(); updateCutterUI(); });
@@ -185,8 +198,12 @@ withApp(async (page, logs) => {
   await page.click('#btn-crop');
   await page.waitForFunction(() => /Crop (done|refused)/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
   const hs = await statusOf(page);
-  check('refused, naming the hole', /Crop refused/.test(hs) && /hole/.test(hs), hs);
-  check('piece unchanged', JSON.stringify(await rawOf(page)) === JSON.stringify(hBefore));
+  check('hinge 5.4..9.9 cropped, the hole named in the status', /Crop done/.test(hs) && /1 of them a hole/.test(hs), hs);
+  const hv = validate(writeSTL(path.join(TMP, 'hinge-hole.stl'), await rawOf(page)));
+  check('rawTris PASS mesh_validate.py (self-intersection included)', hv.verdict === 'PASS', summary(hv));
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => /Undo/.test(document.getElementById('status').textContent), null, { timeout: 15000 });
+  check('undo puts the hinge back', JSON.stringify(await rawOf(page)) === JSON.stringify(hBefore));
 
   console.log('\n=== 8. Split still cuts a cropped piece cleanly ===');
   await setBox(page, 7.2, 10.8);
