@@ -132,44 +132,6 @@
           <button id="btn-seat-grid" class="btn btn-secondary" type="button" title="Faint grid on the top surface of the target piece (A), to line up what goes above it">Surface grid: auto</button>
           <button id="btn-join-clear" class="btn btn-ghost" type="button">Cancel Join</button>
         </section>
-        <section class="card hidden" id="toolpath-card" tabindex="0">
-          <h2>Toolpath</h2>
-          <p class="hint">An already-sliced <code>.gcode.3mf</code> from Bambu Studio, drawn as real
-            geometry. Scrub to a single line, isolate its Z to see that one layer alone,
-            then Extract Line.</p>
-          <input type="range" id="tp-slider" min="0" max="0" step="1" value="0"
-                 title="Scrub through the toolpath one extrusion move at a time" />
-          <div class="edit-row tp-step-row">
-            <button id="btn-tp-prev" class="btn btn-secondary" type="button" title="Previous line (Left arrow)">&minus;1 line</button>
-            <input type="number" id="tp-index" value="0" min="0" max="0" step="1" title="Jump to a line by number" />
-            <button id="btn-tp-next" class="btn btn-secondary" type="button" title="Next line (Right arrow)">+1 line</button>
-          </div>
-          <div class="edit-row tp-step-row">
-            <button id="btn-tp-layer-down" class="btn btn-secondary" type="button" title="First line of the previous layer (Shift+Left)">&#9660; layer</button>
-            <button id="btn-tp-layer-up" class="btn btn-secondary" type="button" title="First line of the next layer (Shift+Right)">&#9650; layer</button>
-          </div>
-          <p id="tp-readout" class="cut-readout">&mdash;</p>
-          <p id="tp-detail" class="hint tp-detail">&mdash;</p>
-          <label class="tp-check-row" for="tp-zfilter" title="Hide every layer but the one at the scrubbed line's Z, so a single layer's construction stands alone from the rest of its own feature">
-            <input type="checkbox" id="tp-zfilter" />
-            <span>Isolate Z (one layer at a time)</span>
-          </label>
-          <div class="edit-row tp-step-row">
-            <label class="hint" for="tp-zhalf" style="margin:0">&plusmn; mm</label>
-            <input type="number" id="tp-zhalf" value="0" min="0" max="15" step="0.05"
-                   title="Half-thickness of the Z window. 0 is exactly one layer; raise it to take a slab of several." />
-          </div>
-          <p id="tp-zreadout" class="hint tp-detail">&mdash;</p>
-          <label class="hint" for="tp-scope" style="margin-bottom:4px;display:block">Extract scope</label>
-          <select id="tp-scope" title="How much of the toolpath Extract Line pulls out">
-            <option value="zlayer">This whole layer at one Z (all features)</option>
-            <option value="zfeature">This feature, at this Z</option>
-            <option value="move">This line only</option>
-            <option value="feature">This feature, on this layer</option>
-            <option value="layer">This whole layer</option>
-          </select>
-          <button id="btn-tp-extract" class="btn btn-primary" type="button">Extract Line</button>
-        </section>
         <section class="card card-compact">
           <h2>Pack</h2>
           <button id="btn-optimize" class="btn btn-primary" disabled>Optimize plate</button>
@@ -709,21 +671,16 @@
           <button id="btn-undo" class="viewport-tool-btn" type="button" disabled>↶</button>
           <button id="btn-frame-view" class="viewport-tool-btn" type="button">◎</button>
           <button id="btn-xray" class="viewport-tool-btn" type="button">X</button>
-          <button id="btn-gcode" class="viewport-tool-btn btn-gcode" type="button"
-                  aria-label="G-code microscope"
-                  title="G-code microscope: open an already-sliced .gcode.3mf from Bambu Studio, draw its toolpath as real geometry, scrub to a single extrusion line, isolate one Z layer, and extract what you are looking at as its own piece.">G&#128300;</button>
-          <input type="file" id="gcode-input" accept=".3mf" class="hidden-quiet" />
-          <!-- The Microscope VIEW. Distinct from G-code-onto-the-plate above:
-               that one imports a sliced project as models you then scrub on
-               the plate; this one lays a dedicated inspector - the reference
-               tool's own view - OVER whatever is on the plate, the same way
-               X-ray acts on what is already there, and hands a selection back
-               out either onto the plate or to a file. It takes a file too,
-               and a .gcode.3mf import lands in it without a button press.
-               See docs/GCODE-MICROSCOPE.md. -->
-          <button id="btn-microscope" class="viewport-tool-btn" type="button"
-                  aria-label="Microscope view"
-                  title="Microscope: put whatever is on the plate under the lens, the way X-ray does - or Import an STL, a 3MF or a sliced .gcode.3mf instead. Colour per part or per slicer feature, a capture box with independent footprint and thickness, whole-layer selection on a slice - then send what you isolated to the plate or straight to an STL file.">&#128300;</button>
+          <!-- G-scope: the ONE G-code / microscope tool. It lays an inspector
+               OVER whatever is on the plate, the way X-ray acts on what is
+               already there; a sliced .gcode.3mf import (by content, not by
+               name) lands in it without a button press and puts nothing on
+               the plate. Selections leave only through Export or Crop.
+               The old G-code-onto-the-plate door (#btn-gcode) was merged
+               into this one. See docs/GCODE-MICROSCOPE.md, "G-scope". -->
+          <button id="btn-microscope" class="viewport-tool-btn btn-gscope" type="button"
+                  aria-label="G-scope"
+                  title="G-scope: put the plate under the lens, or open an STL, a 3MF or a sliced .gcode.3mf. Colour per part or per slicer feature, a capture box, single-line picking, a layer-range slider, clear-from-view - then export what you isolated, or crop a Z band out through the Crop tool.">G&#128300;</button>
           <input type="file" id="ms-input" accept=".stl,.3mf" class="hidden-quiet" />
           <button id="btn-watch" class="viewport-tool-btn" type="button"
                   aria-pressed="false"
@@ -749,7 +706,7 @@
   </div>
 
   <!-- ===================================================================
-       The Microscope view. app-microscope.js owns it; deleting this block,
+       G-scope (the Microscope view). app-microscope.js owns it; deleting this block,
        the #btn-microscope button and that script tag removes the feature
        whole. The layout is the reference tool's - sidebar left, viewport
        right, badges over the canvas - because the view is reused rather
@@ -757,7 +714,7 @@
        =================================================================== -->
   <div id="microscope" class="ms-panel" tabindex="0" hidden>
     <div id="ms-sidebar" class="ms-sidebar">
-      <h1 id="ms-title">Microscope</h1>
+      <h1 id="ms-title">G-scope</h1>
       <p class="ms-sub" id="ms-sub">The plate, or an STL, a 3MF or a sliced .gcode.3mf.</p>
 
       <div class="ms-section">
@@ -778,6 +735,8 @@
         <div class="ms-btn-row">
           <button id="ms-mode-orbit" type="button">Orbit whole part</button>
           <button id="ms-mode-select" type="button" class="active">Click to select region</button>
+          <button id="ms-mode-line" type="button"
+                  title="Pick one extrusion move at a time (sliced files only)">Pick a line</button>
         </div>
         <div id="ms-select-controls">
           <p class="ms-note">Click empty space to drop a flat box. Drag its
@@ -789,6 +748,17 @@
             <button id="ms-btn-isolate" type="button" disabled>Isolate all boxes &rarr;</button>
             <button id="ms-btn-clear" type="button">Clear all boxes</button>
           </div>
+        </div>
+        <div id="ms-line-controls" style="display:none;">
+          <p class="ms-note">Click a line to pick that one move; <b>Shift</b>-click
+            adds or removes one. The arrows step to the neighbouring move that is
+            drawn, so the layer-range slider and the legend decide what you step through.</p>
+          <div class="ms-btn-row">
+            <button id="ms-line-prev" type="button" title="Previous move (Left arrow)">&#9664; line</button>
+            <button id="ms-line-next" type="button" title="Next move (Right arrow)">line &#9654;</button>
+            <button id="ms-btn-isolate-line" type="button" disabled>Isolate &rarr;</button>
+          </div>
+          <p class="ms-note" id="ms-line-read">&mdash;</p>
         </div>
         <div id="ms-detail-controls" class="ms-btn-row" data-flex="1" style="display:none;">
           <button id="ms-btn-back" type="button">&larr; Back to whole part</button>
@@ -806,6 +776,30 @@
                   title="Select every move at this layer's printing height, whatever feature printed it">Select layer</button>
         </div>
         <p class="ms-note" id="ms-layer-note">&mdash;</p>
+      </div>
+
+      <div class="ms-section" id="ms-visibility-row">
+        <div class="ms-section-title">Visibility (view only)</div>
+        <div class="ms-btn-row">
+          <button id="ms-btn-clear-view" type="button" disabled
+                  title="Hide what is selected. View only: nothing is exported, the plate is not touched, and there is nothing to undo">Clear from view</button>
+          <button id="ms-btn-show-all" type="button" disabled
+                  title="Bring back every cleared line or piece and every legend group">Show all</button>
+          <button id="ms-btn-select-visible" type="button" disabled
+                  title="Select everything drawn right now - the legend, the cleared set and the layer range decide what that is. How an isolated feature becomes something you can export or crop.">Select shown</button>
+        </div>
+      </div>
+
+      <div class="ms-section" id="ms-crop-row" style="display:none;">
+        <div class="ms-section-title">Crop Z band</div>
+        <p class="ms-note">Select what to crop, then narrow the layer-range slider
+          on the right to the band to take out. Crop removes that band and joins
+          what is above onto what is below, through the <b>Crop</b> tool itself.</p>
+        <div class="ms-btn-row">
+          <button id="ms-btn-crop" type="button" disabled
+                  title="Remove the slider's Z band from the selection and rejoin it, with the Crop tool. A plate piece is edited in place (undo reverts it); a slice or a file selection lands on the plate as a new, cropped piece.">Crop out band</button>
+        </div>
+        <p class="ms-note" id="ms-crop-read">&mdash;</p>
       </div>
 
       <div class="ms-section" id="ms-export-row" data-flex="0" style="display:none;">
@@ -832,6 +826,22 @@
     <div id="ms-viewport" class="ms-viewport">
       <div id="ms-mode-badge">Whole part</div>
       <div id="ms-hint-badge"></div>
+      <!-- The layer-range slider, docked to the viewport's right edge. Two
+           handles: the lower and upper Z the view draws. One step apart is one
+           layer; spread apart is a chunk; the ends are everything. -->
+      <div id="ms-zr" class="ms-zr" hidden>
+        <div id="ms-zr-hi-read" class="ms-zr-read">&mdash;</div>
+        <div id="ms-zr-track" class="ms-zr-track">
+          <div id="ms-zr-fill" class="ms-zr-fill" title="Drag to move the whole band"></div>
+          <div id="ms-zr-hi" class="ms-zr-handle ms-zr-handle-hi" role="slider" tabindex="0"
+               aria-label="Upper Z bound" aria-valuemin="0"></div>
+          <div id="ms-zr-lo" class="ms-zr-handle ms-zr-handle-lo" role="slider" tabindex="0"
+               aria-label="Lower Z bound" aria-valuemin="0"></div>
+        </div>
+        <div id="ms-zr-lo-read" class="ms-zr-read">&mdash;</div>
+        <div id="ms-zr-count" class="ms-zr-count">&mdash;</div>
+        <button id="ms-zr-all" class="ms-zr-all" type="button" title="Every layer">All</button>
+      </div>
     </div>
   </div>
   <script src="NSO_Repair.js?v=inside4"></script>
@@ -921,7 +931,6 @@
   <script src="app-library-save.js?v=libsave1"></script>
   <script src="app-library.js?v=libsave1"></script>
   <script src="app-photoset.js?v=photoset1"></script>
-  <script src="app-toolpath.js?v=toolpath2"></script>
   <script src="app-microscope.js?v=scope2"></script>
   <script src="app-ux.js?v=inside7"></script>
   <!-- Live watch: off until its button is pressed, and it patches nothing

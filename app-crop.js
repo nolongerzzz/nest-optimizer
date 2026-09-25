@@ -470,6 +470,8 @@ function NSO_cropSeal(trisA, trisB, k, plane, tol, info) {
 
    opts.box    a box as in section 2, or
    opts.axisIdx, opts.lo, opts.hi   the slab directly.
+   opts.shells the input is several closed shells that may share faces
+               (a toolpath's beads); see the gate below.
    On refusal ok is false and tris is the input soup object.
    ===================================================================== */
 function NSO_cropRaw(rawTris, opts) {
@@ -527,7 +529,20 @@ function NSO_cropRaw(rawTris, opts) {
   // Gate on the result, on the float32 values it will be saved as.
   var census = NSO_cropEdgeCensus(out);
   res.census = census;
-  if (census.open || census.repeated || census.degenerate) {
+  // opts.shells: the input is a SET of closed shells that touch, not one
+  // closed piece - a toolpath's beads (G-scope, app-microscope.js), where
+  // buildLineGeometry emits one closed box per move and stacked layers and
+  // collinear moves share faces exactly. Such a soup already carries repeated
+  // directed edges before Crop touches it, so "no repeated edge" can never
+  // hold. The gate becomes: still closed, nothing degenerate, and no MORE
+  // repeated edges than the input brought - Crop may not add any. The volume
+  // gate below is unchanged: it is a sum over shells either way.
+  var allowRepeated = 0;
+  if (opts.shells) {
+    res.inputCensus = NSO_cropEdgeCensus(rawTris);
+    allowRepeated = res.inputCensus.repeated;
+  }
+  if (census.open || census.repeated > allowRepeated || census.degenerate) {
     res.reason = 'the sealed piece is not closed (open ' + census.open + ', repeated ' + census.repeated +
       ', degenerate ' + census.degenerate + ')';
     return res;
@@ -848,7 +863,33 @@ function NSO_cropSelectedModel() {
   if (!slab) { setStatus('Crop: this piece has no extent to crop', true); return { ok: false, reason: 'no extent' }; }
   var rb = NSO_cropRawBox(m, slab);
   if (!rb.box) { setStatus('Crop refused - piece unchanged (' + rb.reason + ')', true); return { ok: false, reason: rb.reason }; }
-  var r = NSO_cropRaw(m.rawTris, { box: rb.box });
+  var label = 'removed ' + slab.axis.toUpperCase() + ' ' + slab.startMm.toFixed(1) + '–' + slab.endMm.toFixed(1) + ' mm';
+  var r = NSO_cropModel(m, rb.box, { label: label });
+  if (r.ok) {
+    var cs = NSO_cropState();
+    cs.forId = null;               // the old box would now select other geometry
+    NSO_cropSyncUI();
+  }
+  return r;
+}
+
+/* The commit, for any caller that already has a raw box: the Cut menu's Crop
+   row above, and G-scope (app-microscope.js), which crops a Z band chosen on
+   its layer-range slider. One gate and one commit, so the two cannot drift.
+     m      a model with rawTris ('zup')
+     box    { axisIdx, lo, hi } or { axisIdx, min, max } in m's raw frame
+     opts.shells  see NSO_cropRaw
+     opts.label   what the status line says was removed
+   Refusals leave the piece untouched and say why. */
+function NSO_cropModel(m, box, opts) {
+  opts = opts || {};
+  if (!m || !m.rawTris) { setStatus('Crop needs a raw piece', true); return { ok: false, reason: 'no raw piece' }; }
+  var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
+  if (painted > 0) {
+    setStatus('Crop stood down - ' + painted + ' painted face(s); everything past the box slides. Clear paint to crop.', true);
+    return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
+  }
+  var r = NSO_cropRaw(m.rawTris, { box: box, shells: !!opts.shells });
   if (!r.ok) { setStatus('Crop refused - piece unchanged (' + r.reason + ')', true); return r; }
   // The in-page transcription of the canonical checker, as Solidify gates.
   var before = NSO_cropCensus(m.rawTris), after = NSO_cropCensus(r.tris);
@@ -865,12 +906,9 @@ function NSO_cropSelectedModel() {
     return r;
   }
   var cap = r.joint.capLoops ? r.joint.capLoops + ' step face(s) capped' : 'sections matched, no cap needed';
-  var txt = 'Crop done - removed ' + slab.axis.toUpperCase() + ' ' + slab.startMm.toFixed(1) + '–' +
-    slab.endMm.toFixed(1) + ' mm; piece ' + r.lengthBefore.toFixed(2) + ' → ' + r.lengthAfter.toFixed(2) +
-    ' mm, one closed piece (' + cap + '; open 0, non-manifold ' + after.nm + ')';
+  var txt = 'Crop done - ' + (opts.label || ('removed ' + 'XYZ'[r.axisIdx] + ' ' + r.lo.toFixed(2) + '–' + r.hi.toFixed(2) + ' mm')) +
+    '; piece ' + r.lengthBefore.toFixed(2) + ' → ' + r.lengthAfter.toFixed(2) +
+    ' mm, ' + (opts.shells ? 'closed shells' : 'one closed piece') + ' (' + cap + '; open 0, non-manifold ' + after.nm + ')';
   NSO_sculptCommitRaw(m, r.tris, 'cropReplace', txt);
-  var cs = NSO_cropState();
-  cs.forId = null;               // the old box would now select other geometry
-  NSO_cropSyncUI();
   return r;
 }

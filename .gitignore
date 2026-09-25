@@ -12,3 +12,4 @@ tools/assemble-out/
 tools/integration-out/
 .test-run/
 tools/scope-overlay-out/
+tools/gscope-out/
