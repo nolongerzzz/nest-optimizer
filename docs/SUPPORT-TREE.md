@@ -454,6 +454,155 @@ length`, put to `mesh_validate.py` rather than to our own sectioning code.
 
 ---
 
+## 6b. Round, tapered, and hollow — the shipped default
+
+`planTree(host, { hollow: true })` then `hollowTree(plan)`.
+`npm run tree:round`, `tree:round-tall`, `tree:round-tall-gecko`.
+Built to the measurements in `docs/SUPPORT-TREE-SHAPE.md`, which `npm run
+tree:shape` re-derives from the real Bambu slice on every run.
+
+### Section: round, tapered by the measured law
+
+`section: 'round'` (default) makes every trunk and branch a straight
+frustum. Its section is a regular 24-gon with the **area** of a circle of
+diameter
+
+> **d = 2 mm + 2·tan 5° × (height below its tip)**
+
+This is one law for trunk and branch. It was measured as eqD = 1.97 + 0.172 ×
+depth (r² 0.988) on 1,824 slices of the reference, and it is that slice's own
+`tree_support_branch_diameter` and `tree_support_branch_diameter_angle`.
+`tipDiameterMm` and `diameterAngleDeg` override it. A branch's tip is its
+contact. The trunk's tip is the highest contact it serves, so it is never
+narrower at the collar than a branch leaving it. `section: 'square'` is the
+constant 1.2 mm strut this file shipped first. It is kept for comparison, and
+`tree:test` / `tree:canonical` pin it by name.
+
+The frustum is `NSO_PathSweep.sweep({ scales: [s0, s1] })`. It is allowed on
+straight two-point paths only: every rail passes through the cone's apex, so
+each wall quad is planar (measured: ≤ 1 × 10⁻⁵ mm), and a path with a joint is
+refused by name.
+
+**The plan does not move.** Contacts, the split, the trunk's base and axis, and
+every branch's contact, root, heading, length and tilt are planned on the 1.2 mm
+planning side exactly as before. The section is read only when the solids are
+made. `tree:round` asserts this against the square plan on every fixture and
+both tip styles, to the bit, together with the refusals, the part count, and
+every gecko finger byte for byte. The hand stays at the planning size: scaled
+to a 2 mm tip, its fingers reach into the neighbouring contacts and close
+loops through the tree (measured: Euler −74 on the shelf).
+
+**The square fallback.** A fatter solid can hit the piece where the square one
+cleared, so each round part is tested on its own converging rails. One that
+would run into the piece keeps the square section and is named in
+`plan.sectionFallback`. Nothing is dropped and nothing moves. Measured:
+
+| fixture | fallback |
+|---|---|
+| shelf, tab | none |
+| tall | 4 branches, whose contacts sit 0.13 mm from the post's face: a 2 mm round tip there must overlap the post |
+| tiny | the trunk: a 4.1 mm base under a 2 mm tab 1 mm from a post |
+
+### Bores: exact, and joined
+
+> **hollow tree = union(outer parts) − union(each part shrunk by one wall)**
+
+A part's inner is the same prism or frustum with every face moved in by
+`wall` along its own normal. The section's apothem shrinks by
+`wall / cos α` (α is the taper's half-angle) and each end cap moves in by
+`wall`. A radial `apothem − wall` would leave `wall·cos α` perpendicular, the
+same shortfall `NSO_wheelInnerAt` measured; on the shelf trunk that is
+0.4184 mm instead of 0.42. The shrink is in closed form: it is exactly the
+erosion `nso_hollow.js` samples. So every bore point is at least `wall` inside
+its own part, hence inside the union, and no bore comes nearer the outside
+than `wall`. There is no grid, no level set and no keep region. It replaced
+the sampled version for trees; `nso_hollow.js` stays for arbitrary pieces.
+Bores remove through `NSO_subtractSoups` (app-join.js), the plain kernel
+subtract next to the union.
+
+What the measurements say it gives:
+
+- **One merged bore**, as the reference's merged contours have. Every
+  multi-branch fixture comes out Euler 4: one skin and one bore.
+- **Every wall to the outside at least 0.42 mm, read off the kernel's
+  output.** A labelled probe classes each face as skin or bore, fires one ray
+  per face into the material, and bins each reading. Skin↔bore thinnest:
+  0.4200 mm on every fixture, 0 under the floor.
+- **Membranes between diverging bores.** Where two bores part, they part
+  before their tubes do, and for a short run the material between them is
+  thinner than a wall: 324 of 1,690 bore↔bore readings on the shelf, thinnest
+  0.001 mm. That is not a wall to the outside. A slicer offsetting two holes
+  by half a line merges them, which is the single merged bore the reference
+  shows at the same place. It is reported, never counted as a wall.
+- A 2 mm tip keeps a **bore over 1 mm** (the square 1.2 mm strut had
+  0.36 mm). At a 0.6 mm nozzle (floor 0.63 mm) the round tree still takes
+  bores; the square strut could not.
+
+### The fallback
+
+A part stays solid, named, with a `kind`, and never refuses the tree:
+
+| kind | when |
+|---|---|
+| `too-small` | its bore would be narrower than `minBoreMm` (default the floor, one line: two lines round a hole thinner than one of them leave no hole a slicer keeps, and the reference's ~2 mm tips close up), or it is too short for two end walls. Every gecko finger; every square-fallback part; a deliberately thin 0.9 mm branch added to a real tree |
+| `under-floor` | the wall asked for (`hollowWallMm`) is under the nozzle floor |
+| `kernel` | the kernel would not remove its bore |
+
+### Not built yet
+
+The **base foot** measured on the reference (+1.35 mm at the plate, gone by
+z 1.8, on a solid ~10 mm first-layer pad) is a separate adhesion feature and
+is deliberately not part of the taper law. It is the next ticket.
+
+---
+
+## 6c. Where the support meets the piece: the gap, the interface, the walls
+
+`nso_support_interface.js` — `finish(bulk, stations, piece)`, `npm run
+tree:interface`. `planTree({ wallClearanceMm })` for the walls.
+`tools/nso_support_slice_artifact.js --interface --tree` writes the tape test
+artifact with all three.
+
+**The conflict it fixes.** Every support aimed so far ended *on* the overhang:
+on the tape piece every tip stops at plate z 18.042, inside 0.2 mm layer 91,
+with zero air. That is the overlap Bambu Studio reported. None of those
+supports had an interface either.
+
+**The gap:** 0.18 mm, the repo's own easy-release figure (Seat (support)
+−0.18; `docs/SEAT-SURFACE.md`). It is measured as the **true minimum
+distance** over the **whole** support, not a z offset and not only at the
+tips. Each stack's height comes from the lowest underside within one layer
+of the contact over its patch, and is then *solved*: a slightly sloped
+underside lowers it by the shortfall. At 0.2 mm layers the interface fills
+exactly two slicer layers and leaves one empty layer under the piece, the same
+as Bambu's own `support_top_z_distance` 0.2.
+
+**The interface:** `nso_crosshatch.js`, unchanged. Two layers, each **one**
+direction of 0.42 mm lines at 1.2 mm pitch, the second at 90° to the first,
+each exactly one layer tall. The patch is 2×2 lines (2.82 mm) so every
+layer-1 line crosses the cut tip. It is centred where the support's own axis
+crosses the interface's underside. The bulk is cut flat there (on a bored tree
+that opens the bore upward, and the lines bridge it), and the layers are fused
+to each other and to the tip with a 2 µm overlap.
+
+**The ladder**, per tip: a patch nearer the piece than the gap drops to 1×1,
+then to none, and is named. The gap is never given up to fit an interface; a
+tip that cannot keep it is refused (`ok: false`), not built into the piece.
+
+**Wall clearance.** `contactPoints` places contacts over the overhang's own
+footprint and knows nothing about walls beside it. On the tape piece it put
+contact 4 0.74 mm from a wall, where a 2 mm tip reaches 0.26 mm into it. That
+zone sits inside the last cross-section, which the rail probe leaves out as
+cap. With `wallClearanceMm`, each contact is tested with horizontal rays over
+its tip's last 3 mm against the tip's own radius plus the clearance, and moved
+straight away from the wall until it clears (Bambu's
+`support_object_xy_distance`, same idea). Moves are reported, and a contact
+that would have to leave the overhang is refused. On `tall` it moves the four
+contacts that sat 0.13 mm off the post, and none of them then needs the square
+fallback. It is opt-in, so the validated fixtures above are unchanged.
+
+---
+
 ## 7. What the reference check compares
 
 `npm run tree:reference`, 21 checks, ~5 s, no browser.
@@ -516,11 +665,16 @@ splitPoint(from, apex, contacts, opts) // { ok, point, trunkMm, widestDeg, trunk
 branch(rootPoint, tip, opts)           // { ok, soup, parts, lengthMm, tiltDeg, tipPenetrationMm, hand? }
 planTree(rawTris, opts)                // detect + contacts + trunk + fan
 unionParts(parts, opts)                // Promise of the app's own union
+hollowParts(plan, opts)                // each part's exact bore, or left solid and why (§6b)
+hollowTree(plan, opts)                 // Promise: union(parts) - union(bores) (§6b)
 describe(result)                       // one status line
 ```
 
 `opts` is everything `detectOverhangs` and `aim` take, plus `maxSpanMm`,
 `branchTiltDeg`, `maxContacts`, `regionId`, `stations`, `tipEngageMm` and
-`branchStyle` (`'square'` default, or `'gecko-hand'`, see §5).
+`branchStyle` (`'square'` default, or `'gecko-hand'`, see §5), `section`
+(`'round'` default, or `'square'`), `tipDiameterMm` / `diameterAngleDeg`
+(the law, default 2 mm / 5°), `hollow` (`true` runs `hollowParts` after
+planning, §6b), `hollowWallMm` and `minBoreMm` (both default the floor).
 Soups are the app's raw convention: 9 floats per triangle, **Z up**,
 millimetres.

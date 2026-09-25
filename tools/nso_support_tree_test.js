@@ -38,7 +38,18 @@ for (const f of ['nso_thickness.js', 'nso_seat_surface.js', 'app-sculpt.js',
                  'nso_support_tree.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
-const ST = ctx.NSO_SupportTree;
+/* THIS SUITE PINS THE SQUARE SECTION. The shipped default is now 'round'
+   (tapered by the measured diameter law - see nso_support_tree.js,
+   SECTIONS, and tools/nso_support_tree_round_check.js, which covers it).
+   Everything here - 16-triangle branches, side^2 x length volumes, the
+   square cap's overshoot bound - is a fact about the square section, so it
+   is asked of the square section by name, in one place, rather than
+   quietly re-pointed at a different solid. */
+const ST_SHIPPED = ctx.NSO_SupportTree;
+const ST = Object.assign({}, ST_SHIPPED, {
+  planTree: (h, o) => ST_SHIPPED.planTree(h, Object.assign({ section: 'square' }, o)),
+  branch: (a, b, o) => ST_SHIPPED.branch(a, b, Object.assign({ section: 'square' }, o))
+});
 const SA = ctx.NSO_SupportAim;
 const PS = ctx.NSO_PathSweep;
 

@@ -77,7 +77,7 @@ function csgSource() {
 }
 
 const JOIN_FNS = ['NSO_soupLen', 'NSO_errMsg', 'NSO_manifoldStats',
-                  'NSO_weldEpsFor', 'NSO_unionSoups'];
+                  'NSO_weldEpsFor', 'NSO_unionSoups', 'NSO_subtractSoups'];
 const FIN_FNS = ['weldSoupVerts'];
 
 /* Two node warnings, neither of them about the code under test: the dynamic
