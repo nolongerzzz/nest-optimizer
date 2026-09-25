@@ -16,7 +16,11 @@
      skin <-> skin   solid material (a solid part, a crotch's wedge)
    The probe is nso_thickness.js's ray code - the JS port of mesh_validate.py's
    wall_thickness - reading the kernel's output, not the construction. */
-function labelledWalls(TH, soup, partSoups, FLOOR) {
+/* opts.exclude(point) -> true skips a reading that starts or lands there -
+   used to leave out a support's interface zone, whose lines are one layer
+   tall by design (their floor is a line WIDTH, not a height). */
+function labelledWalls(TH, soup, partSoups, FLOOR, opts) {
+  const exclude = (opts && opts.exclude) || null;
   const P = TH.prepare(soup, {});
   const parts = partSoups.map(s => TH.prepare(s, {}));
   const inAny = p => parts.some(Q => p[0] >= Q.lo[0] && p[0] <= Q.hi[0] && p[1] >= Q.lo[1] && p[1] <= Q.hi[1] &&
@@ -33,8 +37,10 @@ function labelledWalls(TH, soup, partSoups, FLOOR) {
     if (kind[f] === 'degenerate') return;
     const n = P.faceNormal(f), d = [-n[0], -n[1], -n[2]];
     const o = [0, 1, 2].map(i => (T[0][i] + T[1][i] + T[2][i]) / 3 + d[i] * 1e-4);
+    if (exclude && exclude(o)) return;
     const hits = P.hitsAlong(o, d, 8); if (!hits.length) return;
     const t = hits[0] + 1e-4, h = [0, 1, 2].map(i => o[i] + d[i] * hits[0]);
+    if (exclude && exclude(h)) return;
     const nr = P.nearest(h, 0.05); if (!nr) return;
     const k2 = kind[nr.face];
     const pair = (kind[f] === 'bore' && k2 === 'bore') ? 'membrane' : (kind[f] === 'skin' && k2 === 'skin') ? 'solid' : 'wall';

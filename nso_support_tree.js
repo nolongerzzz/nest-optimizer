@@ -1033,6 +1033,78 @@
     return hand;
   }
 
+  /* WALL CLEARANCE - a contact's tip kept clear of the piece's SIDE walls.
+
+     contactPoints() places contacts over the overhang's own footprint and
+     knows nothing about what rises beside it. On the tape piece that put a
+     contact 0.74 mm from a wall: a 2 mm round tip there reaches 0.26 mm INTO
+     the wall, inside the last cross-section a branch's rail probe leaves out
+     as cap. Bambu keeps its supports support_object_xy_distance off the
+     object for the same reason. So, with opts.wallClearanceMm (the air gap
+     the tip must keep), every contact is tested with horizontal rays at a few
+     heights over its tip's last 3 mm, each against the tip's own radius at
+     that height (the diameter law for 'round', the square's half-diagonal
+     otherwise) plus the clearance; a contact that is too close is moved
+     inward, straight away from the nearest wall, and dropped back onto the
+     region. Every move is reported, in mm. A contact that cannot be cleared
+     without leaving the region is refused by name. */
+  function clearWalls(SA, rawTris, region, points, opts) {
+    var out = { ok: false, reason: '', moved: [], clearanceMm: +opts.wallClearanceMm };
+    var gap = out.clearanceMm, law = lawOf(opts), round = sectionOf(opts) === 'round';
+    var side = (opts.sideMm == null) ? 1.2 : +opts.sideMm;
+    var tris = region.tris.map(function (t) { return triOf(rawTris, t); });
+    var obstacles = [rawTris];
+    var LEVELS = [0.01, 0.3, 0.6, 1.0, 1.5, 2.0, 3.0], DIRS = 24;
+    function radius(depth, zTip) {
+      return round ? law.at(zTip - depth, zTip) / 2 : side / Math.SQRT2;
+    }
+    function onRegion(x, y) {
+      var best = null;
+      for (var t = 0; t < tris.length; t++) {
+        var z = zOnTriAt(tris[t], x, y);
+        if (z != null && (best == null || z < best)) best = z;
+      }
+      return best;
+    }
+    function worst(q) {
+      var w = null;
+      for (var li = 0; li < LEVELS.length; li++) {
+        var z = q[2] - gap - LEVELS[li], need = radius(gap + LEVELS[li], q[2]) + gap;
+        for (var k = 0; k < DIRS; k++) {
+          var a = 2 * Math.PI * k / DIRS, d = [Math.cos(a), Math.sin(a), 0];
+          var hit = SA._nearestHit(obstacles, [q[0], q[1], z], d, EPS_MM, need + 1);
+          if (hit > 0 && hit < need && (!w || need - hit > w.short)) w = { dir: d, short: need - hit, at: hit, z: z, need: need };
+        }
+      }
+      return w;
+    }
+    for (var i = 0; i < points.length; i++) {
+      var q = points[i].p.slice(), start = q.slice(), total = 0, guard = 0, w;
+      while ((w = worst(q)) && guard++ < 12) {
+        var step = w.short + 0.01;
+        var nx = q[0] - w.dir[0] * step, ny = q[1] - w.dir[1] * step, nz = onRegion(nx, ny);
+        if (nz == null) {
+          out.reason = 'contact ' + i + ' is ' + w.at.toFixed(3) + ' mm from a wall where its tip needs ' +
+            w.need.toFixed(3) + ' mm, and moving it clear would take it off the overhang';
+          return out;
+        }
+        q = [nx, ny, nz]; total += step;
+      }
+      if (w) { out.reason = 'contact ' + i + ' could not be cleared in 12 moves'; return out; }
+      if (total > 0) {
+        out.moved.push({ index: i, from: start, to: q.slice(), mm: Math.hypot(q[0] - start[0], q[1] - start[1]) });
+        points[i].p = q;
+        points[i].source = (points[i].source || '') + '+cleared';
+      }
+    }
+    out.ok = true;
+    out.reason = out.moved.length
+      ? out.moved.length + ' contact(s) moved clear of a wall: ' +
+        out.moved.map(function (m) { return 'contact ' + m.index + ' by ' + m.mm.toFixed(3) + ' mm'; }).join(', ')
+      : 'every contact already clear of the walls by ' + gap + ' mm';
+    return out;
+  }
+
   /* probeClear for a TAPERED part: the rails of a frustum converge, so each
      is cast along its own line - ring 0 to ring 1 - rather than parallel to
      the axis from ring 0, which would test a wider solid than the one built.
@@ -1132,6 +1204,10 @@
     var cp = contactPoints(rawTris, region, opts);
     out.contacts = cp;
     if (!cp.ok) { out.reason = cp.reason; return out; }
+    if (opts.wallClearanceMm > 0) {
+      out.wallClearance = clearWalls(SA, rawTris, region, cp.points, opts);
+      if (!out.wallClearance.ok) { out.reason = out.wallClearance.reason; return out; }
+    }
 
     var bases = opts.bases || [{ kind: 'plate', z: det.plateZ }];
     var obstacles = opts.obstacles || [rawTris].concat(opts.occluders || []);

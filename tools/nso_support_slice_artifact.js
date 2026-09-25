@@ -6,6 +6,7 @@
 //   node tools/nso_support_slice_artifact.js [out.3mf]
 //   node tools/nso_support_slice_artifact.js --hollow [out.3mf]
 //   node tools/nso_support_slice_artifact.js --hollow --tree [out.3mf]
+//   node tools/nso_support_slice_artifact.js --interface --tree [out.3mf]
 //
 // Default output: out/nso_support_slice_artifact.3mf, or ..._hollow.3mf /
 // ..._hollow_tree.3mf with the flags (out/ is gitignored).
@@ -30,6 +31,14 @@
 //      region 1 - the one region of this piece a single trunk can serve, 4
 //      branches - round, tapered and bored (NSO_SupportTree.hollowTree), as a
 //      third object, so trunk-and-branch tubes are sliced on the same piece
+//   2d. --interface (implies --hollow; with --tree, plans the tree with
+//      wallClearanceMm = the gap): every tip is cut back and capped with a
+//      two-layer crosshatch interface (nso_support_interface.js) whose top is
+//      0.18 mm - the Seat (support) easy-release gap, as a TRUE minimum
+//      distance - under the underside. Before, every tip ended ON the
+//      underside, inside layer 91 at 0.2 mm layers: the overlap Bambu Studio
+//      reported. The whole support's closest approach to the piece is measured
+//      again from the archive's own vertices before the run is allowed to pass.
 //   3. names the support NSO_SUPPORT_<...> and the piece after its file
 //   4. moves EVERY object by one rigid translation onto the centre of a
 //      256 x 256 Bambu plate, plate at z = 0 - the same frame
@@ -57,7 +66,8 @@ const { readSTL, writeSTL } = require('./nso_stl_io.js');
 const NSO3MF = require('../nso-3mf.js');
 
 const args = process.argv.slice(2);
-const HOLLOW = args.includes('--hollow');
+const IFACE = args.includes('--interface');
+const HOLLOW = args.includes('--hollow') || IFACE;
 const TREE = args.includes('--tree');
 if (TREE && !HOLLOW) { console.error('--tree is only built hollow; pass --hollow --tree'); process.exit(1); }
 const positional = args.filter(a => !a.startsWith('--'));
@@ -69,7 +79,8 @@ const TREE_NAME = 'NSO_SUPPORT_tape_tree_region1';
 const TREE_REGION = 1;
 const PLATE = { w: 256, d: 256 };
 
-const defaultName = 'nso_support_slice_artifact' + (HOLLOW ? '_hollow' : '') + (TREE ? '_tree' : '') + '.3mf';
+const defaultName = 'nso_support_slice_artifact' + (HOLLOW ? '_hollow' : '') + (TREE ? '_tree' : '') +
+  (IFACE ? '_interface' : '') + '.3mf';
 const outPath = path.resolve(positional[0] || path.join(ROOT, 'out', defaultName));
 
 /* The support module and everything it reuses, loaded the way the aim test
@@ -80,7 +91,8 @@ const ctx = {
 };
 vm.createContext(ctx);
 for (const f of ['nso_thickness.js', 'nso_seat_surface.js', 'app-sculpt.js',
-                 'app-extend.js', 'nso_support_aim.js', 'nso_path_sweep.js', 'nso_support_tree.js']) {
+                 'app-extend.js', 'nso_support_aim.js', 'nso_path_sweep.js', 'nso_support_tree.js',
+                 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
 const SA = ctx.NSO_SupportAim;
@@ -156,11 +168,20 @@ const fmt = v => v.map(c => c.toFixed(3)).join(', ');
   }
   supports[0].soup = strut;
   supports[0].parts = [strutPart];
+  supports[0].stations = [{ label: 'strut tip', contact: a.target, from: a.from, to: a.tip }];
 
   /* ---- 2c. a hollow tree on the region one trunk can serve ----------------- */
   if (TREE) {
-    const tp = ST.planTree(piece, { skipList: [], regionId: TREE_REGION, hollow: true });
+    const tp = ST.planTree(piece, Object.assign({ skipList: [], regionId: TREE_REGION, hollow: true },
+      IFACE ? { wallClearanceMm: ctx.NSO_SupportInterface.DEFAULTS.gapMm } : {}));
     if (!tp.ok) { console.error('the region ' + TREE_REGION + ' tree would not plan: ' + tp.reason); process.exit(1); }
+    if (tp.wallClearance) {
+      console.log('walls      ' + tp.wallClearance.reason);
+      for (const m of tp.wallClearance.moved) {
+        console.log('           contact ' + m.index + ': [' + m.from.map(v => v.toFixed(3)).join(', ') + '] -> [' +
+                    m.to.map(v => v.toFixed(3)).join(', ') + ']');
+      }
+    }
     const t = await ST.hollowTree(tp, { unionSoups: csg.NSO_unionSoups, subtractSoups: csg.NSO_subtractSoups });
     if (!t.ok) { console.error('the hollow tree would not build: ' + t.reason); process.exit(1); }
     console.log('tree       region ' + TREE_REGION + ', ' + tp.region.areaMm2.toFixed(3) + ' mm^2: ' +
@@ -182,7 +203,44 @@ const fmt = v => v.map(c => c.toFixed(3)).join(', ');
     const apart = [0, 1, 2].some(k => bs.max[k] < bt.min[k] || bt.max[k] < bs.min[k]);
     console.log('           ' + (apart ? 'clear of the strut (bounding boxes do not overlap)'
                                        : 'WARNING: bounding boxes overlap the strut\'s'));
-    supports.push({ name: TREE_NAME, soup: t.soup, parts: tp.parts });
+    const stations = tp.branches.map((b, i) => ({
+      label: 'branch ' + i + ' (contact ' + b.contactIndex + ')',
+      contact: tp.contacts.points[b.contactIndex].p, from: b.from, to: b.tip }));
+    if (tp.trunkCarriesContact >= 0) {
+      stations.unshift({ label: 'trunk (contact ' + tp.trunkCarriesContact + ')',
+        contact: tp.contacts.points[tp.trunkCarriesContact].p, from: tp.trunk.from, to: tp.trunk.tip });
+    }
+    supports.push({ name: TREE_NAME, soup: t.soup, parts: tp.parts, stations });
+  }
+
+  /* ---- 2d. the gap and the interface, at every tip -------------------------- */
+  if (IFACE) {
+    const SI = ctx.NSO_SupportInterface, TH = ctx.NSO_Thickness;
+    console.log('\ninterface  the gap: ' + SI.DEFAULTS.gapMm + ' mm true minimum distance (Seat (support) -0.18); ' +
+                'two crosshatch layers of ' + SI.DEFAULTS.layerMm + ' mm, one direction each');
+    for (const sp of supports) {
+      const before = SI.minDistance(sp.soup, piece, { thickness: TH, reach: 1 });
+      const f = await SI.finish(sp.soup, sp.stations, piece, {
+        unionSoups: csg.NSO_unionSoups, subtractSoups: csg.NSO_subtractSoups });
+      console.log('  ' + sp.name + ': before, closest approach to the piece ' + before.mm.toFixed(4) + ' mm');
+      for (const r of f.stations) {
+        console.log('    ' + r.label.padEnd(22) + 'underside z ' + r.zUnderside.toFixed(3) +
+          ' -> interface ' + r.zBase.toFixed(3) + '..' + r.zTop.toFixed(3) + ', ' +
+          (r.interface ? r.repeats + 'x' + r.repeats + ' lines, ' + r.span.toFixed(3) + ' mm square, centred [' +
+            r.centre.map(v => v.toFixed(3)).join(', ') + '], layers run ' +
+            r.patch.lineDirections.map(v => Math.round(v)).join(' / ') + ' deg, patch ' +
+            r.patchDistanceMm.toFixed(4) + ' mm off the piece'
+            : 'NO INTERFACE - cut at the gap line: ' + r.tried.map(x => x.why).join('; ')));
+      }
+      console.log('    ' + f.reason);
+      if (!f.ok) {
+        console.error('the gap or the interface failed on ' + sp.name + ' - closest approach at [' +
+          (f.minDistanceAt || []).map(v => v.toFixed(3)).join(', ') + '] - NOT writing it');
+        process.exit(1);
+      }
+      sp.soup = f.soup;
+      sp.finish = f;
+    }
   }
 
   /* ---- 4. one rigid move onto the plate ------------------------------------ */
@@ -244,14 +302,45 @@ const fmt = v => v.map(c => c.toFixed(3)).join(', ');
          against the object's own parts (moved onto the plate the same way),
          one ray per face into the material. */
       const parts = supports[si].parts.map(ps => Float32Array.from(translate(ps, shift)));
-      const w = labelledWalls(TH, soup, parts, a.floorMm);
+      /* With an interface, the zone from its underside to its top is one-layer
+         lines by design - their floor is the line WIDTH - so the wall probe
+         reads the bulk below it. */
+      const zones = (supports[si].finish ? supports[si].finish.stations : [])
+        .map(r => ({ z0: r.zBase + shift[2] - 0.01, z1: r.zTop + shift[2] + 0.01 }));
+      const w = labelledWalls(TH, soup, parts, a.floorMm,
+        { exclude: q => zones.some(zn => q[2] >= zn.z0 && q[2] <= zn.z1) });
       const shells = (v.euler_characteristic / 2) | 0;
-      const wallOk = w.wall.thin === 0;
+      let wallOk = w.wall.thin === 0;
       console.log('checked    ' + f[2].padEnd(30) + ' ' + v.verdict +
                   (v.verdict_fails.length ? ' - ' + v.verdict_fails.join('; ') : '') +
                   ', ' + v.triangles + ' tris, open ' + v.open_edges + ', non-manifold ' + v.nonmanifold_edges +
-                  ', pierce ' + v.self_intersection.pierce + ', euler ' + v.euler_characteristic + ' (' + shells +
-                  ' closed shells: 1 skin + ' + (shells - 1) + ' bore(s))');
+                  ', pierce ' + v.self_intersection.pierce + ', euler ' + v.euler_characteristic +
+                  (supports[si].finish ? ' (bores opened into the interface, which bridges them)'
+                                       : ' (' + shells + ' closed shells: 1 skin + ' + (shells - 1) + ' bore(s))'));
+      if (supports[si].finish) {
+        /* THE CONFLICT CHECK, as the slicer will see it: the support object
+           and the piece object, both from the archive's own vertices. */
+        const comps = ctx.NSO_RasterLines.countComponents(soup);
+        console.log('           ' + comps + ' connected component(s) - ' + (comps === 1
+          ? 'every interface patch is fused to the tip it sits on' : 'SOMETHING IS FLOATING'));
+        wallOk = wallOk && comps === 1;
+        const pieceW = objectSoup(model, found[0].index);
+        const gap = ctx.NSO_SupportInterface.minDistance(soup, pieceW, { thickness: TH, reach: 1 });
+        const g0 = ctx.NSO_SupportInterface.DEFAULTS.gapMm;
+        const gapOk = gap.mm >= g0 - 1e-3;
+        console.log('           closest approach to ' + PIECE_NAME + ' as written: ' + gap.mm.toFixed(4) + ' mm at [' +
+                    gap.at.map(c => c.toFixed(3)).join(', ') + '] (gap ' + g0 + ' mm, sampled at ' + gap.step + ' mm) - ' +
+                    (gapOk ? 'no overlap, no contact' : 'UNDER THE GAP'));
+        for (const r of supports[si].finish.stations) {
+          const zb = r.zBase + shift[2], zt = r.zTop + shift[2], zu = r.zUnderside + shift[2];
+          console.log('           ' + r.label.padEnd(22) + 'plate z: interface ' + zb.toFixed(3) + '..' + zt.toFixed(3) +
+                      ', underside ' + zu.toFixed(3) + '; at ' + ctx.NSO_SupportInterface.DEFAULTS.layerMm +
+                      ' mm layers, interface in layers ' + Math.ceil((zb + 0.1) / 0.2) + '-' + Math.ceil((zt - 0.1) / 0.2) +
+                      ', piece from layer ' + Math.ceil(zu / 0.2) + (r.interface ? ', ' + r.repeats + 'x' + r.repeats +
+                      ' lines ' + supports[si].finish.widthMm + ' mm wide at ' + supports[si].finish.pitchMm + ' mm pitch' : ', no interface'));
+        }
+        wallOk = wallOk && gapOk;
+      }
       console.log('           walls to the outside: thinnest ' + w.wall.min.toFixed(4) + ' mm over ' + w.wall.n +
                   ' readings, ' + w.wall.thin + ' under the ' + a.floorMm + ' mm floor' +
                   (w.membrane.n ? '; membranes between diverging bores: ' + w.membrane.n + ' readings, ' +

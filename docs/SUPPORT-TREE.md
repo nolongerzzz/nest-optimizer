@@ -556,6 +556,53 @@ is deliberately not part of the taper law. It is the next ticket.
 
 ---
 
+## 6c. Where the support meets the piece: the gap, the interface, the walls
+
+`nso_support_interface.js` — `finish(bulk, stations, piece)`, `npm run
+tree:interface`. `planTree({ wallClearanceMm })` for the walls.
+`tools/nso_support_slice_artifact.js --interface --tree` writes the tape test
+artifact with all three.
+
+**The conflict it fixes.** Every support aimed so far ended *on* the overhang:
+on the tape piece every tip stops at plate z 18.042, inside 0.2 mm layer 91,
+with zero air. That is the overlap Bambu Studio reported. None of those
+supports had an interface either.
+
+**The gap:** 0.18 mm, the repo's own easy-release figure (Seat (support)
+−0.18; `docs/SEAT-SURFACE.md`). It is measured as the **true minimum
+distance** over the **whole** support, not a z offset and not only at the
+tips. Each stack's height comes from the lowest underside within one layer
+of the contact over its patch, and is then *solved*: a slightly sloped
+underside lowers it by the shortfall. At 0.2 mm layers the interface fills
+exactly two slicer layers and leaves one empty layer under the piece, the same
+as Bambu's own `support_top_z_distance` 0.2.
+
+**The interface:** `nso_crosshatch.js`, unchanged. Two layers, each **one**
+direction of 0.42 mm lines at 1.2 mm pitch, the second at 90° to the first,
+each exactly one layer tall. The patch is 2×2 lines (2.82 mm) so every
+layer-1 line crosses the cut tip. It is centred where the support's own axis
+crosses the interface's underside. The bulk is cut flat there (on a bored tree
+that opens the bore upward, and the lines bridge it), and the layers are fused
+to each other and to the tip with a 2 µm overlap.
+
+**The ladder**, per tip: a patch nearer the piece than the gap drops to 1×1,
+then to none, and is named. The gap is never given up to fit an interface; a
+tip that cannot keep it is refused (`ok: false`), not built into the piece.
+
+**Wall clearance.** `contactPoints` places contacts over the overhang's own
+footprint and knows nothing about walls beside it. On the tape piece it put
+contact 4 0.74 mm from a wall, where a 2 mm tip reaches 0.26 mm into it. That
+zone sits inside the last cross-section, which the rail probe leaves out as
+cap. With `wallClearanceMm`, each contact is tested with horizontal rays over
+its tip's last 3 mm against the tip's own radius plus the clearance, and moved
+straight away from the wall until it clears (Bambu's
+`support_object_xy_distance`, same idea). Moves are reported, and a contact
+that would have to leave the overhang is refused. On `tall` it moves the four
+contacts that sat 0.13 mm off the post, and none of them then needs the square
+fallback. It is opt-in, so the validated fixtures above are unchanged.
+
+---
+
 ## 7. What the reference check compares
 
 `npm run tree:reference`, 21 checks, ~5 s, no browser.
