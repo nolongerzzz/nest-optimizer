@@ -13,6 +13,118 @@ baked slice, and its only way out is `Export .json`.
 > supersedes the older sections below wherever they disagree - in particular
 > on the second rail button, on the Toolpath card, and on a `.gcode.3mf`
 > import adding pieces to the plate. Those are gone.
+>
+> The corner-drag / camera-mode section above it adds to that. The capture
+> box's footprint is no longer one square `r` (see "Blob crop" below for the
+> reference's original).
+
+---
+
+## G-scope: corner-drag box and camera modes (2026-09-25)
+
+Branch `claude/gscope-corner-camera`, off `claude-wip`.
+
+### Audit: did corner-drag ever exist?
+
+**No, never.** Checked in three places before building anything:
+
+- **The reference demo** (`docs/reference/joint_microscope_3d.html`) has three
+  drag states: `move | resizeR | resizeH`. The first is the centre dot, the
+  second a hit on the box *surface* that sets ONE horizontal half-extent `r`
+  (a square footprint, uniformly), and the third is the orange top dot
+  (thickness, up/down). It has no corner handle and no independent X/Y extent.
+- **G-scope as it was on `claude-wip`** (`app-microscope.js`) has the same
+  three drag states, lifted verbatim. There was no corner handle and no
+  `rx`/`ry`, and `inBox()` tested `r` on both horizontal axes.
+- **History**: `git log --all` on `app-microscope.js` and the reference file
+  has no commit adding a corner handle or a split footprint, and none removing
+  one. The only unmerged branch that touches the file,
+  `claude/overhang-point-support`, doesn't add one either.
+
+So this is a gap in the early demo that NSO inherited, not a regression.
+
+### Corner handle: X and Y independently
+
+A **green corner dot** on the box's top face. Drag it and the footprint's
+G-code X and Y half-extents follow the pointer **independently** (`rx`, `ry`),
+across a horizontal plane at the corner's own height. The box stays centred,
+as every other resize keeps it. Details:
+
+- The dot sits on the corner **nearest the camera** and follows it round as
+  you orbit. The resize is symmetric about the centre, so which corner carries
+  the dot changes nothing about the drag. It draws over the toolpath
+  (`depthTest: false`): the corner is usually inside a wall of lines, and a
+  handle you can't see is one you can't find.
+- Priority on press: centre dot (move) > orange dot (thickness) > corner dot
+  (X and Y) > box face (footprint).
+- The **face drag** still resizes the footprint. On a rectangle, the longer
+  side follows the pointer and the proportion it had when the press began is
+  kept, so a square behaves exactly as before.
+- `inBox()` is now `|mx-gx| <= rx && |my-gy| <= ry && |mz-gz| <= h`, which is
+  the reference predicate exactly when `rx == ry`. `gcodeBoxes()` and
+  `selectionRegion().boxes` carry `rx`, `ry` **and** `r = max(rx, ry)`, so an
+  existing reader of `r` still gets a box that covers the footprint.
+  `addBoxAt(gx, gy, gz, r, h, ry)` takes an optional `ry`.
+- The next box dropped takes the last one's shape, as the reference's next
+  ball took its size.
+
+Two faults found while driving it, both fixed here:
+
+- **A face press near an edge threw.** The surface raycast was recursive, and
+  the box's edge lines are a child of `boxMesh`. At the raycaster's 1 mm Line
+  threshold, a press near any edge hit the lines first. No box owns that
+  object, so `findIndex` gave -1 and the next pointermove read `balls[-1]`.
+  The reference tool has the same fault. The raycast is now non-recursive.
+- **A re-frame drifted.** With damping on, OrbitControls keeps adding a
+  decaying remainder of the last drag on every `update()`, so a re-frame just
+  after a pan slid off its own target. `frameBox()` now spends that remainder
+  (one undamped `update()`) before it sets the camera.
+
+### Camera modes: Normal and Close inspection
+
+Two buttons in the View section, `#ms-cam-normal` and `#ms-cam-close`:
+
+| mode | framing | controls |
+| --- | --- | --- |
+| **Normal** | the whole part (what G-scope opens on and Back returns to) | free orbit, zoom, pan |
+| **Close inspection** | tight on the selection's own extent; with nothing selected, the capture boxes; with neither, the whole part | orbit and zoom about it, **pan off**, so the target stays locked on it |
+
+Close inspection is the view Isolate has always put you in, and Isolate still
+enters it. What's new is that it's a mode, not a side effect:
+
+- **A camera mode is only the camera.** Switching never touches the
+  selection, the boxes, the isolation (detail vs overview), Back, the plate
+  or the undo stack. It can be flipped either way at any time: before
+  Isolate, inside it, or after Back.
+- A filter redraw inside the isolation (the slider, the legend) keeps
+  whichever mode, and camera position, you were in. `isolate({ keepCamera })`
+  replaces the old save-and-restore of the camera.
+- Back returns to Normal. Reopening the panel re-frames in the mode it was
+  left in.
+- API: `NSO_MICROSCOPE.setCameraMode('normal' | 'close')`, `cameraMode()`.
+
+### Validation
+
+`gcode:gscope-cornercam` (`tools/gcode-test/gscope-corner-camera-drive-check.mjs`,
+in `npm test`). It runs 50 checks in headless Chromium, with real mouse drags
+and button clicks:
+
+- **Corner drag 1:** 3x3 becomes 6 x 1.5 mm, so X grows and Y shrinks in one drag.
+- **Corner drag 2:** it becomes 1.5 x 7 mm. Centre and thickness don't move.
+- **Selection:** both times it's exactly the rectangle predicate, recomputed
+  in the check from the parsed moves.
+- **Orbit:** a real orbit moves the dot to the new near corner and leaves the
+  box unchanged.
+- **Face drag:** keeps the rectangle's proportion.
+- **Camera toggle:** Normal to Close and back, before Isolate, inside it and
+  after Back. After every switch, the selection, boxes, isolation, Back
+  control, plate and undo stack are compared byte for byte.
+- **Close inspection targets:** targeted on the selection's centre, at under
+  half of Normal's distance.
+- **Pan:** a real right-drag pans in Normal and doesn't move the target in
+  Close.
+
+Screenshots `tools/gscope-out/cc-*.png` are each asserted to be a drawn view.
 
 ---
 
@@ -234,7 +346,7 @@ description in the file's own Z-up millimetres:
   source: 'plate' | 'file' | 'objects',
   document: 'supportwithinsupport.gcode.3mf',
   by: 'box' | 'layer' | 'line' | 'visible',
-  boxes: [{ gx, gy, gz, r, h }],          // the capture boxes, if any
+  boxes: [{ gx, gy, gz, rx, ry, r, h }],  // the capture boxes, if any; r = max(rx, ry)
   zBand: [zLo, zHi],                      // the slider's band, in mm
   zExtent: [zLo, zHi],                    // the selection's own extent
   moves:   [/* parsed move records: x0 y0 x1 y1 z width height feature layer index objectId */],
