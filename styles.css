@@ -2864,10 +2864,16 @@ select:focus, input:focus {
 .ms-viewport { flex: 1; position: relative; min-width: 0; }
 .ms-viewport canvas { display: block; }
 
+/* Top-RIGHT, not top-left: the feature legend has the left corner now. This
+   is a view-state readout - "Whole part" when you are looking at the whole
+   document, "Detail: N ..." once you have drilled into a selection - so it
+   wants to stay in eyeshot rather than move into the sidebar. It clears the
+   layer-range slider below it, which is docked to the same right edge but
+   starts 56px down. */
 #ms-mode-badge {
   position: absolute;
   top: 12px;
-  left: 12px;
+  right: 12px;
   background: rgba(23, 26, 33, 0.9);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -2891,17 +2897,61 @@ select:focus, input:focus {
   line-height: 1.4;
 }
 
+/* The feature legend floats over the viewport's top-left corner instead of
+   sitting in the sidebar.
+
+   It takes the corner itself. #ms-mode-badge used to sit at (12, 12) and has
+   moved to the top RIGHT to make room - see its own rule. Nothing else
+   reaches this corner: the hint badge is bottom-left, and the layer-range
+   slider, top handle included, is docked to the right edge.
+
+   The height cap is what keeps it off the hint badge, which is bottom-left
+   and 420px wide, so the two share a column and can only be kept apart
+   vertically: 96 = 12 (this panel's own top) + 72 (the hint badge's height
+   and margin) + 12 (a gap). A file with more features than the panel can
+   show scrolls rather than growing down over it. */
+#ms-legend-float {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 257px;
+  max-height: calc(100% - 96px);
+  overflow-y: auto;
+  z-index: 5;
+  margin-bottom: 0;
+  background: rgba(23, 26, 33, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+/* Empty until a file is open, and an empty bordered box over the canvas is
+   just a smudge. */
+#ms-legend-float:not(:has(.ms-legend-item)) { display: none; }
+
 /* ---------------------------------------------------------------------------
    G-scope additions: the legend's "only" button and the layer-range slider
    docked to the viewport's right edge.
    --------------------------------------------------------------------------- */
 .ms-legend-label { flex: 1 1 auto; min-width: 0; }
-.ms-sidebar button.ms-legend-only {
+/* Was .ms-sidebar button.ms-legend-only, which took its base look - the
+   panel background, the border, the text colour - from `.ms-sidebar button`.
+   The legend moved out of the sidebar, so that inheritance went with it and
+   these rows would have rendered as default browser buttons. Spelled out
+   here instead, and no longer scoped to an ancestor the legend does not
+   have. */
+button.ms-legend-only {
   flex: 0 0 auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
   padding: 1px 6px;
   font-size: 10.5px;
   opacity: 0;
 }
+button.ms-legend-only:hover { border-color: var(--accent); }
 .ms-legend-item:hover .ms-legend-only,
 .ms-legend-only:focus { opacity: 1; }
 

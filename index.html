@@ -832,11 +832,6 @@
       </div>
 
       <div class="ms-section">
-        <div class="ms-section-title" id="ms-legend-title">Features (click to isolate)</div>
-        <div id="ms-legend"></div>
-      </div>
-
-      <div class="ms-section">
         <div class="ms-section-title" id="ms-info-title">Selection / segment info</div>
         <div id="ms-info">No file open.</div>
       </div>
@@ -844,6 +839,15 @@
 
     <div id="ms-viewport" class="ms-viewport">
       <div id="ms-mode-badge">Whole part</div>
+      <!-- The feature legend, floating over the viewport's top-left rather
+           than down in the sidebar. Sits below the mode badge, which already
+           owns the corner itself. app-microscope.js finds #ms-legend by id
+           and never by where it lives, so the rows, the click-to-isolate and
+           the per-row "only" button are the same code as before the move. -->
+      <div id="ms-legend-float" class="ms-section">
+        <div class="ms-section-title" id="ms-legend-title">Features (click to isolate)</div>
+        <div id="ms-legend"></div>
+      </div>
       <div id="ms-hint-badge"></div>
       <!-- The layer-range slider, docked to the viewport's right edge. Two
            handles: the lower and upper Z the view draws. One step apart is one
