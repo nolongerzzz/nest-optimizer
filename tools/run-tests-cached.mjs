@@ -36,13 +36,14 @@
  *   node tools/run-tests-cached.mjs --deps crop:test        # print a step's recorded deps
  *   node tools/run-tests-cached.mjs --clear      # forget every record
  */
+import { spawn } from 'node:child_process';
 import { readFileSync, rmSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, sep } from 'node:path';
 import { trace, killAll } from './test-cache/trace.mjs';
 import {
   CACHE_VERSION, cacheDir, gitState, envSalt, makeClassifier, Fingerprinter,
-  buildManifest, keyOf, loadRecords, saveRecord, saveTrace, lookup,
+  buildManifest, keyOf, loadRecords, saveRecord, saveTrace, lookup, UNTRACEABLE,
 } from './test-cache/cache.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -50,6 +51,22 @@ const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 const scripts = pkg.scripts || {};
 const allSteps = pkg.testSteps || [];
 const CACHE = cacheDir(ROOT);
+
+/* An UNTRACEABLE step (cache.mjs) runs exactly as `npm test` runs it. */
+const plainLive = new Set();
+function runPlain(command, onOut) {
+  return new Promise((done) => {
+    const started = Date.now();
+    const child = spawn(command, { cwd: ROOT, shell: '/bin/sh', detached: true });
+    plainLive.add(child);
+    let out = '';
+    const take = (d) => { const s = d.toString(); out += s; if (onOut) onOut(s); };
+    child.stdout.on('data', take);
+    child.stderr.on('data', take);
+    child.on('error', (e) => { plainLive.delete(child); done({ code: -1, signal: null, ms: Date.now() - started, out: out + e.message }); });
+    child.on('close', (code, signal) => { plainLive.delete(child); done({ code: code === null ? -1 : code, signal, ms: Date.now() - started, out }); });
+  });
+}
 
 export const NOT_A_GATE = [
   'LOCAL ITERATION ONLY - NOT A PUSH GATE.',
@@ -134,6 +151,7 @@ console.log(`\ntest cache: ${steps.length} step(s), cache ${rel(CACHE)} (v${CACH
 const checkStarted = performance.now();
 const plan = steps.map((step) => {
   if (noSkip) return { step, hit: null, why: '--no-skip' };
+  if (UNTRACEABLE[step]) return { step, hit: null, why: `always run: ${UNTRACEABLE[step]}` };
   const r = lookup({ step, command: scripts[step], salt, records: loadRecords(CACHE, step), fper, classify, root: ROOT });
   return { step, ...r };
 });
@@ -155,7 +173,7 @@ if (dryRun) {
 const results = [];
 const wallStarted = Date.now();
 for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
-  process.on(sig, () => { killAll('SIGKILL'); console.log(`\n${sig}: stopped; nothing further recorded`); process.exit(130); });
+  process.on(sig, () => { killAll('SIGKILL'); for (const c of plainLive) { try { process.kill(-c.pid, 'SIGKILL'); } catch {} } console.log(`\n${sig}: stopped; nothing further recorded`); process.exit(130); });
 }
 
 async function runOne(p, i) {
@@ -163,7 +181,7 @@ async function runOne(p, i) {
   const command = scripts[p.step];
   /* Re-check at the last moment: an earlier step in this run may have
      changed one of this step's inputs since the plan was made. */
-  const again = noSkip ? p : { ...p, ...lookup({ step: p.step, command, salt, records: loadRecords(CACHE, p.step), fper, classify, root: ROOT }) };
+  const again = noSkip || UNTRACEABLE[p.step] ? p : { ...p, ...lookup({ step: p.step, command, salt, records: loadRecords(CACHE, p.step), fper, classify, root: ROOT }) };
   if (again.hit) {
     const h = again.hit;
     console.log(`${label}  SKIP  cached green @ ${h.commit.slice(0, 12)}${h.dirty ? '+dirty' : ''} ` +
@@ -173,6 +191,14 @@ async function runOne(p, i) {
   const buffered = jobs > 1;
   let log = `\n${'='.repeat(70)}\n${label}  $ ${command}\n  rerun: ${again.why}\n${'='.repeat(70)}\n`;
   if (!buffered) process.stdout.write(log);
+  if (UNTRACEABLE[p.step]) {
+    const r = await runPlain(command, buffered ? null : (s) => process.stdout.write(s));
+    const ok = r.code === 0;
+    if (buffered) log += r.out;
+    log += `\n${label}  ${ok ? 'PASS' : 'FAIL'}  exit=${r.code}  ${fmt(r.ms)}\n  run untraced, never cached: ${UNTRACEABLE[p.step]}\n`;
+    process.stdout.write(buffered ? log : log.slice(log.lastIndexOf(`\n${label}  ${ok ? 'PASS' : 'FAIL'}`)));
+    return { step: p.step, skipped: false, ok, ms: r.ms, code: r.code, out: r.out, notCached: `NOT CACHED: ${UNTRACEABLE[p.step]}` };
+  }
   const startedNs = BigInt(Date.now()) * 1_000_000n; // file ctimes are wall-clock ns
   const r = await trace(command, { cwd: ROOT, onOut: buffered ? null : (s) => process.stdout.write(s) });
   if (buffered) log += r.out;

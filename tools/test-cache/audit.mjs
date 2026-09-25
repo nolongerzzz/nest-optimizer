@@ -24,10 +24,10 @@
  *             that were not taken. Safe ONLY because the choice not to take
  *             them was itself made from traced inputs - listed for review.
  */
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, sep } from 'node:path';
-import { cacheDir, loadTrace, loadRecords } from './cache.mjs';
+import { cacheDir, loadTrace, loadRecords, UNTRACEABLE } from './cache.mjs';
 import { staticGraphs } from './static-graph.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -78,7 +78,7 @@ say(md ? '| step | traced | naive | missed by naive | mentions | unseen | cached
   `${'step'.padEnd(w)}  traced  naive  missed  mentions  unseen  cached`);
 for (const r of rows) {
   if (r.missing) { say(md ? `| ${r.step} | - | ${r.g.imports.size} | - | ${r.g.mentions.size} | - | no trace |` : `${r.step.padEnd(w)}  (no trace)`); continue; }
-  const cached = r.rec ? 'yes' : r.t.ok ? 'NO: ' + (r.t.problems[0] || '').slice(0, 60) : 'red';
+  const cached = r.rec ? 'yes' : UNTRACEABLE[r.step] ? 'NO: untraceable' : r.t.ok ? 'NO: ' + (r.t.problems[0] || '').slice(0, 60) : 'red';
   say(md ? `| ${r.step} | ${r.traced.size} | ${r.g.imports.size} | ${r.missed.length} | ${r.g.mentions.size} | ${r.unseen.length} | ${cached} |`
     : `${r.step.padEnd(w)}  ${String(r.traced.size).padStart(6)}  ${String(r.g.imports.size).padStart(5)}  ${String(r.missed.length).padStart(6)}  ${String(r.g.mentions.size).padStart(8)}  ${String(r.unseen.length).padStart(6)}  ${cached}`);
 }
@@ -115,10 +115,29 @@ say();
 say(md ? '### Files one step writes and another reads' : 'FILES ONE STEP WRITES AND ANOTHER READS');
 say(flows.length ? flows.map((f) => (md ? '- ' : '    ') + f).join('\n') : (md ? '- none' : '    none'));
 
+/* ---- the one listing the cache ignores: the temp dir root ---- */
+{
+  const offenders = [];
+  const scan = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) { if (e.name !== 'node_modules') scan(p); continue; }
+      if (!/\.(m?js|py|sh)$/.test(e.name)) continue;
+      const s = readFileSync(p, 'utf8');
+      if (/readdir(Sync)?\(\s*(os\.)?tmpdir\(\)|readdir(Sync)?\(\s*['"]\/tmp['"]|listdir\(\s*(tempfile\.gettempdir\(\)|['"]\/tmp['"])|glob\(\s*['"]\/tmp\//.test(s)) offenders.push(rel(p));
+    }
+  };
+  scan(join(ROOT, 'tools'));
+  say();
+  say(md ? '### Temp-dir listing' : 'TEMP-DIR LISTING');
+  say(`${md ? '- ' : '    '}${offenders.length ? 'FAIL: these list the temp dir itself, whose listing the cache ignores: ' + offenders.join(', ') : 'no test lists the temp dir itself (the one listing the cache does not key on)'}`);
+  if (offenders.length) process.exitCode = 1;
+}
+
 /* ---- what could not be cached, and why ---- */
 const notCached = have.filter((r) => !r.rec);
 say();
 say(md ? '### Not cached (always rerun)' : 'NOT CACHED (ALWAYS RERUN)');
 if (!notCached.length) say(md ? '- none' : '    none');
-for (const r of notCached) say(`${md ? '- ' : '    '}${r.step}: ${r.t.ok ? r.t.problems.join('; ').slice(0, 300) : 'last run was red'}`);
+for (const r of notCached) say(`${md ? '- ' : '    '}${r.step}: ${UNTRACEABLE[r.step] ? 'always run untraced - ' + UNTRACEABLE[r.step] : r.t.ok ? r.t.problems.join('; ').slice(0, 300) : 'last traced run was red'}`);
 console.log(out.join('\n'));

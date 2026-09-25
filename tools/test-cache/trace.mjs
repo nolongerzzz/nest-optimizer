@@ -215,14 +215,20 @@ export function parseTrace(text, rootCwd, { proxyPorts = new Set() } = {}) {
       case 'open': case 'creat': {
         const p = resolveAt(null, a[0]);
         const flags = c.name === 'creat' ? 'O_CREAT' : a[1] || '';
-        if (WRITE_FLAGS.test(flags)) { if (ok) touchWrite(retPath || p); if (/O_RDWR/.test(flags)) touchRead(retPath || p, 'file'); }
+        if (WRITE_FLAGS.test(flags)) {
+          if (ok) { touchWrite(retPath || p); if (/O_RDWR/.test(flags)) touchRead(retPath || p, 'file'); }
+          else touchRead(p, missing ? 'absent' : 'other'); // a failed create still looked
+        }
         else touchOpen(p, retPath, ok ? (/O_DIRECTORY/.test(flags) ? 'dir' : 'file') : missing ? 'absent' : 'other');
         break;
       }
       case 'openat': case 'openat2': {
         const p = resolveAt(a[0], a[1]);
         const flags = a[2] || '';
-        if (WRITE_FLAGS.test(flags)) { if (ok) touchWrite(retPath || p); if (/O_RDWR/.test(flags) && !/O_TRUNC/.test(flags)) touchRead(retPath || p, 'file'); }
+        if (WRITE_FLAGS.test(flags)) {
+          if (ok) { touchWrite(retPath || p); if (/O_RDWR/.test(flags) && !/O_TRUNC/.test(flags)) touchRead(retPath || p, 'file'); }
+          else touchRead(p, missing ? 'absent' : 'other'); // a failed create still looked
+        }
         else touchOpen(p, retPath, ok ? (/O_DIRECTORY/.test(flags) ? 'dir' : 'file') : missing ? 'absent' : 'other');
         break;
       }

@@ -38,7 +38,8 @@ import { dirname, join, resolve, sep } from 'node:path';
 /* Bump when the keying or tracing changes meaning: every old record becomes
    unmatchable, which is the safe direction. */
 export const CACHE_VERSION = 1;
-const KEEP_RECORDS = 6; // per suite: enough to hop between a few branches
+const KEEP_RECORDS = 6;
+const TMP_ROOT = resolve(tmpdir()); // per suite: enough to hop between a few branches
 
 const sha = (s) => createHash('sha256').update(s).digest('hex');
 
@@ -54,6 +55,21 @@ export function gitState(root) {
   const dirty = run(['status', '--porcelain', '--untracked-files=normal']) !== '';
   return { commit, dirty };
 }
+
+/* STEPS THAT CANNOT BE WATCHED
+   A step whose behaviour changes under ptrace can never produce a trustworthy
+   green record, and running it traced would show red where `npm test` is
+   green. These run plainly (untraced), every time, and are never recorded -
+   the same as `npm test` for them. Add a step here only with the evidence.
+
+   gcode:solid-drive  green untraced (104s, 37/37), red under strace every
+     time, with or without sendto tracing: the "Export as solid" click at
+     gscope-solid-drive-check.mjs:364 never passes Playwright's "stable"
+     wait (two matching animation frames) while the tree is ptrace-attached,
+     although the run as a whole is only ~12% slower. Measured 2026-09-25. */
+export const UNTRACEABLE = {
+  'gcode:solid-drive': 'changes behaviour under ptrace (Playwright stability wait never settles)',
+};
 
 /* ENVIRONMENT
    A step's environment is an input the trace cannot see. Hashing ALL of it
@@ -194,7 +210,11 @@ export function buildManifest(access, { classify, fper, startedNs, root }) {
   for (const [p, seen] of access.reads) {
     const cls = classify(p);
     if (cls === 'ignored' || isOwn(p)) continue;
-    const listed = access.listed.has(p);
+    /* The temp dir's own listing changes with every process on the box.
+       Chromium lists it while tearing a profile down; no test reads its
+       inputs by listing it (audit.mjs checks that statically). So its
+       existence is recorded, its listing is not. */
+    const listed = access.listed.has(p) && p !== TMP_ROOT;
     /* Toolchain state the toolchain itself maintains: fontconfig's cache,
        Chromium's NSS db and crash-report settings, Playwright's
        DEPENDENCIES_VALIDATED marker. Outside the repo, rewritten by the
