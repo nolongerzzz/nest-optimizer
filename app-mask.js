@@ -378,8 +378,46 @@
   /* Rebuild both overlays for the active piece. Returns the triangle count
      under the YELLOW (the number the exclude status line reports); the pink's
      count is kept in selPainted for the select status line. */
+  /* What the overlay on screen was drawn for: the active piece, the mesh
+     object and geometry it was built on, and how many entries each list had.
+     When any of that changes and nothing repainted - the active piece
+     switched through one of the ~40 direct editId / selectedIndex writes, a
+     bake swapped the geometry - the yellow stood for a piece or a surface
+     that was no longer on screen, and Watch said so ("phantom paint",
+     driver-testing round 2, 2026-09-24). sync() puts it right. */
+  let paintedFor = null;
+  function paintSig() {
+    const m = activeModel();
+    if (!m) return 'none';
+    const placed = state.placed.find(function (p) { return p && p.sourceId === m.id && p.mesh; });
+    const mask = m.faceMask || {};
+    return m.id + '|' + (placed ? placed.mesh.uuid : '-') + '|' +
+           (placed && placed.mesh.geometry ? placed.mesh.geometry.uuid : '-') + '|' +
+           ((mask.exclude && mask.exclude.length) || 0) + '|' + ((mask.select && mask.select.length) || 0);
+  }
+  /* Repaint through the global, so a wrapper (Watch) sees it like any other. */
+  function sync() {
+    try {
+      if (!state || !state.modelGroup) return;
+      const sig = paintSig();
+      const onScreen = !!(excludeOverlay || selectOverlay);
+      // nothing drawn and nothing to draw is in step whatever the signature says
+      if (sig === paintedFor) return;
+      if (!onScreen && sig !== 'none') {
+        const m = activeModel(), mask = m && m.faceMask;
+        if (!mask || (!(mask.exclude && mask.exclude.length) && !(mask.select && mask.select.length))) {
+          paintedFor = sig;
+          return;
+        }
+      }
+      window.nsoMaskRepaint();
+    } catch (e) { /* display only; never break the caller */ }
+  }
+  window.nsoMaskSync = sync;
+
   function repaint() {
     clearOverlay();
+    paintedFor = paintSig();
     const m = activeModel();
     const mask = m && m.faceMask;
     if (!m || !mask) return 0;
@@ -499,9 +537,18 @@
       transparent: true, opacity: opacity, depthWrite: false,
       polygonOffset: true, polygonOffsetFactor: offset, polygonOffsetUnits: offset
     }));
-    overlay.position.copy(placed.mesh.position);
-    overlay.quaternion.copy(placed.mesh.quaternion);
-    overlay.scale.copy(placed.mesh.scale);
+    /* The overlay's transform IS the piece's: the same position, rotation,
+       quaternion and scale objects, not copies taken once. A copy stayed
+       where the piece was painted - drag it, nudge it, Seat it, and the
+       yellow was left behind on the plate (driver-testing round 2,
+       2026-09-24: 44 mm behind after one drag). Shared, it moves with every
+       pose write there is, in the same frame, with no hook on any of them. */
+    Object.defineProperties(overlay, {
+      position: { configurable: true, enumerable: true, value: placed.mesh.position },
+      rotation: { configurable: true, enumerable: true, value: placed.mesh.rotation },
+      quaternion: { configurable: true, enumerable: true, value: placed.mesh.quaternion },
+      scale: { configurable: true, enumerable: true, value: placed.mesh.scale }
+    });
     overlay.renderOrder = order;
     /* The paint is paint, not a surface. It sits on the face it marks, so a
        ray can land on it as readily as on the piece, and without this a
@@ -758,8 +805,15 @@
     }
     const painted = repaint();
     window.nsoMaskHudRefresh();
+    /* The yellow is drawn for the active piece only, so its count is this
+       face's only when this is the active piece. A click on another piece
+       used to report "(0 tris yellow)" for a face it had just painted. */
+    const act = activeModel();
+    const drawn = act === m
+      ? ' (' + painted + ' tris yellow)'
+      : ' on "' + m.name + '" (not drawn: the yellow shows the active piece' + (act ? ', "' + act.name + '"' : '') + ')';
     setStatus((at >= 0 ? 'Included ' : 'Excluded ') + name +
-              (at >= 0 ? '' : ' (' + painted + ' tris yellow)') +
+              (at >= 0 ? (act === m ? '' : ' on "' + m.name + '"') : drawn) +
               ' - ' + mask.exclude.length + ' face(s) excluded');
     return true;
   };
@@ -807,7 +861,15 @@
         m.faceMask = { exclude: [], select: [] };
         repaint();
         window.nsoMaskHudRefresh();
-        setStatus('Paint cleared - 0 faces excluded, no target face');
+        /* Name the piece. Clear acts on the ACTIVE piece - the one the yellow
+           is drawn for - and inside a Join that is A even while B is the piece
+           highlighted, so an unnamed "Paint cleared" read as clearing B and
+           left B's paint in place (driver-testing round 2, 2026-09-24). */
+        const selP = state.placed[state.selectedIndex];
+        const selM = selP ? state.models.find(function (mm) { return mm.id === selP.sourceId; }) : null;
+        const other = (selM && selM !== m && window.nsoMaskCount(selM) > 0)
+          ? ' - "' + selM.name + '" is selected but is not the active piece; its paint is untouched' : '';
+        setStatus('Paint cleared on "' + m.name + '" - 0 faces excluded, no target face' + other);
       });
       clr._maskBound = true;
     }
@@ -829,6 +891,19 @@
       else window.nsoMaskToggleAt(m, placed.mesh, hit);
     }, true);
   }
+
+  /* When sync() runs. Every frame, so the picture is right by the next one
+     whatever changed the active piece; and at the end of every click, key
+     and change, in the bubble phase - after the handler that did it, and
+     before a setTimeout(0) scheduled by that same event (Watch's first check
+     after an operation) can look at a picture one frame behind. */
+  (function syncLoop() {
+    sync();
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(syncLoop);
+  })();
+  ['click', 'pointerup', 'keyup', 'change'].forEach(function (t) {
+    document.addEventListener(t, sync, false);
+  });
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
   else bind();
