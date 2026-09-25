@@ -557,6 +557,34 @@
     return true;
   }
 
+  /* Which piece an undo entry says it changed - read off the entry itself,
+     the app's own record, never off the selection. The two differ more often
+     than they look: a paint click paints the piece under the cursor whatever
+     is selected, and inside a Join the active piece is A while B is the one
+     highlighted. Seat + paint driver round (2026-09-24): "commit maskReplace"
+     was logged against the selected bit while the entry's modelId named the
+     hull. `modelId` is what the replace / mask / sculpt entries carry;
+     `index` is the plate slot the pose and move entries carry. */
+  function undoTarget(entry) {
+    if (!entry) return null;
+    var S = stateRef();
+    if (!S) return null;
+    var id = null;
+    if (entry.modelId != null) id = entry.modelId;
+    else if (typeof entry.index === 'number' && S.placed && S.placed[entry.index]) id = S.placed[entry.index].sourceId;
+    if (id == null) return null;
+    var m = (S.models || []).filter(function (x) { return x && x.id === id; })[0];
+    var sel = selSnap();
+    var bySel = !!(sel && sel.sourceId != null);
+    var selId = sel ? (bySel ? sel.sourceId : sel.editId) : null;
+    var name = m ? m.name : null;
+    return {
+      target: { modelId: id, model: name, selected: id === selId },
+      label: ' on "' + (name || '?') + '" (model #' + id + ')' +
+             (id === selId || selId == null ? '' : (bySel ? ' - not the selected piece' : ' - not the active piece'))
+    };
+  }
+
   /* ---------------- watcher 2: rendered scene vs logical state ---------------- */
   function installConsistency() {
     /* pushUndo is the app's own record that something changed: every
@@ -566,7 +594,11 @@
        that beats guessing it from a button. */
     wrapGlobal('pushUndo', function (orig) {
       return function (entry) {
-        try { opEvent('commit', (entry && entry.type) || 'unknown'); } catch (e) {}
+        try {
+          var tgt = undoTarget(entry);
+          opEvent('commit', ((entry && entry.type) || 'unknown') + (tgt ? tgt.label : ''),
+                  tgt ? { target: tgt.target } : null);
+        } catch (e) {}
         var r = orig.apply(this, arguments);
         try { markOp('op ' + ((entry && entry.type) || 'unknown')); } catch (e) {}
         return r;
@@ -643,11 +675,27 @@
         markOp('set ' + t.id + '=' + shorten(t.value, 24));
       } catch (e) {}
     }
+    /* A press on the 3D view itself. Paint, Seat here, Carve, Measure and a
+       move drag all start from a pointerdown on the canvas, not from a
+       button, so without this their commit carried whatever button was
+       pressed last ("commit maskReplace | op=click btn-seat-here").
+       Capture phase on the document, so it is recorded before the canvas's
+       own capture-phase handlers run. */
+    function onViewportDown(ev) {
+      try {
+        var S = stateRef();
+        var cv = S && S.renderer && S.renderer.domElement;
+        if (!cv || ev.target !== cv || ev.button !== 0) return;
+        markOp('press on the 3D view');
+      } catch (e) {}
+    }
     document.addEventListener('click', onClick, true);
     document.addEventListener('change', onChange, true);
+    document.addEventListener('pointerdown', onViewportDown, true);
     restores.push(function () {
       document.removeEventListener('click', onClick, true);
       document.removeEventListener('change', onChange, true);
+      document.removeEventListener('pointerdown', onViewportDown, true);
     });
 
     /* Anything not driven by a control at all - a keyboard shortcut, a call

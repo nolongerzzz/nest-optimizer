@@ -360,7 +360,7 @@ withApp(async (page, logs) => {
   console.log('\n=== 2e. Clear paint drops both; Skin with no target falls back to the auto-pick ===');
   await page.click('#btn-mask-clear');
   a = await page.evaluate(pieceState, idA);
-  check('both lists empty, no overlays, status says so', a.excludeCount === 0 && a.selectCount === 0 && a.yellow.length === 0 && a.pink.length === 0 && /^Paint cleared - 0 faces excluded, no target face$/.test(a.status), a.status);
+  check('both lists empty, no overlays, status says so', a.excludeCount === 0 && a.selectCount === 0 && a.yellow.length === 0 && a.pink.length === 0 && /^Paint cleared on "[^"]+" - 0 faces excluded, no target face$/.test(a.status), a.status);
   await clearStatus(page);
   await page.click('#btn-skin-face');
   await waitStatus(page, /^Skinned|^Skin /);

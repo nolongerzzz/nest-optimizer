@@ -484,6 +484,33 @@ it takes no row in the roster. `nsoMaskCount()` is an input to a check, never a
 gate on an operation.
 
 
+**Paint display and commit attribution (2026-09-24, driver-testing round 2,
+Seat + paint).** All four found by driving Seat with painted pieces; Seat's
+own gap and paint-scope rules held throughout (0.180 mm by the checker; Seat
+here stands down on a painted B that must turn, seats when only A is painted).
+- `app-mask.js`: the yellow's position / rotation / quaternion / scale are
+  the piece's own objects (`Object.defineProperties` in `buildOverlay`), so a
+  drag, nudge, turn or Seat carries it - it used to stay on the plate where
+  the piece was painted. And `sync()` (every frame, and in the bubble phase of
+  every click / pointerup / keyup / change) repaints through
+  `window.nsoMaskRepaint` whenever the active piece, its mesh or its geometry
+  changed since the last repaint - the ~40 direct `editId` /
+  `selectedIndex` writes (Join's slot picks among them) and bakes that swap
+  geometry used to leave the previous yellow up. This retires watch:test B2
+  (Seal / turn on a painted piece) as FIXED, per that file's own rule.
+- `app-mask.js` status lines name the piece: `Paint cleared on "<name>"`
+  (inside a Join, Clear acts on the ACTIVE piece A even while B is
+  highlighted, and now says so when B's paint is left alone), and a paint
+  click on a piece that is not the active one says the yellow is not drawn
+  for it instead of "(0 tris yellow)".
+- `nso-watch.js`: a commit is logged against the piece its undo entry names
+  (`modelId`, or the plate slot `index`), with `- not the selected piece` /
+  `- not the active piece` when that differs; `detail.target` carries it. A
+  press on the 3D view is its own operation label (`press on the 3D view`),
+  so paint / Seat here / drag commits no longer carry the last button.
+`npm run watch:test` part G drives all of it; every new check fails on the
+code before this change.
+
 **Panel placement and collapse (2026-09-24, driver-testing round 1).** At a
 1024 x 768 pane the expanded log covered the Undo button and the Scale card's
 "Scale by" row, so a person with Watch on could not click them. The panel now

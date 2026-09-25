@@ -14,7 +14,10 @@
         1. pose lost across an app-finish.js bake - rotate a piece, then Seal
            it. This is the half `nso_pose_after_bake_test.js` does not cover:
            that gate is on NSO_sculptCommitRaw, which now puts the pose back.
-        2. paint left on screen      - paint a face, then Seal it
+        2. paint left on screen      - paint a face, then Seal it. FIXED
+                                       2026-09-24 and retired as below: now
+                                       it must report nothing, and a stray
+                                       overlay is the negative control
         3. a piece restored without its model - Delete, then Undo
       If a case is ever fixed in the app, its assertion here fails loudly -
       which is the point. The check is then to be retired with the fix, not
@@ -37,6 +40,10 @@
 
    F. The panel sits clear of the left tool rail and collapses to its header
       bar, which frees the Scale card the expanded log covers at 1024 x 768.
+
+   G. Seat + paint (driver-testing round 2): paint follows its piece through
+      a drag, a Join and a Seat; commits are logged against the piece they
+      changed; Clear paint and off-piece paint clicks name the piece.
 
    Every button here is pressed with element.click() inside the page rather
    than a Playwright click, so the viewport accordion (docs/HANDOFF.md, "a
@@ -186,20 +193,49 @@ async function partB2(page) {
   ok(found.length === 0, 'painting a face is consistent on its own', texts(found));
   ok(await page.evaluate(() => nsoMaskCount(getActiveModel())) === 1, 'one face is excluded');
 
+  /* FIXED in the app (2026-09-24, driver-testing round 2) and retired here
+     the way this file says a fixed case is: the overlay now shares the
+     piece's own transform objects and app-mask.js re-draws it whenever the
+     active piece, its mesh or its geometry changes. So Seal and a turn,
+     which used to leave the yellow on a surface / pose that was gone, must
+     now leave nothing to report - and the paint must still be on screen,
+     on the new geometry, which is the half that proves the fix is not just
+     the yellow disappearing. */
   found = await after(page, 'seal', () => sealSelectedModel());
-  const paint = found.filter(f => f.subject === 'paint');
-  ok(paint.length >= 1, 'Seal on a painted piece raises a phantom paint',
-     'subjects: ' + subjects(found).join(', '));
-  ok(paint.some(f => /rebuilt since/.test(f.msg)),
-     'it says the yellow belongs to the geometry the piece had before the bake',
-     texts(paint));
+  ok(found.filter(f => f.subject === 'paint').length === 0,
+     'Seal on a painted piece leaves no phantom paint (fixed: repainted on the new geometry)', texts(found));
+  const afterSeal = await page.evaluate(() => {
+    const ov = state.modelGroup.children.filter(o => o.isMesh && o.renderOrder === 40);
+    const pm = state.placed.find(p => p && p.mesh && p.sourceId === getActiveModel().id);
+    return { n: ov.length, tris: ov.length ? ov[0].geometry.attributes.position.count / 3 : 0,
+             mask: nsoMaskCount(getActiveModel()) };
+  });
+  ok(afterSeal.mask === 1 && afterSeal.n === 1 && afterSeal.tris > 0,
+     'the face is still excluded and the yellow is still drawn after the bake', JSON.stringify(afterSeal));
 
-  /* The same shape again, the other way round: turn a painted piece and the
-     yellow stays where it was. */
   found = await after(page, 'rotate a painted piece', () => rotateSelected(1));
-  ok(found.filter(f => f.subject === 'paint').some(f => /off the piece it marks/.test(f.msg)),
-     'turning a painted piece leaves the paint behind, and that is reported',
+  ok(found.filter(f => f.subject === 'paint').length === 0,
+     'turning a painted piece carries the paint with it (fixed: the overlay shares the piece\'s transform)',
      texts(found));
+  ok(await page.evaluate(() => {
+    const ov = state.modelGroup.children.filter(o => o.isMesh && o.renderOrder === 40)[0];
+    const pm = state.placed.find(p => p && p.mesh && p.sourceId === getActiveModel().id);
+    return !!ov && ov.position === pm.mesh.position && ov.quaternion === pm.mesh.quaternion;
+  }), 'the yellow\'s position and rotation ARE the piece\'s, not copies of them');
+
+  /* The paint checks still fire: a second overlay the paint module does not
+     own is exactly the kind of picture-vs-state mismatch they exist for. */
+  found = await after(page, 'a stray second overlay', () => {
+    const ov = state.modelGroup.children.filter(o => o.isMesh && o.renderOrder === 40)[0];
+    const extra = ov.clone(); extra.name = 'stray-test-overlay';
+    state.modelGroup.add(extra);
+  });
+  ok(found.some(f => f.subject === 'paint' && /paint overlays are in the scene/.test(f.msg)),
+     'negative control: a stray second paint overlay is still reported', texts(found));
+  await page.evaluate(() => {
+    const x = state.modelGroup.getObjectByName('stray-test-overlay');
+    if (x) state.modelGroup.remove(x);
+  });
 
   await page.evaluate(() => NSOWatch.stop());
 }
@@ -653,6 +689,123 @@ async function partF(page) {
   await page.setViewportSize({ width: 1280, height: 720 });
 }
 
+
+/* G. Seat + paint, driven the way a person does it (driver-testing round 2,
+   2026-09-24). Four things that round found, each pinned from both sides -
+   the app's own state and what Watch logged:
+     1. a painted piece dragged with the mouse, or seated, takes its yellow
+        with it (it used to stay on the plate where the piece had been);
+     2. Join's slot picks switch the active piece and the yellow follows,
+        with no phantom (it used to keep showing the previous piece's paint);
+     3. a commit is logged against the piece its undo entry names, not the
+        selection, and a press on the 3D view is its own operation label;
+     4. Clear paint and a paint click on a piece that is not the active one
+        say which piece they touched. */
+async function partG(page) {
+  console.log('\nG. Seat + paint');
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true);
+  await page.evaluate(() => { if (!NSOWatch.isOn()) NSOWatch.start(); NSOWatch.collapse(true); });
+  const idA = await loadSTL(page, SLAB);
+  const idB = await loadSTL(page, path.join(ROOT, 'fixtures', 'quick', 'cube-6mm.stl'));
+  await page.evaluate(() => {
+    window.__G = {
+      placed: id => state.placed.find(q => q && q.sourceId === id && q.mesh),
+      model: id => state.models.find(m => m.id === id),
+      moveTo: (id, x, z) => { const i = state.placed.findIndex(p => p.sourceId === id); selectPlaced(i);
+        const p = state.placed[i]; nudgeSelected(x - p.x, z - p.z); },
+      top: id => { const p = __G.placed(id); p.mesh.updateMatrixWorld(true);
+        const bb = new THREE.Box3().setFromObject(p.mesh); const c = bb.getCenter(new THREE.Vector3());
+        const v = new THREE.Vector3(c.x, bb.max.y, c.z).project(state.camera);
+        const r = state.renderer.domElement.getBoundingClientRect();
+        return [r.left + (v.x + 1) / 2 * r.width, r.top + (1 - v.y) / 2 * r.height]; },
+      arm: on => { const b = document.getElementById('btn-mask-paint');
+        if ((b.getAttribute('aria-pressed') === 'true') !== on) b.click(); },
+      overlay: () => state.modelGroup.children.filter(o => o.isMesh && o.renderOrder === 40),
+      paintFindings: from => NSOWatch.events().filter(e => e.seq > from && e.kind === 'phantom' && /paint/.test(e.msg)).map(e => e.msg),
+      mark: () => NSOWatch.events().length
+    };
+  });
+  await page.evaluate(([a, b]) => { __G.moveTo(b, 55, 0); selectPlaced(state.placed.findIndex(p => p.sourceId === b)); }, [idA, idB]);
+  // paint B's top with a real click, B being the active piece
+  await page.evaluate(() => __G.arm(true));
+  let [x, y] = await page.evaluate(b => __G.top(b), idB);
+  await page.mouse.click(x, y);
+  await page.evaluate(() => __G.arm(false));
+  const p0 = await page.evaluate(b => ({ n: nsoMaskCount(__G.model(b)), ov: __G.overlay().length,
+    op: NSOWatch.events().filter(e => e.kind === 'op' && /maskReplace/.test(e.msg)).pop() }), idB);
+  ok(p0.n === 1 && p0.ov === 1, 'B carries one painted face and the yellow is drawn', JSON.stringify({ n: p0.n, ov: p0.ov }));
+  ok(p0.op && p0.op.op === 'press on the 3D view',
+     'the paint commit carries the press on the 3D view as its operation, not the last button', p0.op && p0.op.op);
+
+  // 1. a real mouse drag of the painted piece
+  let m = await page.evaluate(() => __G.mark());
+  [x, y] = await page.evaluate(b => __G.top(b), idB);
+  await page.mouse.move(x, y); await page.mouse.down();
+  await page.mouse.move(x + 60, y + 10, { steps: 10 }); await page.mouse.up();
+  await page.waitForTimeout(2300);
+  const d = await page.evaluate(([b, m]) => { const ov = __G.overlay()[0], p = __G.placed(b);
+    return { moved: Math.hypot(p.x - 55, p.z), same: !!ov && ov.position === p.mesh.position, ph: __G.paintFindings(m) }; }, [idB, m]);
+  ok(d.moved > 3 && d.same && d.ph.length === 0,
+     'dragging a painted piece takes its yellow with it - no phantom paint', JSON.stringify(d));
+
+  // 2. Join: slot picks switch the active piece; 1b. Seat (support) moves painted B
+  m = await page.evaluate(() => __G.mark());
+  await page.evaluate(([a, b]) => { __G.moveTo(b, 10, 0);
+    document.getElementById('btn-join-start').click();
+    document.getElementById('join-slot-a').click(); document.querySelector('.model-item[data-edit-id="' + a + '"]').click();
+    document.getElementById('join-slot-b').click(); document.querySelector('.model-item[data-edit-id="' + b + '"]').click(); }, [idA, idB]);
+  await page.waitForTimeout(2300);
+  ok(await page.evaluate(m => __G.paintFindings(m).length === 0, m),
+     'Join\'s slot picks change the active piece with no phantom paint',
+     JSON.stringify(await page.evaluate(m => __G.paintFindings(m), m)));
+  m = await page.evaluate(() => __G.mark());
+  await page.evaluate(() => { document.getElementById('status').textContent = ''; document.getElementById('btn-seat-support').click(); });
+  await page.waitForTimeout(2300);
+  const seat = await page.evaluate(([b, m]) => ({ status: document.getElementById('status').textContent,
+    n: nsoMaskCount(__G.model(b)), ph: __G.paintFindings(m),
+    commit: NSOWatch.events().filter(e => e.seq > m && e.kind === 'op' && e.phase === 'commit').map(e => e.msg) }), [idB, m]);
+  ok(/^Seated - air gap 0\.18mm/.test(seat.status) && seat.n === 1 && seat.ph.length === 0,
+     'Seat (support) seats painted B at the gap, keeps its paint, and leaves no phantom paint', JSON.stringify(seat));
+  ok(seat.commit.some(t => /^commit posePlaced on "cube-6mm" \(model #\d+\) - not the active piece$/.test(t)),
+     'the seat is logged against B, the piece its undo entry names - not the active hull', JSON.stringify(seat.commit));
+
+  // 3. paint click on A while B is the selected piece: logged against A
+  await page.evaluate(() => document.getElementById('btn-undo').click());
+  await page.evaluate(b => { document.getElementById('btn-join-start').click(); __G.moveTo(b, 55, 0); }, idB);
+  m = await page.evaluate(() => __G.mark());
+  await page.evaluate(() => __G.arm(true));
+  [x, y] = await page.evaluate(a => __G.top(a), idA);
+  await page.mouse.click(x, y);
+  await page.evaluate(() => __G.arm(false));
+  const attr = await page.evaluate(([a, m]) => {
+    const c = NSOWatch.events().filter(e => e.seq > m && e.kind === 'op' && /maskReplace/.test(e.msg)).pop();
+    const st = NSOWatch.events().filter(e => e.seq > m && e.kind === 'status' && /^Excluded/.test(e.msg)).pop();
+    return { msg: c && c.msg, target: c && c.detail && c.detail.target, status: st && st.msg,
+             aPainted: nsoMaskCount(__G.model(a)) };
+  }, [idA, m]);
+  ok(attr.aPainted === 1 && attr.target && attr.target.modelId === idA && attr.target.selected === false &&
+     / - not the selected piece$/.test(attr.msg),
+     'a paint click on A while B is selected is logged against A, and says it is not the selected piece', JSON.stringify(attr));
+  ok(/ on "box_hull_80x40x20-2" \(not drawn: the yellow shows the active piece, "cube-6mm"\)/.test(attr.status || ''),
+     'the status names the piece painted and says why its yellow is not drawn - no "0 tris yellow"', attr.status);
+
+  // 4. Clear paint inside a Join names the piece it cleared
+  await page.evaluate(([a, b]) => {
+    document.getElementById('btn-join-start').click();
+    document.getElementById('join-slot-a').click(); document.querySelector('.model-item[data-edit-id="' + a + '"]').click();
+    document.getElementById('join-slot-b').click(); document.querySelector('.model-item[data-edit-id="' + b + '"]').click();
+    selectPlaced(state.placed.findIndex(p => p.sourceId === b));
+    document.getElementById('btn-mask-clear').click(); }, [idA, idB]);
+  const clr = await page.evaluate(([a, b]) => ({ status: document.getElementById('status').textContent,
+    a: nsoMaskCount(__G.model(a)), b: nsoMaskCount(__G.model(b)) }), [idA, idB]);
+  ok(clr.a === 0 && clr.b === 1 &&
+     clr.status === 'Paint cleared on "box_hull_80x40x20-2" - 0 faces excluded, no target face - "cube-6mm" is selected but is not the active piece; its paint is untouched',
+     'Clear paint in a Join clears the active hull, names it, and says the selected bit\'s paint is untouched', JSON.stringify(clr));
+  await page.setViewportSize({ width: 1280, height: 720 });
+}
+
 withApp(async (page, logs) => {
   await partA(page);
   await page.reload({ waitUntil: 'load' });
@@ -675,6 +828,7 @@ withApp(async (page, logs) => {
   await partE3(page);
   await partE4(page);
   await partF(page);
+  await partG(page);
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   if (fail) {
