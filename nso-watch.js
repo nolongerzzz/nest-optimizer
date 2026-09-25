@@ -900,12 +900,18 @@
 
   /* ---------------- the panel ---------------- */
   var CSS = [
-    '#nso-watch-panel{position:absolute;left:12px;bottom:68px;width:min(420px,calc(100% - 24px));',
+    /* left:64px clears the viewport's left tool rail (Undo, the eye and the
+       buttons between them: 12px inset + 44px buttons), so the log never sits
+       on it, expanded or collapsed. */
+    '#nso-watch-panel{position:absolute;left:64px;bottom:68px;width:min(420px,calc(100% - 76px));',
     'max-height:46vh;display:none;flex-direction:column;z-index:120;pointer-events:auto;',
     'background:rgba(9,12,18,.95);border:1px solid #3a4558;border-radius:10px;',
     'box-shadow:0 6px 24px rgba(0,0,0,.55);backdrop-filter:blur(8px);color:#e5edf7;',
     'font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}',
     '#nso-watch-panel.is-on{display:flex}',
+    '#nso-watch-panel.is-collapsed #nso-watch-list{display:none}',
+    '#nso-watch-panel.is-collapsed #nso-watch-head{border-bottom:0}',
+    '#nso-watch-panel.is-collapsed{width:auto;max-width:calc(100% - 76px)}',
     '#nso-watch-head{display:flex;align-items:center;gap:6px;padding:7px 9px;border-bottom:1px solid #26303f;flex:0 0 auto}',
     '#nso-watch-head b{font-weight:600;letter-spacing:.02em;color:#f8fafc}',
     '#nso-watch-counts{margin-left:auto;display:flex;gap:6px;align-items:center}',
@@ -982,6 +988,8 @@
         '<button type="button" id="nso-watch-report-btn">Report</button>' +
         '<button type="button" id="nso-watch-copy">Copy</button>' +
         '<button type="button" id="nso-watch-clear">Clear</button>' +
+        '<button type="button" id="nso-watch-collapse" aria-expanded="true"' +
+          ' title="Collapse the log to this bar, so it stops covering the tool cards">\u25be</button>' +
       '</div>' +
       '<div id="nso-watch-list"></div>';
     host.appendChild(p);
@@ -992,6 +1000,31 @@
     p.querySelector('#nso-watch-report-btn').addEventListener('click', function () { api.showReport(); });
     p.querySelector('#nso-watch-copy').addEventListener('click', function () { api.copy(); });
     p.querySelector('#nso-watch-clear').addEventListener('click', function () { api.clear(); });
+    p.querySelector('#nso-watch-collapse').addEventListener('click', function () { api.collapse(!api.isCollapsed()); });
+    applyCollapsed(readCollapsed());
+  }
+
+  /* Collapse. Expanded, the panel is up to 46vh tall in the bottom-left of
+     the viewport - over the Scale card's "Scale by" row and the Undo button,
+     which a person watching could then not click (driver-testing round 1,
+     2026-09-24). Collapsed it is only its header bar: the phantom and error
+     pills stay in view, logging and checking carry on exactly as before, and
+     nothing under the log's old footprint is covered. A per-viewer display
+     preference, so it lives in its own localStorage key and survives a
+     reload; unreadable storage just means "expanded". */
+  var COLLAPSE_KEY = 'nso.watch.collapsed';
+  function readCollapsed() {
+    try { return global.localStorage.getItem(COLLAPSE_KEY) === '1'; } catch (e) { return false; }
+  }
+  function applyCollapsed(c) {
+    if (!el.panel) return;
+    el.panel.classList.toggle('is-collapsed', !!c);
+    var b = el.panel.querySelector('#nso-watch-collapse');
+    if (b) {
+      b.textContent = c ? '\u25b8' : '\u25be';
+      b.setAttribute('aria-expanded', c ? 'false' : 'true');
+      b.title = c ? 'Show the log' : 'Collapse the log to this bar, so it stops covering the tool cards';
+    }
   }
 
   /* One classification, shared by the live panel and the report. */
@@ -1322,6 +1355,15 @@
     },
 
     toggle: function () { return on ? (api.stop(), false) : (api.start(), true); },
+    /* Collapse the panel to its header bar (true) or show the log (false).
+       Display only: what is logged and checked does not change. */
+    collapse: function (c) {
+      c = !!c;
+      try { global.localStorage.setItem(COLLAPSE_KEY, c ? '1' : '0'); } catch (e) {}
+      applyCollapsed(c);
+      return c;
+    },
+    isCollapsed: function () { return !!(el.panel && el.panel.classList.contains('is-collapsed')); },
     isOn: function () { return on; },
 
     /* Run the consistency pass now and hand back what it found. */

@@ -483,6 +483,17 @@ PAINT SCOPE: **not applicable** - it reads the skip list and bakes nothing, so
 it takes no row in the roster. `nsoMaskCount()` is an input to a check, never a
 gate on an operation.
 
+
+**Panel placement and collapse (2026-09-24, driver-testing round 1).** At a
+1024 x 768 pane the expanded log covered the Undo button and the Scale card's
+"Scale by" row, so a person with Watch on could not click them. The panel now
+starts at `left: 64px`, clear of the left tool rail (Undo and the eye stay
+clickable even expanded), and the header has a collapse button (▾ / ▸) that
+shrinks it to the header bar - phantom / error pills still visible, logging
+unchanged. `NSOWatch.collapse(bool)` / `isCollapsed()`; the choice is a
+per-viewer preference in its own localStorage key, `nso.watch.collapsed`.
+`npm run watch:test` part F.
+
 ## Solidify - a progress gate, and two loops it could not close (2026-09-24)
 
 Found by driver-testing round 1 (single operation, three sources of truth:

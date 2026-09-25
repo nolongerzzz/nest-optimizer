@@ -35,6 +35,9 @@
         4. the history is kept in this browser across a reload, one run per
            start, and the in-app Report view shows and filters all of it.
 
+   F. The panel sits clear of the left tool rail and collapses to its header
+      bar, which frees the Scale card the expanded log covers at 1024 x 768.
+
    Every button here is pressed with element.click() inside the page rather
    than a Playwright click, so the viewport accordion (docs/HANDOFF.md, "a
    second viewport menu") cannot hide a control out from under this suite.
@@ -587,6 +590,69 @@ async function partE4(page) {
   ok(restored.plain, 'stop() puts state.selectedIndex and state.editId back as plain properties');
 }
 
+
+/* F. The panel must not take the controls under it away (driver-testing
+   round 1, 2026-09-24). At the pane size it was found at, 1024 x 768, the
+   expanded log covered the Scale card's "Scale by" button and the Undo
+   button: a real click landed on the log. The panel now starts right of the
+   left tool rail, so Undo is clear even expanded; collapsed, the Scale card
+   is clear too, the phantom / error pills stay on screen, the watch keeps
+   logging, and the choice survives a reload. */
+async function partF(page) {
+  console.log('\nF. collapsing the panel frees the controls under it');
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.evaluate(() => { try { localStorage.removeItem('nso.watch.collapsed'); } catch (e) {} });
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true);
+  await loadSTL(page, path.join(ROOT, 'fixtures', 'quick', 'cube-12mm.stl'));
+  const hit = () => page.evaluate(() => {
+    if (!NSOWatch.isOn()) NSOWatch.start();
+    document.getElementById('menu-scale').open = true;
+    const at = id => {
+      const r = document.getElementById(id).getBoundingClientRect();
+      const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return !!e && (e.id === id || !!e.closest('#' + id));
+    };
+    const pills = ['nso-watch-n-phantom', 'nso-watch-n-error'].every(id => {
+      const r = document.getElementById(id).getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    });
+    return { scale: at('btn-scale-factor'), undo: at('btn-undo'), pills,
+             collapsed: NSOWatch.isCollapsed(),
+             expanded: document.getElementById('nso-watch-collapse').getAttribute('aria-expanded') };
+  });
+  // A session's worth of lines, so the log is as tall as it gets in use.
+  await page.evaluate(() => { if (!NSOWatch.isOn()) NSOWatch.start(); for (let i = 0; i < 30; i++) setStatus('status line ' + i + ' of a working session'); });
+  await page.waitForTimeout(100);
+  const open = await hit();
+  ok(open.collapsed === false && open.expanded === 'true', 'the panel starts expanded, as it always has');
+  ok(open.undo, 'expanded, the log no longer sits on the left tool rail - Undo takes the click',
+     JSON.stringify(open));
+  ok(!open.scale, 'expanded, it can still cover the Scale card - which is what collapsing is for',
+     JSON.stringify(open));
+  await page.evaluate(() => document.getElementById('nso-watch-collapse').click());
+  const shut = await hit();
+  ok(shut.collapsed && shut.expanded === 'false', 'the collapse button collapses it');
+  ok(shut.scale && shut.undo, 'collapsed, "Scale by" and Undo take the click again', JSON.stringify(shut));
+  ok(shut.pills, 'the phantom and error pills are still on screen');
+  const logs = await page.evaluate(() => {
+    const n = NSOWatch.events().length;
+    console.error('logged while collapsed');
+    return NSOWatch.events().length > n;
+  });
+  ok(logs, 'it keeps logging while collapsed');
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true);
+  await page.waitForFunction(() => window.NSOWatch && NSOWatch.isOn());
+  ok(await page.evaluate(() => NSOWatch.isCollapsed()), 'the choice survives a reload');
+  await page.evaluate(() => document.getElementById('nso-watch-collapse').click());
+  ok(await page.evaluate(() => !NSOWatch.isCollapsed() &&
+       getComputedStyle(document.getElementById('nso-watch-list')).display !== 'none'),
+     'and the same button brings the log back');
+  await page.evaluate(() => { try { localStorage.removeItem('nso.watch.collapsed'); } catch (e) {} });
+  await page.setViewportSize({ width: 1280, height: 720 });
+}
+
 withApp(async (page, logs) => {
   await partA(page);
   await page.reload({ waitUntil: 'load' });
@@ -608,6 +674,7 @@ withApp(async (page, logs) => {
   await partE2(page);
   await partE3(page);
   await partE4(page);
+  await partF(page);
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   if (fail) {
