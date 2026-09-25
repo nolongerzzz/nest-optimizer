@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=libsave1" />
+  <link rel="stylesheet" href="styles.css?v=libsave2" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -881,25 +881,25 @@
   <script src="nso_raster_lines.js?v=raster1"></script>
   <script src="app-core.js?v=crop2"></script>
   <script src="app-cut.js?v=crop3"></script>
-  <script src="app-finish.js?v=inside7"></script>
+  <script src="app-finish.js?v=inside8"></script>
   <script src="app-sculpt.js?v=inside4"></script>
   <script src="app-extend.js?v=inside6"></script>
   <!-- Mirror: exact reflection across the cut plane. After app-extend.js,
        whose axis detector and band cut it calls. See docs/MIRROR.md. -->
-  <script src="app-mirror.js?v=mirror1"></script>
+  <script src="app-mirror.js?v=mirror2"></script>
   <!-- Crop, stage 1: box -> remove slab -> seal the joint. After app-cut.js
        (rawCutOpen, rawFlatCapLoop, mapPlaneToRaw) and app-sculpt.js (commit). -->
   <script src="app-crop.js?v=crop3"></script>
   <script src="app-fatten.js?v=fatten1"></script>
   <script src="app-scale.js?v=inside6"></script>
-  <script src="app-brush.js?v=hollow1"></script>
+  <script src="app-brush.js?v=hollow2"></script>
   <script src="app-wheel.js?v=wheel3"></script>
-  <script src="app-fit.js?v=wheel2"></script>
+  <script src="app-fit.js?v=wheel4"></script>
   <script src="app-stock.js?v=stock3"></script>
   <script src="app-assemble.js?v=asm1"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=subtract1"></script>
-  <script src="app-center-lock.js?v=clock1"></script>
+  <script src="app-center-lock.js?v=clock2"></script>
   <script src="app-oversize-washer.js?v=oversize1"></script>
   <script src="app-join-triple.js?v=triple1"></script>
   <script src="app-carve.js?v=hollow1"></script>
@@ -914,7 +914,7 @@
   <script src="app-extract-sel.js?v=inside6"></script>
   <script src="app-texture.js?v=skin2"></script>
   <script src="app-nonsolid.js?v=inside4"></script>
-  <script src="app-poslock.js?v=lock1"></script>
+  <script src="app-poslock.js?v=lock2"></script>
   <!-- The arbiter first: the three menu tools below register with it as
        they bind, and it is what makes "one menu owns the input" true
        rather than three modules each hoping the other two are shut. -->
@@ -926,13 +926,13 @@
   <script src="app-measure.js?v=inside6"></script>
   <!-- The library write features. access first: it holds the gate, the
        target repository and the token key that the other two read. -->
-  <script src="app-library-access.js?v=libsave1"></script>
-  <script src="app-library-delete.js?v=libsave1"></script>
-  <script src="app-library-save.js?v=libsave1"></script>
-  <script src="app-library.js?v=libsave1"></script>
-  <script src="app-photoset.js?v=photoset1"></script>
+  <script src="app-library-access.js?v=libsave2"></script>
+  <script src="app-library-delete.js?v=libsave2"></script>
+  <script src="app-library-save.js?v=libsave2"></script>
+  <script src="app-library.js?v=libsave2"></script>
+  <script src="app-photoset.js?v=photoset2"></script>
   <script src="app-microscope.js?v=scope3"></script>
-  <script src="app-ux.js?v=inside7"></script>
+  <script src="app-ux.js?v=inside8"></script>
   <!-- Live watch: off until its button is pressed, and it patches nothing
        until then. Deleting this tag and the #btn-watch button above removes
        the feature completely. -->
