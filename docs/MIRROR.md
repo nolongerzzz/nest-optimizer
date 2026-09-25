@@ -8,9 +8,10 @@ not copied.
 node tools/nso_mirror_test.js              headless: geometry, the sequence, refusals
 node tools/nso_mirror_canonical_check.js   canonical checker, then exact end identity
 node tools/nso_wire_mirror_test.js         the real app, real clicks, real undo
+node tools/nso_wire_mirror_orient_test.js  the piece keeps its facing: 0 degrees of turn
 ```
 
-All three are in `npm test`.
+All four are in `npm test`.
 
 ## What it is
 
@@ -63,6 +64,36 @@ PAINT SCOPE: **WHOLE-PIECE**. Reflecting moves every vertex off the plane and
 the winding swap reorders every triangle, so no face can be promised
 untouched. Any paint stands the bake down. `nsoMaskCount(m)` is the whole
 test. See the scoping rule in `docs/HANDOFF.md`.
+
+## Facing: the 180-degree turn that was not Mirror's
+
+Reported as "Mirror rotates the piece a full 180 degrees; placement is fine".
+Measured through the real app on a marked, asymmetric block: the least-squares
+map from the world vertices before to the world vertices after, with the
+requested reflection taken out, left exactly 180.0000 degrees, about Y when
+the piece had been edge-flipped (`rotY = pi`) and about X when it had been
+flipped (`flipX`). An unposed piece, or one posed and mirrored directly, left
+0.0000. The reflection was never the problem.
+
+The problem was the pose record disagreeing with the mesh. Join and Subtract
+draw their result at identity but kept the pose A had before on the placed
+record. Mirror bakes through `NSO_sculptCommitRaw`, which honours the record
+("a bake does not move the piece"), so it re-applied that stale half turn.
+Seal, Solidify, Thicken, Soften, Cap and a geometry Undo had the same fault
+the other way round: they drew a posed piece unposed and left the record
+posed, so the next Mirror put the pose back on.
+
+The fix is in the producers, not in Mirror. `app-core.js` has two endings for
+any rebuild of a placed mesh. `nsoReseatPlacedPose` is for a bake in the
+piece's own frame: the pose still stands, so it goes back on the mesh.
+`nsoClearPlacedPose` is for Join and Subtract: the result is drawn at identity,
+so the record is cleared to match, and Undo puts the old pose back.
+
+`tools/nso_wire_mirror_orient_test.js` pins it: seven poses mirrored directly,
+pose then Join then Mirror, Undo of Join and of Mirror, and Seal on a posed
+piece then Mirror. Every case must leave 0 degrees of turn beyond the
+reflection, an unmoved plate position, and a record that still describes the
+mesh. On the old code it fails ten checks, each at 180 degrees.
 
 ## The opposite-end sequence
 

@@ -622,10 +622,7 @@ function NSO_sculptCommitRaw(m, working, undoType, statusText) {
        which the three lines above can only do for an unposed piece. Only
        called when there IS a pose to put back: an unposed piece keeps the
        exact placement this has always given it. */
-    var posed = !!(placedEntry.rotY || placedEntry.tipX || placedEntry.tiltX ||
-                   placedEntry.flipX || placedEntry.tipZ || placedEntry.tiltZ ||
-                   placedEntry.liftY);
-    if (posed && typeof applyMeshRotation === 'function') applyMeshRotation(placedEntry);
+    if (typeof nsoReseatPlacedPose === 'function') nsoReseatPlacedPose(placedEntry);
   }
 
   if (typeof updateEditSize === 'function') updateEditSize();

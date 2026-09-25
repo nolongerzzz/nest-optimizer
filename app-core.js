@@ -264,6 +264,13 @@ function undoLast() {
       placedA.width = mA.size.x;
       placedA.depth = mA.size.z;
       placedA.height = mA.size.y;
+      // Join/Subtract cleared A's pose when they drew the result at
+      // identity. Undo puts the pre-op geometry back, so the pose goes back
+      // with it, on the record and on the mesh.
+      if (entry.aPrevPose) {
+        Object.assign(placedA, entry.aPrevPose);
+        nsoReseatPlacedPose(placedA);
+      }
     }
     if (entry.bSnapshot && entry.poseB && state.modelGroup) {
       const matB = new THREE.MeshStandardMaterial({
@@ -327,6 +334,13 @@ function undoLast() {
       placedA.width = mA.size.x;
       placedA.depth = mA.size.z;
       placedA.height = mA.size.y;
+      // Join/Subtract cleared A's pose when they drew the result at
+      // identity. Undo puts the pre-op geometry back, so the pose goes back
+      // with it, on the record and on the mesh.
+      if (entry.aPrevPose) {
+        Object.assign(placedA, entry.aPrevPose);
+        nsoReseatPlacedPose(placedA);
+      }
     }
     if (entry.bSnapshot && entry.poseB && state.modelGroup) {
       const matB = new THREE.MeshStandardMaterial({
@@ -438,6 +452,11 @@ function undoLast() {
       placedEntry.width = m.size.x;
       placedEntry.depth = m.size.z;
       placedEntry.height = m.size.y;
+      // The old geometry is back in the piece's own frame and the pose on the
+      // record still stands, so put it on the fresh mesh. Without this an
+      // Undo of Mirror on a posed piece drew it unposed while the record and
+      // the export kept the pose. An op with a prevPose re-seats it below.
+      if (!entry.prevPose) nsoReseatPlacedPose(placedEntry);
     } else if (state.cutterOpen && state.editId === m.id) {
       showEditPreview();
     }
@@ -3205,6 +3224,41 @@ function applyMeshRotation(p) {
     p.overflow = false;
     p.meshOffsetY = 0;
   }
+}
+
+/* The pose record and the mesh must say the same thing. Every rebuild of a
+   placed mesh starts it at identity, so after one there are exactly two
+   honest endings:
+
+   - the new geometry is in the piece's own frame (a bake from rawTris or
+     model.geometry - Mirror, Soften, Seal, an Undo): the pose still stands,
+     so put it back on the mesh. nsoReseatPlacedPose.
+   - the new geometry already carries the pose (Join and Subtract build from
+     world soups, or rebuild at identity on purpose): the pose was consumed,
+     so clear it off the record. nsoClearPlacedPose.
+
+   Leaving the record posed while the mesh sits at identity is the bug these
+   exist for. Nothing on screen shows it. The next bake that honours the
+   record (NSO_sculptCommitRaw) re-applies the stale pose, and a piece that
+   was edge-flipped before a Join comes out of a Mirror turned 180 degrees. */
+function nsoPlacedIsPosed(p) {
+  return !!(p && (p.rotY || p.tipX || p.tiltX || p.flipX || p.tipZ || p.tiltZ || p.liftY));
+}
+function nsoReseatPlacedPose(p) {
+  if (nsoPlacedIsPosed(p) && p.mesh) applyMeshRotation(p);
+}
+function nsoPlacedPoseSnapshot(p) {
+  return {
+    rotY: p.rotY || 0, rotated: !!p.rotated, flipX: !!p.flipX,
+    tipX: p.tipX || 0, tipZ: p.tipZ || 0, tiltX: p.tiltX || 0, tiltZ: p.tiltZ || 0,
+    liftY: p.liftY || 0
+  };
+}
+function nsoClearPlacedPose(p) {
+  if (!p) return;
+  p.rotY = 0; p.rotated = false; p.flipX = false;
+  p.tipX = 0; p.tipZ = 0; p.tiltX = 0; p.tiltZ = 0;
+  p.liftY = 0;
 }
 
 function refreshOutline(p) {
