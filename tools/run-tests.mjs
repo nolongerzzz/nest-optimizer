@@ -35,6 +35,13 @@
  * same list silently dropped its last entry - the file had no trailing
  * newline - and reported "6 passed, 0 failed" for a 7-step chain.)
  *
+ * NO CACHE, EVER
+ * This is the push gate, so it runs every declared step every time. It does
+ * not read tools/run-tests-cached.mjs's content-hash cache and must never be
+ * taught to: that runner exists to speed up local iteration BETWEEN full
+ * runs, and skips steps on the strength of an earlier green run. A skipped
+ * step is not a passing step. Before any push, this runner, uncached.
+ *
  * Usage:
  *   npm test
  *   node tools/run-tests.mjs            # same thing
