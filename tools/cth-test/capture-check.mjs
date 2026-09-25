@@ -37,66 +37,20 @@
  * say, or an air-gapped runner.
  */
 import { chromium } from 'playwright';
-import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
-import { dirname, join, normalize } from 'node:path';
+import { ROOT, serveRoot, routeCdn, mkCheck, launchOpts } from './browser-lib.mjs';
 
-const ROOT = normalize(join(dirname(fileURLToPath(import.meta.url)), '..', '..'));
 const DRAG_PX = 24;               // cth/pointer-capture.js dragThresholdPx
-
-const TYPES = {
-  '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
-  '.stl': 'model/stl', '.wasm': 'application/wasm', '.json': 'application/json',
-};
-
-/* three is loaded from the CDN by index.html; serve the devDependency copy so
-   the check does not depend on the network. */
-const CDN = {
-  'build/three.min.js': 'node_modules/three/build/three.min.js',
-  'examples/js/controls/OrbitControls.js': 'node_modules/three/examples/js/controls/OrbitControls.js',
-  'examples/js/loaders/STLLoader.js': 'node_modules/three/examples/js/loaders/STLLoader.js',
-};
-
-const checks = [];
-function check(name, actual, expected) {
-  const ok = JSON.stringify(actual) === JSON.stringify(expected);
-  checks.push({ name, ok });
-  console.log(`${ok ? 'ok    ' : 'FAILED'} ${name}` +
-    (ok ? '' : `  (expected ${JSON.stringify(expected)}, got ${JSON.stringify(actual)})`));
-}
-
-function serveRoot() {
-  return new Promise((resolve) => {
-    const srv = createServer(async (req, res) => {
-      const p = decodeURIComponent(req.url.split('?')[0]);
-      const file = normalize(join(ROOT, p));
-      if (!file.startsWith(ROOT)) { res.writeHead(403); res.end(); return; }
-      try {
-        const body = await readFile(file);
-        res.writeHead(200, { 'content-type': TYPES[file.slice(file.lastIndexOf('.'))] || 'application/octet-stream' });
-        res.end(body);
-      } catch { res.writeHead(404); res.end('not found'); }
-    });
-    srv.listen(0, '127.0.0.1', () => resolve({ srv, base: `http://127.0.0.1:${srv.address().port}` }));
-  });
-}
+const check = mkCheck();
 
 async function main() {
   const external = process.env.APP_URL;
   const served = external ? null : await serveRoot();
   const base = external || served.base;
 
-  const browser = await chromium.launch(
-    process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : {});
+  const browser = await chromium.launch(launchOpts());
   const page = await browser.newPage({ viewport: { width: 1200, height: 820 } });
 
-  await page.route('**cdn.jsdelivr.net/**', async (route) => {
-    const url = route.request().url();
-    const hit = Object.keys(CDN).find((k) => url.includes(k));
-    if (!hit) return route.abort();
-    route.fulfill({ status: 200, contentType: 'text/javascript', body: await readFile(join(ROOT, CDN[hit])) });
-  });
+  routeCdn(page);
 
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -273,9 +227,7 @@ async function main() {
   await browser.close();
   if (served) served.srv.close();
 
-  const failed = checks.filter((c) => !c.ok);
-  console.log(`\n${checks.length - failed.length}/${checks.length} checks passed`);
-  if (failed.length) process.exit(1);
+  if (check.report()) process.exit(1);
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });
