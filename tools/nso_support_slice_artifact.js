@@ -327,10 +327,18 @@ const fmt = v => v.map(c => c.toFixed(3)).join(', ');
         const pieceW = objectSoup(model, found[0].index);
         const gap = ctx.NSO_SupportInterface.minDistance(soup, pieceW, { thickness: TH, reach: 1 });
         const g0 = ctx.NSO_SupportInterface.DEFAULTS.gapMm;
-        const gapOk = gap.mm >= g0 - 1e-3;
+        /* ...and again, EXACTLY: every triangle pair in closed form, candidates
+           by triangle box (tools/nso_tri_distance.js). Two methods that share
+           nothing but the file have to agree, or the run fails. */
+        const exact = require('./nso_tri_distance.js').minTriDistance(soup, pieceW, { reach: 10 });
+        const agree = Math.abs(exact.mm - gap.mm) < 1e-3;
+        const gapOk = gap.mm >= g0 - 1e-3 && exact.mm >= g0 - 1e-3 && agree;
         console.log('           closest approach to ' + PIECE_NAME + ' as written: ' + gap.mm.toFixed(4) + ' mm at [' +
                     gap.at.map(c => c.toFixed(3)).join(', ') + '] (gap ' + g0 + ' mm, sampled at ' + gap.step + ' mm) - ' +
                     (gapOk ? 'no overlap, no contact' : 'UNDER THE GAP'));
+        console.log('           exact triangle-to-triangle: ' + exact.mm.toFixed(6) + ' mm over ' + exact.pairs +
+                    ' pairs (' + exact.candidates + ' piece triangles by box) - ' + (agree ? 'agrees' : 'DISAGREES') +
+                    '; nearest piece triangle ' + exact.b.map(p => '(' + p.map(c => c.toFixed(3)).join(', ') + ')').join(' '));
         for (const r of supports[si].finish.stations) {
           const zb = r.zBase + shift[2], zt = r.zTop + shift[2], zu = r.zUnderside + shift[2];
           console.log('           ' + r.label.padEnd(22) + 'plate z: interface ' + zb.toFixed(3) + '..' + zt.toFixed(3) +

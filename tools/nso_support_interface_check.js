@@ -29,6 +29,7 @@ const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'tools', 'support-tree-out');
 const { writeSTL } = require('./nso_stl_io.js');
 const { csgContext } = require('./nso_csg_node.js');
+const { minTriDistance } = require('./nso_tri_distance.js');
 
 const ctx = {
   Math, Map, Set, console, Array, Object, Number, String, JSON, isFinite, Promise,
@@ -111,6 +112,12 @@ fs.mkdirSync(OUT, { recursive: true });
       pt.census.every(c => c.crossShare <= 0.25) && Math.abs(Math.abs(dirs[0] - dirs[1]) - 90) < 1e-6 &&
       f.widthMm === FLOOR && f.pitchMm === 1.2,
       `layers at ${dirs.map(d => d.toFixed(0)).join(' / ')} deg, cross share ${pt.census.map(c => c.crossShare.toFixed(3)).join(' / ')}`);
+    /* The same number, EXACTLY, by a method that shares nothing with the
+       sampler: every triangle pair in closed form, candidates by box. */
+    const ex = minTriDistance(f.soup, host);
+    check(`${name}: the exact triangle-to-triangle distance agrees with the sampled one`,
+      Math.abs(ex.mm - f.minDistanceMm) < 1e-3 && ex.mm >= GAP - 1e-5,
+      `exact ${ex.mm.toFixed(6)} mm over ${ex.pairs} pairs, sampled ${r4(f.minDistanceMm)} mm`);
     const file = path.join(OUT, name + '_interface.stl');
     writeSTL(file, f.soup, 'NSO support with interface ' + name);
     const v = validate(file, 1e-6);
