@@ -738,9 +738,16 @@
           <button id="ms-mode-line" type="button"
                   title="Pick one extrusion move at a time (sliced files only)">Pick a line</button>
         </div>
+        <div class="ms-btn-row" id="ms-camera-row" role="group" aria-label="Camera mode">
+          <button id="ms-cam-normal" type="button" class="active" aria-pressed="true"
+                  title="Free orbit, zoom and pan, framed on the whole part">Normal</button>
+          <button id="ms-cam-close" type="button" aria-pressed="false"
+                  title="Framed tight on the selection, orbit and zoom locked onto it. Switching never changes the selection or the isolation">Close inspection</button>
+        </div>
         <div id="ms-select-controls">
           <p class="ms-note">Click empty space to drop a flat box. Drag its
-            <b>blue centre dot</b> to move it. Drag its <b>side/face</b> to resize
+            <b>blue centre dot</b> to move it. Drag its <b>green corner dot</b> to
+            size it in X and Y independently. Drag its <b>side/face</b> to scale
             the footprint. Drag the <b>small orange dot on top</b> to control how
             thick (tall) it is &mdash; keep it thin to avoid grabbing unrelated
             layers above/below.</p>
@@ -955,7 +962,7 @@
   <script src="app-library-save.js?v=libsave2"></script>
   <script src="app-library.js?v=libsave2"></script>
   <script src="app-photoset.js?v=photoset2"></script>
-  <script src="app-microscope.js?v=scope3"></script>
+  <script src="app-microscope.js?v=scope4"></script>
   <script src="app-ux.js?v=inside8"></script>
   <!-- Live watch: off until its button is pressed, and it patches nothing
        until then. Deleting this tag and the #btn-watch button above removes

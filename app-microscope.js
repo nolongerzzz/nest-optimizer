@@ -515,6 +515,9 @@ var NSO_MICROSCOPE = (function () {
   var mode = 'orbit';         // 'orbit' | 'select'
   var balls = [];             // the capture boxes
   var defaultR = 5.0;
+  // A corner drag makes the footprint a rectangle; the next box dropped takes
+  // the last one's shape, as the reference tool's next ball took its size.
+  var defaultRx = null, defaultRy = null;
   var defaultH = 1.0;         // flat by default - a thin slab, not a tall cube
   var currentSelection = [];  // segments (toolpath) or objects (mesh)
   var selectionSource = 'box';
@@ -699,8 +702,16 @@ var NSO_MICROSCOPE = (function () {
   }
 
   // --- selection boxes ------------------------------------------------------
-  // each is { point, r (horizontal half-extent), h (vertical half-extent),
-  //           boxMesh, edges, handle, heightHandle }
+  // each is { point, rx, ry (horizontal half-extents along G-code X and Y),
+  //           h (vertical half-extent), boxMesh, edges, handle, heightHandle,
+  //           cornerHandle }
+  //
+  // The reference tool's box had ONE horizontal half-extent `r`, a square
+  // footprint, and no corner handle - it never did, and neither did G-scope
+  // until the corner handle below. The corner handle resizes the footprint
+  // along G-code X and Y independently; `r` survives in gcodeBoxes() as the
+  // larger of the two so a reader of the old field still gets a box that
+  // covers the footprint.
 
   function makeBoxVisuals() {
     var v = view;
@@ -715,22 +726,50 @@ var NSO_MICROSCOPE = (function () {
       new THREE.MeshBasicMaterial({ color: 0x5b8cff }));       // centre dot - drag to MOVE
     var heightHandle = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 6),
       new THREE.MeshBasicMaterial({ color: 0xffb35b }));       // top dot - drag to set thickness
+    // corner dot - drag to size X and Y. Drawn over the toolpath: the corner
+    // it sits on is usually inside a wall of lines, and a handle you cannot
+    // see is one you cannot find (the raycast finds it through them anyway).
+    var cornerHandle = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 6),
+      new THREE.MeshBasicMaterial({ color: 0x4cd97b, depthTest: false, depthWrite: false }));
+    cornerHandle.renderOrder = 10;
 
-    v.scene.add(boxMesh); v.scene.add(handle); v.scene.add(heightHandle);
-    return { boxMesh: boxMesh, edges: edges, handle: handle, heightHandle: heightHandle };
+    v.scene.add(boxMesh); v.scene.add(handle); v.scene.add(heightHandle); v.scene.add(cornerHandle);
+    return { boxMesh: boxMesh, edges: edges, handle: handle, heightHandle: heightHandle,
+             cornerHandle: cornerHandle };
+  }
+
+  /** The three dots and the box, the parts of a capture box a view shows or hides together. */
+  function boxParts(b) { return [b.boxMesh, b.handle, b.heightHandle, b.cornerHandle]; }
+
+  /**
+   * Where the corner dot sits in view space: on the box's top face, at the
+   * footprint corner nearest the camera - the one in front of the box, not
+   * behind it. The resize is symmetric about the centre, so which corner
+   * carries the dot changes nothing about what a drag does.
+   */
+  function cornerPoint(b) {
+    var cam = view ? view.camera.position : null;
+    var sx = cam && cam.x < b.point.x ? -1 : 1;
+    var sz = cam && cam.z < b.point.z ? -1 : 1;
+    return new THREE.Vector3(b.point.x + sx * b.rx, b.point.y + b.h, b.point.z + sz * b.ry);
   }
 
   function updateBoxTransform(b) {
+    var rMax = Math.max(b.rx, b.ry);
     b.boxMesh.position.copy(b.point);
-    b.boxMesh.scale.set(b.r * 2, b.h * 2, b.r * 2);
+    b.boxMesh.scale.set(b.rx * 2, b.h * 2, b.ry * 2);
     b.handle.position.copy(b.point);
-    b.handle.scale.setScalar(Math.max(0.35, b.r * 0.1));
+    b.handle.scale.setScalar(Math.max(0.35, rMax * 0.1));
     b.heightHandle.position.set(b.point.x, b.point.y + b.h, b.point.z);
-    b.heightHandle.scale.setScalar(Math.max(0.3, b.r * 0.08));
+    b.heightHandle.scale.setScalar(Math.max(0.3, rMax * 0.08));
+    b.cornerHandle.position.copy(cornerPoint(b));
+    b.cornerHandle.scale.setScalar(Math.max(0.3, rMax * 0.08));
   }
 
-  function addBall(point, r, h) {
-    var b = Object.assign({ point: point.clone(), r: r, h: h }, makeBoxVisuals());
+  // `r` is the square footprint every caller before the corner handle passed;
+  // `ry`, when given, makes it a rectangle (r is then the X half-extent).
+  function addBall(point, r, h, ry) {
+    var b = Object.assign({ point: point.clone(), rx: r, ry: ry != null ? ry : r, h: h }, makeBoxVisuals());
     updateBoxTransform(b);
     balls.push(b);
     return b;
@@ -738,8 +777,7 @@ var NSO_MICROSCOPE = (function () {
 
   function removeAllBalls() {
     balls.forEach(function (b) {
-      view.scene.remove(b.boxMesh); view.scene.remove(b.handle); view.scene.remove(b.heightHandle);
-      disposeTree(b.boxMesh); disposeTree(b.handle); disposeTree(b.heightHandle);
+      boxParts(b).forEach(function (o) { view.scene.remove(o); disposeTree(o); });
     });
     balls.length = 0;
   }
@@ -748,19 +786,22 @@ var NSO_MICROSCOPE = (function () {
   function gcodeBoxes() {
     return balls.map(function (b) {
       // Inverse of toThree: three (x, y, z) -> gcode (x + cx, -z + cy, y)
-      return { gx: b.point.x + doc.cx, gy: -b.point.z + doc.cy, gz: b.point.y, r: b.r, h: b.h };
+      return { gx: b.point.x + doc.cx, gy: -b.point.z + doc.cy, gz: b.point.y,
+               rx: b.rx, ry: b.ry, r: Math.max(b.rx, b.ry), h: b.h };
     });
   }
 
   /**
-   * The reference tool's capture predicate, unchanged:
-   *     |mx - gx| <= r && |my - gy| <= r && |mz - gz| <= h
-   * `r` is the horizontal half-extent and `h` the vertical one, which is the
-   * whole point of the box - a sphere reaching 5 mm across the plate also
-   * reaches 5 mm up, and that is twenty layers.
+   * The reference tool's capture predicate, with its one horizontal extent
+   * split in two so the corner handle can make the footprint a rectangle:
+   *     |mx - gx| <= rx && |my - gy| <= ry && |mz - gz| <= h
+   * With rx == ry it is the reference predicate exactly. The horizontal and
+   * vertical extents stay independent, which is the whole point of the box -
+   * a sphere reaching 5 mm across the plate also reaches 5 mm up, and that is
+   * twenty layers.
    */
   function inBox(b, mx, my, mz) {
-    return Math.abs(mx - b.gx) <= b.r && Math.abs(my - b.gy) <= b.r && Math.abs(mz - b.gz) <= b.h;
+    return Math.abs(mx - b.gx) <= b.rx && Math.abs(my - b.gy) <= b.ry && Math.abs(mz - b.gz) <= b.h;
   }
 
   function selectByBox() {
@@ -783,8 +824,8 @@ var NSO_MICROSCOPE = (function () {
     return doc.objects.filter(function (o) {
       if (!objectShown(o)) return false;
       var hit = boxes.filter(function (b) {
-        return o.bounds.minX <= b.gx + b.r && o.bounds.maxX >= b.gx - b.r &&
-               o.bounds.minY <= b.gy + b.r && o.bounds.maxY >= b.gy - b.r &&
+        return o.bounds.minX <= b.gx + b.rx && o.bounds.maxX >= b.gx - b.rx &&
+               o.bounds.minY <= b.gy + b.ry && o.bounds.maxY >= b.gy - b.ry &&
                o.bounds.minZ <= b.gz + b.h && o.bounds.maxZ >= b.gz - b.h;
       });
       if (!hit.length) return false;          // bounding box misses every box
@@ -912,7 +953,7 @@ var NSO_MICROSCOPE = (function () {
     var hint = $('ms-hint-badge');
     if (hint) {
       hint.textContent = mode === 'select'
-        ? 'Click empty space to drop a flat box. Drag its blue centre dot to move it, a side to resize the footprint, the orange top dot to set how thick it is.'
+        ? 'Click empty space to drop a flat box. Drag its blue centre dot to move it, the green corner dot to size it in X and Y, a side to scale the footprint, the orange top dot to set how thick it is.'
         : mode === 'line'
           ? 'Click a line to pick that one move. Shift-click adds or removes a line. Left / Right arrows step to the neighbouring move.'
           : '';
@@ -937,7 +978,8 @@ var NSO_MICROSCOPE = (function () {
       var p = ndc(e);
       v.dragRaycaster.setFromCamera(new THREE.Vector2(p[0], p[1]), v.camera);
 
-      // priority: centre handle (move) > height handle (thickness) > box face
+      // priority: centre handle (move) > height handle (thickness) >
+      //           corner handle (X and Y) > box face
       var handleHits = v.dragRaycaster.intersectObjects(balls.map(function (b) { return b.handle; }));
       if (handleHits.length > 0) {
         var i1 = balls.findIndex(function (b) { return b.handle === handleHits[0].object; });
@@ -957,10 +999,27 @@ var NSO_MICROSCOPE = (function () {
         v.controls.enabled = false;
         return;
       }
-      var surfaceHits = v.dragRaycaster.intersectObjects(balls.map(function (b) { return b.boxMesh; }));
+      // The corner dot: drag it across a horizontal plane at the corner's own
+      // height, and the footprint's X and Y half-extents follow the pointer
+      // independently. The box stays centred, as every other resize keeps it.
+      var cornerHits = v.dragRaycaster.intersectObjects(balls.map(function (b) { return b.cornerHandle; }));
+      if (cornerHits.length > 0) {
+        var i2 = balls.findIndex(function (b) { return b.cornerHandle === cornerHits[0].object; });
+        v.dragState = { type: 'resizeXY', ballIndex: i2 };
+        v.controls.enabled = false;
+        v.resizePlane.setFromNormalAndCoplanarPoint(new THREE.Vector3(0, 1, 0), cornerPoint(balls[i2]));
+        return;
+      }
+      // Not recursive: the box's edge lines are a child of boxMesh, and at the
+      // raycaster's 1 mm Line threshold a press near any edge hit THEM first -
+      // no box owns that object, so the drag indexed balls[-1] and threw.
+      // (The reference tool has the same fault.)
+      var surfaceHits = v.dragRaycaster.intersectObjects(balls.map(function (b) { return b.boxMesh; }), false);
       if (surfaceHits.length > 0) {
         var i3 = balls.findIndex(function (b) { return b.boxMesh === surfaceHits[0].object; });
-        v.dragState = { type: 'resizeR', ballIndex: i3 };
+        // The footprint's proportion, fixed for the drag (see resizeR below).
+        var m3 = Math.max(balls[i3].rx, balls[i3].ry);
+        v.dragState = { type: 'resizeR', ballIndex: i3, fx: balls[i3].rx / m3, fy: balls[i3].ry / m3 };
         v.controls.enabled = false;
         var d3 = new THREE.Vector3();
         v.camera.getWorldDirection(d3);
@@ -1001,11 +1060,23 @@ var NSO_MICROSCOPE = (function () {
         var cd = new THREE.Vector3();
         v.camera.getWorldDirection(cd);
         v.resizePlane.setFromNormalAndCoplanarPoint(cd, hit);
+      } else if (v.dragState.type === 'resizeXY') {
+        // corner resize: X from the view's x, G-code Y from the view's -z
+        ball.rx = Math.max(0.3, Math.min(60, Math.abs(hit.x - ball.point.x)));
+        ball.ry = Math.max(0.3, Math.min(60, Math.abs(hit.z - ball.point.z)));
+        defaultRx = ball.rx; defaultRy = ball.ry;
+        updateBoxTransform(ball);
       } else if (v.dragState.type === 'resizeR') {
-        // footprint resize: horizontal distance only
-        var flat = Math.hypot(hit.x - ball.point.x, hit.z - ball.point.z);
-        ball.r = Math.max(0.3, Math.min(60, flat));
-        defaultR = ball.r;
+        // footprint resize: horizontal distance only. The reference tool set
+        // its one `r` here; with a rectangle the LARGER side follows the
+        // pointer and the other keeps the proportion it had when the drag
+        // began, so a square behaves exactly as it did and a corner-drawn
+        // rectangle keeps its shape.
+        var flat = Math.max(0.3, Math.min(60, Math.hypot(hit.x - ball.point.x, hit.z - ball.point.z)));
+        ball.rx = Math.max(0.3, flat * v.dragState.fx);
+        ball.ry = Math.max(0.3, flat * v.dragState.fy);
+        defaultR = Math.max(ball.rx, ball.ry);
+        defaultRx = ball.rx; defaultRy = ball.ry;
         updateBoxTransform(ball);
       }
       selectionSource = 'box';
@@ -1036,7 +1107,8 @@ var NSO_MICROSCOPE = (function () {
       var hits = v.raycaster.intersectObjects(targets);
       if (hits.length === 0) return;
 
-      addBall(hits[0].point.clone(), defaultR, defaultH);
+      if (defaultRx != null) addBall(hits[0].point.clone(), defaultRx, defaultH, defaultRy);
+      else addBall(hits[0].point.clone(), defaultR, defaultH);
       selectionSource = 'box';
       computeSelectionInfo();
     });
@@ -1044,7 +1116,7 @@ var NSO_MICROSCOPE = (function () {
 
   // --- Isolate / Back -------------------------------------------------------
 
-  function isolate() {
+  function isolate(opts) {
     if (!currentSelection.length) return false;
     var v = view;
     clearGroup(v.detailGroup);
@@ -1099,28 +1171,16 @@ var NSO_MICROSCOPE = (function () {
     v.overviewGroup.visible = false;
     v.detailGroup.visible = true;
     v.highlightGroup.visible = false;
-    balls.forEach(function (b) {
-      b.boxMesh.visible = false; b.handle.visible = false; b.heightHandle.visible = false;
-    });
+    balls.forEach(function (b) { boxParts(b).forEach(function (o) { o.visible = false; }); });
     badge('Detail: ' + currentSelection.length + ' ' +
           (doc.kind === 'toolpath' ? 'segments' : 'object(s)'));
     show('ms-detail-controls', true);
     show('ms-select-controls', false);
 
-    // The reference tool only re-TARGETS here, on the centroid of the boxes,
-    // and leaves the camera where the whole part put it. That is the whole
-    // part's zoom, which on a plate of twelve pieces leaves one isolated
-    // support interface a thumbnail in the middle of the grid. Isolate is the
-    // zoom - so frame the selection itself, and fall back to the reference
-    // tool's target when there is nothing measurable to frame.
-    var selBox = selectionBox();
-    if (selBox) {
-      frameBox(selBox);
-    } else if (balls.length > 0) {
-      var centre = new THREE.Vector3();
-      balls.forEach(function (b) { centre.add(b.point); });
-      v.controls.target.copy(centre.divideScalar(balls.length));
-    }
+    // Isolate enters Close inspection (see setCameraMode) - unless this is a
+    // redraw under a filter, which is not a re-zoom and keeps whichever
+    // camera mode and position the user had.
+    if (!(opts && opts.keepCamera)) setCameraMode('close');
     applyFeatureVisibility();
     return true;
   }
@@ -1130,10 +1190,8 @@ var NSO_MICROSCOPE = (function () {
     v.detailGroup.visible = false;
     v.overviewGroup.visible = true;
     v.highlightGroup.visible = true;
-    frame();                      // Isolate zoomed in; Back is the way out of that
-    balls.forEach(function (b) {
-      b.boxMesh.visible = true; b.handle.visible = true; b.heightHandle.visible = true;
-    });
+    setCameraMode('normal');      // Isolate zoomed in; Back is the way out of that
+    balls.forEach(function (b) { boxParts(b).forEach(function (o) { o.visible = true; }); });
     badge('Whole part');
     show('ms-detail-controls', false);
     show('ms-select-controls', mode === 'select');
@@ -1152,6 +1210,8 @@ var NSO_MICROSCOPE = (function () {
     if (!view || !view.running || gen !== loop) return;
     requestAnimationFrame(function () { animate(gen); });
     view.controls.update();
+    // The corner dot follows the camera round to the near corner.
+    balls.forEach(function (b) { b.cornerHandle.position.copy(cornerPoint(b)); });
     view.renderer.render(view.scene, view.camera);
   }
 
@@ -1332,12 +1392,9 @@ var NSO_MICROSCOPE = (function () {
 
   /** Redraw the detail view in place after a filter changed under it. */
   function isolateRedraw() {
-    var sel = currentSelection.slice();
-    var cam = view.camera.position.clone(), tgt = view.controls.target.clone();
-    if (!sel.length) return;
-    isolate();
-    // Filtering is not a re-zoom: keep the camera where the user left it.
-    view.camera.position.copy(cam); view.controls.target.copy(tgt); view.controls.update();
+    if (!currentSelection.length) return;
+    // Filtering is not a re-zoom: keep the camera, and its mode, where the user left it.
+    isolate({ keepCamera: true });
   }
 
   /** One legend group alone. Feature-level isolation; view only. */
@@ -2233,12 +2290,77 @@ var NSO_MICROSCOPE = (function () {
     var half = (v.camera.fov * Math.PI / 180) / 2;
     var dist = (radius / Math.sin(half)) * 1.1;          // 10% air around it
     var step = dist / Math.sqrt(3);                      // equal on all three axes
+    // Spend any orbit / pan the damping is still easing out FIRST. With
+    // damping on, OrbitControls keeps adding a decaying remainder of the last
+    // drag on every update, so a re-frame straight after a pan would drift off
+    // the target it was just given - Close inspection's lock included. One
+    // undamped update applies the remainder and zeroes it; the framing below
+    // then overwrites where it landed.
+    v.controls.enableDamping = false;
+    v.controls.update();
+    v.controls.enableDamping = true;
     v.controls.target.copy(centre);
     v.camera.position.set(centre.x + step, centre.y + step, centre.z + step);
     v.camera.near = Math.max(0.01, span / 1000);
     v.camera.far = Math.max(span, dist) * 100;
     v.camera.updateProjectionMatrix();
     v.controls.update();
+  }
+
+  // --- camera modes -----------------------------------------------------------
+  //
+  //   normal  free orbit / zoom / pan, framed on the whole part - the view
+  //           G-scope opens in and Back returns to.
+  //   close   Close inspection: framed tight on what is selected, orbit and
+  //           zoom about it, pan off so the target stays locked on it. This
+  //           is the view Isolate has always put you in.
+  //
+  // A camera mode is ONLY the camera. Switching it never touches the
+  // selection, the capture boxes, the isolation (detail vs overview) or
+  // anything on the plate, so it can be flipped either way at any time -
+  // before Isolate, inside it, or after Back.
+  var cameraMode = 'normal';
+
+  /**
+   * What Close inspection frames: the selection's own extent; failing that,
+   * the capture boxes (a box that has caught nothing yet is still where you
+   * are looking); failing both, null.
+   */
+  function closeBox() {
+    var sel = selectionBox();
+    if (sel) return sel;
+    if (!balls.length) return null;
+    var box = new THREE.Box3();
+    balls.forEach(function (b) {
+      box.expandByPoint(new THREE.Vector3(b.point.x - b.rx, b.point.y - b.h, b.point.z - b.ry));
+      box.expandByPoint(new THREE.Vector3(b.point.x + b.rx, b.point.y + b.h, b.point.z + b.ry));
+    });
+    return box;
+  }
+
+  function setCameraMode(m) {
+    cameraMode = m === 'close' ? 'close' : 'normal';
+    var v = view;
+    if (v) {
+      if (cameraMode === 'close') {
+        // The reference tool only re-TARGETED on Isolate and left the whole
+        // part's zoom, which on a plate of twelve pieces leaves one isolated
+        // support interface a thumbnail in the middle of the grid. Close
+        // inspection is the zoom: frame the selection itself. With nothing
+        // selected or boxed there is nothing to be close to, so it frames the
+        // whole part and still locks the target.
+        var box = closeBox();
+        if (box) frameBox(box); else frame();
+        v.controls.enablePan = false;
+      } else {
+        frame();
+        v.controls.enablePan = true;
+      }
+    }
+    var n = $('ms-cam-normal'), c = $('ms-cam-close');
+    if (n) { n.classList.toggle('active', cameraMode === 'normal'); n.setAttribute('aria-pressed', String(cameraMode === 'normal')); }
+    if (c) { c.classList.toggle('active', cameraMode === 'close'); c.setAttribute('aria-pressed', String(cameraMode === 'close')); }
+    return cameraMode;
   }
 
   function open(d) {
@@ -2260,7 +2382,7 @@ var NSO_MICROSCOPE = (function () {
     buildOverview();
     buildLegend();
     applyFeatureVisibility();
-    frame();
+    setCameraMode('normal');      // frames the whole part
     badge('Whole part');
     show('ms-detail-controls', false);
     setMode('select');
@@ -2296,7 +2418,7 @@ var NSO_MICROSCOPE = (function () {
     // the frame rate and the damping with it.
     if (!view.running) { view.running = true; animate(++loop); }
     resize();
-    frame();
+    setCameraMode(cameraMode);    // re-frame for the size it opened at, in the mode it was left in
     // The panel owns the keyboard while it is up, so its own Escape handler is
     // reachable without clicking into it first.
     if (panel.focus) panel.focus();
@@ -2390,8 +2512,10 @@ var NSO_MICROSCOPE = (function () {
       selectionSource = 'box';
       computeSelectionInfo();
     });
-    bind('ms-btn-isolate', 'click', isolate);
-    bind('ms-btn-isolate-line', 'click', isolate);
+    bind('ms-btn-isolate', 'click', function () { isolate(); });
+    bind('ms-btn-isolate-line', 'click', function () { isolate(); });
+    bind('ms-cam-normal', 'click', function () { setCameraMode('normal'); });
+    bind('ms-cam-close', 'click', function () { setCameraMode('close'); });
     bind('ms-btn-back', 'click', back);
     bind('ms-mode-line', 'click', function () { setMode('line'); });
     bind('ms-line-prev', 'click', function () { stepLine(-1); });
@@ -2486,12 +2610,13 @@ var NSO_MICROSCOPE = (function () {
     plateObjects: plateObjects,
     openPicker: openPicker,
     setMode: function (m) { setMode(m); },
-    addBoxAt: function (gx, gy, gz, r, h) {
+    addBoxAt: function (gx, gy, gz, r, h, ry) {
       // A capture box placed by G-code coordinates rather than by a click, so a
-      // check can drive the same selection a drag produces.
+      // check can drive the same selection a drag produces. `ry` makes the
+      // footprint a rectangle, as the corner handle does; `r` is then X.
       if (!doc || !buildWorld()) return null;
       var p = toThree(gx - doc.cx, gy - doc.cy, gz);
-      var b = addBall(p, r != null ? r : defaultR, h != null ? h : defaultH);
+      var b = addBall(p, r != null ? r : defaultR, h != null ? h : defaultH, ry);
       selectionSource = 'box';
       computeSelectionInfo();
       return b;
@@ -2556,8 +2681,10 @@ var NSO_MICROSCOPE = (function () {
     setRenderMode: setRenderMode,
     renderMode: function () { return renderMode; },
     shownSolid: function () { return view && view.solidBuilt ? view.solidBuilt : null; },
-    isolate: isolate,
+    isolate: function () { return isolate(); },
     back: back,
+    setCameraMode: setCameraMode,
+    cameraMode: function () { return cameraMode; },
     layerCount: layerCount,
     hidden: function () { return HIDDEN ? Array.from(HIDDEN) : []; },
     groups: function () { return doc ? Object.keys(doc.groups) : []; },
