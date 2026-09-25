@@ -536,6 +536,11 @@ var NSO_MICROSCOPE = (function () {
   // what the capture box catches and what a line pick lands on are the same
   // moves either way, so switching back and forth never loses a selection.
   var renderMode = 'toolpath';
+  // Isolate's state, kept apart from what is drawn. Isolated in Normal: the
+  // selection alone, drawn as-is. Isolated in Close inspection: the whole view
+  // with the selection highlighted over it. The camera toggle flips between
+  // the two without leaving the isolation (applyDisplay).
+  var isolated = false;
 
   function buildWorld() {
     if (view) return view;
@@ -887,11 +892,14 @@ var NSO_MICROSCOPE = (function () {
 
   function applyFeatureVisibility() {
     var v = view;
+    // Per mesh, not only per group: the pick and box raycasts filter on each
+    // mesh's own `visible`, and three.js raycasts a mesh in a hidden group.
+    var detail = showingDetail();
     Object.keys(v.overviewMeshes).forEach(function (name) {
-      v.overviewMeshes[name].visible = !HIDDEN.has(name) && !v.detailGroup.visible;
+      v.overviewMeshes[name].visible = !HIDDEN.has(name) && !detail;
     });
     Object.keys(v.solidMeshes || {}).forEach(function (name) {
-      v.solidMeshes[name].visible = !HIDDEN.has(name) && !v.detailGroup.visible;
+      v.solidMeshes[name].visible = !HIDDEN.has(name) && !detail;
     });
     v.detailGroup.children.forEach(function (mesh) {
       mesh.visible = !HIDDEN.has(mesh.userData.feature);
@@ -1116,86 +1124,117 @@ var NSO_MICROSCOPE = (function () {
 
   // --- Isolate / Back -------------------------------------------------------
 
-  function isolate(opts) {
-    if (!currentSelection.length) return false;
+  /** Isolated and in Normal: the selection alone is what is drawn. */
+  function showingDetail() { return isolated && cameraMode === 'normal'; }
+
+  /**
+   * The selection's own moves / objects, drawn AS-IS - the same way the
+   * overview draws them - into the detail group. Toolpath view: each move as
+   * its line, in its feature's colour, exactly the overview's lines with
+   * everything else taken away. Solid view: the selection's own solid (what
+   * Export as solid writes). Mesh: the objects' own triangles.
+   */
+  function buildDetail() {
     var v = view;
     clearGroup(v.detailGroup);
-
+    if (!doc || !currentSelection.length) return;
     if (doc.kind === 'toolpath') {
-      var bySel = {};
-      currentSelection.forEach(function (s) {
-        if (!bySel[s.feature]) bySel[s.feature] = [];
-        bySel[s.feature].push(s);
-      });
-      // G-scope departs from the reference tool here, on purpose. Its detail
-      // view is one 8-sided cylinder per move - not the shape a bead prints
-      // and not exportable. The detail view is now extrudeFlatLine's
-      // per-move prism (NSOGcodeLines.buildLineGeometry): the SAME triangles
-      // Export writes, at each move's own measured width and height, so what
-      // Isolate shows is exactly what leaves the view. No new geometry code -
-      // this is the builder the export already used.
+      var keys = Object.keys(doc.groups || {});
+      var colourOf = function (f) { return colorForGroup(f, Math.max(0, keys.indexOf(f))); };
+      var segs = currentSelection.filter(function (s) { return !CLEARED.has(s.id) && inZRange(s); });
       if (renderMode === 'solid') {
-        // The solid view's Isolate is the selection's own solid - what
-        // Export as solid writes - built from the selection alone, so a run
-        // the selection cuts is capped where the selection ends.
-        var keys = Object.keys(doc.groups || bySel);
-        var sd = solidMeshes(currentSelection.filter(function (s) {
-          return !CLEARED.has(s.id) && inZRange(s);
-        }), function (f) { return colorForGroup(f, Math.max(0, keys.indexOf(f))); });
+        // A run the selection cuts is capped where the selection ends.
+        var sd = solidMeshes(segs, colourOf);
         Object.keys(sd.meshes).forEach(function (k) { v.detailGroup.add(sd.meshes[k]); });
-      } else {
-        Object.keys(bySel).forEach(function (feature, gi) {
-          var mesh = prismMesh(bySel[feature].filter(function (s) {
-            return !CLEARED.has(s.id) && inZRange(s);
-          }), colorForGroup(feature, gi));
-          mesh.userData.feature = feature;
-          v.detailGroup.add(mesh);
-        });
+        return;
       }
-    } else {
-      currentSelection.forEach(function (o, gi) {
-        var geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(o.positions), 3));
-        geo.translate(-doc.cx, -doc.cy, 0);
-        geo.rotateX(-Math.PI / 2);
-        geo.computeVertexNormals();
-        var mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-          color: colorForGroup(o.name, gi), metalness: 0.05, roughness: 0.4,
-          clippingPlanes: clipPlanes()
-        }));
-        mesh.userData.feature = o.name;
+      var byFeature = {};
+      segs.forEach(function (s) { (byFeature[s.feature] = byFeature[s.feature] || []).push(s); });
+      Object.keys(byFeature).forEach(function (feature) {
+        var mesh = lineMesh(byFeature[feature], colourOf(feature), feature === 'Travel');
+        mesh.userData.feature = feature;
         v.detailGroup.add(mesh);
       });
+      return;
     }
+    var okeys = Object.keys(doc.groups || {});
+    currentSelection.forEach(function (o) {
+      var geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(o.positions), 3));
+      geo.translate(-doc.cx, -doc.cy, 0);
+      geo.rotateX(-Math.PI / 2);
+      geo.computeVertexNormals();
+      var mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+        color: colorForGroup(o.name, Math.max(0, okeys.indexOf(o.name))), metalness: 0.05, roughness: 0.4,
+        clippingPlanes: clipPlanes()
+      }));
+      mesh.userData.feature = o.name;
+      v.detailGroup.add(mesh);
+    });
+  }
 
-    v.overviewGroup.visible = false;
-    v.detailGroup.visible = true;
-    v.highlightGroup.visible = false;
-    balls.forEach(function (b) { boxParts(b).forEach(function (o) { o.visible = false; }); });
-    badge('Detail: ' + currentSelection.length + ' ' +
-          (doc.kind === 'toolpath' ? 'segments' : 'object(s)'));
-    show('ms-detail-controls', true);
-    show('ms-select-controls', false);
+  /** Moves as line segments, the overview's own way of drawing them. */
+  function lineMesh(segs, color, faint) {
+    var positions = new Float32Array(segs.length * 6);
+    segs.forEach(function (s, i) {
+      var p0 = toThree(s.x0 - doc.cx, s.y0 - doc.cy, s.z);
+      var p1 = toThree(s.x1 - doc.cx, s.y1 - doc.cy, s.z);
+      positions.set([p0.x, p0.y, p0.z, p1.x, p1.y, p1.z], i * 6);
+    });
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    var mesh = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
+      color: color, transparent: !!faint, opacity: faint ? 0.35 : 1.0
+    }));
+    mesh.userData.segs = segs;
+    return mesh;
+  }
 
-    // Isolate enters Close inspection (see setCameraMode) - unless this is a
-    // redraw under a filter, which is not a re-zoom and keeps whichever
-    // camera mode and position the user had.
-    if (!(opts && opts.keepCamera)) setCameraMode('close');
+  /**
+   * What is drawn, from the isolation and the camera mode:
+   *   Normal, not isolated      the whole view, the selection highlighted
+   *   Normal, isolated          the selection alone, as-is (detail group)
+   *   Close inspection, either  the whole view with the highlighted
+   *                             selection over it, framed on the selection
+   */
+  function applyDisplay() {
+    var v = view;
+    if (!v) return;
+    var detail = showingDetail();
+    v.detailGroup.visible = detail;
+    v.overviewGroup.visible = !detail;
+    v.highlightGroup.visible = !detail;
+    var unit = doc && doc.kind === 'toolpath' ? 'segments' : 'object(s)';
+    badge(detail ? 'Detail: ' + currentSelection.length + ' ' + unit
+        : cameraMode === 'close' ? 'Close inspection' + (isolated ? ' (isolated)' : '')
+        : 'Whole part');
+    show('ms-detail-controls', isolated);
+    show('ms-select-controls', !isolated && mode === 'select');
     applyFeatureVisibility();
+  }
+
+  function isolate(opts) {
+    if (!currentSelection.length) return false;
+    isolated = true;
+    buildDetail();
+    // Isolate shows the selection alone, which is Normal's isolated view -
+    // so it lands in Normal, turned to the selection (fitView: the same
+    // viewing angle, the selection filling the frame). A redraw under a
+    // filter or a changed selection passes keepCamera and moves nothing.
+    if (!(opts && opts.keepCamera)) {
+      cameraMode = 'normal';
+      syncCameraButtons();
+      fitView(selectionBox());
+    }
+    applyDisplay();
     return true;
   }
 
   function back() {
-    var v = view;
-    v.detailGroup.visible = false;
-    v.overviewGroup.visible = true;
-    v.highlightGroup.visible = true;
-    setCameraMode('normal');      // Isolate zoomed in; Back is the way out of that
-    balls.forEach(function (b) { boxParts(b).forEach(function (o) { o.visible = true; }); });
-    badge('Whole part');
-    show('ms-detail-controls', false);
-    show('ms-select-controls', mode === 'select');
-    applyFeatureVisibility();
+    isolated = false;
+    clearGroup(view.detailGroup);
+    setCameraMode('normal');      // the whole part again; Back is the way out
+    applyDisplay();
   }
 
   // `loop` is a generation counter, not a boolean. Closing sets `running`
@@ -1210,7 +1249,7 @@ var NSO_MICROSCOPE = (function () {
     if (!view || !view.running || gen !== loop) return;
     requestAnimationFrame(function () { animate(gen); });
     view.controls.update();
-    if (cameraMode === 'normal') followClip();
+    followClip();
     // The corner dot follows the camera round to the near corner.
     balls.forEach(function (b) { b.cornerHandle.position.copy(cornerPoint(b)); });
     view.renderer.render(view.scene, view.camera);
@@ -1287,6 +1326,9 @@ var NSO_MICROSCOPE = (function () {
     if (doc) describeSelection();
     syncExportRow();
     refreshHighlightSoon();
+    // Isolated, the view IS the selection: a box dragged, a line stepped,
+    // redraws it. One rebuild per frame, however many steps a drag makes.
+    if (isolated) isolateRedrawSoon();
     syncCropRow();
     if (!selectionListeners.length) return;
     var region = selectionRegion();
@@ -1372,7 +1414,7 @@ var NSO_MICROSCOPE = (function () {
     buildLegend();
     if (doc.kind === 'toolpath') {
       buildOverview();
-      if (view.detailGroup.visible) isolateRedraw();
+      if (isolated) isolateRedraw();
     } else {
       applyClip();
     }
@@ -1391,11 +1433,21 @@ var NSO_MICROSCOPE = (function () {
     if (typeof requestAnimationFrame === 'function' && isOpen()) requestAnimationFrame(run); else run();
   }
 
-  /** Redraw the detail view in place after a filter changed under it. */
+  /**
+   * Redraw the isolated selection in place after a filter or the selection
+   * itself changed under it. Not a re-zoom: the camera and its mode stay.
+   */
   function isolateRedraw() {
-    if (!currentSelection.length) return;
-    // Filtering is not a re-zoom: keep the camera, and its mode, where the user left it.
-    isolate({ keepCamera: true });
+    if (!isolated) return;
+    buildDetail();
+    applyDisplay();
+  }
+  var isolatePending = false;
+  function isolateRedrawSoon() {
+    if (isolatePending) return;
+    isolatePending = true;
+    var run = function () { isolatePending = false; isolateRedraw(); };
+    if (typeof requestAnimationFrame === 'function' && isOpen()) requestAnimationFrame(run); else run();
   }
 
   /** One legend group alone. Feature-level isolation; view only. */
@@ -1415,7 +1467,7 @@ var NSO_MICROSCOPE = (function () {
   function clearFromView() {
     if (!doc || !currentSelection.length) return 0;
     var n = currentSelection.length;
-    if (view && view.detailGroup.visible) back();
+    if (view && isolated) back();
     if (doc.kind === 'toolpath') {
       currentSelection.forEach(function (s) { CLEARED.add(s.id); });
     } else {
@@ -1641,7 +1693,7 @@ var NSO_MICROSCOPE = (function () {
     }
     var next = at < 0 ? (d >= 0 ? 0 : shown.length - 1) : Math.max(0, Math.min(shown.length - 1, at + d));
     pickLine(shown[next], false);
-    if (view && view.detailGroup.visible) isolateRedraw();
+    if (view && isolated) isolateRedraw();
     return shown[next];
   }
 
@@ -2277,7 +2329,7 @@ var NSO_MICROSCOPE = (function () {
   function frame() {
     var v = view;
     var box = worldBox();
-    // Cached for Normal's clip planes (followClip), which need the extent
+    // Cached for the clip planes (followClip), which need the extent
     // every frame and must not recompute it every frame. The grid is 120 mm.
     v.worldSphere = box.clone().union(new THREE.Box3(
       new THREE.Vector3(-60, 0, -60), new THREE.Vector3(60, 0, 60))).getBoundingSphere(new THREE.Sphere());
@@ -2285,17 +2337,17 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
-   * Normal mode's clip planes, re-fitted to wherever the camera is, every frame.
+   * The clip planes, re-fitted to wherever the camera is, every frame, in
+   * both camera modes.
    *
-   * frameBox() sets near / far ONCE, for the box it frames, and that is right
-   * for Close inspection, which stays on it. It was also all Normal had, and
-   * it made two artificial limits out of the framing: past 100x the framed
-   * distance the whole part fell behind the far plane and vanished, and near
-   * stayed at the whole part's size / 1000 however close you zoomed. The
-   * controls themselves were never clamped (minDistance 0, maxDistance
-   * Infinity) - the frustum was. So in Normal it follows the camera: near a
-   * hundredth of the distance to the target, far out past the far side of
-   * everything drawn. No distance is refused and nothing drawn is clipped.
+   * frameBox() sets near / far ONCE, for the box it frames, and on their own
+   * those made two artificial limits: past 100x the framed distance the whole
+   * part fell behind the far plane and vanished, and near stayed at the
+   * framed size / 1000 however close you zoomed. The controls themselves are
+   * never clamped (minDistance 0, maxDistance Infinity) - the frustum was. So
+   * it follows the camera: near a hundredth of the distance to the target,
+   * far out past the far side of everything drawn. No distance is refused
+   * and nothing drawn is clipped.
    */
   function followClip() {
     var v = view, c = v.camera, sph = v.worldSphere;
@@ -2383,28 +2435,57 @@ var NSO_MICROSCOPE = (function () {
         // The reference tool only re-TARGETED on Isolate and left the whole
         // part's zoom, which on a plate of twelve pieces leaves one isolated
         // support interface a thumbnail in the middle of the grid. Close
-        // inspection is the zoom: frame the selection itself. With nothing
-        // selected or boxed there is nothing to be close to, so it frames the
-        // whole part and still locks the target.
+        // inspection is the zoom: frame the selection itself, with the rest
+        // of the view drawn round it. With nothing selected or boxed there is
+        // nothing to be close to, so it frames the whole part.
         var box = closeBox();
         if (box) frameBox(box); else frame();
-        v.controls.enablePan = false;
+      } else if (isolated) {
+        // Normal while isolated: the selection alone, turned to it.
+        fitView(selectionBox());
       } else {
-        // Normal is G-scope's OrbitControls with nothing held back: pan on,
-        // no distance limits, clip planes that follow the camera (followClip,
-        // every frame). Entering it frames the whole part once - the default
-        // view - and from then on nothing re-locks it: no filter, redraw or
-        // panel reopen moves the camera. frameBox() itself is Close
-        // inspection's code and is not changed here.
         frame();
-        v.controls.enablePan = true;
-        followClip();
       }
+      // Full zoom, pan and orbit in both modes: nothing is locked, and the
+      // clip planes follow the camera (followClip, every frame).
+      v.controls.enablePan = true;
+      followClip();
+      if (doc) applyDisplay();
     }
+    syncCameraButtons();
+    return cameraMode;
+  }
+
+  function syncCameraButtons() {
     var n = $('ms-cam-normal'), c = $('ms-cam-close');
     if (n) { n.classList.toggle('active', cameraMode === 'normal'); n.setAttribute('aria-pressed', String(cameraMode === 'normal')); }
     if (c) { c.classList.toggle('active', cameraMode === 'close'); c.setAttribute('aria-pressed', String(cameraMode === 'close')); }
-    return cameraMode;
+  }
+
+  /**
+   * Fit `box` in view WITHOUT turning the camera: the same viewing angle it
+   * has now, the target moved to the box and the distance set so the box's
+   * bounding sphere fills the frame. Isolate uses it, so the selection alone
+   * is seen from where you were looking at it. Empty box: no move.
+   */
+  function fitView(box) {
+    var v = view;
+    if (!box || box.isEmpty()) return;
+    var size = new THREE.Vector3(), centre = new THREE.Vector3();
+    box.getSize(size); box.getCenter(centre);
+    var radius = (size.length() / 2) || 10;
+    var dist = (radius / Math.sin((v.camera.fov * Math.PI / 180) / 2)) * 1.1;
+    var dir = v.camera.position.clone().sub(v.controls.target);
+    if (dir.lengthSq() < 1e-24) dir.set(1, 1, 1);
+    dir.normalize();
+    // Spend the damping's remainder first, as frameBox() does.
+    v.controls.enableDamping = false;
+    v.controls.update();
+    v.controls.enableDamping = true;
+    v.controls.target.copy(centre);
+    v.camera.position.copy(centre).addScaledVector(dir, dist);
+    v.controls.update();
+    followClip();
   }
 
   function open(d) {
@@ -2416,6 +2497,7 @@ var NSO_MICROSCOPE = (function () {
     removeAllBalls();
     currentSelection = [];
     selectionSource = 'box';
+    isolated = false;
     clearGroup(view.detailGroup);
     clearGroup(view.highlightGroup);
     view.detailGroup.visible = false;
@@ -2426,10 +2508,8 @@ var NSO_MICROSCOPE = (function () {
     buildOverview();
     buildLegend();
     applyFeatureVisibility();
-    setCameraMode('normal');      // frames the whole part
-    badge('Whole part');
-    show('ms-detail-controls', false);
     setMode('select');
+    setCameraMode('normal');      // frames the whole part
     syncHeader();
     syncLayerRow();
     info(doc.kind === 'toolpath'
@@ -2462,10 +2542,8 @@ var NSO_MICROSCOPE = (function () {
     // the frame rate and the damping with it.
     if (!view.running) { view.running = true; animate(++loop); }
     resize();
-    // Close inspection re-frames for the size it opened at. Normal is never
-    // re-locked: a reopen leaves the camera where it was left. A NEW document
-    // is framed by open(), which every route calls after this.
-    if (cameraMode === 'close') setCameraMode('close');
+    // A reopen leaves the camera where it was left, in either mode. A NEW
+    // document is framed by open(), which every route calls after this.
     // The panel owns the keyboard while it is up, so its own Escape handler is
     // reachable without clicking into it first.
     if (panel.focus) panel.focus();
@@ -2489,6 +2567,7 @@ var NSO_MICROSCOPE = (function () {
     }
     doc = null;
     currentSelection = [];
+    isolated = false;
     CLEARED = new Set();
     zr = null;
     if (view) clearGroup(view.highlightGroup);
