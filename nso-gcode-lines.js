@@ -174,6 +174,25 @@
     var layers = [];
     var heightSourceCount = { tag: 0, zstep: 0, firstLayer: 0, fallback: 0 };
 
+    // --- continuous extrusion runs -----------------------------------------
+    // `run` numbers the stretches the nozzle printed without stopping. It is
+    // bumped by the first thing that genuinely interrupts the bead: a motion
+    // with no positive E (a travel, a wipe, a Z hop or a layer's Z step), a
+    // retraction (negative E, with or without motion), or a G92 that moves
+    // the position. Nothing else - a feed-rate line, an M-code, a FEATURE tag
+    // or an E-only prime is not a stop, and the bead carries on through it.
+    // The solid reconstruction (nso-gcode-solid.js) caps a sweep only where
+    // this says a run begins or ends.
+    var run = 0;
+    var runOpen = false;
+    var runBreaks = { travel: 0, retract: 0, zmove: 0, reposition: 0 };
+    function breakRun(why) {
+      if (!runOpen) return;
+      run++;
+      runOpen = false;
+      runBreaks[why]++;
+    }
+
     function currentLayer() {
       if (layerIndex < 0) {
         layers.push({ index: 0, z: z, height: 0, moveStart: moves.length, moveEnd: moves.length });
@@ -214,8 +233,10 @@
         angle: Math.atan2(dy, dx),
         feature: feature || 'Unknown',
         objectId: objectId,
-        layer: lay.index
+        layer: lay.index,
+        run: run
       });
+      runOpen = true;
       heightSourceCount[hh.src]++;
       lay.moveEnd = moves.length;
       if (!(lay.height > 0)) lay.height = hh.h;
@@ -238,6 +259,11 @@
       for (var k = 1; k <= n; k++) {
         var a = a0 + sweep * (k / n);
         var qx = cx + r * Math.cos(a), qy = cy + r * Math.sin(a);
+        // The last chord ends on the commanded end point itself, not on the
+        // circle evaluated there: the two differ in the last bits, and the
+        // next move starts from the commanded point, so anything else leaves
+        // a sub-nanometre step between two moves that are one bead.
+        if (k === n) { qx = x1; qy = y1; }
         pushMove(px, py, qx, qy, atZ, dE / n);
         px = qx; py = qy;
       }
@@ -294,6 +320,7 @@
         if (g92.X !== undefined) x = g92.X;
         if (g92.Y !== undefined) y = g92.Y;
         if (g92.Z !== undefined) z = g92.Z;
+        if (g92.X !== undefined || g92.Y !== undefined || g92.Z !== undefined) breakRun('reposition');
         continue;
       }
 
@@ -312,7 +339,13 @@
         e = absE ? w2.E : e + w2.E;
       }
 
-      if (havePos && dE > 0 && (g === 1 || g === 2 || g === 3)) {
+      var extruding = havePos && dE > 0 && (g === 1 || g === 2 || g === 3);
+      if (!extruding) {
+        if (dE < 0) breakRun('retract');
+        else if (nz !== z) breakRun('zmove');
+        else if (nx !== x || ny !== y) breakRun('travel');
+      }
+      if (extruding) {
         // The move prints at the Z it ends at; the layer's Z_HEIGHT tag wins
         // where the file gave one, because a Z hop lands mid-move otherwise.
         var atZ = zHeightTag > 0 ? zHeightTag : nz;
@@ -367,6 +400,10 @@
         absoluteE: absE,
         eModeFromFile: sawEMode,
         heightSources: heightSourceCount,
+        // How many continuous extrusion runs the file breaks into, and what
+        // broke them. `runCount` is one past the highest `run` on a move.
+        runCount: moves.length ? moves[moves.length - 1].run + 1 : 0,
+        runBreaks: runBreaks,
         // True when anything at all fell back to a constant rather than the
         // file's own numbers. Checks assert this is false on a real slice.
         assumed: !filD || !sawEMode || heightSourceCount.fallback > 0,

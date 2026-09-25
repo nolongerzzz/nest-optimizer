@@ -2800,6 +2800,12 @@ select:focus, input:focus {
   background: rgba(59, 130, 246, 0.15);
 }
 .ms-sidebar button:disabled { opacity: 0.4; cursor: default; }
+/* G-scope's Toolpath | Solid toggle: one control, two halves. */
+.ms-seg { gap: 0; }
+.ms-seg button { border-radius: 0; min-width: 76px; }
+.ms-seg button:first-child { border-radius: 6px 0 0 6px; }
+.ms-seg button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
+.ms-seg button.active { position: relative; z-index: 1; }
 .ms-sidebar input[type="number"] {
   width: 62px;
   background: var(--bg);

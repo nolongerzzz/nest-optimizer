@@ -16,6 +16,145 @@ baked slice, and its only way out is `Export .json`.
 
 ---
 
+## G-scope: toolpath to solid (2026-09-25)
+
+Branch `claude/gscope-solid`, off `claude-wip`. Two additions, both built from
+the slice's own ordered moves: **Export as solid** and a live **Toolpath |
+Solid** toggle. New file `nso-gcode-solid.js`; the sweep is the existing
+`NSO_PathSweep` (the round / tapered support-branch primitive), extended, not
+copied.
+
+### 1. Audit - can `NSO_PathSweep` be driven from G-scope's moves?
+
+**Yes, with one gap in the parser and three in the sweep, all closed here.**
+
+| question | as found | now |
+| --- | --- | --- |
+| Do the parsed moves carry print order? | yes - `mv.index` is file order, and the parser keeps every extruding move | unchanged |
+| Do they say where the bead **stops**? | **no.** Travels, wipes and retractions are dropped, so a travel back to the point a run ended at looks continuous, and a run that simply goes on looks the same as one that stopped and restarted | `mv.run`: bumped by a motion with no positive E (travel, wipe, Z hop / layer step), a retraction, or a G92 X/Y/Z. Not by F lines, M-codes, FEATURE tags, E-only primes or G92 E. `meta.runBreaks` counts them by cause |
+| Are consecutive moves of one run exactly touching? | **no, on arcs**: a G2/G3's last chord ended on the circle evaluated at the end angle, the next move starts at the commanded point; 33,225 sub-nanometre steps on `tabletop` | the last chord ends on the commanded point. 0 discontinuous joins on both slices |
+| Does the sweep take a real run's polyline? | yes: flat, mitred, frame seeded with +Z stays +Z (every joint turns about Z) | unchanged |
+| Can it close a loop without caps? | **no** - open paths only | `NSO_PathSweep.sweepClosed`: the path unrolled once past its start through the same `sweep()`, plus a holonomy gate (a twisted space loop is refused by name) and segment 0's rail check |
+| Does it say **where** it refused? | prose only | `failAt: { point }` / `{ segment }` on every path refusal, so a caller splits without parsing prose |
+| Does it see a bead crossing itself? | **no** - its proofs are local (convex rings, rails advance). Found by running every shell through `mesh_validate.py`: a sparse-infill run crossing its own earlier line PASSED the sweep and FAILED the gate (56 piercing pairs) | `nso-gcode-solid.js` checks non-adjacent segment footprints (2D separating axes on a grid, 1e-4 mm margin = the validator's weld) and splits there |
+
+**Where a cap goes** (`chainsOf`): a chain continues while the next move is the
+same run, the next index, and starts exactly where the last ended at the same Z
+and height. So caps land only where the nozzle stopped (`run`) or the selection
+skips a move (`selection`). A FEATURE change mid-bead does not cap - measured:
+0 such changes on either slice.
+
+**Then per chain** (`sweepChain`):
+
+1. **Seam closure.** A perimeter stops just short of its own start (0.09 mm on
+   `supportwithinsupport`). Capping that end faithfully puts the end cap
+   *inside* the bead's own start, so the shell pierces itself. A chain of 3+
+   moves ending within half a bead width of its start is swept **closed**
+   instead, with no caps. That adds `A x gap` of material per loop, which is
+   counted (`seamAddedMm3`), shown in the status line, and is the *only*
+   volume difference from the toolpath view.
+2. **Open sweep**, capped at the two real ends.
+3. **Forced split**, only where one manifold shell of the bead's shape cannot
+   exist: a turn tighter than the bead is wide (`miter has eaten`), a 180°
+   reversal, or the bead crossing its own earlier line. Each is recorded with
+   the sweep's own reason, counted separately from real stops, never folded
+   into them.
+
+**Section.** The toolpath view's rectangle, `width x height`, top at the nozzle
+Z, at the run's length-weighted mean width - which keeps `sum(w h L)` exactly.
+A mitred sweep with its section centred on the path encloses exactly section x
+centreline (the outside of a corner gains what the inside loses), so the
+volume identity is exact, not approximate.
+
+**Measured, every move of both committed slices:**
+
+| | supportwithinsupport | tabletop |
+| --- | --- | --- |
+| moves / runs | 2,895 / 431 (320 travel, 111 retract) | 202,877 / 7,339 (1,348 travel, 5,991 retract) |
+| shells | 1,190 (93 seam-closed loops) | 24,960 (35 seam-closed) |
+| forced splits | 759: 688 tight turn, 71 crossing | 17,621: 12,040 tight turn, 5,531 crossing, 50 reversal |
+| runs swept whole | Inner wall 45/45, Top surface 230/230, Outer wall 46/59, Overhang wall 2/2; every infill 0 | Inner wall 4/4, Top surface 174/174, Overhang 2/2; Support 25/6,859 |
+| time, whole file | ~120 ms | ~2.4 s |
+| solid vs section x centreline | rel 6.3e-7 (float32 storage) | rel 3.7e-7 |
+| section x centreline vs toolpath + seams | rel 7e-15 | rel 5e-14 |
+
+So the honest reading of the forced splits: **walls sweep whole; infill and
+support mostly cannot**, because a zig-zag whose connector is shorter than the
+bead is wide, a grid printed as one run, or a 0.38 mm strut printed with a
+0.61 mm bead all overlap themselves - that bead is not a manifold solid without
+a union, and this does no union. Every piece is still a sound shell on its own.
+
+### 2. Export as solid
+
+In the Export row, for a slice with a selection: **Export as solid** (to the
+plate, undo `addModels`, G-scope closes - as Export to plate) and **Solid STL**
+(download). Same selection as the toolpath exports, a different builder. The
+status line says what came out: shells, seam-closed loops, forced splits, and
+the solid's volume against the toolpath's plus seams. Hidden for a mesh
+document, which already is a mesh.
+
+### 3. Live Toolpath | Solid toggle
+
+The **Render** row (slices only). Solid redraws the overview as the swept
+shells of exactly the moves drawn - the slider, "only", the legend and Clear
+from view apply unchanged - and the highlight and Isolate as the selection's
+own solid. The line meshes stay in the scene with their *material* switched off
+(three.js raycasts them regardless), so a line pick and a dropped capture box
+land on exactly the same moves in either view, and the selection survives the
+toggle. Chains are cached per document (`solidCache`, key `first:last` move),
+so a slider drag re-sweeps nothing: full-range then 5-layer redraw, 9-17 ms on
+`supportwithinsupport`. View only - the drive check compares the plate, the
+undo stack and the download count before and after. First switch on `tabletop`
+pays the ~2.4 s sweep once.
+
+### 4. Validation
+
+`npm run gcode:solid` (`tools/gcode-test/gscope-solid-check.js`, 42 checks,
+headless) and `npm run gcode:solid-drive`
+(`tools/gcode-test/gscope-solid-drive-check.mjs`, 37 checks, Chromium, real
+clicks), both in `npm test`.
+
+- **Canonical checker.** One continuous run as solid: `mesh_validate.py` PASS
+  (open 0, non-manifold 0, pierce 0); the same four moves as per-move prisms
+  FAIL it (80 piercing pairs at the corners). **All 1,190 shells** of
+  `supportwithinsupport`, one by one, through the validator's own
+  `validate()`: 1,190 PASS. Every shell of both files: closed, 2-manifold,
+  consistently wound, positive volume.
+- **Multi-run selections are several shells, touching.** 45 stacked Inner wall
+  loops: open 0, degenerate 0, pierce 0 - and 504 non-manifold edges, every one
+  where one layer's bead sits on the next. That is two solids in contact, which
+  is what the beads are; one solid would need the union this deliberately does
+  not do. Where neighbouring beads *overlap* (walls the slicer spaced closer
+  than their width, infill crossing walls) the shells pierce each other, for
+  the same reason.
+- **Volume, same selection, both views.** 45 Inner wall loops: toolpath export
+  792.8947 mm³, solid export 793.6344 mm³, seams 0.7398 - equal to rel < 1e-5;
+  Isolate in each view holds exactly what that view exports; the solid is 1,440
+  triangles to the prisms' 2,160.
+- **Downstream, end to end.** A 23-move support loop from `tabletop` (one
+  seam-closed shell) through the real **Export as solid** button: PASS on the
+  plate. The real **Mirror** button reads it ("runs along Z"), reflects it
+  (`mirrorReplace`), and the mirrored piece PASSES too with the same volume;
+  one Undo restores it bit for bit. (Mirror refuses every loop in
+  `supportwithinsupport` - all square, no dominant axis - which is Mirror's
+  rule, not the solid's.) Hollow was not used: a 0.6 mm bead is thinner than
+  Hollow's own wall floor.
+- **Screenshots** (`tools/gscope-out/`, each asserted a drawn frame):
+  `solid-01` toolpath view, `solid-02` the same slice as a solid, `solid-03`
+  five layers under the slider, `solid-04` a line picked by a real click in
+  the solid view, `solid-05` Isolate of 45 Inner wall loops, `solid-06` the
+  exported stack on the plate, `solid-07` the exported loop mirrored.
+
+**Paint scope:** none - generator. Export as solid adds a piece and edits none
+(Stock create's category). **Non-solid scope:** not a consumer; every shell is
+closed.
+
+**`?v=` not bumped** (HANDOFF rule): `app-microscope.js`, `nso_path_sweep.js`
+and `nso-gcode-lines.js` changed together and `nso-gcode-solid.js` is new;
+they need a bump at merge.
+
+---
+
 ## G-scope: one tool (2026-09-25)
 
 Branch `claude/gscope-consolidate`, off `claude-wip`. The microscope is now
