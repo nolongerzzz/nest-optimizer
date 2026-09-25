@@ -2183,7 +2183,7 @@ var NSO_MICROSCOPE = (function () {
     var rd = $('ms-render-read');
     if (rd) {
       if (!isPath) rd.textContent = '';
-      else if (renderMode !== 'solid') rd.textContent = 'Each move drawn as a line; a highlight or Isolate shows its flat bead.';
+      else if (renderMode !== 'solid') rd.textContent = 'Each move drawn as a line; Close inspection highlights the selection as its flat beads.';
       else if (view && view.solidBuilt) rd.textContent = 'Shown: ' + describeSolid(view.solidBuilt.stats) + '.';
       else rd.textContent = 'Nothing shown.';
     }

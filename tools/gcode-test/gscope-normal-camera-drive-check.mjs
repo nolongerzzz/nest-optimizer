@@ -3,7 +3,9 @@
  * nest-optimizer / tools/gcode-test / gscope-normal-camera-drive-check.mjs
  *
  * G-scope's two camera modes and Isolate, in the real app: real wheel
- * scrolls, real drags, real button clicks, in headless Chromium.
+ * scrolls, real drags, real button clicks, in headless Chromium. (Long zoom
+ * runs are batched as wheel events on the canvas and finished with real
+ * scrolls - see wheelUntil.)
  *
  *   1  NORMAL - ZOOM. No distance floor and no ceiling: the wheel takes the
  *      camera to a hundredth of a millimetre from the target and out past a
@@ -97,6 +99,33 @@ const cam = (page) => page.evaluate(() => {
 
 const near = (a, b, tol) => a.every((x, i) => Math.abs(x - b[i]) <= tol);
 
+/**
+ * Scroll toward a distance: wheel events in batches of 10 until `done(cam)`,
+ * checking the frustum after every batch, then REAL mouse wheel scrolls to
+ * finish. The batches are WheelEvents dispatched on the G-scope canvas - the
+ * same 'wheel' listener OrbitControls registered, so the same code path - and
+ * exist only for speed: a real Playwright scroll costs ~230 ms here, and one
+ * wheel step is a fixed 0.95 dolly, so seven decades of distance is hundreds
+ * of them. The last `real` steps go through page.mouse.wheel.
+ */
+async function wheelUntil(page, at, dy, done, real = 10) {
+  let holds = true, c = await cam(page), n = 0;
+  while (!done(c) && n < 2000) {
+    await page.evaluate(([x, y, dy]) => {
+      const el = window.NSO_MICROSCOPE.getView().renderer.domElement;
+      for (let i = 0; i < 10; i++) {
+        el.dispatchEvent(new WheelEvent('wheel', { deltaY: dy, clientX: x, clientY: y, bubbles: true, cancelable: true }));
+      }
+    }, [at[0], at[1], dy]);
+    n += 10;
+    c = await cam(page);
+    holds = holds && c.holdsWorld;
+  }
+  await wheel(page, at, dy, real);
+  c = await cam(page);
+  return { c, holds: holds && c.holdsWorld, n };
+}
+
 async function wheel(page, at, dy, n) {
   await page.mouse.move(at[0], at[1]);
   for (let i = 0; i < n; i++) await page.mouse.wheel(0, dy);
@@ -170,14 +199,9 @@ async function main() {
   // Orbit mode: the wheel and drags go to the camera, never to a capture box.
   await page.click('#ms-mode-orbit');
 
-  // In, a step at a time, checking the frustum all the way.
-  let holdsAll = true, minD = Infinity;
-  for (let k = 0; k < 12; k++) {
-    await wheel(page, centre, -300, 20);
-    const c = await cam(page);
-    holdsAll = holdsAll && c.holdsWorld;
-    minD = Math.min(minD, c.d);
-  }
+  // In, checking the frustum all the way.
+  let z = await wheelUntil(page, centre, -300, (c) => c.d < 0.002);
+  let holdsAll = z.holds;
   let c1 = await settle(page);
   console.log(`       zoomed in to ${c1.d.toExponential(3)} mm (near ${c1.near.toExponential(3)})`);
   check('Normal zoom-in: well under a hundredth of a millimetre from the target - no floor',
@@ -186,10 +210,7 @@ async function main() {
   check('Normal zoom-in: the frustum held everything drawn at every step', holdsAll && c1.holdsWorld, true);
 
   // Out, past the old limit, to where the part is still drawn...
-  await wheel(page, centre, 300, 1);
-  let steps = 0;
-  while ((await cam(page)).d < oldFar * 1.05 && steps < 600) { await page.mouse.wheel(0, 300); steps++; }
-  await frames(page, 3);
+  z = await wheelUntil(page, centre, 300, (c) => c.d >= oldFar * 0.6, 12);
   const c2 = await settle(page);
   const px2 = await litPixels(page);
   console.log(`       zoomed out to ${(c2.d / 1000).toFixed(2)} m, ${px2.lit} lit pixels`);
@@ -202,11 +223,8 @@ async function main() {
   await page.locator('#microscope').screenshot({ path: join(SHOTS, 'nc-01-normal-zoomed-far-out.png') });
 
   // ...and on, past a kilometre.
-  holdsAll = true;
-  for (let k = 0; k < 12; k++) {
-    await wheel(page, centre, 300, 20);
-    holdsAll = holdsAll && (await cam(page)).holdsWorld;
-  }
+  z = await wheelUntil(page, centre, 300, (c) => c.d > 1.5e6);
+  holdsAll = z.holds;
   const c3 = await settle(page);
   console.log(`       zoomed out to ${(c3.d / 1e6).toFixed(2)} km`);
   check('Normal zoom-out: past a kilometre - no ceiling', c3.d > 1e6, true);
@@ -373,7 +391,7 @@ async function main() {
   await drag(page, [xm, y], [xm + 120, y + 60], 'right');
   const i2 = await settle(page);
   check('isolated, Normal: a right-drag pans', !near(i2.target, i1.target, 1e-3), true);
-  await wheel(page, centre, -300, 240);
+  await wheelUntil(page, centre, -300, (c) => c.d < 0.002);
   const i3 = await settle(page);
   check('isolated, Normal: zoom in with no floor', [i3.d < 0.01, i3.holdsWorld], [true, true]);
 
@@ -412,13 +430,11 @@ async function main() {
   await drag(page, [xm, y], [xm + 120, y + 60], 'right');
   const k1 = await settle(page);
   check('Close inspection: a right-drag pans (no lock)', !near(k1.target, expected.target, 1e-3), true);
-  await wheel(page, centre, -300, 240);
+  await wheelUntil(page, centre, -300, (c) => c.d < 0.002);
   const k2 = await settle(page);
   check('Close inspection: zoom in with no floor', [k2.d < 0.01, k2.holdsWorld], [true, true]);
   const closeOldFar = k0.d * 100;
-  await page.mouse.move(centre[0], centre[1]);
-  let st = 0;
-  while ((await cam(page)).d < closeOldFar * 1.05 && st < 800) { await page.mouse.wheel(0, 300); st++; }
+  await wheelUntil(page, centre, 300, (c) => c.d >= closeOldFar * 0.6, 12);
   const k3 = await settle(page);
   const pxk = await litPixels(page);
   check('Close inspection: zoom out past 100x its framing, and the part is still drawn',

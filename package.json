@@ -366,7 +366,7 @@
     "gcode:solid": 16500,
     "gcode:solid-drive": 87000,
     "gcode:gscope-cornercam": 12000,
-    "gcode:gscope-normalcam": 25000,
+    "gcode:gscope-normalcam": 270000,
     "3mf:scene": 187,
     "wire:smooth": 1800,
     "wire:repair": 2500,
