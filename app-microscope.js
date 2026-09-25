@@ -222,6 +222,9 @@ var NSO_MICROSCOPE = (function () {
       zBottom: zBottom,
       parsed: res.parsed,
       objects: null,
+      // Swept chains, keyed by first:last move - see NSOGcodeSolid.buildSolid.
+      // Per document, because a chain key means nothing in another file.
+      solidCache: new Map(),
       cx: cx / n2,
       cy: cy / n2,
       unit: 'segment'
@@ -523,6 +526,13 @@ var NSO_MICROSCOPE = (function () {
   var zr = null;              // layer-range slider, in steps: { lo, hi, n }
   var lineCursor = -1;        // position in shownSegments() of the picked line
   var selectionListeners = [];
+  // How a toolpath is DRAWN: 'toolpath' (lines, and per-move prisms for a
+  // highlight or Isolate) or 'solid' (every continuous run of bead swept into
+  // one closed shell - nso-gcode-solid.js). View state like the three above:
+  // it changes the triangles on screen and nothing else. What is selected,
+  // what the capture box catches and what a line pick lands on are the same
+  // moves either way, so switching back and forth never loses a selection.
+  var renderMode = 'toolpath';
 
   function buildWorld() {
     if (view) return view;
@@ -615,6 +625,8 @@ var NSO_MICROSCOPE = (function () {
     var v = view;
     clearGroup(v.overviewGroup);
     v.overviewMeshes = {};
+    v.solidMeshes = {};
+    v.solidBuilt = null;
     if (!doc) return;
 
     if (doc.kind === 'toolpath') {
@@ -649,6 +661,18 @@ var NSO_MICROSCOPE = (function () {
         v.overviewMeshes[feature] = mesh;
         v.overviewGroup.add(mesh);
       });
+      // Solid view: the same moves, swept. The line meshes stay in the scene
+      // with their MATERIAL switched off - three.js still raycasts an object
+      // whose material is invisible - so a line pick and a dropped box land
+      // on exactly the moves they land on in the toolpath view.
+      if (renderMode === 'solid') {
+        Object.keys(v.overviewMeshes).forEach(function (k) { v.overviewMeshes[k].material.visible = false; });
+        var shownNow = doc.segments.filter(function (s) { return !CLEARED.has(s.id) && inZRange(s); });
+        var sm = solidMeshes(shownNow, function (f) { return colorForGroup(f, Object.keys(byFeature).indexOf(f)); });
+        v.solidMeshes = sm.meshes;
+        v.solidBuilt = sm.built;
+        Object.keys(sm.meshes).forEach(function (k) { v.overviewGroup.add(sm.meshes[k]); });
+      }
       return;
     }
 
@@ -824,6 +848,9 @@ var NSO_MICROSCOPE = (function () {
     var v = view;
     Object.keys(v.overviewMeshes).forEach(function (name) {
       v.overviewMeshes[name].visible = !HIDDEN.has(name) && !v.detailGroup.visible;
+    });
+    Object.keys(v.solidMeshes || {}).forEach(function (name) {
+      v.solidMeshes[name].visible = !HIDDEN.has(name) && !v.detailGroup.visible;
     });
     v.detailGroup.children.forEach(function (mesh) {
       mesh.visible = !HIDDEN.has(mesh.userData.feature);
@@ -1035,13 +1062,24 @@ var NSO_MICROSCOPE = (function () {
       // Export writes, at each move's own measured width and height, so what
       // Isolate shows is exactly what leaves the view. No new geometry code -
       // this is the builder the export already used.
-      Object.keys(bySel).forEach(function (feature, gi) {
-        var mesh = prismMesh(bySel[feature].filter(function (s) {
+      if (renderMode === 'solid') {
+        // The solid view's Isolate is the selection's own solid - what
+        // Export as solid writes - built from the selection alone, so a run
+        // the selection cuts is capped where the selection ends.
+        var keys = Object.keys(doc.groups || bySel);
+        var sd = solidMeshes(currentSelection.filter(function (s) {
           return !CLEARED.has(s.id) && inZRange(s);
-        }), colorForGroup(feature, gi));
-        mesh.userData.feature = feature;
-        v.detailGroup.add(mesh);
-      });
+        }), function (f) { return colorForGroup(f, Math.max(0, keys.indexOf(f))); });
+        Object.keys(sd.meshes).forEach(function (k) { v.detailGroup.add(sd.meshes[k]); });
+      } else {
+        Object.keys(bySel).forEach(function (feature, gi) {
+          var mesh = prismMesh(bySel[feature].filter(function (s) {
+            return !CLEARED.has(s.id) && inZRange(s);
+          }), colorForGroup(feature, gi));
+          mesh.userData.feature = feature;
+          v.detailGroup.add(mesh);
+        });
+      }
     } else {
       currentSelection.forEach(function (o, gi) {
         var geo = new THREE.BufferGeometry();
@@ -1282,6 +1320,7 @@ var NSO_MICROSCOPE = (function () {
     syncZRangeUI();
     syncCropRow();
     syncLineRead();
+    syncRenderRow();
   }
   /** Coalesce a burst of slider moves into one redraw per frame. */
   function viewChangedSoon() {
@@ -1382,6 +1421,62 @@ var NSO_MICROSCOPE = (function () {
     return mesh;
   }
 
+  /**
+   * `segs` swept into closed shells (NSOGcodeSolid.buildSolid), one three.js
+   * mesh per feature, in view space. The chains are cached on the document,
+   * so a slider step re-sweeps nothing it has swept before.
+   */
+  // Whole runs repeat (every overview redraw asks for the same ones), but a
+  // capture-box drag cuts runs somewhere new on every step, and each cut is a
+  // new key. Past this many the cache starts over rather than grow for the
+  // session; `tabletop`, 202,877 moves, is 7,339 whole runs.
+  var SOLID_CACHE_LIMIT = 40000;
+
+  function solidCache() {
+    if (doc.solidCache.size > SOLID_CACHE_LIMIT) doc.solidCache.clear();
+    return doc.solidCache;
+  }
+
+  function solidMeshes(segs, colorOf) {
+    var built = window.NSOGcodeSolid.buildSolid(segs.map(function (s) { return s.mv; }),
+                                                { cache: solidCache() });
+    var byF = {};
+    built.shells.forEach(function (sh) {
+      (byF[sh.feature] = byF[sh.feature] || []).push(sh);
+    });
+    var meshes = {};
+    Object.keys(byF).forEach(function (f) {
+      var n = 0;
+      byF[f].forEach(function (sh) { n += sh.triCount * 9; });
+      var pos = new Float32Array(n), at = 0;
+      byF[f].forEach(function (sh) {
+        pos.set(built.positions.subarray(sh.triStart * 9, (sh.triStart + sh.triCount) * 9), at);
+        at += sh.triCount * 9;
+      });
+      var geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.translate(-doc.cx, -doc.cy, 0);
+      geo.rotateX(-Math.PI / 2);          // the same (x,y,z) -> (x,z,-y) as toThree
+      geo.computeVertexNormals();
+      // The scene's ambient light is 1.0, which drives a light feature colour
+      // to white on every face alike and draws a solid as a flat silhouette.
+      // Taking the base colour down leaves the directional light room to
+      // shade the walls apart from the tops, so the solid reads as one.
+      var mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+        color: new THREE.Color(colorOf(f)).multiplyScalar(0.55), metalness: 0.05, roughness: 0.5
+      }));
+      mesh.userData.feature = f;
+      mesh.userData.solid = true;
+      meshes[f] = mesh;
+    });
+    return { meshes: meshes, built: built };
+  }
+
+  // A solid highlight past this many moves falls back to red lines, as the
+  // prism highlight does past HIGHLIGHT_PRISM_CAP. Higher, because a sweep is
+  // cheaper per move than a prism and its chains are cached.
+  var HIGHLIGHT_SOLID_CAP = 20000;
+
   function refreshHighlight() {
     if (!view) return;
     var g = view.highlightGroup;
@@ -1394,7 +1489,18 @@ var NSO_MICROSCOPE = (function () {
     if (doc.kind === 'toolpath') {
       var segs = currentSelection.filter(segShown);
       if (!segs.length) return;
-      if (segs.length <= HIGHLIGHT_PRISM_CAP) {
+      if (renderMode === 'solid' && segs.length <= HIGHLIGHT_SOLID_CAP) {
+        var hs = solidMeshes(segs, function () { return HIGHLIGHT_COLOR; });
+        Object.keys(hs.meshes).forEach(function (k) {
+          hs.meshes[k].material.emissive = new THREE.Color(0x551010);
+          // Drawn over the overview's own shell of the same bead, so it wins
+          // the depth test where the two coincide instead of z-fighting.
+          hs.meshes[k].material.polygonOffset = true;
+          hs.meshes[k].material.polygonOffsetFactor = -1;
+          hs.meshes[k].material.polygonOffsetUnits = -1;
+          g.add(hs.meshes[k]);
+        });
+      } else if (renderMode !== 'solid' && segs.length <= HIGHLIGHT_PRISM_CAP) {
         var mesh = prismMesh(segs, HIGHLIGHT_COLOR);
         mesh.material.emissive = new THREE.Color(0x551010);
         g.add(mesh);
@@ -1799,9 +1905,17 @@ var NSO_MICROSCOPE = (function () {
    *   each move's own measured width and height.
    * - mesh: the selected build objects' triangles, as read.
    */
-  function microscopeGeometry() {
+  function microscopeGeometry(asSolid) {
     if (!doc || !currentSelection.length) return null;
     var positions;
+    if (asSolid) {
+      var sb = solidOfSelection();
+      if (!sb || !sb.positions.length) return null;
+      var sg = new THREE.BufferGeometry();
+      sg.setAttribute('position', new THREE.BufferAttribute(sb.positions, 3));
+      sg.userData.solid = sb.stats;
+      return sg;
+    }
     if (doc.kind === 'toolpath') {
       var built = window.NSOGcodeLines.buildLineGeometry(
         currentSelection.map(function (s) { return s.mv; }));
@@ -1879,6 +1993,92 @@ var NSO_MICROSCOPE = (function () {
     return id;
   }
 
+  // --- Export as solid ---------------------------------------------------------
+  //
+  // The same selection, the same two doors, a different builder: every
+  // continuous run of bead in it becomes ONE closed shell, swept along the
+  // run's own ordered moves (NSOGcodeSolid.buildSolid on NSO_PathSweep), with
+  // a cap only where the nozzle genuinely stopped or the selection ends. No
+  // boolean union anywhere. Toolpath only - a mesh document already IS a
+  // solid, and the buttons are hidden for one.
+
+  /** The selection's solid - every selected move, as the toolpath export takes them. */
+  function solidOfSelection() {
+    if (!doc || doc.kind !== 'toolpath' || !currentSelection.length) return null;
+    return window.NSOGcodeSolid.buildSolid(currentSelection.map(function (s) { return s.mv; }),
+                                           { cache: solidCache() });
+  }
+
+  function mm3(x) { return (Math.round(x * 1000) / 1000).toFixed(3); }
+
+  /** One line on what the sweep made of the selection, for the status bar and the info box. */
+  function describeSolid(st) {
+    var bits = [st.shells + ' closed shell' + (st.shells === 1 ? '' : 's') +
+                ' from ' + st.moves + ' move' + (st.moves === 1 ? '' : 's')];
+    if (st.closedLoops) bits.push(st.closedLoops + ' seam-closed loop' + (st.closedLoops === 1 ? '' : 's'));
+    if (st.forcedSplits.length) {
+      bits.push(st.forcedSplits.length + ' forced split' + (st.forcedSplits.length === 1 ? '' : 's') +
+                ' where the bead overlaps itself');
+    }
+    bits.push('volume ' + mm3(st.solidVolume) + ' mm\u00b3 (toolpath ' + mm3(st.toolpathVolume) +
+              (st.seamAddedMm3 > 0 ? ' + seams ' + mm3(st.seamAddedMm3) : '') + ')');
+    return bits.join(', ');
+  }
+
+  function exportSolidToPlate() {
+    if (!doc) { say('Open a file in the microscope first', true); return null; }
+    if (doc.kind !== 'toolpath') { say('Export as solid is for a sliced toolpath - this document is already a mesh', true); return null; }
+    var geo = microscopeGeometry(true);
+    if (!geo) { say('Nothing selected to export', true); return null; }
+    var st = geo.userData.solid;
+    var label = exportLabel() + ' (solid)';
+    var id = addModelFromZUpGeometry(label, geo);
+    if (!id) { say('Export as solid failed - nothing was added', true); return null; }
+    if (typeof pushUndo === 'function') {
+      pushUndo({ type: 'addModels', ids: [id], editId: state.editId, cutT: state.cutT });
+    }
+    close();
+    say('Export as solid ok - "' + label + '": ' + describeSolid(st));
+    return id;
+  }
+
+  function exportSolidAsSTL() {
+    if (!doc) { say('Open a file in the microscope first', true); return null; }
+    if (doc.kind !== 'toolpath') { say('Export as solid is for a sliced toolpath - this document is already a mesh', true); return null; }
+    var geo = microscopeGeometry(true);
+    if (!geo) { say('Nothing selected to export', true); return null; }
+    var buffer = geometryToBinarySTL(geo);
+    var name = (exportLabel() + ' solid').replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>]/g, '') + '.stl';
+    downloadBlob(new Blob([buffer], { type: 'application/octet-stream' }), name);
+    say('Downloaded ' + name + ' - ' + describeSolid(geo.userData.solid));
+    return name;
+  }
+
+  // --- the live toolpath / solid toggle --------------------------------------
+
+  function setRenderMode(m) {
+    m = m === 'solid' ? 'solid' : 'toolpath';
+    renderMode = m;
+    syncRenderRow();
+    if (view && doc && doc.kind === 'toolpath') viewChanged();
+    return renderMode;
+  }
+
+  function syncRenderRow() {
+    var isPath = !!(doc && doc.kind === 'toolpath');
+    show('ms-render-row', isPath);
+    var a = $('ms-render-toolpath'), b = $('ms-render-solid');
+    if (a) { a.classList.toggle('active', renderMode === 'toolpath'); a.setAttribute('aria-pressed', String(renderMode === 'toolpath')); }
+    if (b) { b.classList.toggle('active', renderMode === 'solid'); b.setAttribute('aria-pressed', String(renderMode === 'solid')); }
+    var rd = $('ms-render-read');
+    if (rd) {
+      if (!isPath) rd.textContent = '';
+      else if (renderMode !== 'solid') rd.textContent = 'Each move drawn as a line; a highlight or Isolate shows its flat bead.';
+      else if (view && view.solidBuilt) rd.textContent = 'Shown: ' + describeSolid(view.solidBuilt.stats) + '.';
+      else rd.textContent = 'Nothing shown.';
+    }
+  }
+
   /** Just the selection, straight to a file. Same geometry, different door. */
   function exportAsSTL() {
     if (!doc) { say('Open a file in the microscope first', true); return null; }
@@ -1907,6 +2107,7 @@ var NSO_MICROSCOPE = (function () {
 
   function syncExportRow() {
     show('ms-export-row', !!(doc && currentSelection.length));
+    show('ms-export-solid-row', !!(doc && doc.kind === 'toolpath' && currentSelection.length));
     var iso = $('ms-btn-isolate');
     if (iso) iso.disabled = !currentSelection.length;
     var iso2 = $('ms-btn-isolate-line');
@@ -2072,6 +2273,7 @@ var NSO_MICROSCOPE = (function () {
     var lineBtn = $('ms-mode-line');
     if (lineBtn) lineBtn.disabled = doc.kind !== 'toolpath';
     syncExportRow();
+    syncRenderRow();
     syncZRangeUI();
     syncCropRow();
     syncLineRead();
@@ -2127,6 +2329,7 @@ var NSO_MICROSCOPE = (function () {
     syncHeader();
     syncLayerRow();
     syncExportRow();
+    syncRenderRow();
     info('No file open.');
   }
 
@@ -2206,6 +2409,10 @@ var NSO_MICROSCOPE = (function () {
     wireZRange();
     bind('ms-btn-export-plate', 'click', exportToPlate);
     bind('ms-btn-export-stl', 'click', exportAsSTL);
+    bind('ms-btn-export-solid-plate', 'click', exportSolidToPlate);
+    bind('ms-btn-export-solid-stl', 'click', exportSolidAsSTL);
+    bind('ms-render-toolpath', 'click', function () { setRenderMode('toolpath'); });
+    bind('ms-render-solid', 'click', function () { setRenderMode('solid'); });
     bind('ms-layer-prev', 'click', function () { stepLayer(-1); });
     bind('ms-layer-next', 'click', function () { stepLayer(1); });
     bind('ms-btn-layer-select', 'click', function () {
@@ -2343,6 +2550,12 @@ var NSO_MICROSCOPE = (function () {
     exportLabel: function () { return doc && currentSelection.length ? exportLabel() : null; },
     exportToPlate: exportToPlate,
     exportAsSTL: exportAsSTL,
+    exportSolidToPlate: exportSolidToPlate,
+    exportSolidAsSTL: exportSolidAsSTL,
+    solidOfSelection: solidOfSelection,
+    setRenderMode: setRenderMode,
+    renderMode: function () { return renderMode; },
+    shownSolid: function () { return view && view.solidBuilt ? view.solidBuilt : null; },
     isolate: isolate,
     back: back,
     layerCount: layerCount,

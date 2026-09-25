@@ -57,8 +57,12 @@
  * down, quadratically, by replacing a corner with an arc of n chords
  * (`arcSubdivide`). docs/CURVING-PATH.md carries the measured table.
  *
- * NOT WIRED IN. No UI, no bake, no undo entry. This file is a primitive and a
- * self-test; wiring is a later ticket. See the paint-scope note at the bottom.
+ * CONSUMERS. The round and tapered support branches (nso_support_tree.js,
+ * nso_support_aim.js), Stock (nso_stock.js), and G-scope's solid view and
+ * Export as solid (nso-gcode-solid.js), which sweeps each continuous run of a
+ * sliced toolpath - and is the reason for `sweepClosed` and `failAt`. This
+ * file itself has no UI, no bake and no undo entry. See the paint-scope note
+ * at the bottom.
  */
 (function (root, factory) {
   'use strict';
@@ -259,7 +263,7 @@
       var minL = 8 * Math.max(ulpAt(pts[k]), ulpAt(pts[k + 1]));
       if (!(L > minL)) {
         return {
-          ok: false,
+          ok: false, failAt: { point: k + 1, kind: 'short' },
           reason: 'path points ' + k + ' and ' + (k + 1) + ' are ' + L.toExponential(3) +
                   ' mm apart, under the ' + minL.toExponential(3) +
                   ' mm float32 floor at that magnitude; drop the duplicate'
@@ -287,7 +291,7 @@
       var rr = rotateMin(frames[j - 1].r, segs[j - 1].u, segs[j].u);
       if (!rr) {
         return {
-          ok: false,
+          ok: false, failAt: { point: j, kind: 'reversal' },
           reason: 'path doubles back on itself at point ' + j +
                   ' (segments ' + (j - 1) + ' and ' + j + ' are exactly opposite); ' +
                   'a 180 degree reversal has no bisector plane and no minimal rotation'
@@ -306,7 +310,7 @@
       var mv = add(a, b);
       var mL = len(mv);
       if (mL < 1e-9) {
-        return { ok: false, reason: 'path doubles back on itself at point ' + v + '; no bisector plane exists' };
+        return { ok: false, failAt: { point: v, kind: 'reversal' }, reason: 'path doubles back on itself at point ' + v + '; no bisector plane exists' };
       }
       var m = mul(mv, 1 / mL);
       var turn = Math.atan2(len(cross(a, b)), dot(a, b));
@@ -434,7 +438,10 @@
    *
    * Returns { ok, reason, tris, rings, stats }. On refusal `tris` is null and
    * `reason` names the specific rail or joint that stopped it - never a bare
-   * "could not build".
+   * "could not build". Path refusals also carry `failAt`, the same place in
+   * machine form - `{ point: v }` (a joint or a too-short step ending at
+   * point v) or `{ segment: k }` (a segment the miters ate) - so a caller
+   * that splits a long path where it cannot be swept does not parse prose.
    */
   function sweep(opts) {
     opts = opts || {};
@@ -443,7 +450,7 @@
     if (!pc.ok) return { ok: false, reason: pc.reason, tris: null };
 
     var fr = buildFrames(opts.points, opts);
-    if (!fr.ok) return { ok: false, reason: fr.reason, tris: null };
+    if (!fr.ok) return { ok: false, reason: fr.reason, failAt: fr.failAt, tris: null };
 
     var pts = fr.pts, segs = fr.segs, frames = fr.frames, joints = fr.joints;
     var M = prof.length, N = pts.length;
@@ -503,7 +510,7 @@
         if (inUlps > worstSeamUlp) worstSeamUlp = inUlps;
         if (gap > tol) {
           return {
-            ok: false, tris: null,
+            ok: false, tris: null, failAt: { point: v, kind: 'seam' },
             reason: 'joint ring at path point ' + v + ' does not close on rail ' + j +
                     ': incoming and outgoing rails disagree by ' + gap.toExponential(3) +
                     ' mm (' + inUlps.toFixed(2) + ' float32 ULPs, limit ' + seamUlps + ')'
@@ -535,7 +542,7 @@
         if (adv < worstMargin) { worstMargin = adv; worstMarginAt = { seg: k, rail: jj }; }
         if (!(adv > floor)) {
           return {
-            ok: false, tris: null,
+            ok: false, tris: null, failAt: { segment: k, kind: 'eaten' },
             reason: 'the miter has eaten segment ' + k + ' on rail ' + jj + ': it advances ' +
                     adv.toExponential(3) + ' mm along the segment (floor ' + floor.toExponential(3) +
                     ' mm). The bend is too sharp for this section over this segment length: ' +
@@ -604,6 +611,119 @@
         maxMiter: joints.reduce(function (m, j) { return Math.max(m, j.miter); }, 1),
         maxTurnDeg: joints.reduce(function (m, j) { return Math.max(m, j.turn * 180 / Math.PI); }, 0)
       }
+    };
+  }
+
+  // ===========================================================================
+  // the closed sweep - a loop with no caps
+  // ===========================================================================
+
+  /**
+   * Evaluate a CLOSED path + profile into a watertight ring-shaped soup: the
+   * path runs P0 .. P(N-1) and back to P0, every vertex is a mitred joint, and
+   * there are no caps at all. Same options as `sweep` except `scales` (a taper
+   * has no meaning round a loop) - pass the points WITHOUT repeating P0.
+   *
+   * It is `sweep` itself, run on the path unrolled once past the start
+   * (P0 .. P(N-1), P0, P1), so every ring - the one at P0 included - is built
+   * and gated by exactly the code the open sweep uses. Two things are then
+   * checked that an open path never has to face:
+   *
+   *   - HOLONOMY. The frame carried all the way round must come back to the
+   *     frame it started with, or the ring at P0 (computed from the last
+   *     segment's frame) does not meet the walls of segment 0 (built from the
+   *     first). A loop in one plane closes exactly: every joint rotates about
+   *     the plane's normal, which fixes the seed `up` when that is the normal.
+   *     A twisted space loop does not, and is refused by name rather than
+   *     twisted to fit.
+   *   - SEGMENT 0's RAILS, which the unrolled sweep checked against its flat
+   *     start ring; round a loop they start at the mitred ring at P0 instead.
+   *
+   * Returns the same shape as `sweep`, with `closed: true`.
+   */
+  function sweepClosed(opts) {
+    opts = opts || {};
+    if (opts.scales != null) return { ok: false, tris: null, reason: 'a closed sweep cannot taper' };
+    var P = opts.points;
+    if (!Array.isArray(P) || P.length < 3) {
+      return { ok: false, tris: null, reason: 'a closed path needs at least 3 points, got ' + (P ? P.length : 0) };
+    }
+    var unrolled = P.slice();
+    unrolled.push(P[0], P[1]);
+    var o = {};
+    for (var key in opts) if (Object.prototype.hasOwnProperty.call(opts, key)) o[key] = opts[key];
+    o.points = unrolled;
+    var sw = sweep(o);
+    if (!sw.ok) return sw;
+
+    var N = P.length, M = opts.profile.length;
+    var minRailUlps = opts.minRailUlps == null ? 8 : opts.minRailUlps;
+    var seamUlps = opts.seamUlps == null ? 8 : opts.seamUlps;
+
+    // Holonomy: frame N is segment 0 again, reached the long way round.
+    var f0 = sw.frames[0], fN = sw.frames[N];
+    var drift = Math.max(dist(f0.r, fN.r), dist(f0.s, fN.s));
+    // The frame vectors are unit length, so the gap they open at the rails is
+    // drift * (profile reach); gate THAT against the float32 grid at the ring.
+    var reach = 0;
+    for (var j = 0; j < M; j++) reach = Math.max(reach, Math.hypot(opts.profile[j][0], opts.profile[j][1]));
+    var ringP0 = sw.rings[N];
+    var tol = seamUlps * ulpAt(ringP0[0]);
+    if (drift * reach > tol) {
+      return {
+        ok: false, tris: null,
+        reason: 'the loop does not close its frame: carried once round it comes back rotated by ' +
+                drift.toExponential(3) + ' (a ' + (drift * reach).toExponential(3) + ' mm gap at the rails, ' +
+                'limit ' + tol.toExponential(3) + ' mm). A loop that lies in one plane always closes; a space loop in general does not'
+      };
+    }
+
+    // Rings of the loop: joints at P1 .. P(N-1), then P0.
+    var rings = sw.rings.slice(1, N + 1);   // index i is the ring at P(i+1), last is P0
+    // Segment 0 runs from the ring at P0 to the ring at P1.
+    var u0 = sw.segs[0].u;
+    for (var jj = 0; jj < M; jj++) {
+      var a = rings[N - 1][jj], b = rings[0][jj];
+      var adv = dot(sub(b, a), u0);
+      var floor = minRailUlps * Math.max(ulpAt(a), ulpAt(b));
+      if (!(adv > floor)) {
+        return {
+          ok: false, tris: null,
+          reason: 'the miter has eaten segment 0 on rail ' + jj + ' round the loop: it advances ' +
+                  adv.toExponential(3) + ' mm (floor ' + floor.toExponential(3) + ' mm)'
+        };
+      }
+    }
+
+    var tris = new Float32Array(2 * M * N * 9);
+    var w = 0;
+    function emit(p, q, r) {
+      tris[w++] = p[0]; tris[w++] = p[1]; tris[w++] = p[2];
+      tris[w++] = q[0]; tris[w++] = q[1]; tris[w++] = q[2];
+      tris[w++] = r[0]; tris[w++] = r[1]; tris[w++] = r[2];
+    }
+    // Segment k of the loop runs from the ring at P(k) to the ring at P(k+1);
+    // the ring at P(k) is rings[k - 1], and P0's is rings[N - 1].
+    for (var k = 0; k < N; k++) {
+      var A = rings[(k + N - 1) % N], B = rings[k];
+      for (var jw = 0; jw < M; jw++) {
+        var j2 = (jw + 1) % M;
+        emit(A[jw], A[j2], B[j2]);
+        emit(A[jw], B[j2], B[jw]);
+      }
+    }
+    var pathLen = 0;
+    for (var ks = 0; ks < N; ks++) pathLen += sw.segs[ks].len;
+    var st = {};
+    for (var sk in sw.stats) if (Object.prototype.hasOwnProperty.call(sw.stats, sk)) st[sk] = sw.stats[sk];
+    st.tris = 2 * M * N;
+    st.rings = N;
+    st.pathLength = pathLen;
+    st.holonomy = drift;
+    return {
+      ok: true, reason: '', closed: true, tris: tris,
+      pts: sw.pts.slice(0, N), rings: rings, frames: sw.frames.slice(0, N),
+      segs: sw.segs.slice(0, N), joints: sw.joints.slice(0, N), stats: st
     };
   }
 
@@ -768,6 +888,7 @@
     buildFrames: buildFrames,
     arcSubdivide: arcSubdivide,
     sweep: sweep,
+    sweepClosed: sweepClosed,
     sectionLoop: sectionLoop,
     loopArea: loopArea,
     wallPlanarity: wallPlanarity,

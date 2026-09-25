@@ -765,6 +765,19 @@
         </div>
       </div>
 
+      <!-- Live toolpath / solid toggle. View only: it changes what is drawn,
+           never what is selected, and nothing on the plate. Toolpath only. -->
+      <div class="ms-section" id="ms-render-row" style="display:none;">
+        <div class="ms-section-title">Render</div>
+        <div class="ms-btn-row ms-seg" role="group" aria-label="Render the toolpath as">
+          <button id="ms-render-toolpath" type="button" class="active" aria-pressed="true"
+                  title="Every move as a line, as the slicer wrote it">Toolpath</button>
+          <button id="ms-render-solid" type="button" aria-pressed="false"
+                  title="Every continuous run of bead swept into one closed solid, capped only where the nozzle stopped - what Export as solid writes">Solid</button>
+        </div>
+        <p class="ms-note" id="ms-render-read">&mdash;</p>
+      </div>
+
       <div class="ms-section" id="ms-layer-row" style="display:none;">
         <div class="ms-section-title">Whole layer</div>
         <div class="ms-btn-row">
@@ -809,6 +822,12 @@
                   title="Leave the microscope and put the selection on the plate in the main Nest 3D viewport, as a standalone object with undo wired">Export to plate</button>
           <button id="ms-btn-export-stl" type="button"
                   title="Download just the selection as a binary STL - the same geometry Export to plate would add">Export as STL</button>
+        </div>
+        <div class="ms-btn-row" id="ms-export-solid-row" data-flex="1" style="display:none;">
+          <button id="ms-btn-export-solid-plate" type="button"
+                  title="Put the selection on the plate as a real solid: each continuous run of bead swept into one closed shell along its own moves, capped only where the nozzle stopped. No boolean union.">Export as solid</button>
+          <button id="ms-btn-export-solid-stl" type="button"
+                  title="Download the same solid as a binary STL">Solid STL</button>
         </div>
       </div>
 
@@ -882,6 +901,7 @@
   <script src="nso-3mf-scene.js?v=scene1"></script>
   <script src="nso-surface-grid.js?v=inside6"></script>
   <script src="nso-gcode-lines.js"></script>
+  <script src="nso-gcode-solid.js"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
   <script src="app-core.js?v=crop2"></script>
   <script src="app-cut.js?v=crop3"></script>
