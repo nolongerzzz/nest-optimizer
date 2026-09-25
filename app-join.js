@@ -2061,6 +2061,7 @@ async function subtractBFromA() {
     aPrevRawAxis: modelA.rawAxis,
     aPrevCenterOffset: modelA.centerOffset,
     aPrevSize: { x: modelA.size.x, y: modelA.size.y, z: modelA.size.z },
+    aPrevPose: (placedA && typeof nsoPlacedPoseSnapshot === 'function') ? nsoPlacedPoseSnapshot(placedA) : null,
     bSnapshot: {
       id: modelB.id,
       name: modelB.name,
@@ -2125,6 +2126,10 @@ async function subtractBFromA() {
   placedA.width = modelA.size.x;
   placedA.depth = modelA.size.z;
   placedA.height = modelA.size.y;
+  // The difference was taken in world space, so A's pose is in the geometry
+  // now and the mesh above is built at identity. Clear the record to match,
+  // or the next bake re-applies it on top (see nsoClearPlacedPose).
+  if (typeof nsoClearPlacedPose === 'function') nsoClearPlacedPose(placedA);
 
   updateEditSize();
   renderModelList();
@@ -2928,6 +2933,7 @@ async function joinSelectedModels() {
     aPrevRawAxis: modelA.rawAxis,
     aPrevCenterOffset: modelA.centerOffset,
     aPrevSize: { x: modelA.size.x, y: modelA.size.y, z: modelA.size.z },
+    aPrevPose: (placedA && typeof nsoPlacedPoseSnapshot === 'function') ? nsoPlacedPoseSnapshot(placedA) : null,
     bSnapshot: {
       id: modelB.id,
       name: modelB.name,
@@ -3000,6 +3006,14 @@ async function joinSelectedModels() {
     placedA.width = modelA.size.x;
     placedA.depth = modelA.size.z;
     placedA.height = modelA.size.y;
+    /* The union is drawn at identity: whichever route made it, the pose A
+       had is either baked into the soup (seated weld, kernel union - world
+       soups) or not part of the result at all (planar fuse, plate weld -
+       unposed geometry). Either way the record must stop claiming it. Left
+       set, the next bake that honours the record - Mirror, through
+       NSO_sculptCommitRaw - re-applies it, and an A that was edge-flipped
+       before this Join comes out of that Mirror turned 180 degrees. */
+    if (typeof nsoClearPlacedPose === 'function') nsoClearPlacedPose(placedA);
   } else if (state.cutterOpen) {
     showEditPreview();
   }
