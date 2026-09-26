@@ -437,6 +437,16 @@
                       title="Reconnect the moved region where it is. Measured, not assumed: an overlap with the piece is trimmed, a face-to-face touch is joined, a gap up to 3 mm is bridged with a filleted fill. Refuses a wider gap, a region buried in the piece, and anything that would not come out as one clean closed piece.">Lock in</button>
               </div>
               </div>
+              <div class="detach-tools" id="detach-tools">
+              <p class="hint">Detach: take a detected flange off the piece. The piece is capped on its own wall, the flange becomes its own piece, and Reattach seats it somewhere else.</p>
+              <div class="edit-row">
+              <button id="btn-detach" class="btn btn-secondary" type="button"
+                      title="Find the flange on this piece and take it off. The piece is capped flush with its own neck wall, with nothing left of the flange and no gap to bridge. The flange lands beside it as its own closed piece. One Undo puts both back. See docs/DETACH.md.">Detach flange</button>
+              <button id="btn-reattach" class="btn btn-secondary btn-attach" type="button" aria-pressed="false" disabled
+                      title="Put the detached flange back somewhere else: click the point on a piece where its root should go. It keeps lying the way it lay, reaches out of the clicked face, is seated deep enough for its whole root to bite (Attach's seat), and is unioned into that piece. One Undo puts both back.">Reattach</button>
+              </div>
+              <p id="detach-readout" class="cut-readout">—</p>
+              </div>
               </div>
             </div>
           </details>
@@ -1032,6 +1042,12 @@
        calls it with app-cut.js's rawCut. -->
   <script src="nso_flange.js?v=flange1"></script>
   <script src="app-microscope.js?v=scope10"></script>
+  <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
+       wall, lift the flange out as a piece, seat it elsewhere with Attach's
+       seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
+       and app-join.js, whose functions it calls. See docs/DETACH.md. -->
+  <script src="nso_detach.js?v=detach1"></script>
+  <script src="app-detach.js?v=detach1"></script>
   <!-- G-scope supports: overhang markers, point-click generation, per-support
        edit / remove. After app-microscope.js, whose hooks it uses, and after
        nso_support_aim.js / nso_support_tree.js / app-join.js, whose

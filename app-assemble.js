@@ -141,6 +141,10 @@
     };
   }
 
+  /* Reattach (app-detach.js) converts its click the same way. Exported, not
+     copied, for the reason this function's own comment gives. */
+  window.nsoAttachRawPick = rawPickFrom;
+
   /* One attach. Async, because the boolean loads a WASM kernel. Exposed on
      window so the drive check runs the same path the click runs rather than a
      parallel copy of it, exactly as app-stock.js exposes nsoStockRun. */

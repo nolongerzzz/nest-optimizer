@@ -748,7 +748,7 @@
          Both ends are excluded by RAY_EPS_MM: the foot sits ON the base and
          the tip sits ON the target, so a hit at either end is the thing the
          support is attaching to, not an obstruction. */
-      var blockAt = nearestHit(obstacles, cand.from, dir, RAY_EPS_MM, cand.length - RAY_EPS_MM);
+      var blockAt = lineBlockedAt(obstacles, cand.from, dir, cand.length);
       if (blockAt > 0) {
         rec.why = 'the straight line is blocked ' + blockAt.toFixed(3) + ' mm along, ' +
           (cand.length - blockAt).toFixed(3) + ' mm short of the target';
@@ -774,6 +774,18 @@
       '. A support that has to bend around the piece to get there is a curving ' +
       'path, which is out of scope here by name';
     return out;
+  }
+
+  /* The line test nearestBase runs on its best candidate, and the whole of
+     it: is anything hit strictly between the two ends of the segment `from`
+     -> `from + dir * length`? Both ends are excluded by RAY_EPS_MM (the foot
+     is ON its base, the tip is ON its target). Returns the distance to the
+     first blocking hit, or -1 when the line is clear. Published so a caller
+     that already KNOWS its foot - nso_assemble.js's footAt, a piece being put
+     back by hand - asks the same question in the same words rather than
+     re-deriving the epsilon. */
+  function lineBlockedAt(obstacles, from, dir, length) {
+    return nearestHit(obstacles || [], from, dir, RAY_EPS_MM, length - RAY_EPS_MM);
   }
 
   /* =====================================================================
@@ -1204,6 +1216,7 @@
     STRUT_SEED_MM: STRUT_SEED_MM,
     detectOverhangs: detectOverhangs,
     nearestBase: nearestBase,
+    lineBlockedAt: lineBlockedAt,
     buildStrut: buildStrut,
     grow: grow,
     place: place,

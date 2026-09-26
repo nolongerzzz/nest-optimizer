@@ -368,6 +368,8 @@ NSO_Assemble.describe(result)   // one status line
 | `keepLength` | grow the arm by `engageMm` first, default `true` |
 | `footTolMm` | how far auto-aim's foot may sit from `at`; default half the arm's width |
 | `obstacles` | soups the line must not cross; the body is added |
+| `footAt` | `at` IS the foot: no nearest-foot search and no drift check, only the line test (`NSO_SupportAim.lineBlockedAt`). For a real piece put back by hand; see docs/DETACH.md |
+| `up` | where the arm's local +Y points after the turn. `place()` is asked which turn it bakes and the arm is pre-turned about +Z. Default: the shortest turn's, all a round arm needs |
 | `aim` / `extendRaw` / `thickness` | injectable dependencies, for tests |
 
 The union is **the caller's**. `NSO_unionSoups` is async, loads a WASM kernel
@@ -391,10 +393,14 @@ seated and stops there.
    check the boss does not, and shipping the two together would have hidden
    which gates belong to which.
 4. **Attaching an existing piece rather than a generated one.** `attach()`
-   takes any soup whose attach axis is +Z with its base on z = 0, so the
-   module is ready; the app layer generates its arm because that is the
-   guided flow the ticket asked for. Wiring Join's B slot into it is a small
-   change and a separate decision about what happens to B on the plate.
+   takes any soup whose attach axis is +Z with its base on z = 0. The app
+   layer generates its arm because that is the guided flow the ticket asked
+   for. **Reattach (docs/DETACH.md) is the first real piece through it**: a
+   detached flange. It needed three opt-in additions, each measured there:
+   `footAt` (the tip-nearest foot aimed a flange 87° off), `up` (the
+   shortest turn stood a plate on end), and an `extendRaw` that grows a flat
+   root (Extend refuses a flange). Wiring Join's B slot in is still a
+   separate decision about what happens to B on the plate.
 5. **Curving or branching arms.** Out for the reason `docs/SUPPORT-AIM.md`
    gives: one straight direction, refused when blocked, never routed around.
    `nso_path_sweep.js` is the growth mechanism when that ticket comes.

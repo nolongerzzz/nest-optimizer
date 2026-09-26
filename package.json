@@ -176,7 +176,9 @@
     "fixtures:gate": "python3 tools/fixture_audit.py --gate --no-selfint",
     "thicken:check": "node tools/nso_thicken_drive_check.js",
     "measure:test": "node tools/nso_measure_test.js",
-    "flange:test": "node tools/nso_flange_test.js"
+    "flange:test": "node tools/nso_flange_test.js",
+    "detach:test": "node tools/nso_detach_test.js",
+    "wire:detach": "node tools/nso_wire_detach_test.js"
   },
   "devDependencies": {
     "playwright": "1.56.1",
@@ -332,6 +334,8 @@
     "assemble",
     "assemble:canonical",
     "wire:assemble",
+    "detach:test",
+    "wire:detach",
     "integration",
     "wire:integration",
     "pathsweep:test",
@@ -510,6 +514,8 @@
     "assemble": 757,
     "assemble:canonical": 1300,
     "wire:assemble": 2900,
+    "detach:test": 54000,
+    "wire:detach": 72000,
     "integration": 7000,
     "wire:integration": 14800,
     "pathsweep:test": 165,
