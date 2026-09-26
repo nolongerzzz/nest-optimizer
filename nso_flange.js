@@ -642,13 +642,23 @@
     res.reason = res.flanges.length
       ? res.flanges.length + ' flange' + (res.flanges.length === 1 ? '' : 's')
       : 'no flange: ' + (res.candidates.length
-          ? 'the nearest slab (' + fmt(res.candidates[0].thickness) + ' mm thick) failed ' +
-            res.candidates[0].failed.join(', ')
-          : 'no flat slab of one thickness anywhere');
+          ? 'the nearest flat plate (' + fmt(res.candidates[0].thickness) + ' mm) ' +
+            res.candidates[0].failed.map(function (k) { return WHY[k] || k; }).join(', and ')
+          : 'no flat plate of one thickness anywhere');
     return res;
   }
 
   function fmt(x) { return (Math.round(x * 100) / 100).toString(); }
+
+  /** Each test's failure, in words - what the tab says when there is none. */
+  var WHY = {
+    attached: 'does not come off anything thicker',
+    thin: 'is not thin next to what it comes off',
+    wide: 'does not stick out far enough',
+    flat: 'is not flat',
+    straight: 'meets its body along a curve, not a line',
+    body: 'comes off another plate, not a body'
+  };
 
   // -------------------------------------------------------------------------
   // extract(): the flange as its own closed solid

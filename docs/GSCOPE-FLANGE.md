@@ -60,8 +60,9 @@ The rule, as `detect(soup)` runs it:
    sink it, and one gusset between two plates cannot fake a body.
 
 Every slab is kept with the tests it failed (`candidates`), so "why no
-flange?" always has an answer: the tab says which test the nearest slab
-failed.
+flange?" always has an answer. The tab puts the nearest slab's failures into
+words, for example "the nearest flat plate (8 mm) does not come off anything
+thicker".
 
 ### Lifting it out
 
@@ -158,4 +159,67 @@ The 0.3 mm shortfall on the synthetic volumes is the 2 µm root clearance.
 
 ## The tab
 
-<!-- filled in with the UI -->
+The floating list in G-scope ("Parts / Features (click to isolate)") has a
+row under a rule, below the file's own tabs: **Flange**. It is kept in its
+own `#ms-detected` block, not in `#ms-legend`, because those rows are exactly
+the file's own groups and several checks count them as that.
+
+| document | the row reads | a click |
+|---|---|---|
+| a mesh with a flange (STL, 3MF, the plate) | `Flange (2.94 mm, 2858 tri)`, in the tab's orange | selects the flange and isolates it, framed on it. The row stays lit while it is the selection |
+| a mesh with none | `Flange - none detected`, dimmed. The tooltip says why, in words | nothing is selected or isolated, and the info line says no flange was found |
+| a slice | `Flange - not on a slice`, dimmed | the same. The tooltip says to open the part itself |
+| while it is still looking | `Flange - looking...` | runs the detection there and then |
+
+Detection runs once per document, just after it opens, so the view comes up
+first. It takes 0.7 s on the clamp bar in the page. On the plate every piece
+is scanned, and a piece over 400,000 triangles is skipped by name.
+
+**It feeds the same mechanism as any selection.** What detection hands back
+is an ordinary mesh object (positions, centroids, bounds), passed through
+`setSelection()`. So:
+
+- **Isolate** draws it alone, in its colour. **Back** returns the whole part
+  with the flange highlighted on it, drawn over the part.
+- **Export as STL** and **Export to plate** write exactly the flange, named
+  `<part> - Flange`.
+- **Crop** takes a Z band out of it. A flange is not a plate piece, so Crop
+  sends it the file route: it becomes a new piece, which is then cropped. The
+  piece it came from is never edited, not even on the plate.
+
+In the page: `NSO_MICROSCOPE.flange()` (status, reason, objects),
+`.detectFlanges()` and `.isolateFlange()`.
+
+### On a slice
+
+The tab says it cannot look, and it does not guess. The rule needs a closed
+surface to cast rays through, and a slice's beads are overlapping boxes. The
+per-layer "area spike" variant would work on beads, but it finds a band, not
+the flange (see above). And on the clamp bar the flange's top layers are
+diagonal infill lines that run from the flange tip across the body top, so
+isolating whole moves could not separate the two. That would take clipping
+moves at the root, which is a different change.
+
+## What proves it
+
+- `npm run flange:test` (`tools/nso_flange_test.js`, 48 gates): the rule on
+  the real clamp bar, the false-positive audit, the lifted solid against an
+  independent integration and the canonical checker, five poses, library
+  pieces with none, and the synthetic shapes. About 10 s.
+- `npm run gcode:gscope-flange` (`tools/gcode-test/gscope-flange-drive-check.mjs`,
+  46 checks, headless Chromium, the real app):
+  1. the clamp bar through G-scope's own Import. The tab finds it, and the
+     page's flange matches the Node one triangle for triangle and to the micron
+     in bounds;
+  2. a real click on the tab isolates it: alone, one solid, orange on the
+     read-back pixels, framed at its middle height. Back highlights it on the
+     part;
+  3. Export as STL writes exactly the flange (`PASS`, 0 open, 0 non-manifold,
+     χ 2). Crop takes 8.5–9.5 out as a new piece;
+  4. the plate route: a click on the tab and Export to plate. The clamp bar
+     itself keeps every triangle;
+  5. `hinge_knuckle_box.stl` reads "none detected" and a click does nothing
+     but say so. A slice says it cannot look, with all ten of its feature tabs
+     intact.
+
+  Screenshots land in `tools/gscope-flange-out/`.

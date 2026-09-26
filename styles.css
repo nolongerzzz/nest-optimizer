@@ -2976,7 +2976,17 @@ button#ms-legend-toggle {
 }
 button#ms-legend-toggle:hover { color: var(--text, #fff); border-color: var(--accent); }
 #ms-legend-float.collapsed { width: auto; }
-#ms-legend-float.collapsed #ms-legend { display: none; }
+#ms-legend-float.collapsed #ms-legend,
+#ms-legend-float.collapsed #ms-detected { display: none; }
+/* The Flange tab: under the file's own tabs, set off by a rule, because it
+   is found in the geometry rather than read from the file. */
+#ms-detected:not(:empty) {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 5px;
+}
+#ms-detected .ms-legend-item { margin-bottom: 0; }
+#ms-detected .ms-legend-item.active { background: rgba(255, 138, 31, 0.16); }
 #ms-legend-float.collapsed .ms-section-title,
 #ms-legend-float.collapsed button#ms-legend-toggle { margin-bottom: 0; }
 #ms-legend-float.collapsed button#ms-legend-toggle { margin-top: 0; }
