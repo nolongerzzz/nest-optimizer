@@ -337,6 +337,13 @@ async function main() {
   check('a slice: the tab says it cannot look, and why', [t6.state.status, t6.row.text, /closed surface/.test(t6.row.title)],
     ['unavailable', 'Flange - not on a slice', true]);
   check('the slice\'s own feature tabs are all still there', t6.legendRows, 10);
+  await page.click('#ms-detected .ms-legend-item');
+  const sliceClick = await page.evaluate(() => ({
+    sel: window.NSO_MICROSCOPE.selection().length,
+    info: document.getElementById('ms-info').textContent,
+  }));
+  check('a click on it there selects nothing and says it is not available (not "none")',
+    [sliceClick.sel, /^Flange: not available here\./.test(sliceClick.info)], [0, true]);
 
   check('no page errors', errors, []);
   await browser.close();

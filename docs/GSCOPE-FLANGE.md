@@ -207,7 +207,7 @@ moves at the root, which is a different change.
   independent integration and the canonical checker, five poses, library
   pieces with none, and the synthetic shapes. About 10 s.
 - `npm run gcode:gscope-flange` (`tools/gcode-test/gscope-flange-drive-check.mjs`,
-  46 checks, headless Chromium, the real app):
+  47 checks, headless Chromium, the real app):
   1. the clamp bar through G-scope's own Import. The tab finds it, and the
      page's flange matches the Node one triangle for triangle and to the micron
      in bounds;
@@ -220,6 +220,6 @@ moves at the root, which is a different change.
      itself keeps every triangle;
   5. `hinge_knuckle_box.stl` reads "none detected" and a click does nothing
      but say so. A slice says it cannot look, with all ten of its feature tabs
-     intact.
+     intact, and a click there says "not available", not "none".
 
   Screenshots land in `tools/gscope-flange-out/`.

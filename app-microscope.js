@@ -1754,7 +1754,8 @@ var NSO_MICROSCOPE = (function () {
       var why = st.status === 'unavailable' ? 'Flange: not available - ' + st.reason
         : 'Flange: none detected - ' + st.reason;
       say(why, false);
-      info('<b>No flange detected.</b> ' + st.reason.replace(/</g, '&lt;'));
+      info((st.status === 'unavailable' ? '<b>Flange: not available here.</b> ' : '<b>No flange detected.</b> ') +
+           st.reason.replace(/</g, '&lt;'));
       return false;
     }
     removeAllBalls();
