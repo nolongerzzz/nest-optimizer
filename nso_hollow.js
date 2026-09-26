@@ -949,6 +949,14 @@
     hollow: hollow,
     fill: fill,
     signedVolume: signedVolume,
+    /* The field tools, for a caller that needs a level set of its own. Crop's
+       Move (app-crop.js, the gap bridge) meshes a closing of two parts with
+       exactly these: the exact EDT, the well-composed tidy (it shrinks the
+       positive set, whatever that set means to the caller) and surface nets.
+       Exported, not copied, so there is one surface-nets in the repo. */
+    edt3d: edt3d,
+    surfaceNets: surfaceNets,
+    tidyPositive: tidyCavity,
     STEPS_PER_WALL: STEPS_PER_WALL,
     MAX_DIM: MAX_DIM
   };
