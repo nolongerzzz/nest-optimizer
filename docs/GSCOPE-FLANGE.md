@@ -49,6 +49,7 @@ The rule, as `detect(soup)` runs it:
    | flat | both faces fit a plane to 0.05 t + 0.02 mm RMS | 0.007 mm | 0.167 mm |
    | straight | the root is a line: RMS ≤ max(0.75 h, 2 % of its length), nothing behind it | 0.000 mm | 3.7 mm |
    | body | from the root *into* the body along the reach direction: ≥ 2.5 t of bulk beside the band, **or** the slab carries on ≥ 2.5 t across its neck | 19.0 mm bulk | 7.35 mm |
+   | sheet | eroded by t/2 in its own plane, the core still reaches ≥ 3 t from the root: it is wider than it is thick | 14.1 mm | 8.82 mm |
 
    "Body" is what separates a flange from one leg of an L-bracket. The other
    leg is tall along the first leg's normal, so it passes "attached" and
@@ -58,6 +59,14 @@ The rule, as `detect(soup)` runs it:
    counts. It is measured at 15 stations along the root. The upper quartile
    is taken so that the clamp bar's keyholes (a third of its root) cannot
    sink it, and one gusset between two plates cannot fake a body.
+
+   "Sheet" separates a flange from a round rod. Near its crest, a rod's
+   chord changes slowly enough for the columns to chain into one "slab".
+   The core is then a band narrower than its own thickness, and it passes
+   every other clause. The arch handle in `fixtures/features/` read as a
+   7.7 mm flange, 26 mm out, until this clause was added
+   (`docs/FEATURES.md`). The clause runs only on a slab that has passed
+   everything else, and no STL in the repo is changed by it.
 
 Every slab is kept with the tests it failed (`candidates`), so "why no
 flange?" always has an answer. The tab puts the nearest slab's failures into
@@ -128,6 +137,16 @@ Before the "body" test, `fixtures/repair/thingi10k/39644.stl` was flagged. It
 is a bracket, and its upright is a 6 mm plate standing on a base plate. That
 false positive is what the test was added for. It now fails "body" (the base is
 a plate, not a body), and so does the synthetic uniform L-bracket.
+
+### Generated features on a known hull (`npm run features:test`)
+
+`fixtures/features/` puts a flange, a handle, a bracket, a lid and a hinge on
+one hull, each from its own definition (`tools/nso_features.js`,
+`docs/FEATURES.md`). The rule finds the one flange at its generated
+thickness, band, reach and root, and it lifts out to the generated volume less
+the 2 µm clearance. None of the 231 slab candidates on the other four
+features or on the hull passes. The bracket without its gussets is found as a
+flange, and that is pinned: by this rule an unbraced angle's arm **is** one.
 
 ### Synthetic shapes
 

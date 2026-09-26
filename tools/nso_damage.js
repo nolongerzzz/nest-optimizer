@@ -626,5 +626,9 @@ function measuredFrom(r) {
 
 module.exports = {
   WELD_TOL, LEVELS, level, rng, exactIndex, census, boundaryLoops, base, selectRegion,
-  hole, nonManifold, weld, sever, apply, measuredFrom, NM_MODES
+  hole, nonManifold, weld, sever, apply, measuredFrom, NM_MODES,
+  /* The machinery under the damage types, for tools that build on the same
+     guarantees (tools/nso_features.js): the kernel, soup <-> Manifold, the
+     sub-weld pair search and the checker-keyed expectation. */
+  kernel, toManifold, toSoup, closestPair, countDegenerate, expectation
 };
