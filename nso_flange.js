@@ -41,6 +41,11 @@
         flat       both faces fit a plane to 0.05 t + 0.02 mm RMS.
         straight   the root is a line (RMS <= max(0.75 h, 2 % of rootLen)),
                    because the flange is lifted out by ONE cut on that line.
+        sheet      it is wider than it is thick: eroded by t/2 in its own
+                   plane, the core still reaches out 3t. A round rod's crest
+                   chains into a "slab" of nearly even chord, narrower than
+                   its thickness - a handle's arch read as a 7.7 mm flange
+                   until this (tools/nso_features_test.js section 4).
       Every candidate is kept with the criteria it failed, so "why not" is
       always answerable - see `candidates`.
 
@@ -432,6 +437,28 @@
     if (cand.reach < 3 * t || cand.reach < 4 * h) cand.failed.push('wide');
     if (cand.flatRms > tol) cand.failed.push('flat');
     if (cand.rootRms > Math.max(0.75 * h, 0.02 * cand.rootLen) || cand.behind > 0.05) cand.failed.push('straight');
+    if (!cand.failed.length) {
+      // A plate is wider than it is thick. Erode the core by t/2: what is
+      // left of a plate still reaches out 3t; the crest of a round rod (a
+      // handle's arch seen end-on, whose chord changes slowly enough for the
+      // columns to chain into one "slab") is narrower than its own
+      // thickness and erodes to nothing. tools/nso_features_test.js.
+      var rho = Math.max(1, Math.round(0.5 * t / h)), rho2 = rho * rho;
+      var coreCells = new Set(core.map(function (k) { return G.cell[k]; }));
+      var sheet = -Infinity;
+      core.forEach(function (k, i) {
+        var ck = G.cell[k], ci = ck % G.nu, cj = (ck - ci) / G.nu;
+        for (var dj = -rho; dj <= rho; dj++) for (var di = -rho; di <= rho; di++) {
+          if (di * di + dj * dj > rho2) continue;
+          var ni = ci + di, nj = cj + dj;
+          if (ni < 0 || nj < 0 || ni >= G.nu || nj >= G.nv || !coreCells.has(nj * G.nu + ni)) return;
+        }
+        var dd = -((us[i] - mx) * e2[0] + (vs[i] - my) * e2[1]);
+        if (dd > sheet) sheet = dd;
+      });
+      cand.sheetReach = sheet === -Infinity ? 0 : sheet + (rho + 0.5) * h;
+      if (cand.sheetReach < 3 * t) cand.failed.push('sheet');
+    }
     return cand;
   }
 
@@ -657,7 +684,8 @@
     wide: 'does not stick out far enough',
     flat: 'is not flat',
     straight: 'meets its body along a curve, not a line',
-    body: 'comes off another plate, not a body'
+    body: 'comes off another plate, not a body',
+    sheet: 'is narrower than it is thick - a rod, not a plate'
   };
 
   // -------------------------------------------------------------------------

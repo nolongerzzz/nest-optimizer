@@ -238,7 +238,28 @@
     { file: 'shape-tube_severed.stl',             category: 'Test Fixtures', source: 'nest-library' },
     { file: 'shape-sphere_nm-duplicate.stl',      category: 'Test Fixtures', source: 'nest-library' },
     { file: 'shape-sphere_winding-flip.stl',      category: 'Test Fixtures', source: 'nest-library' },
-    { file: 'shape-torus_weld-collide.stl',       category: 'Test Fixtures', source: 'nest-library' }
+    { file: 'shape-torus_weld-collide.stl',       category: 'Test Fixtures', source: 'nest-library' },
+    /* Functional features on one known hull (120 x 70 x 40) - each built from
+       its own geometric definition by tools/nso_features.js through
+       tools/nso_features_make_fixtures.js. fixtures/features/features.json
+       carries each feature's ground truth: where it is, its root (where it
+       meets the hull) and what the checker and the flange detector must read.
+       tools/nso_features_test.js holds them to it and byte-compares each
+       row's file in nest-library against fixtures/features/. Load one to try
+       a detector, or a detach, on a feature whose answer is known.
+       docs/FEATURES.md has the definitions.
+         _all      all five, one per face
+         _flange   2.5 mm plate, 15 mm out, straight 60 mm root
+         _handle   round-rod arch, 21 mm clear: genus 1
+         _bracket  gusseted angle, fused flat on its plate
+         _lid      seated on a pocket, plug 0.5 mm clear: one enclosed void
+         _hinge    print-in-place knuckles, 0.5 mm clear: two bodies */
+    { file: 'feature-hull_all.stl',               category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'feature-hull_flange.stl',            category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'feature-hull_handle.stl',            category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'feature-hull_bracket.stl',           category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'feature-hull_lid.stl',               category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'feature-hull_hinge.stl',             category: 'Test Fixtures', source: 'nest-library' }
   ];
 
   /* The one way a file name becomes something fetchable. Absolute, always. */
