@@ -523,6 +523,23 @@ unchanged. `NSOWatch.collapse(bool)` / `isCollapsed()`; the choice is a
 per-viewer preference in its own localStorage key, `nso.watch.collapsed`.
 `npm run watch:test` part F.
 
+## Cache-tag batch (2026-09-26)
+Done on the owner's explicit instruction, as one pass after Crop Stage 2
+(PR #114) and the multi-run union (PR #113) merged. This is an exception to
+rule 4; the HUD string (`stampHud()`) is untouched.
+
+| file | was | now |
+| --- | --- | --- |
+| `app-core.js` | `gsup2` | `gsup3` |
+| `app-crop.js` | `crop3` | `crop4` |
+| `nso_hollow.js` | `hollow3` | `hollow4` |
+| `styles.css` | `legendmin1` | `crop4` |
+| `app-microscope.js` | `scope9` | `scope10` |
+| `nso-gcode-solid.js` | untagged | `solid1` |
+
+The "needs a bump at merge" notes in the Crop Stage 2 and fused-selections
+entries below are covered by this pass.
+
 ## Crop, stage 2 - move a region, reconnect it by what is measured (2026-09-26)
 
 Branch `claude/crop-stage2-move`, off `claude-wip`. Full write-up:
