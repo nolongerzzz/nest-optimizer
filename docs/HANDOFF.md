@@ -560,6 +560,61 @@ Branch `claude/crop-stage2-move`, off `claude-wip`. Full write-up:
   a region at the very end (Stage 1's axis clamp), and mixed contact (overlap
   here, gap there) in one move.
 
+## G-scope - fused selections: one solid where runs touch (2026-09-26)
+Branch `claude/gscope-multirun-union`, off `claude-wip`. Full write-up:
+**`docs/GCODE-MICROSCOPE.md`, "G-scope: fused selections"**.
+
+- **Closes** the solid export's stated limitation: a multi-run selection
+  exported as touching shells. **Export as solid** and **Solid STL** now call
+  `NSOGcodeSolid.fuseShells`. It finds the real junctions (stacked or side by
+  side, `shellContacts`) and unions each connected group in `NSO_CSG`, pair by
+  pair and only across a contact. A run touching nothing passes through bit
+  for bit. The live Solid view stays unfused.
+- **Kernel findings, all measured:** a float32 step between stacked planes
+  reads as "no contact", so it is snapped. Zero-volume slivers appear between
+  compound bodies; they are dropped. Negative-volume components are enclosed
+  cavities; they are kept. The binding's `Manifold.compose` is a union and
+  fills cavities. Each group is written to float32 once and then goes through
+  the tree's `_finishUnion`.
+- **Gated:** every fused body must pass `NSO_Defects.locate` (the checker's
+  browser copy). The ways tried are exact → seated 1e-3 mm → stepwise. Beyond
+  that, the beads at the located defects are set aside as swept. There is a
+  guard at 4,000 runs / 20,000 junctions.
+- **Checks:** `gcode:solid` §5 (62 in all) and `gcode:solid-drive` (44). Inner
+  + Outer wall PASSES `mesh_validate.py` as one export. Its volume matches an
+  independent scanline union to rel 1.2e-7. A single run is unchanged and
+  takes 0-2 ms.
+- **`?v=` not bumped** (rule 4): `app-microscope.js` and `nso-gcode-solid.js`
+  need a bump at merge.
+
+## Open ticket - G-scope renders on demand, not every frame (added 2026-09-26)
+Open, not started. Found while fixing `gcode:solid-drive` (PR #110).
+
+**The cost.** `animate()` in `app-microscope.js` re-queues itself with
+`requestAnimationFrame` and calls `renderer.render` every frame for as long as
+G-scope is open, whether or not anything changed. In headless Chromium
+(software GL) the full `tabletop` slice costs ~2.5 s a frame, back to back:
+measured with long-task timing, a real click on Export as solid took 23.4 s
+and Read the plate 20.6 s on a quiet box, and past 30 s at 2x CPU throttle.
+Real users on a weak or integrated GPU pay the same loop in fan, battery and
+input lag, just at a smaller number.
+
+**The ticket.** Draw only when something changed: a `needsRender` flag set by
+the OrbitControls `change` event, `resize`, `viewChanged` / the detail and
+highlight rebuilds, box drags and the layer slider, and cleared after one
+render. Things that currently lean on the free-running loop and must still
+work:
+- `followClip()` and the corner dot's `cornerPoint()` run every frame; they
+  must run on camera change instead.
+- OrbitControls damping (if enabled) needs frames until it settles.
+- `flushView()` and the screenshot checks assume the canvas is current; they
+  must force one render.
+
+**Done when:** G-scope sits idle with no long tasks while untouched, every
+`gcode:*` G-scope check still passes, and `heavyClick()` in
+`gscope-solid-drive-check.mjs` can go back to a plain `page.click` and still
+pass at 2x throttle. That last one is the proof.
+
 ## G-scope supports - overhang markers, point-click generation, per-support edit (2026-09-25)
 Branch `claude/overhang-point-support`, off `claude-wip` after PR #99. Full
 write-up: **`docs/GCODE-SUPPORTS.md`**.
@@ -584,7 +639,9 @@ write-up: **`docs/GCODE-SUPPORTS.md`**.
   value for value; strut, tree and gecko-hand through the canonical checker at
   the tree check's derived weld; Undo on add, change and remove. Plus
   `paint:scope` (new roster row). Ported onto `claude-wip` as
-  `claude/overhang-point-support-port`; `?v=` tags at `scope7` / `gsup2`.
+  `claude/overhang-point-support-port`; `?v=` tags at `scope8` / `gsup2`
+  (`scope8` since PR #109: the #108 merge had loaded `app-microscope.js`
+  twice - check for exactly one tag after any conflict in `index.html`).
 
 ### Driver round 3 (G-scope x Mirror) - three fixes (2026-09-25)
 1. **Tree union regression (round sections).** Since the round-section /

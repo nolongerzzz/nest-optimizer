@@ -20,6 +20,159 @@ baked slice, and its only way out is `Export .json`.
 
 ---
 
+## G-scope: fused selections (2026-09-26)
+
+Branch `claude/gscope-multirun-union`, off `claude-wip`. Closes the limitation
+[Toolpath to solid](#g-scope-toolpath-to-solid-2026-09-25) §4 stated: *a
+selection spanning several continuous runs exports as several touching
+shells, not one fused solid.* **Export as solid** and **Solid STL** now union
+the runs of a selection **where they genuinely touch and nowhere else**, with
+the app's own kernel. Every run's own sweep goes in exactly as it was, and a
+run that touches nothing comes out bit for bit. New code is `fuseShells` /
+`shellContacts` in `nso-gcode-solid.js`. The live Solid *view* does not fuse:
+it redraws on every slider step, and the union is an export-time cost.
+
+### 1. Audit - what a junction between two separately swept runs is
+
+Measured on `supportwithinsupport`'s Inner + Outer wall (417 moves, 47 layers,
+144 run shells). Tabletop's walls and the whole of `supportwithinsupport` were
+also measured.
+
+| question | measured |
+| --- | --- |
+| How do two runs touch? | Two ways, and only two. **Stacked**: one bead's bottom plane is the other's top plane and their footprints overlap with area (195 junctions). **Side by side**: Z bands overlap with thickness and the footprints overlap. That covers perimeters the slicer spaced closer than their width, and the two pieces of a forced split meeting at the cut (110 junctions). |
+| Is side by side a real overlap? | Yes. Inner and outer wall centrelines are 0.555 mm apart and the beads are 0.609 mm wide, so they overlap by 0.054 mm along the whole perimeter, about 1.85 mm³ per layer. Unfused, that material is counted twice. |
+| Do stacked planes really coincide? | Not always, by rounding. Every sweep vertex is exactly on f32(z) or f32(z - h), but f32(z_N - h) is not always f32(z_(N-1)): 59 of the 144 wall shells (181 of the file's 1,190) sit **one float32 step (9.5e-7 mm) above** the top they rest on. |
+| What does the kernel do with each? | On plain boxes: face contact merges; one float32 step apart does not; edge-only contact does not (and should not). |
+| Is every contact found a real one? | Yes. All 16,542 contacts of the whole `supportwithinsupport` file, and all 6,456 of tabletop's walls, merge when unioned as lone pairs. |
+
+The problem has the same shape as the one the tree solved. A union is needed
+at the junctions and only there, not one N-way boolean over everything.
+
+### 2. The union - `fuseShells(built)`
+
+1. **Contacts** (`shellContacts`). Each shell's Z band and top-face
+   footprint. Candidates come from an XY grid, then an exact 2D
+   separating-axis test: stacked needs overlap with area, side by side
+   needs contact. A bottom within 1e-5 mm of another shell's top is snapped
+   onto it: its bottom vertices only, on a copy, only in a group being fused.
+2. **Groups.** The connected components of the contact graph. A shell in no
+   junction is passed through untouched.
+3. **Unions, only across contacts, in the kernel.** Each round pairs every
+   body with its smallest untaken neighbour, so a stack of N layers takes
+   log2(N) rounds of balanced unions rather than an N-long fold. It uses
+   `NSO_CSG`, the adapter `NSO_unionSoups` is built on, and keeps each body
+   in the kernel until its group is done. Unioning through `NSO_unionSoups`
+   step by step was the first build. It writes every result as float32, and
+   on tabletop's walls that round trip alone put 132 non-manifold edges and
+   845 piercing pairs into the export.
+4. **What the kernel hands back.** *Slivers* are components with no volume,
+   left where coincident coplanar faces meet between two compound bodies.
+   Counted as parts, they refused real junctions ("1 + 1 in, 2 out"), so they
+   are dropped and counted. *Cavities* are components with **negative**
+   volume: air the beads enclose (walls round a pocket of sparse infill,
+   closed over above). They are part of their body and are kept: 189 in the
+   whole `supportwithinsupport` file. The binding's `Manifold.compose` is a
+   union and fills a cavity in (measured: 936 → 1,000 mm³ on a hollow cube),
+   so a body is rebuilt by concatenation. The group's one body is written to
+   float32 **once**, then finished by the tree's own cleanup for that write
+   (`NSO_SupportTree._finishUnion`). That's the tree's pattern: union, one
+   write, one cleanup.
+5. **The gate.** A fused body is exported only if the canonical checker
+   passes it: `NSO_Defects.locate`, the browser copy of
+   `tools/mesh_validate.py`. Three ways are tried per group:
+   - **exact**: stacked beads snapped onto their plane; exact volume.
+   - **seated**: a stacked bead reaches `BOND_MM` = 1e-3 mm into the one
+     below, so no contact is coplanar. This fixes a 0.003 mm strip the
+     kernel leaves uncut where a bead crosses the one it rests on. It adds at
+     most 1e-3 × the seated footprints, which is reported as
+     `seatBoundMm3`.
+   - **stepwise**: exact, but every union is written and cleaned before
+     reuse. This fixes vertex pairs one float32 step apart at a hairpin
+     repeated up a wall.
+
+   Where no way passes, **the beads at the defects the checker located are
+   set aside**, as swept, and the rest is fused. A spot the kernel cannot
+   write soundly then costs the junctions of the few beads that meet there,
+   not the whole group. A median-Z split is used only when there is nothing
+   to locate.
+6. **Guard.** The union runs on the page's thread at about 1.4 ms per
+   junction. Past 4,000 runs or 20,000 junctions it is refused by name and
+   the shells are exported as swept. Tabletop as a whole is 24,960 runs and
+   167,293 junctions, about 4 minutes.
+
+**Measured:**
+
+| selection | runs → solids | junctions fused | overlap counted once | checker | time |
+| --- | --- | --- | --- | --- | --- |
+| one Inner wall run | 1 → 1 (as swept, bit for bit) | - | - | PASS | 0-2 ms |
+| sws Inner wall, 45 loops | 45 → 3 (no wall at layers 28-30) | 42 / 42 | 0 (stacked only) | PASS | - |
+| **sws Inner + Outer wall** (2 features, 47 layers) | **144 → 5** | **305 / 305** | **105.011 mm³** | **PASS** | 0.35-0.45 s |
+| tabletop Outer + Inner wall | 1,396 → 9 | 6,424 / 6,456 (4 beads set aside) | 517.137 mm³ | every fused body PASS | 9.0 s |
+| sws, every feature | 1,190 → 15 | 16,143 / 16,542 (12 beads set aside) | 476.342 mm³ | every fused body PASS | 26.7 s |
+
+The five bodies of the walls are separate because the part is. The kernel
+merges no two of them, and there is no wall at layers 28-30.
+
+### 3. Validation
+
+`npm run gcode:solid`, section 5 (62 checks in all, headless):
+
+- **The audit, as assertions:** both junction kinds, the float32-step
+  bottoms, the 0.054 mm inner/outer overlap, and the kernel's verdict on
+  face, one-step and edge contact.
+- **Canonical checker on the real multi-run export:** the walls selection
+  fused PASSES `mesh_validate.py` (open 0, non-manifold 0, degenerate 0,
+  pierce 0). The same 144 shells unfused FAIL it with 1,032 non-manifold
+  edges and 6,652 piercing pairs.
+- **Volume, without the kernel.** Each bead is a flat prism, so a union's
+  volume is Σ over Z bands of (thickness × area of the union of the
+  footprints). The area comes from exact interval-merging scanlines,
+  rotated off the slicer axes (aligned, the error was 5e-4; rotated,
+  1e-7). Fused walls: 1658.8130 against the independent 1658.8128 mm³
+  (rel 1.2e-7). That is 1763.8238 of runs minus 105.01 of real overlap. The
+  0.2297 mm³ the one seated group adds is within its reported 0.3398 bound.
+  Tabletop: every fused body against the union of exactly its own runs,
+  worst rel 8.4e-7.
+- **Single run:** no junction, no union, bit for bit the sweep's shell,
+  0-2 ms. Two runs that do not touch are also exported exactly as swept.
+- **Guard:** over either limit it refuses by name.
+- **Tabletop walls:** at most 1% of junctions left unfused, and every fused
+  body passes `mesh_validate.py` on its own.
+
+`npm run gcode:solid-drive` (44 checks, Chromium, real clicks). The 45-loop
+stack goes through **Export as solid** and passes the gate (it was 504
+non-manifold edges). **Inner + Outer wall through Solid STL** (the export
+label reads "2 features (x417, 47 layers)") downloads the fused solid
+triangle for triangle, passes the gate, and has the volume `fuseShells`
+reported. The one-run download is unchanged, and so are Mirror and Undo.
+
+*The "2 features, 90 layers" case* named in the ticket is not among the
+committed slices: `supportwithinsupport` has 50 printing heights and
+`tabletop` 73. The real two-feature, every-layer selection used instead is
+`supportwithinsupport`'s Inner + Outer wall, and tabletop's walls (72
+layers) is the heavier check.
+
+### What it does not do
+
+- **Beads set aside stay as they were:** swept, in contact with their
+  neighbours. That is 32 of tabletop's 6,456 wall junctions and 399 of the
+  whole `supportwithinsupport` file's 16,542. They are reported on the
+  status line ("N junctions left as faces in contact (M beads set aside
+  ...)"). A whole-file export can therefore still fail the checker where
+  those beads overlap a fused body. No fused body is ever exported
+  defective.
+- **The seated way adds material** (≤ 1e-3 mm × area, bounded and
+  reported) under the overhanging part of a stacked bead. It is used only
+  where the exact way fails the checker: 1 group of 5 on the walls.
+- **The Solid view is not fused**; Isolate in it shows the swept shells.
+- **Paint scope:** none (generator; it adds a piece, edits none).
+  **Non-solid scope:** not a consumer; every body it emits is closed.
+- **`?v=` not bumped** (HANDOFF rule 4): `app-microscope.js` (`scope8`) and
+  `nso-gcode-solid.js` (untagged) changed and need a bump at merge.
+
+---
+
 ## G-scope: corner-drag box and camera modes (2026-09-25)
 
 Branch `claude/gscope-corner-camera`, off `claude-wip`.
@@ -303,7 +456,9 @@ clicks), both in `npm test`.
   `supportwithinsupport`, one by one, through the validator's own
   `validate()`: 1,190 PASS. Every shell of both files: closed, 2-manifold,
   consistently wound, positive volume.
-- **Multi-run selections are several shells, touching.** 45 stacked Inner wall
+- **Multi-run selections are several shells, touching.** *(Closed by
+  [Fused selections](#g-scope-fused-selections-2026-09-26): the export now
+  unions them where they touch.)* 45 stacked Inner wall
   loops: open 0, degenerate 0, pierce 0 - and 504 non-manifold edges, every one
   where one layer's bead sits on the next. That is two solids in contact, which
   is what the beads are; one solid would need the union this deliberately does
@@ -438,6 +593,9 @@ counting downloads.
   selection, and the capture box now catches only what is drawn - so "only
   Inner wall" plus a box, or plus the slider, gives exactly that feature in
   that region.
+- **Detected, not named:** below the file's own tabs, a **Flange** tab
+  isolates a flange found in the geometry, which no file names (plate, STL
+  or 3MF, not a slice). See [GSCOPE-FLANGE.md](GSCOPE-FLANGE.md).
 
 ### 5. The layer-range slider
 
