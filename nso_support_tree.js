@@ -1517,6 +1517,181 @@
      and two branches leaving one trunk in different directions do not touch.
      ===================================================================== */
 
+  /* THE FLOAT32 COLLAPSE, at a crossing rather than at a root.
+     ROOT_SPREAD_SIDES keeps branch roots apart so two branch walls do not
+     pinch at a shared start point - the one place the square section made
+     that happen. The round section (24-gon frusta, tapered by the law) made
+     it happen somewhere else: where two thicker branches cross near their
+     tips at a grazing angle, two facets meet so obliquely that two distinct
+     vertices of their intersection curve land on one float32 when
+     NSO_CSG.manifoldToSoup writes the result. The output then carries
+     triangles with a REPEATED corner: zero area, zero volume, and at each one
+     a pair of non-manifold edges. Measured on the G-scope shelf fixture
+     (tools/gcode-test/gscope-support-drive-check.mjs), a 16-branch tree at
+     2 and 3 mm: 2 such triangles, 2 non-manifold edges, 1 mis-wound edge by
+     exact vertex; square section on the same plan, 0. That fixture is the
+     only one it shows on - no tree suite puts two round branches that close.
+
+     A triangle whose float32 corners repeat covers nothing, so removing it
+     removes no surface and moves no vertex. That is all this does, and it is
+     gated: kept only when the exact-vertex census of what is left has no more
+     open or non-manifold edges than before. Every triangle it drops is
+     counted in the result. */
+  function repeatedCornerFree(soup) {
+    var n = (soup.length / 9) | 0, keep = [], dropped = 0;
+    for (var t = 0; t < n; t++) {
+      var o = t * 9;
+      var ab = soup[o] === soup[o + 3] && soup[o + 1] === soup[o + 4] && soup[o + 2] === soup[o + 5];
+      var bc = soup[o + 3] === soup[o + 6] && soup[o + 4] === soup[o + 7] && soup[o + 5] === soup[o + 8];
+      var ca = soup[o + 6] === soup[o] && soup[o + 7] === soup[o + 1] && soup[o + 8] === soup[o + 2];
+      if (ab || bc || ca) { dropped++; continue; }
+      keep.push(t);
+    }
+    if (!dropped) return { soup: soup, dropped: 0 };
+    var out = new Float32Array(keep.length * 9);
+    for (var i = 0; i < keep.length; i++) {
+      for (var k = 0; k < 9; k++) out[i * 9 + k] = soup[keep[i] * 9 + k];
+    }
+    return { soup: out, dropped: dropped };
+  }
+  function exactEdgeCensus(soup) {
+    var E = new Map(), n = (soup.length / 9) | 0;
+    function key(i) { return soup[i] + ',' + soup[i + 1] + ',' + soup[i + 2]; }
+    for (var t = 0; t < n; t++) {
+      var k = [key(t * 9), key(t * 9 + 3), key(t * 9 + 6)];
+      for (var e = 0; e < 3; e++) {
+        var u = k[e], v = k[(e + 1) % 3];
+        if (u === v) continue;
+        var kk = u < v ? u + '|' + v : v + '|' + u;
+        E.set(kk, (E.get(kk) || 0) + 1);
+      }
+    }
+    var open = 0, nm = 0;
+    E.forEach(function (c) { if (c === 1) open++; else if (c > 2) nm++; });
+    return { open: open, nm: nm };
+  }
+  function dropCollapsed(soup) {
+    var r = repeatedCornerFree(soup);
+    if (!r.dropped) return r;
+    var before = exactEdgeCensus(soup), after = exactEdgeCensus(r.soup);
+    if (after.open > before.open || after.nm > before.nm) return { soup: soup, dropped: 0, refused: r.dropped };
+    return r;
+  }
+
+  /* AND THE NEAR-COLLAPSE. The same grazing crossings also leave distinct
+     vertices a few micrometres to a tenth of a micrometre apart (measured on
+     the shelf tree: 12 pairs under 1e-4 mm, the closest 9.8e-7), which the
+     canonical checker's default weld reads as open edges. Handled on the
+     finished union by collapseShortEdges below, gated: kept only if the
+     exact census has no more open or non-manifold edges than before and
+     the signed volume moves by under 1e-6 of itself; otherwise the union is
+     returned as manifold gave it and the refusal is named in the result. */
+  var WELD_MM = 1e-4;
+  /* Short-edge collapse at the canonical weld. A boolean's intersection curve
+     comes back from manifold as float32 with runs of vertices microns apart
+     (1e-6 .. 6e-5 mm between neighbours). They are real, distinct vertices
+     and the surface through them is closed - but the canonical checker's
+     default weld (1e-4, first-representative, NOT transitive) splits such a
+     run wherever its greedy pass happens to, and the split reads as an open
+     edge (the G-scope gecko-hand: one, at a run of seven vertices spanning
+     1.8e-4 mm). Welding does not fix that: a weld at 1e-4 also identifies
+     non-adjacent vertices across the crossing and reports non-manifold edges.
+     What removes it is removing the sub-weld EDGES themselves: every edge
+     shorter than WELD_MM is collapsed onto one endpoint, shortest first,
+     only when that is topologically safe (the link condition: the two ends
+     share exactly the two opposite vertices) and no surviving triangle
+     flips. Each collapse moves geometry by less than WELD_MM and removes the
+     two sliver triangles on the edge. */
+  function collapseShortEdges(soup, tol) {
+    var n = soup.length / 9 | 0;
+    var ids = new Map(), P = [], T = new Int32Array(n * 3);
+    for (var i = 0; i < n * 3; i++) {
+      var k = soup[i*3] + ',' + soup[i*3+1] + ',' + soup[i*3+2];
+      var id = ids.get(k);
+      if (id === undefined) { id = P.length; ids.set(k, id); P.push([soup[i*3], soup[i*3+1], soup[i*3+2]]); }
+      T[i] = id;
+    }
+    var alive = new Uint8Array(n).fill(1);
+    var vt = P.map(function () { return []; });           // vertex -> triangles
+    for (var t = 0; t < n; t++) for (var c = 0; c < 3; c++) vt[T[t*3+c]].push(t);
+    var rep = new Int32Array(P.length); for (var v = 0; v < P.length; v++) rep[v] = v;
+    function d(a, b) { return Math.hypot(P[a][0]-P[b][0], P[a][1]-P[b][1], P[a][2]-P[b][2]); }
+    function nrm(a, b, c) {
+      var u = [P[b][0]-P[a][0], P[b][1]-P[a][1], P[b][2]-P[a][2]], w = [P[c][0]-P[a][0], P[c][1]-P[a][1], P[c][2]-P[a][2]];
+      return [u[1]*w[2]-u[2]*w[1], u[2]*w[0]-u[0]*w[2], u[0]*w[1]-u[1]*w[0]];
+    }
+    var edges = [];
+    for (var t2 = 0; t2 < n; t2++) for (var e = 0; e < 3; e++) {
+      var a = T[t2*3+e], b = T[t2*3+(e+1)%3];
+      if (a < b) { var L = d(a, b); if (L < tol) edges.push([L, a, b]); }
+    }
+    edges.sort(function (x, y) { return x[0] - y[0]; });
+    var collapsed = 0;
+    function nb(v) { var s = new Set(); vt[v].forEach(function (t) { if (!alive[t]) return; for (var c = 0; c < 3; c++) if (T[t*3+c] !== v) s.add(T[t*3+c]); }); return s; }
+    for (var q = 0; q < edges.length; q++) {
+      var a = edges[q][1], b = edges[q][2];
+      if (rep[a] !== a || rep[b] !== b) continue;       // an endpoint already went
+      if (!(d(a, b) < tol)) continue;
+      var shared = vt[a].filter(function (t) { return alive[t] && vt[b].indexOf(t) >= 0; });
+      if (shared.length !== 2) continue;                // not a manifold interior edge
+      var opp = new Set();
+      shared.forEach(function (t) { for (var c = 0; c < 3; c++) { var x = T[t*3+c]; if (x !== a && x !== b) opp.add(x); } });
+      var na = nb(a), nbb = nb(b), common = 0, ok = true;
+      na.forEach(function (x) { if (nbb.has(x)) { common++; if (!opp.has(x)) ok = false; } });
+      if (!ok || common !== opp.size) continue;          // link condition
+      // b -> a: no surviving triangle of b may flip or collapse
+      var flip = false;
+      vt[b].forEach(function (t) {
+        if (!alive[t] || shared.indexOf(t) >= 0 || flip) return;
+        var tri = [T[t*3], T[t*3+1], T[t*3+2]];
+        var n0 = nrm(tri[0], tri[1], tri[2]);
+        var t1 = tri.map(function (x) { return x === b ? a : x; });
+        var n1 = nrm(t1[0], t1[1], t1[2]);
+        var dot = n0[0]*n1[0] + n0[1]*n1[1] + n0[2]*n1[2];
+        if (!(dot > 0)) flip = true;
+      });
+      if (flip) continue;
+      shared.forEach(function (t) { alive[t] = 0; });
+      vt[b].forEach(function (t) {
+        if (!alive[t]) return;
+        for (var c = 0; c < 3; c++) if (T[t*3+c] === b) T[t*3+c] = a;
+        vt[a].push(t);
+      });
+      rep[b] = a;
+      collapsed++;
+    }
+    var out = [];
+    for (var t3 = 0; t3 < n; t3++) if (alive[t3]) for (var c3 = 0; c3 < 3; c3++) { var p = P[T[t3*3+c3]]; out.push(p[0], p[1], p[2]); }
+    return { soup: new Float32Array(out), collapsed: collapsed, removedTris: n - out.length / 9 };
+  }
+
+  function signedVolume(soup) {
+    var v = 0;
+    for (var t = 0; t + 8 < soup.length; t += 9) {
+      var ax = soup[t], ay = soup[t + 1], az = soup[t + 2];
+      var bx = soup[t + 3], by = soup[t + 4], bz = soup[t + 5];
+      var cx = soup[t + 6], cy = soup[t + 7], cz = soup[t + 8];
+      v += ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx);
+    }
+    return v / 6;
+  }
+  function finishUnion(soup) {
+    var c = dropCollapsed(soup);
+    var w = collapseShortEdges(c.soup, WELD_MM);
+    if (!w.collapsed) return { soup: c.soup, welded: 0, dropped: c.dropped };
+    soup = c.soup;
+    var r = repeatedCornerFree(w.soup);
+    var before = exactEdgeCensus(soup), after = exactEdgeCensus(r.soup);
+    if (after.open > before.open || after.nm > before.nm) {
+      return { soup: soup, welded: 0, dropped: c.dropped, refused: 'the collapse would raise open / non-manifold edges' };
+    }
+    var v0 = signedVolume(soup), v1 = signedVolume(r.soup);
+    if (!(Math.abs(v1 - v0) <= 1e-6 * Math.abs(v0))) {
+      return { soup: soup, welded: 0, dropped: c.dropped, refused: 'the collapse would move the volume by ' + Math.abs(v1 - v0).toExponential(2) + ' mm3' };
+    }
+    return { soup: r.soup, welded: w.collapsed, dropped: c.dropped + r.dropped };
+  }
+
   function unionParts(parts, opts) {
     opts = opts || {};
     var U = (opts.unionSoups) || (root && root.NSO_unionSoups) ||
@@ -1532,12 +1707,18 @@
     if (parts.length === 1) {
       return Promise.resolve({ ok: true, soup: parts[0], steps: 0, reason: 'one part, nothing to union' });
     }
-    var acc = parts[0], step = 0;
+    var acc = parts[0], step = 0, collapsed = 0;   // collapsed: kept for the result's shape
     function next(i) {
       if (i >= parts.length) {
-        return { ok: true, soup: acc, steps: step,
+        var fin = finishUnion(acc);
+        acc = fin.soup;
+        return { ok: true, soup: acc, steps: step, collapsedDropped: collapsed + fin.dropped,
+          collapsedShortEdges: fin.welded, collapseRefused: fin.refused || null,
           reason: step + ' union(s) over ' + parts.length + ' parts, ' +
-            ((acc.length / 9) | 0) + ' triangles' };
+            ((acc.length / 9) | 0) + ' triangles' +
+            (collapsed + fin.dropped ? '; ' + (collapsed + fin.dropped) + ' zero-area triangle(s) with a repeated float32 corner dropped' : '') +
+            (fin.welded ? '; ' + fin.welded + ' edge(s) under ' + WELD_MM + ' mm collapsed' : '') +
+            (fin.refused ? '; short-edge collapse at ' + WELD_MM + ' mm refused - ' + fin.refused : '') };
       }
       return U(acc, parts[i]).then(function (r) {
         step++;
@@ -1773,6 +1954,10 @@
     branch: branch,
     planTree: planTree,
     unionParts: unionParts,
+    /* The cleanup unionParts applies to its finished left fold - exposed so
+       tools/nso_support_tree_test.js can hold unionParts to exactly
+       finishUnion(fold), and so the refusal cases can be driven directly. */
+    _finishUnion: finishUnion,
     hollowParts: hollowParts,
     hollowTree: hollowTree,
     SECTIONS: SECTIONS.slice(),

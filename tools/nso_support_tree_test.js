@@ -585,8 +585,12 @@ console.log('\n=== 8. THE UNION: the app\'s own boolean, and nothing else ===');
       oneShell, 'parts = 1 throughout');
 
     const whole = await ST.unionParts(p.parts, { unionSoups: csg.NSO_unionSoups });
+    /* unionParts is the same left fold plus one clean-up of the finished
+       fold (_finishUnion: drop float32-collapsed triangles, weld at the
+       canonical 1e-4) - so it must equal that clean-up of this fold. */
+    const fin = ST_SHIPPED._finishUnion(acc);
     check(`${name}: unionParts folds left and gets the same solid`,
-      whole.ok && whole.soup.length === acc.length, whole.reason);
+      whole.ok && whole.soup.length === fin.soup.length, whole.reason);
 
     writeSTL(path.join(OUT, name + '.stl'), whole.soup, 'NSO support tree ' + name);
     writeSTL(path.join(OUT, name + '_host.stl'), host, 'NSO support tree host ' + name);

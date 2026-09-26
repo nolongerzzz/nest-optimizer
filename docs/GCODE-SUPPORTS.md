@@ -53,8 +53,12 @@ is not itself a support. One marker is drawn per region:
   It is drawn on top of everything, so it can be seen and clicked through the
   piece.
 
-A marker is **red** while nothing holds that region up, and **green** once a
-support made for it exists. The angle can be changed in the section's own
+A marker is **red** while nothing holds that region up, and **green** while a
+support made for it still stands under it: every vertex of the support that
+touched the region when it was placed (`nsoSupport.contacts`) still touches
+the region's flagged triangles where they are now. A label alone is not
+enough - move, turn or mirror the host (or the support) and the marker goes
+red and names the support that no longer touches it. The angle can be changed in the section's own
 field, which is `angleDeg`.
 
 The markers are a layer of their own in the scene. They are not paint and

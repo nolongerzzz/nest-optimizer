@@ -166,6 +166,125 @@ var NSO_GSCOPE_SUPPORT = (function () {
     });
   }
 
+  /*
+   * DOES IT STILL STAND THERE? A support records the host and region it was
+   * built for, but that is a label, not a fact: move, turn or mirror the host
+   * (or the support) and the label still matches while the support stands
+   * under nothing. So a region is green only when a support labelled for it
+   * ALSO touches it where the region is NOW - read off the plate document,
+   * both pieces in the same world Z-up frame:
+   *
+   *   some support vertex lies over one of the region's own flagged
+   *   triangles (its closest point on the triangle is its projection, to
+   *   within LATERAL_MM), at a signed distance along the triangle's outward
+   *   normal between -embedMm (into the piece: tree tips and contact
+   *   interfaces sink in) and +GAP_MM (a hair of air below it; float noise).
+   *
+   * embedMm is the larger of 1 mm and the support's own size. The generators'
+   * contacts sit at 0 (a strut's top face is the surface) or up to ~0.5 mm
+   * in (a round tree tip); a region that has moved away by a mirror, turn or
+   * shift is millimetres off, far outside the band.
+   */
+  var GAP_MM = 0.02, LATERAL_MM = 0.02;
+
+  function closestOnTri(p, a, b, c) {
+    // Ericson, Real-Time Collision Detection 5.1.5.
+    function sub(u, v) { return [u[0] - v[0], u[1] - v[1], u[2] - v[2]]; }
+    function dot(u, v) { return u[0] * v[0] + u[1] * v[1] + u[2] * v[2]; }
+    function at(u, s, v, t) { return [a[0] + u[0] * s + v[0] * t, a[1] + u[1] * s + v[1] * t, a[2] + u[2] * s + v[2] * t]; }
+    var ab = sub(b, a), ac = sub(c, a), ap = sub(p, a);
+    var d1 = dot(ab, ap), d2 = dot(ac, ap);
+    if (d1 <= 0 && d2 <= 0) return a.slice();
+    var bp = sub(p, b), d3 = dot(ab, bp), d4 = dot(ac, bp);
+    if (d3 >= 0 && d4 <= d3) return b.slice();
+    var vc = d1 * d4 - d3 * d2;
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) return at(ab, d1 / (d1 - d3), ac, 0);
+    var cp = sub(p, c), d5 = dot(ab, cp), d6 = dot(ac, cp);
+    if (d6 >= 0 && d5 <= d6) return c.slice();
+    var vb = d5 * d2 - d1 * d6;
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) return at(ab, 0, ac, d2 / (d2 - d6));
+    var va = d3 * d6 - d5 * d4;
+    if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+      var w = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+      return [b[0] + (c[0] - b[0]) * w, b[1] + (c[1] - b[1]) * w, b[2] + (c[2] - b[2]) * w];
+    }
+    var den = 1 / (va + vb + vc);
+    return at(ab, vb * den, ac, vc * den);
+  }
+
+  /**
+   * The vertices of support soup S that touch region `region` of host soup P
+   * - over one of its flagged triangles, inside the band above. With `only`
+   * (vertex indices), just those are tested. Returns { hit: [indices],
+   * tested, nearestMm } - nearestMm the best lateral miss, for the reason.
+   */
+  function contactsOn(S, P, region, sideMm, only) {
+    var embed = Math.max(1, +sideMm || 0);
+    var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    var tris = region.tris.map(function (t) {
+      var o = t * 9, a = [P[o], P[o + 1], P[o + 2]], b = [P[o + 3], P[o + 4], P[o + 5]], c = [P[o + 6], P[o + 7], P[o + 8]];
+      for (var k = 0; k < 3; k++) {
+        lo[k] = Math.min(lo[k], a[k], b[k], c[k]); hi[k] = Math.max(hi[k], a[k], b[k], c[k]);
+      }
+      var u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+      var n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+      var L = Math.hypot(n[0], n[1], n[2]) || 1;
+      return { a: a, b: b, c: c, n: [n[0] / L, n[1] / L, n[2] / L] };
+    });
+    var pad = embed + GAP_MM + LATERAL_MM, hit = [], nearest = Infinity;
+    var n = only ? only.length : S.length / 3;
+    for (var q = 0; q < n; q++) {
+      var vi = only ? only[q] : q, i = vi * 3;
+      if (!(i + 2 < S.length)) continue;
+      var x = S[i], y = S[i + 1], z = S[i + 2];
+      if (x < lo[0] - pad || x > hi[0] + pad || y < lo[1] - pad || y > hi[1] + pad ||
+          z < lo[2] - pad || z > hi[2] + pad) continue;
+      for (var j = 0; j < tris.length; j++) {
+        var T = tris[j];
+        var sd = (x - T.a[0]) * T.n[0] + (y - T.a[1]) * T.n[1] + (z - T.a[2]) * T.n[2];
+        if (sd > GAP_MM || sd < -embed) continue;
+        var pr = [x - T.n[0] * sd, y - T.n[1] * sd, z - T.n[2] * sd];
+        var cl = closestOnTri(pr, T.a, T.b, T.c);
+        var lat = Math.hypot(cl[0] - pr[0], cl[1] - pr[1], cl[2] - pr[2]);
+        if (lat <= LATERAL_MM) { hit.push(vi); break; }
+        nearest = Math.min(nearest, lat);
+      }
+    }
+    return { hit: hit, tested: n, nearestMm: nearest };
+  }
+
+  /**
+   * Whether support piece `sup` (a plate-document object) still stands under
+   * `region` of `host` where the region is now: EVERY vertex that touched the
+   * region when the support was placed (meta.contacts, recorded by
+   * placeSupport) must touch it still. Testing only those - the support's own
+   * contacts - keeps a trunk that a moved host happens to pass through from
+   * counting as support; requiring all of them keeps a support slid half off
+   * its overhang from counting as standing.
+   */
+  function touches(sup, host, region, meta) {
+    var c = meta && meta.contacts;
+    if (!c || !c.length) return { ok: false, reason: 'no contacts were recorded when it was placed' };
+    var r = contactsOn(sup.positions, host.positions, region, meta.sideMm, c);
+    return { ok: r.hit.length === c.length, touching: r.hit.length, contacts: c.length };
+  }
+
+  /**
+   * The supports that are labelled for this region AND still touch it now.
+   * `labelled` is what the label alone says; `standing` what the geometry
+   * says; a label whose support no longer touches is `stale`.
+   */
+  function standingFor(d, host, region) {
+    var labelled = supportsFor(host.sourceId, region.id);
+    var standing = [], stale = [];
+    labelled.forEach(function (m) {
+      var o = d && d.objects.find(function (x) { return x.sourceId === m.id; });
+      var t = o ? touches(o, host, region, m.nsoSupport) : { ok: false, reason: 'not on the plate' };
+      (t.ok ? standing : stale).push({ id: m.id, name: m.name, touch: t });
+    });
+    return { labelled: labelled.length, standing: standing, stale: stale };
+  }
+
   function clearLayer() {
     if (!layer) return;
     for (var i = layer.children.length - 1; i >= 0; i--) {
@@ -211,7 +330,8 @@ var NSO_GSCOPE_SUPPORT = (function () {
     scan.forEach(function (s) {
       if (!s.det || !s.det.ok) return;
       s.det.regions.forEach(function (r) {
-        var supported = supportsFor(s.host.sourceId, r.id).length > 0;
+        var st = standingFor(d, s.host, r);
+        var supported = st.standing.length > 0;
         var col = supported ? MARK_GREEN : MARK_RED;
         var P = s.host.positions, lift = 0.02;
         var pos = new Float32Array(r.tris.length * 9);
@@ -243,7 +363,8 @@ var NSO_GSCOPE_SUPPORT = (function () {
         ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1),
           nView.sub(n0).normalize());
         ring.renderOrder = 11;
-        var mk = { host: s.host, region: r, ping: ping, ring: ring, overlay: overlay, supported: supported };
+        var mk = { host: s.host, region: r, ping: ping, ring: ring, overlay: overlay, supported: supported,
+          stale: st.stale.map(function (x) { return x.name; }) };
         ping.userData.marker = mk; overlay.userData.marker = mk; ring.userData.marker = mk;
         layer.add(overlay); layer.add(ring); layer.add(ping);
         markers.push(mk);
@@ -309,7 +430,7 @@ var NSO_GSCOPE_SUPPORT = (function () {
    * { ok, id, entry, maxErrMm } or a refusal. Not an undo step by itself:
    * the caller pushes the one step the user sees.
    */
-  function placeSupport(soup, meta, host) {
+  function placeSupport(soup, meta, host, detOpts) {
     var hostPlaced = state.placed[host.placedIndex];
     if (!hostPlaced) return { ok: false, reason: 'the piece is no longer on the plate' };
     var b = boundsOf(soup);
@@ -339,7 +460,21 @@ var NSO_GSCOPE_SUPPORT = (function () {
       return { ok: false, reason: 'the placed support did not land where it was generated (' +
         err.toExponential(2) + ' mm off) - nothing was added' };
     }
-    return { ok: true, id: id, entry: entry, maxErrMm: err, name: name };
+    // What it touches, now, on the region it was made for: the contacts
+    // standingFor() holds it to from here on (see touches()).
+    var reg = regionOf(host, meta, detOpts);
+    meta.contacts = reg ? contactsOn(soup, host.positions, reg, meta.sideMm).hit : [];
+    return { ok: true, id: id, entry: entry, maxErrMm: err, name: name, contacts: meta.contacts.length };
+  }
+
+  /** The host's region a support is labelled for: detection run again on
+      the host as it is, with the SAME options generation used (taken before
+      any old support came off the plate - read afterwards, the plate
+      document still holds the removed piece and would count it as an
+      occluder). */
+  function regionOf(host, meta, detOpts) {
+    var det = (detOpts && SA()) ? SA().detectOverhangs(host.positions, detOpts) : null;
+    return det && det.ok ? det.regions.find(function (r) { return r.id === meta.regionId; }) || null : null;
   }
 
   /** Take pieces off the plate and out of the model list. No undo step. */
@@ -401,7 +536,7 @@ var NSO_GSCOPE_SUPPORT = (function () {
       var meta = { hostSourceId: host.sourceId, hostName: host.name, regionId: regionId, style: style,
         sideMm: g.plan.sideMm || (g.plan.aim && g.plan.aim.sideMm) || +sideMm, angleDeg: angleDeg,
         point: g.plan.region ? g.plan.region.point.slice() : null };
-      var pl = placeSupport(g.soup, meta, host);
+      var pl = placeSupport(g.soup, meta, host, o.opts);
       if (!pl.ok) { say('Support refused - ' + pl.reason, true); return pl; }
       if (typeof pushUndo === 'function') {
         pushUndo({ type: 'addModels', ids: [pl.id], editId: state.editId, cutT: state.cutT });
@@ -447,7 +582,7 @@ var NSO_GSCOPE_SUPPORT = (function () {
       var removed = removePieces([id]);
       var meta = Object.assign({}, m.nsoSupport, { style: style,
         sideMm: g.plan.sideMm || (g.plan.aim && g.plan.aim.sideMm) || +sideMm });
-      var pl = placeSupport(g.soup, meta, host);
+      var pl = placeSupport(g.soup, meta, host, o.opts);
       if (!pl.ok) {
         // Put the old one back exactly as it was; no step was recorded.
         removed.forEach(function (r) {
@@ -527,7 +662,9 @@ var NSO_GSCOPE_SUPPORT = (function () {
     $('ms-sp-title').textContent = 'Overhang ' + (r.id + 1) + ' on ' + mk.host.name;
     $('ms-sp-sub').textContent = r.areaMm2.toFixed(1) + ' mm², ' + tilt.toFixed(0) +
       '° off flat, ' + r.dropMm.toFixed(1) + ' mm above the plate' +
-      (mk.supported ? ' - already has a support' : '');
+      (mk.supported ? ' - already has a support' :
+        mk.stale && mk.stale.length ? ' - ' + mk.stale.join(', ') + ' was made for it but no longer ' +
+          'touches it (a piece was moved, turned or mirrored)' : '');
     $('ms-sp-read').textContent = '';
     showButtons('new');
     placePop(e);
@@ -590,9 +727,12 @@ var NSO_GSCOPE_SUPPORT = (function () {
     var errs = scan.filter(function (s) { return s.error; });
     var red = markers.filter(function (m) { return !m.supported; }).length;
     var nSup = (state.models || []).filter(function (m) { return m && m.nsoSupport; }).length;
+    var stale = [];
+    markers.forEach(function (m) { if (!m.supported) (m.stale || []).forEach(function (n) { stale.push(n); }); });
     read.textContent = markers.length + ' overhang(s) found at ' + angleDeg + '° - ' + red +
       ' unsupported (red), ' + (markers.length - red) + ' supported (green); ' + nSup +
       ' support piece(s). Click a marker to generate there; click a support to change or remove it.' +
+      (stale.length ? ' No longer touching the overhang it was made for (red): ' + stale.join(', ') + '.' : '') +
       (errs.length ? ' ' + errs.map(function (s) { return s.error; }).join(' ') : '');
   }
 
@@ -643,6 +783,11 @@ var NSO_GSCOPE_SUPPORT = (function () {
     removeSupport: removeSupport,
     adjustSupport: adjustSupport,
     selectSupport: selectSupport,
+    standing: function (hostName, regionId) {
+      var d = plateDoc(), s = scan.find(function (x) { return x.host.name === hostName; });
+      var r = s && s.det && s.det.ok && s.det.regions.find(function (x) { return x.id === regionId; });
+      return r ? standingFor(d, s.host, r) : null;
+    },
     supports: function () { return (state.models || []).filter(function (m) { return m && m.nsoSupport; }); },
     popGenerate: popGenerate,
     popApply: popApply,

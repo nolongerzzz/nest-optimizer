@@ -21,6 +21,11 @@
  *   4  THE EXPORT agrees with the scene: a support sits against its piece in
  *      the combined export exactly as it does on screen.
  *   5  SCREENSHOTS of the markers, the popover, the supports and the edit.
+ *   6  GREEN MEANS IT STILL STANDS THERE. A marker is green only while a
+ *      support labelled for its region still touches the region where it is
+ *      NOW: the host moved, mirrored or turned (or the support moved alone)
+ *      turns it red and names the stale support; Undo brings it back green,
+ *      with the host at exactly its old position and resting height.
  *
  * Usage: node tools/gcode-test/gscope-support-drive-check.mjs
  */
@@ -436,6 +441,9 @@ async function main() {
   canonicalChecks('the gecko-hand', await canonical(gecko.raw, 'gecko-hand'));
   await page.evaluate(() => window.NSO_GSCOPE_SUPPORT.setOn(true));
   await shot(page, '05-changed-to-gecko-hand.png', 'the tree changed to a gecko-hand');
+  check('the gecko-hand stands where the tree stood: both markers still green, each held by a support that touches it',
+    await page.evaluate(() => window.NSO_GSCOPE_SUPPORT.markers().map((m) =>
+      [m.supported, window.NSO_GSCOPE_SUPPORT.standing('shelf', m.region.id).standing.length])), [[true, 1], [true, 1]]);
 
   await page.click('#ms-close');
   await page.click('#btn-undo');
@@ -484,6 +492,86 @@ async function main() {
   check('Undo of a generation takes that support away',
     [await page.evaluate(() => state.models.length), await page.evaluate((id) => state.models.some((m) => m.id === id), treeId)],
     [nNow - 1, false]);
+
+  // =======================================================================
+  console.log('\n--- 6. green means it still stands there: host moved, mirrored, turned ---');
+  // =======================================================================
+  /* A marker is green only when a support labelled for the region ALSO
+     touches the region where it is now. Every host op below leaves both
+     supports where they were, so both regions must go red, name the stale
+     support, and come back green - with the host exactly where it was - on
+     Undo. */
+  await page.click('#btn-microscope');
+  await page.evaluate(() => window.NSO_GSCOPE_SUPPORT.setOn(true));
+  const tree6 = await page.evaluate(() => window.NSO_GSCOPE_SUPPORT.generateAt('shelf', 0, 'tree', 1.2));
+  check('a tree on the shelf again, for the host ops', tree6.ok, true);
+  const readMarks = () => page.evaluate(() => window.NSO_GSCOPE_SUPPORT.markers().map((m) => ({
+    id: m.region.id, supported: m.supported, stale: m.stale,
+    colour: m.ping.material.color.getHex(),
+    standing: window.NSO_GSCOPE_SUPPORT.standing('shelf', m.region.id).standing.map((x) => x.name) })));
+  const hostWorld = () => page.evaluate(() => {
+    const p = state.placed.find((q) => q.name === 'shelf' || (state.models.find((m) => m.id === q.sourceId) || {}).name === 'shelf');
+    p.mesh.updateMatrixWorld(true);
+    return { world: Array.from(meshToWorldSoup(p.mesh)), y: p.mesh.position.y };
+  });
+  const supNames = await page.evaluate(() => window.NSO_GSCOPE_SUPPORT.supports().map((m) => m.name));
+  const fresh = await readMarks();
+  check('freshly generated: both regions green, each held by the support that touches it',
+    fresh.map((m) => [m.id, m.supported, m.colour, m.standing.length]).sort(), [[0, true, 0x22c55e, 1], [1, true, 0x22c55e, 1]]);
+  const hostBefore = await hostWorld();
+  await page.click('#ms-close');
+
+  const selectShelf = () => page.evaluate(() => {
+    selectPlaced(state.placed.findIndex((q) => (state.models.find((m) => m.id === q.sourceId) || {}).name === 'shelf'));
+  });
+  const HOST_OPS = [
+    ['moved 15 mm (nudge)', () => page.evaluate(() => nudgeSelected(-15, 0))],
+    ['mirrored', async () => {
+      await page.evaluate(() => { document.getElementById('inp-mirror-plane').value = ''; document.getElementById('btn-mirror').click(); });
+      await page.evaluate(() => document.getElementById('btn-mirror').click());
+    }],
+    ['turned 90° (yaw)', () => page.evaluate(() => rotateSelected(1))],
+  ];
+  for (const [label, op] of HOST_OPS) {
+    await selectShelf();
+    const u0 = await page.evaluate(() => state.undoStack.length);
+    await op();
+    await page.waitForFunction((n) => state.undoStack.length > n, u0, { timeout: 30000 });
+    await page.click('#btn-microscope');
+    await page.evaluate(() => window.NSO_GSCOPE_SUPPORT.setOn(true));
+    const after = await readMarks();
+    const read = await page.evaluate(() => document.getElementById('ms-support-read').textContent);
+    check(`host ${label}: both regions red - the supports are labelled for them but no longer touch them`,
+      after.map((m) => [m.supported, m.colour, m.standing.length]), [[false, 0xff2d2d, 0], [false, 0xff2d2d, 0]]);
+    check(`host ${label}: each red marker names the support that no longer touches it, and so does the panel`,
+      [after.every((m) => m.stale.length === 1), supNames.every((n) => read.includes(n)),
+        /2 unsupported/.test(read), /No longer touching/.test(read)], [true, true, true, true]);
+    await page.click('#ms-close');
+    await page.click('#btn-undo');
+    const hostNow = await hostWorld();
+    check(`host ${label}, then Undo: the host is back exactly - every world coordinate, and its resting height`,
+      [sameArray(hostNow.world, hostBefore.world), hostNow.y], [true, hostBefore.y]);
+    await page.click('#btn-microscope');
+    await page.evaluate(() => window.NSO_GSCOPE_SUPPORT.setOn(true));
+    check(`host ${label}, then Undo: both green again`,
+      (await readMarks()).map((m) => [m.supported, m.colour, m.stale.length]), [[true, 0x22c55e, 0], [true, 0x22c55e, 0]]);
+    await page.click('#ms-close');
+  }
+
+  // The support moved alone: its own region red, the other untouched.
+  await page.evaluate((id) => selectPlaced(state.placed.findIndex((q) => q.sourceId === id)), tree6.id);
+  await page.evaluate(() => nudgeSelected(0, 8));
+  await page.click('#btn-microscope');
+  await page.evaluate(() => window.NSO_GSCOPE_SUPPORT.setOn(true));
+  check('the tree moved away on its own: the shelf red, the tab (its strut untouched) still green',
+    (await readMarks()).map((m) => [m.id, m.supported]).sort(), [[0, false], [1, true]]);
+  await shot(page, '07-stale-support-red.png', 'a support moved off its overhang: that marker red');
+  await page.click('#ms-close');
+  await page.click('#btn-undo');
+  await page.click('#btn-microscope');
+  await page.evaluate(() => window.NSO_GSCOPE_SUPPORT.setOn(true));
+  check('and Undo of that move: green again', (await readMarks()).every((m) => m.supported), true);
+  await page.click('#ms-close');
 
   // =======================================================================
   console.log('\n--- the build ---');
