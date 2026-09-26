@@ -1,5 +1,9 @@
-# The repo's test suite, run on pull requests into main and on pushes to the
-# working branches.
+# The repo's test suite, run on pull requests into main, on pushes to main, and
+# by hand (Actions -> Tests -> "Run workflow") on any other branch.
+#
+# Pushes to the working branch (claude-wip) deliberately do NOT trigger a run.
+# Work there is batched and CI is run manually via workflow_dispatch when a
+# batch is ready, rather than automatically on every push/merge.
 #
 # This is the REQUIRED status check on main (Settings -> Branches -> branch
 # protection -> "Require status checks to pass before merging"). The check name
@@ -72,7 +76,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, claude-wip]
+    branches: [main]
   workflow_dispatch:
 
 # One run per branch / PR. A superseded run is cancelled rather than left to burn
