@@ -550,17 +550,93 @@ Branch `claude/flange-detach`, off `claude-wip`. Full write-up:
   the root. The flange is the Flange tab's, bit for bit. Reattached at the
   mirror-opposite: one solid, PASS with self-intersection, contact at the
   seat only, **0 of 48,654 triangles off the two input surfaces**. Crop
-  stage 2's own run of the same relocation (its branch, 3b4227a) has 3,091
-  (90.8 mm²): its bridge.
-- Checks: new `detach:test` (55), `wire:detach` (28, a real canvas click).
+  stage 2 (PR #114), run in the same test on the same relocation: 3,091
+  triangles (90.8 mm²) off them, its bridge.
+- Checks: new `detach:test` (57), `wire:detach` (28, a real canvas click).
   `paint:scope` roster + this file's roster: Detach and Reattach, whole-piece.
+- **Base:** `claude-wip` at `eec6bcc` merged in (Stage 2, the cache-tag batch
+  and the five older drifts).
 - **`?v=` not bumped** (rule 4). `nso_detach.js` / `app-detach.js` are new
-  at `?v=detach1`. They need a bump at merge: `nso_flange.js` (flange1),
+  at `?v=detach1`. Five tagged files change here and drift from their tags,
+  so they need a bump at merge: `nso_flange.js` (flange1),
   `nso_assemble.js` and `app-assemble.js` (asm1), `nso_support_aim.js`
-  (support1), `app-core.js` (gsup2).
+  (support2), `app-core.js` (gsup3).
 - **Not yet:** features other than flanges; the 7.4 mm³ sliver between the
   flange's flat root and the hull's staircase belongs to neither piece;
   Reattach refuses rather than trims a placement that runs into the body.
+
+## Cache-tag batch (2026-09-26)
+Done on the owner's explicit instruction, as one pass after Crop Stage 2
+(PR #114) and the multi-run union (PR #113) merged. This is an exception to
+rule 4; the HUD string (`stampHud()`) is untouched.
+
+| file | was | now |
+| --- | --- | --- |
+| `app-core.js` | `gsup2` | `gsup3` |
+| `app-crop.js` | `crop3` | `crop4` |
+| `nso_hollow.js` | `hollow3` | `hollow4` |
+| `styles.css` | `legendmin1` | `crop4` |
+| `app-microscope.js` | `scope9` | `scope10` |
+| `nso-gcode-solid.js` | untagged | `solid1` |
+
+The "needs a bump at merge" notes in the Crop Stage 2 and fused-selections
+entries below are covered by this pass.
+
+**Follow-up, same day: five older drifts the batch missed.** Checked by
+content: a file has drifted when it differs at HEAD from the commit that set
+its current tag (`git log -S "file?v=tag" -- index.html | tail -1`, then
+`git diff --quiet <that> HEAD -- file`). The batch above covered the files
+named in "needs a bump" notes; these five changed after their tags with no
+note:
+
+| file | was | now | changed since by |
+| --- | --- | --- | --- |
+| `nso_support_aim.js` | `support1` | `support2` | `ad22e9a` |
+| `nso_stock.js` | `stock2` | `stock4` | `0b3f572` (`stock3` was used once before, so skipped) |
+| `nso_path_sweep.js` | `taper1` | `taper2` | `2aa07a2` |
+| `nso_support_tree.js` | `tree4` | `tree5` | `548a704`, `e50eaea` |
+| `app-oversize-washer.js` | `oversize1` | `oversize2` | `f1aeac3` |
+
+After this, no tagged file differs from its tag's content. Five scripts still
+load untagged (`nso-cooling-profiles.js`, `nso-3mf.js`, `nso-3mf-read.js`,
+`nso-gcode-lines.js`, `nso-watch.js`); they were untagged before and are
+left so.
+
+## Crop, stage 2 - move a region, reconnect it by what is measured (2026-09-26)
+
+Branch `claude/crop-stage2-move`, off `claude-wip`. Full write-up:
+`docs/CROP.md`, "Stage 2".
+
+- **What.** The Crop box now selects a region (Up / Across narrow it across
+  the section). Lift shows it as a ghost; drag it (camera-facing plane) or
+  type ΔX ΔY ΔZ; **Lock in** reconnects it. The branch is MEASURED at lock-in:
+  overlap → trim (`NSO_unionSoups`), touch → the same union, gap ≤ 3 mm →
+  bridge (a closing of the two parts on Hollow's surface nets), else refused
+  by name: gap too wide, region > 90 % buried, piece left in more parts, or
+  the checker gate.
+- **Where the kernel runs.** A slab along the cut axis only: cut out with
+  `rawCut`, reconnected, spliced back with Stage 1's `NSO_cropSeal`. Outside
+  it every vertex is Cut's clipped half's.
+- **The seam-cap class, again, and how it is kept out.** A union that crosses
+  the Mirror-Join's sliver fans leaves sub-1e-4 vertices (v9: non-manifold
+  2 → 78). The lifted region is re-meshed by `Manifold.simplify` before it
+  moves, and the reconnected slab is welded at Cut's radius. `simplify` on
+  the SLAB is out: it collapsed a cap-outline vertex and broke the splice.
+- **Acceptance** (`crop:move` §3-4): the v9 −Y lip, X 74..86 next to the
+  +seam, to the +Y side at the same X. Own height → bridged (0.897 mm gap);
+  2 mm down → trimmed (11.54 mm³). The box face exactly on the +seam ring,
+  and the same span at the −seam, also pass. Every result PASSes
+  mesh_validate.py with self-intersection, and has 0 defects near either
+  seam ring. The source has 2 nm / 5 inc there. Split through the seam ring
+  and the landing stays clean. Too extreme → refused: 6.90 mm gap, 96 %
+  buried, > 10 mm.
+- **Reuse.** `nso_hollow.js` exports `edt3d`, `surfaceNets`, `tidyPositive`.
+  `NSO_Repair.inspect` gates the headless core too, not only the app.
+- Checks: new `crop:move`, `wire:crop-move`.
+- **`?v=`**: bumped in the cache-tag batch above (PR #115).
+- **Not yet:** a region crossing BOTH seams (the next stress test), rotation,
+  a region at the very end (Stage 1's axis clamp), and mixed contact (overlap
+  here, gap there) in one move.
 
 ## G-scope - fused selections: one solid where runs touch (2026-09-26)
 Branch `claude/gscope-multirun-union`, off `claude-wip`. Full write-up:

@@ -5,7 +5,7 @@
 `nso_flange.js` finds (docs/GSCOPE-FLANGE.md).
 
 ```
-node tools/nso_detach_test.js        headless: the audit, the v9 acceptance test, poses, shapes, refusals (55 gates)
+node tools/nso_detach_test.js        headless: the audit, the v9 acceptance test against Crop stage 2, poses, shapes, refusals (57 gates)
 node tools/nso_wire_detach_test.js   the real app: the buttons, a real click, both undos, the refusals (28 gates)
 ```
 
@@ -136,9 +136,12 @@ body meets it: (0, 0.152, 9.0), aimed +Y, plate normal +Z.
 | Stage 2's splits | through the +seam ring, x 80 and a slot wall (x 77.3): both halves pass each time |
 
 **Against Crop stage 2's own result for the same relocation.** The −Y lip to
-the mirror-opposite +Y side, at its own height, from branch
-`claude/crop-stage2-move` (3b4227a). The Stage 2 column was measured by
-running its own `NSO_cropMoveRaw` there, with this suite's off-surface count.
+the mirror-opposite +Y side, at its own height, the case in Stage 2's own
+acceptance test. `detach:test` §3 **runs** Stage 2's `NSO_cropMoveRaw` (merged
+in PR #114; `app-crop.js` and every file it calls are byte-identical to its
+branch head 3b4227a) and measures its result the same way. Its moved
+region's surface is the source's, shifted by the move, and its notch lies on
+the box planes. Anything off all of those is what it added.
 
 | | Crop stage 2 | Detach + Reattach |
 |---|---|---|
@@ -146,7 +149,7 @@ running its own `NSO_cropMoveRaw` there, with this suite's off-surface count.
 | how it meets the +Y side | **bridge**: a 0.897 mm gap, filled | **seated at its root**, 0.916 mm |
 | added material | **+6.25 mm³** of bridge, surface nets at 0.08 – 0.15 mm pitch | none but the seat |
 | triangles on neither input surface | **3,091 (90.8 mm²)**: the bridge | **0** |
-| canonical checker | PASS, self-intersection included | PASS, self-intersection included |
+| canonical checker | PASS, self-intersection included; χ 0, because the bridge spans a slot between two teeth and closes a loop | PASS, self-intersection included; χ 2 |
 | where it left | a notch, closed by the subtraction's box planes | the wall, capped flush, 0 µm proud |
 
 Stage 2's 2 mm-down variant trims into the teeth instead (11.54 mm³). Reattach
