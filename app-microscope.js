@@ -606,7 +606,36 @@ var NSO_MICROSCOPE = (function () {
     };
 
     wireViewport();
+    wireLegendToggle();
     return view;
+  }
+
+  /**
+   * The minimize button on the floating feature list. Collapsed, the panel is
+   * just its title row, so it stops covering the part; the choice is kept for
+   * this browser. View state only - which features are hidden is untouched.
+   */
+  var legendToggleWired = false;
+  function setLegendCollapsed(on) {
+    var box = $('ms-legend-float'), btn = $('ms-legend-toggle');
+    if (!box || !btn) return;
+    box.classList.toggle('collapsed', !!on);
+    btn.setAttribute('aria-expanded', String(!on));
+    btn.innerHTML = on ? '+' : '&minus;';
+    btn.title = on ? 'Show the list' : 'Minimize the list';
+    try { localStorage.setItem('nso.gscope.legendCollapsed', on ? '1' : '0'); } catch (e) {}
+  }
+  function wireLegendToggle() {
+    if (legendToggleWired) return;
+    var box = $('ms-legend-float'), btn = $('ms-legend-toggle'), title = $('ms-legend-title');
+    if (!box || !btn) return;
+    legendToggleWired = true;
+    var flip = function () { setLegendCollapsed(!box.classList.contains('collapsed')); };
+    btn.addEventListener('click', flip);
+    if (title) title.addEventListener('click', flip);
+    var saved = null;
+    try { saved = localStorage.getItem('nso.gscope.legendCollapsed'); } catch (e) {}
+    if (saved === '1') setLegendCollapsed(true);
   }
 
   function disposeTree(obj) {
@@ -753,15 +782,107 @@ var NSO_MICROSCOPE = (function () {
    * carries the dot changes nothing about what a drag does.
    */
   function cornerPoint(b) {
+    var ax = boxAxes(b);
     var cam = view ? view.camera.position : null;
-    var sx = cam && cam.x < b.point.x ? -1 : 1;
-    var sz = cam && cam.z < b.point.z ? -1 : 1;
-    return new THREE.Vector3(b.point.x + sx * b.rx, b.point.y + b.h, b.point.z + sz * b.ry);
+    var d = cam ? cam.clone().sub(b.point) : null;
+    var sx = d && d.dot(ax.u) < 0 ? -1 : 1;
+    var sz = d && d.dot(ax.w) < 0 ? -1 : 1;
+    return b.point.clone()
+      .addScaledVector(ax.u, sx * b.rx)
+      .addScaledVector(ax.w, sz * b.ry)
+      .add(new THREE.Vector3(0, b.h, 0));
+  }
+
+  /**
+   * A box is turned about the vertical by `a`, the angle its own X axis makes
+   * with G-code X (counter-clockwise, radians). In view space that is a plain
+   * rotation.y of `a` - toThree maps G-code (x, y) to view (x, -y), so a turn
+   * of `a` in the plate is a turn of `a` about view +Y. `u` is the box's own X
+   * (rx along it), `w` its own view-Z (ry along it).
+   */
+  function boxAxes(b) {
+    var a = b.a || 0, c = Math.cos(a), s = Math.sin(a);
+    return { u: new THREE.Vector3(c, 0, -s), w: new THREE.Vector3(s, 0, c) };
+  }
+
+  /**
+   * The angle a box dropped at G-code (gx, gy) should take so it lies square
+   * to the piece next to it rather than square to the plate. Toolpath: the
+   * walls nearest the drop - outer wall if the slice labels it, any wall if
+   * not, any extrusion failing both - give the piece's frame as a
+   * length-weighted mean of their directions folded mod 90 degrees (a
+   * rectangle's two edge directions agree there, and a bar's short ends agree
+   * with its long sides). Of the two axes of that frame the box takes the one
+   * nearer the walls' mod-180 mean, so its own X runs along the piece's
+   * longer run and a footprint drawn long stays long along the part. Mesh:
+   * the principal axis of the nearest object's triangle centroids. Nothing
+   * near, or no direction stronger than noise: 0, square to the plate.
+   */
+  function pieceAngleNear(gx, gy) {
+    if (!doc) return 0;
+    if (doc.kind === 'toolpath') {
+      var tiers = [/outer wall|external perimeter|wall-outer/i, /wall|perimeter/i, null];
+      for (var t = 0; t < tiers.length; t++) {
+        var re = tiers[t], cand = [];
+        doc.segments.forEach(function (s) {
+          if (s.feature === 'Travel' || !segShown(s)) return;
+          if (re && !re.test(s.feature || '')) return;
+          var dx = s.x1 - s.x0, dy = s.y1 - s.y0;
+          var len = Math.hypot(dx, dy);
+          if (len < 1e-3) return;
+          var mx = (s.x0 + s.x1) / 2 - gx, my = (s.y0 + s.y1) / 2 - gy;
+          cand.push({ dx: dx, dy: dy, len: len, d: Math.hypot(mx, my) });
+        });
+        if (!cand.length) continue;
+        var dMin = Infinity;
+        cand.forEach(function (c) { if (c.d < dMin) dMin = c.d; });
+        var reach = dMin + 20;              // the piece beside the drop, not the plate
+        var c2 = 0, s2 = 0, c4 = 0, s4 = 0, wsum = 0;
+        cand.forEach(function (c) {
+          if (c.d > reach) return;
+          var th = Math.atan2(c.dy, c.dx);
+          c2 += c.len * Math.cos(2 * th); s2 += c.len * Math.sin(2 * th);
+          c4 += c.len * Math.cos(4 * th); s4 += c.len * Math.sin(4 * th);
+          wsum += c.len;
+        });
+        if (!wsum || Math.hypot(c4, s4) / wsum < 0.15) return 0;
+        var frame = Math.atan2(s4, c4) / 4;                  // mod 90
+        var along = Math.atan2(s2, c2) / 2;                  // mod 180
+        var alt = frame + Math.PI / 2;
+        var diff = function (x, y) {                         // distance mod 180
+          var d = Math.abs(x - y) % Math.PI; return Math.min(d, Math.PI - d);
+        };
+        return diff(alt, along) < diff(frame, along) ? alt : frame;
+      }
+      return 0;
+    }
+    var best = null, bestD = Infinity;
+    (doc.objects || []).forEach(function (o) {
+      if (!objectShown(o) || !o.bounds) return;
+      var ex = Math.max(o.bounds.minX - gx, 0, gx - o.bounds.maxX);
+      var ey = Math.max(o.bounds.minY - gy, 0, gy - o.bounds.maxY);
+      var d = Math.hypot(ex, ey);
+      if (d < bestD) { bestD = d; best = o; }
+    });
+    if (!best || !best.centroids || best.centroids.length < 9) return 0;
+    var cen = best.centroids, n = 0, sx = 0, sy = 0;
+    for (var i = 0; i < cen.length; i += 3) { sx += cen[i]; sy += cen[i + 1]; n++; }
+    sx /= n; sy /= n;
+    var xx = 0, yy = 0, xy = 0;
+    for (var j = 0; j < cen.length; j += 3) {
+      var px = cen[j] - sx, py = cen[j + 1] - sy;
+      xx += px * px; yy += py * py; xy += px * py;
+    }
+    // Round in plan (no long axis): leave it square to the plate.
+    var spread = Math.hypot(xx - yy, 2 * xy);
+    if (spread < 0.1 * (xx + yy)) return 0;
+    return 0.5 * Math.atan2(2 * xy, xx - yy);
   }
 
   function updateBoxTransform(b) {
     var rMax = Math.max(b.rx, b.ry);
     b.boxMesh.position.copy(b.point);
+    b.boxMesh.rotation.set(0, b.a || 0, 0);
     b.boxMesh.scale.set(b.rx * 2, b.h * 2, b.ry * 2);
     b.handle.position.copy(b.point);
     b.handle.scale.setScalar(Math.max(0.35, rMax * 0.1));
@@ -773,8 +894,10 @@ var NSO_MICROSCOPE = (function () {
 
   // `r` is the square footprint every caller before the corner handle passed;
   // `ry`, when given, makes it a rectangle (r is then the X half-extent).
-  function addBall(point, r, h, ry) {
-    var b = Object.assign({ point: point.clone(), rx: r, ry: ry != null ? ry : r, h: h }, makeBoxVisuals());
+  // `a` turns it about the vertical (see boxAxes); omitted, square to the plate.
+  function addBall(point, r, h, ry, a) {
+    var b = Object.assign({ point: point.clone(), rx: r, ry: ry != null ? ry : r, h: h, a: a || 0 },
+                          makeBoxVisuals());
     updateBoxTransform(b);
     balls.push(b);
     return b;
@@ -791,8 +914,14 @@ var NSO_MICROSCOPE = (function () {
   function gcodeBoxes() {
     return balls.map(function (b) {
       // Inverse of toThree: three (x, y, z) -> gcode (x + cx, -z + cy, y)
+      var a = b.a || 0, ca = Math.cos(a), sa = Math.sin(a);
       return { gx: b.point.x + doc.cx, gy: -b.point.z + doc.cy, gz: b.point.y,
-               rx: b.rx, ry: b.ry, r: Math.max(b.rx, b.ry), h: b.h };
+               rx: b.rx, ry: b.ry, r: Math.max(b.rx, b.ry), h: b.h, a: a,
+               ca: ca, sa: sa,
+               // plate-aligned half-extents of the turned footprint, for
+               // bounding-box rejects
+               ex: b.rx * Math.abs(ca) + b.ry * Math.abs(sa),
+               ey: b.rx * Math.abs(sa) + b.ry * Math.abs(ca) };
     });
   }
 
@@ -806,7 +935,11 @@ var NSO_MICROSCOPE = (function () {
    * twenty layers.
    */
   function inBox(b, mx, my, mz) {
-    return Math.abs(mx - b.gx) <= b.rx && Math.abs(my - b.gy) <= b.ry && Math.abs(mz - b.gz) <= b.h;
+    if (Math.abs(mz - b.gz) > b.h) return false;
+    var dx = mx - b.gx, dy = my - b.gy;
+    var ca = b.ca != null ? b.ca : 1, sa = b.sa || 0;
+    // into the box's own frame (it is turned by `a` about the vertical)
+    return Math.abs(dx * ca + dy * sa) <= b.rx && Math.abs(-dx * sa + dy * ca) <= b.ry;
   }
 
   function selectByBox() {
@@ -829,8 +962,8 @@ var NSO_MICROSCOPE = (function () {
     return doc.objects.filter(function (o) {
       if (!objectShown(o)) return false;
       var hit = boxes.filter(function (b) {
-        return o.bounds.minX <= b.gx + b.rx && o.bounds.maxX >= b.gx - b.rx &&
-               o.bounds.minY <= b.gy + b.ry && o.bounds.maxY >= b.gy - b.ry &&
+        return o.bounds.minX <= b.gx + b.ex && o.bounds.maxX >= b.gx - b.ex &&
+               o.bounds.minY <= b.gy + b.ey && o.bounds.maxY >= b.gy - b.ey &&
                o.bounds.minZ <= b.gz + b.h && o.bounds.maxZ >= b.gz - b.h;
       });
       if (!hit.length) return false;          // bounding box misses every box
@@ -961,7 +1094,7 @@ var NSO_MICROSCOPE = (function () {
     var hint = $('ms-hint-badge');
     if (hint) {
       hint.textContent = mode === 'select'
-        ? 'Click empty space to drop a flat box. Drag its blue centre dot to move it, the green corner dot to size it in X and Y, a side to scale the footprint, the orange top dot to set how thick it is.'
+        ? 'Click empty space to drop a flat box. Drag its blue centre dot to move it, the green corner dot to size it along and across, a side to scale the footprint, the orange top dot to set how thick it is.'
         : mode === 'line'
           ? 'Click a line to pick that one move. Shift-click adds or removes a line. Left / Right arrows step to the neighbouring move.'
           : '';
@@ -1069,9 +1202,10 @@ var NSO_MICROSCOPE = (function () {
         v.camera.getWorldDirection(cd);
         v.resizePlane.setFromNormalAndCoplanarPoint(cd, hit);
       } else if (v.dragState.type === 'resizeXY') {
-        // corner resize: X from the view's x, G-code Y from the view's -z
-        ball.rx = Math.max(0.3, Math.min(60, Math.abs(hit.x - ball.point.x)));
-        ball.ry = Math.max(0.3, Math.min(60, Math.abs(hit.z - ball.point.z)));
+        // corner resize, in the box's own frame: along it and across it
+        var ax = boxAxes(ball), off = hit.clone().sub(ball.point);
+        ball.rx = Math.max(0.3, Math.min(60, Math.abs(off.dot(ax.u))));
+        ball.ry = Math.max(0.3, Math.min(60, Math.abs(off.dot(ax.w))));
         defaultRx = ball.rx; defaultRy = ball.ry;
         updateBoxTransform(ball);
       } else if (v.dragState.type === 'resizeR') {
@@ -1115,8 +1249,11 @@ var NSO_MICROSCOPE = (function () {
       var hits = v.raycaster.intersectObjects(targets);
       if (hits.length === 0) return;
 
-      if (defaultRx != null) addBall(hits[0].point.clone(), defaultRx, defaultH, defaultRy);
-      else addBall(hits[0].point.clone(), defaultR, defaultH);
+      // Square to the piece beside the drop, not to the plate.
+      var hp0 = hits[0].point;
+      var ang = pieceAngleNear(hp0.x + doc.cx, -hp0.z + doc.cy);
+      if (defaultRx != null) addBall(hp0.clone(), defaultRx, defaultH, defaultRy, ang);
+      else addBall(hp0.clone(), defaultR, defaultH, undefined, ang);
       selectionSource = 'box';
       computeSelectionInfo();
     });
@@ -2421,8 +2558,11 @@ var NSO_MICROSCOPE = (function () {
     if (!balls.length) return null;
     var box = new THREE.Box3();
     balls.forEach(function (b) {
-      box.expandByPoint(new THREE.Vector3(b.point.x - b.rx, b.point.y - b.h, b.point.z - b.ry));
-      box.expandByPoint(new THREE.Vector3(b.point.x + b.rx, b.point.y + b.h, b.point.z + b.ry));
+      var a = b.a || 0;
+      var ex = b.rx * Math.abs(Math.cos(a)) + b.ry * Math.abs(Math.sin(a));
+      var ez = b.rx * Math.abs(Math.sin(a)) + b.ry * Math.abs(Math.cos(a));
+      box.expandByPoint(new THREE.Vector3(b.point.x - ex, b.point.y - b.h, b.point.z - ez));
+      box.expandByPoint(new THREE.Vector3(b.point.x + ex, b.point.y + b.h, b.point.z + ez));
     });
     return box;
   }
@@ -2736,13 +2876,16 @@ var NSO_MICROSCOPE = (function () {
     plateObjects: plateObjects,
     openPicker: openPicker,
     setMode: function (m) { setMode(m); },
-    addBoxAt: function (gx, gy, gz, r, h, ry) {
+    addBoxAt: function (gx, gy, gz, r, h, ry, a) {
       // A capture box placed by G-code coordinates rather than by a click, so a
       // check can drive the same selection a drag produces. `ry` makes the
       // footprint a rectangle, as the corner handle does; `r` is then X.
+      // `a` turns it (radians, CCW from G-code X); 'auto' squares it to the
+      // piece beside it, as a click-drop does; omitted, square to the plate.
       if (!doc || !buildWorld()) return null;
       var p = toThree(gx - doc.cx, gy - doc.cy, gz);
-      var b = addBall(p, r != null ? r : defaultR, h != null ? h : defaultH, ry);
+      var ang = a === 'auto' ? pieceAngleNear(gx, gy) : (a || 0);
+      var b = addBall(p, r != null ? r : defaultR, h != null ? h : defaultH, ry, ang);
       selectionSource = 'box';
       computeSelectionInfo();
       return b;
@@ -2753,6 +2896,7 @@ var NSO_MICROSCOPE = (function () {
       computeSelectionInfo();
     },
     boxes: function () { return gcodeBoxes(); },
+    setLegendCollapsed: function (on) { setLegendCollapsed(on); },
     selectLayer: selectLayer,
     selection: function () { return currentSelection.slice(); },
     selectionSource: function () { return selectionSource; },
