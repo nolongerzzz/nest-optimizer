@@ -1378,6 +1378,16 @@ select:focus, input:focus {
   border-top: 1px solid rgba(148, 163, 184, 0.25);
 }
 .crop-row { align-items: center; }
+.crop-move {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.25);
+}
+.crop-lbl {
+  flex: 0 0 44px;
+  font-size: 12px;
+  opacity: 0.85;
+}
 .crop-row input[type="number"] {
   flex: 1;
   min-width: 0;

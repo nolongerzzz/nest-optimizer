@@ -414,6 +414,28 @@
               <p id="crop-readout" class="cut-readout">—</p>
               <button id="btn-crop" class="btn btn-secondary" type="button" disabled
                       title="Remove everything inside the box, slide the far part back by the box length and seal the joint into one closed piece. Refuses a box over an end, a box that does not cover the whole cross-section, and a joint whose step face would need a hole.">Crop</button>
+              <div class="crop-move" id="crop-move-tools">
+              <p class="hint">Move: take out what the box holds, put it anywhere, lock it in. Where it lands decides the join: an overlap is trimmed, a touch is joined, a gap up to 3 mm is bridged.</p>
+              <div class="edit-row crop-row">
+              <span class="crop-lbl" title="Limit the box vertically: mm from the piece's bottom. Blank = the whole height.">Up</span>
+              <input type="number" id="crop-up-from" step="0.1" aria-label="Region up from, mm" title="From, mm above the piece's bottom (blank = all)">
+              <input type="number" id="crop-up-to" step="0.1" aria-label="Region up to, mm" title="To, mm above the piece's bottom (blank = all)">
+              </div>
+              <div class="edit-row crop-row">
+              <span class="crop-lbl" title="Limit the box across the cut axis: mm from the piece's low side. Blank = the whole width.">Across</span>
+              <input type="number" id="crop-across-from" step="0.1" aria-label="Region across from, mm" title="From, mm from the piece's low side (blank = all)">
+              <input type="number" id="crop-across-to" step="0.1" aria-label="Region across to, mm" title="To, mm from the piece's low side (blank = all)">
+              </div>
+              <div class="edit-row crop-row">
+              <label class="vp-clone" title="Take out what the box holds and show it as a ghost you can move. Nothing changes until Lock in."><input type="checkbox" id="chk-crop-lift"> Lift</label>
+              <input type="number" id="crop-move-dx" step="0.1" aria-label="Move X, mm" title="Move along X, mm">
+              <input type="number" id="crop-move-dy" step="0.1" aria-label="Move Y (up), mm" title="Move up (Y), mm">
+              <input type="number" id="crop-move-dz" step="0.1" aria-label="Move Z, mm" title="Move along Z, mm">
+              </div>
+              <p id="crop-move-readout" class="cut-readout">—</p>
+              <button id="btn-crop-lockin" class="btn btn-secondary" type="button" disabled
+                      title="Reconnect the moved region where it is. Measured, not assumed: an overlap with the piece is trimmed, a face-to-face touch is joined, a gap up to 3 mm is bridged with a filleted fill. Refuses a wider gap, a region buried in the piece, and anything that would not come out as one clean closed piece.">Lock in</button>
+              </div>
               </div>
               </div>
             </div>
