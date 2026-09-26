@@ -2946,6 +2946,41 @@ select:focus, input:focus {
    just a smudge. */
 #ms-legend-float:not(:has(.ms-legend-item)) { display: none; }
 
+/* Minimize: the header row stays (so it can be opened again), the list goes,
+   and the panel shrinks to its title. The toggle sits outside
+   #ms-legend-title because syncHeader() rewrites that node's text. */
+.ms-legend-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ms-legend-head .ms-section-title {
+  flex: 1 1 auto;
+  cursor: pointer;
+  user-select: none;
+}
+button#ms-legend-toggle {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin: -2px -2px 6px 0;
+  padding: 0;
+  line-height: 18px;
+  font-size: 14px;
+  text-align: center;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+button#ms-legend-toggle:hover { color: var(--text, #fff); border-color: var(--accent); }
+#ms-legend-float.collapsed { width: auto; }
+#ms-legend-float.collapsed #ms-legend { display: none; }
+#ms-legend-float.collapsed .ms-section-title,
+#ms-legend-float.collapsed button#ms-legend-toggle { margin-bottom: 0; }
+#ms-legend-float.collapsed button#ms-legend-toggle { margin-top: 0; }
+
 /* ---------------------------------------------------------------------------
    G-scope additions: the legend's "only" button and the layer-range slider
    docked to the viewport's right edge.
