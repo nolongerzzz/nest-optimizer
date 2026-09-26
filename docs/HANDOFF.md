@@ -540,6 +540,26 @@ rule 4; the HUD string (`stampHud()`) is untouched.
 The "needs a bump at merge" notes in the Crop Stage 2 and fused-selections
 entries below are covered by this pass.
 
+**Follow-up, same day: five older drifts the batch missed.** Checked by
+content: a file has drifted when it differs at HEAD from the commit that set
+its current tag (`git log -S "file?v=tag" -- index.html | tail -1`, then
+`git diff --quiet <that> HEAD -- file`). The batch above covered the files
+named in "needs a bump" notes; these five changed after their tags with no
+note:
+
+| file | was | now | changed since by |
+| --- | --- | --- | --- |
+| `nso_support_aim.js` | `support1` | `support2` | `ad22e9a` |
+| `nso_stock.js` | `stock2` | `stock4` | `0b3f572` (`stock3` was used once before, so skipped) |
+| `nso_path_sweep.js` | `taper1` | `taper2` | `2aa07a2` |
+| `nso_support_tree.js` | `tree4` | `tree5` | `548a704`, `e50eaea` |
+| `app-oversize-washer.js` | `oversize1` | `oversize2` | `f1aeac3` |
+
+After this, no tagged file differs from its tag's content. Five scripts still
+load untagged (`nso-cooling-profiles.js`, `nso-3mf.js`, `nso-3mf-read.js`,
+`nso-gcode-lines.js`, `nso-watch.js`); they were untagged before and are
+left so.
+
 ## Crop, stage 2 - move a region, reconnect it by what is measured (2026-09-26)
 
 Branch `claude/crop-stage2-move`, off `claude-wip`. Full write-up:
@@ -571,8 +591,7 @@ Branch `claude/crop-stage2-move`, off `claude-wip`. Full write-up:
 - **Reuse.** `nso_hollow.js` exports `edt3d`, `surfaceNets`, `tidyPositive`.
   `NSO_Repair.inspect` gates the headless core too, not only the app.
 - Checks: new `crop:move`, `wire:crop-move`.
-- **`?v=` not bumped** (rule 4). Needs a bump at merge for `app-crop.js`,
-  `app-core.js` (undo label `cropMove`), `nso_hollow.js` and `styles.css`.
+- **`?v=`**: bumped in the cache-tag batch above (PR #115).
 - **Not yet:** a region crossing BOTH seams (the next stress test), rotation,
   a region at the very end (Stage 1's axis clamp), and mixed contact (overlap
   here, gap there) in one move.
