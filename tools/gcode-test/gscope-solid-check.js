@@ -19,6 +19,9 @@
  *     a single run PASSES where the same moves as toolpath prisms FAIL; a
  *     sample of shells from every feature passes one by one; a whole stacked
  *     selection has no open edges and no piercing pairs.
+ *  6. FUSED SELECTIONS (section 5 below). The junction audit, the multi-run
+ *     export through the checker, its volume against an independent scanline
+ *     union, the single-run pass-through, and tabletop's walls.
  *
  * Run: node tools/gcode-test/gscope-solid-check.js
  */
@@ -162,6 +165,258 @@ section('2. The closed sweep');
      'the same loop swept OPEN encloses the same volume (the mitre is volume-neutral; the caps only meet)');
 }
 
+// --- section 5's independent volume: no kernel, no fuse code ---------------
+//
+// Every bead here is a flat prism (a Z band x a footprint), so the volume of
+// any union of them is the sum over Z bands of (band thickness x the AREA OF
+// THE UNION OF THE FOOTPRINTS present in that band). The area is taken by
+// scanlines: on each line the footprints' intervals are merged exactly. The
+// lines are rotated off every slicer axis (0.3137 rad) so no footprint edge
+// lies along one - aligned, the error was 5e-4; rotated, it converges to 1e-7.
+// `bottoms` overrides a shell's bottom Z (a seated bead reaches BOND_MM down).
+function scanUnionVolume(built, bottoms, dy, only) {
+  const c = Math.cos(0.3137), s = Math.sin(0.3137);
+  const sh = built.shells.map((b, i) => {
+    if (only && !only.has(i)) return { top: 0, bot: 0, tris: [] };
+    const t = built.positions.subarray(b.triStart * 9, (b.triStart + b.triCount) * 9);
+    let top = -Infinity, bot = Infinity;
+    for (let k = 2; k < t.length; k += 3) { top = Math.max(top, t[k]); bot = Math.min(bot, t[k]); }
+    if (bottoms && bottoms.has(i)) bot = bottoms.get(i);
+    const tris = [];
+    for (let o = 0; o < t.length; o += 9) {
+      if (t[o + 2] !== top || t[o + 5] !== top || t[o + 8] !== top) continue;
+      const q = [];
+      for (let v = 0; v < 3; v++) { const x = t[o + v * 3], y = t[o + v * 3 + 1]; q.push(x * c - y * s, x * s + y * c); }
+      tris.push(q);
+    }
+    return { top, bot, tris };
+  });
+  const zs = [];
+  sh.forEach((b) => { if (b.tris.length) zs.push(b.top, b.bot); });
+  zs.sort((a, b) => a - b);
+  const Z = [];
+  for (const z of zs) if (!Z.length || z - Z[Z.length - 1] > 1e-5) Z.push(z);
+  let vol = 0;
+  for (let k = 0; k + 1 < Z.length; k++) {
+    const zm = (Z[k] + Z[k + 1]) / 2;
+    const tris = [];
+    sh.forEach((b) => { if (b.bot < zm && b.top > zm) b.tris.forEach((t) => tris.push(t)); });
+    if (!tris.length) continue;
+    let y0 = Infinity, y1 = -Infinity;
+    tris.forEach((t) => { y0 = Math.min(y0, t[1], t[3], t[5]); y1 = Math.max(y1, t[1], t[3], t[5]); });
+    const B = 0.5, nb = Math.max(1, Math.ceil((y1 - y0) / B)), bucket = Array.from({ length: nb }, () => []);
+    tris.forEach((t) => {
+      const a = Math.min(t[1], t[3], t[5]), b = Math.max(t[1], t[3], t[5]);
+      for (let i = Math.floor((a - y0) / B); i <= Math.min(nb - 1, Math.floor((b - y0) / B)); i++) bucket[i].push(t);
+    });
+    let area = 0;
+    for (let y = y0 + dy / 2; y < y1; y += dy) {
+      const iv = [];
+      for (const t of bucket[Math.min(nb - 1, Math.floor((y - y0) / B))]) {
+        const xs = [];
+        for (let e = 0; e < 3; e++) {
+          const ax = t[e * 2], ay = t[e * 2 + 1], bx = t[(e + 1) % 3 * 2], by = t[(e + 1) % 3 * 2 + 1];
+          if ((ay <= y) !== (by <= y)) xs.push(ax + (y - ay) * (bx - ax) / (by - ay));
+        }
+        if (xs.length === 2) iv.push([Math.min(xs[0], xs[1]), Math.max(xs[0], xs[1])]);
+      }
+      iv.sort((a, b) => a[0] - b[0]);
+      let L = 0, cs = 0, ce = 0, on = false;
+      for (const [a, b] of iv) {
+        if (!on) { cs = a; ce = b; on = true; } else if (a > ce) { L += ce - cs; cs = a; ce = b; } else if (b > ce) ce = b;
+      }
+      if (on) L += ce - cs;
+      area += L * dy;
+    }
+    vol += area * (Z[k + 1] - Z[k]);
+  }
+  return vol;
+}
+
+/** The bottoms fuseShells seated: every upper shell of a stack contact in a body fused the 'seated' way. */
+function seatedBottoms(f) {
+  const out = new Map();
+  const seatedShell = new Set();
+  f.bodies.forEach((b) => { if (b.way === 'seated') b.shells.forEach((s) => seatedShell.add(s)); });
+  f.contacts.forEach((e) => {
+    if (e.kind === 'stack' && seatedShell.has(e.upper)) out.set(e.upper, f.feet[e.upper].rest - SO.BOND_MM);
+  });
+  return out;
+}
+
+async function fusedSelections(slices, TMP) {
+  // =========================================================================
+  section('5. Fused selections - one solid where runs genuinely touch');
+  // =========================================================================
+  const { csgContext } = require('../nso_csg_node.js');
+  const csg = csgContext();
+  const wasm = await csg.NSO_CSG.load();
+  const M = (t) => csg.NSO_CSG.soupToManifold(wasm, t);
+  const partsOf = (a, b) => { const u = M(a).add(M(b)); const n = u.decompose().length; u.delete(); return n; };
+  const box = (lo, hi) => {
+    const v = [[lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]], [hi[0], hi[1], lo[2]], [lo[0], hi[1], lo[2]],
+               [lo[0], lo[1], hi[2]], [hi[0], lo[1], hi[2]], [hi[0], hi[1], hi[2]], [lo[0], hi[1], hi[2]]];
+    const f = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4],
+               [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]];
+    const o = [];
+    for (const t of f) for (const i of t) o.push(...v[i]);
+    return new Float32Array(o);
+  };
+
+  // --- 5a. the audit: what a junction between two runs actually is -----------
+  const p = slices.supportwithinsupport;
+  const walls = p.moves.filter((m) => m.feature === 'Inner wall' || m.feature === 'Outer wall');
+  const wb = SO.buildSolid(walls);
+  const ct = SO.shellContacts(wb);
+  const kinds = { side: 0, stack: 0 };
+  ct.edges.forEach((e) => kinds[e.kind]++);
+  const layers = new Set(walls.map((m) => m.z)).size;
+  console.log('  Inner + Outer wall: ' + walls.length + ' moves over ' + layers + ' layers, ' + wb.shells.length +
+              ' run shells, ' + ct.edges.length + ' junctions ' + JSON.stringify(kinds) + ', ' + ct.snapped.length +
+              ' bottoms off the plane they rest on');
+  ok(kinds.stack > 0 && kinds.side > 0, 'two kinds of junction: stacked (a bead on the one below) and side by side (neighbours that overlap)');
+  const f32step = ct.snapped.every((sn) => Math.abs(sn.to - sn.from) <= 2 * S.ulp32(Math.abs(sn.to)));
+  ok(ct.snapped.length > 0 && f32step,
+     ct.snapped.length + ' shells sit one float32 step off the top they rest on (f32(z - h) vs f32(z below)) - rounding, not a gap');
+  // A side junction between the inner and outer wall of a layer is a real overlap: centrelines closer than the bead.
+  const byZ = new Map();
+  walls.forEach((m) => { if (!byZ.has(m.z)) byZ.set(m.z, []); byZ.get(m.z).push(m); });
+  const segD = (a, b) => {
+    const pd = (px, py, x0, y0, x1, y1) => {
+      const dx = x1 - x0, dy = y1 - y0, L = dx * dx + dy * dy;
+      let t = L ? ((px - x0) * dx + (py - y0) * dy) / L : 0; t = Math.max(0, Math.min(1, t));
+      return Math.hypot(px - x0 - t * dx, py - y0 - t * dy);
+    };
+    return Math.min(pd(a.x0, a.y0, b.x0, b.y0, b.x1, b.y1), pd(a.x1, a.y1, b.x0, b.y0, b.x1, b.y1),
+                    pd(b.x0, b.y0, a.x0, a.y0, a.x1, a.y1), pd(b.x1, b.y1, a.x0, a.y0, a.x1, a.y1));
+  };
+  let spacing = Infinity;
+  for (const [, L] of byZ) {
+    const I = L.filter((m) => m.feature === 'Inner wall'), O = L.filter((m) => m.feature === 'Outer wall');
+    for (const a of I) for (const b of O) spacing = Math.min(spacing, segD(a, b));
+  }
+  ok(spacing < walls[0].width, 'inner and outer wall centrelines ' + spacing.toFixed(3) + ' mm apart, beads ' +
+     walls[0].width.toFixed(3) + ' mm wide: a side junction is a genuine overlap of ' + (walls[0].width - spacing).toFixed(3) + ' mm');
+  // What the kernel does with each kind, on plain boxes.
+  const f = Math.fround, step = S.ulp32(1.2);
+  ok(partsOf(box([0, 0, 0], [1, 1, f(1.2)]), box([0.2, 0.2, f(1.2)], [1.2, 1.2, 1.5])) === 1,
+     'kernel: two beads meeting face to face (one on the other) merge into one');
+  ok(partsOf(box([0, 0, 0], [1, 1, f(1.2)]), box([0.2, 0.2, f(1.2) + step], [1.2, 1.2, 1.5])) === 2,
+     'kernel: one float32 step apart they do not - hence the plane snap');
+  ok(partsOf(box([0, 0, 0], [1, 1, 1]), box([1, 1, 0], [2, 2, 1])) === 2,
+     'kernel: meeting only along an edge is no junction - and the contact test never asks (a footprint must overlap with area)');
+
+  // --- 5b. the walls, fused, through the canonical checker --------------------
+  let t0 = Date.now();
+  const fw = await SO.fuseShells(wb, { csg: csg.NSO_CSG });
+  const msW = Date.now() - t0;
+  fw.feet = ct.feet;
+  console.log('  ' + fw.reason + ' (' + msW + ' ms; ways ' + JSON.stringify(fw.stats.ways) + ')');
+  ok(fw.ok && fw.stats.seams === 0 && fw.stats.splits.length === 0,
+     'every junction of the walls is fused: ' + fw.stats.unions + ' unions, 0 left in contact');
+  const fW = path.join(TMP, 'walls.fused.stl');
+  writeSTL(fw.positions, fW);
+  const vW = validate(fW);
+  console.log('  canonical checker, whole export: ' + JSON.stringify(vW));
+  ok(vW.verdict === 'PASS' && vW.open === 0 && vW.nm === 0 && vW.pierce === 0 && vW.degen === 0,
+     'the whole multi-run export PASSES tools/mesh_validate.py (unfused, the same 144 shells report non-manifold edges wherever they touch)');
+  const fU = path.join(TMP, 'walls.shells.stl');
+  writeSTL(wb.positions, fU);
+  const vU = validate(fU);
+  ok(vU.verdict === 'FAIL' && vU.nm > 0, 'the same selection unfused FAILS it: ' + vU.nm + ' non-manifold edges, ' + vU.pierce + ' piercing pairs where shells meet');
+  // The bodies are separate because the part is: no two of them touch.
+  const soups = fw.bodies.map((b) => fw.positions.subarray(b.triStart * 9, (b.triStart + b.triCount) * 9));
+  let merged = 0;
+  for (let i = 0; i < soups.length; i++) for (let j = i + 1; j < soups.length; j++) if (partsOf(soups[i], soups[j]) < 2) merged++;
+  ok(fw.bodies.length === fw.stats.groups && merged === 0,
+     fw.bodies.length + ' bodies, one per connected group, and the kernel merges no two of them - they do not touch (no wall at layers 28-30)');
+  // Volume: the independent scanline union of the SAME swept runs.
+  const seat = seatedBottoms(fw);
+  const vScan = scanUnionVolume(wb, seat, 0.004);
+  const vShells = wb.shells.reduce((a, b) => a + b.volume, 0);
+  const relW = Math.abs(fw.stats.fusedVolume - vScan) / vScan;
+  console.log('  volume: runs ' + vShells.toFixed(4) + ' mm3, independent union ' + vScan.toFixed(4) + ', fused ' +
+              fw.stats.fusedVolume.toFixed(4) + ' (rel ' + relW.toExponential(2) + '); overlap counted once ' +
+              fw.stats.overlapRemovedMm3.toFixed(4) + ', seated ' + seat.size + ' shells (bound ' + fw.stats.seatBoundMm3.toFixed(4) + ')');
+  ok(relW < 1e-5, 'fused volume = the sum of the runs minus their real overlap, measured without the kernel (rel ' + relW.toExponential(2) + ')');
+  const vScanExact = seat.size ? scanUnionVolume(wb, null, 0.004) : vScan;
+  ok(fw.stats.fusedVolume - vScanExact >= -1e-3 && fw.stats.fusedVolume - vScanExact <= fw.stats.seatBoundMm3 + 1e-3,
+     'what seating adds (' + (fw.stats.fusedVolume - vScanExact).toFixed(4) + ' mm3) is within its reported bound (' + fw.stats.seatBoundMm3.toFixed(4) + ')');
+
+  // --- 5c. the single run: untouched, exact, fast ------------------------------
+  const inner = p.moves.filter((m) => m.feature === 'Inner wall');
+  const one = SO.buildSolid(SO.chainsOf(inner)[5].moves);
+  t0 = Date.now();
+  const fo = await SO.fuseShells(one, { csg: csg.NSO_CSG });
+  const msO = Date.now() - t0;
+  ok(fo.ok && fo.stats.contacts === 0 && fo.stats.unions === 0 && fo.bodies.length === 1 && !fo.bodies[0].fused,
+     'one continuous run: no junction, no union, one body as swept');
+  ok(fo.positions.length === one.positions.length && fo.positions.every((v, i) => v === one.positions[i]),
+     'bit for bit the sweep\'s own shell - still exact (volume ' + fo.stats.fusedVolume.toFixed(6) + ' = ' + one.stats.solidVolume.toFixed(6) + ')');
+  ok(msO < 50, 'and still fast: ' + msO + ' ms, the kernel never loaded for it');
+  // Runs that touch nothing are passed through the same way inside a bigger selection.
+  const apart = SO.buildSolid(inner.filter((m) => m.layer === 3 || m.layer === 9));
+  const fa = await SO.fuseShells(apart, { csg: csg.NSO_CSG });
+  ok(fa.stats.contacts === 0 && fa.positions.every((v, i) => v === apart.positions[i]),
+     'two runs six layers apart: no junction between them, both exported exactly as swept');
+
+  // The guard: past its limits the union is refused by name, never started.
+  const g1 = await SO.fuseShells(wb, { csg: csg.NSO_CSG, maxJunctions: 100 });
+  const g2 = await SO.fuseShells(wb, { csg: csg.NSO_CSG, maxShells: 100 });
+  ok(!g1.ok && /305 junctions is over the 100/.test(g1.reason) && !g2.ok && /144 runs is over the 100/.test(g2.reason),
+     'over the limits (defaults ' + SO.MAX_SHELLS + ' runs, ' + SO.MAX_JUNCTIONS + ' junctions) it refuses by name and the caller exports the shells: "' + g1.reason + '"');
+
+  // --- 5d. the hard case: tabletop's walls ------------------------------------
+  const q = slices.tabletop;
+  const tw = q.moves.filter((m) => m.feature === 'Outer wall' || m.feature === 'Inner wall');
+  const tb = SO.buildSolid(tw);
+  t0 = Date.now();
+  const ft = await SO.fuseShells(tb, { csg: csg.NSO_CSG });
+  const msT = Date.now() - t0;
+  console.log('  tabletop walls: ' + ft.reason + ' (' + msT + ' ms; ways ' + JSON.stringify(ft.stats.ways) +
+              ', ' + ft.stats.slivers + ' zero-volume kernel slivers dropped)');
+  ft.stats.splits.forEach((sp) => console.log('    a group of ' + sp.shells + ' no way fused soundly (' + sp.tried.join(' | ') +
+                                              ') - set aside ' + sp.setAside.length + ' bead(s) at the located defect'));
+  ok(ft.ok && ft.stats.seams <= 0.01 * ft.stats.contacts,
+     (ft.stats.contacts - ft.stats.seams) + ' of ' + ft.stats.contacts + ' junctions fused; ' + ft.stats.seams +
+     ' left as faces in contact where the kernel gave no sound solid, and reported');
+  const dirT = path.join(TMP, 'tabletop-bodies');
+  fs.mkdirSync(dirT);
+  ft.bodies.forEach((b, i) => { if (b.fused) writeSTL(ft.positions.subarray(b.triStart * 9, (b.triStart + b.triCount) * 9), path.join(dirT, i + '.stl')); });
+  const pyT = [
+    'import sys, json, pathlib',
+    'sys.path.insert(0, ' + JSON.stringify(path.join(REPO, 'tools')) + ')',
+    'import mesh_validate as mv',
+    'fails = []',
+    'files = sorted(pathlib.Path(' + JSON.stringify(dirT) + ').glob("*.stl"))',
+    'for f in files:',
+    '    r = mv.validate(f, mv.WELD_TOL, 100.0, True, mv.SELFINT_EPS)',
+    '    if r["verdict"] != "PASS": fails.append([f.name, r["verdict_fails"]])',
+    'print(json.dumps({"n": len(files), "fails": fails}))',
+  ].join('\n');
+  const bt = JSON.parse(execFileSync('python3', ['-c', pyT], { encoding: 'utf8', maxBuffer: 64 << 20 }));
+  bt.fails.forEach((x) => console.log('    ' + JSON.stringify(x)));
+  ok(bt.n === ft.bodies.filter((b) => b.fused).length && bt.fails.length === 0,
+     'every fused body of tabletop\'s walls, alone, PASSES tools/mesh_validate.py (' + bt.n + ' bodies) - none is exported defective');
+  // Volume, body by body: each fused body against the independent union of
+  // exactly its own runs. (The export's TOTAL still counts twice whatever a
+  // set-aside bead overlaps - that is the part left unfused, and why it is
+  // reported - so the total is not the check; every body is.)
+  ft.feet = SO.shellContacts(tb).feet;
+  const seatT = seatedBottoms(ft);
+  let worstT = 0, sumFused = 0, sumScan = 0;
+  ft.bodies.filter((b) => b.fused).forEach((b) => {
+    const v = scanUnionVolume(tb, seatT, 0.004, new Set(b.shells));
+    worstT = Math.max(worstT, Math.abs(b.volume - v) / v);
+    sumFused += b.volume; sumScan += v;
+  });
+  console.log('  volume: fused bodies ' + sumFused.toFixed(4) + ' mm3, independent union of each body\'s runs ' +
+              sumScan.toFixed(4) + ' (worst body rel ' + worstT.toExponential(2) + '); ' + ft.stats.setAside + ' bead(s) set aside at ' +
+              ft.stats.splits.length + ' located defect site(s)');
+  ok(worstT < 1e-5, 'tabletop walls: every fused body\'s volume = its runs minus their real overlap, measured without the kernel (worst rel ' +
+     worstT.toExponential(2) + ')');
+}
+
 // ===========================================================================
 section('3. Real slices - every move');
 // ===========================================================================
@@ -283,7 +538,9 @@ const slices = {};
   ok(vSt.open === 0 && vSt.degen === 0 && vSt.pierce === 0,
      'a stacked multi-run selection: open 0, degenerate 0, pierce 0 - watertight, nothing passes through anything');
   ok(vSt.nm > 0,
-     'and its non-manifold edges are where one layer\'s bead sits on the next (' + vSt.nm + '): separate shells touching, which is what the beads are - merging them would be the union this does not do');
+     'and, unfused, its non-manifold edges are where one layer\'s bead sits on the next (' + vSt.nm + '): separate shells touching - what section 5 fuses');
+
+  await fusedSelections(slices, TMP);
 
   fs.rmSync(TMP, { recursive: true, force: true });
   console.log('\n' + (fail ? 'FAIL' : 'PASS') + '  ' + pass + ' passed, ' + fail + ' failed');
