@@ -420,12 +420,30 @@ select:focus, input:focus {
   z-index: 95;
   display: flex;
   flex-direction: column;
+  /* The base .vp-menu-body rule sets flex-wrap: wrap (for the menus that
+     stay in one place and lay controls out in a row that wraps). It has no
+     flex-direction, so column here beats it on specificity - but flex-wrap
+     is a SEPARATE property, and nothing here used to override it, so wrap
+     survived. Column + wrap is "start a new column once the current one is
+     taller than max-height", which is exactly what a panel that is
+     supposed to just get taller and scroll must never do: once the Import
+     dropdown's library list grew past the remaining room under max-height,
+     it stopped scrolling and started a SECOND COLUMN instead, doubling the
+     panel's width and forcing the horizontal scrollbar overflow-y:auto
+     drags in with it (one axis not visible makes the other auto too, per
+     spec). Explicit here so a later edit to the base rule cannot bring
+     wrap back by surprise. */
+  flex-wrap: nowrap;
   gap: 6px;
   width: max-content;
   min-width: 190px;
   max-width: 300px;
   max-height: calc(100vh - 120px);
   overflow-y: auto;
+  /* Belt and suspenders: even if some future change reintroduces sideways
+     growth, this guarantees the panel never grows a horizontal scrollbar.
+     A dropdown that cannot fit gets taller and scrolls, never wider. */
+  overflow-x: hidden;
   overscroll-behavior: contain;
   padding: 8px;
   border-radius: 8px;
