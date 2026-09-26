@@ -197,6 +197,40 @@ function undoLast() {
     setStatus('Undo: removed cloned pieces');
     return;
   }
+  if (entry.type === 'supportSwap') {
+    // G-scope's individual support edits (app-gscope-support.js): Remove takes
+    // one support piece off, Apply replaces it with a regenerated one. Undo
+    // takes any piece the step added back off, and puts every removed piece
+    // back - its model AND its placed entry, mesh and exact position kept -
+    // where it was. One support is one whole piece, so this is the addModels /
+    // removePlaced pair folded into one step, and it restores the model list
+    // too, which removePlaced does not.
+    const added = new Set(entry.addedIds || []);
+    state.models = state.models.filter(m => !added.has(m.id));
+    const kept = [];
+    state.placed.forEach(p => {
+      if (p && p.sourceId != null && added.has(p.sourceId)) {
+        if (p.mesh && p.mesh.parent) p.mesh.parent.remove(p.mesh);
+      } else {
+        kept.push(p);
+      }
+    });
+    state.placed = kept;
+    (entry.removed || []).slice().reverse().forEach(r => {
+      if (r.model && !state.models.some(m => m.id === r.model.id)) {
+        state.models.splice(Math.min(r.modelIndex, state.models.length), 0, r.model);
+      }
+      if (r.placed) {
+        state.placed.splice(Math.min(r.placedIndex, state.placed.length), 0, r.placed);
+        if (r.placed.mesh && state.modelGroup) state.modelGroup.add(r.placed.mesh);
+      }
+    });
+    state.placed.forEach((p, i) => { if (p.mesh) p.mesh.userData.placedIndex = i; });
+    state.selectedIndex = -1;
+    renderModelList(); updateOptimizeButton(); updateEditSize(); updateAdjustUI();
+    setStatus(entry.label || 'Undo: support edit reverted');
+    return;
+  }
   if (entry.type === 'splitReplace') {
     // Remove the two halves, restore the single original, clear plate view
     const ids = new Set(entry.newIds || []);
