@@ -2255,15 +2255,42 @@ var NSO_MICROSCOPE = (function () {
   // The same selection, the same two doors, a different builder: every
   // continuous run of bead in it becomes ONE closed shell, swept along the
   // run's own ordered moves (NSOGcodeSolid.buildSolid on NSO_PathSweep), with
-  // a cap only where the nozzle genuinely stopped or the selection ends. No
-  // boolean union anywhere. Toolpath only - a mesh document already IS a
-  // solid, and the buttons are hidden for one.
+  // a cap only where the nozzle genuinely stopped or the selection ends. Then
+  // the runs that genuinely touch - one layer on the next, a wall overlapping
+  // the wall beside it - are unioned where they touch and nowhere else
+  // (NSOGcodeSolid.fuseShells, the app's own kernel), so a selection of many
+  // runs leaves as the solids it is, not as shells in contact. A run touching
+  // nothing leaves exactly as swept. Toolpath only - a mesh document already
+  // IS a solid, and the buttons are hidden for one.
+  //
+  // The live Solid VIEW stays the unfused shells (solidOfSelection): it is
+  // redrawn on every slider step, and the union is an export-time cost.
 
-  /** The selection's solid - every selected move, as the toolpath export takes them. */
+  /** The selection's swept shells - every selected move, as the toolpath export takes them. */
   function solidOfSelection() {
     if (!doc || doc.kind !== 'toolpath' || !currentSelection.length) return null;
     return window.NSOGcodeSolid.buildSolid(currentSelection.map(function (s) { return s.mv; }),
                                            { cache: solidCache() });
+  }
+
+  /**
+   * The selection as it is exported: the swept shells, fused where runs touch.
+   * A Promise of a Z-up geometry whose userData carries `solid` (the sweep's
+   * stats) and `fuse` (the union's), or null for no selection. If the union
+   * cannot run at all, the shells are exported as they are and `fuse` says why.
+   */
+  function fusedGeometry() {
+    var sb = solidOfSelection();
+    if (!sb || !sb.positions.length) return Promise.resolve(null);
+    return window.NSOGcodeSolid.fuseShells(sb).then(function (f) {
+      var positions = f.ok ? f.positions : sb.positions;
+      var g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      g.userData.solid = sb.stats;
+      g.userData.fuse = f.ok ? f.stats : null;
+      g.userData.fuseReason = f.reason;
+      return g;
+    });
   }
 
   function mm3(x) { return (Math.round(x * 1000) / 1000).toFixed(3); }
@@ -2282,33 +2309,57 @@ var NSO_MICROSCOPE = (function () {
     return bits.join(', ');
   }
 
+  /** The sweep's line, then the union's: what the export actually holds. */
+  function describeExport(geo) {
+    var u = geo.userData;
+    if (!u.fuse) return describeSolid(u.solid) + '; not fused - ' + u.fuseReason;
+    if (!u.fuse.contacts) return describeSolid(u.solid);
+    return describeSolid(u.solid) + '; fused: ' + u.fuseReason + ', exported ' +
+           mm3(u.fuse.fusedVolume) + ' mm\u00b3';
+  }
+
+  function solidExportGuard() {
+    if (!doc) { say('Open a file in the microscope first', true); return false; }
+    if (doc.kind !== 'toolpath') { say('Export as solid is for a sliced toolpath - this document is already a mesh', true); return false; }
+    if (!currentSelection.length) { say('Nothing selected to export', true); return false; }
+    return true;
+  }
+
+  // Both return a Promise: the union runs in the kernel, which loads async.
+  // The status line says it is working first, and a frame is let through so
+  // that line is drawn before the kernel holds the thread.
+  function fusing() {
+    say('Export as solid - fusing ' + currentSelection.length + ' move' +
+        (currentSelection.length === 1 ? '' : 's') + ' where their runs touch...');
+    return new Promise(function (res) { setTimeout(res, 0); }).then(fusedGeometry);
+  }
+
   function exportSolidToPlate() {
-    if (!doc) { say('Open a file in the microscope first', true); return null; }
-    if (doc.kind !== 'toolpath') { say('Export as solid is for a sliced toolpath - this document is already a mesh', true); return null; }
-    var geo = microscopeGeometry(true);
-    if (!geo) { say('Nothing selected to export', true); return null; }
-    var st = geo.userData.solid;
+    if (!solidExportGuard()) return Promise.resolve(null);
     var label = exportLabel() + ' (solid)';
-    var id = addModelFromZUpGeometry(label, geo);
-    if (!id) { say('Export as solid failed - nothing was added', true); return null; }
-    if (typeof pushUndo === 'function') {
-      pushUndo({ type: 'addModels', ids: [id], editId: state.editId, cutT: state.cutT });
-    }
-    close();
-    say('Export as solid ok - "' + label + '": ' + describeSolid(st));
-    return id;
+    return fusing().then(function (geo) {
+      if (!geo) { say('Nothing selected to export', true); return null; }
+      var id = addModelFromZUpGeometry(label, geo);
+      if (!id) { say('Export as solid failed - nothing was added', true); return null; }
+      if (typeof pushUndo === 'function') {
+        pushUndo({ type: 'addModels', ids: [id], editId: state.editId, cutT: state.cutT });
+      }
+      close();
+      say('Export as solid ok - "' + label + '": ' + describeExport(geo));
+      return id;
+    });
   }
 
   function exportSolidAsSTL() {
-    if (!doc) { say('Open a file in the microscope first', true); return null; }
-    if (doc.kind !== 'toolpath') { say('Export as solid is for a sliced toolpath - this document is already a mesh', true); return null; }
-    var geo = microscopeGeometry(true);
-    if (!geo) { say('Nothing selected to export', true); return null; }
-    var buffer = geometryToBinarySTL(geo);
+    if (!solidExportGuard()) return Promise.resolve(null);
     var name = (exportLabel() + ' solid').replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>]/g, '') + '.stl';
-    downloadBlob(new Blob([buffer], { type: 'application/octet-stream' }), name);
-    say('Downloaded ' + name + ' - ' + describeSolid(geo.userData.solid));
-    return name;
+    return fusing().then(function (geo) {
+      if (!geo) { say('Nothing selected to export', true); return null; }
+      var buffer = geometryToBinarySTL(geo);
+      downloadBlob(new Blob([buffer], { type: 'application/octet-stream' }), name);
+      say('Downloaded ' + name + ' - ' + describeExport(geo));
+      return name;
+    });
   }
 
   // --- the live toolpath / solid toggle --------------------------------------
@@ -2961,6 +3012,7 @@ var NSO_MICROSCOPE = (function () {
     exportSolidToPlate: exportSolidToPlate,
     exportSolidAsSTL: exportSolidAsSTL,
     solidOfSelection: solidOfSelection,
+    fusedGeometry: fusedGeometry,
     setRenderMode: setRenderMode,
     renderMode: function () { return renderMode; },
     shownSolid: function () { return view && view.solidBuilt ? view.solidBuilt : null; },

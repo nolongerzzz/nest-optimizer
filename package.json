@@ -372,7 +372,7 @@
     "gcode:scope-drive": 22700,
     "gcode:scope-overlay": 19307,
     "gcode:gscope": 30000,
-    "gcode:solid": 16500,
+    "gcode:solid": 32000,
     "gcode:solid-drive": 87000,
     "gcode:gscope-cornercam": 12000,
     "gcode:gscope-normalcam": 270000,

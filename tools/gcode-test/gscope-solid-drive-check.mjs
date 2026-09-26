@@ -22,7 +22,9 @@
  *      its rawTris pass tools/mesh_validate.py --gate; the real Mirror button
  *      reflects it; the mirrored piece passes the gate too, same volume, one
  *      Undo restores it. Then a stacked 45-loop selection through the same
- *      route. "Solid STL" downloads the same triangles.
+ *      route - fused where the loops touch, passing the gate - and Inner + Outer
+ *      wall on every layer through "Solid STL": the fused solid, triangle for
+ *      triangle, passing the gate. One run downloads exactly as swept.
  *   5  SCREENSHOTS, each asserted to be a drawn frame, to tools/gscope-out/.
  *
  * Usage: node tools/gcode-test/gscope-solid-drive-check.mjs
@@ -332,13 +334,47 @@ async function main() {
   check('Export as solid (real click): a new piece on the plate, G-scope closed, undo wired',
     [ex2.open, ex2.undoTop, / \(solid\)$/.test(ex2.name)], [false, 'addModels', true]);
   check('the status line says what the sweep made of it', /45 closed shells from 180 moves, 45 seam-closed loops/.test(ex2.status), true);
+  // Three solids, not one: the part has no inner wall at layers 28-30, and one
+  // loop between those gaps touches no other - the stack is three stacks.
+  check('and what the union made of it: every junction fused, one solid per stack that really touches',
+    /fused: 45 run shells -> 3 solids, 42 unions at 42 of 42 junctions \(42 stacked, 0 side by side\), 1 touching nothing, left as swept/.test(ex2.status), true);
   const fEx2 = join(TMP, 'stack-solid.stl');
   await writeFile(fEx2, soupToSTL(ex2.raw));
   const vEx2 = validate(fEx2);
   console.log('       45-loop stack on the plate: ' + JSON.stringify(vEx2));
-  check('45 stacked loops on the plate: watertight (open 0), nothing degenerate, nothing piercing',
-    [vEx2.open, vEx2.degen, vEx2.pierce], [0, 0, 0]);
+  check('45 stacked loops on the plate PASS tools/mesh_validate.py (unfused: 504 non-manifold edges where shells met)',
+    [vEx2.verdict, vEx2.open, vEx2.nm, vEx2.degen, vEx2.pierce], ['PASS', 0, 0, 0, 0]);
+  check('and it holds the stack\'s material: stacked beads only touch, so the volume is the runs\' sum (rel < 1e-5)',
+    Math.abs(vEx2.volume - gS.vol) / gS.vol < 1e-5, true);
   await shot(page, 'solid-06-stack-on-plate.png', 'the exported 45-loop solid on the plate', 'body');
+
+  // (b2) two features across every layer - Inner + Outer wall - through the real Solid STL button.
+  await page.click('#btn-microscope');
+  await page.waitForFunction(() => window.NSO_MICROSCOPE.isOpen(), null, { timeout: 10000 });
+  const wallIds = await page.evaluate(() => {
+    const d = window.NSO_MICROSCOPE.getDoc();
+    return d.parsed.moves.filter((m) => m.feature === 'Inner wall' || m.feature === 'Outer wall').map((m) => m.index);
+  });
+  await page.evaluate((ids) => { window.NSO_MICROSCOPE.showAll(); window.NSO_MICROSCOPE.setSelectionMoves(ids); }, wallIds);
+  const wantW = await page.evaluate(() => window.NSO_MICROSCOPE.fusedGeometry().then((g) =>
+    ({ tris: Array.from(g.attributes.position.array), fuse: g.userData.fuse, label: window.NSO_MICROSCOPE.exportLabel() })));
+  const [dlW] = await Promise.all([page.waitForEvent('download', { timeout: 60000 }), page.click('#ms-btn-export-solid-stl')]);
+  const dlWPath = join(TMP, 'walls.stl');
+  await dlW.saveAs(dlWPath);
+  const bufW = await readFile(dlWPath);
+  const stW = await page.evaluate(() => document.getElementById('status').textContent);
+  console.log('       ' + wantW.label);
+  console.log('       status: ' + stW);
+  check('Inner + Outer wall (2 features, every layer): the download is the fused solid, triangle for triangle',
+    [bufW.readUInt32LE(80), bufW.subarray(84).equals(soupToSTL(wantW.tris).subarray(84))], [wantW.tris.length / 9, true]);
+  check('the status line says every junction was fused and what overlap was counted once',
+    /fused: 144 run shells -> 5 solids, 139 unions at 305 of 305 junctions/.test(stW) && /mm\u00b3 of overlap counted once/.test(stW), true);
+  const vW = validate(dlWPath);
+  console.log('       walls, downloaded: ' + JSON.stringify(vW));
+  check('and that multi-run file PASSES tools/mesh_validate.py --gate', [vW.verdict, vW.open, vW.nm, vW.pierce], ['PASS', 0, 0, 0]);
+  check('its volume is the runs minus their real overlap (as fuseShells measured it)',
+    Math.abs(vW.volume - wantW.fuse.fusedVolume) / vW.volume < 1e-6 && wantW.fuse.overlapRemovedMm3 > 100, true);
+  await page.click('#ms-close');
 
   // (c) Mirror, the real button, on an exported solid. Mirror reflects across
   // the piece's dominant axis and refuses a piece without one - every loop in
