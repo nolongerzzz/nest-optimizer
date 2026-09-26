@@ -893,6 +893,10 @@
                   aria-controls="ms-legend" title="Minimize the list">&minus;</button>
         </div>
         <div id="ms-legend"></div>
+        <!-- Tabs for what the geometry has but the file does not name. The
+             Flange tab (nso_flange.js, docs/GSCOPE-FLANGE.md). Kept apart from
+             #ms-legend, whose rows are exactly the file's own groups. -->
+        <div id="ms-detected"></div>
       </div>
       <div id="ms-hint-badge"></div>
       <!-- The layer-range slider, docked to the viewport's right edge. Two
@@ -1024,7 +1028,10 @@
   <script src="app-library.js?v=libsave2"></script>
   <script src="app-photoset.js?v=photoset2"></script>
 
-  <script src="app-microscope.js?v=scope8"></script>
+  <!-- Flange detection for G-scope's Flange tab. Pure; app-microscope.js
+       calls it with app-cut.js's rawCut. -->
+  <script src="nso_flange.js?v=flange1"></script>
+  <script src="app-microscope.js?v=scope9"></script>
   <!-- G-scope supports: overhang markers, point-click generation, per-support
        edit / remove. After app-microscope.js, whose hooks it uses, and after
        nso_support_aim.js / nso_support_tree.js / app-join.js, whose

@@ -61,6 +61,18 @@ async function frames(page) {
   await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 }
 
+/* A real click made while a big slice is live in G-scope. G-scope redraws
+   every frame, and under headless Chromium's software GL the whole tabletop
+   slice costs ~2.5 s a frame on a quiet box (measured: this click took 23.4 s
+   unthrottled, and hit Playwright's 30 s default at 2x CPU throttle - the
+   exact TimeoutError CI shard 6 kept reporting at this click, on a8a4ea2 and
+   after). A real mouse click queues behind several of those frames, so the
+   default is sized for a light page, not this one. Only the clicks made with
+   tabletop on screen use this; every other click keeps the 30 s default, so a
+   genuine hang elsewhere still fails fast. */
+const HEAVY_CLICK_MS = 150000;
+function heavyClick(page, sel) { return page.click(sel, { timeout: HEAVY_CLICK_MS }); }
+
 async function shot(page, file, label, target = 'scope') {
   if (target === 'scope') await page.evaluate(() => window.NSO_MICROSCOPE.flushView());
   await frames(page);
@@ -369,7 +381,7 @@ async function main() {
   console.log(`       tabletop: ${pick.feature} loop, ${pick.ids.length} moves, long/short ${pick.ratio.toFixed(2)}`);
   await page.evaluate((ids) => window.NSO_MICROSCOPE.setSelectionMoves(ids), pick.ids);
   const n3 = await page.evaluate(() => state.models.length);
-  await page.click('#ms-btn-export-solid-plate');
+  await heavyClick(page, '#ms-btn-export-solid-plate');
   await page.waitForFunction((n) => state.models.length === n + 1, n3, { timeout: 30000 });
   const ex = await page.evaluate(() => {
     const m = state.models[state.models.length - 1];
@@ -434,7 +446,7 @@ async function main() {
   await page.click('#btn-microscope');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.isOpen(), null, { timeout: 10000 });
   // A file already under the lens stays there on reopen; Read the plate swaps to the plate.
-  await page.click('#ms-btn-plate');
+  await heavyClick(page, '#ms-btn-plate');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'mesh', null, { timeout: 10000 });
   await page.evaluate(() => { const M = window.NSO_MICROSCOPE; M.selectVisible(); });
   check('a mesh document: no Render row, no Export as solid (it already is a mesh)',
