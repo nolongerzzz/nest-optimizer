@@ -231,33 +231,42 @@ var NSO_MICROSCOPE = (function () {
     };
   }
 
+  /**
+   * Triangle centroids and bounds, once per object, so the capture box never
+   * re-derives them. Every mesh object gets these - a build object, a plate
+   * piece, or a feature lifted out of one (the Flange tab's).
+   */
+  function prepObject(o) {
+    var p = o.positions;
+    var n = Math.floor(p.length / 9);
+    var c = new Float32Array(n * 3);
+    var b = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity,
+              minZ: Infinity, maxZ: -Infinity };
+    for (var t = 0; t < n; t++) {
+      var k = t * 9;
+      var ax = (p[k] + p[k + 3] + p[k + 6]) / 3;
+      var ay = (p[k + 1] + p[k + 4] + p[k + 7]) / 3;
+      var az = (p[k + 2] + p[k + 5] + p[k + 8]) / 3;
+      c[t * 3] = ax; c[t * 3 + 1] = ay; c[t * 3 + 2] = az;
+      for (var v = 0; v < 3; v++) {
+        var x = p[k + v * 3], y = p[k + v * 3 + 1], z = p[k + v * 3 + 2];
+        if (x < b.minX) b.minX = x; if (x > b.maxX) b.maxX = x;
+        if (y < b.minY) b.minY = y; if (y > b.maxY) b.maxY = y;
+        if (z < b.minZ) b.minZ = z; if (z > b.maxZ) b.maxZ = z;
+      }
+    }
+    o.centroids = c;
+    o.triangles = n;
+    o.bounds = b;
+    return o;
+  }
+
   /** A plain mesh: one group per build object, triangles as read. */
   function meshDoc(filename, objects) {
     var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
     var minZ = Infinity, maxZ = -Infinity;
     objects.forEach(function (o) {
-      var p = o.positions;
-      // Triangle centroids, once, so the capture box never re-derives them.
-      var n = Math.floor(p.length / 9);
-      var c = new Float32Array(n * 3);
-      var b = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity,
-                minZ: Infinity, maxZ: -Infinity };
-      for (var t = 0; t < n; t++) {
-        var k = t * 9;
-        var ax = (p[k] + p[k + 3] + p[k + 6]) / 3;
-        var ay = (p[k + 1] + p[k + 4] + p[k + 7]) / 3;
-        var az = (p[k + 2] + p[k + 5] + p[k + 8]) / 3;
-        c[t * 3] = ax; c[t * 3 + 1] = ay; c[t * 3 + 2] = az;
-        for (var v = 0; v < 3; v++) {
-          var x = p[k + v * 3], y = p[k + v * 3 + 1], z = p[k + v * 3 + 2];
-          if (x < b.minX) b.minX = x; if (x > b.maxX) b.maxX = x;
-          if (y < b.minY) b.minY = y; if (y > b.maxY) b.maxY = y;
-          if (z < b.minZ) b.minZ = z; if (z > b.maxZ) b.maxZ = z;
-        }
-      }
-      o.centroids = c;
-      o.triangles = n;
-      o.bounds = b;
+      var b = prepObject(o).bounds;
       if (b.minX < minX) minX = b.minX;
       if (b.maxX > maxX) maxX = b.maxX;
       if (b.minY < minY) minY = b.minY;
@@ -1020,6 +1029,7 @@ var NSO_MICROSCOPE = (function () {
     }
     var tris = currentSelection.reduce(function (a, o) { return a + o.triangles; }, 0);
     info((selectionSource === 'visible' ? '<b>everything shown</b>, '
+          : selectionSource === 'flange' ? '<b>Flange</b> (detected), '
           : selectionSource === 'pick' ? '<b>picked</b>, '
           : '<b>' + balls.length + ' box(es)</b>, ') + '<b>' + currentSelection.length +
          ' object(s)</b>, ' + tris + ' triangle(s)<br>' +
@@ -1046,7 +1056,7 @@ var NSO_MICROSCOPE = (function () {
     var legend = $('ms-legend');
     if (!legend) return;
     legend.innerHTML = '';
-    if (!doc) return;
+    if (!doc) { buildDetectedRow(); return; }
     Object.keys(doc.groups).sort().forEach(function (name, gi) {
       var g = doc.groups[name];
       var count = doc.kind === 'toolpath' ? g.length : g.triangles;
@@ -1079,6 +1089,7 @@ var NSO_MICROSCOPE = (function () {
       });
       legend.appendChild(item);
     });
+    buildDetectedRow();
   }
 
   // --- viewport interaction -------------------------------------------------
@@ -1312,7 +1323,8 @@ var NSO_MICROSCOPE = (function () {
       geo.rotateX(-Math.PI / 2);
       geo.computeVertexNormals();
       var mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-        color: colorForGroup(o.name, Math.max(0, okeys.indexOf(o.name))), metalness: 0.05, roughness: 0.4,
+        color: isDetected(o) ? FLANGE_COLOR : colorForGroup(o.name, Math.max(0, okeys.indexOf(o.name))),
+        metalness: 0.05, roughness: 0.4,
         clippingPlanes: clipPlanes()
       }));
       mesh.userData.feature = o.name;
@@ -1472,6 +1484,7 @@ var NSO_MICROSCOPE = (function () {
     if (selectionSource !== 'line') lineCursor = -1;
     if (doc) describeSelection();
     syncExportRow();
+    buildDetectedRow();        // lit while the selection is the flange
     refreshHighlightSoon();
     // Isolated, the view IS the selection: a box dragged, a line stepped,
     // redraws it. One rebuild per frame, however many steps a drag makes.
@@ -1511,7 +1524,8 @@ var NSO_MICROSCOPE = (function () {
       out.objects = currentSelection.map(function (o) {
         if (o.bounds.minZ < lo) lo = o.bounds.minZ;
         if (o.bounds.maxZ > hi) hi = o.bounds.maxZ;
-        return { name: o.name, positions: o.positions, placedIndex: o.placedIndex, sourceId: o.sourceId };
+        return { name: o.name, positions: o.positions, placedIndex: o.placedIndex, sourceId: o.sourceId,
+                 detected: o.detected || null };
       });
     }
     out.zExtent = [lo, hi];
@@ -1605,6 +1619,164 @@ var NSO_MICROSCOPE = (function () {
     return true;
   }
 
+  // ===========================================================================
+  // Detected features: the Flange tab
+  // ===========================================================================
+  //
+  // The tabs above are what the FILE groups - a slice's FEATURE: tags, a
+  // mesh's build objects. A flange is a functional part of ONE object, so no
+  // file names it: nso_flange.js finds it (docs/GSCOPE-FLANGE.md has the rule
+  // and what it was validated on) and lifts it out as its own closed solid
+  // with the Cut tool's rawCut. What comes back is an ordinary mesh object -
+  // positions, centroids, bounds - so it reaches the rest of the view through
+  // setSelection() like anything else: Isolate, the highlight, Crop and both
+  // exports take it without knowing where it came from. The one thing it is
+  // not is a plate piece, so Crop sends it the file route (a new piece, then
+  // cropped) rather than editing a piece in place.
+  //
+  // Detection runs once per document, just after it opens, so the view is up
+  // first; clicking the tab before it has finished runs it there and then.
+
+  var FLANGE_COLOR = 0xff8a1f;
+  var FLANGE_MAX_TRIS = 400000;   // past this, say so rather than stall the page
+
+  function isDetected(o) { return !!(o && o.detected); }
+
+  function flangeState() {
+    if (!doc) return null;
+    if (!doc.flange) {
+      doc.flange = doc.kind !== 'mesh'
+        ? { status: 'unavailable', objects: [], notes: [],
+            reason: 'a slice has beads, not a closed surface to measure. Open the part itself ' +
+                    '(its STL or 3MF, or the plate) to find its flange.' }
+        : { status: 'pending', objects: [], notes: [], reason: '' };
+    }
+    return doc.flange;
+  }
+
+  /** Find and lift out every flange in the document. Idempotent per document. */
+  function detectFlanges() {
+    var st = flangeState();
+    if (!st || st.status !== 'pending') return st;
+    var F = window.NSO_Flange;
+    if (!F || typeof rawCut !== 'function') {
+      st.status = 'unavailable';
+      st.reason = 'the flange detector (nso_flange.js) or the Cut tool (app-cut.js) is not loaded.';
+      return st;
+    }
+    var t0 = Date.now();
+    var single = doc.objects.length === 1 && doc.source !== 'plate';
+    doc.objects.forEach(function (host) {
+      if (host.triangles > FLANGE_MAX_TRIS) {
+        st.notes.push(host.name + ': ' + host.triangles + ' triangles, too many to scan here');
+        return;
+      }
+      var r;
+      try { r = F.detect(host.positions); }
+      catch (err) { console.error('[g-scope] flange detection', err); st.notes.push(host.name + ': detection failed'); return; }
+      if (!r.flanges.length) { st.notes.push(host.name + ': ' + r.reason.replace(/^no flange: /, '')); return; }
+      r.flanges.forEach(function (f, i) {
+        var e = F.extract(host.positions, f, rawCut);
+        if (!e.ok) { st.notes.push(host.name + ': a flange was found but not lifted out (' + e.reason + ')'); return; }
+        var label = (single ? baseName(doc.name) : host.name) + ' - Flange' +
+          (r.flanges.length > 1 ? ' ' + (i + 1) : '');
+        st.objects.push(prepObject({
+          name: label,
+          positions: e.positions,
+          detected: 'flange',
+          host: host.name,
+          flange: { thickness: f.thickness, reach: f.reach, rootLength: f.rootLen,
+                    axis: f.axis, band: f.band, cut: e.plane }
+        }));
+      });
+    });
+    st.status = st.objects.length ? 'found' : 'none';
+    st.ms = Date.now() - t0;
+    if (!st.objects.length) {
+      st.reason = st.notes.length === 1 ? st.notes[0].replace(/^[^:]*: /, '') : st.notes.join('; ');
+    }
+    return st;
+  }
+
+  function flangeRowText(st) {
+    if (st.status === 'pending') return 'Flange - looking...';
+    if (st.status === 'unavailable') return 'Flange - not on a slice';
+    if (st.status === 'none') return 'Flange - none detected';
+    var o = st.objects;
+    return 'Flange (' + (o.length === 1
+      ? o[0].flange.thickness.toFixed(2) + ' mm, ' + o[0].triangles + ' tri'
+      : o.length + ' found') + ')';
+  }
+
+  /** The Flange tab, under the file's own tabs. Rebuilt with the legend. */
+  function buildDetectedRow() {
+    var box = $('ms-detected');
+    if (!box) return;
+    box.innerHTML = '';
+    var st = flangeState();    // null with no document: the row goes with it
+    if (!st) return;
+    var item = document.createElement('div');
+    item.className = 'ms-legend-item ms-detected-item' + (st.status === 'found' ? '' : ' dim');
+    item.dataset.detected = 'flange';
+    item.dataset.status = st.status;
+    var on = st.status === 'found' && currentSelection.length > 0 &&
+      currentSelection.every(isDetected);
+    if (on) item.classList.add('active');
+    var swatch = document.createElement('div');
+    swatch.className = 'ms-swatch';
+    swatch.style.background = '#' + ('000000' + FLANGE_COLOR.toString(16)).slice(-6);
+    var label = document.createElement('span');
+    label.className = 'ms-legend-label';
+    label.textContent = flangeRowText(st);
+    item.title = st.status === 'found'
+      ? 'Detected from the geometry, not named in the file. Click to isolate ' +
+        (st.objects.length === 1 ? 'it' : 'them') + ' - then Crop or Export as usual.\n' +
+        st.objects.map(function (o) {
+          return o.name + ': ' + o.flange.thickness.toFixed(2) + ' mm thick, ' + o.flange.reach.toFixed(1) +
+            ' mm out, ' + o.flange.rootLength.toFixed(1) + ' mm along its root';
+        }).join('\n')
+      : st.status === 'pending' ? 'Looking for a flange in the geometry...'
+      : 'No flange: ' + st.reason;
+    item.appendChild(swatch); item.appendChild(label);
+    item.addEventListener('click', function () { isolateFlange(); });
+    box.appendChild(item);
+  }
+
+  /**
+   * The Flange tab's click: the flange(s) as the selection, isolated. On a
+   * piece with none, say why and change nothing.
+   */
+  function isolateFlange() {
+    var st = detectFlanges();
+    if (!st) return false;
+    buildDetectedRow();
+    if (st.status !== 'found') {
+      var why = st.status === 'unavailable' ? 'Flange: not available - ' + st.reason
+        : 'Flange: none detected - ' + st.reason;
+      say(why, false);
+      info((st.status === 'unavailable' ? '<b>Flange: not available here.</b> ' : '<b>No flange detected.</b> ') +
+           st.reason.replace(/</g, '&lt;'));
+      return false;
+    }
+    removeAllBalls();
+    setSelection(st.objects.slice(), 'flange');
+    isolate();
+    buildDetectedRow();
+    return true;
+  }
+
+  var detectTimer = null;
+  function detectSoon() {
+    if (detectTimer) clearTimeout(detectTimer);
+    var mine = doc;
+    detectTimer = setTimeout(function () {
+      detectTimer = null;
+      if (doc !== mine) return;
+      detectFlanges();
+      buildDetectedRow();
+    }, 30);
+  }
+
   /**
    * Clear the selection FROM VIEW. Hides it - a piece, a feature's lines, a
    * picked line - and stops there: no export, no plate change, no undo entry.
@@ -1618,7 +1790,7 @@ var NSO_MICROSCOPE = (function () {
     if (doc.kind === 'toolpath') {
       currentSelection.forEach(function (s) { CLEARED.add(s.id); });
     } else {
-      currentSelection.forEach(function (o) { HIDDEN.add(o.name); });
+      currentSelection.forEach(function (o) { if (!isDetected(o)) HIDDEN.add(o.name); });
     }
     removeAllBalls();
     setSelection([], selectionSource === 'line' ? 'line' : 'box');
@@ -1774,6 +1946,22 @@ var NSO_MICROSCOPE = (function () {
       return;
     }
     currentSelection.forEach(function (o) {
+      if (isDetected(o)) {
+        // Lifted out of a part that is drawn whole, so it is drawn over that
+        // part - winning the depth test where the two coincide.
+        var geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(o.positions), 3));
+        geo.translate(-doc.cx, -doc.cy, 0);
+        geo.rotateX(-Math.PI / 2);
+        geo.computeVertexNormals();
+        var hm = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+          color: FLANGE_COLOR, metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes(),
+          polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1
+        }));
+        hm.userData.feature = o.name;
+        g.add(hm);
+        return;
+      }
       var m = view.overviewMeshes[o.name];
       if (m && m.material && m.material.emissive) m.material.emissive.setHex(0x3a1010);
     });
@@ -2059,8 +2247,17 @@ var NSO_MICROSCOPE = (function () {
     if (!cropAvailable()) return 'The Crop tool (app-crop.js) is not loaded';
     if (!currentSelection.length) return 'Select what to crop first';
     if (!zr || zRangeFull()) return 'Narrow the layer range to the band to remove';
-    if (doc.source === 'plate' && currentSelection.length !== 1) return 'Crop edits one plate piece at a time';
+    if (cropsPiece() && currentSelection.length !== 1) return 'Crop edits one plate piece at a time';
     return '';
+  }
+
+  /**
+   * Crop edits a plate piece in place only when the selection IS a plate
+   * piece. A flange lifted out of one is not: it goes the file route, as a
+   * new piece that is then cropped, and the piece it came from is untouched.
+   */
+  function cropsPiece() {
+    return doc && doc.source === 'plate' && !currentSelection.some(isDetected);
   }
 
   function syncCropRow() {
@@ -2075,7 +2272,7 @@ var NSO_MICROSCOPE = (function () {
     var band = zBandMm();
     read.textContent = 'Removes Z ' + band[0].toFixed(2) + ' - ' + band[1].toFixed(2) + ' mm (' +
       (band[1] - band[0]).toFixed(2) + ' mm) from ' +
-      (doc.source === 'plate' ? '"' + currentSelection[0].name + '", in place'
+      (cropsPiece() ? '"' + currentSelection[0].name + '", in place'
         : 'the selection, as a new piece on the plate') + ', and joins the rest.';
   }
 
@@ -2089,7 +2286,7 @@ var NSO_MICROSCOPE = (function () {
     var band = zBandMm();
     var label = cropLabel(band);
 
-    if (doc.source === 'plate') {
+    if (cropsPiece()) {
       var o = currentSelection[0];
       var p = state.placed && state.placed[o.placedIndex];
       var m = p && (state.models || []).find(function (mm) { return mm && mm.id === p.sourceId; });
@@ -2194,6 +2391,11 @@ var NSO_MICROSCOPE = (function () {
   function exportLabel() {
     var base = baseName(doc.name);
     if (doc.kind !== 'toolpath') {
+      // A detected feature is already named for its part ("<part> - Flange").
+      if (currentSelection.every(isDetected)) {
+        return currentSelection.length === 1 ? currentSelection[0].name
+          : baseName(doc.name) + ' - ' + currentSelection.length + ' flanges';
+      }
       var what = currentSelection.length === 1
         ? currentSelection[0].name
         : currentSelection.length + ' ' + (doc.source === 'plate' ? 'pieces' : 'objects');
@@ -2673,6 +2875,7 @@ var NSO_MICROSCOPE = (function () {
     syncZRangeUI();
     syncCropRow();
     syncLineRead();
+    if (flangeState() && flangeState().status === 'pending') detectSoon();
     docListeners.forEach(function (fn) {
       try { fn(doc); } catch (err) { console.error('[g-scope] document listener', err); }
     });
@@ -2985,7 +3188,20 @@ var NSO_MICROSCOPE = (function () {
       setSelection(doc.objects.filter(function (o) { return want.has(o.name); }), source || 'pick');
       return currentSelection;
     },
-    getView: function () { return view; }
+    getView: function () { return view; },
+    // --- detected features (docs/GSCOPE-FLANGE.md) ---
+    /** The Flange tab's state: status 'pending' | 'found' | 'none' | 'unavailable'. */
+    flange: function () {
+      var st = flangeState();
+      if (!st) return null;
+      return { status: st.status, reason: st.reason, notes: st.notes.slice(), ms: st.ms,
+               objects: st.objects.map(function (o) {
+                 return { name: o.name, host: o.host, triangles: o.triangles, bounds: o.bounds,
+                          flange: o.flange };
+               }) };
+    },
+    detectFlanges: function () { var st = detectFlanges(); buildDetectedRow(); return st ? st.status : null; },
+    isolateFlange: isolateFlange
   };
 })();
 
