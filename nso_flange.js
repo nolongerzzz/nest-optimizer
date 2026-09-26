@@ -60,6 +60,7 @@
 
   var AXIS_COS = Math.cos(5 * Math.PI / 180);
   var ROOT_CLEAR = 0.002;     // mm the cut stands off the outermost neck wall
+  var PIECE_GAP = 0.001;      // mm between two neck-wall planes that are two pieces, not one
 
   function vsub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
   function dot(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
@@ -557,6 +558,9 @@
     var off0 = -(p[0] * e2[0] + p[1] * e2[1]);                   // root offset along N (u,v part)
     var n = Math.floor(soup.length / 9);
     var sw = 0, sa = 0, outer = -Infinity;
+    // Along the root: the axis x the normal, the frame nso_detach.js cuts in.
+    var E = norm(cross(cand.axis, N).map(function (x) { return Math.abs(x) < 1e-12 ? 0 : x; }));
+    var faces = [];
     for (var t = 0; t < n; t++) {
       var tn = triNormal(soup, t);
       if (!tn || dot(tn.n, N) < AXIS_COS) continue;
@@ -570,6 +574,9 @@
       if (Math.abs(offc - off0) > 1.5 * h) continue;
       sw += offc * tn.area; sa += tn.area;
       if (offc > outer) outer = offc;
+      var e0 = dot([soup[o], soup[o + 1], soup[o + 2]], E), e1 = dot([soup[o + 3], soup[o + 4], soup[o + 5]], E),
+          e2 = dot([soup[o + 6], soup[o + 7], soup[o + 8]], E);
+      faces.push({ off: offc, area: tn.area, lo: Math.min(e0, e1, e2), hi: Math.max(e0, e1, e2) });
     }
     var snapped = sa > 0;
     // The cut goes just past the OUTERMOST piece of neck wall, not through
@@ -580,12 +587,41 @@
     // snapped onto the cap, and far below anything a printer can see.
     return {
       normal: N,
+      along: E,
       wall: snapped ? sw / sa : off0,
       offset: snapped ? outer + ROOT_CLEAR : off0,
       snapped: snapped,
       wallArea: sa,
-      wallSpread: snapped ? outer - sw / sa : 0
+      wallSpread: snapped ? outer - sw / sa : 0,
+      pieces: wallPieces(faces)
     };
+  }
+
+  /**
+   * The neck wall as the flat pieces it is really made of. The cut above
+   * only needs the outermost one. Detach needs all of them: the clamp bar's
+   * wall is three planes, y = -2.0103 / -1.9987 / -1.9897, stepping 10 um at
+   * each Mirror-Join seam, so a hull capped on any one plane is either left
+   * with a skin of flange (up to 22.5 um) or shaved off its own wall.
+   * Faces are grouped by their offset along the normal (a step is 10 um, a
+   * turned pose's float noise is 12 nm, so 1 um splits one from the other),
+   * and each piece says where it runs along the root.
+   */
+  function wallPieces(faces) {
+    faces.sort(function (a, b) { return a.off - b.off; });
+    var out = [], cur = null;
+    faces.forEach(function (f) {
+      if (!cur || f.off - cur.last > PIECE_GAP) {
+        cur = { sw: 0, area: 0, lo: Infinity, hi: -Infinity, first: f.off, last: f.off };
+        out.push(cur);
+      }
+      cur.sw += f.off * f.area; cur.area += f.area; cur.last = f.off;
+      if (f.lo < cur.lo) cur.lo = f.lo;
+      if (f.hi > cur.hi) cur.hi = f.hi;
+    });
+    return out.map(function (p) {
+      return { offset: p.sw / p.area, area: p.area, lo: p.lo, hi: p.hi, spread: p.last - p.first };
+    }).sort(function (a, b) { return a.lo - b.lo; });
   }
 
   // -------------------------------------------------------------------------

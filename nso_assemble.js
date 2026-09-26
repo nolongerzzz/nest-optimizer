@@ -330,6 +330,12 @@
        footTolMm            how far auto-aim's foot may sit from `at` before
                             the attach is refused; default the arm's own
                             half-width
+       footAt               `at` IS the foot: skip auto-aim's nearest-foot
+                            search (and so the drift check), keep its line
+                            test. For a real piece put back by hand.
+       up                   where the arm's local +Y should point after the
+                            turn. Default: wherever place()'s shortest turn
+                            leaves it, which is all a round arm needs.
        obstacles            soups the line must not cross; the body is added
        aim / extendRaw / thickness   injectable dependencies
   */
@@ -380,8 +386,38 @@
        name and out of scope here for the same reason. */
     out.stage = 'aim';
     var obstacles = [bodySoup].concat(opts.obstacles || []);
-    var nb = SA.nearestBase(target, [{ kind: 'piece', soup: bodySoup, id: opts.bodyId || 'body' }],
-                            { obstacles: obstacles, minLength: opts.minLength });
+    var nb;
+    if (opts.footAt) {
+      /* The caller's point IS the foot (opts.footAt). Auto-aim's foot is the
+         point on the body NEAREST THE TIP, which for a strut or a Stock arm
+         aimed along the face normal is the point that was picked. For a real
+         piece being put back - a detached flange, lying flat - it need not
+         be: a plate that cantilevers 0.9 mm over something (v9's teeth) has
+         its tip nearest to THAT, not to its own root 15 mm back, and the
+         drift check below would refuse every such placement. So here the
+         foot is `at`, the aim is `dir`, and the one auto-aim question that
+         still applies is asked in auto-aim's own words: is the straight line
+         out clear (NSO_SupportAim.lineBlockedAt, the test nearestBase runs). */
+      if (!at) {
+        out.reason = 'opts.footAt needs opts.at + opts.dir: the foot and the way out of it';
+        return out;
+      }
+      if (typeof SA.lineBlockedAt !== 'function') {
+        out.reason = 'nso_support_aim.js has no lineBlockedAt - the line test footAt asks';
+        return out;
+      }
+      var blockAt = SA.lineBlockedAt(obstacles, at, want, armLen);
+      nb = { ok: blockAt < 0, from: at, dir: want, length: armLen, foot: 'caller' };
+      if (!nb.ok) {
+        nb.reason = 'the straight line out of the picked point is blocked ' + blockAt.toFixed(3) +
+          ' mm along, ' + (armLen - blockAt).toFixed(3) + ' mm short of the piece\'s far end';
+      } else {
+        nb.reason = 'foot given by the caller, line clear for ' + armLen.toFixed(3) + ' mm';
+      }
+    } else {
+      nb = SA.nearestBase(target, [{ kind: 'piece', soup: bodySoup, id: opts.bodyId || 'body' }],
+                          { obstacles: obstacles, minLength: opts.minLength });
+    }
     out.aim = nb;
     if (!nb.ok) { out.reason = nb.reason; return out; }
     out.from = nb.from;
@@ -393,7 +429,7 @@
        itself. When it is not, the pick and the aim disagree - the user
        clicked one place and the arm would grow out of another - and that is
        reported rather than silently resolved in the aim's favour. */
-    if (at) {
+    if (at && !opts.footAt) {
       var drift = len3(sub(nb.from, at));
       out.footDriftMm = drift;
       var footTol = (opts.footTolMm == null) ? Math.max(armWidth(armSoup) * 0.5, 1e-3)
@@ -405,6 +441,26 @@
           'arm can leave straight, or pass opts.target and aim it yourself.';
         return out;
       }
+    }
+
+    /* ---- 2b. the twist about the aim, when the caller names one ----
+
+       place() turns local +Z onto the aim by the SHORTEST turn, so where the
+       arm's local +X and +Y end up is whatever that turn makes of them. For
+       a Stock cylinder that is nothing - it is round. For a real piece it is
+       the whole answer: a flange's plate has to lie the way it lay, not
+       wherever the shortest turn leaves it. opts.up names where local +Y
+       should point (it is squared up against the aim first). place() is
+       ASKED which turn it will bake, on a one-triangle probe, and the arm is
+       pre-turned about its own +Z by the difference - so place() stays the
+       one bake, with its own antiparallel fallback, and nothing here repeats
+       its quaternion. A turn about +Z leaves Extend's axis where it was. */
+    if (opts.up) {
+      out.stage = 'twist';
+      var tw = twistFor(SA, nb.dir, opts.up, opts);
+      if (!tw.ok) { out.reason = tw.reason; return out; }
+      armSoup = turnSoup(armSoup, tw.T);
+      out.twistDeg = tw.deg;
     }
 
     /* ---- 3. trial seat at zero engagement, to find the rim ---- */
@@ -483,6 +539,45 @@
                root[1] + nb.dir[1] * (kept ? armLen + engage : armLen),
                root[2] + nb.dir[2] * (kept ? armLen + engage : armLen)];
     out.reason = describe(out);
+    return out;
+  }
+
+  /* The pre-turn about local +Z that makes place()'s bake land local +Y on
+     `up` (squared against the aim). T = Rp^T * Rwant, where Rp is the turn
+     place() reports for this aim and Rwant takes local x, y, z to
+     up x dir, up, dir. Both take +Z to the aim, so T turns about +Z only. */
+  function twistFor(SA, dir, up, opts) {
+    var d = unit(dir), u0 = finite3(up) ? unit(up) : null;
+    if (!d || !u0) return { ok: false, reason: 'opts.up is not a usable direction' };
+    var along = dot(u0, d);
+    var u = unit([u0[0] - d[0] * along, u0[1] - d[1] * along, u0[2] - d[2] * along]);
+    if (!u || Math.abs(along) > 1 - 1e-9) {
+      return { ok: false, reason: 'opts.up lies along the aim, so it names no twist' };
+    }
+    var x = [u[1] * d[2] - u[2] * d[1], u[2] * d[0] - u[0] * d[2], u[0] * d[1] - u[1] * d[0]];
+    var probe = SA.place(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), [0, 0, 0], d, opts);
+    if (!probe.ok) return { ok: false, reason: probe.reason };
+    var m = probe.matrix;                        /* column-major, THREE's order */
+    var Rp = [[m[0], m[1], m[2]], [m[4], m[5], m[6]], [m[8], m[9], m[10]]];   /* columns */
+    var W = [x, u, d];                                                         /* columns */
+    var T = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];   /* row-major: T[i][j] = Rp_col_i . W_col_j */
+    for (var i = 0; i < 3; i++) for (var j = 0; j < 3; j++) T[i][j] = dot(Rp[i], W[j]);
+    /* An exact quarter turn reads as one, not as one plus 6e-17. */
+    for (i = 0; i < 3; i++) for (j = 0; j < 3; j++) {
+      var r = Math.round(T[i][j]);
+      if (Math.abs(T[i][j] - r) < 1e-12) T[i][j] = r;
+    }
+    var deg = Math.atan2(T[1][0], T[0][0]) * 180 / Math.PI;
+    return { ok: true, T: T, deg: deg };
+  }
+  function turnSoup(soup, T) {
+    var out = new Float32Array(soup.length);
+    for (var i = 0; i < soup.length; i += 3) {
+      var x = soup[i], y = soup[i + 1], z = soup[i + 2];
+      out[i] = T[0][0] * x + T[0][1] * y + T[0][2] * z;
+      out[i + 1] = T[1][0] * x + T[1][1] * y + T[1][2] * z;
+      out[i + 2] = T[2][0] * x + T[2][1] * y + T[2][2] * z;
+    }
     return out;
   }
 

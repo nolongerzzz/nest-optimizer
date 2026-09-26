@@ -161,6 +161,8 @@ const UNDO_REPLACE_LABEL = {
   fillReplace: 'Undo: Fill reverted',
   fattenReplace: 'Undo: Fatten reverted',
   attachReplace: 'Undo: Attach reverted',
+  detachReplace: 'Undo: Detach reverted',
+  reattachReplace: 'Undo: Reattach reverted',
   stockReplace: 'Undo: Stock adjustment reverted'
 };
 
@@ -229,6 +231,44 @@ function undoLast() {
     state.selectedIndex = -1;
     renderModelList(); updateOptimizeButton(); updateEditSize(); updateAdjustUI();
     setStatus(entry.label || 'Undo: support edit reverted');
+    return;
+  }
+  if (entry.type === 'featureSwap') {
+    // Detach and Reattach (app-detach.js): one step that changed two things.
+    // One piece's geometry was swapped (entry.replace, a step of a type in
+    // UNDO_REPLACE_LABEL) AND a piece was added (Detach: the flange) or used
+    // up (Reattach: the flange, now part of the piece it went on). Pieces
+    // added come off, pieces used up go back where they were, then the swap
+    // is undone by the one branch that undoes swaps.
+    const added = new Set(entry.addedIds || []);
+    state.models = state.models.filter(m => !added.has(m.id));
+    const keptPlaced = [];
+    state.placed.forEach(p => {
+      if (p && p.sourceId != null && added.has(p.sourceId)) {
+        if (p.mesh && p.mesh.parent) p.mesh.parent.remove(p.mesh);
+      } else {
+        keptPlaced.push(p);
+      }
+    });
+    state.placed = keptPlaced;
+    (entry.removed || []).slice().reverse().forEach(r => {
+      if (r.model && !state.models.some(m => m.id === r.model.id)) {
+        state.models.splice(Math.min(r.modelIndex, state.models.length), 0, r.model);
+      }
+      if (r.placed) {
+        state.placed.splice(Math.min(r.placedIndex, state.placed.length), 0, r.placed);
+        if (r.placed.mesh && state.modelGroup) state.modelGroup.add(r.placed.mesh);
+      }
+    });
+    state.placed.forEach((p, i) => { if (p.mesh) p.mesh.userData.placedIndex = i; });
+    state.selectedIndex = -1;
+    if (entry.replace) {
+      state.undoStack.push(entry.replace);
+      undoLast();
+    }
+    renderModelList(); updateOptimizeButton(); updateEditSize(); updateAdjustUI();
+    if (typeof window.nsoDetachRefresh === 'function') window.nsoDetachRefresh();
+    setStatus(entry.label || 'Undo: reverted');
     return;
   }
   if (entry.type === 'splitReplace') {
@@ -2650,6 +2690,12 @@ function onCanvasPointerDown(event) {
      decides, where its own hit test lives. Asked here for the same reason
      Seat here is - it bakes, so it must be ahead of measure. */
   if (typeof window.nsoAttachTakesClick === 'function' && window.nsoAttachTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+  /* Reattach (app-detach.js) owns a click on a piece for the same reason:
+     the click names where a detached flange's root is seated, and it bakes. */
+  if (typeof window.nsoReattachTakesClick === 'function' && window.nsoReattachTakesClick(event)) {
     setOrbitFromPlate(false);
     return;
   }

@@ -64,6 +64,12 @@ flange?" always has an answer. The tab puts the nearest slab's failures into
 words, for example "the nearest flat plate (8 mm) does not come off anything
 thicker".
 
+**The wall's pieces.** `cut.pieces` lists the neck wall as the flat
+pieces it is really made of: each piece's offset, area, and where it runs
+along the root (`cut.along`). The clamp bar's wall is three pieces, stepping
+10 µm at each Mirror-Join seam. The cut only needs the outermost piece.
+Detach (docs/DETACH.md) caps the hull on every piece.
+
 ### Lifting it out
 
 `extract(soup, flange, rawCut)` makes **one cut on the root plane** with the
