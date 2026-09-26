@@ -219,7 +219,38 @@ end-to-end case.
 Measured on the 4-core sandbox, sequentially, against an untraced
 `npm test` of the same tree on the same box.
 
-SPEEDUP_TABLE
+Baseline: `npm test`, untraced, on the same box, **2245s** (146/146 green).
+
+| the edit (then `npm run test:cached`) | ran | skipped | wall | vs `npm test` |
+| --- | ---: | ---: | ---: | ---: |
+| nothing | 1 | 145 | 103s | **21.8x** |
+| a test file (`tools/nso_crop_test.js`) | 2 | 144 | 126s | **17.8x** |
+| a docs file | 1 | 145 | same run set as "nothing" (dry run) | ~22x |
+| a feature file (`app-crop.js`) | 77 | 69 | 1604s | **1.40x** |
+| the python checker (`tools/mesh_validate.py`) | 55 | 91 | 1926s | **1.17x** |
+
+The cache check itself is about 1s. In every row, about 100s is
+`gcode:solid-drive`, which always runs because it is untraceable. That is
+also why "nothing" is 103s and not 1s.
+
+Read the table honestly:
+
+- **Edits to a test, a fixture used by one suite, a `tools/` helper, or a
+  node-only module are where this pays off.** Those are 1-10 steps instead of
+  146, and minutes instead of 37.
+- **An edit to anything the page loads reruns every browser suite (~80),**
+  and the win drops to about 1.4x. Tracing costs something on top.
+- **`tools/mesh_validate.py` and anything else python imports are shared by
+  the heaviest non-browser suites** (the support-tree checks alone are about
+  600s), so the win is small there too.
+
+The dry run tells you which row you are in, in about a second, before you
+spend any time: `node tools/run-tests-cached.mjs --dry-run`.
 
 What it costs when it misses: every step the cached runner runs is traced.
-TRACE_OVERHEAD
+Across the 106 steps rerun in the rows above, compared step by step with the
+untraced baseline, tracing cost **1.28x** in total. Compute-bound suites
+(`tree:*`, `fit`, `support:canonical`) pay about 1.00x. Browser-heavy ones
+pay the most: `lock:test` 2.66x, `wire:integration` 2.30x, `wire:solidify`
+2.06x. Every run is traced, because a trace is what makes the next skip
+safe.
