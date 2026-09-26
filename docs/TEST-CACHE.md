@@ -171,7 +171,7 @@ Here the cache over-includes and reruns, never guesses:
 
 | step | status | why |
 | --- | --- | --- |
-| `gcode:solid-drive` | **never cached; always run, untraced** | Green untraced (104s, 37/37), red under strace every time: the "Export as solid" click never passes Playwright's two-frame stability wait while the tree is ptrace-attached. Observing it changes it, so it gets no record. It is listed in `UNTRACEABLE` (`tools/test-cache/cache.mjs`). |
+| `gcode:solid-drive` | **never cached; always run, untraced** | **Load-sensitive.** The "Export as solid" click (`gscope-solid-drive-check.mjs:364`) times out at 30s whenever the box is slow enough. Under strace that happens every time; it also happens in plain, untraced CI (shard 5 of the `claude-wip` runs on 495e6d9 and 5b7dad1, 2026-09-25). Untraced on a quiet box it passes (104s, 37/37). This was first written up here as "changes behaviour under ptrace"; CI shows the tracer is only one way to be slow enough. It has no record either way, and is listed in `UNTRACEABLE` (`tools/test-cache/cache.mjs`). The flake itself is the test's problem, not the cache's. |
 | `wall:test` | cached, but dies with every commit | It runs `git merge-base`/`git show`, so `.git/HEAD`, refs and packed objects are on its record. Correct, just short-lived. |
 | every step that runs python (~59) | cached | Python lists its script's directory to resolve imports, so **adding or removing any file directly in `tools/` reruns all of them**. A new `tools/json.py` really would shadow the stdlib, so the listing stays keyed rather than narrowed to names python "probably" wants. The first full run in a fresh clone creates `tools/*-out/` and `__pycache__/`, and costs one extra round of reruns for the same reason. |
 | every step that loads `package.json` | cached | Node reads it on every module load (`"type"`). Editing `package.json`, even just adding a script, reruns nearly everything. |
@@ -230,7 +230,7 @@ Baseline: `npm test`, untraced, on the same box, **2245s** (146/146 green).
 | the python checker (`tools/mesh_validate.py`) | 55 | 91 | 1926s | **1.17x** |
 
 The cache check itself is about 1s. In every row, about 100s is
-`gcode:solid-drive`, which always runs because it is untraceable. That is
+`gcode:solid-drive`, which always runs untraced because it is too load-sensitive to trace. That is
 also why "nothing" is 103s and not 1s.
 
 Read the table honestly:

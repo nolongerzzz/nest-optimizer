@@ -57,18 +57,23 @@ export function gitState(root) {
 }
 
 /* STEPS THAT CANNOT BE WATCHED
-   A step whose behaviour changes under ptrace can never produce a trustworthy
-   green record, and running it traced would show red where `npm test` is
-   green. These run plainly (untraced), every time, and are never recorded -
-   the same as `npm test` for them. Add a step here only with the evidence.
+   A step that goes red under the tracer's slowdown can never produce a
+   trustworthy green record, and running it traced would show red where an
+   untraced run is green. These run plainly (untraced), every time, and are
+   never recorded - the same as `npm test` for them. Add a step here only with
+   the evidence.
 
-   gcode:solid-drive  green untraced (104s, 37/37), red under strace every
-     time, with or without sendto tracing: the "Export as solid" click at
-     gscope-solid-drive-check.mjs:364 never passes Playwright's "stable"
-     wait (two matching animation frames) while the tree is ptrace-attached,
-     although the run as a whole is only ~12% slower. Measured 2026-09-25. */
+   gcode:solid-drive  LOAD-SENSITIVE, not ptrace-specific (first written up
+     here as the latter, which was wrong). The "Export as solid" click at
+     gscope-solid-drive-check.mjs:364 times out at 30s - Playwright reports the
+     button visible, enabled and stable, then the click never completes. It
+     does that under strace every time here (with or without sendto tracing),
+     AND in plain, untraced CI: shard 5 of claude-wip runs 36133545206
+     (495e6d9) and 36190459022 (5b7dad1), 2026-09-25. Untraced on the quiet
+     4-core sandbox it passes (104s, 37/37; twice more inside full npm test
+     runs). So the tracer is one way to be slow enough, not the cause. */
 export const UNTRACEABLE = {
-  'gcode:solid-drive': 'changes behaviour under ptrace (Playwright stability wait never settles)',
+  'gcode:solid-drive': 'load-sensitive: its Export-as-solid click times out when the box is slow - under strace always, in CI too',
 };
 
 /* ENVIRONMENT
