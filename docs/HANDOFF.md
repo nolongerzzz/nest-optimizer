@@ -523,6 +523,36 @@ unchanged. `NSOWatch.collapse(bool)` / `isCollapsed()`; the choice is a
 per-viewer preference in its own localStorage key, `nso.watch.collapsed`.
 `npm run watch:test` part F.
 
+## Cache-bust pass - every drifted `?v=` tag, one pass (2026-09-26)
+
+At the Crop stage 2 merge, on the owner's instruction, the same pattern as
+`6ac393d`: a file is **drifted** when its content at HEAD differs from its
+content in the commit that set its current tag in `index.html`, because a
+browser holding the tagged URL keeps serving the old file. Ten had drifted.
+All now load at `?v=move1`, a tag no branch had ever used:
+
+| file | was | changed since by |
+| --- | --- | --- |
+| `app-crop.js` | `crop3` | Crop stage 2 |
+| `app-core.js` | `gsup2` | Crop stage 2 (undo label `cropMove`) |
+| `nso_hollow.js` | `hollow3` | Crop stage 2 (field tools exported) |
+| `styles.css` | `legendmin1` | Crop stage 2, G-scope Flange tab, `5f91c51` |
+| `app-microscope.js` | `scope9` | `6566b8c` (Flange tab on a slice) |
+| `nso_support_aim.js` | `support1` | `ad22e9a` |
+| `nso_stock.js` | `stock2` | `0b3f572` |
+| `nso_path_sweep.js` | `taper1` | `2aa07a2` |
+| `nso_support_tree.js` | `tree4` | `548a704`, `e50eaea` |
+| `app-oversize-washer.js` | `oversize1` | `f1aeac3` |
+
+This supersedes the older "needs a bump at merge" notes further down: after
+this pass no tagged file differs from its tag's content. The check, for the
+next pass: for each `file?v=tag` in `index.html`, take the oldest commit that
+added that exact string (`git log -S "file?v=tag" -- index.html | tail -1`),
+and `git diff --quiet <that> HEAD -- file`. Six scripts load with no tag at
+all (`nso-cooling-profiles.js`, `nso-3mf.js`, `nso-3mf-read.js`,
+`nso-gcode-lines.js`, `nso-gcode-solid.js`, `nso-watch.js`); they were
+untagged before this pass and are left so.
+
 ## Crop, stage 2 - move a region, reconnect it by what is measured (2026-09-26)
 
 Branch `claude/crop-stage2-move`, off `claude-wip`. Full write-up:
@@ -554,8 +584,8 @@ Branch `claude/crop-stage2-move`, off `claude-wip`. Full write-up:
 - **Reuse.** `nso_hollow.js` exports `edt3d`, `surfaceNets`, `tidyPositive`.
   `NSO_Repair.inspect` gates the headless core too, not only the app.
 - Checks: new `crop:move`, `wire:crop-move`.
-- **`?v=` not bumped** (rule 4). Needs a bump at merge for `app-crop.js`,
-  `app-core.js` (undo label `cropMove`), `nso_hollow.js` and `styles.css`.
+- **`?v=` bumped at merge** on the owner's instruction, in one pass with every
+  other drifted tag: see "Cache-bust pass" below.
 - **Not yet:** a region crossing BOTH seams (the next stress test), rotation,
   a region at the very end (Stage 1's axis clamp), and mixed contact (overlap
   here, gap there) in one move.
