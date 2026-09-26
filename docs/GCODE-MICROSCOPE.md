@@ -593,6 +593,9 @@ counting downloads.
   selection, and the capture box now catches only what is drawn - so "only
   Inner wall" plus a box, or plus the slider, gives exactly that feature in
   that region.
+- **Detected, not named:** below the file's own tabs, a **Flange** tab
+  isolates a flange found in the geometry, which no file names (plate, STL
+  or 3MF, not a slice). See [GSCOPE-FLANGE.md](GSCOPE-FLANGE.md).
 
 ### 5. The layer-range slider
 
