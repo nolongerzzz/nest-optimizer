@@ -197,6 +197,40 @@ function undoLast() {
     setStatus('Undo: removed cloned pieces');
     return;
   }
+  if (entry.type === 'supportSwap') {
+    // G-scope's individual support edits (app-gscope-support.js): Remove takes
+    // one support piece off, Apply replaces it with a regenerated one. Undo
+    // takes any piece the step added back off, and puts every removed piece
+    // back - its model AND its placed entry, mesh and exact position kept -
+    // where it was. One support is one whole piece, so this is the addModels /
+    // removePlaced pair folded into one step, and it restores the model list
+    // too, which removePlaced does not.
+    const added = new Set(entry.addedIds || []);
+    state.models = state.models.filter(m => !added.has(m.id));
+    const kept = [];
+    state.placed.forEach(p => {
+      if (p && p.sourceId != null && added.has(p.sourceId)) {
+        if (p.mesh && p.mesh.parent) p.mesh.parent.remove(p.mesh);
+      } else {
+        kept.push(p);
+      }
+    });
+    state.placed = kept;
+    (entry.removed || []).slice().reverse().forEach(r => {
+      if (r.model && !state.models.some(m => m.id === r.model.id)) {
+        state.models.splice(Math.min(r.modelIndex, state.models.length), 0, r.model);
+      }
+      if (r.placed) {
+        state.placed.splice(Math.min(r.placedIndex, state.placed.length), 0, r.placed);
+        if (r.placed.mesh && state.modelGroup) state.modelGroup.add(r.placed.mesh);
+      }
+    });
+    state.placed.forEach((p, i) => { if (p.mesh) p.mesh.userData.placedIndex = i; });
+    state.selectedIndex = -1;
+    renderModelList(); updateOptimizeButton(); updateEditSize(); updateAdjustUI();
+    setStatus(entry.label || 'Undo: support edit reverted');
+    return;
+  }
   if (entry.type === 'splitReplace') {
     // Remove the two halves, restore the single original, clear plate view
     const ids = new Set(entry.newIds || []);
@@ -531,6 +565,7 @@ function undoLast() {
     const p = state.placed[entry.index];
     if (!p) return;
     applyPlacedXZ(p, entry.x, entry.z);
+    restoreMeshY(p, entry.meshY);
     state.selectedIndex = entry.index;
     updateAdjustUI();
     setStatus('Undo: moved piece back');
@@ -553,6 +588,7 @@ function undoLast() {
       if (typeof refreshOutline === 'function') refreshOutline(p);
     }
     applyPlacedXZ(p, p.x, p.z);
+    restoreMeshY(p, entry.meshY);
     state.selectedIndex = entry.index;
     updateAdjustUI();
     setStatus('Undo: restored pose');
@@ -2168,6 +2204,16 @@ function matchPlacedBottoms(a, b) {
   b.mesh.position.y += 0.2 + (b.liftY || 0) - bb.min.y;
 }
 
+/* Undo of a pose or a move: put the mesh back at the height it had, exactly
+   (see snapshotPlacedPose's meshY). Entries recorded without it keep the
+   re-derived height. */
+function restoreMeshY(p, y) {
+  if (!p || !p.mesh || typeof y !== 'number' || !isFinite(y)) return;
+  p.mesh.position.y = y;
+  p.mesh.updateMatrixWorld(true);
+  if (typeof refreshOutline === 'function') refreshOutline(p);
+}
+
 function applyPlacedXZ(p, x, z) {
   if (!p) return;
   p.x = x;
@@ -2315,7 +2361,7 @@ function startMoveDrag(idx, event) {
   state.moveDragging = true;
   state.moveIndex = idx;
   applyPlateGridVisibility();
-  state.moveUndoFrom = { index: idx, x: p.x, z: p.z };
+  state.moveUndoFrom = { index: idx, x: p.x, z: p.z, meshY: p.mesh ? p.mesh.position.y : null };
   state.moveGrab.x = p.x - hit.x;
   state.moveGrab.z = p.z - hit.z;
   if (state.controls) state.controls.enabled = false;
@@ -2361,7 +2407,7 @@ function endMoveDrag() {
   if (idx >= 0 && state.placed[idx] && from) {
     const p = state.placed[idx];
     if (Math.abs(p.x - from.x) > 0.01 || Math.abs(p.z - from.z) > 0.01) {
-      pushUndo({ type: 'movePlaced', index: from.index, x: from.x, z: from.z });
+      pushUndo({ type: 'movePlaced', index: from.index, x: from.x, z: from.z, meshY: from.meshY });
     }
     if (!reportJoinFlushGap()) setStatus('Moved model #' + (idx + 1));
   }
@@ -3053,7 +3099,13 @@ function snapshotPlacedPose(idx) {
     tiltX: p.tiltX || 0,
     tiltZ: p.tiltZ || 0,
     width: p.width, depth: p.depth, height: p.height,
-    yaw: p.yaw || 0
+    yaw: p.yaw || 0,
+    /* The mesh's own height, as it was. A piece dropped by ingest rests at
+       +0.3 (m.size.y / 2 + 0.3) while every pose/move re-seats it on the
+       0.2 baseline (applyMeshRotation, settlePlacedOnBed) - so re-deriving
+       y on Undo put a freshly dropped piece back 0.1 mm lower than it was.
+       Undo restores this value instead of re-deriving it. */
+    meshY: p.mesh ? p.mesh.position.y : null
   };
 }
 
@@ -3275,7 +3327,7 @@ function nudgeSelected(dx, dz) {
   const p = state.placed[state.selectedIndex];
   if (!p || !p.mesh) return;
   if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'nudge')) return;
-  pushUndo({ type: 'movePlaced', index: state.selectedIndex, x: p.x, z: p.z });
+  pushUndo({ type: 'movePlaced', index: state.selectedIndex, x: p.x, z: p.z, meshY: p.mesh.position.y });
   applyPlacedXZ(p, p.x + dx, p.z + dz);
   holdPlateGridAuto();
   updateExportButton();

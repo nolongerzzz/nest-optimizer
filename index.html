@@ -823,6 +823,18 @@
         <p class="ms-note" id="ms-crop-read">&mdash;</p>
       </div>
 
+      <div class="ms-section" id="ms-support-row" style="display:none;">
+        <div class="ms-section-title">Supports</div>
+        <div class="ms-btn-row">
+          <button id="ms-btn-overhangs" type="button"
+                  title="Mark every overhang auto-aim's detection finds on the plate pieces: red needs a support, green has one">Show overhangs</button>
+          <label class="ms-note" for="ms-overhang-angle" style="margin:0">at
+            <input type="number" id="ms-overhang-angle" value="45" min="1" max="89" step="1"
+                   title="The printable angle, degrees off the plate - the same threshold auto-aim detects at" />&deg;</label>
+        </div>
+        <p class="ms-note" id="ms-support-read">&mdash;</p>
+      </div>
+
       <div class="ms-section" id="ms-export-row" data-flex="0" style="display:none;">
         <div class="ms-section-title">Export selection</div>
         <div class="ms-btn-row">
@@ -864,6 +876,28 @@
       <!-- The layer-range slider, docked to the viewport's right edge. Two
            handles: the lower and upper Z the view draws. One step apart is one
            layer; spread apart is a chunk; the ends are everything. -->
+      <!-- A marker or a support, clicked: what to build there, or what to do
+           with the one that is there. app-gscope-support.js owns it. -->
+      <div id="ms-support-pop" class="ms-pop" hidden>
+        <div id="ms-sp-title" class="ms-pop-title">&mdash;</div>
+        <div id="ms-sp-sub" class="ms-note">&mdash;</div>
+        <label class="ms-pop-field" for="ms-sp-style">Style
+          <select id="ms-sp-style">
+            <option value="strut">Straight strut</option>
+            <option value="tree">Tree</option>
+            <option value="gecko-hand">Gecko-hand</option>
+          </select></label>
+        <label class="ms-pop-field" for="ms-sp-size">Size (strut side, mm)
+          <input type="number" id="ms-sp-size" value="1.2" min="0.4" max="6" step="0.1"
+                 title="The cross-section side of the strut, trunk and branches. Never below the nozzle's wall floor - the generator raises it if asked for less." /></label>
+        <div class="ms-btn-row">
+          <button id="ms-sp-generate" type="button">Generate</button>
+          <button id="ms-sp-apply" type="button">Apply</button>
+          <button id="ms-sp-remove" type="button">Remove</button>
+          <button id="ms-sp-cancel" type="button">Cancel</button>
+        </div>
+        <p id="ms-sp-read" class="ms-note"></p>
+      </div>
       <div id="ms-zr" class="ms-zr" hidden>
         <div id="ms-zr-hi-read" class="ms-zr-read">&mdash;</div>
         <div id="ms-zr-track" class="ms-zr-track">
@@ -915,7 +949,7 @@
   <script src="nso-gcode-lines.js"></script>
   <script src="nso-gcode-solid.js"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
-  <script src="app-core.js?v=pose1"></script>
+  <script src="app-core.js?v=gsup2"></script>
   <script src="app-cut.js?v=crop3"></script>
   <script src="app-finish.js?v=pose1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
@@ -967,7 +1001,16 @@
   <script src="app-library-save.js?v=libsave2"></script>
   <script src="app-library.js?v=libsave2"></script>
   <script src="app-photoset.js?v=photoset2"></script>
+
+  <script src="app-microscope.js?v=scope7"></script>
+  <!-- G-scope supports: overhang markers, point-click generation, per-support
+       edit / remove. After app-microscope.js, whose hooks it uses, and after
+       nso_support_aim.js / nso_support_tree.js / app-join.js, whose
+       detection, generators and union it calls. See docs/GCODE-SUPPORTS.md. -->
+  <script src="app-gscope-support.js?v=gsup2"></script>
+
   <script src="app-microscope.js?v=boxyaw1"></script>
+
   <script src="app-ux.js?v=inside8"></script>
   <!-- Live watch: off until its button is pressed, and it patches nothing
        until then. Deleting this tag and the #btn-watch button above removes

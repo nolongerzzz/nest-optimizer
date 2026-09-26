@@ -251,6 +251,11 @@ Smart build-plate packing for 3D printing.
   - **Crop out band** removes the slider's Z band and rejoins the rest through
     the Crop tool: a plate piece in place, or a slice's selection as a new
     piece.
+  - **Supports:** *Show overhangs* marks every region auto-aim's detection
+    finds on the plate pieces, red where nothing holds it up. Click a marker to
+    generate a straight strut, a tree or a gecko-hand tree exactly there; click
+    a support to change its style or size, or remove it. Each is one Undo. See
+    [docs/GCODE-SUPPORTS.md](docs/GCODE-SUPPORTS.md).
   - A sliced project draws as its toolpath, one colour per `; FEATURE:` group
     the slicer named, with the legend built from the groups the file actually
     has. Click a row to isolate that feature.
