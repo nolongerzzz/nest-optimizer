@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=legendmin1" />
+  <link rel="stylesheet" href="styles.css?v=crop4" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -414,6 +414,28 @@
               <p id="crop-readout" class="cut-readout">—</p>
               <button id="btn-crop" class="btn btn-secondary" type="button" disabled
                       title="Remove everything inside the box, slide the far part back by the box length and seal the joint into one closed piece. Refuses a box over an end, a box that does not cover the whole cross-section, and a joint whose step face would need a hole.">Crop</button>
+              <div class="crop-move" id="crop-move-tools">
+              <p class="hint">Move: take out what the box holds, put it anywhere, lock it in. Where it lands decides the join: an overlap is trimmed, a touch is joined, a gap up to 3 mm is bridged.</p>
+              <div class="edit-row crop-row">
+              <span class="crop-lbl" title="Limit the box vertically: mm from the piece's bottom. Blank = the whole height.">Up</span>
+              <input type="number" id="crop-up-from" step="0.1" aria-label="Region up from, mm" title="From, mm above the piece's bottom (blank = all)">
+              <input type="number" id="crop-up-to" step="0.1" aria-label="Region up to, mm" title="To, mm above the piece's bottom (blank = all)">
+              </div>
+              <div class="edit-row crop-row">
+              <span class="crop-lbl" title="Limit the box across the cut axis: mm from the piece's low side. Blank = the whole width.">Across</span>
+              <input type="number" id="crop-across-from" step="0.1" aria-label="Region across from, mm" title="From, mm from the piece's low side (blank = all)">
+              <input type="number" id="crop-across-to" step="0.1" aria-label="Region across to, mm" title="To, mm from the piece's low side (blank = all)">
+              </div>
+              <div class="edit-row crop-row">
+              <label class="vp-clone" title="Take out what the box holds and show it as a ghost you can move. Nothing changes until Lock in."><input type="checkbox" id="chk-crop-lift"> Lift</label>
+              <input type="number" id="crop-move-dx" step="0.1" aria-label="Move X, mm" title="Move along X, mm">
+              <input type="number" id="crop-move-dy" step="0.1" aria-label="Move Y (up), mm" title="Move up (Y), mm">
+              <input type="number" id="crop-move-dz" step="0.1" aria-label="Move Z, mm" title="Move along Z, mm">
+              </div>
+              <p id="crop-move-readout" class="cut-readout">—</p>
+              <button id="btn-crop-lockin" class="btn btn-secondary" type="button" disabled
+                      title="Reconnect the moved region where it is. Measured, not assumed: an overlap with the piece is trimmed, a face-to-face touch is joined, a gap up to 3 mm is bridged with a filleted fill. Refuses a wider gap, a region buried in the piece, and anything that would not come out as one clean closed piece.">Lock in</button>
+              </div>
               </div>
               </div>
             </div>
@@ -925,8 +947,8 @@
   <script src="nso_carve.js?v=carve1"></script>
   <script src="nso_seat_surface.js?v=seatsurf1"></script>
   <script src="nso_thickness.js?v=hollow1"></script>
-  <script src="nso_hollow.js?v=hollow3"></script>
-  <script src="nso_support_aim.js?v=support1"></script>
+  <script src="nso_hollow.js?v=hollow4"></script>
+  <script src="nso_support_aim.js?v=support2"></script>
   <!-- Attach: the connective tissue between Stock, auto-aim and Join's union.
        After nso_support_aim.js, whose nearestBase and place it calls. See
        docs/ASSEMBLE.md. -->
@@ -934,15 +956,15 @@
   <script src="nso_printer.js?v=wheel2"></script>
   <!-- New stock: the shape-agnostic sizing app-wheel.js's Ball now calls,
        so it loads ahead of it. See docs/STOCK.md. -->
-  <script src="nso_stock.js?v=stock2"></script>
+  <script src="nso_stock.js?v=stock4"></script>
   <script src="nso_paint_delete.js?v=del1"></script>
   <script src="nso_skin_band.js?v=skin2"></script>
-  <script src="nso_path_sweep.js?v=taper1"></script>
+  <script src="nso_path_sweep.js?v=taper2"></script>
   <!-- Trunk-then-branches: the routing that drives the sweep, on top of
        auto-aim's detection and base search. After BOTH of them, because it
        calls into both by name and refuses when either is missing. Unwired,
        like the two modules it sits on. See docs/SUPPORT-TREE.md. -->
-  <script src="nso_support_tree.js?v=tree4"></script>
+  <script src="nso_support_tree.js?v=tree5"></script>
   <script src="nso_exif.js?v=photoset1"></script>
   <script src="nso_photoset.js?v=photoset1"></script>
   <script src="nso-cooling-profiles.js"></script>
@@ -951,9 +973,9 @@
   <script src="nso-3mf-scene.js?v=scene1"></script>
   <script src="nso-surface-grid.js?v=inside6"></script>
   <script src="nso-gcode-lines.js"></script>
-  <script src="nso-gcode-solid.js"></script>
+  <script src="nso-gcode-solid.js?v=solid1"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
-  <script src="app-core.js?v=gsup2"></script>
+  <script src="app-core.js?v=gsup3"></script>
   <script src="app-cut.js?v=crop3"></script>
   <script src="app-finish.js?v=pose1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
@@ -963,7 +985,7 @@
   <script src="app-mirror.js?v=mirror2"></script>
   <!-- Crop, stage 1: box -> remove slab -> seal the joint. After app-cut.js
        (rawCutOpen, rawFlatCapLoop, mapPlaneToRaw) and app-sculpt.js (commit). -->
-  <script src="app-crop.js?v=crop3"></script>
+  <script src="app-crop.js?v=crop4"></script>
   <script src="app-fatten.js?v=fatten1"></script>
   <script src="app-scale.js?v=inside6"></script>
   <script src="app-brush.js?v=hollow2"></script>
@@ -974,7 +996,7 @@
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=pose1"></script>
   <script src="app-center-lock.js?v=clock2"></script>
-  <script src="app-oversize-washer.js?v=oversize1"></script>
+  <script src="app-oversize-washer.js?v=oversize2"></script>
   <script src="app-join-triple.js?v=triple1"></script>
   <script src="app-carve.js?v=hollow1"></script>
   <script src="app-hollow.js?v=hollow1"></script>
@@ -1009,7 +1031,7 @@
   <!-- Flange detection for G-scope's Flange tab. Pure; app-microscope.js
        calls it with app-cut.js's rawCut. -->
   <script src="nso_flange.js?v=flange1"></script>
-  <script src="app-microscope.js?v=scope9"></script>
+  <script src="app-microscope.js?v=scope10"></script>
   <!-- G-scope supports: overhang markers, point-click generation, per-support
        edit / remove. After app-microscope.js, whose hooks it uses, and after
        nso_support_aim.js / nso_support_tree.js / app-join.js, whose

@@ -92,7 +92,7 @@ say(`${have.length}/${rows.length} steps traced. Naive import graphs miss ${tot(
 const readers = (f) => have.filter((r) => r.traced.has(join(ROOT, f))).map((r) => r.step);
 const naiveReaders = (f) => have.filter((r) => r.g.imports.has(join(ROOT, f))).map((r) => r.step);
 const CASES = [
-  ['app-cut.js', 'Cut\'s cap logic (rawFlatCapLoop / rawCutOpen), which Crop calls by global name', ['crop:test', 'wire:crop']],
+  ['app-cut.js', 'Cut\'s cap logic (rawFlatCapLoop / rawCutOpen), which Crop calls by global name', ['crop:test', 'wire:crop', 'crop:move', 'wire:crop-move']],
   ['app-join.js', 'setStatus(), defined in app-join.js and called from ~40 app files; measure and cth:capture both assert on #status', ['measure:test', 'cth:capture']],
   ['NSO_Repair.js', 'NSO_Repair\'s checker, shared by Seal/Repair, the defect overlay and every drive check', ['wire:repair', 'defects:test']],
 ];
