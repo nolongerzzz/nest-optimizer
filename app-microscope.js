@@ -1071,18 +1071,23 @@ var NSO_MICROSCOPE = (function () {
       label.className = 'ms-legend-label';
       label.textContent = name + ' (' + count + unit + ')';
       // Feature-level isolation in one click: this group alone, every other
-      // one switched off. A view action like the row click - nothing is
-      // selected, exported or written anywhere.
+      // one switched off, and it becomes the selection - Export is offered
+      // right away, same as any other isolation method (soloGroup()).
       var only = document.createElement('button');
       only.type = 'button';
       only.className = 'ms-legend-only';
       only.textContent = 'only';
-      only.title = 'Show ' + name + ' alone (view only - click Show all to bring the rest back)';
+      only.title = 'Isolate ' + name + ' alone - selected and ready to Export or Crop. Click Show all to bring the rest back.';
       only.addEventListener('click', function (ev) {
         ev.stopPropagation();
         soloGroup(name);
       });
       item.appendChild(swatch); item.appendChild(label); item.appendChild(only);
+      // The row itself stays a plain visibility toggle - independent of
+      // "only", so several groups can be hidden one at a time to compose a
+      // custom view (see selectByBox()'s comment: hide everything but one
+      // feature, drop a box, get only that). "Select shown" turns whatever
+      // that composed view leaves on screen into the selection.
       item.addEventListener('click', function () {
         if (HIDDEN.has(name)) HIDDEN.delete(name); else HIDDEN.add(name);
         viewChanged();
@@ -1611,11 +1616,20 @@ var NSO_MICROSCOPE = (function () {
     if (typeof requestAnimationFrame === 'function' && isOpen()) requestAnimationFrame(run); else run();
   }
 
-  /** One legend group alone. Feature-level isolation; view only. */
+  /**
+   * One legend group alone: the "only" button, this method's one-click
+   * isolate. It both solos the view (every other group hidden) and becomes
+   * the selection - Export is offered right after, same as a picked line, a
+   * capture box or the Flange tab, with no separate "Select shown" required.
+   * `selectVisible()` is what "Select shown" itself calls, so a plain click
+   * here and a follow-up press of that button read the identical set - one
+   * definition of "what is shown", not two.
+   */
   function soloGroup(name) {
     if (!doc || !doc.groups[name]) return false;
     HIDDEN = new Set(Object.keys(doc.groups).filter(function (g) { return g !== name; }));
     viewChanged();
+    selectVisible();
     return true;
   }
 

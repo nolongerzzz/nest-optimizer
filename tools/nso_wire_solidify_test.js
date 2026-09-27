@@ -9,15 +9,37 @@
    the two coarse grid-snap welds were (0.2 mm in Solidify, 0.3 mm inside
    repairJoinedSoup). See the comment above solidifySelectedModel().
 
+   The tradeoff that fix left standing, and this file now also pins: those
+   same two coarse welds are also what closes a genuine seam gap wider than
+   exact-vertex (two parts meant to register but off by a fraction of a
+   millimetre) - so gating on them meant Solidify correctly REFUSED a
+   fine-detail piece with a real, trivially-closable hole rather than risk
+   that damage, and a real hole went unrepaired. solidifySelectedModel now
+   tries an exact-vertex tier first - weld, cap, cap, weld, close-loops, with
+   repairJoinedSoup left out entirely (it filters degenerate/duplicate faces
+   and drops small disjoint shells on its own, blind to weld tolerance, which
+   is its own risk on a piece with many small legitimate features) - and only
+   escalates to the coarse tier, the original pipeline unchanged, when the
+   tight pass makes no progress. Section 2 is the fine-detail repair this
+   unblocks; section 2b is the genuine-gap case the coarse tier still exists
+   for, and confirms it still works.
+
    Every number gated here comes from tools/mesh_validate.py and
    tools/stl_watertight_check.py, run as subprocesses on the soup the app
    actually holds before and after the click - never from the app's own
    status line or counters. The status line is then checked against them.
 
      1. clean piece: Solidify leaves it bit-identical and says so.
-     2. clean piece with one face knocked out: Solidify still runs (there IS
-        an opening), the coarse welds would wreck it, and the result gate
-        refuses - piece unchanged, and the refusal names the count that rose.
+     2. clean piece with one face knocked out: a fine-detail hole whose own
+        boundary is already exact-vertex. The exact-vertex tier closes it
+        with exactly the one triangle it needs - nothing else invented,
+        nothing dropped, no collateral non-manifold - where the coarse-only
+        pipeline would refuse it (proven directly, ungated, alongside).
+     2b. two halves of a tube, registered a fraction of a millimetre apart at
+        their seam: the real case the coarse weld exists for. Too long a
+        loop for either capper, so the exact-vertex tier makes no progress
+        and Solidify escalates - the coarse weld snaps the seam back
+        together and the result is the one solid tube, volume included.
      3. a box with its top missing: a job Solidify can do. It commits, the
         canonical checker passes the result, the status numbers match it,
         and Undo puts the open box back.
@@ -119,7 +141,7 @@ withApp(async (page, logs) => {
   check('the status says nothing was done, not "Solidify ok"',
         /already closed/.test(st1) && !/Solidify ok/.test(st1), st1);
 
-  console.log('\n=== 2. one face knocked out: Solidify runs, and the result gate refuses ===');
+  console.log('\n=== 2. one face knocked out: the exact-vertex tier closes it, no collateral damage ===');
   const holed = s1.slice(9);                       // drop the first triangle: 3 open edges
   const holedFile = path.join(TMP, 'factory-holed.stl');
   writeSTL(holedFile, holed);
@@ -129,9 +151,11 @@ withApp(async (page, logs) => {
   console.log('   before  ' + fmt(c2));
   check('precondition: exactly the one opening, nothing non-manifold',
         c2.exact.open === 3 && c2.exact.nm === 0, 'exact open ' + c2.exact.open);
-  // What the pipeline WOULD produce if it were allowed to commit - the same
-  // stages, called directly, so the refusal below is shown to be protecting
-  // against a real regression rather than a vacuous one.
+  // What the COARSE-ONLY pipeline would produce if that were the only tier -
+  // the same stages the original single-tolerance pipeline always ran,
+  // called directly, so the fix is shown to be protecting against a real
+  // regression rather than a vacuous one, and the coarse tier is shown to
+  // still be exactly as risky on this piece as it always was.
   const raw = new Float32Array(await page.evaluate(() => {
     let w = getActiveModel().rawTris;
     w = weldSoupVerts(w); w = capSmallOpenLoops(w, 28); w = capAllOuterHoles(w);
@@ -139,20 +163,98 @@ withApp(async (page, logs) => {
     return Array.from(w);
   }));
   const c2raw = canonical(raw, 'holed-ungated');
-  console.log('   ungated ' + fmt(c2raw));
-  check('the ungated pipeline really does raise non-manifold edges on this piece',
+  console.log('   coarse-only (not what Solidify runs) ' + fmt(c2raw));
+  check('the coarse-only pipeline really does raise non-manifold edges on this piece',
         c2raw.nm > c2.nm, 'NM ' + c2.nm + ' -> ' + c2raw.nm);
   const st2 = await solidify(page);
   const s2b = await soupOf(page);
   const c2b = canonical(s2b, 'holed-after');
   console.log('   after   ' + fmt(c2b));
   console.log('   status: ' + st2);
-  check('Solidify refused and said so', /Solidify refused/.test(st2) && !/Solidify ok/.test(st2), st2);
-  check('...naming non-manifold as the count that rose', /non-manifold \d+→\d+/.test(st2));
-  check('the piece is bit-identical - nothing committed', sameSoup(s2, s2b));
-  check('canonical: non-manifold did not rise', c2b.nm <= c2.nm && c2b.exact.nm <= c2.exact.nm);
-  check('nothing went on the undo stack for a refusal',
-        await page.evaluate(() => !(state.undoStack || []).some(u => u && u.type === 'solidifyReplace')));
+  check('Solidify committed and said ok', /Solidify ok/.test(st2) && !/Solidify refused/.test(st2), st2);
+  check('...closing the one opening', /open 3→0/.test(st2), st2);
+  check('...with non-manifold unchanged, not the coarse pipeline\'s rise', /NM 2→2/.test(st2), st2);
+  check('nothing invented or dropped beyond the one face: 49025 -> 49026 tris',
+        c2.tris === 49025 && c2b.tris === 49026, c2.tris + ' -> ' + c2b.tris);
+  check('canonical: non-manifold did not rise', c2b.nm <= c2.nm && c2b.exact.nm <= c2.exact.nm,
+        'NM ' + c2.nm + '->' + c2b.nm + ', exact ' + c2.exact.nm + '->' + c2b.exact.nm);
+  check('canonical: open edges closed', c2b.open === 0 && c2b.exact.open === 0);
+  check('it went on the undo stack once',
+        await page.evaluate(() => (state.undoStack || []).filter(u => u && u.type === 'solidifyReplace').length) === 1);
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => /Undo/.test(document.getElementById('status').textContent),
+                             null, { timeout: 30000 });
+  check('Undo puts the hole back', sameSoup(s2, await soupOf(page)));
+
+  console.log('\n=== 2b. two tube halves registered a fraction of a mm apart at the seam ===');
+  // The real case the coarse weld exists for: two parts meant to meet at a
+  // seam, off by less than the coarse tolerance (0.05 mm here, well under
+  // the 0.2 mm grid) - the kind of registration error a part exported in two
+  // pieces, or reprinted and rejoined, actually has. Each half's own rim sits
+  // exactly on a 0.2 mm grid so the shift lands every vertex pair in the same
+  // grid cell regardless of its angle around the seam - deterministic, not
+  // a coin flip on which side of a rounding boundary a given vertex falls.
+  // 80 segments per rim: too long for capSmallOpenLoops (span > 28 mm) and
+  // too long for solidifyCloseLoops (> the 64-edge cap) either, and circular
+  // enough (Q well above the 0.72 cutoff) that capAllOuterHoles's shape test
+  // would not have filled it even if the seam sat on an outer bbox plane, so
+  // only a weld that actually reunites the two rims can close it at all.
+  function seamTube(SEG, RAD, Hb, Ht, dx, dy, GRID) {
+    const snap = v => Math.round(v / GRID) * GRID;
+    const tris = [];
+    const push3 = (A, B, C) => { tris.push(...A, ...B, ...C); };
+    const ang = i => 2 * Math.PI * i / SEG;
+    const rim = (i, ox, oy) => [snap(RAD * Math.cos(ang(i))) + ox, snap(RAD * Math.sin(ang(i))) + oy];
+    const bc = [0, 0, 0];
+    for (let i = 0; i < SEG; i++) {
+      const r0 = rim(i, 0, 0), r1 = rim(i + 1, 0, 0);
+      const p00 = [r0[0], r0[1], 0], p10 = [r1[0], r1[1], 0];
+      const p01 = [r0[0], r0[1], Hb], p11 = [r1[0], r1[1], Hb];
+      push3(p00, p10, p11); push3(p00, p11, p01); push3(p10, p00, bc);
+    }
+    const tc = [dx, dy, Hb + Ht];
+    for (let i = 0; i < SEG; i++) {
+      const r0 = rim(i, dx, dy), r1 = rim(i + 1, dx, dy);
+      const p00 = [r0[0], r0[1], Hb], p10 = [r1[0], r1[1], Hb];
+      const p01 = [r0[0], r0[1], Hb + Ht], p11 = [r1[0], r1[1], Hb + Ht];
+      push3(p00, p10, p11); push3(p00, p11, p01); push3(p01, p11, tc);
+    }
+    return new Float32Array(tris);
+  }
+  const seamSoup = seamTube(80, 20, 10, 10, 0.05, 0.05, 0.2);
+  const seamFile = path.join(TMP, 'seam-tube.stl');
+  writeSTL(seamFile, seamSoup);
+  await load(page, seamFile);
+  const s2c = await soupOf(page);
+  const c2c = canonical(s2c, 'seam-before');
+  console.log('   before  ' + fmt(c2c));
+  check('precondition: two 80-edge rims, exact-vertex clean otherwise',
+        c2c.exact.open === 160 && c2c.exact.nm === 0 && c2c.wind === 0, 'exact open ' + c2c.exact.open);
+  const st2c = await solidify(page);
+  const s2cb = await soupOf(page);
+  const c2cb = canonical(s2cb, 'seam-after');
+  console.log('   after   ' + fmt(c2cb));
+  console.log('   status: ' + st2c);
+  check('Solidify committed and said ok', /Solidify ok/.test(st2c) && !/Solidify refused/.test(st2c), st2c);
+  check('THE CANONICAL CHECKER PASSES THE RESULT',
+        c2cb.verdict === 'PASS' && c2cb.open === 0 && c2cb.nm === 0 && c2cb.wind === 0, c2cb.verdict);
+  check('...and by the exact census too', c2cb.exact.open === 0 && c2cb.exact.nm === 0 && c2cb.exact.degen === 0);
+  check('nothing invented: the seam only had to be rejoined, tris unchanged',
+        c2cb.tris === c2c.tris, c2c.tris + ' -> ' + c2cb.tris);
+  const seamAfterFile = path.join(TMP, 'seam-after-full.stl');
+  writeSTL(seamAfterFile, s2cb);
+  const v2cb = JSON.parse(execFileSync('python3',
+    [path.join(ROOT, 'tools', 'mesh_validate.py'), seamAfterFile, '--json'], { encoding: 'utf8' }));
+  console.log('   volume  ' + v2cb.signed_volume.toFixed(2) + ' mm3 (one solid tube, R 20, H 20)');
+  check('volume matches one unsplit tube (within 0.5%)',
+        Math.abs(v2cb.signed_volume - Math.PI * 20 * 20 * 20) <= 0.005 * Math.PI * 20 * 20 * 20,
+        v2cb.signed_volume.toFixed(2));
+  check('it went on the undo stack once',
+        await page.evaluate(() => (state.undoStack || []).filter(u => u && u.type === 'solidifyReplace').length) === 1);
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => /Undo/.test(document.getElementById('status').textContent),
+                             null, { timeout: 30000 });
+  check('Undo puts the seam gap back', sameSoup(s2c, await soupOf(page)));
 
   console.log('\n=== 3. a box with its top missing: Solidify closes it ===');
   const box = readSTL(path.join(ROOT, 'fixtures', 'box-20mm.stl'));

@@ -17,8 +17,11 @@
  *      flange (closed, manifold, nothing of the neck or ribs), and Crop takes
  *      a Z band out of it as a new piece.
  *   4  THE PLATE ROUTE: the clamp bar on the plate, the rail button, the tab;
- *      Export to plate lands the flange as its own piece and leaves the
- *      clamp bar exactly as it was.
+ *      Back restores the whole part HERE too, not only through file Import -
+ *      the same click sequence that used to be a dead end (only a full
+ *      "Read the plate" reopen got you back) is pinned so it cannot silently
+ *      regress; Export to plate lands the flange as its own piece and leaves
+ *      the clamp bar exactly as it was.
  *   5  NO FLANGE, SAID SO: a real part with none (library/hinge_knuckle_box
  *      .stl) reads "none detected", and a click on the tab selects nothing,
  *      isolates nothing and says why. A slice says it cannot look.
@@ -287,6 +290,33 @@ async function main() {
   const placedBefore = await page.evaluate(() => state.placed.length);
   await page.click('#ms-detected .ms-legend-item');
   check('a click on the tab selects it on the plate too',
+    await page.evaluate(() => window.NSO_MICROSCOPE.selection().map((o) => o.name)), [plateFlange.name]);
+
+  // The dead end this used to be, on the PLATE route specifically (section 2
+  // above already covers the file-import route): isolating the flange left no
+  // way back to the whole part except closing G-scope and reopening it - the
+  // same "read the plate again" reload a user reaches for when nothing else
+  // works. Back must restore the whole part here too, not just on a file.
+  await page.click('#ms-btn-back');
+  await frames(page);
+  const plateBacked = await page.evaluate((hostId) => {
+    const v = window.NSO_MICROSCOPE.getView(), d = window.NSO_MICROSCOPE.getDoc();
+    const host = d.objects.find((o) => o.sourceId === hostId);
+    return {
+      overview: v.overviewGroup.visible, detail: v.detailGroup.visible,
+      badge: document.getElementById('ms-mode-badge').textContent,
+      docSource: d && d.source, panelOpen: window.NSO_MICROSCOPE.isOpen(),
+      hostTriangles: host ? host.triangles : null,
+    };
+  }, hostBefore.id);
+  check('Back on the PLATE route: the whole part again, not a reload', plateBacked,
+    { overview: true, detail: false, badge: 'Whole part', docSource: 'plate', panelOpen: true,
+      hostTriangles: hostBefore.tris });
+  await shot(page, '3b-plate-flange-back.png', 'the plate route, backed out of the flange to the whole part');
+
+  // Re-isolate for the export that follows.
+  await page.click('#ms-detected .ms-legend-item');
+  check('re-isolating after Back finds the same flange again',
     await page.evaluate(() => window.NSO_MICROSCOPE.selection().map((o) => o.name)), [plateFlange.name]);
   await page.click('#ms-btn-export-plate');
   const after4 = await page.evaluate((hostId) => {
