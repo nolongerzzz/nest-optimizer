@@ -4,7 +4,8 @@
 action (`app-gscope-slice.js`) · checks `slicer:test`, `slicer:bambu`,
 `gcode:gscope-slice`, all in `npm test`.
 
-A real slicer: exact sections, measured offsets and real line families. You
+**What it is for:** reverse-engineering and internal iteration. It is a real
+slicer: exact sections, measured offsets and real line families. You
 can read its output line by line in G-scope and measure it against a real
 slice.
 

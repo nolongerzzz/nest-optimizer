@@ -22,8 +22,8 @@ Smart build-plate packing for 3D printing.
   by the measured line widths, grid / zigzag infill by density, top and bottom
   shells, and per-layer overhang / support-need calls - opened as a toolpath
   G-scope inspects line by line, like an imported `.gcode.3mf`. Validated
-  against real Bambu slices, agreement and disagreement both on record
-  ([docs/SLICER.md](docs/SLICER.md))
+  against real Bambu slices, agreement and disagreement both on record. For
+  reverse-engineering and internal iteration ([docs/SLICER.md](docs/SLICER.md))
 - **New stock**: a correctly-sized blank to start from, before Carve, Hollow,
   Cut or anything else that begins with a blank block - sphere, box, cylinder,
   cone, tube, torus, capsule or ellipsoid, sized from the target piece by a

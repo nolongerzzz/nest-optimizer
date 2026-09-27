@@ -1,5 +1,6 @@
 /*
- * NSO in-house slicer - real layer-by-layer slicing.
+ * NSO in-house slicer - real layer-by-layer slicing, for reverse-engineering
+ * and internal iteration.
  * ----------------------------------------------------------------------------
  *
  * READ docs/SLICER.md FIRST. It carries the library audit (Task 1), the

@@ -268,6 +268,12 @@ Three things to keep when you add to it:
    whole reason `nso_thicken_drive_check.js` needed one line and the other 25
    menu-dependent checks needed none.
 
+## Standing rule — ask before adding a restriction, warning or behaviour change (added 2026-09-27)
+Owner's decision, binding on every task: if carrying out a task suggests adding
+**any restriction, warning label, or behaviour change beyond what was explicitly
+specified, flag it and ask before implementing it**. Do not add it unilaterally
+and report it as done. Design and product decisions belong to the owner alone.
+
 ## Local brush - freehand surface deformation (added 2026-09-18)
 `app-brush.js`, wired at the current `?v=inside6` tag. Carve / Emboss /
 Smooth-here on one brush mechanism: size 5-50mm, one intensity slider,
@@ -537,6 +543,10 @@ Branch `claude/slicer-piece-export`, off `claude-wip`.
   piece. `gcode:gscope-slice` §8 checks it with real clicks: the downloaded
   STL and the plate copy carry the piece's exact triangles, and Undo removes
   the plate copy.
+- **Standing rule recorded** above: ask before adding any restriction, warning
+  or behaviour change that wasn't specified.
+- **Purpose line kept:** the slicer is described as being for
+  reverse-engineering and internal iteration (header, SLICER.md, README).
 - **`?v=` not bumped** (rule 4): `nso_slicer.js` and `app-gscope-slice.js`
   (both `slice1`) need a bump at merge.
 
@@ -562,7 +572,7 @@ Branch `claude/ci-timeout-weights`, off `claude-wip`.
 
 ## In-house slicer - real layers, walls, infill, overhang calls; G-scope Slice (2026-09-27)
 Branch `claude/inhouse-slicer`, off `claude-wip`. Full write-up:
-**`docs/SLICER.md`**.
+**`docs/SLICER.md`**. For reverse-engineering and internal iteration.
 
 - **Geometry:** Clipper2 (BSL-1.0), which is ALREADY compiled into the vendored
   `manifold.wasm` (Apache-2.0) as `CrossSection`. No new dependency. Lockfile
