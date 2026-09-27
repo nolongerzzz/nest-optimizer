@@ -193,24 +193,17 @@ withApp(async (page, logs) => {
 
   console.log('\n=== 6. the other direction still works - no regression ===');
   /* Seat here, the brush and Measure each disarmed paint on their own way in
-     before this change, and must still: the fix gave PAINT a list, it did not
-     touch theirs.
+     before the paint fix, and must still: that fix gave PAINT a list, it did
+     not touch theirs.
 
-     Carve is the exception and it is NOT gated here, because it is not this
-     change's doing. app-carve.js's setArmed() opens with the comment "one
-     click-owning mode at a time, the way Measure's disarmOthers does it" and
-     then disarms Seat here alone - not paint, not Measure, not the brush, not
-     the center lock. So arming Carve over live paint leaves Carve lit and
-     dead, the same shape as the defect fixed here, in the opposite direction
-     and in another file. Measured and printed on every run so it cannot rot
-     unnoticed; fixing it is app-carve.js's own scoped pass.
-
-     ARMS-OVER-PAINT ROSTER, as measured today:
-       Seat here  disarms paint
-       Brush      disarms paint
-       Measure    disarms paint
-       Carve      DOES NOT - app-carve.js setArmed(), open finding */
-  const CARVE_DISARMS_PAINT_TODAY = false;
+     Carve used to be the exception: app-carve.js's setArmed() opened with the
+     comment "one click-owning mode at a time, the way Measure's disarmOthers
+     does it" and then disarmed Seat here alone - not paint, not Measure, not
+     the brush, not the center lock. Arming Carve over live paint left Carve
+     lit and dead, the same shape as the paint defect, in the opposite
+     direction and in another file. app-carve.js now carries the same
+     disarmOthers() the others do, so it is gated here on the same terms as
+     every other tool in the roster - nothing left special-cased. */
   for (const p of PAINT) {
     for (const t of TOOLS) {
       await resetAll(page);
@@ -220,11 +213,6 @@ withApp(async (page, logs) => {
       const paintAfter = await page.evaluate(() => state.maskPaint);
       const tool = await readTool(page, t);
       const detail = paintBefore + ' -> ' + paintAfter + ', ' + t.name + ' ' + JSON.stringify(tool);
-      if (t.btn === 'btn-carve' && !CARVE_DISARMS_PAINT_TODAY) {
-        console.log('  note ' + t.name + ' over ' + p.name + ' leaves paint live (open finding, app-carve.js) - ' + detail);
-        check(t.name + ' at least still arms itself over ' + p.name, tool.armed === true, detail);
-        continue;
-      }
       check(t.name + ' still disarms ' + p.name,
         paintBefore === p.mode && paintAfter === false && tool.armed === true, detail);
     }
