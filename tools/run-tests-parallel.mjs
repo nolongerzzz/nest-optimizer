@@ -215,13 +215,16 @@ async function main() {
      cores each shard reported ~470s for ~112s of its own work, so dividing by
      them claimed 5.8x when the real figure against a sequential run was 1.4x.
      A speedup number that goes UP as contention gets worse is worse than no
-     number at all. */
+     number at all.
+     And since 2026-09-27 the weights are measured on GitHub's CI runners
+     (package.json "testStepWeightsNote"), ~1.7x slower than a local box, so
+     their sum is not this machine's sequential time either: dividing it by a
+     local wall clock would claim ~8x. The sum is printed for what it is, and
+     no ratio is drawn from it. */
   const weights = pkg.testStepWeights || {};
   const baselineMs = declared.reduce((n, k) => n + (Number(weights[k]) || 0), 0);
   console.log(`\n  ${ran}/${declared.length} steps  |  wall ${fmt(wallMs)}` +
-    (baselineMs
-      ? `  |  sequential ${fmt(baselineMs)} (measured)  |  speedup ${(baselineMs / wallMs).toFixed(2)}x`
-      : '  |  no testStepWeights, so no speedup figure'));
+    (baselineMs ? `  |  same steps on GitHub's runners, sequential: ${fmt(baselineMs)} (not comparable - no speedup drawn)` : ''));
 
   /* Same assertion the sequential runner makes, for the same reason: a shard
      that quietly ran fewer steps than the suite declares is the failure this

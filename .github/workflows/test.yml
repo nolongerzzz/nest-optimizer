@@ -26,19 +26,17 @@
 # into a shard on its own.
 #
 # WHY SIX, AND WHY A PACKED SPLIT
-# Measured, not guessed. The 104 steps are 697s of work locally and the shape
-# is lopsided: defects:test alone is 15% of it, the ten slowest are 46%, and 27
-# steps together are under 2%. Slicing the list into six equal-LENGTH pieces
-# would leave one runner holding defects:test and another holding the tail, so
-# the slowest shard - the only number CI waits on - would hardly move. The
-# runner packs by measured cost instead (package.json "testStepWeights"),
-# which lands all six shards at 116s.
+# Measured, not guessed - on these runners (package.json "testStepWeightsNote"
+# has the method). The 161 steps are ~3,900s of work on ubuntu-latest and the
+# shape is lopsided: gcode:gscope-normalcam alone is 260s, the ten slowest are
+# 38%, and dozens of steps take under a second. Slicing the list into six
+# equal-LENGTH pieces would leave one runner holding the heavy steps, so the
+# slowest shard - the only number CI waits on - would hardly move. The runner
+# packs by measured cost instead (package.json "testStepWeights"), which lands
+# all six shards at 652s of tests (~11.5 min with setup).
 #
-# Six because that is where the gain stops. Four shards is ~5.9 min of runner
-# time, six is ~3.9, eight is ~3.5 - past six the longest single step
-# (defects:test, 104s) is the floor, and buying a seventh runner to save 24
-# seconds is not worth the queue time. If this ever needs to go lower, split
-# defects:test rather than adding shards.
+# Six for now: four shards would be 978s each, eight 489s. Past eight the
+# longest single step (gcode:gscope-normalcam, 260s) starts to be the floor.
 #
 # THE REQUIRED CHECK IS THE "npm test" JOB BELOW, NOT THE SHARDS
 # Branch protection on main requires a check called "npm test". A bare matrix
@@ -90,9 +88,13 @@ jobs:
   shard:
     name: shard ${{ matrix.shard }} of 6
     runs-on: ubuntu-latest
-    # A shard is ~4 minutes of runner time; this is room for a slow runner and
-    # for the suite to grow before the split needs revisiting.
-    timeout-minutes: 15
+    # A shard is ~11.5 minutes on a runner (652s of tests + setup). 15 was set
+    # when a shard was ~4 minutes, and the suite outgrew it: under real runner
+    # times the old packing put two shards at 14.2-14.7 min, and Tests #231 and
+    # #233 were each cancelled here with every check it reached passing. 25 is
+    # ~2.2x the packed shard - room for a slow runner and for growth. A shard
+    # that nears it means re-measure the weights, not raise this again.
+    timeout-minutes: 25
     permissions:
       contents: read
     env:
