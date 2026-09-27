@@ -144,9 +144,14 @@ async function rendered() {
                  w: Math.round(b.width), h: Math.round(b.height) };
       };
       /* Only the controls the bar is actually SHOWING: not inside a folded
-         dropdown, and not hidden outright (Remove). The invariant this file
-         exists for is unchanged and still applies to those - a bar control on
-         screen must be clickable where it is drawn.
+         dropdown, and not hidden outright. The invariant this file exists
+         for is unchanged and still applies to those - a bar control on
+         screen must be clickable where it is drawn. (Remove used to be
+         hidden outright too - a stray `hidden` attribute the 2026-09-20
+         top-bar restructure left on it, with no code that ever cleared it,
+         so the button never showed even with a piece selected. Fixed: it is
+         disabled/enabled like `#btn-lock-pos` beside it, and is now part of
+         the general count below.)
 
          The fold state is read directly rather than inferred from the box.
          A panel inside a closed <details> is position:absolute, and Chromium
