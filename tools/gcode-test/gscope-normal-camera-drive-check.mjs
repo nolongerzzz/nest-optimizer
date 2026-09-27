@@ -36,6 +36,32 @@ const check = mkCheck();
 const SLICE = 'fixtures/3mf/supportwithinsupport.gcode.3mf';
 const SHOTS = join(ROOT, 'tools', 'gscope-out');
 
+/* "Drawn at all" needs a floor, not a sign test. `lit > 0` passes on one
+   stray pixel - a single antialiased edge, or a lone speck of bed grid - so
+   it cannot tell a drawn part from a blank canvas with a smudge on it. The
+   two far-zoom reads below measure a part only a few pixels ACROSS, but they
+   still read 195 and 950 lit - 195 dead stable across 12 runs - and `shot()`
+   already holds every screenshot to `lit > 20` for the same reason. So 20
+   here too: an order of magnitude under the measured readings, an order over
+   what noise can reach. Both reads print their value beside the assertion,
+   so the margin is visible rather than assumed. Checked by blanking the
+   render (`scene.visible = false`): both then read 0 and both fail, so the
+   floor is a real gate and not a formality.
+
+   WHAT THESE READS DO NOT PROVE, measured the same way: hiding the part
+   alone (`overviewGroup.visible = false`) leaves both at 195 and 950 and
+   both still pass, because the bed grid is drawn too and `cam()`'s own world
+   sphere includes it. So "the part is STILL DRAWN" is really "something is
+   drawn". That is a weakness in what is measured, not in the floor - no
+   threshold fixes it - and it is left alone here rather than folded into a
+   concurrency fix.
+
+   This is hardening, not the concurrency fix. These reads were never what
+   failed: across 12 runs at four-way concurrency, 11 failed and every one
+   was the frustum sampling race (see camSettled), while lit read exactly
+   195 in all 12. */
+const MIN_LIT = 20;
+
 async function frames(page, n = 2) {
   for (let i = 0; i < n; i++) {
     await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
@@ -108,6 +134,31 @@ const near = (a, b, tol) => a.every((x, i) => Math.abs(x - b[i]) <= tol);
  * wheel step is a fixed 0.95 dolly, so seven decades of distance is hundreds
  * of them. The last `real` steps go through page.mouse.wheel.
  */
+/* A frustum read that lets the frustum catch up before calling it broken.
+   `followClip()` in app-microscope.js re-fits near/far EVERY FRAME from the
+   camera's current position, but a WheelEvent moves that position
+   synchronously inside OrbitControls' own handler. So a read taken straight
+   after dispatching sees the new position against the PREVIOUS frame's near
+   and far, and holdsWorld is false for no better reason than that no frame
+   has run yet.
+
+   Uncontended that window is invisible. With several headless Chromiums on
+   one box - which is what tools/run-tests-parallel.mjs creates - rAF is
+   starved and the read lands inside it almost every time: 11 of 12 runs at
+   four-way concurrency failed here, all of them on this, none on anything
+   about pixels.
+
+   So an apparent violation costs one frame and a re-read, and only a frustum
+   still wrong after that counts. The healthy path is unchanged and pays
+   nothing, because holdsWorld is true on the first read. A frustum that is
+   genuinely too small stays wrong across the frame - followClip would have
+   fixed it - so this waits out the race without weakening the assertion. */
+async function camSettled(page, c) {
+  if (c.holdsWorld) return c;
+  await frames(page, 1);
+  return cam(page);
+}
+
 async function wheelUntil(page, at, dy, done, real = 10) {
   let holds = true, c = await cam(page), n = 0;
   while (!done(c) && n < 2000) {
@@ -118,11 +169,11 @@ async function wheelUntil(page, at, dy, done, real = 10) {
       }
     }, [at[0], at[1], dy]);
     n += 10;
-    c = await cam(page);
+    c = await camSettled(page, await cam(page));
     holds = holds && c.holdsWorld;
   }
   await wheel(page, at, dy, real);
-  c = await cam(page);
+  c = await camSettled(page, await cam(page));
   return { c, holds: holds && c.holdsWorld, n };
 }
 
@@ -215,7 +266,8 @@ async function main() {
   const px2 = await litPixels(page);
   console.log(`       zoomed out to ${(c2.d / 1000).toFixed(2)} m, ${px2.lit} lit pixels`);
   check('Normal zoom-out: past the old far-plane limit', c2.d > oldFar, true);
-  check('Normal zoom-out: and the part is STILL DRAWN there (it used to vanish)', px2.lit > 0, true);
+  check(`Normal zoom-out: and the part is STILL DRAWN there (it used to vanish) - ${px2.lit} lit, floor ${MIN_LIT}`,
+    px2.lit > MIN_LIT, true);
   check('Normal zoom-out: the frustum holds everything drawn', c2.holdsWorld, true);
   // At this distance the part is a few pixels, so this one is asserted
   // drawn (lit pixels, above) rather than detailed.
@@ -437,8 +489,9 @@ async function main() {
   await wheelUntil(page, centre, 300, (c) => c.d >= closeOldFar * 0.6, 12);
   const k3 = await settle(page);
   const pxk = await litPixels(page);
-  check('Close inspection: zoom out past 100x its framing, and the part is still drawn',
-    [k3.d > closeOldFar, pxk.lit > 0, k3.holdsWorld], [true, true, true]);
+  console.log(`       close-inspection zoom-out: ${pxk.lit} lit pixels`);
+  check(`Close inspection: zoom out past 100x its framing, and the part is still drawn - ${pxk.lit} lit, floor ${MIN_LIT}`,
+    [k3.d > closeOldFar, pxk.lit > MIN_LIT, k3.holdsWorld], [true, true, true]);
 
   // Back to Normal: the selection alone again, turned to it.
   await page.click('#ms-cam-normal');
