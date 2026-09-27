@@ -3,9 +3,7 @@
  * piece G-scope has open: the plate as it stands, or an STL / 3MF.
  * ----------------------------------------------------------------------------
  *
- * READ docs/SLICER.md FIRST. It says what this slicer is for - reverse
- * engineering and internal iteration - and what it is not: a final-print
- * decision tool. A real print is sliced in Bambu Studio on the real nozzle.
+ * READ docs/SLICER.md FIRST.
  *
  * THE ONE PATH. Slice writes G-code TEXT in the shape a real Bambu slice has,
  * reads it back with NSOGcodeLines.parseGcode - the parser every imported
@@ -16,15 +14,22 @@
  * the parser down, nothing can tell them apart, and nothing here re-implements
  * any of it.
  *
+ * THE PIECE STAYS EXPORTABLE. While a slice is shown, the Slice section keeps
+ * Export piece to plate / Export piece as STL for the piece(s) it was made
+ * from - no selection needed, nothing to go back for. They build the same
+ * geometry, take the same name and make the same calls as G-scope's own
+ * Export to plate / Export as STL do for a loaded piece.
+ *
  * WHAT IT READS. The mesh document's own objects - Z-up millimetre soups,
  * already in the world frame for plate pieces (G-scope's plate route reads them
  * off the scene with meshToWorldSoup). All pieces are sliced together, in one
  * frame, dropped onto the plate together, so two pieces that overlap in a
  * layer are reported as a conflict, by layer number.
  *
- * PAINT SCOPE: NONE - it reads geometry and writes nothing: no piece, no
- * face, no undo step. Paint has nothing to protect from it (docs/HANDOFF.md,
- * "Scoping"; the same category as Skin patch's).
+ * PAINT SCOPE: NONE - Slice reads geometry and writes nothing. Export piece to
+ * plate adds a copy of the piece as a new piece and edits none, as G-scope's
+ * own Export to plate does. Paint has nothing to protect from either
+ * (docs/HANDOFF.md, "Scoping"; the same category as Skin patch's).
  *
  * NON-SOLID SCOPE (docs/NON-SOLID.md): read through nsoNonSolid for plate
  * pieces, never inferred. A piece flagged non-solid is sliced with
@@ -32,7 +37,8 @@
  * chorded shut, because its open edges are the design. A file opened straight
  * into G-scope has no flag to read and is sliced as a solid.
  */
-/* global state, setStatus */
+/* global state, setStatus, addModelFromZUpGeometry, pushUndo, geometryToBinarySTL,
+          downloadBlob, THREE */
 'use strict';
 
 var NSO_GSCOPE_SLICE = (function () {
@@ -152,6 +158,69 @@ var NSO_GSCOPE_SLICE = (function () {
     return MS().openObjects(s.label, s.objects, { source: s.docSource, subtitle: s.subtitle });
   }
 
+  // --- the piece, exportable while its slice is shown ----------------------
+
+  function baseName(n) {
+    return String(n).replace(/\.gcode\.3mf$/i, '').replace(/\.(stl|3mf)$/i, '');
+  }
+
+  /** The source of the slice G-scope is showing now, or null. */
+  function shownSource() {
+    var d = MS() && MS().getDoc();
+    return d && d.nsoSlice && d.nsoSlice.source ? d.nsoSlice.source : null;
+  }
+
+  /** The piece(s) as one Z-up geometry - the objects' own triangles, as G-scope exports a loaded piece. */
+  function pieceGeometry(src) {
+    var objs = src.objects.filter(function (o) { return o.positions && o.positions.length >= 9; });
+    var total = objs.reduce(function (a, o) { return a + o.positions.length; }, 0);
+    if (!total) return null;
+    var positions = new Float32Array(total), at = 0;
+    objs.forEach(function (o) { positions.set(o.positions, at); at += o.positions.length; });
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    return geo;
+  }
+
+  /** G-scope's own naming for an exported piece. */
+  function pieceLabel(src) {
+    var objs = src.objects;
+    var what = objs.length === 1 ? objs[0].name
+      : objs.length + ' ' + (src.docSource === 'plate' ? 'pieces' : 'objects');
+    return src.docSource === 'plate' ? what : baseName(src.label) + ' - ' + what;
+  }
+
+  /** The piece onto the plate as its own object, with undo - G-scope's Export to plate. */
+  function exportPieceToPlate() {
+    var src = shownSource();
+    if (!src) { say('No slice is shown, so there is no piece to export from here', true); return null; }
+    var geo = pieceGeometry(src);
+    if (!geo) { say('The piece has no triangles to export', true); return null; }
+    var label = pieceLabel(src);
+    var id = addModelFromZUpGeometry(label, geo);
+    if (!id) { say('Export to plate failed - nothing was added', true); return null; }
+    if (typeof pushUndo === 'function') {
+      pushUndo({ type: 'addModels', ids: [id], editId: state.editId, cutT: state.cutT });
+    }
+    var tris = geo.attributes.position.count / 3;
+    MS().close();
+    say('Export to plate ok - "' + label + '" is its own object (' + tris + ' triangles)');
+    return id;
+  }
+
+  /** The piece straight to an STL file - G-scope's Export as STL. */
+  function exportPieceAsSTL() {
+    var src = shownSource();
+    if (!src) { say('No slice is shown, so there is no piece to export from here', true); return null; }
+    var geo = pieceGeometry(src);
+    if (!geo) { say('The piece has no triangles to export', true); return null; }
+    var buffer = geometryToBinarySTL(geo);
+    var name = pieceLabel(src).replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>]/g, '') + '.stl';
+    downloadBlob(new Blob([buffer], { type: 'application/octet-stream' }), name);
+    say('Downloaded ' + name + ' (' + (geo.attributes.position.count / 3) + ' triangles)');
+    return name;
+  }
+
   function report(r, flagged) {
     var lines = [];
     var o = r.options;
@@ -169,7 +238,6 @@ var NSO_GSCOPE_SLICE = (function () {
     });
     if (r.conflicts.length) lines.push('CONFLICT: pieces print into each other on layer ' + conflictLayers(r).join(', ') + '.');
     if (flagged && flagged.length) lines.push('Non-solid (open by design): ' + flagged.join(', ') + '.');
-    lines.push('For inspection only - not a print file. Validate a real print in Bambu Studio.');
     return lines.join(' ');
   }
 
@@ -181,6 +249,8 @@ var NSO_GSCOPE_SLICE = (function () {
     var btn = $('ms-btn-slice'), back = $('ms-btn-slice-back');
     if (btn) { btn.style.display = d && d.kind === 'mesh' ? '' : 'none'; btn.disabled = busy; }
     if (back) back.style.display = ours ? '' : 'none';
+    var exp = $('ms-slice-export-row');
+    if (exp) exp.style.display = ours ? 'flex' : 'none';
     var read = $('ms-slice-read');
     if (!read || busy) return;
     if (ours) read.textContent = report(d.nsoSlice.result, d.nsoSlice.flagged);
@@ -202,6 +272,8 @@ var NSO_GSCOPE_SLICE = (function () {
     });
     bind('ms-btn-slice', 'click', function () { slice(); });
     bind('ms-btn-slice-back', 'click', backToMesh);
+    bind('ms-btn-slice-export-plate', 'click', exportPieceToPlate);
+    bind('ms-btn-slice-export-stl', 'click', exportPieceAsSTL);
     bind('ms-slice-nozzle', 'change', function () {
       var n = num('ms-slice-nozzle', 0.6), lay = $('ms-slice-layer');
       if (lay) lay.value = String(Math.round(n * 0.5 * 100) / 100);
@@ -217,6 +289,8 @@ var NSO_GSCOPE_SLICE = (function () {
   return {
     slice: slice,
     backToMesh: backToMesh,
+    exportPieceToPlate: exportPieceToPlate,
+    exportPieceAsSTL: exportPieceAsSTL,
     last: function () { return last; },
     busy: function () { return busy; },
     panelOpts: panelOpts

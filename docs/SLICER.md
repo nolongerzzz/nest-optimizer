@@ -5,12 +5,9 @@ action (`app-gscope-slice.js`) · checks `slicer:test`, `slicer:bambu`,
 `gcode:gscope-slice`, all in `npm test`.
 
 **What it is for:** reverse-engineering and internal iteration. It is a real
-slicer: exact sections, measured offsets and real line families. You can read
-its output line by line in G-scope and measure it against a real slice.
-
-**What it is not:** a final-print decision tool. Its G-code carries no start
-or end code and no temperatures, and its header says `NOT A PRINT FILE`. A real
-print is sliced in Bambu Studio on the real 0.6 mm nozzle.
+slicer: exact sections, measured offsets and real line families. You
+can read its output line by line in G-scope and measure it against a real
+slice.
 
 ---
 
@@ -309,7 +306,7 @@ plate*, or an STL / 3MF opened into G-scope. Defaults are the real setup: a
 
 From the parser down, nothing can tell an in-house slice from an imported one.
 The legend, Pick a line, Isolate, the layer slider, Clear from view, the solid
-view, Crop and both exports work unchanged. `gcode:gscope-slice` (35 checks,
+view, Crop and both exports work unchanged. `gcode:gscope-slice` (43 checks,
 real clicks) proves:
 
 - the document keys, segment schema and move schema equal those of
@@ -320,8 +317,17 @@ The panel reports layers, walls per layer, each support-need region (z,
 footprint, and what it stands on), and any **CONFLICT** by layer. **Back to the
 mesh** re-opens the source.
 
-- **Paint scope: none.** It reads geometry and writes nothing: no piece, no
-  face, no undo step.
+**The piece stays exportable the whole time its slice is shown.** The Slice
+section keeps **Export piece to plate** and **Export piece as STL** for the
+piece(s) the slice was made from, with no selection needed and nothing to go
+back for. They build the same geometry, use the same name and make the same
+calls as G-scope's own Export to plate / Export as STL for a loaded piece.
+The slice's own beads export through G-scope's Export row as for any imported
+slice.
+
+- **Paint scope: none.** Slice reads geometry and writes nothing. Export
+  piece to plate adds a copy of the piece as a new piece and edits none, as
+  G-scope's own Export to plate does.
 - **Non-solid scope.** It reads `nsoNonSolid`. A flagged piece keeps its open
   chains open.
 
@@ -348,4 +354,4 @@ mesh** re-opens the source.
 |---|---|---|
 | `slicer:test` | 52 checks: sections equal manifold's own `Manifold.slice` on 6 repo meshes (worst rel 1.3e-9); orientation; open and inside-out meshes; wall offsets and counts; grid pitch and angles; density scaling; shells; overhang on cones either side of 30° / 45°, a mushroom (area exact to the step), model vs plate; G-code round trip; conflicts; constants | ~2 s |
 | `slicer:bambu` | §5 above: 51 checks, 7 findings | ~70 s |
-| `gcode:gscope-slice` | 35 checks, real clicks, screenshots in `tools/gscope-slice-out/` | ~10 s |
+| `gcode:gscope-slice` | 43 checks, real clicks, screenshots in `tools/gscope-slice-out/` | ~10 s |

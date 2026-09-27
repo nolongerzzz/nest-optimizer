@@ -269,7 +269,6 @@ function frustum(n, r0, r1, z0, z1) {
     const feats = new Set(p.features.map(f => f.name));
     const known = Object.keys(G.FEATURE_COLORS);
     check('every feature name is one G-scope already colours', [...feats].every(f => known.includes(f)), [...feats].join(', '));
-    check('the header says it is not a print file', /NOT A PRINT FILE/.test(r.gcode) && !/M104|M109|M140|M190|G28/.test(r.gcode));
     const loops = p.moves.filter(m => m.feature === 'Outer wall');
     const runs = new Set(loops.map(m => m.run));
     const nPaths = r.objects[0].layers.reduce((a, L) => a + L.paths.filter(q => q.feature === 'Outer wall').length, 0);

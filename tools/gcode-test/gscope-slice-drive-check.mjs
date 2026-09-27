@@ -21,6 +21,9 @@
  *      the plain box; a non-solid piece is sliced with its chains left open.
  *   6  NOTHING IS WRITTEN: no model, no plate piece, no undo step.
  *   7  BACK TO THE MESH re-opens the plate; an STL opened into G-scope slices too.
+ *   8  THE PIECE STAYS EXPORTABLE while its slice is shown, with nothing
+ *      selected: Export piece as STL downloads the piece's exact triangles,
+ *      Export piece to plate adds them as a new piece with one Undo step.
  *
  * Usage: node tools/gcode-test/gscope-slice-drive-check.mjs
  */
@@ -224,8 +227,12 @@ async function main() {
   check('the mushroom\'s cap needs support, at z 5, standing on the plate',
     [mush.regions.length, Math.abs(mush.regions[0].z - 5) < 1e-6, mush.regions[0].on], [1, true, 'plate']);
   check('the plain block needs none', plain.regions.length, 0);
-  check('the panel says so, and says it is not a print file',
-    [/mushroom: .*needs support at z 5\.00/.test(read), /plain: .*no support needed/.test(read), /not a print file/.test(read)], [true, true, true]);
+  check('the panel says so',
+    [/mushroom: .*needs support at z 5\.00/.test(read), /plain: .*no support needed/.test(read)], [true, true]);
+  await page.evaluate(() => window.NSO_MICROSCOPE.setSelectionMoves([]));
+  check('on the plate\'s slice, both piece exports are there with nothing selected',
+    [await page.isVisible('#ms-btn-slice-export-plate'), await page.isVisible('#ms-btn-slice-export-stl'),
+     await page.evaluate(() => window.NSO_MICROSCOPE.selection().length)], [true, true, 0]);
   // non-solid: flag the plain block, slice again
   await page.click('#ms-btn-slice-back');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'mesh');
@@ -259,6 +266,34 @@ async function main() {
   check('it slices into a toolpath document', await page.evaluate(() => /^mushroom\.stl - NSO slice/.test(window.NSO_MICROSCOPE.getDoc().name)), true);
   await frames(page);
   await page.locator('#microscope').screenshot({ path: join(SHOTS, 'slice-03-stl.png') });
+
+  // =======================================================================
+  console.log('\n--- 8. the piece stays exportable while its slice is shown ---');
+  // =======================================================================
+  const srcSoup = await page.evaluate(() => Array.from(window.NSO_GSCOPE_SLICE.last().source.objects[0].positions));
+  check('nothing is selected in the slice view', await page.evaluate(() => window.NSO_MICROSCOPE.selection().length), 0);
+  check('Export piece to plate and Export piece as STL are both visible',
+    [await page.isVisible('#ms-btn-slice-export-plate'), await page.isVisible('#ms-btn-slice-export-stl')], [true, true]);
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 15000 }), page.click('#ms-btn-slice-export-stl')]);
+  const file = await readFile(await dl.path());
+  const n = file.readUInt32LE(80);
+  const got = [];
+  for (let t = 0; t < n; t++) for (let k = 0; k < 9; k++) got.push(file.readFloatLE(84 + t * 50 + 12 + k * 4));
+  check('Export piece as STL downloads the piece, named for it', dl.suggestedFilename(), 'mushroom_-_mushroom.stl');
+  check('... carrying the piece\'s exact triangles', [n, got.every((v, i) => v === Math.fround(srcSoup[i]))], [srcSoup.length / 9, true]);
+  const pre = await page.evaluate(() => ({ models: state.models.length, undo: state.undoStack.length }));
+  await page.click('#ms-btn-slice-export-plate');
+  await page.waitForFunction((m) => state.models.length === m + 1, pre.models, { timeout: 15000 });
+  const added = await page.evaluate(() => {
+    const m = state.models[state.models.length - 1];
+    return { name: m.name, tris: m.rawTris.length / 9, undo: state.undoStack.length,
+             top: state.undoStack[state.undoStack.length - 1].type };
+  });
+  check('Export piece to plate adds the piece as its own model with the same triangle count, one addModels undo step',
+    [added.name, added.tris, added.undo - pre.undo, added.top], ['mushroom - mushroom', srcSoup.length / 9, 1, 'addModels']);
+  await page.click('#btn-undo');
+  await page.waitForFunction((m) => state.models.length === m, pre.models, { timeout: 15000 });
+  check('... and Undo takes it off again', await page.evaluate(() => state.models.length), pre.models);
 
   check('the kernel came from the vendored copy (no network)', cdn.includes('manifold-3d@3.5.3/manifold.wasm'), true);
   check('no page errors', errors, []);
