@@ -18,6 +18,13 @@ Smart build-plate packing for 3D printing.
 - Resize a piece to a real dimension - pick X, height, Z or the longest edge,
   type the mm you want, and the uniform factor is solved and applied (or scale
   by a plain multiplier)
+- **In-house slicer** (G-scope, **Slice**): exact layer sections, walls offset
+  by the measured line widths, grid / zigzag infill by density, top and bottom
+  shells, and per-layer overhang / support-need calls - opened as a toolpath
+  G-scope inspects line by line, like an imported `.gcode.3mf`. Validated
+  against real Bambu slices, agreement and disagreement both on record. For
+  reverse-engineering only: its G-code is not a print file
+  ([docs/SLICER.md](docs/SLICER.md))
 - **New stock**: a correctly-sized blank to start from, before Carve, Hollow,
   Cut or anything else that begins with a blank block - sphere, box, cylinder,
   cone, tube, torus, capsule or ellipsoid, sized from the target piece by a
