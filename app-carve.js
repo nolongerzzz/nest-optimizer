@@ -123,6 +123,44 @@
   }
 
   /* ---- arming ---- */
+
+  /* One click-owning mode at a time, the same contract app-measure.js states
+     and app-mask.js, app-brush.js and app-seat-surface.js all keep. Carve is
+     asked second in app-core's pointerdown routing - right after paint - so
+     paint left armed when Carve goes live is not queued behind it, it never
+     fires again: paint keeps taking the click and Carve's button sits lit and
+     dead. This used to name only Seat here.
+
+     Paint and the other two with a button go off THROUGH the button, so
+     aria-pressed and the armed class follow rather than being written behind
+     its back; state.centerLockArmed stays a flag write on purpose, as it does
+     in every other disarmOthers, because btn-center-lock-pick refuses to
+     cancel once the Join pair it needs is gone. */
+  function disarmOthers() {
+    if (state.maskPaint) {
+      var paintBtn = $(state.maskPaint === 'select' ? 'btn-mask-select' : 'btn-mask-paint');
+      if (paintBtn) paintBtn.click();
+    }
+    if (state.seatHereArmed) {
+      var seatBtn = $('btn-seat-here');
+      if (seatBtn) seatBtn.click();
+      else state.seatHereArmed = false;
+    }
+    if (typeof window.nsoBrushArmed === 'function' && window.nsoBrushArmed()) {
+      var brushBtn = $('btn-brush');
+      if (brushBtn) brushBtn.click();
+      else if (typeof window.nsoBrushSetArmed === 'function') window.nsoBrushSetArmed(false);
+    }
+    if (state.measureOn) {
+      var measureBtn = $('btn-measure');
+      if (measureBtn) measureBtn.click();
+      else state.measureOn = false;
+    }
+    state.softenArmed = false;
+    state.capArmed = false;
+    state.centerLockArmed = false;
+  }
+
   function setArmed(on) {
     state.carveArmed = !!on;
     var btn = $('btn-carve');
@@ -131,12 +169,7 @@
       btn.classList.toggle('is-armed', state.carveArmed);
     }
     if (state.carveArmed) {
-      /* one click-owning mode at a time, the way Measure's disarmOthers does it */
-      if (state.seatHereArmed) {
-        var seatBtn = $('btn-seat-here');
-        if (seatBtn) seatBtn.click();
-        else state.seatHereArmed = false;
-      }
+      disarmOthers();
       say('Carve armed - click a face, an edge or a corner. Click Carve again to stop.');
     } else {
       say('Carve off');
