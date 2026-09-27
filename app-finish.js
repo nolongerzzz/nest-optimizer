@@ -2838,51 +2838,116 @@ function solidifySelectedModel() {
     setStatus('Solidify: already closed - 0 open edges, nothing to fill; piece unchanged');
     return;
   }
-  let working = soupIn;
-  try {
-    working = weldSoupVerts(working);
-    if (typeof capSmallOpenLoops === 'function') working = capSmallOpenLoops(working, 28);
-    working = capAllOuterHoles(working);
-    if (typeof repairJoinedSoup === 'function') working = repairJoinedSoup(working);
-    working = weldSoupVerts(working);
-  } catch (e) {
-    setStatus('Solidify failed - piece unchanged', true);
-    return;
+  // Run the pipeline once, at one weld tolerance, and report what it
+  // produced - never sets status, never commits. null means a stage threw.
+  function solidifyAttempt(weldTol, useRepairJoin, joinWeldTol) {
+    let w = soupIn;
+    try {
+      w = weldSoupVerts(w, weldTol);
+      if (typeof capSmallOpenLoops === 'function') w = capSmallOpenLoops(w, 28);
+      w = capAllOuterHoles(w);
+      if (useRepairJoin && typeof repairJoinedSoup === 'function') w = repairJoinedSoup(w, joinWeldTol);
+      w = weldSoupVerts(w, weldTol);
+    } catch (e) {
+      return null;
+    }
+    // Whatever the cappers above left open: pinched loops, loops folded over an edge.
+    let cl = null;
+    try {
+      cl = solidifyCloseLoops(w);
+      w = cl.soup;
+    } catch (e) {
+      cl = null;
+    }
+    if (!w || w.length < 9) return null;
+    const c = solidifyCensus(w);
+    if (!c) return null;
+    return { working: w, closeLoops: cl, census: c };
   }
-  // Whatever the cappers above left open: pinched loops, and loops folded over an edge.
-  let closeLoops = null;
-  try {
-    closeLoops = solidifyCloseLoops(working);
-    working = closeLoops.soup;
-  } catch (e) {
-    closeLoops = null;
+
+  // Two tiers, tightest first. weldSoupVerts's 0.2 mm grid snap and
+  // repairJoinedSoup's own 0.3 mm weld are the risky part of this pipeline
+  // (see the comment above solidifyCensus): a grid that coarse merges every
+  // pair of distinct vertices sharing a cell, which is exactly what closes a
+  // real seam gap or a misaligned join, but on finely tessellated geometry
+  // merges vertices that were never meant to be the same point. A
+  // fine-detail hole's own boundary is usually exact-vertex already - a
+  // dropped face's edges are still shared with their neighbours - so it
+  // needs no snap at all to cap.
+  //
+  // repairJoinedSoup is left OUT of the fine tier entirely, not just called
+  // at a tighter tolerance: measured on library/v9_mirror_factory.stl with
+  // one face knocked out, repairJoinedSoup dropped ~160 triangles and opened
+  // 224 new edges even welding at the exact-vertex tolerance - its own
+  // degenerate/duplicate-face filter and its "drop small disjoint shells
+  // under 20 tris or 2% of volume" step are both blind to weld tolerance and
+  // both real risk on a piece with many small, legitimately separate
+  // features. The fine tier is weld -> cap -> cap -> weld -> close-loops
+  // only, which is exactly what closes that hole (a dropped face's edges
+  // were already exact, so nothing needed welding at all - just capping) -
+  // capSmallOpenLoops(28), capAllOuterHoles and solidifyCloseLoops carry
+  // none of repairJoinedSoup's extra filtering.
+  //
+  // Only escalate to the coarse tier - the full original pipeline,
+  // unchanged - when the fine tier makes no progress: closing a genuine gap
+  // wider than exact-vertex, and whatever repairJoinedSoup's filtering costs
+  // to get there, is what the coarse tolerance exists for.
+  const SOLIDIFY_WELD_TOL_FINE =
+    (typeof NSO_Repair !== 'undefined' && NSO_Repair && NSO_Repair.WELD_TOL) || 1e-4;
+  const fine = solidifyAttempt(SOLIDIFY_WELD_TOL_FINE, false);
+  const coarse = solidifyAttempt(0.2, true, 0.3);
+
+  // Both gates, run against a candidate: not worse (result gate) and some
+  // open edge actually closed (progress gate) - the same two solidifyCensus
+  // guards the single-tolerance pipeline always ran, just per candidate now.
+  function gate(attempt) {
+    if (!attempt) return { pass: false };
+    const worse = solidifyRegressions(censusBefore, attempt.census);
+    if (worse.length) return { pass: false, worse: worse };
+    if (attempt.census.open >= censusBefore.open) return { pass: false, noProgress: true };
+    return { pass: true };
   }
-  if (!working || working.length < 9) {
-    setStatus('Solidify failed - piece unchanged', true);
-    return;
-  }
-  const censusAfter = solidifyCensus(working);
-  if (!censusAfter) {
-    setStatus('Solidify failed - result could not be measured; piece unchanged', true);
-    return;
-  }
-  const worse = solidifyRegressions(censusBefore, censusAfter);
-  if (worse.length) {
-    setStatus('Solidify refused - it would make the mesh worse (' + worse.join(', ') +
-              '; ' + censusBefore.tris + '\u2192' + censusAfter.tris + ' tris); piece unchanged', true);
-    return;
-  }
-  // Progress gate. Not worse is not enough: Solidify exists to close
-  // openings, so a result with as many open edges as the input is a refusal,
-  // not an "ok" with an Undo entry for a change that did not happen. Driver
-  // testing round 1 caught exactly that: "Solidify ok - open 16->16" on a
-  // result byte-identical to its input.
-  const leftWhy = (closeLoops && closeLoops.left.length) ? ' - left open: ' + closeLoops.left.join('; ') : '';
-  if (censusAfter.open >= censusBefore.open) {
+  const fineGate = gate(fine);
+  const coarseGate = gate(coarse);
+
+  let chosen = null;
+  if (fineGate.pass) chosen = fine;
+  // A tie keeps the fine result (tighter tolerance, less destructive); only
+  // an outright better one (fewer open edges left) displaces it.
+  if (coarseGate.pass && (!chosen || coarse.census.open < chosen.census.open)) chosen = coarse;
+
+  if (!chosen) {
+    // Report from the coarse attempt when it ran - it is what this pipeline
+    // always ran before the fine tier existed, so the message a user sees on
+    // a refusal is unchanged. Fall back to the fine attempt only when the
+    // coarse pipeline itself threw.
+    const report = coarse || fine;
+    if (!report) {
+      setStatus('Solidify failed - piece unchanged', true);
+      return;
+    }
+    const reportGate = report === coarse ? coarseGate : fineGate;
+    const leftWhy = (report.closeLoops && report.closeLoops.left.length)
+      ? ' - left open: ' + report.closeLoops.left.join('; ') : '';
+    if (reportGate.worse) {
+      setStatus('Solidify refused - it would make the mesh worse (' + reportGate.worse.join(', ') +
+                '; ' + censusBefore.tris + '\u2192' + report.census.tris + ' tris); piece unchanged', true);
+      return;
+    }
+    // Progress gate. Not worse is not enough: Solidify exists to close
+    // openings, so a result with as many open edges as the input is a
+    // refusal, not an "ok" with an Undo entry for a change that did not
+    // happen. Driver testing round 1 caught exactly that: "Solidify ok -
+    // open 16->16" on a result byte-identical to its input.
     setStatus('Solidify refused - closed none of the ' + censusBefore.open + ' open edges (open ' +
-              censusBefore.open + '\u2192' + censusAfter.open + ')' + leftWhy + '; piece unchanged', true);
+              censusBefore.open + '\u2192' + report.census.open + ')' + leftWhy + '; piece unchanged', true);
     return;
   }
+  const working0 = chosen.working;
+  const closeLoops = chosen.closeLoops;
+  const censusAfter = chosen.census;
+  const leftWhy = (closeLoops && closeLoops.left.length) ? ' - left open: ' + closeLoops.left.join('; ') : '';
+  let working = working0;
   pushUndo({
     type: 'solidifyReplace',
     modelId: m.id,
@@ -5458,7 +5523,8 @@ function joinHalvesOnPlate(modelA, placedA, modelB, placedB, axisIdx) {
   return soupToCenteredGeo(merged);
 }
 
-function repairJoinedSoup(soup) {
+function repairJoinedSoup(soup, weldTol) {
+  weldTol = weldTol == null ? 0.3 : weldTol;
   try {
     if (!soup || soup.length < 9) return soup;
     const original = soup;
@@ -5513,7 +5579,7 @@ function repairJoinedSoup(soup) {
 
     // 2) Weld vertices (reuse existing welder; also re-drops any triangles
     //    that collapse to zero area once shared verts snap together).
-    let soupW = weldSoupVerts(new Float32Array(work), 0.3);
+    let soupW = weldSoupVerts(new Float32Array(work), weldTol);
     if (soupW.length < 9) return original;
 
     // 3) Cap any remaining planar open loops with the existing capper
@@ -5525,7 +5591,7 @@ function repairJoinedSoup(soup) {
     for (let pass = 0; pass < 3; pass++) {
       if (!(typeof openBoundaryEdges === 'function' && openBoundaryEdges(soupC).length > 0)) break;
       const capped = capAllOuterHoles(soupC);
-      const reWelded = weldSoupVerts(capped, 0.3);
+      const reWelded = weldSoupVerts(capped, weldTol);
       if (reWelded.length < 9) break;
       if (reWelded.length === soupC.length) { soupC = reWelded; break; }
       soupC = reWelded;
