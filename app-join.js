@@ -226,6 +226,34 @@ function NSO_geomToWorldSoup(geometry, px, py, pz, quatOrEuler, scale) {
   return meshToWorldSoup(fake);
 }
 
+/* Rotates a RAW ('zup') soup by a placed piece's CURRENT pose - rotation
+   only, no translation, about the piece's own origin (raw soups, like the
+   display geometry they come from, are centered there).
+
+   Planar fuse (Join Route 0) works on raw soups on purpose - the same caps
+   in display/placed space carry kerf-offset seed vertices that break exact
+   congruence (see the route's own comment in joinSelectedModels). But raw
+   and display axes differ by a fixed permutation (displayGeometryToRawSoup:
+   raw = (x, -z, y)), while a piece's pose (mesh.quaternion, built by
+   applyMeshRotation) is defined in DISPLAY space. Applying it to raw
+   coordinates directly would rotate around the wrong axes, so each vertex
+   is round-tripped through display space: raw -> display -> rotate ->
+   raw. Identity pose in, unchanged soup out. */
+function NSO_rotateRawSoupByPlacedPose(soup, placed) {
+  if (!soup || !soup.length) return soup;
+  if (!placed || !placed.mesh || typeof nsoPlacedIsPosed !== 'function' || !nsoPlacedIsPosed(placed)) return soup;
+  var q = placed.mesh.quaternion;
+  var out = new Float32Array(soup.length);
+  var v = new THREE.Vector3();
+  for (var i = 0; i < soup.length; i += 3) {
+    var rx = soup[i], ry = soup[i + 1], rz = soup[i + 2];
+    v.set(rx, rz, -ry);          // raw -> display
+    v.applyQuaternion(q);
+    out[i] = v.x; out[i + 1] = -v.z; out[i + 2] = v.y;   // display -> raw
+  }
+  return out;
+}
+
 /* ---- soup <-> geometry ---- */
 
 function NSO_soupToGeometry(soup) {
@@ -2774,7 +2802,20 @@ async function joinSelectedModels() {
     fuseWhy = paintedJoin + ' painted face(s) - fusion has no skip list';
   } else {
     try {
-      const rawA = getModelRawSoup(modelA), rawB = getModelRawSoup(modelB);
+      // Each piece's CURRENT pose (placedA/placedB.mesh's rotation) must be
+      // folded in here, not dropped: fuse hands its output straight to
+      // joinSelectedModels, which then clears the pose off the record on
+      // the assumption that every route's geometry already carries it (see
+      // nsoClearPlacedPose's call site below). For an axis-preserving pose
+      // (a 90/180/270 turn, a flip) the rotated cap still lines up and fuse
+      // still finds and welds it, now correctly turned; for anything else
+      // the rotated cap no longer aligns to X/Y/Z, mating search finds
+      // nothing, and fuse declines - correctly, since a piece tipped at a
+      // free angle is no longer flush with its mate, and no fuse route
+      // should silently paper over that. Route 2 (kernel union) picks up
+      // from there and handles any orientation via a real boolean union.
+      const rawA = NSO_rotateRawSoupByPlacedPose(getModelRawSoup(modelA), placedA);
+      const rawB = NSO_rotateRawSoupByPlacedPose(getModelRawSoup(modelB), placedB);
       if (!NSO_soupLen(rawA) || !NSO_soupLen(rawB)) {
         fuseWhy = 'no raw soup for one side';
       } else {
@@ -2833,8 +2874,8 @@ async function joinSelectedModels() {
       const yB = placedB.mesh ? placedB.mesh.position.y : 0;
       const seated = Math.abs(yA - yB) > 3.5;
       if (seated && typeof meshToWorldSoup === 'function') {
-        const sa = meshToWorldSoup(placedA);
-        const sb = meshToWorldSoup(placedB);
+        const sa = meshToWorldSoup(placedA.mesh);
+        const sb = meshToWorldSoup(placedB.mesh);
         if (!sa || !sb || sa.length < 9 || sb.length < 9) throw new Error('in-place join empty soup');
         let merged = new Float32Array(sa.length + sb.length);
         merged.set(sa, 0);

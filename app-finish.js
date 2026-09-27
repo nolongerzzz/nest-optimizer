@@ -5360,8 +5360,19 @@ function joinHalvesOnPlate(modelA, placedA, modelB, placedB, axisIdx) {
   matchPlacedBottoms(placedA, placedB);
   const pyA = placedA.mesh ? placedA.mesh.position.y : (modelA.size.y / 2 + 0.3);
   const pyB = placedB.mesh ? placedB.mesh.position.y : (modelB.size.y / 2 + 0.3);
-  const soupA = geomToWorldSoup(modelA.geometry, placedA.x, pyA, placedA.z);
-  const soupB = geomToWorldSoup(modelB.geometry, placedB.x, pyB, placedB.z);
+  // meshToWorldSoup(placed.mesh) when there is a mesh to read - the piece's
+  // FULL current transform, turn included. geomToWorldSoup only translates,
+  // so a piece rotated (rotY, flipX, tipX/tiltX, tipZ/tiltZ) before this
+  // Join came out unturned: the record said posed, the drawn geometry
+  // wasn't, and joinSelectedModels clears the record right after (it
+  // assumes every route bakes the pose in - see its own comment), so the
+  // turn was gone with nothing left even claiming it.
+  const soupA = (placedA.mesh && typeof meshToWorldSoup === 'function')
+    ? meshToWorldSoup(placedA.mesh)
+    : geomToWorldSoup(modelA.geometry, placedA.x, pyA, placedA.z);
+  const soupB = (placedB.mesh && typeof meshToWorldSoup === 'function')
+    ? meshToWorldSoup(placedB.mesh)
+    : geomToWorldSoup(modelB.geometry, placedB.x, pyB, placedB.z);
   const key = axisIdx === 0 ? 'x' : 'z';
   const aIsMin = placedA[key] <= placedB[key];
   const left = aIsMin ? soupA : soupB;
