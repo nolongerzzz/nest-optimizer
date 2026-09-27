@@ -563,12 +563,27 @@ async function main() {
   check('one fewer line shown', lineCleared.shown, aim.n - 1);
   await shot(page, '08-line-cleared.png', 'a line cleared from view');
 
-  // Feature-level: the legend's "only", then Select shown.
+  // Feature-level: the legend's "only" is this method's one-click isolate -
+  // Export must be offered right after it, same as a picked line or a box,
+  // with no separate "Select shown" required. (It used to be view-only:
+  // nothing selected, Export never appeared until Select shown was pressed
+  // as a second, undiscoverable step - the one path in that a plain click on
+  // any of the other isolation methods never needed.)
   await page.click('#ms-btn-show-all');
   await page.click('#ms-zr-all');
   const inner = page.locator('#ms-legend .ms-legend-item[data-group="Inner wall"]');
   await inner.hover();
   await inner.locator('.ms-legend-only').click();
+  const soloed = await page.evaluate(() => {
+    const M = window.NSO_MICROSCOPE, d = M.getDoc(), sel = M.selection();
+    return { n: sel.length, want: d.parsed.moves.filter((m) => m.feature === 'Inner wall').length,
+      onlyInner: sel.every((s) => s.feature === 'Inner wall'), by: M.selectionSource(),
+      exportShown: getComputedStyle(document.getElementById('ms-export-row')).display !== 'none' };
+  });
+  check('"only" alone selects every Inner wall move, no Select shown needed',
+    [soloed.n, soloed.onlyInner, soloed.exportShown], [soloed.want, true, true]);
+  // Select shown reads the identical "what is shown" - pressing it after
+  // "only" is a no-op on the selection, not a second, required step.
   await page.click('#ms-btn-select-visible');
   const feat = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, d = M.getDoc(), sel = M.selection();

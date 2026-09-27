@@ -565,14 +565,23 @@ now all take the same route. There is no second importer left to drift.
 
 **Clear from view** hides the current selection: a plate piece (it joins the
 legend's hidden set) or picked / caught lines (a `CLEARED` set of move ids).
-**Show all** brings everything back. The same holds for the legend's row
-click and its new **only** button, the slider, Isolate / Back and
-**Select shown**. None of these functions calls `addModelFromZUpGeometry`,
-`pushUndo`, `downloadBlob`, or writes `state.*`; they rebuild the view's own
-line buffers or clipping planes and nothing else. `gcode:gscope` proves it by
-snapshotting every model id / name / raw-mesh length / vertex count, every
-placement (x, y, z, yaw, visibility) and the undo stack before and after, and
-counting downloads.
+**Show all** brings everything back. The same holds for the legend's plain
+row click, the slider, Isolate / Back and **Select shown**. None of these
+functions calls `addModelFromZUpGeometry`, `pushUndo`, `downloadBlob`, or
+writes `state.*`; they rebuild the view's own line buffers or clipping planes
+and nothing else. `gcode:gscope` proves it by snapshotting every model id /
+name / raw-mesh length / vertex count, every placement (x, y, z, yaw,
+visibility) and the undo stack before and after, and counting downloads.
+
+The legend's **only** button is the one exception, and deliberately so: it is
+this method's one-click isolate, so unlike a plain row click it also becomes
+the selection (`soloGroup()` calls `selectVisible()` on itself) - Export and
+Crop are offered right after, with no separate Select shown press needed, the
+same as a picked line, a capture box or the Flange tab. It used to be view
+only, which meant "only" was the one isolation method that did NOT put you in
+Export's reach on its own click; **Select shown** still exists and still
+reads the identical "what is shown", for composing several groups by hand
+with the plain row toggle first.
 
 ### 4. Line-level and feature-level isolation
 
@@ -588,7 +597,8 @@ counting downloads.
   cylinders in the detail view, so **what Isolate shows is the solid Export
   writes**, 12 triangles per move (checked against `extrudeFlatLine` to the
   micron, and the downloaded STL triangle for triangle).
-- **Feature:** each legend row now has an **only** button (this group alone).
+- **Feature:** each legend row has an **only** button (this group alone,
+  selected and ready to Export or Crop in the one click - see above).
   **Select shown** turns whatever the filters leave on screen into the
   selection, and the capture box now catches only what is drawn - so "only
   Inner wall" plus a box, or plus the slider, gives exactly that feature in
