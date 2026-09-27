@@ -68,7 +68,7 @@ Current roster, by category:
 | Detach (`app-detach.js`) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/DETACH.md` |
 | Reattach (`app-detach.js`) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/DETACH.md` |
 | G-scope supports (`app-gscope-support.js`) | sub-region | the marker scan's skipList, `nsoMaskFaceList(m)` shifted into the world frame; refused by name when the piece is painted and turned. Generating adds a piece (none); removing or changing one acts on the whole support piece | header comment + `docs/GCODE-SUPPORTS.md` |
-| G-scope Slice (`app-gscope-slice.js`) | **none** — reads geometry, writes nothing (no piece, no face, no undo step) | n/a | header comment + `docs/SLICER.md` §6 |
+| G-scope Slice (`app-gscope-slice.js`) | **none** — Slice reads geometry and writes nothing; Export piece to plate adds a copy of the piece and edits none, as G-scope's own Export to plate does | n/a | header comment + `docs/SLICER.md` §6 |
 
 ### The SELECT list is an operand; the EXCLUDE list is still only a veto
 
@@ -526,10 +526,23 @@ unchanged. `NSOWatch.collapse(bool)` / `isCollapsed()`; the choice is a
 per-viewer preference in its own localStorage key, `nso.watch.collapsed`.
 `npm run watch:test` part F.
 
+## Slice: the piece stays exportable while its slice is shown (2026-09-27)
+Branch `claude/slicer-piece-export`, off `claude-wip`.
+
+- **Export.** While a slice is shown, the Slice section keeps **Export piece
+  to plate** and **Export piece as STL** for the piece(s) it was made from,
+  with no selection needed and no Back first. Before this, the slice replaced
+  G-scope's document, so the piece was only exportable after Back to the
+  mesh. Same geometry, name and calls as G-scope's own export of a loaded
+  piece. `gcode:gscope-slice` §8 checks it with real clicks: the downloaded
+  STL and the plate copy carry the piece's exact triangles, and Undo removes
+  the plate copy.
+- **`?v=` not bumped** (rule 4): `nso_slicer.js` and `app-gscope-slice.js`
+  (both `slice1`) need a bump at merge.
+
 ## In-house slicer - real layers, walls, infill, overhang calls; G-scope Slice (2026-09-27)
 Branch `claude/inhouse-slicer`, off `claude-wip`. Full write-up:
-**`docs/SLICER.md`**. For reverse-engineering and iteration only - its G-code
-says NOT A PRINT FILE; real prints are sliced in Bambu Studio.
+**`docs/SLICER.md`**.
 
 - **Geometry:** Clipper2 (BSL-1.0), which is ALREADY compiled into the vendored
   `manifold.wasm` (Apache-2.0) as `CrossSection`. No new dependency. Lockfile

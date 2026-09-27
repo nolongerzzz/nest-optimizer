@@ -874,9 +874,15 @@
         <div class="ms-section-title">Slice (in-house)</div>
         <div class="ms-btn-row">
           <button id="ms-btn-slice" type="button"
-                  title="Slice every piece into real layers, walls and infill with the in-house slicer, and open the toolpath here. For inspection only - a real print is sliced in Bambu Studio.">Slice</button>
+                  title="Slice every piece into real layers, walls and infill with the in-house slicer, and open the toolpath here.">Slice</button>
           <button id="ms-btn-slice-back" type="button" style="display:none;"
                   title="Back to the mesh this slice was made from">&larr; Back to the mesh</button>
+        </div>
+        <div class="ms-btn-row" id="ms-slice-export-row" data-flex="1" style="display:none;">
+          <button id="ms-btn-slice-export-plate" type="button"
+                  title="Put the piece this slice was made from onto the plate as its own object">Export piece to plate</button>
+          <button id="ms-btn-slice-export-stl" type="button"
+                  title="Download the piece this slice was made from as an STL">Export piece as STL</button>
         </div>
         <div class="ms-btn-row" data-flex="1">
           <label class="ms-note" for="ms-slice-nozzle" style="margin:0">nozzle
