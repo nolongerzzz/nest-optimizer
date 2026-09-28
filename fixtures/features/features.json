@@ -771,6 +771,30 @@
           "features": [
             "flange"
           ]
+        },
+        "handle": {
+          "count": 1,
+          "features": [
+            "handle"
+          ]
+        },
+        "bracket": {
+          "count": 1,
+          "features": [
+            "bracket"
+          ]
+        },
+        "lid": {
+          "count": 1,
+          "features": [
+            "lid"
+          ]
+        },
+        "hinge": {
+          "count": 1,
+          "features": [
+            "hinge"
+          ]
         }
       },
       "expected": {
@@ -924,6 +948,22 @@
           "features": [
             "flange"
           ]
+        },
+        "handle": {
+          "count": 0,
+          "features": []
+        },
+        "bracket": {
+          "count": 0,
+          "features": []
+        },
+        "lid": {
+          "count": 0,
+          "features": []
+        },
+        "hinge": {
+          "count": 0,
+          "features": []
         }
       },
       "expected": {
@@ -1089,6 +1129,24 @@
       },
       "detectors": {
         "flange": {
+          "count": 0,
+          "features": []
+        },
+        "handle": {
+          "count": 1,
+          "features": [
+            "handle"
+          ]
+        },
+        "bracket": {
+          "count": 0,
+          "features": []
+        },
+        "lid": {
+          "count": 0,
+          "features": []
+        },
+        "hinge": {
           "count": 0,
           "features": []
         }
@@ -1302,6 +1360,24 @@
         "flange": {
           "count": 0,
           "features": []
+        },
+        "handle": {
+          "count": 0,
+          "features": []
+        },
+        "bracket": {
+          "count": 1,
+          "features": [
+            "bracket"
+          ]
+        },
+        "lid": {
+          "count": 0,
+          "features": []
+        },
+        "hinge": {
+          "count": 0,
+          "features": []
         }
       },
       "expected": {
@@ -1510,6 +1586,24 @@
       },
       "detectors": {
         "flange": {
+          "count": 0,
+          "features": []
+        },
+        "handle": {
+          "count": 0,
+          "features": []
+        },
+        "bracket": {
+          "count": 0,
+          "features": []
+        },
+        "lid": {
+          "count": 1,
+          "features": [
+            "lid"
+          ]
+        },
+        "hinge": {
           "count": 0,
           "features": []
         }
@@ -1731,6 +1825,24 @@
         "flange": {
           "count": 0,
           "features": []
+        },
+        "handle": {
+          "count": 0,
+          "features": []
+        },
+        "bracket": {
+          "count": 0,
+          "features": []
+        },
+        "lid": {
+          "count": 0,
+          "features": []
+        },
+        "hinge": {
+          "count": 1,
+          "features": [
+            "hinge"
+          ]
         }
       },
       "expected": {
@@ -1911,6 +2023,22 @@
           "features": [
             "angle"
           ]
+        },
+        "handle": {
+          "count": 0,
+          "features": []
+        },
+        "bracket": {
+          "count": 0,
+          "features": []
+        },
+        "lid": {
+          "count": 0,
+          "features": []
+        },
+        "hinge": {
+          "count": 0,
+          "features": []
         }
       },
       "expected": {
