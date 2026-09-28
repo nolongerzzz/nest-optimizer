@@ -532,6 +532,27 @@ unchanged. `NSOWatch.collapse(bool)` / `isCollapsed()`; the choice is a
 per-viewer preference in its own localStorage key, `nso.watch.collapsed`.
 `npm run watch:test` part F.
 
+**The panel follows into G-scope (2026-09-28, driver round).** Armed on main,
+the whole panel vanished the instant G-scope opened, in Normal and Slice view.
+The watcher was still running - every patch is on globals G-scope shares -
+but the panel lived in `.viewport-section`, under G-scope's full-screen
+`#microscope` sheet (`position: fixed`, `z-index: 2000`). While on, a
+`MutationObserver` on the sheet's `hidden` attribute now moves the panel and
+the Report view into `#ms-viewport` when G-scope opens and back when it
+closes: same instance, same run, same counts, no re-arm. Installed by
+`start()`, removed by `stop()`: a watch left off is not started, shown or
+moved on the way in. `NSOWatch.where()` -> `'main'` / `'gscope'`.
+Branch `claude/gscope-watch-carry`. `npm run gcode:gscope-watch` (38 checks,
+real clicks: arm on main, G-scope Normal + Slice, a pose phantom and an error
+raised inside G-scope counted there and still on the pills back on main; and
+never-armed stays off, unpatched, through both views). Fails on the code
+before this change at "the panel is in G-scope's viewport". `nso-watch.js` is
+untagged, so no `?v=` question. **Not added (standing rule, ask first):**
+G-scope-specific logging - rows for its legend / 3D-view clicks, or a check of
+a slice's rendered layers against `NSO_Slicer`'s result (the "phantom layers"
+seen on the plate). Proposed in the PR; nothing in the watcher checks slice
+rendering today.
+
 ## Slice: the piece stays exportable while its slice is shown (2026-09-27)
 Branch `claude/slicer-piece-export`, off `claude-wip`.
 

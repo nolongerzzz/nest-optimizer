@@ -7,6 +7,8 @@ drive the app exactly as you would anyway.
     nso-watch.js                the whole feature
     #btn-watch in index.html    the toggle
     node tools/nso_watch_test.js   109 checks, in npm test
+    node tools/gcode-test/gscope-watch-drive-check.mjs   38 checks, in npm test
+                                (the panel across the G-scope boundary)
 
 ## Why
 
@@ -184,7 +186,40 @@ From the console, or a check:
     NSOWatch.stored()         the persisted history: {runs, events, dropped}
     NSOWatch.query({run, cat, q})   filtered history
     NSOWatch.showReport() / .hideReport() / .clearStored()
+    NSOWatch.where()          'main' or 'gscope' - which view the panel is in
     NSOWatch.save()           download the current run as JSON (console only)
+
+## In G-scope
+
+G-scope (`#microscope`, `app-microscope.js`) is its own full-screen sheet -
+`position: fixed`, `z-index: 2000`, its own left rail and 3D view - over the
+whole app. The watcher never stopped while it was up: every patch is on
+globals G-scope shares, so its status lines (the slicer's "Sliced ..."
+included), its errors and the clicks on its controls were being logged and
+checked all along. But the panel lived in `.viewport-section`, under that
+sheet, so an armed watch vanished on entry and looked exactly like a dead one
+(driver round, 2026-09-28, in Normal and Slice view alike).
+
+Now, while it is on, the panel and the Report view follow the view: a
+`MutationObserver` on the sheet's own `hidden` attribute - the one thing every
+way in and out sets (the rail button, a `.gcode.3mf` import, Close, Escape,
+Export to plate) - moves them into `#ms-viewport` the moment G-scope opens and
+back the moment it closes. Same instance, same run, same events and counts on
+both sides; no re-arm. Inside G-scope the panel sits bottom-left above the
+hint badge, clear of the layer-range slider on the right edge.
+
+Off, it stays off: the observer is installed by `start()` and removed by
+`stop()`, so a watch that was never armed is not started, shown, moved or
+observed on the way in. The eye button itself stays on the main view - the
+panel follows the view, the toggle does not - so switching it off from inside
+G-scope is `NSOWatch.stop()` or a trip back to main.
+
+What it logs in G-scope is what it logs anywhere: errors, failed loads,
+status lines, and the plate's consistency checks (a G-scope click schedules
+one, as any click does, and names it in the phantom's trail). It has no
+G-scope-specific checks of its own - nothing compares a slice's layers against
+the slicer's result, and G-scope's legend rows and 3D-view clicks are op
+labels, not rows. `NSOWatch.where()` says which view the panel is in.
 
 `?watch=1` on the URL starts it at load, and the on/off state is remembered in
 `localStorage` as `nso.watch`, so it survives the reload a bug needs to
@@ -238,7 +273,8 @@ loudly if its bug is fixed, which is the cue to retire the check with the fix.
 ## Removing it
 
 Delete `nso-watch.js`, the `#btn-watch` button and the one script tag in
-`index.html`, and `watch:test` from `package.json`. Nothing else refers to it.
+`index.html`, and `watch:test` and `gcode:gscope-watch` from `package.json`
+(with `tools/gcode-test/gscope-watch-drive-check.mjs`). Nothing else refers to it.
 Its CSS is injected from the JS rather than added to `styles.css`, because
 `styles.css` is served with a `?v=` tag this branch may not bump, so a rule
 added there would not reach a browser holding the cached copy.
