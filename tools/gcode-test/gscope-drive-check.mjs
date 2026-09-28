@@ -519,8 +519,9 @@ async function main() {
   check('the overview is hidden and the badge says one segment', [lineAlone.overview, lineAlone.badge], [false, 'Detail: 1 segments']);
   await shot(page, '07-line-isolated.png', 'one line isolated, alone, as-is');
 
-  // Close inspection on it: its extrudeFlatLine prism, highlighted in context.
-  await page.click('#ms-cam-close');
+  // Back to the whole part, still selected: its extrudeFlatLine prism,
+  // highlighted in context.
+  await page.click('#ms-btn-back');
   const lineIso = await page.evaluate((idx) => {
     const M = window.NSO_MICROSCOPE, d = M.getDoc(), v = M.getView(), G = window.NSOGcodeLines;
     const mv = d.parsed.moves[idx];
@@ -536,12 +537,11 @@ async function main() {
     return { kinds: v.highlightGroup.children.map((c) => c.type), tris: got.length / 9, wantTris: want.length / 9, maxErr,
       overview: v.overviewGroup.visible, badge: document.getElementById('ms-mode-badge').textContent };
   }, aim.idx);
-  check('Close inspection highlights the one line as ONE solid', lineIso.kinds, ['Mesh']);
+  check('back on the whole part, the one line is highlighted as ONE solid', lineIso.kinds, ['Mesh']);
   check('12 triangles - one prism, one move', [lineIso.tris, lineIso.wantTris], [12, 12]);
   check('and it IS extrudeFlatLine\'s prism of that move, to the micron', lineIso.maxErr < 1e-3, true);
-  check('with the rest of the part drawn round it', [lineIso.overview, lineIso.badge], [true, 'Close inspection (isolated)']);
-  await shot(page, '07b-line-close-inspection.png', 'the same line in Close inspection, its printed prism in context');
-  await page.click('#ms-cam-normal');
+  check('with the rest of the part drawn round it', [lineIso.overview, lineIso.badge], [true, 'Whole part']);
+  await shot(page, '07b-line-highlighted.png', 'the same line on the whole part, its printed prism in context');
 
   const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.click('#ms-btn-export-stl')]);
   const lineStl = join(TMP, 'line.stl');
@@ -550,7 +550,6 @@ async function main() {
   const wantLine = await page.evaluate((idx) => window.NSOGcodeLines.extrudeFlatLine(window.NSO_MICROSCOPE.getDoc().parsed.moves[idx], []), aim.idx);
   check('the exported line is that prism, triangle for triangle',
     lineTris.length === 12 && lineTris.every((t, i) => t.every((v, k) => Math.abs(v - wantLine[i * 9 + k]) < 1e-4)), true);
-  await page.click('#ms-btn-back');
 
   // Clear that one line from view: view only.
   await page.click('#ms-btn-clear-view');

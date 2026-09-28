@@ -545,13 +545,17 @@ var NSO_MICROSCOPE = (function () {
   // what the capture box catches and what a line pick lands on are the same
   // moves either way, so switching back and forth never loses a selection.
   var renderMode = 'toolpath';
-  // Isolate's state, kept apart from what is drawn. Isolated in Normal: the
-  // selection alone, drawn as-is. Isolated in Close inspection: the whole view
-  // with the selection highlighted over it. The camera toggle flips between
-  // the two without leaving the isolation (applyDisplay).
+  // Isolate's state, kept apart from what is drawn. Isolated: the selection
+  // alone, drawn as-is (applyDisplay).
   var isolated = false;
   var clickHooks = [];        // fn(ndcX, ndcY, event) -> true when it took the click
   var docListeners = [];      // fn(doc) after every open()
+  var detectedSources = [];   // fn(doc) -> rows for the Detected tab (addDetectedSource)
+  // Which list the floating legend shows: null - the file's own list with the
+  // Flange row under it, no tab strip (how every document opens); 'legend' /
+  // 'detected' - the tab strip is up and one of the two is shown. Slice view
+  // (app-gscope-slice.js) puts it up, on 'detected'. View state only.
+  var legendTab = null;
 
   function buildWorld() {
     if (view) return view;
@@ -644,6 +648,9 @@ var NSO_MICROSCOPE = (function () {
     var flip = function () { setLegendCollapsed(!box.classList.contains('collapsed')); };
     btn.addEventListener('click', flip);
     if (title) title.addEventListener('click', flip);
+    var ta = $('ms-tab-legend'), tb = $('ms-tab-detected');
+    if (ta) ta.addEventListener('click', function () { if (legendTab) setLegendTab('legend'); });
+    if (tb) tb.addEventListener('click', function () { if (legendTab) setLegendTab('detected'); });
     var saved = null;
     try { saved = localStorage.getItem('nso.gscope.legendCollapsed'); } catch (e) {}
     if (saved === '1') setLegendCollapsed(true);
@@ -1022,6 +1029,7 @@ var NSO_MICROSCOPE = (function () {
       info((selectionSource === 'layer' ? '<b>whole layer</b>, '
           : selectionSource === 'line' ? '<b>picked lines</b>, '
           : selectionSource === 'visible' ? '<b>everything shown</b>, '
+          : selectionSource === 'detected' ? '<b>detected</b>, '
           : '<b>' + balls.length + ' box(es)</b>, ') +
            '<b>' + currentSelection.length + ' segment(s)</b> total<br>' +
            'across ' + keys.length + ' layer(s): ' + keys.join(', '));
@@ -1287,8 +1295,8 @@ var NSO_MICROSCOPE = (function () {
 
   // --- Isolate / Back -------------------------------------------------------
 
-  /** Isolated and in Normal: the selection alone is what is drawn. */
-  function showingDetail() { return isolated && cameraMode === 'normal'; }
+  /** Isolated: the selection alone is what is drawn. */
+  function showingDetail() { return isolated; }
 
   /**
    * The selection's own moves / objects, drawn AS-IS - the same way the
@@ -1355,11 +1363,9 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
-   * What is drawn, from the isolation and the camera mode:
-   *   Normal, not isolated      the whole view, the selection highlighted
-   *   Normal, isolated          the selection alone, as-is (detail group)
-   *   Close inspection, either  the whole view with the highlighted
-   *                             selection over it, framed on the selection
+   * What is drawn, from the isolation:
+   *   not isolated   the whole view, the selection highlighted
+   *   isolated       the selection alone, as-is (detail group)
    */
   function applyDisplay() {
     var v = view;
@@ -1369,9 +1375,7 @@ var NSO_MICROSCOPE = (function () {
     v.overviewGroup.visible = !detail;
     v.highlightGroup.visible = !detail;
     var unit = doc && doc.kind === 'toolpath' ? 'segments' : 'object(s)';
-    badge(detail ? 'Detail: ' + currentSelection.length + ' ' + unit
-        : cameraMode === 'close' ? 'Close inspection' + (isolated ? ' (isolated)' : '')
-        : 'Whole part');
+    badge(detail ? 'Detail: ' + currentSelection.length + ' ' + unit : 'Whole part');
     show('ms-detail-controls', isolated);
     show('ms-select-controls', !isolated && mode === 'select');
     applyFeatureVisibility();
@@ -1381,15 +1385,10 @@ var NSO_MICROSCOPE = (function () {
     if (!currentSelection.length) return false;
     isolated = true;
     buildDetail();
-    // Isolate shows the selection alone, which is Normal's isolated view -
-    // so it lands in Normal, turned to the selection (fitView: the same
+    // Isolate shows the selection alone, turned to it (fitView: the same
     // viewing angle, the selection filling the frame). A redraw under a
     // filter or a changed selection passes keepCamera and moves nothing.
-    if (!(opts && opts.keepCamera)) {
-      cameraMode = 'normal';
-      syncCameraButtons();
-      fitView(selectionBox());
-    }
+    if (!(opts && opts.keepCamera)) fitView(selectionBox());
     applyDisplay();
     return true;
   }
@@ -1397,7 +1396,7 @@ var NSO_MICROSCOPE = (function () {
   function back() {
     isolated = false;
     clearGroup(view.detailGroup);
-    setCameraMode('normal');      // the whole part again; Back is the way out
+    normalView();                 // the whole part again; Back is the way out
     applyDisplay();
   }
 
@@ -1625,12 +1624,33 @@ var NSO_MICROSCOPE = (function () {
    * here and a follow-up press of that button read the identical set - one
    * definition of "what is shown", not two.
    */
-  function soloGroup(name) {
-    if (!doc || !doc.groups[name]) return false;
-    HIDDEN = new Set(Object.keys(doc.groups).filter(function (g) { return g !== name; }));
+  function soloGroup(name) { return soloGroups([name]); }
+
+  /** soloGroup() for several groups at once: these shown, every other one hidden, selected. */
+  function soloGroups(names) {
+    if (!doc) return false;
+    var want = (names || []).filter(function (n) { return !!doc.groups[n]; });
+    if (!want.length) return false;
+    HIDDEN = new Set(Object.keys(doc.groups).filter(function (g) { return want.indexOf(g) < 0; }));
     viewChanged();
     selectVisible();
     return true;
+  }
+
+  /** A Detected row's click on feature groups: those alone, selected and isolated. */
+  function isolateGroups(names) {
+    if (!soloGroups(names) || !currentSelection.length) return false;
+    return isolate();
+  }
+
+  /** A Detected row's click on moves (parsed-move indices): those, selected and isolated. */
+  function isolateMoves(moveIndices, source) {
+    if (!doc || doc.kind !== 'toolpath') return false;
+    var want = new Set(moveIndices || []);
+    removeAllBalls();
+    setSelection(doc.segments.filter(function (s) { return want.has(s.mv.index); }), source || 'detected');
+    if (!currentSelection.length) return false;
+    return isolate();
   }
 
   // ===========================================================================
@@ -1729,6 +1749,7 @@ var NSO_MICROSCOPE = (function () {
     box.innerHTML = '';
     var st = flangeState();    // null with no document: the row goes with it
     if (!st) return;
+    buildSourceRows(box);
     var item = document.createElement('div');
     item.className = 'ms-legend-item ms-detected-item' + (st.status === 'found' ? '' : ' dim');
     item.dataset.detected = 'flange';
@@ -1754,6 +1775,50 @@ var NSO_MICROSCOPE = (function () {
     item.appendChild(swatch); item.appendChild(label);
     item.addEventListener('click', function () { isolateFlange(); });
     box.appendChild(item);
+  }
+
+  /**
+   * Rows other modules detect (addDetectedSource) - Slice view's walls,
+   * infill and overhang calls - above the Flange row. A source returns
+   * [{ key, label, title, group | color, dim, onClick }] for the document.
+   */
+  function buildSourceRows(box) {
+    var gkeys = Object.keys(doc.groups || {}).sort();
+    detectedSources.forEach(function (fn) {
+      var rows;
+      try { rows = fn(doc) || []; } catch (err) { console.error('[g-scope] detected source', err); rows = []; }
+      rows.forEach(function (r) {
+        var item = document.createElement('div');
+        item.className = 'ms-legend-item ms-detected-item' + (r.dim ? ' dim' : '');
+        item.dataset.detected = r.key;
+        var swatch = document.createElement('div');
+        swatch.className = 'ms-swatch';
+        var c = r.color != null ? r.color : colorForGroup(r.group, Math.max(0, gkeys.indexOf(r.group)));
+        swatch.style.background = '#' + ('000000' + c.toString(16)).slice(-6);
+        var label = document.createElement('span');
+        label.className = 'ms-legend-label';
+        label.textContent = r.label;
+        if (r.title) item.title = r.title;
+        item.appendChild(swatch); item.appendChild(label);
+        if (typeof r.onClick === 'function') item.addEventListener('click', function () { r.onClick(); });
+        box.appendChild(item);
+      });
+    });
+  }
+
+  /** The legend's tab strip: null (none, the default), 'legend' or 'detected'. */
+  function setLegendTab(t) {
+    legendTab = t === 'legend' || t === 'detected' ? t : null;
+    var box = $('ms-legend-float');
+    if (box) {
+      box.classList.toggle('tabbed', !!legendTab);
+      box.classList.toggle('tab-detected', legendTab === 'detected');
+    }
+    var a = $('ms-tab-legend'), b = $('ms-tab-detected');
+    if (a) { a.classList.toggle('active', legendTab === 'legend'); a.setAttribute('aria-selected', String(legendTab === 'legend')); }
+    if (b) { b.classList.toggle('active', legendTab === 'detected'); b.setAttribute('aria-selected', String(legendTab === 'detected')); }
+    syncHeader();
+    return legendTab;
   }
 
   /**
@@ -2597,7 +2662,7 @@ var NSO_MICROSCOPE = (function () {
     var rd = $('ms-render-read');
     if (rd) {
       if (!isPath) rd.textContent = '';
-      else if (renderMode !== 'solid') rd.textContent = 'Each move drawn as a line; Close inspection highlights the selection as its flat beads.';
+      else if (renderMode !== 'solid') rd.textContent = 'Each move drawn as a line; a small selection is highlighted as its flat beads.';
       else if (view && view.solidBuilt) rd.textContent = 'Shown: ' + describeSolid(view.solidBuilt.stats) + '.';
       else rd.textContent = 'Nothing shown.';
     }
@@ -2675,8 +2740,11 @@ var NSO_MICROSCOPE = (function () {
     var legendTitle = $('ms-legend-title'), infoTitle = $('ms-info-title');
     var isPath = !!(doc && doc.kind === 'toolpath');
     if (legendTitle) {
-      legendTitle.textContent = (doc && !isPath ? 'Parts' : 'Features') + ' (click to isolate)';
+      legendTitle.textContent = (legendTab === 'detected' ? 'Detected features'
+        : doc && !isPath ? 'Parts' : 'Features') + ' (click to isolate)';
     }
+    var tabLegend = $('ms-tab-legend');
+    if (tabLegend) tabLegend.textContent = doc && !isPath ? 'Parts' : 'All features';
     if (infoTitle) {
       infoTitle.textContent = 'Selection / ' + (isPath || !doc ? 'segment' : 'part') + ' info';
     }
@@ -2751,8 +2819,7 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
-   * The clip planes, re-fitted to wherever the camera is, every frame, in
-   * both camera modes.
+   * The clip planes, re-fitted to wherever the camera is, every frame.
    *
    * frameBox() sets near / far ONCE, for the box it frames, and on their own
    * those made two artificial limits: past 100x the framed distance the whole
@@ -2796,9 +2863,8 @@ var NSO_MICROSCOPE = (function () {
     // Spend any orbit / pan the damping is still easing out FIRST. With
     // damping on, OrbitControls keeps adding a decaying remainder of the last
     // drag on every update, so a re-frame straight after a pan would drift off
-    // the target it was just given - Close inspection's lock included. One
-    // undamped update applies the remainder and zeroes it; the framing below
-    // then overwrites where it landed.
+    // the target it was just given. One undamped update applies the remainder
+    // and zeroes it; the framing below then overwrites where it landed.
     v.controls.enableDamping = false;
     v.controls.update();
     v.controls.enableDamping = true;
@@ -2810,73 +2876,26 @@ var NSO_MICROSCOPE = (function () {
     v.controls.update();
   }
 
-  // --- camera modes -----------------------------------------------------------
+  // --- Normal ------------------------------------------------------------------
   //
-  //   normal  free orbit / zoom / pan, framed on the whole part - the view
-  //           G-scope opens in and Back returns to.
-  //   close   Close inspection: framed tight on what is selected, orbit and
-  //           zoom about it, pan off so the target stays locked on it. This
-  //           is the view Isolate has always put you in.
-  //
-  // A camera mode is ONLY the camera. Switching it never touches the
-  // selection, the capture boxes, the isolation (detail vs overview) or
-  // anything on the plate, so it can be flipped either way at any time -
-  // before Isolate, inside it, or after Back.
-  var cameraMode = 'normal';
-
-  /**
-   * What Close inspection frames: the selection's own extent; failing that,
-   * the capture boxes (a box that has caught nothing yet is still where you
-   * are looking); failing both, null.
-   */
-  function closeBox() {
-    var sel = selectionBox();
-    if (sel) return sel;
-    if (!balls.length) return null;
-    var box = new THREE.Box3();
-    balls.forEach(function (b) {
-      var a = b.a || 0;
-      var ex = b.rx * Math.abs(Math.cos(a)) + b.ry * Math.abs(Math.sin(a));
-      var ez = b.rx * Math.abs(Math.sin(a)) + b.ry * Math.abs(Math.cos(a));
-      box.expandByPoint(new THREE.Vector3(b.point.x - ex, b.point.y - b.h, b.point.z - ez));
-      box.expandByPoint(new THREE.Vector3(b.point.x + ex, b.point.y + b.h, b.point.z + ez));
-    });
-    return box;
-  }
-
-  function setCameraMode(m) {
-    cameraMode = m === 'close' ? 'close' : 'normal';
+  // The one camera: free orbit / zoom / pan, framed on the whole part - the
+  // view G-scope opens in and Back returns to; isolated, turned to the
+  // selection. #ms-cam-normal re-frames with it. Its neighbour in the View
+  // row, Slice view, is not a camera: app-gscope-slice.js owns both buttons
+  // and swaps the DOCUMENT (mesh <-> in-house slice). The old Close
+  // inspection framing is gone.
+  function normalView() {
     var v = view;
     if (v) {
-      if (cameraMode === 'close') {
-        // The reference tool only re-TARGETED on Isolate and left the whole
-        // part's zoom, which on a plate of twelve pieces leaves one isolated
-        // support interface a thumbnail in the middle of the grid. Close
-        // inspection is the zoom: frame the selection itself, with the rest
-        // of the view drawn round it. With nothing selected or boxed there is
-        // nothing to be close to, so it frames the whole part.
-        var box = closeBox();
-        if (box) frameBox(box); else frame();
-      } else if (isolated) {
-        // Normal while isolated: the selection alone, turned to it.
-        fitView(selectionBox());
-      } else {
-        frame();
-      }
-      // Full zoom, pan and orbit in both modes: nothing is locked, and the
-      // clip planes follow the camera (followClip, every frame).
+      if (isolated) fitView(selectionBox());
+      else frame();
+      // Full zoom, pan and orbit: nothing is locked, and the clip planes
+      // follow the camera (followClip, every frame).
       v.controls.enablePan = true;
       followClip();
       if (doc) applyDisplay();
     }
-    syncCameraButtons();
-    return cameraMode;
-  }
-
-  function syncCameraButtons() {
-    var n = $('ms-cam-normal'), c = $('ms-cam-close');
-    if (n) { n.classList.toggle('active', cameraMode === 'normal'); n.setAttribute('aria-pressed', String(cameraMode === 'normal')); }
-    if (c) { c.classList.toggle('active', cameraMode === 'close'); c.setAttribute('aria-pressed', String(cameraMode === 'close')); }
+    return 'normal';
   }
 
   /**
@@ -2923,10 +2942,11 @@ var NSO_MICROSCOPE = (function () {
     zr = { lo: 0, hi: zSteps() - 1, n: zSteps() };
     applyClip();
     buildOverview();
+    setLegendTab(null);
     buildLegend();
     applyFeatureVisibility();
     setMode('select');
-    setCameraMode('normal');      // frames the whole part
+    normalView();                 // frames the whole part
     syncHeader();
     syncLayerRow();
     info(doc.kind === 'toolpath'
@@ -3061,8 +3081,6 @@ var NSO_MICROSCOPE = (function () {
     });
     bind('ms-btn-isolate', 'click', function () { isolate(); });
     bind('ms-btn-isolate-line', 'click', function () { isolate(); });
-    bind('ms-cam-normal', 'click', function () { setCameraMode('normal'); });
-    bind('ms-cam-close', 'click', function () { setCameraMode('close'); });
     bind('ms-btn-back', 'click', back);
     bind('ms-mode-line', 'click', function () { setMode('line'); });
     bind('ms-line-prev', 'click', function () { stepLine(-1); });
@@ -3198,6 +3216,14 @@ var NSO_MICROSCOPE = (function () {
       return currentSelection;
     },
     soloGroup: soloGroup,
+    soloGroups: soloGroups,
+    isolateGroups: isolateGroups,
+    isolateMoves: isolateMoves,
+    /** fn(doc) -> Detected-tab rows; see buildSourceRows(). Rebuilt with the legend. */
+    addDetectedSource: function (fn) { if (typeof fn === 'function') detectedSources.push(fn); },
+    refreshDetected: function () { buildDetectedRow(); },
+    setLegendTab: setLegendTab,
+    legendTab: function () { return legendTab; },
     showAll: showAll,
     clearFromView: clearFromView,
     cleared: function () { return Array.from(CLEARED); },
@@ -3235,8 +3261,7 @@ var NSO_MICROSCOPE = (function () {
     shownSolid: function () { return view && view.solidBuilt ? view.solidBuilt : null; },
     isolate: function () { return isolate(); },
     back: back,
-    setCameraMode: setCameraMode,
-    cameraMode: function () { return cameraMode; },
+    normalView: normalView,
     layerCount: layerCount,
     hidden: function () { return HIDDEN ? Array.from(HIDDEN) : []; },
     groups: function () { return doc ? Object.keys(doc.groups) : []; },

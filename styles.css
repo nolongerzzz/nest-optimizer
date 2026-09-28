@@ -2997,9 +2997,43 @@ button#ms-legend-toggle:hover { color: var(--text, #fff); border-color: var(--ac
 }
 #ms-detected .ms-legend-item { margin-bottom: 0; }
 #ms-detected .ms-legend-item.active { background: rgba(255, 138, 31, 0.16); }
+/* Slice view's tab strip (app-microscope.js, setLegendTab). Hidden until a
+   slice is shown; there, 'Detected features' is the tab that is up, and the
+   file's own list is one click away. Normal never shows it. */
+.ms-legend-tabs { display: none; gap: 4px; margin: 0 0 6px; }
+#ms-legend-float.tabbed .ms-legend-tabs { display: flex; }
+#ms-legend-float.collapsed .ms-legend-tabs { display: none; }
+.ms-legend-tabs button {
+  flex: 1 1 0;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 4px;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 10.5px;
+  padding: 2px 4px;
+}
+.ms-legend-tabs button.active { color: var(--text); border-color: var(--accent); }
+#ms-legend-float.tabbed:not(.tab-detected) #ms-detected,
+#ms-legend-float.tab-detected #ms-legend { display: none; }
+#ms-legend-float.tab-detected #ms-detected:not(:empty) { border-top: 0; margin-top: 0; padding-top: 0; }
+#ms-legend-float.tab-detected #ms-detected .ms-legend-item { margin-bottom: 2px; }
+
 #ms-legend-float.collapsed .ms-section-title,
 #ms-legend-float.collapsed button#ms-legend-toggle { margin-bottom: 0; }
 #ms-legend-float.collapsed button#ms-legend-toggle { margin-top: 0; }
+
+/* The slice settings: tucked behind a small disclosure, collapsed by default. */
+#ms-slice-settings { margin-top: 4px; }
+#ms-slice-settings > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 11px;
+  user-select: none;
+}
+#ms-slice-settings > summary:hover { color: var(--text); }
+#ms-slice-settings[open] > summary { margin-bottom: 4px; }
 
 /* ---------------------------------------------------------------------------
    G-scope additions: the legend's "only" button and the layer-range slider

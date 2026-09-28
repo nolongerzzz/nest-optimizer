@@ -3,8 +3,8 @@
  * nest-optimizer / tools/gcode-test / gscope-corner-camera-drive-check.mjs
  *
  * G-scope's capture-box corner handle, driven through the real app in
- * headless Chromium with real mouse drags and clicks. (The camera modes and
- * Isolate are gscope-normal-camera-drive-check.mjs.)
+ * headless Chromium with real mouse drags and clicks. (Normal and Isolate
+ * are gscope-normal-camera-drive-check.mjs.)
  *
  *   1  CORNER DRAG. The green corner dot, dragged with the mouse, sizes the
  *      box's footprint along G-code X and Y INDEPENDENTLY - one axis grows
@@ -95,25 +95,16 @@ const camera = (page) => page.evaluate(() => {
   const M = window.NSO_MICROSCOPE, v = M.getView();
   const t = v.controls.target, c = v.camera.position;
   return {
-    mode: M.cameraMode(),
+    mode: window.NSO_GSCOPE_SLICE.viewMode(),
     pan: v.controls.enablePan,
     target: [t.x, t.y, t.z],
     dist: c.distanceTo(t),
     normalOn: document.getElementById('ms-cam-normal').classList.contains('active'),
-    closeOn: document.getElementById('ms-cam-close').classList.contains('active'),
+    sliceOn: document.getElementById('ms-cam-slice').classList.contains('active'),
   };
 });
 
 const near = (a, b, tol) => a.every((x, i) => Math.abs(x - b[i]) <= tol);
-
-/** The same state, screenshotted up close: Close inspection, then straight back to Normal. */
-async function closeShot(page, file, label) {
-  await page.click('#ms-cam-close');
-  await frames(page, 3);
-  await shot(page, file, label);
-  await page.click('#ms-cam-normal');
-  await frames(page, 3);
-}
 
 async function drag(page, from, to) {
   await page.mouse.move(from[0], from[1]);
@@ -145,7 +136,7 @@ async function main() {
   console.log('\n--- 1. corner drag: X and Y independently ---');
   // =======================================================================
   const opened = await camera(page);
-  check('G-scope opens in Normal: its button lit, pan free', [opened.mode, opened.normalOn, opened.closeOn, opened.pan],
+  check('G-scope opens in Normal: its button lit, pan free', [opened.mode, opened.normalOn, opened.sliceOn, opened.pan],
     ['normal', true, false, true]);
 
   // One box at a move in the middle of the print, 3 x 3 mm, 1 mm thick.
@@ -192,7 +183,6 @@ async function main() {
   check('corner drag 1: the selection is exactly the rectangle\'s moves', [b1.exact, b1.source, b1.n > 0], [true, 'box', true]);
   check('the old `r` reads as the larger half-extent', b1.box.r, Math.max(b1.box.rx, b1.box.ry));
   await shot(page, 'cc-02-corner-drag-wide-x.png', 'corner drag: wide in X, narrow in Y');
-  await closeShot(page, 'cc-02b-corner-drag-wide-x-close.png', 'corner drag 1, up close');
 
   // And the other way: X shrinks, Y grows.
   const c1 = await page.evaluate(() => {
@@ -210,7 +200,6 @@ async function main() {
   check('corner drag 2: the selection is exactly the rectangle\'s moves', b2.exact, true);
   check('the two rectangles catch different moves', b1.n !== b2.n, true);
   await shot(page, 'cc-03-corner-drag-tall-y.png', 'corner drag: narrow in X, long in Y');
-  await closeShot(page, 'cc-03b-corner-drag-tall-y-close.png', 'corner drag 2, up close');
 
   // Orbit half way round (Orbit mode, a real left-drag): the dot moves to the
   // corner that is now in front, and the box itself does not change.

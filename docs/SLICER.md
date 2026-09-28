@@ -292,11 +292,15 @@ recorded.**
 
 ## 6. G-scope: the Slice action (Task 8)
 
-The **Slice (in-house)** section appears for any mesh document: *Read the
-plate*, or an STL / 3MF opened into G-scope. Defaults are the real setup: a
-0.6 nozzle, 0.3 mm layers, 2 walls, 15 % grid, support below 30°.
+Slice is the View row's **Slice view** button (`#ms-cam-slice`), the other
+half of a Normal / Slice view toggle (docs/GCODE-MICROSCOPE.md, "The View
+toggle"). It is offered for any mesh document: *Read the plate*, or an STL /
+3MF opened into G-scope. It slices at once with whatever the **Slice
+settings** hold - a disclosure in the Slice (in-house) section, collapsed by
+default, whose values persist across round trips. Defaults are the real
+setup: a 0.6 nozzle, 0.3 mm layers, 2 walls, 15 % grid, support below 30°.
 
-**Slice** does four things:
+**Slice view** does four things:
 
 1. slices every piece in one frame;
 2. writes the G-code text;
@@ -306,7 +310,7 @@ plate*, or an STL / 3MF opened into G-scope. Defaults are the real setup: a
 
 From the parser down, nothing can tell an in-house slice from an imported one.
 The legend, Pick a line, Isolate, the layer slider, Clear from view, the solid
-view, Crop and both exports work unchanged. `gcode:gscope-slice` (43 checks,
+view, Crop and both exports work unchanged. `gcode:gscope-slice` (45 checks,
 real clicks) proves:
 
 - the document keys, segment schema and move schema equal those of
@@ -314,8 +318,12 @@ real clicks) proves:
 - its moves are, move for move, the direct call's.
 
 The panel reports layers, walls per layer, each support-need region (z,
-footprint, and what it stands on), and any **CONFLICT** by layer. **Back to the
-mesh** re-opens the source.
+footprint, and what it stands on), and any **CONFLICT** by layer. The
+floating legend opens on its **Detected features** tab: walls (loops and
+width), infill (density and pattern), top / bottom, and one row per overhang
+call, each a click to isolate its moves. **Normal** goes back through
+`backToMesh()`, which re-opens the source: the whole part as it was, nothing
+selected or isolated.
 
 **The piece stays exportable the whole time its slice is shown.** The Slice
 section keeps **Export piece to plate** and **Export piece as STL** for the
@@ -354,4 +362,5 @@ slice.
 |---|---|---|
 | `slicer:test` | 52 checks: sections equal manifold's own `Manifold.slice` on 6 repo meshes (worst rel 1.3e-9); orientation; open and inside-out meshes; wall offsets and counts; grid pitch and angles; density scaling; shells; overhang on cones either side of 30° / 45°, a mushroom (area exact to the step), model vs plate; G-code round trip; conflicts; constants | ~2 s |
 | `slicer:bambu` | §5 above: 51 checks, 7 findings | ~70 s |
-| `gcode:gscope-slice` | 43 checks, real clicks, screenshots in `tools/gscope-slice-out/` | ~10 s |
+| `gcode:gscope-slice` | 45 checks, real clicks, screenshots in `tools/gscope-slice-out/` | ~10 s |
+| `gcode:gscope-slice-view` | 41 checks: Normal -> Slice view -> Normal twice, the Detected tab, settings persisted, the whole-part state restored exactly | ~15 s |

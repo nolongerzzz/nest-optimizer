@@ -262,7 +262,7 @@ async function main() {
     await page.isVisible('#ms-export-row'), true);
   check('and Isolate is live', await page.isEnabled('#ms-btn-isolate'), true);
 
-  // Isolate / Back. Isolate (Normal camera) shows the selection ALONE and
+  // Isolate / Back. Isolate shows the selection ALONE and
   // AS-IS: each move as the same line the overview draws, nothing else.
   await page.click('#ms-btn-isolate');
   const isolated = await page.evaluate(() => {
@@ -273,7 +273,7 @@ async function main() {
       kinds: [...new Set(v.detailGroup.children.map((c) => c.type))],
       verts: v.detailGroup.children.reduce((a, c) => a + c.geometry.attributes.position.count, 0),
       segs: window.NSO_MICROSCOPE.selection().length,
-      mode: window.NSO_MICROSCOPE.cameraMode(),
+      mode: window.NSO_GSCOPE_SLICE.viewMode(),
       badge: document.getElementById('ms-mode-badge').textContent,
     };
   });
@@ -282,10 +282,10 @@ async function main() {
   check('drawn as-is: the moves\' own lines, as the overview draws them', isolated.kinds, ['LineSegments']);
   check('two vertices per move - exactly the selection, nothing else', isolated.verts, isolated.segs * 2);
   check('the badge says what is on screen', /^Detail: \d+ segments$/.test(isolated.badge), true);
-  // Close inspection, still isolated: the whole view with the selection
-  // highlighted over it as each move's printed prism (extrudeFlatLine) -
-  // the solid Export writes, on screen.
-  await page.click('#ms-cam-close');
+  // Back: the whole view with the selection, still selected, highlighted
+  // over it as each move's printed prism (extrudeFlatLine) - the solid
+  // Export writes, on screen.
+  await page.click('#ms-btn-back');
   const closeIso = await page.evaluate(() => {
     const v = window.NSO_MICROSCOPE.getView();
     return {
@@ -294,14 +294,10 @@ async function main() {
       tris: v.highlightGroup.children.reduce((a, c) => a + c.geometry.attributes.position.count / 3, 0),
     };
   });
-  check('Close inspection while isolated: the whole view and the highlight together',
+  check('Back returns to the whole part: the whole view and the highlight together',
     [closeIso.overview, closeIso.detail, closeIso.hl], [true, false, true]);
   check('the highlight is each move\'s own printed prism, 12 triangles per move',
     [closeIso.kinds, closeIso.tris], [['Mesh'], isolated.segs * 12]);
-  await page.click('#ms-cam-normal');
-  await page.click('#ms-btn-back');
-  check('Back returns to the whole part',
-    await page.evaluate(() => window.NSO_MICROSCOPE.getView().overviewGroup.visible), true);
 
   // =======================================================================
   console.log('\n--- selection mode 2: full layer ---');

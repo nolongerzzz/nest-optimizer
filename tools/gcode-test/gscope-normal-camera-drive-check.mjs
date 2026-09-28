@@ -2,7 +2,7 @@
 /**
  * nest-optimizer / tools/gcode-test / gscope-normal-camera-drive-check.mjs
  *
- * G-scope's two camera modes and Isolate, in the real app: real wheel
+ * G-scope's Normal camera and Isolate, in the real app: real wheel
  * scrolls, real drags, real button clicks, in headless Chromium. (Long zoom
  * runs are batched as wheel events on the canvas and finished with real
  * scrolls - see wheelUntil.)
@@ -15,13 +15,14 @@
  *   2  NORMAL - ORBIT AND PAN. A full 360 degrees round, straight down onto
  *      the top and straight up from under the bed; a right-drag pans; a
  *      filter redraw and a panel reopen do not re-lock the camera.
- *   3  ISOLATE AND THE TOGGLE. A region selected in Normal is highlighted in
- *      the whole view. Isolate shows the selection ALONE, as-is (its own
- *      lines, endpoint for endpoint), still in Normal, turned to it from the
- *      same viewing angle. Close inspection shows the whole view and the
- *      highlighted selection together, framed on it; Normal goes back to the
- *      selection alone. Full zoom and pan in both. A changed box redraws the
- *      isolated view; Back leaves it.
+ *   3  ISOLATE. A region selected in Normal is highlighted in the whole
+ *      view. Isolate shows the selection ALONE, as-is (its own lines,
+ *      endpoint for endpoint), still in Normal, turned to it from the same
+ *      viewing angle. Full zoom and pan while isolated; the Normal button
+ *      turns back to the selection alone. A changed box redraws the isolated
+ *      view; Back leaves it. (There is no second camera: Close inspection is
+ *      gone, and the View row's other button is Slice view -
+ *      gscope-slice-view-drive-check.mjs.)
  *   4  SCREENSHOTS of each state, each asserted to be a drawn view.
  *
  * Usage:
@@ -106,7 +107,7 @@ const cam = (page) => page.evaluate(() => {
   box.union(new THREE.Box3(new THREE.Vector3(-60, 0, -60), new THREE.Vector3(60, 0, 60)));
   const sph = box.getBoundingSphere(new THREE.Sphere());
   return {
-    mode: M.cameraMode(),
+    mode: window.NSO_GSCOPE_SLICE.viewMode(),
     d: c.position.distanceTo(t),
     pos: [c.position.x, c.position.y, c.position.z],
     target: [t.x, t.y, t.z],
@@ -292,7 +293,7 @@ async function main() {
   await wheel(page, centre, -300, 45);
   const c5 = await settle(page);
   console.log(`       close zoom at ${c5.d.toFixed(2)} mm`);
-  check('Normal: zoom in closer than Close inspection\'s tightest framing needs, freely', c5.d < openDist / 5, true);
+  check('Normal: zoom in close, freely', c5.d < openDist / 5, true);
   await shot(page, 'nc-02-normal-zoomed-close.png', 'Normal, wheel-zoomed in close');
   await page.click('#ms-cam-normal');
   await frames(page, 3);
@@ -350,14 +351,14 @@ async function main() {
     near(afterReopen.pos, afterPan.pos, 1e-6) && near(afterReopen.target, afterPan.target, 1e-6), true);
 
   // =======================================================================
-  console.log('\n--- 3. Isolate and the toggle: the selection alone, or in context ---');
+  console.log('\n--- 3. Isolate: the selection alone ---');
   // =======================================================================
   const display = () => page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, v = M.getView();
     const boxesShown = v.scene.children.filter((o) => o.material && o.material.color &&
       o.material.color.getHex() === 0x5b8cff).every((o) => o.visible);
     return {
-      mode: M.cameraMode(),
+      mode: window.NSO_GSCOPE_SLICE.viewMode(),
       detail: v.detailGroup.visible, overview: v.overviewGroup.visible, highlight: v.highlightGroup.visible,
       detailKinds: [...new Set(v.detailGroup.children.map((c) => c.type))],
       hlKinds: [...new Set(v.highlightGroup.children.map((c) => c.type))],
@@ -447,58 +448,13 @@ async function main() {
   const i3 = await settle(page);
   check('isolated, Normal: zoom in with no floor', [i3.d < 0.01, i3.holdsWorld], [true, true]);
 
-  // Picture 3: Close inspection - the whole view and the highlighted blob, framed on it.
-  await page.click('#ms-cam-close');
-  await frames(page, 3);
-  const s2 = await display();
-  check('Close inspection while isolated: the whole view AND the highlight together',
-    [s2.mode, s2.overview, s2.highlight, s2.detail], ['close', true, true, false]);
-  check('Close inspection: the highlight is the selection\'s printed prisms (the blob)', s2.hlKinds, ['Mesh']);
-  check('Close inspection: still isolated (Back offered), same selection and boxes',
-    [s2.back, s2.sel, s2.boxes], [true, s0.sel, s0.boxes]);
-  check('Close inspection: the badge says so', s2.badge, 'Close inspection (isolated)');
-  // frameBox()'s formula on the selection's extent, recomputed here.
-  const expected = await page.evaluate(() => {
-    const M = window.NSO_MICROSCOPE, d = M.getDoc(), v = M.getView(), box = new THREE.Box3();
-    const P = (x, y, z) => new THREE.Vector3(x - d.cx, z, -(y - d.cy));
-    M.selection().forEach((q) => {
-      const w = (q.w || 0) / 2;
-      [[q.x0, q.y0], [q.x1, q.y1]].forEach(([x, y]) => {
-        box.expandByPoint(P(x - w, y - w, q.z - w)); box.expandByPoint(P(x + w, y + w, q.z + w));
-      });
-    });
-    const size = new THREE.Vector3(), c = new THREE.Vector3();
-    box.getSize(size); box.getCenter(c);
-    const dist = ((size.length() / 2) / Math.sin((v.camera.fov * Math.PI / 180) / 2)) * 1.1;
-    const step = dist / Math.sqrt(3);
-    return { target: [c.x, c.y, c.z], pos: [c.x + step, c.y + step, c.z + step] };
-  });
-  const k0 = await cam(page);
-  check('Close inspection: framed on the selection as before (frameBox)',
-    [near(k0.target, expected.target, 1e-6), near(k0.pos, expected.pos, 1e-6)], [true, true]);
-  await shot(page, 'nc-07-close-inspection-isolated.png', 'Close inspection: the part and the highlighted selection together');
-
-  // Full zoom and pan in Close inspection too.
-  await drag(page, [xm, y], [xm + 120, y + 60], 'right');
-  const k1 = await settle(page);
-  check('Close inspection: a right-drag pans (no lock)', !near(k1.target, expected.target, 1e-3), true);
-  await wheelUntil(page, centre, -300, (c) => c.d < 0.002);
-  const k2 = await settle(page);
-  check('Close inspection: zoom in with no floor', [k2.d < 0.01, k2.holdsWorld], [true, true]);
-  const closeOldFar = k0.d * 100;
-  await wheelUntil(page, centre, 300, (c) => c.d >= closeOldFar * 0.6, 12);
-  const k3 = await settle(page);
-  const pxk = await litPixels(page);
-  console.log(`       close-inspection zoom-out: ${pxk.lit} lit pixels`);
-  check(`Close inspection: zoom out past 100x its framing, and the part is still drawn - ${pxk.lit} lit, floor ${MIN_LIT}`,
-    [k3.d > closeOldFar, pxk.lit > MIN_LIT, k3.holdsWorld], [true, true, true]);
-
-  // Back to Normal: the selection alone again, turned to it.
+  // Picture 3: the Normal button while isolated: the selection alone
+  // again, turned back to it after the pan and zoom.
   await page.click('#ms-cam-normal');
   await frames(page, 3);
   const s3 = await display();
   const i4 = await settle(page);
-  check('Normal again while isolated: the selection alone, as-is',
+  check('Normal while isolated: the selection alone, as-is',
     [s3.mode, s3.detail, s3.overview, s3.highlight, (await detailIsSelection()).same], ['normal', true, false, false, true]);
   check('and turned to it (target on the selection)', near(i4.target, mid, 1e-6), true);
 
