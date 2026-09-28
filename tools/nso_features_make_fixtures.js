@@ -45,11 +45,18 @@ const FIXTURES = [
   ['feature-hull_angle-unbraced.stl', ['angle'], 'the bracket without its gussets - a flange by the rule', false]
 ];
 
-/* What each detector must report on a file. Only the flange detector exists;
-   the others' ground truth is in `features`, ready for theirs. */
+/* What each detector must report on a file: nso_flange.js for the flange
+   (and the unbraced angle's arm, which by its rule is one), and
+   nso_face_features.js's four rules for the rest - each finds exactly its
+   own feature and nothing else (tools/nso_face_features_test.js). */
 function detectors(types) {
   const flanges = types.filter(t => t === 'flange' || t === 'angle');
-  return { flange: { count: flanges.length, features: flanges } };
+  const out = { flange: { count: flanges.length, features: flanges } };
+  for (const rule of ['handle', 'bracket', 'lid', 'hinge']) {
+    const own = types.filter(t => t === rule);
+    out[rule] = { count: own.length, features: own };
+  }
+  return out;
 }
 
 async function buildOne(spec) {

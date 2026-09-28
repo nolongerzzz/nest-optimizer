@@ -957,7 +957,9 @@
         </div>
         <div id="ms-legend"></div>
         <!-- Tabs for what the geometry has but the file does not name. The
-             Flange tab (nso_flange.js, docs/GSCOPE-FLANGE.md). Kept apart from
+             Flange tab (nso_flange.js, docs/GSCOPE-FLANGE.md), then Handle,
+             Bracket, Lid and Hinge (nso_face_features.js,
+             docs/GSCOPE-FEATURES.md). Kept apart from
              #ms-legend, whose rows are exactly the file's own groups. -->
         <div id="ms-detected"></div>
       </div>
@@ -1095,7 +1097,10 @@
   <!-- Flange detection for G-scope's Flange tab. Pure; app-microscope.js
        calls it with app-cut.js's rawCut. -->
   <script src="nso_flange.js?v=flange2"></script>
-  <script src="app-microscope.js?v=scope11"></script>
+  <!-- Handle, bracket, lid and hinge detection for G-scope's Parts list, one
+       row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
+  <script src="nso_face_features.js?v=features1"></script>
+  <script src="app-microscope.js?v=scope12"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js

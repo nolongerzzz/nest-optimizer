@@ -130,9 +130,9 @@ async function main() {
     await page.evaluate(() => [!!document.getElementById('ms-cam-close'), typeof window.NSO_MICROSCOPE.setCameraMode,
       typeof window.NSO_MICROSCOPE.cameraMode, /Close inspection/.test(document.getElementById('microscope').textContent)]),
     [false, 'undefined', 'undefined', false]);
-  check('Normal has the legend as ever: Parts, no tab strip, the Flange row under it',
+  check('Normal has the legend as ever: Parts, no tab strip, the Flange, Handle, Bracket, Lid and Hinge rows under it',
     [base.legendTab, base.tabsShown, base.legendShown, base.legendTitle, base.detectedRows],
-    [null, false, true, 'Parts (click to isolate)', ['flange']]);
+    [null, false, true, 'Parts (click to isolate)', ['flange', 'handle', 'bracket', 'lid', 'hinge']]);
   check('the slice settings sit behind a disclosure, collapsed by default',
     await page.evaluate(() => [document.getElementById('ms-slice-settings').open,
       document.getElementById('ms-slice-settings').querySelector('summary').textContent.trim()]), [false, 'Slice settings']);
