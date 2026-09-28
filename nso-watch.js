@@ -46,6 +46,14 @@
                  filter by run, by kind, by text - instead of downloading a
                  file. There is no backend and this does not need one.
 
+   5. G-SCOPE  - the panel follows the view. G-scope (app-microscope.js) is its
+                 own full-screen sheet over the whole app, and the panel used
+                 to stay behind on the main view under it. While watching, the
+                 panel and the report move into G-scope's viewport when it
+                 opens and back when it closes; everything above keeps running
+                 exactly as it was, in Normal and in Slice view alike. Off, it
+                 stays off: nothing is observed and nothing is moved.
+
    Why this exists: two mismatches of exactly this shape have been found by
    accident (a pose lost across a bake, paint left on screen after an undo).
    Both are invisible until an unrelated test happens to trip over them,
@@ -946,6 +954,54 @@
     return found;
   }
 
+  /* ---------------- G-scope: the panel follows the view ----------------
+     G-scope is #microscope: position:fixed, inset 0, z-index 2000, its own
+     left rail and its own 3D view, over the whole app. The watcher never
+     stopped while it was up - every patch here is on globals G-scope shares:
+     its status lines, its errors, the clicks on its controls - but the panel
+     lived in .viewport-section, UNDER that sheet, so an armed watch looked
+     exactly like a dead one (driver round, 2026-09-28). While watching, the
+     panel and the report are re-homed into G-scope's viewport the moment it
+     opens and back to the main view the moment it closes, so the same run -
+     the same events, the same counts - is on screen on both sides.
+
+     Installed by start() only. A watch left off is not started, not shown
+     and not observed on the way in: the on/off state crosses the boundary
+     exactly as it was left. */
+  function gscopeOpen() {
+    var g = document.getElementById('microscope');
+    return !!(g && !g.hidden);
+  }
+  function hostEl() {
+    var v = gscopeOpen() ? document.getElementById('ms-viewport') : null;
+    return v || document.querySelector('.viewport-section') || document.body;
+  }
+  /* Where the panel is now: 'gscope' or 'main'. Exposed as api.where(). */
+  function where() {
+    return (el.panel && el.panel.parentNode && el.panel.parentNode.id === 'ms-viewport') ? 'gscope' : 'main';
+  }
+  function rehome() {
+    var h = hostEl();
+    var inG = h.id === 'ms-viewport';
+    [el.panel, el.report].forEach(function (n) {
+      if (!n) return;
+      if (n.parentNode !== h) h.appendChild(n);
+      n.classList.toggle('in-gscope', inG);
+    });
+  }
+  /* A MutationObserver on the sheet's own `hidden` attribute, which is the one
+     thing every way in and out of G-scope sets (the rail button, a .gcode.3mf
+     import, Close, Escape, Export to plate). Its callback runs as a microtask,
+     so the panel has moved before the next frame is painted. */
+  function installGscope() {
+    rehome();
+    var g = document.getElementById('microscope');
+    if (!g || typeof global.MutationObserver !== 'function') return;
+    var mo = new global.MutationObserver(function () { rehome(); });
+    mo.observe(g, { attributes: true, attributeFilter: ['hidden'] });
+    restores.push(function () { mo.disconnect(); });
+  }
+
   /* ---------------- the panel ---------------- */
   var CSS = [
     /* left:64px clears the viewport's left tool rail (Undo, the eye and the
@@ -1012,7 +1068,13 @@
     '#nso-watch-report .wr-sum button.is-on{border-color:#38bdf8;background:rgba(56,189,248,.18)}',
     '#nso-watch-report .wr-list{overflow:auto;flex:1 1 auto;padding:4px 0;overscroll-behavior:contain;min-height:0}',
     '#nso-watch-report .wr-run{padding:6px 9px 2px;color:#94a3b8;border-top:1px solid #26303f;margin-top:4px}',
-    '#nso-watch-report .wr-note{padding:6px 9px;color:#94a3b8}'
+    '#nso-watch-report .wr-note{padding:6px 9px;color:#94a3b8}',
+    /* Inside G-scope's viewport: bottom-left, above its hint badge (12px +
+       its ~60px), and clear of the layer-range slider docked to the right
+       edge (12px + 64px). */
+    '#nso-watch-panel.in-gscope{left:12px;bottom:84px;width:min(420px,calc(100% - 100px));max-height:40%}',
+    '#nso-watch-panel.in-gscope.is-collapsed{width:auto;max-width:calc(100% - 100px)}',
+    '#nso-watch-report.in-gscope{inset:12px 88px 12px 12px}'
   ].join('');
 
   function buildPanel() {
@@ -1023,7 +1085,7 @@
       st.textContent = CSS;
       document.head.appendChild(st);
     }
-    var host = document.querySelector('.viewport-section') || document.body;
+    var host = hostEl();
     var p = document.createElement('div');
     p.id = 'nso-watch-panel';
     p.innerHTML =
@@ -1132,7 +1194,7 @@
 
   function buildReport() {
     if (el.report) return;
-    var host = document.querySelector('.viewport-section') || document.body;
+    var host = hostEl();
     var r = document.createElement('div');
     r.id = 'nso-watch-report';
     r.setAttribute('role', 'dialog');
@@ -1364,6 +1426,7 @@
       installConsistency();
       installSelection();
       installOps();
+      installGscope();
       global.addEventListener('pagehide', flushStore);
       restores.push(function () { global.removeEventListener('pagehide', flushStore); });
       paintButton();
@@ -1413,6 +1476,8 @@
     },
     isCollapsed: function () { return !!(el.panel && el.panel.classList.contains('is-collapsed')); },
     isOn: function () { return on; },
+    /* Which view the panel is in: 'gscope' or 'main'. */
+    where: function () { return where(); },
 
     /* Run the consistency pass now and hand back what it found. */
     check: function (label) { return check(label || 'manual check'); },
@@ -1469,6 +1534,7 @@
     query: function (f) { return JSON.parse(JSON.stringify(query(f))); },
     showReport: function () {
       buildReport();
+      rehome();
       if (!store) store = loadStore();
       el.report.classList.add('is-on');
       renderReport();
