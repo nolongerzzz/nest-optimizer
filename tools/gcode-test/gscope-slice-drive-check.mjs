@@ -2,8 +2,9 @@
 /**
  * nest-optimizer / tools/gcode-test / gscope-slice-drive-check.mjs
  *
- * G-scope's Slice action (app-gscope-slice.js), driven through the real app in
- * headless Chromium with real clicks:
+ * G-scope's Slice action (app-gscope-slice.js) - the View row's Slice view
+ * button - driven through the real app in headless Chromium with real clicks.
+ * (The Normal / Slice view round trip itself is gscope-slice-view-drive-check.mjs.)
  *
  *   1  THE ACTION IS THERE for a mesh document - the plate, and an STL opened
  *      straight into G-scope - and not for an imported slice.
@@ -20,7 +21,7 @@
  *   5  THE REPORT names the support-need region on the mushroom and none on
  *      the plain box; a non-solid piece is sliced with its chains left open.
  *   6  NOTHING IS WRITTEN: no model, no plate piece, no undo step.
- *   7  BACK TO THE MESH re-opens the plate; an STL opened into G-scope slices too.
+ *   7  NORMAL re-opens the plate; an STL opened into G-scope slices too.
  *   8  THE PIECE STAYS EXPORTABLE while its slice is shown, with nothing
  *      selected: Export piece as STL downloads the piece's exact triangles,
  *      Export piece to plate adds them as a new piece with one Undo step.
@@ -88,7 +89,7 @@ async function main() {
   // =======================================================================
   check('the plate opened as a mesh document', await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().kind), 'mesh');
   check('the Slice section is visible', await page.isVisible('#ms-slice-row'), true);
-  check('the Slice button is visible', await page.isVisible('#ms-btn-slice'), true);
+  check('the Slice view button is offered', [await page.isVisible('#ms-cam-slice'), await page.isEnabled('#ms-cam-slice')], [true, true]);
   check('defaults are the real setup: 0.6 nozzle, 0.3 layers, 2 walls, 15 % grid, 30 deg (Bambu profile)',
     await page.evaluate(() => [document.getElementById('ms-slice-nozzle').value, document.getElementById('ms-slice-layer').value,
       document.getElementById('ms-slice-walls').value, document.getElementById('ms-slice-density').value,
@@ -98,10 +99,11 @@ async function main() {
   // =======================================================================
   console.log('\n--- 2. a real click slices the plate ---');
   // =======================================================================
+  await page.click('#ms-slice-settings > summary');   // the settings, collapsed by default
   await page.selectOption('#ms-slice-nozzle', '0.4');
   check('changing the nozzle sets the layer to half of it', await page.inputValue('#ms-slice-layer'), '0.2');
   const plateObjs = await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().objects.map((o) => o.name));
-  await page.click('#ms-btn-slice');
+  await page.click('#ms-cam-slice');
   await sliced(page);
   const doc = await page.evaluate(() => {
     const d = window.NSO_MICROSCOPE.getDoc();
@@ -153,16 +155,20 @@ async function main() {
   check('same per-segment schema', shape.a.seg, shape.r.seg);
   check('same per-move schema (the parser\'s own)', shape.a.mv, shape.r.mv);
   check('the Slice section hides on an imported slice (there is no mesh to slice)', await page.isVisible('#ms-slice-row'), false);
+  check('... and Slice view is disabled there', await page.isDisabled('#ms-cam-slice'), true);
 
   // back to the plate, slice again for section 4
   await page.click('#ms-btn-plate');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'mesh');
-  await page.click('#ms-btn-slice');
+  await page.click('#ms-cam-slice');
   await sliced(page);
 
   // =======================================================================
   console.log('\n--- 4. G-scope\'s own tools, unchanged ---');
   // =======================================================================
+  check('a slice opens on the Detected features tab', await page.evaluate(() => window.NSO_MICROSCOPE.legendTab()), 'detected');
+  await page.click('#ms-tab-legend');                  // the file's own list, one click away
+  check('... and the All features tab shows the legend', [await page.isVisible('#ms-legend'), await page.isVisible('#ms-detected')], [true, false]);
   const only = await page.evaluate(() => {
     const items = Array.from(document.querySelectorAll('#ms-legend .ms-legend-item, #ms-legend > *'));
     return items.map((el) => el.textContent.trim()).filter(Boolean).length;
@@ -234,11 +240,11 @@ async function main() {
     [await page.isVisible('#ms-btn-slice-export-plate'), await page.isVisible('#ms-btn-slice-export-stl'),
      await page.evaluate(() => window.NSO_MICROSCOPE.selection().length)], [true, true, 0]);
   // non-solid: flag the plain block, slice again
-  await page.click('#ms-btn-slice-back');
+  await page.click('#ms-cam-normal');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'mesh');
-  check('Back to the mesh re-opens the plate', await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().source), 'plate');
+  check('Normal re-opens the plate', await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().source), 'plate');
   await page.evaluate(() => { state.models.find((m) => /plain/.test(m.name)).nonSolid = true; });
-  await page.click('#ms-btn-slice');
+  await page.click('#ms-cam-slice');
   await sliced(page);
   const ns = await page.evaluate(() => ({ read: document.getElementById('ms-slice-read').textContent,
     flags: window.NSO_GSCOPE_SLICE.last().result.objects.map((o) => o.nonSolid) }));
@@ -260,8 +266,8 @@ async function main() {
     await window.NSO_MICROSCOPE.load('mushroom.stl', a);
   }, MUSHROOM);
   check('the STL is a mesh document', await page.evaluate(() => [window.NSO_MICROSCOPE.getDoc().kind, window.NSO_MICROSCOPE.getDoc().source || 'file']), ['mesh', 'file']);
-  check('Slice is offered on it', await page.isVisible('#ms-btn-slice'), true);
-  await page.click('#ms-btn-slice');
+  check('Slice view is offered on it', await page.isEnabled('#ms-cam-slice'), true);
+  await page.click('#ms-cam-slice');
   await sliced(page);
   check('it slices into a toolpath document', await page.evaluate(() => /^mushroom\.stl - NSO slice/.test(window.NSO_MICROSCOPE.getDoc().name)), true);
   await frames(page);
@@ -300,7 +306,7 @@ async function main() {
 
   await browser.close();
   served.srv.close();
-  check.report();
+  process.exit(check.report() ? 1 : 0);
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });

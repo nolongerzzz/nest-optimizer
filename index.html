@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=crop4" />
+  <link rel="stylesheet" href="styles.css?v=slice2" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -771,11 +771,14 @@
           <button id="ms-mode-line" type="button"
                   title="Pick one extrusion move at a time (sliced files only)">Pick a line</button>
         </div>
-        <div class="ms-btn-row" id="ms-camera-row" role="group" aria-label="Camera mode">
+        <!-- Normal / Slice view. app-gscope-slice.js owns both buttons: Slice
+             view slices the open mesh with the in-house slicer and shows the
+             result; Normal re-frames, or from a slice goes back to the mesh. -->
+        <div class="ms-btn-row" id="ms-camera-row" role="group" aria-label="Mesh or slice view">
           <button id="ms-cam-normal" type="button" class="active" aria-pressed="true"
-                  title="Free orbit, pan and zoom. Isolated, it shows the selection alone, as drawn">Normal</button>
-          <button id="ms-cam-close" type="button" aria-pressed="false"
-                  title="Framed on the selection, highlighted, with the rest of the part around it. Free orbit, pan and zoom. Switching never changes the selection or the isolation">Close inspection</button>
+                  title="Free orbit, pan and zoom. Isolated, it shows the selection alone, as drawn. From Slice view, back to the mesh">Normal</button>
+          <button id="ms-cam-slice" type="button" aria-pressed="false"
+                  title="Slice every piece into real layers, walls and infill with the in-house slicer (the Slice settings below) and show its detected features">Slice view</button>
         </div>
         <div id="ms-select-controls">
           <p class="ms-note">Click empty space to drop a flat box. Drag its
@@ -873,18 +876,18 @@
            the same parser an imported .gcode.3mf takes. docs/SLICER.md. -->
       <div class="ms-section" id="ms-slice-row" style="display:none;">
         <div class="ms-section-title">Slice (in-house)</div>
-        <div class="ms-btn-row">
-          <button id="ms-btn-slice" type="button"
-                  title="Slice every piece into real layers, walls and infill with the in-house slicer, and open the toolpath here.">Slice</button>
-          <button id="ms-btn-slice-back" type="button" style="display:none;"
-                  title="Back to the mesh this slice was made from">&larr; Back to the mesh</button>
-        </div>
         <div class="ms-btn-row" id="ms-slice-export-row" data-flex="1" style="display:none;">
           <button id="ms-btn-slice-export-plate" type="button"
                   title="Put the piece this slice was made from onto the plate as its own object">Export piece to plate</button>
           <button id="ms-btn-slice-export-stl" type="button"
                   title="Download the piece this slice was made from as an STL">Export piece as STL</button>
         </div>
+        <p class="ms-note" id="ms-slice-read">&mdash;</p>
+        <!-- The build's slice settings, out of the way: collapsed by default.
+             Slice view uses whatever they hold, and they keep their values
+             across every Normal / Slice view round trip. -->
+        <details id="ms-slice-settings">
+        <summary>Slice settings</summary>
         <div class="ms-btn-row" data-flex="1">
           <label class="ms-note" for="ms-slice-nozzle" style="margin:0">nozzle
             <select id="ms-slice-nozzle" style="width:auto" title="Walls and infill take the repo's measured line for it: 0.42 mm at 0.4, 0.63 mm at 0.6">
@@ -908,7 +911,7 @@
             <input type="number" id="ms-slice-angle" value="30" min="1" max="89" step="1" style="width:3.5em"
                    title="Printable angle off the plate. 30 is the real Bambu profile's support_threshold_angle; auto-aim uses 45" />&deg;</label>
         </div>
-        <p class="ms-note" id="ms-slice-read">&mdash;</p>
+        </details>
       </div>
 
       <div class="ms-section" id="ms-export-row" data-flex="0" style="display:none;">
@@ -945,6 +948,12 @@
           <div class="ms-section-title" id="ms-legend-title">Features (click to isolate)</div>
           <button id="ms-legend-toggle" type="button" aria-expanded="true"
                   aria-controls="ms-legend" title="Minimize the list">&minus;</button>
+        </div>
+        <!-- Slice view's tab strip: hidden until a slice is shown (app-microscope.js,
+             setLegendTab). Normal shows the list and the Flange row as ever. -->
+        <div class="ms-legend-tabs" role="tablist" aria-label="Legend">
+          <button id="ms-tab-legend" type="button" role="tab" aria-selected="false">All features</button>
+          <button id="ms-tab-detected" type="button" role="tab" aria-selected="false">Detected features</button>
         </div>
         <div id="ms-legend"></div>
         <!-- Tabs for what the geometry has but the file does not name. The
@@ -1086,7 +1095,7 @@
   <!-- Flange detection for G-scope's Flange tab. Pure; app-microscope.js
        calls it with app-cut.js's rawCut. -->
   <script src="nso_flange.js?v=flange2"></script>
-  <script src="app-microscope.js?v=scope10"></script>
+  <script src="app-microscope.js?v=scope11"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
@@ -1098,7 +1107,7 @@
        nso_support_aim.js / nso_support_tree.js / app-join.js, whose
        detection, generators and union it calls. See docs/GCODE-SUPPORTS.md. -->
   <script src="app-gscope-support.js?v=gsup2"></script>
-  <script src="app-gscope-slice.js?v=slice1"></script>
+  <script src="app-gscope-slice.js?v=slice2"></script>
 
 
   <script src="app-ux.js?v=inside8"></script>

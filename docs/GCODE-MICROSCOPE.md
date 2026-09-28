@@ -233,13 +233,56 @@ Two faults found while driving it, both fixed here:
   after a pan slid off its own target. `frameBox()` now spends that remainder
   (one undamped `update()`) before it sets the camera.
 
-### Camera modes: Normal and Close inspection
+### The View toggle: Normal and Slice view
 
-> **Current state (final).** The table below supersedes the earlier two
-> rounds described after it.
+> **Current state (final).** Close inspection is gone. The View row's second
+> button, `#ms-cam-slice`, is **Slice view**, which is not a camera at all.
+> Everything below this block that describes Close inspection is history.
 
-Two buttons in the View section, `#ms-cam-normal` and `#ms-cam-close`. Each
-mode is a camera **and** a way of drawing the isolation:
+Two buttons in the View section, `#ms-cam-normal` and `#ms-cam-slice`.
+`app-gscope-slice.js` owns both: they toggle between the open mesh and the
+in-house slicer's output for it.
+
+| | Normal | Slice view |
+| --- | --- | --- |
+| **what is shown** | the document as opened: the plate, an STL / 3MF, or an imported `.gcode.3mf` | the in-house slice of every piece the mesh holds (`NSO_GSCOPE_SLICE.slice()`), opened as a toolpath |
+| **legend** | as ever: Parts (or Features), the Flange row under it, no tab strip | the **Detected features** tab (`#ms-detected`): walls, infill, top / bottom, and every overhang call, each a click to isolate. An **All features** tab keeps the file's own list one click away |
+| **click on a mesh** | the plain re-frame it always was (`NSO_MICROSCOPE.normalView()`): whole part, or turned to the selection when isolated | slices now, with whatever the Slice settings hold |
+| **click on a slice** | back to the mesh through `backToMesh()`, which re-opens it: nothing selected, isolated, hidden or cleared, framed on the whole part | nothing (already there) |
+| **on an imported slice** | the re-frame | disabled: there is no mesh to slice |
+
+- **Isolate** shows the selection alone and turns the camera to it without
+  changing the viewing angle (`fitView`). The capture boxes and their handles
+  stay on screen. A changed box, a stepped line or a filter redraws the
+  isolated view in place without moving the camera.
+- **Back leaves the isolation**, framed on the whole part. What Close
+  inspection used to show - the whole view with the selection highlighted as
+  each move's extrudeFlatLine prism - is simply the not-isolated view: pick
+  a line and Back, and the prism is drawn in context.
+- **Full zoom and pan.** Pan is on, and the clip planes follow the camera
+  every frame (`followClip`), so no distance is refused and nothing drawn is
+  clipped.
+- **The slice settings** (nozzle, layer, walls, infill, pattern, support
+  angle) sit behind a `Slice settings` disclosure, collapsed by default. Their
+  values persist across every Normal / Slice view round trip.
+- API: `NSO_MICROSCOPE.normalView()`, `setLegendTab(null | 'legend' |
+  'detected')`, `legendTab()`, `addDetectedSource(fn)`, `isolateGroups(names)`,
+  `isolateMoves(indices)`; `NSO_GSCOPE_SLICE.sliceView()`, `normalView()`,
+  `viewMode()` (`'normal' | 'slice'`). `setCameraMode` / `cameraMode` are gone.
+
+Proof: `gcode:gscope-slice-view` (`tools/gcode-test/gscope-slice-view-drive-check.mjs`)
+drives Normal -> Slice view -> Normal twice with real clicks: the slice is
+real (the same G-code `NSO_Slicer` gives directly), the Detected tab is
+populated and its rows isolate, the whole-part mesh state after each round
+trip equals the one before slicing (document, selection, isolation, filters,
+camera, legend), the settings persist and the second slice is the first,
+G-code for G-code. `gcode:gscope-normalcam` drives Normal's zoom, orbit, pan
+and Isolate.
+
+### Camera modes: Normal and Close inspection (history - Close inspection removed)
+
+The table and notes below are the state before Slice view replaced Close
+inspection, kept for the record.
 
 | | Normal | Close inspection |
 | --- | --- | --- |
@@ -247,39 +290,10 @@ mode is a camera **and** a way of drawing the isolation:
 | **isolated** | **the selection alone, as-is**: its own lines in the toolpath view, its own solid in the solid view, its own triangles for a mesh. Nothing else is drawn. Turned to the selection from the same viewing angle (`fitView`) | the whole view **and** the highlighted selection (the red prism blob) together, framed on the selection |
 | **controls** | free orbit, pan and zoom, no distance limits | the same: free orbit, pan and zoom, no distance limits |
 
-Why: supports built here are not classified as the slicer's Support or
-Support interface, so feature filters can't pull them out. Isolate has to
-show the selected region by itself, as it is, before export.
-
-- **Isolate lands in Normal.** It shows the selection alone and turns the
-  camera to it without changing the viewing angle. The capture boxes and
-  their handles stay on screen. A changed box, a stepped line or a filter
-  redraws the isolated view in place without moving the camera.
-- **The toggle never leaves the isolation.** Close inspection shows the
-  context (the part plus the highlighted selection). Normal goes back to the
-  selection alone. The selection, boxes, Back, plate and undo stack are never
-  touched.
-- **Full zoom and pan in both modes.** Pan is on in both, and the clip planes
-  follow the camera every frame (`followClip`), so no distance is refused and
-  nothing drawn is clipped.
-- **Back leaves the isolation** and returns to Normal, framed on the whole
-  part. A panel reopen leaves the camera where it was.
-- The earlier Isolate detail (each move's extrudeFlatLine prism) is now
-  **Close inspection's highlight**: the same prisms, drawn in context.
-  Export is unchanged.
-- API: `NSO_MICROSCOPE.setCameraMode('normal' | 'close')`, `cameraMode()`.
-
-Proof: `gcode:gscope-normalcam` (`tools/gcode-test/gscope-normal-camera-drive-check.mjs`)
-drives all four states with real clicks, wheel scrolls and drags.
-- **Isolated view:** its lines are checked against the selected moves,
-  endpoint for endpoint.
-- **Close inspection:** framing is checked against `frameBox`'s formula.
-- **Zoom and pan:** pan, zoom-in without a floor, and zoom-out past the old
-  far plane are all checked in both modes.
-
-The old isolate assertions in `gcode:scope-drive`, `gcode:gscope` and
-`gcode:solid-drive` now assert the as-is lines. The prism exactness they
-checked moved to Close inspection's highlight.
+Why Isolate shows the selection alone: supports built here are not
+classified as the slicer's Support or Support interface, so feature filters
+can't pull them out. Isolate has to show the selected region by itself, as it
+is, before export.
 
 #### Earlier round: Normal made unrestricted (superseded where the table above disagrees)
 

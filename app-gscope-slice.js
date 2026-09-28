@@ -14,6 +14,18 @@
  * the parser down, nothing can tell them apart, and nothing here re-implements
  * any of it.
  *
+ * NORMAL / SLICE VIEW. The View row's two buttons are this module's: one
+ * toggle between the mesh and its slice, not a camera. Slice view
+ * (#ms-cam-slice) slices the open mesh at once with whatever the Slice
+ * settings hold - collapsed out of the way by default, their values kept
+ * across every round trip because nothing resets them - and turns the
+ * floating legend to its Detected features tab: walls, infill, top / bottom
+ * and every overhang call, each a click to isolate. Normal (#ms-cam-normal)
+ * goes back to the mesh through backToMesh(), which re-opens it - so the
+ * whole part comes back as G-scope opens it: nothing selected, nothing
+ * isolated, nothing hidden. On a mesh, Normal is the plain re-frame it always
+ * was (NSO_MICROSCOPE.normalView).
+ *
  * THE PIECE STAYS EXPORTABLE. While a slice is shown, the Slice section keeps
  * Export piece to plate / Export piece as STL for the piece(s) it was made
  * from - no selection needed, nothing to go back for. They build the same
@@ -109,8 +121,7 @@ var NSO_GSCOPE_SLICE = (function () {
     });
     var source = { label: d.name, objects: d.objects, docSource: d.source, subtitle: d.subtitle };
     busy = true;
-    var btn = $('ms-btn-slice');
-    if (btn) btn.disabled = true;
+    syncToggle();
     var read = $('ms-slice-read');
     if (read) read.textContent = 'Slicing ' + objects.length + ' object(s)...';
     say('Slicing ' + d.name + '...');
@@ -138,7 +149,6 @@ var NSO_GSCOPE_SLICE = (function () {
       })
       .then(function (out) {
         busy = false;
-        if (btn) btn.disabled = false;
         syncPanel();
         return out;
       });
@@ -152,8 +162,8 @@ var NSO_GSCOPE_SLICE = (function () {
 
   /** Re-open the mesh the current slice was made from. */
   function backToMesh() {
-    if (!last || !last.source) return null;
-    var s = last.source;
+    var s = shownSource() || (last && last.source);
+    if (!s) return null;
     if (s.docSource === 'plate' && MS().openPlate) return MS().openPlate();
     return MS().openObjects(s.label, s.objects, { source: s.docSource, subtitle: s.subtitle });
   }
@@ -221,6 +231,127 @@ var NSO_GSCOPE_SLICE = (function () {
     return name;
   }
 
+  // --- Normal / Slice view --------------------------------------------------
+
+  /** Is G-scope showing one of our slices? */
+  function showingSlice() {
+    var d = MS() && MS().getDoc();
+    return !!(d && d.nsoSlice);
+  }
+
+  /** Slice view: slice the open mesh now, with the settings as they stand. */
+  function sliceView() {
+    if (showingSlice()) return Promise.resolve({ ok: true, reason: 'already in Slice view', doc: MS().getDoc() });
+    return slice();
+  }
+
+  /** Normal: from a slice, back to its mesh; on a mesh, the re-frame Normal always was. */
+  function normalView() {
+    if (busy) return null;
+    if (showingSlice()) return backToMesh();
+    return MS() ? MS().normalView() : null;
+  }
+
+  function viewMode() { return showingSlice() ? 'slice' : 'normal'; }
+
+  function syncToggle() {
+    var d = MS() && MS().getDoc();
+    var on = showingSlice();
+    var n = $('ms-cam-normal'), c = $('ms-cam-slice');
+    if (n) {
+      n.classList.toggle('active', !on);
+      n.setAttribute('aria-pressed', String(!on));
+      n.disabled = busy;
+    }
+    if (c) {
+      c.classList.toggle('active', on);
+      c.setAttribute('aria-pressed', String(on));
+      c.setAttribute('aria-busy', String(busy));
+      // A mesh can be sliced; an imported .gcode.3mf is a slice already.
+      c.disabled = busy || !(d && (d.kind === 'mesh' || on));
+      c.textContent = busy ? 'Slicing...' : 'Slice view';
+    }
+  }
+
+  // --- the Detected features tab, on a slice --------------------------------
+
+  var FAMILIES = [
+    { key: 'walls', groups: ['Outer wall', 'Inner wall', 'Overhang wall'] },
+    { key: 'infill', groups: ['Sparse infill', 'Internal solid infill'] },
+    { key: 'skin', groups: ['Top surface', 'Bottom surface', 'Bridge'] }
+  ];
+  var OVERHANG_COLOR = 0xe5484d;
+
+  function moves(d, groups) {
+    return groups.reduce(function (a, g) { return a + (d.groups[g] ? d.groups[g].length : 0); }, 0);
+  }
+
+  /** The moves printed over one overhang region: its layers, inside its footprint's bounds. */
+  function regionMoves(d, r, g) {
+    var lo = r.planes[g.firstLayer].printZ - 1e-6, hi = r.planes[g.lastLayer].printZ + 1e-6;
+    var pad = r.options.outerWallWidthMm || 0.5;
+    return d.segments.filter(function (sg) {
+      if (sg.feature === 'Travel' || !(sg.z >= lo && sg.z <= hi)) return false;
+      var mx = (sg.x0 + sg.x1) / 2, my = (sg.y0 + sg.y1) / 2;
+      return mx >= g.min[0] - pad && mx <= g.max[0] + pad && my >= g.min[1] - pad && my <= g.max[1] + pad;
+    }).map(function (sg) { return sg.mv.index; });
+  }
+
+  function isolateOrSay(ok, what) {
+    if (!ok) say(what + ': nothing of it is left to show', true);
+    return ok;
+  }
+
+  /** The rows Slice view lists under Detected features: feature families, then overhang calls. */
+  function detectedRows(d) {
+    if (!d || !d.nsoSlice) return [];
+    var r = d.nsoSlice.result, o = r.options;
+    var rows = [], taken = { Travel: 1 };
+    FAMILIES.forEach(function (f) {
+      var have = f.groups.filter(function (g) { return !!d.groups[g]; });
+      have.forEach(function (g) { taken[g] = 1; });
+      if (!have.length) return;
+      var n = moves(d, have);
+      var label = f.key === 'walls'
+        ? 'Walls - ' + o.wallLoops + ' loop' + (o.wallLoops === 1 ? '' : 's') + ', ' + o.outerWallWidthMm + ' mm (' + n + ')'
+        : f.key === 'infill'
+          ? 'Infill - ' + Math.round(o.sparseDensity * 100) + ' % ' + o.sparsePattern + ' (' + n + ')'
+          : 'Top / bottom (' + n + ')';
+      rows.push({ key: f.key, group: have[0], label: label,
+        title: have.map(function (g) { return g + ': ' + d.groups[g].length + ' moves'; }).join('\n') +
+          '\nClick to isolate them - every other feature hidden.',
+        onClick: function () { return isolateOrSay(MS().isolateGroups(have), label); } });
+    });
+    Object.keys(d.groups).sort().forEach(function (g) {
+      if (taken[g]) return;
+      rows.push({ key: 'group:' + g, group: g, label: g + ' (' + d.groups[g].length + ')',
+        title: 'Click to isolate ' + g + '.',
+        onClick: function () { return isolateOrSay(MS().isolateGroups([g]), g); } });
+    });
+    r.objects.forEach(function (ob) {
+      if (!ob.overhang.length) {
+        rows.push({ key: 'overhang-none:' + ob.name, color: OVERHANG_COLOR, dim: true,
+          label: 'Overhang: ' + ob.name + ' - none, no support needed',
+          title: 'Nothing on ' + ob.name + ' prints steeper than ' + o.supportThresholdDeg + '° off the plate.' });
+        return;
+      }
+      ob.overhang.forEach(function (g, i) {
+        var label = 'Overhang: ' + ob.name + ' at z ' + g.firstZ.toFixed(2) + ' - support on ' + g.standsOn;
+        rows.push({ key: 'overhang:' + ob.name + ':' + i, color: OVERHANG_COLOR, label: label,
+          title: g.footprintMm2.toFixed(1) + ' mm² needs support below ' + o.supportThresholdDeg + '°, layers ' +
+            (g.firstLayer + 1) + '-' + (g.lastLayer + 1) + ', standing on the ' + g.standsOn +
+            '.\nClick to isolate the moves printed over it.',
+          onClick: function () { return isolateOrSay(MS().isolateMoves(regionMoves(d, r, g), 'detected'), label); } });
+      });
+    });
+    if (r.conflicts.length) {
+      rows.push({ key: 'conflict', color: OVERHANG_COLOR,
+        label: 'Conflict: pieces overlap on layer ' + conflictLayers(r).join(', '),
+        title: 'Two pieces print into each other on these layers.' });
+    }
+    return rows;
+  }
+
   function report(r, flagged) {
     var lines = [];
     var o = r.options;
@@ -246,16 +377,14 @@ var NSO_GSCOPE_SLICE = (function () {
     var d = MS() && MS().getDoc();
     var ours = !!(d && d.nsoSlice);
     if (row) row.style.display = d && (d.kind === 'mesh' || ours) ? 'block' : 'none';
-    var btn = $('ms-btn-slice'), back = $('ms-btn-slice-back');
-    if (btn) { btn.style.display = d && d.kind === 'mesh' ? '' : 'none'; btn.disabled = busy; }
-    if (back) back.style.display = ours ? '' : 'none';
+    syncToggle();
     var exp = $('ms-slice-export-row');
     if (exp) exp.style.display = ours ? 'flex' : 'none';
     var read = $('ms-slice-read');
     if (!read || busy) return;
     if (ours) read.textContent = report(d.nsoSlice.result, d.nsoSlice.flagged);
-    else if (d && d.kind === 'mesh') read.textContent = 'Slice every ' + (d.source === 'plate' ? 'piece' : 'object') +
-      ' into real layers, walls and infill with the in-house slicer, then inspect it here line by line.';
+    else if (d && d.kind === 'mesh') read.textContent = 'Slice view slices every ' + (d.source === 'plate' ? 'piece' : 'object') +
+      ' into real layers, walls and infill with the in-house slicer and lists what it finds under Detected features.';
   }
 
   function bind(id, ev, fn) {
@@ -265,13 +394,20 @@ var NSO_GSCOPE_SLICE = (function () {
 
   function mount() {
     if (!MS()) return;
+    MS().addDetectedSource(detectedRows);
     MS().onDocument(function (d) {
       if (pending && d && d.kind === 'toolpath') { d.nsoSlice = pending; last = pending; }
       pending = null;
+      if (d && d.nsoSlice) {
+        // The legend was built before the slice was attached: its rows now,
+        // and the Detected features tab up.
+        MS().refreshDetected();
+        MS().setLegendTab('detected');
+      }
       syncPanel();
     });
-    bind('ms-btn-slice', 'click', function () { slice(); });
-    bind('ms-btn-slice-back', 'click', backToMesh);
+    bind('ms-cam-slice', 'click', function () { sliceView(); });
+    bind('ms-cam-normal', 'click', function () { normalView(); });
     bind('ms-btn-slice-export-plate', 'click', exportPieceToPlate);
     bind('ms-btn-slice-export-stl', 'click', exportPieceAsSTL);
     bind('ms-slice-nozzle', 'change', function () {
@@ -288,6 +424,10 @@ var NSO_GSCOPE_SLICE = (function () {
 
   return {
     slice: slice,
+    sliceView: sliceView,
+    normalView: normalView,
+    viewMode: viewMode,
+    detectedRows: detectedRows,
     backToMesh: backToMesh,
     exportPieceToPlate: exportPieceToPlate,
     exportPieceAsSTL: exportPieceAsSTL,
