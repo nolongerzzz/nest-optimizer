@@ -9,6 +9,8 @@ drive the app exactly as you would anyway.
     node tools/nso_watch_test.js   109 checks, in npm test
     node tools/gcode-test/gscope-watch-drive-check.mjs   38 checks, in npm test
                                 (the panel across the G-scope boundary)
+    node tools/gcode-test/gscope-watch-actions-drive-check.mjs   36 checks, in npm test
+                                (G-scope's own actions as lines of their own)
 
 ## Why
 
@@ -214,12 +216,62 @@ observed on the way in. The eye button itself stays on the main view - the
 panel follows the view, the toggle does not - so switching it off from inside
 G-scope is `NSOWatch.stop()` or a trip back to main.
 
-What it logs in G-scope is what it logs anywhere: errors, failed loads,
-status lines, and the plate's consistency checks (a G-scope click schedules
-one, as any click does, and names it in the phantom's trail). It has no
-G-scope-specific checks of its own - nothing compares a slice's layers against
-the slicer's result, and G-scope's legend rows and 3D-view clicks are op
-labels, not rows. `NSOWatch.where()` says which view the panel is in.
+What it logs in G-scope is what it logs anywhere - errors, failed loads,
+status lines, and the plate's consistency checks (a G-scope button click
+schedules one, as any click does, and names it in the phantom's trail) - plus
+G-scope's own actions, below. It has no G-scope-specific checks of its own:
+nothing compares a slice's layers against the slicer's result (that is the
+next ticket, and it will attach to this trail). `NSOWatch.where()` says which
+view the panel is in.
+
+### G-scope's actions are lines of their own
+
+Almost nothing done in G-scope is an undoable operation, so none of it showed
+up as a select / op line the way main-view work does: a legend toggle, a click
+on its 3D view or a Normal / Slice switch left nothing behind unless a phantom
+or an error happened to carry it in its trail. Each is now a `gscope` line
+(its own colour, and its own count in the Report's summary row), in sequence
+with everything else:
+
+    G-scope Normal: entered G-scope - the plate
+    G-scope Normal: legend "mushroom" off                  which row, off or on
+    G-scope Normal: legend "plain" only (every other row off)
+    G-scope Normal: 3D view click (select mode) - hit "mushroom" at (1.2, -0.4, 7.00)
+    G-scope Normal: 3D view click (orbit mode) - nothing hit
+    G-scope Normal: view Normal -> Slice
+    G-scope Slice: Detected features row "Walls ..." (walls)
+    G-scope Slice: view Slice -> Normal
+    G-scope Normal: view Normal (already Normal - re-frame)
+    G-scope Normal: click ms-btn-clear                     any other button
+    G-scope Slice: set ms-layer-index = 12                 any field
+    left G-scope - back on main
+
+- **Which view** is the prefix, read at the moment of the action (Normal /
+  Slice from `NSO_GSCOPE_SLICE.viewMode()`). Every event, not only these,
+  carries a `view` field - `main`, `gscope-normal` or `gscope-slice` - and
+  anything else that happened inside G-scope (a status line, a phantom, an
+  error) is tagged with it in the panel, the Report and its Copy text.
+- **Order.** Each line is written in the capture phase, before G-scope's own
+  handler runs, so it precedes whatever that handler logs: `view Normal ->
+  Slice` comes before `Sliced ...`. Going in and out is written at the first
+  event after the sheet was shown or hidden, so `entered G-scope` precedes the
+  lines G-scope writes while it opens.
+- **What was hit** on a 3D-view click (a press and release within 4 px, G-scope's
+  own test for a click rather than an orbit drag) is read with a raycaster of
+  the watcher's own against the same targets G-scope's click handler uses - a
+  piece, or a feature's lines in a slice - and given in the document's G-code
+  frame. A click on a capture box's handle says so.
+- **Detail**: `detail.action` is `enter`, `leave`, `legend`, `legend-only`,
+  `detected`, `view`, `click3d`, `control` or `set`, with the row, on/off,
+  from/to, mode, hit name and point as they apply.
+
+Pure record: nothing judges an action, and none of these lines schedules a
+check of its own. Legend rows, Detected rows and 3D clicks are added to the
+trail (`ops`) so a phantom or error that follows names them; buttons and
+fields were already there. Same carry rules as the panel: the listeners are
+installed by `start()` and removed by `stop()`, so recording starts only when
+armed, follows into G-scope with no re-arm, and a watch turned off from main -
+or never armed - records nothing on either side.
 
 `?watch=1` on the URL starts it at load, and the on/off state is remembered in
 `localStorage` as `nso.watch`, so it survives the reload a bug needs to

@@ -53,6 +53,17 @@
                  opens and back when it closes; everything above keeps running
                  exactly as it was, in Normal and in Slice view alike. Off, it
                  stays off: nothing is observed and nothing is moved.
+                 G-scope's own actions are lines of their own ("gscope"), not
+                 only context on a phantom: going in and out, a legend row
+                 toggled (which row, off or on) or soloed, a Detected features
+                 row, a Normal / Slice switch (from which view to which), a
+                 click on its 3D view (the mode, and what was under the
+                 pointer - or nothing), and every other button or field in it.
+                 Each is written BEFORE G-scope's own handler runs, so it
+                 precedes whatever that handler logs. Every event also carries
+                 the view it happened in (main / G-scope Normal / G-scope
+                 Slice). Pure record: nothing here judges an action, and none
+                 of these lines schedules a consistency check of its own.
 
    Why this exists: two mismatches of exactly this shape have been found by
    accident (a pose lost across a bake, paint left on screen after an undo).
@@ -196,10 +207,15 @@
        log always reads "selected X" before "commit Y" and never the other
        way round. */
     if (ev.kind !== 'select') flushSelection();
+    /* Going in or out of G-scope is written first too, at the first event
+       after the sheet was shown or hidden - so "entered G-scope" precedes the
+       status lines G-scope writes while it opens. */
+    if (ev.kind !== 'gscope') flushGscope();
     ev.seq = ++seqN;
     ev.at = new Date();
     ev.time = clock(ev.at);
     ev.op = ev.op || opLabel();
+    ev.view = ev.view || viewNow();
     events.push(ev);
     if (events.length > MAX_EVENTS) { events.shift(); dropped++; }
     persist(ev);
@@ -232,7 +248,8 @@
     var r = {
       run: runId, seq: ev.seq, iso: ev.at.toISOString(), time: ev.time, kind: ev.kind,
       level: ev.level, phase: ev.phase || null, source: ev.source || null, msg: ev.msg,
-      op: ev.op, sel: ev.sel || null, detail: ev.detail || null, trail: ev.trail || null
+      op: ev.op, sel: ev.sel || null, detail: ev.detail || null, trail: ev.trail || null,
+      view: ev.view || null
     };
     ev._rec = r;
     store.events.push(r);
@@ -995,11 +1012,222 @@
      so the panel has moved before the next frame is painted. */
   function installGscope() {
     rehome();
+    gsWas = gscopeOpen();
+    installGscopeActions();
     var g = document.getElementById('microscope');
     if (!g || typeof global.MutationObserver !== 'function') return;
-    var mo = new global.MutationObserver(function () { rehome(); });
+    var mo = new global.MutationObserver(function () { rehome(); flushGscope(); });
     mo.observe(g, { attributes: true, attributeFilter: ['hidden'] });
-    restores.push(function () { mo.disconnect(); });
+    restores.push(function () { mo.disconnect(); gsWas = null; });
+  }
+
+  /* ---------------- G-scope: its actions, as lines of their own ----------------
+     On main, what a person did shows up as select / op / status lines; inside
+     G-scope almost nothing it does is an undoable operation, so until now a
+     legend toggle, a click on its 3D view or a Normal / Slice switch left
+     nothing behind unless a phantom or an error happened to carry it in its
+     trail. Each is now a "gscope" line, in sequence with everything else.
+
+     Read, never judged: every line says what was done, in which view, and
+     what was under the pointer - never whether it was right. Nothing here
+     schedules a consistency check; the action is added to the trail (`ops`)
+     so a phantom or error that follows names it, and that is all.
+
+     Capture phase on the document, installed by start() and removed by
+     stop() with everything else, so the lines are written before G-scope's
+     own handlers run - "view Normal -> Slice" precedes "Sliced ..." - and a
+     watch left off records nothing on either side of the boundary. */
+  var gsWas = null;            // was G-scope open at the last event? null: not tracking
+
+  function gsMS() { return global.NSO_MICROSCOPE || null; }
+  /* The view an event happened in: 'main', 'gscope-normal' or 'gscope-slice'.
+     Normal / Slice is read off app-gscope-slice.js's own viewMode(). */
+  function viewNow() {
+    if (!gscopeOpen()) return 'main';
+    var m = 'normal';
+    try {
+      var SL = global.NSO_GSCOPE_SLICE;
+      if (SL && typeof SL.viewMode === 'function') m = SL.viewMode();
+    } catch (e) {}
+    return 'gscope-' + m;
+  }
+  function viewText(v) {
+    return v === 'gscope-slice' ? 'G-scope Slice' : v === 'gscope-normal' ? 'G-scope Normal' : 'main';
+  }
+  /* A click or change the document-wide onClick / onChange above
+     has already put in the trail (with its checks, as they always were) is
+     not added a second time. */
+  var GS_IN_TRAIL = { 'legend-only': 1, view: 1, control: 1, set: 1 };
+  function gsLog(action, what, detail) {
+    if (!on) return null;
+    var v = viewNow();
+    var d = detail || {};
+    d.action = action;
+    d.view = v;
+    var ev = push({ kind: 'gscope', level: 'info', msg: viewText(v) + ': ' + what, detail: d, view: v });
+    if (!GS_IN_TRAIL[action]) noteOp('G-scope ' + what);
+    return ev;
+  }
+  /* In the trail, without the checks markOp() schedules. */
+  function noteOp(name) {
+    ops.push(shorten(name, 80));
+    if (ops.length > OP_HISTORY) ops.shift();
+  }
+  /* The sheet was shown or hidden since the last event: say so, once. */
+  function flushGscope() {
+    if (!on || gsWas === null) return;
+    var now = gscopeOpen();
+    if (now === gsWas) return;
+    gsWas = now;
+    if (now) {
+      var d = null;
+      try { d = gsMS() && gsMS().getDoc(); } catch (e) {}
+      gsLog('enter', 'entered G-scope' + (d ? ' - ' + (d.source === 'plate' ? 'the plate' : '"' + shorten(d.name || '?', 60) + '"') : ''));
+    } else {
+      var ev = push({ kind: 'gscope', level: 'info', msg: 'left G-scope - back on main',
+                      detail: { action: 'leave', view: 'main' }, view: 'main' });
+      noteOp('left G-scope');
+      return ev;
+    }
+  }
+
+  function gsLabel(n) {
+    if (!n) return '?';
+    var l = n.querySelector && n.querySelector('.ms-legend-label');
+    return shorten(((l || n).textContent || '').trim(), 60) || '?';
+  }
+  function gsMode() {
+    var modes = ['orbit', 'select', 'line'];
+    for (var i = 0; i < modes.length; i++) {
+      var b = document.getElementById('ms-mode-' + modes[i]);
+      if (b && b.classList.contains('active')) return modes[i];
+    }
+    return null;
+  }
+  /* What is under the pointer in G-scope's 3D view: the same targets its own
+     click handler raycasts (the overview's visible meshes - a piece, or a
+     feature's lines in a slice), with a raycaster of our own so G-scope's is
+     never touched. Named by the mesh's own feature name, with the point in
+     the document's G-code frame (toThree: (x, y, z) -> (x, z, -y)). */
+  function gsHit(ev) {
+    var MS = gsMS();
+    if (!MS || typeof THREE === 'undefined') return null;
+    var v = MS.getView(), d = MS.getDoc();
+    if (!v || !d || !v.camera || !v.renderer) return null;
+    var r = v.renderer.domElement.getBoundingClientRect();
+    if (!r.width || !r.height) return null;
+    var rc = new THREE.Raycaster();
+    rc.params.Line.threshold = (v.raycaster && v.raycaster.params && v.raycaster.params.Line &&
+                                v.raycaster.params.Line.threshold) || 0.6;
+    rc.setFromCamera(new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1,
+                                       -((ev.clientY - r.top) / r.height) * 2 + 1), v.camera);
+    var meshes = v.overviewMeshes || {};
+    var targets = Object.keys(meshes).map(function (k) { return meshes[k]; })
+      .filter(function (m) { return m && m.visible; });
+    var hits = rc.intersectObjects(targets, false);
+    if (!hits.length) return { hit: false };
+    var h = hits[0], p = h.point;
+    var name = (h.object.userData && h.object.userData.feature) ||
+      Object.keys(meshes).filter(function (k) { return meshes[k] === h.object; })[0] || '?';
+    return { hit: true, name: String(name),
+             at: [+(p.x + (d.cx || 0)).toFixed(2), +((d.cy || 0) - p.z).toFixed(2), +p.y.toFixed(2)] };
+  }
+
+  function installGscopeActions() {
+    function inside(t) {
+      var g = document.getElementById('microscope');
+      if (!t || !g || !gscopeOpen() || !g.contains(t)) return false;
+      if (el.panel && el.panel.contains(t)) return false;     // our own UI rides in G-scope too
+      if (el.report && el.report.contains(t)) return false;
+      return true;
+    }
+    function onGsClick(ev) {
+      try {
+        var t = ev.target;
+        if (!t || !t.closest || !inside(t)) return;
+        var only = t.closest('#ms-legend .ms-legend-only');
+        var row = t.closest('#ms-legend .ms-legend-item');
+        var det = t.closest('#ms-detected .ms-legend-item');
+        var b = t.closest('button, [role="menuitem"], summary');   // onClick's own set
+        if (only && row) {
+          gsLog('legend-only', 'legend "' + row.dataset.group + '" only (every other row off)',
+                { group: row.dataset.group });
+        } else if (row) {
+          /* The row flips its group (app-microscope.js buildLegend()); read
+             before G-scope's handler runs, so what it is about to become is
+             the other of what it is now. */
+          var g = row.dataset.group, hid = [];
+          try { hid = gsMS().hidden(); } catch (e) { hid = row.classList.contains('dim') ? [g] : []; }
+          var turnsOn = hid.indexOf(g) >= 0;
+          gsLog('legend', 'legend "' + g + '" ' + (turnsOn ? 'on' : 'off'), { group: g, on: turnsOn });
+        } else if (det) {
+          gsLog('detected', 'Detected features row "' + gsLabel(det) + '"' +
+                (det.dataset.detected ? ' (' + det.dataset.detected + ')' : ''),
+                { row: det.dataset.detected || null, label: gsLabel(det) });
+        } else if (b && (b.id === 'ms-cam-normal' || b.id === 'ms-cam-slice')) {
+          if (b.disabled) return;
+          var from = viewNow() === 'gscope-slice' ? 'Slice' : 'Normal';
+          var to = b.id === 'ms-cam-slice' ? 'Slice' : 'Normal';
+          gsLog('view', from === to ? 'view ' + to + ' (already ' + from + ' - ' +
+                (to === 'Normal' ? 're-frame' : 'no change') + ')' : 'view ' + from + ' -> ' + to,
+                { from: from.toLowerCase(), to: to.toLowerCase() });
+        } else if (b) {
+          if (b.disabled) return;
+          gsLog('control', 'click ' + (b.id || gsLabel(b)), { id: b.id || null, label: gsLabel(b) });
+        }
+      } catch (e) {}
+    }
+    function onGsChange(ev) {
+      try {
+        var t = ev.target;
+        if (!inside(t)) return;
+        var val = t.type === 'checkbox' || t.type === 'radio' ? (t.checked ? 'on' : 'off') : shorten(t.value, 40);
+        gsLog('set', 'set ' + (t.id || t.name || t.tagName.toLowerCase()) + ' = ' + val,
+              { id: t.id || null, value: val });
+      } catch (e) {}
+    }
+    /* A click on the 3D view: a press and a release within 4 px, G-scope's own
+       test for a click as opposed to an orbit drag. Written on the release,
+       before G-scope's pointerup handler drops a box or picks a line. */
+    var down = null;
+    function canvas() {
+      try { var v = gsMS() && gsMS().getView(); return v && v.renderer ? v.renderer.domElement : null; }
+      catch (e) { return null; }
+    }
+    function onGsDown(ev) {
+      try {
+        down = null;
+        if (ev.button !== 0 || !gscopeOpen() || ev.target !== canvas()) return;
+        down = [ev.clientX, ev.clientY];
+      } catch (e) {}
+    }
+    function onGsUp(ev) {
+      try {
+        var d0 = down;
+        down = null;
+        if (!d0 || !gscopeOpen() || ev.target !== canvas()) return;
+        if (Math.hypot(ev.clientX - d0[0], ev.clientY - d0[1]) > 4) return;
+        var mode = gsMode(), h = gsHit(ev), v = gsMS().getView();
+        var onBox = v && v.dragState ? v.dragState.type : null;
+        var what = !h ? 'nothing open to hit' : !h.hit ? 'nothing hit'
+          : 'hit "' + shorten(h.name, 60) + '" at (' + h.at.join(', ') + ')';
+        gsLog('click3d', '3D view click' + (mode ? ' (' + mode + ' mode)' : '') + ' - ' + what +
+              (onBox ? ', on a capture box handle (' + onBox + ')' : ''),
+              { mode: mode, hit: h && h.hit ? h.name : null, at: h && h.hit ? h.at : null, box: onBox,
+                x: Math.round(ev.clientX), y: Math.round(ev.clientY) });
+      } catch (e) {}
+    }
+    document.addEventListener('click', onGsClick, true);
+    document.addEventListener('change', onGsChange, true);
+    document.addEventListener('pointerdown', onGsDown, true);
+    document.addEventListener('pointerup', onGsUp, true);
+    restores.push(function () {
+      document.removeEventListener('click', onGsClick, true);
+      document.removeEventListener('change', onGsChange, true);
+      document.removeEventListener('pointerdown', onGsDown, true);
+      document.removeEventListener('pointerup', onGsUp, true);
+      down = null;
+    });
   }
 
   /* ---------------- the panel ---------------- */
@@ -1043,6 +1271,8 @@
     'text-align:center;padding:0 3px;display:none}',
     '#btn-watch .nso-watch-dot.is-on{display:block}',
     '.nso-watch-row.k-select{border-left-color:#38bdf8;color:#bae6fd}',
+    '.nso-watch-row.k-gscope{border-left-color:#c084fc;color:#e9d5ff}',
+    '.nso-watch-row .vw{font-style:normal;flex:0 0 auto;font-size:10px;padding:0 5px;border-radius:4px;border:1px solid #6b21a8;color:#d8b4fe}',
     '.nso-watch-row.k-commit{border-left-color:#22c55e;color:#bbf7d0}',
     '.nso-watch-row.k-undo{border-left-color:#14b8a6;color:#99f6e4}',
     '.nso-watch-row.k-preview{border-left-color:#64748b;color:#cbd5e1;font-style:italic}',
@@ -1143,7 +1373,20 @@
     if (ev.kind === 'status') return ev.source === 'build-volume' ? 'build-volume' : (ev.level === 'refusal' ? 'refusal' : 'status');
     if (ev.kind === 'console') return ev.level === 'error' ? 'error' : 'warning';
     if (ev.kind === 'net') return 'error';
-    return ev.kind;          // phantom, cleared, error, select, watch
+    return ev.kind;          // phantom, cleared, error, select, gscope, watch
+  }
+  /* Any event that happened inside G-scope, other than G-scope's own lines
+     (which say so in their text), is tagged with the view it happened in. */
+  function viewTag(e) {
+    return (e.kind !== 'gscope' && e.view && e.view !== 'main') ? viewText(e.view) : null;
+  }
+  function paintView(d, e) {
+    var v = viewTag(e);
+    if (!v) return;
+    var b = document.createElement('em');
+    b.className = 'vw';
+    b.textContent = v;
+    d.insertBefore(b, d.children[1] || null);
   }
   function paintPhase(d, phase) {
     var b = d.querySelector('.ph');
@@ -1165,6 +1408,7 @@
     s.textContent = ev.msg;
     d.appendChild(t);
     d.appendChild(s);
+    paintView(d, ev);
     if (ev.phase && ev.kind === 'status') paintPhase(d, ev.phase);
     ev._row = d;
     if (ev.kind === 'phantom') {
@@ -1188,7 +1432,7 @@
      The whole persisted history, in the app, browsable. Read from `store`,
      which is the same object persist() writes, so an open report follows the
      session live; when the watch is off it is read back from localStorage. */
-  var REPORT_CATS = ['phantom', 'error', 'select', 'preview', 'discard', 'commit', 'undo',
+  var REPORT_CATS = ['phantom', 'error', 'select', 'gscope', 'preview', 'discard', 'commit', 'undo',
                      'build-volume', 'refusal', 'status', 'warning', 'cleared', 'watch'];
   var rf = { run: 'all', cat: 'all', q: '' };
 
@@ -1333,6 +1577,7 @@
       sp.textContent = e.msg;
       d.appendChild(t);
       d.appendChild(sp);
+      paintView(d, e);
       if (e.kind === 'status' && e.phase) paintPhase(d, e.phase);
       var sub = null;
       if (e.kind === 'phantom') sub = 'after ' + e.op;
@@ -1357,7 +1602,8 @@
                (st.dropped ? ', ' + st.dropped + ' older dropped' : ''), ''];
     rows.forEach(function (e) {
       out.push('#' + (runNo[e.run] || '?') + ' ' + e.time + '  ' + category(e) +
-               (e.kind === 'status' && e.phase ? '/' + e.phase : '') + '  ' + e.msg +
+               (e.kind === 'status' && e.phase ? '/' + e.phase : '') + '  ' +
+               (viewTag(e) ? '[' + viewTag(e) + '] ' : '') + e.msg +
                (e.kind === 'phantom' ? '   [after ' + e.op + ']' : '') +
                (e.kind === 'op' && e.sel ? '   [on ' + selText(e.sel) + ']' : ''));
     });
@@ -1488,7 +1734,7 @@
         return { seq: e.seq, time: e.time, iso: e.at.toISOString(), kind: e.kind,
                  level: e.level, phase: e.phase || null, source: e.source || null,
                  category: category(e), msg: e.msg, op: e.op, sel: e.sel || null,
-                 detail: e.detail, trail: e.trail };
+                 detail: e.detail, trail: e.trail, view: e.view || null };
       });
     },
 
@@ -1516,7 +1762,8 @@
                  (dropped ? ('  (' + dropped + ' older event(s) dropped)') : ''), ''];
       events.forEach(function (e) {
         out.push(e.time + '  ' + e.kind + (e.level && e.level !== 'info' ? '/' + e.level : '') +
-                 '  ' + e.msg + (e.kind === 'phantom' ? '   [after ' + e.op + ']' : ''));
+                 '  ' + (viewTag(e) ? '[' + viewTag(e) + '] ' : '') + e.msg +
+                 (e.kind === 'phantom' ? '   [after ' + e.op + ']' : ''));
       });
       var open = api.open();
       out.push('', '# ' + open.length + ' mismatch(es) still open at export');

@@ -439,6 +439,10 @@ piece is the paint-aware one and inherits the rule then.
 4. The history is kept in `localStorage` (`nso.watch.store`), one run per
    start, across reloads, and browsed in an in-app **Report** view - no
    download, no backend.
+5. It follows into G-scope, and G-scope's own actions - in and out, legend
+   rows, Detected rows, Normal / Slice switches, 3D-view clicks (and what was
+   hit), every other control - are `gscope` lines of their own, in order;
+   every event carries the view it happened in. Record only, no checks.
 
 Two things about it that must not be "tidied up":
 
