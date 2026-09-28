@@ -1038,6 +1038,7 @@ var NSO_MICROSCOPE = (function () {
     var tris = currentSelection.reduce(function (a, o) { return a + o.triangles; }, 0);
     info((selectionSource === 'visible' ? '<b>everything shown</b>, '
           : selectionSource === 'flange' ? '<b>Flange</b> (detected), '
+          : FEATURE_NAMES[selectionSource] ? '<b>' + FEATURE_NAMES[selectionSource] + '</b> (detected), '
           : selectionSource === 'pick' ? '<b>picked</b>, '
           : '<b>' + balls.length + ' box(es)</b>, ') + '<b>' + currentSelection.length +
          ' object(s)</b>, ' + tris + ' triangle(s)<br>' +
@@ -1336,7 +1337,7 @@ var NSO_MICROSCOPE = (function () {
       geo.rotateX(-Math.PI / 2);
       geo.computeVertexNormals();
       var mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-        color: isDetected(o) ? FLANGE_COLOR : colorForGroup(o.name, Math.max(0, okeys.indexOf(o.name))),
+        color: isDetected(o) ? detectedColor(o) : colorForGroup(o.name, Math.max(0, okeys.indexOf(o.name))),
         metalness: 0.05, roughness: 0.4,
         clippingPlanes: clipPlanes()
       }));
@@ -1755,7 +1756,7 @@ var NSO_MICROSCOPE = (function () {
     item.dataset.detected = 'flange';
     item.dataset.status = st.status;
     var on = st.status === 'found' && currentSelection.length > 0 &&
-      currentSelection.every(isDetected);
+      currentSelection.every(function (o) { return o.detected === 'flange'; });
     if (on) item.classList.add('active');
     var swatch = document.createElement('div');
     swatch.className = 'ms-swatch';
@@ -1775,6 +1776,7 @@ var NSO_MICROSCOPE = (function () {
     item.appendChild(swatch); item.appendChild(label);
     item.addEventListener('click', function () { isolateFlange(); });
     box.appendChild(item);
+    FEATURE_RULES.forEach(function (rule) { box.appendChild(featureRow(rule)); });
   }
 
   /**
@@ -1844,6 +1846,150 @@ var NSO_MICROSCOPE = (function () {
     return true;
   }
 
+  // ===========================================================================
+  // Detected features: Handle, Bracket, Lid, Hinge
+  // ===========================================================================
+  //
+  // The same mechanism as the Flange row, one row per rule, from
+  // nso_face_features.js (docs/GSCOPE-FEATURES.md has the four rules and what
+  // they were validated on). Each rule hands back its feature as a closed
+  // solid - the surface standing on the face plus a cap on its own root
+  // loops, nothing cut - so it is an ordinary mesh object through
+  // setSelection(): Isolate, the highlight, Crop and both exports take it
+  // exactly as they take the flange. One analysis of each piece serves all
+  // four rows.
+
+  var FEATURE_RULES = ['handle', 'bracket', 'lid', 'hinge'];
+  var FEATURE_NAMES = { handle: 'Handle', bracket: 'Bracket', lid: 'Lid', hinge: 'Hinge' };
+  var FEATURE_COLORS = { flange: FLANGE_COLOR, handle: 0x3fb6ff, bracket: 0xb57bff, lid: 0x3fd98a, hinge: 0xffd23f };
+
+  function detectedColor(o) { return FEATURE_COLORS[o && o.detected] || FLANGE_COLOR; }
+
+  function featureState(rule) {
+    if (!doc) return null;
+    if (!doc.features) {
+      doc.features = {};
+      FEATURE_RULES.forEach(function (r) {
+        doc.features[r] = doc.kind !== 'mesh'
+          ? { status: 'unavailable', objects: [], notes: [],
+              reason: 'a slice has beads, not a closed surface to measure. Open the part itself ' +
+                      '(its STL or 3MF, or the plate) to find its ' + r + '.' }
+          : { status: 'pending', objects: [], notes: [], reason: '' };
+      });
+    }
+    return doc.features[rule];
+  }
+
+  /** Run all four rules on every piece of the document. Idempotent per document. */
+  function detectFeatures() {
+    if (!doc || featureState('handle').status !== 'pending') return doc ? doc.features : null;
+    var FF = window.NSO_FaceFeatures;
+    var sts = FEATURE_RULES.map(featureState);
+    if (!FF) {
+      sts.forEach(function (st) {
+        st.status = 'unavailable';
+        st.reason = 'the feature detector (nso_face_features.js) is not loaded.';
+      });
+      return doc.features;
+    }
+    var t0 = Date.now();
+    var single = doc.objects.length === 1 && doc.source !== 'plate';
+    doc.objects.forEach(function (host) {
+      if (host.triangles > FLANGE_MAX_TRIS) {
+        sts.forEach(function (st) { st.notes.push(host.name + ': ' + host.triangles + ' triangles, too many to scan here'); });
+        return;
+      }
+      var r;
+      try { r = FF.detect(host.positions); }
+      catch (err) {
+        console.error('[g-scope] feature detection', err);
+        sts.forEach(function (st) { st.notes.push(host.name + ': detection failed'); });
+        return;
+      }
+      FEATURE_RULES.forEach(function (rule, k) {
+        var st = sts[k], rr = r[rule];
+        if (!rr.found.length) { st.notes.push(host.name + ': ' + rr.reason.replace(/^no \w+: /, '')); return; }
+        rr.found.forEach(function (f, i) {
+          st.objects.push(prepObject({
+            name: (single ? baseName(doc.name) : host.name) + ' - ' + FEATURE_NAMES[rule] +
+              (rr.found.length > 1 ? ' ' + (i + 1) : ''),
+            positions: f.positions,
+            detected: rule,
+            host: host.name,
+            feature: { rule: rule, summary: FF.summary(rule, f), measured: f.measured, volume: f.volume,
+                       rootArea: f.rootArea, face: f.face }
+          }));
+        });
+      });
+    });
+    var ms = Date.now() - t0;
+    sts.forEach(function (st) {
+      st.status = st.objects.length ? 'found' : 'none';
+      st.ms = ms;
+      if (!st.objects.length) st.reason = st.notes.length === 1 ? st.notes[0].replace(/^[^:]*: /, '') : st.notes.join('; ');
+    });
+    return doc.features;
+  }
+
+  function featureRowText(rule, st) {
+    var N = FEATURE_NAMES[rule];
+    if (st.status === 'pending') return N + ' - looking...';
+    if (st.status === 'unavailable') return N + ' - ' + (doc && doc.kind !== 'mesh' ? 'not on a slice' : 'not available');
+    if (st.status === 'none') return N + ' - none detected';
+    var o = st.objects;
+    return N + ' (' + (o.length === 1 ? o[0].feature.summary + ', ' + o[0].triangles + ' tri' : o.length + ' found') + ')';
+  }
+
+  /** One rule's row in the Parts list, under the Flange row. */
+  function featureRow(rule) {
+    var st = featureState(rule);
+    var item = document.createElement('div');
+    item.className = 'ms-legend-item ms-detected-item' + (st.status === 'found' ? '' : ' dim');
+    item.dataset.detected = rule;
+    item.dataset.status = st.status;
+    if (st.status === 'found' && currentSelection.length > 0 &&
+        currentSelection.every(function (o) { return o.detected === rule; })) item.classList.add('active');
+    var swatch = document.createElement('div');
+    swatch.className = 'ms-swatch';
+    swatch.style.background = '#' + ('000000' + FEATURE_COLORS[rule].toString(16)).slice(-6);
+    var label = document.createElement('span');
+    label.className = 'ms-legend-label';
+    label.textContent = featureRowText(rule, st);
+    item.title = st.status === 'found'
+      ? 'Detected from the geometry, not named in the file. Click to isolate ' +
+        (st.objects.length === 1 ? 'it' : 'them') + ' - then Crop or Export as usual.\n' +
+        st.objects.map(function (o) {
+          return o.name + ': ' + o.feature.summary + ', ' + o.feature.volume.toFixed(1) + ' mm\u00b3, root ' +
+            o.feature.rootArea.toFixed(1) + ' mm\u00b2';
+        }).join('\n')
+      : st.status === 'pending' ? 'Looking for a ' + rule + ' in the geometry...'
+      : 'No ' + rule + ': ' + st.reason;
+    item.appendChild(swatch); item.appendChild(label);
+    item.addEventListener('click', function () { isolateFeature(rule); });
+    return item;
+  }
+
+  /** A row's click: that rule's feature(s) as the selection, isolated. With none, say why and change nothing. */
+  function isolateFeature(rule) {
+    if (FEATURE_RULES.indexOf(rule) < 0) return false;
+    var st = featureState(rule);
+    if (!st) return false;
+    detectFeatures();
+    buildDetectedRow();
+    var N = FEATURE_NAMES[rule];
+    if (st.status !== 'found') {
+      say(N + ': ' + (st.status === 'unavailable' ? 'not available - ' : 'none detected - ') + st.reason, false);
+      info((st.status === 'unavailable' ? '<b>' + N + ': not available here.</b> ' : '<b>No ' + rule + ' detected.</b> ') +
+           st.reason.replace(/</g, '&lt;'));
+      return false;
+    }
+    removeAllBalls();
+    setSelection(st.objects.slice(), rule);
+    isolate();
+    buildDetectedRow();
+    return true;
+  }
+
   var detectTimer = null;
   function detectSoon() {
     if (detectTimer) clearTimeout(detectTimer);
@@ -1852,6 +1998,7 @@ var NSO_MICROSCOPE = (function () {
       detectTimer = null;
       if (doc !== mine) return;
       detectFlanges();
+      detectFeatures();
       buildDetectedRow();
     }, 30);
   }
@@ -2034,7 +2181,7 @@ var NSO_MICROSCOPE = (function () {
         geo.rotateX(-Math.PI / 2);
         geo.computeVertexNormals();
         var hm = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-          color: FLANGE_COLOR, metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes(),
+          color: detectedColor(o), metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes(),
           polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1
         }));
         hm.userData.feature = o.name;
@@ -2472,8 +2619,10 @@ var NSO_MICROSCOPE = (function () {
     if (doc.kind !== 'toolpath') {
       // A detected feature is already named for its part ("<part> - Flange").
       if (currentSelection.every(isDetected)) {
+        var kind = currentSelection[0].detected;
         return currentSelection.length === 1 ? currentSelection[0].name
-          : baseName(doc.name) + ' - ' + currentSelection.length + ' flanges';
+          : baseName(doc.name) + ' - ' + currentSelection.length + ' ' +
+            (currentSelection.every(function (o) { return o.detected === kind; }) ? kind + 's' : 'features');
       }
       var what = currentSelection.length === 1
         ? currentSelection[0].name
@@ -2960,7 +3109,7 @@ var NSO_MICROSCOPE = (function () {
     syncZRangeUI();
     syncCropRow();
     syncLineRead();
-    if (flangeState() && flangeState().status === 'pending') detectSoon();
+    if (flangeState() && (flangeState().status === 'pending' || featureState('handle').status === 'pending')) detectSoon();
     docListeners.forEach(function (fn) {
       try { fn(doc); } catch (err) { console.error('[g-scope] document listener', err); }
     });
@@ -3292,7 +3441,26 @@ var NSO_MICROSCOPE = (function () {
                }) };
     },
     detectFlanges: function () { var st = detectFlanges(); buildDetectedRow(); return st ? st.status : null; },
-    isolateFlange: isolateFlange
+    isolateFlange: isolateFlange,
+    // --- Handle, Bracket, Lid, Hinge (docs/GSCOPE-FEATURES.md) ---
+    /** One rule's row state: status 'pending' | 'found' | 'none' | 'unavailable'. */
+    feature: function (rule) {
+      if (FEATURE_RULES.indexOf(rule) < 0) return null;
+      var st = featureState(rule);
+      if (!st) return null;
+      return { status: st.status, reason: st.reason, notes: st.notes.slice(), ms: st.ms,
+               objects: st.objects.map(function (o) {
+                 return { name: o.name, host: o.host, triangles: o.triangles, bounds: o.bounds, feature: o.feature };
+               }) };
+    },
+    featureRules: function () { return FEATURE_RULES.slice(); },
+    detectFeatures: function () {
+      detectFeatures(); buildDetectedRow();
+      var out = {};
+      FEATURE_RULES.forEach(function (r) { var st = featureState(r); out[r] = st ? st.status : null; });
+      return out;
+    },
+    isolateFeature: isolateFeature
   };
 })();
 

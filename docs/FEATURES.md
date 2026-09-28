@@ -5,9 +5,9 @@ hull: a flange, a handle, a bracket, a lid and a hinge. Each is built from an
 explicit geometric definition. For each one it states in advance where the
 feature is, where it meets the hull (its **root**), what it adds to the
 topology, and what the canonical checker (`tools/mesh_validate.py`) will read
-off the whole piece. That is ground truth for testing feature detectors (the
-flange detector now, the others as they come) and for testing a detach
-operation.
+off the whole piece. That is ground truth for testing feature detectors (`nso_flange.js` for
+the flange, `nso_face_features.js` for the handle, bracket, lid and hinge)
+and for testing a detach operation.
 
 ```sh
 npm run features:test       # tools/nso_features_test.js - 113 checks, ~9 s
@@ -236,9 +236,21 @@ in `library/` and `fixtures/` gives exactly the table in
 `docs/GSCOPE-FLANGE.md`: the clamp-bar family and `lid_strap`. No STL in the
 repo fails on "sheet" alone.
 
-The other features need detectors that do not exist yet. Their ground truth
-is in `features.json` under each feature's `truth`, and `detectors` in each
-entry is where their expected counts go when they arrive.
+## Task 5: the handle, bracket, lid and hinge detectors
+
+The other four features now have detectors too: `nso_face_features.js`, one
+named rule each, with every clause a worded refusal. They are validated
+against this ground truth to the same standard as the flange detector
+(`docs/GSCOPE-FEATURES.md`, `npm run face-features:test`). On the whole
+piece, each rule finds exactly its own feature, in its cell, and reads back
+every number the generator declared (the handle's clearance, the bracket's
+gusset legs, the lid's seat and void, the hinge's pin and gaps). Each also
+reads back its root area, its volume and its bounds. What each rule lifts
+out is the same solid the reference `detach()` above cuts out, in volume,
+area, χ and triangle count. Every candidate in another feature's cell fails,
+and so does every candidate in the other 103 STLs in the repo. `detectors`
+in each `features.json` entry now carries all five detectors' expected
+counts.
 
 ## Task 4: fixtures and the Library
 

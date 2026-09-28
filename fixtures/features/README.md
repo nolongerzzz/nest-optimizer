@@ -23,18 +23,19 @@ node tools/nso_features_test.js                    # hold every file to features
   for a handle; the axis and swing for a hinge; and so on).
 
 It also records `expected`, the exact numbers `tools/mesh_validate.py --json`
-must report, and `detectors`, what each detector must find. Only the flange
-detector exists so far.
+must report, and `detectors`, what each detector must find: `flange`
+(`nso_flange.js`) and `handle`, `bracket`, `lid` and `hinge`
+(`nso_face_features.js`, `docs/GSCOPE-FEATURES.md`).
 
-| file | tris | on the hull | χ | shells | flanges | Library |
+| file | tris | on the hull | χ | shells | detected | Library |
 |---|---|---|---|---|---|---|
-| `feature-hull_all.stl` | 2036 | all five: a flange on −Y, a handle on −X, a bracket on +X, a lid on top and a hinge on +Y | 0 | 3 | 1 | yes |
-| `feature-hull_flange.stl` | 28 | a 2.5 mm plate, 15 mm out along a straight 60 mm root | 2 | 1 | 1 | yes |
-| `feature-hull_handle.stl` | 1216 | a round-rod arch (8 mm rod), 21 mm clear, with its feet 50 mm apart: genus 1 | 0 | 1 | 0 | yes |
-| `feature-hull_bracket.stl` | 64 | a 3 mm gusseted angle with a 20 mm arm, fused flat by its 40 × 30 plate | 2 | 1 | 0 | yes |
-| `feature-hull_lid.stl` | 56 | a lid seated on a 60 × 40 × 15 pocket, its plug 0.5 mm clear all round: one enclosed void | 4 | 2 | 0 | yes |
-| `feature-hull_hinge.stl` | 720 | a print-in-place knuckle hinge, 0.5 mm radial and axial clearance: two bodies | 0 | 2 | 0 | yes |
-| `feature-hull_angle-unbraced.stl` | 44 | the bracket without its gussets. By the flange rule its arm **is** a flange | 2 | 1 | 1 | |
+| `feature-hull_all.stl` | 2036 | all five: a flange on −Y, a handle on −X, a bracket on +X, a lid on top and a hinge on +Y | 0 | 3 | one of each | yes |
+| `feature-hull_flange.stl` | 28 | a 2.5 mm plate, 15 mm out along a straight 60 mm root | 2 | 1 | flange | yes |
+| `feature-hull_handle.stl` | 1216 | a round-rod arch (8 mm rod), 21 mm clear, with its feet 50 mm apart: genus 1 | 0 | 1 | handle | yes |
+| `feature-hull_bracket.stl` | 64 | a 3 mm gusseted angle with a 20 mm arm, fused flat by its 40 × 30 plate | 2 | 1 | bracket | yes |
+| `feature-hull_lid.stl` | 56 | a lid seated on a 60 × 40 × 15 pocket, its plug 0.5 mm clear all round: one enclosed void | 4 | 2 | lid | yes |
+| `feature-hull_hinge.stl` | 720 | a print-in-place knuckle hinge, 0.5 mm radial and axial clearance: two bodies | 0 | 2 | hinge | yes |
+| `feature-hull_angle-unbraced.stl` | 44 | the bracket without its gussets. By the flange rule its arm **is** a flange | 2 | 1 | flange (not bracket) | |
 
 Every file passes the checker (0 open, 0 non-manifold, 0 piercing). "Shells"
 counts closed surfaces. The lid's second shell is its void. The hinge's second

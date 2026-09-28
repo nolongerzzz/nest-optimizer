@@ -215,6 +215,10 @@ is an ordinary mesh object (positions, centroids, bounds), passed through
 In the page: `NSO_MICROSCOPE.flange()` (status, reason, objects),
 `.detectFlanges()` and `.isolateFlange()`.
 
+Under it are four more rows that work the same way: **Handle**, **Bracket**,
+**Lid** and **Hinge**, from `nso_face_features.js`
+(`docs/GSCOPE-FEATURES.md`).
+
 ### On a slice
 
 The tab says it cannot look, and it does not guess. The rule needs a closed
