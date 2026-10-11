@@ -259,7 +259,8 @@
     { file: 'feature-hull_handle.stl',            category: 'Test Fixtures', source: 'nest-library' },
     { file: 'feature-hull_bracket.stl',           category: 'Test Fixtures', source: 'nest-library' },
     { file: 'feature-hull_lid.stl',               category: 'Test Fixtures', source: 'nest-library' },
-    { file: 'feature-hull_hinge.stl',             category: 'Test Fixtures', source: 'nest-library' }
+    { file: 'feature-hull_hinge.stl',             category: 'Test Fixtures', source: 'nest-library' },
+    { file: 'MINI_TPU_TEST.stl',                  category: 'Test Fixtures', source: 'nest-library' }
   ];
 
   /* The one way a file name becomes something fetchable. Absolute, always. */
