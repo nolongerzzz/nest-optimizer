@@ -546,6 +546,9 @@ select:focus, input:focus {
    open from page load. Say it here, where the display rule is, and make it
    unconditional so a later rule cannot quietly reopen it. */
 .library-list[hidden] { display: none !important; }
+/* Same for the Scale card's Length row: .edit-row is a flex row, and the row
+   is hidden for a piece with no straight axis. */
+#scale-length-row[hidden] { display: none !important; }
 
 .library-list {
   position: absolute;

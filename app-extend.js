@@ -47,9 +47,13 @@
 //      re-tiling tool would promise. "Stretch the border, re-tile the
 //      interior" is a separate, later ticket and must not be bolted on here.
 //
-//   4. SHORTENING. Every gate below is written for delta > 0. Removing length
-//      can drive the cut past a feature at the far end and eat it, and
-//      nothing here would notice. Section 5 refuses delta <= 0 by name.
+//   4. SHORTENING PAST ONE BAND. Shorten is the same stretch run backwards -
+//      a negative delta moves the far side toward the near side - and it is
+//      only safe while it stays inside ONE clean constant-section band:
+//      every vertex is outside the gap, so the far layer can slide toward the
+//      near one without reaching it, and nothing but the band's own straddling
+//      walls changes length. Past the band the far layer would cross a feature
+//      and eat it, so section 5 refuses by name and says the most it can take.
 //
 //   5. OFF-CARDINAL AXES. See section 3: the bit-for-bit promise is only
 //      deliverable when the axis is X, Y or Z, so a piece whose dominant axis
@@ -100,6 +104,15 @@ function NSO_extendUlp32(m) {
   var d = f[0] - before;
   return (d > 0 && isFinite(d)) ? d : 1.4012984643248171e-45;
 }
+
+// Shorten's margin: how much of a clean band it must leave standing. The
+// remaining slab has to stay a real slab - wide enough that the band scan
+// would still call it a band (its ULP and fraction floors), and wide enough
+// that its straddling walls do not become slivers whose normal the next
+// Extend could not trust (NSO_extendTriTol). 0.1 mm is the absolute part: a
+// fine layer height, and at 20 mm a wall triangle 0.1 mm tall still reads
+// with a derived tolerance ~13x inside maxPerpTol.
+var NSO_EXTEND_SHORTEN_MARGIN_MM = 0.1;
 
 // Round to the nearest float32, the way storing into a Float32Array does.
 var NSO_extendFround = (typeof Math.fround === 'function')
@@ -497,8 +510,24 @@ function NSO_extendLengthToReach(rawTris, axisIdx, targetCoord) {
   return { min: mn, max: mx, current: mx - mn, length: targetCoord - mn, gap: targetCoord - mx };
 }
 
+// The margin Shorten leaves inside a band, in mm: the largest of
+// NSO_EXTEND_SHORTEN_MARGIN_MM and the two floors the band scan itself puts on
+// a gap (opts.minBandUlps float32 ULPs at the band's magnitude, default 64, and
+// opts.minBandFrac of the length, default 1e-3), so the band that is left is
+// still one the scan would accept.
+function NSO_extendShortenMargin(band, lengthMm, opts) {
+  opts = opts || {};
+  var ulps = (opts.minBandUlps == null) ? 64 : +opts.minBandUlps;
+  var frac = (opts.minBandFrac == null) ? 1e-3 : +opts.minBandFrac;
+  var mag = Math.max(Math.abs(band.lo), Math.abs(band.hi));
+  return Math.max(NSO_EXTEND_SHORTEN_MARGIN_MM, ulps * NSO_extendUlp32(mag), frac * lengthMm);
+}
+
 // opts.length    target extent along the detected axis, in mm
-// opts.delta     add this much instead (mutually exclusive with length)
+// opts.delta     add this much instead (mutually exclusive with length).
+//                Either may ask for LESS than the piece has: that is Shorten,
+//                accepted only while |delta| is under the chosen band's width
+//                less NSO_extendShortenMargin - see section 4 of the header.
 // opts.axis      force the axis, see NSO_extendDetectAxis
 // opts.cut       force the cut coordinate, skipping the band scan's choice.
 //                Still checked against the band scan - a forced cut that is
@@ -535,12 +564,15 @@ function NSO_extendRaw(rawTris, opts) {
   res.lengthTarget = target;
 
   var want = target - len0;
-  if (!(want > 0)) {
-    res.reason = 'Extend lengthens only - asked for ' + target.toFixed(4) + ' mm along ' +
-      det.axis + ' but the piece is already ' + len0.toFixed(4) +
-      ' mm; shortening would have to remove material and is out of scope';
+  if (!(want !== 0)) {
+    res.reason = 'nothing to change - the piece is already ' + len0.toFixed(4) + ' mm along ' + det.axis;
     return res;
   }
+  if (!(target > 0)) {
+    res.reason = 'target length ' + target.toFixed(4) + ' mm is not a length';
+    return res;
+  }
+  res.mode = want > 0 ? 'extend' : 'shorten';
 
   var scan = NSO_extendBands(rawTris, k, opts);
   res.bands = scan;
@@ -554,6 +586,32 @@ function NSO_extendRaw(rawTris, opts) {
   }
   res.cut = band.cut;
   res.band = band;
+
+  // --- Shorten: only inside the one band, less the margin ---
+  // Every vertex is outside the gap (lo, hi), so moving the far side down by
+  // |want| slides layer hi toward layer lo. While hi - |want| stays above lo
+  // by the margin, the order of the layers is unchanged and the only
+  // triangles that change are the band's own straddling walls, each shorter
+  // inside its own plane - the extend argument, run backwards. Past that, the
+  // far layer would reach the near one and whatever feature sits beyond it.
+  if (want < 0) {
+    var marginMm = NSO_extendShortenMargin(band, len0, opts);
+    // Floored to the 0.1 mm the refusal prints, so the number it names is
+    // one a caller can ask for and get. The 1e-6 mm is float32 storage of the
+    // band edges (pin.stl's 19.8 mm shaft is 19.7999996 mm wide) and is not
+    // allowed to turn a 19.7 into a 19.6: the margin is a policy figure, and
+    // the hard floors inside it are thousands of times larger than that.
+    var most = Math.max(0, Math.floor((band.width - marginMm + 1e-6) * 10) / 10);
+    res.shortenMaxMm = most;
+    res.shortenMarginMm = marginMm;
+    if (!(-want <= most)) {
+      res.reason = 'Shorten can remove up to ' + most.toFixed(1) + ' mm here - asked for ' +
+        (-want).toFixed(1) + ' mm; the piece has no longer straight run (the widest constant-section ' +
+        'band along ' + det.axis + ' is ' + band.width.toFixed(3) + ' mm, less a ' +
+        marginMm.toFixed(3) + ' mm margin)';
+      return res;
+    }
+  }
 
   // --- the float32 probe (section 1a). Predict, apply, MEASURE, correct. ---
   // fround(oldMax + delta) is a step function of delta, so the first guess
@@ -656,10 +714,12 @@ function NSO_extendRaw(rawTris, opts) {
       else if (res.after.openPos > res.before.openPos) t2bad = 'open edges rose ' + res.before.openPos + '->' + res.after.openPos;
       else if (res.after.nmPos > res.before.nmPos) t2bad = 'non-manifold edges rose ' + res.before.nmPos + '->' + res.after.nmPos;
       else if (res.after.degenerate > res.before.degenerate) t2bad = 'degenerate triangles rose ' + res.before.degenerate + '->' + res.after.degenerate;
-      else if (!(Math.abs(res.after.volume) > Math.abs(res.before.volume))) t2bad = 'volume did not grow (' + res.before.volume.toFixed(4) + ' -> ' + res.after.volume.toFixed(4) + ') - a longer piece has more material in it';
+      else if (want > 0 && !(Math.abs(res.after.volume) > Math.abs(res.before.volume))) t2bad = 'volume did not grow (' + res.before.volume.toFixed(4) + ' -> ' + res.after.volume.toFixed(4) + ') - a longer piece has more material in it';
+      else if (want < 0 && !(Math.abs(res.after.volume) < Math.abs(res.before.volume))) t2bad = 'volume did not shrink (' + res.before.volume.toFixed(4) + ' -> ' + res.after.volume.toFixed(4) + ') - a shorter piece has less material in it';
       if (t2bad) { res.reason = t2bad; res.tris = rawTris; return res; }
     }
-    // The volume a stretch adds is the cut's cross-section times the shift.
+    // The volume a stretch adds (or a shorten removes) is the cut's
+    // cross-section times the shift.
     // Reported, not gated: it is the number that says what was actually swept.
     res.impliedCrossSection = (Math.abs(res.after.volume) - Math.abs(res.before.volume)) / delta;
   }
@@ -711,7 +771,7 @@ function NSO_extendSelectedModel(opts) {
     if (typeof setStatus === 'function') setStatus('Extend refused - piece unchanged (' + r.reason + ')', true);
     return r;
   }
-  var txt = 'Extend done - ' + r.axis.toUpperCase() + ' ' + r.lengthBefore.toFixed(3) +
+  var txt = (r.mode === 'shorten' ? 'Shorten' : 'Extend') + ' done - ' + r.axis.toUpperCase() + ' ' + r.lengthBefore.toFixed(3) +
     ' → ' + r.lengthAfter.toFixed(3) + ' mm, cut at ' + r.cut.toFixed(3) +
     ', cross-section unchanged (0 drifted coordinates)';
   NSO_extendCommit(m, r.tris, txt);
@@ -766,7 +826,7 @@ if (typeof document !== 'undefined') {
             if (inp) inp.value = sp.current.toFixed(2);
             if (typeof setStatus === 'function') {
               setStatus('Extend: this piece is ' + sp.current.toFixed(2) + ' mm along ' +
-                        det.axis.toUpperCase() + '. Set a longer target and press Extend.');
+                        det.axis.toUpperCase() + '. Set a target length and press Extend - shorter shortens.');
             }
             return;
           }
