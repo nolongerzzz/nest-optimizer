@@ -673,6 +673,9 @@ async function partF(page) {
   const hit = () => page.evaluate(() => {
     if (!NSOWatch.isOn()) NSOWatch.start();
     document.getElementById('menu-scale').open = true;
+    // The card reads the piece when it opens (a toggle event, async); render
+    // it now so the rows sit where a user sees them, Length row included.
+    if (typeof nsoScaleRefresh === 'function') nsoScaleRefresh();
     const at = id => {
       const r = document.getElementById(id).getBoundingClientRect();
       const e = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
@@ -682,7 +685,10 @@ async function partF(page) {
       const r = document.getElementById(id).getBoundingClientRect();
       return r.width > 0 && r.height > 0;
     });
-    return { scale: at('btn-scale-factor'), undo: at('btn-undo'), pills,
+    // The card's lowest-but-one control, Longest's Set: the one the expanded
+    // log sits over since the card grew a readout line and a Length row (it
+    // was "Scale by" when the card was two rows).
+    return { scale: at('btn-scale-dim'), undo: at('btn-undo'), pills,
              collapsed: NSOWatch.isCollapsed(),
              expanded: document.getElementById('nso-watch-collapse').getAttribute('aria-expanded') };
   });
@@ -698,7 +704,7 @@ async function partF(page) {
   await page.evaluate(() => document.getElementById('nso-watch-collapse').click());
   const shut = await hit();
   ok(shut.collapsed && shut.expanded === 'false', 'the collapse button collapses it');
-  ok(shut.scale && shut.undo, 'collapsed, "Scale by" and Undo take the click again', JSON.stringify(shut));
+  ok(shut.scale && shut.undo, 'collapsed, Longest\'s Set and Undo take the click again', JSON.stringify(shut));
   ok(shut.pills, 'the phantom and error pills are still on screen');
   const logs = await page.evaluate(() => {
     const n = NSOWatch.events().length;
