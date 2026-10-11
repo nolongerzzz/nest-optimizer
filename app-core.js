@@ -3388,13 +3388,17 @@ function buildCombinedGeometry() {
   const positions = [];
   state.placed.forEach(p => {
     const geo = p.geometry.clone();
+    /* Z, then Y, then X: the matrix Rx * Ry * Rz, which is what
+       applyMeshRotation's XYZ Euler puts on screen. The other order agrees on
+       one axis and not on two or three - a leaned-and-turned piece exported
+       turned about a different axis from the one it was drawn on. */
     const tip = (p.tipX || 0) * (Math.PI / 2) + ((p.tiltX || 0) * Math.PI / 180);
     const flip = p.flipX ? Math.PI : 0;
-    if (tip || flip) geo.rotateX(tip + flip);
     const rotY = p.rotY != null ? p.rotY : (p.rotated ? Math.PI / 2 : 0);
-    if (rotY) geo.rotateY(rotY);
     const roll = (p.tipZ || 0) * (Math.PI / 2) + ((p.tiltZ || 0) * Math.PI / 180);
     if (roll) geo.rotateZ(roll);
+    if (rotY) geo.rotateY(rotY);
+    if (tip || flip) geo.rotateX(tip + flip);
     // liftY rides along: a piece Seated with a gap, or lifted, exports where
     // the scene shows it, not dropped back onto the plate.
     geo.translate(p.x, p.height / 2 + (p.liftY || 0), p.z);
@@ -3629,13 +3633,17 @@ function buildPlacedObjects3MF() {
 
   return state.placed.map((p, i) => {
     const geo = p.geometry.clone();
+    /* Z, then Y, then X: the matrix Rx * Ry * Rz, which is what
+       applyMeshRotation's XYZ Euler puts on screen. The other order agrees on
+       one axis and not on two or three - a leaned-and-turned piece exported
+       turned about a different axis from the one it was drawn on. */
     const tip = (p.tipX || 0) * (Math.PI / 2) + ((p.tiltX || 0) * Math.PI / 180);
     const flip = p.flipX ? Math.PI : 0;
-    if (tip || flip) geo.rotateX(tip + flip);
     const rotY = p.rotY != null ? p.rotY : (p.rotated ? Math.PI / 2 : 0);
-    if (rotY) geo.rotateY(rotY);
     const roll = (p.tipZ || 0) * (Math.PI / 2) + ((p.tiltZ || 0) * Math.PI / 180);
     if (roll) geo.rotateZ(roll);
+    if (rotY) geo.rotateY(rotY);
+    if (tip || flip) geo.rotateX(tip + flip);
     // liftY rides along: a piece Seated with a gap, or lifted, exports where
     // the scene shows it, not dropped back onto the plate.
     geo.translate(p.x, p.height / 2 + (p.liftY || 0), p.z);
