@@ -1257,6 +1257,16 @@ var NSO_MICROSCOPE = (function () {
       if (v.dragState) { v.dragState = null; v.controls.enabled = true; }
     });
 
+    // Double-click: the plate's leave-the-tool gesture, one level at a time.
+    // A pick mode armed (region, line) drops to orbit; in orbit, G-scope
+    // closes by the same close() its Close button runs. The canvas only, so
+    // a double-click on G-scope's own buttons and fields is still clicks.
+    el.addEventListener('dblclick', function (e) {
+      e.preventDefault();
+      if (mode === 'select' || mode === 'line') setMode('orbit');
+      else close();
+    });
+
     el.addEventListener('pointerup', function (e) {
       if (!doc || v.dragState || !v.mouseDownPos) return;
       if (Math.hypot(e.clientX - v.mouseDownPos[0], e.clientY - v.mouseDownPos[1]) > 4) return;
