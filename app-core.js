@@ -2605,9 +2605,10 @@ function onCanvasContextMenu(event) {
 }
 
 function onCanvasPointerDown(event) {
-  /* The rotation handle is hit-tested first and swallows the event. That is
-     the point of the separate grab target: a click on the PIECE still means
-     select-and-move, exactly as before, and only the ball rotates.
+  /* The rotation handles are hit-tested first and swallow the event. That is
+     the point of a separate grab target: a click on the PIECE still means
+     select-and-move, exactly as before, and only a ring's arrowheads rotate
+     (app-rotate-handles.js; the ring itself is the track and is never hit).
 
      ONLY WHILE ROTATE OWNS THE INPUT. Being hit-tested first is a strong
      claim on the pointer, and it used to be made on nothing but the group

@@ -2118,12 +2118,27 @@ select:focus, input:focus {
   outline-offset: 1px;
 }
 .vp-flag input:disabled + .vp-flag-face { opacity: 0.45; }
-/* The two rotation locks, in the Rotate dropdown under the 90° buttons.
+/* The three ring choices, in the Rotate dropdown under the 90° buttons.
    Same .vp-flag toggle the Repair and Non-solid flags use - a flag is a flag
-   wherever it sits - in the axis colours the handles are drawn in, so the
-   checkbox and the ball it governs are the same object by eye. */
-.vp-flag-rotlock { --flag-accent: #f472b6; --flag-line: rgba(244,114,182,0.5); --flag-fill: rgba(244,114,182,0.16); }
-.vp-flag-rotlock + .vp-flag-rotlock { --flag-accent: #38bdf8; --flag-line: rgba(56,189,248,0.5); --flag-fill: rgba(56,189,248,0.16); }
+   wherever it sits - each in the colour its ring is drawn in, so the box and
+   the ring it governs are the same object by eye. */
+.vp-flag-rotring-turn { --flag-accent: #38bdf8; --flag-line: rgba(56,189,248,0.5); --flag-fill: rgba(56,189,248,0.16); }
+.vp-flag-rotring-fb { --flag-accent: #f472b6; --flag-line: rgba(244,114,182,0.5); --flag-fill: rgba(244,114,182,0.16); }
+.vp-flag-rotring-ss { --flag-accent: #fbbf24; --flag-line: rgba(251,191,36,0.5); --flag-fill: rgba(251,191,36,0.16); }
+/* The live degrees while an arrowhead is held, beside the pointer. */
+.nso-rot-readout {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid var(--rot-accent, #38bdf8);
+  color: #e8eef6;
+  font: 600 12px/1.2 system-ui, sans-serif;
+  white-space: nowrap;
+}
+.nso-rot-readout[hidden] { display: none; }
 /* The vertical-placement checkbox, and the column beside the piece. */
 .vp-flag-movevert { --flag-accent: #34d399; --flag-line: rgba(52,211,153,0.5); --flag-fill: rgba(52,211,153,0.16); }
 /* Positioned from script against the piece's projected position, so it is
