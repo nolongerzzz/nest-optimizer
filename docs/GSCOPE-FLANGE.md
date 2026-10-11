@@ -1,7 +1,7 @@
-# G-scope: the Flange tab
+# G-scope: the Flange row
 
-G-scope's isolation tabs (the floating list, "click to isolate") are whatever
-the file groups: a slice's `FEATURE:` tags — Outer wall, Sparse infill,
+G-scope's floating list - one per view, every row a show / hide toggle - is
+whatever the file groups: a slice's `FEATURE:` tags — Outer wall, Sparse infill,
 Support — or a mesh's build objects. Those are **print-process** and
 **file-structure** categories. A flange is neither. It is a functional,
 geometric part of *one* object, so nothing in the file names it. Until now,
@@ -69,7 +69,7 @@ The rule, as `detect(soup)` runs it:
    everything else, and no STL in the repo is changed by it.
 
 Every slab is kept with the tests it failed (`candidates`), so "why no
-flange?" always has an answer. The tab puts the nearest slab's failures into
+flange?" always has an answer. The row puts the nearest slab's failures into
 words, for example "the nearest flat plate (8 mm) does not come off anything
 thicker".
 
@@ -180,20 +180,21 @@ The 0.3 mm shortfall on the synthetic volumes is the 2 µm root clearance.
 - **A flange on a slice.** Detection needs a closed surface to cast rays
   through. A `.gcode.3mf` has beads, whose overlapping boxes do not close.
   Open the part's STL or 3MF, or read the sliced plate back in G-scope (the
-  plate route), to use the tab. See "On a slice" below.
+  plate route), to use the row. See "On a slice" below.
 
-## The tab
+## The row
 
-The floating list in G-scope ("Parts / Features (click to isolate)") has a
-row under a rule, below the file's own tabs: **Flange**. It is kept in its
-own `#ms-detected` block, not in `#ms-legend`, because those rows are exactly
-the file's own groups and several checks count them as that.
+A mesh's list in G-scope, **Parts**, has a row under a rule, below the file's
+own rows: **Flange**. It is kept in its own `#ms-detected` block, not in
+`#ms-legend`, because those rows are exactly the file's own groups and several
+checks count them as that. It is a show / hide toggle like every row above
+it - it never isolates, and the list never leaves the screen.
 
 | document | the row reads | a click |
 |---|---|---|
-| a mesh with a flange (STL, 3MF, the plate) | `Flange (2.94 mm, 2858 tri)`, in the tab's orange | selects the flange and isolates it, framed on it. The row stays lit while it is the selection |
-| a mesh with none | `Flange - none detected`, dimmed. The tooltip says why, in words | nothing is selected or isolated, and the info line says no flange was found |
-| a slice | `Flange - not on a slice`, dimmed | the same. The tooltip says to open the part itself |
+| a mesh with a flange (STL, 3MF, the plate) | `Flange (2.94 mm, 2858 tri)`, in the row's orange. Opens switched on: the flange drawn in orange over its part | shows or hides the flange. With its part switched off, the flange is drawn alone |
+| a mesh with none | `Flange - none detected`, dimmed and off. The tooltip says why, in words | stays off, nothing is selected, and the info line says no flange was found |
+| a slice | no row: a slice's one list is its features (`NSO_MICROSCOPE.flange()` still says `unavailable`, and why) | - |
 | while it is still looking | `Flange - looking...` | runs the detection there and then |
 
 Detection runs once per document, just after it opens, so the view comes up
@@ -201,11 +202,13 @@ first. It takes 0.7 s on the clamp bar in the page. On the plate every piece
 is scanned, and a piece over 400,000 triangles is skipped by name.
 
 **It feeds the same mechanism as any selection.** What detection hands back
-is an ordinary mesh object (positions, centroids, bounds), passed through
-`setSelection()`. So:
+is an ordinary mesh object (positions, centroids, bounds). Drawn alone (its
+part off) it is part of what is shown, so **Select shown** takes it and a
+capture box catches it, through `setSelection()`. Drawn over its part (both
+on) it is a highlight on the part, and Select shown takes the part once -
+the flange is inside it. So:
 
-- **Isolate** draws it alone, in its colour. **Back** returns the whole part
-  with the flange highlighted on it, drawn over the part.
+- **Isolate** draws it alone, in its colour.
 - **Export as STL** and **Export to plate** write exactly the flange, named
   `<part> - Flange`.
 - **Crop** takes a Z band out of it. A flange is not a plate piece, so Crop
@@ -213,7 +216,7 @@ is an ordinary mesh object (positions, centroids, bounds), passed through
   piece it came from is never edited, not even on the plate.
 
 In the page: `NSO_MICROSCOPE.flange()` (status, reason, objects),
-`.detectFlanges()` and `.isolateFlange()`.
+`.detectFlanges()`, `.toggleDetected('flange')` and `.detectedOn()`.
 
 Under it are four more rows that work the same way: **Handle**, **Bracket**,
 **Lid** and **Hinge**, from `nso_face_features.js`
@@ -221,7 +224,7 @@ Under it are four more rows that work the same way: **Handle**, **Bracket**,
 
 ### On a slice
 
-The tab says it cannot look, and it does not guess. The rule needs a closed
+There is no row, and nothing guesses. The rule needs a closed
 surface to cast rays through, and a slice's beads are overlapping boxes. The
 per-layer "area spike" variant would work on beads, but it finds a band, not
 the flange (see above). And on the clamp bar the flange's top layers are
@@ -236,19 +239,21 @@ moves at the root, which is a different change.
   independent integration and the canonical checker, five poses, library
   pieces with none, and the synthetic shapes. About 10 s.
 - `npm run gcode:gscope-flange` (`tools/gcode-test/gscope-flange-drive-check.mjs`,
-  47 checks, headless Chromium, the real app):
-  1. the clamp bar through G-scope's own Import. The tab finds it, and the
-     page's flange matches the Node one triangle for triangle and to the micron
-     in bounds;
-  2. a real click on the tab isolates it: alone, one solid, orange on the
-     read-back pixels, framed at its middle height. Back highlights it on the
-     part;
-  3. Export as STL writes exactly the flange (`PASS`, 0 open, 0 non-manifold,
-     χ 2). Crop takes 8.5–9.5 out as a new piece;
-  4. the plate route: a click on the tab and Export to plate. The clamp bar
-     itself keeps every triangle;
-  5. `hinge_knuckle_box.stl` reads "none detected" and a click does nothing
-     but say so. A slice says it cannot look, with all ten of its feature tabs
-     intact, and a click there says "not available", not "none".
+  55 checks, headless Chromium, the real app):
+  1. the clamp bar through G-scope's own Import. The row finds it and opens
+     on, and the page's flange matches the Node one triangle for triangle and
+     to the micron in bounds;
+  2. a real click on the part's row leaves the flange alone: one solid,
+     orange on the read-back pixels, the list up, nothing isolated, no Back.
+     The part's row back on draws it over the part;
+  3. Select shown takes exactly the flange; Export as STL writes exactly it
+     (`PASS`, 0 open, 0 non-manifold, χ 2). Crop takes 8.5–9.5 out as a new
+     piece;
+  4. the plate route: the part rows off, Select shown, Export to plate. The
+     rows alone bring the whole plate back - the dead end isolation once was
+     there cannot return. The clamp bar itself keeps every triangle;
+  5. `hinge_knuckle_box.stl` reads "none detected", stays off, and a click
+     does nothing but say so. A slice has no Flange row, with all ten of its
+     feature rows intact, and the rule asked there says it cannot look.
 
   Screenshots land in `tools/gscope-flange-out/`.

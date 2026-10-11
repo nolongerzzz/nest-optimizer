@@ -16,9 +16,11 @@
  *      viewport, on top (a hit test at the panel lands on the panel), still
  *      on, the SAME run - no second "watch on", no re-arm, the same counts.
  *   2  NORMAL VIEW. Legend rows hidden and shown again, a real click on a
- *      piece in G-scope's own 3D view (a capture box drops), Normal re-frame.
+ *      piece in G-scope's own 3D view - in orbit, as G-scope opens, it drops
+ *      nothing; with Click to select region armed, a capture box drops -
+ *      Normal re-frame.
  *      The panel stays visible throughout; it keeps its collapse state.
- *   3  SLICE VIEW. Slice view, the Detected features rows, Normal back to the
+ *   3  SLICE VIEW. Slice view, its All features rows, Normal back to the
  *      mesh, Slice again - the panel is on top in each. The slice's own
  *      status line lands in the log as a row, in this run.
  *   4  THE COUNTS ARE LIVE INSIDE G-SCOPE. A real pose mismatch made while
@@ -126,6 +128,7 @@ async function exerciseNormal(page) {
   const groups = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map((e) => e.dataset.group));
   for (const g of groups) await page.click(`#ms-legend [data-group="${g}"]`);       // hide each
   for (const g of groups) await page.click(`#ms-legend [data-group="${g}"]`);       // and back
+  await page.click('#ms-mode-select');
   await clickPiece(page, 'mushroom');
   await page.click('#ms-btn-clear');
   await page.click('#ms-cam-normal');
@@ -135,10 +138,11 @@ async function exerciseSlice(page) {
   await page.click('#ms-cam-slice');
   await sliced(page);
   await frames(page);
-  const det = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-detected .ms-legend-item')).map((e) => e.dataset.detected));
-  for (const d of det.slice(0, 3)) await page.click(`#ms-detected [data-detected="${d}"]`);
+  const rows = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map((e) => e.dataset.group));
+  for (const g of rows.slice(0, 3)) await page.click(`#ms-legend [data-group="${g}"]`);   // off
+  for (const g of rows.slice(0, 3)) await page.click(`#ms-legend [data-group="${g}"]`);   // and on
   await frames(page);
-  return det;
+  return rows;
 }
 
 async function openApp(browser, served) {
@@ -208,9 +212,20 @@ async function main() {
   check('a legend row hides its part', await page.evaluate(() => window.NSO_MICROSCOPE.hidden()), [groups[0]]);
   await page.click(`#ms-legend [data-group="${groups[0]}"]`);
   check('... and shows it again', await page.evaluate(() => window.NSO_MICROSCOPE.hidden()), []);
+  // G-scope opens in orbit: a plain click on a piece, nothing armed, is a
+  // look and nothing else. A box is something you ask for.
+  check('G-scope opened in orbit, nothing armed', await page.evaluate(() => [window.NSO_MICROSCOPE.mode(),
+    document.getElementById('ms-mode-orbit').classList.contains('active'),
+    document.getElementById('ms-mode-select').classList.contains('active')]), ['orbit', true, false]);
   await clickPiece(page, 'mushroom');
-  check('a real click on a piece in G-scope\'s 3D view drops a capture box',
-    await page.evaluate(() => window.NSO_MICROSCOPE.boxes().length) > boxes0, true);
+  check('a real click on a piece with nothing armed drops no box, selects nothing',
+    await page.evaluate(() => [window.NSO_MICROSCOPE.boxes().length, window.NSO_MICROSCOPE.selection().length]), [boxes0, 0]);
+  await page.click('#ms-mode-select');
+  await clickPiece(page, 'mushroom');
+  check('Click to select region, then a real click on the piece: a capture box drops, as before',
+    await page.evaluate(() => window.NSO_MICROSCOPE.boxes().length), boxes0 + 1);
+  check('... and catches the piece', await page.evaluate(() => window.NSO_MICROSCOPE.selection().map((o) => o.name)),
+    [await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().objects.find((o) => /mushroom/.test(o.name)).name)]);
   await page.click('#ms-btn-clear');
   await page.click('#ms-cam-normal');
   await frames(page);
@@ -222,8 +237,8 @@ async function main() {
   console.log('\n--- 3. Slice view, Normal back, Slice again ---');
   // =======================================================================
   const det = await exerciseSlice(page);
-  check('Slice view is up, with its Detected features rows',
-    [await page.evaluate(() => window.NSO_GSCOPE_SLICE.viewMode()), det.some((d) => d === 'walls')], ['slice', true]);
+  check('Slice view is up, with its All features rows',
+    [await page.evaluate(() => window.NSO_GSCOPE_SLICE.viewMode()), det.some((d) => /wall/i.test(d))], ['slice', true]);
   const s3 = await panel(page);
   check('in Slice view the panel is in G-scope, on top, on',
     [s3.on, s3.where, s3.shown, s3.onTop], [true, 'gscope', true, true]);

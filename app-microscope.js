@@ -234,7 +234,7 @@ var NSO_MICROSCOPE = (function () {
   /**
    * Triangle centroids and bounds, once per object, so the capture box never
    * re-derives them. Every mesh object gets these - a build object, a plate
-   * piece, or a feature lifted out of one (the Flange tab's).
+   * piece, or a feature lifted out of one (a detector row's).
    */
   function prepObject(o) {
     var p = o.positions;
@@ -521,7 +521,7 @@ var NSO_MICROSCOPE = (function () {
   // ===========================================================================
 
   var HIDDEN = null;          // Set of group names toggled off in the legend
-  var mode = 'orbit';         // 'orbit' | 'select'
+  var mode = 'orbit';         // 'orbit' | 'select' | 'line'; every document opens in 'orbit'
   var balls = [];             // the capture boxes
   var defaultR = 5.0;
   // A corner drag makes the footprint a rectangle; the next box dropped takes
@@ -550,12 +550,13 @@ var NSO_MICROSCOPE = (function () {
   var isolated = false;
   var clickHooks = [];        // fn(ndcX, ndcY, event) -> true when it took the click
   var docListeners = [];      // fn(doc) after every open()
-  var detectedSources = [];   // fn(doc) -> rows for the Detected tab (addDetectedSource)
-  // Which list the floating legend shows: null - the file's own list with the
-  // Flange row under it, no tab strip (how every document opens); 'legend' /
-  // 'detected' - the tab strip is up and one of the two is shown. Slice view
-  // (app-gscope-slice.js) puts it up, on 'detected'. View state only.
-  var legendTab = null;
+  // The detector rows switched on (a mesh's Parts list: 'flange', 'handle',
+  // 'bracket', 'lid', 'hinge'). View state like HIDDEN, and the same kind of
+  // toggle: a rule on draws what it found, over its part when that part is
+  // shown and alone when it is not. Every document opens with all five on, as
+  // every part and every feature opens shown; a row with nothing found has
+  // nothing to draw, so it reads off (allDetectors()).
+  var DETECTED_ON = new Set();
 
   function buildWorld() {
     if (view) return view;
@@ -611,6 +612,7 @@ var NSO_MICROSCOPE = (function () {
       overviewGroup: overviewGroup, detailGroup: detailGroup, highlightGroup: highlightGroup,
       clip: [new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Plane(new THREE.Vector3(0, -1, 0), 0)],
       overviewMeshes: {},
+      detectedMeshes: {},
       raycaster: raycaster,
       dragRaycaster: new THREE.Raycaster(),
       mouse: new THREE.Vector2(),
@@ -648,9 +650,6 @@ var NSO_MICROSCOPE = (function () {
     var flip = function () { setLegendCollapsed(!box.classList.contains('collapsed')); };
     btn.addEventListener('click', flip);
     if (title) title.addEventListener('click', flip);
-    var ta = $('ms-tab-legend'), tb = $('ms-tab-detected');
-    if (ta) ta.addEventListener('click', function () { if (legendTab) setLegendTab('legend'); });
-    if (tb) tb.addEventListener('click', function () { if (legendTab) setLegendTab('detected'); });
     var saved = null;
     try { saved = localStorage.getItem('nso.gscope.legendCollapsed'); } catch (e) {}
     if (saved === '1') setLegendCollapsed(true);
@@ -680,6 +679,7 @@ var NSO_MICROSCOPE = (function () {
     var v = view;
     clearGroup(v.overviewGroup);
     v.overviewMeshes = {};
+    v.detectedMeshes = {};
     v.solidMeshes = {};
     v.solidBuilt = null;
     if (!doc) return;
@@ -975,10 +975,11 @@ var NSO_MICROSCOPE = (function () {
       });
     }
     // Mesh: whole build objects, not loose triangles. An object is taken when
-    // the box holds any of its triangle centroids. See docs/GCODE-MICROSCOPE.md
-    // for why the granularity is the object and not the triangle.
-    return doc.objects.filter(function (o) {
-      if (!objectShown(o)) return false;
+    // the box holds any of its triangle centroids, or failing that when any of
+    // its triangles crosses the box. See docs/GCODE-MICROSCOPE.md
+    // for why the granularity is the object and not the triangle. What is
+    // shown includes a detector row's feature drawn alone (shownObjects()).
+    return shownObjects().filter(function (o) {
       var hit = boxes.filter(function (b) {
         return o.bounds.minX <= b.gx + b.ex && o.bounds.maxX >= b.gx - b.ex &&
                o.bounds.minY <= b.gy + b.ey && o.bounds.maxY >= b.gy - b.ey &&
@@ -991,8 +992,58 @@ var NSO_MICROSCOPE = (function () {
           if (inBox(hit[k], c[t], c[t + 1], c[t + 2])) return true;
         }
       }
+      // No centroid inside, but a triangle may still cross the box: a few
+      // long triangles - a flange lifted out of its part is 2,148 of them
+      // over 187 mm - put every centroid far from a 5 mm box dropped on the
+      // surface itself. Only reached when the centroids miss, so a dense
+      // part costs what it always did.
+      for (var k2 = 0; k2 < hit.length; k2++) {
+        if (anyTriangleInBox(hit[k2], o.positions)) return true;
+      }
       return false;
     });
+  }
+
+  /** Does any triangle of a Z-up soup cross box `b` (gcodeBoxes() form)? */
+  function anyTriangleInBox(b, p) {
+    var ca = b.ca != null ? b.ca : 1, sa = b.sa || 0, v = new Array(9);
+    for (var t = 0; t < p.length; t += 9) {
+      for (var i = 0; i < 3; i++) {
+        // into the box's own frame, centred: along it, across it, up
+        var dx = p[t + i * 3] - b.gx, dy = p[t + i * 3 + 1] - b.gy;
+        v[i * 3] = dx * ca + dy * sa;
+        v[i * 3 + 1] = -dx * sa + dy * ca;
+        v[i * 3 + 2] = p[t + i * 3 + 2] - b.gz;
+      }
+      if (triBoxOverlap(b.rx, b.ry, b.h, v)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Triangle v (9 numbers, box-centred) against the box of half-extents hx, hy,
+   * hz: the separating-axis test (Akenine-Moller) - the box's three axes, the
+   * triangle's normal, and each edge crossed with each box axis.
+   */
+  function triBoxOverlap(hx, hy, hz, v) {
+    function apart(ax, ay, az) {
+      var p0 = ax * v[0] + ay * v[1] + az * v[2];
+      var p1 = ax * v[3] + ay * v[4] + az * v[5];
+      var p2 = ax * v[6] + ay * v[7] + az * v[8];
+      var r = hx * Math.abs(ax) + hy * Math.abs(ay) + hz * Math.abs(az);
+      return Math.min(p0, p1, p2) > r || Math.max(p0, p1, p2) < -r;
+    }
+    if (apart(1, 0, 0) || apart(0, 1, 0) || apart(0, 0, 1)) return false;
+    var e = [[v[3] - v[0], v[4] - v[1], v[5] - v[2]],
+             [v[6] - v[3], v[7] - v[4], v[8] - v[5]],
+             [v[0] - v[6], v[1] - v[7], v[2] - v[8]]];
+    if (apart(e[0][1] * e[1][2] - e[0][2] * e[1][1], e[0][2] * e[1][0] - e[0][0] * e[1][2],
+              e[0][0] * e[1][1] - e[0][1] * e[1][0])) return false;
+    for (var i = 0; i < 3; i++) {
+      var x = e[i][0], y = e[i][1], z = e[i][2];
+      if (apart(0, -z, y) || apart(z, 0, -x) || apart(-y, x, 0)) return false;
+    }
+    return true;
   }
 
   function computeSelectionInfo() {
@@ -1037,8 +1088,6 @@ var NSO_MICROSCOPE = (function () {
     }
     var tris = currentSelection.reduce(function (a, o) { return a + o.triangles; }, 0);
     info((selectionSource === 'visible' ? '<b>everything shown</b>, '
-          : selectionSource === 'flange' ? '<b>Flange</b> (detected), '
-          : FEATURE_NAMES[selectionSource] ? '<b>' + FEATURE_NAMES[selectionSource] + '</b> (detected), '
           : selectionSource === 'pick' ? '<b>picked</b>, '
           : '<b>' + balls.length + ' box(es)</b>, ') + '<b>' + currentSelection.length +
          ' object(s)</b>, ' + tris + ' triangle(s)<br>' +
@@ -1056,6 +1105,7 @@ var NSO_MICROSCOPE = (function () {
     Object.keys(v.solidMeshes || {}).forEach(function (name) {
       v.solidMeshes[name].visible = !HIDDEN.has(name) && !detail;
     });
+    syncDetectedMeshes(detail);
     v.detailGroup.children.forEach(function (mesh) {
       mesh.visible = !HIDDEN.has(mesh.userData.feature);
     });
@@ -1073,20 +1123,21 @@ var NSO_MICROSCOPE = (function () {
       var item = document.createElement('div');
       item.className = 'ms-legend-item' + (HIDDEN.has(name) ? ' dim' : '');
       item.dataset.group = name;
+      item.setAttribute('role', 'checkbox');
+      item.setAttribute('aria-checked', String(!HIDDEN.has(name)));
       var swatch = document.createElement('div');
       swatch.className = 'ms-swatch';
       swatch.style.background = '#' + ('000000' + colorForGroup(name, gi).toString(16)).slice(-6);
       var label = document.createElement('span');
       label.className = 'ms-legend-label';
       label.textContent = name + ' (' + count + unit + ')';
-      // Feature-level isolation in one click: this group alone, every other
-      // one switched off, and it becomes the selection - Export is offered
-      // right away, same as any other isolation method (soloGroup()).
+      // This group alone in one click: every other one switched off, and it
+      // becomes the selection - Export is offered right away (soloGroup()).
       var only = document.createElement('button');
       only.type = 'button';
       only.className = 'ms-legend-only';
       only.textContent = 'only';
-      only.title = 'Isolate ' + name + ' alone - selected and ready to Export or Crop. Click Show all to bring the rest back.';
+      only.title = 'Show ' + name + ' alone - selected and ready to Export or Crop. Click Show all to bring the rest back.';
       only.addEventListener('click', function (ev) {
         ev.stopPropagation();
         soloGroup(name);
@@ -1100,6 +1151,7 @@ var NSO_MICROSCOPE = (function () {
       item.addEventListener('click', function () {
         if (HIDDEN.has(name)) HIDDEN.delete(name); else HIDDEN.add(name);
         viewChanged();
+        rescopeSelection();
       });
       legend.appendChild(item);
     });
@@ -1280,6 +1332,7 @@ var NSO_MICROSCOPE = (function () {
       v.raycaster.setFromCamera(v.mouse, v.camera);
       var targets = Object.keys(v.overviewMeshes)
         .map(function (k) { return v.overviewMeshes[k]; })
+        .concat(Object.keys(v.detectedMeshes).map(function (k) { return v.detectedMeshes[k]; }))
         .filter(function (m) { return m.visible; });
       var hits = v.raycaster.intersectObjects(targets);
       if (hits.length === 0) return;
@@ -1548,9 +1601,25 @@ var NSO_MICROSCOPE = (function () {
 
   function objectShown(o) {
     if (HIDDEN.has(o.name)) return false;
+    if (isDetected(o) && !DETECTED_ON.has(o.detected)) return false;
     var band = zBandMm();
     if (!band || zRangeFull()) return true;
     return o.bounds.maxZ >= band[0] - 1e-6 && o.bounds.minZ <= band[1] + 1e-6;
+  }
+
+  /**
+   * Every object drawn right now, as the selection takes them: the parts
+   * switched on, then each detector row's feature whose own part is switched
+   * off. A feature over a part that is shown is a highlight on that part -
+   * already inside its triangles - and taking it as well would put the same
+   * surface into an export twice.
+   */
+  function shownObjects() {
+    if (!doc || doc.kind !== 'mesh') return [];
+    var parts = doc.objects.filter(objectShown);
+    var on = {};
+    parts.forEach(function (o) { on[o.name] = 1; });
+    return parts.concat(detectedObjects().filter(function (o) { return objectShown(o) && !on[o.host]; }));
   }
 
   /** Every segment drawn right now, in print order. */
@@ -1617,10 +1686,11 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /**
-   * One legend group alone: the "only" button, this method's one-click
-   * isolate. It both solos the view (every other group hidden) and becomes
-   * the selection - Export is offered right after, same as a picked line, a
-   * capture box or the Flange tab, with no separate "Select shown" required.
+   * One legend group alone: the "only" button. It both solos the view (every
+   * other group hidden, and on a mesh every detector row off) and becomes the
+   * selection - Export is offered right after, same as a picked line or a
+   * capture box, with no separate "Select shown" required. Nothing is
+   * isolated: the list stays up, and any row brings the rest back.
    * `selectVisible()` is what "Select shown" itself calls, so a plain click
    * here and a follow-up press of that button read the identical set - one
    * definition of "what is shown", not two.
@@ -1633,44 +1703,53 @@ var NSO_MICROSCOPE = (function () {
     var want = (names || []).filter(function (n) { return !!doc.groups[n]; });
     if (!want.length) return false;
     HIDDEN = new Set(Object.keys(doc.groups).filter(function (g) { return want.indexOf(g) < 0; }));
+    DETECTED_ON.clear();
     viewChanged();
     selectVisible();
     return true;
   }
 
-  /** A Detected row's click on feature groups: those alone, selected and isolated. */
-  function isolateGroups(names) {
-    if (!soloGroups(names) || !currentSelection.length) return false;
-    return isolate();
-  }
-
-  /** A Detected row's click on moves (parsed-move indices): those, selected and isolated. */
-  function isolateMoves(moveIndices, source) {
-    if (!doc || doc.kind !== 'toolpath') return false;
-    var want = new Set(moveIndices || []);
-    removeAllBalls();
-    setSelection(doc.segments.filter(function (s) { return want.has(s.mv.index); }), source || 'detected');
-    if (!currentSelection.length) return false;
-    return isolate();
+  /**
+   * A row was switched on or off: a mesh selection follows what is shown. A
+   * box selection is taken again (a box catches only what is drawn), "Select
+   * shown" stays everything shown, and anything else loses what was switched
+   * off. So Export, Crop and Isolate always act on the parts and features the
+   * list has on, never on one switched off after it was selected. A slice's
+   * selection is left as it was, as it always has been.
+   */
+  function rescopeSelection() {
+    if (!doc || doc.kind !== 'mesh') return;
+    if (selectionSource === 'box') { if (balls.length) setSelection(selectByBox(), 'box'); return; }
+    if (selectionSource === 'visible') { setSelection(shownObjects(), 'visible'); return; }
+    var keep = shownObjects();
+    var next = currentSelection.filter(function (o) { return keep.indexOf(o) >= 0; });
+    if (next.length !== currentSelection.length) setSelection(next, selectionSource);
   }
 
   // ===========================================================================
-  // Detected features: the Flange tab
+  // Detected features: the Flange row
   // ===========================================================================
   //
-  // The tabs above are what the FILE groups - a slice's FEATURE: tags, a
+  // The rows above are what the FILE groups - a slice's FEATURE: tags, a
   // mesh's build objects. A flange is a functional part of ONE object, so no
   // file names it: nso_flange.js finds it (docs/GSCOPE-FLANGE.md has the rule
   // and what it was validated on) and lifts it out as its own closed solid
   // with the Cut tool's rawCut. What comes back is an ordinary mesh object -
-  // positions, centroids, bounds - so it reaches the rest of the view through
-  // setSelection() like anything else: Isolate, the highlight, Crop and both
-  // exports take it without knowing where it came from. The one thing it is
-  // not is a plate piece, so Crop sends it the file route (a new piece, then
-  // cropped) rather than editing a piece in place.
+  // positions, centroids, bounds.
+  //
+  // Its row in the Parts list is a show / hide toggle, the same as a part's
+  // row: on, the flange is drawn in the row's colour over its part, or alone
+  // with its part switched off; off, it is not drawn. Drawn alone, it is part
+  // of what is shown (shownObjects()), so a box catches it and Select shown
+  // takes it - it reaches the rest of the view through setSelection() like
+  // anything else: Isolate, the highlight, Crop and both exports take it
+  // without knowing where it came from. The one thing it is not is a plate
+  // piece, so Crop sends it the file route (a new piece, then cropped) rather
+  // than editing a piece in place.
   //
   // Detection runs once per document, just after it opens, so the view is up
-  // first; clicking the tab before it has finished runs it there and then.
+  // first; switching the row on before it has finished runs it there and then.
+  // A slice has no closed surface to look at, so it lists no detector rows.
 
   var FLANGE_COLOR = 0xff8a1f;
   var FLANGE_MAX_TRIS = 400000;   // past this, say so rather than stall the page
@@ -1743,21 +1822,71 @@ var NSO_MICROSCOPE = (function () {
       : o.length + ' found') + ')';
   }
 
-  /** The Flange tab, under the file's own tabs. Rebuilt with the legend. */
+  /** The detector rows, in list order. */
+  function allDetectors() { return ['flange'].concat(FEATURE_RULES); }
+
+  /** Every feature the detector rows have found in this document, flanges first. */
+  function detectedObjects() {
+    if (!doc || doc.kind !== 'mesh') return [];
+    var out = flangeState().objects.slice();
+    FEATURE_RULES.forEach(function (r) { out = out.concat(featureState(r).objects); });
+    return out;
+  }
+
+  function detectedOf(rule) {
+    var st = rule === 'flange' ? flangeState() : featureState(rule);
+    return st ? st.objects : [];
+  }
+
+  /** Is a detector row switched on: its rule on, and something of it not cleared from view. */
+  function detectedChecked(rule) {
+    return DETECTED_ON.has(rule) && detectedOf(rule).some(function (o) { return !HIDDEN.has(o.name); });
+  }
+
+  /**
+   * A detector row's feature(s), drawn in the overview: in the row's colour,
+   * over the part they were lifted from (winning the depth test where the two
+   * coincide), and so drawn alone when that part is switched off. Built the
+   * first time their row is switched on, then only shown and hidden.
+   */
+  function syncDetectedMeshes(detail) {
+    var v = view;
+    if (!v || !doc || doc.kind !== 'mesh') return;
+    detectedObjects().forEach(function (o) {
+      var on = objectShown(o);
+      var m = v.detectedMeshes[o.name];
+      if (!m && on) {
+        var geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(o.positions), 3));
+        geo.translate(-doc.cx, -doc.cy, 0);
+        geo.rotateX(-Math.PI / 2);
+        geo.computeVertexNormals();
+        m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+          color: detectedColor(o), metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes(),
+          polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1
+        }));
+        m.userData.feature = o.name;
+        m.userData.object = o;
+        v.detectedMeshes[o.name] = m;
+        v.overviewGroup.add(m);
+      }
+      if (m) m.visible = on && !detail;
+    });
+  }
+
+  /** The detector rows, under the parts. A mesh only; rebuilt with the legend. */
   function buildDetectedRow() {
     var box = $('ms-detected');
     if (!box) return;
     box.innerHTML = '';
-    var st = flangeState();    // null with no document: the row goes with it
-    if (!st) return;
-    buildSourceRows(box);
+    var st = flangeState();    // null with no document: the rows go with it
+    if (!st || doc.kind !== 'mesh') return;
     var item = document.createElement('div');
-    item.className = 'ms-legend-item ms-detected-item' + (st.status === 'found' ? '' : ' dim');
+    item.className = 'ms-legend-item ms-detected-item' + (detectedChecked('flange') ? '' : ' dim');
     item.dataset.detected = 'flange';
     item.dataset.status = st.status;
-    var on = st.status === 'found' && currentSelection.length > 0 &&
-      currentSelection.every(function (o) { return o.detected === 'flange'; });
-    if (on) item.classList.add('active');
+    item.setAttribute('role', 'checkbox');
+    item.setAttribute('aria-checked', String(detectedChecked('flange')));
     var swatch = document.createElement('div');
     swatch.className = 'ms-swatch';
     swatch.style.background = '#' + ('000000' + FLANGE_COLOR.toString(16)).slice(-6);
@@ -1765,8 +1894,8 @@ var NSO_MICROSCOPE = (function () {
     label.className = 'ms-legend-label';
     label.textContent = flangeRowText(st);
     item.title = st.status === 'found'
-      ? 'Detected from the geometry, not named in the file. Click to isolate ' +
-        (st.objects.length === 1 ? 'it' : 'them') + ' - then Crop or Export as usual.\n' +
+      ? 'Detected from the geometry, not named in the file. Click to show or hide ' +
+        (st.objects.length === 1 ? 'it' : 'them') + ' - over the part, or alone with the part switched off.\n' +
         st.objects.map(function (o) {
           return o.name + ': ' + o.flange.thickness.toFixed(2) + ' mm thick, ' + o.flange.reach.toFixed(1) +
             ' mm out, ' + o.flange.rootLength.toFixed(1) + ' mm along its root';
@@ -1774,76 +1903,39 @@ var NSO_MICROSCOPE = (function () {
       : st.status === 'pending' ? 'Looking for a flange in the geometry...'
       : 'No flange: ' + st.reason;
     item.appendChild(swatch); item.appendChild(label);
-    item.addEventListener('click', function () { isolateFlange(); });
+    item.addEventListener('click', function () { toggleDetected('flange'); });
     box.appendChild(item);
     FEATURE_RULES.forEach(function (rule) { box.appendChild(featureRow(rule)); });
   }
 
   /**
-   * Rows other modules detect (addDetectedSource) - Slice view's walls,
-   * infill and overhang calls - above the Flange row. A source returns
-   * [{ key, label, title, group | color, dim, onClick }] for the document.
+   * A detector row's click: its feature(s) shown or hidden, as a part's row
+   * shows or hides its part. Nothing is selected or isolated by it, and the
+   * list stays where it is. On a part with none, say why and change nothing.
+   * Returns whether the row is on after the click.
    */
-  function buildSourceRows(box) {
-    var gkeys = Object.keys(doc.groups || {}).sort();
-    detectedSources.forEach(function (fn) {
-      var rows;
-      try { rows = fn(doc) || []; } catch (err) { console.error('[g-scope] detected source', err); rows = []; }
-      rows.forEach(function (r) {
-        var item = document.createElement('div');
-        item.className = 'ms-legend-item ms-detected-item' + (r.dim ? ' dim' : '');
-        item.dataset.detected = r.key;
-        var swatch = document.createElement('div');
-        swatch.className = 'ms-swatch';
-        var c = r.color != null ? r.color : colorForGroup(r.group, Math.max(0, gkeys.indexOf(r.group)));
-        swatch.style.background = '#' + ('000000' + c.toString(16)).slice(-6);
-        var label = document.createElement('span');
-        label.className = 'ms-legend-label';
-        label.textContent = r.label;
-        if (r.title) item.title = r.title;
-        item.appendChild(swatch); item.appendChild(label);
-        if (typeof r.onClick === 'function') item.addEventListener('click', function () { r.onClick(); });
-        box.appendChild(item);
-      });
-    });
-  }
-
-  /** The legend's tab strip: null (none, the default), 'legend' or 'detected'. */
-  function setLegendTab(t) {
-    legendTab = t === 'legend' || t === 'detected' ? t : null;
-    var box = $('ms-legend-float');
-    if (box) {
-      box.classList.toggle('tabbed', !!legendTab);
-      box.classList.toggle('tab-detected', legendTab === 'detected');
-    }
-    var a = $('ms-tab-legend'), b = $('ms-tab-detected');
-    if (a) { a.classList.toggle('active', legendTab === 'legend'); a.setAttribute('aria-selected', String(legendTab === 'legend')); }
-    if (b) { b.classList.toggle('active', legendTab === 'detected'); b.setAttribute('aria-selected', String(legendTab === 'detected')); }
-    syncHeader();
-    return legendTab;
-  }
-
-  /**
-   * The Flange tab's click: the flange(s) as the selection, isolated. On a
-   * piece with none, say why and change nothing.
-   */
-  function isolateFlange() {
-    var st = detectFlanges();
+  function toggleDetected(rule) {
+    if (!doc || (rule !== 'flange' && FEATURE_RULES.indexOf(rule) < 0)) return false;
+    var st, N = rule === 'flange' ? 'Flange' : FEATURE_NAMES[rule];
+    var wasOn = detectedChecked(rule);      // what the row showed when it was clicked
+    if (rule === 'flange') st = detectFlanges();
+    else { detectFeatures(); st = featureState(rule); }
     if (!st) return false;
-    buildDetectedRow();
     if (st.status !== 'found') {
-      var why = st.status === 'unavailable' ? 'Flange: not available - ' + st.reason
-        : 'Flange: none detected - ' + st.reason;
-      say(why, false);
-      info((st.status === 'unavailable' ? '<b>Flange: not available here.</b> ' : '<b>No flange detected.</b> ') +
+      buildDetectedRow();
+      say(N + ': ' + (st.status === 'unavailable' ? 'not available - ' : 'none detected - ') + st.reason, false);
+      info((st.status === 'unavailable' ? '<b>' + N + ': not available here.</b> ' : '<b>No ' + rule + ' detected.</b> ') +
            st.reason.replace(/</g, '&lt;'));
       return false;
     }
-    removeAllBalls();
-    setSelection(st.objects.slice(), 'flange');
-    isolate();
-    buildDetectedRow();
-    return true;
+    if (wasOn) DETECTED_ON.delete(rule);
+    else {
+      DETECTED_ON.add(rule);
+      st.objects.forEach(function (o) { HIDDEN.delete(o.name); });
+    }
+    viewChanged();
+    rescopeSelection();
+    return DETECTED_ON.has(rule);
   }
 
   // ===========================================================================
@@ -1854,8 +1946,9 @@ var NSO_MICROSCOPE = (function () {
   // nso_face_features.js (docs/GSCOPE-FEATURES.md has the four rules and what
   // they were validated on). Each rule hands back its feature as a closed
   // solid - the surface standing on the face plus a cap on its own root
-  // loops, nothing cut - so it is an ordinary mesh object through
-  // setSelection(): Isolate, the highlight, Crop and both exports take it
+  // loops, nothing cut - so it is an ordinary mesh object: its row shows and
+  // hides it exactly as the Flange row does, and once it is shown, a box,
+  // Select shown, Isolate, the highlight, Crop and both exports take it
   // exactly as they take the flange. One analysis of each piece serves all
   // four rows.
 
@@ -1944,11 +2037,11 @@ var NSO_MICROSCOPE = (function () {
   function featureRow(rule) {
     var st = featureState(rule);
     var item = document.createElement('div');
-    item.className = 'ms-legend-item ms-detected-item' + (st.status === 'found' ? '' : ' dim');
+    item.className = 'ms-legend-item ms-detected-item' + (detectedChecked(rule) ? '' : ' dim');
     item.dataset.detected = rule;
     item.dataset.status = st.status;
-    if (st.status === 'found' && currentSelection.length > 0 &&
-        currentSelection.every(function (o) { return o.detected === rule; })) item.classList.add('active');
+    item.setAttribute('role', 'checkbox');
+    item.setAttribute('aria-checked', String(detectedChecked(rule)));
     var swatch = document.createElement('div');
     swatch.className = 'ms-swatch';
     swatch.style.background = '#' + ('000000' + FEATURE_COLORS[rule].toString(16)).slice(-6);
@@ -1956,8 +2049,8 @@ var NSO_MICROSCOPE = (function () {
     label.className = 'ms-legend-label';
     label.textContent = featureRowText(rule, st);
     item.title = st.status === 'found'
-      ? 'Detected from the geometry, not named in the file. Click to isolate ' +
-        (st.objects.length === 1 ? 'it' : 'them') + ' - then Crop or Export as usual.\n' +
+      ? 'Detected from the geometry, not named in the file. Click to show or hide ' +
+        (st.objects.length === 1 ? 'it' : 'them') + ' - over the part, or alone with the part switched off.\n' +
         st.objects.map(function (o) {
           return o.name + ': ' + o.feature.summary + ', ' + o.feature.volume.toFixed(1) + ' mm\u00b3, root ' +
             o.feature.rootArea.toFixed(1) + ' mm\u00b2';
@@ -1965,29 +2058,8 @@ var NSO_MICROSCOPE = (function () {
       : st.status === 'pending' ? 'Looking for a ' + rule + ' in the geometry...'
       : 'No ' + rule + ': ' + st.reason;
     item.appendChild(swatch); item.appendChild(label);
-    item.addEventListener('click', function () { isolateFeature(rule); });
+    item.addEventListener('click', function () { toggleDetected(rule); });
     return item;
-  }
-
-  /** A row's click: that rule's feature(s) as the selection, isolated. With none, say why and change nothing. */
-  function isolateFeature(rule) {
-    if (FEATURE_RULES.indexOf(rule) < 0) return false;
-    var st = featureState(rule);
-    if (!st) return false;
-    detectFeatures();
-    buildDetectedRow();
-    var N = FEATURE_NAMES[rule];
-    if (st.status !== 'found') {
-      say(N + ': ' + (st.status === 'unavailable' ? 'not available - ' : 'none detected - ') + st.reason, false);
-      info((st.status === 'unavailable' ? '<b>' + N + ': not available here.</b> ' : '<b>No ' + rule + ' detected.</b> ') +
-           st.reason.replace(/</g, '&lt;'));
-      return false;
-    }
-    removeAllBalls();
-    setSelection(st.objects.slice(), rule);
-    isolate();
-    buildDetectedRow();
-    return true;
   }
 
   var detectTimer = null;
@@ -1999,7 +2071,8 @@ var NSO_MICROSCOPE = (function () {
       if (doc !== mine) return;
       detectFlanges();
       detectFeatures();
-      buildDetectedRow();
+      // What was found is drawn now: its rows open switched on.
+      if (view) viewChanged(); else buildDetectedRow();
     }, 30);
   }
 
@@ -2016,7 +2089,7 @@ var NSO_MICROSCOPE = (function () {
     if (doc.kind === 'toolpath') {
       currentSelection.forEach(function (s) { CLEARED.add(s.id); });
     } else {
-      currentSelection.forEach(function (o) { if (!isDetected(o)) HIDDEN.add(o.name); });
+      currentSelection.forEach(function (o) { HIDDEN.add(o.name); });
     }
     removeAllBalls();
     setSelection([], selectionSource === 'line' ? 'line' : 'box');
@@ -2027,12 +2100,14 @@ var NSO_MICROSCOPE = (function () {
     return n;
   }
 
-  /** Every legend group back on, nothing cleared. The slider is left alone. */
+  /** Every row back on - parts, features and detector rows - nothing cleared. The slider is left alone. */
   function showAll() {
     if (!doc) return;
     CLEARED.clear();
     HIDDEN = new Set(doc.kind === 'toolpath' ? ['Travel'] : []);
+    DETECTED_ON = new Set(allDetectors());
     viewChanged();
+    rescopeSelection();
   }
 
   /** Everything the filters leave on screen, as the selection. */
@@ -2040,7 +2115,7 @@ var NSO_MICROSCOPE = (function () {
     if (!doc) return [];
     removeAllBalls();
     if (doc.kind === 'toolpath') setSelection(shownSegments(), 'visible');
-    else setSelection(doc.objects.filter(objectShown), 'visible');
+    else setSelection(shownObjects(), 'visible');
     return currentSelection;
   }
 
@@ -2136,9 +2211,11 @@ var NSO_MICROSCOPE = (function () {
     if (!view) return;
     var g = view.highlightGroup;
     clearGroup(g);
-    Object.keys(view.overviewMeshes).forEach(function (k) {
-      var m = view.overviewMeshes[k];
-      if (m.isMesh && m.material && m.material.emissive) m.material.emissive.setHex(0x000000);
+    [view.overviewMeshes, view.detectedMeshes].forEach(function (meshes) {
+      Object.keys(meshes).forEach(function (k) {
+        var m = meshes[k];
+        if (m.isMesh && m.material && m.material.emissive) m.material.emissive.setHex(0x000000);
+      });
     });
     if (!doc || !currentSelection.length) return;
     if (doc.kind === 'toolpath') {
@@ -2172,6 +2249,8 @@ var NSO_MICROSCOPE = (function () {
       return;
     }
     currentSelection.forEach(function (o) {
+      var dm = isDetected(o) && view.detectedMeshes[o.name];
+      if (dm && dm.visible) { dm.material.emissive.setHex(0x3a1010); return; }
       if (isDetected(o)) {
         // Lifted out of a part that is drawn whole, so it is drawn over that
         // part - winning the depth test where the two coincide.
@@ -2889,11 +2968,9 @@ var NSO_MICROSCOPE = (function () {
     var legendTitle = $('ms-legend-title'), infoTitle = $('ms-info-title');
     var isPath = !!(doc && doc.kind === 'toolpath');
     if (legendTitle) {
-      legendTitle.textContent = (legendTab === 'detected' ? 'Detected features'
-        : doc && !isPath ? 'Parts' : 'Features') + ' (click to isolate)';
+      // One list per view, and every row in it a show / hide toggle.
+      legendTitle.textContent = doc && !isPath ? 'Parts' : 'All features';
     }
-    var tabLegend = $('ms-tab-legend');
-    if (tabLegend) tabLegend.textContent = doc && !isPath ? 'Parts' : 'All features';
     if (infoTitle) {
       infoTitle.textContent = 'Selection / ' + (isPath || !doc ? 'segment' : 'part') + ' info';
     }
@@ -3078,6 +3155,7 @@ var NSO_MICROSCOPE = (function () {
     doc = d;
     HIDDEN = new Set(doc.kind === 'toolpath' ? ['Travel'] : []);
     CLEARED = new Set();
+    DETECTED_ON = new Set(allDetectors());
     lineCursor = -1;
     removeAllBalls();
     currentSelection = [];
@@ -3091,17 +3169,20 @@ var NSO_MICROSCOPE = (function () {
     zr = { lo: 0, hi: zSteps() - 1, n: zSteps() };
     applyClip();
     buildOverview();
-    setLegendTab(null);
     buildLegend();
     applyFeatureVisibility();
-    setMode('select');
+    // Orbit: a plain click on a piece does nothing until "Click to select
+    // region" is armed - a box is something you ask for, not a side effect
+    // of looking round the part.
+    setMode('orbit');
     normalView();                 // frames the whole part
     syncHeader();
     syncLayerRow();
     info(doc.kind === 'toolpath'
-      ? 'Click the model to drop a capture box, pick a single line, or take a whole layer.'
-      : ('Click a ' + (doc.source === 'plate' ? 'piece' : 'part') +
-         ' to drop a capture box over it.'));
+      ? 'Drag to orbit. <b>Click to select region</b>, then click the model to drop a capture box; ' +
+        'or pick a single line, or take a whole layer.'
+      : ('Drag to orbit. <b>Click to select region</b>, then click a ' +
+         (doc.source === 'plate' ? 'piece' : 'part') + ' to drop a capture box over it.'));
     var lineBtn = $('ms-mode-line');
     if (lineBtn) lineBtn.disabled = doc.kind !== 'toolpath';
     syncExportRow();
@@ -3154,11 +3235,13 @@ var NSO_MICROSCOPE = (function () {
       clearGroup(view.overviewGroup);
       clearGroup(view.detailGroup);
       view.overviewMeshes = {};
+      view.detectedMeshes = {};
     }
     doc = null;
     currentSelection = [];
     isolated = false;
     CLEARED = new Set();
+    DETECTED_ON = new Set();
     zr = null;
     if (view) clearGroup(view.highlightGroup);
     syncZRangeUI();
@@ -3324,6 +3407,7 @@ var NSO_MICROSCOPE = (function () {
     plateObjects: plateObjects,
     openPicker: openPicker,
     setMode: function (m) { setMode(m); },
+    mode: function () { return mode; },
     addBoxAt: function (gx, gy, gz, r, h, ry, a) {
       // A capture box placed by G-code coordinates rather than by a click, so a
       // check can drive the same selection a drag produces. `ry` makes the
@@ -3366,20 +3450,13 @@ var NSO_MICROSCOPE = (function () {
     },
     soloGroup: soloGroup,
     soloGroups: soloGroups,
-    isolateGroups: isolateGroups,
-    isolateMoves: isolateMoves,
-    /** fn(doc) -> Detected-tab rows; see buildSourceRows(). Rebuilt with the legend. */
-    addDetectedSource: function (fn) { if (typeof fn === 'function') detectedSources.push(fn); },
-    refreshDetected: function () { buildDetectedRow(); },
-    setLegendTab: setLegendTab,
-    legendTab: function () { return legendTab; },
     showAll: showAll,
     clearFromView: clearFromView,
     cleared: function () { return Array.from(CLEARED); },
     selectVisible: selectVisible,
     shownCount: function () {
       if (!doc) return 0;
-      return doc.kind === 'toolpath' ? shownSegments().length : doc.objects.filter(objectShown).length;
+      return doc.kind === 'toolpath' ? shownSegments().length : shownObjects().length;
     },
     pickLineAt: pickLineAt,
     pickLine: function (moveIndex, additive) {
@@ -3430,7 +3507,7 @@ var NSO_MICROSCOPE = (function () {
     },
     getView: function () { return view; },
     // --- detected features (docs/GSCOPE-FLANGE.md) ---
-    /** The Flange tab's state: status 'pending' | 'found' | 'none' | 'unavailable'. */
+    /** The Flange row's state: status 'pending' | 'found' | 'none' | 'unavailable'. */
     flange: function () {
       var st = flangeState();
       if (!st) return null;
@@ -3441,7 +3518,10 @@ var NSO_MICROSCOPE = (function () {
                }) };
     },
     detectFlanges: function () { var st = detectFlanges(); buildDetectedRow(); return st ? st.status : null; },
-    isolateFlange: isolateFlange,
+    /** A detector row's click ('flange', 'handle', ...): true when it is on after it. */
+    toggleDetected: toggleDetected,
+    /** The detector rows switched on, in list order. */
+    detectedOn: function () { return allDetectors().filter(detectedChecked); },
     // --- Handle, Bracket, Lid, Hinge (docs/GSCOPE-FEATURES.md) ---
     /** One rule's row state: status 'pending' | 'found' | 'none' | 'unavailable'. */
     feature: function (rule) {
@@ -3459,8 +3539,7 @@ var NSO_MICROSCOPE = (function () {
       var out = {};
       FEATURE_RULES.forEach(function (r) { var st = featureState(r); out[r] = st ? st.status : null; });
       return out;
-    },
-    isolateFeature: isolateFeature
+    }
   };
 })();
 

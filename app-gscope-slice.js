@@ -18,9 +18,11 @@
  * toggle between the mesh and its slice, not a camera. Slice view
  * (#ms-cam-slice) slices the open mesh at once with whatever the Slice
  * settings hold - collapsed out of the way by default, their values kept
- * across every round trip because nothing resets them - and turns the
- * floating legend to its Detected features tab: walls, infill, top / bottom
- * and every overhang call, each a click to isolate. Normal (#ms-cam-normal)
+ * across every round trip because nothing resets them. The floating list is
+ * then the slice's All features list, one row per feature the slice printed,
+ * each a show / hide toggle - and nothing else: no tab strip, and no rows for
+ * overhangs or conflicts, which are the Supports tool's to show (its own
+ * markers) and this panel's report line's to state. Normal (#ms-cam-normal)
  * goes back to the mesh through backToMesh(), which re-opens it - so the
  * whole part comes back as G-scope opens it: nothing selected, nothing
  * isolated, nothing hidden. On a mesh, Normal is the plain re-frame it always
@@ -273,85 +275,6 @@ var NSO_GSCOPE_SLICE = (function () {
     }
   }
 
-  // --- the Detected features tab, on a slice --------------------------------
-
-  var FAMILIES = [
-    { key: 'walls', groups: ['Outer wall', 'Inner wall', 'Overhang wall'] },
-    { key: 'infill', groups: ['Sparse infill', 'Internal solid infill'] },
-    { key: 'skin', groups: ['Top surface', 'Bottom surface', 'Bridge'] }
-  ];
-  var OVERHANG_COLOR = 0xe5484d;
-
-  function moves(d, groups) {
-    return groups.reduce(function (a, g) { return a + (d.groups[g] ? d.groups[g].length : 0); }, 0);
-  }
-
-  /** The moves printed over one overhang region: its layers, inside its footprint's bounds. */
-  function regionMoves(d, r, g) {
-    var lo = r.planes[g.firstLayer].printZ - 1e-6, hi = r.planes[g.lastLayer].printZ + 1e-6;
-    var pad = r.options.outerWallWidthMm || 0.5;
-    return d.segments.filter(function (sg) {
-      if (sg.feature === 'Travel' || !(sg.z >= lo && sg.z <= hi)) return false;
-      var mx = (sg.x0 + sg.x1) / 2, my = (sg.y0 + sg.y1) / 2;
-      return mx >= g.min[0] - pad && mx <= g.max[0] + pad && my >= g.min[1] - pad && my <= g.max[1] + pad;
-    }).map(function (sg) { return sg.mv.index; });
-  }
-
-  function isolateOrSay(ok, what) {
-    if (!ok) say(what + ': nothing of it is left to show', true);
-    return ok;
-  }
-
-  /** The rows Slice view lists under Detected features: feature families, then overhang calls. */
-  function detectedRows(d) {
-    if (!d || !d.nsoSlice) return [];
-    var r = d.nsoSlice.result, o = r.options;
-    var rows = [], taken = { Travel: 1 };
-    FAMILIES.forEach(function (f) {
-      var have = f.groups.filter(function (g) { return !!d.groups[g]; });
-      have.forEach(function (g) { taken[g] = 1; });
-      if (!have.length) return;
-      var n = moves(d, have);
-      var label = f.key === 'walls'
-        ? 'Walls - ' + o.wallLoops + ' loop' + (o.wallLoops === 1 ? '' : 's') + ', ' + o.outerWallWidthMm + ' mm (' + n + ')'
-        : f.key === 'infill'
-          ? 'Infill - ' + Math.round(o.sparseDensity * 100) + ' % ' + o.sparsePattern + ' (' + n + ')'
-          : 'Top / bottom (' + n + ')';
-      rows.push({ key: f.key, group: have[0], label: label,
-        title: have.map(function (g) { return g + ': ' + d.groups[g].length + ' moves'; }).join('\n') +
-          '\nClick to isolate them - every other feature hidden.',
-        onClick: function () { return isolateOrSay(MS().isolateGroups(have), label); } });
-    });
-    Object.keys(d.groups).sort().forEach(function (g) {
-      if (taken[g]) return;
-      rows.push({ key: 'group:' + g, group: g, label: g + ' (' + d.groups[g].length + ')',
-        title: 'Click to isolate ' + g + '.',
-        onClick: function () { return isolateOrSay(MS().isolateGroups([g]), g); } });
-    });
-    r.objects.forEach(function (ob) {
-      if (!ob.overhang.length) {
-        rows.push({ key: 'overhang-none:' + ob.name, color: OVERHANG_COLOR, dim: true,
-          label: 'Overhang: ' + ob.name + ' - none, no support needed',
-          title: 'Nothing on ' + ob.name + ' prints steeper than ' + o.supportThresholdDeg + '° off the plate.' });
-        return;
-      }
-      ob.overhang.forEach(function (g, i) {
-        var label = 'Overhang: ' + ob.name + ' at z ' + g.firstZ.toFixed(2) + ' - support on ' + g.standsOn;
-        rows.push({ key: 'overhang:' + ob.name + ':' + i, color: OVERHANG_COLOR, label: label,
-          title: g.footprintMm2.toFixed(1) + ' mm² needs support below ' + o.supportThresholdDeg + '°, layers ' +
-            (g.firstLayer + 1) + '-' + (g.lastLayer + 1) + ', standing on the ' + g.standsOn +
-            '.\nClick to isolate the moves printed over it.',
-          onClick: function () { return isolateOrSay(MS().isolateMoves(regionMoves(d, r, g), 'detected'), label); } });
-      });
-    });
-    if (r.conflicts.length) {
-      rows.push({ key: 'conflict', color: OVERHANG_COLOR,
-        label: 'Conflict: pieces overlap on layer ' + conflictLayers(r).join(', '),
-        title: 'Two pieces print into each other on these layers.' });
-    }
-    return rows;
-  }
-
   function report(r, flagged) {
     var lines = [];
     var o = r.options;
@@ -384,7 +307,7 @@ var NSO_GSCOPE_SLICE = (function () {
     if (!read || busy) return;
     if (ours) read.textContent = report(d.nsoSlice.result, d.nsoSlice.flagged);
     else if (d && d.kind === 'mesh') read.textContent = 'Slice view slices every ' + (d.source === 'plate' ? 'piece' : 'object') +
-      ' into real layers, walls and infill with the in-house slicer and lists what it finds under Detected features.';
+      ' into real layers, walls and infill with the in-house slicer and lists its features.';
   }
 
   function bind(id, ev, fn) {
@@ -394,16 +317,9 @@ var NSO_GSCOPE_SLICE = (function () {
 
   function mount() {
     if (!MS()) return;
-    MS().addDetectedSource(detectedRows);
     MS().onDocument(function (d) {
       if (pending && d && d.kind === 'toolpath') { d.nsoSlice = pending; last = pending; }
       pending = null;
-      if (d && d.nsoSlice) {
-        // The legend was built before the slice was attached: its rows now,
-        // and the Detected features tab up.
-        MS().refreshDetected();
-        MS().setLegendTab('detected');
-      }
       syncPanel();
     });
     bind('ms-cam-slice', 'click', function () { sliceView(); });
@@ -427,7 +343,6 @@ var NSO_GSCOPE_SLICE = (function () {
     sliceView: sliceView,
     normalView: normalView,
     viewMode: viewMode,
-    detectedRows: detectedRows,
     backToMesh: backToMesh,
     exportPieceToPlate: exportPieceToPlate,
     exportPieceAsSTL: exportPieceAsSTL,

@@ -55,8 +55,9 @@
                  stays off: nothing is observed and nothing is moved.
                  G-scope's own actions are lines of their own ("gscope"), not
                  only context on a phantom: going in and out, a legend row
-                 toggled (which row, off or on) or soloed, a Detected features
-                 row, a Normal / Slice switch (from which view to which), a
+                 toggled (which row, off or on) or soloed, a Parts list
+                 detector row (off, on, or staying off when nothing was
+                 found), a Normal / Slice switch (from which view to which), a
                  click on its 3D view (the mode, and what was under the
                  pointer - or nothing), and every other button or field in it.
                  Each is written BEFORE G-scope's own handler runs, so it
@@ -1121,7 +1122,9 @@
                                 v.raycaster.params.Line.threshold) || 0.6;
     rc.setFromCamera(new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1,
                                        -((ev.clientY - r.top) / r.height) * 2 + 1), v.camera);
-    var meshes = v.overviewMeshes || {};
+    /* A detector row's feature, drawn over its part or alone, is a target
+       too (v.detectedMeshes). */
+    var meshes = Object.assign({}, v.overviewMeshes || {}, v.detectedMeshes || {});
     var targets = Object.keys(meshes).map(function (k) { return meshes[k]; })
       .filter(function (m) { return m && m.visible; });
     var hits = rc.intersectObjects(targets, false);
@@ -1161,9 +1164,14 @@
           var turnsOn = hid.indexOf(g) >= 0;
           gsLog('legend', 'legend "' + g + '" ' + (turnsOn ? 'on' : 'off'), { group: g, on: turnsOn });
         } else if (det) {
-          gsLog('detected', 'Detected features row "' + gsLabel(det) + '"' +
-                (det.dataset.detected ? ' (' + det.dataset.detected + ')' : ''),
-                { row: det.dataset.detected || null, label: gsLabel(det) });
+          /* A detector row under the parts: a show / hide toggle like a part's
+             row (app-microscope.js toggleDetected()). Read before G-scope's
+             handler runs; a row with nothing found stays off. */
+          var was = det.getAttribute('aria-checked') === 'true';
+          var empty = det.dataset.status === 'none' || det.dataset.status === 'unavailable';
+          var turns = was ? 'off' : empty ? 'stays off (' + det.dataset.status + ')' : 'on';
+          gsLog('detected', 'Parts row "' + gsLabel(det) + '" ' + turns,
+                { row: det.dataset.detected || null, label: gsLabel(det), on: !was && !empty });
         } else if (b && (b.id === 'ms-cam-normal' || b.id === 'ms-cam-slice')) {
           if (b.disabled) return;
           var from = viewNow() === 'gscope-slice' ? 'Slice' : 'Normal';

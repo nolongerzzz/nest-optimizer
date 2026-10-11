@@ -12,7 +12,8 @@ any detector.
 `nso_face_features.js` is the detector for those four. It is one module with
 four rules, and every rule is held to that ground truth as strictly as the
 flange was. Each one is a row in G-scope's Parts list under **Flange**, and
-works the same way: click to isolate, then Export or Crop through
+works the same way: a show / hide toggle like the part rows above it; shown
+alone, Select shown (or a box) takes it, then Export or Crop through
 `setSelection()`.
 
 Out of scope: Detach / Reattach from these detections. Detach
@@ -185,9 +186,9 @@ root area and bounds are exact.
 
 | document | a row reads | a click |
 |---|---|---|
-| a mesh with that feature | `Handle (8 mm rod, 21 mm clear, 1196 tri)`, `Bracket (3 mm, 20 mm arm, 2 gussets, 48 tri)`, `Lid (0.5 mm clear, 6 mm seat, 36 tri)`, `Hinge (0.5 mm clear, 2 bodies, 700 tri)`, each in its own colour | selects it and isolates it. The row stays lit while it is the selection |
-| a mesh without it | `Handle - none detected`, dimmed. The tooltip gives the nearest candidate's failures in words | nothing is selected, and the info line says why |
-| a slice | `Handle - not on a slice` | the same. A slice has beads, not a closed surface |
+| a mesh with that feature | `Handle (8 mm rod, 21 mm clear, 1196 tri)`, `Bracket (3 mm, 20 mm arm, 2 gussets, 48 tri)`, `Lid (0.5 mm clear, 6 mm seat, 36 tri)`, `Hinge (0.5 mm clear, 2 bodies, 700 tri)`, each in its own colour; opens switched on, the feature drawn in that colour over its part | shows or hides it. With its part switched off it is drawn alone. Nothing is selected or isolated by the click, and the list stays up |
+| a mesh without it | `Handle - none detected`, dimmed and off. The tooltip gives the nearest candidate's failures in words | stays off, and the info line says why |
+| a slice | no row: a slice lists only its features. A slice has beads, not a closed surface (`NSO_MICROSCOPE.feature(rule)` still says so) | - |
 
 The rows come after **Flange**, in the order Handle, Bracket, Lid, Hinge, in
 the same `#ms-detected` block. One analysis of each piece serves all four
@@ -195,27 +196,33 @@ rows. It runs once per document, just after it opens, and also runs when a
 row is clicked before it has finished. A piece over 400,000 triangles is
 skipped by name, as it is for the flange.
 
-What a row hands over is an ordinary mesh object, so **Isolate**, **Back**
-(the feature highlighted on the whole part), **Export as STL**, **Export to
-plate** and **Crop** (as a new piece, the file route) all take it exactly as
-they take the flange.
+What a row shows is an ordinary mesh object. Drawn alone (its part off), it is
+part of what is shown, so **Select shown**, a capture box, **Isolate**,
+**Export as STL**, **Export to plate** and **Crop** (as a new piece, the file
+route) all take it exactly as they take the flange. Drawn over its part (both
+on), it is a highlight on that part, and Select shown takes the part once.
 
 The drive-check covers the following:
 
-1. Each single-feature fixture goes through G-scope's own Import. Its row is
-   lit with the numbers Node measures, and the other four rows (Flange
-   included) read "none detected" with their reasons. A real click isolates
-   it alone, in its colour, with exactly its declared bounds. Export as STL
-   writes exactly that feature: the same triangles, its declared volume and
-   bounds, and a clean solid (PASS, χ as declared).
-2. `feature-hull_all.stl` lights all five rows. Each click isolates its own
-   feature with exactly its bounds, and only its own row lights. Back
-   highlights it on the hull. Crop takes a band out of the handle as a new
-   piece.
-3. On a slice, each of the four rows says it cannot look.
+1. Each single-feature fixture goes through G-scope's own Import. Its row
+   opens lit and on with the numbers Node measures, the feature drawn over
+   the hull, and the other four rows (Flange included) read "none detected"
+   with their reasons; a click on one changes nothing and says why. A real
+   click on the hull's row leaves the feature alone, in its colour, the list
+   still up and nothing isolated. Select shown takes exactly it, with its
+   declared bounds, and Export as STL writes exactly that feature: the same
+   triangles, its declared volume and bounds, and a clean solid (PASS, χ as
+   declared).
+2. `feature-hull_all.stl` lights all five rows. Every row off is an empty
+   view; back on one at a time, each click draws exactly its own. Each
+   feature alone is exactly that feature with its bounds. With the hull on,
+   the hinge is a highlight on it and Select shown takes the hull once. Crop
+   takes a band out of the handle as a new piece.
+3. A slice lists no detector rows; asked, each rule says it cannot look.
 
 In the page: `NSO_MICROSCOPE.feature(rule)` (status, reason, objects),
-`.featureRules()`, `.detectFeatures()` and `.isolateFeature(rule)`. In Node
+`.featureRules()`, `.detectFeatures()`, `.toggleDetected(rule)` and
+`.detectedOn()`. In Node
 or the page: `NSO_FaceFeatures.detect(soup)`.
 
 ## What it does not find, on purpose

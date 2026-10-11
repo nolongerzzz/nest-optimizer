@@ -204,7 +204,7 @@ async function main() {
   check('and says how many pieces and triangles', /1 piece, \d+ triangles/.test(plateDoc.sub), true);
   check('it claims no layers, because a plate piece has none', plateDoc.layers, 0);
   check('the legend groups on parts, not on invented features',
-    plateDoc.legendTitle, 'Parts (click to isolate)');
+    plateDoc.legendTitle, 'Parts');
 
   // Geometry, not a picture of it: the piece read off the plate must be the
   // piece that is on the plate, in the file's own Z-up millimetres, standing
@@ -276,6 +276,9 @@ async function main() {
     boxed.label, onPlate.name);
   check('the export row came up with the selection', boxed.exportRow, true);
 
+  // The box controls - Isolate all boxes, Clear all boxes - are under Click
+  // to select region, and G-scope opens in orbit: arm it, as a user does.
+  await page.click('#ms-mode-select');
   await page.click('#ms-btn-isolate');
   const isolated = await page.evaluate(() => {
     const v = window.NSO_MICROSCOPE.getView();
@@ -451,6 +454,9 @@ async function main() {
   check('and what comes out is 12 triangles per move', supportOnly.tris, supportOnly.n * 12);
   console.log(`       ${supportOnly.label}: ${supportOnly.tris} triangles`);
 
+  // The box controls - Isolate all boxes, Clear all boxes - are under Click
+  // to select region, and G-scope opens in orbit: arm it, as a user does.
+  await page.click('#ms-mode-select');
   await page.click('#ms-btn-isolate');
   check('and it isolates on screen as one body',
     await page.evaluate(() => {

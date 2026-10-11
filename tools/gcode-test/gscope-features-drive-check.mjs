@@ -4,21 +4,30 @@
  * READ docs/GSCOPE-FEATURES.md for the four rules; tools/nso_face_features_test.js
  * holds them to nso_features.js's ground truth in Node. This drives the real
  * app in headless Chromium and checks the four rows under Flange in G-scope's
- * Parts list - Handle, Bracket, Lid, Hinge:
+ * Parts list - Handle, Bracket, Lid, Hinge. Every row in that list is a show /
+ * hide toggle, the same model as a slice's All features list: nothing in it
+ * isolates, and the list never leaves the screen.
  *
  *   1  EACH FEATURE ALONE (fixtures/features/feature-hull_<rule>.stl through
- *      G-scope's own Import): its row is lit with the numbers nso_face_features.js
- *      measures in Node, and the other rows - Flange included - read "none
- *      detected", dimmed, with the reason in the tooltip. A real click on the
- *      row isolates it: alone, in its colour, its bounds exactly the feature's
- *      declared bounds. Export as STL writes exactly that feature: the same
- *      triangles, its declared volume and bounds, a clean solid.
- *   2  ALL FIVE ON ONE HULL (feature-hull_all.stl): every row lit, and each
- *      click isolates its own feature and nothing of the others. Back puts the
- *      hull back with the feature highlighted on it; Crop takes a band out of
- *      one as a new piece, as it does for the flange.
- *   3  A SLICE: every row says it cannot look, and a click says so.
- *   4  SCREENSHOTS of each feature isolated.
+ *      G-scope's own Import): its row opens lit and switched on, with the
+ *      numbers nso_face_features.js measures in Node, the feature drawn in its
+ *      colour over the hull; the other rows - Flange included - read "none
+ *      detected", dimmed, with the reason in the tooltip, and a click on one
+ *      changes nothing and says why. A real click on the hull's own row
+ *      switches the hull off: the feature is then drawn alone, the list still
+ *      up, nothing isolated. Select shown takes exactly the feature - its
+ *      bounds the declared bounds - and Export as STL writes exactly it: the
+ *      same triangles, its declared volume and bounds, a clean solid.
+ *   2  ALL FIVE ON ONE HULL (feature-hull_all.stl): every row lit. Every row
+ *      switched off, one real click at a time, leaves nothing drawn; switched
+ *      back on one at a time, each click draws exactly what it adds. Each
+ *      feature alone (every other row off) is exactly that feature, and
+ *      nothing of the others. With the hull on, a feature is a highlight on
+ *      it: Select shown takes the hull and not the feature twice. Crop takes a
+ *      band out of one as a new piece, as it does for the flange.
+ *   3  A SLICE: no detector rows at all - a slice has no closed surface to
+ *      look at, and its one list is its features. Asked anyway, a rule says so.
+ *   4  SCREENSHOTS of each feature alone, and the hinge on the hull.
  *
  * Usage: node tools/gcode-test/gscope-features-drive-check.mjs
  */
@@ -94,7 +103,7 @@ async function rows(page) {
     const out = {};
     document.querySelectorAll('#ms-detected .ms-legend-item').forEach((e) => {
       out[e.dataset.detected] = { text: e.textContent, status: e.dataset.status, dim: e.classList.contains('dim'),
-                                  active: e.classList.contains('active'), title: e.title,
+                                  checked: e.getAttribute('aria-checked'), title: e.title,
                                   visible: !!(e.offsetWidth && e.offsetHeight) };
     });
     const states = {};
@@ -113,23 +122,42 @@ async function importFile(page, rel) {
   }, base, { timeout: 30000 });
 }
 
-/** A real click on a row, and what it did. */
-async function clickRow(page, rule) {
-  await page.click(`#ms-detected [data-detected="${rule}"]`);
+/**
+ * What G-scope draws and holds right now: every visible mesh in the overview
+ * (a part, or a detector row's feature) with its colour, whether anything is
+ * isolated, the list's own state, and the selection.
+ */
+async function view(page) {
   await frames(page);
-  return page.evaluate((rule) => {
+  return page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, v = M.getView();
-    const sel = M.selection();
+    const drawn = [];
+    v.overviewGroup.children.forEach((c) => {
+      if (c.visible) drawn.push([c.userData.feature, c.material.color.getHex()]);
+    });
+    drawn.sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    const float = document.getElementById('ms-legend-float');
     return {
-      sel: sel.map((o) => o.name), by: M.selectionSource(),
-      bounds: sel.length === 1 ? sel[0].bounds : null,
-      detail: v.detailGroup.visible, overview: v.overviewGroup.visible,
-      drawn: v.detailGroup.children.map((c) => [c.type, c.material.color.getHex()]),
-      active: document.querySelector(`#ms-detected [data-detected="${rule}"]`).classList.contains('active'),
+      drawn, detail: v.detailGroup.visible, overview: v.overviewGroup.visible,
+      badge: document.getElementById('ms-mode-badge').textContent,
+      listUp: !!(float.offsetWidth && float.offsetHeight) && !float.classList.contains('collapsed'),
+      rows: document.querySelectorAll('#ms-legend-float .ms-legend-item').length,
+      checked: Array.from(document.querySelectorAll('#ms-legend-float .ms-legend-item'))
+        .filter((e) => e.getAttribute('aria-checked') === 'true')
+        .map((e) => e.dataset.group || e.dataset.detected),
+      sel: M.selection().map((o) => o.name), by: M.selectionSource(),
+      bounds: M.selection().length === 1 ? M.selection()[0].bounds : null,
       exportShown: getComputedStyle(document.getElementById('ms-export-row')).display !== 'none',
       info: document.getElementById('ms-info').textContent,
     };
-  }, rule);
+  });
+}
+
+/** A real click on a row of the Parts list: a part's (by name) or a detector's (by rule). */
+async function clickRow(page, key) {
+  const sel = ['flange', ...RULES].includes(key) ? `#ms-detected [data-detected="${key}"]` : `#ms-legend [data-group="${key}"]`;
+  await page.click(sel);
+  return view(page);
 }
 
 async function exportStl(page, file) {
@@ -161,6 +189,7 @@ async function main() {
   // =======================================================================
   for (const rule of RULES) {
     const stl = `feature-hull_${rule}.stl`;
+    const hull = `feature-hull_${rule}`, fname = `${hull} - ${NAME[rule]}`;
     const rec = feat(stl, rule);
     const node = FF.detect(readSTL(await readFile(join(ROOT, FIX, stl))))[rule].found[0];
     console.log(`\n  ${stl}`);
@@ -168,27 +197,39 @@ async function main() {
     const t = await rows(page);
     check('the Parts list: Flange, then Handle, Bracket, Lid, Hinge, one row each', t.order, ['flange', ...RULES]);
     const want = `${NAME[rule]} (${FF.summary(rule, node)}, ${node.triangles} tri)`;
-    check(`the ${NAME[rule]} row is lit with the numbers Node measures`, [t.rows[rule].text, t.rows[rule].dim, t.rows[rule].visible],
-      [want, false, true]);
+    check(`the ${NAME[rule]} row opens lit and switched on, with the numbers Node measures`,
+      [t.rows[rule].text, t.rows[rule].dim, t.rows[rule].checked, t.rows[rule].visible], [want, false, 'true', true]);
     console.log('       ' + t.rows[rule].text);
     const others = ['flange', ...RULES].filter((r) => r !== rule);
-    check('the other four read "none detected", dimmed', others.map((r) => [t.rows[r].text, t.rows[r].dim]),
-      others.map((r) => [`${NAME[r]} - none detected`, true]));
+    check('the other four read "none detected", dimmed and off', others.map((r) => [t.rows[r].text, t.rows[r].dim, t.rows[r].checked]),
+      others.map((r) => [`${NAME[r]} - none detected`, true, 'false']));
     check('...each saying why in its tooltip', others.every((r) => new RegExp(`^No ${r}: .+`).test(t.rows[r].title)), true);
     console.log('       ' + others.map((r) => t.rows[r].title).join('\n       '));
     const obj = t.states[rule].objects[0];
     check('what the page found is what Node finds: triangles, volume', [obj.triangles, obj.feature.volume.toFixed(3)],
       [node.triangles, rec.volume.toFixed(3)]);
 
-    const iso = await clickRow(page, rule);
-    check('a click isolates it: the selection is the feature, from its row', [iso.sel, iso.by],
-      [[`feature-hull_${rule} - ${NAME[rule]}`], rule]);
-    check('alone, as one solid, in the row\'s colour', [iso.detail, iso.overview, iso.drawn],
-      [true, false, [['Mesh', COLOR[rule]]]]);
-    check('the row is lit while it is the selection; Export is offered', [iso.active, iso.exportShown], [true, true]);
-    check('the info line names it', new RegExp(`${NAME[rule]} \\(detected\\).*feature-hull_${rule} - ${NAME[rule]}`).test(iso.info), true);
-    check('the isolated geometry is exactly the feature\'s declared bounds', pb(iso.bounds), tb(rec.truth.bounds));
-    await shot(page, `${rule}-isolated.png`, `the ${rule} isolated`);
+    const v0 = await view(page);
+    check('it opens drawn in its row\'s colour over the hull, nothing isolated', [v0.drawn, v0.detail, v0.badge],
+      [[[hull, v0.drawn.find((d) => d[0] === hull)[1]], [fname, COLOR[rule]]], false, 'Whole part']);
+
+    const nr = others[0];
+    const vn = await clickRow(page, nr);
+    check(`a click on "${NAME[nr]} - none detected" changes nothing and says why`,
+      [vn.drawn, vn.checked, new RegExp(`^No ${nr} detected\\.`).test(vn.info)], [v0.drawn, v0.checked, true]);
+
+    const v1 = await clickRow(page, hull);
+    check('a real click on the hull\'s row switches it off: the feature is drawn alone, in its colour',
+      v1.drawn, [[fname, COLOR[rule]]]);
+    check('...nothing isolated and nothing selected; the list stays up, every row in it',
+      [v1.detail, v1.overview, v1.badge, v1.sel, v1.listUp, v1.rows], [false, true, 'Whole part', [], true, 6]);
+    await shot(page, `${rule}-alone.png`, `the ${rule} alone`);
+
+    await page.click('#ms-btn-select-visible');
+    const v2 = await view(page);
+    check('Select shown takes exactly what is checked: the feature', [v2.sel, v2.by, v2.exportShown],
+      [[fname], 'visible', true]);
+    check('...whose geometry is exactly the feature\'s declared bounds', pb(v2.bounds), tb(rec.truth.bounds));
 
     const ex = await exportStl(page, `exported-${rule}.stl`);
     check('Export as STL names the file for it', ex.name, `feature-hull_${rule}_-_${NAME[rule]}.stl`);
@@ -197,40 +238,69 @@ async function main() {
       [rec.volume.toFixed(2), tb(rec.truth.bounds)]);
     const chi = 2 + (rec.topology.bodies || []).reduce((s, g) => s + 2 - 2 * g, 0);
     check('...a clean solid (verdict, open, nm, inconsistent, chi)', validate(ex.path), ['PASS', 0, 0, 0, chi]);
-    await page.click('#ms-btn-back');
-    await frames(page);
   }
 
   // =======================================================================
   console.log('\n--- 2. all five on one hull ---');
   // =======================================================================
   const ALL = 'feature-hull_all.stl';
+  const HULL = 'feature-hull_all';
+  const DET = ['flange', ...RULES];
   await importFile(page, `${FIX}/${ALL}`);
   const ta = await rows(page);
-  check('every row lit: Flange, Handle, Bracket, Lid, Hinge',
-    ['flange', ...RULES].map((r) => [ta.rows[r].status, ta.rows[r].dim]), ['flange', ...RULES].map(() => ['found', false]));
-  console.log('       ' + ['flange', ...RULES].map((r) => ta.rows[r].text).join('\n       '));
+  check('every row lit and on: Flange, Handle, Bracket, Lid, Hinge',
+    DET.map((r) => [ta.rows[r].status, ta.rows[r].dim, ta.rows[r].checked]), DET.map(() => ['found', false, 'true']));
+  console.log('       ' + DET.map((r) => ta.rows[r].text).join('\n       '));
+  const fn = (r) => `${HULL} - ${NAME[r]}`;
+  const full = await view(page);
+  check('the whole list opens checked: the hull and the five', full.checked, [HULL, ...DET]);
+  check('...the hull and all five drawn', full.drawn.map((d) => d[0]).sort(), [HULL, ...DET.map(fn)].sort());
+
+  // Empty, one real click at a time.
+  for (const k of [HULL, ...DET]) await clickRow(page, k);
+  const empty = await view(page);
+  check('every row switched off: nothing drawn, nothing checked, the list still up',
+    [empty.drawn, empty.checked, empty.listUp, empty.rows, empty.detail], [[], [], true, 6, false]);
+  check('...and nothing is shown to take', await page.evaluate(() => window.NSO_MICROSCOPE.shownCount()), 0);
+  // Back on, one at a time: each click adds exactly its own.
+  const order = [...DET, HULL];
+  for (let i = 0; i < order.length; i++) {
+    const vi = await clickRow(page, order[i]);
+    const want = order.slice(0, i + 1).map((k) => (k === HULL ? HULL : fn(k))).sort();
+    check(`on again, one at a time (${i + 1}/${order.length}, ${order[i]}): exactly those drawn`,
+      vi.drawn.map((d) => d[0]).sort(), want);
+  }
+
   for (const rule of RULES) {
     const rec = feat(ALL, rule);
-    const iso = await clickRow(page, rule);
-    check(`${NAME[rule]}: a click isolates it and nothing else`, [iso.sel, iso.by, iso.drawn],
-      [[`feature-hull_all - ${NAME[rule]}`], rule, [['Mesh', COLOR[rule]]]]);
+    // This feature alone: everything else off, by real clicks.
+    for (const k of [HULL, ...DET.filter((r) => r !== rule)]) {
+      if ((await view(page)).checked.includes(k)) await clickRow(page, k);
+    }
+    if (!(await view(page)).checked.includes(rule)) await clickRow(page, rule);
+    await page.click('#ms-btn-select-visible');
+    const iso = await view(page);
+    check(`${NAME[rule]} alone: drawn and taken, nothing of the others`, [iso.drawn, iso.sel, iso.detail],
+      [[[fn(rule), COLOR[rule]]], [fn(rule)], false]);
     check('...exactly its declared bounds', pb(iso.bounds), tb(rec.truth.bounds));
-    check('...and only its own row is lit', await page.evaluate(() =>
-      Array.from(document.querySelectorAll('#ms-detected .ms-legend-item.active')).map((e) => e.dataset.detected)), [rule]);
+    check('...and only its own row checked', iso.checked, [rule]);
+    await clickRow(page, rule);                                   // off again for the next
   }
-  await shot(page, 'all-hinge-isolated.png', 'the hinge isolated off the whole piece');
-  await page.click('#ms-btn-back');
-  await frames(page);
-  const backed = await page.evaluate(() => {
-    const v = window.NSO_MICROSCOPE.getView();
-    return [v.overviewGroup.visible, v.detailGroup.visible, v.highlightGroup.children.length];
-  });
-  check('Back: the whole piece again, the hinge highlighted on it', backed, [true, false, 1]);
+  // The hull and the hinge: the hinge highlighted on the hull.
+  await page.click('#ms-btn-show-all');
+  for (const k of DET.filter((r) => r !== 'hinge')) await clickRow(page, k);
+  await page.click('#ms-btn-select-visible');
+  const hl = await view(page);
+  check('the hull with the hinge on: both drawn, the hinge in its colour over it',
+    hl.drawn.map((d) => d[0]).sort(), [HULL, fn('hinge')].sort());
+  check('...and Select shown takes the hull once - the hinge is inside it, not exported twice', hl.sel, [HULL]);
   await shot(page, 'all-hinge-highlighted.png', 'the hinge highlighted on the whole piece');
 
   // Crop: the handle's middle band, as a new piece (a feature is not a plate piece).
-  await clickRow(page, 'handle');
+  await page.click('#ms-btn-show-all');
+  for (const k of [HULL, ...DET.filter((r) => r !== 'handle')]) await clickRow(page, k);
+  await page.click('#ms-btn-select-visible');
+  check('the handle alone, selected for Crop', (await view(page)).sel, [fn('handle')]);
   const before = await page.evaluate(() => state.models.length);
   const crop = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE;
@@ -252,7 +322,7 @@ async function main() {
   console.log(`       cropped handle Z span ${crop.zSpan.toFixed(3)} mm`);
 
   // =======================================================================
-  console.log('\n--- 3. a slice: every row says it cannot look ---');
+  console.log('\n--- 3. a slice: no detector rows ---');
   // =======================================================================
   await page.click('#btn-microscope');
   await page.setInputFiles('#ms-input', join(ROOT, SLICE));
@@ -260,12 +330,19 @@ async function main() {
     const d = window.NSO_MICROSCOPE.getDoc();
     return d && d.kind === 'toolpath';
   }, null, { timeout: 60000 });
-  const ts = await rows(page);
-  check('each of the four: not on a slice, and why', RULES.map((r) => [ts.rows[r].status, ts.rows[r].text, /closed surface/.test(ts.rows[r].title)]),
-    RULES.map((r) => ['unavailable', `${NAME[r]} - not on a slice`, true]));
-  await page.click('#ms-detected [data-detected="lid"]');
-  const sc = await page.evaluate(() => ({ sel: window.NSO_MICROSCOPE.selection().length, info: document.getElementById('ms-info').textContent }));
-  check('a click there selects nothing and says it is not available', [sc.sel, /^Lid: not available here\./.test(sc.info)], [0, true]);
+  await frames(page);
+  const ts = await page.evaluate(() => {
+    const M = window.NSO_MICROSCOPE;
+    return { rows: document.querySelectorAll('#ms-detected .ms-legend-item').length,
+             title: document.getElementById('ms-legend-title').textContent,
+             states: M.featureRules().map((r) => [M.feature(r).status, /closed surface/.test(M.feature(r).reason)]) };
+  });
+  check('a slice lists no detector rows, only its All features', [ts.rows, ts.title], [0, 'All features']);
+  check('each of the four, asked: not on a slice, and why', ts.states, RULES.map(() => ['unavailable', true]));
+  const sc = await page.evaluate(() => ({ on: window.NSO_MICROSCOPE.toggleDetected('lid'),
+    sel: window.NSO_MICROSCOPE.selection().length, info: document.getElementById('ms-info').textContent }));
+  check('switched on there anyway, it stays off, selects nothing and says it is not available',
+    [sc.on, sc.sel, /^Lid: not available here\./.test(sc.info)], [false, 0, true]);
 
   check('no page errors', errors, []);
   await browser.close();

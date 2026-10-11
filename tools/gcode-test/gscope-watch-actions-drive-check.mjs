@@ -13,8 +13,10 @@
  * in sequence with everything else, saying what was done and in which view.
  *
  *   1  A CLEAN SEQUENCE, EVERY ACTION A LINE. Armed on main, into G-scope
- *      (no re-arm), then legend rows off and on, 3D view clicks (on a piece,
- *      on empty space, in orbit mode), mode buttons, and Normal / Slice
+ *      (no re-arm), then legend rows off and on, a detector row of the Parts
+ *      list, 3D view clicks (on a piece, on empty space, in orbit mode),
+ *      mode buttons - G-scope opens in orbit, so a box is armed first - and
+ *      Normal / Slice
  *      switches with a legend toggle and a 3D click inside Slice view, out
  *      again. Nothing goes wrong - and the Report still holds every one of
  *      those actions as its own row, in exactly the order they were done,
@@ -186,6 +188,12 @@ async function main() {
   await legend(page, gM); expect.push(new RegExp(`^G-scope Normal: legend "${gM}" on$`));
   await legend(page, gP); expect.push(new RegExp(`^G-scope Normal: legend "${gP}" on$`));
   check('the legend really toggled (all back on)', await page.evaluate(() => window.NSO_MICROSCOPE.hidden()), []);
+  // A detector row under the parts: neither block has a flange, so it stays off and says so.
+  await page.waitForFunction(() => window.NSO_MICROSCOPE.flange().status !== 'pending', null, { timeout: 30000 });
+  await page.click('#ms-detected [data-detected="flange"]');
+  expect.push(/^G-scope Normal: Parts row "Flange - none detected" stays off \(none\)$/);
+  // G-scope opens in orbit: a box is something you arm first.
+  await page.click('#ms-mode-select'); expect.push(/^G-scope Normal: click ms-mode-select$/);
   const boxes0 = await page.evaluate(() => window.NSO_MICROSCOPE.boxes().length);
   await click3d(page, await pointOn(page, 'mushroom'));
   expect.push(new RegExp(`^G-scope Normal: 3D view click \\(select mode\\) - hit "${gM}" at \\(`));
@@ -203,10 +211,10 @@ async function main() {
   await sliced(page);
   const sliceGroups = await legendGroups(page);
   const wall = sliceGroups.find((g) => g === 'Outer wall') || sliceGroups[0];
-  // A slice opens on its Detected features tab; the file's own rows are the other tab.
-  await page.click('#ms-tab-legend'); expect.push(/^G-scope Slice: click ms-tab-legend$/);
+  // A slice opens on its one list, All features, and in orbit, as every document does.
   await legend(page, wall); expect.push(new RegExp(`^G-scope Slice: legend "${wall}" off$`));
   await legend(page, wall); expect.push(new RegExp(`^G-scope Slice: legend "${wall}" on$`));
+  await page.click('#ms-mode-select'); expect.push(/^G-scope Slice: click ms-mode-select$/);
   await click3d(page, await pointOn(page, wall));
   expect.push(/^G-scope Slice: 3D view click \(select mode\) - hit "[^"]+" at \(/);
   await page.click('#ms-cam-slice'); expect.push(/^G-scope Slice: view Slice \(already Slice - no change\)$/);
@@ -231,7 +239,7 @@ async function main() {
   check('... each carries its view as a field too (main only for "left")',
     lines1.map((e) => e.view).filter((v, i, a) => a.indexOf(v) === i), ['gscope-normal', 'gscope-slice', 'main']);
   check('... and its action', lines1.map((e) => e.detail.action).filter((v, i, a) => a.indexOf(v) === i).sort(),
-    ['click3d', 'control', 'enter', 'leave', 'legend', 'view']);
+    ['click3d', 'control', 'detected', 'enter', 'leave', 'legend', 'view']);
   const legendOn = lines1.find((e) => e.detail.action === 'legend' && e.detail.on);
   check('a legend line says which row and on/off in its detail', [legendOn.detail.group, legendOn.detail.on], [gM, true]);
   const hit = lines1.find((e) => e.detail.action === 'click3d' && e.detail.hit);
@@ -273,6 +281,7 @@ async function main() {
   const before = [/^G-scope Normal: entered G-scope/];
   await legend(page, gP); before.push(new RegExp(`^G-scope Normal: legend "${gP}" off$`));
   await legend(page, gP); before.push(new RegExp(`^G-scope Normal: legend "${gP}" on$`));
+  await page.click('#ms-mode-select'); before.push(/^G-scope Normal: click ms-mode-select$/);
   await click3d(page, await pointOn(page, 'mushroom'));
   before.push(new RegExp(`^G-scope Normal: 3D view click \\(select mode\\) - hit "${gM}"`));
   await page.click('#ms-cam-normal'); before.push(/^G-scope Normal: view Normal \(already Normal - re-frame\)$/);
