@@ -283,7 +283,23 @@ async function main() {
   // footprint as it was, so it is a pose mismatch and nothing else. The
   // watcher is not asked to check: the check is the one a click on a G-scope
   // control schedules, as on the main view.
-  await page.evaluate(() => { state.placed[0].mesh.rotation.y += Math.PI / 2; });
+  //
+  // The turn is made INSIDE the real click, by a window-capture listener that
+  // runs before the watcher's document-capture one: the turn, the click going
+  // into the trail and its checks being scheduled are one task, so the idle
+  // sweep (a fixed 4 s interval) cannot catch the mismatch first. Made in a
+  // separate step before the click, it could: page.click waits for the button
+  // to be stable over animation frames, and with a whole slice drawn on a CI
+  // runner's software GL that gap is long enough for the sweep to land in it -
+  // the phantom then carries a trail without the click (Tests #246).
+  await page.evaluate(() => {
+    const b = document.getElementById('ms-cam-normal');
+    window.addEventListener('click', function turn(e) {
+      if (e.target !== b) return;
+      window.removeEventListener('click', turn, true);
+      state.placed[0].mesh.rotation.y += Math.PI / 2;
+    }, true);
+  });
   await page.click('#ms-cam-normal');
   await meshBack(page);
   await page.waitForFunction(() => /^1 phantom$/.test(document.getElementById('nso-watch-n-phantom').textContent), null, { timeout: 5000 });
