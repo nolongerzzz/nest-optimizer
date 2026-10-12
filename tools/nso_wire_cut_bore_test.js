@@ -7,8 +7,9 @@
    ring standing on its end, lying along X, lying along Z, and rolled onto its
    side with the Roll Z control so the cut runs along the piece's own Y - the
    case that used to fall back to the old engine and lid the bore. Then the
-   same after the real Extend button, on a piece with no raw data, and a cut
-   that cannot be made, which must be refused in the status line. */
+   same after the real Extend button, on a piece with no raw data, on a closed
+   box with a sealed cavity, and a cut that cannot be made, which must be
+   refused in the status line. */
 
 const fs = require('fs');
 const os = require('os');
@@ -166,7 +167,34 @@ withApp(async (page, logs) => {
     await judgeHalves(page, 'no-raw ' + c.want.toUpperCase(), r, 'display');
   }
 
-  console.log('\n=== 4. a cut that cannot be made is refused, in the status line ===');
+  console.log('\n=== 4. the closed box (fixtures/box_cavity_30.stl), through its sealed cavity, on X, Z and (rolled) Y ===');
+  for (const c of CASES) {
+    await page.evaluate(() => { if (state.cutterOpen) closeCutter(true); });
+    const id = await loadSTL(page, path.join(ROOT, 'fixtures', 'box_cavity_30.stl'));
+    const r = await cutPiece(page, id, c.plate, c.roll);
+    const tag = 'box ' + c.want.toUpperCase();
+    check(tag + ': the cut ran along display ' + c.want.toUpperCase(), r.axis === c.want, 'axis ' + r.axis);
+    check(tag + ': two pieces, raw engine', r.halves.length === 2 && r.status.indexOf('[raw]') >= 0, r.status);
+    const ai = { x: 0, y: 1, z: 2 }[r.axis];
+    for (const h of r.halves) {
+      const m = await page.evaluate(([pos, ai]) => {
+        let lo = Infinity, hi = -Infinity;
+        for (let i = ai; i < pos.length; i += 3) { lo = Math.min(lo, pos[i]); hi = Math.max(hi, pos[i]); }
+        return { T: topo(pos), ends: [capOf(pos, ai, lo, [0, 0]), capOf(pos, ai, hi, [0, 0])] };
+      }, [h.pos, ai]);
+      // One end is the cut face, the other the box's own outer face.
+      const ring = m.ends.filter(e => Math.abs(e.area - 224) < 1e-3 && e.comps === 1 && e.loops === 2 && e.chi === 0 && !e.coversProbe);
+      const full = m.ends.filter(e => Math.abs(e.area - 900) < 1e-3 && e.comps === 1 && e.loops === 1 && e.chi === 1);
+      check(tag + ' ' + h.name + ': cut face is one open 2 mm square ring (224 mm²), the far end the 900 mm² outer face',
+        ring.length === 1 && full.length === 1,
+        m.ends.map(e => e.area.toFixed(2) + ' mm² / ' + e.comps + ' piece / ' + e.loops + ' loop' + (e.coversProbe ? ' / covers the centre' : '')).join('  |  '));
+      check(tag + ' ' + h.name + ': no duplicate faces, every edge on exactly two faces, winding agrees, chi 2',
+        m.T.dupFaces === 0 && m.T.badEdge === 0 && m.T.badWinding === 0 && m.T.chi === 2,
+        'dup ' + m.T.dupFaces + ', bad edges ' + m.T.badEdge + ', bad winding ' + m.T.badWinding + ', chi ' + m.T.chi);
+    }
+  }
+
+  console.log('\n=== 5. a cut that cannot be made is refused, in the status line ===');
   {
     // The ring with one outer-wall quad missing: where the plane crosses it
     // the section is open, so no cut face can close it.

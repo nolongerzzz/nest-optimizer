@@ -2,6 +2,12 @@ Test meshes for Claude / Grok. Not shipped to Pages as product files.
 
 - box-20mm.stl — closed 20 mm cube, origin-centered, Z-up, 12 triangles.
   Soften gate: one Square split, then Corners / Round / Bevel at R=0.5. Lid must stay on the cut plane.
+- box_cavity_30.stl — 30 mm cube, 2 mm walls round a sealed 26 mm cavity: two
+  shells, the cavity's faces wound into it. Origin-centered, 24 triangles.
+  Cut gate (`cut:bore`, `wire:cut-bore`): through the cavity each piece's cut
+  face is one open square ring (224 mm²), never lidded; a cut in the wall
+  leaves all 12 cavity faces as they were. Built by
+  `node tools/nso_cut_bore_test.js --write-fixture`, which the test byte-diffs.
 
 ## damage/ - known-clean pieces with one controlled defect each
 

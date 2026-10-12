@@ -141,6 +141,37 @@ function concat(parts) {
   return out;
 }
 
+// fixtures/box_cavity_30.stl: a 30 mm cube with 2 mm walls round a sealed
+// 26 mm cavity. Two shells: the outside wound outward, the cavity's walls
+// wound into the cavity (outward from the material). Two triangles a face.
+const BOX_OUT = 15, BOX_IN = 13;
+function boxCavity() {
+  const outer = box([-BOX_OUT, -BOX_OUT, -BOX_OUT], [BOX_OUT, BOX_OUT, BOX_OUT]);
+  const inner = box([-BOX_IN, -BOX_IN, -BOX_IN], [BOX_IN, BOX_IN, BOX_IN]);
+  for (let t = 0; t < inner.length; t += 9) for (let c = 0; c < 3; c++) {
+    const x = inner[t + 3 + c]; inner[t + 3 + c] = inner[t + 6 + c]; inner[t + 6 + c] = x;
+  }
+  return concat([outer, inner]);
+}
+const BOX_FIXTURE = path.join(ROOT, 'fixtures', 'box_cavity_30.stl');
+function stlBytes(soup) {
+  const n = soup.length / 9, b = Buffer.alloc(84 + n * 50);
+  b.write('box_cavity_30: 30 mm cube, 2 mm walls, sealed 26 mm cavity', 0, 'ascii');
+  b.writeUInt32LE(n, 80);
+  for (let t = 0; t < n; t++) for (let k = 0; k < 9; k++) b.writeFloatLE(soup[t * 9 + k], 84 + t * 50 + 12 + k * 4);
+  return b;
+}
+if (process.argv.includes('--write-fixture')) {
+  fs.writeFileSync(BOX_FIXTURE, stlBytes(boxCavity()));
+  console.log('wrote ' + BOX_FIXTURE);
+  process.exit(0);
+}
+function readSTL(file) {
+  const b = fs.readFileSync(file), n = b.readUInt32LE(80), o = new Float32Array(n * 9);
+  for (let t = 0; t < n; t++) for (let k = 0; k < 9; k++) o[t * 9 + k] = b.readFloatLE(84 + t * 50 + 12 + k * 4);
+  return o;
+}
+
 const ringPrism = k => prism(k, circle(R_OUT, 0, 0), circle(R_IN, 0, 0), 0, H);
 const cylinderPrism = k => prism(k, circle(R_OUT, 0, 0), null, 0, H, [0, 0]);
 // 30 mm block with a Ø6 bore whose centre sits at (8, 8) across it.
@@ -174,7 +205,7 @@ function judge(label, geo, ai, plane, want) {
   check(label + ': cut face is ' + want.comps + ' piece(s), ' + want.loops + ' outline loop(s), cap chi ' + want.capChi,
     c.comps === want.comps && c.loops === want.loops && c.chi === want.capChi,
     'got ' + c.comps + ' piece(s), ' + c.loops + ' loop(s), chi ' + c.chi);
-  if (want.probe) check(label + ': bore centre is NOT covered by the cut face', !c.coversProbe);
+  if (want.probe) check(label + ': the hole\'s centre (bore or cavity) is NOT covered by the cut face', !c.coversProbe);
   check(label + ': no duplicate or coincident faces', T.dupFaces === 0, T.dupFaces + ' duplicate(s)');
   check(label + ': every edge shared by exactly two faces, winding agrees',
     T.badEdge === 0 && T.badWinding === 0, 'bad edges ' + T.badEdge + ', bad winding ' + T.badWinding);
@@ -203,7 +234,7 @@ function cutBoth(label, pr, piece, axis, plane, want) {
   [['left', plane - 0.5], ['right', plane + 0.5]].forEach(([side, pl]) => {
     const w = typeof want === 'function' ? want(side, pair) : want;
     judge(label + ' [' + side + ']', pair[side], ai, pl,
-      Object.assign({ area: sectionArea(pr, RAW_OF_DISP[axis], rawCoord(axis, pl, off)) }, w));
+      w.area != null ? w : Object.assign({ area: sectionArea(pr, RAW_OF_DISP[axis], rawCoord(axis, pl, off)) }, w));
   });
   return pair;
 }
@@ -379,6 +410,56 @@ try {
         const counts = ['left', 'right'].map(sd => boreFacesIn(halfSoup(pair, sd)));
         check(label + ': all ' + boreKeys.length + ' bore-wall faces kept verbatim, in one piece',
           boreKeys.length === 2 * SEG && counts.includes(boreKeys.length) && counts.includes(0), 'per piece ' + counts.join(' / '));
+      }
+    }
+  }
+
+  console.log('\n=== 6. closed box: a sealed cavity inside 2 mm walls (fixtures/box_cavity_30.stl) ===');
+  {
+    const want = stlBytes(boxCavity());
+    const have = fs.readFileSync(BOX_FIXTURE);
+    check('fixture on disk is the one this file builds (regenerate: node tools/nso_cut_bore_test.js --write-fixture)',
+      Buffer.compare(want, have) === 0);
+    const src = readSTL(BOX_FIXTURE);
+    const T0 = topo(src);
+    check('fixture is closed and consistent: two shells (chi ' + T0.chi + '), volume ' + T0.volume.toFixed(1) + ' mm³',
+      T0.badEdge === 0 && T0.badWinding === 0 && T0.dupFaces === 0 && T0.chi === 4 &&
+      Math.abs(T0.volume - (30 ** 3 - 26 ** 3)) < 1e-6 * 30 ** 3);
+    const RING = 30 * 30 - 26 * 26;   // 224 mm^2: a 2 mm square ring
+    for (const withRaw of [true, false]) {
+      const route = withRaw ? '(raw)' : '(display)';
+      console.log('  -- through the cavity, ' + route);
+      for (const axis of ['x', 'y', 'z']) {
+        // Each half is an open box, one surface with the cut face as its rim.
+        cutBoth('box, cut ' + axis.toUpperCase() + ' @ +1.3 ' + route, null, pieceOf(src, withRaw), axis, 1.3,
+          { area: RING, comps: 1, loops: 2, capChi: 0, chi: 2, probe: [0, 0] });
+      }
+      console.log('  -- in the wall, clear of the cavity, ' + route);
+      // The cavity's faces as exact keys in the frame each route cuts in.
+      const piece = pieceOf(src, withRaw);
+      const frame = withRaw ? src : soupOf(piece.geometry);
+      const cavity = [];
+      for (let t = 0; t < frame.length; t += 9) {
+        let inside = true;
+        for (let c = 0; c < 9; c++) if (Math.abs(Math.abs(frame[t + c]) - BOX_IN) > 1e-4 && Math.abs(frame[t + c]) > BOX_IN) inside = false;
+        if (inside) cavity.push([pk(frame, t), pk(frame, t + 3), pk(frame, t + 6)].join('|'));
+      }
+      const cavityIn = h => {
+        const have = new Set();
+        for (let t = 0; t < h.length; t += 9) have.add([pk(h, t), pk(h, t + 3), pk(h, t + 6)].join('|'));
+        return cavity.filter(x => have.has(x)).length;
+      };
+      const halfSoup = (pair, side) => withRaw ? (side === 'left' ? pair.rawA : pair.rawB) : soupOf(pair[side]);
+      for (const axis of ['x', 'y', 'z']) {
+        // -13.8 +- 0.5: both kerf planes inside the -15..-13 wall.
+        const label = 'box, cut ' + axis.toUpperCase() + ' @ -13.8 ' + route;
+        const pair = cutBoth(label, null, piece, axis, -13.8,
+          (side, pr2) => ({ area: 900, comps: 1, loops: 1, capChi: 1,
+                            chi: cavityIn(halfSoup(pr2, side)) ? 4 : 2 }));   // the piece with the cavity keeps both shells
+        if (!pair) continue;
+        const counts = ['left', 'right'].map(sd => cavityIn(halfSoup(pair, sd)));
+        check(label + ': all ' + cavity.length + ' cavity faces kept verbatim, in one piece',
+          cavity.length === 12 && counts.includes(12) && counts.includes(0), 'per piece ' + counts.join(' / '));
       }
     }
   }
