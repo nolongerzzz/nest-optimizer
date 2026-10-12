@@ -314,6 +314,150 @@ function NSO_scaleSoup(soup, spec) {
 }
 
 /* =====================================================================
+   1b. Offset - Fatten and Shrink, folded into one number
+
+   The outside moves by `mm` (positive grows, negative shrinks) and the wall
+   is KEPT: every inner face moves the same way as the outer face across the
+   wall from it. A ring's bore moves with its outside; a tray's inner walls
+   and floor top follow its outer walls and bottom, so every wall and floor
+   comes out the thickness it went in. On a solid with no inner faces it is
+   the plain even offset.
+
+   NOT A SECOND OFFSET. The geometry is Thicken's own vertex solve,
+   _thickenOffsetSoup (app-finish.js), with its outer / inner classification
+   (the faces on the convex hull, and the smooth creases that lead to them,
+   are outer; everything else is inner) and its new `wallKept` mode. What this
+   adds is the two refusals the brief names, each one measured on the result:
+
+     the bore closing   an inner face turned inside out - the bore or pocket
+                        had less room than the offset took from it
+     the floor          a section of the result measures under
+                        NSO_Thickness.floorFor(nozzle) (0.42 mm at 0.4) where
+                        the piece did not already - or a solid section went
+                        through zero, which is the same limit reached harder
+
+   and Thicken's own piercing check (NSO_Repair.inspect), so the moved faces
+   cannot cross the piece.
+   ===================================================================== */
+
+/* A small width: two decimals, three under 0.1 mm. */
+function NSO_scaleFmtSmall(x) { return x < 0.1 ? x.toFixed(3) : x.toFixed(2); }
+
+/* opts.nozzle      default NSO_Thickness.NOZZLE_DEFAULT (0.4)
+   opts.innerWord   what the inner faces are called in a refusal - 'bore' on a
+                    ring, 'pocket' on a tray; default 'bore or pocket' */
+function NSO_scaleOffsetRaw(soup, mm, opts) {
+  opts = opts || {};
+  var res = { ok: false, reason: '', limit: null, tris: soup, mm: +mm };
+  if (!soup || soup.length < 9 || soup.length % 9 !== 0) { res.reason = 'not a triangle soup'; return res; }
+  mm = +mm;
+  if (!isFinite(mm) || mm === 0) {
+    res.reason = 'enter an offset in mm - positive grows the outside, negative shrinks it';
+    return res;
+  }
+  if (typeof _thickenOffsetSoup !== 'function') {
+    res.reason = 'app-finish.js must be loaded - the offset is Thicken\'s own vertex solve';
+    return res;
+  }
+  var T = (typeof NSO_Thickness !== 'undefined') ? NSO_Thickness : null;
+  var nozzle = (opts.nozzle > 0) ? +opts.nozzle : (T ? T.NOZZLE_DEFAULT : 0.4);
+  var floor = T ? T.floorFor(nozzle) : null;
+  res.floorMm = floor;
+  var amt = Math.abs(mm).toFixed(2).replace(/\.?0+$/, '');
+  var innerWord = opts.innerWord || 'bore or pocket';
+  var b0 = NSO_scaleRawBounds(soup);
+
+  // The floor, on the piece's own three extents first. Each one is two faces
+  // on the hull moving apart (or together) by the offset, so its new size is
+  // known before anything moves - and a solid section going through zero
+  // folds every face along it flat, which the inversion count below does not
+  // see (a face folded to zero area has no direction left to have turned).
+  if (floor != null && mm < 0) {
+    var kMin = 0;
+    for (var k = 1; k < 3; k++) if (b0.span[k] < b0.span[kMin]) kMin = k;
+    var want = b0.span[kMin] + 2 * mm;
+    if (want < floor) {
+      res.limit = 'floor';
+      res.reason = 'its ' + 'XYZ'[kMin] + ' size of ' + b0.span[kMin].toFixed(2) + ' mm would ' +
+        (want > 0 ? 'drop to ' + want.toFixed(2) + ' mm' : 'go through zero') + ', under the ' +
+        floor.toFixed(2) + ' mm floor for a ' + nozzle + ' mm nozzle - the most it can shrink is ' +
+        Math.max(0, Math.floor((b0.span[kMin] - floor) / 2 * 100) / 100).toFixed(2) + ' mm';
+      return res;
+    }
+  }
+
+  var r;
+  try { r = _thickenOffsetSoup(soup, 'out', mm, { wallKept: true }); }
+  catch (err) { r = { reason: (err && err.message) || String(err) }; }
+  if (!r || !r.soup) {
+    // The extents were checked above, so a face that turns now is a feature
+    // running out of room: any inner one is the bore or pocket closing (its
+    // cap rims turn with it - the tube's annulus folds once its bore has
+    // crossed the axis); only outer ones is a feature on the outside.
+    if (r && r.flippedInner > 0) {
+      res.limit = 'bore';
+      res.reason = 'the ' + innerWord + ' would close - ' + amt + ' mm is more than the room inside it (' +
+        r.flippedInner + ' inner face(s) would turn inside out)';
+      res.flipped = r.flipped; res.flippedInner = r.flippedInner;
+    } else if (r && r.flipped > 0) {
+      // Thicken's own inversion gate, reached on the outside: a chamfer, a
+      // fillet strip or a rib narrower than the shrink. Neither a bore nor
+      // the floor, so it is named as what it is.
+      res.limit = 'feature';
+      res.reason = amt + ' mm is more than a feature on the outside has room for - ' + (r.flipped - r.flippedInner) +
+        ' outer face(s) would turn inside out' +
+        (isFinite(r.flippedMinWidth) ? ', the narrowest ' + NSO_scaleFmtSmall(r.flippedMinWidth) + ' mm across' : '');
+    } else res.reason = (r && r.reason) || 'the offset produced nothing';
+    return res;
+  }
+  var out = r.soup;
+
+  if (T && typeof T.measureMesh === 'function') {
+    var after = T.measureMesh(out, { nozzle: nozzle });
+    res.thinAfter = after;
+    if (!after.pass && after.min_mm != null) {
+      var before = T.measureMesh(soup, { nozzle: nozzle });
+      res.thinBefore = before;
+      // Thinner than the floor, and thinner than it was: the offset did that.
+      // A piece already under the floor that the offset leaves no thinner is
+      // not this tool's refusal to make.
+      if (!(before.min_mm != null && after.min_mm >= before.min_mm - 1e-4)) {
+        res.limit = 'floor';
+        res.reason = 'a section would drop to ' + after.min_mm.toFixed(2) + ' mm, under the ' +
+          floor.toFixed(2) + ' mm floor for a ' + nozzle + ' mm nozzle';
+        return res;
+      }
+    }
+  }
+
+  if (typeof NSO_Repair !== 'undefined' && NSO_Repair && typeof NSO_Repair.inspect === 'function') {
+    var pb = NSO_Repair.inspect(soup).selfIntersections, pa = NSO_Repair.inspect(out).selfIntersections;
+    if (pa > pb) {
+      res.limit = 'pierce';
+      res.reason = 'the moved faces would cross the piece (piercing pairs ' + pb + ' -> ' + pa + ')';
+      return res;
+    }
+  }
+
+  var t0 = NSO_scaleTopoStats(soup, NSO_SCALE_WELD_Q, NSO_SCALE_AREA_EPS);
+  var t1 = NSO_scaleTopoStats(out, NSO_SCALE_WELD_Q, NSO_SCALE_AREA_EPS);
+  if (t1.degen > t0.degen || t1.open > t0.open || t1.nm > t0.nm) {
+    res.limit = 'floor';
+    res.reason = 'a section would fold flat (degenerate faces ' + t0.degen + ' -> ' + t1.degen + ', open edges ' +
+      t0.open + ' -> ' + t1.open + ')';
+    return res;
+  }
+
+  var b1 = NSO_scaleRawBounds(out);
+  res.ok = true; res.tris = out;
+  res.spanBefore = b0.span; res.spanAfter = b1.span;
+  res.moved = r.moved; res.approx = r.approx;
+  res.outerFaces = 0; res.innerFaces = 0;
+  for (var f = 0; f < r.outer.length; f++) { if (r.outer[f]) res.outerFaces++; else res.innerFaces++; }
+  return res;
+}
+
+/* =====================================================================
    2. App wiring
 
    The house lifecycle, same as Smooth, Skin and Carve: refuse before you
@@ -407,35 +551,37 @@ function NSO_scaleSelectedModel(spec) {
 
    THE CARD READS THE SHAPE FIRST. Its first line is nso_section.js's reading
    in print terms - Ring / Rod / Bar with the numbers a person measures, or the
-   three sizes and the reason a piece is neither - with the build-volume
-   verdict from NSO_fitCheckAll appended. Under it, only what applies:
+   three sizes and, in plain words, the gate that decided the piece is neither
+   and what still applies - with the build-volume verdict appended. Under it,
+   one compact row per field (label | field | unit or hold | Set), and only
+   the rows nso_section.js's NSO_sectionVerbs says apply:
 
-     Length [ ] mm     Extend or Shorten along the piece's straight axis, by
-                       the sign of the change, cross-section held bit for bit.
-                       NSO_extendSelectedModel, unchanged. Shown only when
-                       there is a straight axis.
-     Whole x [ ]       today's uniform factor, NSO_scaleSelectedModel({factor}).
-     Longest [ ] mm    today's longest-edge target, ({axis: 'longest'}).
-     Fit to plate      the largest uniform factor that fits the machine the
-                       app is pointed at, applied, and the factor stated.
+     Length / Width / Height   the piece's own axes as it lies - Height its Z,
+                       Length the longer of its X and Y, Width the shorter;
+                       never the plate's. Each one is Extend / Shorten along
+                       that axis (NSO_extendRaw with the axis forced), so the
+                       material goes in or comes out inside one clean
+                       constant-section band and every wall, floor, hole,
+                       pocket and lip keeps its size. An axis with no such band
+                       gets no row. A ring or rod shows Length only.
+     Outer Ø / Wall    a ring (nso_ring.js): outer and bore together (wall
+                       kept), or the bore alone (outer kept). Part 2's Bore Ø
+                       row is gone: Outer Ø and Wall between them reach every
+                       bore, and the third field only restated the other two.
+     Diameter          a rod.
+     Offset            Fatten and Shrink, folded in: the outside moves by the
+                       mm entered and the inner faces follow (NSO_scaleOffsetRaw
+                       above). Shown only where no named field already does the
+                       same job.
+     Whole x           today's uniform factor. Reset to 1 on every selection,
+                       bake and pose change.
+     Longest           today's longest-edge target, prefilled with the longest
+                       edge. Hidden when a named field shows the same number.
+     Fit to plate      the largest uniform factor that fits the machine.
 
-   What went away: the X / Height / Z axis menu and the "X x H x Z" readout.
-   They spoke the display frame (Y up), so "Height" was right and "Z" was the
-   bed's depth, and a user asking for a wider ring got a taller, thicker one.
-   NSO_scaleSolve still takes those axes underneath; the card no longer offers
-   them.
-
-   A RING adds three fields under the readout, each with its hold stated
-   beside it, and a ROD one (nso_ring.js; Scale part 2):
-
-     Outer Ø [ ]   wall kept     outer and bore faces move together
-     Bore  Ø [ ]   outer kept    bore faces only
-     Wall    [ ]   outer kept    bore faces only
-     Diameter [ ]  (a rod)       outer faces only
-
-   Dimension edits move boundary faces, never scale; the length is held bit
-   for bit. Each field is prefilled with the current value, each apply is one
-   Undo step, and the readout re-reads after it. Bars get nothing new yet.
+   Every field shows nso_section.js's one display precision (NSO_sectionShow)
+   and repopulates whenever the selection, the piece's soup or its pose on the
+   plate changes, whoever changed it.
 --------------------------------------------------------------------------- */
 
 /* The section reading for a piece, cached on its soup: a bake replaces
@@ -526,18 +672,12 @@ function NSO_scaleFitToPlate() {
   return r;
 }
 
-/* A ring or rod verb on the selected piece: 'outer' | 'bore' | 'wall' |
-   'diameter', to `value` mm. nso_ring.js does the geometry and every refusal;
-   this is the house lifecycle around it - refuse before touching anything,
-   then one NSO_sculptCommitRaw (one Undo step, undo type 'ringReplace').
-
-   PAINT SCOPE: WHOLE-PIECE, the Scale card's own category (docs/HANDOFF.md):
-   every wall face on the moving side moves and the cap rims it shares move
-   with it, so no face can be promised untouched - Fatten's reading of the same
-   question. Any paint anywhere stands it down, naming the count. */
-var NSO_SCALE_RING_LABEL = { outer: 'Outer Ø', bore: 'Bore Ø', wall: 'Wall', diameter: 'Diameter' };
-function NSO_scaleRingApply(verb, value) {
-  var label = NSO_SCALE_RING_LABEL[verb] || verb;
+/* The house lifecycle every card verb shares: a selected raw piece, no paint
+   (PAINT SCOPE: WHOLE-PIECE, the Scale card's own category in
+   docs/HANDOFF.md - each verb moves faces all over one side of the piece and
+   the rims they share, so no face can be promised untouched), then the
+   headless call, then one NSO_sculptCommitRaw - one Undo step. */
+function NSO_scaleCardApply(label, undoType, run, describe) {
   var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
   if (!m) {
     if (typeof setStatus === 'function') setStatus('Select a piece first', true);
@@ -551,18 +691,18 @@ function NSO_scaleRingApply(verb, value) {
   var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
   if (painted > 0) {
     if (typeof setStatus === 'function') {
-      setStatus('Scale stood down - ' + painted + ' painted face(s); ' + label + ' moves every wall face ' +
-                'on its side and the cap rims with them. Clear paint to resize.', true);
+      setStatus('Scale stood down - ' + painted + ' painted face(s); ' + label + ' moves faces all over ' +
+                'one side of the piece and the rims they share. Clear paint to resize.', true);
     }
     return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
   }
-  var r = NSO_ringApplyRaw(soup, verb, value);
+  var r = run(soup, m);
   if (!r.ok) {
     if (typeof setStatus === 'function') setStatus(label + ' refused - piece unchanged (' + r.reason + ')', true);
     return r;
   }
-  var txt = label + ' done - ' + NSO_ringDescribe(r);
-  if (typeof NSO_sculptCommitRaw === 'function' && !NSO_sculptCommitRaw(m, r.tris, 'ringReplace', txt)) {
+  var txt = label + ' done - ' + describe(r);
+  if (typeof NSO_sculptCommitRaw === 'function' && !NSO_sculptCommitRaw(m, r.tris, undoType, txt)) {
     if (typeof setStatus === 'function') setStatus(label + ' failed to commit - piece unchanged', true);
     return { ok: false, reason: 'commit failed' };
   }
@@ -570,11 +710,69 @@ function NSO_scaleRingApply(verb, value) {
   return r;
 }
 
+/* A ring or rod verb on the selected piece: 'outer' | 'wall' | 'diameter'
+   (and 'bore', which nso_ring.js still answers; the card no longer offers
+   it), to `value` mm. nso_ring.js does the geometry and every refusal. */
+var NSO_SCALE_RING_LABEL = { outer: 'Outer Ø', bore: 'Bore Ø', wall: 'Wall', diameter: 'Diameter' };
+function NSO_scaleRingApply(verb, value) {
+  return NSO_scaleCardApply(NSO_SCALE_RING_LABEL[verb] || verb, 'ringReplace',
+    function (soup) { return NSO_ringApplyRaw(soup, verb, value); },
+    function (r) { return NSO_ringDescribe(r); });
+}
+
+/* Length / Width / Height: Extend or Shorten along the piece's own axis that
+   NSO_sectionVerbs named for it. The band logic was already per axis
+   (NSO_extendBands and NSO_extendRaw take any of X, Y, Z), so nothing in
+   app-extend.js changed for this: the axis is forced rather than detected,
+   and a refusal - Shorten's "can remove up to N mm here" among them - is
+   Extend's own. undo type 'extendReplace', as Extend's own button. */
+var NSO_SCALE_AXIS_LABEL = { length: 'Length', width: 'Width', height: 'Height' };
+function NSO_scaleAxisApply(verb, value) {
+  var label = NSO_SCALE_AXIS_LABEL[verb] || verb;
+  return NSO_scaleCardApply(label, 'extendReplace', function (soup, m) {
+    var s = NSO_scaleSectionOf(m), dim = s && s.verbs ? s.verbs[verb] : null;
+    if (!dim) {
+      return { ok: false, reason: (s ? s.why || s.reason : 'no reading') + ' - no straight run to stretch along its ' +
+               label.toLowerCase() };
+    }
+    if (!(value > 0)) return { ok: false, reason: label + ' must be a positive number of mm' };
+    return NSO_extendRaw(soup, { axis: dim.axisIdx, length: +value });
+  }, function (r) {
+    return r.axis.toUpperCase() + ' ' + NSO_sectionShow(r.lengthBefore) + ' → ' + NSO_sectionShow(r.lengthAfter) +
+      ' mm (' + (r.mode === 'shorten' ? 'removed' : 'inserted') + ' at ' + r.axis.toUpperCase() + ' ' +
+      r.cut.toFixed(2) + '), every other coordinate unchanged (' + r.crossSectionDrift + ' drifted)';
+  });
+}
+
+/* Offset: Fatten and Shrink as one signed number. undo type 'offsetReplace'. */
+function NSO_scaleOffsetApply(mm) {
+  return NSO_scaleCardApply('Offset', 'offsetReplace', function (soup, m) {
+    var s = NSO_scaleSectionOf(m);
+    return NSO_scaleOffsetRaw(soup, mm, { innerWord: (s && s.shape === 'round') ? 'bore' : 'bore or pocket' });
+  }, function (r) {
+    var f = NSO_sectionShow, a = r.spanBefore, b = r.spanAfter;
+    return (r.mm > 0 ? 'out ' : 'in ') + Math.abs(r.mm) + ' mm, ' + f(a[0]) + ' × ' + f(a[1]) + ' × ' + f(a[2]) +
+      ' → ' + f(b[0]) + ' × ' + f(b[1]) + ' × ' + f(b[2]) + ' mm (X × Y × Z); ' +
+      (r.innerFaces ? r.innerFaces + ' inner face(s) followed, walls kept' : 'no inner faces - an even offset');
+  });
+}
+
 if (typeof document !== 'undefined') {
   (function wireScaleCard() {
-    var lastSoup = null, prefilled = '', ringPrefill = {};
-    var RING_FIELDS = [['outer', 'scale-ring-outer'], ['bore', 'scale-ring-bore'], ['wall', 'scale-ring-wall'],
-                       ['diameter', 'scale-rod-diameter']];
+    // Every field the card has: [key, input id, row id]. The verbs table in
+    // nso_section.js decides which rows show.
+    var FIELDS = [
+      ['length', 'scale-length', 'scale-length-row'],
+      ['width', 'scale-width', 'scale-width-row'],
+      ['height', 'scale-height', 'scale-height-row'],
+      ['outer', 'scale-ring-outer', 'scale-ring-outer-row'],
+      ['wall', 'scale-ring-wall', 'scale-ring-wall-row'],
+      ['diameter', 'scale-rod-diameter', 'scale-rod-diameter-row'],
+      ['offset', 'scale-offset', 'scale-offset-row'],
+      ['factor', 'scale-factor', 'scale-factor-row'],
+      ['longest', 'scale-target', 'scale-longest-row']
+    ];
+    var prefill = {};
 
     // Read only while the card is open. The reading walks the whole soup -
     // about a second on a 49k-triangle piece - and updateEditSize fires on
@@ -586,7 +784,53 @@ if (typeof document !== 'undefined') {
       return !menu || menu.open;
     }
 
-    function readout() {
+    function placedOf(m) {
+      return (m && typeof state !== 'undefined' && state.placed)
+        ? state.placed.find(function (p) { return p && p.sourceId === m.id; }) : null;
+    }
+    // What "the piece changed" means to the card: which piece, which soup
+    // (every bake replaces rawTris with a new array) and how it sits on the
+    // plate (Yaw, Tip, Roll and Lift change the fit verdict, not the soup).
+    function signature(m) {
+      var p = placedOf(m);
+      return [m ? m.id : '', p ? [p.rotY || 0, p.tipX || 0, p.tipZ || 0, p.liftY || 0, p.x, p.z].join(',') : ''].join('|');
+    }
+
+    // Every field, from the reading. Whole x is 1 and Offset empty: a factor
+    // or an offset is a change, not a measurement, so neither carries over.
+    function populate(s) {
+      var v = s ? s.verbs : null, f = NSO_sectionShow, val = {};
+      if (v) {
+        ['length', 'width', 'height'].forEach(function (k) { if (v[k]) val[k] = f(v[k].mm); });
+        if (v.length && s.shape === 'round') val.length = f(s.lengthMm);
+        if (v.outer) { val.outer = f(s.outer.diameterMm); val.wall = f(s.wallMm); }
+        if (v.diameter) val.diameter = f(s.outer.diameterMm);
+        val.longest = f(v.longestMm);
+      }
+      val.factor = '1';
+      val.offset = '';
+      FIELDS.forEach(function (fd) {
+        var el = document.getElementById(fd[1]);
+        prefill[fd[0]] = val[fd[0]] != null ? val[fd[0]] : '';
+        if (el) el.value = prefill[fd[0]];
+      });
+    }
+
+    function show(s) {
+      var v = s ? s.verbs : null;
+      var on = {
+        length: !!(v && v.length), width: !!(v && v.width), height: !!(v && v.height),
+        outer: !!(v && v.outer), wall: !!(v && v.wall), diameter: !!(v && v.diameter),
+        offset: !!(v && v.offset), factor: true, longest: !v || v.longest
+      };
+      FIELDS.forEach(function (fd) {
+        var row = document.getElementById(fd[2]);
+        if (row) row.hidden = !on[fd[0]];
+      });
+    }
+
+    var lastSig = null, lastSoup = null;
+    function readout(force) {
       var el = document.getElementById('scale-readout');
       if (!el) return;
       if (!cardOpen()) { el.dataset.stale = '1'; return; }
@@ -594,56 +838,36 @@ if (typeof document !== 'undefined') {
       var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
       el.textContent = NSO_scaleReadoutText(m);
       var s = m ? NSO_scaleSectionOf(m) : null;
-      var row = document.getElementById('scale-length-row');
-      if (row) row.hidden = !(s && s.axis);
-      // Prefill Length with the real number, once per new soup (a new piece
-      // or a bake), so the user edits it instead of guessing one - and is not
-      // overwritten mid-typing by an unrelated size-line refresh.
-      var round = !!(s && s.shape === 'round');
-      var ringRows = document.getElementById('scale-ring-rows');
-      if (ringRows) ringRows.hidden = !(round && s.hollow);
-      var rodRows = document.getElementById('scale-rod-rows');
-      if (rodRows) rodRows.hidden = !(round && !s.hollow);
-      var soup = m ? m.rawTris : null;
-      var inp = document.getElementById('scale-length');
-      if (soup !== lastSoup) {
-        lastSoup = soup;
-        prefilled = (s && s.lengthMm != null) ? String(+s.lengthMm.toFixed(2)) : '';
-        if (inp) inp.value = prefilled;
-        // The ring / rod fields, prefilled with the current values the same
-        // way, three decimals - the precision the verbs land to.
-        var cur = round ? { outer: s.outer.diameterMm, diameter: s.outer.diameterMm,
-                            bore: s.hollow ? s.bore.diameterMm : null, wall: s.hollow ? s.wallMm : null } : {};
-        RING_FIELDS.forEach(function (f) {
-          var el = document.getElementById(f[1]);
-          ringPrefill[f[0]] = (cur[f[0]] != null) ? String(+cur[f[0]].toFixed(3)) : '';
-          if (el) el.value = ringPrefill[f[0]];
-        });
+      show(s);
+      var soup = m ? m.rawTris : null, sig = signature(m);
+      if (force === true || soup !== lastSoup || sig !== lastSig) {
+        lastSoup = soup; lastSig = sig;
+        populate(s);
       }
     }
-    window.nsoScaleRefresh = readout;
+    window.nsoScaleRefresh = function () { readout(true); };
 
-    // updateEditSize is not called by every bake: Thicken and Fatten commit
-    // through their own path, and the line went on showing the piece before
-    // them (found driving Fatten's Shrink on a ring, Scale part 2). So while
-    // the card is open, watch the selected piece's soup by IDENTITY - every
-    // bake in this app replaces rawTris with a new array - and re-read when
-    // it changes, whoever changed it. app-fit.js watches sizes the same way
-    // for the same reason. One comparison per frame, and only while open.
-    var watching = false, seenModel = null, seenSoup = null;
+    // updateEditSize is not called by every bake (Thicken commits through its
+    // own path) nor by a pose change, so while the card is open the selected
+    // piece is watched once per frame - its identity, its soup's identity and
+    // its pose - and the card re-reads when any of them moves, whoever moved
+    // it. Only while open.
+    var watching = false, seen = null;
+    function key() {
+      var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
+      return { m: m, soup: m ? m.rawTris : null, sig: signature(m) };
+    }
     function watch() {
       if (!cardOpen()) { watching = false; return; }
-      var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
-      var soup = m ? m.rawTris : null;
-      if (m !== seenModel || soup !== seenSoup) { seenModel = m; seenSoup = soup; readout(); }
+      var k = key();
+      if (!seen || k.m !== seen.m || k.soup !== seen.soup || k.sig !== seen.sig) { seen = k; readout(); }
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(watch);
       else watching = false;
     }
     function startWatch() {
       if (watching) return;
       watching = true;
-      var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
-      seenModel = m; seenSoup = m ? m.rawTris : null;
+      seen = key();
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(watch);
     }
 
@@ -657,73 +881,46 @@ if (typeof document !== 'undefined') {
       readout();
     }
 
-    function setLength() {
-      var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
-      var s = m ? NSO_scaleSectionOf(m) : null;
-      if (!s || !s.axis) {
-        if (typeof setStatus === 'function') setStatus('Length needs a piece with a straight axis', true);
-        return;
+    function fieldValue(k, id) {
+      var el = document.getElementById(id);
+      return { raw: el ? el.value : '', num: el ? parseFloat(el.value) : NaN, same: !!el && el.value === prefill[k] };
+    }
+    var LABEL = { length: 'Length', width: 'Width', height: 'Height', outer: 'Outer Ø', wall: 'Wall',
+                  diameter: 'Diameter', offset: 'Offset', factor: 'Whole ×', longest: 'Longest' };
+
+    function apply(k, id) {
+      var fv = fieldValue(k, id);
+      if (k === 'factor') return NSO_scaleSelectedModel({ factor: fv.num });
+      if (k === 'longest') {
+        if (fv.same) { if (typeof setStatus === 'function') setStatus('Longest: that is the current longest edge - type a new one'); return; }
+        return NSO_scaleSelectedModel({ axis: 'longest', targetMm: fv.num });
       }
-      var inp = document.getElementById('scale-length');
-      var want = inp ? parseFloat(inp.value) : NaN;
-      if (inp && inp.value === prefilled) {
-        if (typeof setStatus === 'function') {
-          setStatus('Length: the piece is ' + s.lengthMm.toFixed(2) + ' mm along ' + s.axis +
-                    ' - type a new length (longer extends, shorter shortens)');
+      if (k === 'offset') {
+        if (!(isFinite(fv.num) && fv.num !== 0)) {
+          if (typeof setStatus === 'function') setStatus('Offset: type how far to move the outside, in mm - positive grows, negative shrinks');
+          return;
         }
+        return NSO_scaleOffsetApply(fv.num);
+      }
+      if (fv.same) {
+        if (typeof setStatus === 'function') setStatus(LABEL[k] + ': that is the current value - type a new one');
         return;
       }
-      if (!(want > 0)) {
-        if (typeof setStatus === 'function') setStatus('Length must be a positive number of mm', true);
-        return;
-      }
-      // A cube or a square bar is straight along several tied axes; the
-      // readout named one, so Extend is told which rather than refusing.
-      var opts = { length: want };
-      if (s.axisTied) opts.axis = s.axis.toLowerCase();
-      NSO_extendSelectedModel(opts);
+      if (k === 'length' || k === 'width' || k === 'height') return NSO_scaleAxisApply(k, fv.num);
+      return NSO_scaleRingApply(k, fv.num);
     }
 
-    function setRing(verb, inputId) {
-      var el = document.getElementById(inputId);
-      if (el && el.value === ringPrefill[verb]) {
-        if (typeof setStatus === 'function') {
-          setStatus(NSO_SCALE_RING_LABEL[verb] + ': that is the current value - type a new one');
-        }
-        return;
-      }
-      NSO_scaleRingApply(verb, el ? parseFloat(el.value) : NaN);
-    }
-
+    var BUTTON = { length: 'btn-scale-length', width: 'btn-scale-width', height: 'btn-scale-height',
+                   outer: 'btn-scale-ring-outer', wall: 'btn-scale-ring-wall', diameter: 'btn-scale-rod-diameter',
+                   offset: 'btn-scale-offset', factor: 'btn-scale-factor', longest: 'btn-scale-dim' };
     function wire() {
-      RING_FIELDS.forEach(function (f) {
-        var btn = document.getElementById('btn-' + f[1]);
+      FIELDS.forEach(function (fd) {
+        var btn = document.getElementById(BUTTON[fd[0]]);
         if (btn && btn.dataset.nsoWired !== '1') {
           btn.dataset.nsoWired = '1';
-          btn.addEventListener('click', function () { guarded(NSO_SCALE_RING_LABEL[f[0]], function () { setRing(f[0], f[1]); }); });
+          btn.addEventListener('click', function () { guarded(LABEL[fd[0]], function () { apply(fd[0], fd[1]); }); });
         }
       });
-      var len = document.getElementById('btn-scale-length');
-      if (len && len.dataset.nsoWired !== '1') {
-        len.dataset.nsoWired = '1';
-        len.addEventListener('click', function () { guarded('Length', setLength); });
-      }
-      var dim = document.getElementById('btn-scale-dim');
-      if (dim && dim.dataset.nsoWired !== '1') {
-        dim.dataset.nsoWired = '1';
-        dim.addEventListener('click', function () {
-          var target = parseFloat((document.getElementById('scale-target') || {}).value);
-          guarded('Scale', function () { NSO_scaleSelectedModel({ axis: 'longest', targetMm: target }); });
-        });
-      }
-      var fac = document.getElementById('btn-scale-factor');
-      if (fac && fac.dataset.nsoWired !== '1') {
-        fac.dataset.nsoWired = '1';
-        fac.addEventListener('click', function () {
-          var f = parseFloat((document.getElementById('scale-factor') || {}).value);
-          guarded('Scale', function () { NSO_scaleSelectedModel({ factor: f }); });
-        });
-      }
       var fit = document.getElementById('btn-scale-fit');
       if (fit && fit.dataset.nsoWired !== '1') {
         fit.dataset.nsoWired = '1';
@@ -732,15 +929,15 @@ if (typeof document !== 'undefined') {
       var menu = document.getElementById('menu-scale');
       if (menu && menu.dataset.nsoScaleWired !== '1') {
         menu.dataset.nsoScaleWired = '1';
-        menu.addEventListener('toggle', function () { if (menu.open) { readout(); startWatch(); } });
+        menu.addEventListener('toggle', function () { if (menu.open) { readout(true); startWatch(); } });
       }
       // The verdict names the machine, so a plate change re-reads it.
       ['plate-select', 'custom-w', 'custom-d', 'custom-h'].forEach(function (id) {
         var el = document.getElementById(id);
         if (el && el.dataset.nsoScaleWired !== '1') {
           el.dataset.nsoScaleWired = '1';
-          el.addEventListener('change', readout);
-          el.addEventListener('input', readout);
+          el.addEventListener('change', function () { readout(); });
+          el.addEventListener('input', function () { readout(); });
         }
       });
       readout();

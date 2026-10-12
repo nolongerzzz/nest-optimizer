@@ -546,22 +546,26 @@ select:focus, input:focus {
    open from page load. Say it here, where the display rule is, and make it
    unconditional so a later rule cannot quietly reopen it. */
 .library-list[hidden] { display: none !important; }
-/* Same for the Scale card's Length row: .edit-row is a flex row, and the row
-   is hidden for a piece with no straight axis. */
-#scale-length-row[hidden] { display: none !important; }
-/* Scale part 2: a ring's Outer / Bore / Wall and a rod's Diameter, one line
-   each - label, field, the hold it keeps, Set - so the hold reads beside the
-   field it qualifies. The card body makes every .btn full width, which on a
-   flex row pushed the hold onto a line of its own. */
-#scale-ring-rows .edit-row, #scale-rod-rows .edit-row {
+/* The Scale card (part 3): every field is one compact row - label, field,
+   unit or the hold it keeps, Set - Length and Longest included, so the card
+   fits a 900 px-tall window without scrolling. The card body makes every .btn
+   full width, which on a flex row pushed the hold onto a line of its own;
+   the grid puts each part in its own column. Rows the piece has no use for
+   are [hidden], and an author display rule beats the UA sheet's
+   [hidden] { display: none }, so it is said here, unconditionally. */
+#scale-rows .scale-row {
   display: grid;
-  grid-template-columns: 4rem 5.4rem 1fr auto;
+  grid-template-columns: 4.2rem 5.4rem 1fr auto;
+  align-items: center;
   gap: 6px;
-  margin: 6px 0;
+  margin: 4px 0;
 }
-#scale-ring-rows .edit-row input, #scale-rod-rows .edit-row input { width: 100% !important; }
-#scale-ring-rows .edit-row .btn, #scale-rod-rows .edit-row .btn { width: auto; padding-left: 10px; padding-right: 10px; }
-#scale-ring-rows .edit-row .hint, #scale-rod-rows .edit-row .hint { margin: 0; white-space: nowrap; }
+#scale-rows .scale-row[hidden] { display: none !important; }
+#scale-rows .scale-row label { margin: 0; white-space: nowrap; }
+#scale-rows .scale-row input { width: 100% !important; margin: 0; padding-top: 4px; padding-bottom: 4px; }
+#scale-rows .scale-row .btn { width: auto; margin: 0; padding: 4px 10px; }
+#scale-rows .scale-row .hint { margin: 0; white-space: nowrap; }
+#scale-card > #btn-scale-fit { margin-top: 4px; }
 
 .library-list {
   position: absolute;

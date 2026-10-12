@@ -229,10 +229,20 @@ withApp(async (page, logs) => {
         undone.tris.every((v, i) => v === before.tris[i]));
 
   console.log('\n=== 7. the longest-edge target picks the longest edge ===');
-  await page.evaluate(() => { document.getElementById('scale-target').value = '120'; });
-  // btn-scale-dim moved into the top bar's Scale dropdown; unfold it first.
-  await page.evaluate(() => { const e = document.getElementById('btn-scale-dim'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-  await page.click('#btn-scale-dim');
+  // Since Scale part 3 the card hides Longest where a named field already
+  // shows the same number - here the bar's Length is its longest edge - so
+  // the row is checked hidden and the solver is driven through the function
+  // its Set calls. The click itself is driven on a sphere, where the row
+  // shows, in tools/nso_scale_card_drive_check.js section 8.
+  const longRow = await page.evaluate(() => {
+    const e = document.getElementById('btn-scale-dim'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
+    if (typeof nsoScaleRefresh === 'function') nsoScaleRefresh();
+    const row = document.getElementById('scale-longest-row'), len = document.getElementById('scale-length');
+    return { hidden: getComputedStyle(row).display === 'none', length: len.value, longest: document.getElementById('scale-target').value };
+  });
+  check('Longest is hidden here: it is the same number as the Length field', longRow.hidden && longRow.length === longRow.longest,
+        JSON.stringify(longRow));
+  await page.evaluate(() => { document.getElementById('status').textContent = ''; NSO_scaleSelectedModel({ axis: 'longest', targetMm: 120 }); });
   await page.waitForFunction(() => /Scale done/.test(document.getElementById('status').textContent),
     null, { timeout: 30000 });
   const longSoup = await soupOf(page);

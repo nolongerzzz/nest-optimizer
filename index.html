@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=ring1" />
+  <link rel="stylesheet" href="styles.css?v=box1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -360,58 +360,64 @@
             <summary class="vp-bar-btn" title="Read the piece's shape and size, then lengthen, shorten or scale it">Scale</summary>
             <div class="vp-menu-body vp-top-body" id="scale-card">
               <p id="scale-readout" class="hint">Select a piece to resize.</p>
-              <div class="edit-row" id="scale-length-row" style="align-items:center;gap:6px;flex-wrap:wrap;" hidden>
+              <div id="scale-rows">
+              <div class="edit-row scale-row" id="scale-length-row" hidden>
               <label for="scale-length">Length</label>
-              <input id="scale-length" type="number" min="0.1" max="2000" step="0.1" style="width:5rem;" aria-label="Length along the piece's straight axis, mm" />
+              <input id="scale-length" type="number" min="0.1" max="2000" step="0.1" aria-label="Length, mm" />
               <span class="hint">mm</span>
-              <button id="btn-scale-length" class="btn btn-secondary" type="button"
-              title="Lengthen or shorten the piece along its straight axis to this length - longer extends, shorter shortens - holding the cross-section exactly. Shortening stays inside one straight run and says the most it can take.">Set</button>
+              <button id="btn-scale-length" class="btn btn-secondary" type="button" title="Lengthen or shorten the piece along its own length - longer extends, shorter shortens - by inserting or removing material inside one straight run, so walls, floor, holes and lips keep their size. Shortening says the most it can take.">Set</button>
               </div>
-              <div id="scale-ring-rows" hidden>
-              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+              <div class="edit-row scale-row" id="scale-width-row" hidden>
+              <label for="scale-width">Width</label>
+              <input id="scale-width" type="number" min="0.1" max="2000" step="0.1" aria-label="Width, mm" />
+              <span class="hint">mm</span>
+              <button id="btn-scale-width" class="btn btn-secondary" type="button" title="Widen or narrow the piece across its own width the same way: material goes in or comes out inside one straight run, and every wall, floor, hole and lip keeps its size.">Set</button>
+              </div>
+              <div class="edit-row scale-row" id="scale-height-row" hidden>
+              <label for="scale-height">Height</label>
+              <input id="scale-height" type="number" min="0.1" max="2000" step="0.1" aria-label="Height, mm" />
+              <span class="hint">mm</span>
+              <button id="btn-scale-height" class="btn btn-secondary" type="button" title="Make the piece taller or shorter along its own Z the same way: material goes in or comes out inside one straight run, so the floor and every wall keep their thickness.">Set</button>
+              </div>
+              <div class="edit-row scale-row" id="scale-ring-outer-row" hidden>
               <label for="scale-ring-outer">Outer &Oslash;</label>
-              <input id="scale-ring-outer" type="number" min="0.1" max="2000" step="0.1" style="width:5rem;" aria-label="Outer &Oslash;, mm" />
+              <input id="scale-ring-outer" type="number" min="0.1" max="2000" step="0.1" aria-label="Outer &Oslash;, mm" />
               <span class="hint">wall kept</span>
               <button id="btn-scale-ring-outer" class="btn btn-secondary" type="button" title="Move the outer wall to this diameter and the bore by the same amount, so the wall stays as it is. Faces move; nothing is scaled; the length is held.">Set</button>
               </div>
-              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
-              <label for="scale-ring-bore">Bore &Oslash;</label>
-              <input id="scale-ring-bore" type="number" min="0.1" max="2000" step="0.1" style="width:5rem;" aria-label="Bore &Oslash;, mm" />
-              <span class="hint">outer kept</span>
-              <button id="btn-scale-ring-bore" class="btn btn-secondary" type="button" title="Move the bore wall to this diameter. The outer stays where it is, so the wall changes by the difference. Refused under the nozzle-safety wall floor.">Set</button>
-              </div>
-              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+              <div class="edit-row scale-row" id="scale-ring-wall-row" hidden>
               <label for="scale-ring-wall">Wall</label>
-              <input id="scale-ring-wall" type="number" min="0.1" max="2000" step="0.1" style="width:5rem;" aria-label="Wall, mm" />
+              <input id="scale-ring-wall" type="number" min="0.1" max="2000" step="0.1" aria-label="Wall, mm" />
               <span class="hint">outer kept</span>
               <button id="btn-scale-ring-wall" class="btn btn-secondary" type="button" title="Move the bore wall so the wall is this thick. The outer stays where it is. Refused under the nozzle-safety wall floor.">Set</button>
               </div>
-              </div>
-              <div id="scale-rod-rows" hidden>
-              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+              <div class="edit-row scale-row" id="scale-rod-diameter-row" hidden>
               <label for="scale-rod-diameter">Diameter</label>
-              <input id="scale-rod-diameter" type="number" min="0.1" max="2000" step="0.1" style="width:5rem;" aria-label="Diameter, mm" />
+              <input id="scale-rod-diameter" type="number" min="0.1" max="2000" step="0.1" aria-label="Diameter, mm" />
               <span class="hint">length kept</span>
               <button id="btn-scale-rod-diameter" class="btn btn-secondary" type="button" title="Move the rod's wall to this diameter. Faces move; nothing is scaled; the length is held.">Set</button>
               </div>
+              <div class="edit-row scale-row" id="scale-offset-row" hidden>
+              <label for="scale-offset">Offset</label>
+              <input id="scale-offset" type="number" min="-20" max="20" step="0.1" aria-label="Offset, mm - positive grows, negative shrinks" />
+              <span class="hint">mm, wall kept</span>
+              <button id="btn-scale-offset" class="btn btn-secondary" type="button" title="Move the whole outside out (positive) or in (negative) by this many mm. Every inner face follows, so walls and floors keep their thickness. Refused where a bore or pocket would close, or a section would drop under the nozzle-safety floor.">Set</button>
               </div>
-              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+              <div class="edit-row scale-row" id="scale-factor-row">
               <label for="scale-factor">Whole &times;</label>
-              <input id="scale-factor" type="number" min="0.0001" max="10000" step="0.01" value="1" style="width:5rem;" aria-label="Uniform scale factor" />
-              <button id="btn-scale-factor" class="btn btn-secondary" type="button"
-              title="Plain uniform multiplier: every size, wall and hole by the same factor.">Scale</button>
+              <input id="scale-factor" type="number" min="0.0001" max="10000" step="0.01" value="1" aria-label="Uniform scale factor" />
+              <span class="hint"></span>
+              <button id="btn-scale-factor" class="btn btn-secondary" type="button" title="Plain uniform multiplier: every size, wall and hole by the same factor.">Scale</button>
               </div>
-              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+              <div class="edit-row scale-row" id="scale-longest-row">
               <label for="scale-target">Longest</label>
-              <input id="scale-target" type="number" min="0.1" max="1000" step="0.1" value="50" style="width:5rem;" aria-label="Longest edge, mm" />
+              <input id="scale-target" type="number" min="0.1" max="1000" step="0.1" aria-label="Longest edge, mm" />
               <span class="hint">mm</span>
-              <button id="btn-scale-dim" class="btn btn-secondary" type="button"
-              title="Solve the uniform factor that makes the piece's longest edge exactly this many mm.">Set</button>
+              <button id="btn-scale-dim" class="btn btn-secondary" type="button" title="Solve the uniform factor that makes the piece's longest edge exactly this many mm. Hidden when Length, Width, Height or a diameter already shows the same number.">Set</button>
               </div>
-              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+              </div>
               <button id="btn-scale-fit" class="btn btn-secondary" type="button"
               title="Scale uniformly by the largest factor that fits the printer the plate is set to, and say the factor. If it already fits, nothing changes.">Fit to plate</button>
-              </div>
             </div>
           </details>
           <details class="vp-menu vp-top-menu" id="menu-cut">
@@ -551,14 +557,6 @@
                   <div class="vp-row vp-row-full">
                     <button id="btn-fill" class="btn btn-secondary" type="button"
                             title="Fill a hollow piece's interior cavity solid - the inverse of Hollow. Drops the shells that bound enclosed cavities and touches nothing else, so the outer surface comes back exactly as it was. A captive separate solid is not a cavity and is never removed.">Fill / Densify</button>
-                  </div>
-                  <div class="vp-row vp-row-fatten">
-                    <button id="btn-fatten-grow" class="btn btn-secondary" type="button"
-                            title="Grow the cross-section of an axis-aligned straight piece and hold its length. Detects the axis the way Extend does and offsets only the faces parallel to it, so a pin gets thicker without getting longer. Leave the box blank and press once to read the piece.">Fatten</button>
-                    <input type="number" id="inp-fatten-mm" min="0.05" max="8" step="0.05"
-                           placeholder="mm" aria-label="Fatten offset, mm">
-                    <button id="btn-fatten-shrink" class="btn btn-secondary" type="button"
-                            title="Fatten in reverse: the same offset inward, so the cross-section shrinks and the length is still held. Refused if the amount taken off is more than the wall it eats.">Shrink</button>
                   </div>
                 </div>
               </details>
@@ -1078,9 +1076,9 @@
   <script src="nso-gcode-solid.js?v=solid1"></script>
   <script src="nso_slicer.js?v=slice1"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
-  <script src="app-core.js?v=ring1"></script>
+  <script src="app-core.js?v=box1"></script>
   <script src="app-cut.js?v=scale1"></script>
-  <script src="app-finish.js?v=pose1"></script>
+  <script src="app-finish.js?v=box1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
   <script src="app-extend.js?v=scale1"></script>
   <!-- Mirror: exact reflection across the cut plane. After app-extend.js,
@@ -1089,14 +1087,14 @@
   <!-- Crop, stage 1: box -> remove slab -> seal the joint. After app-cut.js
        (rawCutOpen, rawFlatCapLoop, mapPlaneToRaw) and app-sculpt.js (commit). -->
   <script src="app-crop.js?v=crop4"></script>
-  <script src="app-fatten.js?v=fatten1"></script>
+  <script src="app-fatten.js?v=box1"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
-  <script src="nso_section.js?v=ring1"></script>
+  <script src="nso_section.js?v=box1"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=ring1"></script>
-  <script src="app-scale.js?v=ring1"></script>
+  <script src="app-scale.js?v=box1"></script>
   <script src="app-brush.js?v=hollow2"></script>
   <script src="app-wheel.js?v=wheel3"></script>
   <script src="app-fit.js?v=wheel4"></script>

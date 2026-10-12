@@ -91,13 +91,16 @@ function row(name, r, truth) {
 }
 
 /* The same piece turned three ways must read the same. Axis letters move with
-   the turn, so they are taken out of the reason before comparing; every
-   number is compared exactly. */
+   the turn, so they are taken out of the gate's words before comparing; every
+   number is compared exactly. The gate (r.why) is compared, not the whole
+   reason line: its "so ... apply" tail names Length / Width / Height, which
+   are the piece's axes AS IT LIES - a quarter turn about X makes a Height a
+   Length, and the tail is right to follow. */
 function holdsTurned(name, soup, r0) {
-  const strip = s => String(s || '').replace(/\balong [XYZ]\b/g, 'along _');
+  const strip = s => String(s || '').replace(/\balong [XYZ]\b/g, 'along _').replace(/\bon its [+-][XYZ] side\b|\bat the (top|bottom)\b/g, 'on a side');
   for (const [tn, f] of Object.entries(TURNS)) {
     const r = NSO_sectionRead(turn(soup, f));
-    const same = r.shape === r0.shape && r.hollow === r0.hollow && strip(r.reason) === strip(r0.reason) &&
+    const same = r.shape === r0.shape && r.hollow === r0.hollow && r.gate === r0.gate && strip(r.why) === strip(r0.why) &&
       (r0.lengthMm == null ? r.lengthMm == null : r.lengthMm === r0.lengthMm) &&
       JSON.stringify(nums(r)) === JSON.stringify(nums(r0));
     check(name + ' turned ' + tn + ' reads the same', same,
@@ -156,11 +159,13 @@ function nums(r) {
     holdsTurned('box 2:1:0.5', b2.soup, r2);
   }
   const others = {
-    sphere: /^no straight axis: 100% of the surface is curved or tapered$/,
-    cone: /^no straight axis: \d+% of the surface is curved or tapered$/,
-    torus: /^no straight axis: 100% of the surface is curved or tapered$/,
-    capsule: /^section is constant over only 26\.0 of 52\.0 mm along Z \(50%\) - the rest is shaped$/,
-    ellipsoid: /^no straight axis: 100% of the surface is curved or tapered$/
+    sphere: /^it is curved or tapered all over \(100% of its surface\), so only an even offset and whole-piece scaling apply$/,
+    cone: /^it is curved or tapered all over \(\d+% of its surface\), so only an even offset and whole-piece scaling apply$/,
+    torus: /^it is curved or tapered all over \(100% of its surface\), so only an even offset and whole-piece scaling apply$/,
+    // The capsule's barrel is straight along Z, so Height applies there; its
+    // domes are why nothing else does.
+    capsule: /^only 26\.01 of its 52\.02 mm along Z keeps one section - the ends are shaped, so only height, an even offset and whole-piece scaling apply$/,
+    ellipsoid: /^it is curved or tapered all over \(100% of its surface\), so only an even offset and whole-piece scaling apply$/
   };
   for (const [sh, re] of Object.entries(others)) {
     const r = NSO_sectionRead(stock[sh].soup);
@@ -201,9 +206,9 @@ function nums(r) {
     const s = readSTL(path.join(ROOT, 'fixtures', 'lid_strap.stl'));
     const r = NSO_sectionRead(s);
     check('lid_strap -> other', r.shape === 'other', r.reason);
-    check('  because its outline is a step, 1.2 mm off rectangular (half the 2.4 lid)',
-      /^outer loop is 1\.2 mm off rectangular/.test(r.reason) && near(r.fit.outer.rect.devMm, 1.2, 1e-5),
-      'dev ' + r.fit.outer.rect.devMm);
+    check('  because its section is an L (the step), 1.2 mm off rectangular (half the 2.4 lid)',
+      /^its section along X is an L-shape, not a plain rectangle, so length, width, height and whole-piece scaling apply$/.test(r.reason) &&
+      near(r.fit.outer.rect.devMm, 1.2, 1e-5), r.reason + '  dev ' + r.fit.outer.rect.devMm);
     check('  length 60 along X', r.axis === 'X' && r.lengthMm === 60);
     row('fixtures/lid_strap.stl', r, '60 x 48 x 2.4, step 1.2');
     holdsTurned('lid_strap', s, r);
@@ -213,7 +218,8 @@ function nums(r) {
     const r = NSO_sectionRead(s);
     check('clamp bar -> other', r.shape === 'other', r.reason);
     check('  named: straight along X, but no constant section anywhere',
-      r.axis === 'X' && /no clean straight band anywhere/.test(r.reason) && /none clean/.test(r.detail), r.detail);
+      r.axis === 'X' && /^its section changes all along X - no stretch of it is the same shape, so only an even offset and whole-piece scaling apply$/.test(r.reason) &&
+      /none clean/.test(r.detail), r.reason + '  [' + r.detail + ']');
     row('clamp bar (library/v9_mirror_factory.stl)', r, '187 x 34 x 20.9, keyholes + flange');
     holdsTurned('clamp bar', s, r);
   }
@@ -247,7 +253,7 @@ function nums(r) {
     const s = readSTL(path.join(ROOT, 'fixtures', 'prism_r10h30_s8.stl'));
     const r = NSO_sectionRead(s);
     const sag = 10 * (1 - Math.cos(Math.PI / 8));
-    check('8-gon prism -> other, 0.8 mm off round', r.shape === 'other' && /^outer loop is 0\.8 mm off round/.test(r.reason) &&
+    check('8-gon prism -> other, 0.8 mm off round', r.shape === 'other' && /^its section along Z is a 8-sided polygon, not a circle \(0\.76 mm off round\), so only height, an even offset and whole-piece scaling apply$/.test(r.reason) &&
       near(r.fit.outer.circle.devMm, sag, TOL), r.reason + '  (sagitta ' + sag.toFixed(4) + ')');
     row('fixtures/prism_r10h30_s8.stl', r, 'octagon r 10, sagitta ' + sag.toFixed(3));
     holdsTurned('prism', s, r);
@@ -281,11 +287,11 @@ function nums(r) {
   console.log('\n=== 4. readout wording ===');
   {
     const t = NSO_sectionReadout(NSO_sectionRead(rectTube(40, 20, 30, 10, 60)));
-    check('a bar reads W x D x L', /^Bar 40\.0 × 20\.0 × 60\.0 W × D × L/.test(t), t);
+    check('a bar reads L x W x H, the card\'s own names', t === 'Bar 40.0 L × 20.0 W × 60.0 H · bore 30.0 × 10.0 · wall 5.0', t);
     const tb = NSO_sectionReadout(NSO_sectionRead(stock.tube.soup));
-    check('a ring reads Ø outer, Ø bore, wall, length', /^Ring Ø\d+\.\d outer · Ø\d+\.\d bore · wall \d+\.\d · length \d+\.\d$/.test(tb), tb);
+    check('a ring reads Ø outer, Ø bore, wall, length', /^Ring Ø\d+\.\d\d? outer · Ø\d+\.\d\d? bore · wall \d+\.\d\d? · length \d+\.\d\d?$/.test(tb), tb);
     const sp = NSO_sectionReadout(NSO_sectionRead(stock.sphere.soup));
-    check('other reads the three sizes and the reason on one line', /^35\.3 × 35\.3 × 35\.3 W × D × H · no straight axis/.test(sp), sp);
+    check('other reads the three sizes and the reason on one line', /^35\.3 L × 35\.3 W × 35\.3 H · it is curved or tapered all over/.test(sp), sp);
   }
 
   console.log('\n=== the classifier\'s table ===');

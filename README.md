@@ -16,14 +16,18 @@ Smart build-plate packing for 3D printing.
   placed where the slicer had them)
 - Quantity control per model
 - **Scale card** reads the piece first: `Ring Ø40.0 outer · Ø36.0 bore · wall
-  2.0 · length 10.0`, `Bar 40.0 × 20.0 × 60.0 W × D × L`, or the three sizes and
-  why it is neither, with the build-volume verdict appended (`fits A1 Mini` /
-  `5.0 mm too wide for A1 Mini`). Under it: **Length** (Extend or Shorten
-  along the straight axis, cross-section held), **Whole ×** and **Longest**
-  (uniform scale), and **Fit to plate** (the largest uniform factor that fits,
-  stated). A ring adds **Outer Ø** (wall kept), **Bore Ø** and **Wall** (outer
-  kept); a rod adds **Diameter** - faces move, nothing is scaled, the length is
-  held bit for bit. See [docs/SECTION.md](docs/SECTION.md)
+  2.0 · length 10.0`, `Bar 60.0 L × 20.0 W × 10.0 H`, or the three sizes and,
+  in plain words, why it is neither and what still applies (`its section along
+  X is a U - open at the top - not a closed rectangle, so length, width, height
+  and whole-piece scaling apply`), with the build-volume verdict appended
+  (`fits A1 Mini` / `5.0 mm too wide for A1 Mini`). Under it, one compact row
+  per field that applies: **Length / Width / Height** - the piece's own axes
+  as it lies - each inserting or removing material inside one straight run, so
+  walls, floor, holes and lips keep their size; a ring's **Outer Ø** (wall
+  kept) and **Wall** (outer kept), a rod's **Diameter**; **Offset** (the
+  outside in or out, inner faces following - Fatten / Shrink, folded in) where
+  no named field does that job; **Whole ×**, **Longest** and **Fit to plate**.
+  See [docs/SECTION.md](docs/SECTION.md)
 - **In-house slicer** (G-scope, **Slice**): exact layer sections, walls offset
   by the measured line widths, grid / zigzag infill by density, top and bottom
   shells, and per-layer overhang / support-need calls - opened as a toolpath

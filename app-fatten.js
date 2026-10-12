@@ -258,72 +258,11 @@ function NSO_fattenSelectedModel(dir, mm, opts) {
 }
 
 /* ---------------------------------------------------------------------------
-   4. UI entry point. Two buttons and the mm box they share.
-
-   Blank box: like Extend's, the first click reports what the piece actually is
-   - detected axis and the cross-section extents across it - and fills the box
-   with a starting figure, so the user edits a real number instead of guessing
-   which way the tool thinks the piece points.
+   4. No UI here any more. Scale part 3 folded the Fatten and Shrink buttons
+   into the Scale card's Offset row (app-scale.js, NSO_scaleOffsetRaw): one
+   signed mm figure, the outside moved and the inner faces following, with a
+   floor and a bore-closing refusal this wrapper never had - Shrink here
+   un-rang a ring at 0.1 and 0.5 mm. NSO_fattenCrossSectionFaces stays: it is
+   nso_ring.js's face filter. NSO_fattenSelectedModel stays callable for the
+   integration checks that drive it, and nothing in the app reaches it.
 --------------------------------------------------------------------------- */
-if (typeof document !== 'undefined') {
-  (function wireFattenButtons() {
-    function readBox() {
-      var inp = document.getElementById('inp-fatten-mm');
-      var v = inp ? parseFloat(inp.value) : NaN;
-      return (isFinite(v) && v > 0) ? v : NaN;
-    }
-    function describe() {
-      var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
-      var soup = (m && m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null;
-      if (!soup) {
-        if (typeof setStatus === 'function') setStatus('Select a raw piece first', true);
-        return;
-      }
-      var det = NSO_extendDetectAxis(soup, {});
-      if (!det.ok) {
-        if (typeof setStatus === 'function') setStatus('Fatten refused - ' + det.reason, true);
-        return;
-      }
-      var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-      for (var i = 0; i < soup.length; i += 3) {
-        for (var c = 0; c < 3; c++) {
-          var v = soup[i + c];
-          if (v < lo[c]) lo[c] = v;
-          if (v > hi[c]) hi[c] = v;
-        }
-      }
-      var across = [0, 1, 2].filter(function (c) { return c !== det.axisIdx; })
-        .map(function (c) { return 'xyz'[c].toUpperCase() + ' ' + (hi[c] - lo[c]).toFixed(2); }).join(', ');
-      var inp = document.getElementById('inp-fatten-mm');
-      if (inp) inp.value = '0.5';
-      if (typeof setStatus === 'function') {
-        setStatus('Fatten: this piece runs along ' + det.axis.toUpperCase() + ' (' +
-          (hi[det.axisIdx] - lo[det.axisIdx]).toFixed(2) + ' mm, held). Cross-section ' + across +
-          ' mm. Set an offset and press Fatten or Shrink.');
-      }
-    }
-    function run(dir) {
-      try {
-        var mm = readBox();
-        if (!(mm > 0)) { describe(); return; }
-        NSO_fattenSelectedModel(dir, mm);
-      } catch (err) {
-        console.error('[fatten]', err);
-        if (typeof setStatus === 'function') {
-          setStatus('Fatten failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
-        }
-      }
-    }
-    function wire() {
-      var pairs = [['btn-fatten-grow', 'grow'], ['btn-fatten-shrink', 'shrink']];
-      for (var i = 0; i < pairs.length; i++) {
-        var btn = document.getElementById(pairs[i][0]);
-        if (!btn || btn.dataset.nsoWired === '1') continue;
-        btn.dataset.nsoWired = '1';
-        btn.addEventListener('click', (function (d) { return function () { run(d); }; })(pairs[i][1]));
-      }
-    }
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
-    else wire();
-  })();
-}

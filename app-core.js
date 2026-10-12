@@ -165,7 +165,8 @@ const UNDO_REPLACE_LABEL = {
   detachReplace: 'Undo: Detach reverted',
   reattachReplace: 'Undo: Reattach reverted',
   stockReplace: 'Undo: Stock adjustment reverted',
-  ringReplace: 'Undo: Ring / rod size reverted'
+  ringReplace: 'Undo: Ring / rod size reverted',
+  offsetReplace: 'Undo: Offset reverted'
 };
 
 function undoLast() {
