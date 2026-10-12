@@ -56,9 +56,11 @@ withApp(async (page, logs) => {
     };
     /* the screen angle of a point fixed to the piece, about its centre - a
        point off Z, so it is off both the Turn axis and the lean-X axis */
-    H.mark = () => {
+    H.mark = (ring) => {
       const p = H.p();
-      const w = p.mesh.position.clone().add(new THREE.Vector3(0, 0, 1).multiplyScalar(30));
+      /* off the ring's axis: Turn's is the vertical, front/back's the piece's own X */
+      const off = new THREE.Vector3(0, 0, 1);
+      const w = p.mesh.position.clone().add(off.multiplyScalar(30));
       return p.mesh.worldToLocal(w).toArray();
     };
     H.markAngle = (local) => {
@@ -153,7 +155,7 @@ withApp(async (page, logs) => {
       await N(c => window.__d.cam(c[0], c[1], c[2]), cam);
       await N(rg => { const p = window.__d.p(); p.rotY = 0; p.tiltX = 0; p.tiltZ = 0; applyMeshRotation(p);
         window.nsoRotate.turn(rg, 20); }, ring);         // clear of every snap
-      const mark = await N(() => window.__d.mark());
+      const mark = await N(rg => window.__d.mark(rg), ring);
       const before = await N(m => window.__d.markAngle(m), mark);
       q0 = await N(() => window.__d.q());
       await dragRing(ring, 40);                       // clockwise on screen, every time
@@ -164,7 +166,7 @@ withApp(async (page, logs) => {
         const qa = new THREE.Quaternion().fromArray(q), qb = new THREE.Quaternion().fromArray(window.__d.q());
         const dq = qb.clone().multiply(qa.clone().invert());
         return Math.sign(new THREE.Vector3(dq.x, dq.y, dq.z).dot(A) * dq.w) * window.__d.angle(q, window.__d.q());
-      }, { q: q0, axis: ring === 'turn' ? [0, 1, 0] : [1, 0, 0] });
+      }, { q: q0, axis: await N(rg => window.nsoRotate.ringAxis(rg), ring) });   // a lean's axis is the piece's own
       sides.push({ ring, label, onScreen: +d.toFixed(2), world: +world.toFixed(3),
                    readout: await N(() => window.nsoRotate.readout()) });
       await shot(page, '04-' + ring + '-' + label + '-side-after-clockwise-drag');
@@ -179,7 +181,7 @@ withApp(async (page, logs) => {
       f.onScreen > 20 && Math.abs(Math.abs(f.world) - 40) < 1e-3, f.onScreen + '° on screen, ' + f.world + '° about the axis');
   }
   const fb = sides.filter(x => x.ring === 'fb');
-  check('fb: from opposite sides of the X axis the same screen clockwise is opposite turns about X - the view term',
+  check('fb: from opposite sides of its axis the same screen clockwise is opposite turns about it - the view term',
     Math.sign(fb[0].world) === -Math.sign(fb[1].world), fb.map(x => x.world).join(' vs '));
   await page.click('#chk-rot-ring-fb'); await page.waitForTimeout(60);
 
@@ -307,7 +309,8 @@ withApp(async (page, logs) => {
     undos.push(await N(() => ({ q: window.__d.q(), f: (p => [p.tiltX, +(p.rotY * 180 / Math.PI).toFixed(6), p.tiltZ])(window.__d.p()) })));
   }
   check('one Undo takes back the Turn drag alone: still leaned 90, yaw back',
-    Math.abs(undos[0].f[0]) === 90 && Math.abs(undos[0].f[1]) < 1e-6, JSON.stringify(undos[0].f));
+    (Math.abs(undos[0].f[0]) === 90 || Math.abs(undos[0].f[2]) === 90) && Math.abs(undos[0].f[1]) < 1e-6,
+    JSON.stringify(undos[0].f));
   check('the next takes back the lean: flat again', undos[1].f[0] === 0 && undos[1].f[2] === 0,
     JSON.stringify(undos[1].f));
 

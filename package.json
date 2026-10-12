@@ -165,6 +165,7 @@
     "tip:orient": "node tools/nso_tip_orient_test.js",
     "rotate:handles": "node tools/nso_rotate_handles_test.js",
     "rotate:drive": "node tools/nso_rotate_rings_drive_check.js",
+    "rotate:steady-drive": "node tools/nso_rotate_rings_steady_drive_check.js",
     "lock:test": "node tools/nso_poslock_test.js",
     "overlay:test": "node tools/nso_viewport_overlay_test.js",
     "lock:multi": "node tools/nso_multilock_test.js",
