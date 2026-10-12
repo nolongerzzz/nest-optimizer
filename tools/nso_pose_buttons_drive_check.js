@@ -261,7 +261,7 @@ withApp(async (page, logs) => {
   const rolled = await N(() => ({ long: window.__d.own([1, 0, 0]), width: window.__d.own([0, 0, 1]) }));
   console.log('   old tiltX += 30 from this pose would have been ' + old1b.deg.toFixed(3) + '° about ' + fmtAxis(old1b.axis) +
     ' - the plate\'s X, 45° off the piece');
-  check('Tilt ↑ twice rolls it 30° about its OWN length (own X, at heading 45°)',
+  check('Tilt ↑ twice rolls it 30° about its OWN length (own X, turned 45° with the piece)',
     near(r.deg, 30, 1e-6) && same(r.axis, at45.long), r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis));
   check('...no twist: its length stays level on the same heading',
     same(rolled.long, at45.long), fmtAxis(at45.long) + ' -> ' + fmtAxis(rolled.long));
@@ -279,9 +279,9 @@ withApp(async (page, logs) => {
   await press('#btn-bank-dn'); await press('#btn-bank-dn');
   r = await N(q => window.__d.delta(q), at45.q);
   const ended = await N(() => ({ long: window.__d.own([1, 0, 0]), width: window.__d.own([0, 0, 1]) }));
-  check('Tilt ← twice tips it 30° about its OWN width line (own Z, at heading 135°)',
+  check('Tilt ← twice tips it 30° about its OWN width line (own Z, turned 45° with the piece)',
     near(r.deg, 30, 1e-6) && same(r.axis, at45.width), r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis));
-  check('...end-over-end: its length rises 30° on its own 45° heading',
+  check('...end-over-end: its length rises 30° and keeps its heading',
     near(Math.abs(elev(ended.long)), 30, 1e-6) && near(heading(ended.long), heading(at45.long), 1e-6),
     'elevation ' + elev(ended.long).toFixed(6) + '°, heading ' + heading(ended.long).toFixed(6) + '°');
   check('...no twist: its width line has not moved', same(ended.width, at45.width), fmtAxis(ended.width));
@@ -290,9 +290,16 @@ withApp(async (page, logs) => {
   await N(c => window.__d.cam(c[0], c[1], c[2]), CAM_SIDE);
   await shot(page, '01f-turned-45-tilt-left-x2-camB');
   await undo(); await undo();
-  for (let i = 0; i < 45; i++) await undo();
+  r = await N(q => window.__d.delta(q), at45.q);
+  check('two Undos: back to the 45° turn', r.deg < 1e-6, r.deg.toExponential(2) + '°');
+  /* the 45 key presses back the other way - more than the Undo stack holds */
+  await N(() => window.__d.cam(0.01, 300, 0.01));
+  await openMenu('menu-rotate');
+  for (let i = 0; i < 45; i++) await page.keyboard.press('ArrowRight');
+  await page.waitForTimeout(80);
   r = await N(q => window.__d.delta(q), start.q);
-  check('two Undos for the Tilts and 45 for the ring\'s key presses: flat again', r.deg < 1e-6, r.deg.toExponential(2) + '°');
+  check('45 presses of the other arrow key: flat and square again', r.deg < 1e-6, r.deg.toExponential(2) + '°');
+  await openMenu('menu-tip');
 
   /* ------------------------------------------------------------------- 2 */
   console.log('\n=== 2. Stand it, then Tilt ← ===');
