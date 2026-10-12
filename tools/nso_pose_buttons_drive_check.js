@@ -22,9 +22,9 @@
    would have done from the same pose (oldDelta), so the log says what changed.
 
    The piece is the 80 x 40 x 20 box hull. Screenshots go to outDir (default
-   docs/pose-buttons). Export is checked the way tools/
-   nso_rotate_rings_drive_check.js checks it: the downloaded .3mf's vertices
-   against the screen's, in Bambu's plate frame. */
+   tools/pose-buttons-out, git-ignored: they are not committed). Export is
+   checked the way tools/nso_rotate_rings_drive_check.js checks it: the
+   downloaded .3mf's vertices against the screen's, in Bambu's plate frame. */
 
 const path = require('path');
 const fs = require('fs');
@@ -32,7 +32,7 @@ const os = require('os');
 const { execFileSync } = require('child_process');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
 
-const OUT = path.resolve(process.argv[2] || path.join(ROOT, 'docs', 'pose-buttons'));
+const OUT = path.resolve(process.argv[2] || path.join(ROOT, 'tools', 'pose-buttons-out'));
 fs.mkdirSync(OUT, { recursive: true });
 let fails = 0;
 const check = (name, cond, detail) => {
