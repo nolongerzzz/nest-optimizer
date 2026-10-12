@@ -3157,17 +3157,38 @@ function snapshotPlacedPose(idx) {
   };
 }
 
-function rotateSelected(dir) {
-  const p = state.placed[state.selectedIndex];
-  if (!p || !p.mesh) return;
-  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'yaw')) return;
-  pushUndo(snapshotPlacedPose(state.selectedIndex));
+/* The pose buttons - Rotate's 90° pair and Tip's four Tilts, and Tip's arrow
+   keys, which call the same two functions - each turn the piece about a fixed
+   axis of the PLATE, through nsoRotate.turn (app-rotate-handles.js): the
+   increment is composed with the piece's current orientation and the result
+   written back into the pose fields. They used to add to a pose field
+   directly, which is a plate axis only for the OUTERMOST Euler factor: tiltX
+   was, but rotY (the middle) and tiltZ (the innermost, the piece's own Z)
+   were axes of the piece, so ⟲ 90 on a leaned piece and Tilt ←/→ on a turned
+   or tipped one turned it about the wrong thing.
 
-  p.rotY = (p.rotY || 0) + dir * (Math.PI / 2);
-  p.rotated = Math.abs(Math.sin(p.rotY)) > 0.5;
-  applyMeshRotation(p);
-  refreshOutline(p);
+   Each keeps what is its own around the turn: the lock check and its verb,
+   one Undo point, the status line. The 90° buttons take the rings' hard snap
+   so they land exactly on a quarter turn; the 15° tilts do not.
+
+   plate axes:  'turn' = vertical,  'fb' = the plate's X,  'ss' = the plate's Z */
+function turnSelectedAboutPlate(verb, ring, deg, opts) {
+  const p = state.placed[state.selectedIndex];
+  if (!p || !p.mesh) return null;
+  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, verb)) return null;
+  if (typeof nsoRotate === 'undefined' || !nsoRotate.turn) return null;
+  pushUndo(snapshotPlacedPose(state.selectedIndex));
+  nsoRotate.turn(ring, deg, opts);
   updateExportButton();
+  return p;
+}
+
+/* dir +1 is 90° ⟳, clockwise seen from above: a NEGATIVE turn about the
+   plate's up axis (right-handed, positive reads anticlockwise from above). */
+function rotateSelected(dir) {
+  const p = turnSelectedAboutPlate('yaw', 'turn', -dir * 90, { snap: true });
+  if (!p) return;
+  p.rotated = Math.abs(Math.sin(p.rotY)) > 0.5;
   setStatus(`Yaw #${state.selectedIndex + 1}`);
 }
 
@@ -3278,31 +3299,25 @@ function bringSelectedToPlate() {
   setStatus('On the plate - ' + (moved < 0 ? 'up ' : 'down ') + Math.abs(moved).toFixed(2) + ' mm');
 }
 
+/* Tilt ←/→: 15° about the plate's Z, side to side. dir +1 is Tilt →, which
+   lifts the LEFT edge (its title) - a negative turn about Z, which runs
+   toward the default camera; Tilt ← lifts the right edge. It used to be the
+   other way round: +15 on tiltZ for →, lifting the right edge under a title
+   that said left. The status names the step rather than tiltZ, which is no
+   longer the side-to-side lean once the piece has been turned. */
 function bankSelected(dir) {
-  const p = state.placed[state.selectedIndex];
-  if (!p || !p.mesh) return;
-  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'bank')) return;
-  pushUndo(snapshotPlacedPose(state.selectedIndex));
-  p.tiltZ = (p.tiltZ || 0) + dir * 15;
-  if (p.tiltZ > 180) p.tiltZ -= 360;
-  if (p.tiltZ < -180) p.tiltZ += 360;
-  applyMeshRotation(p);
-  refreshOutline(p);
-  updateExportButton();
-  setStatus('Bank ' + p.tiltZ + '°');
+  const p = turnSelectedAboutPlate('bank', 'ss', -dir * 15);
+  if (!p) return;
+  setStatus('Bank ' + (dir > 0 ? '→' : '←') + ' 15°');
 }
 
+/* Tilt ↑/↓: 15° about the plate's X, front to back. dir +1 is Tilt ↑, which
+   lifts the far edge (its title): +15 about X raises -Z, the side away from
+   the default camera. tiltX is the outermost factor, so it still reads as
+   the lean about the plate's X. */
 function tiltSelected(dir) {
-  const p = state.placed[state.selectedIndex];
-  if (!p || !p.mesh) return;
-  if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'pitch')) return;
-  pushUndo(snapshotPlacedPose(state.selectedIndex));
-  p.tiltX = (p.tiltX || 0) + dir * 15;
-  if (p.tiltX > 180) p.tiltX -= 360;
-  if (p.tiltX < -180) p.tiltX += 360;
-  applyMeshRotation(p);
-  refreshOutline(p);
-  updateExportButton();
+  const p = turnSelectedAboutPlate('pitch', 'fb', dir * 15);
+  if (!p) return;
   setStatus('Tilt ' + p.tiltX + '°');
 }
 

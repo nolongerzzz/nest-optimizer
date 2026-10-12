@@ -126,7 +126,7 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 3 */
-  console.log('\n=== 3. Tilt still works by click, exactly as before ===');
+  console.log('\n=== 3. Tilt works by click, about the plate\'s axes ===');
   {
     const t = await page.evaluate(() => {
       const p = state.placed[0];
@@ -141,22 +141,55 @@ withApp(async (page, logs) => {
         .map(i => document.getElementById(i).textContent.trim());
       return out;
     });
+    /* From flat and un-turned, a plate-X turn is tiltX and a plate-Z turn
+       is tiltZ, so the fields still read the step. Tilt → is -15 on Z: it
+       lifts the left edge, as its title says (it used to be +15, lifting the
+       right). tools/nso_pose_buttons_drive_check.js checks the edges. */
     check('each Tilt button still moves 15° on its own axis',
-      t.up === 15 && t.dn === -15 && t.bankUp === 15 && t.bankDn === -15, JSON.stringify(t));
+      t.up === 15 && t.dn === -15 && t.bankUp === -15 && t.bankDn === 15, JSON.stringify(t));
     check('all four now read as Tilt with a direction',
       t.labels.every(l => /^Tilt/.test(l)), t.labels.join(' | '));
-    /* Tilt is not Rotate. It writes tiltX/tiltZ - lifting one edge - where
-       Rotate's controls write rotY and spin about the centre. Nothing here
-       touches rotY, which is what keeps the two from duplicating. */
+    /* Tilt is not Rotate. Each press leans the piece 15° about a HORIZONTAL
+       axis of the plate - X for ↑/↓, Z for ←/→ - and never turns it about
+       the vertical, which is Rotate's. It used to say so by leaving rotY
+       alone; now that a Tilt is a plate-axis turn decomposed back into the
+       fields, a Tilt on top of a Tilt can spell part of itself in rotY, so
+       the motion itself is what is checked. */
     const sep = await page.evaluate(() => {
       const p = state.placed[0];
       p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; applyMeshRotation(p);
-      document.getElementById('btn-tilt-up').click();
-      document.getElementById('btn-bank-up').click();
-      return { rotY: p.rotY, tiltX: p.tiltX, tiltZ: p.tiltZ };
+      const rel = (a, b) => { const d = b.clone().multiply(a.clone().invert());
+        const s = Math.hypot(d.x, d.y, d.z);
+        return { deg: 2 * Math.atan2(s, Math.abs(d.w)) * 180 / Math.PI, vert: s ? Math.abs(d.y) / s : 0 }; };
+      const q = () => { p.mesh.updateMatrixWorld(true); return p.mesh.quaternion.clone(); };
+      const out = [];
+      for (const id of ['btn-tilt-up', 'btn-bank-up', 'btn-tilt-dn', 'btn-bank-dn']) {
+        const a = q(); document.getElementById(id).click(); out.push(rel(a, q()));
+      }
+      p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; applyMeshRotation(p);
+      return out;
     });
-    check('Tilt never touches rotY - it is a different motion from Rotate',
-      sep.rotY === 0 && sep.tiltX !== 0 && sep.tiltZ !== 0, JSON.stringify(sep));
+    check('Tilt never turns about the vertical - a 15° lean about a horizontal axis, every press',
+      sep.every(r => Math.abs(r.deg - 15) < 1e-6 && r.vert < 1e-9),
+      sep.map(r => r.deg.toFixed(6) + '° vert ' + r.vert.toExponential(1)).join('; '));
+    /* ...and about the PLATE's axes, not the piece's own. Turned 90° first,
+       the piece's own Z runs along the plate's X: the old tiltZ write leaned
+       it front/back there. Tilt ← must still lean it side to side. */
+    const tz = await page.evaluate(() => {
+      const p = state.placed[0];
+      p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; applyMeshRotation(p);
+      window.nsoRotate.turn('turn', 90);
+      p.mesh.updateMatrixWorld(true);
+      const a = p.mesh.quaternion.clone();
+      document.getElementById('btn-bank-dn').click();
+      p.mesh.updateMatrixWorld(true);
+      const d = p.mesh.quaternion.clone().multiply(a.invert());
+      const s = Math.hypot(d.x, d.y, d.z);
+      p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; applyMeshRotation(p);
+      return { deg: 2 * Math.atan2(s, Math.abs(d.w)) * 180 / Math.PI, z: s ? Math.abs(d.z) / s : 0 };
+    });
+    check('on a piece turned 90°, Tilt ← still leans 15° about the plate\'s Z',
+      Math.abs(tz.deg - 15) < 1e-6 && Math.abs(tz.z - 1) < 1e-9, tz.deg.toFixed(6) + '°, |z| ' + tz.z.toFixed(9));
   }
 
   /* ------------------------------------------------------------------ 4 */
@@ -191,7 +224,7 @@ withApp(async (page, logs) => {
       k.shut.tiltX === 0 && k.shut.tiltZ === 0, JSON.stringify(k.shut));
     check('with it open, up/down tilt one axis by 15°', k.up === 15 && k.down === -15,
       'up ' + k.up + ', down ' + k.down);
-    check('...and left/right tilt the other', k.right === 15 && k.left === -15,
+    check('...and left/right tilt the other', k.right === -15 && k.left === 15,
       'right ' + k.right + ', left ' + k.left);
     check('holding an arrow keeps tilting - 6 repeats give 90°', k.held === 90, k.held + '°');
     check('arrows typed into a field still belong to the field', k.inField === 0, k.inField + '°');
