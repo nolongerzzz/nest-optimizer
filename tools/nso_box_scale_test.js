@@ -73,11 +73,11 @@ check('tray: Length X 100 (band 96), Width Y 40 (band 36), Height Z 25 (band 23)
   vT.length.axisIdx === 0 && vT.length.mm === 100 && vT.length.bandMm === 96 &&
   vT.width.axisIdx === 1 && vT.width.mm === 40 && vT.width.bandMm === 36 &&
   vT.height.axisIdx === 2 && vT.height.mm === 25 && vT.height.bandMm === 23, JSON.stringify([vT.length, vT.width, vT.height]));
-check('tray: no Offset (Length, Width and Height cover it), no Longest (it is the Length)', !vT.offset && !vT.longest);
+check('tray: Offset shown (every piece but a ring or rod gets it), no Longest (it is the Length)', vT.offset && !vT.longest);
 const rB = NSO_sectionRead(BAR), vB = rB.verbs;
 console.log('   bar:  ' + NSO_sectionReadout(rB));
 check('bar reads Bar 60.0 L × 20.0 W × 10.0 H with all three fields', NSO_sectionReadout(rB) === 'Bar 60.0 L × 20.0 W × 10.0 H' &&
-  vB.length && vB.width && vB.height && !vB.offset && !vB.longest);
+  vB.length && vB.width && vB.height && vB.offset && !vB.longest);
 // A bar stood on end: Height is still its own Z, Length the longer of X / Y.
 const STAND = BOX.bar(10, 20, 60), rS = NSO_sectionRead(STAND);
 check('a bar stood on end: Height Z 60, Length Y 20, Width X 10 - the piece\'s axes as it lies',
@@ -183,6 +183,34 @@ console.log('\n=== 7. Offset on the bar and the ring ===');
   const c = NSO_scaleOffsetRaw(TUBE, -16);
   console.log('   tube -16: ' + c.reason);
   check('tube -16: its Ø' + NSO_sectionShow(B0) + ' bore would close - refused, limit "bore"', !c.ok && c.limit === 'bore', c.reason);
+}
+
+console.log('\n=== 8. Offset on a stepped piece: fixtures/lid_strap.stl ===');
+{
+  // A 2.4 mm plate (y 0..40) with a 0.6 mm strap along one edge (y 40..48):
+  // an L-section. The strap's top and the step face sit inside the convex
+  // hull, in the concave corner, so Thicken's classification calls them
+  // INNER and they follow the outer faces rather than moving out. Recorded
+  // here as it is, not as it might be wished: the plate thickens by 2t, the
+  // strap keeps its 0.6 mm and slides with the plate's underside, and the
+  // step deepens by 2t. Closed, manifold, nothing thinner than it was.
+  const { readSTL } = require('./nso_stl_io.js');
+  const LID = readSTL(path.join(ROOT, 'fixtures', 'lid_strap.stl'));
+  const rL = NSO_sectionRead(LID);
+  check('lid_strap: Offset shown alongside Length, Width and Height', rL.verbs.offset && rL.verbs.length && rL.verbs.width && rL.verbs.height);
+  for (const t of [0.5, -0.5]) {
+    const r = NSO_scaleOffsetRaw(LID, t);
+    const z = r.ok ? L(r.tris, 2) : [];
+    // the plate's thickness at its far edge (least y), the strap's at its own (most y)
+    const zAt = (pick) => { if (!r.ok) return [NaN, NaN]; const ys = L(r.tris, 1), y0 = pick(ys); let lo = Infinity, hi = -Infinity;
+      for (let i = 0; i < r.tris.length; i += 3) if (r.tris[i + 1] === y0) { lo = Math.min(lo, r.tris[i + 2]); hi = Math.max(hi, r.tris[i + 2]); }
+      return [lo, hi]; };
+    const pz = zAt(ys => ys[0]), sz = zAt(ys => ys[ys.length - 1]);
+    const plate = pz[1] - pz[0], strap = sz[1] - sz[0];
+    console.log('   ' + t + ': z layers ' + z.map(v => +v.toFixed(4)).join(', ') + ' - plate ' + plate.toFixed(3) + ', strap ' + strap.toFixed(3));
+    check('  ' + t + ': the plate goes 2.4 -> ' + (2.4 + 2 * t).toFixed(1) + ', the strap stays 0.6 (its top is an inner face), closed',
+      r.ok && Math.abs(plate - (2.4 + 2 * t)) < 1e-5 && Math.abs(strap - 0.6) < 1e-5 && closed(r.tris), r.ok ? '' : r.reason);
+  }
 }
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

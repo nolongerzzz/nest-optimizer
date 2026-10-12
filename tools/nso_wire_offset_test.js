@@ -6,7 +6,7 @@
    floors keep their thickness. The geometry proofs live in
    tools/nso_box_scale_test.js; what this file exists to prove is that the
    Finish menu's Fatten / Shrink buttons are gone, that the Offset row shows
-   only where no named field does its job, that its commit rebuilds the piece
+   everywhere but on a ring or rod, that its commit rebuilds the piece
    the app draws, that Undo names it and restores the soup, that a refusal
    changes nothing and pushes no undo, that paint stands it down, and -
    section 7, kept from the Fatten wire test this replaces - that the two
@@ -73,7 +73,7 @@ withApp(async (page, logs) => {
   check('no Fatten / Shrink control left in the Finish menu', ui.gone.length === 0, ui.gone.join(','));
   check('#btn-scale-offset is on the Scale card, wired at load, with a numeric field', ui.btn && ui.wired && ui.input && ui.inScale);
 
-  console.log('\n=== 2. shown only where no named field does its job ===');
+  console.log('\n=== 2. shown everywhere but on a ring or rod ===');
   const pin = await loadSTL(page, fx('pin.stl'));
   await select(page, pin);
   const cp = await card(page);

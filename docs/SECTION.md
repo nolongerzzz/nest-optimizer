@@ -108,7 +108,7 @@ rows `NSO_sectionVerbs` says apply:
 | **Length** / **Width** / **Height** `[ ] mm` | that axis has a clean constant-section band. A ring or rod: Length only, along the reader's axis | `NSO_scaleAxisApply` → `NSO_extendRaw({ axis, length })`: material goes in or comes out inside the one band, every other coordinate untouched bit for bit, so walls, floor, holes, pockets and lips keep their size. Shorter shortens; past the band it refuses with `Shorten can remove up to N mm here` |
 | **Outer Ø** `[ ] wall kept` / **Wall** `[ ] outer kept` | a ring | `nso_ring.js`, below. Part 2's **Bore Ø** row is gone: Outer Ø and Wall reach every bore between them |
 | **Diameter** `[ ] length kept` | a rod | `nso_ring.js` |
-| **Offset** `[ ] mm, wall kept` | no named field does the same job — not on a ring or rod (Outer Ø and Length), not on a piece with all three of Length / Width / Height | `NSO_scaleOffsetRaw`, below — Fatten and Shrink, folded in |
+| **Offset** `[ ] mm, wall kept` | every piece but a ring or rod, where Outer Ø / Diameter and Length already do its job. Elsewhere it is the only way to thicken a stepped piece evenly; see lid_strap below for where it is not even | `NSO_scaleOffsetRaw`, below — Fatten and Shrink, folded in |
 | **Whole ×** `[ ]` | always; reset to 1 on every refresh | `NSO_scaleSelectedModel({ factor })` |
 | **Longest** `[ ] mm` | unless a named field already shows the same number | `NSO_scaleSelectedModel({ axis: 'longest', targetMm })`, prefilled with the longest edge |
 | **Fit to plate** | always | `min(limit / size)` over the bed's three axes, from the same `nso_printer.js` fit the plate warning uses, applied as a uniform factor and stated. Already fits: says so, changes nothing |
@@ -117,7 +117,7 @@ Every field repopulates whenever the selection, the selected piece's soup or its
 pose on the plate (Yaw, Tip, Roll, Lift, position) changes, whoever changed it:
 while the card is open, a per-frame check on the piece, `rawTris` identity
 (every bake replaces the array) and the placed entry's pose. A refused apply
-leaves what was typed. At a 900 px-tall window the card ends at 407 px (the
+leaves what was typed. At a 900 px-tall window the card ends at 436 px (the
 tray, the most rows a box gets) with no scroll; the drive check measures it.
 
 Paint scope: every verb is whole-piece and any paint stands it down, naming the
@@ -145,6 +145,29 @@ Refusals name the limit hit:
 | the bore closing | `the bore or pocket would close - 12 mm is more than the room inside it (8 inner face(s) would turn inside out)` |
 | a feature on the outside | `0.5 mm is more than a feature on the outside has room for - 128 outer face(s) would turn inside out, the narrowest 0.12 mm across` — Thicken's own inversion gate, reached on a chamfer or a strip narrower than the shrink |
 | crossing | Thicken's piercing check, `NSO_Repair.inspect` |
+
+**A stepped piece is not thickened evenly.** Which faces count as inner is
+Thicken's classification: on the convex hull (or a smooth crease from it) is
+outer, everything else inner. A step's riser and the ledge below it sit inside
+the hull, so they are inner and *follow* the outside instead of moving out.
+`fixtures/lid_strap.stl` (a 2.4 mm plate with a 0.6 mm strap along one edge) at
+Offset +0.5: the plate goes 2.4 → 3.4, the strap stays 0.6 and slides down with
+the plate's underside, and the step deepens by 1.0. At −0.5: plate 1.4, strap
+0.6. Closed, manifold, nothing thinner than it was (`box:test` §8 records it) —
+but not "every face out by t". A tray's floor top is inner by the same rule,
+which is what keeps its floor; the two cases are not told apart.
+
+### Which axis is Length
+
+Length / Width / Height are the piece's own raw axes **as it lies in its own
+frame**: Height is its raw Z, Length the longer of its raw X and Y, Width the
+shorter. They are not literally X / Y / Z (a bar stood on its end reads Length
+along Y if Y is its longer side), and they do not follow the plate pose: Yaw /
+Tip / Roll turn the placed instance, not the soup, so a Tip X re-reads the card
+but leaves Height on the same raw Z. A ring's or rod's **Length** is different:
+it is along the reader's straight axis, whichever raw axis that is - so a ring
+standing on the plate with its axis on Z calls that extent Length, where a box
+lying the same way would call it Height.
 
 ## Ring verbs (part 2) — `nso_ring.js`
 

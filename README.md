@@ -18,15 +18,15 @@ Smart build-plate packing for 3D printing.
 - **Scale card** reads the piece first: `Ring Ø40.0 outer · Ø36.0 bore · wall
   2.0 · length 10.0`, `Bar 60.0 L × 20.0 W × 10.0 H`, or the three sizes and,
   in plain words, why it is neither and what still applies (`its section along
-  X is a U - open at the top - not a closed rectangle, so length, width, height
-  and whole-piece scaling apply`), with the build-volume verdict appended
+  X is a U - open at the top - not a closed rectangle, so length, width, height,
+  an even offset and whole-piece scaling apply`), with the build-volume verdict appended
   (`fits A1 Mini` / `5.0 mm too wide for A1 Mini`). Under it, one compact row
   per field that applies: **Length / Width / Height** - the piece's own axes
   as it lies - each inserting or removing material inside one straight run, so
   walls, floor, holes and lips keep their size; a ring's **Outer Ø** (wall
   kept) and **Wall** (outer kept), a rod's **Diameter**; **Offset** (the
-  outside in or out, inner faces following - Fatten / Shrink, folded in) where
-  no named field does that job; **Whole ×**, **Longest** and **Fit to plate**.
+  outside in or out, inner faces following - Fatten / Shrink, folded in) on
+  everything but a ring or rod; **Whole ×**, **Longest** and **Fit to plate**.
   See [docs/SECTION.md](docs/SECTION.md)
 - **In-house slicer** (G-scope, **Slice**): exact layer sections, walls offset
   by the measured line widths, grid / zigzag infill by density, top and bottom
@@ -34,6 +34,13 @@ Smart build-plate packing for 3D printing.
   G-scope inspects line by line, like an imported `.gcode.3mf`. Validated
   against real Bambu slices, agreement and disagreement both on record. For
   reverse-engineering and internal iteration ([docs/SLICER.md](docs/SLICER.md))
+- **Picture** (Gen+): a photo or a scan becomes a relief slab - a flat base with
+  a dense relief on top, heights from the picture (auto-contrast, 2 / 4 / 8 / 16
+  levels or smooth, an exact box-filter resample at the Detail you set). Closed
+  and checked, it prints as it is (a relief or a lithophane) and is dense enough
+  to Brush, Smooth, Cut and export like any other piece. A live triangle count,
+  and a 400k budget that refuses by name with the Detail that would fit
+  ([docs/RELIEF.md](docs/RELIEF.md))
 - **New stock**: a correctly-sized blank to start from, before Carve, Hollow,
   Cut or anything else that begins with a blank block - sphere, box, cylinder,
   cone, tube, torus, capsule or ellipsoid, sized from the target piece by a

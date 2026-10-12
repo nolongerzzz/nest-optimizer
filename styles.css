@@ -2593,6 +2593,32 @@ select:focus, input:focus {
    screen with nothing to type in it. */
 .vp-menu-body [hidden] { display: none; }
 .vp-stock-menu .vp-row-opts .vp-clone input[type="text"] { width: 62px; }
+/* Picture (Gen+): the Stock card's shape, one menu further down. The Levels
+   select sits in a label, so it gives up the panel-wide select width. */
+.vp-relief-menu {
+  pointer-events: auto;
+}
+.vp-relief-menu > summary {
+  width: auto;
+  min-width: 64px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.vp-relief-menu .vp-menu-body {
+  top: calc(100% + 4px);
+  left: auto;
+  right: 0;
+  min-width: 168px;
+  max-width: 176px;
+  padding: 4px;
+  gap: 3px;
+}
+.vp-relief-menu .vp-clone select { width: auto; }
+.vp-relief-menu .relief-file-name,
+.vp-relief-menu .relief-tris { margin: 2px 0; font-size: 11px; word-break: break-all; }
+.vp-relief-menu .relief-tris { color: #e2e8f0; font-variant-numeric: tabular-nums; }
+.vp-relief-menu .relief-file-name:empty { display: none; }
 /* Attach arms a click, so it needs the lit state every other click-owning
    button in this app has - Paint, Carve, Measure, Seat here. Same shape as
    .btn-measure.is-armed; a different hue only so two armed tools are never

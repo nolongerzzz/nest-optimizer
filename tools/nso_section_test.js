@@ -207,7 +207,7 @@ function nums(r) {
     const r = NSO_sectionRead(s);
     check('lid_strap -> other', r.shape === 'other', r.reason);
     check('  because its section is an L (the step), 1.2 mm off rectangular (half the 2.4 lid)',
-      /^its section along X is an L-shape, not a plain rectangle, so length, width, height and whole-piece scaling apply$/.test(r.reason) &&
+      /^its section along X is an L-shape, not a plain rectangle, so length, width, height, an even offset and whole-piece scaling apply$/.test(r.reason) &&
       near(r.fit.outer.rect.devMm, 1.2, 1e-5), r.reason + '  dev ' + r.fit.outer.rect.devMm);
     check('  length 60 along X', r.axis === 'X' && r.lengthMm === 60);
     row('fixtures/lid_strap.stl', r, '60 x 48 x 2.4, step 1.2');

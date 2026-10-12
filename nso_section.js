@@ -456,11 +456,13 @@ function NSO_sectionShapeWhy(p2, fo, k) {
                      that has a clean band. Height is the piece's own Z, Length
                      the longer of its X and Y, Width the shorter.
 
-   offset (Fatten / Shrink as one even offset) shows only where those named
-   fields do not already cover every direction it moves the piece in: a ring
-   or rod with a Length, or a piece with all three of Length / Width / Height,
-   has no use for it. Longest shows only where it is not the same number as a
-   named field already on the card. */
+   offset (Fatten / Shrink as one wall-kept offset) shows on every piece but a
+   ring or rod, where Outer Ø / Diameter and Length already do its job. On
+   anything else it is the only way to thicken a piece evenly: Length / Width
+   / Height insert material in one band each, which on a stepped piece (an L,
+   lid_strap's strap) moves the step's position rather than offsetting it.
+   Longest shows only where it is not the same number as a named field
+   already on the card. */
 function NSO_sectionVerbs(s) {
   var v = { length: null, width: null, height: null, outer: false, wall: false, diameter: false,
             offset: true, longest: true, named: [] };
@@ -469,14 +471,13 @@ function NSO_sectionVerbs(s) {
   if (s.shape === 'round') {
     if (s.axes[s.axisIdx].ok) v.length = dim(s.axes[s.axisIdx]);
     if (s.hollow) { v.outer = true; v.wall = true; } else v.diameter = true;
-    v.offset = !v.length;
+    v.offset = false;
   } else {
     var X = s.axes[0], Y = s.axes[1], Z = s.axes[2];
     var lenA = X.extentMm >= Y.extentMm ? X : Y, widA = lenA === X ? Y : X;
     if (lenA.ok) v.length = dim(lenA);
     if (widA.ok) v.width = dim(widA);
     if (Z.ok) v.height = dim(Z);
-    v.offset = !(v.length && v.width && v.height);
   }
   var longest = Math.max(s.sizes.w, s.sizes.d, s.sizes.h);
   var namedMm = [];

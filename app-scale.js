@@ -571,8 +571,8 @@ function NSO_scaleSelectedModel(spec) {
      Diameter          a rod.
      Offset            Fatten and Shrink, folded in: the outside moves by the
                        mm entered and the inner faces follow (NSO_scaleOffsetRaw
-                       above). Shown only where no named field already does the
-                       same job.
+                       above). Shown on every piece but a ring or rod, where Outer Ø /
+                       Diameter and Length already do its job.
      Whole x           today's uniform factor. Reset to 1 on every selection,
                        bake and pose change.
      Longest           today's longest-edge target, prefilled with the longest
