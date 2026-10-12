@@ -30,6 +30,13 @@ Smart build-plate packing for 3D printing.
   G-scope inspects line by line, like an imported `.gcode.3mf`. Validated
   against real Bambu slices, agreement and disagreement both on record. For
   reverse-engineering and internal iteration ([docs/SLICER.md](docs/SLICER.md))
+- **Picture** (Gen+): a photo or a scan becomes a relief slab - a flat base with
+  a dense relief on top, heights from the picture (auto-contrast, 2 / 4 / 8 / 16
+  levels or smooth, an exact box-filter resample at the Detail you set). Closed
+  and checked, it prints as it is (a relief or a lithophane) and is dense enough
+  to Brush, Smooth, Cut and export like any other piece. A live triangle count,
+  and a 400k budget that refuses by name with the Detail that would fit
+  ([docs/RELIEF.md](docs/RELIEF.md))
 - **New stock**: a correctly-sized blank to start from, before Carve, Hollow,
   Cut or anything else that begins with a blank block - sphere, box, cylinder,
   cone, tube, torus, capsule or ellipsoid, sized from the target piece by a
