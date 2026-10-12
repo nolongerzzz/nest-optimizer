@@ -3093,8 +3093,8 @@ function cutActiveModel() {
   const plateAxis = info.plateAxis || axis;
   const span = info.span;
   const plane = info.plane;
-  // Distance from min end - must match readout
-  const cutMm = (plane - info.origin);
+  // Distance from min end - the readout's own number
+  const cutMm = info.mm != null ? info.mm : (plane - info.origin);
   if (span < MIN_CUT_SIDE_MM * 2) {
     setStatus('Piece too short to cut (need >= ' + (MIN_CUT_SIDE_MM * 2) + ' mm along cut axis)', true);
     return;
@@ -3884,12 +3884,8 @@ const btnFrameView = document.getElementById('btn-frame-view');
   });
   const slider = document.getElementById('cut-slider');
   if (slider) slider.addEventListener('input', () => {
-    const m = getActiveModel();
-    const span = m ? getCutSpan(m) : 100;
-    const raw = Math.min(0.98, Math.max(0.02, Number(slider.value) / 100));
-    state.cutT = snapCutT(raw, span);
-    syncCutUI();
-    updateCutHelper();
+    // The slider runs in mm from the low end (syncCutUI sets its range).
+    setCutMm(Number(slider.value));
   });
   const cutMm = document.getElementById('cut-mm');
   if (cutMm) cutMm.addEventListener('change', () => setCutMm(Number(cutMm.value)));

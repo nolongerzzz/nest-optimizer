@@ -50,92 +50,108 @@ function resolveAxis(model) {
   return model.size.x >= model.size.z ? 'x' : 'z';
 }
 
-function getCutSpan(model) {
-  if (model && model.geometry && model.geometry.attributes && model.geometry.attributes.position) {
-    const bbox = new THREE.Box3().setFromBufferAttribute(model.geometry.attributes.position);
-    const axis = resolveAxis(model);
-    return axis === 'x' ? (bbox.max.x - bbox.min.x) : (bbox.max.z - bbox.min.z);
+// ===================== The cut frame =====================
+// One frame for everything the cutter shows or does: the mm readout, the
+// slider, the number box, the blade, and the plane Split cuts. They used to
+// read three different frames (the geometry's box along the plate-axis
+// letter, m.size placed in world space as if the piece had never turned, and
+// the blade's world position carried back into the piece), which agree only
+// while a piece is unrotated: on a turned or rolled piece the blade fell
+// short of the piece or left it, and the cut ran somewhere else again.
+//
+// `axis` is the piece's own (local) axis the plate axis runs along under its
+// current pose; `bbox` is its geometry's bounds in that same frame, so span,
+// origin, the blade's size and the plane all come from one box.
+//
+// The plane may come no closer than CUT_END_MM to either end: a fixed
+// distance, so a sliver is as reachable on a 300 mm piece as on a 30 mm one.
+// It is MIN_CUT_SIDE_MM (app-core.js), the distance Split itself demands, so
+// the end of the slider is never a position Split refuses. Positions sit on a
+// 0.1 mm grid from the low end, the readout's resolution, so the number shown
+// is the plane cut.
+// (Headless checks load this file without app-core.js; 1 mm is its value.)
+const CUT_END_MM = (typeof MIN_CUT_SIDE_MM !== 'undefined') ? MIN_CUT_SIDE_MM : 1;
+
+function cutMeshOf(m) {
+  const placed = (state.placed || []).find(function (p) { return p && p.sourceId === m.id && p.mesh; });
+  return placed ? placed.mesh : (state.previewMesh || null);
+}
+
+// The nearest and farthest allowed plane, in mm from the low end, on the grid.
+function cutEndLimits(span) {
+  let lo = Math.ceil(CUT_END_MM * 10 - 1e-9) / 10;
+  let hi = Math.floor((span - CUT_END_MM) * 10 + 1e-9) / 10;
+  if (!(hi >= lo)) lo = hi = Math.round(span * 5) / 10;   // too short to cut: park mid-piece
+  return { lo: lo, hi: hi };
+}
+
+function cutFrame(model) {
+  const m = model || getActiveModel();
+  if (!m || !m.geometry || !m.geometry.attributes || !m.geometry.attributes.position) return null;
+  const plateAxis = resolveAxis(m);
+  const bbox = new THREE.Box3().setFromBufferAttribute(m.geometry.attributes.position);
+  const mesh = cutMeshOf(m);
+  let axis = plateAxis;
+  if (mesh) {
+    mesh.updateMatrixWorld(true);
+    const n = (plateAxis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1))
+      .transformDirection(new THREE.Matrix4().copy(mesh.matrixWorld).invert());
+    const ax = Math.abs(n.x), ay = Math.abs(n.y), az = Math.abs(n.z);
+    axis = (ax >= ay && ax >= az) ? 'x' : (ay >= az ? 'y' : 'z');
   }
-  return resolveAxis(model) === 'x' ? model.size.x : model.size.z;
+  const span = bbox.max[axis] - bbox.min[axis];
+  if (!(span > 0)) return null;
+  const lim = cutEndLimits(span);
+  return { plateAxis: plateAxis, axis: axis, bbox: bbox, span: span, origin: bbox.min[axis],
+           lo: lim.lo, hi: lim.hi, mesh: mesh };
+}
+
+// The plane's distance from the low end for fraction t, on the grid and
+// inside the limits.
+function cutMmAt(t, span) {
+  const lim = cutEndLimits(span);
+  const mm = Math.round((Number(t) || 0) * span * 10) / 10;
+  return Math.min(lim.hi, Math.max(lim.lo, mm));
+}
+
+function getCutSpan(model) {
+  const f = cutFrame(model);
+  return f ? f.span : 0;
 }
 
 function getCutMm() {
-  const m = getActiveModel();
-  if (!m) return 0;
-  return state.cutT * getCutSpan(m);
+  const f = cutFrame(getActiveModel());
+  return f ? cutMmAt(state.cutT, f.span) : 0;
 }
 
-/** Snap plane to 0.5 mm steps so cuts are repeatable */
+/** Snap a fraction to the 0.1 mm grid and the end limits; returns a fraction. */
 function snapCutT(t, span) {
   if (!(span > 0)) return t;
-  const mm = t * span;
-  const snapped = Math.round(mm * 10) / 10; // 0.1 mm
-  return Math.min(0.98, Math.max(0.02, snapped / span));
+  return cutMmAt(t, span) / span;
 }
 
 /** cutT drives the plane. Helper is a display of cutT. */
 function getCutPlaneLocal(model) {
-  const m = model || getActiveModel();
-  if (!m || !m.geometry) return null;
-  const axis = resolveAxis(m);
-  const bbox = new THREE.Box3().setFromBufferAttribute(m.geometry.attributes.position);
-  const span = axis === 'x' ? (bbox.max.x - bbox.min.x) : (bbox.max.z - bbox.min.z);
-  if (!(span > 0)) return null;
-  const t = Math.min(0.98, Math.max(0.02, Number(state.cutT) || 0.5));
-  const origin = axis === 'x' ? bbox.min.x : bbox.min.z;
-  const plane = origin + t * span;
-  return { axis, plane, bbox, span, t, origin };
+  const f = cutFrame(model);
+  if (!f) return null;
+  const mm = cutMmAt(state.cutT == null ? 0.5 : state.cutT, f.span);
+  return { axis: f.axis, plateAxis: f.plateAxis, plane: f.origin + mm, mm: mm, bbox: f.bbox, span: f.span,
+           t: mm / f.span, origin: f.origin, lo: f.lo, hi: f.hi };
 }
 
-/** For Split: push cutT -> helper, then read plane from helper so cut == red line */
+/** For Split: the plane the red line is drawn at - the same frame, the same number. */
 function getCutPlaneForSplit(model) {
   const m = model || getActiveModel();
   if (!m) return null;
-
   updateCutHelper();
-  const plateAxis = resolveAxis(m);
-  if (!state.cutHelper) return getCutPlaneLocal(m);
-
-  const placed = (state.placed || []).find(function (p) { return p && p.sourceId === m.id && p.mesh; });
-  const mesh = placed ? placed.mesh : state.previewMesh;
-  if (!mesh) {
-    return getCutPlaneLocal(m);
-  }
-
-  mesh.updateMatrixWorld(true);
-  const invWorld = new THREE.Matrix4().copy(mesh.matrixWorld).invert();
-
-  const worldPoint = state.cutHelper.position.clone().applyMatrix4(invWorld);
-  const worldNormal = (plateAxis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1))
-    .transformDirection(invWorld)
-    .normalize();
-
-  const ax = Math.abs(worldNormal.x);
-  const ay = Math.abs(worldNormal.y);
-  const az = Math.abs(worldNormal.z);
-  let clipAxis = 'z';
-  if (ax >= ay && ax >= az) clipAxis = 'x';
-  else if (ay >= ax && ay >= az) clipAxis = 'y';
-  else clipAxis = 'z';
-
-  const bbox = new THREE.Box3().setFromBufferAttribute(m.geometry.attributes.position);
-  const origin = clipAxis === 'x' ? bbox.min.x : clipAxis === 'y' ? bbox.min.y : bbox.min.z;
-  const span = clipAxis === 'x' ? (bbox.max.x - bbox.min.x)
-    : clipAxis === 'y' ? (bbox.max.y - bbox.min.y)
-    : (bbox.max.z - bbox.min.z);
-  if (!(span > 0)) return null;
-
-  const plane = clipAxis === 'x' ? worldPoint.x : clipAxis === 'y' ? worldPoint.y : worldPoint.z;
-  const t = Math.min(1, Math.max(0, (plane - origin) / span));
-
-  return { axis: clipAxis, plateAxis: plateAxis, plane: plane, bbox: bbox, span: span, t: t, origin: origin };
+  return getCutPlaneLocal(m);
 }
+
 function setCutMm(mm) {
   const m = getActiveModel();
-  if (!m) return;
-  const span = getCutSpan(m);
-  if (span < 1) return;
-  state.cutT = snapCutT(Math.min(0.98, Math.max(0.02, mm / span)), span);
+  const f = cutFrame(m);
+  if (!f) return;
+  state.cutT = snapCutT(Number(mm) / f.span, f.span);
   syncCutUI();
   updateCutHelper();
 }
@@ -145,15 +161,27 @@ function syncCutUI() {
   const slider = document.getElementById('cut-slider');
   const input = document.getElementById('cut-mm');
   const readout = document.getElementById('cut-readout');
-  if (!m) {
+  const info = m ? getCutPlaneLocal(m) : null;
+  if (!info) {
     if (readout) readout.textContent = '-';
     return;
   }
-  const span = getCutSpan(m);
-  const axis = resolveAxis(m);
-  const mm = state.cutT * span;
-  if (slider) slider.value = String((state.cutT * 100).toFixed(1));
-  if (input && document.activeElement !== input) input.value = mm.toFixed(1);
+  const span = info.span;
+  const axis = info.plateAxis;
+  const mm = info.mm;
+  // The slider runs in mm over exactly the allowed range, so its thumb, the
+  // number box and the red line are the same number at every position.
+  if (slider) {
+    slider.min = String(info.lo);
+    slider.max = String(info.hi);
+    slider.step = '0.1';
+    slider.value = mm.toFixed(1);
+  }
+  if (input) {
+    input.min = String(info.lo);
+    input.max = String(info.hi);
+    if (document.activeElement !== input) input.value = mm.toFixed(1);
+  }
   if (readout) {
     const a = Math.max(0, mm - KERF_MM * 0.5);
     const b = Math.max(0, span - mm - KERF_MM * 0.5);
@@ -300,6 +328,10 @@ function showEditPreview() {
   syncCutUI();
 }
 
+// The blade, drawn in the piece's own frame from the cut frame's box: it
+// lies across the local cut axis, overhangs the piece's section by 1 mm all
+// round (at least 4 mm across, as before), and stands on the plane Split will
+// cut. Its transform follows the piece's mesh, so any pose carries it along.
 function buildCutHelper() {
   const m = getActiveModel();
   if (!m || !state.previewMesh) return;
@@ -308,22 +340,20 @@ function buildCutHelper() {
     removeCutHelper();
     state.previewMesh = keep;
   }
+  const f = cutFrame(m);
+  if (!f) return;
 
-  const axis = resolveAxis(m);
+  const AX = ['x', 'y', 'z'];
+  const k = AX.indexOf(f.axis);
+  const u = (k + 1) % 3, v = (k + 2) % 3;          // the two directions across the cut
+  const size = f.bbox.getSize(new THREE.Vector3());
+  const across = [size.x, size.y, size.z].map(d => Math.max(d, 4) + 2);
+  const kerfVis = 0.7;
   const group = new THREE.Group();
   group.name = 'cutHelper';
 
-  const w = Math.max(axis === 'x' ? m.size.z : m.size.x, 4);
-  const h = Math.max(m.size.y, 4);
-  const pw = w + 2;
-  const ph = h + 2;
-
-  const kerfVis = 0.7;
-  const planeGeo = new THREE.BoxGeometry(
-    axis === 'x' ? kerfVis : pw,
-    ph,
-    axis === 'x' ? pw : kerfVis
-  );
+  const dims = across.slice();
+  dims[k] = kerfVis;
   const planeMat = new THREE.MeshBasicMaterial({
     color: 0x111111,
     transparent: false,
@@ -332,83 +362,79 @@ function buildCutHelper() {
     depthWrite: true,
     depthTest: true
   });
-  const plane = new THREE.Mesh(planeGeo, planeMat);
+  const plane = new THREE.Mesh(new THREE.BoxGeometry(dims[0], dims[1], dims[2]), planeMat);
   plane.userData.cutHandle = true;
 
-  // Large invisible hit target for easy drag
-  const hitGeo = new THREE.PlaneGeometry(pw + 24, ph + 24);
-  const hit = new THREE.Mesh(hitGeo, new THREE.MeshBasicMaterial({
+  // Large invisible hit target for easy drag. PlaneGeometry lies in x-y;
+  // turn it so its normal is the cut axis, its sides along u and v.
+  const hit = new THREE.Mesh(new THREE.PlaneGeometry(across[u] + 24, across[v] + 24), new THREE.MeshBasicMaterial({
     visible: false, side: THREE.DoubleSide
   }));
   hit.userData.cutHandle = true;
-  if (axis === 'x') hit.rotation.y = Math.PI / 2;
+  const basis = new THREE.Matrix4();
+  const e = i => new THREE.Vector3(i === 0 ? 1 : 0, i === 1 ? 1 : 0, i === 2 ? 1 : 0);
+  basis.makeBasis(e(u), e(v), e(k));
+  hit.quaternion.setFromRotationMatrix(basis);
 
-  // Bright edge frame around the plane
-  const hw = pw / 2, hh = ph / 2;
-  const framePts = axis === 'x'
-    ? [
-        [0, -hh, -hw], [0, -hh, hw],
-        [0, -hh, hw], [0, hh, hw],
-        [0, hh, hw], [0, hh, -hw],
-        [0, hh, -hw], [0, -hh, -hw]
-      ]
-    : [
-        [-hw, -hh, 0], [hw, -hh, 0],
-        [hw, -hh, 0], [hw, hh, 0],
-        [hw, hh, 0], [-hw, hh, 0],
-        [-hw, hh, 0], [-hw, -hh, 0]
-      ];
-  const framePos = new Float32Array(framePts.flat());
+  // Bright edge frame round the blade, and a crosshair at its centre, in the
+  // u-v plane.
+  function pt(du, dv) { const q = [0, 0, 0]; q[u] = du; q[v] = dv; return q; }
+  const hu = across[u] / 2, hv = across[v] / 2;
+  const framePts = [pt(-hu, -hv), pt(hu, -hv), pt(hu, -hv), pt(hu, hv),
+                    pt(hu, hv), pt(-hu, hv), pt(-hu, hv), pt(-hu, -hv)];
   const frameGeo = new THREE.BufferGeometry();
-  frameGeo.setAttribute('position', new THREE.BufferAttribute(framePos, 3));
-  const frame = new THREE.LineSegments(
-    frameGeo,
-    new THREE.LineBasicMaterial({ color: 0x000000 })
-  );
+  frameGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(framePts.flat()), 3));
+  const frame = new THREE.LineSegments(frameGeo, new THREE.LineBasicMaterial({ color: 0x000000 }));
   frame.userData.cutHandle = true;
 
-  // Center crosshair on the plane
-  const cross = axis === 'x'
-    ? [[0, -hh * 0.9, 0], [0, hh * 0.9, 0], [0, 0, -hw * 0.9], [0, 0, hw * 0.9]]
-    : [[0, -hh * 0.9, 0], [0, hh * 0.9, 0], [-hw * 0.9, 0, 0], [hw * 0.9, 0, 0]];
-  const crossPos = new Float32Array(cross.flat());
+  const cross = [pt(-hu * 0.9, 0), pt(hu * 0.9, 0), pt(0, -hv * 0.9), pt(0, hv * 0.9)];
   const crossGeo = new THREE.BufferGeometry();
-  crossGeo.setAttribute('position', new THREE.BufferAttribute(crossPos, 3));
-  const crossLine = new THREE.LineSegments(
-    crossGeo,
-    new THREE.LineBasicMaterial({ color: 0x000000 })
-  );
+  crossGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(cross.flat()), 3));
+  const crossLine = new THREE.LineSegments(crossGeo, new THREE.LineBasicMaterial({ color: 0x000000 }));
   crossLine.userData.cutHandle = true;
 
   group.add(hit);
   group.add(plane);
   group.add(frame);
   group.add(crossLine);
+  group.userData.cutAxis = f.axis;
   if (state.modelGroup) state.modelGroup.add(group);
   else if (state.previewMesh) state.previewMesh.add(group);
   state.cutHelper = group;
   updateCutHelper();
 }
 
+// Puts the blade on the plane: the section's centre with the cut coordinate
+// replaced by the plane, carried through the piece's world transform into
+// the helper's parent. Rebuilds it first if the piece's cut axis or size
+// changed under it (a turn, a roll, a bake).
 function updateCutHelper() {
   const m = getActiveModel();
   if (!m || !state.cutHelper) return;
   const info = getCutPlaneLocal(m);
   if (!info) return;
-  const placed = (state.placed || []).find(function (p) { return p && p.sourceId === m.id && p.mesh; });
-  const mesh = placed ? placed.mesh : state.previewMesh;
-  const wp = mesh ? mesh.position : { x: 0, y: 8, z: 0 };
-  const y = (placed && placed.height) ? placed.height / 2 + 0.3 : (wp.y || 8);
-  state.cutHelper.quaternion.identity();
-  if (info.axis === 'x') {
-    const span = m.size.x;
-    const t = info.t;
-    state.cutHelper.position.set(wp.x - span / 2 + t * span, y, wp.z);
-  } else {
-    const span = m.size.z;
-    const t = info.t;
-    state.cutHelper.position.set(wp.x, y, wp.z - span / 2 + t * span);
+  const mesh = cutMeshOf(m);
+  if (!mesh) return;
+  const blade = state.cutHelper.children.find(c => c.isMesh && c.geometry && c.geometry.type === 'BoxGeometry');
+  const size = info.bbox.getSize(new THREE.Vector3());
+  const want = ['x', 'y', 'z'].map(a => a === info.axis ? 0.7 : Math.max(size[a], 4) + 2);
+  const have = blade ? blade.geometry.parameters : null;
+  if (state.cutHelper.userData.cutAxis !== info.axis || !have ||
+      Math.abs(have.width - want[0]) > 1e-6 || Math.abs(have.height - want[1]) > 1e-6 || Math.abs(have.depth - want[2]) > 1e-6) {
+    state.previewMesh = mesh;
+    buildCutHelper();
+    return;
   }
+  const local = info.bbox.getCenter(new THREE.Vector3());
+  local[info.axis] = info.plane;
+  mesh.updateMatrixWorld(true);
+  const parent = state.cutHelper.parent;
+  if (parent) parent.updateMatrixWorld(true);
+  const M = new THREE.Matrix4().makeTranslation(local.x, local.y, local.z).premultiply(mesh.matrixWorld);
+  if (parent && parent !== mesh) M.premultiply(new THREE.Matrix4().copy(parent.matrixWorld).invert());
+  else if (parent === mesh) M.copy(new THREE.Matrix4().makeTranslation(local.x, local.y, local.z));
+  M.decompose(state.cutHelper.position, state.cutHelper.quaternion, state.cutHelper.scale);
+  state.cutHelper.updateMatrixWorld(true);
 }
 
 function axisCoord(ax, x, y, z) {

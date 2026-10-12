@@ -2461,23 +2461,21 @@ function endMoveDrag() {
   }
 }
 
+// Dragging the red line: where the pointer meets the horizontal plane through
+// the piece, carried into the piece's own frame and read along the cut axis
+// (app-cut.js cutFrame), so the line follows the pointer on any pose.
 function cutTFromPointer() {
   const m = getActiveModel();
-  const placed = (state.placed || []).find(function (p) { return p && p.sourceId === state.editId && p.mesh; });
-  const mesh = (placed && placed.mesh) || state.previewMesh;
-  if (!m || !mesh) return;
-  const axis = resolveAxis(m);
+  const f = m ? cutFrame(m) : null;
+  if (!f || !f.mesh) return;
   const worldPos = new THREE.Vector3();
-  mesh.getWorldPosition(worldPos);
+  f.mesh.getWorldPosition(worldPos);
   const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -worldPos.y);
   const hit = new THREE.Vector3();
   if (state.raycaster && state.camera) state.raycaster.setFromCamera(state.pointer, state.camera);
   if (!state.raycaster.ray.intersectPlane(dragPlane, hit)) return;
-  const span = axis === 'x' ? m.size.x : m.size.z;
-  if (!(span > 0.5)) return;
-  const along = axis === 'x' ? (hit.x - (worldPos.x - span / 2)) : (hit.z - (worldPos.z - span / 2));
-  const raw = Math.min(0.98, Math.max(0.02, along / span));
-  state.cutT = raw;
+  const local = hit.applyMatrix4(new THREE.Matrix4().copy(f.mesh.matrixWorld).invert());
+  state.cutT = snapCutT((local[f.axis] - f.origin) / f.span, f.span);
   syncCutUI();
   updateCutHelper();
 }
