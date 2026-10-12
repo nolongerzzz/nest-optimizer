@@ -579,6 +579,10 @@ var NSO_MICROSCOPE = (function () {
     controls.target.set(0, 10, 0);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
+    // The plate's mapping: left orbits, middle zooms, right-drag pans in
+    // screen space (the part follows the pointer at any orbit angle).
+    controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+    controls.screenSpacePanning = true;
 
     scene.add(new THREE.AmbientLight(0xffffff, 1.0));
     // The reference tool adds this only on Isolate, so its detail cylinders
@@ -1195,7 +1199,8 @@ var NSO_MICROSCOPE = (function () {
 
     el.addEventListener('pointerdown', function (e) {
       v.mouseDownPos = [e.clientX, e.clientY];
-      if (mode !== 'select') return;
+      // The box handles are left-button grabs; a right press is the pan.
+      if (mode !== 'select' || e.button !== 0) return;
       var p = ndc(e);
       v.dragRaycaster.setFromCamera(new THREE.Vector2(p[0], p[1]), v.camera);
 
