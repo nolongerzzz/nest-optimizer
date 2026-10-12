@@ -546,6 +546,9 @@ select:focus, input:focus {
    open from page load. Say it here, where the display rule is, and make it
    unconditional so a later rule cannot quietly reopen it. */
 .library-list[hidden] { display: none !important; }
+/* Same for the Scale card's Length row: .edit-row is a flex row, and the row
+   is hidden for a piece with no straight axis. */
+#scale-length-row[hidden] { display: none !important; }
 
 .library-list {
   position: absolute;
@@ -2118,12 +2121,27 @@ select:focus, input:focus {
   outline-offset: 1px;
 }
 .vp-flag input:disabled + .vp-flag-face { opacity: 0.45; }
-/* The two rotation locks, in the Rotate dropdown under the 90° buttons.
+/* The three ring choices, in the Rotate dropdown under the 90° buttons.
    Same .vp-flag toggle the Repair and Non-solid flags use - a flag is a flag
-   wherever it sits - in the axis colours the handles are drawn in, so the
-   checkbox and the ball it governs are the same object by eye. */
-.vp-flag-rotlock { --flag-accent: #f472b6; --flag-line: rgba(244,114,182,0.5); --flag-fill: rgba(244,114,182,0.16); }
-.vp-flag-rotlock + .vp-flag-rotlock { --flag-accent: #38bdf8; --flag-line: rgba(56,189,248,0.5); --flag-fill: rgba(56,189,248,0.16); }
+   wherever it sits - each in the colour its ring is drawn in, so the box and
+   the ring it governs are the same object by eye. */
+.vp-flag-rotring-turn { --flag-accent: #38bdf8; --flag-line: rgba(56,189,248,0.5); --flag-fill: rgba(56,189,248,0.16); }
+.vp-flag-rotring-fb { --flag-accent: #f472b6; --flag-line: rgba(244,114,182,0.5); --flag-fill: rgba(244,114,182,0.16); }
+.vp-flag-rotring-ss { --flag-accent: #fbbf24; --flag-line: rgba(251,191,36,0.5); --flag-fill: rgba(251,191,36,0.16); }
+/* The live degrees while an arrowhead is held, beside the pointer. */
+.nso-rot-readout {
+  position: fixed;
+  z-index: 50;
+  pointer-events: none;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: rgba(15, 23, 42, 0.88);
+  border: 1px solid var(--rot-accent, #38bdf8);
+  color: #e8eef6;
+  font: 600 12px/1.2 system-ui, sans-serif;
+  white-space: nowrap;
+}
+.nso-rot-readout[hidden] { display: none; }
 /* The vertical-placement checkbox, and the column beside the piece. */
 .vp-flag-movevert { --flag-accent: #34d399; --flag-line: rgba(52,211,153,0.5); --flag-fill: rgba(52,211,153,0.16); }
 /* Positioned from script against the piece's projected position, so it is
@@ -2924,6 +2942,8 @@ select:focus, input:focus {
   max-width: 420px;
   line-height: 1.4;
 }
+/* Orbit, the mode every document opens in, has no hint to give. */
+#ms-hint-badge:empty { display: none; }
 
 /* The feature legend floats over the viewport's top-left corner instead of
    sitting in the sidebar.
@@ -2988,38 +3008,16 @@ button#ms-legend-toggle:hover { color: var(--text, #fff); border-color: var(--ac
 #ms-legend-float.collapsed { width: auto; }
 #ms-legend-float.collapsed #ms-legend,
 #ms-legend-float.collapsed #ms-detected { display: none; }
-/* The Flange tab: under the file's own tabs, set off by a rule, because it
-   is found in the geometry rather than read from the file. */
+/* The detector rows (Flange, Handle, Bracket, Lid, Hinge): under the parts,
+   set off by a rule, because they are found in the geometry rather than read
+   from the file. Show / hide toggles like the rows above them; one switched
+   off reads dim, as a hidden part does. */
 #ms-detected:not(:empty) {
   border-top: 1px solid var(--border);
   margin-top: 4px;
   padding-top: 5px;
 }
 #ms-detected .ms-legend-item { margin-bottom: 0; }
-#ms-detected .ms-legend-item.active { background: rgba(255, 138, 31, 0.16); }
-/* Slice view's tab strip (app-microscope.js, setLegendTab). Hidden until a
-   slice is shown; there, 'Detected features' is the tab that is up, and the
-   file's own list is one click away. Normal never shows it. */
-.ms-legend-tabs { display: none; gap: 4px; margin: 0 0 6px; }
-#ms-legend-float.tabbed .ms-legend-tabs { display: flex; }
-#ms-legend-float.collapsed .ms-legend-tabs { display: none; }
-.ms-legend-tabs button {
-  flex: 1 1 0;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  border-radius: 4px;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 10.5px;
-  padding: 2px 4px;
-}
-.ms-legend-tabs button.active { color: var(--text); border-color: var(--accent); }
-#ms-legend-float.tabbed:not(.tab-detected) #ms-detected,
-#ms-legend-float.tab-detected #ms-legend { display: none; }
-#ms-legend-float.tab-detected #ms-detected:not(:empty) { border-top: 0; margin-top: 0; padding-top: 0; }
-#ms-legend-float.tab-detected #ms-detected .ms-legend-item { margin-bottom: 2px; }
-
 #ms-legend-float.collapsed .ms-section-title,
 #ms-legend-float.collapsed button#ms-legend-toggle { margin-bottom: 0; }
 #ms-legend-float.collapsed button#ms-legend-toggle { margin-top: 0; }

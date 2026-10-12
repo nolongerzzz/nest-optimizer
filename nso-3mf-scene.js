@@ -124,10 +124,10 @@
     var yaw = (pose.rotY != null) ? num(pose.rotY) : (pose.rotated ? Math.PI / 2 : 0);
     var roll = num(pose.tipZ) * (Math.PI / 2) + num(pose.tiltZ) * (Math.PI / 180);
 
-    // rotateX, then rotateY, then rotateZ - the exporter's order - then the
-    // Y-up -> Z-up swap.
-    var A = mul3(rotX(tip + flip), rotY(yaw));
-    A = mul3(A, rotZ(roll));
+    // rotateZ, then rotateY, then rotateX - the exporter's order, which is
+    // Rx * Ry * Rz, applyMeshRotation's XYZ Euler - then the Y-up -> Z-up swap.
+    var A = mul3(rotZ(roll), rotY(yaw));
+    A = mul3(A, rotX(tip + flip));
     A = mul3(A, SWAP);
 
     var tx = num(pose.x) + num(plate.w) / 2;

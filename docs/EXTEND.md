@@ -15,7 +15,9 @@ All three are in `npm test`.
 ## What it is
 
 Extend lengthens a piece along **one** straight axis and holds the
-cross-section perpendicular to that axis **exactly** fixed. Not "to within a
+cross-section perpendicular to that axis **exactly** fixed. Asked for less
+length than the piece has, it **shortens** the same way, inside one band — see
+[Shorten](#shorten) below. Not "to within a
 tolerance" — the two coordinates that are not the axis are copied through bit
 for bit, and a gate inside `NSO_extendRaw` compares them element by element
 against the input on every run and refuses if even one moved.
@@ -241,7 +243,8 @@ code broken.
 | tapered (cone) | same, at 85.8% |
 | ambiguous (20 mm cube) | `no single dominant axis - 3 axes (x, y, z) are equally straight and within 1% of the same length; pass opts.axis to say which one you meant` |
 | off-cardinal | `dominant axis is off-cardinal by 30.00 deg - Extend holds the cross-section bit-for-bit only on X, Y or Z; rotate the piece onto an axis first` |
-| shortening | `Extend lengthens only - asked for 10.0000 mm along x but the piece is already 20.0000 mm; shortening would have to remove material and is out of scope` |
+| shortening past one band | `Shorten can remove up to 3.5 mm here - asked for 8.0 mm; the piece has no longer straight run (the widest constant-section band along x is 3.600 mm, less a 0.100 mm margin)` |
+| the length it already has | `nothing to change - the piece is already 20.0000 mm along x` |
 | no clean band | `no constant cross-section band along x - N gap(s) examined, none clean; widest (W mm) failed because ...` |
 | painted | `Extend stood down - N painted face(s); the cut plane moves every face on one side of it. Clear paint to extend.` |
 
@@ -253,6 +256,42 @@ gets a different mode rather than a quiet downgrade. The diagnosis comes from
 the least eigenvector of the area-weighted normal covariance — the best
 straight direction over the **continuum**, not just among the three — so a
 straight-but-rotated piece is told it is rotated rather than told it is curved.
+
+## Shorten
+
+`NSO_extendRaw` takes a negative delta — or a `length` under the current one —
+when, and only when, it stays inside **one** clean constant-section band:
+`|delta|` must be at most the chosen band's width less a margin.
+
+- **Which band:** the same one Extend would cut — the widest clean band, nearest
+  the middle among ties (or the host band of a forced `cut`).
+- **How:** cut at the band's middle and move every vertex past it toward the
+  near side by `|delta|`, exactly as Extend moves them the other way. The probe
+  loop, the bit-for-bit cross-section gate, the layer-injectivity gate, the
+  ULP length gate and the fixed-end gate all run unchanged; the volume gate
+  checks the volume *shrank*.
+- **Why it is exact:** no vertex lies inside the gap `(lo, hi)`, so sliding
+  layer `hi` toward `lo` changes only the band's own straddling walls, each
+  shorter inside its own plane — Extend's argument run backwards — and while
+  `hi − |delta|` stays above `lo` the layer order is unchanged.
+- **The margin:** `max(0.1 mm, 64 float32 ULPs at the band, 0.1% of the
+  length)` (`NSO_extendShortenMargin`). The ULP and fraction parts are the
+  floors `NSO_extendBands` itself puts on a gap, so the band that is left is
+  still a band; the 0.1 mm keeps its walls from becoming slivers the next
+  Extend could not trust.
+- **The refusal** names the most it can take, floored to the 0.1 mm it prints,
+  and that number is one it will then accept:
+  `Shorten can remove up to 3.5 mm here - asked for 8.0 mm; the piece has no
+  longer straight run (...)`.
+
+Held, in `tools/nso_extend_test.js` section 10, on every shape the file
+already lengthens: `lid_strap` 60 → 25 (removed volume / shift = 100.8 mm²),
+`hinge_knuckle_box` 18 → 16 and the 18 → 10 refusal, `pin` 20 → 10 (both
+chamfers keep their width) and the 20 → 0.2 refusal at 19.7 mm, `box-20mm`
+on a forced X 20 → 12, the 1400 mm-offset box at four lengths (every residual
+under half an ULP), and two chains: 20 → 15 → 10 is bit for bit 20 → 10, and
+20 → 32 → 20 is bit for bit the original. The canonical checker runs on the
+three shortened pieces as it does on the lengthened ones.
 
 ## PAINT SCOPE: WHOLE-PIECE
 
@@ -277,9 +316,9 @@ the whole bake down, naming the count. `nsoMaskCount(m) > 0` is the whole test.
    for what Extend promises and wrong for what a re-tiling tool would promise.
    "Stretch the border, re-tile the interior" is a separate, later ticket and
    must not be bolted on here.
-4. **Shortening.** Every gate is written for `delta > 0`. Removing length can
-   drive the cut past a feature at the far end and eat it, and nothing here
-   would notice.
+4. **Shortening past one band.** Shorten is accepted only inside one clean
+   band (below). Removing more than that would drive the far layer past a
+   feature and eat it, so it refuses by name and says the most it can take.
 5. **Off-cardinal axes.** See above.
 
 ## What the UI is not, yet

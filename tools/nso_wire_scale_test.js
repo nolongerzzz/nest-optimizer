@@ -88,20 +88,26 @@ withApp(async (page, logs) => {
   console.log('\n=== 1. the card exists and is wired ===');
   const ui = await page.evaluate(() => {
     const el = i => document.getElementById(i);
-    const sel = el('scale-axis');
     return {
       card: !!el('scale-card'),
-      axes: sel ? Array.from(sel.options).map(o => o.value) : [],
+      axisMenu: !!el('scale-axis'),
+      readout: el('scale-readout') ? el('scale-readout').textContent : '',
       dim: el('btn-scale-dim') ? el('btn-scale-dim').dataset.nsoWired === '1' : false,
       fac: el('btn-scale-factor') ? el('btn-scale-factor').dataset.nsoWired === '1' : false,
+      len: el('btn-scale-length') ? el('btn-scale-length').dataset.nsoWired === '1' : false,
+      fit: el('btn-scale-fit') ? el('btn-scale-fit').dataset.nsoWired === '1' : false,
       api: typeof NSO_scaleSelectedModel
     };
   });
   check('#scale-card present in the DOM', ui.card);
-  check('axis choices cover X, height, Z and the longest edge',
-        ['longest', 'x', 'y', 'z'].every(a => ui.axes.includes(a)), ui.axes.join(','));
-  check('Set size listener attached at load', ui.dim);
-  check('Scale by listener attached at load', ui.fac);
+  // The display-frame axis menu is gone: "Height" was right and "Z" was the
+  // bed's depth, so a user asking for a wider ring got a taller one. The
+  // solver still takes a display axis underneath (sections 2 and 8 call it
+  // directly); the card offers Length, Whole, Longest and Fit to plate.
+  check('the X / Height / Z axis menu is gone', !ui.axisMenu);
+  check('Longest listener attached at load', ui.dim);
+  check('Whole x listener attached at load', ui.fac);
+  check('Length and Fit to plate listeners attached at load', ui.len && ui.fit);
   check('NSO_scaleSelectedModel reachable', ui.api === 'function', ui.api);
 
   console.log('\n=== 2. a real click: 80x40x20 box, height to exactly 50 mm ===');
@@ -117,14 +123,10 @@ withApp(async (page, logs) => {
   check('the fixture is clean before the scale (canonical checker)', beforeCheck.ok,
         summarise(beforeCheck.out));
 
+  // The per-axis target is no longer on the card; the solver underneath is
+  // unchanged, so it is driven directly - the same call the old menu made.
   const TARGET = 50;
-  await page.evaluate(t => {
-    document.getElementById('scale-axis').value = 'y';
-    document.getElementById('scale-target').value = String(t);
-  }, TARGET);
-  // btn-scale-dim moved into the top bar's Scale dropdown; unfold it first.
-  await page.evaluate(() => { const e = document.getElementById('btn-scale-dim'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-  await page.click('#btn-scale-dim');
+  await page.evaluate(t => NSO_scaleSelectedModel({ axis: 'y', targetMm: t }), TARGET);
   await page.waitForFunction(() => /Scale/.test(document.getElementById('status').textContent),
     null, { timeout: 30000 });
 
@@ -227,10 +229,7 @@ withApp(async (page, logs) => {
         undone.tris.every((v, i) => v === before.tris[i]));
 
   console.log('\n=== 7. the longest-edge target picks the longest edge ===');
-  await page.evaluate(() => {
-    document.getElementById('scale-axis').value = 'longest';
-    document.getElementById('scale-target').value = '120';
-  });
+  await page.evaluate(() => { document.getElementById('scale-target').value = '120'; });
   // btn-scale-dim moved into the top bar's Scale dropdown; unfold it first.
   await page.evaluate(() => { const e = document.getElementById('btn-scale-dim'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.click('#btn-scale-dim');
@@ -287,13 +286,7 @@ withApp(async (page, logs) => {
   const cbCheck = canonicalCheck(cbFile);
   const cbSpan = spanOfSTL(cbFile);
   console.log('   before  ' + JSON.stringify(cbSpan) + '  checker ' + summarise(cbCheck.out));
-  await page.evaluate(() => {
-    document.getElementById('scale-axis').value = 'z';
-    document.getElementById('scale-target').value = '12.7';
-  });
-  // btn-scale-dim moved into the top bar's Scale dropdown; unfold it first.
-  await page.evaluate(() => { const e = document.getElementById('btn-scale-dim'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-  await page.click('#btn-scale-dim');
+  await page.evaluate(() => NSO_scaleSelectedModel({ axis: 'z', targetMm: 12.7 }));
   await page.waitForFunction(() => /Scale/.test(document.getElementById('status').textContent),
     null, { timeout: 30000 });
   const curvedAfter = await soupOf(page);

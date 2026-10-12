@@ -234,9 +234,12 @@ console.log('\n=== 5. refusals, each by its own name ===');
   check('  ...and opts.axis does resolve it', r4b.ok && r4b.lengthAfter === 30,
     r4b.ok ? r4b.lengthAfter + ' mm' : r4b.reason);
 
-  const r5 = NSO_extendRaw(fx('pin.stl'), { length: 10 });
-  check('shortening refuses', !r5.ok, r5.reason);
-  check('  ...and says so rather than silently extending', /lengthens only/.test(r5.reason || ''));
+  // Shortening is no longer a refusal in itself (section 10 holds it); asking
+  // for the length the piece already has is the one length ask with nothing
+  // to do, and it says so rather than reporting a zero-length stretch.
+  const r5 = NSO_extendRaw(fx('pin.stl'), { length: 20 });
+  check('asking for the current length refuses', !r5.ok, r5.reason);
+  check('  ...and says there is nothing to change', /nothing to change/.test(r5.reason || ''));
 
   // Off-cardinal: the same pin, rotated 30 degrees about Z. Straight, but not
   // along X/Y/Z, so the bit-for-bit promise cannot be kept.
@@ -366,6 +369,106 @@ console.log('\n=== 9. a refused Extend hands back the ORIGINAL soup ===');
     'so a caller can swap unconditionally, as NSO_smoothGlobal does');
 }
 
+console.log('\n=== 10. Shorten: the same stretch backwards, inside one band ===');
+// A counterpart for every shape the sections above lengthen. Each one is held
+// to the same promises: cross-section drift exactly 0, length within 2 ULPs,
+// topology identical, and the volume it removes equal to the cut's
+// cross-section times the shift.
+{
+  const ulpsOK = r => Math.abs(r.residual) <= r.residualUlpTol;
+  const topo = r => r.after.tris === r.before.tris && r.after.verts === r.before.verts &&
+    r.after.openPos === r.before.openPos && r.after.nmPos === r.before.nmPos;
+  const yz = (soup, k) => { const a = []; for (let i = 0; i < soup.length; i++) if (i % 3 !== k) a.push(soup[i]); return a; };
+  const bitSame = (a, b, k) => { const p = yz(a, k), q = yz(b, k); return p.length === q.length && p.every((v, i) => Object.is(v, q[i])); };
+
+  // lid_strap 60 -> 25 (Extend took it 60 -> 95). The flexure is the point.
+  {
+    const s = fx('lid_strap.stl');
+    const r = NSO_extendRaw(s, { length: 25 });
+    check('lid_strap shortens 60 -> 25', r.ok && r.mode === 'shorten', r.ok ? r.lengthAfter + ' mm, cut ' + r.cut : r.reason);
+    if (r.ok) {
+      check('  cross-section drift exactly 0, every Y and Z the same float', r.crossSectionDrift === 0 && bitSame(s, r.tris, 0));
+      check('  length within 2 float32 ULPs', ulpsOK(r), 'residual ' + r.residual.toExponential(3));
+      check('  topology identical', topo(r), r.before.verts + ' verts, open ' + r.after.openPos);
+      check('  removed volume = the 100.8 mm2 union section x the shift',
+        Math.abs(r.impliedCrossSection - 100.8) / 100.8 < 1e-4, r.impliedCrossSection.toFixed(4) + ' mm2');
+    }
+  }
+  // hinge_knuckle_box 18 -> 16 (Extend took it 18 -> 26): inside its 3.6 mm finger band.
+  {
+    const s = fx('hinge_knuckle_box.stl');
+    const r = NSO_extendRaw(s, { length: 16 });
+    check('hinge_knuckle_box shortens 18 -> 16', r.ok, r.ok ? r.lengthAfter + ' mm, band ' + r.band.width.toFixed(3) : r.reason);
+    if (r.ok) {
+      check('  cross-section drift exactly 0', r.crossSectionDrift === 0 && bitSame(s, r.tris, 0));
+      check('  length within 2 ULPs, topology identical', ulpsOK(r) && topo(r));
+    }
+    // ...and the over-the-band refusal: 8 mm out of a 3.6 mm band.
+    const over = NSO_extendRaw(s, { length: 10 });
+    check('  18 -> 10 refuses: past the one band', !over.ok && over.tris === s, over.reason);
+    check('  ...naming Shorten and the most it can take',
+      /^Shorten can remove up to 3\.5 mm here - asked for 8\.0 mm; the piece has no longer straight run/.test(over.reason || '') &&
+      over.shortenMaxMm === 3.5);
+    const exact = NSO_extendRaw(s, { length: 18 - over.shortenMaxMm });
+    check('  ...and the most it names is one it will actually take', exact.ok, exact.ok ? exact.lengthAfter + ' mm' : exact.reason);
+  }
+  // pin 20 -> 10 (Extend took it 20 -> 32): both chamfers ride along untouched.
+  {
+    const s = fx('pin.stl');
+    const r = NSO_extendRaw(s, { length: 10 });
+    check('pin shortens 20 -> 10', r.ok, r.ok ? r.lengthAfter + ' mm' : r.reason);
+    if (r.ok) {
+      check('  cross-section drift exactly 0', r.crossSectionDrift === 0 && bitSame(s, r.tris, 0));
+      const layers = soup => { const s2 = new Set(); for (let i = 0; i < soup.length; i += 3) s2.add(soup[i]); return [...s2].sort((a, b) => a - b); };
+      const lb = layers(s), la = layers(r.tris);
+      check('  both chamfers keep their exact width',
+        (lb[1] - lb[0]) === (la[1] - la[0]) && (lb[3] - lb[2]) === (la[3] - la[2]),
+        'X layers ' + lb.map(v => +v.toFixed(3)).join(',') + '  ->  ' + la.map(v => +v.toFixed(3)).join(','));
+      check('  removed volume matches the 3 mm circle', Math.abs(r.impliedCrossSection - Math.PI * 2.25) / (Math.PI * 2.25) < 0.01,
+        r.impliedCrossSection.toFixed(5) + ' mm2');
+      check('  length within 2 ULPs, topology identical', ulpsOK(r) && topo(r));
+    }
+    const over = NSO_extendRaw(s, { length: 0.2 });
+    check('  20 -> 0.2 refuses: 19.8 mm out of a 19.8 mm shaft leaves no margin', !over.ok && over.tris === s, over.reason);
+    check('  ...and names the most: 19.7 mm', /^Shorten can remove up to 19\.7 mm here/.test(over.reason || ''));
+    const most = NSO_extendRaw(s, { length: 20 - 19.7 });
+    check('  ...which it then takes', most.ok && most.crossSectionDrift === 0, most.ok ? most.lengthAfter.toFixed(6) + ' mm' : most.reason);
+  }
+  // box-20mm on a forced axis, 20 -> 12 (Extend took it 20 -> 30).
+  {
+    const s = fx('box-20mm.stl');
+    const r = NSO_extendRaw(s, { length: 12, axis: 'x' });
+    check('box-20mm shortens 20 -> 12 on a forced X', r.ok && r.lengthAfter === 12, r.ok ? r.lengthAfter + ' mm' : r.reason);
+    if (r.ok) check('  drift 0, removed volume 20 x 20 x 8', r.crossSectionDrift === 0 &&
+      Math.abs(Math.abs(r.before.volume) - Math.abs(r.after.volume) - 3200) < 1e-3);
+  }
+  // Far from the origin, where one ULP is 1.2e-4 mm: the probe runs backwards too.
+  {
+    const far = box(20, 8, 8, [1400, 1400, 1400]);
+    let worst = 0;
+    for (const L of [12.3, 7.415926, 15.000001, 4.5]) {
+      const r = NSO_extendRaw(far, { length: L, axis: 'x' });
+      const ulps = r.ok ? Math.abs(r.residual) / NSO_extendUlp32(1400 + L) : Infinity;
+      if (ulps > worst) worst = ulps;
+      check('  ' + L + ' mm at a 1400 mm offset lands within 2 ULPs', r.ok && ulps <= 2 && r.crossSectionDrift === 0,
+        r.ok ? 'got ' + r.lengthAfter.toFixed(9) + ', ' + ulps.toFixed(3) + ' ULP' : r.reason);
+    }
+    check('far box: the probe bounded every shorten residual under half an ULP', worst <= 0.5, worst.toFixed(3) + ' ULP');
+  }
+  // Linear and chainable: 20 -> 15 -> 10 is bit-for-bit 20 -> 10, and
+  // extend-then-shorten back is bit-for-bit the original.
+  {
+    const s = fx('pin.stl');
+    const a = NSO_extendRaw(s, { length: 15 }), b = NSO_extendRaw(s, { length: 10 });
+    const chained = NSO_extendRaw(a.tris, { length: 10 });
+    check('pin 20->15->10 is bit-for-bit the same soup as 20->10',
+      chained.ok && chained.tris.every((v, i) => Object.is(v, b.tris[i])), chained.ok ? 'identical' : chained.reason);
+    const up = NSO_extendRaw(s, { length: 32 }), back = NSO_extendRaw(up.tris, { length: 20 });
+    check('pin 20->32->20 is bit-for-bit the original',
+      back.ok && back.tris.every((v, i) => Object.is(v, s[i])), back.ok ? 'identical' : back.reason);
+  }
+}
+
 /* ---------- artefacts for the canonical checker (task 3) ---------- */
 const OUT = path.join(ROOT, 'tools', 'extend-out');
 if (!fs.existsSync(OUT)) fs.mkdirSync(OUT, { recursive: true });
@@ -376,6 +479,9 @@ for (const [name, file, opt] of [
   ['hinge_knuckle_box_26', 'hinge_knuckle_box.stl', { length: 26 }],
   ['pin_20', 'pin.stl', null],
   ['pin_32', 'pin.stl', { length: 32 }],
+  ['lid_strap_25', 'lid_strap.stl', { length: 25 }],
+  ['hinge_knuckle_box_16', 'hinge_knuckle_box.stl', { length: 16 }],
+  ['pin_10', 'pin.stl', { length: 10 }],
 ]) {
   const s = fx(file);
   const soup = opt ? NSO_extendRaw(s, opt).tris : s;

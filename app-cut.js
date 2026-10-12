@@ -1383,19 +1383,14 @@ function rawFlatCapLoop(loop3d, axisIdx, planeVal, keepMin) {
   return out;
 }
 
-// Caps ALL of a section's loops together. rawFlatCapLoop fills one simple
-// outline; a section through a tube or a hinge knuckle is an outline with a
-// bore inside it, and capping each loop on its own fills the bore as a second
-// disk (double-covering it, the winding inconsistent against the bore wall).
-// Here loops are classed by nesting depth (even = an outer boundary, odd = a
-// hole in the smallest loop around it), each hole is joined to its outer
-// boundary by a bridge edge walked both ways (the standard hole-to-polygon
-// reduction), and the resulting single outline goes to rawFlatCapLoop. The
-// section's loops come from a manifold cut, so they never cross or share a
-// point (rawBuildLoopsFromCutEdges refuses branch points), which makes one
-// vertex enough to decide containment. A loop with no holes is capped exactly
-// as before.
-function rawFlatCapLoops(loops3d, axisIdx, planeVal, keepMin) {
+// A section's loops classed by nesting depth: even = an outer boundary, odd =
+// a hole in the smallest loop around it. Returns one entry per loop,
+// {p3, p2, area, depth, parent, holes}, in the order given. Shared by
+// rawFlatCapLoops (which caps them) and nso_section.js (which reads them), so
+// "a loop inside a loop" means the same thing to both. The loops come from a
+// manifold cut, so they never cross or share a point, which makes one vertex
+// enough to decide containment.
+function rawNestLoops(loops3d, axisIdx) {
   const other = [0,1,2].filter(a => a !== axisIdx);
   const L = loops3d.map(l => {
     const p2 = l.map(p => [p[other[0]], p[other[1]]]);
@@ -1426,6 +1421,23 @@ function rawFlatCapLoops(loops3d, axisIdx, planeVal, keepMin) {
     L[i].parent = best;
     L[best].holes.push(i);
   }
+  return L;
+}
+
+// Caps ALL of a section's loops together. rawFlatCapLoop fills one simple
+// outline; a section through a tube or a hinge knuckle is an outline with a
+// bore inside it, and capping each loop on its own fills the bore as a second
+// disk (double-covering it, the winding inconsistent against the bore wall).
+// Here loops are classed by nesting depth (even = an outer boundary, odd = a
+// hole in the smallest loop around it), each hole is joined to its outer
+// boundary by a bridge edge walked both ways (the standard hole-to-polygon
+// reduction), and the resulting single outline goes to rawFlatCapLoop. The
+// section's loops come from a manifold cut, so they never cross or share a
+// point (rawBuildLoopsFromCutEdges refuses branch points), which makes one
+// vertex enough to decide containment. A loop with no holes is capped exactly
+// as before.
+function rawFlatCapLoops(loops3d, axisIdx, planeVal, keepMin) {
+  const L = rawNestLoops(loops3d, axisIdx);
   const out = [];
   for (let i = 0; i < L.length; i++) {
     if (L[i].depth % 2 !== 0) continue;
@@ -1443,7 +1455,7 @@ function rawFlatCapLoops(loops3d, axisIdx, planeVal, keepMin) {
 // P into the material rather than into another hole or the outside). M and P
 // then appear twice, and the bridge is walked once each way, so the fill
 // shares exactly the loop points with the walls and adds no vertex. Loop
-// entries are {p2, p3, area} as built by rawFlatCapLoops.
+// entries are {p2, p3, area} as built by rawNestLoops.
 function rawBridgeHoles(outer, holes) {
   function oriented(l, ccw) {
     const idx = l.p2.map((_, i) => i);

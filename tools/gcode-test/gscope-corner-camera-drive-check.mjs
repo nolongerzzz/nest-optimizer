@@ -145,6 +145,9 @@ async function main() {
     const m = d.parsed.moves[Math.floor(d.parsed.moves.length / 2)];
     return [(m.x0 + m.x1) / 2, (m.y0 + m.y1) / 2, m.z];
   });
+  // A box and its dots are Click to select region's, and G-scope opens in
+  // orbit: arm it, as a user does before dropping one.
+  await page.click('#ms-mode-select');
   await page.evaluate(([x, y, z]) => window.NSO_MICROSCOPE.addBoxAt(x, y, z, 3, 1), at);
   await frames(page);
   const b0 = await boxState(page);

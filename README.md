@@ -15,9 +15,13 @@ Smart build-plate packing for 3D printing.
 - Drag & drop multiple STL or 3MF files (a 3MF's objects each become a model,
   placed where the slicer had them)
 - Quantity control per model
-- Resize a piece to a real dimension - pick X, height, Z or the longest edge,
-  type the mm you want, and the uniform factor is solved and applied (or scale
-  by a plain multiplier)
+- **Scale card** reads the piece first: `Ring Ø40.0 outer · Ø36.0 bore · wall
+  2.0 · length 10.0`, `Bar 40.0 × 20.0 × 60.0 W × D × L`, or the three sizes and
+  why it is neither, with the build-volume verdict appended (`fits A1 Mini` /
+  `over by 5.0 mm on W`). Under it: **Length** (Extend or Shorten along the
+  straight axis, cross-section held), **Whole ×** and **Longest** (uniform
+  scale), and **Fit to plate** (the largest uniform factor that fits, stated).
+  See [docs/SECTION.md](docs/SECTION.md)
 - **In-house slicer** (G-scope, **Slice**): exact layer sections, walls offset
   by the measured line widths, grid / zigzag infill by density, top and bottom
   shells, and per-layer overhang / support-need calls - opened as a toolpath

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=slice2" />
+  <link rel="stylesheet" href="styles.css?v=scale2" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -178,15 +178,21 @@
             </div>
           </details>
           <details class="vp-menu vp-top-menu" id="menu-rotate">
-            <summary class="vp-bar-btn" title="Turn the selected piece: 90° steps, or freehand by its handle">Rotate</summary>
+            <summary class="vp-bar-btn" title="Turn the selected piece: 90° steps, or by the arrowheads on its rings">Rotate</summary>
             <div class="vp-menu-body vp-top-body">
               <button id="btn-rot-left" class="vp-bar-btn adjust-btn" disabled>⟲ 90°</button>
               <button id="btn-rot-right" class="vp-bar-btn adjust-btn" disabled>90° ⟳</button>
-              <label class="vp-flag vp-flag-rotlock" title="Lock rotation about X (pitch). A locked axis has no handle to grab and its arrow keys do nothing. The 90° buttons are not affected.">
-                <input type="checkbox" id="chk-rot-lock-x"><span class="vp-flag-face">Lock X</span>
+              <!-- Which rings are drawn on the piece. Each turns it about one
+                   axis of the PLATE, whatever the piece is already doing.
+                   Turn only on every opening; nothing here is saved. -->
+              <label class="vp-flag vp-flag-rotring vp-flag-rotring-turn" title="A ring about the plate's vertical. Click an arrowhead to turn 1°, drag it to swing round the ring.">
+                <input type="checkbox" id="chk-rot-ring-turn" checked><span class="vp-flag-face">Turn (horizontal)</span>
               </label>
-              <label class="vp-flag vp-flag-rotlock" title="Lock rotation about Y (yaw). A locked axis has no handle to grab and its arrow keys do nothing. The 90° buttons are not affected.">
-                <input type="checkbox" id="chk-rot-lock-y"><span class="vp-flag-face">Lock Y</span>
+              <label class="vp-flag vp-flag-rotring vp-flag-rotring-fb" title="A ring about the plate's X axis: leans the piece toward you or away. Click an arrowhead to lean 1°, drag it to swing round the ring.">
+                <input type="checkbox" id="chk-rot-ring-fb"><span class="vp-flag-face">Lean front/back</span>
+              </label>
+              <label class="vp-flag vp-flag-rotring vp-flag-rotring-ss" title="A ring about the plate's Z axis: leans the piece left or right. Click an arrowhead to lean 1°, drag it to swing round the ring.">
+                <input type="checkbox" id="chk-rot-ring-ss"><span class="vp-flag-face">Lean side/side</span>
               </label>
             </div>
           </details>
@@ -350,28 +356,32 @@
                its own. -->
           <div class="vp-bar-break" aria-hidden="true"></div>
           <details class="vp-menu vp-top-menu vp-bar-row2-start" id="menu-scale">
-            <summary class="vp-bar-btn" title="Set the piece to a real dimension, or scale it by a factor">Scale</summary>
+            <summary class="vp-bar-btn" title="Read the piece's shape and size, then lengthen, shorten or scale it">Scale</summary>
             <div class="vp-menu-body vp-top-body" id="scale-card">
               <p id="scale-readout" class="hint">Select a piece to resize.</p>
-              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
-              <label for="scale-axis">Set</label>
-              <select id="scale-axis" title="Which dimension the target applies to">
-              <option value="longest">Longest edge</option>
-              <option value="x">X</option>
-              <option value="y">Height</option>
-              <option value="z">Z</option>
-              </select>
-              <input id="scale-target" type="number" min="0.1" max="1000" step="0.1" value="50" style="width:5rem;" aria-label="Target size in mm" />
+              <div class="edit-row" id="scale-length-row" style="align-items:center;gap:6px;flex-wrap:wrap;" hidden>
+              <label for="scale-length">Length</label>
+              <input id="scale-length" type="number" min="0.1" max="2000" step="0.1" style="width:5rem;" aria-label="Length along the piece's straight axis, mm" />
               <span class="hint">mm</span>
-              <button id="btn-scale-dim" class="btn btn-secondary" type="button"
-              title="Solve the factor that makes the chosen dimension exactly this many mm, and apply it to all three axes.">Set size</button>
+              <button id="btn-scale-length" class="btn btn-secondary" type="button"
+              title="Lengthen or shorten the piece along its straight axis to this length - longer extends, shorter shortens - holding the cross-section exactly. Shortening stays inside one straight run and says the most it can take.">Set</button>
               </div>
               <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
-              <label for="scale-factor">Scale by</label>
-              <input id="scale-factor" type="number" min="0.0001" max="10000" step="0.01" value="1" style="width:5rem;" aria-label="Scale factor" />
-              <span class="hint">&times;</span>
+              <label for="scale-factor">Whole &times;</label>
+              <input id="scale-factor" type="number" min="0.0001" max="10000" step="0.01" value="1" style="width:5rem;" aria-label="Uniform scale factor" />
               <button id="btn-scale-factor" class="btn btn-secondary" type="button"
-              title="Plain uniform multiplier on all three axes.">Scale</button>
+              title="Plain uniform multiplier: every size, wall and hole by the same factor.">Scale</button>
+              </div>
+              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+              <label for="scale-target">Longest</label>
+              <input id="scale-target" type="number" min="0.1" max="1000" step="0.1" value="50" style="width:5rem;" aria-label="Longest edge, mm" />
+              <span class="hint">mm</span>
+              <button id="btn-scale-dim" class="btn btn-secondary" type="button"
+              title="Solve the uniform factor that makes the piece's longest edge exactly this many mm.">Set</button>
+              </div>
+              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+              <button id="btn-scale-fit" class="btn btn-secondary" type="button"
+              title="Scale uniformly by the largest factor that fits the printer the plate is set to, and say the factor. If it already fits, nothing changes.">Fit to plate</button>
               </div>
             </div>
           </details>
@@ -766,8 +776,8 @@
       <div class="ms-section">
         <div class="ms-section-title">View</div>
         <div class="ms-btn-row">
-          <button id="ms-mode-orbit" type="button">Orbit whole part</button>
-          <button id="ms-mode-select" type="button" class="active">Click to select region</button>
+          <button id="ms-mode-orbit" type="button" class="active">Orbit whole part</button>
+          <button id="ms-mode-select" type="button">Click to select region</button>
           <button id="ms-mode-line" type="button"
                   title="Pick one extrusion move at a time (sliced files only)">Pick a line</button>
         </div>
@@ -778,9 +788,9 @@
           <button id="ms-cam-normal" type="button" class="active" aria-pressed="true"
                   title="Free orbit, pan and zoom. Isolated, it shows the selection alone, as drawn. From Slice view, back to the mesh">Normal</button>
           <button id="ms-cam-slice" type="button" aria-pressed="false"
-                  title="Slice every piece into real layers, walls and infill with the in-house slicer (the Slice settings below) and show its detected features">Slice view</button>
+                  title="Slice every piece into real layers, walls and infill with the in-house slicer (the Slice settings below) and list its features">Slice view</button>
         </div>
-        <div id="ms-select-controls">
+        <div id="ms-select-controls" style="display:none;">
           <p class="ms-note">Click empty space to drop a flat box. Drag its
             <b>blue centre dot</b> to move it. Drag its <b>green corner dot</b> to
             size it along and across independently. A new box lines up with the
@@ -941,26 +951,24 @@
       <!-- The feature legend, floating over the viewport's top-left rather
            than down in the sidebar. Sits below the mode badge, which already
            owns the corner itself. app-microscope.js finds #ms-legend by id
-           and never by where it lives, so the rows, the click-to-isolate and
-           the per-row "only" button are the same code as before the move. -->
+           and never by where it lives, so the rows, their show / hide toggle
+           and the per-row "only" button are the same code as before the move.
+           One list per view and no tab strip: a slice lists its features
+           (#ms-legend), a mesh lists its parts (#ms-legend) and, under a rule,
+           the five detector rows (#ms-detected). -->
       <div id="ms-legend-float" class="ms-section">
         <div class="ms-legend-head">
-          <div class="ms-section-title" id="ms-legend-title">Features (click to isolate)</div>
+          <div class="ms-section-title" id="ms-legend-title">All features</div>
           <button id="ms-legend-toggle" type="button" aria-expanded="true"
                   aria-controls="ms-legend" title="Minimize the list">&minus;</button>
         </div>
-        <!-- Slice view's tab strip: hidden until a slice is shown (app-microscope.js,
-             setLegendTab). Normal shows the list and the Flange row as ever. -->
-        <div class="ms-legend-tabs" role="tablist" aria-label="Legend">
-          <button id="ms-tab-legend" type="button" role="tab" aria-selected="false">All features</button>
-          <button id="ms-tab-detected" type="button" role="tab" aria-selected="false">Detected features</button>
-        </div>
         <div id="ms-legend"></div>
-        <!-- Tabs for what the geometry has but the file does not name. The
-             Flange tab (nso_flange.js, docs/GSCOPE-FLANGE.md), then Handle,
-             Bracket, Lid and Hinge (nso_face_features.js,
-             docs/GSCOPE-FEATURES.md). Kept apart from
-             #ms-legend, whose rows are exactly the file's own groups. -->
+        <!-- Rows for what the geometry has but the file does not name, mesh
+             only. The Flange row (nso_flange.js, docs/GSCOPE-FLANGE.md), then
+             Handle, Bracket, Lid and Hinge (nso_face_features.js,
+             docs/GSCOPE-FEATURES.md). Each a show / hide toggle like the part
+             rows above it; kept apart from #ms-legend, whose rows are exactly
+             the file's own groups. Empty on a slice. -->
         <div id="ms-detected"></div>
       </div>
       <div id="ms-hint-badge"></div>
@@ -1035,17 +1043,17 @@
   <script src="nso-cooling-profiles.js"></script>
   <script src="nso-3mf.js"></script>
   <script src="nso-3mf-read.js"></script>
-  <script src="nso-3mf-scene.js?v=scene1"></script>
+  <script src="nso-3mf-scene.js?v=scene2"></script>
   <script src="nso-surface-grid.js?v=inside6"></script>
   <script src="nso-gcode-lines.js"></script>
   <script src="nso-gcode-solid.js?v=solid1"></script>
   <script src="nso_slicer.js?v=slice1"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
-  <script src="app-core.js?v=gsup4"></script>
-  <script src="app-cut.js?v=crop3"></script>
+  <script src="app-core.js?v=gsup5"></script>
+  <script src="app-cut.js?v=scale1"></script>
   <script src="app-finish.js?v=pose1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
-  <script src="app-extend.js?v=inside6"></script>
+  <script src="app-extend.js?v=scale1"></script>
   <!-- Mirror: exact reflection across the cut plane. After app-extend.js,
        whose axis detector and band cut it calls. See docs/MIRROR.md. -->
   <script src="app-mirror.js?v=mirror2"></script>
@@ -1053,7 +1061,10 @@
        (rawCutOpen, rawFlatCapLoop, mapPlaneToRaw) and app-sculpt.js (commit). -->
   <script src="app-crop.js?v=crop4"></script>
   <script src="app-fatten.js?v=fatten1"></script>
-  <script src="app-scale.js?v=inside6"></script>
+  <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
+       axis detector and app-cut.js's loop walker at read time. -->
+  <script src="nso_section.js?v=scale1"></script>
+  <script src="app-scale.js?v=scale1"></script>
   <script src="app-brush.js?v=hollow2"></script>
   <script src="app-wheel.js?v=wheel3"></script>
   <script src="app-fit.js?v=wheel4"></script>
@@ -1082,7 +1093,7 @@
        rather than three modules each hoping the other two are shut. -->
   <script src="app-input-mode.js?v=inmode4"></script>
   <script src="app-tip-orient.js?v=tip2"></script>
-  <script src="app-rotate-handles.js?v=rot2"></script>
+  <script src="app-rotate-handles.js?v=rot3"></script>
   <script src="app-move-vertical.js?v=mv2"></script>
   <script src="app-defects.js?v=inside5"></script>
   <script src="app-measure.js?v=measure2"></script>

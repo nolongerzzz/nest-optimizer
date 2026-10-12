@@ -275,6 +275,9 @@ async function main() {
   await firstRow.hover();
   await firstRow.locator('.ms-legend-only').click();
   await page.click('#ms-btn-select-visible');
+  // The box controls - Isolate all boxes, Clear all boxes - are under Click
+  // to select region, and G-scope opens in orbit: arm it, as a user does.
+  await page.click('#ms-mode-select');
   await page.click('#ms-btn-isolate');
   await page.click('#ms-btn-back');
   await page.click('#ms-btn-show-all');

@@ -59,7 +59,7 @@ withApp(async (page, logs) => {
     check('floating, not in flow', where.positioned === 'absolute', where.positioned);
     check('anchored at the top-left corner', where.corner[0] === 12 && where.corner[1] === 12,
       '(' + where.corner.join(', ') + ') from the viewport corner');
-    check('still titled for what it lists', /\(click to isolate\)$/.test(where.title), where.title);
+    check('still titled for what it lists', /^(All features|Parts)$/.test(where.title), where.title);
   }
 
   /* ------------------------------------------------------------------ 2 */
