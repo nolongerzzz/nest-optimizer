@@ -636,7 +636,7 @@ withApp(async (page, logs) => {
       near(lean.deg, 90, 1e-6) && near(lean.y, 1, 1e-9), lean.deg.toFixed(6) + '° about y ' + lean.y.toFixed(9));
     const src = require('fs').readFileSync(path.join(ROOT, 'app-core.js'), 'utf8');
     check('rotateSelected goes through the Turn ring\'s plate-axis turn, snapped, in the source',
-      /turnSelectedAboutPlate\('yaw', 'turn', -dir \* 90, \{ snap: true \}\)/.test(src) &&
+      /turnSelectedAbout\('yaw', 'turn', -dir \* 90, \{ snap: true \}\)/.test(src) &&
       !/p\.rotY = \(p\.rotY \|\| 0\) \+ dir/.test(src));
     check('the X/Y lock checkboxes are gone from the page', b.locks === false);
     check('no lock, trackball or mode left in the API', b.api.length === 0, JSON.stringify(b.api));

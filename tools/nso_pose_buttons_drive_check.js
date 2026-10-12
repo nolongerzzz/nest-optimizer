@@ -1,20 +1,25 @@
 #!/usr/bin/env node
-/* Pose buttons about the plate's axes - the ticket's drive-check, in the real
-   app, with screenshots.
+/* Pose buttons on the rings' axes - the ticket's drive-check, in the real app,
+   with screenshots.
 
    node tools/nso_pose_buttons_drive_check.js [outDir]    exit 0 = every step held
 
-   Tip's Tilt ↑/↓ and Tilt ←/→, Tip's arrow keys, and Rotate's ⟲ 90 / 90 ⟳ all
-   go through nsoRotate.turn now: one turn about a fixed axis of the PLATE,
-   composed with whatever the piece is already doing. Before, Tilt ←/→ wrote
-   tiltZ - the innermost Euler factor, the piece's own Z - and the 90° buttons
-   wrote rotY, the middle one, so on a turned, stood or leaned piece they
-   turned it about an axis of the piece instead.
+   Tip's Tilt buttons and arrow keys, and Rotate's ⟲ 90 / 90 ⟳, all go through
+   nsoRotate.turn, on the same three axes the Rotate rings turn about:
+
+     Tilt ↑/↓   'fb'    the piece's own length (own X) - it rolls
+     Tilt ←/→   'ss'    the piece's own width line (own Z) - end-over-end
+     ⟲ / ⟳      'turn'  the plate's vertical, snapped to the quarter turn
+
+   Before, Tilt ↑/↓ added to tiltX - the OUTERMOST Euler factor, so a turn
+   about the plate's X whatever the piece's heading - and the 90° buttons
+   added to rotY, the middle one, so on a leaned piece they turned it about
+   its own leaned axis. Tilt ←/→ added to tiltZ, the innermost factor: that
+   was already a turn about the piece's own Z, and only its sense changes.
 
    Every step is a real click or key press; what is read back is read from the
-   scene. Each step also works out what the OLD field write would have done
-   from the same pose (oldDelta), so the log says what changed, not only that
-   the new thing holds.
+   scene. Where it is telling, a step also works out what the OLD field write
+   would have done from the same pose (oldDelta), so the log says what changed.
 
    The piece is the 80 x 40 x 20 box hull. Screenshots go to outDir (default
    docs/pose-buttons). Export is checked the way tools/
@@ -117,6 +122,10 @@ withApp(async (page, logs) => {
   const alongY = ax => near(Math.abs(ax[1]), 1, 1e-9);
   const alongX = ax => near(Math.abs(ax[0]), 1, 1e-9);
   const alongZ = ax => near(Math.abs(ax[2]), 1, 1e-9);
+  /* the same line, either sense */
+  const same = (a, b) => near(Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * b[2]), 1, 1e-9);
+  const elev = v => Math.asin(Math.max(-1, Math.min(1, v[1]))) * 180 / Math.PI;
+  const heading = v => Math.atan2(v[0], v[2]) * 180 / Math.PI;
   const CAM_FRONT = [0, 110, 230], CAM_SIDE = [230, 110, 0], CAM_HIGH = [150, 140, 190];
 
   const start = await N(() => ({ q: window.__d.q(), f: window.__d.fields(),
@@ -185,30 +194,33 @@ withApp(async (page, logs) => {
   let r = await N(q => window.__d.delta(q), start.q);
   check('the Turn ring turned it exactly 90° about the plate\'s vertical',
     near(r.deg, 90, 1e-6) && alongY(r.axis), r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis));
-  const turned = await N(() => ({ q: window.__d.q(), f: window.__d.fields(), long: window.__d.own([1, 0, 0]) }));
+  const turned = await N(() => ({ q: window.__d.q(), f: window.__d.fields(), long: window.__d.own([1, 0, 0]),
+    width: window.__d.own([0, 0, 1]) }));
   check('...so its 80 mm length now runs front to back, along the plate\'s Z',
     near(Math.abs(turned.long[2]), 1, 1e-9), fmtAxis(turned.long));
 
   await openMenu('menu-tip');
-  const old1 = await N(() => window.__d.oldDelta('tiltZ', 30));
-  await N(c => window.__d.cam(c[0], c[1], c[2]), CAM_FRONT);
+  const old1 = await N(() => window.__d.oldDelta('tiltZ', -30));
+  await N(c => window.__d.cam(c[0], c[1], c[2]), CAM_SIDE);
   await press('#btn-bank-up');
   const afterOne = await N(() => ({ q: window.__d.q(), status: window.__d.status() }));
   await press('#btn-bank-up');
   r = await N(q => window.__d.delta(q), turned.q);
   const tilted = await N(() => ({ q: window.__d.q(), status: window.__d.status(), long: window.__d.own([1, 0, 0]),
-    up: window.__d.own([0, 1, 0]) }));
-  console.log('   old tiltZ += 30 from this pose would have been ' + old1.deg.toFixed(3) + '° about ' + fmtAxis(old1.axis));
-  check('Tilt → twice leans it 30° about the plate\'s Z - side to side',
-    near(r.deg, 30, 1e-6) && alongZ(r.axis), r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis));
-  check('...not front/back: its length still runs level along the plate\'s Z',
-    near(tilted.long[1], 0, 1e-9) && near(Math.abs(tilted.long[2]), 1, 1e-9), 'length axis ' + fmtAxis(tilted.long));
-  check('...where the old tiltZ write would have leaned it front/back, about the plate\'s X',
-    alongX(old1.axis), fmtAxis(old1.axis));
+    width: window.__d.own([0, 0, 1]) }));
+  console.log('   old tiltZ -= 30 from this pose would have been ' + old1.deg.toFixed(3) + '° about ' + fmtAxis(old1.axis) +
+    ' - tiltZ is the innermost factor, so it was already the piece\'s own Z');
+  check('Tilt → twice tips it 30° about its OWN width line (own Z, here the plate\'s X)',
+    near(r.deg, 30, 1e-6) && same(r.axis, turned.width), r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis) +
+    ', own Z was ' + fmtAxis(turned.width));
+  check('...end-over-end: its length rises 30° and keeps its heading',
+    near(Math.abs(elev(tilted.long)), 30, 1e-6) && near(heading(tilted.long), heading(turned.long), 1e-6),
+    'elevation ' + elev(tilted.long).toFixed(6) + '°, heading ' + heading(turned.long).toFixed(6) + ' -> ' + heading(tilted.long).toFixed(6) + '°');
+  check('...no twist: its width line has not moved', same(tilted.width, turned.width), fmtAxis(tilted.width));
   check('the status line still says Bank', /^Bank /.test(tilted.status), JSON.stringify(tilted.status));
-  await shot(page, '01a-turned-90-tilt-right-x2-front');
-  await N(c => window.__d.cam(c[0], c[1], c[2]), CAM_SIDE);
-  await shot(page, '01b-turned-90-tilt-right-x2-side');
+  await shot(page, '01a-turned-90-tilt-right-x2-side');
+  await N(c => window.__d.cam(c[0], c[1], c[2]), CAM_FRONT);
+  await shot(page, '01b-turned-90-tilt-right-x2-front');
 
   /* the arrow key is the button */
   await undo(); await undo();
@@ -229,6 +241,59 @@ withApp(async (page, logs) => {
   r = await N(q => window.__d.delta(q), start.q);
   check('...and one more Undo takes back the ring turn: flat again', r.deg < 1e-6, r.deg.toExponential(2) + '°');
 
+  /* ------------------------------------------------------------------ 1b */
+  console.log('\n=== 1b. turn it 45° (the Turn ring\'s arrow keys), then Tilt ↑ twice, then Tilt ← twice ===');
+  /* Tilt ↑/↓ follow the Lean front/back ring - about the piece's own length;
+     Tilt ←/→ follow Lean side/side - about its own width line, end-over-end.
+     At 45° neither is a plate axis, which is what makes this the test. */
+  await N(() => window.__d.cam(0.01, 300, 0.01));
+  await openMenu('menu-rotate');
+  for (let i = 0; i < 45; i++) await page.keyboard.press('ArrowLeft');
+  await page.waitForTimeout(80);
+  r = await N(q => window.__d.delta(q), start.q);
+  const at45 = await N(() => ({ q: window.__d.q(), long: window.__d.own([1, 0, 0]), width: window.__d.own([0, 0, 1]) }));
+  check('45 presses of the Turn ring\'s arrow key: exactly 45° about the plate\'s vertical',
+    near(r.deg, 45, 1e-6) && alongY(r.axis), r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis) + ', heading ' + heading(at45.long).toFixed(6) + '°');
+  await openMenu('menu-tip');
+  const old1b = await N(() => window.__d.oldDelta('tiltX', 30));
+  await press('#btn-tilt-up'); await press('#btn-tilt-up');
+  r = await N(q => window.__d.delta(q), at45.q);
+  const rolled = await N(() => ({ long: window.__d.own([1, 0, 0]), width: window.__d.own([0, 0, 1]) }));
+  console.log('   old tiltX += 30 from this pose would have been ' + old1b.deg.toFixed(3) + '° about ' + fmtAxis(old1b.axis) +
+    ' - the plate\'s X, 45° off the piece');
+  check('Tilt ↑ twice rolls it 30° about its OWN length (own X, at heading 45°)',
+    near(r.deg, 30, 1e-6) && same(r.axis, at45.long), r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis));
+  check('...no twist: its length stays level on the same heading',
+    same(rolled.long, at45.long), fmtAxis(at45.long) + ' -> ' + fmtAxis(rolled.long));
+  check('...and its width line rises 30° on its own heading',
+    near(Math.abs(elev(rolled.width)), 30, 1e-6) && near(heading(rolled.width), heading(at45.width), 1e-6),
+    'elevation ' + elev(rolled.width).toFixed(6) + '°');
+  check('...where the old tiltX write would have turned it about the plate\'s X instead', alongX(old1b.axis), fmtAxis(old1b.axis));
+  await N(c => window.__d.cam(c[0], c[1], c[2]), CAM_HIGH);
+  await shot(page, '01c-turned-45-tilt-up-x2-camA');
+  await N(c => window.__d.cam(c[0], c[1], c[2]), CAM_SIDE);
+  await shot(page, '01d-turned-45-tilt-up-x2-camB');
+  await undo(); await undo();
+  r = await N(q => window.__d.delta(q), at45.q);
+  check('two Undos: back to the 45° turn', r.deg < 1e-6, r.deg.toExponential(2) + '°');
+  await press('#btn-bank-dn'); await press('#btn-bank-dn');
+  r = await N(q => window.__d.delta(q), at45.q);
+  const ended = await N(() => ({ long: window.__d.own([1, 0, 0]), width: window.__d.own([0, 0, 1]) }));
+  check('Tilt ← twice tips it 30° about its OWN width line (own Z, at heading 135°)',
+    near(r.deg, 30, 1e-6) && same(r.axis, at45.width), r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis));
+  check('...end-over-end: its length rises 30° on its own 45° heading',
+    near(Math.abs(elev(ended.long)), 30, 1e-6) && near(heading(ended.long), heading(at45.long), 1e-6),
+    'elevation ' + elev(ended.long).toFixed(6) + '°, heading ' + heading(ended.long).toFixed(6) + '°');
+  check('...no twist: its width line has not moved', same(ended.width, at45.width), fmtAxis(ended.width));
+  await N(c => window.__d.cam(c[0], c[1], c[2]), CAM_HIGH);
+  await shot(page, '01e-turned-45-tilt-left-x2-camA');
+  await N(c => window.__d.cam(c[0], c[1], c[2]), CAM_SIDE);
+  await shot(page, '01f-turned-45-tilt-left-x2-camB');
+  await undo(); await undo();
+  for (let i = 0; i < 45; i++) await undo();
+  r = await N(q => window.__d.delta(q), start.q);
+  check('two Undos for the Tilts and 45 for the ring\'s key presses: flat again', r.deg < 1e-6, r.deg.toExponential(2) + '°');
+
   /* ------------------------------------------------------------------- 2 */
   console.log('\n=== 2. Stand it, then Tilt ← ===');
   await N(c => window.__d.cam(c[0], c[1], c[2]), CAM_FRONT);
@@ -244,7 +309,7 @@ withApp(async (page, logs) => {
   const leant = await N(() => ({ long: window.__d.own([1, 0, 0]) }));
   const fromUp = Math.acos(Math.min(1, Math.abs(leant.long[1]))) * 180 / Math.PI;
   console.log('   old tiltZ -= 15 from this pose would have been ' + old2.deg.toFixed(3) + '° about ' + fmtAxis(old2.axis));
-  check('Tilt ← turned it 15° about the plate\'s Z - a horizontal axis', near(r.deg, 15, 1e-6) && alongZ(r.axis),
+  check('Tilt ← turned it 15° about its own width line - here the plate\'s Z, a horizontal axis', near(r.deg, 15, 1e-6) && alongZ(r.axis),
     r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis));
   check('...so it leans: the upright length is now 15° off vertical', near(fromUp, 15, 1e-6), fromUp.toFixed(9) + '°');
   check('...and it did not turn: no part of the motion is about the vertical', Math.abs(r.axis[1]) < 1e-9,
@@ -259,22 +324,20 @@ withApp(async (page, logs) => {
   r = await N(q => window.__d.delta(q), start.q);
   check('...and the next takes back the Stand: flat again', r.deg < 1e-6, r.deg.toExponential(2) + '°');
 
-  /* Stand on this box is a quarter turn about the plate's Z, and the piece's
-     own Z stays the plate's Z - so the old innermost-tiltZ write happened to
-     lean it too (the log above says so). Tip on side is the pose where it did
-     not: a quarter turn about X puts the piece's own Z vertical, and the old
-     Tilt ←/→ spun it where it stood. */
-  console.log('\n=== 2b. Tip on side, then Tilt ← ===');
+  /* Reported, not a defect: Tip on side stands the piece's width line
+     upright, and Tilt ←/→ turn about that line - so here they spin it on the
+     plate, by definition of "its own width line". The old tiltZ write did the
+     same (innermost factor). */
+  console.log('\n=== 2b. Tip on side, then Tilt ← (report) ===');
   await press('#btn-flip');
   const side = await N(() => ({ q: window.__d.q(), ownZ: window.__d.own([0, 0, 1]) }));
-  check('Tip on side put the piece\'s own Z vertical', near(Math.abs(side.ownZ[1]), 1, 1e-9), fmtAxis(side.ownZ));
-  const old2b = await N(() => window.__d.oldDelta('tiltZ', -15));
+  check('Tip on side stood the piece\'s own Z (its width line) upright', near(Math.abs(side.ownZ[1]), 1, 1e-9), fmtAxis(side.ownZ));
+  const old2b = await N(() => window.__d.oldDelta('tiltZ', 15));
   await press('#btn-bank-dn');
   r = await N(q => window.__d.delta(q), side.q);
-  console.log('   old tiltZ -= 15 from this pose would have been ' + old2b.deg.toFixed(3) + '° about ' + fmtAxis(old2b.axis));
-  check('Tilt ← leans it 15° about the plate\'s Z', near(r.deg, 15, 1e-6) && alongZ(r.axis),
-    r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis));
-  check('...where the old tiltZ write would have turned it about the vertical', alongY(old2b.axis), fmtAxis(old2b.axis));
+  console.log('   old tiltZ += 15 from this pose would have been ' + old2b.deg.toFixed(3) + '° about ' + fmtAxis(old2b.axis));
+  check('Tilt ← turns it 15° about its own width line - vertical here, so it spins in place',
+    near(r.deg, 15, 1e-6) && same(r.axis, side.ownZ), r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis));
   await shot(page, '02d-tipped-on-side-tilt-left-front');
   await undo(); await undo();
   r = await N(q => window.__d.delta(q), start.q);
@@ -353,9 +416,9 @@ withApp(async (page, logs) => {
   for (let i = 0; i < 3; i++) { await press('#btn-tilt-up'); chain.push(await N(() => window.__d.q())); }
   r = await N(q => window.__d.delta(q), start.q);
   const tiltStatus = await N(() => window.__d.status());
-  check('Tilt ↑ three times leans it 45° about the plate\'s X', near(r.deg, 45, 1e-6) && alongX(r.axis),
+  check('Tilt ↑ three times rolls it 45° about its own length - the plate\'s X, flat and un-turned', near(r.deg, 45, 1e-6) && alongX(r.axis),
     r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis));
-  check('...and the status line still says Tilt', /^Tilt 45°$/.test(tiltStatus), JSON.stringify(tiltStatus));
+  check('...and the status line still says Tilt', /^Tilt ↑ 15°$/.test(tiltStatus), JSON.stringify(tiltStatus));
   await shot(page, '04a-leaned-45-camA');
   await N(c => window.__d.cam(c[0], c[1], c[2]), CAM_SIDE);
   await shot(page, '04b-leaned-45-camB');
@@ -399,10 +462,11 @@ withApp(async (page, logs) => {
   await N(c => window.__d.cam(c[0], c[1], c[2]), CAM_HIGH);
   await openMenu('menu-tip');
   const qT = await N(() => window.__d.q());
+  const wT = await N(() => window.__d.own([0, 0, 1]));
   for (let i = 0; i < 2; i++) { await press('#btn-bank-up'); chain.push(await N(() => window.__d.q())); }
   r = await N(q => window.__d.delta(q), qT);
-  check('Tilt → twice on top of that: 30° about the plate\'s Z', near(r.deg, 30, 1e-6) && alongZ(r.axis),
-    r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis));
+  check('Tilt → twice on top of that: 30° about its own width line as it lay', near(r.deg, 30, 1e-6) && same(r.axis, wT),
+    r.deg.toFixed(9) + '° about ' + fmtAxis(r.axis) + ', own Z was ' + fmtAxis(wT));
   await shot(page, '04e-leaned-turned-and-tilted-camA');
 
   /* ------------------------------------------------------------------- 5 */

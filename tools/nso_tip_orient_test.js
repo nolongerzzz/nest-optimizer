@@ -126,7 +126,7 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 3 */
-  console.log('\n=== 3. Tilt works by click, about the plate\'s axes ===');
+  console.log('\n=== 3. Tilt works by click, about the piece\'s own axes ===');
   {
     const t = await page.evaluate(() => {
       const p = state.placed[0];
@@ -149,47 +149,54 @@ withApp(async (page, logs) => {
       t.up === 15 && t.dn === -15 && t.bankUp === -15 && t.bankDn === 15, JSON.stringify(t));
     check('all four now read as Tilt with a direction',
       t.labels.every(l => /^Tilt/.test(l)), t.labels.join(' | '));
-    /* Tilt is not Rotate. Each press leans the piece 15° about a HORIZONTAL
-       axis of the plate - X for ↑/↓, Z for ←/→ - and never turns it about
-       the vertical, which is Rotate's. It used to say so by leaving rotY
-       alone; now that a Tilt is a plate-axis turn decomposed back into the
-       fields, a Tilt on top of a Tilt can spell part of itself in rotY, so
-       the motion itself is what is checked. */
+    /* Tilt is not Rotate. Each press leans the piece 15° about one of its
+       OWN horizontal-at-rest axes - its length (own X) for ↑/↓, its width
+       line (own Z) for ←/→, the axes of Rotate's two lean rings - and never
+       about the plate's vertical, which is Rotate's Turn. It used to say so
+       by leaving rotY alone; now that a Tilt is a turn decomposed back into
+       the fields, a Tilt on a Tilt can spell part of itself in rotY, so the
+       motion itself is what is checked. */
     const sep = await page.evaluate(() => {
       const p = state.placed[0];
       p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; applyMeshRotation(p);
-      const rel = (a, b) => { const d = b.clone().multiply(a.clone().invert());
-        const s = Math.hypot(d.x, d.y, d.z);
-        return { deg: 2 * Math.atan2(s, Math.abs(d.w)) * 180 / Math.PI, vert: s ? Math.abs(d.y) / s : 0 }; };
       const q = () => { p.mesh.updateMatrixWorld(true); return p.mesh.quaternion.clone(); };
+      const own = (b) => new THREE.Vector3().fromArray(b).applyQuaternion(q());
       const out = [];
-      for (const id of ['btn-tilt-up', 'btn-bank-up', 'btn-tilt-dn', 'btn-bank-dn']) {
-        const a = q(); document.getElementById(id).click(); out.push(rel(a, q()));
+      for (const [id, b] of [['btn-tilt-up', [1, 0, 0]], ['btn-bank-up', [0, 0, 1]],
+                             ['btn-tilt-dn', [1, 0, 0]], ['btn-bank-dn', [0, 0, 1]]]) {
+        const a = q(), ax = own(b);
+        document.getElementById(id).click();
+        const d = q().multiply(a.clone().invert());
+        const s = Math.hypot(d.x, d.y, d.z);
+        out.push({ deg: 2 * Math.atan2(s, Math.abs(d.w)) * 180 / Math.PI,
+                   along: s ? Math.abs(d.x * ax.x + d.y * ax.y + d.z * ax.z) / s : 0 });
       }
       p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; applyMeshRotation(p);
       return out;
     });
-    check('Tilt never turns about the vertical - a 15° lean about a horizontal axis, every press',
-      sep.every(r => Math.abs(r.deg - 15) < 1e-6 && r.vert < 1e-9),
-      sep.map(r => r.deg.toFixed(6) + '° vert ' + r.vert.toExponential(1)).join('; '));
-    /* ...and about the PLATE's axes, not the piece's own. Turned 90° first,
-       the piece's own Z runs along the plate's X: the old tiltZ write leaned
-       it front/back there. Tilt ← must still lean it side to side. */
+    check('every Tilt press is a 15° turn about the piece\'s own length (↑/↓) or width line (←/→), as it lies',
+      sep.every(r => Math.abs(r.deg - 15) < 1e-6 && Math.abs(r.along - 1) < 1e-9),
+      sep.map(r => r.deg.toFixed(6) + '° |dot| ' + r.along.toFixed(9)).join('; '));
+    /* ...and on a piece turned 90°, Tilt ← still turns about the piece's
+       own width line - which now runs along the plate's X. */
     const tz = await page.evaluate(() => {
       const p = state.placed[0];
       p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; applyMeshRotation(p);
       window.nsoRotate.turn('turn', 90);
       p.mesh.updateMatrixWorld(true);
       const a = p.mesh.quaternion.clone();
+      const w = new THREE.Vector3(0, 0, 1).applyQuaternion(a);
       document.getElementById('btn-bank-dn').click();
       p.mesh.updateMatrixWorld(true);
       const d = p.mesh.quaternion.clone().multiply(a.invert());
       const s = Math.hypot(d.x, d.y, d.z);
       p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; applyMeshRotation(p);
-      return { deg: 2 * Math.atan2(s, Math.abs(d.w)) * 180 / Math.PI, z: s ? Math.abs(d.z) / s : 0 };
+      return { deg: 2 * Math.atan2(s, Math.abs(d.w)) * 180 / Math.PI,
+               along: s ? Math.abs(d.x * w.x + d.y * w.y + d.z * w.z) / s : 0, x: s ? Math.abs(d.x) / s : 0 };
     });
-    check('on a piece turned 90°, Tilt ← still leans 15° about the plate\'s Z',
-      Math.abs(tz.deg - 15) < 1e-6 && Math.abs(tz.z - 1) < 1e-9, tz.deg.toFixed(6) + '°, |z| ' + tz.z.toFixed(9));
+    check('on a piece turned 90°, Tilt ← turns 15° about its own width line - now the plate\'s X',
+      Math.abs(tz.deg - 15) < 1e-6 && Math.abs(tz.along - 1) < 1e-9 && Math.abs(tz.x - 1) < 1e-9,
+      tz.deg.toFixed(6) + '°, |dot| ' + tz.along.toFixed(9));
   }
 
   /* ------------------------------------------------------------------ 4 */
