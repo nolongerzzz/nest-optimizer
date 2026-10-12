@@ -59,7 +59,7 @@ Current roster, by category:
 | Stock create (`app-stock.js`, the New stock button) | none — adds a piece, edits none | n/a | header comment + `docs/STOCK.md` |
 | Stock update (`app-stock.js`, a card adjustment) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/STOCK.md` |
 | Extract selection (`app-extract-sel.js`) | sub-region | the one TARGET face, `nsoMaskIsExcludedRaw(m, face.n, face.d, ...)` | header comment |
-| Scale (`app-scale.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
+| Scale (`app-scale.js`; Whole, Longest, Fit to plate, and the ring verbs Outer / Bore / Wall / Diameter) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comments (`NSO_scaleSelectedModel`, `NSO_scaleRingApply`) |
 | Skin patch (`app-skin-patch.js`) | **none** | — it reads no existing geometry at all | header comment |
 | Texture (`app-texture.js`, the curved band) | sub-region | the band's own facets, `nsoMaskIsExcludedRaw(m, face.n, face.d)` per facet; the caps do not block it | `docs/CURVED-SKIN.md` §7 |
 | Brush (`app-brush.js`) | sub-region | every face the stroke **and its seam band** land on, `nsoMaskPlaneList(m)` | `docs/BRUSH.md` §paint scope |

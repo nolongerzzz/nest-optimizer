@@ -18,10 +18,12 @@ Smart build-plate packing for 3D printing.
 - **Scale card** reads the piece first: `Ring Ø40.0 outer · Ø36.0 bore · wall
   2.0 · length 10.0`, `Bar 40.0 × 20.0 × 60.0 W × D × L`, or the three sizes and
   why it is neither, with the build-volume verdict appended (`fits A1 Mini` /
-  `over by 5.0 mm on W`). Under it: **Length** (Extend or Shorten along the
-  straight axis, cross-section held), **Whole ×** and **Longest** (uniform
-  scale), and **Fit to plate** (the largest uniform factor that fits, stated).
-  See [docs/SECTION.md](docs/SECTION.md)
+  `5.0 mm too wide for A1 Mini`). Under it: **Length** (Extend or Shorten
+  along the straight axis, cross-section held), **Whole ×** and **Longest**
+  (uniform scale), and **Fit to plate** (the largest uniform factor that fits,
+  stated). A ring adds **Outer Ø** (wall kept), **Bore Ø** and **Wall** (outer
+  kept); a rod adds **Diameter** - faces move, nothing is scaled, the length is
+  held bit for bit. See [docs/SECTION.md](docs/SECTION.md)
 - **In-house slicer** (G-scope, **Slice**): exact layer sections, walls offset
   by the measured line widths, grid / zigzag infill by density, top and bottom
   shells, and per-layer overhang / support-need calls - opened as a toolpath

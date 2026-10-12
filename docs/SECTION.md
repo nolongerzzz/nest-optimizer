@@ -43,7 +43,11 @@ The gates run in order; the first that fails names the answer:
   inside an annulus `max(0.05 mm, 1% of r)` wide about the fitted centre. The
   centre is the least-squares (Kasa) fit; `r` is the circle the vertices sit
   on, because that is the circle a tessellator put them on — a revolved 96-gon
-  of radius r has every vertex at r and its chords dip inside. 1% admits any
+  of radius r has every vertex at r and its chords dip inside. Since part 2 it
+  is the *mean* radius of the outline's corner points (its local radius
+  maxima), not the largest: identical on a regular polygon, and one noisy
+  vertex no longer sets the size (`MINI_TPU_TEST`'s outer reads Ø20.0000, not
+  Ø20.0012). 1% admits any
   regular tessellation of 23+ segments; the 0.05 mm floor is under a 0.4 mm
   nozzle's resolution. An 8-gon of r 10 is 0.761 mm off (its sagitta) and reads
   as an octagon.
@@ -63,8 +67,9 @@ letter aside) and the same numbers to the bit.
 First line: `Ring Ø… outer · Ø… bore · wall … · length …` (round hollow),
 `Rod Ø… · length …` (round solid), `Bar W × D × L` (rectangular, `· bore … ·
 wall …` if hollow), or `W × D × H · reason` for `other` — then ` · fits A1 Mini`
-or ` · over by 5.0 mm on W` from `NSO_fitCheckAll`, the bed's axes named W / D
-/ H.
+or ` · 5.0 mm too wide for A1 Mini` from `NSO_fitCheckAll`: the bed's directions
+as words (wide / deep / tall), since W / D on this card are a bar's section
+sides.
 
 | verb | what it calls |
 |---|---|
@@ -78,4 +83,74 @@ the display frame, where "Height" is right and "Z" is the bed's depth.
 `NSO_scaleSolve` still takes a display axis underneath.
 
 Paint scope is unchanged: Length is Extend's (whole-piece), Whole / Longest /
-Fit to plate are Scale's (whole-piece). Both are in the HANDOFF roster.
+Fit to plate and the ring verbs are Scale's (whole-piece). Both are in the
+HANDOFF roster.
+
+The line re-reads whenever the selected piece's soup changes, whoever changed
+it: while the card is open, a per-frame identity check on `rawTris` (every bake
+replaces the array). `updateEditSize` alone missed Thicken and Fatten, which
+commit through their own path.
+
+## Ring verbs (part 2) — `nso_ring.js`
+
+```
+node tools/nso_ring_test.js            headless: every verb x fixture, against truth; canonical checker
+node tools/nso_ring_drive_check.js     the real app: MINI_TPU_TEST from the Library, Shrink diagnosis
+node tools/nso_ring_drive_check.js --shots    also writes docs/scale-ring/*.png
+```
+
+The rule: a dimension edit moves boundary faces, never scales, and on a ring
+the wall is kept unless the wall is what is being edited.
+
+| field | faces that move | held |
+|---|---|---|
+| **Outer Ø** → d | outer walls by Δr = (d − outer)/2, bore walls by the same Δr | wall, length |
+| **Bore Ø** → d | bore walls by Δr = (d − bore)/2 | outer, length |
+| **Wall** → w | bore walls by −(w − wall) | outer, length |
+| **Diameter** → d (a rod) | outer walls by Δr | length |
+
+Δr is in the reader's terms (the vertex circle), so the number the card shows
+after an apply is the number typed. Walls are the faces parallel to the axis
+(`NSO_fattenCrossSectionFaces`, Extend's own per-triangle test), split outer /
+bore by their normal against the reader's centre; caps and every other face are
+held.
+
+**The move is solved in the section plane**, not by `_thickenOffsetSoup`. With
+Fatten's face filter, Thicken's offset moves the right faces by the right amount
+but leans the walls: its vertex solve merges facets within 15° into one
+area-weighted plane, and a wall quad's top and bottom rim vertices see different
+triangle areas, so they land a hair apart in XY. One outer pass takes
+`MINI_TPU_TEST`'s Z census from 0% to 29.7% oblique and the result no longer
+reads as a ring (`nso_ring_test.js` §7 pins this). Here every distinct section
+point moves once, to where its neighbouring segments' offset lines meet, and
+only the two section coordinates are written: walls stay parallel, caps stay
+planar, and every axial coordinate is identical bit for bit — gated on every run.
+
+**Refusals**, in millimetres:
+
+| ask | refusal |
+|---|---|
+| wall under the floor | `wall would be 0.4 mm, under the 0.42 mm floor` |
+| bore at or past the outer | `bore would reach the outer - Ø20 bore against a Ø20 outer` |
+| bore at or past zero | `bore would close up - Ø0 mm is at or below zero` |
+| a face driven inside out | `the move is more than the wall it crosses (N face(s) would turn inside out)` |
+
+The floor is `NSO_Thickness.floorFor(nozzle)` — nozzle × 1.05, **0.42 mm at the
+default 0.4 nozzle**, the one floor this repo keeps. There is no app-wide nozzle
+setting, so the card uses the default; `NSO_ringApplyRaw(..., { nozzle })` takes
+another (0.6 → 0.63 mm).
+
+**Precision is in float32 ULPs at the piece's magnitude.** Every apply stores
+float32 once, so a round trip of two applies is within one ULP of the largest
+coordinate: 9.5e-7 mm for `MINI_TPU_TEST` on the origin (the 1e-6 round trip
+holds), 7.6e-6 mm for the same ring at plate position (90, 90). The ring test
+holds its exactness checks to `max(1e-6, one ULP)` and runs the ring at
+(90, 90) to prove it — Extend's `lengthUlps` rule, the same lesson.
+
+**MINI_TPU_TEST.stl** (nest-library, Library → Test Fixtures) is a 48-gon — 48
+points per outline, 96 wall triangles per surface. Its outer vertices sit at r
+9.9995–10.0006 (mean 10.0000) and its bore vertices at r 9.0020–9.0030, so by
+its own vertices the bore is Ø18.005 and the wall 0.998; the published Ø18 /
+wall 1 hold to 0.01 mm and the readout's one decimal exactly. The checks read it
+from the `nest-library` checkout (`tools/nso_library_dir.js`) and SKIP out loud
+without one.

@@ -549,6 +549,19 @@ select:focus, input:focus {
 /* Same for the Scale card's Length row: .edit-row is a flex row, and the row
    is hidden for a piece with no straight axis. */
 #scale-length-row[hidden] { display: none !important; }
+/* Scale part 2: a ring's Outer / Bore / Wall and a rod's Diameter, one line
+   each - label, field, the hold it keeps, Set - so the hold reads beside the
+   field it qualifies. The card body makes every .btn full width, which on a
+   flex row pushed the hold onto a line of its own. */
+#scale-ring-rows .edit-row, #scale-rod-rows .edit-row {
+  display: grid;
+  grid-template-columns: 4rem 5.4rem 1fr auto;
+  gap: 6px;
+  margin: 6px 0;
+}
+#scale-ring-rows .edit-row input, #scale-rod-rows .edit-row input { width: 100% !important; }
+#scale-ring-rows .edit-row .btn, #scale-rod-rows .edit-row .btn { width: auto; padding-left: 10px; padding-right: 10px; }
+#scale-ring-rows .edit-row .hint, #scale-rod-rows .edit-row .hint { margin: 0; white-space: nowrap; }
 
 .library-list {
   position: absolute;

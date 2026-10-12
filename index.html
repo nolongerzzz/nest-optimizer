@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=scale2" />
+  <link rel="stylesheet" href="styles.css?v=ring1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -366,6 +366,34 @@
               <span class="hint">mm</span>
               <button id="btn-scale-length" class="btn btn-secondary" type="button"
               title="Lengthen or shorten the piece along its straight axis to this length - longer extends, shorter shortens - holding the cross-section exactly. Shortening stays inside one straight run and says the most it can take.">Set</button>
+              </div>
+              <div id="scale-ring-rows" hidden>
+              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+              <label for="scale-ring-outer">Outer &Oslash;</label>
+              <input id="scale-ring-outer" type="number" min="0.1" max="2000" step="0.1" style="width:5rem;" aria-label="Outer &Oslash;, mm" />
+              <span class="hint">wall kept</span>
+              <button id="btn-scale-ring-outer" class="btn btn-secondary" type="button" title="Move the outer wall to this diameter and the bore by the same amount, so the wall stays as it is. Faces move; nothing is scaled; the length is held.">Set</button>
+              </div>
+              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+              <label for="scale-ring-bore">Bore &Oslash;</label>
+              <input id="scale-ring-bore" type="number" min="0.1" max="2000" step="0.1" style="width:5rem;" aria-label="Bore &Oslash;, mm" />
+              <span class="hint">outer kept</span>
+              <button id="btn-scale-ring-bore" class="btn btn-secondary" type="button" title="Move the bore wall to this diameter. The outer stays where it is, so the wall changes by the difference. Refused under the nozzle-safety wall floor.">Set</button>
+              </div>
+              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+              <label for="scale-ring-wall">Wall</label>
+              <input id="scale-ring-wall" type="number" min="0.1" max="2000" step="0.1" style="width:5rem;" aria-label="Wall, mm" />
+              <span class="hint">outer kept</span>
+              <button id="btn-scale-ring-wall" class="btn btn-secondary" type="button" title="Move the bore wall so the wall is this thick. The outer stays where it is. Refused under the nozzle-safety wall floor.">Set</button>
+              </div>
+              </div>
+              <div id="scale-rod-rows" hidden>
+              <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
+              <label for="scale-rod-diameter">Diameter</label>
+              <input id="scale-rod-diameter" type="number" min="0.1" max="2000" step="0.1" style="width:5rem;" aria-label="Diameter, mm" />
+              <span class="hint">length kept</span>
+              <button id="btn-scale-rod-diameter" class="btn btn-secondary" type="button" title="Move the rod's wall to this diameter. Faces move; nothing is scaled; the length is held.">Set</button>
+              </div>
               </div>
               <div class="edit-row" style="align-items:center;gap:6px;flex-wrap:wrap;">
               <label for="scale-factor">Whole &times;</label>
@@ -1050,7 +1078,7 @@
   <script src="nso-gcode-solid.js?v=solid1"></script>
   <script src="nso_slicer.js?v=slice1"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
-  <script src="app-core.js?v=gsup5"></script>
+  <script src="app-core.js?v=ring1"></script>
   <script src="app-cut.js?v=scale1"></script>
   <script src="app-finish.js?v=pose1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
@@ -1064,8 +1092,11 @@
   <script src="app-fatten.js?v=fatten1"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
-  <script src="nso_section.js?v=scale1"></script>
-  <script src="app-scale.js?v=scale1"></script>
+  <script src="nso_section.js?v=ring1"></script>
+  <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
+       nso_section.js and app-fatten.js's face filter at apply time. -->
+  <script src="nso_ring.js?v=ring1"></script>
+  <script src="app-scale.js?v=ring1"></script>
   <script src="app-brush.js?v=hollow2"></script>
   <script src="app-wheel.js?v=wheel3"></script>
   <script src="app-fit.js?v=wheel4"></script>

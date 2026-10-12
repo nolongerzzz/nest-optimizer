@@ -18,6 +18,7 @@ const vm = require('vm');
 
 const ROOT = path.join(__dirname, '..');
 const { readSTL } = require('./nso_stl_io.js');
+const LIBDIR = require('./nso_library_dir.js');
 
 const ctx = {
   Math, Map, Set, console, Array, Object, Number, String, JSON, isFinite,
@@ -215,6 +216,30 @@ function nums(r) {
       r.axis === 'X' && /no clean straight band anywhere/.test(r.reason) && /none clean/.test(r.detail), r.detail);
     row('clamp bar (library/v9_mirror_factory.stl)', r, '187 x 34 x 20.9, keyholes + flange');
     holdsTurned('clamp bar', s, r);
+  }
+  {
+    // MINI_TPU_TEST.stl (Library -> Test Fixtures). It lives in
+    // nolongerzzz/nest-library, not here: read from the checkout
+    // nso_library_dir.js resolves, and SKIPped out loud without one, as the
+    // feature fixtures' catalog checks are. Published: Ø20 / Ø18, wall 1,
+    // length 8. A 48-gon, and not a perfect one: its outer vertices sit at r
+    // 9.9995 - 10.0006 and its bore vertices at r 9.0020 - 9.0030, so by its
+    // own vertices the bore is Ø18.005 and the wall 0.998. Held to the
+    // published figures within 0.01 mm; the readout's one decimal is exact.
+    const file = LIBDIR.libraryDir() && LIBDIR.catalogFile('MINI_TPU_TEST.stl');
+    if (!file) LIBDIR.skip('MINI_TPU_TEST.stl reads as the published ring (nest-library)');
+    else {
+    const s = readSTL(file);
+    const r = NSO_sectionRead(s);
+    check('MINI_TPU_TEST -> round hollow, the published Ø20 / Ø18, wall 1, length 8',
+      r.shape === 'round' && r.hollow && r.axis === 'Z' && near(r.outer.diameterMm, 20, 1e-3) &&
+      near(r.bore.diameterMm, 18, 0.01) && near(r.wallMm, 1, 0.01) && r.lengthMm === 8,
+      r.outer.diameterMm.toFixed(6) + ' / ' + r.bore.diameterMm.toFixed(6) + ', wall ' + r.wallMm.toFixed(6));
+    check('  readout: Ring Ø20.0 outer · Ø18.0 bore · wall 1.0 · length 8.0',
+      NSO_sectionReadout(r) === 'Ring Ø20.0 outer · Ø18.0 bore · wall 1.0 · length 8.0', NSO_sectionReadout(r));
+    row('nest-library/MINI_TPU_TEST.stl', r, 'Ø20 / Ø18 published (vertices Ø20.000 / Ø18.005), wall 1, L 8');
+    holdsTurned('MINI_TPU_TEST', s, r);
+    }
   }
   {
     // prism_r10h30_s8: an octagon of circumradius 10. Off round by its
