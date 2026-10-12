@@ -3298,6 +3298,26 @@ function _thickenSolveVertex(planes, offset) {
   return { d, approx };
 }
 
+/* The angle face f makes at its vertex v. wallKept weights a vertex's planes
+   by it rather than by area: on a curved wall the faces round a vertex merge
+   into one plane cluster, and an AREA-weighted normal leans to whichever side
+   the quad diagonals happen to give more triangles - the top and bottom rims
+   of a 96-segment tube then move in slightly different directions and its
+   walls come out leaning (0.01 mm on a 0.5 mm offset, enough that Extend no
+   longer finds them straight). The corner angle a quad contributes is 90
+   degrees however its diagonal falls, so the angle-weighted normal is the
+   true bisector at every rim alike. */
+function _thickenCornerAngle(pos, tri, f, v) {
+  let k = 0;
+  while (k < 3 && tri[f * 3 + k] !== v) k++;
+  if (k === 3) return 0;
+  const a = tri[f * 3 + k] * 3, b = tri[f * 3 + (k + 1) % 3] * 3, c = tri[f * 3 + (k + 2) % 3] * 3;
+  const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+  const wx = pos[c] - pos[a], wy = pos[c + 1] - pos[a + 1], wz = pos[c + 2] - pos[a + 2];
+  const cx = uy * wz - uz * wy, cy = uz * wx - ux * wz, cz = ux * wy - uy * wx;
+  return Math.atan2(Math.sqrt(cx * cx + cy * cy + cz * cz), ux * wx + uy * wy + uz * wz);
+}
+
 /* The offset. Returns { soup, moved, held, approx } or { reason } when refused.
 
    opts.mayMove   optional Uint8Array, one entry per INPUT TRIANGLE (face f is
@@ -3316,6 +3336,19 @@ function _thickenSolveVertex(planes, offset) {
                   file offsets surfaces and has no notion of an axis, and giving
                   it one would be the wrong place to put it.
 
+   opts.wallKept  every face moves: the outer ones (the same hull-and-crease
+                  classification Thicken out uses) by +offsetMm along their
+                  normal, every inner one by -offsetMm - the same direction in
+                  space as the outer face across the wall from it. So a bore
+                  grows with the outside, a tray's inner walls and floor top
+                  follow its outer walls and bottom, and every wall and floor
+                  keeps its thickness. Added for the Scale card's Offset
+                  (app-scale.js, which replaced Fatten / Shrink). `mode` is
+                  ignored with it. A refusal for inversion also says how many
+                  of the faces that turned were inner (flippedInner): a bore or
+                  pocket closing, as against a solid section going through
+                  zero.
+
    offsetMm may be NEGATIVE here and always could be: every step below is
    linear in it and the sign simply reverses the push. Only the UI entry point
    gates it positive, which is why that gate is the one that had to learn about
@@ -3325,6 +3358,7 @@ function _thickenSolveVertex(planes, offset) {
 function _thickenOffsetSoup(soup, mode, offsetMm, opts) {
   opts = opts || {};
   const mayMove = opts.mayMove || null;
+  const wallKept = !!opts.wallKept;
   const { pos, tri } = _thickenIndex(soup);
   const nf = tri.length / 3, nv = pos.length / 3;
   const fn = _thickenFaceNormals(pos, tri);
@@ -3335,7 +3369,7 @@ function _thickenOffsetSoup(soup, mode, offsetMm, opts) {
   let moved = 0, held = 0, filtered = 0;
   for (let f = 0; f < nf; f++) {
     if (!fn.ok[f]) continue;
-    moving[f] = (mode === 'out') ? outer[f] : (outer[f] ? 0 : 1);
+    moving[f] = wallKept ? 1 : (mode === 'out') ? outer[f] : (outer[f] ? 0 : 1);
     if (moving[f] && mayMove && !mayMove[f]) { moving[f] = 0; filtered++; }
     if (moving[f]) moved++; else held++;
   }
@@ -3370,7 +3404,8 @@ function _thickenOffsetSoup(soup, mode, offsetMm, opts) {
       if (fn.area[f] < floor) continue;
       if (moving[f]) any = 1;
       planes.push({ nx: fn.n[f * 3] * sign, ny: fn.n[f * 3 + 1] * sign, nz: fn.n[f * 3 + 2] * sign,
-                    w: fn.area[f], t: moving[f] ? offsetMm : 0 });
+                    w: wallKept ? _thickenCornerAngle(pos, tri, f, v) : fn.area[f],
+                    t: !moving[f] ? 0 : (wallKept && !outer[f]) ? -offsetMm : offsetMm });
     }
     if (!any) continue; // touches no moving face: does not move, by construction
     const r = _thickenSolveVertex(planes, offsetMm);
@@ -3380,7 +3415,7 @@ function _thickenOffsetSoup(soup, mode, offsetMm, opts) {
   // a face whose normal turned round grew past the feature it sits in
   // (a sliver - under THICKEN_FLIP_AREA, or thinner than THICKEN_SLIVER_WIDTH
   // - is tessellation noise, not a feature; it may fold without a verdict)
-  let flipped = 0;
+  let flipped = 0, flippedInner = 0, flippedMinWidth = Infinity;
   const flipArea2 = 2 * THICKEN_FLIP_AREA;
   for (let f = 0; f < nf; f++) {
     if (!fn.ok[f] || fn.area[f] < THICKEN_FLIP_AREA || fn.alt[f] < THICKEN_SLIVER_WIDTH) continue;
@@ -3389,17 +3424,22 @@ function _thickenOffsetSoup(soup, mode, offsetMm, opts) {
     const e2x = out[c] - out[a], e2y = out[c + 1] - out[a + 1], e2z = out[c + 2] - out[a + 2];
     const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
     const dot = nx * fn.n[f * 3] + ny * fn.n[f * 3 + 1] + nz * fn.n[f * 3 + 2];
-    if (dot <= 0 && Math.sqrt(nx * nx + ny * ny + nz * nz) > flipArea2) flipped++;
+    if (dot <= 0 && Math.sqrt(nx * nx + ny * ny + nz * nz) > flipArea2) {
+      flipped++;
+      if (!outer[f]) flippedInner++;
+      if (fn.alt[f] < flippedMinWidth) flippedMinWidth = fn.alt[f];
+    }
   }
   if (flipped > 0) {
-    return { reason: offsetMm + ' mm is more than the feature it grows into (' + flipped + ' face(s) would turn inside out)' };
+    return { reason: offsetMm + ' mm is more than the feature it grows into (' + flipped + ' face(s) would turn inside out)',
+             flipped, flippedInner, flippedMinWidth };
   }
   const res = new Float32Array(tri.length * 3);
   for (let i = 0; i < tri.length; i++) {
     const v = tri[i] * 3;
     res[i * 3] = out[v]; res[i * 3 + 1] = out[v + 1]; res[i * 3 + 2] = out[v + 2];
   }
-  return { soup: res, moved, held, approx, filtered, signedVolume: fn.signedVolume };
+  return { soup: res, moved, held, approx, filtered, signedVolume: fn.signedVolume, outer };
 }
 
 function _thickenSignedVolume(soup) {

@@ -4,6 +4,12 @@
 Shape group, directly under the Thicken row · tests: `npm run fatten`,
 `npm run wire:fatten`
 
+> **Scale part 3 (2026-10-12):** the Fatten / Shrink row is gone from the Finish
+> menu. Its job is the Scale card's **Offset** (`docs/SECTION.md`), which keeps
+> walls and floors and refuses at the floor and where a bore would close.
+> `wire:fatten` became `wire:offset`; this file is the record of the wrapper as
+> it was, and `NSO_fattenSelectedModel` is still there for the checks that call it.
+
 ---
 
 ## What it does, in one sentence

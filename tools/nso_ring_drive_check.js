@@ -1,6 +1,8 @@
-/* Scale part 2 in the real app: the ring verbs, the Shrink diagnosis, screenshots.
-   node tools/nso_ring_drive_check.js           exit 0 = every gate held
-   node tools/nso_ring_drive_check.js --shots   also write docs/scale-ring/*.png
+/* Scale parts 2 and 3 in the real app: the ring verbs, the Shrink fix, screenshots.
+   node tools/nso_ring_drive_check.js                 exit 0 = every gate held
+   node tools/nso_ring_drive_check.js --shots DIR     also write DIR/*.png
+                                                      (a scratch directory -
+                                                      no screenshot is committed)
 
    MINI_TPU_TEST.stl is loaded the way a user loads it: Library -> Test
    Fixtures -> click. It lives in nolongerzzz/nest-library; the harness answers
@@ -10,15 +12,17 @@
    Steps, in the ticket's order:
 
      1  MINI_TPU_TEST from the Library    -> Ring Ø20.0 / Ø18.0, wall 1.0, length 8.0
-     2  Task 4: Fatten's Shrink at 0.1, 0.5, 1.0 - each outcome recorded as the
-        status line says it; then the same intent through the ring verbs,
-        Outer Ø 20 -> 19.8 and Wall 1 -> 0.9
+     2  Fatten's Shrink is gone from the Finish menu, and the card shows no
+        Offset on a ring (Outer Ø and Length already do its job); the offset
+        that replaced it, run at -0.1 and -0.5 mm, leaves a RING with its
+        wall - part 2's Shrink un-rang it at both. Then the same intent
+        through the ring verbs, Outer Ø 20 -> 19.8 and Wall 1 -> 0.9
      3  Outer Ø -> 24  -> Ø24.0 / Ø22.0, wall 1.0, length 8.0; Undo returns it
-     4  Bore Ø -> 16   -> Ø20.0 / Ø16.0, wall 2.0
-     5  Wall -> 2      -> the same as step 4
+     5  Wall -> 2      -> Ø20.0 / Ø16.0, wall 2.0 (part 2's Bore Ø -> 16; the
+                          Bore row is gone, Wall reaches the same bore)
      6  Wall -> 0.4    -> refused, worded, piece unchanged (and Wall -> 0.5,
                           which the 0.42 mm floor at a 0.4 nozzle allows)
-     7  Stock cylinder -> Rod, Diameter -> 30, no Bore / Wall fields
+     7  Stock cylinder -> Rod, Diameter -> 30, no Outer / Wall fields
      8  Export the Ø24 ring as STL, read the file back with the reader
 
    Every number is printed; the PR quotes them. */
@@ -29,7 +33,13 @@ const path = require('path');
 const { withApp, statusOf, openMenuFor, ROOT } = require('./nso_app_harness');
 const LIB = require('./nso_library_dir');
 
-const SHOTS = process.argv.includes('--shots') ? path.join(ROOT, 'docs', 'scale-ring') : null;
+const SHOTS = (() => {
+  const i = process.argv.indexOf('--shots');
+  if (i < 0) return null;
+  const dir = process.argv[i + 1];
+  if (!dir || dir.startsWith('--')) { console.error('--shots needs a directory (a scratch one: no PNG goes in the repo)'); process.exit(2); }
+  return path.resolve(dir);
+})();
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 
 let fails = 0;
@@ -56,10 +66,11 @@ async function card(page) {
     const s = NSO_scaleSectionOf(m);
     return {
       readout: document.getElementById('scale-readout').textContent,
-      ring: shown('scale-ring-rows'), rod: shown('scale-rod-rows'),
-      fields: { outer: val('scale-ring-outer'), bore: val('scale-ring-bore'), wall: val('scale-ring-wall'), diameter: val('scale-rod-diameter') },
-      holds: Array.from(document.querySelectorAll('#scale-ring-rows .hint, #scale-rod-rows .hint')).map(e => e.textContent),
-      outer: s && s.outer ? s.outer.diameterMm : null, bore: s && s.bore ? s.bore.diameterMm : null,
+      ring: shown('scale-ring-outer-row') && shown('scale-ring-wall-row'), rod: shown('scale-rod-diameter-row'),
+      bore: !!document.getElementById('scale-ring-bore'), offset: shown('scale-offset-row'), lengthRow: shown('scale-length-row'),
+      fields: { outer: val('scale-ring-outer'), wall: val('scale-ring-wall'), diameter: val('scale-rod-diameter'), length: val('scale-length') },
+      holds: ['scale-ring-outer-row', 'scale-ring-wall-row'].map(id => document.querySelector('#' + id + ' .hint').textContent),
+      outer: s && s.outer ? s.outer.diameterMm : null, boreMm: s && s.bore ? s.bore.diameterMm : null,
       wall: s ? s.wallMm : null, length: s ? s.lengthMm : null,
       soup: Array.from(m.rawTris).join(','), undo: state.undoStack.length
     };
@@ -69,7 +80,7 @@ async function card(page) {
 async function shot(page, name) {
   if (!SHOTS) return;
   await page.screenshot({ path: path.join(SHOTS, name + '.png') });
-  console.log('   screenshot docs/scale-ring/' + name + '.png');
+  console.log('   screenshot ' + path.join(SHOTS, name + '.png'));
 }
 
 async function clear(page) { await page.evaluate(() => { document.getElementById('status').textContent = ''; }); }
@@ -95,7 +106,7 @@ async function undo(page) {
 withApp(async (page, logs) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   const f3 = x => (+x).toFixed(3);
-  const line = c => 'Ø' + f3(c.outer) + ' / Ø' + f3(c.bore) + ', wall ' + f3(c.wall) + ', length ' + f3(c.length);
+  const line = c => 'Ø' + f3(c.outer) + ' / Ø' + f3(c.boreMm) + ', wall ' + f3(c.wall) + ', length ' + f3(c.length);
 
   console.log('\n=== 1. MINI_TPU_TEST from the Library ===');
   const n0 = await page.evaluate(() => state.models.length);
@@ -117,34 +128,29 @@ withApp(async (page, logs) => {
   console.log('   reader:  ' + line(c0));
   check('the readout reads Ring with the published numbers',
     c0.readout === 'Ring Ø20.0 outer · Ø18.0 bore · wall 1.0 · length 8.0 · fits A1 Mini', c0.readout);
-  check('three ring fields shown, no Diameter', c0.ring && !c0.rod);
-  check('each states its hold: wall kept, outer kept, outer kept', JSON.stringify(c0.holds.slice(0, 3)) === '["wall kept","outer kept","outer kept"]', c0.holds.join(' | '));
-  check('prefilled with the current values', c0.fields.outer === String(+c0.outer.toFixed(3)) &&
-    c0.fields.bore === String(+c0.bore.toFixed(3)) && c0.fields.wall === String(+c0.wall.toFixed(3)), JSON.stringify(c0.fields));
+  check('Length, Outer Ø and Wall shown; no Bore Ø, no Diameter, no Offset', c0.lengthRow && c0.ring && !c0.bore && !c0.rod && !c0.offset,
+    JSON.stringify({ length: c0.lengthRow, ring: c0.ring, bore: c0.bore, rod: c0.rod, offset: c0.offset }));
+  check('each states its hold: wall kept, outer kept', JSON.stringify(c0.holds) === '["wall kept","outer kept"]', c0.holds.join(' | '));
+  check('prefilled at the readout\'s own precision: 20.0, 1.0, length 8.0',
+    c0.fields.outer === '20.0' && c0.fields.wall === '1.0' && c0.fields.length === '8.0', JSON.stringify(c0.fields));
   await shot(page, '01-mini-tpu-ring-read');
   const orig = c0;
 
-  console.log('\n=== 2. Task 4: Fatten\'s Shrink on the ring, then the same intent through the ring verbs ===');
-  const SHRINK = [];
-  for (const mm of [0.1, 0.5, 1.0]) {
-    await page.evaluate(() => { document.querySelectorAll('.vp-finish-menu, .vp-finish-menu .vp-sec').forEach(d => { d.open = true; }); });
-    await page.evaluate(v => { document.getElementById('inp-fatten-mm').value = String(v); }, mm);
-    await clear(page);
-    await page.click('#btn-fatten-shrink');
-    await page.waitForFunction(() => document.getElementById('status').textContent.length > 0, null, { timeout: 30000 });
-    const st = await statusOf(page);
-    const after = await card(page);
-    const changed = after.soup !== orig.soup;
-    // A shrunk piece may no longer be a ring at all: record the reader's own
-    // words for it, not a Ø it does not have.
-    SHRINK.push({ mm, status: st, changed, reading: changed ? (after.outer != null && after.bore != null ? line(after) : 'reads "' + after.readout + '"') : null });
-    console.log('   Shrink ' + mm + ': ' + (changed ? 'APPLIED -> ' + SHRINK[SHRINK.length - 1].reading : 'unchanged') + '\n     "' + st + '"');
-    if (changed) { await undo(page); check('  Shrink ' + mm + ' undone', (await card(page)).soup === orig.soup); }
+  console.log('\n=== 2. The Shrink fix: no Fatten buttons, no Offset on a ring, and the offset keeps it a ring ===');
+  const gone = await page.evaluate(() => ['btn-fatten-grow', 'btn-fatten-shrink', 'inp-fatten-mm'].filter(id => document.getElementById(id)));
+  check('Fatten / Shrink are gone from the Finish menu', gone.length === 0, gone.join(', '));
+  const SHRINK = await page.evaluate(() => [-0.1, -0.5].map(mm => {
+    const r = NSO_scaleOffsetRaw(getActiveModel().rawTris, mm);
+    const s = r.ok ? NSO_sectionRead(r.tris) : null;
+    return { mm, ok: r.ok, reason: r.reason, readout: s ? NSO_sectionReadout(s) : '', shape: s && s.shape, hollow: s && s.hollow,
+             wall: s && s.wallMm, outer: s && s.outer && s.outer.diameterMm, length: s && s.lengthMm };
+  }));
+  for (const r of SHRINK) {
+    console.log('   offset ' + r.mm + ' mm: ' + (r.ok ? r.readout : 'refused - ' + r.reason));
+    check('  offset ' + r.mm + ' mm leaves a ring, wall kept, outer and length ' + (-2 * r.mm) + ' mm less',
+      r.ok && r.shape === 'round' && r.hollow && Math.abs(r.wall - orig.wall) < 1e-3 &&
+      Math.abs(r.outer - (orig.outer + 2 * r.mm)) < 1e-3 && Math.abs(r.length - (orig.length + 2 * r.mm)) < 1e-4, r.readout);
   }
-  check('Fatten\'s Shrink was run at 0.1, 0.5 and 1.0 and each outcome recorded', SHRINK.length === 3);
-  check('the card re-read after a Fatten bake, which does not call updateEditSize',
-    SHRINK.filter(s => s.changed).every(s => /section is not constant along Z/.test(s.reading)),
-    SHRINK.map(s => s.reading).join(' | '));
   // The 1e-6 mm checks below assume what is true here: the Library's file is
   // centred on the origin (largest coordinate 12 mm, one float32 ULP 9.5e-7),
   // and the app keeps a raw piece's own coordinates, so 1e-6 is above what
@@ -173,7 +179,7 @@ withApp(async (page, logs) => {
   check('readout: Ø24.0 outer · Ø22.0 bore · wall 1.0 · length 8.0',
     c3.readout === 'Ring Ø24.0 outer · Ø22.0 bore · wall 1.0 · length 8.0 · fits A1 Mini', c3.readout);
   check('one Undo step', c3.undo === orig.undo + 1, orig.undo + ' -> ' + c3.undo);
-  check('the fields re-prefilled from the new reading', c3.fields.outer === '24', JSON.stringify(c3.fields));
+  check('the fields re-prefilled from the new reading', c3.fields.outer === '24.0' && c3.fields.wall === '1.0', JSON.stringify(c3.fields));
   await shot(page, '02-outer-24');
 
   console.log('\n=== 8. Export the Ø24 ring as STL and read the file ===');
@@ -203,20 +209,12 @@ withApp(async (page, logs) => {
   check('Undo returns it, coordinate for coordinate', c3u.soup === orig.soup);
   check('Undo names the ring edit', /Undo: Ring \/ rod size reverted/.test(u3), u3);
 
-  console.log('\n=== 4. Bore Ø -> 16 ===');
-  const s4 = await ringSet(page, 'scale-ring-bore', 16);
-  const c4 = await card(page);
-  console.log('   status:  ' + s4 + '\n   readout: ' + c4.readout);
-  check('readout: Ø20.0 · Ø16.0 · wall 2.0', c4.readout === 'Ring Ø20.0 outer · Ø16.0 bore · wall 2.0 · length 8.0 · fits A1 Mini', c4.readout);
-  check('the outer did not move', c4.outer === orig.outer);
-  await shot(page, '03-bore-16');
-  await undo(page);
-
   console.log('\n=== 5. Wall -> 2 ===');
   const s5 = await ringSet(page, 'scale-ring-wall', 2);
   const c5 = await card(page);
   console.log('   status:  ' + s5 + '\n   readout: ' + c5.readout);
-  check('the same result as Bore Ø -> 16', c5.readout === c4.readout && Math.abs(c5.bore - c4.bore) < 1e-3, line(c5) + ' vs ' + line(c4));
+  check('readout: Ø20.0 · Ø16.0 · wall 2.0 - part 2\'s Bore Ø -> 16, reached through Wall',
+    c5.readout === 'Ring Ø20.0 outer · Ø16.0 bore · wall 2.0 · length 8.0 · fits A1 Mini' && c5.outer === orig.outer, c5.readout);
   await shot(page, '04-wall-2');
   await undo(page);
 
@@ -247,8 +245,8 @@ withApp(async (page, logs) => {
   await select(page, cylId);
   const c7 = await card(page);
   console.log('   readout: ' + c7.readout);
-  check('reads Rod', /^Rod Ø\d+\.\d · length \d+\.\d · fits A1 Mini$/.test(c7.readout), c7.readout);
-  check('Diameter shown, no Outer / Bore / Wall fields', c7.rod && !c7.ring);
+  check('reads Rod', /^Rod Ø\d+\.\d\d? · length \d+\.\d\d? · fits A1 Mini$/.test(c7.readout), c7.readout);
+  check('Diameter shown, no Outer / Wall fields', c7.rod && !c7.ring);
   const s7 = await ringSet(page, 'scale-rod-diameter', 30);
   const c7b = await card(page);
   console.log('   status:  ' + s7 + '\n   readout: ' + c7b.readout);
@@ -260,8 +258,8 @@ withApp(async (page, logs) => {
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   check('no uncaught page errors', errs.length === 0, errs.join(' | '));
 
-  console.log('\n=== Task 4, on record ===');
-  for (const s of SHRINK) console.log('   Shrink ' + s.mm + ' mm: ' + (s.changed ? 'applied, ' + s.reading : 'refused') + ' - "' + s.status + '"');
+  console.log('\n=== the Shrink fix, on record ===');
+  for (const s of SHRINK) console.log('   offset ' + s.mm + ' mm: ' + (s.ok ? s.readout : 'refused - ' + s.reason));
   console.log('   Outer Ø 20 -> 19.8: "' + v1 + '"');
   console.log('   Wall 1 -> 0.9:      "' + v2 + '"');
 

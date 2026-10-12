@@ -193,6 +193,58 @@ function NSO_sectionRuns(soup, k, bands) {
 
 function NSO_sectionAxisName(k) { return 'XYZ'[k]; }
 
+/* ONE DISPLAY PRECISION for the readout and every field: one decimal, and a
+   second only when the one-decimal figure is off the real value by more than
+   NSO_SECTION_SHOW_TOL. MINI_TPU_TEST's bore is Ø18.0047: it shows 18.0 in
+   the header and 18.0 in the field, not 18.0 in one and 18.005 in the other. */
+var NSO_SECTION_SHOW_TOL = 0.01;
+function NSO_sectionShow(x) {
+  x = +x;
+  if (!isFinite(x)) return String(x);
+  var one = x.toFixed(1);
+  return Math.abs(+one - x) > NSO_SECTION_SHOW_TOL ? x.toFixed(2) : one;
+}
+
+/* A section loop's corners: its points with collinear runs taken out. */
+function NSO_sectionCorners(p2) {
+  var n = p2.length, out = [];
+  for (var i = 0; i < n; i++) {
+    var a = p2[(i + n - 1) % n], b = p2[i], c = p2[(i + 1) % n];
+    var cr = (b[0] - a[0]) * (c[1] - b[1]) - (b[1] - a[1]) * (c[0] - b[0]);
+    var la = Math.hypot(b[0] - a[0], b[1] - a[1]), lc = Math.hypot(c[0] - b[0], c[1] - b[1]);
+    if (Math.abs(cr) > 1e-9 * Math.max(1e-12, la * lc)) out.push(b);
+  }
+  return out;
+}
+
+/* Which sides of a loop's bounding rectangle the outline only partly covers -
+   a U-section's open top shows as two separate stretches of outline on that
+   side. Returns [{ axis, hi }] in section-plane terms (axis 0 / 1). */
+function NSO_sectionOpenSides(p2, rect, tol) {
+  var open = [], n = p2.length;
+  for (var ax = 0; ax < 2; ax++) for (var hiSide = 0; hiSide < 2; hiSide++) {
+    var at = hiSide ? rect.hi[ax] : rect.lo[ax], ivs = [];
+    for (var i = 0; i < n; i++) {
+      var a = p2[i], b = p2[(i + 1) % n];
+      if (Math.abs(a[ax] - at) <= tol && Math.abs(b[ax] - at) <= tol) {
+        var u = 1 - ax, x0 = Math.min(a[u], b[u]), x1 = Math.max(a[u], b[u]);
+        if (x1 - x0 > tol) ivs.push([x0, x1]);
+      }
+    }
+    ivs.sort(function (p, q) { return p[0] - q[0]; });
+    var runs = 0, end = -Infinity;
+    for (var j = 0; j < ivs.length; j++) { if (ivs[j][0] > end + tol) runs++; end = Math.max(end, ivs[j][1]); }
+    if (runs >= 2) open.push({ axis: ax, hi: !!hiSide });
+  }
+  return open;
+}
+
+/* A side of the section, named the way the piece is: its own Z is up. */
+function NSO_sectionSideName(rawAxis, hi) {
+  if (rawAxis === 2) return hi ? 'at the top' : 'at the bottom';
+  return 'on its ' + (hi ? '+' : '-') + 'XYZ'[rawAxis] + ' side';
+}
+
 /* opts.detect   passed to NSO_extendDetectAxis (opts.axis forces the axis)
    opts.minRun   default NSO_SECTION_MIN_RUN */
 function NSO_sectionRead(soup, opts) {
@@ -220,6 +272,16 @@ function NSO_sectionRead(soup, opts) {
   }
   out.sizes = { w: hi[0] - lo[0], d: hi[1] - lo[1], h: hi[2] - lo[2] };
 
+  // Every one of the piece's own axes, with the widest clean constant-section
+  // band along it - Extend's own band scan, run per axis. An axis with no
+  // clean band gets no field on the card: there is nowhere to insert or
+  // remove length without moving a feature.
+  out.axes = [0, 1, 2].map(function (a) {
+    var sc = NSO_extendBands(soup, a, {});
+    return { idx: a, name: NSO_sectionAxisName(a), extentMm: hi[a] - lo[a], scan: sc,
+             bandMm: sc.ok ? sc.best.width : 0, ok: !!sc.ok };
+  });
+
   // ---- 1. the straight axis: Extend's detector, Extend's refusals ----
   var det = NSO_extendDetectAxis(soup, opts.detect || {});
   out.detect = det;
@@ -231,21 +293,24 @@ function NSO_sectionRead(soup, opts) {
   }
   if (!det.ok) {
     out.detail = det.reason;
-    if (det.offCardinal) out.reason = 'no straight axis: ' + Math.round(det.cov.offAxisDeg) + '° oblique';
-    else if (det.census) {
+    if (det.offCardinal) {
+      out.gate = 'off-axis';
+      out.why = 'its straight axis is turned ' + Math.round(det.cov.offAxisDeg) + '° off its own X, Y and Z';
+    } else if (det.census) {
       var best = det.census.slice().sort(function (a, b) { return a.obliqueFrac - b.obliqueFrac; })[0];
-      out.reason = 'no straight axis: ' + Math.round(best.obliqueFrac * 100) + '% of the surface is curved or tapered';
-    } else out.reason = 'no straight axis: ' + det.reason;
-    return out;
+      out.gate = 'curved';
+      out.why = 'it is curved or tapered all over (' + Math.round(best.obliqueFrac * 100) + '% of its surface)';
+    } else { out.gate = 'soup'; out.why = det.reason; }
+    return NSO_sectionFinish(out);
   }
   var k = det.axisIdx;
   out.axisIdx = k; out.axis = NSO_sectionAxisName(k);
   out.lengthMm = hi[k] - lo[k];
-  if (!(out.lengthMm > 0)) { out.reason = 'piece is flat along ' + out.axis; return out; }
+  if (!(out.lengthMm > 0)) { out.gate = 'flat'; out.why = 'it is flat along ' + out.axis; return NSO_sectionFinish(out); }
 
   // ---- the section plane: mid-length, or the middle of the gap beside it if
   //      mid-length lands exactly on a layer of vertices ----
-  var scan = NSO_extendBands(soup, k, {});
+  var scan = out.axes[k].scan;
   out.bands = scan;
   var mid = (lo[k] + hi[k]) / 2, plane = mid, host = null;
   for (var bi = 0; bi < scan.bands.length; bi++) {
@@ -274,36 +339,37 @@ function NSO_sectionRead(soup, opts) {
     walked = kept ? rawBuildLoopsFromCutEdges(rawPlaneBoundaryEdges(kept, k, plane), k, 1e-9)
                   : { loops: [], degreeIssues: [] };
   } catch (err) {
-    out.reason = 'section at mid-length could not be walked: ' + ((err && err.message) || err);
-    return out;
+    out.gate = 'walk'; out.why = 'its section could not be traced (' + ((err && err.message) || err) + ')';
+    return NSO_sectionFinish(out);
   }
   out.loops = walked.loops.length;
 
   if (!run) {
-    out.reason = 'section is not constant along ' + out.axis + ' at mid-length' +
-      (scan.ok ? '' : ' - no clean straight band anywhere along it');
+    out.gate = 'no-run';
+    out.why = scan.ok ? 'its section changes at the middle of its ' + out.axis + ' length'
+                      : 'its section changes all along ' + out.axis + ' - no stretch of it is the same shape';
     out.detail = scan.ok ? '' : scan.reason;
-    return out;
+    return NSO_sectionFinish(out);
   }
   if (out.run.frac < minRun) {
-    out.reason = 'section is constant over only ' + out.run.lengthMm.toFixed(1) + ' of ' +
-      out.lengthMm.toFixed(1) + ' mm along ' + out.axis + ' (' + Math.round(out.run.frac * 100) +
-      '%) - the rest is shaped';
-    return out;
+    out.gate = 'short-run';
+    out.why = 'only ' + NSO_sectionShow(out.run.lengthMm) + ' of its ' + NSO_sectionShow(out.lengthMm) +
+      ' mm along ' + out.axis + ' keeps one section - the ends are shaped';
+    return NSO_sectionFinish(out);
   }
 
   // ---- 3. the loops, by nesting ----
   if (walked.degreeIssues.length) {
-    out.reason = 'section outline has ' + walked.degreeIssues.length + ' branch point(s)';
-    return out;
+    out.gate = 'tangled'; out.why = 'its section outline is tangled (' + walked.degreeIssues.length + ' branch point(s))';
+    return NSO_sectionFinish(out);
   }
-  if (!walked.loops.length) { out.reason = 'no section at mid-length'; return out; }
+  if (!walked.loops.length) { out.gate = 'empty'; out.why = 'it has no section at mid-length'; return NSO_sectionFinish(out); }
   var L;
   try { L = rawNestLoops(walked.loops, k); }
-  catch (err2) { out.reason = 'section loops do not nest: ' + ((err2 && err2.message) || err2); return out; }
-  if (L.length > 2) { out.reason = 'section has ' + L.length + ' loops'; return out; }
+  catch (err2) { out.gate = 'nesting'; out.why = 'its section outlines overlap'; return NSO_sectionFinish(out); }
+  if (L.length > 2) { out.gate = 'loops'; out.why = 'its section is ' + L.length + ' separate outlines'; return NSO_sectionFinish(out); }
   if (L.length === 2 && !(L[0].depth + L[1].depth === 1)) {
-    out.reason = 'section has 2 loops side by side'; return out;
+    out.gate = 'loops'; out.why = 'its section is two separate outlines side by side'; return NSO_sectionFinish(out);
   }
   var oi = L.length === 1 ? 0 : (L[0].depth === 0 ? 0 : 1);
   var outerL = L[oi], boreL = L.length === 2 ? L[1 - oi] : null;
@@ -313,17 +379,16 @@ function NSO_sectionRead(soup, opts) {
   var fo = NSO_sectionClassLoop(outerL.p2);
   out.fit = { outer: fo };
   if (!fo.cls) {
-    var miss = fo.nearer === 'round' ? fo.circle : fo.rect;
-    out.reason = 'outer loop is ' + miss.devMm.toFixed(1) + ' mm off ' + fo.nearer +
-      ' (tolerance ' + miss.tolMm.toFixed(2) + ' mm)';
-    return out;
+    out.gate = 'shape';
+    out.why = NSO_sectionShapeWhy(outerL.p2, fo, k);
+    return NSO_sectionFinish(out);
   }
   var fb = boreL ? NSO_sectionClassLoop(boreL.p2) : null;
   out.fit.bore = fb;
   if (fb && fb.cls !== fo.cls) {
-    out.reason = 'outer loop is ' + fo.cls + ' but the bore is ' +
-      (fb.cls || ((fb.nearer === 'round' ? fb.circle : fb.rect).devMm.toFixed(1) + ' mm off ' + fb.nearer));
-    return out;
+    out.gate = 'bore-shape';
+    out.why = 'its outside is ' + fo.cls + ' but its hole is ' + (fb.cls || 'neither round nor rectangular');
+    return NSO_sectionFinish(out);
   }
 
   if (fo.cls === 'round') {
@@ -333,16 +398,17 @@ function NSO_sectionRead(soup, opts) {
       var B = fb.circle, ecc = Math.hypot(B.center[0] - C.center[0], B.center[1] - C.center[1]);
       if (ecc > B.tolMm) {
         out.outer = null;
-        out.reason = 'bore is ' + ecc.toFixed(1) + ' mm off centre (tolerance ' + B.tolMm.toFixed(2) + ' mm)';
-        return out;
+        out.gate = 'eccentric';
+        out.why = 'its hole is ' + NSO_sectionShow(ecc) + ' mm off centre';
+        return NSO_sectionFinish(out);
       }
       out.bore = { diameterMm: 2 * B.r, center: B.center, devMm: B.devMm, tolMm: B.tolMm, eccentricityMm: ecc };
       out.wallMm = C.r - B.r;
     }
     out.shape = 'round';
-    out.reason = 'round within ' + C.devMm.toFixed(3) + ' of ' + C.tolMm.toFixed(3) + ' mm' +
+    out.why = 'round within ' + C.devMm.toFixed(3) + ' of ' + C.tolMm.toFixed(3) + ' mm' +
       (fb ? ', bore within ' + fb.circle.devMm.toFixed(3) + ' mm' : '');
-    return out;
+    return NSO_sectionFinish(out);
   }
 
   // rectangular: the wider side is W, and the bore's sides follow the outer's.
@@ -356,15 +422,93 @@ function NSO_sectionRead(soup, opts) {
     out.wallMm = Math.min.apply(null, walls);
   }
   out.shape = 'rectangular';
-  out.reason = 'rectangular within ' + R.devMm.toFixed(3) + ' of ' + R.tolMm.toFixed(3) + ' mm' +
+  out.why = 'rectangular within ' + R.devMm.toFixed(3) + ' of ' + R.tolMm.toFixed(3) + ' mm' +
     (fb ? ', bore within ' + fb.rect.devMm.toFixed(3) + ' mm' : '');
+  return NSO_sectionFinish(out);
+}
+
+/* The fit gate, in plain words: what the section IS, not how far it is from
+   what it is not. "2.0 mm off rectangular" read as an out-of-square box when
+   the box was a tray. */
+function NSO_sectionShapeWhy(p2, fo, k) {
+  var o = [0, 1, 2].filter(function (a) { return a !== k; });
+  var corners = NSO_sectionCorners(p2);
+  var along = ' along ' + NSO_sectionAxisName(k);
+  if (fo.nearer === 'round') {
+    return 'its section' + along + ' is a ' + corners.length + '-sided polygon, not a circle (' +
+      NSO_sectionShow(fo.circle.devMm) + ' mm off round)';
+  }
+  var open = NSO_sectionOpenSides(p2, fo.rect, Math.max(1e-6, 1e-6 * Math.max(fo.rect.span[0], fo.rect.span[1])));
+  if (open.length === 1 && corners.length === 8) {
+    return 'its section' + along + ' is a U - open ' + NSO_sectionSideName(o[open[0].axis], open[0].hi) +
+      ' - not a closed rectangle';
+  }
+  if (corners.length === 6) return 'its section' + along + ' is an L-shape, not a plain rectangle';
+  return 'its section' + along + ' is a stepped outline with ' + corners.length + ' corners, not a plain rectangle';
+}
+
+/* What the card can offer, decided once, here, from the reading - so the
+   readout's "so ... apply" and the card's fields cannot disagree.
+
+     round, hollow   Length (if its axis has a clean band), Outer Ø, Wall
+     round, solid    Length (same), Diameter
+     anything else   Length / Width / Height for each of the piece's own axes
+                     that has a clean band. Height is the piece's own Z, Length
+                     the longer of its X and Y, Width the shorter.
+
+   offset (Fatten / Shrink as one wall-kept offset) shows on every piece but a
+   ring or rod, where Outer Ø / Diameter and Length already do its job. On
+   anything else it is the only way to thicken a piece evenly: Length / Width
+   / Height insert material in one band each, which on a stepped piece (an L,
+   lid_strap's strap) moves the step's position rather than offsetting it.
+   Longest shows only where it is not the same number as a named field
+   already on the card. */
+function NSO_sectionVerbs(s) {
+  var v = { length: null, width: null, height: null, outer: false, wall: false, diameter: false,
+            offset: true, longest: true, named: [] };
+  if (!s || !s.axes) return v;
+  function dim(a) { return { axisIdx: a.idx, axis: a.name, mm: a.extentMm, bandMm: a.bandMm }; }
+  if (s.shape === 'round') {
+    if (s.axes[s.axisIdx].ok) v.length = dim(s.axes[s.axisIdx]);
+    if (s.hollow) { v.outer = true; v.wall = true; } else v.diameter = true;
+    v.offset = false;
+  } else {
+    var X = s.axes[0], Y = s.axes[1], Z = s.axes[2];
+    var lenA = X.extentMm >= Y.extentMm ? X : Y, widA = lenA === X ? Y : X;
+    if (lenA.ok) v.length = dim(lenA);
+    if (widA.ok) v.width = dim(widA);
+    if (Z.ok) v.height = dim(Z);
+  }
+  var longest = Math.max(s.sizes.w, s.sizes.d, s.sizes.h);
+  var namedMm = [];
+  ['length', 'width', 'height'].forEach(function (n) { if (v[n]) { v.named.push(n); namedMm.push(v[n].mm); } });
+  if (v.outer || v.diameter) { v.named.push(v.outer ? 'outer' : 'diameter'); namedMm.push(s.outer.diameterMm); }
+  if (v.wall) v.named.push('wall');
+  v.longest = !namedMm.some(function (mm) { return NSO_sectionShow(mm) === NSO_sectionShow(longest); });
+  v.longestMm = longest;
+  return v;
+}
+
+/* The reason line: the gate that decided, then what still applies. */
+function NSO_sectionFinish(out) {
+  out.verbs = NSO_sectionVerbs(out);
+  if (out.shape !== 'other') { out.reason = out.why; return out; }
+  var v = out.verbs, can = [];
+  if (v.length) can.push('length');
+  if (v.width) can.push('width');
+  if (v.height) can.push('height');
+  if (v.offset) can.push('an even offset');
+  can.push('whole-piece scaling');
+  var all = v.length && v.width && v.height;
+  var list = can.length > 1 ? can.slice(0, -1).join(', ') + ' and ' + can[can.length - 1] : can[0];
+  out.reason = out.why + ', so ' + (all ? '' : 'only ') + list + ' apply';
   return out;
 }
 
 /* The readout's first line, in print terms. Kept here, headless, so the test
    holds the wording the card shows. */
 function NSO_sectionReadout(s) {
-  function f(x) { return (+x).toFixed(1); }
+  var f = NSO_sectionShow;
   if (!s || !s.sizes) return 'No piece to read.';
   if (s.shape === 'round') {
     if (s.hollow) {
@@ -373,10 +517,14 @@ function NSO_sectionReadout(s) {
     }
     return 'Rod Ø' + f(s.outer.diameterMm) + ' · length ' + f(s.lengthMm);
   }
+  // Bars and everything else: the piece's own Length / Width / Height, the
+  // same names the card's fields use (Height its own Z; Length the longer of
+  // X and Y). Part 1's "W × D × L" named a bar's section sides instead.
+  var X = s.sizes.w, Y = s.sizes.d, lwh = f(Math.max(X, Y)) + ' L × ' + f(Math.min(X, Y)) + ' W × ' + f(s.sizes.h) + ' H';
   if (s.shape === 'rectangular') {
-    var t = 'Bar ' + f(s.outer.widthMm) + ' × ' + f(s.outer.depthMm) + ' × ' + f(s.lengthMm) + ' W × D × L';
+    var t = 'Bar ' + lwh;
     if (s.hollow) t += ' · bore ' + f(s.bore.widthMm) + ' × ' + f(s.bore.depthMm) + ' · wall ' + f(s.wallMm);
     return t;
   }
-  return f(s.sizes.w) + ' × ' + f(s.sizes.d) + ' × ' + f(s.sizes.h) + ' W × D × H · ' + s.reason;
+  return lwh + ' · ' + s.reason;
 }

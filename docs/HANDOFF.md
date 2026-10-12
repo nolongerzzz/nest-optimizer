@@ -47,7 +47,7 @@ Current roster, by category:
 | Smooth (`app-sculpt.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
 | Extend (`app-extend.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/EXTEND.md` |
 | Mirror (`app-mirror.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/MIRROR.md` |
-| Fatten (`app-fatten.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/FATTEN.md` |
+| Fatten (`app-fatten.js`; no UI since Scale part 3 - the card's Offset replaced it) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/FATTEN.md` |
 | Pottery Wheel (`app-wheel.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/POTTERY-WHEEL.md` |
 | Repair (`app-finish.js`, Seal's checkbox) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
 | Fusion (`app-join.js`, Join Route 0) | whole-piece | `nsoMaskCount(A)+nsoMaskCount(B) > 0` | stand-down comment |
@@ -59,7 +59,7 @@ Current roster, by category:
 | Stock create (`app-stock.js`, the New stock button) | none — adds a piece, edits none | n/a | header comment + `docs/STOCK.md` |
 | Stock update (`app-stock.js`, a card adjustment) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/STOCK.md` |
 | Extract selection (`app-extract-sel.js`) | sub-region | the one TARGET face, `nsoMaskIsExcludedRaw(m, face.n, face.d, ...)` | header comment |
-| Scale (`app-scale.js`; Whole, Longest, Fit to plate, and the ring verbs Outer / Bore / Wall / Diameter) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comments (`NSO_scaleSelectedModel`, `NSO_scaleRingApply`) |
+| Scale (`app-scale.js`; Whole, Longest, Fit to plate, Length / Width / Height, the ring verbs Outer / Wall / Diameter, and Offset) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comments (`NSO_scaleSelectedModel`, `NSO_scaleCardApply`) |
 | Skin patch (`app-skin-patch.js`) | **none** | — it reads no existing geometry at all | header comment |
 | Texture (`app-texture.js`, the curved band) | sub-region | the band's own facets, `nsoMaskIsExcludedRaw(m, face.n, face.d)` per facet; the caps do not block it | `docs/CURVED-SKIN.md` §7 |
 | Brush (`app-brush.js`) | sub-region | every face the stroke **and its seam band** land on, `nsoMaskPlaneList(m)` | `docs/BRUSH.md` §paint scope |
@@ -239,7 +239,7 @@ The groups, and what decides which one a row belongs to:
 
 | Group | Holds |
 |---|---|
-| **Shape** | changes the form: Soften, Smooth, Extend, Mirror, Thicken, Fatten |
+| **Shape** | changes the form: Soften, Smooth, Extend, Mirror, Thicken (Fatten / Shrink moved to the Scale card's Offset) |
 | **Paint** | the mask itself: Paint Selected / Excluded / Clear, Delete painted, Extract selection |
 | **Surface** | adds relief to a face: Skin face / wrap / patch, Texture |
 | **Sculpt** | freehand and local: Brush, Carve |
@@ -1258,6 +1258,15 @@ tolerance rail. Details and the reason the low half is the one to mirror:
 in `npm test`.
 
 ## Fatten - grow or shrink the cross-section, hold the length (2026-09-19)
+**Superseded in the UI by Scale part 3 (2026-10-12):** the Fatten / mm / Shrink
+row is gone from the Finish menu, folded into the Scale card's **Offset** row
+(`NSO_scaleOffsetRaw`, `docs/SECTION.md`): the outside moves, the inner faces
+follow, and it refuses at the floor and where a bore would close - Shrink here
+had neither and un-rang a ring at 0.1 and 0.5 mm. `NSO_fattenCrossSectionFaces`
+is still nso_ring.js's face filter; `NSO_fattenSelectedModel` is still callable
+(the integration checks drive it) and no button reaches it. `wire:fatten` became
+`wire:offset`. What follows is the original record.
+
 `app-fatten.js`, loaded at `?v=fatten1` straight after `app-mirror.js` (Mirror
 sits between it and `app-extend.js`; Fatten still calls Extend's axis detector). UI is a **Fatten** / mm /
 **Shrink** row in the Finish menu's Shape group, directly under the Thicken
