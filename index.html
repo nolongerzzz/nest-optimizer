@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=scale1" />
+  <link rel="stylesheet" href="styles.css?v=scale2" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -178,15 +178,21 @@
             </div>
           </details>
           <details class="vp-menu vp-top-menu" id="menu-rotate">
-            <summary class="vp-bar-btn" title="Turn the selected piece: 90° steps, or freehand by its handle">Rotate</summary>
+            <summary class="vp-bar-btn" title="Turn the selected piece: 90° steps, or by the arrowheads on its rings">Rotate</summary>
             <div class="vp-menu-body vp-top-body">
               <button id="btn-rot-left" class="vp-bar-btn adjust-btn" disabled>⟲ 90°</button>
               <button id="btn-rot-right" class="vp-bar-btn adjust-btn" disabled>90° ⟳</button>
-              <label class="vp-flag vp-flag-rotlock" title="Lock rotation about X (pitch). A locked axis has no handle to grab and its arrow keys do nothing. The 90° buttons are not affected.">
-                <input type="checkbox" id="chk-rot-lock-x"><span class="vp-flag-face">Lock X</span>
+              <!-- Which rings are drawn on the piece. Each turns it about one
+                   axis of the PLATE, whatever the piece is already doing.
+                   Turn only on every opening; nothing here is saved. -->
+              <label class="vp-flag vp-flag-rotring vp-flag-rotring-turn" title="A ring about the plate's vertical. Click an arrowhead to turn 1°, drag it to swing round the ring.">
+                <input type="checkbox" id="chk-rot-ring-turn" checked><span class="vp-flag-face">Turn (horizontal)</span>
               </label>
-              <label class="vp-flag vp-flag-rotlock" title="Lock rotation about Y (yaw). A locked axis has no handle to grab and its arrow keys do nothing. The 90° buttons are not affected.">
-                <input type="checkbox" id="chk-rot-lock-y"><span class="vp-flag-face">Lock Y</span>
+              <label class="vp-flag vp-flag-rotring vp-flag-rotring-fb" title="A ring about the plate's X axis: leans the piece toward you or away. Click an arrowhead to lean 1°, drag it to swing round the ring.">
+                <input type="checkbox" id="chk-rot-ring-fb"><span class="vp-flag-face">Lean front/back</span>
+              </label>
+              <label class="vp-flag vp-flag-rotring vp-flag-rotring-ss" title="A ring about the plate's Z axis: leans the piece left or right. Click an arrowhead to lean 1°, drag it to swing round the ring.">
+                <input type="checkbox" id="chk-rot-ring-ss"><span class="vp-flag-face">Lean side/side</span>
               </label>
             </div>
           </details>
@@ -1037,13 +1043,13 @@
   <script src="nso-cooling-profiles.js"></script>
   <script src="nso-3mf.js"></script>
   <script src="nso-3mf-read.js"></script>
-  <script src="nso-3mf-scene.js?v=scene1"></script>
+  <script src="nso-3mf-scene.js?v=scene2"></script>
   <script src="nso-surface-grid.js?v=inside6"></script>
   <script src="nso-gcode-lines.js"></script>
   <script src="nso-gcode-solid.js?v=solid1"></script>
   <script src="nso_slicer.js?v=slice1"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
-  <script src="app-core.js?v=gsup4"></script>
+  <script src="app-core.js?v=gsup5"></script>
   <script src="app-cut.js?v=scale1"></script>
   <script src="app-finish.js?v=pose1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
@@ -1087,7 +1093,7 @@
        rather than three modules each hoping the other two are shut. -->
   <script src="app-input-mode.js?v=inmode3"></script>
   <script src="app-tip-orient.js?v=tip2"></script>
-  <script src="app-rotate-handles.js?v=rot2"></script>
+  <script src="app-rotate-handles.js?v=rot3"></script>
   <script src="app-move-vertical.js?v=mv2"></script>
   <script src="app-defects.js?v=inside5"></script>
   <script src="app-measure.js?v=measure2"></script>
