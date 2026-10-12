@@ -353,10 +353,10 @@
               <details class="vp-menu vp-relief-menu" id="menu-relief">
               <summary>Picture</summary>
               <div class="vp-menu-body vp-relief">
-              <input type="file" id="relief-file" accept="image/*" style="display:none" aria-label="Picture to turn into a relief slab">
+              <input type="file" id="relief-file" accept="image/*,.heic,.heif" style="display:none" aria-label="Picture to turn into a relief slab">
               <div class="vp-row vp-row-full">
               <button id="btn-relief-pick" class="btn btn-secondary" type="button"
-              title="Pick a picture - a photo, a scan, anything the browser can open. It is read at full size; nothing is uploaded anywhere.">Choose picture&hellip;</button>
+              title="Pick a picture - a photo, a scan, anything the browser can open (HEIC too, where the browser can read it: Safari can). It is read at full size; nothing is uploaded anywhere.">Choose picture&hellip;</button>
               </div>
               <p id="relief-file-name" class="hint relief-file-name"></p>
               <div class="vp-row vp-row-opts">
@@ -382,7 +382,9 @@
               <p id="relief-tris" class="hint relief-tris" aria-live="polite">Pick a picture</p>
               <div class="vp-row vp-row-full">
               <button id="btn-relief-make" class="btn btn-secondary" type="button" disabled
-              title="Build the slab and put it on the plate as a new piece, named after the file. Nothing else on the plate is touched, and one Undo takes it off again.">Make piece</button>
+              title="Build the slab and open it in G-scope to look at. Nothing goes on the plate: Back to Picture there brings you here with everything as it was, Make again replaces the slab, and Export to plate in G-scope is what puts it on the plate, named after the file.">Make piece</button>
+              <button id="btn-relief-undo" class="btn btn-secondary" type="button" disabled
+              title="Step back to the previous slab: it goes back into G-scope, and the photo and settings it was made with come back here. One step - only the previous attempt is kept.">Undo</button>
               </div>
               </div>
               </details>
@@ -829,6 +831,8 @@
       <div class="ms-section">
         <div class="ms-section-title">Source</div>
         <div class="ms-btn-row">
+          <button id="ms-btn-back-producer" type="button" hidden
+                  title="Close G-scope and go back to where this came from, with everything there as you left it">Back</button>
           <button id="ms-btn-plate" type="button"
                   title="Read the pieces that are on the plate right now, as placed, and put them under the lens. The plate itself is not changed.">Read the plate</button>
           <button id="ms-btn-open" type="button">Import&hellip;</button>
@@ -1156,7 +1160,7 @@
   <script src="app-skin.js?v=skin4"></script>
   <script src="app-skin-patch.js?v=skin3"></script>
   <script src="app-raster.js?v=raster1"></script>
-  <script src="app-relief.js?v=relief1"></script>
+  <script src="app-relief.js?v=relief2"></script>
   <script src="app-mask.js?v=inmode2"></script>
   <script src="app-seat-grid.js?v=inside6"></script>
   <script src="app-paint-delete.js?v=del1"></script>
@@ -1187,7 +1191,7 @@
   <!-- Handle, bracket, lid and hinge detection for G-scope's Parts list, one
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=features1"></script>
-  <script src="app-microscope.js?v=scope15"></script>
+  <script src="app-microscope.js?v=scope16"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js

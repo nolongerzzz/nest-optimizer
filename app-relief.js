@@ -3,8 +3,9 @@
    A picture becomes a relief slab: a flat base, a dense heightfield on top,
    heights driven by the image. All of the arithmetic and all of the geometry
    live in nso_relief.js, which is DOM-free and node-tested; what is here is
-   the four things only the app can do - read a file through the browser's own
-   decoder, read the card, add the piece, and say what happened.
+   what only the app can do - read a file through the browser's own decoder,
+   read the card, hand the slab to G-scope, seat it when it reaches the
+   plate, and say what happened.
 
    NO DECODER OF OUR OWN, exactly as app-raster.js: a file input, an ObjectURL
    into an <img>, one drawImage onto a canvas over a white ground (a
@@ -15,12 +16,24 @@
    filter the browser picks, and the triangle budget - not a pixel cap - is
    what refuses a grid too fine to build.
 
-   THIS ADDS A PIECE AND EDITS NONE, like New stock and Trace raster. It
-   arrives through addModelFromZUpGeometry (app-core.js), the one ingest path
-   an imported STL takes, so the slab has rawTris exactly as a loaded file
-   does and the Brush, Smooth, Cut and both exporters see an ordinary piece.
-   One Undo step takes it off again (an 'addModels' entry, the one Extract
-   selection pushes) and nothing else on the plate is read or written.
+   PICTURE -> G-SCOPE -> PLATE. Make piece builds the slab and opens it in
+   G-scope through NSO_MICROSCOPE.openObjects - the seam G-scope already had
+   for any named Z-up triangle groups - so it is looked at BEFORE it is a
+   piece: nothing goes on the plate and nothing goes on the Undo stack. From
+   there:
+     Back to Picture  closes G-scope and opens this card again. The photo is
+                      still in memory and no control here was touched, so
+                      every setting is as it was left.
+     Make again       replaces the slab G-scope shows. Attempts do not stack.
+     Undo (here)      one step back to the previous attempt: that slab goes
+                      back into G-scope and its photo and settings come back
+                      onto the card. Only the previous one is kept.
+     Export to plate  G-scope's own button. The slab arrives through
+                      addModelFromZUpGeometry, the one ingest path an imported
+                      STL takes, named after the file, with one 'addModels'
+                      Undo step - an ordinary piece from then on. G-scope's
+                      onPlate hook hands it back here and it is moved to free
+                      plate (seat(), below), clear of every placed piece.
 
    PAINT SCOPE, THE CREATE PATH: NONE - it reads no existing geometry at all,
    so there is no face for paint to protect. See docs/HANDOFF.md, "Scoping".
@@ -34,6 +47,13 @@
   if (typeof document === 'undefined') return;
 
   var picture = null;     /* { image: ImageData, name, w, h } once a file is read */
+  /* The attempt G-scope was handed last, and the one before it - nothing
+     older. An attempt is { picture, card, r, name }: the photo, the card's
+     raw control values, NSO_Relief.build's result and the piece name. */
+  var shown = null, previous = null;
+
+  var CARD = ['inp-relief-width', 'inp-relief-base', 'inp-relief-relief', 'inp-relief-detail',
+              'sel-relief-levels', 'chk-relief-bright'];
 
   function el(id) { return document.getElementById(id); }
   function say(t, bad) { if (typeof setStatus === 'function') setStatus(t, !!bad); }
@@ -80,6 +100,10 @@
     return p;
   }
 
+  function isHeic(file) {
+    return /\.hei[cf]$/i.test((file && file.name) || '') || /^image\/hei[cf]/i.test((file && file.type) || '');
+  }
+
   /* file -> ImageData, full size, on white. cb(err, imageData). */
   function readFile(file, cb) {
     var url = URL.createObjectURL(file);
@@ -104,7 +128,10 @@
     };
     img.onerror = function () {
       URL.revokeObjectURL(url);
-      cb('the browser could not decode ' + (file.name || 'that file') + ' as an image');
+      /* HEIC is what an iPhone saves; only Safari's decoder reads it, and the
+         chooser lists it, so a refusal says that rather than "not an image". */
+      if (isHeic(file)) cb('this browser can\'t read HEIC photos; export it as JPEG or use Safari');
+      else cb('the browser could not decode ' + (file.name || 'that file') + ' as an image');
     };
     img.src = url;
   }
@@ -118,45 +145,176 @@
         return;
       }
       picture = { image: id, name: file.name, w: id.width, h: id.height };
-      var nm = el('relief-file-name');
-      if (nm) nm.textContent = file.name + ' · ' + id.width + ' x ' + id.height + ' px';
+      showName();
       refresh();
       say('Picture: ' + file.name + ', ' + id.width + ' x ' + id.height + ' px - set the slab, then Make piece');
     });
   }
 
-  /* Build and add. Exposed so a drive check runs the button's own path. */
+  function showName() {
+    var nm = el('relief-file-name');
+    if (nm) nm.textContent = picture ? picture.name + ' · ' + picture.w + ' x ' + picture.h + ' px' : '';
+  }
+
+  /* The card's controls as they stand, raw, so putting them back is exact. */
+  function cardValues() {
+    var out = {};
+    CARD.forEach(function (k) {
+      var e = el(k);
+      if (e) out[k] = e.type === 'checkbox' ? e.checked : e.value;
+    });
+    return out;
+  }
+  function setCard(v) {
+    CARD.forEach(function (k) {
+      var e = el(k);
+      if (!e || !(k in v)) return;
+      if (e.type === 'checkbox') e.checked = !!v[k]; else e.value = v[k];
+    });
+  }
+
+  function syncUndo() {
+    var b = el('btn-relief-undo');
+    if (b) b.disabled = !previous;
+  }
+
+  /* Gen+ and its Picture card, open - where Back to Picture lands. */
+  function openCard() {
+    var g = el('menu-gen'), r = el('menu-relief');
+    if (g) g.open = true;
+    if (r) r.open = true;
+  }
+
+  function backToPicture() {
+    openCard();
+    say('Picture: back to the card - ' + (picture ? picture.name : 'no picture') +
+        ', every setting as it was. Make piece again replaces the slab in G-scope.');
+  }
+
+  function scope() {
+    return (typeof NSO_MICROSCOPE !== 'undefined' && NSO_MICROSCOPE && NSO_MICROSCOPE.openObjects) ? NSO_MICROSCOPE : null;
+  }
+
+  /* Hand one attempt to G-scope. The positions are the slab's own Z-up soup,
+     exactly what Make piece used to hand the ingest path. */
+  function showInScope(a) {
+    return scope().openObjects(a.picture.name, [{ name: a.name, positions: a.r.rawTris }], {
+      source: 'picture',
+      subtitle: 'A relief slab from ' + a.picture.name + ' - not on the plate. Back to Picture to change it; ' +
+                'Click to select region, click the slab, then Export to plate to keep it.',
+      back: backToPicture,
+      backLabel: 'Back to Picture',
+      onPlate: seat
+    });
+  }
+
+  /* ---------------------------------------------------------- free plate */
+
+  var GAP = 4;          /* mm between pieces - what addModel leaves */
+  var STEP = 2;         /* mm, the search grid */
+
+  /* The spot nearest the plate's middle where `entry`'s footprint sits
+     wholly on the bed and at least GAP from every other placed piece's.
+     Footprints are each piece's real box as posed (placedFootprint, the one
+     drag uses), so a turned piece is judged by the room it takes. Returns
+     { x, z, onBed } - onBed false when the bed has no such spot, and then a
+     spot just past everything, still clear of every piece. */
+  function freeSpot(entry) {
+    var plate = (typeof getCurrentPlate === 'function' && getCurrentPlate()) || { w: 180, d: 180 };
+    var self = placedFootprint(entry, 0, 0);
+    var others = state.placed.filter(function (p) { return p && p !== entry; })
+      .map(function (p) { return placedFootprint(p); });
+    function clear(x, z) {
+      for (var i = 0; i < others.length; i++) {
+        var o = others[i];
+        if (x + self.maxx > o.minx - GAP && x + self.minx < o.maxx + GAP &&
+            z + self.maxz > o.minz - GAP && z + self.minz < o.maxz + GAP) return false;
+      }
+      return true;
+    }
+    var x0 = -plate.w / 2 - self.minx, x1 = plate.w / 2 - self.maxx;
+    var z0 = -plate.d / 2 - self.minz, z1 = plate.d / 2 - self.maxz;
+    if (x0 <= x1 && z0 <= z1) {
+      if (clear(0, 0) && x0 <= 0 && 0 <= x1 && z0 <= 0 && 0 <= z1) return { x: 0, z: 0, onBed: true };
+      var best = null, bd = Infinity;
+      var xs = [], zs = [], v;
+      for (v = x0; v <= x1 + 1e-9; v += STEP) xs.push(v);
+      if (xs[xs.length - 1] < x1 - 1e-9) xs.push(x1);
+      for (v = z0; v <= z1 + 1e-9; v += STEP) zs.push(v);
+      if (zs[zs.length - 1] < z1 - 1e-9) zs.push(z1);
+      for (var j = 0; j < zs.length; j++) {
+        for (var i = 0; i < xs.length; i++) {
+          var d = xs[i] * xs[i] + zs[j] * zs[j];
+          if (d < bd && clear(xs[i], zs[j])) { bd = d; best = { x: xs[i], z: zs[j], onBed: true }; }
+        }
+      }
+      if (best) return best;
+    }
+    var maxx = -plate.w / 2;
+    others.forEach(function (o) { if (o.maxx > maxx) maxx = o.maxx; });
+    return { x: Math.max(maxx, plate.w / 2) + GAP - self.minx, z: 0, onBed: false };
+  }
+
+  /* G-scope's onPlate: the slab has just been added (and its Undo step
+     pushed); move it to free plate. addModel's own seat marches a new piece
+     past the rightmost one by its unturned width, which can land on a
+     turned piece and walks off the bed; this does neither. */
+  function seat(id) {
+    var entry = state.placed.find(function (p) { return p && p.sourceId === id; });
+    if (!entry || typeof placedFootprint !== 'function' || typeof applyPlacedXZ !== 'function') return null;
+    var at = freeSpot(entry);
+    applyPlacedXZ(entry, at.x, at.z);
+    if (typeof refreshOutline === 'function') refreshOutline(entry);
+    if (!at.onBed) {
+      setTimeout(function () {
+        say('On the plate, but the bed had no free room for it - it is beside the plate, clear of every piece', true);
+      }, 0);
+    }
+    return at;
+  }
+
+  /* Build and show. Exposed so a drive check runs the button's own path. */
   function make() {
     if (typeof NSO_Relief === 'undefined' || !NSO_Relief) {
       say('Picture needs nso_relief.js', true); return { ok: false, reason: 'NSO_Relief not loaded' };
     }
-    if (typeof THREE === 'undefined' || typeof addModelFromZUpGeometry !== 'function') {
-      say('Picture needs the viewport', true); return { ok: false, reason: 'no ingest path' };
-    }
+    if (!scope()) { say('Picture needs G-scope', true); return { ok: false, reason: 'no G-scope' }; }
     if (!picture) { say('Pick a picture first', true); return { ok: false, reason: 'no picture' }; }
 
     var r;
     try {
       r = NSO_Relief.build(picture.image, readUI());
     } catch (e) {
-      say('Picture failed - nothing added (' + ((e && e.message) || e) + ')', true);
+      say('Picture failed - nothing made (' + ((e && e.message) || e) + ')', true);
       return { ok: false, reason: (e && e.message) || String(e) };
     }
-    if (!r.ok) { say('Picture refused - nothing added: ' + r.reason, true); return r; }
+    if (!r.ok) { say('Picture refused - nothing made: ' + r.reason, true); return r; }
 
-    var g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.BufferAttribute(r.rawTris, 3));
     var name = String(picture.name || 'picture').replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9_-]+/g, '_') || 'picture';
-    /* Undo puts the selection and cutter position back as they were BEFORE
-       the piece arrived; addModel resets cutT on the way in. */
-    var prevEdit = state.editId, prevCut = state.cutT;
-    var id = addModelFromZUpGeometry(name + '.stl', g);
-    if (id == null) { say('Picture refused - the new piece looked empty', true); return { ok: false, reason: 'addModel refused' }; }
-    if (typeof pushUndo === 'function') pushUndo({ type: 'addModels', ids: [id], editId: prevEdit, cutT: prevCut });
-    r.modelId = id;
+    var a = { picture: picture, card: cardValues(), r: r, name: name };
+    if (!showInScope(a)) { say('Picture: G-scope could not open the slab - nothing changed', true); return { ok: false, reason: 'G-scope refused' }; }
+    if (shown) previous = shown;
+    shown = a;
+    syncUndo();
     r.name = name;
-    say('Added ' + name + ' - ' + r.describe);
+    say('Picture: ' + name + ' in G-scope, not on the plate - ' + r.describe);
     return r;
+  }
+
+  /* One step back: the previous attempt into G-scope, its photo and settings
+     onto the card. There is no step after it. */
+  function undo() {
+    if (!previous) { say('Picture: no previous slab to go back to'); return { ok: false, reason: 'nothing to undo' }; }
+    if (!scope() || !showInScope(previous)) { say('Picture: G-scope could not open the previous slab - nothing changed', true); return { ok: false, reason: 'G-scope refused' }; }
+    shown = previous;
+    previous = null;
+    picture = shown.picture;
+    setCard(shown.card);
+    showName();
+    refresh();
+    syncUndo();
+    say('Picture: back to the previous slab, ' + shown.name + ' - ' + shown.r.describe);
+    return { ok: true, name: shown.name };
   }
 
   function wire() {
@@ -170,17 +328,21 @@
       if (f) pick(f);
     });
     mk.addEventListener('click', function () { make(); });
-    ['inp-relief-width', 'inp-relief-base', 'inp-relief-relief', 'inp-relief-detail',
-     'sel-relief-levels', 'chk-relief-bright'].forEach(function (k) {
+    var un = el('btn-relief-undo');
+    if (un) un.addEventListener('click', function () { undo(); });
+    CARD.forEach(function (k) {
       var e = el(k);
       if (!e) return;
       e.addEventListener('input', refresh);
       e.addEventListener('change', refresh);
     });
     refresh();
+    syncUndo();
   }
 
   window.nsoReliefMake = make;
+  window.nsoReliefUndo = undo;
+  window.nsoReliefFreeSpot = freeSpot;
   window.nsoReliefRefresh = refresh;
   window.nsoReliefPicture = function () {
     return picture ? { name: picture.name, w: picture.w, h: picture.h } : null;
