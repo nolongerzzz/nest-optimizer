@@ -50,10 +50,11 @@
    behind cannot be hit, because it is not there.
 
    Nested menus (Gen+'s Wheel and Stock) and the Finish overlay are not top
-   bar menus and are none of this file's business; app-join's per-overlay
-   accordion still handles those, and still handles the ordinary closing of
-   the bar's menus. This sits on top of it and makes the guarantee one the
-   input handlers can actually rely on. */
+   bar menus and own no input here; app-join's per-overlay accordion still
+   handles those, and still handles the ordinary closing of the bar's menus.
+   This sits on top of it and makes the guarantee one the input handlers can
+   actually rely on. The one place they do come in is leaveTool() below, the
+   double-click that puts every tool away, menus and overlays included. */
 (function () {
   'use strict';
 
@@ -184,6 +185,173 @@
     sync();
   }
 
+  /* LEAVE WHATEVER TOOL YOU ARE IN. One gesture - a double-click on the plate
+     - and every tool that is live is put away, so moving from one tool to the
+     next never starts with hunting for that tool's own way out.
+
+     Each thing is closed THROUGH ITS OWN CLOSE PATH, the one its button runs,
+     so state unwinds exactly as it would have: a flag written behind a
+     button's back leaves the button lit and dead, which is the lesson every
+     disarmOthers in the app was written from. A button is only the way in
+     when pressing it can mean nothing but "off"; where it can mean more
+     (Soften's bakes a ready piece; Pick target refuses once the Join pair is
+     gone) the cancel branch it would have run is run instead.
+
+     The roster is app-carve.js's disarmOthers() - paint, Seat here, brush,
+     Measure, Soften, Cap, Center lock - plus what that list never had to
+     cover because none of them sits in Carve's way: Carve itself, Attach,
+     Reattach, Tip on face, and a Join session. Then the menus: the Cut tool
+     (closeCutter, which also un-pins its menu), every top-bar menu, Gen+'s
+     nested Wheel and Stock, the Finish overlay and the right-click menu. The
+     Rotate / Tip / Move owners are torn down by sync(), the same teardowns
+     that run when another menu takes the input.
+
+     WHAT IT NEVER DOES: clear the selection, change a piece, or touch Undo.
+     closeCutter is the one close path that deselects (its Close button means
+     "done with this piece" as well), so the selection is taken before it and
+     put back after - the cutter goes, the piece you were on stays picked.
+
+     Returns the names of what it closed, for the checks; [] when nothing was
+     live, in which case nothing was touched. */
+  function leaveTool() {
+    if (typeof state === 'undefined' || !state) return [];
+    var left = [];
+    var $ = function (id) { return document.getElementById(id); };
+    var press = function (id) {
+      var b = $(id);
+      if (b && !b.disabled) { b.click(); return true; }
+      return false;
+    };
+    var keepIndex = state.selectedIndex;
+    var keepId = state.editId;
+
+    /* ---- click-waiting modes ---- */
+    if (state.carveArmed) {
+      press('btn-carve');
+      if (state.carveArmed) state.carveArmed = false;
+      left.push('carve');
+    }
+    if (state.maskPaint) {
+      press(state.maskPaint === 'select' ? 'btn-mask-select' : 'btn-mask-paint');
+      if (state.maskPaint) state.maskPaint = false;
+      left.push('paint');
+    }
+    if (state.seatHereArmed) {
+      if (!press('btn-seat-here') && typeof window.nsoSeatHereDisarm === 'function') window.nsoSeatHereDisarm();
+      if (state.seatHereArmed) state.seatHereArmed = false;
+      left.push('seat-here');
+    }
+    if (typeof window.nsoBrushArmed === 'function' && window.nsoBrushArmed()) {
+      press('btn-brush');
+      if (window.nsoBrushArmed() && typeof window.nsoBrushSetArmed === 'function') window.nsoBrushSetArmed(false);
+      left.push('brush');
+    }
+    if (state.measureOn) {
+      press('btn-measure');
+      if (state.measureOn) state.measureOn = false;
+      left.push('measure');
+    }
+    /* Soften and Cap: their buttons' cancel branches, not the buttons. With
+       Full wrap on, a second press of Soften on a ready piece BAKES it. */
+    if (state.softenArmed) {
+      state.softenArmed = false;
+      if (typeof clearFacePick === 'function') clearFacePick();
+      if (typeof setStatus === 'function') setStatus('Soften cancelled');
+      left.push('soften');
+    }
+    if (state.capArmed) {
+      state.capArmed = false;
+      if (typeof clearFacePick === 'function') clearFacePick();
+      if (typeof setStatus === 'function') setStatus('Cap cancelled');
+      left.push('cap');
+    }
+    /* Pick target cancels itself on a second press while A and B are both
+       picked, and refuses without cancelling once they are not - the flag
+       write is for that second case, as every disarmOthers has it. */
+    if (state.centerLockArmed) {
+      press('btn-center-lock-pick');
+      if (state.centerLockArmed) state.centerLockArmed = false;
+      left.push('center-lock');
+    }
+    if (state.attachArmed) {
+      press('btn-stock-attach');
+      if (state.attachArmed) state.attachArmed = false;
+      left.push('attach');
+    }
+    if (state.reattachArmed) {
+      press('btn-reattach');
+      if (state.reattachArmed) state.reattachArmed = false;
+      left.push('reattach');
+    }
+    if (state.tipFaceArmed) {
+      if (typeof nsoTipOrient !== 'undefined' && nsoTipOrient && nsoTipOrient.setArmed) nsoTipOrient.setArmed(false);
+      if (state.tipFaceArmed) state.tipFaceArmed = false;
+      left.push('tip-face');
+    }
+    /* Join: Cancel Join's own handler. It drops the picks and the slot armed
+       for the next click, and retires Center lock and Seat here with them. */
+    if (state.joinSession || state.joinArmed) {
+      if (typeof clearJoinSlots === 'function') clearJoinSlots();
+      else { state.joinSession = false; state.joinArmed = null; }
+      left.push('join');
+    }
+
+    /* ---- the cutter: closeCutter, which un-pins and shuts its menu ---- */
+    if (state.cutterOpen && typeof closeCutter === 'function') {
+      closeCutter(false);
+      left.push('cut');
+    }
+
+    /* ---- menus ---- */
+    var shut = function (d, name) {
+      if (d && d.open) { d.open = false; left.push(name); }
+    };
+    var gen = $('menu-gen');
+    if (gen) {
+      shut(gen.querySelector('.vp-wheel-menu'), 'wheel');
+      shut(gen.querySelector('.vp-stock-menu'), 'stock');
+    }
+    menus().forEach(function (d) { shut(d, d.id || 'menu'); });
+    shut(document.querySelector('.vp-finish-menu'), 'finish');
+    /* The teardowns land now, not a microtask later off the observer. */
+    sync();
+
+    var ctx = $('ctx-menu');
+    if (ctx && !ctx.classList.contains('hidden')) {
+      if (typeof hideCtxMenu === 'function') hideCtxMenu(); else ctx.classList.add('hidden');
+      left.push('context-menu');
+    }
+
+    /* ---- the selection is not this gesture's to change ---- */
+    if (state.selectedIndex !== keepIndex || state.editId !== keepId) {
+      if (keepIndex >= 0 && state.placed && state.placed[keepIndex] && typeof selectPlaced === 'function') {
+        selectPlaced(keepIndex);
+      }
+      if (state.editId !== keepId && keepId != null &&
+          state.models && state.models.some(function (m) { return m && m.id === keepId; })) {
+        state.editId = keepId;
+        if (typeof updateEditSize === 'function') updateEditSize();
+        if (typeof renderModelList === 'function') renderModelList();
+        if (typeof updateCutterUI === 'function') updateCutterUI();
+      }
+    }
+    return left;
+  }
+
+  /* The gesture: a double-click on the plate's canvas. Only the canvas - a
+     double-click on a button is still two clicks and in a number box it still
+     selects a word, because neither ever reaches here. */
+  function bindGesture() {
+    if (typeof state === 'undefined' || !state || !state.renderer) return;
+    var el = state.renderer.domElement;
+    if (!el || el._nsoLeaveToolBound) return;
+    el._nsoLeaveToolBound = true;
+    el.addEventListener('dblclick', function (event) {
+      event.preventDefault();
+      leaveTool();
+    });
+  }
+
   window.nsoInputMode = {
     /* The one question every input handler should be asking. */
     owns: function (id) { return resolve() === id; },
@@ -191,11 +359,15 @@
     register: register,
     sync: sync,
     refresh: refreshOwner,
+    leaveTool: leaveTool,
     /* For the checks: who is registered, and who is claiming to be live. */
     registered: function () { return order.slice(); }
   };
 
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', observe);
-  else observe();
-  setTimeout(observe, 0);
+  window.leaveTool = leaveTool;
+
+  function boot() { observe(); bindGesture(); }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+  else boot();
+  setTimeout(boot, 0);
 })();

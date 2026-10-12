@@ -31,18 +31,6 @@
     window.nsoMaskHudRefresh._hudInside7 = true;
   }
 
-  function pickIdx(event) {
-    if (!state.renderer || !state.camera || !state.modelGroup) return -1;
-    setPointerFromEvent(event);
-    state.raycaster.setFromCamera(state.pointer, state.camera);
-    const hits = state.raycaster.intersectObjects(state.modelGroup.children, true);
-    if (!hits.length) return -1;
-    let obj = hits[0].object;
-    while (obj && obj.userData.placedIndex == null && obj.parent) obj = obj.parent;
-    const idx = obj && obj.userData ? obj.userData.placedIndex : undefined;
-    return typeof idx === 'number' ? idx : -1;
-  }
-
   function lookAtHit(event) {
     if (!state.renderer || !state.camera || !state.controls || !state.modelGroup) return false;
     if (typeof setPointerFromEvent === 'function') setPointerFromEvent(event);
@@ -98,14 +86,8 @@
     setTimeout(function () { stampHud(false); alignMaskHudTag(); }, 0);
     setTimeout(function () { stampHud(false); alignMaskHudTag(); }, 200);
     if (state.renderer && state.renderer.domElement) {
-      state.renderer.domElement.addEventListener('dblclick', function (event) {
-        if (!state.cutterOpen) return;
-        const idx = pickIdx(event);
-        if (idx < 0) return;
-        event.preventDefault();
-        event.stopPropagation();
-        if (typeof closeCutter === 'function') closeCutter(false);
-      });
+      /* Double-click on the plate is app-input-mode.js's leaveTool() now -
+         the cutter is one of the things it closes, not the only one. */
       state.renderer.domElement.addEventListener('pointerdown', function (event) {
         if (event.button !== 0) return;
         if (!event.altKey) return;
