@@ -140,6 +140,13 @@ default 0.4 nozzle**, the one floor this repo keeps. There is no app-wide nozzle
 setting, so the card uses the default; `NSO_ringApplyRaw(..., { nozzle })` takes
 another (0.6 → 0.63 mm).
 
+**Precision is in float32 ULPs at the piece's magnitude.** Every apply stores
+float32 once, so a round trip of two applies is within one ULP of the largest
+coordinate: 9.5e-7 mm for `MINI_TPU_TEST` on the origin (the 1e-6 round trip
+holds), 7.6e-6 mm for the same ring at plate position (90, 90). The ring test
+holds its exactness checks to `max(1e-6, one ULP)` and runs the ring at
+(90, 90) to prove it — Extend's `lengthUlps` rule, the same lesson.
+
 **MINI_TPU_TEST.stl** (nest-library, Library → Test Fixtures) is a 48-gon — 48
 points per outline, 96 wall triangles per surface. Its outer vertices sit at r
 9.9995–10.0006 (mean 10.0000) and its bore vertices at r 9.0020–9.0030, so by

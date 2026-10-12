@@ -16,7 +16,9 @@
 //                   Outer, and the LENGTH bit for bit on every axial coordinate
 //   the mesh        tools/mesh_validate.py on the result: closed, manifold,
 //                   consistently wound, no degenerate triangles, no piercing
-//   the way back    Outer 20 -> 24 -> 20 returns the original within 1e-6 mm
+//   the way back    Outer 20 -> 24 -> 20 returns the original within 1e-6 mm,
+//                   or one float32 ULP at the piece's coordinate magnitude
+//                   where that is coarser (see EPS below)
 //
 // Prints the verb x fixture table at the end; the PR quotes it.
 
@@ -51,6 +53,28 @@ function check(name, cond, detail) {
   else { fail++; FAILS.push(name); console.log('  FAIL  ' + name + (detail ? '   ' + detail : '')); }
 }
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
+
+/* THE PRECISION A RESULT CAN HAVE, by where the piece sits. Every apply
+   stores its result as float32 once, rounding each coordinate by at most half
+   a ULP, so a round trip of two applies is within one ULP and a reading made
+   from those coordinates within about the same. A ULP depends on the
+   coordinate's magnitude, not on the piece: 9.5e-7 mm at 12 (MINI_TPU_TEST
+   centred on the origin, the ticket's 1e-6 holds), 7.6e-6 mm at 100 (the same
+   ring uploaded at plate position (90, 90), where 1e-6 is unreachable by any
+   arithmetic). So these checks are held to 1e-6 mm or one ULP at the piece's
+   largest coordinate, whichever is coarser - Extend's lengthUlps rule, the
+   same lesson (docs/EXTEND.md finding 3). Section 2 runs the ring at (90, 90)
+   to keep that honest. */
+function EPS(soup) {
+  let m = 0;
+  for (let i = 0; i < soup.length; i++) { const a = Math.abs(soup[i]); if (a > m) m = a; }
+  return Math.max(1e-6, ctx.NSO_extendUlp32(m));
+}
+const shift = (soup, d) => {
+  const o = new Float32Array(soup.length);
+  for (let i = 0; i < soup.length; i += 3) { o[i] = soup[i] + d[0]; o[i + 1] = soup[i + 1] + d[1]; o[i + 2] = soup[i + 2] + d[2]; }
+  return o;
+};
 const f3 = x => (x == null ? '-' : (+x).toFixed(3));
 const f6 = x => (x == null ? '-' : (+x).toFixed(6));
 
@@ -161,28 +185,32 @@ else {
   check('the fixture itself is clean', c.ok, c.summary);
 }
 
-/* The ring cases, on the ring as shipped and turned 90 degrees about X and Y. */
-const RINGS = TPU ? [['MINI_TPU_TEST', TPU], ['MINI_TPU_TEST turned 90 about X', turn(TPU, TURN_X)], ['MINI_TPU_TEST turned 90 about Y', turn(TPU, TURN_Y)]] : [];
+/* The ring cases, on the ring as shipped, turned 90 degrees about X and Y, and
+   moved to plate position (90, 90) - where a float32 ULP is 7.6e-6 mm. */
+const RINGS = TPU ? [['MINI_TPU_TEST', TPU], ['MINI_TPU_TEST turned 90 about X', turn(TPU, TURN_X)],
+  ['MINI_TPU_TEST turned 90 about Y', turn(TPU, TURN_Y)], ['MINI_TPU_TEST at (90, 90)', shift(TPU, [90, 90, 0])]] : [];
 const TOL = 0.01;   // published figure vs the file's vertices (section 1)
 for (const [name, soup] of RINGS) {
   console.log('\n=== 2. ' + name + ' ===');
-  const b = NSO_sectionRead(soup);
+  const b = NSO_sectionRead(soup), eps = EPS(soup);
+  console.log('     precision held to: ' + eps.toExponential(2) + ' mm');
   check(name + ' reads the same ring', b.shape === 'round' && b.hollow && b.lengthMm === 8 &&
-    near(b.outer.diameterMm, tpu0.outer.diameterMm, 1e-9) && near(b.bore.diameterMm, tpu0.bore.diameterMm, 1e-9),
+    near(b.outer.diameterMm, tpu0.outer.diameterMm, eps) && near(b.bore.diameterMm, tpu0.bore.diameterMm, eps),
     NSO_sectionReadout(b) + ' along ' + b.axis);
 
   const r1 = NSO_ringApplyRaw(soup, 'outer', 24);
   holds(name + ' Outer 20 -> 24', soup, r1, { outer: 24, bore: 22, wall: 1 }, TOL);
   if (r1.ok) {
-    check(name + ' Outer: the wall is kept (to float32)', near(r1.after.wallMm, b.wallMm, 2e-6), f6(b.wallMm) + ' -> ' + f6(r1.after.wallMm));
-    check(name + ' Outer: Ø24 exactly (the ask), within 1e-6', near(r1.after.outer.diameterMm, 24, 1e-6), f6(r1.after.outer.diameterMm));
+    check(name + ' Outer: the wall is kept (to float32)', near(r1.after.wallMm, b.wallMm, 2 * eps), f6(b.wallMm) + ' -> ' + f6(r1.after.wallMm));
+    check(name + ' Outer: Ø24 exactly (the ask), within ' + eps.toExponential(1), near(r1.after.outer.diameterMm, 24, eps), f6(r1.after.outer.diameterMm));
     // The way back: to the original's own reading, so the lines return to
     // where they were. Asking "20" lands on 20.000000, which is 6e-5 off this
     // file's 19.99994 - the round trip is to the piece, not to the label.
     const back = NSO_ringApplyRaw(r1.tris, 'outer', b.outer.diameterMm);
     let md = 0;
     if (back.ok) for (let i = 0; i < soup.length; i++) md = Math.max(md, Math.abs(back.tris[i] - soup[i]));
-    check(name + ' Outer 20 -> 24 -> 20 returns the original within 1e-6 mm', back.ok && md <= 1e-6, 'worst ' + md.toExponential(2) + ' mm');
+    check(name + ' Outer 20 -> 24 -> 20 returns the original within ' + eps.toExponential(1) + ' mm', back.ok && md <= eps,
+      'worst ' + md.toExponential(2) + ' mm');
   }
   rowOf(name, 'Outer Ø', 24, r1, 'Ø24 / Ø22, wall 1, L 8');
 
@@ -209,7 +237,7 @@ for (const [name, soup] of RINGS) {
   check(name + ' Bore -> 0 refused: closes up', !r6.ok && /^bore would close up - Ø0 mm is at or below zero$/.test(r6.reason), r6.reason);
   const r7 = NSO_ringApplyRaw(soup, 'wall', 0.5);
   check(name + ' Wall -> 0.5 is ALLOWED at the default 0.4 nozzle (floor ' + floor + ' mm)',
-    r7.ok && near(r7.after.wallMm, 0.5, 1e-6), r7.ok ? 'wall ' + f6(r7.after.wallMm) : r7.reason);
+    r7.ok && near(r7.after.wallMm, 0.5, eps), r7.ok ? 'wall ' + f6(r7.after.wallMm) : r7.reason);
   rowOf(name, 'Wall', 0.5, r7, 'allowed: 0.5 ≥ ' + floor + ' floor');
   const r7b = NSO_ringApplyRaw(soup, 'wall', 0.5, { nozzle: 0.6 });
   check(name + ' ...and refused on a 0.6 nozzle, whose floor is 0.63 mm', !r7b.ok && r7b.reason === 'wall would be 0.5 mm, under the 0.63 mm floor', r7b.reason);
@@ -256,11 +284,11 @@ console.log('\n=== 5. Stock cylinder: a rod, Diameter only ===');
   check('reads a Rod with the generator\'s diameter', b.shape === 'round' && !b.hollow && near(b.outer.diameterMm, 2 * m.radius, 1e-4),
     NSO_sectionReadout(b));
   const c1 = NSO_ringApplyRaw(soup, 'diameter', 30);
-  holds('cylinder Diameter -> 30', soup, c1, { outer: 30 }, 1e-6);
+  holds('cylinder Diameter -> 30', soup, c1, { outer: 30 }, EPS(soup));
   if (c1.ok) check('...still a rod, no bore appeared', !c1.after.hollow);
   rowOf('Stock cylinder', 'Diameter', 30, c1, 'Ø30, L ' + f3(m.height));
   const c2 = NSO_ringApplyRaw(soup, 'diameter', 36);
-  holds('cylinder Diameter -> 36', soup, c2, { outer: 36 }, 1e-6);
+  holds('cylinder Diameter -> 36', soup, c2, { outer: 36 }, EPS(soup));
   rowOf('Stock cylinder', 'Diameter', 36, c2, 'Ø36, L ' + f3(m.height));
   for (const v of ['outer', 'bore', 'wall']) {
     const x = NSO_ringApplyRaw(soup, v, 10);

@@ -145,6 +145,12 @@ withApp(async (page, logs) => {
   check('the card re-read after a Fatten bake, which does not call updateEditSize',
     SHRINK.filter(s => s.changed).every(s => /section is not constant along Z/.test(s.reading)),
     SHRINK.map(s => s.reading).join(' | '));
+  // The 1e-6 mm checks below assume what is true here: the Library's file is
+  // centred on the origin (largest coordinate 12 mm, one float32 ULP 9.5e-7),
+  // and the app keeps a raw piece's own coordinates, so 1e-6 is above what
+  // float32 can land. A piece far from the origin has a coarser grid - at plate
+  // position (90, 90) one ULP is 7.6e-6 mm - which tools/nso_ring_test.js
+  // section 2 holds to one ULP at the piece's magnitude instead.
   const v1 = await ringSet(page, 'scale-ring-outer', 19.8);
   const c1 = await card(page);
   console.log('   Outer Ø 20 -> 19.8: "' + v1 + '"\n     reads ' + line(c1));
