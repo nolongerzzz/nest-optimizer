@@ -50,7 +50,8 @@
 //
 //   round        the whole loop - vertices AND edges, measured exactly per
 //                segment - inside an annulus max(0.05 mm, 1% of r) wide about
-//                its fitted centre, r being the circle the vertices sit on. 1% admits any regular tessellation of 23 or more
+//                its fitted centre, r being the circle the vertices sit on
+//                (their mean radius). 1% admits any regular tessellation of 23 or more
 //                segments (sagitta r(1 - cos(pi/n)) <= 0.01 r for n >= 22.2);
 //                the 0.05 mm floor is under a 0.4 mm nozzle's resolution. An
 //                8-gon of r 10 is 0.76 mm off and reads as an octagon, not a
@@ -75,12 +76,15 @@ var NSO_SECTION_TOL_FRAC = 0.01;        // relative part: of r (round), of the s
 
 /* The circle a loop is round to. The CENTRE is the least-squares (Kasa) fit
    through the loop's points, centred on their mean for conditioning. The
-   RADIUS is the circle the outline is inscribed in - the largest distance of a
-   vertex from that centre - because that is the circle a tessellator put the
-   vertices on: a revolved 96-gon of radius r has every vertex at exactly r and
-   its chords dip inside, never outside. The least-squares radius would land
-   between the two and report neither the generator's r nor anything a caliper
-   reads.
+   RADIUS is the circle the outline is inscribed in - the MEAN distance of its
+   corner points (its vertices) from that centre - because that is the circle
+   a tessellator put the vertices on: a revolved 96-gon of radius r has every
+   vertex at exactly r and its chords dip inside, never outside. The
+   least-squares radius would land between the two and report neither the
+   generator's r nor anything a caliper reads. The mean rather than the
+   largest, because a real export is not a perfect polygon: MINI_TPU_TEST's
+   outer vertices sit at r 9.9995 - 10.0006, and the largest alone reads
+   Ø20.0012 where the mean reads Ø20.0000.
 
    The DEVIATION is the width of the thinnest annulus about that centre that
    holds the whole closed polyline, measured exactly per segment: the distance
@@ -101,7 +105,17 @@ function NSO_sectionFitCircle(p2) {
   if (!(Math.abs(det) > 0)) return null;
   var bu = 0.5 * (Suuu + Suvv), bv = 0.5 * (Svvv + Svuu);
   var c = [(bu * Svv - bv * Suv) / det + mx, (Suu * bv - Suv * bu) / det + my];
-  var rMax = 0, rMin = Infinity;
+  var rMax = 0, rMin = Infinity, rad = new Array(n);
+  for (i = 0; i < n; i++) rad[i] = Math.hypot(p2[i][0] - c[0], p2[i][1] - c[1]);
+  // The corners: points at least as far out as both neighbours. Where the
+  // section crosses a wall quad's diagonal it lands mid-chord, a sagitta
+  // inside the circle; where it crosses a vertical edge it lands on a vertex.
+  // The corners are the vertices, and their MEAN radius is the circle they
+  // were put on - the largest alone would let one noisy vertex set the size.
+  var rSum = 0, rCnt = 0;
+  for (i = 0; i < n; i++) {
+    if (rad[i] >= rad[(i + n - 1) % n] && rad[i] >= rad[(i + 1) % n]) { rSum += rad[i]; rCnt++; }
+  }
   for (i = 0; i < n; i++) {
     var a = p2[i], b = p2[(i + 1) % n];
     var ax = a[0] - c[0], ay = a[1] - c[1], ex = b[0] - a[0], ey = b[1] - a[1];
@@ -112,8 +126,9 @@ function NSO_sectionFitCircle(p2) {
     if (d0 < rMin) rMin = d0;
     if (dm < rMin) rMin = dm;
   }
-  return { center: c, r: rMax, rMin: rMin, devMm: rMax - rMin,
-           tolMm: Math.max(NSO_SECTION_TOL_FLOOR_MM, NSO_SECTION_TOL_FRAC * rMax) };
+  var r = rCnt ? rSum / rCnt : rMax;
+  return { center: c, r: r, rMax: rMax, rMin: rMin, corners: rCnt, devMm: rMax - rMin,
+           tolMm: Math.max(NSO_SECTION_TOL_FLOOR_MM, NSO_SECTION_TOL_FRAC * r) };
 }
 
 /* The loop against its own axis-aligned bounding rectangle. */
