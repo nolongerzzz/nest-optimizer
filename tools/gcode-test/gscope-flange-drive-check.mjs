@@ -2,30 +2,34 @@
 /**
  * nest-optimizer / tools/gcode-test / gscope-flange-drive-check.mjs
  *
- * G-scope's Flange tab, driven through the real app in headless Chromium.
+ * G-scope's Flange row, driven through the real app in headless Chromium.
  * READ docs/GSCOPE-FLANGE.md for the rule; tools/nso_flange_test.js holds
- * the rule to the clamp bar's real geometry. This holds the TAB to it:
+ * the rule to the clamp bar's real geometry. This holds the ROW to it. The
+ * row is one of the Parts list's show / hide toggles, the same model as a
+ * slice's All features list: nothing in that list isolates, and the list
+ * never leaves the screen.
  *
  *   1  THE REAL CLAMP BAR, through G-scope's own Import (library/
- *      v9_mirror_factory.stl): the tab says a flange is there, and what the
- *      page lifted out is the same solid nso_flange.js lifts out in Node -
- *      triangle for triangle.
- *   2  ONE CLICK ISOLATES IT: a real click on the tab puts the flange alone
- *      on screen, framed, in the tab's colour, through the ordinary
- *      selection seam - and Back returns the whole part.
- *   3  THE SAME WAY OUT AS ANY SELECTION: Export as STL writes exactly the
- *      flange (closed, manifold, nothing of the neck or ribs), and Crop takes
- *      a Z band out of it as a new piece.
- *   4  THE PLATE ROUTE: the clamp bar on the plate, the rail button, the tab;
- *      Back restores the whole part HERE too, not only through file Import -
- *      the same click sequence that used to be a dead end (only a full
- *      "Read the plate" reopen got you back) is pinned so it cannot silently
- *      regress; Export to plate lands the flange as its own piece and leaves
- *      the clamp bar exactly as it was.
+ *      v9_mirror_factory.stl): the row says a flange is there and opens
+ *      switched on, and what the page lifted out is the same solid
+ *      nso_flange.js lifts out in Node - triangle for triangle.
+ *   2  ONE CLICK SHOWS IT ALONE: a real click on the part's own row switches
+ *      the part off and leaves the flange on screen alone, in the row's
+ *      colour - the list still up, nothing isolated, no Back to press. The
+ *      part's row back on is the whole part again, the flange over it.
+ *   3  THE SAME WAY OUT AS ANY SELECTION: Select shown takes exactly the
+ *      flange; Export as STL writes exactly it (closed, manifold, nothing of
+ *      the neck or ribs), and Crop takes a Z band out of it as a new piece.
+ *   4  THE PLATE ROUTE: the clamp bar on the plate, the rail button, the row.
+ *      The same toggles there - which used to be a dead end once isolated
+ *      (only a full "Read the plate" reopen got you back), pinned so it cannot
+ *      come back: the rows alone return the whole plate. Export to plate
+ *      lands the flange as its own piece and leaves the clamp bar exactly as
+ *      it was.
  *   5  NO FLANGE, SAID SO: a real part with none (library/hinge_knuckle_box
- *      .stl) reads "none detected", and a click on the tab selects nothing,
- *      isolates nothing and says why. A slice says it cannot look.
- *   6  SCREENSHOTS of the tab found, the flange isolated, and none detected.
+ *      .stl) reads "none detected", stays off, and a click on it selects
+ *      nothing, draws nothing new and says why. A slice has no Flange row.
+ *   6  SCREENSHOTS of the row found, the flange alone, on the part, and none.
  *
  * Usage: node tools/gcode-test/gscope-flange-drive-check.mjs
  */
@@ -106,7 +110,7 @@ async function shot(page, file, label) {
   return px;
 }
 
-/** Wait for the tab to finish looking, and read it. */
+/** Wait for the row to finish looking, and read it. */
 async function tab(page) {
   await page.waitForFunction(() => {
     const f = window.NSO_MICROSCOPE.flange();
@@ -115,16 +119,44 @@ async function tab(page) {
   await frames(page);
   return page.evaluate(() => {
     const M = window.NSO_MICROSCOPE;
-    const row = document.querySelector('#ms-detected .ms-legend-item');
+    const row = document.querySelector('#ms-detected [data-detected="flange"]');
     return {
       state: M.flange(),
       row: row ? { text: row.textContent, status: row.dataset.status, dim: row.classList.contains('dim'),
-                   active: row.classList.contains('active'), title: row.title,
+                   checked: row.getAttribute('aria-checked'), title: row.title,
                    visible: !!(row.offsetWidth && row.offsetHeight) } : null,
       legendRows: document.querySelectorAll('#ms-legend .ms-legend-item').length,
+      parts: Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map((e) => e.dataset.group),
     };
   });
 }
+
+/** What G-scope draws and holds right now (see gscope-features-drive-check.mjs, view()). */
+async function view(page) {
+  await frames(page);
+  return page.evaluate(() => {
+    const M = window.NSO_MICROSCOPE, v = M.getView();
+    const drawn = [];
+    v.overviewGroup.children.forEach((c) => {
+      if (c.visible) drawn.push([c.userData.feature, c.material.color.getHex()]);
+    });
+    drawn.sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    const float = document.getElementById('ms-legend-float');
+    return {
+      drawn, detail: v.detailGroup.visible, overview: v.overviewGroup.visible,
+      badge: document.getElementById('ms-mode-badge').textContent,
+      backShown: getComputedStyle(document.getElementById('ms-detail-controls')).display !== 'none',
+      listUp: !!(float.offsetWidth && float.offsetHeight),
+      rows: document.querySelectorAll('#ms-legend-float .ms-legend-item').length,
+      sel: M.selection().map((o) => o.name), by: M.selectionSource(),
+      exportShown: getComputedStyle(document.getElementById('ms-export-row')).display !== 'none',
+      info: document.getElementById('ms-info').textContent,
+      docSource: M.getDoc() && M.getDoc().source, panelOpen: M.isOpen(),
+    };
+  });
+}
+
+const partRow = (page, name) => page.click(`#ms-legend [data-group="${name}"]`);
 
 async function main() {
   await mkdir(SHOTS, { recursive: true });
@@ -151,12 +183,13 @@ async function main() {
     return d && /v9_mirror_factory/.test(d.name);
   }, null, { timeout: 30000 });
   const t1 = await tab(page);
-  check('the tab found a flange', t1.state.status, 'found');
+  check('the row found a flange', t1.state.status, 'found');
   check('one flange, lifted out of the one part', t1.state.objects.map((o) => [o.name, o.host]),
     [['v9_mirror_factory - Flange', 'v9_mirror_factory']]);
-  check('the tab reads it, lit and not dimmed', [t1.row.text, t1.row.dim, t1.row.visible],
-    [`Flange (2.94 mm, ${ref[0].positions.length / 9} tri)`, false, true]);
-  check('the file\'s own tabs are untouched: one part, one row', t1.legendRows, 1);
+  check('the row reads it, lit and switched on', [t1.row.text, t1.row.dim, t1.row.checked, t1.row.visible],
+    [`Flange (2.94 mm, ${ref[0].positions.length / 9} tri)`, false, 'true', true]);
+  check('the file\'s own rows are untouched: one part, one row', t1.legendRows, 1);
+  check('the list is titled Parts', await page.textContent('#ms-legend-title'), 'Parts');
   console.log('       detected in ' + t1.state.ms + ' ms (page)');
   const pageObj = t1.state.objects[0];
   const rb = bounds(ref[0].positions);
@@ -172,50 +205,35 @@ async function main() {
   check('2.94 mm thick, 14 mm out, 186 mm of root',
     [pageObj.flange.thickness.toFixed(2), Math.floor(pageObj.flange.reach), Math.floor(pageObj.flange.rootLength)],
     ['2.94', 14, 186]);
-  await shot(page, '1-flange-tab-found.png', 'the clamp bar with its Flange tab');
+  const v0 = await view(page);
+  check('it opens drawn over the part in the row\'s colour', v0.drawn.map((d) => d[0]),
+    ['v9_mirror_factory', 'v9_mirror_factory - Flange']);
+  check('...the flange in 0xff8a1f', v0.drawn[1][1], 0xff8a1f);
+  await shot(page, '1-flange-row-found.png', 'the clamp bar with its Flange row');
 
   // =======================================================================
-  console.log('\n--- 2. one click on the tab isolates it ---');
+  console.log('\n--- 2. one click on the part\'s row: the flange alone ---');
   // =======================================================================
-  await page.click('#ms-detected .ms-legend-item');
-  await frames(page);
-  const iso = await page.evaluate(() => {
-    const M = window.NSO_MICROSCOPE, v = M.getView();
-    return {
-      sel: M.selection().map((o) => o.name), by: M.selectionSource(),
-      detail: v.detailGroup.visible, overview: v.overviewGroup.visible,
-      drawn: v.detailGroup.children.map((c) => [c.type, c.material.color.getHex()]),
-      badge: document.getElementById('ms-mode-badge').textContent,
-      active: document.querySelector('#ms-detected .ms-legend-item').classList.contains('active'),
-      exportShown: getComputedStyle(document.getElementById('ms-export-row')).display !== 'none',
-      info: document.getElementById('ms-info').textContent,
-      // Framed on the flange: its 187 mm length fills the frame, the
-      // camera looks at its middle.
-      target: [v.controls.target.x, v.controls.target.y, v.controls.target.z],
-    };
-  });
-  check('the selection is the flange, and says where it came from', [iso.sel, iso.by],
-    [['v9_mirror_factory - Flange'], 'flange']);
-  check('Isolate shows it alone', [iso.detail, iso.overview], [true, false]);
-  check('as one solid, in the tab\'s colour', iso.drawn, [['Mesh', 0xff8a1f]]);
-  check('the badge counts it', iso.badge, 'Detail: 1 object(s)');
-  check('the tab is lit while it is the selection', iso.active, true);
-  check('Export is offered for it, as for any selection', iso.exportShown, true);
-  check('the info line names it', /Flange \(detected\).*v9_mirror_factory - Flange/.test(iso.info), true);
-  // The camera target is in view space: X is the file's X minus the doc
-  // centre, three Y is the file's Z. The flange's middle is at Z 9.
-  check('framed on the flange (target at its middle height, Z 9.0)',
-    Math.round(iso.target[1] * 10) / 10, 9);
-  const isoPx = await shot(page, '2-flange-isolated.png', 'the flange isolated');
+  await partRow(page, 'v9_mirror_factory');
+  const alone = await view(page);
+  check('the part switched off: the flange alone, in the row\'s colour', alone.drawn,
+    [['v9_mirror_factory - Flange', 0xff8a1f]]);
+  check('...nothing isolated, nothing selected, no Back to press', [alone.detail, alone.overview, alone.badge,
+    alone.backShown, alone.sel], [false, true, 'Whole part', false, []]);
+  check('...and the list stays up, both rows in it', [alone.listUp, alone.rows], [true, 6]);
+  const isoPx = await shot(page, '2-flange-alone.png', 'the flange alone');
   check('and it is the flange\'s colour on screen', isoPx.orange > 50, true);
-  await page.click('#ms-btn-back');
-  await frames(page);
-  const backed = await page.evaluate(() => {
-    const v = window.NSO_MICROSCOPE.getView();
-    return [v.overviewGroup.visible, v.detailGroup.visible, v.highlightGroup.children.length];
-  });
-  check('Back: the whole part again, the flange highlighted on it', backed, [true, false, 1]);
+  await partRow(page, 'v9_mirror_factory');
+  const both = await view(page);
+  check('the part\'s row back on: the whole part again, the flange over it',
+    [both.drawn.map((d) => d[0]), both.detail, both.badge], [['v9_mirror_factory', 'v9_mirror_factory - Flange'], false, 'Whole part']);
   await shot(page, '3-flange-highlighted-on-part.png', 'the flange highlighted on the whole part');
+  await partRow(page, 'v9_mirror_factory');
+  await page.click('#ms-btn-select-visible');
+  const taken = await view(page);
+  check('Select shown takes exactly what is checked: the flange', [taken.sel, taken.by], [['v9_mirror_factory - Flange'], 'visible']);
+  check('Export is offered for it, as for any selection', taken.exportShown, true);
+  check('the info line names it', /everything shown.*1 object\(s\).*v9_mirror_factory - Flange/.test(taken.info), true);
 
   // =======================================================================
   console.log('\n--- 3. the same way out as any selection ---');
@@ -288,17 +306,22 @@ async function main() {
   check('the cropped flange from section 3 is a plain plate now: no flange of its own',
     t4.state.objects.length, 1);
   const placedBefore = await page.evaluate(() => state.placed.length);
-  await page.click('#ms-detected .ms-legend-item');
-  check('a click on the tab selects it on the plate too',
+  check('the row is on there too', t4.row.checked, 'true');
+  // Every part's row off: the plate's flange alone. Real clicks.
+  for (const g of t4.parts) await partRow(page, g);
+  const pAlone = await view(page);
+  check('on the plate, every part off: the clamp bar\'s flange alone, the list still up',
+    [pAlone.drawn.map((d) => d[0]), pAlone.detail, pAlone.listUp], [[plateFlange.name], false, true]);
+  await page.click('#ms-btn-select-visible');
+  check('Select shown takes it on the plate too',
     await page.evaluate(() => window.NSO_MICROSCOPE.selection().map((o) => o.name)), [plateFlange.name]);
 
-  // The dead end this used to be, on the PLATE route specifically (section 2
-  // above already covers the file-import route): isolating the flange left no
-  // way back to the whole part except closing G-scope and reopening it - the
-  // same "read the plate again" reload a user reaches for when nothing else
-  // works. Back must restore the whole part here too, not just on a file.
-  await page.click('#ms-btn-back');
-  await frames(page);
+  // The dead end this used to be, on the PLATE route specifically: isolating
+  // the flange left no way back to the whole part except closing G-scope and
+  // reopening it - the same "read the plate again" reload a user reaches for
+  // when nothing else works. Now nothing isolates, and the rows themselves
+  // are the way back - here as on a file.
+  for (const g of t4.parts) await partRow(page, g);
   const plateBacked = await page.evaluate((hostId) => {
     const v = window.NSO_MICROSCOPE.getView(), d = window.NSO_MICROSCOPE.getDoc();
     const host = d.objects.find((o) => o.sourceId === hostId);
@@ -307,16 +330,19 @@ async function main() {
       badge: document.getElementById('ms-mode-badge').textContent,
       docSource: d && d.source, panelOpen: window.NSO_MICROSCOPE.isOpen(),
       hostTriangles: host ? host.triangles : null,
+      hostDrawn: !!(host && v.overviewMeshes[host.name] && v.overviewMeshes[host.name].visible),
     };
   }, hostBefore.id);
-  check('Back on the PLATE route: the whole part again, not a reload', plateBacked,
+  check('the part rows back on, on the PLATE route: the whole plate again, not a reload', plateBacked,
     { overview: true, detail: false, badge: 'Whole part', docSource: 'plate', panelOpen: true,
-      hostTriangles: hostBefore.tris });
-  await shot(page, '3b-plate-flange-back.png', 'the plate route, backed out of the flange to the whole part');
+      hostTriangles: hostBefore.tris, hostDrawn: true });
+  check('...and Select shown, still the choice, follows: the parts, not the flange twice',
+    (await view(page)).sel.sort(), t4.parts.slice().sort());
+  await shot(page, '3b-plate-flange-back.png', 'the plate route, the parts back on, the flange over the clamp bar');
 
-  // Re-isolate for the export that follows.
-  await page.click('#ms-detected .ms-legend-item');
-  check('re-isolating after Back finds the same flange again',
+  // The flange alone again for the export that follows.
+  for (const g of t4.parts) await partRow(page, g);
+  check('the parts off again: Select shown is the same flange again',
     await page.evaluate(() => window.NSO_MICROSCOPE.selection().map((o) => o.name)), [plateFlange.name]);
   await page.click('#ms-btn-export-plate');
   const after4 = await page.evaluate((hostId) => {
@@ -341,20 +367,17 @@ async function main() {
     return d && /hinge_knuckle_box/.test(d.name);
   }, null, { timeout: 30000 });
   const t5 = await tab(page);
-  check('a part with no flange: the tab says none detected', [t5.state.status, t5.row.text, t5.row.dim],
-    ['none', 'Flange - none detected', true]);
+  check('a part with no flange: the row says none detected, and is off', [t5.state.status, t5.row.text, t5.row.dim, t5.row.checked],
+    ['none', 'Flange - none detected', true, 'false']);
   check('and says why, in words, when asked (the row\'s tooltip)',
     /^No flange: the nearest flat plate \(8 mm\) does not come off anything thicker$/.test(t5.row.title), true);
   console.log('       ' + t5.row.title);
-  await page.click('#ms-detected .ms-legend-item');
-  await frames(page);
-  const none = await page.evaluate(() => {
-    const M = window.NSO_MICROSCOPE, v = M.getView();
-    return { sel: M.selection().length, detail: v.detailGroup.visible,
-             info: document.getElementById('ms-info').textContent,
-             exportShown: getComputedStyle(document.getElementById('ms-export-row')).display !== 'none' };
-  });
-  check('a click selects nothing and isolates nothing', [none.sel, none.detail, none.exportShown], [0, false, false]);
+  const n0 = await view(page);
+  await page.click('#ms-detected [data-detected="flange"]');
+  const none = await view(page);
+  check('a click selects nothing, draws nothing new, isolates nothing',
+    [none.sel.length, none.drawn, none.detail, none.exportShown], [0, n0.drawn, false, false]);
+  check('...and the row stays off', (await tab(page)).row.checked, 'false');
   check('and the info line says no flange was found', /^No flange detected\./.test(none.info), true);
   await shot(page, '4-no-flange.png', 'a part with no flange');
 
@@ -364,16 +387,11 @@ async function main() {
     return d && d.kind === 'toolpath';
   }, null, { timeout: 60000 });
   const t6 = await tab(page);
-  check('a slice: the tab says it cannot look, and why', [t6.state.status, t6.row.text, /closed surface/.test(t6.row.title)],
-    ['unavailable', 'Flange - not on a slice', true]);
-  check('the slice\'s own feature tabs are all still there', t6.legendRows, 10);
-  await page.click('#ms-detected .ms-legend-item');
-  const sliceClick = await page.evaluate(() => ({
-    sel: window.NSO_MICROSCOPE.selection().length,
-    info: document.getElementById('ms-info').textContent,
-  }));
-  check('a click on it there selects nothing and says it is not available (not "none")',
-    [sliceClick.sel, /^Flange: not available here\./.test(sliceClick.info)], [0, true]);
+  check('a slice: no Flange row - its one list is its features', [t6.row, await page.textContent('#ms-legend-title')],
+    [null, 'All features']);
+  check('...asked, the rule says it cannot look, and why', [t6.state.status, /closed surface/.test(t6.state.reason)],
+    ['unavailable', true]);
+  check('the slice\'s own feature rows are all still there', t6.legendRows, 10);
 
   check('no page errors', errors, []);
   await browser.close();

@@ -246,7 +246,7 @@ in-house slicer's output for it.
 | | Normal | Slice view |
 | --- | --- | --- |
 | **what is shown** | the document as opened: the plate, an STL / 3MF, or an imported `.gcode.3mf` | the in-house slice of every piece the mesh holds (`NSO_GSCOPE_SLICE.slice()`), opened as a toolpath |
-| **legend** | as ever: Parts (or Features), the Flange row under it, no tab strip | the **Detected features** tab (`#ms-detected`): walls, infill, top / bottom, and every overhang call, each a click to isolate. An **All features** tab keeps the file's own list one click away |
+| **list** | one list, **Parts**: the pieces, then the five detector rows (Flange, Handle, Bracket, Lid, Hinge) under their rule. Every row a show / hide toggle | one list, **All features**: the slice's own feature rows, each a show / hide toggle. No tab strip, and no Overhang / Conflict rows - the overhang call is the Supports tool's to mark and the Slice report line's to state |
 | **click on a mesh** | the plain re-frame it always was (`NSO_MICROSCOPE.normalView()`): whole part, or turned to the selection when isolated | slices now, with whatever the Slice settings hold |
 | **click on a slice** | back to the mesh through `backToMesh()`, which re-opens it: nothing selected, isolated, hidden or cleared, framed on the whole part | nothing (already there) |
 | **on an imported slice** | the re-frame | disabled: there is no mesh to slice |
@@ -265,15 +265,30 @@ in-house slicer's output for it.
 - **The slice settings** (nozzle, layer, walls, infill, pattern, support
   angle) sit behind a `Slice settings` disclosure, collapsed by default. Their
   values persist across every Normal / Slice view round trip.
-- API: `NSO_MICROSCOPE.normalView()`, `setLegendTab(null | 'legend' |
-  'detected')`, `legendTab()`, `addDetectedSource(fn)`, `isolateGroups(names)`,
-  `isolateMoves(indices)`; `NSO_GSCOPE_SLICE.sliceView()`, `normalView()`,
-  `viewMode()` (`'normal' | 'slice'`). `setCameraMode` / `cameraMode` are gone.
+- **One list per view, every row a toggle.** Neither list isolates and
+  neither leaves the screen: a row switched off is not drawn, every row off
+  is an empty view, and any combination can be built back up from there.
+  **Select shown** takes what the list has on; a box catches only what is
+  drawn; and a mesh selection follows the rows (`rescopeSelection()`), so
+  Export, Crop and Isolate never act on a part or feature switched off after
+  it was selected. A detector row's feature over its own part (both on) is a
+  highlight on that part - Select shown and a box take the part once, not the
+  feature again on top of it; with the part off it is taken on its own.
+- **G-scope opens in orbit.** A plain click on a piece does nothing until
+  **Click to select region** is armed; the box controls (Isolate all boxes,
+  Clear all boxes) are under it. Every document opens this way, a slice too.
+- API: `NSO_MICROSCOPE.normalView()`, `mode()`, `toggleDetected(rule)`,
+  `detectedOn()`; `NSO_GSCOPE_SLICE.sliceView()`, `normalView()`,
+  `viewMode()` (`'normal' | 'slice'`). `setCameraMode` / `cameraMode` are
+  gone, and so are `setLegendTab` / `legendTab`, `addDetectedSource`,
+  `refreshDetected`, `isolateGroups`, `isolateMoves`, `isolateFlange` and
+  `isolateFeature`: nothing isolates from a list any more.
 
 Proof: `gcode:gscope-slice-view` (`tools/gcode-test/gscope-slice-view-drive-check.mjs`)
 drives Normal -> Slice view -> Normal twice with real clicks: the slice is
-real (the same G-code `NSO_Slicer` gives directly), the Detected tab is
-populated and its rows isolate, the whole-part mesh state after each round
+real (the same G-code `NSO_Slicer` gives directly), it shows one list whose
+rows each toggle (all off is empty, back on one at a time, a partial set is
+exactly what Select shown takes), the whole-part mesh state after each round
 trip equals the one before slicing (document, selection, isolation, filters,
 camera, legend), the settings persist and the second slice is the first,
 G-code for G-code. `gcode:gscope-normalcam` drives Normal's zoom, orbit, pan
@@ -591,7 +606,7 @@ The legend's **only** button is the one exception, and deliberately so: it is
 this method's one-click isolate, so unlike a plain row click it also becomes
 the selection (`soloGroup()` calls `selectVisible()` on itself) - Export and
 Crop are offered right after, with no separate Select shown press needed, the
-same as a picked line, a capture box or the Flange tab. It used to be view
+same as a picked line or a capture box. It used to be view
 only, which meant "only" was the one isolation method that did NOT put you in
 Export's reach on its own click; **Select shown** still exists and still
 reads the identical "what is shown", for composing several groups by hand
@@ -617,9 +632,12 @@ with the plain row toggle first.
   selection, and the capture box now catches only what is drawn - so "only
   Inner wall" plus a box, or plus the slider, gives exactly that feature in
   that region.
-- **Detected, not named:** below the file's own tabs, a **Flange** tab
-  isolates a flange found in the geometry, which no file names (plate, STL
-  or 3MF, not a slice). See [GSCOPE-FLANGE.md](GSCOPE-FLANGE.md).
+- **Detected, not named:** below a mesh's parts, a **Flange** row (and
+  Handle, Bracket, Lid, Hinge) shows or hides a feature found in the
+  geometry, which no file names (plate, STL or 3MF, not a slice). See
+  [GSCOPE-FLANGE.md](GSCOPE-FLANGE.md) and [GSCOPE-FEATURES.md](GSCOPE-FEATURES.md).
+  `gcode:gscope-one-list` drives the whole Parts list on the part this was
+  found on (tape_on-edge-single).
 
 ### 5. The layer-range slider
 
@@ -1050,6 +1068,14 @@ build object. For an STL that is the whole part, which is the same "one whole,
 unsegmented part" answer the rendering gives. For a 10-object 3MF it is a real
 choice of which parts to take. Either way what comes out is closed if what went
 in was.
+
+A box takes an object when it holds one of the object's triangle centroids,
+or, failing that, when one of its triangles crosses the box (a separating-axis
+test in the box's own turned frame). The second clause is for a few long
+triangles: a flange lifted out of its part (2,148 triangles over 187 mm on
+tape_on-edge-single) has no centroid anywhere near a 5 mm box dropped on its
+own surface, so with its part switched off the box used to catch nothing.
+It only runs when the centroids miss, so a dense part costs what it did.
 
 ---
 

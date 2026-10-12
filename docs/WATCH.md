@@ -238,8 +238,10 @@ with everything else:
     G-scope Normal: legend "plain" only (every other row off)
     G-scope Normal: 3D view click (select mode) - hit "mushroom" at (1.2, -0.4, 7.00)
     G-scope Normal: 3D view click (orbit mode) - nothing hit
+    G-scope Normal: Parts row "Flange (2.94 mm, 2148 tri)" off   a detector row, off or on
+    G-scope Normal: Parts row "Lid - none detected" stays off (none)
     G-scope Normal: view Normal -> Slice
-    G-scope Slice: Detected features row "Walls ..." (walls)
+    G-scope Slice: legend "Outer wall" off
     G-scope Slice: view Slice -> Normal
     G-scope Normal: view Normal (already Normal - re-frame)
     G-scope Normal: click ms-btn-clear                     any other button

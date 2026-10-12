@@ -318,10 +318,13 @@ real clicks) proves:
 - its moves are, move for move, the direct call's.
 
 The panel reports layers, walls per layer, each support-need region (z,
-footprint, and what it stands on), and any **CONFLICT** by layer. The
-floating legend opens on its **Detected features** tab: walls (loops and
-width), infill (density and pattern), top / bottom, and one row per overhang
-call, each a click to isolate its moves. **Normal** goes back through
+footprint, and what it stands on), and any **CONFLICT** by layer - that report
+line, and the status line, are where an overhang call and a conflict are
+stated. The floating list is the slice's one list, **All features**: one row
+per feature the slice printed, each a show / hide toggle, no tab strip. (It
+used to open on a Detected features tab that mixed feature families with
+per-object Overhang / Conflict rows; those belong to the Supports tool, which
+marks overhangs on the mesh itself.) **Normal** goes back through
 `backToMesh()`, which re-opens the source: the whole part as it was, nothing
 selected or isolated.
 
@@ -363,4 +366,4 @@ slice.
 | `slicer:test` | 52 checks: sections equal manifold's own `Manifold.slice` on 6 repo meshes (worst rel 1.3e-9); orientation; open and inside-out meshes; wall offsets and counts; grid pitch and angles; density scaling; shells; overhang on cones either side of 30° / 45°, a mushroom (area exact to the step), model vs plate; G-code round trip; conflicts; constants | ~2 s |
 | `slicer:bambu` | §5 above: 51 checks, 7 findings | ~70 s |
 | `gcode:gscope-slice` | 45 checks, real clicks, screenshots in `tools/gscope-slice-out/` | ~10 s |
-| `gcode:gscope-slice-view` | 41 checks: Normal -> Slice view -> Normal twice, the Detected tab, settings persisted, the whole-part state restored exactly | ~15 s |
+| `gcode:gscope-slice-view` | 50 checks: Normal -> Slice view -> Normal twice, the one All features list and its toggles, settings persisted, the whole-part state restored exactly | ~15 s |

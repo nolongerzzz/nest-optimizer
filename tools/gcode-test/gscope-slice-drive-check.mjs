@@ -166,9 +166,11 @@ async function main() {
   // =======================================================================
   console.log('\n--- 4. G-scope\'s own tools, unchanged ---');
   // =======================================================================
-  check('a slice opens on the Detected features tab', await page.evaluate(() => window.NSO_MICROSCOPE.legendTab()), 'detected');
-  await page.click('#ms-tab-legend');                  // the file's own list, one click away
-  check('... and the All features tab shows the legend', [await page.isVisible('#ms-legend'), await page.isVisible('#ms-detected')], [true, false]);
+  check('a slice opens on its one list, All features: no tab strip, no detector rows',
+    [await page.textContent('#ms-legend-title'), await page.isVisible('#ms-legend'),
+     await page.evaluate(() => !!document.querySelector('#ms-tab-legend, #ms-tab-detected, .ms-legend-tabs')),
+     await page.evaluate(() => document.querySelectorAll('#ms-detected .ms-legend-item').length)],
+    ['All features', true, false, 0]);
   const only = await page.evaluate(() => {
     const items = Array.from(document.querySelectorAll('#ms-legend .ms-legend-item, #ms-legend > *'));
     return items.map((el) => el.textContent.trim()).filter(Boolean).length;

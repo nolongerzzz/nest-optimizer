@@ -2924,6 +2924,8 @@ select:focus, input:focus {
   max-width: 420px;
   line-height: 1.4;
 }
+/* Orbit, the mode every document opens in, has no hint to give. */
+#ms-hint-badge:empty { display: none; }
 
 /* The feature legend floats over the viewport's top-left corner instead of
    sitting in the sidebar.
@@ -2988,38 +2990,16 @@ button#ms-legend-toggle:hover { color: var(--text, #fff); border-color: var(--ac
 #ms-legend-float.collapsed { width: auto; }
 #ms-legend-float.collapsed #ms-legend,
 #ms-legend-float.collapsed #ms-detected { display: none; }
-/* The Flange tab: under the file's own tabs, set off by a rule, because it
-   is found in the geometry rather than read from the file. */
+/* The detector rows (Flange, Handle, Bracket, Lid, Hinge): under the parts,
+   set off by a rule, because they are found in the geometry rather than read
+   from the file. Show / hide toggles like the rows above them; one switched
+   off reads dim, as a hidden part does. */
 #ms-detected:not(:empty) {
   border-top: 1px solid var(--border);
   margin-top: 4px;
   padding-top: 5px;
 }
 #ms-detected .ms-legend-item { margin-bottom: 0; }
-#ms-detected .ms-legend-item.active { background: rgba(255, 138, 31, 0.16); }
-/* Slice view's tab strip (app-microscope.js, setLegendTab). Hidden until a
-   slice is shown; there, 'Detected features' is the tab that is up, and the
-   file's own list is one click away. Normal never shows it. */
-.ms-legend-tabs { display: none; gap: 4px; margin: 0 0 6px; }
-#ms-legend-float.tabbed .ms-legend-tabs { display: flex; }
-#ms-legend-float.collapsed .ms-legend-tabs { display: none; }
-.ms-legend-tabs button {
-  flex: 1 1 0;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  color: var(--muted);
-  border-radius: 4px;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 10.5px;
-  padding: 2px 4px;
-}
-.ms-legend-tabs button.active { color: var(--text); border-color: var(--accent); }
-#ms-legend-float.tabbed:not(.tab-detected) #ms-detected,
-#ms-legend-float.tab-detected #ms-legend { display: none; }
-#ms-legend-float.tab-detected #ms-detected:not(:empty) { border-top: 0; margin-top: 0; padding-top: 0; }
-#ms-legend-float.tab-detected #ms-detected .ms-legend-item { margin-bottom: 2px; }
-
 #ms-legend-float.collapsed .ms-section-title,
 #ms-legend-float.collapsed button#ms-legend-toggle { margin-bottom: 0; }
 #ms-legend-float.collapsed button#ms-legend-toggle { margin-top: 0; }

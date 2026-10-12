@@ -12,13 +12,18 @@
  *      collapsed by default.
  *   2  SLICE VIEW slices at once with the settings as they stand, shows the
  *      real slice (layers, walls, infill - the same moves NSO_Slicer +
- *      parseGcode give directly) and turns the legend to its Detected
- *      features tab, populated with walls / infill / top-bottom and every
- *      overhang call, each a real click to isolate.
+ *      parseGcode give directly) and ONE list, All features: one row per
+ *      feature the slice printed, no tab strip anywhere in the page, and no
+ *      Overhang / Conflict / Flange rows - the overhang call is the Supports
+ *      tool's to mark and the Slice report's to state, and it still does.
+ *      Every row is a show / hide toggle: all off is an empty view, back on one
+ *      at a time each draws exactly its own, and a partial set is exactly
+ *      what Select shown takes.
  *   3  NORMAL AGAIN goes back to the mesh through backToMesh(), even from an
- *      isolated overhang: the whole-part state is exactly the one before
- *      slicing - same document, nothing selected, nothing isolated, nothing
- *      hidden or cleared, the same camera, the legend without tabs.
+ *      isolated box with features switched off: the whole-part state is
+ *      exactly the one before slicing - same document, nothing selected,
+ *      nothing isolated, nothing hidden or cleared, the same camera, the same
+ *      one Parts list, in orbit.
  *   4  THE ROUND TRIP AGAIN: the settings kept their values, and the second
  *      slice is the first one, G-code for G-code; Normal is clean again.
  *   5  AN IMPORTED SLICE has nothing to slice: Slice view is disabled there.
@@ -79,11 +84,15 @@ function snapshot(page) {
       detailShown: v.detailGroup.visible, overviewShown: v.overviewGroup.visible,
       backOffered: vis('ms-detail-controls'), badge: document.getElementById('ms-mode-badge').textContent,
       hidden: M.hidden().sort(), cleared: M.cleared().sort(), zRange: M.zRange(),
-      legendTab: M.legendTab(), tabsShown: vis('ms-tab-legend'),
+      tabsInPage: !!document.querySelector('.ms-legend-tabs, #ms-tab-legend, #ms-tab-detected, [role="tab"]'),
       legendTitle: document.getElementById('ms-legend-title').textContent,
       legendRows: Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map((e) => e.dataset.group),
+      legendChecked: Array.from(document.querySelectorAll('#ms-legend .ms-legend-item'))
+        .map((e) => e.getAttribute('aria-checked')),
       legendShown: vis('ms-legend'),
       detectedRows: Array.from(document.querySelectorAll('#ms-detected .ms-legend-item')).map((e) => e.dataset.detected),
+      detectedShown: vis('ms-detected') && !!document.querySelector('#ms-detected .ms-legend-item'),
+      detectedOn: M.detectedOn(), mode: M.mode(),
       camera: { target: r(v.controls.target), position: r(v.camera.position), near: v.camera.near, far: v.camera.far },
       toggle: [document.getElementById('ms-cam-normal').classList.contains('active'),
                document.getElementById('ms-cam-slice').classList.contains('active')],
@@ -115,6 +124,7 @@ async function main() {
   const written = await page.evaluate(() => ({ models: state.models.length, placed: state.placed.length, undo: state.undoStack.length }));
   await page.click('#btn-microscope');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc() && window.NSO_MICROSCOPE.getDoc().kind === 'mesh');
+  await page.waitForFunction(() => window.NSO_MICROSCOPE.flange().status !== 'pending', null, { timeout: 30000 });
   await frames(page);
 
   // =======================================================================
@@ -130,9 +140,12 @@ async function main() {
     await page.evaluate(() => [!!document.getElementById('ms-cam-close'), typeof window.NSO_MICROSCOPE.setCameraMode,
       typeof window.NSO_MICROSCOPE.cameraMode, /Close inspection/.test(document.getElementById('microscope').textContent)]),
     [false, 'undefined', 'undefined', false]);
-  check('Normal has the legend as ever: Parts, no tab strip, the Flange, Handle, Bracket, Lid and Hinge rows under it',
-    [base.legendTab, base.tabsShown, base.legendShown, base.legendTitle, base.detectedRows],
-    [null, false, true, 'Parts (click to isolate)', ['flange', 'handle', 'bracket', 'lid', 'hinge']]);
+  check('Normal has one list: Parts, no tab strip in the page, the pieces, then Flange, Handle, Bracket, Lid and Hinge under them',
+    [base.tabsInPage, base.legendShown, base.legendTitle, base.legendRows.length, base.legendChecked, base.detectedRows],
+    [false, true, 'Parts', 2, ['true', 'true'], ['flange', 'handle', 'bracket', 'lid', 'hinge']]);
+  check('G-scope opens in orbit: no region armed', [base.mode,
+    await page.evaluate(() => document.getElementById('ms-mode-orbit').classList.contains('active')),
+    await page.isVisible('#ms-select-controls')], ['orbit', true, false]);
   check('the slice settings sit behind a disclosure, collapsed by default',
     await page.evaluate(() => [document.getElementById('ms-slice-settings').open,
       document.getElementById('ms-slice-settings').querySelector('summary').textContent.trim()]), [false, 'Slice settings']);
@@ -204,47 +217,67 @@ async function main() {
   });
   check('... the same G-code NSO_Slicer gives called directly on the same pieces', direct, true);
   check('the toggle reads Slice view', [s1.toggle, s1.viewMode], [[false, true], 'slice']);
-  check('the legend turned to its Detected features tab',
-    [s1.legendTab, s1.tabsShown, s1.legendShown, await page.isVisible('#ms-detected'), s1.legendTitle],
-    ['detected', true, false, true, 'Detected features (click to isolate)']);
-  const rows = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-detected .ms-legend-item'))
-    .map((e) => [e.dataset.detected, e.textContent.trim()]));
-  console.log('    detected rows:\n      ' + rows.map((r) => r[1]).join('\n      '));
-  const rowOf = (k) => rows.find((r) => r[0] === k || r[0].startsWith(k));
-  check('Detected features lists the walls, with the loop count set',
-    !!rowOf('walls') && /^Walls - 3 loops/.test(rowOf('walls')[1]), true);
-  check('... the infill, with the density and pattern set',
-    !!rowOf('infill') && /^Infill - 20 % zigzag/.test(rowOf('infill')[1]), true);
-  check('... top / bottom', !!rowOf('skin'), true);
-  check('... the mushroom\'s overhang call at z 5, on the plate',
-    !!rowOf('overhang:') && /mushroom.* at z 5\.00 - support on plate/.test(rowOf('overhang:')[1]), true);
-  check('... and the plain block\'s "none"', !!rowOf('overhang-none:') && /plain/.test(rowOf('overhang-none:')[1]), true);
-  await page.locator('#microscope').screenshot({ path: join(SHOTS, 'slice-view-01-detected.png') });
+  check('one list, All features: the slice\'s own rows, every one on, no tab strip, no detector rows',
+    [s1.legendTitle, s1.legendShown, s1.tabsInPage, s1.detectedRows, s1.detectedShown],
+    ['All features', true, false, [], false]);
+  check('... exactly the groups the slice printed, one row each',
+    s1.legendRows.slice().sort(), out1.groups.filter((g) => g !== 'Travel'));
+  check('... every one a checked toggle', s1.legendChecked.every((c) => c === 'true'), true);
+  const words = await page.evaluate(() => document.getElementById('ms-legend-float').textContent);
+  check('... and nothing in it of the Supports tool\'s, or a mesh\'s: no Overhang, Conflict or Flange rows',
+    /Overhang:|Conflict:|Flange|not on a slice/.test(words), false);
+  check('the overhang call is still made: the Slice report states it, at z 5 on the plate',
+    /mushroom: walls per layer [^.]*; needs support at z 5\.00 \([\d.]+ mm² on plate\)/.test(await page.textContent('#ms-slice-read')), true);
+  await page.locator('#microscope').screenshot({ path: join(SHOTS, 'slice-view-01-one-list.png') });
 
-  await page.click('#ms-detected [data-detected="walls"]');
+  // Every row a toggle, by real clicks: all off, then back one at a time.
+  const drawnFeatures = () => page.evaluate(() => {
+    const v = window.NSO_MICROSCOPE.getView();
+    return Object.keys(v.overviewMeshes).filter((k) => v.overviewMeshes[k].visible &&
+      v.overviewMeshes[k].geometry.attributes.position.count > 0).sort();
+  });
+  for (const g of s1.legendRows) await page.click(`#ms-legend [data-group="${g}"]`);
+  await frames(page);
+  check('every row switched off: an empty view, the list still up',
+    [await drawnFeatures(), await page.evaluate(() => window.NSO_MICROSCOPE.shownCount()), await page.isVisible('#ms-legend')],
+    [[], 0, true]);
+  await page.locator('#microscope').screenshot({ path: join(SHOTS, 'slice-view-02-all-off.png') });
+  const back = [];
+  for (const g of s1.legendRows) {
+    await page.click(`#ms-legend [data-group="${g}"]`);
+    back.push(g);
+    await frames(page);
+    check(`on again, one at a time (${back.length}/${s1.legendRows.length}): exactly those drawn`,
+      await drawnFeatures(), back.slice().sort());
+  }
+  // A partial set: the walls only. Select shown takes exactly them.
+  const wallsOnly = s1.legendRows.filter((g) => /wall/i.test(g));
+  for (const g of s1.legendRows.filter((x) => !wallsOnly.includes(x))) await page.click(`#ms-legend [data-group="${g}"]`);
+  await page.click('#ms-btn-select-visible');
   const walls = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, sel = M.selection();
-    return { n: sel.length, feats: [...new Set(sel.map((s) => s.feature))].sort(),
-      detail: M.getView().detailGroup.visible, hidden: M.hidden() };
+    return { n: sel.length, feats: [...new Set(sel.map((s) => s.feature))].sort(), want: M.shownCount() };
   });
-  check('clicking Walls isolates every wall move and nothing else',
-    [walls.n > 0, walls.detail, walls.feats.every((f) => /wall/i.test(f)), walls.hidden.includes('Sparse infill')],
-    [true, true, true, true]);
-  await page.click('#ms-detected [data-detected^="overhang:"]');
-  const ovh = await page.evaluate(() => {
-    const M = window.NSO_MICROSCOPE, sel = M.selection();
-    return { n: sel.length, zMin: Math.min(...sel.map((s) => s.z)), detail: M.getView().detailGroup.visible,
-      badge: document.getElementById('ms-mode-badge').textContent };
-  });
-  check('clicking the overhang call isolates the moves printed over it, from z 5 up',
-    [ovh.n > 0, ovh.zMin > 5, ovh.detail, /^Detail: /.test(ovh.badge)], [true, true, true, true]);
+  check('a partial set (the walls): Select shown takes every wall move and nothing else',
+    [walls.n > 0, walls.n, walls.feats], [true, walls.want, wallsOnly.slice().sort()]);
   await frames(page);
-  await page.locator('#microscope').screenshot({ path: join(SHOTS, 'slice-view-02-overhang.png') });
+  await page.locator('#microscope').screenshot({ path: join(SHOTS, 'slice-view-03-walls-only.png') });
+
+  // Into an isolated box, features still switched off, for Normal to come back from.
+  await page.click('#ms-mode-select');
+  await page.evaluate(() => {
+    const M = window.NSO_MICROSCOPE, d = M.getDoc(), m = d.segments.find((s) => s.feature === 'Outer wall').mv;
+    M.addBoxAt((m.x0 + m.x1) / 2, (m.y0 + m.y1) / 2, m.z, 5, 1);
+  });
+  await page.click('#ms-btn-isolate');
+  const ovh = await page.evaluate(() => ({ n: window.NSO_MICROSCOPE.selection().length,
+    detail: window.NSO_MICROSCOPE.getView().detailGroup.visible, badge: document.getElementById('ms-mode-badge').textContent }));
+  check('a box isolates on the slice as ever', [ovh.n > 0, ovh.detail, /^Detail: /.test(ovh.badge)], [true, true, true]);
 
   // =======================================================================
   console.log('\n--- 3. Normal: back to the mesh, exactly as it was before slicing ---');
   // =======================================================================
-  await page.click('#ms-cam-normal');                   // from an isolated overhang
+  await page.click('#ms-cam-normal');                   // from an isolated box, features hidden
   await meshBack(page);
   await frames(page);
   const n1 = await snapshot(page);
@@ -267,7 +300,8 @@ async function main() {
   });
   check('the second Slice view used the persisted settings', out2.opts, out1.opts);
   check('... and is the first slice, G-code for G-code', out2.gcode === out1.gcode, true);
-  check('... on the Detected features tab again, the same rows', [s2.legendTab, s2.detectedRows], ['detected', s1.detectedRows]);
+  check('... the one All features list again, the same rows', [s2.legendTitle, s2.legendRows, s2.tabsInPage],
+    ['All features', s1.legendRows, false]);
   check('Slice view again while on the slice changes nothing',
     await page.evaluate(async () => {
       const d = window.NSO_MICROSCOPE.getDoc();
@@ -289,8 +323,9 @@ async function main() {
   await page.evaluate(async (b) => { await window.NSO_MICROSCOPE.load('supportwithinsupport.gcode.3mf', new Uint8Array(b).buffer); }, bytes);
   await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'toolpath');
   const imp = await snapshot(page);
-  check('on an imported .gcode.3mf: Normal, Slice view disabled, the legend as ever',
-    [imp.toggle, await page.isDisabled('#ms-cam-slice'), imp.legendTab, imp.tabsShown], [[true, false], true, null, false]);
+  check('on an imported .gcode.3mf: Normal, Slice view disabled, the one All features list, no detector rows',
+    [imp.toggle, await page.isDisabled('#ms-cam-slice'), imp.legendTitle, imp.tabsInPage, imp.detectedRows],
+    [[true, false], true, 'All features', false, []]);
   await page.click('#ms-cam-normal');
   check('... and Normal there keeps the imported slice', await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().name),
     'supportwithinsupport.gcode.3mf');
