@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=ring1" />
+  <link rel="stylesheet" href="styles.css?v=relief2" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -257,7 +257,7 @@
             </div>
           </details>
           <details class="vp-menu vp-top-menu vp-top-right" id="menu-gen">
-            <summary class="vp-bar-btn" title="Generate a piece: stock to carve from, or a vessel on the wheel">Gen+</summary>
+            <summary class="vp-bar-btn" title="Generate a piece: stock to carve from, a vessel on the wheel, or a relief slab from a picture">Gen+</summary>
             <div class="vp-menu-body vp-top-body">
               <details class="vp-menu vp-wheel-menu">
               <summary>Wheel</summary>
@@ -344,6 +344,45 @@
               <div class="vp-row vp-row-full">
               <button id="btn-stock-attach" class="btn btn-secondary btn-attach" type="button" aria-pressed="false"
               title="Generate the same blank and attach it to a piece in one go: click the point on the piece where it should go, and straight-line auto-aim works out which way it leaves that face, seats it deep enough for the whole rim to bite, and unions the two into one solid. Nothing is left on the plate to tidy up. See docs/ASSEMBLE.md.">Attach</button>
+              </div>
+              </div>
+              </details>
+              <!-- Picture: an image becomes a relief slab, a flat base with a
+                   dense heightfield on top. nso_relief.js builds it,
+                   app-relief.js wires this card. See docs/RELIEF.md. -->
+              <details class="vp-menu vp-relief-menu" id="menu-relief">
+              <summary>Picture</summary>
+              <div class="vp-menu-body vp-relief">
+              <input type="file" id="relief-file" accept="image/*" style="display:none" aria-label="Picture to turn into a relief slab">
+              <div class="vp-row vp-row-full">
+              <button id="btn-relief-pick" class="btn btn-secondary" type="button"
+              title="Pick a picture - a photo, a scan, anything the browser can open. It is read at full size; nothing is uploaded anywhere.">Choose picture&hellip;</button>
+              </div>
+              <p id="relief-file-name" class="hint relief-file-name"></p>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="The finished slab's WIDTH in mm. A picture has pixels, not millimetres, so this is the one number it cannot supply: mm per pixel is this divided by the picture's width, and the depth follows its aspect.">Width <input type="number" id="inp-relief-width" value="60" min="1" max="900" step="1" aria-label="Width, mm"></label>
+              <label class="vp-clone" title="Thickness of the flat base under the relief, mm.">Base <input type="number" id="inp-relief-base" value="2" min="0.1" max="50" step="0.1" aria-label="Base, mm"></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="Height of the relief above the base, mm: the darkest part of the picture stands this much above it (the brightest, with Bright is up).">Relief <input type="number" id="inp-relief-relief" value="2" min="0" max="50" step="0.1" aria-label="Relief, mm"></label>
+              <label class="vp-clone" title="Detail: millimetres per sample. Every sample is the average of the picture over its own square, so nothing aliases. Finer is more triangles.">Detail <input type="number" id="inp-relief-detail" value="0.3" min="0.01" max="20" step="0.01" aria-label="Detail, mm per sample"></label>
+              </div>
+              <div class="vp-row vp-row-opts">
+              <label class="vp-clone" title="How many heights: the picture's tones in that many equal bands after auto-contrast. Smooth keeps every tone.">Levels <select id="sel-relief-levels" aria-label="Levels">
+              <option value="2" selected>2</option>
+              <option value="4">4</option>
+              <option value="8">8</option>
+              <option value="16">16</option>
+              <option value="smooth">Smooth</option>
+              </select></label>
+              </div>
+              <label class="vp-check" title="Raise the bright parts instead of the dark ones.">
+              <input type="checkbox" id="chk-relief-bright"> Bright is up
+              </label>
+              <p id="relief-tris" class="hint relief-tris" aria-live="polite">Pick a picture</p>
+              <div class="vp-row vp-row-full">
+              <button id="btn-relief-make" class="btn btn-secondary" type="button" disabled
+              title="Build the slab and put it on the plate as a new piece, named after the file. Nothing else on the plate is touched, and one Undo takes it off again.">Make piece</button>
               </div>
               </div>
               </details>
@@ -1078,7 +1117,8 @@
   <script src="nso-gcode-solid.js?v=solid1"></script>
   <script src="nso_slicer.js?v=slice1"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
-  <script src="app-core.js?v=pan1"></script>
+  <script src="nso_relief.js?v=relief2"></script>
+  <script src="app-core.js?v=pan2"></script>
   <script src="app-cut.js?v=scale1"></script>
   <script src="app-finish.js?v=pose1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
@@ -1113,6 +1153,7 @@
   <script src="app-skin.js?v=skin4"></script>
   <script src="app-skin-patch.js?v=skin3"></script>
   <script src="app-raster.js?v=raster1"></script>
+  <script src="app-relief.js?v=relief1"></script>
   <script src="app-mask.js?v=inmode2"></script>
   <script src="app-seat-grid.js?v=inside6"></script>
   <script src="app-paint-delete.js?v=del1"></script>
