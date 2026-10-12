@@ -838,7 +838,12 @@
       var box = worldBox(p.mesh);
       var sz = boxSize(box);
       if (box && sz) {
-        if (!p.overflow && !p.meshOffsetY) {
+        /* A turn in hand on Rotate's rings holds the piece on a fixed pivot,
+           free to pass through the plate, and seats it once when the turn is
+           put down (app-rotate-handles.js) - off its bed by design until then. */
+        var heldByRotate = global.nsoRotate && typeof global.nsoRotate.holding === 'function' &&
+                           global.nsoRotate.holding() === p;
+        if (!p.overflow && !p.meshOffsetY && !heldByRotate) {
           var wantMinY = 0.2 + (p.liftY || 0);
           if (Math.abs(box.min.y - wantMinY) > TOL_BED) {
             add('pose', who + ' sits with its lowest point at y=' + mm(box.min.y) +
