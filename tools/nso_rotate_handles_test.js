@@ -33,13 +33,17 @@
   10. THE 90 BUTTONS are untouched; the locks and the trackball are gone.
   11. THE RING BODY is the track, not a handle.
   12. EXPORT writes what the screen shows, leaned and turned.
-  13. THE RADIUS is the bounding sphere's, so it holds through any turn on
-      any shape, and is measured once per geometry.
+  13. THE RADIUS is 45% of the bed's shorter side - one size for every
+      piece, bigger on a bigger bed.
   14. DRAGGING quiets the rails; release restores them.
   15. DEGREE MARKERS are fixed in the ring's frame; the snap lands on one.
   16. THE LEANS are the piece's own axes: turned 45 and leaned side/side
       30, a bar rises end-over-end with no twist, in the drawn ring's plane;
-      front/back from there is a roll about its length. */
+      front/back from there is a roll about its length.
+  17. A FIXED PIVOT: a drag turns the piece about one held point - it may
+      pass through the plate - with the rings standing on it; a run of
+      clicks the same; one seat at the end; Undo seated; nso-watch told.
+  18. A BIGGER BED, bigger rings.                                          */
 
 const path = require('path');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
@@ -688,76 +692,57 @@ withApp(async (page, logs) => {
   }
 
   /* ----------------------------------------------------------------- 13 */
-  console.log('\n=== 13. the radius holds: bounding sphere, not box, measured once per geometry ===');
+  console.log('\n=== 13. one ring size: 45% of the bed\'s shorter side, whatever the piece ===');
   {
     await loadSTL(page, path.join(ROOT, 'fixtures', 'box_hull_80x40x20-2.stl'));
     await loadSTL(page, path.join(ROOT, 'fixtures', 'tape_on-edge-single-B101_rounded_v8_FINAL.stl'));
     await page.waitForTimeout(300);
-    const rows = await page.evaluate(() => {
-      const a = window.nsoRotate, H = window.__rot, out = [];
+    const r = await page.evaluate(() => {
+      const a = window.nsoRotate, H = window.__rot, out = { pieces: [] };
       const n = state.placed.length;
-      [n - 2, n - 1].forEach(idx => {
+      const torus = () => {
+        const g = state.scene.getObjectByName('nso-rotate-handles');
+        return g.children.filter(c => c.userData.nsoRotateRing).map(c => c.geometry.parameters.radius);
+      };
+      const arrowH = () => {
+        const g = state.scene.getObjectByName('nso-rotate-handles');
+        const c = g.children.find(k => k.userData.nsoRotateHandle && k.material.visible);
+        return c.geometry.parameters.height;
+      };
+      [0, n - 2, n - 1].forEach(idx => {
         selectPlaced(idx);
         const p = state.placed[idx];
         H.zero();
         a.setRing('turn', true); a.setRing('fb', true); a.setRing('ss', true);
-        /* the expected number, from the geometry, independently of the module */
-        const pos = p.mesh.geometry.attributes.position, v = new THREE.Vector3();
-        let m = 0;
-        for (let i = 0; i < pos.count; i++) m = Math.max(m, v.fromBufferAttribute(pos, i).length());
-        const want = Math.max(8, 1.45 * m);
-        const torus = () => {
-          const g = state.scene.getObjectByName('nso-rotate-handles');
-          return g.children.filter(c => c.userData.nsoRotateRing).map(c => c.geometry.parameters.radius);
-        };
-        const oldBox = () => Math.max(8, Math.max(p.width, p.depth, p.height) / 2 * 1.45);
         a.refresh();
-        const before = { r: a.ringRadius(), torus: torus(), box: oldBox() };
-        const computes0 = a.sphereComputes();
+        const before = { r: a.ringRadius(), torus: torus(), arrow: arrowH(),
+                         size: [p.width, p.depth, p.height].map(v => +v.toFixed(1)) };
         const after = {};
-        ['turn', 'fb', 'ss'].forEach(ring => {
-          H.zero(); a.refresh();
-          a.turn(ring, 37);
-          for (let k = 0; k < 20; k++) a.refresh();          // frames
-          after[ring] = { r: a.ringRadius(), torus: torus(), box: oldBox() };
-        });
-        const computes1 = a.sphereComputes();
-        /* a geometry change is a new measurement: a Scale-like bake */
-        const g0 = p.mesh.geometry;
-        p.mesh.geometry = g0.clone().scale(1.5, 1.5, 1.5);
-        const scaled = a.ringRadius();
-        const computes2 = a.sphereComputes();
-        p.mesh.geometry.dispose(); p.mesh.geometry = g0;
+        ['turn', 'fb', 'ss'].forEach(ring => { H.zero(); a.turn(ring, 37); a.refresh(); after[ring] = torus(); });
+        out.pieces.push({ name: (state.models.find(m => m.id === p.sourceId) || {}).name || ('#' + idx), before, after });
         H.zero();
-        out.push({ name: (state.models.find(mm => mm.id === p.sourceId) || {}).name || ('#' + idx),
-                   want, before, after, computes: [computes0, computes1, computes2], scaled });
       });
+      out.bed = getCurrentPlate();
       a.setRing('fb', false); a.setRing('ss', false);
       selectPlaced(0); H.zero();
       return out;
     });
-    for (const r of rows) {
-      console.log('   ' + r.name + ': ring radius ' + r.before.r.toFixed(6) + ' mm (1.45 x ' +
-        (r.want / 1.45).toFixed(6) + ' mm sphere); after 37° on each ring: ' +
-        ['turn', 'fb', 'ss'].map(k => k + ' ' + r.after[k].r.toFixed(6)).join(', ') +
-        '  | the old box rule would have drawn ' + r.before.box.toFixed(3) + ' -> ' +
-        ['turn', 'fb', 'ss'].map(k => r.after[k].box.toFixed(3)).join(' / '));
-      check(r.name + ': the radius is 1.45 x the bounding sphere about the turning centre',
-        near(r.before.r, r.want, 1e-9), r.before.r + ' vs ' + r.want);
-      check(r.name + ': identical before and after a 37° turn, on every ring',
-        ['turn', 'fb', 'ss'].every(k => r.after[k].r === r.before.r),
-        ['turn', 'fb', 'ss'].map(k => (r.after[k].r - r.before.r).toExponential(1)).join(' '));
-      check(r.name + ': ...and so is every drawn ring',
-        ['turn', 'fb', 'ss'].every(k => r.after[k].torus.length === 3 &&
-          r.after[k].torus.every(x => x === r.before.r)), JSON.stringify(r.after.turn.torus));
-      check(r.name + ': the old box rule would have breathed - the fix is not vacuous',
-        ['turn', 'fb', 'ss'].some(k => Math.abs(r.after[k].box - r.before.box) > 0.5));
-      check(r.name + ': measured once - none of 60 turns-and-frames measured it again',
-        r.computes[1] === r.computes[0], r.computes.join(' -> '));
-      check(r.name + ': a new geometry is measured afresh, and only once',
-        r.computes[2] === r.computes[1] + 1 && near(r.scaled, 1.5 * r.before.r, 1e-4),   // Float32 vertices
-        r.scaled.toFixed(4) + ' mm');
+    const want = 0.45 * Math.min(r.bed.w, r.bed.d);
+    for (const pc of r.pieces) {
+      console.log('   ' + pc.name.padEnd(42) + ' ' + pc.before.size.join(' x ') + ' mm -> ring ' +
+        pc.before.r.toFixed(3) + ' mm, drawn ' + pc.before.torus.map(x => x.toFixed(3)).join(' / ') +
+        ', arrowhead ' + pc.before.arrow.toFixed(2) + ' mm');
+      check(pc.name + ': the ring radius is 45% of the A1 Mini bed\'s shorter side', near(pc.before.r, want, 1e-9) &&
+        pc.before.torus.every(x => near(x, want, 1e-9)), pc.before.r + ' vs ' + want);
+      check(pc.name + ': ...and does not change with a 37° turn on any ring',
+        ['turn', 'fb', 'ss'].every(k => pc.after[k].every(x => x === pc.before.r)));
     }
+    check('every piece, large or small, gets the same rings',
+      r.pieces.every(pc => pc.before.r === r.pieces[0].before.r && pc.before.arrow === r.pieces[0].before.arrow),
+      r.pieces.map(pc => pc.before.r.toFixed(1)).join(' / '));
+    check('the arrowheads are a fixed fraction of the radius', near(r.pieces[0].before.arrow, 0.18 * want, 1e-9),
+      r.pieces[0].before.arrow.toFixed(3) + ' mm');
+    check('A1 Mini (180 mm): 81 mm', near(want, 81, 1e-9) && r.bed.w === 180, want + ' mm on ' + r.bed.name);
   }
 
   /* ----------------------------------------------------------------- 14 */
@@ -1003,6 +988,156 @@ withApp(async (page, logs) => {
       near(Math.abs(r.roll.applied), 30, 1e-6) && r.roll.lengthMoved < 1e-6 && near(Math.abs(r.roll.widthRose), 30, 1e-3),
       'length moved ' + r.roll.lengthMoved.toExponential(1) + '°, width line ' + r.roll.widthRose.toFixed(4) + '°');
     check('Turn\'s ring stays level - the plate\'s vertical', JSON.stringify(r.turnAxis) === '[0,1,0]');
+  }
+
+  /* ----------------------------------------------------------------- 17 */
+  console.log('\n=== 17. a fixed pivot while turning: the rings stand still, the piece seats once ===');
+  {
+    const K = await page.evaluate(() => window.nsoRotate.constants);
+    /* a drag on side/side, the tape, 0 -> 180, the camera still */
+    const d = await page.evaluate(() => {
+      const H = window.__rot, a = window.nsoRotate;
+      const n = state.placed.length;
+      selectPlaced(n - 1);                                      // the tape
+      const p = H.p();
+      H.zero(); H.home();
+      a.setRing('turn', true); a.setRing('ss', true);
+      p.mesh.updateMatrixWorld(true);
+      const lowest = () => { p.mesh.updateMatrixWorld(true); return new THREE.Box3().setFromObject(p.mesh).min.y; };
+      const g = () => state.scene.getObjectByName('nso-rotate-handles').position.toArray();
+      const centreW = () => { p.mesh.updateMatrixWorld(true);
+        const gg = p.mesh.geometry; if (!gg.boundingSphere) gg.computeBoundingSphere();
+        return gg.boundingSphere.center.clone().applyMatrix4(p.mesh.matrixWorld).toArray(); };
+      const start = { group: g(), centre: centreW(), lowest: lowest() };
+      const frames = [];
+      const sign = a.dialSign('ss');
+      const tr = H.trace('ss', sign * 180, { step: 1, each: () => {
+        const st = a.dragState();
+        return { applied: st.applied, group: g(), centre: centreW(), pivot: a.pivot(), lowest: lowest(),
+                 held: a.holding() === p, screen: a.centreScreen() };
+      } });
+      const after = { group: g(), centre: centreW(), lowest: lowest(), held: a.holding(), y: p.mesh.position.y,
+                      seatedY: p.height / 2 + 0.2 + (p.liftY || 0) };
+      a.setRing('ss', false);
+      return { start, frames: tr.seen.filter(f => f.applied !== 0), after, liftY: p.liftY || 0 };
+    });
+    const F = d.frames, same = (u, v) => u && v && Math.hypot(u[0] - v[0], u[1] - v[1], u[2] - v[2]) < 1e-9;
+    const at = deg => F.find(f => Math.abs(Math.abs(f.applied) - deg) < 0.51) || F[F.length - 1];
+    console.log('   ring centre on screen: ' + [0, 45, 90, 135, 180].map(k => {
+      const f = k === 0 ? F[0] : at(k);
+      return k + '°(' + f.screen.x.toFixed(2) + ', ' + f.screen.y.toFixed(2) + ')';
+    }).join(' '));
+    check('mid-drag the rings never move: the group sits on one pivot through all ' + F.length + ' frames',
+      F.every(f => same(f.group, F[0].group) && same(f.pivot, F[0].group)));
+    check('...the pivot is the bounding-sphere centre the drag started on',
+      same(F[0].pivot, d.start.centre), JSON.stringify(F[0].pivot));
+    check('...and the piece turns about it: its sphere centre stays on the pivot in every frame',
+      F.every(f => same(f.centre, f.pivot)));
+    check('...the ring centre\'s screen position is the same in every frame',
+      F.every(f => Math.abs(f.screen.x - F[0].screen.x) < 1e-6 && Math.abs(f.screen.y - F[0].screen.y) < 1e-6));
+    check('mid-drag the tape passes through the plate - not prevented, not clamped',
+      Math.min(...F.map(f => f.lowest)) < -5, 'lowest ' + Math.min(...F.map(f => f.lowest)).toFixed(2) + ' mm');
+    check('...and nso-watch is told it is held, all the way', F.every(f => f.held));
+    check('on release it is seated on the plate, once', d.after.held === null &&
+      near(d.after.lowest, 0.2 + d.liftY, 1e-3) && near(d.after.y, d.after.seatedY, 1e-9),
+      'lowest ' + d.after.lowest.toFixed(4) + ' mm');
+    /* At 180° end-over-end the tape's box is the one it started with, so its
+       seated centre IS the pivot: the step on release is zero here. The
+       click run below, from a 40° lean, is where the step shows. */
+    check('...and the rings are on the seated centre', same(d.after.group, d.after.centre),
+      F[F.length - 1].group.map(v => v.toFixed(2)) + ' -> ' + d.after.group.map(v => v.toFixed(2)));
+
+    /* a run of 15 one-degree clicks on one arrowhead: one pivot, one seat */
+    const c = await page.evaluate(async (RUN) => {
+      const H = window.__rot, a = window.nsoRotate, p = H.p();
+      H.zero(); a.setRing('ss', true);
+      a.turn('ss', 40);                                         // leaned: a click moves its box
+      a.refresh();
+      const seated0 = { y: p.mesh.position.y, q: H.q().toArray() };
+      const pivots = [], ys = [];
+      const cS = a.centreScreen();
+      for (let i = 0; i < 15; i++) {
+        a.beginDrag({ ring: 'ss', dir: 1 }, cS.x + 100, cS.y, cS.x, cS.y);
+        a.endDrag();
+        pivots.push(a.pivot()); ys.push(p.mesh.position.y);
+        await new Promise(r => setTimeout(r, 40));
+      }
+      const midHeld = a.holding() === p;
+      const turned = H.angleDeg(new THREE.Quaternion().fromArray(seated0.q), H.q());
+      const gHeld = state.scene.getObjectByName('nso-rotate-handles').position.toArray();
+      await new Promise(r => setTimeout(r, RUN + 150));
+      const seatedY = p.height / 2 + 0.2 + (p.liftY || 0);
+      const gSeated = state.scene.getObjectByName('nso-rotate-handles').position.toArray();
+      const end = { held: a.holding(), y: p.mesh.position.y, seatedY, gHeld, gSeated };
+      /* Undo: one click back, seated */
+      document.getElementById('btn-undo').click();
+      const undo1 = { y: p.mesh.position.y, seatedY: p.height / 2 + 0.2 + (p.liftY || 0),
+                      turned: H.angleDeg(new THREE.Quaternion().fromArray(seated0.q), H.q()) };
+      a.setRing('ss', false);
+      H.zero();
+      return { pivots, ys, midHeld, turned, end, undo1, y0: seated0.y };
+    }, K.RUN_MS);
+    check('15 clicks of 1°: one pivot, unchanged until the last release',
+      c.pivots.every(v => v && JSON.stringify(v) === JSON.stringify(c.pivots[0])), JSON.stringify(c.pivots[0]));
+    check('...the piece held off its seat through the run, turned exactly 15°', c.midHeld && near(c.turned, 15, 1e-6),
+      c.turned.toFixed(6) + '°');
+    check('...seated once, ' + K.RUN_MS + ' ms after the last click', c.end.held === null && near(c.end.y, c.end.seatedY, 1e-9),
+      'y ' + c.end.y.toFixed(4) + ' (seats at ' + c.end.seatedY.toFixed(4) + ')');
+    check('...and the rings stepped once, from the pivot to the seated centre',
+      c.end.gHeld[1] !== c.end.gSeated[1] && near(c.end.gSeated[1], c.end.seatedY, 1e-6),
+      'centre y ' + c.end.gHeld[1].toFixed(3) + ' -> ' + c.end.gSeated[1].toFixed(3) + ' mm');
+    check('Undo inside the run gives back a SEATED pose, one click back',
+      near(c.undo1.y, c.undo1.seatedY, 1e-9) && near(c.undo1.turned, 14, 1e-6),
+      'y ' + c.undo1.y.toFixed(4) + ', ' + c.undo1.turned.toFixed(4) + '° from the start');
+
+    /* nso-watch: a held turn is not a piece off its bed - but an unheld one still is */
+    const w = await page.evaluate(() => {
+      const H = window.__rot, a = window.nsoRotate, p = H.p();
+      H.zero(); a.setRing('ss', true); a.refresh();
+      NSOWatch.start();
+      const cS = a.centreScreen();
+      a.beginDrag({ ring: 'ss', dir: 1 }, cS.x + 120, cS.y, cS.x, cS.y);
+      for (let i = 1; i <= 60; i++) a.moveDrag(cS.x + Math.cos(i * Math.PI / 180) * 120, cS.y + Math.sin(i * Math.PI / 180) * 120);
+      const bedHeld = NSOWatch.check('mid-drag').filter(f => /-bed/.test(f.fp || '') || /seated on the bed/.test(f.msg || ''));
+      a.endDrag();
+      const bedAfter = NSOWatch.check('released').filter(f => /seated on the bed/.test(f.msg || ''));
+      /* the control: lift the piece by hand, nothing holding it */
+      p.mesh.position.y += 7; p.mesh.updateMatrixWorld(true);
+      const bedControl = NSOWatch.check('control').filter(f => /seated on the bed/.test(f.msg || ''));
+      applyMeshRotation(p);
+      NSOWatch.stop();
+      a.setRing('ss', false); H.zero();
+      return { held: bedHeld.length, after: bedAfter.length, control: bedControl.length };
+    });
+    check('nso-watch armed: no "off its bed" finding for a piece held mid-drag', w.held === 0, w.held + ' finding(s)');
+    check('...none once it is seated either', w.after === 0);
+    check('...while a piece lifted by hand, with nothing holding it, is still caught', w.control > 0,
+      w.control + ' finding(s)');
+  }
+
+  /* ----------------------------------------------------------------- 18 */
+  console.log('\n=== 18. a bigger bed, bigger rings: P1S selected ===');
+  {
+    /* Switching the plate clears the plate's pieces (updatePlateInfo ->
+       clearPlaced, as it always has), so a piece is dropped on afterwards. */
+    await page.selectOption('#plate-select', 'a1');
+    await page.waitForTimeout(200);
+    await loadSTL(page, path.join(ROOT, 'fixtures', 'tape_on-edge-single-B101_rounded_v8_FINAL.stl'));
+    await page.waitForTimeout(200);
+    const r = await page.evaluate(() => {
+      selectPlaced(state.placed.length - 1);
+      window.nsoRotate.refresh();
+      const g = state.scene.getObjectByName('nso-rotate-handles');
+      return { bed: getCurrentPlate(), r: window.nsoRotate.ringRadius(),
+               torus: g.children.filter(c => c.userData.nsoRotateRing).map(c => c.geometry.parameters.radius) };
+    });
+    check('P1S / A1 / X1C (256 mm bed): the rings scale up with it - 115.2 mm',
+      near(r.r, 115.2, 1e-9) && r.torus.length > 0 && r.torus.every(x => near(x, 115.2, 1e-9)),
+      r.r + ' mm on ' + r.bed.name + ', drawn ' + r.torus.map(x => x.toFixed(2)).join(' / '));
+    await page.selectOption('#plate-select', 'a1mini');
+    await page.waitForTimeout(200);
+    const back = await page.evaluate(() => window.nsoRotate.ringRadius());
+    check('...and back to 81 on the A1 Mini', near(back, 81, 1e-9), back + ' mm');
   }
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));

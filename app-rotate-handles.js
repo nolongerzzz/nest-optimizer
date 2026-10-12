@@ -216,12 +216,21 @@
   /* Put an orientation on the piece, through the fields. tipX, tipZ and flipX
      are left as they are - whole quarter-turn counts that other buttons step -
      and what is left over goes in the free fields. */
-  function writePose(p, q) {
+  function writePose(p, q, held) {
     var e = decompose(q, fieldEuler(p));
     p.tiltX = clean(wrapDeg(e.x * DEG - (p.tipX || 0) * 90 - (p.flipX ? 180 : 0)), 9);
     p.rotY = clean(wrapPi(e.y), 12);
     p.tiltZ = clean(wrapDeg(e.z * DEG - (p.tipZ || 0) * 90), 9);
     if (typeof applyMeshRotation === 'function') applyMeshRotation(p);
+    /* Held: applyMeshRotation has set the rotation and measured the new box
+       (width, depth, height all current); only its seat is undone, putting
+       the bounding-sphere centre back on the pivot. */
+    if (held && hold && hold.p === p) {
+      p.mesh.position.copy(hold.pivot).sub(hold.cL.clone().applyQuaternion(p.mesh.quaternion));
+      p.mesh.updateMatrixWorld(true);
+      hold.lastPos.copy(p.mesh.position);
+      hold.lastQ.copy(p.mesh.quaternion);
+    }
     if (typeof refreshOutline === 'function') refreshOutline(p);
   }
 
@@ -293,8 +302,13 @@
     return typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'rotate');
   }
   function undoPoint() {
-    if (typeof pushUndo === 'function' && typeof snapshotPlacedPose === 'function')
-      pushUndo(snapshotPlacedPose(state.selectedIndex));
+    if (typeof pushUndo !== 'function' || typeof snapshotPlacedPose !== 'function') return;
+    var snap = snapshotPlacedPose(state.selectedIndex);
+    /* Inside a run the mesh is held, not seated; the Undo point records the
+       height this pose seats at, so Undo restores a seated pose as before. */
+    if (snap && hold && holdIntact() && hold.p === state.placed[state.selectedIndex])
+      snap.meshY = seatedY(hold.p);
+    pushUndo(snap);
   }
 
   /* One step of `deg` about a ring, no snap - a click, a key. */
@@ -302,9 +316,14 @@
     var p = piece();
     if (!p || !RINGS[ring]) return false;
     if (refuse(p)) return false;
+    /* a key press is a click without the mouse: one run per ring and way */
+    var way = deg < 0 ? -1 : 1;
+    if (hold && (hold.ring !== ring || hold.dir !== way)) seat();
     undoPoint();
+    startHold(p, ring, way);
     p.mesh.updateMatrixWorld(true);
-    writePose(p, turned(p.mesh.quaternion.clone(), ring, deg));
+    writePose(p, turned(p.mesh.quaternion.clone(), ring, deg), true);
+    seatLater();
     if (arrowAt[ring] != null) arrowAt[ring] += deg * RAD;
     lastTouched = ring;
     if (typeof updateExportButton === 'function') updateExportButton();
@@ -326,7 +345,12 @@
     var p = piece();
     if (!p || !RINGS[ring] || !shown[ring]) return false;
     if (refuse(p)) return false;
+    /* a press on the arrowhead a run is on continues it; any other press
+       puts that run down first */
+    if (hold && (hold.p !== p || hold.ring !== ring || hold.dir !== dir || !holdIntact())) seat();
     undoPoint();
+    startHold(p, ring, dir);
+    if (hold.timer) { clearTimeout(hold.timer); hold.timer = 0; }   // held for as long as it is pressed
     p.mesh.updateMatrixWorld(true);
     var q0 = p.mesh.quaternion.clone();
     var b = refAxis(q0, ring);
@@ -360,7 +384,7 @@
     if (snapped && !drag.snapped) flash();
     drag.snapped = snapped;
     drag.applied = at - drag.abs0;
-    writePose(p, turned(drag.q0, drag.ring, drag.applied));
+    writePose(p, turned(drag.q0, drag.ring, drag.applied), true);
     if (drag.arrow0 != null) arrowAt[drag.ring] = drag.arrow0 + drag.applied * RAD;
     refresh();
     say(drag.ring, drag.applied * drag.sign, snapped, x, y);
@@ -375,13 +399,17 @@
     drag = null;
     if (typeof state !== 'undefined' && state && state.controls) state.controls.enabled = true;
     if (!d.moved && !abandon) {
+      /* a click: a step about the held pivot, the run seated RUN_MS on */
       var p = piece();
       if (p) {
         p.mesh.updateMatrixWorld(true);
-        writePose(p, turned(p.mesh.quaternion.clone(), d.ring, d.dir * STEP_DEG));
+        writePose(p, turned(p.mesh.quaternion.clone(), d.ring, d.dir * STEP_DEG), true);
         if (arrowAt[d.ring] != null) arrowAt[d.ring] += d.dir * STEP_DEG * RAD;
         say(d.ring, d.dir * STEP_DEG * d.sign, false);
       }
+      seatLater();
+    } else {
+      seat();                   // a drag is put down on release; so is an abandoned press
     }
     hideReadoutSoon();
     if (typeof updateExportButton === 'function') updateExportButton();
@@ -502,41 +530,101 @@
   }
 
   /* ---- the radius --------------------------------------------------------
-     From the piece's bounding SPHERE about the point it turns on, not its
-     box. The box is measured in plate axes, so on a bar it grows and shrinks
-     as the bar turns and the rings breathed with it; the largest distance
-     from the mesh's origin - the centre every turn here is about - to any
-     vertex of its own geometry cannot change under a rotation, so the rings
-     hold still through a whole lap on any shape.
+     One size for the machine, not one per piece: 45% of the bed's shorter
+     side, read from the plate the app is set to (getCurrentPlate - the
+     PLATES preset or the custom size), so an A1 Mini's rings are 81 mm in
+     radius - a 162 mm ring inside its 180 mm bed - and a 256 mm bed's 115.2.
+     Sized off the piece, a long bar got rings wider than the bed and a small
+     part tiny ones, and every bake re-sized them. A piece bigger than the
+     rings is fine - the arrowheads are the handles, not the ring body - and
+     a small one sits inside rings it can be seen through. Ticks, labels'
+     offset, the tube and the arrowheads are all fractions of this radius. */
+  var RING_BED_FRACTION = 0.45, RING_FALLBACK_MM = 81;
+  function bedShortSide() {
+    var pl = (typeof getCurrentPlate === 'function') ? getCurrentPlate() : null;
+    var w = pl && Number(pl.w), d = pl && Number(pl.d);
+    return (w > 0 && d > 0) ? Math.min(w, d) : 0;
+  }
+  function ringRadius() {
+    var b = bedShortSide();
+    return b ? b * RING_BED_FRACTION : RING_FALLBACK_MM;
+  }
 
-     Measured once per geometry, not per frame: the cache is keyed on the
-     geometry object and its position attribute's version and count, which a
-     bake (a new geometry), a Scale or a Cut (a new or rewritten one) all
-     change. Mesh scale is folded in for completeness; nothing sets it today. */
-  var RING_CLEARANCE = 1.45, RING_MIN_MM = 8;
-  var sphereCache = typeof WeakMap === 'function' ? new WeakMap() : null, sphereComputes = 0;
-  function boundingSphereRadius(mesh) {
-    var geo = mesh && mesh.geometry, pos = geo && geo.attributes && geo.attributes.position;
-    if (!pos) return 0;
-    var c = sphereCache && sphereCache.get(geo);
-    if (c && c.ver === pos.version && c.count === pos.count) return c.r;
-    var m = 0, a = pos.array, n = pos.count * pos.itemSize, k = pos.itemSize;
-    if (pos.isInterleavedBufferAttribute) {
-      var v = new THREE.Vector3();
-      for (var i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i); m = Math.max(m, v.lengthSq()); }
-    } else {
-      for (var j = 0; j < n; j += k) m = Math.max(m, a[j] * a[j] + a[j + 1] * a[j + 1] + a[j + 2] * a[j + 2]);
-    }
-    sphereComputes++;
-    c = { ver: pos.version, count: pos.count, r: Math.sqrt(m) };
-    if (sphereCache) sphereCache.set(geo, c);
-    return c.r;
+  /* ---- the pivot -----------------------------------------------------------
+     A turn is about the centre of the piece's bounding sphere - the centre
+     of its own geometry's sphere, which the load centres on the mesh origin.
+     applyMeshRotation then re-seats the piece on the plate from its NEW box,
+     so on every step of a turn the centre rose and fell with the box, and the
+     rings, sitting on it, walked away from under the pointer.
+
+     So while a turn is in hand the pivot is HELD: taken once, at the press,
+     and the piece is turned about that fixed point - free to pass through
+     the plate on the way, which is expected and not clamped - with the rings
+     standing on it. The piece is seated on the plate once, when the turn is
+     put down, and the rings move to the seated centre in that one step.
+
+     "In hand" is a drag from press to release, and a RUN of clicks on one
+     arrowhead (or presses of one arrow key) less than RUN_MS apart: the run
+     is seated RUN_MS after its last step, so fifteen clicks of a degree turn
+     about one pivot and land once. A single step lands RUN_MS after it.
+
+     The pose fields are written on every step as before - only the mesh's
+     height is held - so export, Undo and everything else that reads the
+     record never sees anything but a seated pose: every Undo point taken
+     inside a run records the height the piece will be seated at. */
+  var RUN_MS = 600;
+  var hold = null;              // { p, pivot, cL, lastPos, lastQ, ring, dir, timer }
+  function localCentre(mesh) {
+    var g = mesh.geometry;
+    if (!g) return new THREE.Vector3();
+    if (!g.boundingSphere) g.computeBoundingSphere();
+    return g.boundingSphere ? g.boundingSphere.center.clone() : new THREE.Vector3();
   }
-  function ringRadius(p) {
-    var s = p.mesh.scale, k = Math.max(Math.abs(s.x), Math.abs(s.y), Math.abs(s.z));
-    return Math.max(RING_MIN_MM, boundingSphereRadius(p.mesh) * k * RING_CLEARANCE);
+  function seatedY(p) { return (p.height || 0) / 2 + 0.2 + (p.liftY || 0); }
+  /* the hold is still ours: the piece is exactly where the last held step
+     left it - nothing else (an Undo, another tool) has moved it since */
+  function holdIntact() {
+    var p = hold && hold.p;
+    return !!(p && p.mesh && p.mesh.position.distanceTo(hold.lastPos) < 1e-9 &&
+              Math.abs(p.mesh.quaternion.dot(hold.lastQ)) > 1 - 1e-12);
   }
-  function arrowSize(r) { return Math.min(14, Math.max(3.5, r * 0.26)); }
+  function startHold(p, ring, dir) {
+    if (hold && (hold.p !== p || !holdIntact())) dropHold();
+    if (hold) return hold;
+    p.mesh.updateMatrixWorld(true);
+    var cL = localCentre(p.mesh);
+    hold = { p: p, cL: cL, pivot: cL.clone().applyMatrix4(p.mesh.matrixWorld),
+             lastPos: p.mesh.position.clone(), lastQ: p.mesh.quaternion.clone(),
+             ring: ring, dir: dir, timer: 0 };
+    return hold;
+  }
+  function dropHold() {
+    if (hold && hold.timer) clearTimeout(hold.timer);
+    hold = null;
+  }
+  /* Put the turn down: seat the piece on the plate, once, as
+     applyMeshRotation always has, and let the rings follow in one step. */
+  function seat() {
+    if (!hold) return;
+    var h = hold;
+    var mine = holdIntact();
+    dropHold();
+    if (!mine) return;          // something else has already re-placed it
+    if (typeof applyMeshRotation === 'function') applyMeshRotation(h.p);
+    if (typeof refreshOutline === 'function') refreshOutline(h.p);
+    if (typeof updateExportButton === 'function') updateExportButton();
+    refresh();
+  }
+  function seatLater() {
+    if (!hold) return;
+    if (hold.timer) clearTimeout(hold.timer);
+    hold.timer = setTimeout(seat, RUN_MS);
+  }
+
+  /* About the 14 mm they were on #141's rings, which were 66 mm in radius on
+     the drive-check's box - now a straight fraction of the radius, so a
+     bigger bed's rings carry bigger arrowheads. */
+  function arrowSize(r) { return r * 0.18; }
   /* The two arrowheads sit either side of arrowAt[ring], a little apart,
      pointing away from each other along the ring. */
   function arrowGap(r) { return arrowSize(r) * 0.8 / r; }
@@ -709,11 +797,12 @@
     clearGroup(g);
     var p = piece();
     var list = shown ? shownRings() : [];
+    if (hold && !holdIntact()) dropHold();      // re-placed under us: nothing held any more
     if (!p || !list.length || !menuOwnsInput()) { g.visible = false; return; }
     g.visible = true;
-    g.position.copy(p.mesh.position);
+    g.position.copy(ringCentre(p));
     g.updateMatrixWorld(true);
-    var r = ringRadius(p), q = p.mesh.quaternion.clone();
+    var r = ringRadius(), q = p.mesh.quaternion.clone();
     list.forEach(function (ring) {
       var F = frameOf(ring, q);
       if (arrowAt[ring] == null) arrowAt[ring] = defaultArrowAt(F, g.position);
@@ -721,13 +810,21 @@
     });
   }
 
+  /* Where the rings stand: on the held pivot while a turn is in hand,
+     otherwise on the piece's bounding-sphere centre as it sits. */
+  function ringCentre(p) {
+    if (hold && hold.p === p && holdIntact()) return hold.pivot.clone();
+    p.mesh.updateMatrixWorld(true);
+    return localCentre(p.mesh).applyMatrix4(p.mesh.matrixWorld);
+  }
+
   /* An arrowhead's place on screen, in client pixels - for the checks, and
      for the readout after a key press. */
   function handleScreen(ring, dir) {
     var p = piece();
     if (!p || !state.camera || !state.renderer || arrowAt[ring] == null) return null;
-    var r = ringRadius(p);
-    var w = ringPoint(frameOf(ring, pieceQ()), r, arrowAt[ring] + (dir || 1) * arrowGap(r)).add(p.mesh.position);
+    var r = ringRadius();
+    var w = ringPoint(frameOf(ring, pieceQ()), r, arrowAt[ring] + (dir || 1) * arrowGap(r)).add(ringCentre(p));
     var v = w.project(state.camera);
     var c = state.renderer.domElement.getBoundingClientRect();
     return { x: c.left + (v.x * 0.5 + 0.5) * c.width, y: c.top + (-v.y * 0.5 + 0.5) * c.height };
@@ -735,7 +832,7 @@
   function centreScreen() {
     var p = piece();
     if (!p || !state.camera || !state.renderer) return null;
-    var v = p.mesh.position.clone().project(state.camera);
+    var v = ringCentre(p).project(state.camera);
     var c = state.renderer.domElement.getBoundingClientRect();
     return { x: c.left + (v.x * 0.5 + 0.5) * c.width, y: c.top + (-v.y * 0.5 + 0.5) * c.height };
   }
@@ -755,13 +852,20 @@
       document._rotKeysBound = true;
       document.addEventListener('keydown', onKeyDown);
     }
+    /* A different machine is a different ring size: redraw once app-core
+       has switched the plate (its own change handler runs first). */
+    var plateSel = document.getElementById('plate-select');
+    if (plateSel && !plateSel._rotBound) {
+      plateSel._rotBound = true;
+      plateSel.addEventListener('change', function () { setTimeout(refresh, 0); });
+    }
     /* Losing the menu ends any drag in flight before the rings go - endDrag
        gives OrbitControls back - and puts the ring choice back to Turn only,
        which is what makes the next opening start fresh. */
     if (window.nsoInputMode) {
       window.nsoInputMode.register('menu-rotate', {
         activate: refresh,
-        teardown: function () { if (drag) endDrag(true); hideReadout(); resetSession(); refresh(); }
+        teardown: function () { if (drag) endDrag(true); seat(); hideReadout(); resetSession(); refresh(); }
       });
     }
     refresh();
@@ -820,10 +924,15 @@
         return c.userData.nsoRotateHandle && c.material && c.material.visible;
       }).length : 0;
     },
-    /* Task 1's radius, and how many times it has been measured - once per
-       geometry, never per frame. */
-    ringRadius: function () { var p = piece(); return p ? ringRadius(p) : null; },
-    sphereComputes: function () { return sphereComputes; },
+    /* The ring radius: 45% of the bed's shorter side, the same for every piece. */
+    ringRadius: function () { return ringRadius(); },
+    /* The piece a turn is holding on its pivot (unseated) right now, or null -
+       nso-watch asks, so a turn in hand is not reported as a piece off its bed. */
+    holding: function () { return hold && holdIntact() ? hold.p : null; },
+    pivot: function () { return hold && holdIntact() ? hold.pivot.toArray() : null; },
+    ringCentre: function () { var p = piece(); return p ? ringCentre(p).toArray() : null; },
+    /* Put a run down now, as its timer would. */
+    seat: seat,
     weights: WEIGHT,
     ringCount: function () {
       var g = ensureGroup();
@@ -831,7 +940,7 @@
     },
     constants: { STEP_DEG: STEP_DEG, SNAP_STEP_DEG: SNAP_STEP_DEG,
                  SNAP_WITHIN_DEG: SNAP_WITHIN_DEG, CLICK_SLOP_PX: CLICK_SLOP_PX,
-                 RING_CLEARANCE: RING_CLEARANCE, RING_MIN_MM: RING_MIN_MM, TICK_LEN: TICK_LEN,
+                 RING_BED_FRACTION: RING_BED_FRACTION, RUN_MS: RUN_MS, TICK_LEN: TICK_LEN,
                  LABEL_SHIFT_DEG: LABEL_SHIFT_DEG,
                  LOCAL: { fb: RINGS.fb.local, ss: RINGS.ss.local } }
   };
