@@ -116,11 +116,11 @@ function bakeLikeExport(geometry, p, plate) {
   const geo = geometry.clone();
   const tip = (p.tipX || 0) * (Math.PI / 2) + ((p.tiltX || 0) * Math.PI / 180);
   const flip = p.flipX ? Math.PI : 0;
-  if (tip || flip) geo.rotateX(tip + flip);
   const rotY = p.rotY != null ? p.rotY : (p.rotated ? Math.PI / 2 : 0);
-  if (rotY) geo.rotateY(rotY);
   const roll = (p.tipZ || 0) * (Math.PI / 2) + ((p.tiltZ || 0) * Math.PI / 180);
   if (roll) geo.rotateZ(roll);
+  if (rotY) geo.rotateY(rotY);
+  if (tip || flip) geo.rotateX(tip + flip);
   geo.translate(p.x, p.height / 2 + (p.liftY || 0), p.z);
   const pos = geo.attributes.position;
   const flat = [];

@@ -14,12 +14,11 @@
    that a bake is a no-op for pose: the record, the drawn mesh and the exported
    geometry must all read exactly the same before it and after it.
 
-   What is NOT gated here, because it is not this change's doing: a COMPOSITE
-   pose (two or more of rotY / tipX / tipZ at once) already disagrees between
-   viewport and exporter with no bake anywhere near it. applyMeshRotation()
-   sets a THREE Euler in XYZ order while buildCombinedGeometry() calls
-   rotateX, then rotateY, then rotateZ, which composes in the reverse order.
-   Measured in section 5 and printed on every run; it wants its own pass.  */
+   A COMPOSITE pose (two or more of rotY / tipX / tipZ at once) used to
+   disagree between viewport and exporter with no bake anywhere near it:
+   applyMeshRotation() sets a THREE Euler in XYZ order, and buildCombined-
+   Geometry() called rotateX, then rotateY, then rotateZ - the reverse. The
+   exporters now call Z, Y, X (claude/rotate-rings), and section 5b gates it. */
 
 const path = require('path');
 const fs = require('fs');
@@ -89,7 +88,9 @@ const poseOf = (page, id) => page.evaluate(i => {
     mesh: { rot: [p.mesh.rotation.x, p.mesh.rotation.y, p.mesh.rotation.z].map(v => +v.toFixed(6)),
             pos: [p.mesh.position.x, p.mesh.position.y, p.mesh.position.z].map(v => +v.toFixed(4)) },
     drawn: span(Array.from(meshToWorldSoup(p.mesh))),
-    exported: span(Array.from(buildCombinedGeometry().attributes.position.array))
+    exported: span(Array.from(buildCombinedGeometry().attributes.position.array)),
+    /* this piece alone, as the 3MF writes it (Bambu frame: x, -z, y) */
+    own: span(buildPlacedObjects3MF()[state.placed.indexOf(p)].vertices)
   };
 }, id);
 
@@ -259,30 +260,26 @@ withApp(async (page, logs) => {
     ', then a bake: y ' + hop.afterBake +
     '  (delta ' + (hop.afterBake - hop.afterMove).toFixed(4) + ' mm, open finding, app-core.js)');
 
-  console.log('\n=== 5b. recorded, NOT gated: composite poses and the exporter ===');
-  /* Pre-existing and independent of any bake: applyMeshRotation() builds a
-     THREE Euler in XYZ order, buildCombinedGeometry() calls rotateX ->
-     rotateY -> rotateZ, which composes in the reverse order. One axis agrees;
-     two or three need not. Measured before any bake runs, which is what makes
-     it someone else's bug and not this one's. */
+  console.log('\n=== 5b. composite poses: the exporter composes what the viewport draws ===');
+  /* applyMeshRotation() builds a THREE Euler in XYZ order - Rx * Ry * Rz.
+     The exporter used to call rotateX -> rotateY -> rotateZ, the reverse, so
+     one axis agreed and two or three need not. It calls Z -> Y -> X now. */
   const COMPOSITE = [
     { name: 'rotY 90 + tipX 90', pose: { rotY: Math.PI / 2, tipX: 1 } },
     { name: 'rotY 90 + tipZ 90', pose: { rotY: Math.PI / 2, tipZ: 1 } },
     { name: 'tipX 90 + tipZ 90', pose: { tipX: 1, tipZ: 1 } }
   ];
-  let composite = 0;
   for (const c of COMPOSITE) {
     await setPose(page, idC, c.pose);
     const s = await poseOf(page, idC);
     const want = [s.drawn.size[0], s.drawn.size[2], s.drawn.size[1]];
-    const agree = want.every((v, k) => Math.abs(v - s.exported.size[k]) < 1e-3);
-    if (!agree) composite++;
-    console.log('   ' + (agree ? 'agree  ' : 'DIFFER ') + c.name.padEnd(20) +
-      ' drawn ' + JSON.stringify(s.drawn.size) + ' -> expect ' + JSON.stringify(want) +
-      ', exporter gave ' + JSON.stringify(s.exported.size));
+    /* The piece's own object, not the plate: the plate's span is three
+       pieces wide and could not say which of them moved. */
+    check('composite ' + c.name + ': the piece\'s exported box is its drawn box',
+      want.every((v, k) => Math.abs(v - s.own.size[k]) < 1e-3),
+      'drawn ' + JSON.stringify(s.drawn.size) + ' -> expect ' + JSON.stringify(want) +
+      ', exporter gave ' + JSON.stringify(s.own.size));
   }
-  console.log('   ' + composite + ' of ' + COMPOSITE.length +
-    ' composite poses disagree, with no bake involved (open finding, app-core.js)');
 
   console.log('\n=== 6. canonical checker, tools/mesh_validate.py ===');
   await setPose(page, idC, { rotY: Math.PI / 2, liftY: 6 });

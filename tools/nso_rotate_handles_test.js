@@ -1,24 +1,45 @@
 #!/usr/bin/env node
-/* Rotation handles, driven in the real page.
+/* Rotate rings, driven in the real page.
 
    node tools/nso_rotate_handles_test.js        exit 0 = every gate held
 
-   The control is a dial: the pointer's angle about the guide's centre IS the
-   rotation, so tracing 30 degrees turns the piece 30 degrees. The soft
-   detents then displace what is SHOWN, by a bounded amount, which is why the
-   raw accumulator and the displayed angle are checked separately - a test
-   that only looked at the displayed angle could not tell a correct 1:1
-   mapping with a detent from a wrong mapping without one.
+   What is claimed, and so what is measured:
 
-   What is NOT here: the 90 degree buttons' own behaviour beyond proving this
-   ticket left it alone. */
+   1. HONEST MATH. A turn on a ring is a rotation about the PLATE's axis,
+      whatever the piece is already doing: the mesh's quaternion after it is
+      R(axis, d) * q0 to float precision, from any starting pose, and the
+      quarter-turn counters (tipX, tipZ, flipX) are left the whole numbers
+      they were. A flat piece yawed through 90 reads rotY 100, not the
+      (180, 80, 180) THREE's own decomposition would give.
+   2. LEAN, THEN TURN. A piece leaned 90 and then turned keeps every point at
+      its height above the plate - the turn is about the vertical - where the
+      old write to rotY moved them, because it turned about the leaned axis.
+   3. DIRECTION FROM BOTH SIDES. For each ring, with the camera on one side
+      and then the other: a clockwise circle traced on screen moves a point
+      of the piece clockwise ON SCREEN by the same amount. Measured by
+      projecting a point fixed to the piece, not by trusting the sign rule.
+   4. CLICK = exactly 1 degree, never snapped. A real mouse click.
+   5. A FULL LAP of a real mouse drag puts the piece back where it was, and
+      the readout goes past 360.
+   6. THE SNAP is hard and only hard: on a quarter turn inside 3 degrees of
+      it, exactly where the pointer says everywhere else, one flash on
+      landing.
+   7. KEYS nudge 1 degree on the last-touched ring, only while Rotate owns the
+      input.
+   8. WHICH RINGS: Turn only on opening, boxes add rings, all three only with
+      all three boxes, and closing Rotate puts it back to Turn only. Leaving
+      the menu mid-drag ends the drag and empties the scene group.
+   9. UNDO steps back one press at a time.
+  10. THE 90 BUTTONS are untouched; the locks and the trackball are gone.
+  11. THE RING BODY is the track, not a handle.
+  12. EXPORT writes what the screen shows, leaned and turned.             */
 
 const path = require('path');
-const { withApp, loadSTL, statusOf, ROOT } = require('./nso_app_harness');
+const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
 
 let fails = 0;
 const check = (name, cond, detail) => {
-  console.log('  ' + (cond ? 'ok   ' : 'FAIL ') + name + (detail ? ' - ' + detail : ''));
+  console.log('  ' + (cond ? 'ok   ' : 'FAIL ') + name + (detail !== undefined ? ' - ' + detail : ''));
   if (!cond) fails++;
 };
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
@@ -28,354 +49,622 @@ withApp(async (page, logs) => {
   await loadSTL(page, path.join(ROOT, 'fixtures', 'box-20mm.stl'));
   await page.waitForTimeout(300);
   await page.evaluate(() => selectPlaced(0));
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(200);
 
-  const api = await page.evaluate(() => typeof window.nsoRotate);
-  check('the module is on the page', api === 'object', 'typeof = ' + api);
+  /* Page-side helpers, installed once. */
+  await page.evaluate(() => {
+    const H = window.__rot = {};
+    H.p = () => state.placed[state.selectedIndex];
+    H.zero = () => {
+      const p = H.p();
+      p.tipX = 0; p.tipZ = 0; p.flipX = false; p.tiltX = 0; p.tiltZ = 0; p.rotY = 0;
+      applyMeshRotation(p);
+      window.nsoRotate.refresh();
+    };
+    H.q = () => { const p = H.p(); p.mesh.updateMatrixWorld(true); return p.mesh.quaternion.clone(); };
+    /* The angle between two orientations, as 2 atan2(|v|, |w|) of b * a^-1 -
+       acos of a dot product near 1 cannot see below ~3e-6 degrees. */
+    H.angleDeg = (a, b) => {
+      const d = b.clone().multiply(a.clone().invert());
+      return 2 * Math.atan2(Math.hypot(d.x, d.y, d.z), Math.abs(d.w)) * 180 / Math.PI;
+    };
+    H.axisVec = ring => new THREE.Vector3().fromArray(window.nsoRotate.constants.AXES[ring]);
+    H.camera = (offset) => {
+      const c = H.p().mesh.position.clone();
+      state.controls.target.copy(c);
+      state.camera.position.copy(c).add(offset);
+      state.camera.lookAt(c);
+      state.controls.update();
+      state.camera.updateMatrixWorld(true);
+      window.nsoRotate.refresh();
+    };
+    H.home = () => H.camera(new THREE.Vector3(140, 160, 200));
+    H.screen = (w) => {
+      const v = w.clone().project(state.camera);
+      const r = state.renderer.domElement.getBoundingClientRect();
+      return { x: r.left + (v.x * .5 + .5) * r.width, y: r.top + (-v.y * .5 + .5) * r.height };
+    };
+    /* A dial traced through the module's own entry points, as app-core calls
+       them: `screenDeg` degrees of screen angle about the projected centre,
+       positive = clockwise on screen (y runs down). */
+    H.trace = (ring, screenDeg, opts) => {
+      opts = opts || {};
+      const a = window.nsoRotate, c = a.centreScreen(), R = 160;
+      const at = d => ({ x: c.x + Math.cos(d * Math.PI / 180) * R, y: c.y + Math.sin(d * Math.PI / 180) * R });
+      const s0 = opts.start || 0;
+      const p0 = at(s0);
+      if (!a.beginDrag({ ring: ring, dir: 1 }, p0.x, p0.y, c.x, c.y)) return null;
+      const seen = [];
+      const n = Math.round(Math.abs(screenDeg) / (opts.step || 1));
+      for (let i = 1; i <= n; i++) {
+        const q = at(s0 + Math.sign(screenDeg) * i * (opts.step || 1));
+        a.moveDrag(q.x, q.y);
+        if (opts.each) seen.push(opts.each());
+      }
+      const st = a.dragState();
+      a.endDrag();
+      return { state: st, seen: seen };
+    };
+  });
 
-  /* The Rotate menu open for the sections that count handles. The guide and
-     its grab target belong to this menu now - "both axes locked leaves no
-     handle at all" in section 4 says nothing unless there would have been
-     one otherwise. Section 5 shuts it again on purpose, as its own subject. */
-  await page.evaluate(() => { document.getElementById('menu-rotate').open = true; });
-  await page.waitForTimeout(100);
-  const K = await page.evaluate(() => window.nsoRotate.constants);
+  await page.click('#menu-rotate > summary');
+  await page.waitForTimeout(150);
 
   /* ------------------------------------------------------------------ 1 */
-  console.log('\n=== 1. the dial maps traced degrees to rotation degrees ===');
+  console.log('\n=== 1. the math: every turn is about the plate\'s axis, from any pose ===');
   {
-    const d = await page.evaluate(() => {
-      const a = window.nsoRotate, cx = 700, cy = 450, R = 200;
-      const at = deg => ({ x: cx + Math.cos(deg * Math.PI / 180) * R,
-                           y: cy + Math.sin(deg * Math.PI / 180) * R });
-      const trace = (axis, total) => {
-        a.setAngle(axis, 0);
-        const p0 = at(0);
-        a.beginDrag(axis, p0.x, p0.y, cx, cy);
-        for (let i = 1; i <= Math.abs(total); i++) {
-          const q = at(Math.sign(total) * i);
-          a.moveDrag(q.x, q.y);
+    const r = await page.evaluate(() => {
+      const H = window.__rot, a = window.nsoRotate, p = H.p();
+      let seed = 12345;
+      const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+      let worst = 0, countsKept = true, n = 0;
+      const rings = ['turn', 'fb', 'ss'];
+      const poses = [];
+      for (let i = 0; i < 240; i++) {
+        poses.push({ tipX: Math.floor(rnd() * 4), tipZ: Math.floor(rnd() * 4), flipX: rnd() < 0.5,
+                     tiltX: (rnd() - 0.5) * 360, tiltZ: (rnd() - 0.5) * 360,
+                     rotY: (rnd() - 0.5) * 2 * Math.PI });
+      }
+      // The gimbal cases by hand: yaw exactly +/-90 is XYZ's singular pose.
+      poses.push({ rotY: Math.PI / 2 }, { rotY: -Math.PI / 2 }, { rotY: Math.PI / 2, tiltX: 30 },
+                 { rotY: -Math.PI / 2, tiltZ: 45, tipX: 1 }, { flipX: true, rotY: Math.PI / 2 });
+      for (const f of poses) {
+        for (const ring of rings) {
+          Object.assign(p, { tipX: 0, tipZ: 0, flipX: false, tiltX: 0, tiltZ: 0, rotY: 0 }, f);
+          applyMeshRotation(p);
+          const q0 = H.q();
+          const counts = [p.tipX, p.tipZ, p.flipX];
+          const d = rnd() < 0.2 ? 1 : (rnd() - 0.5) * 400;
+          a.turn(ring, d);
+          const want = new THREE.Quaternion().setFromAxisAngle(H.axisVec(ring), d * Math.PI / 180).multiply(q0);
+          worst = Math.max(worst, H.angleDeg(want, H.q()));
+          if (p.tipX !== counts[0] || p.tipZ !== counts[1] || p.flipX !== counts[2]) countsKept = false;
+          n++;
         }
-        const out = { raw: a.rawAngle(axis), shown: a.angleOf(axis) };
-        a.endDrag();
-        return out;
-      };
-      a.setLock('y', true);                 // X alone, so it is a dial not a ball
-      const r = { x30: trace('x', 30), x90: trace('x', 90), xBack: trace('x', -30) };
-      a.setLock('y', false); a.setLock('x', true);
-      r.y30 = trace('y', 30);
-      a.setLock('x', false);
-      return r;
+      }
+      /* Continuity: a flat piece walked round a whole turn a degree at a time. */
+      H.zero();
+      let off = 0, tiltsStill = true;
+      for (let k = 1; k <= 400; k++) {
+        a.turn('turn', 1);
+        const want = ((k + 180) % 360 + 360) % 360 - 180;
+        const got = p.rotY * 180 / Math.PI;
+        off = Math.max(off, Math.abs(((got - want + 540) % 360) - 180));
+        if (p.tiltX !== 0 || p.tiltZ !== 0) tiltsStill = false;
+      }
+      H.zero();
+      a.turn('turn', 100);
+      const at100 = { tiltX: p.tiltX, rotY: +(p.rotY * 180 / Math.PI).toFixed(9), tiltZ: p.tiltZ };
+      H.zero();
+      return { n, worst, countsKept, off, tiltsStill, at100 };
     });
-    check('tracing 30° turns the piece 30°', near(d.x30.raw, 30, 0.01), d.x30.raw + '°');
-    check('tracing 90° turns it 90°', near(d.x90.raw, 90, 0.01), d.x90.raw + '°');
-    check('tracing backwards turns it back', near(d.xBack.raw, -30, 0.01), d.xBack.raw + '°');
-    check('the same holds on the other axis', near(d.y30.raw, 30, 0.01), d.y30.raw + '°');
-    check('a detent displaces what is shown, but never past S*R/4',
-      Math.abs(d.x30.shown - d.x30.raw) <= K.SNAP_STRENGTH * K.SNAP_RADIUS_DEG / 4 + 1e-6,
-      'traced ' + d.x30.raw + '° shown ' + d.x30.shown.toFixed(2) + '°');
-    check('a detent itself is exactly reachable, not merely approached',
-      near(d.x90.shown, 90, 1e-6), d.x90.shown + '°');
+    check(r.n + ' turns from random poses land on R(axis, d) * q0',
+      r.worst < 1e-6, 'worst ' + r.worst.toExponential(2) + '°');
+    check('...and tipX / tipZ / flipX are never touched - they stay whole quarter-turn counts',
+      r.countsKept);
+    check('a flat piece walked round 400° a degree at a time: rotY tracks it, tilts stay 0',
+      r.off < 1e-6 && r.tiltsStill, 'max off ' + r.off.toExponential(2) + '°');
+    check('yawed to 100°, the record reads (0, 100, 0), not THREE\'s (180, 80, 180)',
+      r.at100.tiltX === 0 && near(r.at100.rotY, 100, 1e-9) && r.at100.tiltZ === 0,
+      JSON.stringify(r.at100));
   }
 
   /* ------------------------------------------------------------------ 2 */
-  console.log('\n=== 2. the arc window, its gradations and its detents ===');
+  console.log('\n=== 2. lean 90, then Turn: about the plate\'s vertical, not the piece\'s tilted axis ===');
   {
-    const w = await page.evaluate(() => {
-      const a = window.nsoRotate;
-      return { at0: a.arcWindow(0), at10: a.arcWindow(10), at37: a.arcWindow(37),
-               snap: [0, 1, 10, 22.4, 22.5, 30, 44, 45, 46, 90, 91].map(v =>
-                 ({ in: v, out: a.softSnapDeg(v) })) };
+    const r = await page.evaluate(() => {
+      const H = window.__rot, a = window.nsoRotate, p = H.p();
+      H.zero(); H.home();
+      a.setRing('fb', true);
+      a.turn('fb', 90);
+      p.mesh.updateMatrixWorld(true);
+      const corners = [];
+      const bb = p.mesh.geometry.boundingBox || (p.mesh.geometry.computeBoundingBox(), p.mesh.geometry.boundingBox);
+      for (const x of [bb.min.x, bb.max.x]) for (const y of [bb.min.y, bb.max.y])
+        for (const z of [bb.min.z, bb.max.z]) corners.push(new THREE.Vector3(x, y, z));
+      corners.push(new THREE.Vector3(bb.max.x, 0.3 * bb.max.y, 0.7 * bb.min.z));   // an off-centre point
+      const world = () => corners.map(c => p.mesh.localToWorld(c.clone()).sub(p.mesh.position));
+      const before = world();
+      const fields0 = { tiltX: p.tiltX, rotY: p.rotY, tiltZ: p.tiltZ };
+      const tr = H.trace('turn', 30);
+      const after = world();
+      const dy = Math.max(...before.map((b, i) => Math.abs(b.y - after[i].y)));
+      const dxz = Math.max(...before.map((b, i) => Math.hypot(b.x - after[i].x, b.z - after[i].z)));
+      // The turn's own axis, read off the motion: q1 * q0^-1.
+      // The old behaviour, for contrast: the same 30 written to rotY.
+      const q1 = H.q();
+      Object.assign(p, fields0); applyMeshRotation(p);
+      const keep = world();
+      p.rotY = fields0.rotY + tr.state.applied * Math.PI / 180; applyMeshRotation(p);
+      const old = world();
+      const oldDy = Math.max(...keep.map((b, i) => Math.abs(b.y - old[i].y)));
+      Object.assign(p, fields0); applyMeshRotation(p);
+      a.setRing('fb', false);
+      H.zero();
+      return { turned: tr.state.applied, dy, dxz, oldDy };
     });
-    check('the window shows ' + K.ARC_WINDOW_DEG + '° of path, not the whole circle',
-      near(w.at0.span, K.ARC_WINDOW_DEG, 1e-9) && K.ARC_WINDOW_DEG < 360, w.at0.span + '°');
-    check('most of it is the travel AHEAD of where you are',
-      (w.at0.end - w.at0.at) > (w.at0.at - w.at0.start),
-      (w.at0.at - w.at0.start) + '° behind, ' + (w.at0.end - w.at0.at) + '° ahead');
-    check('the window scrolls with the angle rather than standing still',
-      near(w.at10.start - w.at0.start, 10, 1e-9) && near(w.at37.start - w.at0.start, 37, 1e-9),
-      w.at0.start + ' -> ' + w.at10.start + ' -> ' + w.at37.start);
-    check('gradations are 1° apart',
-      w.at0.ticks.length === K.ARC_WINDOW_DEG / K.TICK_DEG + 1, w.at0.ticks.length + ' ticks');
-    const gaps = w.at0.ticks.slice(1).map((t, i) => +(t.deg - w.at0.ticks[i].deg).toFixed(6));
-    check('...evenly, with no gap wrong', gaps.every(g => near(g, K.TICK_DEG, 1e-6)));
-    check('...and they move with the window, not pinned to absolute positions',
-      w.at10.ticks[0].deg !== w.at0.ticks[0].deg,
-      w.at0.ticks[0].deg + ' -> ' + w.at10.ticks[0].deg);
-    check('every 45° is marked as a detent',
-      w.at0.ticks.filter(t => t.major).every(t => near(t.deg % K.SNAP_STEP_DEG, 0, 1e-6)));
-
-    const s = w.snap;
-    const f = v => s.find(e => e.in === v).out;
-    check('the pull is zero AT a detent: f(0)=0, f(45)=45, f(90)=90',
-      near(f(0), 0, 1e-9) && near(f(45), 45, 1e-9) && near(f(90), 90, 1e-9));
-    check('it is continuous at the edge of the pull: f(R)=R',
-      near(f(22.5), 22.5, 1e-9), 'f(22.5) = ' + f(22.5));
-    check('it is a pull, not a stop - strictly increasing, so the piece always ' +
-      'turns the way you did',
-      s.every((e, i) => i === 0 || e.out > s[i - 1].out),
-      s.map(e => e.in + '->' + e.out.toFixed(2)).join(' '));
-    check('it pulls TOWARD the detent, never away',
-      f(44) > 44 && f(46) < 46 && f(1) < 1,
-      'f(44)=' + f(44).toFixed(2) + ' f(46)=' + f(46).toFixed(2) + ' f(1)=' + f(1).toFixed(2));
-    check('it reuses the grid-snap constants rather than inventing new feel',
-      K.SNAP_STRENGTH === 0.8 && near(K.SNAP_RADIUS_DEG, K.SNAP_STEP_DEG / 2, 1e-9));
+    check('the drag turned the leaned piece', Math.abs(r.turned) > 20, r.turned.toFixed(2) + '°');
+    check('every point keeps its height: the turn is about the plate\'s vertical',
+      r.dy < 1e-6, 'max height change ' + r.dy.toExponential(2) + ' mm');
+    check('...and it really moved round', r.dxz > 1, r.dxz.toFixed(2) + ' mm');
+    check('the old write to rotY would have turned it about the LEANED axis - heights change',
+      r.oldDy > 1, r.oldDy.toFixed(2) + ' mm');
   }
 
   /* ------------------------------------------------------------------ 3 */
-  console.log('\n=== 3. both axes free is one trackball, not two dials ===');
+  console.log('\n=== 3. direction: clockwise on screen is clockwise on the piece, from BOTH sides of every ring ===');
   {
-    const t = await page.evaluate(() => {
-      const a = window.nsoRotate;
-      a.setLock('x', false); a.setLock('y', false);
-      const out = { mode: a.mode(), handles: a.handleCount() };
-      a.setAngle('x', 0); a.setAngle('y', 0);
-      a.beginDrag('trackball', 500, 400, 700, 450);
-      a.moveDrag(600, 400);
-      out.afterDx = { x: a.rawAngle('x'), y: a.rawAngle('y') };
-      a.moveDrag(600, 500);
-      out.afterDy = { x: a.rawAngle('x'), y: a.rawAngle('y') };
-      a.moveDrag(650, 450);
-      out.afterDiag = { x: a.rawAngle('x'), y: a.rawAngle('y') };
-      a.endDrag();
+    const rows = await page.evaluate(() => {
+      const H = window.__rot, a = window.nsoRotate, p = H.p();
+      const out = [];
+      const sides = {
+        turn: [new THREE.Vector3(70, 210, 110), new THREE.Vector3(70, -210, 110)],
+        fb:   [new THREE.Vector3(210, 90, 70), new THREE.Vector3(-210, 90, 70)],
+        ss:   [new THREE.Vector3(80, 90, 210), new THREE.Vector3(80, 90, -210)]
+      };
+      ['turn', 'fb', 'ss'].forEach(ring => {
+        a.setRing('turn', ring === 'turn'); a.setRing('fb', ring === 'fb'); a.setRing('ss', ring === 'ss');
+        sides[ring].forEach((off, si) => {
+          [30, -30].forEach(screenDeg => {
+            H.zero();
+            a.turn(ring, 37);              // well clear of every snap
+            H.camera(off);
+            const A = H.axisVec(ring);
+            // a point FIXED TO THE PIECE, off the axis
+            const e = Math.abs(A.y) > 0.5 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
+            const local = p.mesh.worldToLocal(p.mesh.position.clone().add(e.multiplyScalar(12)));
+            const ang = () => {
+              p.mesh.updateMatrixWorld(true);
+              const s = H.screen(p.mesh.localToWorld(local.clone())), c = H.screen(p.mesh.position);
+              return Math.atan2(s.y - c.y, s.x - c.x) * 180 / Math.PI;
+            };
+            const look = new THREE.Vector3(); state.camera.getWorldDirection(look);
+            const q0 = H.q(), phi0 = ang();
+            const tr = H.trace(ring, screenDeg);
+            const phi1 = ang();
+            const dphi = ((phi1 - phi0 + 540) % 360) - 180;
+            const turnedBy = H.angleDeg(q0, H.q());
+            out.push({ ring, side: si === 0 ? '+' : '-', lookDotAxis: +look.dot(A).toFixed(3),
+                       sign: tr.state.sign, traced: screenDeg, pieceOnScreen: +dphi.toFixed(2),
+                       turned: +turnedBy.toFixed(4), worldDeg: +tr.state.applied.toFixed(4) });
+          });
+        });
+      });
+      a.setRing('turn', true); a.setRing('fb', false); a.setRing('ss', false);
+      H.zero(); H.home();
       return out;
     });
-    check('both axes free gives the trackball', t.mode === 'trackball', t.mode);
-    check('a sideways drag turns Y and leaves X alone',
-      t.afterDx.y !== 0 && t.afterDx.x === 0, JSON.stringify(t.afterDx));
-    check('a vertical drag turns X and leaves Y alone',
-      t.afterDy.x !== 0 && t.afterDy.y === t.afterDx.y, JSON.stringify(t.afterDy));
-    check('a diagonal drag turns BOTH at once - the thing two dials cannot do',
-      t.afterDiag.x !== t.afterDy.x && t.afterDiag.y !== t.afterDy.y,
-      JSON.stringify(t.afterDiag));
-
-    /* Task 7. There was no freehand rotation of a placed piece before this,
-       so there is no old number to compare against; what is pinned is the
-       relationship the ticket asked for - Y, the axis that runs away,
-       deliberately slower than X. */
-    check('Y is tuned calmer than X, and by a real margin',
-      K.GAIN_Y_DEG_PER_PX < K.GAIN_X_DEG_PER_PX * 0.75,
-      'X ' + K.GAIN_X_DEG_PER_PX + ' °/px vs Y ' + K.GAIN_Y_DEG_PER_PX + ' °/px');
-    check('...but not so slow it is sluggish', K.GAIN_Y_DEG_PER_PX >= 0.15,
-      K.GAIN_Y_DEG_PER_PX + ' °/px');
+    console.log('   ring  side  look.axis  sign  traced  piece-on-screen  turned  (world-signed)');
+    for (const r of rows) {
+      console.log('   ' + r.ring.padEnd(5) + ' ' + r.side.padEnd(5) + ' ' + String(r.lookDotAxis).padStart(8) +
+        '  ' + String(r.sign).padStart(4) + '  ' + String(r.traced).padStart(6) +
+        '  ' + String(r.pieceOnScreen).padStart(15) + '  ' + String(r.turned).padStart(6) +
+        '  (' + r.worldDeg + ')');
+    }
+    for (const ring of ['turn', 'fb', 'ss']) {
+      const mine = rows.filter(r => r.ring === ring);
+      check(ring + ': the camera really is on both sides of the ring',
+        mine.some(r => r.lookDotAxis > 0.3) && mine.some(r => r.lookDotAxis < -0.3));
+      check(ring + ': clockwise traced -> the piece goes clockwise on screen, from both sides',
+        mine.filter(r => r.traced > 0).every(r => r.pieceOnScreen > 5),
+        mine.filter(r => r.traced > 0).map(r => r.side + ':' + r.pieceOnScreen + '°').join(' '));
+      check(ring + ': anticlockwise traced -> anticlockwise on screen, from both sides',
+        mine.filter(r => r.traced < 0).every(r => r.pieceOnScreen < -5),
+        mine.filter(r => r.traced < 0).map(r => r.side + ':' + r.pieceOnScreen + '°').join(' '));
+      check(ring + ': the piece turns the 30° traced, 1:1',
+        mine.every(r => near(r.turned, 30, 1e-3)), mine.map(r => r.turned).join(' '));
+      check(ring + ': the world-signed turn flips with the side - that is the view term at work',
+        mine.filter(r => r.traced > 0 && r.side === '+')[0].worldDeg ===
+        -mine.filter(r => r.traced > 0 && r.side === '-')[0].worldDeg);
+    }
   }
 
   /* ------------------------------------------------------------------ 4 */
-  console.log('\n=== 4. each lock disables its own axis and only its own ===');
+  console.log('\n=== 4. opening Rotate, and a real click on an arrowhead: exactly 1°, never snapped ===');
   {
-    const l = await page.evaluate(() => {
-      const a = window.nsoRotate, out = {};
-      const probe = () => ({ mode: a.mode(), handles: a.handleCount() });
-      a.setLock('x', false); a.setLock('y', false); out.free = probe();
-
-      a.setLock('x', true);
-      a.setAngle('x', 0); a.setAngle('y', 0);
-      out.xLocked = probe();
-      out.xLocked.nudgeX = a.nudge('x', 1);
-      out.xLocked.xAfter = a.angleOf('x');
-      out.xLocked.nudgeY = a.nudge('y', 1);
-      out.xLocked.yAfter = a.angleOf('y');
-      out.xLocked.dragX = a.beginDrag('x', 1, 1, 0, 0);
-      out.xLocked.dragY = a.beginDrag('y', 1, 1, 0, 0); a.endDrag();
-
-      a.setLock('x', false); a.setLock('y', true);
-      a.setAngle('x', 0); a.setAngle('y', 0);
-      out.yLocked = probe();
-      out.yLocked.nudgeY = a.nudge('y', 1);
-      out.yLocked.yAfter = a.angleOf('y');
-      out.yLocked.nudgeX = a.nudge('x', 1);
-      out.yLocked.xAfter = a.angleOf('x');
-
-      a.setLock('x', true);
-      a.setAngle('x', 0); a.setAngle('y', 0);
-      out.both = probe();
-      out.both.nudgeX = a.nudge('x', 1); out.both.nudgeY = a.nudge('y', 1);
-      out.both.xAfter = a.angleOf('x'); out.both.yAfter = a.angleOf('y');
-      a.setLock('x', false); a.setLock('y', false);
-      return out;
-    });
-    check('X locked: the mode falls back to the Y dial', l.xLocked.mode === 'y', l.xLocked.mode);
-    check('X locked: its nudge is refused and X does not move',
-      l.xLocked.nudgeX === false && l.xLocked.xAfter === 0, JSON.stringify(l.xLocked));
-    check('X locked: its handle cannot be grabbed', l.xLocked.dragX === false);
-    check('X locked: Y is still completely free - nudge and grab both work',
-      l.xLocked.nudgeY === true && l.xLocked.yAfter === 1 && l.xLocked.dragY === true);
-    check('Y locked: the mode falls back to the X dial', l.yLocked.mode === 'x', l.yLocked.mode);
-    check('Y locked: its nudge is refused, X still free',
-      l.yLocked.nudgeY === false && l.yLocked.yAfter === 0 &&
-      l.yLocked.nudgeX === true && l.yLocked.xAfter === 1, JSON.stringify(l.yLocked));
-    check('both locked: nothing rotates and there is no handle at all',
-      l.both.mode === 'none' && l.both.handles === 0 &&
-      l.both.nudgeX === false && l.both.nudgeY === false &&
-      l.both.xAfter === 0 && l.both.yAfter === 0, JSON.stringify(l.both));
-    check('the locks are checkboxes that persist', await page.evaluate(() => {
-      const a = window.nsoRotate;
-      a.setLock('x', true);
-      const chk = document.getElementById('chk-rot-lock-x');
-      const shown = chk && chk.checked;
-      a.setLock('x', false);
-      return shown && chk && !chk.checked;
+    await page.click('#menu-rotate > summary');       // shut
+    await page.waitForTimeout(100);
+    await page.evaluate(() => { window.__rot.zero(); window.__rot.home(); });
+    await page.click('#menu-rotate > summary');       // open again
+    await page.waitForTimeout(150);
+    const open = await page.evaluate(() => ({
+      rings: window.nsoRotate.rings(), ringCount: window.nsoRotate.ringCount(),
+      arrows: window.nsoRotate.handleCount(),
+      boxes: ['turn', 'fb', 'ss'].map(k => document.getElementById('chk-rot-ring-' + k).checked)
     }));
+    check('opening Rotate shows one ring, Turn, with Turn checked and the others not',
+      open.ringCount === 1 && open.rings.join() === 'turn' &&
+      open.boxes.join() === 'true,false,false', JSON.stringify(open));
+    check('...carrying two arrowheads, one each way', open.arrows === 2, open.arrows + ' arrowheads');
+
+    for (const dir of [1, -1]) {
+      const before = await page.evaluate(() => ({ q: window.__rot.q().toArray(),
+        abs: window.nsoRotate.ringAngle('turn') }));
+      const h = await page.evaluate(d => window.nsoRotate.handleScreen('turn', d), dir);
+      await page.mouse.click(h.x, h.y);
+      await page.waitForTimeout(80);
+      const after = await page.evaluate((b) => {
+        const H = window.__rot;
+        const q0 = new THREE.Quaternion().fromArray(b.q), q1 = H.q();
+        const d = q1.clone().multiply(q0.clone().invert());
+        const ax = new THREE.Vector3(d.x, d.y, d.z).normalize();
+        return { turned: H.angleDeg(q0, q1), axisY: Math.abs(ax.y), abs: window.nsoRotate.ringAngle('turn'),
+                 readout: window.nsoRotate.readout(), shown: window.nsoRotate.readoutShown(),
+                 dragging: window.nsoRotate.dragging() };
+      }, before);
+      check((dir > 0 ? '+' : '-') + ' arrowhead: one click turns exactly 1°',
+        near(after.turned, 1, 1e-6), after.turned.toFixed(9) + '°');
+      check('...about the vertical, the way the arrowhead points',
+        near(after.axisY, 1, 1e-9) && near(after.abs - before.abs, dir, 1e-6),
+        'ring angle ' + before.abs.toFixed(4) + ' -> ' + after.abs.toFixed(4));
+      check('...even from a quarter turn, where a drag would snap', near(before.abs % 90, 0, 1e-6) || dir < 0);
+      check('...and the readout says 1°', /^Turn 1° [⟳⟲]$/.test(after.readout) && after.shown,
+        JSON.stringify(after.readout));
+      check('...and no drag is left running', after.dragging === false);
+    }
   }
 
   /* ------------------------------------------------------------------ 5 */
-  console.log('\n=== 5. the arrow keys, including held down ===');
+  console.log('\n=== 5. a full lap, real mouse: back where it started, readout past 360 ===');
   {
-    await page.evaluate(() => {
-      window.nsoRotate.setLock('x', false); window.nsoRotate.setLock('y', false);
-      window.nsoRotate.setAngle('x', 0); window.nsoRotate.setAngle('y', 0);
-      document.body.focus();
-    });
-
-    /* SHUT first, and this control is not optional. The arrows are scoped to
-       the Rotate menu because Tilt in app-tip-orient.js claims the same four
-       keys off #menu-tip - unscoped, one press would rotate AND tilt the same
-       piece. But every assertion below is of the form "the angle moved", and
-       those all fail alike whether the scoping is wrong or the nudge is simply
-       broken. Measuring the shut case first is what tells the two apart. */
-    const shut = await page.evaluate(() => {
-      const a = window.nsoRotate;
-      document.getElementById('menu-rotate').open = false;
-      a.setAngle('x', 0); a.setAngle('y', 0);
-      ['ArrowRight', 'ArrowUp'].forEach(function (k) {
-        document.dispatchEvent(new KeyboardEvent('keydown',
-          { key: k, bubbles: true, cancelable: true }));
-      });
-      return { x: a.angleOf('x'), y: a.angleOf('y') };
-    });
-    check('with the Rotate menu SHUT the arrows are not ours',
-      near(shut.x, 0, 1e-9) && near(shut.y, 0, 1e-9),
-      'X ' + shut.x + '°, Y ' + shut.y + '°');
-
-    await page.evaluate(() => { document.getElementById('menu-rotate').open = true; });
-    await page.keyboard.press('ArrowRight');
-    await page.keyboard.press('ArrowLeft');
-    await page.keyboard.press('ArrowLeft');
-    await page.keyboard.press('ArrowDown');
-    await page.keyboard.press('ArrowUp');
-    await page.keyboard.press('ArrowUp');
-    let a = await page.evaluate(() => ({ x: window.nsoRotate.angleOf('x'),
-                                         y: window.nsoRotate.angleOf('y') }));
-    check('left/right nudge X by 1° a press', near(a.x, -1, 1e-6), 'X ' + a.x + '°');
-    check('up/down nudge Y by 1° a press', near(a.y, -1, 1e-6), 'Y ' + a.y + '°');
-
-    /* Held down, the OS delivers a stream of keydowns with repeat=true. The
-       handler must not filter those - "hold to keep going" is exactly the
-       absence of an event.repeat guard, so that is what is measured. */
-    const rep = await page.evaluate(() => {
-      const before = window.nsoRotate.angleOf('x');
-      for (let i = 0; i < 12; i++) {
-        document.dispatchEvent(new KeyboardEvent('keydown',
-          { key: 'ArrowRight', repeat: true, bubbles: true, cancelable: true }));
+    for (const startDeg of [0, 37]) {
+      const s = await page.evaluate((d) => {
+        const H = window.__rot;
+        H.zero(); H.home();
+        if (d) window.nsoRotate.turn('turn', d);
+        return { q: H.q().toArray(), c: window.nsoRotate.centreScreen(),
+                 h: window.nsoRotate.handleScreen('turn', 1) };
+      }, startDeg);
+      const a0 = Math.atan2(s.h.y - s.c.y, s.h.x - s.c.x);
+      const R = Math.hypot(s.h.x - s.c.x, s.h.y - s.c.y);
+      await page.mouse.move(s.h.x, s.h.y);
+      await page.mouse.down();
+      let maxSeen = 0, readouts = [];
+      /* 366, not 362: from 0 the piece starts square, and 360 itself is then
+         a quarter turn the snap holds for 3° either side. */
+      for (let i = 1; i <= 366; i++) {
+        const a = a0 + i * Math.PI / 180;
+        await page.mouse.move(s.c.x + Math.cos(a) * R, s.c.y + Math.sin(a) * R);
+        if (i % 30 === 0 || i >= 362) {
+          const t = await page.evaluate(() => window.nsoRotate.readout());
+          const m = /(\d+(?:\.\d)?)°/.exec(t);
+          if (m) maxSeen = Math.max(maxSeen, +m[1]);
+          if (i >= 362) readouts.push(t);
+        }
       }
-      return { before: before, after: window.nsoRotate.angleOf('x') };
-    });
-    check('holding an arrow keeps nudging - 12 repeats move 12°',
-      near(rep.after - rep.before, 12, 1e-6), rep.before + '° -> ' + rep.after + '°');
-
-    const locked = await page.evaluate(() => {
-      const a = window.nsoRotate;
-      a.setLock('x', true);
-      const before = a.angleOf('x');
-      for (let i = 0; i < 5; i++) {
-        document.dispatchEvent(new KeyboardEvent('keydown',
-          { key: 'ArrowRight', repeat: true, bubbles: true, cancelable: true }));
+      // ...and back to exactly one lap
+      for (let i = 365; i >= 360; i--) {
+        const a = a0 + i * Math.PI / 180;
+        await page.mouse.move(s.c.x + Math.cos(a) * R, s.c.y + Math.sin(a) * R);
       }
-      const after = a.angleOf('x');
-      a.setLock('x', false);
-      return { before: before, after: after };
-    });
-    check('a locked axis ignores the keys, held or not',
-      near(locked.after, locked.before, 1e-9), locked.before + '° -> ' + locked.after + '°');
-
-    const typing = await page.evaluate(() => {
-      const a = window.nsoRotate;
-      a.setAngle('x', 0);
-      const inp = document.getElementById('cut-mm') || document.querySelector('input[type="number"]');
-      if (!inp) return null;
-      inp.dispatchEvent(new KeyboardEvent('keydown',
-        { key: 'ArrowRight', bubbles: true, cancelable: true }));
-      return a.angleOf('x');
-    });
-    check('arrows inside a text field still belong to the field',
-      typing === null || near(typing, 0, 1e-9), 'X ' + typing + '°');
-
-    // Leave it as it was found - the sections after this one drive the 90°
-    // buttons, and an open menu is not their subject.
-    await page.evaluate(() => { document.getElementById('menu-rotate').open = false; });
+      const last = await page.evaluate(() => window.nsoRotate.readout());
+      await page.mouse.up();
+      await page.waitForTimeout(80);
+      const r = await page.evaluate((q) => {
+        const H = window.__rot;
+        return { off: H.angleDeg(new THREE.Quaternion().fromArray(q), H.q()),
+                 controls: state.controls.enabled, dragging: window.nsoRotate.dragging() };
+      }, s.q);
+      check('from ' + startDeg + '°: a lap puts the piece back where it started',
+        r.off < 1e-6, 'off by ' + r.off.toExponential(2) + '°');
+      check('...the readout went past 360 on the way', maxSeen > 360,
+        'max ' + maxSeen + '°; ' + readouts.join(' | '));
+      check('...and reads 360 at exactly one lap', /^Turn 360° [⟳⟲]/.test(last), JSON.stringify(last));
+      check('...and the camera is given back', r.controls && !r.dragging);
+    }
   }
 
   /* ------------------------------------------------------------------ 6 */
-  console.log('\n=== 6. the 90° buttons are untouched, and the locks do not reach them ===');
+  console.log('\n=== 6. the snap: hard, inside 3° of a quarter turn only, one flash ===');
   {
-    const b = await page.evaluate(() => {
-      const a = window.nsoRotate, out = {};
-      const yaw = () => +(((state.placed[0].rotY || 0) * 180 / Math.PI).toFixed(6));
-      a.setLock('x', false); a.setLock('y', false);
-      a.setAngle('y', 0);
-      out.before = yaw();
-      document.getElementById('btn-rot-right').click();
-      out.afterRight = yaw();
-      document.getElementById('btn-rot-left').click();
-      out.afterLeft = yaw();
-      /* The one that would catch this ticket over-reaching: a lock is about
-         the HANDLE and the arrow keys. It must not quietly disable a button
-         that has worked since long before any of this existed. */
-      a.setLock('y', true);
-      a.setAngle('y', 0);
-      const pre = yaw();
-      document.getElementById('btn-rot-right').click();
-      out.lockedYawFrom = pre; out.lockedYawTo = yaw();
-      a.setLock('y', false);
-      return out;
+    const r = await page.evaluate(() => {
+      const H = window.__rot, a = window.nsoRotate;
+      H.zero(); H.home();
+      a.turn('turn', 37);
+      const abs0 = a.ringAngle('turn');
+      const target = Math.ceil(abs0 / 90) * 90;            // the next quarter turn up
+      const flash0 = a.flashes();
+      const sign = a.dialSign('turn');
+      /* trace so the ring angle RISES through the quarter turn and on past it */
+      const steps = [];
+      const tr = H.trace('turn', sign * (target - abs0 + 12), { step: 0.5, each: () => {
+        const st = a.dragState();
+        return { raw: st.raw, applied: st.applied, abs: a.ringAngle('turn'), snapped: st.snapped, moved: st.moved,
+                 readout: a.readout() };
+      } });
+      const flashes = a.flashes() - flash0;
+      H.zero();
+      return { abs0, target, seen: tr.seen, flashes };
     });
-    check('90° right still turns exactly 90°', near(b.afterRight - b.before, 90, 1e-6),
-      b.before + '° -> ' + b.afterRight + '°');
-    check('90° left still turns it exactly back', near(b.afterLeft, b.before, 1e-6),
-      b.afterRight + '° -> ' + b.afterLeft + '°');
-    check('a Y lock does NOT disable the 90° button - different control, untouched',
-      near(b.lockedYawTo - b.lockedYawFrom, 90, 1e-6),
-      b.lockedYawFrom + '° -> ' + b.lockedYawTo + '°');
-    const src = require('fs').readFileSync(path.join(ROOT, 'app-core.js'), 'utf8');
-    check('rotateSelected still moves by exactly a quarter turn in the source',
-      /p\.rotY = \(p\.rotY \|\| 0\) \+ dir \* \(Math\.PI \/ 2\);/.test(src));
+    const rows = r.seen.filter(s => s.moved);
+    const sameAngle = (x, y) => near(((x - y) % 360 + 540) % 360 - 180, 0, 1e-6);
+    const inWin = rows.filter(s => Math.abs(r.abs0 + s.raw - r.target) <= 3);
+    const outWin = rows.filter(s => Math.abs(r.abs0 + s.raw - r.target) > 3);
+    check('the drag passed through the snap window and out the other side',
+      inWin.length > 4 && outWin.some(s => s.raw > r.target - r.abs0 + 3));
+    check('inside 3° the piece is ON the quarter turn, exactly',
+      inWin.every(s => sameAngle(s.abs, r.target)),
+      inWin.map(s => (r.abs0 + s.raw).toFixed(1) + '->' + s.abs.toFixed(3)).slice(0, 4).join(' ') + ' ...');
+    check('outside it the piece is exactly where the pointer says - no pull anywhere',
+      outWin.every(s => near(s.applied, s.raw, 1e-9)),
+      'max |applied-raw| ' + Math.max(...outWin.map(s => Math.abs(s.applied - s.raw))).toExponential(1));
+    check('the jump at the edge is the whole snap and no more than 3°',
+      rows.every(s => Math.abs(s.applied - s.raw) <= 3 + 1e-9));
+    check('the ring flashed exactly once, on landing', r.flashes === 1, r.flashes + ' flash(es)');
+    check('the readout says it is square while it is', inWin.every(s => / · square$/.test(s.readout)),
+      inWin[0] && inWin[0].readout);
   }
 
   /* ------------------------------------------------------------------ 7 */
-  console.log('\n=== 7. the handle is a separate grab target from the piece ===');
+  console.log('\n=== 7. arrow keys: 1° on the ring last touched, only while Rotate owns the input ===');
   {
-    /* Open first, and that is part of the subject now rather than setup.
-       The guide used to be drawn on whatever was selected for as long as it
-       was selected - and app-core hit-tests it AHEAD of select-and-drag, so
-       it was a live rotation control in the Tip and Move menus too, where
-       nobody had asked for one. It belongs to this menu; see
-       nso_input_mode_test.js for the cross-menu half of that. */
-    const h = await page.evaluate(() => {
-      const a = window.nsoRotate;
-      document.getElementById('menu-rotate').open = true;
-      a.setLock('x', false); a.setLock('y', false);
-      a.refresh();
-      const g = state.scene.getObjectByName('nso-rotate-handles');
-      return { exists: !!g, visible: !!(g && g.visible), kids: g ? g.children.length : 0,
-               balls: g ? g.children.filter(c => c.userData.nsoRotateHandle).length : 0,
-               follows: g && state.placed[0] ?
-                 g.position.distanceTo(state.placed[0].mesh.position) : null };
-    });
-    check('the handles are in the scene as their own object', h.exists && h.visible);
-    check('there is a ball to grab', h.balls >= 1, h.balls + ' ball(s), ' + h.kids + ' parts');
-    check('the group sits on the selected piece', near(h.follows, 0, 1e-6), h.follows);
-
-    /* And gone when the menu is - EMPTIED, not hidden. `visible` is the flag
-       app-core's picker was already trusting, so hiding the group would have
-       left the same grab target live under another menu. */
+    await page.evaluate(() => { window.__rot.zero(); window.__rot.home(); document.body.focus(); });
     const shut = await page.evaluate(() => {
+      const H = window.__rot;
       document.getElementById('menu-rotate').open = false;
-      window.nsoRotate.refresh();
-      const g = state.scene.getObjectByName('nso-rotate-handles');
-      return { visible: !!(g && g.visible), kids: g ? g.children.length : 0 };
+      const q0 = H.q();
+      ['ArrowRight', 'ArrowUp'].forEach(k => document.dispatchEvent(
+        new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true })));
+      const off = H.angleDeg(q0, H.q());
+      document.getElementById('menu-rotate').open = true;
+      return off;
     });
-    check('with the menu shut there is no handle left in the scene at all',
-      !shut.visible && shut.kids === 0, JSON.stringify(shut));
+    await page.waitForTimeout(80);
+    check('with Rotate SHUT the arrows are not ours', shut === 0, shut + '°');
+
+    const k = async key => {
+      const q = await page.evaluate(() => window.__rot.q().toArray());
+      await page.keyboard.press(key);
+      return page.evaluate((q0) => {
+        const H = window.__rot, q1 = H.q(), qq = new THREE.Quaternion().fromArray(q0);
+        const d = q1.clone().multiply(qq.clone().invert());
+        const ax = new THREE.Vector3(d.x, d.y, d.z).normalize();
+        return { deg: H.angleDeg(qq, q1), ax: [ax.x, ax.y, ax.z].map(v => +Math.abs(v).toFixed(6)),
+                 readout: window.nsoRotate.readout() };
+      }, q);
+    };
+    let r = await k('ArrowRight');
+    check('Turn only: ArrowRight turns 1° about the vertical', near(r.deg, 1, 1e-6) && r.ax[1] === 1,
+      r.deg.toFixed(6) + '° ' + JSON.stringify(r.ax) + ' ' + r.readout);
+    check('...clockwise as seen from here', / ⟳$/.test(r.readout), r.readout);
+    r = await k('ArrowLeft');
+    check('ArrowLeft turns it back, anticlockwise', near(r.deg, 1, 1e-6) && / ⟲$/.test(r.readout), r.readout);
+
+    await page.click('#chk-rot-ring-fb');
+    await page.waitForTimeout(80);
+    r = await k('ArrowUp');
+    check('two rings shown, none touched: the keys stay on Turn', r.ax[1] === 1, JSON.stringify(r.ax));
+    const h = await page.evaluate(() => window.nsoRotate.handleScreen('fb', 1));
+    await page.mouse.click(h.x, h.y);
+    await page.waitForTimeout(60);
+    r = await k('ArrowUp');
+    check('after touching Lean front/back the keys follow it: 1° about the plate X',
+      near(r.deg, 1, 1e-6) && r.ax[0] === 1, r.deg.toFixed(6) + '° ' + JSON.stringify(r.ax));
+    await page.click('#chk-rot-ring-turn');            // Turn off: Lean front/back is the only ring
+    await page.waitForTimeout(60);
+    r = await k('ArrowDown');
+    check('the only ring shown takes the keys', r.ax[0] === 1, JSON.stringify(r.ax));
+    await page.click('#chk-rot-ring-turn');
+    await page.click('#chk-rot-ring-fb');
+    await page.waitForTimeout(60);
+
+    const rep = await page.evaluate(() => {
+      const H = window.__rot, q0 = H.q();
+      for (let i = 0; i < 12; i++) document.dispatchEvent(new KeyboardEvent('keydown',
+        { key: 'ArrowRight', repeat: true, bubbles: true, cancelable: true }));
+      return H.angleDeg(q0, H.q());
+    });
+    check('held down: 12 repeats turn 12°', near(rep, 12, 1e-6), rep.toFixed(6) + '°');
+    const typing = await page.evaluate(() => {
+      const H = window.__rot, q0 = H.q();
+      const inp = document.querySelector('input[type="number"]');
+      if (!inp) return null;
+      inp.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }));
+      return H.angleDeg(q0, H.q());
+    });
+    check('arrows inside a text field still belong to the field', typing === null || typing === 0, typing);
+  }
+
+  /* ------------------------------------------------------------------ 8 */
+  console.log('\n=== 8. which rings show, and closing Rotate puts it back to Turn only ===');
+  {
+    const probe = () => page.evaluate(() => ({ rings: window.nsoRotate.rings().join(),
+      count: window.nsoRotate.ringCount(), arrows: window.nsoRotate.handleCount(),
+      boxes: ['turn', 'fb', 'ss'].map(k => +document.getElementById('chk-rot-ring-' + k).checked).join('') }));
+    let s = await probe();
+    check('Turn only to start', s.rings === 'turn' && s.count === 1 && s.boxes === '100', JSON.stringify(s));
+    await page.click('#chk-rot-ring-fb'); await page.waitForTimeout(50);
+    s = await probe();
+    check('checking Lean front/back adds that ring', s.rings === 'turn,fb' && s.count === 2 && s.arrows === 4,
+      JSON.stringify(s));
+    await page.click('#chk-rot-ring-ss'); await page.waitForTimeout(50);
+    s = await probe();
+    check('all three checked: three rings, six arrowheads', s.count === 3 && s.arrows === 6 && s.boxes === '111',
+      JSON.stringify(s));
+    await page.screenshot({ path: path.join(require('os').tmpdir(), 'nso-rot-three.png') });
+    const colours = await page.evaluate(() => {
+      const g = state.scene.getObjectByName('nso-rotate-handles');
+      return g.children.filter(c => c.userData.nsoRotateRing).map(c => ({
+        ring: c.userData.nsoRotateRing, colour: c.material.color.getHexString(),
+        depthTest: c.material.depthTest }));
+    });
+    check('each ring its own colour, drawn on top of everything (no depth test)',
+      new Set(colours.map(c => c.colour)).size === 3 && colours.every(c => c.depthTest === false),
+      JSON.stringify(colours));
+    check('every ring is centred on the piece', await page.evaluate(() => {
+      const g = state.scene.getObjectByName('nso-rotate-handles');
+      return g.position.distanceTo(window.__rot.p().mesh.position) < 1e-9;
+    }));
+
+    await page.click('#menu-tip > summary'); await page.waitForTimeout(120);
+    const gone = await page.evaluate(() => {
+      const g = state.scene.getObjectByName('nso-rotate-handles');
+      return { kids: g ? g.children.length : 0, visible: !!(g && g.visible) };
+    });
+    check('leaving Rotate empties the scene group - no ring left to hit',
+      gone.kids === 0 && !gone.visible, JSON.stringify(gone));
+    await page.click('#menu-rotate > summary'); await page.waitForTimeout(120);
+    s = await probe();
+    check('reopening Rotate: Turn only again, boxes reset', s.rings === 'turn' && s.count === 1 &&
+      s.boxes === '100', JSON.stringify(s));
+
+    /* Leaving mid-drag: the menu goes from under a held arrowhead. */
+    const h = await page.evaluate(() => window.nsoRotate.handleScreen('turn', 1));
+    await page.mouse.move(h.x, h.y);
+    await page.mouse.down();
+    await page.mouse.move(h.x + 30, h.y + 25, { steps: 5 });
+    const mid = await page.evaluate(() => ({ dragging: window.nsoRotate.dragging(),
+      controls: state.controls.enabled }));
+    await page.evaluate(() => { document.getElementById('menu-tip').open = true; });
+    await page.waitForTimeout(60);
+    const after = await page.evaluate(() => ({ dragging: window.nsoRotate.dragging(),
+      controls: state.controls.enabled,
+      kids: state.scene.getObjectByName('nso-rotate-handles').children.length }));
+    await page.mouse.up();
+    check('a drag was under way', mid.dragging && !mid.controls, JSON.stringify(mid));
+    check('...leaving the menu ends it, gives the camera back and removes every ring',
+      !after.dragging && after.controls && after.kids === 0, JSON.stringify(after));
+    await page.evaluate(() => { document.getElementById('menu-tip').open = false; });
+    await page.click('#menu-rotate > summary'); await page.waitForTimeout(120);
+  }
+
+  /* ------------------------------------------------------------------ 9 */
+  console.log('\n=== 9. Undo steps back one press at a time ===');
+  {
+    await page.evaluate(() => { window.__rot.zero(); window.__rot.home(); });
+    const qs = [await page.evaluate(() => window.__rot.q().toArray())];
+    // a drag, a click, a drag
+    for (const kind of ['drag', 'click', 'drag']) {
+      const h = await page.evaluate(() => window.nsoRotate.handleScreen('turn', 1));
+      const c = await page.evaluate(() => window.nsoRotate.centreScreen());
+      if (kind === 'click') await page.mouse.click(h.x, h.y);
+      else {
+        await page.mouse.move(h.x, h.y); await page.mouse.down();
+        const a0 = Math.atan2(h.y - c.y, h.x - c.x), R = Math.hypot(h.x - c.x, h.y - c.y);
+        for (let i = 1; i <= 25; i++) {
+          const a = a0 + i * Math.PI / 180;
+          await page.mouse.move(c.x + Math.cos(a) * R, c.y + Math.sin(a) * R);
+        }
+        await page.mouse.up();
+      }
+      await page.waitForTimeout(60);
+      qs.push(await page.evaluate(() => window.__rot.q().toArray()));
+    }
+    const offs = [];
+    for (let i = qs.length - 2; i >= 0; i--) {
+      await page.click('#btn-undo');
+      await page.waitForTimeout(80);
+      offs.push(await page.evaluate((q) => window.__rot.angleDeg(new THREE.Quaternion().fromArray(q),
+        window.__rot.q()), qs[i]));
+    }
+    check('three presses, three Undos, each back exactly one press',
+      offs.length === 3 && offs.every(o => o < 1e-6), offs.map(o => o.toExponential(1)).join(' '));
+  }
+
+  /* ----------------------------------------------------------------- 10 */
+  console.log('\n=== 10. the 90° buttons are untouched; the locks and the trackball are gone ===');
+  {
+    const b = await page.evaluate(() => {
+      const H = window.__rot; H.zero();
+      const yaw = () => +((H.p().rotY || 0) * 180 / Math.PI).toFixed(6);
+      const out = { before: yaw() };
+      document.getElementById('btn-rot-right').click(); out.right = yaw();
+      document.getElementById('btn-rot-left').click(); out.left = yaw();
+      out.locks = !!(document.getElementById('chk-rot-lock-x') || document.getElementById('chk-rot-lock-y'));
+      out.api = Object.keys(window.nsoRotate).filter(k => /lock|trackball|mode/i.test(k));
+      H.zero();
+      return out;
+    });
+    check('90° right still turns exactly 90°', near(b.right - b.before, 90, 1e-6), b.before + ' -> ' + b.right);
+    check('90° left turns it exactly back', near(b.left, b.before, 1e-6), b.right + ' -> ' + b.left);
+    const src = require('fs').readFileSync(path.join(ROOT, 'app-core.js'), 'utf8');
+    check('rotateSelected still moves rotY by exactly a quarter turn in the source',
+      /p\.rotY = \(p\.rotY \|\| 0\) \+ dir \* \(Math\.PI \/ 2\);/.test(src));
+    check('the X/Y lock checkboxes are gone from the page', b.locks === false);
+    check('no lock, trackball or mode left in the API', b.api.length === 0, JSON.stringify(b.api));
+  }
+
+  /* ----------------------------------------------------------------- 11 */
+  console.log('\n=== 11. the ring body is the track, not a handle ===');
+  {
+    const at = await page.evaluate(() => {
+      const H = window.__rot, p = H.p();
+      H.zero(); H.home();
+      const g = state.scene.getObjectByName('nso-rotate-handles');
+      const ring = g.children.find(c => c.userData.nsoRotateRing === 'turn');
+      // the far side of the ring from the arrowheads, which sit nearest the camera
+      const r = ring.geometry.parameters.radius;
+      const away = p.mesh.position.clone().sub(state.camera.position).setY(0).normalize().multiplyScalar(r);
+      return { s: H.screen(p.mesh.position.clone().add(away)), q: H.q().toArray() };
+    });
+    await page.mouse.move(at.s.x, at.s.y);
+    await page.mouse.down();
+    await page.mouse.move(at.s.x + 40, at.s.y + 20, { steps: 6 });
+    await page.mouse.up();
+    await page.waitForTimeout(60);
+    const off = await page.evaluate((q) => window.__rot.angleDeg(new THREE.Quaternion().fromArray(q),
+      window.__rot.q()), at.q);
+    check('a drag on the ring body does not turn the piece', off < 1e-9, off + '°');
+  }
+
+  /* ----------------------------------------------------------------- 12 */
+  console.log('\n=== 12. export writes what the screen shows - leaned and turned ===');
+  {
+    const r = await page.evaluate(() => {
+      const H = window.__rot, a = window.nsoRotate, p = H.p();
+      H.zero();
+      a.turn('fb', 90); a.turn('turn', 30); a.turn('ss', 20);
+      p.mesh.updateMatrixWorld(true);
+      // screen: each vertex's world offset from the piece's centre, in Bambu axes
+      const pos = p.mesh.geometry.attributes.position, v = new THREE.Vector3();
+      const screen = [];
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i); p.mesh.localToWorld(v); v.sub(p.mesh.position);
+        screen.push([v.x, -v.z, v.y]);
+      }
+      const plate = getCurrentPlate();
+      const objs = buildPlacedObjects3MF();
+      // the indexed mesh back to a soup, triangle by triangle, in the order it was baked
+      const o = objs[state.selectedIndex], flat = [];
+      o.triangles.forEach(t => flat.push(o.vertices[t * 3], o.vertices[t * 3 + 1], o.vertices[t * 3 + 2]));
+      if (flat.length !== screen.length * 3) return { worst: null, minZ: null, why: 'count ' + flat.length / 3 + ' vs ' + screen.length };
+      const cx = p.x + plate.w / 2, cy = -p.z + plate.d / 2, cz = p.height / 2 + (p.liftY || 0);
+      let worst = 0;
+      for (let i = 0; i < screen.length; i++) {
+        const e = [flat[i * 3] - cx, flat[i * 3 + 1] - cy, flat[i * 3 + 2] - cz];
+        worst = Math.max(worst, Math.hypot(e[0] - screen[i][0], e[1] - screen[i][1], e[2] - screen[i][2]));
+      }
+      let minZ = Infinity;
+      for (let i = 2; i < flat.length; i += 3) minZ = Math.min(minZ, flat[i]);
+      const out = { worst, minZ,
+                    pose: { tiltX: p.tiltX, rotY: p.rotY * 180 / Math.PI, tiltZ: p.tiltZ } };
+      H.zero();
+      return out;
+    });
+    check('every exported vertex sits where the screen draws it (leaned 90, turned 30, leaned 20)',
+      r.worst < 1e-3, 'worst ' + (r.worst != null ? r.worst.toExponential(2) : r.worst) + ' mm; pose ' +
+      JSON.stringify(r.pose));
+    check('...and the exported piece rests on the plate', near(r.minZ, 0, 1e-3), 'min z ' + r.minZ);
   }
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
