@@ -602,8 +602,13 @@ withApp(async (page, logs) => {
   }
 
   /* ----------------------------------------------------------------- 10 */
-  console.log('\n=== 10. the 90° buttons are untouched; the locks and the trackball are gone ===');
+  console.log('\n=== 10. the 90° buttons turn about the plate\'s vertical; the locks and the trackball are gone ===');
   {
+    /* The 90° buttons go through nsoRotate.turn('turn', ...) now, with the
+       hard snap: from flat, 90° ⟳ is -90 on rotY (clockwise seen from above
+       - it used to be +90, anticlockwise, under a ⟳), ⟲ the way back. That
+       they turn about the PLATE's vertical on a leaned piece is
+       tools/nso_pose_buttons_drive_check.js's. */
     const b = await page.evaluate(() => {
       const H = window.__rot; H.zero();
       const yaw = () => +((H.p().rotY || 0) * 180 / Math.PI).toFixed(6);
@@ -615,11 +620,24 @@ withApp(async (page, logs) => {
       H.zero();
       return out;
     });
-    check('90° right still turns exactly 90°', near(b.right - b.before, 90, 1e-6), b.before + ' -> ' + b.right);
-    check('90° left turns it exactly back', near(b.left, b.before, 1e-6), b.right + ' -> ' + b.left);
+    check('90° ⟳ turns exactly 90°, clockwise from above', near(b.right - b.before, -90, 1e-6), b.before + ' -> ' + b.right);
+    check('⟲ 90° turns it exactly back', near(b.left, b.before, 1e-6), b.right + ' -> ' + b.left);
+    const lean = await page.evaluate(() => {
+      const H = window.__rot, p = H.p(); H.zero();
+      window.nsoRotate.turn('fb', 45);
+      const a = H.q();
+      document.getElementById('btn-rot-left').click();
+      const d = H.q().multiply(a.clone().invert());
+      const s = Math.hypot(d.x, d.y, d.z);
+      H.zero();
+      return { deg: 2 * Math.atan2(s, Math.abs(d.w)) * 180 / Math.PI, y: s ? d.y * Math.sign(d.w) / s : 0 };
+    });
+    check('on a piece leaned 45°, ⟲ 90° turns it about the plate\'s vertical, anticlockwise from above',
+      near(lean.deg, 90, 1e-6) && near(lean.y, 1, 1e-9), lean.deg.toFixed(6) + '° about y ' + lean.y.toFixed(9));
     const src = require('fs').readFileSync(path.join(ROOT, 'app-core.js'), 'utf8');
-    check('rotateSelected still moves rotY by exactly a quarter turn in the source',
-      /p\.rotY = \(p\.rotY \|\| 0\) \+ dir \* \(Math\.PI \/ 2\);/.test(src));
+    check('rotateSelected goes through the Turn ring\'s plate-axis turn, snapped, in the source',
+      /turnSelectedAbout\('yaw', 'turn', -dir \* 90, \{ snap: true \}\)/.test(src) &&
+      !/p\.rotY = \(p\.rotY \|\| 0\) \+ dir/.test(src));
     check('the X/Y lock checkboxes are gone from the page', b.locks === false);
     check('no lock, trackball or mode left in the API', b.api.length === 0, JSON.stringify(b.api));
   }

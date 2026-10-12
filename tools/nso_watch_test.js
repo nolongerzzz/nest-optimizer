@@ -159,6 +159,8 @@ async function partB1(page) {
   ok((await page.evaluate(() => NSOWatch.check('baseline'))).length === 0,
      'the piece starts consistent');
 
+  /* rotateSelected(1) is 90° ⟳ - clockwise seen from above, so -90 on rotY
+     (it was +90 until the pose buttons moved onto nsoRotate.turn). */
   let found = await after(page, 'rotate', () => rotateSelected(1));
   ok(found.length === 0, 'a plain 90 yaw stays consistent', texts(found));
 
@@ -175,7 +177,7 @@ async function partB1(page) {
     const pm = state.placed.find(p => p && p.mesh && p.sourceId === getActiveModel().id);
     return { mesh: pm.mesh.rotation.y * 180 / Math.PI, record: (pm.rotY || 0) * 180 / Math.PI };
   });
-  ok(Math.abs(yaw.mesh - 90) < 1e-6 && Math.abs(yaw.record - 90) < 1e-6,
+  ok(Math.abs(yaw.mesh + 90) < 1e-6 && Math.abs(yaw.record + 90) < 1e-6,
      'the piece is still drawn at the 90 deg its record claims', JSON.stringify(yaw));
 
   /* The pose check still fires: a mesh put back at identity under a record
@@ -188,7 +190,7 @@ async function partB1(page) {
   const pose = found.filter(f => f.subject === 'pose');
   ok(pose.length === 1, 'negative control: a mesh reset under a yawed record raises exactly one phantom pose',
      'subjects: ' + subjects(found).join(', '));
-  ok(/logical pose is \(0\.0, 90\.0, 0\.0\)deg/.test(pose.length ? pose[0].msg : ''),
+  ok(/logical pose is \(0\.0, -90\.0, 0\.0\)deg/.test(pose.length ? pose[0].msg : ''),
      'the finding names the 90 deg the entry still claims',
      pose.length ? pose[0].msg : '(none)');
 
