@@ -11,7 +11,7 @@
      Length shorter    -> Shorten; the readout follows; Undo restores the soup
      Length longer     -> Extend
      Whole x 2         -> all three sizes double
-     tape_on-edge-single (185 mm on an A1 Mini's 180) -> over by 5.0 mm on W;
+     tape_on-edge-single (185 mm on an A1 Mini's 180) -> 5.0 mm too wide for A1 Mini;
                           Fit to plate brings it inside 180 and says the factor;
                           pressed again it already fits and changes nothing
      Stock box         -> Bar
@@ -167,7 +167,8 @@ withApp(async (page, logs) => {
   await select(page, tape);
   const c4 = await card(page);
   console.log('   readout: ' + c4.readout);
-  check('the verdict says over by 5.0 mm on W', / · over by 5\.0 mm on W$/.test(c4.readout), c4.readout);
+  check('the verdict says 5.0 mm too wide for A1 Mini - words, not the W / D / H a bar\'s sides use',
+    / · 5\.0 mm too wide for A1 Mini$/.test(c4.readout), c4.readout);
   check('the piece is 185 mm along the bed\'s W', Math.abs(c4.size.x - 185) < 1e-4, String(c4.size.x));
   const s4 = await clickScale(page, '#btn-scale-fit', 'Fit to plate|refused|stood down');
   const c5 = await card(page);
@@ -177,6 +178,7 @@ withApp(async (page, logs) => {
   const factor = 180 / 185;
   check('Fit to plate says the factor', s4.indexOf('×' + factor.toFixed(6)) >= 0, s4);
   check('...and that it now fits', /fits A1 Mini( \||$)/.test(s4), s4);
+  check('...in words: width 185.0 → 180.0 mm, now 180.0 wide', /- width 185\.0 → 180\.0 mm, now 180\.0 wide, /.test(s4), s4);
   check('W is inside 180, by the fit check\'s own 1e-4 mm', c5.size.x <= 180 + 1e-4, String(c5.size.x));
   check('the other two shrank by the same factor',
     Math.abs(c5.size.y / c4.size.y - factor) < 1e-6 && Math.abs(c5.size.z / c4.size.z - factor) < 1e-6);

@@ -423,8 +423,19 @@ function NSO_scaleSelectedModel(spec) {
    They spoke the display frame (Y up), so "Height" was right and "Z" was the
    bed's depth, and a user asking for a wider ring got a taller, thicker one.
    NSO_scaleSolve still takes those axes underneath; the card no longer offers
-   them. The per-shape verbs (outer / bore / wall, width / depth) are the next
-   two tickets, not this one.
+   them.
+
+   A RING adds three fields under the readout, each with its hold stated
+   beside it, and a ROD one (nso_ring.js; Scale part 2):
+
+     Outer Ø [ ]   wall kept     outer and bore faces move together
+     Bore  Ø [ ]   outer kept    bore faces only
+     Wall    [ ]   outer kept    bore faces only
+     Diameter [ ]  (a rod)       outer faces only
+
+   Dimension edits move boundary faces, never scale; the length is held bit
+   for bit. Each field is prefilled with the current value, each apply is one
+   Undo step, and the readout re-reads after it. Bars get nothing new yet.
 --------------------------------------------------------------------------- */
 
 /* The section reading for a piece, cached on its soup: a bake replaces
@@ -440,8 +451,13 @@ function NSO_scaleSectionOf(m) {
   return s;
 }
 
+/* The bed's three directions as words. W / D / H on this card are a bar's
+   section sides, so the build-volume verdict does not reuse the letters. */
+var NSO_SCALE_FIT_WORD = { x: 'wide', y: 'deep', z: 'tall' };
+var NSO_SCALE_FIT_NOUN = { x: 'width', y: 'depth', z: 'height' };
+
 /* The build-volume verdict for one piece, in print terms: the same report the
-   plate's own warning reads, axes named W / D / H as the bed is. */
+   plate's own warning reads - "5.0 mm too wide for A1 Mini". */
 function NSO_scaleFitVerdict(m) {
   if (!m || typeof NSO_fitCheckAll !== 'function') return '';
   var all = NSO_fitCheckAll();
@@ -451,10 +467,9 @@ function NSO_scaleFitVerdict(m) {
   if (!rep) return '';
   var name = String(rep.printer_name || '').replace(/^(Bambu|Creality) /, '');
   if (rep.fits) return 'fits ' + name;
-  var AX = { x: 'W', y: 'D', z: 'H' };
-  return 'over by ' + rep.over.map(function (o, k) {
-    return o.over_mm.toFixed(1) + (k === 0 ? ' mm' : '') + ' on ' + AX[o.axis];
-  }).join(', ');
+  return rep.over.map(function (o) {
+    return o.over_mm.toFixed(1) + ' mm too ' + NSO_SCALE_FIT_WORD[o.axis];
+  }).join(', ') + ' for ' + name;
 }
 
 /* The card's first line, readout and verdict. Returned as well as rendered
@@ -490,8 +505,8 @@ function NSO_scaleFitToPlate() {
   var name = String(printer.name || '').replace(/^(Bambu|Creality) /, '');
   if (rep.fits) {
     if (typeof setStatus === 'function') {
-      setStatus('Fit to plate: already fits ' + name + ' (' + size.x.toFixed(1) + ' × ' + size.y.toFixed(1) +
-                ' × ' + size.z.toFixed(1) + ' mm in ' + printer.bedX + ' × ' + printer.bedY + ' × ' +
+      setStatus('Fit to plate: already fits ' + name + ' (' + size.x.toFixed(1) + ' wide, ' + size.y.toFixed(1) +
+                ' deep, ' + size.z.toFixed(1) + ' tall in ' + printer.bedX + ' × ' + printer.bedY + ' × ' +
                 printer.buildZ + ') - nothing changed');
     }
     return { ok: true, changed: false, factor: 1, fits: true };
@@ -500,10 +515,10 @@ function NSO_scaleFitToPlate() {
   var r = NSO_scaleSelectedModel({ factor: factor });
   if (!r.ok) return r;
   var after = NSO_Printer.fit(NSO_Printer.fromDisplaySize(m.size), printer);
-  var AX = { x: 'W', y: 'D', z: 'H' }, worst = rep.over[0];
-  var txt = 'Fit to plate: ×' + factor.toFixed(6) + ' - ' + AX[worst.axis] + ' ' + worst.size_mm.toFixed(1) +
-    ' → ' + (worst.size_mm * factor).toFixed(1) + ' mm, now ' + m.size.x.toFixed(1) + ' × ' +
-    m.size.z.toFixed(1) + ' × ' + m.size.y.toFixed(1) + ' W × D × H, ' +
+  var worst = rep.over[0];
+  var txt = 'Fit to plate: ×' + factor.toFixed(6) + ' - ' + NSO_SCALE_FIT_NOUN[worst.axis] + ' ' +
+    worst.size_mm.toFixed(1) + ' → ' + (worst.size_mm * factor).toFixed(1) + ' mm, now ' +
+    m.size.x.toFixed(1) + ' wide, ' + m.size.z.toFixed(1) + ' deep, ' + m.size.y.toFixed(1) + ' tall; ' +
     (after.fits ? 'fits ' + name : 'STILL over: ' + after.reason);
   if (typeof setStatus === 'function') setStatus(txt, !after.fits);
   if (typeof nsoScaleRefresh === 'function') nsoScaleRefresh();
@@ -511,9 +526,55 @@ function NSO_scaleFitToPlate() {
   return r;
 }
 
+/* A ring or rod verb on the selected piece: 'outer' | 'bore' | 'wall' |
+   'diameter', to `value` mm. nso_ring.js does the geometry and every refusal;
+   this is the house lifecycle around it - refuse before touching anything,
+   then one NSO_sculptCommitRaw (one Undo step, undo type 'ringReplace').
+
+   PAINT SCOPE: WHOLE-PIECE, the Scale card's own category (docs/HANDOFF.md):
+   every wall face on the moving side moves and the cap rims it shares move
+   with it, so no face can be promised untouched - Fatten's reading of the same
+   question. Any paint anywhere stands it down, naming the count. */
+var NSO_SCALE_RING_LABEL = { outer: 'Outer Ø', bore: 'Bore Ø', wall: 'Wall', diameter: 'Diameter' };
+function NSO_scaleRingApply(verb, value) {
+  var label = NSO_SCALE_RING_LABEL[verb] || verb;
+  var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
+  if (!m) {
+    if (typeof setStatus === 'function') setStatus('Select a piece first', true);
+    return { ok: false, reason: 'no selection' };
+  }
+  var soup = (m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null;
+  if (!soup) {
+    if (typeof setStatus === 'function') setStatus(label + ' needs a raw piece - unchanged', true);
+    return { ok: false, reason: 'no rawTris' };
+  }
+  var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
+  if (painted > 0) {
+    if (typeof setStatus === 'function') {
+      setStatus('Scale stood down - ' + painted + ' painted face(s); ' + label + ' moves every wall face ' +
+                'on its side and the cap rims with them. Clear paint to resize.', true);
+    }
+    return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
+  }
+  var r = NSO_ringApplyRaw(soup, verb, value);
+  if (!r.ok) {
+    if (typeof setStatus === 'function') setStatus(label + ' refused - piece unchanged (' + r.reason + ')', true);
+    return r;
+  }
+  var txt = label + ' done - ' + NSO_ringDescribe(r);
+  if (typeof NSO_sculptCommitRaw === 'function' && !NSO_sculptCommitRaw(m, r.tris, 'ringReplace', txt)) {
+    if (typeof setStatus === 'function') setStatus(label + ' failed to commit - piece unchanged', true);
+    return { ok: false, reason: 'commit failed' };
+  }
+  if (typeof nsoScaleRefresh === 'function') nsoScaleRefresh();
+  return r;
+}
+
 if (typeof document !== 'undefined') {
   (function wireScaleCard() {
-    var lastSoup = null, prefilled = '';
+    var lastSoup = null, prefilled = '', ringPrefill = {};
+    var RING_FIELDS = [['outer', 'scale-ring-outer'], ['bore', 'scale-ring-bore'], ['wall', 'scale-ring-wall'],
+                       ['diameter', 'scale-rod-diameter']];
 
     // Read only while the card is open. The reading walks the whole soup -
     // about a second on a 49k-triangle piece - and updateEditSize fires on
@@ -538,15 +599,53 @@ if (typeof document !== 'undefined') {
       // Prefill Length with the real number, once per new soup (a new piece
       // or a bake), so the user edits it instead of guessing one - and is not
       // overwritten mid-typing by an unrelated size-line refresh.
+      var round = !!(s && s.shape === 'round');
+      var ringRows = document.getElementById('scale-ring-rows');
+      if (ringRows) ringRows.hidden = !(round && s.hollow);
+      var rodRows = document.getElementById('scale-rod-rows');
+      if (rodRows) rodRows.hidden = !(round && !s.hollow);
       var soup = m ? m.rawTris : null;
       var inp = document.getElementById('scale-length');
-      if (inp && soup !== lastSoup) {
+      if (soup !== lastSoup) {
         lastSoup = soup;
         prefilled = (s && s.lengthMm != null) ? String(+s.lengthMm.toFixed(2)) : '';
-        inp.value = prefilled;
+        if (inp) inp.value = prefilled;
+        // The ring / rod fields, prefilled with the current values the same
+        // way, three decimals - the precision the verbs land to.
+        var cur = round ? { outer: s.outer.diameterMm, diameter: s.outer.diameterMm,
+                            bore: s.hollow ? s.bore.diameterMm : null, wall: s.hollow ? s.wallMm : null } : {};
+        RING_FIELDS.forEach(function (f) {
+          var el = document.getElementById(f[1]);
+          ringPrefill[f[0]] = (cur[f[0]] != null) ? String(+cur[f[0]].toFixed(3)) : '';
+          if (el) el.value = ringPrefill[f[0]];
+        });
       }
     }
     window.nsoScaleRefresh = readout;
+
+    // updateEditSize is not called by every bake: Thicken and Fatten commit
+    // through their own path, and the line went on showing the piece before
+    // them (found driving Fatten's Shrink on a ring, Scale part 2). So while
+    // the card is open, watch the selected piece's soup by IDENTITY - every
+    // bake in this app replaces rawTris with a new array - and re-read when
+    // it changes, whoever changed it. app-fit.js watches sizes the same way
+    // for the same reason. One comparison per frame, and only while open.
+    var watching = false, seenModel = null, seenSoup = null;
+    function watch() {
+      if (!cardOpen()) { watching = false; return; }
+      var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
+      var soup = m ? m.rawTris : null;
+      if (m !== seenModel || soup !== seenSoup) { seenModel = m; seenSoup = soup; readout(); }
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(watch);
+      else watching = false;
+    }
+    function startWatch() {
+      if (watching) return;
+      watching = true;
+      var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
+      seenModel = m; seenSoup = m ? m.rawTris : null;
+      if (typeof requestAnimationFrame === 'function') requestAnimationFrame(watch);
+    }
 
     function guarded(name, fn) {
       try { fn(); } catch (err) {
@@ -585,7 +684,25 @@ if (typeof document !== 'undefined') {
       NSO_extendSelectedModel(opts);
     }
 
+    function setRing(verb, inputId) {
+      var el = document.getElementById(inputId);
+      if (el && el.value === ringPrefill[verb]) {
+        if (typeof setStatus === 'function') {
+          setStatus(NSO_SCALE_RING_LABEL[verb] + ': that is the current value - type a new one');
+        }
+        return;
+      }
+      NSO_scaleRingApply(verb, el ? parseFloat(el.value) : NaN);
+    }
+
     function wire() {
+      RING_FIELDS.forEach(function (f) {
+        var btn = document.getElementById('btn-' + f[1]);
+        if (btn && btn.dataset.nsoWired !== '1') {
+          btn.dataset.nsoWired = '1';
+          btn.addEventListener('click', function () { guarded(NSO_SCALE_RING_LABEL[f[0]], function () { setRing(f[0], f[1]); }); });
+        }
+      });
       var len = document.getElementById('btn-scale-length');
       if (len && len.dataset.nsoWired !== '1') {
         len.dataset.nsoWired = '1';
@@ -615,7 +732,7 @@ if (typeof document !== 'undefined') {
       var menu = document.getElementById('menu-scale');
       if (menu && menu.dataset.nsoScaleWired !== '1') {
         menu.dataset.nsoScaleWired = '1';
-        menu.addEventListener('toggle', function () { if (menu.open) readout(); });
+        menu.addEventListener('toggle', function () { if (menu.open) { readout(); startWatch(); } });
       }
       // The verdict names the machine, so a plate change re-reads it.
       ['plate-select', 'custom-w', 'custom-d', 'custom-h'].forEach(function (id) {
