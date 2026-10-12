@@ -587,7 +587,7 @@ one guard in `nso-watch.js`. `applyMeshRotation` is not touched.
   call, which is the same end pose a held step plus a seat gives.
 - Checks: `rotate:handles` sections 13 (rewritten), 17, 18 - 158 gates.
   `rotate:pivot-drive` is the ticket's drive-check, screenshots in
-  `docs/rotate-pivot/`, not in `npm test`. `?v=`: `app-rotate-handles.js`
+  `tools/rotate-pivot-out/` (git-ignored), not in `npm test`. `?v=`: `app-rotate-handles.js`
   rot4 -> rot6 (rot5 is the Pose-buttons branch's).
 
 ## Picture -> relief slab - Gen+ -> Picture (2026-10-12)

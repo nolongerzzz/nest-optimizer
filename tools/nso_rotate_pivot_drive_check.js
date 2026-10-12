@@ -5,7 +5,8 @@
    node tools/nso_rotate_pivot_drive_check.js [outDir]     exit 0 = every step held
 
    Real mouse drags and clicks on the real arrowheads, the camera never moved
-   while a turn is in hand. Screenshots go to outDir (default docs/rotate-pivot).
+   while a turn is in hand. Screenshots go to outDir (default tools/rotate-pivot-out,
+   git-ignored).
 
    The long piece is library/tape_on-edge-single.stl - 185 x 34 x 20.9 mm,
    longer than the A1 Mini's 162 mm rings and its 180 mm bed. (The fixtures/
@@ -16,7 +17,7 @@ const path = require('path');
 const fs = require('fs');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
 
-const OUT = path.resolve(process.argv[2] || path.join(ROOT, 'docs', 'rotate-pivot'));
+const OUT = path.resolve(process.argv[2] || path.join(ROOT, 'tools', 'rotate-pivot-out'));
 fs.mkdirSync(OUT, { recursive: true });
 const TAPE = path.join(ROOT, 'library', 'tape_on-edge-single.stl');
 const BOX = path.join(ROOT, 'fixtures', 'box_hull_80x40x20-2.stl');
