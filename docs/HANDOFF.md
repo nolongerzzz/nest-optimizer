@@ -557,6 +557,33 @@ a slice's rendered layers against `NSO_Slicer`'s result (the "phantom layers"
 seen on the plate). Proposed in the PR; nothing in the watcher checks slice
 rendering today.
 
+## Rotate rings - steady radius, quieter rails, degree markers (2026-10-12)
+Branch `claude/rotate-rings-steady`, off `claude-wip`. Three refinements to
+`app-rotate-handles.js`, nothing else in the app:
+
+- **Radius from the bounding sphere.** 1.45 x the largest distance from the
+  mesh's origin (the point every turn is about) to any vertex of its own
+  geometry, floor 8 mm. Rotation-invariant, so the rings no longer breathe on
+  a bar. Cached per geometry in a WeakMap keyed on the position attribute's
+  version and count - a bake, Scale or Cut measures afresh, a frame never does.
+- **Quieter while dragging.** Active ring 0.6x tube and 0.35 opacity, the other
+  two at 0.12, the held arrowhead at full weight; a press that has not moved
+  is still a click and leaves the rails at rest. Colours unchanged.
+- **Degree markers.** One LineSegments per ring: 24 ticks on the outer edge,
+  short / 45 / quarter lengths. Labels 0 90 180 270 as sprites (sizeAttenuation
+  off, so screen-sized) in the ring's colour, 9 degrees past their tick along
+  their own ring - the three rings cross on the axes, so every quarter of one
+  ring is a quarter of another and centred labels printed over each other.
+  All in the ring's own e1/e2 frame, the frame the snap measures in, so a
+  snapped quarter turn lands on a labelled tick.
+- Checks: `rotate:handles` gains sections 13-15 (129 gates);
+  `rotate:steady-drive` is the ticket's drive-check, screenshots in
+  `docs/rotate-rings-steady/`, not in `npm test`. `?v=` bumped on the owner's
+  instruction (as in 3d42873): `app-rotate-handles.js` rot3 -> rot4.
+- Seen, not changed: a freshly dropped piece rests 0.1 mm higher than a posed
+  one (the open finding at `snapshotPlacedPose`), so the first turn lowers
+  the ring's CENTRE 0.1 mm. Not the radius; the drive-check settles first.
+
 ## Rotate rings - honest rings, click-or-drag arrows, Turn first (2026-10-11)
 Branch `claude/rotate-rings`, off `claude-wip`. `app-rotate-handles.js` is
 rewritten; the 45-degree scrolling arc, the trackball and the X/Y lock boxes

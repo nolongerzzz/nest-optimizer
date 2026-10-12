@@ -437,13 +437,47 @@
   function clearGroup(g) {
     while (g.children.length) {
       var c = g.children.pop();
-      if (c.geometry) c.geometry.dispose();
+      /* A sprite's geometry is THREE's one shared quad, and its texture is
+         cached in labelTexture - only its material is its own. */
+      if (c.geometry && !c.isSprite) c.geometry.dispose();
       if (c.material) c.material.dispose();
     }
   }
 
+  /* ---- the radius --------------------------------------------------------
+     From the piece's bounding SPHERE about the point it turns on, not its
+     box. The box is measured in plate axes, so on a bar it grows and shrinks
+     as the bar turns and the rings breathed with it; the largest distance
+     from the mesh's origin - the centre every turn here is about - to any
+     vertex of its own geometry cannot change under a rotation, so the rings
+     hold still through a whole lap on any shape.
+
+     Measured once per geometry, not per frame: the cache is keyed on the
+     geometry object and its position attribute's version and count, which a
+     bake (a new geometry), a Scale or a Cut (a new or rewritten one) all
+     change. Mesh scale is folded in for completeness; nothing sets it today. */
+  var RING_CLEARANCE = 1.45, RING_MIN_MM = 8;
+  var sphereCache = typeof WeakMap === 'function' ? new WeakMap() : null, sphereComputes = 0;
+  function boundingSphereRadius(mesh) {
+    var geo = mesh && mesh.geometry, pos = geo && geo.attributes && geo.attributes.position;
+    if (!pos) return 0;
+    var c = sphereCache && sphereCache.get(geo);
+    if (c && c.ver === pos.version && c.count === pos.count) return c.r;
+    var m = 0, a = pos.array, n = pos.count * pos.itemSize, k = pos.itemSize;
+    if (pos.isInterleavedBufferAttribute) {
+      var v = new THREE.Vector3();
+      for (var i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i); m = Math.max(m, v.lengthSq()); }
+    } else {
+      for (var j = 0; j < n; j += k) m = Math.max(m, a[j] * a[j] + a[j + 1] * a[j + 1] + a[j + 2] * a[j + 2]);
+    }
+    sphereComputes++;
+    c = { ver: pos.version, count: pos.count, r: Math.sqrt(m) };
+    if (sphereCache) sphereCache.set(geo, c);
+    return c.r;
+  }
   function ringRadius(p) {
-    return Math.max(8, (Math.max(p.width || 0, p.depth || 0, p.height || 0) / 2) * 1.45);
+    var s = p.mesh.scale, k = Math.max(Math.abs(s.x), Math.abs(s.y), Math.abs(s.z));
+    return Math.max(RING_MIN_MM, boundingSphereRadius(p.mesh) * k * RING_CLEARANCE);
   }
   function arrowSize(r) { return Math.min(14, Math.max(3.5, r * 0.26)); }
   /* The two arrowheads sit either side of arrowAt[ring], a little apart,
@@ -469,15 +503,109 @@
     return Math.hypot(u, w) < 1e-6 ? 0 : Math.atan2(w, u);
   }
 
+  /* ---- weights -----------------------------------------------------------
+     At rest every ring is drawn the same. While one is dragged the rails get
+     QUIETER, not louder: the active ring thins and goes see-through so the
+     piece reads through it at the moment its angle is being judged, and the
+     other two fade to a trace. The arrowhead under the pointer keeps full
+     weight, so the grab point never goes soft. Colours never change - the one
+     white is the snap's flash. Release, and refresh draws rest weight again. */
+  var WEIGHT = {
+    rest:     { tube: 1,   ring: 0.7,  arrow: 0.95, ticks: 0.4,  label: 0.9 },
+    active:   { tube: 0.6, ring: 0.35, arrow: 0.35, ticks: 0.2,  label: 0.45 },
+    inactive: { tube: 1,   ring: 0.12, arrow: 0.12, ticks: 0.06, label: 0.12 }
+  };
+  /* A press is not yet a drag: a click on an arrowhead leaves the rails at
+     rest weight, and they go quiet only once the pointer has really moved. */
+  function dragging() { return !!(drag && drag.moved); }
+  function weightFor(ring) {
+    if (!dragging()) return WEIGHT.rest;
+    return drag.ring === ring ? WEIGHT.active : WEIGHT.inactive;
+  }
+  function restTube(r) { return Math.max(0.3, r * 0.016); }
+
   function colourFor(ring) {
     var lit = drag && drag.ring === ring;
     if (lit && Date.now() < flashUntil) return { c: 0xffffff, o: 1 };
-    return { c: RINGS[ring].color, o: lit ? 1 : 0.7 };
+    return { c: RINGS[ring].color, o: weightFor(ring).ring };
+  }
+
+  /* ---- the scale ---------------------------------------------------------
+     Ticks on the ring's outer edge - short every 15, longer every 45, longest
+     on the quarters - and 0 / 90 / 180 / 270 beside the quarters. All of it
+     is in the ring's own frame (the same e1, e2 the snap measures in), so it
+     turns with nothing: it is the fixed scale the piece turns against, and a
+     snapped quarter turn puts the piece's measured axis exactly on a
+     labelled tick. Ticks are one line-segment set per ring, one draw call. */
+  var TICK_LEN = { 15: 0.045, 45: 0.08, 90: 0.12 };   // x radius
+  function tickClass(deg) { return deg % 90 === 0 ? 90 : deg % 45 === 0 ? 45 : 15; }
+  function tickOuter(r) { return r + restTube(r) + TICK_LEN[90] * r; }
+  function labelRadius(r) { return tickOuter(r) + 0.09 * r; }
+  function noRaycast() {}
+
+  function addTicks(g, ring, r, w) {
+    var R = RINGS[ring], e1 = v3(R.e1), e2 = v3(R.e2), pts = [];
+    var r0 = r + restTube(r);
+    for (var d = 0; d < 360; d += 15) {
+      var t = d * RAD, dir = e1.clone().multiplyScalar(Math.cos(t)).add(e2.clone().multiplyScalar(Math.sin(t)));
+      pts.push(dir.clone().multiplyScalar(r0), dir.clone().multiplyScalar(r0 + TICK_LEN[tickClass(d)] * r));
+    }
+    var l = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({ color: R.color, depthTest: false, depthWrite: false,
+                                    transparent: true, opacity: w.ticks }));
+    l.renderOrder = 999;
+    l.raycast = noRaycast;
+    l.userData.nsoRotateTicks = ring;
+    g.add(l);
+  }
+
+  /* The four labels: sprites, so they always face the camera, and sized in
+     SCREEN terms (sizeAttenuation off) so they read the same at any zoom.
+     One canvas texture per ring and label, made once and kept. */
+  var LABEL_PX = 0.032;          // label height as a fraction of the view's height, roughly
+  var labelTextures = {};
+  function labelTexture(ring, text) {
+    var key = ring + ':' + text;
+    if (labelTextures[key]) return labelTextures[key];
+    var cv = document.createElement('canvas');
+    cv.width = 128; cv.height = 64;
+    var x = cv.getContext('2d');
+    x.font = '700 44px system-ui, sans-serif';
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.lineWidth = 8; x.strokeStyle = 'rgba(10, 16, 30, 0.9)';
+    x.strokeText(text, 64, 34);
+    x.fillStyle = RINGS[ring].css;
+    x.fillText(text, 64, 34);
+    var tex = new THREE.CanvasTexture(cv);
+    tex.minFilter = THREE.LinearFilter;
+    return (labelTextures[key] = tex);
+  }
+  /* Each label sits a few degrees past its tick, along its own ring. The
+     three rings cross on the plate's axes, so every quarter of one ring is
+     the same point as a quarter of another - Turn's 0 and Lean front/back's
+     90 are both straight out along Z. Centred on the tick, two labels print
+     on top of each other; nudged along their own rings, whose tangents differ
+     there, they part. */
+  var LABEL_SHIFT_DEG = 9;
+  function addLabels(g, ring, r, w) {
+    var R = RINGS[ring], e1 = v3(R.e1), e2 = v3(R.e2), lr = labelRadius(r);
+    [0, 90, 180, 270].forEach(function (d) {
+      var t = (d + LABEL_SHIFT_DEG) * RAD;
+      var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(ring, String(d)),
+        depthTest: false, depthWrite: false, transparent: true, opacity: w.label,
+        sizeAttenuation: false }));
+      sp.position.copy(e1.clone().multiplyScalar(Math.cos(t) * lr).add(e2.clone().multiplyScalar(Math.sin(t) * lr)));
+      sp.scale.set(LABEL_PX * 2, LABEL_PX, 1);
+      sp.renderOrder = 1001;
+      sp.raycast = noRaycast;
+      sp.userData.nsoRotateLabel = { ring: ring, deg: d };
+      g.add(sp);
+    });
   }
 
   function addRing(g, ring, r) {
-    var col = colourFor(ring);
-    var tube = Math.max(0.3, r * 0.016) * (drag && drag.ring === ring ? 1.8 : 1);
+    var col = colourFor(ring), w = weightFor(ring);
+    var tube = restTube(r) * w.tube;
     var geo = new THREE.TorusGeometry(r, tube, 6, 160);
     // Torus lies in XY with its axis on Z; turn Z onto the ring's axis.
     geo.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(
@@ -488,6 +616,8 @@
     m.renderOrder = 999;
     m.userData.nsoRotateRing = ring;          // the track: drawn, never a handle
     g.add(m);
+    addTicks(g, ring, r, w);
+    addLabels(g, ring, r, w);
 
     var t = arrowAt[ring], h = arrowSize(r), gap = arrowGap(r);
     [1, -1].forEach(function (dir) {
@@ -495,9 +625,12 @@
       var pos = ringPoint(ring, r, at);
       var tan = ringTangent(ring, at).multiplyScalar(dir);
       var handle = { ring: ring, dir: dir };
+      /* the arrowhead under the pointer keeps full weight through a drag */
+      var held = dragging() && drag.ring === ring && drag.dir === dir;
       var cone = new THREE.Mesh(new THREE.ConeGeometry(h * 0.45, h, 18),
-        new THREE.MeshBasicMaterial({ color: col.c, depthTest: false, depthWrite: false,
-                                      transparent: true, opacity: Math.min(1, col.o + 0.25) }));
+        new THREE.MeshBasicMaterial({ color: held ? RINGS[ring].color : col.c, depthTest: false,
+                                      depthWrite: false, transparent: true,
+                                      opacity: held ? 1 : (col.c === 0xffffff ? 1 : w.arrow) }));
       cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tan);
       cone.position.copy(pos);
       cone.renderOrder = 1000;
@@ -625,12 +758,19 @@
         return c.userData.nsoRotateHandle && c.material && c.material.visible;
       }).length : 0;
     },
+    /* Task 1's radius, and how many times it has been measured - once per
+       geometry, never per frame. */
+    ringRadius: function () { var p = piece(); return p ? ringRadius(p) : null; },
+    sphereComputes: function () { return sphereComputes; },
+    weights: WEIGHT,
     ringCount: function () {
       var g = ensureGroup();
       return g ? g.children.filter(function (c) { return c.userData.nsoRotateRing; }).length : 0;
     },
     constants: { STEP_DEG: STEP_DEG, SNAP_STEP_DEG: SNAP_STEP_DEG,
                  SNAP_WITHIN_DEG: SNAP_WITHIN_DEG, CLICK_SLOP_PX: CLICK_SLOP_PX,
+                 RING_CLEARANCE: RING_CLEARANCE, RING_MIN_MM: RING_MIN_MM, TICK_LEN: TICK_LEN,
+                 LABEL_SHIFT_DEG: LABEL_SHIFT_DEG,
                  AXES: { turn: RINGS.turn.axis, fb: RINGS.fb.axis, ss: RINGS.ss.axis } }
   };
 

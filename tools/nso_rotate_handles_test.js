@@ -32,7 +32,11 @@
    9. UNDO steps back one press at a time.
   10. THE 90 BUTTONS are untouched; the locks and the trackball are gone.
   11. THE RING BODY is the track, not a handle.
-  12. EXPORT writes what the screen shows, leaned and turned.             */
+  12. EXPORT writes what the screen shows, leaned and turned.
+  13. THE RADIUS is the bounding sphere's, so it holds through any turn on
+      any shape, and is measured once per geometry.
+  14. DRAGGING quiets the rails; release restores them.
+  15. DEGREE MARKERS are fixed in the ring's frame; the snap lands on one.  */
 
 const path = require('path');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
@@ -665,6 +669,213 @@ withApp(async (page, logs) => {
       r.worst < 1e-3, 'worst ' + (r.worst != null ? r.worst.toExponential(2) : r.worst) + ' mm; pose ' +
       JSON.stringify(r.pose));
     check('...and the exported piece rests on the plate', near(r.minZ, 0, 1e-3), 'min z ' + r.minZ);
+  }
+
+  /* ----------------------------------------------------------------- 13 */
+  console.log('\n=== 13. the radius holds: bounding sphere, not box, measured once per geometry ===');
+  {
+    await loadSTL(page, path.join(ROOT, 'fixtures', 'box_hull_80x40x20-2.stl'));
+    await loadSTL(page, path.join(ROOT, 'fixtures', 'tape_on-edge-single-B101_rounded_v8_FINAL.stl'));
+    await page.waitForTimeout(300);
+    const rows = await page.evaluate(() => {
+      const a = window.nsoRotate, H = window.__rot, out = [];
+      const n = state.placed.length;
+      [n - 2, n - 1].forEach(idx => {
+        selectPlaced(idx);
+        const p = state.placed[idx];
+        H.zero();
+        a.setRing('turn', true); a.setRing('fb', true); a.setRing('ss', true);
+        /* the expected number, from the geometry, independently of the module */
+        const pos = p.mesh.geometry.attributes.position, v = new THREE.Vector3();
+        let m = 0;
+        for (let i = 0; i < pos.count; i++) m = Math.max(m, v.fromBufferAttribute(pos, i).length());
+        const want = Math.max(8, 1.45 * m);
+        const torus = () => {
+          const g = state.scene.getObjectByName('nso-rotate-handles');
+          return g.children.filter(c => c.userData.nsoRotateRing).map(c => c.geometry.parameters.radius);
+        };
+        const oldBox = () => Math.max(8, Math.max(p.width, p.depth, p.height) / 2 * 1.45);
+        a.refresh();
+        const before = { r: a.ringRadius(), torus: torus(), box: oldBox() };
+        const computes0 = a.sphereComputes();
+        const after = {};
+        ['turn', 'fb', 'ss'].forEach(ring => {
+          H.zero(); a.refresh();
+          a.turn(ring, 37);
+          for (let k = 0; k < 20; k++) a.refresh();          // frames
+          after[ring] = { r: a.ringRadius(), torus: torus(), box: oldBox() };
+        });
+        const computes1 = a.sphereComputes();
+        /* a geometry change is a new measurement: a Scale-like bake */
+        const g0 = p.mesh.geometry;
+        p.mesh.geometry = g0.clone().scale(1.5, 1.5, 1.5);
+        const scaled = a.ringRadius();
+        const computes2 = a.sphereComputes();
+        p.mesh.geometry.dispose(); p.mesh.geometry = g0;
+        H.zero();
+        out.push({ name: (state.models.find(mm => mm.id === p.sourceId) || {}).name || ('#' + idx),
+                   want, before, after, computes: [computes0, computes1, computes2], scaled });
+      });
+      a.setRing('fb', false); a.setRing('ss', false);
+      selectPlaced(0); H.zero();
+      return out;
+    });
+    for (const r of rows) {
+      console.log('   ' + r.name + ': ring radius ' + r.before.r.toFixed(6) + ' mm (1.45 x ' +
+        (r.want / 1.45).toFixed(6) + ' mm sphere); after 37° on each ring: ' +
+        ['turn', 'fb', 'ss'].map(k => k + ' ' + r.after[k].r.toFixed(6)).join(', ') +
+        '  | the old box rule would have drawn ' + r.before.box.toFixed(3) + ' -> ' +
+        ['turn', 'fb', 'ss'].map(k => r.after[k].box.toFixed(3)).join(' / '));
+      check(r.name + ': the radius is 1.45 x the bounding sphere about the turning centre',
+        near(r.before.r, r.want, 1e-9), r.before.r + ' vs ' + r.want);
+      check(r.name + ': identical before and after a 37° turn, on every ring',
+        ['turn', 'fb', 'ss'].every(k => r.after[k].r === r.before.r),
+        ['turn', 'fb', 'ss'].map(k => (r.after[k].r - r.before.r).toExponential(1)).join(' '));
+      check(r.name + ': ...and so is every drawn ring',
+        ['turn', 'fb', 'ss'].every(k => r.after[k].torus.length === 3 &&
+          r.after[k].torus.every(x => x === r.before.r)), JSON.stringify(r.after.turn.torus));
+      check(r.name + ': the old box rule would have breathed - the fix is not vacuous',
+        ['turn', 'fb', 'ss'].some(k => Math.abs(r.after[k].box - r.before.box) > 0.5));
+      check(r.name + ': measured once - none of 60 turns-and-frames measured it again',
+        r.computes[1] === r.computes[0], r.computes.join(' -> '));
+      check(r.name + ': a new geometry is measured afresh, and only once',
+        r.computes[2] === r.computes[1] + 1 && near(r.scaled, 1.5 * r.before.r, 1e-4),   // Float32 vertices
+        r.scaled.toFixed(4) + ' mm');
+    }
+  }
+
+  /* ----------------------------------------------------------------- 14 */
+  console.log('\n=== 14. quieter rails while dragging; rest weight on release ===');
+  {
+    const w = await page.evaluate(() => {
+      const a = window.nsoRotate, H = window.__rot;
+      H.zero(); H.home();
+      a.setRing('turn', true); a.setRing('fb', true); a.setRing('ss', true);
+      const look = () => {
+        const g = state.scene.getObjectByName('nso-rotate-handles'), out = {};
+        g.children.forEach(c => {
+          const u = c.userData;
+          if (u.nsoRotateRing) out['ring:' + u.nsoRotateRing] = { o: c.material.opacity,
+            tube: c.geometry.parameters.tube, colour: c.material.color.getHexString() };
+          if (u.nsoRotateTicks) out['ticks:' + u.nsoRotateTicks] = { o: c.material.opacity };
+          if (u.nsoRotateLabel) out['label:' + u.nsoRotateLabel.ring + ':' + u.nsoRotateLabel.deg] = { o: c.material.opacity };
+          if (u.nsoRotateHandle && c.material.visible)
+            out['arrow:' + u.nsoRotateHandle.ring + ':' + u.nsoRotateHandle.dir] = { o: c.material.opacity };
+        });
+        return out;
+      };
+      const rest = look();
+      const c = a.centreScreen(), R = 160;
+      a.beginDrag({ ring: 'turn', dir: 1 }, c.x + R, c.y, c.x, c.y);
+      const pressed = look();                                 // pressed, not yet moved
+      for (let i = 1; i <= 20; i++) a.moveDrag(c.x + Math.cos(i * Math.PI / 180) * R, c.y + Math.sin(i * Math.PI / 180) * R);
+      const mid = look();
+      a.endDrag();
+      const after = look();
+      a.setRing('fb', false); a.setRing('ss', false);
+      H.zero();
+      return { rest, pressed, mid, after };
+    });
+    const R = w.rest, M = w.mid;
+    check('at rest all three rings are drawn alike', ['turn', 'fb', 'ss'].every(k =>
+      R['ring:' + k].o === R['ring:turn'].o && R['ring:' + k].tube === R['ring:turn'].tube));
+    check('a press that has not moved yet leaves everything at rest weight',
+      JSON.stringify(w.pressed) === JSON.stringify(R));
+    check('dragging: the active ring goes THINNER, about 0.6 of its rest width',
+      near(M['ring:turn'].tube / R['ring:turn'].tube, 0.6, 1e-9),
+      R['ring:turn'].tube.toFixed(3) + ' -> ' + M['ring:turn'].tube.toFixed(3) + ' mm');
+    check('...and see-through, so the piece reads through it', M['ring:turn'].o < R['ring:turn'].o * 0.6,
+      R['ring:turn'].o + ' -> ' + M['ring:turn'].o);
+    check('the two inactive rings fade to a faint trace',
+      ['fb', 'ss'].every(k => M['ring:' + k].o <= 0.15 && M['ring:' + k].o < M['ring:turn'].o),
+      ['fb', 'ss'].map(k => k + ' ' + M['ring:' + k].o).join(', '));
+    check('the arrowhead being dragged keeps full weight', M['arrow:turn:1'].o === 1,
+      'held ' + M['arrow:turn:1'].o + ', its partner ' + M['arrow:turn:-1'].o);
+    check('every ring keeps its colour', ['turn', 'fb', 'ss'].every(k => M['ring:' + k].colour === R['ring:' + k].colour));
+    check('ticks and labels fade with their ring',
+      ['turn', 'fb', 'ss'].every(k => M['ticks:' + k].o < R['ticks:' + k].o && M['label:' + k + ':0'].o < R['label:' + k + ':0'].o));
+    check('on release everything is back at rest weight', JSON.stringify(w.after) === JSON.stringify(R));
+  }
+
+  /* ----------------------------------------------------------------- 15 */
+  console.log('\n=== 15. degree markers: fixed in the ring\'s frame, and the snap lands on a labelled tick ===');
+  {
+    const t = await page.evaluate(() => {
+      const a = window.nsoRotate, H = window.__rot, K = a.constants;
+      H.zero(); H.home();
+      a.setRing('turn', true); a.setRing('fb', true); a.setRing('ss', true);
+      const grab = () => {
+        const g = state.scene.getObjectByName('nso-rotate-handles'), out = {};
+        ['turn', 'fb', 'ss'].forEach(k => {
+          const ticks = g.children.filter(c => c.userData.nsoRotateTicks === k);
+          const labels = g.children.filter(c => c.userData.nsoRotateLabel && c.userData.nsoRotateLabel.ring === k);
+          const ring = g.children.find(c => c.userData.nsoRotateRing === k);
+          const pts = ticks[0] ? Array.from(ticks[0].geometry.attributes.position.array) : [];
+          out[k] = { tickSets: ticks.length, isSegments: !!(ticks[0] && ticks[0].isLineSegments),
+                     pts, r: ring.geometry.parameters.radius, tube: ring.geometry.parameters.tube,
+                     ringO: ring.material.opacity, tickO: ticks[0] && ticks[0].material.opacity,
+                     labels: labels.map(l => ({ deg: l.userData.nsoRotateLabel.deg, sprite: !!l.isSprite,
+                       atten: l.material.sizeAttenuation, depth: l.material.depthTest,
+                       d: l.position.length(), p: l.position.toArray() })) };
+        });
+        return out;
+      };
+      const before = grab();
+      a.turn('turn', 37); a.turn('fb', 21);
+      const after = grab();
+      /* snap: drag Turn up into the quarter turn above, and stop there */
+      H.zero(); a.turn('turn', 30);
+      const abs0 = a.ringAngle('turn'), target = Math.ceil(abs0 / 90) * 90;
+      const sign = a.dialSign('turn');
+      const tr = H.trace('turn', sign * (target - abs0 - 1), { step: 0.5 });   // 1° short: inside the snap
+      const at = a.ringAngle('turn');
+      /* the piece's measured axis, projected into the ring's plane, against the tick */
+      const p = H.p(); p.mesh.updateMatrixWorld(true);
+      const A = new THREE.Vector3(0, 1, 0);
+      const best = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(b => new THREE.Vector3().fromArray(b).applyQuaternion(p.mesh.quaternion))
+        .sort((u, v) => Math.abs(u.dot(A)) - Math.abs(v.dot(A)))[0].projectOnPlane(A).normalize();
+      const q = ((Math.round(at / 90) * 90) % 360 + 360) % 360;
+      const ticks = grab().turn.pts;
+      const tick = ((q / 15) | 0) * 6;                               // two points per tick, every 15°
+      const tickDir = new THREE.Vector3(ticks[tick], ticks[tick + 1], ticks[tick + 2]).normalize();
+      const onTick = Math.abs(best.dot(tickDir));
+      a.setRing('fb', false); a.setRing('ss', false);
+      H.zero();
+      return { before, after, K, snap: { abs0, target, at, q, onTick, applied: tr.state.applied } };
+    });
+    const K = t.K;
+    for (const k of ['turn', 'fb', 'ss']) {
+      const b = t.before[k];
+      check(k + ': ticks are ONE line-segment set (one draw call)', b.tickSets === 1 && b.isSegments);
+      check(k + ': a tick every 15° - 24 of them', b.pts.length === 24 * 2 * 3, b.pts.length / 6 + ' ticks');
+      const lens = [];
+      for (let i = 0; i < 24; i++) {
+        const o = i * 6, r0 = Math.hypot(b.pts[o], b.pts[o + 1], b.pts[o + 2]),
+              r1 = Math.hypot(b.pts[o + 3], b.pts[o + 4], b.pts[o + 5]);
+        lens.push({ deg: i * 15, r0, len: r1 - r0 });
+      }
+      const cls = d => d % 90 === 0 ? 90 : d % 45 === 0 ? 45 : 15;
+      check(k + ': short every 15°, longer every 45°, longest on the quarters',
+        lens.every(l => near(l.len, K.TICK_LEN[cls(l.deg)] * b.r, 1e-4)) &&   // Float32 points
+        K.TICK_LEN[15] < K.TICK_LEN[45] && K.TICK_LEN[45] < K.TICK_LEN[90],
+        [0, 15, 45, 90].map(d => d + '°:' + lens[d / 15].len.toFixed(2) + 'mm').join(' '));
+      check(k + ': on the ring\'s outer edge', lens.every(l => near(l.r0, b.r + b.tube, 1e-4)));
+      check(k + ': fixed in the ring\'s frame - a turn moves the piece, not the scale',
+        JSON.stringify(t.after[k].pts) === JSON.stringify(b.pts));
+      check(k + ': lighter than the ring at rest', b.tickO < b.ringO, b.tickO + ' vs ' + b.ringO);
+      const L = b.labels.slice().sort((x, y) => x.deg - y.deg);
+      check(k + ': labels 0 / 90 / 180 / 270', L.map(l => l.deg).join() === '0,90,180,270');
+      check(k + ': sprites - they always face the camera - sized on screen, drawn on top',
+        L.every(l => l.sprite && l.atten === false && l.depth === false));
+      check(k + ': outside the ring and its longest tick, so never on the rail',
+        L.every(l => l.d > b.r + b.tube + K.TICK_LEN[90] * b.r), L.map(l => l.d.toFixed(1)).join(' '));
+      check(k + ': fixed, like the ticks', JSON.stringify(t.after[k].labels) === JSON.stringify(b.labels));
+    }
+    const s = t.snap;
+    check('dragging into the quarter turn snapped it there', near(s.at - s.target, 0, 1e-6) ||
+      near(Math.abs(s.at - s.target), 360, 1e-6), s.abs0.toFixed(2) + '° -> ' + s.at.toFixed(6) + '°');
+    check('...and the piece\'s measured axis points exactly along the ' + s.q + ' tick',
+      near(s.onTick, 1, 1e-9), 'cos = ' + s.onTick);
   }
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
