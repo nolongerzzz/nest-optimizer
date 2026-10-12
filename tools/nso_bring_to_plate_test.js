@@ -224,6 +224,7 @@ withApp(async (page, logs) => {
   {
     await select(page, idB);
     await page.evaluate(() => { liftSelected(1); });
+    await page.evaluate(() => { nsoInputMode.leaveTool(); });
     await page.click('#btn-lock-pos');
     const before = await pose(page, idB);
     check('the button is greyed out with the rest of the adjust row',
@@ -233,6 +234,7 @@ withApp(async (page, logs) => {
     const after = await pose(page, idB);
     check('...and calling it moves nothing', after.pos.every((v, i) => v === before.pos[i]), JSON.stringify(after.pos));
     check('...and says why', /^Locked - bring to plate refused/.test(after.status), after.status);
+    await page.evaluate(() => { nsoInputMode.leaveTool(); });
     await page.click('#btn-lock-pos');
   }
 
