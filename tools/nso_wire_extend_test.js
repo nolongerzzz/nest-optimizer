@@ -124,6 +124,27 @@ withApp(async (page, logs) => {
   check('the whole soup is back, coordinate for coordinate', undone.soup === before.soup,
         before.soup.split(',').length + ' floats compared');
 
+  console.log('\n=== 4b. a shorter target shortens, through the same button ===');
+  await page.fill('#inp-extend-mm', '25');
+  await page.click('#btn-extend');
+  await page.waitForFunction(() => /Shorten done|Extend refused/.test(document.getElementById('status').textContent),
+    null, { timeout: 60000 });
+  const short = await measure(page);
+  const status1b = await statusOf(page);
+  console.log('   status: ' + status1b);
+  check('status reports a completed shorten', /Shorten done - X 60\.000 → 25\.000 mm/.test(status1b), status1b);
+  check('the app\'s own bbox is 25 mm along X', short.size.x === 25, before.size.x + ' -> ' + short.size.x);
+  check('every Y and Z coordinate in the soup is identical', short.yz === before.yz);
+  check('triangle count preserved, mesh still closed', short.tris === before.tris && short.open <= before.open && short.nm <= before.nm);
+  check('volume shrank by the cross-section x the shift',
+        Math.abs((before.volume - short.volume) / 35 - 100.8) < 1e-3,
+        'implied ' + ((before.volume - short.volume) / 35).toFixed(4) + ' mm2');
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => /Undo/.test(document.getElementById('status').textContent),
+    null, { timeout: 15000 });
+  const undone2 = await measure(page);
+  check('Undo restores the shortened piece, coordinate for coordinate', undone2.soup === before.soup);
+
   console.log('\n=== 5. paint wins: a painted piece is a stand-down ===');
   await page.evaluate(() => {
     const m = getActiveModel();

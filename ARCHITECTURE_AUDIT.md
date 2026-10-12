@@ -201,7 +201,7 @@ file-name sanitizers.
 | 8 | app-seat-surface.js:270 | planned pose puts B below plate | Seat here | `"...that pose would put B Xmm below the plate"` | **Physics** |
 | 9 | app-extend.js:344 | dominant axis off-cardinal | Extend/Fatten/Mirror | `"dominant axis is off-cardinal by X deg"` | Physics (algorithm precondition) |
 | 10 | app-extend.js:465 | no constant cross-section band | Extend/Fatten | `"no constant cross-section band along {axis}"` | **Physics** |
-| 11 | app-extend.js:539 | Extend asked to shrink | Extend | `"Extend lengthens only..."` | **Guard rail** (capability scope) |
+| 11 | app-extend.js | Shorten asked for more than one clean band holds | Extend (Shorten) | `"Shorten can remove up to X mm here..."` | **Physics** (was "Extend lengthens only", a capability guard rail, until Shorten landed) |
 | 12 | app-brush.js:1588/1776 | wall-thickness gate predicts too-thin wall | Brush stroke | `"...wall too thin here, Thicken first"` | **Physics** |
 | 13 | app-fatten.js:229/284 | axis detector + chamfer-width inversion | Fatten | `"Fatten refused - {reason}"` | **Physics** |
 | 14 | app-assemble.js:198 | CSG union fails/non-manifold/commit rejected | Attach | `"Attach refused - nothing changed: {reason}"` | **Physics** |

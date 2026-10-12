@@ -13,13 +13,15 @@
 //   triangles, unique_edges, welded_vertices      Extend re-tessellates nothing.
 //   open / nonmanifold / odd edges                A stretch cannot unseal a mesh.
 //   inconsistent_winding, euler_characteristic    Topology is literally untouched.
-//   degenerate_tris                               Stretching adds area, never removes it.
+//   degenerate_tris                               Stretching adds area, never removes it;
+//                                                 a Shorten stays inside its band margin.
 //   selfint pierce + coplanar                     Whatever the piece already had, it
 //                                                 still has - no more, no fewer.
 //   bbox on the two cross-section axes            THE promise. Exact equality.
 //   bbox on the axis                              Exactly the requested length.
-//   signed_volume                                 Grew by cross-section x shift,
-//                                                 to the checker's own precision.
+//   signed_volume                                 Grew (or, shortened, shrank) by
+//                                                 cross-section x shift, to the
+//                                                 checker's own precision.
 //
 // WHAT IS MEASURED BUT NOT GATED, because it legitimately moves:
 //
@@ -61,6 +63,13 @@ const CASES = [
    'hinge_knuckle_box_18', 'hinge_knuckle_box_26', 0, 26, null],
   ['pin  20 -> 32 mm shaft (chamfers at both ends)',
    'pin_20', 'pin_32', 0, 32, Math.PI * 1.5 * 1.5],
+  // Shorten: the same three pieces, the other way, inside one band each.
+  ['lid_strap  60 -> 25 mm (Shorten)',
+   'lid_strap_60', 'lid_strap_25', 0, 25, 40 * 2.4 + 10 * 0.6 - 2 * 0.6],
+  ['hinge_knuckle_box  18 -> 16 mm (Shorten, inside the 3.6 mm finger band)',
+   'hinge_knuckle_box_18', 'hinge_knuckle_box_16', 0, 16, null],
+  ['pin  20 -> 10 mm (Shorten, chamfers at both ends)',
+   'pin_20', 'pin_10', 0, 10, Math.PI * 1.5 * 1.5],
 ];
 
 const EXACT = ['triangles', 'welded_vertices', 'unique_edges', 'open_edges',
@@ -95,7 +104,8 @@ for (const [title, bName, aName, axis, target, xsec] of CASES) {
   const dV = a.signed_volume - b.signed_volume;
   const dL = a.bbox_size[axis] - b.bbox_size[axis];
   const implied = dV / dL;
-  check('volume grew', dV > 0, '+' + dV.toFixed(4) + ' mm^3 over +' + dL + ' mm');
+  check(dL > 0 ? 'volume grew' : 'volume shrank', dL > 0 ? dV > 0 : dV < 0,
+    dV.toFixed(4) + ' mm^3 over ' + dL + ' mm');
   if (xsec != null) {
     check('added volume / added length = the cut cross-section',
       Math.abs(implied - xsec) / xsec < (xsec > 50 ? 1e-5 : 0.01),
@@ -105,7 +115,7 @@ for (const [title, bName, aName, axis, target, xsec] of CASES) {
   }
   console.log('   NOT GATED: sliver_tris ' + b.sliver_tris + ' -> ' + a.sliver_tris +
     ', worst aspect ' + b.worst_aspect_ratio.toFixed(3) + ' -> ' + a.worst_aspect_ratio.toFixed(3) +
-    '   (wall triangles get longer; degenerate stays ' + a.degenerate_tris + ')');
+    '   (wall triangles get ' + (dL > 0 ? 'longer' : 'shorter') + '; degenerate stays ' + a.degenerate_tris + ')');
 }
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');

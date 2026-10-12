@@ -1,10 +1,16 @@
 // ===================== Scale: resize a piece to a real dimension =====================
-// Two ways to resize one piece, and the first is the one this file exists for:
+// The uniform-scale primitives, and the Scale card that reads the piece first:
 //
-//   Set size   pick an axis (or the longest bounding-box edge), type the mm you
-//              want that dimension to end up, and the factor is solved for you.
-//   Scale by   the plain multiplier, kept because it is the honest primitive the
-//              first one is built on and a user sometimes just wants "half".
+//   Whole x    the plain multiplier, the honest primitive everything else here
+//              is built on; a user sometimes just wants "half".
+//   Longest    type the mm the longest bounding-box edge should end up, and the
+//              factor is solved for you (NSO_scaleSolve, which still takes a
+//              single display axis underneath - the card no longer offers one;
+//              see the UI section at the bottom for why).
+//   Fit to plate  the largest uniform factor that fits the current machine.
+//
+// The card's first line and its Length verb come from nso_section.js and
+// app-extend.js; nothing in this file reads a shape.
 //
 // Before this file the app had NO scale control of any kind - not a factor box,
 // not a dimension box. A piece's size came from the file, and only Cut, Thicken,
@@ -399,43 +405,198 @@ function NSO_scaleSelectedModel(spec) {
    UI. Self-wired here rather than in a shared button block, so adding a tool
    does not touch a fat file. Guarded on `document`.
 
-   The readout is the point of the card: it names the piece's current size on
-   every axis, so "50 mm tall" is typed against a number the user can see
-   rather than against a guess.
+   THE CARD READS THE SHAPE FIRST. Its first line is nso_section.js's reading
+   in print terms - Ring / Rod / Bar with the numbers a person measures, or the
+   three sizes and the reason a piece is neither - with the build-volume
+   verdict from NSO_fitCheckAll appended. Under it, only what applies:
+
+     Length [ ] mm     Extend or Shorten along the piece's straight axis, by
+                       the sign of the change, cross-section held bit for bit.
+                       NSO_extendSelectedModel, unchanged. Shown only when
+                       there is a straight axis.
+     Whole x [ ]       today's uniform factor, NSO_scaleSelectedModel({factor}).
+     Longest [ ] mm    today's longest-edge target, ({axis: 'longest'}).
+     Fit to plate      the largest uniform factor that fits the machine the
+                       app is pointed at, applied, and the factor stated.
+
+   What went away: the X / Height / Z axis menu and the "X x H x Z" readout.
+   They spoke the display frame (Y up), so "Height" was right and "Z" was the
+   bed's depth, and a user asking for a wider ring got a taller, thicker one.
+   NSO_scaleSolve still takes those axes underneath; the card no longer offers
+   them. The per-shape verbs (outer / bore / wall, width / depth) are the next
+   two tickets, not this one.
 --------------------------------------------------------------------------- */
+
+/* The section reading for a piece, cached on its soup: a bake replaces
+   rawTris with a new array, so the cache can never serve a stale shape, and
+   a selection change or a size-line refresh costs nothing. */
+var NSO_scaleSectionCache = (typeof WeakMap === 'function') ? new WeakMap() : null;
+function NSO_scaleSectionOf(m) {
+  var soup = (m && m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null;
+  if (!soup || typeof NSO_sectionRead !== 'function') return null;
+  if (NSO_scaleSectionCache && NSO_scaleSectionCache.has(soup)) return NSO_scaleSectionCache.get(soup);
+  var s = NSO_sectionRead(soup);
+  if (NSO_scaleSectionCache) NSO_scaleSectionCache.set(soup, s);
+  return s;
+}
+
+/* The build-volume verdict for one piece, in print terms: the same report the
+   plate's own warning reads, axes named W / D / H as the bed is. */
+function NSO_scaleFitVerdict(m) {
+  if (!m || typeof NSO_fitCheckAll !== 'function') return '';
+  var all = NSO_fitCheckAll();
+  if (!all) return '';
+  var rep = null;
+  for (var i = 0; i < all.pieces.length; i++) if (all.pieces[i].modelId === m.id) rep = all.pieces[i];
+  if (!rep) return '';
+  var name = String(rep.printer_name || '').replace(/^(Bambu|Creality) /, '');
+  if (rep.fits) return 'fits ' + name;
+  var AX = { x: 'W', y: 'D', z: 'H' };
+  return 'over by ' + rep.over.map(function (o, k) {
+    return o.over_mm.toFixed(1) + (k === 0 ? ' mm' : '') + ' on ' + AX[o.axis];
+  }).join(', ');
+}
+
+/* The card's first line, readout and verdict. Returned as well as rendered
+   so the drive check reads the same string the user does. */
+function NSO_scaleReadoutText(m) {
+  if (!m || !m.size) return 'Select a piece to resize.';
+  var s = NSO_scaleSectionOf(m);
+  var line = s ? NSO_sectionReadout(s)
+    : (m.size.x.toFixed(1) + ' × ' + m.size.z.toFixed(1) + ' × ' + m.size.y.toFixed(1) + ' W × D × H');
+  var fit = NSO_scaleFitVerdict(m);
+  return fit ? line + ' · ' + fit : line;
+}
+
+/* Fit to plate: the largest uniform factor that fits the current machine.
+   The factor is min(limit / size) over the bed's three axes, read off the
+   same report NSO_fitCheckAll gives the plate warning, so "fits" here and
+   "fits" there are one rule (nso_printer.js's fit, its 1e-4 mm slack, no bed
+   margin). A uniform factor is the same in every frame, so it applies to the
+   raw soup unchanged. Already fits: say so, change nothing. */
+function NSO_scaleFitToPlate() {
+  var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
+  if (!m || !m.size) {
+    if (typeof setStatus === 'function') setStatus('Select a piece first', true);
+    return { ok: false, reason: 'no selection' };
+  }
+  var printer = (typeof NSO_fitCurrentPrinter === 'function') ? NSO_fitCurrentPrinter() : null;
+  if (!printer || typeof NSO_Printer === 'undefined') {
+    if (typeof setStatus === 'function') setStatus('Fit to plate needs the printer profiles - unchanged', true);
+    return { ok: false, reason: 'no printer' };
+  }
+  var size = NSO_Printer.fromDisplaySize(m.size);
+  var rep = NSO_Printer.fit(size, printer);
+  var name = String(printer.name || '').replace(/^(Bambu|Creality) /, '');
+  if (rep.fits) {
+    if (typeof setStatus === 'function') {
+      setStatus('Fit to plate: already fits ' + name + ' (' + size.x.toFixed(1) + ' × ' + size.y.toFixed(1) +
+                ' × ' + size.z.toFixed(1) + ' mm in ' + printer.bedX + ' × ' + printer.bedY + ' × ' +
+                printer.buildZ + ') - nothing changed');
+    }
+    return { ok: true, changed: false, factor: 1, fits: true };
+  }
+  var factor = Math.min(printer.bedX / size.x, printer.bedY / size.y, printer.buildZ / size.z);
+  var r = NSO_scaleSelectedModel({ factor: factor });
+  if (!r.ok) return r;
+  var after = NSO_Printer.fit(NSO_Printer.fromDisplaySize(m.size), printer);
+  var AX = { x: 'W', y: 'D', z: 'H' }, worst = rep.over[0];
+  var txt = 'Fit to plate: ×' + factor.toFixed(6) + ' - ' + AX[worst.axis] + ' ' + worst.size_mm.toFixed(1) +
+    ' → ' + (worst.size_mm * factor).toFixed(1) + ' mm, now ' + m.size.x.toFixed(1) + ' × ' +
+    m.size.z.toFixed(1) + ' × ' + m.size.y.toFixed(1) + ' W × D × H, ' +
+    (after.fits ? 'fits ' + name : 'STILL over: ' + after.reason);
+  if (typeof setStatus === 'function') setStatus(txt, !after.fits);
+  if (typeof nsoScaleRefresh === 'function') nsoScaleRefresh();
+  r.factor = factor; r.changed = true; r.fits = after.fits; r.fitReport = after;
+  return r;
+}
+
 if (typeof document !== 'undefined') {
   (function wireScaleCard() {
+    var lastSoup = null, prefilled = '';
+
+    // Read only while the card is open. The reading walks the whole soup -
+    // about a second on a 49k-triangle piece - and updateEditSize fires on
+    // every import, selection and bake anywhere in the app; a shut card has
+    // nobody to show it to. Opening the menu reads it (the toggle listener in
+    // wire()), and data-stale says which state the line is in.
+    function cardOpen() {
+      var menu = document.getElementById('menu-scale');
+      return !menu || menu.open;
+    }
+
     function readout() {
       var el = document.getElementById('scale-readout');
       if (!el) return;
+      if (!cardOpen()) { el.dataset.stale = '1'; return; }
+      el.dataset.stale = '0';
       var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
-      if (!m || !m.size) { el.textContent = 'Select a piece to resize.'; return; }
-      var longest = Math.max(m.size.x, m.size.y, m.size.z);
-      el.textContent = m.size.x.toFixed(2) + ' x ' + m.size.y.toFixed(2) + ' x ' +
-        m.size.z.toFixed(2) + ' mm (X x H x Z), longest ' + longest.toFixed(2) + ' mm';
+      el.textContent = NSO_scaleReadoutText(m);
+      var s = m ? NSO_scaleSectionOf(m) : null;
+      var row = document.getElementById('scale-length-row');
+      if (row) row.hidden = !(s && s.axis);
+      // Prefill Length with the real number, once per new soup (a new piece
+      // or a bake), so the user edits it instead of guessing one - and is not
+      // overwritten mid-typing by an unrelated size-line refresh.
+      var soup = m ? m.rawTris : null;
+      var inp = document.getElementById('scale-length');
+      if (inp && soup !== lastSoup) {
+        lastSoup = soup;
+        prefilled = (s && s.lengthMm != null) ? String(+s.lengthMm.toFixed(2)) : '';
+        inp.value = prefilled;
+      }
     }
     window.nsoScaleRefresh = readout;
 
-    function run(spec) {
-      try {
-        NSO_scaleSelectedModel(spec);
-      } catch (err) {
+    function guarded(name, fn) {
+      try { fn(); } catch (err) {
         console.error('[scale]', err);
         if (typeof setStatus === 'function') {
-          setStatus('Scale failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
+          setStatus(name + ' failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
         }
       }
       readout();
     }
 
+    function setLength() {
+      var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
+      var s = m ? NSO_scaleSectionOf(m) : null;
+      if (!s || !s.axis) {
+        if (typeof setStatus === 'function') setStatus('Length needs a piece with a straight axis', true);
+        return;
+      }
+      var inp = document.getElementById('scale-length');
+      var want = inp ? parseFloat(inp.value) : NaN;
+      if (inp && inp.value === prefilled) {
+        if (typeof setStatus === 'function') {
+          setStatus('Length: the piece is ' + s.lengthMm.toFixed(2) + ' mm along ' + s.axis +
+                    ' - type a new length (longer extends, shorter shortens)');
+        }
+        return;
+      }
+      if (!(want > 0)) {
+        if (typeof setStatus === 'function') setStatus('Length must be a positive number of mm', true);
+        return;
+      }
+      // A cube or a square bar is straight along several tied axes; the
+      // readout named one, so Extend is told which rather than refusing.
+      var opts = { length: want };
+      if (s.axisTied) opts.axis = s.axis.toLowerCase();
+      NSO_extendSelectedModel(opts);
+    }
+
     function wire() {
+      var len = document.getElementById('btn-scale-length');
+      if (len && len.dataset.nsoWired !== '1') {
+        len.dataset.nsoWired = '1';
+        len.addEventListener('click', function () { guarded('Length', setLength); });
+      }
       var dim = document.getElementById('btn-scale-dim');
       if (dim && dim.dataset.nsoWired !== '1') {
         dim.dataset.nsoWired = '1';
         dim.addEventListener('click', function () {
-          var axis = (document.getElementById('scale-axis') || {}).value || 'longest';
           var target = parseFloat((document.getElementById('scale-target') || {}).value);
-          run({ axis: axis, targetMm: target });
+          guarded('Scale', function () { NSO_scaleSelectedModel({ axis: 'longest', targetMm: target }); });
         });
       }
       var fac = document.getElementById('btn-scale-factor');
@@ -443,9 +604,28 @@ if (typeof document !== 'undefined') {
         fac.dataset.nsoWired = '1';
         fac.addEventListener('click', function () {
           var f = parseFloat((document.getElementById('scale-factor') || {}).value);
-          run({ factor: f });
+          guarded('Scale', function () { NSO_scaleSelectedModel({ factor: f }); });
         });
       }
+      var fit = document.getElementById('btn-scale-fit');
+      if (fit && fit.dataset.nsoWired !== '1') {
+        fit.dataset.nsoWired = '1';
+        fit.addEventListener('click', function () { guarded('Fit to plate', NSO_scaleFitToPlate); });
+      }
+      var menu = document.getElementById('menu-scale');
+      if (menu && menu.dataset.nsoScaleWired !== '1') {
+        menu.dataset.nsoScaleWired = '1';
+        menu.addEventListener('toggle', function () { if (menu.open) readout(); });
+      }
+      // The verdict names the machine, so a plate change re-reads it.
+      ['plate-select', 'custom-w', 'custom-d', 'custom-h'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el && el.dataset.nsoScaleWired !== '1') {
+          el.dataset.nsoScaleWired = '1';
+          el.addEventListener('change', readout);
+          el.addEventListener('input', readout);
+        }
+      });
       readout();
     }
 
