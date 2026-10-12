@@ -12,14 +12,19 @@
  * Every step is the shipped control: Gen+ is opened by its summary, Picture by
  * its own, the file goes into the real <input type=file> (so the browser's own
  * decoder reads the JPEG and the PNG), the numbers are typed into the card and
- * Make piece is clicked. The piece's triangles are then read back out of the
- * page and judged HERE - the app's own edge count AND tools/mesh_validate.py
- * on the STL the Export button actually downloaded.
+ * Make piece is clicked. That opens the slab in G-scope and NOT on the plate;
+ * G-scope's own Click to select region, a click on the slab and Export to plate
+ * put it there. The piece's triangles are then read back out of the page and
+ * judged HERE - the app's own edge count AND tools/mesh_validate.py on the STL
+ * the Export button actually downloaded.
  *
  *   1. the card is in Gen+, with every control the ticket names
- *   2. a scanned line drawing at Levels 2 -> raised ink on a plate; the live
- *      triangle line is the piece's count; one Undo takes it off and the
- *      piece already on the plate is untouched throughout
+ *   2. the loop, on a scanned line drawing: Make -> G-scope (plate and Undo
+ *      stack untouched) -> Back to Picture (photo and every setting as they
+ *      were, no re-pick) -> Make again replaces the slab (no stacking) ->
+ *      Undo steps back to the previous one -> Make -> Export to plate: an
+ *      ordinary piece named after the file, on free plate, posed flat; one
+ *      app Undo takes it off; the piece already on the plate is untouched
  *   3. the same scan at Levels 8
  *   4. a photo at smooth
  *   5. it sculpts: Brush (Emboss - the brush's raising mode) pulls a region up
@@ -27,7 +32,12 @@
  *      and seals both halves; Export writes it and the canonical checker
  *      passes the file
  *   6. a 4000 x 4000 picture at 0.1 mm/sample is refused with the Detail that
- *      fits, and nothing is added
+ *      fits, and nothing is made
+ *   7. placement: every piece that landed is on the bed and clear of every
+ *      other; a slab wider than the bed lands beside it, still clear, and
+ *      says so
+ *   8. a HEIC the browser cannot read is refused in plain words, and the
+ *      picture already on the card stays
  */
 'use strict';
 
@@ -120,13 +130,84 @@ async function pickFile(page, file) {
 const triLine = page => page.evaluate(() => document.getElementById('relief-tris').textContent);
 const lineCount = s => { const m = /([\d,]+) triangles/.exec(s); return m ? parseInt(m[1].replace(/,/g, ''), 10) : null; };
 
-async function makePiece(page) {
-  const before = await page.evaluate(() => state.models.length);
+/* Make piece: the slab into G-scope. Resolves with what G-scope shows. */
+async function make(page) {
+  await page.evaluate(() => { document.getElementById('status').textContent = ''; });
   await page.click('#btn-relief-make');
-  await page.waitForFunction(n => state.models.length > n || /refused|failed/i.test(document.getElementById('status').textContent),
-    before, { timeout: 120000 });
-  return page.evaluate(n => state.models.length > n ? state.models[state.models.length - 1].id : null, before);
+  await page.waitForFunction(() => /in G-scope|refused|failed|could not/i.test(document.getElementById('status').textContent),
+    null, { timeout: 120000 });
+  return scopeDoc(page);
 }
+
+/* What G-scope is showing: its source, the slab's name, count and a checksum. */
+const scopeDoc = page => page.evaluate(() => {
+  const M = window.NSO_MICROSCOPE, d = M && M.getDoc();
+  if (!d) return { open: M ? M.isOpen() : false, doc: null };
+  const o = d.objects && d.objects[0];
+  let sum = 0;
+  if (o) for (let i = 0; i < o.positions.length; i++) sum += o.positions[i] * ((i % 7) + 1);
+  const b = document.getElementById('ms-btn-back-producer');
+  return { open: M.isOpen(), doc: { source: d.source, name: d.name, objects: d.objects ? d.objects.length : 0,
+    object: o ? o.name : null, tris: o ? o.triangles : 0, sum: sum },
+    back: b ? { shown: !b.hidden, label: b.textContent.trim() } : null };
+});
+
+/* G-scope's own way out: Click to select region, click the slab, Export to plate. */
+async function sendToPlate(page) {
+  const before = await page.evaluate(() => state.models.length);
+  await page.click('#ms-mode-select');
+  const r = await page.evaluate(() => { const b = document.getElementById('ms-viewport').getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; });
+  await page.mouse.click(r[0], r[1]);
+  await page.waitForFunction(() => window.NSO_MICROSCOPE.selection().length === 1, null, { timeout: 30000 });
+  await page.click('#ms-btn-export-plate');
+  await page.waitForFunction(n => state.models.length > n, before, { timeout: 60000 });
+  return page.evaluate(n => state.models[state.models.length - 1].id, before);
+}
+
+/* Make piece, then onto the plate, for the sections where getting a slab onto
+   the plate is the setup and not the thing checked. Section 2 drives every
+   control of the loop with real clicks; here Make is still the real button,
+   and the selection and Export to plate are the functions G-scope's own
+   click and button run - each real click waits on frames that software GL
+   draws slowly with G-scope up, and that is most of this check's time. */
+async function makePiece(page) {
+  const d = await make(page);
+  if (!d.doc || d.doc.source !== 'picture') return null;
+  return page.evaluate(name => {
+    const M = window.NSO_MICROSCOPE;
+    if (M.selectObjects([name], 'box').length !== 1) return null;
+    return M.exportToPlate();
+  }, d.doc.object);
+}
+
+/* Every placed piece's footprint as posed, and whether it is on the bed. */
+const plateLayout = page => page.evaluate(() => {
+  const pl = getCurrentPlate();
+  return state.placed.filter(Boolean).map(p => {
+    const f = placedFootprint(p);
+    return { id: p.sourceId, name: p.name, f: f,
+      onBed: f.minx >= -pl.w / 2 - 1e-6 && f.maxx <= pl.w / 2 + 1e-6 && f.minz >= -pl.d / 2 - 1e-6 && f.maxz <= pl.d / 2 + 1e-6 };
+  });
+});
+const overlaps = (a, b) => Math.min(a.maxx, b.maxx) - Math.max(a.minx, b.minx) > 0 && Math.min(a.maxz, b.maxz) - Math.max(a.minz, b.minz) > 0;
+const clearOfAll = (lay, id) => { const me = lay.find(q => q.id === id); return !!me && lay.every(q => q.id === id || !overlaps(me.f, q.f)); };
+
+/* The pose of a placed piece: where it is, how it is turned, whether it sits on the bed. */
+const poseOf = (page, id) => page.evaluate(id => {
+  const p = state.placed.find(q => q && q.sourceId === id);
+  if (!p) return null;
+  p.mesh.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(p.mesh);
+  return { name: p.name, x: p.x, z: p.z, rotY: p.rotY || 0, tipX: p.tipX || 0, tiltX: p.tiltX || 0, tiltZ: p.tiltZ || 0,
+    flipX: !!p.flipX, minY: b.min.y };
+}, id);
+
+const cardState = page => page.evaluate(() => {
+  const v = id => { const e = document.getElementById(id); return e.type === 'checkbox' ? e.checked : e.value; };
+  return JSON.stringify({ pic: window.nsoReliefPicture(), file: document.getElementById('relief-file-name').textContent,
+    w: v('inp-relief-width'), b: v('inp-relief-base'), r: v('inp-relief-relief'), d: v('inp-relief-detail'),
+    l: v('sel-relief-levels'), up: v('chk-relief-bright') });
+});
 
 /* Look at a piece from (dx, dy, dz) mm off its centre, or off a point
    (tx, 0, tz) mm from its centre. */
@@ -171,61 +252,133 @@ withApp(async (page, logs) => {
       summary: document.querySelector('#menu-relief > summary').textContent.trim(),
       accept: document.getElementById('relief-file').getAttribute('accept'),
       visible: ['btn-relief-pick', 'inp-relief-width', 'inp-relief-base', 'inp-relief-relief', 'inp-relief-detail',
-                'sel-relief-levels', 'chk-relief-bright', 'relief-tris', 'btn-relief-make'].filter(vis),
+                'sel-relief-levels', 'chk-relief-bright', 'relief-tris', 'btn-relief-make', 'btn-relief-undo'].filter(vis),
       levels: Array.from(document.getElementById('sel-relief-levels').options).map(o => o.value),
       level: document.getElementById('sel-relief-levels').value,
       bright: document.getElementById('chk-relief-bright').checked,
       makeDisabled: document.getElementById('btn-relief-make').disabled,
+      undoDisabled: document.getElementById('btn-relief-undo').disabled,
       line: document.getElementById('relief-tris').textContent,
       defaults: ['inp-relief-width', 'inp-relief-base', 'inp-relief-relief', 'inp-relief-detail']
         .map(id => document.getElementById(id).value).join(' / ')
     };
   });
   check('Gen+ -> Picture exists', ui.inGen && ui.summary === 'Picture', ui.summary);
-  check('the file picker takes image/*', ui.accept === 'image/*', ui.accept);
-  check('every control is visible: picker, Width, Base, Relief, Detail, Levels, Bright is up, the line, Make piece',
-    ui.visible.length === 9, ui.visible.join(', '));
+  check('the file picker takes image/* and lists HEIC / HEIF', ui.accept === 'image/*,.heic,.heif', ui.accept);
+  check('every control is visible: picker, Width, Base, Relief, Detail, Levels, Bright is up, the line, Make piece, Undo',
+    ui.visible.length === 10, ui.visible.join(', '));
   check('Levels offers 2 / 4 / 8 / 16 / smooth, 2 by default', JSON.stringify(ui.levels) === '["2","4","8","16","smooth"]' && ui.level === '2',
     ui.levels.join(' '));
   check('Bright is up starts off', ui.bright === false);
   check('the card opens on the ticket\'s defaults: Width 60, Base 2, Relief 2, Detail 0.3',
     ui.defaults === '60 / 2 / 2 / 0.3', ui.defaults);
   check('Make piece waits for a picture', ui.makeDisabled === true, ui.line);
+  check('Undo waits for a previous slab', ui.undoDisabled === true);
 
   /* a piece already on the plate, which nothing below may touch */
   await closeMenus(page);
   const boxId = await loadSTL(page, path.join(ROOT, 'fixtures', 'box-20mm.stl'));
   const boxFp = await fingerprint(page, boxId);
 
-  console.log('\n=== 2. a scanned line drawing at Levels 2 -> raised ink on a plate ===');
+  console.log('\n=== 2. the loop: Make -> G-scope -> Back to Picture -> Make again -> Undo -> Export to plate ===');
   await openCard(page);
   await pickFile(page, SCAN);
-  await setCard(page, { width: 80, base: 1, relief: 1.2, detail: 0.25, levels: 2, bright: false });
+  /* 0.5 mm, not finer: the loop is about where the slab goes, and every frame
+     G-scope and the plate draw under software GL costs its triangles */
+  await setCard(page, { width: 80, base: 1, relief: 1.2, detail: 0.5, levels: 2, bright: false });
   const line2 = await triLine(page);
   const undo0 = await page.evaluate(() => state.undoStack.length);
+  const models0 = await page.evaluate(() => state.models.length);
+  const placed0 = await page.evaluate(() => state.placed.length);
   await shot(page, '01-card-scan-levels2', true);
+
+  /* Make: into G-scope, not onto the plate */
   const t0 = Date.now();
-  const scan2 = await makePiece(page);
+  const g1 = await make(page);
   const ms2 = Date.now() - t0;
+  const st1 = await statusOf(page);
+  check('Make piece opens the slab in G-scope', g1.open && g1.doc && g1.doc.source === 'picture' && g1.doc.objects === 1,
+    JSON.stringify(g1.doc) + ' | ' + st1.trim().slice(0, 120));
+  if (!g1.doc) throw new Error('no slab in G-scope: ' + st1);
+  check('...named after the file', g1.doc.object === 'line-drawing-scan' && g1.doc.name === 'line-drawing-scan.jpg', g1.doc.object);
+  check('...with the triangle count the live line said', lineCount(line2) === g1.doc.tris, line2 + ' vs ' + g1.doc.tris);
+  check('...and nothing went on the plate or the Undo stack',
+    await page.evaluate(([m, p, u]) => state.models.length === m && state.placed.length === p && state.undoStack.length === u,
+      [models0, placed0, undo0]));
+  check('the status says it is in G-scope and not on the plate', /in G-scope, not on the plate/.test(st1) && /closed \(chi 2\)/.test(st1), st1.trim());
+  check('G-scope shows Back to Picture', g1.back && g1.back.shown && g1.back.label === 'Back to Picture', JSON.stringify(g1.back));
+  check('Undo is still off: there is no previous slab', await page.evaluate(() => document.getElementById('btn-relief-undo').disabled));
+  await shot(page, '02-gscope-slab-levels2', true);
+
+  /* Back to Picture: the card, photo and settings as they were */
+  const card1 = await cardState(page);
+  await page.click('#ms-btn-back-producer');
+  await page.waitForTimeout(150);
+  const backed = await page.evaluate(() => ({ scope: window.NSO_MICROSCOPE.isOpen(),
+    gen: document.getElementById('menu-gen').open, card: document.getElementById('menu-relief').open,
+    makeOn: !document.getElementById('btn-relief-make').disabled }));
+  check('Back to Picture closes G-scope and opens the Picture card', !backed.scope && backed.gen && backed.card, JSON.stringify(backed));
+  check('...with the photo and every setting as they were (Width, Base, Relief, Detail, Levels, Bright is up)',
+    await cardState(page) === card1, card1);
+  check('...and Make piece ready without choosing the photo again', backed.makeOn);
+  await shot(page, '03-back-to-picture', true);
+
+  /* Make again: replaces the slab in G-scope, does not stack */
+  await setCard(page, { levels: 8 });
+  const card2 = await cardState(page);
+  const g2 = await make(page);
+  check('Make again replaces the slab G-scope shows - one slab, a different one',
+    g2.open && g2.doc && g2.doc.objects === 1 && g2.doc.source === 'picture' && g2.doc.sum !== g1.doc.sum,
+    g2.doc && (g2.doc.objects + ' object, checksum ' + g2.doc.sum.toFixed(0) + ' vs ' + g1.doc.sum.toFixed(0)));
+  check('...still nothing on the plate or the Undo stack',
+    await page.evaluate(([m, p, u]) => state.models.length === m && state.placed.length === p && state.undoStack.length === u,
+      [models0, placed0, undo0]));
+  check('Undo is on now', await page.evaluate(() => !document.getElementById('btn-relief-undo').disabled));
+
+  /* Undo: one step back to the previous attempt */
+  await page.click('#ms-btn-back-producer');
+  await page.waitForTimeout(100);
+  check('the card shows the second attempt\'s settings', await cardState(page) === card2);
+  await page.click('#btn-relief-undo');
+  await page.waitForTimeout(150);
+  const g3 = await scopeDoc(page);
+  check('Undo puts the previous slab back in G-scope', g3.open && g3.doc && g3.doc.sum === g1.doc.sum && g3.doc.objects === 1,
+    g3.doc && g3.doc.sum.toFixed(0));
+  check('...and its settings back on the card (Levels 2)', await cardState(page) === card1);
+  check('...one step only: Undo is off again', await page.evaluate(() => document.getElementById('btn-relief-undo').disabled));
+  check('...and the plate and the app\'s Undo stack never moved',
+    await page.evaluate(([m, p, u]) => state.models.length === m && state.placed.length === p && state.undoStack.length === u,
+      [models0, placed0, undo0]));
+
+  /* Send to plate: G-scope's own Export to plate, on the Levels 2 slab */
+  const scan2 = await sendToPlate(page);
   const m2 = await measure(page, scan2);
   const st2 = await statusOf(page);
-  check('a piece was added, named after the file', m2 && m2.name === 'line-drawing-scan', m2 ? m2.name : st2);
+  check('Export to plate puts the slab on the plate, named after the file', m2 && m2.name === 'line-drawing-scan', m2 ? m2.name : st2);
   if (!m2) throw new Error('no slab: ' + st2);
-  check('the live line is the piece\'s triangle count', lineCount(line2) === m2.tris, line2 + ' vs ' + m2.tris);
+  check('G-scope closed on the way out', !(await page.evaluate(() => window.NSO_MICROSCOPE.isOpen())));
+  check('it is the slab G-scope showed: the live line\'s count', lineCount(line2) === m2.tris, line2 + ' vs ' + m2.tris);
   check('closed in the app\'s own edge count', m2.open === 0 && m2.nm === 0, 'open ' + m2.open + ', nm ' + m2.nm);
   check('80 mm wide, 60 deep, base + relief tall', Math.abs(m2.size[0] - 80) < 1e-3 && Math.abs(m2.size[2] - 60) < 1e-3 &&
     Math.abs(m2.size[1] - 2.2) < 1e-3, m2.size.join(' x ') + ' mm (x, height, depth)');
-  check('the status says what was built', /Added line-drawing-scan - relief 80\.00 x 60\.00 mm/.test(st2) && /closed \(chi 2\)/.test(st2), st2.trim());
+  check('the status says it went to the plate', /Export to plate ok - "line-drawing-scan"/.test(st2), st2.trim());
+  const pose2 = await poseOf(page, scan2);
+  check('posed as any new piece: flat, unturned, on the bed', pose2 && pose2.rotY === 0 && pose2.tipX === 0 && pose2.tiltX === 0 &&
+    pose2.tiltZ === 0 && !pose2.flipX && Math.abs(pose2.minY) < 0.35, JSON.stringify(pose2));
+  const lay2 = await plateLayout(page);
+  check('on free plate: wholly on the bed and clear of the piece already there',
+    clearOfAll(lay2, scan2) && lay2.find(q => q.id === scan2).onBed,
+    lay2.map(q => q.name + ' x ' + q.f.minx.toFixed(1) + '..' + q.f.maxx.toFixed(1) + ' z ' + q.f.minz.toFixed(1) + '..' + q.f.maxz.toFixed(1)).join(' | '));
   check('nothing else on the plate was touched', await fingerprint(page, boxId) === boxFp);
   check('exactly one Undo step was pushed', await page.evaluate(() => state.undoStack.length) === undo0 + 1);
-  NUM.scan2 = Object.assign({ line: line2, ms: ms2 }, m2);
+  NUM.scan2 = Object.assign({ line: line2, ms: ms2, pose: pose2 }, m2);
   await closeMenus(page);
   await lookAt(page, scan2, [0, 50, 72]);
-  await shot(page, '02-scan-levels2-raised-ink');
+  await shot(page, '04-scan-levels2-on-plate');
   await lookAt(page, scan2, [-8, 16, 26], [-14, 0, 2]);
-  await shot(page, '03-scan-levels2-close');
+  await shot(page, '05-scan-levels2-close');
 
-  /* one Undo takes it off, and only it */
+  /* it is an ordinary piece: one app Undo takes it off, and only it */
   await page.evaluate(() => undoLast());
   check('one Undo takes the slab off', await page.evaluate(id => !state.models.some(m => m.id === id) &&
     !state.placed.some(p => p && p.sourceId === id), scan2));
@@ -244,14 +397,15 @@ withApp(async (page, logs) => {
   NUM.scan8 = Object.assign({ line: line8 }, m8);
   await closeMenus(page);
   await lookAt(page, scan8, [-8, 16, 26], [-14, 0, 2]);
-  await shot(page, '04-scan-levels8');
+  await shot(page, '06-scan-levels8');
+  await page.evaluate(() => undoLast());               /* light plate for what follows */
 
   console.log('\n=== 4. a photo at smooth ===');
   await openCard(page);
   await pickFile(page, PHOTO);
-  await setCard(page, { width: 60, base: 0.8, relief: 2.4, detail: 0.2, levels: 'smooth', bright: true });
+  await setCard(page, { width: 60, base: 0.8, relief: 2.4, detail: 0.4, levels: 'smooth', bright: true });
   const lineP = await triLine(page);
-  await shot(page, '05-card-photo-smooth', true);
+  await shot(page, '07-card-photo-smooth', true);
   const photo = await makePiece(page);
   const mP = await measure(page, photo);
   check('photo, smooth, bright is up: added, named after the file, closed', mP && mP.name === 'camera' && mP.open === 0 && mP.nm === 0,
@@ -260,7 +414,8 @@ withApp(async (page, logs) => {
   NUM.photo = Object.assign({ line: lineP }, mP);
   await closeMenus(page);
   await lookAt(page, photo, [0, 46, 62]);
-  await shot(page, '06-photo-smooth');
+  await shot(page, '08-photo-smooth');
+  await page.evaluate(() => undoLast());
 
   console.log('\n=== 5. it sculpts - Brush, Smooth, Cut, Export ===');
   /* A slab at the scan's Levels 8, at a Detail the brush's whole-mesh gate
@@ -346,7 +501,7 @@ withApp(async (page, logs) => {
   await page.click('#btn-brush');                         /* disarm */
   await closeMenus(page);
   await lookAt(page, slab, [4, 16, 30], [-17, 0, -12]);
-  await shot(page, '07-brush-emboss-on-slab');
+  await shot(page, '09-brush-emboss-on-slab');
 
   /* Smooth: the whole-piece Laplacian, through its button */
   await page.evaluate(() => { const b = document.getElementById('btn-smooth'); for (let n = b; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
@@ -398,7 +553,7 @@ withApp(async (page, logs) => {
     }, [hs[0].id, hs[1].id]);
     await lookAt(page, hs[0].id, [0, 55, 80], gap);
   }
-  await shot(page, '08-cut-through-slab');
+  await shot(page, '10-cut-through-slab');
 
   /* Export: Download selected STL, then the canonical checker on that file */
   if (hs.length) {
@@ -445,12 +600,12 @@ withApp(async (page, logs) => {
   const refusal = await statusOf(page);
   const sug = /Detail ([\d.]+) mm\/sample fits/.exec(refusal);
   check('the picture is 4000 x 4000', await page.evaluate(() => { const p = window.nsoReliefPicture(); return p.w === 4000 && p.h === 4000; }));
-  check('refused, by name, with the Detail that fits', /Picture refused - nothing added/.test(refusal) && /400,000 budget/.test(refusal) && !!sug,
+  check('refused, by name, with the Detail that fits', /Picture refused - nothing made/.test(refusal) && /400,000 budget/.test(refusal) && !!sug,
     refusal.trim());
   check('the card\'s line showed the count it refused', /1,449,612 triangles/.test(bigLine) && /1,449,612 triangles/.test(refusal), bigLine);
-  check('nothing was added and no Undo step pushed', await page.evaluate(() => state.models.length) === nBig &&
+  check('nothing was made, added or pushed onto Undo', await page.evaluate(() => state.models.length) === nBig &&
     await page.evaluate(() => state.undoStack.length) === undoBig);
-  await shot(page, '09-refused-4000px', true);
+  await shot(page, '11-refused-4000px', true);
   if (sug) {
     await setCard(page, { detail: sug[1] });
     const fitLine = await triLine(page);
@@ -459,8 +614,52 @@ withApp(async (page, logs) => {
     check('at the suggested Detail it builds, inside the budget, closed', mBig && mBig.tris <= 400000 && mBig.open === 0 && mBig.nm === 0 &&
       lineCount(fitLine) === mBig.tris, fitLine + (mBig ? ', open ' + mBig.open : ''));
     NUM.big = { refusal: refusal.trim(), line: bigLine, fitLine: fitLine, tris: mBig && mBig.tris };
+    /* 364,812 triangles is the heaviest thing here; off the plate again so
+       the rest of the run does not draw it every frame */
+    if (big) await page.evaluate(() => undoLast());
   }
   check('...and the piece loaded first is untouched after all of it', await fingerprint(page, boxId) === boxFp);
+
+  console.log('\n=== 7. placement: free plate, never on top of a piece ===');
+  const lay = await plateLayout(page);
+  const clash = [];
+  for (let i = 0; i < lay.length; i++) for (let j = i + 1; j < lay.length; j++) if (overlaps(lay[i].f, lay[j].f)) clash.push(lay[i].name + ' / ' + lay[j].name);
+  check('no two pieces on the plate overlap', clash.length === 0, lay.length + ' pieces' + (clash.length ? ' - ' + clash.join(', ') : ''));
+  /* a plate that already holds the box, the slabs above and two halves */
+  await closeMenus(page);
+  await openCard(page);
+  await pickFile(page, SCAN);
+  await setCard(page, { width: 40, base: 1, relief: 1, detail: 1, levels: 2, bright: false });
+  const small = await makePiece(page);
+  const lay7 = await plateLayout(page);
+  const me7 = lay7.find(q => q.id === small);
+  check('a slab sent to a busy plate lands on free plate, on the bed', clearOfAll(lay7, small) && me7 && me7.onBed,
+    me7 && ('x ' + me7.f.minx.toFixed(1) + '..' + me7.f.maxx.toFixed(1) + ' z ' + me7.f.minz.toFixed(1) + '..' + me7.f.maxz.toFixed(1)));
+  await openCard(page);
+  await setCard(page, { width: 400, detail: 2 });
+  const wide = await makePiece(page);
+  const layW = await plateLayout(page);
+  const meW = layW.find(q => q.id === wide);
+  const stW = await statusOf(page);
+  check('a slab wider than the bed lands beside it, clear of every piece, and says so',
+    meW && !meW.onBed && clearOfAll(layW, wide) && /no free room/.test(stW), stW.trim().slice(0, 140));
+  NUM.placement = { pieces: layW.map(q => ({ name: q.name, f: q.f, onBed: q.onBed })) };
+  await closeMenus(page);
+  await page.evaluate(() => framePlateHome());
+  await shot(page, '12-plate-placement', true);
+
+  console.log('\n=== 8. HEIC the browser cannot read ===');
+  await openCard(page);
+  const picBefore = await page.evaluate(() => JSON.stringify(window.nsoReliefPicture()));
+  await page.evaluate(() => { document.getElementById('status').textContent = ''; });
+  await page.setInputFiles('#relief-file', { name: 'IMG_0001.HEIC', mimeType: 'image/heic',
+    buffer: Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypheic'), Buffer.alloc(512, 7)]) });
+  await page.waitForFunction(() => /refused/i.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  const heic = (await statusOf(page)).trim();
+  check('a HEIC this browser cannot decode is refused in plain words',
+    /this browser can't read HEIC photos; export it as JPEG or use Safari/.test(heic) && !/could not decode/.test(heic), heic);
+  check('...and the picture already on the card stays', await page.evaluate(() => JSON.stringify(window.nsoReliefPicture())) === picBefore);
+  await shot(page, '13-heic-refused', true);
 
   const errs = logs.filter(l => /pageerror|\[error\]/.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));

@@ -67,18 +67,41 @@ closed and passed the canonical checker, and it could not be sculpted
 With the floor a grid under the top, Brush, Smooth and Cut pass their own gates
 and the checker, and a fresh slab has 0 slivers.
 
-## 2. The card - Gen+ -> Picture
+## 2. The card - Gen+ -> Picture, and the loop through G-scope
 
-Choose picture... (`image/*`), then Width / Base / Relief mm, Detail mm/sample,
-Levels (2, 4, 8, 16, Smooth), Bright is up, the live line `~ N,NNN triangles`
-(`NSO_Relief.plan`, so it is the count the piece will have), and Make piece.
+Choose picture... (`image/*`, and `.heic` / `.heif` listed too), then Width /
+Base / Relief mm, Detail mm/sample, Levels (2, 4, 8, 16, Smooth), Bright is
+up, the live line `~ N,NNN triangles` (`NSO_Relief.plan`, so it is the count
+the slab will have), Make piece and Undo.
 
 The picture is read at full size through the browser's own decoder (an `<img>`,
 a canvas on white, `getImageData`) - not downscaled first as Trace raster does,
 because the box filter is the resampler and the budget, not a pixel cap, is what
-refuses a grid too fine. The piece arrives through `addModelFromZUpGeometry`,
-the ordinary ingest Trace raster and Stock use, named after the file. One Undo
-step (`addModels`) takes it off. Nothing else on the plate is read or written.
+refuses a grid too fine. A HEIC the browser cannot decode (every browser but
+Safari) is refused as "this browser can't read HEIC photos; export it as JPEG
+or use Safari", and the picture already on the card stays.
+
+**Make piece does not touch the plate.** It opens the slab in G-scope through
+`NSO_MICROSCOPE.openObjects` - the seam G-scope already had for any named Z-up
+triangle groups - as a one-object document named after the file. Nothing is
+added and nothing goes on the Undo stack. From there:
+
+| control | where | what it does |
+|---|---|---|
+| Back to Picture | G-scope, Source row | closes G-scope and opens Gen+ -> Picture. The photo is still in memory and no control was touched, so Width, Base, Relief, Detail, Levels and Bright is up are as they were - no re-choosing |
+| Make piece, again | the card | replaces the slab G-scope shows. Attempts do not stack |
+| Undo | the card | one step back to the previous attempt: that slab goes back into G-scope and its photo and settings come back onto the card. Only the previous attempt is kept, so it is one step; the app's own Undo (the plate's) is not involved |
+| Click to select region, click the slab, Export to plate | G-scope | G-scope's own way out. The slab arrives through `addModelFromZUpGeometry`, the ordinary ingest an imported STL takes, named after the file, with one `addModels` Undo step - an ordinary piece from then on |
+
+**Placement.** A slab that reaches the plate is moved to free plate: the spot
+nearest the bed's middle, on a 2 mm grid, where its footprint is wholly on the
+bed and at least 4 mm from every placed piece's footprint as posed
+(`placedFootprint`, the box drag uses, so a turned piece counts the room it
+takes). A slab with no such spot - wider than the bed, or a full bed - lands
+just past everything, clear of every piece, and the status says so. G-scope's
+`onPlate` hook is how the slab comes back to Picture for this; addModel's own
+seat (past the rightmost piece by its unturned width) is unchanged for every
+other route.
 
 **Paint scope: none** - it adds a piece and reads no existing geometry.
 
@@ -98,7 +121,7 @@ The halves add up to the whole to the third decimal. The slivers after Cut are
 the cut engine's cap, not the slab.
 
 In the real app (`npm run relief:drive`), the scan at Levels 8, 60 mm at 0.5
-mm, 44,892 triangles: an Emboss stroke over open paper baked (8 dabs, open 0->0,
+mm, 44,892 triangles, sent from G-scope to the plate: an Emboss stroke over open paper baked (8 dabs, open 0->0,
 T-junctions 0->0, self-int 0->0, top 2.539 -> 3.501 mm, 4133.99 -> 4636.67
 mm^3); Smooth ran (volume -0.66%); Split cut it into two sealed halves of 23,548
 triangles each; Download selected STL wrote 23,548 triangles that the canonical
@@ -119,7 +142,7 @@ a steep relief is the brush's behaviour, and changing it is out of this ticket.
 |---|---|---|
 | `relief:test` | the generator: checker, gradient, 1-px line, photo at 2/4/16/smooth, each turned 90 degrees, budget, plan = build, edge cases, vm load; the canonical checker on every slab | 277 |
 | `relief:sculpt` | Brush, Smooth, Cut, STL, canonical after each | 12 |
-| `relief:drive` | the card in real Chromium, the three pictures, the line, Undo, the plate untouched, Brush / Smooth / Cut / Export, the 4000 x 4000 refusal | 37 |
+| `relief:drive` | the card in real Chromium; the loop - Make into G-scope, Back to Picture with every setting kept, Make again replacing, Undo one step, Export to plate named and posed on free plate, the app's Undo; the three pictures, the line, the plate untouched, Brush / Smooth / Cut / Export, the 4000 x 4000 refusal, placement on a busy and a too-small bed, the HEIC refusal | 65 |
 | `relief:shots` | `relief:drive`, keeping its screenshots and numbers in `tools/relief-out/` (gitignored - screenshots go in the PR, never in the repo) | - |
 
 Not here, on purpose: region lift, vectorising, edge detection, colour.
