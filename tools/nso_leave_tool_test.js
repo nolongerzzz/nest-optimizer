@@ -67,7 +67,10 @@ withApp(async (page, logs) => {
   };
 
   /* A point on the main canvas that is the plate and nothing else: the canvas
-     is the element there, the plate is under it, and no piece is. */
+     is the element there, the plate is under it, and no piece is - nor any of
+     Rotate's arrowheads, which app-core hit-tests ahead of everything and
+     which, at the bed-sized rings (45% of the bed), reach well out over the
+     plate. A double-click there is two arrowhead clicks, not empty plate. */
   const platePoint = () => page.evaluate(() => {
     const c = state.renderer.domElement;
     const r = c.getBoundingClientRect();
@@ -77,7 +80,10 @@ withApp(async (page, logs) => {
       if (!hitPlateSurface(ev)) return false;
       setPointerFromEvent(ev);
       state.raycaster.setFromCamera(state.pointer, state.camera);
-      return !state.raycaster.intersectObjects(state.modelGroup.children, true).length;
+      if (state.raycaster.intersectObjects(state.modelGroup.children, true).length) return false;
+      const rot = state.scene.getObjectByName('nso-rotate-handles');
+      return !(rot && rot.visible && state.raycaster.intersectObjects(rot.children, true)
+        .some(h => h.object && h.object.userData.nsoRotateHandle));
     };
     let best = null;
     for (let fy = 0.55; fy <= 0.9; fy += 0.05) {
