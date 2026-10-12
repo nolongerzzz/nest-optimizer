@@ -177,9 +177,10 @@
   }
 
   /* ---- Tilt, and its keyboard -------------------------------------------
-     The four Tilt buttons are unchanged - tiltSelected and bankSelected,
-     15 degrees a press, each lifting one edge. The keys do exactly what
-     clicking them does, by calling the same functions.
+     The four Tilt buttons are tiltSelected and bankSelected (app-core.js),
+     15 degrees a press about the plate's X and the plate's Z, through
+     nsoRotate.turn. The keys do exactly what clicking them does, by calling
+     the same functions - so they follow the plate's axes too.
 
      SCOPED TO THE OPEN MENU, not bound globally. Arrow keys are a scarce
      thing and more than one tool wants them; the rule this follows is that
