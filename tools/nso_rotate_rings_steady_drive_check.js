@@ -15,6 +15,8 @@
 
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+const { execFileSync } = require('child_process');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
 
 const OUT = path.resolve(process.argv[2] || path.join(ROOT, 'docs', 'rotate-rings-steady'));
@@ -230,6 +232,93 @@ withApp(async (page, logs) => {
   check('dragged to 2° short of 90, the snap put it on 90 exactly', Math.abs(landed.angle - 90) < 1e-6,
     before.toFixed(3) + '° -> ' + landed.angle.toFixed(6) + '° (' + landed.readout + ')');
   check('...the box\'s long axis lies exactly along the 90 tick', Math.abs(landed.cos - 1) < 1e-9, 'cos = ' + landed.cos);
+
+  console.log('\n=== 6. the leans are the piece\'s own: turn the box 45°, lean side/side 30° ===');
+  /* Real drags only. Back to rest first, from three-quarter view. */
+  await select(0);
+  await N(() => { const p = window.__d.p(); p.rotY = 0; p.tiltX = 0; p.tiltZ = 0; applyMeshRotation(p);
+    window.__d.cam(150, 140, 190); });
+  await page.click('#chk-rot-ring-fb');
+  await page.click('#chk-rot-ring-ss');
+  await page.waitForTimeout(100);
+  await shot(page, '10-box-at-rest-lean-rings-along-the-piece');
+  const axes = () => N(() => {
+    const q = window.__d.p().mesh.quaternion, D = 180 / Math.PI;
+    const L = new THREE.Vector3(1, 0, 0).applyQuaternion(q), W = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+    return { heading: Math.atan2(-L.z, L.x) * D, elev: Math.asin(Math.max(-1, Math.min(1, L.y))) * D,
+             W: W.toArray(), fb: window.nsoRotate.ringAxis('fb'), ss: window.nsoRotate.ringAxis('ss'),
+             L: L.toArray() };
+  });
+  /* turn +45: the dial's turn is dialSign x the screen angle traced, so
+     tracing dialSign x 45 turns it +45 */
+  let sgn = await N(() => window.nsoRotate.dialSign('turn'));
+  await dragRing('turn', sgn * 45);
+  const a45 = await axes();
+  check('Turn: the box\'s heading is 45°', Math.abs(a45.heading - 45) < 1e-3, a45.heading.toFixed(4) + '°');
+  const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+  check('...and the lean rings came round with it: front/back is now its own length, side/side its width line',
+    Math.abs(Math.abs(dot(a45.fb, a45.L)) - 1) < 1e-9 && Math.abs(Math.abs(dot(a45.ss, a45.W)) - 1) < 1e-9,
+    'fb ' + a45.fb.map(v => v.toFixed(3)) + ', ss ' + a45.ss.map(v => v.toFixed(3)));
+  await shot(page, '11-turned-45-lean-rings-turned-with-it');
+  /* lean side/side 30 - the ring that runs along the piece - raising an end */
+  sgn = await N(() => window.nsoRotate.dialSign('ss'));
+  await dragRing('ss', sgn * 30);
+  const a30 = await axes();
+  console.log('   long axis: heading ' + a45.heading.toFixed(4) + '° -> ' + a30.heading.toFixed(4) +
+    '°, elevation ' + a45.elev.toFixed(4) + '° -> ' + a30.elev.toFixed(4) + '°');
+  check('Lean side/side 30°: the long axis rises 30° end-over-end', Math.abs(Math.abs(a30.elev) - 30) < 1e-3,
+    a30.elev.toFixed(4) + '°');
+  check('...with no twist: still heading 45°', Math.abs(a30.heading - a45.heading) < 1e-6,
+    a30.heading.toFixed(6) + '°');
+  check('...about its width line, which stayed put', Math.abs(dot(a30.W, a45.W) - 1) < 1e-12);
+  await shot(page, '12-then-leaned-side-side-30');
+  await N(() => window.__d.cam(-60, 60, 230));
+  await shot(page, '13-same-from-the-side');
+  await N(() => window.__d.cam(150, 140, 190));
+
+  /* export through the real button and read the file back */
+  await N(() => { const f = document.getElementById('export-format'); f.value = '3mf'; f.dispatchEvent(new Event('change')); });
+  await N(() => { const e = document.getElementById('btn-export-stl'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+  const [dl] = await Promise.all([page.waitForEvent('download', { timeout: 30000 }), page.click('#btn-export-stl')]);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-steady-'));
+  const file = path.join(tmp, dl.suggestedFilename());
+  await dl.saveAs(file);
+  const parts = execFileSync('unzip', ['-Z1', file]).toString().split('\n').filter(n => /\.model$/.test(n));
+  const objects = [];
+  for (const part of parts) {
+    const xml = execFileSync('unzip', ['-p', file, part], { maxBuffer: 1 << 28 }).toString();
+    for (const o of xml.matchAll(/<object\b[\s\S]*?<\/object>/g)) {
+      const verts = [], tris = [];
+      for (const m of o[0].matchAll(/<vertex x="([^"]+)" y="([^"]+)" z="([^"]+)"/g)) verts.push([+m[1], +m[2], +m[3]]);
+      for (const m of o[0].matchAll(/<triangle v1="(\d+)" v2="(\d+)" v3="(\d+)"/g)) tris.push([+m[1], +m[2], +m[3]]);
+      if (tris.length) objects.push([].concat(...tris.map(t => t.map(i => verts[i]))));
+    }
+  }
+  const screens = await N(() => {
+    const plate = getCurrentPlate(), v = new THREE.Vector3();
+    return state.placed.map(p => {
+      p.mesh.updateMatrixWorld(true);
+      const pos = p.mesh.geometry.attributes.position, out = [];
+      const lift = p.mesh.position.y - (p.height / 2 + (p.liftY || 0));     // the 0.2 baseline the export leaves out
+      for (let i = 0; i < pos.count; i++) {
+        v.fromBufferAttribute(pos, i); p.mesh.localToWorld(v);
+        out.push([v.x + plate.w / 2, -v.z + plate.d / 2, v.y - lift]);
+      }
+      return out;
+    });
+  });
+  const cmp = screens.map((sc, i) => {
+    const f = objects[i];
+    if (!f || f.length !== sc.length) return { worst: Infinity, n: sc.length, fn: f ? f.length : 0 };
+    let w = 0;
+    for (let k = 0; k < sc.length; k++) w = Math.max(w, Math.hypot(f[k][0] - sc[k][0], f[k][1] - sc[k][1], f[k][2] - sc[k][2]));
+    return { worst: w, n: sc.length, minZ: Math.min(...f.map(v => v[2])) };
+  });
+  check('the downloaded .3mf holds the turned-and-leaned box where the screen shows it, vertex for vertex',
+    cmp[0].worst < 1e-3, 'worst ' + cmp[0].worst.toExponential(2) + ' mm over ' + cmp[0].n + ' vertices');
+  check('...and resting on the plate', Math.abs(cmp[0].minZ) < 1e-3, 'min z ' + cmp[0].minZ);
+  check('...and the other piece on the plate too', cmp[1] && cmp[1].worst < 1e-3,
+    cmp[1] && ('worst ' + cmp[1].worst.toExponential(2) + ' mm over ' + cmp[1].n));
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   if (errs.length) { console.log('\npage errors:\n' + errs.join('\n')); fails++; }

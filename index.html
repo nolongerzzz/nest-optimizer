@@ -182,16 +182,17 @@
             <div class="vp-menu-body vp-top-body">
               <button id="btn-rot-left" class="vp-bar-btn adjust-btn" disabled>⟲ 90°</button>
               <button id="btn-rot-right" class="vp-bar-btn adjust-btn" disabled>90° ⟳</button>
-              <!-- Which rings are drawn on the piece. Each turns it about one
-                   axis of the PLATE, whatever the piece is already doing.
+              <!-- Which rings are drawn on the piece. Turn is about the
+                   plate's vertical; the two leans are about the piece's own
+                   axes as it lies, and their rings turn with it.
                    Turn only on every opening; nothing here is saved. -->
               <label class="vp-flag vp-flag-rotring vp-flag-rotring-turn" title="A ring about the plate's vertical. Click an arrowhead to turn 1°, drag it to swing round the ring.">
                 <input type="checkbox" id="chk-rot-ring-turn" checked><span class="vp-flag-face">Turn (horizontal)</span>
               </label>
-              <label class="vp-flag vp-flag-rotring vp-flag-rotring-fb" title="A ring about the plate's X axis: leans the piece toward you or away. Click an arrowhead to lean 1°, drag it to swing round the ring.">
+              <label class="vp-flag vp-flag-rotring vp-flag-rotring-fb" title="A ring across the piece, about its own length, turning with the piece: rolls it - the front edge goes up or down. Click an arrowhead to lean 1°, drag it to swing round the ring.">
                 <input type="checkbox" id="chk-rot-ring-fb"><span class="vp-flag-face">Lean front/back</span>
               </label>
-              <label class="vp-flag vp-flag-rotring vp-flag-rotring-ss" title="A ring about the plate's Z axis: leans the piece left or right. Click an arrowhead to lean 1°, drag it to swing round the ring.">
+              <label class="vp-flag vp-flag-rotring vp-flag-rotring-ss" title="A ring along the piece, about its own width line, turning with the piece: tips it end-over-end. Click an arrowhead to lean 1°, drag it to swing round the ring.">
                 <input type="checkbox" id="chk-rot-ring-ss"><span class="vp-flag-face">Lean side/side</span>
               </label>
             </div>
