@@ -42,6 +42,7 @@ const state = {
   moveIndex: -1,
   moveGrab: { x: 0, z: 0 },
   moveUndoFrom: null,
+  rightPress: null,   // a right press not yet a pan or a click (onCanvasContextMenu)
   undoStack: [],
   cameraFramed: false,
   cutAxis: null,
@@ -671,13 +672,17 @@ function initThree() {
   state.controls.target.set(0, 0, 0);
   // Orbit only while left-dragging the plate (toggled in pointer handlers)
   state.controls.enableRotate = true;
+  /* Right-drag pans, in screen space: the plate follows the pointer at any
+     orbit angle. A right press that does not travel is still the click that
+     selects a piece and opens the context menu - see onCanvasContextMenu. */
   state.controls.enablePan = true;
+  state.controls.screenSpacePanning = true;
   // Custom wheel handler below - Orbit zoom disabled so we can invert direction
   state.controls.enableZoom = false;
   state.controls.mouseButtons = {
     LEFT: THREE.MOUSE.ROTATE,
     MIDDLE: THREE.MOUSE.DOLLY,
-    RIGHT: null
+    RIGHT: THREE.MOUSE.PAN
   };
 
   // Lights
@@ -2477,6 +2482,7 @@ function cutTFromPointer() {
 }
 
 function onCanvasPointerMove(event) {
+  noteRightPressMove(event);
   if (typeof nsoRotate !== 'undefined' && nsoRotate.dragging()) {
     event.preventDefault();
     nsoRotate.moveDrag(event.clientX, event.clientY);
@@ -2512,7 +2518,7 @@ function clearPointerState() {
   }
 }
 
-function onCanvasPointerUp() {
+function onCanvasPointerUp(event) {
   if (typeof nsoRotate !== 'undefined' && nsoRotate.dragging()) nsoRotate.endDrag();
   if (state.cutDragging) {
     state.cutDragging = false;
@@ -2523,6 +2529,7 @@ function onCanvasPointerUp() {
     if (state.controls) state.controls.enabled = true;
   }
   if (state.moveDragging) endMoveDrag();
+  endRightPress(event);
   // Orbit only while actively dragging the plate
   setOrbitFromPlate(false);
 }
@@ -2530,7 +2537,7 @@ function onCanvasPointerUp() {
 function setOrbitFromPlate(allow) {
   if (!state.controls) return;
   state.controls.enableRotate = !!allow;
-  // keep zoom; pan stays off
+  // keep zoom; right-drag pan is never gated here
 }
 
 function isPlateObject(obj) {
@@ -2589,8 +2596,57 @@ function pickPlacedIndexFromEvent(event) {
   return typeof idx === 'number' ? idx : -1;
 }
 
+/* RIGHT BUTTON: PAN OR CLICK, DECIDED BY MOVEMENT. OrbitControls pans on
+   every right drag (RIGHT: PAN); a right press that travels more than
+   RIGHT_PAN_SLOP pixels before release is that pan and nothing else. One that
+   does not is the click it always was: select the piece under the pointer and
+   open the context menu. Neither can be decided at the press, and the
+   browser's contextmenu event comes at the press on Linux and macOS but after
+   the release on Windows - so the press is recorded here and the click is
+   acted on at whichever of release and contextmenu comes second.
+
+   A camera gesture, not a tool: it is not routed through nsoInputMode, it
+   does not select, and it pushes nothing to undo. The contextmenu event is
+   always cancelled on the canvas, so the browser's menu never shows mid-pan. */
+const RIGHT_PAN_SLOP = 4;
+
+function beginRightPress(event) {
+  state.rightPress = { x: event.clientX, y: event.clientY, moved: false, up: false, menu: null };
+}
+
+function noteRightPressMove(event) {
+  const rp = state.rightPress;
+  if (!rp || rp.up || rp.moved) return;
+  if (Math.hypot(event.clientX - rp.x, event.clientY - rp.y) > RIGHT_PAN_SLOP) rp.moved = true;
+}
+
+function endRightPress(event) {
+  const rp = state.rightPress;
+  if (!rp || rp.up || !event) return;
+  if (event.type === 'pointercancel') { state.rightPress = null; return; }
+  if (event.button !== 2) return;
+  noteRightPressMove(event);
+  rp.up = true;
+  if (!rp.menu) return;             // contextmenu still to come (Windows)
+  state.rightPress = null;
+  if (!rp.moved) openCanvasContextMenu(rp.menu);
+}
+
 function onCanvasContextMenu(event) {
   event.preventDefault();
+  const rp = state.rightPress;
+  if (rp && !rp.up) {               // at the press (Linux, macOS): wait for the release
+    rp.menu = event;
+    return;
+  }
+  if (rp) {                         // after the release (Windows)
+    state.rightPress = null;
+    if (rp.moved) return;
+  }
+  openCanvasContextMenu(event);
+}
+
+function openCanvasContextMenu(event) {
   if (!state.placed.length) {
     hideCtxMenu();
     return;
@@ -2606,6 +2662,7 @@ function onCanvasContextMenu(event) {
 }
 
 function onCanvasPointerDown(event) {
+  state.rightPress = null;
   /* The rotation handles are hit-tested first and swallow the event. That is
      the point of a separate grab target: a click on the PIECE still means
      select-and-move, exactly as before, and only a ring's arrowheads rotate
@@ -2644,11 +2701,11 @@ function onCanvasPointerDown(event) {
   }
   if (!state.renderer || !state.camera) return;
 
-  // Right-click: highlight only (menu comes from contextmenu event)
+  // Right press: a pan if it travels, else select + menu on release
+  // (onCanvasContextMenu). Rotate stays off so OrbitControls only pans.
   if (event.button === 2) {
     setOrbitFromPlate(false);
-    const idx = pickPlacedIndexFromEvent(event);
-    if (idx >= 0) selectPlaced(idx);
+    beginRightPress(event);
     return;
   }
 
