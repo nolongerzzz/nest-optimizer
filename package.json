@@ -153,6 +153,7 @@
     "slicer:bambu": "node tools/nso_slicer_bambu_check.js",
     "gcode:fixture": "node tools/gcode-test/make-fixture.js",
     "library:live": "node tools/nso_library_live_check.js",
+    "page:manifest": "node tools/nso_page_manifest_test.js",
     "test": "node tools/run-tests.mjs",
     "test:par": "node tools/run-tests-parallel.mjs",
     "test:cached": "node tools/run-tests-cached.mjs",
@@ -210,6 +211,7 @@
     "three": "0.147.0"
   },
   "testSteps": [
+    "page:manifest",
     "cth:unit",
     "cth:capture",
     "cth:drive",
@@ -400,14 +402,11 @@
     "gcode:gscope-features are newer still: local times (3.2s / 33s) scaled by the",
     "suite's 1.7x, rounded up, until a CI run measures them. gcode:gscope-one-list",
     "likewise: 71s locally x 1.7, rounded up; and section:test and scale:card",
-
     "(9.3s / 13.3s local), ring:test and ring:drive (2.7s / 13.7s), box:test (3.0s);",
-    "relief:test, relief:sculpt and relief:drive (74s / 19s / 163s local).",
-    "wire:offset carries wire:fatten's weight, the test it replaced. Only the shard packing in",
-
-    "(9.3s / 13.3s local), ring:test and ring:drive (2.7s / 13.7s); relief:test,",
-    "relief:sculpt and relief:drive (74s / 19s / 163s local); and pan:drive (47s). Only the shard packing in",
-
+    "relief:test, relief:sculpt and relief:drive (74s / 19s / 163s local);",
+    "pan:drive (47s); leave:tool (17.9s, the mean of two local runs); and",
+    "page:manifest (0.06s). wire:offset carries wire:fatten's weight, the test it",
+    "replaced. Only the shard packing in",
     "tools/run-tests.mjs reads them (and run-tests-parallel.mjs prints their sum).",
     "No test behaviour depends on them: a step missing from this table is packed",
     "at the median, not skipped - and that is not harmless (below).",
@@ -435,6 +434,7 @@
     "run-tests-parallel.mjs no longer draws a speedup ratio from their sum."
   ],
   "testStepWeights": {
+    "page:manifest": 110,
     "cth:unit": 558,
     "cth:capture": 7850,
     "cth:drive": 3550,
@@ -525,6 +525,7 @@
     "topbar:accordion": 94450,
     "move:vertical": 4000,
     "input:mode": 34350,
+    "leave:tool": 31000,
     "pan:drive": 80000,
     "to-plate": 16450,
     "thicken:check": 49800,
