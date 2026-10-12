@@ -588,7 +588,7 @@ one guard in `nso-watch.js`. `applyMeshRotation` is not touched.
 - Checks: `rotate:handles` sections 13 (rewritten), 17, 18 - 158 gates.
   `rotate:pivot-drive` is the ticket's drive-check, screenshots in
   `tools/rotate-pivot-out/` (git-ignored), not in `npm test`. `?v=`: `app-rotate-handles.js`
-  rot4 -> rot6 (rot5 is the Pose-buttons branch's).
+  -> rot8 (rot5 / rot7 are the Pose-buttons branch's, #142, merged first).
 
 ## Picture -> relief slab - Gen+ -> Picture (2026-10-12)
 Branch `claude/picture-relief`, off `claude-wip`. Full write-up: **`docs/RELIEF.md`**.

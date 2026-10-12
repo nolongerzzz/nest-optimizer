@@ -876,13 +876,28 @@
     setRing: setRing,
     activeRing: activeRing,
     step: function (ring, dir) { return stepBy(ring, (dir < 0 ? -1 : 1) * STEP_DEG); },
-    /* A programmatic turn of `deg` about a ring's plate axis, no snap, no
-       Undo point - what a click does, without the click. */
-    turn: function (ring, deg) {
+    /* A programmatic turn of `deg` about a ring's axis - the plate's vertical
+       for Turn, the piece's own X / Z for the leans - no Undo point and no
+       lock check: what a click does, without the click. The pose
+       buttons (app-core's rotateSelected / tiltSelected / bankSelected) call
+       this and keep their own Undo, lock and status around it.
+
+       opts.snap: land on a quarter turn if the turn ends within the hard
+       snap of one - the drag's own snap, measured the drag's own way
+       (ringAngleDeg on the piece's axis nearest the ring's plane), so a 90
+       degree button from 2 degrees off square lands ON square and a run of
+       them stays exact. Off by default: a click, a key and a tilt step are
+       exactly what they say. */
+    turn: function (ring, deg, opts) {
       var p = piece();
       if (!p || !RINGS[ring]) return false;
       p.mesh.updateMatrixWorld(true);
-      writePose(p, turned(p.mesh.quaternion.clone(), ring, deg));
+      var q0 = p.mesh.quaternion.clone();
+      if (opts && opts.snap) {
+        var abs0 = ringAngleDeg(q0, ring, refAxis(q0, ring));
+        deg = hardSnapDeg(abs0 + deg) - abs0;
+      }
+      writePose(p, turned(q0, ring, deg));
       refresh();
       return true;
     },

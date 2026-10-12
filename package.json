@@ -172,6 +172,7 @@
     "rotate:drive": "node tools/nso_rotate_rings_drive_check.js",
     "rotate:steady-drive": "node tools/nso_rotate_rings_steady_drive_check.js",
     "rotate:pivot-drive": "node tools/nso_rotate_pivot_drive_check.js",
+    "pose:drive": "node tools/nso_pose_buttons_drive_check.js",
     "lock:test": "node tools/nso_poslock_test.js",
     "overlay:test": "node tools/nso_viewport_overlay_test.js",
     "lock:multi": "node tools/nso_multilock_test.js",
