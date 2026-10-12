@@ -160,7 +160,7 @@ async function main() {
   check('the header says what is loaded',
     /2895 extrusion moves, 50 layers/.test(opened.sub), true);
   check('and the legend is named for what a SLICE groups on',
-    await page.textContent('#ms-legend-title'), 'Features (click to isolate)');
+    await page.textContent('#ms-legend-title'), 'All features');
 
   // Legend click isolates, exactly as the reference tool does.
   await page.click('#ms-legend .ms-legend-item:first-child');
@@ -264,6 +264,9 @@ async function main() {
 
   // Isolate / Back. Isolate shows the selection ALONE and
   // AS-IS: each move as the same line the overview draws, nothing else.
+  // The box controls - Isolate all boxes, Clear all boxes - are under Click
+  // to select region, and G-scope opens in orbit: arm it, as a user does.
+  await page.click('#ms-mode-select');
   await page.click('#ms-btn-isolate');
   const isolated = await page.evaluate(() => {
     const v = window.NSO_MICROSCOPE.getView();
@@ -467,7 +470,7 @@ async function main() {
   // A plain mesh has no features, so the legend must not claim it groups on
   // them - it groups on build objects, and says so.
   check('the legend is named for what a MESH groups on',
-    await page.textContent('#ms-legend-title'), 'Parts (click to isolate)');
+    await page.textContent('#ms-legend-title'), 'Parts');
 
   const refused = await page.evaluate(() => {
     window.NSO_MICROSCOPE.selectLayer(0);

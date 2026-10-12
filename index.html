@@ -770,8 +770,8 @@
       <div class="ms-section">
         <div class="ms-section-title">View</div>
         <div class="ms-btn-row">
-          <button id="ms-mode-orbit" type="button">Orbit whole part</button>
-          <button id="ms-mode-select" type="button" class="active">Click to select region</button>
+          <button id="ms-mode-orbit" type="button" class="active">Orbit whole part</button>
+          <button id="ms-mode-select" type="button">Click to select region</button>
           <button id="ms-mode-line" type="button"
                   title="Pick one extrusion move at a time (sliced files only)">Pick a line</button>
         </div>
@@ -782,9 +782,9 @@
           <button id="ms-cam-normal" type="button" class="active" aria-pressed="true"
                   title="Free orbit, pan and zoom. Isolated, it shows the selection alone, as drawn. From Slice view, back to the mesh">Normal</button>
           <button id="ms-cam-slice" type="button" aria-pressed="false"
-                  title="Slice every piece into real layers, walls and infill with the in-house slicer (the Slice settings below) and show its detected features">Slice view</button>
+                  title="Slice every piece into real layers, walls and infill with the in-house slicer (the Slice settings below) and list its features">Slice view</button>
         </div>
-        <div id="ms-select-controls">
+        <div id="ms-select-controls" style="display:none;">
           <p class="ms-note">Click empty space to drop a flat box. Drag its
             <b>blue centre dot</b> to move it. Drag its <b>green corner dot</b> to
             size it along and across independently. A new box lines up with the
@@ -945,26 +945,24 @@
       <!-- The feature legend, floating over the viewport's top-left rather
            than down in the sidebar. Sits below the mode badge, which already
            owns the corner itself. app-microscope.js finds #ms-legend by id
-           and never by where it lives, so the rows, the click-to-isolate and
-           the per-row "only" button are the same code as before the move. -->
+           and never by where it lives, so the rows, their show / hide toggle
+           and the per-row "only" button are the same code as before the move.
+           One list per view and no tab strip: a slice lists its features
+           (#ms-legend), a mesh lists its parts (#ms-legend) and, under a rule,
+           the five detector rows (#ms-detected). -->
       <div id="ms-legend-float" class="ms-section">
         <div class="ms-legend-head">
-          <div class="ms-section-title" id="ms-legend-title">Features (click to isolate)</div>
+          <div class="ms-section-title" id="ms-legend-title">All features</div>
           <button id="ms-legend-toggle" type="button" aria-expanded="true"
                   aria-controls="ms-legend" title="Minimize the list">&minus;</button>
         </div>
-        <!-- Slice view's tab strip: hidden until a slice is shown (app-microscope.js,
-             setLegendTab). Normal shows the list and the Flange row as ever. -->
-        <div class="ms-legend-tabs" role="tablist" aria-label="Legend">
-          <button id="ms-tab-legend" type="button" role="tab" aria-selected="false">All features</button>
-          <button id="ms-tab-detected" type="button" role="tab" aria-selected="false">Detected features</button>
-        </div>
         <div id="ms-legend"></div>
-        <!-- Tabs for what the geometry has but the file does not name. The
-             Flange tab (nso_flange.js, docs/GSCOPE-FLANGE.md), then Handle,
-             Bracket, Lid and Hinge (nso_face_features.js,
-             docs/GSCOPE-FEATURES.md). Kept apart from
-             #ms-legend, whose rows are exactly the file's own groups. -->
+        <!-- Rows for what the geometry has but the file does not name, mesh
+             only. The Flange row (nso_flange.js, docs/GSCOPE-FLANGE.md), then
+             Handle, Bracket, Lid and Hinge (nso_face_features.js,
+             docs/GSCOPE-FEATURES.md). Each a show / hide toggle like the part
+             rows above it; kept apart from #ms-legend, whose rows are exactly
+             the file's own groups. Empty on a slice. -->
         <div id="ms-detected"></div>
       </div>
       <div id="ms-hint-badge"></div>
