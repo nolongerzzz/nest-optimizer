@@ -415,147 +415,6 @@ function axisCoord(ax, x, y, z) {
   return ax === 'x' ? x : ax === 'y' ? y : z;
 }
 
-function clipGeometrySide(geometry, axis, plane, keepMin) {
-  // Always copy - never mutate the source model mesh
-  let src = geometry.clone();
-  if (src.index) src = src.toNonIndexed();
-  const pos = src.attributes.position;
-  const out = [];
-  const edges = [];
-  const EPS = 1e-4;
-
-  function coord(v) {
-    return axis === 'x' ? v[0] : axis === 'y' ? v[1] : v[2];
-  }
-
-  // -1 = min side, 0 = on plane, +1 = max side
-  function classify(c) {
-    if (c < plane - EPS) return -1;
-    if (c > plane + EPS) return 1;
-    return 0;
-  }
-
-  function isKept(side) {
-    if (keepMin) return side <= 0;
-    return side >= 0;
-  }
-
-  function interp(a, b, ca, cb) {
-    const den = cb - ca;
-    const t = Math.abs(den) < 1e-12 ? 0.5 : (plane - ca) / den;
-    const tt = Math.min(1, Math.max(0, t));
-    const pt = [
-      a[0] + (b[0] - a[0]) * tt,
-      a[1] + (b[1] - a[1]) * tt,
-      a[2] + (b[2] - a[2]) * tt
-    ];
-    if (axis === 'x') pt[0] = plane;
-    else if (axis === 'y') pt[1] = plane;
-    else pt[2] = plane;
-    return pt;
-  }
-
-  function almostSame(a, b) {
-    return Math.abs(a[0] - b[0]) < 1e-4
-      && Math.abs(a[1] - b[1]) < 1e-4
-      && Math.abs(a[2] - b[2]) < 1e-4;
-  }
-
-  function pushTri(a, b, c) {
-    const abx = b[0] - a[0], aby = b[1] - a[1], abz = b[2] - a[2];
-    const acx = c[0] - a[0], acy = c[1] - a[1], acz = c[2] - a[2];
-    const nx = aby * acz - abz * acy;
-    const ny = abz * acx - abx * acz;
-    const nz = abx * acy - aby * acx;
-    if (nx * nx + ny * ny + nz * nz < 1e-14) return;
-    out.push(a[0], a[1], a[2], b[0], b[1], b[2], c[0], c[1], c[2]);
-  }
-
-  const triCount = Math.floor(pos.count / 3);
-  for (let t = 0; t < triCount; t++) {
-    const i0 = t * 3;
-    const verts = [
-      [pos.getX(i0), pos.getY(i0), pos.getZ(i0)],
-      [pos.getX(i0 + 1), pos.getY(i0 + 1), pos.getZ(i0 + 1)],
-      [pos.getX(i0 + 2), pos.getY(i0 + 2), pos.getZ(i0 + 2)]
-    ];
-    const cs = verts.map(coord);
-    const sides = cs.map(classify);
-    const kept = sides.map(isKept);
-    const nKeep = (kept[0] ? 1 : 0) + (kept[1] ? 1 : 0) + (kept[2] ? 1 : 0);
-    if (nKeep === 0) continue;
-    if (nKeep === 3) {
-      // Whole triangle on this side - but skip pure on-plane tris (zero volume)
-      if (sides[0] === 0 && sides[1] === 0 && sides[2] === 0) continue;
-      pushTri(verts[0], verts[1], verts[2]);
-      continue;
-    }
-
-    const poly = [];
-    const cutPts = [];
-    for (let e = 0; e < 3; e++) {
-      const a = verts[e];
-      const b = verts[(e + 1) % 3];
-      const ca = cs[e];
-      const cb = cs[(e + 1) % 3];
-      const sa = sides[e];
-      const sb = sides[(e + 1) % 3];
-      const ka = kept[e];
-      const kb = kept[(e + 1) % 3];
-
-      if (ka) poly.push(a);
-
-      // Crossing from one side of plane to the other (not on-plane-only edge)
-      if (sa !== sb && sa * sb === -1) {
-        const p = interp(a, b, ca, cb);
-        poly.push(p);
-        cutPts.push(p);
-      } else if (sa !== sb && (sa === 0 || sb === 0)) {
-        // One vertex on plane, other off - the on-plane vertex is the cut point
-        const onPt = sa === 0 ? a : b;
-        if (ka !== kb) {
-          // only add if the off-plane vertex is NOT kept and on-plane was already pushed, or vice versa
-          if (!almostSame(poly.length ? poly[poly.length - 1] : [1e9, 0, 0], onPt)) {
-            if (!ka) poly.push(onPt);
-          }
-          cutPts.push(onPt);
-        }
-      }
-    }
-
-    const clean = [];
-    for (let i = 0; i < poly.length; i++) {
-      const p = poly[i];
-      if (!clean.length || !almostSame(clean[clean.length - 1], p)) clean.push(p);
-    }
-    if (clean.length >= 2 && almostSame(clean[0], clean[clean.length - 1])) clean.pop();
-    if (clean.length < 3) continue;
-
-    for (let i = 1; i < clean.length - 1; i++) {
-      pushTri(clean[0], clean[i], clean[i + 1]);
-    }
-
-    if (cutPts.length >= 2) {
-      let a = cutPts[0];
-      let b = cutPts[0];
-      for (let i = 1; i < cutPts.length; i++) {
-        if (!almostSame(a, cutPts[i])) { b = cutPts[i]; break; }
-      }
-      if (!almostSame(a, b)) edges.push([a, b]);
-    }
-  }
-
-  const cap = capFromEdges(edges, axis, plane, keepMin);
-  for (let i = 0; i < cap.length; i++) out.push(cap[i]);
-
-  if (out.length < 9) return null;
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(out, 3));
-  geo.computeVertexNormals();
-  geo.computeBoundingBox();
-  return geo;
-}
-
 function capFromEdges(edges, axis, plane, keepMin) {
   // Claude-style: boundary graph -> closed loop(s) -> ear-clip cap -> outward normals
   if (!edges || !edges.length) return [];
@@ -2036,9 +1895,10 @@ function placeHalvesOnPlate(modelA, modelB, axis) {
 // getCutPlaneForSplit returns) back into the raw, untranslated,
 // original-file-axis space that rawTris/rawCut operate on. Inverts, in
 // order: geometry.center() (via the stored centerOffset), then
-// rotateX(-PI/2) (via the fixed axis/sign remap below). Returns null if
-// the model has no rawTris (e.g. it wasn't loaded through handleFiles) —
-// callers must fall back to clipGeometrySide in that case.
+// rotateX(-PI/2) (via the fixed axis/sign remap below). The display frame
+// is (x, z, -y) of the raw one, less centerOffset. Returns null if the model
+// has no raw triple (rawTris, rawAxis 'zup', centerOffset); splitBothSides
+// then cuts the display mesh with the same engine.
 function mapPlaneToRaw(model, displayAxis, displayPlane, keepMin) {
   if (!model.rawTris || !model.centerOffset || model.rawAxis !== 'zup') return null;
   const off = model.centerOffset;
@@ -2046,12 +1906,17 @@ function mapPlaneToRaw(model, displayAxis, displayPlane, keepMin) {
     // raw x0 = dispX + centerOffset.x — axis and sign unaffected by rotateX(-90deg)
     return { axisIdx: 0, plane: displayPlane + off.x, keepMin: keepMin };
   }
+  if (displayAxis === 'y') {
+    // dispY = z0 - centerOffset.y  =>  z0 = dispY + centerOffset.y
+    // Increasing dispY is increasing raw z0, as on X — keepMin unchanged.
+    return { axisIdx: 2, plane: displayPlane + off.y, keepMin: keepMin };
+  }
   if (displayAxis === 'z') {
     // dispZ = -y0 - centerOffset.z  =>  y0 = -dispZ - centerOffset.z
     // Increasing dispZ means DECREASING raw y0 — keepMin flips.
     return { axisIdx: 1, plane: -displayPlane - off.z, keepMin: !keepMin };
   }
-  return null; // unexpected axis — let caller fall back
+  return null;
 }
 
 // Convert a raw-space Float32Array (from rawCut, original file axes,
@@ -2079,22 +1944,149 @@ function rawResultToDisplayGeometry(rawFlatTris, parentOffset) {
   return geo;
 }
 
-// Split hook: try the raw-mesh engine first (same math as the sandbox);
-// fall back to the existing display-mesh clipGeometrySide on ANY failure
-// — mapping unavailable, rawCut throws, or result missing. Never leaves a
-// null half. Both halves always go through the SAME path (both raw or
-// both fallback) so they stay geometrically consistent with each other.
-function splitCutSide(model, axis, plane, keepMin) {
-  try {
-    const mapped = mapPlaneToRaw(model, axis, plane, keepMin);
-    if (!mapped) throw new Error('no raw mapping available for this model');
-    const rawResult = rawCut(model.rawTris, mapped.axisIdx, mapped.plane, mapped.keepMin);
-    if (!rawResult) throw new Error('rawCut produced no geometry');
-    return rawResultToDisplayGeometry(rawResult);
-  } catch (err) {
-    console.warn('[rawCut] falling back to clipGeometrySide:', err.message);
-    return clipGeometrySide(model.geometry, axis, plane, keepMin);
+// ===================== Split: one engine, no fallback =====================
+// Every Cut goes through rawCut, whose cap (rawFlatCapLoops) nests the
+// section's loops, so a tube's cut face is one annulus with its bore open.
+// A piece with a raw triple is cut in the raw frame (mapPlaneToRaw); any
+// other piece (an Array copy, a half of an earlier display cut) is cut on its
+// display mesh, handed to rawCut as a triangle soup - rawCut does not care
+// which frame a soup is in.
+//
+// There is no second engine to fall back to. The old one (clipGeometrySide
+// -> capFromEdges) ear-clipped every loop on its own, so a bore was lidded
+// and the lid sat on top of the annulus: two sets of faces on one plane. If
+// rawCut cannot close the cut face, the Cut is refused with a CutRefused
+// error whose message says why in plain words, and the piece is left alone.
+//
+// Which side each piece is, is left as each route already had it, and the
+// two routes do not agree. rawCut's keepMin = true keeps coord >= plane, so
+// on the raw route `left` = rawCut(..., leftPlane, true) through
+// mapPlaneToRaw is the side ABOVE leftPlane, and each piece keeps the kerf
+// band instead of losing it (an 8 mm ring cut at 4 gives 4.5 + 4.5). Display
+// Y follows display X, so a Y cut on a raw piece now does the same. On the
+// display route `left` is the side below leftPlane, the side
+// clipGeometrySide kept (hence the !keepMin there), and the kerf is removed.
+const CUT_DISPLAY_AXIS_IDX = { x: 0, y: 1, z: 2 };
+
+function cutRefused(message) {
+  const err = new Error(message);
+  err.name = 'CutRefused';
+  return err;
+}
+
+// rawCut's own errors, said the way the status line should say them.
+function cutPlainReason(err) {
+  const m = String((err && err.message) || err);
+  if (/branch point/.test(m)) {
+    return 'where the red plane crosses the piece its surface is open or touches itself, so the cut face cannot be closed';
   }
+  if (/no outline around it/.test(m)) return 'a hole in the cut face has no outline around it';
+  if (/no clear bridge/.test(m)) return 'a hole in the cut face could not be joined to the outline around it';
+  return 'the cut face could not be closed (' + m + ')';
+}
+
+// The cut face must be exactly the section: every wall edge left open on the
+// plane closed by a cap edge running the other way, and the cap's faces
+// covering the section once (their total area equals the section's net area,
+// so no face sits on top of another). Returns null when it holds, else a
+// plain-words reason.
+function cutFaceProblem(soup, axisIdx, planeVal) {
+  const plane = Math.fround(planeVal);   // rawCut's output is float32
+  const o1 = (axisIdx + 1) % 3, o2 = (axisIdx + 2) % 3;
+  function key(o) { return soup[o] + ',' + soup[o+1] + ',' + soup[o+2]; }
+  const wall = new Map(), cap = new Map();
+  let capArea = 0;
+  for (let t = 0; t < soup.length; t += 9) {
+    const onPlane = soup[t + axisIdx] === plane && soup[t + 3 + axisIdx] === plane && soup[t + 6 + axisIdx] === plane;
+    if (onPlane) {
+      capArea += Math.abs((soup[t+3+o1]-soup[t+o1]) * (soup[t+6+o2]-soup[t+o2]) -
+                          (soup[t+3+o2]-soup[t+o2]) * (soup[t+6+o1]-soup[t+o1])) / 2;
+    }
+    const into = onPlane ? cap : wall;
+    for (let e = 0; e < 3; e++) {
+      const a = t + e * 3, b = t + ((e + 1) % 3) * 3;
+      const k = key(a) + '>' + key(b);
+      into.set(k, (into.get(k) || 0) + 1);
+    }
+  }
+  // Wall edges on the plane with no twin among the walls: the section's
+  // outline, directed. Their shoelace sum is the section's net area.
+  // A cap edge running the SAME way as its wall edge means the cap faces out
+  // while the walls face in: the piece is inside-out (negative volume).
+  let open = 0, against = 0, net = 0;
+  for (let t = 0; t < soup.length; t += 9) {
+    if (soup[t + axisIdx] === plane && soup[t + 3 + axisIdx] === plane && soup[t + 6 + axisIdx] === plane) continue;
+    for (let e = 0; e < 3; e++) {
+      const a = t + e * 3, b = t + ((e + 1) % 3) * 3;
+      if (soup[a + axisIdx] !== plane || soup[b + axisIdx] !== plane) continue;
+      if (wall.has(key(b) + '>' + key(a))) continue;
+      if (cap.has(key(b) + '>' + key(a))) { /* closed, and the winding agrees */ }
+      else if (cap.has(key(a) + '>' + key(b))) against++;
+      else open++;
+      net += (soup[a+o1] * soup[b+o2] - soup[b+o1] * soup[a+o2]) / 2;
+    }
+  }
+  if (against) {
+    return 'the piece\'s faces point inward (it is inside-out), so a cut face cannot be wound to match them';
+  }
+  if (open) return open + ' edge(s) of the cut face were left open';
+  if (Math.abs(capArea - Math.abs(net)) > 1e-4 * Math.max(1, Math.abs(net))) {
+    return 'the cut face came out ' + capArea.toFixed(2) + ' mm² for a section of ' +
+      Math.abs(net).toFixed(2) + ' mm², so part of it would be covered twice';
+  }
+  return null;
+}
+
+// One side: rawCut, then the cut-face check, in the frame rawCut ran in.
+function cutOneSide(soup, axisIdx, plane, keepMin) {
+  let out;
+  try {
+    out = rawCut(soup, axisIdx, plane, keepMin);
+  } catch (err) {
+    throw cutRefused(cutPlainReason(err));
+  }
+  if (!out || out.length < 9) throw cutRefused('nothing is left on one side of the red plane');
+  const problem = cutFaceProblem(out, axisIdx, plane);
+  if (problem) throw cutRefused(problem);
+  return out;
+}
+
+function displaySoupOf(geometry) {
+  const g = geometry.index ? geometry.toNonIndexed() : geometry;
+  return new Float32Array(g.attributes.position.array);
+}
+
+function splitBothSides(model, axis, leftPlane, rightPlane) {
+  const mapL = mapPlaneToRaw(model, axis, leftPlane, true);
+  const mapR = mapPlaneToRaw(model, axis, rightPlane, false);
+  if (mapL && mapR) {
+    const rawL = cutOneSide(model.rawTris, mapL.axisIdx, mapL.plane, mapL.keepMin);
+    const rawR = cutOneSide(model.rawTris, mapR.axisIdx, mapR.plane, mapR.keepMin);
+    return {
+      left: rawResultToDisplayGeometry(rawL, model.centerOffset),
+      right: rawResultToDisplayGeometry(rawR, model.centerOffset),
+      engine: 'raw',
+      rawA: rawL,
+      centerOffsetA: computeCenterOffsetFromRaw(rawL),
+      rawB: rawR,
+      centerOffsetB: computeCenterOffsetFromRaw(rawR)
+    };
+  }
+  const axisIdx = CUT_DISPLAY_AXIS_IDX[axis];
+  if (axisIdx == null) throw cutRefused('the cut axis "' + axis + '" is not X, Y or Z');
+  const soup = displaySoupOf(model.geometry);
+  function geo(tris) {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(tris, 3));
+    g.computeVertexNormals();
+    g.computeBoundingBox();
+    return g;
+  }
+  return {
+    left: geo(cutOneSide(soup, axisIdx, leftPlane, false)),
+    right: geo(cutOneSide(soup, axisIdx, rightPlane, true)),
+    engine: 'display'
+  };
 }
 
 // Compute a half's centerOffset directly from its own raw bounding box,

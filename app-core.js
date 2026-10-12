@@ -1285,9 +1285,9 @@ function addModel(name, geometry, opts) {
     size: { x: size2.x, y: size2.y, z: size2.z },
     orientedGeometry: null,
     // Raw-mesh cut engine data - original file axes, untranslated. Only
-    // present when loaded via handleFiles; absent on programmatically
-    // rebuilt models (e.g. after a Split), which fall back to
-    // clipGeometrySide automatically since rawTris will be undefined.
+    // present when loaded via handleFiles (or handed over by a raw-engine
+    // verb); absent on programmatically rebuilt models, which Split cuts on
+    // their display mesh with the same engine (splitBothSides, app-cut.js).
     rawTris: options.rawTris || null,
     rawAxis: options.rawAxis || null,
     centerOffset: options.centerOffset || null
