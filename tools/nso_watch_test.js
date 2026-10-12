@@ -687,10 +687,11 @@ async function partF(page) {
       const r = document.getElementById(id).getBoundingClientRect();
       return r.width > 0 && r.height > 0;
     });
-    // The card's lowest-but-one control, Longest's Set: the one the expanded
-    // log sits over since the card grew a readout line and a Length row (it
-    // was "Scale by" when the card was two rows).
-    return { scale: at('btn-scale-dim'), undo: at('btn-undo'), pills,
+    // The card's lowest control, Fit to plate: the one the expanded log sits
+    // over. It was "Scale by" when the card was two rows, then Longest's Set;
+    // since Scale part 3 a cube shows no Longest (its Length is the same
+    // number) and the rows are one compact line each.
+    return { scale: at('btn-scale-fit'), undo: at('btn-undo'), pills,
              collapsed: NSOWatch.isCollapsed(),
              expanded: document.getElementById('nso-watch-collapse').getAttribute('aria-expanded') };
   });
@@ -701,12 +702,16 @@ async function partF(page) {
   ok(open.collapsed === false && open.expanded === 'true', 'the panel starts expanded, as it always has');
   ok(open.undo, 'expanded, the log no longer sits on the left tool rail - Undo takes the click',
      JSON.stringify(open));
-  ok(!open.scale, 'expanded, it can still cover the Scale card - which is what collapsing is for',
+  // It used to: the expanded log sat over the card's lowest control, which
+  // is what collapsing was for. Since Scale part 3 the card's rows are one
+  // compact line each and it ends above the log, so the click lands even
+  // expanded - held here so a taller card cannot quietly go back under it.
+  ok(open.scale, 'expanded, the log no longer covers the Scale card\'s lowest control (Fit to plate)',
      JSON.stringify(open));
   await page.evaluate(() => document.getElementById('nso-watch-collapse').click());
   const shut = await hit();
   ok(shut.collapsed && shut.expanded === 'false', 'the collapse button collapses it');
-  ok(shut.scale && shut.undo, 'collapsed, Longest\'s Set and Undo take the click again', JSON.stringify(shut));
+  ok(shut.scale && shut.undo, 'collapsed, Fit to plate and Undo take the click again', JSON.stringify(shut));
   ok(shut.pills, 'the phantom and error pills are still on screen');
   const logs = await page.evaluate(() => {
     const n = NSOWatch.events().length;

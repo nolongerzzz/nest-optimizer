@@ -2,16 +2,21 @@
 
 `nso_section.js` (headless) reads what shape a piece is; `app-scale.js`'s card
 puts that reading in print terms on its first line and offers only the verbs
-that apply. Part 1 of 3: the ring verbs (outer / bore / wall) and the bar verbs
-(width / depth) are the next two tickets, and Fatten / Shrink fold in there.
+that apply. Part 1 the reading, Length and the card; part 2 the ring verbs;
+part 3 Length / Width / Height on boxes and trays, and Fatten / Shrink folded
+in as one Offset.
 
 ```
 node tools/nso_section_test.js             headless: every fixture, its truth, three quarter turns
-node tools/nso_scale_card_drive_check.js   the real app: Stock tube / box / sphere, tape_on-edge-single
+node tools/nso_box_scale_test.js           headless: the generated tray and bar, L / W / H and Offset
+node tools/nso_scale_card_drive_check.js   the real app: tube, tape, the tray, box, sphere; refresh; 900 px
 node tools/nso_wire_scale_test.js          Whole x, Longest, Undo, refusals, paint
+node tools/nso_wire_offset_test.js         Offset: reachability, Undo, refusals, paint, Thicken unchanged
 ```
 
-All three are in `npm test`.
+All of them are in `npm test` (`section:test`, `box:test`, `scale:card`,
+`wire:scale`, `wire:offset`). The drive checks take `--shots DIR` for
+screenshots; DIR is a scratch directory - no screenshot is committed.
 
 ## The reading
 
@@ -30,12 +35,24 @@ Nothing in it is a second copy:
 | the section | `rawCutOpen` → `rawPlaneBoundaryEdges` → `rawBuildLoopsFromCutEdges`, the Cut tool's walker, at mid-length |
 | the nesting | `rawNestLoops`, pulled out of `rawFlatCapLoops` so the two read "a loop inside a loop" with one piece of code |
 
-The gates run in order; the first that fails names the answer:
+The gates run in order; the first that fails names the answer, in plain words
+(`reading.gate` is its key, `reading.why` the words):
 
-1. **A straight axis** — `no straight axis: 100% of the surface is curved or tapered` / `no straight axis: 31° oblique`.
-2. **A constant section over ≥ 90% of the length** — `section is constant over only 26.0 of 52.0 mm along Z (50%) - the rest is shaped` (a capsule's barrel), or `section is not constant along X at mid-length - no clean straight band anywhere along it`.
-3. **The loops** — one is solid, a loop inside a loop is hollow, else `section has 3 loops` / `section has 2 loops side by side`.
-4. **The fit** — outer loop round or rectangular within tolerance; a bore the same class and, if round, concentric. Else `outer loop is 0.8 mm off round (tolerance 0.10 mm)`, `outer loop is round but the bore is ...`, `bore is 1.3 mm off centre`.
+1. **A straight axis** — `it is curved or tapered all over (100% of its surface)` / `its straight axis is turned 31° off its own X, Y and Z`.
+2. **A constant section over ≥ 90% of the length** — `only 26.01 of its 52.02 mm along Z keeps one section - the ends are shaped` (a capsule's barrel), or `its section changes all along X - no stretch of it is the same shape`.
+3. **The loops** — one is solid, a loop inside a loop is hollow, else `its section is 3 separate outlines` / `... two separate outlines side by side`.
+4. **The fit** — outer loop round or rectangular within tolerance; a bore the same class and, if round, concentric. Else the section is named for what it IS: `its section along Z is a 8-sided polygon, not a circle (0.76 mm off round)`, `its section along X is a U - open at the top - not a closed rectangle`, `... an L-shape, not a plain rectangle`, `... a stepped outline with N corners`; `its outside is round but its hole is ...`, `its hole is 1.3 mm off centre`.
+
+For `other`, the reason line then says what still applies, from the same table
+the card's rows come from (`NSO_sectionVerbs`): `..., so length, width, height
+and whole-piece scaling apply` (the tray), `..., so only height, an even offset
+and whole-piece scaling apply` (the capsule), `..., so only an even offset and
+whole-piece scaling apply` (the sphere).
+
+**Per-axis bands.** `reading.axes[0..2]` is Extend's band scan run along each of
+the piece's own X, Y and Z (`NSO_extendBands`, which always took an axis): the
+widest clean constant-section band along each, or none. An axis with no band
+gets no field.
 
 ### Tolerances, stated
 
@@ -59,44 +76,105 @@ The gates run in order; the first that fails names the answer:
 
 A bar's section is reported wider side first (`widthMm ≥ depthMm`), so the
 answer does not depend on which way the piece is turned; the test turns every
-fixture 90° about X, Y and Z and requires the same shape, the same reason (axis
-letter aside) and the same numbers to the bit.
+fixture 90° about X, Y and Z and requires the same shape, the same gate and its
+words (axis letters aside) and the same numbers to the bit. The reason line's
+"so ... apply" tail is NOT held across turns, on purpose: it names Length /
+Width / Height, the piece's axes as it lies, and a quarter turn about X makes a
+Height a Length.
+
+**One display precision** (`NSO_sectionShow`): one decimal, and two only when
+the one-decimal figure is more than 0.01 mm off the real value. The header and
+every field use it: `MINI_TPU_TEST`'s Ø18.0047 bore is 18.0 in both; Stock's
+40.623 mm tube is 40.62 in both.
 
 ## The card
 
 First line: `Ring Ø… outer · Ø… bore · wall … · length …` (round hollow),
-`Rod Ø… · length …` (round solid), `Bar W × D × L` (rectangular, `· bore … ·
-wall …` if hollow), or `W × D × H · reason` for `other` — then ` · fits A1 Mini`
-or ` · 5.0 mm too wide for A1 Mini` from `NSO_fitCheckAll`: the bed's directions
-as words (wide / deep / tall), since W / D on this card are a bar's section
-sides.
+`Rod Ø… · length …` (round solid), `Bar … L × … W × … H` (rectangular, `· bore
+… · wall …` if hollow), or `… L × … W × … H · reason` for `other` — then
+` · fits A1 Mini` or ` · 5.0 mm too wide for A1 Mini` from `NSO_fitCheckAll`:
+the bed's directions as words (wide / deep / tall).
 
-| verb | what it calls |
+**L / W / H are the piece's own axes as it lies, never the plate's:** Height is
+its raw Z, Length the longer of its X and Y, Width the shorter. Part 1's bar line
+read `W × D × L`, naming the section's sides; part 3 uses the names the fields
+use.
+
+One compact row per field — label | field | unit or hold | Set — and only the
+rows `NSO_sectionVerbs` says apply:
+
+| row | shown when | what it calls |
+|---|---|---|
+| **Length** / **Width** / **Height** `[ ] mm` | that axis has a clean constant-section band. A ring or rod: Length only, along the reader's axis | `NSO_scaleAxisApply` → `NSO_extendRaw({ axis, length })`: material goes in or comes out inside the one band, every other coordinate untouched bit for bit, so walls, floor, holes, pockets and lips keep their size. Shorter shortens; past the band it refuses with `Shorten can remove up to N mm here` |
+| **Outer Ø** `[ ] wall kept` / **Wall** `[ ] outer kept` | a ring | `nso_ring.js`, below. Part 2's **Bore Ø** row is gone: Outer Ø and Wall reach every bore between them |
+| **Diameter** `[ ] length kept` | a rod | `nso_ring.js` |
+| **Offset** `[ ] mm, wall kept` | every piece but a ring or rod, where Outer Ø / Diameter and Length already do its job. Elsewhere it is the only way to thicken a stepped piece evenly; see lid_strap below for where it is not even | `NSO_scaleOffsetRaw`, below — Fatten and Shrink, folded in |
+| **Whole ×** `[ ]` | always; reset to 1 on every refresh | `NSO_scaleSelectedModel({ factor })` |
+| **Longest** `[ ] mm` | unless a named field already shows the same number | `NSO_scaleSelectedModel({ axis: 'longest', targetMm })`, prefilled with the longest edge |
+| **Fit to plate** | always | `min(limit / size)` over the bed's three axes, from the same `nso_printer.js` fit the plate warning uses, applied as a uniform factor and stated. Already fits: says so, changes nothing |
+
+Every field repopulates whenever the selection, the selected piece's soup or its
+pose on the plate (Yaw, Tip, Roll, Lift, position) changes, whoever changed it:
+while the card is open, a per-frame check on the piece, `rawTris` identity
+(every bake replaces the array) and the placed entry's pose. A refused apply
+leaves what was typed. At a 900 px-tall window the card ends at 436 px (the
+tray, the most rows a box gets) with no scroll; the drive check measures it.
+
+Paint scope: every verb is whole-piece and any paint stands it down, naming the
+count (`NSO_scaleCardApply`, `NSO_scaleSelectedModel`). In the HANDOFF roster.
+
+### Offset — `NSO_scaleOffsetRaw` (app-scale.js)
+
+The outside moves by the mm entered (positive grows, negative shrinks) and the
+wall is kept: every inner face moves the same way as the outer face across the
+wall from it. A ring's bore moves with its outside; a tray's inner walls and
+floor top follow its outer walls and bottom. The geometry is Thicken's own
+vertex solve, `_thickenOffsetSoup`, with a new `wallKept` option: outer faces
+(Thicken's own hull-and-crease classification) at +mm, inner faces at −mm, and
+the planes round a vertex weighted by corner angle instead of area — the
+area weighting leaned a 96-segment tube's walls 0.01 mm on a 0.5 mm offset, enough
+that Extend no longer found them straight; the angle a quad contributes is 90°
+however its diagonal falls. Without `wallKept`, Thicken is byte-for-byte what it
+was (`wire:offset` §7 re-drives both buttons).
+
+Refusals name the limit hit:
+
+| limit | refusal |
 |---|---|
-| **Length** `[ ] mm` | `NSO_extendSelectedModel({ length })` — longer extends, shorter shortens, cross-section held. Shown only when there is a straight axis; prefilled with the real length. On a tied axis (a cube) the reading's axis is passed so Extend does not refuse it as ambiguous |
-| **Whole ×** `[ ]` | `NSO_scaleSelectedModel({ factor })`, unchanged |
-| **Longest** `[ ] mm` | `NSO_scaleSelectedModel({ axis: 'longest', targetMm })`, unchanged |
-| **Fit to plate** | `min(limit / size)` over the bed's three axes, from the same `nso_printer.js` fit the plate warning uses, applied as a uniform factor and stated. Already fits: says so, changes nothing |
+| the floor | `its Z size of 25.00 mm would drop to 0.20 mm, under the 0.42 mm floor for a 0.4 mm nozzle - the most it can shrink is 12.29 mm` (checked before anything moves); or a measured section of the result under `NSO_Thickness.floorFor(nozzle)` where the piece was not already that thin; or a section folding flat |
+| the bore closing | `the bore or pocket would close - 12 mm is more than the room inside it (8 inner face(s) would turn inside out)` |
+| a feature on the outside | `0.5 mm is more than a feature on the outside has room for - 128 outer face(s) would turn inside out, the narrowest 0.12 mm across` — Thicken's own inversion gate, reached on a chamfer or a strip narrower than the shrink |
+| crossing | Thicken's piercing check, `NSO_Repair.inspect` |
 
-Removed: the X / Height / Z axis menu and the `X x H x Z` readout — they spoke
-the display frame, where "Height" is right and "Z" is the bed's depth.
-`NSO_scaleSolve` still takes a display axis underneath.
+**A stepped piece is not thickened evenly.** Which faces count as inner is
+Thicken's classification: on the convex hull (or a smooth crease from it) is
+outer, everything else inner. A step's riser and the ledge below it sit inside
+the hull, so they are inner and *follow* the outside instead of moving out.
+`fixtures/lid_strap.stl` (a 2.4 mm plate with a 0.6 mm strap along one edge) at
+Offset +0.5: the plate goes 2.4 → 3.4, the strap stays 0.6 and slides down with
+the plate's underside, and the step deepens by 1.0. At −0.5: plate 1.4, strap
+0.6. Closed, manifold, nothing thinner than it was (`box:test` §8 records it) —
+but not "every face out by t". A tray's floor top is inner by the same rule,
+which is what keeps its floor; the two cases are not told apart.
 
-Paint scope is unchanged: Length is Extend's (whole-piece), Whole / Longest /
-Fit to plate and the ring verbs are Scale's (whole-piece). Both are in the
-HANDOFF roster.
+### Which axis is Length
 
-The line re-reads whenever the selected piece's soup changes, whoever changed
-it: while the card is open, a per-frame identity check on `rawTris` (every bake
-replaces the array). `updateEditSize` alone missed Thicken and Fatten, which
-commit through their own path.
+Length / Width / Height are the piece's own raw axes **as it lies in its own
+frame**: Height is its raw Z, Length the longer of its raw X and Y, Width the
+shorter. They are not literally X / Y / Z (a bar stood on its end reads Length
+along Y if Y is its longer side), and they do not follow the plate pose: Yaw /
+Tip / Roll turn the placed instance, not the soup, so a Tip X re-reads the card
+but leaves Height on the same raw Z. A ring's or rod's **Length** is different:
+it is along the reader's straight axis, whichever raw axis that is - so a ring
+standing on the plate with its axis on Z calls that extent Length, where a box
+lying the same way would call it Height.
 
 ## Ring verbs (part 2) — `nso_ring.js`
 
 ```
 node tools/nso_ring_test.js            headless: every verb x fixture, against truth; canonical checker
-node tools/nso_ring_drive_check.js     the real app: MINI_TPU_TEST from the Library, Shrink diagnosis
-node tools/nso_ring_drive_check.js --shots    also writes docs/scale-ring/*.png
+node tools/nso_ring_drive_check.js     the real app: MINI_TPU_TEST from the Library, the Shrink fix
+node tools/nso_ring_drive_check.js --shots DIR    also writes DIR/*.png (scratch; nothing committed)
 ```
 
 The rule: a dimension edit moves boundary faces, never scales, and on a ring
@@ -105,7 +183,7 @@ the wall is kept unless the wall is what is being edited.
 | field | faces that move | held |
 |---|---|---|
 | **Outer Ø** → d | outer walls by Δr = (d − outer)/2, bore walls by the same Δr | wall, length |
-| **Bore Ø** → d | bore walls by Δr = (d − bore)/2 | outer, length |
+| **Bore Ø** → d (headless only since part 3; the card has no Bore row) | bore walls by Δr = (d − bore)/2 | outer, length |
 | **Wall** → w | bore walls by −(w − wall) | outer, length |
 | **Diameter** → d (a rod) | outer walls by Δr | length |
 
@@ -154,3 +232,11 @@ its own vertices the bore is Ø18.005 and the wall 0.998; the published Ø18 /
 wall 1 hold to 0.01 mm and the readout's one decimal exactly. The checks read it
 from the `nest-library` checkout (`tools/nso_library_dir.js`) and SKIP out loud
 without one.
+
+**The Shrink bug, closed (part 3).** Fatten's Shrink applied with no floor
+check and un-rang `MINI_TPU_TEST` at 0.1 and 0.5 mm: its face filter plus
+Thicken's area-weighted solve leaned the walls. The Finish menu's Fatten /
+Shrink row is gone; the card shows no Offset on a ring, because Outer Ø and
+Length do that job; and the Offset itself, at −0.1 and −0.5 mm on the same
+ring, reads `Ring Ø19.8 / Ø17.8, wall 1.0, length 7.8` and `Ring Ø19.0 /
+Ø17.0, wall 1.0, length 7.0` (`ring:drive` §2).
