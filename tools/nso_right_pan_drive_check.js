@@ -11,7 +11,8 @@
    measured, not eyeballed: a point at the controls' target depth must land
    exactly where the pointer took it, whatever the orbit angle.
 
-   Screenshots go to outDir (default docs/right-pan). The pieces are the
+   Screenshots go to outDir (default tools/right-pan-out, a gitignored scratch
+   folder like the other checks' *-out folders). The pieces are the
    80 x 40 x 20 box fixture and tape_on-edge-single, the pair the rotate-ring
    checks use. */
 
@@ -19,7 +20,7 @@ const path = require('path');
 const fs = require('fs');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
 
-const OUT = path.resolve(process.argv[2] || path.join(ROOT, 'docs', 'right-pan'));
+const OUT = path.resolve(process.argv[2] || path.join(ROOT, 'tools', 'right-pan-out'));
 fs.mkdirSync(OUT, { recursive: true });
 let fails = 0;
 const check = (name, cond, detail) => {
