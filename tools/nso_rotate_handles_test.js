@@ -32,7 +32,14 @@
    9. UNDO steps back one press at a time.
   10. THE 90 BUTTONS are untouched; the locks and the trackball are gone.
   11. THE RING BODY is the track, not a handle.
-  12. EXPORT writes what the screen shows, leaned and turned.             */
+  12. EXPORT writes what the screen shows, leaned and turned.
+  13. THE RADIUS is the bounding sphere's, so it holds through any turn on
+      any shape, and is measured once per geometry.
+  14. DRAGGING quiets the rails; release restores them.
+  15. DEGREE MARKERS are fixed in the ring's frame; the snap lands on one.
+  16. THE LEANS are the piece's own axes: turned 45 and leaned side/side
+      30, a bar rises end-over-end with no twist, in the drawn ring's plane;
+      front/back from there is a roll about its length. */
 
 const path = require('path');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
@@ -68,7 +75,15 @@ withApp(async (page, logs) => {
       const d = b.clone().multiply(a.clone().invert());
       return 2 * Math.atan2(Math.hypot(d.x, d.y, d.z), Math.abs(d.w)) * 180 / Math.PI;
     };
-    H.axisVec = ring => new THREE.Vector3().fromArray(window.nsoRotate.constants.AXES[ring]);
+    /* a ring's axis in the world NOW: the plate's vertical for Turn, the
+       piece's own X (front/back) or Z (side/side) as it lies for the leans */
+    H.axisVec = ring => new THREE.Vector3().fromArray(window.nsoRotate.ringAxis(ring));
+    /* what a ring's turn should be: Turn on the plate's side, a lean on the
+       piece's side about its own axis */
+    H.want = (ring, q0, d) => ring === 'turn'
+      ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), d * Math.PI / 180).multiply(q0)
+      : q0.clone().multiply(new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3().fromArray(window.nsoRotate.constants.LOCAL[ring]), d * Math.PI / 180));
     H.camera = (offset) => {
       const c = H.p().mesh.position.clone();
       state.controls.target.copy(c);
@@ -136,7 +151,7 @@ withApp(async (page, logs) => {
           const counts = [p.tipX, p.tipZ, p.flipX];
           const d = rnd() < 0.2 ? 1 : (rnd() - 0.5) * 400;
           a.turn(ring, d);
-          const want = new THREE.Quaternion().setFromAxisAngle(H.axisVec(ring), d * Math.PI / 180).multiply(q0);
+          const want = H.want(ring, q0, d);
           worst = Math.max(worst, H.angleDeg(want, H.q()));
           if (p.tipX !== counts[0] || p.tipZ !== counts[1] || p.flipX !== counts[2]) countsKept = false;
           n++;
@@ -158,7 +173,7 @@ withApp(async (page, logs) => {
       H.zero();
       return { n, worst, countsKept, off, tiltsStill, at100 };
     });
-    check(r.n + ' turns from random poses land on R(axis, d) * q0',
+    check(r.n + ' turns from random poses: Turn lands on R(vertical, d) * q0, a lean on q0 * R(own axis, d)',
       r.worst < 1e-6, 'worst ' + r.worst.toExponential(2) + '°');
     check('...and tipX / tipZ / flipX are never touched - they stay whole quarter-turn counts',
       r.countsKept);
@@ -176,6 +191,8 @@ withApp(async (page, logs) => {
       const H = window.__rot, a = window.nsoRotate, p = H.p();
       H.zero(); H.home();
       a.setRing('fb', true);
+      /* front/back: a roll about its own X, so the record says tiltX 90 -
+         the case where the old write to rotY turned about a leaned axis */
       a.turn('fb', 90);
       p.mesh.updateMatrixWorld(true);
       const corners = [];
@@ -219,6 +236,8 @@ withApp(async (page, logs) => {
       const out = [];
       const sides = {
         turn: [new THREE.Vector3(70, 210, 110), new THREE.Vector3(70, -210, 110)],
+        /* at rest a lean ring's axis is the piece's own X (fb) or Z (ss) -
+           which a turn about that same axis leaves where it is */
         fb:   [new THREE.Vector3(210, 90, 70), new THREE.Vector3(-210, 90, 70)],
         ss:   [new THREE.Vector3(80, 90, 210), new THREE.Vector3(80, 90, -210)]
       };
@@ -439,8 +458,9 @@ withApp(async (page, logs) => {
         const H = window.__rot, q1 = H.q(), qq = new THREE.Quaternion().fromArray(q0);
         const d = q1.clone().multiply(qq.clone().invert());
         const ax = new THREE.Vector3(d.x, d.y, d.z).normalize();
+        const on = ring => +Math.abs(ax.dot(H.axisVec(ring))).toFixed(9);
         return { deg: H.angleDeg(qq, q1), ax: [ax.x, ax.y, ax.z].map(v => +Math.abs(v).toFixed(6)),
-                 readout: window.nsoRotate.readout() };
+                 turn: on('turn'), fb: on('fb'), readout: window.nsoRotate.readout() };
       }, q);
     };
     let r = await k('ArrowRight');
@@ -458,12 +478,12 @@ withApp(async (page, logs) => {
     await page.mouse.click(h.x, h.y);
     await page.waitForTimeout(60);
     r = await k('ArrowUp');
-    check('after touching Lean front/back the keys follow it: 1° about the plate X',
-      near(r.deg, 1, 1e-6) && r.ax[0] === 1, r.deg.toFixed(6) + '° ' + JSON.stringify(r.ax));
+    check('after touching Lean front/back the keys follow it: 1° about the piece\'s own X',
+      near(r.deg, 1, 1e-6) && r.fb === 1, r.deg.toFixed(6) + '° ' + JSON.stringify(r.ax));
     await page.click('#chk-rot-ring-turn');            // Turn off: Lean front/back is the only ring
     await page.waitForTimeout(60);
     r = await k('ArrowDown');
-    check('the only ring shown takes the keys', r.ax[0] === 1, JSON.stringify(r.ax));
+    check('the only ring shown takes the keys', r.fb === 1, JSON.stringify(r.ax));
     await page.click('#chk-rot-ring-turn');
     await page.click('#chk-rot-ring-fb');
     await page.waitForTimeout(60);
@@ -665,6 +685,324 @@ withApp(async (page, logs) => {
       r.worst < 1e-3, 'worst ' + (r.worst != null ? r.worst.toExponential(2) : r.worst) + ' mm; pose ' +
       JSON.stringify(r.pose));
     check('...and the exported piece rests on the plate', near(r.minZ, 0, 1e-3), 'min z ' + r.minZ);
+  }
+
+  /* ----------------------------------------------------------------- 13 */
+  console.log('\n=== 13. the radius holds: bounding sphere, not box, measured once per geometry ===');
+  {
+    await loadSTL(page, path.join(ROOT, 'fixtures', 'box_hull_80x40x20-2.stl'));
+    await loadSTL(page, path.join(ROOT, 'fixtures', 'tape_on-edge-single-B101_rounded_v8_FINAL.stl'));
+    await page.waitForTimeout(300);
+    const rows = await page.evaluate(() => {
+      const a = window.nsoRotate, H = window.__rot, out = [];
+      const n = state.placed.length;
+      [n - 2, n - 1].forEach(idx => {
+        selectPlaced(idx);
+        const p = state.placed[idx];
+        H.zero();
+        a.setRing('turn', true); a.setRing('fb', true); a.setRing('ss', true);
+        /* the expected number, from the geometry, independently of the module */
+        const pos = p.mesh.geometry.attributes.position, v = new THREE.Vector3();
+        let m = 0;
+        for (let i = 0; i < pos.count; i++) m = Math.max(m, v.fromBufferAttribute(pos, i).length());
+        const want = Math.max(8, 1.45 * m);
+        const torus = () => {
+          const g = state.scene.getObjectByName('nso-rotate-handles');
+          return g.children.filter(c => c.userData.nsoRotateRing).map(c => c.geometry.parameters.radius);
+        };
+        const oldBox = () => Math.max(8, Math.max(p.width, p.depth, p.height) / 2 * 1.45);
+        a.refresh();
+        const before = { r: a.ringRadius(), torus: torus(), box: oldBox() };
+        const computes0 = a.sphereComputes();
+        const after = {};
+        ['turn', 'fb', 'ss'].forEach(ring => {
+          H.zero(); a.refresh();
+          a.turn(ring, 37);
+          for (let k = 0; k < 20; k++) a.refresh();          // frames
+          after[ring] = { r: a.ringRadius(), torus: torus(), box: oldBox() };
+        });
+        const computes1 = a.sphereComputes();
+        /* a geometry change is a new measurement: a Scale-like bake */
+        const g0 = p.mesh.geometry;
+        p.mesh.geometry = g0.clone().scale(1.5, 1.5, 1.5);
+        const scaled = a.ringRadius();
+        const computes2 = a.sphereComputes();
+        p.mesh.geometry.dispose(); p.mesh.geometry = g0;
+        H.zero();
+        out.push({ name: (state.models.find(mm => mm.id === p.sourceId) || {}).name || ('#' + idx),
+                   want, before, after, computes: [computes0, computes1, computes2], scaled });
+      });
+      a.setRing('fb', false); a.setRing('ss', false);
+      selectPlaced(0); H.zero();
+      return out;
+    });
+    for (const r of rows) {
+      console.log('   ' + r.name + ': ring radius ' + r.before.r.toFixed(6) + ' mm (1.45 x ' +
+        (r.want / 1.45).toFixed(6) + ' mm sphere); after 37° on each ring: ' +
+        ['turn', 'fb', 'ss'].map(k => k + ' ' + r.after[k].r.toFixed(6)).join(', ') +
+        '  | the old box rule would have drawn ' + r.before.box.toFixed(3) + ' -> ' +
+        ['turn', 'fb', 'ss'].map(k => r.after[k].box.toFixed(3)).join(' / '));
+      check(r.name + ': the radius is 1.45 x the bounding sphere about the turning centre',
+        near(r.before.r, r.want, 1e-9), r.before.r + ' vs ' + r.want);
+      check(r.name + ': identical before and after a 37° turn, on every ring',
+        ['turn', 'fb', 'ss'].every(k => r.after[k].r === r.before.r),
+        ['turn', 'fb', 'ss'].map(k => (r.after[k].r - r.before.r).toExponential(1)).join(' '));
+      check(r.name + ': ...and so is every drawn ring',
+        ['turn', 'fb', 'ss'].every(k => r.after[k].torus.length === 3 &&
+          r.after[k].torus.every(x => x === r.before.r)), JSON.stringify(r.after.turn.torus));
+      check(r.name + ': the old box rule would have breathed - the fix is not vacuous',
+        ['turn', 'fb', 'ss'].some(k => Math.abs(r.after[k].box - r.before.box) > 0.5));
+      check(r.name + ': measured once - none of 60 turns-and-frames measured it again',
+        r.computes[1] === r.computes[0], r.computes.join(' -> '));
+      check(r.name + ': a new geometry is measured afresh, and only once',
+        r.computes[2] === r.computes[1] + 1 && near(r.scaled, 1.5 * r.before.r, 1e-4),   // Float32 vertices
+        r.scaled.toFixed(4) + ' mm');
+    }
+  }
+
+  /* ----------------------------------------------------------------- 14 */
+  console.log('\n=== 14. quieter rails while dragging; rest weight on release ===');
+  {
+    const w = await page.evaluate(() => {
+      const a = window.nsoRotate, H = window.__rot;
+      H.zero(); H.home();
+      a.setRing('turn', true); a.setRing('fb', true); a.setRing('ss', true);
+      const look = () => {
+        const g = state.scene.getObjectByName('nso-rotate-handles'), out = {};
+        g.children.forEach(c => {
+          const u = c.userData;
+          if (u.nsoRotateRing) out['ring:' + u.nsoRotateRing] = { o: c.material.opacity,
+            tube: c.geometry.parameters.tube, colour: c.material.color.getHexString() };
+          if (u.nsoRotateTicks) out['ticks:' + u.nsoRotateTicks] = { o: c.material.opacity };
+          if (u.nsoRotateLabel) out['label:' + u.nsoRotateLabel.ring + ':' + u.nsoRotateLabel.deg] = { o: c.material.opacity };
+          if (u.nsoRotateHandle && c.material.visible)
+            out['arrow:' + u.nsoRotateHandle.ring + ':' + u.nsoRotateHandle.dir] = { o: c.material.opacity };
+        });
+        return out;
+      };
+      const rest = look();
+      const c = a.centreScreen(), R = 160;
+      a.beginDrag({ ring: 'turn', dir: 1 }, c.x + R, c.y, c.x, c.y);
+      const pressed = look();                                 // pressed, not yet moved
+      for (let i = 1; i <= 20; i++) a.moveDrag(c.x + Math.cos(i * Math.PI / 180) * R, c.y + Math.sin(i * Math.PI / 180) * R);
+      const mid = look();
+      a.endDrag();
+      const after = look();
+      a.setRing('fb', false); a.setRing('ss', false);
+      H.zero();
+      return { rest, pressed, mid, after };
+    });
+    const R = w.rest, M = w.mid;
+    check('at rest all three rings are drawn alike', ['turn', 'fb', 'ss'].every(k =>
+      R['ring:' + k].o === R['ring:turn'].o && R['ring:' + k].tube === R['ring:turn'].tube));
+    check('a press that has not moved yet leaves everything at rest weight',
+      JSON.stringify(w.pressed) === JSON.stringify(R));
+    check('dragging: the active ring goes THINNER, about 0.6 of its rest width',
+      near(M['ring:turn'].tube / R['ring:turn'].tube, 0.6, 1e-9),
+      R['ring:turn'].tube.toFixed(3) + ' -> ' + M['ring:turn'].tube.toFixed(3) + ' mm');
+    check('...and see-through, so the piece reads through it', M['ring:turn'].o < R['ring:turn'].o * 0.6,
+      R['ring:turn'].o + ' -> ' + M['ring:turn'].o);
+    check('the two inactive rings fade to a faint trace',
+      ['fb', 'ss'].every(k => M['ring:' + k].o <= 0.15 && M['ring:' + k].o < M['ring:turn'].o),
+      ['fb', 'ss'].map(k => k + ' ' + M['ring:' + k].o).join(', '));
+    check('the arrowhead being dragged keeps full weight', M['arrow:turn:1'].o === 1,
+      'held ' + M['arrow:turn:1'].o + ', its partner ' + M['arrow:turn:-1'].o);
+    check('every ring keeps its colour', ['turn', 'fb', 'ss'].every(k => M['ring:' + k].colour === R['ring:' + k].colour));
+    check('ticks and labels fade with their ring',
+      ['turn', 'fb', 'ss'].every(k => M['ticks:' + k].o < R['ticks:' + k].o && M['label:' + k + ':0'].o < R['label:' + k + ':0'].o));
+    check('on release everything is back at rest weight', JSON.stringify(w.after) === JSON.stringify(R));
+  }
+
+  /* ----------------------------------------------------------------- 15 */
+  console.log('\n=== 15. degree markers: fixed in the ring\'s frame, and the snap lands on a labelled tick ===');
+  {
+    const t = await page.evaluate(() => {
+      const a = window.nsoRotate, H = window.__rot, K = a.constants;
+      H.zero(); H.home();
+      a.setRing('turn', true); a.setRing('fb', true); a.setRing('ss', true);
+      const grab = () => {
+        const g = state.scene.getObjectByName('nso-rotate-handles'), out = {};
+        ['turn', 'fb', 'ss'].forEach(k => {
+          const ticks = g.children.filter(c => c.userData.nsoRotateTicks === k);
+          const labels = g.children.filter(c => c.userData.nsoRotateLabel && c.userData.nsoRotateLabel.ring === k);
+          const ring = g.children.find(c => c.userData.nsoRotateRing === k);
+          const pts = ticks[0] ? Array.from(ticks[0].geometry.attributes.position.array) : [];
+          out[k] = { tickSets: ticks.length, isSegments: !!(ticks[0] && ticks[0].isLineSegments),
+                     pts, r: ring.geometry.parameters.radius, tube: ring.geometry.parameters.tube,
+                     ringO: ring.material.opacity, tickO: ticks[0] && ticks[0].material.opacity,
+                     labels: labels.map(l => ({ deg: l.userData.nsoRotateLabel.deg, sprite: !!l.isSprite,
+                       atten: l.material.sizeAttenuation, depth: l.material.depthTest,
+                       d: l.position.length(), p: l.position.toArray() })) };
+        });
+        return out;
+      };
+      const before = grab();
+      /* a turn about a ring's OWN axis moves the piece and leaves that
+         ring's scale where it was */
+      const own = {};
+      ['turn', 'fb', 'ss'].forEach(k => { H.zero(); a.turn(k, 37); own[k] = grab()[k]; });
+      /* ...and a Turn carries the two lean rings round with the piece's
+         heading - they are drawn in its frame - while Turn's own stays put */
+      H.zero(); a.turn('turn', 37);
+      const turned = grab();
+      const Ry = new THREE.Matrix4().makeRotationY(37 * Math.PI / 180);
+      const rotPts = pts => { const o = []; for (let i = 0; i < pts.length; i += 3) {
+        const v = new THREE.Vector3(pts[i], pts[i + 1], pts[i + 2]).applyMatrix4(Ry); o.push(v.x, v.y, v.z); } return o; };
+      const after = { turnByTurn: turned.turn, riding: {} };
+      ['fb', 'ss'].forEach(k => { after.riding[k] = { want: rotPts(before[k].pts), got: turned[k].pts }; });
+      /* snap: drag Turn up into the quarter turn above, and stop there */
+      H.zero(); a.turn('turn', 30);
+      const abs0 = a.ringAngle('turn'), target = Math.ceil(abs0 / 90) * 90;
+      const sign = a.dialSign('turn');
+      const tr = H.trace('turn', sign * (target - abs0 - 1), { step: 0.5 });   // 1° short: inside the snap
+      const at = a.ringAngle('turn');
+      /* the piece's measured axis, projected into the ring's plane, against the tick */
+      const p = H.p(); p.mesh.updateMatrixWorld(true);
+      const A = new THREE.Vector3(0, 1, 0);
+      const best = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(b => new THREE.Vector3().fromArray(b).applyQuaternion(p.mesh.quaternion))
+        .sort((u, v) => Math.abs(u.dot(A)) - Math.abs(v.dot(A)))[0].projectOnPlane(A).normalize();
+      const q = ((Math.round(at / 90) * 90) % 360 + 360) % 360;
+      const ticks = grab().turn.pts;
+      const tick = ((q / 15) | 0) * 6;                               // two points per tick, every 15°
+      const tickDir = new THREE.Vector3(ticks[tick], ticks[tick + 1], ticks[tick + 2]).normalize();
+      const onTick = Math.abs(best.dot(tickDir));
+      a.setRing('fb', false); a.setRing('ss', false);
+      H.zero();
+      return { before, own, after, K, snap: { abs0, target, at, q, onTick, applied: tr.state.applied } };
+    });
+    const K = t.K;
+    for (const k of ['turn', 'fb', 'ss']) {
+      const b = t.before[k];
+      check(k + ': ticks are ONE line-segment set (one draw call)', b.tickSets === 1 && b.isSegments);
+      check(k + ': a tick every 15° - 24 of them', b.pts.length === 24 * 2 * 3, b.pts.length / 6 + ' ticks');
+      const lens = [];
+      for (let i = 0; i < 24; i++) {
+        const o = i * 6, r0 = Math.hypot(b.pts[o], b.pts[o + 1], b.pts[o + 2]),
+              r1 = Math.hypot(b.pts[o + 3], b.pts[o + 4], b.pts[o + 5]);
+        lens.push({ deg: i * 15, r0, len: r1 - r0 });
+      }
+      const cls = d => d % 90 === 0 ? 90 : d % 45 === 0 ? 45 : 15;
+      check(k + ': short every 15°, longer every 45°, longest on the quarters',
+        lens.every(l => near(l.len, K.TICK_LEN[cls(l.deg)] * b.r, 1e-4)) &&   // Float32 points
+        K.TICK_LEN[15] < K.TICK_LEN[45] && K.TICK_LEN[45] < K.TICK_LEN[90],
+        [0, 15, 45, 90].map(d => d + '°:' + lens[d / 15].len.toFixed(2) + 'mm').join(' '));
+      check(k + ': on the ring\'s outer edge', lens.every(l => near(l.r0, b.r + b.tube, 1e-4)));
+      const diff = (x, y) => x.length === y.length ? Math.max(...x.map((v, i) => Math.abs(v - y[i]))) : Infinity;
+      check(k + ': fixed in the ring\'s frame - a 37° turn on it moves the piece, not its scale',
+        diff(t.own[k].pts, b.pts) < 1e-4, 'max move ' + diff(t.own[k].pts, b.pts).toExponential(1) + ' mm');
+      if (k === 'turn') check('turn: a Turn leaves the Turn scale level and where it was',
+        diff(t.after.turnByTurn.pts, b.pts) < 1e-4);
+      else check(k + ': a Turn of 37° carries this lean ring\'s scale round with the piece',
+        diff(t.after.riding[k].got, t.after.riding[k].want) < 1e-4,
+        'max off ' + diff(t.after.riding[k].got, t.after.riding[k].want).toExponential(1) + ' mm');
+      check(k + ': lighter than the ring at rest', b.tickO < b.ringO, b.tickO + ' vs ' + b.ringO);
+      const L = b.labels.slice().sort((x, y) => x.deg - y.deg);
+      check(k + ': labels 0 / 90 / 180 / 270', L.map(l => l.deg).join() === '0,90,180,270');
+      check(k + ': sprites - they always face the camera - sized on screen, drawn on top',
+        L.every(l => l.sprite && l.atten === false && l.depth === false));
+      check(k + ': outside the ring and its longest tick, so never on the rail',
+        L.every(l => l.d > b.r + b.tube + K.TICK_LEN[90] * b.r), L.map(l => l.d.toFixed(1)).join(' '));
+      check(k + ': the labels ride with their ticks',
+        Math.max(...t.own[k].labels.map((l, i) => Math.hypot(...l.p.map((v, j) => v - b.labels[i].p[j])))) < 1e-4);
+    }
+    const s = t.snap;
+    check('dragging into the quarter turn snapped it there', near(s.at - s.target, 0, 1e-6) ||
+      near(Math.abs(s.at - s.target), 360, 1e-6), s.abs0.toFixed(2) + '° -> ' + s.at.toFixed(6) + '°');
+    check('...and the piece\'s measured axis points exactly along the ' + s.q + ' tick',
+      near(s.onTick, 1, 1e-9), 'cos = ' + s.onTick);
+  }
+
+  /* ----------------------------------------------------------------- 16 */
+  console.log('\n=== 16. the leans are the piece\'s own axes: turn 45°, then side/side end-over-end, front/back a roll ===');
+  {
+    const r = await page.evaluate(() => {
+      const H = window.__rot, a = window.nsoRotate;
+      const n = state.placed.length;
+      selectPlaced(n - 2);                                      // the 80 x 40 x 20 box
+      const p = H.p();
+      a.setRing('turn', true); a.setRing('fb', true); a.setRing('ss', true);
+      const D = 180 / Math.PI, up = new THREE.Vector3(0, 1, 0);
+      const len = () => new THREE.Vector3(1, 0, 0).applyQuaternion(H.q());      // its own X: the 80
+      const wid = () => new THREE.Vector3(0, 0, 1).applyQuaternion(H.q());      // its own Z: the 40
+      const heading = v => Math.atan2(-v.z, v.x) * D;
+      const elev = v => Math.asin(Math.max(-1, Math.min(1, v.dot(up)))) * D;
+      /* the drawn rings, read off their own geometry: every vertex of a ring
+         lies within a tube's width of the plane through the centre square to
+         its axis - so this is the axis the screen shows */
+      const plane = ring => {
+        const g = state.scene.getObjectByName('nso-rotate-handles');
+        const m = g.children.find(c => c.userData.nsoRotateRing === ring);
+        const A = new THREE.Vector3().fromArray(a.ringAxis(ring));
+        const pos = m.geometry.attributes.position, v = new THREE.Vector3();
+        let off = 0;
+        for (let i = 0; i < pos.count; i++) off = Math.max(off, Math.abs(v.fromBufferAttribute(pos, i).dot(A)));
+        return { off, tube: m.geometry.parameters.tube };
+      };
+      /* at rest: #135's rings exactly - front/back about the plate X, side/side the plate Z */
+      H.zero(); H.home();
+      const rest = { fb: a.ringAxis('fb'), ss: a.ringAxis('ss') };
+      a.turn('turn', 45);
+      a.refresh();
+      const L0 = len(), W0 = wid();
+      const fbAxis0 = new THREE.Vector3().fromArray(a.ringAxis('fb'));
+      const ssAxis0 = new THREE.Vector3().fromArray(a.ringAxis('ss'));
+      const drawnFb = plane('fb'), drawnSs = plane('ss');
+      /* a real dial drag on side/side, 30° of it, watching one corner: it
+         must move square to the ring's axis - in the ring's plane */
+      const tip = new THREE.Vector3(40, 10, 20);
+      const w0 = p.mesh.localToWorld(tip.clone()).sub(p.mesh.position);
+      const tr = H.trace('ss', a.dialSign('ss') * 30);
+      const w1 = p.mesh.localToWorld(tip.clone()).sub(p.mesh.position);
+      const L1 = len(), W1 = wid();
+      /* for contrast: the same 30° about the PLATE's Z, the old ring */
+      const qOld = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), tr.state.applied * Math.PI / 180)
+        .multiply(new THREE.Quaternion().setFromAxisAngle(up, Math.PI / 4));
+      const Lold = new THREE.Vector3(1, 0, 0).applyQuaternion(qOld);
+      /* and front/back from the same 45° heading: a roll - the length stays level and put */
+      H.zero(); a.turn('turn', 45);
+      const Lr0 = len(), Wr0 = wid();
+      const tf = H.trace('fb', a.dialSign('fb') * 30);
+      const Lr1 = len(), Wr1 = wid();
+      const out = {
+        rest, fbIsOwnX: Math.abs(fbAxis0.dot(L0)), ssIsOwnZ: Math.abs(ssAxis0.dot(W0)),
+        drawnFb, drawnSs, applied: tr.state.applied,
+        headingBefore: heading(L0), headingAfter: heading(L1), elevBefore: elev(L0), elevAfter: elev(L1),
+        widthStill: W1.angleTo(W0) * D,
+        vertexSquare: Math.abs(w1.clone().sub(w0).normalize().dot(ssAxis0)),
+        oldHeading: heading(Lold), oldElev: elev(Lold),
+        roll: { applied: tf.state.applied, lengthMoved: Lr1.angleTo(Lr0) * D, widthRose: elev(Wr1) - elev(Wr0) },
+        turnAxis: a.ringAxis('turn')
+      };
+      a.setRing('fb', false); a.setRing('ss', false);
+      H.zero(); selectPlaced(0); H.zero();
+      return out;
+    });
+    console.log('   side/side 30°, long axis: heading ' + r.headingBefore.toFixed(4) + '° -> ' + r.headingAfter.toFixed(4) +
+      '°, elevation ' + r.elevBefore.toFixed(4) + '° -> ' + r.elevAfter.toFixed(4) + '°  | the old plate-Z ring: heading ' +
+      r.oldHeading.toFixed(2) + '°, elevation ' + r.oldElev.toFixed(2) + '°');
+    console.log('   front/back 30°: the length moved ' + r.roll.lengthMoved.toExponential(1) + '°, the width line rose ' +
+      r.roll.widthRose.toFixed(4) + '°');
+    check('at rest the leans are #135\'s rings: front/back the plate X, side/side the plate Z',
+      JSON.stringify(r.rest.fb) === '[1,0,0]' && JSON.stringify(r.rest.ss) === '[0,0,1]', JSON.stringify(r.rest));
+    check('after a 45° turn, Lean front/back is the piece\'s own length (its X)', near(r.fbIsOwnX, 1, 1e-12));
+    check('...and Lean side/side its own width line (its Z)', near(r.ssIsOwnZ, 1, 1e-12));
+    check('each drawn lean ring lies square to its axis - the ring you grab',
+      r.drawnFb.off <= r.drawnFb.tube + 1e-4 && r.drawnSs.off <= r.drawnSs.tube + 1e-4,
+      'fb ' + r.drawnFb.off.toFixed(4) + ' / ss ' + r.drawnSs.off.toFixed(4) + ' mm off plane, tube ' + r.drawnFb.tube.toFixed(3));
+    check('a 30° side/side drag: the long axis rises 30°, end-over-end',
+      near(Math.abs(r.elevAfter - r.elevBefore), 30, 1e-3) && near(Math.abs(r.applied), 30, 1e-6),
+      r.elevBefore.toFixed(4) + '° -> ' + r.elevAfter.toFixed(4) + '°');
+    check('...with no twist: its heading is still 45°', near(r.headingAfter, r.headingBefore, 1e-6) && near(r.headingBefore, 45, 1e-6),
+      r.headingAfter.toFixed(6) + '°');
+    check('...about the width line, which does not move', r.widthStill < 1e-6, r.widthStill.toExponential(1) + '°');
+    check('...every point moves in the drawn ring\'s plane - the motion you get', r.vertexSquare < 1e-6,
+      'cos to the axis ' + r.vertexSquare.toExponential(1));
+    check('the old plate-Z lean would have twisted it: the heading swings as it rises',
+      Math.abs(r.oldHeading - 45) > 1, 'heading 45° -> ' + r.oldHeading.toFixed(2) + '°');
+    check('a 30° front/back drag from the same heading is a roll: no end lifts, the front edge does',
+      near(Math.abs(r.roll.applied), 30, 1e-6) && r.roll.lengthMoved < 1e-6 && near(Math.abs(r.roll.widthRose), 30, 1e-3),
+      'length moved ' + r.roll.lengthMoved.toExponential(1) + '°, width line ' + r.roll.widthRose.toFixed(4) + '°');
+    check('Turn\'s ring stays level - the plate\'s vertical', JSON.stringify(r.turnAxis) === '[0,1,0]');
   }
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));

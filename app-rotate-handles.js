@@ -21,10 +21,13 @@
 
    WHAT THIS DOES INSTEAD.
 
-   Every rotation here is about a fixed axis of the plate - vertical (Turn),
-   the plate's X (Lean front/back), the plate's Z (Lean side/side). A click or
-   a drag step is one world-axis rotation premultiplied onto the piece's
-   orientation, and the result is decomposed back into the SAME pose fields,
+   Turn is about the plate's vertical; the two leans are about the PIECE's
+   own axes as it lies - Lean front/back its own X (a roll about its length),
+   Lean side/side its own Z (end-over-end along its length) - so each
+   lean ring is drawn in the piece's frame and the ring you grab is the
+   motion you get (frameOf). A Turn step is premultiplied onto the piece's
+   orientation, a lean step postmultiplied (turned), and either way the
+   result is decomposed back into the SAME pose fields,
    in the same XYZ order applyMeshRotation composes them in (writePose below).
    Nothing that reads those fields has to know this file exists: export, Undo
    snapshots, Join's NSO_rotateRawSoupByPlacedPose, Mirror and the Tip menu
@@ -56,13 +59,56 @@
      point at angle t, c + r (cos t e1 + sin t e2), moves the right-handed
      positive way about the axis as t grows. Colours match the checkboxes. */
   var RINGS = {
-    turn: { axis: [0, 1, 0], e1: [0, 0, 1], e2: [1, 0, 0], color: 0x38bdf8, css: '#38bdf8',
-            label: 'Turn', chk: 'chk-rot-ring-turn' },
-    fb:   { axis: [1, 0, 0], e1: [0, 1, 0], e2: [0, 0, 1], color: 0xf472b6, css: '#f472b6',
-            label: 'Lean front/back', chk: 'chk-rot-ring-fb' },
-    ss:   { axis: [0, 0, 1], e1: [1, 0, 0], e2: [0, 1, 0], color: 0xfbbf24, css: '#fbbf24',
-            label: 'Lean side/side', chk: 'chk-rot-ring-ss' }
+    turn: { frame: 'plate', axis: [0, 1, 0], e1: [0, 0, 1], e2: [1, 0, 0],
+            color: 0x38bdf8, css: '#38bdf8', label: 'Turn', chk: 'chk-rot-ring-turn' },
+    fb:   { frame: 'piece', local: [1, 0, 0],
+            color: 0xf472b6, css: '#f472b6', label: 'Lean front/back', chk: 'chk-rot-ring-fb' },
+    ss:   { frame: 'piece', local: [0, 0, 1],
+            color: 0xfbbf24, css: '#fbbf24', label: 'Lean side/side', chk: 'chk-rot-ring-ss' }
   };
+  var UP = [0, 1, 0];
+
+  /* WHICH AXIS EACH RING IS. Turn is the plate's vertical, always: it stays
+     level, and a turn is about the plate however the piece lies. The two
+     leans are the PIECE's own axes as it currently lies, so they turn with
+     it - at rest exactly #135's rings, plate X and plate Z, and after that
+     wherever the piece has taken them. Lean front/back is its own X, its
+     length: its ring lies ACROSS the piece and rolls it, the front edge going
+     up or down and no end lifting. Lean side/side is its own Z, the line
+     across its width: its ring runs ALONG the piece and tips it end-over-end.
+     Turn a bar 45 degrees and lean it side/side: its long axis rises at the
+     same 45 degree heading, with no twist. A lean about the PLATE's axis
+     there would have swung it sideways as it rose.
+
+     frameOf gives a ring's axis A and the two vectors e1, e2 spanning its
+     plane (e1 x e2 = A), in world terms, for the orientation q. For a lean
+     ring e1 is kept level - the horizontal line in the ring's plane - so the
+     ring's scale reads 0 with the piece's end flat and 90 with it upright,
+     and turning about A itself leaves A, and so the whole frame, where it was.
+     Only when A is straight up is there no level line; the piece's own most
+     nearly perpendicular axis stands in. */
+  function frameOf(ring, q) {
+    var R = RINGS[ring];
+    if (R.frame === 'plate') return { A: v3(R.axis), e1: v3(R.e1), e2: v3(R.e2) };
+    var A = v3(R.local).applyQuaternion(q).normalize();
+    var e1 = v3(UP).cross(A);
+    if (e1.lengthSq() < 1e-12) {
+      var best = null, bl = -1;
+      [[1, 0, 0], [0, 1, 0], [0, 0, 1]].forEach(function (b) {
+        var w = v3(b).applyQuaternion(q), l = 1 - Math.pow(w.dot(A), 2);
+        if (l > bl) { bl = l; best = w; }
+      });
+      e1 = best.projectOnPlane(A);
+    }
+    e1.normalize();
+    return { A: A, e1: e1, e2: A.clone().cross(e1).normalize() };
+  }
+  function pieceQ() {
+    var p = piece();
+    if (!p) return new THREE.Quaternion();
+    p.mesh.updateMatrixWorld(true);
+    return p.mesh.quaternion.clone();
+  }
   var ORDER = ['turn', 'fb', 'ss'];
 
   function v3(a) { return new THREE.Vector3(a[0], a[1], a[2]); }
@@ -179,9 +225,16 @@
     if (typeof refreshOutline === 'function') refreshOutline(p);
   }
 
-  /* R(axis, deg) * q0: a turn about the PLATE's axis, whatever q0 already is. */
+  /* A turn of `deg` on a ring. Turn: R(vertical, deg) * q0, on the PLATE's
+     side - about the plate, whatever q0 already is. The leans: q0 * R(own
+     axis, deg), on the PIECE's side - about the piece's own axis as it lies.
+     (The same thing as R(q0 * axis, deg) * q0, which is why frameOf's A is the
+     axis the dial and the snap measure about.) */
   function turned(q0, ring, deg) {
-    return new THREE.Quaternion().setFromAxisAngle(v3(RINGS[ring].axis), deg * RAD).multiply(q0);
+    var R = RINGS[ring];
+    if (R.frame === 'plate')
+      return new THREE.Quaternion().setFromAxisAngle(v3(R.axis), deg * RAD).multiply(q0);
+    return q0.clone().multiply(new THREE.Quaternion().setFromAxisAngle(v3(R.local), deg * RAD));
   }
 
   /* Where the piece stands on a ring, in degrees, for the snap to act on.
@@ -194,7 +247,7 @@
      it to a quarter turn puts that edge of the piece square to the plate.
      Which of the piece's axes is measured is fixed when a drag starts. */
   function refAxis(q, ring) {
-    var A = v3(RINGS[ring].axis), best = null, bestLen = -1;
+    var A = frameOf(ring, q).A, best = null, bestLen = -1;
     [[1, 0, 0], [0, 1, 0], [0, 0, 1]].forEach(function (b) {
       var v = v3(b).applyQuaternion(q);
       var len = 1 - Math.pow(v.dot(A), 2);
@@ -202,9 +255,12 @@
     });
     return best;
   }
-  function ringAngleDeg(q, ring, b) {
-    var R = RINGS[ring], v = v3(b).applyQuaternion(q);
-    return Math.atan2(v.dot(v3(R.e2)), v.dot(v3(R.e1))) * DEG;
+  /* `F` is the ring's frame to measure in - for a drag, the one it started
+     in, which a turn about the ring's own axis leaves unchanged anyway. */
+  function ringAngleDeg(q, ring, b, F) {
+    F = F || frameOf(ring, q);
+    var v = v3(b).applyQuaternion(q);
+    return Math.atan2(v.dot(F.e2), v.dot(F.e1)) * DEG;
   }
 
   /* The hard snap: within SNAP_WITHIN_DEG of a quarter turn, the quarter
@@ -228,7 +284,7 @@
     if (typeof state === 'undefined' || !state || !state.camera) return 1;
     var look = new THREE.Vector3();
     state.camera.getWorldDirection(look);
-    var d = look.dot(v3(RINGS[ring].axis));
+    var d = look.dot(frameOf(ring, pieceQ()).A);
     return d < 0 ? -1 : 1;
   }
 
@@ -276,7 +332,8 @@
     var b = refAxis(q0, ring);
     drag = { ring: ring, dir: dir, x0: x, y0: y, cx: cx, cy: cy,
              lastA: Math.atan2(y - cy, x - cx) * DEG, raw: 0, applied: 0,
-             sign: dialSign(ring), q0: q0, b: b, abs0: ringAngleDeg(q0, ring, b),
+             sign: dialSign(ring), q0: q0, b: b, F: frameOf(ring, q0),
+             abs0: ringAngleDeg(q0, ring, b),
              arrow0: arrowAt[ring], moved: false, snapped: false };
     /* Starting inside a snap is not landing in one: no flash on the way out. */
     drag.snapped = inSnap(drag.abs0);
@@ -437,67 +494,196 @@
   function clearGroup(g) {
     while (g.children.length) {
       var c = g.children.pop();
-      if (c.geometry) c.geometry.dispose();
+      /* A sprite's geometry is THREE's one shared quad, and its texture is
+         cached in labelTexture - only its material is its own. */
+      if (c.geometry && !c.isSprite) c.geometry.dispose();
       if (c.material) c.material.dispose();
     }
   }
 
+  /* ---- the radius --------------------------------------------------------
+     From the piece's bounding SPHERE about the point it turns on, not its
+     box. The box is measured in plate axes, so on a bar it grows and shrinks
+     as the bar turns and the rings breathed with it; the largest distance
+     from the mesh's origin - the centre every turn here is about - to any
+     vertex of its own geometry cannot change under a rotation, so the rings
+     hold still through a whole lap on any shape.
+
+     Measured once per geometry, not per frame: the cache is keyed on the
+     geometry object and its position attribute's version and count, which a
+     bake (a new geometry), a Scale or a Cut (a new or rewritten one) all
+     change. Mesh scale is folded in for completeness; nothing sets it today. */
+  var RING_CLEARANCE = 1.45, RING_MIN_MM = 8;
+  var sphereCache = typeof WeakMap === 'function' ? new WeakMap() : null, sphereComputes = 0;
+  function boundingSphereRadius(mesh) {
+    var geo = mesh && mesh.geometry, pos = geo && geo.attributes && geo.attributes.position;
+    if (!pos) return 0;
+    var c = sphereCache && sphereCache.get(geo);
+    if (c && c.ver === pos.version && c.count === pos.count) return c.r;
+    var m = 0, a = pos.array, n = pos.count * pos.itemSize, k = pos.itemSize;
+    if (pos.isInterleavedBufferAttribute) {
+      var v = new THREE.Vector3();
+      for (var i = 0; i < pos.count; i++) { v.fromBufferAttribute(pos, i); m = Math.max(m, v.lengthSq()); }
+    } else {
+      for (var j = 0; j < n; j += k) m = Math.max(m, a[j] * a[j] + a[j + 1] * a[j + 1] + a[j + 2] * a[j + 2]);
+    }
+    sphereComputes++;
+    c = { ver: pos.version, count: pos.count, r: Math.sqrt(m) };
+    if (sphereCache) sphereCache.set(geo, c);
+    return c.r;
+  }
   function ringRadius(p) {
-    return Math.max(8, (Math.max(p.width || 0, p.depth || 0, p.height || 0) / 2) * 1.45);
+    var s = p.mesh.scale, k = Math.max(Math.abs(s.x), Math.abs(s.y), Math.abs(s.z));
+    return Math.max(RING_MIN_MM, boundingSphereRadius(p.mesh) * k * RING_CLEARANCE);
   }
   function arrowSize(r) { return Math.min(14, Math.max(3.5, r * 0.26)); }
   /* The two arrowheads sit either side of arrowAt[ring], a little apart,
      pointing away from each other along the ring. */
   function arrowGap(r) { return arrowSize(r) * 0.8 / r; }
-  function ringPoint(ring, r, t) {
-    var R = RINGS[ring];
-    return v3(R.e1).multiplyScalar(Math.cos(t) * r).add(v3(R.e2).multiplyScalar(Math.sin(t) * r));
+  function ringPoint(F, r, t) {
+    return F.e1.clone().multiplyScalar(Math.cos(t) * r).add(F.e2.clone().multiplyScalar(Math.sin(t) * r));
   }
-  function ringTangent(ring, t) {
-    var R = RINGS[ring];
-    return v3(R.e1).multiplyScalar(-Math.sin(t)).add(v3(R.e2).multiplyScalar(Math.cos(t)));
+  function ringTangent(F, t) {
+    return F.e1.clone().multiplyScalar(-Math.sin(t)).add(F.e2.clone().multiplyScalar(Math.cos(t)));
   }
 
   /* Where a ring's arrowheads go when it is first drawn: the point of the
      ring nearest the camera, so they face you rather than hide behind the
      piece. After that they ride the ring with the piece. */
-  function defaultArrowAt(ring, centre) {
+  function defaultArrowAt(F, centre) {
     if (!state.camera) return 0;
-    var R = RINGS[ring];
     var v = state.camera.position.clone().sub(centre);
-    var u = v.dot(v3(R.e1)), w = v.dot(v3(R.e2));
+    var u = v.dot(F.e1), w = v.dot(F.e2);
     return Math.hypot(u, w) < 1e-6 ? 0 : Math.atan2(w, u);
   }
+
+  /* ---- weights -----------------------------------------------------------
+     At rest every ring is drawn the same. While one is dragged the rails get
+     QUIETER, not louder: the active ring thins and goes see-through so the
+     piece reads through it at the moment its angle is being judged, and the
+     other two fade to a trace. The arrowhead under the pointer keeps full
+     weight, so the grab point never goes soft. Colours never change - the one
+     white is the snap's flash. Release, and refresh draws rest weight again. */
+  var WEIGHT = {
+    rest:     { tube: 1,   ring: 0.7,  arrow: 0.95, ticks: 0.4,  label: 0.9 },
+    active:   { tube: 0.6, ring: 0.35, arrow: 0.35, ticks: 0.2,  label: 0.45 },
+    inactive: { tube: 1,   ring: 0.12, arrow: 0.12, ticks: 0.06, label: 0.12 }
+  };
+  /* A press is not yet a drag: a click on an arrowhead leaves the rails at
+     rest weight, and they go quiet only once the pointer has really moved. */
+  function dragging() { return !!(drag && drag.moved); }
+  function weightFor(ring) {
+    if (!dragging()) return WEIGHT.rest;
+    return drag.ring === ring ? WEIGHT.active : WEIGHT.inactive;
+  }
+  function restTube(r) { return Math.max(0.3, r * 0.016); }
 
   function colourFor(ring) {
     var lit = drag && drag.ring === ring;
     if (lit && Date.now() < flashUntil) return { c: 0xffffff, o: 1 };
-    return { c: RINGS[ring].color, o: lit ? 1 : 0.7 };
+    return { c: RINGS[ring].color, o: weightFor(ring).ring };
   }
 
-  function addRing(g, ring, r) {
-    var col = colourFor(ring);
-    var tube = Math.max(0.3, r * 0.016) * (drag && drag.ring === ring ? 1.8 : 1);
+  /* ---- the scale ---------------------------------------------------------
+     Ticks on the ring's outer edge - short every 15, longer every 45, longest
+     on the quarters - and 0 / 90 / 180 / 270 beside the quarters. All of it
+     is in the ring's own frame (the same e1, e2 the snap measures in), so it
+     turns with nothing: it is the fixed scale the piece turns against, and a
+     snapped quarter turn puts the piece's measured axis exactly on a
+     labelled tick. Ticks are one line-segment set per ring, one draw call. */
+  var TICK_LEN = { 15: 0.045, 45: 0.08, 90: 0.12 };   // x radius
+  function tickClass(deg) { return deg % 90 === 0 ? 90 : deg % 45 === 0 ? 45 : 15; }
+  function tickOuter(r) { return r + restTube(r) + TICK_LEN[90] * r; }
+  function labelRadius(r) { return tickOuter(r) + 0.09 * r; }
+  function noRaycast() {}
+
+  function addTicks(g, ring, F, r, w) {
+    var R = RINGS[ring], e1 = F.e1, e2 = F.e2, pts = [];
+    var r0 = r + restTube(r);
+    for (var d = 0; d < 360; d += 15) {
+      var t = d * RAD, dir = e1.clone().multiplyScalar(Math.cos(t)).add(e2.clone().multiplyScalar(Math.sin(t)));
+      pts.push(dir.clone().multiplyScalar(r0), dir.clone().multiplyScalar(r0 + TICK_LEN[tickClass(d)] * r));
+    }
+    var l = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts),
+      new THREE.LineBasicMaterial({ color: R.color, depthTest: false, depthWrite: false,
+                                    transparent: true, opacity: w.ticks }));
+    l.renderOrder = 999;
+    l.raycast = noRaycast;
+    l.userData.nsoRotateTicks = ring;
+    g.add(l);
+  }
+
+  /* The four labels: sprites, so they always face the camera, and sized in
+     SCREEN terms (sizeAttenuation off) so they read the same at any zoom.
+     One canvas texture per ring and label, made once and kept. */
+  var LABEL_PX = 0.032;          // label height as a fraction of the view's height, roughly
+  var labelTextures = {};
+  function labelTexture(ring, text) {
+    var key = ring + ':' + text;
+    if (labelTextures[key]) return labelTextures[key];
+    var cv = document.createElement('canvas');
+    cv.width = 128; cv.height = 64;
+    var x = cv.getContext('2d');
+    x.font = '700 44px system-ui, sans-serif';
+    x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.lineWidth = 8; x.strokeStyle = 'rgba(10, 16, 30, 0.9)';
+    x.strokeText(text, 64, 34);
+    x.fillStyle = RINGS[ring].css;
+    x.fillText(text, 64, 34);
+    var tex = new THREE.CanvasTexture(cv);
+    tex.minFilter = THREE.LinearFilter;
+    return (labelTextures[key] = tex);
+  }
+  /* Each label sits a few degrees past its tick, along its own ring. The
+     three rings cross on the plate's axes, so every quarter of one ring is
+     the same point as a quarter of another - Turn's 0 and Lean front/back's
+     90 are both straight out along Z. Centred on the tick, two labels print
+     on top of each other; nudged along their own rings, whose tangents differ
+     there, they part. */
+  var LABEL_SHIFT_DEG = 9;
+  function addLabels(g, ring, F, r, w) {
+    var e1 = F.e1, e2 = F.e2, lr = labelRadius(r);
+    [0, 90, 180, 270].forEach(function (d) {
+      var t = (d + LABEL_SHIFT_DEG) * RAD;
+      var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(ring, String(d)),
+        depthTest: false, depthWrite: false, transparent: true, opacity: w.label,
+        sizeAttenuation: false }));
+      sp.position.copy(e1.clone().multiplyScalar(Math.cos(t) * lr).add(e2.clone().multiplyScalar(Math.sin(t) * lr)));
+      sp.scale.set(LABEL_PX * 2, LABEL_PX, 1);
+      sp.renderOrder = 1001;
+      sp.raycast = noRaycast;
+      sp.userData.nsoRotateLabel = { ring: ring, deg: d };
+      g.add(sp);
+    });
+  }
+
+  function addRing(g, ring, F, r) {
+    var col = colourFor(ring), w = weightFor(ring);
+    var tube = restTube(r) * w.tube;
     var geo = new THREE.TorusGeometry(r, tube, 6, 160);
-    // Torus lies in XY with its axis on Z; turn Z onto the ring's axis.
-    geo.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(
-      new THREE.Vector3(0, 0, 1), v3(RINGS[ring].axis)));
+    // Torus lies in XY with its axis on Z: carry X, Y, Z onto e1, e2, A.
+    geo.applyMatrix4(new THREE.Matrix4().makeBasis(F.e1, F.e2, F.A));
     var mat = new THREE.MeshBasicMaterial({ color: col.c, depthTest: false, depthWrite: false,
                                             transparent: true, opacity: col.o });
     var m = new THREE.Mesh(geo, mat);
     m.renderOrder = 999;
     m.userData.nsoRotateRing = ring;          // the track: drawn, never a handle
     g.add(m);
+    addTicks(g, ring, F, r, w);
+    addLabels(g, ring, F, r, w);
 
     var t = arrowAt[ring], h = arrowSize(r), gap = arrowGap(r);
     [1, -1].forEach(function (dir) {
       var at = t + dir * gap;
-      var pos = ringPoint(ring, r, at);
-      var tan = ringTangent(ring, at).multiplyScalar(dir);
+      var pos = ringPoint(F, r, at);
+      var tan = ringTangent(F, at).multiplyScalar(dir);
       var handle = { ring: ring, dir: dir };
+      /* the arrowhead under the pointer keeps full weight through a drag */
+      var held = dragging() && drag.ring === ring && drag.dir === dir;
       var cone = new THREE.Mesh(new THREE.ConeGeometry(h * 0.45, h, 18),
-        new THREE.MeshBasicMaterial({ color: col.c, depthTest: false, depthWrite: false,
-                                      transparent: true, opacity: Math.min(1, col.o + 0.25) }));
+        new THREE.MeshBasicMaterial({ color: held ? RINGS[ring].color : col.c, depthTest: false,
+                                      depthWrite: false, transparent: true,
+                                      opacity: held ? 1 : (col.c === 0xffffff ? 1 : w.arrow) }));
       cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tan);
       cone.position.copy(pos);
       cone.renderOrder = 1000;
@@ -527,10 +713,11 @@
     g.visible = true;
     g.position.copy(p.mesh.position);
     g.updateMatrixWorld(true);
-    var r = ringRadius(p);
+    var r = ringRadius(p), q = p.mesh.quaternion.clone();
     list.forEach(function (ring) {
-      if (arrowAt[ring] == null) arrowAt[ring] = defaultArrowAt(ring, g.position);
-      addRing(g, ring, r);
+      var F = frameOf(ring, q);
+      if (arrowAt[ring] == null) arrowAt[ring] = defaultArrowAt(F, g.position);
+      addRing(g, ring, F, r);
     });
   }
 
@@ -540,7 +727,7 @@
     var p = piece();
     if (!p || !state.camera || !state.renderer || arrowAt[ring] == null) return null;
     var r = ringRadius(p);
-    var w = ringPoint(ring, r, arrowAt[ring] + (dir || 1) * arrowGap(r)).add(p.mesh.position);
+    var w = ringPoint(frameOf(ring, pieceQ()), r, arrowAt[ring] + (dir || 1) * arrowGap(r)).add(p.mesh.position);
     var v = w.project(state.camera);
     var c = state.renderer.domElement.getBoundingClientRect();
     return { x: c.left + (v.x * 0.5 + 0.5) * c.width, y: c.top + (-v.y * 0.5 + 0.5) * c.height };
@@ -602,6 +789,14 @@
       return drag ? { ring: drag.ring, raw: drag.raw, applied: drag.applied, sign: drag.sign,
                       moved: drag.moved, snapped: drag.snapped } : null;
     },
+    /* A ring's axis in the world, now: the plate's vertical for Turn, the
+       piece's own Z / X as it lies for the two leans. */
+    ringAxis: function (ring) { return RINGS[ring] ? frameOf(ring, pieceQ()).A.toArray() : null; },
+    ringFrame: function (ring) {
+      if (!RINGS[ring]) return null;
+      var F = frameOf(ring, pieceQ());
+      return { A: F.A.toArray(), e1: F.e1.toArray(), e2: F.e2.toArray() };
+    },
     /* The piece's angle on a ring as the snap sees it (see ringAngleDeg). */
     ringAngle: function (ring) {
       var p = piece();
@@ -625,13 +820,20 @@
         return c.userData.nsoRotateHandle && c.material && c.material.visible;
       }).length : 0;
     },
+    /* Task 1's radius, and how many times it has been measured - once per
+       geometry, never per frame. */
+    ringRadius: function () { var p = piece(); return p ? ringRadius(p) : null; },
+    sphereComputes: function () { return sphereComputes; },
+    weights: WEIGHT,
     ringCount: function () {
       var g = ensureGroup();
       return g ? g.children.filter(function (c) { return c.userData.nsoRotateRing; }).length : 0;
     },
     constants: { STEP_DEG: STEP_DEG, SNAP_STEP_DEG: SNAP_STEP_DEG,
                  SNAP_WITHIN_DEG: SNAP_WITHIN_DEG, CLICK_SLOP_PX: CLICK_SLOP_PX,
-                 AXES: { turn: RINGS.turn.axis, fb: RINGS.fb.axis, ss: RINGS.ss.axis } }
+                 RING_CLEARANCE: RING_CLEARANCE, RING_MIN_MM: RING_MIN_MM, TICK_LEN: TICK_LEN,
+                 LABEL_SHIFT_DEG: LABEL_SHIFT_DEG,
+                 LOCAL: { fb: RINGS.fb.local, ss: RINGS.ss.local } }
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
