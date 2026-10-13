@@ -728,18 +728,259 @@
   }
 
   // ===========================================================================
+  // the arc sweep - a section carried rigidly round a circular arc
+  //
+  // `sweep` mitres: its joint rings sit in bisector planes and are the profile
+  // stretched by 1/cos(turn/2) (F4 in docs/CURVING-PATH.md), and it takes one
+  // convex profile. A BEND cannot use either half of that. Its promise is that
+  // the section is held exact, so every ring here is the section itself, moved
+  // by a rotation about the bend axis - a RADIAL station, never a mitre - and
+  // its section is whatever the piece has: an outline with holes (a tube), a
+  // non-convex outline (a channel, an L), several outlines at once.
+  //
+  // What makes that possible is giving up the cap. `sweep` needs convexity for
+  // two things: the proof that a mitred ring cannot self-cross (a rigid image of
+  // a simple loop is simple, so there is nothing to prove here), and the cap
+  // fan from the path point (an arc sweep is spliced between two halves of an
+  // existing piece and has no caps). So `sweepArc` emits walls only.
+  //
+  // The arc, in the frame it is given:
+  //
+  //   origin  a point on the CENTRE LINE at the start of the arc
+  //   u       the tangent there (the piece's axis, pointing at the far end)
+  //   d       the direction the piece folds TOWARD; the centre of curvature is
+  //           origin + R d, and the bend axis is b = u x d
+  //   R       the centre line's radius;  theta  the angle (0, pi]
+  //
+  // A point is named by s along u, h along d and g along b, all from origin.
+  // On the arc (0 < s < L = R theta) it lands at radius R - h from the bend
+  // axis, turned by phi = s / R:
+  //
+  //   origin + u (R - h) sin(phi) + d (R - (R - h) cos(phi)) + b g
+  //
+  // and past it (s >= L) the TAIL turns rigidly with the arc's end:
+  //
+  //   origin + u ((R - h) sin(theta) + (s - L) cos(theta))
+  //          + d (R - (R - h) cos(theta) + (s - L) sin(theta)) + b g
+  //
+  // which in (s - L, h) is a rotation by theta plus a translation - rigid. A
+  // point with s <= 0 does not move. R - h is the only thing that can go wrong:
+  // at R - h <= 0 the inside face reaches the bend axis and turns inside out.
+  // ===========================================================================
+
+  var HALF_PI = Math.PI / 2;
+
+  /** cos and sin, exact at whole quarter turns (Math.cos(pi/2) is 6e-17). */
+  function trigExact(a) {
+    var q = a / HALF_PI, k = Math.round(q);
+    if (Math.abs(q - k) < 1e-12) {
+      var m = ((k % 4) + 4) % 4;
+      return [[1, 0], [0, 1], [-1, 0], [0, -1]][m];
+    }
+    return [Math.cos(a), Math.sin(a)];
+  }
+
+  /**
+   * Normalise and check an arc. Returns { ok, reason, o, u, d, b, R, theta, L,
+   * c, s } with c, s the end's cos and sin (exact at quarter turns).
+   */
+  function arcFrame(arc) {
+    if (!arc) return { ok: false, reason: 'no arc given' };
+    var o = arc.origin, u = arc.tangent, d = arc.toward, R = +arc.radius, th = +arc.angle;
+    if (!o || !u || !d) return { ok: false, reason: 'an arc needs origin, tangent and toward' };
+    if (!(R > 0) || !isFinite(R)) return { ok: false, reason: 'arc radius must be a positive number, got ' + arc.radius };
+    if (!(th > 0) || !(th <= Math.PI + 1e-12)) return { ok: false, reason: 'arc angle must be in (0, pi], got ' + arc.angle };
+    var uu = norm(u), dd = norm(d);
+    if (!(len(uu) > 0) || !(len(dd) > 0)) return { ok: false, reason: 'tangent and toward must be non-zero' };
+    if (Math.abs(dot(uu, dd)) > 1e-12) return { ok: false, reason: 'toward must be perpendicular to the tangent' };
+    var cs = trigExact(th);
+    return { ok: true, o: [+o[0], +o[1], +o[2]], u: uu, d: dd, b: cross(uu, dd), R: R, theta: th,
+             L: R * th, c: cs[0], s: cs[1] };
+  }
+
+  /** h and g of a point: its offsets along d and b from the frame origin. */
+  function arcHG(F, p) {
+    var q = sub(p, F.o);
+    return [dot(q, F.d), dot(q, F.b)];
+  }
+
+  /**
+   * A point on the station at fraction t of the arc (phi = t theta). `p` is the
+   * point's UNBENT position on that station's plane; only its h and g are read.
+   * t === 0 returns p itself, untouched; t === 1 is `arcTail`, so a ring at
+   * either end of the arc is bit for bit the point the rest of the piece puts
+   * there.
+   */
+  function arcPoint(F, p, t) {
+    if (t === 0) return p;
+    if (t === 1) return arcTail(F, p);
+    var hg = arcHG(F, p), rho = F.R - hg[0], phi = t * F.theta;
+    var su = rho * Math.sin(phi), sd = F.R - rho * Math.cos(phi);
+    return [F.o[0] + F.u[0] * su + F.d[0] * sd + F.b[0] * hg[1],
+            F.o[1] + F.u[1] * su + F.d[1] * sd + F.b[1] * hg[1],
+            F.o[2] + F.u[2] * su + F.d[2] * sd + F.b[2] * hg[1]];
+  }
+
+  /** A point past the arc (s >= L), turned rigidly with the arc's end. */
+  function arcTail(F, p) {
+    var q = sub(p, F.o);
+    var s2 = dot(q, F.u) - F.L, h = dot(q, F.d), g = dot(q, F.b), rho = F.R - h;
+    var su = rho * F.s + s2 * F.c, sd = F.R - rho * F.c + s2 * F.s;
+    return [F.o[0] + F.u[0] * su + F.d[0] * sd + F.b[0] * g,
+            F.o[1] + F.u[1] * su + F.d[1] * sd + F.b[1] * g,
+            F.o[2] + F.u[2] * su + F.d[2] * sd + F.b[2] * g];
+  }
+
+  /**
+   * How many equal steps the arc is cut into. Two limits, the tighter wins:
+   *
+   *   sag      the chord between two stations on the OUTERMOST radius rOut dips
+   *            at most sagMm (default 0.02 mm) inside the true arc:
+   *            rOut (1 - cos(step / 2)) <= sagMm.
+   *   volume   between two stations every point of the section runs along a
+   *            chord, so the slab holds A rho_c sin(step) where the true arc
+   *            holds A rho_c step: short by step^2 / 6. volFrac (default 5e-4)
+   *            caps that, so the volume the arc encloses is A x the length its
+   *            centroid travels to within 0.05%, however small the radius.
+   *            (The sag rule alone lets it reach 0.4% on a tight fold.)
+   */
+  function arcSteps(theta, rOut, opts) {
+    opts = opts || {};
+    if (opts.steps != null) return Math.max(1, opts.steps | 0);
+    var sag = opts.sagMm == null ? 0.02 : +opts.sagMm;
+    var volFrac = opts.volFrac == null ? 5e-4 : +opts.volFrac;
+    var dSag = rOut > sag / 2 ? 2 * Math.acos(Math.max(-1, 1 - sag / rOut)) : Math.PI;
+    var dVol = Math.sqrt(6 * volFrac);
+    return Math.max(1, Math.ceil(theta / Math.min(dSag, dVol) - 1e-9));
+  }
+
+  /**
+   * Sweep section loops round an arc. Walls only - no caps.
+   *
+   *   opts.arc        { origin, tangent, toward, radius, angle } (see above)
+   *   opts.loops      the section at the START of the arc: an array of closed
+   *                   loops of 3D points, all on the plane s = 0. Any number of
+   *                   loops, convex or not. Each runs counter-clockwise about
+   *                   +u in the (d, b) plane when its material is inside it (an
+   *                   outline) and clockwise when it is outside (a bore): the
+   *                   material is on the loop's left. The outward wall of the
+   *                   segment p -> q then faces (q - p) x u.
+   *   opts.loopsEnd   optional, the same loops on the plane s = L, still
+   *                   unbent. Point j of a loop may sit anywhere along the
+   *                   section between the two ends (a wall triangle's diagonal
+   *                   crosses the section at a different place on each plane);
+   *                   station i takes the straight blend at t = i / n, which is
+   *                   on the same wall. Default: the start loops moved by L u.
+   *   opts.minInsideMm  the smallest radius a point may end at; default 0
+   *   opts.steps / sagMm / volFrac   see arcSteps
+   *
+   * Ring 0 is opts.loops itself (the same arrays), ring n is arcTail of
+   * opts.loopsEnd: a caller that runs its own geometry through arcTail gets
+   * the identical numbers, so the splice needs no weld tolerance.
+   *
+   * Returns { ok, reason, tris, rings[i][loop][j], steps, stats }.
+   */
+  function sweepArc(opts) {
+    opts = opts || {};
+    var F = arcFrame(opts.arc);
+    if (!F.ok) return { ok: false, reason: F.reason, tris: null };
+    var A = opts.loops;
+    if (!Array.isArray(A) || !A.length) return { ok: false, reason: 'no section loops', tris: null };
+    var B = opts.loopsEnd;
+    if (B == null) {
+      B = A.map(function (lp) { return lp.map(function (p) { return add(p, mul(F.u, F.L)); }); });
+    }
+    if (!Array.isArray(B) || B.length !== A.length) return { ok: false, reason: 'loopsEnd does not match loops', tris: null };
+
+    // Radii, orientation.
+    var rIn = Infinity, rOut = -Infinity, inAt = null, area = 0, M = 0;
+    for (var l = 0; l < A.length; l++) {
+      var lp = A[l];
+      if (!Array.isArray(lp) || lp.length < 3) return { ok: false, reason: 'section loop ' + l + ' has fewer than 3 points', tris: null };
+      if (!Array.isArray(B[l]) || B[l].length !== lp.length) return { ok: false, reason: 'loopsEnd[' + l + '] does not match loops[' + l + ']', tris: null };
+      M += lp.length;
+      for (var e = 0; e < 2; e++) {
+        var L2 = e ? B[l] : lp;
+        for (var j = 0; j < L2.length; j++) {
+          var hg = arcHG(F, L2[j]), rho = F.R - hg[0];
+          if (rho < rIn) { rIn = rho; inAt = { loop: l, point: j }; }
+          if (rho > rOut) rOut = rho;
+        }
+      }
+      for (var j2 = 0; j2 < lp.length; j2++) {
+        var p = arcHG(F, lp[j2]), q = arcHG(F, lp[(j2 + 1) % lp.length]);
+        area += (p[0] * q[1] - q[0] * p[1]) / 2;
+      }
+    }
+    if (!(area > 0)) {
+      return { ok: false, tris: null, reason: 'section loops are wound the wrong way (net area ' + area.toExponential(3) +
+               ' about +u): an outline runs counter-clockwise, a bore clockwise' };
+    }
+    var minIn = opts.minInsideMm == null ? 0 : +opts.minInsideMm;
+    if (!(rIn > minIn)) {
+      return { ok: false, tris: null, failAt: inAt, rInside: rIn,
+               reason: 'the inside of the section would end ' + (rIn <= 0 ? (-rIn).toFixed(4) + ' mm past the bend axis - it turns inside out'
+                 : rIn.toFixed(4) + ' mm from the bend axis, under the ' + minIn + ' mm floor') +
+                 ' (radius ' + F.R + ' mm to the centre line)' };
+    }
+
+    var n = arcSteps(F.theta, rOut, opts);
+    var rings = [];
+    for (var i = 0; i <= n; i++) {
+      var t = i === n ? 1 : i / n, ring = [];
+      for (var l2 = 0; l2 < A.length; l2++) {
+        var out = [];
+        for (var j3 = 0; j3 < A[l2].length; j3++) {
+          var a = A[l2][j3], b2 = B[l2][j3];
+          var pt = (t === 0) ? a : (t === 1) ? b2
+            : [a[0] + (b2[0] - a[0]) * t, a[1] + (b2[1] - a[1]) * t, a[2] + (b2[2] - a[2]) * t];
+          out.push(arcPoint(F, pt, t));
+        }
+        ring.push(out);
+      }
+      rings.push(ring);
+    }
+
+    var nTri = 2 * M * n;
+    var tris = new Float32Array(nTri * 9), w = 0;
+    function emit(a, b, c) {
+      tris[w++] = a[0]; tris[w++] = a[1]; tris[w++] = a[2];
+      tris[w++] = b[0]; tris[w++] = b[1]; tris[w++] = b[2];
+      tris[w++] = c[0]; tris[w++] = c[1]; tris[w++] = c[2];
+    }
+    for (var k = 0; k < n; k++) {
+      for (var l3 = 0; l3 < A.length; l3++) {
+        var RA = rings[k][l3], RB = rings[k + 1][l3], m = RA.length;
+        for (var jw = 0; jw < m; jw++) {
+          var j4 = (jw + 1) % m;
+          emit(RA[jw], RA[j4], RB[j4]);
+          emit(RA[jw], RB[j4], RB[jw]);
+        }
+      }
+    }
+    var step = F.theta / n;
+    return {
+      ok: true, reason: '', tris: tris, rings: rings, steps: n, frame: F,
+      stats: { tris: nTri, steps: n, stepRad: step, rInside: rIn, rOutside: rOut,
+               sagMm: rOut * (1 - Math.cos(step / 2)), loops: A.length, points: M, sectionArea: area }
+    };
+  }
+
+  // ===========================================================================
   // measurement helpers - used by the self-test, and deliberately independent
   // of the construction above. They read the emitted buffer and nothing else.
   // ===========================================================================
 
   /**
-   * Slice a triangle soup with a plane. Returns the loop of section points,
-   * chained end to end, or null if the cut is not one closed loop.
+   * Slice a triangle soup with a plane. Returns every loop of section points,
+   * each chained end to end - one for a rod, an outer and a bore for a tube -
+   * or null if the cut does not fall apart into closed loops. Loops come in
+   * the order their first point was met, unoriented; `loopArea` measures each.
    *
    * This is how the cross-section promise is CHECKED rather than asserted: it
    * forgets how the mesh was made and measures the solid that came out.
    */
-  function sectionLoop(tris, point, normal, opts) {
+  function sectionLoops(tris, point, normal, opts) {
     opts = opts || {};
     var n = norm(normal);
     var d0 = dot(n, point);
@@ -830,20 +1071,36 @@
     if (nSeg < 3) return null;
     for (var k = 0; k < nodes.length; k++) if (nodes[k].links.length !== 2) return null;
 
-    var used = new Array(nSeg);
-    var loop = [];
-    var at = 0;
-    for (var step = 0; step < nSeg; step++) {
-      loop.push(nodes[at].p);
-      var lk = nodes[at].links;
-      var go = null;
-      for (var z = 0; z < lk.length; z++) if (!used[lk[z].seg]) { go = lk[z]; break; }
-      if (!go) break;
-      used[go.seg] = true;
-      at = go.other;
+    // Every node has degree 2, so the segments fall apart into closed loops:
+    // walk each one from its lowest unvisited node.
+    var used = new Array(nSeg), seen = new Array(nodes.length), loops = [];
+    for (var start = 0; start < nodes.length; start++) {
+      if (seen[start]) continue;
+      var loop = [], at = start;
+      for (;;) {
+        seen[at] = true;
+        loop.push(nodes[at].p);
+        var lk = nodes[at].links, go = null;
+        for (var z = 0; z < lk.length; z++) if (!used[lk[z].seg]) { go = lk[z]; break; }
+        if (!go) break;
+        used[go.seg] = true;
+        at = go.other;
+        if (at === start) break;
+      }
+      if (at !== start || loop.length < 3) return null;   // a chain that does not close
+      loops.push(loop);
     }
-    if (loop.length !== nSeg || at !== 0) return null;   // not one closed loop
-    return loop;
+    return loops;
+  }
+
+  /**
+   * One loop, or null: `sectionLoops` for a section that must be a single
+   * closed outline (a solid profile). A tube's section is two loops and reads
+   * null here; ask `sectionLoops` for it.
+   */
+  function sectionLoop(tris, point, normal, opts) {
+    var loops = sectionLoops(tris, point, normal, opts);
+    return (loops && loops.length === 1) ? loops[0] : null;
   }
 
   /** Area of a planar 3D loop, via the vector area. */
@@ -889,7 +1146,13 @@
     arcSubdivide: arcSubdivide,
     sweep: sweep,
     sweepClosed: sweepClosed,
+    arcFrame: arcFrame,
+    arcPoint: arcPoint,
+    arcTail: arcTail,
+    arcSteps: arcSteps,
+    sweepArc: sweepArc,
     sectionLoop: sectionLoop,
+    sectionLoops: sectionLoops,
     loopArea: loopArea,
     wallPlanarity: wallPlanarity,
     _v: { sub: sub, add: add, mul: mul, dot: dot, cross: cross, len: len, norm: norm, dist: dist }
