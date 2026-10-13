@@ -125,6 +125,17 @@ const cam = (page) => page.evaluate(() => {
 });
 
 const near = (a, b, tol) => a.every((x, i) => Math.abs(x - b[i]) <= tol);
+/** Unit view direction, target to camera. */
+const dirOf = (c) => {
+  const v = c.pos.map((x, i) => x - c.target[i]), l = Math.hypot(...v);
+  return v.map((x) => x / l);
+};
+/** How far point `p` is off the line through camera `c` and its target, mm. */
+const offRay = (p, c) => {
+  const d = dirOf(c), w = p.map((x, i) => x - c.pos[i]);
+  const t = w.reduce((a, x, i) => a + x * d[i], 0);
+  return Math.hypot(...w.map((x, i) => x - t * d[i]));
+};
 
 /**
  * Scroll toward a distance: wheel events in batches of 10 until `done(cam)`,
@@ -258,7 +269,13 @@ async function main() {
   console.log(`       zoomed in to ${c1.d.toExponential(3)} mm (near ${c1.near.toExponential(3)})`);
   check('Normal zoom-in: well under a hundredth of a millimetre from the target - no floor',
     c1.d < 0.01, true);
-  check('Normal zoom-in: still the same target (zoom is a dolly, not a pan)', near(c1.target, c0.target, 1e-6), true);
+  // The wheel zooms toward the cursor (gscope-zoom-drive-check.mjs), so the
+  // target may move - but only along the cursor's ray. The cursor is at the
+  // centre, where the target is: the view never turns and the target stays
+  // on the centre ray it started on.
+  check('Normal zoom-in: the view never turned (same direction)', near(dirOf(c1), dirOf(c0), 1e-9), true);
+  check('Normal zoom-in: the target is still on the centre ray it started on',
+    offRay(c1.target, c0) < 1e-6, true);
   check('Normal zoom-in: the frustum held everything drawn at every step', holdsAll && c1.holdsWorld, true);
 
   // Out, past the old limit, to where the part is still drawn...
@@ -397,10 +414,6 @@ async function main() {
     const c = new THREE.Vector3(); box.getCenter(c);
     return [c.x, c.y, c.z];
   });
-  const dirOf = (c) => {
-    const v = c.pos.map((x, i) => x - c.target[i]), l = Math.hypot(...v);
-    return v.map((x) => x / l);
-  };
 
   // Picture 1: the normal view, a region selected.
   await page.click('#ms-cam-normal');

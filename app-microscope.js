@@ -593,6 +593,8 @@ var NSO_MICROSCOPE = (function () {
   // nothing to draw, so it reads off (allDetectors()).
   var DETECTED_ON = new Set();
 
+  var BED_GRID = 120;                 // the bed grid's side, mm, centred on the origin
+
   function buildWorld() {
     if (view) return view;
     var host = $('ms-viewport');
@@ -628,7 +630,8 @@ var NSO_MICROSCOPE = (function () {
     scene.add(dl);
 
     // grid on the "bed" plane (three.js XZ plane, y=0)
-    scene.add(new THREE.GridHelper(120, 24, 0x333844, 0x22252c));
+    var grid = new THREE.GridHelper(BED_GRID, 24, 0x333844, 0x22252c);
+    scene.add(grid);
 
     var overviewGroup = new THREE.Group();
     scene.add(overviewGroup);
@@ -654,6 +657,8 @@ var NSO_MICROSCOPE = (function () {
       detectedMeshes: {},
       raycaster: raycaster,
       dragRaycaster: new THREE.Raycaster(),
+      wheelRaycaster: new THREE.Raycaster(),
+      grid: grid,
       mouse: new THREE.Vector2(),
       resizePlane: new THREE.Plane(),
       running: false,
@@ -1228,9 +1233,79 @@ var NSO_MICROSCOPE = (function () {
     ];
   }
 
+  /* WHEEL ZOOM TOWARD THE CURSOR - the main viewport's (#154), on G-scope's
+     own OrbitControls. three 0.147 has no zoomToCursor, so the wheel is taken
+     before OrbitControls' own handler sees it: a capture listener on the host
+     (the canvas's parent), for wheels over the canvas only, that stops the
+     event there. OrbitControls' zoom stays ON, because its middle-drag and
+     two-finger dolly hang off the same enableZoom - those still dolly about
+     the target, as before.
+
+     Each step scales the camera AND the target about the point under the
+     cursor (app-core.js's dollyAbout, shared with the main viewport), so that
+     point keeps its pixel exactly; the view direction never changes. The step
+     is OrbitControls' own (0.95 per wheel event, either sign of deltaY), and
+     its own limits apply - minDistance / maxDistance on the camera-to-target
+     distance, 0 and Infinity here, so still no floor and no ceiling.
+
+     The point is the first DRAWN thing of the document under the cursor (its
+     lines, solid, detected features, the isolated detail or the highlight):
+     a visible object with a visible material, at a point its clipping planes
+     keep. A line counts within the same zoom-tracking reach a line pick uses.
+     Failing that, the bed's plane (y = 0) where the bed grid is drawn; failing
+     both, the target - which is the zoom this replaced. */
+  function drawnAt(hit) {
+    var o = hit.object;
+    if (!(o.isMesh || o.isLine) || !nsoVisibleInScene(o)) return false;
+    var mats = Array.isArray(o.material) ? o.material : [o.material];
+    if (!mats.some(function (m) { return m && m.visible; })) return false;
+    var m = mats[0] || {};
+    var planes = (m.clippingPlanes || []).concat(view.renderer.clippingPlanes || []);
+    return planes.every(function (pl) { return pl.distanceToPoint(hit.point) >= -1e-6; });
+  }
+
+  function wheelAnchor(clientX, clientY) {
+    var v = view, rect = v.renderer.domElement.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+    var rc = v.wheelRaycaster;
+    rc.setFromCamera(new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1,
+                                       -((clientY - rect.top) / rect.height) * 2 + 1), v.camera);
+    rc.near = v.camera.near;
+    rc.far = v.camera.far;
+    rc.params.Line.threshold = Math.max(0.05, v.camera.position.distanceTo(v.controls.target) * 0.006);
+    var hits = rc.intersectObjects([v.overviewGroup, v.detailGroup, v.highlightGroup], true);
+    for (var i = 0; i < hits.length; i++) {
+      // ray.at(distance), not hit.point: on the ray itself, so the pixel holds
+      if (drawnAt(hits[i])) return rc.ray.at(hits[i].distance, new THREE.Vector3());
+    }
+    var g = rc.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
+    if (g && v.grid && nsoVisibleInScene(v.grid) && g.distanceTo(rc.ray.origin) <= v.camera.far &&
+        Math.abs(g.x) <= BED_GRID / 2 && Math.abs(g.z) <= BED_GRID / 2) return g;
+    return null;
+  }
+
+  function onWheel(e) {
+    var v = view, c = v.controls;
+    if (e.target !== v.renderer.domElement) return;
+    // What OrbitControls' own handler would ignore, it is left to ignore: the
+    // controls off (a box handle drag) or a button held (an orbit, pan or
+    // middle-drag dolly in progress).
+    if (!c.enabled || !c.enableZoom || e.buttons) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!e.deltaY) return;
+    var step = Math.pow(0.95, c.zoomSpeed);
+    var anchor = wheelAnchor(e.clientX, e.clientY) || c.target.clone();
+    c.dispatchEvent({ type: 'start' });
+    dollyAbout(v.camera, c, anchor, e.deltaY < 0 ? step : 1 / step, c.minDistance, c.maxDistance);
+    c.dispatchEvent({ type: 'end' });
+  }
+
   function wireViewport() {
     var v = view;
     var el = v.renderer.domElement;
+
+    v.host.addEventListener('wheel', onWheel, { capture: true, passive: false });
 
     el.addEventListener('pointerdown', function (e) {
       v.mouseDownPos = [e.clientX, e.clientY];

@@ -262,6 +262,20 @@ in-house slicer's output for it.
 - **Full zoom and pan.** Pan is on, and the clip planes follow the camera
   every frame (`followClip`), so no distance is refused and nothing drawn is
   clipped.
+- **The wheel zooms toward the cursor** - the plate's behaviour (#154), on
+  G-scope's own OrbitControls. Each step scales the camera and the target
+  together about the point under the cursor (`app-core.js` `dollyAbout`,
+  shared), so that point keeps its pixel and the view never turns; the target
+  moves along the cursor's ray, so an orbit afterwards pivots about where you
+  zoomed. The point is the first drawn thing of the document under the cursor
+  (visible, material on, not removed by the layer-range clip; a line within
+  the line pick's reach), else the bed plane where the grid is drawn, else the
+  target - the old dolly. The step (0.95 per wheel event) and the limits
+  (`minDistance` 0, `maxDistance` Infinity: no floor, no ceiling) are
+  OrbitControls' own. The wheel is taken by a capture listener on the host
+  before OrbitControls sees it, so `enableZoom` stays on and middle-drag and
+  two-finger touch still dolly about the target. `gcode:gscope-zoom`
+  (`tools/gcode-test/gscope-zoom-drive-check.mjs`) holds it.
 - **The slice settings** (nozzle, layer, walls, infill, pattern, support
   angle) sit behind a `Slice settings` disclosure, collapsed by default. Their
   values persist across every Normal / Slice view round trip.
