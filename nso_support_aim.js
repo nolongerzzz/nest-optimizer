@@ -143,6 +143,8 @@
    ---------------------------------------------------------------------------
    detectOverhangs(rawTris, opts)          -> { ok, regions: [...], ... }
    nearestBase(point, bases, opts)         -> { ok, from, dir, length, ... }
+   lineBlockedAt(obstacles, from, dir, L)  -> first face hit strictly between the ends, or -1
+   lineInsideAt(obstacles, from, dir, L)   -> a point of the line inside material, or -1
    buildStrut(opts)                        -> { ok, soup, sideMm, lengthMm }
    grow(soup, targetLengthMm, opts)        -> Extend's own result, verbatim
    place(soup, from, dir, opts)            -> { ok, soup, matrix, quat }
@@ -396,6 +398,34 @@
       if (d < bestD) { bestD = d; best = q; }
     }
     return best ? { point: best, distance: bestD } : null;
+  }
+
+  /* Generalised winding number of `soup` about p: the signed solid angle
+     every triangle subtends, over 4 pi (Van Oosterom & Strackee). For a
+     closed, outward-wound shell it is 1 inside and 0 outside, exactly. Where
+     the soup is not one clean shell it still answers sensibly: two shells
+     that overlap add (2 inside both), and a small hole only moves the value
+     by the solid angle the hole subtends. Chosen over counting ray crossings
+     because a ray that clips an edge counts that edge twice here (rayTri is
+     inclusive, by 1e-9, so the two triangles meeting there both report it),
+     and a point-in-solid answer that flips on where a ray happened to land
+     is no answer. */
+  function windingAt(soup, p) {
+    var n = triCount(soup), w = 0;
+    for (var t = 0; t < n; t++) {
+      var o = t * 9;
+      var ax = soup[o] - p[0], ay = soup[o + 1] - p[1], az = soup[o + 2] - p[2];
+      var bx = soup[o + 3] - p[0], by = soup[o + 4] - p[1], bz = soup[o + 5] - p[2];
+      var cx = soup[o + 6] - p[0], cy = soup[o + 7] - p[1], cz = soup[o + 8] - p[2];
+      var la = Math.sqrt(ax * ax + ay * ay + az * az);
+      var lb = Math.sqrt(bx * bx + by * by + bz * bz);
+      var lc = Math.sqrt(cx * cx + cy * cy + cz * cz);
+      var det = ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
+      var den = la * lb * lc + (ax * bx + ay * by + az * bz) * lc +
+                (ax * cx + ay * cy + az * cz) * lb + (bx * cx + by * cy + bz * cz) * la;
+      w += 2 * Math.atan2(det, den);
+    }
+    return w / (4 * Math.PI);
   }
 
   function soupBounds(soup) {
@@ -754,6 +784,16 @@
           (cand.length - blockAt).toFixed(3) + ' mm short of the target';
         continue;
       }
+      /* ...and nothing hit is not yet open space: a line that never leaves
+         the material crosses no face either. See lineInsideAt. */
+      var insideAt = lineInsideAt(obstacles, cand.from, dir, cand.length);
+      if (insideAt >= 0) {
+        rec.inside = true;
+        rec.why = 'the straight line runs inside the piece (' + insideAt.toFixed(3) + ' mm along is ' +
+          'in solid material) - it crosses no face only because it never leaves the part, so a ' +
+          'support there would be built inside it, not under it';
+        continue;
+      }
 
       rec.viable = true;
       rec.why = 'clear';
@@ -776,9 +816,9 @@
     return out;
   }
 
-  /* The line test nearestBase runs on its best candidate, and the whole of
-     it: is anything hit strictly between the two ends of the segment `from`
-     -> `from + dir * length`? Both ends are excluded by RAY_EPS_MM (the foot
+  /* The FACE half of the line test nearestBase runs on its best candidate
+     (lineInsideAt below is the other half): is anything hit strictly between
+     the two ends of the segment `from` -> `from + dir * length`? Both ends are excluded by RAY_EPS_MM (the foot
      is ON its base, the tip is ON its target). Returns the distance to the
      first blocking hit, or -1 when the line is clear. Published so a caller
      that already KNOWS its foot - nso_assemble.js's footAt, a piece being put
@@ -786,6 +826,43 @@
      re-deriving the epsilon. */
   function lineBlockedAt(obstacles, from, dir, length) {
     return nearestHit(obstacles || [], from, dir, RAY_EPS_MM, length - RAY_EPS_MM);
+  }
+
+  /* THE OTHER HALF OF "CLEAR": is the line in open space at all?
+
+     lineBlockedAt only sees a FACE between the two ends. A segment that
+     never leaves the material crosses no face, so it reads as clear. That is
+     the mushroom in docs/CURVED-BRANCH.md 1b: the contacts ring a 4 x 4 mm
+     stem, their centroid is on the stem's centre line, and the line from the
+     plate to it runs [6,6,0] -> [6,6,20] wholly inside the stem - its foot is
+     ON the stem's bottom face and its end ON the stem's top, both excluded by
+     RAY_EPS_MM, and nothing lies between. The trunk was built there.
+
+     A clear line crosses no face strictly between its ends, so it is either
+     wholly in material or wholly out of it, and asking a point on it settles
+     the whole line. Three points are asked (a quarter, half, three quarters),
+     not one, only because a line can lie IN a face - a strut aimed at a point on a
+     wall, along the wall - and a point on the surface is neither inside nor
+     out. Such a point is skipped (closer to the surface than
+     INSIDE_SURFACE_TOL_MM); a point off the surface is inside when any
+     obstacle's winding number about it is at least a half. Returns the
+     distance along the line of the first point found inside, or -1. */
+  var INSIDE_SURFACE_TOL_MM = RAY_EPS_MM;
+  function lineInsideAt(obstacles, from, dir, length) {
+    obstacles = obstacles || [];
+    var fracs = [0.25, 0.5, 0.75];
+    for (var f = 0; f < fracs.length; f++) {
+      var s = length * fracs[f];
+      var p = add(from, mul(dir, s));
+      for (var k = 0; k < obstacles.length; k++) {
+        var soup = obstacles[k];
+        if (!soup || !soup.length) continue;
+        var near = closestOnSoup(p, soup);
+        if (near && near.distance < INSIDE_SURFACE_TOL_MM) continue;
+        if (windingAt(soup, p) >= 0.5) return s;
+      }
+    }
+    return -1;
   }
 
   /* =====================================================================
@@ -1217,6 +1294,7 @@
     detectOverhangs: detectOverhangs,
     nearestBase: nearestBase,
     lineBlockedAt: lineBlockedAt,
+    lineInsideAt: lineInsideAt,
     buildStrut: buildStrut,
     grow: grow,
     place: place,
@@ -1228,6 +1306,7 @@
     /* exposed for the tests, not for callers */
     _prism: prism,
     _closestOnTri: closestOnTri,
+    _windingAt: windingAt,
     _nearestHit: nearestHit,
     _buildDownGrid: buildDownGrid,
     _nearestHitDown: nearestHitDown,
