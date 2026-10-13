@@ -66,6 +66,9 @@
  * that splits one support tree into its branches, or lifts one interface
  * layer out of a print, hands its groups to `openObjects()` and inherits the
  * legend, the capture box, Isolate and both exports with no change here.
+ * Gen+ -> Picture (app-relief.js) is one: its slab opens here BEFORE it is a
+ * piece, and the seam's two optional hooks give it a Back button to the card
+ * and a say in where Export to plate seats the slab.
  *
  * WHERE A `.gcode.3mf` LANDS
  * Importing one puts you in this view, coloured by feature, without a button
@@ -382,7 +385,39 @@ var NSO_MICROSCOPE = (function () {
     var d = meshDoc(label, objects);
     d.source = o.source || 'objects';
     d.subtitle = o.subtitle || null;
+    // Two optional hooks for a producer that owns the groups it hands over
+    // (Picture, app-relief.js, is the one caller that sets them):
+    //   back     a way back to the producer: shows the Back button, named
+    //            `backLabel`, which closes this view and calls it;
+    //   onPlate  called with the model id after Export to plate or Crop puts
+    //            a piece of this document on the plate, so the producer can
+    //            seat it. The piece is already added and on the Undo stack.
+    d.back = typeof o.back === 'function' ? o.back : null;
+    d.backLabel = o.backLabel || 'Back';
+    d.onPlate = typeof o.onPlate === 'function' ? o.onPlate : null;
     return open(d);
+  }
+
+  /** A piece of the document just landed on the plate: tell its producer. */
+  function landed(id) {
+    if (!doc || !doc.onPlate || id == null) return;
+    try { doc.onPlate(id); }
+    catch (err) { console.error('[g-scope] onPlate', err); }
+  }
+
+  /** The document's Back button: shown only when its producer gave one. */
+  function syncBackButton() {
+    var b = $('ms-btn-back-producer');
+    if (!b) return;
+    b.hidden = !(doc && doc.back);
+    if (doc && doc.back) b.textContent = doc.backLabel;
+  }
+
+  function backToProducer() {
+    var fn = doc && doc.back;
+    if (!fn) return;
+    close();
+    fn();
   }
 
   /** Whatever is on the plate, under the lens. The overlay route. */
@@ -2657,6 +2692,7 @@ var NSO_MICROSCOPE = (function () {
     var model = state.models.find(function (mm) { return mm && mm.id === id; });
     var res = NSO_cropModel(model, { axisIdx: 2, lo: band[0], hi: band[1] }, { shells: shells, label: label });
     res.modelId = id;
+    landed(id);
     // Crop's own status line stands: it says what was removed and what the
     // checker found. Back to the plate, where the new piece is.
     if (res.ok) close();
@@ -2722,8 +2758,9 @@ var NSO_MICROSCOPE = (function () {
         ? currentSelection[0].name
         : currentSelection.length + ' ' + (doc.source === 'plate' ? 'pieces' : 'objects');
       // A piece read off the plate already carries the plate's own name for
-      // it; prefixing "Plate - " onto that says nothing and reads worse.
-      return doc.source === 'plate' ? what : base + ' - ' + what;
+      // it; prefixing "Plate - " onto that says nothing and reads worse. A
+      // Picture slab is already named after its file, the same way.
+      return (doc.source === 'plate' || doc.source === 'picture') ? what : base + ' - ' + what;
     }
     if (selectionSource === 'line' && currentSelection.length === 1) {
       var s1 = currentSelection[0];
@@ -2769,6 +2806,7 @@ var NSO_MICROSCOPE = (function () {
       pushUndo({ type: 'addModels', ids: [id], editId: state.editId, cutT: state.cutT });
     }
     var tris = geo.attributes.position.count / 3;
+    landed(id);
     close();
     say('Export to plate ok - "' + label + '" is its own object (' + tris + ' triangles)');
     return id;
@@ -2868,6 +2906,7 @@ var NSO_MICROSCOPE = (function () {
       if (typeof pushUndo === 'function') {
         pushUndo({ type: 'addModels', ids: [id], editId: state.editId, cutT: state.cutT });
       }
+      landed(id);
       close();
       say('Export as solid ok - "' + label + '": ' + describeExport(geo));
       return id;
@@ -3205,6 +3244,7 @@ var NSO_MICROSCOPE = (function () {
     syncZRangeUI();
     syncCropRow();
     syncLineRead();
+    syncBackButton();
     if (flangeState() && (flangeState().status === 'pending' || featureState('handle').status === 'pending')) detectSoon();
     docListeners.forEach(function (fn) {
       try { fn(doc); } catch (err) { console.error('[g-scope] document listener', err); }
@@ -3266,6 +3306,7 @@ var NSO_MICROSCOPE = (function () {
     syncLayerRow();
     syncExportRow();
     syncRenderRow();
+    syncBackButton();
     info('No file open.');
   }
 
@@ -3319,6 +3360,7 @@ var NSO_MICROSCOPE = (function () {
       if (!openPlate()) say('Nothing on the plate to look at - import a file instead', true);
     });
     bind('ms-close', 'click', close);
+    bind('ms-btn-back-producer', 'click', backToProducer);
     bind('ms-mode-orbit', 'click', function () { setMode('orbit'); });
     bind('ms-mode-select', 'click', function () { setMode('select'); });
     bind('ms-btn-clear', 'click', function () {

@@ -1205,6 +1205,18 @@ and inherits the legend, the capture box, Isolate and both exports without a
 line changing in this file. Nothing below `meshDoc()` knows, or can ask, who
 grouped the triangles.
 
+Gen+ -> Picture (`app-relief.js`, docs/RELIEF.md) is the second caller: a
+relief slab opens here before it is a piece. It passes the seam's two optional
+hooks, which nothing else sets:
+
+| option | what it does |
+| --- | --- |
+| `back`, `backLabel` | shows the Source row's Back button, named `backLabel` ("Back to Picture"); a click closes G-scope and calls `back` |
+| `onPlate` | called with the new model id after Export to plate, Export as solid or Crop puts a piece of this document on the plate (already added, Undo already pushed) - Picture uses it to seat the slab on free plate |
+
+`source: 'picture'` also names an exported piece by its group alone, as
+`source: 'plate'` does, so a slab leaves as `camera`, not `camera.png - camera`.
+
 ### Coordinates
 
 `meshToWorldSoup` (app-join.js) is the app's one way to read a placed piece as
