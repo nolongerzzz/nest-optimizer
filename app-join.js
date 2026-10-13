@@ -3071,43 +3071,7 @@ async function joinSelectedModels() {
 }
 
 
-function splitBothSides(model, axis, leftPlane, rightPlane) {
-  // Try the raw-mesh engine whenever this model carries a self-consistent
-  // raw triple (rawTris/rawAxis/centerOffset), regardless of whether its
-  // name looks like a prior split's child ("-A12"/"-B12"). mapPlaneToRaw
-  // (app-cut.js) only ever reads THIS model's own rawTris/rawAxis/
-  // centerOffset, and addModel (app-core.js) stores a raw-engine child's
-  // triple verbatim, so a 2nd/3rd+ cut on such a child maps correctly too.
-  // The try/catch below is the real safety net: if mapPlaneToRaw/rawCut
-  // ever disagrees with the slider plane for some piece, it falls back to
-  // the display-mesh clip instead of failing the whole Cut.
-  if (model.rawTris && model.rawAxis === 'zup' && model.centerOffset) {
-    try {
-      const mapL = mapPlaneToRaw(model, axis, leftPlane, true);
-      const mapR = mapPlaneToRaw(model, axis, rightPlane, false);
-      if (!mapL || !mapR) throw new Error('no raw mapping');
-      const rawL = rawCut(model.rawTris, mapL.axisIdx, mapL.plane, mapL.keepMin);
-      const rawR = rawCut(model.rawTris, mapR.axisIdx, mapR.plane, mapR.keepMin);
-      if (!rawL || !rawR) throw new Error('rawCut empty side');
-      return {
-        left: rawResultToDisplayGeometry(rawL, model.centerOffset),
-        right: rawResultToDisplayGeometry(rawR, model.centerOffset),
-        engine: 'raw',
-        rawA: rawL,
-        centerOffsetA: computeCenterOffsetFromRaw(rawL),
-        rawB: rawR,
-        centerOffsetB: computeCenterOffsetFromRaw(rawR)
-      };
-    } catch (err) {
-      console.warn('[rawCut] fallback to display clip:', err.message);
-    }
-  }
-  return {
-    left: clipGeometrySide(model.geometry, axis, leftPlane, true),
-    right: clipGeometrySide(model.geometry, axis, rightPlane, false),
-    engine: 'display'
-  };
-}
+// splitBothSides lives in app-cut.js: one engine (rawCut) for every Cut.
 
 function cutActiveModel() {
   try {
@@ -3129,8 +3093,8 @@ function cutActiveModel() {
   const plateAxis = info.plateAxis || axis;
   const span = info.span;
   const plane = info.plane;
-  // Distance from min end - must match readout
-  const cutMm = (plane - info.origin);
+  // Distance from min end - the readout's own number
+  const cutMm = info.mm != null ? info.mm : (plane - info.origin);
   if (span < MIN_CUT_SIDE_MM * 2) {
     setStatus('Piece too short to cut (need >= ' + (MIN_CUT_SIDE_MM * 2) + ' mm along cut axis)', true);
     return;
@@ -3143,7 +3107,16 @@ function cutActiveModel() {
   const halfKerf = KERF_MM * 0.5;
   const leftPlane = plane - halfKerf;
   const rightPlane = plane + halfKerf;
-  const pair = splitBothSides(m, axis, leftPlane, rightPlane);
+  let pair;
+  try {
+    pair = splitBothSides(m, axis, leftPlane, rightPlane);
+  } catch (err) {
+    if (err && err.name === 'CutRefused') {
+      setStatus('Cut not made: ' + err.message + '. The piece is unchanged - move the red plane and try again.', true);
+      return;
+    }
+    throw err;
+  }
   const left = pair.left;
   const right = pair.right;
   if (!left || !right) {
@@ -3911,12 +3884,8 @@ const btnFrameView = document.getElementById('btn-frame-view');
   });
   const slider = document.getElementById('cut-slider');
   if (slider) slider.addEventListener('input', () => {
-    const m = getActiveModel();
-    const span = m ? getCutSpan(m) : 100;
-    const raw = Math.min(0.98, Math.max(0.02, Number(slider.value) / 100));
-    state.cutT = snapCutT(raw, span);
-    syncCutUI();
-    updateCutHelper();
+    // The slider runs in mm from the low end (syncCutUI sets its range).
+    setCutMm(Number(slider.value));
   });
   const cutMm = document.getElementById('cut-mm');
   if (cutMm) cutMm.addEventListener('change', () => setCutMm(Number(cutMm.value)));
