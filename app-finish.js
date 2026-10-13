@@ -5052,9 +5052,12 @@ function capSelectedOpenFaces() {
     setStatus('No open face to cap');
     return;
   }
+  // `modelId`, the key undoLast() reads. This was `id`, so Undo after Cap
+  // open faces found no piece ("Undo: piece no longer exists"), consumed the
+  // entry and left the cap on.
   pushUndo({
     type: 'softenReplace',
-    id: m.id,
+    modelId: m.id,
     prevGeometry: prevGeo,
     prevRawTris: prevRaw,
     prevRawAxis: prevAxis,
