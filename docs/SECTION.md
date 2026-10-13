@@ -10,11 +10,12 @@ in as one Offset.
 node tools/nso_section_test.js             headless: every fixture, its truth, three quarter turns
 node tools/nso_box_scale_test.js           headless: the generated tray and bar, L / W / H and Offset
 node tools/nso_scale_card_drive_check.js   the real app: tube, tape, the tray, box, sphere; refresh; 900 px
+node tools/nso_scale_inches_drive_check.js the real app: the mm | in toggle on a box, a tube and a rod; reload
 node tools/nso_wire_scale_test.js          Whole x, Longest, Undo, refusals, paint
 node tools/nso_wire_offset_test.js         Offset: reachability, Undo, refusals, paint, Thicken unchanged
 ```
 
-All of them are in `npm test` (`section:test`, `box:test`, `scale:card`,
+All of them are in `npm test` (`section:test`, `box:test`, `scale:card`, `scale:inches`,
 `wire:scale`, `wire:offset`). The drive checks take `--shots DIR` for
 screenshots; DIR is a scratch directory - no screenshot is committed.
 
@@ -240,3 +241,29 @@ Shrink row is gone; the card shows no Offset on a ring, because Outer Ø and
 Length do that job; and the Offset itself, at −0.1 and −0.5 mm on the same
 ring, reads `Ring Ø19.8 / Ø17.8, wall 1.0, length 7.8` and `Ring Ø19.0 /
 Ø17.0, wall 1.0, length 7.0` (`ring:drive` §2).
+
+## Units on the card — mm | in
+
+The toggle at the top of the card picks what the card shows and what is typed
+into it. Display and entry only: `nso_section.js`, `nso_ring.js`,
+`app-extend.js` and every other engine stay in millimetres, and the card
+converts at its edge (`app-scale.js`, section 1c). Typing 1 with inches shown
+hands the engine exactly 25.4 mm; switching the toggle moves no vertex and
+pushes no Undo step. The choice is kept in `localStorage` (`nso.scale.unit`);
+with storage unavailable the card comes up in mm.
+
+With inches shown: the readout, every length box and its unit label,
+aria-label, min, max and step (the 0.1 mm step becomes 0.005 in, and each
+limit moves inward onto that grid: min 0.1 mm becomes 0.005 in, ±20 mm
+±0.785 in, so a box's arrows land on whole steps), the
+buttons' titles, and every message a Scale verb says. Inches show to 3 places;
+a number the person typed is echoed as typed. Whole × is a factor and does not
+change. The Cut, Move and Finish menus, the plate and the rest of the app stay
+in mm.
+
+Engine refusals arrive as finished mm sentences, so `NSO_scaleText` rewrites
+their figures: a number or a run of them (`×`, `→`, `of`, `/`) ending in `mm`,
+a bare `Ø` figure, and "number of / in / many mm". The card's own lines are
+composed figure by figure (`NSO_scaleLen`). `NSO_sectionReadout` and
+`NSO_ringDescribe` take an optional formatter for this; without one they say
+what they always have.

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=box2" />
+  <link rel="stylesheet" href="styles.css?v=inch1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -400,6 +400,12 @@
           <details class="vp-menu vp-top-menu vp-bar-row2-start" id="menu-scale">
             <summary class="vp-bar-btn" title="Read the piece's shape and size, then lengthen, shorten or scale it">Scale</summary>
             <div class="vp-menu-body vp-top-body" id="scale-card">
+              <!-- mm | in: what this card shows and what is typed into it.
+                   Display only - the engines stay in mm (app-scale.js, 1c). -->
+              <div class="scale-unit" role="group" aria-label="Units shown on the Scale card">
+              <button id="btn-scale-unit-mm" class="scale-unit-btn" type="button" aria-pressed="true" title="Show and type millimetres">mm</button>
+              <button id="btn-scale-unit-in" class="scale-unit-btn" type="button" aria-pressed="false" title="Show and type inches - converted to millimetres at the card's edge">in</button>
+              </div>
               <p id="scale-readout" class="hint">Select a piece to resize.</p>
               <div id="scale-rows">
               <div class="edit-row scale-row" id="scale-length-row" hidden>
@@ -1159,11 +1165,11 @@
   <script src="app-fatten.js?v=box2"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
-  <script src="nso_section.js?v=box2"></script>
+  <script src="nso_section.js?v=inch1"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
-  <script src="nso_ring.js?v=ring1"></script>
-  <script src="app-scale.js?v=box2"></script>
+  <script src="nso_ring.js?v=inch1"></script>
+  <script src="app-scale.js?v=inch1"></script>
   <script src="app-brush.js?v=hollow2"></script>
   <script src="app-wheel.js?v=wheel3"></script>
   <script src="app-fit.js?v=wheel4"></script>
