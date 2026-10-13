@@ -21,6 +21,12 @@
      e  Fit to plate's message and the build-volume verdict in inches
      f  the choice survives a reload; with localStorage unavailable the card
         comes up in mm and the toggle still works
+   and the three Scale polish items, with inches shown:
+     -  the upright tube's axis row is Height, and Height pressed in inches
+        lands on the engine's soup for value x 25.4
+     -  the Offset row's sentence reads its lid strap in inches
+     -  Longest on a bar turned 90° about Z and tipped, baked into its
+        geometry, says the long edge before, in inches
 
    Every number is printed; the PR quotes them. */
 
@@ -87,6 +93,7 @@ const card = async page => {
       Array.from(c.querySelectorAll('[title]')).map(e => e.title)).join(' | ');
     return {
       readout: document.getElementById('scale-readout').textContent,
+      note: document.getElementById('scale-offset-note').textContent,
       shown, val, unit, aria, lim, titles, said, pressed: pressed.join(),
       rows: rows.filter(r => shown[r]).join(','),
       size: m ? { x: m.size.x, y: m.size.y, z: m.size.z } : null,
@@ -184,10 +191,18 @@ async function unitsHold(page, label, expect) {
   const lengths = ROWS.filter(r => r !== 'factor');
   check('(a) ' + label + ': every box\'s aria-label says inches, none says mm',
     lengths.every(r => /\binches\b/.test(c.aria[r]) && !/\bmm\b/.test(c.aria[r])), JSON.stringify(c.aria));
-  check('(a) ' + label + ': unit labels "in" and "in, wall kept"; the holds without a unit unchanged',
+  // A ring's or rod's axis goes by its row's name: stood up, "height kept"
+  // and "the height is held" - in either unit.
+  const held = expect.axisWord || 'length';
+  check('(a) ' + label + ': unit labels "in" and "in, wall kept"; the holds without a unit unchanged but for the axis word (' + held + ')',
     ['length', 'width', 'height', 'longest'].every(r => c.unit[r] === 'in') && c.unit.offset === 'in, wall kept' &&
-    c.unit['ring-outer'] === 'wall kept' && c.unit['ring-wall'] === 'outer kept' && c.unit['rod-diameter'] === 'length kept',
+    c.unit['ring-outer'] === 'wall kept' && c.unit['ring-wall'] === 'outer kept' && c.unit['rod-diameter'] === held + ' kept' &&
+    mm.unit['rod-diameter'] === held + ' kept',
     JSON.stringify(c.unit));
+  const heldTitles = t => t.filter(x => /\b(length|height|width) is held\b/.test(x));
+  check('(a) ' + label + ': Outer Ø and Diameter say "the ' + held + ' is held", in mm and in inches',
+    heldTitles(c.titles).length === 2 && heldTitles(c.titles).every(x => x.indexOf('the ' + held + ' is held') >= 0) &&
+    heldTitles(mm.titles).every(x => x.indexOf('the ' + held + ' is held') >= 0), heldTitles(c.titles).join(' | '));
   check('(a) ' + label + ': step 0.1 mm -> 0.005 in; limits converted onto that grid',
     ['length', 'width', 'height', 'ring-outer', 'ring-wall', 'rod-diameter'].every(r => c.lim[r] === '0.005 / 78.74 / 0.005') &&
     c.lim.offset === '-0.785 / 0.785 / 0.005' && c.lim.longest === '0.005 / 39.37 / 0.005', JSON.stringify(c.lim));
@@ -226,6 +241,12 @@ withApp(async (page, logs) => {
     val: { length: inch(b.L), width: inch(b.W), height: inch(b.H), offset: '' }
   });
   await shot(page, '01-box-inches');
+  // The Offset row's sentence, figure by figure in the unit shown.
+  const bin = await card(page);
+  console.log('   Offset sentence: "' + bmm.note + '" / "' + bin.note + '"');
+  check('(a) box: the Offset sentence in mm, then in inches - 0.6 mm -> 0.024 in',
+    bmm.note === 'Thin features keep their thickness: a 0.6 mm lid strap stays 0.6 mm.' &&
+    bin.note === 'Thin features keep their thickness: a 0.024 in lid strap stays 0.024 in.', bin.note);
   // A number typed and not yet applied is converted with the card, not lost,
   // and comes back as typed.
   await setFields(page, { 'scale-length': '1.5' });
@@ -292,16 +313,25 @@ withApp(async (page, logs) => {
   await makeStock(page, 'tube');
   const t = await reading();
   await unitsHold(page, 'tube', {
-    readout: 'Ring Ø' + inch(t.outer) + ' outer · Ø' + inch(t.bore) + ' bore · wall ' + inch(t.wallMm) + ' · length ' + inch(t.lengthMm) + ' · fits A1 Mini',
-    val: { length: inch(t.lengthMm), 'ring-outer': inch(t.outer), 'ring-wall': inch(t.wallMm) }
+    readout: 'Ring Ø' + inch(t.outer) + ' outer · Ø' + inch(t.bore) + ' bore · wall ' + inch(t.wallMm) + ' · height ' + inch(t.lengthMm) + ' · fits A1 Mini',
+    val: { height: inch(t.lengthMm), 'ring-outer': inch(t.outer), 'ring-wall': inch(t.wallMm) }, axisWord: 'height'
   });
   await shot(page, '02-tube-inches');
+  // Stood up, the ring's axis is its own Z: the Height row, in inches.
+  await keepSoup(page);
+  st = await setAndPress(page, 'scale-height', 'btn-scale-height', '1.25', 'Height (done|refused)|stood down');
+  console.log('   Height 1.25 in: ' + st);
+  eq = await sameAsEngine(page, 'NSO_extendRaw(soup, { axis: ' + t.axisH + ', length: 1.25 * 25.4 })');
+  check('(b) tube Height 1.25 in = NSO_extendRaw(Z, 31.75 mm), float for float', t.axisH === 2 && eq.ok, eq.why || eq.floats + ' floats');
+  check('(b) ...and says so in inches: Z ' + inch(t.lengthMm) + ' → 1.250 in', st.indexOf('Height done - Z ' + inch(t.lengthMm) + ' → 1.250 in') === 0 &&
+    !/\bmm\b/.test(st), st);
+  await undo(page);
   await keepSoup(page);
   st = await setAndPress(page, 'scale-ring-outer', 'btn-scale-ring-outer', '2', 'Outer Ø (done|refused)|stood down');
   console.log('   Outer Ø 2 in: ' + st);
   eq = await sameAsEngine(page, 'NSO_ringApplyRaw(soup, "outer", 2 * 25.4)');
   check('(b) tube Outer Ø 2 in = NSO_ringApplyRaw(outer, 50.8 mm), float for float', eq.ok, eq.why || eq.floats + ' floats');
-  check('(b) ...and says so in inches', /→ Ø2\.000 in \/ Ø[\d.]+ in wall [\d.]+ in, wall kept, length held$/.test(st) && !/\bmm\b/.test(st), st);
+  check('(b) ...and says so in inches', /→ Ø2\.000 in \/ Ø[\d.]+ in wall [\d.]+ in, wall kept, height held$/.test(st) && !/\bmm\b/.test(st), st);
   await undo(page);
   await keepSoup(page);
   st = await setAndPress(page, 'scale-ring-wall', 'btn-scale-ring-wall', '0.01', 'Wall (done|refused)|stood down');
@@ -316,8 +346,8 @@ withApp(async (page, logs) => {
   await makeStock(page, 'cylinder');
   const r = await reading();
   await unitsHold(page, 'rod', {
-    readout: 'Rod Ø' + inch(r.outer) + ' · length ' + inch(r.lengthMm) + ' · fits A1 Mini',
-    val: { length: inch(r.lengthMm), 'rod-diameter': inch(r.outer) }
+    readout: 'Rod Ø' + inch(r.outer) + ' · height ' + inch(r.lengthMm) + ' · fits A1 Mini',
+    val: { height: inch(r.lengthMm), 'rod-diameter': inch(r.outer) }, axisWord: 'height'
   });
   await shot(page, '03-rod-inches');
   await keepSoup(page);
@@ -325,13 +355,13 @@ withApp(async (page, logs) => {
   console.log('   Diameter 1.1 in: ' + st);
   eq = await sameAsEngine(page, 'NSO_ringApplyRaw(soup, "diameter", 1.1 * 25.4)');
   check('(b) rod Diameter 1.1 in = NSO_ringApplyRaw(diameter, 27.94 mm), float for float', eq.ok, eq.why || eq.floats + ' floats');
-  check('(b) ...and says so in inches', /^Diameter done - Diameter Ø[\d.]+ in → Ø1\.100 in, length held$/.test(st), st);
+  check('(b) ...and says so in inches', /^Diameter done - Diameter Ø[\d.]+ in → Ø1\.100 in, height held$/.test(st), st);
   await undo(page);
   await keepSoup(page);
-  st = await setAndPress(page, 'scale-length', 'btn-scale-length', '2', 'Length (done|refused)|stood down');
-  eq = await sameAsEngine(page, 'NSO_extendRaw(soup, { axis: ' + r.axisL + ', length: 2 * 25.4 })');
-  console.log('   Length 2 in: ' + st);
-  check('(b) rod Length 2 in = NSO_extendRaw(length 50.8 mm), float for float', eq.ok, eq.why || eq.floats + ' floats');
+  st = await setAndPress(page, 'scale-height', 'btn-scale-height', '2', 'Height (done|refused)|stood down');
+  eq = await sameAsEngine(page, 'NSO_extendRaw(soup, { axis: ' + r.axisH + ', length: 2 * 25.4 })');
+  console.log('   Height 2 in: ' + st);
+  check('(b) rod stood up: Height 2 in = NSO_extendRaw(Z, 50.8 mm), float for float', r.axisH === 2 && eq.ok, eq.why || eq.floats + ' floats');
   await undo(page);
   await keepSoup(page);
   st = await setAndPress(page, 'scale-rod-diameter', 'btn-scale-rod-diameter', '-0.5', 'Diameter (done|refused)|stood down');
@@ -361,6 +391,30 @@ withApp(async (page, logs) => {
   console.log('   again:   ' + st);
   check('...and "already fits" in inches, the bed too', /already fits A1 Mini \(7\.087 in wide, [\d.]+ in deep, [\d.]+ in tall in 7\.087 × 7\.087 × 7\.087 in\) - nothing changed$/.test(st), st);
 
+  console.log('\n=== Longest on a bar turned 90° about Z and tipped, in inches ===');
+  // Posed with the buttons, then baked by Join's own NSO_rotateRawSoupByPlacedPose
+  // (what an exporter writes): the long edge is the bar's own Z, its X 20 mm.
+  await select(page, await loadSTL(page, (() => { const f = path.join(tmp, 'bar_120x20x10.stl'); writeSTL(f, BOX.bar(120, 20, 10), 'bar'); return f; })()));
+  await page.evaluate(() => { rotateSelected(1); tipSelected(); });
+  const turned = await page.evaluate(() => Array.from(NSO_rotateRawSoupByPlacedPose(getActiveModel().rawTris, state.placed[state.selectedIndex])));
+  const turnedFile = path.join(tmp, 'bar_turned.stl');
+  writeSTL(turnedFile, new Float32Array(turned), 'bar 120 x 20 x 10, turned 90 about Z and tipped, baked');
+  await select(page, await loadSTL(page, turnedFile));
+  c = await card(page);
+  console.log('   readout: ' + c.readout + '   Longest box ' + c.val.longest);
+  check('the Longest box reads the long edge, 120 mm -> 4.724 in', c.val.longest === '4.724', c.val.longest);
+  await keepSoup(page);
+  await page.evaluate(() => { document.getElementById('scale-target').value = '6'; document.getElementById('status').textContent = '';
+    document.getElementById('btn-scale-dim').click(); });
+  await page.waitForFunction(() => /Scale (done|refused)|stood down/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
+  st = await statusOf(page);
+  console.log('   Longest 6 in: ' + st);
+  eq = await sameAsEngine(page, 'NSO_scaleSoup(soup, { axis: "longest", targetMm: 6 * 25.4 })');
+  check('Longest 6 in = NSO_scaleSoup(longest 152.4 mm), float for float', eq.ok, eq.why || eq.floats + ' floats');
+  check('...says longest edge 4.724 → 6.000 in - the 120 mm edge, not its X (0.787 in)',
+    /^Scale done - longest edge 4\.724 → 6\.000 in \(asked 6\.000 in, off by [-\d.e+]+ in\), factor 1\.270000,/.test(st) && !/\bmm\b/.test(st), st);
+  await undo(page);
+
   console.log('\n=== f. The choice survives a reload ===');
   await page.reload({ waitUntil: 'load' });
   await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true, null, { timeout: 30000 });
@@ -368,7 +422,7 @@ withApp(async (page, logs) => {
   c = await card(page);
   console.log('   after reload: ' + c.pressed + ' · ' + c.readout + '   ' + JSON.stringify(c.val));
   check('(e) inches chosen, page reloaded: the card comes up in inches, labels and limits too',
-    c.pressed === 'in' && c.readout === 'Rod Ø' + inch(r.outer) + ' · length ' + inch(r.lengthMm) + ' · fits A1 Mini' &&
+    c.pressed === 'in' && c.readout === 'Rod Ø' + inch(r.outer) + ' · height ' + inch(r.lengthMm) + ' · fits A1 Mini' &&
     c.unit.length === 'in' && c.lim.length === '0.005 / 78.74 / 0.005' && /inches/.test(c.aria.length), JSON.stringify({ unit: c.unit.length, lim: c.lim.length }));
   await unit(page, 'mm');
   await page.reload({ waitUntil: 'load' });

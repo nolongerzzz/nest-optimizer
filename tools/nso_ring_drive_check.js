@@ -11,13 +11,13 @@
 
    Steps, in the ticket's order:
 
-     1  MINI_TPU_TEST from the Library    -> Ring Ø20.0 / Ø18.0, wall 1.0, length 8.0
+     1  MINI_TPU_TEST from the Library    -> Ring Ø20.0 / Ø18.0, wall 1.0, height 8.0
      2  Fatten's Shrink is gone from the Finish menu, and the card shows no
         Offset on a ring (Outer Ø and Length already do its job); the offset
         that replaced it, run at -0.1 and -0.5 mm, leaves a RING with its
         wall - part 2's Shrink un-rang it at both. Then the same intent
         through the ring verbs, Outer Ø 20 -> 19.8 and Wall 1 -> 0.9
-     3  Outer Ø -> 24  -> Ø24.0 / Ø22.0, wall 1.0, length 8.0; Undo returns it
+     3  Outer Ø -> 24  -> Ø24.0 / Ø22.0, wall 1.0, height 8.0; Undo returns it
      5  Wall -> 2      -> Ø20.0 / Ø16.0, wall 2.0 (part 2's Bore Ø -> 16; the
                           Bore row is gone, Wall reaches the same bore)
      6  Wall -> 0.4    -> refused, worded, piece unchanged (and Wall -> 0.5,
@@ -67,9 +67,12 @@ async function card(page) {
     return {
       readout: document.getElementById('scale-readout').textContent,
       ring: shown('scale-ring-outer-row') && shown('scale-ring-wall-row'), rod: shown('scale-rod-diameter-row'),
-      bore: !!document.getElementById('scale-ring-bore'), offset: shown('scale-offset-row'), lengthRow: shown('scale-length-row'),
-      fields: { outer: val('scale-ring-outer'), wall: val('scale-ring-wall'), diameter: val('scale-rod-diameter'), length: val('scale-length') },
+      bore: !!document.getElementById('scale-ring-bore'), offset: shown('scale-offset-row'),
+      axisRows: ['length', 'width', 'height'].filter(r => shown('scale-' + r + '-row')),
+      fields: { outer: val('scale-ring-outer'), wall: val('scale-ring-wall'), diameter: val('scale-rod-diameter'), height: val('scale-height') },
       holds: ['scale-ring-outer-row', 'scale-ring-wall-row'].map(id => document.querySelector('#' + id + ' .hint').textContent),
+      rodHold: document.querySelector('#scale-rod-diameter-row .hint').textContent,
+      rodTitle: document.getElementById('btn-scale-rod-diameter').title,
       outer: s && s.outer ? s.outer.diameterMm : null, boreMm: s && s.bore ? s.bore.diameterMm : null,
       wall: s ? s.wallMm : null, length: s ? s.lengthMm : null,
       soup: Array.from(m.rawTris).join(','), undo: state.undoStack.length
@@ -106,7 +109,7 @@ async function undo(page) {
 withApp(async (page, logs) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   const f3 = x => (+x).toFixed(3);
-  const line = c => 'Ø' + f3(c.outer) + ' / Ø' + f3(c.boreMm) + ', wall ' + f3(c.wall) + ', length ' + f3(c.length);
+  const line = c => 'Ø' + f3(c.outer) + ' / Ø' + f3(c.boreMm) + ', wall ' + f3(c.wall) + ', height ' + f3(c.length);
 
   console.log('\n=== 1. MINI_TPU_TEST from the Library ===');
   const n0 = await page.evaluate(() => state.models.length);
@@ -127,12 +130,15 @@ withApp(async (page, logs) => {
   console.log('   readout: ' + c0.readout);
   console.log('   reader:  ' + line(c0));
   check('the readout reads Ring with the published numbers',
-    c0.readout === 'Ring Ø20.0 outer · Ø18.0 bore · wall 1.0 · length 8.0 · fits A1 Mini', c0.readout);
-  check('Length, Outer Ø and Wall shown; no Bore Ø, no Diameter, no Offset', c0.lengthRow && c0.ring && !c0.bore && !c0.rod && !c0.offset,
-    JSON.stringify({ length: c0.lengthRow, ring: c0.ring, bore: c0.bore, rod: c0.rod, offset: c0.offset }));
+    c0.readout === 'Ring Ø20.0 outer · Ø18.0 bore · wall 1.0 · height 8.0 · fits A1 Mini', c0.readout);
+  // It lies flat, its axis its own Z, so its one axis row is Height (one
+  // L / W / H vocabulary, as a box's).
+  check('Height, Outer Ø and Wall shown; no Length / Width, no Bore Ø, no Diameter, no Offset',
+    c0.axisRows.join() === 'height' && c0.ring && !c0.bore && !c0.rod && !c0.offset,
+    JSON.stringify({ axisRows: c0.axisRows, ring: c0.ring, bore: c0.bore, rod: c0.rod, offset: c0.offset }));
   check('each states its hold: wall kept, outer kept', JSON.stringify(c0.holds) === '["wall kept","outer kept"]', c0.holds.join(' | '));
-  check('prefilled at the readout\'s own precision: 20.0, 1.0, length 8.0',
-    c0.fields.outer === '20.0' && c0.fields.wall === '1.0' && c0.fields.length === '8.0', JSON.stringify(c0.fields));
+  check('prefilled at the readout\'s own precision: 20.0, 1.0, Height 8.0',
+    c0.fields.outer === '20.0' && c0.fields.wall === '1.0' && c0.fields.height === '8.0', JSON.stringify(c0.fields));
   await shot(page, '01-mini-tpu-ring-read');
   const orig = c0;
 
@@ -160,7 +166,7 @@ withApp(async (page, logs) => {
   const v1 = await ringSet(page, 'scale-ring-outer', 19.8);
   const c1 = await card(page);
   console.log('   Outer Ø 20 -> 19.8: "' + v1 + '"\n     reads ' + line(c1));
-  check('Outer Ø -> 19.8 applies: outer 19.800, wall kept', /^Outer Ø done/.test(v1) && Math.abs(c1.outer - 19.8) < 1e-6 &&
+  check('Outer Ø -> 19.8 applies: outer 19.800, wall kept; its line says "height held"', /^Outer Ø done - .*, wall kept, height held$/.test(v1) && Math.abs(c1.outer - 19.8) < 1e-6 &&
     Math.abs(c1.wall - orig.wall) < 2e-6 && c1.length === 8, line(c1));
   await undo(page);
   check('  ...Undo returns it', (await card(page)).soup === orig.soup);
@@ -176,8 +182,8 @@ withApp(async (page, logs) => {
   const s3 = await ringSet(page, 'scale-ring-outer', 24);
   const c3 = await card(page);
   console.log('   status:  ' + s3 + '\n   readout: ' + c3.readout + '\n   reader:  ' + line(c3));
-  check('readout: Ø24.0 outer · Ø22.0 bore · wall 1.0 · length 8.0',
-    c3.readout === 'Ring Ø24.0 outer · Ø22.0 bore · wall 1.0 · length 8.0 · fits A1 Mini', c3.readout);
+  check('readout: Ø24.0 outer · Ø22.0 bore · wall 1.0 · height 8.0',
+    c3.readout === 'Ring Ø24.0 outer · Ø22.0 bore · wall 1.0 · height 8.0 · fits A1 Mini', c3.readout);
   check('one Undo step', c3.undo === orig.undo + 1, orig.undo + ' -> ' + c3.undo);
   check('the fields re-prefilled from the new reading', c3.fields.outer === '24.0' && c3.fields.wall === '1.0', JSON.stringify(c3.fields));
   await shot(page, '02-outer-24');
@@ -214,7 +220,7 @@ withApp(async (page, logs) => {
   const c5 = await card(page);
   console.log('   status:  ' + s5 + '\n   readout: ' + c5.readout);
   check('readout: Ø20.0 · Ø16.0 · wall 2.0 - part 2\'s Bore Ø -> 16, reached through Wall',
-    c5.readout === 'Ring Ø20.0 outer · Ø16.0 bore · wall 2.0 · length 8.0 · fits A1 Mini' && c5.outer === orig.outer, c5.readout);
+    c5.readout === 'Ring Ø20.0 outer · Ø16.0 bore · wall 2.0 · height 8.0 · fits A1 Mini' && c5.outer === orig.outer, c5.readout);
   await shot(page, '04-wall-2');
   await undo(page);
 
@@ -245,13 +251,16 @@ withApp(async (page, logs) => {
   await select(page, cylId);
   const c7 = await card(page);
   console.log('   readout: ' + c7.readout);
-  check('reads Rod', /^Rod Ø\d+\.\d\d? · length \d+\.\d\d? · fits A1 Mini$/.test(c7.readout), c7.readout);
+  // stood up, axis Z: its axis goes by Height, in the readout, the row, the hold and the done line
+  check('reads Rod, its axis as height', /^Rod Ø\d+\.\d\d? · height \d+\.\d\d? · fits A1 Mini$/.test(c7.readout), c7.readout);
   check('Diameter shown, no Outer / Wall fields', c7.rod && !c7.ring);
+  check('...with the Height row (no Length), and Diameter\'s hold says "height kept"',
+    c7.axisRows.join() === 'height' && c7.rodHold === 'height kept' && /the height is held/.test(c7.rodTitle), JSON.stringify([c7.axisRows, c7.rodHold, c7.rodTitle]));
   const s7 = await ringSet(page, 'scale-rod-diameter', 30);
   const c7b = await card(page);
   console.log('   status:  ' + s7 + '\n   readout: ' + c7b.readout);
-  check('Diameter -> 30 works', /^Diameter done/.test(s7) && Math.abs(c7b.outer - 30) < 1e-6 && c7b.length === c7.length,
-    'Ø' + f3(c7b.outer) + ', length ' + f3(c7.length) + ' -> ' + f3(c7b.length));
+  check('Diameter -> 30 works, and says "height held"', /^Diameter done - .*, height held$/.test(s7) && Math.abs(c7b.outer - 30) < 1e-6 && c7b.length === c7.length,
+    'Ø' + f3(c7b.outer) + ', height ' + f3(c7.length) + ' -> ' + f3(c7b.length));
   await shot(page, '06-rod-diameter-30');
 
   console.log('\n=== nothing else broke ===');

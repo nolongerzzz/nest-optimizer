@@ -320,8 +320,10 @@ function NSO_ringApplyRaw(soup, verb, value, opts) {
    app-scale.js); it defaults to the bare millimetres this has always shown. */
 function NSO_ringDescribe(r, fmt) {
   var a = r.before, b = r.after, f = fmt || function (x) { return (+x).toFixed(3); };
-  if (!a.hollow) return 'Diameter Ø' + f(a.outer.diameterMm) + ' → Ø' + f(b.outer.diameterMm) + ', length held';
+  // what is held is the axis, by the name its row has ("height held" stood up)
+  var held = ', ' + NSO_sectionAxisWord(a, a.axisIdx) + ' held';
+  if (!a.hollow) return 'Diameter Ø' + f(a.outer.diameterMm) + ' → Ø' + f(b.outer.diameterMm) + held;
   return 'Ø' + f(a.outer.diameterMm) + ' / Ø' + f(a.bore.diameterMm) + ' wall ' + f(a.wallMm) + ' → Ø' +
     f(b.outer.diameterMm) + ' / Ø' + f(b.bore.diameterMm) + ' wall ' + f(b.wallMm) +
-    (r.verb === 'outer' ? ', wall kept' : ', outer kept') + ', length held';
+    (r.verb === 'outer' ? ', wall kept' : ', outer kept') + held;
 }

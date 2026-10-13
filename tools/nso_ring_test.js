@@ -167,8 +167,8 @@ else {
   console.log('     vertex radii: outer ' + f6(Math.min(...outerV)) + ' - ' + f6(Math.max(...outerV)) + ' (mean ' + f6(mean(outerV)) +
     '), bore ' + f6(Math.min(...boreV)) + ' - ' + f6(Math.max(...boreV)) + ' (mean ' + f6(mean(boreV)) + ')');
   check('reads Ring', tpu0.shape === 'round' && tpu0.hollow, NSO_sectionReadout(tpu0));
-  check('readout is "Ring Ø20.0 outer · Ø18.0 bore · wall 1.0 · length 8.0"',
-    NSO_sectionReadout(tpu0) === 'Ring Ø20.0 outer · Ø18.0 bore · wall 1.0 · length 8.0', NSO_sectionReadout(tpu0));
+  check('readout is "Ring Ø20.0 outer · Ø18.0 bore · wall 1.0 · height 8.0" (it lies flat, axis Z)',
+    NSO_sectionReadout(tpu0) === 'Ring Ø20.0 outer · Ø18.0 bore · wall 1.0 · height 8.0', NSO_sectionReadout(tpu0));
   check('outer Ø20.000 (within 0.001)', near(tpu0.outer.diameterMm, 20, 1e-3), f6(tpu0.outer.diameterMm));
   check('bore Ø18.000 within 0.01 - its vertices sit at Ø18.004 - 18.006', near(tpu0.bore.diameterMm, 18, 0.01), f6(tpu0.bore.diameterMm));
   check('wall 1.000 within 0.01', near(tpu0.wallMm, 1, 0.01), f6(tpu0.wallMm));
