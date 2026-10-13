@@ -302,8 +302,15 @@ console.log('\n== 6. refusals in words: an open cup, a solid piece ==');
   check('box-20mm.stl: no enclosed hollow either', S2.kind === 'none', S2.reason);
   const thick = new Float32Array(FX.boxTris([-20, -20, -20], [20, 20, 20], false).concat(FX.boxTris([-5, -5, -5], [5, 5, 5], true)));
   const T = analyse(thick);
-  check('a sealed hollow with every wall over the 5 mm probe: Fill cannot confirm it, and Foam says so - not "open"',
-        !T.ok && T.kind === 'unconfirmed' && /could not confirm/.test(T.reason) && !HOLLOW.fill(thick, {}).ok, T.reason);
+  check('a sealed hollow with every wall over 5 mm (15 mm here) is found - by Fill and by Foam alike',
+        T.ok && T.kind === 'cavities' && T.cavities.length === 1 && T.cavities[0].volume === 1000 &&
+        HOLLOW.fill(thick, {}).ok, T.reason);
+  // A shell wound inward that is NOT in material - a separate body saved
+  // inside out, beside the piece - is still what 'unconfirmed' is for.
+  const inside_out = new Float32Array(FX.boxTris([-10, -10, -10], [10, 10, 10], false).concat(FX.boxTris([20, -5, -5], [30, 5, 5], true)));
+  const U = analyse(inside_out);
+  check('an inside-out body beside the piece: Fill cannot confirm it, and Foam says so - not "open"',
+        !U.ok && U.kind === 'unconfirmed' && /could not confirm/.test(U.reason) && !HOLLOW.fill(inside_out, {}).ok, U.reason);
   const r = set(solid.soup, S, 0, 5);
   check('asked to foam anyway: refused, the piece handed back', !r.ok && r.soup === solid.soup, r.reason);
 }

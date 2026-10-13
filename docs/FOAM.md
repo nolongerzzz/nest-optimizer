@@ -114,7 +114,7 @@ are reorganised it moves into the new button column; that is not built here.
 |---|---|
 | no hollow | "Foam: this piece has no enclosed hollow - it is solid all the way through, so there is nothing to fill. Nothing changed." |
 | open vessel (a cup, a vase, a pocket) | "Foam: this piece's hollow is open to the outside, like a cup or a vase. Foam fills a sealed hollow only - open vessels come later. Nothing changed." Found by a 16³ grid of points in the piece's box that are not in material and have the piece below them and on all four sides (rays along -up and ±e1, ±e2). Two such points call it open. A bracket's corner or a channel escapes sideways; an arch has nothing below it but the plate. |
-| a sealed hollow Fill cannot confirm | "Foam: this piece has 1 inner shell facing inward that Fill / Densify's test could not confirm as a sealed hollow - most often because every wall round it is thicker than the 5 mm the wall probe reaches. Foam finds hollows the way Fill does, so it leaves it alone. Nothing changed." See §7. Asked before the open-vessel probe, which would otherwise call it open. |
+| an inward shell Fill cannot confirm | "Foam: this piece has 1 inner shell facing inward that Fill / Densify's test could not confirm as a sealed hollow - it is not sitting inside material, which is what a separate body saved inside out looks like. Foam finds hollows the way Fill does, so it leaves it alone. Nothing changed." Asked before the open-vessel probe, which would otherwise call it open. Wall thickness no longer lands here (§7.1). |
 | non-solid flag | "Foam does not apply to "<name>" - it is flagged non-solid, so it has no closed inside for foam to fill. Nothing changed." |
 | a level through a captive solid | §2. |
 | a painted wall | §6. |
@@ -139,16 +139,18 @@ the skip list as a **required** input - `foam()` without one is refused - so
 
 ## 7. Limits, stated rather than implied
 
-1. **Thick-walled hollows are not found** - by Fill / Densify either. The
-   "sits in material" half of the cavity test steps off a face by a quarter of
-   its measured wall, and the wall is measured with nso_thickness.js's probe,
-   5 mm by default. A hollow every one of whose walls is thicker than that
-   reads as "mis-wound, not inside material" and is left alone: a Ø30 cylinder
-   round a Ø24 hollow is found, a 40 mm cube round a 10 mm hollow is not (Fill:
-   "nothing to fill"; Foam: the 'unconfirmed' words in §5 - gated). The
-   fixtures keep at least one wall under 5 mm. Fill is out of scope here, so
-   this is flagged, not changed; widening the probe in `cavityShells` would fix
-   both at once.
+1. **Thick-walled hollows are found** - fixed in `cavityShells`, so for Fill /
+   Densify too. The "sits in material" half of the cavity test steps off a
+   face by a quarter of its measured wall; that wall used to be measured with
+   nso_thickness.js's 5 mm default probe, and a hollow every one of whose
+   walls was thicker read as "mis-wound, not inside material" (a 40 mm cube
+   round a 10 mm hollow: Fill "nothing to fill", Foam 'unconfirmed'). The
+   probe now reaches the piece's box diagonal - behind a real cavity wall
+   there is always the outside of the piece - and a face whose probe still
+   finds nothing votes "not in material". A captive solid is still never a
+   cavity (it is wound outward), and one saved inside out is still not one
+   (the step off it lands in the void). Gated by
+   `tools/nso_cavity_thickwall_test.js` (`cavity:thickwall`).
 2. One hollow per Set, by design ("each foamed on its own").
 3. The preview recomputes the cut every frame the level moves. On the
    fixtures that is well under a millisecond; on a hollowed piece with ~12k
