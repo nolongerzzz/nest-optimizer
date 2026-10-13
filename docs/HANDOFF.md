@@ -583,7 +583,8 @@ Branch `claude/lift-flat`, off `claude-wip`. Full write-up: **`docs/LIFT.md`**.
 - **Paint scope:** whole-piece (roster row above, `nso_paint_scope_test.js`).
 - **Checks:** `lift:test` (771), `lift:drive` (58) in `npm test`; `lift:shots`
   keeps screenshots in `tools/lift-out/` (gitignored).
-- **Tags:** `app-core.js` land1 -> lift1, `app-relief.js` relief2 -> lift1,
+- **Tags:** `app-core.js` land1 -> lift1, then lift2 at the merge with the Cut PR (#149, which had
+  taken it to blade1), `app-relief.js` relief2 -> lift1,
   `nso_lift.js` and `app-gscope-lift.js` new at lift1. HUD untouched.
 
 ## Rotate - one ring size, a fixed pivot while turning (2026-10-12)
