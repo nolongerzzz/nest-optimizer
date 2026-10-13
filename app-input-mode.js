@@ -172,8 +172,9 @@
      Measure, Soften, Cap, Center lock - plus what that list never had to
      cover because none of them sits in Carve's way: Carve itself, Attach,
      Reattach, Tip on face, and a Join session. Then the menus: the Cut tool
-     (closeCutter, which also shuts its menu), every top-bar menu, Gen+'s
-     nested Wheel and Stock, the Finish overlay and the right-click menu. The
+     (closeCutter, which also shuts its menu), every top-bar menu, the eight
+     down the left column, Gen+'s nested Wheel and Stock, the Finish overlay
+     and the right-click menu. The
      Rotate / Tip / Move owners are torn down by sync(), the same teardowns
      that run when another menu takes the input.
 
@@ -287,6 +288,10 @@
       shut(gen.querySelector('.vp-stock-menu'), 'stock');
     }
     menus().forEach(function (d) { shut(d, d.id || 'menu'); });
+    /* The left column's menus (Join .. Pack) own no input, so they are not
+       in menus(), but they are panels on the plate all the same. */
+    Array.prototype.forEach.call(document.querySelectorAll('.vp-col-menu'),
+      function (d) { shut(d, d.id || 'menu'); });
     shut(document.querySelector('.vp-finish-menu'), 'finish');
     /* The teardowns land now, not a microtask later off the observer. */
     sync();

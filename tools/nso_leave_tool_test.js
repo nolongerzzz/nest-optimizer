@@ -10,7 +10,8 @@
    Soften, double-click; G-scope, Click to select region, double-click (back
    to orbit), double-click (G-scope closed). Then Carve armed and a
    double-click; then a double-click on Rotate's 90 button, which must stay
-   two clicks. Undo at the end.
+   two clicks. Undo at the end. Last, each of the left column's eight
+   menus (Join .. Pack) opened and shut by a double-click on the plate.
 
    Every step holds the same three things: what was live is gone, the pieces
    did not move, and the selection and the Undo stack are what they were. A
@@ -345,6 +346,31 @@ withApp(async (page, logs) => {
     await page.waitForTimeout(500);
     check('one more Undo takes back the Split',
       await page.evaluate(() => state.placed.length === 1), 'placed ' + await page.evaluate(() => state.placed.length));
+  }
+
+  /* ------------------------------------------------------------------ 9 */
+  console.log('\n=== 9. each of the left column\'s eight menus, double-click ===');
+  {
+    const COL = ['menu-join', 'menu-align', 'menu-seat', 'menu-abc', 'menu-bit', 'menu-plate',
+                 'menu-pieces', 'menu-pack'];
+    const ids = await page.evaluate(() => [...document.querySelectorAll('.vp-col-menu')].map(d => d.id));
+    check('the column holds the eight menus', JSON.stringify(ids) === JSON.stringify(COL), ids.join(', '));
+    for (const id of COL) {
+      await page.evaluate(() => document.querySelectorAll('.vp-menu').forEach(d => { d.open = false; }));
+      await page.click('#' + id + ' > summary');
+      await page.waitForTimeout(150);
+      const opened = await page.evaluate((i) => document.getElementById(i).open, id);
+      const before = await snap();
+      await dblPlate();
+      await shot(id + '-dblclick-closed');
+      const r = await page.evaluate((i) => ({
+        open: document.getElementById(i).open,
+        any: [...document.querySelectorAll('.vp-menu[open]')].map(d => d.id || d.className)
+      }), id);
+      check(id + ' open, then shut by the double-click', opened && !r.open && r.any.length === 0,
+        JSON.stringify({ opened, after: r }));
+      held(id, before, await snap());
+    }
   }
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));

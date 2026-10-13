@@ -3458,7 +3458,11 @@ function setStatus(msg, isError = false) {
   const el = document.getElementById('status');
   if (!el) return;
   el.textContent = msg;
-  el.className = 'status' + (isError ? ' error' : ' success');
+  /* Only the variant changes: the line's own classes (status-hud, the
+     viewport panel) stay, which a className write would wipe. */
+  el.classList.add('status');
+  el.classList.toggle('error', !!isError);
+  el.classList.toggle('success', !isError);
 }
 
 function updatePlateInfo() {
