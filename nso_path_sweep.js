@@ -1051,10 +1051,33 @@
     }
     if (cuts.length < 3) return null;
 
-    var nodes = [];
+    // Nodes are found through a grid whose cell is the largest weld distance
+    // any point here can have, so two points close enough to weld are in the
+    // same or neighbouring cells. Among those, the LOWEST-numbered node within
+    // its weld distance wins - exactly the node a scan of every node in order
+    // would return; the grid only skips the ones too far away to matter.
+    var cell = 0;
+    for (var cc = 0; cc < cuts.length; cc++) {
+      cell = Math.max(cell, weldUlps * ulpAt(cuts[cc][0]), weldUlps * ulpAt(cuts[cc][1]));
+    }
+    if (!(cell > 0)) cell = 1e-12;
+    var nodes = [], grid = new Map();
+    function cellKey(i, j, k) { return i + ',' + j + ',' + k; }
     function nodeFor(p) {
-      for (var i = 0; i < nodes.length; i++) if (near(nodes[i].p, p)) return i;
+      var ci = Math.floor(p[0] / cell), cj = Math.floor(p[1] / cell), ck = Math.floor(p[2] / cell), best = -1;
+      for (var di = -1; di <= 1; di++) for (var dj = -1; dj <= 1; dj++) for (var dk = -1; dk <= 1; dk++) {
+        var bucket = grid.get(cellKey(ci + di, cj + dj, ck + dk));
+        if (!bucket) continue;
+        for (var b = 0; b < bucket.length; b++) {
+          var i = bucket[b];
+          if ((best < 0 || i < best) && near(nodes[i].p, p)) best = i;
+        }
+      }
+      if (best >= 0) return best;
       nodes.push({ p: p, links: [] });
+      var key = cellKey(ci, cj, ck);
+      if (!grid.has(key)) grid.set(key, []);
+      grid.get(key).push(nodes.length - 1);
       return nodes.length - 1;
     }
     // Coincident duplicates are dropped, not treated as a second edge - see the
