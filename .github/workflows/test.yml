@@ -19,28 +19,31 @@
 # main. A branch may carry a newer copy, but main must always have one.
 #
 # WHAT IT RUNS
-# The suite, in six parallel shards, through tools/run-tests.mjs. The suite
+# The suite, in eight parallel shards, through tools/run-tests.mjs. The suite
 # list deliberately is NOT repeated here - package.json's "testSteps" is the
 # single definition, and a copy in this file would drift from it. Add a suite
 # there and CI picks it up with no change to this workflow: the runner packs it
 # into a shard on its own.
 #
-# WHY SIX, AND WHY A PACKED SPLIT
+# WHY EIGHT, AND WHY A PACKED SPLIT
 # Measured, not guessed - on these runners (package.json "testStepWeightsNote"
-# has the method). The 161 steps are ~3,900s of work on ubuntu-latest and the
-# shape is lopsided: gcode:gscope-normalcam alone is 260s, the ten slowest are
-# 38%, and dozens of steps take under a second. Slicing the list into six
+# has the method). The 199 steps are ~6,960s of work on ubuntu-latest and the
+# shape is lopsided: zoom:drive alone is ~290s, the ten slowest are
+# 31%, and dozens of steps take under a second. Slicing the list into eight
 # equal-LENGTH pieces would leave one runner holding the heavy steps, so the
 # slowest shard - the only number CI waits on - would hardly move. The runner
 # packs by measured cost instead (package.json "testStepWeights"), which lands
-# all six shards at 652s of tests (~11.5 min with setup).
+# all eight shards at 870s of tests (~15 min with setup).
 #
-# Six for now: four shards would be 978s each, eight 489s. Past eight the
-# longest single step (gcode:gscope-normalcam, 260s) starts to be the floor.
+# Eight since Tests #266, which ran six and had shards 5 and 6 cancelled at the
+# 25-min timeout with every step they reached passing: the suite had grown to
+# where six shards pack at 1,160s each (~20 min). Ten would be 696s each. The
+# longest single step (zoom:drive, ~290s) is the floor, still well below
+# that.
 #
 # THE REQUIRED CHECK IS THE "npm test" JOB BELOW, NOT THE SHARDS
 # Branch protection on main requires a check called "npm test". A bare matrix
-# would report as "shard 1 of 6", "shard 2 of 6" and so on, and the required
+# would report as "shard 1 of 8", "shard 2 of 8" and so on, and the required
 # check would never report at all - the same silent forever-pending failure
 # this file warns about above. So the shards do the work and a final job named
 # "npm test" gates on all of them. Renaming that job breaks main's protection;
@@ -86,26 +89,29 @@ concurrency:
 
 jobs:
   shard:
-    name: shard ${{ matrix.shard }} of 6
+    name: shard ${{ matrix.shard }} of 8
     runs-on: ubuntu-latest
-    # A shard is ~11.5 minutes on a runner (652s of tests + setup). 15 was set
-    # when a shard was ~4 minutes, and the suite outgrew it: under real runner
-    # times the old packing put two shards at 14.2-14.7 min, and Tests #231 and
-    # #233 were each cancelled here with every check it reached passing. 25 is
-    # ~2.2x the packed shard - room for a slow runner and for growth. A shard
-    # that nears it means re-measure the weights, not raise this again.
-    timeout-minutes: 25
+    # A shard is ~15 minutes on a runner (870s of tests + setup). 15 was set
+    # when a shard was ~4 minutes; Tests #231 and #233 were cancelled at it,
+    # and 25 then held until Tests #266, whose shards 5 and 6 were cancelled at
+    # ~24.7 min of tests with every step they reached passing - the weights had
+    # drifted (rotate:handles was declared at 4s and runs ~250s) and runner
+    # speed swings: the same steps summed 5,073s in #265 and 6,946s in #266.
+    # 40 is ~2.7x the packed shard, enough for a #266-speed runner (~17 min)
+    # with room to spare. A shard that nears it still means re-measure the
+    # weights, not raise this again.
+    timeout-minutes: 40
     permissions:
       contents: read
     env:
       NSO_LIBRARY_DIR: ${{ github.workspace }}/nest-library
     strategy:
-      # Every shard reports. One shard failing must not cancel the other five -
+      # Every shard reports. One shard failing must not cancel the other seven -
       # that would put back exactly the blindness the failure-tolerant runner
       # was written to remove.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8]
 
     steps:
       - name: Check out
@@ -138,7 +144,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run this shard
-        run: node tools/run-tests.mjs --shard=${{ matrix.shard }}/6
+        run: node tools/run-tests.mjs --shard=${{ matrix.shard }}/8
 
   # The required status check. Named "npm test" because that is the name main's
   # branch protection asks for; it gates on the shards and runs no tests itself.
