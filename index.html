@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=polish1" />
+  <link rel="stylesheet" href="styles.css?v=lift2" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -962,23 +962,34 @@
         <p class="ms-note" id="ms-support-read">&mdash;</p>
       </div>
 
-      <!-- Lift (nso_lift.js, app-gscope-lift.js, docs/LIFT.md): pick the flat
-           face details stand on, see what stands proud of it coloured by
-           height, choose islands, lift each off as its own piece. Plate
-           pieces only; one Undo puts everything back. -->
+      <!-- Lift (nso_lift.js, nso_lift_auto.js, app-gscope-lift.js, docs/LIFT.md).
+           Pick: pick the face details stand on, see what stands proud of it
+           coloured by height, choose islands, lift each off as its own piece.
+           Strip: everything found on that face, grouped by its shape, a tick
+           box per group; Lift N or Remove N. Plate pieces only; one Undo puts
+           everything back. -->
       <div class="ms-section" id="ms-lift-row" style="display:none;">
-        <div class="ms-section-title">Features &mdash; lift off a flat face</div>
+        <div class="ms-section-title">Lift</div>
+        <div class="ms-btn-row ms-seg" role="group" aria-label="Lift: one detail at a time, or strip the face">
+          <button id="ms-lift-tab-pick" type="button" aria-pressed="true" class="active"
+                  title="Choose details one by one: click a detail, Shift-click for several">Pick</button>
+          <button id="ms-lift-tab-strip" type="button" aria-pressed="false"
+                  title="Everything found on the face, grouped by its shape: untick a group to keep it on the plate">Strip</button>
+        </div>
         <div class="ms-btn-row">
           <button id="ms-btn-lift-mode" type="button" aria-pressed="false"
-                  title="Click the flat face the details stand on; then click a detail to choose it, Shift-click for several">Pick base face</button>
+                  title="Click the face the details stand on; then click a detail to choose it, Shift-click for several">Pick base face</button>
           <button id="ms-btn-lift" type="button" disabled
                   title="Lift the chosen details off as their own pieces. The piece is left flat where they stood. One Undo puts it all back">Lift</button>
+          <button id="ms-btn-lift-remove" type="button" disabled style="display:none;"
+                  title="Take the ticked details off and throw them away: no pieces, the piece left flat where they stood. One Undo puts them back">Remove</button>
           <button id="ms-btn-lift-clear" type="button" disabled title="Choose nothing">Clear choice</button>
         </div>
         <label class="ms-note ms-lift-height" for="ms-lift-height">How far out counts
           <input type="range" id="ms-lift-height" min="0" max="2" step="0.01" value="0.42"
                  title="A detail is offered when it stands out from the face by MORE than this. Default: one extrusion line at a 0.4 mm nozzle (NSO_Thickness.floorFor)" />
           <span id="ms-lift-height-read">0.42 mm</span></label>
+        <div id="ms-lift-groups" class="ms-lift-groups" style="display:none;"></div>
         <p class="ms-note" id="ms-lift-read">&mdash;</p>
       </div>
 
@@ -1235,11 +1246,13 @@
        detection, generators and union it calls. See docs/GCODE-SUPPORTS.md. -->
   <script src="app-gscope-support.js?v=gsup2"></script>
   <script src="app-gscope-slice.js?v=slice3"></script>
-  <!-- Lift: details off a flat face, the plate left flat. After nso_lift.js
-       (the geometry), app-cut.js (rawFlatCapLoops), app-sculpt.js (the
+  <!-- Lift: details off a face, the plate left flat. After nso_lift.js
+       (Phase 1: a flat face), nso_lift_auto.js (Lift 2: the height map,
+       needs nso_lift.js), app-cut.js (rawFlatCapLoops), app-sculpt.js (the
        commit) and app-microscope.js (the hooks). See docs/LIFT.md. -->
-  <script src="nso_lift.js?v=lift1"></script>
-  <script src="app-gscope-lift.js?v=lift1"></script>
+  <script src="nso_lift.js?v=lift2"></script>
+  <script src="nso_lift_auto.js?v=lift2"></script>
+  <script src="app-gscope-lift.js?v=lift2"></script>
 
 
   <script src="app-ux.js?v=inside9"></script>

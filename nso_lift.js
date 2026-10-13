@@ -583,7 +583,10 @@
     offered: offered,
     lift: lift,
     census: census,
-    volume: volume
+    volume: volume,
+    // For Lift 2 (nso_lift_auto.js), which cuts each island at its own
+    // plane: the same loops and the same caps, nothing here changes.
+    internals: { planeFrame: planeFrame, boundaryLoops: boundaryLoops, capFor: capFor }
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.NSO_Lift = api;

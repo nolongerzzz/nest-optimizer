@@ -2932,6 +2932,14 @@ select:focus, input:focus {
 .ms-seg button:first-child { border-radius: 6px 0 0 6px; }
 .ms-seg button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
 .ms-seg button.active { position: relative; z-index: 1; }
+/* G-scope Lift, Strip: one row per group of details - tick box, colour, name, count. */
+.ms-lift-groups { margin: 0 0 8px 0; }
+.ms-lift-group { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); margin: 0 0 4px 0; cursor: pointer; }
+.ms-lift-group input { margin: 0; }
+.ms-lift-group input:disabled + .ms-lift-sw { opacity: 0.5; }
+.ms-lift-group .ms-lift-sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.ms-lift-group .ms-lift-n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ms-lift-why { font-size: 11px; color: var(--muted); margin: 0 0 4px 22px; line-height: 1.35; }
 .ms-sidebar input[type="number"] {
   width: 62px;
   background: var(--bg);
