@@ -329,10 +329,180 @@ function showEditPreview() {
   syncCutUI();
 }
 
+// ===================== The blade and the plate line =====================
 // The blade, drawn in the piece's own frame from the cut frame's box: it
 // lies across the local cut axis, overhangs the piece's section by 1 mm all
 // round (at least 4 mm across, as before), and stands on the plane Split will
 // cut. Its transform follows the piece's mesh, so any pose carries it along.
+//
+// It is drawn THROUGH the piece, not inside it: a thin translucent sheet and
+// a solid edge frame, neither depth-tested, so the piece's own faces cannot
+// hide the part of the blade buried in it. (It used to be an opaque 0.7 mm
+// black slab, depth-tested: only what stuck out of the piece showed, so on a
+// tall or wide piece the blade looked as if it stopped short.)
+//
+// The plate line marks the same plane where it meets the plate (y = 0): flat
+// on the plate, one kerf wide, spanning the piece's footprint along the cut.
+// It is the plane Split cuts and the box the blade is sized from, carried
+// into world space - the same number, the same bounds - so it follows the
+// slider and the mm box exactly and cannot disagree with the blade.
+//
+// Every part is skipped by the x-ray view (which rewrites depth settings on
+// whatever it walks), and the plate line is never picked: dragging still
+// starts only from the blade, as before.
+const CUT_BLADE_COLOR = 0xffc83d;      // the frame and the plate line
+const CUT_BLADE_FILL = 0x101010;       // the sheet: a dark tint reads on any piece colour
+const CUT_BLADE_FILL_OPACITY = 0.38;
+const CUT_BLADE_RENDER_ORDER = 20;     // after the pieces, so the sheet tints them
+const CUT_PLATE_LINE_Y = 0.35;         // just above the plate border (0.3) and grid (0.15)
+const CUT_OVERHANG_MM = 1;             // the blade's margin past the section, each side
+const CUT_MIN_ACROSS_MM = 4;
+
+function cutBladeAcross(bbox) {
+  const size = bbox.getSize(new THREE.Vector3());
+  return [size.x, size.y, size.z].map(d => Math.max(d, CUT_MIN_ACROSS_MM) + 2 * CUT_OVERHANG_MM);
+}
+
+function cutOverlay(obj, pickable) {
+  obj.renderOrder = CUT_BLADE_RENDER_ORDER;
+  obj.userData.skipXray = true;
+  obj.userData.cutHandle = !!pickable;
+  if (!pickable) obj.raycast = function () {};
+  return obj;
+}
+
+function cutBuildBlade(group, f) {
+  const AX = ['x', 'y', 'z'];
+  const k = AX.indexOf(f.axis);
+  const u = (k + 1) % 3, v = (k + 2) % 3;          // the two directions across the cut
+  const across = cutBladeAcross(f.bbox);
+  const e = i => new THREE.Vector3(i === 0 ? 1 : 0, i === 1 ? 1 : 0, i === 2 ? 1 : 0);
+  // PlaneGeometry lies in x-y; turn it so its normal is the cut axis, its
+  // sides along u and v.
+  const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(e(u), e(v), e(k)));
+
+  // Large invisible hit target for easy drag.
+  const hit = new THREE.Mesh(new THREE.PlaneGeometry(across[u] + 24, across[v] + 24), new THREE.MeshBasicMaterial({
+    visible: false, side: THREE.DoubleSide
+  }));
+  hit.quaternion.copy(q);
+  hit.userData.cutHandle = true;
+  hit.userData.skipXray = true;
+
+  // The sheet: the blade's whole extent, seen through the piece.
+  const blade = new THREE.Mesh(new THREE.PlaneGeometry(across[u], across[v]), new THREE.MeshBasicMaterial({
+    color: CUT_BLADE_FILL, transparent: true, opacity: CUT_BLADE_FILL_OPACITY,
+    side: THREE.DoubleSide, depthTest: false, depthWrite: false
+  }));
+  blade.quaternion.copy(q);
+  blade.userData.cutBlade = true;
+  cutOverlay(blade, true);
+
+  // Edge frame round the sheet, and a crosshair at its centre, in the u-v plane.
+  function pt(du, dv) { const p = [0, 0, 0]; p[u] = du; p[v] = dv; return p; }
+  const hu = across[u] / 2, hv = across[v] / 2;
+  function lines(pts, opacity) {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts.flat()), 3));
+    return cutOverlay(new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
+      color: CUT_BLADE_COLOR, transparent: true, opacity: opacity, depthTest: false, depthWrite: false
+    })), true);
+  }
+  const frame = lines([pt(-hu, -hv), pt(hu, -hv), pt(hu, -hv), pt(hu, hv),
+                       pt(hu, hv), pt(-hu, hv), pt(-hu, hv), pt(-hu, -hv)], 1);
+  frame.userData.cutFrame = true;
+  const cross = lines([pt(-hu * 0.9, 0), pt(hu * 0.9, 0), pt(0, -hv * 0.9), pt(0, hv * 0.9)], 0.55);
+
+  group.add(hit);
+  group.add(blade);
+  group.add(frame);
+  group.add(cross);
+  group.userData.cutAxis = f.axis;
+  group.userData.cutAcross = across;
+}
+
+// The plate line's two objects: a flat strip one kerf wide and its centre
+// line (so it still reads as a line when the plate is seen edge-on). Their
+// vertices are written in world space by cutPlaceLine on every update.
+function cutBuildPlateLine(group) {
+  const strip = new THREE.BufferGeometry();
+  strip.setAttribute('position', new THREE.BufferAttribute(new Float32Array(12), 3));
+  strip.setIndex([0, 1, 2, 0, 2, 3]);
+  const stripMesh = cutOverlay(new THREE.Mesh(strip, new THREE.MeshBasicMaterial({
+    color: CUT_BLADE_COLOR, side: THREE.DoubleSide, depthTest: false, depthWrite: false, transparent: true, opacity: 0.95
+  })), false);
+  const centre = new THREE.BufferGeometry();
+  centre.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
+  const centreLine = cutOverlay(new THREE.LineSegments(centre, new THREE.LineBasicMaterial({
+    color: CUT_BLADE_COLOR, depthTest: false, depthWrite: false, transparent: true
+  })), false);
+  stripMesh.frustumCulled = false;
+  centreLine.frustumCulled = false;
+  stripMesh.userData.cutPlateLine = true;
+  centreLine.userData.cutPlateLine = true;
+  const g = new THREE.Group();
+  g.name = 'cutPlateLine';
+  g.add(stripMesh);
+  g.add(centreLine);
+  group.add(g);
+}
+
+/** Where the cut plane meets the plate, from the cut plane `info`
+    (getCutPlaneLocal) on the piece's `mesh`: its two ends and the direction
+    across it, in world space. Null if the plane is (nearly) parallel to the
+    plate, which the cut frame does not produce. */
+function cutPlateLineWorld(info, mesh) {
+  if (!info || !mesh) return null;
+  mesh.updateMatrixWorld(true);
+  const Mw = mesh.matrixWorld;
+  const local = info.bbox.getCenter(new THREE.Vector3());
+  local[info.axis] = info.plane;
+  const P = local.clone().applyMatrix4(Mw);
+  const n = new THREE.Vector3(info.axis === 'x' ? 1 : 0, info.axis === 'y' ? 1 : 0, info.axis === 'z' ? 1 : 0)
+    .applyMatrix3(new THREE.Matrix3().getNormalMatrix(Mw)).normalize();
+  const nh = new THREE.Vector3(n.x, 0, n.z);
+  const nh2 = nh.lengthSq();
+  if (nh2 < 1e-6) return null;
+  // The plane's trace on y = 0: a point on it, and its direction.
+  const Q = new THREE.Vector3(P.x, 0, P.z).addScaledVector(nh, n.y * P.y / nh2);
+  const dir = new THREE.Vector3(-n.z, 0, n.x).normalize();
+  // Its extent: the cut frame's box, carried into world space, along the line.
+  let lo = Infinity, hi = -Infinity;
+  const b = info.bbox, c = new THREE.Vector3();
+  for (let i = 0; i < 8; i++) {
+    c.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z).applyMatrix4(Mw);
+    const s = c.sub(Q).dot(dir);
+    if (s < lo) lo = s;
+    if (s > hi) hi = s;
+  }
+  lo -= CUT_OVERHANG_MM;
+  hi += CUT_OVERHANG_MM;
+  return { a: Q.clone().addScaledVector(dir, lo), b: Q.clone().addScaledVector(dir, hi),
+           across: nh.normalize(), point: P, normal: n, mm: info.mm };
+}
+
+function cutPlaceLine(group, info, mesh) {
+  const g = group.children.find(c => c.name === 'cutPlateLine');
+  if (!g) return;
+  const w = cutPlateLineWorld(info, mesh);
+  g.visible = !!w;
+  group.userData.plateLine = w ? { a: w.a.toArray(), b: w.b.toArray(), across: w.across.toArray(), mm: w.mm } : null;
+  if (!w) return;
+  const toGroup = new THREE.Matrix4().copy(group.matrixWorld).invert();
+  const y = CUT_PLATE_LINE_Y;
+  const half = (typeof KERF_MM !== 'undefined' ? KERF_MM : 1) / 2;
+  const at = (p, s) => new THREE.Vector3(p.x, y, p.z).addScaledVector(w.across, s).applyMatrix4(toGroup);
+  const quad = [at(w.a, -half), at(w.b, -half), at(w.b, half), at(w.a, half)];
+  const mid = [at(w.a, 0), at(w.b, 0)];
+  g.children.forEach(o => {
+    const pos = o.geometry.attributes.position;
+    const pts = o.isMesh ? quad : mid;
+    pts.forEach((p, i) => pos.setXYZ(i, p.x, p.y, p.z));
+    pos.needsUpdate = true;
+    o.geometry.computeBoundingSphere();
+  });
+}
+
 function buildCutHelper() {
   const m = getActiveModel();
   if (!m || !state.previewMesh) return;
@@ -344,61 +514,10 @@ function buildCutHelper() {
   const f = cutFrame(m);
   if (!f) return;
 
-  const AX = ['x', 'y', 'z'];
-  const k = AX.indexOf(f.axis);
-  const u = (k + 1) % 3, v = (k + 2) % 3;          // the two directions across the cut
-  const size = f.bbox.getSize(new THREE.Vector3());
-  const across = [size.x, size.y, size.z].map(d => Math.max(d, 4) + 2);
-  const kerfVis = 0.7;
   const group = new THREE.Group();
   group.name = 'cutHelper';
-
-  const dims = across.slice();
-  dims[k] = kerfVis;
-  const planeMat = new THREE.MeshBasicMaterial({
-    color: 0x111111,
-    transparent: false,
-    opacity: 1,
-    side: THREE.DoubleSide,
-    depthWrite: true,
-    depthTest: true
-  });
-  const plane = new THREE.Mesh(new THREE.BoxGeometry(dims[0], dims[1], dims[2]), planeMat);
-  plane.userData.cutHandle = true;
-
-  // Large invisible hit target for easy drag. PlaneGeometry lies in x-y;
-  // turn it so its normal is the cut axis, its sides along u and v.
-  const hit = new THREE.Mesh(new THREE.PlaneGeometry(across[u] + 24, across[v] + 24), new THREE.MeshBasicMaterial({
-    visible: false, side: THREE.DoubleSide
-  }));
-  hit.userData.cutHandle = true;
-  const basis = new THREE.Matrix4();
-  const e = i => new THREE.Vector3(i === 0 ? 1 : 0, i === 1 ? 1 : 0, i === 2 ? 1 : 0);
-  basis.makeBasis(e(u), e(v), e(k));
-  hit.quaternion.setFromRotationMatrix(basis);
-
-  // Bright edge frame round the blade, and a crosshair at its centre, in the
-  // u-v plane.
-  function pt(du, dv) { const q = [0, 0, 0]; q[u] = du; q[v] = dv; return q; }
-  const hu = across[u] / 2, hv = across[v] / 2;
-  const framePts = [pt(-hu, -hv), pt(hu, -hv), pt(hu, -hv), pt(hu, hv),
-                    pt(hu, hv), pt(-hu, hv), pt(-hu, hv), pt(-hu, -hv)];
-  const frameGeo = new THREE.BufferGeometry();
-  frameGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(framePts.flat()), 3));
-  const frame = new THREE.LineSegments(frameGeo, new THREE.LineBasicMaterial({ color: 0x000000 }));
-  frame.userData.cutHandle = true;
-
-  const cross = [pt(-hu * 0.9, 0), pt(hu * 0.9, 0), pt(0, -hv * 0.9), pt(0, hv * 0.9)];
-  const crossGeo = new THREE.BufferGeometry();
-  crossGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(cross.flat()), 3));
-  const crossLine = new THREE.LineSegments(crossGeo, new THREE.LineBasicMaterial({ color: 0x000000 }));
-  crossLine.userData.cutHandle = true;
-
-  group.add(hit);
-  group.add(plane);
-  group.add(frame);
-  group.add(crossLine);
-  group.userData.cutAxis = f.axis;
+  cutBuildBlade(group, f);
+  cutBuildPlateLine(group);
   if (state.modelGroup) state.modelGroup.add(group);
   else if (state.previewMesh) state.previewMesh.add(group);
   state.cutHelper = group;
@@ -407,8 +526,8 @@ function buildCutHelper() {
 
 // Puts the blade on the plane: the section's centre with the cut coordinate
 // replaced by the plane, carried through the piece's world transform into
-// the helper's parent. Rebuilds it first if the piece's cut axis or size
-// changed under it (a turn, a roll, a bake).
+// the helper's parent; then lays the plate line under it. Rebuilds it first
+// if the piece's cut axis or size changed under it (a turn, a roll, a bake).
 function updateCutHelper() {
   const m = getActiveModel();
   if (!m || !state.cutHelper) return;
@@ -416,12 +535,10 @@ function updateCutHelper() {
   if (!info) return;
   const mesh = cutMeshOf(m);
   if (!mesh) return;
-  const blade = state.cutHelper.children.find(c => c.isMesh && c.geometry && c.geometry.type === 'BoxGeometry');
-  const size = info.bbox.getSize(new THREE.Vector3());
-  const want = ['x', 'y', 'z'].map(a => a === info.axis ? 0.7 : Math.max(size[a], 4) + 2);
-  const have = blade ? blade.geometry.parameters : null;
+  const want = cutBladeAcross(info.bbox);
+  const have = state.cutHelper.userData.cutAcross;
   if (state.cutHelper.userData.cutAxis !== info.axis || !have ||
-      Math.abs(have.width - want[0]) > 1e-6 || Math.abs(have.height - want[1]) > 1e-6 || Math.abs(have.depth - want[2]) > 1e-6) {
+      want.some((d, i) => Math.abs(d - have[i]) > 1e-6)) {
     state.previewMesh = mesh;
     buildCutHelper();
     return;
@@ -436,6 +553,7 @@ function updateCutHelper() {
   else if (parent === mesh) M.copy(new THREE.Matrix4().makeTranslation(local.x, local.y, local.z));
   M.decompose(state.cutHelper.position, state.cutHelper.quaternion, state.cutHelper.scale);
   state.cutHelper.updateMatrixWorld(true);
+  cutPlaceLine(state.cutHelper, info, mesh);
 }
 
 function axisCoord(ax, x, y, z) {
