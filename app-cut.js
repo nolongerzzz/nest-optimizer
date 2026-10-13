@@ -1,8 +1,50 @@
+// The yaw buttons (and the yaw drag) turn the piece itself, not its pose on
+// the plate. They used to turn the display geometry alone: a piece loaded
+// from a file is cut from its raw triangles (rawTris, through centerOffset -
+// mapPlaneToRaw), which stayed where they were, so Split cut the unturned
+// piece with a plane placed on the turned one - at 90 deg a 60 mm bar was
+// sliced along its length, at 15 deg it was cut square instead of on the
+// slant the blade showed. Now the raw triangles turn with it, about the same
+// centre, and centerOffset follows the re-centring, so the raw triple maps
+// onto the turned display geometry exactly as it did onto the old one.
+//
+// Display yaw about Y is a turn about raw Z (display is (x, z, -y) of raw,
+// less centerOffset): raw (x, y) -> (x c - y s, x s + y c). Quarter turns use
+// exact 0 / +-1, so turning back restores the piece.
+//
+// The geometry and the soup are replaced, not written in place, as a bake
+// replaces them: an undo snapshot holding the old ones keeps a matching
+// triple, and whatever is keyed on the old soup (the Scale card's section
+// cache, a Soften run) sees a new piece.
 function rotateActiveModelY(deg) {
   const m = getActiveModel();
   if (!m || !m.geometry) return;
-  m.geometry.rotateY((deg * Math.PI) / 180);
-  m.geometry.center();
+  const r = (deg * Math.PI) / 180;
+  const exact = v => (Math.abs(v) < 1e-12 ? 0 : Math.abs(Math.abs(v) - 1) < 1e-12 ? Math.sign(v) : v);
+  const c = exact(Math.cos(r)), s = exact(Math.sin(r));
+  const geo = m.geometry.clone();
+  geo.applyMatrix4(new THREE.Matrix4().set(c, 0, s, 0, 0, 1, 0, 0, -s, 0, c, 0, 0, 0, 0, 1));
+  geo.computeBoundingBox();
+  const shift = geo.boundingBox.getCenter(new THREE.Vector3());
+  geo.translate(-shift.x, -shift.y, -shift.z);
+  if (m.rawTris && m.rawAxis === 'zup' && m.centerOffset) {
+    const off = m.centerOffset;
+    const px = off.x, py = -off.z;           // the raw point the display origin is
+    const t = new Float32Array(m.rawTris);
+    for (let i = 0; i < t.length; i += 3) {
+      const x = t[i] - px, y = t[i + 1] - py;
+      t[i] = px + x * c - y * s;
+      t[i + 1] = py + x * s + y * c;
+    }
+    m.rawTris = t;
+    m.centerOffset = { x: off.x + shift.x, y: off.y + shift.y, z: off.z + shift.z };
+  }
+  // The old geometry's GPU buffers go (three uploads them again if a
+  // snapshot's copy is ever drawn); a yaw drag would otherwise leave one
+  // buffer behind per pointer move.
+  const old = m.geometry;
+  m.geometry = geo;
+  old.dispose();
   m.geometry.computeBoundingBox();
   const bb = m.geometry.boundingBox;
   m.size = {
