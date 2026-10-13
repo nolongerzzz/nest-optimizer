@@ -8,6 +8,10 @@ Test meshes for Claude / Grok. Not shipped to Pages as product files.
   face is one open square ring (224 mm²), never lidded; a cut in the wall
   leaves all 12 cavity faces as they were. Built by
   `node tools/nso_cut_bore_test.js --write-fixture`, which the test byte-diffs.
+  Foam gate (`foam:test`, `foam:drive`): "Hollow 1 - 17,576 mm³"; foamed to
+  7,396 / 676 mm the readout is "Foam: 42% of the hollow, 7,396 mm³"; to the top
+  it is Fill / Densify's soup bit for bit. Foam's other fixtures are generated
+  in `tools/nso_foam_fixtures.js`, not stored.
 
 ## damage/ - known-clean pieces with one controlled defect each
 

@@ -246,6 +246,10 @@
       if (window.nsoBrushArmed() && typeof window.nsoBrushSetArmed === 'function') window.nsoBrushSetArmed(false);
       left.push('brush');
     }
+    if (window.nsoFoam && window.nsoFoam.on()) {
+      window.nsoFoam.cancel();
+      left.push('foam');
+    }
     if (state.measureOn) {
       press('btn-measure');
       if (state.measureOn) state.measureOn = false;
