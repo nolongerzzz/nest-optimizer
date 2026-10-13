@@ -57,7 +57,7 @@ const STATE = `window.__cutState = function (id) {
   const info = getCutPlaneForSplit(m);
   const mesh = cutMeshOf(m);
   state.scene.updateMatrixWorld(true);
-  const blade = state.cutHelper && state.cutHelper.children.find(c => c.isMesh && c.geometry.type === 'BoxGeometry');
+  const blade = state.cutHelper && state.cutHelper.children.find(c => c.userData.cutBlade);
   const centre = info.bbox.getCenter(new THREE.Vector3()); centre[info.axis] = info.plane;
   const planeWorld = centre.clone().applyMatrix4(mesh.matrixWorld);
   const bladeCentre = blade ? new THREE.Vector3().setFromMatrixPosition(blade.matrixWorld) : null;
