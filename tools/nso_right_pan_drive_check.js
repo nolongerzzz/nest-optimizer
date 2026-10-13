@@ -131,9 +131,9 @@ withApp(async (page, logs) => {
   console.log('\n=== 1. orbit the plate off to one side, right-drag it back to centre ===');
   /* Look-at on the tape (the existing alt-click), then a real left-drag orbit
      on bare plate: the plate swings off to the side, as in the ticket. (The
-     alt-click also reports "Moved model #2" in the status line though nothing
-     moved - app-core's move drag starts under app-ux's look-at. Pre-existing,
-     not this change; the undo check below shows nothing was pushed.) */
+     alt-click also starts app-core's move drag under app-ux's look-at; it
+     moves nothing, so it pushes no undo and - since the viewport-zoom change -
+     no "Moved model #2" status either: nso_viewport_zoom_drive_check.js.) */
   const tapeAt = await N(() => window.__p.proj(state.placed[1].mesh.position.toArray()));
   await page.keyboard.down('Alt');
   await page.mouse.click(tapeAt[0], tapeAt[1]);

@@ -121,13 +121,20 @@ async function main() {
   check('the fixture is under the aim point', !!(aim && aim.hit), true);
   check('it resolves as the CTH fixture', aim && aim.objectId, 'CTH_fixture');
 
-  // --- 1. Not armed: the host must still take the click, or this proves nothing.
+  /* The host's own gesture is a short DRAG, not a click: endMoveDrag reports
+     "Moved model #N" only when the piece really moved, so a click that does
+     not move it leaves the status alone. */
+  const HOST_DRAG = [10, 6, 4];                             // Manhattan 16
+
+  // --- 1. Not armed: the host must still take the press, or this proves nothing.
   console.log('\n--- gesture 1: NOT armed (the host move is expected to win) ---');
   await reset();
   const r0 = await page.evaluate(() => window.__NESTCHECK__.results().length);
-  await gesture();
-  const g1 = await page.evaluate(() => ({ status: window.__NESTCHECK__.status(), n: window.__NESTCHECK__.results().length }));
+  const xz1 = await page.evaluate(() => window.__NESTCHECK__.xz());
+  await gesture(...HOST_DRAG);
+  const g1 = await page.evaluate(() => ({ status: window.__NESTCHECK__.status(), n: window.__NESTCHECK__.results().length, xz: window.__NESTCHECK__.xz() }));
   check('host reported its move', /^Moved model #\d+$/.test(g1.status), true);
+  check('the host moved the piece', g1.xz.x !== xz1.x || g1.xz.z !== xz1.z, true);
   check('harness recorded nothing', g1.n, r0);
 
   // --- 2. Armed: the host must be locked out and the harness must get the pick.
@@ -156,7 +163,7 @@ async function main() {
   // --- 3. Disarmed again: the host gets its input back.
   console.log('\n--- gesture 3: disarmed again (host input restored) ---');
   await reset();
-  await gesture();
+  await gesture(...HOST_DRAG);
   check('host reported a move again', /^Moved model #\d+$/.test(
     await page.evaluate(() => window.__NESTCHECK__.status())), true);
 
@@ -218,7 +225,7 @@ async function main() {
   // --- 8. With paint off the host gets its input back, so the guard is narrow.
   console.log('\n--- gesture 8: paint off again (the guard must not be sticky) ---');
   await reset();
-  await gesture();
+  await gesture(...HOST_DRAG);
   check('host reported a move once paint was off', /^Moved model #\d+$/.test(
     await page.evaluate(() => window.__NESTCHECK__.status())), true);
 

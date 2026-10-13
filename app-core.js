@@ -753,6 +753,70 @@ function restoreCamera(snap) {
   state.controls.update();
 }
 
+/* WHEEL ZOOM TOWARD THE CURSOR. three 0.147 has no zoomToCursor, so it is
+   done here, on top of OrbitControls (whose own zoom stays off).
+
+   The wheel scales the camera AND the orbit target together about one
+   anchor point. The view direction does not change, so the anchor stays on
+   the same pixel - exactly, not approximately - while everything else
+   scales about it. The camera-to-target distance scales by the same factor,
+   which is what the 15..1200 clamp is applied to; at a limit nothing moves.
+
+   The anchor is the first visible piece under the cursor; failing that the
+   plate's plane (y = 0) under the cursor, while that point is inside the
+   camera's far plane (further out it is not drawn, and a grazing ray can put
+   it kilometres away); failing both, the orbit target - which is the zoom
+   this replaced. A trackpad pinch arrives as a ctrlKey wheel event and takes
+   the same path. */
+const WHEEL_ZOOM_MIN = 15;
+const WHEEL_ZOOM_MAX = 1200;
+const _wheelRay = new THREE.Raycaster();
+const _wheelNdc = new THREE.Vector2();
+const _wheelGround = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+
+function nsoVisibleInScene(obj) {
+  for (let o = obj; o; o = o.parent) if (!o.visible) return false;
+  return true;
+}
+
+// The world point under (clientX, clientY), or null.
+function wheelZoomAnchor(clientX, clientY) {
+  const rect = state.renderer.domElement.getBoundingClientRect();
+  if (!rect.width || !rect.height) return null;
+  _wheelNdc.set(((clientX - rect.left) / rect.width) * 2 - 1,
+                -((clientY - rect.top) / rect.height) * 2 + 1);
+  _wheelRay.setFromCamera(_wheelNdc, state.camera);
+  _wheelRay.near = state.camera.near;
+  _wheelRay.far = state.camera.far;
+  if (state.modelGroup) {
+    const hits = _wheelRay.intersectObjects(state.modelGroup.children, true);
+    for (let i = 0; i < hits.length; i++) {
+      // ray.at(distance), not hit.point: on the ray itself, so the pixel holds
+      if (hits[i].object.isMesh && nsoVisibleInScene(hits[i].object)) {
+        return _wheelRay.ray.at(hits[i].distance, new THREE.Vector3());
+      }
+    }
+  }
+  const g = _wheelRay.ray.intersectPlane(_wheelGround, new THREE.Vector3());
+  if (g && g.distanceTo(_wheelRay.ray.origin) <= state.camera.far) return g;
+  return null;
+}
+
+/* Scale camera and target about `anchor` so the target distance becomes
+   clamp(distance * factor). Returns the factor actually applied (1 = held at
+   a limit, nothing moved). */
+function dollyAbout(camera, controls, anchor, factor, minD, maxD) {
+  const d = camera.position.distanceTo(controls.target);
+  if (!(d > 0) || !(factor > 0)) return 1;
+  const next = Math.min(maxD, Math.max(minD, d * factor));
+  const s = next / d;
+  if (Math.abs(s - 1) < 1e-9) return 1;   // at a limit (to rounding): hold still
+  camera.position.sub(anchor).multiplyScalar(s).add(anchor);
+  controls.target.sub(anchor).multiplyScalar(s).add(anchor);
+  controls.update();
+  return s;
+}
+
 function onViewportWheel(event) {
   event.preventDefault();
   event.stopPropagation();
@@ -761,20 +825,9 @@ function onViewportWheel(event) {
   if (!delta) return;
   // Flipped: deltaY < 0 (scroll up / in) -> closer; deltaY > 0 -> farther
   const scale = Math.pow(0.95, Math.min(8, Math.abs(delta) * 0.01));
-  const offset = state.camera.position.clone().sub(state.controls.target);
-  if (delta < 0) {
-    // scroll in -> closer
-    offset.multiplyScalar(scale);
-  } else {
-    // scroll out -> farther
-    offset.multiplyScalar(1 / scale);
-  }
-  // Clamp distance so we never flip through the target
-  const dist = offset.length();
-  if (dist < 15) offset.setLength(15);
-  if (dist > 1200) offset.setLength(1200);
-  state.camera.position.copy(state.controls.target).add(offset);
-  state.controls.update();
+  const factor = delta < 0 ? scale : 1 / scale;
+  const anchor = wheelZoomAnchor(event.clientX, event.clientY) || state.controls.target.clone();
+  dollyAbout(state.camera, state.controls, anchor, factor, WHEEL_ZOOM_MIN, WHEEL_ZOOM_MAX);
 }
 
 function onResize() {
@@ -2509,10 +2562,15 @@ function endMoveDrag() {
   updateExportButton();
   if (idx >= 0 && state.placed[idx] && from) {
     const p = state.placed[idx];
-    if (Math.abs(p.x - from.x) > 0.01 || Math.abs(p.z - from.z) > 0.01) {
+    /* A press on a piece always starts a drag, so a plain click (or an
+       Alt-click, which also re-aims the view) ends here too. Only a drag
+       that really moved the piece - the same test that decides the undo
+       entry - says so; otherwise the status is left as the click left it. */
+    const moved = Math.abs(p.x - from.x) > 0.01 || Math.abs(p.z - from.z) > 0.01;
+    if (moved) {
       pushUndo({ type: 'movePlaced', index: from.index, x: from.x, z: from.z, meshY: from.meshY });
     }
-    if (!reportJoinFlushGap()) setStatus('Moved model #' + (idx + 1));
+    if (!reportJoinFlushGap() && moved) setStatus('Moved model #' + (idx + 1));
   }
 }
 
