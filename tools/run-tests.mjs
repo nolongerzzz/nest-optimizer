@@ -186,7 +186,7 @@ async function main() {
   }
 
   if (process.argv.includes('--shard-plan')) {
-    const n = shard ? shard.n : Number(process.argv[process.argv.indexOf('--shard-plan') + 1]) || 6;
+    const n = shard ? shard.n : Number(process.argv[process.argv.indexOf('--shard-plan') + 1]) || 8; // CI's matrix size (.github/workflows/test.yml)
     shardPlan(n).forEach((b, k) => {
       console.log(`shard ${k + 1}/${n}  ${(b.total / 1000).toFixed(0)}s over ${b.steps.length} steps`);
       b.steps.forEach((s) => console.log(`    ${s}`));
