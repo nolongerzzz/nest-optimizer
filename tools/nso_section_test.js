@@ -241,8 +241,9 @@ function nums(r) {
       r.shape === 'round' && r.hollow && r.axis === 'Z' && near(r.outer.diameterMm, 20, 1e-3) &&
       near(r.bore.diameterMm, 18, 0.01) && near(r.wallMm, 1, 0.01) && r.lengthMm === 8,
       r.outer.diameterMm.toFixed(6) + ' / ' + r.bore.diameterMm.toFixed(6) + ', wall ' + r.wallMm.toFixed(6));
-    check('  readout: Ring Ø20.0 outer · Ø18.0 bore · wall 1.0 · length 8.0',
-      NSO_sectionReadout(r) === 'Ring Ø20.0 outer · Ø18.0 bore · wall 1.0 · length 8.0', NSO_sectionReadout(r));
+    // it lies flat, axis Z: its 8 mm is a height, the name its row has
+    check('  readout: Ring Ø20.0 outer · Ø18.0 bore · wall 1.0 · height 8.0',
+      NSO_sectionReadout(r) === 'Ring Ø20.0 outer · Ø18.0 bore · wall 1.0 · height 8.0', NSO_sectionReadout(r));
     row('nest-library/MINI_TPU_TEST.stl', r, 'Ø20 / Ø18 published (vertices Ø20.000 / Ø18.005), wall 1, L 8');
     holdsTurned('MINI_TPU_TEST', s, r);
     }
@@ -289,7 +290,7 @@ function nums(r) {
     const t = NSO_sectionReadout(NSO_sectionRead(rectTube(40, 20, 30, 10, 60)));
     check('a bar reads L x W x H, the card\'s own names', t === 'Bar 40.0 L × 20.0 W × 60.0 H · bore 30.0 × 10.0 · wall 5.0', t);
     const tb = NSO_sectionReadout(NSO_sectionRead(stock.tube.soup));
-    check('a ring reads Ø outer, Ø bore, wall, length', /^Ring Ø\d+\.\d\d? outer · Ø\d+\.\d\d? bore · wall \d+\.\d\d? · length \d+\.\d\d?$/.test(tb), tb);
+    check('a ring reads Ø outer, Ø bore, wall, and its axis by its row\'s name (stood up: height)', /^Ring Ø\d+\.\d\d? outer · Ø\d+\.\d\d? bore · wall \d+\.\d\d? · height \d+\.\d\d?$/.test(tb), tb);
     const sp = NSO_sectionReadout(NSO_sectionRead(stock.sphere.soup));
     check('other reads the three sizes and the reason on one line', /^35\.3 L × 35\.3 W × 35\.3 H · it is curved or tapered all over/.test(sp), sp);
   }

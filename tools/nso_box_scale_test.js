@@ -86,32 +86,37 @@ const TUBE = S.make({ shape: 'tube', height: 40 }).soup, rU = NSO_sectionRead(TU
 check('ring stood up (axis Z): Height, Outer Ø and Wall; no Length / Width / Diameter / Offset; no Longest (it is the Height and the Ø)',
   vU.height && vU.height.axisIdx === 2 && vU.outer && vU.wall && !vU.length && !vU.width && !vU.diameter && !vU.offset && !vU.longest,
   JSON.stringify(vU.named));
-// A ring's one axis is named the way a box's would be as it lies: Height if
-// it is the piece's Z, else Length or Width by which of X / Y is longer. A
-// tube lengthened to 80 and laid down reads Length; cut to a 10 mm washer and
-// stood on edge, its axis is the short way across - Width.
+// A ring's or rod's one axis is named the way a box's would be as it lies:
+// Height if it is the piece's Z, else Length or Width by which of X / Y is
+// longer. A piece lengthened to 80 and laid down reads Length; cut to a 10 mm
+// disc and stood on edge, its axis is the short way across - Width. The
+// readout and the verbs' "... held" say the same word as the row.
 {
+  const { NSO_ringApplyRaw, NSO_ringDescribe } = ctx;
   const turn = (s, f) => { const o = new Float32Array(s.length); for (let i = 0; i < s.length; i += 3) { const p = f(s[i], s[i + 1], s[i + 2]); o[i] = p[0]; o[i + 1] = p[1]; o[i + 2] = p[2]; } return o; };
   const onX = s => turn(s, (x, y, z) => [z, y, -x]), onY = s => turn(s, (x, y, z) => [x, z, -y]);
-  const LONG = NSO_extendRaw(TUBE, { axis: 2, length: 80 }).tris, WASHER = NSO_extendRaw(TUBE, { axis: 2, length: 10 }).tris;
-  const CASES = [
-    ['80 long, along X', onX(LONG), 'length', 0, 80], ['80 long, along Y', onY(LONG), 'length', 1, 80],
-    ['80 long, stood up', LONG, 'height', 2, 80],
-    ['10 mm washer on edge, axis X', onX(WASHER), 'width', 0, 10], ['10 mm washer on edge, axis Y', onY(WASHER), 'width', 1, 10],
-    ['10 mm washer flat, axis Z', WASHER, 'height', 2, 10]
-  ];
-  for (const [what, soup, name, k, want] of CASES) {
-    const r = NSO_sectionRead(soup), v = r.verbs;
-    const others = ['length', 'width', 'height'].filter(n => n !== name);
-    check('ring ' + what + ': its axis is the ' + name[0].toUpperCase() + name.slice(1) + ' row (' + AX[k] + ' ' + want + '), no other L / W / H',
-      r.shape === 'round' && r.hollow && v[name] && v[name].axisIdx === k && Math.abs(v[name].mm - want) < 1e-4 && others.every(n => !v[n]) &&
-      v.outer && v.wall, JSON.stringify(v.named) + ' - ' + NSO_sectionReadout(r));
+  const ROD = S.make({ shape: 'cylinder', height: 40 }).soup;
+  for (const [kind, base, verb, value] of [['ring', TUBE, 'outer', 42], ['rod', ROD, 'diameter', 30]]) {
+    const LONG = NSO_extendRaw(base, { axis: 2, length: 80 }).tris, DISC = NSO_extendRaw(base, { axis: 2, length: 10 }).tris;
+    const CASES = [
+      ['80 long, along X', onX(LONG), 'length', 0, 80], ['80 long, along Y', onY(LONG), 'length', 1, 80],
+      ['80 long, stood up', LONG, 'height', 2, 80],
+      ['10 mm disc on edge, axis X', onX(DISC), 'width', 0, 10], ['10 mm disc on edge, axis Y', onY(DISC), 'width', 1, 10],
+      ['10 mm disc flat, axis Z', DISC, 'height', 2, 10]
+    ];
+    for (const [what, soup, name, k, want] of CASES) {
+      const r = NSO_sectionRead(soup), v = r.verbs, said = NSO_sectionReadout(r);
+      const others = ['length', 'width', 'height'].filter(n => n !== name);
+      check(kind + ' ' + what + ': its axis is the ' + name[0].toUpperCase() + name.slice(1) + ' row (' + AX[k] + ' ' + want + '), no other L / W / H',
+        r.shape === 'round' && r.hollow === (kind === 'ring') && v[name] && v[name].axisIdx === k && Math.abs(v[name].mm - want) < 1e-4 &&
+        others.every(n => !v[n]) && (kind === 'ring' ? v.outer && v.wall : v.diameter), JSON.stringify(v.named));
+      const done = NSO_ringApplyRaw(soup, verb, value);
+      const line = done.ok ? NSO_ringDescribe(done) : 'refused: ' + done.reason;
+      check('  ...the readout says "' + name + ' ' + want.toFixed(1) + '" and ' + verb + ' says "' + name + ' held"',
+        said.endsWith(' · ' + name + ' ' + want.toFixed(1)) && done.ok && line.endsWith(', ' + name + ' held'), said + ' | ' + line);
+    }
   }
 }
-// A rod is not a ring: its axis stays Length whichever way it lies.
-const ROD = S.make({ shape: 'cylinder', height: 40 }).soup, vR = NSO_sectionRead(ROD).verbs;
-check('rod stood up (axis Z): Length and Diameter, as before', vR.length && vR.length.axisIdx === 2 && !vR.height && vR.diameter,
-  JSON.stringify(vR.named));
 const SPH = S.make({ shape: 'sphere', height: 40 }).soup, rP = NSO_sectionRead(SPH), vP = rP.verbs;
 check('sphere: only Offset, Whole x and Longest', !vP.length && !vP.width && !vP.height && vP.offset && vP.longest,
   rP.reason);

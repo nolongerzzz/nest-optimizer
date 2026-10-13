@@ -168,7 +168,7 @@ withApp(async (page, logs) => {
     !shut.open && shut.stale === '1', JSON.stringify(shut));
   const m = tube.sizing.measure;
   const want = 'Ring Ø' + show(2 * m.radius) + ' outer · Ø' + show(2 * m.inner_radius) + ' bore · wall ' +
-    show(m.tube_wall) + ' · length ' + show(m.height) + ' · fits A1 Mini';
+    show(m.tube_wall) + ' · height ' + show(m.height) + ' · fits A1 Mini';
   const c0 = await card(page);
   console.log('   generator: radius ' + m.radius + ', inner_radius ' + m.inner_radius + ', tube_wall ' + m.tube_wall + ', height ' + m.height);
   console.log('   readout:   ' + c0.readout);
@@ -188,8 +188,8 @@ withApp(async (page, logs) => {
   console.log('   status:  ' + s1);
   console.log('   readout: ' + c1.readout);
   check('Height 30 shortened along Z', /^Height done - Z 40\.62 → 30\.0 mm \(removed at Z /.test(s1), s1);
-  check('the readout reads length 30.0, Ø and wall unchanged',
-    c1.readout === want.replace('length ' + show(m.height), 'length 30.0'), c1.readout);
+  check('the readout reads height 30.0 - the Height row\'s own word - Ø and wall unchanged',
+    c1.readout === want.replace('height ' + show(m.height), 'height 30.0'), c1.readout);
   check('the Height field re-reads 30.0', c1.val.height === '30.0', c1.val.height);
   check('W and D are bit for bit what they were', c1.size.x === before.size.x && c1.size.z === before.size.z);
   const u1 = await undo(page);
@@ -202,7 +202,7 @@ withApp(async (page, logs) => {
   const c2 = await card(page);
   console.log('   status:  ' + s2);
   check('Height 50 extended along Z', /^Height done - Z 40\.62 → 50\.0 mm \(inserted at Z /.test(s2), s2);
-  check('the readout reads length 50.0', c2.readout === want.replace('length ' + show(m.height), 'length 50.0'), c2.readout);
+  check('the readout reads height 50.0', c2.readout === want.replace('height ' + show(m.height), 'height 50.0'), c2.readout);
   await undo(page);
   check('Undo restores it', (await card(page)).soup === before.soup);
 

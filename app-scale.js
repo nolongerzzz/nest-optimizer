@@ -659,8 +659,9 @@ function NSO_scaleSelectedModel(spec) {
                        material goes in or comes out inside one clean
                        constant-section band and every wall, floor, hole,
                        pocket and lip keeps its size. An axis with no such band
-                       gets no row. A ring shows its one axis under the same
-                       names - Height when the axis is its Z; a rod, Length.
+                       gets no row. A ring or rod shows its one axis under
+                       the same names - Height when the axis is its Z - and
+                       its readout, holds and done lines say the same word.
      Outer Ø / Wall    a ring (nso_ring.js): outer and bore together (wall
                        kept), or the bore alone (outer kept). Part 2's Bore Ø
                        row is gone: Outer Ø and Wall between them reach every
@@ -965,6 +966,7 @@ if (typeof document !== 'undefined') {
       show(s);
       var soup = m ? m.rawTris : null, sig = signature(m);
       lastReading = s;
+      relabel();
       if (force === true || soup !== lastSoup || sig !== lastSig) {
         lastSoup = soup; lastSig = sig;
         populate(s);
@@ -1053,7 +1055,13 @@ if (typeof document !== 'undefined') {
     }
     function relabel() {
       var inch = NSO_scaleIn();
-      var swap = function (t, word) { return inch ? t.replace(/\bmm\b/g, word) : t; };
+      // A ring's or rod's axis goes by the name its row has, so "length kept" /
+      // "the length is held" say height on one stood up (NSO_sectionAxisWord).
+      var s = lastReading, axisWord = (s && s.shape === 'round') ? NSO_sectionAxisWord(s, s.axisIdx) : 'length';
+      var swap = function (t, word) {
+        t = t.replace(/\blength (kept|is held)\b/g, axisWord + ' $1');
+        return inch ? t.replace(/\bmm\b/g, word) : t;
+      };
       FIELDS.forEach(function (fd) {
         if (fd[0] === 'factor') return;
         var el = document.getElementById(fd[1]), row = document.getElementById(fd[2]);

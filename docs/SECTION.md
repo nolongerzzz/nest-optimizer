@@ -90,8 +90,9 @@ every field use it: `MINI_TPU_TEST`'s Ø18.0047 bore is 18.0 in both; Stock's
 
 ## The card
 
-First line: `Ring Ø… outer · Ø… bore · wall … · length …` (round hollow),
-`Rod Ø… · length …` (round solid), `Bar … L × … W × … H` (rectangular, `· bore
+First line: `Ring Ø… outer · Ø… bore · wall … · height …` (round hollow),
+`Rod Ø… · height …` (round solid) - `height`, `length` or `width` by the axis
+row's own name, `Bar … L × … W × … H` (rectangular, `· bore
 … · wall …` if hollow), or `… L × … W × … H · reason` for `other` — then
 ` · fits A1 Mini` or ` · 5.0 mm too wide for A1 Mini` from `NSO_fitCheckAll`:
 the bed's directions as words (wide / deep / tall).
@@ -106,9 +107,9 @@ rows `NSO_sectionVerbs` says apply:
 
 | row | shown when | what it calls |
 |---|---|---|
-| **Length** / **Width** / **Height** `[ ] mm` | that axis has a clean constant-section band. A ring: its one axis, under the same names (Height when it is its own Z). A rod: Length, along the reader's axis | `NSO_scaleAxisApply` → `NSO_extendRaw({ axis, length })`: material goes in or comes out inside the one band, every other coordinate untouched bit for bit, so walls, floor, holes, pockets and lips keep their size. Shorter shortens; past the band it refuses with `Shorten can remove up to N mm here` |
+| **Length** / **Width** / **Height** `[ ] mm` | that axis has a clean constant-section band. A ring or rod: its one axis, under the same names (Height when it is its own Z) | `NSO_scaleAxisApply` → `NSO_extendRaw({ axis, length })`: material goes in or comes out inside the one band, every other coordinate untouched bit for bit, so walls, floor, holes, pockets and lips keep their size. Shorter shortens; past the band it refuses with `Shorten can remove up to N mm here` |
 | **Outer Ø** `[ ] wall kept` / **Wall** `[ ] outer kept` | a ring | `nso_ring.js`, below. Part 2's **Bore Ø** row is gone: Outer Ø and Wall reach every bore between them |
-| **Diameter** `[ ] length kept` | a rod | `nso_ring.js` |
+| **Diameter** `[ ] height kept` (the axis's own name) | a rod | `nso_ring.js` |
 | **Offset** `[ ] mm, wall kept` | every piece but a ring or rod, where Outer Ø / Diameter and Length already do its job. Elsewhere it is the only way to thicken a stepped piece evenly; see lid_strap below for where it is not even. A sentence under the row says so in the unit shown: `Thin features keep their thickness: a 0.6 mm lid strap stays 0.6 mm.` (`0.024 in` with inches shown) | `NSO_scaleOffsetRaw`, below — Fatten and Shrink, folded in |
 | **Whole ×** `[ ]` | always; reset to 1 on every refresh | `NSO_scaleSelectedModel({ factor })` |
 | **Longest** `[ ] mm` | unless a named field already shows the same number | `NSO_scaleSelectedModel({ axis: 'longest', targetMm })`, prefilled with the longest edge. Its done line's before figure is the solver's own `spanBeforeMm`, the edge it solved on, whichever axis that is |
@@ -165,11 +166,12 @@ frame**: Height is its raw Z, Length the longer of its raw X and Y, Width the
 shorter. They are not literally X / Y / Z (a bar stood on its end reads Length
 along Y if Y is its longer side), and they do not follow the plate pose: Yaw /
 Tip / Roll turn the placed instance, not the soup, so a Tip X re-reads the card
-but leaves Height on the same raw Z. A ring's one axis row takes the same
-name its axis would get on a box: a ring standing on its axis is Height, one
-lying on X or Y is Length - or Width, for a washer on edge whose axis is the
-shorter of X and Y. A rod's row is still **Length**, along the reader's
-straight axis whichever raw axis that is.
+but leaves Height on the same raw Z. A ring's or rod's one axis row takes the
+name its axis would get on a box (`NSO_sectionAxisWord`): standing on its axis
+it is Height, lying on X or Y it is Length - or Width, for a disc on edge whose
+axis is the shorter of X and Y. The readout (`· height 40.62`), Diameter's hold
+(`height kept`), the Outer Ø / Diameter titles (`the height is held`) and the
+ring verbs' done lines (`, height held`) say the same word.
 
 ## Ring verbs (part 2) — `nso_ring.js`
 
