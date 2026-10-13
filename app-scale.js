@@ -458,6 +458,97 @@ function NSO_scaleOffsetRaw(soup, mm, opts) {
 }
 
 /* =====================================================================
+   1c. Units at the card's edge - mm or inches
+
+   Everything above, and every engine the card calls, works in millimetres
+   and only ever will. The card's mm | in toggle converts at the edge and
+   nowhere else: what the card shows (its readout, its boxes, their labels
+   and limits, the messages its verbs say) and what the person types. Typing
+   1 with inches shown hands the engine exactly 1 * 25.4 mm. Switching the
+   toggle moves no vertex.
+
+   Inches show to 3 decimal places. A number the person typed is echoed as
+   typed (NSO_scaleTyped), never cut to 3 places.
+
+   Engine reasons arrive as finished mm sentences ("under the 0.42 mm floor
+   for a 0.4 mm nozzle"), so NSO_scaleText rewrites their figures rather than
+   each engine learning about inches. It converts a number, or a run of them
+   joined by × / → / of / slash, that ends in "mm"; a bare Ø figure, which
+   is always a length; and "number of mm" / "in mm" / "many mm". A length
+   an engine prints with no unit and no Ø is invisible to it - the card's
+   own lines are therefore composed unit by unit (NSO_scaleLen) instead.
+   ===================================================================== */
+
+var NSO_SCALE_MM_PER_IN = 25.4;
+var NSO_SCALE_UNIT_KEY = 'nso.scale.unit';
+var NSO_scaleUnitNow = 'mm';
+
+function NSO_scaleIn() { return NSO_scaleUnitNow === 'in'; }
+
+/* What the person typed, in the unit shown, as millimetres for the engine. */
+function NSO_scaleToMm(v) { v = +v; return NSO_scaleIn() ? v * NSO_SCALE_MM_PER_IN : v; }
+
+/* A length for display, without its unit: inches to 3 places, or the mm
+   text exactly as the caller has always written it (`mmFmt` is a digit
+   count or a function). */
+function NSO_scaleLen(mm, mmFmt) {
+  if (NSO_scaleIn()) return (+mm / NSO_SCALE_MM_PER_IN).toFixed(3);
+  return typeof mmFmt === 'function' ? mmFmt(mm) : (+mm).toFixed(mmFmt == null ? 2 : mmFmt);
+}
+
+/* ' mm' or ' in', for the end of a figure. */
+function NSO_scaleU() { return NSO_scaleIn() ? ' in' : ' mm'; }
+
+/* A value the person typed, echoed back in inches: at least 3 places and as
+   many more as they typed (the mm round trip's float noise trimmed at 12
+   significant figures). */
+function NSO_scaleTyped(mm) {
+  var v = +(+mm / NSO_SCALE_MM_PER_IN).toPrecision(12), s = String(v);
+  var dot = s.indexOf('.');
+  return (dot < 0 || s.length - dot - 1 < 3) && !/e/i.test(s) ? v.toFixed(3) : s;
+}
+
+var NSO_SCALE_NUM = '-?\\d+(?:\\.\\d+)?(?:e[-+]?\\d+)?';
+var NSO_SCALE_TEXT_RE = new RegExp(
+  '(Ø?' + NSO_SCALE_NUM + '(?:(?:\\s*(?:×|x|→|->|/)\\s*|\\s+of(?:\\s+its)?\\s+)Ø?' + NSO_SCALE_NUM + ')*)\\s?mm\\b' +
+  '|Ø(' + NSO_SCALE_NUM + ')' +
+  '|\\b(number of|in|many) mm\\b', 'g');
+
+/* One mm figure as an inch figure. An exponent stays an exponent - those
+   are residuals ("off by 1.2e-6 mm"), and 3 places would read them as 0. */
+function NSO_scaleTextNum(n) {
+  var v = parseFloat(n) / NSO_SCALE_MM_PER_IN;
+  var e = /^-?\d+(?:\.(\d+))?e/i.exec(n);
+  return e ? v.toExponential(Math.max(1, (e[1] || '').length)) : v.toFixed(3);
+}
+
+/* An engine's mm sentence in the unit shown. The identity with mm shown. */
+function NSO_scaleText(str) {
+  if (!NSO_scaleIn() || str == null) return str;
+  var num = new RegExp(NSO_SCALE_NUM, 'g');
+  return String(str).replace(NSO_SCALE_TEXT_RE, function (all, chain, dia, words) {
+    if (chain) return chain.replace(num, NSO_scaleTextNum) + ' in';
+    if (dia) return 'Ø' + NSO_scaleTextNum(dia);
+    return words + ' inches';
+  });
+}
+
+/* A box's limit or step in inches. The step goes to the next 1 / 2 / 5 at
+   or above the exact conversion (0.1 mm -> 0.005 in); each limit is moved
+   inward onto that step's grid, because a number box steps from its min -
+   min 0.004 with step 0.005 would make the arrows land on 1.004, not 1. */
+function NSO_scaleInchStep(stepMm) {
+  var x = stepMm / NSO_SCALE_MM_PER_IN, p = Math.pow(10, Math.floor(Math.log10(x)));
+  var m = [1, 2, 5, 10].find(function (k) { return k * p >= x * (1 - 1e-9); });
+  return +(m * p).toPrecision(6);
+}
+function NSO_scaleInchLimit(mm, step, side) {
+  var k = mm / NSO_SCALE_MM_PER_IN / step;
+  k = side === 'min' ? Math.ceil(k - 1e-9) : Math.floor(k + 1e-9);
+  return +(k * step).toPrecision(9);
+}
+
+/* =====================================================================
    2. App wiring
 
    The house lifecycle, same as Smooth, Skin and Carve: refuse before you
@@ -518,21 +609,24 @@ function NSO_scaleSelectedModel(spec) {
 
   var r = NSO_scaleSoup(soup, spec);
   if (!r.ok) {
-    if (typeof setStatus === 'function') setStatus('Scale refused - piece unchanged (' + r.reason + ')', true);
+    if (typeof setStatus === 'function') setStatus('Scale refused - piece unchanged (' + NSO_scaleText(r.reason) + ')', true);
     return r;
   }
 
+  // Composed figure by figure in the unit the card shows (1c); with mm shown
+  // it is the line this has always said.
+  var L = NSO_scaleLen, u = NSO_scaleU(), inch = NSO_scaleIn();
   var txt;
   if (r.axis) {
     txt = 'Scale done - ' + NSO_scaleAxisLabel(r.axis) + ' ' +
-      r.before.span[r.axis === 'longest' ? 'x' : r.axis].toFixed(3) + ' → ' +
-      r.measuredMm.toFixed(3) + ' mm (asked ' + r.targetMm + ', off by ' +
-      r.errMm.toExponential(1) + ' mm), factor ' + r.factor.toFixed(6);
+      L(r.before.span[r.axis === 'longest' ? 'x' : r.axis], 3) + ' → ' +
+      L(r.measuredMm, 3) + u + ' (asked ' + (inch ? NSO_scaleTyped(r.targetMm) + u : r.targetMm) + ', off by ' +
+      (inch ? r.errMm / NSO_SCALE_MM_PER_IN : r.errMm).toExponential(1) + u + '), factor ' + r.factor.toFixed(6);
   } else {
     txt = 'Scale done - factor ' + r.factor.toFixed(6);
   }
-  txt += ', size ' + r.after.span.x.toFixed(2) + ' x ' + r.after.span.y.toFixed(2) +
-         ' x ' + r.after.span.z.toFixed(2) + ' mm, open ' + r.after.stats.open +
+  txt += ', size ' + L(r.after.span.x, 2) + ' x ' + L(r.after.span.y, 2) +
+         ' x ' + L(r.after.span.z, 2) + u + ', open ' + r.after.stats.open +
          ', nm ' + r.after.stats.nm;
 
   if (typeof NSO_sculptCommitRaw === 'function') {
@@ -614,7 +708,7 @@ function NSO_scaleFitVerdict(m) {
   var name = String(rep.printer_name || '').replace(/^(Bambu|Creality) /, '');
   if (rep.fits) return 'fits ' + name;
   return rep.over.map(function (o) {
-    return o.over_mm.toFixed(1) + ' mm too ' + NSO_SCALE_FIT_WORD[o.axis];
+    return NSO_scaleLen(o.over_mm, 1) + NSO_scaleU() + ' too ' + NSO_SCALE_FIT_WORD[o.axis];
   }).join(', ') + ' for ' + name;
 }
 
@@ -623,8 +717,12 @@ function NSO_scaleFitVerdict(m) {
 function NSO_scaleReadoutText(m) {
   if (!m || !m.size) return 'Select a piece to resize.';
   var s = NSO_scaleSectionOf(m);
-  var line = s ? NSO_sectionReadout(s)
-    : (m.size.x.toFixed(1) + ' × ' + m.size.z.toFixed(1) + ' × ' + m.size.y.toFixed(1) + ' W × D × H');
+  // With inches shown every figure goes through the card's unit edge (1c);
+  // with mm shown both hooks are left unset and the line is unchanged.
+  var inch = NSO_scaleIn();
+  var show = inch ? function (x) { return NSO_scaleLen(x); } : null;
+  var line = s ? NSO_sectionReadout(s, show, inch ? NSO_scaleText : null)
+    : (NSO_scaleLen(m.size.x, 1) + ' × ' + NSO_scaleLen(m.size.z, 1) + ' × ' + NSO_scaleLen(m.size.y, 1) + ' W × D × H');
   var fit = NSO_scaleFitVerdict(m);
   return fit ? line + ' · ' + fit : line;
 }
@@ -649,11 +747,15 @@ function NSO_scaleFitToPlate() {
   var size = NSO_Printer.fromDisplaySize(m.size);
   var rep = NSO_Printer.fit(size, printer);
   var name = String(printer.name || '').replace(/^(Bambu|Creality) /, '');
+  // Bare figures with mm shown, as always; each one carries "in" with inches
+  // shown, since the status line is shared with tools that stay in mm.
+  var inch = NSO_scaleIn(), L = function (mm) { return NSO_scaleLen(mm, 1) + (inch ? ' in' : ''); };
+  var bed = function (mm) { return inch ? NSO_scaleLen(mm) : mm; };
   if (rep.fits) {
     if (typeof setStatus === 'function') {
-      setStatus('Fit to plate: already fits ' + name + ' (' + size.x.toFixed(1) + ' wide, ' + size.y.toFixed(1) +
-                ' deep, ' + size.z.toFixed(1) + ' tall in ' + printer.bedX + ' × ' + printer.bedY + ' × ' +
-                printer.buildZ + ') - nothing changed');
+      setStatus('Fit to plate: already fits ' + name + ' (' + L(size.x) + ' wide, ' + L(size.y) +
+                ' deep, ' + L(size.z) + ' tall in ' + bed(printer.bedX) + ' × ' + bed(printer.bedY) + ' × ' +
+                bed(printer.buildZ) + (inch ? ' in' : '') + ') - nothing changed');
     }
     return { ok: true, changed: false, factor: 1, fits: true };
   }
@@ -663,9 +765,9 @@ function NSO_scaleFitToPlate() {
   var after = NSO_Printer.fit(NSO_Printer.fromDisplaySize(m.size), printer);
   var worst = rep.over[0];
   var txt = 'Fit to plate: ×' + factor.toFixed(6) + ' - ' + NSO_SCALE_FIT_NOUN[worst.axis] + ' ' +
-    worst.size_mm.toFixed(1) + ' → ' + (worst.size_mm * factor).toFixed(1) + ' mm, now ' +
-    m.size.x.toFixed(1) + ' wide, ' + m.size.z.toFixed(1) + ' deep, ' + m.size.y.toFixed(1) + ' tall; ' +
-    (after.fits ? 'fits ' + name : 'STILL over: ' + after.reason);
+    NSO_scaleLen(worst.size_mm, 1) + ' → ' + NSO_scaleLen(worst.size_mm * factor, 1) + NSO_scaleU() + ', now ' +
+    L(m.size.x) + ' wide, ' + L(m.size.z) + ' deep, ' + L(m.size.y) + ' tall; ' +
+    (after.fits ? 'fits ' + name : 'STILL over: ' + NSO_scaleText(after.reason));
   if (typeof setStatus === 'function') setStatus(txt, !after.fits);
   if (typeof nsoScaleRefresh === 'function') nsoScaleRefresh();
   r.factor = factor; r.changed = true; r.fits = after.fits; r.fitReport = after;
@@ -698,7 +800,7 @@ function NSO_scaleCardApply(label, undoType, run, describe) {
   }
   var r = run(soup, m);
   if (!r.ok) {
-    if (typeof setStatus === 'function') setStatus(label + ' refused - piece unchanged (' + r.reason + ')', true);
+    if (typeof setStatus === 'function') setStatus(label + ' refused - piece unchanged (' + NSO_scaleText(r.reason) + ')', true);
     return r;
   }
   var txt = label + ' done - ' + describe(r);
@@ -717,7 +819,11 @@ var NSO_SCALE_RING_LABEL = { outer: 'Outer Ø', bore: 'Bore Ø', wall: 'Wall', d
 function NSO_scaleRingApply(verb, value) {
   return NSO_scaleCardApply(NSO_SCALE_RING_LABEL[verb] || verb, 'ringReplace',
     function (soup) { return NSO_ringApplyRaw(soup, verb, value); },
-    function (r) { return NSO_ringDescribe(r); });
+    function (r) {
+      // Bare figures with mm shown, as nso_ring.js has always written them;
+      // each one carries "in" with inches shown.
+      return NSO_ringDescribe(r, NSO_scaleIn() ? function (x) { return NSO_scaleLen(x) + ' in'; } : null);
+    });
 }
 
 /* Length / Width / Height: Extend or Shorten along the piece's own axis that
@@ -738,9 +844,10 @@ function NSO_scaleAxisApply(verb, value) {
     if (!(value > 0)) return { ok: false, reason: label + ' must be a positive number of mm' };
     return NSO_extendRaw(soup, { axis: dim.axisIdx, length: +value });
   }, function (r) {
-    return r.axis.toUpperCase() + ' ' + NSO_sectionShow(r.lengthBefore) + ' → ' + NSO_sectionShow(r.lengthAfter) +
-      ' mm (' + (r.mode === 'shorten' ? 'removed' : 'inserted') + ' at ' + r.axis.toUpperCase() + ' ' +
-      r.cut.toFixed(2) + '), every other coordinate unchanged (' + r.crossSectionDrift + ' drifted)';
+    var L = NSO_scaleLen, f = NSO_sectionShow;
+    return r.axis.toUpperCase() + ' ' + L(r.lengthBefore, f) + ' → ' + L(r.lengthAfter, f) +
+      NSO_scaleU() + ' (' + (r.mode === 'shorten' ? 'removed' : 'inserted') + ' at ' + r.axis.toUpperCase() + ' ' +
+      L(r.cut, 2) + (NSO_scaleIn() ? ' in' : '') + '), every other coordinate unchanged (' + r.crossSectionDrift + ' drifted)';
   });
 }
 
@@ -750,9 +857,13 @@ function NSO_scaleOffsetApply(mm) {
     var s = NSO_scaleSectionOf(m);
     return NSO_scaleOffsetRaw(soup, mm, { innerWord: (s && s.shape === 'round') ? 'bore' : 'bore or pocket' });
   }, function (r) {
-    var f = NSO_sectionShow, a = r.spanBefore, b = r.spanAfter;
-    return (r.mm > 0 ? 'out ' : 'in ') + Math.abs(r.mm) + ' mm, ' + f(a[0]) + ' × ' + f(a[1]) + ' × ' + f(a[2]) +
-      ' → ' + f(b[0]) + ' × ' + f(b[1]) + ' × ' + f(b[2]) + ' mm (X × Y × Z); ' +
+    // With inches shown "in 0.100 in" would read twice, so the direction is
+    // spelt out; the amount is echoed as typed.
+    var inch = NSO_scaleIn(), u = NSO_scaleU(), a = r.spanBefore, b = r.spanAfter;
+    var f = function (x) { return NSO_scaleLen(x, NSO_sectionShow); };
+    return (inch ? (r.mm > 0 ? 'outward ' : 'inward ') : (r.mm > 0 ? 'out ' : 'in ')) +
+      (inch ? NSO_scaleTyped(Math.abs(r.mm)) : Math.abs(r.mm)) + u + ', ' + f(a[0]) + ' × ' + f(a[1]) + ' × ' + f(a[2]) +
+      ' → ' + f(b[0]) + ' × ' + f(b[1]) + ' × ' + f(b[2]) + u + ' (X × Y × Z); ' +
       (r.innerFaces ? r.innerFaces + ' inner face(s) followed, walls kept' : 'no inner faces - an even offset');
   });
 }
@@ -796,10 +907,18 @@ if (typeof document !== 'undefined') {
       return [m ? m.id : '', p ? [p.rotY || 0, p.tipX || 0, p.tipZ || 0, p.liftY || 0, p.x, p.z].join(',') : ''].join('|');
     }
 
-    // Every field, from the reading. Whole x is 1 and Offset empty: a factor
-    // or an offset is a change, not a measurement, so neither carries over.
-    function populate(s) {
-      var v = s ? s.verbs : null, f = NSO_sectionShow, val = {};
+    // Every field, from the reading, in the unit shown. Whole x is 1 and
+    // Offset empty: a factor or an offset is a change, not a measurement, so
+    // neither carries over.
+    //
+    // keepTyped is the unit toggle's repopulate: a box still showing what
+    // the card put there re-reads in the new unit, while a number the person
+    // typed and has not applied yet is converted, not thrown away - at full
+    // precision, so toggling back gives them back what they typed. A
+    // factor is a plain number and is left as it is.
+    function populate(s, keepTyped) {
+      var v = s ? s.verbs : null, val = {};
+      var f = function (x) { return NSO_scaleLen(x, NSO_sectionShow); };
       if (v) {
         ['length', 'width', 'height'].forEach(function (k) { if (v[k]) val[k] = f(v[k].mm); });
         if (v.length && s.shape === 'round') val.length = f(s.lengthMm);
@@ -811,8 +930,9 @@ if (typeof document !== 'undefined') {
       val.offset = '';
       FIELDS.forEach(function (fd) {
         var el = document.getElementById(fd[1]);
+        var typed = keepTyped && el ? keepTyped(fd[0], el.value) : null;
         prefill[fd[0]] = val[fd[0]] != null ? val[fd[0]] : '';
-        if (el) el.value = prefill[fd[0]];
+        if (el) el.value = typed != null ? typed : prefill[fd[0]];
       });
     }
 
@@ -829,7 +949,7 @@ if (typeof document !== 'undefined') {
       });
     }
 
-    var lastSig = null, lastSoup = null;
+    var lastSig = null, lastSoup = null, lastReading = null;
     function readout(force) {
       var el = document.getElementById('scale-readout');
       if (!el) return;
@@ -840,6 +960,7 @@ if (typeof document !== 'undefined') {
       var s = m ? NSO_scaleSectionOf(m) : null;
       show(s);
       var soup = m ? m.rawTris : null, sig = signature(m);
+      lastReading = s;
       if (force === true || soup !== lastSoup || sig !== lastSig) {
         lastSoup = soup; lastSig = sig;
         populate(s);
@@ -875,7 +996,7 @@ if (typeof document !== 'undefined') {
       try { fn(); } catch (err) {
         console.error('[scale]', err);
         if (typeof setStatus === 'function') {
-          setStatus(name + ' failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
+          setStatus(name + ' failed - piece unchanged (' + NSO_scaleText((err && err.message) || String(err)) + ')', true);
         }
       }
       readout();
@@ -888,32 +1009,107 @@ if (typeof document !== 'undefined') {
     var LABEL = { length: 'Length', width: 'Width', height: 'Height', outer: 'Outer Ø', wall: 'Wall',
                   diameter: 'Diameter', offset: 'Offset', factor: 'Whole ×', longest: 'Longest' };
 
+    // The edge, inbound: every box but Whole x holds a length in the unit
+    // shown, and the engine is handed millimetres (NSO_scaleToMm).
     function apply(k, id) {
       var fv = fieldValue(k, id);
       if (k === 'factor') return NSO_scaleSelectedModel({ factor: fv.num });
+      var mm = NSO_scaleToMm(fv.num);
       if (k === 'longest') {
         if (fv.same) { if (typeof setStatus === 'function') setStatus('Longest: that is the current longest edge - type a new one'); return; }
-        return NSO_scaleSelectedModel({ axis: 'longest', targetMm: fv.num });
+        return NSO_scaleSelectedModel({ axis: 'longest', targetMm: mm });
       }
       if (k === 'offset') {
         if (!(isFinite(fv.num) && fv.num !== 0)) {
-          if (typeof setStatus === 'function') setStatus('Offset: type how far to move the outside, in mm - positive grows, negative shrinks');
+          if (typeof setStatus === 'function') {
+            setStatus(NSO_scaleText('Offset: type how far to move the outside, in mm - positive grows, negative shrinks'));
+          }
           return;
         }
-        return NSO_scaleOffsetApply(fv.num);
+        return NSO_scaleOffsetApply(mm);
       }
       if (fv.same) {
         if (typeof setStatus === 'function') setStatus(LABEL[k] + ': that is the current value - type a new one');
         return;
       }
-      if (k === 'length' || k === 'width' || k === 'height') return NSO_scaleAxisApply(k, fv.num);
-      return NSO_scaleRingApply(k, fv.num);
+      if (k === 'length' || k === 'width' || k === 'height') return NSO_scaleAxisApply(k, mm);
+      return NSO_scaleRingApply(k, mm);
+    }
+
+    /* ---- the mm | in toggle ----
+       The card's labels, aria-labels, unit hints, button titles and each
+       length box's min / max / step are written in mm in index.html. The
+       first relabel() records each one as it stands (data-mm-*), and every
+       later one rewrites from that record, so toggling any number of times
+       never compounds a conversion. Whole x has no unit and is skipped. */
+    function loadUnit() {
+      var saved = null;
+      try { saved = localStorage.getItem(NSO_SCALE_UNIT_KEY); } catch (e) {}
+      NSO_scaleUnitNow = saved === 'in' ? 'in' : 'mm';
+    }
+    function relabel() {
+      var inch = NSO_scaleIn();
+      var swap = function (t, word) { return inch ? t.replace(/\bmm\b/g, word) : t; };
+      FIELDS.forEach(function (fd) {
+        if (fd[0] === 'factor') return;
+        var el = document.getElementById(fd[1]), row = document.getElementById(fd[2]);
+        if (el) {
+          var d = el.dataset;
+          if (d.mmStep == null) { d.mmMin = el.min; d.mmMax = el.max; d.mmStep = el.step; d.mmAria = el.getAttribute('aria-label') || ''; }
+          if (inch) {
+            var st = NSO_scaleInchStep(+d.mmStep);
+            el.step = String(st);
+            el.min = String(NSO_scaleInchLimit(+d.mmMin, st, 'min'));
+            el.max = String(NSO_scaleInchLimit(+d.mmMax, st, 'max'));
+          } else { el.step = d.mmStep; el.min = d.mmMin; el.max = d.mmMax; }
+          el.setAttribute('aria-label', swap(d.mmAria, 'inches'));
+        }
+        var hint = row ? row.querySelector('.hint') : null;
+        if (hint) {
+          if (hint.dataset.mmText == null) hint.dataset.mmText = hint.textContent;
+          hint.textContent = swap(hint.dataset.mmText, 'in');
+        }
+      });
+      document.querySelectorAll('#scale-card button[title]').forEach(function (b) {
+        if (b.dataset.mmTitle == null) b.dataset.mmTitle = b.title;
+        b.title = swap(b.dataset.mmTitle, 'inches');
+      });
+      ['mm', 'in'].forEach(function (u) {
+        var b = document.getElementById('btn-scale-unit-' + u);
+        if (b) b.setAttribute('aria-pressed', NSO_scaleUnitNow === u ? 'true' : 'false');
+      });
+    }
+    // Switch the unit shown. Display only: the piece, its undo stack and its
+    // pose are not touched; the readout and the boxes re-read in the new unit.
+    function setUnit(u) {
+      u = u === 'in' ? 'in' : 'mm';
+      var was = NSO_scaleUnitNow;
+      NSO_scaleUnitNow = u;
+      try { localStorage.setItem(NSO_SCALE_UNIT_KEY, u); } catch (e) {}
+      relabel();
+      if (was === u) return;
+      readout();
+      var prev = Object.assign({}, prefill);
+      populate(lastReading, function (k, value) {
+        if (k === 'factor') return value;
+        if (value === prev[k] || value === '' || !isFinite(+value)) return null;
+        var v = u === 'in' ? +value / NSO_SCALE_MM_PER_IN : +value * NSO_SCALE_MM_PER_IN;
+        return String(+v.toPrecision(12));
+      });
     }
 
     var BUTTON = { length: 'btn-scale-length', width: 'btn-scale-width', height: 'btn-scale-height',
                    outer: 'btn-scale-ring-outer', wall: 'btn-scale-ring-wall', diameter: 'btn-scale-rod-diameter',
                    offset: 'btn-scale-offset', factor: 'btn-scale-factor', longest: 'btn-scale-dim' };
     function wire() {
+      ['mm', 'in'].forEach(function (u) {
+        var b = document.getElementById('btn-scale-unit-' + u);
+        if (b && b.dataset.nsoWired !== '1') {
+          b.dataset.nsoWired = '1';
+          b.addEventListener('click', function () { setUnit(u); });
+        }
+      });
+      relabel();
       FIELDS.forEach(function (fd) {
         var btn = document.getElementById(BUTTON[fd[0]]);
         if (btn && btn.dataset.nsoWired !== '1') {
@@ -956,6 +1152,7 @@ if (typeof document !== 'undefined') {
       window.updateEditSize = wrapped;
     }
 
+    loadUnit();
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
     else wire();
     setTimeout(wire, 0);

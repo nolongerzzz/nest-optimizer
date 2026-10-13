@@ -506,9 +506,13 @@ function NSO_sectionFinish(out) {
 }
 
 /* The readout's first line, in print terms. Kept here, headless, so the test
-   holds the wording the card shows. */
-function NSO_sectionReadout(s) {
-  var f = NSO_sectionShow;
+   holds the wording the card shows.
+
+   show and say are the Scale card's unit edge (app-scale.js): show formats a
+   length in mm for display, say passes a plain-words reason through. Both
+   default to the millimetre line this has always been. */
+function NSO_sectionReadout(s, show, say) {
+  var f = show || NSO_sectionShow;
   if (!s || !s.sizes) return 'No piece to read.';
   if (s.shape === 'round') {
     if (s.hollow) {
@@ -526,5 +530,5 @@ function NSO_sectionReadout(s) {
     if (s.hollow) t += ' · bore ' + f(s.bore.widthMm) + ' × ' + f(s.bore.depthMm) + ' · wall ' + f(s.wallMm);
     return t;
   }
-  return lwh + ' · ' + s.reason;
+  return lwh + ' · ' + (say ? say(s.reason) : s.reason);
 }

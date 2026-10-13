@@ -315,9 +315,11 @@ function NSO_ringApplyRaw(soup, verb, value, opts) {
   return res;
 }
 
-/* One line for the status bar: the verb, before -> after, what was held. */
-function NSO_ringDescribe(r) {
-  var a = r.before, b = r.after, f = function (x) { return (+x).toFixed(3); };
+/* One line for the status bar: the verb, before -> after, what was held.
+   fmt formats a length in mm for display (the Scale card's unit edge,
+   app-scale.js); it defaults to the bare millimetres this has always shown. */
+function NSO_ringDescribe(r, fmt) {
+  var a = r.before, b = r.after, f = fmt || function (x) { return (+x).toFixed(3); };
   if (!a.hollow) return 'Diameter Ø' + f(a.outer.diameterMm) + ' → Ø' + f(b.outer.diameterMm) + ', length held';
   return 'Ø' + f(a.outer.diameterMm) + ' / Ø' + f(a.bore.diameterMm) + ' wall ' + f(a.wallMm) + ' → Ø' +
     f(b.outer.diameterMm) + ' / Ø' + f(b.bore.diameterMm) + ' wall ' + f(b.wallMm) +

@@ -548,6 +548,32 @@ select:focus, input:focus {
 #scale-rows .scale-row .btn { width: auto; margin: 0; padding: 4px 10px; }
 #scale-rows .scale-row .hint { margin: 0; white-space: nowrap; }
 #scale-card > #btn-scale-fit { margin-top: 4px; }
+/* The card's mm | in toggle: two small segments, top right, the pressed one
+   lit. Its own class rather than .btn, which the card body makes full width. */
+#scale-card .scale-unit {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 2px;
+}
+#scale-card .scale-unit-btn {
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 8px;
+  margin: 0;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  cursor: pointer;
+}
+#scale-card .scale-unit-btn:first-child { border-radius: 6px 0 0 6px; }
+#scale-card .scale-unit-btn:last-child { border-radius: 0 6px 6px 0; border-left: none; }
+#scale-card .scale-unit-btn[aria-pressed="true"] {
+  border-color: #38bdf8;
+  color: #fff;
+  background: rgba(56, 189, 248, 0.15);
+}
+#scale-card .scale-unit-btn:last-child[aria-pressed="true"] { border-left: 1px solid #38bdf8; }
 
 .library-list {
   position: absolute;
