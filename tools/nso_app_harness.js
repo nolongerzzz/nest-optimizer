@@ -114,7 +114,13 @@ async function withApp(fn, opts) {
     args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox']
       .concat(proxyUrl ? ['--proxy-server=https=' + proxyUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '')] : [])
   });
-  const page = await browser.newPage();
+  /* 900 tall, not Playwright's 720. Below about 790 px the shell's left
+     column sits on top of the bottom-left tools (Undo, Frame, X-ray,
+     G-scope, Watch) - a known collision, flagged and not yet fixed, and
+     measured where it starts by tools/nso_ui_shell_drive_check.js. A check
+     that clicks Undo is asserting what Undo does, so it gets a window tall
+     enough to reach it. Checks that set their own size are unaffected. */
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   installAutoOpen(page);
   const logs = [];
   page.on('console', m => logs.push('[' + m.type() + '] ' + m.text()));

@@ -273,6 +273,35 @@ withApp(async (page, logs) => {
       r.choices.join(', '));
   }
 
+  /* ------------------------------------------------------------------ 9 */
+  console.log('\n=== 9. KNOWN, NOT FIXED: the column meets the bottom-left tools ===');
+  {
+    /* Flagged with the shell, deliberately left as it is: on a short window
+       the left column runs down into the tool column at the bottom-left
+       (Undo, Frame, X-ray, G-scope, Watch) and, being on top, takes their
+       clicks. Pinned here so it cannot get worse unseen, and so whoever
+       fixes it sees this gate go stale. */
+    const collides = async (h) => {
+      await page.setViewportSize({ width: 1280, height: h });
+      await page.waitForTimeout(60);
+      return page.evaluate(() => {
+        const col = [...document.querySelectorAll('.vp-shell-col > .vp-shell-menu > summary')]
+          .map(e => e.getBoundingClientRect());
+        return ['btn-undo', 'btn-frame-view', 'btn-xray', 'btn-microscope', 'btn-watch']
+          .map(id => document.getElementById(id)).filter(Boolean)
+          .some(t => { const r = t.getBoundingClientRect();
+            return col.some(c => Math.min(c.right, r.right) > Math.max(c.left, r.left) &&
+                                 Math.min(c.bottom, r.bottom) > Math.max(c.top, r.top)); });
+      });
+    };
+    let lo = 600, hi = 1000;                     // lo collides, hi does not
+    const okEnds = (await collides(lo)) && !(await collides(hi));
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (await collides(m)) lo = m; else hi = m; }
+    check('the collision starts below about 790 px of window height, no higher',
+      okEnds && hi >= 770 && hi <= 800, okEnds ? 'clear from ' + hi + ' px tall' : 'not bracketed by 600..1000');
+    await page.setViewportSize({ width: 1500, height: 820 });
+  }
+
   const errs = logs.filter(l => /^\[(error|pageerror)\]/.test(l));
   check('no console errors', errs.length === 0, errs.slice(0, 2).join(' | '));
 
