@@ -638,6 +638,11 @@ with the plain row toggle first.
   [GSCOPE-FLANGE.md](GSCOPE-FLANGE.md) and [GSCOPE-FEATURES.md](GSCOPE-FEATURES.md).
   `gcode:gscope-one-list` drives the whole Parts list on the part this was
   found on (tape_on-edge-single).
+- **Lift (the sidebar's "Features - lift off a flat face"):** the one G-scope
+  tool that writes to a piece already on the plate, on purpose. Pick the flat
+  face details stand on, choose islands, Lift: the piece is left flat and the
+  details become pieces, one Undo. It lives in `app-gscope-lift.js` on the
+  click-hook / onDocument seam, like the supports. See [LIFT.md](LIFT.md).
 
 ### 5. The layer-range slider
 

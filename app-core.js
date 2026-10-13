@@ -167,7 +167,8 @@ const UNDO_REPLACE_LABEL = {
   reattachReplace: 'Undo: Reattach reverted',
   stockReplace: 'Undo: Stock adjustment reverted',
   ringReplace: 'Undo: Ring / rod size reverted',
-  offsetReplace: 'Undo: Offset reverted'
+  offsetReplace: 'Undo: Offset reverted',
+  liftReplace: 'Undo: Lift reverted'
 };
 
 function undoLast() {
@@ -272,6 +273,10 @@ function undoLast() {
     }
     renderModelList(); updateOptimizeButton(); updateEditSize(); updateAdjustUI();
     if (typeof window.nsoDetachRefresh === 'function') window.nsoDetachRefresh();
+    // A step taken in a view over the plate (G-scope's Lift) redraws that view.
+    if (typeof entry.onUndone === 'function') {
+      try { entry.onUndone(); } catch (err) { console.error('[undo] onUndone', err); }
+    }
     setStatus(entry.label || 'Undo: reverted');
     return;
   }
@@ -2291,6 +2296,56 @@ function placedFootprint(p, x, z) {
   const hx = Math.max(1, p.width || 10) / 2;
   const hz = Math.max(1, p.depth || 10) / 2;
   return { minx: px - hx, maxx: px + hx, minz: pz - hz, maxz: pz + hz };
+}
+
+/* Free plate: the spot nearest `near` ({ x, z }, the bed's middle when left
+   out) where `entry`'s footprint sits wholly on the bed and at least
+   NSO_FREE_GAP from every other placed piece's. Footprints are each piece's
+   real box as posed (placedFootprint, the one drag uses), so a turned piece
+   is judged by the room it takes. Returns { x, z, onBed } - onBed false when
+   the bed has no such spot, and then a spot just past everything, still
+   clear of every piece.
+   Written for Picture (app-relief.js, which seats a slab nearest the middle)
+   and shared with Lift (app-gscope-lift.js, which seats each lifted piece
+   nearest the piece it came off). Search on a NSO_FREE_STEP grid. */
+const NSO_FREE_GAP = 4;          /* mm between pieces - what addModel leaves */
+const NSO_FREE_STEP = 2;         /* mm, the search grid */
+function nsoFreeSpot(entry, near) {
+  const GAP = NSO_FREE_GAP, STEP = NSO_FREE_STEP;
+  const plate = (typeof getCurrentPlate === 'function' && getCurrentPlate()) || { w: 180, d: 180 };
+  const self = placedFootprint(entry, 0, 0);
+  const others = state.placed.filter(p => p && p !== entry).map(p => placedFootprint(p));
+  const cx = near && isFinite(near.x) ? near.x : 0, cz = near && isFinite(near.z) ? near.z : 0;
+  function clear(x, z) {
+    for (let i = 0; i < others.length; i++) {
+      const o = others[i];
+      if (x + self.maxx > o.minx - GAP && x + self.minx < o.maxx + GAP &&
+          z + self.maxz > o.minz - GAP && z + self.minz < o.maxz + GAP) return false;
+    }
+    return true;
+  }
+  const x0 = -plate.w / 2 - self.minx, x1 = plate.w / 2 - self.maxx;
+  const z0 = -plate.d / 2 - self.minz, z1 = plate.d / 2 - self.maxz;
+  if (x0 <= x1 && z0 <= z1) {
+    if (clear(cx, cz) && x0 <= cx && cx <= x1 && z0 <= cz && cz <= z1) return { x: cx, z: cz, onBed: true };
+    let best = null, bd = Infinity;
+    const xs = [], zs = [];
+    let v;
+    for (v = x0; v <= x1 + 1e-9; v += STEP) xs.push(v);
+    if (xs[xs.length - 1] < x1 - 1e-9) xs.push(x1);
+    for (v = z0; v <= z1 + 1e-9; v += STEP) zs.push(v);
+    if (zs[zs.length - 1] < z1 - 1e-9) zs.push(z1);
+    for (let j = 0; j < zs.length; j++) {
+      for (let i = 0; i < xs.length; i++) {
+        const d = (xs[i] - cx) * (xs[i] - cx) + (zs[j] - cz) * (zs[j] - cz);
+        if (d < bd && clear(xs[i], zs[j])) { bd = d; best = { x: xs[i], z: zs[j], onBed: true }; }
+      }
+    }
+    if (best) return best;
+  }
+  let maxx = -plate.w / 2;
+  others.forEach(o => { if (o.maxx > maxx) maxx = o.maxx; });
+  return { x: Math.max(maxx, plate.w / 2) + GAP - self.minx, z: 0, onBed: false };
 }
 
 function footprintsOverlap(a, b, pad) {

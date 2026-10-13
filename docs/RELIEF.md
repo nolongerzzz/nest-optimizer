@@ -101,7 +101,8 @@ takes). A slab with no such spot - wider than the bed, or a full bed - lands
 just past everything, clear of every piece, and the status says so. G-scope's
 `onPlate` hook is how the slab comes back to Picture for this; addModel's own
 seat (past the rightmost piece by its unturned width) is unchanged for every
-other route.
+other route. The search itself is `nsoFreeSpot` in app-core.js since Lift
+(docs/LIFT.md) shares it; Picture calls it with no `near`, so it is unchanged.
 
 **Paint scope: none** - it adds a piece and reads no existing geometry.
 
