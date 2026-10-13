@@ -3570,60 +3570,41 @@ function setupUI() {
 
   const btnFrame = document.getElementById('btn-frame-selected');
   if (btnFrame) btnFrame.addEventListener('click', frameSelectedPiece);
-  /* A menu the accordion is not allowed to close. Cut is the only one, and
-     only while the cutter tool is actually live - the tool, not the menu.
-     You open the Cut dropdown to reach "Open cutter", so before that click
-     it is an ordinary member of the accordion and closes like any other.
-     Once the cutter is live the dropdown holds the controls that drive it
-     (Split, Close cutter, the plane's own readout), and those have to stay
-     reachable while you go to another menu to line the piece up first.
+  /* One panel open on the whole page. Every drop-down - the row along the
+     top, the column down the left, Finish, and the menus nested in Gen+ -
+     opens its panel at the same spot, so two open at once would sit on top
+     of one another. Opening any of them shuts every other.
 
-     Only automatic closing is blocked. A deliberate click on Cut's own
-     summary still collapses it, because that click toggles the <details>
-     directly and never reaches this code. */
-  function menuIsPinned(el) {
-    return el.id === 'menu-cut' && !!state.cutterOpen;
-  }
+     A menu that contains the one being opened, or is contained by it, is
+     left alone: Gen+ holds Wheel, Stock and Picture, and opening Wheel must
+     not shut the Gen+ it lives in.
 
-  /* One menu open at a time WITHIN AN OVERLAY. Opening one of the top bar's
-     dropdowns shuts the other eight, so they never stack over each other,
-     and Gen+'s two - Wheel and Stock - are exclusive with one another.
+     Watched with a MutationObserver on the `open` attribute rather than a
+     'toggle' listener, for the reason app-input-mode.js gives: toggle is
+     dispatched in a queued task, so for a moment after a click two panels
+     were open; the observer runs as a microtask, before the next event, and
+     sees a programmatic `.open = true` as well as a click.
 
-     Scoped to the overlay rather than the whole page, for two reasons.
-
-     A menu that contains the one being opened is left alone: Gen+ holds
-     Wheel and Stock, and a blanket rule has Wheel's own opening shut the
-     Gen+ it lives in - a click that opens a menu and hides it in the same
-     breath.
-
-     And the Finish menu is a different overlay on the far side of the
-     viewport, overlapping none of them. Under the blanket rule, reaching
-     the top bar for anything at all shut it: with Export in the bar now,
-     every check that opened Finish, exported, and came back to a Finish
-     control found it closed. That was eleven suites. The bar and Finish are
-     independent because on screen they do not collide. */
-  document.querySelectorAll('.vp-menu').forEach(function (d) {
-    d.addEventListener('toggle', function () {
-      if (!d.open) return;
-      var scope = d.closest('.viewport-overlay') || document;
-      scope.querySelectorAll('.vp-menu').forEach(function (o) {
-        if (o === d || o.contains(d) || d.contains(o)) return;
-        if (menuIsPinned(o)) return;
+     Cut has no exemption. Opening another panel shuts Cut's panel, but the
+     cutter itself is a tool, not a panel: closing the <details> leaves
+     state.cutterOpen, the blade and its position exactly as they were, and
+     opening Cut again shows its controls. Only the cutter going away closes
+     Cut's panel by itself (updateCutterUI in app-cut.js). */
+  if (typeof MutationObserver === 'function') {
+    new MutationObserver(function (records) {
+      let opened = null;
+      records.forEach(function (r) {
+        const d = r.target;
+        if (r.oldValue === null && d.open && d.matches('.vp-menu')) opened = d;
+      });
+      if (!opened) return;
+      document.querySelectorAll('.vp-menu[open]').forEach(function (o) {
+        if (o === opened || o.contains(opened) || opened.contains(o)) return;
         o.open = false;
       });
-      /* Whichever menu was opened last paints over the rest. It only
-         matters while a pinned menu is also open - two panels on screen at
-         once - but it is written as a general rule rather than a special
-         case for Cut. Without it the winner is DOM order, and Cut is last
-         in the bar, so the menu you had just opened came up UNDER it:
-         Export's and Scale's panels overlap Cut's footprint exactly, and
-         Cut would have covered the controls you were reaching for. */
-      scope.querySelectorAll('.vp-menu.is-front').forEach(function (o) {
-        if (o !== d) o.classList.remove('is-front');
-      });
-      d.classList.add('is-front');
-    });
-  });
+    }).observe(document.body, { attributes: true, subtree: true,
+                                attributeFilter: ['open'], attributeOldValue: true });
+  }
 
   const btnClearPlate = document.getElementById('btn-clear-plate');
   if (btnClearPlate) btnClearPlate.addEventListener('click', clearPlateOnly);

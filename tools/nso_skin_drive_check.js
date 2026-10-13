@@ -118,12 +118,12 @@ withApp(async (page, logs) => {
     module: typeof NSO_Skin !== 'undefined', appSkin: typeof NSO_skinFaceOfModel === 'function',
     options: [...document.querySelectorAll('#skin-pattern option')].map(o => o.value)
   }));
-  check('Finish tab has Skin face + pattern select; Join card has Seat flush + Seat (support) + gap slider', present.skin && present.sel && present.gap && present.seat, JSON.stringify(present));
+  check('Finish tab has Skin face + pattern select; Seat drop-down has Seat flush + Seat (support) + gap slider', present.skin && present.sel && present.gap && present.seat, JSON.stringify(present));
   const where = await page.evaluate(() => ({
     skinInFinish: !!document.querySelector('.vp-finish #btn-skin-face'), selInFinish: !!document.querySelector('.vp-finish #skin-pattern'),
-    capInFinish: !!document.querySelector('.vp-finish #btn-cap-open'), noneInJoin: !document.querySelector('#join-card #btn-skin-face, #join-card #skin-pattern, #join-card #btn-cap-open')
+    capInFinish: !!document.querySelector('.vp-finish #btn-cap-open'), noneInJoin: ['btn-skin-face', 'skin-pattern', 'btn-cap-open'].every(id => { const e = document.getElementById(id); return !!e && !e.closest('.vp-col-menu'); })
   }));
-  check('Skin face, pattern select and Cap open faces live in the Finish tab, not the Join card', where.skinInFinish && where.selInFinish && where.capInFinish && where.noneInJoin, JSON.stringify(where));
+  check('Skin face, pattern select and Cap open faces live in the Finish tab, not the Join drop-downs', where.skinInFinish && where.selInFinish && where.capInFinish && where.noneInJoin, JSON.stringify(where));
   check('nso_skin.js and app-skin.js loaded, button listener attached', present.module && present.appSkin && present.wired);
   check('pattern select offers crosshatch / crosshatch-fine / zigzag / ring',
     JSON.stringify(present.options) === '["crosshatch","crosshatch-fine","zigzag","ring"]', present.options.join(','));

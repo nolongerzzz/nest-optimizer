@@ -135,6 +135,7 @@ async function main() {
 
   // Clone it, so the export has to carry more than one object.
   await page.evaluate(() => { state.selectedIndex = 0; updateAdjustUI(); });
+  await page.evaluate(() => { const e = document.getElementById('btn-clone'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.click('#btn-clone');
   await page.waitForFunction('state.placed.length === 2', null, { timeout: 20000 });
   check('cloning gives the plate a second piece',

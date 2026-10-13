@@ -20,9 +20,10 @@ const state = {
   controls: null,
   plateMesh: null,
   plateGrid: null,
-  // Plate grid: 'on' | 'off' | 'auto'. auto = visible only while a piece is
-  // actually being positioned. Snap is a separate, off-by-default assist.
-  plateGridMode: 'auto',
+  // Plate grid: 'on' | 'off' | 'auto'. On at load; auto = visible only while
+  // a piece is actually being positioned. Snap is a separate, off-by-default
+  // assist.
+  plateGridMode: 'on',
   plateGridSnap: false,
   plateGridAutoHoldUntil: 0,
   plateBorder: null,

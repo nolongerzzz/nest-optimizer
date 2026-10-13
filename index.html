@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=box2" />
+  <link rel="stylesheet" href="styles.css?v=shell1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -24,125 +24,17 @@
       </div>
     </header>
     <main>
-      <aside class="panel left-panel">
-        <section class="card card-compact">
-          <h2>Plate</h2>
-          <select id="plate-select">
-            <option value="a1mini">A1 Mini 180</option>
-            <option value="a1">A1 / P1S / X1C 256</option>
-            <option value="prusa">Prusa 250 × 210</option>
-            <option value="ender">Ender 220</option>
-            <option value="custom">Custom…</option>
-          </select>
-          <div id="custom-size" class="custom-size hidden">
-            <label>W <input type="number" id="custom-w" value="180" min="50" max="500"></label>
-            <label>D <input type="number" id="custom-d" value="180" min="50" max="500"></label>
-            <label>H <input type="number" id="custom-h" value="180" min="20" max="900"
-                          title="Build height. The plate picker has never carried one; the build-volume warning needs it."></label>
-          </div>
-          <div class="plate-info hidden-quiet">
-            <span id="plate-dims">180 × 180 mm</span>
-            <span id="plate-area">32,400 mm²</span>
-          </div>
-          <div class="plate-grid-controls">
-            <label class="hint" for="plate-grid-show">Bed grid (10 mm)</label>
-            <select id="plate-grid-show" title="A flat reference grid fixed to the plate. It is drawn only - it never takes a click.">
-              <option value="auto">Auto - while positioning</option>
-              <option value="on">Always on</option>
-              <option value="off">Off</option>
-            </select>
-            <label class="plate-grid-snap-row" for="chk-plate-grid-snap"
-                   title="A soft pull toward the nearest grid intersection while you drag. It assists, it does not lock - drag away from a line at any time.">
-              <input type="checkbox" id="chk-plate-grid-snap"> Snap to grid
-            </label>
-          </div>
-          <p id="build-volume-warning" class="build-warning" hidden></p>
-        </section>
-        <section class="card card-compact">
-          <h2>Library</h2>
-          <input type="file" id="file-input" accept=".stl,.3mf" multiple class="hidden-quiet" />
-          <div id="model-list" class="model-list"></div>
-          <div class="edit-row" style="margin-top:8px;align-items:center;gap:8px;flex-wrap:wrap;">
-            <label for="clone-count">Clone</label>
-            <input id="clone-count" type="number" min="1" max="20" value="1" style="width:4rem;" />
-            <button id="btn-clone" class="btn btn-secondary" type="button" disabled>Clone piece</button>
-          </div>
-        </section>
-        <section class="card" id="join-card">
-          <h2>Join</h2>
-          <button id="btn-join-start" class="btn btn-secondary" type="button">Start Join</button>
-          <div class="join-slots">
-            <button type="button" class="join-slot" id="join-slot-a" data-slot="a"><span class="join-badge join-badge-a">A</span><span class="join-slot-name" id="join-name-a">Pick piece A</span></button>
-            <button type="button" class="join-slot" id="join-slot-b" data-slot="b"><span class="join-badge join-badge-b">B</span><span class="join-slot-name" id="join-name-b">Pick piece B</span></button>
-            <button type="button" class="join-slot" id="join-slot-c" data-slot="c"><span class="join-badge join-badge-c">C</span><span class="join-slot-name" id="join-name-c">Pick piece C (optional)</span></button>
-          </div>
-          <button id="btn-join-align" class="btn btn-secondary" type="button">Align edges</button>
-          <button id="btn-join-cx" class="btn btn-secondary" type="button">Center X</button>
-          <button id="btn-join-cz" class="btn btn-secondary" type="button">Center Z</button>
-          <div class="edit-row">
-            <button id="btn-center-lock" class="btn btn-secondary" type="button"
-                    title="Slide B in XZ until its centre sits on the target point on A. Rough placement - Seat / Align still do the fine work.">Center lock</button>
-            <button id="btn-center-lock-pick" class="btn btn-secondary" type="button"
-                    title="Click a point on A to lock onto instead of A's own centre. Right-click this button to drop a stored target.">Pick target</button>
-          </div>
-          <select id="center-lock-ref" title="Which point on each piece Center lock reads, seen top-down">
-            <option value="bbox">Lock on bounding-box centre</option>
-            <option value="centroid">Lock on centroid</option>
-          </select>
-          <button id="btn-join" class="btn btn-primary" type="button" disabled>Complete Join</button>
-          <button id="btn-subtract" class="btn btn-secondary" type="button">Subtract B from A</button>
-          <button id="btn-extract-bit" class="btn btn-secondary" type="button">Extract bit</button>
-          <button id="btn-seat-flush" class="btn btn-secondary" type="button" title="Flush plug seat: bury B in A with its outer face 0.01 mm proud of A's skin, then Subtract. Ignores the gap slider.">Seat flush</button>
-          <div class="seat-support">
-            <button id="btn-seat-support" class="btn btn-secondary" type="button" title="Seat B's mating face at the slider's gap off A's skin (or off the skin tips of a skinned face). Negative = air gap, easy release is -0.15 to -0.20. Positive = B overlaps into A. 0 = touching.">Seat (support)</button>
-            <div class="seat-support-row">
-              <input type="range" id="seat-gap" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Seat gap in mm, 0.01 steps. -0.25 (air) to +0.05 (overlap); default -0.18, mid easy-release. Arrow keys step 0.01." aria-label="Seat gap in mm" />
-              <output id="seat-gap-value" for="seat-gap" title="Exact gap the next Seat (support) will use">-0.18 mm</output>
-            </div>
-            <button id="btn-seat-here" class="btn btn-secondary" type="button" aria-pressed="false" title="Seat here: click a point on A - curved, irregular or flat - and B is turned to face it and set at the slider's gap. The gap is the true minimum distance between the two surfaces.">Seat here</button>
-            <label class="vp-check" for="chk-oversize-washer"
-                   title="Oversized washer: for a deliberately close-contact washer or shim WIDER than the piece it sits on. Seat (support) then places B at the typed gap below through the measured-clearance solve instead of the corner-ray fit - which refuses an overhanging piece with 'corner N missed hull along punch axis' - and reports the true minimum distance, the overhang and that verdict on the status line instead of refusing. Off: Seat (support) is exactly the seat it has always been.">
-              <input type="checkbox" id="chk-oversize-washer"> Oversized washer
-            </label>
-            <div class="seat-support-row oversize-row">
-              <label for="oversize-gap" title="The gap Seat (support) places at while Oversized washer is on, in mm, coupon sign convention: negative = air gap, 0 = touching, positive = the washer overlaps into the target. Typed, not the slider, so a deliberate squeeze past the slider's +0.05 can be asked for at all.">Gap</label>
-              <input type="number" id="oversize-gap" min="-5" max="5" step="0.01" value="0"
-                     aria-label="Oversized washer gap in mm" />
-              <span class="oversize-unit">mm</span>
-            </div>
-          </div>
-          <div class="triple-join" id="triple-join">
-            <select id="triple-mode" title="Vertical stack: each piece is centred over the one before it and seated down onto it. Horizontal sequence: each piece keeps its place along the run and is centred on the cross axis, then seated sideways against the one before it.">
-              <option value="vertical">A-B-C: vertical stack</option>
-              <option value="horizontal">A-B-C: horizontal sequence</option>
-            </select>
-            <div class="triple-gap-row">
-              <label for="triple-gap-ab">A-B</label>
-              <input type="range" id="triple-gap-ab" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Gap at the A-B junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = B overlaps into A. Independent of the B-C gap." aria-label="A to B junction gap in mm" />
-              <output id="triple-gap-ab-value" for="triple-gap-ab" title="Exact gap the A-B junction will be seated at">-0.18 mm</output>
-            </div>
-            <div class="triple-gap-row">
-              <label for="triple-gap-bc">B-C</label>
-              <input type="range" id="triple-gap-bc" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Gap at the B-C junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = C overlaps into B. Independent of the A-B gap." aria-label="B to C junction gap in mm" />
-              <output id="triple-gap-bc-value" for="triple-gap-bc" title="Exact gap the B-C junction will be seated at">-0.18 mm</output>
-            </div>
-            <button id="btn-join-triple" class="btn btn-secondary" type="button" disabled title="Center lock then Seat (support) at A-B, then Center lock then Seat (support) at B-C, each junction at its own gap.">Join A-B-C</button>
-          </div>
-          <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
-          <button id="btn-seat-grid" class="btn btn-secondary" type="button" title="Faint grid on the top surface of the target piece (A), to line up what goes above it">Surface grid: auto</button>
-          <button id="btn-join-clear" class="btn btn-ghost" type="button">Cancel Join</button>
-        </section>
-        <section class="card card-compact">
-          <h2>Pack</h2>
-          <button id="btn-optimize" class="btn btn-primary" disabled>Optimize plate</button>
-        </section>
-      </aside>
       <section class="viewport-section">
         <div id="viewport"></div>
         <div class="viewport-overlay viewport-overlay-topbar">
-          <details class="vp-menu vp-top-menu" id="menu-import">
+          <!-- The shell: one row along the top, one column down the left edge,
+               Import shared at the corner. Every panel opens at the same spot,
+               just right of the column and under the row (styles.css, "UI shell"). -->
+          <div class="vp-shell-row">
+          <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-import">
             <summary class="vp-bar-btn" title="Bring a piece in: from a file on this computer, or from the library">Import</summary>
             <div class="vp-menu-body vp-top-body">
+              <input type="file" id="file-input" accept=".stl,.3mf" multiple class="hidden-quiet" />
               <button id="btn-load-stl" class="vp-bar-btn" type="button"
               title="Load an STL or 3MF from this computer">＋ From File</button>
               <div class="vp-library">
@@ -154,7 +46,7 @@
               </div>
             </div>
           </details>
-          <details class="vp-menu vp-top-menu" id="menu-export">
+          <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-export">
             <summary class="vp-bar-btn" title="Everything the Export card held: format, cooling profile, downloads, Save to Library, Delete model">Export</summary>
             <div class="vp-menu-body vp-top-body" id="export-card">
               <label class="hint" for="export-format" style="margin-bottom:4px;display:block">Format</label>
@@ -177,7 +69,7 @@
               <button id="btn-delete-model" class="btn btn-secondary" type="button">Delete model</button>
             </div>
           </details>
-          <details class="vp-menu vp-top-menu" id="menu-rotate">
+          <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-rotate">
             <summary class="vp-bar-btn" title="Turn the selected piece: 90° steps, or by the arrowheads on its rings">Rotate</summary>
             <div class="vp-menu-body vp-top-body">
               <button id="btn-rot-left" class="vp-bar-btn adjust-btn" disabled>⟲ 90°</button>
@@ -197,7 +89,7 @@
               </label>
             </div>
           </details>
-          <details class="vp-menu vp-top-menu" id="menu-tip">
+          <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-tip">
             <summary class="vp-bar-btn" title="Set which way up the piece rests, and tilt it by degrees">Tip</summary>
             <div class="vp-menu-body vp-top-body">
               <button id="btn-flip" class="vp-bar-btn adjust-btn" disabled
@@ -218,7 +110,7 @@
               <p class="hint" style="margin:2px 0 0">Arrow keys tilt while this menu is open.</p>
             </div>
           </details>
-          <details class="vp-menu vp-top-menu" id="menu-move">
+          <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-move">
             <summary class="vp-bar-btn" title="Raise, lower and nudge the selected piece">Move</summary>
             <div class="vp-menu-body vp-top-body">
               <!-- Raise / Lower are gone: the checkbox below is the vertical
@@ -235,12 +127,11 @@
               <button id="btn-nudge-right" class="vp-bar-btn adjust-btn" disabled>→</button>
             </div>
           </details>
-          <!-- Pushes Photo, Gen+ (and the Finish menu beyond them, in its own
-               top-right overlay) to the end of the row, away from the
-               Import..Move cluster. flex-grow on an empty, pointer-events:
-               none spacer - nothing to click, just room. -->
-          <div class="vp-bar-spacer" aria-hidden="true"></div>
-          <details class="vp-menu vp-top-menu" id="menu-photo">
+          <button id="btn-delete-placed" class="vp-bar-btn" type="button" disabled
+                  title="Delete the selected piece from the plate. One Undo puts it back.">⌫ Remove</button>
+          <button id="btn-lock-pos" class="vp-bar-btn btn-lock-pos" type="button" disabled aria-pressed="false" title="Lock the selected piece's position. A locked piece refuses drag, the nudge arrows, Raise/Lower and the pose buttons, so a stray click cannot move it. Seat, Center, Align and Skin still place it. Shown by a teal outline and a 'locked' tag.">🔒 Lock position</button>
+          <button id="btn-plate-lock" class="vp-bar-btn btn-plate-lock" type="button" disabled aria-pressed="false" title="Lock the plate configuration: hold every piece where it is, in their current relative positions, in one action. Separate from the per-piece lock - it sets no piece flag, so unlocking the plate gives back exactly the piece locks you had.">🔒 Lock plate</button>
+          <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-photo">
             <summary class="vp-bar-btn" title="Check a photogrammetry capture against the capture contract">Photo</summary>
             <div class="vp-menu-body vp-top-body" id="photoset-card">
               <p class="hint">Check a photogrammetry capture against the capture contract
@@ -256,7 +147,7 @@
               <p id="photoset-verdict" class="photoset-verdict" hidden></p>
             </div>
           </details>
-          <details class="vp-menu vp-top-menu vp-top-right" id="menu-gen">
+          <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-gen">
             <summary class="vp-bar-btn" title="Generate a piece: stock to carve from, a vessel on the wheel, or a relief slab from a picture">Gen+</summary>
             <div class="vp-menu-body vp-top-body">
               <details class="vp-menu vp-wheel-menu">
@@ -390,14 +281,9 @@
               </details>
             </div>
           </details>
-          <!-- Forces Scale, Cut and the lock buttons onto their own line
-               unconditionally (flex-basis: 100%), so Photo and Gen+ are
-               always flush against the topbar's own right edge - right up
-               against Finish beyond it - at any window width, not only
-               when the window happens to be narrow enough to wrap there on
-               its own. -->
-          <div class="vp-bar-break" aria-hidden="true"></div>
-          <details class="vp-menu vp-top-menu vp-bar-row2-start" id="menu-scale">
+          </div>
+          <div class="vp-shell-col">
+          <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-scale">
             <summary class="vp-bar-btn" title="Read the piece's shape and size, then lengthen, shorten or scale it">Scale</summary>
             <div class="vp-menu-body vp-top-body" id="scale-card">
               <p id="scale-readout" class="hint">Select a piece to resize.</p>
@@ -461,7 +347,7 @@
               title="Scale uniformly by the largest factor that fits the printer the plate is set to, and say the factor. If it already fits, nothing changes.">Fit to plate</button>
             </div>
           </details>
-          <details class="vp-menu vp-top-menu" id="menu-cut">
+          <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-cut">
             <summary class="vp-bar-btn" title="Open the cutter and split the selected piece">Cut</summary>
             <div class="vp-menu-body vp-top-body" id="edit-card">
               <div class="edit-row tool-toggle-row">
@@ -536,13 +422,148 @@
               </div>
             </div>
           </details>
-          <button id="btn-delete-placed" class="vp-bar-btn" type="button" disabled
-                  title="Delete the selected piece from the plate. One Undo puts it back.">⌫ Remove</button>
-          <button id="btn-lock-pos" class="vp-bar-btn btn-lock-pos" type="button" disabled aria-pressed="false" title="Lock the selected piece's position. A locked piece refuses drag, the nudge arrows, Raise/Lower and the pose buttons, so a stray click cannot move it. Seat, Center, Align and Skin still place it. Shown by a teal outline and a 'locked' tag.">🔒 Lock position</button>
-          <button id="btn-plate-lock" class="vp-bar-btn btn-plate-lock" type="button" disabled aria-pressed="false" title="Lock the plate configuration: hold every piece where it is, in their current relative positions, in one action. Separate from the per-piece lock - it sets no piece flag, so unlocking the plate gives back exactly the piece locks you had.">🔒 Lock plate</button>
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-join">
+            <summary class="vp-bar-btn" title="Start a Join and pick the pieces A, B and C">Join</summary>
+            <div class="vp-menu-body vp-top-body">
+              <button id="btn-join-start" class="btn btn-secondary" type="button">Start Join</button>
+              <div class="join-slots">
+                <button type="button" class="join-slot" id="join-slot-a" data-slot="a"><span class="join-badge join-badge-a">A</span><span class="join-slot-name" id="join-name-a">Pick piece A</span></button>
+                <button type="button" class="join-slot" id="join-slot-b" data-slot="b"><span class="join-badge join-badge-b">B</span><span class="join-slot-name" id="join-name-b">Pick piece B</span></button>
+                <button type="button" class="join-slot" id="join-slot-c" data-slot="c"><span class="join-badge join-badge-c">C</span><span class="join-slot-name" id="join-name-c">Pick piece C (optional)</span></button>
+              </div>
+              <button id="btn-join" class="btn btn-primary" type="button" disabled>Complete Join</button>
+              <button id="btn-join-clear" class="btn btn-ghost" type="button">Cancel Join</button>
+            </div>
+          </details>
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-align">
+            <summary class="vp-bar-btn" title="Line B up on A: edges, centres, Center lock">Align</summary>
+            <div class="vp-menu-body vp-top-body">
+              <button id="btn-join-align" class="btn btn-secondary" type="button">Align edges</button>
+              <button id="btn-join-cx" class="btn btn-secondary" type="button">Center X</button>
+              <button id="btn-join-cz" class="btn btn-secondary" type="button">Center Z</button>
+              <div class="edit-row">
+                <button id="btn-center-lock" class="btn btn-secondary" type="button"
+                        title="Slide B in XZ until its centre sits on the target point on A. Rough placement - Seat / Align still do the fine work.">Center lock</button>
+                <button id="btn-center-lock-pick" class="btn btn-secondary" type="button"
+                        title="Click a point on A to lock onto instead of A's own centre. Right-click this button to drop a stored target.">Pick target</button>
+              </div>
+              <select id="center-lock-ref" title="Which point on each piece Center lock reads, seen top-down">
+                <option value="bbox">Lock on bounding-box centre</option>
+                <option value="centroid">Lock on centroid</option>
+              </select>
+            </div>
+          </details>
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-seat">
+            <summary class="vp-bar-btn" title="Seat B on A: support gap, Seat here, washer, flush, port, surface grid">Seat</summary>
+            <div class="vp-menu-body vp-top-body">
+              <div class="seat-support">
+                <button id="btn-seat-support" class="btn btn-secondary" type="button" title="Seat B's mating face at the slider's gap off A's skin (or off the skin tips of a skinned face). Negative = air gap, easy release is -0.15 to -0.20. Positive = B overlaps into A. 0 = touching.">Seat (support)</button>
+                <div class="seat-support-row">
+                  <input type="range" id="seat-gap" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Seat gap in mm, 0.01 steps. -0.25 (air) to +0.05 (overlap); default -0.18, mid easy-release. Arrow keys step 0.01." aria-label="Seat gap in mm" />
+                  <output id="seat-gap-value" for="seat-gap" title="Exact gap the next Seat (support) will use">-0.18 mm</output>
+                </div>
+                <button id="btn-seat-here" class="btn btn-secondary" type="button" aria-pressed="false" title="Seat here: click a point on A - curved, irregular or flat - and B is turned to face it and set at the slider's gap. The gap is the true minimum distance between the two surfaces.">Seat here</button>
+                <label class="vp-check" for="chk-oversize-washer"
+                       title="Oversized washer: for a deliberately close-contact washer or shim WIDER than the piece it sits on. Seat (support) then places B at the typed gap below through the measured-clearance solve instead of the corner-ray fit - which refuses an overhanging piece with 'corner N missed hull along punch axis' - and reports the true minimum distance, the overhang and that verdict on the status line instead of refusing. Off: Seat (support) is exactly the seat it has always been.">
+                  <input type="checkbox" id="chk-oversize-washer"> Oversized washer
+                </label>
+                <div class="seat-support-row oversize-row">
+                  <label for="oversize-gap" title="The gap Seat (support) places at while Oversized washer is on, in mm, coupon sign convention: negative = air gap, 0 = touching, positive = the washer overlaps into the target. Typed, not the slider, so a deliberate squeeze past the slider's +0.05 can be asked for at all.">Gap</label>
+                  <input type="number" id="oversize-gap" min="-5" max="5" step="0.01" value="0"
+                         aria-label="Oversized washer gap in mm" />
+                  <span class="oversize-unit">mm</span>
+                </div>
+              </div>
+              <button id="btn-seat-flush" class="btn btn-secondary" type="button" title="Flush plug seat: bury B in A with its outer face 0.01 mm proud of A's skin, then Subtract. Ignores the gap slider.">Seat flush</button>
+              <button id="btn-flip-port" class="btn btn-secondary" type="button">Flip port</button>
+              <button id="btn-seat-grid" class="btn btn-secondary" type="button" title="Faint grid on the top surface of the target piece (A), to line up what goes above it">Surface grid: auto</button>
+            </div>
+          </details>
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-abc">
+            <summary class="vp-bar-btn" title="Join three pieces in one go, each junction at its own gap">A-B-C</summary>
+            <div class="vp-menu-body vp-top-body">
+              <div class="triple-join" id="triple-join">
+                <select id="triple-mode" title="Vertical stack: each piece is centred over the one before it and seated down onto it. Horizontal sequence: each piece keeps its place along the run and is centred on the cross axis, then seated sideways against the one before it.">
+                  <option value="vertical">A-B-C: vertical stack</option>
+                  <option value="horizontal">A-B-C: horizontal sequence</option>
+                </select>
+                <div class="triple-gap-row">
+                  <label for="triple-gap-ab">A-B</label>
+                  <input type="range" id="triple-gap-ab" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Gap at the A-B junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = B overlaps into A. Independent of the B-C gap." aria-label="A to B junction gap in mm" />
+                  <output id="triple-gap-ab-value" for="triple-gap-ab" title="Exact gap the A-B junction will be seated at">-0.18 mm</output>
+                </div>
+                <div class="triple-gap-row">
+                  <label for="triple-gap-bc">B-C</label>
+                  <input type="range" id="triple-gap-bc" min="-0.25" max="0.05" step="0.01" value="-0.18" title="Gap at the B-C junction, in mm. Same range and meaning as the Seat (support) slider: negative = air gap, 0 = touching, positive = C overlaps into B. Independent of the A-B gap." aria-label="B to C junction gap in mm" />
+                  <output id="triple-gap-bc-value" for="triple-gap-bc" title="Exact gap the B-C junction will be seated at">-0.18 mm</output>
+                </div>
+                <button id="btn-join-triple" class="btn btn-secondary" type="button" disabled title="Center lock then Seat (support) at A-B, then Center lock then Seat (support) at B-C, each junction at its own gap.">Join A-B-C</button>
+              </div>
+            </div>
+          </details>
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-bit">
+            <summary class="vp-bar-btn" title="Subtract B from A, or extract a bit">Bit</summary>
+            <div class="vp-menu-body vp-top-body">
+              <button id="btn-subtract" class="btn btn-secondary" type="button">Subtract B from A</button>
+              <button id="btn-extract-bit" class="btn btn-secondary" type="button">Extract bit</button>
+            </div>
+          </details>
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-plate">
+            <summary class="vp-bar-btn" title="Plate size, bed grid and snap">Plate</summary>
+            <div class="vp-menu-body vp-top-body">
+              <select id="plate-select">
+                <option value="a1mini">A1 Mini 180</option>
+                <option value="a1">A1 / P1S / X1C 256</option>
+                <option value="prusa">Prusa 250 × 210</option>
+                <option value="ender">Ender 220</option>
+                <option value="custom">Custom…</option>
+              </select>
+              <div id="custom-size" class="custom-size hidden">
+                <label>W <input type="number" id="custom-w" value="180" min="50" max="500"></label>
+                <label>D <input type="number" id="custom-d" value="180" min="50" max="500"></label>
+                <label>H <input type="number" id="custom-h" value="180" min="20" max="900"
+                              title="Build height. The plate picker has never carried one; the build-volume warning needs it."></label>
+              </div>
+              <div class="plate-info hidden-quiet">
+                <span id="plate-dims">180 × 180 mm</span>
+                <span id="plate-area">32,400 mm²</span>
+              </div>
+              <div class="plate-grid-controls">
+                <label class="hint" for="plate-grid-show">Bed grid (10 mm)</label>
+                <select id="plate-grid-show" title="A flat reference grid fixed to the plate. It is drawn only - it never takes a click.">
+                  <option value="auto">Auto - while positioning</option>
+                  <option value="on" selected>Always on</option>
+                  <option value="off">Off</option>
+                </select>
+                <label class="plate-grid-snap-row" for="chk-plate-grid-snap"
+                       title="A soft pull toward the nearest grid intersection while you drag. It assists, it does not lock - drag away from a line at any time.">
+                  <input type="checkbox" id="chk-plate-grid-snap"> Snap to grid
+                </label>
+              </div>
+              <p id="build-volume-warning" class="build-warning" hidden></p>
+            </div>
+          </details>
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-pieces">
+            <summary class="vp-bar-btn" title="The pieces loaded, and Clone">Pieces</summary>
+            <div class="vp-menu-body vp-top-body">
+              <div id="model-list" class="model-list"></div>
+              <div class="edit-row" style="margin-top:8px;align-items:center;gap:8px;flex-wrap:wrap;">
+                <label for="clone-count">Clone</label>
+                <input id="clone-count" type="number" min="1" max="20" value="1" style="width:4rem;" />
+                <button id="btn-clone" class="btn btn-secondary" type="button" disabled>Clone piece</button>
+              </div>
+            </div>
+          </details>
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-pack">
+            <summary class="vp-bar-btn" title="Nest the pieces on the plate">Pack</summary>
+            <div class="vp-menu-body vp-top-body">
+              <button id="btn-optimize" class="btn btn-primary" disabled>Optimize plate</button>
+            </div>
+          </details>
+          </div>
         </div>
         <div class="viewport-overlay viewport-overlay-finish">
-          <details class="vp-menu vp-finish-menu">
+          <details class="vp-menu vp-shell-menu vp-finish-menu" id="menu-finish">
             <summary>Finish</summary>
             <div class="vp-menu-body vp-finish">
               <details class="vp-sec" data-sec="shape" open>
@@ -1140,13 +1161,13 @@
   <script src="nso_slicer.js?v=slice1"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
   <script src="nso_relief.js?v=relief2"></script>
-  <script src="app-core.js?v=lift2"></script>
+  <script src="app-core.js?v=shell1"></script>
 
 
 
 
 
-  <script src="app-cut.js?v=blade1"></script>
+  <script src="app-cut.js?v=shell1"></script>
   <script src="app-finish.js?v=box2"></script>
   <script src="app-sculpt.js?v=pose1"></script>
   <script src="app-extend.js?v=scale1"></script>
@@ -1170,7 +1191,7 @@
   <script src="app-stock.js?v=stock3"></script>
   <script src="app-assemble.js?v=asm2"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
-  <script src="app-join.js?v=blade1"></script>
+  <script src="app-join.js?v=shell1"></script>
   <script src="app-center-lock.js?v=clock2"></script>
   <script src="app-oversize-washer.js?v=oversize2"></script>
   <script src="app-join-triple.js?v=triple1"></script>
@@ -1191,7 +1212,7 @@
   <!-- The arbiter first: the three menu tools below register with it as
        they bind, and it is what makes "one menu owns the input" true
        rather than three modules each hoping the other two are shut. -->
-  <script src="app-input-mode.js?v=inmode4"></script>
+  <script src="app-input-mode.js?v=shell1"></script>
   <script src="app-tip-orient.js?v=tip3"></script>
   <script src="app-rotate-handles.js?v=rot8"></script>
   <script src="app-move-vertical.js?v=mv2"></script>

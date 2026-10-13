@@ -50,7 +50,7 @@
    behind cannot be hit, because it is not there.
 
    Nested menus (Gen+'s Wheel and Stock) and the Finish overlay are not top
-   bar menus and own no input here; app-join's per-overlay accordion still
+   bar menus and own no input here; app-join's page-wide one-panel rule still
    handles those, and still handles the ordinary closing of the bar's menus.
    This sits on top of it and makes the guarantee one the input handlers can
    actually rely on. The one place they do come in is leaveTool() below, the
@@ -69,32 +69,6 @@
     return Array.prototype.slice.call(bar.querySelectorAll('.vp-top-menu'));
   }
 
-  /* PINNED: open on screen, but not a candidate for input.
-
-     Cut is the one, and only while the cutter TOOL is live - not merely
-     while its dropdown is open. Once the cutter is running, the controls
-     that drive it (Split, Close, the plane's readout) live in that
-     dropdown, and you need them to stay reachable while you step over to
-     another menu to line the piece up. So it is exempt from the closing
-     below.
-
-     It is exempt from OWNING, too, and that is the part that keeps this
-     file's guarantee intact. A pinned menu open alongside another is two
-     panels on screen but still exactly one owner of input, so a key press
-     is still answered once - the thing this whole file exists to promise.
-     It costs nothing here because the cutter registers no owner at all:
-     its input is a drag on the red plane, hit-tested in app-core against
-     state.cutterOpen, and it never went through ownership. Were that to
-     change, a pinned owner would need a rule of its own, and this comment
-     is where to start.
-
-     state may not exist yet when a stray toggle fires during load, hence
-     the guard rather than a bare read. */
-  function isPinned(d) {
-    return d && d.id === 'menu-cut' &&
-           typeof state !== 'undefined' && state && !!state.cutterOpen;
-  }
-
   /* The owner, decided now, from the DOM.
 
      More than one CONTENDER open is not a state this returns an answer
@@ -103,15 +77,12 @@
      here, in this turn, before the caller gets its answer. Falling back to
      the last in document order when every open menu is a newcomer keeps it
      deterministic rather than dependent on which handler happened to ask
-     first. Pinned menus sit outside all of it: never closed, never kept,
-     and never the answer unless nothing else is open. */
+     first. No menu is exempt: Cut used to be pinned open while the cutter
+     was live, and is not any more - only one panel is open on the page
+     (app-join.js), and the cutter stays live with its panel shut. */
   function resolve() {
-    var open = menus().filter(function (d) { return d.open; });
-    if (!open.length) return null;
-    var live = open.filter(function (d) { return !isPinned(d); });
-    /* Only the pinned menu is open, so it is the owner by default - there
-       is nothing for it to collide with. */
-    if (!live.length) return open[0].id || null;
+    var live = menus().filter(function (d) { return d.open; });
+    if (!live.length) return null;
     if (live.length > 1) {
       var keep = null;
       for (var i = live.length - 1; i >= 0; i--) {
@@ -201,7 +172,7 @@
      Measure, Soften, Cap, Center lock - plus what that list never had to
      cover because none of them sits in Carve's way: Carve itself, Attach,
      Reattach, Tip on face, and a Join session. Then the menus: the Cut tool
-     (closeCutter, which also un-pins its menu), every top-bar menu, Gen+'s
+     (closeCutter, which also shuts its menu), every top-bar menu, Gen+'s
      nested Wheel and Stock, the Finish overlay and the right-click menu. The
      Rotate / Tip / Move owners are torn down by sync(), the same teardowns
      that run when another menu takes the input.
@@ -296,7 +267,7 @@
       left.push('join');
     }
 
-    /* ---- the cutter: closeCutter, which un-pins and shuts its menu ---- */
+    /* ---- the cutter: closeCutter, which shuts its menu ---- */
     if (state.cutterOpen && typeof closeCutter === 'function') {
       closeCutter(false);
       left.push('cut');
