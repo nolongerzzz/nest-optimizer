@@ -31,10 +31,12 @@ function updateEditSize() {
   if (!el) return;
   if (!m) {
     el.textContent = 'Load an STL to see size.';
+    syncCutRightSideOutButton();
     return;
   }
   el.textContent = m.name + ': ' + m.size.x.toFixed(1) + ' x ' + m.size.y.toFixed(1) + ' x ' + m.size.z.toFixed(1) + ' mm (X x H x Z)';
   syncCutUI();
+  syncCutRightSideOutButton();
 }
 
 function resolveAxis(model) {
@@ -244,6 +246,7 @@ function updateCutterUI() {
   if (cutBtn) cutBtn.disabled = !state.cutterOpen || !getActiveModel() || !state.cutHelper;
   const tools = document.getElementById('cutter-tools');
   if (tools) tools.classList.toggle('is-open', !!state.cutterOpen);
+  syncCutRightSideOutButton();
 }
 
 /** Mesh on the plate for the active model - used to hang the red plane in place */
@@ -256,6 +259,7 @@ function getCutterTargetMesh() {
 
 function openCutter() {
   state.cutterOpen = true;
+  state.cutRightSideOutOffer = null;
   state.cutDragging = false;
   state.editYawDragging = false;
   state.cutT = 0.5;
@@ -277,6 +281,7 @@ function openCutter() {
 
 function closeCutter(silent) {
   state.cutterOpen = false;
+  state.cutRightSideOutOffer = null;
   state.cutDragging = false;
   state.moveDragging = false;
   state.editYawDragging = false;
@@ -2129,6 +2134,9 @@ function cutPlainReason(err) {
   return 'the cut face could not be closed (' + m + ')';
 }
 
+const CUT_INSIDE_OUT_REASON =
+  'the piece\'s faces point inward (it is inside-out), so a cut face cannot be wound to match them';
+
 // The cut face must be exactly the section: every wall edge left open on the
 // plane closed by a cap edge running the other way, and the cap's faces
 // covering the section once (their total area equals the section's net area,
@@ -2170,9 +2178,7 @@ function cutFaceProblem(soup, axisIdx, planeVal) {
       net += (soup[a+o1] * soup[b+o2] - soup[b+o1] * soup[a+o2]) / 2;
     }
   }
-  if (against) {
-    return 'the piece\'s faces point inward (it is inside-out), so a cut face cannot be wound to match them';
-  }
+  if (against) return CUT_INSIDE_OUT_REASON;
   if (open) return open + ' edge(s) of the cut face were left open';
   if (Math.abs(capArea - Math.abs(net)) > 1e-4 * Math.max(1, Math.abs(net))) {
     return 'the cut face came out ' + capArea.toFixed(2) + ' mm² for a section of ' +
@@ -2191,7 +2197,11 @@ function cutOneSide(soup, axisIdx, plane, keepMin) {
   }
   if (!out || out.length < 9) throw cutRefused('nothing is left on one side of the red plane');
   const problem = cutFaceProblem(out, axisIdx, plane);
-  if (problem) throw cutRefused(problem);
+  if (problem) {
+    const err = cutRefused(problem);
+    if (problem === CUT_INSIDE_OUT_REASON) err.insideOut = true;
+    throw err;
+  }
   return out;
 }
 
@@ -2231,6 +2241,217 @@ function splitBothSides(model, axis, leftPlane, rightPlane) {
     right: geo(cutOneSide(soup, axisIdx, rightPlane, true)),
     engine: 'display'
   };
+}
+
+// ===================== Cut on an inside-out piece =====================
+// A piece whose faces all point inward (negative volume; USB_bit.stl is one)
+// cannot be cut as it is: cutFaceProblem refuses it, since no cut face can be
+// wound to match faces that point the wrong way. The refusal offers one
+// button, CUT_RIGHT_SIDE_OUT_LABEL. Its click runs the same Cut on a copy of
+// the piece with every triangle's vertex order reversed, and the piece the
+// Cut replaces (its splitReplace source) is the original, untouched: so the
+// turn and the cut are one Undo step, and that Undo puts the original back
+// bit for bit. Nothing is turned without the click.
+//
+// Only a piece that is inside-out AS A WHOLE qualifies. Its shells (the
+// separate closed surfaces in it) are judged one by one: a shell should
+// enclose positive volume when it sits inside an even number of the others
+// (a body) and negative when inside an odd number (a cavity). Every shell
+// wrong -> turn them all. Some wrong and some right -> turning the whole
+// piece would turn the right ones inside-out, so the Cut is refused and the
+// wrong shells are named.
+const CUT_RIGHT_SIDE_OUT_LABEL = 'Turn it right-side-out, then cut';
+
+// The same soup with every triangle's vertex order reversed (a b c -> a c b).
+// Values are moved, never recomputed, so turning twice gives the soup back
+// bit for bit.
+function cutReverseWinding(soup) {
+  const out = new Float32Array(soup.length);
+  for (let t = 0; t + 8 < soup.length; t += 9) {
+    out[t] = soup[t]; out[t + 1] = soup[t + 1]; out[t + 2] = soup[t + 2];
+    out[t + 3] = soup[t + 6]; out[t + 4] = soup[t + 7]; out[t + 5] = soup[t + 8];
+    out[t + 6] = soup[t + 3]; out[t + 7] = soup[t + 4]; out[t + 8] = soup[t + 5];
+  }
+  return out;
+}
+
+// The soup's shells, in the order their first triangle appears: triangles
+// joined through shared vertices, each with its signed volume, its box, how
+// many other shells it sits inside, and whether it faces the wrong way.
+function cutShellsOf(soup) {
+  const nt = Math.floor(soup.length / 9);
+  const parent = new Int32Array(nt);
+  for (let i = 0; i < nt; i++) parent[i] = i;
+  const find = (i) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
+  const seen = new Map();
+  for (let t = 0; t < nt; t++) {
+    for (let v = 0; v < 3; v++) {
+      const o = t * 9 + v * 3;
+      const k = soup[o] + ',' + soup[o + 1] + ',' + soup[o + 2];
+      const u = seen.get(k);
+      if (u === undefined) seen.set(k, t);
+      else { const a = find(u), b = find(t); if (a !== b) parent[b] = a; }
+    }
+  }
+  const byRoot = new Map(), shells = [];
+  for (let t = 0; t < nt; t++) {
+    const r = find(t);
+    let s = byRoot.get(r);
+    if (!s) {
+      s = { tris: [], volume: 0, min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity],
+            depth: 0, wrong: false };
+      byRoot.set(r, s);
+      shells.push(s);
+    }
+    s.tris.push(t);
+  }
+  for (const s of shells) {
+    // About the shell's first vertex, so a piece far from the origin does not
+    // lose its volume to cancellation.
+    const o0 = s.tris[0] * 9, rx = soup[o0], ry = soup[o0 + 1], rz = soup[o0 + 2];
+    let v6 = 0;
+    for (const t of s.tris) {
+      const o = t * 9;
+      for (let v = 0; v < 9; v += 3) {
+        for (let a = 0; a < 3; a++) {
+          const c = soup[o + v + a];
+          if (c < s.min[a]) s.min[a] = c;
+          if (c > s.max[a]) s.max[a] = c;
+        }
+      }
+      const ax = soup[o] - rx, ay = soup[o + 1] - ry, az = soup[o + 2] - rz;
+      const bx = soup[o + 3] - rx, by = soup[o + 4] - ry, bz = soup[o + 5] - rz;
+      const cx = soup[o + 6] - rx, cy = soup[o + 7] - ry, cz = soup[o + 8] - rz;
+      v6 += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
+    }
+    s.volume = v6 / 6;
+  }
+  // Is point p inside shell s? Crossings of a ray, counted on three skew
+  // directions and taken by majority, so a ray that grazes an edge is
+  // outvoted rather than trusted.
+  const DIRS = [[0.5299, 0.6831, 0.5028], [-0.6113, 0.3917, 0.6877], [0.2741, -0.8423, 0.4641]];
+  function inside(p, s) {
+    for (let a = 0; a < 3; a++) if (p[a] < s.min[a] || p[a] > s.max[a]) return false;
+    let votes = 0;
+    for (const d of DIRS) {
+      let hits = 0;
+      for (const t of s.tris) {
+        const o = t * 9;
+        const e1x = soup[o + 3] - soup[o], e1y = soup[o + 4] - soup[o + 1], e1z = soup[o + 5] - soup[o + 2];
+        const e2x = soup[o + 6] - soup[o], e2y = soup[o + 7] - soup[o + 1], e2z = soup[o + 8] - soup[o + 2];
+        const px = d[1] * e2z - d[2] * e2y, py = d[2] * e2x - d[0] * e2z, pz = d[0] * e2y - d[1] * e2x;
+        const det = e1x * px + e1y * py + e1z * pz;
+        if (Math.abs(det) < 1e-12) continue;
+        const tx = p[0] - soup[o], ty = p[1] - soup[o + 1], tz = p[2] - soup[o + 2];
+        const u = (tx * px + ty * py + tz * pz) / det;
+        if (u < 0 || u > 1) continue;
+        const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+        const w = (d[0] * qx + d[1] * qy + d[2] * qz) / det;
+        if (w < 0 || u + w > 1) continue;
+        if ((e2x * qx + e2y * qy + e2z * qz) / det > 1e-9) hits++;
+      }
+      if (hits & 1) votes++;
+    }
+    return votes >= 2;
+  }
+  for (const s of shells) {
+    const o = s.tris[0] * 9, p = [soup[o], soup[o + 1], soup[o + 2]];
+    for (const other of shells) if (other !== s && inside(p, other)) s.depth++;
+    const span = Math.max(s.max[0] - s.min[0], s.max[1] - s.min[1], s.max[2] - s.min[2]);
+    const flat = !(Math.abs(s.volume) > 1e-9 * span * span * span);   // open or flat: no side to face
+    s.wrong = !flat && (s.depth % 2 === 0 ? s.volume < 0 : s.volume > 0);
+  }
+  return shells;
+}
+
+// The soup a Cut on this model runs on: the raw one when splitBothSides takes
+// the raw route, else the display mesh. sizeOrder maps that soup's axes to
+// display X, Y (up), Z, for naming a shell by its size.
+function cutSoupOf(model) {
+  if (model.rawTris && model.centerOffset && model.rawAxis === 'zup') {
+    return { soup: model.rawTris, sizeOrder: [0, 2, 1] };
+  }
+  return { soup: displaySoupOf(model.geometry), sizeOrder: [0, 1, 2] };
+}
+
+// { whole, shells, wrong, sizeOrder }: whole is true when every shell faces
+// the wrong way, i.e. reversing every triangle puts the piece right.
+function cutInsideOutVerdict(model) {
+  const src = cutSoupOf(model);
+  const shells = cutShellsOf(src.soup);
+  const wrong = [];
+  shells.forEach((s, i) => { if (s.wrong) wrong.push(i); });
+  return { whole: shells.length > 0 && wrong.length === shells.length, shells, wrong, sizeOrder: src.sizeOrder };
+}
+
+// "shell 2 of 2 (12 triangles, 20.0 x 10.0 x 6.0 mm) is inside-out, while
+// shell 1 is not" - which shells, in words a person can find on the piece.
+// Shells are numbered in the order the file lists them; sizes are display
+// X x Y (up) x Z.
+function cutPartlyInsideOutReason(v) {
+  const n = v.shells.length;
+  const and = (xs) => xs.length < 2 ? xs.join('') : xs.slice(0, -1).join(', ') + ' and ' + xs[xs.length - 1];
+  const desc = v.wrong.map(i => {
+    const s = v.shells[i];
+    const dims = v.sizeOrder.map(a => (s.max[a] - s.min[a]).toFixed(1)).join(' x ');
+    return 'shell ' + (i + 1) + ' of ' + n + ' (' + s.tris.length + ' triangles, ' + dims + ' mm)';
+  });
+  const right = [];
+  for (let i = 0; i < n; i++) if (v.wrong.indexOf(i) < 0) right.push(i + 1);
+  const others = (right.length === 1 ? 'shell ' : 'shells ') + and(right.map(String));
+  return 'the piece is only partly inside-out: ' + and(desc) + (v.wrong.length === 1 ? ' is' : ' are') +
+    ' inside-out, while ' + others + (right.length === 1 ? ' is' : ' are') + ' not, so turning the whole piece' +
+    ' would turn ' + others + ' inside-out instead; nothing was turned';
+}
+
+// A copy of the model, every triangle reversed, for splitBothSides to cut.
+// The model itself is not touched.
+function cutRightSideOutCopy(model) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(cutReverseWinding(displaySoupOf(model.geometry)), 3));
+  g.computeVertexNormals();
+  g.computeBoundingBox();
+  return {
+    id: model.id, name: model.name, size: model.size, geometry: g,
+    rawTris: model.rawTris ? cutReverseWinding(model.rawTris) : null,
+    rawAxis: model.rawAxis || null,
+    centerOffset: model.centerOffset || null
+  };
+}
+
+// The offer: one button in the status line and the same one in the Cut panel,
+// both for the piece that was refused (state.cutRightSideOutOffer.id).
+function cutOfferRightSideOut(model, message) {
+  state.cutRightSideOutOffer = { id: model.id };
+  setStatus(message, true);
+  const el = document.getElementById('status');
+  if (el && typeof el.appendChild === 'function') {
+    el.appendChild(document.createTextNode(' '));
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.id = 'status-cut-right-side-out';
+    b.className = 'btn btn-secondary status-action';
+    b.textContent = CUT_RIGHT_SIDE_OUT_LABEL;
+    b.addEventListener('click', cutRightSideOutClicked);
+    el.appendChild(b);
+  }
+  syncCutRightSideOutButton();
+}
+
+function cutClearRightSideOutOffer() {
+  state.cutRightSideOutOffer = null;
+  syncCutRightSideOutButton();
+}
+
+function syncCutRightSideOutButton() {
+  const b = document.getElementById('btn-cut-right-side-out');
+  if (!b) return;
+  const offer = state.cutRightSideOutOffer, m = getActiveModel();
+  b.hidden = !(offer && state.cutterOpen && m && m.id === offer.id);
+}
+
+function cutRightSideOutClicked() {
+  cutActiveModel({ rightSideOut: true });
 }
 
 // Compute a half's centerOffset directly from its own raw bounding box,
