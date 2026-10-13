@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=lift2" />
+  <link rel="stylesheet" href="styles.css?v=bend1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -582,6 +582,28 @@
                     <input type="number" id="inp-extend-mm" min="0.1" max="2000" step="0.1"
                            placeholder="mm" aria-label="Extend to length, mm">
                   </div>
+                  <div class="vp-row vp-row-full vp-row-bend">
+                    <button id="btn-bend" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="bend-panel"
+                            title="Bend the piece like a pipe or plate bender, inside one straight stretch: the section is carried round the arc exactly - a plate's thickness, a tube's bore and wall do not change - and everything past the bend turns with it, rigidly. Opens a panel with a live ghost of the result; click the piece to set where.">Bend</button>
+                  </div>
+                  <div class="vp-bend-panel" id="bend-panel" hidden>
+                    <label class="vp-bend-field" title="Where the bend's middle goes, in mm along the piece from its near (low) end. Click the piece to set it.">Where
+                      <input type="number" id="inp-bend-where" min="0" step="0.1" aria-label="Bend at, mm from the near end"><span>mm</span></label>
+                    <label class="vp-bend-field" title="How far it folds, 1 to 180 degrees.">Angle
+                      <input type="number" id="inp-bend-angle" min="1" max="180" step="1" value="90" aria-label="Bend angle, degrees"><span>°</span></label>
+                    <label class="vp-bend-field" title="Radius to the section's centre line. Blank: 2.5 times the section's width in the bend direction. It must be more than half that width, or the inside face would turn inside out.">Radius
+                      <input type="number" id="inp-bend-radius" min="0.01" step="0.1" placeholder="auto" aria-label="Bend radius, mm"><span>mm</span></label>
+                    <label class="vp-bend-field" title="Which of the piece's sides it folds toward. Up is its own +Z.">Toward
+                      <select id="sel-bend-toward" class="vp-select" aria-label="Fold toward"></select></label>
+                    <label class="vp-bend-field" id="bend-roll-row" hidden title="For a section that is not a rectangle: turn the fold direction about the piece's axis, in 15° steps.">Roll
+                      <input type="number" id="inp-bend-roll" step="15" value="0" aria-label="Roll, degrees"><span>°</span></label>
+                    <p id="bend-readout" class="bend-readout">—</p>
+                    <div class="vp-row vp-row-pair">
+                      <button id="btn-bend-go" class="btn btn-secondary" type="button" disabled
+                              title="Bend the piece as the ghost shows. One Undo puts it back.">Bend</button>
+                      <button id="btn-bend-cancel" class="btn btn-secondary" type="button" title="Close the panel; the piece is unchanged.">Cancel</button>
+                    </div>
+                  </div>
                   <div class="vp-row vp-row-mirror">
                     <button id="btn-mirror" class="btn btn-secondary" type="button"
                             title="Reflect the piece across a plane perpendicular to its dominant axis. The other two axes stay bit for bit. Default plane is the clean-band cut Extend would use; type 0 for X→−X. Refuses a plane that is not an exact float32 mirror. Leave the box blank and press once to read the axis and the plane.">Mirror</button>
@@ -1144,7 +1166,7 @@
   <script src="nso_stock.js?v=stock4"></script>
   <script src="nso_paint_delete.js?v=del1"></script>
   <script src="nso_skin_band.js?v=skin2"></script>
-  <script src="nso_path_sweep.js?v=taper2"></script>
+  <script src="nso_path_sweep.js?v=bend1"></script>
   <!-- Trunk-then-branches: the routing that drives the sweep, on top of
        auto-aim's detection and base search. After BOTH of them, because it
        calls into both by name and refuses when either is missing. Unwired,
@@ -1162,7 +1184,7 @@
   <script src="nso_slicer.js?v=slice1"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
   <script src="nso_relief.js?v=relief2"></script>
-  <script src="app-core.js?v=zoom1"></script>
+  <script src="app-core.js?v=bend1"></script>
 
 
 
@@ -1181,7 +1203,12 @@
   <script src="app-fatten.js?v=box2"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
-  <script src="nso_section.js?v=polish2"></script>
+  <script src="nso_section.js?v=box2"></script>
+  <!-- Bend: the section carried round an arc. After nso_path_sweep.js (its
+       sweepArc), app-extend.js (the band finder), nso_section.js (the fit)
+       and app-sculpt.js (the commit). See docs/BEND.md. -->
+  <script src="nso_bend.js?v=bend1"></script>
+  <script src="app-bend.js?v=bend1"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=polish2"></script>

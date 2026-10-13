@@ -46,6 +46,7 @@ Current roster, by category:
 |---|---|---|---|
 | Smooth (`app-sculpt.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
 | Extend (`app-extend.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/EXTEND.md` |
+| Bend (`app-bend.js`; the geometry is `nso_bend.js`) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/BEND.md` |
 | Mirror (`app-mirror.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/MIRROR.md` |
 | Fatten (`app-fatten.js`; no UI since Scale part 3 - the card's Offset replaced it) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/FATTEN.md` |
 | Pottery Wheel (`app-wheel.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/POTTERY-WHEEL.md` |
@@ -240,7 +241,7 @@ The groups, and what decides which one a row belongs to:
 
 | Group | Holds |
 |---|---|
-| **Shape** | changes the form: Soften, Smooth, Extend, Mirror, Thicken (Fatten / Shrink moved to the Scale card's Offset) |
+| **Shape** | changes the form: Soften, Smooth, Extend, Bend, Mirror, Thicken (Fatten / Shrink moved to the Scale card's Offset) |
 | **Paint** | the mask itself: Paint Selected / Excluded / Clear, Delete painted, Extract selection |
 | **Surface** | adds relief to a face: Skin face / wrap / patch, Texture |
 | **Sculpt** | freehand and local: Brush, Carve |
@@ -1318,6 +1319,31 @@ Three things a later ticket should read before touching this:
 `tools/mesh_validate.py` before/after, machine-compared) and
 `npm run wire:extend` (28 checks, real app). All three in `npm test`, along
 with `npm run paint:scope`, which was written but never wired into the suite.
+
+## Bend - a pipe or plate bender (2026-10-13)
+`nso_bend.js` (headless) and `app-bend.js` (the panel), loaded after
+`nso_section.js` at `?v=bend1`. UI is a **Bend** button in the Finish menu's
+Shape group, in the row under Extend, opening a small panel (Where, Angle,
+Radius, Toward / Roll, Bend, Cancel) with a live ghost and a marker on the
+piece. Full write-up: `docs/BEND.md`.
+
+Folds a piece inside one clean constant-section band (Extend's band finder)
+and holds the section exact: the zone's walls are cut at its two ends, the
+section is swept round the arc with radial stations
+(`NSO_PathSweep.sweepArc`, new, multi-loop and non-convex), and everything
+past the zone turns rigidly. Before a later ticket touches it:
+- **The axis is the longest with a clean band**, not Extend's least-oblique
+  one: a bent plate's least-oblique axis is always its width, which would make
+  a second bend impossible.
+- **Rigid to 1e-9 is a float64 claim.** Stored float32, the far part is the
+  nearest float32 to its exact rigid image (gated), not rigid to 1e-9 mm.
+- **The step count has a volume rule** as well as the 0.02 mm sag rule, so
+  the arc's volume is `A x centroid travel` to 0.05% on its own.
+- **Self-intersection** is impossible for a plain prism up to 180°; a tab or
+  flange can fold into the near arm, and that is checked and refused.
+
+`npm run bend:test` (headless) and `npm run bend:drive` (real app), both in
+`npm test`.
 
 ## Mirror - exact reflection across one plane (2026-09-21)
 `app-mirror.js`, loaded at `?v=mirror1` straight after `app-extend.js`. It
