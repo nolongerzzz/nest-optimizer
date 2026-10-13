@@ -70,7 +70,7 @@ Current roster, by category:
 | G-scope supports (`app-gscope-support.js`) | sub-region | the marker scan's skipList, `nsoMaskFaceList(m)` shifted into the world frame; refused by name when the piece is painted and turned. Generating adds a piece (none); removing or changing one acts on the whole support piece | header comment + `docs/GCODE-SUPPORTS.md` |
 | G-scope Slice (`app-gscope-slice.js`) | **none** — Slice reads geometry and writes nothing; Export piece to plate adds a copy of the piece and edits none, as G-scope's own Export to plate does | n/a | header comment + `docs/SLICER.md` §6 |
 | Picture (`app-relief.js`, Gen+ -> Picture) | none — adds a piece, reads and edits none | n/a | header comment + `docs/RELIEF.md` |
-| Lift (`app-gscope-lift.js`, G-scope -> Features) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/LIFT.md` |
+| Lift (`app-gscope-lift.js`, G-scope -> Lift: Pick, and Strip's Lift N / Remove N) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/LIFT.md` |
 
 ### The SELECT list is an operand; the EXCLUDE list is still only a veto
 
@@ -558,6 +558,30 @@ G-scope-specific logging - rows for its legend / 3D-view clicks, or a check of
 a slice's rendered layers against `NSO_Slicer`'s result (the "phantom layers"
 seen on the plate). Proposed in the PR; nothing in the watcher checks slice
 rendering today.
+
+## Lift 2 - auto-aim and Strip (2026-10-13)
+Branch `claude/lift-auto`, off `claude-wip`. Full write-up: **`docs/LIFT.md` §5**.
+
+- **The map decides where, the mesh decides what:** `nso_lift_auto.js` rasterizes
+  the piece's upward-facing surface looking down the base (0.25 mm cells,
+  coarsened in words past 4 M), estimates the base with a rolling ball
+  (`NSO_LiftAuto.estimateBase`, the one replaceable function; radius 0.2 of the
+  shorter footprint side, 4 - 15 mm), and calls a cell a detail at more than
+  0.32 mm (over a print's layer step). Each island is cut at its own plane;
+  refused in words past 0.15 mm of bend. The pieces are the real triangles, cut
+  with Phase 1's `capFor` / `rawFlatCapLoops`.
+- **`nso_lift.js`:** behaviour unchanged; it exports `internals` (`planeFrame`,
+  `boundaryLoops`, `capFor`) for Lift 2.
+- **UI:** the G-scope section is now "Lift" with Pick | Strip. Pick = Phase 1,
+  plus the map on a face Phase 1 calls curved. Strip = groups by geometry
+  (small dots / lines & squiggles / large shapes / can't lift), tick boxes,
+  Lift N, Remove N; one Undo either way.
+- **Paint scope:** whole-piece for Lift and Remove (roster row above).
+- **Checks:** `lift:auto-test` (398), `lift:auto-drive` (40) in `npm test`;
+  `lift:auto-shots` keeps screenshots in `tools/lift-auto-out/` (gitignored).
+  Phase 1's `lift:test` (771) and `lift:drive` (58) unchanged.
+- **Tags:** `nso_lift.js` and `app-gscope-lift.js` lift1 -> lift2,
+  `nso_lift_auto.js` new at lift2, `styles.css` box2 -> lift2.
 
 ## Lift, phase 1 - details off a flat face, the face left flat (2026-10-13)
 Branch `claude/lift-flat`, off `claude-wip`. Full write-up: **`docs/LIFT.md`**.
