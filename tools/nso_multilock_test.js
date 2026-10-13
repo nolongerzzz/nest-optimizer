@@ -119,6 +119,16 @@ async function clickPiece(page, id) {
 }
 /* A real left-drag on a clear patch of plate, the gesture that orbits. */
 async function orbitDelta(page) {
+  /* From the start view every time. Each measurement drags the same way,
+     up and right, so without this the camera walks a little further round
+     on every call, and where it ends up depends on the canvas's shape: on
+     the full-width canvas the third call left it level with the plate,
+     edge-on, with no patch of plate to drag on at all. */
+  await page.evaluate(() => {
+    state.camera.position.set(160, 180, 200);
+    state.controls.target.set(0, 0, 0);
+    state.controls.update();
+  });
   const before = await page.evaluate(() => state.camera.position.toArray());
   const pt = await page.evaluate(() => {
     const r = state.renderer.domElement.getBoundingClientRect();
