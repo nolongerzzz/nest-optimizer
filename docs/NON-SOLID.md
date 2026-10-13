@@ -173,6 +173,7 @@ unchanged.
 | Smooth (`app-sculpt.js`) | triangle count, open-edge delta, non-manifold delta, degenerate delta, paint stand-down | the signed-volume sign check and the 25 % volume budget, **replaced** by the same 25 % budget on surface area |
 | `tools/mesh_validate.py --gate --non-solid` | non-manifold edges, inconsistent winding, degenerate triangles, piercing self-intersections, **plus** the wall/gap check (section 4) | the open-edge count |
 | *Check piece* (`app-defects.js` / `nso-defects.js`) — the viewport overlay | every measurement above, flag or no flag: open edges are still counted and still drawn in red, they just stop being a failure. The wall/gap check runs at 0.42 mm either way, because the overlay is a viewer and not the gate | the open-edge count, **in the verdict only** |
+| Findings card (`app-findings.js` / `nso-findings.js`, `docs/FINDINGS.md`) | the same report as *Check piece*; the open edges get a row and rings like any other finding | the open-edge row's fault styling and its Cap button: the row is **declared**, and the green "Nothing wrong found" row still shows |
 | `tools/stl_watertight_check.py --odd --non-solid` | non-manifold edges (count > 2), `--degen` | open edges (count == 1) |
 
 Not skipped anywhere: **self-intersection, degenerate triangles, non-manifold

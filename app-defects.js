@@ -57,7 +57,16 @@
  * edge count. The flag changes the VERDICT only - open edges stop being a
  * failure - and changes no measurement, so a piece flagged non-solid still
  * gets its boundary drawn in red, now labelled as declared rather than as a
- * fault. docs/NON-SOLID.md §3, the rule for new consumers. */
+ * fault. docs/NON-SOLID.md §3, the rule for new consumers.
+ *
+ * THE FINDINGS CARD (app-findings.js) sits on top of this file and draws
+ * nothing of its own onto the piece: it reads the report this file stored,
+ * adds a ring and a number per problem, and opens a card. This file tells it
+ * when a check lands, when one is cleared and why, through three optional
+ * hooks - nsoFindingsOnShow, nsoFindingsOnClear, nsoFindingsFrame - so the
+ * overlay still works, and its own drive check still passes, without it.
+ * `nsoDefectsScan` is the battery without the drawing, so the card can take a
+ * "before" reading without a second copy of the placement code below. */
 (function () {
   'use strict';
 
@@ -181,11 +190,18 @@
     if (o.geometry) o.geometry.dispose();
     if (o.material) o.material.dispose();
   }
-  function clearMarks() {
+  /* `why` is passed on to the card: 'hide' (the button, or the card's own
+     close), 'stale' (the piece changed under the marks), 'replace' (a new
+     check is about to be drawn). */
+  function clearMarks(why) {
     if (!shown) return;
     if (shown.group && shown.group.parent) shown.group.parent.remove(shown.group);
     disposeTree(shown.group);
+    var was = shown;
     shown = null;
+    if (typeof window.nsoFindingsOnClear === 'function') {
+      try { window.nsoFindingsOnClear(why || 'hide', was.modelId); } catch (e) { console.warn('nsoFindingsOnClear', e); }
+    }
   }
 
   /* ---- the HUD line ---- */
@@ -244,32 +260,18 @@
 
   /* ---- running it ---- */
 
-  /* Runs the battery on the selected piece and draws it. Returns the report,
-     or null with a status line saying why not. Synchronous: the button defers
-     the call by a frame so the "Checking..." line paints first, and the tests
-     call this directly. */
-  window.nsoDefectsShow = function () {
+  /* The battery on the selected piece, and where its raw coordinates sit on
+     the piece's display mesh - everything nsoDefectsShow draws from, drawing
+     nothing. Returns { model, placed, host, raw, report, off, nonSolid }, or
+     { error } with the sentence the status line would have said. */
+  function scan() {
     var m = activeModel();
-    if (!m) {
-      if (typeof setStatus === 'function') setStatus('Select a piece first - the check runs on one piece', true);
-      return null;
-    }
+    if (!m) return { error: 'Select a piece first - the check runs on one piece' };
     var p = placedFor(m);
-    if (!p) {
-      if (typeof setStatus === 'function') setStatus('Put ' + m.name + ' on the plate first', true);
-      return null;
-    }
-    if (typeof window.NSO_Defects === 'undefined') {
-      if (typeof setStatus === 'function') setStatus('Checker not loaded', true);
-      return null;
-    }
+    if (!p) return { error: 'Put ' + m.name + ' on the plate first' };
+    if (typeof window.NSO_Defects === 'undefined') return { error: 'Checker not loaded' };
     var raw = (typeof getModelRawSoup === 'function') ? getModelRawSoup(m) : m.rawTris;
-    if (!raw || !raw.length) {
-      if (typeof setStatus === 'function') setStatus('No geometry to check on ' + m.name, true);
-      return null;
-    }
-
-    clearMarks();
+    if (!raw || !raw.length) return { error: 'No geometry to check on ' + m.name };
 
     var nonSolid = (typeof window.nsoNonSolid === 'function') ? window.nsoNonSolid(m) : false;
     var report;
@@ -277,15 +279,46 @@
       report = window.NSO_Defects.locate(raw, { nonSolid: nonSolid });
     } catch (e) {
       console.warn('nsoDefectsShow', e);
-      if (typeof setStatus === 'function') setStatus('Check failed: ' + ((e && e.message) || e), true);
-      return null;
+      return { error: 'Check failed: ' + ((e && e.message) || e) };
     }
-
     var off = frameFor(raw, p.mesh.geometry);
-    if (!off) {
-      if (typeof setStatus === 'function') setStatus('Check ran but could not be placed on ' + m.name, true);
+    if (!off) return { error: 'Check ran but could not be placed on ' + m.name };
+    return { model: m, placed: p, host: p.mesh, raw: raw, report: report, off: off, nonSolid: nonSolid,
+             rawRef: m.rawTris, geoRef: m.geometry };
+  }
+  window.nsoDefectsScan = function () {
+    var s = scan();
+    return s.error ? null : s;
+  };
+
+  /* Runs the battery on the selected piece and draws it. Returns the report,
+     or null with a status line saying why not. Synchronous: the button defers
+     the call by a frame so the "Checking..." line paints first, and the tests
+     call this directly.
+
+     opts.quiet  leave the status line alone (the HUD still updates). The
+                 card's re-scan after a fix uses it, so the fix's own status
+                 line - which says what it did - is not overwritten.
+     opts.scan   a nsoDefectsScan() result to draw instead of running the
+                 battery again. Ignored unless it is still this piece's
+                 current mesh. */
+  window.nsoDefectsShow = function (opts) {
+    opts = opts || {};
+    var say = function (text, bad) { if (!opts.quiet && typeof setStatus === 'function') setStatus(text, bad); };
+    var s = opts.scan;
+    var m0 = activeModel();
+    var p0 = m0 ? placedFor(m0) : null;
+    if (!(s && !s.error && m0 && s.model === m0 && p0 && s.host === p0.mesh &&
+          s.rawRef === m0.rawTris && s.geoRef === m0.geometry)) {
+      s = scan();
+    }
+    if (s.error) {
+      if (typeof setStatus === 'function') setStatus(s.error, true);
       return null;
     }
+    var m = s.model, p = s.placed, report = s.report, off = s.off, nonSolid = s.nonSolid;
+
+    clearMarks('replace');
 
     var group = new THREE.Group();
     group.name = 'nso-defect-marks';
@@ -301,23 +334,26 @@
     for (var i = 0; i < layers.length; i++) if (layers[i]) { group.add(layers[i]); drawn++; }
     p.mesh.add(group);
 
-    shown = { modelId: m.id, host: p.mesh, group: group, report: report };
+    shown = { modelId: m.id, host: p.mesh, group: group, report: report, off: off };
     syncButton();
 
-    if (typeof setStatus === 'function') {
-      var un = unpainted(report);
-      var line = 'Check ' + m.name + ': ' + report.verdict + ' - ' + fmt(report);
-      if (!drawn) line += ' - nothing to paint, the piece is clean on every check that has a place on it';
-      if (nonSolid && report.openEdges) line += ' - open edges shown but not counted against it (non-solid)';
-      if (un.length) line += ' - also ' + un.join(', ') + ' (counted, not painted)';
-      setStatus(line, report.verdict === 'FAIL');
-    }
+    var un = unpainted(report);
+    var line = 'Check ' + m.name + ': ' + report.verdict + ' - ' + fmt(report);
+    if (!drawn) line += ' - nothing to paint, the piece is clean on every check that has a place on it';
+    if (nonSolid && report.openEdges) line += ' - open edges shown but not counted against it (non-solid)';
+    if (un.length) line += ' - also ' + un.join(', ') + ' (counted, not painted)';
+    say(line, report.verdict === 'FAIL');
     hud('Check ' + report.verdict + ' - ' + fmt(report));
+    if (typeof window.nsoFindingsOnShow === 'function') {
+      try {
+        window.nsoFindingsOnShow({ model: m, placed: p, host: p.mesh, report: report, off: off });
+      } catch (e) { console.warn('nsoFindingsOnShow', e); }
+    }
     return report;
   };
 
   window.nsoDefectsHide = function () {
-    clearMarks();
+    clearMarks('hide');
     syncButton();
     return true;
   };
@@ -333,7 +369,7 @@
     var m = modelById(shown.modelId);
     var p = m ? placedFor(m) : null;
     if (p && p.mesh === shown.host && shown.group.parent === shown.host) return false;
-    clearMarks();
+    clearMarks('stale');
     return true;
   }
 
@@ -391,7 +427,11 @@
         hud('Checking ' + m.name + '...');
         btn.disabled = true;
         setTimeout(function () {
-          try { window.nsoDefectsShow(); } finally { syncButton(); }
+          try {
+            // Pressing Check frames the camera on the piece and what it found;
+            // a re-scan after a fix does not (app-findings.js).
+            if (window.nsoDefectsShow() && typeof window.nsoFindingsFrame === 'function') window.nsoFindingsFrame();
+          } finally { syncButton(); }
         }, 0);
       });
       btn._defectsBound = true;
