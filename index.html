@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=box2" />
+  <link rel="stylesheet" href="styles.css?v=findings1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -797,6 +797,24 @@
                   aria-pressed="false"
                   title="Watch: log errors / failed loads / status lines, and check the rendered scene against the app state after every Undo, bake and tool switch.">&#128065;</button>
         </div>
+        <!-- Findings: what Check found, one row per kind, docked at the right
+             edge under the top-right buttons. app-findings.js fills it and
+             positions it; hidden until Check runs. docs/FINDINGS.md. -->
+        <section id="findings-card" class="findings-card" hidden aria-label="Findings" aria-live="polite">
+          <header class="findings-head">
+            <h2>Findings</h2>
+            <span id="findings-piece" class="findings-piece"></span>
+            <button id="btn-findings-close" class="findings-close" type="button" aria-label="Close findings"
+                    title="Close the card and clear the check's marks">&times;</button>
+          </header>
+          <div id="findings-stale" class="findings-stale" hidden>
+            <span>The piece changed. Check again</span>
+            <button id="btn-findings-recheck" class="btn btn-secondary findings-recheck" type="button">Check again</button>
+          </div>
+          <p id="findings-result" class="findings-result" hidden></p>
+          <ul id="findings-rows" class="findings-rows"></ul>
+          <p id="findings-unplaced" class="findings-note" hidden></p>
+        </section>
         <div class="viewport-overlay viewport-overlay-br">
           <p id="adjust-status" class="status-hud status-hud-id">HUD inside7</p>
           <p id="status" class="status status-hud"></p>
@@ -1104,6 +1122,7 @@
   </div>
   <script src="NSO_Repair.js?v=repair1"></script>
   <script src="nso-defects.js?v=inside5"></script>
+  <script src="nso-findings.js?v=findings1"></script>
   <script src="nso_planar_fuse.js?v=inside4"></script>
   <script src="nso_skin.js?v=skin4"></script>
   <script src="nso_skin_patch.js?v=skin4"></script>
@@ -1195,7 +1214,9 @@
   <script src="app-tip-orient.js?v=tip3"></script>
   <script src="app-rotate-handles.js?v=rot8"></script>
   <script src="app-move-vertical.js?v=mv2"></script>
-  <script src="app-defects.js?v=inside5"></script>
+  <script src="app-defects.js?v=findings1"></script>
+  <!-- After app-defects.js, whose hooks and scan it uses. -->
+  <script src="app-findings.js?v=findings1"></script>
   <script src="app-measure.js?v=measure2"></script>
   <!-- The library write features. access first: it holds the gate, the
        target repository and the token key that the other two read. -->

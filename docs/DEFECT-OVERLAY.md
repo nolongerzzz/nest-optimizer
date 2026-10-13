@@ -193,6 +193,9 @@ button's `setTimeout(…, 0)` in `app-defects.js` to 400 ms and run
 - No live re-check. See "On demand" above.
 - Winding and degenerate triangles are counted, not painted.
 - The overlay refuses nothing. It is a viewer; `Seal ▸ Repair` is what acts.
+  Since 2026-10-13 the Findings card (`docs/FINDINGS.md`) shows the same
+  report as rows with a ring on each problem, and its fix buttons press the
+  Finish menu's own Cap and Seal; the marks and their colours are unchanged.
 - The report is in memory only, like the paint and the two flags. It is not
   written to the STL or the 3MF and does not survive a round trip.
 - One piece at a time. The battery is per piece and so is the button; a
