@@ -123,6 +123,28 @@ withApp(async (page, logs) => {
       ', finish ends ' + Math.round(r.row[10].r));
   }
 
+  /* At the narrowest window the whole row still fits (1144 px, measured),
+     no slab gives way: each keeps its label's width and none overlaps the
+     next. Narrower than that the row runs under Finish - known, flagged. */
+  {
+    const atRest = await page.evaluate((row) => row.map(id => {
+      const e = document.getElementById(id);
+      return (e.tagName === 'DETAILS' ? e.querySelector(':scope > summary') : e).getBoundingClientRect().width;
+    }), ROW);
+    await page.setViewportSize({ width: 1144, height: 820 });
+    await page.waitForTimeout(150);
+    const r = await page.evaluate((row) => row.map(id => {
+      const e = document.getElementById(id);
+      const b = (e.tagName === 'DETAILS' ? e.querySelector(':scope > summary') : e).getBoundingClientRect();
+      return { id, x: b.left, r: b.right, w: b.width };
+    }), ROW);
+    check('at 1144 px wide no row slab shrinks or overlaps the next',
+      r.every((b, i) => Math.abs(b.w - atRest[i]) < 0.5 && (i === 0 || b.x >= r[i - 1].r - 0.5)),
+      r.map(b => b.id.replace(/^(menu|btn)-/, '') + ' ' + Math.round(b.x) + '..' + Math.round(b.r)).join(' '));
+    await page.setViewportSize({ width: 1500, height: 820 });
+    await page.waitForTimeout(150);
+  }
+
   /* ------------------------------------------------------------------ 4 */
   console.log('\n=== 4. the slab ===');
   {

@@ -3210,6 +3210,9 @@ button.ms-legend-only:hover { border-color: var(--accent); }
   width: var(--shell-col-w);
   pointer-events: none;
 }
+/* A slab never shrinks: squeezed, the plain buttons (Remove, the locks)
+   gave way first and their labels ran into each other. */
+.vp-shell-row > * { flex-shrink: 0; }
 /* Photo, Gen+ (and Finish beyond them) to the right end of the row. */
 .vp-shell-row > #menu-photo { margin-left: auto; }
 
