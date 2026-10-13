@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=inch1" />
+  <link rel="stylesheet" href="styles.css?v=polish1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -446,10 +446,13 @@
               </div>
               <div class="edit-row scale-row" id="scale-offset-row" hidden>
               <label for="scale-offset">Offset</label>
-              <input id="scale-offset" type="number" min="-20" max="20" step="0.1" aria-label="Offset, mm - positive grows, negative shrinks" />
+              <input id="scale-offset" type="number" min="-20" max="20" step="0.1" aria-label="Offset, mm - positive grows, negative shrinks" aria-describedby="scale-offset-note" />
               <span class="hint">mm, wall kept</span>
               <button id="btn-scale-offset" class="btn btn-secondary" type="button" title="Move the whole outside out (positive) or in (negative) by this many mm. Every inner face follows, so walls and floors keep their thickness. Refused where a bore or pocket would close, or a section would drop under the nozzle-safety floor.">Set</button>
               </div>
+              <!-- The Offset row's sentence: too long for the row's unit column, so
+                   it sits under the row and goes with it (styles.css). -->
+              <p class="hint scale-note" id="scale-offset-note">Thin features keep their thickness: a 0.6 mm lid strap stays 0.6 mm.</p>
               <div class="edit-row scale-row" id="scale-factor-row">
               <label for="scale-factor">Whole &times;</label>
               <input id="scale-factor" type="number" min="0.0001" max="10000" step="0.01" value="1" aria-label="Uniform scale factor" />
@@ -1165,11 +1168,11 @@
   <script src="app-fatten.js?v=box2"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
-  <script src="nso_section.js?v=inch1"></script>
+  <script src="nso_section.js?v=polish1"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=inch1"></script>
-  <script src="app-scale.js?v=inch1"></script>
+  <script src="app-scale.js?v=polish1"></script>
   <script src="app-brush.js?v=hollow2"></script>
   <script src="app-wheel.js?v=wheel3"></script>
   <script src="app-fit.js?v=wheel4"></script>

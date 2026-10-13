@@ -67,8 +67,9 @@ async function card(page) {
     return {
       readout: document.getElementById('scale-readout').textContent,
       ring: shown('scale-ring-outer-row') && shown('scale-ring-wall-row'), rod: shown('scale-rod-diameter-row'),
-      bore: !!document.getElementById('scale-ring-bore'), offset: shown('scale-offset-row'), lengthRow: shown('scale-length-row'),
-      fields: { outer: val('scale-ring-outer'), wall: val('scale-ring-wall'), diameter: val('scale-rod-diameter'), length: val('scale-length') },
+      bore: !!document.getElementById('scale-ring-bore'), offset: shown('scale-offset-row'),
+      axisRows: ['length', 'width', 'height'].filter(r => shown('scale-' + r + '-row')),
+      fields: { outer: val('scale-ring-outer'), wall: val('scale-ring-wall'), diameter: val('scale-rod-diameter'), height: val('scale-height') },
       holds: ['scale-ring-outer-row', 'scale-ring-wall-row'].map(id => document.querySelector('#' + id + ' .hint').textContent),
       outer: s && s.outer ? s.outer.diameterMm : null, boreMm: s && s.bore ? s.bore.diameterMm : null,
       wall: s ? s.wallMm : null, length: s ? s.lengthMm : null,
@@ -128,11 +129,14 @@ withApp(async (page, logs) => {
   console.log('   reader:  ' + line(c0));
   check('the readout reads Ring with the published numbers',
     c0.readout === 'Ring Ø20.0 outer · Ø18.0 bore · wall 1.0 · length 8.0 · fits A1 Mini', c0.readout);
-  check('Length, Outer Ø and Wall shown; no Bore Ø, no Diameter, no Offset', c0.lengthRow && c0.ring && !c0.bore && !c0.rod && !c0.offset,
-    JSON.stringify({ length: c0.lengthRow, ring: c0.ring, bore: c0.bore, rod: c0.rod, offset: c0.offset }));
+  // It lies flat, its axis its own Z, so its one axis row is Height (one
+  // L / W / H vocabulary, as a box's).
+  check('Height, Outer Ø and Wall shown; no Length / Width, no Bore Ø, no Diameter, no Offset',
+    c0.axisRows.join() === 'height' && c0.ring && !c0.bore && !c0.rod && !c0.offset,
+    JSON.stringify({ axisRows: c0.axisRows, ring: c0.ring, bore: c0.bore, rod: c0.rod, offset: c0.offset }));
   check('each states its hold: wall kept, outer kept', JSON.stringify(c0.holds) === '["wall kept","outer kept"]', c0.holds.join(' | '));
-  check('prefilled at the readout\'s own precision: 20.0, 1.0, length 8.0',
-    c0.fields.outer === '20.0' && c0.fields.wall === '1.0' && c0.fields.length === '8.0', JSON.stringify(c0.fields));
+  check('prefilled at the readout\'s own precision: 20.0, 1.0, Height 8.0',
+    c0.fields.outer === '20.0' && c0.fields.wall === '1.0' && c0.fields.height === '8.0', JSON.stringify(c0.fields));
   await shot(page, '01-mini-tpu-ring-read');
   const orig = c0;
 

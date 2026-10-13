@@ -615,11 +615,13 @@ function NSO_scaleSelectedModel(spec) {
 
   // Composed figure by figure in the unit the card shows (1c); with mm shown
   // it is the line this has always said.
+  // The before figure is the solver's own span (spanBeforeMm): for Longest
+  // it is the edge the factor was solved on, whichever axis that is.
   var L = NSO_scaleLen, u = NSO_scaleU(), inch = NSO_scaleIn();
   var txt;
   if (r.axis) {
     txt = 'Scale done - ' + NSO_scaleAxisLabel(r.axis) + ' ' +
-      L(r.before.span[r.axis === 'longest' ? 'x' : r.axis], 3) + ' → ' +
+      L(r.spanBeforeMm, 3) + ' → ' +
       L(r.measuredMm, 3) + u + ' (asked ' + (inch ? NSO_scaleTyped(r.targetMm) + u : r.targetMm) + ', off by ' +
       (inch ? r.errMm / NSO_SCALE_MM_PER_IN : r.errMm).toExponential(1) + u + '), factor ' + r.factor.toFixed(6);
   } else {
@@ -657,7 +659,8 @@ function NSO_scaleSelectedModel(spec) {
                        material goes in or comes out inside one clean
                        constant-section band and every wall, floor, hole,
                        pocket and lip keeps its size. An axis with no such band
-                       gets no row. A ring or rod shows Length only.
+                       gets no row. A ring shows its one axis under the same
+                       names - Height when the axis is its Z; a rod, Length.
      Outer Ø / Wall    a ring (nso_ring.js): outer and bore together (wall
                        kept), or the bore alone (outer kept). Part 2's Bore Ø
                        row is gone: Outer Ø and Wall between them reach every
@@ -666,7 +669,9 @@ function NSO_scaleSelectedModel(spec) {
      Offset            Fatten and Shrink, folded in: the outside moves by the
                        mm entered and the inner faces follow (NSO_scaleOffsetRaw
                        above). Shown on every piece but a ring or rod, where Outer Ø /
-                       Diameter and Length already do its job.
+                       Diameter and Length already do its job. The sentence
+                       under it says what wall kept means for a thin feature:
+                       lid_strap's 0.6 mm strap stays 0.6 mm.
      Whole x           today's uniform factor. Reset to 1 on every selection,
                        bake and pose change.
      Longest           today's longest-edge target, prefilled with the longest
@@ -921,7 +926,6 @@ if (typeof document !== 'undefined') {
       var f = function (x) { return NSO_scaleLen(x, NSO_sectionShow); };
       if (v) {
         ['length', 'width', 'height'].forEach(function (k) { if (v[k]) val[k] = f(v[k].mm); });
-        if (v.length && s.shape === 'round') val.length = f(s.lengthMm);
         if (v.outer) { val.outer = f(s.outer.diameterMm); val.wall = f(s.wallMm); }
         if (v.diameter) val.diameter = f(s.outer.diameterMm);
         val.longest = f(v.longestMm);
@@ -1069,6 +1073,12 @@ if (typeof document !== 'undefined') {
           if (hint.dataset.mmText == null) hint.dataset.mmText = hint.textContent;
           hint.textContent = swap(hint.dataset.mmText, 'in');
         }
+      });
+      // A row's sentence carries figures, not just the unit word: converted
+      // figure by figure, like an engine's reason.
+      document.querySelectorAll('#scale-rows .scale-note').forEach(function (n) {
+        if (n.dataset.mmText == null) n.dataset.mmText = n.textContent;
+        n.textContent = NSO_scaleText(n.dataset.mmText);
       });
       document.querySelectorAll('#scale-card button[title]').forEach(function (b) {
         if (b.dataset.mmTitle == null) b.dataset.mmTitle = b.title;

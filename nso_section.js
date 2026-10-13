@@ -450,8 +450,10 @@ function NSO_sectionShapeWhy(p2, fo, k) {
 /* What the card can offer, decided once, here, from the reading - so the
    readout's "so ... apply" and the card's fields cannot disagree.
 
-     round, hollow   Length (if its axis has a clean band), Outer Ø, Wall
-     round, solid    Length (same), Diameter
+     round, hollow   its axis (if it has a clean band), named the way a box's
+                     would be as it lies - Height if the axis is its Z, else
+                     Length or Width by the rule below - then Outer Ø, Wall
+     round, solid    Length (same band), Diameter
      anything else   Length / Width / Height for each of the piece's own axes
                      that has a clean band. Height is the piece's own Z, Length
                      the longer of its X and Y, Width the shorter.
@@ -468,16 +470,17 @@ function NSO_sectionVerbs(s) {
             offset: true, longest: true, named: [] };
   if (!s || !s.axes) return v;
   function dim(a) { return { axisIdx: a.idx, axis: a.name, mm: a.extentMm, bandMm: a.bandMm }; }
+  var X = s.axes[0], Y = s.axes[1], Z = s.axes[2];
+  var lenA = X.extentMm >= Y.extentMm ? X : Y;
+  // One L / W / H vocabulary: the name an axis gets as the piece lies.
+  function word(a) { return a === Z ? 'height' : a === lenA ? 'length' : 'width'; }
   if (s.shape === 'round') {
-    if (s.axes[s.axisIdx].ok) v.length = dim(s.axes[s.axisIdx]);
+    var A = s.axes[s.axisIdx];
+    if (A.ok) v[s.hollow ? word(A) : 'length'] = dim(A);
     if (s.hollow) { v.outer = true; v.wall = true; } else v.diameter = true;
     v.offset = false;
   } else {
-    var X = s.axes[0], Y = s.axes[1], Z = s.axes[2];
-    var lenA = X.extentMm >= Y.extentMm ? X : Y, widA = lenA === X ? Y : X;
-    if (lenA.ok) v.length = dim(lenA);
-    if (widA.ok) v.width = dim(widA);
-    if (Z.ok) v.height = dim(Z);
+    [X, Y, Z].forEach(function (a) { if (a.ok) v[word(a)] = dim(a); });
   }
   var longest = Math.max(s.sizes.w, s.sizes.d, s.sizes.h);
   var namedMm = [];

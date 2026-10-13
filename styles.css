@@ -565,6 +565,9 @@ select:focus, input:focus {
 #scale-rows .scale-row input { width: 100% !important; margin: 0; padding-top: 4px; padding-bottom: 4px; }
 #scale-rows .scale-row .btn { width: auto; margin: 0; padding: 4px 10px; }
 #scale-rows .scale-row .hint { margin: 0; white-space: nowrap; }
+/* A row's sentence, on its own line under the row, shown only with it. */
+#scale-rows .scale-note { margin: -2px 0 4px; }
+#scale-rows .scale-row[hidden] + .scale-note { display: none; }
 #scale-card > #btn-scale-fit { margin-top: 4px; }
 /* The card's mm | in toggle: two small segments, top right, the pressed one
    lit. Its own class rather than .btn, which the card body makes full width. */
