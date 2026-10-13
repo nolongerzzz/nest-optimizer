@@ -57,10 +57,10 @@ async function load(page, name, soup) {
 
 const openCutter = async page => {
   await page.evaluate(() => {
-    const e = document.getElementById('btn-cutter-open');
+    const e = document.getElementById('cutter-tools');
     for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
   });
-  if (!(await page.evaluate(() => state.cutterOpen))) await page.click('#btn-cutter-open');
+  if (!(await page.evaluate(() => cutterArmed('cut')))) await page.evaluate(() => openCutter('cut'));
 };
 
 /* Puts the red line on piece `id` the way a click on it does (selectPlaced),

@@ -86,10 +86,10 @@ withApp(async (page, logs) => {
   };
   const open = async id => {
     await page.evaluate(() => {
-      const e = document.getElementById('btn-cutter-open');
+      const e = document.getElementById('cutter-tools');
       for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
     });
-    if (!(await page.evaluate(() => state.cutterOpen))) await page.click('#btn-cutter-open');
+    if (!(await page.evaluate(() => cutterArmed('cut')))) await page.evaluate(() => openCutter('cut'));
     await page.evaluate(id => selectPlaced(state.placed.findIndex(p => p && p.sourceId === id)), id);
   };
   // The slider driven the way a user drags it: a value, then an input event.
@@ -151,7 +151,7 @@ withApp(async (page, logs) => {
   const sA = await split(a);
   check('Split at the low end: a 1 mm cut is made, not refused', /^Cut @ 1\.0 mm/.test(sA.status) && sA.ids.length === 2, sA.status);
 
-  console.log('\n=== 2. the piece that cut left (299.5 mm on the raw engine): same 1 mm ends ===');
+  console.log('\n=== 2. the piece that cut left (299 mm: a clean split): same 1 mm ends ===');
   const big = await page.evaluate(ids => {
     const ms = ids.map(i => state.models.find(m => m.id === i));
     return ms.sort((p, q) => q.size.x - p.size.x)[0].id;
@@ -168,12 +168,12 @@ withApp(async (page, logs) => {
   await page.evaluate(id => { selectPlaced(state.placed.findIndex(p => p && p.sourceId === id)); rotateSelected(1); }, c);
   await open(c);
   // Cut X runs across the turned bar's 12 mm width ...
-  await page.click('#btn-cut-axis-x');
+  await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'x'; a.dispatchEvent(new Event('change')); });   // the axis lock (Cut X is gone)
   let s = await st(c);
   check('Cut X on the turned bar runs along its own Z, span 12', s.axis === 'z' && Math.abs(s.span - 12) < 1e-6, s.axis + ' ' + s.span);
   await ends('turned, Cut X', c, 12);
   // ... and Cut Z along its 60 mm length.
-  await page.click('#btn-cut-axis-z');
+  await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'z'; a.dispatchEvent(new Event('change')); });   // the axis lock (Cut Z is gone)
   s = await st(c);
   check('Cut Z on the turned bar runs along its own X, span 60', s.axis === 'x' && Math.abs(s.span - 60) < 1e-6, s.axis + ' ' + s.span);
   await ends('turned, Cut Z', c, 60);
@@ -199,7 +199,7 @@ withApp(async (page, logs) => {
   const e = await load('bar60r.stl', bar(60, 12, 8));
   await page.evaluate(id => { selectPlaced(state.placed.findIndex(p => p && p.sourceId === id)); rollSelected(); }, e);
   await open(e);
-  await page.click('#btn-cut-axis-x');
+  await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'x'; a.dispatchEvent(new Event('change')); });   // the axis lock (Cut X is gone)
   s = await st(e);
   check('Cut X on the rolled bar runs along its own Y, span 8', s.axis === 'y' && Math.abs(s.span - 8) < 1e-6, s.axis + ' ' + s.span);
   await ends('rolled, Cut X', e, 8);

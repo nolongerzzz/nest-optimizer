@@ -17,7 +17,7 @@ const check = (name, cond, detail) => {
 const ROW = ['menu-import', 'menu-export', 'menu-rotate', 'menu-tip', 'menu-move',
              'btn-delete-placed', 'btn-lock-pos', 'btn-plate-lock',
              'menu-photo', 'menu-gen', 'menu-finish'];
-const COL = ['menu-scale', 'menu-cut', 'menu-join', 'menu-align', 'menu-seat',
+const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-join', 'menu-align', 'menu-seat',
              'menu-abc', 'menu-bit', 'menu-plate', 'menu-pieces', 'menu-pack'];
 const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(COL);
 
@@ -367,8 +367,10 @@ withApp(async (page, logs) => {
     let lo = 600, hi = 1000;                     // lo collides, hi does not
     const okEnds = (await collides(lo)) && !(await collides(hi));
     while (hi - lo > 1) { const m = (lo + hi) >> 1; if (await collides(m)) lo = m; else hi = m; }
-    check('the collision starts below about 790 px of window height, no higher',
-      okEnds && hi >= 770 && hi <= 800, okEnds ? 'clear from ' + hi + ' px tall' : 'not bracketed by 600..1000');
+    // About 790 px with ten slabs; the Crop card's slab (the Cut / Crop
+    // split) made eleven and moved it to about 830.
+    check('the collision starts below about 830 px of window height, no higher',
+      okEnds && hi >= 815 && hi <= 840, okEnds ? 'clear from ' + hi + ' px tall' : 'not bracketed by 600..1000');
     await page.setViewportSize({ width: 1500, height: 820 });
   }
 

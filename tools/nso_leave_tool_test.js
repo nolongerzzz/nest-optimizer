@@ -129,8 +129,7 @@ withApp(async (page, logs) => {
   /* ------------------------------------------------------------------ 1 */
   console.log('\n=== 1. open Cut, Split, double-click the plate ===');
   {
-    await page.click('#menu-cut > summary');
-    await page.click('#btn-cutter-open');
+    await page.click('#menu-cut > summary');     // the card is the switch: open = armed
     const pc = await pieceAt(0);
     await page.mouse.click(pc.x, pc.y);
     await page.waitForFunction(() => !!state.cutHelper, null, { timeout: 5000 });
@@ -143,19 +142,18 @@ withApp(async (page, logs) => {
     await dblPlate();
     const r = await page.evaluate(() => ({
       cutter: state.cutterOpen, menu: document.getElementById('menu-cut').open,
-      helper: !!state.cutHelper, closeBtn: document.getElementById('btn-cutter-close').disabled
+      helper: !!state.cutHelper
     }));
     await shot('cut-dblclick-closed');
     check('cutter closed', !r.cutter && !r.helper, JSON.stringify(r));
-    check('Cut menu shut and its Close button idle', !r.menu && r.closeBtn);
+    check('Cut card shut', !r.menu);
     check('both halves still on the plate', (await snap()).poses.length === 2);
     held('Cut', before, await snap());
 
-    /* closeCutter is the one close path that deselects - its Close button
-       means "done with this piece" too. The gesture leaves the tool, not the
+    /* closeCutter is the one close path that deselects - shutting the Cut
+       card means "done with this piece" too. The gesture leaves the tool, not the
        piece: a half picked while the cutter is live is still picked after. */
-    await page.click('#menu-cut > summary');
-    await page.click('#btn-cutter-open');
+    await page.click('#menu-cut > summary');     // the card is the switch: open = armed
     const ph = await pieceAt(1);
     await page.mouse.click(ph.x, ph.y);
     await page.waitForFunction(() => state.cutterOpen && state.selectedIndex === 1 && !!state.cutHelper, null, { timeout: 5000 });

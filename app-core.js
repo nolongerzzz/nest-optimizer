@@ -36,9 +36,12 @@ const state = {
   editId: null,
   cutT: 0.5,
   cutDragging: false,
+  cutDragFrom: null,     // where a blade drag started on the piece (its frame)
   cutHelper: null,
   previewMesh: null,
   cutterOpen: false,
+  cutTool: null,         // 'cut' | 'crop': which card armed the cutter (app-cut.js)
+  cutMiterDeg: 0,        // the Cut card's mitre wheel; 0 = square
   moveDragging: false,
   moveIndex: -1,
   moveGrab: { x: 0, z: 0 },
@@ -2577,21 +2580,57 @@ function endMoveDrag() {
   }
 }
 
-// Dragging the red line: where the pointer meets the horizontal plane through
-// the piece, carried into the piece's own frame and read along the cut axis
-// (app-cut.js cutFrame), so the line follows the pointer on any pose.
-function cutTFromPointer() {
+/* Where the pointer puts the blade, along the piece's long axis.
+
+   `hitWorld` is the point a click landed on the piece: the blade goes
+   through it. A drag (no point) reads the pointer on a plane that holds the
+   long axis and faces the camera as squarely as it can, through the blade's
+   current point - so the blade follows the pointer along the piece whether
+   it lies flat or stands on end (a horizontal plane at the piece's centre,
+   the old drag plane, holds a standing piece's axis only edge-on).
+
+   With a mitre the blade crosses the centre line off the clicked point, so
+   the position is solved for the plane through the point; near a mitre of
+   90 the plane barely moves along the axis and the point's own coordinate
+   is used instead. */
+function cutTFromPointer(hitWorld) {
   const m = getActiveModel();
   const f = m ? cutFrame(m) : null;
   if (!f || !f.mesh) return;
-  const worldPos = new THREE.Vector3();
-  f.mesh.getWorldPosition(worldPos);
-  const dragPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -worldPos.y);
-  const hit = new THREE.Vector3();
-  if (state.raycaster && state.camera) state.raycaster.setFromCamera(state.pointer, state.camera);
-  if (!state.raycaster.ray.intersectPlane(dragPlane, hit)) return;
-  const local = hit.applyMatrix4(new THREE.Matrix4().copy(f.mesh.matrixWorld).invert());
-  state.cutT = snapCutT((local[f.axis] - f.origin) / f.span, f.span);
+  f.mesh.updateMatrixWorld(true);
+  const toLocal = new THREE.Matrix4().copy(f.mesh.matrixWorld).invert();
+  const C = f.bbox.getCenter(new THREE.Vector3());
+  const e = new THREE.Vector3(f.axis === 'x' ? 1 : 0, f.axis === 'y' ? 1 : 0, f.axis === 'z' ? 1 : 0);
+  let local = null;
+  if (hitWorld) {
+    local = hitWorld.clone().applyMatrix4(toLocal);
+    // A drag that follows reads the pointer at the depth the click landed.
+    state.cutDragFrom = local.clone();
+  } else {
+    if (state.raycaster && state.camera) state.raycaster.setFromCamera(state.pointer, state.camera);
+    const ray = state.raycaster.ray;
+    let at = state.cutDragFrom && state.cutDragging ? state.cutDragFrom.clone() : null;
+    if (!at) {
+      at = C.clone();
+      at[f.axis] = f.origin + cutMmAt(state.cutT == null ? 0.5 : state.cutT, f.span);
+    }
+    const P = at.applyMatrix4(f.mesh.matrixWorld);
+    const d = e.clone().transformDirection(f.mesh.matrixWorld);
+    const nrm = ray.direction.clone().addScaledVector(d, -ray.direction.dot(d));
+    const plane = nrm.lengthSq() > 1e-6
+      ? new THREE.Plane().setFromNormalAndCoplanarPoint(nrm.normalize(), P)
+      : new THREE.Plane(new THREE.Vector3(0, 1, 0), -P.y);
+    const hit = new THREE.Vector3();
+    if (!ray.intersectPlane(plane, hit)) return;
+    local = hit.applyMatrix4(toLocal);
+  }
+  let mm = local[f.axis] - f.origin;
+  if (f.back) {
+    const n = e.clone().applyMatrix4(f.back);
+    const na = n[f.axis];
+    if (Math.abs(na) > 0.2) mm = n.dot(local.clone().sub(C)) / na + C[f.axis] - f.origin;
+  }
+  state.cutT = snapCutT(mm / f.span, f.span);
   syncCutUI();
   updateCutHelper();
 }
@@ -3008,10 +3047,15 @@ function onCanvasPointerDown(event) {
     }
   }
 
-  // Cutter open: clicking a DIFFERENT piece moves the red line onto it.
-  // Do this BEFORE helper hit-test so the plane cannot trap the other half.
+  // Cutter open: clicking a piece puts the blade on it, where the click
+  // landed. Do this BEFORE helper hit-test so the plane cannot trap the
+  // other half - and look past the blade's own (invisible, oversized) grab
+  // sheet, which lies in front of much of the piece: a click there is a
+  // click on the piece.
   if (state.cutterOpen && state.modelGroup) {
-    const modelHits = state.raycaster.intersectObjects(state.modelGroup.children, true);
+    const inBlade = o => { for (let n = o; n; n = n.parent) if (n === state.cutHelper) return true; return false; };
+    const modelHits = state.raycaster.intersectObjects(state.modelGroup.children, true)
+      .filter(h => !inBlade(h.object));
     if (modelHits.length) {
       let obj = modelHits[0].object;
       while (obj && obj.userData.placedIndex == null && obj.parent) obj = obj.parent;
@@ -3029,9 +3073,13 @@ function onCanvasPointerDown(event) {
             return;
           }
           if (p.sourceId !== state.editId) selectPlaced(idx);
+          // Crop's card: the click picks the piece; there is no blade to drop.
+          if (state.cutTool === 'crop') { event.stopPropagation(); return; }
+          // Cut's card: the blade drops where the click landed, square to the
+          // piece's length; holding the button drags it along.
           state.cutDragging = true;
           if (state.controls) state.controls.enabled = false;
-          cutTFromPointer();
+          cutTFromPointer(modelHits[0].point);
           event.stopPropagation();
           return;
         }
@@ -3045,6 +3093,7 @@ function onCanvasPointerDown(event) {
     if (cutHits.length) {
       setOrbitFromPlate(false);
       state.cutDragging = true;
+      state.cutDragFrom = null;
       if (state.controls) state.controls.enabled = false;
       cutTFromPointer();
       event.stopPropagation();
@@ -3070,9 +3119,10 @@ function onCanvasPointerDown(event) {
         }
         if (state.cutterOpen && hit && hit.sourceId != null) {
           if (hit.sourceId !== state.editId) selectPlaced(idx);
+          if (state.cutTool === 'crop') { event.stopPropagation(); return; }
           state.cutDragging = true;
           if (state.controls) state.controls.enabled = false;
-          cutTFromPointer();
+          cutTFromPointer(modelHits[0].point);
           event.stopPropagation();
           return;
         }
@@ -3158,7 +3208,9 @@ function selectPlaced(idx) {
         state.previewMesh = p.mesh;
         if (state.cutT == null) state.cutT = 0.5;
         buildCutHelper();
-        setStatus('Cutter on ' + m.name + ' - drag red line, then Split.');
+        setStatus(state.cutTool === 'crop'
+          ? 'Crop on ' + m.name + ' - set the box, then Crop.'
+          : 'Cut on ' + m.name + ' - blade square across its length; slide, nudge or angle it, then Cut.');
       }
     }
   }

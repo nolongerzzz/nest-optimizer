@@ -1344,8 +1344,11 @@ select:focus, input:focus {
   margin: 0;
 }
 
-/* Crop, under Split in the Cut menu (app-crop.js) */
+/* Crop, its own card in the column (app-crop.js); Detach under it */
 .crop-tools {
+  margin-top: 0;
+}
+.detach-tools {
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px solid rgba(148, 163, 184, 0.25);
@@ -1373,6 +1376,28 @@ select:focus, input:focus {
   accent-color: #ef4444;
   cursor: pointer;
 }
+
+/* The blade's mm box and the typed mitre: a number, no up/down stepper -
+   the ← / → buttons and the wheel do the stepping. */
+.cut-no-spin { -moz-appearance: textfield; appearance: textfield; text-align: center; }
+.cut-no-spin::-webkit-inner-spin-button,
+.cut-no-spin::-webkit-outer-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
+.cut-mm-row .btn { flex: 0 0 40px; font-size: 15px; line-height: 1; }
+
+/* The mitre wheel (app-cut.js, cutWireMiterDial): a rail, a handle on it and
+   the blade's line through the centre, turned together. */
+.cut-miter { display: flex; align-items: center; gap: 10px; margin: 2px 0 4px; }
+.cut-dial { flex: 0 0 auto; cursor: grab; touch-action: none; user-select: none; outline: none; }
+.cut-dial:active { cursor: grabbing; }
+.cut-dial:focus-visible .cut-dial-rail { stroke: #7dd3fc; }
+.cut-dial-rail { fill: rgba(15, 23, 42, 0.35); stroke: rgba(226, 232, 240, 0.45); stroke-width: 3; }
+.cut-dial-ticks line { stroke: rgba(226, 232, 240, 0.55); stroke-width: 1.5; }
+.cut-dial-blade { stroke: #ffc83d; stroke-width: 2.5; stroke-linecap: round; }
+.cut-dial-handle { fill: #ffc83d; stroke: #1a1d21; stroke-width: 1.5; }
+.cut-dial-deg { fill: #f1f5f9; font-size: 14px; font-weight: 600; pointer-events: none;
+  font-variant-numeric: tabular-nums; paint-order: stroke; stroke: rgba(15, 23, 42, 0.8); stroke-width: 3px; }
+.cut-miter-side { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.cut-miter-side .hint { margin: 0; }
 
 .cut-readout {
   font-size: 12px;
@@ -1524,17 +1549,21 @@ select:focus, input:focus {
 .more-tools { margin-top: 8px; font-size: 13px; }
 .more-tools summary { cursor: pointer; color: #94a3b8; font-weight: 600; }
 .more-tools label { display: block; margin: 6px 0; }
-#edit-card label {
+#edit-card label,
+#crop-card label {
   display: block;
   margin: 8px 0 4px;
   font-size: 13px;
 }
 #edit-card input[type="number"],
-#edit-card select {
+#edit-card select,
+#crop-card input[type="number"],
+#crop-card select {
   width: 100%;
   margin-top: 4px;
 }
-#edit-card .btn {
+#edit-card .btn,
+#crop-card .btn {
   width: 100%;
   margin-top: 6px;
 }

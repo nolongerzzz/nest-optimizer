@@ -518,8 +518,8 @@ withApp(async (page, logs) => {
   await closeMenus(page);
 
   /* Cut: open the cutter, aim it at the slab, Split */
-  await page.evaluate(() => { const e = document.getElementById('btn-cutter-open'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-  if (!(await page.evaluate(() => state.cutterOpen))) await page.click('#btn-cutter-open');
+  await page.evaluate(() => { const e = document.getElementById('cutter-tools'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+  if (!(await page.evaluate(() => cutterArmed('cut')))) await page.evaluate(() => openCutter('cut'));
   /* what a click on the piece does with the cutter open: select it, hang the red line on it */
   await page.evaluate(id => selectPlaced(state.placed.findIndex(p => p && p.sourceId === id)), slab);
   const idsBefore = await page.evaluate(() => state.models.map(m => m.id));
@@ -536,15 +536,14 @@ withApp(async (page, logs) => {
   check('...and sealed both halves', hs.length === 2 && hs.every(h => h && h.open === 0 && h.nm === 0),
     hs.map(h => h && (h.name + ' ' + h.tris + ' tris, open ' + h.open + ', nm ' + h.nm + ', ' + h.volume.toFixed(2) + ' mm^3')).join(' | '));
   if (hs.length === 2) {
-    /* Not asserted: Split cuts with the app's kerf setting ("kerf 1 mm" in its
-       status, each half 0.5 mm longer than the plane), so the halves do not
-       sum to the whole by design. tools/nso_relief_sculpt_test.js holds rawCut
+    /* Not asserted here: Cut is a clean split now (no kerf), so the halves
+       should sum to the whole; tools/nso_relief_sculpt_test.js holds rawCut
        itself to the sum. */
     console.log('   halves ' + hs[0].volume.toFixed(2) + ' + ' + hs[1].volume.toFixed(2) + ' = ' +
-      (hs[0].volume + hs[1].volume).toFixed(2) + ' mm^3 against ' + sS.volume.toFixed(2) + ' whole (Split\'s kerf)');
+      (hs[0].volume + hs[1].volume).toFixed(2) + ' mm^3 against ' + sS.volume.toFixed(2) + ' whole');
   }
   NUM.cut = { status: cutStatus.trim(), halves: hs };
-  if (await page.evaluate(() => state.cutterOpen)) await page.click('#btn-cutter-close').catch(() => {});
+  await page.evaluate(() => { if (state.cutterOpen) closeCutter(true); });
   await closeMenus(page);
   if (hs.length === 2) {
     const gap = await page.evaluate(ids => {

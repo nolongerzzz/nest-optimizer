@@ -24,10 +24,10 @@
    21.3 mm, off-centre, so a sign error cannot hide behind symmetry.
      - the raw triple, mapped onto the display frame, is the display geometry
        (what Split cuts is what the preview shows);
-     - each half's cut face, in world space, lies on one edge of the plate
-       line (the blade's plane +- half a kerf), the two halves on opposite
-       edges, across the full plate-line strip direction, and covers the
-       section the blade crosses (W x H / |cos| of the bar's angle to it);
+     - each half's cut face, in world space, lies on the blade's plane (a
+       clean split: no kerf band between the halves), across the full
+       plate-line strip direction, and covers the section the blade crosses
+       (W x H / |cos| of the bar's angle to it);
      - each half runs out to its own end of the piece;
      - on the plate, each half is the cut half, turned as it was, moved only
        along the cut by the split view gap;
@@ -179,10 +179,10 @@ withApp(async (page, logs) => {
 
   const open = async id => {
     await page.evaluate(() => {
-      const e = document.getElementById('btn-cutter-open');
+      const e = document.getElementById('cutter-tools');
       for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
     });
-    if (!(await page.evaluate(() => state.cutterOpen))) await page.click('#btn-cutter-open');
+    if (!(await page.evaluate(() => cutterArmed('cut')))) await page.evaluate(() => openCutter('cut'));
     await page.evaluate(id => selectPlaced(state.placed.findIndex(p => p && p.sourceId === id)), id);
   };
   const slide = v => page.evaluate(v => {
@@ -224,23 +224,19 @@ withApp(async (page, logs) => {
     const r = await page.evaluate(id => __splitAndMeasure(id), id);
     check(label + ': Split is made', /^Cut @ 21\.3 mm/.test(r.status) && !!r.left, r.status);
     if (!r.left) return;
-    const k2 = r.kerf / 2;
     // the blade's plane and the plate line are one plane; the line spans the cut
     const nh = Math.hypot(r.n[0], r.n[2]);
     check(label + ': the plate line runs across the blade\'s normal', Math.abs(Math.abs(r.n[0] * r.across[0] + r.n[2] * r.across[2]) - nh) < 1e-6);
-    // Which end of the piece each half runs out to. Which plate-line edge
-    // each half's face is on is left as each route has it (the raw route
-    // keeps the kerf band on both halves, so its faces sit on the far edge):
-    // only that the two faces are on opposite edges.
+    // Which end of the piece each half runs out to; both cut faces lie on
+    // the blade's own plane.
     const halves = [['left', r.left], ['right', r.right]];
-    const faceSides = [], reach = [];
+    const reach = [];
     for (const [nm, h] of halves) {
       const f = h.face;
-      faceSides.push(f ? Math.sign(f.s) : 0);
       const toLo = Math.abs(h.lo - r.pLo) < 2e-3, toHi = Math.abs(h.hi - r.pHi) < 2e-3;
       reach.push(toLo === toHi ? 0 : toHi ? 1 : -1);
-      check(label + ', ' + nm + ' half: its cut face lies on an edge of the plate line (blade +- ' + k2 + ' mm)',
-        !!f && Math.abs(Math.abs(f.s) - k2) < 2e-3,
+      check(label + ', ' + nm + ' half: its cut face lies on the blade\'s plane (no kerf)',
+        !!f && Math.abs(f.s) < 2e-3,
         f ? 'face at ' + f.s.toFixed(4) + ' mm from the blade' : 'no face parallel to the blade');
       check(label + ', ' + nm + ' half: it runs out to one end of the piece and stops at the blade', toLo !== toHi,
         'piece ' + r.pLo.toFixed(3) + ' .. ' + r.pHi.toFixed(3) + ', half ' + h.lo.toFixed(3) + ' .. ' + h.hi.toFixed(3));
@@ -256,9 +252,8 @@ withApp(async (page, logs) => {
         f.lineLo >= -1e-3 && f.lineHi <= r.lineLen + 1e-3,
         f.lineLo.toFixed(3) + ' .. ' + f.lineHi.toFixed(3) + ' of 0 .. ' + r.lineLen.toFixed(3));
     }
-    check(label + ': the two cut faces are on opposite edges of the plate line, the halves at opposite ends',
-      faceSides[0] * faceSides[1] === -1 && reach[0] * reach[1] === -1,
-      'faces ' + faceSides.join(' / ') + ', ends ' + reach.join(' / '));
+    check(label + ': the halves run out to opposite ends of the piece',
+      reach[0] * reach[1] === -1, 'ends ' + reach.join(' / '));
     // On the plate: the same half, turned as it was, moved across the plate
     // along the cut only (it is also set down on the plate, a vertical move).
     [['A', r.left, r.plateA, reach[0]], ['B', r.right, r.plateB, reach[1]]].forEach(([nm, h, p, side]) => {

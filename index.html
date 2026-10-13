@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=shell4" />
+  <link rel="stylesheet" href="styles.css?v=cutcard1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -356,37 +356,62 @@
               title="Scale uniformly by the largest factor that fits the printer the plate is set to, and say the factor. If it already fits, nothing changes.">Fit to plate</button>
             </div>
           </details>
+          <!-- Cut: the card is the switch - open it and the cutter is live,
+               close it and the blade is gone (app-cut.js, cutWireCards). -->
           <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-cut">
-            <summary class="vp-bar-btn" title="Open the cutter and split the selected piece">Cut</summary>
+            <summary class="vp-bar-btn" title="Cut the selected piece: click it to drop a square blade, slide or angle it, then Cut">Cut</summary>
             <div class="vp-menu-body vp-top-body" id="edit-card">
-              <div class="edit-row tool-toggle-row">
-              <button id="btn-cutter-open" class="btn btn-secondary" type="button">Open</button>
-              <button id="btn-cutter-close" class="btn btn-secondary" type="button" disabled>Close</button>
-              </div>
-              <p id="cutter-status" class="hint hidden-quiet">Cutter closed</p>
+              <p id="cutter-status" class="hint">Click a piece to drop a square blade on it.</p>
               <p id="edit-size" class="hint hidden-quiet">—</p>
               <div id="cutter-tools" class="cutter-tools">
               <div class="edit-row">
-              <button id="btn-cut-axis-x" class="btn btn-secondary" type="button">Cut X</button>
-              <button id="btn-cut-axis-z" class="btn btn-secondary" type="button">Cut Z</button>
+              <button id="btn-yaw-left-90" class="btn btn-secondary" type="button" title="Turn the piece itself 90° (not the blade)">⟲ 90</button>
+              <button id="btn-yaw-left" class="btn btn-secondary" type="button" title="Turn the piece itself 15° (not the blade)">⟲ 15</button>
+              <button id="btn-yaw-right" class="btn btn-secondary" type="button" title="Turn the piece itself 15° (not the blade)">15 ⟳</button>
+              <button id="btn-yaw-right-90" class="btn btn-secondary" type="button" title="Turn the piece itself 90° (not the blade)">90 ⟳</button>
               </div>
-              <select id="edit-axis" class="hidden-quiet"><option value="auto">Longest axis</option><option value="x">X</option><option value="z">Z</option></select>
-              <div class="edit-row">
-              <button id="btn-yaw-left-90" class="btn btn-secondary" type="button">⟲ 90</button>
-              <button id="btn-yaw-left" class="btn btn-secondary" type="button">⟲ 15</button>
-              <button id="btn-yaw-right" class="btn btn-secondary" type="button">15 ⟳</button>
-              <button id="btn-yaw-right-90" class="btn btn-secondary" type="button">90 ⟳</button>
+              <div class="cut-miter">
+              <svg id="cut-miter-dial" class="cut-dial" viewBox="0 0 100 100" width="104" height="104"
+                   role="slider" tabindex="0" aria-label="Mitre, degrees" aria-valuemin="0" aria-valuemax="359" aria-valuenow="0">
+                <circle class="cut-dial-rail" cx="50" cy="50" r="40"></circle>
+                <g class="cut-dial-ticks">
+                  <line x1="50" y1="6" x2="50" y2="14"></line><line x1="94" y1="50" x2="86" y2="50"></line>
+                  <line x1="50" y1="94" x2="50" y2="86"></line><line x1="6" y1="50" x2="14" y2="50"></line>
+                  <line x1="81.1" y1="18.9" x2="77.6" y2="22.4"></line><line x1="81.1" y1="81.1" x2="77.6" y2="77.6"></line>
+                  <line x1="18.9" y1="81.1" x2="22.4" y2="77.6"></line><line x1="18.9" y1="18.9" x2="22.4" y2="22.4"></line>
+                </g>
+                <g id="cut-dial-turn" transform="rotate(0 50 50)">
+                  <line class="cut-dial-blade" x1="50" y1="22" x2="50" y2="78"></line>
+                  <circle id="cut-dial-handle" class="cut-dial-handle" cx="50" cy="10" r="7"></circle>
+                </g>
+                <text id="cut-dial-deg" class="cut-dial-deg" x="50" y="54" text-anchor="middle">0°</text>
+              </svg>
+              <div class="cut-miter-side">
+              <span class="hint">Mitre</span>
+              <input type="number" id="cut-miter-deg" class="cut-no-spin" min="0" max="359" step="1" value="0" aria-label="Mitre, degrees" title="Type an angle, or drag the handle round the wheel. 0 = square.">
+              <button id="btn-cut-square" class="btn btn-secondary" type="button" title="Back to a square cut (0°)">Square</button>
               </div>
-              <input type="range" id="cut-slider" min="1" max="99" step="0.1" value="50" />
+              </div>
+              <input type="range" id="cut-slider" min="1" max="99" step="0.1" value="50" aria-label="Blade position along the piece, mm" />
               <div class="edit-row cut-mm-row">
-              <button id="btn-cut-nudge-m" class="btn btn-secondary" type="button">−1</button>
-              <input type="number" id="cut-mm" value="50" min="0.5" max="400" step="0.1" />
-              <button id="btn-cut-nudge-p" class="btn btn-secondary" type="button">+1</button>
+              <button id="btn-cut-nudge-m" class="btn btn-secondary" type="button" aria-label="Blade 1 mm toward the low end" title="1 mm toward the low end">←</button>
+              <input type="number" id="cut-mm" class="cut-no-spin" value="50" min="0.5" max="400" step="0.1" aria-label="Blade position, mm from the low end" />
+              <button id="btn-cut-nudge-p" class="btn btn-secondary" type="button" aria-label="Blade 1 mm toward the high end" title="1 mm toward the high end">→</button>
               </div>
               <p id="cut-readout" class="cut-readout">—</p>
-              <button id="btn-cut" class="btn btn-cut" type="button">Split</button>
+              <button id="btn-cut" class="btn btn-cut" type="button"
+                      title="Split the piece at the blade: two pieces that meet exactly at the plane and add back to the original - no kerf. One Undo puts it back.">Cut</button>
               <button id="btn-cut-right-side-out" class="btn btn-secondary" type="button" hidden
-                      title="Offered only after Split refused a piece whose faces all point inward. Reverses every triangle of the piece so its faces point out, then makes the same Split. One Undo puts the original piece back.">Turn it right-side-out, then cut</button>
+                      title="Offered only after Cut refused a piece whose faces all point inward. Reverses every triangle of the piece so its faces point out, then makes the same Cut. One Undo puts the original piece back.">Turn it right-side-out, then cut</button>
+              </div>
+            </div>
+          </details>
+          <!-- Crop: today's Box crop and Move, moved out of Cut unchanged. Opening
+               the card arms the same piece selection, with no blade. -->
+          <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-crop">
+            <summary class="vp-bar-btn" title="Crop a slab out of the selected piece, or take a region out, move it and lock it in">Crop</summary>
+            <div class="vp-menu-body vp-top-body" id="crop-card">
+              <select id="edit-axis" class="hidden-quiet"><option value="auto">Longest axis</option><option value="x">X</option><option value="z">Z</option></select>
               <div class="crop-tools" id="crop-tools">
               <p class="hint">Crop: take out the slab between two distances along the cut axis and close the gap. One closed piece, shorter by the box length.</p>
               <div class="edit-row crop-row">
@@ -429,7 +454,6 @@
                       title="Put the detached flange back somewhere else: click the point on a piece where its root should go. It keeps lying the way it lay, reaches out of the clicked face, is seated deep enough for its whole root to bite (Attach's seat), and is unioned into that piece. One Undo puts both back.">Reattach</button>
               </div>
               <p id="detach-readout" class="cut-readout">—</p>
-              </div>
               </div>
             </div>
           </details>
@@ -1242,13 +1266,13 @@
   <script src="nso_slicer.js?v=slice1"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
   <script src="nso_relief.js?v=relief2"></script>
-  <script src="app-core.js?v=shell1"></script>
+  <script src="app-core.js?v=cutcard1"></script>
 
 
 
 
 
-  <script src="app-cut.js?v=shell2"></script>
+  <script src="app-cut.js?v=cutcard1"></script>
   <script src="app-finish.js?v=findings1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
   <script src="app-extend.js?v=scale1"></script>
@@ -1257,7 +1281,7 @@
   <script src="app-mirror.js?v=mirror2"></script>
   <!-- Crop, stage 1: box -> remove slab -> seal the joint. After app-cut.js
        (rawCutOpen, rawFlatCapLoop, mapPlaneToRaw) and app-sculpt.js (commit). -->
-  <script src="app-crop.js?v=crop4"></script>
+  <script src="app-crop.js?v=cutcard1"></script>
   <script src="app-fatten.js?v=box2"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
@@ -1277,7 +1301,7 @@
   <script src="app-stock.js?v=stock3"></script>
   <script src="app-assemble.js?v=asm2"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
-  <script src="app-join.js?v=shell1"></script>
+  <script src="app-join.js?v=cutcard1"></script>
   <script src="app-center-lock.js?v=clock2"></script>
   <script src="app-oversize-washer.js?v=oversize2"></script>
   <script src="app-join-triple.js?v=triple1"></script>
@@ -1299,7 +1323,7 @@
   <!-- The arbiter first: the three menu tools below register with it as
        they bind, and it is what makes "one menu owns the input" true
        rather than three modules each hoping the other two are shut. -->
-  <script src="app-input-mode.js?v=shell1"></script>
+  <script src="app-input-mode.js?v=cutcard1"></script>
   <script src="app-tip-orient.js?v=tip3"></script>
   <script src="app-rotate-handles.js?v=rot8"></script>
   <script src="app-move-vertical.js?v=mv2"></script>

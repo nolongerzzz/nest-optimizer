@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-/* The drop-downs: one open on the whole page, and Cut's panel can be shut
-   while the cutter stays armed.
+/* The drop-downs: one open on the whole page, and Cut's card is the cutter's
+   switch - open, armed; shut (by any route), disarmed.
      node tools/nso_topbar_accordion_test.js     exit 0 = every gate held */
 
 const path = require('path');
@@ -15,7 +15,7 @@ const check = (name, cond, detail) => {
 /* Every top-level drop-down on the page: the row, the column, and Finish. */
 const ROW = ['menu-import', 'menu-export', 'menu-rotate', 'menu-tip', 'menu-move',
              'menu-photo', 'menu-gen', 'menu-finish'];
-const COL = ['menu-scale', 'menu-cut', 'menu-join', 'menu-align', 'menu-seat',
+const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-join', 'menu-align', 'menu-seat',
              'menu-abc', 'menu-bit', 'menu-plate', 'menu-pieces', 'menu-pack'];
 const ALL = ROW.concat(COL);
 
@@ -167,100 +167,66 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 4 */
-  console.log('\n=== 4. Cut: the panel hides, the cutter stays armed ===');
+  console.log('\n=== 4. Cut: the card is the switch ===');
   {
     await loadSTL(page, path.join(ROOT, 'fixtures', 'box-20mm.stl'));
     await page.waitForTimeout(400);
 
+    /* Opening Cut arms the cutter; there is no Open button any more. */
     await shutAll();
     await openMenu('menu-cut');
-    const toolOff = await page.evaluate(() => state.cutterOpen);
-    await openMenu('menu-rotate');
-    const asOrdinary = await page.evaluate(() => document.getElementById('menu-cut').open);
-    check('with the cutter NOT started, Cut closes like any other drop-down',
-      toolOff === false && asOrdinary === false,
-      'cutter was ' + toolOff + ', menu left ' + (asOrdinary ? 'OPEN' : 'shut'));
-
-    await shutAll();
-    await openMenu('menu-cut');
-    await page.click('#btn-cutter-open');
-    /* The blade goes on the selected piece. */
     await page.evaluate(() => selectPlaced(0));
     await page.waitForTimeout(150);
-    /* Everything that makes up "the blade": the tool flag, the helper in the
-       scene and where it sits, the slider's fraction and the axis. */
-    const blade = () => page.evaluate(() => {
-      const h = state.cutHelper;
-      return {
-        cutter: !!state.cutterOpen,
-        helper: h ? h.uuid : null,
-        inScene: !!(h && h.parent),
-        pos: h ? h.position.toArray().map(v => +v.toFixed(4)) : null,
-        rot: h ? [h.rotation.x, h.rotation.y, h.rotation.z].map(v => +v.toFixed(4)) : null,
-        t: state.cutT, axis: state.cutAxis,
-        slider: document.getElementById('cut-slider').value
-      };
-    });
-    const live = await blade();
-    check('the Open button starts the cutter and leaves Cut showing',
-      live.cutter && live.inScene && !!live.helper && await page.evaluate(() => document.getElementById('menu-cut').open),
-      JSON.stringify(live));
+    const live = await page.evaluate(() => ({ cutter: !!state.cutterOpen, tool: state.cutTool,
+      helper: !!(state.cutHelper && state.cutHelper.parent), menu: document.getElementById('menu-cut').open,
+      openBtn: !!document.querySelector('#menu-cut .tool-toggle-row') }));
+    check('opening Cut arms the cutter; the blade goes on the selected piece',
+      live.cutter && live.tool === 'cut' && live.helper && live.menu && !live.openBtn, JSON.stringify(live));
 
-    /* Every other drop-down in turn: it opens, Cut's panel shuts, the blade
-       does not move and the cutter stays armed. */
+    /* Every other drop-down in turn: it opens, Cut's card shuts and the
+       cutter is disarmed with it; Cut is reopened between each. */
     const wrong = [];
     for (const other of ALL.filter(id => id !== 'menu-cut')) {
+      await shutAll();
+      await openMenu('menu-cut');
+      await page.waitForTimeout(40);
       await openMenu(other);
       await page.waitForTimeout(40);
       const st = await page.evaluate((o) => ({
         cut: document.getElementById('menu-cut').open,
         other: document.getElementById(o).open,
-        n: document.querySelectorAll('.vp-menu[open]').length
+        n: document.querySelectorAll('.vp-menu[open]').length,
+        cutting: !!state.cutterOpen && state.cutTool === 'cut', helper: !!state.cutHelper
       }), other);
-      const now = await blade();
-      if (st.cut || !st.other || st.n !== 1 || JSON.stringify(now) !== JSON.stringify(live)) {
-        wrong.push(other + ' ' + JSON.stringify(st) + (JSON.stringify(now) !== JSON.stringify(live)
-          ? ' blade ' + JSON.stringify(now) : ''));
-      }
+      if (st.cut || !st.other || st.n !== 1 || st.cutting || st.helper) wrong.push(other + ' ' + JSON.stringify(st));
     }
-    check('every other drop-down shuts Cut\'s panel, with the cutter armed and the blade unchanged',
+    check('every other drop-down shuts Cut\'s card and disarms the cutter',
       wrong.length === 0, wrong.length ? wrong.slice(0, 3).join('; ') : (ALL.length - 1) + '/' + (ALL.length - 1));
 
-    /* Back to Cut: its panel shows again with the live cutter's controls. */
+    /* Back to Cut: armed again, controls live. */
+    await shutAll();
     await openMenu('menu-cut');
     await page.waitForTimeout(40);
     const back = await page.evaluate(() => {
       const r = document.getElementById('btn-cut').getBoundingClientRect();
       return {
-        menu: document.getElementById('menu-cut').open,
+        menu: document.getElementById('menu-cut').open, cutter: !!state.cutterOpen,
         n: document.querySelectorAll('.vp-menu[open]').length,
         tools: document.getElementById('cutter-tools').classList.contains('is-open'),
-        closeEnabled: !document.getElementById('btn-cutter-close').disabled,
-        splitShown: r.width > 0 && r.height > 0
+        cutShown: r.width > 0 && r.height > 0
       };
     });
-    check('reopening Cut shows its panel again, controls live',
-      back.menu && back.n === 1 && back.tools && back.closeEnabled && back.splitShown,
-      JSON.stringify(back));
-    check('...and the blade is where it was', JSON.stringify(await blade()) === JSON.stringify(live));
+    check('reopening Cut arms it again, controls live',
+      back.menu && back.cutter && back.n === 1 && back.tools && back.cutShown, JSON.stringify(back));
 
-    /* A deliberate click on Cut's own summary still collapses it. */
+    /* A click on Cut's own summary collapses it and disarms the cutter. */
     await openMenu('menu-cut');
+    await page.waitForTimeout(40);
     const manual = await page.evaluate(() => ({
-      menu: document.getElementById('menu-cut').open, cutter: state.cutterOpen
+      menu: document.getElementById('menu-cut').open, cutter: state.cutterOpen, helper: !!state.cutHelper
     }));
-    check('a click on Cut\'s summary closes it, cutter left running',
-      manual.menu === false && manual.cutter === true, JSON.stringify(manual));
-
-    /* And closing the tool closes the drop-down with it. */
-    await openMenu('menu-cut');
-    await page.click('#btn-cutter-close');
-    await page.waitForTimeout(150);
-    const done = await page.evaluate(() => ({
-      menu: document.getElementById('menu-cut').open, cutter: state.cutterOpen
-    }));
-    check('closing the cutter closes Cut\'s drop-down too',
-      done.menu === false && done.cutter === false, JSON.stringify(done));
+    check('a click on Cut\'s summary closes it and disarms the cutter',
+      manual.menu === false && manual.cutter === false && !manual.helper, JSON.stringify(manual));
   }
 
   /* ------------------------------------------------------------------ 5 */
@@ -271,7 +237,6 @@ withApp(async (page, logs) => {
        three never call closeCutter. Clear plate is one of them. */
     await shutAll();
     await openMenu('menu-cut');
-    await page.click('#btn-cutter-open');
     await page.waitForTimeout(150);
     const before = await page.evaluate(() => state.cutterOpen);
     await page.evaluate(() => clearPlateOnly());

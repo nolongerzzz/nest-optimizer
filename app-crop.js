@@ -1115,9 +1115,10 @@ if (typeof module !== 'undefined' && module.exports) {
 /* =====================================================================
    5. App wiring: the box, the button, the commit
 
-   The Crop row lives in the Cut menu and works on the piece the cutter is
-   on, along the cutter's axis (resolveAxis), so the box and the red line
-   always agree about which way the piece runs. The box is given as two
+   Crop has its own card in the column (index.html, #menu-crop). Opening it
+   arms the cutter's piece selection for Crop (state.cutTool 'crop', no
+   blade; app-cut.js openCutter), and Crop works on the piece picked there,
+   along resolveAxis - the axis it has always used. The box is given as two
    distances from the piece's low end, in the frame the Cut readout uses,
    and mapped to the raw frame with Cut's own mapPlaneToRaw.
 
@@ -1131,6 +1132,11 @@ if (typeof module !== 'undefined' && module.exports) {
    ===================================================================== */
 
 var NSO_CROP_MIN_MM = 0.5;   // keep at least this much on each side, and in the box
+
+// Crop's card is open: the cutter's selection is armed for Crop.
+function NSO_cropLive() {
+  return typeof state !== 'undefined' && !!state.cutterOpen && state.cutTool === 'crop';
+}
 
 function NSO_cropState() {
   if (typeof state === 'undefined') return {};
@@ -1211,7 +1217,7 @@ function NSO_cropSyncUI() {
     if (e && document.activeElement !== e) e.value = slab.endMm.toFixed(1);
   }
   var btn = document.getElementById('btn-crop');
-  if (btn) btn.disabled = !(typeof state !== 'undefined' && state.cutterOpen && m);
+  if (btn) btn.disabled = !(NSO_cropLive() && m);
   NSO_cropReadout(m, slab);
   NSO_cropUpdateHelper();
 }
@@ -1251,7 +1257,7 @@ function NSO_cropUpdateHelper() {
   NSO_cropRemoveHelper();
   var cs = NSO_cropState();
   var m = getActiveModel();
-  if (!cs.show || !state.cutterOpen || !m) return;
+  if (!cs.show || !NSO_cropLive() || !m) return;
   var slab = NSO_cropDisplaySlab(m), mesh = NSO_cropTargetMesh(m);
   if (!slab || !mesh) return;
   var bb = slab.bbox, ax = slab.axis === 'x' ? 0 : 2;
@@ -1567,7 +1573,7 @@ function NSO_cropUpdateGhost() {
   if (typeof state === 'undefined' || !state.scene || typeof THREE === 'undefined') return;
   var cs = NSO_cropState();
   var m = getActiveModel();
-  if (!cs.lift || !state.cutterOpen || !m) { NSO_cropRemoveGhost(); return; }
+  if (!cs.lift || !NSO_cropLive() || !m) { NSO_cropRemoveGhost(); return; }
   var cur = NSO_cropCurrentRegion(m), mesh = NSO_cropTargetMesh(m);
   if (!cur.region || !cur.region.ok || !mesh) { NSO_cropRemoveGhost(); return; }
   if (!cs.regionGeo) cs.regionGeo = rawResultToDisplayGeometry(cur.region.tris, m.centerOffset);
@@ -1601,7 +1607,7 @@ function NSO_cropMoveSyncUI() {
   var chk = document.getElementById('chk-crop-lift');
   if (chk) chk.checked = !!cs.lift;
   var el = document.getElementById('crop-move-readout'), btn = document.getElementById('btn-crop-lockin');
-  var live = typeof state !== 'undefined' && state.cutterOpen && m;
+  var live = NSO_cropLive() && m;
   var ready = false, txt = '—';
   // The region is cut only once Lift is ticked: a Stage 1 box drag should not
   // pay for a clip it never uses.

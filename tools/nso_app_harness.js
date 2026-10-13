@@ -114,7 +114,7 @@ async function withApp(fn, opts) {
     args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox']
       .concat(proxyUrl ? ['--proxy-server=https=' + proxyUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '')] : [])
   });
-  /* 900 tall, not Playwright's 720. Below about 790 px the shell's left
+  /* 900 tall, not Playwright's 720. Below about 830 px the shell's left
      column sits on top of the bottom-left tools (Undo, Frame, X-ray,
      G-scope, Watch) - a known collision, flagged and not yet fixed, and
      measured where it starts by tools/nso_ui_shell_drive_check.js. A check

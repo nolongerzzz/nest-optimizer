@@ -96,25 +96,43 @@ function resolveAxis(model) {
 
 // ===================== The cut frame =====================
 // One frame for everything the cutter shows or does: the mm readout, the
-// slider, the number box, the blade, and the plane Split cuts. They used to
-// read three different frames (the geometry's box along the plate-axis
-// letter, m.size placed in world space as if the piece had never turned, and
-// the blade's world position carried back into the piece), which agree only
-// while a piece is unrotated: on a turned or rolled piece the blade fell
-// short of the piece or left it, and the cut ran somewhere else again.
+// slider, the number box, the blade, the plate line and the plane Cut cuts.
 //
-// `axis` is the piece's own (local) axis the plate axis runs along under its
-// current pose; `bbox` is its geometry's bounds in that same frame, so span,
-// origin, the blade's size and the plane all come from one box.
+// THE SQUARE CUT. The blade stands across the piece's LONGEST dimension as it
+// lies, so the default cut passes through the short cross-section and
+// severs the long way (cut to length). "As it lies" is the piece's own
+// geometry box, the frame Scale's Longest measures in (#162): a pose on the
+// plate (Tip, Stand, Tilt) turns the mesh, not that box, so a tipped piece
+// still cuts across its true length, and the blade, carried by the mesh's
+// transform, is square to the piece in world space. Ties go x, then z, then
+// y. `axis` is that local axis; `plateAxis` names the plate direction it
+// runs along now ('y' for a piece stood on end), for the readout and for
+// which way the halves are parted on the plate.
 //
-// The plane may come no closer than CUT_END_MM to either end: a fixed
-// distance, so a sliver is as reachable on a 300 mm piece as on a 30 mm one.
-// It is MIN_CUT_SIDE_MM (app-core.js), the distance Split itself demands, so
-// the end of the slider is never a position Split refuses. Positions sit on a
-// 0.1 mm grid from the low end, the readout's resolution, so the number shown
-// is the plane cut.
+// A programmatic lock, state.cutAxis = 'x' | 'z', is kept for the checks
+// that cut a piece across a chosen plate axis (a tube's bore on every
+// axis): with it set, the axis is the piece's own axis that plate axis runs
+// along under its pose, as before. No control sets it.
+//
+// THE MITRE. state.cutMiterDeg turns the cut plane's heading about the plate
+// vertical, clockwise seen from above; 0 = square. Everything below works in
+// the CUT frame: the piece's own frame turned by `turn` (that heading, about
+// the plate vertical as it lies in the piece's frame), where the plane is
+// axis-aligned again - #161's yaw, done to a copy. `back` carries the cut
+// frame into the piece's own frame. Square, both are null and the cut frame
+// is the piece's own frame, bit for bit.
+//
+// `mm` is the plane's distance along the long axis from its low end: where
+// the plane crosses the piece's centre line. The plane may come no closer
+// than CUT_END_MM to either end: a fixed distance, so a sliver is as
+// reachable on a 300 mm piece as on a 30 mm one. It is MIN_CUT_SIDE_MM
+// (app-core.js), the distance Cut itself demands, so the end of the slider is
+// never a position Cut refuses. Positions sit on a 0.1 mm grid from the low
+// end, the readout's resolution, so the number shown is the plane cut.
 // (Headless checks load this file without app-core.js; 1 mm is its value.)
 const CUT_END_MM = (typeof MIN_CUT_SIDE_MM !== 'undefined') ? MIN_CUT_SIDE_MM : 1;
+// What the ← / → buttons step the blade by.
+const CUT_NUDGE_MM = 1;
 
 function cutMeshOf(m) {
   const placed = (state.placed || []).find(function (p) { return p && p.sourceId === m.id && p.mesh; });
@@ -129,25 +147,76 @@ function cutEndLimits(span) {
   return { lo: lo, hi: hi };
 }
 
+/** The piece's longest axis in its own frame: 'x', 'z' or 'y' (ties in that order). */
+function cutLongAxis(bbox) {
+  const s = { x: bbox.max.x - bbox.min.x, y: bbox.max.y - bbox.min.y, z: bbox.max.z - bbox.min.z };
+  let a = 'x';
+  if (s.z > s[a]) a = 'z';
+  if (s.y > s[a]) a = 'y';
+  return a;
+}
+
+// Exact 0 / +-1 for quarter values, so a turn by a quarter and back is the
+// identity bit for bit (#161's rule).
+function cutExact(v) {
+  return Math.abs(v) < 1e-12 ? 0 : Math.abs(Math.abs(v) - 1) < 1e-12 ? Math.sign(v) : v;
+}
+
+/** A turn by `deg` about the unit axis `v` (piece frame), entries snapped. */
+function cutTurnMatrix(v, deg) {
+  const a = new THREE.Vector3(v.x, v.y, v.z);
+  ['x', 'y', 'z'].forEach(k => { if (Math.abs(a[k]) < 1e-9) a[k] = 0; });
+  a.normalize();
+  const M = new THREE.Matrix4().makeRotationAxis(a, (deg * Math.PI) / 180);
+  for (let i = 0; i < 16; i++) M.elements[i] = cutExact(M.elements[i]);
+  return M;
+}
+
 function cutFrame(model) {
   const m = model || getActiveModel();
   if (!m || !m.geometry || !m.geometry.attributes || !m.geometry.attributes.position) return null;
-  const plateAxis = resolveAxis(m);
   const bbox = new THREE.Box3().setFromBufferAttribute(m.geometry.attributes.position);
   const mesh = cutMeshOf(m);
-  let axis = plateAxis;
-  if (mesh) {
-    mesh.updateMatrixWorld(true);
-    const n = (plateAxis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1))
-      .transformDirection(new THREE.Matrix4().copy(mesh.matrixWorld).invert());
-    const ax = Math.abs(n.x), ay = Math.abs(n.y), az = Math.abs(n.z);
-    axis = (ax >= ay && ax >= az) ? 'x' : (ay >= az ? 'y' : 'z');
+  if (mesh) mesh.updateMatrixWorld(true);
+  const toLocal = mesh ? new THREE.Matrix4().copy(mesh.matrixWorld).invert() : null;
+  let axis, plateAxis;
+  if (state.cutAxis === 'x' || state.cutAxis === 'z') {
+    plateAxis = state.cutAxis;
+    axis = plateAxis;
+    if (toLocal) {
+      const n = (plateAxis === 'x' ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1)).transformDirection(toLocal);
+      const ax = Math.abs(n.x), ay = Math.abs(n.y), az = Math.abs(n.z);
+      axis = (ax >= ay && ax >= az) ? 'x' : (ay >= az ? 'y' : 'z');
+    }
+  } else {
+    axis = cutLongAxis(bbox);
+    plateAxis = axis;
+    if (mesh) {
+      const w = new THREE.Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, axis === 'z' ? 1 : 0)
+        .transformDirection(mesh.matrixWorld);
+      const ax = Math.abs(w.x), ay = Math.abs(w.y), az = Math.abs(w.z);
+      plateAxis = (ay > ax && ay > az) ? 'y' : (ax >= az ? 'x' : 'z');
+    }
   }
   const span = bbox.max[axis] - bbox.min[axis];
   if (!(span > 0)) return null;
   const lim = cutEndLimits(span);
+  const deg = cutMiterDeg();
+  let turn = null, back = null;
+  if (deg) {
+    // The plate vertical, in the piece's own frame.
+    const up = toLocal ? new THREE.Vector3(0, 1, 0).transformDirection(toLocal) : new THREE.Vector3(0, 1, 0);
+    turn = cutTurnMatrix(up, deg);
+    back = cutTurnMatrix(up, -deg);
+  }
   return { plateAxis: plateAxis, axis: axis, bbox: bbox, span: span, origin: bbox.min[axis],
-           lo: lim.lo, hi: lim.hi, mesh: mesh };
+           lo: lim.lo, hi: lim.hi, mesh: mesh, deg: deg, turn: turn, back: back };
+}
+
+/** The mitre in whole degrees, 0..359; 0 = square. */
+function cutMiterDeg() {
+  const d = Math.round(Number(state.cutMiterDeg) || 0);
+  return ((d % 360) + 360) % 360;
 }
 
 // The plane's distance from the low end for fraction t, on the grid and
@@ -174,16 +243,34 @@ function snapCutT(t, span) {
   return cutMmAt(t, span) / span;
 }
 
-/** cutT drives the plane. Helper is a display of cutT. */
+/** cutT and the mitre drive the plane. The blade is a display of them.
+
+    In the CUT frame: `axis`, `plane` and `bbox` (the piece's box turned into
+    that frame - its eight corners' box, so it holds the whole piece);
+    `frame` carries that frame into the piece's own (null when square).
+    `localBox` and `origin` are the piece's own box and its low end. */
 function getCutPlaneLocal(model) {
   const f = cutFrame(model);
   if (!f) return null;
   const mm = cutMmAt(state.cutT == null ? 0.5 : state.cutT, f.span);
-  return { axis: f.axis, plateAxis: f.plateAxis, plane: f.origin + mm, mm: mm, bbox: f.bbox, span: f.span,
-           t: mm / f.span, origin: f.origin, lo: f.lo, hi: f.hi };
+  const out = { axis: f.axis, plateAxis: f.plateAxis, plane: f.origin + mm, mm: mm, bbox: f.bbox, span: f.span,
+                t: mm / f.span, origin: f.origin, lo: f.lo, hi: f.hi, localBox: f.bbox,
+                deg: f.deg, turn: f.turn, frame: f.back };
+  if (f.turn) {
+    const P = f.bbox.getCenter(new THREE.Vector3());
+    P[f.axis] = f.origin + mm;
+    out.plane = P.applyMatrix4(f.turn)[f.axis];
+    const b = f.bbox, c = new THREE.Vector3(), box = new THREE.Box3();
+    for (let i = 0; i < 8; i++) {
+      box.expandByPoint(c.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z)
+        .applyMatrix4(f.turn));
+    }
+    out.bbox = box;
+  }
+  return out;
 }
 
-/** For Split: the plane the red line is drawn at - the same frame, the same number. */
+/** For Cut: the plane the blade is drawn at - the same frame, the same number. */
 function getCutPlaneForSplit(model) {
   const m = model || getActiveModel();
   if (!m) return null;
@@ -200,7 +287,29 @@ function setCutMm(mm) {
   updateCutHelper();
 }
 
+/** Set the mitre (degrees clockwise seen from above; 0 = square). The plane
+    keeps crossing the centre line where it did. */
+function setCutMiter(deg) {
+  const d = Math.round(Number(deg) || 0);
+  state.cutMiterDeg = ((d % 360) + 360) % 360;
+  syncCutUI();
+  updateCutHelper();
+}
+
+function syncCutMiterUI() {
+  const deg = cutMiterDeg();
+  const turn = document.getElementById('cut-dial-turn');
+  if (turn) turn.setAttribute('transform', 'rotate(' + deg + ' 50 50)');
+  const text = document.getElementById('cut-dial-deg');
+  if (text) text.textContent = deg + '°';
+  const dial = document.getElementById('cut-miter-dial');
+  if (dial) dial.setAttribute('aria-valuenow', String(deg));
+  const input = document.getElementById('cut-miter-deg');
+  if (input && document.activeElement !== input) input.value = String(deg);
+}
+
 function syncCutUI() {
+  syncCutMiterUI();
   const m = getActiveModel();
   const slider = document.getElementById('cut-slider');
   const input = document.getElementById('cut-mm');
@@ -214,7 +323,7 @@ function syncCutUI() {
   const axis = info.plateAxis;
   const mm = info.mm;
   // The slider runs in mm over exactly the allowed range, so its thumb, the
-  // number box and the red line are the same number at every position.
+  // number box and the blade are the same number at every position.
   if (slider) {
     slider.min = String(info.lo);
     slider.max = String(info.hi);
@@ -226,12 +335,13 @@ function syncCutUI() {
     input.max = String(info.hi);
     if (document.activeElement !== input) input.value = mm.toFixed(1);
   }
+  // A clean split: the two sides are the plane's distance from each end and
+  // add back to the piece. No kerf comes off.
   if (readout) {
-    const a = Math.max(0, mm - KERF_MM * 0.5);
-    const b = Math.max(0, span - mm - KERF_MM * 0.5);
     readout.textContent =
-      'RED LINE @ ' + mm.toFixed(1) + ' mm (kerf ' + KERF_MM + ' mm) -> ' +
-      a.toFixed(1) + ' mm | ' + b.toFixed(1) + ' mm  (' + axis.toUpperCase() + ')';
+      'RED LINE @ ' + mm.toFixed(1) + ' mm (no kerf) -> ' +
+      mm.toFixed(1) + ' mm | ' + (span - mm).toFixed(1) + ' mm  (' + axis.toUpperCase() + ')' +
+      (info.deg ? ', mitre ' + info.deg + '°' : '');
   }
 }
 
@@ -251,45 +361,45 @@ function removeCutHelper() {
   state.cutHelper = null;
 }
 
-/* The Cut dropdown closes when the cutter tool goes away. While the tool is
-   live its panel can be shut by opening any other panel (one panel on the
-   page, app-join.js) - the cutter stays armed and the panel comes back when
-   Cut is opened again. The tool goes away by four different routes: the
-   Close button, Undo of a split, Clear plate, and Clear all. Every one of
-   them ends in updateCutterUI(), which is why the closing hangs here
-   rather than on closeCutter() - three of the four never call it.
+/* No Open / Close: the card IS the switch. Opening the Cut card arms the
+   cutter (state.cutterOpen, state.cutTool 'cut'); closing it - by its own
+   slab, by opening any other panel (one panel on the page, app-join.js), by
+   the leave-tool gesture - disarms it. The Crop card arms the same piece
+   selection for Crop (state.cutTool 'crop'), with no blade. The wiring is
+   cutWireCards below.
 
-   On the transition only. A standing "cutter off, so shut the menu" would
-   slam the dropdown shut while you were reading it, since updateCutterUI()
-   also runs on selection changes and on opening the menu in the first
-   place - and the whole point is that you open this menu BEFORE the tool
-   is live, to reach the button that makes it live. */
-let cutterWasOpen = false;
+   The other way round, the card closes when the tool goes away without it:
+   Undo of a cut, Clear plate and Clear all drop state.cutterOpen and never
+   touch the card. Every route ends in updateCutterUI(), which is why the
+   closing hangs here - on the transition only, since updateCutterUI() also
+   runs on every selection change while the card is open. */
+let cutterWasTool = null;
 
 function updateCutterUI() {
-  if (cutterWasOpen && !state.cutterOpen) {
-    const menu = document.getElementById('menu-cut');
+  if (cutterWasTool && !state.cutterOpen) {
+    const menu = document.getElementById(cutterWasTool === 'crop' ? 'menu-crop' : 'menu-cut');
     if (menu) menu.open = false;
   }
-  cutterWasOpen = !!state.cutterOpen;
-  const openBtn = document.getElementById('btn-cutter-open');
-  const closeBtn = document.getElementById('btn-cutter-close');
+  cutterWasTool = state.cutterOpen ? (state.cutTool || 'cut') : null;
+  const cutting = cutterArmed('cut');
   const status = document.getElementById('cutter-status');
   const cutBtn = document.getElementById('btn-cut');
-  if (openBtn) {
-    openBtn.disabled = state.cutterOpen;
-    openBtn.classList.toggle('tool-active', state.cutterOpen);
-  }
-  if (closeBtn) closeBtn.disabled = !state.cutterOpen;
   if (status) {
-    status.textContent = state.cutterOpen
-      ? 'Cutter open - click a piece to put the red line on it, then Split.'
-      : 'Cutter closed - red line off.';
+    status.textContent = cutting
+      ? (getActiveModel() && state.cutHelper
+        ? 'Click the piece to move the blade; slide, nudge or angle it, then Cut.'
+        : 'Click a piece to drop a square blade on it.')
+      : 'Cutter off.';
   }
-  if (cutBtn) cutBtn.disabled = !state.cutterOpen || !getActiveModel() || !state.cutHelper;
+  if (cutBtn) cutBtn.disabled = !cutting || !getActiveModel() || !state.cutHelper;
   const tools = document.getElementById('cutter-tools');
-  if (tools) tools.classList.toggle('is-open', !!state.cutterOpen);
+  if (tools) tools.classList.toggle('is-open', cutting);
   syncCutRightSideOutButton();
+}
+
+/** Is the cutter live for `tool` ('cut' or 'crop')? */
+function cutterArmed(tool) {
+  return !!state.cutterOpen && (state.cutTool || 'cut') === tool;
 }
 
 /** Mesh on the plate for the active model - used to hang the red plane in place */
@@ -300,12 +410,19 @@ function getCutterTargetMesh() {
   return hit ? hit.mesh : null;
 }
 
-function openCutter() {
+/* Arms the cutter for `tool` ('cut' by default, or 'crop'). A piece already
+   selected on the plate stays selected and the tool goes live on it at once
+   (the blade square, mid-piece); otherwise the next click on a piece does. */
+function openCutter(tool) {
+  const kind = tool === 'crop' ? 'crop' : 'cut';
+  const keep = state.selectedIndex;
   state.cutterOpen = true;
+  state.cutTool = kind;
   state.cutRightSideOutOffer = null;
   state.cutDragging = false;
   state.editYawDragging = false;
   state.cutT = 0.5;
+  state.cutMiterDeg = 0;
   state.editId = null;
   state.selectedIndex = -1;
   if (state.controls) state.controls.enabled = true;
@@ -315,15 +432,20 @@ function openCutter() {
   if (typeof paintJoinHighlights === 'function') paintJoinHighlights();
   updateCutterUI();
   updateEditSize();
-  const m = getActiveModel();
-  setStatus(
-    'Cutter open on ' + (m && m.name ? m.name : 'piece') +
-    ' - red line only; pieces stay put. Drag plane, then Split.'
-  );
+  const p = keep >= 0 && state.placed ? state.placed[keep] : null;
+  if (p && p.mesh && p.sourceId != null && typeof selectPlaced === 'function') {
+    selectPlaced(keep);
+    return;
+  }
+  setStatus(kind === 'crop'
+    ? 'Crop on - click a piece to put the crop box on it.'
+    : 'Cut on - click a piece to drop a square blade on it.');
 }
 
 function closeCutter(silent) {
+  const was = state.cutterOpen ? (state.cutTool || 'cut') : null;
   state.cutterOpen = false;
+  state.cutTool = null;
   state.cutRightSideOutOffer = null;
   state.cutDragging = false;
   state.moveDragging = false;
@@ -334,17 +456,89 @@ function closeCutter(silent) {
   if (typeof paintJoinHighlights === 'function') paintJoinHighlights();
   if (state.controls) state.controls.enabled = true;
   removeCutHelper();
-  // Do NOT clear or rebuild pieces - open/close is red-line only
-  if (state.previewMesh && state.previewMesh.userData && state.previewMesh.userData.editPreview) {
-    // Only clear a temporary single-model preview (no real plate pack)
-    if (!state.placed.length) {
-      /* leave preview mesh visible without plane */
-    }
-  }
-  // If previewMesh was a real placed piece, just detach helper (already removed)
+  // Pieces are not cleared or rebuilt: the cutter is the blade only.
   state.previewMesh = null;
   updateCutterUI();
-  if (!silent) setStatus('Cutter closed - red line off. Pieces unchanged.');
+  if (!silent) setStatus((was === 'crop' ? 'Crop' : 'Cut') + ' off - blade gone. Pieces unchanged.');
+}
+
+/* The two cards, wired to the tool. A MutationObserver on `open` rather
+   than a 'toggle' listener, for the reason app-join.js's one-panel rule
+   gives: it sees a programmatic `.open = true` as well as a click, and runs
+   before the next event. Opening Crop while Cut is live hands the selection
+   machinery over to Crop first; Cut's card then shuts (one panel), and its
+   close is a no-op because the live tool is no longer Cut's. */
+function cutWireCards() {
+  if (typeof document === 'undefined' || typeof MutationObserver !== 'function') return;
+  const cards = { 'menu-cut': 'cut', 'menu-crop': 'crop' };
+  new MutationObserver(function (records) {
+    records.forEach(function (r) {
+      const tool = cards[r.target.id];
+      if (!tool) return;
+      if (r.target.open && !cutterArmed(tool)) {
+        openCutter(tool);
+      } else if (!r.target.open && cutterArmed(tool)) {
+        closeCutter(false);
+      }
+    });
+  }).observe(document.body, { attributes: true, subtree: true, attributeFilter: ['open'] });
+  Object.keys(cards).forEach(function (id) {
+    const d = document.getElementById(id);
+    if (d && d.open && !cutterArmed(cards[id])) openCutter(cards[id]);
+  });
+}
+
+/* The mitre wheel: a 360 degree dial, a rail round it and a handle on the
+   rail. Drag the handle (or press anywhere on the rail) round to set the cut
+   plane's heading to any whole degree, clockwise seen from above; 0, the
+   handle at the top, is square. The typed box and Square are the other two
+   ways in. It is optional: the square cut needs none of it. */
+function cutWireMiterDial() {
+  const dial = document.getElementById('cut-miter-dial');
+  if (!dial || dial.dataset.nsoWired === '1') return;
+  dial.dataset.nsoWired = '1';
+  let dragging = false;
+  function degAt(ev) {
+    const r = dial.getBoundingClientRect();
+    const dx = ev.clientX - (r.left + r.width / 2), dy = ev.clientY - (r.top + r.height / 2);
+    if (Math.hypot(dx, dy) < r.width * 0.18) return null;     // the centre is the readout, not the rail
+    return Math.round((Math.atan2(dx, -dy) * 180) / Math.PI);
+  }
+  dial.addEventListener('pointerdown', function (ev) {
+    if (ev.button !== 0) return;
+    const d = degAt(ev);
+    if (d == null) return;
+    dragging = true;
+    if (dial.setPointerCapture) { try { dial.setPointerCapture(ev.pointerId); } catch (e) { /* synthetic */ } }
+    setCutMiter(d);
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
+  dial.addEventListener('pointermove', function (ev) {
+    if (!dragging) return;
+    const d = degAt(ev);
+    if (d != null) setCutMiter(d);
+  });
+  const stop = function () { dragging = false; };
+  dial.addEventListener('pointerup', stop);
+  dial.addEventListener('pointercancel', stop);
+  dial.addEventListener('keydown', function (ev) {
+    const step = ev.shiftKey ? 15 : 1;
+    if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') setCutMiter(cutMiterDeg() + step);
+    else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') setCutMiter(cutMiterDeg() - step);
+    else if (ev.key === 'Home' || ev.key === '0') setCutMiter(0);
+    else return;
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
+  const typed = document.getElementById('cut-miter-deg');
+  if (typed) typed.addEventListener('change', function () {
+    const v = parseFloat(typed.value);
+    setCutMiter(isFinite(v) ? v : 0);
+  });
+  const square = document.getElementById('btn-cut-square');
+  if (square) square.addEventListener('click', function () { setCutMiter(0); });
+  syncCutMiterUI();
 }
 
 function showEditPreview() {
@@ -389,7 +583,7 @@ function showEditPreview() {
 // tall or wide piece the blade looked as if it stopped short.)
 //
 // The plate line marks the same plane where it meets the plate (y = 0): flat
-// on the plate, one kerf wide, spanning the piece's footprint along the cut.
+// on the plate, 1 mm wide (a mark, not a kerf), spanning the piece's footprint along the cut.
 // It is the plane Split cuts and the box the blade is sized from, carried
 // into world space - the same number, the same bounds - so it follows the
 // slider and the mm box exactly and cannot disagree with the blade.
@@ -468,7 +662,7 @@ function cutBuildBlade(group, f) {
   group.userData.cutAcross = across;
 }
 
-// The plate line's two objects: a flat strip one kerf wide and its centre
+// The plate line's two objects: a flat strip 1 mm wide and its centre
 // line (so it still reads as a line when the plate is seen edge-on). Their
 // vertices are written in world space by cutPlaceLine on every update.
 function cutBuildPlateLine(group) {
@@ -501,7 +695,7 @@ function cutBuildPlateLine(group) {
 function cutPlateLineWorld(info, mesh) {
   if (!info || !mesh) return null;
   mesh.updateMatrixWorld(true);
-  const Mw = mesh.matrixWorld;
+  const Mw = cutWorldMatrix(info, mesh);
   const local = info.bbox.getCenter(new THREE.Vector3());
   local[info.axis] = info.plane;
   const P = local.clone().applyMatrix4(Mw);
@@ -558,12 +752,14 @@ function buildCutHelper() {
     removeCutHelper();
     state.previewMesh = keep;
   }
-  const f = cutFrame(m);
-  if (!f) return;
+  // Crop's card shares the selection, not the blade.
+  if (state.cutTool === 'crop') return;
+  const info = getCutPlaneLocal(m);
+  if (!info) return;
 
   const group = new THREE.Group();
   group.name = 'cutHelper';
-  cutBuildBlade(group, f);
+  cutBuildBlade(group, info);
   cutBuildPlateLine(group);
   if (state.modelGroup) state.modelGroup.add(group);
   else if (state.previewMesh) state.previewMesh.add(group);
@@ -571,10 +767,19 @@ function buildCutHelper() {
   updateCutHelper();
 }
 
+// The cut frame carried into world space: the piece's mesh transform, after
+// the mitre's `frame` (cut frame -> piece frame) when there is one.
+function cutWorldMatrix(info, mesh) {
+  const M = new THREE.Matrix4().copy(mesh.matrixWorld);
+  if (info && info.frame) M.multiply(info.frame);
+  return M;
+}
+
 // Puts the blade on the plane: the section's centre with the cut coordinate
-// replaced by the plane, carried through the piece's world transform into
-// the helper's parent; then lays the plate line under it. Rebuilds it first
-// if the piece's cut axis or size changed under it (a turn, a roll, a bake).
+// replaced by the plane (in the cut frame), carried through the mitre and the
+// piece's world transform into the helper's parent; then lays the plate line
+// under it. Rebuilds it first if the piece's cut axis or the section's size
+// changed under it (a turn, a roll, a bake, a new mitre).
 function updateCutHelper() {
   const m = getActiveModel();
   if (!m || !state.cutHelper) return;
@@ -595,11 +800,16 @@ function updateCutHelper() {
   mesh.updateMatrixWorld(true);
   const parent = state.cutHelper.parent;
   if (parent) parent.updateMatrixWorld(true);
-  const M = new THREE.Matrix4().makeTranslation(local.x, local.y, local.z).premultiply(mesh.matrixWorld);
-  if (parent && parent !== mesh) M.premultiply(new THREE.Matrix4().copy(parent.matrixWorld).invert());
-  else if (parent === mesh) M.copy(new THREE.Matrix4().makeTranslation(local.x, local.y, local.z));
+  const M = new THREE.Matrix4().makeTranslation(local.x, local.y, local.z);
+  if (parent === mesh) {
+    if (info.frame) M.premultiply(info.frame);
+  } else {
+    M.premultiply(cutWorldMatrix(info, mesh));
+    if (parent) M.premultiply(new THREE.Matrix4().copy(parent.matrixWorld).invert());
+  }
   M.decompose(state.cutHelper.position, state.cutHelper.quaternion, state.cutHelper.scale);
   state.cutHelper.updateMatrixWorld(true);
+  state.cutHelper.userData.cutDeg = info.deg || 0;
   cutPlaceLine(state.cutHelper, info, mesh);
 }
 
@@ -2150,14 +2360,14 @@ function rawResultToDisplayGeometry(rawFlatTris, parentOffset) {
 // rawCut cannot close the cut face, the Cut is refused with a CutRefused
 // error whose message says why in plain words, and the piece is left alone.
 //
-// Which side each piece is, is left as each route already had it, and the
-// two routes do not agree. rawCut's keepMin = true keeps coord >= plane, so
-// on the raw route `left` = rawCut(..., leftPlane, true) through
-// mapPlaneToRaw is the side ABOVE leftPlane, and each piece keeps the kerf
-// band instead of losing it (an 8 mm ring cut at 4 gives 4.5 + 4.5). Display
-// Y follows display X, so a Y cut on a raw piece now does the same. On the
-// display route `left` is the side below leftPlane, the side
-// clipGeometrySide kept (hence the !keepMin there), and the kerf is removed.
+// A clean split. Both sides are cut at the ONE plane, so the two halves meet
+// there exactly - no kerf band between them, no overlap - and add back to
+// the piece. `left` is the low side along the cut axis on both routes (rawCut's
+// keepMin = true keeps coord >= plane; mapPlaneToRaw carries the side into
+// the raw frame, flipping it where display Z runs against raw Y). The two
+// routes used to disagree: the display route took a kerf band out between
+// the halves, and the raw route gave each half the band (an 8 mm ring cut at
+// 4 came out 4.5 + 4.5). Now an 8 mm piece cut at 4 is 4 + 4 on either.
 const CUT_DISPLAY_AXIS_IDX = { x: 0, y: 1, z: 2 };
 
 function cutRefused(message) {
@@ -2254,8 +2464,8 @@ function displaySoupOf(geometry) {
 }
 
 function splitBothSides(model, axis, leftPlane, rightPlane) {
-  const mapL = mapPlaneToRaw(model, axis, leftPlane, true);
-  const mapR = mapPlaneToRaw(model, axis, rightPlane, false);
+  const mapL = mapPlaneToRaw(model, axis, leftPlane, false);
+  const mapR = mapPlaneToRaw(model, axis, rightPlane, true);
   if (mapL && mapR) {
     const rawL = cutOneSide(model.rawTris, mapL.axisIdx, mapL.plane, mapL.keepMin);
     const rawR = cutOneSide(model.rawTris, mapR.axisIdx, mapR.plane, mapR.keepMin);
@@ -2272,18 +2482,88 @@ function splitBothSides(model, axis, leftPlane, rightPlane) {
   const axisIdx = CUT_DISPLAY_AXIS_IDX[axis];
   if (axisIdx == null) throw cutRefused('the cut axis "' + axis + '" is not X, Y or Z');
   const soup = displaySoupOf(model.geometry);
-  function geo(tris) {
-    const g = new THREE.BufferGeometry();
-    g.setAttribute('position', new THREE.Float32BufferAttribute(tris, 3));
-    g.computeVertexNormals();
-    g.computeBoundingBox();
-    return g;
-  }
   return {
-    left: geo(cutOneSide(soup, axisIdx, leftPlane, false)),
-    right: geo(cutOneSide(soup, axisIdx, rightPlane, true)),
+    left: cutDisplayGeometry(cutOneSide(soup, axisIdx, leftPlane, false)),
+    right: cutDisplayGeometry(cutOneSide(soup, axisIdx, rightPlane, true)),
     engine: 'display'
   };
+}
+
+function cutDisplayGeometry(tris) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(tris, 3));
+  g.computeVertexNormals();
+  g.computeBoundingBox();
+  return g;
+}
+
+// ===================== The mitred cut =====================
+// The plane at the mitre is axis-aligned in the cut frame (getCutPlaneLocal),
+// so the cut is #161's yaw done to a COPY: turn the piece's triangles into
+// the cut frame (info.turn), cut on the axis there with the one engine, and
+// turn both halves back (info.frame). The piece itself never turns - its
+// halves come back in its own frame, lying exactly as it lay - and only the
+// cut face is on the slant. Both halves' cut-face vertices are the same
+// numbers turned back by the same matrix, so the halves still meet exactly.
+//
+// A raw piece turns its raw triangles about the raw point its display origin
+// is (as rotateActiveModelY does): display is (x, z, -y) of raw, less
+// centerOffset, so a display turn T about the origin is, on raw,
+//   r' = p + Minv T M (r - p),  M (x, y, z) = (x, z, -y),  p = Minv centerOffset.
+// The display origin stays where it was, so centerOffset holds for the copy.
+
+/** A soup turned by the rotation Matrix4 `T` about the display origin. */
+function cutTurnDisplaySoup(soup, T) {
+  const e = T.elements, out = new Float32Array(soup.length);
+  for (let i = 0; i < soup.length; i += 3) {
+    const x = soup[i], y = soup[i + 1], z = soup[i + 2];
+    out[i] = e[0] * x + e[4] * y + e[8] * z;
+    out[i + 1] = e[1] * x + e[5] * y + e[9] * z;
+    out[i + 2] = e[2] * x + e[6] * y + e[10] * z;
+  }
+  return out;
+}
+
+/** A raw soup turned by the display rotation `T` about the display origin. */
+function cutTurnRawSoup(raw, off, T) {
+  const e = T.elements, out = new Float32Array(raw.length);
+  const px = off.x, py = -off.z, pz = off.y;          // the raw point the display origin is
+  for (let i = 0; i < raw.length; i += 3) {
+    // into display axes, about the origin: (x, z, -y)
+    const dx = raw[i] - px, dy = raw[i + 2] - pz, dz = -(raw[i + 1] - py);
+    const ex = e[0] * dx + e[4] * dy + e[8] * dz;
+    const ey = e[1] * dx + e[5] * dy + e[9] * dz;
+    const ez = e[2] * dx + e[6] * dy + e[10] * dz;
+    // and back to raw: display (a, b, c) is raw (a, -c, b)
+    out[i] = px + ex;
+    out[i + 1] = py - ez;
+    out[i + 2] = pz + ey;
+  }
+  return out;
+}
+
+/** Cut `model` at `info` (getCutPlaneForSplit): the clean split, square or
+    mitred. Same result shape as splitBothSides. */
+function cutSplitAt(model, info) {
+  if (!info.turn) return splitBothSides(model, info.axis, info.plane, info.plane);
+  const raw = !!(model.rawTris && model.centerOffset && model.rawAxis === 'zup');
+  const copy = raw
+    ? { rawTris: cutTurnRawSoup(model.rawTris, model.centerOffset, info.turn), rawAxis: 'zup',
+        centerOffset: model.centerOffset, geometry: model.geometry }
+    : { geometry: cutDisplayGeometry(cutTurnDisplaySoup(displaySoupOf(model.geometry), info.turn)) };
+  const pair = splitBothSides(copy, info.axis, info.plane, info.plane);
+  if (pair.engine === 'raw') {
+    const rawA = cutTurnRawSoup(pair.rawA, model.centerOffset, info.frame);
+    const rawB = cutTurnRawSoup(pair.rawB, model.centerOffset, info.frame);
+    return {
+      left: rawResultToDisplayGeometry(rawA, model.centerOffset),
+      right: rawResultToDisplayGeometry(rawB, model.centerOffset),
+      engine: 'raw', rawA: rawA, centerOffsetA: computeCenterOffsetFromRaw(rawA),
+      rawB: rawB, centerOffsetB: computeCenterOffsetFromRaw(rawB)
+    };
+  }
+  const back = g => cutDisplayGeometry(cutTurnDisplaySoup(displaySoupOf(g), info.frame));
+  return { left: back(pair.left), right: back(pair.right), engine: 'display' };
 }
 
 // ===================== Cut on an inside-out piece =====================

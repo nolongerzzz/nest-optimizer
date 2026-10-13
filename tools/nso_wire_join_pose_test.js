@@ -144,8 +144,8 @@ async function realCut(page, file) {
   await resetState(page);
   const id = await loadSTL(page, file);
   await page.evaluate(() => { document.querySelectorAll('details').forEach(d => { d.open = true; }); });
-  await page.evaluate(() => { const e = document.getElementById('btn-cutter-open'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-  if (!(await page.evaluate(() => state.cutterOpen))) await page.click('#btn-cutter-open');
+  await page.evaluate(() => { const e = document.getElementById('cutter-tools'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+  if (!(await page.evaluate(() => cutterArmed('cut')))) await page.evaluate(() => openCutter('cut'));
   await selectModel(page, id);
   await page.evaluate(() => { if (typeof updateCutHelper === 'function') updateCutHelper(); cutActiveModel(); });
   return await page.evaluate(() => state.models.map(m => m.id));

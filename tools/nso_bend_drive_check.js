@@ -212,10 +212,10 @@ withApp(async (page, logs) => {
   const rb = await page.evaluate(() => NSO_bendSelectedModel({ where: 60, angle: 90, toward: '+Y' }));
   check('the tube bends 90° toward +Y', rb.ok, rb.ok ? '' : rb.reason);
   await page.evaluate(() => {
-    const e = document.getElementById('btn-cutter-open');
+    const e = document.getElementById('cutter-tools');
     for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
   });
-  if (!(await page.evaluate(() => state.cutterOpen))) await page.click('#btn-cutter-open');
+  if (!(await page.evaluate(() => cutterArmed('cut')))) await page.evaluate(() => openCutter('cut'));
   const cut = await page.evaluate(id => {
     const idx = state.placed.findIndex(p => p && p.sourceId === id);
     selectPlaced(idx);

@@ -1,7 +1,7 @@
 # Detach and Reattach: take a detected feature off, put it back elsewhere
 
 `nso_detach.js` (`window.NSO_Detach`, and a Node module) plus `app-detach.js`
-(the Cut menu row). The first feature it works on is the flange that
+(the Crop card's row; the Cut menu's until Cut and Crop were split). The first feature it works on is the flange that
 `nso_flange.js` finds (docs/GSCOPE-FLANGE.md).
 
 ```
@@ -192,7 +192,7 @@ Every refusal names its reason and makes nothing.
 
 ## UI
 
-Cut menu, below Crop.
+Crop card, below Crop.
 
 - **Detach flange** runs on the cutter's piece. The piece keeps its place and
   its id and becomes the hull. The flange lands beside it as its own piece,

@@ -134,7 +134,9 @@ Each refusal names its reason and hands back the input soup object untouched:
 
 ## UI
 
-Cut menu, under Split. **From** and **to** are millimetres from the piece's
+The Crop card (its own card in the left column, under Cut; it was in the Cut
+menu, under Split, until Cut and Crop were split). Opening it arms the piece
+selection for Crop, with no blade. **From** and **to** are millimetres from the piece's
 low end along the cut axis, the same frame as the red-line readout. They
 default to the middle fifth. The readout shows the new length and how many
 faces the box removes or clips. Tick **Box** to draw the box on the piece:
@@ -299,7 +301,7 @@ All pass with self-intersection included.
 
 ## UI
 
-Cut menu, under Crop:
+Crop card, under Crop:
 
 1. **From / To** as before set the span along the cut axis.
 2. **Up** and **Across** narrow the box across the section. They are mm from

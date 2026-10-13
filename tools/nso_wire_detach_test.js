@@ -79,9 +79,10 @@ const measure = (page, id) => page.evaluate(mid => {
 const rawOf = (page, id) => page.evaluate(mid => Array.from(state.models.find(x => x && x.id === mid).rawTris), id);
 const modelIds = page => page.evaluate(() => state.models.map(m => m.id));
 const openCutter = async page => {
-  const open = await page.evaluate(() => document.getElementById('menu-cut').open);
-  if (!open) await page.click('#menu-cut > summary');
-  if (!(await page.evaluate(() => state.cutterOpen))) await page.click('#btn-cutter-open');
+  // Crop (and Detach under it) has its own card; opening it arms Crop.
+  const open = await page.evaluate(() => document.getElementById('menu-crop').open);
+  if (!open) await page.click('#menu-crop > summary');
+  if (!(await page.evaluate(() => state.cutterOpen && state.cutTool === 'crop'))) await page.evaluate(() => openCutter('crop'));
 };
 /* An oblique view of the plate for the screenshots: the flange side and
    the top at once. */
@@ -106,14 +107,14 @@ withApp(async (page, logs) => {
   {
     const w = await page.evaluate(() => {
       const d = document.getElementById('btn-detach'), r = document.getElementById('btn-reattach');
-      const cut = document.getElementById('menu-cut');
+      const cut = document.getElementById('menu-crop');
       return { d: !!d, r: !!r, wired: d && r && d.dataset.nsoWired === '1' && r.dataset.nsoWired === '1',
                inCut: !!(cut && d && cut.contains(d) && cut.contains(r)), rDisabled: r && r.disabled,
                core: typeof window.NSO_Detach, flange: typeof window.NSO_Flange, run: typeof window.nsoDetachRun,
                at: typeof window.nsoReattachAt, hook: typeof window.nsoReattachTakesClick,
                pick: typeof window.nsoAttachRawPick };
     });
-    check('the Cut menu carries Detach flange and Reattach, wired', w.d && w.r && w.wired && w.inCut, JSON.stringify(w));
+    check('the Crop card carries Detach flange and Reattach, wired', w.d && w.r && w.wired && w.inCut, JSON.stringify(w));
     check('Reattach is disabled until something is detached', w.rDisabled === true);
     check('nso_detach.js, nso_flange.js and app-detach.js are loaded', w.core === 'object' && w.flange === 'object' &&
       w.run === 'function' && w.at === 'function');

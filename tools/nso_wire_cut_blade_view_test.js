@@ -140,10 +140,10 @@ withApp(async (page, logs) => {
   };
   const open = async id => {
     await page.evaluate(() => {
-      const e = document.getElementById('btn-cutter-open');
+      const e = document.getElementById('cutter-tools');
       for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
     });
-    if (!(await page.evaluate(() => state.cutterOpen))) await page.click('#btn-cutter-open');
+    if (!(await page.evaluate(() => cutterArmed('cut')))) await page.evaluate(() => openCutter('cut'));
     await page.evaluate(id => selectPlaced(state.placed.findIndex(p => p && p.sourceId === id)), id);
     // Only this piece on the plate is drawn, so pixels are its own.
     await page.evaluate(id => state.placed.forEach(p => { if (p && p.mesh) p.mesh.visible = p.sourceId === id; }), id);
@@ -272,11 +272,11 @@ withApp(async (page, logs) => {
   const quarter = await load('quarter.stl', bar(60, 12, 30));
   await page.evaluate(id => { selectPlaced(state.placed.findIndex(p => p && p.sourceId === id)); rotateSelected(1); }, quarter);
   await open(quarter);
-  await page.click('#btn-cut-axis-x');
+  await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'x'; a.dispatchEvent(new Event('change')); });   // the axis lock (Cut X is gone)
   s = await view(quarter);
   check('turned 90 deg, Cut X: the cut runs along the bar\'s own Z, span 12', s.axis === 'z' && Math.abs(s.span - 12) < 1e-6, s.axis + ' ' + s.span);
   await ends('turned 90 deg, Cut X', quarter);
-  await page.click('#btn-cut-axis-z');
+  await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'z'; a.dispatchEvent(new Event('change')); });   // the axis lock (Cut Z is gone)
   s = await view(quarter);
   check('turned 90 deg, Cut Z: the cut runs along the bar\'s own X, span 60', s.axis === 'x' && Math.abs(s.span - 60) < 1e-6, s.axis + ' ' + s.span);
   await ends('turned 90 deg, Cut Z', quarter);
@@ -287,7 +287,7 @@ withApp(async (page, logs) => {
   const rolled = await load('rolled.stl', bar(60, 12, 30));
   await page.evaluate(id => { selectPlaced(state.placed.findIndex(p => p && p.sourceId === id)); rollSelected(); }, rolled);
   await open(rolled);
-  await page.click('#btn-cut-axis-x');
+  await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'x'; a.dispatchEvent(new Event('change')); });   // the axis lock (Cut X is gone)
   s = await view(rolled);
   check('rolled, Cut X: the cut runs along the bar\'s own Y', s.axis === 'y', s.axis + ' ' + s.span);
   await ends('rolled, Cut X', rolled);
