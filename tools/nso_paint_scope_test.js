@@ -73,6 +73,8 @@ const ROSTER = [
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Reattach stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Stock update',   file: 'app-stock.js',           scope: 'WHOLE-PIECE',
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Stock stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
+  { feature: 'Lift',           file: 'app-gscope-lift.js',     scope: 'WHOLE-PIECE',
+    test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Lift stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   /* The marker scan only: generation adds a piece and edits none, and a
      support is removed or replaced whole. See docs/GCODE-SUPPORTS.md. */
   { feature: 'G-scope supports', file: 'app-gscope-support.js', scope: 'SUB-REGION',

@@ -951,6 +951,26 @@
         <p class="ms-note" id="ms-support-read">&mdash;</p>
       </div>
 
+      <!-- Lift (nso_lift.js, app-gscope-lift.js, docs/LIFT.md): pick the flat
+           face details stand on, see what stands proud of it coloured by
+           height, choose islands, lift each off as its own piece. Plate
+           pieces only; one Undo puts everything back. -->
+      <div class="ms-section" id="ms-lift-row" style="display:none;">
+        <div class="ms-section-title">Features &mdash; lift off a flat face</div>
+        <div class="ms-btn-row">
+          <button id="ms-btn-lift-mode" type="button" aria-pressed="false"
+                  title="Click the flat face the details stand on; then click a detail to choose it, Shift-click for several">Pick base face</button>
+          <button id="ms-btn-lift" type="button" disabled
+                  title="Lift the chosen details off as their own pieces. The piece is left flat where they stood. One Undo puts it all back">Lift</button>
+          <button id="ms-btn-lift-clear" type="button" disabled title="Choose nothing">Clear choice</button>
+        </div>
+        <label class="ms-note ms-lift-height" for="ms-lift-height">How far out counts
+          <input type="range" id="ms-lift-height" min="0" max="2" step="0.01" value="0.42"
+                 title="A detail is offered when it stands out from the face by MORE than this. Default: one extrusion line at a 0.4 mm nozzle (NSO_Thickness.floorFor)" />
+          <span id="ms-lift-height-read">0.42 mm</span></label>
+        <p class="ms-note" id="ms-lift-read">&mdash;</p>
+      </div>
+
       <!-- In-house slicer (nso_slicer.js). app-gscope-slice.js owns this row:
            it slices the open mesh and opens the result as a toolpath, through
            the same parser an imported .gcode.3mf takes. docs/SLICER.md. -->
@@ -1120,7 +1140,7 @@
   <script src="nso_slicer.js?v=slice1"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
   <script src="nso_relief.js?v=relief2"></script>
-  <script src="app-core.js?v=land1"></script>
+  <script src="app-core.js?v=lift1"></script>
 
 
 
@@ -1160,7 +1180,7 @@
   <script src="app-skin.js?v=skin4"></script>
   <script src="app-skin-patch.js?v=skin3"></script>
   <script src="app-raster.js?v=raster1"></script>
-  <script src="app-relief.js?v=relief2"></script>
+  <script src="app-relief.js?v=lift1"></script>
   <script src="app-mask.js?v=inmode2"></script>
   <script src="app-seat-grid.js?v=inside6"></script>
   <script src="app-paint-delete.js?v=del1"></script>
@@ -1204,6 +1224,11 @@
        detection, generators and union it calls. See docs/GCODE-SUPPORTS.md. -->
   <script src="app-gscope-support.js?v=gsup2"></script>
   <script src="app-gscope-slice.js?v=slice3"></script>
+  <!-- Lift: details off a flat face, the plate left flat. After nso_lift.js
+       (the geometry), app-cut.js (rawFlatCapLoops), app-sculpt.js (the
+       commit) and app-microscope.js (the hooks). See docs/LIFT.md. -->
+  <script src="nso_lift.js?v=lift1"></script>
+  <script src="app-gscope-lift.js?v=lift1"></script>
 
 
   <script src="app-ux.js?v=inside9"></script>

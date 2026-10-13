@@ -210,50 +210,10 @@
 
   /* ---------------------------------------------------------- free plate */
 
-  var GAP = 4;          /* mm between pieces - what addModel leaves */
-  var STEP = 2;         /* mm, the search grid */
-
   /* The spot nearest the plate's middle where `entry`'s footprint sits
-     wholly on the bed and at least GAP from every other placed piece's.
-     Footprints are each piece's real box as posed (placedFootprint, the one
-     drag uses), so a turned piece is judged by the room it takes. Returns
-     { x, z, onBed } - onBed false when the bed has no such spot, and then a
-     spot just past everything, still clear of every piece. */
-  function freeSpot(entry) {
-    var plate = (typeof getCurrentPlate === 'function' && getCurrentPlate()) || { w: 180, d: 180 };
-    var self = placedFootprint(entry, 0, 0);
-    var others = state.placed.filter(function (p) { return p && p !== entry; })
-      .map(function (p) { return placedFootprint(p); });
-    function clear(x, z) {
-      for (var i = 0; i < others.length; i++) {
-        var o = others[i];
-        if (x + self.maxx > o.minx - GAP && x + self.minx < o.maxx + GAP &&
-            z + self.maxz > o.minz - GAP && z + self.minz < o.maxz + GAP) return false;
-      }
-      return true;
-    }
-    var x0 = -plate.w / 2 - self.minx, x1 = plate.w / 2 - self.maxx;
-    var z0 = -plate.d / 2 - self.minz, z1 = plate.d / 2 - self.maxz;
-    if (x0 <= x1 && z0 <= z1) {
-      if (clear(0, 0) && x0 <= 0 && 0 <= x1 && z0 <= 0 && 0 <= z1) return { x: 0, z: 0, onBed: true };
-      var best = null, bd = Infinity;
-      var xs = [], zs = [], v;
-      for (v = x0; v <= x1 + 1e-9; v += STEP) xs.push(v);
-      if (xs[xs.length - 1] < x1 - 1e-9) xs.push(x1);
-      for (v = z0; v <= z1 + 1e-9; v += STEP) zs.push(v);
-      if (zs[zs.length - 1] < z1 - 1e-9) zs.push(z1);
-      for (var j = 0; j < zs.length; j++) {
-        for (var i = 0; i < xs.length; i++) {
-          var d = xs[i] * xs[i] + zs[j] * zs[j];
-          if (d < bd && clear(xs[i], zs[j])) { bd = d; best = { x: xs[i], z: zs[j], onBed: true }; }
-        }
-      }
-      if (best) return best;
-    }
-    var maxx = -plate.w / 2;
-    others.forEach(function (o) { if (o.maxx > maxx) maxx = o.maxx; });
-    return { x: Math.max(maxx, plate.w / 2) + GAP - self.minx, z: 0, onBed: false };
-  }
+     wholly on the bed and at least 4 mm from every other placed piece's.
+     nsoFreeSpot (app-core.js) - written here, moved there so Lift shares it. */
+  function freeSpot(entry) { return nsoFreeSpot(entry); }
 
   /* G-scope's onPlate: the slab has just been added (and its Undo step
      pushed); move it to free plate. addModel's own seat marches a new piece
@@ -261,7 +221,7 @@
      turned piece and walks off the bed; this does neither. */
   function seat(id) {
     var entry = state.placed.find(function (p) { return p && p.sourceId === id; });
-    if (!entry || typeof placedFootprint !== 'function' || typeof applyPlacedXZ !== 'function') return null;
+    if (!entry || typeof nsoFreeSpot !== 'function' || typeof applyPlacedXZ !== 'function') return null;
     var at = freeSpot(entry);
     applyPlacedXZ(entry, at.x, at.z);
     if (typeof refreshOutline === 'function') refreshOutline(entry);
