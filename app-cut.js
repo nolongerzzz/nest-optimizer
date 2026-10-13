@@ -251,11 +251,12 @@ function removeCutHelper() {
   state.cutHelper = null;
 }
 
-/* The Cut dropdown is pinned open for as long as the cutter tool is live
-   (see the accordion in app-join.js). Something has to un-pin it when the
-   tool goes away, and the tool goes away by four different routes: the
+/* The Cut dropdown closes when the cutter tool goes away. While the tool is
+   live its panel can be shut by opening any other panel (one panel on the
+   page, app-join.js) - the cutter stays armed and the panel comes back when
+   Cut is opened again. The tool goes away by four different routes: the
    Close button, Undo of a split, Clear plate, and Clear all. Every one of
-   them ends in updateCutterUI(), which is why the un-pinning hangs here
+   them ends in updateCutterUI(), which is why the closing hangs here
    rather than on closeCutter() - three of the four never call it.
 
    On the transition only. A standing "cutter off, so shut the menu" would

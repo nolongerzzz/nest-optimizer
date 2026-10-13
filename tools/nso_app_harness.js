@@ -62,6 +62,41 @@ function serve() {
   });
 }
 
+/* The sidebar is gone (UI shell): every control lives in a drop-down, and a
+   shut <details> hides its contents from page.click. A drive check asserts
+   what a control DOES, not which drop-down it sits in, so before every
+   Playwright action on a selector the harness opens the drop-downs that hold
+   it, the way a user would - the same walk as openMenuFor below.
+
+   Two things are left alone. The menu whose OWN summary is the target is
+   not pre-opened, so a click on a summary still toggles that menu exactly
+   as before. And a selector querySelector cannot read (Playwright's text=
+   and >> forms) passes straight through. */
+const AUTO_OPEN_ACTIONS = ['click', 'dblclick', 'fill', 'check', 'uncheck', 'setChecked',
+                           'selectOption', 'hover', 'tap', 'type', 'press', 'focus'];
+function openDropdownsHolding(sel) {          // runs in the page
+  let el = null;
+  try { el = document.querySelector(sel); } catch (e) { return; }
+  if (!el) return;
+  const ownSummary = el.closest('summary');
+  for (let n = el.parentElement; n; n = n.parentElement) {
+    if (n.tagName !== 'DETAILS' || n.open) continue;
+    if (ownSummary && ownSummary.parentElement === n) continue;
+    n.open = true;
+  }
+}
+function installAutoOpen(page) {
+  for (const name of AUTO_OPEN_ACTIONS) {
+    const act = page[name].bind(page);
+    page[name] = async function (selector, ...rest) {
+      if (typeof selector === 'string') {
+        try { await page.evaluate(openDropdownsHolding, selector); } catch (e) { /* page busy: act as before */ }
+      }
+      return act(selector, ...rest);
+    };
+  }
+}
+
 /* Boots the app, hands `page` to fn, always tears down. */
 async function withApp(fn, opts) {
   opts = opts || {};
@@ -79,7 +114,14 @@ async function withApp(fn, opts) {
     args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox']
       .concat(proxyUrl ? ['--proxy-server=https=' + proxyUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '')] : [])
   });
-  const page = await browser.newPage();
+  /* 900 tall, not Playwright's 720. Below about 790 px the shell's left
+     column sits on top of the bottom-left tools (Undo, Frame, X-ray,
+     G-scope, Watch) - a known collision, flagged and not yet fixed, and
+     measured where it starts by tools/nso_ui_shell_drive_check.js. A check
+     that clicks Undo is asserting what Undo does, so it gets a window tall
+     enough to reach it. Checks that set their own size are unaffected. */
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  installAutoOpen(page);
   const logs = [];
   page.on('console', m => logs.push('[' + m.type() + '] ' + m.text()));
   page.on('pageerror', e => logs.push('[pageerror] ' + e.message));
@@ -188,9 +230,10 @@ async function openFinishSections(page) {
    opens every <details> on the way, which is the idiom the wire checks already
    use for the Finish menu.
 
-   Needed because the bar's controls moved into dropdowns - Import, Export,
-   Rotate, Tip, Move, Gen+, Photo, Scale, Cut - and a <details> that is shut
-   hides its contents from page.click.
+   Needed because every control lives in a drop-down - the top row, the left
+   column, Finish - and a <details> that is shut hides its contents from
+   page.click. (Actions through `page` now do this walk themselves, see
+   installAutoOpen; this stays for checks that need the panel open first.)
 
    One menu at a time, not all of them: app-join makes .vp-menu an exclusive
    accordion, so opening every menu would leave exactly one open anyway, and

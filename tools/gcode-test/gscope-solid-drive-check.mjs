@@ -433,6 +433,7 @@ async function main() {
   check('the piece on the plate PASSES tools/mesh_validate.py --gate (open 0, non-manifold 0, pierce 0)',
     [vEx.verdict, vEx.open, vEx.nm, vEx.pierce], ['PASS', 0, 0, 0]);
 
+  await page.evaluate(() => { const e = document.getElementById('model-list'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
   await page.click(`.model-item[data-edit-id="${ex.id}"]`);
   await page.evaluate(() => {
     const b = document.getElementById('btn-mirror');
