@@ -117,25 +117,12 @@ main {
   pointer-events: auto;
   background: var(--panel);
 }
-/* Mobile layout */
+/* Narrow window: only the header tightens. The viewport fills the window at
+   every width, as it does above 900 px - the shell's row and column live on
+   it, so squashing it (this rule used to set it to 45vh, under a stacked
+   sidebar that is gone) cut the column off at the viewport's bottom edge and
+   left Pack, and on a short window Pieces, unreachable. */
 @media (max-width: 900px) {
-  main {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr auto;
-    overflow-y: auto;
-  }
-
-  .left-panel,
-  .right-panel {
-    border: none;
-    max-height: none;
-  }
-
-  .viewport-section {
-    min-height: 320px;
-    height: 45vh;
-  }
-
   header {
     padding: 10px 14px;
   }
@@ -146,10 +133,6 @@ main {
 
   .tagline {
     font-size: 11px;
-  }
-
-  .panel {
-    padding: 12px;
   }
 }
 
@@ -3236,9 +3219,37 @@ button.ms-legend-only:hover { border-color: var(--accent); }
   width: var(--shell-col-w);
   pointer-events: none;
 }
-/* A slab never shrinks: squeezed, the plain buttons (Remove, the locks)
-   gave way first and their labels ran into each other. */
+/* When the row runs short of room it is the middle group - Export through
+   Lock plate - that gives way, never Import (the corner, as wide as the
+   column) and never the right group (Photo, Gen+). The middle slabs shrink
+   together and a label that no longer fits is cut with an ellipsis inside
+   its own slab, so nothing spills into its neighbour.
+
+   That is what keeps the row clear of Finish whatever the font: the row
+   can never be wider than the topbar, and the topbar ends --vp-menu-gap
+   before Finish begins (8 px). Label widths are the machine's font
+   metrics, so a layout that only fits when the labels happen to measure a
+   certain width is no layout - at 1144 px one machine's labels touched
+   Finish and another's overlapped it by 5 px. */
 .vp-shell-row > * { flex-shrink: 0; }
+.vp-shell-row > #menu-export, .vp-shell-row > #menu-rotate,
+.vp-shell-row > #menu-tip, .vp-shell-row > #menu-move,
+.vp-shell-row > #btn-delete-placed, .vp-shell-row > #btn-lock-pos,
+.vp-shell-row > #btn-plate-lock {
+  flex-shrink: 1;
+  min-width: 40px;
+}
+#menu-export > summary, #menu-rotate > summary,
+#menu-tip > summary, #menu-move > summary,
+.vp-shell-row > #btn-delete-placed, .vp-shell-row > #btn-lock-pos,
+.vp-shell-row > #btn-plate-lock {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  line-height: calc(var(--shell-btn-h) - 2px);
+}
 /* Photo, Gen+ (and Finish beyond them) to the right end of the row. */
 .vp-shell-row > #menu-photo { margin-left: auto; }
 

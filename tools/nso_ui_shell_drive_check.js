@@ -123,27 +123,75 @@ withApp(async (page, logs) => {
       ', finish ends ' + Math.round(r.row[10].r));
   }
 
-  /* At the narrowest window the whole row still fits (1144 px, measured),
-     no slab gives way: each keeps its label's width and none overlaps the
-     next. Narrower than that the row runs under Finish - known, flagged. */
+  /* The row never reaches Finish, whatever the font. Label widths are the
+     machine's font metrics - at 1144 px one machine's row touched Finish
+     and another's overlapped it by 5 px - so this is checked with the
+     page's own font AND with every row label made markedly wider (extra
+     letter-spacing, standing in for a wider font): Gen+ must stay a few px
+     clear of Finish, and no slab may overlap the next. When room runs short
+     the middle group (Export .. Lock plate) gives way, cutting its labels
+     with an ellipsis; Import and the right group keep their width. */
   {
-    const atRest = await page.evaluate((row) => row.map(id => {
-      const e = document.getElementById(id);
-      return (e.tagName === 'DETAILS' ? e.querySelector(':scope > summary') : e).getBoundingClientRect().width;
-    }), ROW);
-    await page.setViewportSize({ width: 1144, height: 820 });
-    await page.waitForTimeout(150);
-    const r = await page.evaluate((row) => row.map(id => {
-      const e = document.getElementById(id);
-      const b = (e.tagName === 'DETAILS' ? e.querySelector(':scope > summary') : e).getBoundingClientRect();
-      return { id, x: b.left, r: b.right, w: b.width };
-    }), ROW);
-    check('at 1144 px wide no row slab shrinks or overlaps the next',
-      r.every((b, i) => Math.abs(b.w - atRest[i]) < 0.5 && (i === 0 || b.x >= r[i - 1].r - 0.5)),
-      r.map(b => b.id.replace(/^(menu|btn)-/, '') + ' ' + Math.round(b.x) + '..' + Math.round(b.r)).join(' '));
+    const measure = () => page.evaluate((row) => {
+      const out = row.map(id => {
+        const e = document.getElementById(id);
+        const t = e.tagName === 'DETAILS' ? e.querySelector(':scope > summary') : e;
+        const b = t.getBoundingClientRect();
+        return { id, x: b.left, r: b.right, w: b.width,
+                 cut: t.scrollWidth > t.clientWidth + 1,
+                 clipped: getComputedStyle(t).overflowX === 'hidden' };
+      });
+      return out;
+    }, ROW);
+    const FIXED = ['menu-import', 'menu-photo', 'menu-gen', 'menu-finish'];
+    const atRest = await measure();
+    const widthOf = id => atRest.find(b => b.id === id).w;
+    check('at 1500 px wide, with this font, no row label is cut',
+      atRest.every(b => !b.cut), atRest.filter(b => b.cut).map(b => b.id).join(', ') || 'none cut');
+    const WIDER = '.vp-shell-row > .vp-bar-btn, .vp-shell-row > .vp-shell-menu > summary,' +
+                  '.vp-shell-menu.vp-finish-menu > summary { letter-spacing: 0.3em !important; }';
+    for (const wide of [false, true]) {
+      if (wide) await page.addStyleTag({ content: WIDER }).then(h => h.evaluate(n => { n.id = 'wider-labels'; }));
+      for (const w of [1144, 1280, 1500]) {
+        await page.setViewportSize({ width: w, height: 820 });
+        await page.waitForTimeout(120);
+        const r = await measure();
+        const gen = r.find(b => b.id === 'menu-gen'), fin = r.find(b => b.id === 'menu-finish');
+        const overlaps = r.filter((b, i) => i > 0 && b.x < r[i - 1].r - 0.5).map(b => b.id);
+        const spill = r.filter(b => b.cut && !b.clipped).map(b => b.id);
+        const kept = wide || FIXED.every(id => Math.abs(r.find(b => b.id === id).w - widthOf(id)) < 0.5);
+        check('at ' + w + ' px' + (wide ? ', labels made wider,' : '') +
+              ' Gen+ is clear of Finish by 4 px or more, no slab overlaps the next, no label spills',
+          fin.x - gen.r >= 4 && overlaps.length === 0 && spill.length === 0 && kept,
+          'gen ends ' + gen.r.toFixed(1) + ', finish starts ' + fin.x.toFixed(1) +
+          (overlaps.length ? ', overlapping: ' + overlaps.join(' ') : '') +
+          (spill.length ? ', spilling: ' + spill.join(' ') : '') +
+          (r.some(b => b.cut) ? ', cut: ' + r.filter(b => b.cut).map(b => b.id.replace(/^(menu|btn)-/, '')).join(' ') : ''));
+      }
+    }
+    await page.evaluate(() => { const n = document.getElementById('wider-labels'); if (n) n.remove(); });
     await page.setViewportSize({ width: 1500, height: 820 });
     await page.waitForTimeout(150);
   }
+
+  /* A narrow window (900 px and under) keeps the whole viewport: the column
+     is not cut off at a squashed viewport's edge, and Pack - the last slab -
+     can be clicked. */
+  for (const h of [820, 720]) {
+    await page.setViewportSize({ width: 900, height: h });
+    await page.waitForTimeout(150);
+    const r = await page.evaluate(() => {
+      const v = document.querySelector('.viewport-section').getBoundingClientRect();
+      const s = document.querySelector('#menu-pack > summary').getBoundingClientRect();
+      const hit = document.elementFromPoint(s.left + s.width / 2, s.top + s.height / 2);
+      return { vBottom: v.bottom, H: innerHeight, vW: v.width, W: innerWidth,
+               packBottom: s.bottom, packHit: !!(hit && hit.closest('#menu-pack')) };
+    });
+    check('at 900x' + h + ' the viewport fills the window and Pack is clickable',
+      Math.abs(r.vBottom - r.H) < 0.5 && Math.abs(r.vW - r.W) < 0.5 && r.packHit, JSON.stringify(r));
+  }
+  await page.setViewportSize({ width: 1500, height: 820 });
+  await page.waitForTimeout(150);
 
   /* ------------------------------------------------------------------ 4 */
   console.log('\n=== 4. the slab ===');
