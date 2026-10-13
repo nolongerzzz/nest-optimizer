@@ -60,7 +60,10 @@
  * CONSUMERS. The round and tapered support branches (nso_support_tree.js,
  * nso_support_aim.js), Stock (nso_stock.js), and G-scope's solid view and
  * Export as solid (nso-gcode-solid.js), which sweeps each continuous run of a
- * sliced toolpath - and is the reason for `sweepClosed` and `failAt`. This
+ * sliced toolpath - and is the reason for `sweepClosed` and `failAt`.
+ * Bend (nso_bend.js) carries a piece's own section round an arc with
+ * `sweepArc` - radial stations, any number of loops, convex or not - and is
+ * the reason for it and for `sectionLoops`; docs/CURVING-PATH.md section 8. This
  * file itself has no UI, no bake and no undo entry. See the paint-scope note
  * at the bottom.
  */

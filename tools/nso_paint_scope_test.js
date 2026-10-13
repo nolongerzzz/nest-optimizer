@@ -39,6 +39,8 @@ const ROSTER = [
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Smooth stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Extend',         file: 'app-extend.js',          scope: 'WHOLE-PIECE',
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Extend stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
+  { feature: 'Bend',           file: 'app-bend.js',            scope: 'WHOLE-PIECE',
+    test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Bend stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Mirror',         file: 'app-mirror.js',          scope: 'WHOLE-PIECE',
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Mirror stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Fatten',         file: 'app-fatten.js',          scope: 'WHOLE-PIECE',

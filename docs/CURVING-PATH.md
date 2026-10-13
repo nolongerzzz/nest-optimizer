@@ -588,3 +588,30 @@ no face on any existing piece it could move, so there is nothing for a skip list
 to protect, and it takes no row in the roster.
 
 That changes the moment a ticket attaches a branch to a piece. See Q5.
+
+---
+
+## 8. The arc sweep — added for Bend (`docs/BEND.md`)
+
+`sweep` mitres: its joint rings sit in bisector planes and are the profile
+stretched by `1/cos(turn/2)` (F4), and it takes one convex profile because
+convexity buys the proof that a mitred ring cannot self-cross and lets the cap
+fan from the path point. A bend wants the opposite of F4 — the section held
+exact at every station — and has sections with bores and re-entrant corners.
+So it gets its own primitive, beside `sweep` rather than inside it:
+
+| | |
+|---|---|
+| `sweepArc(opts)` | the section carried rigidly round a circular arc. **Radial** stations: every ring is the section turned about the bend axis, never a mitre. **Any number of loops**, outlines counter-clockwise about the tangent and bores clockwise (the material on the loop's left), **convex or not**. **Walls only**: it is spliced between two halves of an existing piece. |
+| `arcFrame(arc)` | origin on the centre line, tangent `u`, fold direction `d`, radius, angle; cos/sin exact at quarter turns |
+| `arcPoint(F, p, t)` / `arcTail(F, p)` | a point on the station at fraction `t`; a point past the arc, turned rigidly with its end. `t = 0` returns `p` itself and `t = 1` is `arcTail`, so the splice at either end is bit for bit what the rest of the piece computes |
+| `arcSteps(theta, rOut, opts)` | sag on the outermost radius ≤ 0.02 mm, and each step's volume within 0.05% (a chord slab is short by `step²/6`) |
+| `sectionLoops(tris, point, normal)` | every loop of a slice — a tube's outline and bore. `sectionLoop` is now one line on top of it and reads exactly as before |
+
+What convexity bought `sweep` is not needed here: a rigid image of a simple
+loop is simple, so nothing can self-cross, and there are no caps to fan. What
+replaces the per-rail "the mitre ate the segment" gate is the radius: every
+point must end at a positive distance from the bend axis, or the inside face
+turns inside out, and `sweepArc` refuses that by name. Per Q3, global
+self-intersection is still not the sweep's job; Bend checks the one case it
+can produce (the far arm folded into the near one).

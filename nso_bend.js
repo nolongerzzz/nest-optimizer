@@ -108,7 +108,20 @@ function NSO_bendAxis(soup, opts) {
   for (var i = 0; i < 3; i++) {
     if (!(ext[i].len > 0)) continue;
     var sc = NSO_extendBands(soup, ext[i].a, {});
-    if (sc.ok) return { ok: true, axisIdx: ext[i].a, axis: NSO_bendAxisName(ext[i].a), scan: sc };
+    if (!sc.ok) continue;
+    // A band only across a shorter extent: is the piece's length turned off
+    // the axes? (A plate turned 30° about Z is a clean extrusion through its
+    // 3 mm thickness, and nothing else.) Its long direction, if it has a
+    // distinct one, says so.
+    if (i > 0) {
+      var pd = NSO_bendPrincipal(soup);
+      if (pd && pd.offAxisDeg > 1) {
+        return { ok: false, gate: 'off-axis',
+                 reason: 'its length runs ' + pd.offAxisDeg.toFixed(1) + '° off X, Y and Z - Bend works only along X, Y or Z. ' +
+                         'Turn the piece onto an axis first.' };
+      }
+    }
+    return { ok: true, axisIdx: ext[i].a, axis: NSO_bendAxisName(ext[i].a), scan: sc };
   }
   var det = NSO_extendDetectAxis(soup, {});
   if (det.offCardinal) {
@@ -124,6 +137,50 @@ function NSO_bendAxis(soup, opts) {
   }
   if (!det.ok && !det.census) return { ok: false, gate: 'soup', reason: det.reason };
   return { ok: false, gate: 'no-band', reason: NSO_bendNoBandWords(NSO_bendAxisName(ext[0].a)) };
+}
+
+/* The piece's long direction: the top eigenvector of the area-weighted
+   covariance of its triangles' centroids, when it is distinct (the top
+   eigenvalue at least 1.5x the next - a disc or a square has none), and how
+   far it is turned off the nearest of X, Y and Z. Null if not distinct. */
+function NSO_bendPrincipal(soup) {
+  // Second moments of the surface, exact per triangle: for a uniform
+  // triangle, E[x xT] = (sum vi viT + s sT) / 12 with s = a + b + c.
+  var n = (soup.length / 9) | 0, W = 0, m = [0, 0, 0], C = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  for (var t = 0; t < n; t++) {
+    var o = t * 9;
+    var ux = soup[o + 3] - soup[o], uy = soup[o + 4] - soup[o + 1], uz = soup[o + 5] - soup[o + 2];
+    var vx = soup[o + 6] - soup[o], vy = soup[o + 7] - soup[o + 1], vz = soup[o + 8] - soup[o + 2];
+    var a = Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2;
+    if (!(a > 0)) continue;
+    var sv = [soup[o] + soup[o + 3] + soup[o + 6], soup[o + 1] + soup[o + 4] + soup[o + 7], soup[o + 2] + soup[o + 5] + soup[o + 8]];
+    W += a;
+    for (var p = 0; p < 3; p++) {
+      m[p] += a * sv[p] / 3;
+      for (var q = 0; q < 3; q++) {
+        var vv = soup[o + p] * soup[o + q] + soup[o + 3 + p] * soup[o + 3 + q] + soup[o + 6 + p] * soup[o + 6 + q];
+        C[p][q] += a * (vv + sv[p] * sv[q]) / 12;
+      }
+    }
+  }
+  if (!(W > 0)) return null;
+  for (var p2 = 0; p2 < 3; p2++) m[p2] /= W;
+  for (var p3 = 0; p3 < 3; p3++) for (var q3 = 0; q3 < 3; q3++) C[p3][q3] = C[p3][q3] / W - m[p3] * m[q3];
+  var V = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+  for (var sweep = 0; sweep < 64; sweep++) {
+    var P = 0, Q = 1, best = Math.abs(C[0][1]);
+    if (Math.abs(C[0][2]) > best) { best = Math.abs(C[0][2]); P = 0; Q = 2; }
+    if (Math.abs(C[1][2]) > best) { best = Math.abs(C[1][2]); P = 1; Q = 2; }
+    if (best < 1e-18 * (C[0][0] + C[1][1] + C[2][2] + 1e-300)) break;
+    var th = 0.5 * Math.atan2(2 * C[P][Q], C[Q][Q] - C[P][P]), co = Math.cos(th), si = Math.sin(th), r;
+    for (r = 0; r < 3; r++) { var cp = C[r][P], cq = C[r][Q]; C[r][P] = co * cp - si * cq; C[r][Q] = si * cp + co * cq; }
+    for (r = 0; r < 3; r++) { var pc = C[P][r], qc = C[Q][r]; C[P][r] = co * pc - si * qc; C[Q][r] = si * pc + co * qc; }
+    for (r = 0; r < 3; r++) { var vp = V[r][P], vq = V[r][Q]; V[r][P] = co * vp - si * vq; V[r][Q] = si * vp + co * vq; }
+  }
+  var ev = [0, 1, 2].map(function (i) { return { l: C[i][i], v: [V[0][i], V[1][i], V[2][i]] }; }).sort(function (x, y) { return y.l - x.l; });
+  if (!(ev[0].l > 1.5 * ev[1].l)) return null;
+  var ab = ev[0].v.map(Math.abs), top = Math.max(ab[0], ab[1], ab[2]);
+  return { dir: ev[0].v, offAxisDeg: Math.acos(Math.min(1, top)) * 180 / Math.PI };
 }
 
 function NSO_bendNoBandWords(A) {

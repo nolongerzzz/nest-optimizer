@@ -514,8 +514,13 @@ console.log('\n=== 6. refusals, in words, the piece unchanged ===');
   refusal('a cone (tapers all over)', cone, { where: 20, angle: 90, toward: '+Z' }, /tapered all over|no straight axis|not constant/);
   refusal('an axis that is not X, Y or Z (a rod turned 30°)', turnZ(rod(100), 30), { where: 50, angle: 90, toward: '+Z' },
           /turned 30\.0° off X, Y and Z - Bend works only along X, Y or Z/);
-  const flat = NSO_bendRaw(turnZ(plate(), 30), { where: 1.5, angle: 90, toward: '+X' });
-  check('a plate turned 30° about Z reads its one straight axis, its 3 mm thickness, and finds no room', !flat.ok && flat.axis === 'Z' && /No straight stretch on this piece is that long/.test(flat.reason), flat.reason);
+  // Straight all through its 3 mm thickness, and only there: its length is
+  // what is turned, and that is what it is told.
+  refusal('a plate turned 30° about Z', turnZ(plate(), 30), { where: 75, angle: 90, toward: '+Z' },
+          /its length runs 30\.0° off X, Y and Z - Bend works only along X, Y or Z/);
+  const ring = NSO_bendRaw(roundTube(10, 48, 20, 16), { where: 5, angle: 30, toward: '+Y', radius: 40 });
+  check('...but a short wide ring, whose only band is its 10 mm length, is not called turned', ring.axis === 'X' && !/off X, Y and Z/.test(ring.reason || ''),
+        ring.ok ? 'bent' : ring.reason);
   const sphere = readSTL(path.join(ROOT, 'fixtures', 'fixture_sphere_curved.stl'));
   refusal('a sphere: no straight axis', sphere, { where: 10, angle: 90, toward: '+Z' }, /no straight axis/);
   refusal('more than 2 million triangles (a 100k-triangle, 12,500-gon tube at 90°)', roundTube(120, 12500, 40, 36), { where: 60, angle: 90, toward: '+Z', radius: 45 },

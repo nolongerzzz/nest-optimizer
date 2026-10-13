@@ -155,6 +155,7 @@ const UNDO_REPLACE_LABEL = {
   brushReplace: 'Undo: Brush reverted',
   seatSurfaceReplace: 'Undo: Seat here reverted',
   extendReplace: 'Undo: Extend reverted',
+  bendReplace: 'Undo: Bend reverted',
   mirrorReplace: 'Undo: Mirror reverted',
   cropReplace: 'Undo: Crop reverted',
   cropMove: 'Undo: Move reverted',
