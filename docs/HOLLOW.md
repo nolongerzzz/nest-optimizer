@@ -156,6 +156,10 @@ A captive separate solid - a rattle's ball, a trapped bearing - is wound outward
 and survives. A mis-wound outer shell fails the second test, is left alone, and
 is reported rather than silently deleted.
 
+That classification is `cavityShells()` (exported), and `fill()` calls it.
+Foam (`docs/FOAM.md`) asks the same function, so "a cavity" means one thing to
+both. Moving it out of `fill()` changed nothing `fill()` does.
+
 ### Hollow to safe minimum
 
 The **thicken -> edit -> hollow back out** workflow. Thicken In put enough wall

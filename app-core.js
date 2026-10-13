@@ -168,7 +168,8 @@ const UNDO_REPLACE_LABEL = {
   stockReplace: 'Undo: Stock adjustment reverted',
   ringReplace: 'Undo: Ring / rod size reverted',
   offsetReplace: 'Undo: Offset reverted',
-  liftReplace: 'Undo: Lift reverted'
+  liftReplace: 'Undo: Lift reverted',
+  foamReplace: 'Undo: Foam reverted'
 };
 
 function undoLast() {
@@ -2824,6 +2825,16 @@ function onCanvasPointerDown(event) {
      that cannot change the piece. Unlike the other three it owns the whole
      drag, not just the press - the stroke runs until pointerup. */
   if (typeof window.nsoBrushTakesPointer === 'function' && window.nsoBrushTakesPointer(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* Foam (app-foam.js) owns a PRESS that lands on the ghosted piece while
+     it is on: the press is the spray, held until pointerup, or a click on a
+     hollow that chooses it. On the brush's terms - its own handler on this
+     canvas does the work, and a fall-through here would start a move drag
+     under the spray. Ahead of Measure, which cannot change the piece. */
+  if (typeof window.nsoFoamTakesPointer === 'function' && window.nsoFoamTakesPointer(event)) {
     setOrbitFromPlate(false);
     return;
   }

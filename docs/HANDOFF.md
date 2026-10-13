@@ -71,6 +71,7 @@ Current roster, by category:
 | G-scope Slice (`app-gscope-slice.js`) | **none** — Slice reads geometry and writes nothing; Export piece to plate adds a copy of the piece and edits none, as G-scope's own Export to plate does | n/a | header comment + `docs/SLICER.md` §6 |
 | Picture (`app-relief.js`, Gen+ -> Picture) | none — adds a piece, reads and edits none | n/a | header comment + `docs/RELIEF.md` |
 | Lift (`app-gscope-lift.js`, G-scope -> Features) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/LIFT.md` |
+| Foam (`app-foam.js`, Finish -> Shape) | sub-region | the faces of the one hollow it fills that the level reaches, against `nsoMaskFaceList(m)`; a null list (a painted recessed patch) stands it down | header comment + `docs/FOAM.md` §6 |
 
 ### The SELECT list is an operand; the EXCLUDE list is still only a veto
 

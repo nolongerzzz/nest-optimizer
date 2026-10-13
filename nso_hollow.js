@@ -810,19 +810,23 @@
          NOT point lands inside the solid. A mis-wound outer shell fails this
          and is left alone and reported, rather than silently deleted.
      =================================================================== */
-  function fill(rawTris, opts) {
+  /* The shells, and which of them bound an enclosed cavity - Fill's own
+     reading, and the one definition of "a cavity" in this repo. Fill drops
+     every shell this marks; Foam (nso_foam.js) fills one of them partway and
+     must find exactly the same ones, so it asks here rather than carrying a
+     second copy of the test.
+
+     Returns null on an empty piece, else { P, shells, info } where shells[s]
+     is a list of face indices (faces joined across shared welded EDGES) and
+     info[s] is { vol, cavity, misWound }. The winding-and-material test only
+     runs when there are at least two shells: a lone shell is the outside, so
+     it can never be a cavity, and fill() has always said so before asking. */
+  function cavityShells(rawTris, opts) {
     var TH = needThickness();
     opts = opts || {};
-    var out = {
-      ok: false, soup: rawTris, reason: '',
-      shells: 0, filled: 0, kept: 0,
-      tris_before: rawTris ? (rawTris.length / 9) | 0 : 0, tris_after: 0,
-      volume_before: null, volume_after: null, cavity_volume: 0
-    };
-    if (!rawTris || rawTris.length < 9) { out.reason = 'nothing to fill - empty piece'; return out; }
-
+    if (!rawTris || rawTris.length < 9) return null;
     var P = TH.prepare(rawTris, opts);
-    if (!P) { out.reason = 'nothing to fill - empty piece'; return out; }
+    if (!P) return null;
     var vids = P.vids, nf = vids.length;
 
     /* Shells: faces joined across shared welded EDGES. Vertices alone would
@@ -859,12 +863,6 @@
       }
       shells.push(list);
     }
-    out.shells = shells.length;
-    if (shells.length < 2) {
-      out.reason = 'nothing to fill - this piece is one shell, so it has no enclosed cavity. ' +
-        'Fill removes interior surfaces; there are none here.';
-      return out;
-    }
 
     /* Is this inward-wound shell sitting in material? Sampled at several faces
        rather than one, because a single face can be a sliver whose centroid
@@ -891,6 +889,36 @@
       return asked > 0 && votes * 2 > asked;
     }
 
+    var info = [];
+    for (var s = 0; s < shells.length; s++) {
+      var vol = signedVolume(rawTris, shells[s]);
+      var cav = shells.length >= 2 && vol < 0 && enclosed(shells[s]);
+      info.push({ vol: vol, cavity: cav, misWound: shells.length >= 2 && vol < 0 && !cav });
+    }
+    return { P: P, shells: shells, info: info };
+  }
+
+  function fill(rawTris, opts) {
+    needThickness();
+    opts = opts || {};
+    var out = {
+      ok: false, soup: rawTris, reason: '',
+      shells: 0, filled: 0, kept: 0,
+      tris_before: rawTris ? (rawTris.length / 9) | 0 : 0, tris_after: 0,
+      volume_before: null, volume_after: null, cavity_volume: 0
+    };
+    if (!rawTris || rawTris.length < 9) { out.reason = 'nothing to fill - empty piece'; return out; }
+
+    var C = cavityShells(rawTris, opts);
+    if (!C) { out.reason = 'nothing to fill - empty piece'; return out; }
+    var shells = C.shells, nf = C.P.vids.length;
+    out.shells = shells.length;
+    if (shells.length < 2) {
+      out.reason = 'nothing to fill - this piece is one shell, so it has no enclosed cavity. ' +
+        'Fill removes interior surfaces; there are none here.';
+      return out;
+    }
+
     /* A DROP MASK, not a list of survivors, so the faces that stay can be
        copied in their ORIGINAL order. That is what makes fill(hollow(X)) come
        back as X's own soup rather than a permutation of it - the triangles
@@ -899,8 +927,8 @@
     var drop = new Uint8Array(nf);
     var removedVol = 0, filled = 0, mis = 0, kept = 0;
     for (var s = 0; s < shells.length; s++) {
-      var vol = signedVolume(rawTris, shells[s]);
-      if (vol < 0 && enclosed(shells[s])) {
+      var vol = C.info[s].vol;
+      if (C.info[s].cavity) {
         for (var dq = 0; dq < shells[s].length; dq++) drop[shells[s][dq]] = 1;
         removedVol += -vol;
         filled++;
@@ -948,6 +976,7 @@
     safeMinWall: safeMinWall,
     hollow: hollow,
     fill: fill,
+    cavityShells: cavityShells,
     signedVolume: signedVolume,
     /* The field tools, for a caller that needs a level set of its own. Crop's
        Move (app-crop.js, the gap bridge) meshes a closing of two parts with
