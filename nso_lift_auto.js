@@ -108,7 +108,12 @@
     dotAreaMm2: 16,        // Strip: small dots are compact and no bigger than this
     thinRatio: 4,          // lines & squiggles: length / width at least this...
     lineWidthMm: 3,        // ...and no wider than this
-    neckRatio: 0.7         // necks (data only): a saddle below 0.7 of the smaller part's width
+    neckRatio: 0.7,        // necks (data only): a saddle below 0.7 of the smaller part's width
+    // Lift 3 (opts.curved): a base that is not one flat plane is followed, not refused
+    curved: false,
+    slantDeg: 50,          // ...an island whose surround leans more than this off the view is read too slantwise
+    relaxMm: 1.5,          // ...the fill relaxes from the neighbours to the base estimate over about this
+    fitSigmaMm: 3          // ...the base carried across: quadratics fitted to the surround, weighted over about this
   };
 
   var BASE = 1, ABOVE = 2, BELOW = 3;
@@ -123,6 +128,11 @@
   function P1() {
     if (root && root.NSO_Lift) return root.NSO_Lift;
     if (typeof require === 'function') { try { return require('./nso_lift.js'); } catch (e) { /* browser */ } }
+    return null;
+  }
+  function LC() {
+    if (root && root.NSO_LiftCurved) return root.NSO_LiftCurved;
+    if (typeof require === 'function') { try { return require('./nso_lift_curved.js'); } catch (e) { /* browser */ } }
     return null;
   }
   function dep(deps, name) {
@@ -613,7 +623,8 @@
     loops: 'where it meets the face does not close into clean loops',
     spill: 'it runs on past the part of the face measured round it, so no one flat cut holds it',
     nobase: 'there is too little of the face round it to measure the surface it stands on',
-    bends: 'the surface under it bends too much for a flat cut'
+    bends: 'the surface under it bends too much for a flat cut',
+    slant: 'it is seen too slantwise from where the face was clicked to measure the surface round it - click the face nearer it'
   };
 
   function refuse(code, reason, extra) { return Object.assign({ ok: false, refused: code, reason: reason }, extra || {}); }
@@ -640,6 +651,10 @@
     var nu = map.nu, nvv = map.nv, NN = nu * nvv, H = map.H, B = est.B, TT = map.T, cell = map.cell;
     var thr = Math.max(o.layerFloorMm, +o.thresholdMm || 0);
     var valid = function (c) { return H[c] > -Infinity; };
+    // Lift 3: a base that bends is followed (the rolling-ball estimate, read
+    // at each vertex) instead of cut flat.
+    var curved = !!o.curved, Bs = curved && LC() ? LC().baseSampler(map, B) : null;
+    if (curved && !Bs) return refuse('deps', 'Lift 3 needs nso_lift_curved.js');
     var det = new Uint8Array(NN);
     for (var c = 0; c < NN; c++) if (H[c] > -Infinity && H[c] - B[c] > thr) det[c] = 1;
 
@@ -755,6 +770,17 @@
     var sStamp = new Int32Array(nV), sVal = new Float64Array(nV), sGen = 0;
     var owner2 = new Int32Array(M.nt).fill(-1);
     var flatTol = 0.001 + 2e-6 * M.scale;
+    // Lift 3: a vertex's height over an island's curved base T(u, v), along
+    // the view. Where T cannot be read (off the surface): far below.
+    function curvedS(T, cur) {
+      return function (vi) {
+        if (cur != null && sStamp[vi] === cur) return sVal[vi];
+        var b = T(VU[vi], VVv[vi]);
+        var x = b === b ? VX[vi * 3] * map.n[0] + VX[vi * 3 + 1] * map.n[1] + VX[vi * 3 + 2] * map.n[2] - b : -Infinity;
+        if (cur != null) { sStamp[vi] = cur; sVal[vi] = x; }
+        return x;
+      };
+    }
 
     function ringAndPlane(G) {
       var st = ++gen; qh = 0; qt = 0;
@@ -817,16 +843,116 @@
       if (aa === 0 && bb === 0) Nw = map.n.slice();
       var P0 = [0, 1, 2].map(function (q) { return uc * map.e1[q] + vc * map.e2[q] + c0 * map.n[q]; });
       G.plane = { n: Nw, d: dot(P0, Nw) };
+      if (curved && bend > flatTol) {
+        // Lift 3: not one flat plane, so the base is followed. Its samples
+        // (where the rolling ball touches the surface round the footprint)
+        // fitted with one quadratic surface, carried across; the ball's own
+        // curve under the detail is not used - on a convex surface it dips
+        // under. Where no one quadratic fits them as well as the ball does,
+        // the ball's base itself.
+        // Its samples: the whole band round the footprint, clear of anything
+        // standing out (not only the cleanest cells, which on rough paper are
+        // its lower envelope).
+        var nd3 = need, band = cand.filter(function (x2) { return !near[x2] || dist[x2] > nd3; });
+        if (band.length < 15) band = ring;
+        var off = 0, sq = 0;
+        band.forEach(function (x) { var r2 = H[x] - B[x]; sq += r2 * r2; if (Math.abs(r2) > off) off = Math.abs(r2); });
+        G.curved = true; G.ringOffMm = off; G.ringRmsMm = Math.sqrt(sq / band.length);
+        G.surroundMm2 = band.length * cell * cell;
+        G.slantDeg = Math.acos(Math.max(-1, Math.min(1, dot(Nw, map.n)))) * 180 / Math.PI;
+        if (G.slantDeg > o.slantDeg) { G.status = 'slant'; G.T = Bs; G.baseKind = 'ball'; G.tolA = o.bendTolMm; return; }
+        var qf = fitLocal(band);
+        G.fitRmsMm = qf ? qf.rms : NaN; G.fitOffMm = qf ? qf.max : NaN;
+        if (qf && qf.rms <= 2 * G.ringRmsMm + o.marginMm) {
+          G.baseKind = 'fit'; G.baseOffMm = qf.max; G.T = qf.T;
+        } else {
+          G.baseKind = 'ball'; G.baseOffMm = off; G.T = Bs;
+        }
+        // The band that counts as on the base: the surround's spread about it,
+        // three times its rms (its worst cell understates the vertices: the
+        // map reads between them), kept under the detection threshold - what
+        // stands out more than that is a detail.
+        G.tolA = Math.min(3 * (G.baseKind === 'fit' ? G.fitRmsMm : G.ringRmsMm), 0.75 * thr) + o.marginMm + flatTol;
+        return;
+      }
+      G.curved = false;
       G.tolA = Math.min(bend, o.bendTolMm) + o.marginMm + flatTol;
       if (bend > o.bendTolMm) G.status = 'bends';
     }
 
+    /** The base carried across a curved footprint: quadratics h = a u^2 +
+        b uv + c v^2 + d u + e v + f fitted by least squares to the ring's
+        samples (the surround, where the rolling ball touches it), each at a
+        node of a lattice fitSigmaMm / 2 apart, its samples weighted by
+        exp(-r^2 / 2 sigma^2) from the node; read anywhere as the nodes'
+        own quadratics blended bilinearly. One quadratic over a long
+        footprint would not hold a cylinder's arc; the ball's own curve
+        under a detail dips under a convex surface. Null when the ring
+        cannot hold it. */
+    function fitLocal(ring) {
+      if (ring.length < 15) return null;
+      var sg = o.fitSigmaMm, step = sg / 2, cut2 = 9 * sg * sg, inv2 = 1 / (2 * sg * sg);
+      var SU = [], SV = [], SH = [], ulo = Infinity, uhi = -Infinity, vlo = Infinity, vhi = -Infinity;
+      ring.forEach(function (x) {
+        var i = x % nu, u = map.u0 + (i + 0.5) * cell, v = map.v0 + ((x - i) / nu + 0.5) * cell;
+        SU.push(u); SV.push(v); SH.push(H[x]);
+        if (u < ulo) ulo = u; if (u > uhi) uhi = u; if (v < vlo) vlo = v; if (v > vhi) vhi = v;
+      });
+      var gw = Math.max(2, Math.ceil((uhi - ulo) / step) + 1), gh = Math.max(2, Math.ceil((vhi - vlo) / step) + 1);
+      var C = new Array(gw * gh), Nn = SU.length, bad = 0;
+      for (var gj = 0; gj < gh; gj++) {
+        for (var gi = 0; gi < gw; gi++) {
+          var nu0 = ulo + gi * step, nv0 = vlo + gj * step, A6 = [], b6 = [0, 0, 0, 0, 0, 0], k6, sw = 0;
+          for (k6 = 0; k6 < 6; k6++) A6.push([0, 0, 0, 0, 0, 0]);
+          for (var q = 0; q < Nn; q++) {
+            var x = (SU[q] - nu0) / sg, y = (SV[q] - nv0) / sg, r2 = (x * x + y * y) * sg * sg;
+            if (r2 > cut2) continue;
+            var w = Math.exp(-r2 * inv2), f = [x * x, x * y, y * y, x, y, 1];
+            sw += w;
+            for (var a = 0; a < 6; a++) { var wf = w * f[a]; b6[a] += wf * SH[q]; for (var b2 = 0; b2 <= a; b2++) A6[a][b2] += wf * f[b2]; }
+          }
+          for (a = 0; a < 6; a++) for (b2 = a + 1; b2 < 6; b2++) A6[a][b2] = A6[b2][a];
+          var c6 = sw > 0 ? solveN(A6, b6, 1e-7 * sw) : null;
+          if (!c6) { bad++; C[gj * gw + gi] = null; continue; }
+          C[gj * gw + gi] = [c6[0] / (sg * sg), c6[1] / (sg * sg), c6[2] / (sg * sg), c6[3] / sg, c6[4] / sg, c6[5], nu0, nv0];
+        }
+      }
+      // a node the ring cannot hold borrows its nearest neighbour's quadratic
+      if (bad === C.length) return null;
+      for (var pass = 0; bad && pass < gw + gh; pass++) {
+        var C2 = C.slice();
+        for (gj = 0; gj < gh; gj++) for (gi = 0; gi < gw; gi++) {
+          if (C[gj * gw + gi]) continue;
+          for (var k = 0; k < 4; k++) {
+            var ii = gi + N8x[k], jj = gj + N8y[k];
+            if (ii < 0 || jj < 0 || ii >= gw || jj >= gh || !C[jj * gw + ii]) continue;
+            C2[gj * gw + gi] = C[jj * gw + ii]; bad--; break;
+          }
+        }
+        C = C2;
+      }
+      function T(U, V) {
+        var fx = (U - ulo) / step, fy = (V - vlo) / step;
+        var x0 = Math.max(0, Math.min(gw - 2, Math.floor(fx))), y0 = Math.max(0, Math.min(gh - 2, Math.floor(fy)));
+        var tx = Math.max(0, Math.min(1, fx - x0)), ty = Math.max(0, Math.min(1, fy - y0)), sum = 0;
+        for (var k2 = 0; k2 < 4; k2++) {
+          var c = C[(y0 + (k2 >> 1)) * gw + x0 + (k2 & 1)], du = U - c[6], dv = V - c[7];
+          var wt = ((k2 & 1) ? tx : 1 - tx) * ((k2 >> 1) ? ty : 1 - ty);
+          sum += wt * (c[0] * du * du + c[1] * du * dv + c[2] * dv * dv + c[3] * du + c[4] * dv + c[5]);
+        }
+        return sum;
+      }
+      var mx = 0, ss = 0;
+      for (q = 0; q < Nn; q++) { var rr = SH[q] - T(SU[q], SV[q]); ss += rr * rr; if (Math.abs(rr) > mx) mx = Math.abs(rr); }
+      return { T: T, rms: Math.sqrt(ss / Nn), max: mx, nodes: gw * gh };
+    }
+
     function grow(G, me) {
       var cur = ++sGen, N0 = G.plane.n, d0 = G.plane.d, tolA = G.tolA, st = G.stamp;
-      function s(vi) {
+      var s = G.curved ? curvedS(G.T, cur) : function (vi) {
         if (sStamp[vi] !== cur) { sStamp[vi] = cur; sVal[vi] = VX[vi * 3] * N0[0] + VX[vi * 3 + 1] * N0[1] + VX[vi * 3 + 2] * N0[2] - d0; }
         return sVal[vi];
-      }
+      };
       function cls(tt) {
         var x = s(tv[tt * 3]), y = s(tv[tt * 3 + 1]), z = s(tv[tt * 3 + 2]);
         var mn = Math.min(x, y, z), mx = Math.max(x, y, z);
@@ -876,7 +1002,7 @@
         var G = groups[gi];
         G.status = null;
         ringAndPlane(G);
-        if (G.status === 'nobase' || G.status === 'bends') {
+        if (G.status === 'nobase' || G.status === 'bends' || G.status === 'slant') {
           // shown, not cut: the cells' own top triangles
           var seen = new Set();
           G.tris = [];
@@ -931,7 +1057,7 @@
       var G = groups[gi];
       if (!G.tris || !G.tris.length) { ghosts++; return; }
       var comps2 = [];
-      if (G.status === 'nobase' || G.status === 'bends') comps2 = [G.tris];
+      if (G.status === 'nobase' || G.status === 'bends' || G.status === 'slant') comps2 = [G.tris];
       else {
         var cmp = new Map();
         G.tris.forEach(function (tt) {
@@ -953,12 +1079,18 @@
       comps2.forEach(function (tris) {
         var I = { id: islands.length, tris: tris, triangles: tris.length, mapCells: G.cells.length, closedCells: G.closed,
                   bendMm: G.bendMm, ringCells: G.ringCells, ringClear: G.ringClear, ringCleanMm: G.ringCleanMm, widened: G.widened || 0 };
+        if (G.curved) {
+          I.curved = true; I.ringOffMm = G.ringOffMm; I.ringRmsMm = G.ringRmsMm; I.slantDeg = G.slantDeg;
+          I.baseKind = G.baseKind; I.baseOffMm = G.baseOffMm; I.fitRmsMm = G.fitRmsMm; I.base = G.T; I.sBase = curvedS(G.T, null);
+          I.surroundMm2 = G.surroundMm2; I.roughMm = G.baseKind === 'fit' ? G.fitRmsMm : G.ringRmsMm;
+        }
         tris.forEach(function (tt) { islandOf[tt] = I.id; });
         islands.push(I);
         I.status = G.status || null;
         if (G.plane) {
           I.plane = { n: G.plane.n, d: G.plane.d, tolMm: G.tolA };
-          I.frame = fr0(G.plane.n);
+          // Lift 3: a curved island's loops and fill are read looking down the view
+          I.frame = G.curved ? { e1: map.e1, e2: map.e2, n: map.n } : fr0(G.plane.n);
         }
         if (!I.status) judge(I, G);
       });
@@ -998,8 +1130,11 @@
         I.rootBendMm = fit.bend;
         I.bendMm = Math.max(I.bendMm || 0, fit.bend);
         I.plane = { n: fit.n, d: fit.d, tolMm: G.tolA };
-        I.frame = L1.internals.planeFrame(fit.n);
-        if (fit.bend > o.bendTolMm) why = 'bends';
+        if (G.curved) I.fill = 'curved';               // Lift 3: cut along the base, whatever it bends
+        else {
+          I.frame = L1.internals.planeFrame(fit.n);
+          if (fit.bend > o.bendTolMm) why = 'bends';
+        }
       }
       I.status = why || 'ok';
     }
@@ -1038,12 +1173,15 @@
           if (seenV.has(vi)) continue;
           seenV.add(vi);
           var P = M.V[vi];
-          if (I.plane) { var sv2 = dot(P, Np) - dp; if (sv2 > h) h = sv2; }
+          if (I.curved) { var sc2 = I.sBase(vi); if (sc2 > h) h = sc2; }
+          else if (I.plane) { var sv2 = dot(P, Np) - dp; if (sv2 > h) h = sv2; }
           for (var q = 0; q < 3; q++) { if (P[q] < lo[q]) lo[q] = P[q]; if (P[q] > hi[q]) hi[q] = P[q]; }
         }
       });
-      if (!I.plane) {
-        // no plane to stand on: how far the map says it stands out
+      if (!I.plane || (I.curved && I.status !== 'ok')) {
+        // no plane to stand on (or a curved base read only round a body that
+        // cannot come off): how far the map says it stands out
+        h = 0;
         foot[I.id].forEach(function (x) { if (H[x] - B[x] > h) h = H[x] - B[x]; });
       }
       I.heightMm = h;
@@ -1056,8 +1194,12 @@
         ? WHY.bends + ' (it is ' + fmt(I.bendMm) + ' mm off one flat plane ' + (I.rootBendMm > o.bendTolMm ? 'where it meets the face' : 'across its footprint') +
           '; a flat cut allows ' + fmt(o.bendTolMm) + ' mm)'
         : WHY[I.status];
+      if (I.status === 'slant') {
+        I.reason = WHY.slant + ' (its surround leans ' + fmt(I.slantDeg, 0) + '° off the view; ' + fmt(o.slantDeg, 0) + '° is the most it reads)';
+      }
       I.group = groupOf(I, o);
       I.necks = I.areaMm2 > o.dotAreaMm2 ? necksOf(foot[I.id], map, o) : { parts: 1, necks: [] };
+      if (I.status === 'ok' && I.fill === 'curved') I.fillNotes = fillNotes(I, o);
     });
     ms.islands = now() - t;
 
@@ -1071,18 +1213,57 @@
     var counts = { dots: 0, lines: 0, large: 0, cant: 0 };
     islands.forEach(function (I) { counts[I.group]++; });
     var A = {
-      ok: true, kind: 'map', M: M, seed: seed, islands: islands, islandOf: islandOf,
+      ok: true, kind: 'map', M: M, seed: seed, islands: islands, islandOf: islandOf, curved: curved, relaxMm: o.relaxMm,
       liftable: islands.filter(function (I) { return I.status === 'ok'; }).length,
       plane: { n: map.n, d: H[seedCell], tolMm: thr },
       base: { tris: baseList.length, list: baseList, areaMm2: baseCells * cell * cell, cells: baseCells },
       map: { cellMm: cell, size: [nu, nvv], cells: NN, coarsened: map.coarsened, normal: map.n,
              ballMm: est.radiusMm, ballCoarseMm: est.coarseMm, thresholdMm: thr, grid: map, B: B, det: det,
-             baseMask: base, seedCell: seedCell, mapIslands: mapIslands.length, ghosts: ghosts, words: est.words },
+             baseMask: base, seedCell: seedCell, mapIslands: mapIslands.length, ghosts: ghosts, words: est.words, sampler: Bs },
       groups: counts,
       ms: Object.assign(ms, { total: now() - T0 })
     };
     A.reason = describe(A, o);
     return A;
+  }
+
+  /** Lift 3's honest ceiling, in words: where the fill matches the
+      surroundings at the rim but has nothing measured to follow inside. Said,
+      never refused. */
+  function fillNotes(I, o) {
+    var out = [], tag = 'detail ' + (I.id + 1);
+    if (I.areaMm2 > I.surroundMm2) {
+      out.push(tag + ' covers ' + fmt(I.areaMm2, 1) + ' mm², more than the ' + fmt(I.surroundMm2, 1) + ' mm² of clear surface measured ' +
+        'round it: across its middle the surface carried under it is the base fitted to that surround - it matches what is round it, ' +
+        'it cannot show what was under the detail');
+    }
+    if (I.baseKind === 'ball') {
+      out.push('the surface round ' + tag + ' is not one smooth curve (smooth quadratic surfaces fitted to it miss it by ' + fmt(I.fitRmsMm, 3) +
+        ' mm on average, the rolling-ball base by ' + fmt(I.ringRmsMm, 3) + ' mm): the fill relaxes to the rolling-ball base across it');
+    }
+    if (I.roughMm > o.cleanMm / 2) {
+      out.push('the surface round ' + tag + ' is rough (' + fmt(I.roughMm, 3) + ' mm rms about the smooth surface fitted to it): the fill ' +
+        'meets it at the rim and runs smooth across - the roughness is not made up under it');
+    }
+    return out;
+  }
+
+  /** A small dense system by Gauss-Jordan with partial pivots; null when a
+      pivot is under eps. */
+  function solveN(A, b, eps) {
+    var n = b.length, m = A.map(function (r, i) { return r.concat([b[i]]); });
+    for (var c = 0; c < n; c++) {
+      var p = c;
+      for (var r = c + 1; r < n; r++) if (Math.abs(m[r][c]) > Math.abs(m[p][c])) p = r;
+      if (!(Math.abs(m[p][c]) > eps)) return null;
+      var tmp = m[c]; m[c] = m[p]; m[p] = tmp;
+      for (r = 0; r < n; r++) {
+        if (r === c) continue;
+        var f = m[r][c] / m[c][c];
+        for (var k = c; k <= n; k++) m[r][k] -= f * m[c][k];
+      }
+    }
+    return m.map(function (row, i) { return row[n] / row[i]; });
   }
 
   function solve3(A, b) {
@@ -1231,16 +1412,29 @@
       var I = A.islands[want[w]];
       if (!I) return { ok: false, reason: 'there is no detail ' + want[w] + ' on this face' };
       if (I.status !== 'ok') return { ok: false, reason: 'detail ' + (I.id + 1) + ' cannot be lifted: ' + I.reason };
-      var cp;
-      try { cp = L1.internals.capFor({ M: M, plane: I.plane, frame: I.frame }, I, cap); }
-      catch (err) { return { ok: false, reason: 'detail ' + (I.id + 1) + ' could not be capped (' + ((err && err.message) || err) + ')' }; }
-      // the cap with the island's touching corners in it, else without them
-      var ps, pc, rf;
-      for (var touch = 1; touch >= 0; touch--) {
-        rf = refineCap(cp, I, M, !!touch);
+      var cp, ps, pc, rf, fl = null;
+      if (I.fill === 'curved') {
+        // Lift 3: the surface round it carried across, welded at the rim
+        var CV = LC();
+        if (!CV) return { ok: false, reason: 'Lift needs nso_lift_curved.js to lift off a curved base' };
+        var ear;
+        try { ear = L1.internals.capFor({ M: M, plane: { n: I.frame.n, d: 0 }, frame: I.frame }, I, cap); }
+        catch (err) { return { ok: false, reason: 'detail ' + (I.id + 1) + ' could not be capped (' + ((err && err.message) || err) + ')' }; }
+        fl = CV.fill(A, I, ear, { relaxMm: A.relaxMm, target: I.base });
+        if (!fl.ok) return { ok: false, reason: 'detail ' + (I.id + 1) + ' could not be filled under: ' + fl.reason + ' - nothing changed' };
+        rf = { cap: fl.cap, touched: 0, contacts: [] };
         ps = pieceOf(soup, I, rf.cap);
         pc = census(ps);
-        if ((pc.closed && !pc.degen) || !(rf.touched > 0)) break;
+      } else {
+        try { cp = L1.internals.capFor({ M: M, plane: I.plane, frame: I.frame }, I, cap); }
+        catch (err) { return { ok: false, reason: 'detail ' + (I.id + 1) + ' could not be capped (' + ((err && err.message) || err) + ')' }; }
+        // the cap with the island's touching corners in it, else without them
+        for (var touch = 1; touch >= 0; touch--) {
+          rf = refineCap(cp, I, M, !!touch);
+          ps = pieceOf(soup, I, rf.cap);
+          pc = census(ps);
+          if ((pc.closed && !pc.degen) || !(rf.touched > 0)) break;
+        }
       }
       cp = rf.cap;
       I.tris.forEach(function (t) { chosen[t] = 1; });
@@ -1249,10 +1443,12 @@
           pc.open + ' open, ' + pc.nm + ' non-manifold, ' + pc.degen + ' degenerate) - nothing changed' };
       }
       var off = 0;
-      for (var c = 0; c < cp.length; c += 3) off = Math.max(off, Math.abs(cp[c] * I.plane.n[0] + cp[c + 1] * I.plane.n[1] + cp[c + 2] * I.plane.n[2] - I.plane.d));
+      if (fl) off = fl.stats.maxOffBaseMm;
+      else for (var c = 0; c < cp.length; c += 3) off = Math.max(off, Math.abs(cp[c] * I.plane.n[0] + cp[c + 1] * I.plane.n[1] + cp[c + 2] * I.plane.n[2] - I.plane.d));
       pieces.push({ id: I.id, soup: ps, heightMm: I.heightMm, capTris: cp.length / 9, volume: L1.volume(ps), sharedCorners: rf.touched,
                     contacts: rf.contacts,
-                    rootAreaMm2: I.rootAreaMm2, census: pc, group: I.group, backOffMm: off, plane: I.plane });
+                    rootAreaMm2: I.rootAreaMm2, census: pc, group: I.group, backOffMm: off, plane: I.plane,
+                    fill: fl ? fl.stats : null, notes: I.fillNotes || [] });
       caps.push(cp);
     }
     var kept = 0;
@@ -1274,10 +1470,29 @@
              volumes: { source: vSrc, plate: vPlate, pieces: vP, residual: vSrc - vPlate - vP } };
   }
 
+  /** Lift 3's words for where they stood, and its notes; null when every
+      piece was cut flat (Lift 2's words stand). */
+  function curvedWords(pieces) {
+    var nc = pieces.filter(function (pc) { return pc.fill; }).length;
+    if (!nc) return null;
+    var notes = [];
+    pieces.forEach(function (pc) { (pc.notes || []).forEach(function (s) { notes.push(s); }); });
+    return { where: (nc === pieces.length ? '' : 'flat where ' + (pieces.length - nc === 1 ? 'one' : 'some') + ' stood on a flat face, and ') +
+      'where ' + (nc === 1 ? 'it' : 'they') + ' stood on a curve the surface round ' + (nc === 1 ? 'it' : 'them') +
+      ' is carried across, welded to it at the rim', notes: notes };
+  }
+
   function lift(soup, A, ids, deps) {
     var r = cut(soup, A, ids, deps);
     if (!r.ok) return r;
-    var n = r.pieces.length;
+    var n = r.pieces.length, cw = curvedWords(r.pieces);
+    if (cw) {
+      r.notes = cw.notes;
+      r.reason = 'lifted ' + plural(n, 'detail') + ' (' + fmt(r.volumes.pieces) + ' mm³) off the face, each cut along the surface ' +
+        'it stands on; the plate keeps ' + r.keptTris + ' of its ' + A.M.nt + ' triangles as they were, and is ' + cw.where +
+        (cw.notes.length ? '. Note: ' + cw.notes.join('; ') : '');
+      return r;
+    }
     r.reason = 'lifted ' + plural(n, 'detail') + ' (' + fmt(r.volumes.pieces) + ' mm³) off the face, each at its own ' +
       'flat cut; the plate keeps ' + r.keptTris + ' of its ' + A.M.nt + ' triangles as they were and is flat where ' +
       (n === 1 ? 'it' : 'they') + ' stood';
@@ -1288,11 +1503,14 @@
   function remove(soup, A, ids, deps) {
     var r = cut(soup, A, ids, deps);
     if (!r.ok) return r;
-    var n = r.pieces.length;
+    var n = r.pieces.length, cw = curvedWords(r.pieces);
     return { ok: true, plate: r.plate, keptTris: r.keptTris, plateCensus: r.plateCensus,
-      removed: r.pieces.map(function (pc) { return { id: pc.id, volume: pc.volume, group: pc.group, backOffMm: pc.backOffMm, capTris: pc.capTris }; }),
+      removed: r.pieces.map(function (pc) { return { id: pc.id, volume: pc.volume, group: pc.group, backOffMm: pc.backOffMm, capTris: pc.capTris, fill: pc.fill }; }),
       volumes: { source: r.volumes.source, plate: r.volumes.plate, removed: r.volumes.pieces, residual: r.volumes.residual },
-      reason: 'removed ' + plural(n, 'detail') + ' (' + fmt(r.volumes.pieces) + ' mm³); the plate keeps ' + r.keptTris +
+      notes: cw ? cw.notes : undefined,
+      reason: cw ? 'removed ' + plural(n, 'detail') + ' (' + fmt(r.volumes.pieces) + ' mm³); the plate keeps ' + r.keptTris +
+        ' of its ' + A.M.nt + ' triangles as they were, and is ' + cw.where + (cw.notes.length ? '. Note: ' + cw.notes.join('; ') : '') :
+        'removed ' + plural(n, 'detail') + ' (' + fmt(r.volumes.pieces) + ' mm³); the plate keeps ' + r.keptTris +
         ' of its ' + A.M.nt + ' triangles as they were and is flat where ' + (n === 1 ? 'it' : 'they') + ' stood' };
   }
 
