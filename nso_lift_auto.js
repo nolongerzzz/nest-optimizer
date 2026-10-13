@@ -5,7 +5,17 @@
    (require('../nso_lift_auto.js')). No DOM, no Three.js. After nso_lift.js,
    whose loops, caps and checks it uses unchanged.
 
-   READ docs/LIFT.md FIRST (section "Lift 2").
+   READ docs/LIFT.md FIRST (section "Lift 2"; section 6 for Lift 3).
+
+   LIFT 3 - analyse(soup, tri, { curved: true }). Detection is the same. An
+   island whose surround is not one flat plane is no longer refused for
+   bending: its base is quadratics fitted to that surround (fitLocal), what
+   comes off is what stands above THAT, and Lift / Remove make the plate good
+   with nso_lift_curved.js's fill - the surrounding surface carried across,
+   welded to the real neighbours at the rim. An island whose surround leans
+   more than slantDeg off the view is refused ('slant'), never cut. Islands
+   on a flat surround are Lift 2's exactly. Without the option, nothing here
+   changes.
 
    ---------------------------------------------------------------------------
    THE MAP DECIDES WHERE. THE REAL MESH DECIDES WHAT.
@@ -67,6 +77,8 @@
    analyse(soup, seedTri, opts) -> Phase 1's shape ({ ok, M, islands,
                                    islandOf, base, plane, seed, reason }) plus
                                    kind 'map', map, groups, necks, ms
+                                   (opts.curved: Lift 3 - island.fill 'curved',
+                                   island.base, island.fillNotes)
    offered(A, minHeight)        -> ids: liftable and standing out more than it
    lift(soup, A, ids, deps)     -> { ok, plate, pieces, volumes, reason }
    remove(soup, A, ids, deps)   -> { ok, plate, removed, volumes, reason }
@@ -111,7 +123,7 @@
     neckRatio: 0.7,        // necks (data only): a saddle below 0.7 of the smaller part's width
     // Lift 3 (opts.curved): a base that is not one flat plane is followed, not refused
     curved: false,
-    slantDeg: 50,          // ...an island whose surround leans more than this off the view is read too slantwise
+    slantDeg: 35,          // ...an island whose surround leans more than this off the view is read too slantwise
     relaxMm: 1.5,          // ...the fill relaxes from the neighbours to the base estimate over about this
     fitSigmaMm: 3          // ...the base carried across: quadratics fitted to the surround, weighted over about this
   };
@@ -651,8 +663,9 @@
     var nu = map.nu, nvv = map.nv, NN = nu * nvv, H = map.H, B = est.B, TT = map.T, cell = map.cell;
     var thr = Math.max(o.layerFloorMm, +o.thresholdMm || 0);
     var valid = function (c) { return H[c] > -Infinity; };
-    // Lift 3: a base that bends is followed (the rolling-ball estimate, read
-    // at each vertex) instead of cut flat.
+    // Lift 3: a base that bends is followed instead of cut flat (per island,
+    // fitLocal below; the rolling-ball estimate, read anywhere, is its
+    // fallback).
     var curved = !!o.curved, Bs = curved && LC() ? LC().baseSampler(map, B) : null;
     if (curved && !Bs) return refuse('deps', 'Lift 3 needs nso_lift_curved.js');
     var det = new Uint8Array(NN);
@@ -844,15 +857,14 @@
       var P0 = [0, 1, 2].map(function (q) { return uc * map.e1[q] + vc * map.e2[q] + c0 * map.n[q]; });
       G.plane = { n: Nw, d: dot(P0, Nw) };
       if (curved && bend > flatTol) {
-        // Lift 3: not one flat plane, so the base is followed. Its samples
+        // Lift 3: not one flat plane, so the base is followed: the surround
         // (where the rolling ball touches the surface round the footprint)
-        // fitted with one quadratic surface, carried across; the ball's own
-        // curve under the detail is not used - on a convex surface it dips
-        // under. Where no one quadratic fits them as well as the ball does,
-        // the ball's base itself.
-        // Its samples: the whole band round the footprint, clear of anything
-        // standing out (not only the cleanest cells, which on rough paper are
-        // its lower envelope).
+        // fitted with local quadratics and carried across (fitLocal). The
+        // ball's own curve under the detail is not used - on a convex surface
+        // it dips under. Where the quadratics fit the surround clearly worse
+        // than the ball does, the ball's base itself. The samples: the whole
+        // band round the footprint, clear of anything standing out (not only
+        // its cleanest cells, which on rough paper are its lower envelope).
         var nd3 = need, band = cand.filter(function (x2) { return !near[x2] || dist[x2] > nd3; });
         if (band.length < 15) band = ring;
         var off = 0, sq = 0;
@@ -860,7 +872,14 @@
         G.curved = true; G.ringOffMm = off; G.ringRmsMm = Math.sqrt(sq / band.length);
         G.surroundMm2 = band.length * cell * cell;
         G.slantDeg = Math.acos(Math.max(-1, Math.min(1, dot(Nw, map.n)))) * 180 / Math.PI;
-        if (G.slantDeg > o.slantDeg) { G.status = 'slant'; G.T = Bs; G.baseKind = 'ball'; G.tolA = o.bendTolMm; return; }
+        if (G.slantDeg > o.slantDeg) {
+          // too slantwise to cut along: found against its own plane, as
+          // Lift 2 finds it (so a speck with nothing on it stays map-only),
+          // shown, never cut
+          G.curved = false; G.status = 'slant';
+          G.tolA = Math.min(bend, o.bendTolMm) + o.marginMm + flatTol;
+          return;
+        }
         var qf = fitLocal(band);
         G.fitRmsMm = qf ? qf.rms : NaN; G.fitOffMm = qf ? qf.max : NaN;
         if (qf && qf.rms <= 2 * G.ringRmsMm + o.marginMm) {
@@ -1002,7 +1021,8 @@
         var G = groups[gi];
         G.status = null;
         ringAndPlane(G);
-        if (G.status === 'nobase' || G.status === 'bends' || G.status === 'slant') {
+        if (G.status === 'slant') { grow(G, gi); return; }
+        if (G.status === 'nobase' || G.status === 'bends') {
           // shown, not cut: the cells' own top triangles
           var seen = new Set();
           G.tris = [];
@@ -1079,8 +1099,9 @@
       comps2.forEach(function (tris) {
         var I = { id: islands.length, tris: tris, triangles: tris.length, mapCells: G.cells.length, closedCells: G.closed,
                   bendMm: G.bendMm, ringCells: G.ringCells, ringClear: G.ringClear, ringCleanMm: G.ringCleanMm, widened: G.widened || 0 };
+        if (G.slantDeg != null) I.slantDeg = G.slantDeg;
         if (G.curved) {
-          I.curved = true; I.ringOffMm = G.ringOffMm; I.ringRmsMm = G.ringRmsMm; I.slantDeg = G.slantDeg;
+          I.curved = true; I.ringOffMm = G.ringOffMm; I.ringRmsMm = G.ringRmsMm;
           I.baseKind = G.baseKind; I.baseOffMm = G.baseOffMm; I.fitRmsMm = G.fitRmsMm; I.base = G.T; I.sBase = curvedS(G.T, null);
           I.surroundMm2 = G.surroundMm2; I.roughMm = G.baseKind === 'fit' ? G.fitRmsMm : G.ringRmsMm;
         }
@@ -1477,8 +1498,8 @@
     if (!nc) return null;
     var notes = [];
     pieces.forEach(function (pc) { (pc.notes || []).forEach(function (s) { notes.push(s); }); });
-    return { where: (nc === pieces.length ? '' : 'flat where ' + (pieces.length - nc === 1 ? 'one' : 'some') + ' stood on a flat face, and ') +
-      'where ' + (nc === 1 ? 'it' : 'they') + ' stood on a curve the surface round ' + (nc === 1 ? 'it' : 'them') +
+    return { where: (nc === pieces.length ? '' : ' and is flat where ' + (pieces.length - nc === 1 ? 'one' : 'some') + ' stood on a flat face') +
+      '; where ' + (nc === 1 ? 'it' : 'they') + ' stood' + (nc === pieces.length ? '' : ' on a curve') + ', the surface round ' + (nc === 1 ? 'it' : 'them') +
       ' is carried across, welded to it at the rim', notes: notes };
   }
 
@@ -1489,7 +1510,7 @@
     if (cw) {
       r.notes = cw.notes;
       r.reason = 'lifted ' + plural(n, 'detail') + ' (' + fmt(r.volumes.pieces) + ' mm³) off the face, each cut along the surface ' +
-        'it stands on; the plate keeps ' + r.keptTris + ' of its ' + A.M.nt + ' triangles as they were, and is ' + cw.where +
+        'it stands on; the plate keeps ' + r.keptTris + ' of its ' + A.M.nt + ' triangles as they were' + cw.where +
         (cw.notes.length ? '. Note: ' + cw.notes.join('; ') : '');
       return r;
     }
@@ -1509,7 +1530,7 @@
       volumes: { source: r.volumes.source, plate: r.volumes.plate, removed: r.volumes.pieces, residual: r.volumes.residual },
       notes: cw ? cw.notes : undefined,
       reason: cw ? 'removed ' + plural(n, 'detail') + ' (' + fmt(r.volumes.pieces) + ' mm³); the plate keeps ' + r.keptTris +
-        ' of its ' + A.M.nt + ' triangles as they were, and is ' + cw.where + (cw.notes.length ? '. Note: ' + cw.notes.join('; ') : '') :
+        ' of its ' + A.M.nt + ' triangles as they were' + cw.where + (cw.notes.length ? '. Note: ' + cw.notes.join('; ') : '') :
         'removed ' + plural(n, 'detail') + ' (' + fmt(r.volumes.pieces) + ' mm³); the plate keeps ' + r.keptTris +
         ' of its ' + A.M.nt + ' triangles as they were and is flat where ' + (n === 1 ? 'it' : 'they') + ' stood' };
   }

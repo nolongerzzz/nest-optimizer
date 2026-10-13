@@ -390,9 +390,10 @@ if (dAll.ok) {
 }
 const RD = removed('dome', DMo, AD, LA.offered(AD, 0.42), dmSeed);
 if (RD) {
-  check('dome: Remove says it carried the surface across, and its note', /surface round them is carried across, welded to it at the rim/.test(RD.r.reason) && RD.r.notes.length === 1, RD.r.reason.slice(0, 200));
+  check('dome: Remove says it carried the surface across, and its note', /as they were; where they stood, the surface round them is carried across, welded to it at the rim\. Note: /.test(RD.r.reason) &&
+    RD.r.notes.length === 1, RD.r.reason.slice(0, 220));
   check('dome: after Remove a fresh read finds nothing standing on it', RD.A2.ok && RD.A2.islands.filter(I => I.status === 'ok').length === 0,
-    RD.A2.ok ? RD.A2.islands.length + ' found (' + RD.A2.islands.map(I => I.status).join(',') + ' - the slab\'s corners, falling away, as on the bare dome)' : RD.A2.reason);
+    RD.A2.ok ? RD.A2.islands.length + ' found' + (RD.A2.islands.length ? ' (' + RD.A2.islands.map(I => I.status).join(',') + ': the slab\'s corners, falling away, as on the bare dome)' : '') : RD.A2.reason);
 }
 
 /* ========================================================== 3. the cylinder */

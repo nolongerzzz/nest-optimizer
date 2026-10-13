@@ -25,31 +25,36 @@
               rim; the loops ear-clipped by the cut engine (capFor ->
               rawFlatCapLoops), then each point inserted and the triangles
               kept Delaunay (Lawson flips; the root edges are never flipped).
-     height   w = B + d. B is the rolling-ball base nso_lift_auto.js already
-              fit to the exposed surround (the map's estimate, read
-              bilinearly). d is how far the real surface stands off B:
-              measured on the exposed neighbours all round (a local height
-              grid of every triangle facing the view that is not part of a
-              detail), and inside the footprint the d that minimises
-                  sum (Laplacian d)^2  +  4 / relaxMm^4 * sum d^2
-              with the exposed cells held. The first term carries the
-              neighbours' height AND slope across the rim (a C1 join - a
-              harmonic fill would match only the height); the second lets d
-              die away into B over about relaxMm (1.5 mm, the width of the
-              ring the base was measured on). So where the base estimate and
-              the real neighbours disagree, the boundary follows the
-              neighbours and the middle relaxes to the estimate. Nothing
-              else: no smoothing of B, no texture made up.
+     height   w = B + d. B is the base under the island nso_lift_auto.js
+              fitted to the exposed surround (opts.target: quadratics fitted
+              where the rolling ball touches the surface round the footprint,
+              or the ball's own estimate where none fits). d is how far the
+              real surface stands off B: held at the rim corners and at the
+              far corners of the real triangles round them (the neighbours
+              as they are); at the points inside, the d that minimises
+                  sum (cotangent Laplacian of d)^2 / area
+                    + 4 / relaxMm^4 * sum area * d^2
+              over the points inside AND the rim corners. A rim corner's
+              Laplacian reaches across the weld into its real neighbours, so
+              the first term carries their height AND slope into the fill
+              there, triangle by triangle (a C1 join - a harmonic fill would
+              match only the height); the second lets d die away into B over
+              about relaxMm (1.5 mm, the width of the ring the base was
+              measured on). So where the base and the real neighbours
+              disagree, the boundary follows the neighbours and the middle
+              relaxes to the base. Nothing else: no smoothing, no texture
+              made up.
 
    The plate gains the fill facing out; the lifted piece gains the same fill
    turned over as its back. Plate + piece = the source, exactly.
 
    API
      fill(A, I, ear, opts) -> { ok, cap, stats, reason }
-         A    nso_lift_auto.js's analysis (its M, map.grid, map.B, islandOf)
+         A    nso_lift_auto.js's analysis (its M, map.grid, map.B)
          I    the island (its tris, loops, frame = the view's)
          ear  capFor's triangles on the root loops (facing out), flat
               [x, y, z, ...] at the loop vertices
+         opts { relaxMm, target: (u, v) => the base along the view }
          cap  the fill, the same layout: triangles facing out
      baseSampler(grid, B) -> (u, v) => B read bilinearly (NaN off the surface)
 

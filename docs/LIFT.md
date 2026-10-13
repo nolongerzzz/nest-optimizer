@@ -1,4 +1,4 @@
-# Lift - take any detail off a face, leave the face flat
+# Lift - take any detail off a face, leave the face as it was round it
 
 Phase 1 (sections 1 - 4): `nso_lift.js` (the geometry, headless,
 `window.NSO_Lift` and a Node module), `app-gscope-lift.js` (G-scope's sidebar
@@ -9,6 +9,11 @@ Lift 2, auto-aim and Strip (section 5): `nso_lift_auto.js`
 (`window.NSO_LiftAuto` and a Node module), the same `app-gscope-lift.js` (the
 Strip side, and Pick on a face that bends), `tools/nso_lift_auto_fixtures.js`,
 `tools/nso_lift_auto_test.js`, `tools/nso_lift_auto_drive_check.js`.
+
+Lift 3, curved bases (section 6): `nso_lift_curved.js` (`window.NSO_LiftCurved`
+and a Node module: the repair), `nso_lift_auto.js`'s `{ curved: true }` read,
+the same `app-gscope-lift.js`, `tools/nso_lift_curved_fixtures.js`,
+`tools/nso_lift_curved_test.js`, `tools/nso_lift_curved_drive_check.js`.
 
 ```
 npm run lift:test     headless: the plate, every detail alone and all together, the ring,
@@ -21,9 +26,14 @@ npm run lift:auto-test   Lift 2 headless: every fixture of section 5, Strip's gr
 npm run lift:auto-drive  Lift 2 in the real app: Strip, the tick boxes, a click on one,
                          Lift N, Remove N, Ctrl+Z, Pick on a curved dish (40 gates)
 npm run lift:auto-shots  lift:auto-drive, keeping its screenshots in tools/lift-auto-out/ (gitignored)
+npm run lift:curved-test   Lift 3 headless: the spiky ball, a domed plate, a cylinder, Lift 2's
+                           fixtures read curved, the canonical checker (483 gates)
+npm run lift:curved-drive  Lift 3 in the real app: Pick on the ball, Strip on the dome, Lift,
+                           Remove, Ctrl+Z (23 gates)
+npm run lift:curved-shots  lift:curved-drive, keeping its screenshots in tools/lift-curved-out/ (gitignored)
 ```
 
-All four checks are in `npm test`.
+All six checks are in `npm test`.
 
 ## 1. One question, not a catalogue
 
@@ -200,8 +210,8 @@ drag-box correction was not built.
 
 Section 5 (Lift 2) takes the first and last of these for a base that bends
 gently (each detail cut at its own flat plane, within 0.15 mm), and adds the
-grouping (Strip). Neck splitting, the curved-base repair and the texture stamp
-are still later tickets.
+grouping (Strip). Section 6 (Lift 3) takes the curved-base repair. Neck
+splitting and the texture stamp are still later tickets.
 
 ## 5. Lift 2 - auto-aim and Strip
 
@@ -293,7 +303,8 @@ bowls (the ring of base samples reaches about 2 mm past the bar):
 
 Roughly, a footprint L mm long on a bend of radius R is refused once
 (L + 4)² / 8R passes 0.15. A long squiggle on a tightly curved lip refuses,
-as the ticket accepts; the curved-base repair is a later ticket.
+as the ticket accepts; the curved-base repair is a later ticket (section 6:
+in the app every one of these bars now lifts).
 
 **Speed.** The dish at 0.17 mm per sample, 501,260 triangles: the map builds
 in 41 - 105 ms; the whole read 0.9 - 1.5 s (the exact weld 0.6 - 1.1 s of it,
@@ -314,3 +325,131 @@ free plate, the 3 lines stay, one undo step, Ctrl+Z bit for bit; Remove 10:
 no pieces, the bare slab, Ctrl+Z bit for bit; back to Pick: Phase 1's read-out;
 the dish in Pick (read from the map, a dot lifts, Ctrl+Z bit for bit) and in
 Strip (6 dots, the can't-lift row says why, Lift 6, Ctrl+Z bit for bit).
+
+## 6. Lift 3 - lift off a curved base, repair to match
+
+Lift 2 refuses a detail whose base bends more than 0.15 mm across its
+footprint, so the bumps on a curved surface (a spiky ball) are all refused.
+Lift 3 removes that limit. **Detection is unchanged** - the same map, the
+same rolling ball, the same islands. What changes is the lift and the repair:
+each detail is cut along the surface it stands on, and the plate is made good
+there with the surrounding exposed surface carried across, welded to the real
+neighbour triangles at the rim.
+
+It is one option on Lift 2's read: `NSO_LiftAuto.analyse(soup, tri, { curved:
+true })`. Without it nothing changes (Lift 2's `lift:auto-test`, 398 gates,
+passes untouched). G-scope always asks for it (Pick on a face Phase 1 calls
+curved, and Strip). On a face that is flat it changes nothing either: an
+island whose surround is one plane to within the flat tolerance (1.1 µm) is
+Lift 2's, flat cap and all - on the flat plate, Phase 1's plate and the
+leaves, `curved: true` gives exactly Lift 2's islands, plate and pieces, bit
+for bit.
+
+### The base under a curved island
+
+| step | exactly |
+|---|---|
+| **samples** | the band of the face round the footprint Lift 2 already measures (0.75 - 2.25 mm out, clear of anything standing out) - all of it, not only its cleanest cells (on rough paper those are its lower envelope) |
+| **the base carried across** | quadratics `h = a u² + b uv + c v² + d u + e v + f` fitted by least squares to those samples, one at each node of a lattice 1.5 mm apart, each sample weighted `exp(-r² / 2σ²)` from the node, σ = 3 mm; read anywhere as the nodes' quadratics blended bilinearly. Where no quadratic fits the samples about as well as the rolling ball does (rms more than twice the ball's + 0.02 mm), the rolling-ball base itself, and the lift says so |
+| **what comes off** | Lift 2's growth, with "above the base" meaning above that surface along the view, not above a plane: the band that counts as on the base is three times the surround's rms about it (plus 0.02 mm, under 0.75 x the detection threshold) |
+| **too slantwise** | an island whose surround leans more than **35°** off the view is refused - "it is seen too slantwise from where the face was clicked to measure the surface round it - click the face nearer it (its surround leans 62° off the view; 35° is the most it reads)" - and shown, never cut |
+
+**Why not the rolling ball's own surface under the detail.** The ticket
+says to cap against the rolling-ball base. Measured, that leaves a visible
+patch: the ball rolls under the surface from below, so under a bump on a
+convex surface its top is the ball's own curve (8.7 mm radius on the 40 mm
+ball), not the surface's (20 mm). A fill that relaxes to it sat **0.25 -
+0.35 mm off the sphere** under the 6 mm domes, 0.08 - 0.11 under the spikes;
+on the cylinder the ball fallback put a 0.064 mm ghost of the ridge back,
+creased 7° at the rim. So the base the fill relaxes to is the rolling ball's
+base where the ball touches the surface - the exposed surround - fitted and
+carried across, not the ball's curve inside the footprint. With it the same
+fills sit within 0.001 - 0.034 mm of the true surface (below).
+
+### The fill (`nso_lift_curved.js`)
+
+| step | exactly |
+|---|---|
+| **rim** | the root loops' own vertices, unmoved: the fill shares them with the real neighbour triangles - the same position, bit for bit, no step |
+| **inside** | the loops ear-clipped by the cut engine (`capFor` -> `rawFlatCapLoops`), then a lattice of points inside at about one root edge's spacing (0.12 - 0.8 mm), none closer than 0.45 of it to the rim, each inserted and the triangles kept Delaunay (Lawson flips; the root edges are never flipped) |
+| **height** | `w = base + d`. `d` is held at the rim corners and at the far corners of the real triangles round them (the neighbours as they are); inside, `d` minimises `Σ (cotangent Laplacian of d)² / area + 4 / relax⁴ · Σ area · d²` over the points inside AND the rim corners, relax = 1.5 mm (the width of the ring the base is measured on). A rim corner's Laplacian reaches across the weld into its real neighbours, so keeping it small carries their slope into the fill there, triangle by triangle (a C1 join; a harmonic fill would match only the height); the second term lets `d` die away into the base inside. So where the base and the real neighbours disagree, the boundary follows the neighbours and the middle relaxes to the base. Nothing else: no smoothing, no texture made up |
+| **pieces** | the plate gains the fill facing out; the lifted piece gains the same fill turned over as its back, corner for corner. Plate + piece = the source, exactly. The piece's back follows the curve it came off, so it no longer sits flat: its lowest point is on the bed |
+
+### The honest ceiling - said, never refused
+
+Each lift says in words (`r.notes`, appended to the read-out as "Note: ...")
+where the fill matches the surroundings at the rim but has nothing measured
+to follow inside:
+
+- **bigger than its surround** (footprint area more than the clear surface
+  measured round it): "detail 5 covers 83.1 mm², more than the 78.8 mm² of
+  clear surface measured round it: across its middle the surface carried
+  under it is the base fitted to that surround - it matches what is round it,
+  it cannot show what was under the detail"
+- **rough neighbours** (rms about the fitted base over 0.02 mm): "the surface
+  round detail 1 is rough (0.030 mm rms about the smooth surface fitted to
+  it): the fill meets it at the rim and runs smooth across - the roughness is
+  not made up under it"
+- **no smooth fit** (the rolling-ball fallback above).
+
+### Checked on (`lift:curved-test`, 483 gates, every fixture generated in the test)
+
+Every lift is gated from the output soups alone: piece and plate closed and
+manifold; the piece the island's own triangles bit for bit plus its back; the
+back the plate's fill turned over; every other plate triangle the source's,
+in order; plate + piece = source; **every root edge welded** (shared by the
+fill and the real neighbour, the same corners bit for bit); **no crease** -
+the weld angles (between the fill triangle's and the neighbour's normals)
+have median and 95th percentile within 1° of the 95th percentile of the
+angles the surround makes with itself, and their worst within 1° of its
+worst (a flat cap on these bumps meets the sphere at 5 - 9° all round); **on
+the true surface** (every fill corner within 0.05 mm); **not a flat cap**
+(the fill stands off its best plane at least half as far as the true surface
+does over the same points); **the curvature tracks the base** (the fill's
+fitted Hessian within 15% of the true surface's).
+
+| fixture | Lift 2 | Lift 3 |
+|---|---|---|
+| **the spiky ball** - a 40 mm icosphere, 81,920 triangles, 6 spikes (cones 2.4 mm high) and 8 domes (paraboloids 1.2 high, 6 across) pushed out of it | every bump refused ("bends") | each bump, clicked beside, lifts with every gate. Spikes: welds 0.95 - 1.11° at worst against the ball's own 0.71 - 1.22°; the fill on the sphere within 0.001 - 0.003 mm. Domes: welds 2.07 - 4.86° at worst against the surface's own 3.92 - 5.47° there (the rim corners left 0.02 - 0.03 mm up, under the band); within 0.023 - 0.034 mm. 0.5 - 0.8 s per bump, read and lift |
+| the ball, all 14 one after another | - | closed and bare: every corner within 0.034 mm of r = 20; 33507.548 mm³ against the bare icosphere's 33505.790; a fresh read from four sides finds nothing |
+| the ball, one click | - | the bump beside the click lifts; the five round the curve are refused as too slantwise, in words, and Lift on one says so |
+| **a domed plate** (R 80) - 8 dots, a 36 mm squiggle, a 10 mm plaque | the squiggle refused (1.74 mm) | all ten lift, together and alone: welds 0.21 - 0.23° against the dome's own 0.20 - 0.21°, the fill on the dome within 0.000 - 0.001 mm; the plaque's note in words; Remove all and a fresh read finds nothing |
+| **a cylinder** (30 mm across) - 3 spikes, 4 domes, a ridge 16 mm round it (61° of arc) | refused | all 8 lift; the ridge's welds 1.53° at worst against the cylinder's own 1.53°, within 0.001 mm |
+| Lift 2's flat plate, Phase 1's plate, the leaves | - | exactly Lift 2's, bit for bit |
+| the dish (R 150) | 6 of 7 (the squiggle refused) | 7 of 7, welds 0.12° against 0.11° |
+| bowls R 300 / 150 / 60 / 30, bars 2 - 20 mm | 7 / 5 / 2 / 0 of 8 | 8 of 8 each; welds within the bowl's own (0.06 / 0.12 / 0.31 / 0.66° against 0.06 / 0.11 / 0.29 / 0.57°) |
+| noisy paper +-0.08 / +-0.16, 0.2 mm layer steps | all lift | all lift; no weld bends more than the surface's own worst; each says its surround is rough |
+| canonical checker | | a spike, the ball after it, the bare ball, the dome after all ten, the plaque, a cylinder spike and the cylinder after it - each PASS, 0 piercing, 0 coplanar |
+
+**Where slantwise bites** (the 35°): measured on the ball, a bump read from
+the click beside it (10 - 14° off) is within 0.001 - 0.027 mm; at 28 - 33°,
+0.049 mm, welds within the surface's own; at 42 - 50° off, closed and
+volume-exact but 0.10 - 0.25 mm of skirt is left. So past 35° it says to
+click nearer.
+
+### In the real app (`lift:curved-drive`, 23 gates)
+
+Pick on the spiky ball (Phase 1 calls it curved, the map reads it with Lift
+3, the spike beside the click offered "lifted along the surface it stands
+on", the rest can't-lift in words); a click on the spike, Lift: one closed
+piece on free plate, the ball closed, every new corner within 0.0008 mm of
+the sphere, every other triangle as it was, ONE undo step, ball + piece = the
+original; Ctrl+Z bit for bit. Strip on the domed plate: 8 small dots, 1 line
+or squiggle, 1 large shape, 0 can't lift; Lift 10 - ten closed pieces, the
+plaque's note in the read-out, a fresh read finds nothing; Ctrl+Z bit for
+bit; Remove 10; Ctrl+Z bit for bit.
+
+**Lift 2's drive check.** Five of its 40 gates said the dish's squiggle is
+refused as bending - the limit this ticket removes. They now say it lifts
+(seven offered, Strip 6 dots + 1 squiggle, Lift 7, nothing left standing).
+Every other Lift 2 and Phase 1 gate is as it was.
+
+### Not here
+
+- **Lift as a reusable skin** - keeping what was lifted (or the texture under
+  it) to stamp on another surface. A later ticket; nothing here keeps or
+  re-applies a lifted skin.
+- A detail too far round the curve from the click is refused, not re-aimed:
+  clicking nearer it reads it straight on.
+- A lifted piece keeps the curved back it came off with; flattening it for
+  printing is not done.
