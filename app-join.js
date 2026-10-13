@@ -3073,7 +3073,14 @@ async function joinSelectedModels() {
 
 // splitBothSides lives in app-cut.js: one engine (rawCut) for every Cut.
 
-function cutActiveModel() {
+// opts.rightSideOut: the click on "Turn it right-side-out, then cut" (see
+// "Cut on an inside-out piece" in app-cut.js). The Split button's click event
+// carries no such field, so a plain Cut never turns anything.
+function cutActiveModel(opts) {
+  const rightSideOut = !!(opts && opts.rightSideOut === true);
+  const offer = state.cutRightSideOutOffer;
+  // Any Cut attempt answers the last offer; a refusal below makes a new one.
+  if (typeof cutClearRightSideOutOffer === 'function') cutClearRightSideOutOffer();
   try {
   if (!state.cutterOpen) {
     setStatus('Open cutter first', true);
@@ -3107,11 +3114,41 @@ function cutActiveModel() {
   const halfKerf = KERF_MM * 0.5;
   const leftPlane = plane - halfKerf;
   const rightPlane = plane + halfKerf;
+  // Turned right-side-out only on the click, only for the piece it was
+  // offered for, and only when every shell of it is inside-out. The turn is
+  // made on a copy; m itself stays as it is, so it is what Undo restores.
+  let cutModel = m;
+  if (rightSideOut) {
+    if (!offer || offer.id !== m.id) {
+      setStatus('Not turned: the button belongs to the inside-out piece Split last refused, and this is not it. ' +
+        'Split this piece to see whether it needs turning.', true);
+      return;
+    }
+    const verdict = cutInsideOutVerdict(m);
+    if (!verdict.whole) {
+      setStatus('Not turned: ' + (verdict.wrong.length
+        ? cutPartlyInsideOutReason(verdict)
+        : 'this piece is not inside-out') + '. The piece is unchanged.', true);
+      return;
+    }
+    cutModel = cutRightSideOutCopy(m);
+  }
   let pair;
   try {
-    pair = splitBothSides(m, axis, leftPlane, rightPlane);
+    pair = splitBothSides(cutModel, axis, leftPlane, rightPlane);
   } catch (err) {
     if (err && err.name === 'CutRefused') {
+      if (err.insideOut && !rightSideOut) {
+        const verdict = cutInsideOutVerdict(m);
+        if (verdict.whole) {
+          cutOfferRightSideOut(m, 'Cut not made: ' + err.message + '. The piece is unchanged.');
+          return;
+        }
+        if (verdict.wrong.length) {
+          setStatus('Cut not made: ' + cutPartlyInsideOutReason(verdict) + '. The piece is unchanged.', true);
+          return;
+        }
+      }
       setStatus('Cut not made: ' + err.message + '. The piece is unchanged - move the red plane and try again.', true);
       return;
     }
@@ -3277,6 +3314,8 @@ function cutActiveModel() {
   const sum = mL.along + mR.along;
   const loss = span - sum;
   setStatus(
+    (rightSideOut ? 'Turned right-side-out (' + (cutModel.geometry.attributes.position.count / 3) +
+      ' triangles reversed), then cut; one Undo puts the original back. ' : '') +
     'Cut @ ' + cutMm.toFixed(1) + ' mm (kerf ' + KERF_MM + ' mm) -> ' +
     nameA + ' ' + mL.along.toFixed(1) + ' mm + ' + nameB + ' ' + mR.along.toFixed(1) +
     ' mm [' + pair.engine + ']. List: ' + state.models.length + ' models. Undo: ' + state.undoStack.length + '.' +
@@ -3686,6 +3725,8 @@ function setupUI() {
   if (btnCutterClose) btnCutterClose.addEventListener('click', () => closeCutter(false));
   const btnCut = document.getElementById('btn-cut');
   if (btnCut) btnCut.addEventListener('click', cutActiveModel);
+  const btnCutRightSideOut = document.getElementById('btn-cut-right-side-out');
+  if (btnCutRightSideOut) btnCutRightSideOut.addEventListener('click', cutRightSideOutClicked);
   const btnArray = document.getElementById('btn-array');
   if (btnArray) btnArray.addEventListener('click', arrayActiveModel);
   const btnExportModel = document.getElementById('btn-export-model');

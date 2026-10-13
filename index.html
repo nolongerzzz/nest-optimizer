@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=inch1" />
+  <link rel="stylesheet" href="styles.css?v=insideout1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -496,6 +496,8 @@
               </div>
               <p id="cut-readout" class="cut-readout">—</p>
               <button id="btn-cut" class="btn btn-cut" type="button">Split</button>
+              <button id="btn-cut-right-side-out" class="btn btn-secondary" type="button" hidden
+                      title="Offered only after Split refused a piece whose faces all point inward. Reverses every triangle of the piece so its faces point out, then makes the same Split. One Undo puts the original piece back.">Turn it right-side-out, then cut</button>
               <div class="crop-tools" id="crop-tools">
               <p class="hint">Crop: take out the slab between two distances along the cut axis and close the gap. One closed piece, shorter by the box length.</p>
               <div class="edit-row crop-row">
@@ -1152,7 +1154,7 @@
 
 
 
-  <script src="app-cut.js?v=blade2"></script>
+  <script src="app-cut.js?v=insideout1"></script>
   <script src="app-finish.js?v=box2"></script>
   <script src="app-sculpt.js?v=pose1"></script>
   <script src="app-extend.js?v=scale1"></script>
@@ -1176,7 +1178,7 @@
   <script src="app-stock.js?v=stock3"></script>
   <script src="app-assemble.js?v=asm2"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
-  <script src="app-join.js?v=blade1"></script>
+  <script src="app-join.js?v=insideout1"></script>
   <script src="app-center-lock.js?v=clock2"></script>
   <script src="app-oversize-washer.js?v=oversize2"></script>
   <script src="app-join-triple.js?v=triple1"></script>
