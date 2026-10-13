@@ -109,7 +109,7 @@
 
   var ringGeo = null;
   function sharedRingGeo() {
-    if (!ringGeo) ringGeo = new THREE.RingGeometry(0.84, 1, 64);
+    if (!ringGeo) ringGeo = new THREE.RingGeometry(0.91, 1, 64);
     return ringGeo;
   }
   function ringMesh(color, name) {
