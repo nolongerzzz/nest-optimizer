@@ -41,7 +41,8 @@ function extractFns(file, names) {
   return out;
 }
 
-const CUT_FNS = ['rawEarClip2D', 'rawEdgeInwardNormal2', 'raw2DWeldLoop'];
+const CUT_FNS = ['rawEarClip2D', 'rawEdgeInwardNormal2', 'raw2DWeldLoop',
+                 'rawCapFaceContext', 'rawSignedArea2', 'rawPointInPoly2', 'rawSnapPieces2'];
 const FIN_FNS = ['rawVertexBallCorners', 'rawVertexBallOnly', 'rawSolidBox', 'rawBoxPockets',
                  'rawPocketBrick', 'nsoSealScore', 'rawBoxSoup', 'rawWrapSolid',
                  'rawHasPlane', 'rawExtremeOf', 'softenSelectedFace', 'rawChamferCut'];
