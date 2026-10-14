@@ -98,11 +98,8 @@ async function thicken(page, mode, mm) {
 async function undo(page) { await page.click('#btn-undo'); await page.waitForTimeout(150); }
 
 withApp(async (page, logs) => {
-  // the menu, then its groups: Thicken lives in the Shape group now
-  await page.evaluate(() => {
-    document.querySelector('.vp-finish-menu').open = true;
-    document.querySelectorAll('.vp-finish-menu .vp-sec').forEach(d => { d.open = true; });
-  });
+  // Thicken lives in the column's Shape menu (shell v2): open it.
+  await page.evaluate(() => { document.getElementById('menu-shape').open = true; });
 
   console.log('\n=== 1. open box (60x40x25, 2 mm walls, open top): which face moves ===');
   {

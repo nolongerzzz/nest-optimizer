@@ -14,31 +14,33 @@ const check = (name, cond, detail) => {
   if (!cond) fails++;
 };
 
-/* The user's drawing. */
-const ROW = ['menu-import', 'menu-export', 'menu-rotate', 'menu-tip', 'menu-move',
-             'btn-delete-placed', 'btn-lock-pos', 'btn-plate-lock',
-             'menu-photo', 'menu-gen', 'menu-finish'];
-const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-join', 'menu-align', 'menu-seat',
-             'menu-abc', 'menu-bit', 'menu-plate', 'menu-pieces', 'menu-pack'];
-const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(COL);
+/* The user's drawing (shell v2). The row, left to right; Plate sits under
+   Export, off the row's line. The column's slabs top to bottom, in their
+   groups (tools/nso_shell_v2_test.js gates the groups' pitch and gaps); the
+   view row (X, the eye, the target) is pinned under them. */
+const ROW = ['menu-import', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-bend', 'menu-align',
+             'menu-gen', 'btn-lock-pos', 'btn-plate-lock', 'btn-undo', 'btn-delete-placed', 'menu-export'];
+const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'btn-shell-lift', 'menu-seat', 'menu-bit',
+             'menu-shape', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-measure', 'menu-repair',
+             'btn-microscope'];
+const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(['menu-plates'], COL.filter(id => id.startsWith('menu-')));
 
-/* Every control that lived in the sidebar, and the drop-down it moved to. */
+/* Every control that lived in the sidebar, and the drop-down it is in now
+   (Join and A-B-C under Join; Plate, Pieces and Pack under Plate). */
 const HOME = {
-  'menu-join': ['btn-join-start', 'join-slot-a', 'join-slot-b', 'join-slot-c',
-                'join-name-a', 'join-name-b', 'join-name-c', 'btn-join', 'btn-join-clear'],
+  'menu-joins': ['btn-join-start', 'join-slot-a', 'join-slot-b', 'join-slot-c',
+                'join-name-a', 'join-name-b', 'join-name-c', 'btn-join', 'btn-join-clear',
+                'triple-join', 'triple-mode', 'triple-gap-ab', 'triple-gap-ab-value',
+                'triple-gap-bc', 'triple-gap-bc-value', 'btn-join-triple'],
   'menu-align': ['btn-join-align', 'btn-join-cx', 'btn-join-cz', 'btn-center-lock',
                  'btn-center-lock-pick', 'center-lock-ref'],
   'menu-seat': ['btn-seat-support', 'seat-gap', 'seat-gap-value', 'btn-seat-here',
                 'chk-oversize-washer', 'oversize-gap', 'btn-seat-flush', 'btn-flip-port',
                 'btn-seat-grid'],
-  'menu-abc': ['triple-join', 'triple-mode', 'triple-gap-ab', 'triple-gap-ab-value',
-               'triple-gap-bc', 'triple-gap-bc-value', 'btn-join-triple'],
   'menu-bit': ['btn-subtract', 'btn-extract-bit'],
-  'menu-plate': ['plate-select', 'custom-size', 'custom-w', 'custom-d', 'custom-h',
+  'menu-plates': ['plate-select', 'custom-size', 'custom-w', 'custom-d', 'custom-h',
                  'plate-dims', 'plate-area', 'plate-grid-show', 'chk-plate-grid-snap',
-                 'build-volume-warning'],
-  'menu-pieces': ['model-list', 'clone-count', 'btn-clone'],
-  'menu-pack': ['btn-optimize'],
+                 'build-volume-warning', 'model-list', 'clone-count', 'btn-clone', 'btn-optimize'],
   'menu-import': ['file-input', 'btn-load-stl', 'btn-library', 'library-list']
 };
 
@@ -118,20 +120,21 @@ withApp(async (page, logs) => {
     const rowSized = r.row.slice(1).map(b => b.w);
     check('the row\'s other slabs size to their labels', new Set(rowSized.map(Math.round)).size > 3,
       rowSized.map(Math.round).join(', '));
-    check('Photo, Gen+ and Finish sit at the right end of the row',
-      r.row[10].r > 1500 - 20 && r.row[8].x > r.row[7].r + 100,
-      'lock plate ends ' + Math.round(r.row[7].r) + ', photo at ' + Math.round(r.row[8].x) +
-      ', finish ends ' + Math.round(r.row[10].r));
+    check('Undo, Remove and Export sit at the right end of the row',
+      r.row[11].r > 1500 - 20 && r.row[9].x > r.row[8].r + 100,
+      'lock plate ends ' + Math.round(r.row[8].r) + ', undo at ' + Math.round(r.row[9].x) +
+      ', export ends ' + Math.round(r.row[11].r));
   }
 
-  /* The row never reaches Finish, whatever the font. Label widths are the
-     machine's font metrics - at 1144 px one machine's row touched Finish
-     and another's overlapped it by 5 px - so this is checked with the
-     page's own font AND with every row label made markedly wider (extra
-     letter-spacing, standing in for a wider font): Gen+ must stay a few px
-     clear of Finish, and no slab may overlap the next. When room runs short
-     the middle group (Export .. Lock plate) gives way, cutting its labels
-     with an ellipsis; Import and the right group keep their width. */
+  /* The row fits the window whatever the font. Label widths are the
+     machine's font metrics - at 1144 px one machine's row touched the slab
+     beyond it and another's overlapped it by 5 px - so this is checked with
+     the page's own font AND with every row label made markedly wider (extra
+     letter-spacing, standing in for a wider font): no slab may overlap the
+     next and Export must end inside the window. When room runs short the
+     middle group (Move .. Lock plate, Gen+ aside) gives way, cutting its
+     labels with an ellipsis; Import, Gen+ and the right group (Undo, Remove,
+     Export) keep their width. */
   {
     const measure = () => page.evaluate((row) => {
       const out = row.map(id => {
@@ -144,27 +147,28 @@ withApp(async (page, logs) => {
       });
       return out;
     }, ROW);
-    const FIXED = ['menu-import', 'menu-photo', 'menu-gen', 'menu-finish'];
+    const FIXED = ['menu-import', 'menu-gen', 'btn-undo', 'btn-delete-placed', 'menu-export'];
     const atRest = await measure();
     const widthOf = id => atRest.find(b => b.id === id).w;
     check('at 1500 px wide, with this font, no row label is cut',
       atRest.every(b => !b.cut), atRest.filter(b => b.cut).map(b => b.id).join(', ') || 'none cut');
     const WIDER = '.vp-shell-row > .vp-bar-btn, .vp-shell-row > .vp-shell-menu > summary,' +
-                  '.vp-shell-menu.vp-finish-menu > summary { letter-spacing: 0.3em !important; }';
+                  '.vp-shell-stack > .vp-shell-menu > summary { letter-spacing: 0.3em !important; }';
     for (const wide of [false, true]) {
       if (wide) await page.addStyleTag({ content: WIDER }).then(h => h.evaluate(n => { n.id = 'wider-labels'; }));
       for (const w of [1144, 1280, 1500]) {
         await page.setViewportSize({ width: w, height: 820 });
         await page.waitForTimeout(120);
         const r = await measure();
-        const gen = r.find(b => b.id === 'menu-gen'), fin = r.find(b => b.id === 'menu-finish');
+        const last = r[r.length - 1];
+        const edge = await page.evaluate(() => innerWidth - 8);
         const overlaps = r.filter((b, i) => i > 0 && b.x < r[i - 1].r - 0.5).map(b => b.id);
         const spill = r.filter(b => b.cut && !b.clipped).map(b => b.id);
         const kept = wide || FIXED.every(id => Math.abs(r.find(b => b.id === id).w - widthOf(id)) < 0.5);
         check('at ' + w + ' px' + (wide ? ', labels made wider,' : '') +
-              ' Gen+ is clear of Finish by 4 px or more, no slab overlaps the next, no label spills',
-          fin.x - gen.r >= 4 && overlaps.length === 0 && spill.length === 0 && kept,
-          'gen ends ' + gen.r.toFixed(1) + ', finish starts ' + fin.x.toFixed(1) +
+              ' Export ends inside the window, no slab overlaps the next, no label spills',
+          last.r <= edge + 0.5 && overlaps.length === 0 && spill.length === 0 && kept,
+          'export ends ' + last.r.toFixed(1) + ' of ' + edge +
           (overlaps.length ? ', overlapping: ' + overlaps.join(' ') : '') +
           (spill.length ? ', spilling: ' + spill.join(' ') : '') +
           (r.some(b => b.cut) ? ', cut: ' + r.filter(b => b.cut).map(b => b.id.replace(/^(menu|btn)-/, '')).join(' ') : ''));
@@ -176,20 +180,23 @@ withApp(async (page, logs) => {
   }
 
   /* A narrow window (900 px and under) keeps the whole viewport: the column
-     is not cut off at a squashed viewport's edge, and Pack - the last slab -
-     can be clicked. */
+     is not cut off at a squashed viewport's edge, and its last slab - the
+     target in the view row - and Plate under Export can be clicked. */
   for (const h of [820, 720]) {
     await page.setViewportSize({ width: 900, height: h });
     await page.waitForTimeout(150);
     const r = await page.evaluate(() => {
       const v = document.querySelector('.viewport-section').getBoundingClientRect();
-      const s = document.querySelector('#menu-pack > summary').getBoundingClientRect();
-      const hit = document.elementFromPoint(s.left + s.width / 2, s.top + s.height / 2);
+      const hits = sel => {
+        const s = document.querySelector(sel).getBoundingClientRect();
+        const hit = document.elementFromPoint(s.left + s.width / 2, s.top + s.height / 2);
+        return !!(hit && hit.closest(sel)) && s.bottom <= innerHeight;
+      };
       return { vBottom: v.bottom, H: innerHeight, vW: v.width, W: innerWidth,
-               packBottom: s.bottom, packHit: !!(hit && hit.closest('#menu-pack')) };
+               lastHit: hits('#btn-frame-view'), plateHit: hits('#menu-plates > summary') };
     });
-    check('at 900x' + h + ' the viewport fills the window and Pack is clickable',
-      Math.abs(r.vBottom - r.H) < 0.5 && Math.abs(r.vW - r.W) < 0.5 && r.packHit, JSON.stringify(r));
+    check('at 900x' + h + ' the viewport fills the window; the column\'s last slab and Plate are clickable',
+      Math.abs(r.vBottom - r.H) < 0.5 && Math.abs(r.vW - r.W) < 0.5 && r.lastHit && r.plateHit, JSON.stringify(r));
   }
   await page.setViewportSize({ width: 1500, height: 820 });
   await page.waitForTimeout(150);
@@ -201,16 +208,16 @@ withApp(async (page, logs) => {
       const s = document.querySelector('#' + id + ' > summary');
       const cs = getComputedStyle(s);
       const after = getComputedStyle(s, '::after').content;
-      return { id, h: s.getBoundingClientRect().height, rad: cs.borderTopLeftRadius,
+      return { id, col: !!s.closest('.vp-shell-col'), h: s.getBoundingClientRect().height, rad: cs.borderTopLeftRadius,
                tt: cs.textTransform, fw: cs.fontWeight, fs: cs.fontSize,
                ls: parseFloat(cs.letterSpacing) / parseFloat(cs.fontSize),
                blur: (cs.backdropFilter || cs.webkitBackdropFilter || ''), after,
                font: cs.fontFamily };
     }), MENUS);
-    const off = r.filter(x => Math.abs(x.h - 36) > 0.5 || x.rad !== '9px' || x.tt !== 'uppercase' ||
+    const off = r.filter(x => Math.abs(x.h - (x.col ? 32 : 36)) > 0.5 || x.rad !== '9px' || x.tt !== 'uppercase' ||
                               x.fw !== '500' || x.fs !== '11.5px' || Math.abs(x.ls - 0.16) > 0.01 ||
                               !/blur/.test(x.blur));
-    check('every drop-down button: 36 px, radius 9, caps, 500, 11.5 px, 0.16em, blurred glass',
+    check('every drop-down button: 36 px in the row, 32 px in the column (a 36 px pitch), radius 9, caps, 500, 11.5 px, 0.16em, blurred glass',
       off.length === 0, off.length ? JSON.stringify(off[0]) : r.length + ' buttons');
     const arrows = r.filter(x => x.after !== 'none' && x.after !== 'normal');
     check('no drop-down arrow on any of them', arrows.length === 0,
@@ -280,16 +287,16 @@ withApp(async (page, logs) => {
         document.querySelectorAll('.vp-menu').forEach(d => { d.open = false; });
         const d = document.getElementById(id);
         d.open = true;
-        /* At its tallest: every group inside it open too (Finish's six,
-           Gen+'s three - one at a time there, so each in turn). */
+        /* At its tallest: each menu held inside it open too, one at a time
+           (Gen+'s four, Join's two, Plate's three), so each in turn. */
         const groups = [...d.querySelectorAll('details')];
-        const variants = d.id === 'menu-gen' ? groups.map(g => [g]) : [groups];
+        const variants = groups.length ? groups.map(g => [g]) : [groups];
         variants.forEach(v => {
           groups.forEach(g => { g.open = false; });
           v.forEach(g => { g.open = true; });
           const body = d.querySelector(':scope > .vp-menu-body');
           const b = body.getBoundingClientRect();
-          out.push({ id: id + (v.length === 1 && d.id === 'menu-gen' ? ':' + v[0].className.split(' ').pop() : ''),
+          out.push({ id: id + (v.length === 1 ? ':' + (v[0].id || v[0].className.split(' ').pop()) : ''),
                      l: b.left, t: b.top, r: b.right, b: b.bottom,
                      scroll: body.scrollHeight > body.clientHeight + 1,
                      ok: b.left >= 0 && b.top >= 0 && b.right <= innerWidth && b.bottom <= innerHeight });
@@ -297,7 +304,6 @@ withApp(async (page, logs) => {
         groups.forEach(g => { g.open = false; });
         d.open = false;
       });
-      document.querySelectorAll('.vp-finish-menu .vp-sec[data-sec="shape"]').forEach(g => { g.open = true; });
       return out;
     }, MENUS);
     const bad = r.filter(x => !x.ok);
@@ -318,11 +324,11 @@ withApp(async (page, logs) => {
     await page.click('#model-list .model-item .name');
     await page.waitForTimeout(150);
     const r = await page.evaluate(() => ({
-      open: document.getElementById('menu-pieces').open,
+      open: document.getElementById('menu-pieces').open && document.getElementById('menu-plates').open,
       n: document.querySelectorAll('.vp-menu[open]').length,
       picked: state.editId
     }));
-    check('the Pieces panel stays open after a row is clicked', r.open && r.n === 1 && r.picked != null,
+    check('the Pieces panel (inside Plate) stays open after a row is clicked', r.open && r.n === 2 && r.picked != null,
       JSON.stringify(r));
   }
 
@@ -345,34 +351,25 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 9 */
-  console.log('\n=== 9. KNOWN, NOT FIXED: the column meets the bottom-left tools ===');
+  console.log('\n=== 9. the column fits the viewport, the view row under it ===');
   {
-    /* Flagged with the shell, deliberately left as it is: on a short window
-       the left column runs down into the tool column at the bottom-left
-       (Undo, Frame, X-ray, G-scope, Watch) and, being on top, takes their
-       clicks. Pinned here so it cannot get worse unseen, and so whoever
-       fixes it sees this gate go stale. */
-    const collides = async (h) => {
+    /* Until shell v2 the column ran into the bottom-left tool strip below
+       about 795 px of window height. The strip is gone - its buttons are the
+       column's G-scope and the view row pinned under it - so the column must
+       now clear the view row and end inside the viewport at every height down
+       to 720 (the narrow fallback's short window). */
+    for (const h of [720, 768, 800, 900]) {
       await page.setViewportSize({ width: 1280, height: h });
-      await page.waitForTimeout(60);
-      return page.evaluate(() => {
-        const col = [...document.querySelectorAll('.vp-shell-col > .vp-shell-menu > summary')]
-          .map(e => e.getBoundingClientRect());
-        return ['btn-undo', 'btn-frame-view', 'btn-xray', 'btn-microscope', 'btn-watch']
-          .map(id => document.getElementById(id)).filter(Boolean)
-          .some(t => { const r = t.getBoundingClientRect();
-            return col.some(c => Math.min(c.right, r.right) > Math.max(c.left, r.left) &&
-                                 Math.min(c.bottom, r.bottom) > Math.max(c.top, r.top)); });
+      await page.waitForTimeout(80);
+      const r = await page.evaluate(() => {
+        const last = document.getElementById('btn-microscope').getBoundingClientRect();
+        const view = document.querySelector('.vp-shell-view').getBoundingClientRect();
+        const vp = document.getElementById('viewport').getBoundingClientRect();
+        return { lastBottom: last.bottom, viewTop: view.top, viewBottom: view.bottom, vpBottom: vp.bottom };
       });
-    };
-    let lo = 600, hi = 1000;                     // lo collides, hi does not
-    const okEnds = (await collides(lo)) && !(await collides(hi));
-    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (await collides(m)) lo = m; else hi = m; }
-    // The 1280 x 800 floor: the column must clear the tools at 800 tall.
-    // Eleven slabs since Crop got its own card, on a 4 px column gap (and a
-    // 4 px gap between the tools): clear from about 795.
-    check('the collision starts below 800 px of window height (the 1280 x 800 floor holds)',
-      okEnds && hi >= 770 && hi <= 800, okEnds ? 'clear from ' + hi + ' px tall' : 'not bracketed by 600..1000');
+      check('at 1280x' + h + ' the column clears the view row and the view row ends inside the viewport',
+        r.lastBottom <= r.viewTop - 4 && r.viewBottom <= r.vpBottom, JSON.stringify(r));
+    }
     await page.setViewportSize({ width: 1500, height: 820 });
   }
 

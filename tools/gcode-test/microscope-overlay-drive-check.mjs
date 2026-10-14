@@ -138,21 +138,19 @@ async function main() {
   // =======================================================================
   // The interaction this feature was asked to copy, stated as a check so a
   // change to either side shows up here.
-  const rail = await page.evaluate(() => {
-    const ids = ['btn-xray', 'btn-microscope'];
-    return ids.map((id) => {
-      const el = document.getElementById(id);
-      const r = el.getBoundingClientRect();
-      return { id, cls: el.className, x: Math.round(r.left), w: Math.round(r.width) };
-    });
-  });
-  check('both are rail buttons in the same column (G-scope sized for its two glyphs)',
-    rail.map((b) => b.cls), ['viewport-tool-btn', 'viewport-tool-btn btn-gscope']);
-  check('and the same width, in the same left-hand rail',
-    [rail[0].x === rail[1].x, rail[0].w === rail[1].w], [true, true]);
-  check('X-ray takes no file and asks for none - the next control is G-scope itself',
-    await page.evaluate(() => document.getElementById('btn-xray').nextElementSibling.id),
-    'btn-microscope');
+  // Shell v2: the rail is gone. Both are in the left column now - G-scope a
+  // slab of the print group, X-ray the X in the view row pinned under it.
+  const rail = await page.evaluate(() => ['btn-xray', 'btn-microscope'].map((id) => {
+    const el = document.getElementById(id);
+    return { id, col: !!el.closest('.vp-shell-col'), slab: el.classList.contains('vp-bar-btn') };
+  }));
+  check('both are buttons in the shell\'s left column',
+    rail.map((b) => b.col && b.slab), [true, true]);
+  check('X-ray takes no file and asks for none - it is a plain toggle, no file input beside it',
+    await page.evaluate(() => {
+      const x = document.getElementById('btn-xray');
+      return !x.closest('.vp-shell-view').querySelector('input[type=file]');
+    }), true);
 
   // =======================================================================
   console.log('\n--- a piece with no G-code anywhere near it ---');

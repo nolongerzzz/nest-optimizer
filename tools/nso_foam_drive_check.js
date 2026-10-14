@@ -103,14 +103,15 @@ withApp(async (page, logs) => {
   console.log('\n=== 1. the button ===');
   const b = await page.evaluate(() => {
     const f = document.getElementById('btn-foam'), fill = document.getElementById('btn-fill');
-    let sec = f; while (sec && !(sec.classList && sec.classList.contains('vp-sec'))) sec = sec.parentElement;
+    // Shell v2: Finish's Shape group is the column's Shape menu (data-sec kept).
+    const sec = f && f.closest('[data-sec]');
     return { present: !!f, text: f && f.textContent.trim(), wired: !!f && f.dataset.nsoWired === '1',
              besideFill: !!f && !!fill && f.parentElement === fill.parentElement,
-             group: sec && sec.dataset.sec, inFinish: !!f && !!f.closest('.vp-finish-menu'),
+             group: sec && sec.dataset.sec, inShape: !!f && !!f.closest('#menu-shape'),
              panelHidden: document.getElementById('foam-panel').hidden };
   });
   check('#btn-foam present, labelled "Foam"', b.present && b.text === 'Foam', b.text);
-  check('...in Finish, in the Shape group, in Fill / Densify\'s row', b.inFinish && b.group === 'shape' && b.besideFill,
+  check('...in the Shape menu, in Fill / Densify\'s row', b.inShape && b.group === 'shape' && b.besideFill,
         'group ' + b.group);
   check('...wired at load; its panel hidden until it is on', b.wired && b.panelHidden);
 

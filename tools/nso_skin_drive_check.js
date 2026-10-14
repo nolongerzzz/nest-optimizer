@@ -121,9 +121,12 @@ withApp(async (page, logs) => {
   check('Finish tab has Skin face + pattern select; Seat drop-down has Seat flush + Seat (support) + gap slider', present.skin && present.sel && present.gap && present.seat, JSON.stringify(present));
   const where = await page.evaluate(() => ({
     skinInFinish: !!document.querySelector('.vp-finish #btn-skin-face'), selInFinish: !!document.querySelector('.vp-finish #skin-pattern'),
-    capInFinish: !!document.querySelector('.vp-finish #btn-cap-open'), noneInJoin: ['btn-skin-face', 'skin-pattern', 'btn-cap-open'].every(id => { const e = document.getElementById(id); return !!e && !e.closest('.vp-col-menu'); })
+    capInFinish: !!document.querySelector('.vp-finish #btn-cap-open'), noneInJoin: ['btn-skin-face', 'skin-pattern', 'btn-cap-open'].every(id => { const e = document.getElementById(id); return !!e && !e.closest('#menu-joins, #menu-align, #menu-seat, #menu-bit'); })
   }));
-  check('Skin face, pattern select and Cap open faces live in the Finish tab, not the Join drop-downs', where.skinInFinish && where.selInFinish && where.capInFinish && where.noneInJoin, JSON.stringify(where));
+  // Shell v2: Finish's sections are the column's Surface and Check & repair
+  // menus (their bodies keep the .vp-finish class); the Join drop-downs are
+  // Join, Align, Seat and Subtract.
+  check('Skin face, pattern select and Cap open faces live in the Finish-era menus, not the Join drop-downs', where.skinInFinish && where.selInFinish && where.capInFinish && where.noneInJoin, JSON.stringify(where));
   check('nso_skin.js and app-skin.js loaded, button listener attached', present.module && present.appSkin && present.wired);
   check('pattern select offers crosshatch / crosshatch-fine / zigzag / ring',
     JSON.stringify(present.options) === '["crosshatch","crosshatch-fine","zigzag","ring"]', present.options.join(','));

@@ -458,8 +458,11 @@ console.log('\n=== 9. reachability, paint scope, and what is NOT in scope ===');
   check('  ...labelled exactly "Texture"', />Texture<\/button>/.test(html));
   check('  ...with its pattern select and both numbers',
         /id="sel-texture-pattern"/.test(html) && /id="inp-texture-pitch"/.test(html) && /id="inp-texture-depth"/.test(html));
-  const finish = html.slice(html.indexOf('vp-menu-body vp-finish'), html.indexOf('viewport-overlay-bl'));
-  check('  ...in the Finish card, with the other skin rows', /id="btn-texture"/.test(finish));
+  // Shell v2: the Surface menu, which was Finish's Surface section.
+  const surfaceAt = html.indexOf('id="menu-surface"');
+  const surface = surfaceAt < 0 ? '' : html.slice(surfaceAt, html.indexOf('</details>', surfaceAt));
+  check('  ...in the Surface card, with the other skin rows',
+        /id="btn-texture"/.test(surface) && /id="btn-skin-face"/.test(surface));
   check('  ...and the engine and the wiring are both loaded',
         /nso_skin_band\.js\?v=/.test(html) && /app-texture\.js\?v=/.test(html));
 
