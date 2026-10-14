@@ -490,6 +490,34 @@ console.log('\n== 7. paint scope: sub-region, both halves ==');
      (brushOnly.length / 3) + ' brush vert(s) vs ' + (pts.length / 3) + ' with the band');
 }
 
+/* =======================================================================
+   8. The 1 mm brush
+
+   The Size slider on the Sculpt card goes down to 1 mm. Its floor is read
+   from index.html, and a 1 mm dab is run through the same canonical gates
+   as the three cases above: on the 20mm box it lands where no vertex is, so
+   refinement has to go down to its edge length for it to move anything.
+   ======================================================================= */
+console.log('\n== 8. the 1 mm brush ==');
+{
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const tag = /<input\b[^>]*\bid="inp-brush-size"[^>]*>/.exec(html);
+  const attr = k => { const m = tag && new RegExp('\\b' + k + '="([^"]*)"').exec(tag[0]); return m ? m[1] : null; };
+  ok(!!tag && attr('type') === 'range' && attr('min') === '1' && attr('step') === '1',
+     'the Size slider is the same range slider, its floor 1 mm',
+     tag ? 'min ' + attr('min') + ', max ' + attr('max') + ', step ' + attr('step') : 'no #inp-brush-size');
+
+  const one = runCase('1mm', 'box-20mm.stl', {
+    stamps: raw => [faceCentreStamp(raw, 2, 1, 'soft')],
+    apply: { mode: 'carve', intensity: 0.6 }
+  });
+  ok(one.ok, '1mm: the stroke committed', one.ok ? '' : one.reason);
+  ok(one.ok && one.refine.target <= 1, '1mm: refined to an edge no longer than the radius',
+     one.ok ? 'target ' + one.refine.target.toFixed(3) + 'mm' : '');
+  ok(one.ok && one.maxMove > 0 && one.maxMove <= 1 + 1e-9, '1mm: the dab moved the surface, by no more than its radius',
+     one.ok ? 'max move ' + one.maxMove.toFixed(3) + 'mm' : '');
+}
+
 /* ---------------------------------------------------------------- summary */
 try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (e) {}
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
