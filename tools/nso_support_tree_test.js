@@ -1,6 +1,16 @@
 #!/usr/bin/env node
 // Headless self-test for nso_support_tree.js: the contact points an overhang
-// actually needs, where the trunk stops, and the fan it hands off to.
+// actually needs, the branch and gecko-hand primitives, the refusals, and the
+// union - with planTree now the grid-pack planner (nso_support_gridpack.js).
+//
+// CHANGED with the grid-pack planner (docs/SUPPORT-GRIDPACK.md). Sections 2
+// (the split point), 3 (the fan of branches), 4 (the rails on a branch) and
+// 5 (the contact on the trunk's axis) pinned the trunk-first planSolid, which
+// is replaced: splitPoint is gone with it. They are rewritten below to ask
+// the same questions of the planner that replaced it - every contact held,
+// the rails (not just the axis) tested, the gecko style changing only the
+// tips - and section 8 still unions every plan through the shipped kernel
+// and writes what tools/nso_support_tree_canonical_check.js validates.
 //
 //   node tools/nso_support_tree_test.js      exit 0 = every gate held
 //
@@ -14,10 +24,7 @@
 // tools/nso_support_tree_canonical_check.js, which puts the same solids
 // through tools/mesh_validate.py.
 //
-// The numbers worth reading are the exact ones. "the widest branch leans
-// 31.43 deg" is the measured angle of the measured branch, not a rounded
-// restatement of the limit, and the contact counts are counted rather than
-// predicted.
+// The contact counts are counted rather than predicted.
 
 const fs = require('fs');
 const path = require('path');
@@ -35,21 +42,17 @@ const ctx = {
 vm.createContext(ctx);
 for (const f of ['nso_thickness.js', 'nso_seat_surface.js', 'app-sculpt.js',
                  'app-extend.js', 'nso_support_beacons.js', 'nso_support_aim.js', 'nso_path_sweep.js',
-                 'nso_support_tree.js']) {
+                 'nso_support_tree.js', 'nso_support_gridpack.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
-/* THIS SUITE PINS THE SQUARE SECTION. The shipped default is now 'round'
-   (tapered by the measured diameter law - see nso_support_tree.js,
-   SECTIONS, and tools/nso_support_tree_round_check.js, which covers it).
-   Everything here - 16-triangle branches, side^2 x length volumes, the
-   square cap's overshoot bound - is a fact about the square section, so it
-   is asked of the square section by name, in one place, rather than
-   quietly re-pointed at a different solid. */
+/* branch() is asked of the SQUARE section by name: its 16-triangle and
+   side^2 x length facts are about that section. The planner's members are
+   square anyway (docs/SUPPORT-GRIDPACK.md). */
 const ST_SHIPPED = ctx.NSO_SupportTree;
 const ST = Object.assign({}, ST_SHIPPED, {
-  planTree: (h, o) => ST_SHIPPED.planTree(h, Object.assign({ section: 'square' }, o)),
   branch: (a, b, o) => ST_SHIPPED.branch(a, b, Object.assign({ section: 'square' }, o))
 });
+const GP = ctx.NSO_SupportGridpack;
 const SA = ctx.NSO_SupportAim;
 const PS = ctx.NSO_PathSweep;
 
@@ -167,192 +170,77 @@ const regSHELF = detSHELF.regions[0];
     !noRegion.ok && /detectOverhangs/.test(noRegion.reason), noRegion.reason);
 }
 
-console.log('\n=== 2. THE SPLIT POINT: as high as the fan allows, and no higher ===');
+
+console.log('\n=== 2. THE PLAN: every contact held, every member to the plate ===');
 
 const planSHELF = ST.planTree(SHELF, { skipList: [] });
 {
-  check('the shelf plans a tree', planSHELF.ok, planSHELF.reason);
-
-  const sp = planSHELF.split;
-  check('the widest branch is AT the limit, which is what "as high as it can" means',
-    sp.widestDeg <= ST.BRANCH_TILT_DEG + 1e-9 &&
-    sp.widestDeg >= ST.BRANCH_TILT_DEG - 2 * sp.splitResolutionMm,
-    `widest ${sp.widestDeg.toFixed(4)} deg, limit ${ST.BRANCH_TILT_DEG}, ` +
-    `scan resolution ${sp.splitResolutionMm.toFixed(6)} mm`);
-
-  /* One station higher and the fan is outside the limit. That is the gate
-     that says the scan found the top of the feasible range rather than any
-     old feasible point. */
-  const higher = ST.splitPoint(planSHELF.base.from, planSHELF.apex, planSHELF.contacts.points,
-    { stations: 4096 });
-  check('a finer scan lands on the same split to within its own resolution',
-    near(higher.trunkMm, sp.trunkMm, sp.splitResolutionMm + higher.splitResolutionMm),
-    `${sp.trunkMm.toFixed(6)} mm at ${sp.splitResolutionMm.toFixed(6)} mm vs ` +
-    `${higher.trunkMm.toFixed(6)} mm at ${higher.splitResolutionMm.toFixed(6)} mm`);
-
-  check('the split point reports where it is on the trunk line, as a fraction',
-    sp.trunkFraction > 0 && sp.trunkFraction < 1,
-    `${(sp.trunkFraction * 100).toFixed(1)}% of ${sp.apexMm.toFixed(3)} mm`);
-
-  /* The ceiling is nso_support_aim.js's own printable angle, read from it. */
-  const past = ST.splitPoint(planSHELF.base.from, planSHELF.apex, planSHELF.contacts.points,
-    { branchTiltDeg: 46 });
-  check('a tilt past the printable angle is refused by name, not clamped',
-    !past.ok && /printable angle/.test(past.reason), past.reason);
-  check('the ceiling is read from nso_support_aim.js rather than restated here',
-    past.reason.indexOf(String(SA.ANGLE_DEFAULT_DEG)) >= 0, `${SA.ANGLE_DEFAULT_DEG} deg`);
-}
-
-{
-  /* The 20 x 10 cantilever at 16 mm is wider than one trunk can fan to. That
-     is the right answer and the reference agrees with it - the real 70 mm
-     tabletop used 36 trunks - so the refusal names the number instead of
-     going quiet. */
+  check('planTree is the grid-pack planner', planSHELF.planner === 'gridpack' && planSHELF.ok, planSHELF.reason);
+  check('its support points are the contact points of section 1, in the same count',
+    planSHELF.beacons.length === 16, `${planSHELF.beacons.length}`);
+  check('every one is held, on trunks that all land on the plate',
+    planSHELF.held === 16 && planSHELF.trunks.every(t => t.landing === 'plate'), planSHELF.reason);
+  /* Where the trunk-first planner refused the 20 x 10 cantilever (one trunk
+     could not serve that fan), the grid-pack planner holds it. */
   const r = ST.planTree(CANTILEVER, { skipList: [] });
-  check('a fan too wide for one trunk is refused, at the split stage',
-    !r.ok && r.stage === 'split' && /cannot serve this fan/.test(r.reason), r.reason);
-  check('the refusal says how many trunks the region would take',
-    r.trunksNeeded >= 2, `${r.trunksNeeded} trunks`);
-
-  /* Same arm, 6 mm more rise, and the same fan now fits. Nothing about the
-     region changed but the height it hangs at, which is the quantity the
-     tilt bound is actually about. */
+  check('the cantilever the trunk-first planner refused is held now', r.ok && r.held === r.beacons.length, r.reason);
   const t = ST.planTree(TALL, { skipList: [] });
-  check('the same 20 x 10 arm carried 6 mm higher plans a tree',
-    t.ok && t.branches.length === 28, t.ok ? `${t.branches.length} branches` : t.reason);
+  check('the tall arm: all 28 contacts held', t.ok && t.held === 28, t.reason);
 }
 
-console.log('\n=== 3. THE BRANCHES: one per contact, on the trunk\'s own cross-section ===');
-
+console.log('\n=== 3. ONE STRUT PER CONTACT, ON THE STRUT\'S OWN SECTION ===');
 {
   const p = planSHELF;
-  check('one branch per contact point, none left over',
-    p.branches.length + p.blocked.length + (p.trunkCarriesContact >= 0 ? 1 : 0) ===
-      p.contacts.points.length,
-    `${p.branches.length} built, ${p.blocked.length} blocked, ` +
-    `${p.contacts.points.length} contacts`);
-
-  check('every branch ends exactly on its own contact point',
-    p.branches.every(b => {
-      const q = p.contacts.points[b.contactIndex].p;
-      return Math.hypot(b.tip[0] - q[0], b.tip[1] - q[1], b.tip[2] - q[2]) < 1e-5;
-    }), `${p.branches.length} branches`);
-
-  check('no two branches end on the same contact',
-    new Set(p.branches.map(b => b.contactIndex)).size === p.branches.length,
-    `${new Set(p.branches.map(b => b.contactIndex)).size} distinct contacts`);
-
-  check('every branch carries the trunk\'s cross-section, to the millimetre it was floored at',
-    p.branches.every(b => b.sideMm === p.trunk.sideMm),
-    `side ${p.trunk.sideMm} mm, floor ${p.trunk.floorMm} mm`);
-
-  check('every branch is inside the tilt the split point was computed for',
-    p.branches.every(b => b.tiltDeg <= ST.BRANCH_TILT_DEG + 1e-9),
-    `${p.tiltDeg.min.toFixed(2)} .. ${p.tiltDeg.max.toFixed(2)} deg off vertical`);
-
-  /* The sweep's own evidence, per branch: one segment, no joints, so the
-     mitre never ran and the seam gate had nothing to measure. */
-  check('each branch is ONE segment - the mitre arithmetic never runs',
-    p.branches.every(b => b.sweep.stats.rings === 2 && b.sweep.stats.maxTurnDeg === 0),
-    `${p.branches[0].sweep.stats.rings} rings, max turn ${p.branches[0].sweep.stats.maxTurnDeg} deg`);
-
-  /* 2 x M per segment for the walls and M per cap, M = 4 for a square: the
-     sweep fans each cap from the path endpoint rather than splitting it in
-     two, which is what lets the endpoint be inside its own ring. */
-  check('each branch is 16 triangles: 2 x 4 wall, 4 + 4 cap fans',
-    p.branches.every(b => b.soup.length / 9 === 16), `${p.branches[0].soup.length / 9}`);
-
-  /* The flat cap overshoot, bracketed by its own closed form. The cap is a
-     square perpendicular to the branch; whichever way the sweep's frame put
-     it about the axis, the extreme point is between the edge midpoint
-     (side/2) and the corner (side/sqrt(2)) out. nso_support_aim.js pins the
-     edge-midpoint case exactly for the strut; here the frame comes from
-     NSO_PathSweep's transport, so the bracket is the honest statement. */
-  let bracketed = 0;
-  for (const b of p.branches) {
-    const s = Math.sin(b.tiltDeg * Math.PI / 180);      /* the region's normal is -Z */
-    const lo = (b.sideMm / 2) * s - 1e-6;
-    const hi = (b.sideMm / Math.SQRT2) * s + 1e-6;
-    if (b.tipPenetrationMm >= lo && b.tipPenetrationMm <= hi) bracketed++;
-  }
-  check('every branch\'s cap overshoot is inside [side/2, side/sqrt(2)] x sin(tilt)',
-    bracketed === p.branches.length,
-    `${bracketed} of ${p.branches.length}, worst ${p.worstTipPenetrationMm.toFixed(6)} mm`);
+  const starts = p.members.filter(m => m.kind === 'beacon' || m.kind === 'side');
+  check('one member starts at each contact, and no contact twice',
+    starts.length === 16 && new Set(starts.map(m => m.beacon)).size === 16, `${starts.length} members`);
+  check('a single contact\'s strut is buildStrut\'s side, never under the floor',
+    starts.every(m => m.side === p.sideMm) && p.sideMm >= p.floorMm, `${p.sideMm} mm, floor ${p.floorMm} mm`);
+  const lean = Math.max(...p.members.map(m => {
+    let w = 0;
+    for (let i = 0; i + 1 < m.path.length; i++) {
+      const a = m.path[i], b = m.path[i + 1];
+      w = Math.max(w, Math.atan2(Math.hypot(b[0] - a[0], b[1] - a[1]), Math.abs(b[2] - a[2])) * 180 / Math.PI);
+    }
+    return w;
+  }));
+  check('no leg leans past the branch limit', lean <= ST.BRANCH_TILT_DEG + 1e-9,
+    `${lean.toFixed(2)} deg against ${ST.BRANCH_TILT_DEG}`);
+  const single = ST.planTree(TINY, { skipList: [] });
+  /* 1 mm from the post: the strut's rails (its circumscribed circle plus
+     CLEAR_MM) would graze the post, so it leans away once, then drops. */
+  const sm = single.members[0], foot = sm.path[sm.path.length - 1];
+  check('a region one contact wide is one strut - one member, one trunk - to the plate, clear of the post',
+    single.ok && single.members.length === 1 && single.trunks.length === 1 && foot[2] === single.plateZ &&
+    sm.path.every(q => q[0] - 10 >= sm.side / Math.SQRT2 + GP.CLEAR_MM - 1e-9 || q === sm.path[0]),
+    single.reason + `; ${sm.path.length - 1} leg(s)` + (single.steered.length ? ', leaning off the post first' : ''));
 }
 
 console.log('\n=== 4. THE RAILS CATCH WHAT THE CENTRE LINE MISSES ===');
-
 {
-  /* A branch threading a gap narrower than itself: clear down the centre
-     line, solid through the wall. Built AROUND a branch this planner really
-     produced - a horizontal plate across it with a 0.8 mm square window
-     centred exactly on its axis. The axis goes through the window; the rails,
-     0.6 mm out, do not. This is the case the axis-only test cannot see, and
-     it is why the clearance probe casts the rails as well. */
-  const base = planSHELF;
-  const b0 = base.branches[base.branches.length - 1];
-  const tMid = b0.lengthMm / 2;
-  const M = [b0.from[0] + b0.dir[0] * tMid,
-             b0.from[1] + b0.dir[1] * tMid,
-             b0.from[2] + b0.dir[2] * tMid];
-  /* The plate is only 3 mm across, so it sits in this one branch's way and
-     nowhere near the trunk's own line - a wall big enough to block the trunk
-     would be testing nearestBase instead. */
-  const halfWin = 0.4, zLo = M[2] - 0.25, zHi = M[2] + 0.25, R = 1.5;
+  /* A 0.5 mm plate under the tiny tab's strut with a 0.8 mm square window
+     centred exactly on its axis: the axis goes clean through, the 1.2 mm
+     strut does not - so the planner must not send it through the window. */
+  const s0 = ST.planTree(TINY, { skipList: [] }).members[0].path[0];
+  const z = 6, h = 0.4, R = 3;
   const WALL = soupOf(
-    box([M[0] - R, M[1] - R, zLo], [M[0] + R, M[1] - halfWin, zHi]),
-    box([M[0] - R, M[1] + halfWin, zLo], [M[0] + R, M[1] + R, zHi]),
-    box([M[0] - R, M[1] - halfWin, zLo], [M[0] - halfWin, M[1] + halfWin, zHi]),
-    box([M[0] + halfWin, M[1] - halfWin, zLo], [M[0] + R, M[1] + halfWin, zHi]));
-
-  const axisHit = SA._nearestHit([WALL], b0.from, b0.dir, 1e-3, b0.lengthMm - 1e-3);
-  check('the centre line goes clean through the 0.8 mm window',
-    axisHit < 0, `axis hit ${axisHit}`);
-
-  const p = ST.planTree(SHELF, { skipList: [], obstacles: [SHELF, WALL] });
-  check('the plan still stands with the wall in the way', p.ok, p.reason);
-  const stopped = p.blocked.filter(x => /^rail /.test(x.why));
-  check('but branches whose rails meet the plate are refused, by rail and by distance',
-    stopped.length > 0,
-    stopped.slice(0, 2).map(x => `#${x.index}: ${x.why}`).join(' | ') ||
-      'none blocked - the window let the whole branch through');
-  check('and the contact that was threading the window is one of them',
-    p.blocked.some(x => x.index === b0.contactIndex),
-    `blocked contacts: ${p.blocked.map(x => x.index).join(', ')}`);
-}
-
-console.log('\n=== 5. A CONTACT ON THE TRUNK\'S AXIS IS THE TRUNK\'S ===');
-
-{
-  const p = ST.planTree(TAB, { skipList: [] });
-  check('the centre contact is carried by the trunk, not built as a branch',
-    p.trunkCarriesContact >= 0 &&
-    !p.branches.some(b => b.contactIndex === p.trunkCarriesContact),
-    `contact #${p.trunkCarriesContact}`);
-
-  check('the trunk therefore grows past its split point, to that contact',
-    p.trunk.lengthMm > p.split.trunkMm + 1e-6,
-    `trunk ${p.trunk.lengthMm.toFixed(3)} mm, split at ${p.split.trunkMm.toFixed(3)} mm`);
-
-  check('and it ends on the contact itself',
-    Math.abs(p.trunk.tip[2] - p.contacts.points[p.trunkCarriesContact].p[2]) < 1e-4,
-    `tip z ${p.trunk.tip[2].toFixed(5)}, contact z ` +
-    `${p.contacts.points[p.trunkCarriesContact].p[2].toFixed(5)}`);
-
-  check('the lattice on an 8 mm region is 3 x 3, so a site lands on the aim',
-    p.contacts.latticeNx === 3 && p.contacts.latticeNy === 3 && p.contacts.points.length === 9,
-    `${p.contacts.latticeNx} x ${p.contacts.latticeNy}, ${p.contacts.points.length} contacts`);
-
-  check('the single-contact region needs no split at all: it IS the straight strut',
-    (() => { const t = ST.planTree(TINY, { skipList: [] });
-             return t.ok && t.single === true && t.branches.length === 0 && t.parts.length === 1; })(),
-    ST.describe(ST.planTree(TINY, { skipList: [] })));
+    box([s0[0] - R, s0[1] - R, z], [s0[0] + R, s0[1] - h, z + 0.5]),
+    box([s0[0] - R, s0[1] + h, z], [s0[0] + R, s0[1] + R, z + 0.5]),
+    box([s0[0] - R, s0[1] - h, z], [s0[0] - h, s0[1] + h, z + 0.5]),
+    box([s0[0] + h, s0[1] - h, z], [s0[0] + R, s0[1] + h, z + 0.5]));
+  check('the axis alone reads the window clear',
+    SA.lineBlockedAt([TINY, WALL], s0, [0, 0, -1], s0[2]) === -1);
+  const p = ST.planTree(TINY, { skipList: [], occluders: [WALL] });
+  const m = p.members[0];
+  const through = m.path.some((q, i) => i + 1 < m.path.length && Math.abs(q[0] - s0[0]) < 1e-9 && Math.abs(q[1] - s0[1]) < 1e-9 &&
+    Math.abs(m.path[i + 1][0] - s0[0]) < 1e-9 && m.path[i + 1][2] < z);
+  check('the rails see the window too narrow: the strut does not go through it',
+    p.ok && !through, p.reason + (p.steered.length ? `; steered to [${p.steered[0].to.map(v => v.toFixed(2))}]` : ''));
 }
 
 console.log('\n=== 6. WHAT IT REFUSES TO DO WITHOUT ===');
 
 {
-  const noSweep = ST.branch([0, 0, 0], [1, 1, 10], { sideMm: 1.2, pathSweep: null });
   const savedPS = ctx.NSO_PathSweep;
   ctx.NSO_PathSweep = undefined;
   const reallyNoSweep = ST.branch([0, 0, 0], [1, 1, 10], { sideMm: 1.2 });
@@ -365,7 +253,14 @@ console.log('\n=== 6. WHAT IT REFUSES TO DO WITHOUT ===');
   const noAim = ST.planTree(SHELF, { skipList: [] });
   ctx.NSO_SupportAim = savedSA;
   check('with no nso_support_aim.js the whole plan refuses rather than re-detecting',
-    !noAim.ok && /nso_support_aim\.js is not loaded/.test(noAim.reason), noAim.reason);
+    !noAim.ok && /nso_support_aim\.js/.test(noAim.reason), noAim.reason);
+
+  const savedGP = ctx.NSO_SupportGridpack;
+  ctx.NSO_SupportGridpack = undefined;
+  const noGP = ST.planTree(SHELF, { skipList: [] });
+  ctx.NSO_SupportGridpack = savedGP;
+  check('with no nso_support_gridpack.js planTree refuses by name - there is no second planner',
+    !noGP.ok && /nso_support_gridpack\.js/.test(noGP.reason), noGP.reason);
 
   check('a branch with no cross-section refuses rather than defaulting one',
     !ST.branch([0, 0, 0], [1, 1, 10], {}).ok,
@@ -388,147 +283,21 @@ for (const [name, host] of CASES) {
     before.equals(after), `${before.length} bytes`);
 }
 
-console.log('\n=== 7b. GECKO HAND: a different tip, and the same tree ===');
+console.log('\n=== 7b. GECKO HAND: a different tip, and the same plan ===');
 
-/* The 'gecko-hand' style may change what a contact's tip LOOKS like and
-   nothing else. So every number the default plan decides - the contacts,
-   the split, the trunk, each branch's root, heading, length and tilt, what
-   was refused - is compared here EXACTLY, not to a tolerance: the style is
-   read after all of it is settled, so any difference at all is a bug. */
 const sameVec = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
-const sameBytes = (a, b) => Buffer.from(new Float32Array(a).buffer)
-  .equals(Buffer.from(new Float32Array(b).buffer));
-
-function parity(name, host, extra) {
-  const base = Object.assign({ skipList: [] }, extra || {});
-  const d = ST.planTree(host, base);
-  const g = ST.planTree(host, Object.assign({}, base, { branchStyle: 'gecko-hand' }));
-  check(`${name}: both styles plan, or neither does`, d.ok === g.ok && d.ok,
-    `square: ${d.ok}, gecko-hand: ${g.ok}` + (g.ok ? '' : ' - ' + g.reason));
-  if (!d.ok || !g.ok) return null;
-
-  check(`${name}: the same contact points, count and placement, exactly`,
-    d.contacts.points.length === g.contacts.points.length &&
-    d.contacts.points.every((c, i) => sameVec(c.p, g.contacts.points[i].p) &&
-                                      c.source === g.contacts.points[i].source),
-    `${g.contacts.points.length} contacts, coverage ${g.contacts.coverageMm.toFixed(4)} mm`);
-
-  check(`${name}: the same trunk, byte for byte, from the same base to the same split`,
-    sameBytes(d.trunk.soup, g.trunk.soup) && sameVec(d.trunk.tip, g.trunk.tip) &&
-    (d.split ? d.split.trunkMm === g.split.trunkMm && sameVec(d.split.point, g.split.point)
-             : !g.split) &&
-    d.trunkCarriesContact === g.trunkCarriesContact,
-    d.split ? `split ${g.split.trunkMm.toFixed(6)} mm, trunk ${g.trunk.lengthMm.toFixed(6)} mm`
-            : `single strut, ${g.trunk.lengthMm.toFixed(6)} mm`);
-
-  check(`${name}: the same branches - count, contact, root, heading, length, tilt`,
-    d.branches.length === g.branches.length &&
-    d.branches.every((b, i) => {
-      const e = g.branches[i];
-      return b.contactIndex === e.contactIndex && sameVec(b.from, e.from) &&
-             sameVec(b.tip, e.tip) && sameVec(b.dir, e.dir) &&
-             b.lengthMm === e.lengthMm && b.tiltDeg === e.tiltDeg && b.sideMm === e.sideMm;
-    }),
-    `${g.branches.length} branches, ${g.tiltDeg ? g.tiltDeg.min.toFixed(2) + '..' +
-      g.tiltDeg.max.toFixed(2) + ' deg' : 'none'}`);
-
-  check(`${name}: the same contacts refused, for the same reasons`,
-    (d.blocked || []).length === (g.blocked || []).length &&
-    (d.blocked || []).every((b, i) => b.index === g.blocked[i].index && b.why === g.blocked[i].why),
-    `${(g.blocked || []).length} refused`);
-
-  check(`${name}: each shaft is the default branch byte for byte - the flat cap included`,
-    d.branches.every((b, i) => sameBytes(b.soup, g.branches[i].soup) &&
-                               b.tipPenetrationMm === g.branches[i].tipPenetrationMm),
-    `${g.branches.length} shafts`);
-
-  /* The fold is left to right, so the default's parts leading the list, in
-     the default's order, is what makes the default's union a prefix of this
-     one - see planTree, THE FINGERS GO ON AFTER EVERY SHAFT. */
-  check(`${name}: the default's parts lead the list, in the default's order`,
-    d.parts.every((p, i) => sameBytes(p, g.parts[i])) &&
-    g.parts.length === d.parts.length + g.fingers,
-    `${d.parts.length} default part(s), then ${g.fingers} finger(s)`);
-
-  /* Every contact point has a hand: each branch's, and the trunk's own when
-     it ends on one. */
-  const hands = g.branches.map(b => ({ hand: b.hand, end: b.tip }));
-  if (g.single || g.trunkCarriesContact >= 0) hands.push({ hand: g.trunkHand, end: g.trunk.tip });
-  const contactsHeld = g.branches.length + ((g.single || g.trunkCarriesContact >= 0) ? 1 : 0);
-  check(`${name}: one hand per contact point held, and no hand anywhere else`,
-    hands.length === contactsHeld && hands.every(h => h.hand && h.hand.ok) &&
-    (g.single || g.trunkCarriesContact >= 0 ? !!g.trunkHand : !g.trunkHand),
-    `${hands.length} hands over ${contactsHeld} contacts`);
-
-  let bad = [];
-  let kept = 0, dropped = 0;
-  for (const { hand, end } of hands) {
-    kept += hand.fingers.length; dropped += hand.dropped.length;
-    if (hand.fingers.length + hand.dropped.length !== ST.GECKO.FINGERS) bad.push('finger count');
-    if (!(hand.widthMm >= g.trunk.floorMm)) bad.push('width under the floor');
-    for (const f of hand.fingers) {
-      const r = [f.to[0] - end[0], f.to[1] - end[1], f.to[2] - end[2]];
-      const out = Math.hypot(r[0], r[1], r[2]);
-      const off = r[0] * hand.normal[0] + r[1] * hand.normal[1] + r[2] * hand.normal[2];
-      if (!near(out, hand.reachMm, 1e-9)) bad.push(`finger ${f.index} reaches ${out}`);
-      if (!near(off, 0, 1e-9)) bad.push(`finger ${f.index} is ${off} off the surface plane`);
-      if (!(f.sweep.stats.rings === 2 && f.sweep.stats.maxTurnDeg === 0)) bad.push('a finger with a joint');
-      if (f.soup.length / 9 !== 2 * 6 + 6 + 6) bad.push(`finger ${f.index} is ${f.soup.length / 9} tris`);
-    }
-  }
-  check(`${name}: every finger is one hexagonal segment, ending ON the surface plane at the reach`,
-    bad.length === 0,
-    bad.length ? bad.slice(0, 3).join('; ')
-               : `${kept} kept, ${dropped} left off; ${hands[0].hand.widthMm.toFixed(3)} mm across ` +
-                 `(floor ${g.trunk.floorMm} mm), reach ${hands[0].hand.reachMm.toFixed(3)} mm`);
-
-  check(`${name}: the plan's finger tally is the hands' own`,
-    g.fingers === kept && g.fingersDropped === dropped, `${g.fingers} + ${g.fingersDropped}`);
-  return { d, g };
+for (const [name, host] of CASES) {
+  const d = ST.planTree(host, { skipList: [] });
+  const g = ST.planTree(host, { skipList: [], branchStyle: 'gecko-hand' });
+  check(`${name}: both styles plan`, d.ok && g.ok, d.reason + ' / ' + g.reason);
+  check(`${name}: gecko-hand plans exactly the default's members, merges and trunks`,
+    d.members.length === g.members.length &&
+    d.members.every((m, i) => m.count === g.members[i].count && m.path.length === g.members[i].path.length &&
+      m.path.every((q, k) => sameVec(q, g.members[i].path[k]))) &&
+    JSON.stringify(d.merges) === JSON.stringify(g.merges) && JSON.stringify(d.trunks) === JSON.stringify(g.trunks),
+    `${g.members.length} members, ${g.merges.length} merges, ${g.trunks.length} trunks`);
 }
-
-for (const [name, host] of [['shelf', SHELF], ['tall', TALL], ['tab', TAB], ['tiny', TINY]]) {
-  parity(name, host);
-}
-
 {
-  /* Section 4's wall, planned both ways: the rail refusals are the default's
-     exactly, because the shaft is tested before a finger exists. */
-  const b0 = planSHELF.branches[planSHELF.branches.length - 1];
-  const tMid = b0.lengthMm / 2;
-  const M = [0, 1, 2].map(k => b0.from[k] + b0.dir[k] * tMid);
-  const halfWin = 0.4, zLo = M[2] - 0.25, zHi = M[2] + 0.25, R = 1.5;
-  const WALL = soupOf(
-    box([M[0] - R, M[1] - R, zLo], [M[0] + R, M[1] - halfWin, zHi]),
-    box([M[0] - R, M[1] + halfWin, zLo], [M[0] + R, M[1] + R, zHi]),
-    box([M[0] - R, M[1] - halfWin, zLo], [M[0] - halfWin, M[1] + halfWin, zHi]),
-    box([M[0] + halfWin, M[1] - halfWin, zLo], [M[0] + R, M[1] + halfWin, zHi]));
-  parity('shelf + wall', SHELF, { obstacles: [SHELF, WALL] });
-}
-
-{
-  const exp = ST.planTree(SHELF, { skipList: [], branchStyle: 'square' });
-  check('naming the default style explicitly is the default, part for part',
-    exp.ok && exp.parts.length === planSHELF.parts.length &&
-    exp.parts.every((p, i) => sameBytes(p, planSHELF.parts[i])) && exp.fingers === undefined,
-    `${exp.parts.length} parts`);
-
-  const unk = ST.planTree(SHELF, { skipList: [], branchStyle: 'gecko' });
-  check('an unknown style is refused by name, before anything is planned',
-    !unk.ok && /unknown branchStyle/.test(unk.reason) && /gecko-hand/.test(unk.reason), unk.reason);
-  const unkB = ST.branch([0, 0, 0], [1, 1, 10], { sideMm: 1.2, branchStyle: 'claw' });
-  check('and so is one handed to branch() directly', !unkB.ok && /unknown branchStyle/.test(unkB.reason),
-    unkB.reason);
-
-  /* The fingers the post is in the way of are left off, and the tip keeps
-     its contact: the shelf's inner column heads back toward the post. */
-  const g = ST.planTree(SHELF, { skipList: [], branchStyle: 'gecko-hand' });
-  const lost = [].concat(...g.branches.map(b => b.hand.dropped));
-  check('a finger that would run into the piece is left off, and says where',
-    lost.length > 0 && lost.every(x => /^finger \d: (the axis|rail \d) is blocked/.test(x.why)) &&
-    g.branches.every(b => b.parts.length === 1 + b.hand.fingers.length),
-    lost.length ? `${lost.length} left off, e.g. ${lost[0].why}` : 'none - the post was not in the way');
-
   /* A finger's root cap has to be inside the shaft, not just its centre -
      see GECKO.ROOT_SIDES. A floor that forces a finger this wide is refused
      by name rather than built poking out through the wall. */
@@ -540,11 +309,12 @@ for (const [name, host] of [['shelf', SHELF], ['tall', TALL], ['tab', TAB], ['ti
     fits.ok && ST.GECKO.ROOT_SIDES * 1.2 + fits.widthMm / Math.sqrt(3) < 0.6 && fits.fullCircle,
     `${(ST.GECKO.ROOT_SIDES * 1.2 + fits.widthMm / Math.sqrt(3)).toFixed(4)} mm of a 0.6 mm half-width; ` +
     `a vertical tip gets the full circle`);
-
-  check('the hand\'s fingertip overshoot is measured and reported, like the cap\'s',
-    g.branches.every(b => b.fingerPenetrationMm >= 0 && b.fingerPenetrationMm <= b.hand.widthMm),
-    `worst ${Math.max(...g.branches.map(b => b.fingerPenetrationMm)).toFixed(4)} mm; ` +
-    `flat cap ${g.worstTipPenetrationMm.toFixed(4)} mm`);
+  const unk = ST.planTree(SHELF, { skipList: [], style: 'claw' });
+  check('an unknown style is refused by name, before anything is planned',
+    !unk.ok && /unknown support style/.test(unk.reason), unk.reason);
+  const unkB = ST.branch([0, 0, 0], [1, 1, 10], { sideMm: 1.2, branchStyle: 'claw' });
+  check('and so is one handed to branch() directly', !unkB.ok && /unknown branchStyle/.test(unkB.reason),
+    unkB.reason);
 }
 
 console.log('\n=== 8. THE UNION: the app\'s own boolean, and nothing else ===');
@@ -554,6 +324,10 @@ console.log('\n=== 8. THE UNION: the app\'s own boolean, and nothing else ===');
     { unionSoups: null });
   check('with no app-join.js the union refuses by name rather than concatenating',
     !noUnion.ok && /NSO_unionSoups/.test(noUnion.reason), noUnion.reason);
+  const noU = await GP.solid(planSHELF, { unionSoups: null });
+  /* GP.solid falls back to the global; in this context there is none. */
+  check('nor does the planner\'s solid() build without it',
+    !noU.ok && /NSO_unionSoups/.test(noU.reason), noU.reason);
 
   const csg = csgContext();
   fs.mkdirSync(OUT, { recursive: true });
@@ -566,74 +340,44 @@ console.log('\n=== 8. THE UNION: the app\'s own boolean, and nothing else ===');
   for (const [name, host, style] of RUNS) {
     const p = ST.planTree(host, Object.assign({ skipList: [] }, style));
     if (!p.ok) { check(`${name}: plans`, false, p.reason); continue; }
+    const s = await GP.solid(p, { unionSoups: csg.NSO_unionSoups });
+    check(`${name}: every part of every trunk genuinely merges - nothing detached`,
+      s.ok && s.detached === 0, s.ok ? `${s.solids.length} solid(s) from ${p.trunks.length} trunk(s)` : s.reason);
+    if (!s.ok) continue;
 
-    /* Every step is a genuine merge. NSO_unionSoups only reports ok when the
-       part count FELL, so a branch that missed the trunk would be caught here
-       rather than quietly added as a second shell. */
-    let acc = p.parts[0], merged = 0, oneShell = true;
-    for (let i = 1; i < p.parts.length; i++) {
-      const u = await csg.NSO_unionSoups(acc, p.parts[i]);
-      if (!u.ok) break;
-      merged++;
-      if (u.parts !== 1) oneShell = false;
-      acc = u.soup;
-    }
-    check(`${name}: every branch genuinely merges into the trunk`,
-      merged === p.parts.length - 1,
-      `${merged} of ${p.parts.length - 1} steps`);
-    check(`${name}: and the kernel calls the result one shell at every step`,
-      oneShell, 'parts = 1 throughout');
-
-    const whole = await ST.unionParts(p.parts, { unionSoups: csg.NSO_unionSoups });
-    /* unionParts is the same left fold plus one clean-up of the finished
-       fold (_finishUnion: drop float32-collapsed triangles, weld at the
-       canonical 1e-4) - so it must equal that clean-up of this fold. */
-    const fin = ST_SHIPPED._finishUnion(acc);
-    check(`${name}: unionParts folds left and gets the same solid`,
-      whole.ok && whole.soup.length === fin.soup.length, whole.reason);
-
-    writeSTL(path.join(OUT, name + '.stl'), whole.soup, 'NSO support tree ' + name);
-    writeSTL(path.join(OUT, name + '_host.stl'), host, 'NSO support tree host ' + name);
-    /* The parts on their own, so the canonical checker can say whether a
-       branch is a clean solid separately from what the boolean did with it. */
-    writeSTL(path.join(OUT, name + '_trunk.stl'), p.trunk.soup, 'NSO trunk ' + name);
-    if (p.branches.length) {
-      writeSTL(path.join(OUT, name + '_branch0.stl'), p.branches[0].soup, 'NSO branch ' + name);
-    }
-    /* And one finger, for the same reason: a hand is only as clean as the
-       sweeps it is made of. The first kept finger of the first hand. */
-    const hands = p.branches.map(b => b.hand).concat(p.trunkHand ? [p.trunkHand] : [])
-      .filter(h => h && h.fingers.length);
-    if (hands.length) {
-      writeSTL(path.join(OUT, name + '_finger0.stl'), hands[0].fingers[0].soup, 'NSO finger ' + name);
-    }
-    let fingerVolumeMm3 = 0;
-    for (const h of hands) for (const f of h.fingers) fingerVolumeMm3 += h.sectionAreaMm2 * f.lengthMm;
+    writeSTL(path.join(OUT, name + '.stl'), s.soup, 'NSO support ' + name);
+    writeSTL(path.join(OUT, name + '_host.stl'), host, 'NSO support host ' + name);
+    /* Two members on their own, so the canonical checker can say whether a
+       swept member is a clean solid separately from what the boolean did:
+       the first trunk's landing column, and the first contact's strut. */
+    const P = ctx.NSO_PathSweep, root = p.members[p.trunks[0].root];
+    const strut = p.members.find(m => m.kind === 'beacon' && m.path.length >= 2);
+    const sweepOf = m => P.sweep({ points: m.points, profile: [[-m.side / 2, -m.side / 2], [m.side / 2, -m.side / 2],
+      [m.side / 2, m.side / 2], [-m.side / 2, m.side / 2]], up: [0, 1, 0] });
+    const rs = sweepOf(root), bs = strut && strut !== root ? sweepOf(strut) : null;
+    writeSTL(path.join(OUT, name + '_trunk.stl'), rs.tris, 'NSO trunk column ' + name);
+    if (bs && bs.ok) writeSTL(path.join(OUT, name + '_branch0.stl'), bs.tris, 'NSO strut ' + name);
+    const len = m => m.points.reduce((a, q, i) => i ? a + Math.hypot(q[0] - m.points[i - 1][0], q[1] - m.points[i - 1][1], q[2] - m.points[i - 1][2]) : 0, 0);
+    let partsVolumeMm3 = 0;
+    for (const m of p.members) if (!m.dead && m.points) partsVolumeMm3 += m.side * m.side * len(m);
+    for (const st of p.stubs) partsVolumeMm3 += st.side * st.side * (Math.hypot(...[0, 1, 2].map(k => st.via[k] - st.from[k])) + Math.hypot(...[0, 1, 2].map(k => st.to[k] - st.via[k])) + p.sideMm);
     fs.writeFileSync(path.join(OUT, name + '.json'), JSON.stringify({
-      contacts: p.contacts.points.length,
-      lattice: p.contacts.lattice,
-      topUp: p.contacts.topUp,
-      pitchMm: p.contacts.pitchMm,
-      coverageMm: p.contacts.coverageMm,
-      branches: p.branches.length,
-      blocked: p.blocked ? p.blocked.length : 0,
+      contacts: p.beacons.length,
+      held: p.held,
+      members: p.members.length,
+      merges: p.merges.length,
+      trunks: p.trunks.length,
+      solids: s.solids.length,
       sideMm: p.sideMm,
-      trunkMm: p.trunk.lengthMm,
-      splitMm: p.split ? p.split.trunkMm : null,
-      trunkFraction: p.split ? p.split.trunkFraction : null,
-      tiltDeg: p.tiltDeg || null,
-      branchLengthMm: p.branchLengthMm || null,
-      worstTipPenetrationMm: p.worstTipPenetrationMm == null ? null : p.worstTipPenetrationMm,
+      trunkSideMm: root.side,
+      branchSideMm: bs && bs.ok ? strut.side : null,
       style: p.style,
-      fingers: p.fingers || 0,
-      fingersDropped: p.fingersDropped || 0,
-      fingerSectionMm2: hands.length ? hands[0].sectionAreaMm2 : null,
-      fingerVolumeMm3: fingerVolumeMm3,
-      parts: p.parts.length,
-      unionTris: (whole.soup.length / 9) | 0
+      fingersDropped: s.fingersDropped,
+      partsVolumeMm3: partsVolumeMm3,
+      unionTris: (s.soup.length / 9) | 0
     }, null, 2) + '\n');
-    console.log(`  wrote ${name}.stl (${(whole.soup.length / 9) | 0} tris from ` +
-      `${p.parts.length} parts) and ${name}_host.stl`);
+    console.log(`  wrote ${name}.stl (${(s.soup.length / 9) | 0} tris, ${s.solids.length} solid(s) from ` +
+      `${p.trunks.length} trunk(s)) and ${name}_host.stl`);
   }
 
   console.log('\n' + (fail ? `FAILED  ${fail} of ${pass + fail}` : `PASSED  all ${pass}`));

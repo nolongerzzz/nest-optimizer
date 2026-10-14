@@ -1,7 +1,14 @@
 #!/usr/bin/env node
 // The CANONICAL checker (tools/mesh_validate.py) run on every solid this
-// feature produces: each part on its own, and the trunk-and-fan after the
-// app's own boolean has made one thing of them.
+// feature produces: each part on its own, and the support after the app's
+// own boolean has made one solid per trunk of them.
+//
+// CHANGED with the grid-pack planner (docs/SUPPORT-GRIDPACK.md): the parts
+// are now a trunk's landing column and one contact's strut (each one mitred
+// NSO_PathSweep of a square section), and a support is one closed shell PER
+// TRUNK, so the union's Euler characteristic is 2 x its solids rather than
+// 2. The gecko comparison asks for the default's members, merges and trunks
+// instead of its split and fan, which no longer exist.
 //
 //   node tools/nso_support_tree_canonical_check.js    exit 0 = every gate held
 //
@@ -9,7 +16,7 @@
 // tools/support-tree-out/; it runs that first, so the solids under test are
 // always the ones the shipped code produces rather than a stale copy.
 //
-// WHAT IS ASSERTED ON A PART (the trunk, and one branch):
+// WHAT IS ASSERTED ON A PART (the trunk column, and one contact's strut):
 //
 //   verdict PASS, 0 open / non-manifold / odd / inconsistently-wound edges,
 //   Euler 2, 0 degenerate, 0 self-intersection of either kind, and
@@ -122,17 +129,14 @@ const CASES = [].concat(...BASES.map(n => [n, n + '_gecko']));
 for (const name of CASES) {
   console.log('\n== ' + name + ' ==');
   const meta = JSON.parse(fs.readFileSync(path.join(OUT, name + '.json'), 'utf8'));
-  console.log(`  ${meta.contacts} contact(s) at ${meta.pitchMm} mm, covered to ` +
-    `${meta.coverageMm.toFixed(3)} mm; trunk ${meta.trunkMm.toFixed(3)} mm, ` +
-    `${meta.branches} branch(es), ${meta.parts} parts -> ${meta.unionTris} triangles`);
+  console.log(`  ${meta.contacts} contact(s), ${meta.held} held; ${meta.members} member(s), ${meta.merges} merge(s), ` +
+    `${meta.trunks} trunk(s) -> ${meta.solids} solid(s), ${meta.unionTris} triangles`);
 
   /* ---- the parts, at the canonical weld, with nothing excused ---------- */
   /* Each part with its own cross-section area: side^2 for the square trunk
      and branch, the hexagon's for a finger. */
-  const sq = meta.sideMm * meta.sideMm;
-  const parts = [['trunk', sq]];
-  if (meta.branches) parts.push(['branch0', sq]);
-  if (meta.fingers) parts.push(['finger0', meta.fingerSectionMm2]);
+  const parts = [['trunk', meta.trunkSideMm * meta.trunkSideMm]];
+  if (meta.branchSideMm) parts.push(['branch0', meta.branchSideMm * meta.branchSideMm]);
   for (const [part, area] of parts) {
     const file = path.join(OUT, name + '_' + part + '.stl');
     if (!fs.existsSync(file)) continue;
@@ -185,8 +189,8 @@ for (const name of CASES) {
     v.verdict === 'PASS',
     v.verdict + (v.verdict_fails.length ? ' - ' + v.verdict_fails.join(', ') : ''));
   for (const k of ZERO) check(`${name}: ${k} = 0`, v[k] === 0, String(v[k]));
-  check(`${name}: euler_characteristic = 2 - one closed shell, no handles`,
-    v.euler_characteristic === 2, String(v.euler_characteristic));
+  check(`${name}: euler_characteristic = 2 x ${meta.solids} - one closed shell per solid, no handles`,
+    v.euler_characteristic === 2 * meta.solids, String(v.euler_characteristic));
   check(`${name}: not flagged non-solid`, v.non_solid === false, String(v.non_solid));
   check(`${name}: no self-intersection, piercing or coplanar`,
     v.self_intersection.pierce === 0 && v.self_intersection.coplanar === 0,
@@ -215,11 +219,11 @@ for (const name of CASES) {
 
   /* ---- the union really is the parts, overlapped ----------------------- */
   const trunk = validate(path.join(OUT, name + '_trunk.stl'));
-  check(`${name}: the union is bigger than its trunk and smaller than the parts summed`,
+  check(`${name}: the union is bigger than one trunk column and smaller than the parts summed`,
     v.signed_volume > trunk.signed_volume - 1e-9 &&
-    v.signed_volume < trunk.signed_volume + meta.branches * meta.sideMm * meta.sideMm *
-      (meta.branchLengthMm ? meta.branchLengthMm.max : 0) + (meta.fingerVolumeMm3 || 0) + 1e-6,
-    `${v.signed_volume.toFixed(4)} mm^3, trunk alone ${trunk.signed_volume.toFixed(4)} mm^3`);
+    v.signed_volume < meta.partsVolumeMm3 * 1.05 + 1e-6 + (/_gecko$/.test(name) ? meta.contacts * 2 : 0),
+    `${v.signed_volume.toFixed(4)} mm^3, one column ${trunk.signed_volume.toFixed(4)} mm^3, ` +
+    `parts summed ${meta.partsVolumeMm3.toFixed(4)} mm^3`);
 
   /* ---- the piece it was aimed at ---------------------------------------- */
   const host = validate(path.join(OUT, name + '_host.stl'));
@@ -231,18 +235,16 @@ for (const name of CASES) {
 
 /* ---- the gecko hand changes the tip and nothing it stands on ----------- */
 console.log('\n== gecko-hand against the default, case by case ==');
-const SAME = ['contacts', 'lattice', 'topUp', 'pitchMm', 'coverageMm', 'branches', 'blocked',
-              'sideMm', 'trunkMm', 'splitMm', 'trunkFraction', 'tiltDeg', 'branchLengthMm',
-              'worstTipPenetrationMm'];
+const SAME = ['contacts', 'held', 'members', 'merges', 'trunks', 'sideMm', 'trunkSideMm'];
 for (const n of BASES) {
   const d = JSON.parse(fs.readFileSync(path.join(OUT, n + '.json'), 'utf8'));
   const g = JSON.parse(fs.readFileSync(path.join(OUT, n + '_gecko.json'), 'utf8'));
   const diff = SAME.filter(k => JSON.stringify(d[k]) !== JSON.stringify(g[k]));
-  check(`${n}: gecko-hand has the default's contact count, split, trunk and fan, exactly`,
-    diff.length === 0 && g.style === 'gecko-hand' && d.style === 'square',
+  check(`${n}: gecko-hand has the default's contacts, members, merges and trunks, exactly`,
+    diff.length === 0 && g.style === 'gecko-hand' && d.style === 'tree',
     diff.length ? 'differs in ' + diff.join(', ')
-                : `${g.contacts} contacts, ${g.branches} branches; ${g.fingers} finger(s) added, ` +
-                  `${g.fingersDropped} left off; ${d.parts} -> ${g.parts} parts`);
+                : `${g.contacts} contacts, ${g.merges} merges, ${g.trunks} trunks; ` +
+                  `${d.unionTris} -> ${g.unionTris} triangles with the hands`);
 }
 
 console.log('\n' + (fail ? `FAILED  ${fail} of ${pass + fail}` : `PASSED  all ${pass}`));

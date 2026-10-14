@@ -111,13 +111,27 @@ async function canonical(soup, name) {
     [join(ROOT, 'tools', 'mesh_validate.py'), file, '--json'].concat(weld ? ['--weld', String(weld)] : []),
     { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }));
   const weld = Math.min(1e-4, closestPair(soup) / 3);
-  return { weld, at: run(weld), dflt: run() };
+  return { weld, at: run(weld), dflt: run(), shells: shells(soup) };
+}
+/* Closed shells of a soup, by shared exact vertices: a grid-pack support is
+   one closed shell PER TRUNK, so its Euler characteristic is 2 per shell. */
+function shells(soup) {
+  const id = new Map(), parent = [];
+  const find = (i) => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
+  const vid = (k) => { if (!id.has(k)) { id.set(k, parent.length); parent.push(parent.length); } return id.get(k); };
+  for (let t = 0; t < soup.length; t += 9) {
+    const a = vid(soup[t] + ',' + soup[t + 1] + ',' + soup[t + 2]);
+    for (const o of [3, 6]) { const b = vid(soup[t + o] + ',' + soup[t + o + 1] + ',' + soup[t + o + 2]); parent[find(a)] = find(b); }
+  }
+  const r = new Set();
+  for (let i = 0; i < parent.length; i++) r.add(find(i));
+  return r.size;
 }
 function canonicalChecks(label, c) {
   const v = c.at;
-  check(`${label}: the canonical checker passes it (weld ${c.weld.toExponential(2)} mm, derived as the tree check derives it)`,
+  check(`${label}: the canonical checker passes it (weld ${c.weld.toExponential(2)} mm, derived as the tree check derives it) - Euler 2 per trunk`,
     [v.verdict, v.open_edges, v.nonmanifold_edges, v.inconsistent_winding_edges, v.degenerate_tris,
-      v.self_intersection.pierce, v.euler_characteristic], ['PASS', 0, 0, 0, 0, 0, 2]);
+      v.self_intersection.pierce, v.euler_characteristic], ['PASS', 0, 0, 0, 0, 0, 2 * c.shells]);
   check(`${label}: and at the default weld it is still closed and non-degenerate`,
     [c.dflt.open_edges, c.dflt.degenerate_tris], [0, 0]);
 }
@@ -289,12 +303,15 @@ async function main() {
   // =======================================================================
   const tab = det.markers.find((m) => m.id === 1);
   // What the generator makes with these exact inputs, called directly first.
-  const wantStrut = await page.evaluate(() => {
+  // Every style is the one grid-pack planner now (docs/SUPPORT-GRIDPACK.md):
+  // NSO_SupportTree.planTree with opts.style, built by NSO_SupportGridpack.solid.
+  const wantStrut = await page.evaluate(async () => {
     const S = window.NSO_GSCOPE_SUPPORT, d = window.NSO_MICROSCOPE.getDoc();
     const host = d.objects.find((o) => o.name === 'shelf');
-    const o = Object.assign({}, S.optsFor('shelf').opts, { regionId: 1, sideMm: 1.2 });
-    const p = window.NSO_SupportAim.plan(host.positions, o);
-    return { ok: p.ok, soup: Array.from(p.soup) };
+    const o = Object.assign({}, S.optsFor('shelf').opts, { regionId: 1, sideMm: 1.2, style: 'strut' });
+    const p = window.NSO_SupportTree.planTree(host.positions, o);
+    const u = await window.NSO_SupportGridpack.solid(p);
+    return { ok: p.ok && u.ok, soup: Array.from(u.soup) };
   });
   check('the direct call plans a strut', wantStrut.ok, true);
   let px = await screenOf(page, tab.pingAt);
@@ -340,10 +357,10 @@ async function main() {
   const wantTree = await page.evaluate(async () => {
     const S = window.NSO_GSCOPE_SUPPORT, d = window.NSO_MICROSCOPE.getDoc();
     const host = d.objects.find((o) => o.name === 'shelf');
-    const o = Object.assign({}, S.optsFor('shelf').opts, { regionId: 0, sideMm: 1.2, branchStyle: 'square' });
+    const o = Object.assign({}, S.optsFor('shelf').opts, { regionId: 0, sideMm: 1.2, style: 'tree' });
     const t = window.NSO_SupportTree.planTree(host.positions, o);
-    const u = await window.NSO_SupportTree.unionParts(t.parts);
-    return { ok: t.ok && u.ok, branches: t.branches.length, soup: Array.from(u.soup) };
+    const u = await window.NSO_SupportGridpack.solid(t);
+    return { ok: t.ok && u.ok, trunks: t.trunks.length, soup: Array.from(u.soup) };
   });
   check('the direct call plans and unions a tree', wantTree.ok, true);
   await lookUnder(page);
@@ -363,7 +380,7 @@ async function main() {
   check('the tree the click made is the generator\'s union, value for value', sameArray(tree.raw, wantTree.soup), true);
   canonicalChecks('the strut', await canonical(strut.raw, 'strut'));
   canonicalChecks('the tree', await canonical(tree.raw, 'tree'));
-  console.log(`       tree: ${wantTree.branches} branches, ${tree.raw.length / 9} triangles`);
+  console.log(`       tree: ${wantTree.trunks} trunk(s), ${tree.raw.length / 9} triangles`);
   const camKept = await page.evaluate(() => window.NSO_MICROSCOPE.getView().camera.position.y);
   check('the view the user was working in is kept across the re-read (camera still below the part)',
     camKept < 10, true);
@@ -421,10 +438,10 @@ async function main() {
   const wantGecko = await page.evaluate(async () => {
     const S = window.NSO_GSCOPE_SUPPORT, d = window.NSO_MICROSCOPE.getDoc();
     const host = d.objects.find((o) => o.name === 'shelf');
-    const o = Object.assign({}, S.optsFor('shelf').opts, { regionId: 0, sideMm: 1.2, branchStyle: 'gecko-hand' });
+    const o = Object.assign({}, S.optsFor('shelf').opts, { regionId: 0, sideMm: 1.2, style: 'gecko-hand' });
     const t = window.NSO_SupportTree.planTree(host.positions, o);
-    const u = await window.NSO_SupportTree.unionParts(t.parts);
-    return { ok: t.ok && u.ok, fingers: t.fingers, soup: Array.from(u.soup) };
+    const u = await window.NSO_SupportGridpack.solid(t);
+    return { ok: t.ok && u.ok, fingersDropped: u.fingersDropped, soup: Array.from(u.soup) };
   });
   check('the direct call plans a gecko-hand tree', wantGecko.ok, true);
   await page.selectOption('#ms-sp-style', 'gecko-hand');
@@ -437,7 +454,7 @@ async function main() {
     [gecko.meta.style, sameArray(gecko.raw, wantGecko.soup)], ['gecko-hand', true]);
   check('as ONE undo step', await page.evaluate((n) =>
     [state.undoStack.length - n, state.undoStack[state.undoStack.length - 1].type], undoBefore), [1, 'supportSwap']);
-  console.log(`       gecko-hand: ${wantGecko.fingers} fingers, ${gecko.raw.length / 9} triangles`);
+  console.log(`       gecko-hand: ${gecko.raw.length / 9} triangles, ${wantGecko.fingersDropped} finger(s) left off`);
   canonicalChecks('the gecko-hand', await canonical(gecko.raw, 'gecko-hand'));
   await page.evaluate(() => window.NSO_GSCOPE_SUPPORT.setOn(true));
   await shot(page, '05-changed-to-gecko-hand.png', 'the tree changed to a gecko-hand');
@@ -505,6 +522,30 @@ async function main() {
   await page.evaluate(() => window.NSO_GSCOPE_SUPPORT.setOn(true));
   const tree6 = await page.evaluate(() => window.NSO_GSCOPE_SUPPORT.generateAt('shelf', 0, 'tree', 1.2));
   check('a tree on the shelf again, for the host ops', tree6.ok, true);
+
+  /* IDEMPOTENT: Generate on a region that already has a support replaces it
+     - one supportSwap step, the same mesh, still one support for the region -
+     never a second support stacked inside the first. Undone again so the
+     host ops below run on tree6. */
+  const again = await page.evaluate(async (id) => {
+    const S = window.NSO_GSCOPE_SUPPORT, n = state.models.length, u = state.undoStack.length;
+    const old = Array.from(state.models.find((m) => m.id === id).rawTris || []);
+    const r = await S.generateAt('shelf', 0, 'tree', 1.2);
+    const now = state.models.find((m) => m.id === r.id);
+    return { ok: r.ok, replaced: r.replaced, models: state.models.length - n, steps: state.undoStack.length - u,
+      top: state.undoStack[state.undoStack.length - 1].type, forRegion: S.supports().filter((m) => m.nsoSupport.regionId === 0).length,
+      same: !!now && old.length > 0 && old.length === now.rawTris.length && old.every((v, i) => v === now.rawTris[i]) };
+  }, tree6.id);
+  check('Generate again on the same region REPLACES its support: one step, the same mesh, never two',
+    [again.ok, again.replaced, again.models, again.steps, again.top, again.forRegion, again.same],
+    [true, [tree6.id], 0, 1, 'supportSwap', 1, true]);
+  await page.click('#ms-close');
+  await page.click('#btn-undo');
+  check('and Undo puts the first one back',
+    await page.evaluate((id) => window.NSO_GSCOPE_SUPPORT.supports().filter((m) => m.nsoSupport.regionId === 0).map((m) => m.id), tree6.id),
+    [tree6.id]);
+  await page.click('#btn-microscope');
+  await page.evaluate(() => window.NSO_GSCOPE_SUPPORT.setOn(true));
   const readMarks = () => page.evaluate(() => window.NSO_GSCOPE_SUPPORT.markers().map((m) => ({
     id: m.region.id, supported: m.supported, stale: m.stale,
     colour: m.ping.material.color.getHex(),

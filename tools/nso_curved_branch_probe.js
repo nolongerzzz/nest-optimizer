@@ -1,4 +1,8 @@
 #!/usr/bin/env node
+// HISTORICAL. This probe measured the trunk-first planner (plan.trunk,
+// plan.branches), which nso_support_gridpack.js replaced - see
+// docs/SUPPORT-GRIDPACK.md. It no longer runs against the shipped planTree;
+// it is kept as the record behind docs/CURVED-BRANCH.md.
 // Curved support branches - a headless PROBE for docs/CURVED-BRANCH.md.
 //
 //   node tools/nso_curved_branch_probe.js     print every measurement (~2.5 min)
