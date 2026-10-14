@@ -158,8 +158,9 @@ async function main() {
     toolpathCard: !!document.getElementById('toolpath-card'),
     toolpathScript: !!document.querySelector('script[src*="app-toolpath"]'),
     oldGlobal: typeof window.NSO_TOOLPATH,
+    // The lens glyph, or (shell v2: the slab reads "G-scope") the G-scope name.
     scopeButtons: [...document.querySelectorAll('button')]
-      .filter((b) => /\u{1F52C}/u.test(b.textContent)).map((b) => b.id),
+      .filter((b) => /\u{1F52C}/u.test(b.textContent) || b.getAttribute('aria-label') === 'G-scope').map((b) => b.id),
     label: document.getElementById('btn-microscope').getAttribute('aria-label'),
     title: document.getElementById('ms-title').textContent,
   }));

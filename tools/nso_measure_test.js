@@ -23,7 +23,7 @@
 const path = require('path');
 const M = require('../app-measure.js');
 const { readSTL } = require('./nso_stl_io');
-const { withApp, loadSTL, selectModel, openFinishMenu, ROOT } = require('./nso_app_harness');
+const { withApp, loadSTL, selectModel, openMenuFor, ROOT } = require('./nso_app_harness');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 
@@ -246,10 +246,9 @@ async function partB() {
 
     const id = await loadSTL(page, fx('box-20mm.stl'));
     await selectModel(page, id);
-    // the harness's own opener, the way every other drive check reaches the
-    // Finish menu - a user clicks the summary, so this clicks the summary
-    await openFinishMenu(page);
-    check('Measure is reachable in the open Finish menu',
+    // Shell v2: Measure lives in the column's Measure & check menu; open it.
+    await openMenuFor(page, '#btn-measure');
+    check('Measure is reachable in the open Measure & check menu',
           await page.isVisible('#btn-measure'));
     const box = await boxOf(page, 0);
     console.log('   box-20mm on the plate: ' + box.min.map(f3).join(', ') +

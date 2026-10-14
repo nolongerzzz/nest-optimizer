@@ -25,7 +25,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { withApp, openFinishMenu, statusOf, ROOT } = require('./nso_app_harness');
+const { withApp, openMenuFor, statusOf, ROOT } = require('./nso_app_harness');
 const ANG = require('./nso_line_angle.js');
 
 const DIR = path.join(ROOT, 'fixtures', 'raster-real');
@@ -53,14 +53,15 @@ async function traceFile(page, file, sizeMM) {
 
 withApp(async (page) => {
   console.log('=== 1. the control is really in the shipped page ===');
-  await openFinishMenu(page);
+  // Shell v2: Trace raster lives in the column's Surface menu; open it.
+  await openMenuFor(page, '#btn-trace-raster');
   check('the module loaded into the page',
     await page.evaluate(() => typeof NSO_RasterLines === 'object' && typeof NSO_RasterLines.buildFromImage === 'function'), true);
   check('the app side loaded into the page',
     await page.evaluate(() => typeof NSO_rasterAddFromFile === 'function'), true);
   check('the Trace raster button is there and its listener is attached',
     await page.evaluate(() => { const b = document.getElementById('btn-trace-raster'); return !!b && b.dataset.nsoWired === '1'; }), true);
-  check('the button is VISIBLE in the Finish menu, not just in the DOM',
+  check('the button is VISIBLE in the Surface menu, not just in the DOM',
     await page.locator('#btn-trace-raster').isVisible(), true);
   check('the file input takes the formats a person uploads',
     await page.getAttribute('#raster-file', 'accept'), 'image/*,.png,.jpg,.jpeg,.webp,.gif,.bmp');
