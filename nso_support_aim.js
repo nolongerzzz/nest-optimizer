@@ -120,6 +120,13 @@
       that no angle test can make. Callers that want it gate on region.spanMm
       themselves; detectOverhangs reports the span and takes no view.
 
+      THE BEACON GRID NOW TAKES ONE: nso_support_beacons.js measures the span
+      under a near-flat face along x and y and leaves a span of 5 mm or less
+      unsupported (need.kind 'gap' above that). Its beacons ride along on
+      every detectOverhangs result - det.beacons, det.grid, det.beaconRegions,
+      region.beacons - while the triangle regions below stay exactly as they
+      were, numbers and all. See docs/SUPPORT-BEACONS.md.
+
    ---------------------------------------------------------------------------
    PAINT SCOPE: SUB-REGION - per docs/HANDOFF.md
    ---------------------------------------------------------------------------
@@ -141,7 +148,7 @@
    ---------------------------------------------------------------------------
    API
    ---------------------------------------------------------------------------
-   detectOverhangs(rawTris, opts)          -> { ok, regions: [...], ... }
+   detectOverhangs(rawTris, opts)          -> { ok, regions: [...], beacons, grid, beaconRegions, ... }
    nearestBase(point, bases, opts)         -> { ok, from, dir, length, ... }
    lineBlockedAt(obstacles, from, dir, L)  -> first face hit strictly between the ends, or -1
    lineInsideAt(obstacles, from, dir, L)   -> a point of the line inside material, or -1
@@ -527,6 +534,32 @@
     return Array.from(groups.values());
   }
 
+  /* detectOverhangs' half of the beacon handover. Same angle, plate, drop,
+     paint and occluders as the triangle pass, so the two cannot disagree on
+     what the question was. opts.beacons === false skips it; a build without
+     nso_support_beacons.js loaded says so in beaconsReason rather than
+     pretending the grid found nothing. */
+  function attachBeacons(out, rawTris, opts, angleDeg, plateZ, minDrop, skipList, occluders, planeTol) {
+    out.beacons = null; out.grid = null; out.beaconRegions = null;
+    if (opts.beacons === false) { out.beaconsReason = 'beacons off (opts.beacons false)'; return null; }
+    var SB = (opts.beaconsModule) || (root && root.NSO_SupportBeacons) ||
+             (typeof NSO_SupportBeacons !== 'undefined' ? NSO_SupportBeacons : null);
+    if (!SB || typeof SB.detect !== 'function') {
+      out.beaconsReason = 'nso_support_beacons.js is not loaded - no beacon grid';
+      return null;
+    }
+    var b = SB.detect(rawTris, {
+      pitch: opts.beaconPitch, angleDeg: angleDeg, plateZ: plateZ, minDropMm: minDrop,
+      skipList: skipList, occluders: occluders, planeTol: planeTol, bridgeMm: opts.bridgeMm
+    });
+    out.beaconsReason = b.reason;
+    if (!b.ok) return null;
+    out.beacons = b.beacons;
+    out.grid = b.grid;
+    out.beaconRegions = b.regions;
+    return b;
+  }
+
   // opts.angleDeg    printable angle off the build plate, default 45
   // opts.plateZ      the plate, default the soup's own minimum z
   // opts.minAreaMm2  drop regions smaller than this, default 1.0
@@ -536,6 +569,9 @@
   // opts.occluders   other pieces' world soups. Material in one of these under
   //                  an overhang supports it exactly as the piece's own does.
   // opts.weldTol     vertex weld for clustering, default 1e-4 mm
+  // opts.beacons     false to skip the beacon grid (nso_support_beacons.js)
+  // opts.beaconPitch the grid's pitch, default 3 mm
+  // opts.bridgeMm    the bridgeable span the grid uses, default 5 mm
   function detectOverhangs(rawTris, opts) {
     opts = opts || {};
     var out = {
@@ -623,6 +659,12 @@
     }
     out.trisFlagged = flagged.length;
 
+    /* The beacon grid (nso_support_beacons.js) is the detector now; the
+       triangle pass above is kept because every caller of region.tris,
+       region.areaMm2 and the counters reads it, and their numbers must not
+       move. The beacons ride along on the same result. */
+    var beaconDet = attachBeacons(out, rawTris, opts, angleDeg, plateZ, minDrop, skipList, occluders, planeTol);
+
     if (!flagged.length) {
       out.ok = true;
       out.reason = 'no unsupported overhang below ' + angleDeg + ' deg';
@@ -692,7 +734,14 @@
     }
 
     regions.sort(function (a, b) { return b.areaMm2 - a.areaMm2; });
-    for (var r = 0; r < regions.length; r++) regions[r].id = r;
+    for (var r = 0; r < regions.length; r++) {
+      regions[r].id = r;
+      /* the beacons that sit on this region's own triangles */
+      if (beaconDet) {
+        var own = new Set(regions[r].tris);
+        regions[r].beacons = beaconDet.beacons.filter(function (b) { return own.has(b.tri); });
+      }
+    }
 
     out.ok = true;
     out.regions = regions;

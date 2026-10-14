@@ -37,7 +37,7 @@ const ctx = {
 };
 vm.createContext(ctx);
 for (const f of ['nso_thickness.js', 'nso_seat_surface.js', 'app-sculpt.js', 'app-extend.js',
-                 'nso_support_aim.js', 'nso_path_sweep.js', 'nso_support_tree.js',
+                 'nso_support_beacons.js', 'nso_support_aim.js', 'nso_path_sweep.js', 'nso_support_tree.js',
                  'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
