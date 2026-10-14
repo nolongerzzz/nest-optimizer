@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=supbridge1" />
+  <link rel="stylesheet" href="styles.css?v=bendcol1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -104,75 +104,6 @@
               <button id="btn-bank-up" class="vp-bar-btn adjust-btn" disabled title="Tilt: lift the left edge 15°">Tilt →</button>
               <button id="btn-bank-dn" class="vp-bar-btn adjust-btn" disabled title="Tilt: lift the right edge 15°">Tilt ←</button>
               <p class="hint" style="margin:2px 0 0">Arrow keys tilt while this menu is open.</p>
-            </div>
-          </details>
-          <!-- BEND: the Bend button and its panel, moved up from Finish > Shape
-               unchanged (app-bend.js). -->
-          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-bend">
-            <summary class="vp-bar-btn" title="Bend the piece like a pipe or plate bender, with a live ghost of the result">Bend</summary>
-            <div class="vp-menu-body vp-finish">
-              <div class="vp-row vp-row-pair vp-row-bend">
-                <button id="btn-bend" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="bend-panel"
-                        title="Bend the piece like a pipe or plate bender, inside one straight stretch: the section is carried round the arc exactly - a plate's thickness, a tube's bore and wall do not change - and everything past the bend turns with it, rigidly. Opens a panel with a live ghost of the result; click the piece to set where.">Bend</button>
-                <button id="btn-tube-edge" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="te-panel"
-                        title="Flare or roll the open end of a tube outward. The wall's thickness is carried exactly through the new section and the new wall is welded to the end ring. Opens a card with a live ghost of the result; click the piece near the end to treat.">Tube edge</button>
-              </div>
-              <div class="vp-bend-panel" id="bend-panel" hidden>
-                <label class="vp-bend-field" title="Where the bend's middle goes, in mm along the piece from its near (low) end. Click the piece to set it.">Where
-                  <input type="number" id="inp-bend-where" min="0" step="0.1" aria-label="Bend at, mm from the near end"><span>mm</span></label>
-                <label class="vp-bend-field" title="How far it folds, 1 to 180 degrees.">Angle
-                  <input type="number" id="inp-bend-angle" min="1" max="180" step="1" value="90" aria-label="Bend angle, degrees"><span>°</span></label>
-                <label class="vp-bend-field" title="Radius to the section's centre line. Blank: 2.5 times the section's width in the bend direction. It must be more than half that width, or the inside face would turn inside out.">Radius
-                  <input type="number" id="inp-bend-radius" min="0.01" step="0.1" placeholder="auto" aria-label="Bend radius, mm"><span>mm</span></label>
-                <label class="vp-bend-field" title="Which of the piece's sides it folds toward. Up is its own +Z.">Toward
-                  <select id="sel-bend-toward" class="vp-select" aria-label="Fold toward"></select></label>
-                <label class="vp-bend-field" id="bend-roll-row" hidden title="For a section that is not a rectangle: turn the fold direction about the piece's axis, in 15° steps.">Roll
-                  <input type="number" id="inp-bend-roll" step="15" value="0" aria-label="Roll, degrees"><span>°</span></label>
-                <p id="bend-readout" class="bend-readout">—</p>
-                <div class="vp-row vp-row-pair">
-                  <button id="btn-bend-go" class="btn btn-secondary" type="button" disabled
-                          title="Bend the piece as the ghost shows. One Undo puts it back.">Bend</button>
-                  <button id="btn-bend-cancel" class="btn btn-secondary" type="button" title="Close the panel; the piece is unchanged.">Cancel</button>
-                </div>
-              </div>
-              <div class="vp-bend-panel te-panel" id="te-panel" hidden>
-                <label class="vp-bend-field" title="Flare turns the end outward over a length; Roll curls it over round a bead.">Verb
-                  <select id="sel-te-verb" class="vp-select" aria-label="Tube edge verb">
-                    <option value="flare" selected>Flare</option>
-                    <option value="roll">Roll</option>
-                  </select></label>
-                <label class="vp-bend-field" title="Out, away from the axis. In (toward the axis) is not supported yet and says so.">Way
-                  <select id="sel-te-dir" class="vp-select" aria-label="Tube edge direction">
-                    <option value="out" selected>Out</option>
-                    <option value="in">In</option>
-                  </select></label>
-                <div id="te-flare-rows" class="te-rows">
-                  <label class="vp-bend-field" title="How far the flare runs past the end, in mm along the wall.">Length
-                    <input type="number" id="inp-te-length" min="0.1" step="0.5" aria-label="Flare length, mm"><span>mm</span></label>
-                  <label class="vp-bend-field" title="The flare's angle off the wall. Linked to Δr over the Length: edit either.">Angle
-                    <input type="number" id="inp-te-angle" min="0.1" max="75" step="1" aria-label="Flare angle, degrees"><span>°</span></label>
-                  <label class="vp-bend-field" title="How far the lip stands out from the wall's line, in mm. Linked to Angle over the Length: edit either.">Δr
-                    <input type="number" id="inp-te-dr" min="0.01" step="0.1" aria-label="Flare delta r, mm"><span>mm</span></label>
-                  <label class="vp-bend-field" title="Straight: a cone. Trumpet: tangent to the tube at the end, its radius growing as the square of the length (an ease-in) to the same lip.">Profile
-                    <select id="sel-te-profile" class="vp-select" aria-label="Flare profile">
-                      <option value="straight" selected>Straight</option>
-                      <option value="trumpet">Trumpet</option>
-                    </select></label>
-                </div>
-                <div id="te-roll-rows" class="te-rows" hidden>
-                  <label class="vp-bend-field" title="The bead's inside radius, mm: the outside face of the tube curls round a circle this size.">Radius
-                    <input type="number" id="inp-te-radius" min="0.1" step="0.5" aria-label="Roll radius, mm"><span>mm</span></label>
-                  <label class="vp-bend-field" title="How far it curls over: 90, 180 or 270 degrees, or type any angle up to 360.">Angle
-                    <input type="number" id="inp-te-roll-angle" min="1" max="360" step="1" list="te-roll-angles" aria-label="Roll angle, degrees"><span>°</span></label>
-                  <datalist id="te-roll-angles"><option value="90"></option><option value="180"></option><option value="270"></option></datalist>
-                </div>
-                <p id="te-readout" class="bend-readout">—</p>
-                <div class="vp-row vp-row-pair">
-                  <button id="btn-te-go" class="btn btn-secondary" type="button" disabled
-                          title="Flare or roll the end as the ghost shows. One Undo puts it back.">Set</button>
-                  <button id="btn-te-cancel" class="btn btn-secondary" type="button" title="Close the card; the piece is unchanged.">Cancel</button>
-                </div>
-              </div>
             </div>
           </details>
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-align">
@@ -783,6 +714,75 @@
                 <button id="btn-foam-cancel" class="btn btn-secondary" type="button" title="Put Foam away and leave the piece exactly as it was.">Cancel</button>
               </div>
             </div>
+            </div>
+          </details>
+          <!-- BEND: the Bend button and its panel (Tube edge beside it), in the
+               column under Shape, its group; unchanged (app-bend.js). -->
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-bend">
+            <summary class="vp-bar-btn" title="Bend the piece like a pipe or plate bender, with a live ghost of the result">Bend</summary>
+            <div class="vp-menu-body vp-finish">
+              <div class="vp-row vp-row-pair vp-row-bend">
+                <button id="btn-bend" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="bend-panel"
+                        title="Bend the piece like a pipe or plate bender, inside one straight stretch: the section is carried round the arc exactly - a plate's thickness, a tube's bore and wall do not change - and everything past the bend turns with it, rigidly. Opens a panel with a live ghost of the result; click the piece to set where.">Bend</button>
+                <button id="btn-tube-edge" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="te-panel"
+                        title="Flare or roll the open end of a tube outward. The wall's thickness is carried exactly through the new section and the new wall is welded to the end ring. Opens a card with a live ghost of the result; click the piece near the end to treat.">Tube edge</button>
+              </div>
+              <div class="vp-bend-panel" id="bend-panel" hidden>
+                <label class="vp-bend-field" title="Where the bend's middle goes, in mm along the piece from its near (low) end. Click the piece to set it.">Where
+                  <input type="number" id="inp-bend-where" min="0" step="0.1" aria-label="Bend at, mm from the near end"><span>mm</span></label>
+                <label class="vp-bend-field" title="How far it folds, 1 to 180 degrees.">Angle
+                  <input type="number" id="inp-bend-angle" min="1" max="180" step="1" value="90" aria-label="Bend angle, degrees"><span>°</span></label>
+                <label class="vp-bend-field" title="Radius to the section's centre line. Blank: 2.5 times the section's width in the bend direction. It must be more than half that width, or the inside face would turn inside out.">Radius
+                  <input type="number" id="inp-bend-radius" min="0.01" step="0.1" placeholder="auto" aria-label="Bend radius, mm"><span>mm</span></label>
+                <label class="vp-bend-field" title="Which of the piece's sides it folds toward. Up is its own +Z.">Toward
+                  <select id="sel-bend-toward" class="vp-select" aria-label="Fold toward"></select></label>
+                <label class="vp-bend-field" id="bend-roll-row" hidden title="For a section that is not a rectangle: turn the fold direction about the piece's axis, in 15° steps.">Roll
+                  <input type="number" id="inp-bend-roll" step="15" value="0" aria-label="Roll, degrees"><span>°</span></label>
+                <p id="bend-readout" class="bend-readout">—</p>
+                <div class="vp-row vp-row-pair">
+                  <button id="btn-bend-go" class="btn btn-secondary" type="button" disabled
+                          title="Bend the piece as the ghost shows. One Undo puts it back.">Bend</button>
+                  <button id="btn-bend-cancel" class="btn btn-secondary" type="button" title="Close the panel; the piece is unchanged.">Cancel</button>
+                </div>
+              </div>
+              <div class="vp-bend-panel te-panel" id="te-panel" hidden>
+                <label class="vp-bend-field" title="Flare turns the end outward over a length; Roll curls it over round a bead.">Verb
+                  <select id="sel-te-verb" class="vp-select" aria-label="Tube edge verb">
+                    <option value="flare" selected>Flare</option>
+                    <option value="roll">Roll</option>
+                  </select></label>
+                <label class="vp-bend-field" title="Out, away from the axis. In (toward the axis) is not supported yet and says so.">Way
+                  <select id="sel-te-dir" class="vp-select" aria-label="Tube edge direction">
+                    <option value="out" selected>Out</option>
+                    <option value="in">In</option>
+                  </select></label>
+                <div id="te-flare-rows" class="te-rows">
+                  <label class="vp-bend-field" title="How far the flare runs past the end, in mm along the wall.">Length
+                    <input type="number" id="inp-te-length" min="0.1" step="0.5" aria-label="Flare length, mm"><span>mm</span></label>
+                  <label class="vp-bend-field" title="The flare's angle off the wall. Linked to Δr over the Length: edit either.">Angle
+                    <input type="number" id="inp-te-angle" min="0.1" max="75" step="1" aria-label="Flare angle, degrees"><span>°</span></label>
+                  <label class="vp-bend-field" title="How far the lip stands out from the wall's line, in mm. Linked to Angle over the Length: edit either.">Δr
+                    <input type="number" id="inp-te-dr" min="0.01" step="0.1" aria-label="Flare delta r, mm"><span>mm</span></label>
+                  <label class="vp-bend-field" title="Straight: a cone. Trumpet: tangent to the tube at the end, its radius growing as the square of the length (an ease-in) to the same lip.">Profile
+                    <select id="sel-te-profile" class="vp-select" aria-label="Flare profile">
+                      <option value="straight" selected>Straight</option>
+                      <option value="trumpet">Trumpet</option>
+                    </select></label>
+                </div>
+                <div id="te-roll-rows" class="te-rows" hidden>
+                  <label class="vp-bend-field" title="The bead's inside radius, mm: the outside face of the tube curls round a circle this size.">Radius
+                    <input type="number" id="inp-te-radius" min="0.1" step="0.5" aria-label="Roll radius, mm"><span>mm</span></label>
+                  <label class="vp-bend-field" title="How far it curls over: 90, 180 or 270 degrees, or type any angle up to 360.">Angle
+                    <input type="number" id="inp-te-roll-angle" min="1" max="360" step="1" list="te-roll-angles" aria-label="Roll angle, degrees"><span>°</span></label>
+                  <datalist id="te-roll-angles"><option value="90"></option><option value="180"></option><option value="270"></option></datalist>
+                </div>
+                <p id="te-readout" class="bend-readout">—</p>
+                <div class="vp-row vp-row-pair">
+                  <button id="btn-te-go" class="btn btn-secondary" type="button" disabled
+                          title="Flare or roll the end as the ghost shows. One Undo puts it back.">Set</button>
+                  <button id="btn-te-cancel" class="btn btn-secondary" type="button" title="Close the card; the piece is unchanged.">Cancel</button>
+                </div>
+              </div>
             </div>
           </details>
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-paint" data-sec="paint">

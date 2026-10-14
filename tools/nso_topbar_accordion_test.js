@@ -15,10 +15,10 @@ const check = (name, cond, detail) => {
 /* Every top-level drop-down on the page (shell v2): the row with Plate under
    Export, and the column. Members held inside one (Gen+'s four, Join's two,
    Plate's three) are not top-level; section 3 covers them. */
-const ROW = ['menu-import', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-bend', 'menu-align',
+const ROW = ['menu-import', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-align',
              'menu-gen', 'menu-export', 'menu-plates'];
 const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'menu-seat', 'menu-bit',
-             'menu-shape', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-measure', 'menu-repair'];
+             'menu-shape', 'menu-bend', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-measure', 'menu-repair'];
 const ALL = ROW.concat(COL);
 
 withApp(async (page, logs) => {

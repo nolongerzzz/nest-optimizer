@@ -18,10 +18,10 @@ const check = (name, cond, detail) => {
    Export, off the row's line. The column's slabs top to bottom, in their
    groups (tools/nso_shell_v2_test.js gates the groups' pitch and gaps); the
    view row (X, the eye, the target) is pinned under them. */
-const ROW = ['menu-import', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-bend', 'menu-align',
+const ROW = ['menu-import', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-align',
              'menu-gen', 'btn-lock-pos', 'btn-plate-lock', 'btn-undo', 'btn-delete-placed', 'menu-export'];
 const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'btn-shell-lift', 'menu-seat', 'menu-bit',
-             'menu-shape', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-measure', 'menu-repair',
+             'menu-shape', 'menu-bend', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-measure', 'menu-repair',
              'btn-microscope'];
 const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(['menu-plates'], COL.filter(id => id.startsWith('menu-')));
 
@@ -120,10 +120,12 @@ withApp(async (page, logs) => {
     const rowSized = r.row.slice(1).map(b => b.w);
     check('the row\'s other slabs size to their labels', new Set(rowSized.map(Math.round)).size > 3,
       rowSized.map(Math.round).join(', '));
+    const at = id => r.row[ROW.indexOf(id)];
+    const lockPlate = at('btn-plate-lock'), undo = at('btn-undo'), exp = at('menu-export');
     check('Undo, Remove and Export sit at the right end of the row',
-      r.row[11].r > 1500 - 20 && r.row[9].x > r.row[8].r + 100,
-      'lock plate ends ' + Math.round(r.row[8].r) + ', undo at ' + Math.round(r.row[9].x) +
-      ', export ends ' + Math.round(r.row[11].r));
+      exp.r > 1500 - 20 && undo.x > lockPlate.r + 100,
+      'lock plate ends ' + Math.round(lockPlate.r) + ', undo at ' + Math.round(undo.x) +
+      ', export ends ' + Math.round(exp.r));
   }
 
   /* The row fits the window whatever the font. Label widths are the
