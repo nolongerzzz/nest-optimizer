@@ -47,6 +47,7 @@ Current roster, by category:
 | Smooth (`app-sculpt.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment |
 | Extend (`app-extend.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/EXTEND.md` |
 | Bend (`app-bend.js`; the geometry is `nso_bend.js`) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/BEND.md` |
+| Tube edge (`app-tube-edge.js`; the geometry is `nso_tube_edge.js`) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/TUBE-EDGE.md` |
 | Mirror (`app-mirror.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/MIRROR.md` |
 | Fatten (`app-fatten.js`; no UI since Scale part 3 - the card's Offset replaced it) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/FATTEN.md` |
 | Pottery Wheel (`app-wheel.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/POTTERY-WHEEL.md` |
@@ -242,7 +243,7 @@ The groups, and what decides which one a row belongs to:
 
 | Group | Holds |
 |---|---|
-| **Shape** | changes the form: Soften, Smooth, Extend, Bend, Mirror, Thicken (Fatten / Shrink moved to the Scale card's Offset) |
+| **Shape** | changes the form: Soften, Smooth, Extend, Bend, Tube edge, Mirror, Thicken (Fatten / Shrink moved to the Scale card's Offset) |
 | **Paint** | the mask itself: Paint Selected / Excluded / Clear, Delete painted, Extract selection |
 | **Surface** | adds relief to a face: Skin face / wrap / patch, Texture |
 | **Sculpt** | freehand and local: Brush, Carve |
@@ -1369,6 +1370,31 @@ Three things a later ticket should read before touching this:
 `tools/mesh_validate.py` before/after, machine-compared) and
 `npm run wire:extend` (28 checks, real app). All three in `npm test`, along
 with `npm run paint:scope`, which was written but never wired into the suite.
+
+## Tube edge - Flare and Roll on the open end of a tube (2026-10-14)
+`nso_tube_edge.js` (headless) and `app-tube-edge.js` (the card), loaded after
+`app-bend.js` at `?v=tube1`. UI is a **Tube edge** button beside Bend in the
+Finish menu's Shape group, opening a small card (Verb, Way, Length / Angle /
+Δr / Profile or Radius / Angle, Set, Cancel) with a live ghost and an amber
+ring on the end being treated. Full write-up: `docs/TUBE-EDGE.md`.
+
+The end is a flat face bounded by two concentric circles, read with the
+section reader's own circle fit. The wall is swept round the tube's axis along
+a meridian curve - a cone, a parabolic "trumpet" or a circular roll - with one
+face the other's offset by the wall, so the wall holds through the new section
+(gated at 0.02 mm). Before a later ticket touches it:
+- **Station 0 is the end loop**, every vertex carried along its own radial
+  line: no weld at the join. The end face is the only thing removed.
+- **The thin-wall rule is a hoop stretch**: wall × (ring radius ÷ largest
+  mid-wall radius) must stay at or above 2 nozzle widths. The model itself
+  keeps the wall; the rule is the user's guard on what forming would do.
+- **Touch means one nozzle width**, checked as a 2D distance in each point's
+  meridian (the new wall is a surface of revolution), except within 2.5
+  nozzle widths of the end ring, where the new wall must meet the old.
+- **Inward and non-circular ends are refused**, by name; inward is a later ticket.
+
+`npm run tube:edges` (headless) and `npm run tube:edges-drive` (real app),
+both in `npm test`.
 
 ## Bend - a pipe or plate bender (2026-10-13)
 `nso_bend.js` (headless) and `app-bend.js` (the panel), loaded after
