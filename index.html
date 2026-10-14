@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=shell2" />
+  <link rel="stylesheet" href="styles.css?v=shell3" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -154,7 +154,7 @@
             </div>
           </details>
           <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-gen">
-            <summary class="vp-bar-btn" title="Generate a piece: stock to carve from, a vessel on the wheel, or a relief slab from a picture; or check a photogrammetry capture">Gen+ <span class="vp-caret" aria-hidden="true">▾</span></summary>
+            <summary class="vp-bar-btn" title="Generate a piece: stock to carve from, a vessel on the wheel, or a relief slab from a picture; or check a photogrammetry capture">Gen+</summary>
             <div class="vp-menu-body vp-top-body">
               <details class="vp-menu vp-wheel-menu">
               <summary>Wheel</summary>
@@ -338,7 +338,7 @@
             <!-- PLATE: Plate, Pieces (list + Clone) and Pack, the three column
                  menus merged; Clear plate came with them from Finish. -->
             <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-plates">
-              <summary class="vp-bar-btn" title="Plate size and grid, the pieces loaded and Clone, Pack, Clear plate">Plate <span class="vp-caret" aria-hidden="true">▾</span></summary>
+              <summary class="vp-bar-btn" title="Plate size and grid, the pieces loaded and Clone, Pack, Clear plate">Plate</summary>
               <div class="vp-menu-body vp-top-body">
                 <details class="vp-menu vp-sub-menu" id="menu-plate">
                   <summary title="Plate size, bed grid and snap">Plate</summary>
@@ -578,7 +578,7 @@
           <!-- JOIN: Join (Start / Complete / Cancel) and A-B-C, the two column
                menus merged; each keeps its own card. -->
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-joins">
-            <summary class="vp-bar-btn" title="Join two pieces (Start, pick A and B, Complete), or three at once with A-B-C">Join <span class="vp-caret" aria-hidden="true">▾</span></summary>
+            <summary class="vp-bar-btn" title="Join two pieces (Start, pick A and B, Complete), or three at once with A-B-C">Join</summary>
             <div class="vp-menu-body vp-top-body">
               <details class="vp-menu vp-sub-menu" id="menu-join">
                 <summary title="Start a Join and pick the pieces A, B and C">Join</summary>
@@ -617,9 +617,8 @@
               </details>
             </div>
           </details>
-          <!-- LIFT, SUPPORTS, SLICE SETTINGS: G-scope opened at that row of its
-               sidebar, the row marked and scrolled to (app-shell.js). The rows
-               themselves are untouched. -->
+          <!-- LIFT: G-scope opened at its Lift row, the row marked and scrolled
+               to (app-shell.js). The row itself is untouched. -->
           <button id="btn-shell-lift" class="vp-bar-btn vp-gscope-row-btn" type="button" data-gscope-row="ms-lift-row"
                   title="Open G-scope at its Lift row: lift details off a face as their own pieces">Lift</button>
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-seat">
@@ -907,15 +906,11 @@
                   aria-label="G-scope"
                   title="G-scope: put the plate under the lens, or open an STL, a 3MF or a sliced .gcode.3mf. Colour per part or per slicer feature, a capture box, single-line picking, a layer-range slider, clear-from-view - then export what you isolated, or crop a Z band out through the Crop tool.">G-scope</button>
           <input type="file" id="ms-input" accept=".stl,.3mf" class="hidden-quiet" />
-          <button id="btn-shell-supports" class="vp-bar-btn vp-gscope-row-btn" type="button" data-gscope-row="ms-support-row"
-                  title="Open G-scope at its Supports row: show overhangs, click one to build a support">Supports</button>
-          <button id="btn-shell-slice" class="vp-bar-btn vp-gscope-row-btn" type="button" data-gscope-row="ms-slice-row" data-gscope-open="ms-slice-settings"
-                  title="Open G-scope at the in-house slicer's settings: nozzle, layer, walls, infill, support angle">Slice settings</button>
           <div class="vp-shell-view vp-group-start">
-            <button id="btn-xray" class="vp-bar-btn" type="button" title="X-ray: see through the pieces">X-ray</button>
+            <button id="btn-xray" class="vp-bar-btn" type="button" aria-label="X-ray" title="X-ray: see through the pieces">X</button>
             <button id="btn-watch" class="vp-bar-btn" type="button"
-                    aria-pressed="false"
-                    title="Watch: log errors / failed loads / status lines, and check the rendered scene against the app state after every Undo, bake and tool switch.">Eye</button>
+                    aria-pressed="false" aria-label="Eye"
+                    title="Watch: log errors / failed loads / status lines, and check the rendered scene against the app state after every Undo, bake and tool switch.">&#128065;</button>
             <button id="btn-frame-view" class="vp-bar-btn" type="button" aria-label="Frame the view" title="Frame the selected piece, or the plate">◎</button>
           </div>
           </div>
@@ -1403,9 +1398,9 @@
   <script src="app-gscope-lift.js?v=lift3"></script>
 
 
-  <!-- Shell v2: the column's Lift, Supports and Slice settings buttons open
-       G-scope at that row. Calls app-microscope.js at click time only. -->
-  <script src="app-shell.js?v=shell2"></script>
+  <!-- Shell v2: the column's Lift button opens G-scope at its Lift row.
+       Calls app-microscope.js at click time only. -->
+  <script src="app-shell.js?v=shell3"></script>
   <script src="app-ux.js?v=inside9"></script>
   <!-- Live watch: off until its button is pressed, and it patches nothing
        until then. Deleting this tag and the #btn-watch button above removes

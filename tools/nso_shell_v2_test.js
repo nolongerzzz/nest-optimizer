@@ -3,10 +3,11 @@
 
    The top row, left to right: Import, Move, Rotate, Tip, Bend, Align, Gen+ ▾,
    Lock position, Lock plate, then at the right Undo, Remove, Export, with
-   Plate ▾ directly under Export. The left column in five groups, a 12 px gap
-   between them, a 36 px pitch inside them: Scale .. Subtract; Shape .. Sculpt;
-   Measure & check, Check & repair; G-scope, Supports, Slice settings; X-ray,
-   Eye, ◎ pinned to the bottom.
+   Plate directly under Export. Gen+, Join and Plate hold several menus each
+   but carry plain text, no drop-down mark. The left column in five groups, a
+   12 px gap between them, a 36 px pitch inside them: Scale .. Subtract;
+   Shape .. Sculpt; Measure & check, Check & repair; G-scope; and X-ray (X),
+   Eye (👁), ◎ in one row pinned to the bottom.
 
    GATES
      1. Grid on at load.
@@ -17,8 +18,8 @@
         at the one spot (the green box), one open at a time, and closing a
         card keeps the selection.
      4. Each plain button does what it should: the locks, Undo (and its
-        disabled state), Remove, X-ray, Eye, ◎, G-scope, and Lift / Supports
-        / Slice settings opening G-scope at their row.
+        disabled state), Remove, X-ray, Eye, ◎, G-scope, and Lift opening
+        G-scope at its row.
      5. Every control the shell had before v2 (listed below by id) is still
         reachable: each drop-down on the way to it is clicked open at its own
         on-screen spot, and the control is then hit-testable in its panel -
@@ -41,19 +42,23 @@ const check = (name, cond, detail) => {
 /* ---------------------------------------------------------------- the ticket */
 const ROW = [
   ['menu-import', 'IMPORT'], ['menu-move', 'MOVE'], ['menu-rotate', 'ROTATE'], ['menu-tip', 'TIP'],
-  ['menu-bend', 'BEND'], ['menu-align', 'ALIGN'], ['menu-gen', 'GEN+ ▾'],
+  ['menu-bend', 'BEND'], ['menu-align', 'ALIGN'], ['menu-gen', 'GEN+'],
   ['btn-lock-pos', 'LOCK POSITION'], ['btn-plate-lock', 'LOCK PLATE']
 ];
 const RIGHT = [['btn-undo', 'UNDO'], ['btn-delete-placed', 'REMOVE'], ['menu-export', 'EXPORT']];
-const UNDER_EXPORT = ['menu-plates', 'PLATE ▾'];
+const UNDER_EXPORT = ['menu-plates', 'PLATE'];
 const GROUPS = [
-  [['menu-scale', 'SCALE'], ['menu-cut', 'CUT'], ['menu-crop', 'CROP'], ['menu-joins', 'JOIN ▾'],
+  [['menu-scale', 'SCALE'], ['menu-cut', 'CUT'], ['menu-crop', 'CROP'], ['menu-joins', 'JOIN'],
    ['btn-shell-lift', 'LIFT'], ['menu-seat', 'SEAT'], ['menu-bit', 'SUBTRACT']],
   [['menu-shape', 'SHAPE'], ['menu-paint', 'PAINT'], ['menu-surface', 'SURFACE'], ['menu-sculpt', 'SCULPT']],
   [['menu-measure', 'MEASURE & CHECK'], ['menu-repair', 'CHECK & REPAIR']],
-  [['btn-microscope', 'G-SCOPE'], ['btn-shell-supports', 'SUPPORTS'], ['btn-shell-slice', 'SLICE SETTINGS']],
+  [['btn-microscope', 'G-SCOPE']],
   [['btn-xray', 'X-RAY'], ['btn-watch', 'EYE'], ['btn-frame-view', '◎']]
 ];
+/* The view group's faces are icons; X and the eye are named by their
+   aria-labels, ◎ by itself. */
+const ICON = { 'btn-xray': 'X', 'btn-watch': '\u{1F441}', 'btn-frame-view': '◎' };
+const GONE = ['btn-shell-supports', 'btn-shell-slice'];
 const ALL = ROW.concat(RIGHT, [UNDER_EXPORT], ...GROUPS);
 const DROPDOWNS = ALL.map(([id]) => id).filter(id => id.startsWith('menu-'));
 
@@ -156,7 +161,7 @@ const FILE_INPUT_VIA = { 'file-input': 'btn-load-stl', 'photoset-input': 'btn-ph
                          'raster-file': 'btn-trace-raster', 'ms-input': 'btn-microscope' };
 
 /* ------------------------------------------------------------------ helpers */
-const norm = s => String(s || '').toUpperCase().replace(/[^A-Z0-9+&▾◎\- ]/g, ' ').replace(/\s+/g, ' ').trim();
+const norm = s => String(s || '').toUpperCase().replace(/[^A-Z0-9+&◎\- ]/g, ' ').replace(/\s+/g, ' ').trim();
 
 // The clickable face of a shell entry: a <details>' summary, or the button.
 const FACE = id => {
@@ -207,7 +212,7 @@ withApp(async (page, logs) => {
 
   /* ------------------------------------------------------------------ 2 */
   console.log('\n=== 2. every button, its label, its place ===');
-  const geo = await page.evaluate((all) => {
+  const geo = await page.evaluate(([all, gone]) => {
     const FACE = id => {
       const e = document.getElementById(id);
       return e && e.tagName === 'DETAILS' ? e.querySelector(':scope > summary') : e;
@@ -217,21 +222,30 @@ withApp(async (page, logs) => {
       const f = FACE(id);
       if (!f) { out[id] = null; return; }
       const b = f.getBoundingClientRect();
-      out[id] = { text: f.textContent, x: b.left, y: b.top, w: b.width, h: b.height, r: b.right, b: b.bottom,
+      out[id] = { text: f.textContent, aria: f.getAttribute('aria-label') || '', x: b.left, y: b.top, w: b.width, h: b.height, r: b.right, b: b.bottom,
                   inRow: !!f.closest('.vp-shell-row'), inCol: !!f.closest('.vp-shell-col'),
                   cut: f.scrollWidth > f.clientWidth + 1 || f.scrollHeight > f.clientHeight + 1 };
     });
     const v = document.getElementById('viewport').getBoundingClientRect();
     out._vp = { top: v.top, bottom: v.bottom, left: v.left, right: v.right, h: v.height, W: innerWidth, H: innerHeight };
     out._strip = document.querySelectorAll('.viewport-overlay-bl, .viewport-tool-btn, .vp-finish-menu, #menu-finish').length;
+    out._marks = all.map(([id]) => (FACE(id) || {}).textContent || '').join('').match(/[▾▼⌄]/g) || [];
+    out._gone = gone.filter(id => document.getElementById(id));
     return out;
-  }, ALL);
+  }, [ALL, GONE]);
   {
     const missing = ALL.filter(([id]) => !geo[id]).map(([id]) => id);
     check('every button in the ticket exists', missing.length === 0, missing.join(', ') || ALL.length + ' buttons');
-    const wrong = ALL.filter(([id, label]) => geo[id] && norm(geo[id].text) !== norm(label))
-      .map(([id, label]) => id + ' reads "' + norm(geo[id].text) + '", wants "' + label + '"');
+    const named = id => (ICON[id] && id !== 'btn-frame-view') ? geo[id].aria : geo[id].text;
+    const wrong = ALL.filter(([id, label]) => geo[id] && norm(named(id)) !== norm(label))
+      .map(([id, label]) => id + ' reads "' + norm(named(id)) + '", wants "' + label + '"');
     check('each carries the ticket\'s label', wrong.length === 0, wrong.join('; ') || 'all ' + ALL.length);
+    const icons = Object.keys(ICON).filter(id => !geo[id] || geo[id].text.trim() !== ICON[id]);
+    check('the view group shows X, the eye emoji and ◎', icons.length === 0,
+      icons.map(id => id + ' shows "' + (geo[id] && geo[id].text.trim()) + '"').join('; ') || 'X 👁 ◎');
+    check('no drop-down mark on any face (Gen+, Join, Plate are plain text)', geo._marks.length === 0,
+      geo._marks.length + ' found');
+    check('Supports and Slice settings are not in the column', geo._gone.length === 0, geo._gone.join(', ') || 'gone');
     const cut = ALL.filter(([id]) => geo[id] && geo[id].cut).map(([id]) => id);
     check('no label is cut off or spills out of its slab', cut.length === 0, cut.join(', ') || 'none');
     check('the bottom-left tool strip and the Finish wrapper are gone', geo._strip === 0, geo._strip + ' found');
@@ -266,8 +280,9 @@ withApp(async (page, logs) => {
     check('a 12 px gap between groups', gaps.every(g => Math.abs(g - 12) < 0.5), gaps.join(' '));
     const view = col[4];
     const lastAbove = col[3][col[3].length - 1];
-    check('the view group (X-ray, Eye, ◎) is pinned to the bottom of the column, a group gap or more under Slice settings',
-      view.every(b => b.inCol && Math.abs(b.b - (geo._vp.bottom - 8)) < 0.5) && view[0].y - lastAbove.b >= 12 - 0.5 &&
+    check('the view group (X, eye, ◎) is one row pinned to the bottom of the column, a group gap or more under G-scope',
+      view.every(b => b.inCol && Math.abs(b.b - (geo._vp.bottom - 8)) < 0.5 && Math.abs(b.y - view[0].y) < 0.5) &&
+      view[0].y - lastAbove.b >= 12 - 0.5 &&
       Math.abs(view[0].x - imp.x) < 0.5 && view[2].r <= imp.r + 0.5,
       view.map(b => b.id + '@' + Math.round(b.x) + ',' + Math.round(b.y)).join(' ') + '; viewport bottom ' + geo._vp.bottom);
     const colBottom = Math.max(...view.map(b => b.b));
@@ -428,8 +443,7 @@ withApp(async (page, logs) => {
         return { shown: getComputedStyle(e).display !== 'none' && b.height > 0, target: e.classList.contains('ms-row-target'),
                  inView: b.top >= bar.top - 0.5 && b.top < bar.bottom - 20 };
       };
-      return { open: !panel.hidden, lift: row('ms-lift-row'), sup: row('ms-support-row'), slice: row('ms-slice-row'),
-               settings: document.getElementById('ms-slice-settings').open };
+      return { open: !panel.hidden, lift: row('ms-lift-row'), sup: row('ms-support-row'), slice: row('ms-slice-row') };
     });
     const msClose = () => page.evaluate(() => { if (NSO_MICROSCOPE.isOpen()) NSO_MICROSCOPE.close(); });
     c = await clickFace(page, '#btn-microscope');
@@ -439,23 +453,19 @@ withApp(async (page, logs) => {
     await page.evaluate(() => document.getElementById('btn-microscope').click());   // its own toggle shuts it
     const g1b = await page.evaluate(() => NSO_MICROSCOPE.isOpen());
     check('...and G-SCOPE shuts it again', g1b === false, String(g1b));
-    for (const [btn, key, label] of [['btn-shell-lift', 'lift', 'LIFT'], ['btn-shell-supports', 'sup', 'SUPPORTS'],
-                                      ['btn-shell-slice', 'slice', 'SLICE SETTINGS']]) {
-      await msClose();
-      c = await clickFace(page, '#' + btn);
-      await page.waitForTimeout(300);
-      const g = await gs();
-      const others = ['lift', 'sup', 'slice'].filter(k => k !== key && g[k].target);
-      check(label + ' opens G-scope with its row shown, marked and scrolled into view',
-        c.ok && g.open && g[key].shown && g[key].target && g[key].inView && others.length === 0 &&
-        (key !== 'slice' || g.settings),
-        JSON.stringify({ open: g.open, row: g[key], settings: g.settings, others }));
-      // Clicked again with G-scope open, it stays open (only G-SCOPE toggles).
-      if (key === 'lift') {
-        await page.evaluate((b) => document.getElementById(b).click(), btn);
-        check('...a second click leaves G-scope open', await page.evaluate(() => NSO_MICROSCOPE.isOpen()), '');
-      }
-    }
+    await msClose();
+    c = await clickFace(page, '#btn-shell-lift');
+    await page.waitForTimeout(300);
+    const gl = await gs();
+    const others = ['sup', 'slice'].filter(k => gl[k].target);
+    check('LIFT opens G-scope with its Lift row shown, marked and scrolled into view',
+      c.ok && gl.open && gl.lift.shown && gl.lift.target && gl.lift.inView && others.length === 0,
+      JSON.stringify({ open: gl.open, row: gl.lift, others }));
+    await page.evaluate(() => document.getElementById('btn-shell-lift').click());
+    check('...a second click leaves G-scope open', await page.evaluate(() => NSO_MICROSCOPE.isOpen()), '');
+    // Supports and Slice settings stay where they were: G-scope's own rows.
+    check('Supports and Slice settings are reached in G-scope, as before', gl.sup.shown && gl.slice.shown,
+      JSON.stringify({ supports: gl.sup.shown, slice: gl.slice.shown }));
     await msClose();
   }
 

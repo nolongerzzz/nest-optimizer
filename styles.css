@@ -3378,9 +3378,8 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
    height of the viewport - the bottom-left tool strip it used to have to
    clear is gone, its buttons are the column's last two groups.
 
-   Nineteen slabs on a 36px pitch do not fit under Import on a 1280 x 800
-   window (the viewport is 739px tall there), so the view group is one row
-   of three rather than three rows. */
+   The view group is one row of three icon buttons (X, the eye, the target),
+   which keeps the column short. */
 .vp-shell-col {
   display: flex;
   flex-direction: column;
@@ -3396,7 +3395,7 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 .vp-shell-col > .vp-shell-view {
   display: flex;
   gap: var(--shell-col-gap);
-  /* Pinned to the bottom; at least a group gap under Slice settings. */
+  /* Pinned to the bottom; at least a group gap under G-scope. */
   margin-top: auto;
   padding-top: calc(var(--shell-group-gap) - var(--shell-col-gap));
   pointer-events: none;
@@ -3450,8 +3449,7 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   pointer-events: none;
 }
 .vp-shell-stack > .vp-shell-menu.vp-shell-menu > summary { width: 100%; }
-/* The merge mark on Gen+, Join and Plate: a drop-down holding several. */
-.vp-caret { font-size: 9px; letter-spacing: 0; opacity: 0.8; }
+
 
 /* Static, so each panel's containing block is the overlay (see above). */
 .vp-shell-menu.vp-shell-menu {
@@ -3504,8 +3502,8 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 .vp-shell-view > .vp-bar-btn {
   height: var(--shell-col-btn-h);
 }
-/* A label longer than the column (Measure & check, Check & repair, Slice
-   settings) takes two lines inside its slab rather than spilling past it. */
+/* A label longer than the column (Measure & check, Check & repair) takes two
+   lines inside its slab rather than spilling past it. */
 .vp-shell-col > .vp-shell-menu > summary,
 .vp-shell-col > .vp-bar-btn {
   display: flex;        /* not inline-flex: a two-line label must not move the baseline */
@@ -3514,16 +3512,16 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   line-height: 1.15;
   text-align: center;
 }
-/* The view group's three share one column width in one row: tighter padding
-   and tracking than a full slab, and room for Eye's count dot. */
+/* The view group: three icon buttons sharing the column's width equally,
+   with room for the eye's count dot. */
 .vp-shell-view > .vp-bar-btn {
   position: relative;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
-  padding: 0 6px;
-  letter-spacing: 0.08em;
+  padding: 0;
+  font-size: 16px;
+  letter-spacing: 0;
 }
-.vp-shell-view > #btn-frame-view { flex: 0 0 auto; font-size: 15px; letter-spacing: 0; }
 .vp-shell-menu.vp-shell-menu > summary:hover,
 .vp-shell-row > .vp-bar-btn:hover:not(:disabled),
 .vp-shell-col > .vp-bar-btn:hover:not(:disabled),
@@ -3615,8 +3613,8 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
    sidebar-era fixed width the nested rule would otherwise inherit. */
 .vp-shell-menu .vp-sub-menu > .vp-menu-body { flex-direction: column; flex-wrap: nowrap; }
 
-/* G-scope opened at a row from the column (Lift, Supports, Slice settings):
-   the row it was opened at is marked until another is asked for. */
+/* G-scope opened at its Lift row from the column: the row is marked until
+   G-scope is opened from its own button. */
 #microscope .ms-section.ms-row-target {
   box-shadow: inset 3px 0 0 #7dd3fc;
   background: rgba(125, 211, 252, 0.07);

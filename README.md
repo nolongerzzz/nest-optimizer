@@ -307,18 +307,19 @@ Smart build-plate packing for 3D printing.
 
 ## Where things are (the shell)
 
-- **Top row**, left to right: Import, Move, Rotate, Tip, Bend, Align, Gen+ ▾
+- **Top row**, left to right: Import, Move, Rotate, Tip, Bend, Align, Gen+
   (Wheel, Stock, Picture, Photo), Lock position, Lock plate; at the right
-  Undo, Remove and Export, with **Plate ▾** under Export (Plate, Pieces with
+  Undo, Remove and Export, with **Plate** under Export (Plate, Pieces with
   Clone, Pack, Clear plate).
-- **Left column**, in five groups: Scale, Cut, Crop, Join ▾ (Join, A-B-C),
+- **Left column**, in five groups: Scale, Cut, Crop, Join (Join, A-B-C),
   Lift, Seat, Subtract · Shape, Paint, Surface, Sculpt · Measure & check,
-  Check & repair · G-scope, Supports, Slice settings · X-ray, Eye (Watch), ◎
-  (frame the view) at the bottom.
+  Check & repair · G-scope · X (X-ray), 👁 (Watch), ◎ (frame the view) in one
+  row at the bottom.
 - Every drop-down opens at the same spot, right of the column and under the
-  row, one at a time. **Lift**, **Supports** and **Slice settings** open
-  G-scope at that row of its sidebar. The old Finish menu's sections are the
-  column's second and third groups; Bend moved up to the row.
+  row, one at a time. **Lift** opens G-scope at its Lift row; Supports and
+  the slicer's settings are G-scope's own rows, as before. The old Finish
+  menu's sections are the column's second and third groups; Bend moved up
+  to the row.
 
 ## How to use
 

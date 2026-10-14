@@ -1,20 +1,17 @@
-/* Shell v2: the column's Lift, Supports and Slice settings buttons.
+/* Shell v2: the column's Lift button.
 
-   Each opens G-scope exactly as the G-scope button does - the plate under
-   the lens, or the file picker when the plate is empty - and then brings one
-   row of G-scope's sidebar into view and marks it: Lift (#ms-lift-row),
-   Supports (#ms-support-row), or the in-house slicer's row with its Slice
-   settings unfolded (#ms-slice-row, #ms-slice-settings). Which row is the
-   button's data-gscope-row; data-gscope-open names a <details> in it to
-   unfold.
+   It opens G-scope exactly as the G-scope button does - the plate under the
+   lens, or the file picker when the plate is empty - and then brings one row
+   of G-scope's sidebar into view and marks it: the button's data-gscope-row
+   (#ms-lift-row).
 
-   The rows, their controls and what they do belong to app-gscope-lift.js,
-   app-gscope-support.js and app-gscope-slice.js and are not touched here.
-   Nothing is pressed for the user: the row is shown, not started.
+   The row, its controls and what they do belong to app-gscope-lift.js and
+   are not touched here. Nothing is pressed for the user: the row is shown,
+   not started.
 
-   If G-scope is already open the buttons do not close it (the G-scope button
-   toggles; these only ever go to their row). Opening G-scope from its own
-   button clears the mark. */
+   If G-scope is already open the button does not close it (the G-scope
+   button toggles; this only ever goes to its row). Opening G-scope from its
+   own button clears the mark. */
 (function () {
   'use strict';
 
@@ -47,8 +44,6 @@
     }
     clearTarget();
     row.classList.add('ms-row-target');
-    var inner = btn.dataset.gscopeOpen ? $(btn.dataset.gscopeOpen) : null;
-    if (inner && inner.tagName === 'DETAILS') inner.open = true;
     scrollTo(row);
   }
 
