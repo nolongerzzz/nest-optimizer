@@ -102,8 +102,12 @@ async function main() {
   // =======================================================================
   check('the microscope rail button exists and is visible',
     await page.isVisible('#btn-microscope'), true);
-  check('it wears the rail class of the other viewport tools (sized for G + lens)',
-    await page.getAttribute('#btn-microscope', 'class'), 'viewport-tool-btn btn-gscope');
+  // Shell v2: the rail is gone; G-scope is a slab in the left column.
+  check('it is a slab in the shell\'s left column',
+    await page.evaluate(() => {
+      const b = document.getElementById('btn-microscope');
+      return b.classList.contains('vp-bar-btn') && !!b.closest('.vp-shell-col');
+    }), true);
   check('it says what it does on hover',
     /capture box/i.test(await page.getAttribute('#btn-microscope', 'title') || ''), true);
   check('the panel starts closed', await page.isVisible('#microscope'), false);

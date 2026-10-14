@@ -3,9 +3,10 @@
 
    WHY THIS EXISTS
 
-   The viewport's top strip is several absolutely positioned overlays sharing
+   The viewport's top strip was several absolutely positioned overlays sharing
    one line: `.viewport-overlay-topbar` on the left, and the `Stock`, `Wheel`
-   and `Finish` menus in the top-right corner. The topbar has to RESERVE room for the menus,
+   and `Finish` menus in the top-right corner (all three gone from there since
+   shell v2 - the topbar now spans the width). The topbar has to RESERVE room for the menus,
    because the menus sit at a higher z-index and their summaries have
    `pointer-events: auto` - so a topbar button underneath one of them is visible,
    enabled, and unclickable.
@@ -110,8 +111,10 @@ function cssStructure() {
     const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
     const menus = (html.match(/class="viewport-overlay viewport-overlay-(finish|wheel|stock)"/g) || []).length;
     const declared = (stripComments(src).match(/--vp-menu-count:\s*(\d+)/) || [])[1];
+    /* Shell v2 took Finish, the last of them, apart: there are none now, the
+       count is 0, and the topbar spans the width (tier 2 measures that). */
     check('--vp-menu-count matches the number of top-right menus in the markup',
-          menus > 0 && String(menus) === declared, menus + ' menus, --vp-menu-count: ' + declared);
+          String(menus) === declared, menus + ' menus, --vp-menu-count: ' + declared);
   }
 }
 
@@ -164,6 +167,7 @@ async function rendered() {
         .filter((e) => !e.closest('details:not([open])') && !e.hidden);
       return {
         topbar: box('.viewport-overlay-topbar'),
+        vpRight: document.querySelector('.viewport-section').getBoundingClientRect().right,
         wheel: box('.vp-wheel-menu'),
         stock: box('.vp-stock-menu'),
         finish: box('.vp-finish-menu'),
@@ -183,28 +187,16 @@ async function rendered() {
     });
 
     check('the topbar is on screen', !!m.topbar, m.topbar && m.topbar.w + 'px wide');
-    check('the Finish menu is on screen', !!m.finish,
-          m.finish && 'x ' + Math.round(m.finish.x) + '..' + Math.round(m.finish.right));
 
-    /* Finish is the only top-right menu now. The Wheel and Stock overlays are
-       gone - both menus moved into the bar's Gen+ dropdown - so the claims
-       that used to stand here, that each sat in its own corner immediately
-       left of the next, are claims about markup that no longer exists.
-       --vp-menu-count went 3 -> 1 with them, and the check above that it
-       matches the overlays in index.html is what keeps the two in step.
-
-       What is NOT dropped is the bug this file was written for: the topbar
-       must still end before the menu begins, or a bar control sits under a
-       higher-z menu summary - visible, enabled and unclickable. */
-    check('the Finish menu is positioned in the top-right corner, not left where an ' +
-          'unstyled overlay lands',
-          !!m.finish && m.finish.x > m.topbar.x,
-          m.finish && 'finish x ' + Math.round(m.finish.x) + ' vs topbar x ' + Math.round(m.topbar.x));
-
-    // THE ONE THAT BROKE. The topbar must end before the menus begin.
-    const vsFinish = overlap(m.topbar, m.finish);
-    check('the topbar reserves room for the Finish menu and does not run under it',
-          !vsFinish, vsFinish ? vsFinish.x + 'x' + vsFinish.y + ' px overlap' : 'clear');
+    /* No top-right menu is left (shell v2 took Finish, the last, apart:
+       its sections are column buttons now). The bug this file was written
+       for - a bar control under a higher-z overlay, visible, enabled and
+       unclickable - is still the point: with nothing at the top right the
+       topbar runs to the right edge, and the gate below still requires every
+       bar button to be clickable where it is drawn. */
+    check('no top-right overlay menu is left', !m.finish, m.finish ? 'Finish still at x ' + Math.round(m.finish.x) : 'none');
+    check('the topbar runs to the viewport\'s right edge', !!m.topbar && Math.abs(m.topbar.right - m.vpRight) < 0.5,
+          m.topbar && 'topbar ends ' + Math.round(m.topbar.right) + ' of ' + Math.round(m.vpRight));
 
     // The invariant that actually matters to a user: every button is clickable.
     const covered = m.buttons.filter((b) => b.covered);
@@ -220,10 +212,7 @@ async function rendered() {
           lock ? (lock.covered ? 'covered by ' + lock.by : 'clear at x ' +
                   Math.round(lock.x) + '..' + Math.round(lock.right)) : 'button not found');
 
-    console.log('       topbar x ' + Math.round(m.topbar.x) + '..' + Math.round(m.topbar.right) +
-                ' | Stock ' + Math.round(m.stock.x) + '..' + Math.round(m.stock.right) +
-                ' | Wheel ' + Math.round(m.wheel.x) + '..' + Math.round(m.wheel.right) +
-                ' | Finish ' + Math.round(m.finish.x) + '..' + Math.round(m.finish.right));
+    console.log('       topbar x ' + Math.round(m.topbar.x) + '..' + Math.round(m.topbar.right));
   });
 }
 

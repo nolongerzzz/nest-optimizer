@@ -12,11 +12,13 @@ const check = (name, cond, detail) => {
   if (!cond) fails++;
 };
 
-/* Every top-level drop-down on the page: the row, the column, and Finish. */
-const ROW = ['menu-import', 'menu-export', 'menu-rotate', 'menu-tip', 'menu-move',
-             'menu-photo', 'menu-gen', 'menu-finish'];
-const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-join', 'menu-align', 'menu-seat',
-             'menu-abc', 'menu-bit', 'menu-plate', 'menu-pieces', 'menu-pack'];
+/* Every top-level drop-down on the page (shell v2): the row with Plate under
+   Export, and the column. Members held inside one (Gen+'s four, Join's two,
+   Plate's three) are not top-level; section 3 covers them. */
+const ROW = ['menu-import', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-bend', 'menu-align',
+             'menu-gen', 'menu-export', 'menu-plates'];
+const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'menu-seat', 'menu-bit',
+             'menu-shape', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-measure', 'menu-repair'];
 const ALL = ROW.concat(COL);
 
 withApp(async (page, logs) => {
@@ -45,17 +47,18 @@ withApp(async (page, logs) => {
   const openCount = () => page.evaluate(() => document.querySelectorAll('.vp-menu[open]').length);
 
   /* ------------------------------------------------------------------ 1 */
-  console.log('\n=== 1. a panel never covers the bottom-left tools ===');
+  console.log('\n=== 1. a panel never covers the shell\'s plain buttons ===');
   {
-    /* The panels open at one spot right of the column, so none of them can
-       reach the tool column at the bottom-left (Undo, Frame, X-ray, G-scope,
-       Watch) at any height. The left column itself does reach it on a short
-       window - that is a known, separate collision and not this gate's. */
+    /* The panels open at one spot right of the column and under the row, so
+       none of them can reach a button that is not a drop-down - Undo, Remove,
+       the locks in the row; Lift, G-scope and the view row (X, the eye, the
+       target) in the column - at any height. */
     for (const h of [720, 900]) {
       await page.setViewportSize({ width: 1280, height: h });
       await page.waitForTimeout(250);
       const hits = await page.evaluate((ids) => {
-        const tools = ['btn-undo', 'btn-frame-view', 'btn-xray', 'btn-microscope', 'btn-watch']
+        const tools = ['btn-undo', 'btn-delete-placed', 'btn-lock-pos', 'btn-plate-lock', 'btn-shell-lift',
+                       'btn-microscope', 'btn-xray', 'btn-watch', 'btn-frame-view']
           .map(id => document.getElementById(id)).filter(Boolean)
           .map(e => ({ id: e.id, r: e.getBoundingClientRect() }));
         const out = [];
@@ -72,7 +75,7 @@ withApp(async (page, logs) => {
         }
         return out;
       }, ALL);
-      check('at ' + h + 'px tall no panel overlaps a bottom-left tool', hits.length === 0,
+      check('at ' + h + 'px tall no panel overlaps a plain shell button', hits.length === 0,
         hits.length ? hits.slice(0, 6).join('; ') : ALL.length + ' panels clear');
     }
     await page.setViewportSize({ width: 1400, height: 900 });
@@ -149,7 +152,7 @@ withApp(async (page, logs) => {
     await shutAll();
     await openMenu('menu-gen');
     const nested = [];
-    for (const cls of ['.vp-wheel-menu', '.vp-stock-menu', '.vp-relief-menu']) {
+    for (const cls of ['.vp-wheel-menu', '.vp-stock-menu', '.vp-relief-menu', '.vp-photo-menu']) {
       await page.click('#menu-gen ' + cls + ' > summary');
       await page.waitForTimeout(40);
       nested.push(await page.evaluate((cls) => ({
@@ -158,7 +161,7 @@ withApp(async (page, logs) => {
         others: [...document.querySelectorAll('#menu-gen .vp-menu[open]')].length - 1
       }), cls));
     }
-    check('opening Wheel, Stock or Picture leaves Gen+ open and shuts the other two',
+    check('opening Wheel, Stock, Picture or Photo leaves Gen+ open and shuts the other three',
       nested.every(n => n.gen && n.it && n.others === 0), JSON.stringify(nested));
     await openMenu('menu-seat');
     await page.waitForTimeout(40);

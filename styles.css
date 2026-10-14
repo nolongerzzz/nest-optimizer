@@ -27,7 +27,8 @@
      button ends up under a menu. */
   --vp-menu-gap: 8px;      /* margin at the edge, and between menus */
   --vp-menu-w: 96px;       /* one menu summary: the Finish slab, width 96px */
-  --vp-menu-count: 1;      /* Finish. Wheel and Stock moved into the bar's Gen+ */
+  --vp-menu-count: 0;      /* none: Wheel and Stock moved into Gen+, and shell v2
+                              took Finish apart; the topbar spans the width */
 }
 
 * {

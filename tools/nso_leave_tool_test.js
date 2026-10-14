@@ -217,7 +217,7 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 4 */
-  console.log('\n=== 4. Finish -> Soften, double-click ===');
+  console.log('\n=== 4. Shape -> Soften, double-click ===');
   {
     const pc = await pieceAt(0);
     await page.mouse.click(pc.x, pc.y);
@@ -231,10 +231,10 @@ withApp(async (page, logs) => {
     await dblPlate();
     await shot('soften-dblclick-closed');
     const r = await page.evaluate(() => ({
-      armed: state.softenArmed, finish: document.querySelector('.vp-finish-menu').open, pick: state.facePick
+      armed: state.softenArmed, shape: document.getElementById('menu-shape').open, pick: state.facePick
     }));
     check('Soften disarmed', r.armed === false);
-    check('Finish overlay closed', r.finish === false);
+    check('Shape menu closed', r.shape === false);
     held('Soften', before, await snap());
   }
 
@@ -294,10 +294,10 @@ withApp(async (page, logs) => {
     await shot('carve-dblclick-disarmed');
     const r = await page.evaluate(() => ({
       armed: state.carveArmed, pressed: document.getElementById('btn-carve').getAttribute('aria-pressed'),
-      finish: document.querySelector('.vp-finish-menu').open
+      sculpt: document.getElementById('menu-sculpt').open
     }));
     check('Carve disarmed through its button', r.armed === false && r.pressed === 'false', JSON.stringify(r));
-    check('Finish overlay closed with it', r.finish === false);
+    check('Sculpt menu closed with it', r.sculpt === false);
     held('Carve', before, await snap());
   }
 
@@ -347,13 +347,17 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 9 */
-  console.log('\n=== 9. each of the left column\'s eight menus, double-click ===');
+  console.log('\n=== 9. each drop-down that owns no input, double-click ===');
   {
-    const COL = ['menu-join', 'menu-align', 'menu-seat', 'menu-abc', 'menu-bit', 'menu-plate',
-                 'menu-pieces', 'menu-pack'];
+    /* Shell v2: Bend, Align and Plate in the row; Join, Seat, Subtract and
+       the six that were Finish's sections in the column. Then a member open
+       inside a merged one (A-B-C in Join, Pack in Plate, Photo in Gen+): the
+       double-click shuts it and the drop-down holding it. */
+    const COL = ['menu-bend', 'menu-align', 'menu-plates', 'menu-joins', 'menu-seat', 'menu-bit',
+                 'menu-shape', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-measure', 'menu-repair'];
     const ids = await page.evaluate(() => [...document.querySelectorAll('.vp-col-menu')].map(d => d.id));
-    check('the column holds the eight menus', JSON.stringify(ids) === JSON.stringify(COL), ids.join(', '));
-    for (const id of COL) {
+    check('the shell holds these twelve', JSON.stringify(ids) === JSON.stringify(COL), ids.join(', '));
+    for (const id of COL.concat(['menu-abc', 'menu-pack', 'menu-photo'])) {
       await page.evaluate(() => document.querySelectorAll('.vp-menu').forEach(d => { d.open = false; }));
       await page.click('#' + id + ' > summary');
       await page.waitForTimeout(150);
