@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=shell3" />
+  <link rel="stylesheet" href="styles.css?v=bridge1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -655,7 +655,7 @@
             </div>
           </details>
           <details class="vp-menu vp-shell-menu vp-col-menu vp-group-start" id="menu-shape" data-sec="shape">
-            <summary class="vp-bar-btn" title="Soften, Smooth, Extend, Mirror, Thicken, Hollow, Fill / Densify, Foam">Shape</summary>
+            <summary class="vp-bar-btn" title="Soften, Smooth, Extend, Mirror, Bridge, Thicken, Hollow, Fill / Densify, Foam">Shape</summary>
             <div class="vp-menu-body vp-finish">
             <div class="vp-row vp-row-opts">
               <label class="vp-clone">R <input type="number" id="inp-soften-r" value="0.5" min="0.05" max="5" step="0.05"></label>
@@ -685,6 +685,24 @@
                       title="Reflect the piece across a plane perpendicular to its dominant axis. The other two axes stay bit for bit. Default plane is the clean-band cut Extend would use; type 0 for X→−X. Refuses a plane that is not an exact float32 mirror. Leave the box blank and press once to read the axis and the plane.">Mirror</button>
               <input type="number" id="inp-mirror-plane" step="any"
                      placeholder="plane" aria-label="Mirror plane, mm">
+            </div>
+            <!-- BRIDGE: one button beside Extend and Mirror, and the card it
+                 opens (app-bridge.js, nso_bridge.js). docs/BRIDGE.md. -->
+            <div class="vp-row vp-row-full vp-row-bridge">
+              <button id="btn-bridge" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="bridge-panel"
+                      title="Stretch a web from one place on a piece to another - on the same piece or another one - and weld both ends into one closed solid. Face to face makes a band, point to point a round string, edge to edge a flat sheet. Every web is straight.">Bridge</button>
+            </div>
+            <div class="vp-bend-panel vp-bridge-panel" id="bridge-panel" hidden>
+              <p id="bridge-readout" class="bend-readout">—</p>
+              <label class="vp-bend-field" id="bridge-dia-row" hidden title="The string's diameter. Each end is sunk 0.5 mm under the surface, past the gap its rim leaves, and unioned.">Ø
+                <input type="number" id="inp-bridge-dia" min="0.4" step="0.1" value="2" aria-label="String diameter, mm"><span>mm</span></label>
+              <label class="vp-bend-field" id="bridge-thick-row" hidden title="The sheet's thickness. Blank: the thinner piece's wall, at least two nozzle widths. Flush with the faces either side when they lie in the sheet's plane.">Thick
+                <input type="number" id="inp-bridge-thick" min="0.8" step="0.1" placeholder="auto" aria-label="Sheet thickness, mm"><span>mm</span></label>
+              <div class="vp-row vp-row-pair">
+                <button id="btn-bridge-go" class="btn btn-secondary" type="button" disabled
+                        title="Build the web the ghost shows and weld both ends. The pieces become one; one Undo puts every input back.">Set</button>
+                <button id="btn-bridge-cancel" class="btn btn-secondary" type="button" title="Drop the pending web; with none pending, close the card.">Cancel</button>
+              </div>
             </div>
             <div class="vp-row vp-row-thicken">
               <button id="btn-thicken-out" class="btn btn-secondary" type="button">Thicken out</button>
@@ -1319,6 +1337,12 @@
        and app-sculpt.js (the commit). See docs/BEND.md. -->
   <script src="nso_bend.js?v=bend1"></script>
   <script src="app-bend.js?v=bend1"></script>
+  <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
+       nso_planar_fuse.js (the vertex space), nso_thickness.js,
+       nso_assemble.js (the seat), nso_path_sweep.js (the rod) and
+       nso_section.js (the face's shape). See docs/BRIDGE.md. -->
+  <script src="nso_bridge.js?v=bridge1"></script>
+  <script src="app-bridge.js?v=bridge1"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=polish2"></script>

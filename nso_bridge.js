@@ -105,8 +105,14 @@
     var n = triCount(soup);
     var tolInfo = (opts && opts.tolInfo) || tolFor([soup]);
     var grid = NSO_fuseVertGrid(tolInfo.tol);
-    var vid = new Int32Array(n * 3), i;
-    for (i = 0; i < n * 3; i++) vid[i] = grid.intern(soup[i * 3], soup[i * 3 + 1], soup[i * 3 + 2]);
+    var vid = new Int32Array(n * 3), i, exact = new Map();
+    // Bit-equal corners first (most of them: a soup repeats each vertex ~6
+    // times), so the grid only interns each distinct point once.
+    for (i = 0; i < n * 3; i++) {
+      var x = soup[i * 3], y = soup[i * 3 + 1], z = soup[i * 3 + 2], k0 = x + ',' + y + ',' + z, id0 = exact.get(k0);
+      if (id0 === undefined) { id0 = grid.intern(x, y, z); exact.set(k0, id0); }
+      vid[i] = id0;
+    }
     var nrm = new Float64Array(n * 3), area = new Float64Array(n), he = new Map(), dupHe = 0;
     for (var t = 0; t < n; t++) {
       var o = t * 9;
@@ -931,8 +937,12 @@
   /* Closed / manifold / wound / how many shells, welded on Join's grid. */
   function topology(soup, tolInfo) {
     var tol = (tolInfo && tolInfo.tol) || tolFor([soup]).tol;
-    var grid = NSO_fuseVertGrid(tol), n = triCount(soup), vid = new Int32Array(n * 3);
-    for (var i = 0; i < n * 3; i++) vid[i] = grid.intern(soup[i * 3], soup[i * 3 + 1], soup[i * 3 + 2]);
+    var grid = NSO_fuseVertGrid(tol), n = triCount(soup), vid = new Int32Array(n * 3), exact = new Map();
+    for (var i = 0; i < n * 3; i++) {
+      var x = soup[i * 3], y = soup[i * 3 + 1], z = soup[i * 3 + 2], k0 = x + ',' + y + ',' + z, id0 = exact.get(k0);
+      if (id0 === undefined) { id0 = grid.intern(x, y, z); exact.set(k0, id0); }
+      vid[i] = id0;
+    }
     var und = new Map(), dir = new Map(), degenerate = 0;
     var parent = new Int32Array(n);
     for (i = 0; i < n; i++) parent[i] = i;
