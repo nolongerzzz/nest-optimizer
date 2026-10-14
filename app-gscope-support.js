@@ -58,6 +58,8 @@ var NSO_GSCOPE_SUPPORT = (function () {
   var STYLES = { strut: 'Straight strut', tree: 'Tree', 'gecko-hand': 'Gecko-hand' };
   var MARK_RED = 0xff2d2d;
   var MARK_GREEN = 0x22c55e;
+  // Beacon states (see "Beacons" below): before Generate, then after it.
+  var BEACON = { planned: 0xffffff, held: MARK_GREEN, rest: 0xf59e0b, unreachable: MARK_RED };
 
   var on = false;              // markers shown
   var angleDeg = 45;
@@ -65,6 +67,9 @@ var NSO_GSCOPE_SUPPORT = (function () {
   var markers = [];            // [{ host, region, ping, overlay, supported }]
   var layer = null;            // THREE.Group in G-scope's scene
   var pop = null;              // { kind: 'new'|'edit', marker?, supportId? }
+  var popAnchor = null;        // { x, y } client px the open card points at
+  var picked = null;           // { hostSourceId, regionId } the card is open on
+  var tried = {};              // 'hostSourceId|regionId|style' -> beacons of a refused Generate
   var busy = false;
 
   function $(id) { return document.getElementById(id); }
@@ -285,6 +290,169 @@ var NSO_GSCOPE_SUPPORT = (function () {
     return { labelled: labelled.length, standing: standing, stale: stale };
   }
 
+  // =========================================================================
+  // Beacons - the points a support will hold, drawn before and after Generate
+  // =========================================================================
+
+  /*
+   * THE CONTRACT. A beacon is { p, n, kind, state }:
+   *   p      [x, y, z] on the surface, world Z-up mm (detection's frame)
+   *   n      the outward surface normal there, unit
+   *   kind   'face' - drawn as a small disc lying in the surface - or 'side',
+   *          a contact closer to the region's rim than half the support's
+   *          width (its tip lands on the edge), drawn as a tick standing off it
+   *   state  'planned' before Generate; after it, read off the plan:
+   *          'held' (its support stands on the plate), 'rest' (it stands on a
+   *          part), 'unreachable' (the plan could not get to it from below)
+   *
+   * This is the shared beacon contract the support card draws against, and
+   * the adapter here plays the part support-gridpack's does until
+   * support-beacons lands with its own beaconsFor / beaconStates. Nothing
+   * here plans: the points are the ones the generator is about to be handed
+   * - NSO_SupportTree.contactPoints for a tree, the region's aim point for a
+   * strut, called with the same soup and options - and the states are the
+   * counts the plan itself reports (its branches, the contact the trunk
+   * carries, its blocked list, the base it chose).
+   */
+  /** The region's rim: edges used by exactly one of its triangles. */
+  function rimOf(P, region) {
+    var key = function (o) { return Math.round(P[o] * 1e4) + '|' + Math.round(P[o + 1] * 1e4) + '|' + Math.round(P[o + 2] * 1e4); };
+    var edges = new Map();
+    region.tris.forEach(function (t) {
+      for (var e = 0; e < 3; e++) {
+        var a = t * 9 + e * 3, b = t * 9 + ((e + 1) % 3) * 3;
+        var ka = key(a), kb = key(b), k = ka < kb ? ka + '#' + kb : kb + '#' + ka;
+        var rec = edges.get(k);
+        if (rec) rec.n++; else edges.set(k, { n: 1, a: [P[a], P[a + 1], P[a + 2]], b: [P[b], P[b + 1], P[b + 2]] });
+      }
+    });
+    var rim = [];
+    edges.forEach(function (r) { if (r.n === 1) rim.push(r); });
+    return rim;
+  }
+
+  function onRim(rim, p, tol) {
+    for (var i = 0; i < rim.length; i++) {
+      var a = rim[i].a, b = rim[i].b;
+      var ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], ap = [p[0] - a[0], p[1] - a[1], p[2] - a[2]];
+      var L2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
+      var t = L2 > 0 ? Math.max(0, Math.min(1, (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / L2)) : 0;
+      if (Math.hypot(ap[0] - ab[0] * t, ap[1] - ab[1] * t, ap[2] - ab[2] * t) <= tol) return true;
+    }
+    return false;
+  }
+
+  /** The unit normal of the region triangle a surface point lies on. */
+  function normalAt(P, region, p) {
+    var best = null, bestD = Infinity;
+    region.tris.forEach(function (t) {
+      var o = t * 9, a = [P[o], P[o + 1], P[o + 2]], b = [P[o + 3], P[o + 4], P[o + 5]], c = [P[o + 6], P[o + 7], P[o + 8]];
+      var q = closestOnTri(p, a, b, c), dd = Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]);
+      if (dd < bestD) {
+        var u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+        var n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+        var L = Math.hypot(n[0], n[1], n[2]);
+        if (L > 0) { bestD = dd; best = [n[0] / L, n[1] / L, n[2] / L]; }
+      }
+    });
+    return best || region.normal.slice();
+  }
+
+  var SIDE_DEFAULT_MM = 1.2;                   // the card's own default size
+  function beaconsFrom(P, region, points, sideMm) {
+    var rim = rimOf(P, region), tol = (+sideMm > 0 ? +sideMm : SIDE_DEFAULT_MM) / 2;
+    return points.map(function (p) {
+      return { p: p.slice(), n: normalAt(P, region, p), kind: onRim(rim, p, tol) ? 'side' : 'face', state: 'planned' };
+    });
+  }
+
+  /** The generator's options for one call: the same object planFor hands it. */
+  function genOpts(baseOpts, regionId, style, sideMm) {
+    var o = Object.assign({}, baseOpts, { regionId: regionId });
+    if (sideMm != null && isFinite(sideMm)) o.sideMm = +sideMm;
+    if (style === 'tree' || style === 'gecko-hand') o.branchStyle = style === 'gecko-hand' ? 'gecko-hand' : 'square';
+    return o;
+  }
+
+  /** The beacons a style will hold on one region, before anything is planned. */
+  function beaconsFor(host, region, style, opts) {
+    if (style === 'strut') return { ok: true, beacons: beaconsFrom(host.positions, region, [region.point], opts.sideMm) };
+    if (!ST() || typeof ST().contactPoints !== 'function') return { ok: false, beacons: [], reason: 'nso_support_tree.js is not loaded' };
+    var cp = ST().contactPoints(host.positions, region, opts);
+    if (!cp.ok) return { ok: false, beacons: [], reason: cp.reason };
+    return { ok: true, beacons: beaconsFrom(host.positions, region, cp.points.map(function (c) { return c.p; }), opts.sideMm) };
+  }
+
+  /**
+   * The beacons after a Generate, with their states, from the plan's own
+   * report. A refused plan that got as far as finding a way down (base, aim,
+   * trunk, branches) marks every contact unreachable; one refused earlier
+   * (the region too wide for one trunk, say) leaves them planned - nothing
+   * was learnt about reaching them.
+   */
+  function beaconStates(host, region, style, g, opts) {
+    var plan = (g && g.plan) || {};
+    var pts = style === 'strut' ? [(plan.region || region).point]
+      : plan.contacts && plan.contacts.points ? plan.contacts.points.map(function (c) { return c.p; }) : null;
+    var sideMm = plan.sideMm || (plan.aim && plan.aim.sideMm) || opts.sideMm;
+    var beacons = pts ? beaconsFrom(host.positions, plan.region || region, pts, sideMm)
+      : (beaconsFor(host, region, style, opts).beacons || []);
+    if (g && g.ok) {
+      var base = style === 'strut' ? plan.aim && plan.aim.base : plan.base;
+      var held = base && base.base && base.base.kind === 'piece' ? 'rest' : 'held';
+      if (style === 'strut' || plan.single) beacons[0].state = held;
+      else {
+        (plan.branches || []).forEach(function (b) { if (beacons[b.contactIndex]) beacons[b.contactIndex].state = held; });
+        if (plan.trunkCarriesContact >= 0 && beacons[plan.trunkCarriesContact]) beacons[plan.trunkCarriesContact].state = held;
+        (plan.blocked || []).forEach(function (b) { if (beacons[b.index]) beacons[b.index].state = 'unreachable'; });
+      }
+    } else if (/^(base|aim|trunk|branches)$/.test(plan.stage || '')) {
+      beacons.forEach(function (b) { b.state = 'unreachable'; });
+    }
+    return beacons;
+  }
+
+  function countStates(beacons) {
+    var c = { held: 0, rest: 0, unreachable: 0, planned: 0 };
+    (beacons || []).forEach(function (b) { c[b.state] = (c[b.state] || 0) + 1; });
+    return c;
+  }
+
+  // =========================================================================
+  // Plain words - everything the card says goes through here
+  // =========================================================================
+
+  /** A number as people say it: at most one decimal place, none when whole. */
+  function num(x) {
+    var r = Math.round(+x * 10) / 10;
+    return isFinite(r) ? String(r) : '?';
+  }
+  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+  function readout(beacons) {
+    var c = countStates(beacons);
+    return plural(c.held, 'contact', 'contacts') + ' held from the plate · ' +
+      c.rest + ' resting on the part · ' + c.unreachable + ' unreachable';
+  }
+
+  /** Why a Generate came to nothing, in words a user acts on. */
+  function plainWhy(g, restOn) {
+    var plan = (g && g.plan) || {}, why = (g && g.reason) || '';
+    if (why === 'busy') return 'Still working on the last one - try again in a moment.';
+    if (plan.trunksNeeded) return 'This overhang is too wide for one support to reach all of it. ' +
+      'Try a straight strut instead.';
+    if (/^(base|aim)$/.test(plan.stage || '') || /no viable base|no base offers/.test(why)) {
+      return 'There is no clear straight path down to the plate from here' +
+        (restOn ? ', or onto the part.' : '. Tick "May rest on the part" to let it stand on the part instead.');
+    }
+    if (plan.stage === 'trunk') return 'The support would run into the part on its way up.';
+    if (plan.stage === 'branches') return 'None of the branches could reach the underside without hitting the part.';
+    if (plan.stage === 'contacts') return 'This overhang is too big to cover with one support.';
+    if (/did not land where it was generated/.test(why)) return 'It did not land where it was built, so nothing was added.';
+    if (/painted/.test(why)) return why.replace(/\s+-\s+/g, ' - ');
+    return 'It could not be built here.';
+  }
+
   function clearLayer() {
     if (!layer) return;
     for (var i = layer.children.length - 1; i >= 0; i--) {
@@ -310,8 +478,9 @@ var NSO_GSCOPE_SUPPORT = (function () {
   /**
    * One marker per region: the region's own flagged triangles, lifted a hair
    * off the surface and tinted, and a ping - a sphere at the region's aim
-   * point with a ring round it in the plane of the face. Red where no support
-   * stands for it yet, green where one does.
+   * point - to click. Red where no support stands for it yet, green where one
+   * does. A region with beacons to show (picked on the card, or held by a
+   * support) shows those instead of its ping: see drawBeacons.
    */
   function drawMarkers() {
     markers = [];
@@ -321,11 +490,7 @@ var NSO_GSCOPE_SUPPORT = (function () {
     layer.visible = on;
     var d = plateDoc();
     if (!on || !d) { syncPanel(); return; }
-    var span = 0;
-    d.objects.forEach(function (o) {
-      span = Math.max(span, o.bounds.maxX - o.bounds.minX, o.bounds.maxY - o.bounds.minY, o.bounds.maxZ - o.bounds.minZ);
-    });
-    var pingR = Math.max(0.5, Math.min(3, span * 0.025));
+    var pingR = markSize(d);
 
     scan.forEach(function (s) {
       if (!s.det || !s.det.ok) return;
@@ -353,24 +518,101 @@ var NSO_GSCOPE_SUPPORT = (function () {
           new THREE.MeshBasicMaterial({ color: col, depthTest: false, transparent: true, opacity: 0.95 }));
         ping.position.copy(at);
         ping.renderOrder = 12;
-        var ring = new THREE.Mesh(new THREE.RingGeometry(pingR * 1.6, pingR * 2.1, 32),
-          new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide, depthTest: false,
-            transparent: true, opacity: 0.8 }));
-        ring.position.copy(at);
-        // The ring lies in the face: its own +Z turned onto the region normal.
-        var nView = MS().toView(r.normal[0], r.normal[1], r.normal[2]);
-        var n0 = MS().toView(0, 0, 0);
-        ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1),
-          nView.sub(n0).normalize());
-        ring.renderOrder = 11;
-        var mk = { host: s.host, region: r, ping: ping, ring: ring, overlay: overlay, supported: supported,
-          stale: st.stale.map(function (x) { return x.name; }) };
-        ping.userData.marker = mk; overlay.userData.marker = mk; ring.userData.marker = mk;
-        layer.add(overlay); layer.add(ring); layer.add(ping);
+        // The beacons a standing support holds, as its plan left them.
+        var held = null;
+        st.standing.forEach(function (x) {
+          var m = modelOf(x.id);
+          if (!held && m && m.nsoSupport && m.nsoSupport.beacons) held = m.nsoSupport.beacons;
+        });
+        var mk = { host: s.host, region: r, ping: ping, overlay: overlay, supported: supported,
+          stale: st.stale.map(function (x) { return x.name; }), heldBeacons: held, beacons: null, beaconMeshes: [] };
+        ping.userData.marker = mk; overlay.userData.marker = mk;
+        layer.add(overlay); layer.add(ping);
         markers.push(mk);
       });
     });
+    if (pop && pop.kind === 'new' && picked) pop.marker = markerOf(picked.hostSourceId, picked.regionId) || pop.marker;
+    drawBeacons();
     syncPanel();
+  }
+
+  function markSize(d) {
+    var span = 0;
+    d.objects.forEach(function (o) {
+      span = Math.max(span, o.bounds.maxX - o.bounds.minX, o.bounds.maxY - o.bounds.minY, o.bounds.maxZ - o.bounds.minZ);
+    });
+    return Math.max(0.5, Math.min(3, span * 0.025));
+  }
+
+  function markerOf(hostSourceId, regionId) {
+    return markers.find(function (m) { return m.host.sourceId === hostSourceId && m.region.id === regionId; }) || null;
+  }
+
+  function cardStyle() { var el = $('ms-sp-style'); return el ? el.value : 'strut'; }
+  function cardSize() { var el = $('ms-sp-size'); return el ? parseFloat(el.value) : NaN; }
+  function cardRest() { var el = $('ms-sp-rest'); return !!(el && el.checked); }
+
+  /** The beacons the picked region shows now: a refused try's, else planned. */
+  function pickedBeacons(mk) {
+    var style = cardStyle(), key = mk.host.sourceId + '|' + mk.region.id + '|' + style;
+    if (tried[key]) return tried[key];
+    var d = plateDoc(), o = d ? optsFor(d, mk.host) : null;
+    if (!o || o.reason) return [];
+    var b = beaconsFor(mk.host, mk.region, style, genOpts(o.opts, mk.region.id, style, cardSize()));
+    return b.beacons;
+  }
+
+  /**
+   * The beacons, drawn on the surface: a disc lying in the face for a face
+   * beacon, a tick standing off the surface for a side one, each over a dark
+   * backing so a green or red beacon still reads on a tinted region. Drawn
+   * over everything, as the pings are: once a support stands there its own
+   * tips cover the very points whose state the beacons report. A
+   * region showing beacons hides its ping - the single centroid marker goes;
+   * the region's own tint stays.
+   */
+  function drawBeacons() {
+    markers.forEach(function (mk) {
+      mk.beaconMeshes.forEach(function (o) {
+        layer.remove(o);
+        if (o.geometry) o.geometry.dispose();
+        if (o.material) o.material.dispose();
+      });
+      mk.beaconMeshes = [];
+      var isPicked = !!(pop && pop.kind === 'new' && picked &&
+        picked.hostSourceId === mk.host.sourceId && picked.regionId === mk.region.id);
+      mk.beacons = isPicked ? pickedBeacons(mk) : (mk.supported ? mk.heldBeacons : null);
+      mk.ping.visible = !(mk.beacons && mk.beacons.length);
+      if (!mk.beacons || !mk.beacons.length) return;
+      var d = plateDoc();
+      var r = markSize(d) * 0.4, nn = Infinity, B = mk.beacons;
+      for (var i = 0; i < B.length; i++) for (var j = i + 1; j < B.length; j++) {
+        nn = Math.min(nn, Math.hypot(B[i].p[0] - B[j].p[0], B[i].p[1] - B[j].p[1], B[i].p[2] - B[j].p[2]));
+      }
+      if (isFinite(nn)) r = Math.max(0.12, Math.min(r, nn * 0.3));
+      var o0 = MS().toView(0, 0, 0), z = new THREE.Vector3(0, 0, 1), y = new THREE.Vector3(0, 1, 0);
+      B.forEach(function (b) {
+        var nv = MS().toView(b.n[0], b.n[1], b.n[2]).sub(o0).normalize();
+        var col = BEACON[b.state] != null ? BEACON[b.state] : BEACON.planned;
+        function put(geo, color, liftMm, order, axis) {
+          var m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: color, side: THREE.DoubleSide,
+            transparent: true, opacity: 0.98, depthWrite: false, depthTest: false }));
+          m.position.copy(MS().toView(b.p[0] + b.n[0] * liftMm, b.p[1] + b.n[1] * liftMm, b.p[2] + b.n[2] * liftMm));
+          m.quaternion.setFromUnitVectors(axis, nv);
+          m.renderOrder = order;
+          m.userData.marker = mk; m.userData.beacon = b;
+          layer.add(m); mk.beaconMeshes.push(m);
+          return m;
+        }
+        if (b.kind === 'side') {
+          put(new THREE.CylinderGeometry(r * 0.42, r * 0.42, r * 2.6, 8), 0x0b0f17, r * 1.3, 13, y);
+          put(new THREE.CylinderGeometry(r * 0.26, r * 0.26, r * 2.6, 8), col, r * 1.3 + 0.01, 14, y);
+        } else {
+          put(new THREE.CircleGeometry(r * 1.3, 20), 0x0b0f17, 0.04, 13, z);
+          put(new THREE.CircleGeometry(r, 20), col, 0.06, 14, z);
+        }
+      });
+    });
   }
 
   /** Re-scan and redraw, e.g. after the plate changed under G-scope. */
@@ -393,13 +635,50 @@ var NSO_GSCOPE_SUPPORT = (function () {
   // =========================================================================
 
   /**
+   * "May rest on the part": the bases the planner may stand a support on.
+   * Off (the default) this is undefined and the planner keeps its own, the
+   * plate alone. On, every plate piece - the host included - is offered as
+   * well, cut down to its upward-facing triangles that lie wholly below the
+   * region: the only faces a support could stand on to reach up to it. The
+   * planner picks the nearest clear one exactly as it picks the plate
+   * (NSO_SupportAim.nearestBase, kind 'piece'); nothing here aims anything.
+   */
+  var REST_UP = 0.5;                          // upward: its normal within 60 degrees of straight up
+  function restBases(d, host, regionId) {
+    var s = scan.find(function (x) { return x.host === host; });
+    var region = s && s.det && s.det.ok ? s.det.regions.find(function (r) { return r.id === regionId; }) : null;
+    var P = host.positions, plateZ = Infinity, i;
+    for (i = 2; i < P.length; i += 3) if (P[i] < plateZ) plateZ = P[i];
+    var bases = [{ kind: 'plate', z: s && s.det ? s.det.plateZ : plateZ }];
+    if (!region) return bases;
+    var lowZ = Infinity;
+    region.tris.forEach(function (t) { for (var v = 0; v < 3; v++) lowZ = Math.min(lowZ, P[t * 9 + v * 3 + 2]); });
+    hostsOf(d).forEach(function (o) {
+      var Q = o.positions, keep = [];
+      for (var t = 0; t + 8 < Q.length; t += 9) {
+        if (Math.max(Q[t + 2], Q[t + 5], Q[t + 8]) >= lowZ) continue;
+        var ux = Q[t + 3] - Q[t], uy = Q[t + 4] - Q[t + 1], uz = Q[t + 5] - Q[t + 2];
+        var wx = Q[t + 6] - Q[t], wy = Q[t + 7] - Q[t + 1], wz = Q[t + 8] - Q[t + 2];
+        var nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+        var L = Math.hypot(nx, ny, nz);
+        if (!(L > 0) || nz / L < REST_UP) continue;
+        if (Math.max(Q[t + 2], Q[t + 5], Q[t + 8]) <= bases[0].z + 1e-6) continue;   // the piece's own foot is the plate
+        for (var k = 0; k < 9; k++) keep.push(Q[t + k]);
+      }
+      if (keep.length) bases.push({ kind: 'piece', soup: new Float32Array(keep), id: o.name });
+    });
+    return bases;
+  }
+
+  /**
    * The generator's own call for one marker. Returns a Promise of
    * { ok, soup, plan, reason }. The soup is exactly what the generator (and,
    * for a tree, unionParts) handed back - nothing is done to it here.
+   * `bases` is restBases' list when the card allows resting on the part.
    */
-  function planFor(host, regionId, style, sideMm, baseOpts) {
-    var o = Object.assign({}, baseOpts, { regionId: regionId });
-    if (sideMm != null) o.sideMm = +sideMm;
+  function planFor(host, regionId, style, sideMm, baseOpts, bases) {
+    var o = genOpts(baseOpts, regionId, style, sideMm);
+    if (bases) o.bases = bases;
     if (style === 'strut') {
       var p = SA().plan(host.positions, o);
       return Promise.resolve(p.ok ? { ok: true, soup: p.soup, plan: p, reason: p.reason }
@@ -409,7 +688,6 @@ var NSO_GSCOPE_SUPPORT = (function () {
       return Promise.resolve({ ok: false, reason: 'unknown support style ' + JSON.stringify(style) });
     }
     if (!ST()) return Promise.resolve({ ok: false, reason: 'nso_support_tree.js is not loaded' });
-    o.branchStyle = style === 'gecko-hand' ? 'gecko-hand' : 'square';
     var t = ST().planTree(host.positions, o);
     if (!t.ok) return Promise.resolve({ ok: false, plan: t, reason: t.reason });
     return ST().unionParts(t.parts).then(function (u) {
@@ -518,36 +796,55 @@ var NSO_GSCOPE_SUPPORT = (function () {
   }
 
   /**
-   * Generate a support for one marker: host piece, region id, style, size.
-   * The whole click path runs through here, and so does the drive check.
+   * Generate a support for one marker: host piece, region id, style, size,
+   * and { rest } - may it stand on the part ("May rest on the part", off
+   * unless asked). The whole click path runs through here, and so does the
+   * drive check. Every result carries the beacons with their states, the
+   * readout line, and `plain` - what the card says.
    */
-  function generateAt(hostName, regionId, style, sideMm) {
-    if (busy) return Promise.resolve({ ok: false, reason: 'busy' });
+  function generateAt(hostName, regionId, style, sideMm, opt) {
+    var rest = !!(opt && opt.rest);
+    if (busy) return Promise.resolve({ ok: false, reason: 'busy', plain: plainWhy({ reason: 'busy' }) });
     var d = plateDoc();
-    if (!d) return Promise.resolve({ ok: false, reason: 'G-scope is not on the plate' });
+    if (!d) return Promise.resolve({ ok: false, reason: 'G-scope is not on the plate', plain: 'Read the plate first.' });
     var host = d.objects.find(function (o) { return o.name === hostName; });
-    if (!host || isSupportId(host.sourceId)) return Promise.resolve({ ok: false, reason: 'no such piece: ' + hostName });
+    if (!host || isSupportId(host.sourceId)) return Promise.resolve({ ok: false, reason: 'no such piece: ' + hostName, plain: 'That piece is not on the plate.' });
     var o = optsFor(d, host);
-    if (o.reason) { say('Support refused - ' + o.reason, true); return Promise.resolve({ ok: false, reason: o.reason }); }
+    if (o.reason) { say('Support refused - ' + o.reason, true); return Promise.resolve({ ok: false, reason: o.reason, plain: o.reason }); }
+    var s0 = scan.find(function (x) { return x.host === host; });
+    var region = s0 && s0.det && s0.det.ok ? s0.det.regions.find(function (r) { return r.id === regionId; }) : null;
+    var gen = genOpts(o.opts, regionId, style, sideMm);
     busy = true;
     say('Generating a ' + STYLES[style] + ' support...');
-    return planFor(host, regionId, style, sideMm, o.opts).then(function (g) {
-      if (!g.ok) { say('Support refused - nothing added: ' + g.reason, true); return g; }
+    return planFor(host, regionId, style, sideMm, o.opts, rest ? restBases(d, host, regionId) : null).then(function (g) {
+      var reg = (g.plan && g.plan.region) || region;
+      var beacons = reg ? beaconStates(host, reg, style, g, gen) : [];
+      var key = host.sourceId + '|' + regionId + '|' + style;
+      if (!g.ok) {
+        var why = plainWhy(g, rest);
+        tried[key] = beacons;
+        drawBeacons();
+        say('Support refused - nothing added. ' + why, true);
+        return Object.assign({}, g, { plain: why, beacons: beacons, readout: readout(beacons) });
+      }
       var meta = { hostSourceId: host.sourceId, hostName: host.name, regionId: regionId, style: style,
         sideMm: g.plan.sideMm || (g.plan.aim && g.plan.aim.sideMm) || +sideMm, angleDeg: angleDeg,
-        point: g.plan.region ? g.plan.region.point.slice() : null };
+        point: g.plan.region ? g.plan.region.point.slice() : null, rest: rest, beacons: beacons };
       var pl = placeSupport(g.soup, meta, host, o.opts);
-      if (!pl.ok) { say('Support refused - ' + pl.reason, true); return pl; }
+      if (!pl.ok) { var w2 = plainWhy(pl, rest); say('Support refused - ' + w2, true); return Object.assign({}, pl, { plain: w2 }); }
+      delete tried[key];
       if (typeof pushUndo === 'function') {
         pushUndo({ type: 'addModels', ids: [pl.id], editId: state.editId, cutT: state.cutT });
       }
-      say('Support added - ' + pl.name + ', ' + (g.soup.length / 9) + ' triangles; ' + g.reason);
+      var line = readout(beacons);
+      say('Support added under overhang ' + (regionId + 1) + ' on ' + host.name + ': ' + line);
       reread();                          // the support is now a piece
-      return { ok: true, id: pl.id, soup: g.soup, plan: g.plan, maxErrMm: pl.maxErrMm, name: pl.name };
+      return { ok: true, id: pl.id, soup: g.soup, plan: g.plan, maxErrMm: pl.maxErrMm, name: pl.name,
+        beacons: beacons, readout: line, plain: line };
     }).catch(function (err) {
       console.error('[g-scope support]', err);
-      say('Support failed - nothing added (' + ((err && err.message) || err) + ')', true);
-      return { ok: false, reason: (err && err.message) || String(err) };
+      say('Support failed - nothing added.', true);
+      return { ok: false, reason: (err && err.message) || String(err), plain: 'Something went wrong - nothing was added.' };
     }).then(function (r) { busy = false; return r; });
   }
 
@@ -566,22 +863,28 @@ var NSO_GSCOPE_SUPPORT = (function () {
   }
 
   /** Regenerate one support with a new style / size, replacing it: one step. */
-  function adjustSupport(id, style, sideMm) {
+  function adjustSupport(id, style, sideMm, opt) {
     var m = modelOf(id);
     if (!m || !m.nsoSupport) return Promise.resolve({ ok: false, reason: 'that piece is not a G-scope support' });
+    var rest = opt && opt.rest != null ? !!opt.rest : !!m.nsoSupport.rest;
     var d = plateDoc();
     var host = hostBySourceId(d, m.nsoSupport.hostSourceId);
-    if (!host) return Promise.resolve({ ok: false, reason: 'the piece this support holds up is gone' });
+    if (!host) return Promise.resolve({ ok: false, reason: 'the piece this support holds up is gone', plain: 'The piece this support holds up is gone.' });
     var o = optsFor(d, host);
-    if (o.reason) return Promise.resolve({ ok: false, reason: o.reason });
-    if (busy) return Promise.resolve({ ok: false, reason: 'busy' });
+    if (o.reason) return Promise.resolve({ ok: false, reason: o.reason, plain: o.reason });
+    if (busy) return Promise.resolve({ ok: false, reason: 'busy', plain: plainWhy({ reason: 'busy' }) });
     busy = true;
     var regionId = m.nsoSupport.regionId;
-    return planFor(host, regionId, style, sideMm, o.opts).then(function (g) {
-      if (!g.ok) { say('Support change refused - unchanged: ' + g.reason, true); return g; }
+    var s0 = scan.find(function (x) { return x.host === host; });
+    var region = s0 && s0.det && s0.det.ok ? s0.det.regions.find(function (r) { return r.id === regionId; }) : null;
+    var gen = genOpts(o.opts, regionId, style, sideMm);
+    return planFor(host, regionId, style, sideMm, o.opts, rest ? restBases(d, host, regionId) : null).then(function (g) {
+      if (!g.ok) { var why = plainWhy(g, rest); say('Support change refused - unchanged. ' + why, true); return Object.assign({}, g, { plain: why }); }
+      var reg = (g.plan && g.plan.region) || region;
+      var beacons = reg ? beaconStates(host, reg, style, g, gen) : [];
       var removed = removePieces([id]);
       var meta = Object.assign({}, m.nsoSupport, { style: style,
-        sideMm: g.plan.sideMm || (g.plan.aim && g.plan.aim.sideMm) || +sideMm });
+        sideMm: g.plan.sideMm || (g.plan.aim && g.plan.aim.sideMm) || +sideMm, rest: rest, beacons: beacons });
       var pl = placeSupport(g.soup, meta, host, o.opts);
       if (!pl.ok) {
         // Put the old one back exactly as it was; no step was recorded.
@@ -590,19 +893,21 @@ var NSO_GSCOPE_SUPPORT = (function () {
           state.placed.splice(Math.min(r.placedIndex, state.placed.length), 0, r.placed);
           if (r.placed.mesh && state.modelGroup) state.modelGroup.add(r.placed.mesh);
         });
-        say('Support change refused - unchanged: ' + pl.reason, true);
-        return pl;
+        var w2 = plainWhy(pl, rest);
+        say('Support change refused - unchanged. ' + w2, true);
+        return Object.assign({}, pl, { plain: w2 });
       }
       if (typeof pushUndo === 'function') {
         pushUndo({ type: 'supportSwap', removed: removed, addedIds: [pl.id], label: 'Undo: support change reverted' });
       }
-      say('Support changed - ' + pl.name + ', ' + (g.soup.length / 9) + ' triangles');
+      var line = readout(beacons);
+      say('Support changed - ' + pl.name + ': ' + line);
       closePop();
       reread();
-      return { ok: true, id: pl.id, replaced: id, soup: g.soup, plan: g.plan };
+      return { ok: true, id: pl.id, replaced: id, soup: g.soup, plan: g.plan, beacons: beacons, readout: line, plain: line };
     }).catch(function (err) {
       console.error('[g-scope support]', err);
-      return { ok: false, reason: (err && err.message) || String(err) };
+      return { ok: false, reason: (err && err.message) || String(err), plain: 'Something went wrong - nothing was changed.' };
     }).then(function (r) { busy = false; return r; });
   }
 
@@ -643,44 +948,111 @@ var NSO_GSCOPE_SUPPORT = (function () {
     return true;
   }
 
-  function placePop(e) {
+  /*
+   * WHERE THE CARD GOES. Next to the marker it belongs to - below and to the
+   * right of it - and always wholly inside the part of the viewport the
+   * window really shows (the viewport can run past the window's edge). No
+   * room below: it flips above the marker. No room above either: it pins to
+   * the shell's drop-down spot (--shell-panel-x / -y, the one spot every
+   * drop-down panel opens at), measured inside the viewport. Taller than the
+   * window shows, it scrolls inside itself rather than running off. And it is
+   * placed again whenever what it says changes, so a long message never
+   * grows it past the edge after it was placed.
+   */
+  var POP_GAP = 14, POP_MARGIN = 8, POP_RIGHT = 90;     // the layer slider's strip on the right
+
+  function shellSpot(host) {
+    var probe = document.createElement('div');
+    probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;width:0;height:0;' +
+      'left:var(--shell-panel-x, 134px);top:var(--shell-panel-y, 52px)';
+    host.appendChild(probe);
+    var at = { x: probe.offsetLeft, y: probe.offsetTop };
+    host.removeChild(probe);
+    return at;
+  }
+
+  function anchorOf(e) {
+    if (e && isFinite(e.clientX) && isFinite(e.clientY)) return { x: e.clientX, y: e.clientY };
+    return null;
+  }
+
+  /** The screen point of a world Z-up point, in client px. */
+  function screenOf(p) {
+    var v = MS() && MS().getView();
+    if (!v) return null;
+    var q = MS().toView(p[0], p[1], p[2]).project(v.camera);
+    var r = v.renderer.domElement.getBoundingClientRect();
+    return { x: r.left + (q.x + 1) / 2 * r.width, y: r.top + (1 - q.y) / 2 * r.height };
+  }
+
+  function placePop(anchor) {
     var el = $('ms-support-pop'), host = $('ms-viewport');
     if (!el || !host) return;
+    if (anchor !== undefined) popAnchor = anchor;
     el.hidden = false;
     var r = host.getBoundingClientRect();
-    var x = e ? e.clientX - r.left + 14 : 80, y = e ? e.clientY - r.top + 14 : 80;
-    x = Math.max(8, Math.min(r.width - el.offsetWidth - 90, x));
-    y = Math.max(8, Math.min(r.height - el.offsetHeight - 8, y));
-    el.style.left = x + 'px';
-    el.style.top = y + 'px';
+    var top = Math.max(r.top, 0) + POP_MARGIN, bottom = Math.min(r.bottom, window.innerHeight) - POP_MARGIN;
+    var left = Math.max(r.left, 0) + POP_MARGIN, right = Math.min(r.right, window.innerWidth) - POP_MARGIN;
+    el.style.maxHeight = Math.max(80, bottom - top) + 'px';
+    var w = el.offsetWidth, h = el.offsetHeight, x, y, how;
+    var a = popAnchor || { x: left + 72, y: top + 72 };
+    if (a.y + POP_GAP + h <= bottom) { x = a.x + POP_GAP; y = a.y + POP_GAP; how = 'below'; }
+    else if (a.y - POP_GAP - h >= top) { x = a.x + POP_GAP; y = a.y - POP_GAP - h; how = 'above'; }
+    else { var sp = shellSpot(host); x = r.left + sp.x; y = r.top + sp.y; how = 'pinned'; }
+    var maxX = right - w - (right - w - POP_RIGHT >= left ? POP_RIGHT : 0);
+    x = Math.max(left, Math.min(maxX, x));
+    y = Math.max(top, Math.min(bottom - h, y));
+    el.style.left = (x - r.left) + 'px';
+    el.style.top = (y - r.top) + 'px';
+    el.dataset.place = how;
+  }
+
+  /** Say something on the card, and keep the card inside the window. */
+  function cardSay(text) {
+    var el = $('ms-sp-read');
+    if (el) el.textContent = text;
+    if (pop && !$('ms-support-pop').hidden) placePop();
   }
 
   function openPopNew(mk, e) {
     pop = { kind: 'new', marker: mk };
+    picked = { hostSourceId: mk.host.sourceId, regionId: mk.region.id };
     var r = mk.region;
-    var tilt = Math.acos(Math.min(1, Math.max(-1, -r.normal[2]))) * 180 / Math.PI;
     $('ms-sp-title').textContent = 'Overhang ' + (r.id + 1) + ' on ' + mk.host.name;
-    $('ms-sp-sub').textContent = r.areaMm2.toFixed(1) + ' mm², ' + tilt.toFixed(0) +
-      '° off flat, ' + r.dropMm.toFixed(1) + ' mm above the plate' +
-      (mk.supported ? ' - already has a support' :
-        mk.stale && mk.stale.length ? ' - ' + mk.stale.join(', ') + ' was made for it but no longer ' +
-          'touches it (a piece was moved, turned or mirrored)' : '');
-    $('ms-sp-read').textContent = '';
+    $('ms-sp-sub').textContent = 'An underside of ' + num(r.areaMm2) + ' mm\u00b2, ' + num(r.dropMm) +
+      ' mm above the plate' +
+      (mk.supported ? '. It already has a support.' :
+        mk.stale && mk.stale.length ? '. ' + mk.stale.join(', ') + ' was made for it but no longer ' +
+          'touches it - a piece was moved, turned or mirrored.' : '.');
+    var rest = $('ms-sp-rest');
+    if (rest) rest.checked = false;
     showButtons('new');
-    placePop(e);
+    drawBeacons();
+    cardSay(plannedLine(mk));
+    placePop(anchorOf(e) || screenOf(r.point));
+  }
+
+  /** What the card says before Generate: how many points it will hold. */
+  function plannedLine(mk) {
+    var n = (mk.beacons || []).length;
+    return n ? plural(n, 'contact', 'contacts') + ' to hold, shown on the part.' : '';
   }
 
   function openPopEdit(id, e) {
     var m = modelOf(id);
     pop = { kind: 'edit', supportId: id };
+    picked = null;
+    drawBeacons();
     $('ms-sp-title').textContent = m.name;
     $('ms-sp-sub').textContent = 'Holds up overhang ' + (m.nsoSupport.regionId + 1) + ' on ' +
       m.nsoSupport.hostName + '. Change it, or remove it - one Undo either way.';
     $('ms-sp-style').value = m.nsoSupport.style;
-    $('ms-sp-size').value = String(+m.nsoSupport.sideMm.toFixed(2));
-    $('ms-sp-read').textContent = '';
+    $('ms-sp-size').value = num(m.nsoSupport.sideMm);
+    var rest = $('ms-sp-rest');
+    if (rest) rest.checked = !!m.nsoSupport.rest;
     showButtons('edit');
-    placePop(e);
+    $('ms-sp-read').textContent = m.nsoSupport.beacons ? readout(m.nsoSupport.beacons) : '';
+    placePop(anchorOf(e));
   }
 
   function showButtons(kind) {
@@ -689,27 +1061,49 @@ var NSO_GSCOPE_SUPPORT = (function () {
   }
 
   function closePop() {
+    var had = !!picked;
     pop = null;
+    picked = null;
     var el = $('ms-support-pop');
     if (el) el.hidden = true;
+    if (had && layer) drawBeacons();
+  }
+
+  /** The card's own controls changed: the picked region's beacons follow. */
+  function cardChanged() {
+    if (!pop || pop.kind !== 'new') return;
+    drawBeacons();
+    cardSay(plannedLine(pop.marker));
   }
 
   function popGenerate() {
     if (!pop || pop.kind !== 'new') return null;
-    var mk = pop.marker;
-    $('ms-sp-read').textContent = 'Generating...';
-    return generateAt(mk.host.name, mk.region.id, $('ms-sp-style').value, parseFloat($('ms-sp-size').value))
+    var mk = pop.marker, anchor = popAnchor;
+    cardSay('Generating...');
+    return generateAt(mk.host.name, mk.region.id, cardStyle(), cardSize(), { rest: cardRest() })
       .then(function (r) {
-        if (r.ok) closePop(); else if ($('ms-sp-read')) $('ms-sp-read').textContent = 'Refused: ' + r.reason;
+        if (r.ok) {
+          // The re-read closed the card; open it again on the support just
+          // made, where it was, saying what the plan holds.
+          if (modelOf(r.id)) { openPopEdit(r.id, anchor && { clientX: anchor.x, clientY: anchor.y }); cardSay(r.readout); }
+        } else {
+          var counted = (r.beacons || []).some(function (x) { return x.state !== 'planned'; });
+          cardSay((counted ? r.readout + '. ' : '') + 'Not added: ' + r.plain);
+        }
         return r;
       });
   }
 
   function popApply() {
     if (!pop || pop.kind !== 'edit') return null;
-    $('ms-sp-read').textContent = 'Regenerating...';
-    return adjustSupport(pop.supportId, $('ms-sp-style').value, parseFloat($('ms-sp-size').value))
-      .then(function (r) { if (!r.ok && $('ms-sp-read')) $('ms-sp-read').textContent = 'Refused: ' + r.reason; return r; });
+    var anchor = popAnchor;
+    cardSay('Regenerating...');
+    return adjustSupport(pop.supportId, cardStyle(), cardSize(), { rest: cardRest() })
+      .then(function (r) {
+        if (r.ok) { if (modelOf(r.id)) { openPopEdit(r.id, anchor && { clientX: anchor.x, clientY: anchor.y }); cardSay(r.readout); } }
+        else cardSay('Unchanged: ' + r.plain);
+        return r;
+      });
   }
 
   // =========================================================================
@@ -754,6 +1148,14 @@ var NSO_GSCOPE_SUPPORT = (function () {
     bind('ms-sp-apply', 'click', popApply);
     bind('ms-sp-remove', 'click', function () { if (pop && pop.kind === 'edit') removeSupport(pop.supportId); });
     bind('ms-sp-cancel', 'click', closePop);
+    bind('ms-sp-style', 'change', cardChanged);
+    bind('ms-sp-size', 'change', cardChanged);
+    bind('ms-sp-rest', 'change', function () {
+      // A refused try was made with the other setting: its states no longer say anything.
+      if (pop && pop.kind === 'new') delete tried[pop.marker.host.sourceId + '|' + pop.marker.region.id + '|' + cardStyle()];
+      cardChanged();
+    });
+    window.addEventListener('resize', function () { if (pop) placePop(); });
     syncPanel();
   }
 
@@ -774,11 +1176,18 @@ var NSO_GSCOPE_SUPPORT = (function () {
       var d = plateDoc(), h = d && d.objects.find(function (o) { return o.name === hostName; });
       return h ? optsFor(d, h) : null;
     },
-    planFor: function (hostName, regionId, style, sideMm) {
+    planFor: function (hostName, regionId, style, sideMm, opt) {
       var d = plateDoc(), h = d && d.objects.find(function (o) { return o.name === hostName; });
       if (!h) return Promise.resolve({ ok: false, reason: 'no such piece' });
-      return planFor(h, regionId, style, sideMm, optsFor(d, h).opts);
+      return planFor(h, regionId, style, sideMm, optsFor(d, h).opts,
+        opt && opt.rest ? restBases(d, h, regionId) : null);
     },
+    /** The beacons a marker shows now (null when it shows its ping). */
+    beaconsOf: function (hostName, regionId) {
+      var mk = markers.find(function (m) { return m.host.name === hostName && m.region.id === regionId; });
+      return mk ? mk.beacons : null;
+    },
+    readout: readout,
     generateAt: generateAt,
     removeSupport: removeSupport,
     adjustSupport: adjustSupport,

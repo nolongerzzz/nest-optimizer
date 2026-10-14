@@ -3184,6 +3184,17 @@ button.ms-legend-only:hover { border-color: var(--accent); }
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
 }
 .ms-pop[hidden] { display: none; }
+/* app-gscope-support.js sets max-height to what the window shows of the
+   viewport; past that the card scrolls inside itself, never off the edge. */
+#ms-support-pop { overflow-y: auto; box-sizing: border-box; }
+.ms-pop-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+  color: var(--muted);
+  cursor: pointer;
+}
 .ms-pop-title { font-weight: 600; margin-bottom: 4px; }
 .ms-pop-field {
   display: flex;

@@ -329,10 +329,14 @@ async function main() {
     [1, 'addModels']);
   check('it carries what it is: host, region, style, size',
     [strut.meta.hostName, strut.meta.regionId, strut.meta.style, strut.meta.sideMm], ['shelf', 1, 'strut', 1.2]);
-  check('the popover closed and the tab\'s marker is green now',
+  // The card stays open on the support it just made, saying what it holds
+  // (support:ui holds it to that); closed here to click on.
+  check('the card turned to the new support and the tab\'s marker is green now',
     await page.evaluate(() => [document.getElementById('ms-support-pop').hidden,
+      getComputedStyle(document.getElementById('ms-sp-apply')).display !== 'none',
       window.NSO_GSCOPE_SUPPORT.markers().find((m) => m.region.id === 1).ping.material.color.getHex()]),
-    [true, 0x22c55e]);
+    [false, true, 0x22c55e]);
+  await page.click('#ms-sp-cancel');
 
   // =======================================================================
   console.log('\n--- 2b. a tree on the shelf ---');
@@ -370,7 +374,11 @@ async function main() {
   const s3 = await shot(page, '03-strut-and-tree.png', 'a strut and a tree, both markers green');
   check('both markers green now', await page.evaluate(() =>
     window.NSO_GSCOPE_SUPPORT.markers().every((m) => m.supported)), true);
-  check('green is on screen', s3.green > 20, true);
+  // A supported region shows its beacons, held green, in place of its ping.
+  check('green is on screen', s3.green > 0, true);
+  check('...as each region\'s beacons, all held (green)', await page.evaluate(() =>
+    window.NSO_GSCOPE_SUPPORT.markers().every((m) => m.beacons && m.beacons.length &&
+      m.beacons.every((b) => b.state === 'held') && !m.ping.visible)), true);
 
   // =======================================================================
   console.log('\n--- 4. the export agrees with the scene ---');
