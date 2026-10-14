@@ -246,8 +246,14 @@ withApp(async (page, logs) => {
   console.log('\n=== 1. a tall piece: 40 x 30 x 140 ===');
   const tall = await load('tall.stl', bar(40, 30, 140));
   await open(tall);
+  // Square across the longest dimension, the Cut card's default cut on this
+  // piece is horizontal (to length; wire:cut-redesign section 2), and a
+  // horizontal plane never meets the plate. This section is about a blade
+  // standing up through a tall piece, so it locks the cut to plate X.
+  await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'x'; a.dispatchEvent(new Event('change')); });
   await ends('tall', tall);
   await pixels('tall', tall);
+  await page.evaluate(() => { const a = document.getElementById('edit-axis'); a.value = 'auto'; a.dispatchEvent(new Event('change')); });
 
   console.log('\n=== 2. a wide piece: 160 x 140 x 15 ===');
   const wide = await load('wide.stl', bar(160, 140, 15));
@@ -255,12 +261,12 @@ withApp(async (page, logs) => {
   await ends('wide', wide);
   await pixels('wide', wide);
 
-  console.log('\n=== 3. a turned piece: 60 x 12 x 30, turned 15 deg with the cutter\'s own button ===');
-  // The button turns the geometry itself (the piece is shown as the cutter's
+  console.log('\n=== 3. a turned piece: 60 x 12 x 30, turned 15 deg by the cutter\'s own yaw ===');
+  // The yaw turns the geometry itself (the piece is shown as the cutter's
   // preview), so the cut runs along the plate's X across a turned section.
   const turned = await load('turned.stl', bar(60, 12, 30));
   await open(turned);
-  await page.click('#btn-yaw-left');
+  await page.evaluate(() => rotateActiveModelY(-15));   // the yaw the Cut card's ⟲ 15 made
   let s = await view(turned);
   const want15 = 60 * Math.cos(Math.PI / 12) + 12 * Math.sin(Math.PI / 12);
   check('turned 15 deg: the cut runs along X over the turned bar, span ' + want15.toFixed(2),
