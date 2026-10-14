@@ -85,7 +85,14 @@ Smart build-plate packing for 3D printing.
   slider and arrows only write the lift and rebuild the piece's rotation from
   the plate record, this keeps the rotation and only moves it down. Its place on
   the plate is untouched and one Undo puts it back.
-- **Crop** (Cut menu, under Split) takes a middle section out of a piece: set
+- **Cut** (its own card in the left column) cuts a piece to length. Opening
+  the card arms it; a click on a piece drops the blade where the click landed,
+  square across the piece's longest dimension as it lies (a tipped piece too).
+  The slider and **←** / **→** move it along the piece; the **mitre wheel**
+  (optional) turns the cut's heading to any degree while the piece stays put.
+  **Cut** is a clean split: the two halves meet exactly at the plane and add
+  back to the original - "4 | 4", no kerf. One Undo puts it back.
+- **Crop** (its own card, under Cut) takes a middle section out of a piece: set
   the box by two distances along the cut axis (or tick **Box** and drag it on
   the piece), press Crop, and the slab inside the box is removed, the far part
   slides back by the box length, and the joint is sealed into one closed piece.

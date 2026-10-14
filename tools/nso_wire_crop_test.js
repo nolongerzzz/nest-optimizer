@@ -2,7 +2,7 @@
    node tools/nso_wire_crop_test.js        exit 0 = every gate held
 
    Real index.html, real clicks. The geometry proofs live in
-   tools/nso_crop_test.js; this file proves the Crop row in the Cut menu is
+   tools/nso_crop_test.js; this file proves the Crop card is
    reachable, the box is drawn and really moves under a mouse drag, the
    button commits a piece that passes tools/mesh_validate.py - both the
    rawTris the app keeps and the STL it exports - undo names Crop and puts
@@ -51,9 +51,10 @@ function bar(L, W, H) {
 
 const rawOf = page => page.evaluate(() => Array.from(getActiveModel().rawTris));
 const openCutter = async page => {
-  const open = await page.evaluate(() => document.getElementById('menu-cut').open);
-  if (!open) await page.click('#menu-cut > summary');
-  if (!(await page.evaluate(() => state.cutterOpen))) await page.click('#btn-cutter-open');
+  // Crop (and Detach under it) has its own card; opening it arms Crop.
+  const open = await page.evaluate(() => document.getElementById('menu-crop').open);
+  if (!open) await page.click('#menu-crop > summary');
+  if (!(await page.evaluate(() => state.cutterOpen && state.cutTool === 'crop'))) await page.evaluate(() => openCutter('crop'));
 };
 const setBox = async (page, a, b) => {
   await page.fill('#crop-start-mm', String(a));
@@ -66,12 +67,12 @@ withApp(async (page, logs) => {
   console.log('\n=== 1. the Crop row is in the Cut menu and wired ===');
   const ui = await page.evaluate(() => {
     const b = document.getElementById('btn-crop');
-    const inMenu = !!(b && b.closest('#menu-cut'));
+    const inMenu = !!(b && b.closest('#menu-crop'));
     return { btn: !!b, wired: !!b && b.dataset.nsoWired === '1', inMenu,
              inputs: ['crop-start-mm', 'crop-end-mm'].every(i => (document.getElementById(i) || {}).type === 'number'),
              box: (document.getElementById('chk-crop-box') || {}).type === 'checkbox' };
   });
-  check('#btn-crop present, inside the Cut menu', ui.btn && ui.inMenu);
+  check('#btn-crop present, inside the Crop card', ui.btn && ui.inMenu);
   check('listener attached at load', ui.wired);
   check('from / to boxes numeric, Box tick present', ui.inputs && ui.box);
 
@@ -194,6 +195,7 @@ withApp(async (page, logs) => {
   await page.waitForFunction(() => /Crop (done|refused)/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
   check('hinge 7.2..10.8 cropped', /Crop done/.test(await statusOf(page)), await statusOf(page));
   const halves = await page.evaluate(id => {
+    openCutter('cut');      // Cut is its own card now: arm it for the split
     state.editId = id;
     updateCutHelper();
     cutActiveModel();

@@ -44,9 +44,10 @@ const summary = j => j.verdict + ' open ' + j.open_edges + ' nm ' + j.nonmanifol
 
 const rawOf = page => page.evaluate(() => Array.from(getActiveModel().rawTris));
 const openCutter = async page => {
-  const open = await page.evaluate(() => document.getElementById('menu-cut').open);
-  if (!open) await page.click('#menu-cut > summary');
-  if (!(await page.evaluate(() => state.cutterOpen))) await page.click('#btn-cutter-open');
+  // Crop (and Detach under it) has its own card; opening it arms Crop.
+  const open = await page.evaluate(() => document.getElementById('menu-crop').open);
+  if (!open) await page.click('#menu-crop > summary');
+  if (!(await page.evaluate(() => state.cutterOpen && state.cutTool === 'crop'))) await page.evaluate(() => openCutter('crop'));
 };
 const fill = async (page, id, v) => { await page.fill('#' + id, String(v)); await page.dispatchEvent('#' + id, 'change'); };
 const setMove = async (page, d) => {
@@ -64,11 +65,11 @@ withApp(async (page, logs) => {
   const ui = await page.evaluate(() => {
     const b = document.getElementById('btn-crop-lockin');
     const ids = ['crop-up-from', 'crop-up-to', 'crop-across-from', 'crop-across-to', 'crop-move-dx', 'crop-move-dy', 'crop-move-dz'];
-    return { btn: !!b, inMenu: !!(b && b.closest('#menu-cut')), wired: !!b && b.dataset.nsoWired === '1',
+    return { btn: !!b, inMenu: !!(b && b.closest('#menu-crop')), wired: !!b && b.dataset.nsoWired === '1',
              numeric: ids.every(i => (document.getElementById(i) || {}).type === 'number'),
              lift: (document.getElementById('chk-crop-lift') || {}).type === 'checkbox', disabled: !!(b && b.disabled) };
   });
-  check('#btn-crop-lockin present, inside the Cut menu, listener attached', ui.btn && ui.inMenu && ui.wired);
+  check('#btn-crop-lockin present, inside the Crop card, listener attached', ui.btn && ui.inMenu && ui.wired);
   check('Up / Across / ΔX ΔY ΔZ numeric, Lift tick present', ui.numeric && ui.lift);
   check('Lock in disabled before anything is lifted', ui.disabled);
 

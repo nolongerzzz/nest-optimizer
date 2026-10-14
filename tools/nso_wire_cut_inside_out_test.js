@@ -15,7 +15,7 @@
         without the click.
      2. The click (status line, then the panel): two pieces, each closed,
         2-manifold, enclosing positive volume; their volumes add up to the
-        original's absolute volume plus the kerf band each keeps; and they are
+        original's absolute volume exactly (a clean split); and they are
         bit for bit the halves of the same piece built right-side-out.
      3. One step on the Undo stack, and one Undo puts the original inside-out
         piece back bit for bit (raw triple, display mesh, name, size).
@@ -38,7 +38,6 @@ const check = (name, cond, detail) => {
 };
 
 const LABEL = 'Turn it right-side-out, then cut';
-const KERF = 1.0;   // KERF_MM, app-core.js
 
 /* ---------------- fixtures, in the file's own frame (Z up) ---------------- */
 function box(x0, y0, z0, x1, y1, z1) {
@@ -91,10 +90,10 @@ async function load(page, file) {
 }
 const openCutter = async page => {
   await page.evaluate(() => {
-    const e = document.getElementById('btn-cutter-open');
+    const e = document.getElementById('cutter-tools');
     for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
   });
-  if (!(await page.evaluate(() => state.cutterOpen))) await page.click('#btn-cutter-open');
+  if (!(await page.evaluate(() => cutterArmed('cut')))) await page.evaluate(() => openCutter('cut'));
 };
 
 /* Puts the red line on piece `id` the way a click on it does, on plate axis X,
@@ -197,12 +196,11 @@ withApp(async (page, logs) => {
         h.T.dupFaces === 0 && h.T.badEdge === 0 && h.T.badWinding === 0 && h.T.volume > 0, tStr(h.T)));
       const sum = halves.reduce((a, h) => a + h.T.volume, 0);
       const twinSum = twin.reduce((a, h) => a + h.T.volume, 0);
-      // Each piece keeps the 1 mm kerf band (the raw route), so the two add
-      // up to the piece plus one band: section x kerf.
-      const band = c.section != null ? c.section * KERF : twinSum - c.vol;
-      check(tag + ': the pieces\' volumes add up to the original\'s absolute volume plus the kerf band',
-        halves.length === 2 && Math.abs(sum - (c.vol + band)) < 1e-4 * c.vol && band > 0 && band < 0.1 * c.vol,
-        sum.toFixed(3) + ' = ' + c.vol.toFixed(3) + ' + ' + band.toFixed(3) + ' (kerf band)');
+      // A clean split: the two pieces add back to the piece exactly (no kerf
+      // band comes out, none is kept twice).
+      check(tag + ': the pieces\' volumes add up to the original\'s absolute volume',
+        halves.length === 2 && Math.abs(sum - c.vol) < 1e-4 * c.vol && Math.abs(twinSum - c.vol) < 1e-4 * c.vol,
+        sum.toFixed(3) + ' vs ' + c.vol.toFixed(3));
       check(tag + ': the pieces are bit for bit the right-side-out twin\'s',
         halves.length === 2 && twin.length === 2 && halves.every((h, i) => sameBytes(h.raw, twin[i].raw)));
       check(tag + ': one step on Undo', after.undo === start.undo + 1,

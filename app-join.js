@@ -3082,8 +3082,8 @@ function cutActiveModel(opts) {
   // Any Cut attempt answers the last offer; a refusal below makes a new one.
   if (typeof cutClearRightSideOutOffer === 'function') cutClearRightSideOutOffer();
   try {
-  if (!state.cutterOpen) {
-    setStatus('Open cutter first', true);
+  if (!state.cutterOpen || (state.cutTool || 'cut') !== 'cut') {
+    setStatus('Open Cut first', true);
     return;
   }
   const m = getActiveModel();
@@ -3093,7 +3093,7 @@ function cutActiveModel(opts) {
   }
   const info = getCutPlaneForSplit(m);
   if (!info) {
-    setStatus('Cannot resolve cut plane - reopen cutter', true);
+    setStatus('Cannot resolve cut plane - reopen Cut', true);
     return;
   }
   const axis = info.axis;
@@ -3110,10 +3110,8 @@ function cutActiveModel(opts) {
     setStatus('Keep >= ' + MIN_CUT_SIDE_MM + ' mm on each side of the red plane', true);
     return;
   }
-  // Kerf band centered on red line - middle slab discarded so halves have a real gap
-  const halfKerf = KERF_MM * 0.5;
-  const leftPlane = plane - halfKerf;
-  const rightPlane = plane + halfKerf;
+  // A clean split at the one plane (cutSplitAt, app-cut.js): the halves meet
+  // exactly and add back to the piece - no kerf band comes out.
   // Turned right-side-out only on the click, only for the piece it was
   // offered for, and only when every shell of it is inside-out. The turn is
   // made on a copy; m itself stays as it is, so it is what Undo restores.
@@ -3135,7 +3133,7 @@ function cutActiveModel(opts) {
   }
   let pair;
   try {
-    pair = splitBothSides(cutModel, axis, leftPlane, rightPlane);
+    pair = cutSplitAt(cutModel, info);
   } catch (err) {
     if (err && err.name === 'CutRefused') {
       if (err.insideOut && !rightSideOut) {
@@ -3311,15 +3309,12 @@ function cutActiveModel(opts) {
   updateCutterUI();
   updateUndoBtn();
 
-  const sum = mL.along + mR.along;
-  const loss = span - sum;
   setStatus(
     (rightSideOut ? 'Turned right-side-out (' + (cutModel.geometry.attributes.position.count / 3) +
       ' triangles reversed), then cut; one Undo puts the original back. ' : '') +
-    'Cut @ ' + cutMm.toFixed(1) + ' mm (kerf ' + KERF_MM + ' mm) -> ' +
+    'Cut @ ' + cutMm.toFixed(1) + ' mm' + (info.deg ? ', mitre ' + info.deg + '°' : '') + ' -> ' +
     nameA + ' ' + mL.along.toFixed(1) + ' mm + ' + nameB + ' ' + mR.along.toFixed(1) +
-    ' mm [' + pair.engine + ']. List: ' + state.models.length + ' models. Undo: ' + state.undoStack.length + '.' +
-    (Math.abs(loss) > KERF_MM + 1.5 ? ' ! loss ' + loss.toFixed(1) + ' mm' : '')
+    ' mm [' + pair.engine + ']. List: ' + state.models.length + ' models. Undo: ' + state.undoStack.length + '.'
   );
   } catch (err) {
     console.error(err);
@@ -3683,7 +3678,7 @@ function setupUI() {
       undoLast();
       return;
     }
-    if (state.cutterOpen && getActiveModel()) {
+    if (cutterArmed('cut') && getActiveModel()) {
       if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
         e.preventDefault();
         setCutMm(getCutMm() - 0.5);
@@ -3704,10 +3699,9 @@ function setupUI() {
       }
     }
   });
-  const btnCutterOpen = document.getElementById('btn-cutter-open');
-  if (btnCutterOpen) btnCutterOpen.addEventListener('click', openCutter);
-  const btnCutterClose = document.getElementById('btn-cutter-close');
-  if (btnCutterClose) btnCutterClose.addEventListener('click', () => closeCutter(false));
+  // No Open / Close buttons: the Cut and Crop cards arm and disarm the
+  // cutter themselves (cutWireCards, app-cut.js).
+  cutWireCards();
   const btnCut = document.getElementById('btn-cut');
   if (btnCut) btnCut.addEventListener('click', cutActiveModel);
   const btnCutRightSideOut = document.getElementById('btn-cut-right-side-out');
@@ -3874,23 +3868,16 @@ const btnFrameView = document.getElementById('btn-frame-view');
   if (slotA) slotA.addEventListener('click', function () { armJoinSlot('a'); });
   const slotB = document.getElementById('join-slot-b');
   if (slotB) slotB.addEventListener('click', function () { armJoinSlot('b'); });
-  const btnYawL = document.getElementById('btn-yaw-left');
-  const btnYawR = document.getElementById('btn-yaw-right');
-  const btnYawL90 = document.getElementById('btn-yaw-left-90');
-  const btnYawR90 = document.getElementById('btn-yaw-right-90');
-  if (btnYawL) btnYawL.addEventListener('click', () => rotateActiveModelY(-15));
-  if (btnYawR) btnYawR.addEventListener('click', () => rotateActiveModelY(15));
-  if (btnYawL90) btnYawL90.addEventListener('click', () => rotateActiveModelY(-90));
-  if (btnYawR90) btnYawR90.addEventListener('click', () => rotateActiveModelY(90));
+  // The yaw buttons are gone from the Cut card (the mitre wheel angles the
+  // cut, the piece stays put); rotateActiveModelY stays for the yaw drag.
 
+  // The hidden axis select: Crop's axis (resolveAxis), and the programmatic
+  // cut-axis lock (cutFrame). No visible control sets either now - Cut X /
+  // Cut Z are gone; the blade is square to the piece's length by itself.
   function setCutAxisLock(axis) {
     state.cutAxis = axis;
     const sel = document.getElementById('edit-axis');
     if (sel) sel.value = axis;
-    const bx = document.getElementById('btn-cut-axis-x');
-    const bz = document.getElementById('btn-cut-axis-z');
-    if (bx) bx.classList.toggle('tool-active', axis === 'x');
-    if (bz) bz.classList.toggle('tool-active', axis === 'z');
     if (state.cutterOpen && getActiveModel()) {
       const mesh = getCutterTargetMesh();
       if (mesh) state.previewMesh = mesh;
@@ -3900,10 +3887,6 @@ const btnFrameView = document.getElementById('btn-frame-view');
     }
     setStatus('Blade axis ' + axis.toUpperCase());
   }
-  const btnAx = document.getElementById('btn-cut-axis-x');
-  const btnAz = document.getElementById('btn-cut-axis-z');
-  if (btnAx) btnAx.addEventListener('click', function () { setCutAxisLock('x'); });
-  if (btnAz) btnAz.addEventListener('click', function () { setCutAxisLock('z'); });
   const axisSel = document.getElementById('edit-axis');
   if (axisSel) axisSel.addEventListener('change', function () {
     setCutAxisLock(axisSel.value === 'z' ? 'z' : axisSel.value === 'x' ? 'x' : 'auto');
@@ -3915,10 +3898,12 @@ const btnFrameView = document.getElementById('btn-frame-view');
   });
   const cutMm = document.getElementById('cut-mm');
   if (cutMm) cutMm.addEventListener('change', () => setCutMm(Number(cutMm.value)));
+  // ← / →: the blade along the piece by one step each press.
   const nudgeM = document.getElementById('btn-cut-nudge-m');
-  if (nudgeM) nudgeM.addEventListener('click', () => setCutMm(getCutMm() - 1));
+  if (nudgeM) nudgeM.addEventListener('click', () => setCutMm(getCutMm() - CUT_NUDGE_MM));
   const nudgeP = document.getElementById('btn-cut-nudge-p');
-  if (nudgeP) nudgeP.addEventListener('click', () => setCutMm(getCutMm() + 1));
+  if (nudgeP) nudgeP.addEventListener('click', () => setCutMm(getCutMm() + CUT_NUDGE_MM));
+  cutWireMiterDial();
   updateAdjustUI();
   updateCutterUI();
 }

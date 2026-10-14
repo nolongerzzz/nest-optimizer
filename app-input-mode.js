@@ -79,7 +79,8 @@
      deterministic rather than dependent on which handler happened to ask
      first. No menu is exempt: Cut used to be pinned open while the cutter
      was live, and is not any more - only one panel is open on the page
-     (app-join.js), and the cutter stays live with its panel shut. */
+     (app-join.js), and the Cut and Crop cards arm the cutter while open and
+     disarm it when shut (app-cut.js, cutWireCards). */
   function resolve() {
     var live = menus().filter(function (d) { return d.open; });
     if (!live.length) return null;

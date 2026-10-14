@@ -18,7 +18,7 @@ const check = (name, cond, detail) => {
 const ROW = ['menu-import', 'menu-export', 'menu-rotate', 'menu-tip', 'menu-move',
              'btn-delete-placed', 'btn-lock-pos', 'btn-plate-lock',
              'menu-photo', 'menu-gen', 'menu-finish'];
-const COL = ['menu-scale', 'menu-cut', 'menu-join', 'menu-align', 'menu-seat',
+const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-join', 'menu-align', 'menu-seat',
              'menu-abc', 'menu-bit', 'menu-plate', 'menu-pieces', 'menu-pack'];
 const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(COL);
 
@@ -368,7 +368,10 @@ withApp(async (page, logs) => {
     let lo = 600, hi = 1000;                     // lo collides, hi does not
     const okEnds = (await collides(lo)) && !(await collides(hi));
     while (hi - lo > 1) { const m = (lo + hi) >> 1; if (await collides(m)) lo = m; else hi = m; }
-    check('the collision starts below about 790 px of window height, no higher',
+    // The 1280 x 800 floor: the column must clear the tools at 800 tall.
+    // Eleven slabs since Crop got its own card, on a 4 px column gap (and a
+    // 4 px gap between the tools): clear from about 795.
+    check('the collision starts below 800 px of window height (the 1280 x 800 floor holds)',
       okEnds && hi >= 770 && hi <= 800, okEnds ? 'clear from ' + hi + ' px tall' : 'not bracketed by 600..1000');
     await page.setViewportSize({ width: 1500, height: 820 });
   }

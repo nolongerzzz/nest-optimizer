@@ -141,8 +141,8 @@ withApp(async (page, logs) => {
        tools/nso_wire_fuse_test.js's splitFixture, kept local to this file
        since only this section needs it. */
     async function splitOnce(page, id) {
-      await page.evaluate(() => { const e = document.getElementById('btn-cutter-open'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-      if (!(await page.evaluate(() => state.cutterOpen))) await page.click('#btn-cutter-open');
+      await page.evaluate(() => { const e = document.getElementById('cutter-tools'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+      if (!(await page.evaluate(() => cutterArmed('cut')))) await page.evaluate(() => openCutter('cut'));
       await selectModel(page, id);
       return await page.evaluate(() => {
         if (typeof updateCutHelper === 'function') updateCutHelper();
