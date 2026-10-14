@@ -8,12 +8,6 @@ layer-view work (`docs/GCODE-SUPPORTS.md`); both call the same planner.
 npm run support:card    tools/nso_support_card_drive_check.mjs, 80 checks, headless Chromium at 1280 x 800
 ```
 
-![The tilted box with All built: 121 spots in 2 regions, every one held from the plate](img/support-card-tilted-box.png)
-
-*The tilted box after a shift-click on its side wall and All: "121 spots need
-holding in 2 regions", "121 held from the plate · 0 resting on the part · 0
-unreachable". The badge on each region is its count, green when built.*
-
 ## 1. Flow
 
 Open Supports, click a piece. Its beacons appear on it: the spots that need
@@ -98,8 +92,6 @@ region 1). Region 1's badge takes off exactly its solids and leaves region
 one stroke back and forth along rows 0–4 of 10: 120 → 60, exactly rows 5–9
 left. A standing tube: "Nothing on this piece needs holding.", All off. Every
 step adds exactly one Undo entry, and Undo after each restores it.
-
-![Paint Skip over half the face: 60 spots left](img/support-card-skip-half.png)
 
 ## 5. Flags
 
