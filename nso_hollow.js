@@ -866,7 +866,20 @@
 
     /* Is this inward-wound shell sitting in material? Sampled at several faces
        rather than one, because a single face can be a sliver whose centroid
-       offset lands on the wrong side of a thin wall. */
+       offset lands on the wrong side of a thin wall.
+
+       THE PROBE REACHES ACROSS THE WHOLE PIECE. At nso_thickness.js's 5 mm
+       default a face whose wall is thicker than that came back unmeasured and
+       was skipped, and when every face was skipped the shell was never asked
+       at all - a 40 mm cube round a 10 mm hollow read as "mis-wound, not
+       inside material" and Fill and Foam both stood down. Behind a genuine
+       cavity wall there is ALWAYS a surface - the outside of the piece - and
+       it can be no further away than the box's diagonal, so that is the
+       reach. A face whose probe still finds nothing points out of the piece
+       altogether: there is no material that way, so it is asked and votes no,
+       rather than dropping out of the count. */
+    var span = [P.hi[0] - P.lo[0], P.hi[1] - P.lo[1], P.hi[2] - P.lo[2]];
+    var reach = Math.sqrt(span[0] * span[0] + span[1] * span[1] + span[2] * span[2]) + 1;
     function enclosed(list) {
       var votes = 0, asked = 0;
       var stepN = Math.max(1, Math.floor(list.length / 9));
@@ -880,10 +893,10 @@
         /* How far there is to step before the next surface, measured rather
            than guessed - on a cavity wall that IS the wall thickness, and a
            quarter of it is safely inside the material and safely off the face. */
-        var w = P.wallAt(c, { normal: Nn });
-        var step = w.measured ? Math.max(w.mm * 0.25, TH.WELD_TOL * 10) : null;
-        if (step === null) continue;
+        var w = P.wallAt(c, { normal: Nn, probe: reach });
         asked++;
+        if (!w.measured) continue;
+        var step = Math.max(w.mm * 0.25, TH.WELD_TOL * 10);
         if (P.inside([c[0] - Nn[0] * step, c[1] - Nn[1] * step, c[2] - Nn[2] * step])) votes++;
       }
       return asked > 0 && votes * 2 > asked;

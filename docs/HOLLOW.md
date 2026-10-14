@@ -150,7 +150,10 @@ enough:
 
 * it is **wound inward** (negative signed volume);
 * it **sits in material** (stepping off its surface the way its normals do not
-  point lands inside the solid, sampled at up to nine faces).
+  point lands inside the solid, sampled at up to nine faces). The step is a
+  quarter of the wall behind the face, measured with a probe that reaches the
+  piece's whole box diagonal - at nso_thickness.js's 5 mm default a hollow
+  whose every wall was thicker went unconfirmed and was never filled.
 
 A captive separate solid - a rattle's ball, a trapped bearing - is wound outward
 and survives. A mis-wound outer shell fails the second test, is left alone, and
@@ -272,6 +275,7 @@ still drives it.
 | --- | --- | --- |
 | `tools/nso_hollow_test.js` | `hollow` | 107 checks. Canonical checker before/after on four fixtures; the cube against an answer known by construction (16^3 = 4096 mm3); `fill(hollow(X))` byte for byte; the captive-solid case; the thicken/edit/hollow-back-out workflow end to end. |
 | `tools/nso_live_gate_test.js` | `live:gate` | 54 checks. Live probe vs batch checker, face for face; refuse the thin stroke / allow the safe one, and both sides of the boundary; the unmeasured case; the independence demonstration; both wirings. |
+| `tools/nso_cavity_thickwall_test.js` | `cavity:thickwall` | 27 checks. `cavityShells()` on thick walls: a 40 mm cube round a 10 mm hollow is found and filled / foamed; a captive solid in a 20 mm-walled hollow is still not a cavity (nor is one saved inside out); thin walls unchanged. |
 | `tools/nso_wire_hollow_test.js` | `wire:hollow` | The three buttons in the real app in Chromium: click, commit, Undo, refusals, and the canonical checker run **in the page** on each result. |
 
 Also extended: `tools/nso_carve_test.js` (section 2i3, the carve refusal through

@@ -348,14 +348,15 @@
     }
     /* An inward-wound shell the cavity test could not confirm is in material:
        Fill / Densify leaves it alone, so Foam does too - and says what it is
-       rather than guess. In practice a sealed hollow every wall of which is
-       thicker than nso_thickness.js's 5 mm probe (docs/FOAM.md §7). */
+       rather than guess. Wall thickness no longer lands here - cavityShells()
+       probes across the whole piece - so what does is a shell wound inward
+       that is not in material: most often a separate body saved inside out. */
     var mis = C.info.filter(function (x) { return x.misWound; }).length;
     if (mis) {
       out.kind = 'unconfirmed';
       out.reason = 'Foam: this piece has ' + mis + ' inner shell' + (mis === 1 ? '' : 's') + ' facing inward that ' +
-        'Fill / Densify\'s test could not confirm as a sealed hollow - most often because every wall round it is ' +
-        'thicker than the 5 mm the wall probe reaches. Foam finds hollows the way Fill does, so it leaves ' +
+        'Fill / Densify\'s test could not confirm as a sealed hollow - it is not sitting inside material, which ' +
+        'is what a separate body saved inside out looks like. Foam finds hollows the way Fill does, so it leaves ' +
         (mis === 1 ? 'it' : 'them') + ' alone. Nothing changed.';
       return out;
     }
