@@ -312,13 +312,27 @@ console.log('\n=== 4. the contracts refuse BY NAME ===');
     !r3.ok && r3.stage === 'rim' && /LOCAL ORIGIN/.test(r3.reason),
     'near end ' + r3.baseOffsetMm.toFixed(4) + ' mm off the foot');
 
-  /* Clicked the back face, pointed forward. The nearest point to that target
-     is the FRONT face, so the arm would grow out of somewhere the user did
-     not pick - and that is said rather than silently obeyed. */
+  /* Clicked the back face, pointed forward - INTO the body. The arm's free
+     end lands inside the box, so the line from the nearest point on the body
+     to it runs through solid material. nearestBase refuses that by name
+     (NSO_SupportAim.lineInsideAt, docs/CURVED-BRANCH.md 1b) at the aim
+     stage, before any foot is compared with the pick. Until that check
+     landed, this case got past the aim and was refused one stage later for
+     foot drift; the earlier refusal is the true reason. Read by its stage:
+     there is no foot drift to report when no foot was found. */
   const r4 = AS.attach(BODY.soup, ARM.soup, { at: [bb.lo[0], 0, AT[2]], dir: [1, 0, 0] });
+  check('an arm aimed into the body -> refused at the aim stage, inside the piece',
+    !r4.ok && r4.stage === 'aim' && /runs inside the piece/.test(r4.reason),
+    'stage ' + r4.stage + ': ' + r4.reason.slice(0, 90) + '...');
+
+  /* Clicked the back face, pointed up past the top. The free end is in the
+     open above the body, but the nearest point to it is the top edge, not
+     the pick, so the arm would grow out of somewhere the user did not pick -
+     and that is said rather than silently obeyed. */
+  const r4b = AS.attach(BODY.soup, ARM.soup, { at: [bb.lo[0], 0, AT[2]], dir: [0, 0, 1] });
   check('a pick that disagrees with the aim -> refused, with the distance',
-    !r4.ok && /mm apart/.test(r4.reason),
-    'foot drift ' + r4.footDriftMm.toFixed(3) + ' mm');
+    !r4b.ok && r4b.stage === 'aim' && /mm apart/.test(r4b.reason) && r4b.footDriftMm > 0,
+    'foot drift ' + (r4b.footDriftMm == null ? '-' : r4b.footDriftMm.toFixed(3)) + ' mm');
 
   /* A wall standing between the face and where the arm would end. auto-aim's
      own blockage test, reached through attach with nothing added. */
