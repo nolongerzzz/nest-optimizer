@@ -430,16 +430,21 @@ function coverage(footprintPolys, ifaceMoves, reach, grow) {
   finding('interface strands: NSO builds 0.42 mm at 1.2 mm pitch; Bambu\'s own interface in tabletop measures 0.61 mm at 1.09 mm ' +
     '(CONSTANTS.interfaceStrand) - the same two-layer, one-direction-per-layer construction at Bambu\'s 0.6 nozzle widths.');
 
-  // --- the taper law, read back off the slice of the tree trunk
+  // --- the taper law, read back off the slice of the round strut. Since the
+  // grid-pack planner (#175) the tree is square members merged pairwise, with
+  // no taper; the strut is the one support still built to the law (the
+  // artifact's own "section round, ... 2 + 2 tan 5 deg x height below the
+  // tip" line), and it ends on the same contacts' z.
   const tree = rIf.objects[2];
+  const strut = rIf.objects[1];
   const ST_TIP = 2, ST_ANG = 5 * Math.PI / 180;
   const tipZ = 18.042;                     // plate z of every contact on this piece (docs/SUPPORT-TREE.md 6c)
-  // The trunk alone is the stretch from the plate up to its first fork: one
-  // outline, at most one bore, and a diameter that only ever shrinks going up.
-  // Above that the section is the union of trunk and branches, not one tube.
+  // The strut is one tube from the plate to its tip: one outline, at most one
+  // bore, and a diameter that only ever shrinks going up.
   const rows = [];
-  for (const L of tree.layers) {
+  for (const L of strut.layers) {
     if (!(L.areaMm2 > 0)) continue;
+    if (!(L.printZ < 17.4)) break;          // 88-89 are the interface's crosshatch on this build, not tube
     const outers = L.sectionPolys.filter(p => SL.signedArea(p) > 0);
     const holes = L.sectionPolys.length - outers.length;
     if (outers.length !== 1 || holes > 1) break;
@@ -449,19 +454,22 @@ function coverage(footprintPolys, ifaceMoves, reach, grow) {
     rows.push({ z, eqD, law: ST_TIP + 2 * Math.tan(ST_ANG) * (tipZ - z) });
   }
   const worst = rows.reduce((m, r) => Math.max(m, Math.abs(r.eqD - r.law)), 0);
-  check('below its first fork the trunk\'s sliced diameter IS the measured taper law d = 2 + 2 tan 5 deg x depth (24-gon of equal area, <= 0.005 mm)',
+  check('the strut\'s sliced diameter IS the measured taper law d = 2 + 2 tan 5 deg x depth (24-gon of equal area, <= 0.005 mm)',
         rows.length >= 20 && worst <= 0.005, rows.length + ' layers z ' + f3(rows[0].z) + '..' + f3(rows[rows.length - 1].z) + ', worst ' + worst.toFixed(4) + ' mm');
-  // and at the top: the pre-interface tree, whose tips run to the contacts, on
-  // layer 89 (slice z 17.7) - the last layer below every tip and above every
-  // fork. (On the interface build layers 88-89 are crosshatch, not tube.)
-  const tipL = rPre.objects[2].layers[88];
+  // and at the top: the pre-interface strut, whose tip runs to its contact, on
+  // layer 89 (slice z 17.7) - the last layer below the tip. (On the
+  // interface build layers 88-89 are crosshatch, not tube.)
+  const tipL = rPre.objects[1].layers[88];
   const tipD = Math.min(...tipL.sectionPolys.filter(p => SL.signedArea(p) > 0).map(p => Math.sqrt(4 * SL.signedArea(p) / Math.PI)));
   const tipLaw = ST_TIP + 2 * Math.tan(ST_ANG) * (tipZ - (tipL.printZ - tipL.h / 2));
-  check('the narrowest tip on layer 89 is the law\'s own diameter there (the vertical trunk tip, 1 %)',
+  check('the strut\'s tip on layer 89 is the law\'s own diameter there (1 %)',
         Math.abs(tipD - tipLaw) / tipLaw < 0.01, f3(tipD) + ' vs ' + f3(tipLaw) + ' at z ' + f3(tipL.printZ));
-  const treeWalls = tree.layers.filter(L => L.areaMm2 > 0 && L.printZ > 1 && L.printZ < 17.4).map(L => L.wallCount);
+  // One wall per layer is a bored tube's property: the strut is one, end to
+  // end. The grid-pack tree leaves members too small to bore SOLID (the
+  // artifact says which), so its layers are not all tube.
+  const treeWalls = strut.layers.filter(L => L.areaMm2 > 0 && L.printZ > 1 && L.printZ < 17.4).map(L => L.wallCount);
   const oneWall = treeWalls.filter(c => c === 1).length;
-  check('every tree tube layer slices to ONE wall (Bambu\'s own trees: one line, CONSTANTS.treeWall)', oneWall === treeWalls.length,
+  check('every strut tube layer slices to ONE wall (Bambu\'s own trees: one line, CONSTANTS.treeWall)', oneWall === treeWalls.length,
         oneWall + ' of ' + treeWalls.length);
   // the same artifact at the real 0.6 nozzle
   const r06 = SL.sliceObjects(art.iface, SL.defaultsFor(0.6, { layerMm: 0.2, firstLayerMm: 0.2, dropToPlate: false, emitGcode: false }), wasm);
