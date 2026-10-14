@@ -73,28 +73,31 @@ is not flagged where the other holds it up.
 
 ## 2a. Beacons and the card
 
-Picking a region (clicking its marker) draws its **beacons**: one per point
-the chosen style will hold - `NSO_SupportTree.contactPoints` for a tree or
-gecko-hand, `region.point` for a strut, called with the same soup and options
-the generator gets. A beacon on the face is a small disc lying in the surface;
-one closer to the region's rim than half the support's width (its tip lands on
-the edge) is a tick standing off the surface. Changing the style redraws them.
+Picking a region (clicking its marker) draws its **beacons**: exactly
+`region.beacons`, which `detectOverhangs` carries on every region through
+`nso_support_beacons.js` (docs/SUPPORT-BEACONS.md) - the spots on that
+region's own triangles that need holding, whatever the style. A disc lying in
+the surface for `need.kind` face, gap, edge and tip; a tick along the beacon's
+`normal` (the side approach, out of the wall) for ridge. The card only reads
+them: a drawn beacon is a shallow copy with one field added, `state`.
 
-After **Generate** the beacons take their state from what the plan reports:
-**held** (green, the support stands on the plate), **resting on the part**
-(amber), **unreachable** (red: in the plan's `blocked` list, or the plan was
-refused while finding a way down - base, aim, trunk or branches). A refusal
-before that (the region too wide for one trunk) leaves them planned (white):
-nothing was learnt about reaching them. A support keeps its beacons in
-`nsoSupport.beacons`, so they are drawn again whenever its region is still
-held. They are drawn over everything, like the pings, since the support's own
-tips cover the points they report on.
+After **Generate** the beacons take their state from what the plan reports
+about its own contact points: **held** (green, the support stands on the
+plate), **resting on the part** (amber), **unreachable** (red, in the plan's
+`blocked` list). A beacon takes the state of the nearest contact that covers
+it - within the tree lattice's achieved covering radius, or for a strut within
+the beacon's own grid cell (pitch / sqrt 2) - and a beacon no contact covers
+stays planned (white): a strut holds one spot, not the region. A plan refused
+while finding a way down (base, aim, trunk or branches) marks every beacon
+unreachable; one refused earlier (the region too wide for one trunk) leaves
+them planned. A support keeps its beacons in `nsoSupport.beacons`, drawn again
+whenever its region is still held. They are drawn over everything, like the
+pings, since the support's own tips cover the points they report on.
 
-The beacon shape - `{ p, n, kind: 'face' | 'side', state }` - is the shared
-beacon contract; `beaconsFor` / `beaconStates` in `app-gscope-support.js`
-stand in for support-gridpack's adapter until support-beacons lands. Neither
-branch is on `claude-wip`, so the shape was set from what the planner reports
-today.
+Ridge beacons reach the card only where they sit on one of the triangle
+pass's region triangles; a rib with material close under it is not such a
+triangle (the triangle pass calls it self-supported), so most ridge beacons
+are in `det.beacons` / `det.beaconRegions` and not in any `region.beacons`.
 
 **The card** speaks in plain words: at most one decimal place, no angles, and
 after Generate the readout line

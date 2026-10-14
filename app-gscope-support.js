@@ -291,80 +291,28 @@ var NSO_GSCOPE_SUPPORT = (function () {
   }
 
   // =========================================================================
-  // Beacons - the points a support will hold, drawn before and after Generate
+  // Beacons - where a piece needs holding, drawn before and after Generate
   // =========================================================================
 
   /*
-   * THE CONTRACT. A beacon is { p, n, kind, state }:
-   *   p      [x, y, z] on the surface, world Z-up mm (detection's frame)
-   *   n      the outward surface normal there, unit
-   *   kind   'face' - drawn as a small disc lying in the surface - or 'side',
-   *          a contact closer to the region's rim than half the support's
-   *          width (its tip lands on the edge), drawn as a tick standing off it
-   *   state  'planned' before Generate; after it, read off the plan:
-   *          'held' (its support stands on the plate), 'rest' (it stands on a
-   *          part), 'unreachable' (the plan could not get to it from below)
-   *
-   * This is the shared beacon contract the support card draws against, and
-   * the adapter here plays the part support-gridpack's does until
-   * support-beacons lands with its own beaconsFor / beaconStates. Nothing
-   * here plans: the points are the ones the generator is about to be handed
-   * - NSO_SupportTree.contactPoints for a tree, the region's aim point for a
-   * strut, called with the same soup and options - and the states are the
-   * counts the plan itself reports (its branches, the contact the trunk
-   * carries, its blocked list, the base it chose).
+   * THE CONTRACT is nso_support_beacons.js's (docs/SUPPORT-BEACONS.md):
+   * detectOverhangs carries region.beacons on every region - the beacons on
+   * that region's own triangles - each { x, y, z, normal, need: { angle,
+   * gapBelow, kind, ... }, cell, tri }, kind one of face | gap | edge | tip |
+   * ridge. This only READS them: the card draws exactly region.beacons, a
+   * disc for face / gap / edge / tip and a tick along `normal` (the side
+   * approach) for ridge. What is added here is one field, `state`:
+   *   'planned' before Generate; after it, read off the plan:
+   *   'held' (its support stands on the plate), 'rest' (it stands on a part),
+   *   'unreachable' (the plan could not get to it from below)
+   * A drawn beacon is a shallow copy of the region's with `state` on it, so
+   * the region's own records are never written.
    */
-  /** The region's rim: edges used by exactly one of its triangles. */
-  function rimOf(P, region) {
-    var key = function (o) { return Math.round(P[o] * 1e4) + '|' + Math.round(P[o + 1] * 1e4) + '|' + Math.round(P[o + 2] * 1e4); };
-    var edges = new Map();
-    region.tris.forEach(function (t) {
-      for (var e = 0; e < 3; e++) {
-        var a = t * 9 + e * 3, b = t * 9 + ((e + 1) % 3) * 3;
-        var ka = key(a), kb = key(b), k = ka < kb ? ka + '#' + kb : kb + '#' + ka;
-        var rec = edges.get(k);
-        if (rec) rec.n++; else edges.set(k, { n: 1, a: [P[a], P[a + 1], P[a + 2]], b: [P[b], P[b + 1], P[b + 2]] });
-      }
-    });
-    var rim = [];
-    edges.forEach(function (r) { if (r.n === 1) rim.push(r); });
-    return rim;
+  function readBeacons(region) {
+    return (region && region.beacons || []).map(function (b) { return Object.assign({}, b, { state: 'planned' }); });
   }
 
-  function onRim(rim, p, tol) {
-    for (var i = 0; i < rim.length; i++) {
-      var a = rim[i].a, b = rim[i].b;
-      var ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], ap = [p[0] - a[0], p[1] - a[1], p[2] - a[2]];
-      var L2 = ab[0] * ab[0] + ab[1] * ab[1] + ab[2] * ab[2];
-      var t = L2 > 0 ? Math.max(0, Math.min(1, (ap[0] * ab[0] + ap[1] * ab[1] + ap[2] * ab[2]) / L2)) : 0;
-      if (Math.hypot(ap[0] - ab[0] * t, ap[1] - ab[1] * t, ap[2] - ab[2] * t) <= tol) return true;
-    }
-    return false;
-  }
-
-  /** The unit normal of the region triangle a surface point lies on. */
-  function normalAt(P, region, p) {
-    var best = null, bestD = Infinity;
-    region.tris.forEach(function (t) {
-      var o = t * 9, a = [P[o], P[o + 1], P[o + 2]], b = [P[o + 3], P[o + 4], P[o + 5]], c = [P[o + 6], P[o + 7], P[o + 8]];
-      var q = closestOnTri(p, a, b, c), dd = Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]);
-      if (dd < bestD) {
-        var u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-        var n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
-        var L = Math.hypot(n[0], n[1], n[2]);
-        if (L > 0) { bestD = dd; best = [n[0] / L, n[1] / L, n[2] / L]; }
-      }
-    });
-    return best || region.normal.slice();
-  }
-
-  var SIDE_DEFAULT_MM = 1.2;                   // the card's own default size
-  function beaconsFrom(P, region, points, sideMm) {
-    var rim = rimOf(P, region), tol = (+sideMm > 0 ? +sideMm : SIDE_DEFAULT_MM) / 2;
-    return points.map(function (p) {
-      return { p: p.slice(), n: normalAt(P, region, p), kind: onRim(rim, p, tol) ? 'side' : 'face', state: 'planned' };
-    });
-  }
+  function beaconKind(b) { return (b.need && b.need.kind) || 'face'; }
 
   /** The generator's options for one call: the same object planFor hands it. */
   function genOpts(baseOpts, regionId, style, sideMm) {
@@ -374,42 +322,56 @@ var NSO_GSCOPE_SUPPORT = (function () {
     return o;
   }
 
-  /** The beacons a style will hold on one region, before anything is planned. */
-  function beaconsFor(host, region, style, opts) {
-    if (style === 'strut') return { ok: true, beacons: beaconsFrom(host.positions, region, [region.point], opts.sideMm) };
-    if (!ST() || typeof ST().contactPoints !== 'function') return { ok: false, beacons: [], reason: 'nso_support_tree.js is not loaded' };
-    var cp = ST().contactPoints(host.positions, region, opts);
-    if (!cp.ok) return { ok: false, beacons: [], reason: cp.reason };
-    return { ok: true, beacons: beaconsFrom(host.positions, region, cp.points.map(function (c) { return c.p; }), opts.sideMm) };
+  /**
+   * The region's beacons after a Generate, with their states, from the plan's
+   * own report. The plan holds the region at its own contact points - a
+   * tree's contactPoints lattice (branches, the contact the trunk carries,
+   * the blocked list), a strut's one aim point - each held / resting /
+   * unreachable by what the plan says of it. A beacon takes the state of the
+   * nearest contact that covers it: within the lattice's achieved covering
+   * radius for a tree, within the beacon's own grid cell (pitch / sqrt 2) for
+   * a strut. A beacon no contact covers stays planned - a strut holds one
+   * spot, not the region. A refused plan that got as far as finding a way
+   * down (base, aim, trunk, branches) marks every beacon unreachable; one
+   * refused earlier (the region too wide for one trunk) leaves them planned -
+   * nothing was learnt about reaching them.
+   */
+  function beaconStates(region, style, g, pitch) {
+    var plan = (g && g.plan) || {};
+    var beacons = readBeacons(region);
+    if (!(g && g.ok)) {
+      if (/^(base|aim|trunk|branches)$/.test(plan.stage || '')) beacons.forEach(function (b) { b.state = 'unreachable'; });
+      return beacons;
+    }
+    var base = style === 'strut' ? plan.aim && plan.aim.base : plan.base;
+    var held = base && base.base && base.base.kind === 'piece' ? 'rest' : 'held';
+    var contacts, reach;
+    if (style === 'strut' || plan.single) {
+      var at = style === 'strut' ? (plan.region || region).point : plan.contacts.points[0].p;
+      contacts = [{ p: at, state: held }];
+      reach = (pitch > 0 ? pitch : 3) / Math.SQRT2;
+    } else {
+      contacts = plan.contacts.points.map(function (c) { return { p: c.p, state: 'planned' }; });
+      (plan.branches || []).forEach(function (b) { if (contacts[b.contactIndex]) contacts[b.contactIndex].state = held; });
+      if (plan.trunkCarriesContact >= 0 && contacts[plan.trunkCarriesContact]) contacts[plan.trunkCarriesContact].state = held;
+      (plan.blocked || []).forEach(function (b) { if (contacts[b.index]) contacts[b.index].state = 'unreachable'; });
+      reach = (plan.contacts.coverageMm || 0) + 1e-6;
+    }
+    beacons.forEach(function (b) {
+      var best = null, bestD = Infinity;
+      contacts.forEach(function (c) {
+        var dd = Math.hypot(c.p[0] - b.x, c.p[1] - b.y, c.p[2] - b.z);
+        if (dd < bestD) { bestD = dd; best = c; }
+      });
+      if (best && bestD <= reach) b.state = best.state;
+    });
+    return beacons;
   }
 
-  /**
-   * The beacons after a Generate, with their states, from the plan's own
-   * report. A refused plan that got as far as finding a way down (base, aim,
-   * trunk, branches) marks every contact unreachable; one refused earlier
-   * (the region too wide for one trunk, say) leaves them planned - nothing
-   * was learnt about reaching them.
-   */
-  function beaconStates(host, region, style, g, opts) {
-    var plan = (g && g.plan) || {};
-    var pts = style === 'strut' ? [(plan.region || region).point]
-      : plan.contacts && plan.contacts.points ? plan.contacts.points.map(function (c) { return c.p; }) : null;
-    var sideMm = plan.sideMm || (plan.aim && plan.aim.sideMm) || opts.sideMm;
-    var beacons = pts ? beaconsFrom(host.positions, plan.region || region, pts, sideMm)
-      : (beaconsFor(host, region, style, opts).beacons || []);
-    if (g && g.ok) {
-      var base = style === 'strut' ? plan.aim && plan.aim.base : plan.base;
-      var held = base && base.base && base.base.kind === 'piece' ? 'rest' : 'held';
-      if (style === 'strut' || plan.single) beacons[0].state = held;
-      else {
-        (plan.branches || []).forEach(function (b) { if (beacons[b.contactIndex]) beacons[b.contactIndex].state = held; });
-        if (plan.trunkCarriesContact >= 0 && beacons[plan.trunkCarriesContact]) beacons[plan.trunkCarriesContact].state = held;
-        (plan.blocked || []).forEach(function (b) { if (beacons[b.index]) beacons[b.index].state = 'unreachable'; });
-      }
-    } else if (/^(base|aim|trunk|branches)$/.test(plan.stage || '')) {
-      beacons.forEach(function (b) { b.state = 'unreachable'; });
-    }
-    return beacons;
+  /** The beacon grid's pitch for a host: its scan's, else the plan's own detection's. */
+  function gridPitch(scanEntry, g) {
+    var det = (scanEntry && scanEntry.det) || (g && g.plan && g.plan.detect);
+    return det && det.grid ? det.grid.pitch : null;
   }
 
   function countStates(beacons) {
@@ -554,17 +516,14 @@ var NSO_GSCOPE_SUPPORT = (function () {
 
   /** The beacons the picked region shows now: a refused try's, else planned. */
   function pickedBeacons(mk) {
-    var style = cardStyle(), key = mk.host.sourceId + '|' + mk.region.id + '|' + style;
-    if (tried[key]) return tried[key];
-    var d = plateDoc(), o = d ? optsFor(d, mk.host) : null;
-    if (!o || o.reason) return [];
-    var b = beaconsFor(mk.host, mk.region, style, genOpts(o.opts, mk.region.id, style, cardSize()));
-    return b.beacons;
+    var key = mk.host.sourceId + '|' + mk.region.id + '|' + cardStyle();
+    return tried[key] || readBeacons(mk.region);
   }
 
   /**
-   * The beacons, drawn on the surface: a disc lying in the face for a face
-   * beacon, a tick standing off the surface for a side one, each over a dark
+   * The beacons, drawn on the surface: a disc lying in the face for face,
+   * gap, edge and tip beacons, a tick along the side approach for ridge
+   * beacons (their normal is horizontal, out of the wall), each over a dark
    * backing so a green or red beacon still reads on a tinted region. Drawn
    * over everything, as the pings are: once a support stands there its own
    * tips cover the very points whose state the beacons report. A
@@ -587,24 +546,25 @@ var NSO_GSCOPE_SUPPORT = (function () {
       var d = plateDoc();
       var r = markSize(d) * 0.4, nn = Infinity, B = mk.beacons;
       for (var i = 0; i < B.length; i++) for (var j = i + 1; j < B.length; j++) {
-        nn = Math.min(nn, Math.hypot(B[i].p[0] - B[j].p[0], B[i].p[1] - B[j].p[1], B[i].p[2] - B[j].p[2]));
+        nn = Math.min(nn, Math.hypot(B[i].x - B[j].x, B[i].y - B[j].y, B[i].z - B[j].z));
       }
       if (isFinite(nn)) r = Math.max(0.12, Math.min(r, nn * 0.3));
       var o0 = MS().toView(0, 0, 0), z = new THREE.Vector3(0, 0, 1), y = new THREE.Vector3(0, 1, 0);
       B.forEach(function (b) {
-        var nv = MS().toView(b.n[0], b.n[1], b.n[2]).sub(o0).normalize();
+        var n = b.normal || [0, 0, -1];
+        var nv = MS().toView(n[0], n[1], n[2]).sub(o0).normalize();
         var col = BEACON[b.state] != null ? BEACON[b.state] : BEACON.planned;
         function put(geo, color, liftMm, order, axis) {
           var m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: color, side: THREE.DoubleSide,
             transparent: true, opacity: 0.98, depthWrite: false, depthTest: false }));
-          m.position.copy(MS().toView(b.p[0] + b.n[0] * liftMm, b.p[1] + b.n[1] * liftMm, b.p[2] + b.n[2] * liftMm));
+          m.position.copy(MS().toView(b.x + n[0] * liftMm, b.y + n[1] * liftMm, b.z + n[2] * liftMm));
           m.quaternion.setFromUnitVectors(axis, nv);
           m.renderOrder = order;
           m.userData.marker = mk; m.userData.beacon = b;
           layer.add(m); mk.beaconMeshes.push(m);
           return m;
         }
-        if (b.kind === 'side') {
+        if (beaconKind(b) === 'ridge') {
           put(new THREE.CylinderGeometry(r * 0.42, r * 0.42, r * 2.6, 8), 0x0b0f17, r * 1.3, 13, y);
           put(new THREE.CylinderGeometry(r * 0.26, r * 0.26, r * 2.6, 8), col, r * 1.3 + 0.01, 14, y);
         } else {
@@ -813,12 +773,11 @@ var NSO_GSCOPE_SUPPORT = (function () {
     if (o.reason) { say('Support refused - ' + o.reason, true); return Promise.resolve({ ok: false, reason: o.reason, plain: o.reason }); }
     var s0 = scan.find(function (x) { return x.host === host; });
     var region = s0 && s0.det && s0.det.ok ? s0.det.regions.find(function (r) { return r.id === regionId; }) : null;
-    var gen = genOpts(o.opts, regionId, style, sideMm);
     busy = true;
     say('Generating a ' + STYLES[style] + ' support...');
     return planFor(host, regionId, style, sideMm, o.opts, rest ? restBases(d, host, regionId) : null).then(function (g) {
       var reg = (g.plan && g.plan.region) || region;
-      var beacons = reg ? beaconStates(host, reg, style, g, gen) : [];
+      var beacons = reg ? beaconStates(reg, style, g, gridPitch(s0, g)) : [];
       var key = host.sourceId + '|' + regionId + '|' + style;
       if (!g.ok) {
         var why = plainWhy(g, rest);
@@ -877,11 +836,10 @@ var NSO_GSCOPE_SUPPORT = (function () {
     var regionId = m.nsoSupport.regionId;
     var s0 = scan.find(function (x) { return x.host === host; });
     var region = s0 && s0.det && s0.det.ok ? s0.det.regions.find(function (r) { return r.id === regionId; }) : null;
-    var gen = genOpts(o.opts, regionId, style, sideMm);
     return planFor(host, regionId, style, sideMm, o.opts, rest ? restBases(d, host, regionId) : null).then(function (g) {
       if (!g.ok) { var why = plainWhy(g, rest); say('Support change refused - unchanged. ' + why, true); return Object.assign({}, g, { plain: why }); }
       var reg = (g.plan && g.plan.region) || region;
-      var beacons = reg ? beaconStates(host, reg, style, g, gen) : [];
+      var beacons = reg ? beaconStates(reg, style, g, gridPitch(s0, g)) : [];
       var removed = removePieces([id]);
       var meta = Object.assign({}, m.nsoSupport, { style: style,
         sideMm: g.plan.sideMm || (g.plan.aim && g.plan.aim.sideMm) || +sideMm, rest: rest, beacons: beacons });
@@ -1032,10 +990,10 @@ var NSO_GSCOPE_SUPPORT = (function () {
     placePop(anchorOf(e) || screenOf(r.point));
   }
 
-  /** What the card says before Generate: how many points it will hold. */
+  /** What the card says before Generate: how many spots need holding. */
   function plannedLine(mk) {
     var n = (mk.beacons || []).length;
-    return n ? plural(n, 'contact', 'contacts') + ' to hold, shown on the part.' : '';
+    return n ? plural(n, 'spot needs', 'spots need') + ' holding, shown on the part.' : '';
   }
 
   function openPopEdit(id, e) {

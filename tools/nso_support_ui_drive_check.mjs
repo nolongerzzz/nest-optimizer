@@ -11,16 +11,18 @@
  *      for real: the card opens wholly inside the window and the viewport
  *      (flipped above the marker), and stays inside after it grows with a
  *      refusal, and when the window is made short.
- *   2  BEACONS ON PICK. Picking a region draws its beacons on the part - one
- *      per point the style will hold, discs and rim ticks - and its centroid
- *      ping goes; the region's tint stays. Changing the style redraws them.
+ *   2  BEACONS ON PICK. Picking a region draws exactly its region.beacons
+ *      (nso_support_beacons.js, through detectOverhangs) - a disc for face /
+ *      gap / edge / tip, a tick for ridge - and its centroid ping goes; the
+ *      region's tint stays. On support:beacons' tilted box the drawn count
+ *      is region.beacons.length.
  *   3  STATES AFTER GENERATE, from the plan's own counts:
  *        a tree on an open shelf      every contact held from the plate
  *        a tree over a stub           every contact unreachable (the trunk
  *                                     from the plate runs into the stub),
  *                                     nothing added
- *        a strut there, "May rest   its contact resting on the part (the
- *        on the part" ticked         stub's top)
+ *        a strut there, "May rest   the spot it stands under resting on the
+ *        on the part" ticked         part (the stub's top); the rest planned
  *      and each beacon is drawn in its state's colour. A region too wide for
  *      one tree is refused in plain words, its contacts left planned.
  *   4  "May rest on the part" is a checkbox, off by default on every new card.
@@ -66,6 +68,14 @@ const STUB = stl([...box([0, 0, 0], [10, 10, 20]), ...box([10, 0, 16], [22, 10, 
    fan out from so low. The planner's refusal there is the one the report
    quoted ("past the 31.44 deg limit ... about 144 trunks"). */
 const LOW = stl([...box([0, 0, 0], [4, 30, 6]), ...box([4, 0, 3], [34, 30, 6])]);
+/* support:beacons' tilted box: 40 x 30 x 10, turned 30 deg about y, its
+   underside rising towards +x at 30 deg off the plate, lowest edge on it. */
+const TILT = 30 * Math.PI / 180;
+const TILTED = stl(box([0, 0, 0], [40, 30, 10]).map((v, i, a) => {
+  const k = i % 3, p = a.slice(i - k, i - k + 3);
+  return k === 0 ? p[0] * Math.cos(TILT) - p[2] * Math.sin(TILT)
+    : k === 1 ? p[1] : p[0] * Math.sin(TILT) + p[2] * Math.cos(TILT);
+}));
 
 const frames = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 
@@ -158,8 +168,11 @@ async function main() {
   const marks = () => page.evaluate(() => window.NSO_GSCOPE_SUPPORT.markers().map((m) => ({
     host: m.host.name, id: m.region.id, ping: [m.ping.position.x, m.ping.position.y, m.ping.position.z],
     pingShown: m.ping.visible, overlayShown: m.overlay.visible && !!m.overlay.parent,
-    beacons: m.beacons ? m.beacons.map((b) => ({ kind: b.kind, state: b.state })) : null,
+    beacons: m.beacons ? m.beacons.map((b) => ({ kind: b.need && b.need.kind, state: b.state })) : null,
+    regionBeacons: (m.region.beacons || []).length,
     meshes: m.beaconMeshes.length,
+    drawnAs: m.beaconMeshes.filter((x) => x.material.color.getHex() !== 0x0b0f17)
+      .map((x) => [x.userData.beacon.need.kind, x.geometry.type]),
     colours: [...new Set(m.beaconMeshes.filter((x) => x.material.color.getHex() !== 0x0b0f17)
       .map((x) => x.material.color.getHex()))],
   })));
@@ -214,25 +227,19 @@ async function main() {
   check('...and is off on a new card', await page.isChecked('#ms-sp-rest'), false);
   await page.selectOption('#ms-sp-style', 'strut');
   m = (await marks()).find((x) => x.id === 0);
-  check('a strut holds one point: one beacon, the ping gone, the tint kept',
-    [m.beacons && m.beacons.length, m.pingShown, m.overlayShown], [1, false, true]);
+  const wantContacts = m.regionBeacons;
+  check('picking draws exactly the region\'s beacons (region.beacons, ' + wantContacts + '), the ping gone, the tint kept',
+    [wantContacts > 0, m.beacons && m.beacons.length, m.pingShown, m.overlayShown], [true, wantContacts, false, true]);
   await page.selectOption('#ms-sp-style', 'tree');
-  const wantContacts = await page.evaluate(() => {
-    const S = window.NSO_GSCOPE_SUPPORT, d = window.NSO_MICROSCOPE.getDoc();
-    const host = d.objects.find((o) => o.name === 'shelf');
-    const reg = S.scan()[0].det.regions[0];
-    const o = Object.assign({}, S.optsFor('shelf').opts, { regionId: 0, sideMm: 1.2, branchStyle: 'square' });
-    return window.NSO_SupportTree.contactPoints(host.positions, reg, o).points.length;
-  });
   m = (await marks()).find((x) => x.id === 0);
-  check('a tree: one beacon per contact the tree will be handed (' + wantContacts + ')',
+  check('...the same beacons whatever the style: they are where the part needs holding',
     m.beacons && m.beacons.length, wantContacts);
-  check('...face beacons as discs and rim beacons as ticks, both kinds present',
-    [m.beacons.some((x) => x.kind === 'face'), m.beacons.some((x) => x.kind === 'side')], [true, true]);
+  check('...each drawn as its kind says: a disc for face / gap / edge / tip, a tick for ridge',
+    m.drawnAs.filter(([k, g]) => g !== (k === 'ridge' ? 'CylinderGeometry' : 'CircleGeometry')), []);
   check('...each drawn (beacon over its dark backing: two meshes each)', m.meshes, m.beacons.length * 2);
   check('...all in the planned colour', m.colours, [0xffffff]);
   t = await collect('tree beacons planned');
-  check('the card says how many it will hold', t.read, wantContacts + ' contacts to hold, shown on the part.');
+  check('the card says how many spots need holding', t.read, wantContacts + ' spots need holding, shown on the part.');
   b = await cardBox();
   check('the card is still inside after it changed', inside(b), true);
   /* Look up at the underside to see them; the card stays where it was. */
@@ -285,8 +292,8 @@ async function main() {
   check('the checkbox is off on this new card too', await page.isChecked('#ms-sp-rest'), false);
   await page.selectOption('#ms-sp-style', 'tree');
   await page.fill('#ms-sp-size', '1.2');
-  const nC = (await marks())[0].beacons.length;
-  check('the shelf shows its beacons before Generate', nC > 1, true);
+  const nC = (await marks())[0].regionBeacons;
+  check('the shelf shows its beacons before Generate', [nC > 1, (await marks())[0].beacons.length], [true, nC]);
   const mBefore = await page.evaluate(() => state.models.length);
   await page.click('#ms-sp-generate');
   await page.waitForFunction(() => /Not added/.test(document.getElementById('ms-sp-read').textContent), null, { timeout: 90000 });
@@ -315,10 +322,10 @@ async function main() {
   await page.waitForFunction(() => /resting on the part/.test(document.getElementById('ms-sp-read').textContent) &&
     !/Generating/.test(document.getElementById('ms-sp-read').textContent), null, { timeout: 30000 });
   m = (await marks())[0];
-  check('with "May rest on the part": every contact resting on the part (amber)',
-    [m.beacons.length > 0, m.beacons.every((x) => x.state === 'rest'), m.colours], [true, true, [0xf59e0b]]);
+  const nR = m.beacons.filter((x) => x.state === 'rest').length;
+  check('with "May rest on the part": the spot the strut stands under rests on the part (amber); a strut holds one spot, the rest stay planned',
+    [nR >= 1, m.beacons.every((x) => x.state === 'rest' || x.state === 'planned'), m.colours.includes(0xf59e0b)], [true, true, true]);
   t = await collect('stub resting on part');
-  const nR = m.beacons.length;
   check('readout', t.read, '0 contacts held from the plate · ' + nR + ' resting on the part · 0 unreachable');
   check('the support remembers it may rest on the part', await page.evaluate(() =>
     window.NSO_GSCOPE_SUPPORT.supports()[0].nsoSupport.rest), true);
@@ -365,6 +372,22 @@ async function main() {
     m.beacons.length > 0 && m.beacons.every((x) => x.state === 'planned'), true);
   check('the card is inside the window', inside(await cardBox()), true);
   await shot('07-too-wide.png');
+
+  // =======================================================================
+  console.log('\n--- 2b. the tilted box: every beacon detection reports is drawn ---');
+  // =======================================================================
+  await page.goto(served.base + '/index.html', { waitUntil: 'load' });
+  await page.waitForFunction('window.state && window.state.ready', null, { timeout: 30000 });
+  await page.waitForFunction(() => !!window.NSO_GSCOPE_SUPPORT, null, { timeout: 30000 });
+  await openPlate([['tilted.stl', TILTED]]);
+  const tm = (await marks())[0];
+  await aimAt(tm.ping, 0.4, 1, 0.9);
+  px = await screenOf(tm.ping);
+  await page.mouse.click(px[0], px[1]);
+  m = (await marks())[0];
+  check('the tilted box: drawn beacon count equals region.beacons.length (' + m.regionBeacons + ')',
+    [m.regionBeacons > 0, m.meshes / 2], [true, m.regionBeacons]);
+  await shot('08-tilted-box.png');
 
   // =======================================================================
   console.log('\n--- 5. plain words ---');
