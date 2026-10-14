@@ -561,6 +561,26 @@ a slice's rendered layers against `NSO_Slicer`'s result (the "phantom layers"
 seen on the plate). Proposed in the PR; nothing in the watcher checks slice
 rendering today.
 
+## UI cleanups - status panel, column menus on double-click, rotate screenshots (2026-10-13)
+Branch `claude/ui-cleanup`, off `claude-wip`.
+
+- **`setStatus` keeps the HUD panel.** It wrote `className = 'status success'`,
+  dropping `status-hud`, so the viewport status line lost its dark panel at the
+  first message. It now toggles only `success` / `error` (`app-join.js`; the
+  dead `app.js` copy is untouched).
+- **Double-click on the plate closes the left column's eight menus** (Join ..
+  Pack, `.vp-col-menu`) as well as the top-row ones: `leaveTool` in
+  `app-input-mode.js`. They own no input, so they stay out of `menus()`.
+- **Rotate drive-checks write outside the repo.** `rotate:steady-drive` and
+  `rotate:drive` default to a fresh dir under the OS temp dir (path printed);
+  an outDir argument still wins. The 14 PNGs under `docs/rotate-rings/` are
+  removed - only the drive-check that wrote them named them.
+- Checks: `ui:shell` section 10 (status classes and panel across three
+  messages), `leave:tool` section 9 (each column menu shut by a double-click,
+  nothing else moved). Both fail on the code before this change. `?v=`:
+  `app-join.js`, `app-input-mode.js` shell1 -> uiclean1; `styles.css` shell4 ->
+  uiclean1 (a comment that described the old class wipe).
+
 ## Lift 2 - auto-aim and Strip (2026-10-13)
 Branch `claude/lift-auto`, off `claude-wip`. Full write-up: **`docs/LIFT.md` §5**.
 
@@ -716,8 +736,9 @@ Branch `claude/rotate-rings-steady`, off `claude-wip`. Changes to
   All in the ring's own e1/e2 frame, the frame the snap measures in, so a
   snapped quarter turn lands on a labelled tick.
 - Checks: `rotate:handles` gains sections 13-16 (143 gates);
-  `rotate:steady-drive` is the ticket's drive-check, screenshots in
-  `docs/rotate-rings-steady/`, not in `npm test`. `?v=` bumped on the owner's
+  `rotate:steady-drive` is the ticket's drive-check, screenshots in a fresh
+  OS temp dir (outside the repo, path printed; pass a dir to keep them
+  elsewhere), not in `npm test`. `?v=` bumped on the owner's
   instruction (as in 3d42873): `app-rotate-handles.js` rot3 -> rot4.
 - Seen, not changed: a freshly dropped piece rests 0.1 mm higher than a posed
   one (the open finding at `snapshotPlacedPose`), so the first turn lowers
@@ -753,7 +774,9 @@ for that session and are not saved.
   those buttons as they are.
 - Checks: `rotate:handles` rewritten (12 sections); `rotate:drive`
   (`tools/nso_rotate_rings_drive_check.js`) is the ticket's drive-check with
-  screenshots into `docs/rotate-rings/`, not in `npm test`. `?v=` not bumped
+  screenshots into a fresh OS temp dir (outside the repo; its 14 PNGs that
+  were once committed under `docs/rotate-rings/` were removed), not in
+  `npm test`. `?v=` not bumped
   (rule 4): `app-rotate-handles.js`, `app-core.js`, `nso-3mf-scene.js` and
   `styles.css` change under their current tags.
 

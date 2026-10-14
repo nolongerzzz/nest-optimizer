@@ -4,7 +4,9 @@
    node tools/nso_rotate_rings_drive_check.js [outDir]     exit 0 = every step held
 
    Every step is a real mouse or keyboard action on the page; what is read back
-   is read from the scene. Screenshots go to outDir (default docs/rotate-rings).
+   is read from the scene. Screenshots go to outDir (default a fresh
+   nso-rotate-rings-* dir under the OS temp dir, outside the repo; the path
+   is printed at the end).
 
    The piece is the 80 x 40 x 20 box hull, so a turn and a lean are visible
    at a glance - a cube looks the same from too many sides.
@@ -19,7 +21,8 @@ const os = require('os');
 const { execFileSync } = require('child_process');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
 
-const OUT = path.resolve(process.argv[2] || path.join(ROOT, 'docs', 'rotate-rings'));
+const OUT = process.argv[2] ? path.resolve(process.argv[2])
+                            : fs.mkdtempSync(path.join(os.tmpdir(), 'nso-rotate-rings-'));
 fs.mkdirSync(OUT, { recursive: true });
 let fails = 0;
 const check = (name, cond, detail) => {

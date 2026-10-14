@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /* The UI shell: no sidebar, a row of slabs along the top and a column down the
    left sharing Import at the corner, every control in a drop-down, every panel
-   at one spot, one open at a time, and the bed grid on at load.
+   at one spot, one open at a time, the bed grid on at load, and the status
+   line keeping its HUD panel across messages.
      node tools/nso_ui_shell_drive_check.js     exit 0 = every gate held */
 
 const path = require('path');
@@ -370,6 +371,32 @@ withApp(async (page, logs) => {
     check('the collision starts below about 790 px of window height, no higher',
       okEnds && hi >= 770 && hi <= 800, okEnds ? 'clear from ' + hi + ' px tall' : 'not bracketed by 600..1000');
     await page.setViewportSize({ width: 1500, height: 820 });
+  }
+
+  /* ----------------------------------------------------------------- 10 */
+  console.log('\n=== 10. the status line keeps its panel across messages ===');
+  {
+    /* setStatus used to write className = 'status success', dropping
+       status-hud: after the first message the HUD lost its dark panel. */
+    const read = () => page.evaluate(() => {
+      const el = document.getElementById('status');
+      const cs = getComputedStyle(el);
+      return { cls: [...el.classList].sort().join(' '), bg: cs.backgroundColor, color: cs.color };
+    });
+    const base = await read();
+    check('at load #status is the HUD panel', /\bstatus-hud\b/.test(base.cls) && base.bg !== 'rgba(0, 0, 0, 0)',
+      JSON.stringify(base));
+    const steps = [['first message', false], ['an error', true], ['back to normal', false]];
+    let prevColor = null;
+    for (const [msg, isErr] of steps) {
+      await page.evaluate(([m, e]) => setStatus(m, e), [msg, isErr]);
+      const r = await read();
+      const want = ['status', 'status-hud', isErr ? 'error' : 'success'].sort().join(' ');
+      check('after setStatus("' + msg + '"' + (isErr ? ', error' : '') + ') the classes are ' + want +
+        ' and the panel is the same', r.cls === want && r.bg === base.bg, JSON.stringify(r));
+      if (prevColor) check('...and its text colour changed with the variant', r.color !== prevColor, r.color);
+      prevColor = r.color;
+    }
   }
 
   const errs = logs.filter(l => /^\[(error|pageerror)\]/.test(l));

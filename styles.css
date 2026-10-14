@@ -1753,8 +1753,7 @@ select:focus, input:focus {
 .status-hud.success { color: #86efac; }
 .status-hud.error { color: #fca5a5; }
 /* A button the status line offers (Cut's "Turn it right-side-out, then cut"):
-   the HUD lets clicks through to the viewport, its button takes them. By id:
-   setStatus rewrites the line's class list. */
+   the HUD lets clicks through to the viewport, its button takes them. */
 #status .status-action {
   pointer-events: auto;
   margin-top: 6px;

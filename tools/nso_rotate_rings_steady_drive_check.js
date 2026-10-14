@@ -7,8 +7,9 @@
    Real mouse drags on the real arrowheads. The ring's PIXEL diameter is read
    off the drawn torus itself - every vertex of the mesh that is on screen,
    through the camera that drew it - at rest, before and after a turn, with
-   the camera not moved in between. Screenshots go to outDir (default
-   docs/rotate-rings-steady).
+   the camera not moved in between. Screenshots go to outDir (default a
+   fresh nso-rotate-rings-steady-* dir under the OS temp dir, outside the
+   repo; the path is printed at the end).
 
    The pieces are the repository's 80 x 40 x 20 box fixture (the one #135's
    drive-check used) and tape_on-edge-single. */
@@ -19,7 +20,8 @@ const os = require('os');
 const { execFileSync } = require('child_process');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
 
-const OUT = path.resolve(process.argv[2] || path.join(ROOT, 'docs', 'rotate-rings-steady'));
+const OUT = process.argv[2] ? path.resolve(process.argv[2])
+                            : fs.mkdtempSync(path.join(os.tmpdir(), 'nso-rotate-rings-steady-'));
 fs.mkdirSync(OUT, { recursive: true });
 let fails = 0;
 const check = (name, cond, detail) => {
