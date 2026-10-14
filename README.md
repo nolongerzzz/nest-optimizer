@@ -198,7 +198,7 @@ Smart build-plate packing for 3D printing.
     under one line and the slicer fills it in. The measurements, including why
     the canonical mesh checker cannot see this and what does, are in
     `docs/SKIN-CROSSHATCH-PITCH.md`
-  - **Trace a raster into flat printed lines** - **Finish -> Trace raster**, or
+  - **Trace a raster into flat printed lines** - **Surface -> Trace raster**, or
     the command line - for the case the reliefs above cannot do: a real printed
     line's section. Pick any picture the browser can open (PNG, JPEG, WebP) and
     the traced lines are added as a NEW piece, flagged Non-solid because every
@@ -304,6 +304,22 @@ Smart build-plate packing for 3D printing.
     the capture box selects whole parts, and the layer control is **disabled
     with the reason on screen** rather than inventing a layer height the file
     never stated. See [docs/GCODE-MICROSCOPE.md](docs/GCODE-MICROSCOPE.md).
+
+## Where things are (the shell)
+
+- **Top row**, left to right: Import, Move, Rotate, Tip, Bend, Align, Gen+
+  (Wheel, Stock, Picture, Photo), Lock position, Lock plate; at the right
+  Undo, Remove and Export, with **Plate** under Export (Plate, Pieces with
+  Clone, Pack, Clear plate).
+- **Left column**, in five groups: Scale, Cut, Crop, Join (Join, A-B-C),
+  Lift, Seat, Subtract · Shape, Paint, Surface, Sculpt · Measure & check,
+  Check & repair · G-scope · X (X-ray), 👁 (Watch), ◎ (frame the view) in one
+  row at the bottom.
+- Every drop-down opens at the same spot, right of the column and under the
+  row, one at a time. **Lift** opens G-scope at its Lift row; Supports and
+  the slicer's settings are G-scope's own rows, as before. The old Finish
+  menu's sections are the column's second and third groups; Bend moved up
+  to the row.
 
 ## How to use
 

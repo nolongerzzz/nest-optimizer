@@ -977,13 +977,12 @@ select:focus, input:focus {
 .viewport-overlay-topbar {
   top: 0;
   left: 0;
-  /* Room for every top-right menu plus a gap either side of each. Was a bare
-     88px, which fitted Finish alone. */
-  right: calc(var(--vp-menu-gap) * (var(--vp-menu-count) + 1) +
-              var(--vp-menu-w) * var(--vp-menu-count));
+  /* The whole width: Finish's top-right corner is gone (shell v2) and the
+     row's right end - Undo, Remove, Export - is the shell's own. */
+  right: 0;
   /* Full height, so the panels it holds can size against it (UI shell). */
   bottom: 0;
-  padding: var(--shell-pad) 0 var(--shell-pad) var(--shell-pad);
+  padding: var(--shell-pad);
   flex-direction: column;
   flex-wrap: nowrap;
   align-items: flex-start;
@@ -1016,89 +1015,10 @@ select:focus, input:focus {
   margin: 0 2px;
   pointer-events: none;
 }
-/* The same box as the topbar's - the whole viewport - so Finish's panel
-   opens at the same spot as every other (UI shell). The summary still sits
-   in the top-right corner: the padding is menu 1's outer gap. */
-.viewport-overlay-finish {
-  top: 0;
-  right: 0;
-  left: 0;
-  bottom: 0;
-  padding: var(--vp-menu-gap);
-  flex-direction: column;
-  align-items: flex-end;
-  z-index: 90;
-  pointer-events: none;
-}
-.vp-finish-menu {
-  pointer-events: auto;
-}
-/* Doubled to out-specify `.vp-menu > summary`'s 40px icon-square base - the
-   same trap documented above .vp-top-menu, and the reason this button used
-   to render at 40x40/18px instead of the values declared here. Height and
-   padding match .vp-bar-btn exactly: Photo and Gen+ now sit right beside
-   this button at the end of the top row, and a size mismatch would read as
-   a different kind of control instead of the last one in the same row. The
-   bolder weight, wider box and accent border are what make it read as the
-   row's prominent "done" button; the height/padding stay the shared size
-   class. */
-.vp-finish-menu.vp-finish-menu > summary {
-  width: auto;
-  min-width: 72px;
-  height: 28px;
-  padding: 0 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  border: 1px solid rgba(125, 211, 252, 0.65);
-  background: rgba(30, 58, 84, 0.88);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  line-height: 1;
-  white-space: nowrap;
-  backdrop-filter: blur(10px);
-  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.25);
-}
-.vp-finish-menu.vp-finish-menu > summary:hover { border-color: #7dd3fc; }
-.vp-finish-menu.vp-finish-menu[open] > summary {
-  border-color: #7dd3fc;
-  background: rgba(30, 58, 84, 0.97);
-}
-/* One fixed width, not a range. With min 168 / max 176 the card sized itself
-   to its widest row, so it sat at 176 only because the layer-2 row overflowed
-   and fell back to 168 the moment that row was made to fit - every other row
-   silently losing 8px as a side effect of a fix two rows away. 176 is the
-   width it has been rendering at all along; pinning it keeps that and makes
-   the 166px of usable row width a constant the rows can be sized against. */
-.vp-finish-menu .vp-menu-body {
-  top: calc(100% + 4px);
-  left: auto;
-  right: 0;
-  width: 176px;
-  min-width: 176px;
-  max-width: 176px;
-  padding: 4px;
-  gap: 3px;
-  /* The Finish menu grows every time a feature lands in it, and it had run
-     out of viewport: opened on a 720px-tall window it was taller than the
-     space below its summary, so clicking a control inside it made the PAGE
-     scroll to bring the control into view. That drags the canvas up under the
-     fixed header, and a click aimed at the piece then lands on the header
-     instead - measured, adding four rows moved the scroll from -157px to
-     -251px and put the target 6px under it.
-
-     Bounding the body and letting IT scroll fixes that for every row, not
-     just the ones added last: the menu can no longer be taller than the space
-     it has, so the page never scrolls to reach a control and the viewport
-     stays where the user put it. */
-  max-height: calc(100vh - 96px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-/* ---- Finish menu: the six collapsible groups ----------------------------
+/* ---- Collapsible groups (.vp-sec) -------------------------------------------
+   Written for the Finish menu's six groups; since shell v2 those are column
+   buttons of their own and .vp-sec is the library browser's category group.
+   The history below is kept for the sizing reasons it records.
    The menu had grown to 29 rows and 49 controls in a 176px column - 988px of
    content, of which a 720px-tall window could show 63%. Five threads each
    added a row and none of them could see the whole thing.
@@ -1180,14 +1100,6 @@ select:focus, input:focus {
   backdrop-filter: blur(10px);
 }
 .vp-icon-btn:hover { border-color: #7dd3fc; }
-.viewport-overlay-bl {
-  left: 12px;
-  bottom: 12px;
-  top: auto;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 4px;            /* 8 until the column grew to eleven slabs (see .vp-shell-col) */
-}
 .vp-menu {
   pointer-events: auto;
   position: relative;
@@ -1688,15 +1600,6 @@ select:focus, input:focus {
 #btn-xray.is-on {
   border-color: #38bdf8;
   color: #38bdf8;
-}
-
-/* G-scope's rail button carries TWO glyphs - a letter and an emoji - where
-   every other tool button carries one, so the rail's 22px would overflow the
-   44px box. Its own size rather than a smaller rail for all. */
-.viewport-tool-btn.btn-gscope {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: -0.5px;
 }
 
 /* Lit while G-scope is open, the same signal X-ray gives. */
@@ -3422,9 +3325,12 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 .findings-note[hidden] { display: none; }
 .findings-fix { align-self: flex-start; }
 /* ===== UI shell: glass slabs round the top-left corner ====================
-   No sidebar. One row along the top (Import .. Lock plate, then Photo, Gen+
-   and Finish at the right) and one column down the left edge (Scale .. Pack),
-   sharing Import as the corner button. Every drop-down's panel opens at ONE
+   No sidebar. One row along the top (Import .. Lock plate, then Undo, Remove
+   and Export at the right, with Plate under Export) and one column down the
+   left edge in five groups (make/edit, surface, check, print, view), sharing
+   Import as the corner button. Shell v2 took the Finish menu apart into
+   column buttons and moved the bottom-left tool strip into the column.
+   Every drop-down's panel opens at ONE
    spot - just right of the column, just under the row - so a panel never
    covers the button that opened it and never lands on the plate's centre.
    Only one is open at a time on the page (app-join.js).
@@ -3441,6 +3347,9 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   --shell-gap: 6px;                 /* between slabs, along the row and down the column */
   --shell-btn-h: 36px;
   --shell-col-w: 118px;             /* every column slab, and Import at the corner */
+  --shell-col-btn-h: 32px;          /* column slab: 32 + the 4px gap = a 36px pitch */
+  --shell-col-gap: 4px;
+  --shell-group-gap: 12px;          /* between the column's five groups */
   --shell-panel-x: calc(var(--shell-pad) + var(--shell-col-w) + 8px);
   --shell-panel-y: calc(var(--shell-pad) + var(--shell-btn-h) + 8px);
 
@@ -3457,50 +3366,67 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 
 .vp-shell-row {
   display: flex;
-  align-items: center;
+  /* flex-start, not center: the Export/Plate stack is one slab tall in the
+     row (Plate hangs below it), and nothing in the row may sit lower. */
+  align-items: flex-start;
   gap: var(--shell-gap);
   width: 100%;
   pointer-events: none;
 }
-/* The column's own, tighter gap: eleven slabs since Crop got its own card,
-   and the column must still clear the bottom-left tools (Undo ... Watch) on
-   a 1280 x 800 window. */
+/* The column: 32px slabs on a 36px pitch, a 12px gap between groups, and
+   the view group (X-ray, Eye, Frame) pinned to the bottom. It runs the full
+   height of the viewport - the bottom-left tool strip it used to have to
+   clear is gone, its buttons are the column's last two groups.
+
+   The view group is one row of three icon buttons (X, the eye, the target),
+   which keeps the column short. */
 .vp-shell-col {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--shell-col-gap);
+  flex: 1 1 auto;
+  min-height: 0;
   width: var(--shell-col-w);
   pointer-events: none;
 }
-/* Under 800 high the 4px gap leaves Pack over Undo (1024 x 768, watch:test
-   part F); 2px ends the column 16px above Undo's middle. */
-@media (max-height: 799px) {
-  .vp-shell-col { gap: 2px; }
+.vp-shell-col > .vp-group-start {
+  margin-top: calc(var(--shell-group-gap) - var(--shell-col-gap));
 }
-/* When the row runs short of room it is the middle group - Export through
-   Lock plate - that gives way, never Import (the corner, as wide as the
-   column) and never the right group (Photo, Gen+). The middle slabs shrink
-   together and a label that no longer fits is cut with an ellipsis inside
-   its own slab, so nothing spills into its neighbour.
-
-   That is what keeps the row clear of Finish whatever the font: the row
-   can never be wider than the topbar, and the topbar ends --vp-menu-gap
-   before Finish begins (8 px). Label widths are the machine's font
-   metrics, so a layout that only fits when the labels happen to measure a
-   certain width is no layout - at 1144 px one machine's labels touched
-   Finish and another's overlapped it by 5 px. */
+.vp-shell-col > .vp-shell-view {
+  display: flex;
+  gap: var(--shell-col-gap);
+  /* Pinned to the bottom; at least a group gap under G-scope. */
+  margin-top: auto;
+  padding-top: calc(var(--shell-group-gap) - var(--shell-col-gap));
+  pointer-events: none;
+}
+/* A short window (under 760 high, the 900 x 720 fallback among them) tightens
+   the column so its last group still lands inside the viewport. */
+@media (max-height: 759px) {
+  :root {
+    --shell-col-btn-h: 28px;
+    --shell-col-gap: 2px;
+    --shell-group-gap: 8px;
+  }
+}
+/* When the row runs short of room it is the middle group - Move through
+   Lock plate, Gen+ aside - that gives way, never Import (the corner, as wide
+   as the column), never Gen+ and never the right group (Undo, Remove,
+   Export). The middle slabs shrink together and a label that no longer fits
+   is cut with an ellipsis inside its own slab, so nothing spills into its
+   neighbour. Label widths are the machine's font metrics, so a layout that
+   only fits when the labels happen to measure a certain width is no layout. */
 .vp-shell-row > * { flex-shrink: 0; }
-.vp-shell-row > #menu-export, .vp-shell-row > #menu-rotate,
-.vp-shell-row > #menu-tip, .vp-shell-row > #menu-move,
-.vp-shell-row > #btn-delete-placed, .vp-shell-row > #btn-lock-pos,
-.vp-shell-row > #btn-plate-lock {
+.vp-shell-row > #menu-move, .vp-shell-row > #menu-rotate,
+.vp-shell-row > #menu-tip, .vp-shell-row > #menu-bend,
+.vp-shell-row > #menu-align,
+.vp-shell-row > #btn-lock-pos, .vp-shell-row > #btn-plate-lock {
   flex-shrink: 1;
   min-width: 40px;
 }
-#menu-export > summary, #menu-rotate > summary,
-#menu-tip > summary, #menu-move > summary,
-.vp-shell-row > #btn-delete-placed, .vp-shell-row > #btn-lock-pos,
-.vp-shell-row > #btn-plate-lock {
+#menu-move > summary, #menu-rotate > summary,
+#menu-tip > summary, #menu-bend > summary, #menu-align > summary,
+.vp-shell-row > #btn-lock-pos, .vp-shell-row > #btn-plate-lock {
   display: block;
   max-width: 100%;
   overflow: hidden;
@@ -3508,8 +3434,22 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   text-align: center;
   line-height: calc(var(--shell-btn-h) - 2px);
 }
-/* Photo, Gen+ (and Finish beyond them) to the right end of the row. */
-.vp-shell-row > #menu-photo { margin-left: auto; }
+/* Undo, Remove and Export to the right end of the row. */
+.vp-shell-row > #btn-undo { margin-left: auto; }
+/* Export with Plate directly under it. One slab tall as far as the row is
+   concerned - Plate overflows below - so the column still starts right under
+   Import. Both slabs take the stack's width, the wider of the two labels. */
+.vp-shell-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--shell-col-gap);
+  height: var(--shell-btn-h);
+  overflow: visible;
+  pointer-events: none;
+}
+.vp-shell-stack > .vp-shell-menu.vp-shell-menu > summary { width: 100%; }
+
 
 /* Static, so each panel's containing block is the overlay (see above). */
 .vp-shell-menu.vp-shell-menu {
@@ -3520,7 +3460,9 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 
 /* ---- the slab ---- */
 .vp-shell-menu.vp-shell-menu > summary,
-.vp-shell-row > .vp-bar-btn {
+.vp-shell-row > .vp-bar-btn,
+.vp-shell-col > .vp-bar-btn,
+.vp-shell-view > .vp-bar-btn {
   list-style: none;
   display: inline-flex;
   align-items: center;
@@ -3549,13 +3491,41 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   transition: border-color 0.12s, box-shadow 0.12s;
 }
 /* Import is the corner: as wide as the column under it. Row slabs size to
-   their label; column slabs all share one width. */
+   their label; column slabs all share one width and the column's height. */
 .vp-shell-row > #menu-import > summary,
-.vp-shell-col > .vp-shell-menu > summary {
+.vp-shell-col > .vp-shell-menu > summary,
+.vp-shell-col > .vp-bar-btn {
   width: var(--shell-col-w);
 }
+.vp-shell-col > .vp-shell-menu > summary,
+.vp-shell-col > .vp-bar-btn,
+.vp-shell-view > .vp-bar-btn {
+  height: var(--shell-col-btn-h);
+}
+/* A label longer than the column (Measure & check, Check & repair) takes two
+   lines inside its slab rather than spilling past it. */
+.vp-shell-col > .vp-shell-menu > summary,
+.vp-shell-col > .vp-bar-btn {
+  display: flex;        /* not inline-flex: a two-line label must not move the baseline */
+  padding: 0 8px;
+  white-space: normal;
+  line-height: 1.15;
+  text-align: center;
+}
+/* The view group: three icon buttons sharing the column's width equally,
+   with room for the eye's count dot. */
+.vp-shell-view > .vp-bar-btn {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0;
+  font-size: 16px;
+  letter-spacing: 0;
+}
 .vp-shell-menu.vp-shell-menu > summary:hover,
-.vp-shell-row > .vp-bar-btn:hover:not(:disabled) {
+.vp-shell-row > .vp-bar-btn:hover:not(:disabled),
+.vp-shell-col > .vp-bar-btn:hover:not(:disabled),
+.vp-shell-view > .vp-bar-btn:hover:not(:disabled) {
   border-color: rgba(255, 255, 255, 0.45);
 }
 /* Open: a lit border and a glow, nothing else - no arrow. */
@@ -3565,23 +3535,24 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   background: var(--glass-slab);
 }
 .vp-shell-menu.vp-shell-menu > summary:focus-visible,
-.vp-shell-row > .vp-bar-btn:focus-visible {
+.vp-shell-row > .vp-bar-btn:focus-visible,
+.vp-shell-col > .vp-bar-btn:focus-visible,
+.vp-shell-view > .vp-bar-btn:focus-visible {
   outline: 2px solid #7dd3fc;
   outline-offset: 1px;
 }
-.vp-shell-row > .vp-bar-btn:disabled {
+.vp-shell-row > .vp-bar-btn:disabled,
+.vp-shell-col > .vp-bar-btn:disabled,
+.vp-shell-view > .vp-bar-btn:disabled {
   opacity: 0.38;
   cursor: not-allowed;
 }
-/* Finish keeps its blue tint. */
-.vp-shell-menu.vp-finish-menu > summary {
-  width: var(--vp-menu-w);
-  border-color: rgba(147, 197, 253, 0.55);
-  background: linear-gradient(180deg, rgba(96, 165, 250, 0.42), rgba(37, 99, 235, 0.22));
-}
-.vp-shell-menu.vp-finish-menu[open] > summary {
+/* On: X-ray, Eye (Watch) and G-scope while they are live - the lit border
+   the open drop-downs use, so "on" reads the same everywhere in the shell. */
+.vp-shell-col > .vp-bar-btn.is-on,
+.vp-shell-view > .vp-bar-btn.is-on {
   border-color: var(--glass-border-lit);
-  background: linear-gradient(180deg, rgba(96, 165, 250, 0.50), rgba(37, 99, 235, 0.28));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), var(--glass-glow);
 }
 /* The two locks keep their teal "on" state over the slab. */
 .vp-shell-row > .vp-bar-btn.is-locked {
@@ -3623,29 +3594,48 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   letter-spacing: normal;
   text-transform: none;
 }
-/* Finish's rows are fitted to its 176px column; it keeps that width. */
-.vp-shell-menu.vp-finish-menu > .vp-menu-body {
+/* The cards that were Finish's sections (and Bend, out of Shape) keep the
+   176px column their rows are fitted to, to the pixel. */
+.vp-shell-menu.vp-shell-menu > .vp-menu-body.vp-finish {
   width: 176px;
   min-width: 176px;
   max-width: 176px;
   padding: 4px;
   gap: 3px;
 }
-.vp-shell-col .vp-menu-body .btn { font-size: 12.5px; }
+.vp-shell-col .vp-menu-body:not(.vp-finish) .btn { font-size: 12.5px; }
 /* The sidebar's cards gave these a top margin and a card behind them. */
 .vp-shell-menu .join-slots { margin-bottom: 0; }
 .vp-shell-menu .btn-secondary { margin-bottom: 0; }
+
+/* The merged drop-downs' members (Join ▾, Plate ▾, Gen+'s Photo) open in flow
+   inside the panel like Gen+'s Wheel and Stock; their own panels drop the
+   sidebar-era fixed width the nested rule would otherwise inherit. */
+.vp-shell-menu .vp-sub-menu > .vp-menu-body { flex-direction: column; flex-wrap: nowrap; }
+
+/* G-scope opened at its Lift row from the column: the row is marked until
+   G-scope is opened from its own button. */
+#microscope .ms-section.ms-row-target {
+  box-shadow: inset 3px 0 0 #7dd3fc;
+  background: rgba(125, 211, 252, 0.07);
+}
+
+/* Watch's log docks at the panel spot's x, beside the column rather than
+   over it; it was placed to clear the bottom-left tool strip, now gone. */
+.viewport-section > #nso-watch-panel:not(.in-gscope) {
+  left: var(--shell-panel-x);
+  bottom: var(--shell-pad);
+  width: min(420px, calc(100% - var(--shell-panel-x) - 12px));
+}
 
 /* No backdrop-filter: solid slabs and panels, still readable over the plate. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .vp-shell-menu.vp-shell-menu > summary,
   .vp-shell-row > .vp-bar-btn,
+  .vp-shell-col > .vp-bar-btn,
+  .vp-shell-view > .vp-bar-btn,
   .vp-shell-menu.vp-shell-menu[open] > summary {
     background: var(--glass-slab-solid);
-  }
-  .vp-shell-menu.vp-finish-menu > summary,
-  .vp-shell-menu.vp-finish-menu[open] > summary {
-    background: #1e3a5f;
   }
   .vp-shell-menu.vp-shell-menu > .vp-menu-body {
     background: var(--glass-panel-solid);

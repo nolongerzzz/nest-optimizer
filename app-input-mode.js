@@ -49,9 +49,10 @@
    through the same path the button uses, overlays are put away. What is left
    behind cannot be hit, because it is not there.
 
-   Nested menus (Gen+'s Wheel and Stock) and the Finish overlay are not top
-   bar menus and own no input here; app-join's page-wide one-panel rule still
-   handles those, and still handles the ordinary closing of the bar's menus.
+   Nested menus (Gen+'s Wheel and Stock) and the shell's other drop-downs
+   are not top bar menus and own no input here; app-join's page-wide
+   one-panel rule still handles those, and still handles the ordinary
+   closing of the bar's menus.
    This sits on top of it and makes the guarantee one the input handlers can
    actually rely on. The one place they do come in is leaveTool() below, the
    double-click that puts every tool away, menus and overlays included. */
@@ -173,9 +174,9 @@
      Measure, Soften, Cap, Center lock - plus what that list never had to
      cover because none of them sits in Carve's way: Carve itself, Attach,
      Reattach, Tip on face, and a Join session. Then the menus: the Cut tool
-     (closeCutter, which also shuts its menu), every top-bar menu, the eight
-     down the left column, Gen+'s nested Wheel and Stock, the Finish overlay
-     and the right-click menu. The
+     (closeCutter, which also shuts its menu), every top-bar menu, the rest
+     of the shell's drop-downs and the members open inside them (Gen+'s
+     Wheel and Stock among them) and the right-click menu. The
      Rotate / Tip / Move owners are torn down by sync(), the same teardowns
      that run when another menu takes the input.
 
@@ -289,11 +290,15 @@
       shut(gen.querySelector('.vp-stock-menu'), 'stock');
     }
     menus().forEach(function (d) { shut(d, d.id || 'menu'); });
-    /* The left column's menus (Join .. Pack) own no input, so they are not
-       in menus(), but they are panels on the plate all the same. */
+    /* The shell's other drop-downs (Bend, Align, Join, Seat, Subtract, the
+       column's surface and check menus, Plate) own no input, so they are not
+       in menus(), but they are panels on the plate all the same - and so are
+       the members open inside the merged ones (Join, A-B-C; Plate, Pieces,
+       Pack; Gen+'s Picture and Photo). */
     Array.prototype.forEach.call(document.querySelectorAll('.vp-col-menu'),
       function (d) { shut(d, d.id || 'menu'); });
-    shut(document.querySelector('.vp-finish-menu'), 'finish');
+    Array.prototype.forEach.call(document.querySelectorAll('.vp-shell-menu .vp-menu'),
+      function (d) { shut(d, d.id || 'menu'); });
     /* The teardowns land now, not a microtask later off the observer. */
     sync();
 
