@@ -90,13 +90,14 @@
    region rather than stacking a second one.
 
    OUT OF SCOPE: economics dials beyond L, curved legs, round or tapered
-   sections, bores (hollowing), UI.
+   sections, UI.
 
    API
    ---------------------------------------------------------------------------
    gridBeacons(rawTris, opts)  -> { ok, reason, beacons, detect, regions }
    plan(rawTris, opts)         -> { ok, reason, members, merges, trunks, ... }
-   solid(plan, opts)           -> Promise { ok, soup, trunks, reason }
+   solid(plan, opts)           -> Promise { ok, soup, solids, reason }; opts.hollow
+                                  bores every member (BORES), hollowWallMm, minBoreMm
    describe(plan)              -> one plain status line
    opts: skipList (required, as detectOverhangs), angleDeg, occluders,
          regionId, sideMm, style ('strut' | 'tree' | 'gecko-hand'),
@@ -114,6 +115,7 @@
   var RAY_EPS = 1e-3;
   var PAD_LAYERS_MM = 0.4;     /* a resting foot: two 0.2 mm layers */
   var GAP_MM = 0.18;           /* nso_support_interface.js's easy-release gap */
+  var TIP_LEVELS = [0.05, 0.3, 0.6, 1.0, 1.5];   /* mm below a tip where the tip zone is swept for walls */
   var TIP_RISE_SIDES = 2;     /* a pickup stub's vertical last run, x the strut side */
   var NUDGE_STEPS = [0.25, 0.5, 0.75, 1];   /* x the strut side: how far a tip may move off a wall */
   var EAGERNESS = { strut: 0, tree: 1, 'gecko-hand': 1 };
@@ -130,6 +132,25 @@
   function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
   function unit(a) { var L = len(a); return L > 1e-15 ? mul(a, 1 / L) : null; }
   function hdist(a, b) { return Math.hypot(a[0] - b[0], a[1] - b[1]); }
+  /* Closest distance between segments p0-p1 and q0-q1 (Ericson 5.1.9). */
+  function segDist(p0, p1, q0, q1) {
+    var d1 = sub(p1, p0), d2 = sub(q1, q0), r = sub(p0, q0);
+    var a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r), s, t;
+    if (a < 1e-18 && e < 1e-18) return len(r);
+    if (a < 1e-18) { s = 0; t = Math.max(0, Math.min(1, f / e)); }
+    else {
+      var c = dot(d1, r);
+      if (e < 1e-18) { t = 0; s = Math.max(0, Math.min(1, -c / a)); }
+      else {
+        var b = dot(d1, d2), den = a * e - b * b;
+        s = den > 1e-18 ? Math.max(0, Math.min(1, (b * f - c * e) / den)) : 0;
+        t = (b * s + f) / e;
+        if (t < 0) { t = 0; s = Math.max(0, Math.min(1, -c / a)); }
+        else if (t > 1) { t = 1; s = Math.max(0, Math.min(1, (b - c) / a)); }
+      }
+    }
+    return len(sub(add(p0, mul(d1, s)), add(q0, mul(d2, t))));
+  }
 
   /* =====================================================================
      BEACONS - the adapter. Today's detectOverhangs regions, gridded at the
@@ -194,12 +215,13 @@
        how much of each end the RAILS leave out (a tip's own cross-section is
        the cap's business, as in the tree's probeRails); the axis is always
        tested end to end but for the ray epsilon. */
-    function leg(a, b, side, capA, capB) {
+    function leg(a, b, side, capA, capB, clear) {
+      if (clear == null) clear = CLEAR_MM;
       var d = sub(b, a), L = len(d);
       if (!(L > 2 * RAY_EPS)) return -1;
       var u = mul(d, 1 / L);
       var vertical = Math.abs(u[0]) < 1e-12 && Math.abs(u[1]) < 1e-12;
-      if (vertical && u[2] > 0) return leg(b, a, side, capB, capA);
+      if (vertical && u[2] > 0) return leg(b, a, side, capB, capA, clear);
       function cast(o, t0, t1) {
         if (!(t1 - t0 > 2 * RAY_EPS)) return -1;
         var org = add(o, mul(u, t0));
@@ -211,7 +233,7 @@
       /* Eight rails on the section's circumscribed circle: every member's
          square is turned by its own phase (see PHASE), so the probe takes
          the circle any turn of it fits in. */
-      var r = vertical ? [1, 0, 0] : (unit(cross(u, [0, 0, 1])) || [1, 0, 0]), s = cross(u, r), R = side / Math.SQRT2 + CLEAR_MM;
+      var r = vertical ? [1, 0, 0] : (unit(cross(u, [0, 0, 1])) || [1, 0, 0]), s = cross(u, r), R = side / Math.SQRT2 + clear;
       for (var k = 0; k < 8; k++) {
         var t = 2 * Math.PI * k / 8;
         offs.push(add(mul(r, R * Math.cos(t)), mul(s, R * Math.sin(t))));
@@ -260,7 +282,7 @@
   function plan(rawTris, opts) {
     opts = opts || {};
     var out = { ok: false, reason: '', stage: 'beacons', members: [], stubs: [], merges: [], pickups: [],
-                steered: [], nudged: [], unreachable: [], resting: [], inside: [], held: 0 };
+                steered: [], nudged: [], tight: [], unreachable: [], resting: [], inside: [], held: 0 };
     var A = SA(opts), T = ST(opts);
     if (!A || !T || typeof A.detectOverhangs !== 'function') {
       out.reason = 'nso_support_aim.js and nso_support_tree.js must be loaded'; return out;
@@ -295,10 +317,11 @@
 
     /* ---- refusal: a beacon inside the piece ---- */
     var live = [];
+    /* Inside: the short line out of the point along its own normal is in
+       material (lineInsideAt - a point that lies ON a face, a contact
+       against a wall, is not inside; the nudge below deals with it). */
     bc.beacons.forEach(function (b) {
-      var q = add(b.p, mul(b.n, 0.05)), inside = false;
-      for (var k = 0; k < obstacles.length && !inside; k++) if (A._windingAt(obstacles[k], q) >= 0.5) inside = true;
-      if (inside) out.inside.push(b.id); else live.push(b);
+      if (A.lineInsideAt(obstacles, b.p, b.n, 0.2) >= 0) out.inside.push(b.id); else live.push(b);
     });
     if (!live.length) {
       out.reason = 'Every support point is inside the piece, so there is nowhere to start a support.';
@@ -317,50 +340,81 @@
     function anchor(m) { return m.path[m.path.length - 1]; }
     function dropHit(p, side, cap) { return probe.leg(p, [p[0], p[1], plateZ], side, cap, 0); }
 
-    /* A member just made: a clear drop, a steer, a rest, or nothing. */
-    function settle(m) {
-      var a = anchor(m), cap = m.path.length === 1 ? m.tipCap : 0;
-      if (dropHit(a, m.side, cap) < 0) return true;
-      var best = null;
-      for (var li = 0; li < STEER_LEANS.length; li++) {
-        for (var hi = 0; hi < STEER_HEADINGS; hi++) {
-          var t = 2 * Math.PI * hi / STEER_HEADINGS, u = [Math.cos(t), Math.sin(t)], lean = tanT * STEER_LEANS[li];
-          for (var k = Math.floor((a[2] - plateZ) / g - 1e-9); k >= 0; k--) {
-            var z = plateZ + k * g, D = a[2] - z;
-            if (best && D >= best.D) break;
-            var W = [a[0] + u[0] * D * lean, a[1] + u[1] * D * lean, z];
-            if (probe.leg(a, W, m.side, cap, 0) >= 0) break;          /* the leaning line itself is blocked */
-            if (k === 0 || dropHit(W, m.side, 0) < 0) { best = { D: D, W: W, heading: hi, lean: STEER_LEANS[li] }; break; }
+    /* THE TIP'S OWN ZONE. The rail test leaves a tip's last cross-section
+       out (on a sloped face the cap's downhill corner meets the face by
+       design). A WALL beside the tip is another matter: a tip within its
+       section of a side wall has its top in the wall, and the interface
+       finish then cannot keep its gap there (measured on the tab and tall
+       arms, 0.07 mm and 0 mm from the post). So the tip's top TIP_ZONE_MM is
+       swept with horizontal rays at a few heights, and anything nearer than
+       the section's circumradius plus CLEAR_MM is a wall - except the face
+       the tip is holding up, recognised by lying in its tangent plane. */
+    function tipClear(q, n, side, margin) {
+      var need = side / Math.SQRT2 + (margin == null ? CLEAR_MM : margin);
+      for (var hi = 0; hi < TIP_LEVELS.length; hi++) {
+        var o = [q[0], q[1], q[2] - TIP_LEVELS[hi]];
+        for (var k = 0; k < STEER_HEADINGS; k++) {
+          var t = 2 * Math.PI * k / STEER_HEADINGS, d = [Math.cos(t), Math.sin(t), 0], t0 = RAY_EPS;
+          for (var guard = 0; guard < 4; guard++) {
+            var h = A._nearestHit(obstacles, o, d, t0, need);
+            if (!(h > 0)) break;
+            var x = add(o, mul(d, h));
+            if (Math.abs(dot(sub(x, q), n)) < 0.02) { t0 = h + RAY_EPS; continue; }   /* the supported face */
+            return false;
           }
         }
       }
-      if (best) {
-        m.path.push(best.W);
-        out.steered.push({ member: m.id, to: best.W.slice(), leanDeg: Math.atan(tanT * best.lean) * 180 / Math.PI });
-        if (best.W[2] <= plateZ + 1e-9) { m.free = false; m.end = 'plate'; }
-        return true;
-      }
-      /* A TIP AGAINST A WALL, when no lean gets it clear. A point within a
-         strut's half-width of a wall beside it has its own column in the
-         wall, and no lean from there clears it. The tip is moved straight off the wall, along the face's
-         own tangent plane, by the least of NUDGE_STEPS that gives a clear
-         drop - the old tree's clearWalls, here for every point, and reported. */
-      if (m.kind === 'beacon' && m.path.length === 1) {
-        var n = out.beacons[m.beacon].n;
+      return true;
+    }
+
+    /* A member just made: a clear drop, a steer, a rest, or nothing. */
+    function settle(m) {
+      var a = anchor(m), cap = m.path.length === 1 ? m.tipCap : 0;
+      var fresh = m.kind === 'beacon' && m.path.length === 1;
+      var n = fresh ? out.beacons[m.beacon].n : null;
+      var tipOk = !fresh || tipClear(a, n, m.side);
+      if (tipOk && dropHit(a, m.side, cap) < 0) return true;
+      if (tipOk && steer(m, a, cap)) return true;
+      /* A TIP AGAINST A WALL: the tip is moved straight off it, along the
+         face's own tangent plane, by the least of NUDGE_STEPS that gives a
+         clear tip and a clear drop (or, failing that, a clear tip and a
+         steer - tried once per step) - the old tree's clearWalls, here for
+         every point, and reported. The moved tip is still under the face.
+         A tip that reads clear but has no route - one lying exactly ON a
+         wall, whose rays start in the wall's plane and cannot see it - tries
+         the same moves for a straight drop only. */
+      if (fresh) {
+        var cands = [];
         for (var si = 0; si < NUDGE_STEPS.length; si++) {
-          var dd = NUDGE_STEPS[si] * s0, moved = null;
-          for (var h0 = 0; h0 < STEER_HEADINGS && !moved; h0++) {
+          var dd = NUDGE_STEPS[si] * s0;
+          for (var h0 = 0; h0 < STEER_HEADINGS; h0++) {
             var th = 2 * Math.PI * h0 / STEER_HEADINGS, dx = Math.cos(th) * dd, dy = Math.sin(th) * dd;
             var q = [a[0] + dx, a[1] + dy, a[2] - (n[0] * dx + n[1] * dy) / n[2]];
-            /* still under the piece: the face is right above the moved tip */
             if (!(A._nearestHit(obstacles, [q[0], q[1], q[2] - 0.2], [0, 0, 1], 0, 0.4) > 0)) continue;
-            if (dropHit(q, m.side, cap) < 0) moved = q;
+            if (!tipClear(q, n, m.side)) continue;
+            cands.push({ q: q, mm: dd, step: si });
           }
-          if (moved) {
-            out.nudged.push({ beacon: m.beacon, from: a.slice(), to: moved.slice(), mm: dd });
-            m.path[0] = moved;
-            return true;
-          }
+        }
+        var pickQ = null, i, tried = {};
+        for (i = 0; i < cands.length && !pickQ; i++) if (dropHit(cands[i].q, m.side, cap) < 0) pickQ = cands[i];
+        for (i = 0; i < cands.length && !pickQ && !tipOk; i++) {
+          if (tried[cands[i].step]) continue;
+          tried[cands[i].step] = true;
+          m.path[0] = cands[i].q;
+          if (steer(m, cands[i].q, cap)) pickQ = cands[i];
+          else m.path[0] = a;
+        }
+        if (pickQ) {
+          out.nudged.push({ beacon: m.beacon, from: a.slice(), to: pickQ.q.slice(), mm: pickQ.mm });
+          m.path[0] = pickQ.q;
+          return true;
+        }
+        /* No move clears it by the margin: a tip that does not TOUCH the
+           wall stays where it is (the interface ladder takes a smaller
+           patch there, or cuts at the gap). */
+        if (!tipOk && tipClear(a, n, m.side, 0)) {
+          out.tight.push(m.beacon);
+          if (dropHit(a, m.side, cap) < 0 || steer(m, a, cap)) return true;
         }
       }
       if (rest) {
@@ -375,6 +429,30 @@
       }
       m.free = false; m.end = 'none';
       return false;
+    }
+
+    /* STEER: for each heading at theta and theta/2, the leaning line from
+       the anchor is walked down the lattice levels; the first point from
+       which the drop is clear wins, shallowest first. */
+    function steer(m, a, cap) {
+      var best = null;
+      for (var li = 0; li < STEER_LEANS.length; li++) {
+        for (var hi = 0; hi < STEER_HEADINGS; hi++) {
+          var t = 2 * Math.PI * hi / STEER_HEADINGS, u = [Math.cos(t), Math.sin(t)], lean = tanT * STEER_LEANS[li];
+          for (var k = Math.floor((a[2] - plateZ) / g - 1e-9); k >= 0; k--) {
+            var z = plateZ + k * g, D = a[2] - z;
+            if (best && D >= best.D) break;
+            var W = [a[0] + u[0] * D * lean, a[1] + u[1] * D * lean, z];
+            if (probe.leg(a, W, m.side, cap, 0) >= 0) break;          /* the leaning line itself is blocked */
+            if (k === 0 || dropHit(W, m.side, 0) < 0) { best = { D: D, W: W, heading: hi, lean: STEER_LEANS[li] }; break; }
+          }
+        }
+      }
+      if (!best) return false;
+      m.path.push(best.W);
+      out.steered.push({ member: m.id, to: best.W.slice(), leanDeg: Math.atan(tanT * best.lean) * 180 / Math.PI });
+      if (best.W[2] <= plateZ + 1e-9) { m.free = false; m.end = 'plate'; }
+      return true;
     }
     function drop(m) {                     /* nothing built for it */
       m.dead = true;
@@ -520,9 +598,9 @@
     out.stations = [];
     M.forEach(function (m) {
       if (m.dead || m.beacon == null) return;
-      var b = bc.beacons[m.beacon];
-      var below = m.path.length > 1 ? m.path[1] : [b.p[0], b.p[1], b.p[2] - 5];
-      out.stations.push({ label: 'point ' + b.id, beacon: b.id, contact: b.p.slice(), from: below.slice(), to: b.p.slice(), side: m.kind === 'side' });
+      var b = bc.beacons[m.beacon], tip = m.path[0];       /* the tip, after any move off a wall */
+      var below = m.path.length > 1 ? m.path[1] : [tip[0], tip[1], tip[2] - 5];
+      out.stations.push({ label: 'point ' + b.id, beacon: b.id, contact: tip.slice(), from: below.slice(), to: tip.slice(), side: m.kind === 'side' });
     });
     out.stubs.forEach(function (s) {
       out.stations.push({ label: 'point ' + s.beacon, beacon: s.beacon, contact: s.to.slice(), from: s.via.slice(), to: s.to.slice() });
@@ -640,7 +718,16 @@
     var P = PS(opts), T = ST(opts), A = SA(opts);
     if (!P || typeof P.sweep !== 'function') return { ok: false, reason: 'nso_path_sweep.js is not loaded' };
     var probe = makeProbe(A, [opts.rawTris || []].concat(opts.occluders || []));
-    var out = [];
+    var out = [], placed = [], droppedFingers = 0, shafts = [];
+    /* Every contact's shaft near its tip, for the fingers to keep clear of. */
+    if (p.style === 'gecko-hand') {
+      p.members.forEach(function (m) {
+        if (m.dead || m.beacon == null || m.path.length < 2) return;
+        var d = unit(sub(m.path[1], m.path[0]));
+        shafts.push({ beacon: m.beacon, a: m.path[0], b: add(m.path[0], mul(d, 3)), r: m.side / Math.SQRT2 });
+      });
+      p.stubs.forEach(function (st) { shafts.push({ beacon: st.beacon, a: st.to, b: st.via, r: st.side / Math.SQRT2 }); });
+    }
     for (var t = 0; t < p.trunks.length; t++) {
       var tr = p.trunks[t], parts = [], fingers = [];
       for (var i = 0; i < tr.members.length; i++) {
@@ -655,33 +742,51 @@
         }
         p.stubs.forEach(function (s) {
           if (s.member !== m.id) return;
-          /* started a quarter of the column's side back along itself, for the
-             same no-shared-vertex reason as a member's run-on */
-          var su = unit(sub(s.via, s.from)), cs = p.members[s.member].side;
-          var sw = P.sweep({ points: [sub(s.from, mul(su, cs / 4)), s.via, s.to], profile: squareProfile(s.side, phaseOf(p.members.length + s.beacon + 1)), up: [0, 1, 0] });
+          /* Started AT the pickup point: it lies on the column's axis, inside
+             both the column it leaves and the one below, and is no vertex of
+             either. Run back a quarter side instead, the stub's start landed
+             within 0.2 mm of the parent column's run-on end, and the union
+             pinched there (2 non-manifold edges on a box tilted 30 deg). */
+          var sw = P.sweep({ points: [s.from, s.via, s.to], profile: squareProfile(s.side, phaseOf(p.members.length + s.beacon + 1)), up: [0, 1, 0] });
           if (sw.ok) { parts.push({ soup: sw.tris, stub: true }); s.soup = sw.tris; }
         });
         if (p.style === 'gecko-hand' && T && T._geckoHand) {
           var tips = [];
           if (m.beacon != null) {
             var pts = ms.points, dir = unit(sub(pts[0], pts[1]));
-            tips.push({ end: pts[0], dir: dir, n: p.beacons[m.beacon].n });
+            tips.push({ end: pts[0], dir: dir, n: p.beacons[m.beacon].n, beacon: m.beacon });
           }
-          p.stubs.forEach(function (s) { if (s.member === m.id) tips.push({ end: s.to, dir: unit(sub(s.to, s.via)), n: p.beacons[s.beacon].n }); });
+          p.stubs.forEach(function (s) { if (s.member === m.id) tips.push({ end: s.to, dir: unit(sub(s.to, s.via)), n: p.beacons[s.beacon].n, beacon: s.beacon }); });
           tips.forEach(function (tp) {
             /* At the planning side, as the old tree kept it: a hand sized to
                a fatter strut reaches into its neighbours' and closes loops. */
             var hand = T._geckoHand(tp.end, tp.dir, p.handSideMm, { normal: tp.n, floorMm: p.floorMm, pathSweep: P });
             if (!hand.ok) return;
             hand.fingers.forEach(function (f) {
-              if (probe.leg(f.from, f.to, hand.widthMm, 0, hand.widthMm) < 0) fingers.push({ soup: f.soup, optional: true });
+              /* the finger's own hexagon (circumradius width / sqrt 3), no
+                 extra clearance: it lies along the face by design, as the
+                 old tree's clearFingers tested it */
+              if (probe.leg(f.from, f.to, hand.widthMm * Math.SQRT2 / Math.sqrt(3), 0, hand.widthMm, 0) >= 0) return;
+              /* and clear of every OTHER hand: two hands that touch close a
+                 loop through the support (measured: 2 handles on the tall arm
+                 where tips were moved off the post) */
+              var gap = 2 * hand.widthMm / Math.sqrt(3) + CLEAR_MM;
+              for (var q = 0; q < placed.length; q++) {
+                if (placed[q].tip !== tp && segDist(f.from, f.to, placed[q].a, placed[q].b) < gap) { droppedFingers++; return; }
+              }
+              for (q = 0; q < shafts.length; q++) {
+                if (shafts[q].beacon !== tp.beacon &&
+                    segDist(f.from, f.to, shafts[q].a, shafts[q].b) < hand.widthMm / Math.sqrt(3) + shafts[q].r + CLEAR_MM) { droppedFingers++; return; }
+              }
+              placed.push({ tip: tp, a: f.from, b: f.to });
+              fingers.push({ soup: f.soup, optional: true });
             });
           });
         }
       }
       out.push({ trunk: t, parts: parts.concat(fingers), fingers: fingers.length });
     }
-    return { ok: true, trunks: out };
+    return { ok: true, trunks: out, fingersDropped: droppedFingers };
   }
 
   /* Promise of { ok, soup, solids, reason }. One solid per landed trunk;
@@ -752,12 +857,87 @@
         solids = out;
       });
     });
+    var hollow = null;
     return chain.then(function () {
       var n = solids.reduce(function (s, x) { return s + x.soup.length; }, 0), soup = new Float32Array(n), w = 0;
       solids.forEach(function (x) { soup.set(x.soup, w); w += x.soup.length; });
-      return { ok: true, soup: soup, solids: solids, fingersDropped: dropped, detached: detached, reason: p.reason };
+      if (!opts.hollow) return soup;
+      return bore(p, soup, opts).then(function (h) { hollow = h; return h.soup; });
+    }).then(function (soup) {
+      return { ok: true, soup: soup, solids: solids, fingersDropped: dropped + tp.fingersDropped, detached: detached,
+               partSoups: [].concat.apply([], tp.trunks.map(function (t) { return t.parts.map(function (x) { return x.soup; }); })),
+               hollow: hollow, solidSoup: hollow ? hollow.solidSoup : null,
+               reason: p.reason + (hollow ? ' ' + hollow.reason : '') };
     }).catch(function (err) {
       return { ok: false, reason: 'the support would not join into one solid: ' + ((err && err.message) || err) };
+    });
+  }
+
+  /* =====================================================================
+     BORES - hollow = union(members) - union(each member shrunk by a wall)
+
+     docs/SUPPORT-TREE.md 6b's construction, carried to a mitred member. A
+     member is one constant square section swept along its polyline, so every
+     side wall is a plane parallel to its segment and every mitre a bisector
+     plane; moving each side wall in by `wall` is the same sweep with the side
+     reduced by 2 x wall - exactly, with no taper to pay cos(alpha) for - and
+     its end caps come in by `wall` along their own segments. Every bore
+     point is then at least `wall` inside its member, hence inside the
+     support. Bores of members that meet overlap and become one bore, as the
+     reference's merged contours do.
+
+     A member stays solid, named, when its bore would be narrower than
+     minBoreMm (default the floor - a single 1.2 mm strut at a 0.42 mm wall
+     leaves 0.36 mm, which no slicer keeps as a hole) or it is too short for
+     two end walls; a pickup stub and a gecko finger likewise. Never the
+     whole support. A wall under the floor is refused by name.
+     ===================================================================== */
+  function bore(p, soup, opts) {
+    var P = PS(opts), T = ST(opts);
+    var S = opts.subtractSoups || (root && root.NSO_subtractSoups);
+    var out = { solidSoup: soup, soup: soup, bores: [], solid: [], cut: 0, removedMm3: 0 };
+    if (typeof S !== 'function') {
+      out.reason = '(not hollowed: NSO_subtractSoups, app-join.js, is not loaded)';
+      return Promise.resolve(out);
+    }
+    var wall = opts.hollowWallMm == null ? p.floorMm : +opts.hollowWallMm;
+    var minBore = opts.minBoreMm == null ? p.floorMm : +opts.minBoreMm;
+    out.wallMm = wall; out.minBoreMm = minBore;
+    if (!(wall >= p.floorMm - 1e-9)) {
+      out.reason = '(not hollowed: a ' + wall + ' mm wall is under the ' + p.floorMm + ' mm nozzle floor)';
+      return Promise.resolve(out);
+    }
+    p.members.forEach(function (m) {
+      if (m.dead || !m.points || m.end === 'none') return;
+      var label = 'member ' + m.id, inner = m.side - 2 * wall, pts = m.points.map(function (q) { return q.slice(); });
+      var n = pts.length, u0 = unit(sub(pts[1], pts[0])), u1 = unit(sub(pts[n - 1], pts[n - 2]));
+      var L0 = len(sub(pts[1], pts[0])), L1 = len(sub(pts[n - 1], pts[n - 2]));
+      if (!(inner >= minBore - 1e-9)) { out.solid.push({ label: label, kind: 'too-small', boreMm: inner }); return; }
+      if (!(L0 > wall + minBore) || !(L1 > wall + minBore) || (n === 2 && !(L0 > 2 * wall + minBore))) {
+        out.solid.push({ label: label, kind: 'too-small', why: 'too short for two end walls' }); return;
+      }
+      pts[0] = add(pts[0], mul(u0, wall));
+      pts[n - 1] = sub(pts[n - 1], mul(u1, wall));
+      var up = Math.abs(u0[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+      var sw = P.sweep({ points: pts, profile: squareProfile(inner, phaseOf(m.id + 1)), up: up });
+      if (!sw.ok) { out.solid.push({ label: label, kind: 'other', why: sw.reason }); return; }
+      out.bores.push({ label: label, member: m.id, soup: sw.tris, boreMm: inner });
+    });
+    p.stubs.forEach(function (st) { out.solid.push({ label: 'stub ' + st.beacon, kind: 'too-small', boreMm: st.side - 2 * wall }); });
+    var acc = soup, chain = Promise.resolve();
+    out.bores.forEach(function (b) {
+      chain = chain.then(function () {
+        return S(acc, b.soup).then(function (d) {
+          if (d && d.ok) { acc = d.soup; out.cut++; out.removedMm3 += d.removedMm3; b.cut = true; }
+          else { b.cut = false; out.solid.push({ label: b.label, kind: 'kernel', why: (d && d.reason) || 'no reason' }); }
+        });
+      });
+    });
+    return chain.then(function () {
+      out.soup = T._finishUnion(acc).soup;
+      out.reason = '(' + out.cut + ' bore' + (out.cut === 1 ? '' : 's') + ' inside a ' + (+wall.toFixed(2)) +
+        ' mm wall; ' + out.solid.length + ' part' + (out.solid.length === 1 ? '' : 's') + ' left solid)';
+      return out;
     });
   }
 
@@ -782,6 +962,8 @@
     solid: solid,
     describe: describe,
     _sideFor: sideFor,
+    _squareProfile: squareProfile,
+    _phaseOf: phaseOf,
     _makeProbe: makeProbe
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

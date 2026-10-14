@@ -866,7 +866,9 @@
              (typeof NSO_SupportGridpack !== 'undefined' ? NSO_SupportGridpack : null);
     if (!GP) return { ok: false, reason: 'nso_support_gridpack.js is not loaded - it is the support planner', parts: [] };
     var style = opts.style != null ? opts.style : (opts.branchStyle === 'gecko-hand' ? 'gecko-hand' : 'tree');
-    var p = GP.plan(rawTris, Object.assign({}, opts, { style: style }));
+    /* default region: the largest, as planTree always took */
+    var regionId = (opts.regionId == null && !opts.beacons) ? 0 : opts.regionId;
+    var p = GP.plan(rawTris, Object.assign({}, opts, { style: style, regionId: regionId }));
     p.planner = 'gridpack';
     return p;
   }
@@ -1264,6 +1266,14 @@
      opts.unionSoups     as unionParts */
   function hollowTree(plan, opts) {
     opts = opts || {};
+    /* A grid-pack plan (planTree's) is bored by its own solid(): its members
+       are mitred sweeps, which innerOf's two-ended frusta are not. */
+    if (plan && plan.planner === 'gridpack') {
+      var GP = (opts.gridpack) || (root && root.NSO_SupportGridpack) ||
+               (typeof NSO_SupportGridpack !== 'undefined' ? NSO_SupportGridpack : null);
+      if (!GP) return Promise.resolve({ ok: false, soup: null, reason: 'nso_support_gridpack.js is not loaded' });
+      return GP.solid(plan, Object.assign({}, opts, { hollow: true }));
+    }
     var S = opts.subtractSoups || (root && root.NSO_subtractSoups) ||
             (typeof NSO_subtractSoups !== 'undefined' ? NSO_subtractSoups : null);
     if (typeof S !== 'function') {

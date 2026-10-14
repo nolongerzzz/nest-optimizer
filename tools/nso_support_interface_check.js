@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Where a support meets the piece: the air gap and the crosshatch interface
-// (nso_support_interface.js), and the wall clearance that keeps a tip off a
-// side wall (nso_support_tree.js, opts.wallClearanceMm).
+// (nso_support_interface.js), on the grid-pack planner's supports and their
+// stations (nso_support_gridpack.js keeps every tip off a side wall itself).
 //
 //   node tools/nso_support_interface_check.js     exit 0 = every gate held
 //
@@ -17,8 +17,8 @@
 //      one too close for any patch AND the tip is refused, not built into.
 //      Wall clearance (4) is what keeps real trees out of that last case.
 //   4. WALL CLEARANCE: the tall fixture's four contacts 0.13 mm off the post
-//      are moved clear, by the tip's own radius plus the gap - and with that,
-//      none of them needs the square fallback any more.
+//      are kept off it by the planner (moved, or leaning away) - CHANGED with
+//      the grid-pack planner, which replaced opts.wallClearanceMm.
 
 const fs = require('fs');
 const path = require('path');
@@ -38,7 +38,7 @@ const ctx = {
 vm.createContext(ctx);
 for (const f of ['nso_thickness.js', 'nso_seat_surface.js', 'app-sculpt.js', 'app-extend.js',
                  'nso_support_aim.js', 'nso_path_sweep.js', 'nso_support_tree.js',
-                 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js']) {
+                 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js', 'nso_support_gridpack.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
 const ST = ctx.NSO_SupportTree, SI = ctx.NSO_SupportInterface, TH = ctx.NSO_Thickness, RL = ctx.NSO_RasterLines;
@@ -70,14 +70,9 @@ const validate = (file, weld) => JSON.parse(execFileSync('python3',
   [path.join(ROOT, 'tools', 'mesh_validate.py'), file, '--json', '--weld', String(weld)],
   { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }));
 
-function stationsOf(p) {
-  const st = p.branches.map((b, i) => ({ label: 'branch ' + i, contact: p.contacts.points[b.contactIndex].p, from: b.from, to: b.tip }));
-  if (p.single || p.trunkCarriesContact >= 0) {
-    const c = p.single ? 0 : p.trunkCarriesContact;
-    st.unshift({ label: 'trunk', contact: p.contacts.points[c].p, from: p.trunk.from, to: p.trunk.tip });
-  }
-  return st;
-}
+/* The planner hands its stations over in finish()'s own shape: one per
+   contact, its axis the leg that arrives at the tip. */
+const stationsOf = p => p.stations;
 
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -86,8 +81,7 @@ fs.mkdirSync(OUT, { recursive: true });
   const K = { unionSoups: csg.NSO_unionSoups, subtractSoups: csg.NSO_subtractSoups };
 
   console.log('\n=== 1 + 2. the gap and the interface, on real trees ===');
-  for (const [name, host, extra] of [['shelf', SHELF, { wallClearanceMm: GAP }], ['tab', TAB, { wallClearanceMm: GAP }],
-                                     ['tall', TALL, { wallClearanceMm: GAP }]]) {
+  for (const [name, host, extra] of [['shelf', SHELF, {}], ['tab', TAB, {}], ['tall', TALL, {}]]) {
     console.log('\n-- ' + name + ' --');
     const p = ST.planTree(host, Object.assign({ skipList: [], hollow: true }, extra));
     const t = await ST.hollowTree(p, K);
@@ -125,19 +119,24 @@ fs.mkdirSync(OUT, { recursive: true });
       v.open_edges === 0 && v.nonmanifold_edges === 0 && v.degenerate_tris === 0 &&
       v.self_intersection.pierce === 0 && v.self_intersection.coplanar === 0,
       `${v.triangles} tris, open ${v.open_edges}, nm ${v.nonmanifold_edges}, pierce ${v.self_intersection.pierce}`);
-    check(`${name}: one solid - every patch fused to the tip it sits on`, RL.countComponents(f.soup) === 1,
-      `${RL.countComponents(f.soup)} component(s)`);
+    /* One solid per trunk (and its bores) before, the same count after: every
+       patch fused to the tip it sits on, none left floating. */
+    check(`${name}: every patch fused to the tip it sits on - no new component`,
+      RL.countComponents(f.soup) === RL.countComponents(t.soup),
+      `${RL.countComponents(f.soup)} component(s) after, ${RL.countComponents(t.soup)} before`);
     if (name === 'tall') {
-      const sq = ST.planTree(host, { skipList: [], hollow: true });
-      check('tall: wall clearance moves the four contacts that sat 0.13 mm off the post',
-        p.wallClearance.moved.length === 4 && p.wallClearance.moved.every(m => m.to[0] - 10 >= 1.0 + GAP - 1e-6),
-        p.wallClearance.reason + '; now ' + p.wallClearance.moved.map(m => r4(m.to[0] - 10)).join(', ') + ' mm off the post');
-      check('tall: ...and none of them needs the square fallback any more',
-        sq.sectionFallback.length === 4 && p.sectionFallback.length === 0,
-        `square fallbacks ${sq.sectionFallback.length} without it, ${p.sectionFallback.length} with it`);
-      check('tall: every contact that did not need moving is exactly where the planner put it',
-        p.contacts.points.every((c, i) => p.wallClearance.moved.some(m => m.index === i) ||
-          c.p.every((v, k) => v === sq.contacts.points[i].p[k])), `${p.contacts.points.length} contacts`);
+      /* CHANGED with the grid-pack planner: opts.wallClearanceMm and the
+         tree's clearWalls are gone. The planner keeps every strut's rails
+         (its circumscribed circle plus CLEAR_MM) off the piece; the four
+         contacts that sit 0.13 mm off the post are moved off it (or lean
+         away) by the planner itself, and their tips then take the interface
+         like every other - asserted above, for all of them. */
+      const nearPost = p.beacons.filter(b => b.p[0] - 10 < 0.2).map(b => b.id);
+      const moved = nearPost.filter(id => p.nudged.some(n => n.beacon === id) ||
+        p.members.some(m => m.beacon === id && m.path.length > 1 && m.path[1][0] > m.path[0][0] + 1e-9));
+      check('tall: the four contacts 0.13 mm off the post are kept off it by the planner - moved, or leaning away',
+        nearPost.length === 4 && moved.length === 4,
+        `${nearPost.length} near the post; ${p.nudged.length} tip(s) moved, the rest lean off it`);
     }
   }
 

@@ -27,12 +27,11 @@
 //      kernel). Its round body is tested on its own rails against the piece;
 //      if it would hit, the square strut is kept and bored instead, and the
 //      run says so. Refuses rather than writing a solid under the hollow name.
-//   2c. --tree (with --hollow): also plans a support TREE on the piece's
-//      region 1 - the one region of this piece a single trunk can serve, 4
-//      branches - round, tapered and bored (NSO_SupportTree.hollowTree), as a
-//      third object, so trunk-and-branch tubes are sliced on the same piece
-//   2d. --interface (implies --hollow; with --tree, plans the tree with
-//      wallClearanceMm = the gap): every tip is cut back and capped with a
+//   2c. --tree (with --hollow): also plans a support on the piece's region 1
+//      with the planner (planTree, the grid-pack planner) and bores it
+//      (NSO_SupportTree.hollowTree -> NSO_SupportGridpack.solid), as a third
+//      object, so merged members' bores are sliced on the same piece
+//   2d. --interface (implies --hollow): every tip is cut back and capped with a
 //      two-layer crosshatch interface (nso_support_interface.js) whose top is
 //      0.18 mm - the Seat (support) easy-release gap, as a TRUE minimum
 //      distance - under the underside. Before, every tip ended ON the
@@ -92,10 +91,29 @@ const ctx = {
 vm.createContext(ctx);
 for (const f of ['nso_thickness.js', 'nso_seat_surface.js', 'app-sculpt.js',
                  'app-extend.js', 'nso_support_aim.js', 'nso_path_sweep.js', 'nso_support_tree.js',
-                 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js']) {
+                 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js', 'nso_support_gridpack.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
 const SA = ctx.NSO_SupportAim;
+
+/* A frustum's clearance on its own converging rails - the probe the
+   trunk-first planner kept in nso_support_tree.js (probeRails), which went
+   with it; this tool's round strut is the one caller left, so it lives here.
+   The last capMm of each rail is the cap's business. */
+function probeRails(A, obstacles, from, dir, lengthMm, rings, capMm) {
+  const EPS = 1e-3;
+  const probes = [[from, dir, lengthMm - EPS, 'the axis']];
+  const R0 = rings[0], R1 = rings[rings.length - 1];
+  for (let j = 0; j < R0.length; j++) {
+    const v = [0, 1, 2].map(k => R1[j][k] - R0[j][k]), Lr = Math.hypot(...v), shaft = Lr - capMm;
+    if (shaft > 2 * EPS) probes.push([R0[j], v.map(c => c / Lr), shaft - EPS, 'rail ' + j]);
+  }
+  for (const [o, d, L, what] of probes) {
+    const hit = A._nearestHit(obstacles, o, d, EPS, L);
+    if (hit > 0) return { at: hit, why: what + ' is blocked ' + hit.toFixed(3) + ' mm along, ' + (L - hit).toFixed(3) + ' mm short of the end of its run' };
+  }
+  return null;
+}
 const ST = ctx.NSO_SupportTree;
 
 function bounds(soup) {
@@ -149,7 +167,7 @@ const fmt = v => v.map(c => c.toFixed(3)).join(', ');
     const PS = ctx.NSO_PathSweep, law = ST._lawOf({});
     let solid = p.soup, axis = { from: a.from, to: a.tip, a0: a.sideMm / 2, a1: a.sideMm / 2 }, section = 'square';
     const rp = ST._roundPart(PS, a.from, a.tip, law.at(a.from[2], a.target[2]), law.at(a.tip[2], a.target[2]));
-    const stop = rp.ok ? ST._probeRails(SA, [piece], a.from, a.dir, a.lengthMm, rp.sweep.rings, rp.dToMm) : { why: rp.reason };
+    const stop = rp.ok ? probeRails(SA, [piece], a.from, a.dir, a.lengthMm, rp.sweep.rings, rp.dToMm) : { why: rp.reason };
     if (!stop) { solid = rp.soup; axis = rp.axis; section = 'round'; }
     console.log('section    ' + (section === 'round'
       ? 'round, ' + rp.dFromMm.toFixed(3) + ' mm at the plate -> ' + rp.dToMm.toFixed(3) + ' mm at the tip ' +
@@ -172,45 +190,28 @@ const fmt = v => v.map(c => c.toFixed(3)).join(', ');
 
   /* ---- 2c. a hollow tree on the region one trunk can serve ----------------- */
   if (TREE) {
-    const tp = ST.planTree(piece, Object.assign({ skipList: [], regionId: TREE_REGION, hollow: true },
-      IFACE ? { wallClearanceMm: ctx.NSO_SupportInterface.DEFAULTS.gapMm } : {}));
-    if (!tp.ok) { console.error('the region ' + TREE_REGION + ' tree would not plan: ' + tp.reason); process.exit(1); }
-    if (tp.wallClearance) {
-      console.log('walls      ' + tp.wallClearance.reason);
-      for (const m of tp.wallClearance.moved) {
-        console.log('           contact ' + m.index + ': [' + m.from.map(v => v.toFixed(3)).join(', ') + '] -> [' +
-                    m.to.map(v => v.toFixed(3)).join(', ') + ']');
-      }
+    /* The grid-pack planner (docs/SUPPORT-GRIDPACK.md): one strut per
+       contact, merged pairwise, plate first; tips kept off walls by the
+       planner itself; bored by its own solid() through hollowTree. */
+    const tp = ST.planTree(piece, { skipList: [], regionId: TREE_REGION });
+    if (!tp.ok) { console.error('the region ' + TREE_REGION + ' support would not plan: ' + tp.reason); process.exit(1); }
+    for (const m of tp.nudged) {
+      console.log('walls      point ' + m.beacon + ' moved ' + m.mm.toFixed(2) + ' mm off a wall: [' +
+                  m.from.map(v => v.toFixed(3)).join(', ') + '] -> [' + m.to.map(v => v.toFixed(3)).join(', ') + ']');
     }
     const t = await ST.hollowTree(tp, { unionSoups: csg.NSO_unionSoups, subtractSoups: csg.NSO_subtractSoups });
-    if (!t.ok) { console.error('the hollow tree would not build: ' + t.reason); process.exit(1); }
-    console.log('tree       region ' + TREE_REGION + ', ' + tp.region.areaMm2.toFixed(3) + ' mm^2: ' +
-                tp.contacts.points.length + ' contacts, trunk ' + tp.trunk.lengthMm.toFixed(3) + ' mm, ' +
-                tp.branches.length + ' branches, ' + tp.tiltDeg.min.toFixed(2) + '..' +
-                tp.tiltDeg.max.toFixed(2) + ' deg off vertical');
-    console.log('           ' + t.reason);
-    tp.parts.forEach((sp, i) => {
-      const r = t.hollow.parts[i];
-      const part = i === 0 ? tp.trunk : tp.branches[r.branch];
-      const sect = part && part.section === 'round'
-        ? 'round ' + part.dFromMm.toFixed(3) + ' -> ' + part.dToMm.toFixed(3) + ' mm' : 'square 1.2 mm';
-      console.log('           ' + r.label.padEnd(22) + sect.padEnd(26) + (r.hollow
-        ? 'bore ' + r.boreFromMm.toFixed(3) + ' -> ' + r.boreToMm.toFixed(3) + ' mm'
-        : 'SOLID - ' + r.kind + ': ' + r.reason));
-    });
-    for (const f of tp.sectionFallback) console.log('           square fallback: ' + f.label + ' - ' + f.why);
+    if (!t.ok) { console.error('the hollow support would not build: ' + t.reason); process.exit(1); }
+    console.log('tree       region ' + TREE_REGION + ', ' + tp.region.areaMm2.toFixed(3) + ' mm^2: ' + tp.reason);
+    console.log('           ' + tp.members.length + ' members, ' + tp.merges.length + ' merges, ' + tp.trunks.length +
+                ' trunk(s); ' + t.hollow.reason);
+    for (const x of t.hollow.solid) console.log('           ' + x.label.padEnd(14) + 'SOLID - ' + x.kind + (x.why ? ': ' + x.why : ''));
     const bs = bounds(strut), bt = bounds(t.soup);
     const apart = [0, 1, 2].some(k => bs.max[k] < bt.min[k] || bt.max[k] < bs.min[k]);
     console.log('           ' + (apart ? 'clear of the strut (bounding boxes do not overlap)'
                                        : 'WARNING: bounding boxes overlap the strut\'s'));
-    const stations = tp.branches.map((b, i) => ({
-      label: 'branch ' + i + ' (contact ' + b.contactIndex + ')',
-      contact: tp.contacts.points[b.contactIndex].p, from: b.from, to: b.tip }));
-    if (tp.trunkCarriesContact >= 0) {
-      stations.unshift({ label: 'trunk (contact ' + tp.trunkCarriesContact + ')',
-        contact: tp.contacts.points[tp.trunkCarriesContact].p, from: tp.trunk.from, to: tp.trunk.tip });
-    }
-    supports.push({ name: TREE_NAME, soup: t.soup, parts: tp.parts, stations });
+    const stations = tp.stations;
+    supports.push({ name: TREE_NAME, soup: t.soup, parts: t.partSoups, stations,
+                    solids: ctx.NSO_RasterLines.countComponents(t.soup) });
   }
 
   /* ---- 2d. the gap and the interface, at every tip -------------------------- */
@@ -320,10 +321,15 @@ const fmt = v => v.map(c => c.toFixed(3)).join(', ');
       if (supports[si].finish) {
         /* THE CONFLICT CHECK, as the slicer will see it: the support object
            and the piece object, both from the archive's own vertices. */
+        /* As many components as the support had before its finish (a
+           grid-pack support is one solid PER TRUNK, and a bore sealed inside
+           a merged member is a shell of its own) - the same count after the
+           finish means every patch is fused to the tip it sits on. */
         const comps = ctx.NSO_RasterLines.countComponents(soup);
-        console.log('           ' + comps + ' connected component(s) - ' + (comps === 1
+        const want = supports[si].solids || 1;
+        console.log('           ' + comps + ' connected component(s), ' + want + ' expected - ' + (comps === want
           ? 'every interface patch is fused to the tip it sits on' : 'SOMETHING IS FLOATING'));
-        wallOk = wallOk && comps === 1;
+        wallOk = wallOk && comps === want;
         const pieceW = objectSoup(model, found[0].index);
         const gap = ctx.NSO_SupportInterface.minDistance(soup, pieceW, { thickness: TH, reach: 1 });
         const g0 = ctx.NSO_SupportInterface.DEFAULTS.gapMm;

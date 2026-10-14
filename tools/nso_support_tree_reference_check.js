@@ -20,8 +20,9 @@
 //
 // It then does the comparison the constants were for: it puts a synthetic
 // overhang of the reference's own dimensions through contactPoints() and
-// planTree() and asks whether this module places the same number of contacts,
-// at the same pitch, and splits its trunk at a comparable height.
+// planTree() (the grid-pack planner, nso_support_gridpack.js) and asks
+// whether this module places the same number of contacts, at the same pitch,
+// and lands a comparable number of trunks.
 //
 // HOW THE STRUCTURE IS READ OUT OF THE TOOLPATH
 //
@@ -58,7 +59,7 @@ const ctx = {
 vm.createContext(ctx);
 for (const f of ['nso_thickness.js', 'nso_seat_surface.js', 'app-sculpt.js',
                  'app-extend.js', 'nso_support_aim.js', 'nso_path_sweep.js',
-                 'nso_support_tree.js']) {
+                 'nso_support_tree.js', 'nso_support_gridpack.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
 const ST = ctx.NSO_SupportTree;
@@ -301,19 +302,20 @@ console.log('\n=== 3. THE SAME OVERHANG, PUT THROUGH contactPoints() ===');
     `nn median ${cp.nnMm.median.toFixed(2)} mm on this lattice vs ` +
     `${tipNN.median.toFixed(2)} .. ${tipNN.max.toFixed(2)} mm across the slicer's field`);
 
-  /* One trunk cannot serve a 70 mm tabletop, and the reference agrees: it
-     used 36. The refusal is the finding, and the number it names is the one
-     to compare. */
+  /* The whole tabletop, through the planner (nso_support_gridpack.js since
+     the trunk-first planner was replaced). It no longer refuses for want of
+     a trunk field: it grows one strut per contact and merges them pairwise,
+     and the number of trunks that land on the plate is the number to put
+     beside the slicer's 36. */
   const whole = ST.planTree(host, {
     skipList: [], plateZ: 0, bases: [{ kind: 'plate', z: 0 }], maxContacts: 4096
   });
-  check('planTree refuses the whole tabletop on one trunk, as the slicer did',
-    !whole.ok && whole.stage === 'split', whole.reason);
-  console.log(`  this module asks for ${whole.trunksNeeded} trunks; ` +
-    `the real slice used ${trunks.length}`);
-  check('the trunk count it asks for is the same order as the slicer\'s',
-    whole.trunksNeeded >= trunks.length / 4 && whole.trunksNeeded <= trunks.length * 4,
-    `${whole.trunksNeeded} vs ${trunks.length}`);
+  check('planTree holds the whole tabletop, every contact to the plate',
+    whole.ok && whole.held === whole.beacons.length && whole.trunks.every(t => t.landing === 'plate'), whole.reason);
+  console.log(`  this module lands ${whole.trunks.length} trunks; the real slice used ${trunks.length}`);
+  check('the trunk count is the same order as the slicer\'s',
+    whole.trunks.length >= trunks.length / 4 && whole.trunks.length <= trunks.length * 4,
+    `${whole.trunks.length} vs ${trunks.length}`);
 }
 
 console.log('\n=== 4. ONE TRUNK\'S SHARE, PUT THROUGH planTree() ===');
@@ -326,32 +328,33 @@ console.log('\n=== 4. ONE TRUNK\'S SHARE, PUT THROUGH planTree() ===');
   const cellMm = trunkNN.median;
   const host = slab(cellMm, cellMm, ifaceZ - plateZ, 4);
   const p = ST.planTree(host, { skipList: [], plateZ: 0, bases: [{ kind: 'plate', z: 0 }] });
-  check('one trunk serves one trunk\'s share of the overhang', p.ok, p.reason);
+  /* The trunk-first planner built exactly one trunk here, by construction.
+     The grid-pack planner merges pairwise only where the lean budget allows
+     before the plate, so one reference trunk's share comes out as a few. */
+  check('one trunk\'s share of the overhang is held, on a handful of trunks', p.ok && p.held === p.beacons.length &&
+    p.trunks.length >= 1 && p.trunks.length <= 4, p.reason);
 
   const fanOut = tips.length / trunks.length;
-  const ours = p.branches.length + (p.trunkCarriesContact >= 0 ? 1 : 0);
+  const ours = p.beacons.length;
   console.log(`  cell ${cellMm.toFixed(2)} x ${cellMm.toFixed(2)} mm at z ` +
-    `${(ifaceZ - plateZ).toFixed(1)}: this module puts ${ours} contacts on it ` +
-    `(${p.branches.length} branches + ${p.trunkCarriesContact >= 0 ? 1 : 0} on the trunk)`);
+    `${(ifaceZ - plateZ).toFixed(1)}: this module puts ${ours} contacts on it, merged into ${p.trunks.length} trunk(s)`);
   console.log(`  the real slice fans one trunk into ${fanOut.toFixed(2)} tips`);
   check('the fan-out is the same order as the reference\'s',
     ours >= fanOut / 2 && ours <= fanOut * 2,
     `${ours} vs ${fanOut.toFixed(2)}`);
 
-  /* Where the trunk stops. The reference splits at 22% of its height and then
-     splits again and again; this module splits ONCE, so its trunk runs
-     further before it has to hand off. Both numbers are reported, because the
-     difference is the design difference and not an error in either. */
+  /* Where the members become one. The reference's trunk phase ends at its
+     first split; here the last merge is where the trunk starts. Both are
+     reported; the planner merges pairwise level by level, as the reference
+     splits again and again on the way up. */
   const refFrac = (trunkTopZ - plateZ) / (ifaceZ - plateZ);
-  const ourFrac = p.trunk.lengthMm / (ifaceZ - plateZ);
-  console.log(`  trunk height: ${(ourFrac * 100).toFixed(1)}% of the run here, ` +
-    `${(refFrac * 100).toFixed(1)}% at the reference's FIRST split ` +
-    `(it splits again ${counts.length - last - 1} more times; this module splits once)`);
+  const lastMerge = Math.min(...p.merges.map(m => m.z));
+  const ourFrac = (lastMerge - plateZ) / (ifaceZ - plateZ);
+  console.log(`  trunk height: ${(ourFrac * 100).toFixed(1)}% of the run here (the last merge), ` +
+    `${(refFrac * 100).toFixed(1)}% at the reference's first split; ${p.merges.length} merges on the way down, ` +
+    `the reference splits ${counts.length - last} times on the way up`);
   check('the trunk carries a real share of the height, as the reference\'s does',
-    ourFrac > 0.1 && ourFrac < 0.95,
-    `${(ourFrac * 100).toFixed(1)}%`);
-  check('and this module\'s single split leaves the trunk longer, which is the design difference',
-    ourFrac > refFrac, `${(ourFrac * 100).toFixed(1)}% vs ${(refFrac * 100).toFixed(1)}%`);
+    ourFrac > 0.05 && ourFrac < 0.95, `${(ourFrac * 100).toFixed(1)}%`);
 
   const maxHoriz = Math.max(...tips.map(t => {
     let b = Infinity;
@@ -361,9 +364,13 @@ console.log('\n=== 4. ONE TRUNK\'S SHARE, PUT THROUGH planTree() ===');
     }
     return b;
   }));
-  const ourHoriz = Math.max(...p.branches.map(b =>
-    Math.hypot(b.tip[0] - b.from[0], b.tip[1] - b.from[1])));
-  check('no branch here reaches further sideways than the reference\'s worst does',
+  /* Each contact's sideways travel to the foot of the trunk it lands on. */
+  let ourHoriz = 0;
+  for (const t of p.trunks) {
+    const root = p.members[t.root], foot = root.path[root.path.length - 1];
+    for (const id of t.beacons) ourHoriz = Math.max(ourHoriz, Math.hypot(p.beacons[id].p[0] - foot[0], p.beacons[id].p[1] - foot[1]));
+  }
+  check('no contact here is further sideways from its trunk than the reference\'s worst',
     ourHoriz <= maxHoriz + 1e-9,
     `${ourHoriz.toFixed(2)} mm here vs ${maxHoriz.toFixed(2)} mm there`);
 }

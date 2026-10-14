@@ -1,6 +1,17 @@
 #!/usr/bin/env node
-// The round, tapered, exactly-bored support tree - the shipped default -
-// against the measured reference and against the square plan it replaces.
+// The taper primitive, and EXACT BORES on the planner's supports.
+//
+// CHANGED with the grid-pack planner (docs/SUPPORT-GRIDPACK.md). This suite
+// pinned the trunk-first planner's round, tapered tree: its parity with the
+// square plan (section 2) and its frusta's bores. That planner is replaced
+// and its members are SQUARE, constant-section mitred sweeps (a flagged
+// choice), so: section 1 still pins the taper primitive (_roundPart, the
+// law), which stays in nso_support_tree.js; section 2 now asks the planner's
+// bores the same closed-form question - every bore point one wall inside its
+// own member - per leg, since a mitred member is convex leg by leg; section 3
+// is the fallback ladder (too-small, under-floor, a fatter nozzle); section 4
+// is the canonical checker and the labelled wall probe, unchanged in what
+// they ask, on every hollow support.
 //
 //   node tools/nso_support_tree_round_check.js               shelf, tab, tiny + sections 1-4
 //   node tools/nso_support_tree_round_check.js --tall        the tall fixture, square tips
@@ -49,10 +60,10 @@ const ctx = {
 };
 vm.createContext(ctx);
 for (const f of ['nso_thickness.js', 'nso_seat_surface.js', 'app-sculpt.js', 'app-extend.js',
-                 'nso_support_aim.js', 'nso_path_sweep.js', 'nso_support_tree.js']) {
+                 'nso_support_aim.js', 'nso_path_sweep.js', 'nso_support_tree.js', 'nso_support_gridpack.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
-const ST = ctx.NSO_SupportTree, PS = ctx.NSO_PathSweep, TH = ctx.NSO_Thickness;
+const ST = ctx.NSO_SupportTree, PS = ctx.NSO_PathSweep, TH = ctx.NSO_Thickness, GP = ctx.NSO_SupportGridpack;
 
 let pass = 0, fail = 0;
 const FAILS = [];
@@ -87,6 +98,50 @@ const TINY = soupOf(box([0, 0, 0], [10, 10, 16]), box([10, 4, 12], [12, 6, 16]))
 const TALL_STYLE = process.argv.includes('--tall-gecko') ? 'gecko-hand' : process.argv.includes('--tall') ? 'square' : null;
 const CASES = TALL_STYLE ? [['tall', TALL]] : [['shelf', SHELF], ['tab', TAB], ['tiny', TINY]];
 const STYLES = TALL_STYLE ? [TALL_STYLE] : ['square', 'gecko-hand'];
+const unit3 = a => { const L = Math.hypot(a[0], a[1], a[2]); return [a[0] / L, a[1] / L, a[2] / L]; };
+/* Shells of a soup, by shared exact vertices. */
+function shells(soup) {
+  const id = new Map(), parent = [];
+  const find = i => { while (parent[i] !== i) i = parent[i] = parent[parent[i]]; return i; };
+  const vid = k => { if (!id.has(k)) { id.set(k, parent.length); parent.push(parent.length); } return id.get(k); };
+  for (let t = 0; t < soup.length; t += 9) {
+    const a = vid(soup[t] + ',' + soup[t + 1] + ',' + soup[t + 2]);
+    for (const o of [3, 6]) { const b = vid(soup[t + o] + ',' + soup[t + o + 1] + ',' + soup[t + o + 2]); parent[find(a)] = find(b); }
+  }
+  const r = new Set(); for (let i = 0; i < parent.length; i++) r.add(find(i)); return r.size;
+}
+/* A member's outer and inner sweeps, as GP builds them, with their rings. */
+function sweepsOf(p, m, wall) {
+  const pts = m.points.map(q => q.slice()), n = pts.length;
+  const u0 = unit3(sub(pts[1], pts[0])), up = Math.abs(u0[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+  const outer = PS.sweep({ points: pts, profile: GP._squareProfile(m.side, GP._phaseOf(m.id + 1)), up });
+  const u1 = unit3(sub(pts[n - 1], pts[n - 2]));
+  const ip = pts.map(q => q.slice());
+  ip[0] = [0, 1, 2].map(k => ip[0][k] + u0[k] * wall);
+  ip[n - 1] = [0, 1, 2].map(k => ip[n - 1][k] - u1[k] * wall);
+  const inner = PS.sweep({ points: ip, profile: GP._squareProfile(m.side - 2 * wall, GP._phaseOf(m.id + 1)), up });
+  return { outer, inner };
+}
+/* Least depth of the inner's vertices inside the outer, LEG BY LEG: on leg k
+   the outer is a prism (convex), so each inner ring vertex of that leg is
+   measured against the leg's four side planes, and the first / last inner
+   rings against the outer's end caps. */
+function boreDepth(outer, inner, pts) {
+  let worst = Infinity;
+  const R = outer.rings, I = inner.rings, M = R[0].length;
+  for (let k = 0; k + 1 < R.length; k++) {
+    for (let j = 0; j < M; j++) {
+      const A = R[k][j], B = R[k][(j + 1) % M], C = R[k + 1][j];
+      const nrm = unit3(cross(sub(B, A), sub(C, A)));
+      const side = dot(sub(pts[k], A), nrm) > 0 ? 1 : -1;      /* the axis is inside */
+      for (const q of [...I[k], ...I[k + 1]]) worst = Math.min(worst, dot(sub(q, A), nrm) * side);
+    }
+  }
+  const n = pts.length, u0 = unit3(sub(pts[1], pts[0])), u1 = unit3(sub(pts[n - 1], pts[n - 2]));
+  for (const q of I[0]) worst = Math.min(worst, dot(sub(q, pts[0]), u0));
+  for (const q of I[I.length - 1]) worst = Math.min(worst, dot(sub(pts[n - 1], q), u1));
+  return worst;
+}
 const FLOOR = TH.floorFor(0.4);
 const LAW = (z, zTip) => 2 + 2 * Math.tan(5 * Math.PI / 180) * Math.max(0, zTip - z);
 
@@ -167,146 +222,63 @@ fs.mkdirSync(OUT, { recursive: true });
   }
 
   /* =====================================================================
-     2. PARITY with the square plan, and the law on every part
+     2. EXACT BORES on the planner's members
      ===================================================================== */
-  console.log('\n=== 2. the round tree is the square PLAN, exactly, in round solids at the law ===');
+  console.log('\n=== 2. exact bores: each member shrunk by one wall, leg by leg, in closed form ===');
+  const csg = csgContext();
+  const opts = { unionSoups: csg.NSO_unionSoups, subtractSoups: csg.NSO_subtractSoups };
   const PLANS = {};
   for (const [name, host] of CASES) for (const style of STYLES) {
     const tag = name + (style === 'gecko-hand' ? '_gecko' : '');
-    const sq = ST.planTree(host, { skipList: [], section: 'square', branchStyle: style });
-    const rd = ST.planTree(host, { skipList: [], branchStyle: style, hollow: true });
-    if (!sq.ok || !rd.ok) { check(`${tag}: plans square and round`, false, (rd.ok ? sq : rd).reason); continue; }
-    PLANS[tag] = { host, sq, rd };
-    check(`${tag}: round is the default section`, rd.section === 'round', rd.section);
-    check(`${tag}: the same contacts, count and placement`,
-      sq.contacts.points.length === rd.contacts.points.length &&
-      sq.contacts.points.every((c, i) => sameVec(c.p, rd.contacts.points[i].p)), `${rd.contacts.points.length} contacts`);
-    check(`${tag}: the same trunk base, axis, length and split`,
-      sameVec(sq.trunk.from, rd.trunk.from) && sameVec(sq.trunk.tip, rd.trunk.tip) && sameVec(sq.trunk.dir, rd.trunk.dir) &&
-      sq.trunk.lengthMm === rd.trunk.lengthMm && sq.trunkCarriesContact === rd.trunkCarriesContact &&
-      (sq.split ? sq.split.trunkMm === rd.split.trunkMm && sameVec(sq.split.point, rd.split.point) : !rd.split),
-      `trunk ${rd.trunk.lengthMm.toFixed(6)} mm` + (rd.split ? `, split ${rd.split.trunkMm.toFixed(6)} mm` : ', single strut'));
-    check(`${tag}: the same branches - count, contact, root, heading, length, tilt`,
-      sq.branches.length === rd.branches.length && sq.branches.every((b, i) => {
-        const e = rd.branches[i];
-        return b.contactIndex === e.contactIndex && sameVec(b.from, e.from) && sameVec(b.tip, e.tip) &&
-               sameVec(b.dir, e.dir) && b.lengthMm === e.lengthMm && b.tiltDeg === e.tiltDeg;
-      }), `${rd.branches.length} branches` + (rd.tiltDeg ? `, ${rd.tiltDeg.min.toFixed(2)}..${rd.tiltDeg.max.toFixed(2)} deg` : ''));
-    check(`${tag}: the same refusals, and the same number of parts`,
-      (sq.blocked || []).length === (rd.blocked || []).length && sq.parts.length === rd.parts.length,
-      `${(rd.blocked || []).length} refused, ${rd.parts.length} parts`);
-    if (style === 'gecko-hand') {
-      const fs0 = [].concat(...sq.branches.map(b => b.hand.fingers)).concat(sq.trunkHand ? sq.trunkHand.fingers : []);
-      const fs1 = [].concat(...rd.branches.map(b => b.hand.fingers)).concat(rd.trunkHand ? rd.trunkHand.fingers : []);
-      check(`${tag}: every gecko finger is the square plan's, byte for byte`,
-        fs0.length === fs1.length && fs0.every((f, i) => sameBytes(f.soup, fs1[i].soup)), `${fs1.length} fingers`);
+    const rd = ST.planTree(host, { skipList: [], branchStyle: style });
+    if (!rd.ok) { check(`${tag}: plans`, false, rd.reason); continue; }
+    const t = await ST.hollowTree(rd, opts);
+    check(`${tag}: the hollow support builds`, t.ok && !!t.hollow, t.reason && t.reason.slice(0, 220));
+    if (!t.ok) continue;
+    PLANS[tag] = { host, rd, t };
+    let worst = Infinity, n = 0;
+    for (const b of t.hollow.bores) {
+      const m = rd.members[b.member], sw = sweepsOf(rd, m, t.hollow.wallMm);
+      worst = Math.min(worst, boreDepth(sw.outer, sw.inner, m.points)); n++;
     }
-
-    /* The law, part by part, against an independent restatement of it. */
-    const zTip = Math.max(...rd.contacts.points.map(c => c.p[2]));
-    const bad = [];
-    const roundBranches = rd.branches.filter(b => b.section === 'round');
-    for (const b of roundBranches) {
-      const zc = rd.contacts.points[b.contactIndex].p[2];
-      if (!near(b.dFromMm, LAW(b.from[2], zc), 1e-9) || !near(b.dToMm, LAW(b.tip[2], zc), 1e-9)) bad.push(b.contactIndex);
-    }
-    const tr = rd.trunk;
-    const trunkOk = tr.section === 'square' ||
-      (near(tr.dFromMm, LAW(tr.from[2], zTip), 1e-9) && near(tr.dToMm, LAW(tr.tip[2], zTip), 1e-9));
-    check(`${tag}: every round part is 2 + 2 tan(5 deg) x (height below its tip) across, at both ends`,
-      bad.length === 0 && trunkOk,
-      (tr.section === 'round' ? `trunk ${r3(tr.dFromMm)} -> ${r3(tr.dToMm)} mm; ` : 'trunk square (fallback); ') +
-      (roundBranches.length ? `branches ${r3(Math.min(...roundBranches.map(b => b.dFromMm)))}..${r3(Math.max(...roundBranches.map(b => b.dFromMm)))} mm at the root, ` +
-        `${r3(roundBranches[0].dToMm)} mm at every tip` : 'no round branches'));
-
-    /* The square fallback: named, square, and only where the round body hits. */
-    const fb = rd.sectionFallback;
-    const fbOk = fb.every(f => /would run into the piece/.test(f.why)) &&
-      fb.filter(f => f.role === 'branch').every(f => rd.branches.find(b => b.contactIndex === f.contactIndex).section === 'square') &&
-      (fb.some(f => f.role === 'trunk') ? rd.trunk.section === 'square' : rd.trunk.section === 'round');
-    const expect = { shelf: 0, tab: 0, tiny: 1, tall: 4 }[name];
-    check(`${tag}: ${expect ? expect + ' part(s) keep the square section - their round body would hit the piece - named' : 'no part needs the square fallback'}`,
-      fbOk && fb.length === expect, fb.length ? fb.map(f => f.label + ': ' + f.why).join(' | ').slice(0, 260) : 'none');
-  }
-
-  if (!TALL_STYLE) {
-    const t = PLANS.tiny.rd;
-    check('tiny: the trunk falls back because a 2 mm tab 1 mm off a post has no room for a 4.1 mm base',
-      t.trunk.section === 'square' && /rail \d+ is blocked/.test(t.sectionFallback[0].why), t.sectionFallback[0].why);
-  } else {
-    const t = PLANS[TALL_STYLE === 'square' ? 'tall' : 'tall_gecko'].rd;
-    const xs = t.sectionFallback.map(f => t.contacts.points[f.contactIndex].p[0]);
-    check('tall: the four fallbacks are the contacts 0.13 mm off the post - a 2 mm round tip there has to overlap it',
-      xs.length === 4 && xs.every(x => x - 10 < 0.2), `contacts at x = ${xs.map(r3).join(', ')}; post face at x = 10`);
+    check(`${tag}: every bore vertex is at least one ${FLOOR} mm wall inside its own member`,
+      n > 0 ? worst >= FLOOR - 1e-5 : t.hollow.cut === 0,
+      n ? `${n} bore(s), least depth ${r4(worst)} mm` : 'no member large enough to bore');
+    const single = rd.members.filter(m => !m.dead && m.count === 1 && m.points);
+    check(`${tag}: a single contact's 1.2 mm strut stays solid - its bore would be 0.36 mm`,
+      single.every(m => t.hollow.solid.some(x => x.label === 'member ' + m.id && x.kind === 'too-small')),
+      `${single.length} strut(s); ${t.hollow.reason}`);
+    check(`${tag}: merged members are bored: their side is the count's, less two walls`,
+      t.hollow.bores.every(b => near(b.boreMm, rd.members[b.member].side - 2 * FLOOR, 1e-12) && rd.members[b.member].count >= 2),
+      t.hollow.bores.map(b => r3(b.boreMm)).filter((v, i, a) => a.indexOf(v) === i).join(', ') + ' mm');
   }
 
   /* =====================================================================
-     3. EXACT BORES
+     3. THE FALLBACK LADDER
      ===================================================================== */
-  console.log('\n=== 3. exact bores: each part shrunk by one wall, in closed form ===');
-  for (const tag of Object.keys(PLANS)) {
-    const rd = PLANS[tag].rd, hp = rd.hollow;
-    let worst = Infinity, n = 0;
-    hp.parts.forEach((r, i) => { if (r.hollow) { n++; worst = Math.min(worst, depthInside(rd.parts[i], r.inner)); } });
-    check(`${tag}: every bore vertex is at least one ${FLOOR} mm wall inside every face of its own part`,
-      n > 0 ? worst >= FLOOR - 1e-5 : hp.hollowed === 0,
-      n ? `${n} bore(s), least depth ${r4(worst)} mm` : 'no part large enough to bore');
-    const kinds = {}; hp.solid.forEach(s => { kinds[s.kind] = (kinds[s.kind] || 0) + 1; });
-    const fingers = hp.parts.filter(r => r.role === 'finger');
-    check(`${tag}: trunk and branches are bored where the section allows; every gecko finger stays solid`,
-      fingers.every(r => !r.hollow && r.kind === 'too-small') &&
-      hp.parts.filter(r => r.role !== 'finger').every((r, k) => r.hollow ||
-        (r.kind === 'too-small' && (r.role === 'trunk' ? rd.trunk.section === 'square'
-          : rd.branches[r.branch].section === 'square'))),
-      hp.reason + (Object.keys(kinds).length ? ' ' + JSON.stringify(kinds) : ''));
-  }
   if (!TALL_STYLE) {
-    const sh = PLANS.shelf.rd, tr = sh.hollow.parts[0];
-    check('the taper\'s cos(alpha) is paid for: the section shrinks by wall / cos(alpha), not by wall',
-      near(tr.deltaMm, FLOOR / Math.cos(tr.halfAngleDeg * Math.PI / 180), 1e-9) && FLOOR * Math.cos(tr.halfAngleDeg * Math.PI / 180) < FLOOR - 1e-4,
-      `half-angle ${r3(tr.halfAngleDeg)} deg: shrink ${r4(tr.deltaMm)} mm; a radial ${FLOOR} would leave ` +
-      `${r4(FLOOR * Math.cos(tr.halfAngleDeg * Math.PI / 180))} mm perpendicular`);
-    const tips = sh.hollow.parts.filter(r => r.role === 'branch');
-    check('a 2 mm round tip keeps a bore of more than 1 mm - against 0.36 mm in the 1.2 mm square strut',
-      tips.every(r => r.boreToMm > 1.0), `tip bore ${r3(Math.min(...tips.map(r => r.boreToMm)))} mm`);
-
-    /* THE FALLBACK on a deliberately tiny branch, in a real tree. */
-    const g = sh;
-    const tiny = ST.branch(g.branchRoot, [20.5, 8.5, 16], { sideMm: 1.2, tipDiameterMm: 0.9, diameterAngleDeg: 0 });
-    tiny.contactIndex = 99;
-    const tinyPlan = Object.assign({}, g, {
-      parts: g.parts.concat([tiny.soup]), partAxes: g.partAxes.concat([tiny.axis]),
-      branches: g.branches.concat([tiny]), hollow: undefined
-    });
-    const hp = ST.hollowParts(tinyPlan, {});
-    check('a deliberately thin 0.9 mm branch added to a real tree stays solid, named, and nothing else does',
-      hp.ok && hp.solid.length === 1 && hp.solid[0].label === 'branch 16 (contact 99)' && hp.solid[0].kind === 'too-small' &&
-      hp.hollowed === g.parts.length, hp.solid.map(s => s.label + ': ' + s.why).join('; '));
-    PLANS.shelf_tinybranch = { rd: Object.assign(tinyPlan, { hollow: hp }) };
-
-    const thin = ST.hollowParts(g, { hollowWallMm: 0.3 });
-    check('a 0.3 mm wall request bores nothing - every part stays solid as under-floor, and the tree is not refused',
-      thin.ok && thin.hollowed === 0 && thin.solid.every(s => s.kind === 'under-floor'), thin.solid[0].why);
-    const p6 = ST.planTree(SHELF, { skipList: [], nozzle: 0.6, hollow: true });
-    check('at a 0.6 mm nozzle (floor 0.63 mm) the round tree still takes bores - the square strut could not',
-      p6.ok && p6.trunk.floorMm === TH.floorFor(0.6) && p6.hollow.hollowed === p6.parts.length,
-      p6.hollow.reason + `; tip bore ${r3(Math.min(...p6.hollow.parts.filter(r => r.role === 'branch').map(r => r.boreToMm)))} mm`);
+    console.log('\n=== 3. the fallback: too small, under the floor, a fatter nozzle ===');
+    const rd = ST.planTree(SHELF, { skipList: [] });
+    const thin = await GP.solid(rd, Object.assign({ hollow: true, hollowWallMm: 0.3 }, opts));
+    check('a 0.3 mm wall request bores nothing, and the support is still built',
+      thin.ok && thin.hollow.cut === 0 && /under the .* nozzle floor/.test(thin.hollow.reason), thin.hollow.reason);
+    const p6 = ST.planTree(SHELF, { skipList: [], nozzle: 0.6 });
+    const t6 = await GP.solid(p6, Object.assign({ hollow: true }, opts));
+    const f6 = TH.floorFor(0.6);
+    check('at a 0.6 mm nozzle (floor 0.63 mm) the merged members whose side leaves a bore of the floor still take one',
+      t6.ok && p6.floorMm === f6 && t6.hollow.cut > 0 &&
+      t6.hollow.bores.every(b => p6.members[b.member].side - 2 * f6 >= f6 - 1e-9 && p6.members[b.member].count >= 3), t6.hollow.reason);
   }
 
   /* =====================================================================
      4. THE CANONICAL CHECKER, and the labelled wall probe
      ===================================================================== */
-  console.log('\n=== 4. every hollow tree: the canonical checker, and walls vs membranes ===');
-  const csg = csgContext();
-  const opts = { unionSoups: csg.NSO_unionSoups, subtractSoups: csg.NSO_subtractSoups };
+  console.log('\n=== 4. every hollow support: the canonical checker, and walls vs membranes ===');
   for (const tag of Object.keys(PLANS)) {
-    const rd = PLANS[tag].rd;
+    const { rd, t } = PLANS[tag];
     console.log('\n-- ' + tag + ' --');
-    const t = await ST.hollowTree(rd, opts);
-    check(`${tag}: the hollow tree builds`, t.ok, t.reason && t.reason.slice(0, 220));
-    if (!t.ok) continue;
     const file = path.join(OUT, tag + '_round_hollow.stl');
-    writeSTL(file, t.soup, 'NSO round hollow support tree ' + tag);
+    writeSTL(file, t.soup, 'NSO hollow support ' + tag);
     const weld = Math.min(1e-4, closestPair(t.soup) / 3);
     const v = validate(file, weld);
     check(`${tag}: canonical checker - closed, manifold, consistently wound, no degenerates`,
@@ -315,15 +287,21 @@ fs.mkdirSync(OUT, { recursive: true });
     check(`${tag}: no self-intersection, piercing or coplanar`,
       v.self_intersection.pierce === 0 && v.self_intersection.coplanar === 0,
       `${v.self_intersection.pierce} piercing, ${v.self_intersection.coplanar} coplanar`);
-    const hollowed = rd.hollow.hollowed;
-    check(`${tag}: euler = 2 + 2 x bores - ` + (hollowed > 1 ? 'every bore joined into ONE, as the reference\'s merged bore' : 'the skin and its bores'),
-      v.euler_characteristic === 2 + 2 * t.boreShells && (hollowed > 1 ? t.boreShells === 1 : t.boreShells === hollowed),
-      `${v.euler_characteristic}; ${hollowed} part(s) bored, ${t.boreShells} bore shell(s)`);
+    const sh = shells(t.soup), voids = sh - t.solids.length;
+    check(`${tag}: euler = 2 x shells - every solid and every bore a sphere, no handles`,
+      v.euler_characteristic === 2 * sh && voids >= (t.hollow.cut ? 1 : 0) && voids <= t.hollow.cut,
+      `${v.euler_characteristic}; ${t.solids.length} solid(s), ${t.hollow.cut} member(s) bored into ${voids} bore(s)`);
     check(`${tag}: volume = the solid union less exactly what the bores removed`,
-      near(v.signed_volume, signedVolume(t.solidSoup) - t.removedMm3, 1e-3),
-      `${r4(v.signed_volume)} = ${r4(signedVolume(t.solidSoup))} - ${r4(t.removedMm3)} mm^3`);
-    if (hollowed) {
-      const w = labelledWalls(t.soup, rd.parts);
+      near(v.signed_volume, signedVolume(t.solidSoup) - t.hollow.removedMm3, 1e-3),
+      `${r4(v.signed_volume)} = ${r4(signedVolume(t.solidSoup))} - ${r4(t.hollow.removedMm3)} mm^3`);
+    if (t.hollow.cut) {
+      /* Skin vs bore is decided against the BORED members only. Against
+         every part, a face at the crotch where two unbored 1.2 mm legs
+         converge on a node reads as 'bore' (the point just off it lands in
+         the other leg) and the probe reports the crotch's wedge as a 0.03 mm
+         wall - measured on the tab, at z 10.3, above every bore. */
+      const bored = t.hollow.bores.map(b => sweepsOf(rd, rd.members[b.member], t.hollow.wallMm).outer.tris);
+      const w = labelledWalls(t.soup, bored);
       check(`${tag}: every wall to the outside is at least the ${FLOOR} mm floor, read off the kernel's output`,
         w.wall.n > 0 && w.wall.thin === 0 && w.wall.min >= FLOOR - TH.WELD_TOL,
         `${w.wall.n} skin<->bore readings over ${w.faces.skin} skin + ${w.faces.bore} bore faces, thinnest ${r4(w.wall.min)} mm` +

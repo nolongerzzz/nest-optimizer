@@ -355,7 +355,7 @@ fs.mkdirSync(OUT, { recursive: true });
     const gs = await build(gk);
     check('gecko-hand style: the tree\'s plan, with a hand at every point', gk.ok && gs.ok &&
       JSON.stringify(gk.merges) === JSON.stringify(plan('boss').merges), gs.reason);
-    if (gs.ok) validSolid('boss_gecko', gs.soup, gs.solids.length, true);
+    if (gs.ok) validSolid('boss_gecko', gs.soup, gs.solids.length);
     const tp = ST.planTree(FIX.shelf, { skipList: [], regionId: 0 });
     check('NSO_SupportTree.planTree is this planner (one planner, not two)', tp.ok && tp.planner === 'gridpack' && tp.merges.length > 0, tp.reason);
   }

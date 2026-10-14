@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // A support must stand in open space: the inside-material half of the line
-// test (NSO_SupportAim.lineInsideAt), and the trunks it now refuses.
+// test (NSO_SupportAim.lineInsideAt), and the planner legs it keeps out of
+// the part (the grid-pack planner tests every leg with it).
 //
 //   node tools/nso_support_inside_test.js      exit 0 = every gate held
 //
@@ -14,7 +15,7 @@
 //
 // Loads the shipped files with vm, in index.html's own order, exactly the way
 // tools/nso_support_tree_test.js does. Plans the way G-scope's planFor() does
-// (section left at the shipped 'round', skipList []).
+// (NSO_SupportTree.planTree, which is nso_support_gridpack.js, skipList []).
 
 const fs = require('fs');
 const path = require('path');
@@ -29,7 +30,7 @@ const ctx = {
 vm.createContext(ctx);
 for (const f of ['nso_thickness.js', 'nso_seat_surface.js', 'app-sculpt.js',
                  'app-extend.js', 'nso_support_aim.js', 'nso_path_sweep.js',
-                 'nso_support_tree.js']) {
+                 'nso_support_tree.js', 'nso_support_gridpack.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
 const SA = ctx.NSO_SupportAim;
@@ -97,7 +98,26 @@ const FIX = {
   boss:  soupOf(box([0, 0, 0], [10, 10, 26]), arm(10, 30, 0, 10, 22, 26, 1, [[22, 25, 6, 9]]),
                 box([22, 6, 17], [25, 9, 22]))
 };
-const plan = (host) => ST.planTree(host, { skipList: [] });
+const plan = (host) => ST.planTree(host, { skipList: [], regionId: 0 });
+/* Every leg of every member that was built, as [from, to]. */
+function legsOf(p) {
+  const out = [];
+  for (const m of p.members) {
+    if (m.dead) continue;
+    for (let i = 0; i + 1 < m.path.length; i++) out.push([m.path[i], m.path[i + 1], 'member ' + m.id]);
+  }
+  for (const s of p.stubs) out.push([s.from, s.via, 'stub ' + s.beacon], [s.via, s.to, 'stub ' + s.beacon]);
+  return out;
+}
+function legInside(host, p) {
+  for (const [a, b, label] of legsOf(p)) {
+    const d = sub(b, a), L = len(d);
+    if (!(L > 1e-6)) continue;
+    const at = SA.lineInsideAt([host], a, unit(d), L);
+    if (at >= 0) return label + ' ' + f3(a) + ' -> ' + f3(b);
+  }
+  return null;
+}
 const INSIDE_WORDS = 'runs inside the piece';
 
 /* ---- 1. the winding number the inside test stands on ------------------- */
@@ -139,56 +159,44 @@ console.log('\n2. the mushroom\'s plate -> apex line: the face test reads it cle
   check('2d a line lying in the stem\'s wall: not counted as inside', onWall === -1, String(onWall));
 }
 
-/* ---- 3. the two fixtures: refused at base, nothing built --------------- */
-console.log('\n3. trunks that would stand inside the part are refused at the base, by name');
+/* ---- 3. the two fixtures: nothing stands inside the part --------------- */
+/* CHANGED with the grid-pack planner (docs/SUPPORT-GRIDPACK.md). These two
+   were pinned as "refused at the base": the trunk-first planner aimed ONE
+   trunk at the contacts' centroid, which here is inside the stem / block, and
+   refused it. That planner is gone. The grid-pack planner grows a strut from
+   every contact straight down and tests every leg with lineInsideAt as well
+   as lineBlockedAt - so the same invariant is asserted on every leg it
+   builds: none of them runs inside the part, and the part is held. */
+console.log('\n3. no support leg stands inside the part');
 for (const name of ['mushroom', 'shelfOnBlock']) {
   const p = plan(FIX[name]);
-  console.log('    ' + name + ': apex ' + (p.apex ? f3(p.apex) : '-') + ', stage ' + p.stage);
-  console.log('      ' + p.reason);
-  check('3 ' + name + ': not ok, refused at stage base', !p.ok && p.stage === 'base', p.stage);
-  check('3 ' + name + ': no trunk, no parts', !p.trunk && p.parts.length === 0,
-    'parts ' + p.parts.length);
-  const c0 = p.base && p.base.considered && p.base.considered[0];
-  check('3 ' + name + ': the plate was considered and marked inside', !!(c0 && c0.kind === 'plate' && c0.inside),
-    c0 ? c0.why : '-');
-  check('3 ' + name + ': the reason says so', p.reason.indexOf(INSIDE_WORDS) >= 0);
-  /* and the apex's line really is inside the body - the fixture is what it
-     claims to be */
-  const L = p.apex[2] - p.detect.plateZ;
-  const w = SA._windingAt(FIX[name], [p.apex[0], p.apex[1], p.detect.plateZ + L / 2]);
-  check('3 ' + name + ': the trunk\'s would-be midpoint is in the body', w >= 0.5, w.toFixed(6));
+  console.log('    ' + name + ': ' + p.reason);
+  check('3 ' + name + ': planned, every contact held, every trunk on the plate',
+    p.ok && p.held === p.beacons.length && p.trunks.every(t => t.landing === 'plate'), p.reason);
+  const bad = p.ok ? legInside(FIX[name], p) : 'no plan';
+  check('3 ' + name + ': no leg of any member runs inside the part (lineInsideAt)', !bad, bad || (legsOf(p).length + ' legs'));
 }
 {
   /* aim() asks the same nearestBase, so a strut aimed straight at the
      centroid is refused too - the strut half of the ticket. */
   const p = plan(FIX.shelfOnBlock);
-  const a = SA.aim(p.apex, [{ kind: 'plate', z: 0 }], { obstacles: [FIX.shelfOnBlock] });
+  const apex = [0, 1, 2].map(k => p.beacons.reduce((s, b) => s + b.p[k], 0) / p.beacons.length);
+  const a = SA.aim(apex, [{ kind: 'plate', z: 0 }], { obstacles: [FIX.shelfOnBlock] });
   check('3c a strut aim() at the shelf\'s centroid: refused at base, inside', !a.ok && a.stage === 'base' &&
     a.reason.indexOf(INSIDE_WORDS) >= 0, a.reason.slice(0, 120));
 }
 
-/* ---- 4. controls: trunks in open space are planned as before ----------- */
-console.log('\n4. controls: every trunk that stands in open space still stands');
-/* Pinned from this branch's base (claude-wip 6abb59c), unchanged here: the
-   held branch counts and refusals G-scope's planFor() gets today. */
-const EXPECT = {
-  shelf: { branches: 16, refused: 0 },
-  tall:  { branches: 28, refused: 0 },
-  tab:   { branches: 8,  refused: 0 },
-  tiny:  { branches: 0,  refused: 0 },
-  boss:  { branches: 24, refused: 4 }
-};
-for (const name of Object.keys(EXPECT)) {
+/* ---- 4. controls: every fixture held, nothing inside --------------------- */
+/* CHANGED with the grid-pack planner: the counts pinned here were the
+   trunk-first plan's branch counts (boss: 24 held, 4 refused). Now every
+   contact is held - boss 28 of 28 - and no leg runs inside a part. */
+console.log('\n4. controls: every contact held, no leg inside a part');
+for (const name of ['shelf', 'tall', 'tab', 'tiny', 'boss']) {
   const p = plan(FIX[name]);
-  const e = EXPECT[name];
-  const refused = (p.blocked || []).length;
-  check('4 ' + name + ': ok, ' + e.branches + ' branches, ' + e.refused + ' refused',
-    p.ok && p.branches.length === e.branches && refused === e.refused,
-    'ok ' + p.ok + ', ' + p.branches.length + ' branches, ' + refused + ' refused');
-  const t = p.trunk;
-  const dir = unit(sub(t.tip, t.from)), L = len(sub(t.tip, t.from));
-  const ins = SA.lineInsideAt([FIX[name]], t.from, dir, L);
-  check('4 ' + name + ': its trunk ' + f3(t.from) + ' -> ' + f3(t.tip) + ' is in open space', ins === -1);
+  check('4 ' + name + ': ok, every contact held', p.ok && p.held === p.beacons.length && !p.unreachable.length,
+    p.reason);
+  const bad = p.ok ? legInside(FIX[name], p) : 'no plan';
+  check('4 ' + name + ': no leg inside the part', !bad, bad || (legsOf(p).length + ' legs'));
 }
 {
   /* The single strut, nso_support_aim.js's own cantilever. */
