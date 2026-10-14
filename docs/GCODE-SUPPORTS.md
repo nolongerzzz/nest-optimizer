@@ -85,12 +85,24 @@ soup and the same options the marker's detection ran with, plus `regionId` and
 
 | style | call |
 | --- | --- |
-| straight strut | `NSO_SupportAim.plan(soup, opts)` |
-| tree | `NSO_SupportTree.planTree(soup, { ...opts, branchStyle: 'square' })`, then `unionParts` |
-| gecko-hand | the same, with `branchStyle: 'gecko-hand'` |
+| straight strut | `NSO_SupportTree.planTree(soup, { ...opts, style: 'strut' })`, then `NSO_SupportGridpack.solid` |
+| tree | the same, with `style: 'tree'` |
+| gecko-hand | the same, with `style: 'gecko-hand'` |
 
-No geometry is built in `app-gscope-support.js`. A refusal is the generator's
-own, by name (for example "trunksNeeded"), and nothing is added to the plate.
+All three are the one grid-pack planner (`nso_support_gridpack.js`,
+`docs/SUPPORT-GRIDPACK.md`): one strut per support point, grown down to the
+plate. `strut` never merges; `tree` merges pairwise on the node lattice;
+`gecko-hand` is the tree with a hand at every point.
+
+No geometry is built in `app-gscope-support.js`. The only refusal is a support
+point inside the piece; points with no route to the plate are counted in the
+status line ("unreachable from the plate"), and a plan that holds nothing adds
+nothing and says so.
+
+**Generate again replaces.** Generating on a region that already has supports
+takes them off and puts the new one on as one `supportSwap` undo step. It never
+stacks a second support inside the first, and the same inputs give the same
+mesh.
 
 **Where the support goes.** Each support is its own plate piece. It comes in
 through the ordinary ingest (`addModelFromZUpGeometry`) and is placed by its
@@ -191,9 +203,9 @@ asserted to be a drawn frame, with red / green pixels counted:
   appear on G-scope's plate document. A file opened in G-scope has no plate to
   stand on; use Read the plate. Sliced `.gcode.3mf` toolpaths are not
   scanned: their supports are already in the G-code.
-- **One tree per region.** A region too big for one trunk is refused with
-  `planTree`'s own `trunksNeeded` count. A field of trunks is still the tree
-  module's out-of-scope 1.
+- **One support piece per region.** It may hold several trunks: the planner
+  lands as many as the merges leave, each its own closed solid inside the one
+  piece.
 - **Region ids follow detection.** If the host piece changes shape after a
   support was made, "which overhang this holds up" is only as stable as
   `detectOverhangs`' area ranking.

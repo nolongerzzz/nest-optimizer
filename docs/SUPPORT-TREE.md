@@ -1,5 +1,15 @@
 # Support tree — a trunk that stops, and branches that finish the job
 
+> **The planner described in §4–5 (one trunk, a split point, a fan of
+> branches) is REPLACED** by the grid-pack planner, `nso_support_gridpack.js`
+> — see `docs/SUPPORT-GRIDPACK.md`. `planTree` now returns its plan. What this
+> file still owns and this document still describes: the contact points (§3,
+> `contactPoints`, the grid the planner's points come from), the two
+> constants (§2), `branch` and the gecko hand (§5, primitives), the union
+> (§6), the taper law and exact bores of a frustum (§6b, primitives), and the
+> interface (§6c). The numbers in §4–5 and §7 are the trunk-first planner's,
+> kept as the record of what it did.
+
 `nso_support_tree.js` (`window.NSO_SupportTree`, and a Node module).
 Tests: `npm run tree:test`, `npm run tree:canonical`, `npm run tree:reference`.
 All three are in `npm test`.

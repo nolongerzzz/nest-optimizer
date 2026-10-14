@@ -1,5 +1,11 @@
 # Curved support branches — audit and design report
 
+> **Historical.** Everything below measured the trunk-first planner, which the
+> grid-pack planner (`nso_support_gridpack.js`, `docs/SUPPORT-GRIDPACK.md`)
+> replaced. The boss fixture's 4 refused contacts are held there (28 of 28),
+> by steering and by moving tips off walls, with no curved legs. The probe
+> reads `plan.trunk` / `plan.branches` and no longer runs against `planTree`.
+
 **Report only. No behaviour changes.** Nothing here is wired in and nothing in
 the app calls it. The one addition to the repo apart from this file is a probe:
 
