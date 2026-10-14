@@ -92,6 +92,7 @@ should not count them as wins:
   - Its rays start inside the stem and never cross a face before the end is excluded by `RAY_EPS_MM`, so the line reads as clear.
   - Every branch then has to leave the stem through its wall, which is why all 20 are refused.
   - This is a pre-existing defect in the line test: a segment wholly inside material reads as clear. It is separate from curving. No branch-level search can rescue a trunk that starts inside the piece (the probe's detour gets 0 of 20 there: 5,740 candidates fail at the axis and 1,788 on rails, because every one starts inside the stem). That defect has to be fixed first, and the mushroom then refuses at `base` by name.
+  - **Fixed (`claude/support-trunk-inside`).** `nearestBase` now runs `NSO_SupportAim.lineInsideAt` on every line `lineBlockedAt` clears: a generalised winding number at the quarter, half and three-quarter points, skipping any point on the surface. The mushroom now refuses at `base` with *"the straight line runs inside the piece"*, and so does a shelf on an off-centre solid block. `tools/nso_support_inside_test.js` (`support:inside`) pins both, and the four tree fixtures and `boss` plan exactly as before.
 
 ### 1c. The sweep itself: a round branch cannot have a joint
 
