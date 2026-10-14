@@ -1,4 +1,5 @@
-/* The Cut panel's yaw buttons (⟲ 90, ⟲ 15, 15 ⟳, 90 ⟳) turn the piece Split
+/* The piece yaw (rotateActiveModelY: the yaw drag, and the ⟲ 90, ⟲ 15, 15 ⟳,
+   90 ⟳ buttons the Cut card had until the mitre wheel) turns the piece Split
    cuts, not only the piece on screen: the cut faces land where the blade and
    the plate line show them, at every yaw and after turning back.
      node tools/nso_wire_cut_yaw_test.js        exit 0 = every gate held
@@ -18,7 +19,7 @@
    display geometry, about the same centre, and centerOffset follows the
    re-centring; both are replaced, not written in place.
 
-   GATES, through the real buttons and the real Split, on a raw piece and a
+   GATES, through rotateActiveModelY and the real Split, on a raw piece and a
    display-route piece, at yaw 0, 15 ⟳, 90 ⟳, ⟲ 15, ⟲ 90, and turned back
    (15 ⟳ ⟲ 15, 90 ⟳ ⟲ 90, six 15 ⟳ then ⟲ 90). The red line is put at
    21.3 mm, off-centre, so a sign error cannot hide behind symmetry.
@@ -199,12 +200,10 @@ withApp(async (page, logs) => {
     const loaded = await page.evaluate(id => __soups(id), id);
     await open(id);
     let yaw = 0;
+    // The yaw buttons left the Cut card with the mitre wheel; the turn they
+    // made is rotateActiveModelY, which the yaw drag still drives.
     for (const p of presses) {
-      await page.evaluate(sel => {
-        const e = document.querySelector(sel);
-        for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
-      }, YAWS[p][0]);
-      await page.click(YAWS[p][0]);
+      await page.evaluate(d => rotateActiveModelY(d), YAWS[p][1]);
       yaw += YAWS[p][1];
     }
     if (route === 'raw') {

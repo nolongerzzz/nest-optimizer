@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=cutcard1" />
+  <link rel="stylesheet" href="styles.css?v=cutcard2" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -364,12 +364,6 @@
               <p id="cutter-status" class="hint">Click a piece to drop a square blade on it.</p>
               <p id="edit-size" class="hint hidden-quiet">—</p>
               <div id="cutter-tools" class="cutter-tools">
-              <div class="edit-row">
-              <button id="btn-yaw-left-90" class="btn btn-secondary" type="button" title="Turn the piece itself 90° (not the blade)">⟲ 90</button>
-              <button id="btn-yaw-left" class="btn btn-secondary" type="button" title="Turn the piece itself 15° (not the blade)">⟲ 15</button>
-              <button id="btn-yaw-right" class="btn btn-secondary" type="button" title="Turn the piece itself 15° (not the blade)">15 ⟳</button>
-              <button id="btn-yaw-right-90" class="btn btn-secondary" type="button" title="Turn the piece itself 90° (not the blade)">90 ⟳</button>
-              </div>
               <div class="cut-miter">
               <svg id="cut-miter-dial" class="cut-dial" viewBox="0 0 100 100" width="104" height="104"
                    role="slider" tabindex="0" aria-label="Mitre, degrees" aria-valuemin="0" aria-valuemax="359" aria-valuenow="0">
@@ -412,6 +406,12 @@
             <summary class="vp-bar-btn" title="Crop a slab out of the selected piece, or take a region out, move it and lock it in">Crop</summary>
             <div class="vp-menu-body vp-top-body" id="crop-card">
               <select id="edit-axis" class="hidden-quiet"><option value="auto">Longest axis</option><option value="x">X</option><option value="z">Z</option></select>
+              <!-- Crop's axis: what Cut X / Cut Z set before Cut and Crop were
+                   split, now Crop's own (app-crop.js, NSO_cropSetAxis). -->
+              <div class="edit-row crop-axis-row">
+              <button id="btn-crop-axis-x" class="btn btn-secondary" type="button" title="Crop along plate X">Crop X</button>
+              <button id="btn-crop-axis-z" class="btn btn-secondary" type="button" title="Crop along plate Z">Crop Z</button>
+              </div>
               <div class="crop-tools" id="crop-tools">
               <p class="hint">Crop: take out the slab between two distances along the cut axis and close the gap. One closed piece, shorter by the box length.</p>
               <div class="edit-row crop-row">
@@ -1266,13 +1266,13 @@
   <script src="nso_slicer.js?v=slice1"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
   <script src="nso_relief.js?v=relief2"></script>
-  <script src="app-core.js?v=cutcard1"></script>
+  <script src="app-core.js?v=cutcard2"></script>
 
 
 
 
 
-  <script src="app-cut.js?v=cutcard1"></script>
+  <script src="app-cut.js?v=cutcard2"></script>
   <script src="app-finish.js?v=findings1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
   <script src="app-extend.js?v=scale1"></script>
@@ -1281,7 +1281,7 @@
   <script src="app-mirror.js?v=mirror2"></script>
   <!-- Crop, stage 1: box -> remove slab -> seal the joint. After app-cut.js
        (rawCutOpen, rawFlatCapLoop, mapPlaneToRaw) and app-sculpt.js (commit). -->
-  <script src="app-crop.js?v=cutcard1"></script>
+  <script src="app-crop.js?v=cutcard2"></script>
   <script src="app-fatten.js?v=box2"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
@@ -1301,7 +1301,7 @@
   <script src="app-stock.js?v=stock3"></script>
   <script src="app-assemble.js?v=asm2"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
-  <script src="app-join.js?v=cutcard1"></script>
+  <script src="app-join.js?v=cutcard2"></script>
   <script src="app-center-lock.js?v=clock2"></script>
   <script src="app-oversize-washer.js?v=oversize2"></script>
   <script src="app-join-triple.js?v=triple1"></script>

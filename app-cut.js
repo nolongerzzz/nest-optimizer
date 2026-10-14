@@ -1,5 +1,5 @@
-// The yaw buttons (and the yaw drag) turn the piece itself, not its pose on
-// the plate. They used to turn the display geometry alone: a piece loaded
+// The yaw drag (and the Cut card's yaw buttons, until the mitre wheel
+// replaced them) turns the piece itself, not its pose on the plate. They used to turn the display geometry alone: a piece loaded
 // from a file is cut from its raw triangles (rawTris, through centerOffset -
 // mapPlaneToRaw), which stayed where they were, so Split cut the unturned
 // piece with a plane placed on the turned one - at 90 deg a 60 mm bar was
@@ -81,7 +81,10 @@ function updateEditSize() {
   syncCutRightSideOutButton();
 }
 
+// Crop's axis (and Array's): Crop X / Crop Z first (app-crop.js), then the
+// programmatic lock and the hidden select, then the longer of X and Z.
 function resolveAxis(model) {
+  if (state.cropAxis === 'x' || state.cropAxis === 'z') return state.cropAxis;
   if (state.cutAxis === 'x' || state.cutAxis === 'z') return state.cutAxis;
   const sel = (document.getElementById('edit-axis') || {}).value || 'auto';
   if (sel === 'x' || sel === 'z') return sel;
@@ -467,7 +470,8 @@ function closeCutter(silent) {
    gives: it sees a programmatic `.open = true` as well as a click, and runs
    before the next event. Opening Crop while Cut is live hands the selection
    machinery over to Crop first; Cut's card then shuts (one panel), and its
-   close is a no-op because the live tool is no longer Cut's. */
+   close is a no-op because the live tool is no longer Cut's. Shutting a
+   card leaves the selection as it was. */
 function cutWireCards() {
   if (typeof document === 'undefined' || typeof MutationObserver !== 'function') return;
   const cards = { 'menu-cut': 'cut', 'menu-crop': 'crop' };
@@ -478,7 +482,21 @@ function cutWireCards() {
       if (r.target.open && !cutterArmed(tool)) {
         openCutter(tool);
       } else if (!r.target.open && cutterArmed(tool)) {
+        // The tool goes; the piece stays picked, as the leave-tool gesture
+        // keeps it (app-input-mode.js). Shutting the card is not "done with
+        // this piece": opening Join or Scale next works on the piece just
+        // cut, and Join's A, set before its card opened, survives.
+        const keepIndex = state.selectedIndex, keepId = state.editId;
         closeCutter(false);
+        if (keepIndex >= 0 && state.placed && state.placed[keepIndex] && typeof selectPlaced === 'function') {
+          selectPlaced(keepIndex);
+        }
+        if (keepId != null && state.editId !== keepId && state.models.some(m => m && m.id === keepId)) {
+          state.editId = keepId;
+          updateEditSize();
+          if (typeof renderModelList === 'function') renderModelList();
+          updateCutterUI();
+        }
       }
     });
   }).observe(document.body, { attributes: true, subtree: true, attributeFilter: ['open'] });
@@ -2190,8 +2208,11 @@ function layoutAfterSplit(sourcePose, poseById, sourceId, modelA, modelB, axis, 
       stay && typeof stay.z === 'number' ? stay.z : 0
     );
     if (ori) {
+      // applyMeshRotation's own composition, flip included: a record with
+      // flipX (a scene 3MF puts one back) otherwise parts the halves the
+      // wrong way round along a cut it turns over.
       const e = new THREE.Euler(
-        ((ori.tipX || 0) * Math.PI / 2) + ((ori.tiltX || 0) * Math.PI / 180),
+        ((ori.tipX || 0) * Math.PI / 2) + ((ori.tiltX || 0) * Math.PI / 180) + (ori.flipX ? Math.PI : 0),
         ori.rotY || 0,
         ((ori.tipZ || 0) * Math.PI / 2) + ((ori.tiltZ || 0) * Math.PI / 180),
         'XYZ'

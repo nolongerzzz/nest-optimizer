@@ -367,10 +367,11 @@ withApp(async (page, logs) => {
     let lo = 600, hi = 1000;                     // lo collides, hi does not
     const okEnds = (await collides(lo)) && !(await collides(hi));
     while (hi - lo > 1) { const m = (lo + hi) >> 1; if (await collides(m)) lo = m; else hi = m; }
-    // About 790 px with ten slabs; the Crop card's slab (the Cut / Crop
-    // split) made eleven and moved it to about 830.
-    check('the collision starts below about 830 px of window height, no higher',
-      okEnds && hi >= 815 && hi <= 840, okEnds ? 'clear from ' + hi + ' px tall' : 'not bracketed by 600..1000');
+    // The 1280 x 800 floor: the column must clear the tools at 800 tall.
+    // Eleven slabs since Crop got its own card, on a 4 px column gap (and a
+    // 4 px gap between the tools): clear from about 795.
+    check('the collision starts below 800 px of window height (the 1280 x 800 floor holds)',
+      okEnds && hi >= 770 && hi <= 800, okEnds ? 'clear from ' + hi + ' px tall' : 'not bracketed by 600..1000');
     await page.setViewportSize({ width: 1500, height: 820 });
   }
 

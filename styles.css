@@ -1186,7 +1186,7 @@ select:focus, input:focus {
   top: auto;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
+  gap: 4px;            /* 8 until the column grew to eleven slabs (see .vp-shell-col) */
 }
 .vp-menu {
   pointer-events: auto;
@@ -3463,10 +3463,13 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   width: 100%;
   pointer-events: none;
 }
+/* The column's own, tighter gap: eleven slabs since Crop got its own card,
+   and the column must still clear the bottom-left tools (Undo ... Watch) on
+   a 1280 x 800 window. */
 .vp-shell-col {
   display: flex;
   flex-direction: column;
-  gap: var(--shell-gap);
+  gap: 4px;
   width: var(--shell-col-w);
   pointer-events: none;
 }

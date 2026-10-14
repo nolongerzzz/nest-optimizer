@@ -3864,14 +3864,8 @@ const btnFrameView = document.getElementById('btn-frame-view');
   if (slotA) slotA.addEventListener('click', function () { armJoinSlot('a'); });
   const slotB = document.getElementById('join-slot-b');
   if (slotB) slotB.addEventListener('click', function () { armJoinSlot('b'); });
-  const btnYawL = document.getElementById('btn-yaw-left');
-  const btnYawR = document.getElementById('btn-yaw-right');
-  const btnYawL90 = document.getElementById('btn-yaw-left-90');
-  const btnYawR90 = document.getElementById('btn-yaw-right-90');
-  if (btnYawL) btnYawL.addEventListener('click', () => rotateActiveModelY(-15));
-  if (btnYawR) btnYawR.addEventListener('click', () => rotateActiveModelY(15));
-  if (btnYawL90) btnYawL90.addEventListener('click', () => rotateActiveModelY(-90));
-  if (btnYawR90) btnYawR90.addEventListener('click', () => rotateActiveModelY(90));
+  // The yaw buttons are gone from the Cut card (the mitre wheel angles the
+  // cut, the piece stays put); rotateActiveModelY stays for the yaw drag.
 
   // The hidden axis select: Crop's axis (resolveAxis), and the programmatic
   // cut-axis lock (cutFrame). No visible control sets either now - Cut X /

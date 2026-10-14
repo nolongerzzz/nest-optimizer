@@ -42,6 +42,7 @@ const state = {
   cutterOpen: false,
   cutTool: null,         // 'cut' | 'crop': which card armed the cutter (app-cut.js)
   cutMiterDeg: 0,        // the Cut card's mitre wheel; 0 = square
+  cropAxis: null,        // Crop X / Crop Z (app-crop.js); null = as resolveAxis decides
   moveDragging: false,
   moveIndex: -1,
   moveGrab: { x: 0, z: 0 },

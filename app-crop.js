@@ -1150,6 +1150,20 @@ function NSO_cropState() {
   return cs;
 }
 
+/* Crop's own X / Z. Before Cut and Crop were split, Cut X / Cut Z set
+   state.cutAxis, which resolveAxis read for Crop's box; Crop X / Crop Z set
+   state.cropAxis the same way, read first by resolveAxis, and remembered
+   the same way (until set again). Cut no longer reads either. */
+function NSO_cropSetAxis(axis) {
+  state.cropAxis = axis;
+  var bx = document.getElementById('btn-crop-axis-x');
+  var bz = document.getElementById('btn-crop-axis-z');
+  if (bx) bx.classList.toggle('tool-active', axis === 'x');
+  if (bz) bz.classList.toggle('tool-active', axis === 'z');
+  NSO_cropSyncUI();
+  if (typeof setStatus === 'function') setStatus('Crop axis ' + String(axis).toUpperCase());
+}
+
 // The slab in display terms for model m, defaulting to the middle fifth.
 function NSO_cropDisplaySlab(m) {
   if (!m || !m.geometry || !m.geometry.attributes || !m.geometry.attributes.position) return null;
@@ -1385,6 +1399,9 @@ if (typeof document !== 'undefined') {
           else NSO_cropSyncUI();
         });
       });
+      var ax = document.getElementById('btn-crop-axis-x'), az = document.getElementById('btn-crop-axis-z');
+      if (ax) ax.addEventListener('click', function () { NSO_cropSetAxis('x'); });
+      if (az) az.addEventListener('click', function () { NSO_cropSetAxis('z'); });
       var chk = document.getElementById('chk-crop-box');
       if (chk) chk.addEventListener('change', function () { NSO_cropState().show = chk.checked; NSO_cropSyncUI(); });
       // Capture on the document, ahead of the canvas's own capture handler,

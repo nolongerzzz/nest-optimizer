@@ -222,16 +222,17 @@ const DISP_OF_RAW = ['x', 'z', 'y'];
 const RAW_OF_DISP = { x: 0, y: 2, z: 1 };
 const rawCoord = (axis, p, off) => axis === 'x' ? p + off.x : axis === 'y' ? p + off.y : -p - off.z;
 
-// Cut the way cutActiveModel does: a 1 mm kerf band centred on `plane`. Each
-// side is judged against the section the prism really has at its plane.
+// Cut the way cutActiveModel does: a clean split, both sides at the one
+// `plane` (no kerf band). Each side is judged against the section the prism
+// really has at the plane.
 function cutBoth(label, pr, piece, axis, plane, want) {
   let pair = null, err = null;
-  try { pair = splitBothSides(piece, axis, plane - 0.5, plane + 0.5); } catch (e) { err = e; }
+  try { pair = splitBothSides(piece, axis, plane, plane); } catch (e) { err = e; }
   check(label + ': Split cuts it', !!pair, err && (err.name + ': ' + err.message));
   if (!pair) return null;
   const ai = AX[axis];
   const off = piece.centerOffset || piece.offForTest;
-  [['left', plane - 0.5], ['right', plane + 0.5]].forEach(([side, pl]) => {
+  [['left', plane], ['right', plane]].forEach(([side, pl]) => {
     const w = typeof want === 'function' ? want(side, pair) : want;
     judge(label + ' [' + side + ']', pair[side], ai, pl,
       w.area != null ? w : Object.assign({ area: sectionArea(pr, RAW_OF_DISP[axis], rawCoord(axis, pl, off)) }, w));
@@ -351,13 +352,16 @@ try {
         const pair = cutBoth('cylinder along ' + DISP_OF_RAW[k].toUpperCase() + ', cut ' + axis.toUpperCase() + ' @ +1.3 ' +
           (withRaw ? '(raw)' : '(display)'), cyl, pieceOf(cyl.soup, withRaw), axis, 1.3, SOLID);
         if (pair && withRaw && axis !== 'y') {
-          // X and Z took the raw route before this change too: same rawCut,
-          // same mapping, so the pieces must be byte-for-byte what they were.
+          // The raw route is rawCut through mapPlaneToRaw, one plane for both
+          // sides (the clean split): the low side (A) is rawCut keeping below
+          // the plane, the high side (B) keeping above it, byte for byte.
           const p = pieceOf(cyl.soup, true);
-          const m = mapPlaneToRaw(p, axis, 0.8, true);
-          const before = rawCut(cyl.soup, m.axisIdx, m.plane, m.keepMin);
-          check('  raw ' + axis.toUpperCase() + ' piece byte-identical to the pre-change raw route',
-            before.length === pair.rawA.length && before.every((v, i) => v === pair.rawA[i]));
+          const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+          const mA = mapPlaneToRaw(p, axis, 1.3, false), mB = mapPlaneToRaw(p, axis, 1.3, true);
+          const lowA = rawCut(cyl.soup, mA.axisIdx, mA.plane, mA.keepMin);
+          const highB = rawCut(cyl.soup, mB.axisIdx, mB.plane, mB.keepMin);
+          check('  raw ' + axis.toUpperCase() + ' pieces byte-identical to rawCut at the one plane (A below, B above)',
+            same(lowA, pair.rawA) && same(highB, pair.rawB));
         }
       }
     }
@@ -451,7 +455,7 @@ try {
       };
       const halfSoup = (pair, side) => withRaw ? (side === 'left' ? pair.rawA : pair.rawB) : soupOf(pair[side]);
       for (const axis of ['x', 'y', 'z']) {
-        // -13.8 +- 0.5: both kerf planes inside the -15..-13 wall.
+        // -13.8: the plane inside the -15..-13 wall.
         const label = 'box, cut ' + axis.toUpperCase() + ' @ -13.8 ' + route;
         const pair = cutBoth(label, null, piece, axis, -13.8,
           (side, pr2) => ({ area: 900, comps: 1, loops: 1, capChi: 1,

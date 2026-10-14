@@ -124,7 +124,8 @@ window.__cut = function (id) {
   const fresh = state.models.filter(x => !before.includes(x.id));
   const plate = fresh.map(x => {
     const e = state.placed.find(p => p && p.sourceId === x.id);
-    return { name: x.name, quat: e ? e.mesh.quaternion.toArray() : null };
+    return { name: x.name, id: x.id, quat: e ? e.mesh.quaternion.toArray() : null,
+             pos: e ? e.mesh.position.toArray() : null };
   });
   return { status, got, src, plate, models: state.models.length, undo: state.undoStack.length };
 };
@@ -219,9 +220,17 @@ withApp(async (page, logs) => {
   /* ------------------------------------------------------------------ 1 */
   console.log('\n=== 1. the card is the switch ===');
   {
-    const gone = await page.evaluate(() => ['btn-cutter-open', 'btn-cutter-close', 'btn-cut-axis-x', 'btn-cut-axis-z']
-      .filter(id => document.getElementById(id)));
-    check('no Open / Close, no Cut X / Cut Z buttons', gone.length === 0, gone.join(', ') || 'none');
+    const gone = await page.evaluate(() => ['btn-cutter-open', 'btn-cutter-close', 'btn-cut-axis-x', 'btn-cut-axis-z',
+      'btn-yaw-left', 'btn-yaw-right', 'btn-yaw-left-90', 'btn-yaw-right-90'].filter(id => document.getElementById(id)));
+    check('no Open / Close, no Cut X / Cut Z, no yaw buttons', gone.length === 0, gone.join(', ') || 'none');
+    // The card, top to bottom: the mitre dial (with its typed box and
+    // Square), the slider, ← number →, Cut. (The right-side-out offer is
+    // hidden until a Cut refuses an inside-out piece.)
+    const order = await page.evaluate(() => [...document.querySelectorAll('#cutter-tools button, #cutter-tools input, #cutter-tools svg')]
+      .filter(e => !e.hidden).map(e => e.id));
+    check('the Cut card is: mitre dial, slider, ← number →, Cut',
+      order.join(' ') === 'cut-miter-dial cut-miter-deg btn-cut-square cut-slider btn-cut-nudge-m cut-mm btn-cut-nudge-p btn-cut',
+      order.join(' '));
     const cards = await page.evaluate(() => ({
       cut: !!document.querySelector('.vp-shell-col > #menu-cut'), crop: !!document.querySelector('.vp-shell-col > #menu-crop'),
       cropInCut: !!document.querySelector('#menu-cut #btn-crop, #menu-cut #btn-crop-lockin'),
@@ -469,6 +478,17 @@ withApp(async (page, logs) => {
       disabled: document.getElementById('btn-crop').disabled }));
     check('a click picks the piece for Crop; still no blade; Crop enabled', sel.editId === id && !sel.blade && !sel.disabled,
       JSON.stringify(sel));
+    // Crop's own axis, where Cut X / Cut Z used to set it: Z crops across the
+    // 12 mm width, X along the 60 mm length - as before the split.
+    await page.click('#btn-crop-axis-z');
+    const rz = await page.evaluate(() => ({ ro: document.getElementById('crop-readout').textContent,
+      on: document.getElementById('btn-crop-axis-z').classList.contains('tool-active'), cut: state.cutAxis || null }));
+    check('Crop Z: the box runs along Z, the 12 mm width; Cut\'s axis untouched',
+      /^Box Z .*piece 12\.0/.test(rz.ro) && rz.on && (rz.cut === null || rz.cut === 'auto'), JSON.stringify(rz));
+    await page.click('#btn-crop-axis-x');
+    const rx = await page.evaluate(() => ({ ro: document.getElementById('crop-readout').textContent,
+      on: document.getElementById('btn-crop-axis-x').classList.contains('tool-active') }));
+    check('Crop X: back along X, the 60 mm length', /^Box X .*piece 60\.0/.test(rx.ro) && rx.on, JSON.stringify(rx));
     await page.fill('#crop-start-mm', '25'); await page.dispatchEvent('#crop-start-mm', 'change');
     await page.fill('#crop-end-mm', '35'); await page.dispatchEvent('#crop-end-mm', 'change');
     await page.click('#btn-crop');
@@ -480,6 +500,80 @@ withApp(async (page, logs) => {
     await clickSummary('menu-crop');
     const s2 = await armed();
     check('closing the Crop card disarms it', !s2.open && !s2.crop, JSON.stringify(s2));
+    await page.evaluate(() => { state.cropAxis = null; });
+  }
+
+  /* ------------------------------------------------------------------ 8 */
+  console.log('\n=== 8. cut, then Join the halves: the original back ===');
+  for (const [name, soup, f] of [['box20', box(20, 20, 20), 0.35], ['bar60', box(60, 12, 8), 0.4]]) {
+    await page.evaluate(() => __clearAll());
+    await shutCut();
+    const id = await loadSTL(page, stl(name + 'j.stl', soup));
+    const orig = await page.evaluate(id => Array.from(state.models.find(x => x.id === id).rawTris), id);
+    await ensureCut();
+    await clickPieceAt(id, f);
+    const r = await page.evaluate(id => __cut(id), id);
+    check(name + ': cut into two', !!r.got && r.plate.length === 2, r.status);
+    if (r.plate.length !== 2) continue;
+    // Join through its own card, picking A and B on the plate with the mouse.
+    await clickSummary('menu-join');
+    await page.click('#btn-join-start');
+    await page.click('#join-slot-a');
+    await clickPieceAt(r.plate[0].id, 0.5);
+    await page.click('#join-slot-b');
+    await clickPieceAt(r.plate[1].id, 0.5);
+    await page.click('#btn-join');
+    await page.waitForFunction(() => /Join ok|Join failed|Join refused/.test(document.getElementById('status').textContent),
+      null, { timeout: 60000 }).catch(() => {});
+    const j = await page.evaluate(() => {
+      const m = state.models.length === 1 ? state.models[0] : null;
+      const e = m && typeof NSO_edgeStats === 'function' ? NSO_edgeStats(m.rawTris) : null;
+      return { status: document.getElementById('status').textContent, models: state.models.length,
+               raw: m ? Array.from(m.rawTris) : null, open: e ? e.open : null, nm: e ? e.nm : null };
+    });
+    check(name + ': Join made one piece of the two halves', j.models === 1 && /Join ok/.test(j.status), j.status);
+    if (!j.raw) continue;
+    const spans = t => [0, 1, 2].map(a => { const v = t.filter((_, i) => i % 3 === a); return Math.max(...v) - Math.min(...v); });
+    const area = t => tris(t).reduce((a, T) => a + T.area, 0);
+    const So = spans(orig), Sj = spans(j.raw);
+    check(name + ': the joined piece is the original - size, volume and surface, closed',
+      So.every((v, i) => Math.abs(v - Sj[i]) < 1e-4) && Math.abs(volume(j.raw) - volume(orig)) < 1e-6 * volume(orig) &&
+      Math.abs(area(j.raw) - area(orig)) < 1e-6 * area(orig) && j.open === 0 && j.nm === 0,
+      'size ' + Sj.map(v => v.toFixed(4)).join(' x ') + ' vs ' + So.map(v => v.toFixed(4)).join(' x ') +
+      ', volume ' + volume(j.raw).toFixed(4) + ' vs ' + volume(orig).toFixed(4) +
+      ', area ' + area(j.raw).toFixed(4) + ' vs ' + area(orig).toFixed(4) + ', open ' + j.open + ', nm ' + j.nm + '; ' + j.status);
+    await page.evaluate(() => { if (state.joinSession && typeof clearJoinSlots === 'function') clearJoinSlots(); });
+    await page.evaluate(() => document.querySelectorAll('.vp-menu[open]').forEach(d => { d.open = false; }));
+  }
+
+  /* ------------------------------------------------------------------ 9 */
+  console.log('\n=== 9. a flipped pose record: each half lands where its part was ===');
+  {
+    // A piece whose record carries flipX (a scene 3MF puts one back): the
+    // halves must land on the side of the plate their part of the piece was
+    // on, not swapped across the cut.
+    await page.evaluate(() => __clearAll());
+    await shutCut();
+    const id = await loadSTL(page, stl('barZf.stl', box(12, 60, 8)));
+    await page.evaluate(id => {
+      const p = state.placed.find(q => q && q.sourceId === id);
+      p.flipX = true;
+      applyMeshRotation(p);
+    }, id);
+    await ensureCut();
+    await clickPieceAt(id, 0.25);
+    const r = await page.evaluate(id => __cut(id), id);
+    check('the flipped bar is cut', !!r.got && r.plate.length === 2, r.status);
+    if (r.got && r.plate.length === 2) {
+      const ctr = soup => { const c = [0, 1, 2].map(a => { const v = soup.filter((_, i) => i % 3 === a); return (Math.max(...v) + Math.min(...v)) / 2; }); return applyM(r.src.Mw, c); };
+      const wA = ctr(r.got.left), wB = ctr(r.got.right);
+      const A = r.plate.find(p => /-A\d+$/.test(p.name)), B = r.plate.find(p => /-B\d+$/.test(p.name));
+      const dWorld = V.sub(wB, wA), dPlate = V.sub(B.pos, A.pos);
+      check('A and B sit on the plate the way round they were in the piece (not swapped)',
+        V.dot([dWorld[0], 0, dWorld[2]], [dPlate[0], 0, dPlate[2]]) > 0 &&
+        Math.abs(Math.abs(dPlate[2]) - (Math.abs(dWorld[2]) + 8)) < 1e-3,
+        'piece B-A ' + dWorld.map(v => v.toFixed(2)).join(', ') + '; plate B-A ' + dPlate.map(v => v.toFixed(2)).join(', '));
+    }
   }
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
