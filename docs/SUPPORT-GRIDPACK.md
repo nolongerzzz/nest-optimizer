@@ -123,6 +123,13 @@ undo step.
 
 ## 3. Measured (`support:gridpack`, 80 checks)
 
+![The 30° tilted box in G-scope with its Tree support: 50 of 50 points held, all to the plate](img/support-gridpack-tilted-box.png)
+
+*The tilted box generated through G-scope's own Generate (Tree, 1.2 mm):
+"Holds 50 of 50 support points on 35 trunks to the plate". In the app the
+piece sits at its plate position, so the lattice falls differently than in
+the suite's frame (29 trunks).*
+
 | fixture | result |
 |---|---|
 | **tilted box 30°** (40 × 12 × 6 on its edge) | 50 of 50 held, 29 trunks, all on the plate, no refusal; 10 pickups, 10 merges; worst leg 28.6°; mesh_validate clean, one shell per solid |
