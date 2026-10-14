@@ -59,7 +59,7 @@ ctx.window = ctx;
 ctx.globalThis = ctx;
 vm.createContext(ctx);
 for (const f of ['nso_stock.js', 'nso_seat_surface.js', 'app-sculpt.js', 'app-finish.js',
-                 'app-extend.js', 'app-fatten.js', 'nso_support_aim.js',
+                 'app-extend.js', 'app-fatten.js', 'nso_support_beacons.js', 'nso_support_aim.js',
                  'nso_assemble.js', 'NSO_Repair.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
