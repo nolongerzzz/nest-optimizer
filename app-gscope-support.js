@@ -12,9 +12,11 @@
  *               region says it is: `point` (the aim point, on the surface) and
  *               `tris` (the flagged triangles). Nothing here re-tests an angle
  *               or casts a ray.
- *   generation  straight strut  NSO_SupportAim.plan
- *               tree            NSO_SupportTree.planTree + unionParts
- *               gecko-hand      the same, branchStyle 'gecko-hand'
+ *   generation  one planner for every style: NSO_SupportTree.planTree,
+ *               which is nso_support_gridpack.js, then
+ *               NSO_SupportGridpack.solid. 'strut' never merges, 'tree'
+ *               merges pairwise, 'gecko-hand' is the tree with hands.
+ *               Generating again on a region REPLACES its supports.
  *               Each is called with the SAME soup and the SAME options the
  *               marker's detection ran with, plus `regionId` and `sideMm`, so
  *               the region a marker shows is the region the generator plans
@@ -394,25 +396,27 @@ var NSO_GSCOPE_SUPPORT = (function () {
 
   /**
    * The generator's own call for one marker. Returns a Promise of
-   * { ok, soup, plan, reason }. The soup is exactly what the generator (and,
-   * for a tree, unionParts) handed back - nothing is done to it here.
+   * { ok, soup, plan, reason }. Every style is the ONE planner
+   * (nso_support_gridpack.js, through NSO_SupportTree.planTree): 'strut'
+   * never merges, 'tree' merges pairwise on the node lattice, 'gecko-hand'
+   * is the tree with a hand at every point. The soup is exactly what
+   * NSO_SupportGridpack.solid handed back - nothing is done to it here. A
+   * plan that holds nothing (every point unreachable from the plate) comes
+   * back ok with an empty soup and its own plain line; it is not a refusal.
    */
   function planFor(host, regionId, style, sideMm, baseOpts) {
     var o = Object.assign({}, baseOpts, { regionId: regionId });
     if (sideMm != null) o.sideMm = +sideMm;
-    if (style === 'strut') {
-      var p = SA().plan(host.positions, o);
-      return Promise.resolve(p.ok ? { ok: true, soup: p.soup, plan: p, reason: p.reason }
-                                  : { ok: false, plan: p, reason: p.reason });
-    }
-    if (style !== 'tree' && style !== 'gecko-hand') {
+    if (!STYLES[style]) {
       return Promise.resolve({ ok: false, reason: 'unknown support style ' + JSON.stringify(style) });
     }
-    if (!ST()) return Promise.resolve({ ok: false, reason: 'nso_support_tree.js is not loaded' });
-    o.branchStyle = style === 'gecko-hand' ? 'gecko-hand' : 'square';
+    if (!ST() || !window.NSO_SupportGridpack) {
+      return Promise.resolve({ ok: false, reason: 'nso_support_tree.js / nso_support_gridpack.js are not loaded' });
+    }
+    o.style = style;
     var t = ST().planTree(host.positions, o);
     if (!t.ok) return Promise.resolve({ ok: false, plan: t, reason: t.reason });
-    return ST().unionParts(t.parts).then(function (u) {
+    return window.NSO_SupportGridpack.solid(t).then(function (u) {
       return u.ok ? { ok: true, soup: u.soup, plan: t, union: u, reason: t.reason }
                   : { ok: false, plan: t, union: u, reason: u.reason };
     });
@@ -520,6 +524,10 @@ var NSO_GSCOPE_SUPPORT = (function () {
   /**
    * Generate a support for one marker: host piece, region id, style, size.
    * The whole click path runs through here, and so does the drive check.
+   *
+   * IDEMPOTENT: a region that already has supports gets them REPLACED - the
+   * old ones come off and the new one goes on as ONE undo step - never a
+   * second support stacked inside the first.
    */
   function generateAt(hostName, regionId, style, sideMm) {
     if (busy) return Promise.resolve({ ok: false, reason: 'busy' });
@@ -533,22 +541,47 @@ var NSO_GSCOPE_SUPPORT = (function () {
     say('Generating a ' + STYLES[style] + ' support...');
     return planFor(host, regionId, style, sideMm, o.opts).then(function (g) {
       if (!g.ok) { say('Support refused - nothing added: ' + g.reason, true); return g; }
+      if (!g.soup.length) {
+        say('Nothing added - ' + g.reason, true);
+        return { ok: false, nothing: true, plan: g.plan, reason: g.reason };
+      }
+      var old = supportsFor(host.sourceId, regionId).map(function (m) { return m.id; });
+      var removed = old.length ? removePieces(old) : [];
       var meta = { hostSourceId: host.sourceId, hostName: host.name, regionId: regionId, style: style,
-        sideMm: g.plan.sideMm || (g.plan.aim && g.plan.aim.sideMm) || +sideMm, angleDeg: angleDeg,
+        sideMm: g.plan.sideMm || +sideMm, angleDeg: angleDeg,
         point: g.plan.region ? g.plan.region.point.slice() : null };
       var pl = placeSupport(g.soup, meta, host, o.opts);
-      if (!pl.ok) { say('Support refused - ' + pl.reason, true); return pl; }
-      if (typeof pushUndo === 'function') {
-        pushUndo({ type: 'addModels', ids: [pl.id], editId: state.editId, cutT: state.cutT });
+      if (!pl.ok) {
+        restorePieces(removed);
+        say('Support refused - ' + pl.reason, true);
+        return pl;
       }
-      say('Support added - ' + pl.name + ', ' + (g.soup.length / 9) + ' triangles; ' + g.reason);
+      if (typeof pushUndo === 'function') {
+        pushUndo(removed.length
+          ? { type: 'supportSwap', removed: removed, addedIds: [pl.id], label: 'Undo: the earlier support restored' }
+          : { type: 'addModels', ids: [pl.id], editId: state.editId, cutT: state.cutT });
+      }
+      say('Support added - ' + pl.name + ', ' + (g.soup.length / 9) + ' triangles' +
+        (removed.length ? ', replacing ' + removed.length + ' earlier' : '') + '. ' + g.reason);
       reread();                          // the support is now a piece
-      return { ok: true, id: pl.id, soup: g.soup, plan: g.plan, maxErrMm: pl.maxErrMm, name: pl.name };
+      return { ok: true, id: pl.id, soup: g.soup, plan: g.plan, maxErrMm: pl.maxErrMm, name: pl.name,
+               replaced: removed.map(function (r) { return r.placed.sourceId; }) };
     }).catch(function (err) {
       console.error('[g-scope support]', err);
       say('Support failed - nothing added (' + ((err && err.message) || err) + ')', true);
       return { ok: false, reason: (err && err.message) || String(err) };
     }).then(function (r) { busy = false; return r; });
+  }
+
+  /** Put pieces removePieces took back exactly as they were. No undo step. */
+  function restorePieces(removed) {
+    removed.forEach(function (r) {
+      state.models.splice(Math.min(r.modelIndex, state.models.length), 0, r.model);
+      state.placed.splice(Math.min(r.placedIndex, state.placed.length), 0, r.placed);
+      if (r.placed.mesh && state.modelGroup) state.modelGroup.add(r.placed.mesh);
+    });
+    state.placed.forEach(function (p, i) { if (p.mesh) p.mesh.userData.placedIndex = i; });
+    if (typeof renderModelList === 'function') renderModelList();
   }
 
   /** One support off the plate, one undo step. */
@@ -579,17 +612,13 @@ var NSO_GSCOPE_SUPPORT = (function () {
     var regionId = m.nsoSupport.regionId;
     return planFor(host, regionId, style, sideMm, o.opts).then(function (g) {
       if (!g.ok) { say('Support change refused - unchanged: ' + g.reason, true); return g; }
+      if (!g.soup.length) { say('Support unchanged - ' + g.reason, true); return { ok: false, nothing: true, plan: g.plan, reason: g.reason }; }
       var removed = removePieces([id]);
-      var meta = Object.assign({}, m.nsoSupport, { style: style,
-        sideMm: g.plan.sideMm || (g.plan.aim && g.plan.aim.sideMm) || +sideMm });
+      var meta = Object.assign({}, m.nsoSupport, { style: style, sideMm: g.plan.sideMm || +sideMm });
       var pl = placeSupport(g.soup, meta, host, o.opts);
       if (!pl.ok) {
         // Put the old one back exactly as it was; no step was recorded.
-        removed.forEach(function (r) {
-          state.models.splice(Math.min(r.modelIndex, state.models.length), 0, r.model);
-          state.placed.splice(Math.min(r.placedIndex, state.placed.length), 0, r.placed);
-          if (r.placed.mesh && state.modelGroup) state.modelGroup.add(r.placed.mesh);
-        });
+        restorePieces(removed);
         say('Support change refused - unchanged: ' + pl.reason, true);
         return pl;
       }

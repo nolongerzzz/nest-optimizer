@@ -178,15 +178,15 @@
    API
    ---------------------------------------------------------------------------
    contactPoints(rawTris, region, opts)  -> { ok, points, pitchMm, ... }
-   splitPoint(from, apex, contacts, opts)-> { ok, point, trunkMm, ... }
    branch(rootPoint, tip, opts)          -> { ok, soup, parts, tiltDeg, ... }
    opts.branchStyle                      'square' (default) or 'gecko-hand', see 3b
-   planTree(rawTris, opts)               -> detect + contacts + trunk + fan
+   planTree(rawTris, opts)               -> the grid-pack plan (nso_support_gridpack.js,
+                                         section 4); the trunk-first planner is gone
    unionParts(parts, opts)               -> Promise of the app's own union
    opts.section                          'round' (default: tapered by the measured
                                          law) or 'square', see SECTIONS
-   opts.hollow                           planTree also bores every part, see 6
-   hollowParts(plan, opts)               -> { ok, parts, hollowed, solid, ... }
+   hollowParts(plan, opts)               -> { ok, parts, hollowed, solid, ... } for any
+                                         plan carrying parts + partAxes
    hollowTree(plan, opts)                -> Promise of union(parts) - union(bores)
    describe(result)                      -> one status line
    ============================================================ */
@@ -198,55 +198,6 @@
      them out of the file again on every run. */
   var MAX_SPAN_MM = 3.29;
   var BRANCH_TILT_DEG = 31.44;
-
-  /* How far a branch's root is sunk back along the trunk, as a multiple of
-     the shared cross-section side. A branch starting exactly at the trunk's
-     end cap meets it at a point: two solids touching on a plane of zero
-     thickness, which is the one input a boolean kernel is entitled to refuse.
-     One full side of overlap puts the branch root a whole cross-section
-     inside the trunk, whatever direction the branch leaves in. */
-  var ROOT_OVERLAP_SIDES = 1;
-
-  /* And how far ACROSS the trunk it is moved, along its own heading, as a
-     multiple of the same side. A branch leaves the trunk on its OWN SIDE
-     rather than out of its axis, which is also what a real branch does.
-
-     This is not cosmetic, and it was not in the first version. With every
-     root on the axis, any two branches share a start point, so their side
-     walls meet along a curve that pinches to nothing exactly there - and
-     NSO_CSG.manifoldToSoup writes the result as float32, whose spacing at
-     plate coordinates is about 2e-6 mm. Two vertices of that pinch land on
-     the same float32 and the boolean's output carries a triangle with a
-     repeated vertex: measured, on the multi-branch fixtures in
-     tools/nso_support_tree_test.js, as 1 to 2 degenerate triangles and 2 to 6
-     non-manifold edges that no weld tolerance removes, because they are in
-     the buffer. With the roots spread, all three come back 0 open, 0
-     non-manifold, 0 degenerate, Euler 2. The 16-branch fixture is clean
-     either way, which is why this had to be measured on more than one:
-     whether two particular branches pinch depends on how their walls happen
-     to meet.
-
-     0.4 is under the 0.5 half-width, so the root's centre is still inside the
-     trunk's own cross-section - which is the bound that matters, and the
-     reason this is not simply "as far apart as possible": at 0.45 the fixtures
-     start reporting a piercing pair instead, measured the same way. */
-  var ROOT_SPREAD_SIDES = 0.4;
-
-  /* A branch this close to the trunk's own direction is not a branch: it is
-     the trunk carrying on. Built as one it would be a prism coaxial with the
-     trunk, its four side walls exactly coplanar with the trunk's, and a
-     boolean handed two coincident coplanar walls emits slivers and
-     zero-area triangles at the seam - measured, before this existed, as 2
-     degenerate triangles and 2 non-manifold edges on a region whose centre
-     contact sat dead on the aim. So the trunk takes that contact itself and
-     the fan is the rest. One degree, because the wall coincidence is what
-     matters and it is gone well before the angle is visible. */
-  var COLLINEAR_DEG = 1;
-
-  /* Stations on the trunk line for the split scan. 2048 over a trunk of
-     tens of millimetres is tens of microns of resolution, which is reported
-     rather than assumed - see WHERE THE TRUNK STOPS. */
-  var SPLIT_STATIONS = 2048;
 
   /* A guard, not a parameter: a region asking for more contacts than this has
      either been handed a pitch of nearly zero or is not one region. Refused
@@ -311,7 +262,7 @@
                         the plane of the surface being supported
        ROOT_SIDES       how far off the shaft axis each finger's root sits,
                         toward its own fingertip - the same no-shared-start-
-                        point reason as ROOT_SPREAD_SIDES. Small, because it
+                        point reason as the old root spread (SUPPORT-TREE.md 5). Small, because it
                         is the root CAP that has to stay inside the shaft,
                         not just its centre: offset plus the hexagon's
                         circumradius must be under the 0.5 half-width, and
@@ -575,119 +526,6 @@
   }
 
   /* =====================================================================
-     2. WHERE THE TRUNK STOPS
-
-     The highest station on the trunk line at which every branch it would hand
-     off to is still inside the tilt. See WHERE THE TRUNK STOPS in the header
-     for why this is a scan rather than a bisection.
-     ===================================================================== */
-
-  // opts.branchTiltDeg  the limit, default BRANCH_TILT_DEG, ceiling 45
-  // opts.stations       scan resolution, default SPLIT_STATIONS
-  function splitPoint(from, apex, contacts, opts) {
-    opts = opts || {};
-    var out = { ok: false, reason: '' };
-    if (!finite3(from) || !finite3(apex)) { out.reason = 'from and apex must both be finite 3-vectors'; return out; }
-    if (!contacts || !contacts.length) { out.reason = 'no contact points to hand off to'; return out; }
-
-    var SA = aimModule(opts);
-    /* The ceiling is nso_support_aim.js's printable angle, read from it rather
-       than restated: a branch leaning further off vertical than the angle that
-       module calls an overhang IS an overhang, and would need support itself. */
-    var ceiling = (SA && SA.ANGLE_DEFAULT_DEG != null) ? SA.ANGLE_DEFAULT_DEG : 45;
-    var tilt = (opts.branchTiltDeg == null) ? BRANCH_TILT_DEG : +opts.branchTiltDeg;
-    if (!(tilt > 0)) { out.reason = 'branchTiltDeg must be positive, got ' + opts.branchTiltDeg; return out; }
-    if (tilt > ceiling) {
-      out.reason = 'branchTiltDeg ' + tilt + ' is past the ' + ceiling + ' deg printable angle ' +
-        'nso_support_aim.js detects overhangs at - a branch leaning further than that is an ' +
-        'unsupported overhang itself, and a support that needs support is not a support';
-      return out;
-    }
-    out.branchTiltDeg = tilt;
-    out.ceilingDeg = ceiling;
-    var tanMax = Math.tan(tilt * Math.PI / 180);
-
-    var run = sub(apex, from), total = len(run);
-    if (!(total > 0)) { out.reason = 'the trunk has nowhere to go: base and apex coincide'; return out; }
-    var dir = mul(run, 1 / total);
-    var stations = (opts.stations == null) ? SPLIT_STATIONS : (opts.stations | 0);
-    if (!(stations >= 2)) { out.reason = 'need at least 2 stations, got ' + opts.stations; return out; }
-    out.splitResolutionMm = total / stations;
-
-    function widest(S) {
-      var worst = -1, at = -1;
-      for (var i = 0; i < contacts.length; i++) {
-        var q = contacts[i].p || contacts[i];
-        var rise = q[2] - S[2];
-        var horiz = distXY(q, S);
-        /* A contact at or below the station is not reachable by a branch that
-           leans: it would have to hang downward off the trunk. Reported as an
-           infinite tilt so the scan rejects the station rather than dividing
-           by a rise of zero. */
-        var deg = (rise > 1e-9) ? Math.atan2(horiz, rise) * 180 / Math.PI : 180;
-        if (deg > worst) { worst = deg; at = i; }
-      }
-      return { deg: worst, index: at };
-    }
-
-    var bestT = -1, bestW = null;
-    for (var k = stations; k >= 0; k--) {
-      var t = total * (k / stations);
-      var S = add(from, mul(dir, t));
-      var w = widest(S);
-      if (w.deg <= tilt) { bestT = t; bestW = w; break; }
-    }
-
-    if (bestT < 0) {
-      /* Not a failure to report as a mystery: say what one trunk would have
-         had to do, and how many trunks the fan would take instead. At the
-         base the rise is the largest it ever gets, so the fan radius one
-         trunk can serve there is rise * tan(tilt), and the contacts that fall
-         outside it are the ones that need a trunk of their own. */
-      var w0 = widest(from);
-      var q0 = contacts[w0.index].p || contacts[w0.index];
-      var rise0 = q0[2] - from[2];
-      var reach = Math.max(rise0, 0) * tanMax;
-      var needed = 1;
-      if (reach > 1e-6) {
-        var mnx = Infinity, mxx = -Infinity, mny = Infinity, mxy = -Infinity;
-        for (var c = 0; c < contacts.length; c++) {
-          var p = contacts[c].p || contacts[c];
-          if (p[0] < mnx) mnx = p[0];
-          if (p[0] > mxx) mxx = p[0];
-          if (p[1] < mny) mny = p[1];
-          if (p[1] > mxy) mxy = p[1];
-        }
-        /* A square lattice of trunks, each serving a cell whose circumradius
-           is the reach: cell side = reach * sqrt(2). */
-        var cell = reach * Math.SQRT2;
-        needed = Math.max(1, Math.ceil((mxx - mnx) / cell)) * Math.max(1, Math.ceil((mxy - mny) / cell));
-      }
-      out.trunksNeeded = needed;
-      out.widestDeg = w0.deg;
-      out.reason = 'one trunk cannot serve this fan: even standing at the base the widest branch ' +
-        'leans ' + w0.deg.toFixed(2) + ' deg off vertical, past the ' + tilt + ' deg limit. ' +
-        'The region wants about ' + needed + ' trunks, and where a field of them should stand is ' +
-        'the layout half of nso_support_aim.js OUT OF SCOPE 3';
-      return out;
-    }
-
-    out.ok = true;
-    out.point = add(from, mul(dir, bestT));
-    out.dir = dir;
-    out.trunkMm = bestT;
-    out.apexMm = total;
-    out.trunkFraction = total > 0 ? bestT / total : 0;
-    out.widestDeg = bestW.deg;
-    out.widestContact = bestW.index;
-    out.reason = 'the trunk stops ' + bestT.toFixed(3) + ' mm along its aim (' +
-      (out.trunkFraction * 100).toFixed(1) + '% of the way to the fan centre); the widest of ' +
-      contacts.length + ' branches then leans ' + bestW.deg.toFixed(2) + ' deg off vertical, ' +
-      'inside the ' + tilt + ' deg limit';
-    return out;
-  }
-
-  /* =====================================================================
      3. ONE BRANCH
 
      A two-point sweep. One segment, no joints, so the mitre arithmetic in
@@ -895,7 +733,7 @@
      union is still NSO_unionSoups, folded left, and each finger's root sits
      inside the shaft so every one genuinely overlaps what it is unioned
      against. Roots are spread off the axis toward their own fingertip for
-     ROOT_SPREAD_SIDES' reason - two sweeps sharing a start point pinch.
+     the old root spread's reason (SUPPORT-TREE.md 5) - two sweeps sharing a start point pinch.
      ===================================================================== */
 
   function hexProfile(acrossFlats) {
@@ -997,134 +835,9 @@
     return worst;
   }
 
-  /* The clearance probe of section 4, for any one swept part: its axis over
-     the whole run, and its rails over the shaft - everything but the last
-     cross-section, which is the cap's business. Returns null when clear. */
-  function probeClear(SA, obstacles, from, dir, lengthMm, rails, capMm) {
-    var probes = [[from, dir, lengthMm - EPS_MM, 'the axis']];
-    var shaft = lengthMm - capMm;
-    if (shaft > 2 * EPS_MM) {
-      for (var j = 0; j < rails.length; j++) probes.push([rails[j], dir, shaft - EPS_MM, 'rail ' + j]);
-    }
-    for (j = 0; j < probes.length; j++) {
-      var hit = SA._nearestHit(obstacles, probes[j][0], probes[j][1], EPS_MM, probes[j][2]);
-      if (hit > 0) {
-        return { at: hit, why: probes[j][3] + ' is blocked ' + hit.toFixed(3) + ' mm along, ' +
-                 (probes[j][2] - hit).toFixed(3) + ' mm short of the end of its run' };
-      }
-    }
-    return null;
-  }
 
-  /* A hand's fingers are clearance-tested like a branch, and one that would
-     run into the piece is LEFT OFF rather than refusing the branch: the
-     fingers are the tip's shape, not its contact, so losing one changes what
-     the tip looks like and nothing about what holds the overhang up. */
-  function clearFingers(SA, obstacles, hand) {
-    var kept = [], dropped = [];
-    for (var f = 0; f < hand.fingers.length; f++) {
-      var fi = hand.fingers[f];
-      var stop = probeClear(SA, obstacles, fi.from, fi.dir, fi.lengthMm, fi.sweep.rings[0], hand.widthMm);
-      if (stop) dropped.push({ index: fi.index, at: stop.at, why: 'finger ' + fi.index + ': ' + stop.why });
-      else kept.push(fi);
-    }
-    hand.fingers = kept;
-    hand.dropped = dropped;
-    return hand;
-  }
 
-  /* WALL CLEARANCE - a contact's tip kept clear of the piece's SIDE walls.
 
-     contactPoints() places contacts over the overhang's own footprint and
-     knows nothing about what rises beside it. On the tape piece that put a
-     contact 0.74 mm from a wall: a 2 mm round tip there reaches 0.26 mm INTO
-     the wall, inside the last cross-section a branch's rail probe leaves out
-     as cap. Bambu keeps its supports support_object_xy_distance off the
-     object for the same reason. So, with opts.wallClearanceMm (the air gap
-     the tip must keep), every contact is tested with horizontal rays at a few
-     heights over its tip's last 3 mm, each against the tip's own radius at
-     that height (the diameter law for 'round', the square's half-diagonal
-     otherwise) plus the clearance; a contact that is too close is moved
-     inward, straight away from the nearest wall, and dropped back onto the
-     region. Every move is reported, in mm. A contact that cannot be cleared
-     without leaving the region is refused by name. */
-  function clearWalls(SA, rawTris, region, points, opts) {
-    var out = { ok: false, reason: '', moved: [], clearanceMm: +opts.wallClearanceMm };
-    var gap = out.clearanceMm, law = lawOf(opts), round = sectionOf(opts) === 'round';
-    var side = (opts.sideMm == null) ? 1.2 : +opts.sideMm;
-    var tris = region.tris.map(function (t) { return triOf(rawTris, t); });
-    var obstacles = [rawTris];
-    var LEVELS = [0.01, 0.3, 0.6, 1.0, 1.5, 2.0, 3.0], DIRS = 24;
-    function radius(depth, zTip) {
-      return round ? law.at(zTip - depth, zTip) / 2 : side / Math.SQRT2;
-    }
-    function onRegion(x, y) {
-      var best = null;
-      for (var t = 0; t < tris.length; t++) {
-        var z = zOnTriAt(tris[t], x, y);
-        if (z != null && (best == null || z < best)) best = z;
-      }
-      return best;
-    }
-    function worst(q) {
-      var w = null;
-      for (var li = 0; li < LEVELS.length; li++) {
-        var z = q[2] - gap - LEVELS[li], need = radius(gap + LEVELS[li], q[2]) + gap;
-        for (var k = 0; k < DIRS; k++) {
-          var a = 2 * Math.PI * k / DIRS, d = [Math.cos(a), Math.sin(a), 0];
-          var hit = SA._nearestHit(obstacles, [q[0], q[1], z], d, EPS_MM, need + 1);
-          if (hit > 0 && hit < need && (!w || need - hit > w.short)) w = { dir: d, short: need - hit, at: hit, z: z, need: need };
-        }
-      }
-      return w;
-    }
-    for (var i = 0; i < points.length; i++) {
-      var q = points[i].p.slice(), start = q.slice(), total = 0, guard = 0, w;
-      while ((w = worst(q)) && guard++ < 12) {
-        var step = w.short + 0.01;
-        var nx = q[0] - w.dir[0] * step, ny = q[1] - w.dir[1] * step, nz = onRegion(nx, ny);
-        if (nz == null) {
-          out.reason = 'contact ' + i + ' is ' + w.at.toFixed(3) + ' mm from a wall where its tip needs ' +
-            w.need.toFixed(3) + ' mm, and moving it clear would take it off the overhang';
-          return out;
-        }
-        q = [nx, ny, nz]; total += step;
-      }
-      if (w) { out.reason = 'contact ' + i + ' could not be cleared in 12 moves'; return out; }
-      if (total > 0) {
-        out.moved.push({ index: i, from: start, to: q.slice(), mm: Math.hypot(q[0] - start[0], q[1] - start[1]) });
-        points[i].p = q;
-        points[i].source = (points[i].source || '') + '+cleared';
-      }
-    }
-    out.ok = true;
-    out.reason = out.moved.length
-      ? out.moved.length + ' contact(s) moved clear of a wall: ' +
-        out.moved.map(function (m) { return 'contact ' + m.index + ' by ' + m.mm.toFixed(3) + ' mm'; }).join(', ')
-      : 'every contact already clear of the walls by ' + gap + ' mm';
-    return out;
-  }
-
-  /* probeClear for a TAPERED part: the rails of a frustum converge, so each
-     is cast along its own line - ring 0 to ring 1 - rather than parallel to
-     the axis from ring 0, which would test a wider solid than the one built.
-     The last capMm of each rail is the cap's business, as in probeClear. */
-  function probeRails(SA, obstacles, from, dir, lengthMm, rings, capMm) {
-    var probes = [[from, dir, lengthMm - EPS_MM, 'the axis']];
-    var A = rings[0], B = rings[rings.length - 1];
-    for (var j = 0; j < A.length; j++) {
-      var v = sub(B[j], A[j]), Lr = len(v), shaft = Lr - capMm;
-      if (shaft > 2 * EPS_MM) probes.push([A[j], mul(v, 1 / Lr), shaft - EPS_MM, 'rail ' + j]);
-    }
-    for (j = 0; j < probes.length; j++) {
-      var hit = SA._nearestHit(obstacles, probes[j][0], probes[j][1], EPS_MM, probes[j][2]);
-      if (hit > 0) {
-        return { at: hit, why: probes[j][3] + ' is blocked ' + hit.toFixed(3) + ' mm along, ' +
-                 (probes[j][2] - hit).toFixed(3) + ' mm short of the end of its run' };
-      }
-    }
-    return null;
-  }
 
   function styleOf(opts) {
     var s = (opts && opts.branchStyle != null) ? String(opts.branchStyle) : 'square';
@@ -1132,374 +845,30 @@
   }
 
   /* =====================================================================
-     4. THE WHOLE TREE
+     4. THE WHOLE SUPPORT - the grid-pack planner
+
+     The trunk-first planSolid that stood here (one trunk from the plate,
+     stopped at a computed split point, a fan of branches to every contact)
+     is REPLACED by nso_support_gridpack.js: one strut per support point,
+     grown down and merged pairwise on a node lattice, plate first. One bad
+     angle used to refuse the whole region; now only a point inside the
+     piece is refused. See docs/SUPPORT-GRIDPACK.md.
+
+     planTree keeps its name and its callers. Its styles map onto the one
+     planner: branchStyle 'square' (the tree) -> style 'tree',
+     'gecko-hand' -> 'gecko-hand'; opts.style wins when given ('strut',
+     'tree', 'gecko-hand'). The result is a grid-pack plan
+     (planner: 'gridpack'); NSO_SupportGridpack.solid(plan) builds it.
      ===================================================================== */
-
-  // Everything detectOverhangs and aim take, plus:
-  //   opts.maxSpanMm      permitted span between contacts
-  //   opts.branchTiltDeg  the branch limit
-  //   opts.regionId       which region, default the largest
-  //   opts.hollow         true: also hollow every part - see 6. HOLLOW. The
-  //                       plan itself is planned first, exactly as without
-  //                       it; hollowing is read after all of it is settled
   function planTree(rawTris, opts) {
-    var p = planSolid(rawTris, opts);
-    if (p.ok && opts && opts.hollow) {
-      p.hollow = hollowParts(p, opts);
-      p.reason += '; ' + (p.hollow.ok ? p.hollow.reason : 'NOT hollowed - ' + p.hollow.reason);
-    }
-    return p;
-  }
-
-  function planSolid(rawTris, opts) {
     opts = opts || {};
-    var out = { ok: false, reason: '', stage: 'detect', parts: [], branches: [] };
-
-    var SA = aimModule(opts);
-    if (!SA || typeof SA.detectOverhangs !== 'function') {
-      out.reason = 'nso_support_aim.js is not loaded - it owns the detection, the base search ' +
-        'and the strut, and none of them is reimplemented here';
-      return out;
-    }
-
-    var style = styleOf(opts);
-    if (!style) {
-      out.reason = 'unknown branchStyle ' + JSON.stringify(opts.branchStyle) + ' - one of ' +
-        BRANCH_STYLES.join(', ');
-      return out;
-    }
-    out.style = style;
-    var section = sectionOf(opts);
-    if (!section) {
-      out.reason = 'unknown section ' + JSON.stringify(opts.section) + ' - one of ' + SECTIONS.join(', ');
-      return out;
-    }
-    out.section = section;
-    /* Every part's axis and the apothem of its section at each end, aligned
-       with out.parts: what the exact bores of section 6 are built from. */
-    out.partAxes = [];
-    out.sectionFallback = [];
-    function addPart(soup, axis) { out.parts.push(soup); out.partAxes.push(axis); }
-    function sectionNote() {
-      if (section !== 'round') return '; square section';
-      return '; round, ' + (out.trunk.section === 'round'
-        ? 'trunk ' + out.trunk.dFromMm.toFixed(3) + ' -> ' + out.trunk.dToMm.toFixed(3) + ' mm' : 'trunk square') +
-        (out.sectionFallback.length ? ', ' + out.sectionFallback.length + ' part(s) kept square where round would hit the piece' : '');
-    }
-    function fingerAxis(hand, f) {
-      return { from: f.from.slice(), to: f.to.slice(), a0: hand.widthMm / 2, a1: hand.widthMm / 2 };
-    }
-
-    var det = SA.detectOverhangs(rawTris, opts);
-    out.detect = det;
-    if (!det.ok) { out.reason = det.reason; return out; }
-    if (!det.regions.length) { out.reason = det.reason; return out; }
-
-    var idx = (opts.regionId == null) ? 0 : (opts.regionId | 0);
-    var region = det.regions[idx];
-    if (!region) { out.reason = 'no region with id ' + idx + ' - ' + det.regions.length + ' found'; return out; }
-    out.region = region;
-
-    out.stage = 'contacts';
-    var cp = contactPoints(rawTris, region, opts);
-    out.contacts = cp;
-    if (!cp.ok) { out.reason = cp.reason; return out; }
-    if (opts.wallClearanceMm > 0) {
-      out.wallClearance = clearWalls(SA, rawTris, region, cp.points, opts);
-      if (!out.wallClearance.ok) { out.reason = out.wallClearance.reason; return out; }
-    }
-
-    var bases = opts.bases || [{ kind: 'plate', z: det.plateZ }];
-    var obstacles = opts.obstacles || [rawTris].concat(opts.occluders || []);
-
-    /* THE SINGLE-CONTACT CASE IS THE OLD FEATURE, UNCHANGED. A region narrow
-       enough to need one contact has no fan, so there is nothing to split and
-       nothing to branch: the answer is one straight strut aimed at that point,
-       which is exactly what nso_support_aim.js already builds. It is returned
-       as such rather than as a tree with an empty branch list dressed up. */
-    var single = cp.points.length === 1;
-
-    /* The fan's centre, which is where the trunk points. Not the region's own
-       aim point: with a fan, the thing the trunk has to get under is the set
-       of contacts, and their centroid is the direction that leaves every
-       branch the shortest reach. */
-    var apex = [0, 0, 0], i;
-    for (i = 0; i < cp.points.length; i++) apex = add(apex, cp.points[i].p);
-    apex = mul(apex, 1 / cp.points.length);
-    out.apex = apex;
-
-    out.stage = 'base';
-    var nb = SA.nearestBase(single ? cp.points[0].p : apex, bases,
-      Object.assign({}, opts, { obstacles: obstacles }));
-    out.base = nb;
-    if (!nb.ok) { out.reason = nb.reason; return out; }
-
-    /* The trunk is aimed from the base nearestBase picked, and from that one
-       only. Re-offering the whole list to aim() would let it settle on a
-       different base for the split point than the fan was measured against,
-       and the tilt figures would then be about a trunk nobody built. */
-    var chosen = [nb.base];
-
-    var target = single ? cp.points[0].p : null;
-    var carried = -1;                     /* the contact the trunk takes itself */
-    if (!single) {
-      out.stage = 'split';
-      var sp = splitPoint(nb.from, apex, cp.points, opts);
-      out.split = sp;
-      if (!sp.ok) { out.reason = sp.reason; out.trunksNeeded = sp.trunksNeeded; return out; }
-      target = sp.point;
-
-      /* A CONTACT ON THE TRUNK'S OWN AXIS IS THE TRUNK'S, NOT A BRANCH'S - see
-         COLLINEAR_DEG. A symmetric region with an odd lattice count puts one
-         contact dead on the aim every time, so this is the ordinary case and
-         not a corner one. The trunk grows past its split point to reach it;
-         the split point is still where the fan leaves, which is the thing
-         that was computed. The farthest of them is taken when several line
-         up, because the trunk passing through the nearer ones covers them. */
-      var far = -1;
-      for (i = 0; i < cp.points.length; i++) {
-        var away = unit(sub(cp.points[i].p, sp.point));
-        if (!away) continue;
-        var offDeg = Math.acos(Math.min(1, Math.max(-1, dot(away, sp.dir)))) * 180 / Math.PI;
-        if (offDeg > COLLINEAR_DEG) continue;
-        var reach = dist(cp.points[i].p, nb.from);
-        if (reach > far) { far = reach; carried = i; }
-      }
-      if (carried >= 0) target = cp.points[carried].p;
-      out.trunkCarriesContact = carried;
-    }
-
-    out.stage = 'trunk';
-    var trunkOpts = Object.assign({}, opts, { bases: chosen, obstacles: obstacles });
-    if ((single || carried >= 0) && trunkOpts.targetNormal === undefined) {
-      trunkOpts.targetNormal = region.normal;
-    }
-    var trunk = SA.aim(target, chosen, trunkOpts);
-    out.trunk = trunk;
-    if (!trunk.ok) {
-      out.reason = 'the trunk would not reach ' +
-        (single ? 'the one contact point' :
-         carried >= 0 ? 'the contact on its own axis' : 'its split point') +
-        ': ' + trunk.reason;
-      return out;
-    }
-    out.sideMm = trunk.sideMm;
-
-    /* THE ROUND TRUNK. aim() settled the base, the axis and the reach on the
-       planning strut, and all of that is kept; only the solid along that axis
-       is remade, as a frustum under the diameter law. Its tip is the highest
-       contact it serves - on the reference every tip is at one height - so
-       the trunk is never narrower at the collar than a branch leaving it. */
-    var zTipTrunk = -Infinity;
-    for (i = 0; i < cp.points.length; i++) if (cp.points[i].p[2] > zTipTrunk) zTipTrunk = cp.points[i].p[2];
-    out.zTipMm = zTipTrunk;
-    var trunkAxis = { from: trunk.from.slice(), to: trunk.tip.slice(), a0: trunk.sideMm / 2, a1: trunk.sideMm / 2 };
-    if (section === 'round') {
-      var PSt = sweepModule(opts);
-      if (!PSt || typeof PSt.sweep !== 'function') {
-        out.reason = 'nso_path_sweep.js is not loaded - a round trunk is a swept frustum';
-        return out;
-      }
-      var law = lawOf(opts);
-      out.law = { tipMm: law.tipMm, angleDeg: law.angleDeg, perMm: law.perMm };
-      var rt = roundPart(PSt, trunk.from, trunk.tip, law.at(trunk.from[2], zTipTrunk), law.at(trunk.tip[2], zTipTrunk));
-      if (!rt.ok) { out.reason = 'the round trunk would not sweep: ' + rt.reason; return out; }
-      /* Its own rails against the piece: aim() tested the axis, and a 5 mm
-         trunk has a body the axis does not. The cap is excluded only where
-         the trunk ends ON a contact, as a branch's is. */
-      var tStop = probeRails(SA, obstacles, trunk.from, trunk.dir, trunk.lengthMm, rt.sweep.rings,
-        (single || carried >= 0) ? rt.dToMm : 0);
-      if (tStop) {
-        /* THE SQUARE FALLBACK. A round part whose own body would run into the
-           piece keeps the planning section aim() already cleared, and says
-           so - the tree is not refused, and nothing planned moves. */
-        out.sectionFallback.push({ role: 'trunk', label: 'trunk', why: 'the round trunk (' +
-          rt.dFromMm.toFixed(3) + ' -> ' + rt.dToMm.toFixed(3) + ' mm) would run into the piece: ' + tStop.why });
-        out.trunk = trunk = Object.assign({}, trunk, { section: 'square', roundRefused: tStop.why });
-      } else {
-        trunkAxis = rt.axis;
-        out.trunk = trunk = Object.assign({}, trunk, {
-          soup: rt.soup, squareSoup: trunk.soup, section: 'round', sweep: rt.sweep,
-          dFromMm: rt.dFromMm, dToMm: rt.dToMm, axis: rt.axis
-        });
-      }
-    } else {
-      out.trunk = trunk = Object.assign({}, trunk, { section: 'square' });
-    }
-    addPart(trunk.soup, trunkAxis);
-
-    /* A trunk that ends ON a contact - the single strut, or the one carrying
-       the contact on its own axis - gets the same hand a branch would, so
-       under 'gecko-hand' every contact point has one. The trunk's own soup
-       is untouched: the fingers are parts beside it, as on a branch. */
-    if (style === 'gecko-hand' && (single || carried >= 0)) {
-      var th = geckoHand(trunk.tip, trunk.dir, trunk.sideMm, {
-        normal: region.normal, floorMm: trunk.floorMm, shaftMm: trunk.lengthMm
-      });
-      if (!th.ok) { out.reason = 'the trunk\'s gecko hand would not build: ' + th.reason; return out; }
-      clearFingers(SA, obstacles, th);
-      out.trunkHand = th;
-    }
-
-    if (single) {
-      if (out.trunkHand) {
-        for (i = 0; i < out.trunkHand.fingers.length; i++) {
-          addPart(out.trunkHand.fingers[i].soup, fingerAxis(out.trunkHand, out.trunkHand.fingers[i]));
-        }
-        out.fingers = out.trunkHand.fingers.length;
-        out.fingersDropped = out.trunkHand.dropped.length;
-      }
-      out.ok = true;
-      out.stage = 'done';
-      out.single = true;
-      out.reason = det.reason + '; one contact point, so no split: ' + trunk.reason + sectionNote() +
-        (out.trunkHand ? '; a gecko hand of ' + out.fingers + ' finger(s)' : '');
-      return out;
-    }
-
-    /* Each branch starts one cross-section back down the trunk and a little
-       across it, onto its own side - see ROOT_OVERLAP_SIDES and
-       ROOT_SPREAD_SIDES. The back-off gives the union a solid overlap to work
-       on instead of two caps meeting on a plane of zero thickness; the spread
-       stops any two branches sharing a start point. */
-    out.stage = 'branches';
-    var overlap = ROOT_OVERLAP_SIDES * trunk.sideMm;
-    var spread = ROOT_SPREAD_SIDES * trunk.sideMm;
-    var collar = add(out.split.point, mul(trunk.dir, -overlap));
-    out.branchRoot = collar;
-    out.rootOverlapMm = overlap;
-    out.rootSpreadMm = spread;
-
-    var blocked = [];
-    for (i = 0; i < cp.points.length; i++) {
-      if (i === carried) continue;                 /* the trunk is taking this one */
-      var q = cp.points[i].p;
-
-      /* The branch's own side of the trunk: the part of its heading that is
-         across the trunk rather than along it. A branch with no such part is
-         the collinear case, which the trunk already took. */
-      var head = unit(sub(q, collar));
-      var across = head ? unit(sub(head, mul(trunk.dir, dot(head, trunk.dir)))) : null;
-      var rootPoint = across ? add(collar, mul(across, spread)) : collar;
-
-      var br = branch(rootPoint, q, Object.assign({}, opts, {
-        sideMm: trunk.sideMm, targetNormal: region.normal, floorMm: trunk.floorMm, section: section
-      }));
-      if (!br.ok) { blocked.push({ index: i, why: br.reason }); continue; }
-
-      /* THE CLEARANCE TEST IS RUN ON THE BRANCH'S OWN RAILS AS WELL AS ITS
-         AXIS. nearestBase tests one centre line, which is the right test for
-         choosing between bases and too little for a solid 1.2 mm across: a
-         branch threading a gap narrower than itself has a clear centre line
-         and a body through the wall. NSO_PathSweep already built the four
-         rails the solid is made of, so they are what gets cast rather than a
-         circumscribed cylinder that would refuse branches that fit.
-
-         THE RAILS ARE TESTED OVER THE SHAFT, NOT THE WHOLE BRANCH - the last
-         cross-section is left out. That is not a softened gate, it is the
-         only coherent one: the cap is flat and perpendicular to the branch,
-         the face it lands on is not, so on any oblique branch the leading
-         rails stand proud of the target by design. Measured before this
-         exclusion existed, EVERY branch on all three fixtures was "blocked
-         0.4 mm short" - by the overhang it was aiming at. What the cap does
-         in that last cross-section is tipPenetrationMm's business, measured
-         and reported per branch, exactly as nso_support_aim.js reports it for
-         the strut. Both ends are excluded by one epsilon besides, for the
-         reason nearestBase excludes them.
-
-         A branch shorter than one cross-section has no shaft and is tested on
-         its axis alone; it is also a branch that is almost entirely cap, and
-         the tip measurement is the one that means anything about it. */
-      var stop = (section === 'round')
-        ? probeRails(SA, obstacles, rootPoint, br.dir, br.lengthMm, br.sweep.rings, br.dToMm)
-        : probeClear(SA, obstacles, rootPoint, br.dir, br.lengthMm, br.sweep.rings[0], trunk.sideMm);
-      if (stop && section === 'round') {
-        /* The square fallback, as for the trunk: the same branch at the
-           planning section, under the square plan's own clearance test. */
-        var sqb = branch(rootPoint, q, Object.assign({}, opts, {
-          sideMm: trunk.sideMm, targetNormal: region.normal, floorMm: trunk.floorMm, section: 'square'
-        }));
-        var sqStop = sqb.ok ? probeClear(SA, obstacles, rootPoint, sqb.dir, sqb.lengthMm, sqb.sweep.rings[0], trunk.sideMm)
-                            : { why: sqb.reason };
-        if (!sqStop) {
-          out.sectionFallback.push({ role: 'branch', label: 'branch ' + out.branches.length + ' (contact ' + i + ')',
-            contactIndex: i, why: 'the round branch (' + br.dFromMm.toFixed(3) + ' -> ' + br.dToMm.toFixed(3) +
-              ' mm) would run into the piece: ' + stop.why });
-          br = sqb;
-          br.roundRefused = stop.why;
-          stop = null;
-        }
-      }
-      if (stop) {
-        blocked.push({ index: i, at: stop.at, why: stop.why });
-        continue;
-      }
-      if (br.hand) {
-        clearFingers(SA, obstacles, br.hand);
-        br.parts = [br.soup].concat(br.hand.fingers.map(function (fi) { return fi.soup; }));
-        br.fingerPenetrationMm = handPenetration(br.hand, q, unit(region.normal));
-      }
-
-      br.contactIndex = i;
-      out.branches.push(br);
-      addPart(br.soup, br.axis);
-    }
-    out.blocked = blocked;
-    /* the axis, and one per rail */
-    out.probesPerBranch = 1 + (section === 'round' ? ROUND_SIDES : squareProfile(trunk.sideMm).length);
-    /* THE FINGERS GO ON AFTER EVERY SHAFT, not beside their own. The fold is
-       left to right, so this makes the first 1 + branches steps of the union
-       the default tree's own steps, in the default's own order - the trunk
-       and fan the canonical checker already passes - and every finger is then
-       unioned against a solid that has its shaft in it. Interleaved, the
-       boolean re-rounds the fan's roots to float32 between branches in a
-       different order, and on the tall fixture that alone was measured as 2
-       piercing pairs down at the branch roots, nowhere near a hand. */
-    if (style === 'gecko-hand') {
-      var fingers = 0, dropped = 0;
-      for (i = 0; i < out.branches.length; i++) {
-        for (var f = 0; f < out.branches[i].hand.fingers.length; f++) {
-          addPart(out.branches[i].hand.fingers[f].soup, fingerAxis(out.branches[i].hand, out.branches[i].hand.fingers[f]));
-        }
-        fingers += out.branches[i].hand.fingers.length;
-        dropped += out.branches[i].hand.dropped.length;
-      }
-      if (out.trunkHand) {
-        for (i = 0; i < out.trunkHand.fingers.length; i++) {
-          addPart(out.trunkHand.fingers[i].soup, fingerAxis(out.trunkHand, out.trunkHand.fingers[i]));
-        }
-        fingers += out.trunkHand.fingers.length;
-        dropped += out.trunkHand.dropped.length;
-      }
-      out.fingers = fingers;
-      out.fingersDropped = dropped;
-    }
-
-    if (!out.branches.length) {
-      out.reason = 'the trunk reached ' + (carried >= 0 ? 'its own contact' : 'its split point') +
-        ' and not one of the ' + (cp.points.length - (carried >= 0 ? 1 : 0)) +
-        ' branches could leave it: ' + (blocked[0] ? blocked[0].why : 'no reason recorded');
-      return out;
-    }
-
-    var tilts = out.branches.map(function (b) { return b.tiltDeg; }).sort(function (a, b) { return a - b; });
-    var lens = out.branches.map(function (b) { return b.lengthMm; });
-    var pen = 0;
-    for (i = 0; i < out.branches.length; i++) {
-      if (out.branches[i].tipPenetrationMm > pen) pen = out.branches[i].tipPenetrationMm;
-    }
-    out.tiltDeg = { min: tilts[0], median: tilts[(tilts.length / 2) | 0], max: tilts[tilts.length - 1] };
-    out.branchLengthMm = { min: Math.min.apply(null, lens), max: Math.max.apply(null, lens) };
-    out.worstTipPenetrationMm = pen;
-
-    out.ok = true;
-    out.stage = 'done';
-    out.reason = det.reason + '; ' + cp.reason + '; ' + out.split.reason + '; ' +
-      out.branches.length + ' branch(es)' + (blocked.length ? ', ' + blocked.length + ' refused' : '') +
-      ', ' + out.tiltDeg.min.toFixed(2) + '..' + out.tiltDeg.max.toFixed(2) + ' deg off vertical' + sectionNote() +
-      (style === 'gecko-hand' ? '; gecko hands, ' + out.fingers + ' finger(s)' +
-        (out.fingersDropped ? ', ' + out.fingersDropped + ' left off where they met the piece' : '') : '');
-    return out;
+    var GP = (opts.gridpack) || (root && root.NSO_SupportGridpack) ||
+             (typeof NSO_SupportGridpack !== 'undefined' ? NSO_SupportGridpack : null);
+    if (!GP) return { ok: false, reason: 'nso_support_gridpack.js is not loaded - it is the support planner', parts: [] };
+    var style = opts.style != null ? opts.style : (opts.branchStyle === 'gecko-hand' ? 'gecko-hand' : 'tree');
+    var p = GP.plan(rawTris, Object.assign({}, opts, { style: style }));
+    p.planner = 'gridpack';
+    return p;
   }
 
   /* =====================================================================
@@ -1518,7 +887,7 @@
      ===================================================================== */
 
   /* THE FLOAT32 COLLAPSE, at a crossing rather than at a root.
-     ROOT_SPREAD_SIDES keeps branch roots apart so two branch walls do not
+     The old trunk planner's root spread kept branch roots apart so two branch walls do not
      pinch at a shared start point - the one place the square section made
      that happen. The round section (24-gon frusta, tapered by the law) made
      it happen somewhere else: where two thicker branches cross near their
@@ -1943,14 +1312,10 @@
   var api = {
     MAX_SPAN_MM: MAX_SPAN_MM,
     BRANCH_TILT_DEG: BRANCH_TILT_DEG,
-    COLLINEAR_DEG: COLLINEAR_DEG,
-    ROOT_OVERLAP_SIDES: ROOT_OVERLAP_SIDES,
-    ROOT_SPREAD_SIDES: ROOT_SPREAD_SIDES,
     MAX_CONTACTS: MAX_CONTACTS,
     BRANCH_STYLES: BRANCH_STYLES.slice(),
     GECKO: Object.assign({}, GECKO),     /* a copy: the proportions are not a setting */
     contactPoints: contactPoints,
-    splitPoint: splitPoint,
     branch: branch,
     planTree: planTree,
     unionParts: unionParts,
@@ -1968,7 +1333,6 @@
     _roundProfile: roundProfile,
     _roundPart: roundPart,
     _innerOf: innerOf,
-    _probeRails: probeRails,
     describe: describe,
     /* exposed for the tests, not for callers */
     _zOnTriAt: zOnTriAt,
