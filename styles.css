@@ -3172,6 +3172,10 @@ button.ms-legend-only:hover { border-color: var(--accent); }
 .te-rows { display: flex; flex-direction: column; gap: 3px; }
 .te-rows[hidden] { display: none; }
 .vp-menu-body .vp-row-bend .btn { min-width: 0; }
+
+/* Bridge (app-bridge.js): Bend's panel classes, its readout on top - it
+   says what is under the pointer before anything is picked. */
+.vp-bridge-panel .bend-readout { margin-top: 0; }
 /* Foam (app-foam.js): the panel under the Fill / Densify | Foam row. One
    column like the rest of Finish - the hollows' list, the level, the readout
    in words, and Fill it all / Set / Cancel. */

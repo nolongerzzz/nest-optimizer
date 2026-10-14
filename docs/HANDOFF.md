@@ -48,6 +48,7 @@ Current roster, by category:
 | Extend (`app-extend.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/EXTEND.md` |
 | Bend (`app-bend.js`; the geometry is `nso_bend.js`) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/BEND.md` |
 | Tube edge (`app-tube-edge.js`; the geometry is `nso_tube_edge.js`) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/TUBE-EDGE.md` |
+| Bridge (`app-bridge.js`; the geometry is `nso_bridge.js`) | whole-piece, on both pieces | `nsoMaskCount(m) > 0` on either | header comment + `docs/BRIDGE.md` |
 | Mirror (`app-mirror.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/MIRROR.md` |
 | Fatten (`app-fatten.js`; no UI since Scale part 3 - the card's Offset replaced it) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/FATTEN.md` |
 | Pottery Wheel (`app-wheel.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/POTTERY-WHEEL.md` |
@@ -243,7 +244,7 @@ The groups, and what decides which one a row belongs to:
 
 | Group | Holds |
 |---|---|
-| **Shape** | changes the form: Soften, Smooth, Extend, Bend, Tube edge, Mirror, Thicken (Fatten / Shrink moved to the Scale card's Offset) |
+| **Shape** | changes the form: Soften, Smooth, Extend, Bend, Tube edge, Mirror, Bridge, Thicken (Fatten / Shrink moved to the Scale card's Offset) |
 | **Paint** | the mask itself: Paint Selected / Excluded / Clear, Delete painted, Extract selection |
 | **Surface** | adds relief to a face: Skin face / wrap / patch, Texture |
 | **Sculpt** | freehand and local: Brush, Carve |
@@ -1395,6 +1396,27 @@ face the other's offset by the wall, so the wall holds through the new section
 
 `npm run tube:edges` (headless) and `npm run tube:edges-drive` (real app),
 both in `npm test`.
+
+## Bridge - a web between two places, welded (2026-10-14)
+`nso_bridge.js` (headless) and `app-bridge.js` (the card), loaded after
+`app-bend.js` at `?v=bridge1`. UI is a **Bridge** button in the Shape
+drop-down, under Extend and Mirror: hover lights a face, an edge or a point;
+press, drag, release on another; a ghost of the web; Set / Cancel. Full
+write-up: `docs/BRIDGE.md`.
+
+Face to face is a band (a ruled loft, both caps dropped, walls split where new
+points land, stitched on the same numbers - Join's planar-fuse vertex space and
+seam weld, no kernel); point to point a round string and edge to edge a flat
+sheet, both unioned with `NSO_unionSoups`. Before a later ticket touches it:
+- **The result is a new piece** in place of its inputs; Undo is G-scope's
+  `supportSwap` step, so every input comes back as the same objects.
+- **What is picked is decided by the mesh**: a flat region whose whole rim is
+  creased 20° is a face, 8 px from its straight rim is an edge, anything else
+  a point. A face end with a point end is a string.
+- **Every web is straight.** Curved bridges are Bend's job afterwards.
+
+`npm run bridge:test` (headless) and `npm run bridge:drive` (real app), both
+in `npm test`.
 
 ## Bend - a pipe or plate bender (2026-10-13)
 `nso_bend.js` (headless) and `app-bend.js` (the panel), loaded after
