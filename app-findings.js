@@ -472,12 +472,11 @@
     layout();
   }
 
-  /* Docked at the right edge, its top just under the top-right buttons. The
-     Finish menu's panel also hangs down that edge in today's layout, so when
-     it is open and would cover the card, the card moves to its left rather
-     than under it. Measured, not assumed: under the UI shell
-     (claude/ui-shell) Finish's panel opens at the shared panel spot on the
-     left and this finds no overlap. */
+  /* Docked at the right edge, its top just under the top-right buttons -
+     since shell v2 that is the Export / Plate stack, Plate hanging under
+     Export. If an open drop-down's panel would cover the card, the card moves
+     to its left rather than under it. Measured, not assumed: every panel
+     opens at the shared spot on the left, so this finds no overlap today. */
   function layout() {
     var el = $('findings-card');
     if (!el || el.hidden) return;
@@ -485,17 +484,16 @@
     if (!host) return;
     var hr = host.getBoundingClientRect();
     var gap = 8;
-    var fm = document.querySelector('.vp-finish-menu');
-    var sum = fm ? fm.querySelector('summary') : null;
     var top = gap + 36;
-    if (sum) {
-      var sr = sum.getBoundingClientRect();
+    var anchor = document.querySelector('#menu-plates > summary');
+    if (anchor) {
+      var sr = anchor.getBoundingClientRect();
       if (sr.height > 0) top = Math.round(sr.bottom - hr.top + gap);
     }
     var right = gap;
-    if (fm && fm.open) {
-      var body = fm.querySelector('.vp-menu-body');
-      var br = body ? body.getBoundingClientRect() : null;
+    var open = document.querySelector('.vp-shell-menu[open] > .vp-menu-body');
+    if (open) {
+      var br = open.getBoundingClientRect();
       var w = el.offsetWidth || 300;
       if (br && br.width > 0) {
         var cardLeft = hr.right - right - w, cardRight = hr.right - right;
@@ -742,10 +740,10 @@
       });
       again._findingsBound = true;
     }
-    var fm = document.querySelector('.vp-finish-menu');
-    if (fm && !fm._findingsBound) {
-      fm.addEventListener('toggle', layout);
-      fm._findingsBound = true;
+    var bar = document.querySelector('.viewport-overlay-topbar');
+    if (bar && !bar._findingsBound) {
+      bar.addEventListener('toggle', layout, true);
+      bar._findingsBound = true;
     }
   }
   if (!document._findingsActionsBound) {

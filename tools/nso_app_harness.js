@@ -114,12 +114,12 @@ async function withApp(fn, opts) {
     args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--no-sandbox']
       .concat(proxyUrl ? ['--proxy-server=https=' + proxyUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '')] : [])
   });
-  /* 900 tall, not Playwright's 720. Below about 795 px the shell's left
-     column sits on top of the bottom-left tools (Undo, Frame, X-ray,
-     G-scope, Watch) - a known collision, flagged and not yet fixed, and
-     measured where it starts by tools/nso_ui_shell_drive_check.js. A check
-     that clicks Undo is asserting what Undo does, so it gets a window tall
-     enough to reach it. Checks that set their own size are unaffected. */
+  /* 900 tall, not Playwright's 720. It was chosen when the shell's left
+     column ran into the bottom-left tool strip under about 795 px; since
+     shell v2 that strip is gone (Undo is in the top row, the rest in the
+     column) and the column fits a 720 px window, but every check was
+     written and timed at 900, so it stays. Checks that set their own size
+     are unaffected. */
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   installAutoOpen(page);
   const logs = [];
@@ -197,34 +197,20 @@ const statusOf = page => page.evaluate(() => {
   return el ? el.textContent : null;
 });
 
-/* Opens the viewport's Finish menu (a <details>) by clicking its summary, the
-   way a user does, so the controls inside it - Paint, Skin face, Cap open
-   faces, Soften... - are visible to page.click. Idempotent.
+/* Finish is gone (shell v2): its six groups are column buttons of their own
+   - Shape, Paint, Surface, Sculpt, Measure & check, Check & repair - and Bend
+   moved to the top row. Only one drop-down is open at a time, so no single
+   menu shows every Finish control any more. The checks don't need one: every
+   action through `page` opens the drop-down holding its target first
+   (installAutoOpen above), and openMenuFor below does the same for a check
+   that needs a panel open before it acts.
 
-   The menu's rows live in six collapsible groups, all but Shape shut when the
-   page loads, so opening the menu alone no longer makes every control
-   clickable. Every group is opened here too: a drive check is asserting what
-   a control DOES, not which fold the user found it in, and a check that had
-   to name its group would have to be edited again the next time a row moves
-   between them. Clicking a control the user would first have to unfold is the
-   one thing this hides, and no check in the suite is making that claim. */
-async function openFinishMenu(page) {
-  const open = await page.evaluate(() => { const d = document.querySelector('.vp-finish-menu'); return !!(d && d.open); });
-  if (!open) await page.click('.vp-finish-menu > summary');
-  await page.waitForFunction(() => { const d = document.querySelector('.vp-finish-menu'); return !!(d && d.open); }, null, { timeout: 5000 });
-  await openFinishSections(page);
-}
+   Both are kept, doing nothing, for the checks that still call them. A check
+   that reads where a Finish control sits on screen has to open its menu
+   itself (openMenuFor). */
+async function openFinishMenu(page) { }
 
-/* Unfolds every group inside the Finish menu. Separate from the above so a
-   check that opens the menu its own way can still reach the rows. */
-async function openFinishSections(page) {
-  await page.evaluate(() => {
-    document.querySelectorAll('.vp-finish-menu .vp-sec').forEach(d => { d.open = true; });
-  });
-  await page.waitForFunction(
-    () => [...document.querySelectorAll('.vp-finish-menu .vp-sec')].every(d => d.open),
-    null, { timeout: 5000 });
-}
+async function openFinishSections(page) { }
 
 /* Opens whatever menus a control is buried in: walks up from the element and
    opens every <details> on the way, which is the idiom the wire checks already
