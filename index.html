@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=cutcard3" />
+  <link rel="stylesheet" href="styles.css?v=tube1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -627,9 +627,11 @@
                     <input type="number" id="inp-extend-mm" min="0.1" max="2000" step="0.1"
                            placeholder="mm" aria-label="Extend to length, mm">
                   </div>
-                  <div class="vp-row vp-row-full vp-row-bend">
+                  <div class="vp-row vp-row-pair vp-row-bend">
                     <button id="btn-bend" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="bend-panel"
                             title="Bend the piece like a pipe or plate bender, inside one straight stretch: the section is carried round the arc exactly - a plate's thickness, a tube's bore and wall do not change - and everything past the bend turns with it, rigidly. Opens a panel with a live ghost of the result; click the piece to set where.">Bend</button>
+                    <button id="btn-tube-edge" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="te-panel"
+                            title="Flare or roll the open end of a tube outward. The wall's thickness is carried exactly through the new section and the new wall is welded to the end ring. Opens a card with a live ghost of the result; click the piece near the end to treat.">Tube edge</button>
                   </div>
                   <div class="vp-bend-panel" id="bend-panel" hidden>
                     <label class="vp-bend-field" title="Where the bend's middle goes, in mm along the piece from its near (low) end. Click the piece to set it.">Where
@@ -647,6 +649,44 @@
                       <button id="btn-bend-go" class="btn btn-secondary" type="button" disabled
                               title="Bend the piece as the ghost shows. One Undo puts it back.">Bend</button>
                       <button id="btn-bend-cancel" class="btn btn-secondary" type="button" title="Close the panel; the piece is unchanged.">Cancel</button>
+                    </div>
+                  </div>
+                  <div class="vp-bend-panel te-panel" id="te-panel" hidden>
+                    <label class="vp-bend-field" title="Flare turns the end outward over a length; Roll curls it over round a bead.">Verb
+                      <select id="sel-te-verb" class="vp-select" aria-label="Tube edge verb">
+                        <option value="flare" selected>Flare</option>
+                        <option value="roll">Roll</option>
+                      </select></label>
+                    <label class="vp-bend-field" title="Out, away from the axis. In (toward the axis) is not supported yet and says so.">Way
+                      <select id="sel-te-dir" class="vp-select" aria-label="Tube edge direction">
+                        <option value="out" selected>Out</option>
+                        <option value="in">In</option>
+                      </select></label>
+                    <div id="te-flare-rows" class="te-rows">
+                      <label class="vp-bend-field" title="How far the flare runs past the end, in mm along the wall.">Length
+                        <input type="number" id="inp-te-length" min="0.1" step="0.5" aria-label="Flare length, mm"><span>mm</span></label>
+                      <label class="vp-bend-field" title="The flare's angle off the wall. Linked to Δr over the Length: edit either.">Angle
+                        <input type="number" id="inp-te-angle" min="0.1" max="75" step="1" aria-label="Flare angle, degrees"><span>°</span></label>
+                      <label class="vp-bend-field" title="How far the lip stands out from the wall's line, in mm. Linked to Angle over the Length: edit either.">Δr
+                        <input type="number" id="inp-te-dr" min="0.01" step="0.1" aria-label="Flare delta r, mm"><span>mm</span></label>
+                      <label class="vp-bend-field" title="Straight: a cone. Trumpet: tangent to the tube at the end, its radius growing as the square of the length (an ease-in) to the same lip.">Profile
+                        <select id="sel-te-profile" class="vp-select" aria-label="Flare profile">
+                          <option value="straight" selected>Straight</option>
+                          <option value="trumpet">Trumpet</option>
+                        </select></label>
+                    </div>
+                    <div id="te-roll-rows" class="te-rows" hidden>
+                      <label class="vp-bend-field" title="The bead's inside radius, mm: the outside face of the tube curls round a circle this size.">Radius
+                        <input type="number" id="inp-te-radius" min="0.1" step="0.5" aria-label="Roll radius, mm"><span>mm</span></label>
+                      <label class="vp-bend-field" title="How far it curls over: 90, 180 or 270 degrees, or type any angle up to 360.">Angle
+                        <input type="number" id="inp-te-roll-angle" min="1" max="360" step="1" list="te-roll-angles" aria-label="Roll angle, degrees"><span>°</span></label>
+                      <datalist id="te-roll-angles"><option value="90"></option><option value="180"></option><option value="270"></option></datalist>
+                    </div>
+                    <p id="te-readout" class="bend-readout">—</p>
+                    <div class="vp-row vp-row-pair">
+                      <button id="btn-te-go" class="btn btn-secondary" type="button" disabled
+                              title="Flare or roll the end as the ghost shows. One Undo puts it back.">Set</button>
+                      <button id="btn-te-cancel" class="btn btn-secondary" type="button" title="Close the card; the piece is unchanged.">Cancel</button>
                     </div>
                   </div>
                   <div class="vp-row vp-row-mirror">
@@ -1266,7 +1306,7 @@
   <script src="nso_slicer.js?v=slice1"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
   <script src="nso_relief.js?v=relief2"></script>
-  <script src="app-core.js?v=cutcard2"></script>
+  <script src="app-core.js?v=tube1"></script>
 
 
 
@@ -1291,6 +1331,11 @@
        and app-sculpt.js (the commit). See docs/BEND.md. -->
   <script src="nso_bend.js?v=bend1"></script>
   <script src="app-bend.js?v=bend1"></script>
+  <!-- Tube edge: Flare and Roll on the open end of a tube. After nso_section.js
+       (the circle fit), nso_bend.js (the topology gate) and app-sculpt.js (the
+       commit). See docs/TUBE-EDGE.md. -->
+  <script src="nso_tube_edge.js?v=tube1"></script>
+  <script src="app-tube-edge.js?v=tube1"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=polish2"></script>

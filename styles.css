@@ -3263,6 +3263,11 @@ button.ms-legend-only:hover { border-color: var(--accent); }
   overflow-wrap: anywhere;
 }
 .bend-readout.is-bad { color: #f87171; }
+/* Tube edge (app-tube-edge.js): its card under Bend's, the same field rows;
+   the verb's rows in a block that hides whole. */
+.te-rows { display: flex; flex-direction: column; gap: 3px; }
+.te-rows[hidden] { display: none; }
+.vp-menu-body .vp-row-bend .btn { min-width: 0; }
 /* Foam (app-foam.js): the panel under the Fill / Densify | Foam row. One
    column like the rest of Finish - the hollows' list, the level, the readout
    in words, and Fill it all / Set / Cancel. */
