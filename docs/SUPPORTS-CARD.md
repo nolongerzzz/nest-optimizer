@@ -30,10 +30,16 @@ After any build the card reads **"N held from the plate · M resting on the
 part · K unreachable"** over the piece's spots. A beacon is drawn in its state:
 white planned, green held, amber resting, red unreachable.
 
-Guards, in words: no beacons, **"Nothing on this piece needs holding."**; a
-support clicked with no piece of its own picked, **"That's a support; pick the
-piece it holds."**; a shift-click on a face that looks up, "That face looks up
-- nothing hangs from it."
+A piece with no beacons at all puts the card in its **nothing-needed state**:
+where the spot count sits it says **"Nothing hangs in air. Tall-and-thin sway
+isn't checked yet."**, and All (the button that builds) is off. Detection
+only asks what hangs in air; whether a tall, thin piece sways as it prints is
+not asked yet. Paint and shift-click stay live, so spots can still be added
+by hand.
+
+Guards, in words: a support clicked with no piece of its own picked, **"That's
+a support; pick the piece it holds."**; a shift-click on a face that looks up,
+"That face looks up - nothing hangs from it."
 
 Painted and manual edits live on the piece (`m.nsoSupportEdits`), in its own
 mesh frame, so they move with it. They last until None or a reload.
@@ -90,7 +96,7 @@ spot; the next All holds all 121 (the manual spot by a support labelled for
 region 1). Region 1's badge takes off exactly its solids and leaves region
 0's (same pieces); a second click builds exactly region 1's again. Paint Skip,
 one stroke back and forth along rows 0–4 of 10: 120 → 60, exactly rows 5–9
-left. A standing tube: "Nothing on this piece needs holding.", All off. Every
+left. A standing Stock tube (Ø20, 165 mm tall, wall 1.6): the nothing-needed state, both sentences shown, All off. Every
 step adds exactly one Undo entry, and Undo after each restores it.
 
 ## 5. Flags

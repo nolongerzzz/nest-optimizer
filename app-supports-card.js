@@ -54,6 +54,10 @@ var NSO_SUPPORTS_CARD = (function () {
   var PAINT_R_PITCHES = 0.5;     // the paint stroke's radius: one grid row wide
   var UP_MAX = 0.26;             // a face whose normal points up more than this (15 deg) holds nothing
   var ORDER = 30;                // over the piece and its outline
+  /* The card's state when the picked piece has no beacons at all. Detection
+     only asks what hangs in air; a tall, thin piece that may sway as it
+     prints is a different question, not asked yet, and the words say so. */
+  var NOTHING = 'Nothing hangs in air. Tall-and-thin sway isn\'t checked yet.';
 
   var S = {
     open: false, hostId: null, selSupport: null, paint: null, stroke: null, busy: false,
@@ -332,14 +336,24 @@ var NSO_SUPPORTS_CARD = (function () {
 
   /* --------------------------------------------------------------- words */
 
+  /* The card's state: 'idle' (no piece picked), 'error' (detection refused),
+     'nothing' (the piece has no beacons: NOTHING, where the spot count sits,
+     and nothing that would build is live) or 'spots'. */
+  function cardState() {
+    if (S.hostId == null || !placedOf(S.hostId) || !S.eff) return 'idle';
+    if (S.eff.error) return 'error';
+    return S.eff.beacons.length ? 'spots' : 'nothing';
+  }
+
   function sync() {
-    var head = $('sup-count'), read = $('sup-read');
+    var head = $('sup-count'), read = $('sup-read'), card = $('supports-card');
     var hasHost = S.hostId != null && !!placedOf(S.hostId);
-    var eff = S.eff, text, bad = false;
+    var eff = S.eff, text, bad = false, cs = cardState();
+    if (card) card.dataset.state = cs;
     if (S.msg) { text = S.msg.text; bad = !!S.msg.bad; }
-    else if (!hasHost) text = 'Click a piece to see where it needs holding.';
-    else if (eff.error) { text = eff.error; bad = true; }
-    else if (!eff.beacons.length) text = 'Nothing on this piece needs holding.';
+    else if (cs === 'idle') text = 'Click a piece to see where it needs holding.';
+    else if (cs === 'error') { text = eff.error; bad = true; }
+    else if (cs === 'nothing') text = NOTHING;
     else text = plural(eff.beacons.length, 'spot needs', 'spots need') + ' holding in ' + plural(eff.regions.length, 'region', 'regions') + '.';
     if (head) { head.textContent = text; head.classList.toggle('is-bad', bad); }
     var r = '';
@@ -350,7 +364,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (read && !S.busy) read.textContent = r;
     var some = hasHost && eff && !eff.error;
     var en = function (id, on) { var e = $(id); if (e) e.disabled = !on || S.busy; };
-    en('btn-sup-all', some && eff.beacons.length > 0);
+    en('btn-sup-all', cs === 'spots');
     en('btn-sup-none', some && (supportsOf(S.hostId).length > 0 || editsOf(modelOf(S.hostId)).ops.length > 0));
     en('btn-sup-remove', S.selSupport != null && !!modelOf(S.selSupport));
     en('btn-sup-paint', some);
@@ -863,7 +877,7 @@ var NSO_SUPPORTS_CARD = (function () {
       var eff = S.eff || { beacons: [], regions: [], pitch: 3 };
       var st = S.hostId != null && eff.beacons.length ? statesFor(eff) : {};
       return {
-        host: S.hostId, error: eff.error || null, pitch: eff.pitch,
+        host: S.hostId, state: cardState(), error: eff.error || null, pitch: eff.pitch,
         beacons: eff.beacons.map(function (b) {
           return { key: b.key, p: pt(b), normal: b.normal, region: b.region, manual: b.manual, kind: b.need && b.need.kind, state: st[b.key] };
         }),

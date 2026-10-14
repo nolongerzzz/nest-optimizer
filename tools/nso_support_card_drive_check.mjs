@@ -25,7 +25,9 @@
  *      own Remove takes a card support off too (a support is a plate piece).
  *   8  PAINT SKIP over half the face (rows 0-4 of 10, one stroke) halves the
  *      beacon count, 120 -> 60; Undo puts them back.
- *   9  A STANDING TUBE: "Nothing on this piece needs holding."; All disabled.
+ *   9  A STANDING STOCK TUBE (Ø20, 165 mm tall, wall 1.6): the card's
+ *      nothing-needed state - "Nothing hangs in air. Tall-and-thin sway
+ *      isn't checked yet." where the spot count sits; All disabled.
  *  10  Every step is one Undo; the card stays inside the window; no page
  *      errors. Screenshots in tools/support-card-out/.
  */
@@ -60,22 +62,6 @@ const TILTED = stl(box([0, 0, 0], [40, 30, 10]).map((v, i, a) => {
   return k === 0 ? p[0] * Math.cos(TILT) - p[2] * Math.sin(TILT)
     : k === 1 ? p[1] : p[0] * Math.sin(TILT) + p[2] * Math.cos(TILT);
 }));
-/* A tube standing on its end: r 8 / 5, 20 tall, 48 sides. Nothing hangs. */
-function tube(ro, ri, h, n) {
-  const o = [];
-  const P = (r, a, z) => [r * Math.cos(a), r * Math.sin(a), z];
-  for (let i = 0; i < n; i++) {
-    const a0 = (i / n) * 2 * Math.PI, a1 = ((i + 1) / n) * 2 * Math.PI;
-    const O0b = P(ro, a0, 0), O1b = P(ro, a1, 0), O0t = P(ro, a0, h), O1t = P(ro, a1, h);
-    const I0b = P(ri, a0, 0), I1b = P(ri, a1, 0), I0t = P(ri, a0, h), I1t = P(ri, a1, h);
-    o.push(...O0b, ...O1b, ...O1t, ...O0b, ...O1t, ...O0t);          // outer wall
-    o.push(...I0b, ...I1t, ...I1b, ...I0b, ...I0t, ...I1t);          // inner wall
-    o.push(...O0t, ...O1t, ...I1t, ...O0t, ...I1t, ...I0t);          // top ring
-    o.push(...O0b, ...I1b, ...O1b, ...O0b, ...I0b, ...I1b);          // bottom ring
-  }
-  return o;
-}
-const TUBE = stl(tube(8, 5, 20, 48));
 
 const frames = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 
@@ -451,27 +437,37 @@ async function main() {
   check('Paint off', await page.evaluate(() => window.NSO_SUPPORTS_CARD.paint()), null);
 
   // =======================================================================
-  console.log('\n--- 9. a standing tube: nothing needs holding ---');
+  console.log('\n--- 9. a standing Stock tube: nothing hangs in air ---');
   // =======================================================================
-  await page.evaluate((fs) => handleFiles(fs.map(([n, a]) => new File([new Uint8Array(a)], n))), [['tube.stl', TUBE]]);
-  await page.waitForFunction(() => state.models.some((m) => m.name === 'tube') && state.placed.length === 2, null, { timeout: 30000 });
-  const tubeId = await page.evaluate(() => state.models.find((m) => m.name === 'tube').id);
-  await aim(tubeId, [1, -1, 0.6], 90);
+  /* A real Stock tube, outer diameter 20, 165 mm tall, wall 1.6: Stock's own
+     tube meridian (NSO_Stock.profileTube) revolved at Stock's own segment
+     count, ingested as the Stock card ingests it. (Stock's card sizes a
+     blank from a finished piece by volume, so it cannot be asked for these
+     exact measurements; its geometry can.) */
+  const tubeId = await page.evaluate(() => {
+    const soup = NSO_Stock.revolve(NSO_Stock.profileTube(10, 8.4, 165), NSO_Stock.DEFAULTS.segments);
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(soup), 3));
+    return addModelFromZUpGeometry('stock_tube_165mm.stl', g);
+  });
+  await page.waitForFunction((id) => state.placed.some((p) => p.sourceId === id), tubeId, { timeout: 30000 });
+  const tubeSize = await page.evaluate((id) => { const m = state.models.find((x) => x.id === id); return [m.size.x, m.size.y, m.size.z].map((x) => +x.toFixed(2)); }, tubeId);
+  check('the Stock tube is 20 x 165 x 20 (x, height, z) and stands on its end', tubeSize, [20, 165, 20]);
+  await aim(tubeId, [1, -1, 0.5], 420);
   at = await pieceAt(tubeId);
-  /* the box centre of a tube is its hole: click on its wall instead */
-  const wallAt = await page.evaluate((id) => {
-    const p = state.placed.find((q) => q.sourceId === id);
-    const bb = new THREE.Box3().setFromObject(p.mesh), c = bb.getCenter(new THREE.Vector3());
-    const q = new THREE.Vector3(c.x + 6.5 * Math.SQRT1_2, c.y, c.z + 6.5 * Math.SQRT1_2).project(state.camera);
-    const r = state.renderer.domElement.getBoundingClientRect();
-    return [r.left + (q.x + 1) / 2 * r.width, r.top + (1 - q.y) / 2 * r.height];
-  }, tubeId);
-  await page.mouse.click(wallAt[0], wallAt[1]);
+  await page.mouse.click(at[0], at[1]);
   await frames(page);
   v = await view();
   check('the tube is picked', v.host, tubeId);
-  check('"Nothing on this piece needs holding."', v.count, 'Nothing on this piece needs holding.');
-  check('...no beacons drawn, All is off', [(await overlay()).discs, await page.isEnabled('#btn-sup-all')], [0, false]);
+  check('the card is in its nothing-needed state', [v.state, await page.evaluate(() => document.getElementById('supports-card').dataset.state)], ['nothing', 'nothing']);
+  const nothing = await page.evaluate(() => {
+    const el = document.getElementById('sup-count'), r = el.getBoundingClientRect();
+    return { text: el.textContent, shown: r.width > 0 && r.height > 0 && getComputedStyle(el).visibility !== 'hidden' };
+  });
+  check('where the spot count sits, both sentences are shown: "Nothing hangs in air." and "Tall-and-thin sway isn\'t checked yet."',
+    [nothing.shown, nothing.text.includes('Nothing hangs in air.'), nothing.text.includes('Tall-and-thin sway isn\'t checked yet.')], [true, true, true]);
+  check('...no beacons or badges drawn, and All (the button that builds) is off',
+    [(await overlay()).discs, (await overlay()).badges.length, await page.isEnabled('#btn-sup-all')], [0, 0, false]);
   check('the card is still inside the window', await cardInside(), true);
   await shot('09-standing-tube.png');
 
