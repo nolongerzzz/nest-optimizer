@@ -865,7 +865,11 @@
     var drawnPieces = 0;
     (group.children || []).forEach(function (c) {
       if (isPaintOverlay(c)) { overlays.push(c); return; }
-      if (c === S.previewMesh || c === S.cutHelper || c === S.faceHelper || c === S.fenceGroup) return;
+      if (c === S.cutHelper || c === S.faceHelper || c === S.fenceGroup) return;
+      // The open cutter points previewMesh at the plate piece it cuts: that
+      // mesh is still the piece, drawn, so only a preview the plate does not
+      // own is left out of the count.
+      if (c === S.previewMesh && owned.indexOf(c) < 0) return;
       var cud = c.userData || {};
       var isPiece = !!(c.isMesh && (cud.sourceId != null || cud.placedIndex != null));
       if (isPiece) drawnPieces++;

@@ -3472,6 +3472,11 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   width: var(--shell-col-w);
   pointer-events: none;
 }
+/* Under 800 high the 4px gap leaves Pack over Undo (1024 x 768, watch:test
+   part F); 2px ends the column 16px above Undo's middle. */
+@media (max-height: 799px) {
+  .vp-shell-col { gap: 2px; }
+}
 /* When the row runs short of room it is the middle group - Export through
    Lock plate - that gives way, never Import (the corner, as wide as the
    column) and never the right group (Photo, Gen+). The middle slabs shrink
