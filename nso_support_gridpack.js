@@ -102,6 +102,10 @@
    opts: skipList (required, as detectOverhangs), angleDeg, occluders,
          regionId, sideMm, style ('strut' | 'tree' | 'gecko-hand'),
          branchTiltDeg, latticeMm, pitchMm, restOnModel, beacons
+   opts.beacons: an explicit list ({ p, n } or { x, y, z, normal }, each
+         optionally with regionId and key) planned instead of detecting.
+   Every plan.trunks[i] carries regionIds; every solid(plan).solids[i]
+   carries beacons (ids), regionIds and landing.
    ============================================================ */
 (function (root) {
   'use strict';
@@ -195,15 +199,40 @@
   }
 
   /* The ONE place the beacon source is chosen. Swap to
-     NSO_SupportBeacons.detect here when claude/support-beacons lands. */
+     NSO_SupportBeacons.detect here when claude/support-beacons lands.
+
+     EXPLICIT BEACONS (opts.beacons). The caller's own list, planned as it
+     is: the Supports card hands in the detected set with the user's manual
+     and painted edits already applied. Each entry is either the planner's
+     { p, n } or a detector record { x, y, z, normal } (nso_support_beacons.js),
+     and may carry regionId and key; both ride through untouched, so a trunk
+     and a solid can say which region and which beacons they hold. Detection
+     still runs for the plate and the regions, without its beacon grid -
+     the list given IS the beacons. */
   function beaconsFor(rawTris, opts) {
     if (opts.beacons) {
-      var A = SA(opts), det = A.detectOverhangs(rawTris, opts);
+      var A = SA(opts), det = A.detectOverhangs(rawTris, Object.assign({}, opts, { beacons: false }));
       return { ok: det.ok, reason: det.reason, detect: det, regions: det.regions || [],
                pitchMm: opts.pitchMm == null ? ST(opts).MAX_SPAN_MM : +opts.pitchMm,
-               beacons: opts.beacons.map(function (b, i) { return { id: i, p: b.p.slice(), n: (unit(b.n) || [0, 0, -1]).slice(), regionId: b.regionId, source: b.source || 'given' }; }) };
+               beacons: opts.beacons.map(function (b, i) {
+                 var p = b.p ? b.p : [b.x, b.y, b.z], n = b.n || b.normal;
+                 return { id: i, p: p.slice(), n: (unit(n || [0, 0, -1]) || [0, 0, -1]).slice(), regionId: b.regionId,
+                          key: b.key, source: b.source || 'given' };
+               }) };
     }
     return gridBeacons(rawTris, opts);
+  }
+
+  /* Which regions a set of beacon ids belongs to: sorted, distinct, the
+     beacons' own regionId (undefined ones left out). */
+  function regionIdsOf(beacons, ids) {
+    var seen = {}, out = [];
+    ids.forEach(function (id) {
+      var r = beacons[id] && beacons[id].regionId;
+      if (r == null || seen[r]) return;
+      seen[r] = true; out.push(r);
+    });
+    return out.sort(function (a, b) { return a - b; });
   }
 
   /* =====================================================================
@@ -588,6 +617,9 @@
       trunks.push(tr);
     });
     out.trunks = trunks;
+    /* Every trunk says which regions its beacons came from: the lookup a
+       caller removes "this region's supports" by. */
+    trunks.forEach(function (t) { t.regionIds = regionIdsOf(bc.beacons, t.beacons); });
     trunks.forEach(function (t) {
       if (t.landing === 'rest') t.beacons.forEach(function (id) { out.resting.push(id); });
       out.held += t.beacons.length;
@@ -854,6 +886,20 @@
       return c2.then(function () {
         var out = [];
         for (var k = 0; k < solids.length; k++) if (find(k) === k) out.push(soupOf[k]);
+        /* Each solid carries what it holds: its trunks' beacon ids, their
+           regions, and where it lands ('plate', 'rest', or 'mixed'). A
+           support built from one solid is then labelled by lookup. */
+        out.forEach(function (x) {
+          var ids = [], lands = {};
+          x.trunks.slice().sort(function (a, b) { return a - b; }).forEach(function (t) {
+            var tr = p.trunks[t];
+            ids = ids.concat(tr.beacons); lands[tr.landing] = true;
+          });
+          x.beacons = ids;
+          x.regionIds = p.beacons ? regionIdsOf(p.beacons, ids) : [];
+          var ls = Object.keys(lands);
+          x.landing = ls.length === 1 ? ls[0] : 'mixed';
+        });
         solids = out;
       });
     });

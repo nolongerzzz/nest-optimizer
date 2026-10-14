@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=supbridge1" />
+  <link rel="stylesheet" href="styles.css?v=supcard1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -687,6 +687,49 @@
               <button id="btn-seat-grid" class="btn btn-secondary" type="button" title="Faint grid on the top surface of the target piece (A), to line up what goes above it">Surface grid: auto</button>
             </div>
           </details>
+          <!-- SUPPORTS: one card on the main page (app-supports-card.js,
+               docs/SUPPORTS-CARD.md). Open it, click a piece: where it needs
+               holding, by region; build all, none, a region, or take one
+               support off. G-scope's support row stays for layer-view work;
+               both call the same planner. -->
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-supports">
+            <summary class="vp-bar-btn" title="Where a piece needs holding, and the supports that hold it: all at once, a region at a time, or one by one">Supports</summary>
+            <div class="vp-menu-body vp-top-body sup-card" id="supports-card">
+              <p id="sup-count" class="bend-readout sup-count">Click a piece to see where it needs holding.</p>
+              <div class="vp-row vp-row-pair">
+                <button id="btn-sup-all" class="btn btn-secondary" type="button" disabled
+                        title="Build supports for every region of this piece. Any supports already on it are replaced. One Undo puts it back.">All</button>
+                <button id="btn-sup-none" class="btn btn-secondary" type="button" disabled
+                        title="Take every support off this piece and drop its painted and manual spots. One Undo puts it all back.">None</button>
+              </div>
+              <div class="vp-row vp-row-pair">
+                <button id="btn-sup-paint" class="btn btn-secondary btn-sup-paint" type="button" aria-pressed="false" disabled
+                        title="Paint on the piece. Hold adds spots to hold where you drag, one grid step apart; Skip takes spots away so nothing is built there. Each stroke is one Undo. Click again to stop.">Paint</button>
+                <select id="sel-sup-paint" class="vp-select" aria-label="Paint mode"
+                        title="Hold: add spots where you paint. Skip: leave the spots you paint over unsupported.">
+                  <option value="hold">Hold</option>
+                  <option value="skip">Skip</option>
+                </select>
+              </div>
+              <label class="vp-bend-field" for="sup-style">Style
+                <select id="sup-style" class="vp-select" title="Straight strut: one post per spot. Tree: posts merge on the way down. Gecko-hand: the tree with a hand at every spot.">
+                  <option value="strut">Straight strut</option>
+                  <option value="tree" selected>Tree</option>
+                  <option value="gecko-hand">Gecko-hand</option>
+                </select></label>
+              <label class="vp-bend-field" for="sup-size">Size
+                <input type="number" id="sup-size" value="1.2" min="0.4" max="6" step="0.1" aria-label="Strut side, mm"
+                       title="The cross-section side of the struts, trunks and branches. Never below the nozzle's wall floor - the planner raises it if asked for less."><span>mm</span></label>
+              <label class="vp-check" for="sup-rest" title="Off: every support stands on the plate, and a spot with no clear way down is left unreachable. On: such a spot may be held from a part below it.">
+                <input type="checkbox" id="sup-rest"> May rest on the part</label>
+              <div class="vp-row vp-row-full">
+                <button id="btn-sup-remove" class="btn btn-secondary" type="button" disabled
+                        title="Take off the one support you clicked. One Undo puts it back.">Remove</button>
+              </div>
+              <p id="sup-read" class="bend-readout sup-read"></p>
+              <p class="hint sup-hint">Click a region's count to build or clear that region. Click a support to pick it. Shift-click the piece to add a spot.</p>
+            </div>
+          </details>
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-bit">
             <summary class="vp-bar-btn" title="Subtract B from A, or extract a bit">Subtract</summary>
             <div class="vp-menu-body vp-top-body">
@@ -1346,12 +1389,12 @@
        auto-aim's detection and base search. After BOTH of them, because it
        calls into both by name and refuses when either is missing. Unwired,
        like the two modules it sits on. See docs/SUPPORT-TREE.md. -->
-  <script src="nso_support_tree.js?v=tree6"></script>
+  <script src="nso_support_tree.js?v=tree7"></script>
   <!-- The support planner: one strut per support point, grown down and
        merged pairwise on a node lattice, plate first. planTree above is
        this; it needs nso_support_tree.js's contactPoints and union. See
        docs/SUPPORT-GRIDPACK.md. -->
-  <script src="nso_support_gridpack.js?v=gridpack1"></script>
+  <script src="nso_support_gridpack.js?v=gridpack2"></script>
   <script src="nso_exif.js?v=photoset1"></script>
   <script src="nso_photoset.js?v=photoset1"></script>
   <script src="nso-cooling-profiles.js"></script>
@@ -1364,7 +1407,7 @@
   <script src="nso_slicer.js?v=slice1"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
   <script src="nso_relief.js?v=relief2"></script>
-  <script src="app-core.js?v=tube1"></script>
+  <script src="app-core.js?v=supcard1"></script>
 
 
 
@@ -1465,7 +1508,10 @@
        edit / remove. After app-microscope.js, whose hooks it uses, and after
        nso_support_aim.js / nso_support_tree.js / app-join.js, whose
        detection, generators and union it calls. See docs/GCODE-SUPPORTS.md. -->
-  <script src="app-gscope-support.js?v=gsupui1"></script>
+  <script src="app-gscope-support.js?v=supcard1"></script>
+  <!-- The Supports card on the main page: the same detection and planner,
+       after app-core.js / app-join.js, whose ingest and soups it uses. -->
+  <script src="app-supports-card.js?v=supcard1"></script>
   <script src="app-gscope-slice.js?v=slice3"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the

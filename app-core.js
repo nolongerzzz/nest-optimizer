@@ -243,6 +243,12 @@ function undoLast() {
     state.placed.forEach((p, i) => { if (p.mesh) p.mesh.userData.placedIndex = i; });
     state.selectedIndex = -1;
     renderModelList(); updateOptimizeButton(); updateEditSize(); updateAdjustUI();
+    // The Supports card (app-supports-card.js) keeps what it knows about a
+    // piece - its beacon edits, the spots a build could not reach - with the
+    // step, and puts it back here, as featureSwap's onUndone does for Lift.
+    if (typeof entry.onUndone === 'function') {
+      try { entry.onUndone(); } catch (err) { console.error('[undo] onUndone', err); }
+    }
     setStatus(entry.label || 'Undo: support edit reverted');
     return;
   }

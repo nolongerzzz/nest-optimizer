@@ -166,10 +166,14 @@ var NSO_GSCOPE_SUPPORT = (function () {
     return scan;
   }
 
+  /* With a region: G-scope's own supports for that triangle region. The
+     Supports card's (meta.card) number their regions on the beacon grid, so
+     the same number names a different place; they are never this row's to
+     replace or count as standing. Without one: every support on the piece. */
   function supportsFor(hostSourceId, regionId) {
     return (state.models || []).filter(function (m) {
       return m && m.nsoSupport && m.nsoSupport.hostSourceId === hostSourceId &&
-        (regionId == null || m.nsoSupport.regionId === regionId);
+        (regionId == null || (m.nsoSupport.regionId === regionId && !m.nsoSupport.card));
     });
   }
 

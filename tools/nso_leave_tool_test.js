@@ -353,10 +353,10 @@ withApp(async (page, logs) => {
        the six that were Finish's sections in the column. Then a member open
        inside a merged one (A-B-C in Join, Pack in Plate, Photo in Gen+): the
        double-click shuts it and the drop-down holding it. */
-    const COL = ['menu-bend', 'menu-align', 'menu-plates', 'menu-joins', 'menu-seat', 'menu-bit',
+    const COL = ['menu-bend', 'menu-align', 'menu-plates', 'menu-joins', 'menu-seat', 'menu-supports', 'menu-bit',
                  'menu-shape', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-measure', 'menu-repair'];
     const ids = await page.evaluate(() => [...document.querySelectorAll('.vp-col-menu')].map(d => d.id));
-    check('the shell holds these twelve', JSON.stringify(ids) === JSON.stringify(COL), ids.join(', '));
+    check('the shell holds these thirteen', JSON.stringify(ids) === JSON.stringify(COL), ids.join(', '));
     for (const id of COL.concat(['menu-abc', 'menu-pack', 'menu-photo'])) {
       await page.evaluate(() => document.querySelectorAll('.vp-menu').forEach(d => { d.open = false; }));
       await page.click('#' + id + ' > summary');

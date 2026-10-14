@@ -7,6 +7,11 @@ actually needed, let the user click to generate exactly there, and let them
 change or remove any one support afterwards. Nothing is painted and nothing is
 generated wholesale.
 
+The main page has its own card for the same job, the column's Supports
+(`docs/SUPPORTS-CARD.md`): the same detection and planner, a piece at a time.
+This row's `supportsFor(host, region)` leaves the card's supports
+(`meta.card`) alone - the card numbers regions on the beacon grid.
+
 ```
 npm run gcode:gscope-support    tools/gcode-test/gscope-support-drive-check.mjs, 52 checks, headless Chromium
 ```

@@ -49,7 +49,7 @@ const RIGHT = [['btn-undo', 'UNDO'], ['btn-delete-placed', 'REMOVE'], ['menu-exp
 const UNDER_EXPORT = ['menu-plates', 'PLATE'];
 const GROUPS = [
   [['menu-scale', 'SCALE'], ['menu-cut', 'CUT'], ['menu-crop', 'CROP'], ['menu-joins', 'JOIN'],
-   ['btn-shell-lift', 'LIFT'], ['menu-seat', 'SEAT'], ['menu-bit', 'SUBTRACT']],
+   ['btn-shell-lift', 'LIFT'], ['menu-seat', 'SEAT'], ['menu-supports', 'SUPPORTS'], ['menu-bit', 'SUBTRACT']],
   [['menu-shape', 'SHAPE'], ['menu-paint', 'PAINT'], ['menu-surface', 'SURFACE'], ['menu-sculpt', 'SCULPT']],
   [['menu-measure', 'MEASURE & CHECK'], ['menu-repair', 'CHECK & REPAIR']],
   [['btn-microscope', 'G-SCOPE']],
@@ -82,6 +82,8 @@ const HOLDS = {
   'menu-joins': ['menu-join', 'btn-join-start', 'join-slot-a', 'join-slot-b', 'join-slot-c', 'btn-join', 'btn-join-clear',
                  'menu-abc', 'triple-mode', 'btn-join-triple'],
   'menu-seat': ['btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid'],
+  'menu-supports': ['supports-card', 'btn-sup-all', 'btn-sup-none', 'btn-sup-paint', 'sel-sup-paint', 'sup-style', 'sup-size',
+                    'sup-rest', 'btn-sup-remove'],
   'menu-bit': ['btn-subtract', 'btn-extract-bit'],
   'menu-shape': ['inp-soften-r', 'chk-full-wrap', 'btn-soften', 'sel-edge-treat', 'btn-smooth', 'btn-extend', 'btn-mirror',
                  'btn-thicken-out', 'btn-thicken-in', 'btn-hollow', 'btn-hollow-safe', 'btn-fill', 'btn-foam', 'foam-panel'],
