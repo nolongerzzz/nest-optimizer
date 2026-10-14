@@ -1,6 +1,9 @@
 /*
- * G-scope Lift - take details off a face, and leave the face flat.
- * The app side of nso_lift.js (Phase 1) and nso_lift_auto.js (Lift 2).
+ * G-scope Lift - take details off a face, and leave the face as it was round
+ * them: flat on a flat face, the surrounding surface carried across on a
+ * curved one.
+ * The app side of nso_lift.js (Phase 1), nso_lift_auto.js (Lift 2) and
+ * nso_lift_curved.js (Lift 3).
  * READ docs/LIFT.md FIRST.
  * ----------------------------------------------------------------------------
  *
@@ -28,6 +31,15 @@
  *      (nsoFreeSpot, app-core.js - Picture's placement, now shared). One
  *      Undo ('featureSwap', the step Detach takes) puts everything back.
  *
+ *   LIFT 3 (curved bases). Every height-map read - Pick on a face Phase 1
+ *   calls curved, and Strip - asks NSO_LiftAuto.analyse for { curved: true }:
+ *   a detail whose base bends is no longer refused, it is cut along the
+ *   surface round it and the plate is made good there with that surface
+ *   carried across, welded to its neighbours at the rim (nso_lift_curved.js).
+ *   On a flat face nothing changes: the same islands, the same flat cuts,
+ *   bit for bit. What the fill cannot know (a detail bigger than the surface
+ *   measured round it, rough neighbours) is said after the lift, in words.
+ *
  *   STRIP (Lift 2)
  *   After Pick base face, everything the height map finds on that face, each
  *   island at its own plane, grouped by what it is geometrically: small
@@ -52,7 +64,8 @@
  * WHAT IS REUSED
  *   geometry    NSO_Lift.analyse / offered / lift (nso_lift.js), and
  *               NSO_LiftAuto.analyse / offered / lift / remove
- *               (nso_lift_auto.js); both cap with rawFlatCapLoops (app-cut.js)
+ *               (nso_lift_auto.js, with NSO_LiftCurved's fill for a curved
+ *               base); all cap with rawFlatCapLoops (app-cut.js)
  *   the swap    NSO_sculptCommitRaw (app-sculpt.js) + the 'featureSwap' undo
  *               step app-detach.js folds it into
  *   new pieces  addModel + placeModelMovable, as Detach adds its flange
@@ -179,18 +192,21 @@ var NSO_GSCOPE_LIFT = (function () {
    * something on it - else the refusal, in Phase 1's words. A refusal comes
    * back { ok: false, reason } in full sentences ending "Nothing changed."
    */
+  // Lift 3: a base that bends is followed, not refused (nso_lift_curved.js)
+  var MAP_OPTS = { curved: true };
+
   function analyseFor(raw, tri, keepEmpty) {
     function words(x) { return (/^Lift/.test(x) ? '' : 'Lift: ') + x + (/[.]$/.test(x) ? '' : '.') + ' Nothing changed.'; }
     if (tab === 'strip') {
       if (!LA()) return { ok: false, reason: 'Strip needs nso_lift_auto.js. Nothing changed.' };
-      var s = LA().analyse(raw, tri);
+      var s = LA().analyse(raw, tri, MAP_OPTS);
       if (!s.ok) return { ok: false, refused: s.refused, reason: words(s.reason) };
       return s;
     }
     var r = LF().analyse(raw, tri);
     if (r.ok) return r;
     if (r.refused === 'curved' && LA()) {
-      var q = LA().analyse(raw, tri);
+      var q = LA().analyse(raw, tri, MAP_OPTS);
       if (q.ok && (q.islands.length || keepEmpty)) { q.curvedWords = r.reason; return q; }
       return { ok: false, refused: r.refused, reason: words(r.reason) +
         (q.ok ? ' Read as a height map instead, nothing stands out of it more than ' + q.map.thresholdMm.toFixed(2) + ' mm either.' : '') };
@@ -277,6 +293,16 @@ var NSO_GSCOPE_LIFT = (function () {
     return Object.keys(why).map(function (k) { return why[k] + ': ' + k; });
   }
 
+  /** How the offered ones come off: each at its own flat cut, or (Lift 3)
+      along the surface it stands on. */
+  function cutWords(ids, lifted) {
+    var curved = ids.filter(function (id) { return A.islands[id].fill === 'curved'; }).length;
+    if (!curved) return lifted ? 'each lifted at its own flat cut' : 'each at its own flat cut';
+    return (curved === ids.length ? 'each ' : curved + ' of them ') + (lifted ? 'lifted along' : 'cut along') + ' the surface ' +
+      (curved === 1 && ids.length === 1 ? 'it stands' : 'they stand') + ' on, the face made good where ' +
+      (curved === 1 ? 'it stood' : 'they stood');
+  }
+
   /** The read-out for a height-map analysis: Pick on a curved face, or Strip. */
   function mapReadout() {
     var off = LA().offered(A, minH), ok = A.islands.filter(function (I) { return I.status === 'ok'; });
@@ -293,16 +319,17 @@ var NSO_GSCOPE_LIFT = (function () {
       off.forEach(function (id) { g[A.islands[id].group]++; });
       var found = ['dots', 'lines', 'large'].filter(function (k) { return g[k]; }).map(function (k) { return countOf(g[k], k); });
       parts.push('Found ' + (found.length ? found.join(', ') : 'nothing to lift') + ' standing out more than ' + f2(minH) + ' mm' +
-        (off.length ? ' (' + f2(Math.min.apply(null, hs)) + ' - ' + f2(Math.max.apply(null, hs)) + ' mm), each at its own flat cut' : '') + '.');
+        (off.length ? ' (' + f2(Math.min.apply(null, hs)) + ' - ' + f2(Math.max.apply(null, hs)) + ' mm), ' + cutWords(off, false) : '') + '.');
     } else {
       parts.push(off.length + ' detail' + (off.length === 1 ? '' : 's') + ' stand' + (off.length === 1 ? 's' : '') + ' out more than ' +
-        f2(minH) + ' mm' + (off.length ? ' (' + f2(Math.min.apply(null, hs)) + ' - ' + f2(Math.max.apply(null, hs)) + ' mm), each lifted at its own flat cut' : '') + '.');
+        f2(minH) + ' mm' + (off.length ? ' (' + f2(Math.min.apply(null, hs)) + ' - ' + f2(Math.max.apply(null, hs)) + ' mm), ' + cutWords(off, true) : '') + '.');
     }
     if (low) parts.push(low + ' lower, not offered (grey).');
     if (cant) parts.push(cant + ' can\'t be lifted - ' + cantWords().join('; ') + '.');
     if (tab === 'strip') {
       if (chosen.size) parts.push(chosen.size + ' ticked: Lift ' + chosen.size + ' makes each its own piece, Remove ' + chosen.size +
-        ' throws ' + (chosen.size === 1 ? 'it' : 'them') + ' away; either way the face is left flat where they stood.');
+        ' throws ' + (chosen.size === 1 ? 'it' : 'them') + ' away; either way the face is left ' +
+        (Array.from(chosen).some(function (id) { return A.islands[id].fill === 'curved'; }) ? 'as it was round them' : 'flat') + ' where they stood.');
       else if (off.length) parts.push('Nothing ticked.');
       if (off.length) parts.push('Untick a group to keep it on the plate; click a detail to tick or untick it alone.');
     } else if (chosen.size) {
@@ -583,13 +610,19 @@ var NSO_GSCOPE_LIFT = (function () {
       gone.forEach(function (t) { if (t < seed) before++; });
       var memo = { modelId: m.id, raw: m.rawTris, seed: seed, kind: kind };
 
+      // Lift 3: where a detail stood on a curve, the surface round it is
+      // carried across instead of a flat cap
+      var nCurved = (rem ? r.removed : r.pieces).filter(function (pc) { return pc.fill; }).length;
+      var where = nCurved ? (nCurved === want.length ? '' : 'flat where ' + (want.length - nCurved === 1 ? 'one' : 'some') + ' stood on a flat face, ') +
+        'the surface round ' + (want.length === 1 ? 'it' : 'them') + ' carried across where ' + (want.length === 1 ? 'it' : 'they') +
+        ' stood and welded to it at the rim' : 'flat where ' + (want.length === 1 ? 'it' : 'they') + ' stood';
       var txt = rem ? 'Removed ' + want.length + ' detail' + (want.length === 1 ? '' : 's') + ' from ' + m.name + ' (' +
-        r.volumes.removed.toFixed(2) + ' mm³, thrown away): it is flat where ' + (want.length === 1 ? 'it' : 'they') +
-        ' stood and every other triangle is as it was. One Undo (Ctrl+Z) puts ' + (want.length === 1 ? 'it' : 'them') + ' back.' :
+        r.volumes.removed.toFixed(2) + ' mm³, thrown away): it is ' + where + ', and every other triangle is as it was. One Undo (Ctrl+Z) puts ' +
+        (want.length === 1 ? 'it' : 'them') + ' back.' :
         'Lifted ' + r.pieces.length + ' detail' + (r.pieces.length === 1 ? '' : 's') + ' off ' + m.name +
-        ' (' + r.volumes.pieces.toFixed(2) + ' mm³): it is flat where ' + (r.pieces.length === 1 ? 'it' : 'they') +
-        ' stood, every other triangle as it was, and ' + (r.pieces.length === 1 ? 'the new piece is' : 'the new pieces are') +
-        ' on free plate beside it. One Undo (Ctrl+Z) puts it all back.';
+        ' (' + r.volumes.pieces.toFixed(2) + ' mm³): it is ' + where + ', every other triangle as it was, and ' +
+        (r.pieces.length === 1 ? 'the new piece is' : 'the new pieces are') + ' on free plate beside it. One Undo (Ctrl+Z) puts it all back.';
+      if (r.notes && r.notes.length) txt += ' Note: ' + r.notes.join('; ') + '.';
       var before0 = state.undoStack.length;
       if (typeof NSO_sculptCommitRaw !== 'function' || !NSO_sculptCommitRaw(m, r.plate, 'liftReplace', txt)) {
         takeOff(added);

@@ -20,8 +20,10 @@
      3. Remove 10: no pieces, the plate flat and closed; Ctrl+Z bit for bit
      4. back to Pick: Phase 1 on the flat top, unchanged
      5. the dish, Pick: Phase 1 says curved, so the map reads it - six dots
-        offered, the long squiggle refused in words; a dot lifts; Ctrl+Z
-     6. the dish, Strip: the can't-lift row says why; Lift 6; Ctrl+Z
+        and the long squiggle offered (Lift 3: the squiggle, refused by
+        Lift 2 as bending, is cut along the dish); a dot lifts; Ctrl+Z
+     6. the dish, Strip: 6 small dots and 1 squiggle, none can't-lift;
+        Lift 7; Ctrl+Z
 */
 'use strict';
 
@@ -281,8 +283,10 @@ withApp(async (page, logs) => {
   await clickTri(page, dishName, T_DISH);
   const A5 = await analysisInfo(page), r5 = await readout(page);
   check('Phase 1 calls the dish curved, so the map reads it: the read-out says so', A5 && A5.kind === 'map' && /This face bends, so it is read from a height map/.test(r5), r5.slice(0, 200));
-  check('six dots offered, each at its own flat cut; the squiggle refused in words', A5.offered.length === 6 && A5.status.filter(s => s === 'bends').length === 1 &&
-    /1 can't be lifted - 1: the surface under it bends too much for a flat cut/.test(r5), r5);
+  // Lift 3 (docs/LIFT.md section 6): the squiggle Lift 2 refused as bending
+  // is now cut along the dish, so all seven are offered and none refused.
+  check('six dots and the squiggle offered, each cut along the dish; nothing refused', A5.offered.length === 7 && A5.status.every(s => s === 'ok') &&
+    /each lifted along the surface they stand on/.test(r5) && !/can't be lifted/.test(r5), r5);
   await shotScope(page, '5-pick-dish');
   await clickTri(page, dishName, T_DISHDOT);
   check('a click on a dot chooses it', (await page.evaluate(() => NSO_GSCOPE_LIFT.chosen())).length === 1, await readout(page));
@@ -302,9 +306,9 @@ withApp(async (page, logs) => {
   console.log('\n=== 6. the dish, Strip ===');
   await page.click('#ms-lift-tab-strip');
   const q6 = await panel(page), A6 = await analysisInfo(page);
-  check('Strip on the dish: 6 small dots, 1 can\'t lift - and the row says why', A6 && A6.kind === 'map' && q6.groups.dots.count === '6' && q6.groups.cant.count === '1' &&
-    q6.why.length === 1 && /bends too much for a flat cut/.test(q6.why[0]) && q6.groups.cant.disabled, q6.why.join(' | '));
-  check('Lift 6', q6.lift.text === 'Lift 6');
+  check('Strip on the dish: 6 small dots, 1 line or squiggle, none can\'t lift (Lift 3)', A6 && A6.kind === 'map' && q6.groups.dots.count === '6' &&
+    q6.groups.lines.count === '1' && q6.groups.cant.count === '0' && q6.why.length === 0, JSON.stringify(A6 && A6.groups));
+  check('Lift 7', q6.lift.text === 'Lift 7');
   await shotScope(page, '6-strip-dish');
   const b6 = await plateState(page);
   await page.click('#ms-btn-lift');
@@ -313,9 +317,9 @@ withApp(async (page, logs) => {
   const new6 = a6.models.filter(m => !b6.models.some(b => b.id === m.id));
   let v6 = 0, c6 = true;
   for (const m of new6) { const p = await pieceInfo(page, m.id); v6 += p.volume; if (!p.closed) c6 = false; }
-  check('six closed pieces; the dish stays closed; volumes add up', new6.length === 6 && c6 && host6.closed &&
+  check('seven closed pieces; the dish stays closed; volumes add up', new6.length === 7 && c6 && host6.closed &&
     Math.abs(host6.volume + v6 - await page.evaluate(s => NSO_Lift.volume(new Float32Array(s)), DSRC)) < 1e-6 * host6.volume);
-  check('...and the squiggle stays on the dish, still refused', (await analysisInfo(page)).islands === 1);
+  check('...and nothing is left standing on the dish', (await analysisInfo(page)).islands === 0);
   await shotScope(page, '7-strip-dish-after-lift');
   await ctrlZ(page);
   const U6 = await raw(page, dishId);

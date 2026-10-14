@@ -1334,13 +1334,16 @@
        detection, generators and union it calls. See docs/GCODE-SUPPORTS.md. -->
   <script src="app-gscope-support.js?v=gsup2"></script>
   <script src="app-gscope-slice.js?v=slice3"></script>
-  <!-- Lift: details off a face, the plate left flat. After nso_lift.js
-       (Phase 1: a flat face), nso_lift_auto.js (Lift 2: the height map,
-       needs nso_lift.js), app-cut.js (rawFlatCapLoops), app-sculpt.js (the
-       commit) and app-microscope.js (the hooks). See docs/LIFT.md. -->
+  <!-- Lift: details off a face, the face left as it was round them. After
+       nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
+       repair under a detail lifted off a curved base), nso_lift_auto.js
+       (Lift 2: the height map, needs nso_lift.js; Lift 3 calls the repair),
+       app-cut.js (rawFlatCapLoops), app-sculpt.js (the commit) and
+       app-microscope.js (the hooks). See docs/LIFT.md. -->
   <script src="nso_lift.js?v=lift2"></script>
-  <script src="nso_lift_auto.js?v=lift2"></script>
-  <script src="app-gscope-lift.js?v=lift2"></script>
+  <script src="nso_lift_curved.js?v=lift3"></script>
+  <script src="nso_lift_auto.js?v=lift3"></script>
+  <script src="app-gscope-lift.js?v=lift3"></script>
 
 
   <script src="app-ux.js?v=inside9"></script>
