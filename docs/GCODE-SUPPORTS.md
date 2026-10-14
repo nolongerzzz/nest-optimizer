@@ -49,9 +49,10 @@ is not itself a support. One marker is drawn per region:
 
 - **The region itself:** its own flagged triangles, as a tinted surface lifted
   0.02 mm off the face.
-- **A ping:** a sphere at `region.point` with a ring in the plane of the face.
-  It is drawn on top of everything, so it can be seen and clicked through the
-  piece.
+- **A ping:** a sphere at `region.point`. It is drawn on top of everything, so
+  it can be seen and clicked through the piece. (The ring round it is gone: it
+  read as "selected". A region that shows beacons - section 2a - hides its
+  ping.)
 
 A marker is **red** while nothing holds that region up, and **green** while a
 support made for it still stands under it: every vertex of the support that
@@ -69,6 +70,49 @@ way G-scope's plate document already holds it. That is the print orientation,
 so a piece that has been tipped gets markers for where it overhangs now.
 `occluders` are the other non-support pieces, so a piece standing over another
 is not flagged where the other holds it up.
+
+## 2a. Beacons and the card
+
+Picking a region (clicking its marker) draws its **beacons**: exactly
+`region.beacons`, which `detectOverhangs` carries on every region through
+`nso_support_beacons.js` (docs/SUPPORT-BEACONS.md) - the spots on that
+region's own triangles that need holding, whatever the style. A disc lying in
+the surface for `need.kind` face, gap, edge and tip; a tick along the beacon's
+`normal` (the side approach, out of the wall) for ridge. The card only reads
+them: a drawn beacon is a shallow copy with one field added, `state`.
+
+After **Generate** the beacons take their state from what the plan reports
+about its own contact points: **held** (green, the support stands on the
+plate), **resting on the part** (amber), **unreachable** (red, in the plan's
+`blocked` list). A beacon takes the state of the nearest contact that covers
+it - within the tree lattice's achieved covering radius, or for a strut within
+the beacon's own grid cell (pitch / sqrt 2) - and a beacon no contact covers
+stays planned (white): a strut holds one spot, not the region. A plan refused
+while finding a way down (base, aim, trunk or branches) marks every beacon
+unreachable; one refused earlier (the region too wide for one trunk) leaves
+them planned. A support keeps its beacons in `nsoSupport.beacons`, drawn again
+whenever its region is still held. They are drawn over everything, like the
+pings, since the support's own tips cover the points they report on.
+
+Ridge beacons reach the card only where they sit on one of the triangle
+pass's region triangles; a rib with material close under it is not such a
+triangle (the triangle pass calls it self-supported), so most ridge beacons
+are in `det.beacons` / `det.beaconRegions` and not in any `region.beacons`.
+
+**The card** speaks in plain words: at most one decimal place, no angles, and
+after Generate the readout line
+`N contacts held from the plate · M resting on the part · K unreachable`. It
+stays open on the support it made. **May rest on the part** (off by default)
+offers every plate piece's upward faces below the region to the planner as
+`bases` of kind `piece`, beside the plate; `nearestBase` picks the nearest
+clear one as it always does.
+
+The card sits next to its marker, below it, and always wholly inside what the
+window shows of the viewport: no room below, it flips above; no room either
+way, it pins to the shell's drop-down spot (`--shell-panel-x/-y`). It is
+placed again whenever its text changes and on resize, and scrolls inside
+itself past the window's height. `support:ui`
+(`tools/nso_support_ui_drive_check.mjs`) drives all of this at 1280 x 800.
 
 ## 3. Point-click generation
 
