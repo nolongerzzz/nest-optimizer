@@ -26,11 +26,13 @@
      5  fields repopulate on selection change and on a pose change; Whole x
         resets to 1
      6  the card fits a 900 px-tall window without scrolling, one line a row
-     7  Stock box -> Bar, Length / Width / Height
-     8  Stock sphere -> the gate in plain words, Offset shown, no L / W / H;
+     7  Stock box -> Bar, Length / Width / Height; Offset +1 grows it 2 mm,
+        Undo; a shrink through the floor refused
+     8  Stock sphere -> Sphere Ø and its A · B · C rows (nso_shapes.js), no
+        Offset; A 50 by a real click, Undo. Stock torus -> Ring Ø / Tube Ø;
         Longest 50 by a real click (the card hides Longest where a named field
-        shows the same number, so a sphere is where it is clicked); Offset +1
-        grows it 2 mm, Undo; a shrink through the floor refused
+        shows the same number - a torus's outside Ø is no row's number, so it
+        is where it is clicked), Undo; Ring Ø by a real click, Undo
      9  the Offset row's sentence under it - thin features keep their
         thickness - and fixtures/lid_strap.stl, Offset +0.5 by a real click:
         the plate thickens 1 mm, the 0.6 mm strap stays 0.6 mm
@@ -70,7 +72,8 @@ const select = (page, id) => page.evaluate(i => {
   selectPlaced(idx);
 }, id);
 
-const ROWS = ['length', 'width', 'height', 'ring-outer', 'ring-wall', 'rod-diameter', 'offset', 'factor', 'longest'];
+const ROWS = ['length', 'width', 'height', 'ring-outer', 'ring-wall', 'rod-diameter', 'offset',
+              'cap-length', 'cap-diameter', 'ell-a', 'ell-b', 'ell-c', 'torus-ring', 'torus-tube', 'factor', 'longest'];
 
 /* Reads the card the way a user does: open the Scale menu (the line is only
    read while the card is open), wait for it to render, read it. */
@@ -330,37 +333,65 @@ withApp(async (page, logs) => {
     c7.readout === 'Bar ' + show(bm.x) + ' L × ' + show(bm.y) + ' W × ' + show(bm.z) + ' H · fits A1 Mini', c7.readout);
   check('Length, Width, Height and Offset shown; no Longest', c7.rows === 'length,width,height,offset,factor', c7.rows);
 
-  console.log('\n=== 8. Stock sphere -> the gate in plain words; Offset ===');
+  const so = await setAndPress(page, 'scale-offset', 'btn-scale-offset', 1, 'Offset (done|refused)|stood down');
+  const c7o = await card(page);
+  console.log('   Offset +1: ' + so);
+  check('Offset +1 grows every side 1 mm: 2 mm on each size', /^Offset done - out 1 mm/.test(so) &&
+    ['x', 'y', 'z'].every(k => Math.abs(c7o.size[k] - c7.size[k] - 2) < 0.02),
+    ['x', 'y', 'z'].map(k => (c7o.size[k] - c7.size[k]).toFixed(4)).join(' / '));
+  check('...and the field is empty again for the next one', c7o.val.offset === '', c7o.val.offset);
+  const u7 = await undo(page);
+  check('Undo names the offset and restores the box', /Undo: Offset reverted/.test(u7) && (await card(page)).soup === c7.soup, u7);
+  const sr = await setAndPress(page, 'scale-offset', 'btn-scale-offset', -20, 'Offset (done|refused)|stood down');
+  console.log('   Offset -20: ' + sr);
+  check('Offset -20 refused, naming the floor', /^Offset refused - piece unchanged \(its . size of .* would go through zero, under the 0\.42 mm floor/.test(sr), sr);
+
+  console.log('\n=== 8. Stock sphere -> A · B · C; Stock torus -> Ring Ø / Tube Ø, Longest ===');
   const sph = await makeStock(page, 'sphere');
   const c8 = await card(page);
   const d = show(sph.sizing.measure.diameter);
   console.log('   generator: diameter ' + sph.sizing.measure.diameter);
   console.log('   readout:   ' + c8.readout + '   rows ' + c8.rows);
-  check('the three sizes and the gate that failed, in plain words',
-    c8.readout === d + ' L × ' + d + ' W × ' + d + ' H · it is curved or tapered all over (100% of its surface), ' +
-      'so only an even offset and whole-piece scaling apply · fits A1 Mini', c8.readout);
-  check('rows: Offset, Whole ×, Longest - no Length / Width / Height', c8.rows === 'offset,factor,longest', c8.rows);
-  check('Longest prefilled with the longest edge', c8.val.longest === d, c8.val.longest);
+  check('the readout is the Stock sphere it carries', c8.readout === 'Sphere Ø' + d + ' (Stock) · fits A1 Mini', c8.readout);
+  check('rows: A, B, C, Whole × - no Offset, no Longest (A is the longest)', c8.rows === 'ell-a,ell-b,ell-c,factor', c8.rows);
+  check('A, B and C prefilled with the diameter', ['ell-a', 'ell-b', 'ell-c'].every(k => c8.val[k] === d), JSON.stringify(c8.val));
+  const sa = await setAndPress(page, 'scale-ell-a', 'btn-scale-ell-a', 50, 'A (done|refused)|stood down');
+  const ca = await card(page);
+  console.log('   A 50: ' + sa);
+  check('A 50, by a real click: X lands on 50, Y and Z unchanged, the field re-reads 50.0',
+    /^A done - A /.test(sa) && Math.abs(ca.size.x - 50) < 1e-4 && ca.size.y === c8.size.y && ca.size.z === c8.size.z &&
+    ca.val['ell-a'] === '50.0', ca.size.x + ' / ' + ca.size.y + ' / ' + ca.size.z);
+  check('...and the readout says ellipsoid', /^Ellipsoid 50\.0 A × /.test(ca.readout), ca.readout);
+  const ua = await undo(page);
+  const cu = await card(page);
+  check('Undo restores the sphere and its reading', /Undo: Scale reverted/.test(ua) && cu.soup === c8.soup && cu.readout === c8.readout, ua);
+
+  const tor = await makeStock(page, 'torus');
+  const ct = await card(page);
+  const tm = tor.sizing.measure;
+  console.log('   generator: ring ' + tm.ring_radius + ', tube ' + tm.tube_radius + ', diameter ' + tm.diameter);
+  console.log('   readout:   ' + ct.readout + '   rows ' + ct.rows);
+  check('the readout is the Stock torus it carries',
+    ct.readout === 'Torus ring Ø' + show(2 * tm.ring_radius) + ' · tube Ø' + show(2 * tm.tube_radius) + ' (Stock) · fits A1 Mini', ct.readout);
+  check('rows: Ring Ø, Tube Ø, Whole ×, Longest', ct.rows === 'torus-ring,torus-tube,factor,longest', ct.rows);
+  check('Longest prefilled with the outside Ø', ct.val.longest === show(tm.diameter), ct.val.longest);
   const sl = await setAndPress(page, 'scale-target', 'btn-scale-dim', 50, 'Scale done|refused|stood down');
   const cl = await card(page);
   console.log('   Longest 50: ' + sl);
   check('Longest 50, by a real click: the longest edge lands on 50 and the field re-reads 50.0',
     /^Scale done/.test(sl) && Math.abs(Math.max(cl.size.x, cl.size.y, cl.size.z) - 50) < 1e-4 && cl.val.longest === '50.0', cl.val.longest);
   await undo(page);
-  check('...Undo restores the sphere', (await card(page)).soup === c8.soup);
-  const so = await setAndPress(page, 'scale-offset', 'btn-scale-offset', 1, 'Offset (done|refused)|stood down');
-  const c9 = await card(page);
-  console.log('   Offset +1: ' + so);
-  check('Offset +1 grows every side 1 mm: 2 mm on each size', /^Offset done - out 1 mm/.test(so) &&
-    ['x', 'y', 'z'].every(k => Math.abs(c9.size[k] - c8.size[k] - 2) < 0.02),
-    ['x', 'y', 'z'].map(k => (c9.size[k] - c8.size[k]).toFixed(4)).join(' / '));
-  check('...and the field is empty again for the next one', c9.val.offset === '', c9.val.offset);
-  const u9 = await undo(page);
-  check('Undo names the offset and restores the sphere', /Undo: Offset reverted/.test(u9) && (await card(page)).soup === c8.soup, u9);
-  const sr = await setAndPress(page, 'scale-offset', 'btn-scale-offset', -20, 'Offset (done|refused)|stood down');
-  console.log('   Offset -20: ' + sr);
-  check('Offset -20 refused, naming the floor', /^Offset refused - piece unchanged \(its . size of .* would go through zero, under the 0\.42 mm floor/.test(sr), sr);
-  await shot(page, '04-sphere-offset');
+  check('...Undo restores the torus', (await card(page)).soup === ct.soup);
+  const ring = Math.round(2 * tm.ring_radius) + 10;
+  const sg = await setAndPress(page, 'scale-torus-ring', 'btn-scale-torus-ring', ring, 'Ring Ø (done|refused)|stood down');
+  const cg = await card(page);
+  console.log('   Ring Ø ' + ring + ': ' + sg);
+  check('Ring Ø by a real click: the outside grows by the change, the height is held',
+    /^Ring Ø done/.test(sg) && Math.abs(cg.size.x - (ring + 2 * tm.tube_radius)) < 1e-3 && cg.size.y === ct.size.y &&
+    cg.val['torus-ring'] === show(ring), cg.size.x + ' / ' + cg.size.y);
+  const ug = await undo(page);
+  check('Undo restores the torus', /Undo: Scale reverted/.test(ug) && (await card(page)).soup === ct.soup, ug);
+  await shot(page, '04-torus-rows');
 
   console.log('\n=== 9. The Offset sentence; a lid strap does not thicken ===');
   const NOTE = 'Thin features keep their thickness: a 0.6 mm lid strap stays 0.6 mm.';

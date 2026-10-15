@@ -345,6 +345,10 @@
        docs/INTEGRATION.md finding 3 was about in Clone. */
     session = { modelId: id };
     var madeModel = state.models.find(function (x) { return x && x.id === id; });
+    /* The piece carries its shape and parameters, so Scale's shape rows
+       (nso_shapes.js) read them rather than fitting the mesh. Keyed on this
+       rawTris array: any later bake replaces it and the tag goes with it. */
+    if (madeModel && madeModel.rawTris && typeof NSO_shapeTagStock === 'function') NSO_shapeTagStock(madeModel.rawTris, r.sizing);
     if (madeModel && madeModel.rawTris) {
       var fp0 = fingerprint(madeModel.rawTris);
       session.tris = fp0.tris; session.sum = fp0.sum;
@@ -443,6 +447,7 @@
     else session.undoPushed = true;
     if (typeof updateUndoBtn === 'function') updateUndoBtn();
 
+    if (typeof NSO_shapeTagStock === 'function') NSO_shapeTagStock(m.rawTris, r.sizing);
     var fp2 = fingerprint(m.rawTris);
     session.tris = fp2.tris; session.sum = fp2.sum;
     if (typeof updateAdjustUI === 'function') updateAdjustUI();
