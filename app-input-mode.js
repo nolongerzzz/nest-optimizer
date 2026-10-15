@@ -293,11 +293,12 @@
       shut(gen.querySelector('.vp-stock-menu'), 'stock');
     }
     menus().forEach(function (d) { shut(d, d.id || 'menu'); });
-    /* The shell's other drop-downs (Bend, Align, Join, Seat, Subtract, the
-       column's surface and check menus, Plate) own no input, so they are not
-       in menus(), but they are panels on the plate all the same - and so are
-       the members open inside the merged ones (Join, A-B-C; Plate, Pieces,
-       Pack; Gen+'s Picture and Photo). */
+    /* The shell's other drop-downs (Measure, Align, Join, Seat, Supports,
+       Add, Subtract, the column's surface and check menus) own no input, so
+       they are not in menus(), but they are panels on the plate all the same
+       - and so are the members open inside the merged ones (Join, A-B-C;
+       Gen+'s Picture and Photo). Plate & pieces is pinned open, not a
+       drop-down, and is left as it is. */
     Array.prototype.forEach.call(document.querySelectorAll('.vp-col-menu'),
       function (d) { shut(d, d.id || 'menu'); });
     Array.prototype.forEach.call(document.querySelectorAll('.vp-shell-menu .vp-menu'),

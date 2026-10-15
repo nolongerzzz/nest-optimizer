@@ -458,7 +458,7 @@ console.log('\n=== 9. reachability, paint scope, and what is NOT in scope ===');
   check('  ...labelled exactly "Texture"', />Texture<\/button>/.test(html));
   check('  ...with its pattern select and both numbers',
         /id="sel-texture-pattern"/.test(html) && /id="inp-texture-pitch"/.test(html) && /id="inp-texture-depth"/.test(html));
-  // Shell v2: the Surface menu, which was Finish's Surface section.
+  // Shell v2: the Surface menu, which was Finish's Surface section (Surface & edges since v3).
   const surfaceAt = html.indexOf('id="menu-surface"');
   const surface = surfaceAt < 0 ? '' : html.slice(surfaceAt, html.indexOf('</details>', surfaceAt));
   check('  ...in the Surface card, with the other skin rows',

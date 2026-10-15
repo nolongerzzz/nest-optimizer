@@ -472,11 +472,12 @@
     layout();
   }
 
-  /* Docked at the right edge, its top just under the top-right buttons -
-     since shell v2 that is the Export / Plate stack, Plate hanging under
-     Export. If an open drop-down's panel would cover the card, the card moves
-     to its left rather than under it. Measured, not assumed: every panel
-     opens at the shared spot on the left, so this finds no overlap today. */
+  /* Docked at the right edge, its top just under what holds the top-right
+     corner - since shell v3 the pinned Plate & pieces panel (and the Clear
+     plate / Optimize slabs beside it, whichever reaches lower). If an open
+     drop-down's panel would cover the card, the card moves to its left
+     rather than under it. Measured, not assumed: every panel opens at the
+     shared spot on the left, so this finds no overlap today. */
   function layout() {
     var el = $('findings-card');
     if (!el || el.hidden) return;
@@ -485,11 +486,12 @@
     var hr = host.getBoundingClientRect();
     var gap = 8;
     var top = gap + 36;
-    var anchor = document.querySelector('#menu-plates > summary');
-    if (anchor) {
+    ['plate-panel', 'btn-optimize'].forEach(function (id) {
+      var anchor = $(id);
+      if (!anchor) return;
       var sr = anchor.getBoundingClientRect();
-      if (sr.height > 0) top = Math.round(sr.bottom - hr.top + gap);
-    }
+      if (sr.height > 0) top = Math.max(top, Math.round(sr.bottom - hr.top + gap));
+    });
     var right = gap;
     var open = document.querySelector('.vp-shell-menu[open] > .vp-menu-body');
     if (open) {

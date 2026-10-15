@@ -240,20 +240,22 @@ earlier thread had already capped the body with `max-height` + `overflow-y`
 scrolling the canvas under the header, but it is the backstop, not the
 structure.
 
-The groups, and what decides which one a row belongs to:
+The groups, and what decides which one a row belongs to (shell v3; the
+groups are column cards now, and Measure is a top-row drop-down of its own):
 
 | Group | Holds |
 |---|---|
-| **Shape** | changes the form: Soften, Smooth, Extend, Bend, Tube edge, Mirror, Bridge, Thicken (Fatten / Shrink moved to the Scale card's Offset) |
+| **Shape** | bends the form it has: Smooth, Bend, Tube edge (Flare, Roll, Neck) |
+| **Add** | builds material on: Fill / Densify, Foam, Thicken out / in, Extend, Bridge |
+| **Subtract** | takes material away: Subtract B from A, Extract bit, Carve, Hollow, Hollow to safe min, Lift (G-scope's Lift row) |
 | **Paint** | the mask itself: Paint Selected / Excluded / Clear, Delete painted, Extract selection |
-| **Surface** | adds relief to a face: Skin face / wrap / patch, Texture |
-| **Sculpt** | freehand and local: Brush, Carve |
-| **Measure & check** | read-only inspection: Measure, Check piece. Nothing here may mutate the piece — that is the line the group is drawn on, so a tool that bakes does not belong in it however diagnostic it feels |
-| **Check & repair** | finds or fixes defects: Cap open faces, Repair, Seal, Non-solid, Solidify |
+| **Surface & edges** | edges and faces: Soften, Mirror, Skin face / wrap / patch, Trace raster, Texture |
+| **Sculpt** | freehand: the Brush |
+| **Check & repair** | finds or fixes defects: Check piece (read-only), Cap open faces, Repair, Seal, Non-solid, Solidify |
 
 *Clear plate* is outside every group on purpose: it is the only control that
 is not about the selected piece, and it must never be a click hidden behind a
-fold.
+fold - it is a top-row slab, under Remove.
 
 Three things to keep when you add to it:
 

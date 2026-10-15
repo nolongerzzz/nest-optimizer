@@ -12,13 +12,13 @@ const check = (name, cond, detail) => {
   if (!cond) fails++;
 };
 
-/* Every top-level drop-down on the page (shell v2): the row with Plate under
-   Export, and the column. Members held inside one (Gen+'s four, Join's two,
-   Plate's three) are not top-level; section 3 covers them. */
-const ROW = ['menu-import', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-align',
-             'menu-gen', 'menu-export', 'menu-plates'];
-const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'menu-seat', 'menu-supports', 'menu-bit',
-             'menu-shape', 'menu-bend', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-measure', 'menu-repair'];
+/* Every top-level drop-down on the page (shell v3): the row, and the column.
+   Members held inside one (Gen+'s four, Join's two) are not top-level;
+   section 3 covers them. Plate & pieces is pinned open, not a drop-down. */
+const ROW = ['menu-import', 'menu-measure', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-align',
+             'menu-gen', 'menu-export'];
+const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'menu-seat', 'menu-supports', 'menu-add', 'menu-bit',
+             'menu-shape', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-repair'];
 const ALL = ROW.concat(COL);
 
 withApp(async (page, logs) => {
@@ -51,14 +51,15 @@ withApp(async (page, logs) => {
   {
     /* The panels open at one spot right of the column and under the row, so
        none of them can reach a button that is not a drop-down - Undo, Remove,
-       the locks in the row; Lift, G-scope and the view row (X, the eye, the
-       target) in the column - at any height. */
+       Clear plate, Optimize, the locks in the row; the pinned Plate & pieces
+       panel; G-scope and the view row (X, the eye, the target) in the
+       column - at any height. */
     for (const h of [720, 900]) {
       await page.setViewportSize({ width: 1280, height: h });
       await page.waitForTimeout(250);
       const hits = await page.evaluate((ids) => {
-        const tools = ['btn-undo', 'btn-delete-placed', 'btn-lock-pos', 'btn-plate-lock', 'btn-shell-lift',
-                       'btn-microscope', 'btn-xray', 'btn-watch', 'btn-frame-view']
+        const tools = ['btn-undo', 'btn-delete-placed', 'btn-lock-pos', 'btn-plate-lock', 'btn-clear-plate',
+                       'btn-optimize', 'plate-panel', 'btn-microscope', 'btn-xray', 'btn-watch', 'btn-frame-view']
           .map(id => document.getElementById(id)).filter(Boolean)
           .map(e => ({ id: e.id, r: e.getBoundingClientRect() }));
         const out = [];

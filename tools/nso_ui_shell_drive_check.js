@@ -14,19 +14,21 @@ const check = (name, cond, detail) => {
   if (!cond) fails++;
 };
 
-/* The user's drawing (shell v2). The row, left to right; Plate sits under
-   Export, off the row's line. The column's slabs top to bottom, in their
-   groups (tools/nso_shell_v2_test.js gates the groups' pitch and gaps); the
-   view row (X, the eye, the target) is pinned under them. */
-const ROW = ['menu-import', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-align',
+/* The user's drawing (shell v3). The row, left to right; Clear plate and
+   Optimize sit under Remove and Export, off the row's line, and the Plate &
+   pieces panel is pinned in the top-right corner. The column's slabs top to
+   bottom, in their groups (tools/nso_shell_v3_test.js gates the groups'
+   pitch and gaps); the view row (X, the eye, the target) is pinned under
+   them. */
+const ROW = ['menu-import', 'menu-measure', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-align',
              'menu-gen', 'btn-lock-pos', 'btn-plate-lock', 'btn-undo', 'btn-delete-placed', 'menu-export'];
-const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'btn-shell-lift', 'menu-seat', 'menu-supports', 'menu-bit',
-             'menu-shape', 'menu-bend', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-measure', 'menu-repair',
-             'btn-microscope'];
-const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(['menu-plates'], COL.filter(id => id.startsWith('menu-')));
+const COL = ['btn-microscope', 'menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'menu-seat', 'menu-supports',
+             'menu-add', 'menu-bit', 'menu-shape', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-repair'];
+const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(COL.filter(id => id.startsWith('menu-')));
 
-/* Every control that lived in the sidebar, and the drop-down it is in now
-   (Join and A-B-C under Join; Plate, Pieces and Pack under Plate). */
+/* Every control that lived in the sidebar, and where it is now (Join and
+   A-B-C under Join; Plate and Pieces in the pinned Plate & pieces panel;
+   Pack's Optimize a slab of its own, under Export). */
 const HOME = {
   'menu-joins': ['btn-join-start', 'join-slot-a', 'join-slot-b', 'join-slot-c',
                 'join-name-a', 'join-name-b', 'join-name-c', 'btn-join', 'btn-join-clear',
@@ -37,10 +39,10 @@ const HOME = {
   'menu-seat': ['btn-seat-support', 'seat-gap', 'seat-gap-value', 'btn-seat-here',
                 'chk-oversize-washer', 'oversize-gap', 'btn-seat-flush', 'btn-flip-port',
                 'btn-seat-grid'],
-  'menu-bit': ['btn-subtract', 'btn-extract-bit'],
-  'menu-plates': ['plate-select', 'custom-size', 'custom-w', 'custom-d', 'custom-h',
+  'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-carve', 'btn-hollow', 'btn-hollow-safe', 'btn-shell-lift'],
+  'plate-panel': ['plate-select', 'custom-size', 'custom-w', 'custom-d', 'custom-h',
                  'plate-dims', 'plate-area', 'plate-grid-show', 'chk-plate-grid-snap',
-                 'build-volume-warning', 'model-list', 'clone-count', 'btn-clone', 'btn-optimize'],
+                 'build-volume-warning', 'model-list', 'clone-count', 'btn-clone'],
   'menu-import': ['file-input', 'btn-load-stl', 'btn-library', 'library-list']
 };
 
@@ -75,6 +77,11 @@ withApp(async (page, logs) => {
       Object.keys(home).forEach(menu => home[menu].forEach(id => {
         const e = document.getElementById(id);
         if (!e) { missing.push(id); return; }
+        // The pinned panel is not a drop-down: it has no body to be in.
+        if (menu === 'plate-panel') {
+          if (!e.closest('#plate-panel') || e.closest('details')) wrong.push(id + ' not in the pinned panel');
+          return;
+        }
         const top = e.closest('.vp-shell-menu');
         if (!top || top.id !== menu || top.contains(e) === false ||
             !top.querySelector(':scope > .vp-menu-body').contains(e)) {
@@ -98,7 +105,8 @@ withApp(async (page, logs) => {
         const b = t.getBoundingClientRect();
         return { id, x: b.left, y: b.top, w: b.width, h: b.height, r: b.right, b: b.bottom };
       };
-      return { row: row.map(box), col: col.map(box),
+      const p = document.getElementById('plate-panel').getBoundingClientRect();
+      return { row: row.map(box), col: col.map(box), panel: { x: p.left, r: p.right, y: p.top },
                breaks: document.querySelectorAll('.vp-bar-break, .vp-bar-spacer').length };
     }, [ROW, COL]);
     const rowTop = r.row[0].y;
@@ -110,7 +118,7 @@ withApp(async (page, logs) => {
     check('no row break or spacer is left in the bar', r.breaks === 0, r.breaks + ' found');
     const imp = r.row[0];
     check('the column starts under Import, at its x', Math.abs(r.col[0].x - imp.x) < 0.5 && r.col[0].y > imp.b,
-      'import x ' + imp.x + ', scale x ' + r.col[0].x);
+      'import x ' + imp.x + ', g-scope x ' + r.col[0].x);
     check('the column runs top to bottom in the drawing\'s order',
       r.col.every((b, i) => Math.abs(b.x - imp.x) < 0.5 && (i === 0 || b.y > r.col[i - 1].b - 0.5)),
       r.col.map(b => b.id.replace('menu-', '') + '@' + Math.round(b.y)).join(' '));
@@ -122,10 +130,11 @@ withApp(async (page, logs) => {
       rowSized.map(Math.round).join(', '));
     const at = id => r.row[ROW.indexOf(id)];
     const lockPlate = at('btn-plate-lock'), undo = at('btn-undo'), exp = at('menu-export');
-    check('Undo, Remove and Export sit at the right end of the row',
-      exp.r > 1500 - 20 && undo.x > lockPlate.r + 100,
+    check('Undo, Remove and Export sit at the right end of the row, against the pinned panel in the corner',
+      Math.abs(r.panel.r - (1500 - 8)) < 1 && Math.abs(r.panel.y - rowTop) < 0.5 &&
+      exp.r < r.panel.x && r.panel.x - exp.r < 10 && undo.x > lockPlate.r + 100,
       'lock plate ends ' + Math.round(lockPlate.r) + ', undo at ' + Math.round(undo.x) +
-      ', export ends ' + Math.round(exp.r));
+      ', export ends ' + Math.round(exp.r) + ', panel ' + Math.round(r.panel.x) + '..' + Math.round(r.panel.r));
   }
 
   /* The row fits the window whatever the font. Label widths are the
@@ -133,10 +142,12 @@ withApp(async (page, logs) => {
      beyond it and another's overlapped it by 5 px - so this is checked with
      the page's own font AND with every row label made markedly wider (extra
      letter-spacing, standing in for a wider font): no slab may overlap the
-     next and Export must end inside the window. When room runs short the
-     middle group (Move .. Lock plate, Gen+ aside) gives way, cutting its
-     labels with an ellipsis; Import, Gen+ and the right group (Undo, Remove,
-     Export) keep their width. */
+     next and Export must end inside the window - left of the pinned Plate &
+     pieces panel where the two share the top (1280 px and over), under it
+     the panel drops below the stacks. When room runs short the middle group
+     (Measure .. Lock plate, Gen+ aside) gives way, cutting its labels with
+     an ellipsis; Import, Gen+ and the right group (Undo, Remove, Export)
+     keep their width. */
   {
     const measure = () => page.evaluate((row) => {
       const out = row.map(id => {
@@ -155,7 +166,7 @@ withApp(async (page, logs) => {
     check('at 1500 px wide, with this font, no row label is cut',
       atRest.every(b => !b.cut), atRest.filter(b => b.cut).map(b => b.id).join(', ') || 'none cut');
     const WIDER = '.vp-shell-row > .vp-bar-btn, .vp-shell-row > .vp-shell-menu > summary,' +
-                  '.vp-shell-stack > .vp-shell-menu > summary { letter-spacing: 0.3em !important; }';
+                  '.vp-shell-stack > .vp-shell-menu > summary, .vp-shell-stack > .vp-bar-btn { letter-spacing: 0.3em !important; }';
     for (const wide of [false, true]) {
       if (wide) await page.addStyleTag({ content: WIDER }).then(h => h.evaluate(n => { n.id = 'wider-labels'; }));
       for (const w of [1144, 1280, 1500]) {
@@ -163,7 +174,11 @@ withApp(async (page, logs) => {
         await page.waitForTimeout(120);
         const r = await measure();
         const last = r[r.length - 1];
-        const edge = await page.evaluate(() => innerWidth - 8);
+        const edge = await page.evaluate(() => {
+          const p = document.getElementById('plate-panel').getBoundingClientRect();
+          const o = document.getElementById('btn-optimize').getBoundingClientRect();
+          return p.top < o.top ? p.left - 6 : innerWidth - 8;    // beside the panel, or under it
+        });
         const overlaps = r.filter((b, i) => i > 0 && b.x < r[i - 1].r - 0.5).map(b => b.id);
         const spill = r.filter(b => b.cut && !b.clipped).map(b => b.id);
         const kept = wide || FIXED.every(id => Math.abs(r.find(b => b.id === id).w - widthOf(id)) < 0.5);
@@ -183,7 +198,8 @@ withApp(async (page, logs) => {
 
   /* A narrow window (900 px and under) keeps the whole viewport: the column
      is not cut off at a squashed viewport's edge, and its last slab - the
-     target in the view row - and Plate under Export can be clicked. */
+     target in the view row - Optimize under Export and the Plate & pieces
+     panel can be clicked. */
   for (const h of [820, 720]) {
     await page.setViewportSize({ width: 900, height: h });
     await page.waitForTimeout(150);
@@ -195,10 +211,10 @@ withApp(async (page, logs) => {
         return !!(hit && hit.closest(sel)) && s.bottom <= innerHeight;
       };
       return { vBottom: v.bottom, H: innerHeight, vW: v.width, W: innerWidth,
-               lastHit: hits('#btn-frame-view'), plateHit: hits('#menu-plates > summary') };
+               lastHit: hits('#btn-frame-view'), optHit: hits('#btn-optimize'), plateHit: hits('#plate-select') };
     });
-    check('at 900x' + h + ' the viewport fills the window; the column\'s last slab and Plate are clickable',
-      Math.abs(r.vBottom - r.H) < 0.5 && Math.abs(r.vW - r.W) < 0.5 && r.lastHit && r.plateHit, JSON.stringify(r));
+    check('at 900x' + h + ' the viewport fills the window; the column\'s last slab, Optimize and the Plate & pieces panel are clickable',
+      Math.abs(r.vBottom - r.H) < 0.5 && Math.abs(r.vW - r.W) < 0.5 && r.lastHit && r.optHit && r.plateHit, JSON.stringify(r));
   }
   await page.setViewportSize({ width: 1500, height: 820 });
   await page.waitForTimeout(150);
@@ -210,16 +226,17 @@ withApp(async (page, logs) => {
       const s = document.querySelector('#' + id + ' > summary');
       const cs = getComputedStyle(s);
       const after = getComputedStyle(s, '::after').content;
-      return { id, col: !!s.closest('.vp-shell-col'), h: s.getBoundingClientRect().height, rad: cs.borderTopLeftRadius,
+      return { id, col: !!s.closest('.vp-shell-col'), tight: !!s.closest('.vp-shell-row') && id !== 'menu-import',
+               h: s.getBoundingClientRect().height, rad: cs.borderTopLeftRadius,
                tt: cs.textTransform, fw: cs.fontWeight, fs: cs.fontSize,
                ls: parseFloat(cs.letterSpacing) / parseFloat(cs.fontSize),
                blur: (cs.backdropFilter || cs.webkitBackdropFilter || ''), after,
                font: cs.fontFamily };
     }), MENUS);
     const off = r.filter(x => Math.abs(x.h - (x.col ? 32 : 36)) > 0.5 || x.rad !== '9px' || x.tt !== 'uppercase' ||
-                              x.fw !== '500' || x.fs !== '11.5px' || Math.abs(x.ls - 0.16) > 0.01 ||
+                              x.fw !== '500' || x.fs !== '11.5px' || Math.abs(x.ls - (x.tight ? 0.07 : 0.16)) > 0.01 ||
                               !/blur/.test(x.blur));
-    check('every drop-down button: 36 px in the row, 32 px in the column (a 36 px pitch), radius 9, caps, 500, 11.5 px, 0.16em, blurred glass',
+    check('every drop-down button: 36 px in the row, 32 px in the column (a 36 px pitch), radius 9, caps, 500, 11.5 px, 0.16em (0.07em in the row past Import, shell v3), blurred glass',
       off.length === 0, off.length ? JSON.stringify(off[0]) : r.length + ' buttons');
     const arrows = r.filter(x => x.after !== 'none' && x.after !== 'normal');
     check('no drop-down arrow on any of them', arrows.length === 0,
@@ -290,7 +307,7 @@ withApp(async (page, logs) => {
         const d = document.getElementById(id);
         d.open = true;
         /* At its tallest: each menu held inside it open too, one at a time
-           (Gen+'s four, Join's two, Plate's three), so each in turn. */
+           (Gen+'s four, Join's two), so each in turn. */
         const groups = [...d.querySelectorAll('details')];
         const variants = groups.length ? groups.map(g => [g]) : [groups];
         variants.forEach(v => {
@@ -322,15 +339,14 @@ withApp(async (page, logs) => {
   console.log('\n=== 7. Pieces: picking a row keeps the panel open ===');
   {
     await page.evaluate(() => document.querySelectorAll('.vp-menu').forEach(d => { d.open = false; }));
-    await page.click('#menu-pieces > summary');
     await page.click('#model-list .model-item .name');
     await page.waitForTimeout(150);
-    const r = await page.evaluate(() => ({
-      open: document.getElementById('menu-pieces').open && document.getElementById('menu-plates').open,
-      n: document.querySelectorAll('.vp-menu[open]').length,
-      picked: state.editId
-    }));
-    check('the Pieces panel (inside Plate) stays open after a row is clicked', r.open && r.n === 2 && r.picked != null,
+    const r = await page.evaluate(() => {
+      const p = document.getElementById('plate-panel');
+      return { open: !p.hidden && p.getBoundingClientRect().height > 0 && p.contains(document.getElementById('model-list')),
+               n: document.querySelectorAll('.vp-menu[open]').length, picked: state.editId };
+    });
+    check('the pinned Plate & pieces panel stays open after a row is clicked, and opens no drop-down', r.open && r.n === 0 && r.picked != null,
       JSON.stringify(r));
   }
 
@@ -359,18 +375,24 @@ withApp(async (page, logs) => {
        about 795 px of window height. The strip is gone - its buttons are the
        column's G-scope and the view row pinned under it - so the column must
        now clear the view row and end inside the viewport at every height down
-       to 720 (the narrow fallback's short window). */
+       to 720 (the narrow fallback's short window). Since shell v3 the last
+       slab over the view row is Check & repair, pinned there on its own, and
+       Sculpt must clear it in turn. */
     for (const h of [720, 768, 800, 900]) {
       await page.setViewportSize({ width: 1280, height: h });
       await page.waitForTimeout(80);
       const r = await page.evaluate(() => {
-        const last = document.getElementById('btn-microscope').getBoundingClientRect();
+        const last = document.querySelector('#menu-repair > summary').getBoundingClientRect();
+        const sculpt = document.querySelector('#menu-sculpt > summary').getBoundingClientRect();
         const view = document.querySelector('.vp-shell-view').getBoundingClientRect();
         const vp = document.getElementById('viewport').getBoundingClientRect();
-        return { lastBottom: last.bottom, viewTop: view.top, viewBottom: view.bottom, vpBottom: vp.bottom };
+        // The view row's buttons, not its box: the box's top padding is the group gap.
+        const xray = document.getElementById('btn-xray').getBoundingClientRect();
+        return { sculptBottom: sculpt.bottom, lastTop: last.top, lastBottom: last.bottom, viewTop: xray.top,
+                 viewBottom: view.bottom, vpBottom: vp.bottom };
       });
       check('at 1280x' + h + ' the column clears the view row and the view row ends inside the viewport',
-        r.lastBottom <= r.viewTop - 4 && r.viewBottom <= r.vpBottom, JSON.stringify(r));
+        r.sculptBottom <= r.lastTop - 4 && r.lastBottom <= r.viewTop - 4 && r.viewBottom <= r.vpBottom, JSON.stringify(r));
     }
     await page.setViewportSize({ width: 1500, height: 820 });
   }
