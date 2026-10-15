@@ -124,8 +124,7 @@ function NSO_teSetGhost(m, tris) {
   g.userData.tubeEdgeGhost = true;
   g.userData.skipXray = true;
   g.matrixAutoUpdate = false;
-  g.raycast = function () {};
-  state.scene.add(g);
+  nsoHelpers.attach(state.scene, g, 'tube-edge');
   NSO_teUI().ghost = g;
   NSO_teFollow();
 }
@@ -152,7 +151,7 @@ function NSO_teSetRing(m, end) {
     group.add(line);
   });
   group.userData.center = NSO_teRawToDisplay(m, C);
-  state.scene.add(group);
+  nsoHelpers.attach(state.scene, group, 'tube-edge');
   NSO_teUI().ring = group;
   NSO_teFollow();
 }
@@ -252,6 +251,15 @@ function NSO_teClose() {
   if (B.raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(B.raf);
   B.raf = 0;
 }
+
+// Tube edge's session, for the helper registry (nso-helpers.js) - Bend's
+// contract: leave-tool and Clear close it, an Undo under it reloads it.
+if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('tube-edge', {
+  live: function () { return !!NSO_teUI().open; },
+  close: NSO_teClose,
+  clear: NSO_teClear,
+  refresh: NSO_teLoad
+});
 
 // Per frame while open: follow the piece, and start over when the selection
 // or the piece's soup changes under the card (another bake, Undo, another piece).

@@ -318,7 +318,9 @@
     group = new THREE.Group();
     group.userData.skipXray = true;
     group.userData.nsoFoamGroup = true;
-    mesh.add(group);
+    // A helper (nso-helpers.js), riding the piece's mesh; interactive - a
+    // click on a hollow's void chooses it.
+    nsoHelpers.attach(mesh, group, 'foam', { interactive: true });
     ghost(true);
     buildVoids();
     styleVoids();
@@ -535,6 +537,13 @@
     window.addEventListener('pointercancel', onUp);
     window.addEventListener('keydown', function (e) { if (e.key === 'Escape' && on) cancel(); });
   }
+
+  /* Foam's session, for the helper registry. Undo needs no case of its own:
+     tick() already puts Foam away when the piece changes under it. */
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('foam', {
+    live: function () { return on; },
+    close: function () { cancel(); }
+  });
 
   /* For the drive check and leaveTool: the same paths the controls run. */
   window.nsoFoam = {

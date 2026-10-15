@@ -180,6 +180,9 @@
      Rotate / Tip / Move owners are torn down by sync(), the same teardowns
      that run when another menu takes the input.
 
+     Last, nso-helpers.js's teardown: every other live session closed and
+     every helper a tool drew taken out of the scene.
+
      WHAT IT NEVER DOES: clear the selection, change a piece, or touch Undo.
      closeCutter is the one close path that deselects (its Close button means
      "done with this piece" as well), so the selection is taken before it and
@@ -306,6 +309,16 @@
     if (ctx && !ctx.classList.contains('hidden')) {
       if (typeof hideCtxMenu === 'function') hideCtxMenu(); else ctx.classList.add('hidden');
       left.push('context-menu');
+    }
+
+    /* ---- every helper still in the scene: the registry's one teardown ----
+       Closes the sessions this list does not name (Bend, Tube edge, Bridge,
+       the Check, G-scope's Lift and Overhangs) through their own close paths,
+       then takes out whatever any tool left drawn (nso-helpers.js). */
+    if (window.nsoHelpers) {
+      window.nsoHelpers.teardown('leave').closed.forEach(function (n) {
+        if (left.indexOf(n) < 0) left.push(n);
+      });
     }
 
     /* ---- the selection is not this gesture's to change ---- */

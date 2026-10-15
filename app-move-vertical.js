@@ -56,7 +56,6 @@
     if (!arrows) {
       arrows = new THREE.Group();
       arrows.name = 'nso-move-arrows';
-      state.scene.add(arrows);
     }
     return arrows;
   }
@@ -93,11 +92,16 @@
     }
     var p = piece();
     if (!p || !menuOpen()) { g.visible = false; return; }
+    // A helper (nso-helpers.js): put in the scene when drawn, and back after
+    // a leave, a Clear or an Undo took it out.
+    if (g.parent !== state.scene) nsoHelpers.attach(state.scene, g, 'move');
     g.visible = true;
     var r = Math.max(10, (Math.max(p.width || 0, p.depth || 0) / 2) + 6);
     g.position.set(p.mesh.position.x, Math.max(1.5, (p.height || 4) * 0.25), p.mesh.position.z);
     for (var i = 0; i < DIRS.length; i++) g.add(makeArrow(DIRS[i], r, 0x7dd3fc));
   }
+
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('move', { live: menuOpen, refresh: refreshArrows, clear: refreshArrows });
 
   /* ---- the reference frame for left / right -----------------------------
      Side to side RELATIVE TO THE NEAREST OTHER PIECE: the axis is the one

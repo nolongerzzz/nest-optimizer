@@ -1310,7 +1310,7 @@ function NSO_cropUpdateHelper() {
   g.matrixAutoUpdate = false;
   g.matrix.copy(mesh.matrixWorld).multiply(new THREE.Matrix4().makeTranslation(center[0], center[1], center[2]));
   g.matrixWorldNeedsUpdate = true;
-  state.scene.add(g);
+  nsoHelpers.attach(state.scene, g, 'crop', { interactive: true });   // its faces are the drag handles
   state.cropHelper = g;
 }
 
@@ -1586,6 +1586,15 @@ function NSO_cropRemoveGhost() {
   state.cropGhost = null;
 }
 
+// Crop's box and lifted ghost, for the helper registry (nso-helpers.js). Crop
+// is the cutter armed for Crop, so closing it is closeCutter.
+if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('crop', {
+  live: NSO_cropLive,
+  close: function () { closeCutter(false); },
+  clear: function () { NSO_cropRemoveHelper(); NSO_cropRemoveGhost(); },
+  refresh: function () { NSO_cropUpdateHelper(); NSO_cropUpdateGhost(); }
+});
+
 function NSO_cropUpdateGhost() {
   if (typeof state === 'undefined' || !state.scene || typeof THREE === 'undefined') return;
   var cs = NSO_cropState();
@@ -1595,14 +1604,16 @@ function NSO_cropUpdateGhost() {
   if (!cur.region || !cur.region.ok || !mesh) { NSO_cropRemoveGhost(); return; }
   if (!cs.regionGeo) cs.regionGeo = rawResultToDisplayGeometry(cur.region.tris, m.centerOffset);
   var g = state.cropGhost;
-  if (!g || g.geometry !== cs.regionGeo) {
+  // Not in the scene any more (the helper registry took it on a leave, a
+  // Clear or an Undo): drawn afresh, never moved about unseen.
+  if (!g || g.geometry !== cs.regionGeo || !g.parent) {
     NSO_cropRemoveGhost();
     g = new THREE.Mesh(cs.regionGeo, new THREE.MeshStandardMaterial({
       color: 0xf59e0b, transparent: true, opacity: 0.75, metalness: 0.05, roughness: 0.5 }));
     g.name = 'cropGhost';
     g.userData.cropGhost = true;
     g.matrixAutoUpdate = false;
-    state.scene.add(g);
+    nsoHelpers.attach(state.scene, g, 'crop', { interactive: true });   // dragged to move the lifted region
     state.cropGhost = g;
   }
   mesh.updateMatrixWorld(true);

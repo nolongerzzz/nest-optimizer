@@ -179,7 +179,15 @@ const UNDO_REPLACE_LABEL = {
   foamReplace: 'Undo: Foam reverted'
 };
 
+/* Undo, then the helper rule (nso-helpers.js): a helper drawn after the step
+   just undone shows state that is gone, so its tool redraws it or it goes. */
 function undoLast() {
+  const r = undoLastStep();
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.afterUndo();
+  return r;
+}
+
+function undoLastStep() {
   if (typeof removeFaceHelper === 'function') removeFaceHelper();
   const entry = state.undoStack.pop();
   updateUndoBtn();
@@ -277,7 +285,7 @@ function undoLast() {
     state.selectedIndex = -1;
     if (entry.replace) {
       state.undoStack.push(entry.replace);
-      undoLast();
+      undoLastStep();
     }
     renderModelList(); updateOptimizeButton(); updateEditSize(); updateAdjustUI();
     if (typeof window.nsoDetachRefresh === 'function') window.nsoDetachRefresh();
@@ -1473,6 +1481,9 @@ function frameSelectedPiece() {
 }
 
 function clearPlateOnly() {
+  // Every tool closed and every helper gone first, while the pieces they
+  // were drawn on are still there to close against (nso-helpers.js).
+  nsoHelpers.teardown('clear-plate');
   clearPlaced();
   removeCutHelper();
   state.previewMesh = null;
@@ -2269,6 +2280,8 @@ function clearFenceLines() {
   state.fenceGroup = null;
 }
 
+if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('fence', { clear: clearFenceLines });
+
 function showFenceLines(skipIdx) {
   clearFenceLines();
   if (!state.modelGroup || !state.placed) return;
@@ -2295,7 +2308,7 @@ function showFenceLines(skipIdx) {
     }
   }
   state.fenceGroup = g;
-  state.modelGroup.add(g);
+  nsoHelpers.attach(state.modelGroup, g, 'fence');
 }
 
 /* Square both pieces onto the bed baseline (world box bottom on 0.2) - the
@@ -2746,7 +2759,7 @@ function pickPlacedIndexFromEvent(event) {
   if (!state.renderer || !state.camera || !state.modelGroup) return -1;
   setPointerFromEvent(event);
   state.raycaster.setFromCamera(state.pointer, state.camera);
-  const hits = state.raycaster.intersectObjects(state.modelGroup.children, false);
+  const hits = nsoHelpers.pieceHits(state.raycaster.intersectObjects(state.modelGroup.children, false));
   if (!hits.length) return -1;
   const idx = hits[0].object.userData.placedIndex;
   return typeof idx === 'number' ? idx : -1;
@@ -3105,7 +3118,7 @@ function onCanvasPointerDown(event) {
 
   // Models / pieces take priority over plate orbit
   if (state.modelGroup) {
-    const modelHits = state.raycaster.intersectObjects(state.modelGroup.children, false);
+    const modelHits = nsoHelpers.pieceHits(state.raycaster.intersectObjects(state.modelGroup.children, false));
     if (modelHits.length) {
       setOrbitFromPlate(false);
       const idx = modelHits[0].object.userData.placedIndex;
@@ -3641,7 +3654,8 @@ function nudgeSelected(dx, dz) {
 // Convert (x, y, z)_three -> (x, z, y)_slicer so the plate lies flat.
 function buildCombinedGeometry() {
   const positions = [];
-  state.placed.forEach(p => {
+  // Pieces only: a helper that found its way onto the plate is never written.
+  nsoHelpers.exportable(state.placed).forEach(p => {
     const geo = p.geometry.clone();
     /* Z, then Y, then X: the matrix Rx * Ry * Rz, which is what
        applyMeshRotation's XYZ Euler puts on screen. The other order agrees on
@@ -3886,7 +3900,7 @@ function buildPlacedObjects3MF() {
   const halfW = plate.w / 2;
   const halfD = plate.d / 2;
 
-  return state.placed.map((p, i) => {
+  return nsoHelpers.exportable(state.placed).map((p, i) => {
     const geo = p.geometry.clone();
     /* Z, then Y, then X: the matrix Rx * Ry * Rz, which is what
        applyMeshRotation's XYZ Euler puts on screen. The other order agrees on
@@ -4024,7 +4038,7 @@ function buildPlateSceneJson() {
         locked: !!(typeof window.nsoPlateLocked === 'function' && window.nsoPlateLocked())
       },
       selection: { placedIndex: state.selectedIndex, editId: state.editId },
-      pieces: state.placed.map((p, i) => capturePieceState(p, i, plate))
+      pieces: nsoHelpers.exportable(state.placed).map((p, i) => capturePieceState(p, i, plate))
     });
     return Scene.serialize(block);
   } catch (err) {

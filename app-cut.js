@@ -779,11 +779,22 @@ function buildCutHelper() {
   group.name = 'cutHelper';
   cutBuildBlade(group, info);
   cutBuildPlateLine(group);
-  if (state.modelGroup) state.modelGroup.add(group);
-  else if (state.previewMesh) state.previewMesh.add(group);
+  // A helper (nso-helpers.js): tagged, never exported, gone on leave / Clear /
+  // Undo. Interactive - the grab sheet is how the blade is dragged.
+  const parent = state.modelGroup || state.previewMesh;
+  if (parent) nsoHelpers.attach(parent, group, 'cut', { interactive: true });
   state.cutHelper = group;
   updateCutHelper();
 }
+
+/* Cut's session, for the helper registry: live while the cutter is armed for
+   Cut; closed by closeCutter, the path its card's own shutting runs. */
+if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('cut', {
+  live: function () { return !!state.cutterOpen && state.cutTool !== 'crop'; },
+  close: function () { closeCutter(false); },
+  clear: removeCutHelper,
+  refresh: function () { if (state.cutterOpen && state.previewMesh) buildCutHelper(); }
+});
 
 // The cut frame carried into world space: the piece's mesh transform, after
 // the mitre's `frame` (cut frame -> piece frame) when there is one.

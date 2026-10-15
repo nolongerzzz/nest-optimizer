@@ -154,7 +154,7 @@ function NSO_bridgeDrawPicks() {
     if (!s) return;
     var o = NSO_bridgeTargetObject(s, BRIDGE_PICK_COLOR); o.userData.role = i ? 'b' : 'a'; g.add(o);
   });
-  state.scene.add(g);
+  nsoHelpers.attach(state.scene, g, 'bridge');
   B.overlay = g;
 }
 
@@ -166,7 +166,7 @@ function NSO_bridgeDrawLine(from, to) {
   B.line = NSO_bridgeOverlay(new THREE.Line(geo, new THREE.LineBasicMaterial({
     color: BRIDGE_PICK_COLOR, transparent: true, depthTest: false, depthWrite: false })), BRIDGE_RENDER_ORDER + 2);
   B.line.name = 'bridgeLine';
-  state.scene.add(B.line);
+  nsoHelpers.attach(state.scene, B.line, 'bridge');
 }
 
 function NSO_bridgeSetGhost(soupUp) {
@@ -183,8 +183,7 @@ function NSO_bridgeSetGhost(soupUp) {
     polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
   m.name = 'bridgeGhost';
   m.userData.bridgeGhost = true; m.userData.skipXray = true;
-  m.raycast = function () {};
-  state.scene.add(m);
+  nsoHelpers.attach(state.scene, m, 'bridge');
   B.ghost = m;
 }
 
@@ -269,6 +268,19 @@ function NSO_bridgeClose() {
   if (B.raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(B.raf);
   B.raf = 0;
 }
+
+// Bridge's session, for the helper registry (nso-helpers.js). An Undo under
+// an open card drops the pending web: it was planned on pieces as they were.
+if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('bridge', {
+  live: function () { return !!NSO_bridgeUI().open; },
+  close: NSO_bridgeClose,
+  clear: function () {
+    var B = NSO_bridgeUI();
+    [B.overlay, B.line, B.ghost].forEach(NSO_bridgeDispose);
+    B.overlay = B.line = B.ghost = null;
+  },
+  refresh: function () { NSO_bridgeUI().idx = {}; NSO_bridgeClearPicks(); }
+});
 
 // Cancel: drop the pending web; with none pending, close the card.
 function NSO_bridgeCancel() {

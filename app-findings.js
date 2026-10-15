@@ -262,7 +262,7 @@
       grp.add(ring);
       grp.add(label);
     }
-    state.scene.add(grp);
+    nsoHelpers.attach(state.scene, grp, 'check');
     cur.group = grp;
   }
 
@@ -281,7 +281,7 @@
           this.matrixWorld.copy(this.matrix);
         };
       })(w, r);
-      state.scene.add(ring);
+      nsoHelpers.attach(state.scene, ring, 'check-flash');   // a flash: no session, gone on its own
       flashes.push({ ring: ring, t0: t0 });
     }
     kick();

@@ -464,7 +464,9 @@ var NSO_GSCOPE_SUPPORT = (function () {
       layer.name = 'gscopeSupportMarkers';
       layer.renderOrder = 10;
     }
-    if (layer.parent !== v.scene) v.scene.add(layer);
+    // A helper (nso-helpers.js), in G-scope's own scene; interactive - a
+    // click on a ping or a tinted region picks it.
+    if (layer.parent !== v.scene) nsoHelpers.attach(v.scene, layer, 'gscope-support', { interactive: true });
     return layer;
   }
 
@@ -612,6 +614,14 @@ var NSO_GSCOPE_SUPPORT = (function () {
     if (on) runScan();
     drawMarkers();
   }
+
+  /* The overhang beacons, for the helper registry: Overhangs' own off. */
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('gscope-support', {
+    live: function () { return on; },
+    close: function () { setOn(false); },
+    clear: clearLayer,
+    refresh: refresh
+  });
 
   function setOn(v) {
     on = !!v;

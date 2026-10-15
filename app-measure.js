@@ -345,8 +345,7 @@
     obj.renderOrder = MEASURE_RENDER_ORDER;
     // The paint learned this the hard way: a helper that answers the ray eats
     // the next click, and the click lands on the helper instead of the piece.
-    obj.raycast = function () {};
-    state.scene.add(obj);
+    nsoHelpers.attach(state.scene, obj, 'measure');   // tagged, never raycastable
     helpers.push(obj);
     return obj;
   }
@@ -754,6 +753,16 @@
   }
 
   function toggle() { if (state.measureOn) leave(); else enter(); }
+
+  /* Measure's session, for the helper registry (nso-helpers.js). A span read
+     before an Undo measured a piece that is no longer there: it goes, and
+     Measure stays on for the next one. */
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('measure', {
+    live: function () { return !!state.measureOn; },
+    close: leave,
+    clear: function () { clearShot(null); },
+    refresh: function () { clearShot(null); }
+  });
 
   /* app-core's onCanvasPointerDown asks this before it starts a move drag -
      the same contract app-mask.js's nsoMaskTakesClick has, for the same

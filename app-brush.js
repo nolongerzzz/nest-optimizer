@@ -1392,13 +1392,14 @@ if (typeof document !== 'undefined') (function () {
       var mat = new THREE.LineBasicMaterial({ color: 0xe8a33d, depthTest: false, transparent: true, opacity: 0.95 });
       ring = new THREE.LineLoop(geo, mat);
       ring.renderOrder = RING_ORDER;
-      ring.raycast = function () {};
       ring.visible = false;
-      state.scene.add(ring);
     } else {
       if (ring.geometry) ring.geometry.dispose();
       ring.geometry = geo;
     }
+    // A helper (nso-helpers.js): put back in the scene whenever it is drawn,
+    // since a leave, a Clear or an Undo takes it out.
+    if (ring.parent !== state.scene) nsoHelpers.attach(state.scene, ring, 'brush');
   }
   function showRing(point, normalWorld, radius) {
     buildRing(radius);
@@ -1900,6 +1901,10 @@ if (typeof document !== 'undefined') (function () {
     say('Brush off');
   }
   function toggle() { if (armed) exit(); else enter(); }
+  // An Undo under the armed brush only hides the ring; the next move draws it.
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('brush', {
+    live: function () { return armed; }, close: exit, clear: hideRing, refresh: hideRing
+  });
   window.nsoBrushArmed = function () { return armed; };
   window.nsoBrushSetArmed = function (on) { if (!!on !== armed) toggle(); };
 
