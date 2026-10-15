@@ -154,7 +154,7 @@ withApp(async (page, logs) => {
   const reg = await page.evaluate(() => ({ ok: typeof nsoHelpers === 'object', owners: nsoHelpers.owners() }));
   check('nsoHelpers is loaded ahead of the tools', reg.ok);
   const want = ['cut', 'crop', 'bend', 'tube-edge', 'bridge', 'foam', 'measure', 'brush', 'check', 'rotate', 'move',
-                'face-pick', 'seat-grid', 'fence', 'inspect', 'gscope-lift', 'gscope-support'];
+                'face-pick', 'seat-grid', 'fence', 'inspect', 'gscope-lift', 'gscope-support', 'lift-plate'];
   const missing = want.filter(w => reg.owners.indexOf(w) < 0);
   check('every helper-drawing tool registered its session', !missing.length, missing.length ? 'missing ' + missing.join(', ') : reg.owners.length + ' owners');
   check('a fresh page holds pieces and plate only', (await audit(page)).length === 0, (await audit(page)).join('; '));
@@ -275,11 +275,11 @@ withApp(async (page, logs) => {
     await page.evaluate(() => { window.nsoFoam.fillAll(); });
   }, () => window.nsoFoam.on());
 
-  /* G-scope: its own sheet and its own scene. Overhangs' beacons and Lift's
-     height map, then G-scope shut and the plate's leave gesture. */
+  /* G-scope: its own sheet and its own scene. Overhangs' beacons and the Features
+     row's outlines, then G-scope shut and the plate's leave gesture. */
   for (const [name, owner, api, ready] of [
     ['G-scope Overhangs', 'gscope-support', 'NSO_GSCOPE_SUPPORT', () => NSO_GSCOPE_SUPPORT.isOn()],
-    ['G-scope Lift', 'gscope-lift', 'NSO_GSCOPE_LIFT', () => !!(NSO_GSCOPE_LIFT.layer() && NSO_GSCOPE_LIFT.layer().parent)]
+    ['G-scope Features', 'gscope-lift', 'NSO_GSCOPE_LIFT', () => !!(NSO_GSCOPE_LIFT.layer() && NSO_GSCOPE_LIFT.layer().parent)]
   ]) {
     await selectPiece(page, cavId);
     await page.evaluate(() => NSO_MICROSCOPE.openPlate());

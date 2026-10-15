@@ -73,7 +73,8 @@ Current roster, by category:
 | G-scope supports (`app-gscope-support.js`) | sub-region | the marker scan's skipList, `nsoMaskFaceList(m)` shifted into the world frame; refused by name when the piece is painted and turned. Generating adds a piece (none); removing or changing one acts on the whole support piece | header comment + `docs/GCODE-SUPPORTS.md` |
 | G-scope Slice (`app-gscope-slice.js`) | **none** — Slice reads geometry and writes nothing; Export piece to plate adds a copy of the piece and edits none, as G-scope's own Export to plate does | n/a | header comment + `docs/SLICER.md` §6 |
 | Picture (`app-relief.js`, Gen+ -> Picture) | none — adds a piece, reads and edits none | n/a | header comment + `docs/RELIEF.md` |
-| Lift (`app-gscope-lift.js`, G-scope -> Lift: Pick, and Strip's Lift N / Remove N) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/LIFT.md` |
+| Lift (`app-lift-plate.js`, Subtract -> Lift: a click, a Shift group, Strip's Confirm) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/LIFT.md` §7 |
+| G-scope Features (`app-gscope-lift.js`) | **none** - reads geometry, writes none | n/a | header comment + `docs/LIFT.md` §7 |
 | Foam (`app-foam.js`, Finish -> Shape) | sub-region | the faces of the one hollow it fills that the level reaches, against `nsoMaskFaceList(m)`; a null list (a painted recessed patch) stands it down | header comment + `docs/FOAM.md` §6 |
 
 ### The SELECT list is an operand; the EXCLUDE list is still only a veto
@@ -584,6 +585,32 @@ Branch `claude/ui-cleanup`, off `claude-wip`.
   nothing else moved). Both fail on the code before this change. `?v=`:
   `app-join.js`, `app-input-mode.js` shell1 -> uiclean1; `styles.css` shell4 ->
   uiclean1 (a comment that described the old class wipe).
+
+## Lift on the plate - out of G-scope, into the Subtract card (2026-10-15)
+Branch `claude/lift-to-plate`, off `claude-wip`. Full write-up: **`docs/LIFT.md` §7**.
+- **What changed:** where and how Lift is driven; the engine (`nso_lift.js`,
+  `nso_lift_auto.js`, `nso_lift_curved.js`) is untouched. Subtract's Lift is
+  now a verb on the plate (`app-lift-plate.js`): arming it on a selected piece
+  runs the rolling ball once (cached per soup), the card says "N features
+  found"; hover outlines, a click lifts, Shift-click gathers and lifts on
+  release, Strip lifts everything after an untick list; one Undo each.
+- **G-scope:** the row is **Features**, read-only (`app-gscope-lift.js`
+  rewritten): outlines + the grouped list from the card's cache. No Pick base
+  face / Lift / Remove / Clear choice / slider.
+- **Dropped from the UI:** Remove (throw details away) and Phase 1's
+  click-a-flat-face base. Both engines' functions are unchanged and still
+  covered headless (`lift:test`, `lift:auto-test`).
+- **Gone:** `app-shell.js` (its one button was "open G-scope at the Lift row")
+  and its `.ms-row-target` style.
+- **Paint scope:** Lift row moves to `app-lift-plate.js` (whole-piece);
+  Features is none.
+- **Checks:** new `lift:plate` (the Barocke plate fixture, 1280 x 800).
+  `lift:drive`, `lift:auto-drive`, `lift:curved-drive` re-pointed at the plate
+  and the read-only row. Static references updated, not run on this ticket:
+  `shell:v3`, `ui:shell`, `paint:scope`, `helpers:teardown`.
+- **Tags:** `app-core.js` helpmrg1 -> liftplate1, `app-gscope-lift.js`
+  helpers1 -> liftplate1, `app-lift-plate.js` new at liftplate1,
+  `styles.css` shellv3scale1 -> liftplate1.
 
 ## Lift 3 - lift off a curved base, repair to match (2026-10-13)
 Branch `claude/lift-curved`, off `claude-wip`. Full write-up: **`docs/LIFT.md` §6**.

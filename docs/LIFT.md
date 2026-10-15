@@ -1,5 +1,12 @@
 # Lift - take any detail off a face, leave the face as it was round it
 
+**Where Lift is worked (section 7):** on the plate, from the Subtract card's
+**Lift** verb (`app-lift-plate.js`). G-scope's row is **Features**, read-only:
+it shows what Lift would find and nothing else. Sections 2 and 5's "In
+G-scope" describe the G-scope controls Lift had before; the engine they
+describe (`nso_lift.js`, `nso_lift_auto.js`, `nso_lift_curved.js`) is
+unchanged, only where and how it is driven.
+
 Phase 1 (sections 1 - 4): `nso_lift.js` (the geometry, headless,
 `window.NSO_Lift` and a Node module), `app-gscope-lift.js` (G-scope's sidebar
 section "Lift", its Pick side), `tools/nso_lift_fixtures.js`,
@@ -16,6 +23,10 @@ the same `app-gscope-lift.js`, `tools/nso_lift_curved_fixtures.js`,
 `tools/nso_lift_curved_test.js`, `tools/nso_lift_curved_drive_check.js`.
 
 ```
+npm run lift:plate    Lift on the plate in the real app at 1280 x 800: the Barocke plate - arm,
+                      the count, hover, a click, Shift-click, Strip, Move / Join, G-scope's
+                      Features row, refusals (section 7)
+npm run lift:plate-shots  lift:plate, keeping its screenshots in tools/lift-plate-out/ (gitignored)
 npm run lift:test     headless: the plate, every detail alone and all together, the ring,
                       refusals, an off-axis pose, the Picture slab, the canonical checker (771 gates)
 npm run lift:drive    the real app in Chromium: real clicks in G-scope, Lift, Ctrl+Z,
@@ -33,7 +44,9 @@ npm run lift:curved-drive  Lift 3 in the real app: Pick on the ball, Strip on th
 npm run lift:curved-shots  lift:curved-drive, keeping its screenshots in tools/lift-curved-out/ (gitignored)
 ```
 
-All six checks are in `npm test`.
+All seven checks are in `npm test`. The three drives (`lift:drive`,
+`lift:auto-drive`, `lift:curved-drive`) work Lift on the plate since
+section 7.
 
 ## 1. One question, not a catalogue
 
@@ -453,3 +466,97 @@ Every other Lift 2 and Phase 1 gate is as it was.
   clicking nearer it reads it straight on.
 - A lifted piece keeps the curved back it came off with; flattening it for
   printing is not done.
+
+## 7. Lift on the plate - the Subtract card
+
+Lift moved out of G-scope onto the plate. The engine is unchanged; this is
+only where and how it is driven. `app-lift-plate.js` (`window.NSO_LIFT_PLATE`),
+`app-gscope-lift.js` (now G-scope's read-only **Features** row),
+`tools/nso_lift_plate_fixtures.js` (the Barocke plate),
+`tools/nso_lift_plate_drive_check.js` (`lift:plate`) and
+`tools/nso_lift_plate_drive_lib.js` (the page helpers the four Lift drives
+share).
+
+### The verb
+
+**Subtract -> Lift.** Arming it on a selected piece runs detection once: the
+rolling ball of section 5 (`NSO_LiftAuto.analyse`, `{ curved: true }`, so a
+curved base is section 6's fill), looking straight down onto the piece - the
+world's up carried into its raw frame, raw +Z for a piece lying as it was
+made. The base face is not clicked: the seed is the face looking up (within
+20 degrees) with the most area at one height, then the next, so a seed on a
+feature is never used. The answer is cached per piece soup (a `WeakMap` keyed
+by `m.rawTris`), so it holds until the piece changes; an Undo that puts a soup
+back finds it read already. The card says **"N features found"** - liftable
+and standing out more than **How far out counts** (0.42 mm, as before).
+
+- **Pick** (the default). Hovering the piece outlines the feature under the
+  cursor, yellow (the islands are the engine's: one whose surround leans more
+  than 35 degrees off the view is refused, said in words). A **click** lifts
+  it. **Shift**-click gathers several (magenta) and they lift together when
+  Shift is let go. Each click, or each Shift group, is one Undo.
+- **Strip.** One button: a short untick list with the grouped breakdown -
+  `line ×1 · large shape ×1 (12 parts) · dots ×20 · bare plate` on the Barocke
+  plate; the last item is what the plate is left as ("the plate keeps 20" with
+  the dots unticked). **Confirm** lifts every ticked feature in one step, one
+  Undo; **Cancel** changes nothing. The parts of a large shape are the
+  engine's necks (data only, nothing splits it).
+- A click on another piece points Lift at that piece (and selects it).
+
+A lift is section 2's, unchanged: the piece keeps its place and id and is
+repaired (flat where a feature stood, or the surface carried across on a
+curve); each feature becomes `<piece> - lifted N` on free plate beside it
+(`nsoFreeSpot`) - an ordinary piece: Pieces list, Move, Join, Export, Remove.
+One `featureSwap` Undo puts it all back. **Remove** (throw the features away)
+has no button on the plate; `NSO_LiftAuto.remove` is unchanged and
+`lift:auto-test` still holds it.
+
+Refusals are in words, as before: a painted piece ("Lift stood down - N
+painted face(s) ..."), a piece with no raw soup or whose mesh does not match
+it, nothing found ("Nothing found on <piece>: nothing stands out of its top
+more than 0.32 mm."). A feature past the 35-degree view reads "it stands
+where the piece slopes too far away from looking up (35° is the most Lift
+reads) - turn the piece so that side faces up": the engine's own words for
+that case tell G-scope's user to click nearer it, which the plate has no use
+for.
+
+**Paint scope: WHOLE-PIECE** (`nsoMaskCount(m) > 0`), declared in
+`app-lift-plate.js`'s header and in `nso_paint_scope_test.js`'s roster.
+
+### G-scope: Features, read-only
+
+The row is **Features**: the features Lift would find on the piece under the
+lens - G-scope's one selected object, else the plate's selected piece, else
+the biggest object - outlined over it in their group's colour, and the
+grouped list. No Pick base face, no Lift, no Remove, no Clear choice, no
+slider (it reads the card's). It reads the same cache through
+`NSO_LIFT_PLATE.detectSoup`, so the two always count the same. A document that
+is not the plate is read off its own triangles, looking down its Z.
+**Paint scope: none** - it writes nothing.
+
+### The Barocke plate (`tools/nso_lift_plate_fixtures.js`)
+
+A 70 x 50 height-field slab at 0.3 mm (157,244 triangles), paper at z = 3: a
+line 50 x 1.2 x 0.6 along the front; a plant - a curving stem, eleven leaves
+and a bud, one body 0.8 high, read as one large shape of 12 parts; and 20
+dots (2.2 mm across, 0.6 high) round the back and sides. Detection reads 22
+features in about 1.8 s; the second read is the cache.
+
+### In the real app (`lift:plate`, 1280 x 800)
+
+Arm on the selected plate: "22 features found", the read not from the cache;
+off and on again: the cache. Hover a dot: outlined; the bare plate: nothing;
+a leaf: the whole plant. A click on a dot: one piece, closed, on free plate
+beside the plate, the plate closed, volumes add up, ONE undo step, 21 left;
+Ctrl+Z: bit for bit, 22 from the cache. Shift-click two dots: gathered, then
+one step on letting go. Strip: three ticked rows, the breakdown above,
+"Confirm - lift 22"; dots unticked: "the plate keeps 20", lift 2; Cancel
+changes nothing; Confirm lifts the line and the plant in one step, 20 dots
+stay. The lifted line moves 5 mm and joins the plant ("Join ok"). G-scope:
+the row is Features, 22 - the same count, from the same cache - the grouped
+list, an outline per group, no controls. Refusals: a plain box (nothing
+found), a painted plate, a piece with no raw soup.
+
+`lift:drive`, `lift:auto-drive` and `lift:curved-drive` drive their fixtures
+the same way now: G-scope's Features row read-only (a click on G-scope's
+canvas lifts nothing), the lifts through the card.

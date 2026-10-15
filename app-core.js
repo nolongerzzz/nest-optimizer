@@ -2387,7 +2387,7 @@ function placedFootprint(p, x, z) {
    the bed has no such spot, and then a spot just past everything, still
    clear of every piece.
    Written for Picture (app-relief.js, which seats a slab nearest the middle)
-   and shared with Lift (app-gscope-lift.js, which seats each lifted piece
+   and shared with Lift (app-lift-plate.js, which seats each lifted piece
    nearest the piece it came off). Search on a NSO_FREE_STEP grid. */
 const NSO_FREE_GAP = 4;          /* mm between pieces - what addModel leaves */
 const NSO_FREE_STEP = 2;         /* mm, the search grid */
@@ -2907,6 +2907,14 @@ function onCanvasPointerDown(event) {
      start a move drag under the carve and report "Moved model #N" over its
      status. app-carve.js decides, where its own hit test lives. */
   if (typeof window.nsoCarveTakesClick === 'function' && window.nsoCarveTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* Lift (app-lift-plate.js, Subtract's LIFT) owns a click on a piece while
+     it is armed, on Carve's terms: the click lifts the feature under it, or
+     points Lift at another piece. A fall-through would start a move drag. */
+  if (typeof window.nsoLiftTakesClick === 'function' && window.nsoLiftTakesClick(event)) {
     setOrbitFromPlate(false);
     return;
   }
