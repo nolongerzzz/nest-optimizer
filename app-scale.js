@@ -566,79 +566,60 @@ function NSO_scaleAxisLabel(axis) {
   return 'longest edge';
 }
 
-/* Scale the selected piece. spec is { axis, targetMm } or { factor }.
- * Returns the result object so the console and the drive check can read the
- * before/after numbers rather than parsing the status line. */
-function NSO_scaleSelectedModel(spec) {
-  var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
-  if (!m) {
-    if (typeof setStatus === 'function') setStatus('Select a piece first', true);
-    return { ok: false, reason: 'no selection' };
-  }
-  var soup = (m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null;
-  if (!soup) {
-    if (typeof setStatus === 'function') setStatus('Scale needs a raw piece - unchanged', true);
-    return { ok: false, reason: 'no rawTris' };
-  }
-
-  // Standing rule: a painted face stays untouched by ANY bake.
-  //
-  // PAINT SCOPE: WHOLE-PIECE. A uniform scale moves every vertex on the piece
-  // and there is no sub-region to scope the check to, so by the scoping rule
-  // in docs/HANDOFF.md any painted face stands the whole operation down - the
-  // same answer Smooth gives, for the same reason. The roster row is in that
-  // file's scoping table and in tools/nso_paint_scope_test.js.
-  //
-  // Worth stating why this is not merely inherited: a mask entry is a plane
-  // {n, d}, and under a uniform scale about the bbox centre the normal is
-  // unchanged while d moves, so the paint COULD in principle be carried
-  // through by rescaling d. That is a second mapping from a plane back to a
-  // face - exactly the re-derivation the standing rule forbids - and it would
-  // have to agree with app-mask.js's own recorded axis and side. Until the
-  // mask stores something scale-invariant, refusing is the honest answer and
-  // the user clears the paint, scales, and repaints on a piece whose planes
-  // are the ones app-mask.js actually recorded.
-  var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
-  if (painted > 0) {
-    if (typeof setStatus === 'function') {
-      setStatus('Scale stood down - ' + painted + ' painted face(s); a uniform scale moves ' +
-                'every vertex and cannot hold a face still. Clear paint to scale.', true);
-    }
-    return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
-  }
-
-  var r = NSO_scaleSoup(soup, spec);
-  if (!r.ok) {
-    if (typeof setStatus === 'function') setStatus('Scale refused - piece unchanged (' + NSO_scaleText(r.reason) + ')', true);
-    return r;
-  }
-
-  // Composed figure by figure in the unit the card shows (1c); with mm shown
-  // it is the line this has always said.
-  // The before figure is the solver's own span (spanBeforeMm): for Longest
-  // it is the edge the factor was solved on, whichever axis that is.
+/* What a done uniform scale says after "Scale done - ". Composed figure by
+   figure in the unit the card shows (1c); with mm shown it is the line this
+   has always said. The before figure is the solver's own span
+   (spanBeforeMm): for Longest it is the edge the factor was solved on,
+   whichever axis that is. */
+function NSO_scaleDescribe(r) {
   var L = NSO_scaleLen, u = NSO_scaleU(), inch = NSO_scaleIn();
   var txt;
   if (r.axis) {
-    txt = 'Scale done - ' + NSO_scaleAxisLabel(r.axis) + ' ' +
+    txt = NSO_scaleAxisLabel(r.axis) + ' ' +
       L(r.spanBeforeMm, 3) + ' → ' +
       L(r.measuredMm, 3) + u + ' (asked ' + (inch ? NSO_scaleTyped(r.targetMm) + u : r.targetMm) + ', off by ' +
       (inch ? r.errMm / NSO_SCALE_MM_PER_IN : r.errMm).toExponential(1) + u + '), factor ' + r.factor.toFixed(6);
   } else {
-    txt = 'Scale done - factor ' + r.factor.toFixed(6);
+    txt = 'factor ' + r.factor.toFixed(6);
   }
-  txt += ', size ' + L(r.after.span.x, 2) + ' x ' + L(r.after.span.y, 2) +
+  return txt + ', size ' + L(r.after.span.x, 2) + ' x ' + L(r.after.span.y, 2) +
          ' x ' + L(r.after.span.z, 2) + u + ', open ' + r.after.stats.open +
          ', nm ' + r.after.stats.nm;
+}
 
-  if (typeof NSO_sculptCommitRaw === 'function') {
-    if (!NSO_sculptCommitRaw(m, r.tris, 'scaleReplace', txt)) {
-      if (typeof setStatus === 'function') setStatus('Scale failed to commit - piece unchanged', true);
-      return { ok: false, reason: 'commit failed' };
-    }
-  }
-  if (typeof nsoScaleRefresh === 'function') nsoScaleRefresh();
-  return r;
+/* A uniform scale as a card verb (see NSO_scaleCardTry). spec is
+   { axis, targetMm } or { factor }. */
+function NSO_scaleUniformVerb(spec) {
+  return {
+    label: 'Scale', undoType: 'scaleReplace',
+    // Standing rule: a painted face stays untouched by ANY bake.
+    //
+    // PAINT SCOPE: WHOLE-PIECE. A uniform scale moves every vertex on the piece
+    // and there is no sub-region to scope the check to, so by the scoping rule
+    // in docs/HANDOFF.md any painted face stands the whole operation down - the
+    // same answer Smooth gives, for the same reason. The roster row is in that
+    // file's scoping table and in tools/nso_paint_scope_test.js.
+    //
+    // Worth stating why this is not merely inherited: a mask entry is a plane
+    // {n, d}, and under a uniform scale about the bbox centre the normal is
+    // unchanged while d moves, so the paint COULD in principle be carried
+    // through by rescaling d. That is a second mapping from a plane back to a
+    // face - exactly the re-derivation the standing rule forbids - and it would
+    // have to agree with app-mask.js's own recorded axis and side. Until the
+    // mask stores something scale-invariant, refusing is the honest answer and
+    // the user clears the paint, scales, and repaints on a piece whose planes
+    // are the ones app-mask.js actually recorded.
+    paint: 'a uniform scale moves every vertex and cannot hold a face still. Clear paint to scale.',
+    run: function (soup) { return NSO_scaleSoup(soup, spec); },
+    describe: NSO_scaleDescribe
+  };
+}
+
+/* Scale the selected piece. spec is { axis, targetMm } or { factor }.
+ * Returns the result object so the console and the drive check can read the
+ * before/after numbers rather than parsing the status line. */
+function NSO_scaleSelectedModel(spec) {
+  return NSO_scaleCardApply(NSO_scaleUniformVerb(spec));
 }
 
 /* ---------------------------------------------------------------------------
@@ -649,8 +630,8 @@ function NSO_scaleSelectedModel(spec) {
    in print terms - Ring / Rod / Bar with the numbers a person measures, or the
    three sizes and, in plain words, the gate that decided the piece is neither
    and what still applies - with the build-volume verdict appended. Under it,
-   one compact row per field (label | field | unit or hold | Set), and only
-   the rows nso_section.js's NSO_sectionVerbs says apply:
+   one compact row per field (label | field | unit or hold), and only the rows
+   nso_section.js's NSO_sectionVerbs says apply:
 
      Length / Width / Height   the piece's own axes as it lies - Height its Z,
                        Length the longer of its X and Y, Width the shorter;
@@ -682,6 +663,16 @@ function NSO_scaleSelectedModel(spec) {
    Every field shows nso_section.js's one display precision (NSO_sectionShow)
    and repopulates whenever the selection, the piece's soup or its pose on the
    plate changes, whoever changed it.
+
+   THE FIELDS ARE LIVE - there is no Set. Typing applies (debounced
+   NSO_SCALE_LIVE_MS): the verb runs on the piece as it was when the edit
+   began, and the viewport, the readout and the other fields follow. Leaving
+   the field (blur, Tab, Enter) commits it: one Undo step for the whole edit,
+   however many values were typed on the way. Escape puts back the value the
+   field had when the edit began, and the piece with it. A value the piece
+   refuses says why under the field, in red, while it is typed; the piece
+   stays at the last good value, and leaving the field on it commits nothing.
+   Fit to plate stays a button.
 --------------------------------------------------------------------------- */
 
 /* The section reading for a piece, cached on its soup: a bake replaces
@@ -780,57 +771,83 @@ function NSO_scaleFitToPlate() {
   return r;
 }
 
-/* The house lifecycle every card verb shares: a selected raw piece, no paint
-   (PAINT SCOPE: WHOLE-PIECE, the Scale card's own category in
-   docs/HANDOFF.md - each verb moves faces all over one side of the piece and
-   the rims they share, so no face can be promised untouched), then the
-   headless call, then one NSO_sculptCommitRaw - one Undo step. */
-function NSO_scaleCardApply(label, undoType, run, describe) {
-  var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
-  if (!m) {
-    if (typeof setStatus === 'function') setStatus('Select a piece first', true);
-    return { ok: false, reason: 'no selection' };
-  }
-  var soup = (m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null;
-  if (!soup) {
-    if (typeof setStatus === 'function') setStatus(label + ' needs a raw piece - unchanged', true);
-    return { ok: false, reason: 'no rawTris' };
-  }
+/* The house lifecycle every card verb shares, without the commit: a selected
+   raw piece, no paint (PAINT SCOPE: WHOLE-PIECE, the Scale card's own
+   category in docs/HANDOFF.md - each verb moves faces all over one side of
+   the piece and the rims they share, so no face can be promised untouched),
+   then the headless call on `soup` - the piece's own, or the one a live
+   field's edit began from. Nothing is touched and nothing is said: the result
+   carries the status line (`status`) and the reason alone (`inline`, what a
+   live field shows under itself).
+
+   verb: { label, undoType, paint, run(soup) -> engine result, describe(r) } */
+function NSO_scaleCardTry(verb, m, soup) {
+  var no = function (reason, status, inline) {
+    return { ok: false, reason: reason, status: status, inline: inline || status };
+  };
+  if (!m) return no('no selection', 'Select a piece first');
+  soup = soup || ((m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null);
+  if (!soup) return no('no rawTris', verb.label + ' needs a raw piece - unchanged', 'needs a raw piece');
   var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
   if (painted > 0) {
-    if (typeof setStatus === 'function') {
-      setStatus('Scale stood down - ' + painted + ' painted face(s); ' + label + ' moves faces all over ' +
-                'one side of the piece and the rims they share. Clear paint to resize.', true);
-    }
-    return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
+    var p = no('painted faces: ' + painted, 'Scale stood down - ' + painted + ' painted face(s); ' + verb.paint,
+      painted + ' painted face(s) - clear paint to resize');
+    p.painted = painted;
+    return p;
   }
-  var r = run(soup, m);
+  var r = verb.run(soup);
   if (!r.ok) {
-    if (typeof setStatus === 'function') setStatus(label + ' refused - piece unchanged (' + NSO_scaleText(r.reason) + ')', true);
+    r.inline = NSO_scaleText(r.reason);
+    r.status = verb.label + ' refused - piece unchanged (' + r.inline + ')';
     return r;
   }
-  var txt = label + ' done - ' + describe(r);
-  if (typeof NSO_sculptCommitRaw === 'function' && !NSO_sculptCommitRaw(m, r.tris, undoType, txt)) {
-    if (typeof setStatus === 'function') setStatus(label + ' failed to commit - piece unchanged', true);
+  r.said = verb.describe(r);
+  r.status = verb.label + ' done - ' + r.said;
+  return r;
+}
+
+/* Try, then one NSO_sculptCommitRaw - one Undo step. */
+function NSO_scaleCardApply(verb) {
+  var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
+  var r = NSO_scaleCardTry(verb, m);
+  if (!r.ok) {
+    if (typeof setStatus === 'function') setStatus(r.status, true);
+    return r;
+  }
+  if (typeof NSO_sculptCommitRaw === 'function' && !NSO_sculptCommitRaw(m, r.tris, verb.undoType, r.status)) {
+    if (typeof setStatus === 'function') setStatus(verb.label + ' failed to commit - piece unchanged', true);
     return { ok: false, reason: 'commit failed' };
   }
   if (typeof nsoScaleRefresh === 'function') nsoScaleRefresh();
   return r;
 }
 
-/* A ring or rod verb on the selected piece: 'outer' | 'wall' | 'diameter'
-   (and 'bore', which nso_ring.js still answers; the card no longer offers
-   it), to `value` mm. nso_ring.js does the geometry and every refusal. */
+/* The reading of a soup, for a verb that runs on it: a live field's verbs
+   run on the soup its edit began from, which is not the piece's while the
+   edit is shown. */
+function NSO_scaleSectionOfSoup(soup) {
+  return NSO_scaleSectionOf(soup ? { rawTris: soup, rawAxis: 'zup' } : null);
+}
+
+var NSO_SCALE_FACES_PAINT = ' moves faces all over one side of the piece and the rims they share. Clear paint to resize.';
+
+/* A ring or rod verb: 'outer' | 'wall' | 'diameter' (and 'bore', which
+   nso_ring.js still answers; the card no longer offers it), to `value` mm.
+   nso_ring.js does the geometry and every refusal. */
 var NSO_SCALE_RING_LABEL = { outer: 'Outer Ø', bore: 'Bore Ø', wall: 'Wall', diameter: 'Diameter' };
-function NSO_scaleRingApply(verb, value) {
-  return NSO_scaleCardApply(NSO_SCALE_RING_LABEL[verb] || verb, 'ringReplace',
-    function (soup) { return NSO_ringApplyRaw(soup, verb, value); },
-    function (r) {
+function NSO_scaleRingVerb(verb, value) {
+  var label = NSO_SCALE_RING_LABEL[verb] || verb;
+  return {
+    label: label, undoType: 'ringReplace', paint: label + NSO_SCALE_FACES_PAINT,
+    run: function (soup) { return NSO_ringApplyRaw(soup, verb, value); },
+    describe: function (r) {
       // Bare figures with mm shown, as nso_ring.js has always written them;
       // each one carries "in" with inches shown.
       return NSO_ringDescribe(r, NSO_scaleIn() ? function (x) { return NSO_scaleLen(x) + ' in'; } : null);
-    });
+    }
+  };
 }
+function NSO_scaleRingApply(verb, value) { return NSO_scaleCardApply(NSO_scaleRingVerb(verb, value)); }
 
 /* Length / Width / Height: Extend or Shorten along the piece's own axis that
    NSO_sectionVerbs named for it. The band logic was already per axis
@@ -839,40 +856,62 @@ function NSO_scaleRingApply(verb, value) {
    and a refusal - Shorten's "can remove up to N mm here" among them - is
    Extend's own. undo type 'extendReplace', as Extend's own button. */
 var NSO_SCALE_AXIS_LABEL = { length: 'Length', width: 'Width', height: 'Height' };
-function NSO_scaleAxisApply(verb, value) {
+function NSO_scaleAxisVerb(verb, value) {
   var label = NSO_SCALE_AXIS_LABEL[verb] || verb;
-  return NSO_scaleCardApply(label, 'extendReplace', function (soup, m) {
-    var s = NSO_scaleSectionOf(m), dim = s && s.verbs ? s.verbs[verb] : null;
-    if (!dim) {
-      return { ok: false, reason: (s ? s.why || s.reason : 'no reading') + ' - no straight run to stretch along its ' +
-               label.toLowerCase() };
+  return {
+    label: label, undoType: 'extendReplace', paint: label + NSO_SCALE_FACES_PAINT,
+    run: function (soup) {
+      var s = NSO_scaleSectionOfSoup(soup), dim = s && s.verbs ? s.verbs[verb] : null;
+      if (!dim) {
+        return { ok: false, reason: (s ? s.why || s.reason : 'no reading') + ' - no straight run to stretch along its ' +
+                 label.toLowerCase() };
+      }
+      if (!(value > 0)) return { ok: false, reason: label + ' must be a positive number of mm' };
+      return NSO_extendRaw(soup, { axis: dim.axisIdx, length: +value });
+    },
+    describe: function (r) {
+      var L = NSO_scaleLen, f = NSO_sectionShow;
+      return r.axis.toUpperCase() + ' ' + L(r.lengthBefore, f) + ' → ' + L(r.lengthAfter, f) +
+        NSO_scaleU() + ' (' + (r.mode === 'shorten' ? 'removed' : 'inserted') + ' at ' + r.axis.toUpperCase() + ' ' +
+        L(r.cut, 2) + (NSO_scaleIn() ? ' in' : '') + '), every other coordinate unchanged (' + r.crossSectionDrift + ' drifted)';
     }
-    if (!(value > 0)) return { ok: false, reason: label + ' must be a positive number of mm' };
-    return NSO_extendRaw(soup, { axis: dim.axisIdx, length: +value });
-  }, function (r) {
-    var L = NSO_scaleLen, f = NSO_sectionShow;
-    return r.axis.toUpperCase() + ' ' + L(r.lengthBefore, f) + ' → ' + L(r.lengthAfter, f) +
-      NSO_scaleU() + ' (' + (r.mode === 'shorten' ? 'removed' : 'inserted') + ' at ' + r.axis.toUpperCase() + ' ' +
-      L(r.cut, 2) + (NSO_scaleIn() ? ' in' : '') + '), every other coordinate unchanged (' + r.crossSectionDrift + ' drifted)';
-  });
+  };
 }
+function NSO_scaleAxisApply(verb, value) { return NSO_scaleCardApply(NSO_scaleAxisVerb(verb, value)); }
 
 /* Offset: Fatten and Shrink as one signed number. undo type 'offsetReplace'. */
-function NSO_scaleOffsetApply(mm) {
-  return NSO_scaleCardApply('Offset', 'offsetReplace', function (soup, m) {
-    var s = NSO_scaleSectionOf(m);
-    return NSO_scaleOffsetRaw(soup, mm, { innerWord: (s && s.shape === 'round') ? 'bore' : 'bore or pocket' });
-  }, function (r) {
-    // With inches shown "in 0.100 in" would read twice, so the direction is
-    // spelt out; the amount is echoed as typed.
-    var inch = NSO_scaleIn(), u = NSO_scaleU(), a = r.spanBefore, b = r.spanAfter;
-    var f = function (x) { return NSO_scaleLen(x, NSO_sectionShow); };
-    return (inch ? (r.mm > 0 ? 'outward ' : 'inward ') : (r.mm > 0 ? 'out ' : 'in ')) +
-      (inch ? NSO_scaleTyped(Math.abs(r.mm)) : Math.abs(r.mm)) + u + ', ' + f(a[0]) + ' × ' + f(a[1]) + ' × ' + f(a[2]) +
-      ' → ' + f(b[0]) + ' × ' + f(b[1]) + ' × ' + f(b[2]) + u + ' (X × Y × Z); ' +
-      (r.innerFaces ? r.innerFaces + ' inner face(s) followed, walls kept' : 'no inner faces - an even offset');
-  });
+function NSO_scaleOffsetVerb(mm) {
+  return {
+    label: 'Offset', undoType: 'offsetReplace', paint: 'Offset' + NSO_SCALE_FACES_PAINT,
+    run: function (soup) {
+      var s = NSO_scaleSectionOfSoup(soup);
+      return NSO_scaleOffsetRaw(soup, mm, { innerWord: (s && s.shape === 'round') ? 'bore' : 'bore or pocket' });
+    },
+    describe: function (r) {
+      // With inches shown "in 0.100 in" would read twice, so the direction is
+      // spelt out; the amount is echoed as typed.
+      var inch = NSO_scaleIn(), u = NSO_scaleU(), a = r.spanBefore, b = r.spanAfter;
+      var f = function (x) { return NSO_scaleLen(x, NSO_sectionShow); };
+      return (inch ? (r.mm > 0 ? 'outward ' : 'inward ') : (r.mm > 0 ? 'out ' : 'in ')) +
+        (inch ? NSO_scaleTyped(Math.abs(r.mm)) : Math.abs(r.mm)) + u + ', ' + f(a[0]) + ' × ' + f(a[1]) + ' × ' + f(a[2]) +
+        ' → ' + f(b[0]) + ' × ' + f(b[1]) + ' × ' + f(b[2]) + u + ' (X × Y × Z); ' +
+        (r.innerFaces ? r.innerFaces + ' inner face(s) followed, walls kept' : 'no inner faces - an even offset');
+    }
+  };
 }
+function NSO_scaleOffsetApply(mm) { return NSO_scaleCardApply(NSO_scaleOffsetVerb(mm)); }
+
+/* A card field's verb, `value` in mm (Whole x: a plain factor). */
+function NSO_scaleCardVerb(k, value) {
+  if (k === 'factor') return NSO_scaleUniformVerb({ factor: value });
+  if (k === 'longest') return NSO_scaleUniformVerb({ axis: 'longest', targetMm: value });
+  if (k === 'offset') return NSO_scaleOffsetVerb(value);
+  if (NSO_SCALE_AXIS_LABEL[k]) return NSO_scaleAxisVerb(k, value);
+  return NSO_scaleRingVerb(k, value);
+}
+
+// How long a live field waits after the last keystroke before it applies.
+var NSO_SCALE_LIVE_MS = 80;
 
 if (typeof document !== 'undefined') {
   (function wireScaleCard() {
@@ -889,7 +928,17 @@ if (typeof document !== 'undefined') {
       ['factor', 'scale-factor', 'scale-factor-row'],
       ['longest', 'scale-target', 'scale-longest-row']
     ];
+    var LABEL = { length: 'Length', width: 'Width', height: 'Height', outer: 'Outer Ø', wall: 'Wall',
+                  diameter: 'Diameter', offset: 'Offset', factor: 'Whole ×', longest: 'Longest' };
+    // What the card last put in each field: the value an edit starts from,
+    // and what Escape puts back.
     var prefill = {};
+    // The edit in progress, one field at a time (see edit() below).
+    var sess = null;
+
+    function byId(id) { return document.getElementById(id); }
+    function active() { return (typeof getActiveModel === 'function') ? getActiveModel() : null; }
+    function fieldOf(k) { for (var i = 0; i < FIELDS.length; i++) if (FIELDS[i][0] === k) return FIELDS[i]; return null; }
 
     // Read only while the card is open. The reading walks the whole soup -
     // about a second on a 49k-triangle piece - and updateEditSize fires on
@@ -897,7 +946,7 @@ if (typeof document !== 'undefined') {
     // nobody to show it to. Opening the menu reads it (the toggle listener in
     // wire()), and data-stale says which state the line is in.
     function cardOpen() {
-      var menu = document.getElementById('menu-scale');
+      var menu = byId('menu-scale');
       return !menu || menu.open;
     }
 
@@ -915,14 +964,9 @@ if (typeof document !== 'undefined') {
 
     // Every field, from the reading, in the unit shown. Whole x is 1 and
     // Offset empty: a factor or an offset is a change, not a measurement, so
-    // neither carries over.
-    //
-    // keepTyped is the unit toggle's repopulate: a box still showing what
-    // the card put there re-reads in the new unit, while a number the person
-    // typed and has not applied yet is converted, not thrown away - at full
-    // precision, so toggling back gives them back what they typed. A
-    // factor is a plain number and is left as it is.
-    function populate(s, keepTyped) {
+    // neither carries over. The field being edited is left as it is - the
+    // edit is what changed the piece.
+    function populate(s) {
       var v = s ? s.verbs : null, val = {};
       var f = function (x) { return NSO_scaleLen(x, NSO_sectionShow); };
       if (v) {
@@ -934,10 +978,10 @@ if (typeof document !== 'undefined') {
       val.factor = '1';
       val.offset = '';
       FIELDS.forEach(function (fd) {
-        var el = document.getElementById(fd[1]);
-        var typed = keepTyped && el ? keepTyped(fd[0], el.value) : null;
+        if (sess && sess.k === fd[0]) return;
+        var el = byId(fd[1]);
         prefill[fd[0]] = val[fd[0]] != null ? val[fd[0]] : '';
-        if (el) el.value = typed != null ? typed : prefill[fd[0]];
+        if (el) el.value = prefill[fd[0]];
       });
     }
 
@@ -948,19 +992,24 @@ if (typeof document !== 'undefined') {
         outer: !!(v && v.outer), wall: !!(v && v.wall), diameter: !!(v && v.diameter),
         offset: !!(v && v.offset), factor: true, longest: !v || v.longest
       };
+      // The row being typed in stays, whatever the piece it is making reads as.
+      if (sess) on[sess.k] = true;
       FIELDS.forEach(function (fd) {
-        var row = document.getElementById(fd[2]);
+        var row = byId(fd[2]);
         if (row) row.hidden = !on[fd[0]];
       });
     }
 
     var lastSig = null, lastSoup = null, lastReading = null;
     function readout(force) {
-      var el = document.getElementById('scale-readout');
+      var el = byId('scale-readout');
       if (!el) return;
+      var m = active();
+      // Another piece selected mid-edit: the field has been left, so the
+      // edit is kept, on the piece it was made on.
+      if (sess && m !== sess.m) finish(true);
       if (!cardOpen()) { el.dataset.stale = '1'; return; }
       el.dataset.stale = '0';
-      var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
       el.textContent = NSO_scaleReadoutText(m);
       var s = m ? NSO_scaleSectionOf(m) : null;
       show(s);
@@ -981,7 +1030,7 @@ if (typeof document !== 'undefined') {
     // it. Only while open.
     var watching = false, seen = null;
     function key() {
-      var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
+      var m = active();
       return { m: m, soup: m ? m.rawTris : null, sig: signature(m) };
     }
     function watch() {
@@ -998,56 +1047,153 @@ if (typeof document !== 'undefined') {
       if (typeof requestAnimationFrame === 'function') requestAnimationFrame(watch);
     }
 
-    function guarded(name, fn) {
-      try { fn(); } catch (err) {
-        console.error('[scale]', err);
-        if (typeof setStatus === 'function') {
-          setStatus(name + ' failed - piece unchanged (' + NSO_scaleText((err && err.message) || String(err)) + ')', true);
-        }
-      }
-      readout();
+    /* ---- live fields ----
+       An edit is one field from the moment it is typed in until it is left.
+       It keeps the piece and the soup it began from, and every value typed
+       runs its verb on THAT soup - never on the last one shown - so typing
+       60 then 65 gives exactly what 65 alone would, and what the field
+       commits is what a single Set used to.
+
+       The piece follows through NSO_sculptCommitRaw, the one bake path. The
+       first value shown writes the edit's undo entry (its "before" is the
+       soup the edit began from); later ones swap the piece with pushUndo
+       held off, so the edit stays one step. Going back to where it began -
+       Escape, the value cleared or typed back, or leaving on a refused value
+       - is that entry undone. */
+    function edit(k) {
+      if (sess && sess.k === k) return sess;
+      if (sess) finish(true);
+      var fd = fieldOf(k), m = active();
+      sess = { k: k, el: byId(fd[1]), start: prefill[k] != null ? prefill[k] : '', m: m,
+               soup: (m && m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null,
+               entry: null, last: null, timer: 0 };
+      return sess;
     }
 
-    function fieldValue(k, id) {
-      var el = document.getElementById(id);
-      return { raw: el ? el.value : '', num: el ? parseFloat(el.value) : NaN, same: !!el && el.value === prefill[k] };
+    // The field's text as a verb, in mm; null when it asks for no change
+    // (empty, the value the edit began from, Whole x 1, Offset 0).
+    function verbOf(s) {
+      var t = String(s.el.value).trim(), num = parseFloat(t);
+      if (t === '' || !isFinite(num)) return null;
+      if (s.k === 'factor') return num === 1 ? null : NSO_scaleCardVerb('factor', num);
+      if (s.k === 'offset') return num === 0 ? null : NSO_scaleCardVerb('offset', NSO_scaleToMm(num));
+      if (s.start !== '' && num === +s.start) return null;
+      return NSO_scaleCardVerb(s.k, NSO_scaleToMm(num));
     }
-    var LABEL = { length: 'Length', width: 'Width', height: 'Height', outer: 'Outer Ø', wall: 'Wall',
-                  diameter: 'Diameter', offset: 'Offset', factor: 'Whole ×', longest: 'Longest' };
 
-    // The edge, inbound: every box but Whole x holds a length in the unit
-    // shown, and the engine is handed millimetres (NSO_scaleToMm).
-    function apply(k, id) {
-      var fv = fieldValue(k, id);
-      if (k === 'factor') return NSO_scaleSelectedModel({ factor: fv.num });
-      var mm = NSO_scaleToMm(fv.num);
-      if (k === 'longest') {
-        if (fv.same) { if (typeof setStatus === 'function') setStatus('Longest: that is the current longest edge - type a new one'); return; }
-        return NSO_scaleSelectedModel({ axis: 'longest', targetMm: mm });
+    function withoutUndo(fn) {
+      var push = window.pushUndo;
+      window.pushUndo = function () {};
+      try { return fn(); } finally { window.pushUndo = push; }
+    }
+    function topEntry() {
+      return (typeof state !== 'undefined' && state.undoStack) ? state.undoStack[state.undoStack.length - 1] : null;
+    }
+
+    // The reason under the field, red, while the typed value is refused.
+    function whyOf(k) {
+      var fd = fieldOf(k), id = fd[1] + '-why', p = byId(id);
+      var row = byId(fd[2]);
+      if (!p && row) {
+        p = document.createElement('p');
+        p.id = id;
+        p.className = 'hint scale-why';
+        p.setAttribute('aria-live', 'polite');
+        p.hidden = true;
+        row.insertAdjacentElement('afterend', p);
       }
-      if (k === 'offset') {
-        if (!(isFinite(fv.num) && fv.num !== 0)) {
-          if (typeof setStatus === 'function') {
-            setStatus(NSO_scaleText('Offset: type how far to move the outside, in mm - positive grows, negative shrinks'));
-          }
-          return;
+      return p;
+    }
+    // The reason is part of the field's description only while it shows.
+    function mark(s, text) {
+      var p = whyOf(s.k), el = s.el;
+      if (p) { p.textContent = text || ''; p.hidden = !text; }
+      if (!el) return;
+      if (el.dataset.nsoDescribed == null) el.dataset.nsoDescribed = el.getAttribute('aria-describedby') || '';
+      var said = el.dataset.nsoDescribed;
+      if (text) {
+        el.setAttribute('aria-invalid', 'true');
+        el.setAttribute('aria-describedby', (said + ' ' + (p ? p.id : '')).trim());
+      } else {
+        el.removeAttribute('aria-invalid');
+        if (said) el.setAttribute('aria-describedby', said); else el.removeAttribute('aria-describedby');
+      }
+    }
+
+    // Back to the soup the edit began from.
+    function putBack(s) {
+      if (!s.entry) return;
+      var entry = s.entry;
+      s.entry = null;
+      if (topEntry() === entry && typeof undoLast === 'function') undoLast();
+      else if (s.m && s.soup && s.m.rawTris !== s.soup) {
+        withoutUndo(function () { NSO_sculptCommitRaw(s.m, s.soup, 'scaleReplace', ''); });
+      }
+    }
+
+    // Apply what the field says now.
+    function preview(s) {
+      if (s.timer) { clearTimeout(s.timer); s.timer = 0; }
+      var verb = verbOf(s), r = null;
+      if (verb) {
+        try { r = NSO_scaleCardTry(verb, s.m, s.soup); } catch (err) {
+          console.error('[scale]', err);
+          var why = NSO_scaleText((err && err.message) || String(err));
+          r = { ok: false, reason: why, inline: why, status: LABEL[s.k] + ' failed - piece unchanged (' + why + ')' };
         }
-        return NSO_scaleOffsetApply(mm);
       }
-      if (fv.same) {
-        if (typeof setStatus === 'function') setStatus(LABEL[k] + ': that is the current value - type a new one');
+      s.last = r;
+      if (r && !r.ok) { mark(s, r.inline); return; }   // the piece stays at the last good value
+      mark(s, '');
+      if (!r) {
+        var had = !!s.entry;
+        putBack(s);
+        if (had && typeof setStatus === 'function') setStatus(LABEL[s.k] + ': as it was');
         return;
       }
-      if (k === 'length' || k === 'width' || k === 'height') return NSO_scaleAxisApply(k, mm);
-      return NSO_scaleRingApply(k, mm);
+      // An undo taken mid-edit (it can only be the edit's own) leaves no entry to fold into.
+      if (s.entry && topEntry() !== s.entry) s.entry = null;
+      var line = verb.label + ': ' + r.said + ' - leave the field to keep it, Esc to put it back';
+      var ok = s.entry
+        ? withoutUndo(function () { return NSO_sculptCommitRaw(s.m, r.tris, verb.undoType, line); })
+        : NSO_sculptCommitRaw(s.m, r.tris, verb.undoType, line);
+      if (ok && !s.entry) s.entry = topEntry();
+      if (!ok) s.last = { ok: false, reason: 'commit failed', status: verb.label + ' failed to commit - piece unchanged' };
+    }
+
+    // Leave the edit: keep it (blur, Tab, Enter) or put it back (Escape).
+    // Leaving on a refused value commits nothing.
+    function finish(keep) {
+      var s = sess;
+      if (!s) return null;
+      sess = null;
+      if (keep && s.timer) preview(s);   // the last keystroke counts
+      if (s.timer) { clearTimeout(s.timer); s.timer = 0; }
+      mark(s, '');
+      var r = s.last;
+      if (keep && r && r.ok) {
+        s.entry = null;
+        if (typeof setStatus === 'function') setStatus(r.status);
+        readout(true);
+        return r;
+      }
+      var moved = !!s.entry;
+      putBack(s);
+      if (s.el) s.el.value = s.start;
+      if (typeof setStatus === 'function') {
+        if (keep && r) setStatus(r.status, true);
+        else if (!keep && (moved || r)) setStatus(LABEL[s.k] + ': put back - piece unchanged');
+      }
+      if (moved || r) readout(true);
+      return r;
     }
 
     /* ---- the mm | in toggle ----
-       The card's labels, aria-labels, unit hints, button titles and each
-       length box's min / max / step are written in mm in index.html. The
-       first relabel() records each one as it stands (data-mm-*), and every
-       later one rewrites from that record, so toggling any number of times
-       never compounds a conversion. Whole x has no unit and is skipped. */
+       The card's labels, aria-labels, unit hints, titles and each length
+       box's min / max / step are written in mm in index.html. The first
+       relabel() records each one as it stands (data-mm-*), and every later
+       one rewrites from that record, so toggling any number of times never
+       compounds a conversion. Whole x has no unit and is skipped. */
     function loadUnit() {
       var saved = null;
       try { saved = localStorage.getItem(NSO_SCALE_UNIT_KEY); } catch (e) {}
@@ -1064,7 +1210,7 @@ if (typeof document !== 'undefined') {
       };
       FIELDS.forEach(function (fd) {
         if (fd[0] === 'factor') return;
-        var el = document.getElementById(fd[1]), row = document.getElementById(fd[2]);
+        var el = byId(fd[1]), row = byId(fd[2]);
         if (el) {
           var d = el.dataset;
           if (d.mmStep == null) { d.mmMin = el.min; d.mmMax = el.max; d.mmStep = el.step; d.mmAria = el.getAttribute('aria-label') || ''; }
@@ -1088,66 +1234,94 @@ if (typeof document !== 'undefined') {
         if (n.dataset.mmText == null) n.dataset.mmText = n.textContent;
         n.textContent = NSO_scaleText(n.dataset.mmText);
       });
-      document.querySelectorAll('#scale-card button[title]').forEach(function (b) {
+      document.querySelectorAll('#scale-card button[title], #scale-rows input[title]').forEach(function (b) {
         if (b.dataset.mmTitle == null) b.dataset.mmTitle = b.title;
         b.title = swap(b.dataset.mmTitle, 'inches');
       });
       ['mm', 'in'].forEach(function (u) {
-        var b = document.getElementById('btn-scale-unit-' + u);
+        var b = byId('btn-scale-unit-' + u);
         if (b) b.setAttribute('aria-pressed', NSO_scaleUnitNow === u ? 'true' : 'false');
       });
     }
     // Switch the unit shown. Display only: the piece, its undo stack and its
-    // pose are not touched; the readout and the boxes re-read in the new unit.
+    // pose are not touched; the readout and the boxes re-read in the new
+    // unit. An edit still open is left first, as a click on the toggle does.
     function setUnit(u) {
       u = u === 'in' ? 'in' : 'mm';
+      if (sess) finish(true);
       var was = NSO_scaleUnitNow;
       NSO_scaleUnitNow = u;
       try { localStorage.setItem(NSO_SCALE_UNIT_KEY, u); } catch (e) {}
       relabel();
       if (was === u) return;
       readout();
-      var prev = Object.assign({}, prefill);
-      populate(lastReading, function (k, value) {
-        if (k === 'factor') return value;
-        if (value === prev[k] || value === '' || !isFinite(+value)) return null;
-        var v = u === 'in' ? +value / NSO_SCALE_MM_PER_IN : +value * NSO_SCALE_MM_PER_IN;
-        return String(+v.toPrecision(12));
+      populate(lastReading);
+    }
+
+    function wireField(fd) {
+      var k = fd[0], el = byId(fd[1]);
+      if (!el || el.dataset.nsoWired === '1') return;
+      el.dataset.nsoWired = '1';
+      whyOf(k);
+      el.addEventListener('focus', function () { edit(k); });
+      el.addEventListener('input', function () {
+        var s = edit(k);
+        if (s.timer) clearTimeout(s.timer);
+        s.timer = setTimeout(function () { if (sess === s) preview(s); }, NSO_SCALE_LIVE_MS);
+      });
+      el.addEventListener('blur', function () { if (sess && sess.k === k) finish(true); });
+      // A value set from outside, with the field not focused (a script, an
+      // autofill): the same edit, begun and left at once. While focused,
+      // change is the spinner or Enter, both handled as typing.
+      el.addEventListener('change', function () {
+        if (document.activeElement === el) return;
+        if (sess && sess.k === k) finish(true);
+        else if (el.value !== (prefill[k] != null ? prefill[k] : '')) { edit(k); finish(true); }
+      });
+      el.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          if (sess && sess.k === k) finish(true);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          if (sess && sess.k === k) finish(false);
+        }
       });
     }
 
-    var BUTTON = { length: 'btn-scale-length', width: 'btn-scale-width', height: 'btn-scale-height',
-                   outer: 'btn-scale-ring-outer', wall: 'btn-scale-ring-wall', diameter: 'btn-scale-rod-diameter',
-                   offset: 'btn-scale-offset', factor: 'btn-scale-factor', longest: 'btn-scale-dim' };
     function wire() {
       ['mm', 'in'].forEach(function (u) {
-        var b = document.getElementById('btn-scale-unit-' + u);
+        var b = byId('btn-scale-unit-' + u);
         if (b && b.dataset.nsoWired !== '1') {
           b.dataset.nsoWired = '1';
           b.addEventListener('click', function () { setUnit(u); });
         }
       });
       relabel();
-      FIELDS.forEach(function (fd) {
-        var btn = document.getElementById(BUTTON[fd[0]]);
-        if (btn && btn.dataset.nsoWired !== '1') {
-          btn.dataset.nsoWired = '1';
-          btn.addEventListener('click', function () { guarded(LABEL[fd[0]], function () { apply(fd[0], fd[1]); }); });
-        }
-      });
-      var fit = document.getElementById('btn-scale-fit');
+      FIELDS.forEach(wireField);
+      var fit = byId('btn-scale-fit');
       if (fit && fit.dataset.nsoWired !== '1') {
         fit.dataset.nsoWired = '1';
-        fit.addEventListener('click', function () { guarded('Fit to plate', NSO_scaleFitToPlate); });
+        fit.addEventListener('click', function () {
+          if (sess) finish(true);
+          try { NSO_scaleFitToPlate(); } catch (err) {
+            console.error('[scale]', err);
+            if (typeof setStatus === 'function') {
+              setStatus('Fit to plate failed - piece unchanged (' + NSO_scaleText((err && err.message) || String(err)) + ')', true);
+            }
+          }
+          readout();
+        });
       }
-      var menu = document.getElementById('menu-scale');
+      var menu = byId('menu-scale');
       if (menu && menu.dataset.nsoScaleWired !== '1') {
         menu.dataset.nsoScaleWired = '1';
         menu.addEventListener('toggle', function () { if (menu.open) { readout(true); startWatch(); } });
       }
       // The verdict names the machine, so a plate change re-reads it.
       ['plate-select', 'custom-w', 'custom-d', 'custom-h'].forEach(function (id) {
-        var el = document.getElementById(id);
+        var el = byId(id);
         if (el && el.dataset.nsoScaleWired !== '1') {
           el.dataset.nsoScaleWired = '1';
           el.addEventListener('change', function () { readout(); });

@@ -1,5 +1,7 @@
 /* The Scale card, driven through the real app: read the shape, then every
-   field it offers, with real clicks and real Undo.
+   field it offers, typed on a real keyboard and left with Tab (the fields
+   are live - there is no Set; tools/nso_scale_live_drive_check.js proves the
+   live part), with real Undo.
    node tools/nso_scale_card_drive_check.js               exit 0 = every gate held
    node tools/nso_scale_card_drive_check.js --shots DIR   also write DIR/*.png
                                                           (a scratch directory -
@@ -24,15 +26,16 @@
         the floor, refused with the most Shorten can take; Offset +1 by a real
         click, walls and floor kept
      5  fields repopulate on selection change and on a pose change; Whole x
-        resets to 1
+        resets to 1; a field typed in and the piece changed under it keeps
+        the edit, on the piece it was made on
      6  the card fits a 900 px-tall window without scrolling, one line a row
      7  Stock box -> Bar, Length / Width / Height
      8  Stock sphere -> the gate in plain words, Offset shown, no L / W / H;
-        Longest 50 by a real click (the card hides Longest where a named field
-        shows the same number, so a sphere is where it is clicked); Offset +1
+        Longest 50 typed (the card hides Longest where a named field shows
+        the same number, so a sphere is where it is typed in); Offset +1
         grows it 2 mm, Undo; a shrink through the floor refused
      9  the Offset row's sentence under it - thin features keep their
-        thickness - and fixtures/lid_strap.stl, Offset +0.5 by a real click:
+        thickness - and fixtures/lid_strap.stl, Offset +0.5 typed:
         the plate thickens 1 mm, the 0.6 mm strap stays 0.6 mm
      10 Longest on a bar turned 90° about Z and tipped: as a pose, and with
         the turn in its geometry (the app's own pose bake, as Join and every
@@ -132,11 +135,22 @@ async function clickScale(page, sel, waitRe) {
     waitRe, { timeout: 60000 });
   return statusOf(page);
 }
-/* Type a value into a field and press its Set, as a user does. */
-async function setAndPress(page, input, button, value, waitRe) {
+/* Type a value into a field, as a user does, without leaving it. */
+async function type(page, input, value) {
   await openMenuFor(page, '#' + input);
-  await setFields(page, { [input]: value });
-  return clickScale(page, '#' + button, waitRe);
+  await page.focus('#' + input);
+  await page.keyboard.press('Control+A');
+  if (String(value) === '') await page.keyboard.press('Backspace');
+  else await page.keyboard.type(String(value));
+}
+/* Type a value and leave the field with Tab - which is what commits it. */
+async function typeAndLeave(page, input, value, waitRe) {
+  await type(page, input, value);
+  await page.evaluate(() => { document.getElementById('status').textContent = ''; });
+  await page.keyboard.press('Tab');
+  await page.waitForFunction(re => new RegExp(re).test(document.getElementById('status').textContent),
+    waitRe, { timeout: 60000 });
+  return statusOf(page);
 }
 
 async function undo(page) {
@@ -183,7 +197,7 @@ withApp(async (page, logs) => {
   const before = c0;
 
   console.log('\n=== 2. Height shorter / taller; Whole x 2 ===');
-  const s1 = await setAndPress(page, 'scale-height', 'btn-scale-height', 30, 'Height (done|refused)|stood down');
+  const s1 = await typeAndLeave(page, 'scale-height', 30, 'Height (done|refused)|stood down');
   const c1 = await card(page);
   console.log('   status:  ' + s1);
   console.log('   readout: ' + c1.readout);
@@ -198,7 +212,7 @@ withApp(async (page, logs) => {
   check('Undo restores the soup coordinate for coordinate', c1u.soup === before.soup);
   check('...and the readout with it', c1u.readout === want, c1u.readout);
 
-  const s2 = await setAndPress(page, 'scale-height', 'btn-scale-height', 50, 'Height (done|refused)|stood down');
+  const s2 = await typeAndLeave(page, 'scale-height', 50, 'Height (done|refused)|stood down');
   const c2 = await card(page);
   console.log('   status:  ' + s2);
   check('Height 50 extended along Z', /^Height done - Z 40\.62 → 50\.0 mm \(inserted at Z /.test(s2), s2);
@@ -206,7 +220,7 @@ withApp(async (page, logs) => {
   await undo(page);
   check('Undo restores it', (await card(page)).soup === before.soup);
 
-  const s3 = await setAndPress(page, 'scale-factor', 'btn-scale-factor', 2, 'Scale done|refused|stood down');
+  const s3 = await typeAndLeave(page, 'scale-factor', 2, 'Scale done|refused|stood down');
   const c3 = await card(page);
   console.log('   status:  ' + s3);
   console.log('   readout: ' + c3.readout);
@@ -255,7 +269,7 @@ withApp(async (page, logs) => {
   ];
   for (const [verb, v, k, layers] of TRAY) {
     const label = verb[0].toUpperCase() + verb.slice(1);
-    const st = await setAndPress(page, 'scale-' + verb, 'btn-scale-' + verb, v, label + ' (done|refused)|stood down');
+    const st = await typeAndLeave(page, 'scale-' + verb, v, label + ' (done|refused)|stood down');
     const c = await card(page);
     console.log('   ' + label + ' -> ' + v + ': ' + st);
     console.log('     layers ' + 'xyz'[k] + ' ' + c.layers[k].join(','));
@@ -267,7 +281,7 @@ withApp(async (page, logs) => {
     await undo(page);
     check('  ...Undo returns the tray', (await card(page)).soup === t0.soup);
   }
-  const so1 = await setAndPress(page, 'scale-offset', 'btn-scale-offset', 1, 'Offset (done|refused)|stood down');
+  const so1 = await typeAndLeave(page, 'scale-offset', 1, 'Offset (done|refused)|stood down');
   const co1 = await card(page);
   console.log('   Offset +1: ' + so1);
   console.log('     layers x ' + co1.layers[0].join(',') + '  y ' + co1.layers[1].join(',') + '  z ' + co1.layers[2].join(','));
@@ -276,7 +290,7 @@ withApp(async (page, logs) => {
     co1.layers[2].join() === '-1,1,26', so1);
   await undo(page);
   check('  ...Undo returns the tray', (await card(page)).soup === t0.soup);
-  const sf = await setAndPress(page, 'scale-height', 'btn-scale-height', 1.5, 'Height (done|refused)|stood down');
+  const sf = await typeAndLeave(page, 'scale-height', 1.5, 'Height (done|refused)|stood down');
   const cf = await card(page);
   console.log('   Height -> 1.5: ' + sf);
   check('Height 1.5, under the 2 mm floor: refused, naming the most Shorten can remove, piece unchanged',
@@ -284,16 +298,27 @@ withApp(async (page, logs) => {
   await shot(page, '03-tray-height-refused');
 
   console.log('\n=== 5. Every field repopulates on selection and pose change ===');
-  await setFields(page, { 'scale-factor': 3, 'scale-width': 77 });
+  // Width typed - live, not left - and another piece selected from script,
+  // so the field never blurs: the card takes the selection as leaving the
+  // field, and keeps the edit on the tray.
+  const undo5 = await page.evaluate(() => state.undoStack.length);
+  await type(page, 'scale-width', 77);
+  await page.waitForFunction(() => Math.abs(NSO_scaleRawBounds(getActiveModel().rawTris).span[1] - 77) < 1e-3, null, { timeout: 30000 });
   await select(page, tube.id);
   const r1 = await card(page);
-  check('selecting the tube: its own fields, Whole × back to 1', r1.val.factor === '1' && r1.val.height === show(m.height) &&
+  check('selecting the tube mid-edit: its own fields, Whole × 1', r1.val.factor === '1' && r1.val.height === show(m.height) &&
     r1.rows === 'height,ring-outer,ring-wall,factor', JSON.stringify(r1.val));
   await select(page, trayId);
   const r2 = await card(page);
-  check('back to the tray: 100.0 / 40.0 / 25.0 again, Whole × 1', r2.val.length === '100.0' && r2.val.width === '40.0' &&
-    r2.val.height === '25.0' && r2.val.factor === '1', JSON.stringify(r2.val));
-  await setFields(page, { 'scale-factor': 3, 'scale-width': 77 });
+  const undo5b = await page.evaluate(() => state.undoStack.length);
+  check('back to the tray: the Width edit was kept as one step - 100.0 / 77.0 / 25.0, Whole × 1',
+    r2.val.length === '100.0' && r2.val.width === '77.0' && r2.val.height === '25.0' && r2.val.factor === '1' && undo5b === undo5 + 1,
+    JSON.stringify(r2.val) + ', undo ' + undo5 + ' -> ' + undo5b);
+  await undo(page);
+  check('...one Undo returns the tray', (await card(page)).soup === t0.soup);
+  // Boxes left showing other numbers with nobody editing them (set from
+  // script, no event): a pose change re-reads every one.
+  await page.evaluate(() => { document.getElementById('scale-factor').value = '3'; document.getElementById('scale-width').value = '77'; });
   await page.evaluate(() => tipSelected());
   const r3 = await card(page);
   console.log('   after Tip X: ' + r3.readout + '   ' + JSON.stringify(r3.val));
@@ -310,13 +335,13 @@ withApp(async (page, logs) => {
       const rows = Array.from(document.querySelectorAll('#scale-rows .scale-row')).filter(e => getComputedStyle(e).display !== 'none');
       return { bottom: Math.round(r.bottom), vh: innerHeight, scroll: c.scrollHeight - c.clientHeight,
                rowH: rows.map(e => Math.round(e.getBoundingClientRect().height)),
-               // one line: every part of the row - label, field, unit, Set - on the same line
+               // one line: every part of the row - label, field, unit - on the same line
                spread: rows.map(e => { const c = Array.from(e.children).map(x => { const b = x.getBoundingClientRect(); return (b.top + b.bottom) / 2; });
                                         return Math.round(Math.max(...c) - Math.min(...c)); }) };
     });
     console.log('   ' + (id === trayId ? 'tray' : 'tube') + ': card bottom ' + box.bottom + ' of ' + box.vh + ', rows ' + box.rowH.join('/') + ' px');
     check('  inside the window, no scroll inside the card', box.bottom <= box.vh && box.scroll <= 1, JSON.stringify(box));
-    check('  one line a row: label, field, unit and Set centred on one line, no row taller than 44 px',
+    check('  one line a row: label, field and unit centred on one line, no row taller than 44 px',
       box.spread.every(d => d <= 2) && box.rowH.every(h => h <= 44), 'centres within ' + box.spread.join('/') + ' px');
   }
 
@@ -341,14 +366,14 @@ withApp(async (page, logs) => {
       'so only an even offset and whole-piece scaling apply · fits A1 Mini', c8.readout);
   check('rows: Offset, Whole ×, Longest - no Length / Width / Height', c8.rows === 'offset,factor,longest', c8.rows);
   check('Longest prefilled with the longest edge', c8.val.longest === d, c8.val.longest);
-  const sl = await setAndPress(page, 'scale-target', 'btn-scale-dim', 50, 'Scale done|refused|stood down');
+  const sl = await typeAndLeave(page, 'scale-target', 50, 'Scale done|refused|stood down');
   const cl = await card(page);
   console.log('   Longest 50: ' + sl);
-  check('Longest 50, by a real click: the longest edge lands on 50 and the field re-reads 50.0',
+  check('Longest 50, typed and left: the longest edge lands on 50 and the field re-reads 50.0',
     /^Scale done/.test(sl) && Math.abs(Math.max(cl.size.x, cl.size.y, cl.size.z) - 50) < 1e-4 && cl.val.longest === '50.0', cl.val.longest);
   await undo(page);
   check('...Undo restores the sphere', (await card(page)).soup === c8.soup);
-  const so = await setAndPress(page, 'scale-offset', 'btn-scale-offset', 1, 'Offset (done|refused)|stood down');
+  const so = await typeAndLeave(page, 'scale-offset', 1, 'Offset (done|refused)|stood down');
   const c9 = await card(page);
   console.log('   Offset +1: ' + so);
   check('Offset +1 grows every side 1 mm: 2 mm on each size', /^Offset done - out 1 mm/.test(so) &&
@@ -357,7 +382,7 @@ withApp(async (page, logs) => {
   check('...and the field is empty again for the next one', c9.val.offset === '', c9.val.offset);
   const u9 = await undo(page);
   check('Undo names the offset and restores the sphere', /Undo: Offset reverted/.test(u9) && (await card(page)).soup === c8.soup, u9);
-  const sr = await setAndPress(page, 'scale-offset', 'btn-scale-offset', -20, 'Offset (done|refused)|stood down');
+  const sr = await typeAndLeave(page, 'scale-offset', -20, 'Offset (done|refused)|stood down');
   console.log('   Offset -20: ' + sr);
   check('Offset -20 refused, naming the floor', /^Offset refused - piece unchanged \(its . size of .* would go through zero, under the 0\.42 mm floor/.test(sr), sr);
   await shot(page, '04-sphere-offset');
@@ -400,11 +425,11 @@ withApp(async (page, logs) => {
   console.log('   lid_strap: ' + cL.readout + '   rows ' + cL.rows);
   console.log('   before: plate ' + lb.plate.toFixed(4) + ', strap ' + lb.strap.toFixed(4));
   check('lid_strap: Offset and its sentence shown', cL.shown.offset && n9.shown && n9.under, cL.rows);
-  const sL = await setAndPress(page, 'scale-offset', 'btn-scale-offset', 0.5, 'Offset (done|refused)|stood down');
+  const sL = await typeAndLeave(page, 'scale-offset', 0.5, 'Offset (done|refused)|stood down');
   const la = await strap(page);
   console.log('   Offset +0.5: ' + sL);
   console.log('   after:  plate ' + la.plate.toFixed(4) + ', strap ' + la.strap.toFixed(4));
-  check('Offset +0.5 by a real click: the plate 2.4 -> 3.4, the 0.6 mm strap stays 0.6 mm - what the sentence says',
+  check('Offset +0.5 typed and left: the plate 2.4 -> 3.4, the 0.6 mm strap stays 0.6 mm - what the sentence says',
     /^Offset done - out 0\.5 mm/.test(sL) && Math.abs(lb.plate - 2.4) < 1e-5 && Math.abs(la.plate - 3.4) < 1e-5 &&
     Math.abs(lb.strap - 0.6) < 1e-5 && Math.abs(la.strap - 0.6) < 1e-5, la.plate.toFixed(4) + ' / ' + la.strap.toFixed(4));
   await undo(page);
@@ -418,11 +443,12 @@ withApp(async (page, logs) => {
   // own Z: a file exported turned and loaded back.
   const longest = async (real) => {
     await openMenuFor(page, '#scale-readout');
-    await setFields(page, { 'scale-target': 150 });
-    if (real) return clickScale(page, '#btn-scale-dim', 'Scale (done|refused)|stood down|Longest');
+    if (real) return typeAndLeave(page, 'scale-target', 150, 'Scale (done|refused)|stood down|Longest');
     // A plain bar hides the row (its Length shows the same number), so the
-    // card's own Set is pressed from script: the same handler a click runs.
-    await page.evaluate(() => { document.getElementById('status').textContent = ''; document.getElementById('btn-scale-dim').click(); });
+    // value is set from script and the field's change fired, with the field
+    // not focused: the card's path for a value set from outside.
+    await page.evaluate(() => { document.getElementById('status').textContent = ''; });
+    await setFields(page, { 'scale-target': 150 });
     await page.waitForFunction(() => /Scale (done|refused)|stood down|Longest/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
     return statusOf(page);
   };
