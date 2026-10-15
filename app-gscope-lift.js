@@ -435,7 +435,9 @@ var NSO_GSCOPE_LIFT = (function () {
     var v = MS() && MS().getView();
     if (!v) return null;
     if (!layer) { layer = new THREE.Group(); layer.name = 'gscopeLift'; layer.renderOrder = 9; }
-    if (layer.parent !== v.scene) v.scene.add(layer);
+    // A helper (nso-helpers.js), in G-scope's own scene; put back whenever it
+    // is drawn, since a leave, a Clear or an Undo takes it out.
+    if (layer.parent !== v.scene) nsoHelpers.attach(v.scene, layer, 'gscope-lift');
     return layer;
   }
   function clearLayer() {
@@ -676,6 +678,15 @@ var NSO_GSCOPE_LIFT = (function () {
   // =========================================================================
   // Panel
   // =========================================================================
+
+  /* Lift's height map, for the helper registry. Closing is Lift's own off
+     switch; an Undo is already redrawn by afterUndo, so refresh is draw(). */
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('gscope-lift', {
+    live: function () { return on; },
+    close: function () { setOn(false); },
+    clear: clearLayer,
+    refresh: function () { draw(); }
+  });
 
   function setOn(v) {
     on = !!v;

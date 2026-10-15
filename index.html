@@ -1419,14 +1419,16 @@
   <script src="nso_slicer.js?v=slice1"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
   <script src="nso_relief.js?v=relief2"></script>
-  <script src="app-core.js?v=neckcard1"></script>
+  <!-- Every tool helper goes in and out of the scene through this registry. -->
+  <script src="nso-helpers.js?v=helpers1"></script>
+  <script src="app-core.js?v=helpmrg1"></script>
 
 
 
 
 
-  <script src="app-cut.js?v=finestep1"></script>
-  <script src="app-finish.js?v=holes1"></script>
+  <script src="app-cut.js?v=helpmrg1"></script>
+  <script src="app-finish.js?v=helpers1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
   <script src="app-extend.js?v=scale1"></script>
   <!-- Mirror: exact reflection across the cut plane. After app-extend.js,
@@ -1434,7 +1436,7 @@
   <script src="app-mirror.js?v=mirror2"></script>
   <!-- Crop, stage 1: box -> remove slab -> seal the joint. After app-cut.js
        (rawCutOpen, rawFlatCapLoop, mapPlaneToRaw) and app-sculpt.js (commit). -->
-  <script src="app-crop.js?v=cutcard2"></script>
+  <script src="app-crop.js?v=helpers1"></script>
   <script src="app-fatten.js?v=box2"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
@@ -1443,7 +1445,7 @@
        sweepArc), app-extend.js (the band finder), nso_section.js (the fit)
        and app-sculpt.js (the commit). See docs/BEND.md. -->
   <script src="nso_bend.js?v=bend1"></script>
-  <script src="app-bend.js?v=bend1"></script>
+  <script src="app-bend.js?v=helpers1"></script>
   <!-- Tube edge: Flare and Roll on the open end of a tube. After nso_section.js
        (the circle fit), nso_bend.js (the topology gate) and app-sculpt.js (the
        commit). See docs/TUBE-EDGE.md. -->
@@ -1451,37 +1453,37 @@
   <!-- Neck: a pinch or a bulge along a tube. After nso_tube_edge.js (its end
        reader, weld and helpers). See docs/TUBE-EDGE.md, "Neck". -->
   <script src="nso_tube_neck.js?v=neck1"></script>
-  <script src="app-tube-edge.js?v=neck1"></script>
+  <script src="app-tube-edge.js?v=helpmrg1"></script>
   <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
        nso_planar_fuse.js (the vertex space), nso_thickness.js,
        nso_assemble.js (the seat), nso_path_sweep.js (the rod) and
        nso_section.js (the face's shape). See docs/BRIDGE.md. -->
   <script src="nso_bridge.js?v=bridge1"></script>
-  <script src="app-bridge.js?v=bridge1"></script>
+  <script src="app-bridge.js?v=helpers1"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=polish2"></script>
   <script src="app-scale.js?v=polish2"></script>
-  <script src="app-brush.js?v=hollow2"></script>
+  <script src="app-brush.js?v=helpers1"></script>
   <script src="app-wheel.js?v=wheel3"></script>
   <script src="app-fit.js?v=wheel4"></script>
   <script src="app-stock.js?v=stock3"></script>
   <script src="app-assemble.js?v=asm2"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
-  <script src="app-join.js?v=finestep1"></script>
+  <script src="app-join.js?v=helpmrg1"></script>
   <script src="app-center-lock.js?v=clock2"></script>
   <script src="app-oversize-washer.js?v=oversize2"></script>
   <script src="app-join-triple.js?v=triple1"></script>
   <script src="app-carve.js?v=carvedrag1"></script>
   <script src="app-hollow.js?v=hollow1"></script>
-  <script src="app-foam.js?v=foam1"></script>
+  <script src="app-foam.js?v=helpers1"></script>
   <script src="app-seat-surface.js?v=seatsurf2"></script>
   <script src="app-skin.js?v=skin4"></script>
   <script src="app-skin-patch.js?v=skin3"></script>
   <script src="app-raster.js?v=raster1"></script>
   <script src="app-relief.js?v=lift1"></script>
   <script src="app-mask.js?v=inmode2"></script>
-  <script src="app-seat-grid.js?v=inside6"></script>
+  <script src="app-seat-grid.js?v=helpers1"></script>
   <script src="app-paint-delete.js?v=del1"></script>
   <script src="app-extract-sel.js?v=inside6"></script>
   <script src="app-texture.js?v=skin2"></script>
@@ -1490,14 +1492,14 @@
   <!-- The arbiter first: the three menu tools below register with it as
        they bind, and it is what makes "one menu owns the input" true
        rather than three modules each hoping the other two are shut. -->
-  <script src="app-input-mode.js?v=shell2"></script>
+  <script src="app-input-mode.js?v=helpers1"></script>
   <script src="app-tip-orient.js?v=tip3"></script>
-  <script src="app-rotate-handles.js?v=rot10"></script>
-  <script src="app-move-vertical.js?v=mv2"></script>
-  <script src="app-defects.js?v=findings1"></script>
+  <script src="app-rotate-handles.js?v=helpmrg1"></script>
+  <script src="app-move-vertical.js?v=helpers1"></script>
+  <script src="app-defects.js?v=helpers1"></script>
   <!-- After app-defects.js, whose hooks and scan it uses. -->
-  <script src="app-findings.js?v=shell2"></script>
-  <script src="app-measure.js?v=measure2"></script>
+  <script src="app-findings.js?v=helpers1"></script>
+  <script src="app-measure.js?v=helpers1"></script>
   <!-- The library write features. access first: it holds the gate, the
        target repository and the token key that the other two read. -->
   <script src="app-library-access.js?v=libsave2"></script>
@@ -1523,7 +1525,7 @@
        edit / remove. After app-microscope.js, whose hooks it uses, and after
        nso_support_aim.js / nso_support_tree.js / app-join.js, whose
        detection, generators and union it calls. See docs/GCODE-SUPPORTS.md. -->
-  <script src="app-gscope-support.js?v=supcard1"></script>
+  <script src="app-gscope-support.js?v=helpmrg1"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
   <script src="app-supports-card.js?v=supcard2"></script>
@@ -1537,7 +1539,7 @@
   <script src="nso_lift.js?v=lift2"></script>
   <script src="nso_lift_curved.js?v=lift3"></script>
   <script src="nso_lift_auto.js?v=lift3"></script>
-  <script src="app-gscope-lift.js?v=lift3"></script>
+  <script src="app-gscope-lift.js?v=helpers1"></script>
 
 
   <!-- Shell v2: the column's Lift button opens G-scope at its Lift row.
@@ -1547,7 +1549,7 @@
   <!-- Live watch: off until its button is pressed, and it patches nothing
        until then. Deleting this tag and the #btn-watch button above removes
        the feature completely. -->
-  <script src="nso-watch.js"></script>
+  <script src="nso-watch.js?v=helpers1"></script>
   <script src="app-cth-expose.js?v=cth15"></script>
   <script type="module" src="app-cth.js?v=cth15"></script>
 </body>

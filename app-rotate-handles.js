@@ -515,7 +515,6 @@
       group = new THREE.Group();
       group.name = 'nso-rotate-handles';
       group.renderOrder = 999;
-      state.scene.add(group);
     }
     return group;
   }
@@ -765,6 +764,10 @@
     var list = shown ? shownRings() : [];
     if (hold && !holdIntact()) dropHold();      // re-placed under us: nothing held any more
     if (!p || !list.length || !menuOwnsInput()) { g.visible = false; return; }
+    /* A helper (nso-helpers.js): put in the scene when there are rings to
+       draw, and put back here after a leave, a Clear or an Undo took it out.
+       Interactive: the rings are grabbed. */
+    if (g.parent !== state.scene) nsoHelpers.attach(state.scene, g, 'rotate', { interactive: true });
     g.visible = true;
     g.position.copy(ringCentre(p));
     g.updateMatrixWorld(true);
@@ -775,6 +778,11 @@
       addRing(g, ring, F, r);
     });
   }
+
+  /* Rotate's rails, for the helper registry: live while the menu owns the
+     input; refresh() is the one drawing path, and empties them when there is
+     nothing to show. */
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('rotate', { live: menuOwnsInput, refresh: refresh, clear: refresh });
 
   /* Where the rings stand: on the held pivot while a turn is in hand,
      otherwise on the piece's bounding-sphere centre as it sits. */

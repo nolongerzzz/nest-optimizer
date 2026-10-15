@@ -81,6 +81,9 @@
                   width / depth / height from.
      - paint:     nsoMaskCount() and nsoMaskRepaint()'s own return value.
                   The skip list is read, never re-derived - docs/HANDOFF.md.
+     - helper:    nso-helpers.js's isHelper() and stale(): a tool's helper is
+                  never counted as a piece, and one still drawn after its
+                  tool closed is an object phantom.
 
    The CSS is injected from here rather than added to styles.css because
    styles.css is served with a ?v= tag this file is not allowed to bump, so a
@@ -863,9 +866,12 @@
     /* --- everything on screen that no logical piece owns --- */
     var overlays = [];
     var drawnPieces = 0;
+    var H = global.nsoHelpers;
     (group.children || []).forEach(function (c) {
       if (isPaintOverlay(c)) { overlays.push(c); return; }
       if (c === S.cutHelper || c === S.faceHelper || c === S.fenceGroup) return;
+      // A tool's helper (nso-helpers.js) is never a piece, whatever it carries.
+      if (H && H.isHelper(c)) return;
       // The open cutter points previewMesh at the plate piece it cuts: that
       // mesh is still the piece, drawn, so only a preview the plate does not
       // own is left out of the count.
@@ -886,6 +892,16 @@
     if (drawnPieces !== placed.length) {
       add('object', 'the plate holds ' + placed.length + ' piece(s); the scene draws ' + drawnPieces,
           'count-' + placed.length + '-' + drawnPieces);
+    }
+
+    /* --- a helper still drawn after its tool closed: the leak nso-helpers.js
+       exists to stop, seen on screen rather than trusted --- */
+    if (H && typeof H.stale === 'function') {
+      H.stale().forEach(function (o) {
+        var who = H.ownerOf(o);
+        add('object', 'a ' + who + ' helper ("' + (o.name || o.type) + '") is still on screen with ' + who +
+            ' closed - a picture of a tool nobody is using', 'stale-helper-' + o.uuid);
+      });
     }
 
     /* --- paint: the skip list vs the yellow on screen --- */

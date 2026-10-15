@@ -120,8 +120,7 @@ function NSO_bendSetGhost(m, tris) {
   g.userData.bendGhost = true;
   g.userData.skipXray = true;
   g.matrixAutoUpdate = false;
-  g.raycast = function () {};
-  state.scene.add(g);
+  nsoHelpers.attach(state.scene, g, 'bend');
   NSO_bendUI().ghost = g;
   NSO_bendFollow();
 }
@@ -159,7 +158,7 @@ function NSO_bendSetMarker(m, k, rawCoord) {
   frameLine.userData.bendFrame = true;
   group.add(frameLine);
   group.userData.plane = { axis: ax.a, value: c[dk] };
-  state.scene.add(group);
+  nsoHelpers.attach(state.scene, group, 'bend');
   NSO_bendUI().marker = group;
   NSO_bendFollow();
 }
@@ -279,6 +278,17 @@ function NSO_bendClose() {
   if (B.raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(B.raf);
   B.raf = 0;
 }
+
+/* Bend's session, for the helper registry (nso-helpers.js). Leave-tool and
+   Clear close it here: before, nothing did, so a session left open over a
+   tube outlived Clear and drew its marker through the next piece loaded. An
+   Undo under an open panel reloads it from the piece as it now is. */
+if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('bend', {
+  live: function () { return !!NSO_bendUI().open; },
+  close: NSO_bendClose,
+  clear: NSO_bendClear,
+  refresh: function () { var B = NSO_bendUI(); B.key = ''; B.result = null; NSO_bendLoad(); }
+});
 
 // Per frame while open: follow the piece, and start over when the selection
 // or the piece's soup changes under the panel (another bake, Undo, a click on

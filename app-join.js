@@ -3550,6 +3550,10 @@ function setupUI() {
 
   document.getElementById('btn-optimize').addEventListener('click', runOptimize);
   document.getElementById('btn-clear').addEventListener('click', () => {
+    // Every tool closed and every helper gone first, while the pieces they
+    // were drawn on still exist (nso-helpers.js). Before, Clear told only the
+    // cutter: a Bend left open drew its marker through the next piece loaded.
+    nsoHelpers.teardown('clear');
     state.models = [];
     state.editId = null;
     state.cutT = 0.5;

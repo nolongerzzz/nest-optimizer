@@ -332,7 +332,7 @@
     ];
     var drawn = 0;
     for (var i = 0; i < layers.length; i++) if (layers[i]) { group.add(layers[i]); drawn++; }
-    p.mesh.add(group);
+    nsoHelpers.attach(p.mesh, group, 'check');
 
     shown = { modelId: m.id, host: p.mesh, group: group, report: report, off: off };
     syncButton();
@@ -357,6 +357,15 @@
     syncButton();
     return true;
   };
+
+  /* The Check's marks and the finding rings that go with them, for the helper
+     registry (nso-helpers.js): a snapshot of one piece as it was, so a leave,
+     a Clear or an Undo past it hides it - Hide check's own path. */
+  if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('check', {
+    live: function () { return !!shown; },
+    close: window.nsoDefectsHide,
+    clear: window.nsoDefectsHide
+  });
 
   /* ---- staleness, the button, the wiring ---- */
 

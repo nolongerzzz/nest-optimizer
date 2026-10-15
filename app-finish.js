@@ -5663,6 +5663,8 @@ function clearInspectCage() {
   state.inspectCage = null;
 }
 
+if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('inspect', { clear: clearInspectCage });
+
 function showInspectCage(model) {
   clearInspectCage();
   if (!model || !state.placed) return;
@@ -5680,8 +5682,7 @@ function showInspectCage(model) {
     const cage = new THREE.LineSegments(edges, mat);
     cage.renderOrder = 16;
     cage.name = 'inspectCage';
-    cage.raycast = function () {};
-    mesh.add(cage);
+    nsoHelpers.attach(mesh, cage, 'inspect');
     state.inspectCage = cage;
   } catch (e) {
     state.inspectCage = null;
@@ -6067,7 +6068,7 @@ function showPlanarHighlight(mesh, face) {
     depthWrite: false
   }));
   hl.renderOrder = 20;
-  state.scene.add(hl);
+  nsoHelpers.attach(state.scene, hl, 'face-pick');
   state.faceHelper = hl;
 }
 
@@ -6081,6 +6082,9 @@ function removeFaceHelper() {
   }
   state.faceHelper = null;
 }
+/* The picked-face highlight is not a session of its own - Soften, Cap and
+   Join each draw it - so it is cleared, never closed. */
+if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('face-pick', { clear: removeFaceHelper });
 
 function showFaceHighlight(hit) {
   removeFaceHelper();
@@ -6110,7 +6114,7 @@ function showFaceHighlight(hit) {
     depthWrite: false
   }));
   mesh.renderOrder = 20;
-  state.scene.add(mesh);
+  nsoHelpers.attach(state.scene, mesh, 'face-pick');
   state.faceHelper = mesh;
 }
 
