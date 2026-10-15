@@ -497,6 +497,50 @@
               <!-- The Offset row's sentence: too long for the row's unit column, so
                    it sits under the row and goes with it (styles.css). -->
               <p class="hint scale-note" id="scale-offset-note">Thin features keep their thickness: a 0.6 mm lid strap stays 0.6 mm.</p>
+              <!-- Shape rows (nso_shapes.js): a capsule, a sphere or ellipsoid, a
+                   torus. Each changes one thing; shown instead of the rows above. -->
+              <div class="edit-row scale-row" id="scale-cap-length-row" hidden>
+              <label for="scale-cap-length">Length</label>
+              <input id="scale-cap-length" type="number" min="0.1" max="2000" step="0.1" aria-label="Capsule length, mm" />
+              <span class="hint">ends kept</span>
+              <button id="btn-scale-cap-length" class="btn btn-secondary" type="button" title="Lengthen or shorten the straight band between the two hemispheres. The hemispheres move but never change shape. Refused under 2× the radius.">Set</button>
+              </div>
+              <div class="edit-row scale-row" id="scale-cap-diameter-row" hidden>
+              <label for="scale-cap-diameter">Diameter</label>
+              <input id="scale-cap-diameter" type="number" min="0.1" max="2000" step="0.1" aria-label="Capsule diameter, mm" />
+              <span class="hint">length kept</span>
+              <button id="btn-scale-cap-diameter" class="btn btn-secondary" type="button" title="Scale the capsule's whole cross-section to this diameter. Both ends stay hemispheres and the overall length is held. Refused over the length.">Set</button>
+              </div>
+              <div class="edit-row scale-row" id="scale-ell-a-row" hidden>
+              <label for="scale-ell-a">A</label>
+              <input id="scale-ell-a" type="number" min="0.1" max="2000" step="0.1" aria-label="Axis A (X), mm" />
+              <span class="hint">X only</span>
+              <button id="btn-scale-ell-a" class="btn btn-secondary" type="button" title="Make the piece this long along its own X, an exact scale along X alone. Y and Z are not touched.">Set</button>
+              </div>
+              <div class="edit-row scale-row" id="scale-ell-b-row" hidden>
+              <label for="scale-ell-b">B</label>
+              <input id="scale-ell-b" type="number" min="0.1" max="2000" step="0.1" aria-label="Axis B (Y), mm" />
+              <span class="hint">Y only</span>
+              <button id="btn-scale-ell-b" class="btn btn-secondary" type="button" title="Make the piece this long along its own Y, an exact scale along Y alone. X and Z are not touched.">Set</button>
+              </div>
+              <div class="edit-row scale-row" id="scale-ell-c-row" hidden>
+              <label for="scale-ell-c">C</label>
+              <input id="scale-ell-c" type="number" min="0.1" max="2000" step="0.1" aria-label="Axis C (Z), mm" />
+              <span class="hint">Z only</span>
+              <button id="btn-scale-ell-c" class="btn btn-secondary" type="button" title="Make the piece this tall along its own Z, an exact scale along Z alone. X and Y are not touched.">Set</button>
+              </div>
+              <div class="edit-row scale-row" id="scale-torus-ring-row" hidden>
+              <label for="scale-torus-ring">Ring &Oslash;</label>
+              <input id="scale-torus-ring" type="number" min="0.1" max="2000" step="0.1" aria-label="Ring &Oslash;, mm" />
+              <span class="hint">tube kept</span>
+              <button id="btn-scale-torus-ring" class="btn btn-secondary" type="button" title="Move the tube in or out to this centreline diameter. The tube's section is unchanged. Refused where the tube would reach the axis.">Set</button>
+              </div>
+              <div class="edit-row scale-row" id="scale-torus-tube-row" hidden>
+              <label for="scale-torus-tube">Tube &Oslash;</label>
+              <input id="scale-torus-tube" type="number" min="0.1" max="2000" step="0.1" aria-label="Tube &Oslash;, mm" />
+              <span class="hint">ring kept</span>
+              <button id="btn-scale-torus-tube" class="btn btn-secondary" type="button" title="Scale the tube's section to this diameter about its own centreline. The ring diameter is held, and a hollow tube keeps its wall. Refused where the tube would reach the axis.">Set</button>
+              </div>
               <div class="edit-row scale-row" id="scale-factor-row">
               <label for="scale-factor">Whole &times;</label>
               <input id="scale-factor" type="number" min="0.0001" max="10000" step="0.01" value="1" aria-label="Uniform scale factor" />
@@ -1384,6 +1428,9 @@
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
   <script src="nso_section.js?v=box2"></script>
+  <!-- Shape rows: capsule, sphere / ellipsoid, torus - read and changed one
+       thing at a time. Calls app-extend.js (a capsule's Length) at apply time. -->
+  <script src="nso_shapes.js?v=shapes1"></script>
   <!-- Bend: the section carried round an arc. After nso_path_sweep.js (its
        sweepArc), app-extend.js (the band finder), nso_section.js (the fit)
        and app-sculpt.js (the commit). See docs/BEND.md. -->
@@ -1403,11 +1450,11 @@
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=polish2"></script>
-  <script src="app-scale.js?v=polish2"></script>
+  <script src="app-scale.js?v=shapes1"></script>
   <script src="app-brush.js?v=hollow2"></script>
   <script src="app-wheel.js?v=wheel3"></script>
   <script src="app-fit.js?v=wheel4"></script>
-  <script src="app-stock.js?v=stock3"></script>
+  <script src="app-stock.js?v=shapes1"></script>
   <script src="app-assemble.js?v=asm2"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=cutcard2"></script>

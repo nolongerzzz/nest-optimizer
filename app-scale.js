@@ -10,7 +10,8 @@
 //   Fit to plate  the largest uniform factor that fits the current machine.
 //
 // The card's first line and its Length verb come from nso_section.js and
-// app-extend.js; nothing in this file reads a shape.
+// app-extend.js; a capsule's, sphere's, ellipsoid's or torus's rows come from
+// nso_shapes.js. Nothing in this file fits a shape itself.
 //
 // Before this file the app had NO scale control of any kind - not a factor box,
 // not a dimension box. A piece's size came from the file, and only Cut, Thicken,
@@ -673,6 +674,11 @@ function NSO_scaleSelectedModel(spec) {
                        Diameter and Length already do its job. The sentence
                        under it says what wall kept means for a thin feature:
                        lid_strap's 0.6 mm strap stays 0.6 mm.
+     Shape rows        a capsule's Length and Diameter, a sphere's or
+                       ellipsoid's A, B and C, a torus's Ring Ø and Tube Ø
+                       (nso_shapes.js) - a Stock piece by its tag, anything
+                       else by its vertices. They replace Length / Width /
+                       Height, the ring rows and Offset; each changes one thing.
      Whole x           today's uniform factor. Reset to 1 on every selection,
                        bake and pose change.
      Longest           today's longest-edge target, prefilled with the longest
@@ -695,6 +701,23 @@ function NSO_scaleSectionOf(m) {
   var s = NSO_sectionRead(soup);
   if (NSO_scaleSectionCache) NSO_scaleSectionCache.set(soup, s);
   return s;
+}
+
+/* A capsule, sphere / ellipsoid or torus (nso_shapes.js), or null. A Stock
+   piece's tag answers at once; anything else is recognised off its vertices,
+   along the section reader's axis where it has one, and tagged so the next
+   read is free. A piece that is none of them is remembered as none, on its
+   soup, so a selection or pose change does not fit it again. */
+var NSO_scaleNotShape = (typeof WeakMap === 'function') ? new WeakMap() : null;
+function NSO_scaleShapeOf(m) {
+  var soup = (m && m.rawTris && m.rawAxis === 'zup') ? m.rawTris : null;
+  if (!soup || typeof NSO_shapeRead !== 'function') return null;
+  var tag = NSO_shapeTagOf(soup);
+  if (tag) return tag;
+  if (NSO_scaleNotShape && NSO_scaleNotShape.has(soup)) return null;
+  var p = NSO_shapeRead(soup, NSO_scaleSectionOf(m));
+  if (!p && NSO_scaleNotShape) NSO_scaleNotShape.set(soup, true);
+  return p;
 }
 
 /* The bed's three directions as words. W / D / H on this card are a bar's
@@ -722,12 +745,14 @@ function NSO_scaleFitVerdict(m) {
    so the drive check reads the same string the user does. */
 function NSO_scaleReadoutText(m) {
   if (!m || !m.size) return 'Select a piece to resize.';
-  var s = NSO_scaleSectionOf(m);
+  var sh = NSO_scaleShapeOf(m);
+  var s = sh ? null : NSO_scaleSectionOf(m);
   // With inches shown every figure goes through the card's unit edge (1c);
   // with mm shown both hooks are left unset and the line is unchanged.
   var inch = NSO_scaleIn();
   var show = inch ? function (x) { return NSO_scaleLen(x); } : null;
-  var line = s ? NSO_sectionReadout(s, show, inch ? NSO_scaleText : null)
+  var line = sh ? NSO_shapeReadout(sh, function (x) { return NSO_scaleLen(x, NSO_sectionShow); })
+    : s ? NSO_sectionReadout(s, show, inch ? NSO_scaleText : null)
     : (NSO_scaleLen(m.size.x, 1) + ' × ' + NSO_scaleLen(m.size.z, 1) + ' × ' + NSO_scaleLen(m.size.y, 1) + ' W × D × H');
   var fit = NSO_scaleFitVerdict(m);
   return fit ? line + ' · ' + fit : line;
@@ -857,6 +882,26 @@ function NSO_scaleAxisApply(verb, value) {
   });
 }
 
+/* A shape row - Length / Diameter on a capsule, A · B · C on a sphere or
+   ellipsoid, Ring Ø / Tube Ø on a torus - to `value` mm. nso_shapes.js does
+   the geometry and every refusal and tags the result, so the card reads the
+   new shape back without fitting it again. undo type 'scaleReplace'. */
+function NSO_scaleShapeApply(row, value) {
+  var label = (typeof NSO_SHAPE_ROW_LABEL !== 'undefined' && NSO_SHAPE_ROW_LABEL[row]) || row;
+  return NSO_scaleCardApply(label, 'scaleReplace', function (soup, m) {
+    var sh = NSO_scaleShapeOf(m);
+    if (!sh) return { ok: false, reason: 'the piece no longer reads as a capsule, sphere, ellipsoid or torus' };
+    return NSO_shapeApplyRaw(soup, sh, row, +value);
+  }, function (r) {
+    var f = function (x) { return NSO_scaleLen(x, NSO_sectionShow); }, u = NSO_scaleU();
+    var keep = { capLength: 'the hemispheres moved, not reshaped', capDiameter: 'length kept, the ends still hemispheres',
+                 ellA: 'B and C untouched', ellB: 'A and C untouched', ellC: 'A and B untouched',
+                 ringDia: 'tube section unchanged', tubeDia: r.shape && r.shape.wall != null ? 'ring Ø and wall kept' : 'ring Ø kept' };
+    return r.label + ' ' + f(r.valueBefore) + ' → ' + f(r.valueAfter) + u + ' (' + keep[row] + '); now ' +
+      NSO_shapeReadout(r.shape, f);
+  });
+}
+
 /* Offset: Fatten and Shrink as one signed number. undo type 'offsetReplace'. */
 function NSO_scaleOffsetApply(mm) {
   return NSO_scaleCardApply('Offset', 'offsetReplace', function (soup, m) {
@@ -886,6 +931,13 @@ if (typeof document !== 'undefined') {
       ['wall', 'scale-ring-wall', 'scale-ring-wall-row'],
       ['diameter', 'scale-rod-diameter', 'scale-rod-diameter-row'],
       ['offset', 'scale-offset', 'scale-offset-row'],
+      ['capLength', 'scale-cap-length', 'scale-cap-length-row'],
+      ['capDiameter', 'scale-cap-diameter', 'scale-cap-diameter-row'],
+      ['ellA', 'scale-ell-a', 'scale-ell-a-row'],
+      ['ellB', 'scale-ell-b', 'scale-ell-b-row'],
+      ['ellC', 'scale-ell-c', 'scale-ell-c-row'],
+      ['ringDia', 'scale-torus-ring', 'scale-torus-ring-row'],
+      ['tubeDia', 'scale-torus-tube', 'scale-torus-tube-row'],
       ['factor', 'scale-factor', 'scale-factor-row'],
       ['longest', 'scale-target', 'scale-longest-row']
     ];
@@ -925,6 +977,12 @@ if (typeof document !== 'undefined') {
     function populate(s, keepTyped) {
       var v = s ? s.verbs : null, val = {};
       var f = function (x) { return NSO_scaleLen(x, NSO_sectionShow); };
+      var sv = lastShape ? NSO_shapeRowValues(lastShape) : null;
+      if (sv) {
+        Object.keys(sv).forEach(function (k) { val[k] = f(sv[k]); });
+        var e = NSO_shapeExpectedSpan(lastShape);
+        val.longest = f(Math.max(e[0], e[1], e[2]));
+      }
       if (v) {
         ['length', 'width', 'height'].forEach(function (k) { if (v[k]) val[k] = f(v[k].mm); });
         if (v.outer) { val.outer = f(s.outer.diameterMm); val.wall = f(s.wallMm); }
@@ -941,20 +999,30 @@ if (typeof document !== 'undefined') {
       });
     }
 
+    // A recognised shape replaces the section rows with its own: each one
+    // changes one thing, and a Length / Width / Height band stretch or an
+    // even offset on top of them would only say the same less exactly.
     function show(s) {
-      var v = s ? s.verbs : null;
+      var v = s ? s.verbs : null, sh = lastShape;
       var on = {
         length: !!(v && v.length), width: !!(v && v.width), height: !!(v && v.height),
         outer: !!(v && v.outer), wall: !!(v && v.wall), diameter: !!(v && v.diameter),
         offset: !!(v && v.offset), factor: true, longest: !v || v.longest
       };
+      if (sh) {
+        var rows = NSO_SHAPE_ROWS[sh.shape] || [], vals = NSO_shapeRowValues(sh);
+        ['length', 'width', 'height', 'outer', 'wall', 'diameter', 'offset'].forEach(function (k) { on[k] = false; });
+        rows.forEach(function (k) { on[k] = true; });
+        var b = NSO_shapeExpectedSpan(sh), longest = Math.max(b[0], b[1], b[2]);
+        on.longest = !rows.some(function (k) { return NSO_sectionShow(vals[k]) === NSO_sectionShow(longest); });
+      }
       FIELDS.forEach(function (fd) {
         var row = document.getElementById(fd[2]);
         if (row) row.hidden = !on[fd[0]];
       });
     }
 
-    var lastSig = null, lastSoup = null, lastReading = null;
+    var lastSig = null, lastSoup = null, lastReading = null, lastShape = null;
     function readout(force) {
       var el = document.getElementById('scale-readout');
       if (!el) return;
@@ -962,7 +1030,8 @@ if (typeof document !== 'undefined') {
       el.dataset.stale = '0';
       var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
       el.textContent = NSO_scaleReadoutText(m);
-      var s = m ? NSO_scaleSectionOf(m) : null;
+      lastShape = m ? NSO_scaleShapeOf(m) : null;
+      var s = (m && !lastShape) ? NSO_scaleSectionOf(m) : null;
       show(s);
       var soup = m ? m.rawTris : null, sig = signature(m);
       lastReading = s;
@@ -1013,7 +1082,9 @@ if (typeof document !== 'undefined') {
       return { raw: el ? el.value : '', num: el ? parseFloat(el.value) : NaN, same: !!el && el.value === prefill[k] };
     }
     var LABEL = { length: 'Length', width: 'Width', height: 'Height', outer: 'Outer Ø', wall: 'Wall',
-                  diameter: 'Diameter', offset: 'Offset', factor: 'Whole ×', longest: 'Longest' };
+                  diameter: 'Diameter', offset: 'Offset', factor: 'Whole ×', longest: 'Longest',
+                  capLength: 'Length', capDiameter: 'Diameter', ellA: 'A', ellB: 'B', ellC: 'C',
+                  ringDia: 'Ring Ø', tubeDia: 'Tube Ø' };
 
     // The edge, inbound: every box but Whole x holds a length in the unit
     // shown, and the engine is handed millimetres (NSO_scaleToMm).
@@ -1039,6 +1110,7 @@ if (typeof document !== 'undefined') {
         return;
       }
       if (k === 'length' || k === 'width' || k === 'height') return NSO_scaleAxisApply(k, mm);
+      if (typeof NSO_SHAPE_ROW_LABEL !== 'undefined' && NSO_SHAPE_ROW_LABEL[k]) return NSO_scaleShapeApply(k, mm);
       return NSO_scaleRingApply(k, mm);
     }
 
@@ -1118,7 +1190,10 @@ if (typeof document !== 'undefined') {
 
     var BUTTON = { length: 'btn-scale-length', width: 'btn-scale-width', height: 'btn-scale-height',
                    outer: 'btn-scale-ring-outer', wall: 'btn-scale-ring-wall', diameter: 'btn-scale-rod-diameter',
-                   offset: 'btn-scale-offset', factor: 'btn-scale-factor', longest: 'btn-scale-dim' };
+                   offset: 'btn-scale-offset', factor: 'btn-scale-factor', longest: 'btn-scale-dim',
+                   capLength: 'btn-scale-cap-length', capDiameter: 'btn-scale-cap-diameter',
+                   ellA: 'btn-scale-ell-a', ellB: 'btn-scale-ell-b', ellC: 'btn-scale-ell-c',
+                   ringDia: 'btn-scale-torus-ring', tubeDia: 'btn-scale-torus-tube' };
     function wire() {
       ['mm', 'in'].forEach(function (u) {
         var b = document.getElementById('btn-scale-unit-' + u);
