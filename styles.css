@@ -1365,6 +1365,24 @@ select:focus, input:focus {
 }
 .carve-readout.carve-bad { color: #f87171; }
 
+/* Lift (app-lift-plate.js): the verb, its count, and the panel it opens.
+   Yellow while armed - the hover outline's colour, so the button and what it
+   draws read as one tool; teal is Carve's. */
+.vp-row-lift { grid-template-columns: 1fr 1fr; gap: 6px; }
+.vp-menu-body .btn-lift { color: #facc15; border-color: rgba(250, 204, 21, 0.55); }
+.vp-menu-body .btn-lift:hover { border-color: rgba(250, 204, 21, 0.9); }
+.vp-menu-body .btn-lift.is-armed { background: #facc15; color: #1a1d21; border-color: #facc15; font-weight: 600; }
+.lift-count { font-size: 11px; color: #94a3b8; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.lift-panel[hidden], .lift-strip[hidden] { display: none; }
+.lift-height { display: grid; grid-template-columns: 1fr auto; align-items: center; column-gap: 6px; font-size: 11px; color: #94a3b8;
+                min-width: 0; margin: 2px 0; width: 100%; font-variant-numeric: tabular-nums; }
+.lift-height input { grid-column: 1 / -1; width: 100%; min-width: 0; margin: 2px 0 0; }
+.lift-strip { margin: 4px 0; padding: 4px 6px; border: 1px solid rgba(255, 43, 214, 0.45); border-radius: 4px; }
+.lift-strip-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); margin: 0 0 3px; cursor: pointer; }
+.lift-strip-row input { margin: 0; }
+.lift-strip-note { font-size: 11px; color: #94a3b8; margin: 0 0 3px; }
+.lift-strip-sum { font-size: 11px; color: #f0abfc; margin: 4px 0; line-height: 1.3; }
+
 .btn-cut {
   background: #dc2626;
   color: white;
@@ -2794,7 +2812,7 @@ select:focus, input:focus {
 .ms-seg button.active { position: relative; z-index: 1; }
 /* G-scope Lift, Strip: one row per group of details - tick box, colour, name, count. */
 .ms-lift-groups { margin: 0 0 8px 0; }
-.ms-lift-group { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); margin: 0 0 4px 0; cursor: pointer; }
+.ms-lift-group { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); margin: 0 0 4px 0; }
 .ms-lift-group input { margin: 0; }
 .ms-lift-group input:disabled + .ms-lift-sw { opacity: 0.5; }
 .ms-lift-group .ms-lift-sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
@@ -3754,13 +3772,6 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   top: calc(var(--shell-pad) + 2 * var(--shell-btn-h) + var(--shell-col-gap) + 8px);
   right: calc(var(--plate-panel-w) + 2 * var(--shell-pad));
   width: min(560px, calc(100% - var(--plate-panel-w) - var(--shell-panel-x) - 3 * var(--shell-pad)));
-}
-
-/* G-scope opened at its Lift row from the column: the row is marked until
-   G-scope is opened from its own button. */
-#microscope .ms-section.ms-row-target {
-  box-shadow: inset 3px 0 0 #7dd3fc;
-  background: rgba(125, 211, 252, 0.07);
 }
 
 /* Watch's log docks at the panel spot's x, beside the column rather than

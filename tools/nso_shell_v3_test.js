@@ -75,9 +75,9 @@ const GROUPS = [
    aria-labels, ◎ by itself. */
 const ICON = { 'btn-xray': 'X', 'btn-watch': '\u{1F441}', 'btn-frame-view': '◎' };
 // Gone from the shell as buttons. Their contents moved (RETIRED below);
-// btn-shell-lift is not gone - it is Subtract's Lift now, not a slab.
+// Lift is not gone - it is Subtract's Lift verb (btn-lift), not a slab.
 const GONE = ['menu-bend', 'menu-plates', 'menu-pack', 'btn-shell-supports', 'btn-shell-slice'];
-const NOT_SLABS = ['btn-shell-lift'];
+const NOT_SLABS = ['btn-lift'];
 const ALL = ROW.concat(RIGHT, UNDER.map(([id, l]) => [id, l]), ...GROUPS);
 const DROPDOWNS = ALL.map(([id]) => id).filter(id => id.startsWith('menu-'));
 
@@ -109,7 +109,7 @@ const HOLDS = {
                'btn-extend', 'inp-extend-mm', 'btn-bridge', 'bridge-panel'],
   // SUBTRACT: Subtract B from A · Extract bit · Carve · Hollow · Hollow to safe min · Lift
   'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-carve', 'carve-blade', 'carve-depth', 'btn-hollow', 'inp-hollow-mm',
-               'btn-hollow-safe', 'btn-shell-lift'],
+               'btn-hollow-safe', 'btn-lift', 'lift-panel'],
   'menu-paint': ['btn-mask-select', 'btn-mask-paint', 'btn-mask-clear', 'btn-mask-delete', 'sel-mask-delete', 'btn-extract-sel'],
   // SURFACE & EDGES: Soften (R, Full wrap, edge treatment) · Mirror · Skin face · Skin wrap · Skin patch · Trace raster · Texture
   'menu-surface': ['inp-soften-r', 'chk-full-wrap', 'btn-soften', 'sel-edge-treat', 'btn-mirror', 'inp-mirror-plane',
@@ -152,7 +152,7 @@ const BEFORE = ['menu-import', 'file-input', 'btn-load-stl', 'btn-library', 'men
   'crop-up-to', 'crop-across-from', 'crop-across-to', 'chk-crop-lift', 'crop-move-dx', 'crop-move-dy', 'crop-move-dz',
   'btn-crop-lockin', 'btn-detach', 'btn-reattach', 'menu-joins', 'menu-join', 'btn-join-start', 'join-slot-a', 'join-slot-b',
   'join-slot-c', 'btn-join', 'btn-join-clear', 'menu-abc', 'triple-mode', 'triple-gap-ab', 'triple-gap-bc', 'btn-join-triple',
-  'btn-shell-lift', 'menu-seat', 'btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'oversize-gap',
+  'btn-lift', 'menu-seat', 'btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'oversize-gap',
   'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid', 'menu-supports', 'btn-sup-all', 'btn-sup-none', 'btn-sup-paint',
   'sel-sup-paint', 'sup-style', 'sup-size', 'sup-rest', 'btn-sup-remove', 'menu-bit', 'btn-subtract', 'btn-extract-bit',
   'menu-shape', 'inp-soften-r', 'chk-full-wrap', 'btn-soften', 'sel-edge-treat', 'btn-smooth', 'btn-extend', 'inp-extend-mm',
@@ -607,39 +607,30 @@ withApp(async (page, logs) => {
     const fv = await page.evaluate(() => ({ cam: state.camera.position.toArray(), status: document.getElementById('status').textContent }));
     check('◎ frames the view', c.ok && fv.cam.some((v, i) => Math.abs(v - cam0[i]) > 1), fv.status);
 
-    // G-scope, then Lift (in Subtract) at its row.
+    // G-scope, then Lift (in Subtract): on the plate, not a way into G-scope.
     const gs = async () => page.evaluate(() => {
       const panel = document.getElementById('microscope');
-      const bar = document.getElementById('ms-sidebar').getBoundingClientRect();
-      const row = id => {
-        const e = document.getElementById(id);
-        const b = e.getBoundingClientRect();
-        return { shown: getComputedStyle(e).display !== 'none' && b.height > 0, target: e.classList.contains('ms-row-target'),
-                 inView: b.top >= bar.top - 0.5 && b.top < bar.bottom - 20 };
-      };
-      return { open: !panel.hidden, lift: row('ms-lift-row'), sup: row('ms-support-row'), slice: row('ms-slice-row') };
+      const e = document.getElementById('ms-lift-row'), b = e.getBoundingClientRect();
+      return { open: !panel.hidden, features: { shown: getComputedStyle(e).display !== 'none' && b.height > 0 } };
     });
     const msClose = () => page.evaluate(() => { if (NSO_MICROSCOPE.isOpen()) NSO_MICROSCOPE.close(); });
     c = await clickFace(page, '#btn-microscope');
     await page.waitForTimeout(300);
     const g1 = await gs();
-    check('G-SCOPE (column slot 2) opens G-scope on the plate', c.ok && g1.open && g1.lift.shown, JSON.stringify({ open: g1.open }));
+    check('G-SCOPE (column slot 2) opens G-scope on the plate', c.ok && g1.open && g1.features.shown, JSON.stringify({ open: g1.open }));
     await page.evaluate(() => document.getElementById('btn-microscope').click());   // its own toggle shuts it
     const g1b = await page.evaluate(() => NSO_MICROSCOPE.isOpen());
     check('...and G-SCOPE shuts it again', g1b === false, String(g1b));
     await msClose();
     await shutAll(page);
     await clickFace(page, '#menu-bit > summary');
-    c = await clickFace(page, '#btn-shell-lift');
+    c = await clickFace(page, '#btn-lift');
     await page.waitForTimeout(300);
-    const gl = await gs();
-    const others = ['sup', 'slice'].filter(k => gl[k].target);
-    check('LIFT, in SUBTRACT, opens G-scope with its Lift row shown, marked and scrolled into view',
-      c.ok && gl.open && gl.lift.shown && gl.lift.target && gl.lift.inView && others.length === 0,
-      JSON.stringify({ open: gl.open, row: gl.lift, others, why: c.why }));
-    await page.evaluate(() => document.getElementById('btn-shell-lift').click());
-    check('...a second click leaves G-scope open', await page.evaluate(() => NSO_MICROSCOPE.isOpen()), '');
-    await msClose();
+    const gl = await gs(), lit = await page.evaluate(() => ({ armed: NSO_LIFT_PLATE.isArmed(), panel: !document.getElementById('lift-panel').hidden }));
+    check('LIFT, in SUBTRACT, arms Lift on the plate and its panel opens; G-scope stays shut',
+      c.ok && lit.armed && lit.panel && !gl.open, JSON.stringify({ lit, open: gl.open, why: c.why }));
+    await page.evaluate(() => document.getElementById('btn-lift').click());
+    check('...a second click puts Lift away', await page.evaluate(() => !NSO_LIFT_PLATE.isArmed()), '');
     await shutAll(page);
 
     // Optimize, then Clear plate (last: it empties the plate).

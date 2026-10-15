@@ -39,7 +39,7 @@ const HOME = {
   'menu-seat': ['btn-seat-support', 'seat-gap', 'seat-gap-value', 'btn-seat-here',
                 'chk-oversize-washer', 'oversize-gap', 'btn-seat-flush', 'btn-flip-port',
                 'btn-seat-grid'],
-  'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-carve', 'btn-hollow', 'btn-hollow-safe', 'btn-shell-lift'],
+  'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-carve', 'btn-hollow', 'btn-hollow-safe', 'btn-lift'],
   'plate-panel': ['plate-select', 'custom-size', 'custom-w', 'custom-d', 'custom-h',
                  'plate-dims', 'plate-area', 'plate-grid-show', 'chk-plate-grid-snap',
                  'build-volume-warning', 'model-list', 'clone-count', 'btn-clone'],

@@ -652,12 +652,12 @@ with the plain row toggle first.
   [GSCOPE-FLANGE.md](GSCOPE-FLANGE.md) and [GSCOPE-FEATURES.md](GSCOPE-FEATURES.md).
   `gcode:gscope-one-list` drives the whole Parts list on the part this was
   found on (tape_on-edge-single).
-- **Lift (the sidebar's "Lift", Pick | Strip):** the one G-scope tool that
-  writes to a piece already on the plate, on purpose. Pick the face details
-  stand on, choose islands (Pick) or tick groups of them (Strip), Lift or
-  Remove: the piece is left flat and the details become pieces or are thrown
-  away, one Undo. It lives in `app-gscope-lift.js` on the click-hook /
-  onDocument seam, like the supports. See [LIFT.md](LIFT.md).
+- **Features (read-only):** what Lift would find on the piece under the
+  lens - each feature outlined in its group's colour, and the grouped list.
+  Nothing to press: Lift itself is worked on the plate, from the Subtract
+  card. It lives in `app-gscope-lift.js` on the onDocument / onSelection
+  seam and reads the card's cache (`NSO_LIFT_PLATE.detectSoup`). See
+  [LIFT.md](LIFT.md) section 7.
 
 ### 5. The layer-range slider
 
