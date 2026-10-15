@@ -250,6 +250,16 @@ const clickUndo = async page => { await page.click('#btn-undo'); await page.wait
     await page.click('#btn-pull');
     st = await page.evaluate(() => ({ pull: nsoPullArmed(), brush: nsoBrushArmed() }));
     check('and arming Pull stands the Brush down', st.pull && !st.brush);
+    /* Every tool that arms stands Pull down, through Pull's button, the way
+       app-brush.js's disarmOthers has always done for the Brush. */
+    for (const [btn, name] of [['#btn-measure', 'Measure'], ['#btn-carve', 'Carve'], ['#btn-mask-paint', 'Paint Excluded']]) {
+      const before = await page.evaluate(() => nsoPullArmed());
+      await page.click(btn);
+      const now = await page.evaluate(() => ({ pull: nsoPullArmed(), hidden: document.getElementById('pull-panel').hidden }));
+      check('arming ' + name + ' stands Pull down', before && !now.pull && now.hidden);
+      await page.click(btn);                                   // that tool off again
+      await page.click('#btn-pull');                           // Pull back on for the next
+    }
     await page.click('#btn-pull');
     check('pressing it again turns it off', !(await page.evaluate(() => nsoPullArmed())));
 
@@ -504,8 +514,22 @@ const clickUndo = async page => { await page.click('#btn-undo'); await page.wait
     check('refused at the press, in words', /^Pull refused - that is a support piece/.test(st), st);
     check('and nothing moved', (await sameAsKept(page)) && (await geometryTris(page)) === geoE && (await undoDepth(page)) === dE);
     await page.evaluate(() => { getActiveModel().nsoSupport = false; });
-    await page.click('#btn-pull');   // off
-    check('turning Pull off drops the ring and any pins', await page.evaluate(() => nsoHelpers.live().filter(o => nsoHelpers.ownerOf(o) === 'pull').length === 0));
+
+    /* ============================================================== 9 */
+    console.log('\n=== 9. leaving the tool leaves nothing behind ===');
+    await page.mouse.click(lipS.x, lipS.y);                  // a pin, with Pull still armed
+    await page.mouse.move(lipS.x - 60, lipS.y + 40);         // and the hover ring
+    await page.waitForTimeout(150);
+    const before = await page.evaluate(() => ({ armed: nsoPullArmed(), pins: nsoPullState().pins.length,
+      helpers: nsoHelpers.live().filter(o => nsoHelpers.ownerOf(o) === 'pull').length }));
+    check('armed, one pin, its anchor and the radius ring are in the scene', before.armed && before.pins === 1 && before.helpers >= 1, JSON.stringify(before));
+    const left = await page.evaluate(() => window.leaveTool());
+    const after = await page.evaluate(() => ({ armed: nsoPullArmed(), pins: nsoPullState().pins.length, hidden: document.getElementById('pull-panel').hidden,
+      helpers: nsoHelpers.live().filter(o => nsoHelpers.ownerOf(o) === 'pull').length, undo: state.undoStack.length }));
+    check('leave-tool (the double-click on the plate) puts Pull away, pins and ring with it', left.includes('pull') && !after.armed && after.pins === 0 && after.hidden && after.helpers === 0 && after.undo === dE, left.join(',') + ' ' + JSON.stringify(after));
+    await page.click('#btn-pull');
+    await page.click('#btn-pull');
+    check('and turning Pull off by its button drops the ring too', await page.evaluate(() => !nsoPullArmed() && nsoHelpers.live().filter(o => nsoHelpers.ownerOf(o) === 'pull').length === 0));
 
     const errs = logs.filter(l => l.startsWith('[pageerror]'));
     check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));

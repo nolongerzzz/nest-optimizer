@@ -58,6 +58,7 @@ if (typeof document !== 'undefined') (function () {
   var pinModel = null;
   var ring = null, ringVisible = false;
   var pinGroup = null;
+  var pinPose = '';              // the piece's world matrix when the anchors were drawn
 
   function model() { return (typeof getActiveModel === 'function') ? getActiveModel() : null; }
   function say(t, bad) { if (typeof setStatus === 'function') setStatus(t, !!bad); }
@@ -192,6 +193,7 @@ if (typeof document !== 'undefined') (function () {
     var pl = placedOf(m), f = frameOf(m);
     if (!pl || !f) return;
     pl.mesh.updateMatrixWorld();
+    pinPose = pl.mesh.matrixWorld.elements.join(',');
     pinGroup = new THREE.Group();
     pins.forEach(function (pn) {
       var lc = localFromRaw(f, pn.c);
@@ -545,6 +547,10 @@ if (typeof document !== 'undefined') (function () {
     var p = pick(event);
     if (!p) { hideRing(); return; }
     p.mesh.updateMatrixWorld();
+    // The anchors are in the scene, not on the mesh (a child would widen every
+    // bounding box taken of the piece), so a piece that has been moved or
+    // turned since they were drawn gets them redrawn on it.
+    if (pins.length && pinGroup && p.m.id === pinModel && p.mesh.matrixWorld.elements.join(',') !== pinPose) drawPins();
     var nW = p.hit.face.normal.clone().transformDirection(p.mesh.matrixWorld).normalize();
     placeRing(p.hit.point, nW, radius());
   }
