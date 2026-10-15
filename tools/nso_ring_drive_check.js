@@ -72,7 +72,7 @@ async function card(page) {
       fields: { outer: val('scale-ring-outer'), wall: val('scale-ring-wall'), diameter: val('scale-rod-diameter'), height: val('scale-height') },
       holds: ['scale-ring-outer-row', 'scale-ring-wall-row'].map(id => document.querySelector('#' + id + ' .hint').textContent),
       rodHold: document.querySelector('#scale-rod-diameter-row .hint').textContent,
-      rodTitle: document.getElementById('btn-scale-rod-diameter').title,
+      rodTitle: document.getElementById('scale-rod-diameter').title,      // #187: the Set's title is the field's
       outer: s && s.outer ? s.outer.diameterMm : null, boreMm: s && s.bore ? s.bore.diameterMm : null,
       wall: s ? s.wallMm : null, length: s ? s.lengthMm : null,
       soup: Array.from(m.rawTris).join(','), undo: state.undoStack.length
@@ -88,13 +88,15 @@ async function shot(page, name) {
 
 async function clear(page) { await page.evaluate(() => { document.getElementById('status').textContent = ''; }); }
 
-/* Type into a ring field and press its Set, as a user does. */
+/* Type into a ring field and leave it with Tab, as a user does (#187: the
+   fields are live, no Set; leaving the field is what commits it). */
 async function ringSet(page, inputId, value) {
-  await openMenuFor(page, '#scale-readout');
-  await page.evaluate(([id, v]) => { document.getElementById(id).value = String(v); }, [inputId, value]);
+  await openMenuFor(page, '#' + inputId);
+  await page.focus('#' + inputId);
+  await page.keyboard.press('Control+A');
+  await page.keyboard.type(String(value));
   await clear(page);
-  await openMenuFor(page, '#btn-' + inputId);
-  await page.click('#btn-' + inputId);
+  await page.keyboard.press('Tab');
   await page.waitForFunction(() => document.getElementById('status').textContent.length > 0, null, { timeout: 30000 });
   return statusOf(page);
 }
