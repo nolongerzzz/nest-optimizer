@@ -3439,14 +3439,13 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
    only fits when the labels happen to measure a certain width is no layout. */
 .vp-shell-row > * { flex-shrink: 0; }
 .vp-shell-row > #menu-move, .vp-shell-row > #menu-rotate,
-.vp-shell-row > #menu-tip, .vp-shell-row > #menu-bend,
-.vp-shell-row > #menu-align,
+.vp-shell-row > #menu-tip, .vp-shell-row > #menu-align,
 .vp-shell-row > #btn-lock-pos, .vp-shell-row > #btn-plate-lock {
   flex-shrink: 1;
   min-width: 40px;
 }
 #menu-move > summary, #menu-rotate > summary,
-#menu-tip > summary, #menu-bend > summary, #menu-align > summary,
+#menu-tip > summary, #menu-align > summary,
 .vp-shell-row > #btn-lock-pos, .vp-shell-row > #btn-plate-lock {
   display: block;
   max-width: 100%;

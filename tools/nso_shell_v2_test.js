@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /* Shell v2: which buttons exist, where they sit, and what each opens.
 
-   The top row, left to right: Import, Move, Rotate, Tip, Bend, Align, Gen+ ▾,
+   The top row, left to right: Import, Move, Rotate, Tip, Align, Gen+ ▾,
    Lock position, Lock plate, then at the right Undo, Remove, Export, with
    Plate directly under Export. Gen+, Join and Plate hold several menus each
    but carry plain text, no drop-down mark. The left column in five groups, a
    12 px gap between them, a 36 px pitch inside them: Scale .. Subtract;
-   Shape .. Sculpt; Measure & check, Check & repair; G-scope; and X-ray (X),
+   Shape, Bend .. Sculpt; Measure & check, Check & repair; G-scope; and X-ray (X),
    Eye (👁), ◎ in one row pinned to the bottom.
 
    GATES
@@ -42,7 +42,7 @@ const check = (name, cond, detail) => {
 /* ---------------------------------------------------------------- the ticket */
 const ROW = [
   ['menu-import', 'IMPORT'], ['menu-move', 'MOVE'], ['menu-rotate', 'ROTATE'], ['menu-tip', 'TIP'],
-  ['menu-bend', 'BEND'], ['menu-align', 'ALIGN'], ['menu-gen', 'GEN+'],
+  ['menu-align', 'ALIGN'], ['menu-gen', 'GEN+'],
   ['btn-lock-pos', 'LOCK POSITION'], ['btn-plate-lock', 'LOCK PLATE']
 ];
 const RIGHT = [['btn-undo', 'UNDO'], ['btn-delete-placed', 'REMOVE'], ['menu-export', 'EXPORT']];
@@ -50,7 +50,7 @@ const UNDER_EXPORT = ['menu-plates', 'PLATE'];
 const GROUPS = [
   [['menu-scale', 'SCALE'], ['menu-cut', 'CUT'], ['menu-crop', 'CROP'], ['menu-joins', 'JOIN'],
    ['btn-shell-lift', 'LIFT'], ['menu-seat', 'SEAT'], ['menu-bit', 'SUBTRACT']],
-  [['menu-shape', 'SHAPE'], ['menu-paint', 'PAINT'], ['menu-surface', 'SURFACE'], ['menu-sculpt', 'SCULPT']],
+  [['menu-shape', 'SHAPE'], ['menu-bend', 'BEND'], ['menu-paint', 'PAINT'], ['menu-surface', 'SURFACE'], ['menu-sculpt', 'SCULPT']],
   [['menu-measure', 'MEASURE & CHECK'], ['menu-repair', 'CHECK & REPAIR']],
   [['btn-microscope', 'G-SCOPE']],
   [['btn-xray', 'X-RAY'], ['btn-watch', 'EYE'], ['btn-frame-view', '◎']]
@@ -285,10 +285,16 @@ withApp(async (page, logs) => {
       view[0].y - lastAbove.b >= 12 - 0.5 &&
       Math.abs(view[0].x - imp.x) < 0.5 && view[2].r <= imp.r + 0.5,
       view.map(b => b.id + '@' + Math.round(b.x) + ',' + Math.round(b.y)).join(' ') + '; viewport bottom ' + geo._vp.bottom);
+    /* The view row is pinned, so its bottom alone cannot see a slab added
+       above it: the stack (groups 1-4, Bend under Shape included) is
+       measured on its own as well. */
     const colBottom = Math.max(...view.map(b => b.b));
-    check('the column fits within 744 px at 1280 x 800, inside the viewport',
-      colBottom - geo._vp.top <= 744 && colBottom <= geo._vp.bottom && first.y >= geo._vp.top,
-      'column ' + Math.round(first.y - geo._vp.top) + '..' + Math.round(colBottom - geo._vp.top) + ' px of a ' + geo._vp.h + ' px viewport');
+    const slabs = col.slice(0, 4).reduce((n, g) => n + g.length, 0);
+    check('the column fits within 744 px at 1280 x 800, inside the viewport, its ' + slabs + ' slabs clear of the view row',
+      colBottom - geo._vp.top <= 744 && colBottom <= geo._vp.bottom && first.y >= geo._vp.top &&
+      slabs === 15 && lastAbove.b - geo._vp.top <= 744 && lastAbove.b < view[0].y,
+      'column ' + Math.round(first.y - geo._vp.top) + '..' + Math.round(colBottom - geo._vp.top) + ' px of a ' + geo._vp.h +
+      ' px viewport; stack of ' + slabs + ' ends at ' + Math.round(lastAbove.b - geo._vp.top));
   }
 
   /* ------------------------------------------------------------------ 3 */
