@@ -76,6 +76,7 @@ Current roster, by category:
 | Lift (`app-lift-plate.js`, Subtract -> Lift: a click, a Shift group, Strip's Confirm) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/LIFT.md` §7 |
 | G-scope Features (`app-gscope-lift.js`) | **none** - reads geometry, writes none | n/a | header comment + `docs/LIFT.md` §7 |
 | Foam (`app-foam.js`, Finish -> Shape) | sub-region | the faces of the one hollow it fills that the level reaches, against `nsoMaskFaceList(m)`; a null list (a painted recessed patch) stands it down | header comment + `docs/FOAM.md` §6 |
+| Pull (`app-pull.js`, Shape -> Pull; the geometry is `nso_pull.js` + `nso_densify.js`) | sub-region | the moved vertices (where they were and where they went) against `nsoMaskPlaneList(m)`, `NSO_brushPaintCheck`; operand none | header comment + `docs/PULL.md` |
 
 ### The SELECT list is an operand; the EXCLUDE list is still only a veto
 

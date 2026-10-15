@@ -160,6 +160,15 @@ if (typeof document !== 'undefined') (function () {
     ringVisible = true;
   }
   function hideRing() { if (ring) ring.visible = false; ringVisible = false; }
+  // Out of the scene altogether: leaving the tool leaves nothing of it behind.
+  function dropRing() {
+    hideRing();
+    if (!ring) return;
+    if (ring.parent) ring.parent.remove(ring);
+    if (ring.geometry) ring.geometry.dispose();
+    if (ring.material) ring.material.dispose();
+    ring = null;
+  }
 
   function clearPinMarks() {
     if (!pinGroup) return;
@@ -279,7 +288,11 @@ if (typeof document !== 'undefined') (function () {
   }
   function makePreviewGeometry(s) {
     var geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.Float32BufferAttribute(s.disp, 3));
+    /* BufferAttribute, not Float32BufferAttribute: that one COPIES the array it
+       is handed, and then every write to s.disp below would be to a buffer the
+       GPU never sees - the status line would say 6 mm and the piece would sit
+       still. This one holds s.disp itself. */
+    geo.setAttribute('position', new THREE.BufferAttribute(s.disp, 3));
     geo.computeVertexNormals();
     geo.computeBoundingBox();
     geo.computeBoundingSphere();
@@ -471,8 +484,11 @@ if (typeof document !== 'undefined') (function () {
     var done = (typeof NSO_sculptCommitRaw === 'function')
       ? NSO_sculptCommitRaw(s.m, res.tris, 'pullReplace', txt) : false;
     if (done === false) { say('Pull has nowhere to commit - app-sculpt.js is not loaded', true); return; }
+    /* For the checks (tools/nso_pull_drive_check.js): what the last pull was.
+       S carries the densified base and the final positions; it is dropped the
+       next time a pull is prepared and when Pull is left. */
     window.nsoPullLast = { report: rep, D: D, shift: s.shift, grab: s.S.grab, pins: s.S.pins,
-                           radius: s.radius, status: txt };
+                           radius: s.radius, status: txt, normalRaw: s.normalRaw, S: s.S };
     readout(txt);
     drawPins();                     // the piece was swapped and re-centred: redraw the anchors
     syncSize();
@@ -607,8 +623,9 @@ if (typeof document !== 'undefined') (function () {
     pending = null;
     releaseControls();
     armed = false;
-    hideRing();
+    dropRing();
     clearPins();
+    if (window.nsoPullLast) window.nsoPullLast.S = null;
     setLabel();
     say('Pull off');
   }
@@ -623,7 +640,7 @@ if (typeof document !== 'undefined') (function () {
   };
   if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('pull', {
     live: function () { return armed; }, close: exit,
-    clear: function () { hideRing(); clearPinMarks(); },
+    clear: function () { dropRing(); clearPinMarks(); },
     refresh: function () { hideRing(); drawPins(); }
   });
 

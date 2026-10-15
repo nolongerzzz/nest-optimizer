@@ -318,7 +318,8 @@ Smart build-plate packing for 3D printing.
   Supports, Add, Subtract · Shape, Paint, Surface & edges, Sculpt · Check &
   repair on its own at the bottom · X (X-ray), 👁 (Watch), ◎ (frame the
   view) in one row under it.
-- The cards: **Shape** Smooth, Bend, Tube edge (Flare, Roll, Neck) ·
+- The cards: **Shape** Smooth, Bend, Tube edge (Flare, Roll, Neck), Pull
+  (grab a spot and drag it, with pins; docs/PULL.md) ·
   **Add** Fill / Densify, Foam, Thicken out / in, Extend, Bridge ·
   **Subtract** Subtract B from A, Extract bit, Carve, Hollow, Hollow to safe
   min, Lift (opens G-scope at its Lift row) · **Surface & edges** Soften,
