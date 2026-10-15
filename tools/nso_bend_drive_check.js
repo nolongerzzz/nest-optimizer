@@ -96,17 +96,17 @@ async function setField(page, id, value) {
 }
 
 withApp(async (page, logs) => {
-  console.log('\n=== 1. the button, in the top row\'s Bend menu (shell v2; was Finish -> Shape) ===');
+  console.log('\n=== 1. the button, in the column\'s Bend menu (#180, under Shape; shell v2 had it in the row) ===');
   const ui = await page.evaluate(() => {
     const b = document.getElementById('btn-bend');
     const menu = b && b.closest('.vp-shell-menu');
     return { btn: !!b, wired: b && b.dataset.nsoWired === '1', menu: menu && menu.id,
-             inRow: !!(menu && menu.closest('.vp-shell-row')),
+             inCol: !!(menu && menu.closest('.vp-shell-col')),
              panelWithIt: !!(menu && menu.contains(document.getElementById('bend-panel'))),
              notInShape: !document.getElementById('menu-shape').contains(b),
              panelHidden: document.getElementById('bend-panel').hidden };
   });
-  check('#btn-bend is in the top row\'s Bend menu, with its panel', ui.btn && ui.menu === 'menu-bend' && ui.inRow && ui.panelWithIt,
+  check('#btn-bend is in the column\'s Bend menu (#180: under Shape), with its panel', ui.btn && ui.menu === 'menu-bend' && ui.inCol && ui.panelWithIt,
         JSON.stringify(ui));
   check('...and no longer in Shape', ui.notInShape);
   check('...wired at load, its panel shut', ui.wired && ui.panelHidden);
