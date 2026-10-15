@@ -17,7 +17,7 @@ const check = (name, cond, detail) => {
    Plate's three) are not top-level; section 3 covers them. */
 const ROW = ['menu-import', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-align',
              'menu-gen', 'menu-export', 'menu-plates'];
-const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'menu-seat', 'menu-bit',
+const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'menu-seat', 'menu-supports', 'menu-bit',
              'menu-shape', 'menu-bend', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-measure', 'menu-repair'];
 const ALL = ROW.concat(COL);
 

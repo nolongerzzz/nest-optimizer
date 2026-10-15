@@ -20,7 +20,7 @@ const check = (name, cond, detail) => {
    view row (X, the eye, the target) is pinned under them. */
 const ROW = ['menu-import', 'menu-move', 'menu-rotate', 'menu-tip', 'menu-align',
              'menu-gen', 'btn-lock-pos', 'btn-plate-lock', 'btn-undo', 'btn-delete-placed', 'menu-export'];
-const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'btn-shell-lift', 'menu-seat', 'menu-bit',
+const COL = ['menu-scale', 'menu-cut', 'menu-crop', 'menu-joins', 'btn-shell-lift', 'menu-seat', 'menu-supports', 'menu-bit',
              'menu-shape', 'menu-bend', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-measure', 'menu-repair',
              'btn-microscope'];
 const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(['menu-plates'], COL.filter(id => id.startsWith('menu-')));

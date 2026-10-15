@@ -181,7 +181,10 @@
    branch(rootPoint, tip, opts)          -> { ok, soup, parts, tiltDeg, ... }
    opts.branchStyle                      'square' (default) or 'gecko-hand', see 3b
    planTree(rawTris, opts)               -> the grid-pack plan (nso_support_gridpack.js,
-                                         section 4); the trunk-first planner is gone
+                                         section 4); the trunk-first planner is gone.
+                                         opts.beacons: an explicit beacon list (the
+                                         Supports card's: detected, plus manual and
+                                         painted edits) planned instead of detection's
    unionParts(parts, opts)               -> Promise of the app's own union
    opts.section                          'round' (default: tapered by the measured
                                          law) or 'square', see SECTIONS
@@ -866,7 +869,8 @@
              (typeof NSO_SupportGridpack !== 'undefined' ? NSO_SupportGridpack : null);
     if (!GP) return { ok: false, reason: 'nso_support_gridpack.js is not loaded - it is the support planner', parts: [] };
     var style = opts.style != null ? opts.style : (opts.branchStyle === 'gecko-hand' ? 'gecko-hand' : 'tree');
-    /* default region: the largest, as planTree always took */
+    /* default region: the largest, as planTree always took. An explicit
+       opts.beacons list is planned as given, whatever region it came from. */
     var regionId = (opts.regionId == null && !opts.beacons) ? 0 : opts.regionId;
     var p = GP.plan(rawTris, Object.assign({}, opts, { style: style, regionId: regionId }));
     p.planner = 'gridpack';

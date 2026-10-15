@@ -47,6 +47,10 @@ Deterministic. Dials:
 | node lattice `L` | 5 mm: nodes every L/2 = 2.5 mm in x, y and z (z from the plate) | the ticket; Bambu's own 2.5/5 lattice |
 
 **Beacons.** `{ p, n }`: a point on the surface and its outward normal.
+`opts.beacons` takes an explicit list (`{ p, n }` or a detector record
+`{ x, y, z, normal }`, each with an optional `regionId` and `key`): the
+Supports card's, `docs/SUPPORTS-CARD.md`. Every trunk then carries
+`regionIds`, and every solid `beacons`, `regionIds` and `landing`.
 `gridBeacons` is the adapter: `detectOverhangs`' regions gridded at `p` through
 the tree's own `contactPoints` (centred lattice plus covering top-up), each
 point carrying the normal of the triangle under it. `beaconsFor` is the one

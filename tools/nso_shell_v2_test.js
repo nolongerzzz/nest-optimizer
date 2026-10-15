@@ -49,7 +49,7 @@ const RIGHT = [['btn-undo', 'UNDO'], ['btn-delete-placed', 'REMOVE'], ['menu-exp
 const UNDER_EXPORT = ['menu-plates', 'PLATE'];
 const GROUPS = [
   [['menu-scale', 'SCALE'], ['menu-cut', 'CUT'], ['menu-crop', 'CROP'], ['menu-joins', 'JOIN'],
-   ['btn-shell-lift', 'LIFT'], ['menu-seat', 'SEAT'], ['menu-bit', 'SUBTRACT']],
+   ['btn-shell-lift', 'LIFT'], ['menu-seat', 'SEAT'], ['menu-supports', 'SUPPORTS'], ['menu-bit', 'SUBTRACT']],
   [['menu-shape', 'SHAPE'], ['menu-bend', 'BEND'], ['menu-paint', 'PAINT'], ['menu-surface', 'SURFACE'], ['menu-sculpt', 'SCULPT']],
   [['menu-measure', 'MEASURE & CHECK'], ['menu-repair', 'CHECK & REPAIR']],
   [['btn-microscope', 'G-SCOPE']],
@@ -82,6 +82,8 @@ const HOLDS = {
   'menu-joins': ['menu-join', 'btn-join-start', 'join-slot-a', 'join-slot-b', 'join-slot-c', 'btn-join', 'btn-join-clear',
                  'menu-abc', 'triple-mode', 'btn-join-triple'],
   'menu-seat': ['btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid'],
+  'menu-supports': ['supports-card', 'btn-sup-all', 'btn-sup-none', 'btn-sup-paint', 'sel-sup-paint', 'sup-style', 'sup-size',
+                    'sup-rest', 'btn-sup-remove'],
   'menu-bit': ['btn-subtract', 'btn-extract-bit'],
   'menu-shape': ['inp-soften-r', 'chk-full-wrap', 'btn-soften', 'sel-edge-treat', 'btn-smooth', 'btn-extend', 'btn-mirror',
                  'btn-thicken-out', 'btn-thicken-in', 'btn-hollow', 'btn-hollow-safe', 'btn-fill', 'btn-foam', 'foam-panel'],
@@ -292,7 +294,7 @@ withApp(async (page, logs) => {
     const slabs = col.slice(0, 4).reduce((n, g) => n + g.length, 0);
     check('the column fits within 744 px at 1280 x 800, inside the viewport, its ' + slabs + ' slabs clear of the view row',
       colBottom - geo._vp.top <= 744 && colBottom <= geo._vp.bottom && first.y >= geo._vp.top &&
-      slabs === 15 && lastAbove.b - geo._vp.top <= 744 && lastAbove.b < view[0].y,
+      slabs === 16 && lastAbove.b - geo._vp.top <= 744 && lastAbove.b < view[0].y,
       'column ' + Math.round(first.y - geo._vp.top) + '..' + Math.round(colBottom - geo._vp.top) + ' px of a ' + geo._vp.h +
       ' px viewport; stack of ' + slabs + ' ends at ' + Math.round(lastAbove.b - geo._vp.top));
   }
