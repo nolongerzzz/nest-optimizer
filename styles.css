@@ -2417,6 +2417,17 @@ select:focus, input:focus {
   font-weight: 600;
 }
 
+/* Pull (app-pull.js): armed reads like the Brush, in a hue of its own so two
+   armed tools are never mistaken for each other. Its panel is Bend's. */
+.btn-pull.is-armed {
+  background: #38bdf8;
+  color: #08202e;
+  border-color: #38bdf8;
+  font-weight: 600;
+}
+.pull-panel .vp-row-brush { margin-bottom: 2px; }
+.pull-panel .vp-row-brush input[type="range"] { accent-color: #38bdf8; }
+
 /* Seat here shares that slider and arms a click, so it needs the same armed
    state the other click-owning tools have. */
 #btn-seat-here { margin-top: 4px; }

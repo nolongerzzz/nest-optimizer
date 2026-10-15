@@ -223,6 +223,11 @@
       if (window.nsoBrushArmed() && typeof window.nsoBrushSetArmed === 'function') window.nsoBrushSetArmed(false);
       left.push('brush');
     }
+    if (typeof window.nsoPullArmed === 'function' && window.nsoPullArmed()) {
+      press('btn-pull');
+      if (window.nsoPullArmed() && typeof window.nsoPullSetArmed === 'function') window.nsoPullSetArmed(false);
+      left.push('pull');
+    }
     if (window.nsoFoam && window.nsoFoam.on()) {
       window.nsoFoam.cancel();
       left.push('foam');

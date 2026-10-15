@@ -177,7 +177,8 @@ const UNDO_REPLACE_LABEL = {
   ringReplace: 'Undo: Ring / rod size reverted',
   offsetReplace: 'Undo: Offset reverted',
   liftReplace: 'Undo: Lift reverted',
-  foamReplace: 'Undo: Foam reverted'
+  foamReplace: 'Undo: Foam reverted',
+  pullReplace: 'Undo: Pull reverted'
 };
 
 /* Undo, then the helper rule (nso-helpers.js): a helper drawn after the step
@@ -2954,6 +2955,16 @@ function onCanvasPointerDown(event) {
      that cannot change the piece. Unlike the other three it owns the whole
      drag, not just the press - the stroke runs until pointerup. */
   if (typeof window.nsoBrushTakesPointer === 'function' && window.nsoBrushTakesPointer(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* Pull (app-pull.js) owns a PRESS that lands on a piece while it is armed,
+     on the brush's terms: the press is a pin or the start of a grab, and a
+     fall-through here would start a move drag UNDER it and report "Moved
+     model #N" over Pull's own status. Asked beside the brush for the same
+     reason - it bakes, so it wins a contested press over Measure. */
+  if (typeof window.nsoPullTakesPointer === 'function' && window.nsoPullTakesPointer(event)) {
     setOrbitFromPlate(false);
     return;
   }
