@@ -13,6 +13,13 @@
                  20 dots     discs 2.2 mm across, 0.6 high, a border round the
                              back and the two sides
 
+   hinge()     the hinge plate (grab:drop): a 64 x 40 slab, paper at z = 3,
+               carrying two hinge halves laid out flat, side by side, 6 mm
+               apart. Each half is one body: a leaf 18 x 24, 1.2 high, and
+               two knuckles along its inner edge, 4 wide and 7 long, 2.4
+               high. Lifted, a half stays where it stood - 3 mm up, on the
+               leftover slab, in the air above the bed.
+
    `truth` lists what the generator put where: kind, centre, height. */
 'use strict';
 
@@ -78,4 +85,24 @@ function barocke() {
   return Object.assign(sl, { truth, paper: PAPER, W, D });
 }
 
-module.exports = { barocke };
+/* A hinge half: the leaf from x0 to x1 (the knuckles on the side `kx`). */
+function hingeHalf(x0, x1, kx, y0) {
+  const leaf = (x, y) => x >= x0 && x <= x1 && y >= y0 && y <= y0 + 24;
+  const k1 = (x, y) => Math.abs(x - kx) <= 2 && y >= y0 + 2 && y <= y0 + 9;
+  const k2 = (x, y) => Math.abs(x - kx) <= 2 && y >= y0 + 15 && y <= y0 + 22;
+  return (x, y) => (k1(x, y) || k2(x, y)) ? 2.4 : leaf(x, y) ? 1.2 : 0;
+}
+
+function hinge() {
+  const HW = 64, HD = 40;
+  const A = hingeHalf(6, 24, 22, 8), B = hingeHalf(40, 58, 42, 8);
+  const field = (x, y) => PAPER + Math.max(A(x, y), B(x, y));
+  const sl = FX.slab(HW, HD, S, field);
+  const truth = [
+    { kind: 'hinge', half: 'A', center: [15, 20], heightMm: 2.4, box: [6, 8, 24, 32] },
+    { kind: 'hinge', half: 'B', center: [49, 20], heightMm: 2.4, box: [40, 8, 58, 32] }
+  ];
+  return Object.assign(sl, { truth, paper: PAPER, W: HW, D: HD });
+}
+
+module.exports = { barocke, hinge };

@@ -159,6 +159,7 @@ const UNDO_REPLACE_LABEL = {
   deleteReplace: 'Undo: Delete reverted',
   brushReplace: 'Undo: Brush reverted',
   seatSurfaceReplace: 'Undo: Seat here reverted',
+  dropSeatReplace: 'Undo: Drop reverted',
   extendReplace: 'Undo: Extend reverted',
   bendReplace: 'Undo: Bend reverted',
   tubeEdgeReplace: 'Undo: Tube edge reverted',
@@ -623,7 +624,7 @@ function undoLastStep() {
       p.mesh = new THREE.Mesh(p.geometry, mat);
     }
     if (p.mesh && state.modelGroup) {
-      p.mesh.position.set(p.x, p.height / 2 + 0.2, p.z);
+      p.mesh.position.set(p.x, p.height / 2 + 0.2 + (p.liftY || 0), p.z);
       state.modelGroup.add(p.mesh);
     }
     state.placed.splice(at, 0, p);
@@ -2251,10 +2252,12 @@ function setPointerFromEvent(event) {
   state.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 }
 
-function hitPlateXZ() {
+/* The pointer on the horizontal plane at height `y` (the bed, y = 0, when
+   left out). */
+function hitPlateXZ(y) {
   if (!state.raycaster || !state.camera) return null;
   state.raycaster.setFromCamera(state.pointer, state.camera);
-  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -(y || 0));
   const hit = new THREE.Vector3();
   if (!state.raycaster.ray.intersectPlane(plane, hit)) return null;
   return hit;
@@ -2386,9 +2389,9 @@ function placedFootprint(p, x, z) {
    is judged by the room it takes. Returns { x, z, onBed } - onBed false when
    the bed has no such spot, and then a spot just past everything, still
    clear of every piece.
-   Written for Picture (app-relief.js, which seats a slab nearest the middle)
-   and shared with Lift (app-lift-plate.js, which seats each lifted piece
-   nearest the piece it came off). Search on a NSO_FREE_STEP grid. */
+   Written for Picture (app-relief.js, which seats a slab nearest the middle).
+   Lift used it too until its lifted pieces began landing where they stood
+   (app-lift-plate.js). Search on a NSO_FREE_STEP grid. */
 const NSO_FREE_GAP = 4;          /* mm between pieces - what addModel leaves */
 const NSO_FREE_STEP = 2;         /* mm, the search grid */
 function nsoFreeSpot(entry, near) {
@@ -2540,12 +2543,18 @@ function startMoveDrag(idx, event) {
   // the drag never starts and nothing is pushed to undo.
   if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(p, 'drag')) return false;
   setPointerFromEvent(event);
-  const hit = hitPlateXZ();
+  /* The grab offset is read on the plane of the piece's own bottom - the
+     bed for a piece on it, as it always was; a piece in the air is held
+     by the point under it, not by where the ray meets the bed far below. */
+  const hit = hitPlateXZ(p.liftY || 0);
   if (!hit) return false;
   state.moveDragging = true;
   state.moveIndex = idx;
   applyPlateGridVisibility();
   state.moveUndoFrom = { index: idx, x: p.x, z: p.z, meshY: p.mesh ? p.mesh.position.y : null };
+  /* Grab and drop (app-grab-drop.js): the pointer may carry the piece over
+     another piece or over nothing, and the release decides where it lands. */
+  if (typeof nsoGrab !== 'undefined') nsoGrab.begin(p, idx, event);
   state.moveGrab.x = p.x - hit.x;
   state.moveGrab.z = p.z - hit.z;
   if (state.controls) state.controls.enabled = false;
@@ -2561,6 +2570,9 @@ function dragMovePlaced(event) {
   if (!state.moveDragging) return;
   const p = state.placed[state.moveIndex];
   if (!p) return;
+  // over another piece or over nothing, the grab places it; over the plate,
+  // this does, as it always has
+  if (typeof nsoGrab !== 'undefined' && nsoGrab.move(event)) return;
   setPointerFromEvent(event);
   const hit = hitPlateXZ();
   if (!hit) return;
@@ -2587,18 +2599,29 @@ function endMoveDrag() {
   if (state.renderer && state.renderer.domElement) {
     state.renderer.domElement.style.cursor = '';
   }
+  /* A drop onto a piece, into the air, or an Escape: the grab finished it,
+     its one Undo and its words included. */
+  const grab = (typeof nsoGrab !== 'undefined') ? nsoGrab.end() : null;
   updateExportButton();
+  if (grab && grab.handled) return;
   if (idx >= 0 && state.placed[idx] && from) {
     const p = state.placed[idx];
     /* A press on a piece always starts a drag, so a plain click (or an
        Alt-click, which also re-aims the view) ends here too. Only a drag
        that really moved the piece - the same test that decides the undo
-       entry - says so; otherwise the status is left as the click left it. */
-    const moved = Math.abs(p.x - from.x) > 0.01 || Math.abs(p.z - from.z) > 0.01;
+       entry - says so; otherwise the status is left as the click left it.
+       A piece carried down out of the air came down as well as across, so
+       its Undo is the whole pose it was picked up in. */
+    const pose = grab && grab.from;
+    const wasUp = !!(pose && pose.liftY > 0);
+    const moved = Math.abs(p.x - from.x) > 0.01 || Math.abs(p.z - from.z) > 0.01 ||
+      (wasUp && Math.abs((p.liftY || 0) - pose.liftY) > 1e-6);
     if (moved) {
-      pushUndo({ type: 'movePlaced', index: from.index, x: from.x, z: from.z, meshY: from.meshY });
+      if (wasUp) pushUndo(pose);
+      else pushUndo({ type: 'movePlaced', index: from.index, x: from.x, z: from.z, meshY: from.meshY });
     }
-    if (!reportJoinFlushGap() && moved) setStatus('Moved model #' + (idx + 1));
+    if (moved && wasUp) setStatus('Set down on the plate, from ' + pose.liftY.toFixed(2) + ' mm up. One Undo (Ctrl+Z) puts it back.');
+    else if (!reportJoinFlushGap() && moved) setStatus('Moved model #' + (idx + 1));
   }
 }
 

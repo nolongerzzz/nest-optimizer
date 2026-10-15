@@ -17,10 +17,12 @@
         "22 features found"; arming again is the cache
      2. hover: the feature under the cursor is outlined
      3. a click lifts one dot: the plate repaired and closed, the new piece
-        beside it, volumes add up, ONE undo step; Ctrl+Z restores both
-     4. Shift-click two dots, let go of Shift: one step, two pieces
+        exactly where it stood (in the air over the plate, on the leftover
+        paper), volumes add up, ONE undo step; Ctrl+Z restores both
+     4. Shift-click two dots, let go of Shift: one step, two pieces, each
+        where it stood
      5. Strip: the grouped list, untick the dots, Confirm: the line and the
-        plant lift, the dots stay; one Undo step
+        plant lift, where they stood; the dots stay; one Undo step
      6. the lifted piece is an ordinary piece: Move, then Join
      7. G-scope's Features row: the same count, outlines, no action buttons
      8. refusals in words: a painted piece, nothing found
@@ -55,6 +57,27 @@ const T_DOT2 = rawTriNear(BAR.soup, dots[2].center[0], dots[2].center[1], 3.5, 3
 const T_PAPER = rawTriNear(BAR.soup, 60, 20, 2.99, 3.01);
 
 const shots = L.shooter(OUT, KEEP, ROOT), shot = shots.plate;
+
+/* Where the host draws feature `fid`'s own triangles, before it is lifted:
+   their world box. A piece that lands where it stood has this box (its cap
+   adds nothing outside it). */
+const featureBox = (page, hostId, fid) => page.evaluate(([id, f]) => {
+  const p = state.placed.find(q => q && q.sourceId === id), P = p.mesh.geometry.attributes.position.array;
+  p.mesh.updateMatrixWorld(true);
+  const bb = new THREE.Box3(), v = new THREE.Vector3();
+  NSO_LIFT_PLATE.analysis().islands[f].tris.forEach(t => {
+    for (let k = 0; k < 3; k++) bb.expandByPoint(v.set(P[t * 9 + k * 3], P[t * 9 + k * 3 + 1], P[t * 9 + k * 3 + 2]).applyMatrix4(p.mesh.matrixWorld));
+  });
+  return { min: bb.min.toArray(), max: bb.max.toArray() };
+}, [hostId, fid]);
+/* A lifted piece as drawn: its world box and the floating record. */
+const drawnBox = (page, id) => page.evaluate(id => {
+  const p = state.placed.find(q => q && q.sourceId === id), bb = new THREE.Box3().setFromObject(p.mesh);
+  return { min: bb.min.toArray(), max: bb.max.toArray(), liftY: p.liftY || 0 };
+}, id);
+/* Same box to within `tol` on every side. */
+const sameBox = (a, b, tol) => a && b && [0, 1, 2].every(k => Math.abs(a.min[k] - b.min[k]) <= tol && Math.abs(a.max[k] - b.max[k]) <= tol);
+const hostBottom = (page, id) => page.evaluate(id => new THREE.Box3().setFromObject(state.placed.find(q => q && q.sourceId === id).mesh).min.y, id);
 
 withApp(async (page, logs) => {
   await page.setViewportSize({ width: 1280, height: 800 });
@@ -104,6 +127,7 @@ withApp(async (page, logs) => {
   console.log('\n=== 3. a click lifts one dot ===');
   const b3 = await plateState(page);
   const v0 = await page.evaluate(s => NSO_Lift.volume(new Float32Array(s)), SRC);
+  const box3 = await featureBox(page, plateId, fDot0), bed3 = await hostBottom(page, plateId);
   await clickTri(page, plateId, T_DOT0);
   await waitRead(page, /Lifted|refused|failed/);
   const r3 = await readout(page), a3 = await plateState(page);
@@ -113,7 +137,13 @@ withApp(async (page, logs) => {
   check('exactly ONE undo step', a3.undo === b3.undo + 1, b3.undo + ' -> ' + a3.undo);
   const host3 = await pieceInfo(page, plateId), pc3 = added3.length ? await pieceInfo(page, added3[0].id) : null;
   check('the plate keeps its id and is repaired: closed, no degenerate faces', host3 && host3.closed && host3.degen === 0, host3 && host3.tris + ' tris');
-  check('the dot is a closed piece on free plate beside it', pc3 && pc3.closed && pc3.onBed && !overlaps(pc3.fp, host3.fp), pc3 && JSON.stringify(pc3.fp));
+  const d3 = pc3 ? await drawnBox(page, pc3.id) : null;
+  check('the dot is a closed piece, exactly where it stood: the box the plate drew it in', pc3 && pc3.closed && sameBox(d3, box3, 1e-3),
+    d3 && JSON.stringify(d3.min.map(v => +v.toFixed(3))) + ' vs ' + JSON.stringify(box3.min.map(v => +v.toFixed(3))));
+  check('...over its own spot on the plate, in the air on the paper: its bottom 3 mm over the plate\'s, liftY says so',
+    pc3 && overlaps(pc3.fp, host3.fp) && Math.abs(d3.min[1] - bed3 - BAR.paper) < 1e-3 && Math.abs(d3.liftY - (d3.min[1] - 0.2)) < 1e-6,
+    d3 && 'bottom ' + d3.min[1].toFixed(3) + ', plate ' + bed3.toFixed(3) + ', liftY ' + d3.liftY.toFixed(3));
+  check('...and the read-out says it stays where it stood, in the air', /stays where it stood/.test(r3) && /in the air, 3\.\d\d mm over the bed/.test(r3), r3.slice(0, 400));
   check('plate + piece = the original', pc3 && Math.abs(host3.volume + pc3.volume - v0) < 1e-6 * v0, host3.volume.toFixed(3) + ' + ' + (pc3 && pc3.volume.toFixed(3)) + ' = ' + v0.toFixed(3));
   check('the card now counts 21', (await card(page)).count === '21 features found');
   await ctrlZ(page);
@@ -136,8 +166,9 @@ withApp(async (page, logs) => {
   const a4 = await plateState(page), added4 = a4.models.filter(m => !b4.models.some(b => b.id === m.id));
   check('letting go of Shift lifts both in ONE step', added4.length === 2 && a4.undo === b4.undo + 1, added4.length + ' pieces, ' + b4.undo + ' -> ' + a4.undo);
   let c4 = true;
-  for (const m of added4) { const p = await pieceInfo(page, m.id); if (!p.closed || !p.onBed) c4 = false; }
-  check('...both closed, on free plate; the card counts 20', c4 && (await card(page)).count === '20 features found');
+  const host4 = await pieceInfo(page, plateId);
+  for (const m of added4) { const p = await pieceInfo(page, m.id), d = await drawnBox(page, m.id); if (!p.closed || !overlaps(p.fp, host4.fp) || !(d.liftY > 2.9)) c4 = false; }
+  check('...both closed, each where it stood over the plate; the card counts 20', c4 && (await card(page)).count === '20 features found');
   await ctrlZ(page);
   const U4 = await raw(page, plateId);
   check('one Ctrl+Z puts both back, bit for bit', U4.every((v, i) => v === SRC[i]) && (await plateState(page)).models.length === b4.models.length);
@@ -164,9 +195,9 @@ withApp(async (page, logs) => {
   const a5 = await plateState(page), added5 = a5.models.filter(m => !b5.models.some(b => b.id === m.id));
   const host5 = await pieceInfo(page, plateId);
   let v5 = 0, c5c = true;
-  for (const m of added5) { const p = await pieceInfo(page, m.id); v5 += p.volume; if (!p.closed || !p.onBed || overlaps(p.fp, host5.fp)) c5c = false; }
+  for (const m of added5) { const p = await pieceInfo(page, m.id), d = await drawnBox(page, m.id); v5 += p.volume; if (!p.closed || !overlaps(p.fp, host5.fp) || !(d.liftY > 2.9)) c5c = false; }
   check('Confirm lifts the line and the plant: two pieces, ONE undo step', added5.length === 2 && a5.undo === b5.undo + 1, added5.map(m => m.name).join(', '));
-  check('...closed, on free plate; the plate closed; volumes add up', c5c && host5.closed && Math.abs(host5.volume + v5 - v0) < 1e-6 * v0,
+  check('...closed, each where it stood over the plate; the plate closed; volumes add up', c5c && host5.closed && Math.abs(host5.volume + v5 - v0) < 1e-6 * v0,
     host5.volume.toFixed(3) + ' + ' + v5.toFixed(3) + ' = ' + v0.toFixed(3));
   const g5 = await page.evaluate(() => NSO_LIFT_PLATE.groups(NSO_LIFT_PLATE.analysis(), NSO_LIFT_PLATE.minHeight()).list.map(G => G.key + ' ' + G.ids.length));
   check('the 20 dots stay on the plate, nothing else', (await card(page)).count === '20 features found' && g5.join() === 'dots 20', g5.join());

@@ -505,8 +505,13 @@ and standing out more than **How far out counts** (0.42 mm, as before).
 
 A lift is section 2's, unchanged: the piece keeps its place and id and is
 repaired (flat where a feature stood, or the surface carried across on a
-curve); each feature becomes `<piece> - lifted N` on free plate beside it
-(`nsoFreeSpot`) - an ordinary piece: Pieces list, Move, Join, Export, Remove.
+curve); each feature becomes `<piece> - lifted N` - an ordinary piece: Pieces
+list, Move, Join, Export, Remove - **exactly where it stood** (`landInPlace`:
+the parent's pose, the mesh where the parent drew those raw triangles). A
+feature on top of a slab is left resting on the leftover slab, in the air over
+the bed, and stays there - the floating state, `docs/GRAB-DROP.md` - until it
+is grabbed and dropped or sent To plate. (Until grab and drop it went onto
+free plate beside the parent, `nsoFreeSpot`.)
 One `featureSwap` Undo puts it all back. **Remove** (throw the features away)
 has no button on the plate; `NSO_LiftAuto.remove` is unchanged and
 `lift:auto-test` still holds it.
@@ -546,13 +551,14 @@ features in about 1.8 s; the second read is the cache.
 
 Arm on the selected plate: "22 features found", the read not from the cache;
 off and on again: the cache. Hover a dot: outlined; the bare plate: nothing;
-a leaf: the whole plant. A click on a dot: one piece, closed, on free plate
-beside the plate, the plate closed, volumes add up, ONE undo step, 21 left;
+a leaf: the whole plant. A click on a dot: one piece, closed, exactly where it
+stood (the box the plate drew it in, 3 mm over the plate's bottom, in the air,
+liftY saying so), the plate closed, volumes add up, ONE undo step, 21 left;
 Ctrl+Z: bit for bit, 22 from the cache. Shift-click two dots: gathered, then
-one step on letting go. Strip: three ticked rows, the breakdown above,
+one step on letting go, each where it stood. Strip: three ticked rows, the breakdown above,
 "Confirm - lift 22"; dots unticked: "the plate keeps 20", lift 2; Cancel
-changes nothing; Confirm lifts the line and the plant in one step, 20 dots
-stay. The lifted line moves 5 mm and joins the plant ("Join ok"). G-scope:
+changes nothing; Confirm lifts the line and the plant in one step, where they
+stood, 20 dots stay. The lifted line moves 5 mm and joins the plant ("Join ok"). G-scope:
 the row is Features, 22 - the same count, from the same cache - the grouped
 list, an outline per group, no controls. Refusals: a plain box (nothing
 found), a painted plate, a piece with no raw soup.
