@@ -22,7 +22,8 @@
      e. a click that does not move still punches, exactly as before.
      f. a groove into a 2 mm floor deeper than 2 - 0.8 mm is refused in words
         and the piece is untouched; one that leaves 0.8 mm is cut.
-   A screenshot of the three grooves is written to docs/img/carve-drag.png. */
+   A screenshot of the three grooves is written to tools/carve-out/carve-drag.png
+   (git-ignored). */
 
 const path = require('path');
 const fs = require('fs');
@@ -374,7 +375,9 @@ async function part2() {
       state.camera.updateMatrixWorld(true);
       state.renderer.render(state.scene, state.camera);
     }, [[cx, top, cz]]);
-    await page.screenshot({ path: path.join(ROOT, 'docs', 'img', 'carve-drag.png') });
+    const shotDir = path.join(ROOT, 'tools', 'carve-out');
+    fs.mkdirSync(shotDir, { recursive: true });
+    await page.screenshot({ path: path.join(shotDir, 'carve-drag.png') });
     await lookDown(page, [cx, top, cz], 140);
 
     console.log('\n--- 2d. one Undo per stroke puts the piece back, vertex for vertex ---');

@@ -646,7 +646,8 @@ release within 4 px of the press is a click and punches once, exactly as in
 §5-§8. Anything longer is a groove: the blade swept along the stroke at the set
 depth, one boolean, one Undo (`carveReplace`, "Undo: Carve reverted").
 
-![Three 20 mm drags: ball-nose, flat shave, V-groove](img/carve-drag.png)
+`npm run carve:drag` writes a screenshot of three 20 mm drags (ball-nose, flat
+shave, V-groove) to tools/carve-out/carve-drag.png, which is git-ignored.
 
 **What the groove is.** `NSO_Carve.planStroke` builds it from two primitives
 the repo already proves:
