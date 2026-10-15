@@ -33,17 +33,20 @@
   10. THE 90 BUTTONS are untouched; the locks and the trackball are gone.
   11. THE RING BODY is the track, not a handle.
   12. EXPORT writes what the screen shows, leaned and turned.
-  13. THE RADIUS is 45% of the bed's shorter side - one size for every
-      piece, bigger on a bigger bed.
+  13. THE RADIUS is one fixed size for every piece and every bed - just
+      enough to enclose library/box_closed.stl - with slim 7.5 mm
+      arrowheads.
   14. DRAGGING quiets the rails; release restores them.
-  15. DEGREE MARKERS are fixed in the ring's frame; the snap lands on one.
+  15. DEGREE MARKERS - a solid bar every 5, longer every 15, longest on
+      the quarters, no numbers, as solid as the rail - are fixed in the
+      ring's frame; the snap lands on one.
   16. THE LEANS are the piece's own axes: turned 45 and leaned side/side
       30, a bar rises end-over-end with no twist, in the drawn ring's plane;
       front/back from there is a roll about its length.
   17. A FIXED PIVOT: a drag turns the piece about one held point - it may
       pass through the plate - with the rings standing on it; a run of
       clicks the same; one seat at the end; Undo seated; nso-watch told.
-  18. A BIGGER BED, bigger rings.                                          */
+  18. A BIGGER BED, the same rings.                                       */
 
 const path = require('path');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
@@ -710,8 +713,9 @@ withApp(async (page, logs) => {
   }
 
   /* ----------------------------------------------------------------- 13 */
-  console.log('\n=== 13. one ring size: 45% of the bed\'s shorter side, whatever the piece ===');
+  console.log('\n=== 13. one ring size, whatever the piece: just enough to enclose box_closed.stl ===');
   {
+    await loadSTL(page, path.join(ROOT, 'library', 'box_closed.stl'));
     await loadSTL(page, path.join(ROOT, 'fixtures', 'box_hull_80x40x20-2.stl'));
     await loadSTL(page, path.join(ROOT, 'fixtures', 'tape_on-edge-single-B101_rounded_v8_FINAL.stl'));
     await page.waitForTimeout(300);
@@ -722,18 +726,31 @@ withApp(async (page, logs) => {
         const g = state.scene.getObjectByName('nso-rotate-handles');
         return g.children.filter(c => c.userData.nsoRotateRing).map(c => c.geometry.parameters.radius);
       };
+      const tube = () => {
+        const g = state.scene.getObjectByName('nso-rotate-handles');
+        return g.children.find(c => c.userData.nsoRotateRing).geometry.parameters.tube;
+      };
       const arrowH = () => {
         const g = state.scene.getObjectByName('nso-rotate-handles');
         const c = g.children.find(k => k.userData.nsoRotateHandle && k.material.visible);
         return c.geometry.parameters.height;
       };
-      [0, n - 2, n - 1].forEach(idx => {
+      const arrowBase = () => {
+        const g = state.scene.getObjectByName('nso-rotate-handles');
+        const c = g.children.find(k => k.userData.nsoRotateHandle && k.material.visible);
+        const h = g.children.find(k => k.userData.nsoRotateHandle && !k.material.visible);
+        return { base: c.geometry.parameters.radius, hit: h.geometry.parameters.radius };
+      };
+      [0, n - 3, n - 2, n - 1].forEach(idx => {
         selectPlaced(idx);
         const p = state.placed[idx];
         H.zero();
         a.setRing('turn', true); a.setRing('fb', true); a.setRing('ss', true);
         a.refresh();
-        const before = { r: a.ringRadius(), torus: torus(), arrow: arrowH(),
+        const geo = p.mesh.geometry;
+        if (!geo.boundingSphere) geo.computeBoundingSphere();
+        const before = { r: a.ringRadius(), torus: torus(), tube: tube(), arrow: arrowH(), dart: arrowBase(),
+                         sphere: geo.boundingSphere.radius,
                          size: [p.width, p.depth, p.height].map(v => +v.toFixed(1)) };
         const after = {};
         ['turn', 'fb', 'ss'].forEach(ring => { H.zero(); a.turn(ring, 37); a.refresh(); after[ring] = torus(); });
@@ -741,16 +758,17 @@ withApp(async (page, logs) => {
         H.zero();
       });
       out.bed = getCurrentPlate();
+      out.K = a.constants;
       a.setRing('fb', false); a.setRing('ss', false);
       selectPlaced(0); H.zero();
       return out;
     });
-    const want = 0.45 * Math.min(r.bed.w, r.bed.d);
+    const want = r.K.RING_RADIUS_MM;
     for (const pc of r.pieces) {
       console.log('   ' + pc.name.padEnd(42) + ' ' + pc.before.size.join(' x ') + ' mm -> ring ' +
         pc.before.r.toFixed(3) + ' mm, drawn ' + pc.before.torus.map(x => x.toFixed(3)).join(' / ') +
         ', arrowhead ' + pc.before.arrow.toFixed(2) + ' mm');
-      check(pc.name + ': the ring radius is 45% of the A1 Mini bed\'s shorter side', near(pc.before.r, want, 1e-9) &&
+      check(pc.name + ': the ring radius is the one fixed size', near(pc.before.r, want, 1e-9) &&
         pc.before.torus.every(x => near(x, want, 1e-9)), pc.before.r + ' vs ' + want);
       check(pc.name + ': ...and does not change with a 37° turn on any ring',
         ['turn', 'fb', 'ss'].every(k => pc.after[k].every(x => x === pc.before.r)));
@@ -758,9 +776,19 @@ withApp(async (page, logs) => {
     check('every piece, large or small, gets the same rings',
       r.pieces.every(pc => pc.before.r === r.pieces[0].before.r && pc.before.arrow === r.pieces[0].before.arrow),
       r.pieces.map(pc => pc.before.r.toFixed(1)).join(' / '));
-    check('the arrowheads are a fixed fraction of the radius', near(r.pieces[0].before.arrow, 0.18 * want, 1e-9),
-      r.pieces[0].before.arrow.toFixed(3) + ' mm');
-    check('A1 Mini (180 mm): 81 mm', near(want, 81, 1e-9) && r.bed.w === 180, want + ' mm on ' + r.bed.name);
+    const d0 = r.pieces[0].before;
+    check('the arrowheads are slim darts: 7.5 mm long, under 4 mm across the base',
+      near(d0.arrow, 7.5, 1e-9) && 2 * d0.dart.base < 4,
+      d0.arrow.toFixed(2) + ' x ' + (2 * d0.dart.base).toFixed(2) + ' mm (were 14.58 x 13.12)');
+    check('...with a grab target wider than the dart', d0.dart.hit > 2 * d0.dart.base,
+      'grab sphere ' + d0.dart.hit.toFixed(2) + ' mm in radius');
+    const bc = r.pieces.find(pc => /box_closed/.test(pc.name));
+    check('box_closed.stl fits inside: its bounding sphere clears the tube\'s inner edge',
+      !!bc && bc.before.sphere < want - bc.before.tube,
+      bc && ('sphere ' + bc.before.sphere.toFixed(3) + ' mm < ' + (want - bc.before.tube).toFixed(3) + ' mm'));
+    check('...and only just: within 2 mm of it', !!bc && want - bc.before.tube - bc.before.sphere < 2,
+      bc && ((want - bc.before.tube - bc.before.sphere).toFixed(3) + ' mm to spare'));
+    check('40 mm, on the A1 Mini as anywhere', near(want, 40, 1e-9), want + ' mm on ' + r.bed.name);
   }
 
   /* ----------------------------------------------------------------- 14 */
@@ -777,7 +805,6 @@ withApp(async (page, logs) => {
           if (u.nsoRotateRing) out['ring:' + u.nsoRotateRing] = { o: c.material.opacity,
             tube: c.geometry.parameters.tube, colour: c.material.color.getHexString() };
           if (u.nsoRotateTicks) out['ticks:' + u.nsoRotateTicks] = { o: c.material.opacity };
-          if (u.nsoRotateLabel) out['label:' + u.nsoRotateLabel.ring + ':' + u.nsoRotateLabel.deg] = { o: c.material.opacity };
           if (u.nsoRotateHandle && c.material.visible)
             out['arrow:' + u.nsoRotateHandle.ring + ':' + u.nsoRotateHandle.dir] = { o: c.material.opacity };
         });
@@ -811,13 +838,13 @@ withApp(async (page, logs) => {
     check('the arrowhead being dragged keeps full weight', M['arrow:turn:1'].o === 1,
       'held ' + M['arrow:turn:1'].o + ', its partner ' + M['arrow:turn:-1'].o);
     check('every ring keeps its colour', ['turn', 'fb', 'ss'].every(k => M['ring:' + k].colour === R['ring:' + k].colour));
-    check('ticks and labels fade with their ring',
-      ['turn', 'fb', 'ss'].every(k => M['ticks:' + k].o < R['ticks:' + k].o && M['label:' + k + ':0'].o < R['label:' + k + ':0'].o));
+    check('ticks fade with their ring',
+      ['turn', 'fb', 'ss'].every(k => M['ticks:' + k].o < R['ticks:' + k].o));
     check('on release everything is back at rest weight', JSON.stringify(w.after) === JSON.stringify(R));
   }
 
   /* ----------------------------------------------------------------- 15 */
-  console.log('\n=== 15. degree markers: fixed in the ring\'s frame, and the snap lands on a labelled tick ===');
+  console.log('\n=== 15. degree markers: fixed in the ring\'s frame, and the snap lands on a long tick ===');
   {
     const t = await page.evaluate(() => {
       const a = window.nsoRotate, H = window.__rot, K = a.constants;
@@ -827,15 +854,16 @@ withApp(async (page, logs) => {
         const g = state.scene.getObjectByName('nso-rotate-handles'), out = {};
         ['turn', 'fb', 'ss'].forEach(k => {
           const ticks = g.children.filter(c => c.userData.nsoRotateTicks === k);
-          const labels = g.children.filter(c => c.userData.nsoRotateLabel && c.userData.nsoRotateLabel.ring === k);
           const ring = g.children.find(c => c.userData.nsoRotateRing === k);
-          const pts = ticks[0] ? Array.from(ticks[0].geometry.attributes.position.array) : [];
-          out[k] = { tickSets: ticks.length, isSegments: !!(ticks[0] && ticks[0].isLineSegments),
+          const pts = ticks[0] ? ticks[0].userData.nsoTickEnds.slice() : [];
+          const gp = ticks[0] && ticks[0].geometry.attributes.position;
+          let span = 0;                                 // farthest bar vertex from the centre
+          if (gp) for (let i = 0; i < gp.count; i++) span = Math.max(span, Math.hypot(gp.getX(i), gp.getY(i), gp.getZ(i)));
+          out[k] = { tickSets: ticks.length, isMesh: !!(ticks[0] && ticks[0].isMesh),
+                     verts: gp ? gp.count : 0, span,
                      pts, r: ring.geometry.parameters.radius, tube: ring.geometry.parameters.tube,
                      ringO: ring.material.opacity, tickO: ticks[0] && ticks[0].material.opacity,
-                     labels: labels.map(l => ({ deg: l.userData.nsoRotateLabel.deg, sprite: !!l.isSprite,
-                       atten: l.material.sizeAttenuation, depth: l.material.depthTest,
-                       d: l.position.length(), p: l.position.toArray() })) };
+                     sprites: g.children.filter(c => c.isSprite).length };
         });
         return out;
       };
@@ -866,7 +894,7 @@ withApp(async (page, logs) => {
         .sort((u, v) => Math.abs(u.dot(A)) - Math.abs(v.dot(A)))[0].projectOnPlane(A).normalize();
       const q = ((Math.round(at / 90) * 90) % 360 + 360) % 360;
       const ticks = grab().turn.pts;
-      const tick = ((q / 15) | 0) * 6;                               // two points per tick, every 15°
+      const tick = ((q / 5) | 0) * 6;                                // two points per tick, every 5°
       const tickDir = new THREE.Vector3(ticks[tick], ticks[tick + 1], ticks[tick + 2]).normalize();
       const onTick = Math.abs(best.dot(tickDir));
       a.setRing('fb', false); a.setRing('ss', false);
@@ -876,20 +904,27 @@ withApp(async (page, logs) => {
     const K = t.K;
     for (const k of ['turn', 'fb', 'ss']) {
       const b = t.before[k];
-      check(k + ': ticks are ONE line-segment set (one draw call)', b.tickSets === 1 && b.isSegments);
-      check(k + ': a tick every 15° - 24 of them', b.pts.length === 24 * 2 * 3, b.pts.length / 6 + ' ticks');
+      check(k + ': ticks are ONE mesh of solid bars (one draw call)', b.tickSets === 1 && b.isMesh &&
+        b.verts === 72 * 36, b.verts + ' vertices = ' + b.verts / 36 + ' boxes');
+      check(k + ': a tick every 5° - 72 of them', b.pts.length === 72 * 2 * 3, b.pts.length / 6 + ' ticks');
       const lens = [];
-      for (let i = 0; i < 24; i++) {
+      for (let i = 0; i < 72; i++) {
         const o = i * 6, r0 = Math.hypot(b.pts[o], b.pts[o + 1], b.pts[o + 2]),
               r1 = Math.hypot(b.pts[o + 3], b.pts[o + 4], b.pts[o + 5]);
-        lens.push({ deg: i * 15, r0, len: r1 - r0 });
+        lens.push({ deg: i * 5, r0, len: r1 - r0 });
       }
-      const cls = d => d % 90 === 0 ? 90 : d % 45 === 0 ? 45 : 15;
-      check(k + ': short every 15°, longer every 45°, longest on the quarters',
+      const cls = d => d % 90 === 0 ? 90 : d % 15 === 0 ? 15 : 5;
+      check(k + ': short every 5°, longer every 15°, longest on the quarters',
         lens.every(l => near(l.len, K.TICK_LEN[cls(l.deg)] * b.r, 1e-4)) &&   // Float32 points
-        K.TICK_LEN[15] < K.TICK_LEN[45] && K.TICK_LEN[45] < K.TICK_LEN[90],
-        [0, 15, 45, 90].map(d => d + '°:' + lens[d / 15].len.toFixed(2) + 'mm').join(' '));
+        K.TICK_LEN[5] < K.TICK_LEN[15] && K.TICK_LEN[15] < K.TICK_LEN[90],
+        [0, 5, 15, 45, 90].map(d => d + '°:' + lens[d / 5].len.toFixed(2) + 'mm').join(' '));
       check(k + ': on the ring\'s outer edge', lens.every(l => near(l.r0, b.r + b.tube, 1e-4)));
+      check(k + ': the bars reach out to the longest tick\'s end - the mesh is the scale it says',
+        b.span > b.r + b.tube + K.TICK_LEN[90] * b.r - 1e-3 &&
+        b.span < Math.hypot(b.r + b.tube + K.TICK_LEN[90] * b.r, K.TICK_WIDTH[90]) + 1e-3, b.span.toFixed(3) + ' mm');
+      check(k + ': solid bars, thicker on the longer ticks', K.TICK_WIDTH[5] >= 0.4 &&
+        K.TICK_WIDTH[5] < K.TICK_WIDTH[15] && K.TICK_WIDTH[15] < K.TICK_WIDTH[90],
+        [5, 15, 90].map(c => c + '°: ' + K.TICK_WIDTH[c] + ' mm').join(', '));
       const diff = (x, y) => x.length === y.length ? Math.max(...x.map((v, i) => Math.abs(v - y[i]))) : Infinity;
       check(k + ': fixed in the ring\'s frame - a 37° turn on it moves the piece, not its scale',
         diff(t.own[k].pts, b.pts) < 1e-4, 'max move ' + diff(t.own[k].pts, b.pts).toExponential(1) + ' mm');
@@ -898,15 +933,9 @@ withApp(async (page, logs) => {
       else check(k + ': a Turn of 37° carries this lean ring\'s scale round with the piece',
         diff(t.after.riding[k].got, t.after.riding[k].want) < 1e-4,
         'max off ' + diff(t.after.riding[k].got, t.after.riding[k].want).toExponential(1) + ' mm');
-      check(k + ': lighter than the ring at rest', b.tickO < b.ringO, b.tickO + ' vs ' + b.ringO);
-      const L = b.labels.slice().sort((x, y) => x.deg - y.deg);
-      check(k + ': labels 0 / 90 / 180 / 270', L.map(l => l.deg).join() === '0,90,180,270');
-      check(k + ': sprites - they always face the camera - sized on screen, drawn on top',
-        L.every(l => l.sprite && l.atten === false && l.depth === false));
-      check(k + ': outside the ring and its longest tick, so never on the rail',
-        L.every(l => l.d > b.r + b.tube + K.TICK_LEN[90] * b.r), L.map(l => l.d.toFixed(1)).join(' '));
-      check(k + ': the labels ride with their ticks',
-        Math.max(...t.own[k].labels.map((l, i) => Math.hypot(...l.p.map((v, j) => v - b.labels[i].p[j])))) < 1e-4);
+      check(k + ': at least as solid as the ring at rest', b.tickO >= b.ringO, b.tickO + ' vs ' + b.ringO);
+      check(k + ': no 0 / 90 / 180 / 270 labels - the readout follows the cursor', b.sprites === 0,
+        b.sprites + ' sprite(s) in the group');
     }
     const s = t.snap;
     check('dragging into the quarter turn snapped it there', near(s.at - s.target, 0, 1e-6) ||
@@ -1134,7 +1163,7 @@ withApp(async (page, logs) => {
   }
 
   /* ----------------------------------------------------------------- 18 */
-  console.log('\n=== 18. a bigger bed, bigger rings: P1S selected ===');
+  console.log('\n=== 18. a bigger bed, the same rings: P1S selected ===');
   {
     /* Switching the plate clears the plate's pieces (updatePlateInfo ->
        clearPlaced, as it always has), so a piece is dropped on afterwards. */
@@ -1154,13 +1183,13 @@ withApp(async (page, logs) => {
       return { bed: getCurrentPlate(), r: window.nsoRotate.ringRadius(),
                torus: g.children.filter(c => c.userData.nsoRotateRing).map(c => c.geometry.parameters.radius) };
     });
-    check('P1S / A1 / X1C (256 mm bed): the rings scale up with it - 115.2 mm',
-      near(r.r, 115.2, 1e-9) && r.torus.length > 0 && r.torus.every(x => near(x, 115.2, 1e-9)),
+    check('P1S / A1 / X1C (256 mm bed): the same 40 mm rings - the bed no longer sizes them',
+      near(r.r, 40, 1e-9) && r.torus.length > 0 && r.torus.every(x => near(x, 40, 1e-9)),
       r.r + ' mm on ' + r.bed.name + ', drawn ' + r.torus.map(x => x.toFixed(2)).join(' / '));
     await page.selectOption('#plate-select', 'a1mini');
     await page.waitForTimeout(200);
     const back = await page.evaluate(() => window.nsoRotate.ringRadius());
-    check('...and back to 81 on the A1 Mini', near(back, 81, 1e-9), back + ' mm');
+    check('...and still 40 back on the A1 Mini', near(back, 40, 1e-9), back + ' mm');
   }
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));

@@ -9,7 +9,7 @@
    git-ignored).
 
    The long piece is library/tape_on-edge-single.stl - 185 x 34 x 20.9 mm,
-   longer than the A1 Mini's 162 mm rings and its 180 mm bed. (The fixtures/
+   longer than the 80 mm rings and the A1 Mini's 180 mm bed. (The fixtures/
    copy with the longer name is an 83.8 mm cut of it.) The other is the
    80 x 40 x 20 box fixture. */
 
@@ -54,7 +54,8 @@ withApp(async (page, logs) => {
     H.lowest = () => { const p = H.p(); p.mesh.updateMatrixWorld(true); return new THREE.Box3().setFromObject(p.mesh).min.y; };
     H.diam = ring => {
       const g = state.scene.getObjectByName('nso-rotate-handles');
-      const m = g.children.find(c => c.userData.nsoRotateRing === ring);
+      const m = g && g.children.find(c => c.userData.nsoRotateRing === ring);
+      if (!m) return null;                      // not drawn: Rotate shut, or no piece
       m.updateMatrixWorld(true);
       const pos = m.geometry.attributes.position, v = new THREE.Vector3(), r = state.renderer.domElement.getBoundingClientRect();
       let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
@@ -105,13 +106,13 @@ withApp(async (page, logs) => {
     await N(i => { const p = state.placed[i]; applyPlacedXZ(p, i ? 45 : -45, i ? 30 : -30); applyMeshRotation(p); }, idx);
   }
   console.log('   ' + JSON.stringify(sizes));
-  check('both get the same ring: 81 mm (45% of the 180 mm bed)',
-    sizes.box.ring === 81 && sizes.tape.ring === 81 && sizes.box.px.mm === 81 && sizes.tape.px.mm === 81);
+  check('both get the same ring: the fixed 40 mm',
+    sizes.box.ring === 40 && sizes.tape.ring === 40 && sizes.box.px.mm === 40 && sizes.tape.px.mm === 40);
   check('...measured on screen from the same spot and camera: the same diameter to a pixel',
     Math.abs(sizes.box.px.w - sizes.tape.px.w) < 1 && Math.abs(sizes.box.px.h - sizes.tape.px.h) < 1,
     'box ' + sizes.box.px.w + ' x ' + sizes.box.px.h + ' px, tape ' + sizes.tape.px.w + ' x ' + sizes.tape.px.h +
     ' px (centres at y ' + sizes.box.centre[1].toFixed(2) + ' / ' + sizes.tape.centre[1].toFixed(2) + ' mm)');
-  check('the tape is longer than the rings, which is fine: they are 162 mm across', sizes.tape.dims[0] > 162,
+  check('the tape is longer than the rings, which is fine: they are 80 mm across', sizes.tape.dims[0] > 80,
     sizes.tape.dims.join(' x ') + ' mm');
 
   console.log('\n=== 2. drag side/side 0 -> 90 -> 180 on the tape, camera still ===');
@@ -215,24 +216,28 @@ withApp(async (page, logs) => {
     undos.every((u, i) => Math.abs(u.lowest - 0.2) < 1e-3 && Math.abs(u.turned - (14 - i)) < 1e-6),
     undos.map(u => u.turned.toFixed(2) + '° @ ' + u.lowest.toFixed(3) + ' mm').join(', '));
 
-  console.log('\n=== 5. P1S selected: the rings scale up with the bed ===');
+  console.log('\n=== 5. P1S selected: the same rings - the bed no longer sizes them ===');
   /* Switching the plate clears its pieces (updatePlateInfo -> clearPlaced,
-     as it always has), so the tape is dropped on again. */
+     as it always has), so the tape is dropped on again. The plate picker
+     lives in the Plate drop-down now, and switching it shuts Rotate (one
+     panel on the page), which empties the rings' group - so Rotate is
+     opened again, as a user would, before the rings are measured. */
   await page.selectOption('#plate-select', 'a1');
   await page.waitForTimeout(200);
   await loadSTL(page, TAPE);
   await page.waitForTimeout(300);
+  if (!(await N(() => document.getElementById('menu-rotate').open))) await page.click('#menu-rotate > summary');
+  await page.waitForTimeout(150);
   await N(() => { selectPlaced(state.placed.length - 1); window.__d.cam(); window.__d.centre(); });
   await page.waitForTimeout(150);
   const big = await N(() => ({ bed: getCurrentPlate(), ring: window.nsoRotate.ringRadius(), px: window.__d.diam('turn') }));
-  await shot(page, '09-p1s-bed-bigger-rings');
-  check('P1S / A1 / X1C, 256 mm bed: 115.2 mm rings', big.ring === 115.2 && big.px.mm === 115.2,
-    big.ring + ' mm, ' + big.px.w + ' x ' + big.px.h + ' px at the same camera (A1 Mini: ' + sizes.tape.px.w + ' x ' + sizes.tape.px.h + ')');
-  /* within perspective: the ring's near half is nearer the camera, and a
-     bigger ring reaches nearer, so its screen width grows a little faster */
-  check('...bigger on screen in proportion, to within perspective (5%)',
-    Math.abs(big.px.w / sizes.tape.px.w / (115.2 / 81) - 1) < 0.05,
-    'ratio ' + (big.px.w / sizes.tape.px.w).toFixed(3) + ' vs ' + (115.2 / 81).toFixed(3));
+  await shot(page, '09-p1s-bed-same-rings');
+  check('P1S / A1 / X1C, 256 mm bed: the rings are drawn, and are the same 40 mm',
+    !!big.px && big.bed.w === 256 && big.ring === 40 && big.px.mm === 40,
+    big.ring + ' mm on ' + big.bed.name + (big.px ? ', ' + big.px.w + ' x ' + big.px.h + ' px' : ', no ring drawn'));
+  check('...the same size on screen as on the A1 Mini, same piece, spot and camera (to a pixel)',
+    !!big.px && Math.abs(big.px.w - sizes.tape.px.w) < 1 && Math.abs(big.px.h - sizes.tape.px.h) < 1,
+    big.px && (big.px.w + ' x ' + big.px.h + ' px vs ' + sizes.tape.px.w + ' x ' + sizes.tape.px.h));
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   if (errs.length) { console.log('\npage errors:\n' + errs.join('\n')); fails++; }
