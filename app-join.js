@@ -3898,11 +3898,12 @@ const btnFrameView = document.getElementById('btn-frame-view');
   });
   const cutMm = document.getElementById('cut-mm');
   if (cutMm) cutMm.addEventListener('change', () => setCutMm(Number(cutMm.value)));
-  // ← / →: the blade along the piece by one step each press.
+  // ← / →: the blade along the piece by 0.1 mm each press, 1 mm with Shift.
+  const nudgeStep = (ev) => (ev && ev.shiftKey ? CUT_NUDGE_SHIFT_MM : CUT_NUDGE_MM);
   const nudgeM = document.getElementById('btn-cut-nudge-m');
-  if (nudgeM) nudgeM.addEventListener('click', () => setCutMm(getCutMm() - CUT_NUDGE_MM));
+  if (nudgeM) nudgeM.addEventListener('click', (ev) => setCutMm(getCutMm() - nudgeStep(ev)));
   const nudgeP = document.getElementById('btn-cut-nudge-p');
-  if (nudgeP) nudgeP.addEventListener('click', () => setCutMm(getCutMm() + CUT_NUDGE_MM));
+  if (nudgeP) nudgeP.addEventListener('click', (ev) => setCutMm(getCutMm() + nudgeStep(ev)));
   cutWireMiterDial();
   updateAdjustUI();
   updateCutterUI();

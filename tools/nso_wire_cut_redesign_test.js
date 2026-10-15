@@ -11,7 +11,8 @@
      - The mitre wheel turns the plane's heading about the plate vertical;
        the cut is made on a copy turned into the cut frame and both halves
        are turned back, so the piece stays put and only the face is angled.
-     - The slider, ← / → and the number box move the blade along the length.
+     - The slider, ← / → and the number box move the blade along the length,
+       on a 0.1 mm grid: ← / → step 0.1 mm, 1 mm with Shift held.
      - Cut is a clean split on both engines: the halves meet exactly at the
        plane and add back to the piece; the readout shows each side's true
        length. One Undo restores the original.
@@ -27,7 +28,8 @@
      4. the mitre wheel, dragged by its handle: the face is angled by the
         dial, on the raw and the display route; each half keeps the piece's
         orientation (every other face as it was), the halves meet exactly.
-     5. the slider and ← / → move the blade; the number tracks.
+     5. the slider and ← / → move the blade in 0.1 mm steps (Shift: 1 mm);
+        the number tracks, to one decimal.
      6. Cut splits cleanly (raw and display route: lengths add back, no
         kerf, faces meet) and one Undo restores the original bit for bit.
      7. Crop works from its own card, with no blade.                        */
@@ -401,7 +403,7 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 5 */
-  console.log('\n=== 5. the slider and ← / → move the blade; the number tracks ===');
+  console.log('\n=== 5. the slider and ← / → move the blade in 0.1 mm steps; the number tracks ===');
   {
     await page.evaluate(() => __clearAll());
     const id = await loadSTL(page, stl('bar60s.stl', box(60, 12, 8)));
@@ -414,16 +416,34 @@ withApp(async (page, logs) => {
     const a = await read();
     check('the slider put the blade at 20.0 and the number says so', a.mm === 20 && a.input === '20.0' && +a.slider === 20,
       JSON.stringify({ mm: a.mm, input: a.input, slider: a.slider }));
+    const sl = await page.evaluate(() => { const s = document.getElementById('cut-slider');
+      return { step: s.step, min: +s.min, max: +s.max }; });
+    check('the slider runs the whole piece at 0.1 mm resolution',
+      sl.step === '0.1' && sl.min === 1 && sl.max === 59, JSON.stringify(sl));
+    await page.evaluate(() => { const s = document.getElementById('cut-slider'); s.value = '20.3'; s.dispatchEvent(new Event('input')); });
+    const a3 = await read();
+    check('the slider stops at 20.3: blade and number on the tenth', a3.mm === 20.3 && a3.input === '20.3' && +a3.slider === 20.3,
+      JSON.stringify({ mm: a3.mm, input: a3.input, slider: a3.slider }));
+    await page.evaluate(() => { const s = document.getElementById('cut-slider'); s.value = '20'; s.dispatchEvent(new Event('input')); });
     await page.click('#btn-cut-nudge-p');
     const b = await read();
     const step = V.len(V.sub(b.blade, a.blade));
-    check('→ moved it 1 mm along the piece; number and slider follow',
-      b.mm === 21 && b.input === '21.0' && +b.slider === 21 && Math.abs(step - 1) < 1e-4,
+    check('→ moved it 0.1 mm along the piece; number and slider follow',
+      b.mm === 20.1 && b.input === '20.1' && +b.slider === 20.1 && Math.abs(step - 0.1) < 1e-4,
       b.input + ', blade moved ' + step.toFixed(4) + ' mm');
     await page.click('#btn-cut-nudge-m');
     await page.click('#btn-cut-nudge-m');
     const c = await read();
-    check('← ← moved it back 2 mm', c.mm === 19 && c.input === '19.0', c.input);
+    check('← ← moved it back 0.2 mm', c.mm === 19.9 && c.input === '19.9', c.input);
+    await page.click('#btn-cut-nudge-p', { modifiers: ['Shift'] });
+    const e = await read();
+    const big = V.len(V.sub(e.blade, c.blade));
+    check('Shift-→ moved it 1.0 mm', e.mm === 20.9 && e.input === '20.9' && +e.slider === 20.9 && Math.abs(big - 1) < 1e-4,
+      e.input + ', blade moved ' + big.toFixed(4) + ' mm');
+    await page.click('#btn-cut-nudge-m', { modifiers: ['Shift'] });
+    await page.click('#btn-cut-nudge-m', { modifiers: ['Shift'] });
+    const f = await read();
+    check('Shift-← Shift-← moved it back 2.0 mm', f.mm === 18.9 && f.input === '18.9', f.input);
     await page.fill('#cut-mm', '33.3');
     await page.dispatchEvent('#cut-mm', 'change');
     const d = await read();

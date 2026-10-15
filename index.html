@@ -477,9 +477,9 @@
               </div>
               <input type="range" id="cut-slider" min="1" max="99" step="0.1" value="50" aria-label="Blade position along the piece, mm" />
               <div class="edit-row cut-mm-row">
-              <button id="btn-cut-nudge-m" class="btn btn-secondary" type="button" aria-label="Blade 1 mm toward the low end" title="1 mm toward the low end">←</button>
+              <button id="btn-cut-nudge-m" class="btn btn-secondary" type="button" aria-label="Blade 0.1 mm toward the low end" title="0.1 mm toward the low end (Shift: 1 mm)">←</button>
               <input type="number" id="cut-mm" class="cut-no-spin" value="50" min="0.5" max="400" step="0.1" aria-label="Blade position, mm from the low end" />
-              <button id="btn-cut-nudge-p" class="btn btn-secondary" type="button" aria-label="Blade 1 mm toward the high end" title="1 mm toward the high end">→</button>
+              <button id="btn-cut-nudge-p" class="btn btn-secondary" type="button" aria-label="Blade 0.1 mm toward the high end" title="0.1 mm toward the high end (Shift: 1 mm)">→</button>
               </div>
               <p id="cut-readout" class="cut-readout">—</p>
               <button id="btn-cut" class="btn btn-cut" type="button"
@@ -884,7 +884,7 @@
             </div>
             <div class="vp-row vp-row-brush">
               <span class="vp-brush-tag">Size</span>
-              <input type="range" id="inp-brush-size" min="5" max="50" step="1" value="12" aria-label="Brush radius mm">
+              <input type="range" id="inp-brush-size" min="1" max="50" step="1" value="12" aria-label="Brush radius mm">
               <output id="out-brush-size" class="vp-brush-out">12 mm</output>
             </div>
             <div class="vp-row vp-row-brush">
@@ -1370,7 +1370,7 @@
 
 
 
-  <script src="app-cut.js?v=holes1"></script>
+  <script src="app-cut.js?v=finestep1"></script>
   <script src="app-finish.js?v=holes1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
   <script src="app-extend.js?v=scale1"></script>
@@ -1410,7 +1410,7 @@
   <script src="app-stock.js?v=stock3"></script>
   <script src="app-assemble.js?v=asm2"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
-  <script src="app-join.js?v=cutcard2"></script>
+  <script src="app-join.js?v=finestep1"></script>
   <script src="app-center-lock.js?v=clock2"></script>
   <script src="app-oversize-washer.js?v=oversize2"></script>
   <script src="app-join-triple.js?v=triple1"></script>

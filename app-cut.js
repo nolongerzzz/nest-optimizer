@@ -134,8 +134,9 @@ function resolveAxis(model) {
 // end, the readout's resolution, so the number shown is the plane cut.
 // (Headless checks load this file without app-core.js; 1 mm is its value.)
 const CUT_END_MM = (typeof MIN_CUT_SIDE_MM !== 'undefined') ? MIN_CUT_SIDE_MM : 1;
-// What the ← / → buttons step the blade by.
-const CUT_NUDGE_MM = 1;
+// What the ← / → buttons step the blade by: one grid step, or 1 mm with Shift.
+const CUT_NUDGE_MM = 0.1;
+const CUT_NUDGE_SHIFT_MM = 1;
 
 function cutMeshOf(m) {
   const placed = (state.placed || []).find(function (p) { return p && p.sourceId === m.id && p.mesh; });

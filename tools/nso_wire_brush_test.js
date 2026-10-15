@@ -119,7 +119,7 @@ withApp(async (page, logs) => {
   check('#btn-brush present', ui.button, ui.label ? 'label "' + ui.label + '"' : 'missing');
   check('three modes on the toggle', JSON.stringify(ui.modes) === '["carve","emboss","smooth"]',
         JSON.stringify(ui.modes));
-  check('size slider is 5-50mm', ui.size && ui.size.type === 'range' && ui.size.min === '5' && ui.size.max === '50',
+  check('size slider is 1-50mm', ui.size && ui.size.type === 'range' && ui.size.min === '1' && ui.size.max === '50',
         JSON.stringify(ui.size));
   check('one intensity slider, 0-1', ui.force && ui.force.type === 'range' && ui.force.min === '0' && ui.force.max === '1',
         JSON.stringify(ui.force));
