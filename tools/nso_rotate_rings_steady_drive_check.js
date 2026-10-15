@@ -186,9 +186,9 @@ withApp(async (page, logs) => {
     const r = state.renderer.domElement.getBoundingClientRect();
     const t = g.children.find(c => c.userData.nsoRotateTicks === 'turn');
     t.updateMatrixWorld(true);
-    const pos = t.geometry.attributes.position, v = new THREE.Vector3(), out = [];
-    for (let i = 0; i < pos.count; i += 2) {                  // each tick's inner end
-      v.fromBufferAttribute(pos, i).applyMatrix4(t.matrixWorld).project(state.camera);
+    const e = t.userData.nsoTickEnds, v = new THREE.Vector3(), out = [];
+    for (let i = 0; i < e.length; i += 6) {                   // each tick's inner end
+      v.set(e[i], e[i + 1], e[i + 2]).applyMatrix4(t.matrixWorld).project(state.camera);
       out.push({ x: +((v.x * .5 + .5) * r.width).toFixed(1), y: +((-v.y * .5 + .5) * r.height).toFixed(1),
                  onScreen: Math.abs(v.x) < 1 && Math.abs(v.y) < 1 });
     }
@@ -219,7 +219,7 @@ withApp(async (page, logs) => {
     const p = window.__d.p(); p.mesh.updateMatrixWorld(true);
     const ax = new THREE.Vector3(1, 0, 0).applyQuaternion(p.mesh.quaternion).projectOnPlane(new THREE.Vector3(0, 1, 0)).normalize();
     const g = state.scene.getObjectByName('nso-rotate-handles');
-    const t = g.children.find(c => c.userData.nsoRotateTicks === 'turn').geometry.attributes.position.array;
+    const t = g.children.find(c => c.userData.nsoRotateTicks === 'turn').userData.nsoTickEnds;
     const k = (90 / 5) * 6;                                // the 90 tick's first point
     const tick = new THREE.Vector3(t[k], t[k + 1], t[k + 2]).normalize();
     /* drawn for the screenshot only: the box's long axis, out to the tick */

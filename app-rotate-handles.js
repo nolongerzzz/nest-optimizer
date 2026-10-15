@@ -610,9 +610,12 @@
     hold.timer = setTimeout(seat, RUN_MS);
   }
 
-  /* Three quarters of the 14.58 mm (0.18 x 81) they were on the A1 Mini's
-     bed-sized rings: 10.9 mm, kept as a fraction of the fixed radius. */
-  var ARROW_FRACTION = 0.75 * 0.18 * 81 / RING_RADIUS_MM;
+  /* Slim darts riding the rail, not cones sat on it: 7.5 mm long and 3.6 mm
+     across the base (the old ones were 14.58 x 13.1 mm), kept as a fraction
+     of the fixed radius. The grab target stays wider than the dart (HIT). */
+  var ARROW_FRACTION = 7.5 / RING_RADIUS_MM;
+  var ARROW_BASE = 0.24;        // base radius, x length
+  var ARROW_HIT = 0.8;          // grab sphere radius, x length: the pair's spheres just touch
   function arrowSize(r) { return r * ARROW_FRACTION; }
   /* The two arrowheads sit either side of arrowAt[ring], a little apart,
      pointing away from each other along the ring. */
@@ -642,8 +645,8 @@
      weight, so the grab point never goes soft. Colours never change - the one
      white is the snap's flash. Release, and refresh draws rest weight again. */
   var WEIGHT = {
-    rest:     { tube: 1,   ring: 0.7,  arrow: 0.95, ticks: 0.4  },
-    active:   { tube: 0.6, ring: 0.35, arrow: 0.35, ticks: 0.2  },
+    rest:     { tube: 1,   ring: 0.7,  arrow: 0.95, ticks: 0.85 },
+    active:   { tube: 0.6, ring: 0.35, arrow: 0.35, ticks: 0.35 },
     inactive: { tube: 1,   ring: 0.12, arrow: 0.12, ticks: 0.06 }
   };
   /* A press is not yet a drag: a click on an arrowhead leaves the rails at
@@ -667,26 +670,45 @@
      angle. All of it is in the ring's own frame (the same e1, e2 the snap
      measures in), so it turns with nothing: it is the fixed scale the piece
      turns against, and a snapped quarter turn puts the piece's measured axis
-     exactly on a long tick. Ticks are one line-segment set per ring, one
-     draw call. */
+     exactly on a long tick.
+
+     Each tick is a solid square bar, not a line: WebGL draws lines one pixel
+     wide whatever is asked, which left the scale a faint fuzz behind the
+     rail. The bars are as thick as a good part of the rail and drawn at
+     least as solid, so the scale reads with it. All of a ring's bars are one
+     mesh, one draw call; userData.nsoTickEnds keeps each tick's inner and
+     outer point for the checks. */
   var TICK_STEP_DEG = 5;
-  var TICK_LEN = { 5: 0.04, 15: 0.08, 90: 0.14 };   // x radius
+  var TICK_LEN = { 5: 0.05, 15: 0.09, 90: 0.15 };      // x radius
+  var TICK_WIDTH = { 5: 0.45, 15: 0.6, 90: 0.8 };      // mm, square section
   function tickClass(deg) { return deg % 90 === 0 ? 90 : deg % 15 === 0 ? 15 : 5; }
   function noRaycast() {}
 
   function addTicks(g, ring, F, r, w) {
-    var R = RINGS[ring], e1 = F.e1, e2 = F.e2, pts = [];
-    var r0 = r + restTube(r);
+    var R = RINGS[ring], e1 = F.e1, e2 = F.e2, A = F.A, ends = [], pos = [];
+    var r0 = r + restTube(r), m = new THREE.Matrix4(), v = new THREE.Vector3();
     for (var d = 0; d < 360; d += TICK_STEP_DEG) {
-      var t = d * RAD, dir = e1.clone().multiplyScalar(Math.cos(t)).add(e2.clone().multiplyScalar(Math.sin(t)));
-      pts.push(dir.clone().multiplyScalar(r0), dir.clone().multiplyScalar(r0 + TICK_LEN[tickClass(d)] * r));
+      var t = d * RAD, k = tickClass(d), len = TICK_LEN[k] * r, wd = TICK_WIDTH[k];
+      var u = e1.clone().multiplyScalar(Math.cos(t)).add(e2.clone().multiplyScalar(Math.sin(t)));
+      var tan = A.clone().cross(u);
+      ends.push(u.x * r0, u.y * r0, u.z * r0, u.x * (r0 + len), u.y * (r0 + len), u.z * (r0 + len));
+      /* the bar: length along u, its square section across tan and A */
+      m.makeBasis(u, tan, A).setPosition(u.clone().multiplyScalar(r0 + len / 2));
+      var box = new THREE.BoxGeometry(len, wd, wd).toNonIndexed(), bp = box.attributes.position;
+      for (var i = 0; i < bp.count; i++) {
+        v.fromBufferAttribute(bp, i).applyMatrix4(m);
+        pos.push(v.x, v.y, v.z);
+      }
+      box.dispose();
     }
-    var l = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts),
-      new THREE.LineBasicMaterial({ color: R.color, depthTest: false, depthWrite: false,
-                                    transparent: true, opacity: w.ticks }));
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    var l = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: R.color, depthTest: false,
+      depthWrite: false, transparent: true, opacity: w.ticks }));
     l.renderOrder = 999;
     l.raycast = noRaycast;
     l.userData.nsoRotateTicks = ring;
+    l.userData.nsoTickEnds = ends;
     g.add(l);
   }
 
@@ -712,7 +734,7 @@
       var handle = { ring: ring, dir: dir };
       /* the arrowhead under the pointer keeps full weight through a drag */
       var held = dragging() && drag.ring === ring && drag.dir === dir;
-      var cone = new THREE.Mesh(new THREE.ConeGeometry(h * 0.45, h, 18),
+      var cone = new THREE.Mesh(new THREE.ConeGeometry(h * ARROW_BASE, h, 18),
         new THREE.MeshBasicMaterial({ color: held ? RINGS[ring].color : col.c, depthTest: false,
                                       depthWrite: false, transparent: true,
                                       opacity: held ? 1 : (col.c === 0xffffff ? 1 : w.arrow) }));
@@ -723,7 +745,7 @@
       g.add(cone);
       /* A grab target a little bigger than the cone, drawn as nothing. The
          raycaster still finds it: it tests the geometry, not the material. */
-      var hit = new THREE.Mesh(new THREE.SphereGeometry(h * 0.7, 10, 8),
+      var hit = new THREE.Mesh(new THREE.SphereGeometry(h * ARROW_HIT, 10, 8),
         new THREE.MeshBasicMaterial({ visible: false }));
       hit.position.copy(pos);
       hit.userData.nsoRotateHandle = handle;
@@ -893,7 +915,8 @@
     constants: { STEP_DEG: STEP_DEG, SNAP_STEP_DEG: SNAP_STEP_DEG,
                  SNAP_WITHIN_DEG: SNAP_WITHIN_DEG, CLICK_SLOP_PX: CLICK_SLOP_PX,
                  RING_RADIUS_MM: RING_RADIUS_MM, ARROW_FRACTION: ARROW_FRACTION,
-                 RUN_MS: RUN_MS, TICK_STEP_DEG: TICK_STEP_DEG, TICK_LEN: TICK_LEN,
+                 ARROW_BASE: ARROW_BASE, ARROW_HIT: ARROW_HIT,
+                 RUN_MS: RUN_MS, TICK_STEP_DEG: TICK_STEP_DEG, TICK_LEN: TICK_LEN, TICK_WIDTH: TICK_WIDTH,
                  LOCAL: { fb: RINGS.fb.local, ss: RINGS.ss.local } }
   };
 

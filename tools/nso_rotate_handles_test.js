@@ -34,12 +34,12 @@
   11. THE RING BODY is the track, not a handle.
   12. EXPORT writes what the screen shows, leaned and turned.
   13. THE RADIUS is one fixed size for every piece and every bed - just
-      enough to enclose library/box_closed.stl - with arrowheads 3/4 of
-      the old 14.58 mm.
+      enough to enclose library/box_closed.stl - with slim 7.5 mm
+      arrowheads.
   14. DRAGGING quiets the rails; release restores them.
-  15. DEGREE MARKERS - a tick every 5, longer every 15, longest on the
-      quarters, no numbers - are fixed in the ring's frame; the snap lands
-      on one.
+  15. DEGREE MARKERS - a solid bar every 5, longer every 15, longest on
+      the quarters, no numbers, as solid as the rail - are fixed in the
+      ring's frame; the snap lands on one.
   16. THE LEANS are the piece's own axes: turned 45 and leaned side/side
       30, a bar rises end-over-end with no twist, in the drawn ring's plane;
       front/back from there is a roll about its length.
@@ -735,6 +735,12 @@ withApp(async (page, logs) => {
         const c = g.children.find(k => k.userData.nsoRotateHandle && k.material.visible);
         return c.geometry.parameters.height;
       };
+      const arrowBase = () => {
+        const g = state.scene.getObjectByName('nso-rotate-handles');
+        const c = g.children.find(k => k.userData.nsoRotateHandle && k.material.visible);
+        const h = g.children.find(k => k.userData.nsoRotateHandle && !k.material.visible);
+        return { base: c.geometry.parameters.radius, hit: h.geometry.parameters.radius };
+      };
       [0, n - 3, n - 2, n - 1].forEach(idx => {
         selectPlaced(idx);
         const p = state.placed[idx];
@@ -743,7 +749,7 @@ withApp(async (page, logs) => {
         a.refresh();
         const geo = p.mesh.geometry;
         if (!geo.boundingSphere) geo.computeBoundingSphere();
-        const before = { r: a.ringRadius(), torus: torus(), tube: tube(), arrow: arrowH(),
+        const before = { r: a.ringRadius(), torus: torus(), tube: tube(), arrow: arrowH(), dart: arrowBase(),
                          sphere: geo.boundingSphere.radius,
                          size: [p.width, p.depth, p.height].map(v => +v.toFixed(1)) };
         const after = {};
@@ -770,8 +776,12 @@ withApp(async (page, logs) => {
     check('every piece, large or small, gets the same rings',
       r.pieces.every(pc => pc.before.r === r.pieces[0].before.r && pc.before.arrow === r.pieces[0].before.arrow),
       r.pieces.map(pc => pc.before.r.toFixed(1)).join(' / '));
-    check('the arrowheads are 3/4 of the old 14.58 mm (0.18 x 81)', near(r.pieces[0].before.arrow, 0.75 * 0.18 * 81, 1e-9),
-      r.pieces[0].before.arrow.toFixed(3) + ' mm');
+    const d0 = r.pieces[0].before;
+    check('the arrowheads are slim darts: 7.5 mm long, under 4 mm across the base',
+      near(d0.arrow, 7.5, 1e-9) && 2 * d0.dart.base < 4,
+      d0.arrow.toFixed(2) + ' x ' + (2 * d0.dart.base).toFixed(2) + ' mm (were 14.58 x 13.12)');
+    check('...with a grab target wider than the dart', d0.dart.hit > 2 * d0.dart.base,
+      'grab sphere ' + d0.dart.hit.toFixed(2) + ' mm in radius');
     const bc = r.pieces.find(pc => /box_closed/.test(pc.name));
     check('box_closed.stl fits inside: its bounding sphere clears the tube\'s inner edge',
       !!bc && bc.before.sphere < want - bc.before.tube,
@@ -845,8 +855,12 @@ withApp(async (page, logs) => {
         ['turn', 'fb', 'ss'].forEach(k => {
           const ticks = g.children.filter(c => c.userData.nsoRotateTicks === k);
           const ring = g.children.find(c => c.userData.nsoRotateRing === k);
-          const pts = ticks[0] ? Array.from(ticks[0].geometry.attributes.position.array) : [];
-          out[k] = { tickSets: ticks.length, isSegments: !!(ticks[0] && ticks[0].isLineSegments),
+          const pts = ticks[0] ? ticks[0].userData.nsoTickEnds.slice() : [];
+          const gp = ticks[0] && ticks[0].geometry.attributes.position;
+          let span = 0;                                 // farthest bar vertex from the centre
+          if (gp) for (let i = 0; i < gp.count; i++) span = Math.max(span, Math.hypot(gp.getX(i), gp.getY(i), gp.getZ(i)));
+          out[k] = { tickSets: ticks.length, isMesh: !!(ticks[0] && ticks[0].isMesh),
+                     verts: gp ? gp.count : 0, span,
                      pts, r: ring.geometry.parameters.radius, tube: ring.geometry.parameters.tube,
                      ringO: ring.material.opacity, tickO: ticks[0] && ticks[0].material.opacity,
                      sprites: g.children.filter(c => c.isSprite).length };
@@ -890,7 +904,8 @@ withApp(async (page, logs) => {
     const K = t.K;
     for (const k of ['turn', 'fb', 'ss']) {
       const b = t.before[k];
-      check(k + ': ticks are ONE line-segment set (one draw call)', b.tickSets === 1 && b.isSegments);
+      check(k + ': ticks are ONE mesh of solid bars (one draw call)', b.tickSets === 1 && b.isMesh &&
+        b.verts === 72 * 36, b.verts + ' vertices = ' + b.verts / 36 + ' boxes');
       check(k + ': a tick every 5° - 72 of them', b.pts.length === 72 * 2 * 3, b.pts.length / 6 + ' ticks');
       const lens = [];
       for (let i = 0; i < 72; i++) {
@@ -904,6 +919,12 @@ withApp(async (page, logs) => {
         K.TICK_LEN[5] < K.TICK_LEN[15] && K.TICK_LEN[15] < K.TICK_LEN[90],
         [0, 5, 15, 45, 90].map(d => d + '°:' + lens[d / 5].len.toFixed(2) + 'mm').join(' '));
       check(k + ': on the ring\'s outer edge', lens.every(l => near(l.r0, b.r + b.tube, 1e-4)));
+      check(k + ': the bars reach out to the longest tick\'s end - the mesh is the scale it says',
+        b.span > b.r + b.tube + K.TICK_LEN[90] * b.r - 1e-3 &&
+        b.span < Math.hypot(b.r + b.tube + K.TICK_LEN[90] * b.r, K.TICK_WIDTH[90]) + 1e-3, b.span.toFixed(3) + ' mm');
+      check(k + ': solid bars, thicker on the longer ticks', K.TICK_WIDTH[5] >= 0.4 &&
+        K.TICK_WIDTH[5] < K.TICK_WIDTH[15] && K.TICK_WIDTH[15] < K.TICK_WIDTH[90],
+        [5, 15, 90].map(c => c + '°: ' + K.TICK_WIDTH[c] + ' mm').join(', '));
       const diff = (x, y) => x.length === y.length ? Math.max(...x.map((v, i) => Math.abs(v - y[i]))) : Infinity;
       check(k + ': fixed in the ring\'s frame - a 37° turn on it moves the piece, not its scale',
         diff(t.own[k].pts, b.pts) < 1e-4, 'max move ' + diff(t.own[k].pts, b.pts).toExponential(1) + ' mm');
@@ -912,7 +933,7 @@ withApp(async (page, logs) => {
       else check(k + ': a Turn of 37° carries this lean ring\'s scale round with the piece',
         diff(t.after.riding[k].got, t.after.riding[k].want) < 1e-4,
         'max off ' + diff(t.after.riding[k].got, t.after.riding[k].want).toExponential(1) + ' mm');
-      check(k + ': lighter than the ring at rest', b.tickO < b.ringO, b.tickO + ' vs ' + b.ringO);
+      check(k + ': at least as solid as the ring at rest', b.tickO >= b.ringO, b.tickO + ' vs ' + b.ringO);
       check(k + ': no 0 / 90 / 180 / 270 labels - the readout follows the cursor', b.sprites === 0,
         b.sprites + ' sprite(s) in the group');
     }
