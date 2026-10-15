@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/* Rotate rings - steady radius, quieter rails, degree markers: the ticket's
+/* Rotate rings - steady radius, quieter rails, a 5° scale: the ticket's
    drive-check, in the real app, with screenshots.
 
    node tools/nso_rotate_rings_steady_drive_check.js [outDir]     exit 0 = every step held
@@ -176,31 +176,34 @@ withApp(async (page, logs) => {
     ['turn', 'fb', 'ss'].every(k => rest[k].opacity === rest.turn.opacity && rest[k].tube === rest.turn.tube) &&
     rest.turn.tube > midState.turn.tube);
 
-  console.log('\n=== 4. at rest: ticks and the four labels, at the default zoom and after an orbit ===');
+  console.log('\n=== 4. at rest: the 5° scale, no numbers, at the default zoom and after an orbit ===');
   await page.click('#chk-rot-ring-fb');
   await page.click('#chk-rot-ring-ss');
   await page.waitForTimeout(120);
-  await shot(page, '07-turn-ring-ticks-labels-default-zoom');
-  const lab = async () => N(() => {
+  await shot(page, '07-turn-ring-ticks-default-zoom');
+  const scale = async () => N(() => {
     const g = state.scene.getObjectByName('nso-rotate-handles');
     const r = state.renderer.domElement.getBoundingClientRect();
-    return g.children.filter(c => c.userData.nsoRotateLabel && c.userData.nsoRotateLabel.ring === 'turn').map(s => {
-      const v = s.getWorldPosition(new THREE.Vector3()).project(state.camera);
-      return { deg: s.userData.nsoRotateLabel.deg, sprite: !!s.isSprite,
-               x: +((v.x * .5 + .5) * r.width).toFixed(1), y: +((-v.y * .5 + .5) * r.height).toFixed(1),
-               onScreen: Math.abs(v.x) < 1 && Math.abs(v.y) < 1 };
-    });
+    const t = g.children.find(c => c.userData.nsoRotateTicks === 'turn');
+    t.updateMatrixWorld(true);
+    const pos = t.geometry.attributes.position, v = new THREE.Vector3(), out = [];
+    for (let i = 0; i < pos.count; i += 2) {                  // each tick's inner end
+      v.fromBufferAttribute(pos, i).applyMatrix4(t.matrixWorld).project(state.camera);
+      out.push({ x: +((v.x * .5 + .5) * r.width).toFixed(1), y: +((-v.y * .5 + .5) * r.height).toFixed(1),
+                 onScreen: Math.abs(v.x) < 1 && Math.abs(v.y) < 1 });
+    }
+    return { ticks: out, sprites: g.children.filter(c => c.isSprite).length };
   });
-  const L0 = await lab();
-  check('four Turn labels, all on screen at the default zoom', L0.length === 4 && L0.every(l => l.onScreen),
-    L0.map(l => l.deg + '@(' + l.x + ',' + l.y + ')').join(' '));
+  const S0 = await scale();
+  check('72 Turn ticks - one every 5° - all on screen at the default zoom',
+    S0.ticks.length === 72 && S0.ticks.every(l => l.onScreen), S0.ticks.length + ' ticks');
+  check('no 0 / 90 / 180 / 270 labels round the ring', S0.sprites === 0, S0.sprites + ' sprite(s)');
   await N(() => window.__d.cam(-170, 120, -150));
-  const L1 = await lab();
-  await shot(page, '08-turn-ring-labels-after-orbit');
-  check('after an orbit they are still sprites - camera-facing by construction - and on screen',
-    L1.every(l => l.sprite && l.onScreen), L1.map(l => l.deg + '@(' + l.x + ',' + l.y + ')').join(' '));
+  const S1 = await scale();
+  await shot(page, '08-turn-ring-ticks-after-orbit');
+  check('after an orbit the ticks are still all on screen', S1.ticks.every(l => l.onScreen));
   check('...and they moved on screen with the orbit, i.e. they stay where the scale is',
-    L1.some((l, i) => Math.hypot(l.x - L0[i].x, l.y - L0[i].y) > 20));
+    S1.ticks.some((l, i) => Math.hypot(l.x - S0.ticks[i].x, l.y - S0.ticks[i].y) > 20));
 
   console.log('\n=== 5. the hard snap at 90° lands on the 90 tick ===');
   await N(() => { const p = window.__d.p(); p.rotY = 0; p.tiltX = 0; p.tiltZ = 0; applyMeshRotation(p); });
@@ -217,7 +220,7 @@ withApp(async (page, logs) => {
     const ax = new THREE.Vector3(1, 0, 0).applyQuaternion(p.mesh.quaternion).projectOnPlane(new THREE.Vector3(0, 1, 0)).normalize();
     const g = state.scene.getObjectByName('nso-rotate-handles');
     const t = g.children.find(c => c.userData.nsoRotateTicks === 'turn').geometry.attributes.position.array;
-    const k = (90 / 15) * 6;                               // the 90 tick's first point
+    const k = (90 / 5) * 6;                                // the 90 tick's first point
     const tick = new THREE.Vector3(t[k], t[k + 1], t[k + 2]).normalize();
     /* drawn for the screenshot only: the box's long axis, out to the tick */
     const r = window.nsoRotate.ringRadius() * 1.12;

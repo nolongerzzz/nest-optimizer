@@ -522,33 +522,22 @@
   function clearGroup(g) {
     while (g.children.length) {
       var c = g.children.pop();
-      /* A sprite's geometry is THREE's one shared quad, and its texture is
-         cached in labelTexture - only its material is its own. */
-      if (c.geometry && !c.isSprite) c.geometry.dispose();
+      if (c.geometry) c.geometry.dispose();
       if (c.material) c.material.dispose();
     }
   }
 
   /* ---- the radius --------------------------------------------------------
-     One size for the machine, not one per piece: 45% of the bed's shorter
-     side, read from the plate the app is set to (getCurrentPlate - the
-     PLATES preset or the custom size), so an A1 Mini's rings are 81 mm in
-     radius - a 162 mm ring inside its 180 mm bed - and a 256 mm bed's 115.2.
-     Sized off the piece, a long bar got rings wider than the bed and a small
-     part tiny ones, and every bake re-sized them. A piece bigger than the
-     rings is fine - the arrowheads are the handles, not the ring body - and
-     a small one sits inside rings it can be seen through. Ticks, labels'
-     offset, the tube and the arrowheads are all fractions of this radius. */
-  var RING_BED_FRACTION = 0.45, RING_FALLBACK_MM = 81;
-  function bedShortSide() {
-    var pl = (typeof getCurrentPlate === 'function') ? getCurrentPlate() : null;
-    var w = pl && Number(pl.w), d = pl && Number(pl.d);
-    return (w > 0 && d > 0) ? Math.min(w, d) : 0;
-  }
-  function ringRadius() {
-    var b = bedShortSide();
-    return b ? b * RING_BED_FRACTION : RING_FALLBACK_MM;
-  }
+     One size, full stop: not one per piece, and no longer one per bed (45%
+     of the bed's shorter side made an A1 Mini's rings 81 mm and a 256 mm
+     bed's 115 - big hoops round small parts). 40 mm is just enough to
+     enclose library/box_closed.stl: a 60 x 40 x 27.3 mm box, so its
+     bounding sphere - the sphere the rings are centred on - is 38.55 mm in
+     radius, and the tube's inner edge (40 - 0.64) clears it in every pose.
+     A piece bigger than the rings is fine - the arrowheads are the handles,
+     not the ring body. Ticks and the tube are fractions of this radius. */
+  var RING_RADIUS_MM = 40;
+  function ringRadius() { return RING_RADIUS_MM; }
 
   /* ---- the pivot -----------------------------------------------------------
      A turn is about the centre of the piece's bounding sphere - the centre
@@ -621,10 +610,10 @@
     hold.timer = setTimeout(seat, RUN_MS);
   }
 
-  /* About the 14 mm they were on #141's rings, which were 66 mm in radius on
-     the drive-check's box - now a straight fraction of the radius, so a
-     bigger bed's rings carry bigger arrowheads. */
-  function arrowSize(r) { return r * 0.18; }
+  /* Three quarters of the 14.58 mm (0.18 x 81) they were on the A1 Mini's
+     bed-sized rings: 10.9 mm, kept as a fraction of the fixed radius. */
+  var ARROW_FRACTION = 0.75 * 0.18 * 81 / RING_RADIUS_MM;
+  function arrowSize(r) { return r * ARROW_FRACTION; }
   /* The two arrowheads sit either side of arrowAt[ring], a little apart,
      pointing away from each other along the ring. */
   function arrowGap(r) { return arrowSize(r) * 0.8 / r; }
@@ -653,9 +642,9 @@
      weight, so the grab point never goes soft. Colours never change - the one
      white is the snap's flash. Release, and refresh draws rest weight again. */
   var WEIGHT = {
-    rest:     { tube: 1,   ring: 0.7,  arrow: 0.95, ticks: 0.4,  label: 0.9 },
-    active:   { tube: 0.6, ring: 0.35, arrow: 0.35, ticks: 0.2,  label: 0.45 },
-    inactive: { tube: 1,   ring: 0.12, arrow: 0.12, ticks: 0.06, label: 0.12 }
+    rest:     { tube: 1,   ring: 0.7,  arrow: 0.95, ticks: 0.4  },
+    active:   { tube: 0.6, ring: 0.35, arrow: 0.35, ticks: 0.2  },
+    inactive: { tube: 1,   ring: 0.12, arrow: 0.12, ticks: 0.06 }
   };
   /* A press is not yet a drag: a click on an arrowhead leaves the rails at
      rest weight, and they go quiet only once the pointer has really moved. */
@@ -673,22 +662,22 @@
   }
 
   /* ---- the scale ---------------------------------------------------------
-     Ticks on the ring's outer edge - short every 15, longer every 45, longest
-     on the quarters - and 0 / 90 / 180 / 270 beside the quarters. All of it
-     is in the ring's own frame (the same e1, e2 the snap measures in), so it
-     turns with nothing: it is the fixed scale the piece turns against, and a
-     snapped quarter turn puts the piece's measured axis exactly on a
-     labelled tick. Ticks are one line-segment set per ring, one draw call. */
-  var TICK_LEN = { 15: 0.045, 45: 0.08, 90: 0.12 };   // x radius
-  function tickClass(deg) { return deg % 90 === 0 ? 90 : deg % 45 === 0 ? 45 : 15; }
-  function tickOuter(r) { return r + restTube(r) + TICK_LEN[90] * r; }
-  function labelRadius(r) { return tickOuter(r) + 0.09 * r; }
+     Ticks on the ring's outer edge - short every 5, longer every 15, longest
+     on the quarters. No numbers: the readout beside the pointer says the
+     angle. All of it is in the ring's own frame (the same e1, e2 the snap
+     measures in), so it turns with nothing: it is the fixed scale the piece
+     turns against, and a snapped quarter turn puts the piece's measured axis
+     exactly on a long tick. Ticks are one line-segment set per ring, one
+     draw call. */
+  var TICK_STEP_DEG = 5;
+  var TICK_LEN = { 5: 0.04, 15: 0.08, 90: 0.14 };   // x radius
+  function tickClass(deg) { return deg % 90 === 0 ? 90 : deg % 15 === 0 ? 15 : 5; }
   function noRaycast() {}
 
   function addTicks(g, ring, F, r, w) {
     var R = RINGS[ring], e1 = F.e1, e2 = F.e2, pts = [];
     var r0 = r + restTube(r);
-    for (var d = 0; d < 360; d += 15) {
+    for (var d = 0; d < 360; d += TICK_STEP_DEG) {
       var t = d * RAD, dir = e1.clone().multiplyScalar(Math.cos(t)).add(e2.clone().multiplyScalar(Math.sin(t)));
       pts.push(dir.clone().multiplyScalar(r0), dir.clone().multiplyScalar(r0 + TICK_LEN[tickClass(d)] * r));
     }
@@ -699,50 +688,6 @@
     l.raycast = noRaycast;
     l.userData.nsoRotateTicks = ring;
     g.add(l);
-  }
-
-  /* The four labels: sprites, so they always face the camera, and sized in
-     SCREEN terms (sizeAttenuation off) so they read the same at any zoom.
-     One canvas texture per ring and label, made once and kept. */
-  var LABEL_PX = 0.032;          // label height as a fraction of the view's height, roughly
-  var labelTextures = {};
-  function labelTexture(ring, text) {
-    var key = ring + ':' + text;
-    if (labelTextures[key]) return labelTextures[key];
-    var cv = document.createElement('canvas');
-    cv.width = 128; cv.height = 64;
-    var x = cv.getContext('2d');
-    x.font = '700 44px system-ui, sans-serif';
-    x.textAlign = 'center'; x.textBaseline = 'middle';
-    x.lineWidth = 8; x.strokeStyle = 'rgba(10, 16, 30, 0.9)';
-    x.strokeText(text, 64, 34);
-    x.fillStyle = RINGS[ring].css;
-    x.fillText(text, 64, 34);
-    var tex = new THREE.CanvasTexture(cv);
-    tex.minFilter = THREE.LinearFilter;
-    return (labelTextures[key] = tex);
-  }
-  /* Each label sits a few degrees past its tick, along its own ring. The
-     three rings cross on the plate's axes, so every quarter of one ring is
-     the same point as a quarter of another - Turn's 0 and Lean front/back's
-     90 are both straight out along Z. Centred on the tick, two labels print
-     on top of each other; nudged along their own rings, whose tangents differ
-     there, they part. */
-  var LABEL_SHIFT_DEG = 9;
-  function addLabels(g, ring, F, r, w) {
-    var e1 = F.e1, e2 = F.e2, lr = labelRadius(r);
-    [0, 90, 180, 270].forEach(function (d) {
-      var t = (d + LABEL_SHIFT_DEG) * RAD;
-      var sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(ring, String(d)),
-        depthTest: false, depthWrite: false, transparent: true, opacity: w.label,
-        sizeAttenuation: false }));
-      sp.position.copy(e1.clone().multiplyScalar(Math.cos(t) * lr).add(e2.clone().multiplyScalar(Math.sin(t) * lr)));
-      sp.scale.set(LABEL_PX * 2, LABEL_PX, 1);
-      sp.renderOrder = 1001;
-      sp.raycast = noRaycast;
-      sp.userData.nsoRotateLabel = { ring: ring, deg: d };
-      g.add(sp);
-    });
   }
 
   function addRing(g, ring, F, r) {
@@ -758,7 +703,6 @@
     m.userData.nsoRotateRing = ring;          // the track: drawn, never a handle
     g.add(m);
     addTicks(g, ring, F, r, w);
-    addLabels(g, ring, F, r, w);
 
     var t = arrowAt[ring], h = arrowSize(r), gap = arrowGap(r);
     [1, -1].forEach(function (dir) {
@@ -852,13 +796,6 @@
       document._rotKeysBound = true;
       document.addEventListener('keydown', onKeyDown);
     }
-    /* A different machine is a different ring size: redraw once app-core
-       has switched the plate (its own change handler runs first). */
-    var plateSel = document.getElementById('plate-select');
-    if (plateSel && !plateSel._rotBound) {
-      plateSel._rotBound = true;
-      plateSel.addEventListener('change', function () { setTimeout(refresh, 0); });
-    }
     /* Losing the menu ends any drag in flight before the rings go - endDrag
        gives OrbitControls back - and puts the ring choice back to Turn only,
        which is what makes the next opening start fresh. */
@@ -939,7 +876,7 @@
         return c.userData.nsoRotateHandle && c.material && c.material.visible;
       }).length : 0;
     },
-    /* The ring radius: 45% of the bed's shorter side, the same for every piece. */
+    /* The ring radius: RING_RADIUS_MM, the same for every piece and bed. */
     ringRadius: function () { return ringRadius(); },
     /* The piece a turn is holding on its pivot (unseated) right now, or null -
        nso-watch asks, so a turn in hand is not reported as a piece off its bed. */
@@ -955,8 +892,8 @@
     },
     constants: { STEP_DEG: STEP_DEG, SNAP_STEP_DEG: SNAP_STEP_DEG,
                  SNAP_WITHIN_DEG: SNAP_WITHIN_DEG, CLICK_SLOP_PX: CLICK_SLOP_PX,
-                 RING_BED_FRACTION: RING_BED_FRACTION, RUN_MS: RUN_MS, TICK_LEN: TICK_LEN,
-                 LABEL_SHIFT_DEG: LABEL_SHIFT_DEG,
+                 RING_RADIUS_MM: RING_RADIUS_MM, ARROW_FRACTION: ARROW_FRACTION,
+                 RUN_MS: RUN_MS, TICK_STEP_DEG: TICK_STEP_DEG, TICK_LEN: TICK_LEN,
                  LOCAL: { fb: RINGS.fb.local, ss: RINGS.ss.local } }
   };
 
