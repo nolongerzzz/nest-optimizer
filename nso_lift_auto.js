@@ -88,6 +88,17 @@
    index(soup)                  -> the exact weld (numeric hashes; Phase 1's
                                    shape, fast enough for 0.5 M triangles)
 
+   ASSEMBLIES (docs/LIFT.md section 8). A shell of the piece that is not
+   connected to the base body and is captured by a liftable feature - inside its
+   box inflated by captureMm (2 mm), or overlapping its box - goes with it:
+   `assemble`, at the end of analyse, gives the feature `parts` / `partCount`,
+   drops the held shell's own island and points its triangles at the feature in
+   islandOf. lift / remove copy the held shells into the piece triangle for
+   triangle (separate shells, original gaps, nothing fused) and take them off the
+   plate. A shell nothing holds is island status 'floating'; a held shell that is
+   not closed makes the feature 'capture' (refused). A piece with one shell is
+   untouched by all of this. `shellsOf(M)` is exported.
+
    Neck splitting is NOT done here. Each large island carries `necks`: where
    a watershed on its smoothed distance transform would divide it, as data
    for the next ticket. Nothing reads it to cut.
@@ -125,7 +136,10 @@
     curved: false,
     slantDeg: 35,          // ...an island whose surround leans more than this off the view is read too slantwise
     relaxMm: 1.5,          // ...the fill relaxes from the neighbours to the base estimate over about this
-    fitSigmaMm: 3          // ...the base carried across: quadratics fitted to the surround, weighted over about this
+    fitSigmaMm: 3,         // ...the base carried across: quadratics fitted to the surround, weighted over about this
+    // Assemblies: a shell not connected to the base body is caught by a feature whose box,
+    // inflated by this, holds it - or whose box it overlaps
+    captureMm: 2
   };
 
   var BASE = 1, ABOVE = 2, BELOW = 3;
@@ -624,6 +638,97 @@
     return { areaMm2: area, widthMm: width, lengthMm: width > 0 ? area / width : 0 };
   }
 
+
+  // -------------------------------------------------------------------------
+  // Assemblies: the shells a feature holds
+  // -------------------------------------------------------------------------
+
+  /** The piece's shells: triangles joined edge to edge. -> { n, of (shell per
+      triangle), tris (per shell), lo, hi (per shell, [x,y,z]), open (per
+      shell: an edge with no twin) }. */
+  function shellsOf(M) {
+    var nt = M.nt, of = new Int32Array(nt).fill(-1), n = 0, tris = [], open = [], lo = [], hi = [];
+    for (var t0 = 0; t0 < nt; t0++) {
+      if (of[t0] >= 0) continue;
+      var q = [t0], l = [Infinity, Infinity, Infinity], h = [-Infinity, -Infinity, -Infinity], op = false;
+      of[t0] = n;
+      for (var i = 0; i < q.length; i++) {
+        var t = q[i];
+        for (var k = 0; k < 3; k++) {
+          var u = M.twin(t, k);
+          if (u < 0) op = true;
+          else if (of[u] < 0) { of[u] = n; q.push(u); }
+          var P = M.V[M.tv[t * 3 + k]];
+          for (var a = 0; a < 3; a++) { if (P[a] < l[a]) l[a] = P[a]; if (P[a] > h[a]) h[a] = P[a]; }
+        }
+      }
+      tris.push(q); lo.push(l); hi.push(h); open.push(op);
+      n++;
+    }
+    return { n: n, of: of, tris: tris, lo: lo, hi: hi, open: open };
+  }
+
+  /** Every shell of the piece that is not the base body and that an offered
+      feature holds goes with that feature: its box, inflated by captureMm,
+      holds the shell's box, or the two boxes overlap (a leaf on a pin through
+      a knuckle). A shell goes with ONE feature: the nearest by box centre.
+      The caught shells are not fused to anything; Lift copies them as they are.
+      -> islands renumbered, `islandOf` rebuilt (a caught shell's triangles
+      belong to the feature), I.parts on each feature that holds any. */
+  function assemble(M, seed, islands, islandOf, o) {
+    var S = shellsOf(M);
+    if (S.n < 2) return { shells: S.n, islands: islands, caught: 0 };
+    var baseShell = S.of[seed], pad = o.captureMm, eps = 1e-9;
+    // a separate shell that no feature holds is floating - said so, not as a flaw of its footprint
+    islands.forEach(function (I) {
+      if (I.status === 'loops' && I.tris.length && I.tris.every(function (t) { return S.of[t] !== baseShell; })) {
+        I.status = 'floating'; I.reason = WHY.floating;
+      }
+    });
+    var feats = islands.filter(function (I) { return I.status === 'ok' && S.of[I.tris[0]] === baseShell; });
+    if (!feats.length) return { shells: S.n, islands: islands, caught: 0 };
+    var mine = new Map();                                  // feature -> [shell]
+    for (var s = 0; s < S.n; s++) {
+      if (s === baseShell) continue;
+      var lo = S.lo[s], hi = S.hi[s], best = null, bd = Infinity;
+      feats.forEach(function (I) {
+        var fl = I.bounds.lo, fh = I.bounds.hi, within = true, over = true, d = 0;
+        for (var a = 0; a < 3; a++) {
+          if (lo[a] < fl[a] - pad || hi[a] > fh[a] + pad) within = false;
+          if (Math.min(hi[a], fh[a]) - Math.max(lo[a], fl[a]) <= eps) over = false;
+          var dc = (lo[a] + hi[a]) / 2 - (fl[a] + fh[a]) / 2;
+          d += dc * dc;
+        }
+        if ((within || over) && d < bd) { bd = d; best = I; }
+      });
+      if (!best) continue;
+      if (!mine.has(best)) mine.set(best, []);
+      mine.get(best).push(s);
+    }
+    var caught = new Set(), count = 0;
+    mine.forEach(function (list, I) {
+      if (list.some(function (sh) { return S.open[sh]; })) { I.status = 'capture'; I.reason = WHY.capture; I.group = 'cant'; return; }
+      I.parts = list.map(function (sh) {
+        var tr = S.tris[sh];
+        return { shell: sh, tris: tr, triangles: tr.length, bounds: { lo: S.lo[sh], hi: S.hi[sh] } };
+      });
+      I.partCount = list.length;
+      list.forEach(function (sh) { caught.add(sh); count++; });
+    });
+    // a free shell's own "can't be lifted" island goes with the feature that holds it
+    var kept = islands.filter(function (I) {
+      return !(I.tris.length && I.tris.every(function (t) { return caught.has(S.of[t]); }));
+    });
+    kept.forEach(function (I, i) { I.id = i; });
+    islandOf.fill(-1);
+    kept.forEach(function (I) { I.tris.forEach(function (t) { islandOf[t] = I.id; }); });
+    kept.forEach(function (I) {
+      if (!I.parts) return;
+      I.parts.forEach(function (P) { P.tris.forEach(function (t) { islandOf[t] = I.id; }); });
+    });
+    return { shells: S.n, islands: kept, caught: count };
+  }
+
   // -------------------------------------------------------------------------
   // analyse
   // -------------------------------------------------------------------------
@@ -636,7 +741,9 @@
     spill: 'it runs on past the part of the face measured round it, so no one flat cut holds it',
     nobase: 'there is too little of the face round it to measure the surface it stands on',
     bends: 'the surface under it bends too much for a flat cut',
-    slant: 'it is seen too slantwise from where the face was clicked to measure the surface round it - click the face nearer it'
+    slant: 'it is seen too slantwise from where the face was clicked to measure the surface round it - click the face nearer it',
+    capture: 'a part caught in it is not a closed solid, so the assembly would not come off whole',
+    floating: 'it is a separate part, joined to nothing, and no feature on the face holds it - it does not stand on the face'
   };
 
   function refuse(code, reason, extra) { return Object.assign({ ok: false, refused: code, reason: reason }, extra || {}); }
@@ -1225,6 +1332,10 @@
     });
     ms.islands = now() - t;
 
+    // assemblies: the free shells a feature holds go with it
+    var asm = assemble(M, seed, islands, islandOf, o);
+    islands = asm.islands;
+
     // the face, for the tint: its cells' own top triangles
     var baseList = [], seenB = new Uint8Array(M.nt);
     for (c = 0; c < NN; c++) {
@@ -1242,7 +1353,7 @@
       map: { cellMm: cell, size: [nu, nvv], cells: NN, coarsened: map.coarsened, normal: map.n,
              ballMm: est.radiusMm, ballCoarseMm: est.coarseMm, thresholdMm: thr, grid: map, B: B, det: det,
              baseMask: base, seedCell: seedCell, mapIslands: mapIslands.length, ghosts: ghosts, words: est.words, sampler: Bs },
-      groups: counts,
+      groups: counts, shells: asm.shells, caught: asm.caught,
       ms: Object.assign(ms, { total: now() - T0 })
     };
     A.reason = describe(A, o);
@@ -1460,6 +1571,20 @@
       }
       cp = rf.cap;
       I.tris.forEach(function (t) { chosen[t] = 1; });
+      var held = 0;
+      if (I.parts && I.parts.length) {
+        // the shells it holds come along as they are: same corners, same gaps, not fused to anything
+        var extra = 0;
+        I.parts.forEach(function (P) { extra += P.tris.length * 9; });
+        var whole = new Float32Array(ps.length + extra), wo = ps.length;
+        whole.set(ps);
+        I.parts.forEach(function (P) {
+          P.tris.forEach(function (t) { chosen[t] = 1; for (var q3 = 0; q3 < 9; q3++) whole[wo++] = soup[t * 9 + q3]; });
+          held++;
+        });
+        ps = whole;
+        pc = census(ps);
+      }
       if (!pc.closed || pc.degen) {
         return { ok: false, reason: 'detail ' + (I.id + 1) + ' would not come off as a closed piece (' +
           pc.open + ' open, ' + pc.nm + ' non-manifold, ' + pc.degen + ' degenerate) - nothing changed' };
@@ -1469,7 +1594,7 @@
       else for (var c = 0; c < cp.length; c += 3) off = Math.max(off, Math.abs(cp[c] * I.plane.n[0] + cp[c + 1] * I.plane.n[1] + cp[c + 2] * I.plane.n[2] - I.plane.d));
       pieces.push({ id: I.id, soup: ps, heightMm: I.heightMm, capTris: cp.length / 9, volume: L1.volume(ps), sharedCorners: rf.touched,
                     contacts: rf.contacts,
-                    rootAreaMm2: I.rootAreaMm2, census: pc, group: I.group, backOffMm: off, plane: I.plane,
+                    rootAreaMm2: I.rootAreaMm2, census: pc, group: I.group, backOffMm: off, plane: I.plane, parts: held,
                     fill: fl ? fl.stats : null, notes: I.fillNotes || [] });
       caps.push(cp);
     }
@@ -1504,18 +1629,24 @@
       ' is carried across, welded to it at the rim', notes: notes };
   }
 
+  /** " with 2 captured parts" for the parts that went with the details; '' when none did. */
+  function heldWords(pieces) {
+    var k = pieces.reduce(function (s2, pc) { return s2 + (pc.parts || 0); }, 0);
+    return k ? ' with ' + plural(k, 'captured part') : '';
+  }
+
   function lift(soup, A, ids, deps) {
     var r = cut(soup, A, ids, deps);
     if (!r.ok) return r;
-    var n = r.pieces.length, cw = curvedWords(r.pieces);
+    var n = r.pieces.length, cw = curvedWords(r.pieces), hw = heldWords(r.pieces);
     if (cw) {
       r.notes = cw.notes;
-      r.reason = 'lifted ' + plural(n, 'detail') + ' (' + fmt(r.volumes.pieces) + ' mm³) off the face, each cut along the surface ' +
+      r.reason = 'lifted ' + plural(n, 'detail') + hw + ' (' + fmt(r.volumes.pieces) + ' mm³) off the face, each cut along the surface ' +
         'it stands on; the plate keeps ' + r.keptTris + ' of its ' + A.M.nt + ' triangles as they were' + cw.where +
         (cw.notes.length ? '. Note: ' + cw.notes.join('; ') : '');
       return r;
     }
-    r.reason = 'lifted ' + plural(n, 'detail') + ' (' + fmt(r.volumes.pieces) + ' mm³) off the face, each at its own ' +
+    r.reason = 'lifted ' + plural(n, 'detail') + hw + ' (' + fmt(r.volumes.pieces) + ' mm³) off the face, each at its own ' +
       'flat cut; the plate keeps ' + r.keptTris + ' of its ' + A.M.nt + ' triangles as they were and is flat where ' +
       (n === 1 ? 'it' : 'they') + ' stood';
     return r;
@@ -1525,14 +1656,14 @@
   function remove(soup, A, ids, deps) {
     var r = cut(soup, A, ids, deps);
     if (!r.ok) return r;
-    var n = r.pieces.length, cw = curvedWords(r.pieces);
+    var n = r.pieces.length, cw = curvedWords(r.pieces), hw = heldWords(r.pieces);
     return { ok: true, plate: r.plate, keptTris: r.keptTris, plateCensus: r.plateCensus,
       removed: r.pieces.map(function (pc) { return { id: pc.id, volume: pc.volume, group: pc.group, backOffMm: pc.backOffMm, capTris: pc.capTris, fill: pc.fill }; }),
       volumes: { source: r.volumes.source, plate: r.volumes.plate, removed: r.volumes.pieces, residual: r.volumes.residual },
       notes: cw ? cw.notes : undefined,
-      reason: cw ? 'removed ' + plural(n, 'detail') + ' (' + fmt(r.volumes.pieces) + ' mm³); the plate keeps ' + r.keptTris +
+      reason: cw ? 'removed ' + plural(n, 'detail') + hw + ' (' + fmt(r.volumes.pieces) + ' mm³); the plate keeps ' + r.keptTris +
         ' of its ' + A.M.nt + ' triangles as they were' + cw.where + (cw.notes.length ? '. Note: ' + cw.notes.join('; ') : '') :
-        'removed ' + plural(n, 'detail') + ' (' + fmt(r.volumes.pieces) + ' mm³); the plate keeps ' + r.keptTris +
+        'removed ' + plural(n, 'detail') + hw + ' (' + fmt(r.volumes.pieces) + ' mm³); the plate keeps ' + r.keptTris +
         ' of its ' + A.M.nt + ' triangles as they were and is flat where ' + (n === 1 ? 'it' : 'they') + ' stood' };
   }
 
@@ -1551,7 +1682,8 @@
     remove: remove,
     necksOf: necksOf,
     edt: edt,
-    census: census
+    census: census,
+    shellsOf: shellsOf
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.NSO_LiftAuto = api;

@@ -11,8 +11,9 @@
      fixtures/features/feature-hull_hinge.stl  a 120 x 70 x 40 box with a
         print-in-place knuckle hinge on its +Y wall. Looking down at the top
         there is nothing to lift; looking at the +Y wall there is one thing,
-        the knuckle (the moving leaf, free of the wall, is found and said
-        "can't be lifted").
+        the knuckle, and the moving leaf, free of the wall, comes with it as a
+        captured part (lift:assembly; before it was found and said "can't be
+        lifted").
      the Barocke plate (tools/nso_lift_plate_fixtures.js)  the top face is
         what lift:plate reads and must still be.
    Every hover and click is a real pointer event on the main canvas at the
@@ -26,7 +27,7 @@
      4. a click lifts the knuckle: closed pieces, volumes add up, ONE undo
         step; Ctrl+Z puts it back bit for bit and the wall's count is the cache
      5. the lifted knuckle, grabbed and dropped, stays where it was dropped
-     6. Strip strips the wall: "line x1", ONE undo step; on the top it is off
+     6. Strip strips the wall: "line x1 + 1 captured part", ONE undo step; on the top it is off
      7. the cursor off the piece goes back to the top; off the viewport onto
         the card, the face stays
      8. a wall with nothing on it: "Nothing stands out from this face." - one
@@ -168,10 +169,10 @@ withApp(async (page, logs) => {
   await moveTo(page, wv.x, wv.y);
   const f2 = await faceNow(page), c2 = await card(page), d2 = await detNow(page), r2 = await readout(page);
   check('the base face is now the +Y wall: normal (0, 1, 0), the 4544 mm² of it', !!f2 && f2.n.join() === '0,1,0' && f2.area === 4544, JSON.stringify(f2));
-  check('the card follows: "1 feature found"', c2.count === '1 feature found' && c2.panel, c2.count);
+  check('the card follows: "1 feature found", and what comes with it (the leaf the knuckle holds)', c2.count === '1 feature found \u2014 a line with 1 captured part' && c2.panel, c2.count);
   check('...the first read of that face, not the cache', d2.ok && d2.cached === false, d2.ms + ' ms');
-  check('...the read-out says it in words: one line, the knuckle a line, the leaf can\'t be lifted',
-    /^1 feature found on feature-hull_hinge standing out more than 0\.42 mm: line ×1\. 1 can't be lifted/.test(r2) && !/\n/.test(r2), r2);
+  check('...the read-out says it in words: one line, the knuckle a line with its captured leaf, nothing refused',
+    /^1 feature found on feature-hull_hinge standing out more than 0\.42 mm: line ×1 \+ 1 captured part\./.test(r2) && !/can't be lifted/.test(r2) && !/\n/.test(r2), r2);
   const k2 = await kids(page);
   check('the wall is tinted and the knuckle outlined', k2.includes('Mesh:a78bfa') && k2.includes('LineSegments:38bdf8'), k2.join(' '));
   check('the HUD is not made to repeat the card', (await status(page)) !== r2);
@@ -182,12 +183,12 @@ withApp(async (page, logs) => {
   check('the cursor off the piece (over the viewport): back to the top, 0 features', (await faceNow(page)) === null && (await card(page)).count === '0 features found');
   await moveTo(page, wv.x, wv.y);
   const d2b = await detNow(page);
-  check('the wall again: its count straight from the cache', (await card(page)).count === '1 feature found' && d2b.cached === true);
+  check('the wall again: its count straight from the cache', (await card(page)).count === '1 feature found \u2014 a line with 1 captured part' && d2b.cached === true);
 
   /* ============================================ 3. the knuckle is a feature */
   console.log('\n=== 3. hover the knuckle ===');
   const isl = await page.evaluate(() => { const A = NSO_LIFT_PLATE.analysis(); return { off: NSO_LIFT_PLATE.offered(), tris: A.islands.map(I => ({ s: I.status, g: I.group, tris: I.tris })) }; });
-  check('one offered feature: the knuckle (a line, ok); the other is the free leaf', isl.off.length === 1 && isl.tris[isl.off[0]].s === 'ok' && isl.tris.length === 2 && isl.tris.some(I => I.s !== 'ok'),
+  check('one offered feature: the knuckle (a line, ok); the free leaf is no island of its own, it is held by the knuckle', isl.off.length === 1 && isl.tris[isl.off[0]].s === 'ok' && isl.tris.length === 1,
     JSON.stringify(isl.tris.map(I => I.s + ':' + I.g + ':' + I.tris.length)));
   const KN = isl.off[0];
   const kv = await visibleTri(page, hullId, isl.tris[KN].tris, true);
@@ -215,7 +216,7 @@ withApp(async (page, logs) => {
   await ctrlZ(page);
   const U4 = await raw(page, hullId), s4 = await plateState(page);
   check('one Ctrl+Z: the hull bit for bit, the knuckle gone, the stack as before', sameSoup(U4, SRC) && s4.models.length === b4.models.length && s4.undo === b4.undo);
-  check('...and the wall counts 1 again, still the wall, from the cache', (await card(page)).count === '1 feature found' && (await faceNow(page)).n.join() === '0,1,0' && (await detNow(page)).cached === true, (await card(page)).count);
+  check('...and the wall counts 1 again, still the wall, from the cache', (await card(page)).count === '1 feature found \u2014 a line with 1 captured part' && (await faceNow(page)).n.join() === '0,1,0' && (await detNow(page)).cached === true, (await card(page)).count);
 
   /* ================================== 5. the lifted knuckle: grab and drop */
   console.log('\n=== 5. grab the lifted knuckle and drop it ===');
@@ -284,10 +285,10 @@ withApp(async (page, logs) => {
   await frameDir(page, hullId, WALL_VIEW);
   check('on the top face Strip has nothing: it is off', (await card(page)).stripDisabled && (await card(page)).count === '0 features found');
   await moveTo(page, wv.x, wv.y);
-  check('on the wall Strip is on', !(await card(page)).stripDisabled && (await card(page)).count === '1 feature found');
+  check('on the wall Strip is on', !(await card(page)).stripDisabled && (await card(page)).count === '1 feature found \u2014 a line with 1 captured part');
   await page.click('#btn-lift-strip');
   const c6 = await card(page);
-  check('Strip lists the wall\'s: line ×1, and what the plate keeps', c6.strip && c6.rows.length === 1 && c6.sum === 'line ×1 · the plate keeps 1' && c6.go === 'Confirm – lift 1', c6.sum + ' / ' + c6.go);
+  check('Strip lists the wall\'s: line ×1 with its captured part, and what the plate keeps', c6.strip && c6.rows.length === 1 && c6.sum === 'line ×1 + 1 captured part · bare plate' && c6.go === 'Confirm – lift 1', c6.sum + ' / ' + c6.go);
   const b6 = await plateState(page);
   await page.click('#btn-lift-strip-go');
   await waitRead(page, /Lifted|refused|failed/);
@@ -299,10 +300,10 @@ withApp(async (page, logs) => {
   /* ====================================== 7. off the piece / off the viewport */
   console.log('\n=== 7. off the piece: the top; onto the card: the face stays ===');
   await moveTo(page, wv.x, wv.y);
-  check('on the wall', (await faceNow(page)) !== null && (await card(page)).count === '1 feature found');
+  check('on the wall', (await faceNow(page)) !== null && (await card(page)).count === '1 feature found \u2014 a line with 1 captured part');
   await page.hover('#btn-lift-strip');
   await page.waitForTimeout(200);
-  check('the cursor onto the card (a button): the face stays, so Strip strips what was shown', (await faceNow(page)) !== null && (await card(page)).count === '1 feature found' && !(await card(page)).stripDisabled);
+  check('the cursor onto the card (a button): the face stays, so Strip strips what was shown', (await faceNow(page)) !== null && (await card(page)).count === '1 feature found \u2014 a line with 1 captured part' && !(await card(page)).stripDisabled);
   const e7 = await emptyPoint(page);
   await moveTo(page, e7.x, e7.y);
   check('the cursor over the empty viewport: back to the top', (await faceNow(page)) === null && (await card(page)).count === '0 features found');
