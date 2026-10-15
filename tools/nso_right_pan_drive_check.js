@@ -174,7 +174,9 @@ withApp(async (page, logs) => {
   await drag('left', bare2[0], bare2[1], 0, 120);
   const camB = await N(() => window.__p.cam());
   check('the second orbit turned the camera again', !sameQuat(camA.quat, camB.quat));
-  await panCheck('steep view, press on empty background', C[0] + 420, C[1] - 330, -150, 90);
+  // 100 px lower than it was: since shell v3 (#188) C + (420, -330) is the
+  // Optimize slab under Export, not background.
+  await panCheck('steep view, press on empty background', C[0] + 420, C[1] - 230, -150, 90);
   check('undo stack untouched so far', (await N(() => state.undoStack.length)) === undo0);
   /* back to a working view for the click checks */
   await N(() => {
