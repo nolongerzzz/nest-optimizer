@@ -1,4 +1,5 @@
-/* Shell v2: the column's Lift button.
+/* Lift: the button in the Subtract card (shell v3; the column's own Lift
+   button in shell v2).
 
    It opens G-scope exactly as the G-scope button does - the plate under the
    lens, or the file picker when the plate is empty - and then brings one row

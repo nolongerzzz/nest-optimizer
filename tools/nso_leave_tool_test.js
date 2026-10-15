@@ -217,7 +217,7 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 4 */
-  console.log('\n=== 4. Shape -> Soften, double-click ===');
+  console.log('\n=== 4. Surface & edges -> Soften, double-click ===');
   {
     const pc = await pieceAt(0);
     await page.mouse.click(pc.x, pc.y);
@@ -231,10 +231,10 @@ withApp(async (page, logs) => {
     await dblPlate();
     await shot('soften-dblclick-closed');
     const r = await page.evaluate(() => ({
-      armed: state.softenArmed, shape: document.getElementById('menu-shape').open, pick: state.facePick
+      armed: state.softenArmed, shape: document.getElementById('menu-surface').open, pick: state.facePick
     }));
     check('Soften disarmed', r.armed === false);
-    check('Shape menu closed', r.shape === false);
+    check('Surface & edges menu closed', r.shape === false);
     held('Soften', before, await snap());
   }
 
@@ -294,10 +294,10 @@ withApp(async (page, logs) => {
     await shot('carve-dblclick-disarmed');
     const r = await page.evaluate(() => ({
       armed: state.carveArmed, pressed: document.getElementById('btn-carve').getAttribute('aria-pressed'),
-      sculpt: document.getElementById('menu-sculpt').open
+      sculpt: document.getElementById('menu-bit').open
     }));
     check('Carve disarmed through its button', r.armed === false && r.pressed === 'false', JSON.stringify(r));
-    check('Sculpt menu closed with it', r.sculpt === false);
+    check('Subtract menu (Carve\'s home since shell v3) closed with it', r.sculpt === false);
     held('Carve', before, await snap());
   }
 
@@ -349,16 +349,16 @@ withApp(async (page, logs) => {
   /* ------------------------------------------------------------------ 9 */
   console.log('\n=== 9. each drop-down that owns no input, double-click ===');
   {
-    /* Shell v2: Align and Plate in the row; Join, Seat, Supports, Subtract, the six
-       that were Finish's sections and Bend (under Shape) in the column.
-       Then a member open inside a merged one (A-B-C in Join, Pack in Plate,
+    /* Shell v3: Measure and Align in the row; Join, Seat, Supports, Add,
+       Subtract, Shape, Paint, Surface & edges, Sculpt and Check & repair in
+       the column. Then a member open inside a merged one (A-B-C in Join,
        Photo in Gen+): the double-click shuts it and the drop-down holding
-       it. */
-    const COL = ['menu-align', 'menu-plates', 'menu-joins', 'menu-seat', 'menu-supports', 'menu-bit',
-                 'menu-shape', 'menu-bend', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-measure', 'menu-repair'];
+       it. Plate & pieces is pinned open, not a drop-down: it stays. */
+    const COL = ['menu-measure', 'menu-align', 'menu-joins', 'menu-seat', 'menu-supports', 'menu-add', 'menu-bit',
+                 'menu-shape', 'menu-paint', 'menu-surface', 'menu-sculpt', 'menu-repair'];
     const ids = await page.evaluate(() => [...document.querySelectorAll('.vp-col-menu')].map(d => d.id));
-    check('the shell holds these thirteen', JSON.stringify(ids) === JSON.stringify(COL), ids.join(', '));
-    for (const id of COL.concat(['menu-abc', 'menu-pack', 'menu-photo'])) {
+    check('the shell holds these twelve', JSON.stringify(ids) === JSON.stringify(COL), ids.join(', '));
+    for (const id of COL.concat(['menu-abc', 'menu-photo'])) {
       await page.evaluate(() => document.querySelectorAll('.vp-menu').forEach(d => { d.open = false; }));
       await page.click('#' + id + ' > summary');
       await page.waitForTimeout(150);
@@ -374,6 +374,11 @@ withApp(async (page, logs) => {
         JSON.stringify({ opened, after: r }));
       held(id, before, await snap());
     }
+    const pinned = await page.evaluate(() => {
+      const p = document.getElementById('plate-panel');
+      return !!p && !p.hidden && p.getBoundingClientRect().height > 0;
+    });
+    check('Plate & pieces, pinned open, is still on screen after every double-click', pinned);
   }
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));

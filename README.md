@@ -307,19 +307,27 @@ Smart build-plate packing for 3D printing.
 
 ## Where things are (the shell)
 
-- **Top row**, left to right: Import, Move, Rotate, Tip, Bend, Align, Gen+
-  (Wheel, Stock, Picture, Photo), Lock position, Lock plate; at the right
-  Undo, Remove and Export, with **Plate** under Export (Plate, Pieces with
-  Clone, Pack, Clear plate).
-- **Left column**, in five groups: Scale, Cut, Crop, Join (Join, A-B-C),
-  Lift, Seat, Subtract · Shape, Paint, Surface, Sculpt · Measure & check,
-  Check & repair · G-scope · X (X-ray), 👁 (Watch), ◎ (frame the view) in one
-  row at the bottom.
+- **Top row**, left to right: Import, Measure (Two points / Edge), Move,
+  Rotate, Tip, Align, Gen+ (Wheel, Stock, Picture, Photo), Lock position,
+  Lock plate; at the right Undo, Remove and Export, with **Clear plate**
+  under Remove and **Optimize** under Export.
+- **Plate & pieces**, pinned open in the top-right corner: the plate picker
+  (and Custom W · D · H), the bed grid (auto / on / off) and Snap to grid,
+  the pieces list and Clone. Always visible, never a drop-down.
+- **Left column**: G-scope, Scale, Cut, Crop, Join (Join, A-B-C), Seat,
+  Supports, Add, Subtract · Shape, Paint, Surface & edges, Sculpt · Check &
+  repair on its own at the bottom · X (X-ray), 👁 (Watch), ◎ (frame the
+  view) in one row under it.
+- The cards: **Shape** Smooth, Bend, Tube edge (Flare, Roll, Neck) ·
+  **Add** Fill / Densify, Foam, Thicken out / in, Extend, Bridge ·
+  **Subtract** Subtract B from A, Extract bit, Carve, Hollow, Hollow to safe
+  min, Lift (opens G-scope at its Lift row) · **Surface & edges** Soften,
+  Mirror, Skin face / wrap / patch, Trace raster, Texture · **Sculpt** the
+  Brush · **Check & repair** Check piece, Cap open faces, Repair, Seal,
+  Non-solid, Solidify.
 - Every drop-down opens at the same spot, right of the column and under the
-  row, one at a time. **Lift** opens G-scope at its Lift row; Supports and
-  the slicer's settings are G-scope's own rows, as before. The old Finish
-  menu's sections are the column's second and third groups; Bend moved up
-  to the row.
+  row, one at a time. Supports and the slicer's settings are also G-scope's
+  own rows, as before.
 
 ## How to use
 
@@ -327,7 +335,7 @@ Smart build-plate packing for 3D printing.
 2. Select your build plate.
 3. Tap / drop one or more STL or 3MF files.
 4. Set quantities if needed.
-5. Tap **Optimize Plate**.
+5. Tap **Optimize** (top right, under Export).
 6. Download the result and open it in your slicer.
 
 ## Notes

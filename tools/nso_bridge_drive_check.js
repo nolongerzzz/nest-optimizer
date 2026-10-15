@@ -165,17 +165,16 @@ const openCard = async page => {
 withApp(async (page, logs) => {
   await page.evaluate(installHelpers);
 
-  console.log('\n=== 1. the button: in Shape, beside Extend and Mirror ===');
+  console.log('\n=== 1. the button: in Add (shell v3), right after Extend ===');
   const ui = await page.evaluate(() => {
-    const b = document.getElementById('btn-bridge'), e = document.getElementById('btn-extend'), mi = document.getElementById('btn-mirror');
+    const b = document.getElementById('btn-bridge'), e = document.getElementById('btn-extend');
     const menu = b && b.closest('details');
     const rows = [...menu.querySelectorAll('.vp-row')];
     return { btn: !!b, menu: menu && menu.id, wired: b && b.dataset.nsoWired === '1', panelHidden: document.getElementById('bridge-panel').hidden,
-             afterMirror: rows.indexOf(b.closest('.vp-row')) === rows.indexOf(mi.closest('.vp-row')) + 1,
              nearExtend: rows.indexOf(b.closest('.vp-row')) - rows.indexOf(e.closest('.vp-row')) };
   });
-  check('#btn-bridge is in the Shape drop-down', ui.btn && ui.menu === 'menu-shape', ui.menu);
-  check('...in the row under Extend and Mirror', ui.afterMirror && ui.nearExtend === 2, 'rows from Extend: ' + ui.nearExtend);
+  check('#btn-bridge is in the Add drop-down', ui.btn && ui.menu === 'menu-add', ui.menu);
+  check('...in the row under Extend', ui.nearExtend === 1, 'rows from Extend: ' + ui.nearExtend);
   check('...wired at load, its card shut', ui.wired && ui.panelHidden);
 
   console.log('\n=== 2. the ring: Split, halves 20 mm apart, both gaps bridged, Undo ===');

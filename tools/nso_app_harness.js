@@ -197,9 +197,9 @@ const statusOf = page => page.evaluate(() => {
   return el ? el.textContent : null;
 });
 
-/* Finish is gone (shell v2): its six groups are column buttons of their own
-   - Shape, Paint, Surface, Sculpt, Measure & check, Check & repair - and Bend
-   sits in the column under Shape. Only one drop-down is open at a time, so no single
+/* Finish is gone (shell v2): its groups are column buttons of their own -
+   since shell v3 Add, Subtract, Shape, Paint, Surface & edges, Sculpt and
+   Check & repair, with Measure in the row. Only one drop-down is open at a time, so no single
    menu shows every Finish control any more. The checks don't need one: every
    action through `page` opens the drop-down holding its target first
    (installAutoOpen above), and openMenuFor below does the same for a check

@@ -1171,10 +1171,10 @@ withApp(async (page, logs) => {
     await page.waitForTimeout(200);
     await loadSTL(page, path.join(ROOT, 'fixtures', 'tape_on-edge-single-B101_rounded_v8_FINAL.stl'));
     await page.waitForTimeout(200);
-    /* The plate picker is in the Plate drop-down now, and opening it shut
-       Rotate (one panel on the page) - so Rotate is opened again, as a
-       user would, before its rings are measured. */
-    await page.click('#menu-rotate > summary');
+    /* Rotate open before its rings are measured. Until shell v3 the plate
+       picker sat in a drop-down whose opening shut Rotate; it is pinned open
+       now and leaves Rotate as it was, so Rotate is opened only if shut. */
+    if (!(await page.evaluate(() => document.getElementById('menu-rotate').open))) await page.click('#menu-rotate > summary');
     await page.waitForTimeout(120);
     const r = await page.evaluate(() => {
       selectPlaced(state.placed.length - 1);

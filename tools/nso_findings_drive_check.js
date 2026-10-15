@@ -14,7 +14,7 @@
  *   2. Rings: one per problem, depth-test off, never picked, not children of
  *      the piece (the piece measures the same with them up), on the piece.
  *   3. Where the card sits: at the right edge, under the top-right buttons,
- *      clear of the plate's middle and of the open Measure & check panel.
+ *      clear of the plate's middle and of the open Check & repair panel.
  *   4. Check frames the camera on the piece; a row click flies it to the
  *      nearest problem of that kind and pulses that ring.
  *   5. Each fix button changes the piece exactly as the Finish-menu button
@@ -211,36 +211,36 @@ withApp(async (page, logs) => {
     /* ------------------------------------------------------------ *
      * 3. where the card sits
      * ------------------------------------------------------------ */
-    console.log('\n3. the card is docked at the right edge, under the top-right buttons');
+    console.log('\n3. the card is docked at the right edge, under the top-right corner\'s panel');
     const geo = await page.evaluate(() => {
       const r = el => { const b = el.getBoundingClientRect(); return { l: b.left, t: b.top, r: b.right, b: b.bottom }; };
       const vp = r(document.querySelector('.viewport-section'));
       const c = r(document.getElementById('findings-card'));
-      /* Shell v2: Check lives in the column's Measure & check menu, and the
-         top-right buttons end with Plate under Export. */
-      const fm = document.getElementById('menu-measure');
-      const sum = r(document.querySelector('#menu-plates > summary'));
+      /* Shell v3: Check lives in the column's Check & repair menu, and the
+         top-right corner holds the pinned Plate & pieces panel. */
+      const fm = document.getElementById('menu-repair');
+      const sum = r(document.getElementById('plate-panel'));
       const body = r(fm.querySelector('.vp-menu-body'));
       return { vp, c, sum, body, finishOpen: fm.open };
     });
     const overlap = (a, b) => a.l < b.r && b.l < a.r && a.t < b.b && b.t < a.b;
-    check('below the top-right buttons', geo.c.t >= geo.sum.b, 'card top ' + geo.c.t + ', Plate button bottom ' + geo.sum.b);
+    check('below the top-right panel', geo.c.t >= geo.sum.b, 'card top ' + geo.c.t + ', Plate & pieces bottom ' + geo.sum.b);
     const mid = { l: (geo.vp.l + geo.vp.r) / 2 - 1, r: (geo.vp.l + geo.vp.r) / 2 + 1, t: (geo.vp.t + geo.vp.b) / 2 - 1, b: (geo.vp.t + geo.vp.b) / 2 + 1 };
     check('away from the plate: clear of the viewport centre', !overlap(geo.c, mid));
-    check('with Measure & check open, beside its panel and not under it', geo.finishOpen && !overlap(geo.c, geo.body),
+    check('with Check & repair open, beside its panel and not under it', geo.finishOpen && !overlap(geo.c, geo.body),
           JSON.stringify(geo.c) + ' vs ' + JSON.stringify(geo.body));
-    await page.click('#menu-measure > summary');   // shut Measure & check
-    await page.waitForFunction(() => !document.getElementById('menu-measure').open);
+    await page.click('#menu-repair > summary');   // shut Check & repair
+    await page.waitForFunction(() => !document.getElementById('menu-repair').open);
     await page.waitForTimeout(50);
     const docked = await page.evaluate(() => {
       const vp = document.querySelector('.viewport-section').getBoundingClientRect();
       const c = document.getElementById('findings-card').getBoundingClientRect();
       return { gap: vp.right - c.right, left: c.left, mid: (vp.left + vp.right) / 2, top: c.top,
-               sumBottom: document.querySelector('#menu-plates > summary').getBoundingClientRect().bottom };
+               sumBottom: document.getElementById('plate-panel').getBoundingClientRect().bottom };
     });
-    check('with Measure & check shut, flush to the right edge', docked.gap <= 12, docked.gap + ' px from the edge');
+    check('with Check & repair shut, flush to the right edge', docked.gap <= 12, docked.gap + ' px from the edge');
     check('in the right half of the viewport', docked.left > docked.mid, 'card left ' + docked.left + ', middle ' + docked.mid);
-    check('still under the top-right buttons', docked.top >= docked.sumBottom);
+    check('still under the top-right panel', docked.top >= docked.sumBottom);
     check('it stays open until closed', (await card(page)).open);
 
     /* ------------------------------------------------------------ *

@@ -3350,11 +3350,13 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 .findings-note[hidden] { display: none; }
 .findings-fix { align-self: flex-start; }
 /* ===== UI shell: glass slabs round the top-left corner ====================
-   No sidebar. One row along the top (Import .. Lock plate, then Undo, Remove
-   and Export at the right, with Plate under Export) and one column down the
-   left edge in five groups (make/edit, surface, check, print, view), sharing
-   Import as the corner button. Shell v2 took the Finish menu apart into
-   column buttons and moved the bottom-left tool strip into the column.
+   No sidebar. One row along the top (Import, Measure .. Lock plate, then
+   Undo, Remove and Export at the right, Clear plate under Remove and Optimize
+   under Export), the Plate & pieces panel pinned open in the top-right
+   corner, and one column down the left edge sharing Import as the corner
+   button: G-scope, make/edit, surface, then Check & repair over the view
+   row at the bottom. Shell v2 took the Finish menu apart into column
+   buttons; shell v3 regrouped the cards and pinned Plate & pieces open.
    Every drop-down's panel opens at ONE
    spot - just right of the column, just under the row - so a panel never
    covers the button that opened it and never lands on the plate's centre.
@@ -3376,6 +3378,7 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   --shell-col-gap: 4px;
   --shell-group-gap: 12px;          /* between the column's five groups */
   --shell-panel-x: calc(var(--shell-pad) + var(--shell-col-w) + 8px);
+  --plate-panel-w: 200px;           /* the pinned Plate & pieces panel, top right */
   --shell-panel-y: calc(var(--shell-pad) + var(--shell-btn-h) + 8px);
 
   --glass-border: rgba(255, 255, 255, 0.22);
@@ -3391,11 +3394,14 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 
 .vp-shell-row {
   display: flex;
-  /* flex-start, not center: the Export/Plate stack is one slab tall in the
-     row (Plate hangs below it), and nothing in the row may sit lower. */
+  /* flex-start, not center: the Remove and Export stacks are one slab tall
+     in the row (Clear plate and Optimize hang below them), and nothing in
+     the row may sit lower. */
   align-items: flex-start;
   gap: var(--shell-gap);
   width: 100%;
+  /* The row ends where the pinned Plate & pieces panel begins. */
+  padding-right: calc(var(--plate-panel-w) + var(--shell-gap));
   pointer-events: none;
 }
 /* The column: 32px slabs on a 36px pitch, a 12px gap between groups, and
@@ -3417,11 +3423,14 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 .vp-shell-col > .vp-group-start {
   margin-top: calc(var(--shell-group-gap) - var(--shell-col-gap));
 }
+/* Check & repair on its own, pinned to the bottom over the view row, a
+   group gap above it; the free space falls above Check & repair. */
+.vp-shell-col > #menu-repair { margin-top: auto; }
 .vp-shell-col > .vp-shell-view {
   display: flex;
   gap: var(--shell-col-gap);
-  /* Pinned to the bottom; at least a group gap under G-scope. */
-  margin-top: auto;
+  /* Pinned to the bottom, a group gap under Check & repair. */
+  margin-top: 0;
   padding-top: calc(var(--shell-group-gap) - var(--shell-col-gap));
   pointer-events: none;
 }
@@ -3442,12 +3451,14 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
    neighbour. Label widths are the machine's font metrics, so a layout that
    only fits when the labels happen to measure a certain width is no layout. */
 .vp-shell-row > * { flex-shrink: 0; }
+.vp-shell-row > #menu-measure,
 .vp-shell-row > #menu-move, .vp-shell-row > #menu-rotate,
 .vp-shell-row > #menu-tip, .vp-shell-row > #menu-align,
 .vp-shell-row > #btn-lock-pos, .vp-shell-row > #btn-plate-lock {
   flex-shrink: 1;
   min-width: 40px;
 }
+#menu-measure > summary,
 #menu-move > summary, #menu-rotate > summary,
 #menu-tip > summary, #menu-align > summary,
 .vp-shell-row > #btn-lock-pos, .vp-shell-row > #btn-plate-lock {
@@ -3460,9 +3471,10 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 }
 /* Undo, Remove and Export to the right end of the row. */
 .vp-shell-row > #btn-undo { margin-left: auto; }
-/* Export with Plate directly under it. One slab tall as far as the row is
-   concerned - Plate overflows below - so the column still starts right under
-   Import. Both slabs take the stack's width, the wider of the two labels. */
+/* Remove with Clear plate under it, Export with Optimize under it. Each
+   stack is one slab tall as far as the row is concerned - the second slab
+   overflows below - so the column still starts right under Import. Both
+   slabs take the stack's width, the wider of the two labels. */
 .vp-shell-stack {
   display: flex;
   flex-direction: column;
@@ -3472,7 +3484,9 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   overflow: visible;
   pointer-events: none;
 }
-.vp-shell-stack > .vp-shell-menu.vp-shell-menu > summary { width: 100%; }
+.vp-shell-stack > .vp-shell-menu.vp-shell-menu > summary,
+.vp-shell-stack > .vp-bar-btn { width: 100%; }
+.vp-shell-stack > * { flex-shrink: 0; }
 
 
 /* Static, so each panel's containing block is the overlay (see above). */
@@ -3485,6 +3499,7 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 /* ---- the slab ---- */
 .vp-shell-menu.vp-shell-menu > summary,
 .vp-shell-row > .vp-bar-btn,
+.vp-shell-stack > .vp-bar-btn,
 .vp-shell-col > .vp-bar-btn,
 .vp-shell-view > .vp-bar-btn {
   list-style: none;
@@ -3513,6 +3528,17 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   cursor: pointer;
   user-select: none;
   transition: border-color 0.12s, box-shadow 0.12s;
+}
+/* The row's slabs run tighter than the column's - less tracking and side
+   padding - so Import .. Lock plate and Undo .. Export fit beside the
+   pinned panel at 1280 px with every label whole. Import, the corner,
+   keeps the column's face. */
+.vp-shell-row > .vp-shell-menu.vp-shell-menu:not(#menu-import) > summary,
+.vp-shell-stack > .vp-shell-menu.vp-shell-menu > summary,
+.vp-shell-row > .vp-bar-btn,
+.vp-shell-stack > .vp-bar-btn {
+  padding: 0 8px;
+  letter-spacing: 0.07em;
 }
 /* Import is the corner: as wide as the column under it. Row slabs size to
    their label; column slabs all share one width and the column's height. */
@@ -3548,6 +3574,7 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 }
 .vp-shell-menu.vp-shell-menu > summary:hover,
 .vp-shell-row > .vp-bar-btn:hover:not(:disabled),
+.vp-shell-stack > .vp-bar-btn:hover:not(:disabled),
 .vp-shell-col > .vp-bar-btn:hover:not(:disabled),
 .vp-shell-view > .vp-bar-btn:hover:not(:disabled) {
   border-color: rgba(255, 255, 255, 0.45);
@@ -3560,12 +3587,14 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 }
 .vp-shell-menu.vp-shell-menu > summary:focus-visible,
 .vp-shell-row > .vp-bar-btn:focus-visible,
+.vp-shell-stack > .vp-bar-btn:focus-visible,
 .vp-shell-col > .vp-bar-btn:focus-visible,
 .vp-shell-view > .vp-bar-btn:focus-visible {
   outline: 2px solid #7dd3fc;
   outline-offset: 1px;
 }
 .vp-shell-row > .vp-bar-btn:disabled,
+.vp-shell-stack > .vp-bar-btn:disabled,
 .vp-shell-col > .vp-bar-btn:disabled,
 .vp-shell-view > .vp-bar-btn:disabled {
   opacity: 0.38;
@@ -3637,6 +3666,96 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
    sidebar-era fixed width the nested rule would otherwise inherit. */
 .vp-shell-menu .vp-sub-menu > .vp-menu-body { flex-direction: column; flex-wrap: nowrap; }
 
+/* ---- Plate & pieces: pinned open in the top-right corner ----
+   The old Plate menu's Plate and Pieces bodies, never a drop-down: a plain
+   panel, not a <details>, so app-join's one-panel rule and leaveTool() pass
+   it by. Glued to the corner at the row's top; the row pads itself clear of
+   it. Compact: the grid choice and Snap share a line, the custom W / D / H
+   share one, and the pieces list scrolls inside a short box. */
+.vp-plate-panel {
+  position: absolute;
+  top: var(--shell-pad);
+  right: var(--shell-pad);
+  z-index: 90;
+  width: var(--plate-panel-w);
+  max-height: calc(100% - 2 * var(--shell-pad));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px 8px 8px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: var(--glass-panel);
+  -webkit-backdrop-filter: var(--glass-blur-panel);
+  backdrop-filter: var(--glass-blur-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 10px 28px rgba(0, 0, 0, 0.4);
+  color: #e8eef6;
+  font-family: var(--font);
+  font-size: 12px;
+  pointer-events: auto;
+}
+.vp-plate-sec { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.vp-plate-sec + .vp-plate-sec { padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.1); }
+.vp-plate-head {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.vp-plate-panel select,
+.vp-plate-panel input[type="number"] { padding: 3px 6px; font-size: 12px; margin: 0; }
+.vp-plate-panel .custom-size { grid-template-columns: 1fr 1fr 1fr; margin: 0; gap: 4px; }
+.vp-plate-panel .custom-size.hidden { display: none; }
+.vp-plate-panel .custom-size label { flex-direction: row; align-items: center; gap: 3px; font-size: 11px; }
+.vp-plate-panel .custom-size input { min-width: 0; padding: 2px 3px; }
+.vp-plate-panel .plate-grid-controls {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 2px 6px;
+  margin: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.vp-plate-panel .plate-grid-controls .hint { grid-column: 1 / -1; margin: 0; font-size: 10.5px; }
+.vp-plate-panel .plate-grid-controls select { margin: 0; }
+.vp-plate-panel .plate-grid-snap-row { margin: 0; white-space: nowrap; font-size: 11.5px; }
+.vp-plate-panel .build-warning { margin: 0; font-size: 11px; }
+.vp-plate-panel .model-list { margin-top: 0; gap: 3px; max-height: 112px; }
+.vp-plate-panel .model-list:empty { display: none; }
+.vp-plate-panel .model-item { padding: 4px 6px; gap: 6px; font-size: 11.5px; }
+.vp-plate-panel .model-item .qty { width: 40px; }
+.vp-plate-panel .model-item .qty input { padding: 2px; }
+.vp-plate-panel .edit-row { margin-top: 0 !important; gap: 6px !important; flex-wrap: nowrap !important; }
+.vp-plate-panel #clone-count { width: 3.2rem !important; }
+.vp-plate-panel #btn-clone { flex: 1 1 auto; margin: 0; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+
+/* A window too narrow for the row and the panel side by side: the panel
+   drops under the right-hand stacks (Clear plate, Optimize), still pinned
+   to the right edge and still open, and the row takes the full width. */
+@media (max-width: 1279px) {
+  .vp-shell-row { padding-right: 0; }
+  .vp-plate-panel {
+    top: calc(var(--shell-pad) + 2 * var(--shell-btn-h) + var(--shell-col-gap) + 8px);
+    max-height: calc(100% - 2 * var(--shell-btn-h) - var(--shell-col-gap) - 8px - 2 * var(--shell-pad));
+  }
+}
+
+/* The photo set's capture report docks beside the pinned panel, not under
+   it: the drawer sits below the shell's overlay (z 70 < 80), so in the
+   corner the panel would cover its heading and Close. Left of the panel,
+   under the second row (Clear plate, Optimize), right of the column. */
+.photoset-drawer {
+  top: calc(var(--shell-pad) + 2 * var(--shell-btn-h) + var(--shell-col-gap) + 8px);
+  right: calc(var(--plate-panel-w) + 2 * var(--shell-pad));
+  width: min(560px, calc(100% - var(--plate-panel-w) - var(--shell-panel-x) - 3 * var(--shell-pad)));
+}
+
 /* G-scope opened at its Lift row from the column: the row is marked until
    G-scope is opened from its own button. */
 #microscope .ms-section.ms-row-target {
@@ -3656,12 +3775,14 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .vp-shell-menu.vp-shell-menu > summary,
   .vp-shell-row > .vp-bar-btn,
+  .vp-shell-stack > .vp-bar-btn,
   .vp-shell-col > .vp-bar-btn,
   .vp-shell-view > .vp-bar-btn,
   .vp-shell-menu.vp-shell-menu[open] > summary {
     background: var(--glass-slab-solid);
   }
-  .vp-shell-menu.vp-shell-menu > .vp-menu-body {
+  .vp-shell-menu.vp-shell-menu > .vp-menu-body,
+  .vp-plate-panel {
     background: var(--glass-panel-solid);
   }
 }

@@ -96,7 +96,7 @@ withApp(async (page, logs) => {
              panelWithIt: !!(menu && menu.contains(document.getElementById('te-panel'))),
              panelHidden: document.getElementById('te-panel').hidden };
   });
-  check('#btn-tube-edge is in the Bend menu, with its card', ui.btn && ui.menu === 'menu-bend' && ui.panelWithIt, JSON.stringify(ui));
+  check('#btn-tube-edge is in the Shape card (shell v3; Bend\'s card moved there whole), with its card', ui.btn && ui.menu === 'menu-shape' && ui.panelWithIt, JSON.stringify(ui));
   check('...in Bend\'s own row, beside it; Bend still first', ui.sameRow && ui.bendFirst);
   check('...wired at load, its card shut', ui.wired && ui.panelHidden);
 
