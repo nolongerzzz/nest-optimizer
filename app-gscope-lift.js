@@ -144,7 +144,7 @@ var NSO_GSCOPE_LIFT = (function () {
     if (!ensureLayer()) return;
     clearLayer();
     var d = meshDoc();
-    layer.visible = on && !!d;
+    layer.visible = isOn();
     syncPanel();
     if (!on || !d || !cur || !A()) return;
     var a = A(), P = cur.o.positions, by = { dots: [], lines: [], large: [], cant: [] };
@@ -191,9 +191,14 @@ var NSO_GSCOPE_LIFT = (function () {
   // =========================================================================
 
   /* The outlines, for the helper registry: leave-tool switches them off; the
-     next document G-scope opens shows them again. */
+     next document G-scope opens shows them again. G-scope's close() only
+     hides its panel - the document stays, and nothing is told - so the
+     outlines are hidden here whenever the row is not live (a visible helper
+     whose owner is not live is a stale one, Watch's phantom), and drawn
+     again when the panel shows (the observer in mount). */
+  function hideIfIdle() { if (layer && !isOn()) layer.visible = false; }
   if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('gscope-lift', {
-    live: function () { return isOn(); },
+    live: function () { var v = isOn(); if (!v) hideIfIdle(); return v; },
     close: function () { setOn(false); },
     clear: clearLayer,
     refresh: function () { update(); }
@@ -206,6 +211,11 @@ var NSO_GSCOPE_LIFT = (function () {
     if (!MS()) return;
     MS().onDocument(function () { on = true; cur = null; update(); });
     MS().onSelection(function () { if (meshDoc()) update(); });
+    var panel = $('microscope');
+    if (panel && typeof MutationObserver === 'function') {
+      new MutationObserver(function () { if (panel.hidden) hideIfIdle(); else if (meshDoc()) update(); })
+        .observe(panel, { attributes: true, attributeFilter: ['hidden'] });
+    }
     syncPanel();
   }
 
