@@ -1140,7 +1140,8 @@
         var big = null, ra = 0;
         I.loops.forEach(function (Lp) { ra += Lp.area; if (!big || Math.abs(Lp.area) > Math.abs(big.area)) big = Lp; });
         I.rootAreaMm2 = ra;
-        if (!(big.area > 0)) why = 'body';
+        if (!big) why = 'loops';
+        else if (!(big.area > 0)) why = 'body';
         else if (!(ra > 0)) why = 'loops';
       }
       if (!why) {

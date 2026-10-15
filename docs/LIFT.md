@@ -523,6 +523,60 @@ for.
 **Paint scope: WHOLE-PIECE** (`nsoMaskCount(m) > 0`), declared in
 `app-lift-plate.js`'s header and in `nso_paint_scope_test.js`'s roster.
 
+### Any face
+
+Lift is not only for the top. While it is armed **the base face is the face
+under the cursor**: hover a side wall and the card reads *that wall* - its
+features standing out sideways - "N features found" follows, Pick outlines and
+lifts from it, Strip strips it. `app-lift-plate.js` only; the engine already
+read a map looking down any normal (`analyse`'s `normal` option), and what a
+lift does is section 2's, unchanged.
+
+- **The default is the top** - the face the piece lies with up - read at arm
+  time exactly as above (the seeds of the face looking up, biggest first). A
+  triangle that looks up within 20 degrees of the view is the top, always, so
+  hovering a dot, the paper or a leaf of the plant never leaves it: the Barocke
+  plate counts the 22 it always did.
+- **A face is a plane**: the triangles that share a normal (to 3 places) and a
+  height along it (to 0.05 mm, the plane and the bins either side of it, so a
+  plane on a bin's edge is not split). It is read from its own biggest
+  triangles (three, in turn - the first read with islands wins, as the top's
+  seeds do). It is named by its plane, not by a triangle number, so it
+  survives a lift or an Undo (the soup changes; if the face is gone the card
+  falls back to the top).
+- **A face to read from must be a face**: at least 2 % of the piece's surface
+  (`FACE_MIN_FRAC`). A hinge leaf's end, a facet of a cylinder, is not a base;
+  hovering it leaves the face as it was.
+- **A feature of the face being read leaves the face alone.** Hover the hinge's
+  knuckle while its wall is read and the knuckle is outlined (the wall is not
+  swapped for one of the knuckle's facets); hover a triangle that is not a
+  feature of the face read and the face under it becomes the base. A click on
+  a bare face reads it and lifts nothing - the lift is a second click.
+- **Off the piece, the top.** The cursor over the viewport but off the piece
+  goes back to the top. The cursor leaving the viewport for the card or a menu
+  keeps the face, so Strip strips what was shown. Strip's list freezes the
+  face while it is open; a Shift group gathered on one face is dropped when the
+  face changes.
+- **Cached per face**: one read per soup and face (`detectFace`; the top's is
+  `detectSoup`'s). Reading a face writes nothing and costs no Undo step.
+- **Said once, on the card.** A face with nothing on it reads **"Nothing stands
+  out from this face."** - one line - on the card only; the HUD is not made to
+  repeat it. (The top, the default, keeps the words it had: "Nothing found on
+  <piece>: nothing stands out of its top more than ...".) The base face being
+  read is tinted while it is not the top.
+
+**`feature-hull_hinge.stl`** (a 120 x 70 x 40 box, a print-in-place knuckle
+hinge on its +Y wall): the top reads 0; the +Y wall reads **1** - the knuckle
+(its two fixed halves and the pin, one feature of 408 triangles, a line 10.5 mm
+out of the wall) - and the free moving leaf, which does not meet the wall at
+all, is found and refused in words ("where it meets the face does not close
+into clean loops"). The wall reading it needed one guard in the engine:
+`judge` in `nso_lift_auto.js` took the biggest boundary loop of an island with
+none and threw; an island with no loops is now the existing `loops` refusal.
+Lifted, the knuckle is a closed piece on free plate beside the hull, the hull
+repaired and closed (hull + knuckle = the original volume, 347468.017 mm³), one
+Undo; grabbed and dropped it stays where it was dropped.
+
 ### G-scope: Features, read-only
 
 The row is **Features**: the features Lift would find on the piece under the
@@ -556,6 +610,24 @@ stay. The lifted line moves 5 mm and joins the plant ("Join ok"). G-scope:
 the row is Features, 22 - the same count, from the same cache - the grouped
 list, an outline per group, no controls. Refusals: a plain box (nothing
 found), a painted plate, a piece with no raw soup.
+
+### In the real app (`lift:any-face`, 1280 x 800)
+
+`feature-hull_hinge` through Import: armed, the top reads "0 features found".
+Hover the +Y wall: the face read is the wall (normal +Y, 4544 mm²), "1 feature
+found", the wall tinted and the knuckle outlined, the first read of that face;
+the cursor off the piece goes back to the top; the wall again is the cache.
+Hover the knuckle: outlined, the wall still the face. A click lifts it: one
+piece, closed, on free plate; the hull closed; hull + knuckle = the original
+volume; ONE undo step; Ctrl+Z puts the hull back bit for bit and the wall
+counts 1 from the cache. Lifted again and grabbed with the mouse, dragged to
+free plate (clear of the app's 12 mm neighbour magnet) and dropped: it is where
+it was dropped, closed, on the bed. Strip: off on the top, on for the wall -
+"line ×1 · the plate keeps 1", Confirm - lift 1 - one step. The cursor onto a
+card button keeps the face; over the empty viewport it returns to the top. The
++X end wall: the card says "Nothing stands out from this face." and nothing
+else, and the HUD keeps what it had. The Barocke plate: the top still reads 22
+(`line ×1 · large shape ×1 (12 parts) · dots ×20`) however it is hovered.
 
 `lift:drive`, `lift:auto-drive` and `lift:curved-drive` drive their fixtures
 the same way now: G-scope's Features row read-only (a click on G-scope's

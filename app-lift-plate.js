@@ -50,6 +50,23 @@
  *
  * G-scope's Features row (app-gscope-lift.js) reads the same cache through
  * NSO_LIFT_PLATE.detectSoup, so the two always count the same features.
+ *
+ * ANY FACE (docs/LIFT.md section 7, "Any face"). While Lift is armed the base
+ * face is the face under the cursor. The top face - the one the piece lies
+ * with up - is the default, read at arm time exactly as above. Hovering a
+ * planar face that does not look up (a side wall) reads THAT face: the same
+ * rolling ball, looking down that face's own normal, seeded on the face's own
+ * biggest triangles. The card's count, Pick, Strip and the outlines follow it.
+ *   - a triangle that belongs to a feature of the face being read leaves the
+ *     face alone (the cursor is on the thing, not on a new face);
+ *   - a face is a base only if it is at least FACE_MIN_FRAC of the piece's
+ *     surface (a leaf's end, a cylinder's facet is not a face to read from);
+ *   - the cursor over the viewport but off the piece goes back to the top; the
+ *     cursor leaving the viewport for the card keeps the face, so Strip strips
+ *     what was shown;
+ *   - one read per face, cached per soup (and a face is named by its plane, not
+ *     a triangle number, so it survives a lift or an Undo);
+ *   - what it says goes to the card only: the HUD does not repeat it.
  */
 /* global THREE, state, setStatus, addModel, placeModelMovable, pushUndo, applyPlacedXZ,
           nsoFreeSpot, nsoMaskCount, NSO_sculptCommitRaw, rawResultToDisplayGeometry,
@@ -61,7 +78,9 @@ var NSO_LIFT_PLATE = (function () {
   var MAP_OPTS = { curved: true };          // Lift 3: a base that bends is followed
   var UP_DEG = 20;                          // a seed face looks within this of the view
   var BIN_MM = 0.05;                        // seed faces binned by height, this fine
-  var HOVER = 0xfacc15, PENDING = 0xff2bd6, FOUND = 0x38bdf8;
+  var FACE_MIN_FRAC = 0.02;                 // a face is a base if it is this much of the piece's surface
+  var FACE_SEEDS = 3;                       // a face is seeded on its biggest triangles, this many
+  var HOVER = 0xfacc15, PENDING = 0xff2bd6, FOUND = 0x38bdf8, FACE = 0xa78bfa;
 
   function LA() { return typeof window !== 'undefined' ? window.NSO_LiftAuto : null; }
   function LF() { return typeof window !== 'undefined' ? window.NSO_Lift : null; }
@@ -72,7 +91,7 @@ var NSO_LIFT_PLATE = (function () {
   // Detection, cached per soup
   // =========================================================================
 
-  var cache = new WeakMap();               // soup -> { key, r }
+  var cache = new WeakMap();               // soup -> Map(read key -> r)
 
   function nkey(n) { return n.map(function (x) { return x.toFixed(6); }).join(','); }
 
@@ -103,18 +122,28 @@ var NSO_LIFT_PLATE = (function () {
     return out;
   }
 
+  /** One read per soup and key: the second call is the first call's answer.
+      A read that throws is a refusal in words, kept like any other. */
+  function cachedRead(soup, key, make) {
+    var per = soup && cache.get(soup), hit = per && per.get(key);
+    if (hit) return Object.assign({}, hit, { cached: true });
+    var r;
+    try { r = make(); } catch (err) {
+      console.error('[lift]', err);
+      r = { ok: false, refused: 'error', reason: 'Lift: could not read this face (' + ((err && err.message) || err) + '). Nothing changed.' };
+    }
+    if (soup) { if (!per) { per = new Map(); cache.set(soup, per); } per.set(key, r); }
+    return Object.assign({}, r, { cached: false });
+  }
+
   /**
-   * The features on `soup`, looking down `n` (default raw +Z). Once per soup
-   * and view: a second call with the same soup is the first call's answer.
+   * The features on `soup`, looking down `n` (default raw +Z): the top face,
+   * the default. Once per soup and view.
    * -> { ok, A, seed, ms, cached } or { ok: false, refused, reason }.
    */
   function detectSoup(soup, n) {
     n = n || [0, 0, 1];
-    var key = nkey(n), hit = soup && cache.get(soup);
-    if (hit && hit.key === key) return Object.assign({}, hit.r, { cached: true });
-    var r = detectNow(soup, n);
-    if (soup) cache.set(soup, { key: key, r: r });
-    return Object.assign({}, r, { cached: false });
+    return cachedRead(soup, 'v:' + nkey(n), function () { return detectNow(soup, n); });
   }
 
   function detectNow(soup, n) {
@@ -125,6 +154,12 @@ var NSO_LIFT_PLATE = (function () {
     if (!S.length) {
       return { ok: false, refused: 'noface', reason: 'Lift: this piece has no face looking up for details to stand on. Nothing changed.' };
     }
+    return readSeeds(soup, n, S, t0);
+  }
+
+  /** Try the seeds in turn: the first read with islands wins, else the
+      first read that found none, else the last refusal. */
+  function readSeeds(soup, n, S, t0) {
     var M = LA().index(soup), empty = null, last = null;
     for (var i = 0; i < S.length; i++) {
       var r = LA().analyse(soup, S[i], Object.assign({ M: M, normal: n }, MAP_OPTS));
@@ -134,6 +169,106 @@ var NSO_LIFT_PLATE = (function () {
     }
     if (empty) return { ok: true, A: empty, seed: empty.seed, ms: Date.now() - t0 };
     return { ok: false, refused: last && last.refused, reason: 'Lift: ' + ((last && last.reason) || 'nothing to read') + '. Nothing changed.' };
+  }
+
+  // =========================================================================
+  // Planar faces: which face a triangle is on, and a read of that face
+  // =========================================================================
+
+  var planeCache = new WeakMap();          // soup -> { groups: Map(normal key -> { n, bins }), total }
+
+  function r3(x) { return Math.round(x * 1000) / 1000 + 0; }
+
+  /** The plane of raw triangle `t`: { nk, k, key, n (unit), area }, or null for
+      a degenerate one. The key is the normal to 3 places and the height along
+      it in BIN_MM steps; the height is read off the exact normal so a plane
+      stays one plane however far from the origin it lies. */
+  function triPlane(s, t) {
+    var o = t * 9;
+    var ux = s[o + 3] - s[o], uy = s[o + 4] - s[o + 1], uz = s[o + 5] - s[o + 2];
+    var vx = s[o + 6] - s[o], vy = s[o + 7] - s[o + 1], vz = s[o + 8] - s[o + 2];
+    var cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+    var L = Math.hypot(cx, cy, cz);
+    if (!(L > 1e-12)) return null;
+    var nx = cx / L, ny = cy / L, nz = cz / L;
+    var h = ((s[o] + s[o + 3] + s[o + 6]) * nx + (s[o + 1] + s[o + 4] + s[o + 7]) * ny + (s[o + 2] + s[o + 5] + s[o + 8]) * nz) / 3;
+    var nk = r3(nx) + ',' + r3(ny) + ',' + r3(nz), k = Math.round(h / BIN_MM);
+    return { nk: nk, k: k, key: nk + '|' + k, n: [nx, ny, nz], area: L / 2 };
+  }
+
+  /** Every triangle sorted into its plane, once per soup. */
+  function planesOf(soup) {
+    var hit = planeCache.get(soup);
+    if (hit) return hit;
+    var groups = new Map(), total = 0;
+    for (var t = 0, nt = Math.floor(soup.length / 9); t < nt; t++) {
+      var tp = triPlane(soup, t);
+      if (!tp) continue;
+      total += tp.area;
+      var g = groups.get(tp.nk);
+      if (!g) { g = { n: tp.n, bins: new Map() }; groups.set(tp.nk, g); }
+      var b = g.bins.get(tp.k);
+      if (!b) { b = { area: 0, tris: [] }; g.bins.set(tp.k, b); }
+      b.area += tp.area; b.tris.push(t);
+    }
+    hit = { groups: groups, total: total };
+    planeCache.set(soup, hit);
+    return hit;
+  }
+
+  /** The face named by `key`: { n, area, tris } over the plane's bin and the
+      two beside it (a plane at the edge of a bin is not split in two), or null
+      when the soup has no such face. */
+  function planeByKey(soup, key) {
+    var at = String(key).split('|'), g = planesOf(soup).groups.get(at[0]), k = +at[1];
+    if (!g) return null;
+    var out = { n: g.n, area: 0, tris: [] };
+    for (var d = -1; d <= 1; d++) {
+      var b = g.bins.get(k + d);
+      if (b) { out.area += b.area; out.tris = out.tris.concat(b.tris); }
+    }
+    return out.tris.length ? out : null;
+  }
+
+  /** The `n` biggest of `tris`, biggest first. */
+  function biggest(soup, tris, n) {
+    var sc = tris.map(function (t) {
+      var o = t * 9;
+      var ux = soup[o + 3] - soup[o], uy = soup[o + 4] - soup[o + 1], uz = soup[o + 5] - soup[o + 2];
+      var vx = soup[o + 6] - soup[o], vy = soup[o + 7] - soup[o + 1], vz = soup[o + 8] - soup[o + 2];
+      return { t: t, a: Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) };
+    });
+    sc.sort(function (a, b) { return b.a - a.a; });
+    return sc.slice(0, n).map(function (x) { return x.t; });
+  }
+
+  /**
+   * The features standing out of one planar face - `f` is { key } from
+   * faceOfTri - looking straight down its normal. Once per soup and face.
+   */
+  function detectFace(soup, f) {
+    return cachedRead(soup, 'f:' + f.key, function () {
+      var t0 = Date.now();
+      if (!LA()) return { ok: false, refused: 'deps', reason: 'Lift needs nso_lift_auto.js. Nothing changed.' };
+      var pl = soup && soup.length >= 36 ? planeByKey(soup, f.key) : null;
+      if (!pl) return { ok: false, refused: 'noface', reason: 'Lift: that face is not on this piece any more. Nothing changed.' };
+      return readSeeds(soup, pl.n, biggest(soup, pl.tris, FACE_SEEDS), t0);
+    });
+  }
+
+  /**
+   * The base face for raw triangle `tri` of `soup`, the view being `view`:
+   *   'top'  - it looks up (within UP_DEG of the view): the default face;
+   *   { key, n, area } - a planar face to read from;
+   *   null   - too small to be a base (a leaf's end, a facet of a curve).
+   */
+  function faceOfTri(soup, tri, view) {
+    var tp = soup && tri >= 0 ? triPlane(soup, tri) : null;
+    if (!tp) return null;
+    if (tp.n[0] * view[0] + tp.n[1] * view[1] + tp.n[2] * view[2] >= Math.cos(UP_DEG * Math.PI / 180)) return 'top';
+    var pl = planeByKey(soup, tp.key);
+    if (!pl || pl.area < FACE_MIN_FRAC * planesOf(soup).total) return null;
+    return { key: tp.key, n: pl.n, area: pl.area };
   }
 
   /** Liftable, and standing out more than minH. */
@@ -186,7 +321,8 @@ var NSO_LIFT_PLATE = (function () {
 
   var armed = false;
   var targetId = null;                      // the piece's model id
-  var D = null;                             // detectSoup's answer for it
+  var D = null;                             // the read of the face being read (detectSoup's or detectFace's answer)
+  var face = null;                          // the face under the cursor { key, n, area }; null = the top, the default
   var minH = null;
   var hoverId = -1;
   var pending = new Set();                  // a Shift group, not yet lifted
@@ -201,10 +337,14 @@ var NSO_LIFT_PLATE = (function () {
   function placedOf(id) { return (state.placed || []).find(function (p) { return p && p.sourceId === id; }) || null; }
   function A() { return D && D.ok ? D.A : null; }
 
-  function say(msg, bad) {
+  /** The card's line only: what the HUD must not repeat. */
+  function sayCard(msg, bad) {
     lastMsg = msg;
     var r = $('lift-readout');
     if (r) { r.textContent = msg; r.classList.toggle('carve-bad', !!bad); }
+  }
+  function say(msg, bad) {
+    sayCard(msg, bad);
     if (typeof setStatus === 'function') setStatus(msg, !!bad);
   }
   function fail(msg) { say(msg, true); return { ok: false, reason: msg }; }
@@ -239,14 +379,27 @@ var NSO_LIFT_PLATE = (function () {
     return null;
   }
 
+  /** The read of the face being read on a piece: the top (the default), or the
+      face under the cursor. A face that has gone from the soup (a lift took
+      its last stand, an Undo) falls back to the top. */
+  function readTarget(m, p) {
+    if (face) {
+      var r = detectFace(m.rawTris, face);
+      if (r.refused !== 'noface') return r;
+      face = null;
+    }
+    return detectSoup(m.rawTris, viewOf(p));
+  }
+
   /** Point the card at a piece: read it (or its cached read) and say so. */
   function target(id) {
     var m = modelOf(id), p = placedOf(id);
     clearHover(); pending = new Set(); closeStrip(true);
+    face = null;
     var why = refusalFor(m, p);
     if (why) { targetId = null; D = null; draw(); sync(); return fail(why); }
     targetId = id;
-    D = detectSoup(m.rawTris, viewOf(p));
+    D = readTarget(m, p);
     syncSlider();
     draw(); sync();
     if (!D.ok) return fail(D.reason);
@@ -258,8 +411,8 @@ var NSO_LIFT_PLATE = (function () {
   function refresh() {
     if (!armed || targetId == null) { draw(); sync(); return; }
     var m = modelOf(targetId), p = placedOf(targetId);
-    if (!m || !p) { targetId = null; D = null; clearHover(); draw(); sync(); return; }
-    D = detectSoup(m.rawTris, viewOf(p));
+    if (!m || !p) { targetId = null; D = null; face = null; clearHover(); draw(); sync(); return; }
+    D = readTarget(m, p);
     if (hoverId >= 0 && !(A() && A().islands[hoverId])) hoverId = -1;
     syncSlider(); draw(); sync();
   }
@@ -270,6 +423,7 @@ var NSO_LIFT_PLATE = (function () {
     if (!D || !D.ok) return D ? D.reason : '';
     var m = modelOf(targetId), a = A(), gs = groups(a, minH), n = offered(a, minH).length;
     var parts = [];
+    if (face && !a.islands.length) return 'Nothing stands out from this face.';
     if (!a.islands.length) {
       parts.push('Nothing found on ' + m.name + ': nothing stands out of its top more than ' + f2(a.map.thresholdMm) + ' mm.');
       return parts.join(' ');
@@ -354,7 +508,7 @@ var NSO_LIFT_PLATE = (function () {
     armed = on;
     if (!armed) {
       clearHover(); pending = new Set(); closeStrip(true);
-      targetId = null; D = null;
+      targetId = null; D = null; face = null;
       draw(); sync();
       say('Lift off.');
       return armed;
@@ -437,8 +591,43 @@ var NSO_LIFT_PLATE = (function () {
 
   function hoverAt(ev) {
     var h = hitAt(ev), id = -1;
-    if (h && h.id === targetId) { var f = featureAt(h.tri); if (f) id = f.id; }
+    /* Only a pointer over the viewport itself picks a face: crossing the
+       card or a menu on the way to a button leaves the face as it was. */
+    var onCanvas = !!state.renderer && ev.target === state.renderer.domElement;
+    if (h && h.id === targetId) {
+      if (onCanvas) settleFace(h);
+      var f = featureAt(h.tri);
+      if (f) id = f.id;
+    } else if (onCanvas && face) {
+      setFace(null);                            // off the piece: the top is the default
+    }
     setHover(id);
+  }
+
+  /** Read from another face: null is the top. Gathered features belong to the
+      face they were gathered on, so they are dropped. Said on the card only. */
+  function setFace(f) {
+    if ((f ? f.key : null) === (face ? face.key : null)) return false;
+    var m = modelOf(targetId), p = placedOf(targetId);
+    if (!m || !p) return false;
+    face = f;
+    hoverId = -1; pending = new Set();
+    D = readTarget(m, p);
+    syncSlider(); draw(); sync();
+    sayCard(readout(), !!(D && !D.ok));
+    return true;
+  }
+
+  /** The cursor is on raw triangle h.tri of the target. A triangle that is
+      one of the features of the face being read leaves the face alone; any
+      other is on a face, which becomes the one read when it is a base. */
+  function settleFace(h) {
+    if (A() && featureAt(h.tri)) return false;
+    var m = modelOf(targetId), p = placedOf(targetId);
+    if (!m || !p || stripOpen || busy) return false;
+    var c = faceOfTri(m.rawTris, h.tri, viewOf(p));
+    if (c == null) return false;
+    return setFace(c === 'top' ? null : c);
   }
 
   function setHover(id) {
@@ -474,6 +663,7 @@ var NSO_LIFT_PLATE = (function () {
       return true;
     }
     var f = featureAt(h.tri);
+    if (!f && settleFace(h)) return true;       // the click read the face under it; lifting takes a second click
     if (!f) { say('Lift: nothing to lift there - ' + (offered(A(), minH).length ? 'hover a feature first.' : 'nothing is found on this piece.')); return true; }
     var why = whyNot(f.I);
     if (why) { fail(why); return true; }
@@ -588,7 +778,7 @@ var NSO_LIFT_PLATE = (function () {
     var refused = refusalFor(m, placed);
     if (refused) return fail(refused);
     // the features must be this soup's: a cached read is, anything else is read again first
-    var cur = detectSoup(m.rawTris, viewOf(placed));
+    var cur = readTarget(m, placed);
     if (!cur.ok || cur.A !== a) { D = cur; refresh(); return fail('Lift: "' + m.name + '" changed since it was read - read again, try once more. Nothing changed.'); }
     busy = true;
     clearHover();
@@ -736,6 +926,10 @@ var NSO_LIFT_PLATE = (function () {
     layer.matrix.copy(p.mesh.matrixWorld);
     layer.matrixWorldNeedsUpdate = true;
     var off = offered(a, minH), all = [];
+    if (face) {
+      var fp = planeByKey(modelOf(targetId).rawTris, face.key);
+      if (fp) layer.add(fill(P, fp.tris, FACE, 0.38));
+    }
     var stripSet = stripOpen ? new Set(stripIds()) : null;
     off.forEach(function (id) { if (id !== hoverId && !pending.has(id)) all = all.concat(a.islands[id].tris); });
     if (all.length) layer.add(lines(outlineOf(P, all), FOUND, stripOpen ? 0.35 : 0.55));
@@ -799,6 +993,9 @@ var NSO_LIFT_PLATE = (function () {
 
   return {
     detectSoup: detectSoup,
+    detectFace: detectFace,
+    faceOfTri: faceOfTri,
+    face: function () { return face ? { key: face.key, n: face.n.slice(), area: face.area } : null; },
     viewFor: function (id) { return viewOf(placedOf(id)); },
     groups: groups,
     groupWords: groupWords,
