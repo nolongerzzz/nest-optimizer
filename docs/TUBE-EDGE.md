@@ -11,6 +11,10 @@ TUBE_EDGE_SHOTS=dir node tools/nso_tube_edge_drive_check.js   ...and screenshots
 
 Both are in `npm test` (`tube:edges`, `tube:edges-drive`).
 
+The card's third verb, **Neck**, is `nso_tube_neck.js` (`?v=neck1`, loaded
+after `nso_tube_edge.js`): see [Neck](#neck--a-pinch-or-a-bulge-along-a-tube)
+at the end.
+
 ## The promise
 
 Bend's, for the end of a tube: **the wall's section is carried exactly.**
@@ -249,3 +253,115 @@ HANDOFF roster and `tools/nso_paint_scope_test.js`.
    `TUBE_EDGE_SHOTS` is set, and are not kept in the repo.
 9. **Beside Bend** is in Bend's row: the row is now a pair, Bend still the row
    straight after Extend (its drive check's claim).
+
+## Neck — a pinch or a bulge along a tube
+
+`nso_tube_neck.js` (headless) and the third verb on this card.
+
+```
+node tools/nso_tube_neck_test.js           headless: every fixture, every gate, every refusal (npm test: tube:neck)
+TUBE_NECK_SHOTS=dir node tools/nso_tube_neck_shots.js   the real app: the card's Neck, Set, Undo, and screenshots
+```
+
+**Neck** moves the wall in (Δr < 0, a pinch) or out (Δr > 0, a bulge)
+anywhere along the tube, not only at an end: a band of the given **Length**
+centred where the tube is clicked (blank: the middle of the tube).
+
+| profile | the mid-wall's meridian | the two faces |
+|---|---|---|
+| **Smooth** | `r = r_mid + Δr·(1 − cos 2πs/L)/2`: tangent to the tube at both ends of the band, Δr at its middle (the waist) | offsets of it, t/2 either side along its normal |
+| **Funnel** | straight in to the waist, straight out | at each corner the face on the inside of the bend is sharp at K and the other goes round K on an arc of radius t, as bent sheet does |
+
+**The wall is carried exactly.** Smooth's faces are offsets of one curve, so
+the distance between them is t wherever the curve turns no tighter than t/2 —
+refused otherwise ("too short to move a 1.60 mm wall by −6.00 mm … it needs
+9.74 mm or more"). Funnel's sharp-corner-and-arc keeps t through every corner.
+The waist's bore is the tube's bore + 2Δr across, its outside the outside +
+2Δr. Gated on the meridian: t ± 0.02 mm.
+
+**The axis** is read with Tube edge's own end reader (the highest open round
+end): its fitted centre and its face normal. **The wall at the band** is read
+off the mesh: every triangle the band crosses must be a piece of one of two
+cylinders about that axis — normal square to the axis, all its vertices at one
+radius (within 0.001 mm), the outside facing out and the bore facing in. That
+gives Ro, Ri and t at the neck. Anything else across the band — a neck already
+there, a taper, a flange — refuses, naming the stretch where the wall is not
+straight and how far to move: **necks may not overlap** (bands that just meet
+end to end are fine).
+
+**The build.** On each face, the triangles the band crosses are taken out —
+a band of the cylinder between two whole rings of its vertices (for a Stock
+tube, its two end rings; after a neck, that neck's own ring). The lower ring's
+vertices are carried up through the stations, each along its own radial line,
+so the new face shares that ring's edges bit for bit; the last station is
+zipped to the upper ring by angle. A straight station is laid at each end of
+the band where the ring is further off. Everything else is copied bit for bit.
+A wall whose triangles do not run in rings round the tube refuses in words.
+
+**Gates on the output**: topology (Bend's counter: nothing opened, Euler
+unchanged), the volume change against Pappus (π∫r²dh of each new face against
+its straight wall, times its ring's polygon factor; measured equal to 1e-6),
+the wall.
+
+### Refusals, in words, the piece unchanged
+
+| what | says |
+|---|---|
+| the pinch closes the bore | `a pinch of 9.00 mm would close the bore - the Ø16.80 bore would come to nothing at the waist, under the bore limit of Ø0.80 (2 nozzle widths at a 0.4 mm nozzle). This bore pinches by 8.00 mm at most` |
+| overlap | `the wall is not straight from 14.00 to 26.00 mm in from the end, where this neck would go (6.00 to 18.00 mm) - a neck already there, or the piece's own shape. Necks may not overlap, and a neck is made on a straight stretch of tube: move it 4.00 mm or more along the tube, or shorten it` |
+| past the end | `a 12.0 mm neck centred 3.00 mm in would run past the end of the tube (it is 40.00 mm long) - centre it at least 6.00 mm in from either end, or shorten it` |
+| Smooth too short; Funnel past a 75° taper; Δr 0; no open round end to read the axis from (a rod) | each by name |
+
+### Numbers
+
+From `tools/nso_tube_neck_test.js` (99 checks); ms are `NSO_tubeNeckRaw` under node's `vm`.
+
+| piece and neck | in → out triangles | ms | measured on the output |
+|---|---|---|---|
+| Stock tube Ø20 / wall 1.6, pinch −4 over 12, smooth | 768 → 25,728 | 65–120 | bore Ø8.800 at the waist; wall 1.598–1.600 (3D 1.597–1.600) |
+| …expand +4 over 12, smooth | 768 → 25,728 | 55–70 | bore Ø24.800; wall 1.598–1.600 |
+| …pinch −4 over 12, funnel | 768 → 4,992 | 13–18 | bore Ø8.800; wall 1.595–1.600; taper 36.137° |
+| …expand +4 over 12, funnel | 768 → 4,992 | 11–13 | bore Ø24.800; wall 1.595–1.600 |
+| …two pinches 10 mm apart (the second on the first's output) | 25,728 → 50,688 | | both waists Ø8.800; the first copied bit for bit |
+| Wheel cup Ø30 / wall 2 (128 sides), pinch −3 over 14 | 1,024 → 17,920 | | bore Ø20.000; wall 1.995–2.000 |
+| Extend-made pipe (60 mm), expand +3 over 12, funnel | 768 → 4,224 | | bore Ø22.800; wall 1.595–1.600 |
+| imported Ø16 / Ø12 48-gon along X, pinch −2.5 over 16 | 384 → 6,720 | | bore Ø7.000; wall 1.998–2.000 |
+| 2000-sided Ø60 / wall 2 tube, pinch −6 over 30 | 16,000 → 536,000 | ~600 | |
+
+Every one: closed, 2-manifold, consistently wound, Euler unchanged,
+`tools/mesh_validate.py --gate` PASS with 0 piercing pairs, everything outside
+the band copied bit for bit, the volume change Pappus's.
+
+### The card
+
+Verb **Neck** shows Length, Δr and Profile (Smooth / Funnel) and hides Way
+(Δr's sign is the way). Blank fields take defaults from the wall at the end:
+Length 7.5 walls (12 mm on a 1.6 mm wall), Δr −2.5 walls (−4). A click on the
+tube centres the band where it projects onto the axis. Two amber rings mark
+the band's ends. A neck's ghost lies inside the piece wherever it pinches, so
+while it is up **the piece itself is hidden** — the ghost is the whole result
+— and shown again when the ghost goes (a refusal, Cancel, Set). Set commits
+with undo type `tubeNeckReplace` ("Undo: Neck reverted"); several necks are
+several Sets, each its own Undo. Paint stands it down, as Flare and Roll.
+
+### Flags — not in the ticket, or not as the ticket said
+
+1. **The ticket's "bore at the waist = 12.8" is not what a −4 radial pinch
+   gives**: 16.8 − 2·4 = **8.8**. 12.8 is 16.8 − 4, the bore's *diameter*
+   moved by 4. Δr here is a change of radius — it is Flare's Δr, and the
+   ticket's own "pinch to −9 → refusal naming the bore limit" only refuses if
+   it is (a diametral −9 leaves a Ø7.8 bore). The test checks Ø8.80 ± 0.05.
+2. **"Two necks 10 mm apart"** is read as 10 mm of straight tube between the
+   bands (necks centred at 9 and 31 mm, 12 mm long). Centred 10 mm apart,
+   two 12 mm necks overlap by 2 mm and are refused.
+3. **The bore limit is across**: the bore at the waist may be no narrower than
+   2 nozzle widths in diameter (Ø0.80 at 0.4 mm). A bulge has no limit here
+   (Flare's hoop-stretch rule is not applied: the model keeps t either way).
+4. **A neck needs a straight stretch**: on a thrown vessel with a curved wall
+   it refuses. The Wheel fixture is a straight-walled cup profile revolved by
+   the Wheel's own revolve.
+5. **Smooth is sampled at equal steps** of the band, halved until every chord
+   of both faces sags under 0.01 mm: dense (64 steps for −4 over 12) but
+   simple. Funnel is 4 straight runs and the corners' arcs.
+6. **One test step**, `tube:neck`, as the ticket asked; the card is driven by
+   `tube:neck-shots`, which is not in `npm test`.

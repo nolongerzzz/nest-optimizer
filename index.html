@@ -115,7 +115,7 @@
                 <button id="btn-bend" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="bend-panel"
                         title="Bend the piece like a pipe or plate bender, inside one straight stretch: the section is carried round the arc exactly - a plate's thickness, a tube's bore and wall do not change - and everything past the bend turns with it, rigidly. Opens a panel with a live ghost of the result; click the piece to set where.">Bend</button>
                 <button id="btn-tube-edge" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="te-panel"
-                        title="Flare or roll the open end of a tube outward. The wall's thickness is carried exactly through the new section and the new wall is welded to the end ring. Opens a card with a live ghost of the result; click the piece near the end to treat.">Tube edge</button>
+                        title="Flare or roll the open end of a tube outward, or neck it anywhere along its length (a pinch or a bulge). The wall's thickness is carried exactly through the new section and the new wall is welded to the old. Opens a card with a live ghost of the result; click the piece near the end to treat, or where the neck goes.">Tube edge</button>
               </div>
               <div class="vp-bend-panel" id="bend-panel" hidden>
                 <label class="vp-bend-field" title="Where the bend's middle goes, in mm along the piece from its near (low) end. Click the piece to set it.">Where
@@ -140,8 +140,9 @@
                   <select id="sel-te-verb" class="vp-select" aria-label="Tube edge verb">
                     <option value="flare" selected>Flare</option>
                     <option value="roll">Roll</option>
+                    <option value="neck">Neck</option>
                   </select></label>
-                <label class="vp-bend-field" title="Out, away from the axis. In (toward the axis) is not supported yet and says so.">Way
+                <label class="vp-bend-field" id="te-dir-row" title="Out, away from the axis. In (toward the axis) is not supported yet and says so.">Way
                   <select id="sel-te-dir" class="vp-select" aria-label="Tube edge direction">
                     <option value="out" selected>Out</option>
                     <option value="in">In</option>
@@ -166,10 +167,21 @@
                     <input type="number" id="inp-te-roll-angle" min="1" max="360" step="1" list="te-roll-angles" aria-label="Roll angle, degrees"><span>°</span></label>
                   <datalist id="te-roll-angles"><option value="90"></option><option value="180"></option><option value="270"></option></datalist>
                 </div>
+                <div id="te-neck-rows" class="te-rows" hidden>
+                  <label class="vp-bend-field" title="How long the neck runs along the tube, in mm, centred where you click the tube.">Length
+                    <input type="number" id="inp-te-neck-length" min="0.1" step="0.5" aria-label="Neck length, mm"><span>mm</span></label>
+                  <label class="vp-bend-field" title="How far the wall moves at the neck's waist, in mm: below 0 pinches the tube in, above 0 bulges it out. The wall's thickness is kept.">Δr
+                    <input type="number" id="inp-te-neck-dr" step="0.5" aria-label="Neck delta r, mm (negative pinches, positive expands)"><span>mm</span></label>
+                  <label class="vp-bend-field" title="Smooth: a cosine ease in and out, tangent to the tube at both ends. Funnel: a straight taper in and a straight taper out.">Profile
+                    <select id="sel-te-neck-profile" class="vp-select" aria-label="Neck profile">
+                      <option value="smooth" selected>Smooth</option>
+                      <option value="funnel">Funnel</option>
+                    </select></label>
+                </div>
                 <p id="te-readout" class="bend-readout">—</p>
                 <div class="vp-row vp-row-pair">
                   <button id="btn-te-go" class="btn btn-secondary" type="button" disabled
-                          title="Flare or roll the end as the ghost shows. One Undo puts it back.">Set</button>
+                          title="Flare, roll or neck the tube as the ghost shows. One Undo puts it back.">Set</button>
                   <button id="btn-te-cancel" class="btn btn-secondary" type="button" title="Close the card; the piece is unchanged.">Cancel</button>
                 </div>
               </div>
@@ -1364,7 +1376,7 @@
   <script src="nso_slicer.js?v=slice1"></script>
   <script src="nso_raster_lines.js?v=raster1"></script>
   <script src="nso_relief.js?v=relief2"></script>
-  <script src="app-core.js?v=tube1"></script>
+  <script src="app-core.js?v=neck1"></script>
 
 
 
@@ -1393,7 +1405,10 @@
        (the circle fit), nso_bend.js (the topology gate) and app-sculpt.js (the
        commit). See docs/TUBE-EDGE.md. -->
   <script src="nso_tube_edge.js?v=tube1"></script>
-  <script src="app-tube-edge.js?v=tube1"></script>
+  <!-- Neck: a pinch or a bulge along a tube. After nso_tube_edge.js (its end
+       reader, weld and helpers). See docs/TUBE-EDGE.md, "Neck". -->
+  <script src="nso_tube_neck.js?v=neck1"></script>
+  <script src="app-tube-edge.js?v=neck1"></script>
   <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
        nso_planar_fuse.js (the vertex space), nso_thickness.js,
        nso_assemble.js (the seat), nso_path_sweep.js (the rod) and

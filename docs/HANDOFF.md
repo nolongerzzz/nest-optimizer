@@ -1394,6 +1394,23 @@ face the other's offset by the wall, so the wall holds through the new section
   nozzle widths of the end ring, where the new wall must meet the old.
 - **Inward and non-circular ends are refused**, by name; inward is a later ticket.
 
+**Neck** (2026-10-15) is the card's third verb: `nso_tube_neck.js`, loaded
+after `nso_tube_edge.js` at `?v=neck1`. A pinch (Δr < 0) or a bulge anywhere
+along the tube, a band of the given Length centred where the tube is clicked,
+Smooth (cosine) or Funnel (straight in, straight out), the wall carried exactly
+the same way. Before a later ticket touches it:
+- **The axis is Tube edge's end reader**; the wall across the band must be two
+  cylinders about it (normals square to the axis, one radius each). Anything
+  else there - a neck already made, a taper, the end - refuses, naming where
+  the wall stops being straight. That is how **necks may not overlap**.
+- **Δr is a change of radius**, as Flare's is. The bore limit: a pinch may
+  narrow the bore to no less than 2 nozzle widths across.
+- **Each face's band is rebuilt between two whole rings** of its vertices; the
+  lower ring is carried up (no weld) and the last station zipped to the upper
+  ring by angle. Each neck is its own commit and its own Undo
+  (`tubeNeckReplace`). `npm run tube:neck`; screenshots from
+  `TUBE_NECK_SHOTS=dir npm run tube:neck-shots` (not a test step).
+
 `npm run tube:edges` (headless) and `npm run tube:edges-drive` (real app),
 both in `npm test`.
 
