@@ -513,15 +513,14 @@ select:focus, input:focus {
    unconditional so a later rule cannot quietly reopen it. */
 .library-list[hidden] { display: none !important; }
 /* The Scale card (part 3): every field is one compact row - label, field,
-   unit or the hold it keeps, Set - Length and Longest included, so the card
-   fits a 900 px-tall window without scrolling. The card body makes every .btn
-   full width, which on a flex row pushed the hold onto a line of its own;
-   the grid puts each part in its own column. Rows the piece has no use for
-   are [hidden], and an author display rule beats the UA sheet's
-   [hidden] { display: none }, so it is said here, unconditionally. */
+   unit or the hold it keeps - Length and Longest included, so the card fits
+   a 900 px-tall window without scrolling. The fields are live (app-scale.js),
+   so a row has no Set. The grid puts each part in its own column. Rows the
+   piece has no use for are [hidden], and an author display rule beats the UA
+   sheet's [hidden] { display: none }, so it is said here, unconditionally. */
 #scale-rows .scale-row {
   display: grid;
-  grid-template-columns: 4.2rem 5.4rem 1fr auto;
+  grid-template-columns: 4.2rem 5.4rem 1fr;
   align-items: center;
   gap: 6px;
   margin: 4px 0;
@@ -529,11 +528,16 @@ select:focus, input:focus {
 #scale-rows .scale-row[hidden] { display: none !important; }
 #scale-rows .scale-row label { margin: 0; white-space: nowrap; }
 #scale-rows .scale-row input { width: 100% !important; margin: 0; padding-top: 4px; padding-bottom: 4px; }
-#scale-rows .scale-row .btn { width: auto; margin: 0; padding: 4px 10px; }
 #scale-rows .scale-row .hint { margin: 0; white-space: nowrap; }
 /* A row's sentence, on its own line under the row, shown only with it. */
 #scale-rows .scale-note { margin: -2px 0 4px; }
-#scale-rows .scale-row[hidden] + .scale-note { display: none; }
+#scale-rows .scale-row[hidden] + .scale-note,
+#scale-rows .scale-row[hidden] + .scale-why + .scale-note { display: none; }
+/* Why the value typed is refused, under its field, while it is typed. The
+   piece stays at the last good value and nothing is committed. */
+#scale-rows .scale-why { margin: -2px 0 4px; color: #f87171; white-space: normal; }
+#scale-rows .scale-why[hidden] { display: none; }
+#scale-rows .scale-row input[aria-invalid="true"] { border-color: #f87171; }
 #scale-card > #btn-scale-fit { margin-top: 4px; }
 /* The card's mm | in toggle: two small segments, top right, the pressed one
    lit. Its own class rather than .btn, which the card body makes full width. */

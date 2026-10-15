@@ -1,6 +1,7 @@
 /* The Scale card's mm | in toggle, driven through the real app with real
-   clicks. Display and entry only: the engines stay in mm, the card converts
-   at its edge.
+   clicks and a real keyboard. Display and entry only: the engines stay in
+   mm, the card converts at its edge. The fields are live - typed, then left
+   with Tab, which is what commits a value (there is no Set).
    node tools/nso_scale_inches_drive_check.js               exit 0 = every gate held
    node tools/nso_scale_inches_drive_check.js --shots DIR   also write DIR/*.png
                                                             (a scratch directory -
@@ -10,7 +11,7 @@
      a  inches shown: the readout, every box, its unit label, aria-label and
         min / max / step say inches; nothing on the card says mm but the
         toggle's own "mm" segment; Whole x is untouched
-     b  an inch value typed and its verb pressed lands on exactly the soup
+     b  an inch value typed and the field left lands on exactly the soup
         the engine gives for value x 25.4 mm, run headless on the same piece
      c  toggling in -> mm -> in -> mm leaves the soup, its size and the
         undo stack exactly as they were, and the mm card exactly as it was
@@ -22,7 +23,7 @@
      f  the choice survives a reload; with localStorage unavailable the card
         comes up in mm and the toggle still works
    and the three Scale polish items, with inches shown:
-     -  the upright tube's axis row is Height, and Height pressed in inches
+     -  the upright tube's axis row is Height, and Height typed in inches
         lands on the engine's soup for value x 25.4
      -  the Offset row's sentence reads its lid strap in inches
      -  Longest on a bar turned 90° about Z and tipped, baked into its
@@ -85,7 +86,11 @@ const card = async page => {
       unit[r] = h ? h.textContent : null;
     }
     const pressed = ['mm', 'in'].filter(u => document.getElementById('btn-scale-unit-' + u).getAttribute('aria-pressed') === 'true');
-    const titles = Array.from(document.querySelectorAll('#scale-card button[title]')).map(b => b.title);
+    const titles = Array.from(document.querySelectorAll('#scale-card button[title], #scale-rows input[title]')).map(b => b.title);
+    // The section rows' own titles: a shape row (#186) is never shown on a
+    // ring, rod or box, and its capsule Diameter says "the overall length".
+    const sectionTitles = Array.from(document.querySelectorAll('#scale-card button[title], #scale-rows input[title]'))
+      .filter(b => !/^scale-(cap|ell|torus)-/.test(b.id)).map(b => b.title);
     // everything the card says, the toggle aside: its text, aria-labels and titles
     const c = document.getElementById('scale-card').cloneNode(true);
     c.querySelector('.scale-unit').remove();
@@ -94,7 +99,7 @@ const card = async page => {
     return {
       readout: document.getElementById('scale-readout').textContent,
       note: document.getElementById('scale-offset-note').textContent,
-      shown, val, unit, aria, lim, titles, said, pressed: pressed.join(),
+      shown, val, unit, aria, lim, titles, sectionTitles, said, pressed: pressed.join(),
       rows: rows.filter(r => shown[r]).join(','),
       size: m ? { x: m.size.x, y: m.size.y, z: m.size.z } : null,
       soup: m ? Array.from(m.rawTris).join(',') : '',
@@ -138,10 +143,22 @@ async function clickScale(page, sel, waitRe) {
     waitRe, { timeout: 60000 });
   return statusOf(page);
 }
-async function setAndPress(page, input, button, value, waitRe) {
+/* Type into a field as a person does, without leaving it. */
+async function type(page, input, value) {
   await openMenuFor(page, '#' + input);
-  await setFields(page, { [input]: value });
-  return clickScale(page, '#' + button, waitRe);
+  await page.focus('#' + input);
+  await page.keyboard.press('Control+A');
+  if (String(value) === '') await page.keyboard.press('Backspace');
+  else await page.keyboard.type(String(value));
+}
+/* Type, then leave the field with Tab - which is what commits it. */
+async function typeAndLeave(page, input, value, waitRe) {
+  await type(page, input, value);
+  await page.evaluate(() => { document.getElementById('status').textContent = ''; });
+  await page.keyboard.press('Tab');
+  await page.waitForFunction(re => new RegExp(re).test(document.getElementById('status').textContent),
+    waitRe, { timeout: 60000 });
+  return statusOf(page);
 }
 async function undo(page) {
   await page.evaluate(() => { document.getElementById('status').textContent = ''; });
@@ -157,7 +174,7 @@ async function shot(page, name) {
 
 /* Keep the selected piece's soup as it stands, for the headless replay. */
 const keepSoup = page => page.evaluate(() => { window.__nsoBefore = getActiveModel().rawTris; });
-/* Did the card's press land on exactly the soup the engine gives for `run`
+/* Did the card's field land on exactly the soup the engine gives for `run`
    on the kept soup? run is a string - evaluated in the page. */
 const sameAsEngine = (page, run) => page.evaluate(src => {
   const soup = window.__nsoBefore, m = getActiveModel();
@@ -201,8 +218,8 @@ async function unitsHold(page, label, expect) {
     JSON.stringify(c.unit));
   const heldTitles = t => t.filter(x => /\b(length|height|width) is held\b/.test(x));
   check('(a) ' + label + ': Outer Ø and Diameter say "the ' + held + ' is held", in mm and in inches',
-    heldTitles(c.titles).length === 2 && heldTitles(c.titles).every(x => x.indexOf('the ' + held + ' is held') >= 0) &&
-    heldTitles(mm.titles).every(x => x.indexOf('the ' + held + ' is held') >= 0), heldTitles(c.titles).join(' | '));
+    heldTitles(c.sectionTitles).length === 2 && heldTitles(c.sectionTitles).every(x => x.indexOf('the ' + held + ' is held') >= 0) &&
+    heldTitles(mm.sectionTitles).every(x => x.indexOf('the ' + held + ' is held') >= 0), heldTitles(c.sectionTitles).join(' | '));
   check('(a) ' + label + ': step 0.1 mm -> 0.005 in; limits converted onto that grid',
     ['length', 'width', 'height', 'ring-outer', 'ring-wall', 'rod-diameter'].every(r => c.lim[r] === '0.005 / 78.74 / 0.005') &&
     c.lim.offset === '-0.785 / 0.785 / 0.005' && c.lim.longest === '0.005 / 39.37 / 0.005', JSON.stringify(c.lim));
@@ -247,17 +264,17 @@ withApp(async (page, logs) => {
   check('(a) box: the Offset sentence in mm, then in inches - 0.6 mm -> 0.024 in',
     bmm.note === 'Thin features keep their thickness: a 0.6 mm lid strap stays 0.6 mm.' &&
     bin.note === 'Thin features keep their thickness: a 0.024 in lid strap stays 0.024 in.', bin.note);
-  // A number typed and not yet applied is converted with the card, not lost,
-  // and comes back as typed.
-  await setFields(page, { 'scale-length': '1.5' });
+  // A number typed and the toggle clicked: the click leaves the field, so
+  // the value is kept, then read in the new unit.
+  await type(page, 'scale-length', '1.5');
   const t1 = await unit(page, 'mm'), t2 = await unit(page, 'in');
-  check('(c) a typed, unapplied 1.5 in reads 38.1 mm, and 1.5 again on the way back; the untouched boxes re-read',
-    t1.val.length === '38.1' && t2.val.length === '1.5' && t1.val.width === bmm.val.width && t2.val.width === inch(b.W),
-    t1.val.length + ' / ' + t2.val.length);
-  await setFields(page, { 'scale-length': inch(b.L) });
+  check('(c) 1.5 in typed, then the toggle clicked: the edit is kept, as one step - 38.1 mm, 1.500 in on the way back; the other boxes re-read',
+    t1.val.length === '38.1' && t2.val.length === '1.500' && t1.val.width === bmm.val.width && t2.val.width === inch(b.W) &&
+    t1.undo === bmm.undo + 1 && t2.undo === t1.undo, t1.val.length + ' / ' + t2.val.length + ', undo ' + bmm.undo + ' -> ' + t2.undo);
+  await undo(page);
   // (b) Length 1.25 in: exactly NSO_extendRaw at 1.25 x 25.4 mm on the same soup
   await keepSoup(page);
-  let st = await setAndPress(page, 'scale-length', 'btn-scale-length', '1.25', 'Length (done|refused)|stood down');
+  let st = await typeAndLeave(page, 'scale-length', '1.25', 'Length (done|refused)|stood down');
   console.log('   Length 1.25 in: ' + st);
   let eq = await sameAsEngine(page, 'NSO_extendRaw(soup, { axis: ' + b.axisL + ', length: 1.25 * 25.4 })');
   check('(b) box Length 1.25 in = NSO_extendRaw(length 31.75 mm) on the same soup, float for float', eq.ok, eq.why || eq.floats + ' floats');
@@ -266,31 +283,36 @@ withApp(async (page, logs) => {
   check('(b) ...the Length box re-reads 1.250', c.val.length === '1.250', c.val.length);
   await undo(page);
   await keepSoup(page);
-  st = await setAndPress(page, 'scale-offset', 'btn-scale-offset', '0.0625', 'Offset (done|refused)|stood down');
+  st = await typeAndLeave(page, 'scale-offset', '0.0625', 'Offset (done|refused)|stood down');
   console.log('   Offset 0.0625 in: ' + st);
   eq = await sameAsEngine(page, 'NSO_scaleOffsetRaw(soup, 0.0625 * 25.4, { innerWord: "bore or pocket" })');
   check('(b) box Offset 0.0625 in = NSO_scaleOffsetRaw(1.5875 mm), float for float', eq.ok, eq.why || eq.floats + ' floats');
   check('(b) ...echoed as typed, not cut to 3 places: "outward 0.0625 in"', /^Offset done - outward 0\.0625 in, /.test(st) && !/\bmm\b/.test(st), st);
   await undo(page);
   await keepSoup(page);
-  st = await setAndPress(page, 'scale-factor', 'btn-scale-factor', '2', 'Scale done|refused|stood down');
+  st = await typeAndLeave(page, 'scale-factor', '2', 'Scale done|refused|stood down');
   console.log('   Whole × 2: ' + st);
   eq = await sameAsEngine(page, 'NSO_scaleSoup(soup, { factor: 2 })');
   check('(b) Whole × 2 is a plain factor in either unit', eq.ok && /, size [\d.]+ x [\d.]+ x [\d.]+ in, open 0/.test(st), eq.why || st);
   await undo(page);
   // (d) refusals
   await keepSoup(page);
-  st = await setAndPress(page, 'scale-offset', 'btn-scale-offset', '-1', 'Offset (done|refused)|stood down');
+  st = await typeAndLeave(page, 'scale-offset', '-1', 'Offset (done|refused)|stood down');
   console.log('   Offset -1 in: ' + st);
   check('(d) box Offset -1 in refused at the nozzle floor: 0.42 mm -> 0.017 in, 0.4 mm nozzle -> 0.016 in',
     st === 'Offset refused - piece unchanged (its ' + 'XYZ'[[b.sizes.w, b.sizes.d, b.sizes.h].indexOf(Math.min(b.sizes.w, b.sizes.d, b.sizes.h))] +
       ' size of ' + inch(Math.min(b.sizes.w, b.sizes.d, b.sizes.h)) + ' in would go through zero, under the 0.017 in floor for a 0.016 in nozzle' +
       ' - the most it can shrink is ' + inch(Math.floor((Math.min(b.sizes.w, b.sizes.d, b.sizes.h) - 0.42) / 2 * 100) / 100) + ' in)' && !/\bmm\b/.test(st) && await unchanged(page), st);
-  st = await setAndPress(page, 'scale-width', 'btn-scale-width', '-1', 'Width (done|refused)|stood down');
+  st = await typeAndLeave(page, 'scale-width', '-1', 'Width (done|refused)|stood down');
   console.log('   Width -1 in: ' + st);
   check('(d) box Width -1 in: "must be a positive number of inches"', st === 'Width refused - piece unchanged (Width must be a positive number of inches)' && await unchanged(page), st);
-  st = await setAndPress(page, 'scale-offset', 'btn-scale-offset', '', 'Offset');
-  check('(d) an empty Offset asks for inches', st === 'Offset: type how far to move the outside, in inches - positive grows, negative shrinks', st);
+  const u0 = await card(page);
+  await type(page, 'scale-offset', '');
+  await page.keyboard.press('Tab');
+  await page.waitForTimeout(300);
+  const u1 = await card(page);
+  check('(d) an empty Offset left: nothing committed, the piece and the undo stack as they were',
+    u1.undo === u0.undo && await unchanged(page) && u1.val.offset === '', 'undo ' + u0.undo + ' -> ' + u1.undo);
 
   // Shorten's refusal needs a piece with walls: the 100 x 40 x 25 tray of
   // tools/nso_scale_card_drive_check.js, 2 mm walls and floor.
@@ -302,7 +324,7 @@ withApp(async (page, logs) => {
   console.log('   tray:    ' + c.readout);
   await keepSoup(page);
   const hMm = await page.evaluate(() => NSO_extendRaw(window.__nsoBefore, { axis: 2, length: 0.06 * 25.4 }).reason);
-  st = await setAndPress(page, 'scale-height', 'btn-scale-height', '0.06', 'Height (done|refused)|stood down');
+  st = await typeAndLeave(page, 'scale-height', '0.06', 'Height (done|refused)|stood down');
   console.log('   Height 0.06 in: ' + st);
   console.log('     engine in mm: ' + hMm);
   check('(d) tray Height 0.06 in refused, Shorten\'s most and the asked-for in inches, piece unchanged',
@@ -319,7 +341,7 @@ withApp(async (page, logs) => {
   await shot(page, '02-tube-inches');
   // Stood up, the ring's axis is its own Z: the Height row, in inches.
   await keepSoup(page);
-  st = await setAndPress(page, 'scale-height', 'btn-scale-height', '1.25', 'Height (done|refused)|stood down');
+  st = await typeAndLeave(page, 'scale-height', '1.25', 'Height (done|refused)|stood down');
   console.log('   Height 1.25 in: ' + st);
   eq = await sameAsEngine(page, 'NSO_extendRaw(soup, { axis: ' + t.axisH + ', length: 1.25 * 25.4 })');
   check('(b) tube Height 1.25 in = NSO_extendRaw(Z, 31.75 mm), float for float', t.axisH === 2 && eq.ok, eq.why || eq.floats + ' floats');
@@ -327,18 +349,18 @@ withApp(async (page, logs) => {
     !/\bmm\b/.test(st), st);
   await undo(page);
   await keepSoup(page);
-  st = await setAndPress(page, 'scale-ring-outer', 'btn-scale-ring-outer', '2', 'Outer Ø (done|refused)|stood down');
+  st = await typeAndLeave(page, 'scale-ring-outer', '2', 'Outer Ø (done|refused)|stood down');
   console.log('   Outer Ø 2 in: ' + st);
   eq = await sameAsEngine(page, 'NSO_ringApplyRaw(soup, "outer", 2 * 25.4)');
   check('(b) tube Outer Ø 2 in = NSO_ringApplyRaw(outer, 50.8 mm), float for float', eq.ok, eq.why || eq.floats + ' floats');
   check('(b) ...and says so in inches', /→ Ø2\.000 in \/ Ø[\d.]+ in wall [\d.]+ in, wall kept, height held$/.test(st) && !/\bmm\b/.test(st), st);
   await undo(page);
   await keepSoup(page);
-  st = await setAndPress(page, 'scale-ring-wall', 'btn-scale-ring-wall', '0.01', 'Wall (done|refused)|stood down');
+  st = await typeAndLeave(page, 'scale-ring-wall', '0.01', 'Wall (done|refused)|stood down');
   console.log('   Wall 0.01 in: ' + st);
   check('(d) tube Wall 0.01 in refused under the floor, both in inches: 0.254 mm -> 0.010 in, 0.42 mm -> 0.017 in',
     st === 'Wall refused - piece unchanged (wall would be 0.010 in, under the 0.017 in floor)' && await unchanged(page), st);
-  st = await setAndPress(page, 'scale-ring-outer', 'btn-scale-ring-outer', '0.1', 'Outer Ø (done|refused)|stood down');
+  st = await typeAndLeave(page, 'scale-ring-outer', '0.1', 'Outer Ø (done|refused)|stood down');
   console.log('   Outer Ø 0.1 in: ' + st);
   check('(d) tube Outer Ø 0.1 in: the bore closes, its Ø named in inches', /^Outer Ø refused - piece unchanged \(bore would close up - Ø-[\d.]+ in is at or below zero\)$/.test(st) && await unchanged(page), st);
 
@@ -351,20 +373,20 @@ withApp(async (page, logs) => {
   });
   await shot(page, '03-rod-inches');
   await keepSoup(page);
-  st = await setAndPress(page, 'scale-rod-diameter', 'btn-scale-rod-diameter', '1.1', 'Diameter (done|refused)|stood down');
+  st = await typeAndLeave(page, 'scale-rod-diameter', '1.1', 'Diameter (done|refused)|stood down');
   console.log('   Diameter 1.1 in: ' + st);
   eq = await sameAsEngine(page, 'NSO_ringApplyRaw(soup, "diameter", 1.1 * 25.4)');
   check('(b) rod Diameter 1.1 in = NSO_ringApplyRaw(diameter, 27.94 mm), float for float', eq.ok, eq.why || eq.floats + ' floats');
   check('(b) ...and says so in inches', /^Diameter done - Diameter Ø[\d.]+ in → Ø1\.100 in, height held$/.test(st), st);
   await undo(page);
   await keepSoup(page);
-  st = await setAndPress(page, 'scale-height', 'btn-scale-height', '2', 'Height (done|refused)|stood down');
+  st = await typeAndLeave(page, 'scale-height', '2', 'Height (done|refused)|stood down');
   eq = await sameAsEngine(page, 'NSO_extendRaw(soup, { axis: ' + r.axisH + ', length: 2 * 25.4 })');
   console.log('   Height 2 in: ' + st);
   check('(b) rod stood up: Height 2 in = NSO_extendRaw(Z, 50.8 mm), float for float', r.axisH === 2 && eq.ok, eq.why || eq.floats + ' floats');
   await undo(page);
   await keepSoup(page);
-  st = await setAndPress(page, 'scale-rod-diameter', 'btn-scale-rod-diameter', '-0.5', 'Diameter (done|refused)|stood down');
+  st = await typeAndLeave(page, 'scale-rod-diameter', '-0.5', 'Diameter (done|refused)|stood down');
   console.log('   Diameter -0.5 in: ' + st);
   check('(d) rod Diameter -0.5 in refused, its zero named in inches',
     st === 'Diameter refused - piece unchanged (diameter would be -0.500 in - a rod needs more than zero)' && await unchanged(page), st);
@@ -376,7 +398,7 @@ withApp(async (page, logs) => {
   console.log('   readout: ' + c.readout);
   check('the verdict: 5.0 mm too wide -> 0.197 in too wide for A1 Mini', / · 0\.197 in too wide for A1 Mini$/.test(c.readout), c.readout);
   await keepSoup(page);
-  st = await setAndPress(page, 'scale-target', 'btn-scale-dim', '7.0625', 'Scale (done|refused)|stood down');
+  st = await typeAndLeave(page, 'scale-target', '7.0625', 'Scale (done|refused)|stood down');
   console.log('   Longest 7.0625 in: ' + st);
   eq = await sameAsEngine(page, 'NSO_scaleSoup(soup, { axis: "longest", targetMm: 7.0625 * 25.4 })');
   check('(b) Longest 7.0625 in = NSO_scaleSoup(longest 179.3875 mm), float for float', eq.ok, eq.why || eq.floats + ' floats');
@@ -404,8 +426,10 @@ withApp(async (page, logs) => {
   console.log('   readout: ' + c.readout + '   Longest box ' + c.val.longest);
   check('the Longest box reads the long edge, 120 mm -> 4.724 in', c.val.longest === '4.724', c.val.longest);
   await keepSoup(page);
-  await page.evaluate(() => { document.getElementById('scale-target').value = '6'; document.getElementById('status').textContent = '';
-    document.getElementById('btn-scale-dim').click(); });
+  // The row is hidden (the bar's Height shows the same number), so the value
+  // is set from script and the field's change fired, with it not focused.
+  await page.evaluate(() => { document.getElementById('status').textContent = ''; });
+  await setFields(page, { 'scale-target': '6' });
   await page.waitForFunction(() => /Scale (done|refused)|stood down/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
   st = await statusOf(page);
   console.log('   Longest 6 in: ' + st);

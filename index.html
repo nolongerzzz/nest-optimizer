@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=supcardcol1" />
+  <link rel="stylesheet" href="styles.css?v=scalelivecol1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -385,45 +385,38 @@
               <div id="scale-rows">
               <div class="edit-row scale-row" id="scale-length-row" hidden>
               <label for="scale-length">Length</label>
-              <input id="scale-length" type="number" min="0.1" max="2000" step="0.1" aria-label="Length, mm" />
+              <input id="scale-length" title="Lengthen or shorten the piece along its own length - longer extends, shorter shortens - by inserting or removing material inside one straight run, so walls, floor, holes and lips keep their size. Shortening says the most it can take." type="number" min="0.1" max="2000" step="0.1" aria-label="Length, mm" />
               <span class="hint">mm</span>
-              <button id="btn-scale-length" class="btn btn-secondary" type="button" title="Lengthen or shorten the piece along its own length - longer extends, shorter shortens - by inserting or removing material inside one straight run, so walls, floor, holes and lips keep their size. Shortening says the most it can take.">Set</button>
               </div>
               <div class="edit-row scale-row" id="scale-width-row" hidden>
               <label for="scale-width">Width</label>
-              <input id="scale-width" type="number" min="0.1" max="2000" step="0.1" aria-label="Width, mm" />
+              <input id="scale-width" title="Widen or narrow the piece across its own width the same way: material goes in or comes out inside one straight run, and every wall, floor, hole and lip keeps its size." type="number" min="0.1" max="2000" step="0.1" aria-label="Width, mm" />
               <span class="hint">mm</span>
-              <button id="btn-scale-width" class="btn btn-secondary" type="button" title="Widen or narrow the piece across its own width the same way: material goes in or comes out inside one straight run, and every wall, floor, hole and lip keeps its size.">Set</button>
               </div>
               <div class="edit-row scale-row" id="scale-height-row" hidden>
               <label for="scale-height">Height</label>
-              <input id="scale-height" type="number" min="0.1" max="2000" step="0.1" aria-label="Height, mm" />
+              <input id="scale-height" title="Make the piece taller or shorter along its own Z the same way: material goes in or comes out inside one straight run, so the floor and every wall keep their thickness." type="number" min="0.1" max="2000" step="0.1" aria-label="Height, mm" />
               <span class="hint">mm</span>
-              <button id="btn-scale-height" class="btn btn-secondary" type="button" title="Make the piece taller or shorter along its own Z the same way: material goes in or comes out inside one straight run, so the floor and every wall keep their thickness.">Set</button>
               </div>
               <div class="edit-row scale-row" id="scale-ring-outer-row" hidden>
               <label for="scale-ring-outer">Outer &Oslash;</label>
-              <input id="scale-ring-outer" type="number" min="0.1" max="2000" step="0.1" aria-label="Outer &Oslash;, mm" />
+              <input id="scale-ring-outer" title="Move the outer wall to this diameter and the bore by the same amount, so the wall stays as it is. Faces move; nothing is scaled; the length is held." type="number" min="0.1" max="2000" step="0.1" aria-label="Outer &Oslash;, mm" />
               <span class="hint">wall kept</span>
-              <button id="btn-scale-ring-outer" class="btn btn-secondary" type="button" title="Move the outer wall to this diameter and the bore by the same amount, so the wall stays as it is. Faces move; nothing is scaled; the length is held.">Set</button>
               </div>
               <div class="edit-row scale-row" id="scale-ring-wall-row" hidden>
               <label for="scale-ring-wall">Wall</label>
-              <input id="scale-ring-wall" type="number" min="0.1" max="2000" step="0.1" aria-label="Wall, mm" />
+              <input id="scale-ring-wall" title="Move the bore wall so the wall is this thick. The outer stays where it is. Refused under the nozzle-safety wall floor." type="number" min="0.1" max="2000" step="0.1" aria-label="Wall, mm" />
               <span class="hint">outer kept</span>
-              <button id="btn-scale-ring-wall" class="btn btn-secondary" type="button" title="Move the bore wall so the wall is this thick. The outer stays where it is. Refused under the nozzle-safety wall floor.">Set</button>
               </div>
               <div class="edit-row scale-row" id="scale-rod-diameter-row" hidden>
               <label for="scale-rod-diameter">Diameter</label>
-              <input id="scale-rod-diameter" type="number" min="0.1" max="2000" step="0.1" aria-label="Diameter, mm" />
+              <input id="scale-rod-diameter" title="Move the rod's wall to this diameter. Faces move; nothing is scaled; the length is held." type="number" min="0.1" max="2000" step="0.1" aria-label="Diameter, mm" />
               <span class="hint">length kept</span>
-              <button id="btn-scale-rod-diameter" class="btn btn-secondary" type="button" title="Move the rod's wall to this diameter. Faces move; nothing is scaled; the length is held.">Set</button>
               </div>
               <div class="edit-row scale-row" id="scale-offset-row" hidden>
               <label for="scale-offset">Offset</label>
-              <input id="scale-offset" type="number" min="-20" max="20" step="0.1" aria-label="Offset, mm - positive grows, negative shrinks" aria-describedby="scale-offset-note" />
+              <input id="scale-offset" title="Move the whole outside out (positive) or in (negative) by this many mm. Every inner face follows, so walls and floors keep their thickness. Refused where a bore or pocket would close, or a section would drop under the nozzle-safety floor." type="number" min="-20" max="20" step="0.1" aria-label="Offset, mm - positive grows, negative shrinks" aria-describedby="scale-offset-note" />
               <span class="hint">mm, wall kept</span>
-              <button id="btn-scale-offset" class="btn btn-secondary" type="button" title="Move the whole outside out (positive) or in (negative) by this many mm. Every inner face follows, so walls and floors keep their thickness. Refused where a bore or pocket would close, or a section would drop under the nozzle-safety floor.">Set</button>
               </div>
               <!-- The Offset row's sentence: too long for the row's unit column, so
                    it sits under the row and goes with it (styles.css). -->
@@ -432,57 +425,48 @@
                    torus. Each changes one thing; shown instead of the rows above. -->
               <div class="edit-row scale-row" id="scale-cap-length-row" hidden>
               <label for="scale-cap-length">Length</label>
-              <input id="scale-cap-length" type="number" min="0.1" max="2000" step="0.1" aria-label="Capsule length, mm" />
+              <input id="scale-cap-length" title="Lengthen or shorten the straight band between the two hemispheres. The hemispheres move but never change shape. Refused under 2× the radius." type="number" min="0.1" max="2000" step="0.1" aria-label="Capsule length, mm" />
               <span class="hint">ends kept</span>
-              <button id="btn-scale-cap-length" class="btn btn-secondary" type="button" title="Lengthen or shorten the straight band between the two hemispheres. The hemispheres move but never change shape. Refused under 2× the radius.">Set</button>
               </div>
               <div class="edit-row scale-row" id="scale-cap-diameter-row" hidden>
               <label for="scale-cap-diameter">Diameter</label>
-              <input id="scale-cap-diameter" type="number" min="0.1" max="2000" step="0.1" aria-label="Capsule diameter, mm" />
+              <input id="scale-cap-diameter" title="Scale the capsule's whole cross-section to this diameter. Both ends stay hemispheres and the overall length is held. Refused over the length." type="number" min="0.1" max="2000" step="0.1" aria-label="Capsule diameter, mm" />
               <span class="hint">length kept</span>
-              <button id="btn-scale-cap-diameter" class="btn btn-secondary" type="button" title="Scale the capsule's whole cross-section to this diameter. Both ends stay hemispheres and the overall length is held. Refused over the length.">Set</button>
               </div>
               <div class="edit-row scale-row" id="scale-ell-a-row" hidden>
               <label for="scale-ell-a">A</label>
-              <input id="scale-ell-a" type="number" min="0.1" max="2000" step="0.1" aria-label="Axis A (X), mm" />
+              <input id="scale-ell-a" title="Make the piece this long along its own X, an exact scale along X alone. Y and Z are not touched." type="number" min="0.1" max="2000" step="0.1" aria-label="Axis A (X), mm" />
               <span class="hint">X only</span>
-              <button id="btn-scale-ell-a" class="btn btn-secondary" type="button" title="Make the piece this long along its own X, an exact scale along X alone. Y and Z are not touched.">Set</button>
               </div>
               <div class="edit-row scale-row" id="scale-ell-b-row" hidden>
               <label for="scale-ell-b">B</label>
-              <input id="scale-ell-b" type="number" min="0.1" max="2000" step="0.1" aria-label="Axis B (Y), mm" />
+              <input id="scale-ell-b" title="Make the piece this long along its own Y, an exact scale along Y alone. X and Z are not touched." type="number" min="0.1" max="2000" step="0.1" aria-label="Axis B (Y), mm" />
               <span class="hint">Y only</span>
-              <button id="btn-scale-ell-b" class="btn btn-secondary" type="button" title="Make the piece this long along its own Y, an exact scale along Y alone. X and Z are not touched.">Set</button>
               </div>
               <div class="edit-row scale-row" id="scale-ell-c-row" hidden>
               <label for="scale-ell-c">C</label>
-              <input id="scale-ell-c" type="number" min="0.1" max="2000" step="0.1" aria-label="Axis C (Z), mm" />
+              <input id="scale-ell-c" title="Make the piece this tall along its own Z, an exact scale along Z alone. X and Y are not touched." type="number" min="0.1" max="2000" step="0.1" aria-label="Axis C (Z), mm" />
               <span class="hint">Z only</span>
-              <button id="btn-scale-ell-c" class="btn btn-secondary" type="button" title="Make the piece this tall along its own Z, an exact scale along Z alone. X and Y are not touched.">Set</button>
               </div>
               <div class="edit-row scale-row" id="scale-torus-ring-row" hidden>
               <label for="scale-torus-ring">Ring &Oslash;</label>
-              <input id="scale-torus-ring" type="number" min="0.1" max="2000" step="0.1" aria-label="Ring &Oslash;, mm" />
+              <input id="scale-torus-ring" title="Move the tube in or out to this centreline diameter. The tube's section is unchanged. Refused where the tube would reach the axis." type="number" min="0.1" max="2000" step="0.1" aria-label="Ring &Oslash;, mm" />
               <span class="hint">tube kept</span>
-              <button id="btn-scale-torus-ring" class="btn btn-secondary" type="button" title="Move the tube in or out to this centreline diameter. The tube's section is unchanged. Refused where the tube would reach the axis.">Set</button>
               </div>
               <div class="edit-row scale-row" id="scale-torus-tube-row" hidden>
               <label for="scale-torus-tube">Tube &Oslash;</label>
-              <input id="scale-torus-tube" type="number" min="0.1" max="2000" step="0.1" aria-label="Tube &Oslash;, mm" />
+              <input id="scale-torus-tube" title="Scale the tube's section to this diameter about its own centreline. The ring diameter is held, and a hollow tube keeps its wall. Refused where the tube would reach the axis." type="number" min="0.1" max="2000" step="0.1" aria-label="Tube &Oslash;, mm" />
               <span class="hint">ring kept</span>
-              <button id="btn-scale-torus-tube" class="btn btn-secondary" type="button" title="Scale the tube's section to this diameter about its own centreline. The ring diameter is held, and a hollow tube keeps its wall. Refused where the tube would reach the axis.">Set</button>
               </div>
               <div class="edit-row scale-row" id="scale-factor-row">
               <label for="scale-factor">Whole &times;</label>
-              <input id="scale-factor" type="number" min="0.0001" max="10000" step="0.01" value="1" aria-label="Uniform scale factor" />
+              <input id="scale-factor" title="Plain uniform multiplier: every size, wall and hole by the same factor." type="number" min="0.0001" max="10000" step="0.01" value="1" aria-label="Uniform scale factor" />
               <span class="hint"></span>
-              <button id="btn-scale-factor" class="btn btn-secondary" type="button" title="Plain uniform multiplier: every size, wall and hole by the same factor.">Scale</button>
               </div>
               <div class="edit-row scale-row" id="scale-longest-row">
               <label for="scale-target">Longest</label>
-              <input id="scale-target" type="number" min="0.1" max="1000" step="0.1" aria-label="Longest edge, mm" />
+              <input id="scale-target" title="Solve the uniform factor that makes the piece's longest edge exactly this many mm. Hidden when Length, Width, Height or a diameter already shows the same number." type="number" min="0.1" max="1000" step="0.1" aria-label="Longest edge, mm" />
               <span class="hint">mm</span>
-              <button id="btn-scale-dim" class="btn btn-secondary" type="button" title="Solve the uniform factor that makes the piece's longest edge exactly this many mm. Hidden when Length, Width, Height or a diameter already shows the same number.">Set</button>
               </div>
               </div>
               <button id="btn-scale-fit" class="btn btn-secondary" type="button"
@@ -1510,7 +1494,7 @@
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=polish2"></script>
-  <script src="app-scale.js?v=shapes1"></script>
+  <script src="app-scale.js?v=shapeslive1"></script>
   <script src="app-brush.js?v=helpers1"></script>
   <script src="app-wheel.js?v=wheel3"></script>
   <script src="app-fit.js?v=wheel4"></script>

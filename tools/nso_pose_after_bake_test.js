@@ -307,7 +307,7 @@ withApp(async (page, logs) => {
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   check('no uncaught page errors', errs.length === 0, errs.join(' | '));
   const missing = await page.evaluate(() => ['btn-smooth','btn-skin-face','btn-skin-wrap','btn-texture',
-    'btn-scale-dim','btn-carve','btn-rot-left','btn-tip','chk-move-vertical'].filter(i => !document.getElementById(i)));
+    'scale-target','btn-carve','btn-rot-left','btn-tip','chk-move-vertical'].filter(i => !document.getElementById(i)));
   check('every bake and pose button still present', missing.length === 0, missing.join(','));
 
   console.log('\n----------------------------------------------------------');

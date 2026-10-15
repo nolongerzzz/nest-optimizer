@@ -54,10 +54,16 @@ async function card(page) {
   });
 }
 
+/* The live field (#187: no Set): typed on the keyboard and left with Tab,
+   which is what commits it. */
 async function offset(page, mm, waitRe) {
   await openMenuFor(page, '#scale-offset');
-  await page.evaluate(v => { document.getElementById('scale-offset').value = String(v); document.getElementById('status').textContent = ''; }, mm);
-  await page.click('#btn-scale-offset');
+  await page.focus('#scale-offset');
+  await page.keyboard.press('Control+A');
+  if (String(mm) === '') await page.keyboard.press('Backspace');
+  else await page.keyboard.type(String(mm));
+  await page.evaluate(() => { document.getElementById('status').textContent = ''; });
+  await page.keyboard.press('Tab');
   await page.waitForFunction(re => new RegExp(re).test(document.getElementById('status').textContent), waitRe || 'Offset', { timeout: 60000 });
   return statusOf(page);
 }
@@ -65,13 +71,13 @@ async function offset(page, mm, waitRe) {
 withApp(async (page, logs) => {
   console.log('\n=== 1. Fatten / Shrink are gone; the Offset row is there and wired ===');
   const ui = await page.evaluate(() => {
-    const b = document.getElementById('btn-scale-offset'), i = document.getElementById('scale-offset');
+    const i = document.getElementById('scale-offset');
     return { gone: ['btn-fatten-grow', 'btn-fatten-shrink', 'inp-fatten-mm'].filter(id => document.getElementById(id)),
-             btn: !!b, wired: !!b && b.dataset.nsoWired === '1', input: !!i && i.type === 'number',
-             inScale: !!b && !!b.closest('#scale-card') };
+             wired: !!i && i.dataset.nsoWired === '1', input: !!i && i.type === 'number',
+             inScale: !!i && !!i.closest('#scale-card') };
   });
   check('no Fatten / Shrink control left in the Finish menu', ui.gone.length === 0, ui.gone.join(','));
-  check('#btn-scale-offset is on the Scale card, wired at load, with a numeric field', ui.btn && ui.wired && ui.input && ui.inScale);
+  check('#scale-offset is a live numeric field on the Scale card, wired at load', ui.wired && ui.input && ui.inScale);
 
   console.log('\n=== 2. shown everywhere but on a ring or rod ===');
   const pin = await loadSTL(page, fx('pin.stl'));
@@ -81,11 +87,16 @@ withApp(async (page, logs) => {
   check('pin.stl (a rod): Diameter and Length shown, no Offset', cp.diameter && cp.length && !cp.offset);
   const sphereId = await loadSTL(page, fx('fixture_sphere_curved.stl'));
   await select(page, sphereId);
+  const csph = await card(page);
+  console.log('   sphere: ' + csph.readout);
+  check('the curved sphere reads as a sphere (#186): its A / B / C rows, no Offset, no Length', !csph.offset && !csph.length);
+  const blobId = await loadSTL(page, fx('fixture_blob_organic.stl'));
+  await select(page, blobId);
   const cs = await card(page);
-  console.log('   sphere: ' + cs.readout);
-  check('a curved sphere: Offset shown, no Length', cs.offset && !cs.length);
+  console.log('   blob:   ' + cs.readout);
+  check('a curved blob: Offset shown, no Length', cs.offset && !cs.length);
 
-  console.log('\n=== 3. Offset +0.5 on the sphere, by a real click ===');
+  console.log('\n=== 3. Offset +0.5 on the blob, typed ===');
   const before = await measure(page);
   const s1 = await offset(page, 0.5, 'Offset (done|refused)|stood down');
   const after = await measure(page);
@@ -122,8 +133,14 @@ withApp(async (page, logs) => {
   check('Offset -1000 refused, naming the floor', /^Offset refused - piece unchanged \(its . size of .* would go through zero, under the 0\.42 mm floor/.test(s4), s4);
   check('the piece is byte-for-byte unchanged and no undo entry was pushed',
     (await measure(page)).soup === before.soup && (await page.evaluate(() => state.undoStack.length)) === undoDepth);
-  const s5 = await offset(page, '', 'Offset');
-  check('an empty field asks for a number instead of failing', /^Offset: type how far to move the outside/.test(s5), s5);
+  const depth5 = await page.evaluate(() => state.undoStack.length);
+  await openMenuFor(page, '#scale-offset');
+  await page.focus('#scale-offset');
+  await page.keyboard.press('Control+A');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.press('Tab');
+  check('an empty field, left, changes nothing and pushes no undo step (a live field: empty is no change)',
+    (await measure(page)).soup === before.soup && (await page.evaluate(() => state.undoStack.length)) === depth5);
 
   console.log('\n=== 6. paint wins ===');
   await page.evaluate(() => {
@@ -139,6 +156,7 @@ withApp(async (page, logs) => {
     document.querySelectorAll('.vp-finish-menu .vp-sec').forEach(x => { x.open = true; }); });
 
   console.log('\n=== 7. REGRESSION: the Thicken buttons still behave exactly as before ===');
+  await select(page, sphereId);
   // Offset's whole claim is that wallKept is additive to Thicken. The sphere is the
   // sharpest case for that: it has no axis at all, so if the axis restriction
   // had leaked into Thicken's default path this is where it would show.

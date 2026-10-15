@@ -92,10 +92,12 @@ withApp(async (page, logs) => {
       card: !!el('scale-card'),
       axisMenu: !!el('scale-axis'),
       readout: el('scale-readout') ? el('scale-readout').textContent : '',
-      dim: el('btn-scale-dim') ? el('btn-scale-dim').dataset.nsoWired === '1' : false,
-      fac: el('btn-scale-factor') ? el('btn-scale-factor').dataset.nsoWired === '1' : false,
-      len: el('btn-scale-length') ? el('btn-scale-length').dataset.nsoWired === '1' : false,
+      dim: el('scale-target') ? el('scale-target').dataset.nsoWired === '1' : false,
+      fac: el('scale-factor') ? el('scale-factor').dataset.nsoWired === '1' : false,
+      len: el('scale-length') ? el('scale-length').dataset.nsoWired === '1' : false,
       fit: el('btn-scale-fit') ? el('btn-scale-fit').dataset.nsoWired === '1' : false,
+      // The fields are live: no Set beside any of them.
+      set: Array.from(document.querySelectorAll('#scale-rows button')).map(b => b.id),
       api: typeof NSO_scaleSelectedModel
     };
   });
@@ -105,9 +107,10 @@ withApp(async (page, logs) => {
   // solver still takes a display axis underneath (sections 2 and 8 call it
   // directly); the card offers Length, Whole, Longest and Fit to plate.
   check('the X / Height / Z axis menu is gone', !ui.axisMenu);
-  check('Longest listener attached at load', ui.dim);
-  check('Whole x listener attached at load', ui.fac);
-  check('Length and Fit to plate listeners attached at load', ui.len && ui.fit);
+  check('Longest field wired at load', ui.dim);
+  check('Whole x field wired at load', ui.fac);
+  check('Length field and Fit to plate wired at load', ui.len && ui.fit);
+  check('no Set button beside any field - typing applies, leaving commits', ui.set.length === 0, ui.set.join(', '));
   check('NSO_scaleSelectedModel reachable', ui.api === 'function', ui.api);
 
   console.log('\n=== 2. a real click: 80x40x20 box, height to exactly 50 mm ===');
@@ -232,10 +235,10 @@ withApp(async (page, logs) => {
   // Since Scale part 3 the card hides Longest where a named field already
   // shows the same number - here the bar's Length is its longest edge - so
   // the row is checked hidden and the solver is driven through the function
-  // its Set calls. The click itself is driven on a sphere, where the row
+  // its field calls. The field itself is typed in on a sphere, where the row
   // shows, in tools/nso_scale_card_drive_check.js section 8.
   const longRow = await page.evaluate(() => {
-    const e = document.getElementById('btn-scale-dim'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
+    const e = document.getElementById('scale-target'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true;
     if (typeof nsoScaleRefresh === 'function') nsoScaleRefresh();
     const row = document.getElementById('scale-longest-row'), len = document.getElementById('scale-length');
     return { hidden: getComputedStyle(row).display === 'none', length: len.value, longest: document.getElementById('scale-target').value };
@@ -261,12 +264,15 @@ withApp(async (page, logs) => {
   await page.waitForFunction(() => /Undo: Scale reverted/.test(document.getElementById('status').textContent),
     null, { timeout: 15000 });
 
-  console.log('\n=== 7b. the plain factor button ===');
+  console.log('\n=== 7b. the plain factor field ===');
   const facBefore = await soupOf(page);
-  await page.evaluate(() => { document.getElementById('scale-factor').value = '0.5'; });
-  // btn-scale-factor moved into the top bar's Scale dropdown; unfold it first.
-  await page.evaluate(() => { const e = document.getElementById('btn-scale-factor'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-  await page.click('#btn-scale-factor');
+  // Whole x is in the top bar's Scale dropdown; unfold it, type 0.5 and
+  // press Enter, which commits a live field.
+  await page.evaluate(() => { const e = document.getElementById('scale-factor'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
+  await page.focus('#scale-factor');
+  await page.keyboard.press('Control+A');
+  await page.keyboard.type('0.5');
+  await page.keyboard.press('Enter');
   await page.waitForFunction(() => /Scale done/.test(document.getElementById('status').textContent),
     null, { timeout: 30000 });
   const facAfter = await soupOf(page);
