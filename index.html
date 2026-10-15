@@ -897,7 +897,7 @@
             </div>
             <div class="vp-row vp-row-carve">
               <button id="btn-carve" class="btn btn-secondary btn-carve" type="button" aria-pressed="false"
-                      title="Local carving tool. Arm it, then click a face, an edge or a corner of a piece: the blade is aimed along the outward bisector of whatever faces it can reach there, and just that local volume is subtracted. A corner gouge and an edge chamfer need no rotation - the blade lays its sweep axis along the edge itself. Click Carve again to stop. Unlike Subtract this consumes nothing, so the same blade carves the next edge too.">Carve</button>
+                      title="Local carving tool. Arm it, then click a face, an edge or a corner of a piece: the blade is aimed along the outward bisector of whatever faces it can reach there, and just that local volume is subtracted. Or press and drag across one face: on release the blade is swept along the stroke at the set depth - one continuous groove of the blade's exact section, one Undo. A groove that would leave less than two nozzle widths of wall anywhere along it is refused before anything is cut. A corner gouge and an edge chamfer need no rotation - the blade lays its sweep axis along the edge itself. Click Carve again to stop. Unlike Subtract this consumes nothing, so the same blade carves the next edge too.">Carve</button>
               <select id="carve-blade" class="vp-select" aria-label="Blade profile"
                       title="Blade profile. flat: a slab, leaves a flat-bottomed local shave. ball: a hemisphere-ended cylinder, leaves a rounded gouge with no stress corner. vee: a wedge, leaves a V-groove or a chamfer - cut deeper for a wider one.">
                 <option value="ball">ball-nose</option>
@@ -1321,7 +1321,7 @@
   <script src="nso_planar_fuse.js?v=inside4"></script>
   <script src="nso_skin.js?v=skin4"></script>
   <script src="nso_skin_patch.js?v=skin4"></script>
-  <script src="nso_carve.js?v=carve2"></script>
+  <script src="nso_carve.js?v=carvedrag1"></script>
   <script src="nso_seat_surface.js?v=seatsurf1"></script>
   <script src="nso_thickness.js?v=hollow1"></script>
   <script src="nso_hollow.js?v=thickwall1"></script>
@@ -1414,7 +1414,7 @@
   <script src="app-center-lock.js?v=clock2"></script>
   <script src="app-oversize-washer.js?v=oversize2"></script>
   <script src="app-join-triple.js?v=triple1"></script>
-  <script src="app-carve.js?v=hollow1"></script>
+  <script src="app-carve.js?v=carvedrag1"></script>
   <script src="app-hollow.js?v=hollow1"></script>
   <script src="app-foam.js?v=foam1"></script>
   <script src="app-seat-surface.js?v=seatsurf2"></script>

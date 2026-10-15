@@ -638,3 +638,51 @@ than skipped quietly.
 curved bit through the shipped Subtract would hit the same float32 ULP seams, and
 the audit only proved Subtract clean for *box* bits on *box* hulls. Worth
 measuring; it moves numbers other checks pin, so it needs its own run.
+
+## 11. Drag: one continuous groove
+
+A press on a piece with Carve armed opens a stroke; the release decides. A
+release within 4 px of the press is a click and punches once, exactly as in
+§5-§8. Anything longer is a groove: the blade swept along the stroke at the set
+depth, one boolean, one Undo (`carveReplace`, "Undo: Carve reverted").
+
+`npm run carve:drag` writes a screenshot of three 20 mm drags (ball-nose, flat
+shave, V-groove) to tools/carve-out/carve-drag.png, which is git-ignored.
+
+**What the groove is.** `NSO_Carve.planStroke` builds it from two primitives
+the repo already proves:
+
+- the blade's section - its silhouette down its own sweep axis (`grooveSection`:
+  the slab's rectangle, the wedge's triangle, the U of the ball-nose meridian) -
+  swept along the stroke's tip line by `NSO_PathSweep.sweep`, the mitred sweep
+  Bend and the support branches use, so the section perpendicular to the stroke
+  is the blade's section exactly inside every segment;
+- the blade solid itself, placed at the press and the release from the sweep's
+  own end frames, so it meets the sweep's end ring bit for bit.
+
+For a straight stroke the union is exactly the Minkowski sum of the blade with
+the segment: a ball-nose groove gets round ends, a slab or wedge its own length
+of overrun. The pointer samples are straightened (RDP at 0.02 mm), spaced to at
+least the blade's half-width so a mitre has room to turn, and a stroke turning
+through more than 120° is cut into runs overlapping by one segment and unioned.
+The blade is held at one orientation - the mean surface normal under the stroke -
+and a stroke whose normals spread past 25° has crossed an edge and is refused in
+words.
+
+**The wall gate** (`NSO_Carve.strokeWallGate`) runs before the kernel loads and
+refuses, it does not clip. Floor: **two nozzle widths** (0.8 mm at the 0.4 mm
+nozzle), stricter than a punch's 0.42 mm one-line floor. Every 0.5 mm along the
+stroke it asks NSO_Thickness's `strokeGate` what the cut leaves under the tip,
+and looks out of the groove from each in-material vertex and edge midpoint of the
+section along its own normal, so a slab run along a block's edge is refused for
+the side wall it would leave, not just the floor. The ends' hemispheres and
+overruns are not probed separately.
+
+**Measured** - `npm run carve:drag` (tools/nso_carve_drag_check.js): a real
+pointer drag of 20 mm on fixtures/box_hull_80x40x20-2.stl with each blade; the
+section across the result every 0.5 mm along the whole stroke matches the blade's
+section to 0.0000 mm both ways (the ball-nose floor is the r 2 circle to
+0.017 mm, the facet sagitta); the piece gates clean on mesh_validate.py; one Undo
+restores it vertex for vertex. A still click still punches; a 126° arc drag is one
+groove; a 1.5 mm groove into fixtures/box_open.stl's 2 mm floor is refused in
+words and the piece is untouched, 1.15 mm (leaves 0.85) is cut.
