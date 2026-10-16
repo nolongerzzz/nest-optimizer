@@ -106,10 +106,13 @@
    the structure itself uses. A square lattice at this pitch reproduces the
    reference's own contact count on the reference's own footprint to +7%.
 
-   BRANCH_TILT_DEG = 31.44. Measured, per tip, as the angle off vertical from
+   BRANCH_TILT_DEG = 30. Measured, per tip, as the angle off vertical from
    that tip to its nearest trunk: median 18.19 deg, p95 26.83 deg, and 31.44
-   deg at the very worst. That worst case is the widest the proven structure
-   ever leans, so it is what this file allows - not the 45 deg printable angle
+   deg at the very worst. The widest the proven structure ever leans was the
+   limit here until the supports-exposed ticket rounded it down to 30 deg:
+   every leg the planner takes is then within the reference's 95th percentile
+   plus a margin, and a face tilted exactly 30 deg is still a face a
+   vertical post can hold. It is not the 45 deg printable angle
    nso_support_aim.js detects overhangs at. 45 deg is kept as the CEILING and
    a caller asking past it is refused by name, because a branch leaning
    further than that is an unsupported overhang by this repo's own detector,
@@ -200,7 +203,7 @@
      the header, and tools/nso_support_tree_reference_check.js, which takes
      them out of the file again on every run. */
   var MAX_SPAN_MM = 3.29;
-  var BRANCH_TILT_DEG = 31.44;
+  var BRANCH_TILT_DEG = 30;
 
   /* A guard, not a parameter: a region asking for more contacts than this has
      either been handed a pitch of nearly zero or is not one region. Refused

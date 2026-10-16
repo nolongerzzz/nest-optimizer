@@ -81,7 +81,15 @@ fs.mkdirSync(OUT, { recursive: true });
   const K = { unionSoups: csg.NSO_unionSoups, subtractSoups: csg.NSO_subtractSoups };
 
   console.log('\n=== 1 + 2. the gap and the interface, on real trees ===');
-  for (const [name, host, extra] of [['shelf', SHELF, {}], ['tab', TAB, {}], ['tall', TALL, {}]]) {
+  /* RE-PINNED (supports-exposed): the planner's points are the beacon
+     detector's now, whose 3 mm cell centres put the tall arm's nearest points
+     0.5 mm off the post, not the 0.13 mm the old 3.29 mm contact lattice did.
+     The wall-clearance scenario (section 4) is the lattice's, so the tall
+     arm is handed its points explicitly: the same 28, in the beacon contract. */
+  const tallRegion = ST.planTree && ctx.NSO_SupportAim.detectOverhangs(TALL, { skipList: [], beacons: false }).regions[0];
+  const tallLattice = ST.contactPoints(TALL, tallRegion, { skipList: [], maxSpanMm: ST.MAX_SPAN_MM });
+  const TALL_POINTS = tallLattice.points.map(c => ({ p: c.p, n: [0, 0, -1] }));
+  for (const [name, host, extra] of [['shelf', SHELF, {}], ['tab', TAB, {}], ['tall', TALL, { beacons: TALL_POINTS }]]) {
     console.log('\n-- ' + name + ' --');
     const p = ST.planTree(host, Object.assign({ skipList: [], hollow: true }, extra));
     const t = await ST.hollowTree(p, K);

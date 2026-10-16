@@ -220,7 +220,10 @@ for (const name of CASES) {
   /* ---- the union really is the parts, overlapped ----------------------- */
   const trunk = validate(path.join(OUT, name + '_trunk.stl'));
   check(`${name}: the union is bigger than one trunk column and smaller than the parts summed`,
-    v.signed_volume > trunk.signed_volume - 1e-9 &&
+    /* 1e-3 mm^3, not 1e-9 (supports-exposed): the detector's single point under
+       the tiny tab is a plain vertical strut, whose union IS its column, and
+       two float32 sweeps of one prism differ by ~1e-5 mm^3 either way. */
+    v.signed_volume > trunk.signed_volume - 1e-3 &&
     v.signed_volume < meta.partsVolumeMm3 * 1.05 + 1e-6 + (/_gecko$/.test(name) ? meta.contacts * 2 : 0),
     `${v.signed_volume.toFixed(4)} mm^3, one column ${trunk.signed_volume.toFixed(4)} mm^3, ` +
     `parts summed ${meta.partsVolumeMm3.toFixed(4)} mm^3`);

@@ -34,6 +34,18 @@
    the same count for a 2-triangle underside and a 2048-triangle one.
 
    ---------------------------------------------------------------------------
+   EXPOSED ONLY
+   ---------------------------------------------------------------------------
+   A beacon counts only if its spot can be reached from outside the piece: the
+   ray from the spot along its own normal, away from the surface, leaves the
+   piece's bounding box without hitting the piece. Cavity ceilings, bores and
+   inside walls - spots whose ray runs into the piece's own far wall - make
+   no beacon, so they join no region and make no area. (Holding the inside of
+   a piece is a later opt-in.) The piece's own triangles only: another piece
+   in the way (an occluder) does not make a spot interior. counts.interior is
+   how many were left out.
+
+   ---------------------------------------------------------------------------
    THE FOUR WAYS A SPOT NEEDS HOLDING (need.kind)
    ---------------------------------------------------------------------------
    Every crossing is first required to have air under it: the gap down to the
@@ -46,7 +58,8 @@
           n.z < -cos(angleDeg). Open to the plate below.
 
    gap    the same steep face, but the air under it is bounded: material
-          below it (undercut, cavity ceiling), or a near-flat face anchored on
+          below it (undercut; a cavity ceiling too, which EXPOSED ONLY above
+          then drops), or a near-flat face anchored on
           both sides along x or y (a bridge) whose span is wider than the
           bridgeable span, 5 mm by default. A flat face anchored on both
           sides by a span of 5 mm or less is BRIDGED and gets no beacon - the
@@ -330,7 +343,7 @@
     out.grid = { pitch: pitch, origin: origin, nx: nx, ny: ny };
 
     var counts = { cells: nx * ny, rays: 0, crossings: 0, resting: 0, printable: 0, bridged: 0,
-                   painted: 0, face: 0, gap: 0, edge: 0, tip: 0, ridge: 0 };
+                   painted: 0, interior: 0, face: 0, gap: 0, edge: 0, tip: 0, ridge: 0 };
     out.counts = counts;
 
     /* ---- one column: every crossing of the vertical line through (x, y),
@@ -484,12 +497,75 @@
       return c.need;
     }
 
+    /* ---- EXPOSED ONLY. Is there a way out along this spot's own normal?
+       The piece's own triangles are filed in a coarse xy grid and the ray is
+       walked through the cells it crosses (Amanatides-Woo, 2D): a near-
+       vertical ray visits one cell, a sideways one a row. A hit is anything
+       beyond HIT_EPS_MM; the face the spot sits on and its coplanar
+       neighbours are never in front of it. ---- */
+    var XG = (function () {
+      var side = Math.max(1, Math.min(128, Math.round(Math.sqrt(own.length))));
+      var wx = Math.max(hi[0] - lo[0], 1e-6) / side, wy = Math.max(hi[1] - lo[1], 1e-6) / side;
+      var cells = new Array(side * side);
+      for (var k = 0; k < own.length; k++) {
+        var T = own[k];
+        T.seen = -1;
+        var i0 = Math.max(0, Math.min(side - 1, Math.floor((T.lo[0] - lo[0]) / wx)));
+        var i1 = Math.max(0, Math.min(side - 1, Math.floor((T.hi[0] - lo[0]) / wx)));
+        var j0 = Math.max(0, Math.min(side - 1, Math.floor((T.lo[1] - lo[1]) / wy)));
+        var j1 = Math.max(0, Math.min(side - 1, Math.floor((T.hi[1] - lo[1]) / wy)));
+        for (var i = i0; i <= i1; i++) for (var j = j0; j <= j1; j++) {
+          var c = j * side + i;
+          (cells[c] || (cells[c] = [])).push(T);
+        }
+      }
+      return { side: side, wx: wx, wy: wy, cells: cells, stamp: 0 };
+    })();
+    function exposed(nd) {
+      var d = nd.normal, o = [nd.x, nd.y, nd.z], g = XG;
+      /* where the ray leaves the piece's bounding box */
+      var tEnd = Infinity, a;
+      for (a = 0; a < 3; a++) {
+        if (d[a] > 1e-12) tEnd = Math.min(tEnd, (hi[a] - o[a]) / d[a]);
+        else if (d[a] < -1e-12) tEnd = Math.min(tEnd, (lo[a] - o[a]) / d[a]);
+      }
+      if (!(tEnd > HIT_EPS_MM)) return true;                 /* already at the box wall, facing out */
+      var stamp = ++g.stamp;
+      var ci = Math.max(0, Math.min(g.side - 1, Math.floor((o[0] - lo[0]) / g.wx)));
+      var cj = Math.max(0, Math.min(g.side - 1, Math.floor((o[1] - lo[1]) / g.wy)));
+      var sx = d[0] > 0 ? 1 : -1, sy = d[1] > 0 ? 1 : -1;
+      var tx = Infinity, ty = Infinity, dtx = Infinity, dty = Infinity;
+      if (Math.abs(d[0]) > 1e-12) {
+        dtx = g.wx / Math.abs(d[0]);
+        tx = ((sx > 0 ? lo[0] + (ci + 1) * g.wx : lo[0] + ci * g.wx) - o[0]) / d[0];
+      }
+      if (Math.abs(d[1]) > 1e-12) {
+        dty = g.wy / Math.abs(d[1]);
+        ty = ((sy > 0 ? lo[1] + (cj + 1) * g.wy : lo[1] + cj * g.wy) - o[1]) / d[1];
+      }
+      for (;;) {
+        var list = g.cells[cj * g.side + ci];
+        if (list) for (var k = 0; k < list.length; k++) {
+          var T = list[k];
+          if (T.seen === stamp) continue;
+          T.seen = stamp;
+          var tt = rayTri(o[0], o[1], o[2], d[0], d[1], d[2], T.soup, T.o);
+          if (tt > HIT_EPS_MM && tt < tEnd) return false;
+        }
+        var tNext = Math.min(tx, ty);
+        if (!(tNext < tEnd)) return true;
+        if (tx <= ty) { ci += sx; tx += dtx; } else { cj += sy; ty += dty; }
+        if (ci < 0 || cj < 0 || ci >= g.side || cj >= g.side) return true;
+      }
+    }
+
     var beacons = [], byCell = new Array(nx * ny);
     function addBeacon(nd, i, j, kindOverride, extra) {
       var need = {};
       for (var key in nd.need) if (Object.prototype.hasOwnProperty.call(nd.need, key)) need[key] = nd.need[key];
       if (kindOverride && need.kind !== 'ridge') { need.via = need.kind; need.kind = kindOverride; }
       if (extra) for (var e in extra) if (Object.prototype.hasOwnProperty.call(extra, e)) need[e] = extra[e];
+      if (!exposed(nd)) { counts.interior++; return null; }
       var bcn = { x: nd.x, y: nd.y, z: nd.z, normal: nd.normal, need: need, cell: [i, j], tri: nd.T.idx };
       beacons.push(bcn);
       var ci = j * nx + i;
@@ -578,11 +654,16 @@
       if (ci < 0 || cj < 0 || ci >= nx || cj >= ny) return null;
       return [ci, cj];
     }
-    function addFeature(p, nrm, kind, angle) {
+    function addFeature(p, nrm, kind, angle, ownFaces) {
       var cell = cellOf(p[0], p[1]);
       if (!cell || cellHasNear(cell[0], cell[1], p[2], pitch)) return;
       var sn = surfaceNear(p[0], p[1], p[2], 0.01);
       if (!sn || sn.T.painted || !(sn.gap > minDrop)) return;
+      /* A crease hangs in air only if the surface the column finds there is
+         the crease's own. Another face of the piece within 0.01 mm of the
+         crease point means the crease is flush on, or buried in, that face
+         (a lid's edge sunk into the box wall it sits on): not a knife edge. */
+      if (ownFaces && ownFaces.indexOf(sn.T) < 0) return;
       addBeacon({ x: p[0], y: p[1], z: p[2], T: sn.T, normal: nrm,
                   need: { angle: angle, gapBelow: sn.gap, below: sn.below, kind: kind } },
                 cell[0], cell[1]);
@@ -611,7 +692,7 @@
       var steps = Math.max(1, Math.ceil(el / (pitch / 2)));
       for (var st = 0; st < steps; st++) {
         var fr = (st + 0.5) / steps;
-        addFeature([A[0] + ex * fr, A[1] + ey * fr, A[2] + ez * fr], nm, 'edge', tilt);
+        addFeature([A[0] + ex * fr, A[1] + ey * fr, A[2] + ez * fr], nm, 'edge', tilt, [E.faces[0].T, E.faces[1].T]);
       }
     });
     for (var vi = 0; vi < vid; vi++) {

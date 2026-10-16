@@ -1429,7 +1429,7 @@
   <!-- Support beacons: the plan-grid detector detectOverhangs wraps. Before
        nso_support_aim.js so its beacons ride along on every detection. See
        docs/SUPPORT-BEACONS.md. -->
-  <script src="nso_support_beacons.js?v=beacons1"></script>
+  <script src="nso_support_beacons.js?v=exposed1"></script>
   <script src="nso_support_aim.js?v=support5"></script>
   <!-- Attach: the connective tissue between Stock, auto-aim and Join's union.
        After nso_support_aim.js, whose nearestBase and place it calls. See
@@ -1446,12 +1446,12 @@
        auto-aim's detection and base search. After BOTH of them, because it
        calls into both by name and refuses when either is missing. Unwired,
        like the two modules it sits on. See docs/SUPPORT-TREE.md. -->
-  <script src="nso_support_tree.js?v=tree7"></script>
+  <script src="nso_support_tree.js?v=exposed1"></script>
   <!-- The support planner: one strut per support point, grown down and
        merged pairwise on a node lattice, plate first. planTree above is
        this; it needs nso_support_tree.js's contactPoints and union. See
        docs/SUPPORT-GRIDPACK.md. -->
-  <script src="nso_support_gridpack.js?v=gridpack2"></script>
+  <script src="nso_support_gridpack.js?v=exposed1"></script>
   <script src="nso_exif.js?v=photoset1"></script>
   <script src="nso_photoset.js?v=photoset1"></script>
   <script src="nso-cooling-profiles.js"></script>
@@ -1573,7 +1573,7 @@
        edit / remove. After app-microscope.js, whose hooks it uses, and after
        nso_support_aim.js / nso_support_tree.js / app-join.js, whose
        detection, generators and union it calls. See docs/GCODE-SUPPORTS.md. -->
-  <script src="app-gscope-support.js?v=helpmrg1"></script>
+  <script src="app-gscope-support.js?v=exposed1"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
   <script src="app-supports-card.js?v=supcard2"></script>

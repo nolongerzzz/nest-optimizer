@@ -176,10 +176,17 @@ console.log('\n=== 2. THE PLAN: every contact held, every member to the plate ==
 const planSHELF = ST.planTree(SHELF, { skipList: [] });
 {
   check('planTree is the grid-pack planner', planSHELF.planner === 'gridpack' && planSHELF.ok, planSHELF.reason);
-  check('its support points are the contact points of section 1, in the same count',
-    planSHELF.beacons.length === 16, `${planSHELF.beacons.length}`);
+  /* RE-PINNED (supports-exposed): the planner's support points are the
+     beacon detector's now, not section 1's contactPoints lattice. The
+     shelf's 12 x 10 underside is 4 x 4 cells at the detector's 3 mm pitch,
+     16 face beacons - the same 16 the lattice gave, at 3 mm instead of 3.29 -
+     and the detector adds 3 corner 'edge' beacons beside the post
+     (docs/SUPPORT-BEACONS.md, shelf), which the lattice could not see. */
+  const faceN = planSHELF.beacons.filter(b => b.kind === 'face').length;
+  check('its support points are the detector\'s beacons: 16 face under the arm, 3 corner beside the post',
+    faceN === 16 && planSHELF.beacons.length === 19, `${faceN} face, ${planSHELF.beacons.length} in all`);
   check('every one is held, on trunks that all land on the plate',
-    planSHELF.held === 16 && planSHELF.trunks.every(t => t.landing === 'plate'), planSHELF.reason);
+    planSHELF.held === 19 && planSHELF.trunks.every(t => t.landing === 'plate'), planSHELF.reason);
   /* Where the trunk-first planner refused the 20 x 10 cantilever (one trunk
      could not serve that fan), the grid-pack planner holds it. */
   const r = ST.planTree(CANTILEVER, { skipList: [] });
@@ -193,7 +200,7 @@ console.log('\n=== 3. ONE STRUT PER CONTACT, ON THE STRUT\'S OWN SECTION ===');
   const p = planSHELF;
   const starts = p.members.filter(m => m.kind === 'beacon' || m.kind === 'side');
   check('one member starts at each contact, and no contact twice',
-    starts.length === 16 && new Set(starts.map(m => m.beacon)).size === 16, `${starts.length} members`);
+    starts.length === 19 && new Set(starts.map(m => m.beacon)).size === 19, `${starts.length} members`);
   check('a single contact\'s strut is buildStrut\'s side, never under the floor',
     starts.every(m => m.side === p.sideMm) && p.sideMm >= p.floorMm, `${p.sideMm} mm, floor ${p.floorMm} mm`);
   const lean = Math.max(...p.members.map(m => {
@@ -340,7 +347,11 @@ console.log('\n=== 8. THE UNION: the app\'s own boolean, and nothing else ===');
   for (const [name, host, style] of RUNS) {
     const p = ST.planTree(host, Object.assign({ skipList: [] }, style));
     if (!p.ok) { check(`${name}: plans`, false, p.reason); continue; }
-    const s = await GP.solid(p, { unionSoups: csg.NSO_unionSoups });
+    /* feet off (supports-exposed): tree:canonical weighs these solids against
+       their members' volumes and a handle-free Euler; a foot pad adds volume of
+       its own and, on three close trunks, a ring round a gap. Feet are
+       support:exposed's to check. */
+    const s = await GP.solid(p, { unionSoups: csg.NSO_unionSoups, footPads: false });
     check(`${name}: every part of every trunk genuinely merges - nothing detached`,
       s.ok && s.detached === 0, s.ok ? `${s.solids.length} solid(s) from ${p.trunks.length} trunk(s)` : s.reason);
     if (!s.ok) continue;
