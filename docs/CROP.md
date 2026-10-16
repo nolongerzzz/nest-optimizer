@@ -338,3 +338,87 @@ when there is one.
   self-intersecting pair.
 - **Crossing both seams is not tested yet.** A region spanning the whole
   lip, across both seam rings, is the next stress test.
+
+# Stage 3: Circle and Piece
+
+Two regions beside the Box (`app-crop.js` sections 6 and 7). Neither removes
+a slab or slides anything. The region is a cutter standing upright through
+the whole piece, and the piece keeps what is inside it or what is outside it.
+
+| Region | Cutter | Controls |
+|---|---|---|
+| **Circle** | a cylinder, axis vertical as the piece lies | Click centre, then press on the piece and drag out (Ø = twice the drag), or type Ø. Drag the drawn circle's middle to slide it, its rim to resize it. |
+| **Piece** | another piece's outline seen from above (its silhouette, vertical walls), where it sits on the plate | Pick piece, then click the template. Grow (mm, default 0, + wider / − narrower, round corners). |
+
+Both have **Keep inside** / **Keep outside** and one **Crop** button. The
+template piece is read, never changed.
+
+## How
+
+`NSO_cropShapeRaw(rawTris, { shape, keep, toRaw })`, headless and async:
+
+1. The cross-section is the kernel's own `CrossSection`. The circle is a
+   regular polygon whose chords sag at most 0.005 mm inside the true circle
+   (124 sides at Ø30). The outline is the union, under the non-zero rule, of
+   the template's triangles dropped straight down. That is the silhouette
+   whatever the template's own topology. Grow is the CrossSection's round
+   offset (256 segments a turn).
+2. It is extruded through the piece's whole height plus 1 mm each way.
+3. It is built in the plate frame P (z up) and moved onto the piece's raw
+   soup by one transform, P to raw through the mesh as drawn. The piece's
+   own vertices are never moved or re-rounded, and a piece turned on the
+   plate is cut where it is seen. A raw soup that no longer matches its mesh
+   (turned since it was loaded) is refused, as the Box refuses it.
+4. Keep inside is `intersect`, Keep outside is `subtract`. The result is
+   gated by the exact-key edge census here, then by the in-page checker
+   before the commit.
+
+The bake recentres the piece's frame on what is left, which would move a disc
+cut off-centre to where the plate's centre was. So the placed entry is slid
+back by that shift, and the Undo entry carries the pose it had (`prevPose`).
+One Undo puts back both.
+
+## Refusals
+
+Each one is in words. The piece is unchanged and no Undo step is added.
+
+- the region misses the piece: none of it is inside, or Keep outside would
+  remove nothing;
+- the region holds the whole piece (Keep inside would change nothing), or
+  covers it (Keep outside would leave nothing);
+- Grow shrinks the outline to nothing; the template has no outline from
+  above;
+- the template is the piece being cropped (refused at the pick);
+- the kernel will not take the piece as a closed solid, or the result is not
+  closed.
+
+Paint scope: **whole-piece**, as the Box. The kernel rebuilds the whole
+piece, so any paint stands the crop down.
+
+## Results (`npm run crop:shapes`, 71 gates)
+
+Through the real app. The checker is `tools/mesh_validate.py` with
+self-intersection included.
+
+| Case | Result |
+|---|---|
+| Circle Ø30, keep inside, 60 x 60 x 4 plate | Every vertex 15.0000 mm from the centre. 30.0000 x 30.0000 across. Volume within 0.05% of π·15²·4. Closed, χ 2. Stays where the circle was. |
+| Circle Ø30, keep outside | Outside still 60 x 60. Every bore vertex 15.0000 mm from the centre. χ 0 (a hole through). Volume = plate − disc. |
+| Piece: 100 x 100 x 3 plate to the star prism, laid over it off-centre | Every result vertex on the star's outline, and every point of the star's outline on the result's, worst 0.00000 mm. Volume = star area x 3. The star is untouched. |
+| Grow 2 | Every result vertex 2.0000 mm outside the star's outline. Edges sampled 2.0000. 2.000 mm past the star on all four sides. |
+
+The star's outline is computed by the test from the two meshes as drawn, in
+the plate's raw frame, and not by the app's code. At the star's notches the
+grown edge is two offset lines meeting, 2.44 mm from the notch itself. So the
+star-side check is "no closer than 2", and the result-side check is "exactly
+2".
+
+## Limits
+
+- **Circle and Piece cannot be lifted and moved** the way Move moves a boxed
+  region. Their "slab-move" controls are the drags on the drawn circle.
+- **The cutter is vertical.** Its axis is the plate's up, whatever the
+  piece's pose. There is no tilted cylinder.
+- **The template is used where it sits.** Put it over the piece (drag it,
+  Center lock) before Crop. The outline is taken as drawn at that moment.
+

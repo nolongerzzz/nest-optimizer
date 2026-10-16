@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=liftplate1" />
+  <link rel="stylesheet" href="styles.css?v=cropshapes1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -550,9 +550,19 @@
             <summary class="vp-bar-btn" title="Crop a slab out of the selected piece, or take a region out, move it and lock it in">Crop</summary>
             <div class="vp-menu-body vp-top-body" id="crop-card">
               <select id="edit-axis" class="hidden-quiet"><option value="auto">Longest axis</option><option value="x">X</option><option value="z">Z</option></select>
+              <!-- Crop's region: the Box (the slab crop and Move below), a Circle,
+                   or another Piece's outline (app-crop.js sections 6 and 7). -->
+              <div class="edit-row crop-region-row" id="crop-region-row" role="group" aria-label="Crop region">
+              <button id="btn-crop-region-box" class="btn btn-secondary tool-active" type="button" aria-pressed="true"
+                      title="Box: crop a slab out along X or Z, or lift a boxed region and move it">Box</button>
+              <button id="btn-crop-region-circle" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Circle: a cylinder standing upright through the piece. Keep the disc inside it, or punch it out as a hole">Circle</button>
+              <button id="btn-crop-region-piece" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Piece: another piece's outline seen from above, as a cutter with vertical walls. Keep inside it or outside it">Piece</button>
+              </div>
               <!-- Crop's axis: what Cut X / Cut Z set before Cut and Crop were
                    split, now Crop's own (app-crop.js, NSO_cropSetAxis). -->
-              <div class="edit-row crop-axis-row">
+              <div class="edit-row crop-axis-row" id="crop-axis-row">
               <button id="btn-crop-axis-x" class="btn btn-secondary" type="button" title="Crop along plate X">Crop X</button>
               <button id="btn-crop-axis-z" class="btn btn-secondary" type="button" title="Crop along plate Z">Crop Z</button>
               </div>
@@ -588,6 +598,36 @@
               <button id="btn-crop-lockin" class="btn btn-secondary" type="button" disabled
                       title="Reconnect the moved region where it is. Measured, not assumed: an overlap with the piece is trimmed, a face-to-face touch is joined, a gap up to 3 mm is bridged with a filleted fill. Refuses a wider gap, a region buried in the piece, and anything that would not come out as one clean closed piece.">Lock in</button>
               </div>
+              </div>
+              <!-- Circle and Piece (app-crop.js sections 6 and 7). Shown in place of
+                   the Box rows when the region is a Circle or a Piece. -->
+              <div class="crop-shape" id="crop-shape-tools" hidden>
+              <p class="hint" id="crop-circle-hint">Circle: a cylinder standing upright through the whole piece. Press Click centre, then press on the piece and drag out to size it, or type Ø. Drag the circle's middle to slide it, its rim to resize it.</p>
+              <div class="edit-row crop-row" id="crop-circle-row">
+              <button id="btn-crop-circle-place" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Then press on the piece where the centre goes; drag out before letting go to size the circle">Click centre</button>
+              <span class="crop-lbl" title="Diameter, mm">Ø</span>
+              <input type="number" id="crop-circle-d" min="0.1" step="0.1" aria-label="Circle diameter, mm" title="Circle diameter, mm">
+              </div>
+              <p class="hint" id="crop-piece-hint" hidden>Piece: another piece on the plate is the cutter - its outline seen from above, with vertical walls, wherever it sits over this piece. Grow widens (+) or narrows (−) that outline. The template piece is not changed.</p>
+              <div class="edit-row crop-row" id="crop-piece-row" hidden>
+              <button id="btn-crop-piece-pick" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Then click another piece on the plate: its outline becomes the cutter">Pick piece</button>
+              <span class="crop-pick-name" id="crop-piece-name">no template</span>
+              </div>
+              <div class="edit-row crop-row" id="crop-grow-row" hidden>
+              <span class="crop-lbl" title="Offset the outline, mm: + wider, − narrower, round corners">Grow</span>
+              <input type="number" id="crop-piece-grow" step="0.1" value="0" aria-label="Grow the outline, mm" title="Grow the outline, mm (negative narrows it)">
+              </div>
+              <div class="edit-row crop-row crop-keep-row" role="group" aria-label="Keep">
+              <button id="btn-crop-keep-in" class="btn btn-secondary tool-active" type="button" aria-pressed="true"
+                      title="Keep what is inside the region; everything outside it goes">Keep inside</button>
+              <button id="btn-crop-keep-out" class="btn btn-secondary" type="button" aria-pressed="false"
+                      title="Keep what is outside the region; the region is cut out of the piece">Keep outside</button>
+              </div>
+              <p id="crop-shape-readout" class="cut-readout">—</p>
+              <button id="btn-crop-shape" class="btn btn-secondary" type="button" disabled
+                      title="Cut the piece to the region: one closed piece (or closed pieces) and one Undo. Refuses a region that misses the piece, holds all of it, or would leave nothing.">Crop</button>
               </div>
               <div class="detach-tools" id="detach-tools">
               <p class="hint">Detach: take a detected flange off the piece. The piece is capped on its own wall, the flange becomes its own piece, and Reattach seats it somewhere else.</p>
@@ -1481,7 +1521,7 @@
   <script src="app-mirror.js?v=mirror2"></script>
   <!-- Crop, stage 1: box -> remove slab -> seal the joint. After app-cut.js
        (rawCutOpen, rawFlatCapLoop, mapPlaneToRaw) and app-sculpt.js (commit). -->
-  <script src="app-crop.js?v=helpers1"></script>
+  <script src="app-crop.js?v=cropshapes1"></script>
   <script src="app-fatten.js?v=box2"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
