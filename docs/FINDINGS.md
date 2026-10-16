@@ -13,13 +13,24 @@ check measures or what colour it paints. It adds three things:
    has one row per kind of problem, each with its numbers and one sentence on
    what it means for a print:
 
-   | row | title, from the report | the one button |
+   | row | title, from the report | the buttons (one per finding on the row) |
    |---|---|---|
-   | holes (open edges) | `2 holes, 221 open edges` | **Cap open faces** — clicks `#btn-cap-open` |
-   | doubled or pinched (non-manifold) | `5 places, 132 doubled or pinched edges` | **Seal with Repair** — ticks `#chk-seal-repair`, clicks `#btn-seal`, puts the tick back |
+   | holes (open edges) | `2 holes, 221 open edges` | **CAP**, **PATCH** or **BRIDGE** per hole or pair of holes; **REPAIR** for open edges that are no clean loop |
+   | doubled or pinched (non-manifold) | `5 places, 132 doubled or pinched edges` | **REPAIR** — Seal with Repair, whole piece: ticks `#chk-seal-repair`, clicks `#btn-seal`, puts the tick back |
    | piercing | `1 place, 7 piercing pairs - pieces passing through each other` | none. Says no tool in the app removes it yet |
-   | thin walls | `1 place, 96 faces under 0.42 mm (thinnest 0.249 mm)` | none. Names Thicken out / Thicken in |
-   | clean | `Nothing wrong found`, green, shown exactly when the verdict is PASS | — |
+   | thin walls | `1 place, 96 faces under 0.42 mm (thinnest 0.249 mm)` | **THICKEN OUT +0.56 mm** — types the mm that reaches two nozzle widths into `#inp-thicken-mm`, clicks `#btn-thicken-out`, puts the box back |
+   | gap between faces (advisory) | `1 gap between faces that look at each other` | **BRIDGE** |
+   | clean | `Nothing wrong found`, green, shown exactly when the verdict is PASS and there is no gap | — |
+
+   **Since 2026-10-16 each row holds ITEMS, and every item has the fix that
+   fits it** (`docs/PATCH.md`): a flat rim is `Hole, flat rim — CAP`, a curved
+   one `Hole, curved rim — PATCH`, two openings facing each other `Gap 1.2 mm
+   between two edges — BRIDGE`, a severed tube `Gap 1.0 mm between two faces —
+   BRIDGE`. The button runs that fix on that finding only, the card re-scans,
+   and the item's line goes green with its before → after (or amber with the
+   tool's own reason). **Fix all (n)** runs every item's own fix in the card's
+   order, never the advisory gap. Each fix is one Undo. The row titles and
+   counts are as they were.
 
    Winding and degenerate triangles have no place on the mesh to point at, so
    they get no row. When the report counts them, the card names them in one
@@ -75,17 +86,22 @@ every fixture's count:
 | `shape-sphere_holes-shredded` | 12 sites grown into 2 loops (4 cycles at 2 pinch vertices) | 2 holes, 221 edges |
 | `shape-cylinder_holes-light` | 2 loops, one pinched at the cap centre (3 cycles) | 2 holes, 16 edges |
 
-## The fix button is the Finish menu's button
+## REPAIR and THICKEN OUT are the Finish menu's buttons
 
-A row's button does not call a copy of the repair. It clicks the existing
-control, so what runs is the same handler with the same Undo entry and the
-same status line. Cap and Seal have no second code path to drift.
-`tools/nso_findings_drive_check.js` holds this bit for bit. The card's Cap
-and the Finish menu's Cap give the same bytes, the card's Seal with Repair
-and the Finish menu's ticked Seal give the same bytes, and one Undo after
-either puts back the original bytes.
+REPAIR and THICKEN OUT do not call a copy of the repair. They click the
+existing control, so what runs is the same handler with the same Undo entry and
+the same status line. `tools/nso_findings_drive_check.js` holds REPAIR bit for
+bit: the card's Seal with Repair and the Finish menu's ticked Seal give the
+same bytes, and one Undo after either puts back the original bytes.
 
-The re-scan is wired at the document, around the button's own listener. A
+CAP, PATCH and BRIDGE are `nsoRepairRun` in `app-patch.js`, one commit path with
+one Undo of its own type; the card brackets each with the same before / after
+the document listeners take for the Finish buttons. (The card's CAP is not the
+Finish menu's Cap open faces, which is unchanged: `docs/PATCH.md`, "Cap is not
+the Finish menu's Cap".)
+
+The re-scan of a Finish button (Cap open faces, Seal, Solidify, Thicken out) is
+wired at the document, around the button's own listener. A
 capture-phase listener takes the "before" reading before the handler runs. If
 the card is already showing this piece's check, it reuses it. If not, it runs
 a scan that draws nothing (`nsoDefectsScan`). A bubble-phase listener takes
@@ -139,7 +155,8 @@ tools/nso_findings_drive_check.js  npm run findings:drive
 
 ## Not done, on purpose
 
-- No new repair geometry. Piercing and thin walls have no button yet.
+- Piercing has no button yet. (Open loops, gaps between faces and thin walls
+  do now: `docs/PATCH.md`.)
 - A row click goes to the problem nearest the camera, so clicking the same
   row twice stays on the same problem. Stepping to the next one would be a
   new control.

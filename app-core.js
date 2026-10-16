@@ -178,7 +178,9 @@ const UNDO_REPLACE_LABEL = {
   ringReplace: 'Undo: Ring / rod size reverted',
   offsetReplace: 'Undo: Offset reverted',
   liftReplace: 'Undo: Lift reverted',
-  foamReplace: 'Undo: Foam reverted'
+  foamReplace: 'Undo: Foam reverted',
+  patchReplace: 'Undo: Patch reverted',
+  bridgeReplace: 'Undo: Bridge reverted'
 };
 
 /* Undo, then the helper rule (nso-helpers.js): a helper drawn after the step
@@ -2925,6 +2927,14 @@ function onCanvasPointerDown(event) {
      A click on any other piece, or off the pieces, falls through - so
      picking another piece to mold still works. */
   if (typeof window.nsoMoldTakesClick === 'function' && window.nsoMoldTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
+  /* Patch (app-patch.js, Add's PATCH) owns a click on a hole while it is armed:
+     the click fills the loop under the pointer. A fall-through would start a
+     move drag under it. */
+  if (typeof window.nsoPatchTakesClick === 'function' && window.nsoPatchTakesClick(event)) {
     setOrbitFromPlate(false);
     return;
   }

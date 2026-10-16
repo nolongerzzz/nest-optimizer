@@ -1,4 +1,5 @@
-/* Findings - Check's report, sorted into problems a person can go and look at.
+/* Findings - Check's report, sorted into problems a person can go and look at,
+ * each with the one fix that fits it.
  *
  * Pure: no DOM, no THREE. app-findings.js draws and acts on what this returns;
  * tools/nso_findings_test.js holds it to NSO_Defects' own report in node.
@@ -196,18 +197,135 @@
       open: problemsOf('open', mk.openEdges, 6, joinEdge),
       nonManifold: problemsOf('nonManifold', mk.nonManifoldEdges, 6, joinEdge),
       pierce: problemsOf('pierce', mk.pierceTris, 9, joinEdge),
-      thin: problemsOf('thin', mk.thinTris, 9, opts.joinThin != null ? opts.joinThin : minWall)
+      thin: problemsOf('thin', mk.thinTris, 9, opts.joinThin != null ? opts.joinThin : minWall),
+      gap: gapProblems(report.gaps)
     };
+  }
+
+  /* A gap (nso_patch.js gaps()) is one problem on its own: two end faces
+     facing each other. It has no marks, so it is not clustered; its ring sits
+     in the middle of the slot. */
+  function gapProblems(gaps) {
+    var out = [];
+    (gaps || []).forEach(function (g, i) {
+      var r = Math.max(g.radiusMm || 0, 0.5);
+      out.push({
+        kind: 'gap', count: 1, members: [i], gap: g,
+        lo: [g.centre[0] - r, g.centre[1] - r, g.centre[2] - r], hi: [g.centre[0] + r, g.centre[1] + r, g.centre[2] + r],
+        center: g.centre.slice(), radius: r
+      });
+    });
+    out.forEach(function (p, i) { p.number = i + 1; });
+    return out;
   }
 
   /* ---- the card's rows, in words ---- */
 
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
 
+  /* ---- the fix that fits ---- */
+
+  var NOZZLE_MM = 0.4;
+  var TWO_LINES_MM = 2 * NOZZLE_MM;      // the thinnest wall that prints as two lines
+
+  function mm1(x) { return (Math.round(x * 10) / 10).toFixed(1); }
+  var FIX_LABEL = { cap: 'CAP', patch: 'PATCH', bridge: 'BRIDGE', sealRepair: 'REPAIR', thickenOut: 'THICKEN OUT' };
+
+  function keyOf(x, y, z) { return x.toFixed(4) + ',' + y.toFixed(4) + ',' + z.toFixed(4); }
+
+  /* Which problem each of the plan's loops belongs to: the loop's anchor is a
+     vertex of the piece, and so is the end of a marked edge. */
+  function loopProblems(report, P) {
+    var plan = report.repair, out = {};
+    if (!plan) return out;
+    var sets = P.open.map(function (p) {
+      var s = new Set(), f = (report.marks || {}).openEdges || [];
+      p.members.forEach(function (m) {
+        s.add(keyOf(f[m * 6], f[m * 6 + 1], f[m * 6 + 2]));
+        s.add(keyOf(f[m * 6 + 3], f[m * 6 + 4], f[m * 6 + 5]));
+      });
+      return s;
+    });
+    plan.loops.forEach(function (L, li) {
+      var k = keyOf(L.anchor[0], L.anchor[1], L.anchor[2]);
+      for (var i = 0; i < sets.length; i++) if (sets[i].has(k)) { out[li] = i; return; }
+    });
+    return out;
+  }
+
+  /* One item per hole (or per pair of holes that face each other): what it is,
+     in the card's plain words, and the one fix that fits it. The fix is
+     chosen from the finding's own geometry (nso_patch.js plan()), never from a
+     count. An item names the loops it acts on by an anchor vertex each, so the
+     fix finds them again on the piece as it stands when the button is pressed. */
+  function openItems(report, P) {
+    var plan = report.repair, items = [];
+    function whole(i) {
+      return {
+        kind: 'open', fix: 'sealRepair', fixLabel: FIX_LABEL.sealRepair, scope: 'whole piece', problems: [i],
+        text: 'Open edges that are not one clean loop, whole piece'
+      };
+    }
+    if (!plan || !plan.loops) {
+      // No plan at all (nso_patch.js not loaded): the old button.
+      P.open.forEach(function (p, i) {
+        items.push({ kind: 'open', fix: 'cap', fixLabel: FIX_LABEL.cap, scope: 'whole piece', problems: [i], text: 'Hole' });
+      });
+      return items;
+    }
+    var lp = loopProblems(report, P), handled = {};
+    var covered = P.open.map(function () { return 0; });
+    plan.loops.forEach(function (L, li) { if (lp[li] != null) covered[lp[li]] += L.vertices; });
+    // pairs first: two openings that face each other are one gap
+    (plan.pairs || []).forEach(function (pr) {
+      var pa = lp[pr.a], pb = lp[pr.b];
+      if (pa == null || pb == null) return;
+      handled[pr.a] = handled[pr.b] = true;
+      var probs = pa === pb ? [pa] : [pa, pb].sort(function (x, y) { return x - y; });
+      items.push({
+        kind: 'open', fix: 'bridge', fixLabel: FIX_LABEL.bridge, scope: 'this pair', problems: probs,
+        anchors: [plan.loops[pr.a].anchor, plan.loops[pr.b].anchor], gapMm: pr.gapMm,
+        text: 'Gap ' + mm1(pr.gapMm) + ' mm between two edges'
+      });
+    });
+    P.open.forEach(function (p, i) {
+      var mine = [];
+      plan.loops.forEach(function (L, li) { if (lp[li] === i && !handled[li]) mine.push(L); });
+      if (mine.length) {
+        var flat = mine.every(function (L) { return L.planar; });
+        items.push({
+          kind: 'open', fix: flat ? 'cap' : 'patch', fixLabel: FIX_LABEL[flat ? 'cap' : 'patch'], scope: 'this hole', problems: [i],
+          anchors: mine.map(function (L) { return L.anchor; }),
+          text: flat ? 'Hole, flat rim' : 'Hole, curved rim'
+        });
+      }
+      // marked edges that are no closed loop (a flap's free sides, a pinched fold)
+      var inPairs = 0;
+      plan.loops.forEach(function (L, li) { if (lp[li] === i && handled[li]) inPairs += L.vertices; });
+      if (covered[i] !== p.count) items.push(whole(i));
+      else if (!mine.length && !inPairs) items.push(whole(i));
+    });
+    items.sort(function (x, y) { return x.problems[0] - y.problems[0]; });
+    return items;
+  }
+
+  function thinItem(report) {
+    var w = report.wall || {};
+    var min = w.minWallMm, need = TWO_LINES_MM;
+    var mm = (min != null && isFinite(min)) ? Math.ceil((need - min) * 100 - 1e-9) / 100 : null;
+    if (!(mm > 0)) return null;
+    return {
+      kind: 'thin', fix: 'thickenOut', fixLabel: FIX_LABEL.thickenOut, scope: 'whole piece', mm: mm,
+      problems: [], text: 'Wall ' + min.toFixed(2) + ' mm, ' + need.toFixed(1) + ' mm is two lines',
+      detail: '+' + mm.toFixed(2) + ' mm'
+    };
+  }
+
   /* One row per kind of problem found, in the order the card shows them.
      Counts are the REPORT's, never re-counted here; the number of places is
-     the grouping's. `fix` names the existing control a row's one button
-     presses; `handledBy` is the sentence for a row that has none yet. */
+     the grouping's. Each row carries ITEMS - one per thing to fix, each with
+     its own button (item.fix, item.fixLabel); a row with no item has
+     \`handledBy\`, the sentence for a kind nothing fixes yet. */
   function rows(report, problems) {
     var out = [];
     var nonSolid = !!report.nonSolid;
@@ -216,57 +334,75 @@
       var h = P.open.length;
       if (nonSolid) {
         out.push({
-          kind: 'open', declared: true, problems: P.open,
+          kind: 'open', declared: true, problems: P.open, items: [],
           title: plural(h, 'opening') + ', ' + plural(report.openEdges, 'open edge') + ' - declared',
           meaning: 'This piece is flagged non-solid, so it is meant to be open here. Not a fault; nothing to fix.',
-          fix: null, handledBy: null
+          handledBy: null
         });
       } else {
         out.push({
-          kind: 'open', problems: P.open,
+          kind: 'open', problems: P.open, items: openItems(report, P),
           title: plural(h, 'hole') + ', ' + plural(report.openEdges, 'open edge'),
           meaning: 'The surface has gaps, so a slicer has to guess where the inside is and can leave walls or layers out.',
-          fix: 'cap', handledBy: null
+          handledBy: null
         });
       }
     }
     if (report.nonManifoldEdges) {
       out.push({
         kind: 'nonManifold', problems: P.nonManifold,
+        items: [{ kind: 'nonManifold', fix: 'sealRepair', fixLabel: FIX_LABEL.sealRepair, scope: 'whole piece',
+                  problems: P.nonManifold.map(function (_, i) { return i; }),
+                  text: 'Doubled or pinched edges, whole piece' }],
         title: plural(P.nonManifold.length, 'place') + ', ' +
                plural(report.nonManifoldEdges, 'doubled or pinched edge'),
         meaning: 'More than two faces meet at these edges, so inside and outside are ambiguous and a slicer may add or drop walls there.',
-        fix: 'sealRepair', handledBy: null
+        handledBy: null
       });
     }
     if (report.pierce) {
       out.push({
-        kind: 'pierce', problems: P.pierce,
+        kind: 'pierce', problems: P.pierce, items: [],
         title: plural(P.pierce.length, 'place') + ', ' + plural(report.pierce, 'piercing pair') +
                ' - pieces passing through each other',
         meaning: 'Parts of the surface pass through each other, so the slicer may fill or hollow the overlap unpredictably.',
-        fix: null,
         handledBy: 'No tool in the app removes this yet. Seal with Repair will not make it worse; the overlap has to be remodelled.'
       });
     }
     if (report.wall && report.wall.thinFaces) {
+      var ti = thinItem(report);
       out.push({
-        kind: 'thin', problems: P.thin,
+        kind: 'thin', problems: P.thin, items: ti ? [ti] : [],
         title: plural(P.thin.length, 'place') + ', ' + plural(report.wall.thinFaces, 'face') + ' under ' +
                report.wall.thresholdMm + ' mm (thinnest ' + report.wall.minWallMm.toFixed(3) + ' mm)',
         meaning: 'These walls or gaps are thinner than one nozzle line, so they may print as nothing or fuse shut.',
-        fix: null,
-        handledBy: 'Handled by Thicken out or Thicken in, in the Finish menu under Shape.'
+        handledBy: ti ? null : 'Handled by Thicken out or Thicken in, in the Finish menu under Shape.'
       });
     }
-    if (report.verdict === 'PASS') {
+    if (P.gap && P.gap.length) {
+      // ADVISORY: a gap is not a fault, it never moves the verdict, and a slot may be meant.
       out.push({
-        kind: 'clean', problems: [],
+        kind: 'gap', advisory: true, problems: P.gap,
+        items: P.gap.map(function (p, i) {
+          return {
+            kind: 'gap', fix: 'bridge', fixLabel: FIX_LABEL.bridge, scope: 'this pair', problems: [i],
+            anchors: [p.gap.a.centroid, p.gap.b.centroid], gapMm: p.gap.gapMm,
+            text: 'Gap ' + mm1(p.gap.gapMm) + ' mm between two faces'
+          };
+        }),
+        title: plural(P.gap.length, 'gap') + ' between faces that look at each other',
+        meaning: 'Two flat faces face each other across a narrow gap, as a cut or a crack leaves them. If it is not a slot you drew, Bridge joins them back into one piece.',
+        handledBy: null
+      });
+    }
+    if (report.verdict === 'PASS' && !(P.gap && P.gap.length)) {
+      out.push({
+        kind: 'clean', problems: [], items: [],
         title: 'Nothing wrong found',
         meaning: nonSolid
           ? 'Every check that applies passed. The open edges above are the ones this piece is meant to have.'
           : 'Every check passed: this piece should slice as one closed solid.',
-        fix: null, handledBy: null
+        handledBy: null
       });
     }
     return out;
@@ -287,7 +423,8 @@
     open: ['open edge', 'open edges'],
     nonManifold: ['doubled or pinched edge', 'doubled or pinched edges'],
     pierce: ['piercing pair', 'piercing pairs'],
-    thin: ['thin face', 'thin faces']
+    thin: ['thin face', 'thin faces'],
+    gap: ['gap between faces', 'gaps between faces']
   };
   function countOf(report, kind) {
     if (!report) return 0;
@@ -295,6 +432,7 @@
     if (kind === 'nonManifold') return report.nonManifoldEdges || 0;
     if (kind === 'pierce') return report.pierce || 0;
     if (kind === 'thin') return (report.wall && report.wall.thinFaces) || 0;
+    if (kind === 'gap') return (report.gaps && report.gaps.length) || 0;
     return 0;
   }
   function beforeNow(before, after, kind) {
@@ -304,7 +442,9 @@
 
   var api = {
     JOIN_EDGE: JOIN_EDGE,
-    KINDS: ['open', 'nonManifold', 'pierce', 'thin'],
+    KINDS: ['open', 'nonManifold', 'pierce', 'thin', 'gap'],
+    TWO_LINES_MM: TWO_LINES_MM,
+    FIX_LABEL: FIX_LABEL,
     group: group,
     _clusterEdges: clusterEdges,
     rows: rows,

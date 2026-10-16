@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=moldmrg1" />
+  <link rel="stylesheet" href="styles.css?v=patchclose1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -811,7 +811,7 @@
           <!-- ADD: what builds material onto a piece - Fill / Densify, Foam, Thicken,
                Extend, Bridge - out of the old Shape card, unchanged; and Close. -->
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-add" data-sec="add">
-            <summary class="vp-bar-btn" title="Fill / Densify, Foam, Thicken out and in, Extend, Bridge, Close">Add</summary>
+            <summary class="vp-bar-btn" title="Fill / Densify, Foam, Thicken out and in, Extend, Bridge, Close, Patch">Add</summary>
             <div class="vp-menu-body vp-finish">
             <div class="vp-row vp-row-pair">
               <button id="btn-fill" class="btn btn-secondary" type="button"
@@ -888,6 +888,14 @@
               </div>
             </div>
             </div>
+            <!-- PATCH (app-patch.js, nso_patch.js, docs/PATCH.md): arm it, hover a hole to
+                 outline it, click to fill it with a surface that continues the curvature
+                 round it. One Undo per click. The Findings card's PATCH is the same fill. -->
+            <div class="vp-row vp-row-full vp-row-patch">
+              <button id="btn-patch" class="btn btn-secondary btn-patch" type="button" aria-pressed="false"
+                      title="Fill an open hole with a surface that continues the curvature round it: a smooth fit through the rim's neighbours, welded at the rim - no lip, no flat facet. A hole whose rim is flat gets the flat cap. Arm it, hover a hole to outline it, click to fill it. One Undo per click. Click Patch again, or press Escape, to stop.">Patch</button>
+            </div>
+            <p id="patch-readout" class="bend-readout patch-readout" hidden></p>
           </details>
           <!-- SUBTRACT: what takes material away - Subtract, Extract bit, Carve (from
                Sculpt), Hollow (from Shape), and Lift, on the plate (app-lift-plate.js). -->
@@ -1228,6 +1236,11 @@
             <button id="btn-findings-recheck" class="btn btn-secondary findings-recheck" type="button">Check again</button>
           </div>
           <p id="findings-result" class="findings-result" hidden></p>
+          <div id="findings-actions" class="findings-actions" hidden>
+            <button id="btn-findings-fixall" class="btn btn-secondary findings-fixall" type="button"
+                    title="Run every finding's own fix, one after the other, in the order shown. Each is its own Undo. A gap between faces is advisory and is left for you.">Fix all</button>
+          </div>
+          <ul id="findings-done" class="findings-done" hidden></ul>
           <ul id="findings-rows" class="findings-rows"></ul>
           <p id="findings-unplaced" class="findings-note" hidden></p>
         </section>
@@ -1530,8 +1543,9 @@
     </div>
   </div>
   <script src="NSO_Repair.js?v=repair1"></script>
-  <script src="nso-defects.js?v=inside5"></script>
-  <script src="nso-findings.js?v=findings1"></script>
+  <script src="nso-defects.js?v=repairloop1"></script>
+  <script src="nso-findings.js?v=repairloop1"></script>
+  <script src="nso_patch.js?v=repairloop1"></script>
   <script src="nso_planar_fuse.js?v=inside4"></script>
   <script src="nso_skin.js?v=skin4"></script>
   <script src="nso_skin_patch.js?v=skin4"></script>
@@ -1581,7 +1595,7 @@
   <script src="nso_relief.js?v=relief2"></script>
   <!-- Every tool helper goes in and out of the scene through this registry. -->
   <script src="nso-helpers.js?v=helpers1"></script>
-  <script src="app-core.js?v=moldmrg1"></script>
+  <script src="app-core.js?v=patchclose1"></script>
 
 
 
@@ -1664,7 +1678,8 @@
   <script src="app-move-vertical.js?v=helpers1"></script>
   <script src="app-defects.js?v=helpers1"></script>
   <!-- After app-defects.js, whose hooks and scan it uses. -->
-  <script src="app-findings.js?v=shellv3"></script>
+  <script src="app-findings.js?v=repairloop1"></script>
+  <script src="app-patch.js?v=repairloop1"></script>
   <script src="app-measure.js?v=helpers1"></script>
   <!-- The library write features. access first: it holds the gate, the
        target repository and the token key that the other two read. -->
