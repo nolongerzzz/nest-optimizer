@@ -163,6 +163,7 @@ const UNDO_REPLACE_LABEL = {
   bendReplace: 'Undo: Bend reverted',
   tubeEdgeReplace: 'Undo: Tube edge reverted',
   tubeNeckReplace: 'Undo: Neck reverted',
+  closeReplace: 'Undo: Close reverted',
   mirrorReplace: 'Undo: Mirror reverted',
   cropReplace: 'Undo: Crop reverted',
   cropMove: 'Undo: Move reverted',

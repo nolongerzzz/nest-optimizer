@@ -717,9 +717,9 @@
             </div>
           </details>
           <!-- ADD: what builds material onto a piece - Fill / Densify, Foam, Thicken,
-               Extend, Bridge - out of the old Shape card, unchanged. -->
+               Extend, Bridge - out of the old Shape card, unchanged; and Close. -->
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-add" data-sec="add">
-            <summary class="vp-bar-btn" title="Fill / Densify, Foam, Thicken out and in, Extend, Bridge">Add</summary>
+            <summary class="vp-bar-btn" title="Fill / Densify, Foam, Thicken out and in, Extend, Bridge, Close">Add</summary>
             <div class="vp-menu-body vp-finish">
             <div class="vp-row vp-row-pair">
               <button id="btn-fill" class="btn btn-secondary" type="button"
@@ -775,6 +775,24 @@
                 <button id="btn-bridge-go" class="btn btn-secondary" type="button" disabled
                         title="Build the web the ghost shows and weld both ends. The pieces become one; one Undo puts every input back.">Set</button>
                 <button id="btn-bridge-cancel" class="btn btn-secondary" type="button" title="Drop the pending web; with none pending, close the card.">Cancel</button>
+              </div>
+            </div>
+            <!-- CLOSE: a lid across an open end, and the card it opens
+                 (app-close.js, nso_close.js). docs/CLOSE.md. -->
+            <div class="vp-row vp-row-full vp-row-close">
+              <button id="btn-close" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="close-panel"
+                      title="Put a lid across an open end - a tube end, an open box, any rim. Hover outlines the rim; click picks it. The lid is as thick as the wall there, flush with the rim (Inset sinks it), unioned into the piece as one closed solid. The outside is not touched.">Close</button>
+            </div>
+            <div class="vp-bend-panel vp-close-panel" id="close-panel" hidden>
+              <p id="close-readout" class="bend-readout">—</p>
+              <label class="vp-bend-field" for="inp-close-thick" title="The lid's thickness. Filled with the wall at the rim you click; at least two nozzle widths.">Thick
+                <input type="number" id="inp-close-thick" min="0.8" step="0.1" aria-label="Lid thickness, mm"><span>mm</span></label>
+              <label class="vp-bend-field" for="inp-close-inset" title="How far below the rim the lid's top sits. 0: flush with the rim.">Inset
+                <input type="number" id="inp-close-inset" min="0" step="0.1" value="0" aria-label="Lid inset below the rim, mm"><span>mm</span></label>
+              <div class="vp-row vp-row-pair">
+                <button id="btn-close-go" class="btn btn-secondary" type="button" disabled
+                        title="Build the lid the ghost shows into the piece. One Undo puts the piece back.">Set</button>
+                <button id="btn-close-cancel" class="btn btn-secondary" type="button" title="Put Close away and leave the piece exactly as it was.">Cancel</button>
               </div>
             </div>
             </div>
@@ -1470,7 +1488,7 @@
   <script src="nso_relief.js?v=relief2"></script>
   <!-- Every tool helper goes in and out of the scene through this registry. -->
   <script src="nso-helpers.js?v=helpers1"></script>
-  <script src="app-core.js?v=liftplate1"></script>
+  <script src="app-core.js?v=close1"></script>
 
 
 
@@ -1512,6 +1530,8 @@
        nso_section.js (the face's shape). See docs/BRIDGE.md. -->
   <script src="nso_bridge.js?v=bridge1"></script>
   <script src="app-bridge.js?v=helpers1"></script>
+  <script src="nso_close.js?v=close1"></script>
+  <script src="app-close.js?v=close1"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=polish2"></script>
