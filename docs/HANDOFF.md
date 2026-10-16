@@ -74,6 +74,7 @@ Current roster, by category:
 | G-scope Slice (`app-gscope-slice.js`) | **none** — Slice reads geometry and writes nothing; Export piece to plate adds a copy of the piece and edits none, as G-scope's own Export to plate does | n/a | header comment + `docs/SLICER.md` §6 |
 | Picture (`app-relief.js`, Gen+ -> Picture) | none — adds a piece, reads and edits none | n/a | header comment + `docs/RELIEF.md` |
 | Lift (`app-lift-plate.js`, Subtract -> Lift: a click, a Shift group, Strip's Confirm) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/LIFT.md` §7 |
+| Mold (`app-mold.js`, Gen+ -> Mold; the geometry is `nso_mold.js`) | **none** - reads the piece's geometry, writes no face of it, adds two pieces | n/a | header comment + `docs/MOLD.md` |
 | G-scope Features (`app-gscope-lift.js`) | **none** - reads geometry, writes none | n/a | header comment + `docs/LIFT.md` §7 |
 | Foam (`app-foam.js`, Finish -> Shape) | sub-region | the faces of the one hollow it fills that the level reaches, against `nsoMaskFaceList(m)`; a null list (a painted recessed patch) stands it down | header comment + `docs/FOAM.md` §6 |
 
@@ -585,6 +586,37 @@ Branch `claude/ui-cleanup`, off `claude-wip`.
   nothing else moved). Both fail on the code before this change. `?v=`:
   `app-join.js`, `app-input-mode.js` shell1 -> uiclean1; `styles.css` shell4 ->
   uiclean1 (a comment that described the old class wipe).
+
+## Mold - a two-piece silicone mold from a piece (2026-10-16)
+Branch `claude/mold`, off `claude-wip`, independent of the open branches. Full
+write-up: **`docs/MOLD.md`**.
+- **What it is:** an engine (`nso_mold.js`, THREE-free) and a card (Gen+ ->
+  Mold, `app-mold.js`, its own entry beside Wheel, Stock and Picture). Select a
+  piece, slide / tilt the blade (the Cut card's slider, ← number →, dial),
+  press Generate: two closed, manifold pieces on the plate beside the original,
+  `<piece> mold A` / `mold B`, parting face up, keys in, sprue Ø8 and vent Ø3 in.
+  One Undo removes both; Regenerate replaces the pair. The piece is untouched.
+- **Reuse, not reinvention:** the cavity and the sockets are **Subtract**
+  (`NSO_subtractSoups`), the keys are **Union** (`NSO_unionSoups`), the halves
+  are **Cut's clean split** (`cutOneSide` / `rawCut`), all handed to the engine
+  as a `kernel` so the node tests run the shipped code (`tools/nso_mold_testlib.js`).
+- **Locks** (faces that would lock a half) are tinted and counted on the card:
+  "N mm² would lock" - a warning, never a refusal. **Refusals** in words: not
+  closed; block bigger than the plate (the size is in the text); keys that would
+  not fit (the minimum wall is).
+- **Interpretations to check against intent:** the Cut card's dial is a heading
+  about the vertical, which does nothing to a level plane, so here the dial
+  steers which way the blade leans and a **Tilt** field sets how far. "A Stock
+  box tilted 20°" is tested both as the blade tilted 20° (the plane follows the
+  slider; lock > 0) and as the piece posed 20° on its side. A key is a full
+  cone at Ø6 / 3 mm / 45° (apex at 3 mm); the height is held to Ø/2.
+- **Paint scope:** none (roster row above) - it reads geometry and edits no
+  piece.
+- **Checks:** new `mold:test` (85 gates, node) and `mold:drive` (1280 x 800),
+  plus `page:manifest`. Nothing else was run on this ticket.
+- **Tags:** `app-core.js` liftplate1 -> mold1 (one click-routing block,
+  `nsoMoldTakesClick`), `styles.css` liftplate1 -> mold1, `nso_mold.js` and
+  `app-mold.js` new at mold1.
 
 ## Lift reads any face (2026-10-15)
 Branch `claude/lift-any-face`, off `claude-wip` after #190. Full write-up:
