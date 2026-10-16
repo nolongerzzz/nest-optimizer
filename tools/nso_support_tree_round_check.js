@@ -226,7 +226,12 @@ fs.mkdirSync(OUT, { recursive: true });
      ===================================================================== */
   console.log('\n=== 2. exact bores: each member shrunk by one wall, leg by leg, in closed form ===');
   const csg = csgContext();
-  const opts = { unionSoups: csg.NSO_unionSoups, subtractSoups: csg.NSO_subtractSoups };
+  /* RE-PINNED (supports-exposed): feet off. This suite asks about the bores
+     and the members they follow - "no handles" is its Euler gate - and a foot
+     pad is a round slab under every landed trunk, so three trunks standing
+     close (the tab's) put a ring of pads round a gap, a handle in the first
+     layer by design. The feet, and the bores under them, are support:exposed's. */
+  const opts = { unionSoups: csg.NSO_unionSoups, subtractSoups: csg.NSO_subtractSoups, footPads: false };
   const PLANS = {};
   for (const [name, host] of CASES) for (const style of STYLES) {
     const tag = name + (style === 'gecko-hand' ? '_gecko' : '');

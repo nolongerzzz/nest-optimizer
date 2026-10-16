@@ -258,9 +258,14 @@ console.log(`  branch lean off vertical over a ${rise.toFixed(1)} mm rise: media
   `${tiltMed.toFixed(2)}, p95 ${tilts[Math.floor(0.95 * (tilts.length - 1))].toFixed(2)}, ` +
   `max ${tiltMax.toFixed(2)} deg`);
 
-check('BRANCH_TILT_DEG is the widest lean the proven structure ever uses, to 0.1 deg',
-  Math.abs(ST.BRANCH_TILT_DEG - tiltMax) <= 0.1,
-  `${ST.BRANCH_TILT_DEG} deg vs ${tiltMax.toFixed(4)} deg measured`);
+/* RE-PINNED (supports-exposed): the limit was the widest lean measured, to
+   0.1 deg (31.44). It is 30 now - rounded down, so a face tilted exactly 30
+   deg is held by a vertical post, and every leg sits inside the proven
+   structure: above its 95th percentile, below its widest. */
+const tiltP95 = tilts[Math.floor(0.95 * (tilts.length - 1))];
+check('BRANCH_TILT_DEG is 30: above the proven structure\'s 95th-percentile lean, at or below its widest',
+  ST.BRANCH_TILT_DEG === 30 && ST.BRANCH_TILT_DEG >= tiltP95 && ST.BRANCH_TILT_DEG <= tiltMax,
+  `${ST.BRANCH_TILT_DEG} deg vs p95 ${tiltP95.toFixed(4)}, widest ${tiltMax.toFixed(4)} deg measured`);
 check('...which is well inside the printable angle, not at it',
   ST.BRANCH_TILT_DEG < SA.ANGLE_DEFAULT_DEG,
   `${ST.BRANCH_TILT_DEG} deg vs the ${SA.ANGLE_DEFAULT_DEG} deg overhang threshold - ` +

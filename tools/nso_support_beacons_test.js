@@ -342,22 +342,26 @@ console.log('\n=== 6. THROUGH-HOLE: no beacons on the hole\'s walls ===');
     `${f.beacons.length} beacons, ${inHole.length} in the hole, ${kinds(f)}`);
 }
 
-console.log('\n=== 7. CAVITY: two beacons in one cell, at different z ===');
+console.log('\n=== 7. CAVITY: exposed only - the ceiling inside is not a beacon ===');
 {
   const d = SB.detect(CAVITY, { plateZ: 0 }), g = d.grid;
-  let two = 0, cav = 0;
+  let under = 0, ceil = 0, cav = 0;
   for (let j = 0; j < g.ny; j++) for (let i = 0; i < g.nx; i++) {
     const [x, y] = centre(g, i, j);
     if (!(x > 5 && x < 15 && y > 5 && y < 15)) continue;
     cav++;
     const here = d.beacons.filter(b => b.cell[0] === i && b.cell[1] === j);
-    if (here.some(b => near(b.z, 5, 1e-4) && b.need.kind === 'face') &&
-        here.some(b => near(b.z, 12, 1e-4) && b.need.kind === 'gap' && b.need.below === 'material')) two++;
+    if (here.some(b => near(b.z, 5, 1e-4) && b.need.kind === 'face')) under++;
+    if (here.some(b => near(b.z, 12, 1e-4))) ceil++;
   }
-  check('cavity: every cell over the cavity holds the underside AND the cavity ceiling',
-    cav > 0 && two === cav, `${two} of ${cav}, ${kinds(d)}`);
-  check('cavity: the floor and the ceiling are separate regions', d.regions.length === 2,
-    d.regions.map(r => `${r.count} @ z ${r.point[2].toFixed(2)}`).join('; '));
+  /* Before exposed-only each of these cells held two beacons, the underside
+     at z 5 and the cavity ceiling at z 12 (a 'gap' over material). The
+     ceiling's ray runs down into the cavity floor, so it is interior. */
+  check('cavity: every cell over the cavity holds its underside beacon, and no ceiling',
+    cav > 0 && under === cav && ceil === 0, `${under} of ${cav} undersides, ${ceil} ceilings, ${kinds(d)}`);
+  check('cavity: one region (the underside), the ceiling counted out as interior',
+    d.regions.length === 1 && near(d.regions[0].point[2], 5, 1e-4) && d.counts.interior > 0,
+    d.regions.map(r => `${r.count} @ z ${r.point[2].toFixed(2)}`).join('; ') + `, ${d.counts.interior} interior`);
 }
 
 console.log('\n=== 8. EDGE and TIP: downward features with no steep face ===');

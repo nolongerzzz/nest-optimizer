@@ -38,7 +38,7 @@ const ctx = {
 };
 vm.createContext(ctx);
 for (const f of ['nso_thickness.js', 'nso_seat_surface.js', 'app-sculpt.js', 'app-extend.js',
-                 'nso_support_aim.js', 'nso_path_sweep.js', 'nso_support_tree.js', 'nso_support_gridpack.js']) {
+                 'nso_support_beacons.js', 'nso_support_aim.js', 'nso_path_sweep.js', 'nso_support_tree.js', 'nso_support_gridpack.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
 const GP = ctx.NSO_SupportGridpack, ST = ctx.NSO_SupportTree;
@@ -244,7 +244,12 @@ fs.mkdirSync(OUT, { recursive: true });
   console.log('\n=== 2. flat shelf, 3 x 3: merges at the predicted depths ===');
   {
     const p = plan('shelf');
-    check('3 x 3 support points', p.ok && p.beacons.length === 9, `${p.beacons && p.beacons.length}`);
+    /* The detector's own beacons: the 3 x 3 under the arm, plus 3 corner
+       'edge' beacons beside the post (docs/SUPPORT-BEACONS.md, shelf). The
+       trunk-first adapter's contact lattice gave the 9 alone. */
+    const faces = p.ok ? p.beacons.filter(b => b.kind === 'face') : [];
+    check('3 x 3 face points under the arm, and 3 corner points beside the post',
+      p.ok && faces.length === 9 && p.beacons.length === 12, `${faces.length} face, ${p.beacons && p.beacons.length} in all`);
     const tan = Math.tan(p.branchTiltDeg * Math.PI / 180), g = p.latticeMm / 2;
     const first = p.merges.filter(m => m.members.every(id => p.members[id].kind === 'beacon'));
     check('points merge pairwise: every first merge is a pair, and no merge takes more than three',

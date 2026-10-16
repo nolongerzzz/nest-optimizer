@@ -21,15 +21,19 @@
    THE PLANNER (deterministic)
    ---------------------------------------------------------------------------
    Dials: strut side s (buildStrut's, floored), lean limit theta
-   (BRANCH_TILT_DEG, 31.44 deg, the reference's widest branch), node
+   (BRANCH_TILT_DEG, 30 deg: inside the reference's widest branch, 31.44), node
    lattice L (5 mm), and merge eagerness (the Style: 'strut' 0, 'tree' 1).
 
    BEACONS. The support points. Each is { p, n } - a point on the surface
-   and its outward normal. Today they come from gridBeacons() below, which
-   grids detectOverhangs' regions at the contact pitch through
-   NSO_SupportTree.contactPoints. claude/support-beacons is building the
-   real detector (NSO_SupportBeacons.detect); beaconsFor() is the one place
-   that swaps over, and opts.beacons takes a list directly.
+   and its outward normal. They come from gridBeacons() below:
+   NSO_SupportBeacons.detect's own beacons, EXPOSED ONES ONLY (a spot whose
+   ray along its own normal leaves the piece; a cavity ceiling or bore is no
+   beacon), each carrying the id of its beacon region (its area). opts.beacons
+   takes a list directly (the Supports card's; G-scope's row).
+
+   HELD. A beacon is held when it is in a landed trunk. Merging joins members
+   and never drops one, so on a clean face held == the area's beacon count; a
+   face that needs more capacity gets more trunks, never a section past 4 x s^2.
 
    LEVEL 0. Every beacon starts a strut straight down from its point. A
    SIDE beacon - its face leans more than theta off straight down, so a
@@ -67,6 +71,13 @@
    Openings in the piece are found this way: a drop that is clear through a
    hole is a clear drop.
 
+   FEET. A trunk that lands on the plate stands on a pad: one first layer
+   (0.2 mm) of a round slab, r = max(3 mm, 2.5 x the trunk's half-width), kept
+   0.2 mm off the piece; pads that touch are unioned (opts.footPads false turns
+   them off). Nothing goes below the plate: the trunk ends half a layer inside
+   its pad, and a last leg that would lean onto the plate stops 1 mm short and
+   drops straight.
+
    LANDING. Plate first, always. A member with no route to the plate:
      - restOnModel off (default): builds nothing; its beacons are counted
        as "unreachable from the plate".
@@ -94,14 +105,15 @@
 
    API
    ---------------------------------------------------------------------------
-   gridBeacons(rawTris, opts)  -> { ok, reason, beacons, detect, regions }
+   gridBeacons(rawTris, opts)  -> { ok, reason, beacons, detect, regions (beacon regions) }
    plan(rawTris, opts)         -> { ok, reason, members, merges, trunks, ... }
    solid(plan, opts)           -> Promise { ok, soup, solids, reason }; opts.hollow
                                   bores every member (BORES), hollowWallMm, minBoreMm
    describe(plan)              -> one plain status line
    opts: skipList (required, as detectOverhangs), angleDeg, occluders,
          regionId, sideMm, style ('strut' | 'tree' | 'gecko-hand'),
-         branchTiltDeg, latticeMm, pitchMm, restOnModel, beacons
+         branchTiltDeg, latticeMm, pitchMm, restOnModel, beacons, footPads,
+         firstLayerMm
    opts.beacons: an explicit list ({ p, n } or { x, y, z, normal }, each
          optionally with regionId and key) planned instead of detecting.
    Every plan.trunks[i] carries regionIds; every solid(plan).solids[i]
@@ -122,10 +134,18 @@
   var TIP_LEVELS = [0.05, 0.3, 0.6, 1.0, 1.5];   /* mm below a tip where the tip zone is swept for walls */
   var TIP_RISE_SIDES = 2;     /* a pickup stub's vertical last run, x the strut side */
   var NUDGE_STEPS = [0.25, 0.5, 0.75, 1];   /* x the strut side: how far a tip may move off a wall */
+  var FOOT_LAYER_MM = 0.2;     /* a foot pad is one first layer thick (the 0.2 mm layers this file's gaps are sized for) */
+  var FOOT_MIN_R_MM = 3;       /* foot pad radius: max(this, FOOT_HALF_WIDTHS x the trunk's half-width) */
+  var FOOT_HALF_WIDTHS = 2.5;
+  var FOOT_RUN_MM = 1;         /* a trunk that would land leaning stops this high and drops the rest straight */
+  var FOOT_SIDES = 48;
+  var FOOT_GAP_MM = 0.2;       /* a pad keeps this far off the piece (and what stands round it), the support gap and a hair */
+  var LEAN_TOL = 1e-4;          /* a face tilted exactly the lean limit is not a side face: float32 noise on its normal must not decide */
   var EAGERNESS = { strut: 0, tree: 1, 'gecko-hand': 1 };
 
   function SA(o) { return (o && o.supportAim) || (root && root.NSO_SupportAim) || null; }
   function ST(o) { return (o && o.supportTree) || (root && root.NSO_SupportTree) || null; }
+  function SBM(o) { return (o && o.beaconsModule) || (root && root.NSO_SupportBeacons) || null; }
   function PS(o) { return (o && o.pathSweep) || (root && root.NSO_PathSweep) || null; }
 
   function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
@@ -157,49 +177,48 @@
   }
 
   /* =====================================================================
-     BEACONS - the adapter. Today's detectOverhangs regions, gridded at the
-     contact pitch by the same contactPoints the tree used, each point
-     carrying the normal of the region triangle under it.
+     BEACONS - the adapter. NSO_SupportBeacons.detect's own beacons, on its
+     plan grid, exposed ones only (docs/SUPPORT-BEACONS.md): every spot that
+     needs holding and can be reached from outside the piece. Each carries
+     the id of the beacon region (the area) it belongs to. Nothing here
+     decides what needs holding or where; it only asks.
      ===================================================================== */
   function gridBeacons(rawTris, opts) {
     opts = opts || {};
-    var A = SA(opts), T = ST(opts);
+    var A = SA(opts), T = ST(opts), SB = SBM(opts);
     if (!A || !T) return { ok: false, reason: 'nso_support_aim.js and nso_support_tree.js must be loaded', beacons: [] };
-    var det = A.detectOverhangs(rawTris, opts);
+    if (!SB || typeof SB.detect !== 'function') return { ok: false, reason: 'nso_support_beacons.js must be loaded', beacons: [] };
+    if (opts.skipList === undefined) {
+      return { ok: false, reason: 'the planner needs opts.skipList - pass nsoMaskFaceList(m), or [] to state ' +
+        'that nothing is painted; there is no unpainted default', beacons: [] };
+    }
+    /* The pitch is the contact span, or wider when the strut is. A pair's
+       merge node sits half a pitch along a row, so the next row's points are
+       sqrt(5)/2 pitches from it; the merged column must clear them (touch()),
+       or no merge can ever go ahead. The detector's own 3 mm holds up to a
+       1.7 mm strut; a 2 mm strut gets 3.41, a 3 mm one 4.94. */
+    var st = A.buildStrut(opts), side = st.ok ? st.sideMm : 0;
+    var pitch = Math.max(opts.pitchMm == null ? SB.PITCH_DEFAULT_MM : +opts.pitchMm,
+                         touch(sideFor(side, 2), side) / (Math.sqrt(5) / 2));
+    var det = SB.detect(rawTris, {
+      pitch: pitch, angleDeg: opts.angleDeg, plateZ: opts.plateZ, minDropMm: opts.minDropMm,
+      skipList: opts.skipList, occluders: opts.occluders, planeTol: opts.planeTol, bridgeMm: opts.bridgeMm
+    });
     if (!det.ok) return { ok: false, reason: det.reason, detect: det, beacons: [] };
     var regions = opts.regionId == null ? det.regions : det.regions.filter(function (r) { return r.id === (opts.regionId | 0); });
     if (opts.regionId != null && !regions.length) {
       return { ok: false, reason: 'there is no overhang ' + ((opts.regionId | 0) + 1) + ' on this piece', detect: det, beacons: [] };
     }
-    /* The pitch is the contact span, or wider when the strut is. A pair's
-       merge node sits half a pitch along a row, so the next row's points are
-       sqrt(5)/2 pitches from it; the merged column must clear them (touch()),
-       or no merge can ever go ahead. 3.29 mm holds up to a 1.9 mm strut; a
-       2 mm strut gets 3.41, a 3 mm one 4.94. */
-    var st = A.buildStrut(opts), side = st.ok ? st.sideMm : 0;
-    var pitch = Math.max(opts.pitchMm == null ? T.MAX_SPAN_MM : +opts.pitchMm,
-                         touch(sideFor(side, 2), side) / (Math.sqrt(5) / 2));
     var out = [];
     regions.forEach(function (r) {
-      var cp = T.contactPoints(rawTris, r, { maxSpanMm: pitch });
-      if (!cp.ok) return;
-      cp.points.forEach(function (c) {
-        var n = r.normal, bestZ = null;
-        for (var i = 0; i < r.tris.length; i++) {
-          var o = r.tris[i] * 9, tri = [[rawTris[o], rawTris[o + 1], rawTris[o + 2]],
-            [rawTris[o + 3], rawTris[o + 4], rawTris[o + 5]], [rawTris[o + 6], rawTris[o + 7], rawTris[o + 8]]];
-          var z = T._zOnTriAt(tri, c.p[0], c.p[1]);
-          if (z == null || Math.abs(z - c.p[2]) > 1e-4 || (bestZ != null && z >= bestZ)) continue;
-          bestZ = z; n = unit(cross(sub(tri[1], tri[0]), sub(tri[2], tri[0]))) || r.normal;
-        }
-        out.push({ id: out.length, p: c.p.slice(), n: n.slice(), regionId: r.id, source: c.source });
+      r.beacons.forEach(function (b) {
+        out.push({ id: out.length, p: [b.x, b.y, b.z], n: b.normal.slice(), regionId: r.id, source: 'detect', kind: b.need.kind });
       });
     });
     return { ok: true, reason: out.length + ' support point(s)', beacons: out, detect: det, regions: regions, pitchMm: pitch };
   }
 
-  /* The ONE place the beacon source is chosen. Swap to
-     NSO_SupportBeacons.detect here when claude/support-beacons lands.
+  /* The ONE place the beacon source is chosen.
 
      EXPLICIT BEACONS (opts.beacons). The caller's own list, planned as it
      is: the Supports card hands in the detected set with the user's manual
@@ -207,12 +226,12 @@
      { p, n } or a detector record { x, y, z, normal } (nso_support_beacons.js),
      and may carry regionId and key; both ride through untouched, so a trunk
      and a solid can say which region and which beacons they hold. Detection
-     still runs for the plate and the regions, without its beacon grid -
-     the list given IS the beacons. */
+     still runs for the plate, without its beacon grid - the list given IS the
+     beacons - and names no region: the caller's regionIds are the only ones. */
   function beaconsFor(rawTris, opts) {
     if (opts.beacons) {
       var A = SA(opts), det = A.detectOverhangs(rawTris, Object.assign({}, opts, { beacons: false }));
-      return { ok: det.ok, reason: det.reason, detect: det, regions: det.regions || [],
+      return { ok: det.ok, reason: det.reason, detect: det, regions: [],
                pitchMm: opts.pitchMm == null ? ST(opts).MAX_SPAN_MM : +opts.pitchMm,
                beacons: opts.beacons.map(function (b, i) {
                  var p = b.p ? b.p : [b.x, b.y, b.z], n = b.n || b.normal;
@@ -498,7 +517,7 @@
       /* 1. beacons above this level start (or are picked up) */
       while (next < live.length && live[next].p[2] > zk + 1e-9) {
         var b = live[next++];
-        var sideBeacon = b.n[2] > -cosT;
+        var sideBeacon = b.n[2] > -cosT + LEAN_TOL;
         if (!sideBeacon && reach > 0) {
           var pick = null;
           M.forEach(function (m) {
@@ -688,8 +707,26 @@
 
   /* One member, one sweep: its whole polyline, mitred at every bend. A member
      formed at a node or a pickup starts half its side above that point. */
-  function memberSolid(P, m) {
+  function memberSolid(P, m, foot) {
     var pts = m.path.slice();
+    /* A trunk that lands on a foot pad ends half a first layer inside it, so
+       its end cap is not coplanar with the pad's bottom (the boolean's one
+       untrustworthy input) and the pad, not the cap, is what sits on the plate. */
+    if (foot && m.end === 'plate') {
+      /* ...and lands upright. A last leg that leans would put its cap's low
+         corner under the plate: it stops FOOT_RUN_MM short and drops the rest
+         straight (at most half the leg, so a short leg still has a lean). */
+      var nP = pts.length, la = pts[Math.max(0, nP - 2)], lb = pts[nP - 1], drop = la[2] - lb[2];
+      if (nP >= 2 && Math.hypot(lb[0] - la[0], lb[1] - la[1]) > 1e-6 && drop > 1e-6) {
+        var rise = Math.min(FOOT_RUN_MM, drop / 2), fr = 1 - rise / drop;
+        var E = [la[0] + (lb[0] - la[0]) * fr, la[1] + (lb[1] - la[1]) * fr, lb[2] + rise];
+        pts[nP - 1] = E;
+        pts.push([E[0], E[1], lb[2]]);
+      }
+      var lastP = pts[pts.length - 1].slice();
+      lastP[2] += foot / 2;
+      pts[pts.length - 1] = lastP;
+    }
     if (m.kind === 'merge' || m.kind === 'pickup') pts.unshift(add(pts[0], [0, 0, m.side / 2]));
     pts = cleanPath(pts);
     /* A member that ends in a junction runs on past it along its own last
@@ -723,6 +760,48 @@
     return { ok: true, soups: soups, points: pts, split: true };
   }
 
+  /* A pad: an n-sided prism round (cx, cy) from z0 to z1, outward-wound, its
+     k-th corner at radius rs[k] (all equal for a plain disc). */
+  function discSoup(cx, cy, z0, z1, rs, phase) {
+    var n = rs.length, out = new Float32Array(n * 4 * 9), w = 0;
+    function tri(a, b, c) {
+      out[w++] = a[0]; out[w++] = a[1]; out[w++] = a[2];
+      out[w++] = b[0]; out[w++] = b[1]; out[w++] = b[2];
+      out[w++] = c[0]; out[w++] = c[1]; out[w++] = c[2];
+    }
+    for (var k = 0; k < n; k++) {
+      var k1 = (k + 1) % n, a0 = phase + 2 * Math.PI * k / n, a1 = phase + 2 * Math.PI * (k + 1) / n;
+      var p0 = [cx + rs[k] * Math.cos(a0), cy + rs[k] * Math.sin(a0)], p1 = [cx + rs[k1] * Math.cos(a1), cy + rs[k1] * Math.sin(a1)];
+      tri([cx, cy, z1], [p0[0], p0[1], z1], [p1[0], p1[1], z1]);
+      tri([cx, cy, z0], [p1[0], p1[1], z0], [p0[0], p0[1], z0]);
+      tri([p0[0], p0[1], z0], [p1[0], p1[1], z0], [p1[0], p1[1], z1]);
+      tri([p0[0], p0[1], z0], [p1[0], p1[1], z1], [p0[0], p0[1], z1]);
+    }
+    return out;
+  }
+
+  /* The pad's corner radii: r everywhere, drawn in where something of the
+     piece (or an occluder) stands within FOOT_GAP_MM of the pad's slab - a
+     horizontal ray from the centre at four heights through the slab and the
+     gap above it. A corner never goes in past the trunk's own corner, and
+     takes the least of itself and its two neighbours, so a wall's edge
+     cannot slip between two corners. */
+  function footRadii(A, obstacles, cx, cy, plateZ, thick, r, side, phase) {
+    var n = FOOT_SIDES, rs = [], hs = [0.02, thick / 2, thick, thick + 0.18];
+    var floor = side / Math.SQRT2 + 0.01;
+    for (var k = 0; k < n; k++) {
+      var a = phase + 2 * Math.PI * k / n, d = [Math.cos(a), Math.sin(a), 0], best = r + FOOT_GAP_MM;
+      for (var hi = 0; hi < hs.length && A; hi++) {
+        var h = A._nearestHit(obstacles, [cx, cy, plateZ + hs[hi]], d, 0, best);
+        if (h > 0 && h < best) best = h;
+      }
+      rs.push(Math.max(floor, Math.min(r, best - FOOT_GAP_MM)));
+    }
+    var out = [];
+    for (k = 0; k < n; k++) out.push(Math.min(rs[(k + n - 1) % n], rs[k], rs[(k + 1) % n]));
+    return out;
+  }
+
   function boxSoup(lo, hi) {
     var v = [[lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]], [hi[0], hi[1], lo[2]], [lo[0], hi[1], lo[2]],
              [lo[0], lo[1], hi[2]], [hi[0], lo[1], hi[2]], [hi[0], hi[1], hi[2]], [lo[0], hi[1], hi[2]]];
@@ -750,6 +829,7 @@
     var P = PS(opts), T = ST(opts), A = SA(opts);
     if (!P || typeof P.sweep !== 'function') return { ok: false, reason: 'nso_path_sweep.js is not loaded' };
     var probe = makeProbe(A, [opts.rawTris || []].concat(opts.occluders || []));
+    var foot = opts.footPads === false ? 0 : (opts.firstLayerMm == null ? FOOT_LAYER_MM : +opts.firstLayerMm);
     var out = [], placed = [], droppedFingers = 0, shafts = [];
     /* Every contact's shaft near its tip, for the fingers to keep clear of. */
     if (p.style === 'gecko-hand') {
@@ -764,10 +844,18 @@
       var tr = p.trunks[t], parts = [], fingers = [];
       for (var i = 0; i < tr.members.length; i++) {
         var m = p.members[tr.members[i]];
-        var ms = memberSolid(P, m);
+        var ms = memberSolid(P, m, foot);
         if (!ms.ok) return { ok: false, reason: ms.reason };
         m.points = ms.points;
         parts = parts.concat(ms.soups.map(function (x) { return { soup: x }; }));
+        if (foot && i === 0 && tr.landing === 'plate') {
+          /* The foot: one first layer, a disc round the landing point. Pads of
+             trunks that stand close overlap and join in solid()'s union. */
+          var fa = ms.points[ms.points.length - 1], fr = Math.max(FOOT_MIN_R_MM, FOOT_HALF_WIDTHS * m.side / 2);
+          var fph = 0.37 * (t + 1);
+          parts.push({ soup: discSoup(fa[0], fa[1], p.plateZ, p.plateZ + foot,
+            footRadii(A, [opts.rawTris || []].concat(opts.occluders || []), fa[0], fa[1], p.plateZ, foot, fr, m.side, fph), fph), foot: true });
+        }
         if (m.pad) {
           var h = Math.max(2 * m.side, 2.82) / 2, a = m.path[m.path.length - 1];
           parts.push({ soup: boxSoup([a[0] - h, a[1] - h, m.pad.z0], [a[0] + h, a[1] + h, m.pad.z1]) });
@@ -858,34 +946,57 @@
         solids.push({ soup: fin.soup, box: bounds(fin.soup), trunks: [tr.trunk] });
       });
     });
-    /* Trunks whose boxes meet are offered to the union, pair by pair; it
-       joins them only when they really touch. Iterative, not recursive: a
-       wide region has a hundred trunks. */
-    var group = [], soupOf = [];
+    /* Trunks whose boxes meet are offered to the union; it joins them only
+       when they really touch. With foot pads a whole slope's trunks can end
+       up in one solid, so the joins go in ROUNDS, each pairing off groups
+       that touch (lowest first) and uniting every pair once: a balanced
+       merge, about log2 of the trunks' worth of work, where folding the
+       trunks into one growing solid one at a time re-processed the whole of
+       it for every trunk (13 s against 2 s on a 98-trunk face). A pair whose
+       union fails is remembered and not offered again. */
     chain = chain.then(function () {
-      solids.forEach(function (x, i) { group.push(i); soupOf.push(x); });
-      function find(i) { while (group[i] !== i) i = group[i] = group[group[i]]; return i; }
-      var c2 = Promise.resolve();
-      for (var i = 0; i < solids.length; i++) {
-        for (var j = i + 1; j < solids.length; j++) {
-          if (!boxesTouch(solids[i].box, solids[j].box)) continue;
-          (function (i, j) {
-            c2 = c2.then(function () {
-              var ri = find(i), rj = find(j);
-              if (ri === rj) return null;
-              return U(soupOf[ri].soup, soupOf[rj].soup).then(function (r) {
-                if (!(r && r.ok)) return;
-                var fin = T._finishUnion(r.soup);
-                group[rj] = ri;
-                soupOf[ri] = { soup: fin.soup, box: bounds(fin.soup), trunks: soupOf[ri].trunks.concat(soupOf[rj].trunks) };
-              });
-            });
-          })(i, j);
+      var groups = solids.map(function (x, i) { return { ids: [i], soup: x }; }), failed = new Set();
+      var pk = function (i, j) { return i < j ? i + '|' + j : j + '|' + i; };
+      function touching(A, B) {
+        for (var a = 0; a < A.ids.length; a++) for (var b = 0; b < B.ids.length; b++) {
+          if (boxesTouch(solids[A.ids[a]].box, solids[B.ids[b]].box) && !failed.has(pk(A.ids[a], B.ids[b]))) return true;
         }
+        return false;
       }
-      return c2.then(function () {
-        var out = [];
-        for (var k = 0; k < solids.length; k++) if (find(k) === k) out.push(soupOf[k]);
+      function round() {
+        var used = {}, pairs = [];
+        for (var a = 0; a < groups.length; a++) {
+          if (used[a]) continue;
+          for (var b = a + 1; b < groups.length; b++) {
+            if (used[b] || !touching(groups[a], groups[b])) continue;
+            used[a] = used[b] = true; pairs.push([a, b]); break;
+          }
+        }
+        if (!pairs.length) return Promise.resolve(false);
+        var c2 = Promise.resolve(), dead = {};
+        pairs.forEach(function (pr) {
+          c2 = c2.then(function () {
+            var A = groups[pr[0]], B = groups[pr[1]];
+            return U(A.soup.soup, B.soup.soup).then(function (r) {
+              if (r && r.ok) {
+                var fin = T._finishUnion(r.soup);
+                A.soup = { soup: fin.soup, box: bounds(fin.soup), trunks: A.soup.trunks.concat(B.soup.trunks) };
+                A.ids = A.ids.concat(B.ids);
+                dead[pr[1]] = true;
+              } else {
+                A.ids.forEach(function (i) { B.ids.forEach(function (j) { failed.add(pk(i, j)); }); });
+              }
+            });
+          });
+        });
+        return c2.then(function () {
+          groups = groups.filter(function (g, k) { return !dead[k]; });
+          return true;
+        });
+      }
+      function rounds() { return round().then(function (again) { return again ? rounds() : null; }); }
+      return rounds().then(function () {
+        var out = groups.map(function (g) { return g.soup; });
         /* Each solid carries what it holds: its trunks' beacon ids, their
            regions, and where it lands ('plate', 'rest', or 'mixed'). A
            support built from one solid is then labelled by lookup. */
@@ -1009,6 +1120,7 @@
     describe: describe,
     _sideFor: sideFor,
     _squareProfile: squareProfile,
+    _memberSolid: function (m, foot, opts) { return memberSolid(PS(opts || {}), m, foot); },
     _phaseOf: phaseOf,
     _makeProbe: makeProbe
   };

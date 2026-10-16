@@ -137,7 +137,9 @@ statistic to compare a square lattice against: a regular lattice's nearest
 neighbour *is* its pitch, while an irregular field's nearest neighbour sits
 below its areal pitch. Both are asserted.
 
-### `BRANCH_TILT_DEG = 31.44` — how far a branch may lean
+### `BRANCH_TILT_DEG = 30` — how far a branch may lean
+
+*(Was 31.44, the widest measured below. Rounded down to 30 by supports-exposed: every leg sits inside the proven structure, and a face tilted exactly 30° is held by a vertical post. The table is the measurement; the limit is no longer its maximum.)*
 
 Measured per tip, as the angle off vertical from that tip to its nearest trunk
 over the 15.0 mm rise between the two phases:

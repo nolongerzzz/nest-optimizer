@@ -691,6 +691,15 @@ var NSO_GSCOPE_SUPPORT = (function () {
   function planFor(host, regionId, style, sideMm, baseOpts, bases) {
     var o = genOpts(baseOpts, regionId, style, sideMm);
     if (bases) { o.bases = bases; o.restOnModel = true; }
+    /* The planner's regionId names a BEACON region (the Supports card's). This
+       row's markers are detectOverhangs' triangle regions, so the planner is
+       handed this region's own beacons - the ones on its triangles - labelled
+       with this row's number, and plans exactly those. */
+    var sc = scan.find(function (x) { return x.host === host; });
+    var rg = sc && sc.det && sc.det.ok ? sc.det.regions.find(function (r) { return r.id === regionId; }) : null;
+    if (!rg) return Promise.resolve({ ok: false, reason: 'there is no overhang ' + (regionId + 1) + ' on this piece' });
+    delete o.regionId;
+    o.beacons = (rg.beacons || []).map(function (b) { return Object.assign({}, b, { regionId: regionId }); });
     if (!STYLES[style]) {
       return Promise.resolve({ ok: false, reason: 'unknown support style ' + JSON.stringify(style) });
     }
@@ -851,7 +860,7 @@ var NSO_GSCOPE_SUPPORT = (function () {
       var removed = old.length ? removePieces(old) : [];
       var meta = { hostSourceId: host.sourceId, hostName: host.name, regionId: regionId, style: style,
         sideMm: g.plan.sideMm || +sideMm, angleDeg: angleDeg,
-        point: g.plan.region ? g.plan.region.point.slice() : null, rest: rest, beacons: beacons };
+        point: reg ? reg.point.slice() : null, rest: rest, beacons: beacons };
       var pl = placeSupport(g.soup, meta, host, o.opts);
       if (!pl.ok) {
         restorePieces(removed);

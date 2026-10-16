@@ -42,23 +42,38 @@ Deterministic. Dials:
 | dial | value | source |
 |---|---|---|
 | strut side `s` | `buildStrut`'s, 1.2 mm, never under `NSO_Thickness.floorFor` | existing strut law |
-| point pitch `p` | `MAX_SPAN_MM` 3.29, widened for fat struts (below) | the beacon grid |
-| lean limit θ | `BRANCH_TILT_DEG` 31.44° | the existing branch angle |
+| point pitch `p` | the detector's own 3 mm, widened for fat struts (below) | the beacon grid |
+| lean limit θ | `BRANCH_TILT_DEG` **30°** | the proven structure's widest lean was 31.44° (p95 26.83°); rounded down so every leg sits inside it, and so a face tilted exactly 30° is a face a vertical post holds |
+| foot pad | one first layer (0.2 mm), `r = max(3 mm, 2.5 × the trunk's half-width)` | §2, *Feet* |
 | node lattice `L` | 5 mm: nodes every L/2 = 2.5 mm in x, y and z (z from the plate) | the ticket; Bambu's own 2.5/5 lattice |
 
 **Beacons.** `{ p, n }`: a point on the surface and its outward normal.
+`gridBeacons` is the adapter: **`NSO_SupportBeacons.detect`'s own beacons**
+(`docs/SUPPORT-BEACONS.md`) at the detector's 3 mm pitch (wider for a fat
+strut, below), **exposed ones only**: a spot counts only if its ray along its
+own normal leaves the piece. Cavity ceilings, bores and inside walls are not
+beacons here, so they build nothing. Each carries the id of its **beacon
+region** (its area, `det.regions[i].id`, what the Supports card numbers by),
+and `opts.regionId` picks one of those. The planner no longer reads
+`detectOverhangs`' triangle regions or `contactPoints`' lattice.
 `opts.beacons` takes an explicit list (`{ p, n }` or a detector record
 `{ x, y, z, normal }`, each with an optional `regionId` and `key`): the
-Supports card's, `docs/SUPPORTS-CARD.md`. Every trunk then carries
-`regionIds`, and every solid `beacons`, `regionIds` and `landing`.
-`gridBeacons` is the adapter: `detectOverhangs`' regions gridded at `p` through
-the tree's own `contactPoints` (centred lattice plus covering top-up), each
-point carrying the normal of the triangle under it. `beaconsFor` is the one
-place to swap in `NSO_SupportBeacons.detect` when `claude/support-beacons`
-lands; `opts.beacons` takes a list directly.
+Supports card's, `docs/SUPPORTS-CARD.md`, and G-scope's row, which hands in the
+beacons on its own triangle region labelled with its own number. Every trunk
+then carries `regionIds`, and every solid `beacons`, `regionIds` and `landing`.
+`plan.region` is the first beacon region of a detected plan (none for an
+explicit list: the caller names its own).
+
+**Held is every beacon with a route.** A beacon is held when it is in a landed
+trunk; merging only joins members and never drops one, so on a clean face
+`held` equals the area's beacon count (`plan.detect.regions[0].count`) exactly.
+A beacon is *not* held only when it is inside the piece, or has no route to the
+plate (and `restOnModel` is off). If a face needs more capacity, the answer is
+more trunks, never fatter ones: a merged section stays capped at 4 × s².
 
 **Level 0.** Every point starts a strut straight down. A *side* point (its face
-leans more than θ off straight down) gets a horizontal stub of `s + 0.2 mm` out
+leans more than θ off straight down, with a 0.01° tolerance so float32 noise on a
+face tilted exactly θ does not decide) gets a horizontal stub of `s + 0.2 mm` out
 along its normal first, then turns down.
 
 **Descent.** Lattice levels are visited top down. A member hangs straight from
@@ -106,6 +121,29 @@ does not touch the wall stays (`plan.tight`).
   (0.4 mm) pad one support gap (0.18 mm) above the surface. It is counted
   *resting on the part*.
 
+**Feet.** Every trunk that lands on the plate stands on a pad: one first layer
+(0.2 mm, `opts.firstLayerMm`) of a round slab at the plate, `r = max(3 mm, 2.5 ×
+the landing member's half-width)` (3 mm for a 1.2 mm strut and for the
+capped 2.4 mm trunk; 3.75 mm for a lone 3 mm strut; 7.5 mm for a 6 mm trunk).
+Pads of trunks that stand close overlap and are **unioned**: the trunks in one
+solid are joined through them (98 trunks of the 30° closed box became 10
+solids). Where several pads ring a gap the union has a hole in its first layer,
+a handle by Euler count (6 of them on that box); the trunks alone have none.
+
+- **Nothing below z = 0.** The pad's bottom *is* the plate; the trunk's
+  end cap sits half a layer inside the pad (so it is never coplanar with the
+  pad's bottom, the one input the boolean cannot be trusted with). A member
+  whose last leg would reach the plate leaning stops 1 mm short and drops the
+  rest straight, because a leaning cap's low corner goes under the plate.
+- **Clear of the piece.** A pad's corners are drawn in wherever the piece (or an
+  occluder) stands within 0.2 mm of its slab, found with horizontal rays at four
+  heights from the landing point, so a foot never fuses a support to the part's
+  own first layer (measured 0.256 mm from the piece on the closed box).
+- `opts.footPads: false` leaves them off (the suites that weigh members and
+  bores on their own use it, with the reason in each).
+- Pads are only for trunks that land on the plate. A resting trunk keeps its
+  two-layer pad on the part.
+
 **Refusal.** Only a support point inside the piece (`lineInsideAt` along its
 own normal). Beside good points it is left out and named. If every point is
 inside, the plan refuses in one line: *"Every support point is inside the
@@ -116,32 +154,28 @@ along its polyline, every bend a mitred joint. Each part's square is turned by
 its own phase (golden angle × index, mod 90°), so no two parts share a wall
 plane. A member formed at a node starts half its side above the node. Members
 ending in a junction run on past it by a quarter of the member they join, so
-no two leg ends share a vertex. Each landed trunk is folded through
-`NSO_unionSoups` into one solid; trunks that touch are joined; the rest go side
-by side in one soup. `opts.hollow` bores every member whose `side − 2·wall` is
+no two leg ends share a vertex. Each landed trunk (with its foot) is folded through
+`NSO_unionSoups` into one solid; trunks that touch are joined, in balanced
+rounds (a whole slope can end up one solid, and folding trunks into one growing
+solid one at a time took 13 s on a 98-trunk face against 5 s now); the rest go
+side by side in one soup. `opts.hollow` bores every member whose `side − 2·wall` is
 at least the floor.
 
 **Idempotent.** Every order is fixed, so the same input gives the same bytes.
 G-scope's Generate on a region that already has supports replaces them as one
 undo step.
 
-## 3. Measured (`support:gridpack`, 80 checks)
-
-![The 30° tilted box in G-scope with its Tree support: 50 of 50 points held, all to the plate](img/support-gridpack-tilted-box.png)
-
-*The tilted box generated through G-scope's own Generate (Tree, 1.2 mm):
-"Holds 50 of 50 support points on 35 trunks to the plate". In the app the
-piece sits at its plate position, so the lattice falls differently than in
-the suite's frame (29 trunks).*
+## 3. Measured (`support:gridpack`, 80 checks; `support:exposed`, 63)
 
 | fixture | result |
 |---|---|
-| **tilted box 30°** (40 × 12 × 6 on its edge) | 50 of 50 held, 29 trunks, all on the plate, no refusal; 10 pickups, 10 merges; worst leg 28.6°; mesh_validate clean, one shell per solid |
-| **flat shelf, 3 × 3** | 4 first merges, each at the predicted level z 15.00 (pred 15.00), within 0.1 mm; then 1 trunk; every merge 2 members except one of 3 |
-| **box with a through-hole** | 9 of 9 held; 8 points steered into the hole; the one trunk stands in it at [10, 10] and goes through the block to the plate |
+| **tilted box 30°** (40 × 12 × 6 on its edge) | 44 of 44 held (the detector's beacons; the lattice gave 50), 26 trunks, all on the plate, no refusal; 12 pickups, 5 merges; every leg within 30°; mesh_validate clean, one shell per solid |
+| **closed hollow box, 30°** (`library/box_closed.stl`) | `support:exposed`: **1 area, 238 beacons, 238 held** on 98 trunks (62 merges, 78 pickups), none unreachable; worst leg 29.8°; no beacon on the cavity; 98 trunks on feet join into 10 solids, nothing below z = 0, 0.256 mm from the piece |
+| **flat shelf, 3 × 3** | 12 beacons (9 face + 3 corner `edge` beside the post, which the lattice could not see); 3 first merges, each at the predicted level (within 0.1 mm); every merge 2 members except one of 3 |
+| **box with a through-hole** | 9 of 9 held; 8 points steered into the hole; all 7 trunks stand in it and go through the block to the plate; every last run upright |
 | **mushroom on a wide stem**, rest OFF | 12 of 12 cap points *unreachable from the plate*, nothing built, no refusal |
 | same, rest ON | 12 of 12 *resting on the part*, on the stem top (z 6), pad at 6.18 |
-| **boss** | **28 of 28 held** (trunk-first: 24); 3 trunks, all to the plate; tips moved off the boss and post |
+| **boss** | **28 of 28 held** (trunk-first: 24); 4 trunks, all to the plate; tips moved off the boss and post |
 | **60 mm overhang** | 28 of 28 on **one trunk**, its section capped at 2.4 mm (4 × the strut area) |
 | **Generate twice** | identical bytes (2,936 triangles on the boss) |
 | strut style | no merges or pickups: 9 posts for 9 points |
@@ -192,7 +226,34 @@ Fixes the sweep forced, each measured:
 | `tools/nso_support_slice_artifact.js` | `--tree` ported |
 | `tools/nso_curved_branch_probe.js` | historical: it measured the trunk-first planner and no longer runs against `planTree` |
 
+### Supports-exposed (what changed, and what was re-pinned)
+
+| file | change |
+|---|---|
+| `nso_support_beacons.js` | exposed only; a crease must hang in air (docs/SUPPORT-BEACONS.md) |
+| `nso_support_gridpack.js` | `gridBeacons` calls `NSO_SupportBeacons.detect`; beacon regions; held == beacons on a clean face; the foot pads and their union (balanced rounds); upright last run; side-beacon tolerance |
+| `nso_support_tree.js` | `BRANCH_TILT_DEG` 31.44 → 30 |
+| `app-gscope-support.js` | `planFor` hands the planner its triangle region's own beacons (the planner's `regionId` is a beacon region now) |
+| `tree:test` | the shelf's points are the detector's: 16 face + 3 corner = 19, where the contact lattice gave 16 |
+| `tree:reference` | `BRANCH_TILT_DEG` is 30: between the structure's p95 and its widest, not equal to the widest |
+| `tree:canonical` | a lone strut's union equals its column to 1e-3 mm³, not 1e-9; built with `footPads: false` |
+| `tree:round`, `tree:test`'s build | `footPads: false`: they weigh members and bores and a handle-free Euler; three close trunks' pads ring a gap by design |
+| `tree:interface` | the tall arm's wall-clearance scenario is handed the old lattice's 28 points explicitly (the detector's grid does not put four at 0.13 mm off the post) |
+| `support:beacons` | the cavity case: one beacon per cell, one region, the ceiling interior (two before) |
+| `support:gridpack` | loads the detector; the shelf is 12 points (9 face + 3 corner) |
+| `support:exposed` (new) | §3 of this file |
+| `docs/img/support-gridpack-tilted-box.png` | dropped |
+
 ## 6. Flags and out of scope
+
+- **FLAG** foot pad: 0.2 mm thick (the 0.2 mm layers the gaps here are sized
+  for; `opts.firstLayerMm`), `max(3 mm, 2.5 × half-width)`, a 48-sided disc
+  drawn in 0.2 mm off the piece. The ticket's numbers except the thickness and
+  the 0.2 mm clearance.
+- **FLAG** exposed-only drops an overhang that has more of the same piece
+  directly below it (docs/SUPPORT-BEACONS.md, *Exposed only*): a cap over a
+  wide stem gets no beacon from the detector. `restOnModel` is for reaching
+  such a spot, and now has to be given it as `opts.beacons`.
 
 - **FLAG** square section everywhere; area cap 4 × s²; merges of up to 3.
 - **FLAG** pickup reach = 1.05 × the pitch; the stub's vertical last run is 2 × s.
@@ -207,5 +268,5 @@ Fixes the sweep forced, each measured:
 
 ## Paint scope: sub-region — inherited
 
-Points come from `detectOverhangs` with `opts.skipList` passed through, as the
-tree did. This file names no faces of its own.
+Points come from `NSO_SupportBeacons.detect` with `opts.skipList` passed through
+(a painted face still blocks what is above it but gets no beacon). This file names no faces of its own.
