@@ -15,7 +15,7 @@
 
      1. the flat plate: Lift reads it - 10 features (3 lines, 1 large shape,
         6 dots); Strip's list, every group ticked, "bare plate"
-     2. untick the lines: Confirm lifts 7 - seven closed pieces on free plate,
+     2. untick the lines: Confirm lifts 7 - seven closed pieces where they stood,
         the three lines stay, ONE undo step; Ctrl+Z puts it back bit for bit
      3. a click on the ring lifts it alone: closed, its bore open; Ctrl+Z
      4. G-scope's Features row counts the same 10, grouped, read-only
@@ -106,9 +106,9 @@ withApp(async (page, logs) => {
   check('exactly ONE undo step', a2.undo === b2.undo + 1, b2.undo + ' -> ' + a2.undo);
   const host2 = await pieceInfo(page, flatId);
   let pv = 0, allClosed = true, allOnBed = true;
-  for (const m of add2) { const p = await pieceInfo(page, m.id); pv += p.volume; if (!p.closed || p.degen) allClosed = false; if (!p.onBed || overlaps(p.fp, host2.fp)) allOnBed = false; }
+  for (const m of add2) { const p = await pieceInfo(page, m.id); pv += p.volume; if (!p.closed || p.degen) allClosed = false; if (!overlaps(p.fp, host2.fp) || !(p.yMin > host2.yMin + 1e-3)) allOnBed = false; }
   const v0 = await volumeOf(page, SRC);
-  check('the plate is closed; every piece is closed and on free plate', host2.closed && host2.degen === 0 && allClosed && allOnBed, host2.tris + ' tris');
+  check('the plate is closed; every piece is closed and where it stood, over the plate', host2.closed && host2.degen === 0 && allClosed && allOnBed, host2.tris + ' tris');
   check('plate + pieces = the original', Math.abs(host2.volume + pv - v0) < 1e-6 * v0, host2.volume.toFixed(3) + ' + ' + pv.toFixed(3) + ' = ' + v0.toFixed(3));
   check('the card read the plate again: the 3 lines stay, nothing else', (await card(page)).count === '3 features found' && (await groupsNow(page)) === 'lines 3', await groupsNow(page));
   await shots.plate(page, '2-after-lift-7');
@@ -127,7 +127,7 @@ withApp(async (page, logs) => {
   await clickTri(page, flatId, T_RING);
   await waitRead(page, /Lifted|refused|failed/);
   const a3 = await plateState(page), add3 = added(b3, a3), pc3 = add3.length === 1 ? await pieceInfo(page, add3[0].id) : null;
-  check('one piece, closed, its bore open (chi 0), on free plate; one undo step', pc3 && pc3.closed && pc3.chi === 0 && pc3.onBed && a3.undo === b3.undo + 1,
+  check('one piece, closed, its bore open (chi 0), where it stood; one undo step', pc3 && pc3.closed && pc3.chi === 0 && pc3.onBed && a3.undo === b3.undo + 1,
     pc3 && (pc3.tris + ' tris chi ' + pc3.chi));
   check('9 left', (await card(page)).count === '9 features found');
   await ctrlZ(page);

@@ -77,6 +77,7 @@ Current roster, by category:
 | Lift (`app-lift-plate.js`, Subtract -> Lift: a click, a Shift group, Strip's Confirm) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/LIFT.md` §7 |
 | Mold (`app-mold.js`, Gen+ -> Mold; the geometry is `nso_mold.js`) | **none** - reads the piece's geometry, writes no face of it, adds two pieces | n/a | header comment + `docs/MOLD.md` |
 | G-scope Features (`app-gscope-lift.js`) | **none** - reads geometry, writes none | n/a | header comment + `docs/LIFT.md` §7 |
+| Grab and drop (`app-grab-drop.js`; a drop onto a piece is `NSO_seatPieceAt`, Seat here's seat) | none of its own - a drop over the plate or into the air is a move; onto a piece it is Seat here's whole-piece, on the carried piece, only when the seat turns it | Seat here's `nsoMaskCount(modelB)` | header comment + `docs/GRAB-DROP.md` §4 |
 | Foam (`app-foam.js`, Finish -> Shape) | sub-region | the faces of the one hollow it fills that the level reaches, against `nsoMaskFaceList(m)`; a null list (a painted recessed patch) stands it down | header comment + `docs/FOAM.md` §6 |
 | Pull (`app-pull.js`, Shape -> Pull; the geometry is `nso_pull.js` + `nso_densify.js`) | sub-region | the moved vertices (where they were and where they went) against `nsoMaskPlaneList(m)`, `NSO_brushPaintCheck`; operand none | header comment + `docs/PULL.md` |
 
@@ -652,6 +653,31 @@ Branch `claude/lift-any-face`, off `claude-wip` after #190. Full write-up:
   it, one Undo, grab-drop; the Barocke plate's top unchanged). `lift:plate`
   unchanged and green.
 - **Tags:** `app-lift-plate.js` and `nso_lift_auto.js` -> liftanyface1.
+
+## Grab and drop; floating is a state; Lift lands in place (2026-10-15)
+Branch `claude/grab-drop`, off `claude-wip` after #189. Full write-up: **`docs/GRAB-DROP.md`**.
+- **Grab and drop** (`app-grab-drop.js`, new): press on any piece and drag; it
+  follows the pointer, itself looked through. Let go over a piece: seated onto
+  it at that point at the Seat gap (`NSO_seatPieceAt`, Seat here's seat
+  without the Join session); over the plate: on the plate there (app-core's
+  move drag, unchanged); over nothing: left in the air. Escape puts it back;
+  each drop is one Undo; it never fuses. Refused in words: onto a support
+  piece, onto itself. A press is a carry after 3 px.
+- **Floating is a state:** liftY = lowest point - 0.2, kept by nudges, the
+  vertical slider, Rotate, Tip and Seat here; only To plate or a drop onto
+  the plate brings it down. Undo of a removed piece now honours liftY.
+- **Lift lands in place** (`app-lift-plate.js`, `landInPlace`): a lifted
+  feature stays exactly where it stood, in the air when it stood on
+  something, instead of on free plate beside the parent.
+- **Seat here:** its seat factored out as `NSO_seatPieceAt`; Seat here's
+  behaviour and words unchanged. New undo label `dropSeatReplace`.
+- **Checks:** new `grab:drop` (hinge-plate fixture, 1280 x 800); `lift:plate`
+  updated for in-place landing. Static expectations updated, not run on this
+  ticket: `lift:drive`, `lift:auto-drive`, `lift:curved-drive` (they asserted
+  "on free plate beside it").
+- **Tags:** `app-core.js` liftplate1 -> grabdrop1, `app-seat-surface.js`
+  seatsurf2 -> grabdrop1, `app-lift-plate.js` liftplate1 -> grabdrop1,
+  `app-grab-drop.js` new at grabdrop1.
 
 ## Lift on the plate - out of G-scope, into the Subtract card (2026-10-15)
 Branch `claude/lift-to-plate`, off `claude-wip`. Full write-up: **`docs/LIFT.md` §7**.

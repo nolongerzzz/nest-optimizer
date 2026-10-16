@@ -207,7 +207,19 @@
     }
     var placedB = state.placed.find(function (p) { return p && p.sourceId === idB && p.mesh; });
     if (!placedB) { say('B is not on the plate', true); return { ok: false, reason: 'no B' }; }
-    if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(placedB, 'Seat here')) {
+    return seatPiece(target, point, placedB, optsIn, { verb: 'Seat here', a: 'A', b: 'B' });
+  };
+
+  /* The seat itself: `placedB` onto `target` at world `point`, outside its
+     surface, at the Seat gap. Seat here calls it with its Join pair; a drop
+     (app-grab-drop.js) calls it with the piece it carried and the piece it
+     was let go over - no Join session, the same plan, the same gap rule,
+     the same paint scope and the same one Undo. `w` names the two pieces
+     and the verb in the status line. */
+  function seatPiece(target, point, placedB, optsIn, w) {
+    optsIn = optsIn || {};
+    var idB = placedB.sourceId;
+    if (typeof nsoPosLockBlocks === 'function' && nsoPosLockBlocks(placedB, w.verb)) {
       return { ok: false, reason: 'position lock' };
     }
     var gap = (optsIn.gap !== undefined) ? Number(optsIn.gap)
@@ -232,7 +244,7 @@
 
     placedB.mesh.updateMatrixWorld(true);
     var hull = meshToWorldSoup(target.mesh);
-    if (!hull || !hull.length) { say('A has no geometry to seat against', true); return { ok: false, reason: 'empty A' }; }
+    if (!hull || !hull.length) { say(w.a + ' has no geometry to seat against', true); return { ok: false, reason: 'empty A' }; }
     var boxB = NSO_localAABB(placedB.mesh.geometry);
     var plan = NSO_SeatSurface.plan(hull, {
       soup: meshToWorldSoup(placedB.mesh),
@@ -243,7 +255,7 @@
       normalRadius: optsIn.normalRadius, dihedralDeg: optsIn.dihedralDeg,
       roll: optsIn.roll, center: optsIn.center, maxTiltDeg: optsIn.maxTiltDeg
     });
-    if (!plan.ok) { say('Seat here refused - nothing moved (' + plan.reason + ')', true); return plan; }
+    if (!plan.ok) { say(w.verb + ' refused - nothing moved (' + plan.reason + ')', true); return plan; }
 
     var needsRotation = plan.rotationDeg > ROTATION_FLOOR_DEG;
 
@@ -253,13 +265,13 @@
     if (needsRotation) {
       var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(modelB) : 0;
       if (painted > 0) {
-        say('Seat here stood down - ' + painted + ' painted face(s) on B, and seating there turns B ' +
+        say(w.verb + ' stood down - ' + painted + ' painted face(s) on ' + w.b + ', and seating there turns ' + w.b + ' ' +
           plan.rotationDeg.toFixed(1) + ' degrees, which would leave the paint on a different face' +
           ' - clear it, or seat a face that already looks at the target', true);
         return { ok: false, reason: 'B is painted', plan: plan, painted: painted };
       }
       if (!modelB || !modelB.rawTris || modelB.rawAxis !== 'zup') {
-        say('Seat here needs a raw piece for B - nothing moved', true);
+        say(w.verb + ' needs a raw piece for ' + w.b + ' - nothing moved', true);
         return { ok: false, reason: 'no rawTris on B', plan: plan };
       }
     }
@@ -268,9 +280,9 @@
     var height = wb.hi[1] - wb.lo[1];
     var lift = wb.lo[1] - BED;
     if (lift < -BED_EPS) {
-      say('Seat here refused - that pose would put B ' + (-lift).toFixed(2) +
+      say(w.verb + ' refused - that pose would put ' + w.b + ' ' + (-lift).toFixed(2) +
         'mm below the plate, so the gap could not be what was asked for. Aim at a face that' +
-        ' does not look down, or raise A', true);
+        ' does not look down, or raise ' + w.a, true);
       return { ok: false, reason: 'below the plate', plan: plan };
     }
     if (lift < 0) lift = 0;
@@ -286,12 +298,13 @@
       /* NSO_sculptCommitRaw pushes the undo entry itself, and it carries the
          geometry but not the pose. One Seat here must be ONE Undo, so the
          pose snapshot goes on that same entry rather than on a second one. */
-      if (!NSO_sculptCommitRaw(modelB, newRaw, 'seatSurfaceReplace', null)) {
-        say('Seat here failed - B\'s geometry was not replaced, nothing moved', true);
+      var undoType = optsIn.undoType || 'seatSurfaceReplace';
+      if (!NSO_sculptCommitRaw(modelB, newRaw, undoType, null)) {
+        say(w.verb + ' failed - ' + w.b + '\'s geometry was not replaced, nothing moved', true);
         return { ok: false, reason: 'commit failed', plan: plan };
       }
       var top = state.undoStack[state.undoStack.length - 1];
-      if (top && top.type === 'seatSurfaceReplace' && top.modelId === modelB.id) top.prevPose = pose;
+      if (top && top.type === undoType && top.modelId === modelB.id) top.prevPose = pose;
     } else if (pose) {
       pushUndo(pose);
     }
@@ -325,7 +338,7 @@
     if (gap < 0) what = 'air gap ' + Math.abs(gap).toFixed(2) + 'mm';
     else if (gap > 0) what = 'overlap ' + gap.toFixed(2) + 'mm';
     else what = 'touching, gap 0.00mm';
-    var msg = 'Seated on the ' + plan.kind + ' at that point - ' + what +
+    var msg = (w.seated || 'Seated') + ' on the ' + plan.kind + ' at that point - ' + what +
       ' (clearance ' + (isFinite(after) ? after.toFixed(3) : '-') + 'mm';
     /* For a gap that is not an air gap there is no clearance to report - both
        touching and overlapping measure zero - so the status carries the
@@ -338,8 +351,8 @@
     }
     msg += ')';
     msg += needsRotation
-      ? ' - B turned ' + plan.rotationDeg.toFixed(1) + ' degrees and baked into its own axes'
-      : ' - no turn needed, B was already facing it';
+      ? ' - ' + w.b + ' turned ' + plan.rotationDeg.toFixed(1) + ' degrees and baked into its own axes'
+      : ' - no turn needed, ' + w.b + ' was already facing it';
     say(msg);
 
     /* The record every Seat leaves on the piece it moved (NSO_recordSeat,
@@ -371,6 +384,20 @@
       clearanceAfter: after, status: msg
     };
     return plan;
+  }
+
+  window.NSO_seatPieceAt = function (target, point, placedB, optsIn, words) {
+    if (typeof NSO_SeatSurface === 'undefined' || !NSO_SeatSurface) {
+      say('Seating needs nso_seat_surface.js', true);
+      return { ok: false, reason: 'core missing' };
+    }
+    if (!target || !target.mesh || !placedB || !placedB.mesh) return { ok: false, reason: 'no piece' };
+    if (target === placedB) {
+      say('That is ' + (words && words.b || 'the piece') + ' itself - a piece cannot be dropped onto itself. Nothing moved.', true);
+      return { ok: false, reason: 'onto itself' };
+    }
+    return seatPiece(target, point, placedB, optsIn,
+      Object.assign({ verb: 'Seat', a: 'the target', b: 'the piece' }, words || {}));
   };
 
   if (typeof document !== 'undefined') {

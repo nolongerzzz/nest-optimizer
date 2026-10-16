@@ -96,7 +96,7 @@ withApp(async (page, logs) => {
   check('a click lifts it: the surface carried across and welded, and one Undo puts it back',
     /^Lifted 1 feature off .*: it is the surface round it carried across where it stood and welded to it at the rim, every other triangle as it was/.test(r1b) &&
     /One Undo \(Ctrl\+Z\) puts it all back/.test(r1b), r1b.slice(0, 220));
-  check('one new piece, named after the ball, closed, on free plate', pc1 && /- lifted \d+$/.test(new1[0].name) && pc1.closed && pc1.degen === 0 && pc1.onBed, pc1 && pc1.tris + ' tris');
+  check('one new piece, named after the ball, closed, where it stood', pc1 && /- lifted \d+$/.test(new1[0].name) && pc1.closed && pc1.degen === 0 && pc1.onBed, pc1 && pc1.tris + ' tris');
   check('the ball keeps its id and stays closed; exactly ONE undo step', host1 && host1.closed && host1.degen === 0 && a1.undo === b1.undo + 1, b1.undo + ' -> ' + a1.undo);
   const vBall = await volumeOf(page, BSRC);
   check('ball + piece = the original', Math.abs(host1.volume + pc1.volume - vBall) < 1e-6 * vBall, host1.volume.toFixed(3) + ' + ' + pc1.volume.toFixed(3) + ' = ' + vBall.toFixed(3));
@@ -143,7 +143,7 @@ withApp(async (page, logs) => {
   let v2 = 0, c2b = true, bed2 = true;
   for (const m of new2) { const p = await pieceInfo(page, m.id); v2 += p.volume; if (!p.closed || p.degen) c2b = false; if (!p.onBed) bed2 = false; }
   const vDome = await volumeOf(page, DSRC);
-  check('ten closed pieces on free plate, the dome closed, one undo step, the volumes add up', new2.length === 10 && c2b && host2.closed &&
+  check('ten closed pieces where they stood, the dome closed, one undo step, the volumes add up', new2.length === 10 && c2b && host2.closed &&
     a2.undo === b2.undo + 1 && Math.abs(host2.volume + v2 - vDome) < 1e-6 * vDome, host2.volume.toFixed(3) + ' + ' + v2.toFixed(3) + ' = ' + vDome.toFixed(3) + (bed2 ? '' : ' (some beside the bed)'));
   check('...and the plaque\'s lift says, in words, what the fill under it cannot know',
     /Note: detail \d+ covers [0-9.]+ mm², more than the [0-9.]+ mm² of clear surface measured round it: across its middle the surface carried under it is the base fitted to that surround/.test(r2b), r2b.slice(0, 400));

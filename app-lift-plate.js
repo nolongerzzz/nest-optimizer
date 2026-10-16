@@ -28,9 +28,15 @@
  * other triangle bit for bit, flat - or on a curved base, the surface round
  * it carried across - where each feature stood); each feature becomes its
  * own closed piece named "<piece> - lifted N", an ordinary piece (Pieces
- * list, Move, Join, Export, Remove), placed on free plate nearest the piece
- * it came off (nsoFreeSpot). One 'featureSwap' Undo step (Detach's) puts it
- * all back.
+ * list, Move, Join, Export, Remove). One 'featureSwap' Undo step (Detach's)
+ * puts it all back.
+ *
+ * WHERE A LIFTED PIECE LANDS: exactly where it stood. It takes the parent's
+ * pose and sits over the spot it came off, every triangle where the parent
+ * drew it - so a feature on top of a slab is left in the air above the bed,
+ * resting on the leftover plate, and stays there (liftY, the floating state
+ * app-grab-drop.js describes) until it is grabbed and dropped, or sent To
+ * plate. It used to go onto free plate beside the parent (nsoFreeSpot).
  *
  * FRAME. The map runs on the piece's RAW soup (m.rawTris), the frame the
  * pieces are made in. The view is the world's up carried into that frame
@@ -68,8 +74,8 @@
  *     a triangle number, so it survives a lift or an Undo);
  *   - what it says goes to the card only: the HUD does not repeat it.
  */
-/* global THREE, state, setStatus, addModel, placeModelMovable, pushUndo, applyPlacedXZ,
-          nsoFreeSpot, nsoMaskCount, NSO_sculptCommitRaw, rawResultToDisplayGeometry,
+/* global THREE, state, setStatus, addModel, placeModelMovable, pushUndo, applyMeshRotation,
+          meshLocalBox3, nsoMaskCount, NSO_sculptCommitRaw, rawResultToDisplayGeometry,
           computeCenterOffsetFromRaw, rawFlatCapLoops, renderModelList, updateOptimizeButton,
           updateEditSize, updateAdjustUI, selectPlaced, nsoHelpers */
 'use strict';
@@ -814,7 +820,8 @@ var NSO_LIFT_PLATE = (function () {
         ' stood and welded to it at the rim' : 'flat where ' + (want.length === 1 ? 'it' : 'they') + ' stood';
       var txt = 'Lifted ' + r.pieces.length + ' feature' + (r.pieces.length === 1 ? '' : 's') + ' off ' + m.name +
         ' (' + r.volumes.pieces.toFixed(2) + ' mm³): it is ' + where + ', every other triangle as it was, and ' +
-        (r.pieces.length === 1 ? 'the new piece is' : 'the new pieces are') + ' on free plate beside it. One Undo (Ctrl+Z) puts it all back.';
+        (r.pieces.length === 1 ? 'the new piece stays' : 'the new pieces stay') + ' where ' + (r.pieces.length === 1 ? 'it' : 'they') +
+        ' stood' + ' - grab ' + (r.pieces.length === 1 ? 'it' : 'one') + ' to drop it somewhere else. One Undo (Ctrl+Z) puts it all back.';
       if (r.notes && r.notes.length) txt += ' Note: ' + r.notes.join('; ') + '.';
       var before0 = state.undoStack.length;
       if (typeof NSO_sculptCommitRaw !== 'function' || !NSO_sculptCommitRaw(m, r.plate, 'liftReplace', txt)) {
@@ -825,27 +832,31 @@ var NSO_LIFT_PLATE = (function () {
       pushUndo({ type: 'featureSwap', replace: rep, addedIds: added.slice(), removed: [], label: 'Undo: Lift reverted',
         onUndone: afterUndo });
 
-      /* Each new piece onto free plate, nearest the piece it came off. */
+      /* Each new piece exactly where it stood on the parent, as the parent
+         is drawn now (the commit rebuilt its mesh). */
       var spots = [];
       added.forEach(function (id2) {
         var made = modelOf(id2);
         var entry = placeModelMovable(made, placed.x, placed.z);
         if (!entry) return;
-        var at = nsoFreeSpot(entry, { x: placed.x, z: placed.z });
-        applyPlacedXZ(entry, at.x, at.z);
-        spots.push(at);
+        spots.push(landInPlace(entry, made, m, placedOf(m.id)));
       });
       if (typeof renderModelList === 'function') renderModelList();
       if (typeof updateOptimizeButton === 'function') updateOptimizeButton();
       if (typeof updateEditSize === 'function') updateEditSize();
       if (typeof updateAdjustUI === 'function') updateAdjustUI();
 
-      var offBed = spots.filter(function (s) { return !s.onBed; }).length;
-      if (offBed) txt += ' ' + offBed + ' did not fit on the bed and sit beside it, clear of every piece.';
+      var up = spots.filter(function (s) { return s && s.liftY > 0; });
+      if (up.length === 1 && r.pieces.length === 1) {
+        txt += ' It is in the air, ' + f2(up[0].liftY) + ' mm over the bed, and stays there until dropped or sent To plate.';
+      } else if (up.length) {
+        txt += ' ' + (up.length === r.pieces.length ? 'They are' : up.length + ' are') +
+          ' in the air over the bed, and stay there until dropped or sent To plate.';
+      }
       busy = false;
       refresh();
       var left = offered(A(), minH).length;
-      say(txt + ' ' + left + ' feature' + (left === 1 ? '' : 's') + ' left on it.', offBed > 0);
+      say(txt + ' ' + left + ' feature' + (left === 1 ? '' : 's') + ' left on it.');
       return { ok: true, lift: r, addedIds: added, names: names, hostId: m.id, spots: spots, how: how || 'pick', reason: txt };
     } catch (err) {
       console.error('[lift]', err);
@@ -854,6 +865,30 @@ var NSO_LIFT_PLATE = (function () {
       busy = false;
       sync();
     }
+  }
+
+  /** Put a lifted piece where it stood on `host`: the parent's pose, and
+      the mesh where the parent draws those same raw triangles. Both soups
+      are in the parent's raw frame; each display mesh is that soup turned
+      (raw (x, y, z) -> (x, z, -y)) and centred on its own box, so the
+      piece's origin is the parent's moved by the difference of the two
+      centres, carried through the parent's rotation. Its height above the
+      bed is what it is - liftY records it, the floating state. */
+  function landInPlace(entry, made, hostModel, host) {
+    if (!host || !host.mesh) return null;
+    ['rotY', 'rotated', 'flipX', 'tipX', 'tipZ', 'tiltX', 'tiltZ'].forEach(function (k) { entry[k] = host[k]; });
+    entry.liftY = 0;
+    applyMeshRotation(entry);
+    var cH = hostModel.centerOffset, cN = made.centerOffset;
+    host.mesh.updateMatrixWorld(true);
+    var at = host.mesh.localToWorld(new THREE.Vector3(cN.x - cH.x, cN.y - cH.y, cN.z - cH.z));
+    entry.mesh.quaternion.copy(host.mesh.quaternion);
+    entry.mesh.position.copy(at);
+    entry.mesh.updateMatrixWorld(true);
+    entry.x = at.x; entry.z = at.z;
+    var lift = meshLocalBox3(entry.mesh).min.y - 0.2;
+    entry.liftY = lift > 1e-6 ? lift : 0;
+    return { x: at.x, y: at.y, z: at.z, liftY: entry.liftY };
   }
 
   /** The Lift step was undone: the piece is back with its old soup, whose

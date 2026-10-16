@@ -20,8 +20,9 @@
      2. arm Lift on the plate: 56 found. Shift-click the ring and the cap, let
         go: ONE step. The piece keeps its id and becomes the plate: closed,
         flat where they stood, every other triangle bit for bit; two new
-        closed pieces on free plate beside it, the ring's bore open; volumes
-        add up, each the generator's
+        closed pieces exactly where they stood (on the leftover paper, in the
+        air over the bed), the ring's bore open; volumes add up, each the
+        generator's
      3. Ctrl+Z: the piece is bit for bit what it was, both pieces gone, the
         undo stack as before, 56 again (from the cache)
      4. the slider: at 0.7 the dots are not offered, and a click on one says
@@ -163,13 +164,13 @@ withApp(async (page, logs) => {
   check('...each piece is the volume the generator built', ringPc && capPc && Math.abs(ringPc.volume - ringT.volume) < 1e-5 && Math.abs(capPc.volume - capT.volume) < 1e-5,
     ringPc && capPc ? ringPc.volume.toFixed(4) + ' / ' + capPc.volume.toFixed(4) : '');
   const hostFp = hostInfo.fp;
-  check('each new piece sits on the bed (settlePlacedOnBed\'s 0.2), on free plate, clear of the plate and of each other',
-    pcs.every(p => p.onBed && Math.abs(p.yMin - 0.2) < 1e-6 && !overlaps(p.fp, hostFp)) && !overlaps(pcs[0].fp, pcs[1].fp),
+  check('each new piece stays where it stood: over the plate, on the paper 3 mm over its bottom, clear of each other',
+    pcs.every(p => overlaps(p.fp, hostFp) && Math.abs(p.yMin - hostInfo.yMin - 3) < 1e-3) && !overlaps(pcs[0].fp, pcs[1].fp),
     pcs.map(p => 'x ' + ((p.fp.minx + p.fp.maxx) / 2).toFixed(1) + ' z ' + ((p.fp.minz + p.fp.maxz) / 2).toFixed(1) + ' bottom ' + p.yMin.toFixed(3)).join('; '));
-  check('...beside it: nearer the plate piece than the far side of the bed', pcs.every(p => {
-    const cx = (p.fp.minx + p.fp.maxx) / 2, cz = (p.fp.minz + p.fp.maxz) / 2, hx = (hostFp.minx + hostFp.maxx) / 2, hz = (hostFp.minz + hostFp.maxz) / 2;
-    return Math.hypot(cx - hx, cz - hz) < 60;
-  }));
+  check('...in the air: liftY says how far over the bed (the floating state)', (await page.evaluate(ids => ids.every(id => {
+    const p = state.placed.find(q => q && q.sourceId === id);
+    return Math.abs(new THREE.Box3().setFromObject(p.mesh).min.y - 0.2 - (p.liftY || 0)) < 1e-6 && p.liftY > 2.9;
+  }), add2.map(m => m.id))));
   check('the card read the plate again: 54 left', (await card(page)).count === '54 features found' && (await islandsAt(page)) === 54);
   await shots.plate(page, '3-plate-after-lift');
 
