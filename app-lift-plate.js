@@ -709,6 +709,11 @@ var NSO_LIFT_PLATE = (function () {
     var c = faceOfTri(m.rawTris, h.tri, viewOf(p), click);
     if (c == null) return false;
     if (fe && !c.surf) return false;
+    /* Only a curved surface takes a click: a planar patch is read as it always was (nothing changes). */
+    if (c.surf) {
+      var rs = detectSurface(m.rawTris, c);
+      if (!rs.ok || !rs.A || rs.A.engine !== 'surface') return false;
+    }
     /* Hovering with a curved surface read: only a planar face takes it from the surface - the top, which any
        up-looking triangle is, does not. */
     if (!click && face && face.surf && c === 'top') return false;
