@@ -1,8 +1,10 @@
 #!/usr/bin/env node
-/* G-scope's feature legend, floating over the viewport's top-left corner.
-   A layout move: the rows, the click-to-isolate and the per-row "only"
-   button are the same code, so this checks WHERE it is and that moving it
-   cost none of what it does.
+/* G-scope's feature legend, down the left wall under the shell's button column,
+   with the G-scope file-line box directly above it. A layout move: the rows,
+   the click-to-isolate and the per-row "only" button are the same code, so
+   this checks WHERE it is and that moving it cost none of what it does.
+   (It floated top-left over the sidebar-less viewport before the shell's
+   readouts went to the bottom; docs: nso_gscope_shell_test.js has the layout.)
      node tools/nso_gscope_legend_float_test.js      exit 0 = every gate held */
 
 const path = require('path');
@@ -20,13 +22,17 @@ const SHOTS = path.join(ROOT, 'tools', 'gscope-legend-out');
 
 /* Real window shapes, not one comfortable default. The toolbar work shipped a
    buried Undo button that every check at 1400x900 called clean and the suite
-   caught at 720, so the short ones are the point of this list. 1280x360 is
-   past anything anyone uses and is here to force the height cap to engage. */
-const SIZES = [[1680, 1050], [1400, 900], [1366, 768], [1280, 720], [1024, 768], [1280, 360]];
+   caught at 720, so the short ones are the point of this list. 1280x560 is
+   shorter than anyone uses and is here to force the legend's height cap to
+   engage: the button column takes 330 px of the left wall, the file line sits
+   under it, and the legend is what is left, so it scrolls inside itself. (Under
+   about 500 high the column leaves the left wall no room at all.) */
+const SIZES = [[1680, 1050], [1400, 900], [1366, 768], [1280, 720], [1024, 768], [1280, 560]];
 
 /* Everything that floats over this viewport. The legend has to clear all of
    them at every size. */
-const OVERLAYS = ['ms-legend-float', 'ms-mode-badge', 'ms-hint-badge', 'ms-zr'];
+const OVERLAYS = ['ms-sidebar', 'ms-corner', 'ms-legend-float', 'ms-title', 'ms-mode-badge', 'ms-info', 'ms-lift-row', 'ms-slice-readout',
+                  'ms-hint-badge', 'ms-zr'];
 
 withApp(async (page, logs) => {
   fs.mkdirSync(SHOTS, { recursive: true });
@@ -38,7 +44,7 @@ withApp(async (page, logs) => {
     await page.evaluate(() => !document.getElementById('microscope').hidden));
 
   /* ------------------------------------------------------------------ 1 */
-  console.log('\n=== 1. it left the sidebar and lives over the viewport ===');
+  console.log('\n=== 1. it left the sidebar and lives on the left wall, under the column ===');
   {
     const where = await page.evaluate(() => {
       const el = document.getElementById('ms-legend');
@@ -49,16 +55,22 @@ withApp(async (page, logs) => {
         inSidebar: !!document.querySelector('#ms-sidebar #ms-legend'),
         inViewport: !!document.querySelector('#ms-viewport #ms-legend'),
         sameNode: el === document.getElementById('ms-legend'),
-        corner: [+(b.left - vp.left).toFixed(0), +(b.top - vp.top).toFixed(0)],
-        positioned: getComputedStyle(box).position,
+        corner: [+(b.left - vp.left).toFixed(0), +(vp.bottom - b.bottom).toFixed(0)],
+        positioned: getComputedStyle(box.parentElement).position,
+        inStack: box.parentElement.id === 'ms-dock-left',
+        headAbove: (h => !!h && h.getBoundingClientRect().bottom <= b.top && b.top - h.getBoundingClientRect().bottom < 16)(
+          document.querySelector('#ms-dock-left > .ms-head')),
+        clearOfColumn: b.top >= Math.max(...Array.from(document.querySelectorAll('#ms-sidebar > button')).map(e => e.getBoundingClientRect().bottom)),
         title: document.getElementById('ms-legend-title').textContent
       };
     });
     check('no longer in the sidebar', !where.inSidebar);
     check('now inside the viewport', where.inViewport);
-    check('floating, not in flow', where.positioned === 'absolute', where.positioned);
-    check('anchored at the top-left corner', where.corner[0] === 12 && where.corner[1] === 12,
-      '(' + where.corner.join(', ') + ') from the viewport corner');
+    check('in the left-wall stack, which is pinned (not in flow)', where.inStack && where.positioned === 'absolute', where.positioned);
+    check('anchored to the bottom-left: 8 px from the left wall, 12 px off the bottom', where.corner[0] === 8 && where.corner[1] === 12,
+      '(' + where.corner.join(', ') + ') from the viewport\'s left and bottom');
+    check('the G-scope file-line box is directly above it', where.headAbove);
+    check('and the whole stack is under the button column', where.clearOfColumn);
     check('still titled for what it lists', /^(All features|Parts)$/.test(where.title), where.title);
   }
 
@@ -111,7 +123,8 @@ withApp(async (page, logs) => {
       return { border: cs.borderTopStyle, radius: cs.borderTopLeftRadius, size: cs.fontSize };
     });
     /* It used to take its look from `.ms-sidebar button`, an ancestor it no
-       longer has. Left alone it would render as a default browser button. */
+       longer has (and no sidebar remains). Left alone it would render as a
+       default browser button. */
     check('the "only" button kept its styling outside the sidebar',
       styled.border === 'solid' && styled.radius === '6px' && styled.size === '10.5px',
       JSON.stringify(styled));
@@ -162,10 +175,16 @@ withApp(async (page, logs) => {
       }).filter(i => i >= 0));
       L.scrollTop = 0;
       const top = hittableNow();
-      L.scrollTop = L.scrollHeight;
-      const bottom = hittableNow();
+      /* Walk the scroll a window at a time: a legend squeezed to two or three
+         rows (the short windows) shows its middle rows only part-way down, not
+         at either end. */
+      const reached = new Set(top);
+      const step = Math.max(24, L.clientHeight - 36);
+      for (let y = 0; y <= L.scrollHeight + step; y += step) {
+        L.scrollTop = y;
+        hittableNow().forEach(i => reached.add(i));
+      }
       L.scrollTop = 0;
-      const reached = new Set([...top, ...bottom]);
       return { clash, spill, rows: rows.length, atRest: top.size, reached: reached.size,
                capped: L.scrollHeight > L.clientHeight,
                missing: rows.map((rr, i) => reached.has(i) ? null : rr.dataset.group)

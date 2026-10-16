@@ -32,6 +32,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { serveRoot, routeCdn, mkCheck, launchOpts, ROOT } from '../cth-test/browser-lib.mjs';
+import gscopeCards from '../nso_gscope_cards.js';        // opens the card a G-scope control lives in, before the click
 
 const check = mkCheck();
 const SLICE = 'fixtures/3mf/supportwithinsupport.gcode.3mf';
@@ -221,6 +222,7 @@ async function main() {
   const served = await serveRoot();
   const browser = await chromium.launch(launchOpts());
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  gscopeCards.install(page);
   const cdn = routeCdn(page);
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -321,7 +323,8 @@ async function main() {
   // OrbitControls turns 2*pi per canvas HEIGHT of horizontal drag.
   const a0 = (await settle(page)).azimuth;
   const H = rect[3];
-  const y = rect[1] + H * 0.5, x0 = rect[0] + rect[2] * 0.1;
+  // The drag starts clear of the left wall's boxes (the shell's column and readouts are over the canvas now).
+  const y = rect[1] + H * 0.5, x0 = rect[0] + rect[2] * 0.3;
   await drag(page, [x0, y], [x0 + H / 2, y]);
   const half = (await settle(page)).azimuth;
   const dHalf = Math.abs(Math.atan2(Math.sin(half - a0), Math.cos(half - a0)));

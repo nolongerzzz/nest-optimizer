@@ -43,8 +43,15 @@
  */
 import { chromium } from 'playwright';
 import { serveRoot, routeCdn, mkCheck, launchOpts } from '../cth-test/browser-lib.mjs';
+import gscopeCards from '../nso_gscope_cards.js';        // opens the card a G-scope control lives in, before the click
 
 const check = mkCheck();
+
+/* A legend row, pressed. Watch's log sits over the left wall in G-scope (nso-watch.js docks it at
+   left 12 / bottom 84, where the shell's legend now is), so a real click at the row's centre can land
+   on the log. What these checks assert is what Watch RECORDS when the row's own handler runs, so the
+   handler is run directly - a real click on the row is gscope:shell's and gcode:scope-legend's job. */
+const legendRow = (page, g) => page.evaluate((sel) => document.querySelector(sel).click(), `#ms-legend [data-group="${g}"]`);
 const SOAK_MS = Number(process.env.SOAK_MS || 0);
 const PROBE = 'gscope-watch probe: thrown while G-scope is up';
 
@@ -126,8 +133,8 @@ async function clickPiece(page, which) {
 /** One pass of ordinary G-scope use, in whichever view is up. */
 async function exerciseNormal(page) {
   const groups = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map((e) => e.dataset.group));
-  for (const g of groups) await page.click(`#ms-legend [data-group="${g}"]`);       // hide each
-  for (const g of groups) await page.click(`#ms-legend [data-group="${g}"]`);       // and back
+  for (const g of groups) await legendRow(page, g);       // hide each
+  for (const g of groups) await legendRow(page, g);       // and back
   await page.click('#ms-mode-select');
   await clickPiece(page, 'mushroom');
   await page.click('#ms-btn-clear');
@@ -139,14 +146,15 @@ async function exerciseSlice(page) {
   await sliced(page);
   await frames(page);
   const rows = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map((e) => e.dataset.group));
-  for (const g of rows.slice(0, 3)) await page.click(`#ms-legend [data-group="${g}"]`);   // off
-  for (const g of rows.slice(0, 3)) await page.click(`#ms-legend [data-group="${g}"]`);   // and on
+  for (const g of rows.slice(0, 3)) await legendRow(page, g);   // off
+  for (const g of rows.slice(0, 3)) await legendRow(page, g);   // and on
   await frames(page);
   return rows;
 }
 
 async function openApp(browser, served) {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  gscopeCards.install(page);
   routeCdn(page);
   const errors = [];
   page.on('pageerror', (e) => { if (!String(e).includes(PROBE)) errors.push(String(e)); });
@@ -208,9 +216,9 @@ async function main() {
   await page.click('#nso-watch-collapse');
   const boxes0 = await page.evaluate(() => window.NSO_MICROSCOPE.boxes().length);
   const groups = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map((e) => e.dataset.group));
-  await page.click(`#ms-legend [data-group="${groups[0]}"]`);
+  await legendRow(page, groups[0]);
   check('a legend row hides its part', await page.evaluate(() => window.NSO_MICROSCOPE.hidden()), [groups[0]]);
-  await page.click(`#ms-legend [data-group="${groups[0]}"]`);
+  await legendRow(page, groups[0]);
   check('... and shows it again', await page.evaluate(() => window.NSO_MICROSCOPE.hidden()), []);
   // G-scope opens in orbit: a plain click on a piece, nothing armed, is a
   // look and nothing else. A box is something you ask for.
