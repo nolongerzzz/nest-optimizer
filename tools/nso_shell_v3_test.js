@@ -65,7 +65,7 @@ const PANEL_HOLDS = ['plate-select', 'custom-w', 'custom-d', 'custom-h', 'plate-
                      'model-list', 'clone-count', 'btn-clone'];
 const GROUPS = [
   [['btn-microscope', 'G-SCOPE'], ['menu-scale', 'SCALE'], ['menu-cut', 'CUT'], ['menu-crop', 'CROP'],
-   ['menu-joins', 'JOIN'], ['menu-seat', 'SEAT'], ['menu-supports', 'SUPPORTS'], ['menu-add', 'ADD'],
+   ['menu-connect', 'CONNECT'], ['menu-joins', 'JOIN'], ['menu-seat', 'SEAT'], ['menu-supports', 'SUPPORTS'], ['menu-add', 'ADD'],
    ['menu-bit', 'SUBTRACT']],
   [['menu-shape', 'SHAPE'], ['menu-paint', 'PAINT'], ['menu-surface', 'SURFACE & EDGES'], ['menu-sculpt', 'SCULPT']],
   [['menu-repair', 'CHECK & REPAIR']],
