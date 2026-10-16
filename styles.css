@@ -1303,8 +1303,13 @@ select:focus, input:focus {
 
 /* The mitre wheel (app-cut.js, cutWireMiterDial): a rail, a handle on it and
    the blade's line through the centre, turned together. */
-.cut-miter { display: flex; align-items: center; gap: 10px; margin: 2px 0 4px; }
-.cut-dial { flex: 0 0 auto; cursor: grab; touch-action: none; user-select: none; outline: none; }
+/* A two-row grid so the − / + buttons can sit under the wheel without moving
+   anything above them: row 1 is the wheel beside the Mitre box, centred on
+   each other as before; row 2 is the buttons, in the wheel's own 104px
+   column, so the Mitre box keeps its place and width. */
+.cut-miter { display: grid; grid-template-columns: 104px minmax(0, 1fr); column-gap: 10px; align-items: center;
+  margin: 2px 0 4px; }
+.cut-dial { grid-column: 1; grid-row: 1; justify-self: start; cursor: grab; touch-action: none; user-select: none; outline: none; }
 .cut-dial:active { cursor: grabbing; }
 .cut-dial:focus-visible .cut-dial-rail { stroke: #7dd3fc; }
 .cut-dial-rail { fill: rgba(15, 23, 42, 0.35); stroke: rgba(226, 232, 240, 0.45); stroke-width: 3; }
@@ -1313,8 +1318,11 @@ select:focus, input:focus {
 .cut-dial-handle { fill: #ffc83d; stroke: #1a1d21; stroke-width: 1.5; }
 .cut-dial-deg { fill: #f1f5f9; font-size: 14px; font-weight: 600; pointer-events: none;
   font-variant-numeric: tabular-nums; paint-order: stroke; stroke: rgba(15, 23, 42, 0.8); stroke-width: 3px; }
-.cut-miter-side { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+.cut-miter-side { grid-column: 2; grid-row: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .cut-miter-side .hint { margin: 0; }
+.cut-miter-steps { grid-column: 1; grid-row: 2; display: flex; justify-content: center; gap: 8px; margin-top: 2px; }
+.cut-miter-steps .btn { flex: 0 0 46px; width: 46px; padding: 7px 0; font-size: 16px; line-height: 1;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 
 .cut-readout {
   font-size: 12px;

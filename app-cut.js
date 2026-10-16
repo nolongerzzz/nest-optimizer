@@ -137,6 +137,14 @@ const CUT_END_MM = (typeof MIN_CUT_SIDE_MM !== 'undefined') ? MIN_CUT_SIDE_MM : 
 // What the ← / → buttons step the blade by: one grid step, or 1 mm with Shift.
 const CUT_NUDGE_MM = 0.1;
 const CUT_NUDGE_SHIFT_MM = 1;
+// What the mitre − / + buttons step by: 1 degree, 0.1 with Shift, 5 with Alt
+// (Alt wins if both are down). Held, a button repeats after CUT_MITER_HOLD_MS
+// at one step every CUT_MITER_REPEAT_MS.
+const CUT_MITER_STEP_DEG = 1;
+const CUT_MITER_STEP_SHIFT_DEG = 0.1;
+const CUT_MITER_STEP_ALT_DEG = 5;
+const CUT_MITER_HOLD_MS = 400;
+const CUT_MITER_REPEAT_MS = 100;
 
 function cutMeshOf(m) {
   const placed = (state.placed || []).find(function (p) { return p && p.sourceId === m.id && p.mesh; });
@@ -217,10 +225,11 @@ function cutFrame(model) {
            lo: lim.lo, hi: lim.hi, mesh: mesh, deg: deg, turn: turn, back: back };
 }
 
-/** The mitre in whole degrees, 0..359; 0 = square. */
+/** The mitre in degrees on a 0.1 grid, 0..359.9; 0 = square. Kept in tenths
+    while it is rounded and wrapped, so steps of 0.1 never drift. */
 function cutMiterDeg() {
-  const d = Math.round(Number(state.cutMiterDeg) || 0);
-  return ((d % 360) + 360) % 360;
+  const t = Math.round((Number(state.cutMiterDeg) || 0) * 10);
+  return (((t % 3600) + 3600) % 3600) / 10;
 }
 
 // The plane's distance from the low end for fraction t, on the grid and
@@ -291,11 +300,11 @@ function setCutMm(mm) {
   updateCutHelper();
 }
 
-/** Set the mitre (degrees clockwise seen from above; 0 = square). The plane
-    keeps crossing the centre line where it did. */
+/** Set the mitre (degrees clockwise seen from above; 0 = square), to the
+    nearest 0.1. The plane keeps crossing the centre line where it did. */
 function setCutMiter(deg) {
-  const d = Math.round(Number(deg) || 0);
-  state.cutMiterDeg = ((d % 360) + 360) % 360;
+  state.cutMiterDeg = Number(deg) || 0;
+  state.cutMiterDeg = cutMiterDeg();
   syncCutUI();
   updateCutHelper();
 }
@@ -510,8 +519,10 @@ function cutWireCards() {
 /* The mitre wheel: a 360 degree dial, a rail round it and a handle on the
    rail. Drag the handle (or press anywhere on the rail) round to set the cut
    plane's heading to any whole degree, clockwise seen from above; 0, the
-   handle at the top, is square. The typed box and Square are the other two
-   ways in. It is optional: the square cut needs none of it. */
+   handle at the top, is square. The typed box, Square and the − / + buttons
+   under the wheel (1 degree a press, Shift 0.1, Alt 5) are the other ways in;
+   the box and the buttons reach the tenths. It is optional: the square cut
+   needs none of it. */
 function cutWireMiterDial() {
   const dial = document.getElementById('cut-miter-dial');
   if (!dial || dial.dataset.nsoWired === '1') return;
@@ -557,7 +568,55 @@ function cutWireMiterDial() {
   });
   const square = document.getElementById('btn-cut-square');
   if (square) square.addEventListener('click', function () { setCutMiter(0); });
+  cutWireMiterStep('btn-cut-miter-minus', -1);
+  cutWireMiterStep('btn-cut-miter-plus', 1);
   syncCutMiterUI();
+}
+
+/* One − / + button under the wheel. A press steps the mitre through
+   setCutMiter - the call the handle's drag makes - so the wheel, the number
+   and the blade all follow. The size is read from the press: 1 degree, Shift
+   0.1, Alt 5. Held, it repeats at that size after CUT_MITER_HOLD_MS, every
+   CUT_MITER_REPEAT_MS. A pointer press steps on pointerdown and the click that
+   follows is ignored (detail > 0); a keyboard press (Enter / Space) and a
+   scripted .click() arrive as a click with detail 0 and step once. */
+function cutWireMiterStep(id, sign) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  let wait = null, rep = null;
+  const stop = function () {
+    clearTimeout(wait);
+    clearInterval(rep);
+    wait = rep = null;
+  };
+  const sizeOf = function (ev) {
+    return ev.altKey ? CUT_MITER_STEP_ALT_DEG : ev.shiftKey ? CUT_MITER_STEP_SHIFT_DEG : CUT_MITER_STEP_DEG;
+  };
+  const step = function (size) { setCutMiter(cutMiterDeg() + sign * size); };
+  btn.addEventListener('pointerdown', function (ev) {
+    if (ev.button !== 0) return;
+    stop();
+    // A number still being typed commits first. Its change event would
+    // otherwise fire when this press takes the focus - after the step - and
+    // put the typed angle back over it.
+    const typed = document.getElementById('cut-miter-deg');
+    if (typed && document.activeElement === typed) typed.blur();
+    const size = sizeOf(ev);
+    step(size);
+    const tick = function () {
+      if (!btn.offsetParent) stop();         // the card shut under a held button
+      else step(size);
+    };
+    wait = setTimeout(function () {
+      tick();
+      if (wait !== null) rep = setInterval(tick, CUT_MITER_REPEAT_MS);
+    }, CUT_MITER_HOLD_MS);
+  });
+  ['pointerup', 'pointercancel', 'pointerleave', 'blur'].forEach(function (t) { btn.addEventListener(t, stop); });
+  btn.addEventListener('contextmenu', function (ev) { ev.preventDefault(); });
+  btn.addEventListener('click', function (ev) {
+    if (ev.detail === 0) step(sizeOf(ev));
+  });
 }
 
 function showEditPreview() {

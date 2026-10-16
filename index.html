@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=liftplate1" />
+  <link rel="stylesheet" href="styles.css?v=mitrestep1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -510,7 +510,7 @@
               <div id="cutter-tools" class="cutter-tools">
               <div class="cut-miter">
               <svg id="cut-miter-dial" class="cut-dial" viewBox="0 0 100 100" width="104" height="104"
-                   role="slider" tabindex="0" aria-label="Mitre, degrees" aria-valuemin="0" aria-valuemax="359" aria-valuenow="0">
+                   role="slider" tabindex="0" aria-label="Mitre, degrees" aria-valuemin="0" aria-valuemax="359.9" aria-valuenow="0">
                 <circle class="cut-dial-rail" cx="50" cy="50" r="40"></circle>
                 <g class="cut-dial-ticks">
                   <line x1="50" y1="6" x2="50" y2="14"></line><line x1="94" y1="50" x2="86" y2="50"></line>
@@ -526,8 +526,12 @@
               </svg>
               <div class="cut-miter-side">
               <span class="hint">Mitre</span>
-              <input type="number" id="cut-miter-deg" class="cut-no-spin" min="0" max="359" step="1" value="0" aria-label="Mitre, degrees" title="Type an angle, or drag the handle round the wheel. 0 = square.">
+              <input type="number" id="cut-miter-deg" class="cut-no-spin" min="0" max="359.9" step="0.1" value="0" aria-label="Mitre, degrees" title="Type an angle, or drag the handle round the wheel. 0 = square.">
               <button id="btn-cut-square" class="btn btn-secondary" type="button" title="Back to a square cut (0°)">Square</button>
+              </div>
+              <div class="cut-miter-steps" role="group" aria-label="Mitre, step">
+              <button id="btn-cut-miter-minus" class="btn btn-secondary" type="button" aria-label="Mitre 1 degree less" title="Mitre −1° (Shift: 0.1°, Alt: 5°). Hold to repeat.">−</button>
+              <button id="btn-cut-miter-plus" class="btn btn-secondary" type="button" aria-label="Mitre 1 degree more" title="Mitre +1° (Shift: 0.1°, Alt: 5°). Hold to repeat.">+</button>
               </div>
               </div>
               <input type="range" id="cut-slider" min="1" max="99" step="0.1" value="50" aria-label="Blade position along the piece, mm" />
@@ -1472,7 +1476,7 @@
 
 
 
-  <script src="app-cut.js?v=helpmrg1"></script>
+  <script src="app-cut.js?v=mitrestep1"></script>
   <script src="app-finish.js?v=helpers1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
   <script src="app-extend.js?v=scale1"></script>
