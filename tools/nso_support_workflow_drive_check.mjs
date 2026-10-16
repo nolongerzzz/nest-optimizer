@@ -35,7 +35,7 @@
  *      after the build drops it from the line (one Undo, Undo puts it back).
  *  10  The HUD (#status) reads exactly the state line at every step; the card
  *      stays inside the window; no page errors. Screenshots of each state in
- *      tools/support-workflow-out/.
+ *      tools/supports-workflow-out/.
  */
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
@@ -43,7 +43,7 @@ import { join } from 'node:path';
 import { serveRoot, routeCdn, mkCheck, launchOpts, ROOT } from './cth-test/browser-lib.mjs';
 
 const check = mkCheck();
-const SHOTS = join(ROOT, 'tools', 'support-workflow-out');
+const SHOTS = join(ROOT, 'tools', 'supports-workflow-out');
 const W = 1280, H = 800;
 
 function box(lo, hi) {
