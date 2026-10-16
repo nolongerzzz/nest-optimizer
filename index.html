@@ -601,6 +601,61 @@
               </div>
             </div>
           </details>
+          <!-- CONNECT: the builder. Two anchors say where, the card says what runs
+               between them (String, Ribbon, Tube, Tapered) and whether it is welded
+               into the pieces or kept as one of its own (app-connect.js,
+               nso_connect.js). Bridge, in Add, stays the quick gap-fill.
+               docs/CONNECT.md. -->
+          <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-connect">
+            <summary class="vp-bar-btn" title="Build a connector between two anchors: a string, a ribbon, a tube or a taper - welded into the pieces, or kept as a piece of its own">Connect</summary>
+            <div class="vp-menu-body vp-top-body">
+              <div class="vp-row vp-row-full vp-row-bridge">
+                <button id="btn-connect" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="connect-panel"
+                        title="Click anchor A on a piece, orbit as you like, click anchor B. A face is its centre, an edge its middle (a ribbon takes the whole edge), a point itself. Then pick what runs between them and Set. Every connector is straight.">Connect</button>
+              </div>
+              <div class="vp-bend-panel vp-bridge-panel" id="connect-panel" hidden>
+                <p id="connect-readout" class="bend-readout">—</p>
+                <p id="connect-a-text" class="bend-readout">Anchor A: — click a piece</p>
+                <p id="connect-b-text" class="bend-readout">Anchor B: — click a piece</p>
+                <label class="vp-bend-field" title="What runs between the anchors.">Shape
+                  <select id="sel-connect-shape" class="vp-select" aria-label="Connector shape">
+                    <option value="string" selected>String</option>
+                    <option value="ribbon">Ribbon</option>
+                    <option value="tube">Tube</option>
+                    <option value="tapered">Tapered</option>
+                  </select></label>
+                <div class="te-rows" id="connect-string-rows">
+                  <label class="vp-bend-field" id="connect-string-row" title="The string's diameter.">Ø
+                    <input type="number" id="inp-connect-dia" min="0.4" step="0.1" value="2" aria-label="String diameter, mm"><span>mm</span></label>
+                </div>
+                <div class="te-rows" id="connect-ribbon-rows" hidden>
+                  <label class="vp-bend-field" title="The ribbon's width. Its flat face is perpendicular to the average of the two anchor normals. At most twice the shorter anchor edge.">Width
+                    <input type="number" id="inp-connect-width" min="0.4" step="0.1" value="6" aria-label="Ribbon width, mm"><span>mm</span></label>
+                  <label class="vp-bend-field" title="The ribbon's thickness.">Thick
+                    <input type="number" id="inp-connect-thick" min="0.4" step="0.1" value="1.2" aria-label="Ribbon thickness, mm"><span>mm</span></label>
+                </div>
+                <div class="te-rows" id="connect-tube-rows" hidden>
+                  <label class="vp-bend-field" title="The tube's outer diameter. It is closed at both ends: a hollow rod, its bore sealed inside.">Ø
+                    <input type="number" id="inp-connect-tube-dia" min="0.8" step="0.1" value="4" aria-label="Tube diameter, mm"><span>mm</span></label>
+                  <label class="vp-bend-field" title="The tube's wall. Under half the diameter, or there is no bore.">Wall
+                    <input type="number" id="inp-connect-wall" min="0.4" step="0.1" value="0.8" aria-label="Tube wall, mm"><span>mm</span></label>
+                </div>
+                <div class="te-rows" id="connect-tapered-rows" hidden>
+                  <label class="vp-bend-field" title="The diameter at anchor A.">Ø at A
+                    <input type="number" id="inp-connect-dia-a" min="0.4" step="0.1" value="4" aria-label="Diameter at A, mm"><span>mm</span></label>
+                  <label class="vp-bend-field" title="The diameter at anchor B.">Ø at B
+                    <input type="number" id="inp-connect-dia-b" min="0.4" step="0.1" value="1.5" aria-label="Diameter at B, mm"><span>mm</span></label>
+                </div>
+                <label class="vp-clone" title="Both ends sunk under the surface, past the gap their rim leaves, and unioned - Bridge's string. Two pieces become one."><input type="radio" name="connect-result" value="weld" checked> Weld into A and B</label>
+                <label class="vp-clone" title="The connector becomes a closed piece of its own on the plate, its ends cut flush with each surface. The pieces are not touched."><input type="radio" name="connect-result" value="separate"> Keep separate</label>
+                <div class="vp-row vp-row-pair">
+                  <button id="btn-connect-go" class="btn btn-secondary" type="button" disabled
+                          title="Build the connector the ghost shows. One Undo puts everything back.">Set</button>
+                  <button id="btn-connect-cancel" class="btn btn-secondary" type="button" title="Drop the anchors; with none picked, close the card.">Cancel</button>
+                </div>
+              </div>
+            </div>
+          </details>
           <!-- JOIN: Join (Start / Complete / Cancel) and A-B-C, the two column
                menus merged; each keeps its own card. -->
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-joins">
@@ -1508,6 +1563,11 @@
        nso_section.js (the face's shape). See docs/BRIDGE.md. -->
   <script src="nso_bridge.js?v=bridge1"></script>
   <script src="app-bridge.js?v=helpers1"></script>
+  <!-- Connect: the builder on Bridge's pick. After nso_bridge.js and
+       app-bridge.js (the pick and the overlay it reuses), nso_path_sweep.js
+       and nso_assemble.js. See docs/CONNECT.md. -->
+  <script src="nso_connect.js?v=connect1"></script>
+  <script src="app-connect.js?v=connect1"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=polish2"></script>
