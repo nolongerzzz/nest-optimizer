@@ -713,6 +713,8 @@ function initThree() {
     MIDDLE: THREE.MOUSE.DOLLY,
     RIGHT: THREE.MOUSE.PAN
   };
+  // Keep the orbit centre near the plate (see leashOrbitTarget)
+  installOrbitLeash(state.camera, state.controls);
 
   // Lights
   const ambient = new THREE.AmbientLight(0xffffff, 0.75);
@@ -785,14 +787,23 @@ function restoreCamera(snap) {
    scales about it. The camera-to-target distance scales by the same factor,
    which is what the 15..1200 clamp is applied to; at a limit nothing moves.
 
-   The anchor is the first visible piece under the cursor; failing that the
-   plate's plane (y = 0) under the cursor, while that point is inside the
-   camera's far plane (further out it is not drawn, and a grazing ray can put
-   it kilometres away); failing both, the orbit target - which is the zoom
-   this replaced. A trackpad pinch arrives as a ctrlKey wheel event and takes
-   the same path. */
+   The anchor is the first visible piece under the cursor (X-ray pieces
+   included: wireframe and depthTest off change how a mesh is drawn, not how
+   it is raycast). Failing that it is the plate's plane (y = 0) under the
+   cursor, while that point is inside the camera's far plane, and CLAMPED to
+   the plate rectangle plus WHEEL_ANCHOR_MARGIN_MM: off the plate it is the
+   nearest point of that rectangle, so an off-plate scroll zooms toward the
+   nearest plate edge and never past it. That plane is infinite - a cursor
+   near the horizon met it hundreds of mm off the plate, and every scroll-out
+   scaled the orbit target further from the plate, until orbit swung around
+   empty space. Failing both (above the horizon, or past the far plane), the
+   orbit target - which is the zoom this replaced. A trackpad pinch arrives
+   as a ctrlKey wheel event and takes the same path.
+
+   After each wheel step the target is also held on the leash below. */
 const WHEEL_ZOOM_MIN = 15;
 const WHEEL_ZOOM_MAX = 1200;
+const WHEEL_ANCHOR_MARGIN_MM = 10;
 const _wheelRay = new THREE.Raycaster();
 const _wheelNdc = new THREE.Vector2();
 const _wheelGround = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -821,8 +832,12 @@ function wheelZoomAnchor(clientX, clientY) {
     }
   }
   const g = _wheelRay.ray.intersectPlane(_wheelGround, new THREE.Vector3());
-  if (g && g.distanceTo(_wheelRay.ray.origin) <= state.camera.far) return g;
-  return null;
+  if (!g || g.distanceTo(_wheelRay.ray.origin) > state.camera.far) return null;
+  const plate = getCurrentPlate() || { w: 180, d: 180 };
+  const hw = (plate.w || 180) / 2 + WHEEL_ANCHOR_MARGIN_MM;
+  const hd = (plate.d || 180) / 2 + WHEEL_ANCHOR_MARGIN_MM;
+  g.set(Math.min(hw, Math.max(-hw, g.x)), 0, Math.min(hd, Math.max(-hd, g.z)));
+  return g;
 }
 
 /* Scale camera and target about `anchor` so the target distance becomes
@@ -851,6 +866,38 @@ function onViewportWheel(event) {
   const factor = delta < 0 ? scale : 1 / scale;
   const anchor = wheelZoomAnchor(event.clientX, event.clientY) || state.controls.target.clone();
   dollyAbout(state.camera, state.controls, anchor, factor, WHEEL_ZOOM_MIN, WHEEL_ZOOM_MAX);
+  if (leashOrbitTarget(state.camera, state.controls)) state.controls.update();
+}
+
+/* THE LEASH. The orbit target may not sit more than one plate diagonal from
+   the plate's centre (the origin). Past that it is moved to the nearest point
+   at that distance, and the camera moves with it by the same vector, so the
+   camera's offset from the target - and with it the view direction and the
+   zoom - is unchanged: the view slides, it does not jump or turn. Run after
+   every wheel step (above) and on every OrbitControls 'change', which covers
+   a pan or orbit drag and the damping that runs on after its 'end'. Frame
+   (framePlateHome) puts the target at the plate's centre, well inside.
+   Returns true when it moved anything. */
+const _leashShift = new THREE.Vector3();
+
+function leashOrbitTarget(camera, controls) {
+  if (!camera || !controls) return false;
+  const plate = getCurrentPlate() || { w: 180, d: 180 };
+  const reach = Math.hypot(plate.w || 180, plate.d || 180);
+  const t = controls.target;
+  const r = t.length();
+  if (!(r > reach)) return false;
+  _leashShift.copy(t).multiplyScalar(reach / r - 1);
+  t.add(_leashShift);
+  camera.position.add(_leashShift);
+  return true;
+}
+
+/* No controls.update() here: this runs inside update()'s own 'change'
+   dispatch, and camera and target moved together, so the camera's
+   orientation is already right. */
+function installOrbitLeash(camera, controls) {
+  controls.addEventListener('change', () => leashOrbitTarget(camera, controls));
 }
 
 function onResize() {
