@@ -565,7 +565,10 @@
       for (var key in nd.need) if (Object.prototype.hasOwnProperty.call(nd.need, key)) need[key] = nd.need[key];
       if (kindOverride && need.kind !== 'ridge') { need.via = need.kind; need.kind = kindOverride; }
       if (extra) for (var e in extra) if (Object.prototype.hasOwnProperty.call(extra, e)) need[e] = extra[e];
-      if (!exposed(nd)) { counts.interior++; return null; }
+      // opts.exposedOnly === false keeps the ones whose normal meets the piece
+      // (a ceiling over its own floor): the rule as it was before exposed-only,
+      // for a caller that asks. Off by default nowhere in the app.
+      if (opts.exposedOnly !== false && !exposed(nd)) { counts.interior++; return null; }
       var bcn = { x: nd.x, y: nd.y, z: nd.z, normal: nd.normal, need: need, cell: [i, j], tri: nd.T.idx };
       beacons.push(bcn);
       var ci = j * nx + i;

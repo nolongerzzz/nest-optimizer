@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=patchclose1" />
+  <link rel="stylesheet" href="styles.css?v=supworkb6" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -766,28 +766,25 @@
             </div>
           </details>
           <!-- SUPPORTS: one card on the main page (app-supports-card.js,
-               docs/SUPPORTS-CARD.md). Open it, click a piece: where it needs
-               holding, by region; build all, none, a region, or take one
-               support off. G-scope's support row stays for layer-view work;
-               both call the same planner. -->
+               docs/SUPPORTS-CARD.md), a verb with a state. Click a piece: its
+               overhang areas are outlined on it and the card says how many.
+               GENERATE builds; the card is locked while it does; once built it
+               reads the result and offers REGENERATE, REMOVE ALL and REMOVE.
+               G-scope's support row stays for layer-view work; both call the
+               same planner. -->
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-supports">
-            <summary class="vp-bar-btn" title="Where a piece needs holding, and the supports that hold it: all at once, a region at a time, or one by one">Supports</summary>
-            <div class="vp-menu-body vp-top-body sup-card" id="supports-card">
+            <summary class="vp-bar-btn" title="Outline where a piece overhangs, then generate the supports that hold it">Supports</summary>
+            <div class="vp-menu-body vp-top-body sup-card" id="supports-card" data-state="pick">
               <p id="sup-count" class="bend-readout sup-count">Click a piece to see where it needs holding.</p>
-              <div class="vp-row vp-row-pair">
-                <button id="btn-sup-all" class="btn btn-secondary" type="button" disabled
-                        title="Build supports for every region of this piece. Any supports already on it are replaced. One Undo puts it back.">All</button>
-                <button id="btn-sup-none" class="btn btn-secondary" type="button" disabled
-                        title="Take every support off this piece and drop its painted and manual spots. One Undo puts it all back.">None</button>
+              <div class="sup-go-row">
+                <button id="btn-sup-all" class="btn btn-primary sup-go" type="button" disabled
+                        title="Build supports for every outlined area. When the piece already has supports they are all replaced. One Undo puts it back.">Generate</button>
+                <button id="btn-sup-none" class="btn btn-secondary" type="button" hidden disabled
+                        title="Take every support off this piece. The areas stay outlined. One Undo puts them back.">Remove all</button>
               </div>
-              <div class="vp-row vp-row-pair">
-                <button id="btn-sup-paint" class="btn btn-secondary btn-sup-paint" type="button" aria-pressed="false" disabled
-                        title="Paint on the piece. Hold adds spots to hold where you drag, one grid step apart; Skip takes spots away so nothing is built there. Each stroke is one Undo. Click again to stop.">Paint</button>
-                <select id="sel-sup-paint" class="vp-select" aria-label="Paint mode"
-                        title="Hold: add spots where you paint. Skip: leave the spots you paint over unsupported.">
-                  <option value="hold">Hold</option>
-                  <option value="skip">Skip</option>
-                </select>
+              <div class="vp-row vp-row-full">
+                <button id="btn-sup-remove" class="btn btn-secondary" type="button" hidden disabled
+                        title="Take off the one support you clicked. One Undo puts it back.">Remove</button>
               </div>
               <label class="vp-bend-field" for="sup-style">Style
                 <select id="sup-style" class="vp-select" title="Straight strut: one post per spot. Tree: posts merge on the way down. Gecko-hand: the tree with a hand at every spot.">
@@ -800,12 +797,19 @@
                        title="The cross-section side of the struts, trunks and branches. Never below the nozzle's wall floor - the planner raises it if asked for less."><span>mm</span></label>
               <label class="vp-check" for="sup-rest" title="Off: every support stands on the plate, and a spot with no clear way down is left unreachable. On: such a spot may be held from a part below it.">
                 <input type="checkbox" id="sup-rest"> May rest on the part</label>
-              <div class="vp-row vp-row-full">
-                <button id="btn-sup-remove" class="btn btn-secondary" type="button" disabled
-                        title="Take off the one support you clicked. One Undo puts it back.">Remove</button>
-              </div>
-              <p id="sup-read" class="bend-readout sup-read"></p>
-              <p class="hint sup-hint">Click a region's count to build or clear that region. Click a support to pick it. Shift-click the piece to add a spot.</p>
+              <details class="sup-more" id="sup-more">
+                <summary title="Add or take away spots by painting on the piece">Paint spots</summary>
+                <div class="vp-row vp-row-pair">
+                  <button id="btn-sup-paint" class="btn btn-secondary btn-sup-paint" type="button" aria-pressed="false" disabled
+                          title="Paint on the piece. Hold adds spots to hold where you drag, one grid step apart; Skip takes spots away so nothing is built there. Each stroke is one Undo. Click again to stop.">Paint</button>
+                  <select id="sel-sup-paint" class="vp-select" aria-label="Paint mode"
+                          title="Hold: add spots where you paint. Skip: leave the spots you paint over unsupported.">
+                    <option value="hold">Hold</option>
+                    <option value="skip">Skip</option>
+                  </select>
+                </div>
+              </details>
+              <p class="hint sup-hint">Click an outlined area to leave it out, or put it back. Click a support to pick it. Shift-click the piece to add a spot.</p>
             </div>
           </details>
           <!-- ADD: what builds material onto a piece - Fill / Densify, Foam, Thicken,
@@ -1557,7 +1561,7 @@
   <!-- Support beacons: the plan-grid detector detectOverhangs wraps. Before
        nso_support_aim.js so its beacons ride along on every detection. See
        docs/SUPPORT-BEACONS.md. -->
-  <script src="nso_support_beacons.js?v=exposed1"></script>
+  <script src="nso_support_beacons.js?v=exposedopt1"></script>
   <script src="nso_support_aim.js?v=support5"></script>
   <!-- Attach: the connective tissue between Stock, auto-aim and Join's union.
        After nso_support_aim.js, whose nearestBase and place it calls. See
@@ -1709,7 +1713,7 @@
   <script src="app-gscope-support.js?v=exposed1"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
-  <script src="app-supports-card.js?v=supcard2"></script>
+  <script src="app-supports-card.js?v=supwork1"></script>
   <script src="app-gscope-slice.js?v=slice3"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
