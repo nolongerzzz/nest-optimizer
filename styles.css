@@ -2728,13 +2728,16 @@ select:focus, input:focus {
 /* ===================================================================
    The Microscope view (app-microscope.js)
 
-   The layout and the type scale are the reference tool's own
-   (docs/reference/joint_microscope_3d.html) - sidebar left, viewport
-   right, two badges over the canvas - because the view is reused
-   rather than redesigned. Its colour literals are replaced by this
-   app's variables, which carry the same values where it matters:
-   the reference tool's --bg #0d0f13 against ours #0f1115, its accent
-   #5b8cff against our #3b82f6. Nothing else differs.
+   The type scale is the reference tool's own
+   (docs/reference/joint_microscope_3d.html); the layout is the main
+   page's shell. No sidebar: a narrow button column down the left edge
+   (the shell's own slabs and width), a card under each button opening
+   to its right, Back / Export / Close pinned in the top-right corner,
+   and the readouts docked bottom-left. The viewport is the whole
+   panel. Its colour literals are replaced by this app's variables,
+   which carry the same values where it matters: the reference tool's
+   --bg #0d0f13 against ours #0f1115, its accent #5b8cff against our
+   #3b82f6. Nothing else differs.
    =================================================================== */
 
 .ms-panel {
@@ -2749,15 +2752,25 @@ select:focus, input:focus {
 }
 .ms-panel[hidden] { display: none; }
 
-.ms-sidebar {
-  width: 290px;
-  flex-shrink: 0;
-  background: var(--panel);
-  border-right: 1px solid var(--border);
-  padding: 16px;
-  overflow-y: auto;
+/* The column: the shell's slabs, 32px on a 36px pitch, in three groups
+   (Import, Read plate | Select .. Render | Overhangs, Crop Z, Slice), floated
+   over the viewport. The strip itself passes clicks through to the canvas;
+   only the slabs take them. */
+.ms-col {
+  position: absolute;
+  top: var(--shell-pad);
+  left: var(--shell-pad);
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  gap: var(--shell-col-gap);
+  width: var(--shell-col-w);
+  pointer-events: none;
 }
-.ms-sidebar h1 { font-size: 15px; margin: 0 0 4px 0; }
+.ms-col > .ms-group-start {
+  margin-top: calc(var(--shell-group-gap) - var(--shell-col-gap));
+}
+.ms-head h1 { font-size: 15px; margin: 0 0 4px 0; }
 .ms-sub {
   font-size: 12px;
   color: var(--muted);
@@ -2773,6 +2786,8 @@ select:focus, input:focus {
 .ms-note b { color: var(--text); }
 
 .ms-section { margin-bottom: 16px; }
+.ms-xgroup { display: flex; flex-direction: column; gap: 6px; }
+.ms-xgroup .ms-section-title { margin-bottom: 0; }
 .ms-section-title {
   font-size: 11px;
   text-transform: uppercase;
@@ -2788,7 +2803,7 @@ select:focus, input:focus {
   margin-bottom: 8px;
   align-items: center;
 }
-.ms-sidebar button {
+.ms-card button {
   background: var(--panel);
   border: 1px solid var(--border);
   color: var(--text);
@@ -2798,12 +2813,12 @@ select:focus, input:focus {
   cursor: pointer;
   font-family: inherit;
 }
-.ms-sidebar button:hover:not(:disabled) { border-color: var(--accent); }
-.ms-sidebar button.active {
+.ms-card button:hover:not(:disabled) { border-color: var(--accent); }
+.ms-card button.active {
   border-color: var(--accent);
   background: rgba(59, 130, 246, 0.15);
 }
-.ms-sidebar button:disabled { opacity: 0.4; cursor: default; }
+.ms-card button:disabled { opacity: 0.4; cursor: default; }
 /* G-scope's Toolpath | Solid toggle: one control, two halves. */
 .ms-seg { gap: 0; }
 .ms-seg button { border-radius: 0; min-width: 76px; }
@@ -2818,7 +2833,7 @@ select:focus, input:focus {
 .ms-lift-group .ms-lift-sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
 .ms-lift-group .ms-lift-n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
 .ms-lift-why { font-size: 11px; color: var(--muted); margin: 0 0 4px 22px; line-height: 1.35; }
-.ms-sidebar input[type="number"] {
+.ms-card input[type="number"] {
   width: 62px;
   background: var(--bg);
   border: 1px solid var(--border);
@@ -2828,7 +2843,7 @@ select:focus, input:focus {
   font-size: 12px;
   font-family: inherit;
 }
-.ms-sidebar input[type="number"]:disabled { opacity: 0.4; }
+.ms-card input[type="number"]:disabled { opacity: 0.4; }
 
 /* The two exports are the point of this view, so they read as the one
    real choice rather than as two more grey buttons in a row. */
@@ -2868,7 +2883,7 @@ select:focus, input:focus {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 10px;
+  padding: 8px 10px;
   min-height: 60px;
 }
 #ms-info b { color: var(--text); }
@@ -2876,16 +2891,200 @@ select:focus, input:focus {
 .ms-viewport { flex: 1; position: relative; min-width: 0; }
 .ms-viewport canvas { display: block; }
 
-/* Top-RIGHT, not top-left: the feature legend has the left corner now. This
-   is a view-state readout - "Whole part" when you are looking at the whole
-   document, "Detail: N ..." once you have drilled into a selection - so it
-   wants to stay in eyeshot rather than move into the sidebar. It clears the
-   layer-range slider below it, which is docked to the same right edge but
-   starts 56px down. */
+/* ---- G-scope's shell: slabs, cards, the corner row, the dock ----------------
+   The slabs are the main shell's own (".vp-shell-col > .vp-bar-btn"): same
+   width (--shell-col-w), pitch, glass and lit "open" border. They are written
+   out here rather than shared by class because the main page's checks count
+   ".vp-shell-col" and ".vp-shell-row" slabs by those classes. */
+.ms-col > .vp-bar-btn,
+.ms-corner > .vp-bar-btn {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 8px;
+  border-radius: 9px;
+  border: 1px solid var(--glass-border);
+  background: var(--glass-slab);
+  -webkit-backdrop-filter: var(--glass-blur);
+  backdrop-filter: var(--glass-blur);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 2px 10px rgba(0, 0, 0, 0.28);
+  color: #f1f5f9;
+  font-family: var(--font);
+  font-size: 11.5px;
+  font-weight: 500;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.12s, box-shadow 0.12s;
+}
+.ms-col > .vp-bar-btn {
+  width: var(--shell-col-w);
+  height: var(--shell-col-btn-h);
+  letter-spacing: 0.16em;
+  line-height: 1.15;
+  text-align: center;
+  white-space: normal;          /* a label longer than the column wraps inside its slab */
+}
+.ms-corner > .vp-bar-btn {
+  height: var(--shell-btn-h);
+  letter-spacing: 0.07em;
+  line-height: 1;
+  white-space: nowrap;
+}
+.ms-corner > .vp-bar-btn[hidden] { display: none; }
+.ms-col > .vp-bar-btn:hover:not(:disabled),
+.ms-corner > .vp-bar-btn:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.45); }
+.ms-col > .vp-bar-btn:focus-visible,
+.ms-corner > .vp-bar-btn:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 1px; }
+.ms-col > .vp-bar-btn:disabled,
+.ms-corner > .vp-bar-btn:disabled { opacity: 0.38; cursor: not-allowed; }
+/* Open: the lit border and glow the main shell's open drop-downs wear. */
+.ms-col > .vp-bar-btn.is-on,
+.ms-corner > .vp-bar-btn.is-on {
+  border-color: var(--glass-border-lit);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), var(--glass-glow);
+}
+
+/* Top-right: Back, Export, Close, one pinned row. */
+.ms-corner {
+  position: absolute;
+  top: var(--shell-pad);
+  right: var(--shell-pad);
+  z-index: 7;
+  display: flex;
+  gap: var(--shell-gap);
+  pointer-events: none;
+}
+
+/* A card: the main shell's panel, opening just right of the column at the
+   top of the viewport. Only .is-open shows; the rows inside are still shown
+   and hidden by the engine, by id. */
+.ms-card {
+  position: absolute;
+  left: var(--shell-panel-x);
+  top: 12px;
+  z-index: 8;
+  display: none;
+  flex-direction: column;
+  gap: 8px;
+  width: max-content;
+  min-width: 200px;
+  max-width: 300px;
+  max-height: calc(100% - 24px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: var(--glass-panel);
+  -webkit-backdrop-filter: var(--glass-blur-panel);
+  backdrop-filter: var(--glass-blur-panel);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 18px 40px rgba(0, 0, 0, 0.45);
+  color: #e8eef6;
+  font-family: var(--font);
+  font-size: 12.5px;
+}
+.ms-card.is-open { display: flex; }
+/* Export opens under the corner row, clear of the layer-range slider. */
+.ms-card-corner {
+  left: auto;
+  right: 84px;
+  top: calc(var(--shell-pad) + var(--shell-btn-h) + 8px);
+  max-height: calc(100% - var(--shell-pad) - var(--shell-btn-h) - 20px);
+}
+.ms-card .ms-btn-row,
+.ms-card .ms-note,
+.ms-card .ms-section { margin-bottom: 8px; }
+.ms-card .ms-btn-row:last-child,
+.ms-card .ms-note:last-child,
+.ms-card .ms-section:last-child,
+.ms-card > div > :last-child { margin-bottom: 0; }
+.ms-card .ms-section-title { margin-bottom: 6px; }
+.ms-card select {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+/* The dock, bottom-left and just right of the column: the legend, and
+   beside it the readouts. Always up, never a card. It stops short of the
+   layer-range slider on the right. */
+.ms-dock {
+  position: absolute;
+  left: var(--shell-panel-x);
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: calc(100% - var(--shell-panel-x) - 88px);
+  pointer-events: none;
+}
+.ms-readouts {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+/* Two columns of readouts: the file line and the info; Features, the Slice
+   report and the hint. Each scrolls inside itself rather than growing past
+   the window. */
+.ms-rcol {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 250px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  pointer-events: none;
+}
+.ms-glass {
+  background: rgba(23, 26, 33, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  margin-bottom: 0;
+  pointer-events: auto;
+}
+.ms-glass .ms-section-title { margin-bottom: 6px; }
+.ms-glass .ms-note:last-child { margin-bottom: 0; }
+.ms-head .ms-sub { margin: 0; }
+.ms-readouts #ms-info {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  min-height: 0;
+}
+#ms-slice-read { max-height: 9em; overflow-y: auto; }
+#ms-hint-badge { pointer-events: auto; }
+
+/* No backdrop-filter: solid slabs and cards, still readable over the canvas. */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .ms-col > .vp-bar-btn,
+  .ms-corner > .vp-bar-btn { background: var(--glass-slab-solid); }
+  .ms-card { background: var(--glass-panel-solid); }
+}
+
+/* Top-CENTRE: the corner row (Back / Export / Close) has the top right, the
+   cards open at the top left. This is a view-state readout - "Whole part"
+   when you are looking at the whole document, "Detail: N ..." once you have
+   drilled into a selection - so it wants to stay in eyeshot. */
 #ms-mode-badge {
   position: absolute;
   top: 12px;
-  right: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  white-space: nowrap;
   background: rgba(23, 26, 33, 0.9);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -2895,43 +3094,27 @@ select:focus, input:focus {
   z-index: 5;
 }
 #ms-hint-badge {
-  position: absolute;
-  bottom: 12px;
-  left: 12px;
   background: rgba(23, 26, 33, 0.9);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 6px 10px;
   font-size: 11px;
   color: var(--muted);
-  z-index: 5;
   max-width: 420px;
   line-height: 1.4;
 }
 /* Orbit, the mode every document opens in, has no hint to give. */
 #ms-hint-badge:empty { display: none; }
 
-/* The feature legend floats over the viewport's top-left corner instead of
-   sitting in the sidebar.
-
-   It takes the corner itself. #ms-mode-badge used to sit at (12, 12) and has
-   moved to the top RIGHT to make room - see its own rule. Nothing else
-   reaches this corner: the hint badge is bottom-left, and the layer-range
-   slider, top handle included, is docked to the right edge.
-
-   The height cap is what keeps it off the hint badge, which is bottom-left
-   and 420px wide, so the two share a column and can only be kept apart
-   vertically: 96 = 12 (this panel's own top) + 72 (the hint badge's height
-   and margin) + 12 (a gap). A file with more features than the panel can
-   show scrolls rather than growing down over it. */
+/* The feature legend sits in the dock, bottom-left, as the first of the
+   readouts (see .ms-dock). Its own height cap keeps a file with many features
+   from growing up over the cards: past it the list scrolls. */
 #ms-legend-float {
-  position: absolute;
-  top: 12px;
-  left: 12px;
+  flex: 0 0 257px;
   width: 257px;
-  max-height: calc(100% - 96px);
+  max-height: min(46vh, 100%);
   overflow-y: auto;
-  z-index: 5;
+  pointer-events: auto;
   margin-bottom: 0;
   background: rgba(23, 26, 33, 0.9);
   border: 1px solid var(--border);
@@ -2971,7 +3154,7 @@ button#ms-legend-toggle {
   cursor: pointer;
 }
 button#ms-legend-toggle:hover { color: var(--text, #fff); border-color: var(--accent); }
-#ms-legend-float.collapsed { width: auto; }
+#ms-legend-float.collapsed { width: auto; flex-basis: auto; }
 #ms-legend-float.collapsed #ms-legend,
 #ms-legend-float.collapsed #ms-detected { display: none; }
 /* The detector rows (Flange, Handle, Bracket, Lid, Hinge): under the parts,
@@ -2987,17 +3170,6 @@ button#ms-legend-toggle:hover { color: var(--text, #fff); border-color: var(--ac
 #ms-legend-float.collapsed .ms-section-title,
 #ms-legend-float.collapsed button#ms-legend-toggle { margin-bottom: 0; }
 #ms-legend-float.collapsed button#ms-legend-toggle { margin-top: 0; }
-
-/* The slice settings: tucked behind a small disclosure, collapsed by default. */
-#ms-slice-settings { margin-top: 4px; }
-#ms-slice-settings > summary {
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 11px;
-  user-select: none;
-}
-#ms-slice-settings > summary:hover { color: var(--text); }
-#ms-slice-settings[open] > summary { margin-bottom: 4px; }
 
 /* ---------------------------------------------------------------------------
    G-scope additions: the legend's "only" button and the layer-range slider
