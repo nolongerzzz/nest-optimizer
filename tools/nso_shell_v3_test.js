@@ -207,7 +207,10 @@ const OWN_STATE = {
   'btn-bridge-go': 'Bridge on', 'btn-bridge-cancel': 'Bridge on',
   'scale-target': 'the longest edge, when a named section already shows the same number',
   'btn-scale-dim': 'ditto',
-  'carve-b': 'a blade with a length', 'inp-stock-prop': 'a shape with proportions'
+  'carve-b': 'a blade with a length', 'inp-stock-prop': 'a shape with proportions',
+  // #194: the Supports card is a verb with a state - Remove all once it has
+  // built, Remove once a built support is picked
+  'btn-sup-none': 'Supports card BUILT', 'btn-sup-remove': 'Supports card BUILT, a support picked'
 };
 /* File inputs are never on screen: their button opens them. */
 const FILE_INPUT_VIA = { 'file-input': 'btn-load-stl', 'photoset-input': 'btn-photoset-pick', 'relief-file': 'btn-relief-pick',
