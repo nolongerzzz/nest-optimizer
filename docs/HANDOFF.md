@@ -49,6 +49,7 @@ Current roster, by category:
 | Bend (`app-bend.js`; the geometry is `nso_bend.js`) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/BEND.md` |
 | Tube edge (`app-tube-edge.js`; the geometry is `nso_tube_edge.js`) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/TUBE-EDGE.md` |
 | Bridge (`app-bridge.js`; the geometry is `nso_bridge.js`) | whole-piece, on both pieces | `nsoMaskCount(m) > 0` on either | header comment + `docs/BRIDGE.md` |
+| Close (`app-close.js`, ADD -> Close; the geometry is `nso_close.js`) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/CLOSE.md` §5 |
 | Mirror (`app-mirror.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/MIRROR.md` |
 | Fatten (`app-fatten.js`; no UI since Scale part 3 - the card's Offset replaced it) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/FATTEN.md` |
 | Pottery Wheel (`app-wheel.js`) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comment + `docs/POTTERY-WHEEL.md` |
