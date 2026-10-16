@@ -270,7 +270,9 @@
     "grab:drop": "node tools/nso_grab_drop_drive_check.js",
     "grab:drop-shots": "node tools/nso_grab_drop_drive_check.js tools/grab-drop-out",
     "lift:assembly": "node tools/nso_lift_assembly_drive_check.js",
-    "lift:assembly-shots": "node tools/nso_lift_assembly_drive_check.js tools/lift-assembly-out"
+    "lift:assembly-shots": "node tools/nso_lift_assembly_drive_check.js tools/lift-assembly-out",
+    "split:parts": "node tools/nso_split_parts_test.js",
+    "split:parts-drive": "node tools/nso_split_parts_drive.js"
   },
   "devDependencies": {
     "playwright": "1.56.1",
@@ -316,6 +318,8 @@
     "pull:drive",
     "grab:drop",
     "lift:assembly",
+    "split:parts",
+    "split:parts-drive",
     "foam:test",
     "foam:drive",
     "cavity:thickwall",
@@ -602,6 +606,8 @@
     "pull:drive": 160000,
     "grab:drop": 169000,
     "lift:assembly": 92000,
+    "split:parts": 11500,
+    "split:parts-drive": 33000,
     "foam:test": 4200,
     "foam:drive": 85300,
     "cavity:thickwall": 110,
