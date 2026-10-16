@@ -29,6 +29,7 @@ tools/lift-curved-out/
 tools/lift-plate-out/
 tools/lift-any-face-out/
 tools/close-out/
+tools/crop-shapes-out/
 tools/rotate-pivot-out/
 tools/right-pan-out/
 tools/curved-branch-out/

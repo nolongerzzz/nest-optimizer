@@ -1271,7 +1271,7 @@ function NSO_cropUpdateHelper() {
   NSO_cropRemoveHelper();
   var cs = NSO_cropState();
   var m = getActiveModel();
-  if (!cs.show || !NSO_cropLive() || !m) return;
+  if (!cs.show || !NSO_cropLive() || !m || NSO_cropRegionMode() !== 'box') return;
   var slab = NSO_cropDisplaySlab(m), mesh = NSO_cropTargetMesh(m);
   if (!slab || !mesh) return;
   var bb = slab.bbox, ax = slab.axis === 'x' ? 0 : 2;
@@ -1591,15 +1591,15 @@ function NSO_cropRemoveGhost() {
 if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('crop', {
   live: NSO_cropLive,
   close: function () { closeCutter(false); },
-  clear: function () { NSO_cropRemoveHelper(); NSO_cropRemoveGhost(); },
-  refresh: function () { NSO_cropUpdateHelper(); NSO_cropUpdateGhost(); }
+  clear: function () { NSO_cropRemoveHelper(); NSO_cropRemoveGhost(); NSO_cropShapeRemoveHelper(); },
+  refresh: function () { NSO_cropUpdateHelper(); NSO_cropUpdateGhost(); NSO_cropShapeUpdateHelper(); }
 });
 
 function NSO_cropUpdateGhost() {
   if (typeof state === 'undefined' || !state.scene || typeof THREE === 'undefined') return;
   var cs = NSO_cropState();
   var m = getActiveModel();
-  if (!cs.lift || !NSO_cropLive() || !m) { NSO_cropRemoveGhost(); return; }
+  if (!cs.lift || !NSO_cropLive() || !m || NSO_cropRegionMode() !== 'box') { NSO_cropRemoveGhost(); return; }
   var cur = NSO_cropCurrentRegion(m), mesh = NSO_cropTargetMesh(m);
   if (!cur.region || !cur.region.ok || !mesh) { NSO_cropRemoveGhost(); return; }
   if (!cs.regionGeo) cs.regionGeo = rawResultToDisplayGeometry(cur.region.tris, m.centerOffset);
@@ -1788,6 +1788,795 @@ if (typeof document !== 'undefined') {
       var baseSync = NSO_cropSyncUI;
       NSO_cropSyncUI = function () { var r = baseSync.apply(this, arguments); NSO_cropMoveSyncUI(); return r; };
       NSO_cropMoveSyncUI();
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
+    else wire();
+  })();
+}
+
+/* =====================================================================
+   6. Crop shapes: a Circle, or another Piece's outline, as the region
+
+   Two regions beside the Box. Neither removes a slab or slides anything:
+   the region is a cutter standing upright through the piece, and the piece
+   keeps what is inside it or what is outside it.
+
+     circle   a cylinder, axis vertical as the piece lies on the plate,
+              { kind: 'circle', cx, cy, d }.
+     outline  another piece's outline seen from above - its silhouette, with
+              vertical walls - grown or shrunk by `grow` mm (round corners),
+              { kind: 'outline', soup, grow }. The soup is only read; the
+              template piece is never touched.
+
+   Both are given in the PLATE frame P: z up (the plate's vertical), x and y
+   across the plate. opts.toRaw (16 numbers, column-major, as THREE's
+   Matrix4.elements) maps P into the piece's raw frame; omitted, P is the
+   raw frame. So the cutter is built where the user sees it and moved onto
+   the raw soup by one rigid transform, and the piece's own vertices are
+   never moved or re-rounded.
+
+   The cutter's height spans the piece (its extent along P's z, plus a
+   margin), so the cut always goes right through.
+
+   WHY THE KERNEL, not Cut's clip. A circle or a star is not a set of
+   planes; the clip only cuts at one plane at a time. The kernel's
+   intersect / subtract are the two booleans the region means, and it
+   returns a closed manifold or says why not. The cutter is the kernel's
+   own CrossSection, extruded: the circle is a regular polygon whose chords
+   sag at most NSO_CROP_SHAPE.sagMm inside the true circle; the outline is
+   the union of the template's triangles projected straight down (the
+   silhouette, whatever the template's own topology), and Grow is the
+   CrossSection's round offset.
+
+   Refusals, each in words, and the input soup object handed back:
+     - the region misses the piece (nothing kept inside, nothing removed
+       outside);
+     - the region holds the whole piece (Keep inside would change nothing) or
+       covers it (Keep outside would leave nothing);
+     - Grow shrinks the outline to nothing; the template has no outline from
+       above;
+     - the kernel will not take the piece as a solid, or the result is not
+       closed.
+   ===================================================================== */
+
+var NSO_CROP_SHAPE = {
+  sagMm: 0.005,      // the circle's chords sag at most this inside the true circle
+  minSeg: 48,
+  maxSeg: 2048,
+  growSeg: 256,      // segments per full turn on Grow's round corners
+  marginMm: 1,       // the cutter runs this far past the piece, top and bottom
+  tinyMm3: 1e-3      // a change below this (or 1e-7 of the piece) is nothing
+};
+
+// Segments for a circle of radius r whose chords sag at most sagMm.
+function NSO_cropCircleSegments(r) {
+  var S = NSO_CROP_SHAPE;
+  var c = 1 - S.sagMm / r;
+  var n = c > -1 ? Math.ceil(Math.PI / Math.acos(Math.max(-1, Math.min(1, c)))) : S.minSeg;
+  n = Math.max(S.minSeg, Math.min(S.maxSeg, n));
+  return Math.ceil(n / 4) * 4;
+}
+
+// Column-major 4x4 (affine) helpers.
+function NSO_cropMatApply(M, x, y, z) {
+  return [M[0] * x + M[4] * y + M[8] * z + M[12],
+          M[1] * x + M[5] * y + M[9] * z + M[13],
+          M[2] * x + M[6] * y + M[10] * z + M[14]];
+}
+function NSO_cropMatInvert(M) {
+  var a = M[0], b = M[4], c = M[8], d = M[1], e = M[5], f = M[9], g = M[2], h = M[6], i = M[10];
+  var A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
+  var det = a * A + b * B + c * C;
+  if (!(Math.abs(det) > 1e-12)) return null;
+  var r = 1 / det;
+  var inv = [A * r, B * r, C * r,
+             -(b * i - c * h) * r, (a * i - c * g) * r, -(a * h - b * g) * r,
+             (b * f - c * e) * r, -(a * f - c * d) * r, (a * e - b * d) * r];
+  // inv is row-major 3x3 here; out is column-major 4x4
+  var tx = M[12], ty = M[13], tz = M[14];
+  var out = [inv[0], inv[3], inv[6], 0, inv[1], inv[4], inv[7], 0, inv[2], inv[5], inv[8], 0, 0, 0, 0, 1];
+  out[12] = -(out[0] * tx + out[4] * ty + out[8] * tz);
+  out[13] = -(out[1] * tx + out[5] * ty + out[9] * tz);
+  out[14] = -(out[2] * tx + out[6] * ty + out[10] * tz);
+  return out;
+}
+
+/* The outline seen from above: every triangle of `soup` (P frame) dropped
+   onto z = 0, wound counter-clockwise. Walls drop to nothing and are left
+   out. Their union, under the non-zero rule, is the silhouette. Points are
+   { x, y }: the kernel reads an [x, y] pair only when it is an Array of its
+   own realm, so a soup from a vm context (the node tests) would not pass. */
+function NSO_cropSilhouettePolys(soup) {
+  var polys = [];
+  for (var o = 0; o + 8 < soup.length; o += 9) {
+    var ax = soup[o], ay = soup[o + 1], bx = soup[o + 3], by = soup[o + 4], cx = soup[o + 6], cy = soup[o + 7];
+    var ar = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+    if (!(Math.abs(ar) > 1e-10)) continue;
+    var A = { x: ax, y: ay }, B = { x: bx, y: by }, C = { x: cx, y: cy };
+    polys.push(ar > 0 ? [A, B, C] : [A, C, B]);
+  }
+  return polys;
+}
+
+/* The region's cross-section (a kernel CrossSection in P's xy), or a reason.
+   The caller deletes it. */
+function NSO_cropShapeSection(wasm, shape) {
+  var S = NSO_CROP_SHAPE;
+  if (!shape) return { reason: 'no region' };
+  if (shape.kind === 'circle') {
+    var d = +shape.d;
+    if (!isFinite(shape.cx) || !isFinite(shape.cy)) return { reason: 'the circle has no centre - click one on the piece' };
+    if (!(d > 0.1)) return { reason: 'the circle needs a diameter above 0.1 mm' };
+    var n = NSO_cropCircleSegments(d / 2);
+    var c0 = wasm.CrossSection.circle(d / 2, n);
+    var cs = c0.translate(shape.cx, shape.cy);   // varargs: an array from another realm (a vm context) is not instanceof Array
+    c0.delete();
+    return { cs: cs, segments: n, what: 'the circle' };
+  }
+  if (shape.kind === 'outline') {
+    var polys = NSO_cropSilhouettePolys(shape.soup || []);
+    if (!polys.length) return { reason: 'the template piece has no outline seen from above' };
+    var base = new wasm.CrossSection(polys, 'NonZero');
+    if (base.isEmpty() || !(base.area() > 1e-6)) { base.delete(); return { reason: 'the template piece has no outline seen from above' }; }
+    var grow = +shape.grow || 0;
+    var out = base;
+    if (grow) {
+      out = base.offset(grow, 'Round', 2, S.growSeg);
+      base.delete();
+      if (out.isEmpty() || !(out.area() > 1e-6)) {
+        out.delete();
+        return { reason: 'Grow ' + grow.toFixed(2) + ' mm shrinks the outline to nothing' };
+      }
+    }
+    return { cs: out, what: 'the outline' };
+  }
+  return { reason: 'unknown region "' + shape.kind + '"' };
+}
+
+/* NSO_cropShapeRaw(rawTris, opts) -> Promise<{ ok, reason, tris, ... }>
+     opts.shape   { kind: 'circle', cx, cy, d } or { kind: 'outline', soup, grow }, in P
+     opts.keep    'inside' (default) or 'outside'
+     opts.toRaw   P -> raw, 16 numbers column-major; omitted = identity
+   On refusal ok is false and tris is the input soup object. */
+async function NSO_cropShapeRaw(rawTris, opts) {
+  opts = opts || {};
+  var S = NSO_CROP_SHAPE;
+  var keep = opts.keep === 'outside' ? 'outside' : 'inside';
+  var res = { ok: false, reason: '', tris: rawTris, keep: keep };
+  if (!rawTris || rawTris.length < 9) { res.reason = 'empty piece'; return res; }
+  var toRaw = opts.toRaw ? Array.prototype.slice.call(opts.toRaw) : null;
+  var fromRaw = toRaw ? NSO_cropMatInvert(toRaw) : null;
+  if (toRaw && !fromRaw) { res.reason = 'the plate-to-piece transform is singular'; return res; }
+
+  // The piece's extent in P: the cutter's height, and a cheap miss test.
+  var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (var i = 0; i + 2 < rawTris.length; i += 3) {
+    var p = fromRaw ? NSO_cropMatApply(fromRaw, rawTris[i], rawTris[i + 1], rawTris[i + 2]) : [rawTris[i], rawTris[i + 1], rawTris[i + 2]];
+    for (var k = 0; k < 3; k++) { if (p[k] < lo[k]) lo[k] = p[k]; if (p[k] > hi[k]) hi[k] = p[k]; }
+  }
+  res.pieceP = { lo: lo, hi: hi };
+
+  var wasm;
+  try { wasm = await NSO_CSG.load(); }
+  catch (err) { res.reason = 'the boolean kernel failed to load (' + ((err && err.message) || err) + ')'; return res; }
+
+  var sec = null, solid = null, cutter = null, man = null, out = null;
+  try {
+    sec = NSO_cropShapeSection(wasm, opts.shape);
+    if (!sec.cs) { res.reason = sec.reason; return res; }
+    var what = sec.what;
+    res.what = what; res.segments = sec.segments || null; res.areaMm2 = sec.cs.area();
+    var b = sec.cs.bounds();
+    var bmin = b.min, bmax = b.max;
+    var bx0 = bmin.x !== undefined ? bmin.x : bmin[0], by0 = bmin.y !== undefined ? bmin.y : bmin[1];
+    var bx1 = bmax.x !== undefined ? bmax.x : bmax[0], by1 = bmax.y !== undefined ? bmax.y : bmax[1];
+    res.regionP = { lo: [bx0, by0], hi: [bx1, by1] };
+    if (bx1 < lo[0] || bx0 > hi[0] || by1 < lo[1] || by0 > hi[1]) {
+      res.reason = what + ' misses the piece - move it over the piece';
+      return res;
+    }
+    var z0 = lo[2] - S.marginMm, h = hi[2] - lo[2] + 2 * S.marginMm;
+    solid = sec.cs.extrude(h);
+    cutter = solid.translate(0, 0, z0);
+    solid.delete(); solid = null;
+    if (toRaw) { var moved = cutter.transform(toRaw); cutter.delete(); cutter = moved; }
+
+    man = NSO_CSG.soupToManifold(wasm, rawTris);
+    if (man.status && man.status() !== 'NoError' && typeof weldSoupVerts === 'function' && typeof NSO_weldEpsFor === 'function') {
+      man.delete();
+      man = NSO_CSG.soupToManifold(wasm, weldSoupVerts(rawTris, NSO_weldEpsFor(rawTris, 0.08)));
+    }
+    if (man.status && man.status() !== 'NoError') {
+      res.reason = 'the kernel does not take this piece as a closed solid (' + man.status() + ')';
+      return res;
+    }
+    var v0 = man.volume();
+    var tiny = Math.max(S.tinyMm3, Math.abs(v0) * 1e-7);
+    out = keep === 'inside' ? man.intersect(cutter) : man.subtract(cutter);
+    if (out.status && out.status() !== 'NoError') { res.reason = 'the kernel refused the cut (' + out.status() + ')'; return res; }
+    var v1 = out.isEmpty() ? 0 : out.volume();
+    res.volumeBefore = v0; res.keptMm3 = v1; res.removedMm3 = v0 - v1;
+    if (keep === 'inside') {
+      if (!(v1 > tiny)) { res.reason = what + ' misses the piece - nothing of it is inside'; return res; }
+      if (!(v0 - v1 > tiny)) { res.reason = what + ' holds the whole piece - Keep inside would change nothing'; return res; }
+    } else {
+      if (!(v0 - v1 > tiny)) { res.reason = what + ' misses the piece - Keep outside would remove nothing'; return res; }
+      if (!(v1 > tiny)) { res.reason = what + ' covers the whole piece - Keep outside would leave nothing'; return res; }
+    }
+    var tris = NSO_CSG.manifoldToSoup(out);
+    var cen = NSO_cropEdgeCensus(tris);
+    if (cen.open || cen.repeated || cen.degenerate) {
+      res.reason = 'the result did not come out closed (open ' + cen.open + ', repeated ' + cen.repeated +
+        ', degenerate ' + cen.degenerate + ')';
+      return res;
+    }
+    var parts = 1;
+    if (typeof out.decompose === 'function') {
+      var bits = out.decompose();
+      parts = bits.length;
+      for (var j = 0; j < bits.length; j++) bits[j].delete();
+    }
+    res.parts = parts;
+    res.census = cen;
+    res.tris = tris;
+    res.ok = true;
+    return res;
+  } catch (err) {
+    res.reason = 'the kernel failed (' + ((err && err.message) || err) + ')';
+    res.tris = rawTris;
+    return res;
+  } finally {
+    if (sec && sec.cs) sec.cs.delete();
+    if (solid) solid.delete();
+    if (cutter) cutter.delete();
+    if (man) man.delete();
+    if (out) out.delete();
+  }
+}
+
+/* The cutter itself as a closed soup in P, for the preview: the same
+   cross-section the crop uses, extruded from z0 by h. -> { soup } | { reason } */
+async function NSO_cropShapeCutterSoup(shape, z0, h) {
+  var wasm;
+  try { wasm = await NSO_CSG.load(); }
+  catch (err) { return { reason: 'the boolean kernel failed to load' }; }
+  var sec = null, solid = null, moved = null;
+  try {
+    sec = NSO_cropShapeSection(wasm, shape);
+    if (!sec.cs) return { reason: sec.reason };
+    solid = sec.cs.extrude(h);
+    moved = solid.translate(0, 0, z0);
+    return { soup: NSO_CSG.manifoldToSoup(moved), areaMm2: sec.cs.area() };
+  } catch (err) {
+    return { reason: (err && err.message) || String(err) };
+  } finally {
+    if (sec && sec.cs) sec.cs.delete();
+    if (solid) solid.delete();
+    if (moved) moved.delete();
+  }
+}
+
+/* =====================================================================
+   7. App wiring for Circle and Piece
+
+   The Crop card's first row picks the region: Box (sections 5 and 5b,
+   unchanged), Circle or Piece. Circle and Piece share Keep inside / Keep
+   outside, a read-out and a Crop button; the Box rows are hidden while
+   either is chosen, and the box and its ghost are not drawn.
+
+   CIRCLE. Click centre arms one press on the selected piece: the press
+   puts the centre where it lands, and dragging before letting go sizes the
+   circle (Ø is twice the distance from the centre, measured level). Ø can be
+   typed. The circle is drawn as an upright cylinder through the piece; drag
+   its middle to slide it, its rim to resize it - the Box's drags, for a
+   circle. The centre is kept in the piece's RAW frame, which neither a crop
+   nor its Undo moves, so the circle stays on the same spot of the piece.
+
+   PIECE. Pick piece arms one click on another piece on the plate. Its
+   outline seen from above, where it sits now, grown by Grow mm, is the
+   cutter; it is drawn over the selected piece as a translucent prism. The
+   template is read, never changed.
+
+   THE FRAMES. The cutter is built in the plate frame P (z up; world =
+   (Px, Pz, -Py)) and handed to the engine with the transform P -> the
+   piece's raw frame through the mesh as drawn, so a piece turned on the
+   plate is cut where it is seen. A raw soup that no longer matches the mesh
+   (turned since it was loaded) is refused, as Box refuses it.
+
+   THE COMMIT. One NSO_sculptCommitRaw, Undo type cropReplace ("Undo: Crop
+   reverted"), gated by the in-page checker as Box's crop is. A bake
+   recentres the piece's frame on what is left, which would move a disc cut
+   off-centre to where the plate's centre was; so the placed entry is slid
+   back by that shift, and the same Undo entry carries the pose it had
+   (prevPose), so one Undo puts back both.
+
+   PAINT SCOPE: WHOLE-PIECE, as Box. The kernel rebuilds the whole piece, so
+   no face can be promised untouched. Any paint stands the crop down.
+   ===================================================================== */
+
+function NSO_cropShapeState() {
+  var cs = NSO_cropState();
+  if (!cs.shape) cs.shape = { mode: 'box', keep: 'inside', circle: null, templateId: null, grow: 0,
+                              placing: false, picking: false, busy: false, preview: null };
+  return cs.shape;
+}
+
+function NSO_cropRegionMode() {
+  return (typeof state !== 'undefined' && state.crop && state.crop.shape) ? state.crop.shape.mode : 'box';
+}
+
+// P (z up) <-> world (y up): world = (Px, Pz, -Py).
+function NSO_cropWorldFromP() { return new THREE.Matrix4().set(1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1); }
+function NSO_cropPFromWorld() { return new THREE.Matrix4().set(1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1); }
+
+// The display transform the bake draws with: local = (x - off.x, z - off.y, -y - off.z).
+function NSO_cropRawToLocal(m, p) {
+  var off = m.centerOffset;
+  return new THREE.Vector3(p[0] - off.x, p[2] - off.y, -p[1] - off.z);
+}
+function NSO_cropLocalToRaw(m, v) {
+  var off = m.centerOffset;
+  return [v.x + off.x, -(v.z + off.z), v.y + off.y];
+}
+
+/* P -> m's raw frame, through `mesh` as drawn: { M } (16 numbers,
+   column-major) or { reason }. */
+function NSO_cropPlateToRaw(m, mesh) {
+  if (!m || !m.rawTris || m.rawAxis !== 'zup' || !m.centerOffset) return { reason: 'Crop needs a raw piece' };
+  if (!mesh || !mesh.geometry) return { reason: 'the piece is not drawn' };
+  var off = m.centerOffset, rb = NSO_cropBounds(m.rawTris);
+  mesh.geometry.computeBoundingBox();
+  var bb = mesh.geometry.boundingBox;
+  var pairs = [[rb.lo[0] - off.x, bb.min.x], [rb.hi[0] - off.x, bb.max.x], [rb.lo[2] - off.y, bb.min.y],
+               [rb.hi[2] - off.y, bb.max.y], [-rb.hi[1] - off.z, bb.min.z], [-rb.lo[1] - off.z, bb.max.z]];
+  for (var i = 0; i < pairs.length; i++) {
+    if (Math.abs(pairs[i][0] - pairs[i][1]) > 1e-3) {
+      return { reason: 'the piece was turned since it was loaded, so its raw frame no longer matches the view' };
+    }
+  }
+  var rawFromLocal = new THREE.Matrix4().set(1, 0, 0, off.x, 0, 0, -1, -off.z, 0, 1, 0, off.y, 0, 0, 0, 1);
+  mesh.updateMatrixWorld(true);
+  var M = rawFromLocal.multiply(new THREE.Matrix4().copy(mesh.matrixWorld).invert()).multiply(NSO_cropWorldFromP());
+  return { M: Array.from(M.elements) };
+}
+
+function NSO_cropPlacedOf(id) {
+  return (state.placed || []).find(function (p) { return p && p.sourceId === id && p.mesh; }) || null;
+}
+
+// A placed piece's triangles in P, from the mesh as drawn.
+function NSO_cropMeshSoupP(mesh) {
+  var g = mesh.geometry, pos = g.attributes.position, idx = g.index;
+  var n = idx ? idx.count : pos.count;
+  mesh.updateMatrixWorld(true);
+  var M = NSO_cropPFromWorld().multiply(mesh.matrixWorld);
+  var out = new Float32Array(n * 3), v = new THREE.Vector3();
+  for (var i = 0; i < n; i++) {
+    v.fromBufferAttribute(pos, idx ? idx.getX(i) : i).applyMatrix4(M);
+    out[i * 3] = v.x; out[i * 3 + 1] = v.y; out[i * 3 + 2] = v.z;
+  }
+  return out;
+}
+
+// The circle for the selected piece, made fresh (centred, half the narrower
+// footprint) for a new piece.
+function NSO_cropCircleFor(m) {
+  var sh = NSO_cropShapeState();
+  if (!m || !m.rawTris || !m.centerOffset) return null;
+  if (!sh.circle || sh.circle.forId !== m.id) {
+    var rb = NSO_cropBounds(m.rawTris);
+    var d = Math.max(1, Math.round(Math.min(rb.hi[0] - rb.lo[0], rb.hi[1] - rb.lo[1]) * 0.5));
+    sh.circle = { forId: m.id, raw: [(rb.lo[0] + rb.hi[0]) / 2, (rb.lo[1] + rb.hi[1]) / 2, rb.hi[2]], d: d };
+  }
+  return sh.circle;
+}
+
+function NSO_cropCircleWorld(m, mesh) {
+  var c = NSO_cropCircleFor(m);
+  if (!c || !mesh) return null;
+  mesh.updateMatrixWorld(true);
+  return NSO_cropRawToLocal(m, c.raw).applyMatrix4(mesh.matrixWorld);
+}
+
+function NSO_cropSetCircleWorld(m, mesh, w) {
+  var c = NSO_cropCircleFor(m);
+  mesh.updateMatrixWorld(true);
+  c.raw = NSO_cropLocalToRaw(m, mesh.worldToLocal(w.clone()));
+}
+
+function NSO_cropSetCircleD(d) {
+  var m = getActiveModel(), c = m && NSO_cropCircleFor(m);
+  if (!c || !isFinite(d)) { NSO_cropShapeSyncUI(); return; }
+  c.d = Math.max(0.2, Math.round(d * 10) / 10);
+  NSO_cropShapeSyncUI();
+}
+
+/* The region now, in P: { shape } or { reason }. */
+function NSO_cropShapeNow(m, mesh) {
+  var sh = NSO_cropShapeState();
+  if (sh.mode === 'circle') {
+    var w = NSO_cropCircleWorld(m, mesh);
+    if (!w) return { reason: 'no circle yet - press Click centre, then press on the piece' };
+    return { shape: { kind: 'circle', cx: w.x, cy: -w.z, d: NSO_cropCircleFor(m).d } };
+  }
+  if (sh.mode === 'piece') {
+    if (sh.templateId == null) return { reason: 'no template - press Pick piece, then click another piece on the plate' };
+    if (sh.templateId === m.id) return { reason: 'the template is the piece being cropped - pick another piece' };
+    var tp = NSO_cropPlacedOf(sh.templateId);
+    if (!tp) return { reason: 'the template piece is no longer on the plate' };
+    return { shape: { kind: 'outline', soup: NSO_cropMeshSoupP(tp.mesh), grow: +sh.grow || 0 }, template: tp };
+  }
+  return { reason: 'the region is the Box' };
+}
+
+/* ---- drawing: the circle, and the piece's outline prism ------------------ */
+
+function NSO_cropShapeRemoveHelper() {
+  var h = state.cropShapeHelper;
+  if (!h) return;
+  if (h.parent) h.parent.remove(h);
+  h.traverse(function (o) {
+    if (o.geometry) o.geometry.dispose();
+    if (o.material) o.material.dispose();
+  });
+  state.cropShapeHelper = null;
+}
+
+function NSO_cropShapeUpdateHelper() {
+  if (typeof state === 'undefined' || !state.scene || typeof THREE === 'undefined') return;
+  NSO_cropShapeRemoveHelper();
+  var sh = NSO_cropShapeState(), m = getActiveModel();
+  if (sh.mode === 'box' || !NSO_cropLive() || !m) return;
+  var mesh = NSO_cropTargetMesh(m);
+  if (!mesh) return;
+  var bb = new THREE.Box3().setFromObject(mesh);
+  var y0 = bb.min.y - 1, y1 = bb.max.y + 1;
+  var g = new THREE.Group();
+  g.name = 'cropShapeHelper';
+  if (sh.mode === 'circle') {
+    var c = NSO_cropCircleFor(m), w = NSO_cropCircleWorld(m, mesh);
+    if (!c || !w) return;
+    var r = c.d / 2, seg = Math.min(256, NSO_cropCircleSegments(r));
+    var body = new THREE.Mesh(new THREE.CylinderGeometry(r, r, y1 - y0, seg, 1, false),
+      new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.18, depthWrite: false }));
+    body.position.set(w.x, (y0 + y1) / 2, w.z);
+    body.userData.cropShapeHandle = 'circle';
+    g.add(body);
+    [y0, y1].forEach(function (y) {
+      var pts = [];
+      for (var i = 0; i < seg; i++) {
+        var a = i / seg * Math.PI * 2;
+        pts.push(new THREE.Vector3(w.x + r * Math.cos(a), y, w.z + r * Math.sin(a)));
+      }
+      g.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0xb91c1c })));
+    });
+    var dot = new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.4, Math.min(1.5, r * 0.06)), 12, 8),
+      new THREE.MeshBasicMaterial({ color: 0xb91c1c }));
+    dot.position.set(w.x, y1, w.z);
+    g.add(dot);
+  } else {
+    var pv = NSO_cropPiecePreview(m, mesh, y0, y1);
+    if (!pv || !pv.soup) return;
+    var arr = new Float32Array(pv.soup.length);
+    for (var k = 0; k < pv.soup.length; k += 3) { arr[k] = pv.soup[k]; arr[k + 1] = pv.soup[k + 2]; arr[k + 2] = -pv.soup[k + 1]; }
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(arr, 3));
+    var prism = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.18,
+      depthWrite: false, side: THREE.DoubleSide }));
+    g.add(prism);
+    // The template usually stands right where its outline cuts, so the
+    // outline's edges are drawn through it.
+    var edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 20),
+      new THREE.LineBasicMaterial({ color: 0xb91c1c, depthTest: false, transparent: true }));
+    edges.renderOrder = 10;
+    g.add(edges);
+  }
+  nsoHelpers.attach(state.scene, g, 'crop', { interactive: sh.mode === 'circle' });   // the circle is dragged
+  state.cropShapeHelper = g;
+}
+
+/* The outline prism for the preview, computed by the kernel off the main
+   path and cached on what it depends on. Returns the cached result, or null
+   while it is being made (the helper is redrawn when it lands). */
+function NSO_cropPiecePreview(m, mesh, y0, y1) {
+  var sh = NSO_cropShapeState();
+  var now = NSO_cropShapeNow(m, mesh);
+  if (!now.shape) { sh.preview = { key: null, reason: now.reason }; return null; }
+  var tm = now.template.mesh;
+  tm.updateMatrixWorld(true);
+  var key = [sh.templateId, tm.geometry.uuid, tm.matrixWorld.elements.map(function (v) { return v.toFixed(4); }).join(','),
+             now.shape.grow, y0.toFixed(3), y1.toFixed(3)].join('|');
+  if (sh.preview && sh.preview.key === key) return sh.preview.pending ? null : sh.preview;
+  var pv = { key: key, pending: true };
+  sh.preview = pv;
+  NSO_cropShapeCutterSoup(now.shape, y0, y1 - y0).then(function (r) {
+    pv.pending = false;
+    pv.soup = r.soup || null; pv.reason = r.reason || ''; pv.areaMm2 = r.areaMm2;
+    if (sh.preview === pv) { NSO_cropShapeUpdateHelper(); NSO_cropShapeReadout(); }
+  });
+  return null;
+}
+
+/* ---- the card --------------------------------------------------------------- */
+
+function NSO_cropShapeReadout() {
+  var el = document.getElementById('crop-shape-readout');
+  if (!el) return;
+  var sh = NSO_cropShapeState(), m = getActiveModel(), mesh = m && NSO_cropTargetMesh(m);
+  var keepTxt = sh.keep === 'inside' ? 'Keep inside: what is inside stays, the rest goes.'
+    : 'Keep outside: the region is cut out of the piece.';
+  var txt = '—';
+  if (sh.busy) txt = 'Cropping…';
+  else if (NSO_cropLive() && m && mesh && sh.mode === 'circle') {
+    if (sh.placing) txt = 'Press on the piece where the centre goes; drag out to size the circle.';
+    else if (!NSO_cropCircleFor(m)) txt = 'This piece has no raw frame to place a circle on.';
+    else {
+      var c = NSO_cropCircleFor(m), w = NSO_cropCircleWorld(m, mesh), bb = new THREE.Box3().setFromObject(mesh);
+      txt = 'Circle Ø' + c.d.toFixed(1) + ' mm, centre ' + (w.x - bb.min.x).toFixed(1) + ' / ' + (w.z - bb.min.z).toFixed(1) +
+        ' mm from the piece\'s low X / Z corner. ' + keepTxt;
+      var r = c.d / 2;
+      if (w.x + r < bb.min.x || w.x - r > bb.max.x || w.z + r < bb.min.z || w.z - r > bb.max.z) txt += ' The circle misses the piece.';
+    }
+  } else if (NSO_cropLive() && m && sh.mode === 'piece') {
+    var tm = sh.templateId != null ? state.models.find(function (q) { return q.id === sh.templateId; }) : null;
+    if (sh.picking) txt = 'Click another piece on the plate: its outline seen from above is the cutter.';
+    else if (!tm) txt = 'Press Pick piece, then click another piece on the plate.';
+    else {
+      var g = +sh.grow || 0;
+      txt = 'Outline of ' + (tm.name || 'piece ' + tm.id) + (g ? ', grown ' + (g > 0 ? '+' : '') + g.toFixed(1) + ' mm' : '');
+      var pv = sh.preview;
+      if (pv && pv.areaMm2 > 0 && !pv.pending) txt += ', ' + pv.areaMm2.toFixed(1) + ' mm² seen from above';
+      txt += '. ' + keepTxt;
+      if (pv && pv.reason) txt += ' ' + pv.reason.charAt(0).toUpperCase() + pv.reason.slice(1) + '.';
+    }
+  }
+  el.textContent = txt;
+}
+
+function NSO_cropShapeSyncUI() {
+  if (typeof document === 'undefined') return;
+  var sh = NSO_cropShapeState(), mode = sh.mode, m = getActiveModel();
+  if (!NSO_cropLive()) { sh.placing = false; sh.picking = false; }   // an armed press does not outlive the card
+  function show(id, on) { var el = document.getElementById(id); if (el) el.hidden = !on; }
+  function press(id, on) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.classList.toggle('tool-active', !!on);
+    el.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+  press('btn-crop-region-box', mode === 'box');
+  press('btn-crop-region-circle', mode === 'circle');
+  press('btn-crop-region-piece', mode === 'piece');
+  show('crop-axis-row', mode === 'box');
+  show('crop-tools', mode === 'box');
+  show('crop-shape-tools', mode !== 'box');
+  ['crop-circle-hint', 'crop-circle-row'].forEach(function (id) { show(id, mode === 'circle'); });
+  ['crop-piece-hint', 'crop-piece-row', 'crop-grow-row'].forEach(function (id) { show(id, mode === 'piece'); });
+  press('btn-crop-keep-in', sh.keep === 'inside');
+  press('btn-crop-keep-out', sh.keep === 'outside');
+  press('btn-crop-circle-place', sh.placing);
+  press('btn-crop-piece-pick', sh.picking);
+  var live = NSO_cropLive() && !!m;
+  var dEl = document.getElementById('crop-circle-d');
+  var c = (live && mode === 'circle') ? NSO_cropCircleFor(m) : null;
+  if (dEl && document.activeElement !== dEl) dEl.value = c ? c.d.toFixed(1) : '';
+  var gEl = document.getElementById('crop-piece-grow');
+  if (gEl && document.activeElement !== gEl) gEl.value = (+sh.grow || 0).toFixed(1);
+  var nameEl = document.getElementById('crop-piece-name');
+  var tm = sh.templateId != null ? state.models.find(function (q) { return q.id === sh.templateId; }) : null;
+  if (nameEl) nameEl.textContent = sh.picking ? 'click a piece…' : tm ? (tm.name || 'piece ' + tm.id) : 'no template';
+  var ready = live && !sh.busy && !sh.placing && !sh.picking &&
+    ((mode === 'circle' && !!c) || (mode === 'piece' && !!tm && sh.templateId !== m.id));
+  var btn = document.getElementById('btn-crop-shape');
+  if (btn) btn.disabled = !ready;
+  NSO_cropShapeUpdateHelper();
+  NSO_cropShapeReadout();
+}
+
+function NSO_cropSetRegion(mode) {
+  var sh = NSO_cropShapeState();
+  sh.mode = (mode === 'circle' || mode === 'piece') ? mode : 'box';
+  sh.placing = false; sh.picking = false;
+  if (sh.mode !== 'box') { var cs = NSO_cropState(); cs.lift = false; }
+  NSO_cropSyncUI();
+  if (typeof setStatus === 'function') setStatus('Crop region: ' + sh.mode.charAt(0).toUpperCase() + sh.mode.slice(1));
+}
+
+async function NSO_cropShapeSelectedModel() {
+  var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
+  if (!m) { setStatus('Open Crop and select a piece first', true); return { ok: false, reason: 'no selection' }; }
+  var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
+  if (painted > 0) {
+    setStatus('Crop stood down - ' + painted + ' painted face(s); the kernel rebuilds the whole piece. Clear paint to crop.', true);
+    return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
+  }
+  var sh = NSO_cropShapeState(), mesh = NSO_cropTargetMesh(m);
+  function refuse(reason) { setStatus('Crop refused - piece unchanged (' + reason + ')', true); return { ok: false, reason: reason }; }
+  var fr = NSO_cropPlateToRaw(m, mesh);
+  if (!fr.M) return refuse(fr.reason);
+  var now = NSO_cropShapeNow(m, mesh);
+  if (!now.shape) return refuse(now.reason);
+  var src = m.rawTris;
+  sh.busy = true;
+  NSO_cropShapeSyncUI();
+  setStatus('Crop: cutting the piece to the ' + (sh.mode === 'circle' ? 'circle' : 'outline') + '…');
+  var r;
+  try { r = await NSO_cropShapeRaw(src, { shape: now.shape, keep: sh.keep, toRaw: fr.M }); }
+  catch (err) { r = { ok: false, reason: (err && err.message) || String(err) }; }
+  finally { sh.busy = false; }
+  if (!r.ok) { NSO_cropShapeSyncUI(); return refuse(r.reason); }
+  if (m.rawTris !== src) { NSO_cropShapeSyncUI(); return refuse('the piece changed while it was being cut'); }
+  var before = NSO_cropCensus(src), after = NSO_cropCensus(r.tris);
+  r.canonBefore = before; r.canonAfter = after;
+  if (!after) {
+    NSO_cropShapeSyncUI();
+    setStatus('Crop unavailable - the mesh checker (NSO_Repair) is not loaded; piece unchanged', true);
+    return { ok: false, reason: 'no checker' };
+  }
+  if (after.open || after.nm || after.degen > before.degen) {
+    NSO_cropShapeSyncUI();
+    return refuse('checker: open ' + after.open + ', non-manifold ' + after.nm + ', degenerate ' + before.degen + '→' + after.degen);
+  }
+  // Where the kept part is now, so it stays there through the bake's recentring.
+  var placed = NSO_cropPlacedOf(m.id), idx = placed ? state.placed.indexOf(placed) : -1;
+  var pose = (placed && typeof snapshotPlacedPose === 'function') ? snapshotPlacedPose(idx) : null;
+  var anchor = [r.tris[0], r.tris[1], r.tris[2]];
+  mesh.updateMatrixWorld(true);
+  var anchorWas = NSO_cropRawToLocal(m, anchor).applyMatrix4(mesh.matrixWorld);
+  var circleWas = sh.mode === 'circle' ? NSO_cropCircleWorld(m, mesh) : null;
+  var what = sh.mode === 'circle' ? 'circle Ø' + NSO_cropCircleFor(m).d.toFixed(1) + ' mm'
+    : 'outline of ' + ((state.models.find(function (q) { return q.id === sh.templateId; }) || {}).name || 'the template') +
+      ((+sh.grow) ? ' grown ' + (+sh.grow > 0 ? '+' : '') + (+sh.grow).toFixed(1) + ' mm' : '');
+  var txt = 'Crop done - kept ' + (sh.keep === 'inside' ? 'inside' : 'outside') + ' the ' + what + '; ' +
+    r.removedMm3.toFixed(1) + ' mm³ removed, ' + r.keptMm3.toFixed(1) + ' mm³ kept, ' +
+    (r.parts > 1 ? r.parts + ' closed pieces' : 'one closed piece') + ' (open 0, non-manifold ' + after.nm + ')';
+  NSO_sculptCommitRaw(m, r.tris, 'cropReplace', txt);
+  if (placed && placed.mesh) {
+    placed.mesh.updateMatrixWorld(true);
+    var anchorNow = NSO_cropRawToLocal(m, anchor).applyMatrix4(placed.mesh.matrixWorld);
+    var dx = anchorWas.x - anchorNow.x, dz = anchorWas.z - anchorNow.z;
+    if (Math.abs(dx) > 1e-9 || Math.abs(dz) > 1e-9) applyPlacedXZ(placed, placed.x + dx, placed.z + dz);
+    var top = state.undoStack && state.undoStack[state.undoStack.length - 1];
+    if (pose && top && top.type === 'cropReplace' && top.modelId === m.id) top.prevPose = pose;
+  }
+  if (circleWas && placed && placed.mesh) NSO_cropSetCircleWorld(m, placed.mesh, circleWas);
+  NSO_cropSyncUI();
+  return r;
+}
+
+if (typeof document !== 'undefined') {
+  (function wireCropShapes() {
+    var drag = null;
+    function consume(ev) { ev.stopImmediatePropagation(); ev.preventDefault(); }
+    // The pointer on the level plane through world height y.
+    function level(y) {
+      state.raycaster.setFromCamera(state.pointer, state.camera);
+      var q = new THREE.Vector3();
+      return state.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -y), q) ? q : null;
+    }
+    function onDown(ev) {
+      if (ev.button !== 0 || !state.raycaster || !state.camera || !state.renderer) return;
+      if (ev.target !== state.renderer.domElement || !NSO_cropLive()) return;
+      var sh = NSO_cropShapeState();
+      if (sh.mode === 'box' || sh.busy) return;
+      setPointerFromEvent(ev);
+      state.raycaster.setFromCamera(state.pointer, state.camera);
+      var m = getActiveModel(), mesh = m && NSO_cropTargetMesh(m);
+      if (sh.mode === 'piece') {
+        if (!sh.picking) return;
+        var hits = state.raycaster.intersectObjects(state.modelGroup.children, true).filter(function (h) { return h.faceIndex != null; });
+        if (typeof nsoHelpers !== 'undefined' && nsoHelpers.pieceHits) hits = nsoHelpers.pieceHits(hits);
+        if (!hits.length) return;                       // empty plate: the orbit has it
+        consume(ev);
+        var obj = hits[0].object;
+        while (obj && obj.userData.placedIndex == null && obj.parent) obj = obj.parent;
+        var placed = obj && typeof obj.userData.placedIndex === 'number' ? state.placed[obj.userData.placedIndex] : null;
+        if (!placed) return;
+        if (m && placed.sourceId === m.id) {
+          setStatus('That is the piece being cropped - click another piece on the plate', true);
+          return;
+        }
+        sh.templateId = placed.sourceId; sh.picking = false;
+        var tm = state.models.find(function (q) { return q.id === placed.sourceId; });
+        setStatus('Crop: the outline of ' + ((tm && tm.name) || 'that piece') + ' is the cutter');
+        NSO_cropShapeSyncUI();
+        return;
+      }
+      if (!m || !mesh) return;
+      if (sh.placing) {
+        consume(ev);
+        var hit = state.raycaster.intersectObject(mesh, false)[0];
+        if (!hit) { setStatus('Press on the selected piece to put the circle\'s centre there', true); return; }
+        NSO_cropSetCircleWorld(m, mesh, hit.point);
+        drag = { kind: 'size', y: hit.point.y, centre: hit.point.clone() };
+        if (state.controls) state.controls.enabled = false;
+        NSO_cropShapeSyncUI();
+        return;
+      }
+      if (!state.cropShapeHelper) return;
+      state.cropShapeHelper.updateMatrixWorld(true);
+      var hh = state.raycaster.intersectObject(state.cropShapeHelper, true)
+        .filter(function (h) { return h.object.userData.cropShapeHandle; });
+      if (!hh.length) return;
+      var c = NSO_cropCircleFor(m), w = NSO_cropCircleWorld(m, mesh), p = hh[0].point;
+      var r = c.d / 2, dist = Math.hypot(p.x - w.x, p.z - w.z);
+      var grip = Math.max(0.8, Math.min(3, r * 0.2));
+      drag = { kind: dist >= r - grip ? 'rim' : 'body', y: p.y, start: p.clone(), centre: w.clone() };
+      if (state.controls) state.controls.enabled = false;
+      consume(ev);
+    }
+    function onMove(ev) {
+      if (!drag) return;
+      var m = getActiveModel(), mesh = m && NSO_cropTargetMesh(m);
+      if (!mesh) { drag = null; return; }
+      setPointerFromEvent(ev);
+      var q = level(drag.y);
+      if (!q) return;
+      var c = NSO_cropCircleFor(m);
+      if (drag.kind === 'body') {
+        NSO_cropSetCircleWorld(m, mesh, new THREE.Vector3(drag.centre.x + q.x - drag.start.x, drag.centre.y, drag.centre.z + q.z - drag.start.z));
+      } else {
+        var d = 2 * Math.hypot(q.x - drag.centre.x, q.z - drag.centre.z);
+        if (drag.kind === 'size' && d < 0.5) return;    // a click without a drag keeps the Ø it had
+        c.d = Math.max(0.2, Math.round(d * 10) / 10);
+      }
+      NSO_cropShapeSyncUI();
+    }
+    function onUp() {
+      if (!drag) return;
+      var sh = NSO_cropShapeState();
+      if (drag.kind === 'size') sh.placing = false;
+      drag = null;
+      if (state.controls) state.controls.enabled = true;
+      NSO_cropShapeSyncUI();
+    }
+    function wire() {
+      var btn = document.getElementById('btn-crop-shape');
+      if (!btn || btn.dataset.nsoWired === '1') return;
+      btn.dataset.nsoWired = '1';
+      btn.addEventListener('click', function () {
+        NSO_cropShapeSelectedModel().catch(function (err) {
+          console.error('[crop shape]', err);
+          NSO_cropShapeState().busy = false;
+          setStatus('Crop failed - piece unchanged (' + ((err && err.message) || err) + ')', true);
+          NSO_cropShapeSyncUI();
+        });
+      });
+      function on(id, fn) { var el = document.getElementById(id); if (el) el.addEventListener('click', fn); }
+      on('btn-crop-region-box', function () { NSO_cropSetRegion('box'); });
+      on('btn-crop-region-circle', function () { NSO_cropSetRegion('circle'); });
+      on('btn-crop-region-piece', function () { NSO_cropSetRegion('piece'); });
+      on('btn-crop-keep-in', function () { NSO_cropShapeState().keep = 'inside'; NSO_cropShapeSyncUI(); });
+      on('btn-crop-keep-out', function () { NSO_cropShapeState().keep = 'outside'; NSO_cropShapeSyncUI(); });
+      on('btn-crop-circle-place', function () {
+        var sh = NSO_cropShapeState();
+        sh.placing = !sh.placing;
+        NSO_cropShapeSyncUI();
+      });
+      on('btn-crop-piece-pick', function () {
+        var sh = NSO_cropShapeState();
+        sh.picking = !sh.picking;
+        NSO_cropShapeSyncUI();
+      });
+      var dEl = document.getElementById('crop-circle-d');
+      if (dEl) dEl.addEventListener('change', function () { NSO_cropSetCircleD(parseFloat(dEl.value)); });
+      var gEl = document.getElementById('crop-piece-grow');
+      if (gEl) gEl.addEventListener('change', function () {
+        var v = parseFloat(gEl.value);
+        NSO_cropShapeState().grow = isFinite(v) ? Math.round(v * 100) / 100 : 0;
+        NSO_cropShapeSyncUI();
+      });
+      // Window capture, ahead of the box's and the ghost's handlers and of
+      // select / move / orbit; each press is only taken when Circle or Piece
+      // has a use for it.
+      window.addEventListener('pointerdown', onDown, true);
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+      // Follow the Crop row: same piece, same lifetime.
+      var baseSync = NSO_cropSyncUI;
+      NSO_cropSyncUI = function () { var r = baseSync.apply(this, arguments); NSO_cropShapeSyncUI(); return r; };
+      NSO_cropShapeSyncUI();
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
     else wire();
