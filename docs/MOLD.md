@@ -5,11 +5,9 @@
 `<piece> mold A` and `<piece> mold B`: print them, close them, pour silicone,
 pull the cast out. The piece is read and never written.
 
-![the open pair on the plate beside the original](img/mold-open-pair.png)
-
-*A Stock sphere Ø30 and its mold, both halves open, parting face up: half A at
-the back (four cones standing out of its face), half B in front (the four
-sockets), each with its hemisphere. Taken by `npm run mold:drive`.*
+`npm run mold:drive` photographs the open pair - a Stock sphere Ø30 and its mold, both
+halves open, parting face up beside the original - into the git-ignored
+`tools/mold-out/mold-open-pair.png`; nothing is committed.
 
 Files: `nso_mold.js` (the engine: THREE-free, node-tested), `app-mold.js` (the
 card, the helpers, the click, the Generate / Undo), `tools/nso_mold_test.js`
