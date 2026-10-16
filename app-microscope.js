@@ -3417,6 +3417,101 @@ var NSO_MICROSCOPE = (function () {
     }
   }
 
+  // ===========================================================================
+  // Shell: the button column and its cards
+  //
+  // Look and feel only. A column button opens its card (the same rows the
+  // sidebar had, now beside the column), one at a time; Escape shuts it. The
+  // engine still shows and hides those rows by id, exactly as before - the
+  // only thing added is that a button whose rows are all hidden is disabled
+  // (nothing to open), a card whose button is disabled shuts, and the Export
+  // card's two groups and the Slice report follow the rows they report on.
+  // ===========================================================================
+
+  // [button, card, the rows the engine shows for it - null: always available]
+  var SHELL_CARDS = [
+    ['ms-nav-select', 'ms-card-select', null],
+    ['ms-nav-line', 'ms-card-line', ['ms-line-controls']],
+    ['ms-nav-layer', 'ms-card-layer', ['ms-layer-row']],
+    ['ms-nav-view', 'ms-card-view', null],
+    ['ms-nav-render', 'ms-card-render', ['ms-render-row']],
+    ['ms-nav-overhangs', 'ms-card-overhangs', ['ms-support-row']],
+    ['ms-nav-crop', 'ms-card-crop', ['ms-crop-row']],
+    ['ms-nav-slice', 'ms-card-slice', ['ms-slice-row']],
+    ['ms-nav-export', 'ms-card-export', ['ms-export-row', 'ms-export-solid-row', 'ms-slice-export-row']]
+  ];
+  var shellOpen = null;      // the card id that is open, or null
+
+  function rowShown(id) {
+    var el = $(id);
+    return !!el && el.style.display !== 'none';
+  }
+
+  function shellCardSet(card, on) {
+    var el = $(card);
+    if (el) el.classList.toggle('is-open', on);
+    SHELL_CARDS.forEach(function (c) {
+      if (c[1] !== card) return;
+      var btn = $(c[0]);
+      if (!btn) return;
+      btn.classList.toggle('is-on', on);
+      btn.setAttribute('aria-expanded', String(on));
+    });
+  }
+
+  /** Shut the open card. True if there was one (Escape's cue to stop there). */
+  function shellCardClose() {
+    if (!shellOpen) return false;
+    shellCardSet(shellOpen, false);
+    shellOpen = null;
+    return true;
+  }
+
+  /** Open a card, shutting the one that was open; its own button again shuts it. */
+  function shellCardToggle(card) {
+    var was = shellOpen;
+    shellCardClose();
+    if (was !== card) { shellCardSet(card, true); shellOpen = card; }
+  }
+
+  function syncShell() {
+    SHELL_CARDS.forEach(function (c) {
+      var btn = $(c[0]);
+      if (!btn || !c[2]) return;
+      var avail = c[2].some(rowShown);
+      btn.disabled = !avail;
+      if (!avail && shellOpen === c[1]) shellCardClose();
+    });
+    // A labelled group of rows shows while any of its rows does.
+    var groups = document.querySelectorAll('#ms-card-export .ms-xgroup');
+    Array.prototype.forEach.call(groups, function (g) {
+      var any = Array.prototype.some.call(g.children, function (k) {
+        return !k.classList.contains('ms-section-title') && k.style.display !== 'none';
+      });
+      g.style.display = any ? '' : 'none';
+    });
+    // The Slice report is a readout, so it lives in the dock; it shows while
+    // the Slice settings do (a mesh or a slice made here is open).
+    var rd = $('ms-slice-readout');
+    if (rd) rd.style.display = rowShown('ms-slice-row') ? '' : 'none';
+  }
+
+  function wireShell() {
+    SHELL_CARDS.forEach(function (c) {
+      bind(c[0], 'click', function () { shellCardToggle(c[1]); });
+    });
+    if (typeof MutationObserver === 'undefined') { syncShell(); return; }
+    var watch = new MutationObserver(syncShell);
+    var seen = {};
+    SHELL_CARDS.forEach(function (c) {
+      (c[2] || []).forEach(function (id) {
+        var el = $(id);
+        if (el && !seen[id]) { seen[id] = 1; watch.observe(el, { attributes: true, attributeFilter: ['style'] }); }
+      });
+    });
+    syncShell();
+  }
+
   function mount() {
     // X-ray's pattern: one rail button, a toggle, and it acts on what is
     // ALREADY on the plate rather than sending you off to fetch something
@@ -3445,6 +3540,7 @@ var NSO_MICROSCOPE = (function () {
     });
     bind('ms-btn-isolate', 'click', function () { isolate(); });
     bind('ms-btn-isolate-line', 'click', function () { isolate(); });
+    wireShell();
     bind('ms-btn-back', 'click', back);
     bind('ms-mode-line', 'click', function () { setMode('line'); });
     bind('ms-line-prev', 'click', function () { stepLine(-1); });
@@ -3480,7 +3576,8 @@ var NSO_MICROSCOPE = (function () {
     if (panel && panel.dataset.wired !== '1') {
       panel.dataset.wired = '1';
       panel.addEventListener('keydown', function (ev) {
-        if (ev.key === 'Escape') { close(); ev.preventDefault(); return; }
+        // An open card shuts first; Escape with none open closes G-scope, as before.
+        if (ev.key === 'Escape') { if (!shellCardClose()) close(); ev.preventDefault(); return; }
         // Left / Right step the picked line, the way the old Toolpath card's
         // arrows did - unless a text field or the slider has the keys.
         var t = ev.target;
