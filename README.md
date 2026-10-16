@@ -136,6 +136,14 @@ Smart build-plate packing for 3D printing.
   - A piece flagged **Non-solid** still gets its open edges drawn - you still
     want to see where it is open - they just stop counting against it. See
     `docs/DEFECT-OVERLAY.md`
+  - Every finding on the **Findings** card names the fix that fits it, on its
+    own button, and runs it on that finding only: **CAP** a flat hole, **PATCH**
+    a curved one (a surface that continues the curvature round it, welded at the
+    rim), **BRIDGE** two openings or two faces facing each other across a gap,
+    **REPAIR** doubled edges, **THICKEN OUT** a thin wall with the mm filled in.
+    The card re-scans after each, **Fix all** runs them in order, each is one
+    Undo. **Add > Patch** does the same by hovering and clicking a hole. See
+    `docs/PATCH.md`.
 - **Carve** is a local carving tool - a handheld rotary tool, not the Cutter's
   full-plane Split. Pick a blade profile, arm it, then click a face, an **edge**
   or a **corner** of a piece: the blade is aimed along the outward bisector of

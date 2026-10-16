@@ -3367,6 +3367,32 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 }
 .findings-note[hidden] { display: none; }
 .findings-fix { align-self: flex-start; }
+/* items: one finding, its words, its one button (nso-findings.js rows()) */
+.findings-items { display: flex; flex-direction: column; gap: 4px; }
+.findings-item { display: flex; align-items: center; gap: 6px; }
+.findings-num {
+  flex: none; min-width: 16px; padding: 0 4px; border-radius: 9px; text-align: center;
+  font-size: 11px; font-weight: 700; color: #fff; background: #ff2d2d;
+}
+.findings-row.findings-nonManifold .findings-num { background: #ff8c1a; }
+.findings-row.findings-thin .findings-num { background: #c084fc; }
+.findings-row.findings-gap .findings-num { background: #22d3ee; color: #0f172a; }
+.findings-row.findings-gap { border-left-color: #22d3ee; }
+.findings-item-text { flex: 1; min-width: 0; color: #e8eef6; }
+.findings-item-text.is-link { cursor: pointer; }
+.findings-item-text.is-link:hover { text-decoration: underline; }
+.findings-item .findings-fix { flex: none; font-weight: 700; letter-spacing: 0.03em; }
+.findings-actions { display: flex; justify-content: flex-end; }
+.findings-actions[hidden] { display: none; }
+.findings-done { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.findings-done[hidden] { display: none; }
+.findings-done-row {
+  padding: 5px 8px; border-radius: 6px; border: 1px solid rgba(34, 197, 94, 0.5);
+  background: rgba(34, 197, 94, 0.1); color: #bbf7d0;
+}
+.findings-done-row.is-notfixed {
+  border-color: rgba(245, 158, 11, 0.55); background: rgba(245, 158, 11, 0.12); color: #fde68a;
+}
 /* ===== UI shell: glass slabs round the top-left corner ====================
    No sidebar. One row along the top (Import, Measure .. Lock plate, then
    Undo, Remove and Export at the right, Clear plate under Remove and Optimize

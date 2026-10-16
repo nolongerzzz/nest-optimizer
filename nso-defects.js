@@ -431,6 +431,19 @@
     };
     report.fails = verdictFails(report, nonSolid);
     report.verdict = report.fails.length ? 'FAIL' : 'PASS';
+
+    /* What would fix each open loop (CAP, PATCH or BRIDGE) and the advisory
+       gaps (two end faces facing each other: a severed tube). Both come from
+       nso_patch.js, read from the geometry of the loop itself. They add
+       information and change no count and no verdict; without nso_patch.js
+       loaded they are empty and the card falls back to its old single button. */
+    report.repair = null;
+    report.gaps = [];
+    var NP = global.NSO_Patch;
+    if (NP && opts.plan !== false) {
+      try { if (report.openEdges) report.repair = NP.plan(rawTris); } catch (e) { report.repair = null; }
+      try { report.gaps = NP.gaps(rawTris); } catch (e2) { report.gaps = []; }
+    }
     return report;
   }
 
