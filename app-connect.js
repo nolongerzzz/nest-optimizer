@@ -1,0 +1,540 @@
+// ===================== Connect: the card =====================
+// The geometry is nso_connect.js (headless, tools/nso_connect_test.js); this
+// file is the card on it, in its own drop-down in the column between Crop and
+// Join. docs/CONNECT.md.
+//
+// Bridge (app-bridge.js) is the quick gap-fill: the two picks decide the shape.
+// Connect is the builder: the two anchors are only WHERE, the card decides WHAT
+// runs between them - String, Ribbon, Tube or Tapered, welded into the pieces
+// or kept as a piece of its own.
+//
+// TWO CLICKS, NOT A DRAG. Open Connect, then:
+//   - HOVER: whatever is under the pointer that Connect could take lights up -
+//     a face, an edge (a bar along its whole straight edge) or a point (a dot) -
+//     and the card names it. This is Bridge's own pick and overlay
+//     (NSO_Bridge.pick; NSO_bridgeTargetAt / NSO_bridgeTargetObject).
+//   - CLICK a piece: that is anchor A, and it stays marked. Nothing is held
+//     down and nothing captures the pointer: orbit, pan and zoom as much as you
+//     like - a line from A follows the pointer the whole time - then
+//   - CLICK another place: anchor B. The connector is built at once and drawn as
+//     a GHOST (amber, Bridge's), from the very soup Set would commit. A refusal
+//     draws nothing and says why, in red. Changing the shape or any field
+//     redraws the ghost at once.
+//   - Clicking an anchor again clears it. A click on nothing clears the picks (an
+//     orbit drag does not: it has to stay put to count as a click) and so does
+//     Escape. With both set, a click on a new place replaces B.
+//   - SET commits it. Weld into A and B: the pieces leave the plate and one new
+//     piece takes their place (or the one, when both anchors are on it). Keep
+//     separate: the connector is added as a piece of its own and the pieces are
+//     not touched. One Undo puts it all back. CANCEL drops the picks; pressed
+//     with none, it closes the card. The card stays open after a Set.
+//
+// A press that starts ON a piece belongs to Connect while the card is open (it
+// would otherwise select the piece and start a move drag under the click); a
+// press that starts anywhere else - the plate, the empty view - is never
+// touched, so every orbit, pan and zoom works as it always does.
+//
+// Both pieces are read in the plate's world frame, Z up (meshToWorldSoup, then
+// (x, -z, y)), so their poses are in the numbers and the result needs none.
+//
+// PAINT SCOPE: WHOLE-PIECE, on every piece a WELD joins; none for Keep separate.
+// Per the scoping rule in docs/HANDOFF.md: a weld goes through the boolean
+// kernel, which rebuilds every face of the pieces it joins, so no face on
+// either can be promised untouched and the new piece is a new model. Any paint
+// on a piece to be welded stands it down, naming the count: nsoMaskCount(m) is
+// the whole test. Keep separate adds a piece and changes none, so paint cannot
+// be touched by it.
+
+var CONNECT_GHOST_COLOR = 0xf59e0b;      // Bridge's ghost, Bend's
+var CONNECT_HOVER_COLOR = 0x22d3ee;
+var CONNECT_PICK_COLOR = 0xffc83d;
+var CONNECT_RENDER_ORDER = 21;
+var CONNECT_CLICK_PX = 5;                // a press that moves more than this is an orbit, not a click
+var CONNECT_SAME_MM = 1.0;               // a click this close to a point anchor is that anchor
+var NSO_CONNECT_HINT = 'Click anchor A on a piece, orbit as you like, then click anchor B.';
+
+function NSO_connectUI() {
+  if (typeof state === 'undefined') return {};
+  if (!state.connect) {
+    state.connect = { open: false, hover: null, a: null, b: null, plan: null, overlay: null, ghost: null, line: null,
+                      busy: false, raf: 0, press: null, soups: {}, timer: 0 };
+  }
+  return state.connect;
+}
+function NSO_connectEl(id) { return (typeof document !== 'undefined') ? document.getElementById(id) : null; }
+
+/* ----------------------------------------------------------- the pieces */
+
+// World soup, Z up - cached until the piece moves or changes. Bridge's own
+// pose key says when.
+function NSO_connectSoupFor(p) {
+  var C = NSO_connectUI(), key = NSO_bridgePoseKey(p), c = C.soups[p.sourceId];
+  if (c && c.key === key) return c.soup;
+  var s = meshToWorldSoup(p.mesh), up = new Float32Array(s.length);
+  for (var i = 0; i < s.length; i += 3) { up[i] = s[i]; up[i + 1] = -s[i + 2]; up[i + 2] = s[i + 1]; }
+  C.soups[p.sourceId] = { key: key, soup: up };
+  return up;
+}
+
+function NSO_connectReady() {
+  return typeof NSO_Bridge !== 'undefined' && typeof NSO_Connect !== 'undefined' && typeof NSO_bridgeTargetAt === 'function' &&
+         typeof NSO_bridgeTargetObject === 'function';
+}
+
+// The anchor as the engine will use it: where the connector really starts.
+function NSO_connectAnchorPoint(sel) {
+  var t = sel.target;
+  if (t.kind === 'face') return t.centroid;
+  if (t.kind === 'edge') return [(t.a[0] + t.b[0]) / 2, (t.a[1] + t.b[1]) / 2, (t.a[2] + t.b[2]) / 2];
+  return t.point;
+}
+
+function NSO_connectSame(x, y) {
+  if (!x || !y || x.sourceId !== y.sourceId || x.target.kind !== y.target.kind) return false;
+  var a = x.target, b = y.target;
+  if (a.kind === 'face') return !!(a.face.inR && a.face.inR[b.tri]) || a.tri === b.tri;
+  if (a.kind === 'edge') {
+    var d = function (p, q) { return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]); };
+    return (d(a.a, b.a) + d(a.b, b.b) < 1e-6) || (d(a.a, b.b) + d(a.b, b.a) < 1e-6);
+  }
+  return Math.hypot(a.point[0] - b.point[0], a.point[1] - b.point[1], a.point[2] - b.point[2]) < CONNECT_SAME_MM;
+}
+
+/* ---------------------------------------------------------------- drawing */
+
+function NSO_connectDrawPicks() {
+  var C = NSO_connectUI();
+  NSO_bridgeDispose(C.overlay); C.overlay = null;
+  if (typeof THREE === 'undefined' || !state.scene) return;
+  var g = new THREE.Group();
+  g.name = 'connectOverlay';
+  if (C.hover && !NSO_connectSame(C.hover, C.a) && !NSO_connectSame(C.hover, C.b)) {
+    var h = NSO_bridgeTargetObject(C.hover, CONNECT_HOVER_COLOR); h.userData.role = 'hover'; g.add(h);
+  }
+  [C.a, C.b].forEach(function (s, i) {
+    if (!s) return;
+    var o = NSO_bridgeTargetObject(s, CONNECT_PICK_COLOR); o.userData.role = i ? 'b' : 'a';
+    // Where the connector actually starts (a face's centroid, an edge's midpoint).
+    var m = new THREE.Mesh(new THREE.SphereGeometry(0.9, 12, 8), new THREE.MeshBasicMaterial({
+      color: CONNECT_PICK_COLOR, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false }));
+    m.position.copy(NSO_bridgeUpToDisplay(NSO_connectAnchorPoint(s)));
+    o.add(NSO_bridgeOverlay(m, CONNECT_RENDER_ORDER + 1));
+    g.add(o);
+  });
+  nsoHelpers.attach(state.scene, g, 'connect');
+  C.overlay = g;
+}
+
+function NSO_connectDrawLine(from, to) {
+  var C = NSO_connectUI();
+  NSO_bridgeDispose(C.line); C.line = null;
+  if (!from || !to || typeof THREE === 'undefined' || !state.scene) return;
+  var geo = new THREE.BufferGeometry().setFromPoints([from, to]);
+  C.line = NSO_bridgeOverlay(new THREE.Line(geo, new THREE.LineBasicMaterial({
+    color: CONNECT_PICK_COLOR, transparent: true, depthTest: false, depthWrite: false })), CONNECT_RENDER_ORDER + 2);
+  C.line.name = 'connectLine';
+  nsoHelpers.attach(state.scene, C.line, 'connect');
+}
+
+function NSO_connectSetGhost(soupUp) {
+  var C = NSO_connectUI();
+  NSO_bridgeDispose(C.ghost); C.ghost = null;
+  if (!soupUp || typeof THREE === 'undefined' || !state.scene) return;
+  var arr = new Float32Array(soupUp.length);
+  for (var i = 0; i < soupUp.length; i += 3) { arr[i] = soupUp[i]; arr[i + 1] = soupUp[i + 2]; arr[i + 2] = -soupUp[i + 1]; }
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+  geo.computeVertexNormals();
+  var m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+    color: CONNECT_GHOST_COLOR, transparent: true, opacity: 0.75, metalness: 0.05, roughness: 0.5, side: THREE.DoubleSide,
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }));
+  m.name = 'connectGhost';
+  m.userData.connectGhost = true; m.userData.skipXray = true;
+  nsoHelpers.attach(state.scene, m, 'connect');
+  C.ghost = m;
+}
+
+/* --------------------------------------------------------------- the card */
+
+function NSO_connectReadout(text, bad) {
+  var el = NSO_connectEl('connect-readout');
+  if (el) { el.textContent = text; el.classList.toggle('is-bad', !!bad); }
+}
+function NSO_connectAnchorText() {
+  var C = NSO_connectUI();
+  [['a', C.a], ['b', C.b]].forEach(function (x) {
+    var el = NSO_connectEl('connect-' + x[0] + '-text');
+    if (el) el.textContent = 'Anchor ' + x[0].toUpperCase() + ': ' + (x[1] ? x[1].target.text : '— click a piece');
+  });
+}
+
+function NSO_connectShape() { var el = NSO_connectEl('sel-connect-shape'); return el && el.value ? el.value : 'string'; }
+function NSO_connectResult() {
+  var els = typeof document !== 'undefined' ? document.getElementsByName('connect-result') : [];
+  for (var i = 0; i < els.length; i++) if (els[i].checked) return els[i].value;
+  return 'weld';
+}
+function NSO_connectOpts() {
+  function num(id) { var el = NSO_connectEl(id); return el && el.value !== '' && isFinite(+el.value) ? +el.value : null; }
+  var o = { shape: NSO_connectShape(), result: NSO_connectResult() };
+  [['inp-connect-dia', 'diameterMm'], ['inp-connect-width', 'widthMm'], ['inp-connect-thick', 'thicknessMm'],
+   ['inp-connect-tube-dia', 'tubeDiaMm'], ['inp-connect-wall', 'wallMm'], ['inp-connect-dia-a', 'diaAMm'],
+   ['inp-connect-dia-b', 'diaBMm']].forEach(function (f) { var v = num(f[0]); if (v != null) o[f[1]] = v; });
+  return o;
+}
+function NSO_connectSyncRows() {
+  var C = NSO_connectUI(), shape = NSO_connectShape();
+  [['connect-string-rows', 'string'], ['connect-ribbon-rows', 'ribbon'], ['connect-tube-rows', 'tube'], ['connect-tapered-rows', 'tapered']].forEach(function (r) {
+    var el = NSO_connectEl(r[0]); if (el) el.hidden = shape !== r[1];
+  });
+  var go = NSO_connectEl('btn-connect-go');
+  if (go) go.disabled = !(C.plan && C.plan.ok) || C.busy;
+}
+
+// The picks -> a plan, a ghost and the readout. Refusals are words.
+function NSO_connectPreview() {
+  var C = NSO_connectUI();
+  NSO_connectSetGhost(null);
+  NSO_connectAnchorText();
+  if (!C.a || !C.b) { C.plan = null; NSO_connectSyncRows(); return null; }
+  var ids = [C.a.sourceId], pieces = [NSO_connectSoupFor(C.a.placed)];
+  if (C.b.sourceId !== C.a.sourceId) { ids.push(C.b.sourceId); pieces.push(NSO_connectSoupFor(C.b.placed)); }
+  var o = NSO_connectOpts();
+  o.others = (state.placed || []).filter(function (q) { return q && q.mesh && q.mesh.visible !== false && ids.indexOf(q.sourceId) < 0; })
+    .map(function (q) { var m = NSO_bridgeModel(q.sourceId); return { soup: NSO_connectSoupFor(q), name: m ? m.name : null }; });
+  var p;
+  try {
+    p = NSO_Connect.plan(pieces, { piece: 0, target: C.a.target }, { piece: ids.indexOf(C.b.sourceId), target: C.b.target }, o);
+  } catch (err) { p = { ok: false, reason: (err && err.message) || String(err) }; }
+  p.ids = ids;
+  p.keys = [NSO_bridgePoseKey(C.a.placed), NSO_bridgePoseKey(C.b.placed)];
+  C.plan = p;
+  if (p.ok) {
+    NSO_connectSetGhost(p.web);
+    NSO_connectReadout(p.text + ' · Set ' + (p.result === 'weld' ? 'welds it' : 'adds it'), false);
+  } else {
+    NSO_connectReadout('Connect: ' + p.reason, true);
+  }
+  NSO_connectSyncRows();
+  return p;
+}
+
+function NSO_connectClearPicks() {
+  var C = NSO_connectUI();
+  C.a = null; C.b = null; C.plan = null; C.press = null;
+  NSO_connectSetGhost(null); NSO_connectDrawLine(null, null); NSO_connectDrawPicks();
+  NSO_connectAnchorText(); NSO_connectSyncRows();
+}
+
+function NSO_connectOpen() {
+  var C = NSO_connectUI(), panel = NSO_connectEl('connect-panel'), btn = NSO_connectEl('btn-connect');
+  C.open = true; C.soups = {};
+  if (panel) panel.hidden = false;
+  if (btn) { btn.setAttribute('aria-expanded', 'true'); btn.classList.add('is-on'); }
+  NSO_connectClearPicks();
+  NSO_connectReadout(NSO_connectReady() ? NSO_CONNECT_HINT : 'Connect needs Bridge\'s pick (nso_bridge.js, app-bridge.js) and nso_connect.js loaded.', !NSO_connectReady());
+  NSO_connectTick();
+}
+
+function NSO_connectClose() {
+  var C = NSO_connectUI(), panel = NSO_connectEl('connect-panel'), btn = NSO_connectEl('btn-connect');
+  C.open = false; C.hover = null; C.soups = {};
+  if (panel) panel.hidden = true;
+  if (btn) { btn.setAttribute('aria-expanded', 'false'); btn.classList.remove('is-on'); }
+  NSO_connectClearPicks();
+  NSO_bridgeDispose(C.overlay); C.overlay = null;
+  if (C.raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(C.raf);
+  C.raf = 0;
+}
+
+// Connect's session, for the helper registry (nso-helpers.js). An Undo under an
+// open card drops the picks: the connector was planned on pieces as they were.
+if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('connect', {
+  live: function () { return !!NSO_connectUI().open; },
+  close: NSO_connectClose,
+  clear: function () {
+    var C = NSO_connectUI();
+    [C.overlay, C.line, C.ghost].forEach(NSO_bridgeDispose);
+    C.overlay = C.line = C.ghost = null;
+  },
+  refresh: function () { var C = NSO_connectUI(); C.soups = {}; NSO_connectClearPicks(); }
+});
+
+// Cancel: drop the picks; with none, close the card.
+function NSO_connectCancel() {
+  var C = NSO_connectUI();
+  if (C.a || C.b || C.plan) { NSO_connectClearPicks(); NSO_connectReadout(NSO_CONNECT_HINT, false); }
+  else NSO_connectClose();
+}
+
+// Per frame while open: the card goes when its drop-down shuts (one panel at a
+// time), and the picks go when a picked piece moved, changed or left. The
+// camera is not a piece: orbiting never disturbs a pick.
+function NSO_connectTick() {
+  var C = NSO_connectUI();
+  if (!C.open) return;
+  var panel = NSO_connectEl('connect-panel');
+  var menu = panel && panel.closest ? panel.closest('details') : null;
+  if (menu && !menu.open) { NSO_connectClose(); return; }
+  if (!C.busy && (C.a || C.b)) {
+    var stale = [C.a, C.b].some(function (s) {
+      if (!s) return false;
+      var p = NSO_bridgePlacedBySource(s.sourceId);
+      return !p || NSO_bridgePoseKey(p) !== s.cache.key;
+    });
+    if (stale) { NSO_connectClearPicks(); NSO_connectReadout('The pieces moved - pick again. ' + NSO_CONNECT_HINT, false); }
+  }
+  C.raf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame(NSO_connectTick) : 0;
+}
+
+/* ------------------------------------------------------------------ Set */
+
+function NSO_connectSay(text, bad) { if (typeof setStatus === 'function') setStatus(text, bad); }
+
+function NSO_connectSet() {
+  var C = NSO_connectUI(), p = C.plan;
+  if (!p || !p.ok) return Promise.resolve({ ok: false, reason: p ? p.reason : 'nothing to connect - pick two anchors' });
+  if (C.busy) return Promise.resolve({ ok: false, reason: 'busy' });
+  var weld = p.result === 'weld';
+  var models = p.ids.map(NSO_bridgeModel), placed = p.ids.map(NSO_bridgePlacedBySource);
+  if (models.some(function (m) { return !m; }) || placed.some(function (q) { return !q; })) {
+    NSO_connectClearPicks();
+    return Promise.resolve({ ok: false, reason: 'a picked piece is no longer on the plate' });
+  }
+  var want = p.ids.length === 2 ? p.keys : [p.keys[0]];
+  if (placed.some(function (q, i) { return NSO_bridgePoseKey(q) !== want[i]; })) {
+    NSO_connectClearPicks();
+    NSO_connectReadout('The pieces moved - pick again.', true);
+    return Promise.resolve({ ok: false, reason: 'the pieces moved since they were picked' });
+  }
+  if (weld) {
+    var painted = models.reduce(function (s, m) { return s + ((typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0); }, 0);
+    if (painted > 0) {
+      var why = 'Connect stood down - ' + painted + ' painted face(s); a weld rebuilds the pieces it joins into a new one. Clear paint to weld, or Keep separate.';
+      NSO_connectSay(why, true); NSO_connectReadout(why, true);
+      return Promise.resolve({ ok: false, reason: 'painted faces: ' + painted, painted: painted });
+    }
+  }
+  C.busy = true; NSO_connectSyncRows();
+  if (weld) NSO_connectSay('Connecting (loading CSG kernel)...');
+  var unionFn = (typeof NSO_unionSoups === 'function') ? NSO_unionSoups : null;
+  return NSO_Connect.weld(p, { union: unionFn }).then(function (r) {
+    C.busy = false;
+    if (!r.ok) {
+      NSO_connectSay('Connect refused - pieces unchanged (' + r.reason + ')', true);
+      NSO_connectReadout('Connect: ' + r.reason, true);
+      NSO_connectSyncRows();
+      return r;
+    }
+    var c = NSO_connectCommit(r.soup, weld ? models : [], p.shape);
+    if (!c.ok) {
+      NSO_connectSay('Connect failed - pieces unchanged (' + c.reason + ')', true);
+      NSO_connectReadout('Connect: ' + c.reason, true);
+      NSO_connectSyncRows();
+      return c;
+    }
+    var msg = weld
+      ? 'Connect done - ' + p.text + '; ' + (models.length === 2 ? 'two pieces are one' : 'the piece is closed on itself') + ', ' + (r.soup.length / 9) +
+        ' faces. One Undo puts ' + (models.length === 2 ? 'both back.' : 'it back.')
+      : 'Connect done - ' + p.text + '; ' + (r.soup.length / 9) + ' faces. One Undo takes it off the plate.';
+    NSO_connectSay(msg);
+    NSO_connectClearPicks();
+    NSO_connectReadout('Connected. ' + NSO_CONNECT_HINT, false);
+    r.newId = c.id;
+    return r;
+  }).catch(function (err) {
+    C.busy = false; NSO_connectSyncRows();
+    console.error('[connect]', err);
+    NSO_connectSay('Connect failed - pieces unchanged (' + ((err && err.message) || err) + ')', true);
+    return { ok: false, reason: (err && err.message) || String(err) };
+  });
+}
+
+/* Put the result on the plate. `models` are the inputs a weld consumes (none
+   for Keep separate); it is ONE undo step either way (supportSwap: the new
+   piece off, every input back exactly as it was - model, placed record, mesh,
+   pose). */
+function NSO_connectCommit(soupUp, models, shape) {
+  var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (var i = 0; i < soupUp.length; i++) { var k = i % 3; if (soupUp[i] < lo[k]) lo[k] = soupUp[i]; if (soupUp[i] > hi[k]) hi[k] = soupUp[i]; }
+  var drop = new Set(models.map(function (m) { return m.id; })), removed = [];
+  state.placed.forEach(function (q, idx) { if (q && drop.has(q.sourceId)) removed.push({ placed: q, placedIndex: idx }); });
+  removed.forEach(function (r) { r.model = NSO_bridgeModel(r.placed.sourceId); r.modelIndex = state.models.indexOf(r.model); });
+  function putBack() {
+    removed.slice().sort(function (x, y) { return x.modelIndex - y.modelIndex; }).forEach(function (r) {
+      if (state.models.indexOf(r.model) < 0) state.models.splice(Math.min(r.modelIndex, state.models.length), 0, r.model);
+    });
+    removed.slice().sort(function (x, y) { return x.placedIndex - y.placedIndex; }).forEach(function (r) {
+      if (state.placed.indexOf(r.placed) < 0) state.placed.splice(Math.min(r.placedIndex, state.placed.length), 0, r.placed);
+      if (r.placed.mesh && state.modelGroup && !r.placed.mesh.parent) state.modelGroup.add(r.placed.mesh);
+    });
+    state.placed.forEach(function (q, j) { if (q.mesh) q.mesh.userData.placedIndex = j; });
+  }
+  if (drop.size) {
+    state.placed = state.placed.filter(function (q) { return !(q && drop.has(q.sourceId)); });
+    state.models = state.models.filter(function (m) { return !drop.has(m.id); });
+    removed.forEach(function (r) { if (r.placed.mesh && r.placed.mesh.parent) r.placed.mesh.parent.remove(r.placed.mesh); });
+    state.placed.forEach(function (q, j) { if (q.mesh) q.mesh.userData.placedIndex = j; });
+  }
+
+  var name;
+  if (models.length) {
+    name = models.map(function (m) { return m.name; }).filter(function (n, j, a) { return a.indexOf(n) === j; }).join(' + ');
+    if (!/\(connected\)$/.test(name)) name += ' (connected)';
+  } else {
+    name = 'Connector (' + shape + ')';
+  }
+  var geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(soupUp), 3));
+  var id = addModelFromZUpGeometry(name, geo, { keepSelection: true, silent: true });
+  if (!id) { putBack(); return { ok: false, reason: 'the connected piece could not be added' }; }
+  var m = NSO_bridgeModel(id);
+  var entry = placeModelMovable(m, (lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2);
+  entry.mesh.position.y = (lo[2] + hi[2]) / 2;
+  // Resting where the inputs rested: the plate puts a piece's bottom at 0.2-0.3.
+  entry.liftY = lo[2] > 0.35 ? lo[2] - 0.3 : 0;
+  entry.mesh.updateMatrixWorld(true);
+  // Read it back off the scene: it must stand exactly where it was built.
+  var back = meshToWorldSoup(entry.mesh), err = 0;
+  if (back.length !== soupUp.length) err = Infinity;
+  else for (var t = 0; t < back.length; t += 3) {
+    err = Math.max(err, Math.abs(back[t] - soupUp[t]), Math.abs(-back[t + 2] - soupUp[t + 1]), Math.abs(back[t + 1] - soupUp[t + 2]));
+  }
+  if (!(err <= 1e-3)) {
+    if (entry.mesh.parent) entry.mesh.parent.remove(entry.mesh);
+    state.placed = state.placed.filter(function (q) { return q !== entry; });
+    state.models = state.models.filter(function (x) { return x.id !== id; });
+    putBack();
+    return { ok: false, reason: 'the connected piece did not land where it was built (' + (isFinite(err) ? err.toExponential(2) : 'size') + ' mm off)' };
+  }
+  if (typeof pushUndo === 'function') {
+    pushUndo({ type: 'supportSwap', removed: removed, addedIds: [id], label: models.length
+      ? 'Undo: Connect reverted - ' + (models.length === 2 ? 'both pieces back as they were' : 'the piece back as it was')
+      : 'Undo: Connect reverted - the connector is off the plate' });
+  }
+  state.editId = id;
+  state.selectedIndex = state.placed.indexOf(entry);
+  if (typeof renderModelList === 'function') renderModelList();
+  if (typeof updateOptimizeButton === 'function') updateOptimizeButton();
+  if (typeof updateEditSize === 'function') updateEditSize();
+  if (typeof updateAdjustUI === 'function') updateAdjustUI();
+  if (typeof updateUndoBtn === 'function') updateUndoBtn();
+  return { ok: true, id: id, entry: entry, maxErrMm: err };
+}
+
+/* ---------------------------------------------------------- the pointer */
+
+// A click on a place: it sets, or clears, an anchor.
+function NSO_connectClickPiece(sel) {
+  var C = NSO_connectUI();
+  if (NSO_connectSame(sel, C.a)) C.a = null;
+  else if (NSO_connectSame(sel, C.b)) C.b = null;
+  else if (!C.a) C.a = sel;
+  else if (!C.b) C.b = sel;
+  else C.b = sel;                        // both set: the new place replaces B
+  NSO_connectDrawLine(null, null);
+  NSO_connectDrawPicks();
+  if (C.a && C.b) NSO_connectPreview();
+  else {
+    C.plan = null; NSO_connectSetGhost(null); NSO_connectAnchorText(); NSO_connectSyncRows();
+    NSO_connectReadout(C.a || C.b ? 'Anchor ' + (C.a ? 'A' : 'B') + ' set (' + (C.a || C.b).target.text + ') - orbit as you like, then click ' + (C.a ? 'B' : 'A') + '.' : NSO_CONNECT_HINT, false);
+  }
+}
+
+if (typeof document !== 'undefined') {
+  (function wireConnect() {
+    function onCanvas(ev) { return state.renderer && ev.target === state.renderer.domElement; }
+    function target(ev) {
+      if (!NSO_connectReady()) return null;
+      try { return NSO_bridgeTargetAt(ev); } catch (err) { return null; }
+    }
+    // Nothing is held down between the clicks, so this only runs for a pointer
+    // that is just moving: an orbit drag (a button down) is left alone.
+    function onMove(ev) {
+      var C = NSO_connectUI();
+      if (!C.open || C.busy || ev.buttons || !onCanvas(ev)) return;
+      var sel = target(ev);
+      C.hover = sel;
+      var held = C.a && !C.b ? C.a : (C.b && !C.a ? C.b : null);
+      if (held) {
+        var to = sel ? sel.world : null;
+        if (!to) {
+          // off the pieces: the line ends under the pointer at the anchor's depth
+          var p0 = NSO_bridgeUpToDisplay(NSO_connectAnchorPoint(held)), d = state.camera.position.distanceTo(p0);
+          to = state.raycaster.ray.at(d, new THREE.Vector3());
+        }
+        NSO_connectDrawLine(NSO_bridgeUpToDisplay(NSO_connectAnchorPoint(held)), to);
+      }
+      NSO_connectDrawPicks();
+      if (!C.a && !C.b) NSO_connectReadout(sel ? 'Under the pointer: ' + sel.target.text + ' - click to make it anchor A.' : NSO_CONNECT_HINT, false);
+    }
+    // A press ON a piece is Connect's while the card is open (it would
+    // otherwise select the piece and start a move drag under the click); a
+    // press anywhere else is untouched, so orbit, pan and zoom are as always.
+    function onDown(ev) {
+      var C = NSO_connectUI();
+      C.press = null;
+      if (!C.open || C.busy || ev.button !== 0 || !onCanvas(ev)) return;
+      var sel = target(ev);
+      C.press = { x: ev.clientX, y: ev.clientY, sel: sel };
+      if (sel) { ev.stopImmediatePropagation(); ev.preventDefault(); }
+    }
+    function onUp(ev) {
+      var C = NSO_connectUI(), pr = C.press;
+      C.press = null;
+      if (!C.open || !pr || C.busy || ev.button !== 0) return;
+      if (Math.hypot(ev.clientX - pr.x, ev.clientY - pr.y) > CONNECT_CLICK_PX) return;     // an orbit drag, not a click
+      if (!onCanvas(ev)) return;
+      if (pr.sel) {
+        // The press already named what was under it; the release is the click.
+        NSO_connectClickPiece(pr.sel);
+        ev.stopImmediatePropagation();
+      } else if (C.a || C.b) {
+        NSO_connectClearPicks();
+        NSO_connectReadout(NSO_CONNECT_HINT, false);
+      }
+    }
+    function onKey(ev) {
+      var C = NSO_connectUI();
+      if (!C.open || ev.key !== 'Escape' || !(C.a || C.b)) return;
+      NSO_connectClearPicks();
+      NSO_connectReadout(NSO_CONNECT_HINT, false);
+    }
+    function wire() {
+      var btn = NSO_connectEl('btn-connect');
+      if (!btn || btn.dataset.nsoWired === '1') return;
+      btn.dataset.nsoWired = '1';
+      btn.addEventListener('click', function () { if (NSO_connectUI().open) NSO_connectClose(); else NSO_connectOpen(); });
+      var go = NSO_connectEl('btn-connect-go'), cancel = NSO_connectEl('btn-connect-cancel');
+      if (go) go.addEventListener('click', function () { NSO_connectSet(); });
+      if (cancel) cancel.addEventListener('click', NSO_connectCancel);
+      var redraw = function () { var C = NSO_connectUI(); if (C.a && C.b) NSO_connectPreview(); else NSO_connectSyncRows(); };
+      // The ghost follows the fields as they change: a typed value after a short
+      // pause, a finished one (change) at once.
+      ['inp-connect-dia', 'inp-connect-width', 'inp-connect-thick', 'inp-connect-tube-dia', 'inp-connect-wall',
+       'inp-connect-dia-a', 'inp-connect-dia-b'].forEach(function (id) {
+        var el = NSO_connectEl(id);
+        if (!el) return;
+        el.addEventListener('input', function () {
+          var C = NSO_connectUI();
+          if (C.timer) clearTimeout(C.timer);
+          C.timer = setTimeout(function () { C.timer = 0; redraw(); }, 120);
+        });
+        el.addEventListener('change', function () { var C = NSO_connectUI(); if (C.timer) { clearTimeout(C.timer); C.timer = 0; } redraw(); });
+      });
+      var sel = NSO_connectEl('sel-connect-shape');
+      if (sel) sel.addEventListener('change', function () { NSO_connectSyncRows(); redraw(); });
+      var radios = document.getElementsByName('connect-result');
+      for (var i = 0; i < radios.length; i++) radios[i].addEventListener('change', redraw);
+      NSO_connectSyncRows();
+      // Capture on window: ahead of app-core's canvas handler, so a press on a
+      // piece does not also select or drag it.
+      window.addEventListener('pointerdown', onDown, true);
+      window.addEventListener('pointermove', onMove, true);
+      window.addEventListener('pointerup', onUp, true);
+      window.addEventListener('keydown', onKey, true);
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
+    else wire();
+  })();
+}
