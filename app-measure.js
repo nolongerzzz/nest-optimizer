@@ -726,6 +726,11 @@
       if (brushBtn) brushBtn.click();
       else if (typeof window.nsoBrushSetArmed === 'function') window.nsoBrushSetArmed(false);
     }
+    if (typeof window.nsoPullArmed === 'function' && window.nsoPullArmed()) {
+      var pullBtn = el('btn-pull');
+      if (pullBtn) pullBtn.click();
+      else if (typeof window.nsoPullSetArmed === 'function') window.nsoPullSetArmed(false);
+    }
     if (state.seatHereArmed) {
       var seatBtn = el('btn-seat-here');
       if (seatBtn) seatBtn.click();

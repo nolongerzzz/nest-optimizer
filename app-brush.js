@@ -1848,6 +1848,11 @@ if (typeof document !== 'undefined') (function () {
       var paintBtn = el(state.maskPaint === 'select' ? 'btn-mask-select' : 'btn-mask-paint');
       if (paintBtn) paintBtn.click();
     }
+    if (typeof window.nsoPullArmed === 'function' && window.nsoPullArmed()) {
+      var pullBtn = el('btn-pull');
+      if (pullBtn) pullBtn.click();
+      else if (typeof window.nsoPullSetArmed === 'function') window.nsoPullSetArmed(false);
+    }
     if (state.carveArmed) {
       var carveBtn = el('btn-carve');
       if (carveBtn) carveBtn.click();
