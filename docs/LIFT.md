@@ -27,6 +27,10 @@ npm run lift:plate    Lift on the plate in the real app at 1280 x 800: the Baroc
                       the count, hover, a click, Shift-click, Strip, Move / Join, G-scope's
                       Features row, refusals (section 7)
 npm run lift:plate-shots  lift:plate, keeping its screenshots in tools/lift-plate-out/ (gitignored)
+npm run lift:assembly   Lift keeps an assembly together in the real app at 1280 x 800: the hinge
+                        and a plate of posts with collars - the card's words, hover, Pick,
+                        Shift-click, Strip, the export, a lone floating shell refused (section 8)
+npm run lift:assembly-shots  lift:assembly, keeping its screenshots in tools/lift-assembly-out/ (gitignored)
 npm run lift:test     headless: the plate, every detail alone and all together, the ring,
                       refusals, an off-axis pose, the Picture slab, the canonical checker (771 gates)
 npm run lift:drive    the real app in Chromium: real clicks in G-scope, Lift, Ctrl+Z,
@@ -566,21 +570,24 @@ lift does is section 2's, unchanged.
   `detectSoup`'s). Reading a face writes nothing and costs no Undo step.
 - **Said once, on the card.** A face with nothing on it reads **"Nothing stands
   out from this face."** - one line - on the card only; the HUD is not made to
-  repeat it. (The top, the default, keeps the words it had: "Nothing found on
+  repeat it, and it is cleared when the card changes face (it used to keep the
+  last face's words under the new face's). (The top, the default, keeps the words it had: "Nothing found on
   <piece>: nothing stands out of its top more than ...".) The base face being
   read is tinted while it is not the top.
 
 **`feature-hull_hinge.stl`** (a 120 x 70 x 40 box, a print-in-place knuckle
 hinge on its +Y wall): the top reads 0; the +Y wall reads **1** - the knuckle
 (its two fixed halves and the pin, one feature of 408 triangles, a line 10.5 mm
-out of the wall) - and the free moving leaf, which does not meet the wall at
-all, is found and refused in words ("where it meets the face does not close
-into clean loops"). The wall reading it needed one guard in the engine:
+out of the wall). The free moving leaf, which does not meet the wall at all,
+was found and refused in words ("where it meets the face does not close into
+clean loops"); since section 8 the knuckle holds it and it comes along. The
+wall reading it needed one guard in the engine:
 `judge` in `nso_lift_auto.js` took the biggest boundary loop of an island with
 none and threw; an island with no loops is now the existing `loops` refusal.
-Lifted, the knuckle is a closed piece on free plate beside the hull, the hull
-repaired and closed (hull + knuckle = the original volume, 347468.017 mm³), one
-Undo; grabbed and dropped it stays where it was dropped.
+Lifted, the knuckle (with its leaf, section 8) is a closed piece on free plate
+beside the hull, the hull repaired and closed (hull + piece = the original
+volume, 347468.017 mm³), one Undo; grabbed and dropped it stays where it was
+dropped.
 
 ### G-scope: Features, read-only
 
@@ -629,12 +636,120 @@ volume; ONE undo step; Ctrl+Z puts the hull back bit for bit and the wall
 counts 1 from the cache. Lifted again and grabbed with the mouse, dragged to
 free plate (clear of the app's 12 mm neighbour magnet) and dropped: it is where
 it was dropped, closed, on the bed. Strip: off on the top, on for the wall -
-"line ×1 · the plate keeps 1", Confirm - lift 1 - one step. The cursor onto a
-card button keeps the face; over the empty viewport it returns to the top. The
-+X end wall: the card says "Nothing stands out from this face." and nothing
-else, and the HUD keeps what it had. The Barocke plate: the top still reads 22
+"line ×1 + 1 captured part · bare plate", Confirm - lift 1 - one step. The
+cursor onto a card button keeps the face; over the empty viewport it returns to
+the top. The +X end wall: the card says "Nothing stands out from this face." and
+nothing else, and the HUD is cleared. The Barocke plate: the top still reads 22
 (`line ×1 · large shape ×1 (12 parts) · dots ×20`) however it is hovered.
 
 `lift:drive`, `lift:auto-drive` and `lift:curved-drive` drive their fixtures
 the same way now: G-scope's Features row read-only (a click on G-scope's
 canvas lifts nothing), the lifts through the card.
+
+## 8. Lift keeps an assembly together
+
+A print-in-place assembly stays an assembly. A hinge's leaf rides on a pin
+through a knuckle; a ring sits on a post; a pin sits in a bore. None of them is
+joined to the other, so each is its own **shell** of the piece - and until now
+Lift took the part that was fused to the face and left the rest behind on the
+parent as a floating shell, or refused it. Now a lifted feature brings its
+captured parts with it, as **one piece with several shells**.
+
+**The rule** (engine: `assemble` in `nso_lift_auto.js`, run at the end of
+`analyse`). A shell is a set of triangles joined edge to edge. The **base body**
+is the shell of the face being read. Every other shell is *free*. A free shell
+is **captured** by a liftable feature when
+
+- it lies **within the feature's bounding box inflated by 2 mm**
+  (`captureMm`), or
+- its bounding box **overlaps** the feature's (it interlocks with it).
+
+A leaf on a pin through a knuckle, a pin in a bore and a ring on a post all
+qualify. A shell is held by ONE feature: the one whose box centre is nearest.
+Boxes are the feature's own (its island), not grown by what it already holds.
+
+**What a lift does with them.** Nothing is fused and nothing moves. The lifted
+piece is the feature (its triangles + the cap on its back, as always) **plus
+every captured shell, copied triangle for triangle**: same corners, same gaps,
+so it prints in place exactly as it did on the parent. The parent loses the
+feature and its captured shells and is repaired **only where the feature stood**
+(the same cap as before); every other triangle is as it was. Plate + piece =
+the source, exactly. **One Undo** restores parent and assembly bit for bit.
+Remove (the engine's discard) takes the assembly too, so nothing is left
+floating.
+
+**Where it shows.** The islands the engine reports are the features: a free
+shell that is held is no island of its own any more (it was "1 can't be lifted"
+before) - its triangles belong to the feature that holds it, so hovering the
+leaf is hovering the knuckle. A feature that holds parts carries `partCount` and
+`parts` (their triangles and boxes). The card, in plain words, no engine terms:
+
+> 1 feature found — a line with 1 captured part
+> 2 features found — 2 with captured parts (3 in all)
+
+and the read-out / Strip's list say "line ×1 + 1 captured part". Hover says
+"A line, 10.50 mm high, 64.0 mm², with 1 captured part - click to lift it".
+Pick (a click), Shift-click (gathering) and Strip all lift through the same
+call, so they all bring the assembly: "Lifted 1 feature off feature-hull_hinge
+with 1 captured part (still separate shells, gaps as they were) ...". The hover
+fill and the Shift/Strip fill cover the captured shells too.
+
+**Refusals stay honest.**
+
+- A shell that **nothing holds** - floating, outside every feature's box - is
+  still "can't be lifted", now with a reason that is true for it: *it is a
+  separate part, joined to nothing, and no feature on the face holds it - it
+  does not stand on the face* (status `floating`; it used to borrow `loops`,
+  "where it meets the face does not close into clean loops", which said
+  nothing about it). A plate with only such a shell reads "0 features found"
+  and lifts nothing.
+- A shell **connected to the base body** is body, as before - it is never
+  captured.
+- A feature that holds a shell that is **not a closed solid** is refused ("a
+  part caught in it is not a closed solid, so the assembly would not come off
+  whole") rather than lifted without it, which would leave it floating on the
+  parent.
+- The top face of the hinge hull still reads 0: no feature on it holds the leaf,
+  so nothing is brought along and the read is as it was.
+
+**The HUD.** It is cleared when the card's reading changes face. It used to
+keep the previous face's text while the card showed the new one.
+
+### Checked on (`lift:assembly`, 64 gates, 1280 x 800)
+
+Shells are counted in the check by a union-find over exact corners, which shares
+no code with the engine.
+
+| fixture | result |
+|---|---|
+| `feature-hull_hinge.stl`, +Y wall | **1 feature, 1 captured part**: "1 feature found — a line with 1 captured part"; the file has TWO shells (the hull with its fixed knuckles and pin, 432 triangles; the moving knuckle + leaf, 288). Lift: one piece of **2 shells** (700 triangles, closed), the leaf exactly its source triangles, the gap between the shells 0.5000 mm before and after; parent closed, manifold, ONE shell, 28 triangles, chi 2; parent + piece = 347468.017 mm³; one Undo, bit for bit. The 3MF export of the piece: one object, 2 shells |
+| the same, Strip | "line ×1 + 1 captured part · bare plate", Confirm - lift 1: the same piece, one step, one Undo |
+| the same, top face | 0 features found, nothing captured (no feature there holds the leaf) |
+| `posts()` (`tools/nso_lift_assembly_fixtures.js`): a 70 x 40 x 4 plate, post A with two collars, post B with one, a stray cube | "2 features found — 2 with captured parts (3 in all)"; the stray is the one "can't be lifted" (floating). Pick on A: one piece of **3 shells** (the post and its two collars, collars bit for bit, gaps within 0.01 mm), parent closed with 3 shells left (plate + post B, B's collar, the stray); Shift-click both: pieces of 3 and 2 shells in ONE step; Strip: the same, "large shapes ×2 + 3 captured parts · the plate keeps 1"; each one Undo, bit for bit. Export of A's piece: one object, 3 shells |
+| `stray()`: the plate and the cube alone | 0 features found; the cube refused with its reason; a click or `lift()` changes nothing; Strip stays off |
+
+**One number differs from the ticket.** The ticket expected the hinge to give
+"1 feature with 2 captured parts" and a lifted piece of 3 shells. The file has
+two shells (`features.json`: "a print-in-place knuckle hinge ... 2 bodies"; the
+pin is fused to the two fixed knuckles, the moving knuckle and leaf are one
+body), so there is one captured part and the piece has two shells. The 3-shell
+case (a base feature + 2 captured parts) is the posts fixture's post A.
+
+**Limits, in the open.**
+
+- The rule is the ticket's: a bounding box overlap is enough, so a big free
+  shell whose box happens to enclose a feature's box (a loose frame round the
+  part) is captured by the feature nearest its centre. Boxes are boxes.
+- The feature must itself be found. In the height map a post that is wholly
+  inside a ring's bore, seen from above, was not found as a feature at all
+  (seen with the first version of the posts fixture; the map starts islands
+  next to the face, and the ring closes the post off from it). The posts
+  fixture gives its posts a head, as a real print-in-place collar needs one to
+  stay on, and then the post is found and the collars come with it.
+- The refusal for a part that is not a closed solid was checked by hand (a
+  collar with a triangle removed: the post reads "a part caught in it is not a
+  closed solid", the collar "it runs into an open edge of the mesh"); no gate
+  holds it yet.
+- A part held by an already-captured part but not by the feature itself (a latch
+  on the leaf that does not reach the knuckle's box) is not held: capture is by
+  the feature's own box, not transitive.

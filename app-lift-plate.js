@@ -291,7 +291,7 @@ var NSO_LIFT_PLATE = (function () {
       large shapes into (data from the engine; nothing is split). */
   function groups(A, minH) {
     var g = {};
-    KEYS.forEach(function (k) { g[k] = { key: k, ids: [], parts: 0 }; });
+    KEYS.forEach(function (k) { g[k] = { key: k, ids: [], parts: 0, held: 0 }; });
     var cant = 0, low = 0, off = new Set(offered(A, minH));
     (A ? A.islands : []).forEach(function (I) {
       if (I.status !== 'ok') { cant++; return; }
@@ -299,13 +299,31 @@ var NSO_LIFT_PLATE = (function () {
       var G = g[I.group] || g.large;
       G.ids.push(I.id);
       G.parts += (I.necks && I.necks.parts) || 1;
+      G.held += I.partCount || 0;
     });
     return { list: KEYS.map(function (k) { return g[k]; }).filter(function (G) { return G.ids.length; }), cant: cant, low: low };
   }
 
   function groupWords(G) {
     var n = G.ids.length;
-    return (n === 1 ? WORDS[G.key][0] : WORDS[G.key][1]) + ' ×' + n + (G.parts > n ? ' (' + G.parts + ' parts)' : '');
+    return (n === 1 ? WORDS[G.key][0] : WORDS[G.key][1]) + ' ×' + n + (G.parts > n ? ' (' + G.parts + ' parts)' : '') +
+      (G.held ? ' + ' + capturedWords(G.held) : '');
+  }
+
+  function capturedWords(k) { return k + ' captured part' + (k === 1 ? '' : 's'); }
+
+  /** The card's count line when features come with captured parts: what was
+      found, in plain words. '' when nothing does. */
+  function assemblyWords(A, minH) {
+    var held = [];
+    offered(A, minH).forEach(function (id) { var I = A.islands[id]; if (I.partCount) held.push(I); });
+    if (!held.length) return '';
+    var k = held.reduce(function (s2, I) { return s2 + I.partCount; }, 0);
+    if (held.length === 1 && offered(A, minH).length === 1) {
+      var I0 = held[0];
+      return (WORDS[I0.group] ? 'a ' + WORDS[I0.group][0] : 'a feature') + ' with ' + capturedWords(k);
+    }
+    return held.length + ' with captured parts (' + k + ' in all)';
   }
 
   /** "line x1 . large shape x1 (12 parts) . dots x20 . bare plate", for the
@@ -475,10 +493,10 @@ var NSO_LIFT_PLATE = (function () {
     if (b) { b.setAttribute('aria-pressed', armed ? 'true' : 'false'); b.classList.toggle('is-armed', armed); }
     var panel = $('lift-panel');
     if (panel) panel.hidden = !armed;
-    var a = A(), n = offered(a, minH).length;
+    var a = A(), n = offered(a, minH).length, asm = armed && targetId != null && D && D.ok ? assemblyWords(a, minH) : '';
     var c = $('lift-count');
     if (c) c.textContent = !armed || targetId == null ? '—' : !D || !D.ok ? 'nothing read' :
-      n + ' feature' + (n === 1 ? '' : 's') + ' found';
+      n + ' feature' + (n === 1 ? '' : 's') + ' found' + (asm ? ' \u2014 ' + asm : '');
     var sb = $('btn-lift-strip');
     if (sb) sb.disabled = !(armed && n && !busy);
     syncStrip();
@@ -625,6 +643,8 @@ var NSO_LIFT_PLATE = (function () {
     D = readTarget(m, p);
     syncSlider(); draw(); sync();
     sayCard(readout(), !!(D && !D.ok));
+    /* The card now reads another face; the HUD must not keep the last one's words. */
+    if (typeof setStatus === 'function') setStatus('');
     return true;
   }
 
@@ -650,6 +670,7 @@ var NSO_LIFT_PLATE = (function () {
       var r = $('lift-readout');
       var txt = why || ('A ' + (WORDS[I.group] ? WORDS[I.group][0] : 'feature') + ', ' + f2(I.heightMm) + ' mm high, ' +
         I.areaMm2.toFixed(1) + ' mm²' + ((I.necks && I.necks.parts > 1) ? ', ' + I.necks.parts + ' parts' : '') +
+        (I.partCount ? ', with ' + capturedWords(I.partCount) : '') +
         ' - click to lift it, Shift-click to gather it.');
       if (r) { r.textContent = txt; r.classList.toggle('carve-bad', !!why); }
     } else if (armed) {
@@ -818,7 +839,9 @@ var NSO_LIFT_PLATE = (function () {
       var where = nCurved ? (nCurved === want.length ? '' : 'flat where ' + (want.length - nCurved === 1 ? 'one' : 'some') + ' stood on a flat face, ') +
         'the surface round ' + (want.length === 1 ? 'it' : 'them') + ' carried across where ' + (want.length === 1 ? 'it' : 'they') +
         ' stood and welded to it at the rim' : 'flat where ' + (want.length === 1 ? 'it' : 'they') + ' stood';
+      var heldN = r.pieces.reduce(function (s2, pc3) { return s2 + (pc3.parts || 0); }, 0);
       var txt = 'Lifted ' + r.pieces.length + ' feature' + (r.pieces.length === 1 ? '' : 's') + ' off ' + m.name +
+        (heldN ? ' with ' + capturedWords(heldN) + ' (still separate shells, gaps as they were)' : '') +
         ' (' + r.volumes.pieces.toFixed(2) + ' mm³): it is ' + where + ', every other triangle as it was, and ' +
         (r.pieces.length === 1 ? 'the new piece stays' : 'the new pieces stay') + ' where ' + (r.pieces.length === 1 ? 'it' : 'they') +
         ' stood' + ' - grab ' + (r.pieces.length === 1 ? 'it' : 'one') + ' to drop it somewhere else. One Undo (Ctrl+Z) puts it all back.';
@@ -952,6 +975,13 @@ var NSO_LIFT_PLATE = (function () {
       depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
   }
 
+  /** A feature's triangles and, behind them, those of the parts it holds. */
+  function withParts(I) {
+    var out = I.tris;
+    (I.parts || []).forEach(function (P) { out = out.concat(P.tris); });
+    return out;
+  }
+
   function draw() {
     if (!ensureLayer()) return;
     clearLayer();
@@ -974,18 +1004,18 @@ var NSO_LIFT_PLATE = (function () {
     if (all.length) layer.add(lines(outlineOf(P, all), FOUND, stripOpen ? 0.35 : 0.55));
     if (stripSet && stripSet.size) {
       var ticked = [];
-      stripSet.forEach(function (id) { ticked = ticked.concat(a.islands[id].tris); });
+      stripSet.forEach(function (id) { ticked = ticked.concat(withParts(a.islands[id])); });
       layer.add(fill(P, ticked, PENDING, 0.55));
     }
     if (pending.size) {
       var g = [];
-      pending.forEach(function (id) { g = g.concat(a.islands[id].tris); });
+      pending.forEach(function (id) { g = g.concat(withParts(a.islands[id])); });
       layer.add(fill(P, g, PENDING, 0.6));
       layer.add(lines(outlineOf(P, g), PENDING, 1));
     }
     if (hoverId >= 0 && a.islands[hoverId]) {
       var I = a.islands[hoverId], ok = !whyNot(I);
-      layer.add(fill(P, I.tris, ok ? HOVER : 0xb91c1c, 0.45));
+      layer.add(fill(P, withParts(I), ok ? HOVER : 0xb91c1c, 0.45));
       layer.add(lines(outlineOf(P, I.tris), ok ? HOVER : 0xef4444, 1));
     }
   }
