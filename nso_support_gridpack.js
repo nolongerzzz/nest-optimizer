@@ -27,9 +27,12 @@
    BEACONS. The support points. Each is { p, n } - a point on the surface
    and its outward normal. They come from gridBeacons() below:
    NSO_SupportBeacons.detect's own beacons, EXPOSED ONES ONLY (a spot whose
-   ray along its own normal leaves the piece; a cavity ceiling or bore is no
-   beacon), each carrying the id of its beacon region (its area). opts.beacons
-   takes a list directly (the Supports card's; G-scope's row).
+   air reaches the outside; the inside of a sealed cavity is no beacon, but a
+   shelf over its own base, a bridge over its foot and the underside of an arch
+   are - detection is geometry only, and what is under the spot is no part of
+   it), each carrying the id of its beacon region (its area). opts.beacons
+   takes a list directly (the Supports card's; G-scope's row). Whether a beacon
+   can be reached is decided HERE, by LANDING below.
 
    HELD. A beacon is held when it is in a landed trunk. Merging joins members
    and never drops one, so on a clean face held == the area's beacon count; a
@@ -74,11 +77,17 @@
    FEET. A trunk that lands on the plate stands on a pad: one first layer
    (0.2 mm) of a round slab, r = max(3 mm, 2.5 x the trunk's half-width), kept
    0.2 mm off the piece; pads that touch are unioned (opts.footPads false turns
-   them off). Nothing goes below the plate: the trunk ends half a layer inside
+   them off). A pad is a solid disc, never a ring: where pads overlap round a
+   small gap the gap is filled, and where two just touch (discs of r = 3 on a
+   6 mm lattice) a bridge makes the join solid, so a group of pads is one
+   slab with no hole in it (a gap that holds something of the piece within
+   0.2 mm is left, and counted in solid()'s padGaps; opts.padGaps false turns
+   the filling off). Nothing goes below the plate: the trunk ends half a layer inside
    its pad, and a last leg that would lean onto the plate stops 1 mm short and
    drops straight.
 
-   LANDING. Plate first, always. A member with no route to the plate:
+   LANDING. Plate first, always: straight down, else steered round the piece
+   within the lean limit (STEER below). A member with no route to the plate:
      - restOnModel off (default): builds nothing; its beacons are counted
        as "unreachable from the plate".
      - restOnModel on: drops straight onto the piece below and stands on a
@@ -140,6 +149,12 @@
   var FOOT_RUN_MM = 1;         /* a trunk that would land leaning stops this high and drops the rest straight */
   var FOOT_SIDES = 48;
   var FOOT_GAP_MM = 0.2;       /* a pad keeps this far off the piece (and what stands round it), the support gap and a hair */
+  var GAP_CELL_MM = 0.025;     /* the raster the gaps between pads are found on: one cell */
+  var GAP_CELLS_MAX = 4e6;     /* ...coarsened to this many cells on a very wide field of feet */
+  var BRIDGE_NEAR_MM = 0.1;    /* pads whose outlines overlap or part by less than this are bridged */
+  var BRIDGE_LEN_MM = 0.6;     /* a bridge: this long across the contact (more by the overlap), */
+  var BRIDGE_WIDTH_MM = 0.8;   /* ...this wide, one first layer thick */
+  var GAP_DILATE = 2;          /* a gap is filled this many cells past its own edge, so the fill overlaps the pads round it */
   var LEAN_TOL = 1e-4;          /* a face tilted exactly the lean limit is not a side face: float32 noise on its normal must not decide */
   var EAGERNESS = { strut: 0, tree: 1, 'gecko-hand': 1 };
 
@@ -802,6 +817,307 @@
     return out;
   }
 
+  /* A pad's outline: the n corners discSoup draws, as [x, y] pairs. */
+  function padPoly(cx, cy, rs, phase) {
+    var n = rs.length, out = [];
+    for (var k = 0; k < n; k++) {
+      var a = phase + 2 * Math.PI * k / n;
+      out.push([cx + rs[k] * Math.cos(a), cy + rs[k] * Math.sin(a)]);
+    }
+    return out;
+  }
+
+  /* Ear clipping of a simple polygon, counter-clockwise in, triangles out as
+     index triples, or null when it will not triangulate (a self-touching
+     outline): the caller then leaves that polygon alone. */
+  function earClip(poly) {
+    var n = poly.length, idx = [], i, out = [];
+    if (n < 3) return null;
+    for (i = 0; i < n; i++) idx.push(i);
+    function cross2(a, b, c) { return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); }
+    function inTri(p, a, b, c) {
+      return cross2(a, b, p) >= -1e-12 && cross2(b, c, p) >= -1e-12 && cross2(c, a, p) >= -1e-12;
+    }
+    var guard = 0;
+    while (idx.length > 3) {
+      var clipped = false, m = idx.length;
+      for (i = 0; i < m; i++) {
+        var ia = idx[(i + m - 1) % m], ib = idx[i], ic = idx[(i + 1) % m];
+        var a = poly[ia], b = poly[ib], c = poly[ic];
+        if (!(cross2(a, b, c) > 1e-12)) continue;             /* reflex or flat: not an ear */
+        var ear = true;
+        for (var j = 0; j < m && ear; j++) {
+          var ij = idx[j];
+          if (ij === ia || ij === ib || ij === ic) continue;
+          if (inTri(poly[ij], a, b, c)) ear = false;
+        }
+        if (!ear) continue;
+        out.push([ia, ib, ic]);
+        idx.splice(i, 1);
+        clipped = true;
+        break;
+      }
+      if (!clipped || ++guard > 10 * n) return null;
+    }
+    out.push([idx[0], idx[1], idx[2]]);
+    return out;
+  }
+
+  /* A prism over a simple counter-clockwise polygon, from z0 to z1, outward-
+     wound; null if the polygon will not triangulate. */
+  function prismSoup(poly, z0, z1) {
+    var tri = earClip(poly);
+    if (!tri) return null;
+    var n = poly.length, out = new Float32Array((tri.length * 2 + n * 2) * 9), w = 0;
+    function put(a, b, c) {
+      out[w++] = a[0]; out[w++] = a[1]; out[w++] = a[2];
+      out[w++] = b[0]; out[w++] = b[1]; out[w++] = b[2];
+      out[w++] = c[0]; out[w++] = c[1]; out[w++] = c[2];
+    }
+    tri.forEach(function (t) {
+      var a = poly[t[0]], b = poly[t[1]], c = poly[t[2]];
+      put([a[0], a[1], z1], [b[0], b[1], z1], [c[0], c[1], z1]);
+      put([a[0], a[1], z0], [c[0], c[1], z0], [b[0], b[1], z0]);
+    });
+    for (var k = 0; k < n; k++) {
+      var p0 = poly[k], p1 = poly[(k + 1) % n];
+      put([p0[0], p0[1], z0], [p1[0], p1[1], z0], [p1[0], p1[1], z1]);
+      put([p0[0], p0[1], z0], [p1[0], p1[1], z1], [p0[0], p0[1], z1]);
+    }
+    return out;
+  }
+
+  /* Douglas-Peucker on a closed loop, eps in the loop's own units. */
+  function simplifyLoop(pts, eps) {
+    var n = pts.length;
+    if (n < 4) return pts;
+    function dseg(p, a, b) {
+      var dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy;
+      var t = L2 > 0 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / L2)) : 0;
+      return Math.hypot(p[0] - a[0] - dx * t, p[1] - a[1] - dy * t);
+    }
+    function dp(lo, hi, keep) {
+      var worst = -1, at = -1;
+      for (var i = lo + 1; i < hi; i++) { var d = dseg(pts[i], pts[lo], pts[hi % n]); if (d > worst) { worst = d; at = i; } }
+      if (worst > eps) { keep[at] = true; dp(lo, at, keep); dp(at, hi, keep); }
+    }
+    var far = 0, fd = -1;                                      /* split at the point farthest from vertex 0 */
+    for (var i = 1; i < n; i++) { var d = Math.hypot(pts[i][0] - pts[0][0], pts[i][1] - pts[0][1]); if (d > fd) { fd = d; far = i; } }
+    var keep = new Array(n); keep[0] = true; keep[far] = true;
+    dp(0, far, keep); dp(far, n, keep);
+    return pts.filter(function (p, k) { return keep[k]; });
+  }
+
+  /* THE GAPS BETWEEN PADS. Pads that overlap in a ring round a small gap - the
+     discs of a lattice of trunks, say - leave a hole in the first layer: a
+     handle in the foot, and a ring where the slicer wants a disc. Each such
+     gap is found on a raster of the pads' union (cell h, a hair of a mm), its
+     outline taken one cell outside the gap so it overlaps the pads round it,
+     and handed back as a prism the pads' own thickness. A gap is left alone,
+     and counted, when anything of the piece (or what stands round it) is
+     within FOOT_GAP_MM of it: that is a gap the pads were drawn in to keep.
+     Pads whose outlines just touch are bridged first (below), so that the gap
+     a third pad closes beside them is a gap the raster can see.
+     pads: [{ poly, id }]  ->  { fills: [{ poly, owner }], bridges: [{ poly,
+     owner }], found, left }; owner is the id of the pad the part belongs to. */
+  function padGaps(A, obstacles, pads, plateZ, thick) {
+    var res = { fills: [], bridges: [], found: 0, left: 0 }, n = pads.length, i, j;
+    if (n < 2) return res;
+    var parent = [], rmax = [], cen = [], polys = [], trunkOf = [];
+    function find(x) { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; }
+    for (i = 0; i < n; i++) {
+      var c = [0, 0], r = 0;
+      pads[i].poly.forEach(function (q) { c[0] += q[0] / pads[i].poly.length; c[1] += q[1] / pads[i].poly.length; });
+      pads[i].poly.forEach(function (q) { r = Math.max(r, Math.hypot(q[0] - c[0], q[1] - c[1])); });
+      cen.push(c); rmax.push(r); parent.push(i); polys.push(pads[i].poly); trunkOf.push(pads[i].id);
+    }
+    for (i = 0; i < n; i++) for (j = i + 1; j < n; j++) {
+      if (Math.hypot(cen[i][0] - cen[j][0], cen[i][1] - cen[j][1]) < rmax[i] + rmax[j] + BRIDGE_NEAR_MM) parent[find(i)] = find(j);
+    }
+    /* How far from its centre does pad i reach along unit u? */
+    function reach(k, u) {
+      var poly = polys[k], c0 = cen[k], best = 0;
+      for (var e = 0; e < poly.length; e++) {
+        var pa = poly[e], pb = poly[(e + 1) % poly.length];
+        var ex = pb[0] - pa[0], ey = pb[1] - pa[1], den = u[0] * ey - u[1] * ex;
+        if (Math.abs(den) < 1e-12) continue;
+        var qx = pa[0] - c0[0], qy = pa[1] - c0[1];
+        var t = (qx * ey - qy * ex) / den, w = (qx * u[1] - qy * u[0]) / den;
+        if (t > 0 && w >= -1e-9 && w <= 1 + 1e-9 && t > best) best = t;
+      }
+      return best;
+    }
+    /* TOUCHING PADS. Two pads whose outlines only just meet - overlapping or
+       parted by less than BRIDGE_NEAR_MM, as discs of r = 3 on a 6 mm lattice
+       do - join through a hair-thin neck, and the sealed slivers beside it
+       are far too thin to find on any raster. A bridge across the contact is
+       a solid neck, and is itself a part of the pad. */
+    for (i = 0; i < n; i++) for (j = i + 1; j < n; j++) {
+      if (find(i) !== find(j)) continue;
+      var dx = cen[j][0] - cen[i][0], dy = cen[j][1] - cen[i][1], dd = Math.hypot(dx, dy);
+      if (!(dd > 1e-9)) continue;
+      if (dd > rmax[i] + rmax[j] + BRIDGE_NEAR_MM) continue;
+      var u = [dx / dd, dy / dd], pen = reach(i, u) + reach(j, [-u[0], -u[1]]) - dd;
+      if (!(Math.abs(pen) <= BRIDGE_NEAR_MM)) continue;
+      var mid = [cen[i][0] + u[0] * (reach(i, u) - pen / 2), cen[i][1] + u[1] * (reach(i, u) - pen / 2)];
+      var L = BRIDGE_LEN_MM / 2 + Math.abs(pen) / 2, W = BRIDGE_WIDTH_MM / 2, v = [-u[1], u[0]];
+      var bp = [[-L, -W], [L, -W], [L, W], [-L, W]].map(function (q) {
+        return [mid[0] + u[0] * q[0] + v[0] * q[1], mid[1] + u[1] * q[0] + v[1] * q[1]];
+      });
+      res.bridges.push({ poly: bp, owner: pads[i].id, mid: mid, pad: i });
+    }
+    var clusters = {};
+    for (i = 0; i < n; i++) (clusters[find(i)] || (clusters[find(i)] = [])).push(i);
+    var hs = [thick / 2, thick + 0.18];       /* the slab's middle, and the gap above it */
+    function clear(x, y) {
+      if (A) {
+        if (A.lineInsideAt(obstacles, [x, y, plateZ + 0.01], [0, 0, 1], 0.2) >= 0) return false;
+        if (A._nearestHit(obstacles, [x, y, plateZ - 0.01], [0, 0, 1], 0, thick + 0.18 + 0.01) > 0) return false;
+        for (var hi = 0; hi < hs.length; hi++) for (var k = 0; k < 8; k++) {
+          var a = Math.PI * k / 4;
+          if (A._nearestHit(obstacles, [x, y, plateZ + hs[hi]], [Math.cos(a), Math.sin(a), 0], 0, FOOT_GAP_MM + 0.05) > 0) return false;
+        }
+      }
+      return true;
+    }
+    res.bridges = res.bridges.filter(function (b) {
+      return clear(b.mid[0], b.mid[1]) && clear(b.poly[0][0], b.poly[0][1]) && clear(b.poly[2][0], b.poly[2][1]);
+    });
+    res.bridges.forEach(function (b) {
+      var k = polys.length;
+      polys.push(b.poly); trunkOf.push(b.owner); cen.push(b.mid); rmax.push(BRIDGE_LEN_MM);
+      clusters[find(b.pad)].push(k);
+    });
+    Object.keys(clusters).forEach(function (key) {
+      var ids = clusters[key];
+      if (ids.length < 3) return;
+      var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      ids.forEach(function (id) { polys[id].forEach(function (q) {
+        if (q[0] < x0) x0 = q[0]; if (q[0] > x1) x1 = q[0]; if (q[1] < y0) y0 = q[1]; if (q[1] > y1) y1 = q[1];
+      }); });
+      var h = Math.max(GAP_CELL_MM, Math.sqrt((x1 - x0) * (y1 - y0) / GAP_CELLS_MAX));
+      x0 -= 2 * h; y0 -= 2 * h;
+      var nx = Math.ceil((x1 - x0) / h) + 3, ny = Math.ceil((y1 - y0) / h) + 3;
+      var owner = new Int32Array(nx * ny).fill(-1);
+      ids.forEach(function (id) {                                /* cell centres inside each outline (even-odd) */
+        var poly = polys[id], m = poly.length, ymin = Infinity, ymax = -Infinity;
+        poly.forEach(function (q) { if (q[1] < ymin) ymin = q[1]; if (q[1] > ymax) ymax = q[1]; });
+        var j0 = Math.max(0, Math.floor((ymin - y0) / h - 0.5)), j1 = Math.min(ny - 1, Math.ceil((ymax - y0) / h - 0.5));
+        for (var jj = j0; jj <= j1; jj++) {
+          var yc = y0 + (jj + 0.5) * h, xs = [];
+          for (var e = 0; e < m; e++) {
+            var pa = poly[e], pb = poly[(e + 1) % m];
+            if ((pa[1] <= yc) !== (pb[1] <= yc)) xs.push(pa[0] + (yc - pa[1]) / (pb[1] - pa[1]) * (pb[0] - pa[0]));
+          }
+          xs.sort(function (u, v) { return u - v; });
+          for (var q2 = 0; q2 + 1 < xs.length; q2 += 2) {
+            var i0 = Math.max(0, Math.ceil((xs[q2] - x0) / h - 0.5)), i1 = Math.min(nx - 1, Math.floor((xs[q2 + 1] - x0) / h - 0.5));
+            for (var ii = i0; ii <= i1; ii++) owner[jj * nx + ii] = id;
+          }
+        }
+      });
+      /* the air that reaches the raster's edge is outside; what does not is a gap */
+      var comp = new Int32Array(nx * ny).fill(-1), stack = [], ncomp = 0, at;
+      function flood(seed, label) {
+        var cells = [];
+        stack.push(seed); comp[seed] = label;
+        while (stack.length) {
+          var cc = stack.pop(), cx = cc % nx, cy = (cc - cx) / nx, pc;
+          cells.push(cc);
+          if (cx > 0 && owner[pc = cc - 1] < 0 && comp[pc] < 0) { comp[pc] = label; stack.push(pc); }
+          if (cx < nx - 1 && owner[pc = cc + 1] < 0 && comp[pc] < 0) { comp[pc] = label; stack.push(pc); }
+          if (cy > 0 && owner[pc = cc - nx] < 0 && comp[pc] < 0) { comp[pc] = label; stack.push(pc); }
+          if (cy < ny - 1 && owner[pc = cc + nx] < 0 && comp[pc] < 0) { comp[pc] = label; stack.push(pc); }
+        }
+        return cells;
+      }
+      flood(0, 0); ncomp = 1;
+      var gaps = [];
+      for (at = 0; at < nx * ny; at++) if (owner[at] < 0 && comp[at] < 0) gaps.push(flood(at, ncomp++));
+      gaps.forEach(function (cells) {
+        res.found++;
+        var inD = new Uint8Array(nx * ny), loopCells = [];
+        cells.forEach(function (cc) {
+          var cx = cc % nx, cy = (cc - cx) / nx;
+          for (var dy = -GAP_DILATE; dy <= GAP_DILATE; dy++) for (var dx = -GAP_DILATE; dx <= GAP_DILATE; dx++) {
+            var px = cx + dx, py = cy + dy;
+            if (px < 0 || py < 0 || px >= nx || py >= ny) continue;
+            inD[py * nx + px] = 1;
+          }
+        });
+        /* the outline of the dilated gap: unit edges with the cell on their left */
+        var next = new Map(), vkey = function (a, b) { return a * (nx + 2) + b; };
+        for (var cy2 = 0; cy2 < ny; cy2++) for (var cx2 = 0; cx2 < nx; cx2++) {
+          if (!inD[cy2 * nx + cx2]) continue;
+          loopCells.push(cy2 * nx + cx2);
+          var open = function (px, py) { return px < 0 || py < 0 || px >= nx || py >= ny || !inD[py * nx + px]; };
+          var edges = [];
+          if (open(cx2, cy2 - 1)) edges.push([[cx2, cy2], [cx2 + 1, cy2]]);
+          if (open(cx2 + 1, cy2)) edges.push([[cx2 + 1, cy2], [cx2 + 1, cy2 + 1]]);
+          if (open(cx2, cy2 + 1)) edges.push([[cx2 + 1, cy2 + 1], [cx2, cy2 + 1]]);
+          if (open(cx2 - 1, cy2)) edges.push([[cx2, cy2 + 1], [cx2, cy2]]);
+          edges.forEach(function (ed) {
+            var k0 = vkey(ed[0][0], ed[0][1]);
+            if (!next.has(k0)) next.set(k0, []);
+            next.get(k0).push(ed);
+          });
+        }
+        var used = new Set(), best = null, bestA = 0;
+        next.forEach(function (list) {
+          list.forEach(function (start) {
+            if (used.has(start)) return;
+            var loop = [start[0]], cur = start;
+            used.add(start);
+            for (var g = 0; g < 4 * nx * ny; g++) {
+              var cand = (next.get(vkey(cur[1][0], cur[1][1])) || []).filter(function (e2) { return !used.has(e2); });
+              if (!cand.length) break;
+              var e3 = cand[0];
+              if (cand.length > 1) {                            /* a pinch: keep the loop on its left, turn left first */
+                var dx0 = cur[1][0] - cur[0][0], dy0 = cur[1][1] - cur[0][1];
+                cand.sort(function (u, v) {
+                  var cu = dx0 * (u[1][1] - u[0][1]) - dy0 * (u[1][0] - u[0][0]);
+                  var cv = dx0 * (v[1][1] - v[0][1]) - dy0 * (v[1][0] - v[0][0]);
+                  return cv - cu;
+                });
+                e3 = cand[0];
+              }
+              used.add(e3);
+              if (e3 === start) break;
+              loop.push(e3[0]); cur = e3;
+              if (e3[1][0] === start[0][0] && e3[1][1] === start[0][1]) break;
+            }
+            var A2 = 0;
+            for (var q = 0; q < loop.length; q++) { var u = loop[q], v = loop[(q + 1) % loop.length]; A2 += u[0] * v[1] - v[0] * u[1]; }
+            if (A2 > bestA) { bestA = A2; best = loop; }
+          });
+        });
+        if (!best || best.length < 3) { res.left++; return; }
+        var world = best.map(function (q) { return [x0 + q[0] * h, y0 + q[1] * h]; });
+        world = simplifyLoop(world, 0.5 * h);
+        var area2 = 0;
+        for (var q3 = 0; q3 < world.length; q3++) {
+          var u2 = world[q3], v2 = world[(q3 + 1) % world.length]; area2 += u2[0] * v2[1] - v2[0] * u2[1];
+        }
+        if (!(area2 > 0)) { res.left++; return; }
+        /* clear of the piece at the outline's corners and the gap's middle */
+        var step = Math.max(1, Math.ceil(world.length / 8)), samples = world.filter(function (q, k) { return k % step === 0; }), mid = [0, 0];
+        cells.forEach(function (cc) { var cx = cc % nx, cy = (cc - cx) / nx; mid[0] += (x0 + (cx + 0.5) * h) / cells.length; mid[1] += (y0 + (cy + 0.5) * h) / cells.length; });
+        samples.push(mid);
+        for (var si = 0; si < samples.length; si++) if (!clear(samples[si][0], samples[si][1])) { res.left++; return; }
+        /* the pad that owns it: the nearest of those whose outline reaches the dilated gap */
+        var near = {}, nearest = -1, nd = Infinity;
+        loopCells.forEach(function (cc) { var o = owner[cc]; if (o >= 0) near[o] = true; });
+        Object.keys(near).forEach(function (k2) {
+          var d = Math.hypot(cen[k2][0] - mid[0], cen[k2][1] - mid[1]);
+          if (d < nd) { nd = d; nearest = +k2; }
+        });
+        if (nearest < 0) { res.left++; return; }
+        res.fills.push({ poly: world, owner: trunkOf[nearest] });
+      });
+    });
+    return res;
+  }
+
   function boxSoup(lo, hi) {
     var v = [[lo[0], lo[1], lo[2]], [hi[0], lo[1], lo[2]], [hi[0], hi[1], lo[2]], [lo[0], hi[1], lo[2]],
              [lo[0], lo[1], hi[2]], [hi[0], lo[1], hi[2]], [hi[0], hi[1], hi[2]], [lo[0], hi[1], hi[2]]];
@@ -830,7 +1146,7 @@
     if (!P || typeof P.sweep !== 'function') return { ok: false, reason: 'nso_path_sweep.js is not loaded' };
     var probe = makeProbe(A, [opts.rawTris || []].concat(opts.occluders || []));
     var foot = opts.footPads === false ? 0 : (opts.firstLayerMm == null ? FOOT_LAYER_MM : +opts.firstLayerMm);
-    var out = [], placed = [], droppedFingers = 0, shafts = [];
+    var out = [], placed = [], droppedFingers = 0, shafts = [], padList = [];
     /* Every contact's shaft near its tip, for the fingers to keep clear of. */
     if (p.style === 'gecko-hand') {
       p.members.forEach(function (m) {
@@ -853,8 +1169,9 @@
              trunks that stand close overlap and join in solid()'s union. */
           var fa = ms.points[ms.points.length - 1], fr = Math.max(FOOT_MIN_R_MM, FOOT_HALF_WIDTHS * m.side / 2);
           var fph = 0.37 * (t + 1);
-          parts.push({ soup: discSoup(fa[0], fa[1], p.plateZ, p.plateZ + foot,
-            footRadii(A, [opts.rawTris || []].concat(opts.occluders || []), fa[0], fa[1], p.plateZ, foot, fr, m.side, fph), fph), foot: true });
+          var frs = footRadii(A, [opts.rawTris || []].concat(opts.occluders || []), fa[0], fa[1], p.plateZ, foot, fr, m.side, fph);
+          parts.push({ soup: discSoup(fa[0], fa[1], p.plateZ, p.plateZ + foot, frs, fph), foot: true });
+          padList.push({ poly: padPoly(fa[0], fa[1], frs, fph), id: t });
         }
         if (m.pad) {
           var h = Math.max(2 * m.side, 2.82) / 2, a = m.path[m.path.length - 1];
@@ -904,9 +1221,26 @@
           });
         }
       }
-      out.push({ trunk: t, parts: parts.concat(fingers), fingers: fingers.length });
+      out.push({ trunk: t, parts: parts, fingerParts: fingers, fingers: fingers.length });
     }
-    return { ok: true, trunks: out, fingersDropped: droppedFingers };
+    /* The gaps between pads that overlap in a ring are filled, each by the
+       pad nearest it, so every group of pads is one disc-shaped slab. */
+    var gaps = { fills: [], found: 0, left: 0 };
+    if (foot && opts.padGaps !== false) {
+      gaps = padGaps(A, [opts.rawTris || []].concat(opts.occluders || []), padList, p.plateZ, foot);
+      gaps.bridges.forEach(function (b) {
+        var soup = prismSoup(b.poly, p.plateZ, p.plateZ + foot);
+        if (soup) { out[b.owner].parts.push({ soup: soup, foot: true, bridge: true }); gaps.bridged = (gaps.bridged || 0) + 1; }
+      });
+      gaps.fills.forEach(function (f) {
+        var soup = prismSoup(f.poly, p.plateZ, p.plateZ + foot);
+        if (!soup) { gaps.left++; return; }
+        out[f.owner].parts.push({ soup: soup, foot: true, fill: true });
+        gaps.filled = (gaps.filled || 0) + 1;
+      });
+    }
+    out.forEach(function (o) { o.parts = o.parts.concat(o.fingerParts); delete o.fingerParts; });
+    return { ok: true, trunks: out, fingersDropped: droppedFingers, padGaps: { found: gaps.found, filled: gaps.filled || 0, bridged: gaps.bridged || 0, left: gaps.left } };
   }
 
   /* Promise of { ok, soup, solids, reason }. One solid per landed trunk;
@@ -1022,6 +1356,7 @@
       return bore(p, soup, opts).then(function (h) { hollow = h; return h.soup; });
     }).then(function (soup) {
       return { ok: true, soup: soup, solids: solids, fingersDropped: dropped + tp.fingersDropped, detached: detached,
+               padGaps: tp.padGaps,
                partSoups: [].concat.apply([], tp.trunks.map(function (t) { return t.parts.map(function (x) { return x.soup; }); })),
                hollow: hollow, solidSoup: hollow ? hollow.solidSoup : null,
                reason: p.reason + (hollow ? ' ' + hollow.reason : '') };
@@ -1120,6 +1455,9 @@
     describe: describe,
     _sideFor: sideFor,
     _squareProfile: squareProfile,
+    _earClip: earClip,
+    _prismSoup: prismSoup,
+    _padGaps: padGaps,
     _memberSolid: function (m, foot, opts) { return memberSolid(PS(opts || {}), m, foot); },
     _phaseOf: phaseOf,
     _makeProbe: makeProbe

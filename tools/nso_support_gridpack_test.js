@@ -12,7 +12,8 @@
 //      nothing refused, every leg within the lean limit
 //   2. flat shelf, 3 x 3 points: each first merge happens at the depth the
 //      lean budget predicts (the first lattice level both reach), to 0.1 mm
-//   3. box with a through-hole: trunks route through the hole to the plate
+//   3. box with a through-hole: trunks route through the hole to the plate, or
+//      round the block's edge within the lean limit - none through the block
 //   4. mushroom on a wide stem: rest-on-model OFF - the cap's points are
 //      unreachable from the plate, nothing is built, nothing refused;
 //      ON - they stand on the stem top, counted as resting on the part
@@ -282,17 +283,26 @@ fs.mkdirSync(OUT, { recursive: true });
     const p = plan('hole');
     check('the plan is made', p.ok, p.reason);
     const inHole = (q) => q[0] > 6 && q[0] < 14 && q[1] > 6 && q[1] < 14;
+    /* The block is 20 x 20; the arm's whole underside is a beacon since
+       supports-followups (the block below it is the piece's own, which no
+       longer hides it), so a point over the block's solid part either goes
+       through the hole or leans out past the block's edge. */
+    const offBlock = (q) => q[0] < 0 || q[0] > 20 || q[1] < 0 || q[1] > 20;
     const plateRoots = p.trunks.filter(t => t.landing === 'plate').map(t => p.members[t.root]);
     check('trunks reach the plate', plateRoots.length > 0, `${plateRoots.length} trunk(s)`);
-    check('and every one of them stands in the hole: it goes through the block, not round it',
-      plateRoots.length && plateRoots.every(m => inHole(m.path[m.path.length - 1])),
+    check('and every one of them stands in the hole or beyond the block\'s edge: none goes through the block',
+      plateRoots.length && plateRoots.every(m => inHole(m.path[m.path.length - 1]) || offBlock(m.path[m.path.length - 1])),
       plateRoots.map(m => '[' + m.path[m.path.length - 1].slice(0, 2).map(v => v.toFixed(1)) + ']').join(' '));
+    check('...and most of them go through the hole', plateRoots.filter(m => inHole(m.path[m.path.length - 1])).length > plateRoots.length / 2,
+      `${plateRoots.filter(m => inHole(m.path[m.path.length - 1])).length} of ${plateRoots.length}`);
     check('points not over the hole were steered into it', p.steered.length > 0, `${p.steered.length} steered`);
     check('every support point held', p.held === p.beacons.length, `${p.held} of ${p.beacons.length}`);
     check('every leg within the lean limit', worstLean(p) <= p.branchTiltDeg + 1e-6, worstLean(p).toFixed(2) + ' deg');
     const s = await build(p);
     check('the solids build', s.ok, s.reason);
-    if (s.ok) validSolid('hole', s.soup, s.solids.length);
+    /* handles allowed (supports-followups): 22 trunks in an 8 mm hole stand close enough that
+       columns touch above a shared foot - a ring in the bundle, not in a pad. */
+    if (s.ok) validSolid('hole', s.soup, s.solids.length, true);
   }
 
   console.log('\n=== 4. mushroom on a wide stem ===');

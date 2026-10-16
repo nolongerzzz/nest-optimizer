@@ -36,14 +36,30 @@
    ---------------------------------------------------------------------------
    EXPOSED ONLY
    ---------------------------------------------------------------------------
-   A beacon counts only if its spot can be reached from outside the piece: the
-   ray from the spot along its own normal, away from the surface, leaves the
-   piece's bounding box without hitting the piece. Cavity ceilings, bores and
-   inside walls - spots whose ray runs into the piece's own far wall - make
-   no beacon, so they join no region and make no area. (Holding the inside of
-   a piece is a later opt-in.) The piece's own triangles only: another piece
-   in the way (an occluder) does not make a spot interior. counts.interior is
-   how many were left out.
+   A beacon counts only if the air at its spot reaches the outside of the
+   piece. That is all this module asks: it is geometry, and it does not ask
+   what is under the spot. A shelf over its own base, a bridge over its own
+   foot and the underside of an arch are all exposed - air runs out from under
+   them - and each gets its beacons. Whether a support can GET there is the
+   planner's question (nso_support_gridpack.js: the plate first, round the
+   piece within the lean budget, the piece only when restOnModel is on;
+   what is left is counted unreachable).
+
+   What is left out is the INSIDE of a closed piece: cavity ceilings, the
+   walls and floors of a sealed void - spots whose air has no way out. The
+   test is rays from the spot: first along its own normal (the cheap, common
+   case), then a fan over the hemisphere the normal faces, 16 headings at each
+   of 0.5, 5, 15, 30, 50 and 70 deg above the face's own plane. If any of them
+   leaves the piece's bounding box without meeting the piece, the air has a
+   way out. The piece's own triangles only: another piece in the way (an
+   occluder) does not make a spot interior. counts.interior is how many
+   candidates were left out; counts.sheltered is how many were kept although
+   their own normal runs into the piece (the shelf, the arch).
+
+   A fan is a sample, not a proof: a long tunnel narrower than its length
+   divided by ~115 (the 0.5 deg ray) and not along a face's own heading could
+   slip through it and be counted interior. A sealed cavity cannot be taken
+   for open - no ray gets out of it.
 
    ---------------------------------------------------------------------------
    THE FOUR WAYS A SPOT NEEDS HOLDING (need.kind)
@@ -58,8 +74,8 @@
           n.z < -cos(angleDeg). Open to the plate below.
 
    gap    the same steep face, but the air under it is bounded: material
-          below it (undercut; a cavity ceiling too, which EXPOSED ONLY above
-          then drops), or a near-flat face anchored on
+          below it (undercut, the underside of a shelf over its own base; a
+          cavity ceiling too, which EXPOSED ONLY above then drops), or a near-flat face anchored on
           both sides along x or y (a bridge) whose span is wider than the
           bridgeable span, 5 mm by default. A flat face anchored on both
           sides by a span of 5 mm or less is BRIDGED and gets no beacon - the
@@ -149,6 +165,8 @@
   var CREASE_MIN_DEG = 30;           /* faces closer than this are one curved surface */
   var SAME_Z_MM = 1e-4;              /* two hits this close on one ray are one crossing */
   var HIT_EPS_MM = 1e-3;
+  var FAN_AZIMUTHS = 16;             /* exposed-only fan: headings round a blocked spot's normal... */
+  var FAN_ELEVATIONS_DEG = [0.5, 5, 15, 30, 50, 70];   /* ...each at these angles above the face's own plane */
 
   /* ---- ray / triangle, double-sided. The same Moller-Trumbore
      nso_support_aim.js writes out, for the same reason it gives. ---- */
@@ -343,7 +361,7 @@
     out.grid = { pitch: pitch, origin: origin, nx: nx, ny: ny };
 
     var counts = { cells: nx * ny, rays: 0, crossings: 0, resting: 0, printable: 0, bridged: 0,
-                   painted: 0, interior: 0, face: 0, gap: 0, edge: 0, tip: 0, ridge: 0 };
+                   painted: 0, interior: 0, sheltered: 0, face: 0, gap: 0, edge: 0, tip: 0, ridge: 0 };
     out.counts = counts;
 
     /* ---- one column: every crossing of the vertical line through (x, y),
@@ -497,8 +515,8 @@
       return c.need;
     }
 
-    /* ---- EXPOSED ONLY. Is there a way out along this spot's own normal?
-       The piece's own triangles are filed in a coarse xy grid and the ray is
+    /* ---- EXPOSED ONLY. Is this spot in air that reaches the outside?
+       The piece's own triangles are filed in a coarse xy grid and a ray is
        walked through the cells it crosses (Amanatides-Woo, 2D): a near-
        vertical ray visits one cell, a sideways one a row. A hit is anything
        beyond HIT_EPS_MM; the face the spot sits on and its coplanar
@@ -521,15 +539,17 @@
       }
       return { side: side, wx: wx, wy: wy, cells: cells, stamp: 0 };
     })();
-    function exposed(nd) {
-      var d = nd.normal, o = [nd.x, nd.y, nd.z], g = XG;
-      /* where the ray leaves the piece's bounding box */
+    /* Does the ray from o along unit d leave the piece's bounding box without
+       meeting the piece? */
+    function rayOut(o, d) {
+      var g = XG;
       var tEnd = Infinity, a;
       for (a = 0; a < 3; a++) {
         if (d[a] > 1e-12) tEnd = Math.min(tEnd, (hi[a] - o[a]) / d[a]);
         else if (d[a] < -1e-12) tEnd = Math.min(tEnd, (lo[a] - o[a]) / d[a]);
       }
       if (!(tEnd > HIT_EPS_MM)) return true;                 /* already at the box wall, facing out */
+      tEnd += HIT_EPS_MM;                                    /* a face lying ON the box wall is still a face */
       var stamp = ++g.stamp;
       var ci = Math.max(0, Math.min(g.side - 1, Math.floor((o[0] - lo[0]) / g.wx)));
       var cj = Math.max(0, Math.min(g.side - 1, Math.floor((o[1] - lo[1]) / g.wy)));
@@ -558,6 +578,37 @@
         if (ci < 0 || cj < 0 || ci >= g.side || cj >= g.side) return true;
       }
     }
+    /* A spot's own normal first (the common case, one cheap ray); failing
+       that, a fan over the hemisphere the normal faces: FAN_AZIMUTHS headings
+       round the normal at each of FAN_ELEVATIONS_DEG above the face's own
+       plane, the smallest first (the way out of a shelf or a tunnel is
+       nearly along the face). Air that any ray gets out through is air that
+       reaches the outside; a sealed cavity has no such ray. */
+    var fan = [];
+    (function () {
+      for (var ei = 0; ei < FAN_ELEVATIONS_DEG.length; ei++) {
+        var el = FAN_ELEVATIONS_DEG[ei] * Math.PI / 180;
+        for (var ai = 0; ai < FAN_AZIMUTHS; ai++) {
+          var az = 2 * Math.PI * ai / FAN_AZIMUTHS;
+          fan.push([Math.cos(el) * Math.cos(az), Math.cos(el) * Math.sin(az), Math.sin(el)]);
+        }
+      }
+    })();
+    function exposed(nd) {
+      var n = nd.normal, o = [nd.x, nd.y, nd.z];
+      if (rayOut(o, n)) return true;
+      var t1 = Math.abs(n[2]) < 0.9 ? [-n[1], n[0], 0] : [0, -n[2], n[1]];
+      var l1 = Math.sqrt(t1[0] * t1[0] + t1[1] * t1[1] + t1[2] * t1[2]);
+      t1 = [t1[0] / l1, t1[1] / l1, t1[2] / l1];
+      var t2 = [n[1] * t1[2] - n[2] * t1[1], n[2] * t1[0] - n[0] * t1[2], n[0] * t1[1] - n[1] * t1[0]];
+      for (var k = 0; k < fan.length; k++) {
+        var f = fan[k];
+        if (rayOut(o, [f[0] * t1[0] + f[1] * t2[0] + f[2] * n[0],
+                       f[0] * t1[1] + f[1] * t2[1] + f[2] * n[1],
+                       f[0] * t1[2] + f[1] * t2[2] + f[2] * n[2]])) { counts.sheltered++; return true; }
+      }
+      return false;
+    }
 
     var beacons = [], byCell = new Array(nx * ny);
     function addBeacon(nd, i, j, kindOverride, extra) {
@@ -565,9 +616,9 @@
       for (var key in nd.need) if (Object.prototype.hasOwnProperty.call(nd.need, key)) need[key] = nd.need[key];
       if (kindOverride && need.kind !== 'ridge') { need.via = need.kind; need.kind = kindOverride; }
       if (extra) for (var e in extra) if (Object.prototype.hasOwnProperty.call(extra, e)) need[e] = extra[e];
-      // opts.exposedOnly === false keeps the ones whose normal meets the piece
-      // (a ceiling over its own floor): the rule as it was before exposed-only,
-      // for a caller that asks. Off by default nowhere in the app.
+      // opts.exposedOnly === false keeps the spots in sealed air too (a cavity
+      // ceiling): the rule as it was before exposed-only, for a caller that
+      // asks. Off by default nowhere in the app.
       if (opts.exposedOnly !== false && !exposed(nd)) { counts.interior++; return null; }
       var bcn = { x: nd.x, y: nd.y, z: nd.z, normal: nd.normal, need: need, cell: [i, j], tri: nd.T.idx };
       beacons.push(bcn);

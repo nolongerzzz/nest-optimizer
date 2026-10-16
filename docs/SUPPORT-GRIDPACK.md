@@ -50,9 +50,10 @@ Deterministic. Dials:
 **Beacons.** `{ p, n }`: a point on the surface and its outward normal.
 `gridBeacons` is the adapter: **`NSO_SupportBeacons.detect`'s own beacons**
 (`docs/SUPPORT-BEACONS.md`) at the detector's 3 mm pitch (wider for a fat
-strut, below), **exposed ones only**: a spot counts only if its ray along its
-own normal leaves the piece. Cavity ceilings, bores and inside walls are not
-beacons here, so they build nothing. Each carries the id of its **beacon
+strut, below), **exposed ones only**: a spot counts only if its air reaches the
+outside of the piece (geometry only, `docs/SUPPORT-BEACONS.md`). The inside of a
+sealed cavity is not a beacon here, so it builds nothing; a shelf over its own
+base is, and reaching it is **this planner's** job (below). Each carries the id of its **beacon
 region** (its area, `det.regions[i].id`, what the Supports card numbers by),
 and `opts.regionId` picks one of those. The planner no longer reads
 `detectOverhangs`' triangle regions or `contactPoints`' lattice.
@@ -165,14 +166,14 @@ at least the floor.
 G-scope's Generate on a region that already has supports replaces them as one
 undo step.
 
-## 3. Measured (`support:gridpack`, 80 checks; `support:exposed`, 63)
+## 3. Measured (`support:gridpack`, 80 checks; `support:exposed`, 114)
 
 | fixture | result |
 |---|---|
 | **tilted box 30°** (40 × 12 × 6 on its edge) | 44 of 44 held (the detector's beacons; the lattice gave 50), 26 trunks, all on the plate, no refusal; 12 pickups, 5 merges; every leg within 30°; mesh_validate clean, one shell per solid |
-| **closed hollow box, 30°** (`library/box_closed.stl`) | `support:exposed`: **1 area, 238 beacons, 238 held** on 98 trunks (62 merges, 78 pickups), none unreachable; worst leg 29.8°; no beacon on the cavity; 98 trunks on feet join into 10 solids, nothing below z = 0, 0.256 mm from the piece |
+| **closed hollow box, 30°** (`library/box_closed.stl`) | `support:exposed`: **1 area, 238 beacons, 238 held** on 98 trunks (62 merges, 78 pickups), none unreachable; worst leg 29.8°; no beacon on the cavity; 98 trunks on feet join into 10 solids with no handle (Euler 20; 6 before the pads' gaps were filled), nothing below z = 0, 0.256 mm from the piece |
 | **flat shelf, 3 × 3** | 12 beacons (9 face + 3 corner `edge` beside the post, which the lattice could not see); 3 first merges, each at the predicted level (within 0.1 mm); every merge 2 members except one of 3 |
-| **box with a through-hole** | 9 of 9 held; 8 points steered into the hole; all 7 trunks stand in it and go through the block to the plate; every last run upright |
+| **box with a through-hole** | 26 of 26 held (the arm's whole underside, since supports-followups; 9 of 9 before); 25 steered; 22 trunks, each in the hole or beyond the block's edge, none through the block; every last run upright |
 | **mushroom on a wide stem**, rest OFF | 12 of 12 cap points *unreachable from the plate*, nothing built, no refusal |
 | same, rest ON | 12 of 12 *resting on the part*, on the stem top (z 6), pad at 6.18 |
 | **boss** | **28 of 28 held** (trunk-first: 24); 4 trunks, all to the plate; tips moved off the boss and post |
@@ -226,6 +227,17 @@ Fixes the sweep forced, each measured:
 | `tools/nso_support_slice_artifact.js` | `--tree` ported |
 | `tools/nso_curved_branch_probe.js` | historical: it measured the trunk-first planner and no longer runs against `planTree` |
 
+### Supports-followups (what changed, and what was re-pinned)
+
+| file | change |
+|---|---|
+| `nso_support_beacons.js` | exposed only is "the air reaches the outside", not "the normal's ray does": the normal first, then a fan of 96 rays; `counts.sheltered`; a hit on the bounding box's own wall is a hit |
+| `nso_support_gridpack.js` | pads are discs without rings: touches bridged, gaps filled (`solid().padGaps`, `opts.padGaps`); prism and ear-clip helpers |
+| `tools/nso_support_slice_artifact.js` | the tree is built on its foot pads again (`slicer:bambu` re-run; its pins held, the strand positions it prints moved with the footprint) |
+| `support:exposed` | 63 → 114 checks: pads as one slab (section 4b, 5 mm and 6 mm lattices), shelf / bridge / arch / tunnel beacons, reachability, a sealed block still 0; budget 40000 → 81000 |
+| `support:gridpack` | the through-hole case: every trunk is in the hole or beyond the block's edge, not "all in the hole" (the arm's whole underside is held now); handles allowed (22 trunks in an 8 mm hole touch above a shared foot) |
+| `support:workflow` | section 9 runs with the default settings: its `exposedOnly: false` switch is gone |
+
 ### Supports-exposed (what changed, and what was re-pinned)
 
 | file | change |
@@ -250,10 +262,17 @@ Fixes the sweep forced, each measured:
   for; `opts.firstLayerMm`), `max(3 mm, 2.5 × half-width)`, a 48-sided disc
   drawn in 0.2 mm off the piece. The ticket's numbers except the thickness and
   the 0.2 mm clearance.
-- **FLAG** exposed-only drops an overhang that has more of the same piece
-  directly below it (docs/SUPPORT-BEACONS.md, *Exposed only*): a cap over a
-  wide stem gets no beacon from the detector. `restOnModel` is for reaching
-  such a spot, and now has to be given it as `opts.beacons`.
+- **FLAG** exposed-only keeps an overhang that has more of the same piece
+  directly below it (supports-followups; docs/SUPPORT-BEACONS.md, *Exposed
+  only*): a cap over a wide stem, a shelf over its base, an arch over its floor
+  all get beacons, and the planner decides what the plate can reach. The
+  ones it cannot reach are counted unreachable; they cost the planner about a
+  third of a second each to give up on (the 59 of the workflow's tunnel: 25 s).
+- **FLAG** a fan of rays is a sample, not a proof, that a spot's air reaches the
+  outside (docs/SUPPORT-BEACONS.md, *Limit*).
+- **FLAG** foot pads: a gap is filled and a touch bridged by raster and a
+  rule of thumb (0.025 mm cell, 0.1 mm touch), not by an exact polygon union; a
+  pad void narrower than a cell and not at a touch could survive as a handle.
 
 - **FLAG** square section everywhere; area cap 4 × s²; merges of up to 3.
 - **FLAG** pickup reach = 1.05 × the pitch; the stub's vertical last run is 2 × s.
