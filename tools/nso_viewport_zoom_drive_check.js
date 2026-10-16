@@ -10,8 +10,12 @@
    own raycast (first visible piece, else the plate's plane y = 0), and
    projected back to the screen after every wheel step. It must stay within
    1 px of the cursor - at three cursor positions, three zoom levels, in and
-   out - and at the 15 and 1200 mm distance limits. A wheel over nothing at
-   all (above the horizon) keeps the old zoom about the orbit target.
+   out - and at the 15 and 1200 mm distance limits. Off the plate (more than
+   10 mm past its edge) the plane point is not the anchor: the app clamps it
+   to the nearest point of the plate rectangle + 10 mm (#201, the camera
+   leash), so there it is THAT point which must hold its pixel, while the far
+   ground point under the cursor must not. A wheel over nothing at all (above
+   the horizon) keeps the old zoom about the orbit target.
 
    No screenshots. The pieces are the 80 x 40 x 20 box fixture and
    tape_on-edge-single, the pair the right-pan check uses. */
@@ -62,7 +66,11 @@ withApp(async (page, logs) => {
       const g = rc.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
       if (!g || g.distanceTo(rc.ray.origin) > state.camera.far) return null;
       const onPlate = state.plateMesh && rc.intersectObject(state.plateMesh, false).length > 0;
-      return { kind: onPlate ? 'plate' : 'ground', p: g.toArray() };
+      /* the app's anchor off the plate: the nearest point of plate + 10 mm */
+      const pl = getCurrentPlate(), hw = pl.w / 2 + 10, hd = pl.d / 2 + 10;
+      const a = [Math.min(hw, Math.max(-hw, g.x)), 0, Math.min(hd, Math.max(-hd, g.z))];
+      const clamped = a[0] !== g.x || a[2] !== g.z;
+      return { kind: onPlate ? 'plate' : 'ground', p: g.toArray(), a: clamped ? a : null };
     };
     H.onCanvas = (x, y) => document.elementFromPoint(x, y) === cv;
     /* A view at distance d from `tgt`, along the app's default direction. */
@@ -93,7 +101,7 @@ withApp(async (page, logs) => {
   };
   const C0 = await N(() => window.__z.cam());
 
-  console.log('\n=== 1. the point under the cursor stays under it: 3 positions x 3 zoom levels, in and out ===');
+  console.log('\n=== 1. the point under the cursor stays under it (off the plate: its plate-edge anchor holds): 3 positions x 3 zoom levels, in and out ===');
   const box0 = await N(() => window.__z.boxTop());
   const boxBed = [box0[0], 0, box0[2]];
   const LEVELS = [60, 300, 900];
@@ -120,15 +128,20 @@ withApp(async (page, logs) => {
         const u = await N(a => window.__z.under(a[0], a[1]), at);
         if (!onCv || !u) { check(label + ': cursor on the canvas, over a piece or the plane', false, px(at)); continue; }
         kinds.add(u.kind);
-        const s0 = await N(p => window.__z.proj(p), u.p);
+        /* Clamped (ground off the plate): the plate-edge anchor holds the pixel
+           it starts on, and the far ground point under the cursor drifts. */
+        const anchorP = u.a || u.p;
+        const s0 = await N(p => window.__z.proj(p), anchorP);
+        const home = u.a ? s0 : at;
         const sign = dir === 'in' ? -1 : 1;
-        let drift = dist2(s0, at), ok = true, dOk = true, prevD = c0.d;
+        let drift = dist2(s0, home), farDrift = 0, ok = true, dOk = true, prevD = c0.d;
         // three steps one way, three back
         for (let i = 0; i < 6; i++) {
           const way = i < 3 ? sign : -sign;
           const c = await wheelAt(at[0], at[1], 100 * way);
-          const s = await N(p => window.__z.proj(p), u.p);
-          drift = Math.max(drift, dist2(s, at));
+          const s = await N(p => window.__z.proj(p), anchorP);
+          drift = Math.max(drift, dist2(s, home));
+          if (u.a) farDrift = Math.max(farDrift, dist2(await N(p => window.__z.proj(p), u.p), at));
           if (way < 0 ? !(c.d < prevD) : !(c.d > prevD)) dOk = false;
           prevD = c.d;
           steps++;
@@ -136,8 +149,15 @@ withApp(async (page, logs) => {
         const c1 = await N(() => window.__z.cam());
         ok = drift <= TOL_PX;
         worst = Math.max(worst, drift);
-        check(label + ' (' + u.kind + '): within ' + TOL_PX + ' px of the cursor at every step', ok,
-          'worst ' + drift.toFixed(3) + ' px');
+        if (u.a) {
+          check(label + ' (' + u.kind + ', clamped to ' + px([u.a[0], u.a[2]]) + '): the plate-edge anchor holds its pixel within ' + TOL_PX + ' px at every step', ok,
+            'worst ' + drift.toFixed(3) + ' px');
+          check(label + ': the far ground point under the cursor is not the anchor (it drifts)', farDrift > TOL_PX,
+            'far point ' + px([u.p[0], u.p[2]]) + ' drifted ' + farDrift.toFixed(3) + ' px');
+        } else {
+          check(label + ' (' + u.kind + '): within ' + TOL_PX + ' px of the cursor at every step', ok,
+            'worst ' + drift.toFixed(3) + ' px');
+        }
         check(label + ': each step went the way of the wheel (in = closer)', dOk);
         const back = Math.hypot(...c1.pos.map((x, i) => x - c0.pos[i])) + Math.hypot(...c1.tgt.map((x, i) => x - c0.tgt[i]));
         check(label + ': three back undo three forward (camera and target home to 1e-6 mm)', back < 1e-6, back.toExponential(2));
