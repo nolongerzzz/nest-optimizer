@@ -27,7 +27,7 @@
 //      kernel). Its round body is tested on its own rails against the piece;
 //      if it would hit, the square strut is kept and bored instead, and the
 //      run says so. Refuses rather than writing a solid under the hollow name.
-//   2c. --tree (with --hollow): also plans a support on the piece's region 1
+//   2c. --tree (with --hollow): also plans a support on the piece's old region 1 strip (TREE_PATCH)
 //      with the planner (planTree, the grid-pack planner) and bores it
 //      (NSO_SupportTree.hollowTree -> NSO_SupportGridpack.solid), as a third
 //      object, so merged members' bores are sliced on the same piece
@@ -76,6 +76,13 @@ const PIECE_NAME = 'tape_on-edge-single-B101';
 const SUPPORT_NAME = 'NSO_SUPPORT_tape_underside';
 const TREE_NAME = 'NSO_SUPPORT_tape_tree_region1';
 const TREE_REGION = 1;
+/* Since #195 the planner's regions are the beacon detector's: the tape's
+   whole underside is one region (0, under the strut too), and region 1 is a
+   spot by the plate. The tree goes where it always went - the strip at the
+   underside's -x end that was region 1 before, x -41.67..-38.90,
+   y -16.80..-1.85 (5 points down x -40.29) - planned on region 0's own
+   beacons inside that strip. */
+const TREE_PATCH = { lo: [-41.67, -16.80], hi: [-38.90, -1.85] };
 const PLATE = { w: 256, d: 256 };
 
 const defaultName = 'nso_support_slice_artifact' + (HOLLOW ? '_hollow' : '') + (TREE ? '_tree' : '') +
@@ -90,7 +97,7 @@ const ctx = {
 };
 vm.createContext(ctx);
 for (const f of ['nso_thickness.js', 'nso_seat_surface.js', 'app-sculpt.js',
-                 'app-extend.js', 'nso_support_aim.js', 'nso_path_sweep.js', 'nso_support_tree.js',
+                 'app-extend.js', 'nso_support_beacons.js', 'nso_support_aim.js', 'nso_path_sweep.js', 'nso_support_tree.js',
                  'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js', 'nso_support_gridpack.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
@@ -193,15 +200,25 @@ const fmt = v => v.map(c => c.toFixed(3)).join(', ');
     /* The grid-pack planner (docs/SUPPORT-GRIDPACK.md): one strut per
        contact, merged pairwise, plate first; tips kept off walls by the
        planner itself; bored by its own solid() through hollowTree. */
-    const tp = ST.planTree(piece, { skipList: [], regionId: TREE_REGION });
+    const gb = ctx.NSO_SupportGridpack.gridBeacons(piece, { skipList: [], regionId: 0 });
+    const inPatch = b => b.p[0] >= TREE_PATCH.lo[0] - 0.5 && b.p[0] <= TREE_PATCH.hi[0] + 0.5 &&
+                         b.p[1] >= TREE_PATCH.lo[1] - 0.5 && b.p[1] <= TREE_PATCH.hi[1] + 0.5;
+    const patch = (gb.beacons || []).filter(inPatch);
+    if (!patch.length) { console.error('no region 0 beacon inside the tree patch: ' + gb.reason); process.exit(1); }
+    const tp = ST.planTree(piece, { skipList: [], beacons: patch });
     if (!tp.ok) { console.error('the region ' + TREE_REGION + ' support would not plan: ' + tp.reason); process.exit(1); }
     for (const m of tp.nudged) {
       console.log('walls      point ' + m.beacon + ' moved ' + m.mm.toFixed(2) + ' mm off a wall: [' +
                   m.from.map(v => v.toFixed(3)).join(', ') + '] -> [' + m.to.map(v => v.toFixed(3)).join(', ') + ']');
     }
-    const t = await ST.hollowTree(tp, { unionSoups: csg.NSO_unionSoups, subtractSoups: csg.NSO_subtractSoups });
+    // No foot pads (#195): the 0.2 mm first-layer pad reads as a wall under
+    // the floor in the canonical check below, which weighs the members and
+    // their bores - as tree:canonical / tree:round do since #195.
+    const t = await ST.hollowTree(tp, { unionSoups: csg.NSO_unionSoups, subtractSoups: csg.NSO_subtractSoups, footPads: false });
     if (!t.ok) { console.error('the hollow support would not build: ' + t.reason); process.exit(1); }
-    console.log('tree       region ' + TREE_REGION + ', ' + tp.region.areaMm2.toFixed(3) + ' mm^2: ' + tp.reason);
+    // since #195 the plan's region is a beacon region: no area of its own
+    const rArea = tp.region && tp.region.areaMm2 != null ? tp.region.areaMm2.toFixed(3) + ' mm^2' : tp.beacons.length + ' beacons';
+    console.log('tree       region ' + TREE_REGION + ', ' + rArea + ': ' + tp.reason);
     console.log('           ' + tp.members.length + ' members, ' + tp.merges.length + ' merges, ' + tp.trunks.length +
                 ' trunk(s); ' + t.hollow.reason);
     for (const x of t.hollow.solid) console.log('           ' + x.label.padEnd(14) + 'SOLID - ' + x.kind + (x.why ? ': ' + x.why : ''));
