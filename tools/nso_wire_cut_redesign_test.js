@@ -11,6 +11,10 @@
      - The mitre wheel turns the plane's heading about the plate vertical;
        the cut is made on a copy turned into the cut frame and both halves
        are turned back, so the piece stays put and only the face is angled.
+     - The mitre wheel has − / + buttons under it: 1 degree a press, Shift
+       0.1, Alt 5; held, they repeat after 400 ms at 10 a second. The wheel's
+       handle, the Mitre number (one decimal when it isn't whole) and the
+       blade all follow each press, as they follow a drag.
      - The slider, ← / → and the number box move the blade along the length,
        on a 0.1 mm grid: ← / → step 0.1 mm, 1 mm with Shift held.
      - Cut is a clean split on both engines: the halves meet exactly at the
@@ -28,6 +32,12 @@
      4. the mitre wheel, dragged by its handle: the face is angled by the
         dial, on the raw and the display route; each half keeps the piece's
         orientation (every other face as it was), the halves meet exactly.
+     4b. the mitre − / + buttons: 1°, Shift 0.1° and Alt 5°, each way, from
+        square and from 30°, across the 0/360 wrap and with no drift over
+        ten 0.1° presses; after every press the wheel's handle, the number,
+        the readout and the blade all say the same angle. A key press steps
+        once; a held button keeps stepping, in order, and stops on release
+        (order only - the 400 ms / 10 a second cadence is not asserted).
      5. the slider and ← / → move the blade in 0.1 mm steps (Shift: 1 mm);
         the number tracks, to one decimal.
      6. Cut splits cleanly (raw and display route: lengths add back, no
@@ -226,12 +236,12 @@ withApp(async (page, logs) => {
       'btn-yaw-left', 'btn-yaw-right', 'btn-yaw-left-90', 'btn-yaw-right-90'].filter(id => document.getElementById(id)));
     check('no Open / Close, no Cut X / Cut Z, no yaw buttons', gone.length === 0, gone.join(', ') || 'none');
     // The card, top to bottom: the mitre dial (with its typed box and
-    // Square), the slider, ← number →, Cut. (The right-side-out offer is
+    // Square, and the − / + buttons under it), the slider, ← number →, Cut. (The right-side-out offer is
     // hidden until a Cut refuses an inside-out piece.)
     const order = await page.evaluate(() => [...document.querySelectorAll('#cutter-tools button, #cutter-tools input, #cutter-tools svg')]
       .filter(e => !e.hidden).map(e => e.id));
-    check('the Cut card is: mitre dial, slider, ← number →, Cut',
-      order.join(' ') === 'cut-miter-dial cut-miter-deg btn-cut-square cut-slider btn-cut-nudge-m cut-mm btn-cut-nudge-p btn-cut',
+    check('the Cut card is: mitre dial, − / +, slider, ← number →, Cut',
+      order.join(' ') === 'cut-miter-dial cut-miter-deg btn-cut-square btn-cut-miter-minus btn-cut-miter-plus cut-slider btn-cut-nudge-m cut-mm btn-cut-nudge-p btn-cut',
       order.join(' '));
     const cards = await page.evaluate(() => ({
       cut: !!document.querySelector('.vp-shell-col > #menu-cut'), crop: !!document.querySelector('.vp-shell-col > #menu-crop'),
@@ -400,6 +410,119 @@ withApp(async (page, logs) => {
       va.toFixed(3) + ' + ' + vb.toFixed(3) + ' vs ' + vs.toFixed(3));
     check(route + ': the halves on the plate keep the piece\'s pose', r.plate.every(p => p.quat && quatSame(p.quat, r.src.quat)));
     await page.evaluate(() => setCutMiter(0));
+  }
+
+  /* ------------------------------------------------------------------ 4b */
+  console.log('\n=== 4b. the mitre − / + buttons: 1°, Shift 0.1°, Alt 5°, both ways; wheel, number and blade agree ===');
+  {
+    await page.evaluate(() => __clearAll());
+    await shutCut();
+    const id = await loadSTL(page, stl('bar60b.stl', box(60, 12, 8)));
+    await ensureCut();
+    await clickPieceAt(id, 0.5);
+    await page.evaluate(() => setCutMm(30));
+    /* What each surface shows, read as a user sees it: the handle's rendered
+       position on the wheel (its screen matrix, so the real rotation; Chrome
+       keeps those in float32, hence the 1e-3° slack - a step is 0.1°), the
+       wheel's number, the typed box, the readout, and the blade's normal. */
+    const surfaces = () => page.evaluate(() => {
+      const dial = document.getElementById('cut-miter-dial');
+      const at = (el, x, y) => new DOMPoint(x, y).matrixTransform(el.getScreenCTM());
+      const c = at(dial, 50, 50), h = at(document.getElementById('cut-dial-handle'), 50, 10);
+      return { state: state.cutMiterDeg,
+               handle: (Math.atan2(h.x - c.x, -(h.y - c.y)) * 180 / Math.PI + 360) % 360,
+               text: document.getElementById('cut-dial-deg').textContent,
+               field: document.getElementById('cut-miter-deg').value,
+               aria: dial.getAttribute('aria-valuenow'),
+               readout: document.getElementById('cut-readout').textContent,
+               blade: __blade() };
+    });
+    const agree = async (what, want) => {
+      const s = await surfaces();
+      const off = ((s.handle - want + 540) % 360) - 180;
+      const nWant = [Math.cos(-want * Math.PI / 180), 0, -Math.sin(-want * Math.PI / 180)];
+      const bladeOff = s.blade ? angleDeg(s.blade.n, nWant) : NaN;
+      const readoutOk = want ? s.readout.includes(', mitre ' + want + '°') : !/mitre/.test(s.readout);
+      check(what + ' -> ' + want + '°: wheel, number, readout and blade agree',
+        s.state === want && Math.abs(off) < 1e-3 && s.text === want + '°' && s.field === String(want) &&
+        s.aria === String(want) && bladeOff < 1e-4 && readoutOk,
+        'state ' + s.state + ', handle ' + s.handle.toFixed(6) + '°, wheel "' + s.text + '", box "' + s.field +
+        '", blade ' + bladeOff.toExponential(1) + '° off');
+    };
+    // A press is a real mouse down / up on the button with the real modifier
+    // key held. (Not page.click: on this software-GL page each costs about
+    // 0.3 s in stability frames, and a press here costs 0.1.)
+    const centreOf = sel => page.evaluate(sel => { const r = document.querySelector(sel).getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; }, sel);
+    const at = { 1: await centreOf('#btn-cut-miter-plus'), '-1': await centreOf('#btn-cut-miter-minus') };
+    const press = async (sign, mod) => {
+      if (mod) await page.keyboard.down(mod);
+      await page.mouse.move(at[sign].x, at[sign].y);
+      await page.mouse.down();
+      await page.mouse.up();
+      if (mod) await page.keyboard.up(mod);
+    };
+    const run = async seq => {
+      for (const [sign, mod, want] of seq) {
+        await press(sign, mod);
+        await agree((mod ? mod + '-' : '') + (sign > 0 ? '+' : '−'), want);
+      }
+    };
+    const typeMitre = async v => { await page.fill('#cut-miter-deg', String(v)); await page.dispatchEvent('#cut-miter-deg', 'change'); };
+
+    const geo = await page.evaluate(() => {
+      const d = document.getElementById('cut-miter-dial').getBoundingClientRect();
+      const a = document.getElementById('btn-cut-miter-minus').getBoundingClientRect();
+      const b = document.getElementById('btn-cut-miter-plus').getBoundingClientRect();
+      return { dial: [d.left, d.right, d.bottom], mid: (a.left + b.right) / 2, dialMid: (d.left + d.right) / 2,
+               inside: a.left >= d.left - 0.01 && b.right <= d.right + 0.01, top: Math.min(a.top, b.top) - d.bottom };
+    });
+    check('the buttons sit under the wheel, centred on its base, inside its width',
+      Math.abs(geo.mid - geo.dialMid) < 0.5 && geo.inside && geo.top >= 0 && geo.top < 14, JSON.stringify(geo));
+
+    await agree('start', 0);
+    await run([[1, '', 1], [-1, '', 0], [1, 'Shift', 0.1], [-1, 'Shift', 0], [1, 'Alt', 5], [-1, 'Alt', 0]]);
+    await typeMitre(30);
+    await agree('typed', 30);
+    await run([[1, '', 31], [-1, '', 30], [1, 'Shift', 30.1], [1, '', 31.1], [1, 'Alt', 36.1], [-1, 'Alt', 31.1],
+               [-1, '', 30.1], [-1, 'Shift', 30]]);
+    await run([[-1, 'Shift', 29.9], [1, 'Shift', 30], [-1, 'Alt', 25], [1, 'Alt', 30]]);
+    await typeMitre(0);
+    await run([[-1, 'Shift', 359.9], [1, 'Shift', 0], [-1, '', 359], [1, '', 0], [-1, 'Alt', 355], [1, 'Alt', 0]]);
+    await typeMitre(30);
+    for (let i = 0; i < 10; i++) await press(1, 'Shift');
+    await agree('ten Shift-+ presses (no drift)', 31);
+
+    // From the keyboard: Enter on the focused button is one press, Shift-Enter a Shift press.
+    await page.focus('#btn-cut-miter-plus');
+    await page.keyboard.press('Enter');
+    await agree('Enter on +', 32);
+    await page.keyboard.press('Shift+Enter');
+    await agree('Shift-Enter on +', 32.1);
+    await page.click('#btn-cut-square');
+    await agree('Square', 0);
+
+    // Held: a step at once, then it keeps stepping, in order, until release. Order
+    // only - no millisecond cadence, which a loaded runner cannot keep.
+    await page.evaluate(() => {
+      window.__steps = [];
+      new MutationObserver(() => window.__steps.push(state.cutMiterDeg)).observe(
+        document.getElementById('cut-miter-dial'), { attributes: true, attributeFilter: ['aria-valuenow'] });
+    });
+    const c = at[1];
+    await page.mouse.move(c.x, c.y);
+    await page.mouse.down();
+    await page.waitForTimeout(1000);
+    await page.mouse.up();
+    const held = await page.evaluate(() => window.__steps.slice());
+    await page.waitForTimeout(300);
+    const after = await page.evaluate(() => ({ n: window.__steps.length, deg: state.cutMiterDeg }));
+    check('held: it stepped once and then repeated (at least two steps)', held.length >= 2, held.length + ' steps');
+    check('...every step one whole degree up from the last, in order: no skip, repeat or reversal',
+      held.every((d, i) => d === 1 + i), held.join(' '));
+    check('...and releasing stops it', after.n === held.length, held.length + ' steps at release, ' + after.n + ' 300 ms later');
+    await agree('after the hold', after.deg);
+    await page.click('#btn-cut-square');
   }
 
   /* ------------------------------------------------------------------ 5 */
