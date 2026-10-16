@@ -2,7 +2,7 @@
 /* Pull, driven through the REAL app at 1280x800: real index.html, real script
    tags, real pointer events, real Undo.
      node tools/nso_pull_drive_check.js            exit 0 = every gate held
-     PULL_SHOTS=dir node tools/nso_pull_drive_check.js   also writes screenshots
+     PULL_SHOTS=dir node tools/nso_pull_drive_check.js   screenshots elsewhere (default tools/pull-out/, git-ignored)
      npm run pull:drive
 
    The geometry is proven headless in tools/nso_pull_test.js. What this file
@@ -31,8 +31,8 @@ const check = (name, cond, detail) => {
   console.log('  ' + (cond ? 'ok   ' : 'FAIL ') + name + (detail ? ' - ' + detail : ''));
   if (!cond) fails++;
 };
-const SHOTS = process.env.PULL_SHOTS || null;
-if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
+const SHOTS = process.env.PULL_SHOTS || path.join(ROOT, 'tools', 'pull-out');
+fs.mkdirSync(SHOTS, { recursive: true });
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-pull-drive-'));
 const MV = path.join(ROOT, 'tools', 'mesh_validate.py');
 const f3 = v => (Math.round(v * 1000) / 1000).toString();
@@ -309,28 +309,29 @@ const clickUndo = async page => { await page.click('#btn-undo'); await page.wait
       for (let i = 0; i < orig.length; i += 3) {
         if (Math.hypot(orig[i] - base[0], orig[i + 1] - base[1], orig[i + 2] - base[2]) >= L.radius) { far++; if (have.has(orig[i] + ',' + orig[i + 1] + ',' + orig[i + 2])) kept++; }
       }
-      // the field is the bell at every vertex the grab reaches
+      /* A wall moves as one section: each wall vertex by D x bell(distance from
+         the wall's MID-SURFACE, r = 9.2), so the two skins at a point move together. */
       const bell = (d, r) => { const t = 1 - d / r; return t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t); };
-      const Dm = Math.hypot(...L.D); let worst = 0, beyond = 0, beyondMoved = 0;
+      const Dm = Math.hypot(...L.D), gc = S.grab.c; let worst = 0, beyond = 0, beyondMoved = 0, n = 0;
       for (let v = 0; v < S.mesh.vertCount; v++) {
-        const b = [S.basePos[v * 3], S.basePos[v * 3 + 1], S.basePos[v * 3 + 2]];
-        const d = Math.hypot(b[0] - base[0], b[1] - base[1], b[2] - base[2]);
+        const b = [S.basePos[v * 3], S.basePos[v * 3 + 1], S.basePos[v * 3 + 2]], rad = Math.hypot(b[0], b[1]);
+        if (b[2] > 55 || rad < 8.3 || rad > 10.1) continue;
+        const mid = [b[0] * 9.2 / rad, b[1] * 9.2 / rad, b[2]];
+        const d = Math.hypot(mid[0] - gc[0], mid[1] - gc[1], mid[2] - gc[2]);
         const disp = Math.hypot(S.pos[v * 3] - b[0], S.pos[v * 3 + 1] - b[1], S.pos[v * 3 + 2] - b[2]);
-        worst = Math.max(worst, Math.abs(disp - Dm * bell(d, L.radius)));
-        if (d >= L.radius) { beyond++; if (disp !== 0) beyondMoved++; }
+        worst = Math.max(worst, Math.abs(disp - Dm * bell(d, L.radius))); n++;
+        if (d >= L.radius + 0.01) { beyond++; if (disp !== 0) beyondMoved++; }
       }
-      return { D: L.D, Dm, radius: L.radius, gvMoved: Math.hypot(pos[0] - base[0], pos[1] - base[1], pos[2] - base[2]), best, far, kept, worst, beyond, beyondMoved, shift: L.shift };
+      return { D: L.D, Dm, radius: L.radius, gvMoved: Math.hypot(pos[0] - base[0], pos[1] - base[1], pos[2] - base[2]), best, far, kept, worst, beyond, beyondMoved, n, shift: L.shift };
     });
     check('the pull was 6 mm', Math.abs(L.Dm - 6) < 0.1, f3(L.Dm) + ' mm');
     check('the lip moved 6 mm at the grab', Math.abs(L.gvMoved - L.Dm) < 1e-6 && L.best < 1e-4, f3(L.gvMoved) + ' mm; a vertex of the committed soup is ' + L.best.toExponential(1) + ' mm from where it went');
-    check('0 mm at the radius and beyond', L.beyond > 0 && L.beyondMoved === 0 && L.worst < 1e-9, L.beyond + ' vertices at or past ' + L.radius + ' mm none moved; worst bell error ' + L.worst.toExponential(1));
+    check('every wall vertex moved by D x bell(distance from the wall\'s mid-surface)', L.n > 10000 && L.worst < 0.01, 'worst error ' + L.worst.toExponential(1) + ' mm over ' + L.n + ' vertices');
+    check('0 mm at the radius and beyond', L.beyond > 0 && L.beyondMoved === 0, L.beyond + ' wall vertices past ' + L.radius + ' mm from the mid-surface, none moved');
     check('the tube\'s far end is bit-for-bit where it was', L.far > 0 && L.far === L.kept, L.kept + ' of ' + L.far);
     const wr = await wallRange(page, 59.4);
-    /* The slope bound at 50 mm is 1.6 / sqrt(1 + (1.5 x 6 / 50)^2) = 1.575; the
-       difference in displacement between a wall's inside and outside takes
-       about 0.03 more, and a pull driven by pixels is not exactly along +x. */
-    check('the wall is no thinner than 1.54 mm anywhere under the move (1.6 - 0.06)', wr.n > 500 && wr.lo >= 1.54, f3(wr.lo) + ' .. ' + f3(wr.hi) + ' mm at ' + wr.n + ' stations');
-    console.log('        (informational) thicker than 1.65 on the far side of the tube, by shear: ' + f3(wr.lo) + ' .. ' + f3(wr.hi) + ' mm (docs/PULL.md)');
+    check('wall 1.6 +- 0.05 across the moved region (the wall moves as one section)', wr.n > 500 && wr.lo >= 1.55 && wr.hi <= 1.65, f3(wr.lo) + ' .. ' + f3(wr.hi) + ' mm at ' + wr.n + ' stations');
+    check('the status line says the wall moved as a section', /wall as one section, \d+ paired/.test(st), st.slice(0, 200));
     const es = await edgeStats(page);
     check('manifold: no open or non-manifold edge', es.open === 0 && es.nm === 0, JSON.stringify(es));
     const mv = await canonical(page, 'tube-pull');
@@ -362,10 +363,8 @@ const clickUndo = async page => { await page.click('#btn-undo'); await page.wait
     const tgt = await worldToPx(page, grabPx.world.map((v, i) => v - 6 * grabPx.right[i]));
     await drag(page, grabPx, tgt, 16, { hold: true });
     await page.waitForTimeout(200);
-    if (SHOTS) {
-      await page.screenshot({ path: path.join(SHOTS, 'pull-drag-pin.png') });
-      console.log('        screenshot -> ' + path.join(SHOTS, 'pull-drag-pin.png'));
-    }
+    await page.screenshot({ path: path.join(SHOTS, 'pull-drag-pin.png') });
+    console.log('        screenshot -> ' + path.join(SHOTS, 'pull-drag-pin.png'));
     const midPin = await page.evaluate(() => document.getElementById('status').textContent);
     check('mid-drag with the pin set the status line is live', /Pulling [\d.]+ mm/.test(midPin), midPin);
     await page.mouse.up();
@@ -426,6 +425,58 @@ const clickUndo = async page => { await page.click('#btn-undo'); await page.wait
     await clickUndo(page);
     check('Undo puts it back', await sameAsKept(page));
     await page.click('#btn-pull');   // off
+
+    /* ============================================================== 4b */
+    console.log('\n=== 4b. "This side only" - the bore pushed 0.4 mm inward, the outside stays true ===');
+    await page.click('#btn-pull');                            // Pull on: the panel is open
+    check('the toggle is in the panel and off by default', await page.evaluate(() => { const c = document.getElementById('chk-pull-side'); return !!c && !c.checked && !!c.closest('#pull-panel'); }));
+    await lookAtRaw(page, [0, 8.4, 50], 42, 35);
+    await page.click('#chk-pull-side');
+    const boreRaw = [0, 8.4, 52], boreN = [0, -1, 0];        // the bore's far wall, facing the camera, normal toward the axis
+    const borePx = await rawInfo(page, boreRaw);
+    const boreHit = await hitRaw(page, borePx);
+    check('the bore is under the cursor', boreHit && dist3(boreHit, boreRaw) < 0.6, boreHit ? boreHit.map(f3).join(', ') : 'missed');
+    const in04 = await worldToPx(page, [borePx.world[0], borePx.world[1], borePx.world[2] + 0.4]);   // raw -y is world +z
+    await keepSoup(page);
+    await page.keyboard.down('Shift');
+    await page.mouse.move(borePx.x, borePx.y);
+    await page.mouse.down();
+    await page.mouse.move(in04.x, in04.y - 25, { steps: 4 });          // past the click threshold ...
+    await page.mouse.move(in04.x, in04.y, { steps: 4 });               // ... and back to 0.4 mm
+    await page.screenshot({ path: path.join(SHOTS, 'pull-side-only.png') });
+    await page.mouse.up();
+    await page.keyboard.up('Shift');
+    await page.waitForTimeout(300);
+    st = await statusOf(page);
+    check('set, and the status line says this side only', /^Pull set/.test(st) && /this side only/.test(st), st.slice(0, 150));
+    const SO = await page.evaluate(() => {
+      const L = window.nsoPullLast, S = L.S, soup = getActiveModel().rawTris;
+      let outer = 0, outerWorst = 0, inner = 0;
+      for (const v of S.moved) {
+        const rad = Math.hypot(S.basePos[v * 3], S.basePos[v * 3 + 1]);
+        const d = Math.hypot(S.pos[v * 3] - S.basePos[v * 3], S.pos[v * 3 + 1] - S.basePos[v * 3 + 1], S.pos[v * 3 + 2] - S.basePos[v * 3 + 2]);
+        if (rad > 9.9) { outer++; outerWorst = Math.max(outerWorst, d); } else if (rad < 8.5) inner++;
+      }
+      // the outer skin of the committed soup, bit for bit against the soup before
+      const key = (a, i) => a[i] + ',' + a[i + 1] + ',' + a[i + 2];
+      const before = new Set(), now = new Set();
+      for (let i = 0; i < window.__kept.length; i += 3) if (Math.hypot(window.__kept[i], window.__kept[i + 1]) > 9.9) before.add(key(window.__kept, i));
+      for (let i = 0; i < soup.length; i += 3) if (Math.hypot(soup[i], soup[i + 1]) > 9.9) now.add(key(soup, i));
+      let changed = 0; before.forEach(k => { if (!now.has(k)) changed++; });
+      const P = NSO_Thickness.prepare(soup, {}), gv = S.grab.v;
+      const w = P.wallAt([S.pos[gv * 3], S.pos[gv * 3 + 1], S.pos[gv * 3 + 2]], { normal: [0, -1, 0], probe: 3 });
+      return { mode: S.mode, outer, outerWorst, inner, outerVerts: before.size, changed, wall: w.measured ? w.mm : null, D: Math.hypot(...L.D), n: L.normalRaw, Dv: L.D };
+    });
+    check('only the skin under the grab moved', SO.mode === 'side' && SO.inner > 500 && SO.outer === 0, SO.inner + ' bore vertices moved, ' + SO.outer + ' outer');
+    check('the outer surface is unchanged within 0.01 mm', SO.outerWorst <= 0.01 && SO.changed === 0, SO.outerVerts + ' outer vertices, ' + SO.changed + ' changed in the committed soup');
+    check('it was a 0.4 mm push along the bore\'s normal', Math.abs(SO.D - 0.4) < 0.05 && (SO.Dv[0] * SO.n[0] + SO.Dv[1] * SO.n[1] + SO.Dv[2] * SO.n[2]) / SO.D / Math.hypot(...SO.n) > 0.999, f3(SO.D) + ' mm');
+    check('wall 2.0 +- 0.05 at the grab', SO.wall !== null && Math.abs(SO.wall - 2.0) <= 0.05, f3(SO.wall) + ' mm');
+    const mvs = await canonical(page, 'bore-side');
+    check('mesh_validate.py --gate PASS', mvs.verdict === 'PASS', mvs.triangles + ' triangles; ' + (mvs.verdict_fails || []).join('; '));
+    await clickUndo(page);
+    check('Undo restores the soup exactly', await sameAsKept(page));
+    await page.click('#chk-pull-side');                       // off again
+    await page.click('#btn-pull');                            // Pull off
 
     /* ============================================================== 5 */
     console.log('\n=== 5. a coarse box (12 triangles) - densified under the grab, a smooth bump ===');

@@ -937,6 +937,7 @@
                        title="The falloff radius, 1 to 50 mm. It is the Brush's size slider: the two move together.">
                 <output id="out-pull-size" class="vp-brush-out">12 mm</output>
               </div>
+              <label class="vp-clone" title="Off (the default): a wall moves as one section - each vertex is paired with the one straight through the wall from it and both move by the same amount, so the wall keeps its thickness. On: the falloff is measured along the surface and ONLY the skin under the grab moves; the skin behind it stays. That is how the inside of a tube is pushed locally while the outside stays true. The 0.8 mm wall guard still applies."><input type="checkbox" id="chk-pull-side"> This side only</label>
               <p id="pull-readout" class="bend-readout">Press and drag on the piece to pull; click to pin.</p>
               <div class="vp-row vp-row-pair">
                 <button id="btn-pull-clear" class="btn btn-secondary" type="button" disabled

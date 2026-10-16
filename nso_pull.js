@@ -53,16 +53,19 @@
      COLLAPSE a triangle that goes to zero area is a fold; refused as one.
    A refused pull returns the words and no triangles.
 
-   WHAT A PULL DOES TO A THIN WALL. The rule is the plain one - move by D times
-   a falloff - so a wall pulled sideways is SHEARED, not bent: its two skins
-   move together, and the wall is thinner measured across its new slope by
-   1/sqrt(1 + slope^2), slope up to 1.5 * |D| / r. At the default 12 mm radius a
-   6 mm pull of a 1.6 mm wall leaves about 1.2 mm; at 50 mm, 1.56. The guard
-   above is what keeps that honest; it does not stop it. docs/PULL.md says so.
+   WHAT A PULL DOES TO A WALL. By default (the SECTION RULE, findPartners below)
+   each wall vertex is paired with the point straight through the wall from it
+   and takes the displacement of their mid-point, so both skins move by the same
+   vector and the wall never gets thicker; carried sideways across a slope it is
+   still thinner measured square to its new surface, by cos(slope), slope up to
+   1.5 |D| / r: 1.57 mm of a 1.6 mm wall at 50 mm radius, 1.39 at 12. With
+   `sideOnly` the falloff is measured along the surface and only the skin under
+   the grab moves. `section: false` is the plain rule - each vertex by its own
+   distance - kept for the headless checks. docs/PULL.md has the numbers.
 
      NSO_Pull.prepare(rawTris, grab, pins, opts) -> S      (S.ok false = refused)
        grab { c:[x,y,z], r }       pins [{ c, r }]
-       opts { spacing = 0.5, maxTris, nozzle = 0.4 }
+       opts { spacing = 0.5, maxTris, nozzle = 0.4, sideOnly = false, section = true }
      NSO_Pull.displace(S, D)       fills S.pos: base + D * phi, over S.zone
      NSO_Pull.finish(S, D, opts)   the guards -> { ok, reason, tris, report }
      NSO_Pull.pull(rawTris, spec)  all three, for a headless caller
@@ -80,6 +83,12 @@
   var EPS4 = Math.pow(0.05, 4);
   var MAX_STATIONS = 24000;    // wall stations before sampling every k-th
   var SNAP_PIN = 1.2 * SPACING;
+  var PARTNER_MAX = 6;         // mm: a surface deeper than this behind a vertex is a solid, not its wall's other skin
+  var PARTNER_RATIO = 2;       // ... and the hit must be within this many x the local wall thickness
+  var PARTNER_ANTI = -0.8;     // ... and face back at the vertex (cos of the angle between the two normals)
+  var OFFSET_RINGS = 12;       // rings the mid-point offset is carried past the last partnered vertex ...
+  var OFFSET_FADE = 0.85;      // ... and the factor it fades by at each
+  var CREASE_DEG = 60;         // "this side only" never crosses an edge sharper than this
 
   function round3(v) { return Math.round(v * 1000) / 1000; }
 
@@ -94,25 +103,31 @@
     return t * t * (3 - 2 * t);
   }
 
-  /* The fraction of the grab's displacement point p gets. */
-  function phiAt(grab, pins, p) {
-    var dx = p[0] - grab.c[0], dy = p[1] - grab.c[1], dz = p[2] - grab.c[2];
-    var dg2 = dx * dx + dy * dy + dz * dz;
-    var g = bell(Math.sqrt(dg2), grab.r);
+  /* phi from distances already measured: dg to the grab, dps[i] to pin i. The
+     distances are Euclidean in space for a plain pull, from a wall's mid-surface
+     for a section pull, along the surface for "This side only". */
+  function phiD(dg, rg, dps, rps) {
+    var g = bell(dg, rg);
     if (!(g > 0)) return 0;
-    if (!pins || !pins.length) return g;
-    var wg = 1 / (dg2 * dg2 + EPS4), s = 1;
-    for (var i = 0; i < pins.length; i++) {
-      var pn = pins[i];
-      var ex = p[0] - pn.c[0], ey = p[1] - pn.c[1], ez = p[2] - pn.c[2];
-      var dp2 = ex * ex + ey * ey + ez * ez;
-      var b = bell(Math.sqrt(dp2), pn.r);
+    if (!dps || !dps.length) return g;
+    var wg = 1 / (dg * dg * dg * dg + EPS4), s = 1;
+    for (var i = 0; i < dps.length; i++) {
+      var b = bell(dps[i], rps[i]);
       if (!(b > 0)) continue;
-      var wp = 1 / (dp2 * dp2 + EPS4);
+      var d2 = dps[i] * dps[i];
+      var wp = 1 / (d2 * d2 + EPS4);
       s *= 1 - b * (wp / (wp + wg));
     }
     return g * s;
   }
+
+  /* The fraction of the grab's displacement point p gets, by straight distance. */
+  function phiAt(grab, pins, p) {
+    var dg = Math.sqrt(sq(p, grab.c)), dps = [], rps = [];
+    for (var i = 0; i < (pins ? pins.length : 0); i++) { dps.push(Math.sqrt(sq(p, pins[i].c))); rps.push(pins[i].r); }
+    return phiD(dg, grab.r, dps, rps);
+  }
+  function sq(a, b) { var x = a[0] - b[0], y = a[1] - b[1], z = a[2] - b[2]; return x * x + y * y + z * z; }
 
   /* ---------------------------------------------------------------- prepare */
 
@@ -124,6 +139,251 @@
       if (d < bd) { bd = d; best = v; }
     }
     return { v: best, d: Math.sqrt(bd) };
+  }
+
+  /* ---------------------------------------------- a wall's mid-surface */
+
+  /* THE SECTION RULE. A vertex on one skin of a wall and the point straight
+     through the wall from it are two ends of one section; their falloff
+     distance is measured from the MID-POINT, so both get the same displacement
+     and the wall moves as one section instead of its two skins being carried by
+     different amounts. The partner is the first surface met along the vertex's
+     inward normal, if it is within PARTNER_MAX (a deeper one is a solid, not a
+     wall), within PARTNER_RATIO x the local wall thickness (the thinnest such
+     hit in the vertex's one-ring - a hit much longer than its neighbours' is a
+     ray that slid out of a corner, not the far skin), and faces back at the
+     vertex. A vertex with no partner - an open edge, a solid, a rim corner -
+     keeps its own position: the plain rule.
+
+     findPartners() returns, for each vertex asked: has[], and anchor[] (the
+     mid-point). The ray cast is its own: a uniform grid over the triangles
+     near the grab, because NSO_Thickness.wallAt() looks the nearest face up
+     first and 70,000 of those is twenty seconds on a 50 mm radius. */
+  function findPartners(S, cands, centre, reach) {
+    var mesh = S.mesh, pos = S.basePos, tri = mesh.tri, V = mesh.vertCount;
+    var n = cands.length;
+    var out = { has: new Uint8Array(n), anchor: new Float64Array(n * 3), t: new Float64Array(n) };
+    var norms = vertexNormals(S, pos, cands);
+    // grid over the triangles within `reach` of the grab
+    var CELL = 1.0, inv = 1 / CELL, grid = new Map(), r2 = reach * reach, T = mesh.triCount;
+    var tn = new Float64Array(T * 3), keep = [];
+    function key(i, j, k) { return ((i + 4096) * 8192 + (j + 4096)) * 8192 + (k + 4096); }
+    for (var t = 0; t < T; t++) {
+      var ia = tri[t * 3] * 3, ib = tri[t * 3 + 1] * 3, ic = tri[t * 3 + 2] * 3;
+      var near = false;
+      for (var q = 0; q < 3 && !near; q++) {
+        var io = tri[t * 3 + q] * 3;
+        var dx = pos[io] - centre[0], dy = pos[io + 1] - centre[1], dz = pos[io + 2] - centre[2];
+        if (dx * dx + dy * dy + dz * dz <= r2) near = true;
+      }
+      if (!near) continue;
+      var ux = pos[ib] - pos[ia], uy = pos[ib + 1] - pos[ia + 1], uz = pos[ib + 2] - pos[ia + 2];
+      var wx = pos[ic] - pos[ia], wy = pos[ic + 1] - pos[ia + 1], wz = pos[ic + 2] - pos[ia + 2];
+      var cx = uy * wz - uz * wy, cy = uz * wx - ux * wz, cz = ux * wy - uy * wx, L = Math.sqrt(cx * cx + cy * cy + cz * cz);
+      if (!(L > 0)) continue;
+      tn[t * 3] = cx / L; tn[t * 3 + 1] = cy / L; tn[t * 3 + 2] = cz / L;
+      keep.push(t);
+      var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+      for (var m = 0; m < 3; m++) {
+        var o3 = tri[t * 3 + m] * 3;
+        for (var a = 0; a < 3; a++) { if (pos[o3 + a] < lo[a]) lo[a] = pos[o3 + a]; if (pos[o3 + a] > hi[a]) hi[a] = pos[o3 + a]; }
+      }
+      for (var i = Math.floor(lo[0] * inv); i <= Math.floor(hi[0] * inv); i++)
+        for (var j = Math.floor(lo[1] * inv); j <= Math.floor(hi[1] * inv); j++)
+          for (var k = Math.floor(lo[2] * inv); k <= Math.floor(hi[2] * inv); k++) {
+            var kk = key(i, j, k), b2 = grid.get(kk);
+            if (b2) b2.push(t); else grid.set(kk, [t]);
+          }
+    }
+    var stamp = new Int32Array(T), rayId = 0;
+    var rawT = new Float64Array(V).fill(Infinity), rawOK = new Uint8Array(V);
+    for (var c = 0; c < n; c++) {
+      var v = cands[c], o = v * 3;
+      var nx = norms[c * 3], ny = norms[c * 3 + 1], nz = norms[c * 3 + 2];
+      if (!nx && !ny && !nz) continue;
+      var dir = [-nx, -ny, -nz], org = [pos[o], pos[o + 1], pos[o + 2]];
+      rayId++;
+      var ci = [Math.floor(org[0] * inv), Math.floor(org[1] * inv), Math.floor(org[2] * inv)];
+      var step = [0, 0, 0], tMax = [Infinity, Infinity, Infinity], tDelta = [Infinity, Infinity, Infinity];
+      for (var ax = 0; ax < 3; ax++) {
+        if (dir[ax] > 1e-12) { step[ax] = 1; tMax[ax] = ((ci[ax] + 1) * CELL - org[ax]) / dir[ax]; tDelta[ax] = CELL / dir[ax]; }
+        else if (dir[ax] < -1e-12) { step[ax] = -1; tMax[ax] = (ci[ax] * CELL - org[ax]) / dir[ax]; tDelta[ax] = -CELL / dir[ax]; }
+      }
+      var best = Infinity, bestT = -1, entry = 0;
+      while (entry <= Math.min(best, PARTNER_MAX)) {
+        var bucket = grid.get(key(ci[0], ci[1], ci[2]));
+        if (bucket) {
+          for (var bi = 0; bi < bucket.length; bi++) {
+            var tt = bucket[bi];
+            if (stamp[tt] === rayId) continue;
+            stamp[tt] = rayId;
+            if (tri[tt * 3] === v || tri[tt * 3 + 1] === v || tri[tt * 3 + 2] === v) continue;
+            // Moller-Trumbore, both sides
+            var a0 = tri[tt * 3] * 3, a1 = tri[tt * 3 + 1] * 3, a2 = tri[tt * 3 + 2] * 3;
+            var e1x = pos[a1] - pos[a0], e1y = pos[a1 + 1] - pos[a0 + 1], e1z = pos[a1 + 2] - pos[a0 + 2];
+            var e2x = pos[a2] - pos[a0], e2y = pos[a2 + 1] - pos[a0 + 1], e2z = pos[a2 + 2] - pos[a0 + 2];
+            var px = dir[1] * e2z - dir[2] * e2y, py = dir[2] * e2x - dir[0] * e2z, pz = dir[0] * e2y - dir[1] * e2x;
+            var det = e1x * px + e1y * py + e1z * pz;
+            if (Math.abs(det) < 1e-14) continue;
+            var id = 1 / det, sx = org[0] - pos[a0], sy = org[1] - pos[a0 + 1], sz = org[2] - pos[a0 + 2];
+            var uu = (sx * px + sy * py + sz * pz) * id;
+            if (uu < -1e-9 || uu > 1 + 1e-9) continue;
+            var qx = sy * e1z - sz * e1y, qy = sz * e1x - sx * e1z, qz = sx * e1y - sy * e1x;
+            var vv = (dir[0] * qx + dir[1] * qy + dir[2] * qz) * id;
+            if (vv < -1e-9 || uu + vv > 1 + 1e-9) continue;
+            var th = (e2x * qx + e2y * qy + e2z * qz) * id;
+            if (th > 1e-6 && th < best) { best = th; bestT = tt; }
+          }
+        }
+        var kx = (tMax[0] < tMax[1]) ? (tMax[0] < tMax[2] ? 0 : 2) : (tMax[1] < tMax[2] ? 1 : 2);
+        if (!isFinite(tMax[kx])) break;
+        entry = tMax[kx]; ci[kx] += step[kx]; tMax[kx] += tDelta[kx];
+      }
+      if (bestT < 0 || best > PARTNER_MAX) continue;
+      // the far surface must face back at the vertex
+      var facing = tn[bestT * 3] * nx + tn[bestT * 3 + 1] * ny + tn[bestT * 3 + 2] * nz;
+      if (facing > PARTNER_ANTI) continue;
+      rawT[v] = best; rawOK[v] = 1;
+      out.t[c] = best;
+    }
+    // local thickness: the thinnest hit in the vertex's one-ring (and its own)
+    for (var c2 = 0; c2 < n; c2++) {
+      var v2 = cands[c2];
+      if (!rawOK[v2]) continue;
+      var loc = rawT[v2];
+      for (var j2 = S.vtStart[v2]; j2 < S.vtStart[v2 + 1]; j2++) {
+        var t2 = S.vtList[j2];
+        for (var m2 = 0; m2 < 3; m2++) { var u2 = tri[t2 * 3 + m2]; if (rawOK[u2] && rawT[u2] < loc) loc = rawT[u2]; }
+      }
+      if (rawT[v2] > PARTNER_RATIO * loc) continue;
+      out.has[c2] = 1;
+      var o2 = v2 * 3, h = rawT[v2] / 2;
+      out.anchor[c2 * 3] = pos[o2] - norms[c2 * 3] * h;
+      out.anchor[c2 * 3 + 1] = pos[o2 + 1] - norms[c2 * 3 + 1] * h;
+      out.anchor[c2 * 3 + 2] = pos[o2 + 2] - norms[c2 * 3 + 2] * h;
+    }
+    return out;
+  }
+
+  /* ---------------------------------------------- "this side only" */
+
+  /* Distance ALONG THE SURFACE from vertex `src`, to every vertex within
+     `radius` of it, by Dijkstra over the mesh's edges - and never across a
+     crease (two faces more than CREASE_DEG apart), so the walk stays on the
+     skin it started on: a bore does not reach the outside by way of the rim. */
+  function geodesic(S, src, radius) {
+    var tri = S.mesh.tri, pos = S.basePos, cosC = Math.cos(CREASE_DEG * Math.PI / 180);
+    var tnCache = new Map();
+    function tnorm(t) {
+      var c = tnCache.get(t);
+      if (c) return c;
+      var a = tri[t * 3] * 3, b = tri[t * 3 + 1] * 3, cc = tri[t * 3 + 2] * 3;
+      var ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+      var vx = pos[cc] - pos[a], vy = pos[cc + 1] - pos[a + 1], vz = pos[cc + 2] - pos[a + 2];
+      var x = uy * vz - uz * vy, y = uz * vx - ux * vz, z = ux * vy - uy * vx, L = Math.sqrt(x * x + y * y + z * z) || 1;
+      c = [x / L, y / L, z / L]; tnCache.set(t, c); return c;
+    }
+    var dist = new Map(), heap = [];
+    function push(d, v) {
+      heap.push([d, v]);
+      var i = heap.length - 1;
+      while (i > 0) { var p = (i - 1) >> 1; if (heap[p][0] <= heap[i][0]) break; var tmp = heap[p]; heap[p] = heap[i]; heap[i] = tmp; i = p; }
+    }
+    function pop() {
+      var top = heap[0], last = heap.pop();
+      if (heap.length) {
+        heap[0] = last; var i = 0;
+        for (;;) {
+          var l = 2 * i + 1, r = l + 1, m = i;
+          if (l < heap.length && heap[l][0] < heap[m][0]) m = l;
+          if (r < heap.length && heap[r][0] < heap[m][0]) m = r;
+          if (m === i) break;
+          var tmp = heap[m]; heap[m] = heap[i]; heap[i] = tmp; i = m;
+        }
+      }
+      return top;
+    }
+    dist.set(src, 0); push(0, src);
+    var done = new Set();
+    while (heap.length) {
+      var top = pop(), d = top[0], v = top[1];
+      if (done.has(v)) continue;
+      done.add(v);
+      /* A vertex ON a crease (a rim: it belongs to the skin behind the grab and
+         to the face over the edge) is reached but not walked on from: crossing
+         the crease through its corner would be the one way over it that the
+         edges do not forbid. */
+      var steps = [], onCrease = false;
+      for (var j = S.vtStart[v]; j < S.vtStart[v + 1]; j++) {
+        var t = S.vtList[j];
+        for (var m = 0; m < 3; m++) {
+          var u = tri[t * 3 + m];
+          if (u === v) continue;
+          // the other triangle on edge v-u, if any: is the edge a crease?
+          var crease = false;
+          for (var j2 = S.vtStart[v]; j2 < S.vtStart[v + 1] && !crease; j2++) {
+            var t2 = S.vtList[j2];
+            if (t2 === t) continue;
+            if (tri[t2 * 3] !== u && tri[t2 * 3 + 1] !== u && tri[t2 * 3 + 2] !== u) continue;
+            var n1 = tnorm(t), n2 = tnorm(t2);
+            if (n1[0] * n2[0] + n1[1] * n2[1] + n1[2] * n2[2] < cosC) crease = true;
+          }
+          if (crease) { onCrease = true; continue; }
+          steps.push(u);
+        }
+      }
+      if (onCrease && v !== src) continue;
+      for (var si = 0; si < steps.length; si++) {
+        var u2 = steps[si];
+        var dx = pos[u2 * 3] - pos[v * 3], dy = pos[u2 * 3 + 1] - pos[v * 3 + 1], dz = pos[u2 * 3 + 2] - pos[v * 3 + 2];
+        var nd = d + Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (nd >= radius) continue;
+        var old = dist.get(u2);
+        if (old === undefined || nd < old) { dist.set(u2, nd); push(nd, u2); }
+      }
+    }
+    return dist;
+  }
+
+  /* WHERE THE SECTION RULE STOPS. At a wall's rim (and at any open edge) the
+     vertices on one side have a partner and their neighbours do not, and if the
+     neighbours simply fell back to their own position the two would be
+     measured from points up to half a wall apart: a step in the displacement
+     of 0.1 mm per 0.3 mm of surface, which on a 1.6 mm lip left 0.46 mm of wall
+     at the rim. So the offset (mid-point minus vertex) is carried outward from
+     the partnered vertices ring by ring, fading by OFFSET_FADE each ring for
+     OFFSET_RINGS rings: the plain rule is reached by a slope, not a step. A
+     solid, with no partnered vertex near it, never gets an offset at all. */
+  function extendOffsets(S, cands, off, st) {
+    var tri = S.mesh.tri, inCand = new Uint8Array(S.mesh.vertCount);
+    for (var i = 0; i < cands.length; i++) inCand[cands[i]] = 1;
+    var frontier = [];
+    for (i = 0; i < cands.length; i++) if (st[cands[i]] === 2) frontier.push(cands[i]);
+    var fade = 1;
+    for (var ring = 0; ring < OFFSET_RINGS && frontier.length; ring++) {
+      fade *= OFFSET_FADE;
+      var next = [], seen = new Map();
+      for (var q = 0; q < frontier.length; q++) {
+        var v = frontier[q];
+        for (var j = S.vtStart[v]; j < S.vtStart[v + 1]; j++) {
+          var t = S.vtList[j];
+          for (var m = 0; m < 3; m++) {
+            var u = tri[t * 3 + m];
+            if (!inCand[u] || st[u]) continue;
+            var a = seen.get(u);
+            if (!a) { a = [0, 0, 0, 0]; seen.set(u, a); next.push(u); }
+            a[0] += off[v * 3]; a[1] += off[v * 3 + 1]; a[2] += off[v * 3 + 2]; a[3]++;
+          }
+        }
+      }
+      // set after the sweep so one ring does not feed the next within a round
+      for (q = 0; q < next.length; q++) {
+        var w = next[q], aa = seen.get(w);
+        off[w * 3] = aa[0] / aa[3] * OFFSET_FADE; off[w * 3 + 1] = aa[1] / aa[3] * OFFSET_FADE; off[w * 3 + 2] = aa[2] / aa[3] * OFFSET_FADE;
+        st[w] = 1;
+      }
+      frontier = next;
+    }
   }
 
   function prepare(rawTris, grab, pins, opts) {
@@ -142,12 +402,28 @@
     var mesh = reg.mesh, V = mesh.vertCount;
     var basePos = new Float64Array(mesh.pos);
 
-    // Snap the handles to a vertex of the mesh they act on.
-    var ng = nearestVertex(basePos, V, grab.c);
-    var g = {
-      c: [basePos[ng.v * 3], basePos[ng.v * 3 + 1], basePos[ng.v * 3 + 2]],
-      r: grab.r, v: ng.v, at: grab.c.slice()
+    // Vertex -> triangles, so a live preview rewrites only what moved.
+    var T = mesh.triCount, tri = mesh.tri;
+    var vdeg = new Int32Array(V + 1), t, k, v;
+    for (t = 0; t < T * 3; t++) vdeg[tri[t] + 1]++;
+    for (v = 0; v < V; v++) vdeg[v + 1] += vdeg[v];
+    var vtList = new Int32Array(T * 3), fill = new Int32Array(V);
+    for (t = 0; t < T; t++) {
+      for (k = 0; k < 3; k++) { var vv = tri[t * 3 + k]; vtList[vdeg[vv] + fill[vv]++] = t; }
+    }
+    var S = {
+      ok: true, reason: '',
+      mesh: mesh, basePos: basePos, pos: new Float64Array(basePos),
+      vtStart: vdeg, vtList: vtList,
+      densify: reg.report, changed: reg.changed,
+      origTris: rawTris, spacing: spacing,
+      nozzle: opts.nozzle > 0 ? opts.nozzle : NOZZLE
     };
+    S.mode = opts.sideOnly ? 'side' : (opts.section === false ? 'space' : 'section');
+
+    // The handles snap to a vertex of the mesh they act on.
+    var ng = nearestVertex(basePos, V, grab.c);
+    var g = { c: [basePos[ng.v * 3], basePos[ng.v * 3 + 1], basePos[ng.v * 3 + 2]], r: grab.r, v: ng.v, at: grab.c.slice() };
     var ps = [];
     for (var i = 0; i < pins.length; i++) {
       var np = nearestVertex(basePos, V, pins[i].c);
@@ -157,39 +433,71 @@
         r: pins[i].r, v: snapped ? np.v : -1, at: pins[i].c.slice()
       });
     }
+    S.grab = g; S.pins = ps;
 
-    // The zone (every vertex the grab can reach) and phi for each, once.
-    var zone = [], phiList = [], moved = [];
-    var p = [0, 0, 0], r2 = g.r * g.r;
-    for (var v = 0; v < V; v++) {
-      var dx = basePos[v * 3] - g.c[0], dy = basePos[v * 3 + 1] - g.c[1], dz = basePos[v * 3 + 2] - g.c[2];
-      if (dx * dx + dy * dy + dz * dz >= r2) continue;
-      p[0] = basePos[v * 3]; p[1] = basePos[v * 3 + 1]; p[2] = basePos[v * 3 + 2];
-      var f = phiAt(g, ps, p);
-      zone.push(v); phiList.push(f);
-      if (f > 0) moved.push(v);
+    var zone = [], phiList = [], moved = [], partnered = 0;
+    var rg = g.r;
+    if (S.mode === 'side') {
+      /* Only the skin under the grab: every distance is along the surface. */
+      var dg = geodesic(S, g.v, rg);
+      var pd = ps.map(function (pn) { return pn.v >= 0 ? geodesic(S, pn.v, pn.r) : null; });
+      dg.forEach(function (d, vtx) {
+        var dps = [], rps = [];
+        for (var q = 0; q < ps.length; q++) {
+          if (!pd[q]) continue;
+          var dq = pd[q].get(vtx);
+          dps.push(dq === undefined ? Infinity : dq); rps.push(ps[q].r);
+        }
+        var f = phiD(d, rg, dps, rps);
+        zone.push(vtx); phiList.push(f);
+        if (f > 0) moved.push(vtx);
+      });
+    } else {
+      var cands = [], r2 = Math.pow(rg + (S.mode === 'section' ? PARTNER_MAX / 2 : 0), 2);
+      var want = new Set();
+      for (v = 0; v < V; v++) {
+        var dx = basePos[v * 3] - g.c[0], dy = basePos[v * 3 + 1] - g.c[1], dz = basePos[v * 3 + 2] - g.c[2];
+        if (dx * dx + dy * dy + dz * dz < r2) { cands.push(v); want.add(v); }
+      }
+      ps.forEach(function (pn) { if (pn.v >= 0 && !want.has(pn.v)) { cands.push(pn.v); want.add(pn.v); } });
+      var off = null, st = null;
+      if (S.mode === 'section') {
+        var cArr = Int32Array.from(cands);
+        var pt = findPartners(S, cArr, g.c, rg + PARTNER_MAX + 1);
+        off = new Float64Array(V * 3); st = new Uint8Array(V);
+        for (var c0 = 0; c0 < cArr.length; c0++) {
+          if (!pt.has[c0]) continue;
+          var w0 = cArr[c0];
+          st[w0] = 2;
+          off[w0 * 3] = pt.anchor[c0 * 3] - basePos[w0 * 3];
+          off[w0 * 3 + 1] = pt.anchor[c0 * 3 + 1] - basePos[w0 * 3 + 1];
+          off[w0 * 3 + 2] = pt.anchor[c0 * 3 + 2] - basePos[w0 * 3 + 2];
+        }
+        extendOffsets(S, cArr, off, st);
+        // A handle on a wall is centred on the wall's MID-POINT, so both skins
+        // at the grab (or at the pin) share the handle's full effect.
+        var shift = function (h) {
+          if (h.v < 0 || !st[h.v]) return;
+          h.c = [basePos[h.v * 3] + off[h.v * 3], basePos[h.v * 3 + 1] + off[h.v * 3 + 1], basePos[h.v * 3 + 2] + off[h.v * 3 + 2]];
+        };
+        shift(g); ps.forEach(shift);
+      }
+      var pnt = [0, 0, 0];
+      for (var ci = 0; ci < cands.length; ci++) {
+        v = cands[ci];
+        if (st && st[v]) {
+          pnt[0] = basePos[v * 3] + off[v * 3]; pnt[1] = basePos[v * 3 + 1] + off[v * 3 + 1]; pnt[2] = basePos[v * 3 + 2] + off[v * 3 + 2];
+          if (st[v] === 2) partnered++;
+        } else { pnt[0] = basePos[v * 3]; pnt[1] = basePos[v * 3 + 1]; pnt[2] = basePos[v * 3 + 2]; }
+        if (sq(pnt, g.c) >= rg * rg) continue;
+        var f2 = phiAt(g, ps, pnt);
+        zone.push(v); phiList.push(f2);
+        if (f2 > 0) moved.push(v);
+      }
     }
-
-    // Vertex -> triangles, so a live preview rewrites only what moved.
-    var T = mesh.triCount, tri = mesh.tri;
-    var vdeg = new Int32Array(V + 1), t, k;
-    for (t = 0; t < T * 3; t++) vdeg[tri[t] + 1]++;
-    for (v = 0; v < V; v++) vdeg[v + 1] += vdeg[v];
-    var vtList = new Int32Array(T * 3), fill = new Int32Array(V);
-    for (t = 0; t < T; t++) {
-      for (k = 0; k < 3; k++) { var vv = tri[t * 3 + k]; vtList[vdeg[vv] + fill[vv]++] = t; }
-    }
-
-    return {
-      ok: true, reason: '',
-      mesh: mesh, basePos: basePos, pos: new Float64Array(basePos),
-      grab: g, pins: ps,
-      zone: new Int32Array(zone), phi: new Float64Array(phiList), moved: new Int32Array(moved),
-      vtStart: vdeg, vtList: vtList,
-      densify: reg.report, changed: reg.changed,
-      origTris: rawTris, spacing: spacing,
-      nozzle: opts.nozzle > 0 ? opts.nozzle : NOZZLE
-    };
+    S.zone = new Int32Array(zone); S.phi = new Float64Array(phiList); S.moved = new Int32Array(moved);
+    S.partnered = partnered;
+    return S;
   }
 
   /* ---------------------------------------------------------------- displace */

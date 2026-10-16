@@ -4,18 +4,14 @@
 guards, headless) and `app-pull.js` (the pointer session), under **Shape -> Pull**.
 
 ```
-node tools/nso_pull_test.js          headless: densify, field, pins, tube, box, guards (58 checks)
+node tools/nso_pull_test.js          headless: densify, field, pins, tube, box, guards (72 checks)
 node tools/nso_pull_drive_check.js   the real app at 1280x800: gesture, pins, Shift, Escape, refusals
-PULL_SHOTS=dir node tools/nso_pull_drive_check.js     also writes the screenshot
+PULL_SHOTS=dir node tools/nso_pull_drive_check.js     screenshots elsewhere (default tools/pull-out/)
 ```
 
 Both are in `npm test` (`pull:test`, `pull:drive`).
 
-![mid-drag on a Stock tube's lip, a pin on the other side](img/pull-drag-pin.png)
-
-*Mid-drag: a Stock tube D20 wall 1.6, a 30 mm pin on the right-hand lip (the red
-anchor, with its radius), the left-hand lip grabbed and pulled 6 mm outward in the view
-plane. The mesh on screen is the real one, live.*
+(A mid-drag screenshot is in the PR description; the drive check writes its own to `tools/pull-out/`, which is git-ignored.)
 
 ## The gesture
 
@@ -24,6 +20,7 @@ plane. The mesh on screen is the real one, live.*
 | **Arm** | select a piece, press **Pull**. The panel's slider *is* the Brush's size slider (the two are mirrored): the falloff radius, 1-50 mm, 12 by default. |
 | **Click** | a plain click on the piece drops a **pin**: a spot that holds still. It is drawn as a small red anchor with its radius, keeps the radius the slider had when it was placed, and stays until **Clear pins** or until Pull is left. |
 | **Drag** | press-and-drag a spot to **grab** it. After 4 px the triangles under the grab are densified (below) and the real mesh follows the cursor, live, in the **view plane** - the plane through the grab, square to the camera. **Shift** moves it **along the surface normal** at the grab, in or out. |
+| **This side only** | a checkbox in the panel, off by default (below). |
 | **Release** | is Set. One Undo step. There is no Set button. |
 | **Escape** | mid-drag puts the piece back. **Cancel** does the same and leaves the tool. |
 
@@ -55,12 +52,27 @@ The grab (always) and a pin (when a vertex is within 0.6 mm) **snap to the neare
 vertex** of the densified mesh, so "the lip moved 6 mm at the grab" and "the pinned
 vertex did not move" are statements about a vertex.
 
-Measured, headless, on the Stock tube D20 wall 1.6 (`tools/nso_pull_test.js`):
-the grab vertex moves 6.000 mm; every vertex moves by exactly `6 x bell(d)` (worst
-error 4e-15 mm over 60,000 vertices); 0 at and beyond the radius (2,467 vertices, none
-moved; the tube's far end is bit-for-bit where it was). With a 30 mm pin on the
-other lip: the pinned vertex moves 0 mm, everything within 1 mm of it at most 0.007 mm,
-while the same spot unpinned would have moved 2.0 mm; the grab still moves 6.000 mm.
+### Where the distance is measured - three ways
+
+| | the falloff distance is measured |
+|---|---|
+| **the section rule** (default) | from the wall's **mid-surface**, not through space. Each vertex is paired with its opposite-skin partner - the first surface met along its inward normal, if it is within 6 mm (deeper is a solid, not a wall), within 2x the *local wall thickness* (the thinnest such hit in the vertex's one-ring: a hit much longer than its neighbours' is a ray that slid out of a corner), and faces back at the vertex - and the vertex takes the displacement of their shared **mid-point**. Both skins get the same vector, so a wall moves as one section. The grab and the pins on a wall are centred on the wall's mid-point too, so both skins at the grab follow it fully. |
+| **no partner** | an open edge, a solid, a lip's top face: the vertex's own position, the plain rule. |
+| **This side only** | **along the surface** (Dijkstra over the mesh's edges, never across an edge sharper than 60 degrees, and a vertex ON such an edge is reached but not walked on from, so the walk stays on the skin it started on and a bore does not reach the outside by way of the rim). Only that skin moves; the skin behind it stays bit-for-bit. Pins hold along the surface too. No pairing. |
+
+*Where the section rule meets a vertex with no partner* (a wall's rim, an open edge) the two sides would be measured from points up to half a wall apart: a step in
+the displacement. That cost 0.46 mm of wall at the rim of a 1.6 mm lip in the first
+build of this rule (the 0.8 mm guard refused the pull). So the mid-point offset is
+carried outward from the partnered vertices, 12 rings at a fade of 0.85 each: the plain
+rule is reached by a slope, not a step. A solid, with no partnered vertex near it,
+never gets an offset: it is exactly the plain rule.
+
+Measured, headless, on the Stock tube D20 wall 1.6 (`tools/nso_pull_test.js`): the grab
+vertex moves 6.000 mm; every wall vertex moves by `6 x bell(distance from the mid-surface)`
+(worst error 0.01 mm, the polygon of the facets); 0 beyond the radius; the tube's far end is
+bit-for-bit where it was. With a 30 mm pin on the other lip: the pinned vertex moves 0 mm,
+everything within 1 mm of it at most 0.007 mm, while the same spot unpinned would have
+moved 2.0 mm; the grab still moves 6.000 mm.
 
 ## Densify first - `nso_densify.js`
 
@@ -118,29 +130,45 @@ Output stays manifold and `mesh_validate.py --gate` clean: every output in both 
 (a 120,000-triangle tube, a 72,000-triangle pinned one, the box) is run through it as
 a real STL.
 
-## What a pull does to a thin wall - read this before relying on it
+## What a pull does to a wall
 
-The rule is the plain one: every vertex moves by D times a falloff. So a wall pulled
-sideways is **sheared, not bent** - its two skins move together - and measured across
-its new slope it is thinner by `1 / sqrt(1 + slope^2)`, slope up to `1.5 |D| / r`. On
-the Stock tube (wall 1.6, lip pulled 6 mm):
+**The wall keeps its thickness across the pulled region, at the radius the ticket's test
+uses.** Stock tube D20 wall 1.6, lip pulled 6 mm outward in the view plane:
 
-| falloff radius | thinnest wall | thickest wall |
-|---|---|---|
-| 12 mm (default) | 1.196 mm | |
-| 50 mm | 1.557 mm | 1.868 mm |
+| falloff radius | thinnest | thickest | `cos(slope)` bound |
+|---|---|---|---|
+| 12 mm (default) | 1.388 | 1.601 | 1.28 |
+| 25 mm | 1.505 | 1.601 | 1.505 |
+| 50 mm | **1.574** | **1.601** | 1.575 |
 
-At 50 mm the thin side is the slope bound (1.575) less about 0.03 for the difference
-between the inside and the outside; the thick side is the far side of the tube, where
-the shear runs the other way. **The ticket's "wall 1.6 +- 0.05 across the moved
-region" does not hold on the thick side at any radius, and on the thin side only near
-the 50 mm limit**, so the tests assert what is true - no thinner than 1.54 mm at 50 mm,
-the 0.8 mm guard working - and print the range. A pull that *preserves* thickness is a
-different field (each wall vertex offset from a mid-surface point by a vector rotated
-with the local deformation) and would be a change to the rule the ticket wrote, so it
-has not been built; it is the one follow-up this is waiting on. The guard is what keeps
-the shear honest: a 0.8 mm wall pulled 2 mm at the default radius comes out at 0.74
-and is refused.
+At 50 mm the wall is **1.6 +- 0.05 everywhere** (1.574 .. 1.601; the test asserts it). The
+old rule (each vertex by its own distance) measured 1.557 .. 1.868 there: the thick side
+was the two skins being carried by different amounts, and that is what the section rule
+removes - the wall is never thicker than it was.
+
+**What it does not remove is the tilt, and at a small radius that is not small.** The
+two skins now move by the same vector, so the section is carried sideways across a slope,
+and a section carried sideways across a slope is thinner measured square to its new
+surface, by `cos(slope)` with slope up to `1.5 |D| / r`. At the default 12 mm radius a
+6 mm pull still leaves 1.39 mm (1.6 - 0.21), not 1.6 +- 0.05; at 25 mm, 1.51. So "stays
+1.6 +- 0.05 at any radius" holds from about 40 mm up and is a cosine below it. Keeping
+the full thickness there too needs the section's two half-offsets *turned* with the local
+slope (a rotation of the vertex about the mid-point) - one further step on this rule, not
+built, because the ticket asked for the pairing and not that. The tests assert the bound
+that is true at each radius.
+
+The guard is what keeps either honest. A 0.8 mm wall pulled 2 mm at the default radius
+is still refused (it comes out near 0.74).
+
+## This side only
+
+Off by default. On, only the skin under the grab moves and the skin behind it stays: how
+the inside of a tube is pushed locally while the outside stays true. The Stock tube's
+bore pushed 0.4 mm toward the axis, 8 mm under the lip so the 12 mm radius reaches the rim and must not get over it: the outer surface is unchanged (5,584 outer vertices,
+0 changed, bit-for-bit), the wall at the grab is **2.000 mm** (1.6 + 0.4), the grab moves
+the full 0.4. With the toggle off the same push moves the outer skin 0.4 mm too - the wall
+as one section. The 0.8 mm guard still applies: the outside of a 0.8 mm wall pushed 0.5 mm
+into it is refused. The toggle is read when a grab begins, not mid-drag.
 
 ## Out of scope
 
@@ -150,7 +178,7 @@ individual pins (Undo restores the piece; the pins are raw coordinates and stay)
 ## Files
 
 `nso_densify.js`, `nso_pull.js`, `app-pull.js` (new, `?v=pull1`); `index.html` (button,
-panel, three script tags); `styles.css` (armed colour); `app-core.js` (the undo label,
+panel and its two controls, three script tags); `styles.css` (armed colour); `app-core.js` (the undo label,
 the pointer ask beside the Brush's); `app-input-mode.js` (leave-tool); and the
 mutual-disarm both ways in `app-brush.js`, `app-carve.js`, `app-center-lock.js`,
 `app-lift-plate.js`, `app-mask.js`, `app-measure.js`.

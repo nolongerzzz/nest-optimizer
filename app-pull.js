@@ -17,6 +17,10 @@
               the grab moves in the VIEW PLANE (the plane through the grab,
               square to the camera), or with Shift held ALONG THE SURFACE
               NORMAL at the grab, in or out.
+     THIS SIDE ONLY  a checkbox, off by default. Off: a wall moves as one
+              section (each vertex paired with the one through the wall, both
+              moving by the same amount). On: the falloff is measured along the
+              surface and only the skin under the grab moves. Read at the press.
      RELEASE  is Set. One Undo step. There is no Set button.
      ESCAPE   mid-drag puts the piece back exactly. Cancel does the same and
               leaves the tool; Clear pins takes the pins off.
@@ -104,6 +108,11 @@ if (typeof document !== 'undefined') (function () {
     var o = el('out-pull-size');
     if (o) o.textContent = radius().toFixed(0) + ' mm';
     if (ring && ringVisible && !session) buildRing(radius());
+  }
+  /* "This side only", read when a grab begins (not mid-drag). */
+  function sideOnly() { var c = el('chk-pull-side'); return !!(c && c.checked); }
+  function modeWords(s) {
+    return s.S.mode === 'side' ? 'this side only' : (s.S.partnered ? 'wall as one section, ' + s.S.partnered + ' paired' : 'no wall under it');
   }
   function readout(text, bad) {
     var r = el('pull-readout');
@@ -384,7 +393,8 @@ if (typeof document !== 'undefined') (function () {
     var engPins = pins.filter(function () { return pinModel === m.id; })
                       .map(function (pn) { return { c: pn.c.slice(), r: pn.r }; });
     var rad = radius();
-    var S = NSO_Pull.prepare(m.rawTris, { c: h.point, r: rad }, engPins, { nozzle: 0.4 });
+    var side = sideOnly();
+    var S = NSO_Pull.prepare(m.rawTris, { c: h.point, r: rad }, engPins, { nozzle: 0.4, sideOnly: side });
     if (!S.ok) { say('Pull refused - ' + S.reason + ' - piece unchanged', true); return false; }
 
     var rect = state.renderer.domElement.getBoundingClientRect();
@@ -393,7 +403,7 @@ if (typeof document !== 'undefined') (function () {
     var b = toScreen(p.hit.point.clone().add(rightV), rect);
     p.mesh.updateMatrixWorld();
     session = {
-      m: m, mesh: p.mesh, idx: p.idx, frame: h.frame, S: S, radius: rad,
+      m: m, mesh: p.mesh, idx: p.idx, frame: h.frame, S: S, radius: rad, side: side,
       origGeometry: p.mesh.geometry, previewGeo: null,
       pressWorld: p.hit.point.clone(), normalWorld: h.normalWorld, normalRaw: h.normal,
       startX: pd.x, startY: pd.y,
@@ -406,7 +416,7 @@ if (typeof document !== 'undefined') (function () {
     p.mesh.geometry = session.previewGeo;
     note('preview', session);
     hideRing();
-    var dens = NSO_Densify.say(S.densify);
+    var dens = NSO_Densify.say(S.densify) + ' (' + modeWords(session) + ')';
     say('Pull - ' + dens + '; drag to pull (Shift: along the normal), release to set, Esc to cancel');
     readout(dens.charAt(0).toUpperCase() + dens.slice(1) + '. ' + engPins.length + ' pin' +
             (engPins.length === 1 ? '' : 's') + ' hold.');
@@ -425,7 +435,7 @@ if (typeof document !== 'undefined') (function () {
     s.moves++;
     var mm = Math.hypot(D[0], D[1], D[2]);
     var txt = 'Pulling ' + round(mm, 2).toFixed(2) + ' mm ' + (s.shift ? 'along the normal' : 'in the view plane') +
-              ' - release to set, Esc to cancel';
+              ' (' + modeWords(s) + ') - release to set, Esc to cancel';
     say(txt); readout(txt);
   }
 
@@ -476,6 +486,7 @@ if (typeof document !== 'undefined') (function () {
     var txt = 'Pull set - ' + round(mm, 2).toFixed(2) + ' mm ' + (s.shift ? 'along the normal' : 'in the view plane') +
       ', ' + rep.moved + ' vertices moved over a ' + s.radius.toFixed(0) + ' mm radius' +
       (s.S.pins.length ? ', ' + s.S.pins.length + ' pin' + (s.S.pins.length === 1 ? '' : 's') : '') +
+      ' (' + modeWords(s) + ')' +
       '; ' + NSO_Densify.say(rep.densify) +
       (rep.wall && rep.wall.thinnest != null
         ? '; thinnest wall under the move ' + round(rep.wall.thinnest, 3) + ' mm (floor ' + round(rep.wall.floor, 3) +
@@ -490,7 +501,7 @@ if (typeof document !== 'undefined') (function () {
        S carries the densified base and the final positions; it is dropped the
        next time a pull is prepared and when Pull is left. */
     window.nsoPullLast = { report: rep, D: D, shift: s.shift, grab: s.S.grab, pins: s.S.pins,
-                           radius: s.radius, status: txt, normalRaw: s.normalRaw, S: s.S };
+                           radius: s.radius, status: txt, normalRaw: s.normalRaw, S: s.S, side: s.side };
     readout(txt);
     drawPins();                     // the piece was swapped and re-centred: redraw the anchors
     syncSize();

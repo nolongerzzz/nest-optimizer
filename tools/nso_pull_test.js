@@ -246,44 +246,36 @@ console.log('\n=== 2. the field - bell, grab, pins ===');
 }
 
 /* ====================================================== 3. THE STOCK TUBE */
-console.log('\n=== 3. Stock tube D20 wall 1.6 - grab the lip, pull 6 mm outward ===');
+console.log('\n=== 3. Stock tube D20 wall 1.6 - grab the lip, pull 6 mm outward (the section rule) ===');
 {
   const soup = tube(10, 1.6, 60);
   const R = 50, grab = { c: [9.2, 0, 60], r: R }, Dv = [6, 0, 0];
   const t0 = Date.now();
   const S = PL.prepare(soup, grab, [], {});
-  ok(S.ok, 'prepare: densified first', D.say(S.densify) + ' in ' + (Date.now() - t0) + ' ms');
+  ok(S.ok && S.mode === 'section', 'prepare: densified first, wall vertices paired through the wall', D.say(S.densify) + '; ' + S.partnered + ' of ' + S.zone.length + ' vertices have a partner; ' + (Date.now() - t0) + ' ms');
   PL.displace(S, Dv);
   const gv = S.grab.v, moved = dist(vpos(S.pos, gv), vpos(S.basePos, gv));
-  ok(Math.abs(moved - 6) < 1e-9, 'the lip moved 6 mm at the grab', f3(moved) + ' mm');
-  ok(dist(S.grab.c, grab.c) < 0.5, 'the grab snapped to a vertex within 0.5 mm of where it was put', f3(dist(S.grab.c, grab.c)) + ' mm');
-  // the field is exactly the bell at every vertex the grab reaches
-  let worstErr = 0, nz = 0, atRadius = 0, beyond = 0;
+  ok(Math.abs(moved - 6) < 1e-6, 'the lip moved 6 mm at the grab', f3(moved) + ' mm');
+  ok(dist(S.grab.c, grab.c) < 0.5 + 1.0, 'the grab snapped to a vertex (centred on the wall\'s mid-point if it is on a wall) near where it was put', f3(dist(S.grab.c, grab.c)) + ' mm');
+  /* A wall moves as ONE SECTION: each vertex on the wall moves by 6 mm x
+     bell(distance from the wall's MID-SURFACE), not from itself, so the two
+     skins at any point move together. The mid-surface of this tube is r = 9.2. */
+  let worst = 0, nWall = 0, beyond = 0, beyondMoved = 0;
   for (let v = 0; v < S.mesh.vertCount; v++) {
-    const d = dist(vpos(S.basePos, v), S.grab.c);
-    const disp = dist(vpos(S.pos, v), vpos(S.basePos, v));
-    worstErr = Math.max(worstErr, Math.abs(disp - 6 * PL.bell(d, R)));
-    if (d >= R) { beyond++; if (disp !== 0) atRadius++; }
-    nz++;
+    const b = vpos(S.basePos, v), rad = Math.hypot(b[0], b[1]);
+    if (b[2] > 55 || rad < 8.3 || rad > 10.1) continue;
+    const mid = [b[0] * 9.2 / rad, b[1] * 9.2 / rad, b[2]];
+    const disp = dist(vpos(S.pos, v), b), want = 6 * PL.bell(dist(mid, S.grab.c), R);
+    worst = Math.max(worst, Math.abs(disp - want)); nWall++;
+    if (dist(mid, S.grab.c) >= R + 0.01) { beyond++; if (disp !== 0) beyondMoved++; }
   }
-  ok(worstErr < 1e-9, 'every vertex moved by 6 mm x bell(distance)', 'worst error ' + worstErr.toExponential(2) + ' over ' + nz + ' vertices');
-  ok(atRadius === 0 && beyond > 0, '0 mm at the radius and beyond', beyond + ' vertices at or past 50 mm, none moved');
+  ok(nWall > 10000 && worst < 0.01, 'every wall vertex moves by 6 mm x bell(distance from the wall\'s mid-surface)', 'worst error ' + worst.toExponential(2) + ' mm over ' + nWall + ' vertices');
+  ok(beyond > 0 && beyondMoved === 0, '0 mm at the radius and beyond', beyond + ' wall vertices past 50 mm from the mid-surface, none moved');
   const res = PL.finish(S, Dv, { repair: REPAIR });
   ok(res.ok, 'the guards pass', res.reason || ('thinnest ' + f3(res.report.wall.thinnest) + ' mm, ' + res.report.wall.stations + ' stations, self-intersections ' +
      res.report.pierce.before + ' -> ' + res.report.pierce.after));
   const wr = wallRange(S, res.tris, 59.4);
-  /* THE LOWER HALF OF "1.6 +- 0.05" HOLDS, THE UPPER DOES NOT, AND THE FIELD IS WHY.
-     Every vertex moves by 6 mm x bell(distance), so a wall is carried sideways,
-     not bent: where the carry varies along the wall it shears. Measured square
-     to the new surface the wall is thinner where the slope is steepest and
-     THICKER on the far side of the tube, where the shear runs the other way.
-     At 50 mm radius the thin side is 1.557 mm (the slope bound 1.575, less
-     the inside/outside difference) and the thick side reaches 1.87. A thickness-preserving pull is a different field (offsets
-     rotated by the local deformation) and is not what the ticket specified;
-     docs/PULL.md puts the numbers where the owner can decide. */
-  ok(wr.n > 1000 && wr.lo >= 1.54, 'the wall is no thinner than 1.54 mm anywhere in the moved region (1.6 - 0.06)',
-     'thinnest ' + f3(wr.lo) + ' mm at ' + wr.n + ' stations; the slope bound is ' + f3(1.6 / Math.sqrt(1 + Math.pow(1.5 * 6 / 50, 2))));
-  console.log('        (informational) the wall measures ' + f3(wr.lo) + ' .. ' + f3(wr.hi) + ' mm; thicker than 1.65 on the far side of the tube, by shear');
+  ok(wr.n > 1000 && wr.lo >= 1.55 && wr.hi <= 1.65, 'wall 1.6 +- 0.05 across the moved region', f3(wr.lo) + ' .. ' + f3(wr.hi) + ' mm at ' + wr.n + ' stations');
   const tp = topology(res.tris);
   ok(tp.open === 0 && tp.nm === 0 && tp.wind === 0 && tp.degen === 0, 'manifold: closed, 2-manifold, wound, nothing degenerate');
   const mv = canonical(res.tris, 'tube-r50');
@@ -294,16 +286,33 @@ console.log('\n=== 3. Stock tube D20 wall 1.6 - grab the lip, pull 6 mm outward 
   for (let i = 0; i < res.tris.length; i += 3) have.add(res.tris[i] + ',' + res.tris[i + 1] + ',' + res.tris[i + 2]);
   let far = 0, farKept = 0;
   for (let i = 0; i < soup.length; i += 3) {
-    if (dist([soup[i], soup[i + 1], soup[i + 2]], S.grab.c) >= R) { far++; if (have.has(soup[i] + ',' + soup[i + 1] + ',' + soup[i + 2])) farKept++; }
+    if (dist([soup[i], soup[i + 1], soup[i + 2]], S.grab.c) >= R + 1) { far++; if (have.has(soup[i] + ',' + soup[i + 1] + ',' + soup[i + 2])) farKept++; }
   }
-  ok(far > 0 && far === farKept, 'the tube\'s far end (past the radius) is bit-for-bit where it was', farKept + ' of ' + far + ' vertices');
+  ok(far > 0 && far === farKept, 'the tube\'s far end is bit-for-bit where it was', farKept + ' of ' + far + ' vertices');
 
-  // the same pull at the default radius: thinner, and said so rather than hidden
-  const small = PL.pull(soup, { grab: { c: [9.2, 0, 60], r: 12 }, D: Dv }, { repair: REPAIR });
-  const bound = 1.6 / Math.sqrt(1 + Math.pow(1.5 * 6 / 12, 2));
-  ok(small.ok && small.report.wall.thinnest > 0.8 && small.report.wall.thinnest < 1.6 - 0.05,
-     'at the default 12 mm radius the wall is sheared thinner - reported, not hidden (docs/PULL.md)',
-     'thinnest ' + f3(small.report.wall.thinnest) + ' mm; the slope bound says about ' + f3(bound) + ' mm');
+  /* THE SECTION RULE REMOVES THE SHEAR BETWEEN THE SKINS AND NOT THE TILT. The
+     two skins now move by the same vector, so the wall never gets THICKER (the
+     old rule reached 1.87 on the far side of the tube). But a section carried
+     sideways across a slope is thinner measured square to its new surface, by
+     cos(slope): at a small radius the slope is steep. Asserted against that
+     bound, not against 1.6 +- 0.05, which only the large radius meets. */
+  console.log('        radius -> thinnest .. thickest wall, and the cos(slope) bound (slope <= 1.5 x 6 / r)');
+  for (const r of [12, 25, 50]) {
+    const q = r === 50 ? { S, tris: res.tris } : (() => { const Sq = PL.prepare(soup, { c: [9.2, 0, 60], r }, [], {}); PL.displace(Sq, Dv); return { S: Sq, tris: D.toSoup(Sq.mesh, Sq.pos) }; })();
+    const w = r === 50 ? wr : wallRange(q.S, q.tris, 59.4);
+    const bound = 1.6 / Math.sqrt(1 + Math.pow(1.5 * 6 / r, 2));
+    ok(w.hi <= 1.65 && w.lo >= bound - 0.05, 'r = ' + r + ' mm: never thicker than 1.65, no thinner than the slope bound less 0.05',
+       f3(w.lo) + ' .. ' + f3(w.hi) + ' mm; bound ' + f3(bound));
+  }
+  // the old rule is still there, one switch away: a plain displacement of every vertex by its own distance
+  const plain = PL.prepare(soup, { c: [9.2, 0, 60], r: 12 }, [], { section: false });
+  PL.displace(plain, Dv);
+  let pw = 0;
+  for (let v = 0; v < plain.mesh.vertCount; v++) {
+    const d = dist(vpos(plain.basePos, v), plain.grab.c);
+    pw = Math.max(pw, Math.abs(dist(vpos(plain.pos, v), vpos(plain.basePos, v)) - 6 * PL.bell(d, 12)));
+  }
+  ok(plain.mode === 'space' && pw < 1e-9, 'section: false is the plain rule - every vertex by 6 mm x bell(its own distance)', 'worst error ' + pw.toExponential(2));
 }
 
 /* ================================================================ 4. PINS */
@@ -408,7 +417,7 @@ console.log('\n=== 6. guards - the words, and the piece unchanged ===');
 {
   // a plate pulled down through itself: the self-intersection guard, on its own
   const plate = STOCK.boxSoup(40, 40, 3);
-  const S = PL.prepare(plate, { c: [0, 0, 3], r: 4 }, [], {});
+  const S = PL.prepare(plate, { c: [0, 0, 3], r: 4 }, [], { section: false });   // the plain rule: a section would carry both skins down together
   const Dv = [0, 0, -6];
   PL.displace(S, Dv);
   const g = PL.pierceGuard(S, Dv, { repair: REPAIR });
@@ -422,6 +431,51 @@ console.log('\n=== 6. guards - the words, and the piece unchanged ===');
 {
   const r = PL.pull(STOCK.boxSoup(20, 20, 20), { grab: { c: [0, 0, 20], r: 8 }, D: [0, 0, 0] }, { repair: REPAIR });
   ok(r.ok && r.noop, 'a grab that did not move is a no-op, not a commit');
+}
+
+/* ============================================================= 7. THIS SIDE ONLY */
+console.log('\n=== 7. "This side only" - the bore of the tube pushed 0.4 mm inward ===');
+{
+  const soup = tube(10, 1.6, 60);
+  const bore = [8.4, 0, 52], Dv = [-0.4, 0, 0];             // toward the axis: the wall gets thicker. 8 mm under the lip, so the 12 mm radius reaches the rim and must not get over it
+  const t0 = Date.now();
+  const S = PL.prepare(soup, { c: bore, r: 12 }, [], { sideOnly: true });
+  ok(S.ok && S.mode === 'side', 'prepare in side-only mode', D.say(S.densify) + '; ' + (Date.now() - t0) + ' ms');
+  PL.displace(S, Dv);
+  let outer = 0, outerWorst = 0, inner = 0, rimWorst = 0;
+  for (const v of S.moved) {
+    const rad = Math.hypot(S.basePos[v * 3], S.basePos[v * 3 + 1]);
+    const d = dist(vpos(S.pos, v), vpos(S.basePos, v));
+    if (rad > 9.9) { outer++; outerWorst = Math.max(outerWorst, d); } else if (rad < 8.5) inner++;
+  }
+  ok(inner > 1000, 'the skin under the grab moved', inner + ' bore vertices');
+  ok(outer === 0 && outerWorst <= 0.01, 'the outer surface is unchanged within 0.01 mm', outer + ' outer vertices moved, worst ' + outerWorst.toExponential(1) + ' mm');
+  // and that is true of the whole soup, not just the vertices that were asked about
+  const res = PL.finish(S, Dv, { repair: REPAIR });
+  ok(res.ok, 'the guards pass', res.reason || '');
+  let outerSoup = 0;
+  const base = D.region(soup, { c: bore, r: 12 }, {}).soup, key = new Set();
+  for (let i = 0; i < base.length; i += 3) if (Math.hypot(base[i], base[i + 1]) > 9.9) key.add(base[i] + ',' + base[i + 1] + ',' + base[i + 2]);
+  const after = new Set();
+  for (let i = 0; i < res.tris.length; i += 3) if (Math.hypot(res.tris[i], res.tris[i + 1]) > 9.9) after.add(res.tris[i] + ',' + res.tris[i + 1] + ',' + res.tris[i + 2]);
+  key.forEach(k => { if (!after.has(k)) outerSoup++; });
+  ok(key.size > 1000 && outerSoup === 0, 'every vertex of the outer skin is bit-for-bit where it was', key.size + ' outer vertices, ' + outerSoup + ' changed');
+  const P = TH.prepare(res.tris, {});
+  const gv = S.grab.v, w = P.wallAt(vpos(S.pos, gv), { normal: [-1, 0, 0], probe: 3 });
+  ok(w.measured && Math.abs(w.mm - 2.0) <= 0.05, 'wall 2.0 +- 0.05 at the grab', f3(w.mm) + ' mm (1.6 + 0.4)');
+  ok(Math.abs(dist(vpos(S.pos, gv), vpos(S.basePos, gv)) - 0.4) < 1e-9, 'the grab moved the full 0.4 mm');
+  const mv = canonical(res.tris, 'bore-side');
+  ok(mv.verdict === 'PASS', 'mesh_validate.py --gate PASS', mv.triangles + ' triangles');
+  // the same push with the toggle off carries the outside with it - that is what the toggle is for
+  const both = PL.prepare(soup, { c: bore, r: 12 }, [], {});
+  PL.displace(both, Dv);
+  let outerBoth = 0;
+  for (const v of both.moved) if (Math.hypot(both.basePos[v * 3], both.basePos[v * 3 + 1]) > 9.9) outerBoth = Math.max(outerBoth, dist(vpos(both.pos, v), vpos(both.basePos, v)));
+  ok(outerBoth > 0.3, 'with the toggle off the same push moves the outer skin too (the wall as one section)', f3(outerBoth) + ' mm');
+  // the 0.8 mm guard still applies: a 0.8 wall pushed 0.4 mm toward the axis is fine, pulled into the wall 0.4 mm it is not
+  const thin = tube(10, 0.8, 60);
+  const intoSide = (() => { const St = PL.prepare(thin, { c: [10, 0, 40], r: 12 }, [], { sideOnly: true }); PL.displace(St, [-0.5, 0, 0]); return PL.finish(St, [-0.5, 0, 0], { repair: REPAIR }); })();
+  ok(!intoSide.ok && /under the 0\.8 mm floor/.test(intoSide.reason), 'the 0.8 mm guard still applies: the OUTSIDE of a 0.8 wall pushed 0.5 mm into it is refused', intoSide.reason);
 }
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
