@@ -66,7 +66,9 @@ const ROSTER = [
   { feature: 'Texture',        file: 'app-texture.js',         scope: 'SUB-REGION',
     test: /nsoMaskIsExcludedRaw\s*\(\s*m\s*,\s*face\.n\s*,\s*face\.d/, standDown: /Texture stood down - ' \+ \w+ \+ ' painted facet\(s\)/ },
   { feature: 'Seat here',      file: 'app-seat-surface.js',    scope: 'WHOLE-PIECE',
-    test: /nsoMaskCount\s*\(\s*modelB\s*\)/,                standDown: /Seat here stood down - ' \+ \w+ \+ ' painted face\(s\) on B/ },
+    test: /nsoMaskCount\s*\(\s*modelB\s*\)/,                standDown: /^(?=[\s\S]*verb: 'Seat here', a: 'A', b: 'B')[\s\S]*w\.verb \+ ' stood down - ' \+ \w+ \+ ' painted face\(s\) on ' \+ w\.b\b/ },
+    // #190: one seat behind Seat here and the grab's drop - the words name
+    // the verb and the piece ("Seat here ... on B" for Seat here itself)
   { feature: 'Brush',          file: 'app-brush.js',           scope: 'SUB-REGION',
     test: /NSO_brushPaintCheck/,                            standDown: /Brush stood down - ' \+ [\w.]+ \+ ' painted face\(s\)/ },
   { feature: 'Pull',           file: 'app-pull.js',            scope: 'SUB-REGION',
