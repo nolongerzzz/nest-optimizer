@@ -113,10 +113,7 @@ has to tell them apart.
 | `box_lid_hole` | 1 hole, 22 open edges | CAP: 20 triangles in the lid's plane, canonical **PASS**, volume 6912 = 24 × 24 × 12 | 17 ms |
 | `thin_shell_cup_thin` | thin wall 0.249 mm | THICKEN OUT +0.56 mm (0.249 + 0.56 = 0.809 ≥ 0.8): 96 thin faces → 0 | |
 
-![the Findings card on the shredded sphere, before Fix all](img/repair-loop-shredded-before.png)
-![and after: the rows are green, and Check still reads FAIL](img/repair-loop-shredded-after.png)
-
-**The shredded sphere is closed and manifold, not clean.** Its fragments are
+**The shredded sphere is closed and manifold, not clean.** (`findings:drive` writes the card's before / after screenshots to the git-ignored `tools/repair-out/`.) Its fragments are
 five separate shells; the big fill crosses a small neighbouring fragment, and
 the canonical checker reads **10 piercing pairs** and a few thin faces where it
 does. The engine tries to ease the fill off them and cannot (a 4-vertex hole in

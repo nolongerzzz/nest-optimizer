@@ -40,6 +40,7 @@ const vm = require('vm');
 const { withApp, loadSTL, selectModel, openFinishMenu, ROOT } = require('./nso_app_harness');
 const { readSTL } = require('./nso_stl_io.js');
 const RL = require('./nso_repair_loop_lib.js');
+const SHOTS = path.join(__dirname, 'repair-out');      // git-ignored; the card on the shredded sphere, before and after Fix all
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 let fails = 0;
@@ -547,9 +548,16 @@ withApp(async (page, logs) => {
     check('which puts the piece back bit for bit', (await rawBytes(page, id)) === raw0);
     await page.click('#btn-findings-recheck');
     await page.waitForFunction(i => nsoFindingsState().modelId === i && !nsoFindingsState().stale, id, { timeout: 60000 });
-    // Fix all
+    // Fix all (screenshots of the card before and after, to the git-ignored tools/repair-out/)
+    fs.mkdirSync(SHOTS, { recursive: true });
+    await page.evaluate(() => document.querySelectorAll('details.vp-menu').forEach(x => { x.open = false; }));
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: path.join(SHOTS, 'shredded-before-fix-all.png') });
     await page.click('#btn-findings-fixall');
     st = await card(page); rep = await reportNow(page);
+    await page.evaluate(() => document.querySelectorAll('details.vp-menu').forEach(x => { x.open = false; }));
+    await page.waitForTimeout(2000);
+    await page.screenshot({ path: path.join(SHOTS, 'shredded-after-fix-all.png') });
     check('Fix all: 0 open edges, 0 non-manifold, 0 mis-wound', rep.open === 0 && rep.nm === 0 && rep.wind === 0, JSON.stringify(rep));
     const patches = st.done.filter(d => d.fix === 'patch');
     check('both PATCH rows ran and turned green, one line each', patches.length === 2 && patches.every(d => d.ok), JSON.stringify(st.done.map(d => [d.fix, d.ok])));
