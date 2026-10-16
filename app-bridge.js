@@ -7,10 +7,14 @@
 //   - HOVER: whatever is under the pointer that Bridge could take lights up -
 //     a face (its triangles), an edge (a bar along the whole straight edge) or
 //     a point (a dot) - and the readout names it;
-//   - PRESS on one, DRAG (a line follows the pointer), RELEASE on another:
-//     the web between them is built at once and drawn as a GHOST (amber, as
-//     Bend's), from the very soup Set would weld. A refusal draws nothing and
-//     says why in the readout, in red;
+//   - CLICK on one (it stays marked), orbit, pan and zoom as much as you like -
+//     nothing is held, so the camera is free - then CLICK on another: the web
+//     between them is built at once and drawn as a GHOST (amber, as Bend's),
+//     from the very soup Set would weld. A line from the marked place follows
+//     the pointer meanwhile. A refusal draws nothing and says why in the
+//     readout, in red. A click on empty space, Escape, or a click on the
+//     marked place again drops the mark (and any web on it); a click on
+//     another place while a web is showing moves its second end there;
 //   - SET welds it: the two pieces (or the one, when both ends are on it)
 //     leave the plate and one new piece takes their place, exactly where they
 //     stood. One Undo puts every input back as it was. CANCEL drops the
@@ -35,11 +39,13 @@ var BRIDGE_HOVER_COLOR = 0x22d3ee;
 var BRIDGE_PICK_COLOR = 0xffc83d;       // Cut's blade frame
 var BRIDGE_RENDER_ORDER = 21;
 var BRIDGE_EDGE_PX = 8;                 // a press this close to a face's straight edge picks the edge
+var BRIDGE_CLICK_PX = 4;                // a press that travels farther than this is an orbit, not a click
 
 function NSO_bridgeUI() {
   if (typeof state === 'undefined') return {};
   if (!state.bridge) {
-    state.bridge = { open: false, idx: {}, hover: null, a: null, b: null, plan: null, dragging: false,
+    state.bridge = { open: false, idx: {}, hover: null, a: null, b: null, plan: null,
+                     press: null, last: null, camKey: '',
                      overlay: null, ghost: null, line: null, busy: false, raf: 0, key: '' };
   }
   return state.bridge;
@@ -241,12 +247,12 @@ function NSO_bridgePreview() {
 
 function NSO_bridgeClearPicks() {
   var B = NSO_bridgeUI();
-  B.a = null; B.b = null; B.plan = null; B.dragging = false;
+  B.a = null; B.b = null; B.plan = null;
   NSO_bridgeSetGhost(null); NSO_bridgeDrawLine(null); NSO_bridgeDrawPicks();
   NSO_bridgeSyncRows();
 }
 
-var NSO_BRIDGE_HINT = 'Press on a face, an edge or a point, drag to another, let go.';
+var NSO_BRIDGE_HINT = 'Click a face, an edge or a point, orbit if you like, then click another. Esc or empty space starts over.';
 
 function NSO_bridgeOpen() {
   var B = NSO_bridgeUI(), panel = NSO_bridgeEl('bridge-panel'), btn = NSO_bridgeEl('btn-bridge');
@@ -304,6 +310,13 @@ function NSO_bridgeTick() {
       return !p || NSO_bridgePoseKey(p) !== s.cache.key;
     });
     if (stale) { NSO_bridgeClearPicks(); NSO_bridgeReadout('The pieces moved - pick again. ' + NSO_BRIDGE_HINT, false); }
+  }
+  // The camera moved under a still pointer (wheel, orbit damping): the hover
+  // and the line from the mark follow it.
+  if (B.a && !B.b && !B.press && B.last && state.camera) {
+    state.camera.updateMatrixWorld();
+    var ck = state.camera.matrixWorld.elements.join(',') + '|' + (state.camera.zoom || 1) + '|' + (state.camera.fov || 0);
+    if (ck !== B.camKey) { B.camKey = ck; try { NSO_bridgeHoverAt(B.last); } catch (err) { /* a frame without it */ } }
   }
   B.raf = (typeof requestAnimationFrame === 'function') ? requestAnimationFrame(NSO_bridgeTick) : 0;
 }
@@ -435,66 +448,115 @@ function NSO_bridgeCommit(soupUp, models, placed) {
 
 /* ---------------------------------------------------------- the pointer */
 
+// Is this pick the very place the other one marked? A face is the same face
+// wherever on it the click lands, an edge the same straight run, a point the
+// same spot to within a few pixels.
+function NSO_bridgeSameTarget(x, y) {
+  if (!x || !y || x.sourceId !== y.sourceId || x.target.kind !== y.target.kind) return false;
+  var tx = x.target, ty = y.target;
+  if (tx.kind === 'face') return tx.tri === ty.tri || tx.face.tris.indexOf(ty.tri) >= 0;
+  if (tx.kind === 'edge') {
+    function same(p, q) { return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) < 1e-6; }
+    return (same(tx.a, ty.a) && same(tx.b, ty.b)) || (same(tx.a, ty.b) && same(tx.b, ty.a));
+  }
+  var r = state.renderer.domElement.getBoundingClientRect();
+  function px(t) {
+    var v = NSO_bridgeUpToDisplay(t.point).project(state.camera);
+    return [(v.x + 1) / 2 * r.width, (1 - v.y) / 2 * r.height];
+  }
+  var pa = px(tx), pb = px(ty);
+  return Math.hypot(pa[0] - pb[0], pa[1] - pb[1]) <= BRIDGE_EDGE_PX;
+}
+
+// The pointer is at (clientX, clientY): light what is under it and, with a
+// place marked and no second one yet, run the line out to it (or, off the
+// pieces, to where the pointer's ray is at the mark's depth).
+function NSO_bridgeHoverAt(pt) {
+  var B = NSO_bridgeUI();
+  B.last = { clientX: pt.clientX, clientY: pt.clientY };
+  var sel = null;
+  try { sel = NSO_bridgeTargetAt(pt); } catch (err) { sel = null; }
+  B.hover = sel;
+  if (B.a && !B.b) {
+    var to = sel ? sel.world : null;
+    if (!to) {
+      var p0 = NSO_bridgeUpToDisplay(B.a.target.point), d = state.camera.position.distanceTo(p0);
+      to = state.raycaster.ray.at(d, new THREE.Vector3());
+    }
+    NSO_bridgeDrawLine(NSO_bridgeUpToDisplay(B.a.target.point), to);
+  }
+  NSO_bridgeDrawPicks();
+  if (!B.a) NSO_bridgeReadout(sel ? 'Under the pointer: ' + sel.target.text + ' - click to mark it.' : NSO_BRIDGE_HINT, false);
+  else if (!B.b) NSO_bridgeReadout('From the ' + B.a.target.text + (sel && !NSO_bridgeSameTarget(B.a, sel)
+    ? ' - click the ' + sel.target.text + ' to bridge to it.' : ' - click another place; orbit first if you like. Esc clears it.'), false);
+  return sel;
+}
+
+// A click (press and release without travelling) at ev.
+function NSO_bridgeClick(ev) {
+  var B = NSO_bridgeUI(), sel = null;
+  try { sel = NSO_bridgeTargetAt(ev); } catch (err) { sel = null; }
+  if (!sel || NSO_bridgeSameTarget(B.a, sel)) {
+    // empty space, or the marked place again: let go of the mark
+    if (B.a) { NSO_bridgeClearPicks(); B.hover = sel; NSO_bridgeDrawPicks(); NSO_bridgeReadout(NSO_BRIDGE_HINT, false); }
+    return;
+  }
+  B.hover = sel;
+  if (!B.a) {
+    NSO_bridgeSetGhost(null);
+    B.a = sel; B.b = null; B.plan = null;
+    NSO_bridgeDrawPicks();
+    NSO_bridgeReadout('From the ' + sel.target.text + ' - click another place; orbit first if you like. Esc clears it.', false);
+    NSO_bridgeSyncRows();
+    return;
+  }
+  B.b = sel;
+  NSO_bridgeDrawLine(null);
+  NSO_bridgeDrawPicks();
+  NSO_bridgePreview();
+}
+
 if (typeof document !== 'undefined') {
   (function wireBridge() {
     function onCanvas(ev) { return state.renderer && ev.target === state.renderer.domElement; }
     function onMove(ev) {
       var B = NSO_bridgeUI();
       if (!B.open || B.busy || typeof NSO_Bridge === 'undefined') return;
-      if (!B.dragging && !onCanvas(ev)) return;
-      var sel = null;
-      try { sel = NSO_bridgeTargetAt(ev); } catch (err) { sel = null; }
-      B.hover = sel;
-      if (B.dragging && B.a) {
-        var to = sel ? sel.world : null;
-        if (!to) {
-          // off the pieces: the line ends under the pointer at the start's depth
-          var p0 = NSO_bridgeUpToDisplay(B.a.target.point), d = state.camera.position.distanceTo(p0);
-          to = state.raycaster.ray.at(d, new THREE.Vector3());
-        }
-        NSO_bridgeDrawLine(NSO_bridgeUpToDisplay(B.a.target.point), to);
-      }
-      NSO_bridgeDrawPicks();
-      if (!B.dragging && !B.a) NSO_bridgeReadout(sel ? 'Under the pointer: ' + sel.target.text + ' - press and drag to another place.' : NSO_BRIDGE_HINT, false);
+      var pr = B.press;
+      if (pr && ev.pointerId === pr.id && Math.hypot(ev.clientX - pr.x, ev.clientY - pr.y) > BRIDGE_CLICK_PX) pr.moved = true;
+      if (!onCanvas(ev)) return;
+      NSO_bridgeHoverAt(ev);
     }
+    // A press only starts a click. One that lands on a piece is ours (it must
+    // not also select or drag the piece); one on empty space is left alone, so
+    // the view still orbits. Nothing is captured: the camera is free.
     function onDown(ev) {
       var B = NSO_bridgeUI();
+      if (B.press && ev.pointerId !== B.press.id) { B.press.multi = true; return; }   // a second finger: a pinch, not a click
+      B.press = null;
       if (!B.open || B.busy || ev.button !== 0 || !onCanvas(ev) || typeof NSO_Bridge === 'undefined') return;
       var sel = null;
       try { sel = NSO_bridgeTargetAt(ev); } catch (err) { sel = null; }
-      if (!sel) return;                       // empty space: the view still orbits
-      NSO_bridgeSetGhost(null);
-      B.a = sel; B.b = null; B.plan = null; B.dragging = true; B.hover = sel;
-      NSO_bridgeDrawPicks();
-      NSO_bridgeReadout('From the ' + sel.target.text + ' - drag to another place and let go.', false);
-      NSO_bridgeSyncRows();
+      B.press = { id: ev.pointerId, x: ev.clientX, y: ev.clientY, moved: false, multi: false, onTarget: !!sel };
+      if (!sel) return;
       ev.stopImmediatePropagation();
       ev.preventDefault();
     }
     function onUp(ev) {
-      var B = NSO_bridgeUI();
-      if (!B.open || !B.dragging) return;
-      B.dragging = false;
-      NSO_bridgeDrawLine(null);
-      var sel = null;
-      try { sel = onCanvas(ev) ? NSO_bridgeTargetAt(ev) : null; } catch (err) { sel = null; }
-      if (!sel || (sel.sourceId === B.a.sourceId && sel.target.tri === B.a.target.tri && sel.target.kind === B.a.target.kind &&
-                   Math.hypot(sel.target.point[0] - B.a.target.point[0], sel.target.point[1] - B.a.target.point[1], sel.target.point[2] - B.a.target.point[2]) < 1e-6)) {
-        B.a = null; B.hover = sel;
-        NSO_bridgeDrawPicks(); NSO_bridgeSyncRows();
-        NSO_bridgeReadout('Let go on another face, edge or point to bridge to it. ' + NSO_BRIDGE_HINT, false);
-        return;
-      }
-      B.b = sel;
-      NSO_bridgeDrawPicks();
-      NSO_bridgePreview();
-      ev.stopImmediatePropagation();
+      var B = NSO_bridgeUI(), pr = B.press;
+      if (!pr || ev.pointerId !== pr.id) return;
+      B.press = null;
+      if (pr.onTarget) ev.stopImmediatePropagation();          // its press was ours, so is its release
+      if (!B.open || B.busy || ev.button !== 0 || pr.moved || pr.multi || !onCanvas(ev) || typeof NSO_Bridge === 'undefined') return;
+      if (Math.hypot(ev.clientX - pr.x, ev.clientY - pr.y) > BRIDGE_CLICK_PX) return;
+      NSO_bridgeClick(ev);
     }
+    function onCancel() { NSO_bridgeUI().press = null; }
     function onKey(ev) {
       var B = NSO_bridgeUI();
-      if (!B.open || ev.key !== 'Escape' || !B.dragging) return;
-      B.dragging = false; B.a = null;
-      NSO_bridgeDrawLine(null); NSO_bridgeDrawPicks(); NSO_bridgeSyncRows();
+      if (!B.open || ev.key !== 'Escape' || !B.a) return;
+      NSO_bridgeClearPicks();
+      NSO_bridgeReadout(NSO_BRIDGE_HINT, false);
     }
     function wire() {
       var btn = NSO_bridgeEl('btn-bridge');
@@ -508,11 +570,12 @@ if (typeof document !== 'undefined') {
         var el = NSO_bridgeEl(id);
         if (el) el.addEventListener('change', function () { if (NSO_bridgeUI().a && NSO_bridgeUI().b) NSO_bridgePreview(); });
       });
-      // Capture on window: ahead of app-core's canvas handler and the orbit
-      // controls, so a press on a target does not also select, drag or orbit.
+      // Capture on window: ahead of app-core's canvas handler, so a press on a
+      // piece does not also select or drag it. Empty space falls through.
       window.addEventListener('pointerdown', onDown, true);
       window.addEventListener('pointermove', onMove, true);
       window.addEventListener('pointerup', onUp, true);
+      window.addEventListener('pointercancel', onCancel, true);
       window.addEventListener('keydown', onKey, true);
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);

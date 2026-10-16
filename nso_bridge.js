@@ -53,7 +53,7 @@
   var DEFAULTS = {
     planarDeg: 0.5,        // a neighbour within this of the seed's normal joins the flat region
     faceCreaseDeg: 20,     // ...and the region is a FACE when every rim edge is at least this sharp
-    edgeTolMm: 1.0,        // a press within this of a face's straight rim edge picks the edge
+    edgeTolMm: 1.0,        // a click within this of a face's straight rim edge picks the edge
     edgeFrac: 0.25,        // ...capped at this fraction of the face's narrower span
     edgeStraightDeg: 0.5,  // rim edges within this of each other run on as one straight edge
     maxOpposeDeg: 60,      // two faces may be at most this far from facing each other
@@ -255,7 +255,7 @@
 
   /* ------------------------------------------------------------- picking
 
-     What a press at `point` on triangle `tri` picks, in this order:
+     What a click at `point` on triangle `tri` picks, in this order:
        an EDGE  - within edgeTol of a straight rim edge of a face,
        a FACE   - a flat region whose whole rim is creased,
        a POINT  - anything else (a curved surface, a facet of one). */
@@ -513,7 +513,7 @@
   function planBand(pieces, A, B, opts) {
     var FA = A.target.face, FB = B.target.face;
     var nA = FA.normal, nB = FB.normal;
-    if (A.piece === B.piece && FA.tris[0] === FB.tris[0]) return refuse('band', 'both ends are the same face - drag from one face to another');
+    if (A.piece === B.piece && FA.tris[0] === FB.tris[0]) return refuse('band', 'both ends are the same face - click one face, then another');
     var oppose = deg(Math.acos(clamp1(-dot(nA, nB))));
     if (oppose > opt(opts, 'maxOpposeDeg') + 1e-9) {
       return refuse('band', 'the two faces are ' + f1(oppose) + '° from facing each other - a band takes faces no more than ' +
@@ -793,7 +793,7 @@
 
   function planSheet(pieces, A, B, opts) {
     var a0 = A.target.a, a1 = A.target.b, b0 = B.target.a, b1 = B.target.b;
-    if (A.piece === B.piece && len(sub(a0, b0)) + len(sub(a1, b1)) < 1e-9) return refuse('sheet', 'both ends are the same edge - drag from one edge to another');
+    if (A.piece === B.piece && len(sub(a0, b0)) + len(sub(a1, b1)) < 1e-9) return refuse('sheet', 'both ends are the same edge - click one edge, then another');
     if (len(sub(a0, b0)) + len(sub(a1, b1)) > len(sub(a0, b1)) + len(sub(a1, b0))) { var tmp = b0; b0 = b1; b1 = tmp; }
     var Q = [a0, a1, b1, b0];
     var nsum = [0, 0, 0];
@@ -881,7 +881,7 @@
     if (ka === 'edge' && kb === 'edge') return planSheet(pieces, a, b, opts);
     if (ka === 'edge' || kb === 'edge') {
       return refuse(null, 'one end is an edge and the other a ' + (ka === 'edge' ? kb : ka) +
-        ' - a sheet runs edge to edge; drag from an edge to another edge, or between faces or points');
+        ' - a sheet runs edge to edge; click an edge, then another edge, or pick between faces or points');
     }
     function asPoint(e) {
       if (e.target.kind === 'point') return e;

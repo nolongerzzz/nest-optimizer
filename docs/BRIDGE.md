@@ -1,14 +1,14 @@
 # Bridge — a web from one place to another, welded
 
 `nso_bridge.js` (headless geometry) and `app-bridge.js` (the card), loaded
-straight after `app-bend.js` at `?v=bridge1`. The card is **Bridge** in the
+straight after `app-bend.js` at `?v=bridge2`. The card is **Bridge** in the
 left column's **Shape** drop-down, in the row under Extend and Mirror (Bend
 moved to the top row in shell v2).
 
 ```
 node tools/nso_bridge_test.js           headless: ring -> oval, yawed boxes, square -> round,
                                         spheres, bars, every guard; mesh_validate on every output
-node tools/nso_bridge_drive_check.js    the real app: Split, press-drag-release, ghost, Set, Undo, Cancel
+node tools/nso_bridge_drive_check.js    the real app: Split, two clicks (orbit between), ghost, Set, Undo, Cancel
 node tools/nso_bridge_drive_check.js --shots DIR    also writes DIR/*.png (scratch; nothing committed)
 ```
 
@@ -41,21 +41,27 @@ Open Bridge and, while it is open:
   triangles, cyan), an edge (a bar along the whole straight edge) or a point
   (a dot) — and the readout names it: `Under the pointer: face, 8.0 × 1.0 mm
   rectangle`;
-- **press** on one, **drag** (an amber line follows the pointer), **release**
-  on another: the web is planned at once and drawn as a **ghost** (amber,
-  0.75 — Bend's), from the very soup Set welds. The readout says what it is
+- **click** on one — it stays marked (gold) — then **orbit, pan and zoom as
+  much as you like**: nothing is held or captured, so the camera is free, and
+  an amber line runs from the marked place to the pointer meanwhile. Then
+  **click** on another: the web is planned at once and drawn as a **ghost**
+  (amber, 0.75 — Bend's), from the very soup Set welds. The readout says what it is
   (`Band 20.0 mm, 8.0 × 1.0 mm rectangle both ends · 4/4 → 4 points`), or why
   not, in red, with no ghost and Set off;
 - the **Ø** row shows for a string, the **Thick** row for a sheet (its hint
   the default, `auto 5.0`); a change re-plans at once;
 - **Set** welds it and stays open for the next one; **Cancel** drops the
-  pending web, and pressed with nothing pending closes the card. Escape during
-  a drag drops the drag.
+  pending web, and pressed with nothing pending closes the card;
+- **starting over**: a click on empty space, **Escape**, or a click on the
+  marked place again drops the mark (and any web on it). With a web showing, a
+  click on another place **moves the second end** there and re-plans; A stays
+  marked.
 
-A press on empty space is left alone, so the view still orbits. A press on a
-target is captured ahead of app-core's canvas handler, so it does not also
-select or drag the piece. The card goes away when its drop-down shuts (one
-panel at a time), and the picks go when a picked piece moves or changes.
+A press that travels more than 4 px is an orbit, not a click, and never picks
+or clears anything. A press on empty space is left alone, so the view still
+orbits. A press on a target is taken ahead of app-core's canvas handler, so it
+does not also select or drag the piece. The card goes away when its
+drop-down shuts (one panel at a time), and the picks go when a picked piece moves or changes.
 
 **Each Set is one Undo**, and the Undo puts **every input back as it was**:
 the same model objects, the same raw soups bit for bit, the same placed
@@ -70,7 +76,7 @@ Both pieces are read in the plate's world frame, Z up (`meshToWorldSoup`, then
 Each piece is indexed once per pose (`NSO_Bridge.index`) on Join's vertex
 space: `NSO_fuseVertGrid` at `NSO_fuseTolerance`.
 
-A press at a point on a triangle picks, in this order:
+A click at a point on a triangle picks, in this order:
 
 1. **an edge** — within 8 screen pixels (in mm at the hit's depth), capped at
    a quarter of the face's narrower span, of a straight rim edge of a face. The
@@ -116,7 +122,7 @@ goes through `NSO_Assemble.rootGap` (which asks `nso_support_aim.js`'s
 The rod is `NSO_PathSweep.sweep` on a regular profile, then unioned with the
 first piece and that with the second — the shipped `NSO_unionSoups`, the
 kernel Join's union route uses, with its "the component count dropped" merge
-gate. A face end paired with a point end gives up the point it was pressed at,
+gate. A face end paired with a point end gives up the point it was clicked at,
 so a string can start on a flat face.
 
 ## Sheet (edge → edge)
@@ -219,6 +225,12 @@ down, naming the count (`nsoMaskCount(m) > 0`). In the HANDOFF roster.
     label are in place for it.
 11. **Two faces must have the same number of outlines** (outline to outline,
     hole to hole). A ring face to a disc face is refused by name.
+
+12. **Two clicks, not press-drag-release.** The pick used to hold the pointer
+    from A to B, which froze the camera, so a B round the back of the piece
+    could not be reached square-on. A is now marked by a click and stays marked
+    while the view moves; only a click that does not travel (4 px) counts. A
+    third click moves B rather than starting over (a click on A starts over).
 
 ## Out of scope, named
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /* Bridge, driven through the real app: real index.html, real script tags, the
-   real Split button, real mouse presses, drags and releases on the canvas,
+   real Split button, real mouse clicks (and an orbit drag) on the canvas,
    real Set and real Undo.
      node tools/nso_bridge_drive_check.js              exit 0 = every gate held
      node tools/nso_bridge_drive_check.js --shots DIR  also writes DIR/*.png
@@ -10,15 +10,20 @@
    proves is the card on it:
      1. the button sits in Shape beside Extend, wired, its card shut;
      2. the ring: MINI_TPU_TEST split through its axis by Split, the halves set
-        20 mm apart, both gaps bridged face to face by press-drag-release ->
-        hover lights the face, the drag draws a line, the ghost is the soup Set
-        welds, Set makes one piece, the second Set closes it into the oval;
+        20 mm apart, both gaps bridged face to face by two clicks -> hover
+        lights the face, the first click marks it and a line follows the
+        pointer to the second, the ghost is the soup Set welds, Set makes one
+        piece, the second Set closes it into the oval;
         one Undo per Set, and two put both halves back exactly;
      3. two spheres, point to point: the string, its Ø field, one piece, Undo;
-     4. two bars, edge to edge: a press near an edge lights the whole edge,
+     4. two bars, edge to edge: a pointer near an edge lights the whole edge,
         the thickness field (its hint the default), one piece, Undo;
-     5. a guard in the app: refused in words, no ghost, Set stays off;
-     6. Cancel drops the pending web and keeps the card; again, closes it.
+     5. two clicks with the camera free between them: click A (it stays
+        marked, nothing captured), orbit ~90 degrees with a real drag, click B
+        -> the same plan as a direct A->B pick; a click on empty space, a click
+        on A again and Escape each clear A; the orbit drag itself does not;
+     6. a guard in the app: refused in words, no ghost, Set stays off;
+     7. Cancel drops the pending web and keeps the card; again, closes it.
    Fixtures other than MINI_TPU_TEST are generated here into a temp directory. */
 
 const fs = require('fs');
@@ -60,6 +65,18 @@ function installHelpers() {
       const p = this.placed(id);
       p.x += dx; p.z += dz; p.mesh.position.x += dx; p.mesh.position.z += dz;
       p.mesh.updateMatrixWorld(true);
+    },
+    // The camera's azimuth about the look target, degrees (Y is up in the view).
+    azimuth() {
+      const c = state.camera.position, t = state.controls.target;
+      return Math.atan2(c.x - t.x, c.z - t.z) * 180 / Math.PI;
+    },
+    pickableAt(q, kind) {
+      const s = this.screen(q), r = state.renderer.domElement.getBoundingClientRect();
+      if (s.x < r.left + 380 || s.x > r.right - 20 || s.y < r.top + 60 || s.y > r.bottom - 20) return false;
+      if (document.elementFromPoint(s.x, s.y) !== state.renderer.domElement) return false;
+      const t = NSO_bridgeTargetAt({ clientX: s.x, clientY: s.y });
+      return !!t && t.target.kind === kind;
     },
     look(from, at) {
       state.controls.target.set(at[0], at[1], at[2]);
@@ -119,7 +136,8 @@ function installHelpers() {
         ghost: !!(B.ghost && B.ghost.parent), ghostTris: B.ghost ? B.ghost.geometry.attributes.position.count / 3 : 0,
         planTris: B.plan && B.plan.ok ? B.plan.web.length / 9 : 0, kind: B.plan ? B.plan.kind : null,
         planOk: !!(B.plan && B.plan.ok), reason: B.plan && !B.plan.ok ? B.plan.reason : '',
-        a: B.a ? B.a.target.kind : null, b: B.b ? B.b.target.kind : null, dragging: !!B.dragging,
+        a: B.a ? B.a.target.kind : null, b: B.b ? B.b.target.kind : null, press: !!B.press,
+        webSum: B.plan && B.plan.ok ? Array.prototype.reduce.call(B.plan.web, (t, v, i) => t + v * ((i % 7) + 1), 0) : 0,
         ghostMat: B.ghost ? { color: B.ghost.material.color.getHex(), opacity: B.ghost.material.opacity } : null
       };
     },
@@ -135,19 +153,33 @@ function installHelpers() {
 }
 
 const SP = (page, q) => page.evaluate(q => window.__br.screen(q), q);
-// Press at a, drag in steps to b, release. Returns the panel mid-drag.
+// Click a, walk the pointer (no button down) to b, click b. Returns the panel
+// mid-walk: the first click has marked a and a line follows the pointer.
 async function drag(page, a, b) {
   const A = await SP(page, a), Bp = await SP(page, b);
   await page.mouse.move(A.x, A.y);
   await page.mouse.down();
+  await page.mouse.up();
   let mid = null;
   for (let i = 1; i <= 6; i++) {
     await page.mouse.move(A.x + (Bp.x - A.x) * i / 6, A.y + (Bp.y - A.y) * i / 6);
     if (i === 3) mid = await page.evaluate(() => window.__br.panel());
   }
+  await page.mouse.down();
   await page.mouse.up();
   await page.waitForTimeout(50);
   return mid;
+}
+// One click on a world point / on a screen point.
+async function click(page, q) {
+  const S = await SP(page, q);
+  await clickAt(page, S.x, S.y);
+}
+async function clickAt(page, x, y) {
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.up();
+  await page.waitForTimeout(50);
 }
 async function setAndWait(page) {
   const before = await page.evaluate(() => state.undoStack.length);
@@ -217,7 +249,7 @@ withApp(async (page, logs) => {
 
     await openCard(page);
     let P = await page.evaluate(() => window.__br.panel());
-    check('Bridge opens its card, the readout says what to do', P.open && !P.hidden && /Press on a face, an edge or a point/.test(P.readout), P.readout);
+    check('Bridge opens its card, the readout says what to do', P.open && !P.hidden && /Click a face, an edge or a point/.test(P.readout), P.readout);
 
     for (const [gi, side] of [[1, 'hi'], [2, 'lo']]) {
       const ids = gi === 1 ? [lay.low, lay.high] : await page.evaluate(() => [state.placed[state.placed.length - 1].sourceId]);
@@ -238,10 +270,10 @@ withApp(async (page, logs) => {
         /Under the pointer: face, 8\.0 × 1\.0 mm rectangle/.test(P.readout), P.overlay.join(',') + ' | ' + P.readout);
       await shot(page, 'ring-gap' + gi + '-hover');
       const midDrag = await drag(page, fa, fb);
-      check('gap ' + gi + ': the press picks the face and the drag draws a line', midDrag && midDrag.a === 'face' && midDrag.line && midDrag.dragging,
-        midDrag ? 'a ' + midDrag.a + ', line ' + midDrag.line : '');
+      check('gap ' + gi + ': the first click marks the face and a line follows the pointer to the second', midDrag && midDrag.a === 'face' &&
+        midDrag.b === null && midDrag.line && midDrag.overlay.includes('a:face'), midDrag ? 'a ' + midDrag.a + ', line ' + midDrag.line : '');
       P = await page.evaluate(() => window.__br.panel());
-      check('gap ' + gi + ': released on the other face - a band, previewed', P.planOk && P.kind === 'band' && P.a === 'face' && P.b === 'face' && !P.bad &&
+      check('gap ' + gi + ': a click on the other face - a band, previewed', P.planOk && P.kind === 'band' && P.a === 'face' && P.b === 'face' && !P.bad &&
         /^Band 20\.0 mm, 8\.0 × 1\.0 mm rectangle both ends/.test(P.readout), P.readout);
       check('gap ' + gi + ': the ghost is the very web Set welds, drawn as Bend\'s (amber, 0.75)', P.ghost && P.ghostTris === P.planTris && P.ghostTris === 8 &&
         P.ghostMat.color === 0xf59e0b && P.ghostMat.opacity === 0.75, P.ghostTris + ' triangles');
@@ -383,7 +415,103 @@ withApp(async (page, logs) => {
     await undo(page);
     check('Undo: both bars back', await page.evaluate(() => state.models.length === 2 && state.placed.length === 2));
 
-    console.log('\n=== 5. a guard in the app ===');
+    console.log('\n=== 5. two clicks, the camera free between them ===');
+    {
+      const fr5 = await page.evaluate(([m, pa, pb]) => window.__br.frame([pa, pb], ['edge', 'edge'], [m[0] - 40, m[2] + 45, -m[1] + 25], [m[0], m[2], -m[1]]), [m, pa, pb]);
+      check('the section-4 view again, both bar edges on bare canvas', !!fr5, JSON.stringify(fr5));
+      // Direct: A then B, no camera move - the plan the orbiting pick has to match.
+      await drag(page, pa, pb);
+      const direct = await page.evaluate(() => window.__br.panel());
+      check('direct A -> B: a sheet, planned', direct.planOk && direct.kind === 'sheet' && direct.a === 'edge' && direct.b === 'edge', direct.readout);
+      await page.keyboard.press('Escape');
+      let Q = await page.evaluate(() => window.__br.panel());
+      check('Escape clears A, B and the web: no ghost, no line, Set off, the hint back', Q.a === null && Q.b === null && !Q.ghost && !Q.line &&
+        Q.goDisabled && Q.open && /Click a face, an edge or a point/.test(Q.readout), Q.readout);
+
+      // Click A. It stays marked; nothing is captured; the pointer is free.
+      await click(page, pa);
+      Q = await page.evaluate(() => ({ p: window.__br.panel(), cap: state.renderer.domElement.hasPointerCapture(1), az: window.__br.azimuth() }));
+      check('click A: marked (role a), no second pick, Set off', Q.p.a === 'edge' && Q.p.b === null && Q.p.overlay.includes('a:edge') && Q.p.goDisabled, Q.p.readout);
+      check('...no pointer capture between the clicks', Q.cap === false);
+      // Orbit by a real drag on empty canvas: a quarter of the canvas height across is ~90 degrees.
+      const orbit = async dir => {
+        const rc = await page.evaluate(() => { const r = state.renderer.domElement.getBoundingClientRect(); return { h: r.height, r: r.right, b: r.bottom }; });
+        const x0 = rc.r - 100, y0 = rc.b - 60, dx = dir * rc.h / 4;
+        const hit = await page.evaluate(([x, y]) => !!NSO_bridgeTargetAt({ clientX: x, clientY: y }), [x0, y0]);
+        await page.mouse.move(x0, y0);
+        await page.mouse.down();
+        for (let i = 1; i <= 10; i++) await page.mouse.move(x0 - dx * i / 10, y0);
+        await page.mouse.up();
+        let last = null;
+        for (let i = 0; i < 40; i++) {                       // let the damping settle
+          await page.waitForTimeout(50);
+          const az = await page.evaluate(() => window.__br.azimuth());
+          if (last !== null && Math.abs(az - last) < 1e-4) break;
+          last = az;
+        }
+        return hit;
+      };
+      const az0 = Q.az;
+      const onPiece = await orbit(1);
+      Q = await page.evaluate(() => ({ p: window.__br.panel(), az: window.__br.azimuth() }));
+      const turned = Math.abs(((Q.az - az0 + 540) % 360) - 180);
+      check('orbit drag from empty space turns the view ~90 degrees with A marked', !onPiece && Math.abs(180 - turned) > 60 && Math.abs(180 - turned) < 120,
+        (180 - turned).toFixed(1) + ' deg');
+      check('...the orbit did not clear A, and the line still runs from it', Q.p.a === 'edge' && Q.p.b === null && Q.p.line && !Q.p.press, 'a ' + Q.p.a);
+      let seen = await page.evaluate(([pa, pb]) => ({ a: window.__br.pickableAt(pa, 'edge'), b: window.__br.pickableAt(pb, 'edge') }), [pa, pb]);
+      check('from the new side B\'s edge is on bare canvas and reads as an edge', seen.b, JSON.stringify(seen));
+      await shot(page, 'bars-orbited-marked');
+      await click(page, pb);
+      const viaOrbit = await page.evaluate(() => window.__br.panel());
+      check('click B after the orbit: the same plan as the direct pick (kind, readout, triangles, web)', viaOrbit.planOk && viaOrbit.kind === direct.kind &&
+        viaOrbit.readout === direct.readout && viaOrbit.planTris === direct.planTris && viaOrbit.ghostTris === direct.ghostTris &&
+        Math.abs(viaOrbit.webSum - direct.webSum) <= 1e-6 * Math.max(1, Math.abs(direct.webSum)),
+        viaOrbit.readout + ' | web ' + viaOrbit.webSum + ' vs ' + direct.webSum);
+      check('...ghost drawn, line gone, Set on', viaOrbit.ghost && !viaOrbit.line && !viaOrbit.goDisabled);
+      await page.keyboard.press('Escape');
+
+      // Click on nothing clears A.
+      await click(page, pa);
+      Q = await page.evaluate(() => window.__br.panel());
+      const empty = await page.evaluate(() => {
+        const r = state.renderer.domElement.getBoundingClientRect();
+        for (const [fx, fy] of [[0.9, 0.9], [0.9, 0.1], [0.6, 0.9], [0.6, 0.1]]) {
+          const x = r.left + r.width * fx, y = r.top + r.height * fy;
+          if (document.elementFromPoint(x, y) === state.renderer.domElement && !NSO_bridgeTargetAt({ clientX: x, clientY: y })) return [x, y];
+        }
+        return null;
+      });
+      check('A is marked, and there is bare canvas to click on', Q.a === 'edge' && !!empty, JSON.stringify(empty));
+      await clickAt(page, empty[0], empty[1]);
+      Q = await page.evaluate(() => window.__br.panel());
+      check('a click on empty space clears A (and its line)', Q.a === null && Q.b === null && !Q.line && !Q.ghost && Q.open &&
+        /Click a face, an edge or a point/.test(Q.readout), Q.readout);
+      // Clicking A again clears it.
+      await click(page, pa);
+      Q = await page.evaluate(() => window.__br.panel());
+      await click(page, pa);
+      const again = await page.evaluate(() => window.__br.panel());
+      check('clicking A again clears it', Q.a === 'edge' && again.a === null && !again.line && again.open, 'a ' + Q.a + ' -> ' + again.a);
+      // With a web showing, a click on another place moves the second end; A stays.
+      await drag(page, pa, pb);
+      const first = await page.evaluate(() => window.__br.panel());
+      const pb2 = [xm, eg[1].hi[1] - 0.15, eg[1].hi[2]];
+      const can2 = await page.evaluate(q => window.__br.pickableAt(q, 'edge'), pb2);
+      if (can2) {
+        await click(page, pb2);
+        const moved = await page.evaluate(() => window.__br.panel());
+        // (B's far edge is across B itself, so the sheet to it is refused in words - the point is that the second end moved and was re-planned.)
+        check('with a web showing, a click on another edge moves the second end and re-plans (A stays marked)', first.planOk && moved.a === 'edge' &&
+          moved.b === 'edge' && moved.readout !== first.readout && moved.goDisabled === !moved.planOk, first.readout + ' -> ' + moved.readout);
+      } else {
+        check('with a web showing, a click on another edge moves the second end and re-plans (A stays marked)', false, 'the far edge is not pickable from this view');
+      }
+      await page.keyboard.press('Escape');
+      Q = await page.evaluate(() => window.__br.panel());
+      check('Escape leaves the card open and empty', Q.open && Q.a === null && Q.b === null);
+    }
+
+    console.log('\n=== 6. a guard in the app ===');
     // From A's top face (a face) to B's top edge: refused in words.
     const pf = [xm, eg[0].lo[1] + 2.5, eg[0].hi[2]];
     await drag(page, pf, pb);
@@ -391,7 +519,7 @@ withApp(async (page, logs) => {
     check('a face to an edge is refused in words, no ghost, Set off', !P.planOk && P.bad && !P.ghost && P.goDisabled &&
       /one end is an edge and the other a face/.test(P.readout), P.readout);
 
-    console.log('\n=== 6. Cancel ===');
+    console.log('\n=== 7. Cancel ===');
     await page.click('#btn-bridge-cancel');
     P = await page.evaluate(() => window.__br.panel());
     check('Cancel drops the pending web and keeps the card', P.open && !P.a && !P.b && !P.ghost && P.goDisabled);
