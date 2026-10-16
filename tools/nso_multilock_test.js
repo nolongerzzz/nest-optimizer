@@ -103,6 +103,16 @@ const centreOf = (page, id) => page.evaluate(id => {
 async function dragPiece(page, id, dx, dy) {
   const c = await centreOf(page, id);
   if (!c.inCanvas) throw new Error('piece ' + id + ' is off screen at ' + JSON.stringify(c));
+  /* Since grab and drop (#190) a drag let go off the bed is "over nothing"
+     and leaves the piece in the air: keep the drop on the bed - the same
+     drag the other way when this one would end past its edge. */
+  const offBed = await page.evaluate(([x, y]) => {
+    const r = state.renderer.domElement.getBoundingClientRect(), q = getCurrentPlate();
+    state.pointer.x = ((x - r.left) / r.width) * 2 - 1; state.pointer.y = -((y - r.top) / r.height) * 2 + 1;
+    const h = hitPlateXZ();
+    return !h || Math.abs(h.x) > q.w / 2 - 5 || Math.abs(h.z) > q.d / 2 - 5;
+  }, [c.x + dx, c.y + dy]);
+  if (offBed) { dx = -dx; dy = -dy; }
   await page.mouse.move(c.x, c.y);
   await page.mouse.down();
   await page.mouse.move(c.x + dx, c.y + dy, { steps: 8 });
