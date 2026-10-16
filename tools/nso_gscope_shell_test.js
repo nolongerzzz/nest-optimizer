@@ -11,8 +11,10 @@
      A card under each of the last eight, opening to the RIGHT of the column,
      top-left of the viewport; one at a time; Escape shuts it.
      Top-right, a pinned row: BACK, EXPORT, CLOSE. EXPORT's card opens under it.
-     Bottom-left, the dock: the ALL FEATURES legend, and beside it the file
-     line, SELECTION / SEGMENT INFO, FEATURES and the Slice report. Always up.
+     Down the left wall, under the column: the file line (G-scope) and, right
+     under it, the ALL FEATURES legend. Along the bottom, side by side to the
+     right of them: SELECTION / SEGMENT INFO, FEATURES, the Slice report and the
+     hint. Always up, never a card, low enough to leave the piece clear.
      The viewport takes the whole panel (the sidebar's width is given back).
 
    GATES
@@ -255,7 +257,8 @@ withApp(async (page, logs) => {
       return { panel, vp, col, slabs, mainW: main.width, mainH: main.height, mainFont: mainStyle.fontSize, mainTrack: mainStyle.letterSpacing,
                slabFont: slab.fontSize, slabTrack: slab.letterSpacing, slabCls: document.getElementById('ms-nav-select').classList.contains('vp-bar-btn'),
                corner: ['ms-btn-back-producer', 'ms-nav-export', 'ms-close'].map(id => document.getElementById(id).hidden ? null : R(id)),
-               legend: R('ms-legend-float'), info: R('ms-info'), W: innerWidth, H: innerHeight, colPos: cs('ms-sidebar').position,
+               legend: R('ms-legend-float'), head: (b => ({ x: b.left, y: b.top, r: b.right, b: b.bottom }))(document.querySelector('#ms-dock-left .ms-head').getBoundingClientRect()), info: R('ms-info'),
+               box: ['ms-info-title', 'ms-lift-row', 'ms-slice-readout'].map(id => { const e = document.getElementById(id).closest('.ms-glass'); if (getComputedStyle(e).display === 'none') return null; const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height }; }), W: innerWidth, H: innerHeight, colPos: cs('ms-sidebar').position,
                cut: ['ms-btn-open', 'ms-btn-plate', 'ms-nav-select', 'ms-nav-line', 'ms-nav-layer', 'ms-nav-view', 'ms-nav-render',
                      'ms-nav-overhangs', 'ms-nav-crop', 'ms-nav-slice'].filter(id => {
                        const e = document.getElementById(id); return e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1; }),
@@ -281,10 +284,19 @@ withApp(async (page, logs) => {
       g.corner[2] && g.corner[1] && Math.abs(g.W - g.corner[2].r - 8) < 1.5 && g.corner[2].y <= 12 && g.corner[1].r <= g.corner[2].x + 0.5,
       JSON.stringify(g.corner));
     check('Back is hidden until a document hands one over', g.corner[0] === null);
-    check('the legend is bottom-left, right of the column, in the lower half of the window',
-      g.legend.x >= g.col.r && g.legend.x < g.W / 2 && g.legend.b > g.H / 2 && g.legend.b <= g.H, JSON.stringify([g.legend.x, g.legend.b]));
-    check('the info readout is bottom-left too, beside the legend', g.info.x > g.legend.r - 1 && g.info.b > g.H / 2 && g.info.b <= g.H, JSON.stringify([g.info.x, g.info.b]));
-    check('the layer-range slider (when up) is clear of the corner row and the dock', !g.zr || (g.zr.y >= g.corner[1].b && g.zr.x > g.info.r), JSON.stringify(g.zr));
+    const lastSlab = g.slabs[g.slabs.length - 1];
+    check('the legend is on the left wall, under the column, in the lower half of the window',
+      g.legend.x <= g.col.x + 2 && g.legend.y >= lastSlab.b && g.legend.b > g.H / 2 && g.legend.b <= g.H, JSON.stringify([g.legend.x, g.legend.y, g.legend.b]));
+    check('the G-scope box is directly above the legend, on the same wall',
+      Math.abs(g.head.x - g.legend.x) < 2 && g.head.b <= g.legend.y && g.legend.y - g.head.b < 16 && g.head.y >= lastSlab.b, JSON.stringify([g.head.x, g.head.b, g.legend.y]));
+    check('the info box is along the bottom, to the right of the legend, bottom edges level',
+      g.info.x >= g.legend.r && g.info.b > g.H - 40 && g.info.b <= g.H, JSON.stringify([g.info.x, g.info.b]));
+    const row = g.box.filter(Boolean);
+    check('the bottom boxes sit side by side on one line (none stacked over another), clear of the slider',
+      row.length >= 2 && row.every(b => Math.abs(b.b - row[0].b) < 2) && row.every((b, i) => i === 0 || b.x >= row[i - 1].r) && row[row.length - 1].r <= (g.zr ? g.zr.x : g.W),
+      JSON.stringify(row.map(b => [Math.round(b.x), Math.round(b.r), Math.round(b.b)])));
+    check('the bottom row is short: its tallest box is under a quarter of the window', row.every(b => b.h < g.H / 4), row.map(b => Math.round(b.h)).join(','));
+    check('the layer-range slider (when up) is clear of the corner row', !g.zr || g.zr.y >= g.corner[1].b, JSON.stringify(g.zr));
   }
 
   /* ------------------------------------------------------------------ 4 */
@@ -509,13 +521,17 @@ withApp(async (page, logs) => {
       const H = innerHeight, W = innerWidth;
       const slabs = Array.from(document.querySelectorAll('#ms-sidebar > button')).map(b => b.getBoundingClientRect());
       const corner = Array.from(document.querySelectorAll('#ms-corner > button:not([hidden])')).map(b => b.getBoundingClientRect());
-      const dock = document.getElementById('ms-dock').getBoundingClientRect();
-      return { H, W, colB: Math.max(...slabs.map(b => b.bottom)), cornerR: Math.max(...corner.map(b => b.right)),
-               dock: { x: dock.left, y: dock.top, r: dock.right, b: dock.bottom } };
+      const r = id => { const b = document.getElementById(id).getBoundingClientRect(); return { x: b.left, y: b.top, r: b.right, b: b.bottom }; };
+      const left = r('ms-dock-left');
+      const boxes = ['ms-info-title', 'ms-lift-row', 'ms-slice-readout'].map(id => document.getElementById(id).closest('.ms-glass')).filter(e => getComputedStyle(e).display !== 'none')
+        .map(e => e.getBoundingClientRect());
+      return { H, W, colB: Math.max(...slabs.map(b => b.bottom)), cornerR: Math.max(...corner.map(b => b.right)), left,
+               rowTop: Math.min(...boxes.map(b => b.top)), rowR: Math.max(...boxes.map(b => b.right)) };
     }, [CARDS]);
     check('1024 x 720: the column ends inside the window', short.colB <= short.H, String(short.colB));
     check('1024 x 720: the corner row stays inside', short.cornerR <= short.W, String(short.cornerR));
-    check('1024 x 720: the dock is inside the window, right of the column', short.dock.b <= short.H && short.dock.r <= short.W && short.dock.y >= 0, JSON.stringify(short.dock));
+    check('1024 x 720: the left wall\'s boxes end inside the window and start under the column', short.left.b <= short.H && short.left.y >= short.colB, JSON.stringify([short.left, short.colB]));
+    check('1024 x 720: the bottom boxes are inside the window and clear of the slider', short.rowTop >= 0 && short.rowR <= short.W - 76, JSON.stringify([short.rowTop, short.rowR]));
     for (const card of ['ms-card-select', 'ms-card-layer', 'ms-card-view', 'ms-card-overhangs', 'ms-card-crop', 'ms-card-slice', 'ms-card-export']) {
       await openCard(page, card);
       const r = await page.evaluate(card => { const b = document.getElementById(card).getBoundingClientRect(); return { b: b.bottom, r: b.right, t: b.top, l: b.left, H: innerHeight, W: innerWidth,

@@ -2751,6 +2751,11 @@ select:focus, input:focus {
   overflow: hidden;
 }
 .ms-panel[hidden] { display: none; }
+/* How far down the column reaches (10 slabs, 2 group gaps, the top pad), plus a
+   gap: the left wall's readouts stay below it. The shell's short-window
+   tightening (under 760 high) shortens the column, and this with it. */
+.ms-panel { --ms-col-h: 392px; }
+@media (max-height: 759px) { .ms-panel { --ms-col-h: 330px; } }
 
 /* The column: the shell's slabs, 32px on a 36px pitch, in three groups
    (Import, Read plate | Select .. Render | Overhangs, Crop Z, Slice), floated
@@ -3015,39 +3020,39 @@ select:focus, input:focus {
   font-family: inherit;
 }
 
-/* The dock, bottom-left and just right of the column: the legend, and
-   beside it the readouts. Always up, never a card. It stops short of the
-   layer-range slider on the right. */
-.ms-dock {
+/* The readouts, always up, never a card. Left wall, under the column: the
+   file line, and the feature legend right under it. Along the bottom, right
+   of them: the info, Features, the Slice report and the mode hint, side by
+   side so they stay low and leave the piece clear. #ms-dock itself is only
+   the wrapper. */
+.ms-dock { display: contents; }
+.ms-dock-left {
   position: absolute;
-  left: var(--shell-panel-x);
+  left: var(--shell-pad);
   bottom: 12px;
   z-index: 5;
   display: flex;
-  align-items: flex-end;
+  flex-direction: column;
   gap: 8px;
-  max-width: calc(100% - var(--shell-panel-x) - 88px);
+  width: 257px;
+  /* Never up into the column: the column is --ms-col-h tall, so what is under
+     it is the window less that. The legend scrolls inside itself. */
+  max-height: calc(100vh - var(--ms-col-h) - 24px);
   pointer-events: none;
 }
 .ms-readouts {
+  position: absolute;
+  left: calc(var(--shell-pad) + 257px + 8px);
+  right: 88px;                 /* clear of the layer-range slider */
+  bottom: 12px;
+  z-index: 5;
   display: flex;
-  align-items: flex-end;
+  flex-wrap: wrap-reverse;     /* a fifth box, or a narrow window, wraps upward */
+  align-items: flex-start;     /* ...and with wrap-reverse that is the bottom edge */
   gap: 8px;
   pointer-events: none;
 }
-/* Two columns of readouts: the file line and the info; Features, the Slice
-   report and the hint. Each scrolls inside itself rather than growing past
-   the window. */
-.ms-rcol {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 250px;
-  max-height: calc(100vh - 24px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  pointer-events: none;
-}
+.ms-readouts > * { flex: 1 1 200px; max-width: 300px; min-width: 0; }
 .ms-glass {
   background: rgba(23, 26, 33, 0.9);
   border: 1px solid var(--border);
@@ -3058,6 +3063,7 @@ select:focus, input:focus {
 }
 .ms-glass .ms-section-title { margin-bottom: 6px; }
 .ms-glass .ms-note:last-child { margin-bottom: 0; }
+.ms-head { flex: 0 0 auto; }
 .ms-head .ms-sub { margin: 0; }
 .ms-readouts #ms-info {
   background: transparent;
@@ -3106,13 +3112,12 @@ select:focus, input:focus {
 /* Orbit, the mode every document opens in, has no hint to give. */
 #ms-hint-badge:empty { display: none; }
 
-/* The feature legend sits in the dock, bottom-left, as the first of the
-   readouts (see .ms-dock). Its own height cap keeps a file with many features
-   from growing up over the cards: past it the list scrolls. */
+/* The feature legend, on the left wall under the file line (see .ms-dock-left).
+   A file with many features scrolls inside it rather than growing up into
+   the column. */
 #ms-legend-float {
-  flex: 0 0 257px;
-  width: 257px;
-  max-height: min(46vh, 100%);
+  flex: 0 1 auto;
+  min-height: 0;
   overflow-y: auto;
   pointer-events: auto;
   margin-bottom: 0;
@@ -3154,7 +3159,7 @@ button#ms-legend-toggle {
   cursor: pointer;
 }
 button#ms-legend-toggle:hover { color: var(--text, #fff); border-color: var(--accent); }
-#ms-legend-float.collapsed { width: auto; flex-basis: auto; }
+#ms-legend-float.collapsed { width: auto; }
 #ms-legend-float.collapsed #ms-legend,
 #ms-legend-float.collapsed #ms-detected { display: none; }
 /* The detector rows (Flange, Handle, Bracket, Lid, Hinge): under the parts,

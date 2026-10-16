@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=gscopeshell1" />
+  <link rel="stylesheet" href="styles.css?v=gscopeshell2" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1373,43 +1373,46 @@
         </div>
       </div>
 
-      <!-- The readouts, bottom-left, always up and never a card: the feature
-           legend (floating, with its minimize toggle) and, beside it, the
-           file line, the selection / segment info, the Features readout and
-           the Slice report. app-microscope.js finds #ms-legend by id and
+      <!-- The readouts, always up and never a card: down the left wall under
+           the column, the file line over the feature legend (with its
+           minimize toggle); along the bottom, the selection / segment info,
+           the Features readout, the Slice report and the mode hint. app-microscope.js finds #ms-legend by id and
            never by where it lives, so the rows, their show / hide toggle and
            the per-row "only" button are the same code as before the move.
            One list per view and no tab strip: a slice lists its features
            (#ms-legend), a mesh lists its parts (#ms-legend) and, under a rule,
            the five detector rows (#ms-detected). -->
       <div id="ms-dock" class="ms-dock">
-        <div id="ms-legend-float" class="ms-section">
-          <div class="ms-legend-head">
-            <div class="ms-section-title" id="ms-legend-title">All features</div>
-            <button id="ms-legend-toggle" type="button" aria-expanded="true"
-                    aria-controls="ms-legend" title="Minimize the list">&minus;</button>
-          </div>
-          <div id="ms-legend"></div>
-          <!-- Rows for what the geometry has but the file does not name, mesh
-               only. The Flange row (nso_flange.js, docs/GSCOPE-FLANGE.md), then
-               Handle, Bracket, Lid and Hinge (nso_face_features.js,
-               docs/GSCOPE-FEATURES.md). Each a show / hide toggle like the part
-               rows above it; kept apart from #ms-legend, whose rows are exactly
-               the file's own groups. Empty on a slice. -->
-          <div id="ms-detected"></div>
-        </div>
-        <div id="ms-readouts" class="ms-readouts">
-         <div class="ms-rcol">
+        <!-- Left wall, under the column: the file line, and the legend right
+             below it. -->
+        <div id="ms-dock-left" class="ms-dock-left">
           <div class="ms-glass ms-head">
             <h1 id="ms-title">G-scope</h1>
             <p class="ms-sub" id="ms-sub">The plate, or an STL, a 3MF or a sliced .gcode.3mf.</p>
           </div>
+          <div id="ms-legend-float" class="ms-section">
+            <div class="ms-legend-head">
+              <div class="ms-section-title" id="ms-legend-title">All features</div>
+              <button id="ms-legend-toggle" type="button" aria-expanded="true"
+                      aria-controls="ms-legend" title="Minimize the list">&minus;</button>
+            </div>
+            <div id="ms-legend"></div>
+            <!-- Rows for what the geometry has but the file does not name, mesh
+                 only. The Flange row (nso_flange.js, docs/GSCOPE-FLANGE.md), then
+                 Handle, Bracket, Lid and Hinge (nso_face_features.js,
+                 docs/GSCOPE-FEATURES.md). Each a show / hide toggle like the part
+                 rows above it; kept apart from #ms-legend, whose rows are exactly
+                 the file's own groups. Empty on a slice. -->
+            <div id="ms-detected"></div>
+          </div>
+        </div>
+        <!-- Along the bottom, right of the legend: the boxes sit side by side
+             so they stay low and clear of the piece. -->
+        <div id="ms-readouts" class="ms-readouts">
           <div class="ms-glass ms-section">
             <div class="ms-section-title" id="ms-info-title">Selection / segment info</div>
             <div id="ms-info">No file open.</div>
           </div>
-         </div>
-         <div class="ms-rcol">
           <!-- Features (app-gscope-lift.js, docs/LIFT.md section 7): read-only.
                What Lift would find on the piece under the lens - outlined over it,
                and the grouped list - from the same read the Subtract card's Lift
@@ -1423,7 +1426,6 @@
             <p class="ms-note" id="ms-slice-read">&mdash;</p>
           </div>
           <div id="ms-hint-badge"></div>
-         </div>
         </div>
       </div>
 
