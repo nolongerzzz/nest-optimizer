@@ -21,6 +21,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { serveRoot, routeCdn, mkCheck, launchOpts, ROOT } from '../cth-test/browser-lib.mjs';
+import gscopeCards from '../nso_gscope_cards.js';        // opens the card a G-scope control lives in, before the click
 
 const check = mkCheck();
 const SLICE = 'fixtures/3mf/supportwithinsupport.gcode.3mf';
@@ -119,6 +120,7 @@ async function main() {
   const served = await serveRoot();
   const browser = await chromium.launch(launchOpts());
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  gscopeCards.install(page);
   const cdn = routeCdn(page);
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e) + ' ' + (e.stack || '').split('\n').slice(0, 4).join(' | ')));
@@ -212,7 +214,11 @@ async function main() {
     return [r.left, r.top, r.width, r.height];
   });
   const oy = rect[1] + rect[3] * 0.5;
-  await drag(page, [rect[0] + rect[2] * 0.25, oy], [rect[0] + rect[2] * 0.95, oy]);
+  // An orbit turns by the pixels dragged (2*pi per canvas height). The canvas was 1110 wide beside the
+  // sidebar and is the whole panel now, so a drag of 0.7 of its width went further round than this
+  // check means: keep the same 777 px of travel, from clear of the left wall's boxes.
+  const x1 = rect[0] + rect[2] * 0.25;
+  await drag(page, [x1, oy], [x1 + 0.7 * 1110, oy]);
   await frames(page, 30);                                     // let the damping settle
   const orbited = await page.evaluate((c) => {
     const M = window.NSO_MICROSCOPE, v = M.getView(), p = v.camera.position;

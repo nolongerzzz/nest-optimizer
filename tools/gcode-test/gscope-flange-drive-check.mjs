@@ -40,6 +40,7 @@ import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import vm from 'node:vm';
 import { serveRoot, routeCdn, mkCheck, launchOpts, ROOT } from '../cth-test/browser-lib.mjs';
+import gscopeCards from '../nso_gscope_cards.js';        // opens the card a G-scope control lives in, before the click
 
 const check = mkCheck();
 const require = createRequire(import.meta.url);
@@ -163,6 +164,7 @@ async function main() {
   const served = await serveRoot();
   const browser = await chromium.launch(launchOpts());
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 }, acceptDownloads: true });
+  gscopeCards.install(page);
   routeCdn(page);
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));

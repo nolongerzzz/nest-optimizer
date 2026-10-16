@@ -36,6 +36,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { serveRoot, routeCdn, mkCheck, launchOpts, ROOT } from './cth-test/browser-lib.mjs';
+import gscopeCards from './nso_gscope_cards.js';        // opens the card a G-scope control lives in, before the click
 
 const check = mkCheck();
 const SHOTS = join(ROOT, 'tools', 'support-ui-out');
@@ -93,6 +94,7 @@ async function main() {
   const served = await serveRoot();
   const browser = await chromium.launch(launchOpts());
   const page = await browser.newPage({ viewport: { width: W, height: H } });
+  gscopeCards.install(page);
   const cdn = routeCdn(page);
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -100,6 +102,9 @@ async function main() {
   await page.goto(served.base + '/index.html', { waitUntil: 'load' });
   await page.waitForFunction('window.state && window.state.ready', null, { timeout: 30000 });
   await page.waitForFunction(() => !!window.NSO_GSCOPE_SUPPORT, null, { timeout: 30000 });
+  // The card's placement is what is under test, and its marker sits at the bottom of the view,
+  // where the shell's readouts are: make them click-through rather than click the info box.
+  await gscopeCards.clickThroughReadouts(page);
 
   /* Every message seen on the way, for section 5. */
   const said = [];

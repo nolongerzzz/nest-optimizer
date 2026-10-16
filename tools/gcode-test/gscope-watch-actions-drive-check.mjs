@@ -34,6 +34,7 @@
  */
 import { chromium } from 'playwright';
 import { serveRoot, routeCdn, mkCheck, launchOpts } from '../cth-test/browser-lib.mjs';
+import gscopeCards from '../nso_gscope_cards.js';        // opens the card a G-scope control lives in, before the click
 
 const check = mkCheck();
 const PROBE = 'gscope-actions probe: thrown mid-sequence';
@@ -113,10 +114,23 @@ async function click3d(page, at) {
 }
 const legendGroups = (page) => page.evaluate(() =>
   Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map((e) => e.dataset.group));
-const legend = (page, g) => page.click(`#ms-legend [data-group="${g}"]`);
+/* Watch's log sits over the left wall in G-scope (nso-watch.js docks it at left 12 / bottom 84, where
+   the shell's legend now is), so a real click at the row's centre can land on the log. These checks
+   assert what Watch RECORDS when the row's own handler runs, so the handler is run directly. */
+const legend = (page, g) => page.evaluate((sel) => document.querySelector(sel).click(), `#ms-legend [data-group="${g}"]`);
+
+/** The list of expected lines the card presses made by gscopeCards go into (null: none being kept). */
+let sink = null;
 
 async function openApp(browser, served) {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  /* Watch records a press on a column button like any other control, so opening a card to reach a
+     control is a line of its own in the log: each one is added to the expectations as it happens. */
+  gscopeCards.install(page, { before: async (nav) => {
+    if (!sink) return;
+    const slice = (await page.evaluate(() => window.NSO_GSCOPE_SLICE.viewMode())) === 'slice';
+    sink.push(new RegExp(`^G-scope ${slice ? 'Slice' : 'Normal'}: click ${nav}$`));
+  } });
   routeCdn(page);
   const errors = [];
   page.on('pageerror', (e) => { if (!String(e).includes(PROBE)) errors.push(String(e)); });
@@ -183,6 +197,7 @@ async function main() {
 
   // The sequence - each step, and the line it must leave, side by side.
   const expect = [/^G-scope Normal: entered G-scope - the plate$/];
+  sink = expect;
   await legend(page, gM); expect.push(new RegExp(`^G-scope Normal: legend "${gM}" off$`));
   await legend(page, gP); expect.push(new RegExp(`^G-scope Normal: legend "${gP}" off$`));
   await legend(page, gM); expect.push(new RegExp(`^G-scope Normal: legend "${gM}" on$`));
@@ -190,7 +205,7 @@ async function main() {
   check('the legend really toggled (all back on)', await page.evaluate(() => window.NSO_MICROSCOPE.hidden()), []);
   // A detector row under the parts: neither block has a flange, so it stays off and says so.
   await page.waitForFunction(() => window.NSO_MICROSCOPE.flange().status !== 'pending', null, { timeout: 30000 });
-  await page.click('#ms-detected [data-detected="flange"]');
+  await page.evaluate(() => document.querySelector('#ms-detected [data-detected="flange"]').click());   // not under Watch's log
   expect.push(/^G-scope Normal: Parts row "Flange - none detected" stays off \(none\)$/);
   // G-scope opens in orbit: a box is something you arm first.
   await page.click('#ms-mode-select'); expect.push(/^G-scope Normal: click ms-mode-select$/);
@@ -279,6 +294,7 @@ async function main() {
   await page.click('#btn-microscope');
   await frames(page);
   const before = [/^G-scope Normal: entered G-scope/];
+  sink = before;
   await legend(page, gP); before.push(new RegExp(`^G-scope Normal: legend "${gP}" off$`));
   await legend(page, gP); before.push(new RegExp(`^G-scope Normal: legend "${gP}" on$`));
   await page.click('#ms-mode-select'); before.push(/^G-scope Normal: click ms-mode-select$/);
@@ -293,11 +309,13 @@ async function main() {
   await page.evaluate(() => { state.placed[0].mesh.rotation.y += Math.PI / 2; });
   await page.waitForFunction(() => /^1 phantom$/.test(document.getElementById('nso-watch-n-phantom').textContent), null, { timeout: 10000 });
   const between = [];
+  sink = between;
   await legend(page, gM); between.push(new RegExp(`^G-scope Normal: legend "${gM}" off$`));
   await legend(page, gM); between.push(new RegExp(`^G-scope Normal: legend "${gM}" on$`));
   await page.evaluate((m) => { setTimeout(() => { throw new Error(m); }, 0); }, PROBE);
   await page.waitForFunction(() => /^1 error$/.test(document.getElementById('nso-watch-n-error').textContent), null, { timeout: 5000 });
   const after = [];
+  sink = after;
   await click3d(page, await emptyPoint(page)); after.push(/^G-scope Normal: 3D view click \(select mode\) - nothing hit$/);
   await page.click('#ms-cam-slice'); after.push(/^G-scope Normal: view Normal -> Slice$/);
   await sliced(page);
@@ -321,6 +339,7 @@ async function main() {
   check(`every action was still logged as its own line, with nothing gone wrong or not (${e2.length})`,
     [g2.length, g2.every((t, i) => e2[i].test(t))], [e2.length, true]);
 
+  sink = null;
   const rows2 = await reportRows(page);
   const texts2 = rows2.map((r) => r.text);
   const phRow = texts2.findIndex((t) => /^phantom pose/.test(t));

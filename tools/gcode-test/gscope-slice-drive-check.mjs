@@ -32,6 +32,7 @@ import { chromium } from 'playwright';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { serveRoot, routeCdn, mkCheck, launchOpts, ROOT } from '../cth-test/browser-lib.mjs';
+import gscopeCards from '../nso_gscope_cards.js';        // opens the card a G-scope control lives in, before the click
 
 const check = mkCheck();
 const SHOTS = join(ROOT, 'tools', 'gscope-slice-out');
@@ -70,6 +71,7 @@ async function main() {
   const served = await serveRoot();
   const browser = await chromium.launch(launchOpts());
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  gscopeCards.install(page);
   const cdn = routeCdn(page);
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -99,7 +101,7 @@ async function main() {
   // =======================================================================
   console.log('\n--- 2. a real click slices the plate ---');
   // =======================================================================
-  await page.click('#ms-slice-settings > summary');   // the settings, collapsed by default
+  // the settings are plain fields in the Slice card; selectOption opens the card first
   await page.selectOption('#ms-slice-nozzle', '0.4');
   check('changing the nozzle sets the layer to half of it', await page.inputValue('#ms-slice-layer'), '0.2');
   const plateObjs = await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().objects.map((o) => o.name));

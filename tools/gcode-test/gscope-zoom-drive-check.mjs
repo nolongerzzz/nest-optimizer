@@ -44,6 +44,7 @@
 import { chromium } from 'playwright';
 import { join } from 'node:path';
 import { serveRoot, routeCdn, mkCheck, launchOpts, ROOT } from '../cth-test/browser-lib.mjs';
+import gscopeCards from '../nso_gscope_cards.js';        // opens the card a G-scope control lives in, before the click
 
 const check = mkCheck();
 const SLICE = 'fixtures/3mf/supportwithinsupport.gcode.3mf';
@@ -140,6 +141,7 @@ async function main() {
   const browser = await chromium.launch(launchOpts());
   const context = await browser.newContext({ viewport: { width: 1400, height: 900 }, hasTouch: true });
   const page = await context.newPage();
+  gscopeCards.install(page);
   const cdn = routeCdn(page);
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));

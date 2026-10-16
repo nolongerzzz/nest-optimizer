@@ -41,6 +41,7 @@ import { chromium } from 'playwright';
 import { mkdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { serveRoot, routeCdn, mkCheck, launchOpts, ROOT } from '../cth-test/browser-lib.mjs';
+import gscopeCards from '../nso_gscope_cards.js';        // opens the card a G-scope control lives in, before the click
 
 const check = mkCheck();
 
@@ -124,6 +125,7 @@ async function main() {
   const served = await serveRoot();
   const browser = await chromium.launch(launchOpts());
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 }, acceptDownloads: true });
+  gscopeCards.install(page);
   const cdn = routeCdn(page);
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));

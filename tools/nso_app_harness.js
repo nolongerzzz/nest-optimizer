@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const { chromium } = require('playwright');
 const LIB = require('./nso_library_dir');
+const gscopeCards = require('./nso_gscope_cards');
 
 /* The sandbox ships a pinned Chromium that may not match this playwright
    build's expected revision, so prefer whatever is actually on disk. */
@@ -122,6 +123,7 @@ async function withApp(fn, opts) {
      are unaffected. */
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   installAutoOpen(page);
+  gscopeCards.install(page);      // and the G-scope card a control lives in (the shell has no sidebar)
   const logs = [];
   page.on('console', m => logs.push('[' + m.type() + '] ' + m.text()));
   page.on('pageerror', e => logs.push('[pageerror] ' + e.message));

@@ -35,6 +35,7 @@ import { chromium } from 'playwright';
 import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { serveRoot, routeCdn, mkCheck, launchOpts, ROOT } from '../cth-test/browser-lib.mjs';
+import gscopeCards from '../nso_gscope_cards.js';        // opens the card a G-scope control lives in, before the click
 
 const check = mkCheck();
 const SHOTS = join(ROOT, 'tools', 'gscope-slice-out');
@@ -72,7 +73,9 @@ async function meshBack(page) {
 }
 
 /** The whole-part state a round trip must give back, exactly. */
-function snapshot(page) {
+async function snapshot(page) {
+  // Back to whole part lives in the Select card, and offsetParent reads a closed card as hidden.
+  await gscopeCards.openCardFor(page, '#ms-detail-controls');
   return page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, d = M.getDoc(), v = M.getView();
     const vis = (id) => { const el = document.getElementById(id); return !!el && el.offsetParent !== null; };
@@ -110,6 +113,7 @@ async function main() {
   const served = await serveRoot();
   const browser = await chromium.launch(launchOpts());
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
+  gscopeCards.install(page);
   const cdn = routeCdn(page);
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -146,13 +150,14 @@ async function main() {
   check('G-scope opens in orbit: no region armed', [base.mode,
     await page.evaluate(() => document.getElementById('ms-mode-orbit').classList.contains('active')),
     await page.isVisible('#ms-select-controls')], ['orbit', true, false]);
-  check('the slice settings sit behind a disclosure, collapsed by default',
-    await page.evaluate(() => [document.getElementById('ms-slice-settings').open,
-      document.getElementById('ms-slice-settings').querySelector('summary').textContent.trim()]), [false, 'Slice settings']);
-  check('... every control is still there, just not shown',
+  check('the slice settings are plain fields in the Slice card: no disclosure, no <details>',
+    await page.evaluate(() => [document.getElementById('ms-slice-settings').tagName,
+      document.querySelectorAll('#microscope details, #microscope summary').length,
+      !!document.getElementById('ms-slice-settings').closest('#ms-card-slice')]), ['DIV', 0, true]);
+  check('... every control is in them, and the card is shut until its button opens it',
     [await page.evaluate(() => ['nozzle', 'layer', 'walls', 'density', 'pattern', 'angle']
       .every((k) => document.getElementById('ms-slice-settings').contains(document.getElementById('ms-slice-' + k)))),
-     await page.isVisible('#ms-slice-layer')], [true, false]);
+     await page.evaluate(() => document.getElementById('ms-card-slice').classList.contains('is-open'))], [true, false]);
   check('defaults are the real setup: 0.6 nozzle, 0.3 layers, 2 walls, 15 % grid, 30 deg',
     await settings(page), ['0.6', '0.3', '2', '15', 'grid', '30']);
 
@@ -179,15 +184,15 @@ async function main() {
   // =======================================================================
   console.log('\n--- 2. Slice view: sliced now, with the settings as set ---');
   // =======================================================================
-  await page.click('#ms-slice-settings > summary');
-  check('the disclosure opens on a click', await page.isVisible('#ms-slice-layer'), true);
+  await page.click('#ms-nav-slice');
+  check('the Slice card opens from its button, with the settings in it', await page.isVisible('#ms-slice-layer'), true);
   await page.selectOption('#ms-slice-nozzle', '0.4');
   check('changing the nozzle still sets the layer to half of it', await page.inputValue('#ms-slice-layer'), '0.2');
   await page.fill('#ms-slice-walls', '3');
   await page.fill('#ms-slice-density', '20');
   await page.selectOption('#ms-slice-pattern', 'zigzag');
   await page.fill('#ms-slice-angle', '35');
-  await page.click('#ms-slice-settings > summary');     // tucked away again
+  await page.click('#ms-nav-slice');                    // the card shut again
   const set = await settings(page);
   check('the settings as set', set, ['0.4', '0.2', '3', '20', 'zigzag', '35']);
 
@@ -285,7 +290,7 @@ async function main() {
   check('the whole-part state is exactly the one before slicing', n1, base);
   check('... no residual isolation, no stuck selection',
     [n1.selection, n1.detailShown, n1.backOffered, n1.badge], [0, false, false, 'Whole part']);
-  check('the settings are closed and kept', [await page.evaluate(() => document.getElementById('ms-slice-settings').open),
+  check('the settings are kept, and the Slice card is shut', [await page.evaluate(() => document.getElementById('ms-card-slice').classList.contains('is-open')),
     await settings(page)], [false, set]);
 
   // =======================================================================
