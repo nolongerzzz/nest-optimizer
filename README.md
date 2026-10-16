@@ -41,6 +41,15 @@ Smart build-plate packing for 3D printing.
   to Brush, Smooth, Cut and export like any other piece. A live triangle count,
   and a 400k budget that refuses by name with the Detail that would fit
   ([docs/RELIEF.md](docs/RELIEF.md))
+- **Mold** (Gen+): a two-piece interlocking mold from the selected piece, to print
+  and cast silicone in. Slide and tilt the parting blade (the Cut card's slider,
+  number and dial); the faces that would lock a half are tinted and counted
+  ("N mm² would lock" - a warning). Generate puts two closed, manifold pieces on
+  the plate beside the original, parting face up: the block around the piece
+  with the piece taken out, split so the faces mate exactly, four cone keys and
+  sockets with a 0.2 mm fit gap, a Ø8 sprue to the highest point and a Ø3 vent.
+  Click the piece to move the pour point. One Undo removes both
+  ([docs/MOLD.md](docs/MOLD.md))
 - **New stock**: a correctly-sized blank to start from, before Carve, Hollow,
   Cut or anything else that begins with a blank block - sphere, box, cylinder,
   cone, tube, torus, capsule or ellipsoid, sized from the target piece by a
@@ -310,7 +319,7 @@ Smart build-plate packing for 3D printing.
 ## Where things are (the shell)
 
 - **Top row**, left to right: Import, Measure (Two points / Edge), Move,
-  Rotate, Tip, Align, Gen+ (Wheel, Stock, Picture, Photo), Lock position,
+  Rotate, Tip, Align, Gen+ (Wheel, Stock, Picture, Mold, Photo), Lock position,
   Lock plate; at the right Undo, Remove and Export, with **Clear plate**
   under Remove and **Optimize** under Export.
 - **Plate & pieces**, pinned open in the top-right corner: the plate picker

@@ -2920,6 +2920,15 @@ function onCanvasPointerDown(event) {
     return;
   }
 
+  /* Mold (app-mold.js, Gen+) owns a click on the piece it is making a mold
+     of: the click names the pour point, and the sprue is re-routed from it.
+     A click on any other piece, or off the pieces, falls through - so
+     picking another piece to mold still works. */
+  if (typeof window.nsoMoldTakesClick === 'function' && window.nsoMoldTakesClick(event)) {
+    setOrbitFromPlate(false);
+    return;
+  }
+
   /* Seat here owns a click that lands on a piece, on the same terms as paint
      and carve: app-seat-surface.js decides, where its own hit test lives, and
      a fall-through would start a move drag under the seat. Asked after carve

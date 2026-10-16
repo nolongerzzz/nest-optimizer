@@ -2542,6 +2542,53 @@ select:focus, input:focus {
 .vp-relief-menu .relief-tris { margin: 2px 0; font-size: 11px; word-break: break-all; }
 .vp-relief-menu .relief-tris { color: #e2e8f0; font-variant-numeric: tabular-nums; }
 .vp-relief-menu .relief-file-name:empty { display: none; }
+/* Mold (Gen+): the Picture card's shape, wider for the dial, the plane's
+   slider and a plan view. The dial, the slider and the <- number -> row are
+   the Cut card's own classes (.cut-miter, .cut-dial, .cut-mm-row). */
+.vp-mold-menu {
+  pointer-events: auto;
+}
+.vp-mold-menu > summary {
+  width: auto;
+  min-width: 64px;
+  height: 28px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+.vp-mold-menu .vp-menu-body {
+  top: calc(100% + 4px);
+  left: auto;
+  right: 0;
+  min-width: 224px;
+  max-width: 240px;
+  padding: 4px;
+  gap: 3px;
+}
+.vp-mold-menu .mold-status,
+.vp-mold-menu .mold-lock,
+.vp-mold-menu .mold-pour { margin: 1px 0; font-size: 11px; line-height: 1.25; }
+.vp-mold-menu .mold-lock { color: #e2e8f0; font-variant-numeric: tabular-nums; }
+.vp-mold-menu .mold-lock.is-lock { color: #fb923c; }
+.vp-mold-menu .mold-readout { font-size: 11px; margin: 1px 0; line-height: 1.25; }
+.vp-mold-menu .mold-readout:empty { display: none; }
+.vp-mold-menu .cut-miter { margin: 0; gap: 8px; }
+.vp-mold-menu .mold-lean { gap: 3px; }
+.vp-mold-menu .mold-lean .vp-clone { display: flex; align-items: center; justify-content: space-between; gap: 4px; font-size: 11px; }
+.vp-mold-menu .mold-lean input[type="number"] { width: 46px; box-sizing: border-box; }
+.vp-mold-menu #mold-slider { width: 100%; margin: 0; }
+.vp-mold-menu .cut-mm-row { margin: 0; }
+.vp-mold-menu .cut-mm-row .btn { padding: 2px 0; min-height: 26px; }
+.mold-fields { display: grid; grid-template-columns: repeat(4, 1fr); gap: 3px; }
+.mold-fields .vp-clone { display: flex; flex-direction: column; align-items: stretch; gap: 1px; font-size: 9.5px; min-width: 0; }
+.mold-fields .vp-clone input[type="number"] { width: 100%; box-sizing: border-box; padding: 2px 3px; }
+.mold-plan { width: 100%; height: 76px; display: block; margin: 1px 0;
+  background: rgba(15, 23, 42, 0.35); border-radius: 4px; }
+.mold-plan .p-block { fill: none; stroke: rgba(226, 232, 240, 0.55); stroke-width: 1; }
+.mold-plan .p-piece { fill: rgba(56, 189, 248, 0.22); stroke: #38bdf8; stroke-width: 1; stroke-dasharray: 3 2; }
+.mold-plan .p-key { fill: rgba(255, 200, 61, 0.35); stroke: #ffc83d; stroke-width: 1; }
+.mold-plan .p-pour { fill: #38bdf8; stroke: #0b1220; stroke-width: 1; }
+.mold-plan .p-vent { fill: #4ade80; stroke: #0b1220; stroke-width: 1; }
+.mold-plan text { fill: #e2e8f0; font-size: 6px; pointer-events: none; }
 /* Attach arms a click, so it needs the lit state every other click-owning
    button in this app has - Paint, Carve, Measure, Seat here. Same shape as
    .btn-measure.is-armed; a different hue only so two armed tools are never

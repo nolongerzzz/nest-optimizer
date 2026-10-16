@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=cropmitre1" />
+  <link rel="stylesheet" href="styles.css?v=moldmrg1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -144,7 +144,7 @@
             </div>
           </details>
           <details class="vp-menu vp-top-menu vp-shell-menu" id="menu-gen">
-            <summary class="vp-bar-btn" title="Generate a piece: stock to carve from, a vessel on the wheel, or a relief slab from a picture; or check a photogrammetry capture">Gen+</summary>
+            <summary class="vp-bar-btn" title="Generate a piece: stock to carve from, a vessel on the wheel, a relief slab from a picture, or a silicone mold of the selected piece; or check a photogrammetry capture">Gen+</summary>
             <div class="vp-menu-body vp-top-body">
               <details class="vp-menu vp-wheel-menu">
               <summary>Wheel</summary>
@@ -272,6 +272,58 @@
               title="Build the slab and open it in G-scope to look at. Nothing goes on the plate: Back to Picture there brings you here with everything as it was, Make again replaces the slab, and Export to plate in G-scope is what puts it on the plate, named after the file.">Make piece</button>
               <button id="btn-relief-undo" class="btn btn-secondary" type="button" disabled
               title="Step back to the previous slab: it goes back into G-scope, and the photo and settings it was made with come back here. One step - only the previous attempt is kept.">Undo</button>
+              </div>
+              </div>
+              </details>
+              <!-- Mold: a two-piece interlocking mold from the selected piece, to print
+                   and cast silicone in. nso_mold.js builds it (the Cut engine's clean
+                   split, Subtract, Union), app-mold.js wires this card. See docs/MOLD.md. -->
+              <details class="vp-menu vp-mold-menu" id="menu-mold">
+              <summary>Mold</summary>
+              <div class="vp-menu-body vp-mold" id="mold-card">
+              <p id="mold-status" class="hint mold-status">Select a piece, then open Mold.</p>
+              <div class="cut-miter">
+              <svg id="mold-dial" class="cut-dial" viewBox="0 0 100 100" width="72" height="72"
+                   role="slider" tabindex="0" aria-label="Tilt direction, degrees" aria-valuemin="0" aria-valuemax="359" aria-valuenow="0">
+                <circle class="cut-dial-rail" cx="50" cy="50" r="40"></circle>
+                <g class="cut-dial-ticks">
+                  <line x1="50" y1="6" x2="50" y2="14"></line><line x1="94" y1="50" x2="86" y2="50"></line>
+                  <line x1="50" y1="94" x2="50" y2="86"></line><line x1="6" y1="50" x2="14" y2="50"></line>
+                  <line x1="81.1" y1="18.9" x2="77.6" y2="22.4"></line><line x1="81.1" y1="81.1" x2="77.6" y2="77.6"></line>
+                  <line x1="18.9" y1="81.1" x2="22.4" y2="77.6"></line><line x1="18.9" y1="18.9" x2="22.4" y2="22.4"></line>
+                </g>
+                <g id="mold-dial-turn" transform="rotate(0 50 50)">
+                  <line class="cut-dial-blade" x1="50" y1="22" x2="50" y2="78"></line>
+                  <circle id="mold-dial-handle" class="cut-dial-handle" cx="50" cy="10" r="7"></circle>
+                </g>
+                <text id="mold-dial-deg" class="cut-dial-deg" x="50" y="54" text-anchor="middle">0°</text>
+              </svg>
+              <div class="cut-miter-side mold-lean">
+              <label class="vp-clone" title="Which way the blade leans: degrees clockwise seen from above, 0 = toward the top of the screen. Drag the handle round the wheel, or type. It leans only once Tilt is above 0."><span>Lean toward</span> <input type="number" id="mold-heading" class="cut-no-spin" min="0" max="359" step="1" value="0" aria-label="Lean toward, degrees"></label>
+              <label class="vp-clone" title="How far the blade leans off level, degrees. 0 = a flat parting plane."><span>Tilt &deg;</span> <input type="number" id="mold-tilt" class="cut-no-spin" min="0" max="60" step="1" value="0" aria-label="Tilt, degrees"></label>
+              </div>
+              </div>
+              <input type="range" id="mold-slider" min="1" max="99" step="0.1" value="50" aria-label="Parting plane height, mm" />
+              <div class="edit-row cut-mm-row">
+              <button id="btn-mold-nudge-m" class="btn btn-secondary" type="button" aria-label="Blade 0.1 mm down" title="0.1 mm down (Shift: 1 mm)">&larr;</button>
+              <input type="number" id="mold-mm" class="cut-no-spin" value="50" min="0.5" max="400" step="0.1" aria-label="Parting plane, mm from the piece's low end" title="The blade's height above the piece's low end, where it crosses the piece's middle line.">
+              <button id="btn-mold-nudge-p" class="btn btn-secondary" type="button" aria-label="Blade 0.1 mm up" title="0.1 mm up (Shift: 1 mm)">&rarr;</button>
+              </div>
+              <p id="mold-lock" class="hint mold-lock" aria-live="polite" title="Faces of the piece that would lock a half (they face away from that half's pull, on its side of the blade) are tinted on the piece. A warning only: silicone pulls out of small undercuts.">&mdash;</p>
+              <div class="mold-fields">
+              <label class="vp-clone" title="Mold wall around the piece, each side, mm. Default 10."><span>Wall</span> <input type="number" id="mold-wall" value="10" min="0" max="100" step="0.5" aria-label="Wall, mm"></label>
+              <label class="vp-clone" title="Mold above and below the piece, mm. Default 15."><span>Top/bottom</span> <input type="number" id="mold-cap" value="15" min="0" max="100" step="0.5" aria-label="Top and bottom, mm"></label>
+              <label class="vp-clone" title="Diameter of the four registration cones at their base, on the parting face. The sockets are 0.4 mm wider."><span>Key &Oslash;</span> <input type="number" id="mold-key-dia" value="6" min="1" max="30" step="0.5" aria-label="Key diameter, mm"></label>
+              <label class="vp-clone" title="How far each cone stands proud of the parting face, mm. The sides are at 45&deg;, so it cannot be more than half the diameter."><span>Key h</span> <input type="number" id="mold-key-h" value="3" min="0.5" max="15" step="0.5" aria-label="Key height, mm"></label>
+              </div>
+              <svg id="mold-plan" class="mold-plan" viewBox="0 0 120 76" role="img" aria-label="Plan view: block, piece, keys, pour point and vent"></svg>
+              <p id="mold-pour" class="hint mold-pour" aria-live="polite">&mdash;</p>
+              <p id="mold-readout" class="cut-readout mold-readout" aria-live="polite"></p>
+              <div class="vp-row vp-row-pair">
+              <button id="btn-mold-make" class="btn btn-secondary" type="button" disabled
+              title="Make two pieces beside the original, 'mold A' and 'mold B': the block around the piece with the piece taken out, split at the blade so the faces mate exactly, four cone keys and sockets, a Ø8 sprue to the highest point and a Ø3 vent. Both lie open, parting face up. The piece is untouched. One Undo removes both; pressing it again replaces the pair.">Generate mold</button>
+              <button id="btn-mold-pour-reset" class="btn btn-secondary" type="button"
+              title="Put the pour point back at the cavity's highest point (and the sprue straight up to the top).">Pour: top</button>
               </div>
               </div>
               </details>
@@ -1501,6 +1553,7 @@
   <!-- New stock: the shape-agnostic sizing app-wheel.js's Ball now calls,
        so it loads ahead of it. See docs/STOCK.md. -->
   <script src="nso_stock.js?v=stock4"></script>
+  <script src="nso_mold.js?v=mold1"></script>
   <script src="nso_paint_delete.js?v=del1"></script>
   <script src="nso_skin_band.js?v=skin2"></script>
   <script src="nso_path_sweep.js?v=bend1"></script>
@@ -1528,7 +1581,7 @@
   <script src="nso_relief.js?v=relief2"></script>
   <!-- Every tool helper goes in and out of the scene through this registry. -->
   <script src="nso-helpers.js?v=helpers1"></script>
-  <script src="app-core.js?v=close1"></script>
+  <script src="app-core.js?v=moldmrg1"></script>
 
 
 
@@ -1594,6 +1647,7 @@
   <script src="app-skin-patch.js?v=skin3"></script>
   <script src="app-raster.js?v=raster1"></script>
   <script src="app-relief.js?v=lift1"></script>
+  <script src="app-mold.js?v=mold1"></script>
   <script src="app-mask.js?v=inmode2"></script>
   <script src="app-seat-grid.js?v=helpers1"></script>
   <script src="app-paint-delete.js?v=del1"></script>
