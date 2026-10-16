@@ -73,6 +73,13 @@
  *   - one read per face, cached per soup (and a face is named by its plane, not
  *     a triangle number, so it survives a lift or an Undo);
  *   - what it says goes to the card only: the HUD does not repeat it.
+ *
+ * CURVED SURFACE (nso_lift_curved.js, `surface`). A CLICK on a triangle that is on no planar face (a vase's
+ * wall, a curved cheek) reads the SURFACE REGION it is in: grown from that triangle while the surface stays
+ * smooth, creases stopping it. What stands on it, attached only through it, is the feature list - the card,
+ * Pick and Strip work as on a face - and a lift cuts along the surface and fills flush. Only a click reads
+ * it (a read takes seconds on a big mesh); a hover never does, and the cursor off the piece keeps it.
+ * Planar faces are read exactly as before.
  */
 /* global THREE, state, setStatus, addModel, placeModelMovable, pushUndo, applyMeshRotation,
           meshLocalBox3, nsoMaskCount, NSO_sculptCommitRaw, rawResultToDisplayGeometry,
@@ -90,6 +97,9 @@ var NSO_LIFT_PLATE = (function () {
 
   function LA() { return typeof window !== 'undefined' ? window.NSO_LiftAuto : null; }
   function LF() { return typeof window !== 'undefined' ? window.NSO_Lift : null; }
+  function LS() { return typeof window !== 'undefined' && window.NSO_LiftCurved ? window.NSO_LiftCurved.surface : null; }
+  /** The engine that read analysis `a`: the surface's own, else Lift 2 / 3's. */
+  function engineOf(a) { return a && a.engine === 'surface' ? LS() : LA(); }
   function $(id) { return typeof document !== 'undefined' ? document.getElementById(id) : null; }
   function f2(x) { return (+x).toFixed(2); }
 
@@ -262,18 +272,55 @@ var NSO_LIFT_PLATE = (function () {
     });
   }
 
+  var indexMemo = new WeakMap();           // soup -> NSO_LiftAuto.index(soup): the weld is the biggest cost of a read
+
+  /** The triangle a surface was read from, found again in `soup`: the same index when it still has that
+      centroid, else the triangle with it (a lift keeps the surface the cursor was on, but not its numbering). */
+  function surfaceSeed(soup, f) {
+    var nt = Math.floor(soup.length / 9);
+    function cen(t, a) { return (soup[t * 9 + a] + soup[t * 9 + 3 + a] + soup[t * 9 + 6 + a]) / 3; }
+    function at(t) { return t >= 0 && t < nt && Math.abs(cen(t, 0) - f.c[0]) < 1e-6 && Math.abs(cen(t, 1) - f.c[1]) < 1e-6 && Math.abs(cen(t, 2) - f.c[2]) < 1e-6; }
+    if (at(f.tri)) return f.tri;
+    for (var t = 0; t < nt; t++) if (at(t)) return t;
+    return -1;
+  }
+
+  /**
+   * The features standing on the curved SURFACE a click read - `f` is { tri, c } from faceOfTri - once per
+   * soup and surface (the key is the clicked triangle).
+   */
+  function detectSurface(soup, f) {
+    return cachedRead(soup, 's:' + f.tri, function () {
+      var t0 = Date.now(), CV = LS();
+      if (!CV || !LA()) return { ok: false, refused: 'deps', reason: 'Lift needs nso_lift_curved.js. Nothing changed.' };
+      var tri = soup && soup.length >= 36 ? surfaceSeed(soup, f) : -1;
+      if (tri < 0) return { ok: false, refused: 'noface', reason: 'Lift: that surface is not on this piece any more. Nothing changed.' };
+      var M = indexMemo.get(soup);
+      if (!M) { M = LA().index(soup); indexMemo.set(soup, M); }
+      var A = CV.analyse(soup, tri, { M: M });
+      if (!A.ok) return { ok: false, refused: A.refused, reason: 'Lift: ' + A.reason + '. Nothing changed.' };
+      return { ok: true, A: A, seed: tri, ms: Date.now() - t0 };
+    });
+  }
+
   /**
    * The base face for raw triangle `tri` of `soup`, the view being `view`:
    *   'top'  - it looks up (within UP_DEG of the view): the default face;
    *   { key, n, area } - a planar face to read from;
    *   null   - too small to be a base (a leaf's end, a facet of a curve).
    */
-  function faceOfTri(soup, tri, view) {
+  function faceOfTri(soup, tri, view, click) {
     var tp = soup && tri >= 0 ? triPlane(soup, tri) : null;
     if (!tp) return null;
+    var pl = planeByKey(soup, tp.key), face = !!pl && pl.area >= FACE_MIN_FRAC * planesOf(soup).total;
+    /* A click on a triangle that is on no planar face reads the curved surface it is in. */
+    if (click && !face) {
+      var o = tri * 9;
+      return { surf: true, tri: tri, key: 's:' + tri,
+        c: [(soup[o] + soup[o + 3] + soup[o + 6]) / 3, (soup[o + 1] + soup[o + 4] + soup[o + 7]) / 3, (soup[o + 2] + soup[o + 5] + soup[o + 8]) / 3] };
+    }
     if (tp.n[0] * view[0] + tp.n[1] * view[1] + tp.n[2] * view[2] >= Math.cos(UP_DEG * Math.PI / 180)) return 'top';
-    var pl = planeByKey(soup, tp.key);
-    if (!pl || pl.area < FACE_MIN_FRAC * planesOf(soup).total) return null;
+    if (!face) return null;
     return { key: tp.key, n: pl.n, area: pl.area };
   }
 
@@ -408,7 +455,7 @@ var NSO_LIFT_PLATE = (function () {
       its last stand, an Undo) falls back to the top. */
   function readTarget(m, p) {
     if (face) {
-      var r = detectFace(m.rawTris, face);
+      var r = face.surf ? detectSurface(m.rawTris, face) : detectFace(m.rawTris, face);
       if (r.refused !== 'noface') return r;
       face = null;
     }
@@ -626,8 +673,8 @@ var NSO_LIFT_PLATE = (function () {
       if (onCanvas) settleFace(h);
       var f = featureAt(h.tri);
       if (f) id = f.id;
-    } else if (onCanvas && face) {
-      setFace(null);                            // off the piece: the top is the default
+    } else if (onCanvas && face && !face.surf) {
+      setFace(null);                            // off the piece: the top is the default (a curved surface read by a click stays)
     }
     setHover(id);
   }
@@ -651,12 +698,20 @@ var NSO_LIFT_PLATE = (function () {
   /** The cursor is on raw triangle h.tri of the target. A triangle that is
       one of the features of the face being read leaves the face alone; any
       other is on a face, which becomes the one read when it is a base. */
-  function settleFace(h) {
-    if (A() && featureAt(h.tri)) return false;
+  function settleFace(h, click) {
+    /* On a feature the cursor is on the thing, not a new face - except a click on one that cannot be lifted
+       (the whole of a vase's wall is one, "it runs off the edge"): that reads the curved surface it is on. */
+    var fe = A() && featureAt(h.tri);
+    if (fe && !(click && fe.I.status !== 'ok')) return false;
+    if (face && face.surf && A() && A().region && A().region.inR[h.tri]) return false;   // already on the surface being read
     var m = modelOf(targetId), p = placedOf(targetId);
     if (!m || !p || stripOpen || busy) return false;
-    var c = faceOfTri(m.rawTris, h.tri, viewOf(p));
+    var c = faceOfTri(m.rawTris, h.tri, viewOf(p), click);
     if (c == null) return false;
+    if (fe && !c.surf) return false;
+    /* Hovering with a curved surface read: only a planar face takes it from the surface - the top, which any
+       up-looking triangle is, does not. */
+    if (!click && face && face.surf && c === 'top') return false;
     return setFace(c === 'top' ? null : c);
   }
 
@@ -694,7 +749,7 @@ var NSO_LIFT_PLATE = (function () {
       return true;
     }
     var f = featureAt(h.tri);
-    if (!f && settleFace(h)) return true;       // the click read the face under it; lifting takes a second click
+    if ((!f || f.I.status !== 'ok') && settleFace(h, true)) return true; // the click read the face under it; lifting takes a second click
     if (!f) { say('Lift: nothing to lift there - ' + (offered(A(), minH).length ? 'hover a feature first.' : 'nothing is found on this piece.')); return true; }
     var why = whyNot(f.I);
     if (why) { fail(why); return true; }
@@ -815,7 +870,7 @@ var NSO_LIFT_PLATE = (function () {
     clearHover();
     try {
       var deps = { rawFlatCapLoops: window.rawFlatCapLoops || (typeof rawFlatCapLoops === 'function' ? rawFlatCapLoops : null) };
-      var r = LA().lift(m.rawTris, a, want, deps);
+      var r = engineOf(a).lift(m.rawTris, a, want, deps);
       if (!r.ok) return fail('Lift refused - nothing changed: ' + r.reason);
 
       /* The pieces first, so a failure to add one leaves the plate alone. */
@@ -936,14 +991,24 @@ var NSO_LIFT_PLATE = (function () {
     }
     return layer;
   }
+  /* The tint of a read surface can be hundreds of thousands of triangles: built once per read, not per redraw. */
+  var tint = null;
+  function dropTint() {
+    if (!tint) return;
+    if (tint.mesh.geometry) tint.mesh.geometry.dispose();
+    if (tint.mesh.material) tint.mesh.material.dispose();
+    tint = null;
+  }
   function clearLayer() {
     if (!layer) return;
     for (var i = layer.children.length - 1; i >= 0; i--) {
       var c = layer.children[i];
       layer.remove(c);
+      if (tint && c === tint.mesh) continue;
       if (c.geometry) c.geometry.dispose();
       if (c.material) c.material.dispose();
     }
+    if (tint && !(face && face.surf && A() === tint.A)) dropTint();
   }
 
   /** The outline of a set of triangles: the edges only one of them uses. */
@@ -995,7 +1060,10 @@ var NSO_LIFT_PLATE = (function () {
     layer.matrix.copy(p.mesh.matrixWorld);
     layer.matrixWorldNeedsUpdate = true;
     var off = offered(a, minH), all = [];
-    if (face) {
+    if (face && face.surf) {
+      if (!tint || tint.A !== a) { dropTint(); tint = { A: a, mesh: fill(P, a.region.tris, FACE, 0.3) }; }
+      layer.add(tint.mesh);
+    } else if (face) {
       var fp = planeByKey(modelOf(targetId).rawTris, face.key);
       if (fp) layer.add(fill(P, fp.tris, FACE, 0.38));
     }
@@ -1063,8 +1131,9 @@ var NSO_LIFT_PLATE = (function () {
   return {
     detectSoup: detectSoup,
     detectFace: detectFace,
+    detectSurface: detectSurface,
     faceOfTri: faceOfTri,
-    face: function () { return face ? { key: face.key, n: face.n.slice(), area: face.area } : null; },
+    face: function () { return face ? (face.surf ? { key: face.key, surf: true, tri: face.tri } : { key: face.key, n: face.n.slice(), area: face.area }) : null; },
     viewFor: function (id) { return viewOf(placedOf(id)); },
     groups: groups,
     groupWords: groupWords,
