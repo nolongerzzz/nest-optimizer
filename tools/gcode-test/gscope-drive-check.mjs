@@ -274,9 +274,12 @@ async function main() {
   check('the plate is EXACTLY as it was: models, placement, raw meshes, undo', await plateSnapshot(page), snap0);
   check('no file was written', downloads, dl0);
   // More view actions, same promise.
-  const firstRow = page.locator('#ms-legend .ms-legend-item').first();
-  await firstRow.hover();
-  await firstRow.locator('.ms-legend-only').click();
+  // A mesh document has no line types: the Features list has no rows (only its note),
+  // so the old per-row "only" is the API's soloGroup here (what a Feature click calls).
+  check('a mesh document has no Features rows - the list says it is not sliced',
+    await page.evaluate(() => [document.querySelectorAll('#ms-legend .ms-legend-item').length,
+      /Not sliced/.test(document.getElementById('ms-legend').textContent)]), [0, true]);
+  await page.evaluate((g) => window.NSO_MICROSCOPE.soloGroup(g), pieces[0]);
   await page.click('#ms-btn-select-visible');
   // The box controls - Isolate all boxes, Clear all boxes - are under Click
   // to select region, and G-scope opens in orbit: arm it, as a user does.
@@ -568,7 +571,7 @@ async function main() {
   check('one fewer line shown', lineCleared.shown, aim.n - 1);
   await shot(page, '08-line-cleared.png', 'a line cleared from view');
 
-  // Feature-level: the legend's "only" is this method's one-click isolate -
+  // Feature-level: a click on a Features row (Feature mode's click) is this method's one-click isolate -
   // Export must be offered right after it, same as a picked line or a box,
   // with no separate "Select shown" required. (It used to be view-only:
   // nothing selected, Export never appeared until Select shown was pressed
@@ -578,14 +581,14 @@ async function main() {
   await page.click('#ms-zr-all');
   const inner = page.locator('#ms-legend .ms-legend-item[data-group="Inner wall"]');
   await inner.hover();
-  await inner.locator('.ms-legend-only').click();
+  await inner.click();
   const soloed = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, d = M.getDoc(), sel = M.selection();
     return { n: sel.length, want: d.parsed.moves.filter((m) => m.feature === 'Inner wall').length,
       onlyInner: sel.every((s) => s.feature === 'Inner wall'), by: M.selectionSource(),
       exportShown: getComputedStyle(document.getElementById('ms-export-row')).display !== 'none' };
   });
-  check('"only" alone selects every Inner wall move, no Select shown needed',
+  check('a click on the Inner wall row alone selects every Inner wall move, no Select shown needed',
     [soloed.n, soloed.onlyInner, soloed.exportShown], [soloed.want, true, true]);
   // Select shown reads the identical "what is shown" - pressing it after
   // "only" is a no-op on the selection, not a second, required step.
@@ -595,7 +598,7 @@ async function main() {
     return { n: sel.length, want: d.parsed.moves.filter((m) => m.feature === 'Inner wall').length,
       onlyInner: sel.every((s) => s.feature === 'Inner wall'), by: M.selectionSource() };
   });
-  check('"only" + Select shown takes every Inner wall move and nothing else',
+  check('row click + Select shown takes every Inner wall move and nothing else',
     [feat.n, feat.onlyInner, feat.by], [feat.want, true, 'visible']);
   await shot(page, '09-feature-solo.png', 'one feature alone');
   const featBand = await page.evaluate(() => {

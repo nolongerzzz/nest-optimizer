@@ -11,12 +11,11 @@
    from the relief fixtures the relief tests use, and sent to the plate by
    G-scope's Export to plate. Lift is worked on the plate, from the Subtract
    card (app-lift-plate.js): every hover and click is a real pointer event on
-   the main canvas at the screen point of a triangle the app drew. G-scope's
-   row is Features, read-only (app-gscope-lift.js).
+   the main canvas at the screen point of a triangle the app drew. (G-scope's
+   read-only Features row left G-scope with the SELECT ticket,
+   docs/GSCOPE-SELECT.md: its section 1 and the cache it filled are gone.)
 
-     1. G-scope's Features row on the plate: 56 features, outlined, the
-        grouped list, no action buttons; a click on G-scope's canvas lifts
-        nothing
+     1. the plate comes in through Import as one piece
      2. arm Lift on the plate: 56 found. Shift-click the ring and the cap, let
         go: ONE step. The piece keeps its id and becomes the plate: closed,
         flat where they stood, every other triangle bit for bit; two new
@@ -91,35 +90,17 @@ withApp(async (page, logs) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   const V0 = 10800 + PL.truth.reduce((s, t) => s + t.volume, 0);
 
-  /* ============================================ 1. G-scope: Features, read-only */
-  console.log('\n=== 1. G-scope: the Features row on the plate ===');
+  /* ============================================ 1. the plate */
+  console.log('\n=== 1. the plate comes in ===');
   const plateId = await loadSTL(page, PLATE_STL);
   const SRC = await raw(page, plateId);
   check('the plate came in through Import as one piece', SRC.length / 9 === PL.soup.length / 9, (SRC.length / 9) + ' triangles');
-  await openScopeOnPlate(page);
-  const f1 = await features(page);
-  check('G-scope\'s sidebar has the Features row on the plate, on this piece', f1.title === 'Features' && f1.shown && f1.piece && f1.piece.sourceId === plateId);
-  check('it counts 56 features, standing out more than 0.42 mm, grouped', f1.count === 56 && /^56 features found on lift-plate, standing out more than 0\.42 mm: lines ×2 · large shape ×1 · dots ×53\./.test(f1.read), f1.read);
-  check('the grouped list, one row a group', f1.rows.join(' | ') === 'Lineslines ×2 | Large shapeslarge shape ×1 | Dotsdots ×53', f1.rows.join(' | '));
-  check('each group outlined over the piece', f1.lines === 3, f1.lines + ' outlines');
-  check('nothing to press: no Pick base face, no Lift, no Remove, no Clear choice, no slider', f1.controls === 0 &&
-    await page.evaluate(() => ['ms-btn-lift-mode', 'ms-btn-lift', 'ms-btn-lift-remove', 'ms-btn-lift-clear', 'ms-lift-height', 'ms-lift-tab-strip'].every(id => !document.getElementById(id))));
-  await frameScope(page, plateId, 1.8);
-  const u1 = await plateState(page);
-  await clickScopeTri(page, plateId, T_RING);
-  check('a click on the ring in G-scope lifts nothing: the piece and the undo stack as they were', sameSoup(await raw(page, plateId), SRC) &&
-    JSON.stringify((await plateState(page)).models) === JSON.stringify(u1.models) && (await plateState(page)).undo === u1.undo);
-  await frameScope(page, plateId);
-  await shots.scope(page, '1-plate-features-in-gscope');
-  await page.evaluate(() => NSO_MICROSCOPE.close());
-
   /* ============================= 2. Lift on the plate: Shift-click ring and cap */
   console.log('\n=== 2. Lift on the plate: Shift-click the ring and the cap ===');
   const def = await page.evaluate(() => [NSO_LIFT_PLATE.minHeight(), document.getElementById('lift-height').value,
     document.getElementById('lift-height-read').textContent, NSO_Thickness.floorFor(0.4)]);
   check('"How far out counts" starts at NSO_Thickness.floorFor(0.4) = 0.42 mm', def[0] === 0.42 && +def[1] === 0.42 && def[2] === '0.42 mm' && def[3] === 0.42, def.join(' / '));
-  check('armed on the plate: "56 features found", the same count as G-scope', (await armOn(page, plateId)) === '56 features found');
-  check('the card read the same cache G-scope filled', (await page.evaluate(() => NSO_LIFT_PLATE.detection().cached)) === true);
+  check('armed on the plate: "56 features found"', (await armOn(page, plateId)) === '56 features found');
   await frameOn(page, plateId);
   const fRing = await featureOf(page, T_RING), fCap = await featureOf(page, T_CAP);
   await hoverTri(page, plateId, T_RING);

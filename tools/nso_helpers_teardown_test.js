@@ -275,11 +275,11 @@ withApp(async (page, logs) => {
     await page.evaluate(() => { window.nsoFoam.fillAll(); });
   }, () => window.nsoFoam.on());
 
-  /* G-scope: its own sheet and its own scene. Overhangs' beacons and the Features
-     row's outlines, then G-scope shut and the plate's leave gesture. */
+  /* G-scope: its own sheet and its own scene. Overhangs' beacons (the Features
+     row's outlines left G-scope with the SELECT ticket), then G-scope shut and the
+     plate's leave gesture. */
   for (const [name, owner, api, ready] of [
-    ['G-scope Overhangs', 'gscope-support', 'NSO_GSCOPE_SUPPORT', () => NSO_GSCOPE_SUPPORT.isOn()],
-    ['G-scope Features', 'gscope-lift', 'NSO_GSCOPE_LIFT', () => !!(NSO_GSCOPE_LIFT.layer() && NSO_GSCOPE_LIFT.layer().parent)]
+    ['G-scope Overhangs', 'gscope-support', 'NSO_GSCOPE_SUPPORT', () => NSO_GSCOPE_SUPPORT.isOn()]
   ]) {
     await selectPiece(page, cavId);
     await page.evaluate(() => NSO_MICROSCOPE.openPlate());

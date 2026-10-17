@@ -24,7 +24,7 @@
      5. Strip: the grouped list, untick the dots, Confirm: the line and the
         plant lift, where they stood; the dots stay; one Undo step
      6. the lifted piece is an ordinary piece: Move, then Join
-     7. G-scope's Features row: the same count, outlines, no action buttons
+     7. (G-scope's Features row left G-scope with the SELECT ticket)
      8. refusals in words: a painted piece, nothing found
 */
 'use strict';
@@ -231,40 +231,14 @@ withApp(async (page, logs) => {
   const s6 = await status(page), a6 = await plateState(page);
   check('Join: the line and the plant join into one piece', /Join ok/.test(s6) && a6.models.length === before6.models.length - 1, s6.slice(0, 160));
 
-  /* ======================================================= 7. G-scope */
-  console.log('\n=== 7. G-scope: the Features row, read-only ===');
+  /* ======================================================= 7. back past the strip */
+  /* (G-scope's read-only Features row was section 7's other half; it left G-scope
+     with the SELECT ticket, docs/GSCOPE-SELECT.md.) */
+  console.log('\n=== 7. back past the strip ===');
   let presses = 0;                        // the join, the move, the strip - however many steps each took
   while ((await plateState(page)).undo > b5.undo && presses < 8) { await ctrlZ(page); presses++; }
   const u7 = await raw(page, plateId);
   check('Ctrl+Z back past the strip: the plate bit for bit again', u7.length === SRC.length && u7.every((v, i) => v === SRC[i]), presses + ' presses');
-  await selectRow(page, plateId);
-  await page.click('#btn-lift');
-  const plateCount = await page.evaluate(() => NSO_LIFT_PLATE.count());
-  await page.click('#btn-lift');
-  await page.click('#btn-microscope');
-  await page.waitForFunction(() => NSO_MICROSCOPE.isOpen(), null, { timeout: 30000 });
-  if (await page.evaluate(() => !(NSO_MICROSCOPE.getDoc() && NSO_MICROSCOPE.getDoc().source === 'plate'))) await page.click('#ms-btn-plate');
-  await page.waitForFunction(() => NSO_MICROSCOPE.getDoc() && NSO_MICROSCOPE.getDoc().source === 'plate', null, { timeout: 30000 });
-  await page.waitForTimeout(300);
-  const g7 = await page.evaluate(() => ({
-    title: document.querySelector('#ms-lift-row .ms-section-title').textContent,
-    shown: getComputedStyle(document.getElementById('ms-lift-row')).display !== 'none',
-    buttons: document.querySelectorAll('#ms-lift-row button, #ms-lift-row input').length,
-    piece: NSO_GSCOPE_LIFT.piece(), count: NSO_GSCOPE_LIFT.count(),
-    rows: Array.from(document.querySelectorAll('#ms-lift-groups .ms-lift-group')).map(r => r.textContent),
-    read: document.getElementById('ms-lift-read').textContent,
-    lines: NSO_GSCOPE_LIFT.layer() ? NSO_GSCOPE_LIFT.layer().children.filter(c => c.type === 'LineSegments').length : 0,
-    cached: NSO_LIFT_PLATE.detectSoup(state.models.find(m => m.name === 'barocke-plate').rawTris, NSO_LIFT_PLATE.viewFor(state.models.find(m => m.name === 'barocke-plate').id)).cached
-  }));
-  check('the row is "Features", shown on the plate, on the Barocke plate', g7.title === 'Features' && g7.shown && g7.piece && g7.piece.sourceId === plateId, JSON.stringify(g7.piece));
-  check('the same count as the card: 22', g7.count === plateCount && plateCount === 22 && /^22 features found on barocke-plate/.test(g7.read), g7.read.slice(0, 140));
-  check('the grouped list', g7.rows.join(' | ') === 'Linesline ×1 | Large shapeslarge shape ×1 (12 parts) | Dotsdots ×20', g7.rows.join(' | '));
-  check('outlines drawn, one per group', g7.lines === 3, g7.lines);
-  check('no action buttons: nothing to pick, lift, remove or clear', g7.buttons === 0, g7.buttons);
-  check('the same read: the cache the card filled', g7.cached === true);
-  await page.evaluate(() => document.getElementById('ms-lift-row').scrollIntoView({ block: 'center' }));
-  await shot(page, '3-gscope-features');
-  await page.evaluate(() => NSO_MICROSCOPE.close());
 
   /* ====================================================== 8. refusals */
   console.log('\n=== 8. refusals in words ===');

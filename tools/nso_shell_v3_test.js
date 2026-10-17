@@ -613,7 +613,8 @@ withApp(async (page, logs) => {
     // G-scope, then Lift (in Subtract): on the plate, not a way into G-scope.
     const gs = async () => page.evaluate(() => {
       const panel = document.getElementById('microscope');
-      const e = document.getElementById('ms-lift-row'), b = e.getBoundingClientRect();
+      // the viewport is what G-scope draws on (its old Features row stood in for it, and left G-scope)
+      const e = document.getElementById('ms-viewport'), b = e.getBoundingClientRect();
       return { open: !panel.hidden, features: { shown: getComputedStyle(e).display !== 'none' && b.height > 0 } };
     });
     const msClose = () => page.evaluate(() => { if (NSO_MICROSCOPE.isOpen()) NSO_MICROSCOPE.close(); });
