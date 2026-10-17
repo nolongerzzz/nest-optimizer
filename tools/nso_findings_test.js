@@ -73,7 +73,7 @@ function soupOf(rel) {
    where holes < loops the reason is written next to it. */
 const KNOWN = {
   'damage/shape-sphere_hole.stl':                { holes: 1, loops: 1, fixes: ['patch'] },
-  'damage/shape-sphere_hole-painted.stl':        { holes: 1, loops: 1, fixes: ['cap'] },
+  'damage/shape-sphere_hole-painted.stl':        { holes: 1, loops: 1, fixes: ['patch'] },      // a flat rim in a sphere: the surround curves (was CAP)
   // "12 sites grown together ... 2 loops" in the README is the generator's
   // exact topology; the checker's loop walk splits them at 2 pinch vertices
   // into 4 cycles. Two holes to look at.
