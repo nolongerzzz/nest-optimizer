@@ -249,7 +249,6 @@ withApp(async (page, logs) => {
   await showLens(page);
   await page.click('#ms-btn-plate');
   await page.waitForFunction(() => NSO_MICROSCOPE.getDoc() && NSO_MICROSCOPE.lensDoc().source === 'plate', null, { timeout: 30000 });
-  await page.waitForFunction(() => NSO_MICROSCOPE.flange().status !== 'pending', null, { timeout: 30000 });
   await pull(page, 'piece (whole)',
     () => { const M = NSO_MICROSCOPE; M.clearBoxes(); M.selectObjects([M.getDoc().objects[0].name], 'pick'); },
     () => {
@@ -301,7 +300,11 @@ withApp(async (page, logs) => {
     await page.mouse.down();
     await page.mouse.up();
     await frames(page);
-    check('a press that does not travel pulls nothing', await plate(page) === 'lens' && await takeN(page) === n0 && await lensState(page) === before);
+    check('a press that does not travel pulls nothing - it is a click, and isolates', await plate(page) === 'lens' && await takeN(page) === n0 &&
+      await page.evaluate(() => NSO_MICROSCOPE.getView().detailGroup.visible));
+    await page.keyboard.press('Escape');
+    await frames(page);
+    check('...and Escape makes it whole again', await page.evaluate(() => !NSO_MICROSCOPE.getView().detailGroup.visible && NSO_MICROSCOPE.isOpen()));
 
     // a press on empty space still orbits
     const empty = await page.evaluate(() => window.__t.emptyPx());
@@ -338,30 +341,48 @@ withApp(async (page, logs) => {
   /* ------------------------------------------------------------------ 4 */
   console.log('\n=== 4. TAKE follows: legend, readouts, slider ===');
   {
+    // "only" on the Support row (pull d) left every other line type off - Display is one set, and it outlived LENS being re-read
+    check('Display outlived the plate being read again: the other line types are still off', await page.evaluate(() => NSO_MICROSCOPE.plateState('lens').featuresOff.length) >= 4);
+    await page.evaluate(() => NSO_MICROSCOPE.showAll());
     await page.click('#ms-plate-take');
     await frames(page);
     const t = await page.evaluate(() => {
       const M = NSO_MICROSCOPE, d = M.getDoc(), z = document.getElementById('ms-zr');
       return { plate: M.plate(), rows: Array.from(document.querySelectorAll('#ms-legend .ms-legend-item .ms-legend-label')).map(e => e.textContent),
+        checks: Array.from(document.querySelectorAll('#ms-legend .ms-legend-display')).map(e => e.checked),
         title: document.getElementById('ms-legend-title').textContent, sub: document.getElementById('ms-sub').textContent,
         zrHidden: z.hidden, zrCount: document.getElementById('ms-zr-count').textContent, zr: M.zRange(), kind: d.kind, source: d.source,
-        det: document.getElementById('ms-detected').children.length, info: document.getElementById('ms-info').textContent,
+        info: document.getElementById('ms-info').textContent,
         badge: document.getElementById('ms-mode-badge').textContent, lens: M.lensDoc().name };
     });
-    check('the legend lists the five pieces, as Parts', t.rows.length === 5 && t.title === 'Parts', J(t.rows));
+    check('the legend is TAKE\'s Features: the slicer line types on it (the box piece has none), each with a Display check',
+      t.title === 'Features' && t.rows.length >= 3 && t.rows.length <= 5 && t.rows.every(r => /\(\d+\)$/.test(r)) && t.checks.every(Boolean) && t.checks.length === t.rows.length, J(t.rows));
     check('the header is TAKE\'s: five pieces', /^TAKE - 5 pieces/.test(t.sub), t.sub.slice(0, 60));
     check('the slider is TAKE\'s: a Z range over what is on it', !t.zrHidden && t.zr && t.zr.bandMm[1] > 5 && t.zr.unit === 'mm', J(t.zr));
-    check('the detector rows are not on TAKE; the badge says TAKE', t.det === 0 && /TAKE: 5/.test(t.badge), t.badge);
+    check('the badge says TAKE', /TAKE: 5/.test(t.badge), t.badge);
     check('getDoc() is the plate shown; lensDoc() is still LENS\'s', t.kind === 'mesh' && t.source === 'take' && t.lens === 'Plate');
     // the slider clips TAKE like any mesh: the lower half only
     const clipped = await page.evaluate(() => { const M = NSO_MICROSCOPE; M.setZRangeMm(0, 1); M.flushView(); return [M.zRange().bandMm, M.shownCount()]; });
     check('the slider narrows TAKE to a band', clipped[0][1] < 3 && clipped[1] >= 1, J(clipped));
     await page.evaluate(() => { NSO_MICROSCOPE.setZRange(0, 1e6); NSO_MICROSCOPE.flushView(); });
     await shot('04-take-follows');
-    // and the legend's own row toggles a piece off and back
-    const dim = await page.evaluate(() => { const row = () => document.querySelector('#ms-legend .ms-legend-item');
-      row().click(); const a = row().classList.contains('dim'); row().click(); return [a, row().classList.contains('dim')]; });
-    check('a legend row hides a piece and shows it again', dim[0] === true && dim[1] === false, J(dim));
+    // Display: a line type unchecked is hidden on TAKE, and on LENS too - one set for both plates
+    const d0 = await page.evaluate(() => { const M = NSO_MICROSCOPE; const v = M.getView(); let tri = 0;
+      Object.keys(v.overviewMeshes).forEach(k => { const m = v.overviewMeshes[k]; if (m.visible) tri += m.geometry.attributes.position.count / 3; });
+      return { tri, rows: Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map(r => r.dataset.group) }; });
+    await page.evaluate(() => { const c = document.querySelector('#ms-legend .ms-legend-item[data-group="Support"] .ms-legend-display'); c.click(); });
+    await frames(page);
+    const d1 = await page.evaluate(() => { const M = NSO_MICROSCOPE; const v = M.getView(); let tri = 0;
+      Object.keys(v.overviewMeshes).forEach(k => { const m = v.overviewMeshes[k]; if (m.visible) tri += m.geometry.attributes.position.count / 3; });
+      return { tri, dim: document.querySelector('#ms-legend .ms-legend-item[data-group="Support"]').classList.contains('dim'), off: M.hidden() }; });
+    check('Display unchecked: that line type is drawn no more on TAKE', d1.tri < d0.tri && d1.dim, J([d0.tri, d1.tri, d1.dim]));
+    await page.click('#ms-plate-lens');
+    await frames(page);
+    check('...and the same type is off for LENS too: one Display set for both plates', await page.evaluate(() => JSON.parse(NSO_MICROSCOPE.plateState('lens').featuresOff.length ? JSON.stringify(NSO_MICROSCOPE.plateState('lens').featuresOff) : '[]').indexOf('Support') >= 0));
+    await page.click('#ms-plate-take');
+    await page.evaluate(() => { const c = document.querySelector('#ms-legend .ms-legend-item[data-group="Support"] .ms-legend-display'); c.click(); });
+    await frames(page);
+    check('checked again, it is back', await page.evaluate(() => NSO_MICROSCOPE.plateState('lens').featuresOff.indexOf('Support') < 0));
   }
 
   /* ------------------------------------------------------------------ 5 */
@@ -520,7 +541,7 @@ withApp(async (page, logs) => {
     // On LENS: today's selection exports, unchanged
     await page.click('#btn-microscope');
     await page.waitForFunction(() => NSO_MICROSCOPE.isOpen(), null, { timeout: 30000 });
-    await page.waitForFunction(() => NSO_MICROSCOPE.lensDoc() && NSO_MICROSCOPE.flange().status !== 'pending', null, { timeout: 30000 });
+    await page.waitForFunction(() => NSO_MICROSCOPE.lensDoc() && NSO_MICROSCOPE.lensDoc().source === 'plate', null, { timeout: 30000 });
     await frames(page);
     await showLens(page);
     await page.evaluate(() => { const M = NSO_MICROSCOPE; M.selectObjects([M.getDoc().objects[0].name], 'pick'); });

@@ -1376,10 +1376,6 @@
 
       <button id="ms-nav-select" type="button" class="vp-bar-btn ms-nav ms-group-start"
               data-card="ms-card-select" aria-controls="ms-card-select" aria-expanded="false">Select</button>
-      <button id="ms-nav-line" type="button" class="vp-bar-btn ms-nav"
-              data-card="ms-card-line" aria-controls="ms-card-line" aria-expanded="false">Line</button>
-      <button id="ms-nav-layer" type="button" class="vp-bar-btn ms-nav"
-              data-card="ms-card-layer" aria-controls="ms-card-layer" aria-expanded="false">Layer</button>
       <button id="ms-nav-view" type="button" class="vp-bar-btn ms-nav"
               data-card="ms-card-view" aria-controls="ms-card-view" aria-expanded="false">View</button>
       <button id="ms-nav-render" type="button" class="vp-bar-btn ms-nav"
@@ -1419,36 +1415,30 @@
       <!-- The cards. One open at a time, each beside the column, top-left of
            the viewport (Export: under the corner row). The engine still shows
            and hides the rows inside them by id, as it did in the sidebar. -->
+      <!-- SELECT: one selection model, five ways in. In every mode: hover outlines
+           what a click would take, a click isolates it (again, or Escape: whole
+           again), a drag pulls it onto TAKE. A press on bare plate orbits. -->
       <div id="ms-card-select" class="ms-card" role="group" aria-label="Select" data-nav="ms-nav-select">
-        <div class="ms-btn-row">
-          <button id="ms-mode-orbit" type="button" class="active">Orbit whole part</button>
-          <button id="ms-mode-select" type="button">Click to select region</button>
-          <button id="ms-mode-line" type="button"
-                  title="Pick one extrusion move at a time (sliced files only)">Pick a line</button>
+        <div class="ms-btn-row ms-seg" id="ms-mode-row" role="group" aria-label="Select by">
+          <button id="ms-mode-piece" type="button" class="active" aria-pressed="true"
+                  title="A whole piece">Piece</button>
+          <button id="ms-mode-select" type="button" aria-pressed="false"
+                  title="The capture box: click a piece to drop one, size it by its dots">Region</button>
+          <button id="ms-mode-feature" type="button" aria-pressed="false"
+                  title="A slicer line type: a line of it, or its row in the Features list (slices only)">Feature</button>
+          <button id="ms-mode-line" type="button" aria-pressed="false"
+                  title="One extrusion line; the arrows step along it (slices only)">Line</button>
+          <button id="ms-mode-layer" type="button" aria-pressed="false"
+                  title="One layer, or the slider's whole range (slices only)">Layer</button>
         </div>
+        <p class="ms-note" id="ms-mode-note">Hover a piece, click to isolate it. Drag it onto TAKE.</p>
         <div id="ms-select-controls" style="display:none;">
-          <p class="ms-note">Click empty space to drop a flat box. Drag its
-            <b>blue centre dot</b> to move it. Drag its <b>green corner dot</b> to
-            size it along and across independently. A new box lines up with the
-            piece next to it. Drag its <b>side/face</b> to scale
-            the footprint. Drag the <b>small orange dot on top</b> to control how
-            thick (tall) it is &mdash; keep it thin to avoid grabbing unrelated
-            layers above/below.</p>
           <div class="ms-btn-row">
             <button id="ms-btn-isolate" type="button" disabled>Isolate all boxes &rarr;</button>
             <button id="ms-btn-clear" type="button">Clear all boxes</button>
           </div>
         </div>
-        <div id="ms-detail-controls" class="ms-btn-row" data-flex="1" style="display:none;">
-          <button id="ms-btn-back" type="button">&larr; Back to whole part</button>
-        </div>
-      </div>
-
-      <div id="ms-card-line" class="ms-card" role="group" aria-label="Line" data-nav="ms-nav-line">
         <div id="ms-line-controls" style="display:none;">
-          <p class="ms-note">Click a line to pick that one move; <b>Shift</b>-click
-            adds or removes one. The arrows step to the neighbouring move that is
-            drawn, so the layer-range slider and the legend decide what you step through.</p>
           <div class="ms-btn-row">
             <button id="ms-line-prev" type="button" title="Previous move (Left arrow)">&#9664; line</button>
             <button id="ms-line-next" type="button" title="Next move (Right arrow)">line &#9654;</button>
@@ -1456,9 +1446,6 @@
           </div>
           <p class="ms-note" id="ms-line-read">&mdash;</p>
         </div>
-      </div>
-
-      <div id="ms-card-layer" class="ms-card" role="group" aria-label="Layer" data-nav="ms-nav-layer">
         <div id="ms-layer-row" style="display:none;">
           <div class="ms-btn-row">
             <button id="ms-layer-prev" type="button" title="Previous layer">&#9660;</button>
@@ -1469,6 +1456,9 @@
                     title="Select every move at this layer's printing height, whatever feature printed it">Select layer</button>
           </div>
           <p class="ms-note" id="ms-layer-note">&mdash;</p>
+        </div>
+        <div id="ms-detail-controls" class="ms-btn-row" data-flex="1" style="display:none;">
+          <button id="ms-btn-back" type="button">&larr; Back to whole part</button>
         </div>
       </div>
 
@@ -1613,14 +1603,11 @@
       </div>
 
       <!-- The readouts, always up and never a card: down the left wall under
-           the column, the file line over the feature legend (with its
-           minimize toggle); along the bottom, the selection / segment info,
-           the Features readout, the Slice report and the mode hint. app-microscope.js finds #ms-legend by id and
-           never by where it lives, so the rows, their show / hide toggle and
-           the per-row "only" button are the same code as before the move.
-           One list per view and no tab strip: a slice lists its features
-           (#ms-legend), a mesh lists its parts (#ms-legend) and, under a rule,
-           the five detector rows (#ms-detected). -->
+           the column, the file line over the FEATURES list (with its minimize
+           toggle); along the bottom, the selection / segment info, the Slice
+           report and the mode hint. The list is the slicer's line types and
+           nothing else - Bambu-style: swatch, name, count, a Display check -
+           and acts on both plates; surface features are the plate's now. -->
       <div id="ms-dock" class="ms-dock">
         <!-- Left wall, under the column: the file line, and the legend right
              below it. -->
@@ -1631,18 +1618,11 @@
           </div>
           <div id="ms-legend-float" class="ms-section">
             <div class="ms-legend-head">
-              <div class="ms-section-title" id="ms-legend-title">All features</div>
+              <div class="ms-section-title" id="ms-legend-title">Features</div>
               <button id="ms-legend-toggle" type="button" aria-expanded="true"
                       aria-controls="ms-legend" title="Minimize the list">&minus;</button>
             </div>
             <div id="ms-legend"></div>
-            <!-- Rows for what the geometry has but the file does not name, mesh
-                 only. The Flange row (nso_flange.js, docs/GSCOPE-FLANGE.md), then
-                 Handle, Bracket, Lid and Hinge (nso_face_features.js,
-                 docs/GSCOPE-FEATURES.md). Each a show / hide toggle like the part
-                 rows above it; kept apart from #ms-legend, whose rows are exactly
-                 the file's own groups. Empty on a slice. -->
-            <div id="ms-detected"></div>
           </div>
         </div>
         <!-- Along the bottom, right of the legend: the boxes sit side by side
@@ -1651,15 +1631,6 @@
           <div class="ms-glass ms-section">
             <div class="ms-section-title" id="ms-info-title">Selection / segment info</div>
             <div id="ms-info">No file open.</div>
-          </div>
-          <!-- Features (app-gscope-lift.js, docs/LIFT.md section 7): read-only.
-               What Lift would find on the piece under the lens - outlined over it,
-               and the grouped list - from the same read the Subtract card's Lift
-               makes (NSO_LIFT_PLATE.detectSoup). Lifting is done on the plate. -->
-          <div class="ms-glass ms-section" id="ms-lift-row" style="display:none;">
-            <div class="ms-section-title">Features</div>
-            <div id="ms-lift-groups" class="ms-lift-groups" style="display:none;"></div>
-            <p class="ms-note" id="ms-lift-read">&mdash;</p>
           </div>
           <div class="ms-glass ms-section" id="ms-slice-readout" style="display:none;">
             <p class="ms-note" id="ms-slice-read">&mdash;</p>
@@ -1707,6 +1678,8 @@
         </div>
         <div id="ms-zr-lo-read" class="ms-zr-read">&mdash;</div>
         <div id="ms-zr-count" class="ms-zr-count">&mdash;</div>
+        <button id="ms-zr-card" class="ms-zr-card" type="button"
+                title="The range, as one card: hover to outline it, click to isolate it, drag it onto TAKE">Range</button>
         <button id="ms-zr-all" class="ms-zr-all" type="button" title="Every layer">All</button>
       </div>
     </div>
@@ -1902,7 +1875,6 @@
   <script src="app-lift-plate.js?v=liftsurface1"></script>
   <script src="nso_split_parts.js?v=split1"></script>
   <script src="app-split-parts.js?v=split1"></script>
-  <script src="app-gscope-lift.js?v=take1"></script>
 
 
   <script src="app-ux.js?v=inside9"></script>

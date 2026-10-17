@@ -558,7 +558,7 @@ var NSO_MICROSCOPE = (function () {
   // ===========================================================================
 
   var HIDDEN = null;          // Set of group names toggled off in the legend
-  var mode = 'orbit';         // 'orbit' | 'select' | 'line'; every document opens in 'orbit'
+  var mode = 'piece';         // 'piece' | 'select' (Region) | 'feature' | 'line' | 'layer'; every document opens in 'piece'
   var balls = [];             // the capture boxes
   var defaultR = 5.0;
   // A corner drag makes the footprint a rectangle; the next box dropped takes
@@ -587,13 +587,11 @@ var NSO_MICROSCOPE = (function () {
   var isolated = false;
   var clickHooks = [];        // fn(ndcX, ndcY, event) -> true when it took the click
   var docListeners = [];      // fn(doc) after every open()
-  // The detector rows switched on (a mesh's Parts list: 'flange', 'handle',
-  // 'bracket', 'lid', 'hinge'). View state like HIDDEN, and the same kind of
-  // toggle: a rule on draws what it found, over its part when that part is
-  // shown and alone when it is not. Every document opens with all five on, as
-  // every part and every feature opens shown; a row with nothing found has
-  // nothing to draw, so it reads off (allDetectors()).
-  var DETECTED_ON = new Set();
+  // Line types the Display column has switched off. ONE set for both plates:
+  // unchecking "Support" hides it on LENS and on TAKE alike, and it outlives
+  // the plate that was showing when the box was ticked. Travel opens off, as
+  // it always has; a new slice opens with that default again.
+  var FEATURE_OFF = new Set(['Travel']);
 
   var BED_GRID = 120;                 // the bed grid's side, mm, centred on the origin
 
@@ -638,9 +636,9 @@ var NSO_MICROSCOPE = (function () {
     dg.visible = false;
     return {
       doc: name === 'take' ? (takeDoc || (takeDoc = newTakeDoc())) : null,
-      HIDDEN: new Set(), CLEARED: new Set(), DETECTED_ON: new Set(), zr: null, lineCursor: -1,
-      mode: 'orbit', balls: [], currentSelection: [], selectionSource: 'box', isolated: false,
-      groups: [G(), dg, G()], overviewMeshes: {}, detectedMeshes: {}, solidMeshes: {}, solidBuilt: null,
+      HIDDEN: new Set(), CLEARED: new Set(), zr: null, lineCursor: -1,
+      mode: 'piece', balls: [], currentSelection: [], selectionSource: 'box', isolated: false,
+      groups: [G(), dg, G()], overviewMeshes: {}, solidMeshes: {}, solidBuilt: null,
       worldSphere: null, cam: null
     };
   }
@@ -649,12 +647,12 @@ var NSO_MICROSCOPE = (function () {
   function stashPlate() {
     var v = view;
     var s = {
-      doc: doc, HIDDEN: HIDDEN, CLEARED: CLEARED, DETECTED_ON: DETECTED_ON, zr: zr, lineCursor: lineCursor,
+      doc: doc, HIDDEN: HIDDEN, CLEARED: CLEARED, zr: zr, lineCursor: lineCursor,
       mode: mode, balls: balls, currentSelection: currentSelection, selectionSource: selectionSource, isolated: isolated
     };
     if (v) {
       s.groups = [v.overviewGroup, v.detailGroup, v.highlightGroup];
-      s.overviewMeshes = v.overviewMeshes; s.detectedMeshes = v.detectedMeshes;
+      s.overviewMeshes = v.overviewMeshes;
       s.solidMeshes = v.solidMeshes || {}; s.solidBuilt = v.solidBuilt || null;
       s.worldSphere = v.worldSphere || null;
       s.cam = { pos: v.camera.position.clone(), target: v.controls.target.clone(), near: v.camera.near, far: v.camera.far };
@@ -665,11 +663,11 @@ var NSO_MICROSCOPE = (function () {
   /** A stash back into the module variables and the view's fields. */
   function loadPlate(s) {
     var v = view;
-    doc = s.doc; HIDDEN = s.HIDDEN; CLEARED = s.CLEARED; DETECTED_ON = s.DETECTED_ON; zr = s.zr;
+    doc = s.doc; HIDDEN = s.HIDDEN; CLEARED = s.CLEARED; zr = s.zr;
     lineCursor = s.lineCursor; mode = s.mode; balls = s.balls; currentSelection = s.currentSelection;
     selectionSource = s.selectionSource; isolated = s.isolated;
     v.overviewGroup = s.groups[0]; v.detailGroup = s.groups[1]; v.highlightGroup = s.groups[2];
-    v.overviewMeshes = s.overviewMeshes; v.detectedMeshes = s.detectedMeshes;
+    v.overviewMeshes = s.overviewMeshes;
     v.solidMeshes = s.solidMeshes; v.solidBuilt = s.solidBuilt; v.worldSphere = s.worldSphere;
   }
 
@@ -733,7 +731,6 @@ var NSO_MICROSCOPE = (function () {
       if (first) frame();
     } else {
       redrawDoc(false);
-      if (doc && flangeState() && (flangeState().status === 'pending' || featureState('handle').status === 'pending')) detectSoon();
     }
     syncPlate();
     docListeners.forEach(function (fn) {
@@ -752,10 +749,11 @@ var NSO_MICROSCOPE = (function () {
   function redrawDoc(rebuild) {
     var v = view;
     applyClip();
-    if (v && rebuild !== false) {
+    if (v && (rebuild !== false || (doc && doc.source === 'take' && v.takeSig !== featureSig()))) {
       buildOverview();
       buildDetail_();
     }
+    clearHover();
     buildLegend();
     applyFeatureVisibility();
     refreshHighlight();
@@ -769,8 +767,6 @@ var NSO_MICROSCOPE = (function () {
     syncCropRow();
     syncLineRead();
     syncBackButton();
-    var lineBtn = $('ms-mode-line');
-    if (lineBtn) lineBtn.disabled = !(doc && doc.kind === 'toolpath');
     if (doc && currentSelection.length) describeSelection(); else info(introInfo());
   }
 
@@ -782,14 +778,11 @@ var NSO_MICROSCOPE = (function () {
     if (!doc) return 'No file open.';
     if (doc.source === 'take') {
       return doc.objects.length
-        ? 'Drag a piece to move it. <b>Click to select region</b>, or click a piece, to choose what Export acts on.'
+        ? 'Drag a piece to move it. Hover and click one to isolate it - and Export acts on it.'
         : 'Nothing on TAKE yet. Press the isolated thing on LENS and drag it here.';
     }
-    return doc.kind === 'toolpath'
-      ? 'Drag to orbit. <b>Click to select region</b>, then click the model to drop a capture box; ' +
-        'or pick a single line, or take a whole layer.'
-      : ('Drag to orbit. <b>Click to select region</b>, then click a ' +
-         (doc.source === 'plate' ? 'piece' : 'part') + ' to drop a capture box over it.');
+    return 'Hover what a click would take and it is outlined. <b>Click</b> isolates it (click it again, or Escape, to see the ' +
+           'whole part), <b>drag</b> pulls it onto TAKE; drag bare plate to orbit. The Select card picks what a click takes.';
   }
 
   /** The LENS | TAKE toggle and CLEAR follow the shown plate. */
@@ -906,7 +899,7 @@ var NSO_MICROSCOPE = (function () {
     var live = name === plateName, S = live ? null : plateSaved[name];
     var d = live ? doc : (S ? S.doc : null);
     if (!live && !S) return null;
-    var H = live ? HIDDEN : S.HIDDEN, C = live ? CLEARED : S.CLEARED, ON = live ? DETECTED_ON : S.DETECTED_ON;
+    var H = live ? HIDDEN : S.HIDDEN, C = live ? CLEARED : S.CLEARED;
     var Z = live ? zr : S.zr, B = live ? balls : S.balls, SEL = live ? currentSelection : S.currentSelection;
     var cam = live && view ? { pos: view.camera.position, target: view.controls.target } : (S && S.cam ? { pos: S.cam.pos, target: S.cam.target } : null);
     var sum = 0, n = 0;
@@ -918,7 +911,7 @@ var NSO_MICROSCOPE = (function () {
     var r = function (v) { return +v.toFixed(6); };
     return {
       doc: d ? d.name : null, kind: d ? d.kind : null, source: d ? d.source || null : null,
-      hidden: Array.from(H).sort(), cleared: Array.from(C).sort(function (a, b) { return a - b; }), detectedOn: Array.from(ON).sort(),
+      hidden: Array.from(H).sort(), cleared: Array.from(C).sort(function (a, b) { return a - b; }), featuresOff: Array.from(FEATURE_OFF).sort(),
       zr: Z ? [Z.lo, Z.hi, Z.n] : null,
       mode: live ? mode : S.mode, isolated: live ? isolated : S.isolated,
       selectionSource: live ? selectionSource : S.selectionSource,
@@ -942,22 +935,36 @@ var NSO_MICROSCOPE = (function () {
   // ---------------------------------------------------------------------------
 
   /**
-   * LENS's selection as a piece to put on TAKE, or null. Whatever made the
-   * selection - a capture box, a picked line, a layer or a layer range, a
-   * piece, a legend feature - it is the same one thing here (setSelection's),
-   * and the piece is what Export would write: a slice's beads as their prisms
-   * (with the moves kept for "as solid"), a mesh's own triangles.
+   * What is being pulled, as a piece to put on TAKE, or null. `tgt` is what the
+   * press was on ({ items, source }); with none it is LENS's selection. Whatever
+   * the thing is - a piece, a box's region, a line type, a line, a layer, the
+   * slider's range - it is the same here: items, and the piece is what Export
+   * would write: a slice's beads as their prisms (with the moves kept for "as
+   * solid"), a mesh's own triangles. LENS is not touched: the selection the
+   * name and the geometry are read from is only borrowed for the read.
    */
-  function pullSpec() {
-    if (!doc || plateName !== 'lens' || !currentSelection.length) return null;
-    var geo = microscopeGeometry();
-    if (!geo) return null;
-    var pos = new Float32Array(geo.attributes.position.array);
-    if (pos.length < 9) return null;
-    return {
-      name: exportLabel(), positions: pos, from: doc.name,
-      moves: doc.kind === 'toolpath' ? currentSelection.map(function (s) { return s.mv; }) : null
-    };
+  function pullSpec(tgt) {
+    if (!doc || plateName !== 'lens') return null;
+    var items = tgt ? tgt.items : currentSelection, source = tgt ? tgt.source : selectionSource;
+    if (!items || !items.length) return null;
+    return withSelection(items, source, function () {
+      var geo = microscopeGeometry();
+      if (!geo) return null;
+      var pos = new Float32Array(geo.attributes.position.array);
+      if (pos.length < 9) return null;
+      return {
+        name: exportLabel(), positions: pos, from: doc.name,
+        moves: doc.kind === 'toolpath' ? items.map(function (sg) { return sg.mv; }) : null
+      };
+    });
+  }
+
+  /** Run fn with `items` as the selection - and put the real one back, whatever fn does. */
+  function withSelection(items, source, fn) {
+    var s0 = currentSelection, src0 = selectionSource, c0 = lineCursor, li0 = doc && doc.layerIndex;
+    currentSelection = items; selectionSource = source;
+    try { return fn(); }
+    finally { currentSelection = s0; selectionSource = src0; lineCursor = c0; if (doc) doc.layerIndex = li0; }
   }
 
   /** A spec set down on TAKE's bed, its footprint centred on the Z-up point (x, y). Returns the piece. */
@@ -978,38 +985,55 @@ var NSO_MICROSCOPE = (function () {
     return o;
   }
 
-  var pull = null;     // the press in progress: { kind: 'new' | 'move', x0, y0, live, cancelled }
+  var pull = null;     // the press in progress: { kind: 'new' | 'move', tgt, x0, y0, live, cancelled }
 
   function pullSlop() { return (window.nsoGrab && window.nsoGrab.SLOP) || 3; }
 
-  /** The first thing drawn under the pointer that the selection owns, or false. */
-  function selectedHit(e) {
+  function rayAt(e) {
     var v = view, q = ndc(e);
     v.raycaster.setFromCamera(new THREE.Vector2(q[0], q[1]), v.camera);
     var d = v.camera.position.distanceTo(v.controls.target);
     v.raycaster.params.Line.threshold = Math.max(0.05, d * 0.006);
-    // A capture box's three dots are the box's: they keep their press.
-    if (mode === 'select' && balls.length) {
-      var hs = [];
-      balls.forEach(function (b) { hs.push(b.handle, b.heightHandle, b.cornerHandle); });
-      if (v.raycaster.intersectObjects(hs).length) return false;
-    }
+    return v.raycaster;
+  }
+
+  /** The nearest thing DRAWN under the pointer in these groups, or null. */
+  function firstDrawn(e, roots) {
+    var best = null, bestScore = Infinity, ray = rayAt(e).ray;
+    rayAt(e).intersectObjects(roots, true).forEach(function (h) {
+      if (!drawnAt(h)) return;
+      var sc = (h.object.isLine || h.object.isLineSegments ? ray.distanceToPoint(h.point) : 0) + h.distance * 1e-4;
+      if (sc < bestScore) { bestScore = sc; best = h; }
+    });
+    return best;
+  }
+
+  /** Is the press the capture box's: one of its three dots, or its face in front of what is drawn there? */
+  function boxOwnsPress(e) {
+    if (mode !== 'select' || !balls.length) return false;
+    var v = view, rc = rayAt(e), hs = [];
+    balls.forEach(function (b) { hs.push(b.handle, b.heightHandle, b.cornerHandle); });
+    if (rc.intersectObjects(hs).length) return true;
+    var fh = rc.intersectObjects(balls.map(function (b) { return b.boxMesh; }), false)[0];
+    if (!fh) return false;
+    // Armed, a box's face scales the footprint - when it is in front of what the
+    // selection draws. Behind it (or with nothing there) the face is the box's.
+    var drawn = firstDrawn(e, isolated ? [v.detailGroup] : [v.highlightGroup, v.overviewGroup]);
+    return !drawn || fh.distance <= drawn.distance;
+  }
+
+  /** Is the selection what is drawn under the pointer? */
+  function selectedHit(e) {
+    var v = view, rc = rayAt(e), ray = rc.ray;
     var roots = isolated ? [v.detailGroup] : [v.highlightGroup, v.overviewGroup];
-    var ray = v.raycaster.ray, best = null, bestScore = Infinity, scored = [];
-    v.raycaster.intersectObjects(roots, true).forEach(function (h) {
+    var best = null, bestScore = Infinity, scored = [];
+    rc.intersectObjects(roots, true).forEach(function (h) {
       if (!drawnAt(h)) return;
       var sc = (h.object.isLine || h.object.isLineSegments ? ray.distanceToPoint(h.point) : 0) + h.distance * 1e-4;
       scored.push([sc, h]);
       if (sc < bestScore) { bestScore = sc; best = h; }
     });
     if (!best) return false;
-    // Armed (Click to select region), a box's face is the box's too - a press on
-    // it scales the footprint - when it is in front of what the selection draws.
-    // In Orbit the box is only a marker, and the selection under it is pulled.
-    if (mode === 'select' && balls.length) {
-      var fh = v.raycaster.intersectObjects(balls.map(function (b) { return b.boxMesh; }), false)[0];
-      if (fh && fh.distance <= best.distance) return false;
-    }
     var sel = new Set(currentSelection);
     var owns = function (h) {
       if (isolated) return true;
@@ -1024,17 +1048,225 @@ var NSO_MICROSCOPE = (function () {
     return scored.some(function (r) { return r[0] <= bestScore + eps && owns(r[1]); });
   }
 
-  /** The TAKE piece under the pointer, or null. */
-  function takePieceAt(e) {
-    var v = view, q = ndc(e);
-    v.raycaster.setFromCamera(new THREE.Vector2(q[0], q[1]), v.camera);
-    var hs = [];
-    balls.forEach(function (b) { hs.push(b.handle, b.heightHandle, b.cornerHandle); });
-    if (mode === 'select' && hs.length && v.raycaster.intersectObjects(hs).length) return null;
+  // --- what a click would take ------------------------------------------------
+
+  /** The line under the pointer: { seg, point } - the nearest to the ray, of what is drawn. */
+  function lineHitAt(e) {
+    var v = view, rc = rayAt(e);
+    var targets = Object.keys(v.overviewMeshes).map(function (k) { return v.overviewMeshes[k]; })
+      .filter(function (m) { return m.visible && m.userData.segs && m.userData.segs.length; });
+    var hits = rc.intersectObjects(targets, false);
+    if (!hits.length) return null;
+    // Closest to the cursor ray wins, not first along it: with a threshold,
+    // many lines are "hit" and the nearest in depth is often a neighbour.
+    var best = null, bestScore = Infinity;
+    hits.forEach(function (h) {
+      var sc = rc.ray.distanceToPoint(h.point) + h.distance * 1e-4;
+      if (sc < bestScore) { bestScore = sc; best = h; }
+    });
+    var seg = best.object.userData.segs[Math.floor(best.index / 2)];
+    return seg ? { seg: seg, point: best.point } : null;
+  }
+
+  /** The mesh object under the pointer: { obj, point } - the nearest drawn. */
+  function objectHitAt(e) {
+    var v = view, rc = rayAt(e);
     var meshes = Object.keys(v.overviewMeshes).map(function (k) { return v.overviewMeshes[k]; })
       .filter(function (m) { return m.visible && m.userData.object; });
-    var hit = v.raycaster.intersectObjects(meshes, false).filter(drawnAt)[0];
-    return hit ? hit.object.userData.object : null;
+    var hit = rc.intersectObjects(meshes, false).filter(drawnAt)[0];
+    return hit ? { obj: hit.object.userData.object, point: hit.point } : null;
+  }
+
+  /** The default-sized capture box a click at `pt` (view space) would drop, as data. */
+  function tempBoxAt(pt) {
+    var ang = pieceAngleNear(pt.x + doc.cx, -pt.z + doc.cy);
+    var rx = defaultRx != null ? defaultRx : defaultR, ry = defaultRx != null ? defaultRy : defaultR;
+    return { point: pt.clone(), rx: rx, ry: ry, h: defaultH, a: ang };
+  }
+
+  /**
+   * What a click here would take, in the current mode: { items, source, point,
+   * label } or null. Items are a slice's segments or a mesh's objects - the one
+   * selection every export, crop and pull already reads.
+   */
+  function targetAt(e) {
+    if (!view || !doc || isolated) return null;     // isolated, the selection is all there is (selectedHit)
+    var isPath = doc.kind === 'toolpath', t;
+    if (isPath) {
+      var lh = lineHitAt(e);
+      if (!lh) return null;
+      var sg = lh.seg, shown = shownSegments();
+      if (mode === 'line') return { items: [sg], source: 'line', seg: sg, point: lh.point, label: 'line' };
+      if (mode === 'piece') {
+        t = shown.filter(function (x) { return x.obj === sg.obj; });
+        return { items: t, source: 'pick', point: lh.point, label: 'piece' };
+      }
+      if (mode === 'feature') {
+        t = shown.filter(function (x) { return x.obj === sg.obj && x.feature === sg.feature; });
+        return { items: t, source: 'feature', point: lh.point, label: sg.feature };
+      }
+      if (mode === 'layer') {
+        t = shown.filter(function (x) { return x.zi === sg.zi; });
+        return { items: t, source: 'layer', point: lh.point, label: 'layer ' + (sg.layer + 1) };
+      }
+      var tb = tempBoxAt(lh.point);
+      t = selectByBox([gcodeBoxOf(tb)]);
+      return t.length ? { items: t, source: 'box', point: lh.point, box: tb, label: 'region' } : null;
+    }
+    var oh = objectHitAt(e);
+    if (!oh) return null;
+    if (mode === 'select') {
+      var tb2 = tempBoxAt(oh.point);
+      t = selectByBox([gcodeBoxOf(tb2)]);
+      return t.length ? { items: t, source: 'box', point: oh.point, box: tb2, label: 'region' } : null;
+    }
+    return { items: [oh.obj], source: 'pick', point: oh.point, label: 'piece' };
+  }
+
+  /** A press here: the selection when it is under the pointer, else what the mode takes. */
+  function pressTarget(e) {
+    if (!doc) return null;
+    if (currentSelection.length && selectedHit(e)) {
+      return { items: currentSelection, source: selectionSource, selected: true, label: 'selection' };
+    }
+    return targetAt(e);
+  }
+
+  /** The line type's moves, everywhere it is drawn. */
+  function featureTarget(name) {
+    if (!doc || doc.kind !== 'toolpath') return null;
+    var t = shownSegments().filter(function (x) { return x.feature === name; });
+    return t.length ? { items: t, source: 'feature', label: name } : null;
+  }
+
+  /** Everything the slider's range leaves drawn: one card. */
+  function rangeTarget() {
+    if (!doc) return null;
+    var t = doc.kind === 'toolpath' ? shownSegments() : shownObjects();
+    return t.length ? { items: t, source: 'range', label: 'range' } : null;
+  }
+
+  function sameItems(a, b) {
+    if (!a || !b || a.length !== b.length) return false;
+    var set = new Set(b);
+    return a.every(function (x) { return set.has(x); });
+  }
+
+  // --- hover: an outline of what a click would take ---------------------------
+
+  var HOVER_COLOR = 0x38bdf8;
+  var hoverKey = '';
+  var hoverTgt = null;     // what the outline stands for
+
+  function clearHover() {
+    hoverKey = '';
+    hoverTgt = null;
+    if (!view || !view.hoverGroup) return;
+    var g = view.hoverGroup;
+    for (var i = g.children.length - 1; i >= 0; i--) {
+      var c = g.children[i];
+      g.remove(c);
+      if (c.geometry && !c.userData.sharedGeometry) c.geometry.dispose();
+      if (c.material) c.material.dispose();
+    }
+    if (view.renderer && view.renderer.domElement) view.renderer.domElement.style.cursor = '';
+  }
+
+  /** Draw `tgt` as the hover: its lines in the hover colour over the view, or its pieces tinted. */
+  function drawHover(tgt) {
+    if (!view || !tgt) { clearHover(); return; }
+    var key = plateName + '|' + tgt.source + '|' + tgt.items.length + '|' + (tgt.items[0] && (tgt.items[0].id != null ? tgt.items[0].id : tgt.items[0].name)) +
+      '|' + (tgt.box ? tgt.box.point.x.toFixed(2) + ',' + tgt.box.point.z.toFixed(2) : '');
+    if (key === hoverKey) return;
+    clearHover();
+    hoverKey = key;
+    hoverTgt = tgt;
+    var g = view.hoverGroup;
+    var mat = function () {
+      return new THREE.LineBasicMaterial({ color: HOVER_COLOR, depthTest: false, transparent: true, opacity: 0.95 });
+    };
+    if (doc.kind === 'toolpath') {
+      var segs = tgt.items;
+      if (segs.length <= HIGHLIGHT_PRISM_CAP) {
+        var pm = prismMesh(segs, HOVER_COLOR);
+        pm.material.depthTest = false; pm.material.transparent = true; pm.material.opacity = 0.7;
+        pm.renderOrder = 8;
+        g.add(pm);
+      } else {
+        var pos = new Float32Array(segs.length * 6);
+        segs.forEach(function (sg, i) {
+          var p0 = toThree(sg.x0 - doc.cx, sg.y0 - doc.cy, sg.z), p1 = toThree(sg.x1 - doc.cx, sg.y1 - doc.cy, sg.z);
+          pos.set([p0.x, p0.y, p0.z, p1.x, p1.y, p1.z], i * 6);
+        });
+        var lg = new THREE.BufferGeometry();
+        lg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        var ls = new THREE.LineSegments(lg, mat());
+        ls.renderOrder = 8;
+        g.add(ls);
+      }
+    } else {
+      tgt.items.forEach(function (o) {
+        var m = view.overviewMeshes[o.name];
+        if (!m || !m.visible) return;
+        var h = new THREE.Mesh(m.geometry, new THREE.MeshBasicMaterial({
+          color: HOVER_COLOR, transparent: true, opacity: 0.4, depthTest: false, depthWrite: false
+        }));
+        h.position.copy(m.position);
+        h.renderOrder = 8;
+        h.userData.sharedGeometry = true;
+        g.add(h);
+        var edges = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 30), mat());
+        edges.position.copy(m.position);
+        edges.renderOrder = 8;
+        g.add(edges);
+      });
+    }
+    if (tgt.box) {
+      // what a click would drop: the box, as a wire
+      var b = tgt.box;
+      var wire = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1, 1, 1)), mat());
+      wire.position.copy(b.point);
+      wire.rotation.set(0, b.a || 0, 0);
+      wire.scale.set(b.rx * 2, b.h * 2, b.ry * 2);
+      wire.renderOrder = 8;
+      g.add(wire);
+    }
+    if (view.renderer.domElement) view.renderer.domElement.style.cursor = 'pointer';
+  }
+
+  var hoverPending = null, hoverAt = 0;
+  function onHoverMove(e) {
+    if (!view || !isOpen() || pull || e.buttons || view.dragState) { if (e.buttons) clearHover(); return; }
+    if (e.target !== view.renderer.domElement) {
+      // the legend rows and the range card outline what they would take; moving over them is not leaving them
+      if (hoverKey && !(e.target.closest && e.target.closest('#ms-zr-card, #ms-legend'))) clearHover();
+      return;
+    }
+    var now = Date.now();
+    if (now - hoverAt < 40) { hoverPending = e; setTimeout(flushHover, 45); return; }
+    hoverAt = now;
+    hoverNow(e);
+  }
+  function flushHover() {
+    if (!hoverPending) return;
+    var e = hoverPending; hoverPending = null;
+    if (Date.now() - hoverAt < 40) return;
+    hoverAt = Date.now();
+    hoverNow(e);
+  }
+  function hoverNow(e) {
+    if (!view || !doc || !isOpen() || pull) return;
+    var tgt = null;
+    try { tgt = (currentSelection.length && selectedHit(e)) ? null : targetAt(e); } catch (err) { tgt = null; }
+    if (!tgt) { clearHover(); return; }
+    drawHover(tgt);
+  }
+
+  /** The TAKE piece under the pointer, or null. */
+  function takePieceAt(e) {
+    if (boxOwnsPress(e)) return null;
+    var oh = objectHitAt(e);
+    return oh ? oh.obj : null;
   }
 
   // --- the TAKE world, for app-grab-drop.js ------------------------------------
@@ -1184,33 +1416,64 @@ var NSO_MICROSCOPE = (function () {
   }
 
   // --- the gesture ---------------------------------------------------------------
+  //
+  // One press, decided by what follows it:
+  //   it travels past the slop  -> PULL: the thing under it is copied onto TAKE
+  //                                (a piece already on TAKE is moved instead)
+  //   it is let go in place     -> CLICK: the thing is isolated; its click again un-isolates
+  //   it was on bare plate      -> never taken: OrbitControls has it
 
-  /** Press on the selection on LENS (or a piece on TAKE) takes the press from the orbit. */
+  /** Taking the press from the orbit. A click still reaches the click hooks and the click below. */
   function claimPress(e) {
     e.stopImmediatePropagation();
     view.mouseDownPos = [e.clientX, e.clientY];
+    view.hookTook = false;
     view.controls.enabled = false;
   }
 
   function onPressCapture(e) {
     var v = view;
     if (!v || e.button !== 0 || pull || !doc) return;
+    if (boxOwnsPress(e)) {                         // the box's dots and face: the older handler has them
+      v.boxPress = [e.clientX, e.clientY];           // ...but a click on it (no travel) toggles the isolation of what it holds
+      return;
+    }
+    v.boxPress = null;
     if (plateName === 'lens') {
-      if (!currentSelection.length || !selectedHit(e)) return;
+      var tgt = pressTarget(e);
+      if (!tgt) return;                           // bare plate: orbit
       claimPress(e);
-      pull = { kind: 'new', x0: e.clientX, y0: e.clientY, live: false, cancelled: false };
+      pull = { kind: 'new', tgt: tgt, x0: e.clientX, y0: e.clientY, live: false, cancelled: false };
+      return;
+    }
+    // TAKE: a piece is grabbed (moved); isolated, the piece drawn is the selection
+    if (isolated) {
+      if (!selectedHit(e)) return;
+      claimPress(e);
+      pull = { kind: 'iso', tgt: { items: currentSelection, source: selectionSource, selected: true }, x0: e.clientX, y0: e.clientY, live: false, cancelled: false };
       return;
     }
     var o = takePieceAt(e);
     if (!o || !window.nsoGrab || !window.nsoGrab.begin(o, null, e, takeWorld)) return;
+    var tg = (currentSelection.length === 1 && currentSelection[0] === o && selectedHit(e))
+      ? { items: currentSelection, source: selectionSource, selected: true } : targetAt(e);
     claimPress(e);
-    pull = { kind: 'move', piece: o, x0: e.clientX, y0: e.clientY, live: false, cancelled: false };
+    pull = { kind: 'move', piece: o, tgt: tg, x0: e.clientX, y0: e.clientY, live: false, cancelled: false };
+  }
+
+  /** A press that began on a DOM card (a legend row, the range grip): the target is given. */
+  function pressCard(ev, tgtFn) {
+    if (ev.button !== 0 || pull || !doc || plateName !== 'lens') return;
+    var tgt = tgtFn();
+    if (!tgt) return;
+    pull = { kind: 'new', tgt: tgt, x0: ev.clientX, y0: ev.clientY, live: false, cancelled: false, dom: true };
   }
 
   /** The slop is crossed: LENS stays as it is, TAKE is shown, and the copy is in hand. */
   function startPull(e) {
-    var spec = pullSpec();
+    var spec = pullSpec(pull.tgt);
     if (!spec) { pull.cancelled = true; view.controls.enabled = true; return false; }
+    clearHover();
     showPlate('take');
     var q = ndc(e), bp = new THREE.Vector3();
     view.raycaster.setFromCamera(new THREE.Vector2(q[0], q[1]), view.camera);
@@ -1232,6 +1495,7 @@ var NSO_MICROSCOPE = (function () {
 
   function onPullMove(e) {
     if (!pull || pull.cancelled) return;
+    if (pull.kind === 'iso') return;                        // an isolated piece on TAKE is clicked, not moved
     if (pull.kind === 'new' && !pull.live) {
       if (Math.hypot(e.clientX - pull.x0, e.clientY - pull.y0) < pullSlop()) return;
       if (!startPull(e)) return;
@@ -1242,21 +1506,80 @@ var NSO_MICROSCOPE = (function () {
     }
   }
 
-  function onPullUp() {
-    if (!pull) return;
+  function onPullUp(e) {
+    if (!pull) {
+      var bp = view && view.boxPress;
+      if (bp && e && Math.hypot(e.clientX - bp[0], e.clientY - bp[1]) < pullSlop() && currentSelection.length) {
+        if (isolated) unIsolate(); else isolate();
+      }
+      if (view) view.boxPress = null;
+      return;
+    }
     var P = pull;
     pull = null;
     if (view) view.controls.enabled = true;
     if (P.cancelled) return;
     var r = window.nsoGrab && window.nsoGrab.active() ? window.nsoGrab.end() : null;
     if (P.live || (r && r.handled)) { if (view) view.mouseDownPos = null; return; }
-    // a press that never travelled is a click. On TAKE, in orbit, it picks the piece.
-    if (P.kind === 'move' && plateName === 'take' && mode === 'orbit' && P.piece) {
-      removeAllBalls();
-      setSelection([P.piece], 'pick');
-      view.mouseDownPos = null;
-    }
+    if (P.dom) return;                                      // the card's own click does it
+    if (view && view.hookTook) { view.hookTook = false; return; }
+    // a press that never travelled is a click
+    if (P.tgt && Math.hypot(e.clientX - P.x0, e.clientY - P.y0) < pullSlop()) clickTarget(P.tgt, e);
+    if (view) view.mouseDownPos = null;
   }
+
+  /**
+   * A click on a target. On the selection: isolated, it is whole again; else it
+   * is isolated. On anything else: it becomes the selection and is isolated.
+   */
+  function clickTarget(tgt, e) {
+    if (!tgt || !doc) return;
+    if (mode === 'line' && e && e.shiftKey && tgt.seg && !isolated) { pickLine(tgt.seg, true); return; }
+    if (tgt.selected) { if (isolated) unIsolate(); else isolate(); return; }
+    if (tgt.source === 'box') {
+      // the box a click drops, where it dropped
+      var hp0 = tgt.point;
+      var ang = pieceAngleNear(hp0.x + doc.cx, -hp0.z + doc.cy);
+      if (defaultRx != null) addBall(hp0.clone(), defaultRx, defaultH, defaultRy, ang);
+      else addBall(hp0.clone(), defaultR, defaultH, undefined, ang);
+      selectionSource = 'box';
+      computeSelectionInfo();
+    } else if (tgt.source === 'line' && tgt.seg) {
+      pickLine(tgt.seg, false);
+    } else {
+      removeAllBalls();
+      setSelection(tgt.items, tgt.source);
+    }
+    isolate();
+  }
+
+  /** Whole again: what was isolated stays selected. */
+  function unIsolate() {
+    if (!isolated) return false;
+    back();
+    return true;
+  }
+
+  function featureRowClick(name) {
+    if (!doc || doc.kind !== 'toolpath' || plateName !== 'lens') return;
+    var t = featureTarget(name);
+    if (!t) return;
+    setMode('feature');
+    t.selected = isolated && selectionSource === 'feature' && sameItems(t.items, currentSelection);
+    clickTarget(t);
+  }
+  function featureRowPress(ev, name) {
+    if (ev.target.closest && ev.target.closest('.ms-legend-display')) return;
+    pressCard(ev, function () { return featureTarget(name); });
+  }
+  function rangeCardClick() {
+    if (!doc) return;
+    var t = rangeTarget();
+    if (!t) return;
+    t.selected = isolated && selectionSource === 'range' && sameItems(t.items, currentSelection);
+    clickTarget(t);
+  }
+  function rangeCardPress(ev) { pressCard(ev, rangeTarget); }
 
   function cancelPull() {
     if (!pull) return;
@@ -1321,6 +1644,9 @@ var NSO_MICROSCOPE = (function () {
     // caught region can be seen before anything is isolated or exported.
     var highlightGroup = new THREE.Group();
     scene.add(highlightGroup);
+    // What a click would take, outlined under the pointer (hover).
+    var hoverGroup = new THREE.Group();
+    scene.add(hoverGroup);
     // The layer-range slider clips a mesh document with two planes.
     renderer.localClippingEnabled = true;
 
@@ -1330,10 +1656,9 @@ var NSO_MICROSCOPE = (function () {
     view = {
       scene: scene, camera: camera, renderer: renderer, controls: controls,
       host: host,
-      overviewGroup: overviewGroup, detailGroup: detailGroup, highlightGroup: highlightGroup,
+      overviewGroup: overviewGroup, detailGroup: detailGroup, highlightGroup: highlightGroup, hoverGroup: hoverGroup,
       clip: [new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Plane(new THREE.Vector3(0, -1, 0), 0)],
       overviewMeshes: {},
-      detectedMeshes: {},
       raycaster: raycaster,
       dragRaycaster: new THREE.Raycaster(),
       wheelRaycaster: new THREE.Raycaster(),
@@ -1402,7 +1727,6 @@ var NSO_MICROSCOPE = (function () {
     var v = view;
     clearGroup(v.overviewGroup);
     v.overviewMeshes = {};
-    v.detectedMeshes = {};
     v.solidMeshes = {};
     v.solidBuilt = null;
     if (!doc) return;
@@ -1455,26 +1779,56 @@ var NSO_MICROSCOPE = (function () {
     }
 
     // Mesh route. One solid per build object, in the app's own material family,
-    // so what the microscope shows is what the plate would show.
+    // so what the microscope shows is what the plate would show. A TAKE piece
+    // that is still a slice's beads is drawn bead by bead in its line types'
+    // colours, minus the types Display has switched off.
     var byObject = {};
     doc.objects.forEach(function (o, gi) {
       byObject[o.name] = o;
-      var geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(o.positions), 3));
-      geo.translate(-doc.cx, -doc.cy, 0);
-      geo.rotateX(-Math.PI / 2);          // the same (x,y,z) -> (x,z,-y) as toThree
-      geo.computeVertexNormals();
-      var mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-        color: colorForGroup(o.name, gi), metalness: 0.05, roughness: 0.4,
-        clippingPlanes: clipPlanes()
-      }));
+      var mesh = null;
+      var G = window.NSOGcodeLines;
+      if (doc.source === 'take' && o.moves && o.moves.length && G && G.buildLineGeometry) {
+        var shown = o.moves.filter(function (m) { return !FEATURE_OFF.has(m.feature); });
+        var built = G.buildLineGeometry(shown);
+        var pos = built.positions, colors = new Float32Array(pos.length), featOf = {};
+        shown.forEach(function (m) { featOf[m.index] = m.feature; });
+        var tc = new THREE.Color();
+        for (var t = 0; t < pos.length / 9; t++) {
+          tc.setHex(featureColor(featOf[built.moveIds[Math.floor(t / built.trisPerMove)]], 0));
+          for (var k = 0; k < 3; k++) { colors[t * 9 + k * 3] = tc.r; colors[t * 9 + k * 3 + 1] = tc.g; colors[t * 9 + k * 3 + 2] = tc.b; }
+        }
+        var bg = new THREE.BufferGeometry();
+        bg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        bg.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+        bg.translate(-doc.cx, -doc.cy, 0);
+        bg.rotateX(-Math.PI / 2);
+        bg.computeVertexNormals();
+        mesh = new THREE.Mesh(bg, new THREE.MeshStandardMaterial({
+          color: 0xffffff, vertexColors: true, metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes()
+        }));
+        mesh.userData.empty = !pos.length;
+      } else {
+        var geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(o.positions), 3));
+        geo.translate(-doc.cx, -doc.cy, 0);
+        geo.rotateX(-Math.PI / 2);          // the same (x,y,z) -> (x,z,-y) as toThree
+        geo.computeVertexNormals();
+        mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
+          color: colorForGroup(o.name, gi), metalness: 0.05, roughness: 0.4,
+          clippingPlanes: clipPlanes()
+        }));
+      }
       mesh.userData.feature = o.name;
       mesh.userData.object = o;
       v.overviewMeshes[o.name] = mesh;
       v.overviewGroup.add(mesh);
     });
     doc.groups = byObject;
+    v.takeSig = featureSig();
   }
+
+  /** What Display has switched off, as one string: TAKE is drawn from it, and is rebuilt when it changes. */
+  function featureSig() { return Array.from(FEATURE_OFF).sort().join('|'); }
 
   // --- selection boxes ------------------------------------------------------
   // each is { point, rx, ry (horizontal half-extents along G-code X and Y),
@@ -1652,18 +2006,20 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /** The capture boxes as G-code-space centres and extents. */
+  function gcodeBoxOf(b) {
+    // Inverse of toThree: three (x, y, z) -> gcode (x + cx, -z + cy, y)
+    var a = b.a || 0, ca = Math.cos(a), sa = Math.sin(a);
+    return { gx: b.point.x + doc.cx, gy: -b.point.z + doc.cy, gz: b.point.y,
+             rx: b.rx, ry: b.ry, r: Math.max(b.rx, b.ry), h: b.h, a: a,
+             ca: ca, sa: sa,
+             // plate-aligned half-extents of the turned footprint, for
+             // bounding-box rejects
+             ex: b.rx * Math.abs(ca) + b.ry * Math.abs(sa),
+             ey: b.rx * Math.abs(sa) + b.ry * Math.abs(ca) };
+  }
+
   function gcodeBoxes() {
-    return balls.map(function (b) {
-      // Inverse of toThree: three (x, y, z) -> gcode (x + cx, -z + cy, y)
-      var a = b.a || 0, ca = Math.cos(a), sa = Math.sin(a);
-      return { gx: b.point.x + doc.cx, gy: -b.point.z + doc.cy, gz: b.point.y,
-               rx: b.rx, ry: b.ry, r: Math.max(b.rx, b.ry), h: b.h, a: a,
-               ca: ca, sa: sa,
-               // plate-aligned half-extents of the turned footprint, for
-               // bounding-box rejects
-               ex: b.rx * Math.abs(ca) + b.ry * Math.abs(sa),
-               ey: b.rx * Math.abs(sa) + b.ry * Math.abs(ca) };
-    });
+    return balls.map(gcodeBoxOf);
   }
 
   /**
@@ -1683,8 +2039,8 @@ var NSO_MICROSCOPE = (function () {
     return Math.abs(dx * ca + dy * sa) <= b.rx && Math.abs(-dx * sa + dy * ca) <= b.ry;
   }
 
-  function selectByBox() {
-    var boxes = gcodeBoxes();
+  function selectByBox(boxesIn) {
+    var boxes = boxesIn || gcodeBoxes();
     if (!boxes.length) return [];
     // What you can see is what a box catches: a feature switched off in the
     // legend, a line cleared from view or a layer outside the slider's range
@@ -1803,14 +2159,16 @@ var NSO_MICROSCOPE = (function () {
       info((selectionSource === 'layer' ? '<b>whole layer</b>, '
           : selectionSource === 'line' ? '<b>picked lines</b>, '
           : selectionSource === 'visible' ? '<b>everything shown</b>, '
-          : selectionSource === 'detected' ? '<b>detected</b>, '
+          : selectionSource === 'range' ? '<b>the slider\'s range</b>, '
+          : selectionSource === 'feature' ? '<b>one line type</b>, '
+          : selectionSource === 'pick' ? '<b>a piece</b>, '
           : '<b>' + balls.length + ' box(es)</b>, ') +
            '<b>' + currentSelection.length + ' segment(s)</b> total<br>' +
            'across ' + keys.length + ' layer(s): ' + keys.join(', '));
       return;
     }
     var tris = currentSelection.reduce(function (a, o) { return a + o.triangles; }, 0);
-    info((selectionSource === 'visible' ? '<b>everything shown</b>, '
+    info((selectionSource === 'visible' || selectionSource === 'range' ? '<b>everything shown</b>, '
           : selectionSource === 'pick' ? '<b>picked</b>, '
           : '<b>' + balls.length + ' box(es)</b>, ') + '<b>' + currentSelection.length +
          ' object(s)</b>, ' + tris + ' triangle(s)<br>' +
@@ -1823,85 +2181,170 @@ var NSO_MICROSCOPE = (function () {
     // mesh's own `visible`, and three.js raycasts a mesh in a hidden group.
     var detail = showingDetail();
     Object.keys(v.overviewMeshes).forEach(function (name) {
-      v.overviewMeshes[name].visible = !HIDDEN.has(name) && !detail;
+      var m = v.overviewMeshes[name];
+      m.visible = !rowOff(name) && !detail && !m.userData.empty;
     });
     Object.keys(v.solidMeshes || {}).forEach(function (name) {
-      v.solidMeshes[name].visible = !HIDDEN.has(name) && !detail;
+      v.solidMeshes[name].visible = !rowOff(name) && !detail;
     });
-    syncDetectedMeshes(detail);
     v.detailGroup.children.forEach(function (mesh) {
-      mesh.visible = !HIDDEN.has(mesh.userData.feature);
+      mesh.visible = !rowOff(mesh.userData.feature);
     });
+  }
+
+  /** Is this overview row switched off: a line type (slice) or a piece cleared from view (mesh)? */
+  function rowOff(name) {
+    return doc && doc.kind === 'toolpath' ? FEATURE_OFF.has(name) : HIDDEN.has(name);
+  }
+
+  // ===========================================================================
+  // The Features list
+  // ===========================================================================
+  //
+  // ONE list, the slicer's own line types - Outer wall, Inner wall, Sparse
+  // infill, Support ... - the way Bambu Studio's preview lists them: a colour
+  // swatch, the name, a count, and a Display check that hides or shows that
+  // type in the view. The check is the whole of the row's visibility: it acts
+  // on both plates (FEATURE_OFF is one set), and nothing else decides what a
+  // type shows as. Clicking the row anywhere else is the Feature mode's click:
+  // that type, isolated. A part that is not sliced has no line types and the
+  // list says so; surface features (flange, handle ...) are the plate's now.
+
+  var FEATURE_ORDER = ['Outer wall', 'Inner wall', 'Overhang wall', 'Sparse infill', 'Internal solid infill',
+    'Top surface', 'Bottom surface', 'Bridge', 'Gap infill', 'Support', 'Support interface', 'Floating vertical shell',
+    'Custom', 'Travel'];
+
+  /** [{ name, count }] - the line types of the document shown, in Bambu's order. */
+  function featureCounts() {
+    if (!doc) return [];
+    var counts = {};
+    if (doc.kind === 'toolpath') {
+      doc.segments.forEach(function (sg) { counts[sg.feature] = (counts[sg.feature] || 0) + 1; });
+    } else if (doc.source === 'take') {
+      doc.objects.forEach(function (o) {
+        (o.moves || []).forEach(function (m) { counts[m.feature] = (counts[m.feature] || 0) + 1; });
+      });
+    }
+    var rank = function (n) { var i = FEATURE_ORDER.indexOf(n); return i < 0 ? 1000 : i; };
+    return Object.keys(counts).sort(function (a, b) { return rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0); })
+      .map(function (n) { return { name: n, count: counts[n] }; });
   }
 
   function buildLegend() {
     var legend = $('ms-legend');
     if (!legend) return;
     legend.innerHTML = '';
-    if (!doc) { buildDetectedRow(); return; }
-    Object.keys(doc.groups).sort().forEach(function (name, gi) {
-      var g = doc.groups[name];
-      var count = doc.kind === 'toolpath' ? g.length : g.triangles;
-      var unit = doc.kind === 'toolpath' ? '' : ' tri';
+    if (!doc) return;
+    var rows = featureCounts();
+    if (!rows.length) {
+      var note = document.createElement('div');
+      note.className = 'ms-legend-note';
+      note.textContent = doc.source === 'take'
+        ? (doc.objects.length ? 'No line types on TAKE - these pieces are not slices.' : 'Nothing on TAKE yet.')
+        : 'Not sliced - no line types.';
+      legend.appendChild(note);
+      return;
+    }
+    rows.forEach(function (r, gi) {
+      var name = r.name, off = FEATURE_OFF.has(name);
       var item = document.createElement('div');
-      item.className = 'ms-legend-item' + (HIDDEN.has(name) ? ' dim' : '');
+      item.className = 'ms-legend-item' + (off ? ' dim' : '');
       item.dataset.group = name;
-      item.setAttribute('role', 'checkbox');
-      item.setAttribute('aria-checked', String(!HIDDEN.has(name)));
+      item.setAttribute('role', 'listitem');
       var swatch = document.createElement('div');
       swatch.className = 'ms-swatch';
-      swatch.style.background = '#' + ('000000' + colorForGroup(name, gi).toString(16)).slice(-6);
+      swatch.style.background = '#' + ('000000' + featureColor(name, gi).toString(16)).slice(-6);
       var label = document.createElement('span');
       label.className = 'ms-legend-label';
-      label.textContent = name + ' (' + count + unit + ')';
-      // This group alone in one click: every other one switched off, and it
-      // becomes the selection - Export is offered right away (soloGroup()).
-      var only = document.createElement('button');
-      only.type = 'button';
-      only.className = 'ms-legend-only';
-      only.textContent = 'only';
-      only.title = 'Show ' + name + ' alone - selected and ready to Export or Crop. Click Show all to bring the rest back.';
-      only.addEventListener('click', function (ev) {
-        ev.stopPropagation();
-        soloGroup(name);
-      });
-      item.appendChild(swatch); item.appendChild(label); item.appendChild(only);
-      // The row itself stays a plain visibility toggle - independent of
-      // "only", so several groups can be hidden one at a time to compose a
-      // custom view (see selectByBox()'s comment: hide everything but one
-      // feature, drop a box, get only that). "Select shown" turns whatever
-      // that composed view leaves on screen into the selection.
-      item.addEventListener('click', function () {
-        if (HIDDEN.has(name)) HIDDEN.delete(name); else HIDDEN.add(name);
-        viewChanged();
-        rescopeSelection();
-      });
+      label.textContent = name + ' (' + r.count + ')';
+      var disp = document.createElement('input');
+      disp.type = 'checkbox';
+      disp.className = 'ms-legend-display';
+      disp.checked = !off;
+      disp.title = 'Display ' + name + ' - hide or show this line type in the view, on LENS and on TAKE';
+      disp.setAttribute('aria-label', 'Display ' + name);
+      disp.addEventListener('click', function (ev) { ev.stopPropagation(); });
+      disp.addEventListener('change', function () { setFeatureDisplay(name, disp.checked); });
+      item.appendChild(swatch); item.appendChild(label); item.appendChild(disp);
+      // The row: Feature mode's click - this line type, isolated.
+      item.title = 'Click to isolate ' + name + '. Drag it onto TAKE.';
+      item.addEventListener('click', function () { featureRowClick(name); });
+      item.addEventListener('pointerenter', function () { if (plateName === 'lens' && !pull) drawHover(featureTarget(name)); });
+      item.addEventListener('pointerleave', function () { clearHover(); });
+      item.addEventListener('pointerdown', function (ev) { featureRowPress(ev, name); });
       legend.appendChild(item);
     });
-    buildDetectedRow();
+  }
+
+  function featureColor(name, i) {
+    var G = window.NSOGcodeLines;
+    return G && G.colorForFeature ? G.colorForFeature(name) : OBJECT_COLORS[i % OBJECT_COLORS.length];
+  }
+
+  /** The Display check of one line type: shown or hidden, on both plates. */
+  function setFeatureDisplay(name, on) {
+    if (!doc) return;
+    if (on === undefined) on = FEATURE_OFF.has(name);
+    if (on) FEATURE_OFF.delete(name); else FEATURE_OFF.add(name);
+    viewChanged();
+    rescopeSelection();
   }
 
   // --- viewport interaction -------------------------------------------------
 
+  // ===========================================================================
+  // The Select card: five modes, one selection model
+  // ===========================================================================
+  //
+  //   Piece    a whole piece
+  //   Region   the capture box (a box dropped where you click, sized by its dots)
+  //   Feature  a slicer line type - a line of it on the piece, or its legend row
+  //   Line     one extrusion line (slices only); the arrows step along it
+  //   Layer    every layer of a slice is a card; the slider's range is one more
+  //
+  // In EVERY mode the same three things, whatever the thing is:
+  //   hover   outlines what a click would take
+  //   click   isolates it (what is not it goes out of the view); click it again,
+  //           or press Escape, and it is whole again
+  //   drag    pulls it onto TAKE (ticket 1's gesture; a piece on TAKE is moved)
+  // and a press on bare plate - nothing to take - orbits. There is no orbit
+  // MODE: the orbit is what a drag does where there is nothing to drag.
+
+  var MODES = ['piece', 'select', 'feature', 'line', 'layer'];   // 'select' is Region (its id, ms-mode-select, is older than its name)
+  var MODE_ALIAS = { orbit: 'piece', region: 'select' };
+  var MODE_SOURCE = { piece: 'pick', select: 'box', feature: 'feature', line: 'line', layer: 'layer' };
+
+  /** Does this plate have what the mode takes? Feature, Line and Layer are a slice's. */
+  function modeAvailable(m) {
+    if (!doc) return false;
+    if (m === 'piece' || m === 'select') return true;
+    return doc.kind === 'toolpath';
+  }
+
   function setMode(newMode) {
-    // Picking a line needs lines; a mesh document has none.
-    if (newMode === 'line' && !(doc && doc.kind === 'toolpath')) newMode = 'select';
+    newMode = MODE_ALIAS[newMode] || newMode;
+    if (MODES.indexOf(newMode) < 0 || !modeAvailable(newMode)) newMode = 'piece';
     mode = newMode;
-    var o = $('ms-mode-orbit'), s = $('ms-mode-select'), l = $('ms-mode-line');
-    if (o) o.classList.toggle('active', mode === 'orbit');
-    if (s) s.classList.toggle('active', mode === 'select');
-    if (l) l.classList.toggle('active', mode === 'line');
-    var ctl = $('ms-select-controls');
-    if (ctl) ctl.style.display = mode === 'select' ? 'block' : 'none';
-    show('ms-line-controls', mode === 'line');
+    MODES.forEach(function (m) {
+      var b = $('ms-mode-' + m);
+      if (!b) return;
+      b.classList.toggle('active', mode === m);
+      b.setAttribute('aria-pressed', String(mode === m));
+      b.disabled = !modeAvailable(m);
+    });
+    show('ms-select-controls', mode === 'select' && !isolated);
+    var note = $('ms-mode-note');
+    var text = {
+      piece: 'Hover a piece, click to isolate it. Drag it onto TAKE.',
+      select: 'Click a piece to drop a flat capture box there. Drag its blue centre dot to move it, the green corner dot to size it along and across, a side to scale the footprint, the orange top dot to set how thick it is.',
+      feature: 'Hover a line, or a legend row, for that line type. Click to isolate it. Drag it onto TAKE.',
+      line: 'Hover a line. Click to isolate that one move; Shift-click adds or removes one. The arrows step to the neighbouring move.',
+      layer: 'Every layer is a card: hover one, click to isolate it, drag it onto TAKE. The slider\'s range is one card more - its grip beside the slider.'
+    }[mode];
+    if (note) note.textContent = text;
     var hint = $('ms-hint-badge');
-    if (hint) {
-      hint.textContent = mode === 'select'
-        ? 'Click empty space to drop a flat box. Drag its blue centre dot to move it, the green corner dot to size it along and across, a side to scale the footprint, the orange top dot to set how thick it is.'
-        : mode === 'line'
-          ? 'Click a line to pick that one move. Shift-click adds or removes a line. Left / Right arrows step to the neighbouring move.'
-          : '';
-    }
+    if (hint) hint.textContent = '';
+    clearHover();
   }
 
   function ndc(e) {
@@ -1988,6 +2431,7 @@ var NSO_MICROSCOPE = (function () {
 
     el.addEventListener('pointerdown', function (e) {
       v.mouseDownPos = [e.clientX, e.clientY];
+      v.hookTook = false;
       // The box handles are left-button grabs; a right press is the pan.
       if (mode !== 'select' || e.button !== 0) return;
       var p = ndc(e);
@@ -2123,34 +2567,14 @@ var NSO_MICROSCOPE = (function () {
       // region you box. A hook that takes the click returns true.
       var h = ndc(e);
       for (var hk = 0; hk < clickHooks.length; hk++) {
-        try { if (clickHooks[hk](h[0], h[1], e)) return; }
+        try { if (clickHooks[hk](h[0], h[1], e)) { v.hookTook = true; return; } }
         catch (err) { console.error('[g-scope] click hook', err); }
       }
-      if (mode !== 'select' && mode !== 'line') return;
-      if (mode === 'line') {
-        var q = ndc(e);
-        pickLineAt(q[0], q[1], e.shiftKey);
-        return;
-      }
-
-      var p = ndc(e);
-      v.mouse.set(p[0], p[1]);
-      v.raycaster.setFromCamera(v.mouse, v.camera);
-      var targets = Object.keys(v.overviewMeshes)
-        .map(function (k) { return v.overviewMeshes[k]; })
-        .concat(Object.keys(v.detectedMeshes).map(function (k) { return v.detectedMeshes[k]; }))
-        .filter(function (m) { return m.visible; });
-      var hits = v.raycaster.intersectObjects(targets);
-      if (hits.length === 0) return;
-
-      // Square to the piece beside the drop, not to the plate.
-      var hp0 = hits[0].point;
-      var ang = pieceAngleNear(hp0.x + doc.cx, -hp0.z + doc.cy);
-      if (defaultRx != null) addBall(hp0.clone(), defaultRx, defaultH, defaultRy, ang);
-      else addBall(hp0.clone(), defaultR, defaultH, undefined, ang);
-      selectionSource = 'box';
-      computeSelectionInfo();
     });
+
+    // Hover: an outline of what a click would take.
+    window.addEventListener('pointermove', onHoverMove);
+    el.addEventListener('pointerleave', function () { clearHover(); });
   }
 
   // --- Isolate / Back -------------------------------------------------------
@@ -2196,7 +2620,7 @@ var NSO_MICROSCOPE = (function () {
       geo.rotateX(-Math.PI / 2);
       geo.computeVertexNormals();
       var mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-        color: isDetected(o) ? detectedColor(o) : colorForGroup(o.name, Math.max(0, okeys.indexOf(o.name))),
+        color: colorForGroup(o.name, Math.max(0, okeys.indexOf(o.name))),
         metalness: 0.05, roughness: 0.4,
         clippingPlanes: clipPlanes()
       }));
@@ -2349,7 +2773,6 @@ var NSO_MICROSCOPE = (function () {
     if (selectionSource !== 'line') lineCursor = -1;
     if (doc) describeSelection();
     syncExportRow();
-    buildDetectedRow();        // lit while the selection is the flange
     refreshHighlightSoon();
     // Isolated, the view IS the selection: a box dragged, a line stepped,
     // redraws it. One rebuild per frame, however many steps a drag makes.
@@ -2403,30 +2826,22 @@ var NSO_MICROSCOPE = (function () {
   function inZRange(s) { return !zr || (s.zi >= zr.lo && s.zi <= zr.hi); }
 
   function segShown(s) {
-    return !HIDDEN.has(s.feature) && !CLEARED.has(s.id) && inZRange(s);
+    return !FEATURE_OFF.has(s.feature) && !CLEARED.has(s.id) && inZRange(s);
   }
 
   function objectShown(o) {
     if (HIDDEN.has(o.name)) return false;
-    if (isDetected(o) && !DETECTED_ON.has(o.detected)) return false;
+    // a TAKE piece whose every line type is switched off is not drawn
+    if (o.moves && o.moves.length && o.moves.every(function (m) { return FEATURE_OFF.has(m.feature); })) return false;
     var band = zBandMm();
     if (!band || zRangeFull()) return true;
     return o.bounds.maxZ >= band[0] - 1e-6 && o.bounds.minZ <= band[1] + 1e-6;
   }
 
-  /**
-   * Every object drawn right now, as the selection takes them: the parts
-   * switched on, then each detector row's feature whose own part is switched
-   * off. A feature over a part that is shown is a highlight on that part -
-   * already inside its triangles - and taking it as well would put the same
-   * surface into an export twice.
-   */
+  /** Every object drawn right now, as the selection takes them. */
   function shownObjects() {
     if (!doc || doc.kind !== 'mesh') return [];
-    var parts = doc.objects.filter(objectShown);
-    var on = {};
-    parts.forEach(function (o) { on[o.name] = 1; });
-    return parts.concat(detectedObjects().filter(function (o) { return objectShown(o) && !on[o.host]; }));
+    return doc.objects.filter(objectShown);
   }
 
   /** Every segment drawn right now, in print order. */
@@ -2459,6 +2874,7 @@ var NSO_MICROSCOPE = (function () {
       if (isolated) isolateRedraw();
     } else {
       applyClip();
+      if (doc.source === 'take' && view.takeSig !== featureSig()) { buildOverview(); buildDetail_(); }
     }
     applyFeatureVisibility();
     refreshHighlight();
@@ -2509,8 +2925,8 @@ var NSO_MICROSCOPE = (function () {
     if (!doc) return false;
     var want = (names || []).filter(function (n) { return !!doc.groups[n]; });
     if (!want.length) return false;
-    HIDDEN = new Set(Object.keys(doc.groups).filter(function (g) { return want.indexOf(g) < 0; }));
-    DETECTED_ON.clear();
+    if (doc.kind === 'toolpath') FEATURE_OFF = new Set(Object.keys(doc.groups).filter(function (g) { return want.indexOf(g) < 0; }));
+    else HIDDEN = new Set(Object.keys(doc.groups).filter(function (g) { return want.indexOf(g) < 0; }));
     viewChanged();
     selectVisible();
     return true;
@@ -2534,358 +2950,10 @@ var NSO_MICROSCOPE = (function () {
   }
 
   // ===========================================================================
-  // Detected features: the Flange row
+  // Surface features (flange, handle, bracket, lid, hinge) are not G-scope's:
+  // they live on the plate now (Subtract > Lift). G-scope's one list is the
+  // slicer's line types - see "The Features list".
   // ===========================================================================
-  //
-  // The rows above are what the FILE groups - a slice's FEATURE: tags, a
-  // mesh's build objects. A flange is a functional part of ONE object, so no
-  // file names it: nso_flange.js finds it (docs/GSCOPE-FLANGE.md has the rule
-  // and what it was validated on) and lifts it out as its own closed solid
-  // with the Cut tool's rawCut. What comes back is an ordinary mesh object -
-  // positions, centroids, bounds.
-  //
-  // Its row in the Parts list is a show / hide toggle, the same as a part's
-  // row: on, the flange is drawn in the row's colour over its part, or alone
-  // with its part switched off; off, it is not drawn. Drawn alone, it is part
-  // of what is shown (shownObjects()), so a box catches it and Select shown
-  // takes it - it reaches the rest of the view through setSelection() like
-  // anything else: Isolate, the highlight, Crop and both exports take it
-  // without knowing where it came from. The one thing it is not is a plate
-  // piece, so Crop sends it the file route (a new piece, then cropped) rather
-  // than editing a piece in place.
-  //
-  // Detection runs once per document, just after it opens, so the view is up
-  // first; switching the row on before it has finished runs it there and then.
-  // A slice has no closed surface to look at, so it lists no detector rows.
-
-  var FLANGE_COLOR = 0xff8a1f;
-  var FLANGE_MAX_TRIS = 400000;   // past this, say so rather than stall the page
-
-  function isDetected(o) { return !!(o && o.detected); }
-
-  function flangeState() {
-    if (!doc) return null;
-    if (!doc.flange) {
-      doc.flange = doc.source === 'take'
-        ? { status: 'unavailable', objects: [], notes: [], reason: 'TAKE holds copies; the detectors read LENS.' }
-        : doc.kind !== 'mesh'
-        ? { status: 'unavailable', objects: [], notes: [],
-            reason: 'a slice has beads, not a closed surface to measure. Open the part itself ' +
-                    '(its STL or 3MF, or the plate) to find its flange.' }
-        : { status: 'pending', objects: [], notes: [], reason: '' };
-    }
-    return doc.flange;
-  }
-
-  /** Find and lift out every flange in the document. Idempotent per document. */
-  function detectFlanges() {
-    var st = flangeState();
-    if (!st || st.status !== 'pending') return st;
-    var F = window.NSO_Flange;
-    if (!F || typeof rawCut !== 'function') {
-      st.status = 'unavailable';
-      st.reason = 'the flange detector (nso_flange.js) or the Cut tool (app-cut.js) is not loaded.';
-      return st;
-    }
-    var t0 = Date.now();
-    var single = doc.objects.length === 1 && doc.source !== 'plate';
-    doc.objects.forEach(function (host) {
-      if (host.triangles > FLANGE_MAX_TRIS) {
-        st.notes.push(host.name + ': ' + host.triangles + ' triangles, too many to scan here');
-        return;
-      }
-      var r;
-      try { r = F.detect(host.positions); }
-      catch (err) { console.error('[g-scope] flange detection', err); st.notes.push(host.name + ': detection failed'); return; }
-      if (!r.flanges.length) { st.notes.push(host.name + ': ' + r.reason.replace(/^no flange: /, '')); return; }
-      r.flanges.forEach(function (f, i) {
-        var e = F.extract(host.positions, f, rawCut);
-        if (!e.ok) { st.notes.push(host.name + ': a flange was found but not lifted out (' + e.reason + ')'); return; }
-        var label = (single ? baseName(doc.name) : host.name) + ' - Flange' +
-          (r.flanges.length > 1 ? ' ' + (i + 1) : '');
-        st.objects.push(prepObject({
-          name: label,
-          positions: e.positions,
-          detected: 'flange',
-          host: host.name,
-          flange: { thickness: f.thickness, reach: f.reach, rootLength: f.rootLen,
-                    axis: f.axis, band: f.band, cut: e.plane }
-        }));
-      });
-    });
-    st.status = st.objects.length ? 'found' : 'none';
-    st.ms = Date.now() - t0;
-    if (!st.objects.length) {
-      st.reason = st.notes.length === 1 ? st.notes[0].replace(/^[^:]*: /, '') : st.notes.join('; ');
-    }
-    return st;
-  }
-
-  function flangeRowText(st) {
-    if (st.status === 'pending') return 'Flange - looking...';
-    if (st.status === 'unavailable') return 'Flange - not on a slice';
-    if (st.status === 'none') return 'Flange - none detected';
-    var o = st.objects;
-    return 'Flange (' + (o.length === 1
-      ? o[0].flange.thickness.toFixed(2) + ' mm, ' + o[0].triangles + ' tri'
-      : o.length + ' found') + ')';
-  }
-
-  /** The detector rows, in list order. */
-  function allDetectors() { return ['flange'].concat(FEATURE_RULES); }
-
-  /** Every feature the detector rows have found in this document, flanges first. */
-  function detectedObjects() {
-    if (!doc || doc.kind !== 'mesh') return [];
-    var out = flangeState().objects.slice();
-    FEATURE_RULES.forEach(function (r) { out = out.concat(featureState(r).objects); });
-    return out;
-  }
-
-  function detectedOf(rule) {
-    var st = rule === 'flange' ? flangeState() : featureState(rule);
-    return st ? st.objects : [];
-  }
-
-  /** Is a detector row switched on: its rule on, and something of it not cleared from view. */
-  function detectedChecked(rule) {
-    return DETECTED_ON.has(rule) && detectedOf(rule).some(function (o) { return !HIDDEN.has(o.name); });
-  }
-
-  /**
-   * A detector row's feature(s), drawn in the overview: in the row's colour,
-   * over the part they were lifted from (winning the depth test where the two
-   * coincide), and so drawn alone when that part is switched off. Built the
-   * first time their row is switched on, then only shown and hidden.
-   */
-  function syncDetectedMeshes(detail) {
-    var v = view;
-    if (!v || !doc || doc.kind !== 'mesh') return;
-    detectedObjects().forEach(function (o) {
-      var on = objectShown(o);
-      var m = v.detectedMeshes[o.name];
-      if (!m && on) {
-        var geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(o.positions), 3));
-        geo.translate(-doc.cx, -doc.cy, 0);
-        geo.rotateX(-Math.PI / 2);
-        geo.computeVertexNormals();
-        m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-          color: detectedColor(o), metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes(),
-          polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1
-        }));
-        m.userData.feature = o.name;
-        m.userData.object = o;
-        v.detectedMeshes[o.name] = m;
-        v.overviewGroup.add(m);
-      }
-      if (m) m.visible = on && !detail;
-    });
-  }
-
-  /** The detector rows, under the parts. A mesh only; rebuilt with the legend. */
-  function buildDetectedRow() {
-    var box = $('ms-detected');
-    if (!box) return;
-    box.innerHTML = '';
-    var st = flangeState();    // null with no document: the rows go with it
-    if (!st || doc.kind !== 'mesh' || doc.source === 'take') return;
-    var item = document.createElement('div');
-    item.className = 'ms-legend-item ms-detected-item' + (detectedChecked('flange') ? '' : ' dim');
-    item.dataset.detected = 'flange';
-    item.dataset.status = st.status;
-    item.setAttribute('role', 'checkbox');
-    item.setAttribute('aria-checked', String(detectedChecked('flange')));
-    var swatch = document.createElement('div');
-    swatch.className = 'ms-swatch';
-    swatch.style.background = '#' + ('000000' + FLANGE_COLOR.toString(16)).slice(-6);
-    var label = document.createElement('span');
-    label.className = 'ms-legend-label';
-    label.textContent = flangeRowText(st);
-    item.title = st.status === 'found'
-      ? 'Detected from the geometry, not named in the file. Click to show or hide ' +
-        (st.objects.length === 1 ? 'it' : 'them') + ' - over the part, or alone with the part switched off.\n' +
-        st.objects.map(function (o) {
-          return o.name + ': ' + o.flange.thickness.toFixed(2) + ' mm thick, ' + o.flange.reach.toFixed(1) +
-            ' mm out, ' + o.flange.rootLength.toFixed(1) + ' mm along its root';
-        }).join('\n')
-      : st.status === 'pending' ? 'Looking for a flange in the geometry...'
-      : 'No flange: ' + st.reason;
-    item.appendChild(swatch); item.appendChild(label);
-    item.addEventListener('click', function () { toggleDetected('flange'); });
-    box.appendChild(item);
-    FEATURE_RULES.forEach(function (rule) { box.appendChild(featureRow(rule)); });
-  }
-
-  /**
-   * A detector row's click: its feature(s) shown or hidden, as a part's row
-   * shows or hides its part. Nothing is selected or isolated by it, and the
-   * list stays where it is. On a part with none, say why and change nothing.
-   * Returns whether the row is on after the click.
-   */
-  function toggleDetected(rule) {
-    if (!doc || (rule !== 'flange' && FEATURE_RULES.indexOf(rule) < 0)) return false;
-    var st, N = rule === 'flange' ? 'Flange' : FEATURE_NAMES[rule];
-    var wasOn = detectedChecked(rule);      // what the row showed when it was clicked
-    if (rule === 'flange') st = detectFlanges();
-    else { detectFeatures(); st = featureState(rule); }
-    if (!st) return false;
-    if (st.status !== 'found') {
-      buildDetectedRow();
-      say(N + ': ' + (st.status === 'unavailable' ? 'not available - ' : 'none detected - ') + st.reason, false);
-      info((st.status === 'unavailable' ? '<b>' + N + ': not available here.</b> ' : '<b>No ' + rule + ' detected.</b> ') +
-           st.reason.replace(/</g, '&lt;'));
-      return false;
-    }
-    if (wasOn) DETECTED_ON.delete(rule);
-    else {
-      DETECTED_ON.add(rule);
-      st.objects.forEach(function (o) { HIDDEN.delete(o.name); });
-    }
-    viewChanged();
-    rescopeSelection();
-    return DETECTED_ON.has(rule);
-  }
-
-  // ===========================================================================
-  // Detected features: Handle, Bracket, Lid, Hinge
-  // ===========================================================================
-  //
-  // The same mechanism as the Flange row, one row per rule, from
-  // nso_face_features.js (docs/GSCOPE-FEATURES.md has the four rules and what
-  // they were validated on). Each rule hands back its feature as a closed
-  // solid - the surface standing on the face plus a cap on its own root
-  // loops, nothing cut - so it is an ordinary mesh object: its row shows and
-  // hides it exactly as the Flange row does, and once it is shown, a box,
-  // Select shown, Isolate, the highlight, Crop and both exports take it
-  // exactly as they take the flange. One analysis of each piece serves all
-  // four rows.
-
-  var FEATURE_RULES = ['handle', 'bracket', 'lid', 'hinge'];
-  var FEATURE_NAMES = { handle: 'Handle', bracket: 'Bracket', lid: 'Lid', hinge: 'Hinge' };
-  var FEATURE_COLORS = { flange: FLANGE_COLOR, handle: 0x3fb6ff, bracket: 0xb57bff, lid: 0x3fd98a, hinge: 0xffd23f };
-
-  function detectedColor(o) { return FEATURE_COLORS[o && o.detected] || FLANGE_COLOR; }
-
-  function featureState(rule) {
-    if (!doc) return null;
-    if (!doc.features) {
-      doc.features = {};
-      FEATURE_RULES.forEach(function (r) {
-        doc.features[r] = doc.source === 'take'
-          ? { status: 'unavailable', objects: [], notes: [], reason: 'TAKE holds copies; the detectors read LENS.' }
-          : doc.kind !== 'mesh'
-          ? { status: 'unavailable', objects: [], notes: [],
-              reason: 'a slice has beads, not a closed surface to measure. Open the part itself ' +
-                      '(its STL or 3MF, or the plate) to find its ' + r + '.' }
-          : { status: 'pending', objects: [], notes: [], reason: '' };
-      });
-    }
-    return doc.features[rule];
-  }
-
-  /** Run all four rules on every piece of the document. Idempotent per document. */
-  function detectFeatures() {
-    if (!doc || featureState('handle').status !== 'pending') return doc ? doc.features : null;
-    var FF = window.NSO_FaceFeatures;
-    var sts = FEATURE_RULES.map(featureState);
-    if (!FF) {
-      sts.forEach(function (st) {
-        st.status = 'unavailable';
-        st.reason = 'the feature detector (nso_face_features.js) is not loaded.';
-      });
-      return doc.features;
-    }
-    var t0 = Date.now();
-    var single = doc.objects.length === 1 && doc.source !== 'plate';
-    doc.objects.forEach(function (host) {
-      if (host.triangles > FLANGE_MAX_TRIS) {
-        sts.forEach(function (st) { st.notes.push(host.name + ': ' + host.triangles + ' triangles, too many to scan here'); });
-        return;
-      }
-      var r;
-      try { r = FF.detect(host.positions); }
-      catch (err) {
-        console.error('[g-scope] feature detection', err);
-        sts.forEach(function (st) { st.notes.push(host.name + ': detection failed'); });
-        return;
-      }
-      FEATURE_RULES.forEach(function (rule, k) {
-        var st = sts[k], rr = r[rule];
-        if (!rr.found.length) { st.notes.push(host.name + ': ' + rr.reason.replace(/^no \w+: /, '')); return; }
-        rr.found.forEach(function (f, i) {
-          st.objects.push(prepObject({
-            name: (single ? baseName(doc.name) : host.name) + ' - ' + FEATURE_NAMES[rule] +
-              (rr.found.length > 1 ? ' ' + (i + 1) : ''),
-            positions: f.positions,
-            detected: rule,
-            host: host.name,
-            feature: { rule: rule, summary: FF.summary(rule, f), measured: f.measured, volume: f.volume,
-                       rootArea: f.rootArea, face: f.face }
-          }));
-        });
-      });
-    });
-    var ms = Date.now() - t0;
-    sts.forEach(function (st) {
-      st.status = st.objects.length ? 'found' : 'none';
-      st.ms = ms;
-      if (!st.objects.length) st.reason = st.notes.length === 1 ? st.notes[0].replace(/^[^:]*: /, '') : st.notes.join('; ');
-    });
-    return doc.features;
-  }
-
-  function featureRowText(rule, st) {
-    var N = FEATURE_NAMES[rule];
-    if (st.status === 'pending') return N + ' - looking...';
-    if (st.status === 'unavailable') return N + ' - ' + (doc && doc.kind !== 'mesh' ? 'not on a slice' : 'not available');
-    if (st.status === 'none') return N + ' - none detected';
-    var o = st.objects;
-    return N + ' (' + (o.length === 1 ? o[0].feature.summary + ', ' + o[0].triangles + ' tri' : o.length + ' found') + ')';
-  }
-
-  /** One rule's row in the Parts list, under the Flange row. */
-  function featureRow(rule) {
-    var st = featureState(rule);
-    var item = document.createElement('div');
-    item.className = 'ms-legend-item ms-detected-item' + (detectedChecked(rule) ? '' : ' dim');
-    item.dataset.detected = rule;
-    item.dataset.status = st.status;
-    item.setAttribute('role', 'checkbox');
-    item.setAttribute('aria-checked', String(detectedChecked(rule)));
-    var swatch = document.createElement('div');
-    swatch.className = 'ms-swatch';
-    swatch.style.background = '#' + ('000000' + FEATURE_COLORS[rule].toString(16)).slice(-6);
-    var label = document.createElement('span');
-    label.className = 'ms-legend-label';
-    label.textContent = featureRowText(rule, st);
-    item.title = st.status === 'found'
-      ? 'Detected from the geometry, not named in the file. Click to show or hide ' +
-        (st.objects.length === 1 ? 'it' : 'them') + ' - over the part, or alone with the part switched off.\n' +
-        st.objects.map(function (o) {
-          return o.name + ': ' + o.feature.summary + ', ' + o.feature.volume.toFixed(1) + ' mm\u00b3, root ' +
-            o.feature.rootArea.toFixed(1) + ' mm\u00b2';
-        }).join('\n')
-      : st.status === 'pending' ? 'Looking for a ' + rule + ' in the geometry...'
-      : 'No ' + rule + ': ' + st.reason;
-    item.appendChild(swatch); item.appendChild(label);
-    item.addEventListener('click', function () { toggleDetected(rule); });
-    return item;
-  }
-
-  var detectTimer = null;
-  function detectSoon() {
-    if (detectTimer) clearTimeout(detectTimer);
-    var mine = doc;
-    detectTimer = setTimeout(function () {
-      detectTimer = null;
-      if (doc !== mine) return;
-      detectFlanges();
-      detectFeatures();
-      // What was found is drawn now: its rows open switched on.
-      if (view) viewChanged(); else buildDetectedRow();
-    }, 30);
-  }
 
   /**
    * Clear the selection FROM VIEW. Hides it - a piece, a feature's lines, a
@@ -2915,8 +2983,8 @@ var NSO_MICROSCOPE = (function () {
   function showAll() {
     if (!doc) return;
     CLEARED.clear();
-    HIDDEN = new Set(doc.kind === 'toolpath' ? ['Travel'] : []);
-    DETECTED_ON = new Set(allDetectors());
+    HIDDEN = new Set();
+    FEATURE_OFF = new Set(['Travel']);
     viewChanged();
     rescopeSelection();
   }
@@ -3022,11 +3090,9 @@ var NSO_MICROSCOPE = (function () {
     if (!view) return;
     var g = view.highlightGroup;
     clearGroup(g);
-    [view.overviewMeshes, view.detectedMeshes].forEach(function (meshes) {
-      Object.keys(meshes).forEach(function (k) {
-        var m = meshes[k];
-        if (m.isMesh && m.material && m.material.emissive) m.material.emissive.setHex(0x000000);
-      });
+    Object.keys(view.overviewMeshes).forEach(function (k) {
+      var m = view.overviewMeshes[k];
+      if (m.isMesh && m.material && m.material.emissive) m.material.emissive.setHex(0x000000);
     });
     if (!doc || !currentSelection.length) return;
     if (doc.kind === 'toolpath') {
@@ -3060,24 +3126,6 @@ var NSO_MICROSCOPE = (function () {
       return;
     }
     currentSelection.forEach(function (o) {
-      var dm = isDetected(o) && view.detectedMeshes[o.name];
-      if (dm && dm.visible) { dm.material.emissive.setHex(0x3a1010); return; }
-      if (isDetected(o)) {
-        // Lifted out of a part that is drawn whole, so it is drawn over that
-        // part - winning the depth test where the two coincide.
-        var geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(o.positions), 3));
-        geo.translate(-doc.cx, -doc.cy, 0);
-        geo.rotateX(-Math.PI / 2);
-        geo.computeVertexNormals();
-        var hm = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
-          color: detectedColor(o), metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes(),
-          polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1
-        }));
-        hm.userData.feature = o.name;
-        g.add(hm);
-        return;
-      }
       var m = view.overviewMeshes[o.name];
       if (m && m.material && m.material.emissive) m.material.emissive.setHex(0x3a1010);
     });
@@ -3373,7 +3421,7 @@ var NSO_MICROSCOPE = (function () {
    * new piece that is then cropped, and the piece it came from is untouched.
    */
   function cropsPiece() {
-    return doc && doc.source === 'plate' && !currentSelection.some(isDetected);
+    return doc && doc.source === 'plate';
   }
 
   function syncCropRow() {
@@ -3508,13 +3556,6 @@ var NSO_MICROSCOPE = (function () {
   function exportLabel() {
     var base = baseName(doc.name);
     if (doc.kind !== 'toolpath') {
-      // A detected feature is already named for its part ("<part> - Flange").
-      if (currentSelection.every(isDetected)) {
-        var kind = currentSelection[0].detected;
-        return currentSelection.length === 1 ? currentSelection[0].name
-          : baseName(doc.name) + ' - ' + currentSelection.length + ' ' +
-            (currentSelection.every(function (o) { return o.detected === kind; }) ? kind + 's' : 'features');
-      }
       var what = currentSelection.length === 1
         ? currentSelection[0].name
         : currentSelection.length + ' ' + (doc.source === 'plate' ? 'pieces' : 'objects');
@@ -3527,7 +3568,13 @@ var NSO_MICROSCOPE = (function () {
       var s1 = currentSelection[0];
       return base + ' - ' + s1.feature + ' L' + (s1.layer + 1) + ' move ' + (s1.mv.index + 1);
     }
-    if (selectionSource === 'visible' || selectionSource === 'line') {
+    if (selectionSource === 'pick' && !currentSelection.every(function (x) { return x.obj === currentSelection[0].obj; })) {
+      return base + ' - ' + currentSelection.length + ' moves';
+    }
+    if (selectionSource === 'pick') {
+      return base + ' - piece' + (currentSelection[0].obj != null ? ' ' + currentSelection[0].obj : '') + ' (x' + currentSelection.length + ')';
+    }
+    if (selectionSource === 'visible' || selectionSource === 'line' || selectionSource === 'feature' || selectionSource === 'range') {
       var feats = {};
       currentSelection.forEach(function (s) { feats[s.feature] = 1; });
       var fk = Object.keys(feats);
@@ -3539,7 +3586,7 @@ var NSO_MICROSCOPE = (function () {
     }
     if (selectionSource === 'layer') {
       var z = currentSelection.length ? currentSelection[0].z : 0;
-      return base + ' - Z ' + z.toFixed(3) + ' mm (L' + ((doc.layerIndex || 0) + 1) +
+      return base + ' - Z ' + z.toFixed(3) + ' mm (L' + ((currentSelection.length ? currentSelection[0].layer : 0) + 1) +
              ', x' + currentSelection.length + ')';
     }
     var zs = [];
@@ -3839,7 +3886,9 @@ var NSO_MICROSCOPE = (function () {
   function syncLayerRow() {
     var n = layerCount();
     var row = $('ms-layer-row');
-    if (row) row.style.display = doc ? 'block' : 'none';
+    var isPath = !!(doc && doc.kind === 'toolpath');
+    if (row) row.style.display = isPath ? 'block' : 'none';
+    show('ms-line-controls', isPath);
     var note = $('ms-layer-note');
     var num = $('ms-layer-index');
     var btn = $('ms-btn-layer-select');
@@ -3867,8 +3916,8 @@ var NSO_MICROSCOPE = (function () {
     var legendTitle = $('ms-legend-title'), infoTitle = $('ms-info-title');
     var isPath = !!(doc && doc.kind === 'toolpath');
     if (legendTitle) {
-      // One list per view, and every row in it a show / hide toggle.
-      legendTitle.textContent = doc && !isPath ? 'Parts' : 'All features';
+      // One list: the slicer's line types, each with a Display check.
+      legendTitle.textContent = 'Features';
     }
     if (infoTitle) {
       infoTitle.textContent = 'Selection / ' + (isPath || !doc ? 'segment' : 'part') + ' info';
@@ -4059,9 +4108,10 @@ var NSO_MICROSCOPE = (function () {
     var wasTake = plateName !== 'lens';
     if (wasTake) { cancelPull(); showPlate('lens', { quiet: true }); }
     doc = d;
-    HIDDEN = new Set(doc.kind === 'toolpath' ? ['Travel'] : []);
+    HIDDEN = new Set();
+    // a new slice opens with Travel off, as every one has; Display survives a plate flip, not a load
+    if (doc.kind === 'toolpath') FEATURE_OFF = new Set(['Travel']);
     CLEARED = new Set();
-    DETECTED_ON = new Set(allDetectors());
     lineCursor = -1;
     removeAllBalls();
     currentSelection = [];
@@ -4080,20 +4130,17 @@ var NSO_MICROSCOPE = (function () {
     // Orbit: a plain click on a piece does nothing until "Click to select
     // region" is armed - a box is something you ask for, not a side effect
     // of looking round the part.
-    setMode('orbit');
+    setMode('piece');
     normalView();                 // frames the whole part
     syncHeader();
     syncLayerRow();
     info(introInfo());
-    var lineBtn = $('ms-mode-line');
-    if (lineBtn) lineBtn.disabled = doc.kind !== 'toolpath';
     syncExportRow();
     syncRenderRow();
     syncZRangeUI();
     syncCropRow();
     syncLineRead();
     syncBackButton();
-    if (flangeState() && (flangeState().status === 'pending' || featureState('handle').status === 'pending')) detectSoon();
     docListeners.forEach(function (fn) {
       try { fn(doc); } catch (err) { console.error('[g-scope] document listener', err); }
     });
@@ -4146,13 +4193,11 @@ var NSO_MICROSCOPE = (function () {
       clearGroup(view.overviewGroup);
       clearGroup(view.detailGroup);
       view.overviewMeshes = {};
-      view.detectedMeshes = {};
     }
     doc = null;
     currentSelection = [];
     isolated = false;
     CLEARED = new Set();
-    DETECTED_ON = new Set();
     zr = null;
     if (view) clearGroup(view.highlightGroup);
     syncZRangeUI();
@@ -4213,8 +4258,6 @@ var NSO_MICROSCOPE = (function () {
   // [button, card, the rows the engine shows for it - null: always available]
   var SHELL_CARDS = [
     ['ms-nav-select', 'ms-card-select', null],
-    ['ms-nav-line', 'ms-card-line', ['ms-line-controls']],
-    ['ms-nav-layer', 'ms-card-layer', ['ms-layer-row']],
     ['ms-nav-view', 'ms-card-view', null],
     ['ms-nav-render', 'ms-card-render', ['ms-render-row']],
     ['ms-nav-overhangs', 'ms-card-overhangs', ['ms-support-row']],
@@ -4232,6 +4275,9 @@ var NSO_MICROSCOPE = (function () {
   function shellCardSet(card, on) {
     var el = $(card);
     if (el) el.classList.toggle('is-open', on);
+    // a shut card must not take the keyboard with it: Escape is the panel's
+    var ae = document.activeElement, panel = $('microscope');
+    if (!on && el && ae && el.contains(ae) && panel && panel.focus) panel.focus();
     SHELL_CARDS.forEach(function (c) {
       if (c[1] !== card) return;
       var btn = $(c[0]);
@@ -4322,8 +4368,15 @@ var NSO_MICROSCOPE = (function () {
     });
     bind('ms-close', 'click', close);
     bind('ms-btn-back-producer', 'click', backToProducer);
-    bind('ms-mode-orbit', 'click', function () { setMode('orbit'); });
-    bind('ms-mode-select', 'click', function () { setMode('select'); });
+    MODES.forEach(function (m) { bind('ms-mode-' + m, 'click', function () { setMode(m); }); });
+    var zcard = $('ms-zr-card');
+    if (zcard && zcard.dataset.wired !== '1') {
+      zcard.dataset.wired = '1';
+      zcard.addEventListener('click', rangeCardClick);
+      zcard.addEventListener('pointerdown', rangeCardPress);
+      zcard.addEventListener('pointerenter', function () { if (plateName === 'lens' && !pull) drawHover(rangeTarget()); });
+      zcard.addEventListener('pointerleave', clearHover);
+    }
     bind('ms-btn-clear', 'click', function () {
       removeAllBalls();
       selectionSource = 'box';
@@ -4333,9 +4386,8 @@ var NSO_MICROSCOPE = (function () {
     bind('ms-btn-isolate-line', 'click', function () { isolate(); });
     wireShell();
     bind('ms-btn-back', 'click', back);
-    bind('ms-mode-line', 'click', function () { setMode('line'); });
-    bind('ms-line-prev', 'click', function () { stepLine(-1); });
-    bind('ms-line-next', 'click', function () { stepLine(1); });
+    bind('ms-line-prev', 'click', function () { setMode('line'); stepLine(-1); });
+    bind('ms-line-next', 'click', function () { setMode('line'); stepLine(1); });
     bind('ms-btn-clear-view', 'click', clearFromView);
     bind('ms-btn-show-all', 'click', showAll);
     bind('ms-btn-select-visible', 'click', selectVisible);
@@ -4353,10 +4405,11 @@ var NSO_MICROSCOPE = (function () {
     bind('ms-btn-export-solid-stl', 'click', exportSolidAsSTL);
     bind('ms-render-toolpath', 'click', function () { setRenderMode('toolpath'); });
     bind('ms-render-solid', 'click', function () { setRenderMode('solid'); });
-    bind('ms-layer-prev', 'click', function () { stepLayer(-1); });
-    bind('ms-layer-next', 'click', function () { stepLayer(1); });
+    bind('ms-layer-prev', 'click', function () { setMode('layer'); stepLayer(-1); });
+    bind('ms-layer-next', 'click', function () { setMode('layer'); stepLayer(1); });
     bind('ms-btn-layer-select', 'click', function () {
       var num = $('ms-layer-index');
+      setMode('layer');
       selectLayer(num ? (parseInt(num.value, 10) || 0) : 0);
     });
     if (!wiredWindow && window && window.addEventListener) {
@@ -4367,8 +4420,9 @@ var NSO_MICROSCOPE = (function () {
     if (panel && panel.dataset.wired !== '1') {
       panel.dataset.wired = '1';
       panel.addEventListener('keydown', function (ev) {
-        // An open card shuts first; Escape with none open closes G-scope, as before.
-        if (ev.key === 'Escape') { if (!shellCardClose()) close(); ev.preventDefault(); return; }
+        // An open card shuts first; then what is isolated is whole again; with
+        // neither, Escape closes G-scope, as before.
+        if (ev.key === 'Escape') { if (!shellCardClose() && !unIsolate()) close(); ev.preventDefault(); return; }
         // Left / Right step the picked line, the way the old Toolpath card's
         // arrows did - unless a text field or the slider has the keys.
         var t = ev.target;
@@ -4427,6 +4481,10 @@ var NSO_MICROSCOPE = (function () {
     plateObjects: plateObjects,
     openPicker: openPicker,
     setMode: function (m) { setMode(m); },
+    /** What the outline under the pointer stands for: { source, count, label } or null. */
+    hoverInfo: function () { return hoverTgt ? { source: hoverTgt.source, count: hoverTgt.items.length, label: hoverTgt.label } : null; },
+    isIsolated: function () { return isolated; },
+    pressTargetAt: function (x, y) { var t = pressTarget({ clientX: x, clientY: y }); return t ? { source: t.source, count: t.items.length, selected: !!t.selected } : null; },
     mode: function () { return mode; },
     addBoxAt: function (gx, gy, gz, r, h, ry, a) {
       // A capture box placed by G-code coordinates rather than by a click, so a
@@ -4509,7 +4567,7 @@ var NSO_MICROSCOPE = (function () {
     back: back,
     normalView: normalView,
     layerCount: layerCount,
-    hidden: function () { return HIDDEN ? Array.from(HIDDEN) : []; },
+    hidden: function () { return doc && doc.kind === 'toolpath' ? Array.from(FEATURE_OFF) : (HIDDEN ? Array.from(HIDDEN) : []); },
     groups: function () { return doc ? Object.keys(doc.groups) : []; },
     getDoc: function () { return doc; },
     // --- the two plates (docs/GSCOPE-TAKE.md) ---
@@ -4538,41 +4596,7 @@ var NSO_MICROSCOPE = (function () {
       setSelection(doc.objects.filter(function (o) { return want.has(o.name); }), source || 'pick');
       return currentSelection;
     },
-    getView: function () { return view; },
-    // --- detected features (docs/GSCOPE-FLANGE.md) ---
-    /** The Flange row's state: status 'pending' | 'found' | 'none' | 'unavailable'. */
-    flange: function () {
-      var st = flangeState();
-      if (!st) return null;
-      return { status: st.status, reason: st.reason, notes: st.notes.slice(), ms: st.ms,
-               objects: st.objects.map(function (o) {
-                 return { name: o.name, host: o.host, triangles: o.triangles, bounds: o.bounds,
-                          flange: o.flange };
-               }) };
-    },
-    detectFlanges: function () { var st = detectFlanges(); buildDetectedRow(); return st ? st.status : null; },
-    /** A detector row's click ('flange', 'handle', ...): true when it is on after it. */
-    toggleDetected: toggleDetected,
-    /** The detector rows switched on, in list order. */
-    detectedOn: function () { return allDetectors().filter(detectedChecked); },
-    // --- Handle, Bracket, Lid, Hinge (docs/GSCOPE-FEATURES.md) ---
-    /** One rule's row state: status 'pending' | 'found' | 'none' | 'unavailable'. */
-    feature: function (rule) {
-      if (FEATURE_RULES.indexOf(rule) < 0) return null;
-      var st = featureState(rule);
-      if (!st) return null;
-      return { status: st.status, reason: st.reason, notes: st.notes.slice(), ms: st.ms,
-               objects: st.objects.map(function (o) {
-                 return { name: o.name, host: o.host, triangles: o.triangles, bounds: o.bounds, feature: o.feature };
-               }) };
-    },
-    featureRules: function () { return FEATURE_RULES.slice(); },
-    detectFeatures: function () {
-      detectFeatures(); buildDetectedRow();
-      var out = {};
-      FEATURE_RULES.forEach(function (r) { var st = featureState(r); out[r] = st ? st.status : null; });
-      return out;
-    }
+    getView: function () { return view; }
   };
 })();
 

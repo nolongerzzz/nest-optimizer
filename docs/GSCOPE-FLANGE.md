@@ -1,5 +1,10 @@
 # G-scope: the Flange row
 
+> **Moved.** G-scope no longer shows the Flange row (G-scope's SELECT ticket,
+> `docs/GSCOPE-SELECT.md`): surface features live on the plate now. The detector
+> (`nso_flange.js`) and its checks stay; the row, its API and
+> `gcode:gscope-flange` are gone.
+
 G-scope's floating list - one per view, every row a show / hide toggle - is
 whatever the file groups: a slice's `FEATURE:` tags — Outer wall, Sparse infill,
 Support — or a mesh's build objects. Those are **print-process** and
