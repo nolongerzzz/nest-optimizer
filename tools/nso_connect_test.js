@@ -874,6 +874,189 @@ function loopExtent(lp, dir) {
     check('...after the third the four boxes and three strings are ONE solid', shells(acc).length === 1);
   }
 
+  /* ================================================================== 12 */
+  console.log('\n=== 12. DRAW: a freehand stroke, smoothed, swept ===');
+  {
+    const PZ = 0.2;                                           // where a piece rests on the plate
+    const up = [0, 0, 1], pt = (x, y, z, n, piece) => ({ p: [x, y, z], n: n || up, piece: piece == null ? -1 : piece });
+    const dist3 = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+    const polyLen = P => P.reduce((s, q, i) => i ? s + dist3(q, P[i - 1]) : 0, 0);
+    // Chaikin x2 with the corners (a turn over 60°) kept, written out here, not read back from Connect: the length to hold it to
+    const refSmooth = raw => {
+      let P = [raw[0]];
+      for (const q of raw.slice(1)) if (dist3(q, P[P.length - 1]) >= 1) P.push(q);
+      for (let pass = 0; pass < 2; pass++) {
+        const n = P.length, ang = i => {
+          const a = sub(P[i], P[i - 1]), b = sub(P[i + 1], P[i]);
+          return (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / (Math.hypot(...a) * Math.hypot(...b));
+        };
+        const corner = P.map((_, i) => i === 0 || i === n - 1 || P.keep && P.keep[i] || ang(i) < 0.5);
+        const out = [P[0]], keep = [true];
+        for (let i = 0; i + 1 < n; i++) {
+          const lerp = t => P[i].map((v, k) => v + (P[i + 1][k] - v) * t);
+          if (!corner[i]) { out.push(lerp(0.25)); keep.push(false); }
+          if (!corner[i + 1]) { out.push(lerp(0.75)); keep.push(false); } else { out.push(P[i + 1]); keep.push(true); }
+        }
+        P = out; P.keep = keep;
+      }
+      return P;
+    };
+    const area = p => { const n = p.segments, r = p.spec.d / 2; return n / 2 * Math.sin(2 * Math.PI / n) * r * r; };
+    const noJitter = (P, j) => P.map((q, i) => [q[0] + j * Math.sin(i * 12.9898), q[1] + j * Math.cos(i * 78.233), q[2]]);
+
+    // ---- the smoothing
+    const sCurve = []; for (let i = 0; i <= 40; i++) { const x = i * 1.5; sCurve.push(pt(x, 5 * Math.sin(x / 9), PZ)); }
+    const sm = CN.smoothStroke(sCurve);
+    const gaps = sm.points.slice(1).map((q, i) => dist3(q.p, sm.points[i].p));
+    check('the stroke is resampled every 1 mm', sm.ok && Math.min(...gaps) > 0.5 && Math.max(...gaps) < 1.5, 'gaps ' + Math.min(...gaps).toFixed(3) + ' .. ' + Math.max(...gaps).toFixed(3) + ' mm, ' + sm.points.length + ' points');
+    const refLen = polyLen(refSmooth(sCurve.map(q => q.p)));
+    check('...its length is the Chaikin x2 path\'s, computed here (≤ 0.5%)', Math.abs(sm.lengthMm - refLen) / refLen < 0.005, sm.lengthMm.toFixed(3) + ' vs ' + refLen.toFixed(3) + ' mm');
+    const jit = CN.smoothStroke(noJitter(sCurve.map(q => q.p), 0.15).map(p => pt(...p)));
+    check('a pointer\'s jitter (0.15 mm) makes no corner', jit.ok && !jit.points.some(q => q.corner) && Math.abs(jit.lengthMm - sm.lengthMm) / sm.lengthMm < 0.02, jit.lengthMm.toFixed(2) + ' mm');
+    const el = []; for (let x = 0; x <= 20; x++) el.push(pt(x, 0, PZ)); for (let y = 1; y <= 20; y++) el.push(pt(20, y, PZ));
+    const smE = CN.smoothStroke(el);
+    const cn = smE.points.filter(q => q.corner);
+    check('a 90° turn is a corner, and stays one: the corner (20, 0) is a point of the smoothed stroke, no cut', cn.length === 1 && dist3(cn[0].p, [20, 0, PZ]) < 1e-9, cn.length + ' corner(s)');
+    const bend = []; for (let i = 0; i <= 24; i++) { const a = Math.min(i, 12) * 0, x = i * 1; bend.push(pt(x, i <= 12 ? 0 : (i - 12) * Math.tan(50 * Math.PI / 180), PZ)); }
+    check('a 50° turn is smoothed (not a corner): Chaikin rounds it', !CN.smoothStroke(bend).points.some(q => q.corner));
+    check('a stroke under 3 mm is refused in words, a point is no stroke, nothing is built',
+      /2\.5 mm long - draw at least 3\.0 mm/.test(CN.drawPlan([], [pt(0, 0, PZ), pt(2.5, 0, PZ)], { shape: 'string' }).reason) &&
+      /a point/.test(CN.drawPlan([], [pt(0, 0, PZ)], { shape: 'string' }).reason) && CN.drawPlan([], [pt(0, 0, PZ), pt(3.2, 0, PZ)], { shape: 'string' }).ok);
+
+    // ---- plate to plate: a closed piece of its own
+    {
+      const t0 = Date.now();
+      const p = CN.drawPlan([], sCurve, { shape: 'string', plateZ: PZ });
+      check('plate to plate: plans, and it is its own piece (a stroke with both ends on the plate never welds), whatever Result says', p.ok && p.result === 'separate' && p.welds.length === 0 &&
+        CN.drawPlan([], sCurve, { shape: 'string', result: 'weld' }).result === 'separate', p.reason || p.text);
+      const r = await CN.weld(p, { union });
+      check('...builds a closed manifold piece', r.ok && r.topo.open === 0 && r.topo.nm === 0 && r.topo.badWinding === 0 && r.topo.shells === 1 && r.topo.euler === 2, r.ok ? JSON.stringify(r.topo) : r.reason);
+      canonical('draw plate to plate', r.soup);
+      const meas = BR.volume(r.soup) / area(p);
+      check('...its length (volume / section area) is within 2% of the smoothed path (' + refLen.toFixed(2) + ' mm, Chaikin written out in the test)', Math.abs(meas - refLen) / refLen < 0.02, meas.toFixed(3) + ' mm, ' + (100 * (meas - refLen) / refLen).toFixed(2) + '%');
+      const v = verts(r.soup), lo = Math.min(...v.map(q => q[2])), hi = Math.max(...v.map(q => q[2]));
+      check('...it lies ON the plate: the bottom is at the plate (' + PZ + ') and the top a diameter above', lo >= PZ - 1e-6 && lo < PZ + 0.01 && Math.abs(hi - (PZ + 2)) < 0.01, lo.toFixed(4) + ' .. ' + hi.toFixed(4));
+      const e0 = sCurve[0].p, e1 = sCurve[sCurve.length - 1].p;
+      const endLo = e => Math.min(...v.filter(q => dist3([q[0], q[1], 0], [e[0], e[1], 0]) < 1.6).map(q => q[2]));
+      const capOf = (e, d) => { const w = v.filter(q => dist3([q[0], q[1], 0], [e[0], e[1], 0]) < 1.6); const m = Math.max(...w.map(q => d[0] * q[0] + d[1] * q[1])); return w.filter(q => Math.abs(d[0] * q[0] + d[1] * q[1] - m) < 1e-4); };
+      const dir0 = unitv([p.centre[0][0] - p.centre[1][0], p.centre[0][1] - p.centre[1][1], 0]), dir1 = unitv([p.centre[p.centre.length - 1][0] - p.centre[p.centre.length - 2][0], p.centre[p.centre.length - 1][1] - p.centre[p.centre.length - 2][1], 0]);
+      const c0 = capOf(e0, dir0), c1 = capOf(e1, dir1);
+      check('...BOTH ends are flat feet on the plate: each end is a square cap standing on it (' + c0.length + ' / ' + c1.length + ' vertices on a plane across the path), its lowest point on the plate',
+        c0.length >= 16 && c1.length >= 16 && endLo(e0) < PZ + 0.01 && endLo(e1) < PZ + 0.01 && Math.abs(Math.min(...c0.map(q => q[2])) - PZ) < 0.01 && Math.abs(Math.min(...c1.map(q => q[2])) - PZ) < 0.01,
+        endLo(e0).toFixed(4) + ' / ' + endLo(e1).toFixed(4));
+      TABLE.push(['draw · plate to plate · string', '66 points → ' + (r.soup.length / 9), 'Euler 2', 'its own piece', 'length ' + meas.toFixed(2) + ' vs ' + refLen.toFixed(2) + ' mm', ms(t0)]);
+    }
+
+    // ---- every shape, plate to plate
+    for (const [shape, extra] of [['ribbon', {}], ['tube', {}], ['tapered', {}]]) {
+      const p = CN.drawPlan([], sCurve, Object.assign({ shape, plateZ: PZ }, extra));
+      const r = p.ok ? await CN.weld(p, { union }) : p;
+      const sh = r.ok ? shells(r.soup) : [];
+      check(shape + ' plate to plate: a closed piece' + (shape === 'tube' ? ' with its bore sealed' : '') + ', lying on the plate', p.ok && r.ok && r.topo.open === 0 && r.topo.nm === 0 && r.topo.badWinding === 0 &&
+        sh.filter(x => x.volume > 0).length === 1 && sh.filter(x => x.volume < 0).length === (shape === 'tube' ? 1 : 0) && Math.abs(L.bounds(r.soup).lo[2] - PZ) < 0.01,
+        p.ok ? (r.ok ? JSON.stringify(r.topo) : r.reason) : p.reason);
+    }
+
+    // ---- the boxes: A (0..20) and B (40..60), 10 high
+    const TOP = PZ + 10, BA = L.box(0, 0, PZ, 20, 20, TOP), BB = L.box(40, 0, PZ, 60, 20, TOP), PB2 = [BA, BB];
+    const inside = (b, q, e) => q[0] > b[0] + e && q[0] < b[3] - e && q[1] > b[1] + e && q[1] < b[4] - e && q[2] > b[2] + e && q[2] < b[5] - e;
+    const boxA = [0, 0, PZ, 20, 20, TOP], boxB = [40, 0, PZ, 60, 20, TOP];
+
+    // ---- a sample AT the crease (a real drag lands there as often as it steps over it): one corner, not two
+    {
+      const st = [];
+      for (let y = -20; y <= -10; y++) st.push(pt(10, y, PZ));                                     // the plate in front of A's front face (y = 0 is far: use a wall at y = -10)
+      for (let z = PZ + 1; z <= TOP; z++) st.push(pt(10, -10, z, [0, -1, 0], 0));                  // up the wall, the last sample ON the top edge
+      st.push(pt(10, -9.97, TOP, up, 0));
+      for (let y = -9; y <= 0; y++) st.push(pt(10, y, TOP, up, 0));
+      const sc = CN.smoothStroke(st), cs = sc.points.map((q, i) => ({ q, i })).filter(x => x.q.corner);
+      check('a sample at the crease and the sample just past it: the stroke has one corner at each of the two creases (the wall\'s foot, its top), none doubled',
+        cs.length === 2 && dist3(cs[0].q.p, [10, -10, PZ]) < 0.05 && dist3(cs[1].q.p, [10, -10, TOP]) < 0.05, cs.map(x => x.q.p.map(v => v.toFixed(2)).join(',')).join(' | '));
+      const wall = L.box(0, -10, PZ, 20, 10, TOP);
+      const pl = CN.drawPlan([wall], st, { shape: 'string', plateZ: PZ, result: 'weld' });
+      check('...and it plans, welds into the piece', pl.ok && pl.welds.length === 1, pl.reason || pl.text);
+    }
+
+    // ---- plate to piece: welded
+    {
+      const t0 = Date.now();
+      const st = []; for (let x = -30; x <= 0; x++) st.push(pt(x, 10, PZ));
+      for (let z = PZ; z <= TOP; z++) st.push(pt(0, 10, z, [-1, 0, 0], 0));
+      for (let x = 1; x <= 10; x++) st.push(pt(x, 10, TOP, up, 0));
+      for (const ends of ['weld', 'pad', 'ball']) {
+        const p = CN.drawPlan([BA], st, { shape: 'string', plateZ: PZ, ends });
+        check('plate to piece, ends = ' + ends + ': plans, welds into the piece (and only it)', p.ok && p.result === 'weld' && p.welds.length === 1 && p.welds[0] === 0 && p.endsOn.join() === 'plate,piece', p.reason || p.text);
+        if (!p.ok) continue;
+        const r = await CN.weld(p, { union });
+        const sh = r.ok ? shells(r.soup) : [];
+        check('...the box and the stroke are ONE closed solid (the plate end is a flat foot, the end on the piece follows Ends)', r.ok && sh.length === 1 && sh[0].volume > 0 && r.kernel.open === 0 && r.kernel.nm === 0 &&
+          Math.abs(L.bounds(r.soup).lo[2] - PZ) < 0.01, r.ok ? sh.length + ' shell(s), ' + (r.soup.length / 9) + ' triangles' : r.reason);
+        if (ends === 'weld') {
+          canonical('draw plate to piece', r.soup);
+          const gained = BR.volume(r.soup) - BR.volume(BA);
+          check('...it grew by about the stroke\'s volume (the part outside the box): ' + gained.toFixed(1) + ' mm³ of ' + (area(p) * p.lengthMm).toFixed(1), gained > 0.4 * area(p) * p.lengthMm && gained < area(p) * p.lengthMm * 1.05, gained.toFixed(2));
+          TABLE.push(['draw · plate to piece · string weld', (BA.length / 9) + ' + ' + (p.web.length / 9) + ' → ' + (r.soup.length / 9), 'one solid', 'welded into the box', p.lengthMm.toFixed(2) + ' mm', ms(t0)]);
+        }
+      }
+      const fl = CN.drawPlan([BA], st, { shape: 'string', plateZ: PZ, ends: 'flat' });
+      check('...Flat ends with Weld on a piece end: refused in words (nothing to weld a flush cut with); Keep separate makes it', !fl.ok && /Flat ends are cut flush/.test(fl.reason) && CN.drawPlan([BA], st, { shape: 'string', plateZ: PZ, ends: 'flat', result: 'separate' }).ok, fl.reason);
+      const tp = CN.drawPlan([BA], st, { shape: 'string', plateZ: PZ, ends: 'ball' });
+      check('...a Ball is only at the end on the piece: the plate end has no tip of its own', tp.ok && tp.tips && tp.tips[0] === null && tp.tips[1] && tp.tips[1].length > 0);
+    }
+
+    // ---- piece to piece over the plate: welded both, rides the surface
+    {
+      const t0 = Date.now();
+      const st = [];
+      for (let x = 5; x <= 20; x++) st.push(pt(x, 10, TOP, up, 0));
+      for (let z = TOP; z >= PZ; z--) st.push(pt(20, 10, z, [1, 0, 0], 0));
+      for (let x = 21; x <= 39; x++) st.push(pt(x, 10, PZ, up, -1));
+      for (let z = PZ; z <= TOP; z++) st.push(pt(40, 10, z, [-1, 0, 0], 1));
+      for (let x = 41; x <= 55; x++) st.push(pt(x, 10, TOP, up, 1));
+      const ps = CN.drawPlan(PB2, st, { shape: 'string', plateZ: PZ, result: 'separate' });
+      check('piece to piece (over the plate between them), Keep separate: plans as a piece of its own', ps.ok && ps.result === 'separate' && ps.welds.length === 0 && ps.endsOn.join() === 'piece,piece', ps.reason || ps.text);
+      const rs = ps.ok ? await CN.weld(ps, { union }) : ps;
+      const vs = rs.ok ? verts(rs.soup) : [];
+      check('...a closed piece that rides the surface: no vertex of it is inside either box, and it touches them (the lowest point on the first top is on it, ≤ 0.02 mm)',
+        rs.ok && rs.topo.open === 0 && rs.topo.nm === 0 && !vs.some(q => inside(boxA, q, 1e-3) || inside(boxB, q, 1e-3)) &&
+        Math.abs(Math.min(...vs.filter(q => q[0] > 6 && q[0] < 17).map(q => q[2])) - TOP) < 0.02, rs.ok ? JSON.stringify(rs.topo) : rs.reason);
+      // (the straight stretches: not the tip's start, the ramps up to a bend, or the bends themselves)
+      const onA = ps.centre.filter(c => c[0] > 6 && c[0] < 14), onPlate = ps.centre.filter(c => c[0] > 24 && c[0] < 36), onWall = ps.centre.filter(c => c[2] > PZ + 2.8 && c[2] < 5.3 && c[0] < 30);
+      check('...its centre is the shape\'s half-height (1 mm) off the surface: ' + (TOP + 1) + ' over the top of A, ' + (PZ + 1).toFixed(1) + ' over the plate, 21 along A\'s wall (x)',
+        onA.every(c => Math.abs(c[2] - (TOP + 1)) < 0.02) && onPlate.every(c => Math.abs(c[2] - (PZ + 1)) < 0.02) && onWall.length >= 2 && onWall.every(c => Math.abs(c[0] - 21) < 0.1),
+        onA.length + '/' + onPlate.length + '/' + onWall.length + ' samples');
+      const pw = CN.drawPlan(PB2, st, { shape: 'string', plateZ: PZ });
+      check('piece to piece, Weld: plans, welds into BOTH pieces', pw.ok && pw.result === 'weld' && pw.welds.length === 2, pw.reason || pw.text);
+      const rw = pw.ok ? await CN.weld(pw, { union }) : pw;
+      const sw = rw.ok ? shells(rw.soup) : [];
+      check('...the two boxes and the stroke are ONE closed solid', rw.ok && sw.length === 1 && sw[0].volume > 0 && rw.kernel.open === 0 && rw.kernel.nm === 0, rw.ok ? sw.length + ' shell(s), ' + (rw.soup.length / 9) + ' triangles' : rw.reason);
+      if (rw.ok) canonical('draw piece to piece', rw.soup);
+      const embedded = pw.centre.filter(c => c[0] > 9 && c[0] < 14);
+      check('...where it is welded it is sunk into the piece (0.4 mm, the most of the half-height), so the boolean has material to merge: ' + (TOP + 0.6).toFixed(1) + ' over the top', embedded.length > 3 && embedded.every(c => Math.abs(c[2] - (TOP + 0.6)) < 0.02), embedded.map(c => c[2].toFixed(2)).slice(0, 3).join(','));
+      if (rw.ok) TABLE.push(['draw · piece to piece over the plate · string weld', '24 + ' + (pw.web.length / 9) + ' → ' + (rw.soup.length / 9), 'one solid', 'welded into both', pw.lengthMm.toFixed(2) + ' mm', ms(t0)]);
+    }
+
+    // ---- sag: a lift of the middle
+    {
+      const line = []; for (let x = 0; x <= 40; x++) line.push(pt(x, 0, PZ));
+      for (const sag of [0, 6]) {
+        const p = CN.drawPlan([], line, { shape: 'string', plateZ: PZ, sagMm: sag });
+        const r = p.ok ? await CN.weld(p, { union }) : p;
+        const v = r.ok ? verts(r.soup) : [];
+        const mid = v.filter(q => Math.abs(q[0] - 20) < 1.5), tops = (xs) => Math.max(...v.filter(q => Math.abs(q[0] - xs) < 1.5).map(q => q[2]));
+        const peak = tops(20), end0 = v.filter(q => q[0] < 1.2), end1 = v.filter(q => q[0] > 38.8);
+        check('Sag ' + sag + ': ' + (sag ? 'the middle is raised by exactly ' + sag + ' mm (its top ' + (PZ + 2 + sag).toFixed(1) + ' over the plate), the ends stay on the plate' : 'flat on the plate: nothing above a diameter'),
+          p.ok && r.ok && r.topo.open === 0 && r.topo.nm === 0 && Math.abs(peak - (PZ + 2 + sag)) < 0.1 && Math.min(...end0.map(q => q[2])) < PZ + 0.02 && Math.min(...end1.map(q => q[2])) < PZ + 0.02 &&
+          (sag ? true : Math.max(...v.map(q => q[2])) < PZ + 2 + 0.01), p.ok ? (r.ok ? 'peak ' + peak.toFixed(3) : r.reason) : p.reason);
+        if (sag) {
+          check('...it is an arch: a quarter in it stands about half way up (sin²), and the text says so', Math.abs((tops(10) - PZ - 2) - sag * 0.5) < 0.4 && /lift \+6\.0/.test(p.text), (tops(10) - PZ - 2).toFixed(2) + ' mm, ' + p.text);
+          canonical('draw sag 6', r.soup);
+        }
+      }
+      check('a negative Sag is refused in words: Draw lifts, it does not hang', /Draw lifts the stroke/.test(CN.drawPlan([], line, { shape: 'string', sagMm: -3 }).reason));
+    }
+  }
+
   console.log('\n=== table ===');
   console.log('| case | triangles | topology | shells | measured | time |');
   console.log('|---|---|---|---|---|---|');

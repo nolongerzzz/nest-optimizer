@@ -28,6 +28,10 @@
         edge midpoint, Set leaves the card armed for the next pair (picks clear,
         fields stay, the last connector stays) - three Sets in a row on four
         boxes, one solid, Undo x3 puts the boxes back - and Escape closes it
+    10. DRAW: a real freehand drag (mouse down, moves, up) - plate to plate (live
+        ghost, release builds a closed piece lying on the plate), Esc mid-drag
+        cancels, plate up the wall of a box onto its top welds it, the card stays
+        armed for the next stroke, Sag lifts the middle, Draw off is anchors again
      8. Sag and Ends: typing a Sag redraws the ghost as an arc (+6 up, -6 down,
         measured off the ghost), a hoop is refused in words, the Ends dropdown
         redraws it with a Foot pad / Ball, Flat with Weld is refused; then Set
@@ -102,6 +106,26 @@ function installHelpers() {
       }
       return null;
     },
+    /* A view in which every 3D point of a stroke (plate points, wall points, top points) lands on bare canvas and a ray
+       through it meets that very place (a piece or the plate), clear of the open card. */
+    frameDraw(pts, from, at) {
+      const r = state.renderer.domElement.getBoundingClientRect();
+      for (const k of [0, 6, 12, 18, 26, 34, 44, 56]) for (const back of [1, 1.3, 1.7, 2.2]) {
+        const f = [at[0] + (from[0] - at[0]) * back, at[1] + (from[1] - at[1]) * back, at[2] + (from[2] - at[2]) * back];
+        this.look(f, at);
+        const right = new THREE.Vector3().setFromMatrixColumn(state.camera.matrixWorld, 0).multiplyScalar(-k);
+        this.look([f[0] + right.x, f[1] + right.y, f[2] + right.z], [at[0] + right.x, at[1] + right.y, at[2] + right.z]);
+        const ok = pts.every(q => {
+          const s = this.screen(q);
+          if (s.x < r.left + 400 || s.x > r.right - 20 || s.y < r.top + 70 || s.y > r.bottom - 20) return false;
+          if (document.elementFromPoint(s.x, s.y) !== state.renderer.domElement) return false;
+          const t = NSO_connectSample({ clientX: s.x, clientY: s.y });
+          return t && Math.hypot(t.p[0] - q[0], t.p[1] - q[1], t.p[2] - q[2]) < 0.6;
+        });
+        if (ok) return { k, back };
+      }
+      return null;
+    },
     azimuth() {
       const d = state.camera.position.clone().sub(state.controls.target);
       return Math.atan2(d.x, d.z) * 180 / Math.PI;
@@ -141,7 +165,7 @@ function installHelpers() {
         aLeave: C.a && C.a.target.leaveNormal ? C.a.target.leaveNormal.slice() : null, bLeave: C.b && C.b.target.leaveNormal ? C.b.target.leaveNormal.slice() : null,
         aCentre: C.a ? !!C.a.target.centre : null, aEdge: C.a && C.a.target.kind === 'edge' ? [C.a.target.a, C.a.target.b] : null,
         anchorsP: C.plan && C.plan.ok ? C.plan.anchors.map(x => x.p.slice()) : null, anchorsN: C.plan && C.plan.ok ? C.plan.anchors.map(x => x.n.slice()) : null,
-        pressNull: !C.press, controlsOn: state.controls.enabled,
+        pressNull: !C.press, controlsOn: state.controls.enabled, stroke: !!C.stroke, strokePts: C.stroke ? C.stroke.raw.length : 0,
         ghostMat: C.ghost ? { color: C.ghost.material.color.getHex(), opacity: C.ghost.material.opacity } : null
       };
     },
@@ -684,6 +708,145 @@ withApp(async (page, logs) => {
     await page.keyboard.press('Escape');
     C9 = await P(page);
     check('Escape with nothing picked closes the card', !C9.open && C9.hidden && C9.overlay.length === 0);
+  }
+
+
+  console.log('\n=== 10. DRAW: a real freehand drag - plate to plate, plate up onto a piece, Esc, the card stays armed ===');
+  {
+    // a bare plate, then one box
+    await page.evaluate(() => {
+      state.placed.slice().forEach(p => { if (p.mesh && p.mesh.parent) p.mesh.parent.remove(p.mesh); });
+      state.placed = []; state.models = []; state.undoStack.length = 0; state.editId = null; state.selectedIndex = -1;
+    });
+    const boxId = await loadSTL(page, L.writeSTL(path.join(TMP, 'box_draw.stl'), L.box(0, 0, 0, 20, 20, 10)));
+    await page.evaluate(id => { const b = window.__cn.bounds(window.__cn.up(id)); window.__cn.nudge(id, 40 - (b.lo[0] + b.hi[0]) / 2, 0 - (-(b.lo[1] + b.hi[1]) / 2)); }, boxId);
+    const bb = await page.evaluate(id => window.__cn.bounds(window.__cn.up(id)), boxId);
+    const REST = 0.2, TOPZ = bb.hi[2];
+    await page.click('#btn-connect');
+    await page.waitForFunction(() => state.connect && state.connect.open, null, { timeout: 5000 });
+    await page.selectOption('#sel-connect-shape', 'string');
+    await page.check('input[name="connect-result"][value="weld"]');
+    await page.selectOption('#sel-connect-ends', 'weld');
+    await page.fill('#inp-connect-dia', '2');
+    await page.fill('#inp-connect-sag', '0');
+    await page.check('#chk-connect-draw');
+    let D = await P(page);
+    check('Draw is a switch on the card; on, the readout says how: press, drag, release builds, Esc cancels', /^Draw: press on the plate or a piece and drag; release builds it\. Esc cancels\.$/.test(D.readout) && D.open && D.goDisabled, D.readout);
+
+    const lerp3 = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+    const along = (pts, stepMm) => {                                    // a 3D polyline, in steps
+      const out = [pts[0]];
+      for (let i = 1; i < pts.length; i++) {
+        const d = Math.hypot(...pts[i].map((v, k) => v - pts[i - 1][k])), n = Math.max(1, Math.ceil(d / stepMm));
+        for (let j = 1; j <= n; j++) out.push(lerp3(pts[i - 1], pts[i], j / n));
+      }
+      return out;
+    };
+    const screenPath = pts => page.evaluate(pts => pts.map(q => window.__cn.screen(q)), pts);
+    const drag = async (spath, o) => {                                    // a real press, moves and release
+      o = o || {};
+      await page.mouse.move(spath[0].x, spath[0].y);
+      await page.mouse.down();
+      const upTo = o.upTo == null ? spath.length : o.upTo;
+      for (let i = 1; i < upTo; i++) await page.mouse.move(spath[i].x, spath[i].y);
+      if (o.hold) return;
+      await page.mouse.up();
+    };
+    const waitIdle = () => page.waitForFunction(() => state.connect && !state.connect.busy && !state.connect.stroke, null, { timeout: 60000 });
+
+    // ---- plate to plate: a wavy freehand stroke
+    const wave = []; for (let i = 0; i <= 30; i++) wave.push([-25 + i * 1.4, -28 + 6 * Math.sin(i / 4.5), REST]);
+    const w3 = along(wave, 1.2);
+    let fr = await page.evaluate(([w3, V, AT]) => window.__cn.frameDraw(w3, V, AT), [w3, [-4, 70, 34], [-4, 0, 28]]);
+    check('a view with the whole stroke on bare plate', !!fr, JSON.stringify(fr));
+    let sp = await screenPath(w3);
+    const nm0 = await page.evaluate(() => state.models.length), un0 = await page.evaluate(() => state.undoStack.length);
+    await drag(sp, { upTo: Math.floor(sp.length * 0.6), hold: true });
+    await page.waitForFunction(() => state.connect.stroke && state.connect.ghost && !state.connect.stroke.dirty, null, { timeout: 5000 });   // (the ghost is built on the next frame)
+    D = await P(page);
+    check('mid-drag: the stroke is down, drawn live as a line, and the connector it would make is the ghost (amber, 0.75) - nothing is committed yet',
+      D.stroke && D.strokePts > 10 && D.line && D.ghost && D.ghostMat.color === 0xf59e0b && D.ghostMat.opacity === 0.75 && /^Draw: String Ø2\.0, [\d.]+ mm along the stroke · plate to plate · kept as its own piece · release builds it$/.test(D.readout) &&
+      (await page.evaluate(() => state.models.length)) === nm0, D.readout + ' | ' + D.strokePts + ' points');
+    await shot(page, '20-draw-ghost');
+    for (let i = Math.floor(sp.length * 0.6); i < sp.length; i++) await page.mouse.move(sp[i].x, sp[i].y);
+    await page.mouse.up();
+    await waitIdle();
+    let st = await page.evaluate(() => {
+      const e = state.placed[state.placed.length - 1], C = state.connect;
+      return { models: state.models.length, undo: state.undoStack.length, id: e.sourceId, name: state.models.find(m => m.id === e.sourceId).name, open: C.open, stroke: !!C.stroke, ghost: !!C.ghost, line: !!(C.line && C.line.parent),
+               draw: document.getElementById('chk-connect-draw').checked, readout: document.getElementById('connect-readout').textContent };
+    });
+    let tp = await page.evaluate(id => window.__cn.topo(id), st.id);
+    let bnd = await page.evaluate(id => window.__cn.bounds(window.__cn.up(id)), st.id);
+    check('release builds it: ONE new piece (Connector (string)), closed and manifold, one undo step', st.models === nm0 + 1 && st.undo === un0 + 1 && st.name === 'Connector (string)' && tp.open === 0 && tp.nm === 0 && tp.badWinding === 0 && tp.shells === 1, JSON.stringify(tp) + ' | ' + st.name);
+    check('...it lies ON the plate: bottom at the rest height (' + REST + '), top a diameter above', Math.abs(bnd.lo[2] - REST) < 0.05 && Math.abs(bnd.hi[2] - (REST + 2)) < 0.05, bnd.lo[2].toFixed(3) + ' .. ' + bnd.hi[2].toFixed(3));
+    const ends3 = [w3[0], w3[w3.length - 1]], bx = [bnd.lo[0], bnd.hi[0]];
+    check('...from where the pointer went down to where it was let go (its ends within a radius of them, plus the smoothing)', Math.abs(bx[0] - (ends3[0][0] - 1)) < 1.5 && Math.abs(bx[1] - (ends3[1][0] + 1)) < 1.5, bx.map(v => v.toFixed(2)).join(' .. ') + ' vs ' + ends3.map(q => q[0].toFixed(2)).join(' .. '));
+    check('...the card stays armed for the next stroke: still open, Draw still on, no stroke, no ghost, the line gone, the fields as they were', st.open && st.draw && !st.stroke && !st.ghost && !st.line && /^Connected\. Draw: press/.test(st.readout), st.readout);
+    await shot(page, '21-draw-plate-plate');
+
+    // ---- Esc mid-drag cancels
+    const un1 = st.undo;
+    await drag(sp, { upTo: Math.floor(sp.length * 0.5), hold: true });
+    await page.waitForFunction(() => state.connect.stroke && state.connect.ghost && !state.connect.stroke.dirty, null, { timeout: 5000 });
+    D = await P(page);
+    check('a second stroke is down (no reopening the card)', D.stroke && D.ghost);
+    await page.keyboard.press('Escape');
+    D = await P(page);
+    check('Esc mid-drag cancels the stroke: no stroke, no ghost, no line, the card still open - and nothing is built when the button comes up', !D.stroke && !D.ghost && !D.line && D.open && /^Stroke cancelled - nothing built\./.test(D.readout), D.readout);
+    for (let i = Math.floor(sp.length * 0.5); i < sp.length; i++) await page.mouse.move(sp[i].x, sp[i].y);
+    await page.mouse.up();
+    await page.waitForTimeout(150);
+    st = await page.evaluate(() => ({ models: state.models.length, undo: state.undoStack.length, stroke: !!state.connect.stroke, open: state.connect.open }));
+    check('...(the rest of the drag and the release are just a mouse: no new piece, no undo step)', st.models === nm0 + 1 && st.undo === un1 && !st.stroke && st.open, JSON.stringify(st));
+
+    // ---- plate up onto the piece: welded
+    const FY = bb.lo[1];                                                // the box's front face (y = FY), the plate in front of it
+    const wall = [[34, FY - 18, REST], [34, FY - 4, REST], [34, FY, REST], [34, FY, TOPZ], [34, FY + 4, TOPZ], [37, FY + 9, TOPZ]];
+    const c3 = along(wall, 1.2);
+    const view2 = await page.evaluate(([c3, V, AT]) => window.__cn.frameDraw(c3, V, AT), [c3, [37, 44, 22], [37, 3, 4]]);
+    check('a view of the stroke: plate in front, up the front wall, onto the top', !!view2, JSON.stringify(view2));
+    sp = await screenPath(c3);
+    const snap1 = await page.evaluate(() => window.__cn.snapshot());
+    const un2 = await page.evaluate(() => state.undoStack.length);
+    await drag(sp);
+    await waitIdle();
+    st = await page.evaluate(() => {
+      const e = state.placed[state.placed.length - 1], C = state.connect;
+      return { models: state.models.length, placed: state.placed.length, undo: state.undoStack.length, id: e.sourceId, name: state.models.find(m => m.id === e.sourceId).name, open: C.open,
+               status: document.getElementById('status').textContent, label: state.undoStack.length ? state.undoStack[state.undoStack.length - 1].label : '' };
+    });
+    tp = await page.evaluate(id => window.__cn.topo(id), st.id);
+    check('release welds it: the box and the stroke are ONE closed solid (the first stroke\'s piece untouched), ONE undo step', st.models === 2 && st.undo === un2 + 1 && /\(connected\)$/.test(st.name) && tp.open === 0 && tp.nm === 0 && tp.badWinding === 0 && tp.shells === 1 &&
+      /Connect done - Draw: String Ø2\.0, [\d.]+ mm along the stroke · plate to piece · welds into the piece/.test(st.status), JSON.stringify(tp) + ' | ' + st.name + ' | ' + st.status.slice(0, 120));
+    bnd = await page.evaluate(id => window.__cn.bounds(window.__cn.up(id)), st.id);
+    check('...it climbed the wall: the piece now reaches out over the plate in front of the box (its front is past the box\'s face by the stroke\'s length on the plate, 18 mm)', bnd.lo[1] < FY - 10, 'front at ' + bnd.lo[1].toFixed(2) + ' vs the box\'s ' + FY.toFixed(2));
+    await shot(page, '22-draw-plate-to-piece');
+    await undo(page);
+    const back = await page.evaluate(() => ({ snap: window.__cn.snapshot(), models: state.models.length, status: document.getElementById('status').textContent }));
+    check('Undo: the box is back as it was, bit for bit (the first stroke\'s piece with it)', back.models === 2 && sameSnap(snap1, back.snap) && /Undo: Connect reverted/.test(back.status), back.status);
+
+    // ---- Sag lifts the middle of a drawn stroke
+    await undo(page);
+    await page.fill('#inp-connect-sag', '4');
+    fr = await page.evaluate(([w3, V, AT]) => window.__cn.frameDraw(w3, V, AT), [w3, [-4, 70, 34], [-4, 0, 28]]);
+    sp = await screenPath(w3);
+    await drag(sp);
+    await waitIdle();
+    const lifted = await page.evaluate(() => { const e = state.placed[state.placed.length - 1]; return { id: e.sourceId, text: document.getElementById('status').textContent }; });
+    bnd = await page.evaluate(id => window.__cn.bounds(window.__cn.up(id)), lifted.id);
+    check('Sag 4 with Draw: the middle of the stroke is raised - the piece reaches ' + (REST + 2 + 4).toFixed(1) + ' mm (a diameter + the lift over the plate)', Math.abs(bnd.hi[2] - (REST + 2 + 4)) < 0.4 && /lift \+4\.0/.test(lifted.text), 'top ' + bnd.hi[2].toFixed(2) + ' | ' + lifted.text.slice(0, 110));
+    await shot(page, '23-draw-sag');
+    await undo(page);
+    await page.fill('#inp-connect-sag', '0');
+
+    // ---- Draw off: the anchors are as they were
+    await page.uncheck('#chk-connect-draw');
+    D = await P(page);
+    check('Draw off: the card is back to anchors (the readout says so, a press on a piece picks, nothing is drawn)', /^Click anchor A on a piece/.test(D.readout) && D.open && !D.stroke, D.readout);
+    await page.keyboard.press('Escape');
+    D = await P(page);
+    check('Escape with nothing picked closes the card', !D.open && D.hidden);
   }
 
   const errs = logs.filter(l => /\[pageerror\]|\[error\]/.test(l) && !/favicon/.test(l));

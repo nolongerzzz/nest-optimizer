@@ -43,6 +43,22 @@
 //     you like. CANCEL or ESCAPE drops the picks; pressed with none, it closes the
 //     card.
 //
+// DRAW (the Draw switch beside Sag): the path is a freehand stroke instead of two anchors.
+//   - PRESS anywhere on the plate or on a piece and DRAG: the stroke follows the
+//     cursor across the plate and up onto the pieces it crosses (every move is a
+//     ray - the plate where it meets none - with a step in the screen of at most a
+//     few px, so a fast drag does not skip over a wall). It is drawn live, with the
+//     connector it would make as the ghost (amber, Bridge's).
+//   - RELEASE builds it: NSO_Connect.drawPlan smooths the stroke (Chaikin x2,
+//     resampled at 1 mm, corners over 60 degrees kept) and sweeps the shape
+//     along it. Result, Ends and Sag are the card's own; Sag is a lift of the
+//     middle. Weld joins the pieces the two ends stand on; a stroke with both
+//     ends on the plate is its own piece. One Undo. The card stays armed for the
+//     next stroke.
+//   - ESC mid-drag cancels the stroke and builds nothing.
+//   Left-drag draws while Draw is on; a press that finds nothing under it, and the
+//   right and middle buttons, still orbit and pan.
+//
 // A press that starts ON a piece belongs to Connect while the card is open (it
 // would otherwise select the piece and start a move drag under the click); a
 // press that starts anywhere else - the plate, the empty view - is never
@@ -66,12 +82,15 @@ var CONNECT_RENDER_ORDER = 21;
 var CONNECT_CLICK_PX = 5;                // a press that moves more than this is an orbit, not a click
 var CONNECT_SAME_MM = 1.0;               // a click this close to a point anchor is that anchor
 var NSO_CONNECT_HINT = 'Click anchor A on a piece, orbit as you like, then click anchor B.';
+var NSO_CONNECT_DRAW_HINT = 'Draw: press on the plate or a piece and drag; release builds it. Esc cancels.';
+var CONNECT_REST_Z = 0.2;                // where a piece rests on the plate: a stroke over bare plate rides there
+var CONNECT_STROKE_PX = 5;               // the screen step between rays along a drag
 
 function NSO_connectUI() {
   if (typeof state === 'undefined') return {};
   if (!state.connect) {
     state.connect = { open: false, hover: null, a: null, b: null, plan: null, overlay: null, ghost: null, line: null,
-                      busy: false, raf: 0, press: null, soups: {}, timer: 0 };
+                      busy: false, raf: 0, press: null, soups: {}, timer: 0, draw: false, stroke: null };
   }
   return state.connect;
 }
@@ -163,6 +182,94 @@ function NSO_connectDrawLine(from, to) {
     color: CONNECT_PICK_COLOR, transparent: true, depthTest: false, depthWrite: false })), CONNECT_RENDER_ORDER + 2);
   C.line.name = 'connectLine';
   nsoHelpers.attach(state.scene, C.line, 'connect');
+}
+
+/* ------------------------------------------------------------- the stroke */
+
+function NSO_connectDrawOn() { var el = NSO_connectEl('chk-connect-draw'); return !!(el && el.checked); }
+
+// What is under the pointer for a stroke: a piece (its point and the soup's face normal, Z up) or the plate (where a piece rests).
+function NSO_connectSample(ev) {
+  if (!state.raycaster || !state.camera || !state.renderer) return null;
+  setPointerFromEvent(ev);
+  state.raycaster.setFromCamera(state.pointer, state.camera);
+  var placed = (state.placed || []).filter(function (p) { return p && p.mesh && p.mesh.visible !== false; });
+  var best = null, hits = state.raycaster.intersectObjects(placed.map(function (p) { return p.mesh; }), false);
+  if (hits.length && hits[0].faceIndex != null) {
+    var h = hits[0], q = placed.find(function (p) { return p.mesh === h.object; }), c = q && NSO_bridgeIndexFor(q);
+    if (c) best = { d: h.distance, p: [h.point.x, -h.point.z, h.point.y], n: [c.T.nrm[h.faceIndex * 3], c.T.nrm[h.faceIndex * 3 + 1], c.T.nrm[h.faceIndex * 3 + 2]], sourceId: q.sourceId };
+  }
+  if (state.plateMesh && state.raycaster.intersectObject(state.plateMesh, false).length) {
+    var w = new THREE.Vector3();
+    if (state.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -CONNECT_REST_Z), w)) {
+      var d = state.camera.position.distanceTo(w);
+      if (!best || d < best.d) best = { d: d, p: [w.x, -w.z, w.y], n: [0, 0, 1], sourceId: null };
+    }
+  }
+  return best;
+}
+
+// A stroke point from the pointer, and the ones between it and the last (a ray every few px, so a wall is not stepped over).
+function NSO_connectStrokeAdd(ev) {
+  var S = NSO_connectUI().stroke;
+  if (!S) return;
+  var from = S.last, to = { x: ev.clientX, y: ev.clientY }, steps = from ? Math.min(16, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y) / CONNECT_STROKE_PX)) : 1;
+  for (var i = 1; i <= steps; i++) {
+    var t = from ? i / steps : 1, smp = NSO_connectSample({ clientX: from ? from.x + (to.x - from.x) * t : to.x, clientY: from ? from.y + (to.y - from.y) * t : to.y });
+    if (smp) S.raw.push(smp);
+  }
+  S.last = to;
+  S.dirty = true;
+}
+
+// The stroke's pieces, in the order the plan indexes them, and its points in that index.
+function NSO_connectStrokePlan(S) {
+  var placed = (state.placed || []).filter(function (p) { return p && p.mesh && p.mesh.visible !== false; });
+  var ids = placed.map(function (p) { return p.sourceId; });
+  var pieces = placed.map(NSO_connectSoupFor);
+  var o = NSO_connectOpts();
+  o.plateZ = CONNECT_REST_Z;
+  var p;
+  try {
+    p = NSO_Connect.drawPlan(pieces, S.raw.map(function (q) { return { p: q.p, n: q.n, piece: q.sourceId == null ? -1 : ids.indexOf(q.sourceId) }; }), o);
+  } catch (err) { p = { ok: false, reason: (err && err.message) || String(err) }; }
+  if (p.ok) {
+    p.ids = p.welds.map(function (i) { return ids[i]; });
+    p.keys = p.welds.map(function (i) { return NSO_bridgePoseKey(placed[i]); });
+  }
+  return p;
+}
+
+function NSO_connectDrawStroke(S) {
+  var C = NSO_connectUI();
+  NSO_bridgeDispose(C.line); C.line = null;
+  if (!S || S.raw.length < 2 || typeof THREE === 'undefined' || !state.scene) return;
+  var geo = new THREE.BufferGeometry().setFromPoints(S.raw.map(function (q) { return NSO_bridgeUpToDisplay(q.p); }));
+  C.line = NSO_bridgeOverlay(new THREE.Line(geo, new THREE.LineBasicMaterial({ color: CONNECT_PICK_COLOR, transparent: true, depthTest: false, depthWrite: false })), CONNECT_RENDER_ORDER + 2);
+  C.line.name = 'connectStroke';
+  nsoHelpers.attach(state.scene, C.line, 'connect');
+}
+
+// Per frame while a stroke is down: the line, and the ghost of what it would make.
+function NSO_connectStrokeFrame() {
+  var C = NSO_connectUI(), S = C.stroke;
+  if (!S) return;
+  S.raf = 0;
+  if (!S.dirty) return;
+  S.dirty = false;
+  NSO_connectDrawStroke(S);
+  var p = NSO_connectStrokePlan(S);
+  S.plan = p;
+  if (p.ok) { NSO_connectSetGhost(p.web); NSO_connectReadout(p.text + ' · release builds it', false); }
+  else { NSO_connectSetGhost(null); NSO_connectReadout('Draw: ' + p.reason, false); }
+}
+
+function NSO_connectStrokeCancel(why) {
+  var C = NSO_connectUI(), S = C.stroke;
+  if (S && S.raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(S.raf);
+  C.stroke = null;
+  NSO_connectSetGhost(null); NSO_connectDrawStroke(null);
+  if (why) NSO_connectReadout(why, false);
 }
 
 function NSO_connectSetGhost(soupUp) {
@@ -267,13 +374,14 @@ function NSO_connectOpen() {
   if (panel) panel.hidden = false;
   if (btn) { btn.setAttribute('aria-expanded', 'true'); btn.classList.add('is-on'); }
   NSO_connectClearPicks();
-  NSO_connectReadout(NSO_connectReady() ? NSO_CONNECT_HINT : 'Connect needs Bridge\'s pick (nso_bridge.js, app-bridge.js) and nso_connect.js loaded.', !NSO_connectReady());
+  NSO_connectReadout(NSO_connectReady() ? (NSO_connectDrawOn() ? NSO_CONNECT_DRAW_HINT : NSO_CONNECT_HINT) : 'Connect needs Bridge\'s pick (nso_bridge.js, app-bridge.js) and nso_connect.js loaded.', !NSO_connectReady());
   NSO_connectTick();
 }
 
 function NSO_connectClose() {
   var C = NSO_connectUI(), panel = NSO_connectEl('connect-panel'), btn = NSO_connectEl('btn-connect');
   C.open = false; C.hover = null; C.soups = {};
+  NSO_connectStrokeCancel();
   if (panel) panel.hidden = true;
   if (btn) { btn.setAttribute('aria-expanded', 'false'); btn.classList.remove('is-on'); }
   NSO_connectClearPicks();
@@ -298,6 +406,7 @@ if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('connect', {
 // Cancel: drop the picks; with none, close the card.
 function NSO_connectCancel() {
   var C = NSO_connectUI();
+  if (C.stroke) { NSO_connectStrokeCancel('Stroke cancelled - nothing built. ' + NSO_CONNECT_DRAW_HINT); return; }
   if (C.a || C.b || C.plan) { NSO_connectClearPicks(); NSO_connectReadout(NSO_CONNECT_HINT, false); }
   else NSO_connectClose();
 }
@@ -326,8 +435,11 @@ function NSO_connectTick() {
 
 function NSO_connectSay(text, bad) { if (typeof setStatus === 'function') setStatus(text, bad); }
 
-function NSO_connectSet() {
-  var C = NSO_connectUI(), p = C.plan;
+function NSO_connectSet() { return NSO_connectRun(NSO_connectUI().plan); }
+
+// Build a plan: Set's, or a finished stroke's.
+function NSO_connectRun(p) {
+  var C = NSO_connectUI();
   if (!p || !p.ok) return Promise.resolve({ ok: false, reason: p ? p.reason : 'nothing to connect - pick two anchors' });
   if (C.busy) return Promise.resolve({ ok: false, reason: 'busy' });
   var weld = p.result === 'weld';
@@ -336,7 +448,7 @@ function NSO_connectSet() {
     NSO_connectClearPicks();
     return Promise.resolve({ ok: false, reason: 'a picked piece is no longer on the plate' });
   }
-  var want = p.ids.length === 2 ? p.keys : [p.keys[0]];
+  var want = p.drawn ? p.keys : (p.ids.length === 2 ? p.keys : [p.keys[0]]);
   if (placed.some(function (q, i) { return NSO_bridgePoseKey(q) !== want[i]; })) {
     NSO_connectClearPicks();
     NSO_connectReadout('The pieces moved - pick again.', true);
@@ -368,7 +480,9 @@ function NSO_connectSet() {
       NSO_connectSyncRows();
       return c;
     }
-    var msg = weld
+    var msg = p.drawn
+      ? 'Connect done - ' + p.text + '; ' + (r.soup.length / 9) + ' faces. One Undo ' + (weld ? 'puts the piece' + (models.length === 2 ? 's' : '') + ' back.' : 'takes it off the plate.')
+      : weld
       ? 'Connect done - ' + p.text + '; ' + (models.length === 2 ? 'two pieces are one' : 'the piece is closed on itself') + ', ' + (r.soup.length / 9) +
         ' faces. One Undo puts ' + (models.length === 2 ? 'both back.' : 'it back.')
       : 'Connect done - ' + p.text + '; ' + (r.soup.length / 9) + ' faces. One Undo takes it off the plate.';
@@ -377,7 +491,7 @@ function NSO_connectSet() {
     // was hovered may be a piece the weld has just consumed.
     C.hover = null; C.soups = {};
     NSO_connectClearPicks();
-    NSO_connectReadout('Connected. ' + NSO_CONNECT_HINT, false);
+    NSO_connectReadout('Connected. ' + (p.drawn ? NSO_CONNECT_DRAW_HINT : NSO_CONNECT_HINT), false);
     r.newId = c.id;
     return r;
   }).catch(function (err) {
@@ -490,7 +604,13 @@ if (typeof document !== 'undefined') {
     // that is just moving: an orbit drag (a button down) is left alone.
     function onMove(ev) {
       var C = NSO_connectUI();
-      if (!C.open || C.busy || ev.buttons || !onCanvas(ev)) return;
+      if (C.stroke) {                                        // a stroke is down: this is its drag
+        if (!(ev.buttons & 1)) { onUp(ev); return; }          // (the button came up unseen)
+        NSO_connectStrokeAdd(ev);
+        if (!C.stroke.raf && typeof requestAnimationFrame === 'function') C.stroke.raf = requestAnimationFrame(NSO_connectStrokeFrame);
+        return;
+      }
+      if (!C.open || C.busy || ev.buttons || !onCanvas(ev) || NSO_connectDrawOn()) return;
       var sel = target(ev);
       C.hover = sel;
       var held = C.a && !C.b ? C.a : (C.b && !C.a ? C.b : null);
@@ -513,6 +633,14 @@ if (typeof document !== 'undefined') {
       var C = NSO_connectUI();
       C.press = null;
       if (!C.open || C.busy || ev.button !== 0 || !onCanvas(ev)) return;
+      if (NSO_connectDrawOn()) {
+        // A press that finds the plate or a piece starts a stroke; one that finds nothing is an orbit as ever.
+        if (!NSO_connectSample(ev)) return;
+        C.stroke = { raw: [], last: null, dirty: false, raf: 0, plan: null };
+        NSO_connectStrokeAdd(ev);
+        ev.stopImmediatePropagation(); ev.preventDefault();
+        return;
+      }
       var sel = target(ev);
       C.press = { x: ev.clientX, y: ev.clientY, sel: sel, shift: !!ev.shiftKey };
       if (sel) { ev.stopImmediatePropagation(); ev.preventDefault(); }
@@ -520,6 +648,18 @@ if (typeof document !== 'undefined') {
     function onUp(ev) {
       var C = NSO_connectUI(), pr = C.press;
       C.press = null;
+      if (C.stroke) {                                        // the release: build the stroke
+        var S = C.stroke;
+        NSO_connectStrokeAdd(ev);
+        if (S.raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(S.raf);
+        C.stroke = null;
+        ev.stopImmediatePropagation();
+        NSO_connectSetGhost(null); NSO_connectDrawStroke(null);
+        var p = NSO_connectStrokePlan(S);
+        if (!p.ok) { NSO_connectReadout('Draw: ' + p.reason, true); NSO_connectSay('Draw: ' + p.reason, true); return; }
+        C.drawing = NSO_connectRun(p);
+        return;
+      }
       if (!C.open || !pr || C.busy || ev.button !== 0) return;
       if (Math.hypot(ev.clientX - pr.x, ev.clientY - pr.y) > CONNECT_CLICK_PX) return;     // an orbit drag, not a click
       if (!onCanvas(ev)) return;
@@ -536,6 +676,7 @@ if (typeof document !== 'undefined') {
       var C = NSO_connectUI();
       if (!C.open || ev.key !== 'Escape') return;
       NSO_connectCancel();
+      if (ev.stopImmediatePropagation) ev.stopImmediatePropagation();
     }
     function wire() {
       var btn = NSO_connectEl('btn-connect');
@@ -544,6 +685,13 @@ if (typeof document !== 'undefined') {
       btn.addEventListener('click', function () { if (NSO_connectUI().open) NSO_connectClose(); else NSO_connectOpen(); });
       var go = NSO_connectEl('btn-connect-go'), cancel = NSO_connectEl('btn-connect-cancel');
       if (go) go.addEventListener('click', function () { NSO_connectSet(); });
+      var draw = NSO_connectEl('chk-connect-draw');
+      if (draw) draw.addEventListener('change', function () {
+        var C = NSO_connectUI();
+        NSO_connectStrokeCancel(); C.hover = null;
+        NSO_connectClearPicks();
+        NSO_connectReadout(draw.checked ? NSO_CONNECT_DRAW_HINT : NSO_CONNECT_HINT, false);
+      });
       if (cancel) cancel.addEventListener('click', NSO_connectCancel);
       var redraw = function () { var C = NSO_connectUI(); if (C.a && C.b) NSO_connectPreview(); else NSO_connectSyncRows(); };
       // The ghost follows the fields as they change: a typed value after a short
