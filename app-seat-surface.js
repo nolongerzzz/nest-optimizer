@@ -198,7 +198,7 @@
     var idA = target && target.sourceId;
     var idB = state.joinPartnerId;
     if (!state.joinSession || idA == null || idB == null) {
-      say('Start Join, pick A and B, then click the point on A where B should sit', true);
+      say('Open JOIN, pick A and B, then click the point on A where B should sit', true);
       return { ok: false, reason: 'no join session' };
     }
     if (idA === idB) {

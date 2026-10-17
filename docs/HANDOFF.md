@@ -628,8 +628,11 @@ Branch `claude/no-gate-cards`, off `claude-wip`. UI only, no engine.
   tearing it down there would break Join -> Seat. (2) opening Join clears the
   selection, because `startJoinSession` always did.
 - **Ids:** every id inside the two real cards stays; `#btn-connect` and
-  `#btn-join-start` are the only ids removed. Refusals still say "Start Join, ..."
-  (readouts unchanged by request) - the words now name a button that is not there.
+  `#btn-join-start` are the only ids removed. The eight refusals that said
+  "Start Join, ..." now say "Open JOIN, ..." (app-join.js, app-center-lock.js,
+  app-join-triple.js, app-seat-surface.js); `center_lock` and `flip_port` match
+  the new words. Left as it was: the `#join-step` text '1. Start Join' in
+  `updateJoinUI`, which has no element in the page.
 - **Gate:** `page:manifest` section "column cards" - no `.vp-col-menu` whose body,
   outside the panel its one button points at, is that one button.
 - **Tests:** `tools/nso_join_card.js` (`openJoin(page)`: column button, restarting
@@ -649,7 +652,7 @@ Branch `claude/no-gate-cards`, off `claude-wip`. UI only, no engine.
   too), plus every test edited above and `topbar_accordion`; not the full suite.
   `scene_roundtrip` failed once under six-way parallel load ("plate lock came
   back", a 400 ms wait) and passes alone.
-- **Tags:** `app-connect.js`, `app-join.js` -> nogate1.
+- **Tags:** `app-connect.js` -> nogate1; `app-join.js`, `app-center-lock.js`, `app-join-triple.js`, `app-seat-surface.js` -> nogate2.
 
 ## Mold - a two-piece silicone mold from a piece (2026-10-16)
 Branch `claude/mold`, off `claude-wip`, independent of the open branches. Full

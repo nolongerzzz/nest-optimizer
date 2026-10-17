@@ -245,7 +245,7 @@ withApp(async (page, logs) => {
   const st2 = await statusText(page);
   console.log('   status: ' + JSON.stringify(st2));
   check('no B picked is still named, not thrown',
-    /Start Join, pick hull A and tunnel B/.test(st2), st2);
+    /Open JOIN, pick hull A and tunnel B/.test(st2), st2);
 
   console.log('\n=== 8. nothing else on the page broke ===');
   const errs = logs.filter(l => l.startsWith('[pageerror]'));

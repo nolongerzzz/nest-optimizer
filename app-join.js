@@ -2210,7 +2210,7 @@ function centerJoinAxis(axis) {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Start Join, Pick A and B, then Center', true);
+    setStatus('Open JOIN, Pick A and B, then Center', true);
     return;
   }
   const placedA = state.placed.find(function (q) { return q && q.sourceId === idA && q.mesh; });
@@ -2251,7 +2251,7 @@ function flipPortOnPunch() {
   const bit = placedB && placedB.mesh;
   const hull = placedA && placedA.mesh;
   if (!bit || !hull) {
-    setStatus('Start Join, pick hull A and tunnel B, then Flip port', true);
+    setStatus('Open JOIN, pick hull A and tunnel B, then Flip port', true);
     return;
   }
   pushUndo(snapshotPlacedPose(state.placed.indexOf(placedB)));
@@ -2348,7 +2348,7 @@ function seatFlushBitToHull() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Start Join, A = hull, B = bit, then Seat flush', true);
+    setStatus('Open JOIN, A = hull, B = bit, then Seat flush', true);
     return;
   }
   const placedA = state.placed.find(function (p) { return p && p.sourceId === idA && p.mesh; });
@@ -2386,7 +2386,7 @@ function seatSupportBitToHull() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Start Join, A = hull, B = bit, then Seat (support)', true);
+    setStatus('Open JOIN, A = hull, B = bit, then Seat (support)', true);
     return;
   }
   const placedA = state.placed.find(function (p) { return p && p.sourceId === idA && p.mesh; });
@@ -2767,7 +2767,7 @@ async function joinSelectedModels() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Start Join, Pick A, Pick B, then Complete Join', true);
+    setStatus('Open JOIN, Pick A, Pick B, then Complete Join', true);
     return;
   }
   const modelA = state.models.find(x => x.id === idA);

@@ -402,7 +402,7 @@ async function main(page) {
     return { ok: ok, status: document.getElementById('status').textContent };
   });
   check('run() with no pair refuses and says so',
-    noPair.ok === false && /Start Join/.test(noPair.status), noPair.status);
+    noPair.ok === false && /Open JOIN/.test(noPair.status), noPair.status);
 }
 
 withApp(async (page, logs) => {
