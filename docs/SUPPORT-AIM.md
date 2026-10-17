@@ -135,28 +135,97 @@ solid material and calls a fully propped overhang unsupported.
   artefact — one sliver on a curved flank that tipped past the threshold — not a
   region worth a strut.
 
-### The vertical-ray grid
+### The spatial index
+
+Every question this module asks about a piece used to walk all of its
+triangles: a ray (`rayTri` on each), the nearest point (`closestOnTri` on each),
+and "is this point inside?" (a winding-number term on each). One ray from every
+triangle of `tape_on-edge-single-B101_rounded_v8_FINAL.stl` (32,862 triangles)
+took **169 s** that way. The grid that first fixed it (below) only covered
+straight-down rays; the planner asks thousands of every other kind, and on
+`library/v9_mirror_factory.stl` (49,026 triangles, a 377-point underside) the
+walk cost **478 s** in a plan, most of it the inside test.
+
+So a piece gets **one index**, a BVH over its triangles (a binned
+surface-area split, four triangles to a leaf), built the first time the soup is
+asked about and cached on the soup object (a `WeakMap`). `nearestHit`,
+`lineBlockedAt`, `closestOnSoup`, `lineInsideAt` and the straight-down variant
+all go through it; the planner (`nso_support_gridpack.js`'s probe) casts through
+the same calls. A soup under 16 triangles is walked: it is cheaper than the
+lookup. A soup is read as immutable once asked about; the next ask re-checks its
+length and 48 sampled values, and a plan's entry points (`plan`, `nearestBase`)
+read every value once.
+
+**The index changes no answer.** It only narrows which triangles a question is
+put to; each one is then asked with the routine that was always used.
+
+- *Rays.* The boxes are padded past `rayTri`'s own 1e-9 tolerance, so no hit
+  the walk reports can lie outside the boxes the ray enters. Results are
+  identical to the bit (`Object.is`), on axis-aligned, vertical, oblique and
+  multi-soup rays.
+- *Straight down.* The footprint rule of the grid it replaced (a triangle is
+  asked only if (x, y) lies in its XY bounding box) is applied exactly, per
+  triangle: `rayTri` is inclusive by 1e-9, so without it a ray a rounding outside
+  a footprint would count where the grid's did not.
+- *Nearest point.* Same triangle's point, same distance; an exact tie goes to the
+  lowest triangle number, as the walk's strict `<` kept it.
+- *Inside* (`lineInsideAt`). The test is "is any face nearer than 1 µm (then
+  the point is ON the surface, neither inside nor out), else is the generalised
+  winding number at least a half". Both are comparisons, so both are answered
+  without summing everything:
+  1. *by crossings.* The soup is closed by a fan, one triangle from a point
+     inside the piece to each boundary edge that does not cancel (an edge `a→b`
+     in one triangle and `b→a` in another cancel). Soup + fan is a closed cycle,
+     whose winding number is the integer count of signed crossings of any ray; so
+     the soup's own is that count minus the fan's, which is a few exact terms.
+     One ray traversal. The clamp bar's fan has 0 triangles (its seams' odd edges
+     balance); the other fixtures' run to 133. A ray within 1e-7 of an edge or
+     along a face is not trusted and the next of three directions is tried; a
+     fan over 160 triangles (a soup open in earnest) is not closed.
+  2. *by a bound.* Else the far field is summed in bulk, node by node, with a
+     rigorous Taylor remainder (`3 A r² / ρ⁴`: the third derivative of `1/|y|` is
+     at most `6/|y|⁴`), largest bound first, until the sum is further from the
+     threshold than all bounds together.
+  3. *by the walk.* Else `windingAt`, as before.
+
+  Each answer is only taken when it is clear of the threshold by more than its
+  own error, so it is the answer the full sum gives.
+
+**Measured** (Node, the files run in the main context, as a page runs them; the
+same plans in a `vm` context, the way the suites load the files, are 4.2 s for
+the wedge and 4.4 s → 1.0 s for the tunnel block, because every global in a
+sandbox is a slow lookup; the wedge's walk never finished there in 43 minutes):
+
+| | walk | index |
+|---|---|---|
+| `planTree`, the clamp bar's 377-point underside (49,026 triangles) | 478 s | 1.3 s |
+| `planTree`, tunnel block (21 points, 64 triangles) | 0.8 s | 0.27 s |
+| `planTree`, tilted box 30° (44 points, 12 triangles) | 0.04 s | 0.05 s (under the index floor: unchanged) |
+
+(Every plan is the same JSON, byte for byte; `support:index` pins the wedge's by
+hash and holds the small ones to their walked twins.) The hot loops also read
+`mSqrt`, `mAbs`, `mAtan2` and friends from locals: in a `vm` context every
+`Math.sqrt` is a global lookup across the sandbox, 6-17x slower than a local,
+and the suites run the files that way.
+
+`support:index` holds every query to its brute-force twin (`_nearestHitBrute`,
+`_closestOnSoupBrute`, `windingAt`, kept for exactly this) on the clamp bar, the
+tape, a geometric-progression mesh, and the 29 open / damaged / repair fixtures
+(holes, flaps, T-junctions, flipped and duplicated shells), and gates the
+wedge's plan under 30 s.
+
+#### The grid this replaced
 
 One ray per flagged face against every triangle is O(n²). A vertical ray can
-only meet a triangle whose XY footprint contains it, so bucketing every triangle
-by that footprint once turns the scan into flagged × (the handful in one cell).
-On `tape_on-edge-single-B101_rounded_v8_FINAL.stl`, 32862 triangles: casting one
-ray from every triangle takes **169 s** brute force and **0.27 s** through the
-grid, and the whole `detectOverhangs` scan of that part lands at **0.13 s**
-(median of five runs).
-
-The suite pins grid against brute force **ray for ray** on four real fixtures
-rather than trusting the index, because one that is merely nearly right reads
-exactly like a correct one until the day it does not. It already caught one: the
-query index was floored without the clamp the bucketing applies, so every ray
-arriving on the mesh's own +x or +y boundary looked in cell `side`, which does
-not exist, and reported a clear line through solid material. On `hinge_pip.stl`
-that was 81 rays out of 1528 — on a symmetric part, a whole face's worth. Over
-all 32862 rays of the tape fixture the two now agree exactly.
-
-Arbitrary-direction rays are left brute force on purpose: base viability casts
-one ray per candidate, so a second index would cost more to build than the scan
-it saved.
+only meet a triangle whose XY footprint contains it, so the first fix bucketed
+every triangle by that footprint: casting one ray from every triangle of the
+tape took 169 s brute force and 0.27 s through the grid, and the whole
+`detectOverhangs` scan of that part landed at 0.13 s. It was pinned against brute
+force ray for ray, and caught one bug: the query index was floored without the
+clamp the bucketing applies, so every ray arriving on the mesh's own +x or +y
+boundary looked in cell `side`, which does not exist, and reported a clear line
+through solid material (81 rays of 1528 on `hinge_pip.stl`). The index has no
+cells to clamp; the pin (`support:test`, section 3) stands.
 
 ### Paint scope: **sub-region**
 

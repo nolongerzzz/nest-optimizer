@@ -273,6 +273,8 @@
      CLEARANCE - one leg, axis and rails, against the piece and occluders.
      ===================================================================== */
   function makeProbe(A, obstacles) {
+    /* Every ray goes through the pieces' spatial indexes (aim's section 0b),
+       straight-down ones through the footprint variant of the same query. */
     var grid = A._buildDownGrid(obstacles);
     /* Nearest blocking hit along a->b (distance from a), or -1. capA / capB:
        how much of each end the RAILS leave out (a tip's own cross-section is
@@ -376,6 +378,10 @@
     var rest = !!opts.restOnModel;
     out.branchTiltDeg = tiltDeg; out.latticeMm = L; out.plateZ = plateZ; out.restOnModel = rest;
     var obstacles = [rawTris].concat(opts.occluders || []);
+    /* One index per piece, built here once for the whole plan (or found, if
+       this soup was planned before and is unchanged: every value is checked,
+       once, so an edit in place cannot leave a stale index behind). */
+    obstacles.forEach(function (soup) { A._indexFor(soup, true); });
     var probe = makeProbe(A, obstacles);
 
     /* ---- refusal: a beacon inside the piece ---- */

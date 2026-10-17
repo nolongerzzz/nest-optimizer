@@ -227,6 +227,16 @@ Fixes the sweep forced, each measured:
 | `tools/nso_support_slice_artifact.js` | `--tree` ported |
 | `tools/nso_curved_branch_probe.js` | historical: it measured the trunk-first planner and no longer runs against `planTree` |
 
+### Support-aim index (what changed, and what was re-pinned)
+
+Nothing was re-pinned: every plan is the same JSON, byte for byte.
+
+| file | change |
+|---|---|
+| `nso_support_aim.js` | one BVH per piece (docs/SUPPORT-AIM.md, "The spatial index"): `nearestHit`, `closestOnSoup`, `lineInsideAt`, `nearestHitDown`, and the inside test by crossings / a bound; `Math` read from locals in the hot loops |
+| `nso_support_gridpack.js` | `plan` builds (or finds) each obstacle's index once, and checks it against the soup; the probe's straight-down rays use the index's footprint variant in place of the XY grid |
+| `support:index` (new) | the index against the walk, bit for bit; the wedge's 377 points under 30 s, to the plan it always planned |
+
 ### Supports-followups (what changed, and what was re-pinned)
 
 | file | change |

@@ -146,6 +146,17 @@
    cannot be honoured rather than a reason to proceed as if there were none.
 
    ---------------------------------------------------------------------------
+   ONE SPATIAL INDEX PER PIECE
+   ---------------------------------------------------------------------------
+   Every ray, nearest-point and inside question below goes through a BVH over
+   the piece's triangles, built once and cached on the soup (section 0b). It
+   changes no answer - the queries are held to their brute-force twins, bit
+   for bit, by tools/nso_support_index_test.js - it only stops each question
+   from walking all of the piece. On a 49,026-triangle piece with 377 support
+   points that is the difference between minutes (478 s, measured) and a few
+   seconds for a plan.
+
+   ---------------------------------------------------------------------------
    API
    ---------------------------------------------------------------------------
    detectOverhangs(rawTris, opts)          -> { ok, regions: [...], beacons, grid, beaconRegions, ... }
@@ -198,6 +209,12 @@
 
   var UP = [0, 0, 1];
 
+  /* The hot loops read these, not Math.sqrt and friends: a global lookup in a
+     vm context (the test harness, and anything else that runs the file in a
+     sandbox) crosses the sandbox every time, and in a ray or winding loop
+     that is the larger part of the cost - measured 6-17x on the winding sum. */
+  var mSqrt = Math.sqrt, mAbs = Math.abs, mMin = Math.min, mMax = Math.max, mAtan2 = Math.atan2, mFloor = Math.floor;
+
   /* ---- plain 3-vectors. Same shapes as nso_carve.js / nso_seat_surface.js,
      so a point crosses between the three modules with no conversion. ---- */
   function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
@@ -207,7 +224,7 @@
   function cross(a, b) {
     return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
   }
-  function len(a) { return Math.sqrt(dot(a, a)); }
+  function len(a) { return mSqrt(dot(a, a)); }
   function unit(a) { var L = len(a); return L > 1e-15 ? mul(a, 1 / L) : null; }
   function finite3(p) {
     return !!p && p.length === 3 && isFinite(p[0]) && isFinite(p[1]) && isFinite(p[2]);
@@ -223,7 +240,7 @@
     var ux = soup[o + 3] - soup[o], uy = soup[o + 4] - soup[o + 1], uz = soup[o + 5] - soup[o + 2];
     var vx = soup[o + 6] - soup[o], vy = soup[o + 7] - soup[o + 1], vz = soup[o + 8] - soup[o + 2];
     var nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
-    var L = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    var L = mSqrt(nx * nx + ny * ny + nz * nz);
     if (!(L > 1e-15)) return null;
     return { n: [nx / L, ny / L, nz / L], area: L / 2 };
   }
@@ -246,7 +263,7 @@
     var e2x = soup[o + 6] - ax, e2y = soup[o + 7] - ay, e2z = soup[o + 8] - az;
     var px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
     var det = e1x * px + e1y * py + e1z * pz;
-    if (Math.abs(det) < 1e-14) return -1;
+    if (mAbs(det) < 1e-14) return -1;
     var inv = 1 / det;
     var tx = ox - ax, ty = oy - ay, tz = oz - az;
     var u = (tx * px + ty * py + tz * pz) * inv;
@@ -259,8 +276,34 @@
   }
 
   /* Nearest hit strictly beyond `tMin` and strictly before `tMax`, over every
-     soup in `soups`. -1 for a clear line. */
+     soup in `soups`. -1 for a clear line. A soup of INDEX_MIN_TRIS triangles
+     or more is asked through its spatial index (section 0b below); a smaller
+     one is walked, which is cheaper than an index it would never earn back.
+     Either way the answer is the same number, bit for bit: the index only
+     decides WHICH triangles rayTri is asked about, never what it answers. */
   function nearestHit(soups, orig, dir, tMin, tMax) {
+    var best = -1;
+    for (var s = 0; s < soups.length; s++) {
+      var soup = soups[s];
+      if (!soup || !soup.length) continue;
+      var ix = indexFor(soup);
+      if (ix) {
+        var hit = bvhRay(ix, soup, orig[0], orig[1], orig[2], dir[0], dir[1], dir[2],
+                         tMin, (best >= 0 && best < tMax) ? best : tMax);
+        if (hit > tMin && hit < tMax && (best < 0 || hit < best)) best = hit;
+        continue;
+      }
+      var n = triCount(soup);
+      for (var t = 0; t < n; t++) {
+        var tt = rayTri(orig[0], orig[1], orig[2], dir[0], dir[1], dir[2], soup, t * 9);
+        if (tt > tMin && tt < tMax && (best < 0 || tt < best)) best = tt;
+      }
+    }
+    return best;
+  }
+
+  /* The walk nearestHit is held to: every triangle of every soup, no index. */
+  function nearestHitBrute(soups, orig, dir, tMin, tMax) {
     var best = -1;
     for (var s = 0; s < soups.length; s++) {
       var soup = soups[s];
@@ -274,99 +317,54 @@
     return best;
   }
 
-  /* A uniform XY bucket grid, for the ONE ray direction this module casts
-     thousands of: straight down. A vertical ray can only ever meet a triangle
-     whose XY footprint contains the ray's (x, y), so bucketing every triangle
-     by that footprint once turns the self-support scan from flagged x tris
-     into flagged x (the handful in one cell). Measured on
-     fixtures/tape_on-edge-single-B101_rounded_v8_FINAL.stl, 32862 triangles:
-     one ray from every triangle takes 169 s brute force and 0.27 s through
-     the grid, and the whole detectOverhangs scan of that part lands at 0.13 s
-     (median of five).
+  /* Straight-down rays, the one direction this module casts thousands of.
+     A vertical ray can only ever meet a triangle whose XY footprint contains
+     the ray's (x, y), so the question is put to those triangles alone: the
+     soup's index finds them (a vertical ray enters only the boxes over its
+     own column), and each one is then checked against its own footprint,
+     exactly, before rayTri is asked. That footprint test is the one the XY
+     bucket grid this replaced applied - same triangles asked, same answer -
+     and it is deliberately the EXACT one: rayTri is inclusive by 1e-9, so
+     nearestHit would count a ray a rounding outside a triangle's footprint
+     as a hit, and the plans were pinned on the footprint's answer.
+     tools/nso_support_aim_test.js holds the two equal ray for ray on real
+     fixtures, because a spatial index that is merely nearly right reads
+     exactly like a correct one until the day it does not.
 
-     Same answer, ray for ray - tools/nso_support_aim_test.js pins that
-     equality on real fixtures rather than trusting it, because a spatial
-     index that is merely nearly right reads exactly like a correct one until
-     the day it does not. It already caught one: see the clamp note in
-     nearestHitDown.
-
-     Arbitrary-direction rays are left brute force on purpose: the base
-     viability check casts one ray per candidate base, so a second index would
-     cost more to build than the scan it saved. */
+     buildDownGrid keeps its name and its place in the API: it now gathers
+     each soup with its index (built once, and shared with every other query
+     on that soup) rather than bucketing the triangles itself. */
   function buildDownGrid(soups) {
-    var tris = [], s, t, n, o, k;
-    for (s = 0; s < soups.length; s++) {
+    var views = [];
+    for (var s = 0; s < soups.length; s++) {
       var soup = soups[s];
       if (!soup || !soup.length) continue;
-      n = triCount(soup);
-      for (t = 0; t < n; t++) {
-        o = t * 9;
-        tris.push({
-          soup: soup, o: o,
-          x0: Math.min(soup[o], soup[o + 3], soup[o + 6]),
-          x1: Math.max(soup[o], soup[o + 3], soup[o + 6]),
-          y0: Math.min(soup[o + 1], soup[o + 4], soup[o + 7]),
-          y1: Math.max(soup[o + 1], soup[o + 4], soup[o + 7])
-        });
-      }
+      views.push({ soup: soup, ix: indexFor(soup) });
     }
-    if (!tris.length) return { cells: null, tris: tris };
-
-    var mnx = Infinity, mxx = -Infinity, mny = Infinity, mxy = -Infinity;
-    for (k = 0; k < tris.length; k++) {
-      if (tris[k].x0 < mnx) mnx = tris[k].x0;
-      if (tris[k].x1 > mxx) mxx = tris[k].x1;
-      if (tris[k].y0 < mny) mny = tris[k].y0;
-      if (tris[k].y1 > mxy) mxy = tris[k].y1;
-    }
-    /* sqrt(N) cells a side puts about one triangle in each, and the cap keeps
-       a 30k-triangle mesh from allocating a quarter of a million cells. */
-    var side = Math.max(1, Math.min(256, Math.round(Math.sqrt(tris.length))));
-    var w = Math.max(mxx - mnx, 1e-6) / side, h = Math.max(mxy - mny, 1e-6) / side;
-    var cells = new Array(side * side);
-    for (k = 0; k < tris.length; k++) {
-      var T = tris[k];
-      var i0 = Math.max(0, Math.min(side - 1, Math.floor((T.x0 - mnx) / w)));
-      var i1 = Math.max(0, Math.min(side - 1, Math.floor((T.x1 - mnx) / w)));
-      var j0 = Math.max(0, Math.min(side - 1, Math.floor((T.y0 - mny) / h)));
-      var j1 = Math.max(0, Math.min(side - 1, Math.floor((T.y1 - mny) / h)));
-      for (var i = i0; i <= i1; i++) for (var j = j0; j <= j1; j++) {
-        var c = j * side + i;
-        if (!cells[c]) cells[c] = [];
-        cells[c].push(T);
-      }
-    }
-    return { cells: cells, side: side, mnx: mnx, mny: mny, w: w, h: h, tris: tris };
+    return { views: views };
   }
 
   /* Nearest hit straight down from (orig), in (tMin, tMax). Same answer as
-     nearestHit(soups, orig, [0,0,-1], tMin, tMax), reached through the grid. */
+     nearestHit(soups, orig, [0,0,-1], tMin, tMax) on every footprint the ray
+     is inside. */
   function nearestHitDown(grid, orig, tMin, tMax) {
-    var list;
-    if (!grid.cells) {
-      list = grid.tris;
-    } else {
-      /* Clamped exactly as the bucketing clamps, and for the same reason: a
-         triangle whose bbox ends ON the grid's own maximum is filed in the
-         last cell, so a ray arriving at that same coordinate has to look
-         there too. Flooring without the clamp sends it to cell `side`, which
-         does not exist, and the ray reports a clear line through solid
-         material. That is not a rounding: it is every ray on the mesh's own
-         +x or +y boundary, which on a symmetric part is a whole face's worth.
-         A point genuinely outside the grid lands in an edge cell and is then
-         rejected by the per-triangle footprint test below, at the cost of one
-         cell's worth of work. */
-      var i = Math.max(0, Math.min(grid.side - 1, Math.floor((orig[0] - grid.mnx) / grid.w)));
-      var j = Math.max(0, Math.min(grid.side - 1, Math.floor((orig[1] - grid.mny) / grid.h)));
-      list = grid.cells[j * grid.side + i];
-      if (!list) return -1;
-    }
     var best = -1;
-    for (var k = 0; k < list.length; k++) {
-      var T = list[k];
-      if (orig[0] < T.x0 || orig[0] > T.x1 || orig[1] < T.y0 || orig[1] > T.y1) continue;
-      var tt = rayTri(orig[0], orig[1], orig[2], 0, 0, -1, T.soup, T.o);
-      if (tt > tMin && tt < tMax && (best < 0 || tt < best)) best = tt;
+    for (var v = 0; v < grid.views.length; v++) {
+      var view = grid.views[v], soup = view.soup;
+      if (view.ix) {
+        var hit = bvhRay(view.ix, soup, orig[0], orig[1], orig[2], 0, 0, -1,
+                         tMin, (best >= 0 && best < tMax) ? best : tMax, true);
+        if (hit > tMin && hit < tMax && (best < 0 || hit < best)) best = hit;
+        continue;
+      }
+      var n = triCount(soup);
+      for (var t = 0; t < n; t++) {
+        var o = t * 9;
+        if (orig[0] < Math.min(soup[o], soup[o + 3], soup[o + 6]) || orig[0] > Math.max(soup[o], soup[o + 3], soup[o + 6]) ||
+            orig[1] < Math.min(soup[o + 1], soup[o + 4], soup[o + 7]) || orig[1] > Math.max(soup[o + 1], soup[o + 4], soup[o + 7])) continue;
+        var tt = rayTri(orig[0], orig[1], orig[2], 0, 0, -1, soup, o);
+        if (tt > tMin && tt < tMax && (best < 0 || tt < best)) best = tt;
+      }
     }
     return best;
   }
@@ -394,7 +392,14 @@
     return add(a, add(mul(ab, vb * den), mul(ac, vc * den)));
   }
 
+  /* The nearest point of `soup` to p, through the soup's index when it has
+     one. Equal distances go to the lowest triangle number either way. */
   function closestOnSoup(p, soup) {
+    var ix = indexFor(soup);
+    return ix ? bvhClosest(ix, soup, p) : closestOnSoupBrute(p, soup);
+  }
+
+  function closestOnSoupBrute(p, soup) {
     var n = triCount(soup), best = null, bestD = Infinity;
     for (var t = 0; t < n; t++) {
       var o = t * 9;
@@ -405,6 +410,15 @@
       if (d < bestD) { bestD = d; best = q; }
     }
     return best ? { point: best, distance: bestD } : null;
+  }
+
+  /* Is any triangle of `soup` nearer to p than tol? closestOnSoup's own
+     distance, asked as a yes/no so the index can stop at the first one. */
+  function withinOfSoup(p, soup, tol) {
+    var ix = indexFor(soup);
+    if (ix) return bvhWithin(ix, soup, p, tol);
+    var near = closestOnSoupBrute(p, soup);
+    return !!near && near.distance < tol;
   }
 
   /* Generalised winding number of `soup` about p: the signed solid angle
@@ -419,19 +433,7 @@
      is no answer. */
   function windingAt(soup, p) {
     var n = triCount(soup), w = 0;
-    for (var t = 0; t < n; t++) {
-      var o = t * 9;
-      var ax = soup[o] - p[0], ay = soup[o + 1] - p[1], az = soup[o + 2] - p[2];
-      var bx = soup[o + 3] - p[0], by = soup[o + 4] - p[1], bz = soup[o + 5] - p[2];
-      var cx = soup[o + 6] - p[0], cy = soup[o + 7] - p[1], cz = soup[o + 8] - p[2];
-      var la = Math.sqrt(ax * ax + ay * ay + az * az);
-      var lb = Math.sqrt(bx * bx + by * by + bz * bz);
-      var lc = Math.sqrt(cx * cx + cy * cy + cz * cz);
-      var det = ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
-      var den = la * lb * lc + (ax * bx + ay * by + az * bz) * lc +
-                (ax * cx + ay * cy + az * cz) * lb + (bx * cx + by * cy + bz * cz) * la;
-      w += 2 * Math.atan2(det, den);
-    }
+    for (var t = 0; t < n; t++) w += windTerm(soup, t * 9, p[0], p[1], p[2]);
     return w / (4 * Math.PI);
   }
 
@@ -447,6 +449,636 @@
       }
     }
     return { min: mn, max: mx };
+  }
+
+  /* =====================================================================
+     0b. THE SPATIAL INDEX - one per piece, built once, asked for everything
+
+     Every question this module asks about a piece used to walk all of its
+     triangles: a ray (rayTri on each), the nearest point (closestOnTri on
+     each, with three arrays allocated apiece), and "is this point inside?"
+     (a winding-number term for each). A support plan asks them by the
+     hundred thousand, and on a 49,026-triangle piece with 377 support points
+     (478 s, measured) the inside test alone was the better part of the run.
+
+     So a piece gets a BVH over its triangles: axis-aligned boxes, a median
+     split on the longest axis of the centroids, four triangles to a leaf.
+     It is built the first time a soup is asked about and cached on the soup
+     OBJECT (a WeakMap, so it goes when the soup does): the same Float32Array
+     handed back in costs nothing, a new one costs one build. A soup shorter
+     than INDEX_MIN_TRIS is not indexed at all - walking twelve triangles
+     beats looking them up.
+
+     THE INDEX CHANGES NO ANSWER. It only narrows which triangles a question
+     is put to; each one is then asked with the very routine that was asked
+     before (rayTri, closestOnTri, the winding term), so a number that comes
+     back is the number that came back before, bit for bit. Where a question
+     is a comparison rather than a number - "is the winding at least a half?"
+     - the index may only skip terms it can PROVE leave the comparison where
+     it was, and falls back to the full sum when it cannot (windingInside).
+     tools/nso_support_index_test.js holds every query to its brute-force
+     twin (the *Brute functions, kept for exactly that) on real pieces, and
+     the planner suites hold the plans to the numbers they were pinned at.
+
+     A SOUP IS READ AS IMMUTABLE once it has been asked about. Its length and
+     a sample of its values are re-checked on every query, which catches a
+     resize and a transform; a plan's entry points (indexFor with verify)
+     check every value once, so an edit in place between two plans cannot
+     leave a stale index behind. An edit in place DURING a plan is not a
+     thing the planner does.
+     ===================================================================== */
+  var INDEX_MIN_TRIS = 16;
+  /* Below this the far field never pays: every term is near, and the ladder of
+     tries costs more than the sum it was meant to save. */
+  var WIND_MIN_TRIS = 512;
+  var LEAF_TRIS = 4;
+  var SAH_DEPTH = 40;
+  var indexCache = typeof WeakMap === 'function' ? new WeakMap() : null;
+  var STACK = new Int32Array(256);
+
+  /* A cheap fingerprint of a soup: its length and 48 values spread along it. */
+  function sampleOf(soup) {
+    var L = soup.length, step = Math.max(1, Math.floor(L / 48)), h = 0, k = 1;
+    for (var i = 0; i < L; i += step, k++) h += soup[i] * k;
+    return h + soup[L - 1] * 7919;
+  }
+  /* A fingerprint of every value. One pass; used once per plan, not per query. */
+  function fullOf(soup) {
+    var a = 0, b = 0;
+    for (var i = 0, L = soup.length; i < L; i++) { var v = soup[i]; a += v; b += v * ((i % 1021) + 1); }
+    return a + '|' + b;
+  }
+
+  function buildBVH(soup) {
+    var n = triCount(soup), i, k;
+    var tb = new Float64Array(n * 6), tc = new Float64Array(n * 3);
+    for (i = 0; i < n; i++) {
+      var o = i * 9;
+      for (k = 0; k < 3; k++) {
+        var a = soup[o + k], b = soup[o + 3 + k], c = soup[o + 6 + k];
+        if (!(isFinite(a) && isFinite(b) && isFinite(c))) return null;
+        var lo = mMin(a, b, c), hi = mMax(a, b, c);
+        tb[i * 6 + k] = lo; tb[i * 6 + 3 + k] = hi; tc[i * 3 + k] = (lo + hi) * 0.5;
+      }
+    }
+    var order = new Int32Array(n);
+    for (i = 0; i < n; i++) order[i] = i;
+    var cap = 2 * n + 1;
+    var box = new Float64Array(cap * 6), left = new Int32Array(cap), right = new Int32Array(cap);
+    var start = new Int32Array(cap), count = new Int32Array(cap);
+    var nodes = 0;
+    var BINS = 12, binN = new Int32Array(BINS), binLo = new Float64Array(BINS * 3), binHi = new Float64Array(BINS * 3);
+    var leftCost = new Float64Array(BINS), leftN = new Int32Array(BINS);
+    function make(s, e, dep) {
+      var id = nodes++;
+      start[id] = s; count[id] = e - s;
+      var b0 = id * 6;
+      if (e - s <= LEAF_TRIS) {
+        left[id] = -1; right[id] = -1;
+        for (k = 0; k < 3; k++) { box[b0 + k] = Infinity; box[b0 + 3 + k] = -Infinity; }
+        for (var q = s; q < e; q++) {
+          var t = order[q];
+          for (k = 0; k < 3; k++) {
+            if (tb[t * 6 + k] < box[b0 + k]) box[b0 + k] = tb[t * 6 + k];
+            if (tb[t * 6 + 3 + k] > box[b0 + 3 + k]) box[b0 + 3 + k] = tb[t * 6 + 3 + k];
+          }
+        }
+        return id;
+      }
+      var cmn = [Infinity, Infinity, Infinity], cmx = [-Infinity, -Infinity, -Infinity];
+      for (var r = s; r < e; r++) {
+        var tt = order[r];
+        for (k = 0; k < 3; k++) {
+          var cv = tc[tt * 3 + k];
+          if (cv < cmn[k]) cmn[k] = cv;
+          if (cv > cmx[k]) cmx[k] = cv;
+        }
+      }
+      /* The split: a binned surface-area heuristic over the three axes (the
+         plane that makes the cheapest pair of boxes to be tested), and the
+         median of the longest axis when no plane separates anything. */
+      var bestCost = Infinity, bestAx = -1, bestBin = -1, ax, bi;
+      /* (past SAH_DEPTH it is the median alone, so the tree is never deeper than
+         the traversal stack: SAH on a strange mesh can peel one triangle a level) */
+      for (ax = 0; ax < (dep < SAH_DEPTH ? 3 : 0); ax++) {
+        var ext = cmx[ax] - cmn[ax];
+        if (!(ext > 0)) continue;
+        for (bi = 0; bi < BINS; bi++) {
+          binN[bi] = 0;
+          for (k = 0; k < 3; k++) { binLo[bi * 3 + k] = Infinity; binHi[bi * 3 + k] = -Infinity; }
+        }
+        for (r = s; r < e; r++) {
+          tt = order[r];
+          bi = mMin(BINS - 1, mFloor((tc[tt * 3 + ax] - cmn[ax]) / ext * BINS));
+          binN[bi]++;
+          for (k = 0; k < 3; k++) {
+            if (tb[tt * 6 + k] < binLo[bi * 3 + k]) binLo[bi * 3 + k] = tb[tt * 6 + k];
+            if (tb[tt * 6 + 3 + k] > binHi[bi * 3 + k]) binHi[bi * 3 + k] = tb[tt * 6 + 3 + k];
+          }
+        }
+        /* area of the boxes of bins [0..i] and [i+1..], swept */
+        var cnt = 0, lx0 = Infinity, ly0 = Infinity, lz0 = Infinity, lx1 = -Infinity, ly1 = -Infinity, lz1 = -Infinity;
+        for (bi = 0; bi < BINS - 1; bi++) {
+          if (binN[bi]) {
+            cnt += binN[bi];
+            lx0 = mMin(lx0, binLo[bi * 3]); ly0 = mMin(ly0, binLo[bi * 3 + 1]); lz0 = mMin(lz0, binLo[bi * 3 + 2]);
+            lx1 = mMax(lx1, binHi[bi * 3]); ly1 = mMax(ly1, binHi[bi * 3 + 1]); lz1 = mMax(lz1, binHi[bi * 3 + 2]);
+          }
+          leftCost[bi] = cnt ? cnt * ((lx1 - lx0) * (ly1 - ly0) + (ly1 - ly0) * (lz1 - lz0) + (lz1 - lz0) * (lx1 - lx0)) : 0;
+          leftN[bi] = cnt;
+        }
+        cnt = 0; lx0 = ly0 = lz0 = Infinity; lx1 = ly1 = lz1 = -Infinity;
+        for (bi = BINS - 1; bi > 0; bi--) {
+          if (binN[bi]) {
+            cnt += binN[bi];
+            lx0 = mMin(lx0, binLo[bi * 3]); ly0 = mMin(ly0, binLo[bi * 3 + 1]); lz0 = mMin(lz0, binLo[bi * 3 + 2]);
+            lx1 = mMax(lx1, binHi[bi * 3]); ly1 = mMax(ly1, binHi[bi * 3 + 1]); lz1 = mMax(lz1, binHi[bi * 3 + 2]);
+          }
+          if (leftN[bi - 1] > 0 && cnt > 0) {
+            var cost = leftCost[bi - 1] + cnt * ((lx1 - lx0) * (ly1 - ly0) + (ly1 - ly0) * (lz1 - lz0) + (lz1 - lz0) * (lx1 - lx0));
+            if (cost < bestCost) { bestCost = cost; bestAx = ax; bestBin = bi - 1; }
+          }
+        }
+      }
+      var mid = -1;
+      if (bestAx >= 0) {
+        var ex = cmx[bestAx] - cmn[bestAx], i0 = s, i1 = e - 1;
+        while (i0 <= i1) {
+          var tl = order[i0];
+          if (mMin(BINS - 1, mFloor((tc[tl * 3 + bestAx] - cmn[bestAx]) / ex * BINS)) <= bestBin) i0++;
+          else { order[i0] = order[i1]; order[i1] = tl; i1--; }
+        }
+        mid = i0;
+        if (mid === s || mid === e) mid = -1;
+      }
+      if (mid < 0) {
+        ax = 0;
+        if (cmx[1] - cmn[1] > cmx[ax] - cmn[ax]) ax = 1;
+        if (cmx[2] - cmn[2] > cmx[ax] - cmn[ax]) ax = 2;
+        if (cmx[ax] > cmn[ax]) {
+          order.subarray(s, e).sort(function (p, q2) { return (tc[p * 3 + ax] - tc[q2 * 3 + ax]) || (p - q2); });
+        }
+        mid = (s + e) >> 1;
+      }
+      var l = make(s, mid, dep + 1), rr = make(mid, e, dep + 1);
+      left[id] = l; right[id] = rr;
+      for (k = 0; k < 3; k++) {
+        box[b0 + k] = mMin(box[l * 6 + k], box[rr * 6 + k]);
+        box[b0 + 3 + k] = mMax(box[l * 6 + 3 + k], box[rr * 6 + 3 + k]);
+      }
+      return id;
+    }
+    make(0, n, 0);
+    /* Pad every box. rayTri accepts a hit up to 1e-9 of an edge outside its
+       triangle, so a box that is exact would be able to miss a hit the walk
+       reports; the pad is two orders over that at plate scale. */
+    var span = 0;
+    for (k = 0; k < 3; k++) span = mMax(span, box[3 + k] - box[k]);
+    var pad = 1e-6 + 1e-8 * span;
+    for (i = 0; i < nodes; i++) for (k = 0; k < 3; k++) { box[i * 6 + k] -= pad; box[i * 6 + 3 + k] += pad; }
+    return { n: n, len: soup.length, sample: sampleOf(soup), full: fullOf(soup), nodes: nodes,
+             box: box, left: left, right: right, start: start, count: count, order: order, tb: tb, wind: null, cross: undefined };
+  }
+
+  /* The soup's index, or null for a soup too small (or too broken - a
+     non-finite coordinate - to index). `verify` reads every value instead of
+     a sample, once, and rebuilds if the soup changed under its index. */
+  function indexFor(soup, verify) {
+    if (!indexCache || !soup || soup.length < INDEX_MIN_TRIS * 9) return null;
+    var ix = indexCache.get(soup);
+    if (ix === undefined || (ix && (ix.len !== soup.length || ix.sample !== sampleOf(soup)))) ix = undefined;
+    if (ix && verify && ix.full !== fullOf(soup)) ix = undefined;
+    if (ix === undefined) {
+      ix = buildBVH(soup);
+      indexCache.set(soup, ix);
+    }
+    return ix;
+  }
+
+  /* Distance along the ray at which it enters box `b` of the index, within
+     [0, limit]; Infinity when it does not. The origin inside is 0. `ix_` and
+     friends are 1/d per axis, with 1e300 standing for 1/0: a slab the ray
+     runs parallel to then spans (-huge, +huge) when the origin is between its
+     faces and is empty when it is not, with no NaN to catch (the boxes are
+     padded, so an origin ON a face is not a case). */
+  function boxEntry(box, b, ox, oy, oz, ix_, iy_, iz_, limit) {
+    var a = (box[b] - ox) * ix_, c = (box[b + 3] - ox) * ix_;
+    var t0 = a < c ? a : c, t1 = a < c ? c : a;
+    a = (box[b + 1] - oy) * iy_; c = (box[b + 4] - oy) * iy_;
+    if (a > c) { var tmp = a; a = c; c = tmp; }
+    if (a > t0) t0 = a;
+    if (c < t1) t1 = c;
+    a = (box[b + 2] - oz) * iz_; c = (box[b + 5] - oz) * iz_;
+    if (a > c) { tmp = a; a = c; c = tmp; }
+    if (a > t0) t0 = a;
+    if (c < t1) t1 = c;
+    if (t1 > limit) t1 = limit;
+    if (t0 < 0) t0 = 0;
+    return t0 <= t1 ? t0 : Infinity;
+  }
+
+  /* nearestHit for one indexed soup: the nearest rayTri hit in (tMin, tMax),
+     or -1. Only triangles in boxes the ray enters before `tMax` are asked;
+     with `footprint`, only those whose XY bounding box holds the origin (the
+     straight-down variant). */
+  function bvhRay(ix, soup, ox, oy, oz, dx, dy, dz, tMin, tMax, footprint) {
+    var ix_ = mAbs(dx) < 1e-300 ? 1e300 : 1 / dx, iy_ = mAbs(dy) < 1e-300 ? 1e300 : 1 / dy, iz_ = mAbs(dz) < 1e-300 ? 1e300 : 1 / dz;
+    var box = ix.box, left = ix.left, right = ix.right, start = ix.start, count = ix.count, order = ix.order, tb = ix.tb;
+    var best = -1, limit = tMax, sp = 0, node, l, r, el, er;
+    if (boxEntry(box, 0, ox, oy, oz, ix_, iy_, iz_, limit) === Infinity) return -1;
+    STACK[sp++] = 0;
+    while (sp > 0) {
+      node = STACK[--sp];
+      if (left[node] < 0) {
+        var e = start[node] + count[node];
+        for (var q = start[node]; q < e; q++) {
+          var tri = order[q];
+          if (footprint && (ox < tb[tri * 6] || ox > tb[tri * 6 + 3] || oy < tb[tri * 6 + 1] || oy > tb[tri * 6 + 4])) continue;
+          var tt = rayTri(ox, oy, oz, dx, dy, dz, soup, tri * 9);
+          if (tt > tMin && tt < limit) { best = tt; limit = tt; }
+        }
+        continue;
+      }
+      l = left[node]; r = right[node];
+      el = boxEntry(box, l * 6, ox, oy, oz, ix_, iy_, iz_, limit);
+      er = boxEntry(box, r * 6, ox, oy, oz, ix_, iy_, iz_, limit);
+      if (el === Infinity) { if (er !== Infinity) STACK[sp++] = r; }
+      else if (er === Infinity) STACK[sp++] = l;
+      else if (el <= er) { STACK[sp++] = r; STACK[sp++] = l; }
+      else { STACK[sp++] = l; STACK[sp++] = r; }
+    }
+    return best;
+  }
+
+  /* Distance from p to box `b` (0 inside). A lower bound on the distance to
+     any triangle in it - the box is padded, so it is a safe one. */
+  function boxDist(box, b, px, py, pz) {
+    var gx = mMax(box[b] - px, 0, px - box[b + 3]);
+    var gy = mMax(box[b + 1] - py, 0, py - box[b + 4]);
+    var gz = mMax(box[b + 2] - pz, 0, pz - box[b + 5]);
+    return mSqrt(gx * gx + gy * gy + gz * gz);
+  }
+
+  function triVerts(soup, t) {
+    var o = t * 9;
+    return [[soup[o], soup[o + 1], soup[o + 2]], [soup[o + 3], soup[o + 4], soup[o + 5]], [soup[o + 6], soup[o + 7], soup[o + 8]]];
+  }
+
+  /* closestOnSoup for one indexed soup. Ties go to the lowest triangle
+     number, which is who the walk (strict <, ascending) kept. */
+  function bvhClosest(ix, soup, p) {
+    var box = ix.box, left = ix.left, right = ix.right, start = ix.start, count = ix.count, order = ix.order;
+    var best = null, bestD = Infinity, bestT = -1, sp = 0, node, l, r, dl, dr;
+    STACK[sp++] = 0;
+    while (sp > 0) {
+      node = STACK[--sp];
+      if (boxDist(box, node * 6, p[0], p[1], p[2]) > bestD) continue;
+      if (left[node] < 0) {
+        var e = start[node] + count[node];
+        for (var q = start[node]; q < e; q++) {
+          var t = order[q], V = triVerts(soup, t);
+          var pt = closestOnTri(p, V[0], V[1], V[2]);
+          var d = len(sub(pt, p));
+          if (d < bestD || (d === bestD && t < bestT)) { bestD = d; best = pt; bestT = t; }
+        }
+        continue;
+      }
+      l = left[node]; r = right[node];
+      dl = boxDist(box, l * 6, p[0], p[1], p[2]); dr = boxDist(box, r * 6, p[0], p[1], p[2]);
+      if (dl <= dr) { STACK[sp++] = r; STACK[sp++] = l; } else { STACK[sp++] = l; STACK[sp++] = r; }
+    }
+    return best ? { point: best, distance: bestD } : null;
+  }
+
+  /* Is any triangle of this indexed soup closer to p than `tol`, by the very
+     distance closestOnSoup would report? (The first such triangle ends it.) */
+  function bvhWithin(ix, soup, p, tol) {
+    var box = ix.box, left = ix.left, right = ix.right, start = ix.start, count = ix.count, order = ix.order;
+    var sp = 0, node;
+    STACK[sp++] = 0;
+    while (sp > 0) {
+      node = STACK[--sp];
+      if (boxDist(box, node * 6, p[0], p[1], p[2]) >= tol) continue;
+      if (left[node] < 0) {
+        var e = start[node] + count[node];
+        for (var q = start[node]; q < e; q++) {
+          var V = triVerts(soup, order[q]);
+          if (len(sub(closestOnTri(p, V[0], V[1], V[2]), p)) < tol) return true;
+        }
+        continue;
+      }
+      STACK[sp++] = right[node]; STACK[sp++] = left[node];
+    }
+    return false;
+  }
+
+  /* ---- the winding number by crossings -------------------------------
+
+     The generalised winding number of a CLOSED oriented surface is an
+     integer off the surface - the signed number of times any ray from the
+     point crosses it - and a soup that is one clean shell is exactly that.
+     A real piece is nearly so: library/v9_mirror_factory.stl is closed but
+     for a handful of edges at its seams (2 non-manifold, 5 inconsistent). So
+     the soup is closed with a small FAN rather than treated as hopeless:
+
+       the chain of edges that do not cancel (an edge a -> b in one triangle
+       and b -> a in another cancel; what is left is the soup's boundary,
+       a cycle) is closed by one triangle per boundary edge to a fixed point P
+       inside the piece's box. Soup + fan is a closed cycle, so
+
+           w_soup(p) = crossings(soup + fan, any ray from p) - w_fan(p),
+
+       and the fan is a few triangles, summed with windingAt's own term. One
+       ray traversal replaces the sum over every triangle of the piece.
+
+     A ray that passes within CROSS_EPS of an edge or vertex, or along a
+     face, is not trusted: the next of three directions is tried, and after
+     the third the bound-driven sum below takes over (it, in turn, ends in
+     windingAt). A fan of more than CROSS_MAX_FAN triangles - a soup that is
+     open in earnest - is not closed this way at all. The count and the fan
+     are exact integers and a few exact terms; the answer is only taken when
+     it is a clear 1e-6 from the threshold. */
+  var CROSS_EPS = 1e-7;
+  var CROSS_MAX_FAN = 160;
+  var CROSS_DIRS = [[0.41421356, 0.61803399, 0.73205081], [-0.6, 0.30901699, -0.9], [0.1618034, -0.7320508, 0.5522642]]
+    .map(function (v) { var L = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]); return [v[0] / L, v[1] / L, v[2] / L]; });
+
+  /* One triangle against the ray from (px,py,pz) along d: 0 it misses, +1 the
+     ray leaves through its outer face, -1 it enters through it, 2 too close
+     to call. The same Moller-Trumbore arithmetic as rayTri, with the margins
+     rayTri leaves out. */
+  function crossTri(soup, o, px, py, pz, dx, dy, dz) {
+    var ax = soup[o], ay = soup[o + 1], az = soup[o + 2];
+    var e1x = soup[o + 3] - ax, e1y = soup[o + 4] - ay, e1z = soup[o + 5] - az;
+    var e2x = soup[o + 6] - ax, e2y = soup[o + 7] - ay, e2z = soup[o + 8] - az;
+    var qx0 = dy * e2z - dz * e2y, qy0 = dz * e2x - dx * e2z, qz0 = dx * e2y - dy * e2x;
+    var det = e1x * qx0 + e1y * qy0 + e1z * qz0;
+    var tx = px - ax, ty = py - ay, tz = pz - az;
+    var scale = mSqrt((e1x * e1x + e1y * e1y + e1z * e1z) * (e2x * e2x + e2y * e2y + e2z * e2z));
+    if (mAbs(det) <= 1e-10 * scale) {              /* along the face's plane, or no face at all */
+      var nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+      var nl = mSqrt(nx * nx + ny * ny + nz * nz);
+      if (!(nl > 1e-12 * scale)) return 0;
+      return mAbs((nx * tx + ny * ty + nz * tz) / nl) > 1e-6 ? 0 : 2;
+    }
+    var inv = 1 / det;
+    var u = (tx * qx0 + ty * qy0 + tz * qz0) * inv;
+    if (u < -CROSS_EPS || u > 1 + CROSS_EPS) return 0;
+    var qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+    var v = (dx * qx + dy * qy + dz * qz) * inv;
+    if (v < -CROSS_EPS || u + v > 1 + CROSS_EPS) return 0;
+    var tt = (e2x * qx + e2y * qy + e2z * qz) * inv;
+    if (tt < -1e-6) return 0;
+    if (u < CROSS_EPS || v < CROSS_EPS || u + v > 1 - CROSS_EPS || tt < 1e-6) return 2;
+    return det < 0 ? 1 : -1;
+  }
+
+  /* The fan that closes the soup, or false when it would be too big. */
+  function crossPrep(ix, soup) {
+    if (ix.cross !== undefined) return ix.cross;
+    var n = ix.n, vid = new Int32Array(n * 3), ids = new Map(), xyz = [], V = 0, i, k;
+    for (i = 0; i < n * 3; i++) {
+      var key = soup[i * 3] + ',' + soup[i * 3 + 1] + ',' + soup[i * 3 + 2];
+      var id = ids.get(key);
+      if (id === undefined) { id = V++; ids.set(key, id); xyz.push(soup[i * 3], soup[i * 3 + 1], soup[i * 3 + 2]); }
+      vid[i] = id;
+    }
+    var net = new Map();
+    for (i = 0; i < n; i++) {
+      for (k = 0; k < 3; k++) {
+        var a = vid[i * 3 + k], b = vid[i * 3 + (k + 1) % 3];
+        if (a === b) continue;
+        var key2 = a < b ? a * V + b : b * V + a;
+        net.set(key2, (net.get(key2) || 0) + (a < b ? 1 : -1));
+      }
+    }
+    var fan = 0;
+    net.forEach(function (m) { fan += mAbs(m); });
+    if (fan > CROSS_MAX_FAN) { ix.cross = false; return false; }
+    var box = ix.box, P = [(box[0] + box[3]) / 2, (box[1] + box[4]) / 2, (box[2] + box[5]) / 2];
+    var C = new Float64Array(fan * 9), c = 0;
+    net.forEach(function (m, key3) {
+      var lo = Math.floor(key3 / V), hi = key3 - lo * V;
+      /* the net edge runs x -> y; the fan triangle (P, y, x) carries y -> x */
+      var x = m > 0 ? lo : hi, y = m > 0 ? hi : lo;
+      for (var r = 0; r < mAbs(m); r++, c++) {
+        C[c * 9] = P[0]; C[c * 9 + 1] = P[1]; C[c * 9 + 2] = P[2];
+        C[c * 9 + 3] = xyz[y * 3]; C[c * 9 + 4] = xyz[y * 3 + 1]; C[c * 9 + 5] = xyz[y * 3 + 2];
+        C[c * 9 + 6] = xyz[x * 3]; C[c * 9 + 7] = xyz[x * 3 + 1]; C[c * 9 + 8] = xyz[x * 3 + 2];
+      }
+    });
+    ix.cross = { C: C, n: fan };
+    return ix.cross;
+  }
+
+  /* +1 inside (winding at least a half), -1 not, 0 could not say. */
+  function crossWinding(ix, soup, p) {
+    var cr = crossPrep(ix, soup);
+    if (!cr) return 0;
+    var box = ix.box, left = ix.left, right = ix.right, start = ix.start, count = ix.count, order = ix.order;
+    var px = p[0], py = p[1], pz = p[2];
+    for (var di = 0; di < CROSS_DIRS.length; di++) {
+      var d = CROSS_DIRS[di], dx = d[0], dy = d[1], dz = d[2];
+      var ix_ = 1 / dx, iy_ = 1 / dy, iz_ = 1 / dz, X = 0, bad = false, sp = 0, node, l, r, q, c;
+      if (boxEntry(box, 0, px, py, pz, ix_, iy_, iz_, Infinity) !== Infinity) STACK[sp++] = 0;
+      while (sp > 0 && !bad) {
+        node = STACK[--sp];
+        if (left[node] < 0) {
+          for (q = start[node], c = q + count[node]; q < c; q++) {
+            var hit = crossTri(soup, order[q] * 9, px, py, pz, dx, dy, dz);
+            if (hit === 2) { bad = true; break; }
+            X += hit;
+          }
+          continue;
+        }
+        l = left[node]; r = right[node];
+        if (boxEntry(box, l * 6, px, py, pz, ix_, iy_, iz_, Infinity) !== Infinity) STACK[sp++] = l;
+        if (boxEntry(box, r * 6, px, py, pz, ix_, iy_, iz_, Infinity) !== Infinity) STACK[sp++] = r;
+      }
+      if (bad) continue;
+      var fc = 0;
+      for (var k = 0; k < cr.n; k++) {
+        var h2 = crossTri(cr.C, k * 9, px, py, pz, dx, dy, dz);
+        if (h2 === 2) { bad = true; break; }
+        X += h2;
+        fc += windTerm(cr.C, k * 9, px, py, pz);
+      }
+      if (bad) continue;
+      var w = X - fc / (4 * Math.PI);
+      if (mAbs(w - 0.5) < 1e-6) return 0;
+      return w > 0.5 ? 1 : -1;
+    }
+    return 0;
+  }
+
+  /* ---- the winding number, with the far field summed in bulk ----------
+
+     A node's triangles seen from a point p well outside it subtend, together,
+     almost what one small flat patch at the node's centre c would:
+
+         sum_t  integral of g.n dA  ~  V.g(c) + sum_ij M_ij d_j g_i(c),
+         g(x) = (x - p) / |x - p|^3,   V = sum of the area vectors,
+         M_ij = sum_t A_t,i (centroid_t - c)_j.
+
+     (That integral IS the term windingAt adds for the triangle, up to the sign
+     convention it was written in: positive for p inside an outward shell.)
+     The remainder after the two terms is bounded without any assumption about
+     the triangles: with r the node's radius about c and rho = |c - p| - r,
+     every point of it is at least rho from p, |D^3(1/|y|)| <= 6/|y|^4 (the
+     k-th derivative of 1/|y| along a direction is k! P_k / |y|^(k+1)), so
+
+         |error| <= totalArea * 3 r^2 / rho^4.
+
+     windingInside only needs to know whether the sum reaches a half of 4 pi.
+     It adds the far nodes' bulk values and their error bounds; when the sum is
+     further from the threshold than every bound together, the full sum is on
+     the same side and the answer is read off. When it is not, the far field
+     is demanded closer (a wider theta) and, past that, the full sum is taken
+     - windingAt itself - so a hard point costs what it always did and an easy
+     one costs a handful of boxes. */
+  function windPrep(ix, soup) {
+    if (ix.wind) return ix.wind;
+    var n = ix.n, N = ix.nodes, order = ix.order, start = ix.start, count = ix.count;
+    var tA = new Float64Array(n), tV = new Float64Array(n * 3), tG = new Float64Array(n * 3);
+    var i, k, o;
+    for (i = 0; i < n; i++) {
+      o = i * 9;
+      var ux = soup[o + 3] - soup[o], uy = soup[o + 4] - soup[o + 1], uz = soup[o + 5] - soup[o + 2];
+      var vx = soup[o + 6] - soup[o], vy = soup[o + 7] - soup[o + 1], vz = soup[o + 8] - soup[o + 2];
+      var nx = (uy * vz - uz * vy) / 2, ny = (uz * vx - ux * vz) / 2, nz = (ux * vy - uy * vx) / 2;
+      tV[i * 3] = nx; tV[i * 3 + 1] = ny; tV[i * 3 + 2] = nz;
+      tA[i] = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      tG[i * 3] = (soup[o] + soup[o + 3] + soup[o + 6]) / 3;
+      tG[i * 3 + 1] = (soup[o + 1] + soup[o + 4] + soup[o + 7]) / 3;
+      tG[i * 3 + 2] = (soup[o + 2] + soup[o + 5] + soup[o + 8]) / 3;
+    }
+    var C = new Float64Array(N * 3), R = new Float64Array(N), A = new Float64Array(N);
+    var V = new Float64Array(N * 3), M = new Float64Array(N * 9);
+    for (var nd = 0; nd < N; nd++) {
+      var s = start[nd], e = s + count[nd], a = 0, cx = 0, cy = 0, cz = 0;
+      for (var q = s; q < e; q++) {
+        var t = order[q];
+        a += tA[t]; cx += tG[t * 3] * tA[t]; cy += tG[t * 3 + 1] * tA[t]; cz += tG[t * 3 + 2] * tA[t];
+      }
+      if (a > 0) { cx /= a; cy /= a; cz /= a; }
+      else {                                     /* no area: the plain mean */
+        for (q = s; q < e; q++) { cx += tG[order[q] * 3]; cy += tG[order[q] * 3 + 1]; cz += tG[order[q] * 3 + 2]; }
+        cx /= (e - s); cy /= (e - s); cz /= (e - s);
+      }
+      var rr = 0;
+      for (q = s; q < e; q++) {
+        var tq = order[q], oq = tq * 9;
+        for (k = 0; k < 9; k += 3) {
+          var ddx = soup[oq + k] - cx, ddy = soup[oq + k + 1] - cy, ddz = soup[oq + k + 2] - cz;
+          var dd = ddx * ddx + ddy * ddy + ddz * ddz;
+          if (dd > rr) rr = dd;
+        }
+        var gx = tG[tq * 3] - cx, gy = tG[tq * 3 + 1] - cy, gz = tG[tq * 3 + 2] - cz;
+        for (k = 0; k < 3; k++) {
+          var av = tV[tq * 3 + k];
+          V[nd * 3 + k] += av;
+          M[nd * 9 + k * 3] += av * gx; M[nd * 9 + k * 3 + 1] += av * gy; M[nd * 9 + k * 3 + 2] += av * gz;
+        }
+      }
+      C[nd * 3] = cx; C[nd * 3 + 1] = cy; C[nd * 3 + 2] = cz; R[nd] = Math.sqrt(rr) * (1 + 1e-12) + 1e-12; A[nd] = a;
+    }
+    ix.wind = { C: C, R: R, A: A, V: V, M: M, heap: new Int32Array(N), e: new Float64Array(N), s: new Float64Array(N) };
+    return ix.wind;
+  }
+
+  /* One triangle's term, windingAt's own arithmetic. */
+  function windTerm(soup, o, px, py, pz) {
+    var ax = soup[o] - px, ay = soup[o + 1] - py, az = soup[o + 2] - pz;
+    var bx = soup[o + 3] - px, by = soup[o + 4] - py, bz = soup[o + 5] - pz;
+    var cx = soup[o + 6] - px, cy = soup[o + 7] - py, cz = soup[o + 8] - pz;
+    var la = mSqrt(ax * ax + ay * ay + az * az);
+    var lb = mSqrt(bx * bx + by * by + bz * bz);
+    var lc = mSqrt(cx * cx + cy * cy + cz * cz);
+    var det = ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
+    var den = la * lb * lc + (ax * bx + ay * by + az * bz) * lc +
+              (ax * cx + ay * cy + az * cz) * lb + (bx * cx + by * cy + bz * cz) * la;
+    return 2 * mAtan2(det, den);
+  }
+
+  /* Whether windingAt(soup, p) >= 0.5, without summing every triangle when
+     the far field already settles it. Returns true / false, always the
+     answer the full sum gives.
+
+     Best-first: the root stands in for the whole piece, with its error bound;
+     the stand-in with the LARGEST bound is replaced by its two children (a
+     leaf, or a node the point is inside the ball of, is summed exactly)
+     until the total bound is smaller than the distance of the sum from the
+     threshold. A point in the open air or deep in material is a half-turn
+     from the threshold (2 pi of 4 pi) and is settled after a few dozen
+     boxes; a point a hair from a face is settled by the faces near it,
+     summed exactly, and the rest in bulk. Only a point so close to the
+     threshold that every box has been opened falls back to windingAt. */
+  function windingInside(soup, p) {
+    var ix = indexFor(soup);
+    if (!ix || ix.n < WIND_MIN_TRIS) return windingAt(soup, p) >= 0.5;
+    var cw = crossWinding(ix, soup, p);
+    if (cw !== 0) return cw > 0;
+    var W = windPrep(ix, soup), C = W.C, R = W.R, A = W.A, V = W.V, M = W.M;
+    var heap = W.heap, es = W.e, ss = W.s;
+    var left = ix.left, right = ix.right, start = ix.start, count = ix.count, order = ix.order;
+    var px = p[0], py = p[1], pz = p[2];
+    var HALF = 2 * Math.PI, SLACK = 4 * Math.PI * 1e-8;
+    var exact = 0, bulk = 0, bound = 0, hn = 0, sp = 0, nd, i, q, e;
+    STACK[sp++] = 0;
+    for (;;) {
+      while (sp > 0) {
+        nd = STACK[--sp];
+        var yx = C[nd * 3] - px, yy = C[nd * 3 + 1] - py, yz = C[nd * 3 + 2] - pz;
+        var d = mSqrt(yx * yx + yy * yy + yz * yz), r = R[nd];
+        if (d > r * 1.000001) {
+          var inv = 1 / d, inv3 = inv * inv * inv, rho = d - r, m = nd * 9;
+          var yMy = yx * (M[m] * yx + M[m + 1] * yy + M[m + 2] * yz) +
+                    yy * (M[m + 3] * yx + M[m + 4] * yy + M[m + 5] * yz) +
+                    yz * (M[m + 6] * yx + M[m + 7] * yy + M[m + 8] * yz);
+          var sv = (V[nd * 3] * yx + V[nd * 3 + 1] * yy + V[nd * 3 + 2] * yz) * inv3 +
+                   (M[m] + M[m + 4] + M[m + 8] - 3 * yMy * inv * inv) * inv3;
+          var ev = A[nd] * 3 * r * r / (rho * rho * rho * rho);
+          ss[nd] = sv; es[nd] = ev; bulk += sv; bound += ev;
+          /* sift up into the max-heap on the bound */
+          i = hn++;
+          while (i > 0) {
+            var par = (i - 1) >> 1;
+            if (es[heap[par]] >= ev) break;
+            heap[i] = heap[par]; i = par;
+          }
+          heap[i] = nd;
+        } else if (left[nd] < 0) {
+          e = start[nd] + count[nd];
+          for (q = start[nd]; q < e; q++) exact += windTerm(soup, order[q] * 9, px, py, pz);
+        } else {
+          STACK[sp++] = right[nd]; STACK[sp++] = left[nd];
+        }
+      }
+      var w = exact + bulk;
+      if (mAbs(w - HALF) > bound + SLACK) return w >= HALF;
+      if (hn === 0) break;                          /* all summed, and still too close to call */
+      /* take the largest stand-in off the heap and open it */
+      nd = heap[0];
+      var last = heap[--hn];
+      if (hn > 0) {
+        i = 0;
+        for (;;) {
+          var c = 2 * i + 1;
+          if (c >= hn) break;
+          if (c + 1 < hn && es[heap[c + 1]] > es[heap[c]]) c++;
+          if (es[heap[c]] <= es[last]) break;
+          heap[i] = heap[c]; i = c;
+        }
+        heap[i] = last;
+      }
+      bulk -= ss[nd]; bound -= es[nd];
+      if (left[nd] < 0) {
+        for (q = start[nd], e = q + count[nd]; q < e; q++) exact += windTerm(soup, order[q] * 9, px, py, pz);
+      } else {
+        STACK[sp++] = right[nd]; STACK[sp++] = left[nd];
+      }
+    }
+    return windingAt(soup, p) >= 0.5;
   }
 
   /* =====================================================================
@@ -789,6 +1421,10 @@
        checked. plan() fills this in from the piece itself. */
     var obstacles = opts.obstacles || [];
     out.obstaclesChecked = obstacles.length;
+    /* Each piece's index is checked against its soup once, here, rather than
+       sampled on every query below (0b). */
+    obstacles.forEach(function (soup) { indexFor(soup, true); });
+    bases.forEach(function (b) { if (b && b.kind === 'piece') indexFor(b.soup, true); });
     var minLength = (opts.minLength == null) ? 0.5 : +opts.minLength;
 
     var cands = [];
@@ -906,9 +1542,11 @@
       for (var k = 0; k < obstacles.length; k++) {
         var soup = obstacles[k];
         if (!soup || !soup.length) continue;
-        var near = closestOnSoup(p, soup);
-        if (near && near.distance < INSIDE_SURFACE_TOL_MM) continue;
-        if (windingAt(soup, p) >= 0.5) return s;
+        /* On the surface (any triangle nearer than the tolerance): neither
+           inside nor out. Else inside when the winding reaches a half. Both
+           are questions about a threshold, so both go through the index. */
+        if (withinOfSoup(p, soup, INSIDE_SURFACE_TOL_MM)) continue;
+        if (windingInside(soup, p)) return s;
       }
     }
     return -1;
@@ -1356,7 +1994,18 @@
     _prism: prism,
     _closestOnTri: closestOnTri,
     _windingAt: windingAt,
+    _windingInside: windingInside,
+    _closestOnSoup: closestOnSoup,
+    _closestOnSoupBrute: closestOnSoupBrute,
+    _withinOfSoup: withinOfSoup,
     _nearestHit: nearestHit,
+    _nearestHitBrute: nearestHitBrute,
+    _indexFor: indexFor,
+    _setIndexMinTris: function (n, w) {
+      var was = [INDEX_MIN_TRIS, WIND_MIN_TRIS];
+      INDEX_MIN_TRIS = n; if (w != null) WIND_MIN_TRIS = w;
+      return was;
+    },
     _buildDownGrid: buildDownGrid,
     _nearestHitDown: nearestHitDown,
     _resolveFloor: resolveFloor
