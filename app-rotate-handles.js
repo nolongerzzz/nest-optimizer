@@ -60,9 +60,15 @@
    the look vector with the ring's axis), so clockwise on screen is clockwise
    on the piece from every side. See dialSign.
 
-   The snap is a plain hard snap: inside 3 degrees of a quarter turn the
-   piece sits ON the quarter turn, and outside it the piece is exactly where
-   the pointer says. Only during a drag. A click is always exactly 1 degree (0.1 with Shift). */
+   THE DETENTS live on the ring's own ticks, every 45 degrees (the quarters are
+   the long ones), in the ring's frame - the one the scale is painted in. They
+   do not depend on where the drag began or where the darts sit: the piece's
+   angle on the ring (ringAngleDeg) is absolute, so inside 3 degrees of a
+   detent the piece sits ON it, and outside the piece is exactly where the
+   pointer says. Only during a drag. The tick the piece is within that window
+   of is lit (litTick), drag or rest, and the readout says which angle it
+   sits on. A click is always exactly 1 degree (0.1 with Shift). The 90
+   buttons keep the quarter-turn snap alone (hardSnapDeg). */
 (function () {
   'use strict';
 
@@ -70,6 +76,7 @@
   var FINE_STEP_DEG = 0.1;      // ...with Shift held
   var SNAP_STEP_DEG = 90;       // the quarter turns
   var SNAP_WITHIN_DEG = 3;      // ...and how close the hard snap catches
+  var DETENT_DEG = 45;          // the drag's detents: every 45 on the ring's own scale
   var CLICK_SLOP_PX = 4;        // a press that travels less than this is a click
   var FLASH_MS = 240;           // the one flash on landing in a snap
 
@@ -389,6 +396,25 @@
     return inSnap(deg) ? Math.round(deg / SNAP_STEP_DEG) * SNAP_STEP_DEG : deg;
   }
 
+  /* The drag's detents: the tick of the ring's own scale (every DETENT_DEG,
+     absolute, in the ring's frame) nearest `deg`, and how far off it is. */
+  function detentNear(deg) {
+    var k = Math.round(deg / DETENT_DEG);
+    return { deg: k * DETENT_DEG, off: Math.abs(deg - k * DETENT_DEG) };
+  }
+  function inDetent(deg) { return detentNear(deg).off <= SNAP_WITHIN_DEG; }
+  function detentSnapDeg(deg) { return inDetent(deg) ? detentNear(deg).deg : deg; }
+  function tickDeg(deg) { return ((deg % 360) + 360) % 360; }     // a detent as a tick: [0, 360)
+
+  /* The tick the piece is within the window of on a ring, as its angle in
+     [0, 360) - the one that is lit - or null. A drag holds its own measured
+     axis (drag.b), so the tick lit is the tick the drag snaps to. */
+  function litTickOf(ring, q, F) {
+    var b = drag && drag.ring === ring ? drag.b : refAxis(q, ring);
+    var d = detentNear(ringAngleDeg(q, ring, b, F));
+    return d.off <= SNAP_WITHIN_DEG ? tickDeg(d.deg) : null;
+  }
+
   /* The direction of a drag. The pointer's angle about the ring's projected
      centre, in screen terms (y down, so a growing angle is clockwise), times
      the sign of look . axis. Derivation, for the record: a positive turn
@@ -435,7 +461,7 @@
     lastTouched = ring;
     if (typeof updateExportButton === 'function') updateExportButton();
     refresh();
-    say(ring, deg * dialSign(ring), false);
+    say(ring, deg * dialSign(ring), null);
     return true;
   }
 
@@ -467,7 +493,7 @@
              abs0: ringAngleDeg(q0, ring, b),
              arrow0: arrowAt[ring], moved: false, snapped: false, fine: !!fine };
     /* Starting inside a snap is not landing in one: no flash on the way out. */
-    drag.snapped = inSnap(drag.abs0);
+    drag.snapped = inDetent(drag.abs0);
     lastTouched = ring;
     if (state.controls) state.controls.enabled = false;
     refresh();
@@ -486,15 +512,15 @@
     if (!drag.moved && Math.hypot(x - drag.x0, y - drag.y0) < CLICK_SLOP_PX) return null;
     drag.moved = true;
     var want = drag.abs0 + drag.raw;
-    var at = hardSnapDeg(want);
-    var snapped = inSnap(want);
+    var at = detentSnapDeg(want);
+    var snapped = inDetent(want);
     if (snapped && !drag.snapped) flash();
     drag.snapped = snapped;
     drag.applied = at - drag.abs0;
     writePose(p, turned(drag.q0, drag.ring, drag.applied), true);
     if (drag.arrow0 != null) arrowAt[drag.ring] = drag.arrow0 + drag.applied * RAD;
     refresh();
-    say(drag.ring, drag.applied * drag.sign, snapped, x, y);
+    say(drag.ring, drag.applied * drag.sign, snapped ? tickDeg(at) : null, x, y);
     return { raw: drag.raw, applied: drag.applied, snapped: snapped };
   }
 
@@ -512,7 +538,7 @@
       if (p) {
         p.mesh.updateMatrixWorld(true);
         writePose(p, turned(p.mesh.quaternion.clone(), d.ring, d.dir * step), true);
-        say(d.ring, d.dir * step * d.sign, false);
+        say(d.ring, d.dir * step * d.sign, null);
       }
       seatLater();
     } else {
@@ -526,19 +552,21 @@
   /* ---- the readout -------------------------------------------------------
      Degrees turned since the press, with the way it went AS SEEN FROM HERE -
      the same sense the dial reads the pointer in - so dragging a full lap
-     clockwise reads 360 and on past it. The status line says the same. */
+     clockwise reads 360 and on past it. Sitting on a detent it also says the
+     angle of that tick on the ring ("on 90°"). The status line says the same. */
   var readout = null, readoutTimer = null, flashUntil = 0;
   function fmtDeg(d) {
     var a = Math.abs(d);
     return (Math.abs(a - Math.round(a)) < 0.05 ? Math.round(a) : a.toFixed(1)) + '°';
   }
-  function readoutText(ring, seenDeg, snapped) {
+  /* `tick` is the angle of the detent the piece sits on, or null. */
+  function readoutText(ring, seenDeg, tick) {
     return look(ring).label + ' ' + fmtDeg(seenDeg) +
       (Math.abs(seenDeg) < 1e-9 ? '' : (seenDeg > 0 ? ' ⟳' : ' ⟲')) +
-      (snapped ? ' · square' : '');
+      (tick != null ? ' · on ' + fmtDeg(tick) : '');
   }
-  function say(ring, seenDeg, snapped, x, y) {
-    var t = readoutText(ring, seenDeg, snapped);
+  function say(ring, seenDeg, tick, x, y) {
+    var t = readoutText(ring, seenDeg, tick);
     lastReadout = t;
     if (typeof setStatus === 'function') setStatus('Rotate - ' + t);
     if (!readout) {
@@ -846,6 +874,27 @@
     g.add(l);
   }
 
+  /* The lit tick: the one tick of the ring the piece is within the snap
+     window of, drawn longer and thicker than its neighbours and at full
+     strength - through a drag too, when the rest of the scale has gone quiet.
+     userData.nsoRotateLit is its angle; nsoTickEnds its inner and outer point. */
+  var LIT_LEN = 0.2, LIT_WIDTH = 1.4;      // x radius, mm
+  function addLit(g, ring, F, r, deg) {
+    var t = deg * RAD, len = LIT_LEN * r, r0 = r + restTube(r);
+    var u = F.e1.clone().multiplyScalar(Math.cos(t)).add(F.e2.clone().multiplyScalar(Math.sin(t)));
+    var m = new THREE.Matrix4().makeBasis(u, F.A.clone().cross(u), F.A)
+      .setPosition(u.clone().multiplyScalar(r0 + len / 2));
+    var geo = new THREE.BoxGeometry(len, LIT_WIDTH, LIT_WIDTH);
+    geo.applyMatrix4(m);
+    var l = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: look(ring).color, depthTest: false,
+      depthWrite: false, transparent: true, opacity: 1 }));
+    l.renderOrder = 999;
+    l.raycast = noRaycast;
+    l.userData.nsoRotateLit = { ring: ring, deg: deg };
+    l.userData.nsoTickEnds = [u.x * r0, u.y * r0, u.z * r0, u.x * (r0 + len), u.y * (r0 + len), u.z * (r0 + len)];
+    g.add(l);
+  }
+
   function addRing(g, ring, F, r) {
     var col = colourFor(ring), w = weightFor(ring);
     var tube = restTube(r) * w.tube;
@@ -859,6 +908,8 @@
     m.userData.nsoRotateRing = ring;          // the track: drawn, never a handle
     g.add(m);
     addTicks(g, ring, F, r, w);
+    var lit = litTickOf(ring, pieceQ(), F);
+    if (lit != null) addLit(g, ring, F, r, lit);
 
     var t = arrowAt[ring], h = arrowSize(r), gap = arrowGap(r);
     [1, -1].forEach(function (dir) {
@@ -1074,6 +1125,15 @@
     },
     dialSign: dialSign,
     hardSnapDeg: hardSnapDeg,
+    detentSnapDeg: detentSnapDeg,
+    /* The tick of a ring that is lit now - its angle in [0, 360) - or null. */
+    litTick: function (ring) {
+      var p = piece();
+      if (!p || !RINGS[ring]) return null;
+      p.mesh.updateMatrixWorld(true);
+      var q = p.mesh.quaternion.clone();
+      return litTickOf(ring, q, drag && drag.ring === ring ? drag.F : frameOf(ring, q));
+    },
     decompose: decompose,
     readout: function () { return lastReadout; },
     readoutShown: function () { return !!(readout && !readout.hidden); },
@@ -1102,7 +1162,7 @@
       return g ? g.children.filter(function (c) { return c.userData.nsoRotateRing; }).length : 0;
     },
     constants: { STEP_DEG: STEP_DEG, FINE_STEP_DEG: FINE_STEP_DEG, SNAP_STEP_DEG: SNAP_STEP_DEG,
-                 SNAP_WITHIN_DEG: SNAP_WITHIN_DEG, CLICK_SLOP_PX: CLICK_SLOP_PX,
+                 SNAP_WITHIN_DEG: SNAP_WITHIN_DEG, DETENT_DEG: DETENT_DEG, CLICK_SLOP_PX: CLICK_SLOP_PX,
                  RING_RADIUS_MM: RING_RADIUS_MM, ARROW_FRACTION: ARROW_FRACTION,
                  ARROW_BASE: ARROW_BASE, ARROW_HIT: ARROW_HIT,
                  RUN_MS: RUN_MS, TICK_STEP_DEG: TICK_STEP_DEG, TICK_LEN: TICK_LEN, TICK_WIDTH: TICK_WIDTH,

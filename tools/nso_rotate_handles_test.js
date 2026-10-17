@@ -60,7 +60,13 @@
   22. ...re-evaluated after Turn, Tip (Roll), Scale and a bake, and held for
       the length of a drag.
   23. THE CARD: the row follows the ring, the tooltip says which way it tips.
-  24. UNDO of a lean is what it was.                                      */
+  24. UNDO of a lean is what it was.
+  25. THE DETENTS are the ring's own ticks, every 45°, in the ring's frame -
+      not the drag's start: from 7°, 23° and 61° the first detent met is the
+      next painted tick, whichever way the drag goes and wherever the darts
+      sit. The window is 3° either side. The tick the piece is within it of
+      is lit - a painted tick, in 12 seeded random drags - and the readout
+      says the angle it sits on.                                          */
 
 const path = require('path');
 const fs = require('fs');
@@ -435,14 +441,14 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 6 */
-  console.log('\n=== 6. the snap: hard, inside 3° of a quarter turn only, one flash ===');
+  console.log('\n=== 6. the snap: hard, inside 3° of a detent only, one flash ===');
   {
     const r = await page.evaluate(() => {
       const H = window.__rot, a = window.nsoRotate;
       H.zero(); H.home();
       a.turn('turn', 37);
       const abs0 = a.ringAngle('turn');
-      const target = Math.ceil(abs0 / 90) * 90;            // the next quarter turn up
+      const target = Math.ceil(abs0 / 45) * 45;            // the next detent up
       const flash0 = a.flashes();
       const sign = a.dialSign('turn');
       /* trace so the ring angle RISES through the quarter turn and on past it */
@@ -471,7 +477,7 @@ withApp(async (page, logs) => {
     check('the jump at the edge is the whole snap and no more than 3°',
       rows.every(s => Math.abs(s.applied - s.raw) <= 3 + 1e-9));
     check('the ring flashed exactly once, on landing', r.flashes === 1, r.flashes + ' flash(es)');
-    check('the readout says it is square while it is', inWin.every(s => / · square$/.test(s.readout)),
+    check('the readout says the angle it sits on while it does', inWin.every(s => new RegExp(' · on ' + (r.target % 360) + '°$').test(s.readout)),
       inWin[0] && inWin[0].readout);
   }
 
@@ -1736,6 +1742,137 @@ withApp(async (page, logs) => {
     check('Undo, Undo: each press stepped back exactly, pose fields and all',
       (await ang(drags[0].pose.q, u1.q)) < 1e-6 && (await ang(p0.q, u2.q)) < 1e-6 &&
       JSON.stringify(u2.f) === JSON.stringify(p0.f), 'fields ' + p0.f.join(',') + ' → ' + u2.f.join(','));
+  }
+
+  /* ----------------------------------------------------------------- 25 */
+  console.log('\n=== 25. detents: absolute, on the ring\'s own ticks, every 45°; lit; named in the readout ===');
+  {
+    const r = await page.evaluate(() => {
+      const a = window.nsoRotate, H = window.__rot, K = a.constants;
+      const grp = () => state.scene.getObjectByName('nso-rotate-handles');
+      const near45 = d => Math.round(d / 45) * 45;
+      const sameAng = (x, y) => Math.abs(((x - y) % 360 + 540) % 360 - 180) < 1e-6;
+      /* the painted tick at `deg` on a ring: its outer-edge direction from the scale mesh */
+      const paintedDir = (ring, deg) => {
+        const t = grp().children.find(c => c.userData.nsoRotateTicks === ring);
+        const i = (((deg % 360) + 360) % 360) / 5 * 6, e = t.userData.nsoTickEnds;
+        return new THREE.Vector3(e[i + 3], e[i + 4], e[i + 5]).normalize();
+      };
+      const litMeshes = ring => grp().children.filter(c => c.userData.nsoRotateLit && c.userData.nsoRotateLit.ring === ring);
+      const litOnPainted = ring => {
+        const m = litMeshes(ring), want = a.litTick(ring);
+        if (want == null) return m.length === 0;
+        if (m.length !== 1 || !sameAng(m[0].userData.nsoRotateLit.deg, want)) return false;
+        const e = m[0].userData.nsoTickEnds, d = new THREE.Vector3(e[3], e[4], e[5]).normalize();
+        return d.dot(paintedDir(ring, want)) > 1 - 1e-9;
+      };
+      const setup = (ring, start, cam) => {
+        H.zero();
+        if (cam) H.camera(new THREE.Vector3(cam[0], cam[1], cam[2])); else H.home();
+        ['turn', 'fb', 'ss'].forEach(k => a.setRing(k, k === ring));
+        a.turn(ring, start - a.ringAngle(ring));
+        return a.ringAngle(ring);
+      };
+      /* drag the ring's angle `dirn` (+1 up, -1 down) until the first detent is met */
+      const firstHit = (ring, start, dirn, cam) => {
+        const abs0 = setup(ring, start, cam), sign = a.dialSign(ring);
+        const c = a.centreScreen(), R = 160;
+        const at = d => ({ x: c.x + Math.cos(d * Math.PI / 180) * R, y: c.y + Math.sin(d * Math.PI / 180) * R });
+        const p0 = at(0);
+        a.beginDrag({ ring: ring, dir: 1 }, p0.x, p0.y, c.x, c.y);
+        let hit = null;
+        for (let i = 1; i <= 240 && !hit; i++) {
+          const q = at(sign * dirn * i * 0.5); a.moveDrag(q.x, q.y);
+          if (a.dragState().snapped) hit = { pointer: abs0 + a.dragState().raw, piece: a.ringAngle(ring), lit: a.litTick(ring),
+                                             litOK: litOnPainted(ring), readout: a.readout(), darts: a.dartTick(ring) };
+        }
+        a.endDrag();
+        return { abs0, hit };
+      };
+      const out = { first: [], K: { DETENT_DEG: K.DETENT_DEG, SNAP_WITHIN_DEG: K.SNAP_WITHIN_DEG } };
+      for (const ring of ['turn', 'fb', 'ss'])
+        for (const start of [7, 23, 61])
+          for (const dirn of [1, -1]) {
+            const f = firstHit(ring, start, dirn);
+            const want = dirn > 0 ? Math.floor(f.abs0 / 45) * 45 + 45 : Math.ceil(f.abs0 / 45) * 45 - 45;
+            out.first.push({ ring, start, dirn, abs0: f.abs0, want, hit: f.hit });
+          }
+      /* the darts' seat and the drag's start are nothing to the detent: three cameras, three seats */
+      out.seats = [[140, 160, 200], [-200, 90, 40], [30, 120, -220]].map(cam => {
+        const f = firstHit('turn', 23, 1, cam);
+        return { cam, want: 45, hit: f.hit, seat: f.hit && f.hit.darts && f.hit.darts.index };
+      });
+      /* the window: 3° either side catches, a quarter degree beyond does not */
+      out.window = [];
+      for (const [off, wantSnap] of [[-2.75, true], [-3.25, false], [2.75, true], [3.25, false]]) {
+        const abs0 = setup('turn', 20), sign = a.dialSign('turn');
+        const tr = H.trace('turn', sign * (45 + off - abs0), { step: 0.25 });
+        out.window.push({ off, wantSnap, snapped: tr.state.snapped, applied: tr.state.applied, raw: tr.state.raw,
+                          at: a.ringAngle('turn') });
+      }
+      /* 12 seeded random drags: whenever a tick is lit it is a painted one the piece is within 3° of,
+         and one is lit exactly when the piece is within 3° of a multiple of 45 */
+      let seed = 4242;
+      const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+      out.random = [];
+      for (let n = 0; n < 12; n++) {
+        const ring = ['turn', 'fb', 'ss'][Math.floor(rnd() * 3)];
+        const start = rnd() * 360, span = (rnd() < 0.5 ? -1 : 1) * (30 + rnd() * 250);
+        const abs0 = setup(ring, start), sign = a.dialSign(ring);
+        const c = a.centreScreen(), R = 160;
+        const at = d => ({ x: c.x + Math.cos(d * Math.PI / 180) * R, y: c.y + Math.sin(d * Math.PI / 180) * R });
+        const p0 = at(0);
+        a.beginDrag({ ring: ring, dir: 1 }, p0.x, p0.y, c.x, c.y);
+        let steps = 0, lit = 0, bad = 0, wrongSet = 0, unnamed = 0;
+        const N = Math.round(Math.abs(span) / 0.5);
+        for (let i = 1; i <= N; i++) {
+          const q = at(sign * Math.sign(span) * i * 0.5); a.moveDrag(q.x, q.y);
+          const ang = a.ringAngle(ring), L = a.litTick(ring), inWin = Math.abs(ang - near45(ang)) <= 3 + 1e-9;
+          steps++;
+          if (L != null) {
+            lit++;
+            if (!litOnPainted(ring) || !sameAng(L, near45(ang)) || L % 45 !== 0) bad++;
+            /* the readout is written once the press has become a drag (past the click slop) */
+            if (a.dragState().moved && !new RegExp(' · on ' + L + '°$').test(a.readout())) unnamed++;
+          }
+          if ((L != null) !== inWin) wrongSet++;
+        }
+        a.endDrag();
+        out.random.push({ ring, start: +abs0.toFixed(1), span: +span.toFixed(1), steps, lit, bad, wrongSet, unnamed });
+      }
+      H.zero(); H.home(); a.setRing('fb', false); a.setRing('ss', false);
+      return out;
+    });
+    const sameAng = (x, y) => near(((x - y) % 360 + 540) % 360 - 180, 0, 1e-6);
+    check('the detent is every 45° and the window 3°', r.K.DETENT_DEG === 45 && r.K.SNAP_WITHIN_DEG === 3, JSON.stringify(r.K));
+    const f = r.first;
+    check('from 7°, 23° and 61°, both ways, on every ring: the first detent met is the NEXT painted tick, not start±45',
+      f.every(x => x.hit && sameAng(x.hit.piece, x.want)),
+      f.filter(x => !(x.hit && sameAng(x.hit.piece, x.want))).map(x => x.ring + ' ' + x.start + (x.dirn > 0 ? '↑' : '↓') + ' wanted ' + x.want +
+        ' got ' + (x.hit && x.hit.piece.toFixed(2))).join('; ') || f.length + ' drags');
+    check('...and not start±45 for any of them (7→45, 23→45, 61→90 going up)',
+      f.filter(x => x.dirn > 0).every(x => ({ 7: 45, 23: 45, 61: 90 })[x.start] === Math.round(x.hit.piece)),
+      f.filter(x => x.dirn > 0 && x.ring === 'turn').map(x => x.start + '→' + x.hit.piece.toFixed(1)).join(' '));
+    check('the pointer met it within 3° of the tick (the window, not a pull)',
+      f.every(x => Math.abs(x.hit.pointer - x.want) <= 3 + 1e-9), '');
+    check('the tick that snapped is the one that is lit, and it is a painted tick of the ring',
+      f.every(x => x.hit.litOK && x.hit.lit !== null && sameAng(x.hit.lit, x.want)), '');
+    check('...and the readout says the angle it sits on',
+      f.every(x => new RegExp(' · on ' + (((x.want % 360) + 360) % 360) + '°$').test(x.hit.readout)),
+      f[0].hit.readout + ' | ' + f[5].hit.readout);
+    check('the darts\' seat is nothing to it: three cameras, three seats, the same first detent',
+      r.seats.every(x => x.hit && sameAng(x.hit.piece, x.want)) && new Set(r.seats.map(x => x.seat)).size > 1,
+      r.seats.map(x => 'seat ' + x.seat + ' → ' + (x.hit && x.hit.piece.toFixed(1))).join(', '));
+    check('the window is ±3°: 2.75° off snaps, 3.25° off does not, either side',
+      r.window.every(w => w.snapped === w.wantSnap), r.window.map(w => w.off + ':' + w.snapped).join(' '));
+    check('...and outside it the piece is exactly where the pointer says',
+      r.window.filter(w => !w.wantSnap).every(w => near(w.applied, w.raw, 1e-9)), '');
+    check('12 seeded random drags: a tick is lit exactly when the piece is within 3° of a multiple of 45',
+      r.random.every(d => d.wrongSet === 0), r.random.map(d => d.wrongSet).join(','));
+    check('...and the lit tick is always a painted tick of that ring, the one nearest the piece',
+      r.random.every(d => d.bad === 0) && r.random.reduce((n, d) => n + d.lit, 0) > 12,
+      r.random.reduce((n, d) => n + d.lit, 0) + ' lit steps of ' + r.random.reduce((n, d) => n + d.steps, 0));
+    check('...and the readout names it every time it is lit', r.random.every(d => d.unnamed === 0), '');
   }
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
