@@ -109,19 +109,24 @@ function installHelpers() {
       const bad = await loadSTL(page, BAD), good = await loadSTL(page, CLEAN);
       const r = await page.evaluate(([bad, good]) => {
         const mb = window.__ov.model(bad), mg = window.__ov.model(good);
-        let calls = 0; const real = NSO_Repair.inspect;
-        NSO_Repair.inspect = function () { calls++; return real.apply(this, arguments); };
+        let calls = 0; const real = NSO_Repair._selfIntersectionDetail;
+        NSO_Repair._selfIntersectionDetail = function () { calls++; return real.apply(this, arguments); };
         const first = nsoOverlap.pairs(mb.rawTris), again = nsoOverlap.pairs(mb.rawTris), clean = nsoOverlap.pairs(mg.rawTris);
         const callsAfter = calls;
         nsoOverlap.refusalOfModels([mb, mg]);
-        NSO_Repair.inspect = real;
-        return { first, again, clean, callsAfter, callsTotal: calls, say: nsoOverlap.refusalOfModels([mg, mb]), none: nsoOverlap.refusalOfModels([mg]),
+        NSO_Repair._selfIntersectionDetail = real;
+        // a bar with a mark standing on its face: two shells in contact, not overlap
+        const bx = (x0, y0, z0, x1, y1, z1) => { const v = [[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0],[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]], F = [[0,2,1],[0,3,2],[4,5,6],[4,6,7],[0,1,5],[0,5,4],[1,2,6],[1,6,5],[2,3,7],[2,7,6],[3,0,4],[3,4,7]], o = []; F.forEach(f => f.forEach(i => o.push(...v[i]))); return o; };
+        const marked = new Float32Array(bx(0,0,0,60,10,6).concat(bx(50,7,6,58,10,9)));
+        const touching = { pierce: NSO_Repair.inspect(marked).selfIntersections, asked: nsoOverlap.pairs(marked) };
+        return { touching, first, again, clean, callsAfter, callsTotal: calls, say: nsoOverlap.refusalOfModels([mg, mb]), none: nsoOverlap.refusalOfModels([mg]),
                  unknown: nsoOverlap.refusal([{ name: 'x', soup: null }]), repairMerges: nsoOverlap.repairMerges };
       }, [bad, good]);
       check('box_closed is 74 piercing pairs, the cleaned box 0', r.first === 74 && r.clean === 0, r.first + ' / ' + r.clean);
       check('the checker ran once per piece, however often asked (3 calls on 2 soups = 2 runs)', r.again === 74 && r.callsAfter === 2 && r.callsTotal === 2,
         'calls ' + r.callsAfter + ' then ' + r.callsTotal);
       check('the sentence names the piece, the count and the remedy', SENTENCE.test(r.say) && /\(74 piercing pairs\)/.test(r.say), r.say);
+      check('shells that only touch (a mark standing on a bar: the checker counts ' + r.touching.pierce + ' pairs) are not overlap, not refused', r.touching.pierce > 0 && r.touching.asked === 0, JSON.stringify(r.touching));
       check('a clean piece, and a piece that cannot be asked, are not refused', r.none === '' && r.unknown === '', JSON.stringify([r.none, r.unknown]));
       check('Repair does not merge them, so the sentence says nso_fixture_union', r.repairMerges === false && /nso_fixture_union/.test(r.say));
       await page.evaluate(() => window.__ov.clear());

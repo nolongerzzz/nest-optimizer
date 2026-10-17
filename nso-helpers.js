@@ -263,11 +263,16 @@
    stands down in words, naming the piece, before anything is built: Bridge,
    Connect (weld), Join, Subtract B from A, Crop Circle / Piece.
 
-   THE TEST. NSO_Repair.inspect(raw).selfIntersections, the same piercing-pair
-   count the checker and tools/mesh_validate.py give; a piece with any is
-   refused. Counted once per piece: the answer is cached on the piece's raw
-   soup (a WeakMap), which every edit replaces, and a pose does not change it.
-   Unknown (no checker loaded, no soup) is never a refusal.
+   THE TEST. The checker's piercing pairs (NSO_Repair._selfIntersectionDetail,
+   the count tools/mesh_validate.py gives), kept only where the two triangles
+   truly cross: each one straddles the other's plane by more than CROSS_MM. Shells
+   that merely touch (a mark sitting on a bar's face, 0 mm apart) and the
+   checker's near-coplanar sliver pairs are contact, not overlap, and the kernel
+   unions them; box_closed's 0.1 mm lid overlap is 1e5 times CROSS_MM. A piece
+   with any crossing pair is refused, and the sentence quotes the checker's
+   count. Counted once per piece: the answer is cached on the piece's raw soup (a
+   WeakMap), which every edit replaces, and a pose does not change it. Unknown
+   (no checker loaded, no soup) is never a refusal.
 
    THE REMEDY. Check & Repair -> Repair does NOT merge overlapping shells
    (measured on box_closed.stl: "nothing to repair", 74 -> 74 pairs), so the
@@ -275,18 +280,55 @@
    can, and the message becomes "run CHECK & REPAIR -> Repair on it first". */
 (function () {
   var REPAIR_MERGES = false;
+  var CROSS_MM = 1e-3;
   var cache = (typeof WeakMap === 'function') ? new WeakMap() : null;
 
-  // Piercing pairs in a raw soup; null when it cannot be asked.
-  function pairs(soup) {
+  // Do triangles fa and fb of mesh m cross, both straddling the other's plane by more than CROSS_MM?
+  function crosses(m, fa, fb) {
+    function tri(f) {
+      var v = [];
+      for (var i = 0; i < 3; i++) { var o = m.faces[f * 3 + i] * 3; v.push([m.pos[o], m.pos[o + 1], m.pos[o + 2]]); }
+      return v;
+    }
+    function straddles(T, U) {          // does U straddle T's plane?
+      var e1 = [T[1][0] - T[0][0], T[1][1] - T[0][1], T[1][2] - T[0][2]], e2 = [T[2][0] - T[0][0], T[2][1] - T[0][1], T[2][2] - T[0][2]];
+      var n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+      var L = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+      if (!(L > 0)) return false;
+      var pos = false, neg = false;
+      for (var i = 0; i < 3; i++) {
+        var d = ((U[i][0] - T[0][0]) * n[0] + (U[i][1] - T[0][1]) * n[1] + (U[i][2] - T[0][2]) * n[2]) / L;
+        if (d > CROSS_MM) pos = true; else if (d < -CROSS_MM) neg = true;
+      }
+      return pos && neg;
+    }
+    var A = tri(fa), B = tri(fb);
+    return straddles(A, B) && straddles(B, A);
+  }
+
+  // { pierce, crossing } for a raw soup: the checker's pairs, and those that truly cross; null when it cannot be asked.
+  function measure(soup) {
     if (!soup || !soup.length) return null;
     if (cache && cache.has(soup)) return cache.get(soup);
-    if (typeof NSO_Repair === 'undefined' || !NSO_Repair || typeof NSO_Repair.inspect !== 'function') return null;
-    var n;
-    try { n = NSO_Repair.inspect(soup).selfIntersections; } catch (e) { return null; }
-    if (typeof n !== 'number') return null;
-    if (cache) cache.set(soup, n);
-    return n;
+    if (typeof NSO_Repair === 'undefined' || !NSO_Repair || typeof NSO_Repair._selfIntersectionDetail !== 'function' ||
+        typeof NSO_Repair._weldToIndexed !== 'function') return null;
+    var out;
+    try {
+      var mesh = NSO_Repair._weldToIndexed(soup, NSO_Repair.WELD_TOL).mesh;
+      var d = NSO_Repair._selfIntersectionDetail(mesh, { collect: true });
+      out = { pierce: d.pierce, crossing: 0 };
+      for (var i = 0; i < d.pairs.length; i++) {
+        if (d.pairs[i].kind === 'pierce' && crosses(mesh, d.pairs[i].a, d.pairs[i].b)) out.crossing++;
+      }
+    } catch (e) { return null; }
+    if (cache) cache.set(soup, out);
+    return out;
+  }
+
+  // The checker's piercing-pair count when the piece has overlapping shells, else 0; null when it cannot be asked.
+  function pairs(soup) {
+    var r = measure(soup);
+    return r ? (r.crossing > 0 ? r.pierce : 0) : null;
   }
 
   function sentence(name, n) {
