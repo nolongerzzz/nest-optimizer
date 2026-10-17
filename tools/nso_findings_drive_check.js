@@ -693,8 +693,21 @@ withApp(async (page, logs) => {
       state.camera.position.copy(w.clone().add(dir.multiplyScalar(12)));
       state.camera.lookAt(w); state.controls.update();
       state.camera.updateMatrixWorld(true);
-      const v = w.clone().project(state.camera), r = state.renderer.domElement.getBoundingClientRect();
-      return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height };
+      const r = state.renderer.domElement.getBoundingClientRect();
+      const at = () => { const v = w.clone().project(state.camera); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; };
+      // Patch sits in ADD's card, which stays open over the viewport: pan the hole out from under it, as a user would.
+      const card = document.querySelector('#menu-add > .vp-menu-body').getBoundingClientRect();
+      const pan = (mm) => {
+        const d = new THREE.Vector3().setFromMatrixColumn(state.camera.matrixWorld, 0).multiplyScalar(mm);
+        state.controls.target.add(d); state.camera.position.add(d); state.controls.update(); state.camera.updateMatrixWorld(true);
+      };
+      const q0 = at();
+      if (q0.x <= card.right + 40 && q0.y <= card.bottom + 40) {
+        pan(1);
+        const pxPerMm = at().x - q0.x;
+        pan((card.right + 200 - q0.x) / pxPerMm - 1);
+      }
+      return at();
     });
     await page.mouse.move(pos.x - 300, pos.y - 200);
     await page.mouse.move(pos.x, pos.y, { steps: 4 });
