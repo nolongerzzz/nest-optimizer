@@ -789,16 +789,16 @@ console.log('\n== 9. what this version does not do, and says so ==');
     !/document\.|window\.[a-z]|getActiveModel|setStatus|\bstate\./.test(stripComments(src)));
 
   const app = fs.readFileSync(path.join(ROOT, 'app-stock.js'), 'utf8');
-  /* Two paths, two answers, and both have to be written down. The button adds
-     a piece and reads no face of any other, which is `none`; a card adjustment
-     re-generates the whole block in place, which is `whole-piece` - see the
-     "Live editing" section of docs/STOCK.md. Asserting only one of them would
-     let the other rot. */
-  check('app-stock.js declares the CREATE path\'s paint scope',
-    /PAINT SCOPE, THE CREATE PATH:\s*NONE/.test(app));
-  check('app-stock.js declares the UPDATE path\'s paint scope',
-    /PAINT SCOPE:\s*WHOLE-PIECE/.test(app));
-  check('...and carries no arithmetic of its own - it reads controls and calls the module',
+  /* The shelf adds a piece and reads no face of any other: `none`. The old
+     card's update path - a field adjustment re-generating the block in place,
+     `whole-piece` - went with the fields (Scale sizes a dropped piece, and
+     Scale declares its own scope), so there is exactly one answer to write
+     down and it must stay written down. */
+  check('app-stock.js declares its paint scope: NONE',
+    /PAINT SCOPE:\s*NONE/.test(app));
+  check('...and no longer carries an update path that would need a WHOLE-PIECE answer',
+    !/PAINT SCOPE:\s*WHOLE-PIECE/.test(app) && !/nsoMaskCount/.test(app));
+  check('...and carries no arithmetic of its own - it paints and drops what the module makes',
     !/Math\.cbrt|Math\.PI/.test(stripComments(app)));
 
   const doc = fs.readFileSync(path.join(ROOT, 'docs', 'STOCK.md'), 'utf8');
@@ -812,20 +812,24 @@ console.log('\n== 9. what this version does not do, and says so ==');
     /rounded block/i.test(doc) && /superellipsoid/i.test(doc) &&
     /gyroid/i.test(doc) && /helic/i.test(doc));
 
-  /* The card and the module must offer the same shapes. Two lists that drift
-     apart show up as an <option> that refuses on the press. */
+  /* The shelf and the module must offer the same shapes. Two lists that
+     drift apart show up as a tile that refuses on the click, or a shape the
+     module makes that nobody can reach. The shelf's ORDER is the ticket's, not
+     the module's, so it is the set that is compared - and the order is pinned
+     on its own, for the shapes the module makes. */
   const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
-  const block = (html.match(/<select id="sel-stock-shape"[\s\S]*?<\/select>/) || [''])[0];
-  const opts = (block.match(/value="([a-z]+)"/g) || []).map(x => x.slice(7, -1));
-  check('index.html offers exactly NSO_Stock.SHAPES, in the same order',
-    opts.join(',') === S.SHAPES.join(','), opts.join(',') + ' vs ' + S.SHAPES.join(','));
-  /* And every shape with a second measurement has a row in app-stock.js's
-     PROP table - the sphere, which has none, is the one that must NOT. */
-  for (const sh of S.SHAPES) {
-    const has = new RegExp('^\\s*' + sh + ':\\s*\\{', 'm').test(app);
-    check('app-stock.js ' + (sh === 'sphere' ? 'has NO' : 'has a') + ' PROP row for ' + sh,
-      has === (sh !== 'sphere'));
-  }
+  const shelf = (html.match(/<div id="stock-shelf"[\s\S]*?<\/div>/) || [''])[0];
+  const tiles = (shelf.match(/data-shape="([a-z]+)"/g) || []).map(x => x.slice(12, -1));
+  check('index.html offers a tile for exactly NSO_Stock.SHAPES, each once',
+    [...tiles].sort().join(',') === [...S.SHAPES].sort().join(',') && new Set(tiles).size === tiles.length,
+    tiles.join(',') + ' vs ' + S.SHAPES.join(','));
+  const TICKET = ['box', 'cylinder', 'sphere', 'capsule', 'ellipsoid', 'torus', 'tube', 'cone', 'wedge'].filter(sh => S.SHAPES.indexOf(sh) >= 0);
+  check('...in the ticket\'s order: Box, Cylinder, Sphere, Capsule, Ellipsoid, Torus, Tube, Cone',
+    tiles.join(',') === TICKET.join(','), tiles.join(','));
+  /* The tile is drawn from, and a click dropped from, the module's own
+     generator - the app file does no sizing of its own. */
+  check('app-stock.js asks NSO_Stock.make for both the tile and the drop',
+    (app.match(/NSO_Stock\.make\(/g) || []).length >= 2);
 }
 
 fs.writeFileSync(path.join(OUT, 'manifest.json'), JSON.stringify(MANIFEST, null, 2));

@@ -271,11 +271,14 @@ whole result, and it is what the canonical check gates on.
 
 ## 5. The UI thread
 
-One button, **Attach**, in the Stock card beside **New stock**. Not a fourth
-viewport menu and not a second set of size boxes: what the blank is gets said
-in exactly one place, and `app-assemble.js` reads it through
-`window.nsoStockReadUI()` — app-stock.js's own reader — so there is one
-interpretation of those controls, not two.
+One button, **Attach**, *was* in the Stock card beside **New stock**; it left
+the page when the card became a shelf of tiles with no fields (`app-stock.js`),
+because the blank's shape and size were the fields it read. The flow is whole
+and still reachable as `window.nsoAttachAt(placed, point, normal, blank)`, with
+the blank — `{ shape, height, radius, wall, waste, ratio, … }`, `nso_stock.js`'s
+own options — passed in, over the shelf's default size
+(`window.nsoStockShelf.defaultOptions(shape)`); the page control is what is
+waiting for a home. What follows describes the armed click as it was built.
 
 Press it and it arms a click, on the same contract app-mask, app-carve and
 app-seat-surface all have: `window.nsoAttachTakesClick(event)`, asked by

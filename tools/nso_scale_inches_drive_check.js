@@ -120,9 +120,8 @@ const setFields = (page, vals) => page.evaluate(v => {
 
 async function makeStock(page, shape) {
   const n = await page.evaluate(() => state.models.length);
-  await setFields(page, { 'sel-stock-shape': shape, 'inp-stock-height': 40, 'inp-stock-radius': null, 'inp-stock-prop': null });
-  await openMenuFor(page, '#btn-stock-make');
-  await page.click('#btn-stock-make');
+  await openMenuFor(page, '#btn-stock-' + shape);
+  await page.click('#btn-stock-' + shape);
   await page.waitForFunction(k => state.models.length > k, n, { timeout: 30000 });
   const id = await page.evaluate(() => state.models[state.models.length - 1].id);
   await select(page, id);

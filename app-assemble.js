@@ -1,12 +1,19 @@
 /* app-assemble.js - Attach: the one guided flow from "a blank" to "one solid".
  *
- * Pick a shape and a size in the Stock card, press Attach, click the point on
- * a piece where it should go. The blank is generated, auto-aim works out
+ * Arm Attach, click the point on a piece where a blank should go. The blank
+ * is generated, auto-aim works out
  * which way it leaves that point, nso_assemble.js seats it, and app-join.js's
  * union makes the two into one piece. Nothing is left on the plate to tidy up
  * and no tool-hopping is required: before this the same result took New stock,
  * then a pose by hand, then Start Join, then two slot picks, then Complete
  * Join - and got the seat wrong on any curved face.
+ *
+ * THE ATTACH BUTTON IS NOT ON THE PAGE. It lived on the Stock card and took
+ * its shape and size from that card's fields; the card is a shelf of tiles
+ * now (app-stock.js), with neither a button nor a field to arm this from.
+ * The flow below is whole and still reachable as nsoAttachAt(placed, point,
+ * normal, { shape, height, ... }); it is only the page control that is
+ * waiting for a home. wire() binds the old id if a page ever carries it again.
  *
  * Thin on purpose, like app-stock.js and app-hollow.js. Every measurement is
  * in nso_assemble.js (THREE-free, node-tested); the union is app-join.js's;
@@ -147,7 +154,7 @@
 
   /* One attach. Async, because the boolean loads a WASM kernel. Exposed on
      window so the drive check runs the same path the click runs rather than a
-     parallel copy of it, exactly as app-stock.js exposes nsoStockRun. */
+     parallel copy of it, exactly as app-stock.js exposes nsoStockShelf.drop. */
   window.nsoAttachAt = function (placed, worldPoint, localNormal, overrides) {
     if (busy) return Promise.resolve({ ok: false, reason: 'busy' });
     busy = true;
@@ -182,17 +189,19 @@
         'every triangle on the piece and cannot hold a face still. Clear paint to attach.');
     }
 
-    /* The blank: the Stock card's own controls, read by app-stock.js's own
-       reader, so there is one place the boxes are interpreted. */
-    if (typeof window.nsoStockReadUI !== 'function') return fail('Attach needs app-stock.js');
-    var read = window.nsoStockReadUI();
-    if (read.error) return fail(read.error);
-    var opts = read.opts;
+    /* The blank: the Stock shelf's default size for the shape asked for in
+       `overrides` (a cylinder when none is), then whatever else `overrides`
+       sets. The Stock card has no fields to read any more - see
+       app-stock.js - so a size is something the caller says. */
+    if (!window.nsoStockShelf || typeof window.nsoStockShelf.defaultOptions !== 'function') {
+      return fail('Attach needs app-stock.js');
+    }
+    var opts = window.nsoStockShelf.defaultOptions((overrides && overrides.shape) || 'cylinder');
     if (overrides) for (var k in overrides) if (Object.prototype.hasOwnProperty.call(overrides, k)) opts[k] = overrides[k];
     if (!opts.height) {
       return fail('Set a target height first (mm) - the blank is sized from the piece you mean to make');
     }
-    /* The same build-volume gate New stock applies, against the machine the
+    /* The same build-volume gate a Stock drop applies, against the machine the
        Plate card is pointed at, before any geometry exists. */
     if (typeof NSO_fitCurrentPrinter === 'function') opts.printer = NSO_fitCurrentPrinter();
 

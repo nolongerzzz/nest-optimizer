@@ -91,7 +91,7 @@ const HOLDS = {
   'menu-rotate': ['btn-rot-left', 'btn-rot-right', 'chk-rot-ring-turn', 'chk-rot-ring-fb', 'chk-rot-ring-ss'],
   'menu-tip': ['btn-flip', 'btn-tip', 'btn-flip-over', 'btn-tip-face', 'btn-tilt-up', 'btn-tilt-dn', 'btn-bank-up', 'btn-bank-dn'],
   'menu-align': ['btn-join-align', 'btn-join-cx', 'btn-join-cz', 'btn-center-lock', 'btn-center-lock-pick', 'center-lock-ref'],
-  'menu-gen': ['.vp-wheel-menu', '.vp-stock-menu', 'btn-stock-make', 'btn-stock-attach', 'menu-relief', 'btn-relief-pick',
+  'menu-gen': ['.vp-wheel-menu', '.vp-stock-menu', 'stock-shelf', 'btn-stock-box', 'btn-stock-cone', 'menu-relief', 'btn-relief-pick',
                'menu-photo', 'btn-photoset-pick', 'btn-photoset-report', 'btn-photoset-clear'],
   'menu-export': ['export-format', 'btn-export-model', 'btn-library-save', 'btn-export-stl', 'btn-delete-model'],
   'menu-scale': ['scale-card', 'scale-factor', 'scale-target', 'btn-scale-fit'],
@@ -180,7 +180,14 @@ const RETIRED = {
   'btn-scale-length': ['scale-length'], 'btn-scale-width': ['scale-width'], 'btn-scale-height': ['scale-height'],
   'btn-scale-ring-outer': ['scale-ring-outer'], 'btn-scale-ring-wall': ['scale-ring-wall'],
   'btn-scale-rod-diameter': ['scale-rod-diameter'], 'btn-scale-offset': ['scale-offset'],
-  'btn-scale-factor': ['scale-factor'], 'btn-scale-dim': ['scale-target']
+  'btn-scale-factor': ['scale-factor'], 'btn-scale-dim': ['scale-target'],
+  // Stock is a shelf of tiles, no fields: its sizing is the Scale card's and
+  // New stock is a click on a tile. Attach left the card with the fields (its
+  // engine is app-assemble.js's nsoAttachAt; no control arms it now).
+  'sel-stock-shape': ['stock-shelf'], 'inp-stock-height': ['stock-shelf'], 'inp-stock-radius': ['stock-shelf'],
+  'inp-stock-wall': ['stock-shelf'], 'inp-stock-nozzle': ['stock-shelf'], 'inp-stock-waste': ['stock-shelf'],
+  'inp-stock-prop': ['stock-shelf'], 'chk-stock-match': ['stock-shelf'], 'chk-stock-oversize': ['stock-shelf'],
+  'btn-stock-make': ['stock-shelf'], 'btn-stock-attach': ['stock-shelf']
 };
 /* Hidden by their own state, with a box piece selected and nothing armed:
    each shows when its own control asks for it. Anything else found hidden
@@ -207,7 +214,7 @@ const OWN_STATE = {
   'btn-bridge-go': 'Bridge on', 'btn-bridge-cancel': 'Bridge on',
   'scale-target': 'the longest edge, when a named section already shows the same number',
   'btn-scale-dim': 'ditto',
-  'carve-b': 'a blade with a length', 'inp-stock-prop': 'a shape with proportions',
+  'carve-b': 'a blade with a length',
   // #194: the Supports card is a verb with a state - Remove all once it has
   // built, Remove once a built support is picked
   'btn-sup-none': 'Supports card BUILT', 'btn-sup-remove': 'Supports card BUILT, a support picked'

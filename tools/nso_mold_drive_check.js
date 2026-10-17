@@ -98,7 +98,7 @@ withApp(async (page, logs) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.waitForTimeout(400);
 
-  console.log('\n=== 1. A Stock sphere Ø30 from the Stock card; Gen+ -> Mold on it ===');
+  console.log('\n=== 1. A Stock sphere Ø30 from the Stock shelf; Gen+ -> Mold on it ===');
   const H = await page.evaluate(() => {
     let lo = 5, hi = 300;
     for (let i = 0; i < 80; i++) {
@@ -107,12 +107,11 @@ withApp(async (page, logs) => {
     }
     return (lo + hi) / 2;
   });
-  await setF(page, { 'sel-stock-shape': 'sphere', 'inp-stock-height': H, 'inp-stock-radius': null, 'inp-stock-wall': 3, 'inp-stock-waste': 0,
-    'chk-stock-match': false, 'chk-stock-oversize': false });
-  await page.click('#btn-stock-make');
+  // The Stock shelf's own drop, asked for a Ø30 ball (a tile drops the default size).
+  await page.evaluate(h => nsoStockShelf.drop('sphere', { height: h, wall: 3, waste: 0 }), H);
   const sphId = await page.evaluate(() => state.models[state.models.length - 1].id);
   const sph = await page.evaluate(i => { const m = state.models.find(x => x.id === i); return { name: m.name, size: [m.size.x, m.size.y, m.size.z] }; }, sphId);
-  check('the Stock card made a sphere Ø30', sph.size.every(v => near(v, 30, 0.05)), JSON.stringify(sph.size.map(v => +v.toFixed(3))));
+  check('the Stock shelf made a sphere Ø30', sph.size.every(v => near(v, 30, 0.05)), JSON.stringify(sph.size.map(v => +v.toFixed(3))));
   const sphBefore = await sumOf(page, sphId);
   const sphPlaced = await page.evaluate(i => { const p = state.placed.find(q => q.sourceId === i); return { x: p.x, z: p.z }; }, sphId);
 
@@ -288,8 +287,7 @@ withApp(async (page, logs) => {
   check('the card goes back to Generate mold, still armed on the piece', L.btn === 'Generate mold' && L.armed && L.target === sphId && !L.btnDisabled, L.btn);
 
   console.log('\n=== 6. the piece as it lies: a pose changes the block ===');
-  await setF(page, { 'sel-stock-shape': 'box', 'inp-stock-height': 40, 'inp-stock-radius': 20, 'inp-stock-wall': 3, 'inp-stock-waste': 0, 'inp-stock-prop': '2:1:1' });
-  await page.click('#btn-stock-make');
+  await page.evaluate(() => nsoStockShelf.drop('box', { height: 40, radius: 20, wall: 3, waste: 0, proportions: { x: 2, y: 1, z: 1 } }));
   await page.waitForTimeout(300);
   const boxId = await page.evaluate(() => state.models[state.models.length - 1].id);
   await page.evaluate(i => { const k = state.placed.findIndex(p => p.sourceId === i); selectPlaced(k); }, boxId);

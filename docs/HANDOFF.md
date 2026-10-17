@@ -60,8 +60,7 @@ Current roster, by category:
 | Seat here (`app-seat-surface.js`) | whole-piece | `nsoMaskCount(modelB)`, only when the seat must turn B | `docs/SEAT-SURFACE.md` §3 |
 | Skin face (`app-skin.js`) | sub-region | the one face being skinned, `nsoMaskIsExcludedRaw(m, face.n, face.d, ...)` | header comment |
 | Delete painted (`app-paint-delete.js`) | sub-region | the one TARGET face, `nsoMaskIsExcludedRaw(m, face.n, face.d, ...)` | `docs/PAINT-DELETE.md` §7 |
-| Stock create (`app-stock.js`, the New stock button) | none — adds a piece, edits none | n/a | header comment + `docs/STOCK.md` |
-| Stock update (`app-stock.js`, a card adjustment) | whole-piece | `nsoMaskCount(m) > 0` | header comment + `docs/STOCK.md` |
+| Stock shelf (`app-stock.js`, a tile click) | none — adds a piece, edits none | n/a | header comment + `docs/STOCK.md` |
 | Extract selection (`app-extract-sel.js`) | sub-region | the one TARGET face, `nsoMaskIsExcludedRaw(m, face.n, face.d, ...)` | header comment |
 | Scale (`app-scale.js`; Whole, Longest, Fit to plate, Length / Width / Height, the ring verbs Outer / Wall / Diameter, and Offset) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comments (`NSO_scaleSelectedModel`, `NSO_scaleCardApply`) |
 | Skin patch (`app-skin-patch.js`) | **none** | — it reads no existing geometry at all | header comment |
@@ -5726,3 +5725,32 @@ Three things to keep:
 - **"Rim normals within 5 degrees" is the step in the smooth-shading normal at
   the rim vertices**, not a face-to-face dihedral (the undamaged faceted sphere
   has 10.9 degrees there). Patch 3.5, a flat cap 6.2.
+
+## Stock shelf - the Stock card is one row of tiles, no fields (2026-10-17)
+
+Write-up: "The shelf" in `docs/STOCK.md`. Files: `app-stock.js` (rewritten),
+`index.html` (the card), `styles.css`, `app-assemble.js` (reads no card any
+more), `tools/nso_stock_shelf_drive.js` (`npm run stock:shelf`),
+`tools/nso_page_manifest_test.js` (gate 4: the Stock card is tiles only).
+`stock`, `stock:live`, `wire:stock`, `wire:assemble`, `wire:integration`,
+`paint:scope`, `shell:v3` and the scale / ring / mold drive checks were updated
+for the ids that went.
+
+PAINT SCOPE: **NONE** (`app-stock.js`): a tile adds a piece and edits none.
+The old "Stock update" row (whole-piece) is gone with the live session.
+
+Four things to keep:
+
+- **Sizing is Scale's.** A tile drops the shape at one default size (a 40 mm
+  target through `nso_stock.js`'s own defaults) and tags it with its sizing
+  (`NSO_shapeTagStock`); the Scale card's per-shape rows do the rest. A cone has
+  no dimension rows in Scale, so its h/d and taper have no field anywhere.
+- **Tiles are painted from `NSO_Stock.make`, once, on the card's first open.**
+  Nothing is an image file. The ellipsoid drops at h/d 1.5 - at the module's
+  default (1) it is a sphere and the shelf would hold one piece twice.
+- **Attach has no button.** It read the card's fields. `nsoAttachAt(placed,
+  point, normal, blank)` works as before with the blank passed in; the page
+  control is waiting for a home.
+- **The numbering is a running one across shapes** - `box 1`, `cylinder 2` -
+  taken from the highest `<shape> <n>` among the model list, so Undo hands a
+  number back and Clear plate (which leaves the model list) does not.

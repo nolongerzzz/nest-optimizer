@@ -79,8 +79,6 @@ const ROSTER = [
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Detach stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Reattach',       file: 'app-detach.js',          scope: 'WHOLE-PIECE',
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Reattach stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
-  { feature: 'Stock update',   file: 'app-stock.js',           scope: 'WHOLE-PIECE',
-    test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Stock stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   { feature: 'Lift',           file: 'app-lift-plate.js',      scope: 'WHOLE-PIECE',
     test: /nsoMaskCount\s*\(\s*m\s*\)/,                     standDown: /Lift stood down - ' \+ \w+ \+ ' painted face\(s\)/ },
   /* The marker scan only: generation adds a piece and edits none, and a

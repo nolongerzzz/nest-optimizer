@@ -17,6 +17,11 @@
         since the browser never loads them.
      2. package.json parses as JSON.
      3. package.json "testSteps": no step listed twice.
+     4. index.html: the Stock card is tiles only - a row of shape buttons,
+        each carrying a data-shape and one canvas, and nothing else: no
+        input, select, textarea, label, output, picture or line of text, and
+        no button that is not a tile. Stock is a shelf; its sizing is the
+        Scale card's.
    Each gate is run on a known-bad sample first, so a checker that has gone
    blind fails here instead of passing. */
 
@@ -71,6 +76,46 @@ function repeatedSteps(steps) {
   return reps;
 }
 
+/* The Stock card's markup: the <details> that opens it, up to its own close.
+   It holds no nested <details>, so the first </details> after it ends it.
+   Comments are blanked first, so a comment cannot hide a field (or be one). */
+function stockCard(html) {
+  const live = html.replace(/<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, ' '));
+  const a = live.search(/<details\b[^>]*\bvp-stock-menu\b[^>]*>/i);
+  if (a < 0) return null;
+  const b = live.indexOf('</details>', a);
+  return b < 0 ? null : live.slice(a, b + '</details>'.length);
+}
+
+/* What is wrong with a Stock card, one reason each; an empty list is a card
+   that is tiles only. */
+function stockCardFaults(card) {
+  if (card == null) return ['no Stock card found'];
+  const faults = [];
+  const body = card.replace(/^<details\b[^>]*>\s*<summary>[\s\S]*?<\/summary>/i, '');
+  const banned = body.match(/<(input|select|textarea|label|output|img|p|span|a|option|fieldset)\b/gi) || [];
+  for (const t of banned) faults.push('a ' + t.slice(1) + ' on the card');
+  const buttons = body.match(/<button\b[^>]*>[\s\S]*?<\/button>/gi) || [];
+  if (!buttons.length) faults.push('no tiles');
+  const shapes = [];
+  for (const b of buttons) {
+    const open = b.match(/<button\b[^>]*>/i)[0];
+    const shape = (open.match(/\bdata-shape="([a-z]+)"/) || [])[1];
+    const label = (open.match(/\bid="([^"]*)"/) || [])[1] || open;
+    if (!shape) faults.push(label + ' is a button with no data-shape - not a tile');
+    else shapes.push(shape);
+    if (!/\bclass="[^"]*\bstock-tile\b/.test(open)) faults.push(label + ' is not a .stock-tile');
+    if ((b.match(/<canvas\b/gi) || []).length !== 1) faults.push(label + ' does not hold exactly one canvas');
+    const inner = b.replace(/<button\b[^>]*>/i, '').replace(/<\/button>$/i, '').replace(/<canvas\b[^>]*><\/canvas>/gi, '');
+    if (inner.trim()) faults.push(label + ' has more in it than its canvas: ' + inner.trim().slice(0, 30));
+  }
+  if (new Set(shapes).size !== shapes.length) faults.push('a shape has two tiles');
+  // Anything else that is text: the card minus its tags is empty.
+  const loose = body.replace(/<button\b[\s\S]*?<\/button>/gi, '').replace(/<[^>]*>/g, '').trim();
+  if (loose) faults.push('loose text on the card: "' + loose.slice(0, 30) + '"');
+  return faults;
+}
+
 // --- the checkers themselves, on known-bad and known-good samples ---------
 console.log('checker self-test');
 {
@@ -94,6 +139,21 @@ console.log('checker self-test');
     duplicateTargets('<script src="a.js?v=1"></script>\n<script src="b.js?v=1"></script>').length === 0);
   const reps = repeatedSteps(['a', 'b', 'a', 'c', 'b']);
   check('a repeated test step is caught', reps.length === 2 && reps[0].step === 'a' && reps[0].again === 2);
+
+  const tile = (sh) => '<button id="btn-stock-' + sh + '" class="stock-tile" type="button" data-shape="' + sh +
+    '" aria-label="x"><canvas width="56" height="56"></canvas></button>';
+  const card = (inner) => '<details class="vp-menu vp-stock-menu"><summary>Stock</summary><div class="vp-menu-body">' + inner + '</div></details>';
+  check('a card of tiles is clean', stockCardFaults(stockCard(card(tile('box') + tile('cone')))).length === 0);
+  check('a field on the card is caught',
+    stockCardFaults(stockCard(card(tile('box') + '<label>H <input type="number" id="x"></label>'))).length >= 2);
+  check('a select is caught', stockCardFaults(stockCard(card('<select id="s"><option>a</option></select>' + tile('box')))).length >= 2);
+  check('a plain button that is not a tile is caught',
+    stockCardFaults(stockCard(card(tile('box') + '<button id="btn-stock-make" class="btn">New stock</button>'))).length >= 1);
+  check('text on a tile is caught', stockCardFaults(stockCard(card('<button class="stock-tile" data-shape="box"><canvas></canvas>Box</button>'))).length >= 1);
+  check('a tile with no canvas is caught', stockCardFaults(stockCard(card('<button class="stock-tile" data-shape="box"></button>'))).length >= 1);
+  check('loose text is caught', stockCardFaults(stockCard(card(tile('box') + 'Pick a shape'))).length >= 1);
+  check('a field hidden in a comment is not counted, a missing card is',
+    stockCardFaults(stockCard(card(tile('box') + '<!-- <input> -->'))).length === 0 && stockCardFaults(stockCard('<div></div>')).length === 1);
 }
 
 // --- index.html ------------------------------------------------------------
@@ -109,6 +169,16 @@ console.log('index.html');
     console.log('       ' + target + ' is loaded ' + ts.length + ' times:');
     for (const t of ts) console.log('         index.html:' + t.line + '  ' + t.raw);
   }
+}
+
+// --- the Stock card ---------------------------------------------------------
+console.log('the Stock card');
+{
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const card = stockCard(html);
+  const faults = stockCardFaults(card);
+  check('the Stock card is tiles only', faults.length === 0, faults.join('; ') || (card.match(/data-shape=/g) || []).length + ' tiles');
+  for (const f of faults) console.log('       ' + f);
 }
 
 // --- package.json ----------------------------------------------------------
