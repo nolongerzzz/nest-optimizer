@@ -354,11 +354,21 @@ async function twoPoints(page, which) {
     // in sight of the camera, with a clear line from one to the other.
     const cp = 8 * Math.cos(50 * Math.PI / 180), sp = 8 * Math.sin(50 * Math.PI / 180);
     const left = tops[0].x < tops[1].x ? 0 : 1;
-    return tops.map((c, i) => {
+    const at = () => tops.map((c, i) => {
       const p = c.clone(); p.x += (i === left ? cp : -cp); p.y += sp;
       const v = p.project(state.camera);
       return { x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (-v.y * 0.5 + 0.5) * r.height };
     });
+    // The tool's card stays open over the left of the viewport (Connect's grew a Draw row and Attach):
+    // pan the view sideways, measured, until neither point is under it.
+    const open = document.querySelector('.vp-shell-menu[open] > .vp-menu-body');
+    const card = open && open.getBoundingClientRect();
+    const pan = (mm) => { const d = new THREE.Vector3().setFromMatrixColumn(state.camera.matrixWorld, 0).multiplyScalar(mm);
+      state.controls.target.add(d); state.camera.position.add(d); state.controls.update(); state.camera.updateMatrixWorld(true); };
+    let q = at();
+    const under = (q) => card && q.some(p => p.x <= card.right + 20 && p.y <= card.bottom + 20);
+    if (under(q)) { const x0 = Math.min(...q.map(p => p.x)); pan(1); const pxPerMm = Math.min(...at().map(p => p.x)) - x0; pan((card.right + 60 - x0) / pxPerMm - 1); q = at(); }
+    return q;
   });
   await clickAt(page, pts[0]);
   await clickAt(page, pts[1]);
