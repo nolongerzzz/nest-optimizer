@@ -7,6 +7,7 @@ either of them.
 ```
 node tools/nso_crop_test.js        headless: canonical checker on every result, refusals, box -> faces
 node tools/nso_wire_crop_test.js   the real app: the Cut-menu row, the box drag, commit, export, undo
+node tools/nso_crop_engine_test.js the copy engine (Stage 4, below): shapes, Outline, refusals, the plate
 ```
 
 Both are in `npm test` (`crop:test`, `wire:crop`).
@@ -422,3 +423,144 @@ star-side check is "no closer than 2", and the result-side check is "exactly
 - **The template is used where it sits.** Put it over the piece (drag it,
   Center lock) before Crop. The outline is taken as drawn at that moment.
 
+# Stage 4: the copy engine (`nso_crop.js`)
+
+Crop is becoming one operation: **copy what a shape holds out of a piece, as a
+new, sealed, solid piece on the plate.** The original is read and never written -
+no cut, no cap, no repair - and comes out byte for byte as it went in. This is
+the engine for it, on the Manifold kernel (the one Circle and Piece already
+used). The card is the next ticket: until it lands the old card keeps working,
+and its Circle and Piece regions now run on this engine.
+
+```
+NSO_Crop.plan(piece, shape)  -> Promise<{ ok, faces, volumeMm3, bbox, text }>   builds nothing
+NSO_Crop.run(piece, shape)   -> Promise<{ ok, tris, faces, volumeMm3, bbox, ... }>   the closed mesh
+NSO_Crop.copy(model, shape)  -> Promise<{ ok, id, name, ... }>                  run + onto the plate (browser)
+```
+
+Either of the first two answers `{ ok: false, reason }` and nothing else. The
+only refusals are a shape that **holds nothing** of the piece and a result that
+is **not closed**, plus numbers that make no shape (a box with a negative
+half-size, a rim with no triangle) which are refused in words before the kernel
+is touched. A shape that holds the whole piece is a copy of the whole piece.
+
+## The piece, the frames
+
+`piece = { name, rawTris, toRaw }`. `rawTris` is the piece's soup in its raw
+frame. `toRaw` (16 numbers, column-major) maps the plate frame **P** - z up,
+the way the piece stands - into that raw frame; omitted, P is the raw frame.
+Every shape is given in P, where the user sees it, and moved onto the soup by
+that one transform. The copy comes back in the piece's raw frame, so the same
+`toRaw` puts it exactly where the original is.
+
+## The shapes
+
+All placed and sized freely in 3D: centre, half-sizes, yaw (degrees about the
+vertical, counter-clockwise from above). There is no X / Z axis choice.
+
+| shape | fields |
+|---|---|
+| box | `{ kind: 'box', c: [x,y,z], h: [hx,hy,hz], yaw }` |
+| cylinder | `{ kind: 'cylinder', c, r, hl, axis: 'x'\|'y'\|'z', yaw }` (radius `r`, half-length `hl`; axis defaults to z) |
+| sphere | `{ kind: 'sphere', c, r }` |
+| piece | `{ kind: 'piece', source }`: another piece is the cutter; the copy is where the two overlap |
+| outline | `{ kind: 'outline', source, mode, tri, d1, d2, z1, z2 }` |
+
+`source` is a plate-frame soup or a piece-like `{ rawTris, toRaw }`, and may be
+the very piece being cropped. Circles are polygons whose chords sag at most
+0.005 mm inside the true circle; a sphere is cut twice as finely (its error runs
+both ways, and 128 segments is the floor).
+
+### Outline
+
+The footprint **F** of a chosen piece, extruded between heights `z1` and `z2`
+(omitted: right through the piece being cropped).
+
+- `mode: 'silhouette'` (the default): the piece seen from above. A tube's is an
+  annulus - you can see through its bore.
+- `mode: 'rim'`, with `tri` a triangle index of the source: the edge loop that
+  triangle borders, projected onto the plate. The triangle's smooth face is found
+  by walking out across edges that bend less than `creaseDeg` (30); its loops are
+  the crease / open edges round it. A triangle with an edge on one of the loops
+  takes that loop (so on a tube's end face the outer triangles pick the outer rim,
+  the inner ones the bore); any other triangle takes the face's outermost loop.
+
+The offsets are distances, never negative. **d1** grows F outward, **d2** shrinks
+it inward, and the region is the band between: `(F grown by d1) minus (F shrunk
+by d2)`. d1 alone is a skin outside the footprint, d2 alone a skin inside it, both
+a ring across it. **d1 = d2 = 0 is F itself, exactly** - no offset is applied, so
+the cutter's walls are the source's own outline to the last bit. (A band of no
+width would hold nothing, so zero on both is read as "the whole outline".) A d2
+wider than F leaves nothing to subtract, so the band is all of F. `solid: true`
+keeps the whole grown (d1) or shrunk (d2) footprint instead of the band - the old
+card's Grow.
+
+## The checks
+
+On every `run`, before it says ok:
+
+1. **Closed**, on the float32 values it will be saved as: every directed edge once
+   and its reverse once (closed, manifold, consistently wound).
+2. **Closed after the weld** every other tool applies, at the canonical checker's
+   radius (1e-4 mm). Two polygonal surfaces that cross almost exactly at a vertex
+   leave an edge of a few micro-millimetres: the first census passes it, and the
+   weld shuts it into a non-manifold pinch (`mesh_validate.py` fails it).
+3. **No slivers**: no edge under 2e-4 mm. If there is one, the kernel's `simplify`
+   is tried at 2e-4, 5e-4, 1e-3, then an edge collapse by weld at 1e-4 and at 2e-4,
+   and the cleanest result is kept. One that still fails (2) is refused as not
+   closed. Loose parts under 1e-6 of the copy (the film a cutter wall leaves where
+   it grazes a face) are dropped and counted; a void inside the piece stays.
+
+## Onto the plate (`NSO_Crop.copy`)
+
+The copy is a model of its own, **`<name> crop N`** (N is one more than the highest
+already there), in `state.models` and on the plate, with the raw triple the raw
+engines take. It is built in the original's raw frame and centred on its own
+bounding box, so it lands where it was cut from the way Split to parts puts each
+part back: the original's pose carried by the difference of the two centres, and
+the height it was cut at kept (`liftY`). It is **selected**, so Move and the arrow
+keys act on it at once - it overlaps the original, so a click would be a coin
+toss. One Undo (`addModels`) removes it. `{ pieceId }` in place of `source` reads
+a piece on the plate as drawn.
+
+PAINT SCOPE: **none**. Nothing is written to the original, so there is no
+sub-region and no whole-piece bake to stand down for; the copy carries no paint.
+
+## Results (`npm run crop:engine`)
+
+Volumes are checked against an oracle that shares nothing with the kernel: vertical
+rays through the piece's mesh against the **ideal** shape (a true circle or
+sphere, not its polygon), even-odd, on a grid offset so no ray runs along an edge.
+Exact identities back it where they exist.
+
+| case | result |
+|---|---|
+| box (plain, yawed), cylinder (x, y, z, yawed), sphere on the hinge and a stock tube (R12 r8 h20) | closed, no slivers, within 0.5% of the oracle (worst 0.30%), original byte-identical, `mesh_validate.py` clean with self-intersection |
+| the hinge cut in two and added back; a box round all of it | 318.048 + 318.048 = 636.096 exactly; the whole hinge, 730 faces |
+| a posed piece (`toRaw`) | the shape is where the piece is seen; every vertex of the copy lies inside the box seen through the pose |
+| Piece: the tube across the hinge | within 0.1% of the oracle; the same cutter given with its own pose is the same copy |
+| Outline: a tube's rim at offsets (0, 0.8) | the wall ring, 1165.93 mm³ against the closed form 1166.16 (0.02%), and 1165.93 on the 96-gon's own polygon |
+| Outline: the bore's rim, (0.8, 0) and (0.8, 0.8); (0.5, 0.5) across the outer rim | within 0.02% of π(r1² − r2²)h |
+| Outline: a bar 18 x 8 x 8 on a plate, (1, 0) / (1, 1) / (0, 1) | (2·26 + π)·4, that plus 48·4, and (144 − 96)·8, to 4 digits |
+| Outline: the hinge's silhouette | skin 453.162 + core 182.934 = 636.096; the footprint's area is the rays' (100.80 mm²); skin + footprint = footprint grown |
+
+The hinge's footprint is five knuckles, each 3.6 mm along, so it is under 4 mm
+across at its narrowest: a 2 mm skin of it is the whole hinge.
+
+## Found on the way
+
+`NSO_cropMatInvert` (the old card's, from Circle and Piece) returned the
+transpose of the rotation, not its inverse. The old card only read the piece's
+height and a miss test through it, which a transposed rotation leaves roughly
+true, so nothing showed. The engine's `matInvert` is correct, tested through a
+rotated pose, and the old card now uses it.
+
+## For the card (ticket 2)
+
+- `NSO_Crop.cut(piece, shape, keep, build, opts)` keeps the part **outside** as well
+  and takes two gates (`pre`, `post`). It exists for the old card's Keep outside
+  and goes with the card.
+- `NSO_Crop.cutterSoup(shape)` is a closed soup of the cutter in P, for a preview
+  (an outline with no `z1`/`z2` needs them here: it has no piece to take them from).
+- `NSO_Crop.rimLoop(soupP, tri)` is the rim finder alone: `{ loop, area, loops,
+  patchTris }`, for a hover that shows which loop a triangle will take.

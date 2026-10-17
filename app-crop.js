@@ -1811,22 +1811,16 @@ if (typeof document !== 'undefined') {
    Both are given in the PLATE frame P: z up (the plate's vertical), x and y
    across the plate. opts.toRaw (16 numbers, column-major, as THREE's
    Matrix4.elements) maps P into the piece's raw frame; omitted, P is the
-   raw frame. So the cutter is built where the user sees it and moved onto
-   the raw soup by one rigid transform, and the piece's own vertices are
-   never moved or re-rounded.
+   raw frame. The cutter is built where the user sees it and moved onto the
+   raw soup by one rigid transform, and the piece's own vertices are never
+   moved or re-rounded.
 
-   The cutter's height spans the piece (its extent along P's z, plus a
-   margin), so the cut always goes right through.
-
-   WHY THE KERNEL, not Cut's clip. A circle or a star is not a set of
-   planes; the clip only cuts at one plane at a time. The kernel's
-   intersect / subtract are the two booleans the region means, and it
-   returns a closed manifold or says why not. The cutter is the kernel's
-   own CrossSection, extruded: the circle is a regular polygon whose chords
-   sag at most NSO_CROP_SHAPE.sagMm inside the true circle; the outline is
-   the union of the template's triangles projected straight down (the
-   silhouette, whatever the template's own topology), and Grow is the
-   CrossSection's round offset.
+   THE ENGINE IS nso_crop.js. This card's two regions are two of its shapes -
+   the circle is a vertical cylinder through the piece (its height spans the
+   piece plus a margin, so the cut always goes right through), the outline a
+   solid outline with Grow - and its two keeps are the engine's cut(), which
+   takes the part inside (a copy) or the part outside (this card's remainder).
+   What stays here is what is the card's own: the words it refuses in.
 
    Refusals, each in words, and the input soup object handed back:
      - the region misses the piece (nothing kept inside, nothing removed
@@ -1840,97 +1834,36 @@ if (typeof document !== 'undefined') {
    ===================================================================== */
 
 var NSO_CROP_SHAPE = {
-  sagMm: 0.005,      // the circle's chords sag at most this inside the true circle
-  minSeg: 48,
-  maxSeg: 2048,
-  growSeg: 256,      // segments per full turn on Grow's round corners
-  marginMm: 1,       // the cutter runs this far past the piece, top and bottom
-  tinyMm3: 1e-3      // a change below this (or 1e-7 of the piece) is nothing
+  marginMm: 1        // the cutter runs this far past the piece, top and bottom
 };
 
-// Segments for a circle of radius r whose chords sag at most sagMm.
+// Segments for a circle of radius r whose chords sag at most the engine's sag.
 function NSO_cropCircleSegments(r) {
-  var S = NSO_CROP_SHAPE;
-  var c = 1 - S.sagMm / r;
-  var n = c > -1 ? Math.ceil(Math.PI / Math.acos(Math.max(-1, Math.min(1, c)))) : S.minSeg;
-  n = Math.max(S.minSeg, Math.min(S.maxSeg, n));
-  return Math.ceil(n / 4) * 4;
+  return NSO_Crop.circleSegments(r);
 }
 
-// Column-major 4x4 (affine) helpers.
-function NSO_cropMatApply(M, x, y, z) {
-  return [M[0] * x + M[4] * y + M[8] * z + M[12],
-          M[1] * x + M[5] * y + M[9] * z + M[13],
-          M[2] * x + M[6] * y + M[10] * z + M[14]];
-}
-function NSO_cropMatInvert(M) {
-  var a = M[0], b = M[4], c = M[8], d = M[1], e = M[5], f = M[9], g = M[2], h = M[6], i = M[10];
-  var A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
-  var det = a * A + b * B + c * C;
-  if (!(Math.abs(det) > 1e-12)) return null;
-  var r = 1 / det;
-  var inv = [A * r, B * r, C * r,
-             -(b * i - c * h) * r, (a * i - c * g) * r, -(a * h - b * g) * r,
-             (b * f - c * e) * r, -(a * f - c * d) * r, (a * e - b * d) * r];
-  // inv is row-major 3x3 here; out is column-major 4x4
-  var tx = M[12], ty = M[13], tz = M[14];
-  var out = [inv[0], inv[3], inv[6], 0, inv[1], inv[4], inv[7], 0, inv[2], inv[5], inv[8], 0, 0, 0, 0, 1];
-  out[12] = -(out[0] * tx + out[4] * ty + out[8] * tz);
-  out[13] = -(out[1] * tx + out[5] * ty + out[9] * tz);
-  out[14] = -(out[2] * tx + out[6] * ty + out[10] * tz);
-  return out;
-}
-
-/* The outline seen from above: every triangle of `soup` (P frame) dropped
-   onto z = 0, wound counter-clockwise. Walls drop to nothing and are left
-   out. Their union, under the non-zero rule, is the silhouette. Points are
-   { x, y }: the kernel reads an [x, y] pair only when it is an Array of its
-   own realm, so a soup from a vm context (the node tests) would not pass. */
-function NSO_cropSilhouettePolys(soup) {
-  var polys = [];
-  for (var o = 0; o + 8 < soup.length; o += 9) {
-    var ax = soup[o], ay = soup[o + 1], bx = soup[o + 3], by = soup[o + 4], cx = soup[o + 6], cy = soup[o + 7];
-    var ar = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
-    if (!(Math.abs(ar) > 1e-10)) continue;
-    var A = { x: ax, y: ay }, B = { x: bx, y: by }, C = { x: cx, y: cy };
-    polys.push(ar > 0 ? [A, B, C] : [A, C, B]);
-  }
-  return polys;
-}
-
-/* The region's cross-section (a kernel CrossSection in P's xy), or a reason.
-   The caller deletes it. */
-function NSO_cropShapeSection(wasm, shape) {
-  var S = NSO_CROP_SHAPE;
+/* A region of this card (P frame) as an engine shape, or { reason }.
+   zLo/zHi: the heights the cutter runs between. */
+function NSO_cropEngineShape(shape, zLo, zHi) {
   if (!shape) return { reason: 'no region' };
   if (shape.kind === 'circle') {
     var d = +shape.d;
     if (!isFinite(shape.cx) || !isFinite(shape.cy)) return { reason: 'the circle has no centre - click one on the piece' };
     if (!(d > 0.1)) return { reason: 'the circle needs a diameter above 0.1 mm' };
-    var n = NSO_cropCircleSegments(d / 2);
-    var c0 = wasm.CrossSection.circle(d / 2, n);
-    var cs = c0.translate(shape.cx, shape.cy);   // varargs: an array from another realm (a vm context) is not instanceof Array
-    c0.delete();
-    return { cs: cs, segments: n, what: 'the circle' };
+    return { shape: { kind: 'cylinder', c: [shape.cx, shape.cy, (zLo + zHi) / 2], r: d / 2, hl: (zHi - zLo) / 2, axis: 'z',
+                      label: 'the circle' } };
   }
   if (shape.kind === 'outline') {
-    var polys = NSO_cropSilhouettePolys(shape.soup || []);
-    if (!polys.length) return { reason: 'the template piece has no outline seen from above' };
-    var base = new wasm.CrossSection(polys, 'NonZero');
-    if (base.isEmpty() || !(base.area() > 1e-6)) { base.delete(); return { reason: 'the template piece has no outline seen from above' }; }
     var grow = +shape.grow || 0;
-    var out = base;
-    if (grow) {
-      out = base.offset(grow, 'Round', 2, S.growSeg);
-      base.delete();
-      if (out.isEmpty() || !(out.area() > 1e-6)) {
-        out.delete();
-        return { reason: 'Grow ' + grow.toFixed(2) + ' mm shrinks the outline to nothing' };
-      }
-    }
-    return { cs: out, what: 'the outline' };
+    return { shape: { kind: 'outline', source: shape.soup || [], mode: 'silhouette', solid: true,
+                      d1: grow > 0 ? grow : 0, d2: grow < 0 ? -grow : 0, z1: zLo, z2: zHi, label: 'the outline' } };
   }
   return { reason: 'unknown region "' + shape.kind + '"' };
+}
+
+// The engine's own words for a missing outline, in this card's: the template.
+function NSO_cropCardWords(reason) {
+  return String(reason).replace(/^the source piece has no outline/, 'the template piece has no outline');
 }
 
 /* NSO_cropShapeRaw(rawTris, opts) -> Promise<{ ok, reason, tris, ... }>
@@ -1940,120 +1873,51 @@ function NSO_cropShapeSection(wasm, shape) {
    On refusal ok is false and tris is the input soup object. */
 async function NSO_cropShapeRaw(rawTris, opts) {
   opts = opts || {};
-  var S = NSO_CROP_SHAPE;
   var keep = opts.keep === 'outside' ? 'outside' : 'inside';
   var res = { ok: false, reason: '', tris: rawTris, keep: keep };
   if (!rawTris || rawTris.length < 9) { res.reason = 'empty piece'; return res; }
+  if (typeof NSO_Crop === 'undefined') { res.reason = 'the crop engine did not load (nso_crop.js)'; return res; }
   var toRaw = opts.toRaw ? Array.prototype.slice.call(opts.toRaw) : null;
-  var fromRaw = toRaw ? NSO_cropMatInvert(toRaw) : null;
+  var fromRaw = toRaw ? NSO_Crop.matInvert(toRaw) : null;
   if (toRaw && !fromRaw) { res.reason = 'the plate-to-piece transform is singular'; return res; }
 
-  // The piece's extent in P: the cutter's height, and a cheap miss test.
-  var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-  for (var i = 0; i + 2 < rawTris.length; i += 3) {
-    var p = fromRaw ? NSO_cropMatApply(fromRaw, rawTris[i], rawTris[i + 1], rawTris[i + 2]) : [rawTris[i], rawTris[i + 1], rawTris[i + 2]];
-    for (var k = 0; k < 3; k++) { if (p[k] < lo[k]) lo[k] = p[k]; if (p[k] > hi[k]) hi[k] = p[k]; }
-  }
-  res.pieceP = { lo: lo, hi: hi };
+  var ext = NSO_Crop.extentInP(rawTris, fromRaw), M = NSO_CROP_SHAPE.marginMm;
+  var es = NSO_cropEngineShape(opts.shape, ext.lo[2] - M, ext.hi[2] + M);
+  if (!es.shape) { res.reason = es.reason; return res; }
 
-  var wasm;
-  try { wasm = await NSO_CSG.load(); }
-  catch (err) { res.reason = 'the boolean kernel failed to load (' + ((err && err.message) || err) + ')'; return res; }
-
-  var sec = null, solid = null, cutter = null, man = null, out = null;
-  try {
-    sec = NSO_cropShapeSection(wasm, opts.shape);
-    if (!sec.cs) { res.reason = sec.reason; return res; }
-    var what = sec.what;
-    res.what = what; res.segments = sec.segments || null; res.areaMm2 = sec.cs.area();
-    var b = sec.cs.bounds();
-    var bmin = b.min, bmax = b.max;
-    var bx0 = bmin.x !== undefined ? bmin.x : bmin[0], by0 = bmin.y !== undefined ? bmin.y : bmin[1];
-    var bx1 = bmax.x !== undefined ? bmax.x : bmax[0], by1 = bmax.y !== undefined ? bmax.y : bmax[1];
-    res.regionP = { lo: [bx0, by0], hi: [bx1, by1] };
-    if (bx1 < lo[0] || bx0 > hi[0] || by1 < lo[1] || by0 > hi[1]) {
-      res.reason = what + ' misses the piece - move it over the piece';
-      return res;
+  var r = await NSO_Crop.cut({ rawTris: rawTris, toRaw: toRaw }, es.shape, keep, true, {
+    pre: function (c) {
+      var rg = c.regionP, pc = c.pieceP;
+      if (rg && (rg.hi[0] < pc.lo[0] || rg.lo[0] > pc.hi[0] || rg.hi[1] < pc.lo[1] || rg.lo[1] > pc.hi[1])) {
+        return c.what + ' misses the piece - move it over the piece';
+      }
+      return '';
+    },
+    post: function (c) {
+      var tiny = c.tinyMm3, what = c.what;
+      if (keep === 'inside') {
+        if (!(c.keptMm3 > tiny)) return what + ' misses the piece - nothing of it is inside';
+        if (!(c.volumeBefore - c.keptMm3 > tiny)) return what + ' holds the whole piece - Keep inside would change nothing';
+      } else {
+        if (!(c.volumeBefore - c.keptMm3 > tiny)) return what + ' misses the piece - Keep outside would remove nothing';
+        if (!(c.keptMm3 > tiny)) return what + ' covers the whole piece - Keep outside would leave nothing';
+      }
+      return '';
     }
-    var z0 = lo[2] - S.marginMm, h = hi[2] - lo[2] + 2 * S.marginMm;
-    solid = sec.cs.extrude(h);
-    cutter = solid.translate(0, 0, z0);
-    solid.delete(); solid = null;
-    if (toRaw) { var moved = cutter.transform(toRaw); cutter.delete(); cutter = moved; }
-
-    man = NSO_CSG.soupToManifold(wasm, rawTris);
-    if (man.status && man.status() !== 'NoError' && typeof weldSoupVerts === 'function' && typeof NSO_weldEpsFor === 'function') {
-      man.delete();
-      man = NSO_CSG.soupToManifold(wasm, weldSoupVerts(rawTris, NSO_weldEpsFor(rawTris, 0.08)));
-    }
-    if (man.status && man.status() !== 'NoError') {
-      res.reason = 'the kernel does not take this piece as a closed solid (' + man.status() + ')';
-      return res;
-    }
-    var v0 = man.volume();
-    var tiny = Math.max(S.tinyMm3, Math.abs(v0) * 1e-7);
-    out = keep === 'inside' ? man.intersect(cutter) : man.subtract(cutter);
-    if (out.status && out.status() !== 'NoError') { res.reason = 'the kernel refused the cut (' + out.status() + ')'; return res; }
-    var v1 = out.isEmpty() ? 0 : out.volume();
-    res.volumeBefore = v0; res.keptMm3 = v1; res.removedMm3 = v0 - v1;
-    if (keep === 'inside') {
-      if (!(v1 > tiny)) { res.reason = what + ' misses the piece - nothing of it is inside'; return res; }
-      if (!(v0 - v1 > tiny)) { res.reason = what + ' holds the whole piece - Keep inside would change nothing'; return res; }
-    } else {
-      if (!(v0 - v1 > tiny)) { res.reason = what + ' misses the piece - Keep outside would remove nothing'; return res; }
-      if (!(v1 > tiny)) { res.reason = what + ' covers the whole piece - Keep outside would leave nothing'; return res; }
-    }
-    var tris = NSO_CSG.manifoldToSoup(out);
-    var cen = NSO_cropEdgeCensus(tris);
-    if (cen.open || cen.repeated || cen.degenerate) {
-      res.reason = 'the result did not come out closed (open ' + cen.open + ', repeated ' + cen.repeated +
-        ', degenerate ' + cen.degenerate + ')';
-      return res;
-    }
-    var parts = 1;
-    if (typeof out.decompose === 'function') {
-      var bits = out.decompose();
-      parts = bits.length;
-      for (var j = 0; j < bits.length; j++) bits[j].delete();
-    }
-    res.parts = parts;
-    res.census = cen;
-    res.tris = tris;
-    res.ok = true;
-    return res;
-  } catch (err) {
-    res.reason = 'the kernel failed (' + ((err && err.message) || err) + ')';
-    res.tris = rawTris;
-    return res;
-  } finally {
-    if (sec && sec.cs) sec.cs.delete();
-    if (solid) solid.delete();
-    if (cutter) cutter.delete();
-    if (man) man.delete();
-    if (out) out.delete();
-  }
+  });
+  r.reason = NSO_cropCardWords(r.reason);
+  return r;
 }
 
 /* The cutter itself as a closed soup in P, for the preview: the same
-   cross-section the crop uses, extruded from z0 by h. -> { soup } | { reason } */
+   cutter the crop uses, from z0 up by h. -> { soup } | { reason } */
 async function NSO_cropShapeCutterSoup(shape, z0, h) {
-  var wasm;
-  try { wasm = await NSO_CSG.load(); }
-  catch (err) { return { reason: 'the boolean kernel failed to load' }; }
-  var sec = null, solid = null, moved = null;
-  try {
-    sec = NSO_cropShapeSection(wasm, shape);
-    if (!sec.cs) return { reason: sec.reason };
-    solid = sec.cs.extrude(h);
-    moved = solid.translate(0, 0, z0);
-    return { soup: NSO_CSG.manifoldToSoup(moved), areaMm2: sec.cs.area() };
-  } catch (err) {
-    return { reason: (err && err.message) || String(err) };
-  } finally {
-    if (sec && sec.cs) sec.cs.delete();
-    if (solid) solid.delete();
-    if (moved) moved.delete();
-  }
+  if (typeof NSO_Crop === 'undefined') return { reason: 'the crop engine did not load (nso_crop.js)' };
+  var es = NSO_cropEngineShape(shape, z0, z0 + h);
+  if (!es.shape) return { reason: es.reason };
+  var r = await NSO_Crop.cutterSoup(es.shape);
+  if (r.reason) r.reason = NSO_cropCardWords(r.reason);
+  return r;
 }
 
 /* =====================================================================
@@ -2105,10 +1969,6 @@ function NSO_cropRegionMode() {
   return (typeof state !== 'undefined' && state.crop && state.crop.shape) ? state.crop.shape.mode : 'box';
 }
 
-// P (z up) <-> world (y up): world = (Px, Pz, -Py).
-function NSO_cropWorldFromP() { return new THREE.Matrix4().set(1, 0, 0, 0, 0, 0, 1, 0, 0, -1, 0, 0, 0, 0, 0, 1); }
-function NSO_cropPFromWorld() { return new THREE.Matrix4().set(1, 0, 0, 0, 0, 0, -1, 0, 0, 1, 0, 0, 0, 0, 0, 1); }
-
 // The display transform the bake draws with: local = (x - off.x, z - off.y, -y - off.z).
 function NSO_cropRawToLocal(m, p) {
   var off = m.centerOffset;
@@ -2122,22 +1982,7 @@ function NSO_cropLocalToRaw(m, v) {
 /* P -> m's raw frame, through `mesh` as drawn: { M } (16 numbers,
    column-major) or { reason }. */
 function NSO_cropPlateToRaw(m, mesh) {
-  if (!m || !m.rawTris || m.rawAxis !== 'zup' || !m.centerOffset) return { reason: 'Crop needs a raw piece' };
-  if (!mesh || !mesh.geometry) return { reason: 'the piece is not drawn' };
-  var off = m.centerOffset, rb = NSO_cropBounds(m.rawTris);
-  mesh.geometry.computeBoundingBox();
-  var bb = mesh.geometry.boundingBox;
-  var pairs = [[rb.lo[0] - off.x, bb.min.x], [rb.hi[0] - off.x, bb.max.x], [rb.lo[2] - off.y, bb.min.y],
-               [rb.hi[2] - off.y, bb.max.y], [-rb.hi[1] - off.z, bb.min.z], [-rb.lo[1] - off.z, bb.max.z]];
-  for (var i = 0; i < pairs.length; i++) {
-    if (Math.abs(pairs[i][0] - pairs[i][1]) > 1e-3) {
-      return { reason: 'the piece was turned since it was loaded, so its raw frame no longer matches the view' };
-    }
-  }
-  var rawFromLocal = new THREE.Matrix4().set(1, 0, 0, off.x, 0, 0, -1, -off.z, 0, 1, 0, off.y, 0, 0, 0, 1);
-  mesh.updateMatrixWorld(true);
-  var M = rawFromLocal.multiply(new THREE.Matrix4().copy(mesh.matrixWorld).invert()).multiply(NSO_cropWorldFromP());
-  return { M: Array.from(M.elements) };
+  return NSO_Crop.plateToRaw(m, mesh);
 }
 
 function NSO_cropPlacedOf(id) {
@@ -2146,16 +1991,7 @@ function NSO_cropPlacedOf(id) {
 
 // A placed piece's triangles in P, from the mesh as drawn.
 function NSO_cropMeshSoupP(mesh) {
-  var g = mesh.geometry, pos = g.attributes.position, idx = g.index;
-  var n = idx ? idx.count : pos.count;
-  mesh.updateMatrixWorld(true);
-  var M = NSO_cropPFromWorld().multiply(mesh.matrixWorld);
-  var out = new Float32Array(n * 3), v = new THREE.Vector3();
-  for (var i = 0; i < n; i++) {
-    v.fromBufferAttribute(pos, idx ? idx.getX(i) : i).applyMatrix4(M);
-    out[i * 3] = v.x; out[i * 3 + 1] = v.y; out[i * 3 + 2] = v.z;
-  }
-  return out;
+  return NSO_Crop.meshSoupP(mesh);
 }
 
 // The circle for the selected piece, made fresh (centred, half the narrower

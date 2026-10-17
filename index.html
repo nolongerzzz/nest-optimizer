@@ -1757,9 +1757,13 @@
   <!-- Mirror: exact reflection across the cut plane. After app-extend.js,
        whose axis detector and band cut it calls. See docs/MIRROR.md. -->
   <script src="app-mirror.js?v=mirror2"></script>
+  <!-- Crop's engine: copy what a shape holds out of a piece (docs/CROP.md). On
+       the boolean kernel in app-join.js and app-sculpt.js's commit helpers;
+       app-crop.js's Circle and Piece regions run on it, so it comes first. -->
+  <script src="nso_crop.js?v=cropengine1"></script>
   <!-- Crop, stage 1: box -> remove slab -> seal the joint. After app-cut.js
        (rawCutOpen, rawFlatCapLoop, mapPlaneToRaw) and app-sculpt.js (commit). -->
-  <script src="app-crop.js?v=cropshapes1"></script>
+  <script src="app-crop.js?v=cropengine1"></script>
   <script src="app-fatten.js?v=box2"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
