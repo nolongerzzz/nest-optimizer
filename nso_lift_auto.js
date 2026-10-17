@@ -1683,7 +1683,8 @@
     necksOf: necksOf,
     edt: edt,
     census: census,
-    shellsOf: shellsOf
+    shellsOf: shellsOf,
+    assemble: assemble
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.NSO_LiftAuto = api;
