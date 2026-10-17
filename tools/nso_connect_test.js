@@ -26,7 +26,25 @@
 //   4. one piece: the arms of a U, face to face, welded into a ring
 //   5. the refusals, each in its own words
 //   6. the readout line
+//   7. PATH: Sag +6 and -6 on every shape - the section at mid-span sits the
+//      stated 6 mm off the chord (±0.05), the arc stays in the vertical plane
+//      through the anchors, the sag is signed, stacked anchors bow away from the
+//      centroid, the last 3 mm at each end is straight along the approach
+//      direction, and Sag 0 is ticket 1's output to the byte
+//   8. ENDS: Weld / Flat / Foot pad / Ball on String and Ribbon, straight and
+//      curved, Weld into both (one shell) and Keep separate (one new piece), each
+//      closed and manifold; the pad and the ball are measured off the soup
+//   9. the path's refusals: through a third piece, through the connector's own
+//      piece, a hoop too flat on the surface, unknown ends
+//  10. the readout names the path and the ends
+//  11. THE ANCHOR IS THE POINT UNDER THE CURSOR: two boxes, a click on a corner
+//      or mid-face lands the connector's end on that very point (0.1 mm), not
+//      on a centre or a midpoint; the leave direction is the average of the
+//      adjoining faces' normals (a corner's three); Shift keeps the old centre /
+//      midpoint; the readout says where ("on box_closed at 2.1 mm from its
+//      corner"); three connectors in a row, each welded onto the last result
 //
+
 // Prints a table at the end; the PR quotes it.
 
 const fs = require('fs');
@@ -42,6 +60,23 @@ vm.runInContext(fs.readFileSync(path.join(L.ROOT, 'nso_connect.js'), 'utf8'), ct
 const BR = ctx.NSO_Bridge, CN = ctx.NSO_Connect, S = ctx.NSO_PathSweep;
 const csg = csgContext();
 const union = (a, b) => csg.NSO_unionSoups(a, b);
+
+const crypto = require('crypto');
+// Ticket 1's output for the straight fixture (two spheres 18 mm apart, default
+// everything), hashed at the commit before Sag and Ends existed (38cf015). A
+// straight, default-ended connector is byte-identical to it; change these only
+// on purpose.
+const TICKET1 = {
+  'string/weld': { web: 'f731b75d82ff04cd1d49e9e864ae1956bcd17976', soup: '4b8d8224cbbf5fdade8d15ca17bbdd99b7f5e524' },
+  'string/separate': { web: '3b1787bb8902cd3a486bc1b703190c26d353789e', soup: '3b1787bb8902cd3a486bc1b703190c26d353789e' },
+  'ribbon/weld': { web: '355bd0288e86517091d23a3a41860d830c9ddfa2', soup: '04bfb3e794996bc22da9b03488d9ad2a05f814f2' },
+  'ribbon/separate': { web: '1c6ed31058a7b2a0efc0803d1836422acd4c5ea8', soup: '1c6ed31058a7b2a0efc0803d1836422acd4c5ea8' },
+  'tube/weld': { web: 'd518440dc44080a39ace7a60aa5cacadbc6b7c56', soup: '6ff2d6043c18657909a837d13df273be62326611' },
+  'tube/separate': { web: '93faac7013f259b2701711f0198cb3f83d5ba5a6', soup: '93faac7013f259b2701711f0198cb3f83d5ba5a6' },
+  'tapered/weld': { web: '69670a1ce5b6e2d2e96ecf4926a74b6cc543a47b', soup: 'bb0424cc646c78e75298579d19e6cce4d3f26c69' },
+  'tapered/separate': { web: '465af899856c5c77fc214b1f09322e0f885bf9e7', soup: '465af899856c5c77fc214b1f09322e0f885bf9e7' }
+};
+const sha = soup => crypto.createHash('sha1').update(Buffer.from(soup.buffer, soup.byteOffset, soup.byteLength)).digest('hex');
 
 let pass = 0, fail = 0;
 const FAILS = [], TABLE = [];
@@ -92,12 +127,25 @@ function shells(soup) {
   });
 }
 
-function end(T, i, hit) { return { piece: i, target: BR.pick(T[i], hit.tri, hit.point) }; }
+// Sections 1-10 are ticket 1 and 2's: a face or an edge there is its centre / midpoint (`centre`), as before
+// the anchor was the clicked point. Section 11 is the clicked point (exact()).
+function end(T, i, hit) {
+  const t = BR.pick(T[i], hit.tri, hit.point);
+  return { piece: i, target: t.kind === 'face' || t.kind === 'edge' ? Object.assign(t, { centre: true }) : t };
+}
+function exact(T, i, hit, o) {
+  const r = CN.anchor(T[i], BR.pick(T[i], hit.tri, hit.point), o);
+  return { piece: i, target: r.target, info: r };
+}
 function hitAt(soup, p, n) { return { tri: L.triAt(soup, p, n), point: p }; }
 const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const ms = t0 => (Date.now() - t0) + ' ms';
 const same = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const unitv = a => { const n = Math.hypot(...a); return a.map(x => x / n); };
+const verts = soup => { const o = []; for (let i = 0; i < soup.length; i += 3) o.push([soup[i], soup[i + 1], soup[i + 2]]); return o; };
+const mean = pts => [0, 1, 2].map(k => pts.reduce((s, q) => s + q[k], 0) / pts.length);
 
 // The section at distance s along the axis from anchor A, as loops.
 function sectionAt(soup, p, s) {
@@ -356,6 +404,474 @@ function loopExtent(lp, dir) {
       const p = CN.plan(P, a, b, { shape, result });
       check(shape + ' / ' + result, p.ok && re.test(p.text), p.text || p.reason);
     });
+  }
+
+
+  /* =================================================================== 7 */
+  console.log('\n=== 7. PATH: Sag +/-6 on every shape; the arc, its plane, its straight ends; Sag 0 is ticket 1 ===');
+  {
+    // The vertical plane through the anchors: u along the chord, v up in the plane, w across it.
+    const frameOf = p => {
+      const A = p.anchors[0].p, B = p.anchors[1].p, u = unitv(sub(B, A));
+      const v = unitv([-u[2] * u[0], -u[2] * u[1], 1 - u[2] * u[2]]);
+      return { A, B, u, v, w: unitv(cross(u, v)), M: [0, 1, 2].map(k => (A[k] + B[k]) / 2) };
+    };
+    /* The vertices of the soup that lie in the plane through mid-span, normal to the chord: that
+       ring is the section there. Its mean is the centre line's point; its extent along w is the
+       section's width across the bend. */
+    const midRing = (soup, f) => verts(soup).filter(q => Math.abs(dot(sub(q, f.M), f.u)) < 1e-3);
+    /* Across the bend (w), at mid-span, and the widest the section gets along w anywhere. A ribbon lies as
+       ticket 1 puts it - here tilted, the facet normals of two facing spheres all but cancel - and a bend
+       about w keeps what the ribbon's width and thickness project onto w, so that is what is expected. */
+    const WIDTH = { string: 2, tube: 4, tapered: 2.75 }, HALF = { string: 1, tube: 2, tapered: 2 };
+    const TOL = { string: 1e-4, ribbon: 1e-3, tube: 1e-4, tapered: 0.05 };    // a taper's flush ends slide along cone rails
+    for (const shape of CN.SHAPES) for (const sag of [6, -6]) {
+      const t0 = Date.now();
+      const tag = shape + ' sag ' + (sag > 0 ? '+' : '') + sag;
+      const ps = CN.plan(P, a, b, { shape, result: 'separate', sagMm: sag });
+      check(tag + ': plans', ps.ok, ps.reason || ps.text);
+      const rs = await CN.weld(ps, { union });
+      const f = frameOf(ps);
+      const ring = midRing(rs.soup, f), c = mean(ring), d = sub(c, f.M);
+      const offV = dot(d, f.v), offW = dot(d, f.w), offU = dot(d, f.u);
+      check(tag + ' separate: the section at mid-span sits ' + sag + ' mm off the chord (±0.05), along the vertical-plane normal to it',
+        ring.length > 8 && Math.abs(offV - sag) <= 0.05, 'off ' + offV.toFixed(4) + ' (v), ' + offW.toExponential(1) + ' (across), ' + offU.toExponential(1) + ' (along)');
+      check('  ...and not a hair out of the plane or along the chord (≤ 1e-4 mm)', Math.abs(offW) <= 1e-4 && Math.abs(offU) <= 1e-4);
+      const wExt = ring.map(q => dot(sub(q, f.M), f.w)), wAll = verts(rs.soup).map(q => dot(sub(q, f.A), f.w));
+      const wide = shape === 'ribbon' ? Math.abs(dot(ps.frame.w, f.w)) * 6 + Math.abs(dot(ps.frame.f, f.w)) * 1.2 : WIDTH[shape];
+      const half = shape === 'ribbon' ? wide / 2 : HALF[shape];
+      check('  ...the arc stays in the vertical plane: no part of the connector is more than its own half-width (' + half.toFixed(3) + ') across it, and it is centred on it',
+        Math.max(...wAll) <= half + TOL[shape] && Math.min(...wAll) >= -half - TOL[shape] && Math.abs(Math.max(...wAll) + Math.min(...wAll)) <= 2 * TOL[shape],
+        'across ' + Math.min(...wAll).toFixed(5) + ' .. ' + Math.max(...wAll).toFixed(5));
+      check('  ...the section at mid-span across the bend is what it was set to (' + wide.toFixed(3) + ' mm, ±0.05)',
+        Math.abs((Math.max(...wExt) - Math.min(...wExt)) - wide) <= 0.05, (Math.max(...wExt) - Math.min(...wExt)).toFixed(4));
+      canonical(tag + ' separate', rs.soup);
+      // the leave angle holds, and the last 3 mm at each end is straight along the approach direction
+      check('  ...it leaves each surface inside the leave angle (80°) and the path says so', ps.leave.every(c => c > Math.cos(80 * Math.PI / 180)),
+        ps.leave.map(c => (Math.acos(c) * 180 / Math.PI).toFixed(1) + '°').join(' / '));
+      const pts = ps.path.points, d0 = sub(pts[1], pts[0]), d1 = sub(pts[pts.length - 1], pts[pts.length - 2]);
+      check('  ...the path\'s first and last runs are straight and at least 3 mm', Math.hypot(...d0) >= 3 - 1e-9 && Math.hypot(...d1) >= 3 - 1e-9 &&
+        Math.abs(dot(unitv(d0), ps.path.startDir) - 1) < 1e-12 && Math.abs(dot(unitv(d1), ps.path.endDir) - 1) < 1e-12,
+        Math.hypot(...d0).toFixed(3) + ' / ' + Math.hypot(...d1).toFixed(3) + ' mm');
+      if (shape === 'string') {
+        // Measured off the soup: every vertex within 3 mm of the anchor lies on a Ø2 cylinder about the approach line.
+        const near = (A, dir, n) => verts(rs.soup).filter(q => { const t = dot(sub(q, A), dir); return t < 3 - 0.01 && t > -3 && Math.hypot(...sub(q, A)) < 6; })
+          .map(q => { const dq = sub(q, A), t = dot(dq, dir); return Math.hypot(...sub(dq, dir.map(x => x * t))); })
+          .filter(r => r > 0.5);                                         // not the end cap's apex, which is on the axis
+        const rA = near(ps.anchors[0].p, ps.path.startDir), rB = near(ps.anchors[1].p, ps.path.endDir.map(x => -x));
+        check('  ...String: the last 3 mm before each anchor is a straight Ø2 cylinder about the approach direction (radius 1 ±1e-4, measured off the soup)',
+          rA.length > 16 && rB.length > 16 && rA.every(x => Math.abs(x - 1) < 1e-4) && rB.every(x => Math.abs(x - 1) < 1e-4),
+          rA.length + '+' + rB.length + ' vertices, radii ' + Math.min(...rA, ...rB).toFixed(5) + ' .. ' + Math.max(...rA, ...rB).toFixed(5));
+      }
+      // Weld: one solid, the very same curve
+      const pw = CN.plan(P, a, b, { shape, result: 'weld', sagMm: sag });
+      const rw = await CN.weld(pw, { union });
+      check(tag + ' weld: welds', pw.ok && rw.ok, pw.ok ? (rw.ok ? 'kernel parts ' + rw.parts : rw.reason) : pw.reason);
+      const sh = shells(rw.soup), solids = sh.filter(x => x.volume > 0), voids = sh.filter(x => x.volume < 0);
+      check('  ...ONE solid shell (the two spheres and the curve are one)' + (shape === 'tube' ? ' + the sealed bore' : ''), solids.length === 1 &&
+        voids.length === (shape === 'tube' ? 1 : 0) && rw.kernel.open === 0 && rw.kernel.nm === 0, solids.length + ' solid, ' + voids.length + ' void');
+      const rw2 = midRing(rw.soup, f), cw = mean(rw2);
+      check('  ...welded, the section at mid-span is the same ' + sag + ' mm off the chord (±0.05)', rw2.length > 8 && Math.abs(dot(sub(cw, f.M), f.v) - sag) <= 0.05, dot(sub(cw, f.M), f.v).toFixed(4));
+      canonical(tag + ' weld', rw.soup);
+      TABLE.push([tag + ' · weld', (SA.length / 9 + SB.length / 9) + ' → ' + (rw.soup.length / 9), 'one solid' + (voids.length ? ' + bore' : ''),
+        'mid-span ' + offV.toFixed(3) + ' mm, path ' + ps.pathLengthMm.toFixed(2) + ' mm', ms(t0)]);
+    }
+
+    // The sign: + is above the chord, - below.
+    {
+      const up = CN.plan(P, a, b, { shape: 'string', result: 'separate', sagMm: 6 }), dn = CN.plan(P, a, b, { shape: 'string', result: 'separate', sagMm: -6 });
+      const zUp = Math.max(...verts(up.web).map(q => q[2])), zDn = Math.min(...verts(dn.web).map(q => q[2]));
+      check('+6 bows UP and -6 hangs DOWN: the connector reaches ' + (up.anchors[0].p[2] + 6 + 1).toFixed(1) + ' mm above the plate at + and ' + (dn.anchors[0].p[2] - 6 - 1).toFixed(1) + ' at -',
+        Math.abs(zUp - (up.anchors[0].p[2] + 6 + 1)) < 0.1 && Math.abs(zDn - (dn.anchors[0].p[2] - 6 - 1)) < 0.1, 'top ' + zUp.toFixed(3) + ', bottom ' + zDn.toFixed(3));
+    }
+
+    // A tilted chord: the arc is in the vertical plane through the anchors, and "up" is up in that plane, not along Z.
+    {
+      const SC = L.sphere([34, 0, 22], 8, 32, 16), PT = [SA, SC], TT = PT.map(s => BR.index(s));
+      const tb = end(TT, 1, L.rayHit(SC, [20, 0.3, 21.5], [1, 0, 0]));
+      const p = CN.plan(PT, a, tb, { shape: 'string', result: 'separate', sagMm: 3 }), f = frameOf(p);
+      check('a tilted chord (' + (Math.asin(f.u[2]) * 180 / Math.PI).toFixed(1) + '° up) plans with a sag of 3', p.ok, p.reason || p.text);
+      const r = await CN.weld(p, { union });
+      const c = mean(midRing(r.soup, f)), d = sub(c, f.M);
+      check('...mid-span is 3 mm off the chord, perpendicular to it, in the vertical plane through the anchors (and so has height)', Math.abs(dot(d, f.v) - 3) <= 0.05 &&
+        Math.abs(dot(d, f.w)) <= 1e-4 && Math.abs(dot(d, f.u)) <= 1e-4 && f.v[2] > 0.5, 'v ' + dot(d, f.v).toFixed(4) + ', across ' + dot(d, f.w).toExponential(1) + ', along ' + dot(d, f.u).toExponential(1));
+    }
+
+    // Stacked anchors: no vertical plane, so the arc bows away from the centroid of the pieces.
+    {
+      const VA = L.sphere([0, 0, 8], 8, 32, 16), VB = L.sphere([0, 0, 40], 8, 32, 16), PV = [VA, VB], TV = PV.map(s => BR.index(s));
+      const va = end(TV, 0, L.rayHit(VA, [0.3, 0, 30], [0, 0, -1])), vb = end(TV, 1, L.rayHit(VB, [0.3, 0, 20], [0, 0, 1]));
+      for (const sag of [4, -4]) {
+        const p = CN.plan(PV, va, vb, { shape: 'string', result: 'separate', sagMm: sag });
+        check('stacked anchors, sag ' + sag + ': plans', p.ok, p.reason || p.text);
+        const f = frameOf(p), r = await CN.weld(p, { union });
+        const c = mean(midRing(r.soup, f)), d = sub(c, f.M);
+        check('...the chord is vertical (' + f.u.map(x => x.toFixed(6)).join(',') + ') and the arc ' + (sag > 0 ? 'bows away from the centroid' : 'bows toward it') +
+          ': mid-span is ' + Math.abs(sag) + ' mm ' + (sag > 0 ? 'out' : 'in') + ' along X, none along Y (the anchors are at X 0.3, the centroids at 0)', Math.abs(f.u[2]) > 0.999999 &&
+          Math.abs(d[0] - sag) <= 0.05 && Math.abs(d[1]) <= 1e-4 && Math.abs(d[2]) <= 1e-4, 'offset ' + d.map(x => x.toFixed(4)).join(','));
+      }
+    }
+
+    // A hair of sag is still a curve, and still exact (no cancellation in a circle of radius 1e6 mm).
+    for (const sag of [0.05, 0.5]) {
+      const p = CN.plan(P, a, b, { shape: 'string', result: 'separate', sagMm: sag }), f = frameOf(p), r = await CN.weld(p, { union });
+      const d = sub(mean(midRing(r.soup, f)), f.M);
+      check('a sag of ' + sag + ' mm: a closed piece, mid-span exactly ' + sag + ' mm off the chord (±0.001), radius ' + p.path.radiusMm.toFixed(0) + ' mm', p.ok && r.ok && r.topo.open === 0 && r.topo.nm === 0 &&
+        Math.abs(dot(d, f.v) - sag) <= 1e-3 && Math.abs(dot(d, f.w)) <= 1e-4, dot(d, f.v).toExponential(4));
+    }
+
+    // A level strap: a Ribbon between two level tops bends in its thickness, like a handle.
+    {
+      const BA = L.box(0, 0, 0, 4, 20, 5), BB = L.box(0, 38, 0, 4, 58, 5), PP = [BA, BB], TT = PP.map(x => BR.index(x));
+      const ea = end(TT, 0, hitAt(BA, [2, 19.9, 5], [0, 0, 1])), eb = end(TT, 1, hitAt(BB, [2, 38.1, 5], [0, 0, 1]));
+      for (const sag of [3, -3]) {
+        const p = CN.plan(PP, ea, eb, { shape: 'ribbon', result: 'separate', sagMm: sag });
+        check('a level ribbon between the two bars\' top edges, sag ' + sag + ': plans', p.ok, p.reason || p.text);
+        const f = frameOf(p), r = await CN.weld(p, { union });
+        const ring = midRing(r.soup, f), d = sub(mean(ring), f.M);
+        const wE = ring.map(q => dot(sub(q, f.M), f.w)), vE = ring.map(q => dot(sub(q, f.M), f.v));
+        check('...a strap that bows ' + (sag > 0 ? 'up' : 'down') + ' 3 mm: mid-span is 3 mm off the chord (±0.05), 6 wide across the bend (X), 1.2 thick in it (±0.05)',
+          Math.abs(dot(d, f.v) - sag) <= 0.05 && Math.abs(Math.max(...wE) - Math.min(...wE) - 6) <= 0.05 && Math.abs(Math.max(...vE) - Math.min(...vE) - 1.2) <= 0.05 && Math.abs(Math.abs(p.frame.f[2]) - 1) < 1e-9,
+          dot(d, f.v).toFixed(4) + ', ' + (Math.max(...wE) - Math.min(...wE)).toFixed(4) + ' × ' + (Math.max(...vE) - Math.min(...vE)).toFixed(4));
+        canonical('bars ribbon sag ' + sag, r.soup);
+      }
+    }
+
+    // Sag 0 is ticket 1, to the byte - however it is spelt.
+    {
+      let bad = [];
+      for (const shape of CN.SHAPES) for (const result of ['weld', 'separate']) {
+        const key = shape + '/' + result, want = TICKET1[key];
+        for (const spell of [{}, { sagMm: 0 }, { sagMm: '' }, { sagMm: -0 }, { sagMm: 1e-12 }, { ends: 'weld' }]) {
+          const p = CN.plan(P, a, b, Object.assign({ shape, result }, spell));
+          if (!p.ok || sha(p.web) !== want.web) bad.push(key + ' ' + JSON.stringify(spell) + ' web');
+        }
+        const r = await CN.weld(CN.plan(P, a, b, { shape, result, sagMm: 0 }), { union });
+        if (!r.ok || sha(r.soup) !== want.soup) bad.push(key + ' soup');
+      }
+      check('Sag 0 (omitted, 0, blank, -0, 1e-12) and Ends = Weld give ticket 1\'s web and welded soup bit for bit, all four shapes, both results (' + Object.keys(TICKET1).length * 7 + ' hashes)',
+        bad.length === 0, bad.join('; '));
+    }
+  }
+
+  /* =================================================================== 8 */
+  console.log('\n=== 8. ENDS: Weld / Flat / Foot pad / Ball, String and Ribbon, straight and curved, welded and kept separate ===');
+  {
+    const WIDTH = { string: 2, ribbon: 6 };
+    for (const shape of ['string', 'ribbon']) for (const sag of [0, 6]) {
+      const flatSep = CN.plan(P, a, b, { shape, result: 'separate', ends: 'flat', sagMm: sag });
+      const weldSep = CN.plan(P, a, b, { shape, result: 'separate', ends: 'weld', sagMm: sag });
+      check(shape + ' sag ' + sag + ': Ends = Weld, kept separate, is the flush cut - bit for bit what Flat is', flatSep.ok && weldSep.ok && same(flatSep.web, weldSep.web));
+      for (const ends of ['weld', 'flat', 'pad', 'ball']) {
+        const t0 = Date.now(), tag = shape + ' sag ' + sag + ' · ' + ends + ' ends';
+        // ---- Weld into both (Flat has nothing to weld with: refused)
+        let rw = null, jw = { euler_characteristic: '-' };
+        if (ends === 'flat') {
+          const pf = CN.plan(P, a, b, { shape, result: 'weld', ends, sagMm: sag });
+          check(tag + ' · weld: refused in words - a flush face has nothing to weld with', !pf.ok && /Flat ends are cut flush with the surface and not sunk, so there is nothing to weld them with - pick Keep separate/.test(pf.reason), pf.reason);
+        } else {
+          const pw = CN.plan(P, a, b, { shape, result: 'weld', ends, sagMm: sag });
+          check(tag + ' · weld: plans', pw.ok, pw.reason || pw.text);
+          rw = await CN.weld(pw, { union });
+          check(tag + ' · weld: welds', rw.ok, rw.ok ? 'kernel parts ' + rw.parts : rw.reason);
+          const sh = shells(rw.soup);
+          check('  ...ONE solid shell: the two spheres and the connector (and its ends) are one, closed and manifold', sh.length === 1 && sh[0].volume > 0 &&
+            rw.kernel.open === 0 && rw.kernel.nm === 0, sh.length + ' shell(s), kernel open ' + rw.kernel.open + ' / non-manifold ' + rw.kernel.nm);
+          jw = canonical(tag + ' · weld', rw.soup);
+        }
+        // ---- Keep separate
+        const ps = CN.plan(P, a, b, { shape, result: 'separate', ends, sagMm: sag });
+        check(tag + ' · separate: plans', ps.ok, ps.reason || ps.text);
+        const keepA = Float32Array.from(SA), keepB = Float32Array.from(SB);
+        const rs = await CN.weld(ps, { union });
+        check(tag + ' · separate: a closed piece of its own', rs.ok, rs.ok ? '' : rs.reason);
+        check('  ...' + (ends === 'pad' || ends === 'ball' ? 'the ends are unioned with the connector (and only with it)' : 'no boolean at all'),
+          (ends === 'pad' || ends === 'ball') ? rs.kernel && rs.kernel.open === 0 && rs.kernel.nm === 0 : rs.kernel === null, rs.kernel ? JSON.stringify(rs.kernel) : 'kernel null');
+        const ss = shells(rs.soup);
+        check('  ...ONE new piece, one shell', ss.length === 1 && ss[0].volume > 0, ss.map(x => x.volume.toFixed(2)).join(' / '));
+        const js = canonical(tag + ' · separate', rs.soup);
+        check('  ...the spheres are not touched (same numbers, bit for bit)', same(SA, keepA) && same(SB, keepB));
+        // ---- what the tips look like, measured off the soup
+        const w = WIDTH[shape];
+        for (let e = 0; e < 2; e++) {
+          const An = ps.anchors[e], n = An.n, P0 = An.p;
+          const h = q => dot(sub(q, P0), n);
+          const rad = q => { const d = sub(q, P0), t = dot(d, n); return Math.hypot(...sub(d, n.map(x => x * t))); };
+          const vs = verts(rs.soup);
+          if (ends === 'pad') {
+            const R = 2.5 * w / 2;
+            const bot = vs.filter(q => Math.abs(h(q)) < 1e-5 && Math.abs(rad(q) - R) < 1e-4), top = vs.filter(q => Math.abs(h(q) - 0.6) < 1e-5 && Math.abs(rad(q) - R) < 1e-4);
+            const near = vs.filter(q => rad(q) < R + 1e-4 && Math.hypot(...sub(q, P0)) < R + 1);
+            check('  ...end ' + 'AB'[e] + ': a Foot pad Ø' + 2.5 * w + ' (2.5 × ' + w + '), 0.6 thick, flush on the surface (its bottom in the surface plane; nothing of it below)',
+              bot.length >= 16 && top.length >= 16 && Math.min(...near.map(h)) > -1e-5, 'rim ' + bot.length + ' bottom / ' + top.length + ' top, lowest ' + Math.min(...near.map(h)).toExponential(1));
+          } else if (ends === 'ball') {
+            const R = 1.5 * w / 2;
+            const on = vs.filter(q => Math.abs(Math.hypot(...sub(q, P0)) - R) < 1e-4), inside = vs.filter(q => Math.hypot(...sub(q, P0)) < R - 0.03);   // a cut lies on a facet, up to 0.02 inside the sphere
+            check('  ...end ' + 'AB'[e] + ': a Ball Ø' + 1.5 * w + ' (1.5 × ' + w + ') centred on the anchor (its vertices all ' + R + ' mm from it)', on.length >= 100 && inside.length === 0,
+              on.length + ' on the sphere, ' + inside.length + ' inside it (none: the connector\'s own end is swallowed)');
+          } else {
+            const planeOff = vs.filter(q => Math.abs(h(q)) < 1e-5 && Math.hypot(...sub(q, P0)) < w);
+            check('  ...end ' + 'AB'[e] + ': cut flush - its end ring lies in the surface plane, and the connector goes no further', planeOff.length >= 6 && Math.min(...vs.filter(q => Math.hypot(...sub(q, P0)) < w).map(h)) > -1e-5,
+              planeOff.length + ' vertices in the plane');
+          }
+        }
+        TABLE.push([tag, (SA.length / 9 + SB.length / 9) + ' → ' + (rw ? rw.soup.length / 9 : 'refused') + ' / ' + (rs.soup.length / 9) + ' (a third piece)',
+          'Euler ' + jw.euler_characteristic + ' / ' + js.euler_characteristic, (rw ? '1 solid' : '-') + ' / 1 solid', ps.text.replace(/^.*mm between the anchors,? ?/, ''), ms(t0)]);
+      }
+    }
+  }
+
+  /* =================================================================== 9 */
+  console.log('\n=== 9. the path\'s refusals: through a piece (third, or its own), too flat on the surface, unknown ends ===');
+  {
+    // A lintel above the spheres: the straight line clears it, a bow up does not, a drape does.
+    const lintel = { soup: L.box(15, -6, 14, 19, 6, 20), name: 'lintel' };
+    let p = CN.plan(P, a, b, { shape: 'string', others: [lintel] });
+    check('a lintel 4 mm above the line: the straight connector is fine', p.ok, p.reason || p.text);
+    for (const sag of [3, 6]) {
+      p = CN.plan(P, a, b, { shape: 'string', sagMm: sag, others: [lintel] });
+      check('...sag +' + sag + ' would pass through it - refused, naming it', !p.ok && /curved connector passes through a third piece \(lintel\)/.test(p.reason), p.reason);
+    }
+    p = CN.plan(P, a, b, { shape: 'string', result: 'separate', sagMm: 6, others: [lintel] });
+    check('...Keep separate is held to it as well', !p.ok && /third piece/.test(p.reason), p.reason);
+    p = CN.plan(P, a, b, { shape: 'string', sagMm: -6, others: [lintel] });
+    check('...hung the other way (-6) it clears', p.ok, p.reason || p.text);
+    p = CN.plan(P, a, b, { shape: 'string', sagMm: 6, ends: 'pad', result: 'separate', others: [{ soup: L.box(7.9, 2.1, 9, 9.5, 2.7, 11), name: 'shelf' }] });
+    check('a Foot pad that would reach into a third piece (a shelf beside the connector, clear of it, in the pad\'s reach) is refused too', !p.ok && /foot pad at anchor A passes through a third piece \(shelf\)/.test(p.reason), p.reason);
+
+    // Through the connector's own piece: an overhang above anchor A.
+    const U = (await csg.NSO_unionSoups(L.box(0, 0, 0, 10, 10, 10), L.box(0, 0, 10, 16, 10, 16))).soup, BB = L.box(30, 0, 0, 40, 10, 10);
+    const PP = [U, BB], TT = PP.map(x => BR.index(x));
+    const ua = end(TT, 0, hitAt(U, [10, 5, 5], [1, 0, 0])), ub = end(TT, 1, hitAt(BB, [30, 5, 5], [-1, 0, 0]));
+    p = CN.plan(PP, ua, ub, { shape: 'string', sagMm: 0 });
+    check('an overhang over anchor A: the straight connector, under it, is fine', p.ok, p.reason || p.text);
+    p = CN.plan(PP, ua, ub, { shape: 'string', sagMm: 4 });
+    check('...a bow of +4 clears the overhang', p.ok, p.reason || p.text);
+    for (const sag of [6, 8]) {
+      p = CN.plan(PP, ua, ub, { shape: 'string', sagMm: sag });
+      check('...a bow of +' + sag + ' runs up into it: refused, as passing through the first piece', !p.ok && /curved connector would pass through the first piece - a sag of \+\d\.\d mm takes it through the piece/.test(p.reason), p.reason);
+    }
+    p = CN.plan(PP, ua, ub, { shape: 'string', sagMm: -6 });
+    check('...hung down (-6) it is clear of it', p.ok, p.reason || p.text);
+
+    // Too flat on the surface: a hoop.
+    for (const [sag, re] of [[20, /at anchor A it runs into the piece/], [-12, /at anchor A it runs along its surface/]]) {
+      p = CN.plan(P, a, b, { shape: 'string', sagMm: sag });
+      check('a sag of ' + sag + ' turns the connector so it leaves the surface ' + (sag > 0 ? 'into' : 'along') + ' it: refused in words, before anything is built', !p.ok && re.test(p.reason) && /use less sag/.test(p.reason), p.reason);
+    }
+    p = CN.plan(P, a, b, { shape: 'string', sagMm: 6, ends: 'ball', result: 'separate', others: [{ soup: L.box(7.9, 2.1, 9, 9.5, 2.7, 11), name: 'shelf' }] });
+    check('...a Ball is smaller, and the same shelf is clear of it', p.ok, p.reason || p.text);
+    p = CN.plan(P, a, b, { shape: 'string', result: 'weld', ends: 'flat' });
+    check('Flat ends, welded: refused in words (the flush cut has nothing to weld with)', !p.ok && /pick Keep separate, or Weld, Foot pad or Ball ends/.test(p.reason), p.reason);
+    for (const sag of [600, -1e6]) {
+      p = CN.plan(P, a, b, { shape: 'string', sagMm: sag });
+      check('an absurd sag (' + sag + ') is refused for how it leaves the surface, not for some side effect of its size', !p.ok && /at anchor A it runs into the piece, not away from it - use less sag/.test(p.reason), p.reason);
+    }
+    p = CN.plan(P, a, b, { shape: 'string', ends: 'cup' });
+    check('unknown ends are named', !p.ok && /unknown ends "cup" - Weld, Flat, Foot pad or Ball/.test(p.reason), p.reason);
+    p = CN.plan(P, a, b, { shape: 'string', sagMm: 6, diameterMm: 9 });
+    check('a connector too fat for its curve is refused in words, not swept inside out', !p.ok ? /sweep round that curve|bends tighter|fold/.test(p.reason) : true, p.reason || ('plans: ' + p.text));
+  }
+
+  /* ================================================================== 10 */
+  console.log('\n=== 10. the readout names the path and the ends ===');
+  {
+    const want = [
+      [{ shape: 'tube', result: 'separate', sagMm: 6, ends: 'ball' }, /^Tube Ø4\.0 × 0\.8 wall, 18\.1 mm between the anchors, sag \+6\.0 \(path 2[\d.]+ mm\), ball ends · kept as its own piece$/],
+      [{ shape: 'string', result: 'weld', sagMm: -6 }, /^String Ø2\.0, 18\.1 mm between the anchors, sag -6\.0 \(path 2[\d.]+ mm\) · welds into A and B$/],
+      [{ shape: 'ribbon', result: 'weld', ends: 'pad' }, /^Ribbon 6\.0 × 1\.2 mm, 18\.1 mm between the anchors, foot pad ends · welds into A and B$/],
+      [{ shape: 'tapered', result: 'separate', ends: 'flat', sagMm: 2.5 }, /^Tapered Ø4\.0 → Ø1\.5, 18\.1 mm between the anchors, sag \+2\.5 \(path 1[\d.]+ mm\), flat ends · kept as its own piece$/],
+      [{ shape: 'string', result: 'weld' }, /^String Ø2\.0, 18\.1 mm between the anchors · welds into A and B$/]
+    ];
+    want.forEach(([o, re]) => {
+      const p = CN.plan(P, a, b, o);
+      check(JSON.stringify(o), p.ok && re.test(p.text), p.text || p.reason);
+    });
+  }
+
+
+  /* ================================================================== 11 */
+  console.log('\n=== 11. the anchor is the point under the cursor ===');
+  {
+    const BC = L.box(0, 0, 0, 20, 20, 10), BO = L.box(40, 0, 0, 60, 20, 10);       // "box_closed", "box_open"
+    const PB = [BC, BO], TB = PB.map(x => BR.index(x));
+    const dist = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+    const near = (p, q, tol) => dist(p, q) <= tol;
+    // The centre of the cut where a flush-ended connector meets the surface: the mean of its vertices on that plane.
+    const cutCentre = (soup, at, n) => {
+      const v = verts(soup).filter(q => Math.abs(dot(sub(q, at), n)) < 1e-4);
+      return v.length ? mean(v) : null;
+    };
+
+    // ---- corner to corner
+    const cA = [20, 0, 10], cB = [40, 0, 10];                 // the facing top corners
+    const a1 = exact(TB, 0, hitAt(BC, cA, [0, 0, 1]), { name: 'box_closed' }), b1 = exact(TB, 1, hitAt(BO, cB, [0, 0, 1]), { name: 'box_open' });
+    check('a click on a corner is an edge pick, as Bridge classes it', a1.target.kind === 'edge' && b1.target.kind === 'edge', a1.target.kind + ' | ' + b1.target.kind);
+    const r3 = 1 / Math.sqrt(3);
+    check('...its leave direction is the average of the THREE faces\' normals there (±1, -1, 1)/√3',
+      near(a1.target.leaveNormal, [r3, -r3, r3], 1e-9) && near(b1.target.leaveNormal, [-r3, -r3, r3], 1e-9), a1.target.leaveNormal.map(x => x.toFixed(4)) + ' | ' + b1.target.leaveNormal.map(x => x.toFixed(4)));
+    check('...and it says so: "on box_closed at its corner"', a1.info.text === 'on box_closed at its corner' && b1.info.text === 'on box_open at its corner', a1.info.text + ' | ' + b1.info.text);
+    for (const result of ['separate', 'weld']) {
+      const t0 = Date.now();
+      const p = CN.plan(PB, a1, b1, { shape: 'string', result });
+      check('corner to corner, ' + result + ': plans', p.ok, p.reason || p.text);
+      const e0 = dist(p.anchors[0].p, cA), e1 = dist(p.anchors[1].p, cB);
+      check('...the connector\'s ends are the clicked corners, not the middle of the boxes (≤ 0.1 mm)', e0 <= 0.1 && e1 <= 0.1, e0.toExponential(1) + ' / ' + e1.toExponential(1) + ' mm; length ' + p.lengthMm.toFixed(3));
+      check('...it leaves along the corner\'s average normal', near(p.anchors[0].n, [r3, -r3, r3], 1e-9) && near(p.anchors[1].n, [-r3, -r3, r3], 1e-9));
+      const r = await CN.weld(p, { union });
+      check('...builds', r.ok, r.ok ? (r.soup.length / 9) + ' triangles' : r.reason);
+      if (result === 'separate') {
+        const c0 = cutCentre(r.soup, cA, p.anchors[0].n), c1 = cutCentre(r.soup, cB, p.anchors[1].n);
+        check('...measured off the soup: the flush cut at each end is centred on the clicked point (≤ 0.1 mm)', c0 && c1 && near(c0, cA, 0.1) && near(c1, cB, 0.1),
+          c0 && c1 ? dist(c0, cA).toExponential(1) + ' / ' + dist(c1, cB).toExponential(1) : 'no cut found');
+        canonical('corners separate', r.soup);
+      } else {
+        const sh = shells(r.soup);
+        check('...the two boxes and the string are ONE closed solid', sh.length === 1 && sh[0].volume > 0 && r.kernel.open === 0 && r.kernel.nm === 0, sh.length + ' shell(s)');
+        canonical('corners weld', r.soup);
+        TABLE.push(['two boxes, corner to corner · string weld', '24 → ' + (r.soup.length / 9), 'one solid', 'ends at the corners (≤ 0.1 mm)', p.lengthMm.toFixed(3) + ' mm', ms(t0)]);
+      }
+    }
+
+    // ---- the leave-angle guard asks the FACES, not the averaged normal
+    {
+      const lv = [
+        ['straight across: (20,0,10) -> (40,0,10), along +X', [20, 0, 10], [40, 0, 10]],
+        ['across and over: (20,20,10) -> (40,0,10), 45° to the edges', [20, 20, 10], [40, 0, 10]],
+        ['across and back: (20,0,10) -> (40,20,10)', [20, 0, 10], [40, 20, 10]]
+      ];
+      for (const [label, pa, pb] of lv) {
+        const t0 = Date.now();
+        const la = exact(TB, 0, hitAt(BC, pa, [0, 0, 1]), { name: 'box_closed' }), lb = exact(TB, 1, hitAt(BO, pb, [0, 0, 1]), { name: 'box_open' });
+        const p = CN.plan(PB, la, lb, { shape: 'string', result: 'weld' });
+        check('LEVEL corner to corner, ' + label + ': plans (a convex corner is left by any line out of the solid, not by the averaged normal)',
+          la.target.kind === 'edge' && lb.target.kind === 'edge' && la.target.faceRule === 'any' && lb.target.faceRule === 'any' && p.ok, p.ok ? p.text : p.reason);
+        if (!p.ok) continue;
+        check('...the line really is level, and its ends are the corners (≤ 0.1 mm)', Math.abs(p.axis[2]) < 1e-9 && near(p.anchors[0].p, pa, 0.1) && near(p.anchors[1].p, pb, 0.1), 'axis z ' + p.axis[2].toExponential(1));
+        const r = await CN.weld(p, { union });
+        const sh = r.ok ? shells(r.soup) : [];
+        check('...WELDS: the two boxes and the string are ONE closed solid', r.ok && sh.length === 1 && sh[0].volume > 0 && r.kernel.open === 0 && r.kernel.nm === 0, r.ok ? sh.length + ' shell(s), ' + (r.soup.length / 9) + ' triangles' : r.reason);
+        if (r.ok) canonical('level corners ' + lv.indexOf(lv.find(x => x[0] === label)), r.soup);
+        if (label.startsWith('straight')) TABLE.push(['two boxes, LEVEL top corner to corner · string weld', '24 → ' + (r.soup.length / 9), 'one solid', 'level, ends at the corners', p.lengthMm.toFixed(3) + ' mm', ms(t0)]);
+        const sep = CN.plan(PB, la, lb, { shape: 'string', result: 'separate' });
+        check('...and Keep separate plans it too', sep.ok, sep.reason || sep.text);
+      }
+      // still refused: along the corner's own edge, and into the solid
+      const cornerA = () => exact(TB, 0, hitAt(BC, [20, 0, 10], [0, 0, 1]), { name: 'box_closed' });
+      const alongEdge = CN.plan(PB, cornerA(), exact(TB, 0, hitAt(BC, [0, 0, 10], [0, 0, 1]), {}), { shape: 'string' });
+      check('a line running back along the corner\'s own top edge is refused - the face it leaves best is 0° off, not 10°', !alongEdge.ok && /into the piece|along its surface/.test(alongEdge.reason), alongEdge.reason || alongEdge.text);
+      const intoBox = CN.plan(PB, cornerA(), exact(TB, 0, hitAt(BC, [0, 20, 0], [0, 0, -1]), {}), { shape: 'string' });
+      check('...and one that goes into the solid (every adjoining face has it behind it) is refused in words', !intoBox.ok && /into the piece/.test(intoBox.reason), intoBox.reason || intoBox.text);
+      // flat faces keep the 10° rule: the same face anchors, the line 5° off the face
+      const fa = exact(TB, 0, hitAt(BC, [20, 6, 4], [1, 0, 0]), {}), fb = exact(TB, 1, hitAt(BO, [40, 6, 4], [-1, 0, 0]), {});
+      const farB = { piece: 1, target: Object.assign({}, fb.target, { point: [40, 6 + 20 / Math.tan(5 * Math.PI / 180), 4] }) };
+      const flat5 = CN.plan(PB, fa, farB, { shape: 'string', result: 'separate' });
+      check('flat faces keep the 10° rule: a face anchor with the line 5° off the face is refused ("along its surface")', fa.target.kind === 'face' && !flat5.ok && /along its surface/.test(flat5.reason), flat5.reason || flat5.text);
+
+      // concave: the inside corner of an L. The faces close in on the line, so it must clear EVERY one of them.
+      const Lp = (await csg.NSO_unionSoups(L.box(0, 0, 0, 30, 10, 10), L.box(0, 0, 0, 10, 30, 10))).soup;
+      const Cb = L.box(30, 10, 0, 40, 20, 10), Db = L.box(30, 30, 0, 40, 40, 10);
+      const PL = [Lp, Cb, Db], TL = PL.map(x => BR.index(x));
+      const ia = exact(TL, 0, hitAt(Lp, [10, 10, 5], [0, 1, 0]), { name: 'L' });
+      check('an L\'s inside corner is an edge whose faces close in on the line: the rule is "every face"', ia.target.kind === 'edge' && ia.target.faceRule === 'all', ia.target.kind + ' ' + ia.target.faceRule + ' ' + (ia.target.leaveNormal || []).map(x => x.toFixed(3)));
+      const ib = exact(TL, 1, hitAt(Cb, [30, 12, 5], [-1, 0, 0]), { name: 'C' }), id2 = exact(TL, 2, hitAt(Db, [30, 32, 5], [-1, 0, 0]), { name: 'D' });
+      const pAlong = CN.plan(PL, ia, ib, { shape: 'string', result: 'separate' }), pDiag = CN.plan(PL, ia, id2, { shape: 'string', result: 'separate' });
+      check('...a line along one of them (6° off the +Y face) is refused in words - a convex corner would have let it go', !pAlong.ok && /along its surface/.test(pAlong.reason), pAlong.reason || pAlong.text);
+      check('...a diagonal clear of both (≥ 40° off each) plans', pDiag.ok, pDiag.reason || pDiag.text);
+    }
+
+    // ---- a pointer never lands on the vertex: within the pick distance of a corner, the corner's three faces
+    const nc = [20, 0.4, 10];                                  // 0.4 mm along the top edge from the corner (20,0,10)
+    const loose = exact(TB, 0, hitAt(BC, nc, [0, 0, 1]), { name: 'box_closed' }), snug = exact(TB, 0, hitAt(BC, nc, [0, 0, 1]), { name: 'box_closed', cornerPickMm: 1 });
+    check('0.4 mm from a corner on its edge, with no pick distance: the edge\'s two faces (1, 0, 1)/√2', near(loose.target.leaveNormal, [Math.SQRT1_2, 0, Math.SQRT1_2], 1e-9));
+    check('...within a 1 mm pick distance it IS the corner: the three faces (1, -1, 1)/√3 - and the anchor is still the point itself, 0.4 mm along',
+      near(snug.target.leaveNormal, [r3, -r3, r3], 1e-9) && snug.info.text === 'on box_closed at 0.4 mm from its corner' && near(CN.plan(PB, snug, b1, { shape: 'string', result: 'separate' }).anchors[0].p, nc, 1e-6), snug.info.text);
+
+    // ---- Bridge reads a welded piece's flat faces as plain points: a crease within the pick distance is still a corner
+    {
+      const o = { kind: 'point', tri: L.triAt(BC, nc, [0, 0, 1]), point: nc, normal: [0, 0, 1], text: 'point' };
+      const bare = CN.anchor(TB[0], o, { name: 'box_closed' }), within = CN.anchor(TB[0], o, { name: 'box_closed', cornerPickMm: 1 });
+      check('a PLAIN POINT 0.4 mm from a box corner: its own triangle\'s normal with no pick distance; within one, the corner\'s three faces (the anchor is still the point)',
+        !bare.target.leaveNormal && near(within.target.leaveNormal, [r3, -r3, r3], 1e-9) && near(within.target.point, nc, 0), within.target.leaveNormal && within.target.leaveNormal.map(x => x.toFixed(3)).join(','));
+      const sp = L.sphere([0, 0, 10], 8, 32, 16), TSP = BR.index(sp), h = L.rayHit(sp, [0.01, 0.3, 10.2], [1, 0, 0]);
+      const tp = BR.pick(TSP, h.tri, h.point), sw = CN.anchor(TSP, tp, { name: 'ball', cornerPickMm: 0.5 });
+      check('...but a sphere\'s facets are no crease: a point on it keeps its triangle\'s normal (a pick distance within a facet)', !sw.target.leaveNormal && sw.target.point === tp.point, sw.text);
+      const wide = CN.anchor(TSP, tp, { name: 'ball', cornerPickMm: 1.5 }).target.leaveNormal;
+      check('...and a pick distance wider than a facet only smooths it: within 20° of the triangle\'s own', !wide || dot(wide, tp.normal) > Math.cos(20 * Math.PI / 180), wide ? wide.map(x => x.toFixed(3)).join(',') : 'none');
+    }
+
+    // ---- on an edge, 2.1 mm from the corner: the average of the TWO faces; the words give the distance
+    const eC = [20, 2.1, 10];                                  // on the top edge of the side facing box_open
+    const a2 = exact(TB, 0, hitAt(BC, eC, [0, 0, 1]), { name: 'box_closed' });
+    check('a click 2.1 mm along the edge from the corner is an edge pick with the average of its two faces (1, 0, 1)/√2 - no third face',
+      a2.target.kind === 'edge' && near(a2.target.leaveNormal, [Math.SQRT1_2, 0, Math.SQRT1_2], 1e-9), a2.target.kind + ' ' + (a2.target.leaveNormal || []).map(x => x.toFixed(4)));
+    check('...the readout: "on box_closed at 2.1 mm from its corner"', a2.info.text === 'on box_closed at 2.1 mm from its corner' && Math.abs(a2.info.cornerMm - 2.1) < 1e-6, a2.info.text);
+    const p2 = CN.plan(PB, a2, b1, { shape: 'string', result: 'separate' });
+    check('...and the connector\'s end is that point, not the edge\'s midpoint (10 mm away)', p2.ok && near(p2.anchors[0].p, eC, 1e-6), p2.ok ? p2.anchors[0].p.map(x => x.toFixed(3)).join(',') : p2.reason);
+
+    // ---- mid-face
+    const mA = [20, 6, 4], mB = [40, 14, 6];                  // off-centre on the facing sides (centres are (20,10,5), (40,10,5))
+    const a3 = exact(TB, 0, hitAt(BC, mA, [1, 0, 0]), { name: 'box_closed' }), b3 = exact(TB, 1, hitAt(BO, mB, [-1, 0, 0]), { name: 'box_open' });
+    check('a mid-face click is a face pick', a3.target.kind === 'face' && b3.target.kind === 'face', a3.target.kind + ' | ' + b3.target.kind);
+    check('...its words say how far the nearest corner is: "on box_closed at 7.21 mm from its corner"', a3.info.text === 'on box_closed at 7.21 mm from its corner' && Math.abs(a3.info.cornerMm - Math.sqrt(52)) < 1e-6 &&
+      b3.info.text === 'on box_open at 7.21 mm from its corner', a3.info.text + ' | ' + b3.info.text);
+    for (const result of ['separate', 'weld']) {
+      const p = CN.plan(PB, a3, b3, { shape: 'string', result });
+      check('mid-face to mid-face, ' + result + ': plans', p.ok, p.reason || p.text);
+      const e0 = dist(p.anchors[0].p, mA), e1 = dist(p.anchors[1].p, mB), cen = dist(p.anchors[0].p, [20, 10, 5]);
+      check('...the ends are the clicked points (≤ 0.1 mm), not the faces\' centres (' + cen.toFixed(1) + ' mm away)', e0 <= 0.1 && e1 <= 0.1 && cen > 4, e0.toExponential(1) + ' / ' + e1.toExponential(1));
+      check('...it leaves along the face normals', near(p.anchors[0].n, [1, 0, 0], 1e-9) && near(p.anchors[1].n, [-1, 0, 0], 1e-9));
+      const r = await CN.weld(p, { union });
+      if (result === 'separate') {
+        const c0 = cutCentre(r.soup, mA, [1, 0, 0]), c1 = cutCentre(r.soup, mB, [-1, 0, 0]);
+        check('...measured off the soup: the cut at each end is centred on the clicked point (≤ 0.1 mm)', r.ok && c0 && c1 && near(c0, mA, 0.1) && near(c1, mB, 0.1),
+          c0 && c1 ? dist(c0, mA).toExponential(1) + ' / ' + dist(c1, mB).toExponential(1) : (r.reason || 'no cut found'));
+      } else {
+        const sh = shells(r.soup);
+        check('...welded: ONE closed solid', r.ok && sh.length === 1 && sh[0].volume > 0 && r.kernel.open === 0 && r.kernel.nm === 0, r.ok ? sh.length + ' shell(s)' : r.reason);
+        canonical('mid-face weld', r.soup);
+      }
+    }
+
+    // ---- Shift: the old centre / midpoint
+    const sa = exact(TB, 0, hitAt(BC, mA, [1, 0, 0]), { name: 'box_closed', centre: true }), sb = exact(TB, 1, hitAt(BO, mB, [-1, 0, 0]), { name: 'box_open', centre: true });
+    const ps = CN.plan(PB, sa, sb, { shape: 'string', result: 'separate' });
+    check('Shift on a face: the old face centre (20,10,5) and (40,10,5)', ps.ok && near(ps.anchors[0].p, [20, 10, 5], 1e-4) && near(ps.anchors[1].p, [40, 10, 5], 1e-4) &&
+      sa.info.text === 'on box_closed, face centre', ps.ok ? ps.anchors.map(x => x.p.map(v => v.toFixed(2))).join(' | ') + ' | ' + sa.info.text : ps.reason);
+    const sc = exact(TB, 0, hitAt(BC, eC, [0, 0, 1]), { name: 'box_closed', centre: true });
+    const pe = CN.plan(PB, sc, b1, { shape: 'string', result: 'separate' });
+    check('Shift on an edge: its midpoint (20,10,10), leaving along the bisector of its two faces', pe.ok && near(pe.anchors[0].p, [20, 10, 10], 1e-4) && near(pe.anchors[0].n, [Math.SQRT1_2, 0, Math.SQRT1_2], 1e-9) &&
+      sc.info.text === 'on box_closed, edge midpoint', pe.ok ? pe.anchors[0].p.join(',') + ' | ' + sc.info.text : pe.reason);
+    const legacy = CN.plan(PB, end(TB, 0, hitAt(BC, mA, [1, 0, 0])), end(TB, 1, hitAt(BO, mB, [-1, 0, 0])), { shape: 'string', result: 'separate' });
+    check('...and the same as the targets of tickets 1 and 2 (`centre`) always gave, to the byte', legacy.ok && same(Array.from(legacy.web), Array.from(ps.web)));
+
+    // ---- a curved surface has no corner
+    const sph = L.sphere([0, 0, 10], 8, 32, 16), TS = BR.index(sph);
+    const ap = exact([TS], 0, L.rayHit(sph, [0.01, 0.3, 10.2], [1, 0, 0]), { name: 'ball' });
+    check('a sphere is a point pick: "on ball", no corner to measure', ap.target.kind === 'point' && ap.info.cornerMm === null && ap.info.text === 'on ball', ap.info.text);
+
+    // ---- three connectors in a row: each welded onto the last result
+    const W = [0, 1, 2, 3].map(i => L.box(i * 40, 0, 0, i * 40 + 20, 20, 10));
+    let acc = W[0];
+    const wp = [[20, 5, 3], [20, 12, 7], [20, 8, 5]];
+    for (let k = 0; k < 3; k++) {
+      const t0 = Date.now();
+      const left = acc, right = W[k + 1], PR = [left, right], TR = PR.map(x => BR.index(x));
+      const pa = [k * 40 + 20, wp[k][1], wp[k][2]], pb = [(k + 1) * 40, 20 - wp[k][1], 10 - wp[k][2]];
+      const ea = exact(TR, 0, hitAt(left, pa, [1, 0, 0])), eb = exact(TR, 1, hitAt(right, pb, [-1, 0, 0]));
+      const p = CN.plan(PR, ea, eb, { shape: 'string', result: 'weld' });
+      const r = p.ok ? await CN.weld(p, { union }) : p;
+      const sh = r.ok ? shells(r.soup) : [];
+      check('connector ' + (k + 1) + ' of 3, in a row: welds the next box onto the last result - one closed solid', p.ok && r.ok && sh.length === 1 && sh[0].volume > 0 && r.kernel.open === 0 && r.kernel.nm === 0 &&
+        near(p.anchors[0].p, pa, 0.1) && near(p.anchors[1].p, pb, 0.1), p.ok ? (r.ok ? sh.length + ' shell(s), ends ' + dist(p.anchors[0].p, pa).toExponential(1) : r.reason) : p.reason);
+      if (!r.ok) break;
+      acc = r.soup;
+      if (k === 2) {
+        canonical('three in a row', acc);
+        TABLE.push(['four boxes, three connectors in a row · string weld', '48 → ' + (acc.length / 9), 'one solid', 'three welds', 'ends at the clicks', ms(t0)]);
+      }
+    }
+    check('...after the third the four boxes and three strings are ONE solid', shells(acc).length === 1);
   }
 
   console.log('\n=== table ===');

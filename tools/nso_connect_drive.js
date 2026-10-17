@@ -25,7 +25,18 @@
      7. Cancel drops the picks and keeps the card; again, closes it
      8. no gate: the column button opens the card armed (picks live); the column
         button again, Escape with nothing picked, and another column button each
-        shut it and put the picks, ghost and overlay away */
+        shut it and put the picks, ghost and overlay away
+     9. Sag and Ends: typing a Sag redraws the ghost as an arc (+6 up, -6 down,
+        measured off the ghost), a hoop is refused in words, the Ends dropdown
+        redraws it with a Foot pad / Ball, Flat with Weld is refused; then Set
+        (Keep separate + Ball + sag +6; Weld + Foot pad + sag -3) and Undo, the
+        pieces bit for bit
+    10. THE ANCHOR IS THE POINT UNDER THE CURSOR: real clicks at two box corners
+        (the readout says where, the connector's ends are the clicked points,
+        leaving along the corner's three faces' average), Shift keeps the old
+        edge midpoint, Set leaves the card armed for the next pair (picks clear,
+        fields stay, the last connector stays) - three Sets in a row on four
+        boxes, one solid, Undo x3 puts the boxes back - and Escape closes it */
 
 const fs = require('fs');
 const os = require('os');
@@ -89,7 +100,7 @@ function installHelpers() {
           if (document.elementFromPoint(s.x, s.y) !== state.renderer.domElement) return false;
           const t = NSO_bridgeTargetAt({ clientX: s.x, clientY: s.y });
           // the kind wanted, and the very place: within 0.6 mm of the point asked for
-          return t && t.target.kind === kinds[i] && Math.hypot(t.world.x - q[0], t.world.y - q[2], t.world.z + q[1]) < 0.6;
+          return t && [].concat(kinds[i]).includes(t.target.kind) && Math.hypot(t.world.x - q[0], t.world.y - q[2], t.world.z + q[1]) < 0.6;
         });
         if (ok) return { k, back, from: state.camera.position.toArray(), at: state.controls.target.toArray() };
       }
@@ -122,9 +133,18 @@ function installHelpers() {
         overlay: kids, line: !!(C.line && C.line.parent), ghost: !!(C.ghost && C.ghost.parent),
         ghostTris: C.ghost ? C.ghost.geometry.attributes.position.count / 3 : 0,
         planTris: C.plan && C.plan.ok ? C.plan.web.length / 9 : 0, planOk: !!(C.plan && C.plan.ok),
+        sag: C.plan && C.plan.ok ? C.plan.sagMm : null, ends: C.plan && C.plan.ok ? C.plan.ends : null, straight: C.plan && C.plan.ok ? C.plan.path.straight : null,
+        pathLen: C.plan && C.plan.ok ? C.plan.pathLengthMm : null,
+        anchorZ: C.plan && C.plan.ok ? C.plan.anchors[0].p[2] : null,
+        zTop: C.plan && C.plan.ok ? Math.max(...Array.from({ length: C.plan.body.length / 3 }, (_, i) => C.plan.body[i * 3 + 2])) : null,
+        zBot: C.plan && C.plan.ok ? Math.min(...Array.from({ length: C.plan.body.length / 3 }, (_, i) => C.plan.body[i * 3 + 2])) : null,
         reason: C.plan && !C.plan.ok ? C.plan.reason : '', length: C.plan && C.plan.ok ? C.plan.lengthMm : null,
         a: C.a ? C.a.target.kind : null, b: C.b ? C.b.target.kind : null,
         aPoint: C.a ? C.a.target.point.slice() : null, aObj: C.a ? C.a.sourceId : null,
+        aWorld: C.a ? [C.a.world.x, -C.a.world.z, C.a.world.y] : null, bWorld: C.b ? [C.b.world.x, -C.b.world.z, C.b.world.y] : null,
+        aLeave: C.a && C.a.target.leaveNormal ? C.a.target.leaveNormal.slice() : null, bLeave: C.b && C.b.target.leaveNormal ? C.b.target.leaveNormal.slice() : null,
+        aCentre: C.a ? !!C.a.target.centre : null, aEdge: C.a && C.a.target.kind === 'edge' ? [C.a.target.a, C.a.target.b] : null,
+        anchorsP: C.plan && C.plan.ok ? C.plan.anchors.map(x => x.p.slice()) : null, anchorsN: C.plan && C.plan.ok ? C.plan.anchors.map(x => x.n.slice()) : null,
         pressNull: !C.press, controlsOn: state.controls.enabled,
         ghostMat: C.ghost ? { color: C.ghost.material.color.getHex(), opacity: C.ghost.material.opacity } : null
       };
@@ -213,7 +233,7 @@ withApp(async (page, logs) => {
   C = await P(page);
   const aPicked = C;
   check('one click is anchor A: it is marked, named on the card, and nothing is held', C.a === 'point' && !C.b && C.overlay.includes('a:point') &&
-    /Anchor A: point/.test(C.aText) && /Anchor B: — click a piece/.test(C.bText) && C.pressNull && C.controlsOn && !C.planOk, C.aText + ' | ' + C.readout);
+    /^Anchor A: on sphA$/.test(C.aText) && /Anchor B: — click a piece/.test(C.bText) && C.pressNull && C.controlsOn && !C.planOk, C.aText + ' | ' + C.readout);
   check('...the piece was not selected or moved by the click (the press was Connect\'s)', await page.evaluate(ids => {
     const b = ids.map(id => window.__cn.bounds(window.__cn.up(id)));
     return Math.abs((b[1].lo[0] - b[0].lo[0]) - 34) < 1e-4;
@@ -267,7 +287,7 @@ withApp(async (page, logs) => {
   await clickAt(page, pb);
   C = await P(page);
   check('the second click is anchor B: a String is previewed, Set is on', C.a === 'point' && C.b === 'point' && C.planOk && !C.goDisabled && !C.bad &&
-    new RegExp('^String Ø2\\.0, ' + (C.length || 0).toFixed(1) + ' mm between the anchors · welds into A and B · Set welds it$').test(C.readout), C.readout);
+    new RegExp(' · String Ø2\\.0, ' + (C.length || 0).toFixed(1) + ' mm between the anchors · welds into A and B · Set welds it$').test(C.readout), C.readout);
   check('...the ghost is the very soup Set commits, drawn as Bridge\'s (amber, 0.75)', C.ghost && C.ghostTris === C.planTris && C.planTris > 0 &&
     C.ghostMat.color === 0xf59e0b && C.ghostMat.opacity === 0.75 && !C.line, C.ghostTris + ' triangles');
   const geomL = Math.hypot(...[0, 1, 2].map(k => pa[k] - pb[k]));
@@ -276,7 +296,7 @@ withApp(async (page, logs) => {
 
   console.log('\n=== 3. Shape: each re-plans and re-draws the ghost; a typed field redraws it ===');
   const SHAPES = [
-    ['ribbon', /^Ribbon 6\.0 × 1\.2 mm, /, 'ribbon'], ['tube', /^Tube Ø4\.0 × 0\.8 wall, /, 'tube'], ['tapered', /^Tapered Ø4\.0 → Ø1\.5, /, 'tapered'], ['string', /^String Ø2\.0, /, 'string']
+    ['ribbon', / · Ribbon 6\.0 × 1\.2 mm, /, 'ribbon'], ['tube', / · Tube Ø4\.0 × 0\.8 wall, /, 'tube'], ['tapered', / · Tapered Ø4\.0 → Ø1\.5, /, 'tapered'], ['string', / · String Ø2\.0, /, 'string']
   ];
   for (const [shape, re, rows] of SHAPES) {
     await page.selectOption('#sel-connect-shape', shape);
@@ -287,16 +307,16 @@ withApp(async (page, logs) => {
     if (shape !== 'string') await shot(page, '05-' + shape + '-ghost');
   }
   await page.fill('#inp-connect-dia', '3');
-  await page.waitForFunction(() => /^String Ø3\.0/.test(document.getElementById('connect-readout').textContent), null, { timeout: 3000 }).catch(() => {});
+  await page.waitForFunction(() => / · String Ø3\.0/.test(document.getElementById('connect-readout').textContent), null, { timeout: 3000 }).catch(() => {});
   C = await P(page);
-  check('typing a new Ø redraws the ghost with no further click', C.planOk && /^String Ø3\.0, /.test(C.readout), C.readout);
+  check('typing a new Ø redraws the ghost with no further click', C.planOk && / · String Ø3\.0, /.test(C.readout), C.readout);
   await page.fill('#inp-connect-dia', '2');
   await page.waitForTimeout(250);
   await page.selectOption('#sel-connect-shape', 'ribbon');
   await page.fill('#inp-connect-width', '4');
   await page.waitForFunction(() => /^Ribbon 4\.0 /.test(document.getElementById('connect-readout').textContent), null, { timeout: 3000 }).catch(() => {});
   C = await P(page);
-  check('a Ribbon\'s width field redraws it too', /^Ribbon 4\.0 × 1\.2 mm, /.test(C.readout), C.readout);
+  check('a Ribbon\'s width field redraws it too', / · Ribbon 4\.0 × 1\.2 mm, /.test(C.readout), C.readout);
   await page.fill('#inp-connect-width', '6');
   await page.waitForTimeout(250);
   await page.selectOption('#sel-connect-shape', 'tube');
@@ -461,6 +481,252 @@ withApp(async (page, logs) => {
   A = await armed();
   check('another column button shuts it and puts the picks away', !A.open && !A.menu && A.hidden && !A.picks && !A.overlay, JSON.stringify(A));
   await page.click('#menu-seat > summary');
+
+
+  console.log('\n=== 9. Sag and Ends: the ghost follows the fields; Set; Undo ===');
+  {
+    if (!(await page.evaluate(() => document.getElementById('menu-connect').open))) await page.click('#menu-connect > summary');   // no gate: the column opens it
+    await page.waitForFunction(() => state.connect && state.connect.open, null, { timeout: 5000 });
+    await page.selectOption('#sel-connect-shape', 'string');
+    await page.check('input[name="connect-result"][value="weld"]');
+    const ui2 = await page.evaluate(() => ({
+      sag: document.getElementById('inp-connect-sag'), ends: [...document.getElementById('sel-connect-ends').options].map(o => o.value + ':' + o.textContent),
+      sagVal: document.getElementById('inp-connect-sag').value, endsVal: document.getElementById('sel-connect-ends').value,
+      order: [...document.getElementById('connect-panel').querySelectorAll('select,input')].map(e => e.id || e.name) }));
+    check('the card has a Sag field (0) and an Ends dropdown (Weld, Flat, Foot pad, Ball; Weld chosen)', !!ui2.sag && ui2.sagVal === '0' && ui2.endsVal === 'weld' &&
+      ui2.ends.join(',') === 'weld:Weld,flat:Flat,pad:Foot pad,ball:Ball', ui2.ends.join(',') + ' | sag ' + ui2.sagVal);
+    const fr8 = () => page.evaluate(([pa, pb, V1, AT]) => window.__cn.frame([pa, pb], ['point', 'point'], V1, AT), [pa, pb, V1, AT]);
+    check('a front view with both sphere points on bare canvas', !!(await fr8()));
+    await clickAt(page, pa);
+    await clickAt(page, pb);
+    let S = await P(page);
+    check('both anchors picked: the straight String is previewed (Sag 0, Weld ends, readout unchanged from ticket 1)', S.planOk && S.straight === true && S.sag === 0 && S.ends === 'weld' &&
+      / · String Ø2\.0, [\d.]+ mm between the anchors · welds into A and B · Set welds it$/.test(S.readout) && Math.abs(+S.readout.match(/, ([\d.]+) mm between/)[1] - S.length) < 0.01, S.readout);
+    const straightTris = S.ghostTris, z0 = S.anchorZ;
+    await shot(page, '09-straight');
+
+    // ---- Sag: typed, live
+    const setSag = async v => { await page.fill('#inp-connect-sag', String(v)); await page.waitForTimeout(300); return P(page); };
+    S = await setSag(6);
+    check('typing a Sag of 6 redraws the ghost as an arc BOWING UP: the readout names the sag, the ghost reaches ' + (z0 + 6 + 1).toFixed(1) + ' mm (anchor + 6 + the string\'s radius)',
+      S.planOk && S.straight === false && S.sag === 6 && / · String Ø2\.0, [\d.]+ mm between the anchors, sag \+6\.0 \(path [\d.]+ mm\) · welds into A and B · Set welds it$/.test(S.readout) &&
+      S.ghost && S.ghostTris === S.planTris && S.ghostTris !== straightTris && Math.abs(S.zTop - (z0 + 6 + 1)) < 0.15, S.readout + ' | top ' + (S.zTop || 0).toFixed(2));
+    check('...the path is longer than the line, the ghost is still amber 0.75, Set is on', S.pathLen > S.length + 1 && S.ghostMat.color === 0xf59e0b && S.ghostMat.opacity === 0.75 && !S.goDisabled, S.pathLen.toFixed(2) + ' vs ' + S.length.toFixed(2));
+    await shot(page, '10-sag-plus-6');
+    // (These anchors sit 50° up the spheres' facing sides: a drape may fall 30° before it runs into the piece.)
+    S = await setSag(-3);
+    check('a Sag of -3 hangs it DOWN: the ghost reaches ' + (z0 - 3 - 1).toFixed(1) + ' mm', S.planOk && S.sag === -3 && /sag -3\.0 \(path/.test(S.readout) && Math.abs(S.zBot - (z0 - 3 - 1)) < 0.15, S.readout + ' | bottom ' + (S.zBot || 0).toFixed(2));
+    await shot(page, '11-sag-minus-3');
+    S = await setSag(-12);
+    check('a Sag of -12 would leave the surface into the piece: refused in words, no ghost, Set off', !S.planOk && S.bad && !S.ghost && S.goDisabled &&
+      /at anchor A it runs into the piece, not away from it - use less sag/.test(S.readout), S.readout);
+    await shot(page, '12-sag-refused');
+    S = await setSag(0);
+    check('Sag back to 0 is the straight String again, triangle for triangle', S.planOk && S.straight === true && S.ghostTris === straightTris, S.ghostTris + ' vs ' + straightTris);
+
+    // ---- Ends: the dropdown redraws
+    S = await setSag(6);
+    const ghostWeld = S.ghostTris;
+    for (const [ends, word] of [['ball', 'ball'], ['pad', 'foot pad']]) {
+      await page.selectOption('#sel-connect-ends', ends);
+      await page.waitForTimeout(150);
+      S = await P(page);
+      check('Ends = ' + ends + ': the readout names it and the sag, and the ghost now carries the ' + (ends === 'ball' ? 'spheres' : 'discs') + ' too',
+        S.planOk && S.ends === ends && new RegExp('sag \\+6\\.0 \\(path [\\d.]+ mm\\), ' + word + ' ends · welds into A and B').test(S.readout) && S.ghostTris > ghostWeld && S.ghostTris === S.planTris, S.readout + ' | ' + S.ghostTris + ' tris');
+      await shot(page, ends === 'ball' ? '13-ball-ends' : '14-pad-ends');
+    }
+    await page.selectOption('#sel-connect-ends', 'flat');
+    await page.waitForTimeout(150);
+    S = await P(page);
+    check('Ends = Flat with Weld into A and B: refused in words (a flush face has nothing to weld with), no ghost, Set off', !S.planOk && S.bad && !S.ghost && S.goDisabled &&
+      /Flat ends are cut flush with the surface and not sunk, so there is nothing to weld them with - pick Keep separate/.test(S.readout), S.readout);
+    await page.check('input[name="connect-result"][value="separate"]');
+    await page.waitForTimeout(150);
+    S = await P(page);
+    check('...Keep separate makes the Flat cut: it plans, "flat ends · kept as its own piece"', S.planOk && S.ends === 'flat' && /flat ends · kept as its own piece · Set adds it$/.test(S.readout), S.readout);
+
+    // ---- Set + Undo: Keep separate, Ball ends, sag +6
+    await page.selectOption('#sel-connect-ends', 'ball');
+    await page.waitForTimeout(150);
+    const spheres2 = await page.evaluate(() => window.__cn.snapshot());
+    S = await P(page);
+    check('Keep separate + Ball ends + sag +6 previews', S.planOk && /sag \+6\.0 \(path [\d.]+ mm\), ball ends · kept as its own piece · Set adds it$/.test(S.readout), S.readout);
+    let depth = await page.evaluate(() => state.undoStack.length);
+    let did = await setAndWait(page);
+    let after = await page.evaluate(() => {
+      const e = state.placed[state.placed.length - 1];
+      return { models: state.models.length, placed: state.placed.length, id: e.sourceId, name: state.models.find(m => m.id === e.sourceId).name,
+               status: document.getElementById('status').textContent, undo: state.undoStack.length };
+    });
+    let topo2 = await page.evaluate(id => window.__cn.topo(id), after.id);
+    const bb = await page.evaluate(id => window.__cn.bounds(window.__cn.up(id)), after.id);
+    check('Set adds ONE new piece (a third; the spheres stay), closed and manifold, one shell, ONE undo step', did && after.models === 3 && after.placed === 3 && after.undo === depth + 1 &&
+      /Connect done/.test(after.status) && topo2.open === 0 && topo2.nm === 0 && topo2.badWinding === 0 && topo2.shells === 1, JSON.stringify(topo2) + ' | ' + after.status);
+    check('...named Connector (string); on the plate it really bows up: its top is ' + (z0 + 6 + 1).toFixed(1) + ' mm (the anchor\'s height + 6 + the radius), read back off the scene',
+      after.name === 'Connector (string)' && Math.abs(bb.hi[2] - (z0 + 6 + 1)) < 0.2, after.name + ' | top ' + bb.hi[2].toFixed(2));
+    check('...the spheres untouched', sameSnap(spheres2, (await page.evaluate(() => window.__cn.snapshot())).filter(s => spheres2.some(x => x.id === s.id))));
+    await shot(page, '15-set-ball-separate');
+    await undo(page);
+    let back = await page.evaluate(() => ({ snap: window.__cn.snapshot(), status: document.getElementById('status').textContent, models: state.models.length }));
+    check('Undo: the connector is off the plate, the spheres as they were', back.models === 2 && sameSnap(spheres2, back.snap) && /Undo: Connect reverted/.test(back.status), back.status);
+
+    // ---- Set + Undo: Weld, Foot pad ends, sag -6
+    await fr8();
+    await clickAt(page, pa);
+    await clickAt(page, pb);
+    await page.check('input[name="connect-result"][value="weld"]');
+    await page.selectOption('#sel-connect-ends', 'pad');
+    await setSag(-3);
+    S = await P(page);
+    check('Weld + Foot pad ends + sag -3 previews', S.planOk && /sag -3\.0 \(path [\d.]+ mm\), foot pad ends · welds into A and B · Set welds it$/.test(S.readout), S.readout);
+    depth = await page.evaluate(() => state.undoStack.length);
+    did = await setAndWait(page);
+    after = await page.evaluate(() => {
+      const e = state.placed[state.placed.length - 1];
+      return { models: state.models.length, placed: state.placed.length, id: e.sourceId, name: state.models.find(m => m.id === e.sourceId).name,
+               status: document.getElementById('status').textContent, undo: state.undoStack.length, open: state.connect.open };
+    });
+    topo2 = await page.evaluate(id => window.__cn.topo(id), after.id);
+    check('Set: two spheres become ONE closed solid with a Foot pad at each end, ONE undo step, the card stays open', did && after.models === 1 && after.placed === 1 && after.undo === depth + 1 &&
+      /\(connected\)$/.test(after.name) && topo2.open === 0 && topo2.nm === 0 && topo2.badWinding === 0 && topo2.shells === 1 && after.open, JSON.stringify(topo2) + ' | ' + after.name);
+    await shot(page, '16-set-pad-weld');
+    await undo(page);
+    back = await page.evaluate(() => ({ snap: window.__cn.snapshot(), status: document.getElementById('status').textContent, models: state.models.length }));
+    check('Undo: both spheres back, bit for bit', back.models === 2 && sameSnap(spheres2, back.snap) && /Undo: Connect reverted/.test(back.status), back.status);
+
+    await page.selectOption('#sel-connect-ends', 'weld');
+    await page.fill('#inp-connect-sag', '0');
+    await page.check('input[name="connect-result"][value="weld"]');
+    await page.click('#btn-connect-cancel');          // no picks left after the Undo: it closes the card
+    S = await P(page);
+    const back8 = await page.evaluate(() => ({ sag: document.getElementById('inp-connect-sag').value, ends: document.getElementById('sel-connect-ends').value }));
+    check('Cancel with nothing picked closes the card, and the fields are back at Sag 0 / Weld ends', !S.open && S.hidden && back8.sag === '0' && back8.ends === 'weld', JSON.stringify(back8));
+  }
+
+
+  console.log('\n=== 10. the anchor is the point under the cursor: corners, Shift, and three in a row ===');
+  {
+    // a bare plate: four boxes, 40 mm apart in a row
+    await page.evaluate(() => {
+      state.placed.slice().forEach(p => { if (p.mesh && p.mesh.parent) p.mesh.parent.remove(p.mesh); });
+      state.placed = []; state.models = []; state.undoStack.length = 0; state.editId = null; state.selectedIndex = -1;
+    });
+    const bx = [];
+    for (const nm of ['box_closed', 'box_open', 'box_c', 'box_d']) bx.push(await loadSTL(page, L.writeSTL(path.join(TMP, nm + '.stl'), L.box(0, 0, 0, 20, 20, 10))));
+    await page.evaluate(ids => {
+      const b = ids.map(id => window.__cn.bounds(window.__cn.up(id)));
+      ids.forEach((id, i) => { if (i) window.__cn.nudge(id, (b[0].lo[0] + 40 * i) - b[i].lo[0], -(b[0].lo[1] - b[i].lo[1])); });
+    }, bx);
+    const bb = await page.evaluate(ids => ids.map(id => window.__cn.bounds(window.__cn.up(id))), bx);
+    const top = bb[0].hi[2], front = bb[0].lo[1];
+    const right = i => [bb[i].hi[0], front, top], left = i => [bb[i].lo[0], front, top];     // a box's top-front corners
+    const dist3 = (p, q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+    const snap0 = await page.evaluate(() => window.__cn.snapshot());
+    const view = async (pts, kinds) => {
+      const m = [0, 1, 2].map(k => (pts[0][k] + pts[1][k]) / 2);
+      return page.evaluate(([pts, kinds, V, AT]) => window.__cn.frame(pts, kinds, V, AT), [pts, kinds, [m[0], m[2] + 45, -m[1] + 25], [m[0], m[2], -m[1]]]);
+    };
+    const shiftClick = async (q) => {
+      await page.keyboard.down('Shift');
+      try { await clickAt(page, q); } finally { await page.keyboard.up('Shift'); }
+    };
+
+    if (!(await page.evaluate(() => document.getElementById('menu-connect').open))) await page.click('#menu-connect > summary');   // no gate: the column opens it
+    await page.waitForFunction(() => state.connect && state.connect.open, null, { timeout: 5000 });
+    await page.selectOption('#sel-connect-shape', 'string');
+    await page.check('input[name="connect-result"][value="weld"]');
+    await page.fill('#inp-connect-dia', '3');
+    let fr9 = await view([right(0), left(1)], ['edge', 'edge']);
+    check('a view with the two facing top corners on bare canvas, each reading as an edge pick', !!fr9);
+    let C9 = await P(page);
+
+    // ---- real clicks at two corners
+    await clickAt(page, right(0));
+    C9 = await P(page);
+    const WHERE = /^Anchor A: on box_closed at (its corner|[\d.]+ mm from its corner)$/;
+    check('one click at a corner is anchor A: the card says where - "Anchor A: on box_closed at … mm from its corner"', C9.a === 'edge' && WHERE.test(C9.aText) && /^Anchor B: — click a piece$/.test(C9.bText), C9.aText);
+    check('...the readout says it too, and what is left to do', /^Anchor A: on box_closed at (its corner|[\d.]+ mm from its corner) - orbit as you like, then click B\.$/.test(C9.readout), C9.readout);
+    await clickAt(page, left(1));
+    C9 = await P(page);
+    check('the second click: the readout names both - "Anchor A: on box_closed at … · Anchor B: on box_open at …" - then the connector', C9.planOk && !C9.bad &&
+      /^Anchor A: on box_closed at (its corner|[\d.]+ mm from its corner) · Anchor B: on box_open at (its corner|[\d.]+ mm from its corner) · String Ø3\.0, [\d.]+ mm between the anchors · welds into A and B · Set welds it$/.test(C9.readout), C9.readout);
+    const r3 = 1 / Math.sqrt(3);
+    check('...A and B are EXACTLY the points under the cursor (the plan\'s ends equal the click hits), ≤ 1 mm from the corners aimed at',
+      dist3(C9.anchorsP[0], C9.aWorld) < 1e-4 && dist3(C9.anchorsP[1], C9.bWorld) < 1e-4 && dist3(C9.aWorld, right(0)) < 1 && dist3(C9.bWorld, left(1)) < 1,
+      'A ' + dist3(C9.aWorld, right(0)).toFixed(2) + ' mm, B ' + dist3(C9.bWorld, left(1)).toFixed(2) + ' mm from the corners; plan vs hit ' + dist3(C9.anchorsP[0], C9.aWorld).toExponential(1));
+    check('...neither is the middle of its box (the old anchors were 10 mm away)', dist3(C9.anchorsP[0], [(bb[0].lo[0] + bb[0].hi[0]) / 2, (bb[0].lo[1] + bb[0].hi[1]) / 2, top]) > 8 &&
+      dist3(C9.anchorsP[1], [(bb[1].lo[0] + bb[1].hi[0]) / 2, (bb[1].lo[1] + bb[1].hi[1]) / 2, top]) > 8);
+    check('...it leaves along the average of the corner\'s three faces: (+1, -1, +1)/√3 at A, (-1, -1, +1)/√3 at B', !!C9.aLeave && !!C9.bLeave &&
+      dist3(C9.anchorsN[0], [r3, -r3, r3]) < 1e-6 && dist3(C9.anchorsN[1], [-r3, -r3, r3]) < 1e-6, C9.anchorsN && C9.anchorsN.map(n => n.map(v => v.toFixed(3)).join(',')).join(' | '));
+    check('...the marker on the card is at the click, not at a centre', await page.evaluate(() => {
+      const C = state.connect, m = C.overlay.children.find(c => c.userData.role === 'a').children.find(c => c.geometry && c.geometry.type === 'SphereGeometry');
+      const w = C.a.world; return m && Math.hypot(m.position.x - w.x, m.position.y - w.y, m.position.z - w.z) < 1e-6;
+    }));
+    await shot(page, '17-corner-to-corner');
+
+    // ---- Set: weld; the card stays armed
+    let n0 = await page.evaluate(() => state.undoStack.length);
+    let did9 = await setAndWait(page);
+    let st = await page.evaluate(() => {
+      const C = state.connect, e = state.placed[state.placed.length - 1];
+      return { open: C.open, a: !!C.a, b: !!C.b, ghost: !!C.ghost, goDisabled: document.getElementById('btn-connect-go').disabled, models: state.models.length,
+               dia: document.getElementById('inp-connect-dia').value, shape: document.getElementById('sel-connect-shape').value, id: e.sourceId,
+               readout: document.getElementById('connect-readout').textContent, name: state.models.find(m => m.id === e.sourceId).name };
+    });
+    let tp = await page.evaluate(id => window.__cn.topo(id), st.id);
+    check('Set welds the two boxes and the string into ONE closed solid', did9 && st.models === 3 && tp.shells === 1 && tp.open === 0 && tp.nm === 0 && tp.badWinding === 0, JSON.stringify(tp));
+    check('...the card stays open and armed for the next pair: A and B cleared, the ghost gone, Set off, the fields keep their values (String, Ø3)',
+      st.open && !st.a && !st.b && !st.ghost && st.goDisabled && st.dia === '3' && st.shape === 'string' && /^Connected\. Click anchor A on a piece/.test(st.readout), st.readout);
+    await shot(page, '18-after-first-set');
+    await undo(page);
+    check('Undo puts both boxes back, bit for bit', sameSnap(snap0, await page.evaluate(() => window.__cn.snapshot())) && (await page.evaluate(() => state.models.length)) === 4);
+
+    // ---- Shift keeps the old edge midpoint
+    fr9 = await view([right(0), left(1)], ['edge', 'edge']);
+    await shiftClick(right(0));
+    C9 = await P(page);
+    check('Shift-click on an edge: anchor A is the old edge midpoint, and the card says so - "Anchor A: on box_closed, edge midpoint"', C9.a === 'edge' && C9.aCentre === true &&
+      /^Anchor A: on box_closed, edge midpoint$/.test(C9.aText), C9.aText);
+    await clickAt(page, left(1));
+    C9 = await P(page);
+    const mid = C9.aEdge ? [0, 1, 2].map(k => (C9.aEdge[0][k] + C9.aEdge[1][k]) / 2) : null;
+    check('...the plan\'s end A is that edge\'s midpoint (half its length from either end, not the point clicked), B (no Shift) is the point clicked', !!mid && C9.anchorsP && dist3(C9.anchorsP[0], mid) < 1e-4 && dist3(C9.anchorsP[1], C9.bWorld) < 1e-4 &&
+      Math.abs(dist3(mid, C9.aEdge[0]) - dist3(C9.aEdge[0], C9.aEdge[1]) / 2) < 1e-6 && dist3(mid, C9.aWorld) > 1, C9.anchorsP ? 'A ' + C9.anchorsP[0].map(v => v.toFixed(2)).join(',') : C9.readout);
+    check('...and the readout carries both: "Anchor A: on box_closed, edge midpoint · Anchor B: on box_open at …"', /^Anchor A: on box_closed, edge midpoint · Anchor B: on box_open at (its corner|[\d.]+ mm from its corner) · /.test(C9.readout) || C9.bad, C9.readout);
+    await page.click('#btn-connect-cancel');
+    await page.waitForFunction(() => !state.connect.a && !state.connect.b, null, { timeout: 2000 });
+
+    // ---- three in a row, the card never reopened
+    const fields = await page.evaluate(() => ({ dia: document.getElementById('inp-connect-dia').value, open: state.connect.open }));
+    const undo0 = await page.evaluate(() => state.undoStack.length);
+    let ok3 = true, why3 = '';
+    for (let k = 0; k < 3; k++) {
+      const pa = right(k), pb = left(k + 1);
+      const f = await view([pa, pb], [['edge', 'point'], ['edge', 'point']]);   // a welded piece's flat faces read as plain points to Bridge
+      if (!f) { ok3 = false; why3 = 'no view for pair ' + (k + 1); break; }
+      await clickAt(page, pa);
+      await clickAt(page, pb);
+      const Ck = await P(page);
+      if (!Ck.planOk) { ok3 = false; why3 = 'pair ' + (k + 1) + ': ' + Ck.readout; break; }
+      const w = await setAndWait(page);
+      const s2 = await page.evaluate(() => ({ models: state.models.length, open: state.connect.open, a: !!state.connect.a, b: !!state.connect.b,
+        dia: document.getElementById('inp-connect-dia').value, undo: state.undoStack.length }));
+      if (!w || s2.models !== 3 - k || !s2.open || s2.a || s2.b || s2.dia !== fields.dia) { ok3 = false; why3 = 'after Set ' + (k + 1) + ': ' + JSON.stringify(s2); break; }
+    }
+    const fin = await page.evaluate(() => ({ models: state.models.length, undo: state.undoStack.length, open: state.connect.open, id: state.placed[state.placed.length - 1].sourceId,
+      welds: state.undoStack.slice(-3).map(u => u.label) }));
+    const tpf = await page.evaluate(id => window.__cn.topo(id), fin.id);
+    check('three connectors set in a row WITHOUT reopening the card: three welds, each on the last result', ok3 && fin.models === 1 && fin.undo === undo0 + 3 && fin.open, why3 || JSON.stringify({ models: fin.models, undo: fin.undo - undo0 }));
+    check('...the four boxes and three strings are ONE closed solid', tpf.shells === 1 && tpf.open === 0 && tpf.nm === 0 && tpf.badWinding === 0, JSON.stringify(tpf));
+    await shot(page, '19-three-in-a-row');
+    for (let k = 0; k < 3; k++) await undo(page);
+    check('three Undos put the four boxes back, bit for bit', sameSnap(snap0, await page.evaluate(() => window.__cn.snapshot())) && (await page.evaluate(() => state.models.length)) === 4);
+
+    // ---- Escape / Cancel close it when nothing is picked
+    await page.keyboard.press('Escape');
+    C9 = await P(page);
+    check('Escape with nothing picked closes the card', !C9.open && C9.hidden && C9.overlay.length === 0);
+  }
 
   const errs = logs.filter(l => /\[pageerror\]|\[error\]/.test(l) && !/favicon/.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
