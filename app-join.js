@@ -2332,7 +2332,10 @@ function seatFlushBitToHull() {
   }
   placedB.x = placedB.mesh.position.x;
   placedB.z = placedB.mesh.position.z;
-  const baseY = (placedB.height || placedB.mesh.geometry.boundingBox && (placedB.mesh.geometry.boundingBox.max.y - placedB.mesh.geometry.boundingBox.min.y) || 10) / 2 + 0.2;
+  // where the origin sits with B's lowest point on the baseline: nsoBelowOrigin
+  // under it, which is half the height only for a posed box centred on it
+  const baseY = nsoBelowOrigin(placedB.mesh, placedB.height ||
+    (placedB.mesh.geometry.boundingBox && (placedB.mesh.geometry.boundingBox.max.y - placedB.mesh.geometry.boundingBox.min.y)) || 10) + 0.2;
   placedB.liftY = Math.max(0, placedB.mesh.position.y - baseY);
   applyPlacedXZ(placedB, placedB.x, placedB.z);
   var resid = (res.maxResidual != null && isFinite(res.maxResidual)) ? res.maxResidual : 0;

@@ -274,7 +274,8 @@
     "grab:drop-shots": "node tools/nso_grab_drop_drive_check.js tools/grab-drop-out",
     "lift:assembly": "node tools/nso_lift_assembly_drive_check.js",
     "lift:assembly-shots": "node tools/nso_lift_assembly_drive_check.js tools/lift-assembly-out",
-    "camera:leash": "node tools/nso_camera_leash_test.js"
+    "camera:leash": "node tools/nso_camera_leash_test.js",
+    "pose:bounds": "node tools/nso_pose_bounds_test.js"
   },
   "devDependencies": {
     "playwright": "1.56.1",
@@ -321,6 +322,7 @@
     "grab:drop",
     "lift:assembly",
     "camera:leash",
+    "pose:bounds",
     "foam:test",
     "foam:drive",
     "cavity:thickwall",
@@ -611,6 +613,7 @@
     "grab:drop": 169000,
     "lift:assembly": 92000,
     "camera:leash": 300,
+    "pose:bounds": 60000,
     "foam:test": 4200,
     "foam:drive": 85300,
     "cavity:thickwall": 110,

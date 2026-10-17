@@ -47,6 +47,12 @@ Refused in words, the piece put back where it was, nothing on the Undo stack:
   have to turn, no surface under the mating face...), in Seat here's words
   with the pieces named.
 
+The helper a carry draws (the green or red box on the target and the dot on the
+drop point) is a registered helper (`nsoHelpers`, owner `grab-drop`) and is
+taken out of the scene - not just emptied - when the drag ends: a drop onto a
+piece, into the air or onto the plate, Escape, or leave-tool. Watch reports
+nothing after any of them (`watch:test` section H).
+
 ## 2. Floating is a state
 
 A piece in the air carries how far up it is as **liftY**, the record every
@@ -60,6 +66,10 @@ what `settlePlacedOnBed` reads. Everything that moves a piece keeps it:
   own liftY);
 - an Undo of a removed piece (it used to come back on the bed whatever its
   liftY said - fixed here).
+
+The piece's lowest point is its lowest VERTEX as posed (`nso-bounds.js`), also
+after a seat has baked a turn into its axes - see `docs/HANDOFF.md`, "A piece's
+bounds after a bake".
 
 Nothing brings a floating piece down except **To plate** or a drop onto the
 plate. Export writes it at its height, like any piece.

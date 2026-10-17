@@ -1064,7 +1064,7 @@ withApp(async (page, logs) => {
                  held: a.holding() === p, screen: a.centreScreen() };
       } });
       const after = { group: g(), centre: centreW(), lowest: lowest(), held: a.holding(), y: p.mesh.position.y,
-                      seatedY: p.height / 2 + 0.2 + (p.liftY || 0) };
+                      seatedY: nsoBelowOrigin(p.mesh, p.height) + 0.2 + (p.liftY || 0) };
       a.setRing('ss', false);
       return { start, frames: tr.seen.filter(f => f.applied !== 0), after, liftY: p.liftY || 0 };
     });
@@ -1113,12 +1113,12 @@ withApp(async (page, logs) => {
       const turned = H.angleDeg(new THREE.Quaternion().fromArray(seated0.q), H.q());
       const gHeld = state.scene.getObjectByName('nso-rotate-handles').position.toArray();
       await new Promise(r => setTimeout(r, RUN + 150));
-      const seatedY = p.height / 2 + 0.2 + (p.liftY || 0);
+      const seatedY = nsoBelowOrigin(p.mesh, p.height) + 0.2 + (p.liftY || 0);
       const gSeated = state.scene.getObjectByName('nso-rotate-handles').position.toArray();
       const end = { held: a.holding(), y: p.mesh.position.y, seatedY, gHeld, gSeated };
       /* Undo: one click back, seated */
       document.getElementById('btn-undo').click();
-      const undo1 = { y: p.mesh.position.y, seatedY: p.height / 2 + 0.2 + (p.liftY || 0),
+      const undo1 = { y: p.mesh.position.y, seatedY: nsoBelowOrigin(p.mesh, p.height) + 0.2 + (p.liftY || 0),
                       turned: H.angleDeg(new THREE.Quaternion().fromArray(seated0.q), H.q()) };
       a.setRing('ss', false);
       H.zero();

@@ -112,7 +112,7 @@ function boxGeometry(w, h, d) {
 /* buildPlacedObjects3MF()'s body, verbatim in its transform order. This is the
    comparison target: if app-core.js changes the order, this stops matching
    poseBasis() and the suite says so. */
-function bakeLikeExport(geometry, p, plate) {
+function posedGeometry(geometry, p) {
   const geo = geometry.clone();
   const tip = (p.tipX || 0) * (Math.PI / 2) + ((p.tiltX || 0) * Math.PI / 180);
   const flip = p.flipX ? Math.PI : 0;
@@ -121,7 +121,18 @@ function bakeLikeExport(geometry, p, plate) {
   if (roll) geo.rotateZ(roll);
   if (rotY) geo.rotateY(rotY);
   if (tip || flip) geo.rotateX(tip + flip);
-  geo.translate(p.x, p.height / 2 + (p.liftY || 0), p.z);
+  geo.computeBoundingBox();
+  return geo;
+}
+
+/* How far the posed geometry's lowest point is under its origin: what the
+   exporter lifts by (nsoPoseBelow in app-core.js) and poseBasis() takes as
+   `below`. Half the height only when the posed box is centred on the origin. */
+function belowOf(geometry, p) { return -posedGeometry(geometry, p).boundingBox.min.y; }
+
+function bakeLikeExport(geometry, p, plate) {
+  const geo = posedGeometry(geometry, p);
+  geo.translate(p.x, -geo.boundingBox.min.y + (p.liftY || 0), p.z);
   const pos = geo.attributes.position;
   const flat = [];
   for (let v = 0; v < pos.count; v++) {
@@ -168,13 +179,21 @@ const PIECES = [
   { name: 'clip', geo: boxGeometry(8, 22, 8),
     pose: { x: 4.25, z: 44, flipX: true, tipZ: 1, tipX: 3, liftY: 0, height: 22 } },
   { name: 'legacy', geo: boxGeometry(30, 6, 14),
-    pose: { x: -12, z: -40.5, rotY: null, rotated: true, liftY: 1.5, height: 6 } }
+    pose: { x: -12, z: -40.5, rotY: null, rotated: true, liftY: 1.5, height: 6 } },
 ];
+/* A piece whose posed box is NOT centred on its origin - a baked turn, a
+   pyramid banked over: half the height is not how far its lowest point is
+   under the origin, and the exporter lifts by the lowest point. Kept out of
+   PIECES, whose order and count the later sections index by. */
+const PYRAMID = { name: 'pyramid', geo: (() => { const g = new THREE.ConeGeometry(10, 16, 4); return g.index ? g.toNonIndexed() : g; })(),
+  pose: { x: 9.5, z: 21, tiltX: 27, tiltZ: -19, rotY: 0.4, liftY: 2.5, height: 21 } };
+// the figure the app records (pieceBasis3MF -> nsoPoseBelow); a box's posed along an axis agrees with height / 2
+PIECES.concat([PYRAMID]).forEach(pc => { pc.pose.below = belowOf(pc.geo, pc.pose); });
 
 // ---------------------------------------------------------------------------
 section('the chain: poseBasis vs the THREE bake app-core.js runs');
 // ---------------------------------------------------------------------------
-PIECES.forEach(pc => {
+PIECES.concat([PYRAMID]).forEach(pc => {
   const baked = bakeLikeExport(pc.geo, pc.pose, PLATE);
   const M = S.poseBasis(pc.pose, PLATE);
   const src = pc.geo.attributes.position.array;
@@ -186,11 +205,21 @@ PIECES.forEach(pc => {
   const d = maxDiff(baked, viaMatrix);
   check(pc.name + ': poseBasis reproduces the baked geometry', d <= TOL, 'max ' + d.toExponential(2) + ' mm');
 });
+{
+  const pc = PYRAMID, box = PIECES.find(q => q.name === 'hull');
+  const noBelow = Object.assign({}, pc.pose); delete noBelow.below;
+  check('pyramid: its posed box is not centred (below is not height / 2)', Math.abs(pc.pose.below - pc.pose.height / 2) > 0.5,
+        pc.pose.below.toFixed(3) + ' vs ' + (pc.pose.height / 2));
+  check('pyramid: without `below` poseBasis falls back to height / 2 and is out by the difference',
+        Math.abs(S.poseBasis(noBelow, PLATE)[11] - S.poseBasis(pc.pose, PLATE)[11]) > 0.5);
+  const noBelowBox = Object.assign({}, box.pose); delete noBelowBox.below;
+  check('hull: a box turned about its own up axis - the legacy basis (no `below`) is unchanged', Math.abs(S.poseBasis(noBelowBox, PLATE)[11] - S.poseBasis(box.pose, PLATE)[11]) <= TOL);
+}
 
 // ---------------------------------------------------------------------------
 section('the inverse: baked geometry back to model space');
 // ---------------------------------------------------------------------------
-PIECES.forEach(pc => {
+PIECES.concat([PYRAMID]).forEach(pc => {
   const baked = Float32Array.from(bakeLikeExport(pc.geo, pc.pose, PLATE));
   const basis = centredBasis(pc.geo, pc.pose, PLATE);
   const back = S.transformSoup(S.invert12(basis), baked);

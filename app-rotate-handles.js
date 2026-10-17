@@ -568,7 +568,13 @@
     if (!g.boundingSphere) g.computeBoundingSphere();
     return g.boundingSphere ? g.boundingSphere.center.clone() : new THREE.Vector3();
   }
-  function seatedY(p) { return (p.height || 0) / 2 + 0.2 + (p.liftY || 0); }
+  /* where the origin sits when the piece's lowest point is on the bed
+     baseline: its lowest point is nsoBelowOrigin under it, which is half the
+     height only for a posed box centred on the origin (nso-bounds.js) */
+  function seatedY(p) {
+    var below = typeof nsoBelowOrigin === 'function' ? nsoBelowOrigin(p.mesh, p.height) : (p.height || 0) / 2;
+    return below + 0.2 + (p.liftY || 0);
+  }
   /* the hold is still ours: the piece is exactly where the last held step
      left it - nothing else (an Undo, another tool) has moved it since */
   function holdIntact() {

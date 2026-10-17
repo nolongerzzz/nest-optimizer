@@ -49,6 +49,12 @@
       a drag, a Join and a Seat; commits are logged against the piece they
       changed; Clear paint and off-piece paint clicks name the piece.
 
+   H. Grab and drop leaves nothing behind: the helper it boxes the target in
+      is a registered helper, and Watch sees no "grab-drop helper is still on
+      screen" after a drop onto a piece, a drop in the air, a drop onto the
+      plate, an Escape mid-carry, or a leave-tool mid-carry. A helper left in
+      the scene with the drag over is the negative control.
+
    Every button here is pressed with element.click() inside the page rather
    than a Playwright click, so the viewport accordion (docs/HANDOFF.md, "a
    second viewport menu") cannot hide a control out from under this suite.
@@ -848,6 +854,114 @@ async function partG(page) {
   await page.setViewportSize({ width: 1280, height: 720 });
 }
 
+/* H. grab and drop leaves nothing behind */
+async function partH(page) {
+  console.log('\nH. grab and drop leaves no helper on screen');
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const hullId = await loadSTL(page, SLAB);
+  const boxId = await loadSTL(page, BOX);
+  await page.evaluate(([h, b]) => {
+    const ph = state.placed.find(q => q && q.sourceId === h), pb = state.placed.find(q => q && q.sourceId === b);
+    ph.x = 0; ph.z = 0; applyMeshRotation(ph); settlePlacedOnBed(ph);
+    applyPlacedXZ(pb, 70, 40);
+    state.camera.position.set(0, 90, 130); state.controls.target.set(0, 12, 0);
+    state.camera.lookAt(0, 12, 0); state.controls.update();
+    NSOWatch.start();
+  }, [hullId, boxId]);
+
+  const screenOf = w => page.evaluate(w => {
+    state.camera.updateMatrixWorld(true);
+    const q = new THREE.Vector3(w[0], w[1], w[2]).project(state.camera), r = state.renderer.domElement.getBoundingClientRect();
+    return { x: r.left + (q.x + 1) / 2 * r.width, y: r.top + (1 - q.y) / 2 * r.height };
+  }, w);
+  const centre = id => page.evaluate(id => {
+    const b = meshLocalBox3(state.placed.find(q => q && q.sourceId === id).mesh);
+    return [(b.min.x + b.max.x) / 2, (b.min.y + b.max.y) / 2, (b.min.z + b.max.z) / 2];
+  }, id);
+  const top = id => page.evaluate(id => {
+    const p = state.placed.find(q => q && q.sourceId === id), b = meshLocalBox3(p.mesh);
+    const rc = new THREE.Raycaster(new THREE.Vector3((b.min.x + b.max.x) / 2, b.max.y + 50, (b.min.z + b.max.z) / 2), new THREE.Vector3(0, -1, 0));
+    return rc.intersectObject(p.mesh, false)[0].point.toArray();
+  }, id);
+  const press = async a => { await page.mouse.move(a.x, a.y); await page.mouse.down(); };
+  const moveTo = async (a, b) => {
+    for (let k = 1; k <= 12; k++) { await page.mouse.move(a.x + (b.x - a.x) * k / 12, a.y + (b.y - a.y) * k / 12); await page.waitForTimeout(15); }
+    await page.waitForTimeout(120);
+  };
+  const helperState = () => page.evaluate(() => ({
+    stale: nsoHelpers.stale().map(o => (o.name || o.type)),
+    inScene: nsoHelpers.live().filter(o => nsoHelpers.ownerOf(o) === 'grab-drop').length,
+    named: (function walk(n) { let c = n.name === 'grabDrop' ? 1 : 0; n.children.forEach(k => { c += walk(k); }); return c; })(state.scene)
+  }));
+  const quiet = async (label) => {
+    await page.waitForTimeout(150);
+    const found = await page.evaluate(l => NSOWatch.check(l), label);
+    const hs = await helperState();
+    ok(found.length === 0 && hs.stale.length === 0 && hs.inScene === 0 && hs.named === 0,
+       label + ' - no phantom, no grab-drop helper in the scene', found.length ? texts(found) : JSON.stringify(hs));
+  };
+  const home = async () => page.evaluate(([b]) => { const pb = state.placed.find(q => q && q.sourceId === b); pb.liftY = 0; applyMeshRotation(pb); applyPlacedXZ(pb, 70, 40); }, [boxId]);
+
+  // a drop onto a piece: seats
+  let from = await screenOf(await centre(boxId)), to = await screenOf(await top(hullId));
+  await press(from); await moveTo(from, to);
+  const mid = await helperState();
+  ok(mid.inScene === 1, 'carried over a piece, its target is boxed - the helper is in the scene and its tool is live', JSON.stringify(mid));
+  const midFound = await page.evaluate(() => NSOWatch.check('grab-drop: mid-carry'));
+  ok(midFound.length === 0, 'mid-carry is not a phantom - the tool behind it is live', midFound.length ? texts(midFound) : '');
+  await page.mouse.up();
+  ok(/seated|Dropped onto/.test(await page.evaluate(() => document.getElementById('status').textContent)), 'the drop seated the piece');
+  await quiet('grab-drop: a drop onto a piece (seat)');
+
+  // a drop in the air
+  await home();
+  from = await screenOf(await centre(boxId));
+  await press(from); await moveTo(from, { x: from.x + 20, y: 30 }); await page.mouse.up();
+  ok((await page.evaluate(b => state.placed.find(q => q.sourceId === b).liftY, boxId)) > 10, 'the drop in the air left the piece floating');
+  await quiet('grab-drop: a drop in the air');
+
+  // a drop onto the plate (carried over the hull first, so the helper has been drawn)
+  await home();
+  from = await screenOf(await centre(boxId));
+  await press(from); await moveTo(from, await screenOf(await top(hullId))); await moveTo(await screenOf(await top(hullId)), await screenOf([-55, 0.2, 35]));
+  await page.mouse.up();
+  const plateDrop = await page.evaluate(b => { const p = state.placed.find(q => q.sourceId === b); return { liftY: p.liftY || 0, x: +p.x.toFixed(1), z: +p.z.toFixed(1) }; }, boxId);
+  ok(plateDrop.liftY === 0 && plateDrop.x < -40, 'the drop onto the plate set it down there', JSON.stringify(plateDrop));
+  await quiet('grab-drop: a drop onto the plate');
+
+  // Escape mid-carry over a piece
+  await home();
+  from = await screenOf(await centre(boxId));
+  await press(from); await moveTo(from, await screenOf(await top(hullId)));
+  ok((await helperState()).inScene === 1, 'carried over a piece again: the helper is up');
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  await quiet('grab-drop: Escape mid-carry');
+
+  // leave-tool mid-carry
+  await home();
+  from = await screenOf(await centre(boxId));
+  await press(from); await moveTo(from, await screenOf(await top(hullId)));
+  const t = await page.evaluate(() => nsoHelpers.teardown('leave-tool'));
+  ok(t.closed.indexOf('grab-drop') >= 0, 'leave-tool closes the live grab through its own close path', JSON.stringify(t));
+  await page.mouse.up();
+  await quiet('grab-drop: leave-tool mid-carry');
+  ok(await page.evaluate(b => { const p = state.placed.find(q => q.sourceId === b); return !state.moveDragging && !!p; }, boxId),
+     'and the drag is over: nothing is left carrying the piece');
+
+  // negative control: a helper left in the scene with no drag behind it IS the phantom
+  await page.evaluate(() => {
+    const g = nsoGrab.layer() || (function () { const x = new THREE.Group(); x.name = 'grabDrop'; return x; })();
+    g.add(new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial()));
+    nsoHelpers.attach(state.scene, g, 'grab-drop');
+  });
+  const neg = await page.evaluate(() => NSOWatch.check('grab-drop: negative control'));
+  ok(neg.some(f => /grab-drop helper/.test(f.msg)), 'negative control: a grab-drop helper left behind is named by Watch', texts(neg));
+  await page.evaluate(() => nsoHelpers.teardown('clear'));
+  await quiet('grab-drop: after the negative control is swept');
+  await page.evaluate(() => NSOWatch.stop());
+}
+
 withApp(async (page, logs) => {
   await partA(page);
   await page.reload({ waitUntil: 'load' });
@@ -871,6 +985,9 @@ withApp(async (page, logs) => {
   await partE4(page);
   await partF(page);
   await partG(page);
+  await page.reload({ waitUntil: 'load' });
+  await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true);
+  await partH(page);
 
   console.log('\n' + pass + ' passed, ' + fail + ' failed');
   if (fail) {

@@ -4803,6 +4803,10 @@ function rawJoinPieces(rawMin, rawMax, axisIdx) {
 
 function meshLocalBox3(mesh) {
   if (!mesh || !mesh.geometry) return new THREE.Box3();
+  /* The box of the vertices as posed (nso-bounds.js), not the geometry's
+     bounding box with the pose put on its corners: for a geometry that
+     already carries a baked turn those corners are in the air. */
+  if (typeof nsoBounds !== 'undefined') return nsoBounds.worldBox(mesh);
   if (!mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
   mesh.updateMatrixWorld(true);
   return mesh.geometry.boundingBox.clone().applyMatrix4(mesh.matrixWorld);

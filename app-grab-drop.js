@@ -134,6 +134,11 @@
     if (layer.parent !== state.scene) nsoHelpers.attach(state.scene, layer, 'grab-drop');
     return layer;
   }
+  /* Empty AND out of the scene. The group used to stay on screen after the
+     drag that drew in it, empty, and Watch named it a phantom - "a grab-drop
+     helper is still on screen" - because the session behind it had ended.
+     It is put back (ensureLayer) by the next drawTarget, and by nothing else:
+     a drag that never went over a piece never has a helper. */
   function clearLayer() {
     if (!layer) return;
     for (var i = layer.children.length - 1; i >= 0; i--) {
@@ -142,6 +147,7 @@
       if (c.geometry) c.geometry.dispose();
       if (c.material) c.material.dispose();
     }
+    if (layer.parent) layer.parent.remove(layer);
   }
   function drawTarget(u, bad) {
     if (!ensureLayer()) return;

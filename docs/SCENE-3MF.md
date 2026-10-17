@@ -93,8 +93,12 @@ basis   12 numbers, the same row-vector layout 3MF's own <item transform> uses:
 ```
 
 `NSO3MFScene.poseBasis()` is the one place that knows the chain — rotate X,
-rotate Y, rotate Z, translate by (x, height/2 + liftY, z), then the Y-up to
+rotate Y, rotate Z, translate by (x, below + liftY, z), then the Y-up to
 Z-up swap and the shift onto Bambu's front-left origin. Restore inverts it.
+`below` is how far the posed geometry's lowest point is under its origin
+(`nsoPoseBelow`, app-core.js, via nso-bounds.js); it is half the height only for
+a posed box centred on its origin, which is all that files written before
+nso-bounds.js ever assumed, so a pose without `below` falls back to height / 2.
 
 `center_offset` is the model's own `centerOffset`, the translation between its
 raw file axes and its centred display geometry. With it, restore rebuilds

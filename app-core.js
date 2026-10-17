@@ -595,6 +595,7 @@ function undoLastStep() {
       placedEntry.liftY = entry.prevPose.liftY || 0;
       placedEntry.tiltX = entry.prevPose.tiltX || 0;
       placedEntry.tiltZ = entry.prevPose.tiltZ || 0;
+      nsoInvalidatePlacedBounds(placedEntry);
       applyMeshRotation(placedEntry);
       if (typeof refreshOutline === 'function') refreshOutline(placedEntry);
       applyPlacedXZ(placedEntry, placedEntry.x, placedEntry.z);
@@ -628,7 +629,7 @@ function undoLastStep() {
       p.mesh = new THREE.Mesh(p.geometry, mat);
     }
     if (p.mesh && state.modelGroup) {
-      p.mesh.position.set(p.x, p.height / 2 + 0.2 + (p.liftY || 0), p.z);
+      p.mesh.position.set(p.x, nsoBelowOrigin(p.mesh, p.height) + 0.2 + (p.liftY || 0), p.z);
       state.modelGroup.add(p.mesh);
     }
     state.placed.splice(at, 0, p);
@@ -3689,6 +3690,30 @@ function tiltSelected(dir) {
   setStatus('Tilt ' + (dir > 0 ? '↑' : '↓') + ' 15°');
 }
 
+/* How far below the mesh origin the piece's lowest point is, as it is posed.
+   Half the height only for a piece whose posed box is centred on its origin;
+   a baked, turned, re-posed piece is not (nso-bounds.js), and its lowest point
+   is what has to land on the bed. */
+function nsoBelowOrigin(mesh, height) {
+  const off = (mesh && typeof nsoBounds !== 'undefined') ? nsoBounds.restOffsets(mesh) : null;
+  return off ? -off.minY : (height || 0) / 2;
+}
+
+/* nsoBelowOrigin without a mesh: the placed entry's geometry under the pose its
+   fields describe - the chain the exporters bake (Z, then Y, then X, which is
+   applyMeshRotation's XYZ Euler). What the exporters and the scene's basis
+   (pieceBasis3MF) both translate by, so the file and the screen agree. */
+function nsoPoseBelow(p) {
+  const tip = (p.tipX || 0) * (Math.PI / 2) + ((p.tiltX || 0) * Math.PI / 180);
+  const flip = p.flipX ? Math.PI : 0;
+  const rotY = p.rotY != null ? p.rotY : (p.rotated ? Math.PI / 2 : 0);
+  const roll = (p.tipZ || 0) * (Math.PI / 2) + ((p.tiltZ || 0) * Math.PI / 180);
+  const box = (typeof nsoBounds !== 'undefined' && p.geometry)
+    ? nsoBounds.boxUnder(p.geometry, new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(tip + flip, rotY, roll, 'XYZ')))
+    : null;
+  return box ? -box.min[1] : (p.height || 0) / 2;
+}
+
 function applyMeshRotation(p) {
   const tip = (p.tipX || 0) * (Math.PI / 2) + ((p.tiltX || 0) * Math.PI / 180);
   const flip = p.flipX ? Math.PI : 0;
@@ -3702,7 +3727,7 @@ function applyMeshRotation(p) {
   p.depth = size.z;
   p.height = size.y;
   const lift = p.liftY || 0;
-  p.mesh.position.set(p.x, p.height / 2 + 0.2 + lift, p.z);
+  p.mesh.position.set(p.x, nsoBelowOrigin(p.mesh, p.height) + 0.2 + lift, p.z);
   if (p.overflow || p.meshOffsetY) {
     p.overflow = false;
     p.meshOffsetY = 0;
@@ -3728,7 +3753,17 @@ function nsoPlacedIsPosed(p) {
   return !!(p && (p.rotY || p.tipX || p.tiltX || p.flipX || p.tipZ || p.tiltZ || p.liftY));
 }
 function nsoReseatPlacedPose(p) {
+  nsoInvalidatePlacedBounds(p);
   if (nsoPlacedIsPosed(p) && p.mesh) applyMeshRotation(p);
+}
+/* The one invalidation every geometry rewrite goes through (nso-bounds.js):
+   what was measured for the piece's geometry is forgotten, the geometry
+   re-measures itself, and the width / depth / height every pose reads are
+   taken off the posed vertices. Called from both endings of a rewrite -
+   nsoReseatPlacedPose above (the bake keeps the pose) and nsoClearPlacedPose
+   below (the rewrite consumes it) - so neither can leave a stale number. */
+function nsoInvalidatePlacedBounds(p) {
+  if (p && typeof nsoInvalidatePieceBounds === 'function') nsoInvalidatePieceBounds(p);
 }
 function nsoPlacedPoseSnapshot(p) {
   return {
@@ -3742,6 +3777,7 @@ function nsoClearPlacedPose(p) {
   p.rotY = 0; p.rotated = false; p.flipX = false;
   p.tipX = 0; p.tipZ = 0; p.tiltX = 0; p.tiltZ = 0;
   p.liftY = 0;
+  nsoInvalidatePlacedBounds(p);
 }
 
 function refreshOutline(p) {
@@ -3785,8 +3821,10 @@ function buildCombinedGeometry() {
     if (rotY) geo.rotateY(rotY);
     if (tip || flip) geo.rotateX(tip + flip);
     // liftY rides along: a piece Seated with a gap, or lifted, exports where
-    // the scene shows it, not dropped back onto the plate.
-    geo.translate(p.x, p.height / 2 + (p.liftY || 0), p.z);
+    // the scene shows it, not dropped back onto the plate. Its lowest point is
+    // the posed geometry's, not half the recorded height: the two agree only
+    // for a piece whose posed box is centred on its origin.
+    geo.translate(p.x, nsoPoseBelow(p) + (p.liftY || 0), p.z);
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -4030,8 +4068,10 @@ function buildPlacedObjects3MF() {
     if (rotY) geo.rotateY(rotY);
     if (tip || flip) geo.rotateX(tip + flip);
     // liftY rides along: a piece Seated with a gap, or lifted, exports where
-    // the scene shows it, not dropped back onto the plate.
-    geo.translate(p.x, p.height / 2 + (p.liftY || 0), p.z);
+    // the scene shows it, not dropped back onto the plate. Its lowest point is
+    // the posed geometry's, not half the recorded height: the two agree only
+    // for a piece whose posed box is centred on its origin.
+    geo.translate(p.x, nsoPoseBelow(p) + (p.liftY || 0), p.z);
 
     const pos = geo.attributes.position;
     const flat = [];
@@ -4104,7 +4144,7 @@ function pieceBasis3MF(p, plate) {
     x: p.x, z: p.z,
     rotY: p.rotY, rotated: p.rotated, flipX: p.flipX,
     tipX: p.tipX, tipZ: p.tipZ, tiltX: p.tiltX, tiltZ: p.tiltZ,
-    liftY: p.liftY, height: p.height
+    liftY: p.liftY, height: p.height, below: nsoPoseBelow(p)
   }, plate);
   const c = geometryCenter(p.geometry);
   const t = Scene.apply12(M, c.x, c.y, c.z);
