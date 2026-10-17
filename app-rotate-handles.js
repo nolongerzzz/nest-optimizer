@@ -22,9 +22,8 @@
    WHAT THIS DOES INSTEAD.
 
    Turn is about the plate's vertical; the two leans are about the PIECE's
-   own axes as it lies - Lean front/back its own X (a roll about its length),
-   Lean side/side its own Z (end-over-end along its length) - so each
-   lean ring is drawn in the piece's frame and the ring you grab is the
+   own axes as it lies - the ring on its own X and the ring on its own Z - so
+   each lean ring is drawn in the piece's frame and the ring you grab is the
    motion you get (frameOf). A Turn step is premultiplied onto the piece's
    orientation, a lean step postmultiplied (turned), and either way the
    result is decomposed back into the SAME pose fields,
@@ -36,6 +35,26 @@
    here: they stay the whole quarter-turn counts Tip 90 and Roll 90 step, and
    the continuous part goes in tiltX, rotY and tiltZ.
 
+   WHAT THE LEANS ARE CALLED follows the piece's footprint (leanMap). "Lean
+   front/back" is the lean that tips the piece ALONG the long dimension of its
+   footprint as it lies - its two ends rise and fall - and "Lean side/side"
+   tips it ACROSS - one long edge rises. The rings themselves do not move:
+   they stay on the piece's own X and Z, and a ring's id ('fb' = own X, 'ss' =
+   own Z) names that axis, as Tilt and the checks have always called it. Only
+   which ring carries which NAME, colour and card row is looked up, from the
+   footprint, every time it is asked - so a Turn, a Tip, a Scale or a bake
+   that changes the footprint changes the names with no event to forget. A
+   footprint within 5% of square has no long side: there the old mapping
+   stands (front/back = own X). During a drag the names are held, so the ring
+   in your hand does not change colour under it.
+
+   THE DARTS sit on a major (45 degree) tick of their ring, the one nearest the
+   camera, and nowhere between ticks. They stay on it until the camera has
+   orbited 10 degrees past the half-way point to the next one, then re-seat
+   there (seatFor). Only a drag carries them off a tick - they ride the piece
+   under the pointer - and releasing puts them back on one. A click or an
+   arrow key turns the PIECE a step; the darts stay where they are.
+
    The drag is still a dial - the pointer's angle about the ring's projected
    centre - but signed by which side of the ring the camera is on (the dot of
    the look vector with the ring's axis), so clockwise on screen is clockwise
@@ -43,11 +62,12 @@
 
    The snap is a plain hard snap: inside 3 degrees of a quarter turn the
    piece sits ON the quarter turn, and outside it the piece is exactly where
-   the pointer says. Only during a drag. A click is always exactly 1 degree. */
+   the pointer says. Only during a drag. A click is always exactly 1 degree (0.1 with Shift). */
 (function () {
   'use strict';
 
   var STEP_DEG = 1;             // one click on an arrowhead, one arrow key
+  var FINE_STEP_DEG = 0.1;      // ...with Shift held
   var SNAP_STEP_DEG = 90;       // the quarter turns
   var SNAP_WITHIN_DEG = 3;      // ...and how close the hard snap catches
   var CLICK_SLOP_PX = 4;        // a press that travels less than this is a click
@@ -55,16 +75,27 @@
 
   var DEG = 180 / Math.PI, RAD = Math.PI / 180;
 
+  var MAJOR_DEG = 45;           // the ticks the darts may sit on
+  var SEAT_HYST_DEG = 10;       // how far past the half-way point the camera goes before they move
+  var SQUARE_WITHIN = 0.05;     // a footprint this close to square has no long side
+
   /* The three rings. `e1, e2` span the ring's plane with e1 x e2 = axis, so a
      point at angle t, c + r (cos t e1 + sin t e2), moves the right-handed
-     positive way about the axis as t grows. Colours match the checkboxes. */
+     positive way about the axis as t grows. The ids are AXES: 'turn' the
+     plate's vertical, 'fb' the piece's own X, 'ss' its own Z - whatever the
+     ring is called on screen (LOOKS, leanMap). */
   var RINGS = {
-    turn: { frame: 'plate', axis: [0, 1, 0], e1: [0, 0, 1], e2: [1, 0, 0],
-            color: 0x38bdf8, css: '#38bdf8', label: 'Turn', chk: 'chk-rot-ring-turn' },
-    fb:   { frame: 'piece', local: [1, 0, 0],
-            color: 0xf472b6, css: '#f472b6', label: 'Lean front/back', chk: 'chk-rot-ring-fb' },
-    ss:   { frame: 'piece', local: [0, 0, 1],
-            color: 0xfbbf24, css: '#fbbf24', label: 'Lean side/side', chk: 'chk-rot-ring-ss' }
+    turn: { frame: 'plate', axis: [0, 1, 0], e1: [0, 0, 1], e2: [1, 0, 0] },
+    fb:   { frame: 'piece', local: [1, 0, 0] },
+    ss:   { frame: 'piece', local: [0, 0, 1] }
+  };
+  /* What a ring is called, coloured and boxed as. Keyed by ROLE: 'fb' is the
+     lean along the footprint's long side, 'ss' the lean across it. Colours
+     match the checkboxes. */
+  var LOOKS = {
+    turn: { color: 0x38bdf8, css: '#38bdf8', label: 'Turn', chk: 'chk-rot-ring-turn' },
+    fb:   { color: 0xf472b6, css: '#f472b6', label: 'Lean front/back', chk: 'chk-rot-ring-fb' },
+    ss:   { color: 0xfbbf24, css: '#fbbf24', label: 'Lean side/side', chk: 'chk-rot-ring-ss' }
   };
   var UP = [0, 1, 0];
 
@@ -72,13 +103,14 @@
      level, and a turn is about the plate however the piece lies. The two
      leans are the PIECE's own axes as it currently lies, so they turn with
      it - at rest exactly #135's rings, plate X and plate Z, and after that
-     wherever the piece has taken them. Lean front/back is its own X, its
-     length: its ring lies ACROSS the piece and rolls it, the front edge going
-     up or down and no end lifting. Lean side/side is its own Z, the line
-     across its width: its ring runs ALONG the piece and tips it end-over-end.
-     Turn a bar 45 degrees and lean it side/side: its long axis rises at the
-     same 45 degree heading, with no twist. A lean about the PLATE's axis
-     there would have swung it sideways as it rose.
+     wherever the piece has taken them. The 'fb' ring is its own X, its
+     length if it lies along X: its ring lies ACROSS the piece and rolls it.
+     The 'ss' ring is its own Z, the line across its width: its ring runs
+     ALONG the piece and tips it end-over-end. Turn a bar 45 degrees and lean
+     it about its own Z: its long axis rises at the same 45 degree heading,
+     with no twist. A lean about the PLATE's axis there would have swung it
+     sideways as it rose. Which of the two is CALLED front/back is leanMap's
+     business, not the axis's.
 
      frameOf gives a ring's axis A and the two vectors e1, e2 spanning its
      plane (e1 x e2 = A), in world terms, for the orientation q. For a lean
@@ -113,23 +145,99 @@
 
   function v3(a) { return new THREE.Vector3(a[0], a[1], a[2]); }
 
+  /* ---- what the leans are called -------------------------------------------
+     The piece's footprint as it lies: the width and depth of the box its mesh
+     takes on the plate - applyMeshRotation's p.width / p.depth, measured here
+     off the mesh so a bake or a Scale that rebuilt it is never out of date. */
+  function footprint(p) {
+    if (!p || !p.mesh || !p.mesh.geometry) return null;
+    var g = p.mesh.geometry;
+    if (!g.boundingBox) g.computeBoundingBox();
+    if (!g.boundingBox) return null;
+    p.mesh.updateMatrixWorld(true);
+    var b = g.boundingBox.clone().applyMatrix4(p.mesh.matrixWorld);
+    return { w: b.max.x - b.min.x, d: b.max.z - b.min.z };
+  }
+
+  /* Which of the two lean rings tips the piece ALONG the long dimension of its
+     footprint. Tipping about an axis lifts the points that lie across it, so
+     the along-length lean is about the horizontal line across the long side
+     (plate Z for a footprint longer in X, plate X for one longer in Z); the
+     ring whose axis lies the more nearly on that line is it. Returns
+     { along, across, square }: ring ids, with `square` set where there is no
+     long side to follow (within SQUARE_WITHIN of square, or no line to
+     choose by) and the old mapping - front/back is own X - stands. */
+  function leanMap(p) {
+    if (drag && drag.map) return drag.map;       // held for the length of a drag
+    var old = { along: 'fb', across: 'ss', square: true };
+    p = p || piece();
+    var fp = footprint(p);
+    if (!fp) return old;
+    var big = Math.max(fp.w, fp.d);
+    if (!(big > 0) || Math.abs(fp.w - fp.d) <= SQUARE_WITHIN * big) return old;
+    var across = fp.w > fp.d ? v3([0, 0, 1]) : v3([1, 0, 0]);
+    var q = p.mesh.quaternion;
+    var x = Math.abs(v3(RINGS.fb.local).applyQuaternion(q).dot(across));
+    var z = Math.abs(v3(RINGS.ss.local).applyQuaternion(q).dot(across));
+    if (Math.abs(x - z) < 1e-6) return old;
+    return z > x ? { along: 'ss', across: 'fb', square: false }
+                 : { along: 'fb', across: 'ss', square: false };
+  }
+  /* A ring's role - 'turn', 'fb' (the along lean) or 'ss' (the across lean) -
+     and the ring that holds a role. Names, colours and card rows are looked up
+     by role; everything that moves or draws is keyed by ring. */
+  function roleOf(ring, map) {
+    if (ring === 'turn') return 'turn';
+    return (map || leanMap()).along === ring ? 'fb' : 'ss';
+  }
+  function ringOfRole(role, map) {
+    if (role === 'turn') return 'turn';
+    map = map || leanMap();
+    return role === 'fb' ? map.along : map.across;
+  }
+  function look(ring) { return LOOKS[roleOf(ring)]; }
+
+  /* Which way each lean tips, for the card row's tooltip. */
+  var TIP_TAIL = ' Click an arrowhead to lean 1\u00b0, drag it to swing round the ring.';
+  function tipFor(role, map) {
+    if (role === 'turn')
+      return "A ring about the plate's vertical. Click an arrowhead to turn 1\u00b0, drag it to swing round the ring.";
+    if (map.square)
+      return role === 'fb'
+        ? "Tips the piece front over back, about its own X line: its front edge goes up as the back goes down, turning with the piece. (This footprint is square, so there is no long side to follow.)" + TIP_TAIL
+        : "Tips the piece side over side, about its own Z line: one side edge goes up as the other goes down, turning with the piece. (This footprint is square, so there is no long side to follow.)" + TIP_TAIL;
+    return role === 'fb'
+      ? "Tips the piece along its length: its two ends go up and down, turning with the piece." + TIP_TAIL
+      : "Tips the piece across its width: one long edge goes up as the other goes down, turning with the piece." + TIP_TAIL;
+  }
+
   /* ---- which rings, for this Rotate session ------------------------------
      Turn only on every opening. The choice lasts while the menu does and is
      not saved anywhere: the teardown that runs when Rotate loses the input
-     puts it back (resetSession). */
+     puts it back (resetSession). `shown` is keyed by ring: a ring that is
+     drawn stays drawn when a Turn changes what it is called, and the box that
+     is ticked moves to its new row (syncBoxes). */
   var shown = null;
   var lastTouched = null;       // the ring whose arrowhead was pressed last
   var arrowAt = {};             // ring -> angle on the ring where its arrowheads sit
+  var seatIdx = {};             // ring -> the major tick the arrowheads were last seated on
   function resetSession() {
     shown = { turn: true, fb: false, ss: false };
     lastTouched = null;
     arrowAt = {};
+    seatIdx = {};
     syncBoxes();
   }
+  var tipSet = {};
   function syncBoxes() {
-    ORDER.forEach(function (k) {
-      var c = document.getElementById(RINGS[k].chk);
-      if (c) c.checked = !!shown[k];
+    var map = leanMap();
+    ORDER.forEach(function (role) {
+      var c = document.getElementById(LOOKS[role].chk);
+      if (!c) return;
+      var on = !!(shown && shown[ringOfRole(role, map)]);
+      if (c.checked !== on) c.checked = on;
+      var tip = tipFor(role, map), row = c.parentNode;
+      if (row && tipSet[role] !== tip) { row.title = tip; tipSet[role] = tip; }
     });
   }
   function shownRings() { return ORDER.filter(function (k) { return shown[k]; }); }
@@ -324,7 +432,6 @@
     p.mesh.updateMatrixWorld(true);
     writePose(p, turned(p.mesh.quaternion.clone(), ring, deg), true);
     seatLater();
-    if (arrowAt[ring] != null) arrowAt[ring] += deg * RAD;
     lastTouched = ring;
     if (typeof updateExportButton === 'function') updateExportButton();
     refresh();
@@ -334,12 +441,12 @@
 
   /* ---- dragging ----------------------------------------------------------
      A press on an arrowhead starts this. It is a click until the pointer has
-     travelled CLICK_SLOP_PX; released before that, it steps one degree the way
+     travelled CLICK_SLOP_PX; released before that, it steps one degree (a tenth with Shift) the way
      the arrowhead points. Past it, it is a dial round the ring. One Undo
      point either way, taken at the press. */
   var drag = null;
 
-  function beginDrag(handle, x, y, cx, cy) {
+  function beginDrag(handle, x, y, cx, cy, fine) {
     var ring = handle && handle.ring ? handle.ring : handle;
     var dir = handle && handle.dir ? handle.dir : 1;
     var p = piece();
@@ -356,9 +463,9 @@
     var b = refAxis(q0, ring);
     drag = { ring: ring, dir: dir, x0: x, y0: y, cx: cx, cy: cy,
              lastA: Math.atan2(y - cy, x - cx) * DEG, raw: 0, applied: 0,
-             sign: dialSign(ring), q0: q0, b: b, F: frameOf(ring, q0),
+             sign: dialSign(ring), q0: q0, b: b, F: frameOf(ring, q0), map: leanMap(p),
              abs0: ringAngleDeg(q0, ring, b),
-             arrow0: arrowAt[ring], moved: false, snapped: false };
+             arrow0: arrowAt[ring], moved: false, snapped: false, fine: !!fine };
     /* Starting inside a snap is not landing in one: no flash on the way out. */
     drag.snapped = inSnap(drag.abs0);
     lastTouched = ring;
@@ -399,13 +506,13 @@
     drag = null;
     if (typeof state !== 'undefined' && state && state.controls) state.controls.enabled = true;
     if (!d.moved && !abandon) {
-      /* a click: a step about the held pivot, the run seated RUN_MS on */
-      var p = piece();
+      /* a click: a step about the held pivot (a degree, a tenth with Shift),
+         the run seated RUN_MS on. It turns the PIECE; the darts stay put. */
+      var p = piece(), step = d.fine ? FINE_STEP_DEG : STEP_DEG;
       if (p) {
         p.mesh.updateMatrixWorld(true);
-        writePose(p, turned(p.mesh.quaternion.clone(), d.ring, d.dir * STEP_DEG), true);
-        if (arrowAt[d.ring] != null) arrowAt[d.ring] += d.dir * STEP_DEG * RAD;
-        say(d.ring, d.dir * STEP_DEG * d.sign, false);
+        writePose(p, turned(p.mesh.quaternion.clone(), d.ring, d.dir * step), true);
+        say(d.ring, d.dir * step * d.sign, false);
       }
       seatLater();
     } else {
@@ -426,7 +533,7 @@
     return (Math.abs(a - Math.round(a)) < 0.05 ? Math.round(a) : a.toFixed(1)) + '°';
   }
   function readoutText(ring, seenDeg, snapped) {
-    return RINGS[ring].label + ' ' + fmtDeg(seenDeg) +
+    return look(ring).label + ' ' + fmtDeg(seenDeg) +
       (Math.abs(seenDeg) < 1e-9 ? '' : (seenDeg > 0 ? ' ⟳' : ' ⟲')) +
       (snapped ? ' · square' : '');
   }
@@ -441,7 +548,7 @@
       document.body.appendChild(readout);
     }
     readout.textContent = t;
-    readout.style.setProperty('--rot-accent', RINGS[ring].css);
+    readout.style.setProperty('--rot-accent', look(ring).css);
     if (x == null && drag) { x = drag.x0; y = drag.y0; }
     if (x == null) {
       var s = handleScreen(ring, 1);
@@ -469,13 +576,13 @@
   }
 
   /* ---- keyboard ----------------------------------------------------------
-     One degree on the keyboard's ring (activeRing): Right or Up turns it
+     One degree (a tenth with Shift) on the keyboard's ring (activeRing): Right or Up turns it
      clockwise as seen from here, Left or Down anticlockwise - the dial's own
      sense. Held down, the browser's key repeat does the repeating. */
-  function nudge(dir) {
+  function nudge(dir, fine) {
     var ring = activeRing();
     if (!ring) return false;
-    return stepBy(ring, dir * STEP_DEG * dialSign(ring));
+    return stepBy(ring, dir * (fine ? FINE_STEP_DEG : STEP_DEG) * dialSign(ring));
   }
   var KEYS = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 };
 
@@ -502,7 +609,7 @@
               t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     if (!piece() || !activeRing()) return;
     ev.preventDefault();
-    nudge(k);
+    nudge(k, ev.shiftKey);
   }
 
   /* ---- Task 2: the rings in the scene ----------------------------------- */
@@ -632,14 +739,36 @@
     return F.e1.clone().multiplyScalar(-Math.sin(t)).add(F.e2.clone().multiplyScalar(Math.cos(t)));
   }
 
-  /* Where a ring's arrowheads go when it is first drawn: the point of the
-     ring nearest the camera, so they face you rather than hide behind the
-     piece. After that they ride the ring with the piece. */
-  function defaultArrowAt(F, centre) {
-    if (!state.camera) return 0;
+  /* WHERE THE DARTS SIT. On a major tick of their ring - every MAJOR_DEG in
+     the ring's own frame, the frame the scale is drawn in - the one nearest
+     the camera, which is the camera's angle about the ring's axis (its
+     position, less the ring's centre, projected into the ring's plane) rounded
+     to a major tick. Never between two.
+
+     They are seated, not tracked: once on a tick they stay while the camera
+     is within half a tick of it PLUS SEAT_HYST_DEG, and only past that move
+     to the tick nearest now. A camera hovering at the half-way point
+     therefore sits still instead of flickering between two ticks. Looking
+     straight down a ring's axis there is no nearest side, and they stay
+     where they are (the first time, on tick 0). `seatIdx` is the memory; it
+     is written only when `commit` is set, so the camera listener can ask
+     whether a move is due without making one. */
+  function cameraAngleDeg(F, centre) {
+    if (!state.camera) return null;
     var v = state.camera.position.clone().sub(centre);
-    var u = v.dot(F.e1), w = v.dot(F.e2);
-    return Math.hypot(u, w) < 1e-6 ? 0 : Math.atan2(w, u);
+    var u = v.dot(F.e1), w = v.dot(F.e2), len = v.length();
+    return (len < 1e-9 || Math.hypot(u, w) < 1e-3 * len) ? null : Math.atan2(w, u) * DEG;
+  }
+  function tickCount() { return Math.round(360 / MAJOR_DEG); }
+  function seatFor(ring, F, centre, commit) {
+    var n = tickCount(), c = cameraAngleDeg(F, centre), k = seatIdx[ring];
+    if (c != null) {
+      var near = ((Math.round(c / MAJOR_DEG) % n) + n) % n;
+      if (k == null || Math.abs(wrapDeg(c - k * MAJOR_DEG)) > MAJOR_DEG / 2 + SEAT_HYST_DEG) k = near;
+    }
+    if (k == null) k = 0;
+    if (commit) seatIdx[ring] = k;
+    return k;
   }
 
   /* ---- weights -----------------------------------------------------------
@@ -666,7 +795,7 @@
   function colourFor(ring) {
     var lit = drag && drag.ring === ring;
     if (lit && Date.now() < flashUntil) return { c: 0xffffff, o: 1 };
-    return { c: RINGS[ring].color, o: weightFor(ring).ring };
+    return { c: look(ring).color, o: weightFor(ring).ring };
   }
 
   /* ---- the scale ---------------------------------------------------------
@@ -690,7 +819,7 @@
   function noRaycast() {}
 
   function addTicks(g, ring, F, r, w) {
-    var R = RINGS[ring], e1 = F.e1, e2 = F.e2, A = F.A, ends = [], pos = [];
+    var e1 = F.e1, e2 = F.e2, A = F.A, ends = [], pos = [];
     var r0 = r + restTube(r), m = new THREE.Matrix4(), v = new THREE.Vector3();
     for (var d = 0; d < 360; d += TICK_STEP_DEG) {
       var t = d * RAD, k = tickClass(d), len = TICK_LEN[k] * r, wd = TICK_WIDTH[k];
@@ -708,7 +837,7 @@
     }
     var geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-    var l = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: R.color, depthTest: false,
+    var l = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: look(ring).color, depthTest: false,
       depthWrite: false, transparent: true, opacity: w.ticks }));
     l.renderOrder = 999;
     l.raycast = noRaycast;
@@ -740,7 +869,7 @@
       /* the arrowhead under the pointer keeps full weight through a drag */
       var held = dragging() && drag.ring === ring && drag.dir === dir;
       var cone = new THREE.Mesh(new THREE.ConeGeometry(h * ARROW_BASE, h, 18),
-        new THREE.MeshBasicMaterial({ color: held ? RINGS[ring].color : col.c, depthTest: false,
+        new THREE.MeshBasicMaterial({ color: held ? look(ring).color : col.c, depthTest: false,
                                       depthWrite: false, transparent: true,
                                       opacity: held ? 1 : (col.c === 0xffffff ? 1 : w.arrow) }));
       cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), tan);
@@ -768,19 +897,24 @@
     clearGroup(g);
     var p = piece();
     var list = shown ? shownRings() : [];
+    if (shown) syncBoxes();
     if (hold && !holdIntact()) dropHold();      // re-placed under us: nothing held any more
     if (!p || !list.length || !menuOwnsInput()) { g.visible = false; return; }
     /* A helper (nso-helpers.js): put in the scene when there are rings to
        draw, and put back here after a leave, a Clear or an Undo took it out.
        Interactive: the rings are grabbed. */
     if (g.parent !== state.scene) nsoHelpers.attach(state.scene, g, 'rotate', { interactive: true });
+    hookCamera();
     g.visible = true;
     g.position.copy(ringCentre(p));
     g.updateMatrixWorld(true);
     var r = ringRadius(), q = p.mesh.quaternion.clone();
     list.forEach(function (ring) {
       var F = frameOf(ring, q);
-      if (arrowAt[ring] == null) arrowAt[ring] = defaultArrowAt(F, g.position);
+      /* A dragged ring's darts ride the piece under the pointer (moveDrag);
+         at every other moment they are seated on a major tick. */
+      if (!dragging() || arrowAt[ring] == null)
+        arrowAt[ring] = seatFor(ring, F, g.position, true) * MAJOR_DEG * RAD;
       addRing(g, ring, F, r);
     });
   }
@@ -789,6 +923,27 @@
      input; refresh() is the one drawing path, and empties them when there is
      nothing to show. */
   if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('rotate', { live: menuOwnsInput, refresh: refresh, clear: refresh });
+
+  /* The camera's orbit moves the darts, so the rings are told when it moves.
+     OrbitControls says 'change' on every move of the camera; the check is a
+     frame and a rounding per shown ring, and it redraws only if a dart is due
+     to move. Hooked from refresh(), by which time the controls exist. */
+  var camHooked = null;
+  function hookCamera() {
+    var c = state.controls;
+    if (!c || camHooked === c || typeof c.addEventListener !== 'function') return;
+    camHooked = c;
+    c.addEventListener('change', onCameraMoved);
+  }
+  function onCameraMoved() {
+    var p = piece();
+    if (!group || !group.visible || !shown || !p || dragging()) return;
+    var q = p.mesh.quaternion;
+    var due = shownRings().some(function (ring) {
+      return seatFor(ring, frameOf(ring, q), group.position, false) !== seatIdx[ring];
+    });
+    if (due) refresh();
+  }
 
   /* Where the rings stand: on the held pivot while a turn is in hand,
      otherwise on the piece's bounding-sphere centre as it sits. */
@@ -820,14 +975,16 @@
   /* ---- wiring ------------------------------------------------------------ */
   function bind() {
     if (!shown) resetSession();
-    ORDER.forEach(function (k) {
-      var chk = document.getElementById(RINGS[k].chk);
+    /* A row is a ROLE (Turn, Lean front/back, Lean side/side); the ring it
+       ticks is whichever one holds that role now. */
+    ORDER.forEach(function (role) {
+      var chk = document.getElementById(LOOKS[role].chk);
       if (chk && !chk._rotBound) {
         chk._rotBound = true;
-        chk.addEventListener('change', function () { setRing(k, chk.checked); });
-        chk.checked = !!shown[k];
+        chk.addEventListener('change', function () { setRing(ringOfRole(role), chk.checked); });
       }
     });
+    syncBoxes();
     if (!document._rotKeysBound) {
       document._rotKeysBound = true;
       document.addEventListener('keydown', onKeyDown);
@@ -848,7 +1005,7 @@
     rings: function () { return shownRings(); },
     setRing: setRing,
     activeRing: activeRing,
-    step: function (ring, dir) { return stepBy(ring, (dir < 0 ? -1 : 1) * STEP_DEG); },
+    step: function (ring, dir, fine) { return stepBy(ring, (dir < 0 ? -1 : 1) * (fine ? FINE_STEP_DEG : STEP_DEG)); },
     /* A programmatic turn of `deg` about a ring's axis - the plate's vertical
        for Turn, the piece's own X / Z for the leans - no Undo point and no
        lock check: what a click does, without the click. The pose
@@ -897,6 +1054,24 @@
       var q = p.mesh.quaternion;
       return ringAngleDeg(q, ring, refAxis(q, ring));
     },
+    /* What each lean is called now (see leanMap): the ring ids that hold the
+       along-length and the across-width lean, whether the footprint is square
+       enough that the old mapping stands, and any ring's name / role. */
+    leanNames: function () {
+      var m = leanMap();
+      return { along: m.along, across: m.across, square: m.square,
+               labels: { fb: look('fb').label, ss: look('ss').label },
+               roles: { fb: roleOf('fb', m), ss: roleOf('ss', m) },
+               tips: { fb: tipFor('fb', m), ss: tipFor('ss', m) } };
+    },
+    ringLabel: function (ring) { return RINGS[ring] ? look(ring).label : null; },
+    ringColor: function (ring) { return RINGS[ring] ? look(ring).color : null; },
+    /* Where a ring's darts are: the major tick they sit on, and the angle in
+       the ring's frame they are drawn at (a drag carries it off the tick). */
+    dartTick: function (ring) {
+      return RINGS[ring] && seatIdx[ring] != null
+        ? { index: seatIdx[ring], deg: seatIdx[ring] * MAJOR_DEG, at: arrowAt[ring] * DEG } : null;
+    },
     dialSign: dialSign,
     hardSnapDeg: hardSnapDeg,
     decompose: decompose,
@@ -926,11 +1101,12 @@
       var g = ensureGroup();
       return g ? g.children.filter(function (c) { return c.userData.nsoRotateRing; }).length : 0;
     },
-    constants: { STEP_DEG: STEP_DEG, SNAP_STEP_DEG: SNAP_STEP_DEG,
+    constants: { STEP_DEG: STEP_DEG, FINE_STEP_DEG: FINE_STEP_DEG, SNAP_STEP_DEG: SNAP_STEP_DEG,
                  SNAP_WITHIN_DEG: SNAP_WITHIN_DEG, CLICK_SLOP_PX: CLICK_SLOP_PX,
                  RING_RADIUS_MM: RING_RADIUS_MM, ARROW_FRACTION: ARROW_FRACTION,
                  ARROW_BASE: ARROW_BASE, ARROW_HIT: ARROW_HIT,
                  RUN_MS: RUN_MS, TICK_STEP_DEG: TICK_STEP_DEG, TICK_LEN: TICK_LEN, TICK_WIDTH: TICK_WIDTH,
+                 MAJOR_DEG: MAJOR_DEG, SEAT_HYST_DEG: SEAT_HYST_DEG, SQUARE_WITHIN: SQUARE_WITHIN,
                  LOCAL: { fb: RINGS.fb.local, ss: RINGS.ss.local } }
   };
 
