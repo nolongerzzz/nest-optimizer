@@ -166,11 +166,13 @@
     if (!r || !r.ok) return fail((r && r.reason) || 'nothing to do');
     var after = np.topology(r.soup);
     commit(m, r.soup, UNDO[spec.fix]);
+    /* One line per hole filled: its size, the surface the fill follows and how closely - or,
+       never silently, that no fit could be made and what was done instead (nso_patch.js readout). */
+    var holes = (r.filled && np.readout) ? r.filled.map(np.readout) : [];
     var text = how + ' - open edges ' + before.open + '→' + after.open + ', NM ' + before.nm + '→' + after.nm +
-               (r.filled && r.filled.some(function (f) { return f.curved; }) ? ', fitted to the surface round it' : '') +
-               '. One Undo puts it back.';
+               (holes.length ? '. ' + holes.join('. ') : '') + '. One Undo puts it back.';
     say(text);
-    return { ok: true, text: text, fix: spec.fix, before: before, after: after, result: r };
+    return { ok: true, text: text, holes: holes, fix: spec.fix, before: before, after: after, result: r };
   }
   window.nsoRepairRun = run;
 

@@ -243,7 +243,7 @@ console.log('7. every damage fixture: the promised counts before, the fix\'s own
 console.log('8. the choice of fix, on every fixture that has a hole');
 {
   const CASES = [
-    ['damage/shape-sphere_hole.stl', ['patch']], ['damage/shape-sphere_hole-painted.stl', ['cap']],
+    ['damage/shape-sphere_hole.stl', ['patch']], ['damage/shape-sphere_hole-painted.stl', ['patch']],   // a flat RIM in a sphere: the surround curves, so PATCH (was CAP)
     ['damage/shape-sphere_holes-shredded.stl', ['patch', 'patch']], ['damage/shape-cylinder_holes-light.stl', ['cap', 'patch']],
     ['open/open_clip.stl', ['patch']], ['open/thin_shell_cup.stl', ['bridge']], ['repair/synth_hole.stl', ['cap']],
     ['repair/synth_tjunction.stl', ['cap']], ['repair/synth_flap.stl', ['sealRepair', 'sealRepair']], ['repair/box_lid_hole.stl', ['cap']]

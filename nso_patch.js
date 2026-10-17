@@ -14,8 +14,9 @@
      loops(soup)                 every open loop, with an id (this soup's only)
      describe(soup, loop)        planar? how far off its plane? how big?
      patch(soup, ids, opts)      PATCH: fill with a surface that continues the
-                                 curvature round the rim - or, when the rim is
-                                 planar within 0.05 mm, the flat cap
+                                 curvature round the rim - or, when the surround
+                                 is planar within 0.05 mm, the flat cap
+     readout(filled[i])          one plain line per hole filled: size, fit, error
      cap(soup, ids, opts)        CAP: the flat cap, this loop only
      bridgeLoops(soup, a, b)     BRIDGE two open loops: a strip welded to both
      gaps(soup, opts)            two end faces facing each other across a gap
@@ -30,23 +31,31 @@
      rim      the loop's OWN vertices, unmoved: the fill shares them with the
               real triangles round the hole - the same numbers bit for bit, so
               there is no step and no sliver at the weld.
-     triangles  the loop is first triangulated across (minimum area, every
-              chord checked: not an edge the mesh already has, and inside the
-              polygon where the loop is a graph over its plane), then refined
-              (Liepa's rule: a triangle is split at its centre while its edges
-              are longer than the neighbours' edge length at its corners) and
-              relaxed by edge flips, never across the rim.
-     height   the new points are placed where a smooth surface through the
-              rim's neighbours puts them: the points minimise
-                  sum over the new points AND the rim vertices of |L x|^2,
-              L the (uniform) Laplacian over the surface and the fill together.
-              A rim vertex's L reaches across the weld into its real
-              neighbours, so keeping it small carries their slope into the fill
-              (a C1 join - a harmonic fill would match only the height). Nothing
-              else: no smoothing of what was there, no texture made up.
+     surround a ring of the piece's own vertices out from the rim (a quarter of
+              the hole's diameter, 3 to 8 triangle rings). A rim in one plane
+              does not make a flat floor: a circular hole in a sphere has one.
+              The surround decides.
+     fit      a surface is fitted to the surround by least squares: the plane
+              (the surround lies in the rim's plane to 0.05 mm: the flat cap),
+              else a SPHERE, else Lift 3's QUADRIC. A fit follows the surround
+              when its rms residual is within 4% of an edge (not under 0.01 mm)
+              and no vertex of it, the rim's included, is off by more than 3x.
+     fill     triangulated in the fit's chart (flat coordinates for it) and
+              filled with points ON the fit at the surround's own spacing, the
+              triangles kept Delaunay; a facet that would sag more than 0.02 mm
+              off the fit is split. The interior is never on the loop's plane.
+     report   per hole (patch()'s `filled[i].fit`, and readout(filled[i])): the
+              loop's diameter, the fit's kind, radius and residual, how far the
+              fill stands off it, the fill's and the surround's edge length.
+              NEVER SILENT: when no fit follows the surround the hole is faired
+              from the rim's slopes (the biharmonic: the new points minimise
+              sum |L x|^2 over themselves and the rim, L the uniform Laplacian
+              over the piece's edges and the fill's), or filled flat with
+              opts.fallback 'flat', and the report says which and why.
 
-   When the rim lies in one plane to within 0.05 mm (PLANAR_MM), the fill is
-   the flat cap: minimum-area triangulation of the polygon and nothing inside.
+   When the rim and its surround lie in one plane to within 0.05 mm
+   (PLANAR_MM), the fill is the flat cap: minimum-area triangulation of the
+   polygon and nothing inside.
 
    THE FILL IS WOUND TO THE RIM: for every boundary half-edge u->v of the
    piece, the fill holds v->u. Appended to the piece it closes the loop by
@@ -63,13 +72,26 @@
     planarMm: 0.05,       // a rim whose FLATNESS (slab width) is within this gets the flat cap
     maxDpLoop: 500,       // minimum-area DP up to this many rim vertices; a fan from the best corner past it
     alpha: Math.SQRT2,    // Liepa's refinement factor
-    spacing: 0.5,         // the fill's target edge length, as a fraction of the piece's own round the rim
+    spacing: 1.0,         // the fill's target edge length, as a fraction of the piece's own round the rim (the surround's density)
+    ringFrac: 0.25,       // the surround ring is this fraction of the hole's diameter wide...
+    ringMinHops: 3,       // ...but at least this many triangle rings,
+    ringMaxHops: 8,       // ...and at most this many
+    ringMinSamples: 24,   // widened (up to ringMaxHops + 4) until the fit has this many vertices
+    flatHops: 3,          // a surround is flat when the rim plane holds the vertices this many rings out to planarMm
+    fitTolFrac: 0.04,     // a fit follows the surround when its rms residual is within this fraction of an edge...
+    fitMinTolMm: 0.01,    // ...and not under this
+    poleCandidates: 1500, // directions tried for the sphere chart's pole
+    maxCapDeg: 150,       // the sphere chart: no rim vertex farther than this from the pole
+    sagTolMm: 0.02,       // a fill triangle's centre may stand this far off the fit (a flat facet is split until it does not)
+    planSurroundMax: 200, // plan() reads the surround of a flat-rimmed loop only while the piece has this many loops or fewer
+    fallback: 'fair',     // when no fit can be made: 'fair' (biharmonic, reported) or 'flat'
     maxNewPoints: 30000,
     fairMaxIter: 4000,
     fairTol: 1e-9,
     nozzle: 0.4
   };
   var KEY = 4194304;       // vertex ids stay below 2^22
+  var MIN_FIT_VERTS = 12;  // fewer surround vertices than this and a sphere or quadric fits anything
 
   /* ----------------------------------------------------------------- math */
   function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
@@ -362,16 +384,20 @@
     return { area: ar, q: ar > 0 ? Math.max(1, (ab + bc + ca) * (ab + bc + ca) / (12 * Math.sqrt(3) * ar)) : 1e9 };
   }
 
-  function triangulateLoop(M, P, nbr, opts) {
+  function triangulateLoop(M, P, nbr, opts, chart2) {
     var n = P.length, pts = P.map(function (v) { return ptOf(M, v); });
+    var p2, i, j, k;
     if (n === 3) return { tris: [[0, 1, 2]], mode: 'single' };
-    var fit = planeFit(pts), F = frameOf(fit);
-    var p2 = pts.map(function (p) { return to2(F, p); });
+    if (chart2) p2 = chart2;          // the fitted surface's own coordinates: the rim, as it lies in them, is the polygon
+    else {
+      var fit = planeFit(pts), F = frameOf(fit);
+      p2 = pts.map(function (p) { return to2(F, p); });
+    }
     // the fill order's orientation about the fit normal
-    var A2 = 0, i, j, k;
+    var A2 = 0;
     for (i = 0; i < n; i++) { var a = p2[i], b = p2[(i + 1) % n]; A2 += a[0] * b[1] - b[0] * a[1]; }
     var orient = A2 >= 0 ? 1 : -1, perim = 0;
-    for (i = 0; i < n; i++) perim += len(sub(pts[(i + 1) % n], pts[i]));
+    for (i = 0; i < n; i++) perim += chart2 ? Math.hypot(p2[(i + 1) % n][0] - p2[i][0], p2[(i + 1) % n][1] - p2[i][1]) : len(sub(pts[(i + 1) % n], pts[i]));
     var graph = Math.abs(A2) / 2 > 1e-4 * perim * perim;
     for (i = 0; graph && i < n; i++) {
       for (j = i + 2; graph && j < n; j++) {
@@ -434,6 +460,7 @@
       }
     }
     if (W[n - 1] >= INF) {
+      if (chart2) return null;                       // a chart needs a proper planar triangulation or nothing
       if (graph) { opts = Object.assign({}, opts); return triangulateLoopRetry(M, P, nbr, opts); }
       return null;
     }
@@ -540,7 +567,104 @@
      twin among the fill's triangles, and the only kind never flipped. */
   function Fill(M) {
     this.M = M; this.pos = []; this.tris = []; this.E = new Map(); this.sigma = new Map();
+    this.chart = null; this.uv = new Map(); this.orient = 1;      // set when the fill is built in a fitted surface's chart
   }
+  /* Build the fill in a chart: every vertex has coordinates in it (the rim's from
+     the caller, a new point's from where it was put), triangles must keep their
+     orientation in it, and a new point is put ON the fit by chart.toSurf. */
+  Fill.prototype.useChart = function (chart, P, p2, orient) {
+    this.chart = chart; this.orient = orient;
+    for (var i = 0; i < P.length; i++) this.uv.set(P[i], p2[i]);
+  };
+  Fill.prototype.areaUV = function (a, b, c) {
+    var A = this.uv.get(a), B = this.uv.get(b), C = this.uv.get(c);
+    return ((B[0] - A[0]) * (C[1] - A[1]) - (B[1] - A[1]) * (C[0] - A[0])) * this.orient;
+  };
+  /* The triangle whose inside holds chart point q, or -1 (outside the fill, or on
+     an edge: such a point is not inserted). Walks from the last triangle made (points
+     come in near one another) toward q across the edge it is on the wrong side of; if
+     the walk leaves the fill (a concave rim) every triangle is tried. */
+  Fill.prototype.locate = function (q, eps) {
+    var o = this.orient, t = this._hint, steps = 0;
+    function side(A, B) { return ((B[0] - A[0]) * (q[1] - A[1]) - (B[1] - A[1]) * (q[0] - A[0])) * o; }
+    if (t != null && this.tris[t]) {
+      for (; steps < 4000; steps++) {
+        var r = this.tris[t], A = this.uv.get(r[0]), B = this.uv.get(r[1]), C = this.uv.get(r[2]);
+        var s1 = side(A, B), s2 = side(B, C), s3 = side(C, A);
+        if (s1 > eps && s2 > eps && s3 > eps) return t;
+        var e = s1 <= s2 && s1 <= s3 ? 0 : (s2 <= s3 ? 1 : 2), u = this.E.get(r[(e + 1) % 3] * KEY + r[e]);
+        if (u === undefined) break;
+        t = u;
+      }
+    }
+    for (t = 0; t < this.tris.length; t++) {
+      var r2 = this.tris[t];
+      if (!r2) continue;
+      var A2 = this.uv.get(r2[0]), B2 = this.uv.get(r2[1]), C2 = this.uv.get(r2[2]);
+      if (side(A2, B2) > eps && side(B2, C2) > eps && side(C2, A2) > eps) return t;
+    }
+    return -1;
+  };
+  /* Lawson flips from a stack of [triangle, a, b] (the directed edge a>b of that triangle):
+     flip an edge while the vertex across it is inside the circle through the triangle's
+     corners, in the chart. Never across a rim edge (it has no triangle on its other side),
+     never to an edge the piece already has, never to a triangle that would not keep the
+     chart's orientation. */
+  Fill.prototype.legalize = function (stack, nbr, eps) {
+    var guard = 0, flips = 0;
+    while (stack.length && guard++ < 1000000) {
+      var it = stack.pop(), tt = this.tris[it[0]], a = it[1], b = it[2];
+      if (!tt) continue;
+      var k = tt.indexOf(a);
+      if (k < 0 || tt[(k + 1) % 3] !== b) continue;
+      var p = tt[(k + 2) % 3], u = this.E.get(b * KEY + a);
+      if (u === undefined) continue;                                  // a rim edge
+      var s = this.tris[u], q = s[0] === b && s[1] === a ? s[2] : (s[1] === b && s[2] === a ? s[0] : s[1]);
+      var A = this.uv.get(a), B = this.uv.get(b), Pp = this.uv.get(p), Qq = this.uv.get(q);
+      var ax = A[0] - Qq[0], ay = A[1] - Qq[1], bx = B[0] - Qq[0], by = B[1] - Qq[1], cx = Pp[0] - Qq[0], cy = Pp[1] - Qq[1];
+      var inc = ((ax * ax + ay * ay) * (bx * cy - cx * by) - (bx * bx + by * by) * (ax * cy - cx * ay) + (cx * cx + cy * cy) * (ax * by - bx * ay)) * this.orient;
+      if (!(inc > 0)) continue;                                       // q is outside the circle through a, b, p: legal
+      if (!(this.areaUV(a, q, p) > eps && this.areaUV(q, b, p) > eps)) continue;
+      var nbp = nbr.get(p), nbq = nbr.get(q);
+      if ((nbp && nbp.has(q)) || (nbq && nbq.has(p)) || this.E.has(p * KEY + q) || this.E.has(q * KEY + p)) continue;
+      this.setTri(it[0], a, q, p);
+      this.setTri(u, q, b, p);
+      stack.push([it[0], a, q], [u, q, b]);
+      flips++;
+    }
+    return flips;
+  };
+  /* Every edge of the fill, legalized: the triangles the minimum-area triangulation
+     left along the rim (three rim vertices in a row) are flipped away once there are
+     points inside to flip them toward. */
+  Fill.prototype.delaunay = function (nbr, eps) {
+    var total = 0;
+    for (var pass = 0; pass < 8; pass++) {
+      var stack = [];
+      for (var t = 0; t < this.tris.length; t++) {
+        var r = this.tris[t];
+        if (r) stack.push([t, r[0], r[1]], [t, r[1], r[2]], [t, r[2], r[0]]);
+      }
+      var f = this.legalize(stack, nbr, eps);
+      total += f;
+      if (!f) break;
+    }
+    return total;
+  };
+  /* Put a point of the fit into the fill (split its triangle in three) and keep the
+     triangles Delaunay in the chart: Lawson flips, never across a rim edge (it has
+     no triangle on its other side) and never onto an edge the piece already has. */
+  Fill.prototype.insert = function (uv, pt, sigma, nbr, eps) {
+    var t = this.locate(uv, eps);
+    if (t < 0) return false;
+    var r = this.tris[t], v = this.addVertex(pt, sigma);
+    this.uv.set(v, uv);
+    this.setTri(t, r[0], r[1], v);
+    var t2 = this.addTri(r[1], r[2], v), t3 = this.addTri(r[2], r[0], v);
+    this._hint = t;
+    this.legalize([[t, r[0], r[1]], [t2, r[1], r[2]], [t3, r[2], r[0]]], nbr, eps);
+    return true;
+  };
   Fill.prototype.P = function (v) {
     if (v < this.M.nv) return [this.M.pos[v * 3], this.M.pos[v * 3 + 1], this.M.pos[v * 3 + 2]];
     var o = (v - this.M.nv) * 3;
@@ -559,8 +683,9 @@
     return t;
   };
   Fill.prototype.setTri = function (t, a, b, c) {
-    var r = this.tris[t];
-    this.E.delete(r[0] * KEY + r[1]); this.E.delete(r[1] * KEY + r[2]); this.E.delete(r[2] * KEY + r[0]);
+    var r = this.tris[t], E = this.E;
+    // only the edges this triangle still owns: after a flip the other triangle may already hold one
+    for (var k = 0; k < 3; k++) { var key = r[k] * KEY + r[(k + 1) % 3]; if (E.get(key) === t) E.delete(key); }
     this.tris[t] = [a, b, c];
     this.E.set(a * KEY + b, t); this.E.set(b * KEY + c, t); this.E.set(c * KEY + a, t);
   };
@@ -585,14 +710,20 @@
       for (var t = 0; t < nT; t++) {
         var r = this.tris[t];
         if (!r) continue;
-        var pa = this.P(r[0]), pb = this.P(r[1]), pc = this.P(r[2]);
-        var c = mul(add(add(pa, pb), pc), 1 / 3);
+        var pa = this.P(r[0]), pb = this.P(r[1]), pc = this.P(r[2]), c, cuv = null;
+        if (this.chart) {              // the centre in the chart, put ON the fit
+          var ua = this.uv.get(r[0]), ub = this.uv.get(r[1]), uc = this.uv.get(r[2]);
+          cuv = [(ua[0] + ub[0] + uc[0]) / 3, (ua[1] + ub[1] + uc[1]) / 3];
+          c = this.chart.toSurf(cuv);
+        } else c = mul(add(add(pa, pb), pc), 1 / 3);
         var sa = this.sigma.get(r[0]), sb = this.sigma.get(r[1]), sc = this.sigma.get(r[2]);
         var sC = (sa + sb + sc) / 3;
         var da = alpha * len(sub(c, pa)), db = alpha * len(sub(c, pb)), dc = alpha * len(sub(c, pc));
-        if (da > sC && db > sC && dc > sC && da > sa && db > sb && dc > sc) {
+        var tooBig = da > sC && db > sC && dc > sC && da > sa && db > sb && dc > sc;
+        if (tooBig) {
           if (added >= opts.maxNewPoints) break;
           var v = this.addVertex(c, sC);
+          if (cuv) this.uv.set(v, cuv);
           this.setTri(t, r[0], r[1], v);
           this.addTri(r[1], r[2], v);
           this.addTri(r[2], r[0], v);
@@ -601,6 +732,48 @@
       }
       var flips = this.relax(nbr);
       if (!split && !flips) break;
+    }
+    return added;
+  };
+  /* On a fit, no facet may sag: an interior edge whose middle, put on the fit, stands
+     more than sagTolMm off the straight edge is split at that middle (longest first, both
+     triangles on it), then the fill is made Delaunay again. A flat triangle across a hole
+     in a curved surface is split until it follows the surface. */
+  Fill.prototype.refineSag = function (nbr, opts, eps) {
+    var added = 0;
+    for (var pass = 0; pass < 12; pass++) {
+      var cands = [], t, e;
+      for (t = 0; t < this.tris.length; t++) {
+        var r = this.tris[t];
+        if (!r) continue;
+        for (e = 0; e < 3; e++) {
+          var a = r[e], b = r[(e + 1) % 3];
+          if (a > b) continue;
+          var u = this.E.get(b * KEY + a);
+          if (u === undefined) continue;                                 // a rim edge is the piece's
+          var pa = this.P(a), pb = this.P(b), L = len(sub(pb, pa)), sg = (this.sigma.get(a) + this.sigma.get(b)) / 2;
+          if (!(L > 0.5 * sg)) continue;
+          var ua = this.uv.get(a), ub = this.uv.get(b), pm = this.chart.toSurf([(ua[0] + ub[0]) / 2, (ua[1] + ub[1]) / 2]);
+          if (len(sub(pm, mul(add(pa, pb), 0.5))) > opts.sagTolMm) cands.push({ a: a, b: b, t: t, u: u, L: L });
+        }
+      }
+      if (!cands.length || added >= opts.maxNewPoints) break;
+      cands.sort(function (x, y) { return y.L - x.L; });
+      var used = new Set();
+      for (var c = 0; c < cands.length; c++) {
+        var C = cands[c];
+        if (used.has(C.t) || used.has(C.u)) continue;
+        used.add(C.t); used.add(C.u);
+        var tt = this.tris[C.t], k = tt.indexOf(C.a), p = tt[(k + 2) % 3];
+        var ts = this.tris[C.u], k2 = ts.indexOf(C.b), q = ts[(k2 + 2) % 3];
+        var u1 = this.uv.get(C.a), u2 = this.uv.get(C.b), um = [(u1[0] + u2[0]) / 2, (u1[1] + u2[1]) / 2];
+        var v = this.addVertex(this.chart.toSurf(um), (this.sigma.get(C.a) + this.sigma.get(C.b)) / 2);
+        this.uv.set(v, um);
+        this.setTri(C.t, C.a, v, p); this.addTri(v, C.b, p);
+        this.setTri(C.u, C.b, v, q); this.addTri(v, C.a, q);
+        added++;
+      }
+      this.delaunay(nbr, eps);
     }
     return added;
   };
@@ -624,10 +797,14 @@
           var before = Math.min(minAngle(A, B, Pp), minAngle(B, A, Qq));
           var after = Math.min(minAngle(A, Qq, Pp), minAngle(Qq, B, Pp));
           if (!(after > before + 1e-6)) continue;
-          var n1 = cross(sub(Qq, A), sub(Pp, A)), n2 = cross(sub(B, Qq), sub(Pp, Qq));
-          var o1 = cross(sub(B, A), sub(Pp, A)), o2 = cross(sub(A, B), sub(Qq, B));
-          var oldN = unit(add(o1, o2));
-          if (!oldN || dot(n1, oldN) <= 0 || dot(n2, oldN) <= 0) continue;
+          if (this.chart) {            // both new triangles must keep the chart's orientation
+            if (!(this.areaUV(a, q, p) > 0 && this.areaUV(q, b, p) > 0)) continue;
+          } else {
+            var n1 = cross(sub(Qq, A), sub(Pp, A)), n2 = cross(sub(B, Qq), sub(Pp, Qq));
+            var o1 = cross(sub(B, A), sub(Pp, A)), o2 = cross(sub(A, B), sub(Qq, B));
+            var oldN = unit(add(o1, o2));
+            if (!oldN || dot(n1, oldN) <= 0 || dot(n2, oldN) <= 0) continue;
+          }
           this.setTri(t, a, q, p);
           this.setTri(u, q, b, p);
           flips++;
@@ -726,21 +903,30 @@
     return { iters: iters, moved: moved };
   };
 
-  /* The fill on the surface round it - the rule Lift 3's repair fill uses
-     (docs/LIFT.md 6): a smooth local fit through the rim's neighbours is the
-     base, and the fill stands on it by how far the rim itself stands off it.
+  /* ------------------------------------------------- the surround and its fit
 
-       base    w = a u^2 + b uv + c v^2 + d u + e v + f over the best plane
-               through the rim and the rings of the piece's own vertices round
-               it (weights 1, .7, .4, .25 by ring), fitted by least squares
-       height  w = base + h; h is held at the rim (where the fill must meet the
-               real vertices exactly) and is harmonic inside: the rim's own
-               error from the fit is spread across the fill and nothing else is
-               made up.
+     The surface round a hole is READ from the piece: a ring of its own
+     vertices, out from the rim a few triangles (a quarter of the hole's
+     diameter, 3 to 8 rings). A surface is fitted to that ring by least squares
+     and the fill's interior vertices are put ON it - never on the loop's plane.
 
-     Only for a loop that is a graph over that plane and whose neighbours the
-     quadric follows. Returns false (nothing moved) when it is not, and the
-     caller fairs by the biharmonic instead. */
+       plane    the surround lies in the rim's plane within 0.05 mm: the flat cap
+       sphere   least squares, algebraic then polished on the true distance
+       quadric  w = a u^2 + b uv + c v^2 + d u + e v + f over the best plane
+                through the ring (Lift 3's local fit, nso_lift_curved.js)
+
+     A fit FOLLOWS the surround when its rms residual is within 4% of an edge
+     (and not under 0.01 mm). Sphere first; the quadric when the sphere does
+     not follow; neither: the fill is faired from the rim (or flat) and says so.
+
+     Each fit brings a CHART - flat coordinates (u, v) for the surface, with
+     toSurf(uv) the point of the fit above them. The loop is triangulated in the
+     chart, refined in it (a new point is the centre of its triangle IN THE
+     CHART, put on the fit), and flipped with the chart's orientation test, so
+     the fill is a proper triangulation of the hole however far the rim wraps.
+     The sphere's chart is the stereographic projection from the point opposite
+     a pole inside the hole (conformal: a small hole is nearly flat in it, a
+     hole bigger than a hemisphere still lies flat in it). */
   function solveSmall(A, b, n) {
     var i, j, k;
     for (i = 0; i < n; i++) {
@@ -763,128 +949,283 @@
     }
     return x;
   }
-  Fill.prototype.baseFill = function (rim, adj, opts) {
-    var M = this.M, nv = M.nv, nNew = this.pos.length / 3, i, r;
-    // samples: the rim, then rings of the piece's own vertices round it
-    var ring = new Map(), frontier = [];
-    rim.forEach(function (v) { ring.set(v, 0); frontier.push(v); });
-    var want = 18, depth = 0, maxDepth = 5;
-    while (depth < maxDepth && (depth < 2 || ring.size < want)) {
+
+  function adjacencyOf(M) {
+    if (M._adj) return M._adj;
+    var adj = new Array(M.nv), i;
+    for (i = 0; i < M.nv; i++) adj[i] = [];
+    for (var t = 0; t < M.nt; t++) {
+      var a = M.f[t * 3], b = M.f[t * 3 + 1], c = M.f[t * 3 + 2];
+      adj[a].push(b, c); adj[b].push(a, c); adj[c].push(a, b);
+    }
+    M._adj = adj;
+    return adj;
+  }
+  /* The largest distance between two rim vertices: "the loop's diameter". */
+  function loopDiameter(pts) {
+    var stride = Math.ceil(pts.length / 500), q = [], i, j, best = 0;     // a long rim: every few vertices is enough
+    for (i = 0; i < pts.length; i += stride) q.push(pts[i]);
+    for (i = 0; i < q.length; i++) for (j = i + 1; j < q.length; j++) {
+      var dx = q[i][0] - q[j][0], dy = q[i][1] - q[j][1], dz = q[i][2] - q[j][2], d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 > best) best = d2;
+    }
+    return Math.sqrt(best);
+  }
+  /* The ring of the piece's own vertices round a rim: rim = depth 0, then the
+     vertices one triangle edge out, and so on. hops: a fixed number of rings,
+     else the hole's size decides (and the ring is widened to hold enough
+     vertices to fit). edgeMm is the surround's own triangle size: the mean
+     length of the edges between its vertices. */
+  function surroundOf(M, adj, rim, D, o, hops) {
+    var depth = new Map(), frontier = [], es = 0, ec = 0;
+    rim.forEach(function (v) { depth.set(v, 0); frontier.push(v); });
+    rim.forEach(function (v) {
+      var pv = ptOf(M, v);
+      adj[v].forEach(function (w) { es += len(sub(ptOf(M, w), pv)); ec++; });
+    });
+    var rimEdge = ec ? es / ec : 1;
+    var want = hops != null ? hops : Math.max(o.ringMinHops, Math.min(o.ringMaxHops, Math.ceil(o.ringFrac * D / rimEdge)));
+    var cap = hops != null ? hops : o.ringMaxHops + 4, d = 0;
+    while (d < cap && (d < want || (hops == null && depth.size < o.ringMinSamples))) {
       var nxt = [];
       frontier.forEach(function (v) {
-        (adj(v) || []).forEach(function (w) { if (!ring.has(w)) { ring.set(w, depth + 1); nxt.push(w); } });
+        adj[v].forEach(function (w) { if (!depth.has(w)) { depth.set(w, d + 1); nxt.push(w); } });
       });
-      frontier = nxt; depth++;
       if (!nxt.length) break;
+      frontier = nxt; d++;
     }
-    var verts = Array.from(ring.keys()), wts = [0.0, 0.7, 0.4, 0.25, 0.15, 0.1];
-    if (verts.length < 12) return { ok: false, why: 'too few neighbours to fit' };
+    var verts = Array.from(depth.keys()), sum = 0, cnt = 0;
+    verts.forEach(function (v) {
+      var pv = ptOf(M, v), seen = {};
+      adj[v].forEach(function (w) {
+        if (w > v && depth.has(w) && !seen[w]) { seen[w] = 1; sum += len(sub(ptOf(M, w), pv)); cnt++; }
+      });
+    });
+    return { depth: depth, verts: verts, hops: d, edgeMm: cnt ? sum / cnt : rimEdge, rimEdgeMm: rimEdge };
+  }
+  /* Is the surround flat? The rim lies in a plane within planarMm AND the ring
+     (the first flatHops rings out from it) lies in that same plane: 4 in 5 of
+     its vertices within planarMm. A circular hole in a sphere has a flat RIM;
+     it is the ring that tells the sphere from a floor. */
+  function surroundFlat(M, adj, rim, o) {
+    var ring = surroundOf(M, adj, rim, 0, o, o.flatHops);
+    var pf = planeFit(rim.map(function (v) { return ptOf(M, v); })), devs = [];
+    ring.verts.forEach(function (v) {
+      if (ring.depth.get(v) > 0) devs.push(Math.abs(dot(sub(ptOf(M, v), pf.centre), pf.normal)));
+    });
+    devs.sort(function (a, b) { return a - b; });
+    var p80 = devs.length ? devs[Math.min(devs.length - 1, Math.floor(devs.length * 0.8))] : 0;
+    return { flat: pf.flatnessMm <= o.planarMm && p80 <= o.planarMm, rimFlatMm: pf.flatnessMm, ringDevMm: p80, plane: pf };
+  }
+
+  /* Least-squares sphere: the algebraic fit (|x|^2 = 2 a.x + k, linear in a and
+     k), then Gauss-Newton on the true distance residual |x - a| - R. */
+  function fitSphere(pts) {
+    var n = pts.length, i, a, b, k;
+    if (n < 8) return null;
+    var c0 = [0, 0, 0];
+    pts.forEach(function (p) { c0 = add(c0, p); });
+    c0 = mul(c0, 1 / n);
+    var sc = 0;
+    pts.forEach(function (p) { var d = sub(p, c0); sc += dot(d, d); });
+    sc = Math.sqrt(sc / n);
+    if (!(sc > 1e-12)) return null;
+    var q = pts.map(function (p) { return mul(sub(p, c0), 1 / sc); });
+    var AtA = [], Atb = [0, 0, 0, 0];
+    for (a = 0; a < 4; a++) AtA.push([0, 0, 0, 0]);
+    q.forEach(function (x) {
+      var row = [2 * x[0], 2 * x[1], 2 * x[2], 1], rhs = dot(x, x);
+      for (var r = 0; r < 4; r++) { Atb[r] += row[r] * rhs; for (var c = 0; c < 4; c++) AtA[r][c] += row[r] * row[c]; }
+    });
+    var sol = solveSmall(AtA, Atb, 4);
+    if (!sol) return null;
+    var cen = [sol[0], sol[1], sol[2]], R2 = sol[3] + dot(cen, cen);
+    if (!(R2 > 0) || !isFinite(R2)) return null;
+    var R = Math.sqrt(R2);
+    for (var it = 0; it < 10; it++) {
+      var JtJ = [], Jtr = [0, 0, 0, 0];
+      for (a = 0; a < 4; a++) JtJ.push([0, 0, 0, 0]);
+      for (i = 0; i < q.length; i++) {
+        var d = sub(q[i], cen), L = len(d);
+        if (L < 1e-12) continue;
+        var J = [-d[0] / L, -d[1] / L, -d[2] / L, -1], r = L - R;
+        for (a = 0; a < 4; a++) { Jtr[a] -= J[a] * r; for (b = 0; b < 4; b++) JtJ[a][b] += J[a] * J[b]; }
+      }
+      var dl = solveSmall(JtJ, Jtr, 4);
+      if (!dl) break;
+      cen = [cen[0] + dl[0], cen[1] + dl[1], cen[2] + dl[2]]; R += dl[3];
+      if (Math.abs(dl[0]) + Math.abs(dl[1]) + Math.abs(dl[2]) + Math.abs(dl[3]) < 1e-13) break;
+    }
+    var centre = add(c0, mul(cen, sc)), Rmm = R * sc;
+    if (!(Rmm > 0) || !isFinite(Rmm)) return null;
+    var se = 0, mx = 0;
+    pts.forEach(function (p) { var e = Math.abs(len(sub(p, centre)) - Rmm); se += e * e; if (e > mx) mx = e; });
+    return { centre: centre, R: Rmm, rms: Math.sqrt(se / n), max: mx, n: n };
+  }
+  function orientOf(p2) {
+    var A2 = 0;
+    for (var i = 0; i < p2.length; i++) { var a = p2[i], b = p2[(i + 1) % p2.length]; A2 += a[0] * b[1] - b[0] * a[1]; }
+    return A2 >= 0 ? 1 : -1;
+  }
+  /* The sphere's chart. P: the loop in fill order; rim: the loop as the piece
+     has it (boundary order), for the way the piece faces. The pole is a point
+     inside the hole: the direction (from 1500 tried) that has the fill-order
+     rim winding once round it in the chart, with the least distance to the
+     farthest rim vertex. Null (and a reason) when none does. */
+  function sphereChart(M, H, rim, P, sph, o) {
+    var c = sph.centre, n = P.length, dirs = [], i;
+    for (i = 0; i < n; i++) {
+      var dd = unit(sub(ptOf(M, P[i]), c));
+      if (!dd) return { why: 'a rim vertex sits at the sphere\'s centre' };
+      dirs.push(dd);
+    }
+    // which way the piece faces: its triangles on the rim against the way out of the sphere
+    var so = 0;
+    for (i = 0; i < rim.length; i++) {
+      var code = H.he.get(rim[i] * M.nv + rim[(i + 1) % rim.length]);
+      if (code === undefined) continue;
+      var t = (code / 3) | 0, tp = triPts(M, t), g = mul(add(add(tp[0], tp[1]), tp[2]), 1 / 3);
+      var nn = unit(triNormal(M, t)), out = unit(sub(g, c));
+      if (nn && out) so += dot(nn, out);
+    }
+    var sOr = so >= 0 ? 1 : -1;
+    var cands = [], N = o.poleCandidates, gold = Math.PI * (3 - Math.sqrt(5)), mean = [0, 0, 0];
+    for (i = 0; i < N; i++) {
+      var z = 1 - 2 * (i + 0.5) / N, rr = Math.sqrt(1 - z * z), th = i * gold;
+      cands.push([rr * Math.cos(th), rr * Math.sin(th), z]);
+    }
+    dirs.forEach(function (d) { mean = add(mean, d); });
+    var mu = unit(mean);
+    if (mu) { cands.push(mu); cands.push(mul(mu, -1)); }
+    var cosMin = Math.cos(o.maxCapDeg * Math.PI / 180), scored = [];
+    function basisOf(pole) {
+      var a = Math.abs(pole[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0], e1 = unit(cross(a, pole));
+      return { e1: e1, e2: cross(pole, e1) };
+    }
+    function project(pole, bs, d) {
+      var den = 1 + dot(d, pole);
+      return [dot(d, bs.e1) / den, dot(d, bs.e2) / den];
+    }
+    cands.forEach(function (pole) {
+      var minDot = 1;
+      for (var k = 0; k < n; k++) { var dp = dot(dirs[k], pole); if (dp < minDot) minDot = dp; }
+      if (minDot < cosMin) return;
+      var bs = basisOf(pole), xy = dirs.map(function (d) { return project(pole, bs, d); }), tot = 0;
+      for (var k2 = 0; k2 < n; k2++) {
+        var a2 = xy[k2], b2 = xy[(k2 + 1) % n];
+        tot += Math.atan2(a2[0] * b2[1] - a2[1] * b2[0], a2[0] * b2[0] + a2[1] * b2[1]);
+      }
+      if (Math.round(tot / (2 * Math.PI)) !== sOr) return;
+      scored.push({ pole: pole, bs: bs, xy: xy, cap: Math.acos(Math.max(-1, Math.min(1, minDot))) });
+    });
+    scored.sort(function (x, y) { return x.cap - y.cap; });
+    for (var s = 0; s < Math.min(8, scored.length); s++) {
+      var cand = scored[s], simple = true, xy2 = cand.xy;
+      for (i = 0; simple && i < n; i++) for (var j = i + 2; simple && j < n; j++) {
+        if (i === 0 && j === n - 1) continue;
+        if (segCross2(xy2[i], xy2[(i + 1) % n], xy2[j], xy2[(j + 1) % n])) simple = false;
+      }
+      if (!simple) continue;
+      var pole = cand.pole, bs = cand.bs, R = sph.R, capRad = cand.cap;
+      return {
+        ok: true, p2: xy2, orient: sOr, capDeg: deg(cand.cap),
+        /* mm of surface per unit of chart at uv (the stereographic scale), and a lattice of
+           points on the sphere about the pole, rings a row apart, about sigma between points */
+        mmPerUnit: function (uv) { return 2 * R / (1 + uv[0] * uv[0] + uv[1] * uv[1]); },
+        lattice: function (sigma) {
+          var h = sigma * 0.866 / R, out = [[0, 0]], ring = 0;
+          for (var phi = h; phi < capRad + h && phi < 0.98 * Math.PI; phi += h, ring++) {
+            var m = Math.max(3, Math.round(2 * Math.PI * R * Math.sin(phi) / sigma)), tn = Math.tan(phi / 2), off = (ring & 1) ? 0.5 : 0;
+            for (var j = 0; j < m; j++) { var al = (j + off) * 2 * Math.PI / m; out.push([tn * Math.cos(al), tn * Math.sin(al)]); }
+          }
+          return out;
+        },
+        chart: {
+          toSurf: function (uv) {
+            var r2 = uv[0] * uv[0] + uv[1] * uv[1], dn = 1 + r2;
+            var d = add(add(mul(bs.e1, 2 * uv[0] / dn), mul(bs.e2, 2 * uv[1] / dn)), mul(pole, (1 - r2) / dn));
+            return add(c, mul(d, R));
+          }
+        }
+      };
+    }
+    return { why: scored.length ? 'the rim crosses itself in every chart tried' : 'the hole covers more than ' + o.maxCapDeg + ' degrees of the sphere seen from any point inside it' };
+  }
+
+  /* Lift 3's local fit: the quadric over the best plane through the ring,
+     weights 1, .7, .4, .25 ... by ring. { ok, ... } or { why }. */
+  function fitQuadric(M, ring, rim, tol) {
+    var verts = ring.verts, wts = [0.0, 0.7, 0.4, 0.25, 0.15, 0.1], i, a, b2;
+    if (verts.length < MIN_FIT_VERTS) return { why: 'too few surround vertices to fit a quadric (' + verts.length + ')' };
     var pts = verts.map(function (v) { return ptOf(M, v); });
     var fit = planeFit(pts), F = frameOf(fit);
-    // scale: the rim's radius, so the normal equations stay well conditioned
     var scale = 1e-9;
     rim.forEach(function (v) { scale = Math.max(scale, len(sub(ptOf(M, v), F.o))); });
     var uvw = pts.map(function (p) { var d = sub(p, F.o); return [dot(d, F.u) / scale, dot(d, F.v) / scale, dot(d, F.n) / scale]; });
-    // the rim must still be a simple polygon in THIS plane
-    var P2 = rim.map(function (v) { var d = sub(ptOf(M, v), F.o); return [dot(d, F.u), dot(d, F.v)]; }), nR = P2.length;
-    for (i = 0; i < nR; i++) for (var j = i + 2; j < nR; j++) {
-      if (i === 0 && j === nR - 1) continue;
-      if (segCross2(P2[i], P2[(i + 1) % nR], P2[j], P2[(j + 1) % nR])) return { ok: false, why: 'the rim folds over itself looking down its plane' };
-    }
-    var AtA = [], Atb = [], a, b2;
+    var AtA = [], Atb = [];
     for (a = 0; a < 6; a++) { AtA.push([0, 0, 0, 0, 0, 0]); Atb.push(0); }
+    function wOf(v) { var rg = ring.depth.get(v); return rg === 0 ? 1 : (wts[Math.min(rg, wts.length - 1)] || 0.1); }
     for (i = 0; i < verts.length; i++) {
-      var u = uvw[i][0], v = uvw[i][1], w = uvw[i][2], rg = ring.get(verts[i]);
-      var wt = rg === 0 ? 1 : (wts[Math.min(rg, wts.length - 1)] || 0.1);
-      var basis = [u * u, u * v, v * v, u, v, 1];
+      var u = uvw[i][0], v2 = uvw[i][1], w = uvw[i][2], wt = wOf(verts[i]);
+      var basis = [u * u, u * v2, v2 * v2, u, v2, 1];
       for (a = 0; a < 6; a++) { Atb[a] += wt * basis[a] * w; for (b2 = 0; b2 < 6; b2++) AtA[a][b2] += wt * basis[a] * basis[b2]; }
     }
     var co = solveSmall(AtA, Atb, 6);
-    if (!co) return { ok: false, why: 'the fit is degenerate' };
+    if (!co) return { why: 'the quadric fit is degenerate' };
     function B(u2, v2) { return co[0] * u2 * u2 + co[1] * u2 * v2 + co[2] * v2 * v2 + co[3] * u2 + co[4] * v2 + co[5]; }
-    // does the quadric follow the neighbours?
-    var se = 0, sw = 0, maxRim = 0;
+    var se = 0, sw = 0, mx = 0;
     for (i = 0; i < verts.length; i++) {
-      var rg2 = ring.get(verts[i]), wt2 = rg2 === 0 ? 1 : (wts[Math.min(rg2, wts.length - 1)] || 0.1);
-      var e = (B(uvw[i][0], uvw[i][1]) - uvw[i][2]) * scale;
-      se += wt2 * e * e; sw += wt2;
-      if (rg2 === 0) maxRim = Math.max(maxRim, Math.abs(e));
+      var wt2 = wOf(verts[i]), e = (B(uvw[i][0], uvw[i][1]) - uvw[i][2]) * scale;
+      se += wt2 * e * e; sw += wt2; if (Math.abs(e) > mx) mx = Math.abs(e);
     }
-    var rms = Math.sqrt(se / sw), edge = 0, cnt = 0;
-    rim.forEach(function (v) { (adj(v) || []).forEach(function (w2) { edge += len(sub(ptOf(M, w2), ptOf(M, v))); cnt++; }); });
-    edge = cnt ? edge / cnt : scale;
-    var tolFit = Math.max(0.04 * edge, 0.01);
-    if (!(rms <= tolFit)) return { ok: false, why: 'the neighbours are not a smooth surface the fit follows (' + rms.toFixed(3) + ' mm rms)', rms: rms };
-    // heights over the fill's own points
-    var all = nNew + 0, free = [], uv = new Map();
-    function uvOf(p) { var d = sub(p, F.o); return [dot(d, F.u) / scale, dot(d, F.v) / scale]; }
-    var rimSet = new Set(rim);
-    var hres = new Map();                        // rim residuals
-    rim.forEach(function (v) {
-      var q = uvOf(ptOf(M, v)), w = dot(sub(ptOf(M, v), F.o), F.n) / scale;
-      hres.set(v, w - B(q[0], q[1]));
-    });
-    var idx = new Map(), list = [];
-    for (i = 0; i < nNew; i++) { var id = nv + i; idx.set(id, list.length); list.push(id); }
-    var nb = list.map(function () { return new Set(); });
-    this.tris.forEach(function (t) {
-      if (!t) return;
-      for (var e2 = 0; e2 < 3; e2++) {
-        var x = t[e2], y = t[(e2 + 1) % 3];
-        if (idx.has(x)) nb[idx.get(x)].add(y);
-        if (idx.has(y)) nb[idx.get(y)].add(x);
-      }
-    });
-    // harmonic h: free at the new points, held at the rim
-    var h = new Float64Array(nNew), rhs = new Float64Array(nNew);
-    for (i = 0; i < nNew; i++) {
-      var sumB = 0, deg = nb[i].size;
-      nb[i].forEach(function (y) { if (hres.has(y)) sumB += hres.get(y); });
-      rhs[i] = deg ? sumB / deg : 0;
-    }
-    function K(x, out) {                           // (I - mean over free neighbours) x
-      for (var k2 = 0; k2 < nNew; k2++) {
-        var deg2 = nb[k2].size, s3 = 0;
-        nb[k2].forEach(function (y) { if (idx.has(y)) s3 += x[idx.get(y)]; });
-        out[k2] = x[k2] - (deg2 ? s3 / deg2 : 0);
-      }
-    }
-    // The system (I - D^-1 A_ff) h = D^-1 A_fr h_r is not symmetric; solve it
-    // by Gauss-Seidel, which converges for this diagonally dominant system.
-    for (var sweep = 0; sweep < 4000; sweep++) {
-      var change = 0;
-      for (i = 0; i < nNew; i++) {
-        var deg3 = nb[i].size, s4 = 0;
-        if (!deg3) continue;
-        nb[i].forEach(function (y) { if (idx.has(y)) s4 += h[idx.get(y)]; });
-        var hv = (s4 / deg3) + rhs[i];
-        change = Math.max(change, Math.abs(hv - h[i]));
-        h[i] = hv;
-      }
-      if (change < 1e-12) break;
-    }
-    // place the points; keep the old ones in case the fill turns out folded
-    var oldPos = this.pos.slice(), orient = 0;
-    for (i = 0; i < nNew; i++) {
-      var p3 = [oldPos[i * 3], oldPos[i * 3 + 1], oldPos[i * 3 + 2]], q2 = uvOf(p3);
-      var w3 = (B(q2[0], q2[1]) + h[i]) * scale;
-      var np = add(add(add(F.o, mul(F.u, q2[0] * scale)), mul(F.v, q2[1] * scale)), mul(F.n, w3));
-      this.pos[i * 3] = np[0]; this.pos[i * 3 + 1] = np[1]; this.pos[i * 3 + 2] = np[2];
-    }
-    // every fill triangle must still face the way the rim says, in the plane
-    var sgn = 0, folded = 0;
-    for (i = 0; i < this.tris.length; i++) {
-      var tr = this.tris[i];
-      if (!tr) continue;
-      var nn = this.normal(i), d = dot(nn, F.n);
-      if (sgn === 0) sgn = d >= 0 ? 1 : -1;
-      if (!(d * sgn > 1e-12 * scale * scale)) folded++;
-    }
-    var maxH = 0;
-    for (i = 0; i < nNew; i++) maxH = Math.max(maxH, Math.abs(h[i]) * scale);
-    if (folded) { this.pos = oldPos; return { ok: false, why: 'the fill would fold over itself on the fitted surface' }; }
-    return { ok: true, rms: rms, maxRimOffBaseMm: maxRim, maxInsideOffBaseMm: maxH, samples: verts.length };
-  };
+    var rms = Math.sqrt(se / sw);
+    if (!(rms <= tol)) return { why: 'the surround is no quadric either (' + rms.toFixed(3) + ' mm rms against ' + tol.toFixed(3) + ' allowed)', rms: rms };
+    if (!(mx <= 3 * tol)) return { why: 'a surround vertex stands ' + mx.toFixed(3) + ' mm off the quadric (' + (3 * tol).toFixed(3) + ' allowed)', rms: rms };
+    return { ok: true, F: F, scale: scale, B: B, rms: rms, max: mx, n: verts.length };
+  }
+  /* The quadric's chart: its plane's (u, v), the fit above them. */
+  function quadricChart(M, q, P) {
+    var F = q.F, scale = q.scale, B = q.B;
+    var p2 = P.map(function (v) { var d = sub(ptOf(M, v), F.o); return [dot(d, F.u) / scale, dot(d, F.v) / scale]; });
+    var lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
+    p2.forEach(function (q) { for (var k = 0; k < 2; k++) { if (q[k] < lo[k]) lo[k] = q[k]; if (q[k] > hi[k]) hi[k] = q[k]; } });
+    return {
+      ok: true, p2: p2, orient: orientOf(p2),
+      mmPerUnit: function () { return scale; },
+      lattice: function (sigma) {                                   // a hexagonal lattice in the plane the quadric stands over
+        var s = sigma / scale, out = [], row = 0;
+        for (var y = lo[1]; y <= hi[1]; y += s * 0.866, row++) for (var x = lo[0] + ((row & 1) ? s / 2 : 0); x <= hi[0]; x += s) out.push([x, y]);
+        return out;
+      },
+      chart: { toSurf: function (uv) { return add(add(add(F.o, mul(F.u, uv[0] * scale)), mul(F.v, uv[1] * scale)), mul(F.n, B(uv[0], uv[1]) * scale)); } },
+      dev: function (p) { var d = sub(p, F.o), u3 = dot(d, F.u) / scale, v3 = dot(d, F.v) / scale; return Math.abs(dot(d, F.n) / scale - B(u3, v3)) * scale; }
+    };
+  }
+  /* Does a sphere follow the surround? { ok, sph, fit, tol } or { why, fit? }. */
+  function followsSphere(M, ring, diameter, o) {
+    var tol = Math.max(o.fitTolFrac * ring.edgeMm, o.fitMinTolMm);
+    var pts = ring.verts.map(function (v) { return ptOf(M, v); });
+    if (pts.length < MIN_FIT_VERTS) return { why: 'too few surround vertices to fit a sphere (' + pts.length + ')' };
+    var sph = fitSphere(pts);
+    if (!sph) return { why: 'no sphere can be fitted to the ' + pts.length + ' surround vertices' };
+    var fit = { kind: 'sphere', radiusMm: sph.R, centre: sph.centre, rmsMm: sph.rms, maxResidualMm: sph.max, samples: sph.n, tolMm: tol };
+    if (!(sph.rms <= tol)) return { why: 'the surround is no sphere (rms ' + sph.rms.toFixed(3) + ' mm against ' + tol.toFixed(3) + ' allowed)', fit: fit };
+    // and no vertex of it, the rim's included, stands far off: the fill is welded to the rim, so a rim off the fit is a kink
+    if (!(sph.max <= 3 * tol)) return { why: 'a surround vertex stands ' + sph.max.toFixed(3) + ' mm off the sphere (' + (3 * tol).toFixed(3) + ' allowed)', fit: fit };
+    if (!(sph.R >= 0.45 * diameter)) return { why: 'the sphere through the surround (R ' + sph.R.toFixed(2) + ' mm) is smaller than the hole', fit: fit };
+    return { ok: true, sph: sph, fit: fit, tol: tol };
+  }
+  /* Is the surround curved in a way a fit follows? Used to tell a flat rim in a
+     curved surface (a hole in a sphere) from one in a flat or creased one (a
+     hole in a cube's face, which stays a flat cap). */
+  function surroundCurved(M, adj, rim, diameter, o) {
+    var ring = surroundOf(M, adj, rim, diameter, o), tol = Math.max(o.fitTolFrac * ring.edgeMm, o.fitMinTolMm);
+    var s = followsSphere(M, ring, diameter, o);
+    if (s.ok) return { ok: true, kind: 'sphere', ring: ring };
+    var q = fitQuadric(M, ring, rim, tol);
+    if (q.ok) return { ok: true, kind: 'quadric', ring: ring };
+    return { ok: false, why: [s.why, q.why], ring: ring };
+  }
 
   /* ------------------------------------------------- piercing, for the fill
 
@@ -952,7 +1293,7 @@
   };
   /* How many triangles from index \`from\` up pierce another triangle (or one
      another). */
-  TriGrid.prototype.pierceCount = function (from) {
+  TriGrid.prototype.pierceCount = function (from, ignore) {
     var seen = new Set(), hit = new Set(), self = this;
     for (var i = from || 0; i < this.list.length; i++) {
       var A = this.list[i];
@@ -970,6 +1311,7 @@
           if (A.ids[0] === B.ids[0] || A.ids[0] === B.ids[1] || A.ids[0] === B.ids[2] ||
               A.ids[1] === B.ids[0] || A.ids[1] === B.ids[1] || A.ids[1] === B.ids[2] ||
               A.ids[2] === B.ids[0] || A.ids[2] === B.ids[1] || A.ids[2] === B.ids[2]) continue;
+          if (ignore && ignore(A, B)) continue;
           if (triTri(A.p[0], A.p[1], A.p[2], B.p[0], B.p[1], B.p[2])) { if (A.fill) hit.add(i); if (B.fill) hit.add(j); }
         }
       }
@@ -1034,22 +1376,10 @@
     var want = new Set();
     list.forEach(function (l) { l.verts.forEach(function (v) { want.add(v); }); });
     var nbr = surfaceNeighbours(M, want);
-    var adjAll = null;
-    function adjOf(v) {
-      if (!adjAll) {
-        adjAll = new Array(M.nv);
-        for (var i = 0; i < M.nv; i++) adjAll[i] = [];
-        for (var t = 0; t < M.nt; t++) {
-          var a = M.f[t * 3], b = M.f[t * 3 + 1], c = M.f[t * 3 + 2];
-          adjAll[a].push(b, c); adjAll[b].push(a, c); adjAll[c].push(a, b);
-        }
-      }
-      return adjAll[v];
-    }
     var out = [], filled = [], total = { tris: 0, points: 0, ms: 0 }, filledSoFar = [], surfG = null;
     /* The piece's own triangles round the loops, once; each loop's finished
        fill is added to it for good; a trial fill goes on and comes off. */
-    function piercesNow(Fl2, prev) {
+    function piercesNow(Fl2, prev, onFit) {
       if (!surfG) {
         var ls = 0, lc = 0;
         for (var t3 = 0; t3 < Math.min(M.nt, 4000); t3++) { ls += len(sub(ptOf(M, M.f[t3 * 3]), ptOf(M, M.f[t3 * 3 + 1]))); lc++; }
@@ -1065,38 +1395,156 @@
         if (!tr) return;
         surfG.add({ p: [Fl2.P(tr[0]), Fl2.P(tr[1]), Fl2.P(tr[2])], ids: [tr[0], tr[1], tr[2]].map(function (id) { return id < M.nv ? id : id + (prev.length + 1) * 5000000; }), fill: true });
       });
-      var count = surfG.pierceCount(n0);
+      /* A sheet of the piece that already lies ON the fit the new fill stands on
+         is the same surface, not one the fill crosses: it is left out of the count. */
+      var ignore = onFit ? function (A, B) {
+        var T = A.fill ? B : A;
+        return !T.fill && onFit(T.p[0]) && onFit(T.p[1]) && onFit(T.p[2]);
+      } : null;
+      var count = surfG.pierceCount(n0, ignore);
       surfG.truncate(n0);
       return count;
     }
-    for (var li = 0; li < chosen.length; li++) {
-      var L = chosen[li], d = describe(soup, L);
-      var P = L.verts.slice().reverse();                      // fill order
-      var T = triangulateLoop(M, P, nbr, o);
-      if (!T) return { ok: false, reason: 'the ' + L.n + '-vertex loop at (' + d.centre.map(function (x) { return x.toFixed(1); }).join(', ') + ') cannot be crossed without doubling an edge the piece already has' };
+    function makeFill(L, P, T) {
       var Fl = new Fill(M);
-      // sigma at the rim: the mean length of the piece's own edges there
+      // sigma at the rim: the mean length of the piece's own edges there, times the spacing (1: the surround's density)
       L.verts.forEach(function (v) {
         var s = nbr.get(v), sum = 0, cnt = 0, pv = ptOf(M, v);
         s.forEach(function (w) { sum += len(sub(ptOf(M, w), pv)); cnt++; });
         Fl.sigma.set(v, (cnt ? sum / cnt : 1) * o.spacing);
       });
       T.tris.forEach(function (tr) { Fl.addTri(P[tr[0]], P[tr[1]], P[tr[2]]); });
-      var flat = mode === 'cap' || d.planar;
-      var info = { loop: L.id, vertices: L.n, planar: d.planar, planarMm: d.planarMm, triangulation: T.mode, curved: !flat };
-      if (!flat) {
-        info.added = Fl.refine(nbr, o);
-        var basePos = Fl.pos.slice(), done = false;
-        var bf = (T.mode === 'graph' || T.mode === 'single') ? Fl.baseFill(L.verts, adjOf, o) : { ok: false, why: 'the rim does not lie flat looking down its plane' };
-        if (bf.ok) {
-          Fl.relax(nbr);
-          var pc = piercesNow(Fl, filledSoFar);
-          if (pc === 0) { info.method = 'fitted surface'; info.fit = bf; info.pierces = 0; done = true; }
-          else { bf = { ok: false, why: 'the fitted surface pierces ' + pc + ' triangle(s)' }; }
+      return Fl;
+    }
+    /* The fill's interior: points of the fit at the surround's spacing (a lattice in the
+       chart), none nearer the rim than 0.55 of it, put in one by one with the triangles
+       kept Delaunay - so a round rim does not end up as a chain of sliver triangles. */
+    function seedFill(Fl, cand, L, P, sigma) {
+      var p2 = cand.p2, n = p2.length, added = 0, perim = 0, area = 0, i;
+      for (i = 0; i < n; i++) {
+        var q0 = p2[i], q1 = p2[(i + 1) % n];
+        perim += Math.hypot(q1[0] - q0[0], q1[1] - q0[1]); area += q0[0] * q1[1] - q1[0] * q0[1];
+      }
+      // a hole so big that the lattice would pass maxNewPoints gets a coarser one, not a million points to throw away
+      var cu = p2.reduce(function (a, q) { return [a[0] + q[0] / n, a[1] + q[1] / n]; }, [0, 0]), mm = cand.mmPerUnit(cu);
+      var want = Math.abs(area) / 2 * mm * mm / (0.866 * sigma * sigma);
+      if (want > o.maxNewPoints) sigma *= Math.sqrt(want / o.maxNewPoints);
+      var pts = cand.lattice(sigma);
+      var eps = 1e-9 * perim * perim;
+      if (pts.length > o.maxNewPoints) pts = pts.filter(function (q, k) { return k % Math.ceil(pts.length / o.maxNewPoints) === 0; });
+      pts.forEach(function (q) {
+        if (!inPoly2(q, p2)) return;
+        var dmin = Infinity;
+        for (var j = 0; j < n; j++) {
+          var a = p2[j], b = p2[(j + 1) % n], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+          var tt = l2 > 0 ? Math.max(0, Math.min(1, ((q[0] - a[0]) * dx + (q[1] - a[1]) * dy) / l2)) : 0;
+          dmin = Math.min(dmin, Math.hypot(q[0] - a[0] - tt * dx, q[1] - a[1] - tt * dy));
         }
-        if (!done) {
-          if (bf.ok === false && Fl.pos.length === basePos.length) Fl.pos = basePos.slice();
-          Fl.pos = basePos.slice();
+        if (dmin * cand.mmPerUnit(q) < 0.55 * sigma) return;
+        if (Fl.insert(q, cand.chart.toSurf(q), sigma, nbr, eps)) added++;
+      });
+      Fl.delaunay(nbr, eps);
+      return added;
+    }
+    /* One rung of the fit ladder ('sphere' or 'quadric') on one loop: fit the
+       surround, triangulate the hole in the fit's chart, refine it there with
+       every new point ON the fit. { ok, Fl, fit, dev } or { why, fit? }. */
+    function tryFit(kind, L, P, ring, diameter) {
+      var cand, fit, dev;
+      if (kind === 'sphere') {
+        var fs = followsSphere(M, ring, diameter, o);
+        if (!fs.ok) return { why: fs.why, fit: fs.fit };
+        fit = fs.fit;
+        cand = sphereChart(M, H, L.verts, P, fs.sph, o);
+        if (!cand.ok) return { why: cand.why, fit: fit };
+        dev = function (p) { return Math.abs(len(sub(p, fs.sph.centre)) - fs.sph.R); };
+      } else {
+        var tol = Math.max(o.fitTolFrac * ring.edgeMm, o.fitMinTolMm), fq = fitQuadric(M, ring, L.verts, tol);
+        if (!fq.ok) return { why: fq.why, fit: { kind: 'quadric', rmsMm: fq.rms, tolMm: tol } };
+        fit = { kind: 'quadric', rmsMm: fq.rms, maxResidualMm: fq.max, samples: fq.n, tolMm: tol };
+        cand = quadricChart(M, fq, P);
+        dev = cand.dev;
+      }
+      var T = triangulateLoop(M, P, nbr, o, cand.p2);
+      if (!T || (T.mode !== 'graph' && T.mode !== 'single' && T.mode !== 'ears')) {
+        return { why: 'the rim does not lie flat in the ' + kind + '\'s chart (it folds over itself)', fit: fit };
+      }
+      var Fl = makeFill(L, P, T);
+      Fl.useChart(cand.chart, P, cand.p2, cand.orient);
+      var added = seedFill(Fl, cand, L, P, ring.edgeMm * o.spacing);
+      added += Fl.refine(nbr, o);
+      var eps = 1e-9 * Math.pow(cand.p2.reduce(function (a2, q, i, arr) { return a2 + Math.hypot(arr[(i + 1) % arr.length][0] - q[0], arr[(i + 1) % arr.length][1] - q[1]); }, 0), 2);
+      added += Fl.refineSag(nbr, o, eps);
+      Fl.relax(nbr);
+      var bad = 0;
+      for (var t = 0; t < Fl.tris.length; t++) {
+        var tr = Fl.tris[t];
+        if (!tr) continue;
+        if (!(Fl.areaUV(tr[0], tr[1], tr[2]) > 0) || !(len(Fl.normal(t)) > 1e-14)) bad++;
+      }
+      if (bad) return { why: 'the fill on the ' + kind + ' would fold or collapse ' + bad + ' triangle(s)', fit: fit };
+      return { ok: true, Fl: Fl, fit: fit, dev: dev, added: added, mode: T.mode };
+    }
+    /* How far the fill's vertices stand off the fit: the rim (welded to the
+       piece, so not moved) and the points put inside. */
+    function deviation(Fl, P, dev) {
+      var rimMax = 0, inMax = 0, i;
+      P.forEach(function (v) { rimMax = Math.max(rimMax, dev(ptOf(M, v))); });
+      for (i = 0; i < Fl.pos.length; i += 3) inMax = Math.max(inMax, dev([Fl.pos[i], Fl.pos[i + 1], Fl.pos[i + 2]]));
+      return { maxDevMm: Math.max(rimMax, inMax), interiorMaxDevMm: inMax, rimMaxDevMm: rimMax };
+    }
+    function meanEdge(Fl) {
+      var seen = new Set(), sum = 0, cnt = 0;
+      Fl.tris.forEach(function (tr) {
+        if (!tr) return;
+        for (var e = 0; e < 3; e++) {
+          var a = tr[e], b = tr[(e + 1) % 3], k = a < b ? a * KEY + b : b * KEY + a;
+          if (seen.has(k)) continue;
+          seen.add(k); sum += len(sub(Fl.P(a), Fl.P(b))); cnt++;
+        }
+      });
+      return cnt ? sum / cnt : 0;
+    }
+    for (var li = 0; li < chosen.length; li++) {
+      var L = chosen[li], d = describe(soup, L);
+      var P = L.verts.slice().reverse();                      // fill order
+      var diameter = loopDiameter(L.pts);
+      var sf = mode === 'cap' ? null : surroundFlat(M, adjacencyOf(M), L.verts, o);
+      var flat = mode === 'cap' || (d.planar && sf.flat), noFit = null;
+      if (!flat && d.planar) {
+        // a flat rim in a surround that is no flat plane: a curve a fit follows (a hole in a sphere), or not (a cube's face)
+        var sc = surroundCurved(M, adjacencyOf(M), L.verts, diameter, o);
+        if (!sc.ok) { flat = true; noFit = sc; }
+      }
+      var info = { loop: L.id, vertices: L.n, planar: d.planar, planarMm: d.planarMm, curved: !flat, diameterMm: diameter };
+      var Fl = null, T = null;
+      if (!flat) {
+        var ring = surroundOf(M, adjacencyOf(M), L.verts, diameter, o), why = [], rungs = ['sphere', 'quadric'];
+        for (var ri = 0; ri < rungs.length && !Fl; ri++) {
+          var tf = tryFit(rungs[ri], L, P, ring, diameter);
+          if (tf.ok) {
+            var pc = piercesNow(tf.Fl, filledSoFar, function (p) { return tf.dev(p) <= 2 * tf.fit.tolMm; });
+            if (pc === 0) {
+              Fl = tf.Fl;
+              info.method = 'fitted surface'; info.pierces = 0; info.added = tf.added; info.triangulation = tf.mode;
+              info.fit = Object.assign({}, tf.fit, deviation(Fl, P, tf.dev));
+            } else why.push('the ' + rungs[ri] + ' fill pierces ' + pc + ' triangle(s) of the piece');
+          } else why.push(tf.why);
+        }
+        if (Fl) {
+          info.fit.ringMm = ring.hops; info.fit.surroundEdgeMm = ring.edgeMm;
+          if (why.length) info.fit.passedOver = why;          // the rungs above this one, and why each did not follow
+        } else {
+          info.fit = { kind: 'none', reason: why.join('; '), surroundEdgeMm: ring.edgeMm, samples: ring.verts.length };
+        }
+        if (!Fl && o.fallback !== 'flat') {
+          // no fit follows the surround: the faired surface (biharmonic), eased off whatever it would pierce - and SAID
+          T = triangulateLoop(M, P, nbr, o);
+          if (!T) return { ok: false, reason: 'the ' + L.n + '-vertex loop at (' + d.centre.map(function (x) { return x.toFixed(1); }).join(', ') + ') cannot be crossed without doubling an edge the piece already has' };
+          Fl = makeFill(L, P, T);
+          info.triangulation = T.mode;
+          info.added = Fl.refine(nbr, o);
+          var basePos = Fl.pos.slice();
           var fr = Fl.fair(L.verts, nbr, o), fairPos = Fl.pos.slice(), lam = 1, ladder = [1, 0.7, 0.5, 0.35, 0.25, 0.15, 0.08, 0], npc = 0;
           for (var li2 = 0; li2 < ladder.length; li2++) {
             lam = ladder[li2];
@@ -1105,18 +1553,40 @@
             if (npc === 0) break;
           }
           info.method = lam === 1 ? 'fairing' : 'fairing, eased to ' + lam;
-          info.fairIters = fr.iters; info.fairMoved = fr.moved; info.fitRefused = bf.why; info.blend = lam; info.pierces = npc;
+          info.fairIters = fr.iters; info.fairMoved = fr.moved; info.blend = lam; info.pierces = npc;
+          info.fit.fallback = 'faired';
+          // a fill that folded over itself is not shipped faired: it goes flat, and says so
+          var bad = 0;
+          for (var t = 0; t < Fl.tris.length; t++) {
+            if (Fl.tris[t] && !(len(Fl.normal(t)) > 1e-14)) bad++;
+          }
+          if (bad) { Fl = null; info.fit.reason += '; the faired fill would collapse ' + bad + ' triangle(s)'; }
         }
-        // a fill that folded over itself is refused, not shipped
-        var bad = 0;
-        for (var t = 0; t < Fl.tris.length; t++) {
-          var tr2 = Fl.tris[t];
-          if (!tr2) continue;
-          var nn = Fl.normal(t);
-          if (!(len(nn) > 1e-14)) bad++;
+        if (!Fl) {
+          info.fit.fallback = 'flat';
+          flat = true;
         }
-        if (bad) return { ok: false, reason: 'the fill would collapse ' + bad + ' triangle(s) - nothing changed' };
+      } else {
+        // the flat cap: the surround is a plane (or the caller said so)
+        var pf = sf ? sf.plane : planeFit(L.pts);
+        if (noFit) {
+          info.fit = { kind: 'none', reason: noFit.why.join('; ') + '; the rim is flat, so the flat cap', fallback: 'flat', surroundEdgeMm: noFit.ring.edgeMm, samples: noFit.ring.verts.length };
+        } else {
+          info.fit = { kind: 'plane', asked: mode === 'cap', flatnessMm: pf.flatnessMm, ringDevMm: sf ? sf.ringDevMm : null };
+        }
       }
+      if (flat) {
+        // flat: the triangulation across the rim and nothing inside
+        T = T && info.fit.fallback !== 'flat' ? T : triangulateLoop(M, P, nbr, o);
+        if (!T) return { ok: false, reason: 'the ' + L.n + '-vertex loop at (' + d.centre.map(function (x) { return x.toFixed(1); }).join(', ') + ') cannot be crossed without doubling an edge the piece already has' };
+        Fl = makeFill(L, P, T);
+        info.triangulation = T.mode; info.method = 'flat cap';
+        var pfl = planeFit(L.pts);
+        info.maxDevMm = pfl.deviationMm;
+        if (info.fit.kind === 'plane') info.fit.maxDevMm = pfl.deviationMm;
+      }
+      info.surroundEdgeMm = info.fit.surroundEdgeMm != null ? info.fit.surroundEdgeMm : null;
+      info.fillEdgeMm = meanEdge(Fl);
       var mine = [];
       Fl.tris.forEach(function (tr3) {
         if (!tr3) return;
@@ -1134,6 +1604,17 @@
     res.set(out, soup.length);
     total.ms = now() - t0;
     return { ok: true, soup: res, added: out.length / 9, filled: filled, stats: total, originalTris: triCount(soup) };
+  }
+  /* The readout line for one filled hole (an entry of patch()'s `filled`): its
+     size, the surface its fill follows and how closely, or - never silently -
+     that no fit could be made and what was done instead. */
+  function readout(f) {
+    var fit = f.fit || {}, head = '\u00d8' + f.diameterMm.toFixed(1) + ' mm hole: ', mm = function (x) { return x.toFixed(3) + ' mm'; };
+    if (fit.kind === 'sphere') return head + 'sphere R ' + fit.radiusMm.toFixed(2) + ' mm (fit rms ' + mm(fit.rmsMm) + '), fill within ' + mm(fit.maxDevMm) + ' of it';
+    if (fit.kind === 'quadric') return head + 'quadric surface (fit rms ' + mm(fit.rmsMm) + '), fill within ' + mm(fit.maxDevMm) + ' of it';
+    if (fit.kind === 'plane') return head + (fit.asked ? 'flat cap, as asked' : 'flat surround, flat cap');
+    return head + 'NO SURFACE FIT (' + (fit.reason || 'none made') + ') - ' +
+           (fit.fallback === 'flat' ? 'filled FLAT' : 'faired from the rim slopes, not on a fit');
   }
   function patch(soup, ids, opts) { return fillLoops(soup, ids, 'patch', opts); }
   function cap(soup, ids, opts) { return fillLoops(soup, ids, 'cap', opts); }
@@ -1322,10 +1803,15 @@
     var o = Object.assign({}, DEFAULTS, opts || {});
     var M = weld(soup, o.weldTol), H = halfEdges(M), list = loopsOf(soup, M, H);
     var res = { loops: [], pairs: [], wallMm: null };
+    var adj = adjacencyOf(M);
     list.forEach(function (L) {
       var d = describe(soup, L);
-      res.loops.push({ id: L.id, vertices: L.n, planar: d.planar, planarMm: d.planarMm, radiusMm: d.radiusMm,
-                       centre: d.centre, normal: fillNormal(L.pts), fix: d.planar ? 'cap' : 'patch', partner: null,
+      /* Flat means the SURROUND is flat, not only the rim: a circular hole in a
+         sphere has a rim in one plane, and a flat cap over it is the facet. */
+      var sf = d.planar ? surroundFlat(M, adj, L.verts, o) : null, flat = d.planar && sf.flat;
+      if (d.planar && !flat && list.length <= o.planSurroundMax) flat = !surroundCurved(M, adj, L.verts, loopDiameter(L.pts), o).ok;
+      res.loops.push({ id: L.id, vertices: L.n, planar: flat, rimPlanar: d.planar, planarMm: d.planarMm, radiusMm: d.radiusMm,
+                       centre: d.centre, normal: fillNormal(L.pts), fix: flat ? 'cap' : 'patch', partner: null,
                        anchor: L.pts[0].slice(),
                        lo: L.lo, hi: L.hi, minVert: L.minVert });
     });
@@ -1589,7 +2075,7 @@
     _weld: weld, _halfEdges: halfEdges, _traceLoops: traceLoops, _cutRepeats: cutRepeats,
     _planeFit: planeFit, _math: { sub: sub, add: add, mul: mul, dot: dot, cross: cross, len: len, unit: unit, deg: deg, now: now, triCount: triCount, ptOf: ptOf },
     loopsOf: loopsOf, loops: loops, describe: describe, topology: topology,
-    patch: patch, cap: cap, bridgeLoops: bridgeLoops, loopsAt: loopsAt, gaps: gaps, bridgeFaces: bridgeFaces, plan: plan, loopsTouching: loopsTouching,
+    patch: patch, cap: cap, readout: readout, bridgeLoops: bridgeLoops, loopsAt: loopsAt, gaps: gaps, bridgeFaces: bridgeFaces, plan: plan, loopsTouching: loopsTouching,
     _castRay: castRay, _wallNearLoops: wallNearLoops, _zipper: zipper, _fillNormal: fillNormal, _appendTris: appendTris, _bridgeLoopsOnM: bridgeLoopsOnM, _triNormal: triNormal, _triPts: triPts, _fillLoops: fillLoops, _triangulateLoop: triangulateLoop
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
