@@ -30,7 +30,10 @@ flips to TAKE *while you hold*, the copy follows the pointer, and where you let
 go it lands; the view stays on TAKE. **Escape** mid-drag cancels the pull, keeps
 nothing and returns to LENS. A press that never travels is still a click
 (Pick a line, a new capture box...); a press on empty space still orbits; a
-capture box's three dots keep their press.
+capture box's three dots keep their press, and so does its face while
+**Click to select region** is armed and the face is in front of the selection (it
+scales the footprint). To pull a boxed region, press it in Orbit, or on any
+selected thing outside a face.
 
 What lands is what Export would write: a slice's beads as their prisms (the
 moves ride along, shifted with the piece, so "as solid" still works) and a

@@ -1003,6 +1003,13 @@ var NSO_MICROSCOPE = (function () {
       if (sc < bestScore) { bestScore = sc; best = h; }
     });
     if (!best) return false;
+    // Armed (Click to select region), a box's face is the box's too - a press on
+    // it scales the footprint - when it is in front of what the selection draws.
+    // In Orbit the box is only a marker, and the selection under it is pulled.
+    if (mode === 'select' && balls.length) {
+      var fh = v.raycaster.intersectObjects(balls.map(function (b) { return b.boxMesh; }), false)[0];
+      if (fh && fh.distance <= best.distance) return false;
+    }
     var sel = new Set(currentSelection);
     var owns = function (h) {
       if (isolated) return true;

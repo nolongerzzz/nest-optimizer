@@ -312,7 +312,7 @@ withApp(async (page, logs) => {
 
     // a capture box's dots keep their press
     await page.evaluate(() => { const M = NSO_MICROSCOPE; M.setMode('select'); M.clearBoxes(); const o = M.getDoc().objects[0]; const b = o.bounds;
-      M.addBoxAt((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, (b.minZ + b.maxZ) / 2, 12, 12); });
+      M.addBoxAt((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, (b.minZ + b.maxZ) / 2, 14, 14); });
     const dot = await page.evaluate(() => {
       const M = NSO_MICROSCOPE, v = M.getView(), r = v.renderer.domElement.getBoundingClientRect();
       const bx = M.boxes()[0], p = M.toView(bx.gx, bx.gy, bx.gz).project(v.camera);
@@ -323,6 +323,15 @@ withApp(async (page, logs) => {
     const moved = await page.evaluate(() => ({ plate: NSO_MICROSCOPE.plate(), at: (b => [b.gx, b.gy, b.gz])(NSO_MICROSCOPE.boxes()[0]), n: NSO_MICROSCOPE.takePieces().length }));
     const dist = Math.hypot(moved.at[0] - dot.at[0], moved.at[1] - dot.at[1], moved.at[2] - dot.at[2]);
     check('pressing the box\'s centre dot moves the box - it does not pull', moved.plate === 'lens' && dist > 2 && moved.n === n0, J(moved) + ' moved ' + dist.toFixed(1) + ' mm');
+    // ...and so does its face, in front of the selection, while region is armed: it scales the footprint
+    const face = await page.evaluate(() => {
+      const M = NSO_MICROSCOPE, v = M.getView(), r = v.renderer.domElement.getBoundingClientRect(), b = M.boxes()[0];
+      const p = M.toView(b.gx + b.ex, b.gy, b.gz + b.h).project(v.camera);      // on the box's top edge, over the +X side
+      return { px: [r.left + (p.x + 1) / 2 * r.width, r.top + (1 - p.y) / 2 * r.height - 2], rx: b.rx };
+    });
+    await drag(page, face.px, [face.px[0] + 40, face.px[1] - 10]);
+    const scaled = await page.evaluate(() => ({ plate: NSO_MICROSCOPE.plate(), rx: NSO_MICROSCOPE.boxes()[0].rx, n: NSO_MICROSCOPE.takePieces().length }));
+    check('pressing the box\'s face while region is armed scales it - it does not pull', scaled.plate === 'lens' && scaled.n === n0 && Math.abs(scaled.rx - face.rx) > 0.5, J(scaled) + ' from rx ' + face.rx);
     await page.evaluate(() => { const M = NSO_MICROSCOPE; M.clearBoxes(); M.setMode('orbit'); });
   }
 
