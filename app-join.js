@@ -2038,6 +2038,11 @@ async function subtractBFromA() {
     setStatus('Select hull A and bit B', true);
     return;
   }
+  const overlapSub = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([modelA, modelB]) : '';
+  if (overlapSub) {
+    setStatus('Subtract refused - ' + overlapSub + ' - A and B unchanged', true);
+    return;
+  }
 
   let newGeo = null;
   try {
@@ -2736,6 +2741,15 @@ async function joinSelectedModels() {
   const modelB = state.models.find(x => x.id === idB);
   if (!modelA || !modelB) {
     setStatus('Select two pieces to join', true);
+    return;
+  }
+
+  // Pieces with overlapping shells are refused here, before any route runs
+  // (nso-helpers.js, nsoOverlap): the plate weld would stack them, the kernel
+  // would call the result open, and neither says why.
+  const overlapJoin = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([modelA, modelB]) : '';
+  if (overlapJoin) {
+    setStatus('Join refused - ' + overlapJoin + ' - A and B unchanged', true);
     return;
   }
 

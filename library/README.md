@@ -66,6 +66,15 @@ the overlap), but the overlap is 74 real piercing pairs and 34 coplanar
 overlaps, so **do not run Join or Subtract on it** expecting a clean result.
 It is raw hull material for chopping and reassembling, not a CSG-safe part.
 
+The verbs that hand a piece to the boolean kernel now say so instead of failing
+downstream: Bridge (sheet, string), Connect (weld), Join, Subtract B from A and
+Crop Circle / Piece refuse a piece with piercing pairs before anything is built -
+"box_closed has overlapping shells (74 piercing pairs); clean it with
+tools/nso_fixture_union first" (`nsoOverlap` in `nso-helpers.js`; driven by
+`npm run overlap:drive`). CHECK & REPAIR -> Repair does not merge overlapping
+shells ("nothing to repair", 74 -> 74 pairs), so the sentence points at the union
+tool, not at Repair.
+
 It is deliberately left as is rather than regenerated as a union, because
 `tools/sculpt_selftest.js` (section 10), `docs/SCULPT-TIER1.md` and the
 `maxVolumeChange` note in `app-sculpt.js` record measurements against exactly

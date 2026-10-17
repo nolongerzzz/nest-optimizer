@@ -206,6 +206,7 @@ function NSO_connectPreview() {
   try {
     p = NSO_Connect.plan(pieces, { piece: 0, target: C.a.target }, { piece: ids.indexOf(C.b.sourceId), target: C.b.target }, o);
   } catch (err) { p = { ok: false, reason: (err && err.message) || String(err) }; }
+  if (p.ok && p.result === 'weld') { var ov = NSO_bridgeOverlap(ids); if (ov) p = { ok: false, reason: ov, overlap: true }; }
   p.ids = ids;
   p.keys = [NSO_bridgePoseKey(C.a.placed), NSO_bridgePoseKey(C.b.placed)];
   C.plan = p;
@@ -313,6 +314,13 @@ function NSO_connectSet() {
       var why = 'Connect stood down - ' + painted + ' painted face(s); a weld rebuilds the pieces it joins into a new one. Clear paint to weld, or Keep separate.';
       NSO_connectSay(why, true); NSO_connectReadout(why, true);
       return Promise.resolve({ ok: false, reason: 'painted faces: ' + painted, painted: painted });
+    }
+  }
+  if (weld) {
+    var overlap = NSO_bridgeOverlap(p.ids);
+    if (overlap) {
+      NSO_connectSay('Connect refused - pieces unchanged (' + overlap + ')', true); NSO_connectReadout('Connect: ' + overlap, true);
+      return Promise.resolve({ ok: false, reason: overlap, overlap: true });
     }
   }
   C.busy = true; NSO_connectSyncRows();

@@ -251,3 +251,68 @@
     pieceHits: pieceHits
   };
 })();
+
+/* Overlap guard - one check before the boolean kernel runs.
+
+   WHY. The kernel unions and subtracts closed solids. A piece that is several
+   shells laid over one another (library/box_closed.stl: a tray and a lid slab
+   that overlap by 0.1 mm, 74 piercing pairs) is not one solid to it, and what
+   comes back is a weld that "would not be closed (N wound the wrong way)" -
+   the right refusal, in words that point at the wrong thing. Every verb that
+   hands a piece to NSO_unionSoups / NSO_subtractSoups asks here first and
+   stands down in words, naming the piece, before anything is built: Bridge,
+   Connect (weld), Join, Subtract B from A, Crop Circle / Piece.
+
+   THE TEST. NSO_Repair.inspect(raw).selfIntersections, the same piercing-pair
+   count the checker and tools/mesh_validate.py give; a piece with any is
+   refused. Counted once per piece: the answer is cached on the piece's raw
+   soup (a WeakMap), which every edit replaces, and a pose does not change it.
+   Unknown (no checker loaded, no soup) is never a refusal.
+
+   THE REMEDY. Check & Repair -> Repair does NOT merge overlapping shells
+   (measured on box_closed.stl: "nothing to repair", 74 -> 74 pairs), so the
+   message points at tools/nso_fixture_union. Flip REPAIR_MERGES the day Repair
+   can, and the message becomes "run CHECK & REPAIR -> Repair on it first". */
+(function () {
+  var REPAIR_MERGES = false;
+  var cache = (typeof WeakMap === 'function') ? new WeakMap() : null;
+
+  // Piercing pairs in a raw soup; null when it cannot be asked.
+  function pairs(soup) {
+    if (!soup || !soup.length) return null;
+    if (cache && cache.has(soup)) return cache.get(soup);
+    if (typeof NSO_Repair === 'undefined' || !NSO_Repair || typeof NSO_Repair.inspect !== 'function') return null;
+    var n;
+    try { n = NSO_Repair.inspect(soup).selfIntersections; } catch (e) { return null; }
+    if (typeof n !== 'number') return null;
+    if (cache) cache.set(soup, n);
+    return n;
+  }
+
+  function sentence(name, n) {
+    return (name || 'this piece') + ' has overlapping shells (' + n + ' piercing pair' + (n === 1 ? '' : 's') + '); ' +
+      (REPAIR_MERGES ? 'run CHECK & REPAIR \u2192 Repair on it first' : 'clean it with tools/nso_fixture_union first');
+  }
+
+  /* items: [{ name, soup }] - the pieces about to go to the kernel. '' when
+     every one is a clean solid, else the sentence for the first that is not. */
+  function refusal(items) {
+    for (var i = 0; i < (items || []).length; i++) {
+      var it = items[i], n = it ? pairs(it.soup) : null;
+      if (n > 0) return sentence(it.name, n);
+    }
+    return '';
+  }
+
+  /* The same, for models off state.models (name, raw soup). */
+  function refusalOfModels(models) {
+    return refusal((models || []).map(function (m) {
+      if (!m) return null;
+      var soup = (m.rawTris && m.rawAxis === 'zup') ? m.rawTris
+        : (typeof getModelRawSoup === 'function' && m.geometry ? getModelRawSoup(m) : m.rawTris);
+      return { name: m.name, soup: soup };
+    }));
+  }
+
+  window.nsoOverlap = { pairs: pairs, refusal: refusal, refusalOfModels: refusalOfModels, repairMerges: REPAIR_MERGES };
+})();

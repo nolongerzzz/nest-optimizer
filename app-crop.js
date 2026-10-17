@@ -2392,6 +2392,8 @@ async function NSO_cropShapeSelectedModel() {
   }
   var sh = NSO_cropShapeState(), mesh = NSO_cropTargetMesh(m);
   function refuse(reason) { setStatus('Crop refused - piece unchanged (' + reason + ')', true); return { ok: false, reason: reason }; }
+  var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([m]) : '';
+  if (overlap) return refuse(overlap);
   var fr = NSO_cropPlateToRaw(m, mesh);
   if (!fr.M) return refuse(fr.reason);
   var now = NSO_cropShapeNow(m, mesh);
