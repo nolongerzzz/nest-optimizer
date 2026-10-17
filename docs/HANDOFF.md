@@ -830,9 +830,10 @@ sections 19-24. UI only: no pose maths, no export, Undo or Tilt behaviour touche
   through OrbitControls' `change` (hooked from `refresh`), which redraws only when
   a dart is actually due to move. Looking straight down a ring's axis they stay put.
   A drag still carries them under the pointer; releasing seats them again.
-  **Behaviour change to confirm:** a click or an arrow key used to nudge the pair
-  1 degree along the ring (`arrowAt += step`); it would now sit between ticks, so
-  clicks and keys leave the darts on their tick.
+  A click on a dart or an arrow key turns the PIECE 1 degree (Shift: 0.1) and the
+  darts stay on their tick - they no longer nudge along the ring (`arrowAt += step`)
+  with it. Shift reaches `beginDrag` as a 6th argument from app-core's press handler
+  (`event.shiftKey`); a Shift-drag is an ordinary drag.
 - **Names follow the footprint.** The ring ids stay AXES - `fb` = the piece's own X,
   `ss` = its own Z, which is what Tilt (`nsoRotate.turn('fb'|'ss')`) and every older
   check call them, so Tilt and the 90 buttons are untouched. What moved is the
@@ -852,7 +853,7 @@ sections 19-24. UI only: no pose maths, no export, Undo or Tilt behaviour touche
   mapping and then flip back. During a drag they are held; at rest they follow.
   A footprint measure that sees the bar's own direction would not flip, but the
   ticket asked for the box and the 5% rule.
-- `?v=`: `app-rotate-handles.js` helpmrg1 -> rails1, on the ticket's instruction
+- `?v=`: `app-rotate-handles.js` helpmrg1 -> rails2 and `app-core.js` leashb7 -> leashb8, on the ticket's instruction
   (rule 4 above says otherwise by default).
 - Checks: `rotate:handles` 19-24 (darts on 8 azimuths per ring, the hysteresis sweep,
   a 60x20 piece lying and turned 90, square / near-square / 8% cases, Roll, Tip, Scale,

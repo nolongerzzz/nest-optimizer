@@ -51,7 +51,8 @@
       camera azimuths on every ring, never between two.
   20. ...and re-seat only when the camera has orbited 10° past the half-way
       point (hysteresis), so a camera hovering there does not flicker them.
-      A drag carries them; releasing seats them again.
+      A drag carries them; releasing seats them again. A click on a dart or
+      an arrow key turns the PIECE 1° (Shift 0.1°) and leaves them on their tick.
   21. THE LEANS ARE NAMED BY THE FOOTPRINT: a 60x20 piece lying along X, and
       the same piece turned 90°, both call the lean that tips it ALONG its
       length "front/back"; a square piece keeps the old mapping. Measured by
@@ -1394,6 +1395,47 @@ withApp(async (page, logs) => {
     check('a click steps the piece a degree but leaves the darts on their tick',
       ck.before === ck.after && ck.after % 45 === 0, ck.before + '° → ' + ck.after + '°');
     await page.evaluate(() => window.nsoRotate.seat());
+
+    /* Nudge the piece, not the darts: a real click on a dart, a real arrow key,
+       a degree each - a tenth with Shift - and the pair never leaves its tick. */
+    await page.evaluate(() => { window.__rot.zero(); window.__rot.cam(0, 25); window.nsoRotate.refresh(); });
+    await page.waitForTimeout(80);
+    const nudged = async (how) => {
+      const before = await page.evaluate(() => ({ q: window.__rot.q().toArray(), d: window.nsoRotate.dartTick('turn') }));
+      const h = await page.evaluate(() => window.nsoRotate.handleScreen('turn', 1));
+      if (how.click) {
+        if (how.shift) await page.keyboard.down('Shift');
+        await page.mouse.click(h.x, h.y);
+        if (how.shift) await page.keyboard.up('Shift');
+      } else await page.keyboard.press((how.shift ? 'Shift+' : '') + how.key);
+      const after = await page.evaluate(() => ({ q: window.__rot.q().toArray(), d: window.nsoRotate.dartTick('turn'),
+        readout: window.nsoRotate.readout() }));
+      const deg = await page.evaluate(([x, y]) => window.__rot.angleDeg(new THREE.Quaternion().fromArray(x),
+        new THREE.Quaternion().fromArray(y)), [before.q, after.q]);
+      await page.evaluate(() => window.nsoRotate.seat());
+      return { deg: deg, still: before.d.at === after.d.at && after.d.at % 45 === 0, at: after.d.at, readout: after.readout };
+    };
+    for (const how of [{ name: 'click', click: true, want: 1 }, { name: 'Shift+click', click: true, shift: true, want: 0.1 },
+                       { name: 'ArrowRight', key: 'ArrowRight', want: 1 }, { name: 'Shift+ArrowRight', key: 'ArrowRight', shift: true, want: 0.1 },
+                       { name: 'Shift+ArrowLeft', key: 'ArrowLeft', shift: true, want: 0.1 }]) {
+      const r = await nudged(how);
+      check(how.name + ': the piece turns ' + how.want + '°, the darts stay on their tick',
+        near(r.deg, how.want, 1e-6) && r.still, r.deg.toFixed(6) + '°, darts at ' + r.at + '°, "' + r.readout + '"');
+    }
+    const fineRead = await page.evaluate(() => window.nsoRotate.readout());
+    check('...and the readout says a tenth, not a degree', /^Turn 0\.1°/.test(fineRead), fineRead);
+    const fineDrag = await page.evaluate(() => {
+      const a = window.nsoRotate, H = window.__rot;
+      H.zero(); H.cam(0, 25); a.refresh();
+      const c = a.centreScreen(), h = a.handleScreen('turn', 1);
+      a.beginDrag({ ring: 'turn', dir: 1 }, h.x, h.y, c.x, c.y, true);       // Shift held on the press
+      const a0 = Math.atan2(h.y - c.y, h.x - c.x), R = Math.hypot(h.x - c.x, h.y - c.y);
+      for (let i = 1; i <= 17; i++) a.moveDrag(c.x + Math.cos(a0 + i * Math.PI / 180) * R, c.y + Math.sin(a0 + i * Math.PI / 180) * R);
+      const applied = a.dragState().applied;
+      a.endDrag();
+      return applied;
+    });
+    check('Shift does nothing to a drag: 17° of pointer is 17° of piece', near(Math.abs(fineDrag), 17, 1e-6), fineDrag.toFixed(4) + '°');
   }
 
   /* ----------------------------------------------------------------- 21 */

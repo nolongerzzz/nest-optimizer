@@ -2941,7 +2941,7 @@ function onCanvasPointerDown(event) {
         var o = rotG.position.clone().project(state.camera);
         var cx = c.left + (o.x * 0.5 + 0.5) * c.width;
         var cy = c.top + (-o.y * 0.5 + 0.5) * c.height;
-        if (nsoRotate.beginDrag(axis, event.clientX, event.clientY, cx, cy)) {
+        if (nsoRotate.beginDrag(axis, event.clientX, event.clientY, cx, cy, event.shiftKey)) {
           event.preventDefault();
           event.stopPropagation();
           return;

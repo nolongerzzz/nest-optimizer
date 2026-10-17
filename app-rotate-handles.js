@@ -52,7 +52,8 @@
    camera, and nowhere between ticks. They stay on it until the camera has
    orbited 10 degrees past the half-way point to the next one, then re-seat
    there (seatFor). Only a drag carries them off a tick - they ride the piece
-   under the pointer - and releasing puts them back on one.
+   under the pointer - and releasing puts them back on one. A click or an
+   arrow key turns the PIECE a step; the darts stay where they are.
 
    The drag is still a dial - the pointer's angle about the ring's projected
    centre - but signed by which side of the ring the camera is on (the dot of
@@ -61,11 +62,12 @@
 
    The snap is a plain hard snap: inside 3 degrees of a quarter turn the
    piece sits ON the quarter turn, and outside it the piece is exactly where
-   the pointer says. Only during a drag. A click is always exactly 1 degree. */
+   the pointer says. Only during a drag. A click is always exactly 1 degree (0.1 with Shift). */
 (function () {
   'use strict';
 
   var STEP_DEG = 1;             // one click on an arrowhead, one arrow key
+  var FINE_STEP_DEG = 0.1;      // ...with Shift held
   var SNAP_STEP_DEG = 90;       // the quarter turns
   var SNAP_WITHIN_DEG = 3;      // ...and how close the hard snap catches
   var CLICK_SLOP_PX = 4;        // a press that travels less than this is a click
@@ -439,12 +441,12 @@
 
   /* ---- dragging ----------------------------------------------------------
      A press on an arrowhead starts this. It is a click until the pointer has
-     travelled CLICK_SLOP_PX; released before that, it steps one degree the way
+     travelled CLICK_SLOP_PX; released before that, it steps one degree (a tenth with Shift) the way
      the arrowhead points. Past it, it is a dial round the ring. One Undo
      point either way, taken at the press. */
   var drag = null;
 
-  function beginDrag(handle, x, y, cx, cy) {
+  function beginDrag(handle, x, y, cx, cy, fine) {
     var ring = handle && handle.ring ? handle.ring : handle;
     var dir = handle && handle.dir ? handle.dir : 1;
     var p = piece();
@@ -463,7 +465,7 @@
              lastA: Math.atan2(y - cy, x - cx) * DEG, raw: 0, applied: 0,
              sign: dialSign(ring), q0: q0, b: b, F: frameOf(ring, q0), map: leanMap(p),
              abs0: ringAngleDeg(q0, ring, b),
-             arrow0: arrowAt[ring], moved: false, snapped: false };
+             arrow0: arrowAt[ring], moved: false, snapped: false, fine: !!fine };
     /* Starting inside a snap is not landing in one: no flash on the way out. */
     drag.snapped = inSnap(drag.abs0);
     lastTouched = ring;
@@ -504,12 +506,13 @@
     drag = null;
     if (typeof state !== 'undefined' && state && state.controls) state.controls.enabled = true;
     if (!d.moved && !abandon) {
-      /* a click: a step about the held pivot, the run seated RUN_MS on */
-      var p = piece();
+      /* a click: a step about the held pivot (a degree, a tenth with Shift),
+         the run seated RUN_MS on. It turns the PIECE; the darts stay put. */
+      var p = piece(), step = d.fine ? FINE_STEP_DEG : STEP_DEG;
       if (p) {
         p.mesh.updateMatrixWorld(true);
-        writePose(p, turned(p.mesh.quaternion.clone(), d.ring, d.dir * STEP_DEG), true);
-        say(d.ring, d.dir * STEP_DEG * d.sign, false);
+        writePose(p, turned(p.mesh.quaternion.clone(), d.ring, d.dir * step), true);
+        say(d.ring, d.dir * step * d.sign, false);
       }
       seatLater();
     } else {
@@ -573,13 +576,13 @@
   }
 
   /* ---- keyboard ----------------------------------------------------------
-     One degree on the keyboard's ring (activeRing): Right or Up turns it
+     One degree (a tenth with Shift) on the keyboard's ring (activeRing): Right or Up turns it
      clockwise as seen from here, Left or Down anticlockwise - the dial's own
      sense. Held down, the browser's key repeat does the repeating. */
-  function nudge(dir) {
+  function nudge(dir, fine) {
     var ring = activeRing();
     if (!ring) return false;
-    return stepBy(ring, dir * STEP_DEG * dialSign(ring));
+    return stepBy(ring, dir * (fine ? FINE_STEP_DEG : STEP_DEG) * dialSign(ring));
   }
   var KEYS = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 };
 
@@ -606,7 +609,7 @@
               t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
     if (!piece() || !activeRing()) return;
     ev.preventDefault();
-    nudge(k);
+    nudge(k, ev.shiftKey);
   }
 
   /* ---- Task 2: the rings in the scene ----------------------------------- */
@@ -996,7 +999,7 @@
     rings: function () { return shownRings(); },
     setRing: setRing,
     activeRing: activeRing,
-    step: function (ring, dir) { return stepBy(ring, (dir < 0 ? -1 : 1) * STEP_DEG); },
+    step: function (ring, dir, fine) { return stepBy(ring, (dir < 0 ? -1 : 1) * (fine ? FINE_STEP_DEG : STEP_DEG)); },
     /* A programmatic turn of `deg` about a ring's axis - the plate's vertical
        for Turn, the piece's own X / Z for the leans - no Undo point and no
        lock check: what a click does, without the click. The pose
@@ -1092,7 +1095,7 @@
       var g = ensureGroup();
       return g ? g.children.filter(function (c) { return c.userData.nsoRotateRing; }).length : 0;
     },
-    constants: { STEP_DEG: STEP_DEG, SNAP_STEP_DEG: SNAP_STEP_DEG,
+    constants: { STEP_DEG: STEP_DEG, FINE_STEP_DEG: FINE_STEP_DEG, SNAP_STEP_DEG: SNAP_STEP_DEG,
                  SNAP_WITHIN_DEG: SNAP_WITHIN_DEG, CLICK_SLOP_PX: CLICK_SLOP_PX,
                  RING_RADIUS_MM: RING_RADIUS_MM, ARROW_FRACTION: ARROW_FRACTION,
                  ARROW_BASE: ARROW_BASE, ARROW_HIT: ARROW_HIT,
