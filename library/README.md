@@ -68,7 +68,7 @@ It is raw hull material for chopping and reassembling, not a CSG-safe part.
 
 The verbs that hand a piece to the boolean kernel now say so instead of failing
 downstream: Bridge (sheet, string), Connect (weld), Join, Subtract B from A and
-Crop Circle / Piece refuse a piece whose shells cross one another (not merely touch) before anything is built -
+Crop Circle / Piece, Crop Move, Carve, Extract bit, Attach, Detach and Reattach refuse a piece whose shells cross one another (not merely touch) before anything is built -
 "box_closed has overlapping shells (74 piercing pairs); clean it with
 tools/nso_fixture_union first" (`nsoOverlap` in `nso-helpers.js`; driven by
 `npm run overlap:drive`). CHECK & REPAIR -> Repair does not merge overlapping
