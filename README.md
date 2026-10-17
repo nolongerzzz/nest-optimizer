@@ -97,10 +97,12 @@ Smart build-plate packing for 3D printing.
 - **Cut** (its own card in the left column) cuts a piece to length. Opening
   the card arms it; a click on a piece drops the blade where the click landed,
   square across the piece's longest dimension as it lies (a tipped piece too).
-  The slider and **←** / **→** move it along the piece; the **mitre wheel**
-  (optional) turns the cut's heading to any degree while the piece stays put,
-  and the **−** / **+** under it step it 1° a press (Shift 0.1°, Alt 5°; hold
-  to repeat).
+  The slider, **←** / **→** and a drag on the blade move it along its own
+  travel axis, the same distance per pixel at every angle; the **mitre wheel**
+  (optional) turns the cut's heading to any degree while the piece stays put
+  (the blade turns about where it crossed the piece's centre line, and at 90°
+  it travels across the piece's width), and the **−** / **+** under it step it
+  1° a press (Shift 0.1°, Alt 5°; hold to repeat).
   **Cut** is a clean split: the two halves meet exactly at the plane and add
   back to the original - "4 | 4", no kerf. One Undo puts it back.
 - **Crop** (its own card, under Cut) takes a middle section out of a piece: set
