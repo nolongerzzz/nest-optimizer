@@ -927,7 +927,7 @@ function loopExtent(lp, dir) {
     {
       const t0 = Date.now();
       const p = CN.drawPlan([], sCurve, { shape: 'string', plateZ: PZ });
-      check('plate to plate: plans, and it is its own piece (a stroke with both ends on the plate never welds), whatever Result says', p.ok && p.result === 'separate' && p.welds.length === 0 &&
+      check('plate to plate, touching no piece: plans, and it is its own piece (nothing to weld to), whatever Result says', p.ok && p.result === 'separate' && p.welds.length === 0 &&
         CN.drawPlan([], sCurve, { shape: 'string', result: 'weld' }).result === 'separate', p.reason || p.text);
       const r = await CN.weld(p, { union });
       check('...builds a closed manifold piece', r.ok && r.topo.open === 0 && r.topo.nm === 0 && r.topo.badWinding === 0 && r.topo.shells === 1 && r.topo.euler === 2, r.ok ? JSON.stringify(r.topo) : r.reason);
@@ -1034,6 +1034,66 @@ function loopExtent(lp, dir) {
       const embedded = pw.centre.filter(c => c[0] > 9 && c[0] < 14);
       check('...where it is welded it is sunk into the piece (0.4 mm, the most of the half-height), so the boolean has material to merge: ' + (TOP + 0.6).toFixed(1) + ' over the top', embedded.length > 3 && embedded.every(c => Math.abs(c[2] - (TOP + 0.6)) < 0.02), embedded.map(c => c[2].toFixed(2)).slice(0, 3).join(','));
       if (rw.ok) TABLE.push(['draw · piece to piece over the plate · string weld', '24 + ' + (pw.web.length / 9) + ' → ' + (rw.soup.length / 9), 'one solid', 'welded into both', pw.lengthMm.toFixed(2) + ' mm', ms(t0)]);
+    }
+
+    // ---- Weld is to whatever the stroke TOUCHES: a piece it crosses mid-way too, not only the ones at its ends
+    {
+      const t0 = Date.now();
+      const bx = L.box(0, 0, PZ, 20, 20, TOP);
+      // plate (in front of the left wall) -> up the wall -> over the top -> down the right wall -> plate
+      const over = (x0, x1, piece, y) => {
+        const o = []; for (let x = x0; x < x1; x++) o.push([x, y, PZ, up, -1]);
+        return o;
+      };
+      const cross = (xl, xr, piece, y) => {                              // up the left wall of a box (xl..xr), over it, down the right
+        const o = [];
+        for (let z = PZ; z <= TOP + 1e-9; z++) o.push(pt(xl, y, Math.min(z, TOP), [-1, 0, 0], piece));
+        for (let x = xl + 1; x <= xr - 1; x++) o.push(pt(x, y, TOP, up, piece));
+        for (let z = TOP; z >= PZ - 1e-9; z--) o.push(pt(xr, y, Math.max(z, PZ), [1, 0, 0], piece));
+        return o;
+      };
+      const plate = (x0, x1, y) => { const o = []; for (let x = x0; x <= x1; x++) o.push(pt(x, y, PZ)); return o; };
+      const st = [...plate(-16, -1, 10), ...cross(0, 20, 0, 10), ...plate(21, 36, 10)];
+      const pw = CN.drawPlan([bx], st, { shape: 'string', plateZ: PZ, result: 'weld' });
+      check('plate -> OVER a box -> plate, Weld: both ends are on the plate, and it still welds - into the box it crosses (the piece is the box\'s)',
+        pw.ok && pw.endsOn.join() === 'plate,plate' && pw.result === 'weld' && pw.welds.length === 1 && pw.welds[0] === 0 && /plate to plate · welds into the piece$/.test(pw.text), pw.reason || pw.text);
+      const mid = pw.ok ? pw.centre.filter(c => c[0] > 6 && c[0] < 14) : [];
+      check('...where it lies on the box it is sunk into it (' + (TOP + 0.6).toFixed(1) + ' over the top), where it lies on the plate it is not', mid.length > 3 && mid.every(c => Math.abs(c[2] - (TOP + 0.6)) < 0.02) &&
+        pw.centre.filter(c => c[0] < -6).every(c => Math.abs(c[2] - (PZ + 1)) < 0.02), mid.map(c => c[2].toFixed(2)).slice(0, 3).join(','));
+      const rw = pw.ok ? await CN.weld(pw, { union }) : pw;
+      const shw = rw.ok ? shells(rw.soup) : [];
+      check('...the box and the stroke are ONE closed shell', rw.ok && shw.length === 1 && shw[0].volume > 0 && rw.kernel.open === 0 && rw.kernel.nm === 0 && rw.topo.badWinding === 0,
+        rw.ok ? shw.length + ' shell(s), ' + (rw.soup.length / 9) + ' triangles, ' + JSON.stringify(rw.topo) : rw.reason);
+      if (rw.ok) {
+        canonical('draw plate over box', rw.soup);
+        const gained = BR.volume(rw.soup) - BR.volume(bx);
+        check('...it grew by the stroke\'s volume outside the box (' + gained.toFixed(1) + ' of ' + (area(pw) * pw.lengthMm).toFixed(1) + ' mm³): the feet on the plate and the part over the box', gained > 0.5 * area(pw) * pw.lengthMm && gained < area(pw) * pw.lengthMm * 1.05, gained.toFixed(2));
+        TABLE.push(['draw · plate over a box to plate · string weld', (bx.length / 9) + ' + ' + (pw.web.length / 9) + ' → ' + (rw.soup.length / 9), 'one solid', 'welded into the box it crosses', pw.lengthMm.toFixed(2) + ' mm', ms(t0)]);
+      }
+      const psep = CN.drawPlan([bx], st, { shape: 'string', plateZ: PZ, result: 'separate' });
+      check('Keep separate: the same stroke touches nothing it welds to - its own piece, the box untouched', psep.ok && psep.result === 'separate' && psep.welds.length === 0, psep.reason || psep.text);
+      const pfl = CN.drawPlan([bx], st, { shape: 'string', plateZ: PZ, result: 'weld', ends: 'flat' });
+      check('Flat ends do not stand in the way: its ends are on the plate (flat feet), so Weld into the box it crosses is fine', pfl.ok && pfl.welds.length === 1, pfl.reason || pfl.text);
+
+      // ends on two pieces, and a third crossed between them: all three
+      const bA = L.box(0, 0, PZ, 20, 20, TOP), bC = L.box(30, 0, PZ, 40, 20, TOP), bB = L.box(50, 0, PZ, 70, 20, TOP);
+      const st3 = [];
+      for (let x = 10; x <= 20; x++) st3.push(pt(x, 10, TOP, up, 0));
+      for (let z = TOP - 1; z >= PZ; z--) st3.push(pt(20, 10, Math.max(z, PZ), [1, 0, 0], 0));
+      st3.push(...plate(21, 29, 10));
+      st3.push(...cross(30, 40, 1, 10));
+      st3.push(...plate(41, 49, 10));
+      for (let z = PZ; z <= TOP; z++) st3.push(pt(50, 10, Math.min(z, TOP), [-1, 0, 0], 2));
+      for (let x = 51; x <= 60; x++) st3.push(pt(x, 10, TOP, up, 2));
+      const p3 = CN.drawPlan([bA, bC, bB], st3, { shape: 'string', plateZ: PZ, result: 'weld' });
+      check('piece -> (crossing a third) -> piece, Weld: it welds into ALL THREE, the one in the middle too', p3.ok && p3.endsOn.join() === 'piece,piece' && p3.welds.slice().sort().join() === '0,1,2' && /welds into all 3 pieces$/.test(p3.text), p3.reason || p3.text);
+      const r3 = p3.ok ? await CN.weld(p3, { union }) : p3;
+      const sh3 = r3.ok ? shells(r3.soup) : [];
+      check('...three boxes and the stroke: ONE closed shell', r3.ok && sh3.length === 1 && sh3[0].volume > 0 && r3.kernel.open === 0 && r3.kernel.nm === 0 && r3.topo.badWinding === 0, r3.ok ? sh3.length + ' shell(s), ' + (r3.soup.length / 9) + ' triangles' : r3.reason);
+      if (r3.ok) {
+        canonical('draw three pieces', r3.soup);
+        TABLE.push(['draw · piece over a third to piece · string weld', '36 + ' + (p3.web.length / 9) + ' → ' + (r3.soup.length / 9), 'one solid', 'welded into all three', p3.lengthMm.toFixed(2) + ' mm', ms(t0)]);
+      }
     }
 
     // ---- sag: a lift of the middle

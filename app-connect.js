@@ -52,9 +52,9 @@
 //   - RELEASE builds it: NSO_Connect.drawPlan smooths the stroke (Chaikin x2,
 //     resampled at 1 mm, corners over 60 degrees kept) and sweeps the shape
 //     along it. Result, Ends and Sag are the card's own; Sag is a lift of the
-//     middle. Weld joins the pieces the two ends stand on; a stroke with both
-//     ends on the plate is its own piece. One Undo. The card stays armed for the
-//     next stroke.
+//     middle. Weld joins whatever the stroke touches - the pieces its ends stand
+//     on and the ones it crosses on the way; a stroke that touches none is its own
+//     piece. One Undo. The card stays armed for the next stroke.
 //   - ESC mid-drag cancels the stroke and builds nothing.
 //   Left-drag draws while Draw is on; a press that finds nothing under it, and the
 //   right and middle buttons, still orbit and pan.
@@ -481,7 +481,7 @@ function NSO_connectRun(p) {
       return c;
     }
     var msg = p.drawn
-      ? 'Connect done - ' + p.text + '; ' + (r.soup.length / 9) + ' faces. One Undo ' + (weld ? 'puts the piece' + (models.length === 2 ? 's' : '') + ' back.' : 'takes it off the plate.')
+      ? 'Connect done - ' + p.text + '; ' + (r.soup.length / 9) + ' faces. One Undo ' + (weld ? 'puts the piece' + (models.length > 1 ? 's' : '') + ' back.' : 'takes it off the plate.')
       : weld
       ? 'Connect done - ' + p.text + '; ' + (models.length === 2 ? 'two pieces are one' : 'the piece is closed on itself') + ', ' + (r.soup.length / 9) +
         ' faces. One Undo puts ' + (models.length === 2 ? 'both back.' : 'it back.')

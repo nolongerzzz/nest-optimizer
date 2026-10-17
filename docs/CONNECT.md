@@ -128,10 +128,13 @@ whatever Ends says. An end on a **piece** follows Ends: Weld sinks the tip into 
 square cut and, like the anchored Flat, is Keep separate only; Foot pad and Ball are the
 disc and the sphere, at that end only.
 
-**Result.** Weld unions the stroke with the piece(s) its ends stand on (one, or both).
-A stroke with **both ends on the plate is always a piece of its own**, whatever Result
-says, even if it crosses a piece on the way (it rides over it, touching, not welded).
-Keep separate never touches a piece.
+**Result.** Weld unions the stroke with **whatever it touches**: the pieces its ends
+stand on and the ones it crosses on the way (a stroke from the plate over a box and
+down to the plate welds into the box; one from a piece over a third to another piece
+welds all three into one). Every stretch lying on a piece being welded is sunk into it a
+little, so the boolean has material to merge. A stroke that touches no piece (both ends
+on the plate, nothing crossed) is a piece of its own. Keep separate never touches a
+piece.
 
 Not in Draw: anchors A and B, the straight and arc paths. Switching Draw off is the
 anchored card again.

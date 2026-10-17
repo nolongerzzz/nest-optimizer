@@ -50,8 +50,10 @@
    Ends: an end on the PLATE is a flat foot (a square cut, the bottom on the
    plate), whatever Ends says; an end on a PIECE follows Ends (Weld: the tip dives
    into the piece and is unioned; Flat: a square cut, Keep separate only; Foot pad
-   and Ball as ever). Result: Weld unions the connector with the piece(s) its ends
-   stand on; a stroke with both ends on the plate is always a piece of its own.
+   and Ball as ever). Result: Weld unions the connector with whatever the stroke
+   touches - the pieces its ends stand on AND the ones it crosses on the way; a
+   stroke that touches no piece (both ends on the plate, nothing crossed) is a piece
+   of its own.
 
    SHAPES.
      string    Ø                       a round rod
@@ -1196,11 +1198,12 @@
     var G = sm.points, S = sm.arc, Lg = sm.lengthMm, n = G.length;
     if (Lg < DEFAULTS.minStrokeMm - 1e-9) return refuse(shape, 'the stroke is ' + show(Lg) + ' mm long - draw at least ' + show(DEFAULTS.minStrokeMm) + ' mm');
 
-    // What the two ends stand on, and so what is welded.
+    // What the stroke touches, and so what is welded: every piece it stands on at any point, the two ends' and the ones it
+    // crosses on the way. A stroke that touches none (both ends on the plate, nothing crossed) is a piece of its own.
     var onA = G[0].piece, onB = G[n - 1].piece, welds = [];
-    if (opts.result !== 'separate') [onA, onB].forEach(function (i) { if (i >= 0 && welds.indexOf(i) < 0) welds.push(i); });
+    if (opts.result !== 'separate') G.forEach(function (q) { if (q.piece >= 0 && welds.indexOf(q.piece) < 0) welds.push(q.piece); });
     var result = welds.length ? 'weld' : 'separate';
-    if (ends === 'flat' && result === 'weld') {
+    if (ends === 'flat' && result === 'weld' && (onA >= 0 || onB >= 0)) {
       return refuse(shape, 'Flat ends are cut flush with the surface and not sunk, so there is nothing to weld them with - pick Keep separate, or Weld, Foot pad or Ball ends');
     }
     if (welds.length && ends === 'pad') need('nso_assemble.js (NSO_Assemble.rootGap)', typeof NSO_Assemble !== 'undefined' && NSO_Assemble && NSO_Assemble.rootGap);
@@ -1361,9 +1364,9 @@
     var name = { string: 'String', ribbon: 'Ribbon', tube: 'Tube', tapered: 'Tapered' }[shape];
     var text = 'Draw: ' + name + ' ' + spec.size + ', ' + show(Lg) + ' mm along the stroke' + (sag ? ', lift ' + signed(sag) : '') +
       (ends !== 'weld' && (onA >= 0 || onB >= 0) ? ', ' + ENDS_WORD[ends] + ' ends' : '') + ' · ' + kinds.join(' to ') + ' · ' +
-      (result === 'weld' ? 'welds into ' + (welds.length === 2 ? 'both pieces' : 'the piece') : 'kept as its own piece');
+      (result === 'weld' ? 'welds into ' + (welds.length === 1 ? 'the piece' : (welds.length === 2 ? 'both pieces' : 'all ' + welds.length + ' pieces')) : 'kept as its own piece');
     return { ok: true, kind: shape, shape: shape, drawn: true, result: result, ends: ends, sagMm: sag, web: whole,
-             body: web, tips: tips, tipsFor: tipsFor, A: { piece: welds.length ? welds[0] : 0 }, B: { piece: welds.length ? welds[welds.length - 1] : 0 }, pieces: pieces,
+             body: web, tips: tips, tipsFor: tipsFor, A: { piece: welds.length ? welds[0] : 0 }, B: { piece: welds.length ? welds[Math.min(1, welds.length - 1)] : 0 }, pieces: pieces,
              welds: welds, endsOn: kinds, lengthMm: Lg, pathLengthMm: Lc, ground: G.map(function (q) { return q.p; }), centre: C, spec: spec,
              segments: sidesFor(spec.rMax), bore: bore, stations: em.stations, text: text };
   }
@@ -1402,6 +1405,31 @@
         });
       });
     }
+    // Bridge's weld joins two pieces; a stroke can touch more. Each further piece is unioned onto the result, and must merge.
+    function chainWelds(pr) {
+      return pr.then(function (r) {
+        if (!r || !r.ok || !p.drawn || p.welds.length <= 2) return r;
+        var acc = r, k = 2;
+        function next() {
+          if (k >= p.welds.length) {
+            var t = bridge().topology(acc.soup), open = acc.kernel ? acc.kernel.open : t.open, nm = acc.kernel ? acc.kernel.nm : t.nm;
+            if (open || nm || t.badWinding) {
+              return refuse(p.kind, 'the welded piece would not be closed (' + open + ' open edge(s), ' + nm + ' non-manifold, ' + t.badWinding + ' wound the wrong way) - nothing changed');
+            }
+            return acc;
+          }
+          return unionFn(acc.soup, p.pieces[p.welds[k]]).then(function (u) {
+            if (!u || !u.ok) return refuse(p.kind, 'the stroke would not weld to a piece it crosses (' + ((u && u.reason) || 'union failed') + ')');
+            var o = {};
+            for (var key in acc) if (Object.prototype.hasOwnProperty.call(acc, key)) o[key] = acc[key];
+            o.soup = u.soup; o.kernel = u.stats; o.topo = bridge().topology(u.soup);
+            acc = o; k++;
+            return next();
+          });
+        }
+        return next();
+      });
+    }
     function clean(soup) {
       var t = bridge().topology(soup);
       return !(t.open || t.nm || t.badWinding || t.degenerate);
@@ -1423,7 +1451,7 @@
         }
         var q = p;
         if (p.tips) { q = {}; for (var k in p) if (Object.prototype.hasOwnProperty.call(p, k)) q[k] = p[k]; q.web = j.soup; }
-        return bridge().weld(q, opts).then(function (r) {
+        return chainWelds(bridge().weld(q, opts)).then(function (r) {
           if (r && r.ok) { r.result = 'weld'; r.plan = p; }
           if (!again || !r || !r.ok || clean(r.soup)) return r;
           return build(attempt + 1).then(function (r2) { return (r2 && r2.ok && clean(r2.soup)) ? r2 : r; });
