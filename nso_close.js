@@ -7,19 +7,30 @@
 // THE PICK. An open end is a flat face of the piece with a hole in it: a
 // tube's end annulus, an open box's rim, any rim whose face has an outer loop
 // and an inner one. The face under the click is flooded out the way Tube edge
-// finds its end (edge-connected, one plane, NSO_CL_PLANE_TOL_MM), and its
-// boundary is walked into loops with Tube edge's own walker (NSO_teFaceLoops,
-// nso_tube_edge.js, which this file needs loaded first). The outer loop runs
-// counter-clockwise about the face's outward normal, every hole clockwise; the
-// hole nearest the click is the opening. The loop may be any shape - round,
-// square, a slot - so long as it is one closed loop, and its wall must go DOWN
-// into the piece from it (a post standing on a face is not an opening).
+// finds its end (edge-connected, one plane, within 1e-3 mm of it or 1e-5 x the
+// piece's bounding diagonal, whichever is larger, so a float32 Cut rim reads
+// as one face - W.planeTol), and its boundary is walked into loops with Tube
+// edge's own walker (NSO_teFaceLoops, nso_tube_edge.js, which this file needs
+// loaded first). The outer loop runs counter-clockwise about the face's outward
+// normal, every hole clockwise; the hole nearest the click is the opening. The
+// loop may be any shape - round, square, a slot - so long as it is one closed
+// loop, and its wall must go DOWN into the piece from it (a post standing on a
+// face is not an opening).
+//
+// The rim is 1.5 mm wide and nobody hits it on purpose. When the clicked face
+// has no hole in it - the opening's inner wall, the piece's outer wall - the
+// pick WALKS from the clicked triangle, edge-connected, to the nearest flat
+// face that has a hole, and takes it when it lies within one wall-height of
+// the click: the opening's wall, measured down from that rim to the floor or
+// step that ends it (a through-opening: the piece's depth). A click on the
+// bottom of a box is farther than that and is refused, saying what was read.
 //
 // THE LID is a slab across the opening, as thick as the wall there (the
 // least distance from the opening's loop to the outer loop, in the face's
-// plane), flush with the rim; Inset sinks it that far below the rim. It is
-// unioned to the piece, but not by a Boolean: the lid fills the opening's own
-// wall between two planes parallel to the rim, so its sides ARE that wall.
+// plane), flush with the rim; Inset sinks it that far below the rim. Where the
+// opening goes clean through the piece (a frame), the wall there is no more
+// than the piece is deep, and the lid is capped at that. It is unioned to the
+// piece, but not by a Boolean: the lid fills the opening's own wall between two planes parallel to the rim, so its sides ARE that wall.
 // The wall's triangles are cut at the two planes, the pieces between them
 // dropped, and each cut loop is closed with a flat cap - the lid's top
 // (facing out of the opening) and its underside (facing into it). With no
@@ -38,15 +49,19 @@
 //   - an edge that is a hole in the mesh, not a rim: "that edge isn't an open
 //     end - Patch repairs holes". So is a piece with open edges anywhere: the
 //     lid's caps are found as the cut's open edges, and a hole would be one.
-//   - a face with no opening, an opening that is a post, a tangled outline
+//   - a click that reads "flat face, 1 loop, no hole" and walks to no open end:
+//     none on its shell, none within one wall-height, or two as near as each other
+//   - an opening that is a post, a tangled outline
 //   - a lid under 2 nozzle widths thick, a negative inset
-//   - the lid reaching a floor or a step of the opening (it is not that deep)
+//   - the lid reaching a floor, a step or the far side of the opening: "opening
+//     found but the lid (8.00 mm) is deeper than the wall (3.00 mm, ...)"
 //   - the lid's planes crossing more than one wall of the opening (a post
 //     inside it), or the opening's wall running into the outside
 //
 // PAINT SCOPE: WHOLE-PIECE - the caller's (app-close.js), as Tube edge's.
 
-var NSO_CL_PLANE_TOL_MM = 1e-3;     // one flat rim face: every vertex this close to its plane
+var NSO_CL_PLANE_TOL_MM = 1e-3;     // one flat rim face: every vertex this close to its plane ...
+var NSO_CL_PLANE_REL = 1e-5;        // ... or this fraction of the piece's bounding diagonal, whichever is larger
 var NSO_CL_ON_MM = 5e-4;            // a vertex this close to a cut plane is on it
 var NSO_CL_MIN_NOZZLES = 2;         // a lid at least 2 nozzle widths thick
 var NSO_CL_FLOOR_COS = 0.5;         // a face this flat to the rim, inside the lid, is a floor
@@ -68,6 +83,12 @@ function NSO_clWeld(soup) {
   var open = 0, nonManifold = 0;
   for (var e = 0; e < W.eC.length; e++) { if (W.eC[e] === 1) open++; else if (W.eC[e] > 2) nonManifold++; }
   W.openEdges = open; W.nonManifold = nonManifold;
+  var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (var v = 0; v < W.nv; v++) for (var k = 0; k < 3; k++) {
+    var x = W.P[v * 3 + k]; if (x < lo[k]) lo[k] = x; if (x > hi[k]) hi[k] = x;
+  }
+  W.planeTol = W.nv ? Math.max(NSO_CL_PLANE_TOL_MM, NSO_CL_PLANE_REL * Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]))
+                    : NSO_CL_PLANE_TOL_MM;
   if (NSO_clWeldCache) NSO_clWeldCache.set(soup, W);
   return W;
 }
@@ -139,7 +160,7 @@ function NSO_clFace(W, s) {
       var flat = true;
       for (var c = 0; c < 3 && flat; c++) {
         var vi = vid[u * 3 + c] * 3;
-        if (Math.abs(nx * P[vi] + ny * P[vi + 1] + nz * P[vi + 2] - d) > NSO_CL_PLANE_TOL_MM) flat = false;
+        if (Math.abs(nx * P[vi] + ny * P[vi + 1] + nz * P[vi + 2] - d) > W.planeTol) flat = false;
       }
       if (!flat) continue;
       region[u] = 0; mem.push(u);
@@ -188,9 +209,203 @@ function NSO_clShapeWords(p2) {
 
 var NSO_CL_PATCH = "that edge isn't an open end — Patch repairs holes";
 
+/* The piece's edge-connected components, once per weld: the walk stays on the
+   shell the click is on. */
+function NSO_clComps(W) {
+  if (W.comp) return W.comp;
+  var comp = new Int32Array(W.n).fill(-1), nc = 0;
+  for (var s = 0; s < W.n; s++) {
+    if (comp[s] >= 0) continue;
+    var stack = [s]; comp[s] = nc;
+    while (stack.length) {
+      var t = stack.pop();
+      for (var k = 0; k < 3; k++) {
+        var u = NSO_teAcross(W, t * 3 + k);
+        if (u >= 0 && comp[u] < 0) { comp[u] = nc; stack.push(u); }
+      }
+    }
+    nc++;
+  }
+  W.comp = comp;
+  return comp;
+}
+
+/* Every flat face that has a hole in it, once per weld, labelled with the same
+   rule NSO_clFace floods by. Each is { seed (its lowest triangle), tris, comp }. */
+function NSO_clRimFaces(W) {
+  if (W.rimFaces) return W.rimFaces;
+  var n = W.n, N = W.N, P = W.P, vid = W.vid, tol = W.planeTol, comp = NSO_clComps(W);
+  var faceOf = new Int32Array(n).fill(-1), out = [], nf = 0;
+  for (var s = 0; s < n; s++) {
+    if (faceOf[s] >= 0 || W.degen[s]) continue;
+    var nx = N[s * 3], ny = N[s * 3 + 1], nz = N[s * 3 + 2], v0 = vid[s * 3] * 3;
+    var d = nx * P[v0] + ny * P[v0 + 1] + nz * P[v0 + 2], id = nf++, mem = [s], q = 0;
+    faceOf[s] = id;
+    while (q < mem.length) {
+      var t = mem[q++];
+      for (var k = 0; k < 3; k++) {
+        var u = NSO_teAcross(W, t * 3 + k);
+        if (u < 0 || faceOf[u] >= 0) continue;
+        if (!W.degen[u] && nx * N[u * 3] + ny * N[u * 3 + 1] + nz * N[u * 3 + 2] < 0.9999) continue;
+        var flat = true;
+        for (var c = 0; c < 3 && flat; c++) {
+          var vi = vid[u * 3 + c] * 3;
+          if (Math.abs(nx * P[vi] + ny * P[vi + 1] + nz * P[vi + 2] - d) > tol) flat = false;
+        }
+        if (!flat) continue;
+        faceOf[u] = id; mem.push(u);
+      }
+    }
+    if (mem.length < 6) continue;       // an outline and a hole in it take six triangles at the least
+    var L = NSO_teFaceLoops(W, { id: id, tris: mem }, faceOf);
+    if (L.tangled) continue;
+    var pos = 0, neg = 0;
+    L.loops.forEach(function (lp) {
+      var a = 0;                         // the loop's area about the face's normal, in 3D
+      for (var i = 0, m = lp.v.length; i < m; i++) {
+        var p = lp.v[i] * 3, r = lp.v[(i + 1) % m] * 3;
+        a += nx * (P[p + 1] * P[r + 2] - P[p + 2] * P[r + 1]) + ny * (P[p + 2] * P[r] - P[p] * P[r + 2]) + nz * (P[p] * P[r + 1] - P[p + 1] * P[r]);
+      }
+      if (a > 0) pos++; else if (a < 0) neg++;
+    });
+    if (pos && neg) out.push({ seed: s, tris: mem, comp: comp[s] });
+  }
+  W.rimFaces = out;
+  return out;
+}
+
+/* A flat face's loops in its own plane: the outer one (counter-clockwise about
+   the normal) and the holes (clockwise). */
+function NSO_clAnalyze(W, F) {
+  var L = NSO_teFaceLoops(W, F, F.region), fr = NSO_teFrame(F.n), P = W.P, e1 = fr.e1, e2 = fr.e2;
+  function to2(v) { var i = v * 3; return [P[i] * e1[0] + P[i + 1] * e1[1] + P[i + 2] * e1[2], P[i] * e2[0] + P[i + 1] * e2[1] + P[i + 2] * e2[2]]; }
+  var loops = L.loops.map(function (lp) { var p2 = lp.v.map(to2); return { v: lp.v, corners: lp.corners, p2: p2, area: NSO_clArea2(p2) }; });
+  var outer = null, holes = [];
+  loops.forEach(function (lp) {
+    if (lp.area > 0) { if (!outer || lp.area > outer.area) outer = lp; }
+    else holes.push(lp);
+  });
+  return { frame: fr, loops: loops, outer: outer, holes: holes, tangled: !!L.tangled, to2: to2 };
+}
+
+function NSO_clPlane2(fr, p) {
+  return [p[0] * fr.e1[0] + p[1] * fr.e1[1] + p[2] * fr.e1[2], p[0] * fr.e2[0] + p[1] * fr.e2[1] + p[2] * fr.e2[2]];
+}
+function NSO_clNearestHole(A, c2) {
+  var hole = A.holes[0], hd = Infinity;
+  A.holes.forEach(function (h) { var d = NSO_clInside(c2, h.p2) ? 0 : NSO_clLoopDist(c2, h.p2); if (d < hd) { hd = d; hole = h; } });
+  return hole;
+}
+
+/* The opening's wall, walked down from its loop: the triangles across the
+   loop's edges, then on through every triangle that is a wall (more than 60°
+   off the rim's plane). A triangle flatter than that is where the wall ENDS -
+   a floor, a step, the far face of a through-opening - unless it lies wholly
+   above D1, the depth a sunk lid starts at, which a lid clears. Returns
+   { depth, kind, leak, blockers }: depth is how far down the wall runs from
+   the rim (the shallowest blocker; a wall that closes on itself, its deepest
+   point); kind is 'floor' (it ends facing up), 'through' (it ends facing away
+   at the piece's lowest depth: a tube, a frame), 'step' (any other
+   downward ledge), or 'closed'. leak: the walk reached the rim's outer loop. */
+function NSO_clWall(W, F, corners, outerVids, D1) {
+  var Nn = F.n, c = F.d, P = W.P, vid = W.vid, ON = NSO_CL_ON_MM;
+  function dep(v) { return c - (Nn[0] * P[v * 3] + Nn[1] * P[v * 3 + 1] + Nn[2] * P[v * 3 + 2]); }
+  var onOuter = new Uint8Array(W.nv), seen = new Uint8Array(W.n), q = [], blockers = [], maxD = 0, leak = false;
+  for (var oi = 0; oi < outerVids.length; oi++) onOuter[outerVids[oi]] = 1;
+  function visit(u) { if (u < 0 || F.region[u] >= 0 || seen[u]) return; seen[u] = 1; q.push(u); }
+  corners.forEach(function (r) { visit(NSO_teAcross(W, r)); });
+  for (var qi = 0; qi < q.length; qi++) {
+    var t = q[qi], a = dep(vid[t * 3]), b = dep(vid[t * 3 + 1]), d3 = dep(vid[t * 3 + 2]);
+    var dmin = Math.min(a, b, d3), dmax = Math.max(a, b, d3);
+    var cosN = W.degen[t] ? 0 : W.N[t * 3] * Nn[0] + W.N[t * 3 + 1] * Nn[1] + W.N[t * 3 + 2] * Nn[2];
+    if (Math.abs(cosN) >= NSO_CL_FLOOR_COS && dmax > D1 + ON) { blockers.push({ t: t, dmin: dmin, dmax: dmax, up: cosN > 0 }); continue; }
+    if (dmax > maxD) maxD = dmax;
+    for (var k = 0; k < 3; k++) {
+      if (onOuter[vid[t * 3 + k]]) leak = true;
+      visit(NSO_teAcross(W, t * 3 + k));
+    }
+  }
+  var res = { depth: maxD, kind: 'closed', leak: leak, blockers: blockers };
+  if (!blockers.length) return res;
+  var dm = Infinity;
+  blockers.forEach(function (bk) { if (bk.dmin < dm) dm = bk.dmin; });
+  res.depth = dm;
+  if (blockers.some(function (bk) { return bk.up && bk.dmin <= dm + W.planeTol; })) { res.kind = 'floor'; return res; }
+  // facing away: the far side of a through-opening when the piece goes no lower
+  var comp = NSO_clComps(W), me = comp[F.tris[0]], low = 0;
+  for (var t2 = 0; t2 < W.n; t2++) {
+    if (comp[t2] !== me) continue;
+    for (var k2 = 0; k2 < 3; k2++) { var dv = dep(vid[t2 * 3 + k2]); if (dv > low) low = dv; }
+  }
+  res.kind = dm >= low - W.planeTol ? 'through' : 'step';
+  return res;
+}
+
+function NSO_clKindWords(kind) {
+  return kind === 'floor' ? 'a floor' : kind === 'through' ? 'the far side' : kind === 'step' ? 'a step' : 'where the wall closes';
+}
+
+/* The lid is deeper than the wall, in words. */
+function NSO_clDeeperWords(t, inset, D2, wall) {
+  return 'opening found but the lid (' + NSO_clFmt(t) + ' mm' + (inset > 0 ? ' at ' + NSO_clFmt(inset) + ' mm inset, reaching ' + NSO_clFmt(D2) + ' mm' : '') +
+    ') is deeper than the wall (' + NSO_clFmt(wall.depth) + ' mm, down to ' + NSO_clKindWords(wall.kind) + ')';
+}
+
+function NSO_clSqrtMin(W, tris, p) {
+  var m = Infinity;
+  for (var i = 0; i < tris.length; i++) { var d = NSO_clTriDist2(W, tris[i], p); if (d < m) m = d; }
+  return Math.sqrt(m);
+}
+
+/* The walk. From triangle s, over the shell it is on, to the flat face with a
+   hole in it that is nearest the click and within one wall-height of it.
+   -> { ok, seed, F, A, hole, dist, wall } or { ok: false, why: 'none' | 'far' | 'tie', ... }. */
+var NSO_CL_WALK_TRIES = 8;
+function NSO_clNearRim(W, s, p) {
+  var comp = NSO_clComps(W), mine = [];
+  NSO_clRimFaces(W).forEach(function (rf) {
+    if (rf.comp === comp[s]) mine.push({ rf: rf, dist: NSO_clSqrtMin(W, rf.tris, p) });
+  });
+  if (!mine.length) return { ok: false, why: 'none' };
+  mine.sort(function (x, y) { return x.dist - y.dist; });
+  var first = null, hit = null, tie = null;
+  for (var i = 0; i < mine.length && i < NSO_CL_WALK_TRIES; i++) {
+    var c = mine[i];
+    if (hit && c.dist > hit.dist + W.planeTol) break;
+    var F = NSO_clFace(W, c.rf.seed), A = NSO_clAnalyze(W, F);
+    if (A.tangled || !A.outer || !A.holes.length) continue;
+    var hole = NSO_clNearestHole(A, NSO_clPlane2(A.frame, p));
+    var wall = NSO_clWall(W, F, hole.corners, A.outer.v, 0);
+    var got = { ok: true, seed: c.rf.seed, F: F, A: A, hole: hole, dist: c.dist, wall: wall };
+    if (!first) first = got;
+    if (c.dist > wall.depth + W.planeTol) continue;
+    if (!hit) hit = got; else { tie = got; break; }
+  }
+  if (tie) return { ok: false, why: 'tie', dist: hit.dist, n: 2 };
+  if (hit) return hit;
+  if (!first) return { ok: false, why: 'none' };
+  return { ok: false, why: 'far', dist: first.dist, depth: first.wall.depth };
+}
+
+/* What the clicked face is, in words, and why no open end came of it. */
+function NSO_clReadWords(A, nr) {
+  var n = A.loops.length, has = A.holes.length;
+  var seen = 'flat face, ' + n + ' loop' + (n === 1 ? '' : 's') + ', ' + (has ? has + ' hole' + (has === 1 ? '' : 's') : 'no hole');
+  if (nr.why === 'far') {
+    return seen + ' - the nearest open end is ' + NSO_clFmt(nr.dist) + ' mm from the click, more than its ' + NSO_clFmt(nr.depth) + ' mm wall';
+  }
+  if (nr.why === 'tie') {
+    return seen + ' - ' + nr.n + ' open ends are ' + NSO_clFmt(nr.dist) + ' mm from the click, as near as each other: click closer to the one to close';
+  }
+  return seen + ' - this piece has no open end within reach (no flat face with an opening in it)';
+}
+
 /* NSO_closeRead(soup, { point, tri }) -> { ok, reason, rim } where rim is
    { normal, planeD, frame, outer, inner (raw 3D loops, for the outline),
-     innerVids, wallMm, shape, faceTris }. */
+     innerVids, wallMm, rimMm, depthMm, depthKind, through, via, shape, faceTris }.
+   wallMm is what the lid is as thick as by default: the rim's width across
+   its plane, or - where the opening goes clean through the piece - no more
+   than the piece is deep. */
 function NSO_closeRead(soup, opts) {
   opts = opts || {};
   if (!soup || soup.length < 9) return { ok: false, reason: 'no piece' };
@@ -199,59 +414,74 @@ function NSO_closeRead(soup, opts) {
   if (s < 0) return { ok: false, reason: 'click an open end - a tube end, an open box\'s rim' };
   var F = NSO_clFace(W, s);
   if (F.touchesOpen) return { ok: false, reason: NSO_CL_PATCH, hole: true };
-  var L = NSO_teFaceLoops(W, F, F.region);
-  if (L.tangled) return { ok: false, reason: 'that face\'s outline is tangled - it is not one rim' };
-  var fr = NSO_teFrame(F.n), P = W.P, e1 = fr.e1, e2 = fr.e2;
-  function to2(v) { var i = v * 3; return [P[i] * e1[0] + P[i + 1] * e1[1] + P[i + 2] * e1[2], P[i] * e2[0] + P[i + 1] * e2[1] + P[i + 2] * e2[2]]; }
-  var loops = L.loops.map(function (lp) { var p2 = lp.v.map(to2); return { v: lp.v, corners: lp.corners, p2: p2, area: NSO_clArea2(p2) }; });
-  var outer = null, holes = [];
-  loops.forEach(function (lp) {
-    if (lp.area > 0) { if (!outer || lp.area > outer.area) outer = lp; }
-    else holes.push(lp);
-  });
+  var A = NSO_clAnalyze(W, F), via = 'rim', hole, wall;
+  var P = W.P;
+  if (!A.tangled && A.holes.length) {
+    // The clicked face is a rim. Whichever of its triangles the click landed on,
+    // the rim is read from the face's lowest, so every click on it reads alike.
+    var seed = s;
+    for (var fi = 0; fi < F.tris.length; fi++) if (F.tris[fi] < seed) seed = F.tris[fi];
+    if (seed !== s) { F = NSO_clFace(W, seed); A = NSO_clAnalyze(W, F); }
+    s = seed;
+  } else {
+    var nr = NSO_clNearRim(W, s, opts.point);
+    if (!nr.ok) {
+      // A hole in the mesh beside a closed face reads the same to the eye: name Patch.
+      if (W.openEdges > 0) return { ok: false, reason: NSO_CL_PATCH, hole: true };
+      if (A.tangled) return { ok: false, reason: 'that face\'s outline is tangled - it is not one rim' };
+      return { ok: false, reason: NSO_clReadWords(A, nr) };
+    }
+    F = nr.F; A = nr.A; s = nr.seed; hole = nr.hole; wall = nr.wall;
+    if (F.touchesOpen) return { ok: false, reason: NSO_CL_PATCH, hole: true };
+    var wc = NSO_clPlane2(A.frame, opts.point);
+    via = NSO_clLoopDist(wc, hole.p2) <= NSO_clLoopDist(wc, A.outer.p2) ? 'inner wall' : 'outer wall';
+  }
+  if (A.tangled) return { ok: false, reason: 'that face\'s outline is tangled - it is not one rim' };
+  var fr = A.frame, outer = A.outer, holes = A.holes;
   if (!holes.length) {
-    // A hole in the mesh beside a closed face reads the same to the eye: name Patch.
     if (W.openEdges > 0) return { ok: false, reason: NSO_CL_PATCH, hole: true };
-    return { ok: false, reason: 'that face has no opening in it - click the rim of an open end' };
+    return { ok: false, reason: NSO_clReadWords(A, { why: 'none' }) };
   }
   if (!outer) return { ok: false, reason: 'that face has no outer edge - it is not a rim' };
   // The opening nearest the click.
-  var c2 = [opts.point[0] * e1[0] + opts.point[1] * e1[1] + opts.point[2] * e1[2],
-            opts.point[0] * e2[0] + opts.point[1] * e2[1] + opts.point[2] * e2[2]];
-  var hole = holes[0], hd = Infinity;
-  holes.forEach(function (h) { var d = NSO_clInside(c2, h.p2) ? 0 : NSO_clLoopDist(c2, h.p2); if (d < hd) { hd = d; hole = h; } });
+  var c2 = NSO_clPlane2(fr, opts.point);
+  if (!hole) hole = NSO_clNearestHole(A, c2);
   // The wall must go down into the piece from the hole: the triangle across
   // each of its edges has its third corner below the rim.
-  var down = 0, up = 0;
+  var down = 0, up = 0, tol = W.planeTol;
   for (var i = 0; i < hole.corners.length; i++) {
     var r = hole.corners[i], u = NSO_teAcross(W, r);
     if (u < 0) continue;
     for (var k = 0; k < 3; k++) {
       var v = W.vid[u * 3 + k] * 3;
       var dep = F.d - (F.n[0] * P[v] + F.n[1] * P[v + 1] + F.n[2] * P[v + 2]);
-      if (dep > NSO_CL_PLANE_TOL_MM) { down++; break; }
-      if (dep < -NSO_CL_PLANE_TOL_MM) { up++; break; }
+      if (dep > tol) { down++; break; }
+      if (dep < -tol) { up++; break; }
     }
   }
   if (up > down) return { ok: false, reason: 'that loop is a post standing on the face, not an opening' };
   // The wall: round in round, the difference of the two circles the section
   // reader fits; a rectangle in a rectangle, the narrower side's; else the
   // least distance across the rim, from the opening's corners to the outer edge.
-  var wall = Infinity;
+  var rimMm = Infinity;
   if (typeof NSO_sectionClassLoop === 'function' && hole.p2.length >= 4 && outer.p2.length >= 4) {
     var ci = NSO_sectionClassLoop(hole.p2), co = NSO_sectionClassLoop(outer.p2);
     if (ci.cls === 'round' && co.cls === 'round' &&
         Math.hypot(ci.circle.center[0] - co.circle.center[0], ci.circle.center[1] - co.circle.center[1]) <= co.circle.tolMm) {
-      wall = co.circle.r - ci.circle.r;
+      rimMm = co.circle.r - ci.circle.r;
     } else if (ci.cls === 'rectangular' && co.cls === 'rectangular') {
-      wall = Math.min(ci.rect.lo[0] - co.rect.lo[0], co.rect.hi[0] - ci.rect.hi[0],
-                      ci.rect.lo[1] - co.rect.lo[1], co.rect.hi[1] - ci.rect.hi[1]);
+      rimMm = Math.min(ci.rect.lo[0] - co.rect.lo[0], co.rect.hi[0] - ci.rect.hi[0],
+                       ci.rect.lo[1] - co.rect.lo[1], co.rect.hi[1] - ci.rect.hi[1]);
     }
   }
-  if (!(wall > 0) || !isFinite(wall)) {
-    wall = Infinity;
-    for (var j = 0; j < hole.p2.length; j++) wall = Math.min(wall, NSO_clLoopDist(hole.p2[j], outer.p2));
+  if (!(rimMm > 0) || !isFinite(rimMm)) {
+    rimMm = Infinity;
+    for (var j = 0; j < hole.p2.length; j++) rimMm = Math.min(rimMm, NSO_clLoopDist(hole.p2[j], outer.p2));
   }
+  // How deep the opening's wall runs, and what ends it. A through-opening - a
+  // tube, a frame - is as deep as the piece, and its lid is capped there.
+  if (!wall) wall = NSO_clWall(W, F, hole.corners, outer.v, 0);
+  var through = wall.kind === 'through', wallMm = through ? Math.min(rimMm, wall.depth) : rimMm;
   function to3(v) { var q = v * 3; return [P[q], P[q + 1], P[q + 2]]; }
   var shape = NSO_clShapeWords(hole.p2.slice().reverse());
   if (W.openEdges > 0) {
@@ -260,9 +490,10 @@ function NSO_closeRead(soup, opts) {
   if (W.nonManifold > 0) return { ok: false, reason: 'the piece has ' + W.nonManifold + ' edge(s) shared by more than two faces - Seal with Repair on first' };
   return {
     ok: true, soup: soup,
-    reason: shape.text + ', wall ' + NSO_clFmt(wall) + ' mm',
+    reason: shape.text + ', wall ' + NSO_clFmt(wallMm) + ' mm',
     rim: {
-      normal: F.n, planeD: F.d, frame: fr, wallMm: wall, shape: shape,
+      normal: F.n, planeD: F.d, frame: fr, wallMm: wallMm, rimMm: rimMm, depthMm: wall.depth, depthKind: wall.kind, through: through,
+      via: via, shape: shape,
       outer: outer.v.map(to3), inner: hole.v.map(to3), outerVids: outer.v, innerVids: hole.v, innerCorners: hole.corners,
       faceTris: F.tris.length, pickTri: s
     }
@@ -346,11 +577,12 @@ function NSO_closeRaw(soup, opts) {
 
   // The opening's wall above the lid's underside: flood from the triangles
   // across the opening's loop, through every triangle with a corner above D2.
-  var faceSet = new Uint8Array(n);
-  {
-    var Fl = NSO_clFace(W, rim.pickTri);
-    for (var fi = 0; fi < Fl.tris.length; fi++) faceSet[Fl.tris[fi]] = 1;
-  }
+  var faceSet = new Uint8Array(n), Fl = NSO_clFace(W, rim.pickTri);
+  for (var fi = 0; fi < Fl.tris.length; fi++) faceSet[Fl.tris[fi]] = 1;
+  // The wall below the rim, before anything is cut: if it ends above the lid's
+  // underside the lid does not fit in it, and the walk says where it ends.
+  var wall = NSO_clWall(W, Fl, rim.innerCorners, rim.outerVids, D1);
+  if (!wall.leak && wall.depth < D2 - ON) return { ok: false, rim: rim, reason: NSO_clDeeperWords(t, inset, D2, wall) };
   var outerSet = new Set(rim.outerVids);
   var inR = new Uint8Array(n), region = [], q = 0;
   function minDepth(tt) { return Math.min(depth[vid[tt * 3]], depth[vid[tt * 3 + 1]], depth[vid[tt * 3 + 2]]); }
@@ -379,9 +611,7 @@ function NSO_closeRaw(soup, opts) {
     if (W.degen[tq] || cosN < NSO_CL_FLOOR_COS) continue;
     var dmin = minDepth(tq), dmax = Math.max(depth[vid[tq * 3]], depth[vid[tq * 3 + 1]], depth[vid[tq * 3 + 2]]);
     if (dmax > D1 + ON && dmin < D2 - ON) {
-      return { ok: false, rim: rim, reason: 'the opening has a floor or a step ' + NSO_clFmt(Math.max(dmin, 0)) +
-        ' mm below the rim - a lid ' + NSO_clFmt(t) + ' mm thick' + (inset > 0 ? ' at ' + NSO_clFmt(inset) + ' mm inset' : '') +
-        ' needs ' + NSO_clFmt(D2) + ' mm' };
+      return { ok: false, rim: rim, reason: NSO_clDeeperWords(t, inset, D2, { depth: Math.max(dmin, 0), kind: 'floor' }) };
     }
   }
 

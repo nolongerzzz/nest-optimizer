@@ -4,8 +4,10 @@
 //   node tools/nso_close_test.js        exit 0 = every gate held
 //
 // Loads the shipped files with vm, in index.html's order. The tube is Stock's
-// own (NSO_Stock.revolve of its tube meridian); the open box, the tube along X
-// and the holed sphere are built here. Every number is measured on the OUTPUT
+// own (NSO_Stock.revolve of its tube meridian); the open box, the tube along X,
+// the frame and the holed sphere are built here. The open box the pick was
+// built for is library/box_closed.stl cut open by the real Cut (splitBothSides,
+// as tools/nso_cut_bore_test.js drives it). Every number is measured on the OUTPUT
 // soup by code that shares nothing with the lid's construction:
 //   - the topology is welded on exact float32 keys by a counter written here;
 //   - the volume is the divergence sum, here;
@@ -35,6 +37,21 @@ for (const f of ['nso_thickness.js', 'nso_stock.js', 'nso_section.js', 'nso_tube
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
 const { NSO_closeRaw, NSO_closeRead, NSO_Stock } = ctx;
+
+// The real Cut, in its own context (it needs Three.js, as nso_cut_bore_test.js loads it).
+const THREE = require(path.join(ROOT, 'node_modules', 'three', 'build', 'three.cjs'));
+const cutCtx = {
+  Math, Map, Set, console, Array, Object, Number, String, JSON, isFinite, Float32Array, Float64Array,
+  Int32Array, Uint32Array, Uint8Array, ArrayBuffer, Error, Infinity, NaN, THREE
+};
+cutCtx.window = cutCtx;
+vm.createContext(cutCtx);
+vm.runInContext('var state = {}; var document = { readyState: "complete", getElementById: function () { return null; },' +
+  ' addEventListener: function () {} };', cutCtx);
+for (const f of ['app-cut.js', 'app-extend.js']) {
+  vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), cutCtx, { filename: f });
+}
+const { splitBothSides } = cutCtx;
 
 let pass = 0, fail = 0;
 const FAILS = [];
@@ -114,6 +131,59 @@ function prismTube(O, I, h) {
 const star = (k, ro, ri, s) => Array.from({ length: 2 * k }, (_, i) => {
   const a = Math.PI * i / k, r = (i % 2 ? ri : ro) * s; return [30 + r * Math.cos(a), 30 + r * Math.sin(a)];
 });
+
+// A frame: a plate 80 x 60 x 3 with a 60 x 40 window through it. A through-opening.
+const frame = () => prismTube([[0, 0], [80, 0], [80, 60], [0, 60]], [[10, 10], [70, 10], [70, 50], [10, 50]], 3);
+
+// A closed cube, x y z from lo to hi.
+function cube(lo, hi) {
+  const [x0, y0, z0] = lo, [x1, y1, z1] = hi, t = [];
+  const quad = (a, b, c, d) => { t.push(a, b, c, a, c, d); };
+  quad([x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0]);
+  quad([x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]);
+  quad([x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]);
+  quad([x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]);
+  quad([x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]);
+  quad([x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]);
+  return new Float32Array(t.flat());
+}
+const concat = parts => {
+  const o = new Float32Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0; parts.forEach(p => { o.set(p, at); at += p.length; });
+  return o;
+};
+
+// Every vertex at height z moved by up to +-amp in z, the same for every triangle that uses it.
+function jitterRim(soup, z, amp) {
+  const out = new Float32Array(soup);
+  for (let i = 0; i < out.length; i += 3) {
+    if (out[i + 2] !== z) continue;
+    const h = Math.sin(out[i] * 12.9898 + out[i + 1] * 78.233) * 43758.5453;
+    out[i + 2] = Math.fround(z + amp * (2 * (h - Math.floor(h)) - 1));
+  }
+  return out;
+}
+
+// library/box_closed.stl cut open the way Cut does it: a piece built the way
+// addModelFromZUpGeometry builds one, split on display Y. The half below the
+// plane is a 60 x 40 tray with 2 mm walls, open at the cut.
+function readSTL(file) {
+  const b = fs.readFileSync(file), n = b.readUInt32LE(80), o = new Float32Array(n * 9);
+  for (let t = 0; t < n; t++) for (let k = 0; k < 9; k++) o[t * 9 + k] = b.readFloatLE(84 + t * 50 + 12 + k * 4);
+  return o;
+}
+function cutOpenBox() {
+  const raw = readSTL(path.join(ROOT, 'library', 'box_closed.stl'));
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(raw), 3));
+  g.rotateX(-Math.PI / 2);
+  g.computeBoundingBox();
+  const bb = g.boundingBox, off = { x: (bb.min.x + bb.max.x) / 2, y: (bb.min.y + bb.max.y) / 2, z: (bb.min.z + bb.max.z) / 2 };
+  g.center();
+  const piece = { geometry: g, rawTris: raw, rawAxis: 'zup', centerOffset: off };
+  const pair = splitBothSides(piece, 'y', 0.123, 0.123);
+  return { tray: pair.rawA, other: pair.rawB, raw };
+}
 
 // A sphere (Stock's revolve of its own meridian) with a hole in its top:
 // every triangle with a corner above z = 0.85 a taken out.
@@ -290,7 +360,8 @@ const box = openBox(40, 30, 20, 1.6, 2);
   const deep = NSO_closeRaw(box, Object.assign({ thickness: 10, inset: 9 }, pick));
   check('box: a lid reaching the floor is refused', !deep.ok && /floor/.test(deep.reason), deep.reason);
   const bottom = NSO_closeRead(box, { point: [20, 15, 0] });
-  check('box: the bottom has no opening - refused in words', !bottom.ok && /no opening/.test(bottom.reason), bottom.reason);
+  check('box: the bottom is refused, saying what was read', !bottom.ok &&
+    /^flat face, 1 loop, no hole - the nearest open end is 24\.\d\d mm from the click, more than its 18\.00 mm wall$/.test(bottom.reason), bottom.reason);
 }
 
 console.log('\nAn imported tube along X (Ø16 / Ø12, 48 sides) - click the far end');
@@ -329,6 +400,140 @@ console.log('\nA five-point star tube (a non-convex rim), 25 long - click the ri
   }
 }
 
+
+console.log('\nThe three clicks that find an opening: the rim, the inner wall, the outer wall');
+const sameBits = (a, b) => a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
+{
+  // ---- the open box Close was built for, cut open by the real Cut
+  const { tray, other } = cutOpenBox();
+  const top = Math.max(...Array.from(tray).filter((_, i) => i % 3 === 2));
+  check('fixture: Cut left box_closed a tray, closed and manifold but for its cut', topo(other).open === 0 && topo(tray).open === 0 && topo(tray).nm === 0,
+    'tray open ' + topo(tray).open + ', rim at z ' + top);
+  const picks = {
+    rim: { point: [30, 1, top], via: 'rim' },
+    'inner wall': { point: [30, 2, top - 5], via: 'inner wall' },
+    'outer wall': { point: [30, 0, top - 5], via: 'outer wall' }
+  };
+  const lids = {};
+  for (const [name, pk] of Object.entries(picks)) {
+    const rd = NSO_closeRead(tray, { point: pk.point });
+    check('cut box, ' + name + ': an open end, 56 × 36, wall 2.00', rd.ok && rd.rim.shape.kind === 'rectangular' && Math.abs(rd.rim.wallMm - 2) < 1e-4, rd.reason);
+    check('cut box, ' + name + ': read as ' + pk.via + ', one rim face of ' + (rd.ok ? rd.rim.faceTris : '?') + ' triangles', rd.ok && rd.rim.via === pk.via && rd.rim.faceTris === 32,
+      rd.ok ? rd.rim.via : '');
+    check('cut box, ' + name + ': the wall runs 11.77 mm to the floor', rd.ok && rd.rim.depthKind === 'floor' && Math.abs(rd.rim.depthMm - (top - 2)) < 1e-4 && !rd.rim.through,
+      rd.ok ? rd.rim.depthKind + ' ' + f3(rd.rim.depthMm) : '');
+    const r = NSO_closeRaw(tray, { point: pk.point });
+    check('cut box, ' + name + ': the lid is built', r.ok, r.reason);
+    lids[name] = r;
+  }
+  if (lids.rim.ok && lids['inner wall'].ok && lids['outer wall'].ok) {
+    check('cut box: all three clicks build the same lid, bit for bit',
+      sameBits(lids.rim.tris, lids['inner wall'].tris) && sameBits(lids.rim.tris, lids['outer wall'].tris),
+      lids.rim.tris.length / 9 + ' triangles');
+    gateSolid('cut box', tray, lids['inner wall']);
+    const rel = (volume(lids['inner wall'].tris) - volume(tray) - 56 * 36 * 2) / (56 * 36 * 2);
+    check('cut box: the lid adds 56 × 36 × 2 mm³', Math.abs(rel) < 1e-4, (rel * 100).toFixed(5) + ' %');
+    const H = rayHits(lids['inner wall'].tris, 2, 29.7, 19.3).map(h => h.at);
+    check('cut box: a ray down the box crosses the floor, then the lid at ' + f3(top - 2) + ' and ' + f3(top), H.length === 4 &&
+      Math.abs(H[2] - (top - 2)) < 1e-3 && Math.abs(H[3] - top) < 1e-4, H.map(f3).join(', '));
+  }
+  // The lower part of the outside wall is farther from the rim than the wall is tall.
+  const low = NSO_closeRead(tray, { point: [30, 0, 0.5] });
+  check('cut box: the outer wall below the floor is out of reach', !low.ok && /more than its 11\.77 mm wall/.test(low.reason), low.reason);
+  const floorClick = NSO_closeRead(tray, { point: [30, 20, 2] });
+  check('cut box: the floor is out of reach', !floorClick.ok && /^flat face, 1 loop, no hole/.test(floorClick.reason), floorClick.reason);
+
+  // ---- the same on a Stock tube: any click on it finds the nearer end, and builds that end's lid
+  const base = NSO_closeRaw(tube, tubePick);
+  for (const [name, point, via] of [['inner wall', [8.4, 0, 27.5], 'inner wall'], ['outer wall', [10, 0, 27.5], 'outer wall']]) {
+    const r = NSO_closeRaw(tube, { point });
+    check('tube, ' + name + ' 2.5 mm under the rim: built, the same lid as the rim click, bit for bit', r.ok && base.ok && sameBits(r.tris, base.tris) &&
+      r.rim.via === via, r.reason);
+  }
+  const lowEnd = NSO_closeRead(tube, { point: [10, 0, 2] });
+  check('tube, outer wall 2 mm above the bottom end: the bottom end', lowEnd.ok && lowEnd.rim.normal[2] < -0.99 && lowEnd.rim.via === 'outer wall',
+    lowEnd.ok ? 'normal ' + lowEnd.rim.normal.map(f3).join(',') : lowEnd.reason);
+
+  // ---- the walk stays on the shell the click is on
+  const pair = concat([tube, cube([12, -5, 20], [22, 5, 30])]);
+  const onCube = NSO_closeRead(pair, { point: [12, 0, 25] });
+  check('a second shell beside the tube is not walked to (it has no open end)', !onCube.ok &&
+    /^flat face, 1 loop, no hole - this piece has no open end within reach/.test(onCube.reason), onCube.reason);
+  const cubeAlone = NSO_closeRead(cube([0, 0, 0], [10, 10, 10]), { point: [5, 5, 10] });
+  check('a closed cube is refused, saying what was read', !cubeAlone.ok &&
+    /^flat face, 1 loop, no hole - this piece has no open end within reach/.test(cubeAlone.reason), cubeAlone.reason);
+}
+
+console.log('\nA frame (80 x 60 x 3, window 60 x 40 through it) - a through-opening');
+{
+  const fr = frame();
+  const T = topo(fr);
+  check('fixture: the frame is closed and manifold, Euler 0', T.open === 0 && T.nm === 0 && T.flip === 0 && T.euler === 0, 'Euler ' + T.euler);
+  const rd = NSO_closeRead(fr, { point: [5, 30, 3] });
+  check('read: a through-opening, 3.00 deep; the rim is 10 wide but the lid is capped at 3.00', rd.ok && rd.rim.through && rd.rim.depthKind === 'through' &&
+    Math.abs(rd.rim.depthMm - 3) < 1e-4 && Math.abs(rd.rim.rimMm - 10) < 1e-4 && Math.abs(rd.rim.wallMm - 3) < 1e-4,
+    rd.ok ? 'depth ' + f3(rd.rim.depthMm) + ', rim ' + f3(rd.rim.rimMm) + ', lid ' + f3(rd.rim.wallMm) : rd.reason);
+  const want = volume(fr) + 60 * 40 * 3;
+  for (const [name, point] of [['top rim', [5, 30, 3]], ['inner wall, nearer the top', [10, 30, 2.4]], ['outer wall, nearer the top', [0, 30, 2.5]],
+                               ['inner wall, nearer the bottom', [10, 30, 0.6]]]) {
+    const r = NSO_closeRaw(fr, { point });
+    check('frame, ' + name + ': built', r.ok, r.reason);
+    if (!r.ok) continue;
+    const Tg = topo(r.tris);
+    check('frame, ' + name + ': a panel the frame\'s depth, flush both sides (60·40·3 mm³, closed, Euler 2)', Math.abs(r.lid.thickness - 3) < 1e-4 &&
+      Math.abs((volume(r.tris) - want) / want) < 1e-5 && Tg.open === 0 && Tg.nm === 0 && Tg.flip === 0 && Tg.degen === 0 && Tg.euler === 2,
+      'thick ' + f3(r.lid.thickness) + ', ' + f3(volume(r.tris)) + ' vs ' + f3(want) + ', Euler ' + Tg.euler);
+    const H = rayHits(r.tris, 2, 33.3, 21.7).map(h => h.at);
+    check('frame, ' + name + ': a ray through the window crosses the panel at z 0 and 3', H.length === 2 && Math.abs(H[0]) < 1e-4 && Math.abs(H[1] - 3) < 1e-4, H.map(f3).join(', '));
+    if (name === 'top rim') {
+      const MV = meshValidate('frame-panel', r.tris);
+      check('frame: mesh_validate --gate PASS', MV.pass, MV.pass ? '' : (MV.fails || []).join('; '));
+    }
+  }
+  const deep = NSO_closeRaw(fr, { point: [5, 30, 3], thickness: 8 });
+  check('frame: a lid of 8 is deeper than the wall of 3 - refused, in words', !deep.ok &&
+    deep.reason === 'opening found but the lid (8.00 mm) is deeper than the wall (3.00 mm, down to the far side)', deep.reason);
+  const part = NSO_closeRaw(fr, { point: [5, 30, 3], thickness: 2 });
+  check('frame: a lid of 2 sits in the top and leaves the window open below it', part.ok && topo(part.tris).open === 0, part.reason);
+  const sunk = NSO_closeRaw(fr, { point: [5, 30, 3], inset: 2 });
+  check('frame: the 3 mm lid sunk 2 mm reaches 5 - refused, in words', !sunk.ok &&
+    /^opening found but the lid \(3\.00 mm at 2\.00 mm inset, reaching 5\.00 mm\) is deeper than the wall \(3\.00 mm, down to the far side\)$/.test(sunk.reason), sunk.reason);
+}
+
+console.log('\nA lid deeper than the wall, in words');
+{
+  const shallow = openBox(40, 30, 5, 1.6, 2);
+  const rd = NSO_closeRead(shallow, { point: [20, 0.8, 5] });
+  check('shallow tray: a floor 3.00 down; not a through-opening, so the lid is the rim\'s 1.60', rd.ok && rd.rim.depthKind === 'floor' && !rd.rim.through &&
+    Math.abs(rd.rim.depthMm - 3) < 1e-4 && Math.abs(rd.rim.wallMm - 1.6) < 1e-4, rd.ok ? rd.rim.depthKind + ' ' + f3(rd.rim.depthMm) : rd.reason);
+  const r = NSO_closeRaw(shallow, { point: [20, 0.8, 5], thickness: 8 });
+  check('shallow tray: a lid of 8 is deeper than the wall of 3', !r.ok &&
+    r.reason === 'opening found but the lid (8.00 mm) is deeper than the wall (3.00 mm, down to a floor)', r.reason);
+  const r2 = NSO_closeRaw(box, { point: [20, 0.8, 20], thickness: 10, inset: 9 });
+  check('open box: 10 mm sunk 9 reaches 19 - past the floor at 18', !r2.ok &&
+    r2.reason === 'opening found but the lid (10.00 mm at 9.00 mm inset, reaching 19.00 mm) is deeper than the wall (18.00 mm, down to a floor)', r2.reason);
+}
+
+console.log('\nThe plane tolerance scales with the piece');
+{
+  // Float noise on a rim. A skinny rim triangle's plane magnifies it along the rim's
+  // length, so 5e-5 mm on a 600 mm rim is several 1e-3 mm off the seed's plane.
+  const bigClean = openBox(600, 400, 200, 8, 4), big = jitterRim(bigClean, 200, 5e-5);
+  const pk = { point: [300, 8, 150] };
+  const rb = NSO_closeRead(big, pk);
+  check('600 × 400 × 200, rim 5e-5 mm off its plane: one face (tolerance 1e-5 × 750 = 7.5e-3 mm), the opening found from the inner wall',
+    rb.ok && rb.rim.faceTris === 8 && rb.rim.via === 'inner wall', rb.ok ? rb.rim.faceTris + ' triangles, ' + rb.reason : rb.reason);
+  const clean = NSO_closeRead(bigClean, pk);
+  check('... the same opening the clean rim reads', clean.ok && rb.ok && clean.rim.shape.text === rb.rim.shape.text && clean.rim.faceTris === rb.rim.faceTris, clean.reason);
+  ctx.NSO_CL_PLANE_REL = 0;                  // the fixed 1e-3 mm it used to be
+  const old = NSO_closeRead(new Float32Array(big), pk);
+  ctx.NSO_CL_PLANE_REL = 1e-5;
+  check('... which the fixed 1e-3 mm read as no rim at all (the regression this scales away)', !old.ok, old.reason);
+  const small = jitterRim(openBox(40, 30, 20, 1.6, 2), 20, 3e-3);
+  const rs = NSO_closeRead(small, { point: [20, 1.6, 15] });
+  check('40 × 30 × 20, rim 3e-3 mm off its plane: still not one face (the 1e-3 mm floor holds on a small piece)', !rs.ok, rs.reason);
+}
+
 console.log('\nRefusals');
 {
   const thin = NSO_closeRaw(tube, Object.assign({ thickness: 0.6 }, tubePick));
@@ -336,7 +541,8 @@ console.log('\nRefusals');
   const ok2 = NSO_closeRaw(tube, Object.assign({ thickness: 0.8 }, tubePick));
   check('a lid of exactly 2 nozzle widths is built', ok2.ok, ok2.reason);
   const side = NSO_closeRead(tube, { point: [10, 0, 15] });
-  check('the outside wall is not an open end', !side.ok && /no opening/.test(side.reason), side.reason);
+  check('the outside wall half way along is as near one end as the other - refused, saying so', !side.ok &&
+    /^flat face, 1 loop, no hole - 2 open ends are 15\.00 mm from the click, as near as each other/.test(side.reason), side.reason);
   const neg = NSO_closeRaw(tube, Object.assign({ inset: -1 }, tubePick));
   check('a negative inset is refused', !neg.ok, neg.reason);
 
