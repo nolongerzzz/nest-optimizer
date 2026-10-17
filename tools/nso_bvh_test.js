@@ -90,6 +90,7 @@ console.log('\n=== 1. the tree is the planner\'s ===');
 console.log('\n=== 2. the raycast is three\'s ===');
 const orig = THREE.Mesh.prototype.raycast;
 BVH.installThree(THREE, { minTris: 100 });
+BVH._setBigTris(1000);          // the 8,100-triangle meshes below stand in for a big piece
 {
   check('installThree replaces Mesh.prototype.raycast, once', THREE.Mesh.prototype.raycast !== orig && BVH.installThree(THREE) === false);
   const nativeRaycast = THREE.Mesh.prototype.raycast._orig;
@@ -170,6 +171,13 @@ BVH.installThree(THREE, { minTris: 100 });
       mesh.raycast(rcHover, cold);
       check('no tree yet: a hover answers nothing (and has asked for one)', cold.length === 0);
       mesh.raycast(rcDown, cold2);
+      {   // between the tree threshold and "big" a hover keeps the walk
+        const was = BVH._setBigTris(1e9);
+        const mid = meshOf(sphere(90, 45, 40, 0), THREE.DoubleSide), midHits = [];
+        mid.raycast(rcHover, midHits);
+        BVH._setBigTris(was);
+        check('a piece over the tree threshold but not big: a hover with no tree yet is answered by the walk', midHits.length === 2);
+      }
       check('no tree yet: a click is answered by the walk, as before', cold2.length === 2 && Math.abs(cold2[0].distance - 60) < 0.2, cold2.length + ' hits');
       await new Promise(r => setTimeout(r, 50));
       const warm = []; mesh.raycast(rcHover, warm);

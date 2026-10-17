@@ -50,9 +50,11 @@
 
    Anything else - a small mesh, an indexed one, a morph target, a material
    array, a UV set - takes three's own raycast, untouched. So does a big mesh
-   whose tree is not ready, EXCEPT for a hover (raycaster.nsoHover = true): a
-   hover that finds no tree answers "nothing" and asks for one, rather than
-   walking a million triangles to repaint an outline.
+   whose tree is not ready, EXCEPT for a hover (raycaster.nsoHover = true) over
+   a BIG piece (BIG_TRIS, 300k): a hover that finds no tree answers "nothing"
+   and asks for one, rather than walking a million triangles to repaint an
+   outline. Between MIN_TRIS and BIG_TRIS the walk is a few tens of ms and a
+   hover keeps it.
 
    ---------------------------------------------------------------------------
    WHAT IS READ AS IMMUTABLE
@@ -494,9 +496,10 @@
       if (!eligible(this, g)) return raycast._orig.call(this, raycaster, intersects);
       var ix = treeOf(g);
       if (!ix) {
-        /* No tree yet (or an edit just outdated it). A hover answers "nothing"
+        /* No tree yet (or an edit just outdated it). A hover over a BIG piece
+           (300k triangles and up, where a walk is tens of ms) answers "nothing"
            and waits for one; anything else keeps three's walk, as before. */
-        if (raycaster.nsoHover) return;
+        if (raycaster.nsoHover && g.attributes.position.count / 3 >= api.BIG_TRIS) return;
         return raycast._orig.call(this, raycaster, intersects);
       }
       var material = this.material, matrixWorld = this.matrixWorld;
@@ -552,6 +555,7 @@
     forget: forget,
     minTris: function () { return MIN_TRIS; },
     _setMinTris: function (n) { var was = MIN_TRIS; MIN_TRIS = n; return was; },
+    _setBigTris: function (n) { var was = api.BIG_TRIS; api.BIG_TRIS = n; return was; },
     _rebuildDelay: function () { return REBUILD_DELAY_MS; },
     buildCore: buildCore,
     build: buildBVH,
