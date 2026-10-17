@@ -10,6 +10,14 @@
 // Foot pad, Ball); and whether it is welded into the pieces or kept as a piece of
 // its own.
 //
+// AN ANCHOR IS THE POINT UNDER THE CURSOR. Exactly there, on the surface: no
+// snapping to a face's centre or an edge's midpoint, no classifying it as
+// corner / edge / face. It leaves along the surface normal there - at an edge or
+// a corner, the average of the normals of the faces that meet (NSO_Connect.anchor).
+// The card says where: "Anchor A: on box_closed at 2.1 mm from its corner".
+// SHIFT held while clicking keeps the old face centre / edge midpoint, for the
+// rare time that is wanted.
+//
 // TWO CLICKS, NOT A DRAG. Open Connect, then:
 //   - HOVER: whatever is under the pointer that Connect could take lights up -
 //     a face, an edge (a bar along its whole straight edge) or a point (a dot) -
@@ -23,14 +31,17 @@
 //     or a Ball's disc and sphere ride in it, not yet unioned). A refusal
 //     draws nothing and says why, in red. Changing the shape or any field
 //     redraws the ghost at once - Sag and Ends included.
-//   - Clicking an anchor again clears it. A click on nothing clears the picks (an
-//     orbit drag does not: it has to stay put to count as a click) and so does
-//     Escape. With both set, a click on a new place replaces B.
+//   - Clicking an anchor again (within a mm of it) clears it. A click on nothing
+//     clears the picks (an orbit drag does not: it has to stay put to count as a
+//     click) and so does Escape. With both set, a click on a new place replaces B.
 //   - SET commits it. Weld into A and B: the pieces leave the plate and one new
 //     piece takes their place (or the one, when both anchors are on it). Keep
 //     separate: the connector is added as a piece of its own and the pieces are
-//     not touched. One Undo puts it all back. CANCEL drops the picks; pressed
-//     with none, it closes the card. The card stays open after a Set.
+//     not touched. One Undo puts it all back. The card stays open after a Set
+//     and is armed for the next pair: the picks clear, the fields keep their
+//     values, the last connector stays welded or placed - Set as many in a row as
+//     you like. CANCEL or ESCAPE drops the picks; pressed with none, it closes the
+//     card.
 //
 // A press that starts ON a piece belongs to Connect while the card is open (it
 // would otherwise select the piece and start a move drag under the click); a
@@ -84,23 +95,38 @@ function NSO_connectReady() {
          typeof NSO_bridgeTargetObject === 'function';
 }
 
-// The anchor as the engine will use it: where the connector really starts.
+// The anchor as the engine will use it: where the connector really starts - the
+// clicked point, or (Shift) the face's centroid / the edge's midpoint.
 function NSO_connectAnchorPoint(sel) {
   var t = sel.target;
-  if (t.kind === 'face') return t.centroid;
-  if (t.kind === 'edge') return [(t.a[0] + t.b[0]) / 2, (t.a[1] + t.b[1]) / 2, (t.a[2] + t.b[2]) / 2];
+  if (t.centre && t.kind === 'face') return t.centroid;
+  if (t.centre && t.kind === 'edge') return [(t.a[0] + t.b[0]) / 2, (t.a[1] + t.b[1]) / 2, (t.a[2] + t.b[2]) / 2];
   return t.point;
 }
 
+// The pick, made the anchor: exactly the clicked point (Shift: the old centre),
+// and the words for where it is.
+function NSO_connectResolve(sel, shift) {
+  var m = NSO_bridgeModel(sel.sourceId);
+  var r = NSO_Connect.anchor(sel.cache.T, sel.target, { centre: !!shift, name: m ? m.name : null, cornerPickMm: NSO_connectPickMm(sel.world) });
+  return { sourceId: sel.sourceId, placed: sel.placed, cache: sel.cache, world: sel.world, target: r.target, text: r.text, cornerMm: r.cornerMm };
+}
+
+// Bridge's edge-pick distance - BRIDGE_EDGE_PX on screen - in mm at the click's depth: how near a corner is "at" it.
+function NSO_connectPickMm(world) {
+  var cam = state.camera, H = (state.renderer && state.renderer.domElement.clientHeight) || 600;
+  if (!cam || !world) return 0;
+  var mm = cam.isPerspectiveCamera ? 2 * cam.position.distanceTo(world) * Math.tan((cam.fov * Math.PI / 180) / 2) / H
+                                   : (cam.top - cam.bottom) / (cam.zoom || 1) / H;
+  return (typeof BRIDGE_EDGE_PX === 'number' ? BRIDGE_EDGE_PX : 8) * mm;
+}
+
+// Is this the very place the other one marks? A click within a mm of an anchor
+// is that anchor - on any kind of surface, so two anchors can still stand on one face.
 function NSO_connectSame(x, y) {
-  if (!x || !y || x.sourceId !== y.sourceId || x.target.kind !== y.target.kind) return false;
-  var a = x.target, b = y.target;
-  if (a.kind === 'face') return !!(a.face.inR && a.face.inR[b.tri]) || a.tri === b.tri;
-  if (a.kind === 'edge') {
-    var d = function (p, q) { return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]); };
-    return (d(a.a, b.a) + d(a.b, b.b) < 1e-6) || (d(a.a, b.b) + d(a.b, b.a) < 1e-6);
-  }
-  return Math.hypot(a.point[0] - b.point[0], a.point[1] - b.point[1], a.point[2] - b.point[2]) < CONNECT_SAME_MM;
+  if (!x || !y || x.sourceId !== y.sourceId) return false;
+  var a = NSO_connectAnchorPoint(x), b = NSO_connectAnchorPoint(y);
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < CONNECT_SAME_MM;
 }
 
 /* ---------------------------------------------------------------- drawing */
@@ -117,7 +143,7 @@ function NSO_connectDrawPicks() {
   [C.a, C.b].forEach(function (s, i) {
     if (!s) return;
     var o = NSO_bridgeTargetObject(s, CONNECT_PICK_COLOR); o.userData.role = i ? 'b' : 'a';
-    // Where the connector actually starts (a face's centroid, an edge's midpoint).
+    // Where the connector actually starts (the clicked point; Shift: a face's centroid, an edge's midpoint).
     var m = new THREE.Mesh(new THREE.SphereGeometry(0.9, 12, 8), new THREE.MeshBasicMaterial({
       color: CONNECT_PICK_COLOR, transparent: true, opacity: 0.95, depthTest: false, depthWrite: false }));
     m.position.copy(NSO_bridgeUpToDisplay(NSO_connectAnchorPoint(s)));
@@ -167,8 +193,12 @@ function NSO_connectAnchorText() {
   var C = NSO_connectUI();
   [['a', C.a], ['b', C.b]].forEach(function (x) {
     var el = NSO_connectEl('connect-' + x[0] + '-text');
-    if (el) el.textContent = 'Anchor ' + x[0].toUpperCase() + ': ' + (x[1] ? x[1].target.text : '— click a piece');
+    if (el) el.textContent = NSO_connectAnchorLine(x[0], x[1]);
   });
+}
+// "Anchor A: on box_closed at 2.1 mm from its corner"
+function NSO_connectAnchorLine(which, sel) {
+  return 'Anchor ' + which.toUpperCase() + ': ' + (sel ? sel.text : '— click a piece');
 }
 
 function NSO_connectShape() { var el = NSO_connectEl('sel-connect-shape'); return el && el.value ? el.value : 'string'; }
@@ -215,7 +245,8 @@ function NSO_connectPreview() {
   C.plan = p;
   if (p.ok) {
     NSO_connectSetGhost(p.web);
-    NSO_connectReadout(p.text + ' · Set ' + (p.result === 'weld' ? 'welds it' : 'adds it'), false);
+    NSO_connectReadout(NSO_connectAnchorLine('a', C.a) + ' · ' + NSO_connectAnchorLine('b', C.b) + ' · ' + p.text +
+                       ' · Set ' + (p.result === 'weld' ? 'welds it' : 'adds it'), false);
   } else {
     NSO_connectReadout('Connect: ' + p.reason, true);
   }
@@ -342,6 +373,9 @@ function NSO_connectSet() {
         ' faces. One Undo puts ' + (models.length === 2 ? 'both back.' : 'it back.')
       : 'Connect done - ' + p.text + '; ' + (r.soup.length / 9) + ' faces. One Undo takes it off the plate.';
     NSO_connectSay(msg);
+    // Armed for the next pair: A and B clear, the fields keep their values. What
+    // was hovered may be a piece the weld has just consumed.
+    C.hover = null; C.soups = {};
     NSO_connectClearPicks();
     NSO_connectReadout('Connected. ' + NSO_CONNECT_HINT, false);
     r.newId = c.id;
@@ -429,8 +463,8 @@ function NSO_connectCommit(soupUp, models, shape) {
 /* ---------------------------------------------------------- the pointer */
 
 // A click on a place: it sets, or clears, an anchor.
-function NSO_connectClickPiece(sel) {
-  var C = NSO_connectUI();
+function NSO_connectClickPiece(pick, shift) {
+  var C = NSO_connectUI(), sel = NSO_connectResolve(pick, shift);
   if (NSO_connectSame(sel, C.a)) C.a = null;
   else if (NSO_connectSame(sel, C.b)) C.b = null;
   else if (!C.a) C.a = sel;
@@ -441,7 +475,7 @@ function NSO_connectClickPiece(sel) {
   if (C.a && C.b) NSO_connectPreview();
   else {
     C.plan = null; NSO_connectSetGhost(null); NSO_connectAnchorText(); NSO_connectSyncRows();
-    NSO_connectReadout(C.a || C.b ? 'Anchor ' + (C.a ? 'A' : 'B') + ' set (' + (C.a || C.b).target.text + ') - orbit as you like, then click ' + (C.a ? 'B' : 'A') + '.' : NSO_CONNECT_HINT, false);
+    NSO_connectReadout(C.a || C.b ? NSO_connectAnchorLine(C.a ? 'a' : 'b', C.a || C.b) + ' - orbit as you like, then click ' + (C.a ? 'B' : 'A') + '.' : NSO_CONNECT_HINT, false);
   }
 }
 
@@ -480,7 +514,7 @@ if (typeof document !== 'undefined') {
       C.press = null;
       if (!C.open || C.busy || ev.button !== 0 || !onCanvas(ev)) return;
       var sel = target(ev);
-      C.press = { x: ev.clientX, y: ev.clientY, sel: sel };
+      C.press = { x: ev.clientX, y: ev.clientY, sel: sel, shift: !!ev.shiftKey };
       if (sel) { ev.stopImmediatePropagation(); ev.preventDefault(); }
     }
     function onUp(ev) {
@@ -491,7 +525,7 @@ if (typeof document !== 'undefined') {
       if (!onCanvas(ev)) return;
       if (pr.sel) {
         // The press already named what was under it; the release is the click.
-        NSO_connectClickPiece(pr.sel);
+        NSO_connectClickPiece(pr.sel, ev.shiftKey || pr.shift);
         ev.stopImmediatePropagation();
       } else if (C.a || C.b) {
         NSO_connectClearPicks();
@@ -500,9 +534,8 @@ if (typeof document !== 'undefined') {
     }
     function onKey(ev) {
       var C = NSO_connectUI();
-      if (!C.open || ev.key !== 'Escape' || !(C.a || C.b)) return;
-      NSO_connectClearPicks();
-      NSO_connectReadout(NSO_CONNECT_HINT, false);
+      if (!C.open || ev.key !== 'Escape') return;
+      NSO_connectCancel();
     }
     function wire() {
       var btn = NSO_connectEl('btn-connect');

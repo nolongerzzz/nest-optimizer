@@ -14,9 +14,9 @@ Files: `nso_connect.js` (engine, headless), `app-connect.js` (the card),
 Click anchor A on a piece; it stays marked. Orbit, pan and zoom as much as you
 like - nothing is held and nothing captures the pointer - and a line from A
 follows the pointer. Click anchor B: the connector is built and previewed as a
-ghost (Bridge's amber). Clicking an anchor again clears it; a click on nothing
-(an orbit drag does not count) and Escape clear the picks; with both set, a click
-on a new place replaces B.
+ghost (Bridge's amber). Clicking an anchor again (within a mm of it) clears it; a
+click on nothing (an orbit drag does not count) and Escape clear the picks; with
+both set, a click on a new place replaces B.
 
 A press that starts on a piece is Connect's while the card is open (otherwise it
 would select the piece and begin a move drag under the click). A press that
@@ -26,13 +26,53 @@ The pick is Bridge's own (`NSO_Bridge.pick`) and so is its overlay
 (`NSO_bridgeTargetAt`, `NSO_bridgeTargetObject`); `app-connect.js` calls them,
 `app-bridge.js` is untouched.
 
-| anchor | is                                                               |
-|--------|------------------------------------------------------------------|
-| point  | the point, the surface normal there                              |
-| face   | the face's centroid, the face's normal                           |
-| edge   | its midpoint (String, Tube, Tapered), its full length (Ribbon); leaves along the bisector of the edge's two faces |
+## The anchor is the point under the cursor
+
+Exactly there, on the surface: no snapping to a face's centre or an edge's
+midpoint, no deciding whether it was a corner, an edge or a face. A corner-to-
+corner connector on two boxes runs corner to corner.
+
+The connector **leaves along the surface normal** at that point. At an edge or a
+corner it is the average of the normals of the faces that meet there - an edge's
+two, a box corner's three (each face counted once, so a face cut into many
+triangles is not over-weighted). A pointer never lands exactly on a vertex, so
+within Bridge's own edge-pick distance (`BRIDGE_EDGE_PX` on screen, in mm at that
+depth) of a corner it counts as at it: the faces that meet at the corner are all
+averaged, while the anchor stays the point itself. A curved surface's facets are
+no crease and keep their own normal; Bridge reads the flat faces of a welded piece
+as plain points, so a point within the pick distance of a crease (a face meeting
+another at more than 30°) gets the same average.
+
+| pick    | anchor is        | leaves along                                      |
+|---------|------------------|---------------------------------------------------|
+| face    | the clicked point | the face's normal                                |
+| edge / corner | the clicked point | the average of the adjoining faces' normals |
+| point (curved) | the clicked point | the triangle's normal                    |
+
+The card says where, per anchor and in the readout: `Anchor A: on box_closed at
+2.1 mm from its corner · Anchor B: on box_open at its corner · String Ø2.0, …`
+(the distance is to the nearest corner of the face or edge; none on a curved
+surface: `on ball`).
+
+**Shift** held while clicking keeps the old anchor, for the rare time it is
+wanted: a face's centroid (leaving along its normal), an edge's midpoint (leaving
+along the bisector of its two faces; a Ribbon is still held to twice that edge's
+length). The card says `on box_closed, face centre` / `edge midpoint`.
+
+`NSO_Connect.anchor(T, target, { centre, name, cornerPickMm })` makes a Bridge pick
+into the anchor `plan()` takes (it works the corner normal out from the piece's
+`NSO_Bridge.index`); a target without it - tickets 1 and 2's - is the clicked
+point too, unless marked `centre`.
 
 A and B may be on one piece or two.
+
+## Many in a row
+
+After Set the card stays open and is armed for the next pair: A and B clear, the
+fields keep their values, and the last connector stays welded or placed. Its
+result is a piece like any other (a welded one is named `… (connected)`), so the
+next pair can be anchored on it. Cancel drops the picks; with none, Cancel - and
+Escape - close the card.
 
 ## Shapes
 

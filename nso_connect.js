@@ -12,11 +12,17 @@
    (app-connect.js reads each placed mesh the way app-bridge.js does).
 
    ANCHORS are what NSO_Bridge.pick returns (face / edge / point), wrapped as
-   { piece, target }:
+   { piece, target }. The anchor is EXACTLY the point under the pointer, on the
+   surface: no snapping to a centre or a corner, whatever the pick classed it as.
      point  the point itself, the surface normal there
-     face   the face's centroid, the face's normal
-     edge   its midpoint (String, Tube, Tapered) or its full length (Ribbon),
-            leaving along the bisector of the edge's two faces
+     face   the point, the face's normal
+     edge   the point, leaving along the average of the normals of the faces that
+            meet there - the two faces of an edge, the three of a corner
+            (NSO_Connect.anchor works the corner out; without it, the edge's two)
+   A target marked `centre` (NSO_Connect.anchor(T, target, { centre: true }); the
+   card does it for a Shift-click) keeps the old centres instead: a face's
+   centroid, an edge's midpoint (its full length for a Ribbon's width cap),
+   leaving along the face's normal / the bisector of the edge's two faces.
 
    SHAPES.
      string    Ø                       a round rod
@@ -127,6 +133,11 @@
     wallMm: 0.8,
     diaAMm: 4,              // Tapered, at A
     diaBMm: 1.5,            // ... at B
+    sameFaceCos: Math.cos(8 * Math.PI / 180),   // normals this near one another are one face (a corner's average counts each face once)
+    sharpCos: Math.cos(30 * Math.PI / 180),     // faces meeting at more than this are a crease; a curved surface's facets are not
+    cornerDeg: 15,          // a face outline turns this much or more at a corner
+    cornerReachMm: 1e-3,    // faces this near the clicked point (past its distance to the edge) are the ones that meet there
+    atCornerMm: 0.05,       // closer than this to a corner, the anchor is "at" it
     ribbonOverEdge: 2,      // a ribbon may be this many times its shorter anchor edge wide
     perpFloor: 0.1,         // below this the normals' average has no sideways part (a ribbon then lies level)
     stationMm: 2,           // wall triangles are cut to at most this long (see emitRod)
@@ -188,14 +199,108 @@
 
   /* ------------------------------------------------------------- anchors */
   function anchorOf(end) {
-    var t = end.target, k = t.kind;
-    if (k === 'point') return { kind: k, p: t.point.slice(), n: unit(t.normal), edge: null };
-    if (k === 'face') return { kind: k, p: (t.centroid || t.point).slice(), n: unit(t.normal || t.face.normal), edge: null };
+    var t = end.target, k = t.kind, exact = !t.centre && !!t.point, ln = t.leaveNormal ? unit(t.leaveNormal) : null;
+    if (k === 'point') return { kind: k, p: t.point.slice(), n: ln || unit(t.normal), edge: null };
+    if (k === 'face') return { kind: k, p: (exact ? t.point : (t.centroid || t.point)).slice(), n: ln || unit(t.normal || t.face.normal), edge: null };
     if (k === 'edge') {
-      var n = unit(add(t.faceNormal || [0, 0, 1], t.acrossNormal || t.faceNormal || [0, 0, 1])) || unit(t.faceNormal);
-      return { kind: k, p: lerp(t.a, t.b, 0.5), n: n, edge: { a: t.a, b: t.b, lengthMm: t.lengthMm != null ? t.lengthMm : len(sub(t.b, t.a)) } };
+      var n = ln || unit(add(t.faceNormal || [0, 0, 1], t.acrossNormal || t.faceNormal || [0, 0, 1])) || unit(t.faceNormal);
+      return { kind: k, p: exact ? t.point.slice() : lerp(t.a, t.b, 0.5), n: n,
+               edge: { a: t.a, b: t.b, lengthMm: t.lengthMm != null ? t.lengthMm : len(sub(t.b, t.a)) } };
     }
     return null;
+  }
+
+  /* ---------------------------------------------- the anchor, where it is
+
+     NSO_Connect.anchor(T, target, { centre, name, cornerPickMm }): the pick, made the anchor
+     Connect will use. T is the piece's NSO_Bridge.index; target is NSO_Bridge.pick's.
+     Returns { target, cornerMm, text }: `target` is a copy to hand to plan() -
+     with the leave direction an EDGE needs worked out at the point (the average
+     of the normals of every face within reach of it, so a corner gets its three,
+     not the two of the edge it was classed on) - and `text` says where, for the
+     readout: "on box_closed at 2.1 mm from its corner". cornerMm is the distance
+     to the nearest corner of the face or edge (null on a curved surface, which
+     has none). With `centre`, the old centre / midpoint is kept and said.
+
+     A pointer never lands exactly on a vertex. cornerPickMm is how near a corner
+     counts as at it (the card passes Bridge's edge-pick distance, in mm at that
+     depth): within it, the faces that meet at the corner are all averaged - the
+     three of a box corner - while the anchor stays the point itself. */
+  function ptTri(p, a, b, c) {                   // distance from p to the triangle abc (Ericson)
+    var ab = sub(b, a), ac = sub(c, a), ap = sub(p, a), d1 = dot(ab, ap), d2 = dot(ac, ap);
+    if (d1 <= 0 && d2 <= 0) return len(ap);
+    var bp = sub(p, b), d3 = dot(ab, bp), d4 = dot(ac, bp);
+    if (d3 >= 0 && d4 <= d3) return len(bp);
+    var vc = d1 * d4 - d3 * d2;
+    if (vc <= 0 && d1 >= 0 && d3 <= 0) return len(sub(p, add(a, mul(ab, d1 / (d1 - d3)))));
+    var cp = sub(p, c), d5 = dot(ab, cp), d6 = dot(ac, cp);
+    if (d6 >= 0 && d5 <= d6) return len(cp);
+    var vb = d5 * d2 - d1 * d6;
+    if (vb <= 0 && d2 >= 0 && d6 <= 0) return len(sub(p, add(a, mul(ac, d2 / (d2 - d6)))));
+    var va = d3 * d6 - d5 * d4;
+    if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) return len(sub(p, add(b, mul(sub(c, b), (d4 - d3) / ((d4 - d3) + (d5 - d6))))));
+    var den = 1 / (va + vb + vc);
+    return len(sub(p, add(a, add(mul(ab, vb * den), mul(ac, vc * den)))));
+  }
+  function surfaceNormal(T, p, reach) {          // the distinct faces within `reach` of p, their normals averaged
+    var soup = T.soup, reps = [], t, o;
+    for (t = 0; t < T.n; t++) {
+      o = t * 9;
+      if (Math.min(soup[o], soup[o + 3], soup[o + 6]) > p[0] + reach || Math.max(soup[o], soup[o + 3], soup[o + 6]) < p[0] - reach ||
+          Math.min(soup[o + 1], soup[o + 4], soup[o + 7]) > p[1] + reach || Math.max(soup[o + 1], soup[o + 4], soup[o + 7]) < p[1] - reach ||
+          Math.min(soup[o + 2], soup[o + 5], soup[o + 8]) > p[2] + reach || Math.max(soup[o + 2], soup[o + 5], soup[o + 8]) < p[2] - reach) continue;
+      var n = [T.nrm[t * 3], T.nrm[t * 3 + 1], T.nrm[t * 3 + 2]];
+      if (!(len(n) > 0.5)) continue;
+      if (ptTri(p, [soup[o], soup[o + 1], soup[o + 2]], [soup[o + 3], soup[o + 4], soup[o + 5]], [soup[o + 6], soup[o + 7], soup[o + 8]]) > reach) continue;
+      if (!reps.some(function (r) { return dot(r, n) > DEFAULTS.sameFaceCos; })) reps.push(n);
+    }
+    var sum = [0, 0, 0], sharp = reps.some(function (r, i) { return reps.some(function (q, j) { return j > i && dot(r, q) < DEFAULTS.sharpCos; }); });
+    reps.forEach(function (r) { sum = add(sum, r); });
+    return { n: unit(sum), faces: reps.length, sharp: sharp };
+  }
+  function nearestCorner(p, t) {                 // mm to the nearest corner of the face or edge under p, or null
+    var best = null;
+    function take(q) { var d = len(sub(p, q)); if (best == null || d < best) best = d; }
+    if (t.kind === 'edge') { take(t.a); take(t.b); }
+    else if (t.kind === 'face' && t.face && t.face.loops) {
+      var cosT = Math.cos(rad(DEFAULTS.cornerDeg));
+      t.face.loops.forEach(function (lp) {
+        var pts = lp.pts, m = pts.length;
+        for (var i = 0; i < m; i++) {
+          var d1 = unit(sub(pts[i], pts[(i + m - 1) % m])), d2 = unit(sub(pts[(i + 1) % m], pts[i]));
+          if (d1 && d2 && dot(d1, d2) < cosT) take(pts[i]);
+        }
+      });
+    }
+    return best;
+  }
+  function anchor(T, target, o) {
+    o = o || {};
+    var t = {}, k;
+    for (k in target) if (Object.prototype.hasOwnProperty.call(target, k)) t[k] = target[k];
+    var on = 'on ' + (o.name || 'the piece');
+    if (o.centre && (t.kind === 'face' || t.kind === 'edge')) {
+      t.centre = true;
+      return { target: t, cornerMm: null, text: on + ', ' + (t.kind === 'face' ? 'face centre' : 'edge midpoint') };
+    }
+    delete t.centre;
+    if (t.kind === 'point' && T && t.point && o.cornerPickMm > 0) {
+      // Bridge reads a welded piece's flat faces as plain points: a crease within the pick distance is still an edge or a corner.
+      var pn = surfaceNormal(T, t.point, o.cornerPickMm);
+      if (pn.n && pn.sharp) t.leaveNormal = pn.n;
+    }
+    if (t.kind === 'edge' && T && t.point) {
+      var dEdge = segDist(t.point, t.a, t.b), dCorner = Math.min(len(sub(t.point, t.a)), len(sub(t.point, t.b)));
+      var atCorner = o.cornerPickMm > 0 && dCorner <= o.cornerPickMm;
+      var reach = (atCorner ? Math.max(dEdge, dCorner) : dEdge) + DEFAULTS.cornerReachMm, sn = surfaceNormal(T, t.point, reach);
+      if (sn.n && sn.faces >= 2) t.leaveNormal = sn.n;
+    }
+    var c = nearestCorner(t.point, t);
+    return { target: t, cornerMm: c, text: on + (c == null ? '' : (c < DEFAULTS.atCornerMm ? ' at its corner' : ' at ' + show(c) + ' mm from its corner')) };
+  }
+  function segDist(p, a, b) {
+    var d = sub(b, a), L2 = dot(d, d), s = L2 > 0 ? Math.max(0, Math.min(1, dot(sub(p, a), d) / L2)) : 0;
+    return len(sub(p, lerp(a, b, s)));
   }
 
   /* ------------------------------------------------------------ the shape */
@@ -945,6 +1050,7 @@
     ENDS: ENDS,
     DEFAULTS: DEFAULTS,
     plan: plan,
+    anchor: anchor,
     weld: weld,
     emitRod: emitRod
   };
