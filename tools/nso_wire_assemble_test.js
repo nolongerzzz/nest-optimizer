@@ -6,11 +6,10 @@
    tools/nso_assemble_test.js and tools/nso_assemble_canonical_check.js; what
    this file exists to prove is the part only the page can show:
 
-     1. the flow is loaded and answers app-core's click question. The Attach
-        BUTTON left the page with the Stock card's fields (the card is a shelf
-        of tiles now, app-stock.js), so what is reachable is the engine -
-        nsoAttachAt, with the blank's shape and size passed in - and that the
-        button is gone is asserted rather than assumed;
+     1. the button is there (in the Connect card, under Set / Cancel - the
+        Stock card is a shelf of tiles now), it arms once a shape has been
+        clicked on the shelf, disarms, and app-core asks it about clicks - so
+        the flow is actually reachable without tool-hopping;
      2. one call really does generate + aim + join: the piece count does NOT
         go up (nothing is left on the plate to tidy away), the clicked piece's
         soup is replaced, and it comes back closed;
@@ -93,33 +92,62 @@ const attachAt = (page, id, hit, blank) => page.evaluate(async ([mid, h, ov]) =>
 
 withApp(async (page, logs) => {
 
-  console.log('\n=== 1. the flow is loaded, and the button is gone with the card\'s fields ===');
+  console.log('\n=== 1. the flow is reachable: one button, armed by one click ===');
   {
     /* app-ux.js re-stamps the HUD into the status line at 0 and 200 ms after
        load, so a status read before that is reading the stamp, not the tool. */
     await page.waitForTimeout(400);
-    const w = await page.evaluate(() => ({
-      button: !!document.getElementById('btn-stock-attach'),
-      core: typeof window.NSO_Assemble,
-      app: typeof window.nsoAttachAt,
-      hook: typeof window.nsoAttachTakesClick,
-      hookIdle: typeof window.nsoAttachTakesClick === 'function' ? window.nsoAttachTakesClick({ button: 0 }) : null,
-      armed: !!state.attachArmed,
-      shelf: typeof window.nsoStockShelf === 'object' && typeof window.nsoStockShelf.defaultOptions === 'function',
-      mapping: typeof window.nsoRawFrameOf === 'function' &&
-               typeof window.nsoRawPointFromLocal === 'function' &&
-               typeof window.nsoRawDirFromLocal === 'function',
-      union: typeof window.NSO_unionSoups
-    }));
-    check('the Stock card carries no Attach button - it is tiles only', !w.button, JSON.stringify(w));
+    const w = await page.evaluate(() => {
+      const btn = document.getElementById('btn-stock-attach');
+      const connect = document.getElementById('connect-panel');
+      return {
+        hasButton: !!btn,
+        wired: !!btn && btn.dataset.nsoWired === '1',
+        pressed: btn && btn.getAttribute('aria-pressed'),
+        /* the Connect card: where a thing is made at a point you click on a piece */
+        inConnect: !!(connect && btn && connect.contains(btn)),
+        inStockMenu: !!(document.querySelector('.vp-stock-menu') && btn && document.querySelector('.vp-stock-menu').contains(btn)),
+        core: typeof window.NSO_Assemble,
+        app: typeof window.nsoAttachAt,
+        hook: typeof window.nsoAttachTakesClick,
+        mapping: typeof window.nsoRawFrameOf === 'function' &&
+                 typeof window.nsoRawPointFromLocal === 'function' &&
+                 typeof window.nsoRawDirFromLocal === 'function',
+        union: typeof window.NSO_unionSoups
+      };
+    });
+    check('the Connect card carries an Attach button, unarmed', w.hasButton && w.pressed === 'false', JSON.stringify(w));
+    check('it is wired, it is in the Connect card, and the Stock card has none', w.wired && w.inConnect && !w.inStockMenu);
     check('nso_assemble.js and app-assemble.js are both loaded',
       w.core === 'object' && w.app === 'function');
-    check('it answers app-core\'s click question, and with nothing armed takes no click',
-      w.hook === 'function' && w.hookIdle === false && !w.armed);
-    check('the blank comes from the Stock shelf\'s own default options', w.shelf);
+    check('it answers app-core\'s click question', w.hook === 'function');
     check('app-mask.js exports the raw <-> local mapping rather than a copy living here',
       w.mapping);
     check('app-join.js\'s union is the boolean it will use', w.union === 'function');
+
+    // The button is in the Connect card: unfold it, then press it.
+    await page.click('#menu-connect > summary');
+    await page.click('#btn-connect');
+    await page.click('#btn-stock-attach');
+    check('with no shape clicked on the Stock shelf it does not arm, and says where to click',
+      !(await page.evaluate(() => !!state.attachArmed)) && /Attach needs a shape/.test(await statusText(page)), await statusText(page));
+    await page.evaluate(() => nsoStockShelf.drop('cylinder', { height: 10 }));   // the shelf's drop: a click on the Cylinder tile, small so it stays out of the way
+    await page.click('#btn-stock-attach');
+    const armed = await page.evaluate(() => ({
+      pressed: document.getElementById('btn-stock-attach').getAttribute('aria-pressed'),
+      cls: document.getElementById('btn-stock-attach').classList.contains('is-armed'),
+      flag: !!state.attachArmed,
+      status: document.getElementById('status').textContent
+    }));
+    check('one click arms it and says what to do',
+      armed.pressed === 'true' && armed.cls && armed.flag &&
+      /click the point on a piece/i.test(armed.status), JSON.stringify(armed));
+    await page.click('#btn-stock-attach');
+    check('a second click disarms it', !(await page.evaluate(() => !!state.attachArmed)));
+    await page.click('#btn-stock-attach');
+    await page.keyboard.press('Escape');
+    check('Escape disarms it too', !(await page.evaluate(() => !!state.attachArmed)));
+    await page.click('#btn-connect');           // close the card again
   }
 
   console.log('\n=== 2. generate + aim + join, in one call, on a FLAT face ===');

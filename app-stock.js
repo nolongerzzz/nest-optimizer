@@ -211,6 +211,11 @@
   /* `overrides` is for a drive check that needs a block of a stated size
      (opts as nso_stock.js takes them: height, radius, waste, proportions...)
      through the same path a click takes; a tile passes none. */
+  /* The shape last clicked on the shelf - what Connect's Attach button
+     generates a blank of. Set before anything can refuse the drop: it was
+     clicked. */
+  var lastShape = null;
+
   function drop(shape, overrides) {
     if (typeof NSO_Stock === 'undefined' || !NSO_Stock) {
       say('Stock needs nso_stock.js', true);
@@ -225,6 +230,7 @@
       return { ok: false, reason: 'unknown shape' };
     }
 
+    lastShape = shape;
     var opts = stockOpts(shape);
     if (overrides) for (var ok in overrides) if (Object.prototype.hasOwnProperty.call(overrides, ok)) opts[ok] = overrides[ok];
     /* The machine the Plate card is pointed at, passed in rather than looked
@@ -311,6 +317,7 @@
     drop: drop,
     draw: drawTiles,
     drawn: function () { return drawn; },
+    lastShape: function () { return lastShape; },
     /* What a drop asks nso_stock.js for, minus the machine. app-assemble.js
        sizes its blank from the same figures. */
     defaultOptions: stockOpts,

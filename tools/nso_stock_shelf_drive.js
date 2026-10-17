@@ -164,8 +164,11 @@ withApp(async (page, logs) => {
         oneRow: new Set(tiles.map(b => Math.round(b.getBoundingClientRect().top))).size === 1,
         inside: tiles.every(b => { const r = b.getBoundingClientRect(); return r.right <= window.innerWidth && r.left >= 0; }),
         oldIds: ['sel-stock-shape', 'inp-stock-height', 'inp-stock-radius', 'inp-stock-wall', 'inp-stock-nozzle', 'inp-stock-waste',
-                 'inp-stock-prop', 'chk-stock-match', 'chk-stock-oversize', 'btn-stock-make', 'btn-stock-attach',
+                 'inp-stock-prop', 'chk-stock-match', 'chk-stock-oversize', 'btn-stock-make',
                  'row-stock-prop', 'lab-stock-prop'].filter(id => document.getElementById(id)),
+        /* Attach moved to the Connect card, keeping its id: it is on the page, but not on this card. */
+        attachElsewhere: !!document.getElementById('btn-stock-attach') && !menu.contains(document.getElementById('btn-stock-attach')) &&
+                         !!document.getElementById('connect-panel').contains(document.getElementById('btn-stock-attach')),
         redraw: nsoStockShelf.draw()
       };
     });
@@ -187,6 +190,7 @@ withApp(async (page, logs) => {
     check('the Stock card has no field, label, select, picture or line of text - tiles only',
       card.other.length === 0, card.other.join(', ') || 'none');
     check('none of the old card\'s ids is on the page', card.oldIds.length === 0, card.oldIds.map(e => e.id).join(', ') || 'none');
+    check('...and Attach, which was on it, is in the Connect card now (same id), not on this one', card.attachElsewhere);
   }
 
   console.log('\n=== 2. one click: the piece is on the plate, at its default size, selected ===');

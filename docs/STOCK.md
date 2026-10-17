@@ -522,7 +522,7 @@ cannot hold is refused before anything is added.
 | Match selected piece | gone — Scale has no "take the proportions of another piece" |
 | Allow oversize block | gone — a drop is refused if the default block does not fit the plate; Scale's *fits* line and Fit to plate report a piece that grows past it |
 | live session (the card adjusts the piece it made) | Scale's live fields adjust the dropped piece in place — `npm run stock:live` drives it |
-| **Attach** button | gone from the page with the fields it read; the flow (`nsoAttachAt`) is intact in `app-assemble.js` |
+| **Attach** button | moved to the **Connect** card, under Set / Cancel, same id (`btn-stock-attach`): it generates a blank of the shape **last clicked on the shelf**, at its default size, and attaches it where you click on a piece (`docs/ASSEMBLE.md`) |
 
 The new piece arrives through `addModelFromZUpGeometry` (`app-core.js`), the
 one ingest path an imported STL takes, so it has `rawTris` exactly as a loaded

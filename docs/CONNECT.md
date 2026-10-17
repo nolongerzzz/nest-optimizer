@@ -72,3 +72,12 @@ its own width; a taper that would close to a point inside a piece.
   non-manifold. Stations fix it.
 - `NSO_PathSweep.sweep` takes a convex profile with the origin inside, so the
   Tube is an outer rod plus a reversed-wound inner rod, not one annulus sweep.
+
+## Attach shares the card
+
+**Attach** (`app-assemble.js`, `docs/ASSEMBLE.md`) sits in its own row under
+Set / Cancel, id `btn-stock-attach`. Armed, it generates a blank of the shape
+last clicked on the Stock shelf and attaches it where you click on a piece.
+While it is armed Connect's pointer handlers stand down, so the click is not
+also an anchor; arming drops any anchors; Escape, Cancel and closing the card
+turn it off. `tools/nso_connect_drive.js` §8 drives it.

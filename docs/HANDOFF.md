@@ -5731,7 +5731,8 @@ Three things to keep:
 Write-up: "The shelf" in `docs/STOCK.md`. Files: `app-stock.js` (rewritten),
 `index.html` (the card), `styles.css`, `app-assemble.js` (reads no card any
 more), `tools/nso_stock_shelf_drive.js` (`npm run stock:shelf`),
-`tools/nso_page_manifest_test.js` (gate 4: the Stock card is tiles only).
+`tools/nso_page_manifest_test.js` (gate 4: the Stock card is tiles only),
+`app-connect.js` (Attach's button and its stand-down rules).
 `stock`, `stock:live`, `wire:stock`, `wire:assemble`, `wire:integration`,
 `paint:scope`, `shell:v3` and the scale / ring / mold drive checks were updated
 for the ids that went.
@@ -5748,9 +5749,11 @@ Four things to keep:
 - **Tiles are painted from `NSO_Stock.make`, once, on the card's first open.**
   Nothing is an image file. The ellipsoid drops at h/d 1.5 - at the module's
   default (1) it is a sphere and the shelf would hold one piece twice.
-- **Attach has no button.** It read the card's fields. `nsoAttachAt(placed,
-  point, normal, blank)` works as before with the blank passed in; the page
-  control is waiting for a home.
+- **Attach is in the Connect card**, a row under Set / Cancel, id
+  `btn-stock-attach` unchanged. It blanks the shape **last clicked on the
+  shelf** (`nsoStockShelf.lastShape()`; none yet = it refuses to arm). Escape,
+  Cancel and closing the card disarm it; while armed Connect's picks stand
+  down. `nsoAttachAt(placed, point, normal, blank)` still takes a stated blank.
 - **The numbering is a running one across shapes** - `box 1`, `cylinder 2` -
   taken from the highest `<shape> <n>` among the model list, so Undo hands a
   number back and Clear plate (which leaves the model list) does not.

@@ -731,6 +731,10 @@
                           title="Build the connector the ghost shows. One Undo puts everything back.">Set</button>
                   <button id="btn-connect-cancel" class="btn btn-secondary" type="button" title="Drop the anchors; with none picked, close the card.">Cancel</button>
                 </div>
+                <div class="vp-row vp-row-full">
+                  <button id="btn-stock-attach" class="btn btn-secondary btn-attach" type="button" aria-pressed="false"
+                          title="Generate a blank of the shape last clicked on the Stock shelf (Gen+ > Stock), at its default size, and attach it where you click on a piece: straight-line auto-aim works out which way it leaves that face, seats it deep enough for the whole rim to bite, and unions the two into one solid. Nothing is left on the plate to tidy up. Escape or a second click stops. See docs/ASSEMBLE.md.">Attach</button>
+                </div>
               </div>
             </div>
           </details>
@@ -1774,7 +1778,7 @@
        app-bridge.js (the pick and the overlay it reuses), nso_path_sweep.js
        and nso_assemble.js. See docs/CONNECT.md. -->
   <script src="nso_connect.js?v=connect1"></script>
-  <script src="app-connect.js?v=connect1"></script>
+  <script src="app-connect.js?v=connect2"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=polish2"></script>
@@ -1786,8 +1790,8 @@
   <script src="app-pull.js?v=pull1"></script>
   <script src="app-wheel.js?v=wheel3"></script>
   <script src="app-fit.js?v=wheel4"></script>
-  <script src="app-stock.js?v=shelf1"></script>
-  <script src="app-assemble.js?v=asm3"></script>
+  <script src="app-stock.js?v=shelf2"></script>
+  <script src="app-assemble.js?v=asm4"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=helpmrg1"></script>
   <script src="app-center-lock.js?v=pull1"></script>
