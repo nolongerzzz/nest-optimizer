@@ -54,6 +54,18 @@ The card says where, per anchor and in the readout: `Anchor A: on box_closed at
 (the distance is to the nearest corner of the face or edge; none on a curved
 surface: `on ball`).
 
+**The leave-angle guard** (the line must leave a surface at least 10° off it) is
+asked of the faces, not of the averaged normal. On a flat face or a smooth surface
+it is the one normal, as always. At an edge or a corner it is asked of the
+adjoining faces: where they bend away from one another (a box's corner, convex)
+any line out of the solid goes - at least 10° off the face it leaves nearest - so a
+level connector between two top corners is valid and welds; where they close in on
+the line (a U's or an L's inside corner, concave) it must clear every one of them.
+The averaged normal still orients a Ribbon, and a Foot pad or a Flat cut sits on the
+face the line leaves best. A String, Tube or Tapered anchored at an edge or corner
+has its section turned half a facet, so no ring vertex lies in a face plane through
+the axis (a level line would otherwise meet the boolean exactly there).
+
 **Shift** held while clicking keeps the old anchor, for the rare time it is
 wanted: a face's centroid (leaving along its normal), an edge's midpoint (leaving
 along the bisector of its two faces; a Ribbon is still held to twice that edge's

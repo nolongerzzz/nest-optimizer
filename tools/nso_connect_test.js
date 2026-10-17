@@ -733,6 +733,53 @@ function loopExtent(lp, dir) {
       }
     }
 
+    // ---- the leave-angle guard asks the FACES, not the averaged normal
+    {
+      const lv = [
+        ['straight across: (20,0,10) -> (40,0,10), along +X', [20, 0, 10], [40, 0, 10]],
+        ['across and over: (20,20,10) -> (40,0,10), 45° to the edges', [20, 20, 10], [40, 0, 10]],
+        ['across and back: (20,0,10) -> (40,20,10)', [20, 0, 10], [40, 20, 10]]
+      ];
+      for (const [label, pa, pb] of lv) {
+        const t0 = Date.now();
+        const la = exact(TB, 0, hitAt(BC, pa, [0, 0, 1]), { name: 'box_closed' }), lb = exact(TB, 1, hitAt(BO, pb, [0, 0, 1]), { name: 'box_open' });
+        const p = CN.plan(PB, la, lb, { shape: 'string', result: 'weld' });
+        check('LEVEL corner to corner, ' + label + ': plans (a convex corner is left by any line out of the solid, not by the averaged normal)',
+          la.target.kind === 'edge' && lb.target.kind === 'edge' && la.target.faceRule === 'any' && lb.target.faceRule === 'any' && p.ok, p.ok ? p.text : p.reason);
+        if (!p.ok) continue;
+        check('...the line really is level, and its ends are the corners (≤ 0.1 mm)', Math.abs(p.axis[2]) < 1e-9 && near(p.anchors[0].p, pa, 0.1) && near(p.anchors[1].p, pb, 0.1), 'axis z ' + p.axis[2].toExponential(1));
+        const r = await CN.weld(p, { union });
+        const sh = r.ok ? shells(r.soup) : [];
+        check('...WELDS: the two boxes and the string are ONE closed solid', r.ok && sh.length === 1 && sh[0].volume > 0 && r.kernel.open === 0 && r.kernel.nm === 0, r.ok ? sh.length + ' shell(s), ' + (r.soup.length / 9) + ' triangles' : r.reason);
+        if (r.ok) canonical('level corners ' + lv.indexOf(lv.find(x => x[0] === label)), r.soup);
+        if (label.startsWith('straight')) TABLE.push(['two boxes, LEVEL top corner to corner · string weld', '24 → ' + (r.soup.length / 9), 'one solid', 'level, ends at the corners', p.lengthMm.toFixed(3) + ' mm', ms(t0)]);
+        const sep = CN.plan(PB, la, lb, { shape: 'string', result: 'separate' });
+        check('...and Keep separate plans it too', sep.ok, sep.reason || sep.text);
+      }
+      // still refused: along the corner's own edge, and into the solid
+      const cornerA = () => exact(TB, 0, hitAt(BC, [20, 0, 10], [0, 0, 1]), { name: 'box_closed' });
+      const alongEdge = CN.plan(PB, cornerA(), exact(TB, 0, hitAt(BC, [0, 0, 10], [0, 0, 1]), {}), { shape: 'string' });
+      check('a line running back along the corner\'s own top edge is refused - the face it leaves best is 0° off, not 10°', !alongEdge.ok && /into the piece|along its surface/.test(alongEdge.reason), alongEdge.reason || alongEdge.text);
+      const intoBox = CN.plan(PB, cornerA(), exact(TB, 0, hitAt(BC, [0, 20, 0], [0, 0, -1]), {}), { shape: 'string' });
+      check('...and one that goes into the solid (every adjoining face has it behind it) is refused in words', !intoBox.ok && /into the piece/.test(intoBox.reason), intoBox.reason || intoBox.text);
+      // flat faces keep the 10° rule: the same face anchors, the line 5° off the face
+      const fa = exact(TB, 0, hitAt(BC, [20, 6, 4], [1, 0, 0]), {}), fb = exact(TB, 1, hitAt(BO, [40, 6, 4], [-1, 0, 0]), {});
+      const farB = { piece: 1, target: Object.assign({}, fb.target, { point: [40, 6 + 20 / Math.tan(5 * Math.PI / 180), 4] }) };
+      const flat5 = CN.plan(PB, fa, farB, { shape: 'string', result: 'separate' });
+      check('flat faces keep the 10° rule: a face anchor with the line 5° off the face is refused ("along its surface")', fa.target.kind === 'face' && !flat5.ok && /along its surface/.test(flat5.reason), flat5.reason || flat5.text);
+
+      // concave: the inside corner of an L. The faces close in on the line, so it must clear EVERY one of them.
+      const Lp = (await csg.NSO_unionSoups(L.box(0, 0, 0, 30, 10, 10), L.box(0, 0, 0, 10, 30, 10))).soup;
+      const Cb = L.box(30, 10, 0, 40, 20, 10), Db = L.box(30, 30, 0, 40, 40, 10);
+      const PL = [Lp, Cb, Db], TL = PL.map(x => BR.index(x));
+      const ia = exact(TL, 0, hitAt(Lp, [10, 10, 5], [0, 1, 0]), { name: 'L' });
+      check('an L\'s inside corner is an edge whose faces close in on the line: the rule is "every face"', ia.target.kind === 'edge' && ia.target.faceRule === 'all', ia.target.kind + ' ' + ia.target.faceRule + ' ' + (ia.target.leaveNormal || []).map(x => x.toFixed(3)));
+      const ib = exact(TL, 1, hitAt(Cb, [30, 12, 5], [-1, 0, 0]), { name: 'C' }), id2 = exact(TL, 2, hitAt(Db, [30, 32, 5], [-1, 0, 0]), { name: 'D' });
+      const pAlong = CN.plan(PL, ia, ib, { shape: 'string', result: 'separate' }), pDiag = CN.plan(PL, ia, id2, { shape: 'string', result: 'separate' });
+      check('...a line along one of them (6° off the +Y face) is refused in words - a convex corner would have let it go', !pAlong.ok && /along its surface/.test(pAlong.reason), pAlong.reason || pAlong.text);
+      check('...a diagonal clear of both (≥ 40° off each) plans', pDiag.ok, pDiag.reason || pDiag.text);
+    }
+
     // ---- a pointer never lands on the vertex: within the pick distance of a corner, the corner's three faces
     const nc = [20, 0.4, 10];                                  // 0.4 mm along the top edge from the corner (20,0,10)
     const loose = exact(TB, 0, hitAt(BC, nc, [0, 0, 1]), { name: 'box_closed' }), snug = exact(TB, 0, hitAt(BC, nc, [0, 0, 1]), { name: 'box_closed', cornerPickMm: 1 });

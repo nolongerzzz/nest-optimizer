@@ -24,6 +24,15 @@
    centroid, an edge's midpoint (its full length for a Ribbon's width cap),
    leaving along the face's normal / the bisector of the edge's two faces.
 
+   THE LEAVE-ANGLE GUARD (the line must leave a surface at least 10 degrees off
+   it) is asked of the faces, not of the averaged normal. On a flat face or a
+   smooth surface that is the one normal. At an edge or a corner it is asked of
+   the adjoining faces: where they bend away from one another (a box's corner,
+   convex) the line may go any way that is out of the solid - at least 10 degrees
+   off the face it leaves nearest, so a level line between two top corners is
+   valid; where they close in on it (a U's inside corner, concave) it must clear
+   every one of them. The averaged normal still orients a Ribbon and a pad.
+
    SHAPES.
      string    Ø                       a round rod
      ribbon    width x thickness       a flat strap; its flat face is
@@ -200,11 +209,13 @@
   /* ------------------------------------------------------------- anchors */
   function anchorOf(end) {
     var t = end.target, k = t.kind, exact = !t.centre && !!t.point, ln = t.leaveNormal ? unit(t.leaveNormal) : null;
-    if (k === 'point') return { kind: k, p: t.point.slice(), n: ln || unit(t.normal), edge: null };
+    // the faces that meet at the point, for the leave-angle guard (none: the one normal)
+    var fs = exact && t.faceNormals && t.faceNormals.length > 1 ? t.faceNormals.map(unit) : null, rule = t.faceRule === 'any' ? 'any' : 'all';
+    if (k === 'point') return { kind: k, p: t.point.slice(), n: ln || unit(t.normal), edge: null, faces: fs, rule: rule };
     if (k === 'face') return { kind: k, p: (exact ? t.point : (t.centroid || t.point)).slice(), n: ln || unit(t.normal || t.face.normal), edge: null };
     if (k === 'edge') {
       var n = ln || unit(add(t.faceNormal || [0, 0, 1], t.acrossNormal || t.faceNormal || [0, 0, 1])) || unit(t.faceNormal);
-      return { kind: k, p: exact ? t.point.slice() : lerp(t.a, t.b, 0.5), n: n,
+      return { kind: k, p: exact ? t.point.slice() : lerp(t.a, t.b, 0.5), n: n, faces: fs, rule: rule,
                edge: { a: t.a, b: t.b, lengthMm: t.lengthMm != null ? t.lengthMm : len(sub(t.b, t.a)) } };
     }
     return null;
@@ -252,11 +263,24 @@
       var n = [T.nrm[t * 3], T.nrm[t * 3 + 1], T.nrm[t * 3 + 2]];
       if (!(len(n) > 0.5)) continue;
       if (ptTri(p, [soup[o], soup[o + 1], soup[o + 2]], [soup[o + 3], soup[o + 4], soup[o + 5]], [soup[o + 6], soup[o + 7], soup[o + 8]]) > reach) continue;
-      if (!reps.some(function (r) { return dot(r, n) > DEFAULTS.sameFaceCos; })) reps.push(n);
+      if (!reps.some(function (r) { return dot(r.n, n) > DEFAULTS.sameFaceCos; })) {
+        reps.push({ n: n, v: [[soup[o], soup[o + 1], soup[o + 2]], [soup[o + 3], soup[o + 4], soup[o + 5]], [soup[o + 6], soup[o + 7], soup[o + 8]]] });
+      }
     }
-    var sum = [0, 0, 0], sharp = reps.some(function (r, i) { return reps.some(function (q, j) { return j > i && dot(r, q) < DEFAULTS.sharpCos; }); });
-    reps.forEach(function (r) { sum = add(sum, r); });
-    return { n: unit(sum), faces: reps.length, sharp: sharp };
+    var sum = [0, 0, 0], sharp = reps.some(function (r, i) { return reps.some(function (q, j) { return j > i && dot(r.n, q.n) < DEFAULTS.sharpCos; }); });
+    reps.forEach(function (r) { sum = add(sum, r.n); });
+    // Convex where every face lies behind the plane of each of the others: the vertex of a face farthest off another's plane
+    // is on its back. Anything else (a face in front of one, a mix) is a way in: the line must clear them all.
+    var front = false;
+    reps.forEach(function (ri, i) {
+      reps.forEach(function (rj, j) {
+        if (i === j) return;
+        var far = 0;
+        ri.v.forEach(function (q) { var d = dot(rj.n, sub(q, rj.v[0])); if (Math.abs(d) > Math.abs(far)) far = d; });
+        if (far > 1e-6) front = true;
+      });
+    });
+    return { n: unit(sum), faces: reps.length, sharp: sharp, normals: reps.map(function (r) { return r.n; }), convex: reps.length > 1 && !front };
   }
   function nearestCorner(p, t) {                 // mm to the nearest corner of the face or edge under p, or null
     var best = null;
@@ -287,16 +311,31 @@
     if (t.kind === 'point' && T && t.point && o.cornerPickMm > 0) {
       // Bridge reads a welded piece's flat faces as plain points: a crease within the pick distance is still an edge or a corner.
       var pn = surfaceNormal(T, t.point, o.cornerPickMm);
-      if (pn.n && pn.sharp) t.leaveNormal = pn.n;
+      if (pn.n && pn.sharp) { t.leaveNormal = pn.n; t.faceNormals = pn.normals; t.faceRule = pn.convex ? 'any' : 'all'; }
     }
     if (t.kind === 'edge' && T && t.point) {
       var dEdge = segDist(t.point, t.a, t.b), dCorner = Math.min(len(sub(t.point, t.a)), len(sub(t.point, t.b)));
       var atCorner = o.cornerPickMm > 0 && dCorner <= o.cornerPickMm;
       var reach = (atCorner ? Math.max(dEdge, dCorner) : dEdge) + DEFAULTS.cornerReachMm, sn = surfaceNormal(T, t.point, reach);
-      if (sn.n && sn.faces >= 2) t.leaveNormal = sn.n;
+      if (sn.n && sn.faces >= 2) { t.leaveNormal = sn.n; t.faceNormals = sn.normals; t.faceRule = sn.convex ? 'any' : 'all'; }
     }
     var c = nearestCorner(t.point, t);
     return { target: t, cornerMm: c, text: on + (c == null ? '' : (c < DEFAULTS.atCornerMm ? ' at its corner' : ' at ' + show(c) + ' mm from its corner')) };
+  }
+  /* The cosine of the angle the line makes with the surface's normal as it leaves the anchor (d points away from the
+     piece): bigger is more upright. At an edge or corner it is asked of each adjoining face - the one it leaves best
+     (convex) or worst (concave); see the header. */
+  function leaveCos(A, d) {
+    if (!A.faces) return dot(d, A.n);
+    var cs = A.faces.map(function (n) { return dot(d, n); });
+    return A.rule === 'any' ? Math.max.apply(null, cs) : Math.min.apply(null, cs);
+  }
+  function withEndNormal(A, d) {
+    var o = {}, k, best = null;
+    for (k in A) if (Object.prototype.hasOwnProperty.call(A, k)) o[k] = A[k];
+    if (A.faces) A.faces.forEach(function (n) { if (best == null || dot(d, n) > dot(d, best)) best = n; });
+    o.nEnd = best || A.n;
+    return o;
   }
   function segDist(p, a, b) {
     var d = sub(b, a), L2 = dot(d, d), s = L2 > 0 ? Math.max(0, Math.min(1, dot(sub(p, a), d) / L2)) : 0;
@@ -664,7 +703,7 @@
     var cap = 2 * R * Math.sin(alpha / 4);                    // the chord of a quarter of the arc
     var e = Math.min(DEFAULTS.endStraightMm, cap);
     for (var it = 0; it < 8; it++) {
-      var cosA = dot(unit(sub(at(arcOf(e)), A.p)), A.n), cosB = -dot(unit(sub(B.p, at(arcLen - arcOf(e)))), B.n);
+      var cosA = leaveCos(A, unit(sub(at(arcOf(e)), A.p))), cosB = leaveCos(B, unit(sub(at(arcLen - arcOf(e)), B.p)));
       var tilt = function (c) { return Math.tan(Math.acos(clamp1(Math.max(c, 1e-6)))); };
       var need = Math.min(cap, Math.max(DEFAULTS.endStraightMm, reach * Math.max(tilt(cosA), tilt(cosB)) + 1));
       if (need <= e + 1e-9) break;
@@ -814,7 +853,7 @@
       });
     }
     var Lp = path.len;
-    var cA = dot(path.tA, A.n), cB = -dot(path.tB, B.n);
+    var cA = leaveCos(A, path.tA), cB = leaveCos(B, mul(path.tB, -1));
     if (!(cA > leave) || !(cB > leave)) {
       var which = !(cA > leave) ? 'first' : 'second', wc = which === 'first' ? cA : cB;
       if (path.straight) {
@@ -826,6 +865,14 @@
     }
     if (path.ok === false) return refuse(shape, path.reason);
     var fr = frameFor(shape, u, A.n, B.n);
+    // At an edge or corner the line may leave level with a face, so a ring vertex on that face's plane (through the axis)
+    // would meet the boolean exactly: turn the section half a facet, and none does.
+    if ((A.faces || B.faces) && shape !== 'ribbon') {
+      var half = Math.PI / sidesFor(spec.rMax), ch = Math.cos(half), sh = Math.sin(half), e1h = add(mul(fr.e1, ch), mul(fr.e2, sh));
+      fr.e2 = sub(mul(fr.e2, ch), mul(fr.e1, sh)); fr.e1 = e1h;
+    }
+    // The normal the ends sit on: the face the line leaves best (at an edge or corner), else the one normal.
+    A = withEndNormal(A, path.tA); B = withEndNormal(B, mul(path.tB, -1));
 
     // The frame the section carries along the curve, and what it is at each end (the rims are measured in it).
     var fa = fr, fb = fr, up = fr.e1, bf = null;
@@ -877,8 +924,8 @@
     if (!sw.ok) return refuse(shape, path.straight ? sw.reason : 'the connector will not sweep round that curve (' + sw.reason + ') - use less sag, or a slimmer connector');
     // A pad's connector ends inside the disc (mid-thickness), clear of the disc's own faces; a ball's runs to its centre.
     var cut = null;
-    if (flush) cut = { a: [A.p, A.n], b: [B.p, B.n] };
-    else if (ends === 'pad') cut = { a: [add(A.p, mul(A.n, padT / 2)), A.n], b: [add(B.p, mul(B.n, padT / 2)), B.n] };
+    if (flush) cut = { a: [A.p, A.nEnd], b: [B.p, B.nEnd] };
+    else if (ends === 'pad') cut = { a: [add(A.p, mul(A.nEnd, padT / 2)), A.nEnd], b: [add(B.p, mul(B.nEnd, padT / 2)), B.nEnd] };
     var em = emitRod(sw, DEFAULTS.stationMm, cut);
     if (!em) return refuse(shape, 'the ends could not be cut flush with the surfaces - the connector runs too nearly along one of them');
     var web = em.tris;
@@ -907,12 +954,12 @@
       var skirt = [0, 0], rp = [DEFAULTS.padScale * spec.wA / 2, DEFAULTS.padScale * spec.wB / 2];
       if (result === 'weld') {
         // Welded, the disc's foot runs down into the piece by its own rim gap + sink, as a connector's end would.
-        var pg = [NSO_Assemble.rootGap(pieces[a.piece], ringAbout(A.p, A.n, rp[0], 0), ropt),
-                  NSO_Assemble.rootGap(pieces[b.piece], ringAbout(B.p, B.n, rp[1], 0), ropt)];
+        var pg = [NSO_Assemble.rootGap(pieces[a.piece], ringAbout(A.p, A.nEnd, rp[0], 0), ropt),
+                  NSO_Assemble.rootGap(pieces[b.piece], ringAbout(B.p, B.nEnd, rp[1], 0), ropt)];
         if (!pg[0].ok || !pg[1].ok) return refuse(shape, (pg[0].ok ? pg[1] : pg[0]).reason);
         skirt = [pg[0].gapMm + sink, pg[1].gapMm + sink];
       }
-      tipsFor = function (ph) { return [discSoup(A.p, A.n, rp[0], -skirt[0], padT, ph), discSoup(B.p, B.n, rp[1], -skirt[1], padT, ph)]; };
+      tipsFor = function (ph) { return [discSoup(A.p, A.nEnd, rp[0], -skirt[0], padT, ph), discSoup(B.p, B.nEnd, rp[1], -skirt[1], padT, ph)]; };
     } else if (ends === 'ball') {
       tipsFor = function (ph) { return [ballSoup(A.p, DEFAULTS.ballScale * spec.wA / 2, ph * 0.09), ballSoup(B.p, DEFAULTS.ballScale * spec.wB / 2, ph * 0.09)]; };
     }
