@@ -1731,7 +1731,7 @@
   <script src="nso_raster_lines.js?v=raster1"></script>
   <script src="nso_relief.js?v=relief2"></script>
   <!-- Every tool helper goes in and out of the scene through this registry. -->
-  <script src="nso-helpers.js?v=overlap1"></script>
+  <script src="nso-helpers.js?v=overlap2"></script>
   <script src="app-core.js?v=leashb7"></script>
 
 
@@ -1747,7 +1747,7 @@
   <script src="app-mirror.js?v=mirror2"></script>
   <!-- Crop, stage 1: box -> remove slab -> seal the joint. After app-cut.js
        (rawCutOpen, rawFlatCapLoop, mapPlaneToRaw) and app-sculpt.js (commit). -->
-  <script src="app-crop.js?v=overlap1"></script>
+  <script src="app-crop.js?v=overlap2"></script>
   <script src="app-fatten.js?v=box2"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
@@ -1773,14 +1773,14 @@
        nso_assemble.js (the seat), nso_path_sweep.js (the rod) and
        nso_section.js (the face's shape). See docs/BRIDGE.md. -->
   <script src="nso_bridge.js?v=bridge2"></script>
-  <script src="app-bridge.js?v=overlap1"></script>
+  <script src="app-bridge.js?v=overlap2"></script>
   <script src="nso_close.js?v=close1"></script>
   <script src="app-close.js?v=close1"></script>
   <!-- Connect: the builder on Bridge's pick. After nso_bridge.js and
        app-bridge.js (the pick and the overlay it reuses), nso_path_sweep.js
        and nso_assemble.js. See docs/CONNECT.md. -->
   <script src="nso_connect.js?v=connect1"></script>
-  <script src="app-connect.js?v=overlap1"></script>
+  <script src="app-connect.js?v=overlap2"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=polish2"></script>
@@ -1793,13 +1793,13 @@
   <script src="app-wheel.js?v=wheel3"></script>
   <script src="app-fit.js?v=wheel4"></script>
   <script src="app-stock.js?v=shapes1"></script>
-  <script src="app-assemble.js?v=asm2"></script>
+  <script src="app-assemble.js?v=overlap2"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
-  <script src="app-join.js?v=overlap1"></script>
+  <script src="app-join.js?v=overlap2"></script>
   <script src="app-center-lock.js?v=pull1"></script>
   <script src="app-oversize-washer.js?v=oversize2"></script>
   <script src="app-join-triple.js?v=triple1"></script>
-  <script src="app-carve.js?v=pull1"></script>
+  <script src="app-carve.js?v=overlap2"></script>
   <script src="app-hollow.js?v=hollow1"></script>
   <script src="app-foam.js?v=helpers1"></script>
   <script src="app-seat-surface.js?v=grabdrop1"></script>
@@ -1848,7 +1848,7 @@
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
        and app-join.js, whose functions it calls. See docs/DETACH.md. -->
   <script src="nso_detach.js?v=detach1"></script>
-  <script src="app-detach.js?v=detach1"></script>
+  <script src="app-detach.js?v=overlap2"></script>
   <!-- G-scope supports: overhang markers, point-click generation, per-support
        edit / remove. After app-microscope.js, whose hooks it uses, and after
        nso_support_aim.js / nso_support_tree.js / app-join.js, whose

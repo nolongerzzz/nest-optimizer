@@ -15,9 +15,11 @@
    3. each verb, box_closed refused in the one sentence and nothing changed,
       the cleaned box accepted:
         Bridge (sheet), Connect (weld), Join, Subtract B from A,
-        Crop Circle, Crop Piece
-      Close and Extract bit are not in the list: neither calls the kernel
-      (nso_close.js closes with its own lid; Extract bit reads a voxel grid). */
+        Crop Circle, Crop Piece, Extract bit, Carve, Crop Move,
+        Attach, Detach, Reattach
+      Close and Supports are not in the list: Close fills its opening with its
+      own lid, no kernel; supports are shells of their own and never union into
+      the piece. */
 
 const fs = require('fs');
 const os = require('os');
@@ -278,6 +280,97 @@ function installHelpers() {
         } else {
           check('the cleaned box is not refused for its shells (Crop ' + mode + ')', !mentions(st) && !mentions(r.reason), st);
         }
+      }
+    }
+
+    /* One piece of the box on the plate, selected. */
+    async function oneBox(file) {
+      await page.evaluate(() => window.__ov.clear());
+      const id = await loadSTL(page, file);
+      await page.evaluate(id => { state.editId = id; state.selectedIndex = state.placed.findIndex(p => p && p.sourceId === id); }, id);
+      return id;
+    }
+    const sameCounts = async (f) => { const b = JSON.stringify(await counts()); const r = await f(); return { r, same: JSON.stringify(await counts()) === b }; };
+
+    console.log('\n=== 3f. Extract bit ===');
+    for (const [label, file] of [['box_closed', BAD], ['the cleaned box', CLEAN]]) {
+      const id = await oneBox(file);
+      const { same } = await sameCounts(() => page.evaluate(() => extractBitFromSelected()));
+      const st = await page.evaluate(() => window.__ov.status());
+      console.log('  [' + label + '] status:', st);
+      if (label === 'box_closed') {
+        check('Extract bit refuses in the one sentence, nothing added', /^Extract refused - box_closed has overlapping shells \(74 piercing pairs\); clean it with tools\/nso_fixture_union first - piece unchanged$/.test(st) && same, st);
+      } else {
+        check('the cleaned box is accepted: the bit is found in its cavity', /^Extract bit ok/.test(st), st);
+      }
+      void id;
+    }
+
+    console.log('\n=== 3g. Carve ===');
+    for (const [label, file] of [['box_closed', BAD], ['the cleaned box', CLEAN]]) {
+      const id = await oneBox(file);
+      const top = await page.evaluate(id => { const b = window.__ov.bounds(window.__ov.up(id)); return [(b.lo[0] + b.hi[0]) / 2, b.hi[1] - 6, b.hi[2]]; }, id);
+      // world is Y up: the top of the lid, a little in from the +Y rim
+      const wp = await page.evaluate(([id, top]) => [top[0], top[2], -top[1]], [id, top]);
+      const { r, same } = await sameCounts(() => page.evaluate(([id, wp]) => nsoCarveAtPoint(id, wp), [id, wp]));
+      const st = await page.evaluate(() => window.__ov.status());
+      console.log('  [' + label + '] ' + JSON.stringify({ ok: r && r.ok, reason: r && r.reason }).slice(0, 200));
+      if (label === 'box_closed') {
+        check('Carve refuses in the one sentence, the piece unchanged', r && r.ok === false && SENTENCE.test(r.reason) && same && /^Carve refused - box_closed has overlapping shells/.test(st), st);
+      } else {
+        check('the cleaned box is not refused for its shells (Carve)', !mentions(st) && !mentions(r && r.reason), st);
+      }
+    }
+
+    console.log('\n=== 3h. Crop Move ===');
+    for (const [label, file] of [['box_closed', BAD], ['the cleaned box', CLEAN]]) {
+      const id = await oneBox(file);
+      await page.evaluate(() => { NSO_cropState().move = [0, 0, 5]; });
+      const { r, same } = await sameCounts(() => page.evaluate(() => NSO_cropMoveSelectedModel()));
+      const st = await page.evaluate(() => window.__ov.status());
+      console.log('  [' + label + '] status:', st);
+      if (label === 'box_closed') {
+        check('Crop Move refuses in the one sentence, the piece unchanged', r.ok === false && SENTENCE.test(r.reason) && same && /^Move refused - piece unchanged \(box_closed has overlapping shells/.test(st), st);
+      } else {
+        check('the cleaned box is not refused for its shells (Crop Move)', !mentions(st) && !mentions(r.reason), st);
+      }
+      void id;
+    }
+
+    console.log('\n=== 3i. Attach, Detach, Reattach ===');
+    for (const [label, file] of [['box_closed', BAD], ['the cleaned box', CLEAN]]) {
+      const id = await oneBox(file);
+      const placed = () => window.__ov.placed(id);
+      // a real point on the lid and the face normal there, found the way the click finds them
+      const hit = await page.evaluate(id => {
+        const p = window.__ov.placed(id); p.mesh.updateMatrixWorld(true);
+        const box = new THREE.Box3().setFromObject(p.mesh), c = box.getCenter(new THREE.Vector3()), r = box.getSize(new THREE.Vector3()).length();
+        const hits = new THREE.Raycaster(c.clone().add(new THREE.Vector3(0, r * 2, 0)), new THREE.Vector3(0, -1, 0)).intersectObject(p.mesh, true).filter(h => h.face);
+        return { point: hits[0].point.toArray(), normal: hits[0].face.normal.toArray() };
+      }, id);
+      await page.evaluate(() => {
+        const set = (i, v) => { const el = document.getElementById(i); if (el) { if (el.type === 'checkbox') el.checked = !!v; else el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); } };
+        set('sel-stock-shape', 'cylinder'); set('inp-stock-height', 16); set('inp-stock-radius', 4); set('inp-stock-wall', 3);
+        set('inp-stock-waste', 0); set('inp-stock-prop', 3); set('chk-stock-match', false); set('chk-stock-oversize', false);
+      });
+      const a = await sameCounts(() => page.evaluate(([id, h]) => nsoAttachAt(window.__ov.placed(id), h.point, h.normal, null), [id, hit]));
+      const d = await sameCounts(() => page.evaluate(id => nsoDetachRun(id), id));
+      void placed;
+      // Reattach needs a detached flange on the plate: detach one off the clamp bar, then aim it at the box
+      const v9 = await loadSTL(page, path.join(ROOT, 'library', 'v9_mirror_factory.stl'));
+      const det = await page.evaluate(v9 => nsoDetachRun(v9), v9);
+      const re = await sameCounts(() => page.evaluate(([id, h]) => nsoReattachAt(window.__ov.placed(id), h.point, h.normal, {}), [id, hit]));
+      console.log('  [' + label + '] attach: ' + String(a.r.reason).slice(0, 110) + ' | detach: ' + String(d.r.reason).slice(0, 110) +
+        ' | flange off the clamp bar: ' + det.ok + ' | reattach: ' + String(re.r.reason).slice(0, 110));
+      if (label === 'box_closed') {
+        check('Attach refuses in the one sentence, the piece unchanged', a.r.ok === false && /^Attach refused - box_closed has overlapping shells \(74 piercing pairs\); clean it with tools\/nso_fixture_union first - piece unchanged$/.test(a.r.reason) && a.same, a.r.reason);
+        check('Detach refuses in the one sentence, the piece unchanged', d.r.ok === false && /^Detach refused - box_closed has overlapping shells \(74 piercing pairs\); clean it with tools\/nso_fixture_union first - piece unchanged$/.test(d.r.reason) && d.same, d.r.reason);
+        check('a flange detached from a clean piece is on the plate for Reattach', det.ok === true, det.reason || 'ok');
+        check('Reattach onto it refuses in the one sentence, nothing changed', re.r.ok === false && /^Reattach refused - box_closed has overlapping shells \(74 piercing pairs\); clean it with tools\/nso_fixture_union first - piece unchanged$/.test(re.r.reason) && re.same, re.r.reason);
+      } else {
+        check('the cleaned box is accepted by Attach (a blank welded on its lid)', a.r.ok === true, a.r.reason || 'ok');
+        check('the cleaned box is not refused for its shells (Detach, Reattach)', !mentions(d.r.reason) && !mentions(re.r.reason),
+          [d.r.reason, re.r.reason].join(' | '));
       }
     }
 

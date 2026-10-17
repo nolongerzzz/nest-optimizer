@@ -381,6 +381,8 @@
     var placed = target.placed;
     var model = state.models.find(function (m) { return m && m.id === placed.sourceId; });
     if (!model || !placed.mesh) { say('Carve: that piece is not on the plate', true); return null; }
+    var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([model]) : '';
+    if (overlap) { say('Carve refused - ' + overlap + ' - piece unchanged', true); return { ok: false, reason: overlap }; }
 
     var blade = currentBlade();
     var depth = numOf($('carve-depth'), 1);
@@ -587,6 +589,8 @@
     if (!window.NSO_Carve || !NSO_Carve.planStroke) { say('Carve needs nso_carve.js', true); return null; }
     var model = state.models.find(function (m) { return m && m.id === placed.sourceId; });
     if (!model || !placed.mesh) { say('Carve: that piece is not on the plate', true); return null; }
+    var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([model]) : '';
+    if (overlap) { say('Carve refused - ' + overlap + ' - piece unchanged', true); return { ok: false, reason: overlap, stroke: true }; }
 
     var blade = currentBlade();
     var depth = numOf($('carve-depth'), 1);

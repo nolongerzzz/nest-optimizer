@@ -1681,6 +1681,8 @@ async function NSO_cropMoveSelectedModel() {
     setStatus('Move stood down - ' + painted + ' painted face(s); the slab it rebuilds is chosen at lock-in. Clear paint to move.', true);
     return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
   }
+  var overlapMove = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([m]) : '';
+  if (overlapMove) { setStatus('Move refused - piece unchanged (' + overlapMove + ')', true); return { ok: false, reason: overlapMove }; }
   if (typeof NSO_Repair === 'undefined' || !NSO_Repair || typeof NSO_Repair.inspect !== 'function') {
     setStatus('Move unavailable - the mesh checker (NSO_Repair) is not loaded; piece unchanged', true);
     return { ok: false, reason: 'no checker' };

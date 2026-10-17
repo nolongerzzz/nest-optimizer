@@ -2632,6 +2632,13 @@ function extractBitFromSelected() {
     setStatus('Select a tile on the plate first', true);
     return;
   }
+  // The cavity is found by even-odd inside tests, which shells laid over one
+  // another turn inside out (nso-helpers.js, nsoOverlap).
+  const overlapBit = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([model]) : '';
+  if (overlapBit) {
+    setStatus('Extract refused - ' + overlapBit + ' - piece unchanged', true);
+    return;
+  }
   const py = p.mesh.position.y;
   const soupPiece = geomToWorldSoup(model.geometry, p.x, py, p.z);
   if (!soupPiece || soupPiece.length < 9) {
