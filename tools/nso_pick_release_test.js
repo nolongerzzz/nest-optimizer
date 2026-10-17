@@ -375,7 +375,7 @@ withApp(async (page, logs) => {
   const base = await loadSTL(page, fx('box_hull_80x40x20-2.stl'));
   await selectPiece(page, base);
   check('a bare drag orbits with no tool up', (await reading(page, 'baseline')) === 'ORBITED');
-  await page.click('#btn-clear');
+  await page.click('#btn-clear-plate');
 
   let n = 0;
   // PICK_ONLY=Bridge,Connect runs just those rows (the roster is slow end to end).
@@ -384,7 +384,7 @@ withApp(async (page, logs) => {
     n++;
     console.log('\n=== ' + n + '. ' + V.name + ' ===');
     await page.evaluate(() => leaveTool());
-    await page.click('#btn-clear');
+    await page.click('#btn-clear-plate');
     await frames(page, 2);
     let id;
     if (V.two) {

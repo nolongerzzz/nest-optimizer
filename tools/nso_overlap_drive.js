@@ -96,7 +96,8 @@ function installHelpers() {
       }
       return { reason: 'no plannable pair among ' + ta.length + ' x ' + tb.length };
     },
-    clear() { document.getElementById('btn-clear').click(); },
+    // CLEAR PLATE keeps the library's models (#224 took the header's Clear); drop them too, as Clear did.
+    clear() { document.getElementById('btn-clear-plate').click(); state.models = []; state.editId = null; },
     status() { const e = document.getElementById('status'); return e ? e.textContent : ''; }
   };
 }
