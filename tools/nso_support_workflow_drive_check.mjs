@@ -441,15 +441,10 @@ async function main() {
   // =======================================================================
   page = await freshPage('with-tunnel.stl', WITH_TUNNEL);
   T = tools(page);
-  /* Since #195 a beacon counts only where its normal leaves the piece, so the
-     tunnel's ceiling - over its own floor - makes no area at all, and no
-     fixture can show an area the plate cannot reach. This section is about
-     the card's unreachable state, not the detector: it runs with
-     exposedOnly: false, the detection before #195, card and planner alike. */
-  await page.evaluate(() => {
-    const SB = window.NSO_SupportBeacons, det = SB.detect;
-    SB.detect = (soup, o) => det(soup, Object.assign({}, o, { exposedOnly: false }));
-  });
+  /* The tunnel's ceiling hangs over the tunnel's own floor. A beacon is
+     geometry only (supports-followups): the air under that ceiling runs out of
+     both ends, so it is an area like any other, and the planner - not the
+     detector - finds that the plate cannot reach most of it. Default settings. */
   const bId = await page.evaluate(() => state.placed[0].sourceId);
   await page.click('#menu-supports > summary');
   await frames(page);

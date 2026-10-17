@@ -211,10 +211,11 @@ const fmt = v => v.map(c => c.toFixed(3)).join(', ');
       console.log('walls      point ' + m.beacon + ' moved ' + m.mm.toFixed(2) + ' mm off a wall: [' +
                   m.from.map(v => v.toFixed(3)).join(', ') + '] -> [' + m.to.map(v => v.toFixed(3)).join(', ') + ']');
     }
-    // No foot pads (#195): the 0.2 mm first-layer pad reads as a wall under
-    // the floor in the canonical check below, which weighs the members and
-    // their bores - as tree:canonical / tree:round do since #195.
-    const t = await ST.hollowTree(tp, { unionSoups: csg.NSO_unionSoups, subtractSoups: csg.NSO_subtractSoups, footPads: false });
+    // On its foot pads (supports-followups): each is one solid first-layer disc
+    // unioned with its trunk, overlapping pads one slab. They were left off
+    // after #195, when three close trunks' pads rang a gap and the first layer
+    // read as a ring.
+    const t = await ST.hollowTree(tp, { unionSoups: csg.NSO_unionSoups, subtractSoups: csg.NSO_subtractSoups });
     if (!t.ok) { console.error('the hollow support would not build: ' + t.reason); process.exit(1); }
     // since #195 the plan's region is a beacon region: no area of its own
     const rArea = tp.region && tp.region.areaMm2 != null ? tp.region.areaMm2.toFixed(3) + ' mm^2' : tp.beacons.length + ' beacons';

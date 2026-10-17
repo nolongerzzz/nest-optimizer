@@ -21,7 +21,16 @@
 //      slope (the last 15 mm of it had none).
 //   4. THE FOOT. A one-first-layer pad under every landed trunk,
 //      r = max(3 mm, 2.5 x half-width), joined where pads touch; nothing below
-//      the plate, on a steered trunk too; clear of the piece.
+//      the plate, on a steered trunk too; clear of the piece. Pads that overlap
+//      in a ring merge into one solid slab - no handle in the first layer
+//      (supports-followups): lattices of trunks 5 mm apart (a gap between four
+//      pads) and 6 mm apart (pads that exactly touch) are built and validated.
+//   5. OVERHANG OVER THE SAME PIECE (supports-followups). Detection is geometry
+//      only: a shelf over its own base, a bridge over its own foot and the
+//      underside of an arch all get beacons, whatever is under them; a sealed
+//      cavity's ceiling still gets none. What a support can reach is the
+//      planner's: plate first, round the piece within the lean limit, the
+//      piece only with restOnModel; the rest is counted unreachable.
 //   + mesh_validate on every solid: closed, manifold, no piercing pairs.
 
 const fs = require('fs');
@@ -95,6 +104,58 @@ const OPEN = load('fixtures/box_open.stl');        /* 60 x 40 x 25, the same cav
 const HOLE = soupOf(box([0, 0, 0], [20, 6, 8]), box([0, 14, 0], [20, 20, 8]), box([0, 6, 0], [6, 14, 8]),
                     box([14, 6, 0], [20, 14, 8]), box([15, 8, 8], [19, 12, 22]), arm(5, 19, 5, 15, 22, 25, 1, [[15, 19, 8, 12]]));
 const HIGH = soupOf(box([0, 0, 0], [10, 10, 64]), box([10, 0, 60], [30, 10, 64]));
+
+/* A prism over a counter-clockwise polygon in the xz plane, run along y from
+   y0 to y1, outward-wound (GP._prismSoup extrudes in z; the axes are swapped
+   and the winding turned back). */
+function prismY(polyXZ, y0, y1) {
+  const a = GP._prismSoup(polyXZ, y0, y1), out = new Float32Array(a.length);
+  for (let t = 0; t < a.length; t += 9) {
+    const v = [0, 1, 2].map(i => [a[t + 3 * i], a[t + 3 * i + 2], a[t + 3 * i + 1]]);
+    [v[0], v[2], v[1]].forEach((q, i) => out.set(q, t + 3 * i));
+  }
+  return out;
+}
+/* A through-tunnel with a floor and a round roof: a 40 x 30 x 24 block with a
+   D-shaped bore (floor at z 3, a half-circle of r 10 above it) along y. The
+   roof is the underside of an arch over the piece's own floor. */
+async function archBlock(csg) {
+  const D = [[10, 3], [30, 3]];
+  for (let k = 1; k < 24; k++) { const a = Math.PI * k / 24; D.push([20 + 10 * Math.cos(a), 3 + 10 * Math.sin(a)]); }
+  const r = await csg.NSO_subtractSoups(new Float32Array(box([0, 0, 0], [40, 30, 24])), prismY(D, -1, 31));
+  if (!r.ok) throw new Error('the arch block would not build: ' + r.reason);
+  return r.soup;
+}
+/* A C-shaped bracket: a base slab, a post, and a shelf over the base. The
+   shelf's underside (z 16) hangs 12 mm over the base's top (z 4). */
+const SHELF_PROFILE = [[0, 0], [30, 0], [30, 4], [6, 4], [6, 16], [30, 16], [30, 20], [0, 20]];
+
+/* The Supports workflow check's tunnel block (section 9 of
+   tools/nso_support_workflow_drive_check.mjs), whole: 40 x 40 x 30, a tunnel
+   16 wide and 12 high through it along y, its ceiling at z 20 over its own
+   floor at z 8. A grid of cells, so the soup is watertight with no T-junctions. */
+function tunnelBlock(x0, x1, z1) {
+  const xs = [x0, x0 + 12, x1 - 12, x1], zs = [0, 8, 20, z1], cells = [];
+  for (let i = 0; i < 3; i++) for (let k = 0; k < 3; k++) if (!(i === 1 && k === 1)) cells.push([i, k]);
+  const has = (i, k) => cells.some(c => c[0] === i && c[1] === k);
+  const out = [];
+  const quad = (a, b, c, d, want) => {
+    const u = b.map((x, i) => x - a[i]), w = c.map((x, i) => x - a[i]);
+    const n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+    const flip = n[0] * want[0] + n[1] * want[1] + n[2] * want[2] < 0;
+    for (const tri of flip ? [[a, c, b], [a, d, c]] : [[a, b, c], [a, c, d]]) for (const q of tri) out.push(...q);
+  };
+  for (const [i, k] of cells) {
+    const xa = xs[i], xb = xs[i + 1], za = zs[k], zb = zs[k + 1];
+    quad([xa, 0, za], [xb, 0, za], [xb, 0, zb], [xa, 0, zb], [0, -1, 0]);
+    quad([xa, 40, za], [xb, 40, za], [xb, 40, zb], [xa, 40, zb], [0, 1, 0]);
+    for (const [ni, nk, d, e] of [[i - 1, k, [-1, 0], [xa, za, xa, zb]], [i + 1, k, [1, 0], [xb, za, xb, zb]],
+                                  [i, k - 1, [0, -1], [xa, za, xb, za]], [i, k + 1, [0, 1], [xa, zb, xb, zb]]]) {
+      if (!has(ni, nk)) quad([e[0], 0, e[1]], [e[2], 0, e[3]], [e[2], 40, e[3]], [e[0], 40, e[1]], [d[0], 0, d[1]]);
+    }
+  }
+  return new Float32Array(out);
+}
 
 /* ---- helpers shared with nothing in the module -------------------------- */
 function triOf(soup, t) {
@@ -214,6 +275,8 @@ fs.mkdirSync(OUT, { recursive: true });
   }
   const d30 = SB.detect(closed30, { plateZ: 0 });
   check('the cavity is 12 faces: 10 walls and floor, 2 for the lid\'s underside', inside.size === 12, `${inside.size} faces`);
+  check('the tilted closed box is 238 beacons in one area - what it was before overhang over the same piece counted',
+    d30.ok && d30.beacons.length === 238 && d30.regions.length === 1 && d30.counts.sheltered === 0, `${d30.beacons.length} beacons, ${d30.counts.sheltered} sheltered`);
   check('one area - the underside', d30.ok && d30.regions.length === 1 && d30.regions[0].count === d30.beacons.length,
     `${d30.regions.length} region(s), ${d30.beacons.length} beacon(s): ${d30.reason}`);
   check('0 interior beacons: none on the cavity\'s ceiling, floor or walls',
@@ -321,11 +384,15 @@ fs.mkdirSync(OUT, { recursive: true });
       `${p.trunks.length} trunks in ${built.solids.length} solid(s); bare trunks make ${bare.solids.length}`);
     check('without feet the same plan is one solid per trunk and also stops at the plate',
       bare.solids.length === p.trunks.length && minZ(bare.soup) >= -1e-6, `${bare.solids.length}`);
-    const v = validSolid('closed30', built.soup, built.solids.length, true);
-    const handles = (2 * built.solids.length - v.euler_characteristic) / 2;
-    const vb = validSolid('closed30_bare', bare.soup, bare.solids.length, false);
-    check('the only handles are rings of pads round a gap - the trunks alone have none', vb.euler_characteristic === 2 * bare.solids.length && handles >= 0,
-      `${handles} ring(s) of pads in the first layer`);
+    /* The 98 pads overlap in rings round 14 small gaps and touch in 68 places
+       (the 6 mm lattice puts pads of r = 3 exactly edge to edge). Each gap is
+       filled and each touch bridged, so the pads are slabs with no hole in
+       them: not one handle in the first layer. */
+    check('the gaps between overlapping pads were found and all filled, none left (and the touches bridged)',
+      built.padGaps && built.padGaps.found > 0 && built.padGaps.filled === built.padGaps.found && built.padGaps.left === 0,
+      JSON.stringify(built.padGaps));
+    validSolid('closed30', built.soup, built.solids.length, false);
+    validSolid('closed30_bare', bare.soup, bare.solids.length, false);
     /* The feet keep clear of the piece by the support gap. */
     const slab = [];
     for (let t = 0; t < built.soup.length; t += 9) {
@@ -408,6 +475,126 @@ fs.mkdirSync(OUT, { recursive: true });
       check('tab_hollow: the bores are sealed inside - more shells than solids', shells(s.soup) > s.solids.length,
         `${shells(s.soup)} shells, ${s.solids.length} solid(s)`);
       void v;
+    }
+  }
+
+
+  /* ===================================================================== */
+  console.log('\n=== 4b. PADS THAT OVERLAP IN A RING: one slab ===');
+  {
+    /* 3 x 3 straight struts under a slab, 5 mm apart (pads of r = 3 overlap
+       and leave a gap in the middle of every four) and 6 mm apart (the pads
+       touch edge to edge: a sealed sliver where two of them meet). The
+       strut style never merges, so nine trunks stand where they are put. */
+    const SLAB = soupOf(box([0, 0, 20], [22, 22, 24]));
+    for (const [label, pitch] of [['5 mm lattice', 5], ['6 mm lattice (pads touch)', 6]]) {
+      const pts = [];
+      for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) pts.push({ x: 3 + i * pitch, y: 3 + j * pitch, z: 20, normal: [0, 0, -1] });
+      const q = GP.plan(SLAB, { skipList: [], beacons: pts, style: 'strut', plateZ: 0 });
+      check(`${label}: nine trunks, all held`, q.ok && q.trunks.length === 9 && q.held === 9, q.reason);
+      const ring = await GP.solid(q, Object.assign({ padGaps: false }, K));
+      const slab = await GP.solid(q, K);
+      if (!ring.ok || !slab.ok) { check(`${label}: builds`, false, ring.reason || slab.reason); continue; }
+      writeSTL(path.join(OUT, `lattice${pitch}_ring.stl`), ring.soup);
+      const vring = validate(path.join(OUT, `lattice${pitch}_ring.stl`), 1e-4);
+      /* what the fills and bridges are for: round gaps the pads alone are a
+         ring (5 mm: a handle in the first layer); edge to edge (6 mm) they do not
+         even join - nine solids, not one */
+      check(`${label}: without the fills and bridges the pads are NOT one slab (the case this guards)`,
+        pitch === 5 ? ring.solids.length === 1 && vring.euler_characteristic < 2 : ring.solids.length > 1,
+        `Euler ${vring.euler_characteristic} over ${ring.solids.length} solid(s)`);
+      check(`${label}: filled and bridged: ${JSON.stringify(slab.padGaps)}`, slab.padGaps.left === 0 &&
+        (pitch === 5 ? slab.padGaps.found > 0 && slab.padGaps.filled === slab.padGaps.found : slab.padGaps.bridged > 0));
+      check(`${label}: the nine pads merge into ONE solid`, slab.solids.length === 1, `${slab.solids.length} solid(s)`);
+      check(`${label}: nothing below the plate`, minZ(slab.soup) >= -1e-6, `lowest z ${minZ(slab.soup).toExponential(2)}`);
+      validSolid(`lattice${pitch}`, slab.soup, 1, false);
+      /* the first layer is one disc-shaped slab: a vertical line at the lattice's
+         middle (over a gap, if there were one) crosses exactly the slab's floor and top */
+      const mid = 3 + pitch;
+      const zc = zCrossings(slab.soup, mid + pitch / 2, mid + pitch / 2).filter(z => z < 0.25);
+      check(`${label}: the middle of four pads is solid slab, floor to top`, zc.length === 2 && near(zc[0], 0, 1e-4) && near(zc[1], 0.2, 1e-4),
+        zc.map(z => z.toFixed(3)).join(', '));
+    }
+  }
+
+
+  /* ===================================================================== */
+  console.log('\n=== 5. OVERHANG OVER THE SAME PIECE: beacons are geometry only ===');
+  {
+    /* The air an overhang hangs in has a way out along the face: the brute-
+       force ray from the beacon, a half degree off the face towards the air,
+       along +y or -y (the bracket, the arch and the tunnel all run along y),
+       meets nothing of the piece. Shares nothing with the module's fan. */
+    const alongFace = (soup, b) => [1, -1].some(sg => {
+      const n = b.normal, t = [0, sg, 0], e = 0.5 * Math.PI / 180;
+      const d = [t[0] * Math.cos(e) + n[0] * Math.sin(e), t[1] * Math.cos(e) + n[1] * Math.sin(e), t[2] * Math.cos(e) + n[2] * Math.sin(e)];
+      for (let k = 0; k < soup.length / 9; k++) if (rayHit([b.x, b.y, b.z], d, triOf(soup, k)) > 1e-3) return false;
+      return true;
+    });
+    const BRIDGE = await (async () => {
+      /* a 20 mm beam on two piers over a floor: the floor is the bridge's own foot */
+      const r = await csg.NSO_subtractSoups(new Float32Array(box([0, 0, 0], [32, 10, 20])), new Float32Array(box([6, -1, 4], [26, 11, 16])));
+      if (!r.ok) throw new Error(r.reason);
+      return r.soup;
+    })();
+    const SHELF = prismY(SHELF_PROFILE, 0, 10), ARCH = await archBlock(csg), TUNNEL = tunnelBlock(60, 100, 30);
+    const fixtures = [['shelf over its base', SHELF, b => near(b.z, 16, 1e-4), 'gap'],
+                      ['bridge over its foot', BRIDGE, b => near(b.z, 16, 1e-4), 'gap'],
+                      ['arch over its floor', ARCH, b => b.z > 3 + 10 * Math.sin(Math.PI / 4) - 0.2 && b.z < 13.01, 'gap'],
+                      ['tunnel block (the workflow check\'s)', TUNNEL, b => near(b.z, 20, 1e-4), 'gap']];
+    const counted = {};
+    for (const [label, soup, onOverhang, kind] of fixtures) {
+      const d = SB.detect(soup, { plateZ: 0 });
+      counted[label] = d.beacons.length;
+      check(`${label}: beacons under the overhang, default settings`, d.ok && d.beacons.length > 0, `${d.beacons.length} beacon(s) in ${d.regions.length} area(s): ${d.reason}`);
+      /* (a corner-net beacon where the shelf meets its post is an 'edge' that came via a 'gap') */
+      check(`${label}: every one is on the overhang itself, kind ${kind}, with material under it`,
+        d.beacons.every(b => onOverhang(b) && (b.need.kind === kind || (b.need.kind === 'edge' && b.need.via === kind)) && b.need.below === 'material'),
+        `${d.beacons.length} of ${d.beacons.length}`);
+      check(`${label}: the face's own normal runs into the piece for every one (the old rule's reason to drop it)`,
+        d.beacons.every(b => blocked(soup, b)) && d.counts.sheltered === d.beacons.length, `${d.counts.sheltered} sheltered`);
+      /* (not the corner-net ones: they sit exactly in the post's wall plane, which a brute-force ray along it cannot tell from inside it) */
+      const sampled = d.beacons.filter(b => !b.need.corner);
+      check(`${label}: and every one has air running out along the face (brute force)`,
+        sampled.every(b => alongFace(soup, b)), `${sampled.filter(b => !alongFace(soup, b)).length} of ${sampled.length} without`);
+      check(`${label}: nothing counted interior`, d.counts.interior === 0, `${d.counts.interior}`);
+    }
+    {
+      const bd = SB.detect(BRIDGE, { plateZ: 0 });
+      check('bridge over its foot: the span is read off the beam (20 mm, wider than the 5 mm a slicer bridges)',
+        bd.beacons.every(b => near(b.need.spanMm, 20, 1e-3)), bd.beacons.slice(0, 1).map(b => b.need.spanMm).join());
+    }
+    /* a sealed void is still not a beacon: the closed box (section 1) and a
+       hollow bracket, a cavity cut inside the shelf's own mass */
+    {
+      const r = await csg.NSO_subtractSoups(new Float32Array(box([0, 0, 0], [30, 10, 20])), new Float32Array(box([5, 2, 5], [25, 8, 15])));
+      const d = SB.detect(r.soup, { plateZ: 0 });
+      check('a sealed cavity in a block: its ceiling, floor and walls give no beacon', d.ok && d.beacons.length === 0 && d.counts.interior > 0,
+        `${d.beacons.length} beacons, ${d.counts.interior} interior spot(s) counted out`);
+    }
+
+    /* The planner decides what can be reached. */
+    console.log('\n--- reachability is the planner\'s ---');
+    /* (The tunnel is planned at a 6 mm pitch: a point the plate cannot reach costs the
+       planner about a third of a second, and this block has 59 of them at 3 mm.) */
+    for (const [label, soup, pitchMm] of [['shelf over its base', SHELF, 3], ['tunnel block (the workflow check\'s)', TUNNEL, 6]]) {
+      const q = GP.plan(soup, { skipList: [], pitchMm });
+      const n = SB.detect(soup, { plateZ: 0, pitch: pitchMm }).beacons.length;
+      check(`${label}: the plan is made; every beacon is held or counted unreachable, none lost`,
+        q.ok && q.held + q.unreachable.length + q.inside.length === q.beacons.length && q.beacons.length === n && n > 0,
+        `${q.beacons && q.beacons.length} beacons: ${q.held} held, ${q.unreachable && q.unreachable.length} unreachable, ${q.inside && q.inside.length} inside`);
+      check(`${label}: some can only be reached by resting on the piece, and are counted unreachable (restOnModel off)`,
+        q.unreachable.length > 0 && q.held > 0 && /unreachable from the plate/.test(q.reason), q.reason);
+      const on = GP.plan(soup, { skipList: [], pitchMm, restOnModel: true });
+      check(`${label}: with restOnModel they rest on the piece instead, none unreachable`,
+        on.ok && on.unreachable.length === 0 && on.resting.length > 0 && on.held === on.beacons.length,
+        `${on.held} of ${on.beacons && on.beacons.length} held, ${on.resting && on.resting.length} resting`);
+      if (label === 'shelf over its base') {
+        const landings = q.trunks.filter(t => t.landing === 'plate').map(t => landing(q, t));
+        const offBase = l => l[0] > 30 || l[1] < 0 || l[1] > 10;
+        check('shelf: the ones held are the ones near its edges, led round the base to the plate, within the lean limit',
+          landings.length > 0 && landings.every(offBase) && worstLean(q) <= 30 + 1e-6, `${landings.length} trunks, worst lean ${worstLean(q).toFixed(2)} deg`);
+      }
     }
   }
 
