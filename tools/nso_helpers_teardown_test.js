@@ -191,8 +191,8 @@ withApp(async (page, logs) => {
     await page.evaluate(() => { document.getElementById('menu-crop').open = true; });
     await page.waitForFunction(() => state.cutterOpen && state.cutTool === 'crop', null, { timeout: 10000 });
     await page.evaluate(() => updateCutterUI());
-    await page.check('#chk-crop-box');
-    await page.waitForFunction(() => state.cropHelper && state.cropHelper.parent, null, { timeout: 10000 });
+    await page.click('#btn-crop-shape-box');
+    await page.waitForFunction(() => { const g = NSO_CropCard.state().group; return g && g.parent; }, null, { timeout: 10000 });
   }, () => !!state.cutterOpen);
 
   await tool('Bend', 'bend', bendId, async () => {

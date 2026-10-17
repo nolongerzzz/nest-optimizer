@@ -590,6 +590,64 @@ Branch `claude/ui-cleanup`, off `claude-wip`.
   `app-join.js`, `app-input-mode.js` shell1 -> uiclean1; `styles.css` shell4 ->
   uiclean1 (a comment that described the old class wipe).
 
+## Crop card - pick a shape, drag it to size, CROP (2026-10-17)
+Branch `claude/crop-card`, stacked on `claude/crop-engine` (#222), ticket 2 of 3.
+UI only: the engine is #222 as built, plus `planOn` / `resolve` /
+`footprintPolys` for the card. Full write-up: **`docs/CROP.md`, "The card"**.
+- **What it is:** the Crop card is a Shape row (Box, Cylinder, Sphere, Piece,
+  Outline), one readout line, CROP and Cancel - nothing else (`page:manifest`
+  gates it). The shape is placed and sized by dragging handles in the viewport
+  (`app-crop-card.js`), in Rotate's rails look, hit areas 14 px on the screen.
+  The readout follows live from `NSO_Crop.planOn`. CROP is `NSO_Crop.copy`: the
+  copy lands in place, selected, one Undo; the shape stays for another crop.
+  Escape / Cancel / closing the card put it away.
+- **Where each old control went** (also in `docs/CROP.md`): Crop X / Z and the
+  from / to fields -> the dragged Box; Circle -> Cylinder; Piece region -> Piece
+  shape (Grow -> Outline's offsets); Keep outside -> gone (Subtract the copy);
+  Move region (Up / Across / Lift / Lock in) -> removed from Crop with
+  `NSO_cropMoveRaw` and `NSO_Crop.cut`: CROP, grab the copy, JOIN; Detach flange
+  -> the Subtract card under Split to parts; Reattach -> the Connect card, last row (same ids).
+- **Retired:** `crop:move`, `wire:crop-move` (and their test files). Their cases
+  tested `NSO_cropMoveRaw`, which is gone; the kernel unions are Join's.
+  `nso_detach_test.js` lost its comparison against Move.
+- **Rewritten for the new card:** `wire:crop`, `crop:shapes` (same names, same
+  independent measurements: the disc's radius, the star's outline; the old card's
+  Keep outside / Grow cases have no equivalent). Updated: `shell:v3`,
+  `helpers:teardown`, `wire:cut-redesign` §7, `wire:detach`.
+- **Two bugs the card exposed, fixed in `app-core.js`:** Undo of an `addModels`
+  step with a cutter open, and an import while a cutter is open, both rebuilt the
+  plate from a single piece (`showEditPreview` empties `state.placed`). Both now
+  skip it when the cutter is Crop's.
+- **New:** `crop:drive` (`tools/nso_crop_card_drive.js`, real mouse drags).
+  **?v=** `nso_crop.js`, `app-crop.js`, `app-crop-card.js` (new), `app-core.js`,
+  `styles.css` -> cropcard1. `npm test` was not run, as asked.
+
+## Crop engine - copy what a shape holds as a new piece (2026-10-17)
+Branch `claude/crop-engine`, off `claude-wip` at d333fce. Ticket 1 of 2: the
+engine; the card that replaces the old one is ticket 2. Full write-up:
+**`docs/CROP.md`, "Stage 4: the copy engine"**.
+- **What it is:** `nso_crop.js` (`NSO_Crop`, THREE-free but for its last
+  section). `plan(piece, shape)` / `run(piece, shape)` / `copy(model, shape)`:
+  Box, Cylinder (any axis), Sphere, Piece and Outline, placed freely in 3D
+  (centre, half-sizes, yaw). The result is a closed manifold mesh with no
+  slivers, added to the plate as `<name> crop N` where it was cut from, one
+  Undo. The original is only read: byte-identical after.
+- **Outline** is the footprint of a chosen piece (silhouette, or a rim loop
+  found from a triangle), offset out by d1 and in by d2 - the band between - and
+  extruded between z1 and z2. d1 = d2 = 0 is the exact footprint.
+- **The old card keeps working on top of it:** `app-crop.js` section 6
+  (`NSO_cropShapeRaw`, the cutter preview, `NSO_cropPlateToRaw`,
+  `NSO_cropMeshSoupP`) delegates to `NSO_Crop`; the card's own words are what
+  stayed. `crop:test`, `crop:move`, `wire:crop`, `crop:shapes` pass unchanged.
+- **A bug on the way:** the old `NSO_cropMatInvert` transposed the rotation.
+  Fixed in the engine's `matInvert`, which the old card now uses.
+- **PAINT SCOPE:** none - nothing is written to the original, and the copy
+  carries no paint.
+- **Checks:** new `crop:engine` (volumes against an independent ray-cast
+  oracle, exact identities, `mesh_validate.py`, the real app). `?v=`:
+  `nso_crop.js` cropengine1 (new), `app-crop.js` cropshapes1 -> cropengine1.
+  `npm test` was not run, as asked.
+
 ## Crop shapes - a Circle and another Piece's outline as the region (2026-10-16)
 Branch `claude/crop-shapes`, off `claude-wip` after #191. Full write-up:
 **`docs/CROP.md`, "Stage 3: Circle and Piece"**.

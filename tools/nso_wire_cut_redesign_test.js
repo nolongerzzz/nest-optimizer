@@ -629,32 +629,24 @@ withApp(async (page, logs) => {
       JSON.stringify(s));
     await clickPieceAt(id, 0.5);
     const sel = await page.evaluate(() => ({ editId: state.editId, blade: !!state.cutHelper,
-      disabled: document.getElementById('btn-crop').disabled }));
-    check('a click picks the piece for Crop; still no blade; Crop enabled', sel.editId === id && !sel.blade && !sel.disabled,
-      JSON.stringify(sel));
-    // Crop's own axis, where Cut X / Cut Z used to set it: Z crops across the
-    // 12 mm width, X along the 60 mm length - as before the split.
-    await page.click('#btn-crop-axis-z');
-    const rz = await page.evaluate(() => ({ ro: document.getElementById('crop-readout').textContent,
-      on: document.getElementById('btn-crop-axis-z').classList.contains('tool-active'), cut: state.cutAxis || null }));
-    check('Crop Z: the box runs along Z, the 12 mm width; Cut\'s axis untouched',
-      /^Box Z .*piece 12\.0/.test(rz.ro) && rz.on && (rz.cut === null || rz.cut === 'auto'), JSON.stringify(rz));
-    await page.click('#btn-crop-axis-x');
-    const rx = await page.evaluate(() => ({ ro: document.getElementById('crop-readout').textContent,
-      on: document.getElementById('btn-crop-axis-x').classList.contains('tool-active') }));
-    check('Crop X: back along X, the 60 mm length', /^Box X .*piece 60\.0/.test(rx.ro) && rx.on, JSON.stringify(rx));
-    await page.fill('#crop-start-mm', '25'); await page.dispatchEvent('#crop-start-mm', 'change');
-    await page.fill('#crop-end-mm', '35'); await page.dispatchEvent('#crop-end-mm', 'change');
+      disabled: document.getElementById('btn-crop').disabled, ro: document.getElementById('crop-readout').textContent }));
+    check('a click picks the piece for Crop; still no blade; the card asks for a shape, CROP off',
+      sel.editId === id && !sel.blade && sel.disabled && /^Pick a shape/.test(sel.ro), JSON.stringify(sel));
+    // The card is a Shape row and a button now (docs/CROP.md): pick Box, CROP copies what it holds.
+    await page.click('#btn-crop-shape-box');
+    await page.waitForFunction(() => !document.getElementById('btn-crop').disabled, null, { timeout: 30000 });
+    const rb = await page.evaluate(() => document.getElementById('crop-readout').textContent);
+    check('Box: it stands on the piece and the readout says what it holds', /^Box [\d.]+ × [\d.]+ × [\d.]+ mm · holds \d+ faces/.test(rb), rb);
+    const lenBefore = await page.evaluate(id => state.models.find(m => m.id === id).size.x, id);
     await page.click('#btn-crop');
-    await page.waitForFunction(() => /Crop (done|refused)/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+    await page.waitForFunction(() => state.models.length === 2, null, { timeout: 30000 });
     const st = await statusOf(page);
-    const len = await page.evaluate(() => getActiveModel() && getActiveModel().size.x);
-    check('Crop took the 10 mm slab out: 60 -> 50', /Crop done/.test(st) && /60\.00 → 50\.00 mm/.test(st) && Math.abs(len - 50) < 1e-3,
-      st);
+    const after = await page.evaluate(id => ({ len: state.models.find(m => m.id === id).size.x, names: state.models.map(m => m.name) }), id);
+    check('CROP copied it: a new piece "<name> crop 1", the original still 60 long', /^Crop: "bar60c crop 1"/.test(st) && after.names[1] === 'bar60c crop 1' && Math.abs(after.len - lenBefore) < 1e-9 && Math.abs(after.len - 60) < 1e-3,
+      st.slice(0, 120));
     await clickSummary('menu-crop');
     const s2 = await armed();
     check('closing the Crop card disarms it', !s2.open && !s2.crop, JSON.stringify(s2));
-    await page.evaluate(() => { state.cropAxis = null; });
   }
 
   /* ------------------------------------------------------------------ 8 */

@@ -78,12 +78,14 @@ const measure = (page, id) => page.evaluate(mid => {
 }, id);
 const rawOf = (page, id) => page.evaluate(mid => Array.from(state.models.find(x => x && x.id === mid).rawTris), id);
 const modelIds = page => page.evaluate(() => state.models.map(m => m.id));
-const openCutter = async page => {
-  // Crop (and Detach under it) has its own card; opening it arms Crop.
-  const open = await page.evaluate(() => document.getElementById('menu-crop').open);
-  if (!open) await page.click('#menu-crop > summary');
-  if (!(await page.evaluate(() => state.cutterOpen && state.cutTool === 'crop'))) await page.evaluate(() => openCutter('crop'));
+/* Detach is in the Subtract card, under Split to parts, and Reattach in the
+   Connect card (they were both in the Crop card). Opening a card is a real click
+   on its summary. */
+const openCard = async (page, id) => {
+  const open = await page.evaluate(i => document.getElementById(i).open, id);
+  if (!open) await page.click('#' + id + ' > summary');
 };
+const openCutter = page => openCard(page, 'menu-bit');
 /* An oblique view of the plate for the screenshots: the flange side and
    the top at once. */
 const frameOblique = page => page.evaluate(() => {
@@ -107,14 +109,14 @@ withApp(async (page, logs) => {
   {
     const w = await page.evaluate(() => {
       const d = document.getElementById('btn-detach'), r = document.getElementById('btn-reattach');
-      const cut = document.getElementById('menu-crop');
+      const sub = document.getElementById('menu-bit'), join = document.getElementById('menu-connect');
       return { d: !!d, r: !!r, wired: d && r && d.dataset.nsoWired === '1' && r.dataset.nsoWired === '1',
-               inCut: !!(cut && d && cut.contains(d) && cut.contains(r)), rDisabled: r && r.disabled,
+               inCut: !!(sub && d && sub.contains(d) && join && r && join.contains(r)), rDisabled: r && r.disabled,
                core: typeof window.NSO_Detach, flange: typeof window.NSO_Flange, run: typeof window.nsoDetachRun,
                at: typeof window.nsoReattachAt, hook: typeof window.nsoReattachTakesClick,
                pick: typeof window.nsoAttachRawPick };
     });
-    check('the Crop card carries Detach flange and Reattach, wired', w.d && w.r && w.wired && w.inCut, JSON.stringify(w));
+    check('the Subtract card carries Detach flange and the Connect card Reattach, wired', w.d && w.r && w.wired && w.inCut, JSON.stringify(w));
     check('Reattach is disabled until something is detached', w.rDisabled === true);
     check('nso_detach.js, nso_flange.js and app-detach.js are loaded', w.core === 'object' && w.flange === 'object' &&
       w.run === 'function' && w.at === 'function');
@@ -200,10 +202,8 @@ withApp(async (page, logs) => {
       return { x, y, onCanvas: document.elementFromPoint(x, y) === state.renderer.domElement };
     }, [id, atRaw]);
     check('the pixel aimed at is on the canvas', sp.onCanvas, sp.x.toFixed(1) + ', ' + sp.y.toFixed(1));
-    await page.click('#btn-reattach').catch(async () => {
-      await page.evaluate(() => { const e = document.getElementById('btn-reattach'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-      await page.click('#btn-reattach');
-    });
+    await openCard(page, 'menu-connect');
+    await page.click('#btn-reattach');
     const armed = await page.evaluate(() => ({ a: !!state.reattachArmed, s: document.getElementById('status').textContent }));
     check('Reattach arms', armed.a && /click the point on a piece/.test(armed.s), armed.s.slice(0, 90));
     await closeTopMenus(page);

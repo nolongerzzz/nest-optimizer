@@ -1,11 +1,13 @@
 # Detach and Reattach: take a detected feature off, put it back elsewhere
 
-`nso_detach.js` (`window.NSO_Detach`, and a Node module) plus `app-detach.js`
-(the Crop card's row; the Cut menu's until Cut and Crop were split). The first feature it works on is the flange that
-`nso_flange.js` finds (docs/GSCOPE-FLANGE.md).
+`nso_detach.js` (`window.NSO_Detach`, and a Node module) plus `app-detach.js`.
+Detach flange is a button of the Subtract card, under Split to parts, and Reattach
+a button of the Connect card, its last row (both were in the Crop card; same ids, same behaviour).
+The first feature it works on is the flange that `nso_flange.js` finds
+(docs/GSCOPE-FLANGE.md).
 
 ```
-node tools/nso_detach_test.js        headless: the audit, the v9 acceptance test against Crop stage 2, poses, shapes, refusals (57 gates)
+node tools/nso_detach_test.js        headless: the audit, the v9 acceptance test, poses, shapes, refusals
 node tools/nso_wire_detach_test.js   the real app: the buttons, a real click, both undos, the refusals (28 gates)
 ```
 
@@ -13,10 +15,11 @@ Both are in `npm test` (`detach:test`, `wire:detach`).
 
 ## What it is, next to Crop
 
-Crop takes a **box** out of a piece. The box is the user's and says nothing
-about the part. Stage 1 slides the far part back. Stage 2 moves a region and
-reconnects it to whatever it lands against: it trims an overlap, or it
-bridges a gap with a filleted, sampled bridge.
+Crop copies what a **shape** holds. The shape is the user's and says nothing
+about the part. (Crop used to be able to move a boxed region and reconnect it to
+whatever it landed against, trimming an overlap or bridging a gap; that was
+removed from Crop, and Detach + Reattach is how a feature is moved by what is
+known about it.)
 
 Detach starts from a feature the part is **known to have**. It uses what
 detection measured about it: the root plane, the neck wall it comes off, and
@@ -117,7 +120,7 @@ The source itself fails the checker (2 non-manifold / 5 inconsistent edges,
 all at the seams). The hull passes, because Cut's weld merges the +seam's
 sub-tolerance pair.
 
-## 3. Reattach at the mirror-opposite position, against Crop stage 2
+## 3. Reattach at the mirror-opposite position
 
 **Where.** The flange's root, mirrored through the bar's middle (y → −y), is
 in the air. At the flange's height, 7.53 – 10.47, the +Y side of the body is
@@ -129,32 +132,16 @@ body meets it: (0, 0.152, 9.0), aimed +Y, plate normal +Z.
 |---|---|
 | seat | 0.496 mm rim gap + 0.420 mm margin = **0.916 mm**, length kept (**14.998 mm** proud, the flange's own reach) |
 | pose | flat, Z 7.531 … 10.469 (its own band, flush with the top like the original), Y −0.764 … 15.150, the whole X −93.493 … 93.493, across both seams |
-| union | one part. The raw union is 2 nm / 5 inc by the checker (vertices under its 1e-4 weld); Crop stage 2's finish (Cut's weld, `rawSplitDegenerates`) closes it |
+| union | one part. The raw union is 2 nm / 5 inc by the checker (vertices under its 1e-4 weld); the finish (Cut's weld, `rawSplitDegenerates`) closes it |
 | result | **PASS with self-intersection**, χ 2, 0 piercing |
 | contact | the flange meets the body **at its seat only**: 496.1 mm³ of overlap, against at most 503.1 for the seat. It clears the tooth tops by 0.892 mm, cantilevered as the original was over air |
 | bridging | **0 of 48,654 triangles** lie off the two input surfaces (worst 0.2 µm): every face of the result is the hull's or the flange's |
-| Stage 2's splits | through the +seam ring, x 80 and a slot wall (x 77.3): both halves pass each time |
+| splits | through the +seam ring, x 80 and a slot wall (x 77.3): both halves pass each time |
 
-**Against Crop stage 2's own result for the same relocation.** The −Y lip to
-the mirror-opposite +Y side, at its own height, the case in Stage 2's own
-acceptance test. `detach:test` §3 **runs** Stage 2's `NSO_cropMoveRaw` (merged
-in PR #114; `app-crop.js` and every file it calls are byte-identical to its
-branch head 3b4227a) and measures its result the same way. Its moved
-region's surface is the source's, shifted by the move, and its notch lies on
-the box planes. Anything off all of those is what it added.
-
-| | Crop stage 2 | Detach + Reattach |
-|---|---|---|
-| what moves | a 12 mm region, X 74 … 86. Its box cannot reach the bar's ends, and it has not been tested across both seams | the whole 187 mm flange, across both seams |
-| how it meets the +Y side | **bridge**: a 0.897 mm gap, filled | **seated at its root**, 0.916 mm |
-| added material | **+6.25 mm³** of bridge, surface nets at 0.08 – 0.15 mm pitch | none but the seat |
-| triangles on neither input surface | **3,091 (90.8 mm²)**: the bridge | **0** |
-| canonical checker | PASS, self-intersection included; χ 0, because the bridge spans a slot between two teeth and closes a loop | PASS, self-intersection included; χ 2 |
-| where it left | a notch, closed by the subtraction's box planes | the wall, capped flush, 0 µm proud |
-
-Stage 2's 2 mm-down variant trims into the teeth instead (11.54 mm³). Reattach
-refuses that on purpose (see Refusals): it puts a piece back, and it does not
-trim one.
+*(This section used to set the result against Crop's Move for the same relocation:
+a bridge of +6.25 mm³ and 3,091 triangles on neither surface, against none here.
+Move is removed from Crop, so `detach:test` no longer runs it; the numbers above are
+Detach + Reattach's own.)*
 
 ## 4. Poses and shapes
 
@@ -192,9 +179,9 @@ Every refusal names its reason and makes nothing.
 
 ## UI
 
-Crop card, below Crop.
+Detach flange: the Subtract card, under Split to parts. Reattach: the Connect card, its last row.
 
-- **Detach flange** runs on the cutter's piece. The piece keeps its place and
+- **Detach flange** runs on the selected piece. The piece keeps its place and
   its id and becomes the hull. The flange lands beside it as its own piece,
   `<name> - Flange`, which can be exported, moved and checked. The in-page
   checker gates both. **One Undo** puts the piece back value for value and

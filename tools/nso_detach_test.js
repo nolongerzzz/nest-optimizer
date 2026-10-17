@@ -18,8 +18,7 @@
      3. Reattach on v9 at the mirror-opposite position. One solid, PASS with
         self-intersection, the piece meets the body at its seat only, and
         NO triangle of the result is off the two input surfaces: nothing was
-        bridged or sampled. Crop stage 2 is run here on the same relocation
-        and measured the same way.
+        bridged or sampled.
      4. the same with the part turned (an axis-aligned turn and an off-axis one).
      5. synthetic shapes: a lip on a block, a T section, a hat section.
      6. refusals, each by name.
@@ -186,17 +185,6 @@ function box(lo, hi) {
   return new Float32Array(o);
 }
 
-// Crop stage 2, run here, not quoted: its own NSO_cropMoveRaw in the context
-// tools/nso_crop_move_test.js builds (the shipped CSG adapter plus the files
-// Stage 2 calls). The same relocation: the -Y lip, X 74..86, to the
-// mirror-opposite +Y side at its own height (+31 Y), as in its acceptance test.
-const S2 = csgContext();
-S2.window = S2;
-vm.runInContext('var state = {}; var THREE = {};', S2);
-for (const f of ['NSO_Repair.js', 'nso_thickness.js', 'nso_hollow.js', 'app-cut.js', 'app-crop.js']) {
-  vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), S2, { filename: f });
-}
-const S2_LIP = { min: [74, -20, 5], max: [86, -3, 12] }, S2_MOVE = [0, 31, 0];
 
 (async function main() {
   const t0 = Date.now();
@@ -378,7 +366,7 @@ const S2_LIP = { min: [74, -20, 5], max: [86, -3, 12] }, S2_MOVE = [0, 31, 0];
   check('the union is one part', u.ok && u.parts === 1, u.ok ? u.parts + ' part, ' + (u.soup.length / 9) + ' tris' : u.reason);
   const rawU = validate(u.soup, 'v9-union-raw', false);
   const fin = DT.finishUnion(u.soup);
-  check('the finish (Crop stage 2\'s weld at Cut\'s radius) closes what the checker\'s weld would join',
+  check('the finish (a weld at Cut\'s radius) closes what the checker\'s weld would join',
     fin.ok, 'raw union: ' + rawU.summary + ' -> ' + fin.reason);
   const uv = validate(fin.soup, 'v9-reattached', true);
   check('the result passes the canonical checker, self-intersection included', uv.clean, uv.summary);
@@ -392,42 +380,13 @@ const S2_LIP = { min: [74, -20, 5], max: [86, -3, 12] }, S2_MOVE = [0, 31, 0];
   for (let i = 0; i < d.hull.length; i += 3) if (d.hull[i + 1] > 1.5 && d.hull[i + 1] < sb.hi[1]) teeth = Math.max(teeth, d.hull[i + 2]);
   check('it cantilevers over the teeth, as the original cantilevered over air', teeth < b0,
     f3(b0 - teeth) + ' mm clear of the tooth tops (Z ' + f3(teeth) + ')');
-  // Stage 2 split its result through the +seam ring, the landing and a slot wall.
+  // The result, split through the +seam ring, the landing and a slot wall.
   let splits = 0;
   for (const x of [87.53694152832031, 80, 77.3]) {
     const a = rawCut(fin.soup, 0, x, false), b2 = rawCut(fin.soup, 0, x, true);
     if (a && b2 && validate(a).verdict === 'PASS' && validate(b2).verdict === 'PASS') splits++;
   }
   check('split through the +seam ring, x 80 and a slot wall: both halves pass each time', splits === 3, splits + ' of 3');
-  // Crop stage 2 on the same relocation, measured the same way. Its moved
-  // region's surface is the source's, shifted by the move; its notch and the
-  // region's cut ends lie on the box planes. Anything off all of those is
-  // what it added: the bridge.
-  const s2 = await S2.NSO_cropMoveRaw(v9, { box: S2_LIP, offset: S2_MOVE });
-  check('Crop stage 2 moves the lip to the same place, and measures a gap it bridges',
-    s2.ok && s2.branch === 'bridge', s2.ok ? 'gap ' + f3(s2.gapMm) + ' mm, bridge +' + f3(s2.bridgeMm3) + ' mm^3' : s2.reason);
-  const s2v = s2.ok ? validate(s2.tris, 'stage2-bridge', true) : null;
-  const shifted = new Float32Array(v9);
-  for (let i = 0; i < shifted.length; i += 3) shifted[i + 1] = Math.fround(shifted[i + 1] + S2_MOVE[1]);
-  const boxPlanes = [[0, 74], [0, 86], [1, -3], [1, -3 + S2_MOVE[1]]];
-  const onBox = (s, o) => boxPlanes.some(([k, v]) => [0, 3, 6].every((j) => Math.abs(s[o + j + k] - v) < 2e-4));
-  const s2Tris = [];
-  if (s2.ok) for (let o = 0; o < s2.tris.length; o += 9) if (!onBox(s2.tris, o)) s2Tris.push(...s2.tris.subarray(o, o + 9));
-  const s2os = s2.ok ? offSurface(Float32Array.from(s2Tris), [v9, shifted], 2e-4) : { off: NaN, offArea: NaN };
-  check('  ...and its result carries triangles on neither input surface: its bridge', s2os.off > 0,
-    s2os.off + ' triangles, ' + f3(s2os.offArea) + ' mm^2');
-  const cmp = [
-    ['', 'Crop stage 2 (run here)', 'Detach + Reattach'],
-    ['what moves', 'the lip, X 74..86 (a box cannot reach the ends)', 'the whole flange, X ' + f3(sb.lo[0]) + '..' + f3(sb.hi[0]) + ', both seams'],
-    ['how it meets the +Y side', s2.branch + ', a ' + f3(s2.gapMm) + ' mm gap', 'seated at its root, ' + f3(r.engageMm) + ' mm'],
-    ['added material', '+' + f3(s2.bridgeMm3) + ' mm^3 of bridge', 'the seat only'],
-    ['off both input surfaces', s2os.off + ' tris, ' + f3(s2os.offArea) + ' mm^2', os.off + ' tris'],
-    ['canonical checker', s2v ? s2v.summary : '-', uv.summary],
-    ['where it left', 'a notch, closed by box planes', 'the wall, capped flush, 0 um proud']
-  ];
-  console.log('\n     ' + cmp.map((row) => row.map((c, i) => (c + '').padEnd(i ? 44 : 26)).join('')).join('\n     ') + '\n');
-  check('equal or better than Crop stage 2 for the same relocation: both clean, and only Stage 2 bridged',
-    uv.clean && os.off === 0 && uc.ok && s2v && s2v.clean && s2os.off > 0);
 
   // =========================================================================
   console.log('\n4. The part turned');

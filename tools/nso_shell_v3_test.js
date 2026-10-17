@@ -96,7 +96,11 @@ const HOLDS = {
   'menu-export': ['export-format', 'btn-export-model', 'btn-library-save', 'btn-export-stl', 'btn-delete-model'],
   'menu-scale': ['scale-card', 'scale-factor', 'scale-target', 'btn-scale-fit'],
   'menu-cut': ['edit-card', 'cut-miter-dial', 'cut-slider', 'cut-mm', 'btn-cut'],
-  'menu-crop': ['crop-card', 'btn-crop-axis-x', 'btn-crop-axis-z', 'chk-crop-box', 'btn-crop', 'btn-crop-lockin', 'btn-detach', 'btn-reattach'],
+  // CROP: the Shape row, one readout, CROP, Cancel (Detach moved to Subtract, Reattach to Connect)
+  'menu-crop': ['crop-card', 'crop-shape-row', 'btn-crop-shape-box', 'btn-crop-shape-cylinder', 'btn-crop-shape-sphere',
+                'btn-crop-shape-piece', 'btn-crop-shape-outline', 'crop-readout', 'btn-crop', 'btn-crop-cancel'],
+  // CONNECT: the builder, and Reattach as its last row (it moved here from the Crop card)
+  'menu-connect': ['connect-panel', 'btn-reattach'],
   'menu-joins': ['menu-join', 'join-slot-a', 'join-slot-b', 'join-slot-c', 'btn-join', 'btn-join-clear',
                  'menu-abc', 'triple-mode', 'btn-join-triple'],
   'menu-seat': ['btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid'],
@@ -109,7 +113,7 @@ const HOLDS = {
                'btn-extend', 'inp-extend-mm', 'btn-bridge', 'bridge-panel'],
   // SUBTRACT: Subtract B from A · Extract bit · Carve · Hollow · Hollow to safe min · Lift
   'menu-bit': ['btn-subtract', 'btn-extract-bit', 'btn-carve', 'carve-blade', 'carve-depth', 'btn-hollow', 'inp-hollow-mm',
-               'btn-hollow-safe', 'btn-lift', 'lift-panel'],
+               'btn-hollow-safe', 'btn-lift', 'lift-panel', 'btn-detach'],
   'menu-paint': ['btn-mask-select', 'btn-mask-paint', 'btn-mask-clear', 'btn-mask-delete', 'sel-mask-delete', 'btn-extract-sel'],
   // SURFACE & EDGES: Soften (R, Full wrap, edge treatment) · Mirror · Skin face · Skin wrap · Skin patch · Trace raster · Texture
   'menu-surface': ['inp-soften-r', 'chk-full-wrap', 'btn-soften', 'sel-edge-treat', 'btn-mirror', 'inp-mirror-plane',
@@ -148,9 +152,10 @@ const BEFORE = ['menu-import', 'file-input', 'btn-load-stl', 'btn-library', 'men
   'btn-scale-rod-diameter', 'scale-offset', 'btn-scale-offset', 'scale-factor', 'btn-scale-factor', 'scale-target',
   'btn-scale-dim', 'btn-scale-fit', 'menu-cut', 'cut-miter-dial', 'cut-miter-deg', 'btn-cut-square', 'cut-slider',
   'btn-cut-nudge-m', 'cut-mm', 'btn-cut-nudge-p', 'btn-cut', 'btn-cut-right-side-out', 'menu-crop', 'edit-axis',
-  'btn-crop-axis-x', 'btn-crop-axis-z', 'chk-crop-box', 'crop-start-mm', 'crop-end-mm', 'btn-crop', 'crop-up-from',
-  'crop-up-to', 'crop-across-from', 'crop-across-to', 'chk-crop-lift', 'crop-move-dx', 'crop-move-dy', 'crop-move-dz',
-  'btn-crop-lockin', 'btn-detach', 'btn-reattach', 'menu-joins', 'menu-join', 'join-slot-a', 'join-slot-b',
+  /* The Crop card's axis buttons, box fields, Lift and Move controls are gone: one tool, a shape dragged to
+     size (docs/CROP.md says where each job went). The ids that stay are the card's own, and Detach flange and
+     Reattach, which moved to the Subtract and Connect cards under the same ids. */
+  'btn-crop', 'btn-detach', 'btn-reattach', 'menu-joins', 'menu-join', 'join-slot-a', 'join-slot-b',
   'join-slot-c', 'btn-join', 'btn-join-clear', 'menu-abc', 'triple-mode', 'triple-gap-ab', 'triple-gap-bc', 'btn-join-triple',
   'btn-lift', 'menu-seat', 'btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'oversize-gap',
   'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid', 'menu-supports', 'sup-angle', 'btn-sup-all', 'btn-sup-none',

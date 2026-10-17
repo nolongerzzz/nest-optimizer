@@ -2,12 +2,14 @@
    node tools/nso_wire_crop_test.js        exit 0 = every gate held
 
    Real index.html, real clicks. The geometry proofs live in
-   tools/nso_crop_test.js; this file proves the Crop card is
-   reachable, the box is drawn and really moves under a mouse drag, the
-   button commits a piece that passes tools/mesh_validate.py - both the
-   rawTris the app keeps and the STL it exports - undo names Crop and puts
-   the soup back, paint stands it down, a refusal leaves the piece alone,
-   and Split still cuts the cropped piece cleanly. */
+   tools/nso_crop_engine_test.js (the copy engine) and tools/nso_crop_test.js
+   (the slab crop G-scope and Detach still use); the card is driven in
+   tools/nso_crop_card_drive.js. This file proves the copy is a real piece on
+   the plate: the Crop card is reachable, a Box dragged with the mouse and
+   CROP add a piece that passes tools/mesh_validate.py - both the rawTris the
+   app keeps and the STL it exports - one Undo takes it off, paint on the
+   original is neither read nor touched, a refusal leaves the plate alone,
+   and Split still cuts the copy cleanly. */
 
 const fs = require('fs');
 const os = require('os');
@@ -49,158 +51,141 @@ function bar(L, W, H) {
   return out;
 }
 
-const rawOf = page => page.evaluate(() => Array.from(getActiveModel().rawTris));
-const openCutter = async page => {
-  // Crop (and Detach under it) has its own card; opening it arms Crop.
-  const open = await page.evaluate(() => document.getElementById('menu-crop').open);
-  if (!open) await page.click('#menu-crop > summary');
-  if (!(await page.evaluate(() => state.cutterOpen && state.cutTool === 'crop'))) await page.evaluate(() => openCutter('crop'));
-};
-const setBox = async (page, a, b) => {
-  await page.fill('#crop-start-mm', String(a));
-  await page.dispatchEvent('#crop-start-mm', 'change');
-  await page.fill('#crop-end-mm', String(b));
-  await page.dispatchEvent('#crop-end-mm', 'change');
-};
+const rawOf = (page, id) => page.evaluate(i => Array.from(state.models.find(m => m.id === i).rawTris), id);
+const cropNames = page => page.evaluate(() => state.models.map(m => m.name));
+const settle = page => page.waitForFunction(() => { const S = NSO_CropCard.state(); return !S.shape || (!S.timer && S.plan); }, null, { timeout: 30000 });
 
 withApp(async (page, logs) => {
-  console.log('\n=== 1. the Crop row is in the Cut menu and wired ===');
+  console.log('\n=== 1. the Crop card is in the column and wired ===');
   const ui = await page.evaluate(() => {
     const b = document.getElementById('btn-crop');
     const inMenu = !!(b && b.closest('#menu-crop'));
     return { btn: !!b, wired: !!b && b.dataset.nsoWired === '1', inMenu,
-             inputs: ['crop-start-mm', 'crop-end-mm'].every(i => (document.getElementById(i) || {}).type === 'number'),
-             box: (document.getElementById('chk-crop-box') || {}).type === 'checkbox' };
+             row: ['box', 'cylinder', 'sphere', 'piece', 'outline'].every(k => !!document.getElementById('btn-crop-shape-' + k)),
+             old: ['crop-start-mm', 'chk-crop-box', 'btn-crop-axis-x', 'btn-crop-lockin'].filter(i => document.getElementById(i)) };
   });
   check('#btn-crop present, inside the Crop card', ui.btn && ui.inMenu);
   check('listener attached at load', ui.wired);
-  check('from / to boxes numeric, Box tick present', ui.inputs && ui.box);
+  check('the Shape row is there, and the old from / to fields, Box tick, axis and Lock in are not', ui.row && ui.old.length === 0, ui.old.join(','));
 
-  console.log('\n=== 2. select the simple test piece; the box defaults to the middle fifth ===');
+  console.log('\n=== 2. select the simple test piece (60 x 12 x 8); Box stands on it at half size ===');
   const id = await loadSTL(page, writeSTL(path.join(TMP, 'bar60.stl'), bar(60, 12, 8)));
-  await openCutter(page);
   await selectModel(page, id);
-  await page.evaluate(() => { showEditPreview(); updateCutterUI(); });
-  const def = await page.evaluate(() => ({
-    s: document.getElementById('crop-start-mm').value, e: document.getElementById('crop-end-mm').value,
-    readout: document.getElementById('crop-readout').textContent,
-    disabled: document.getElementById('btn-crop').disabled }));
-  check('defaults 24.0 -> 36.0 mm', def.s === '24.0' && def.e === '36.0', def.s + ' -> ' + def.e);
-  check('Crop enabled with the cutter open on a piece', !def.disabled);
-  await setBox(page, 25, 35);
+  await page.click('#menu-crop > summary');
+  await page.evaluate(i => selectPlaced(state.placed.findIndex(p => p.sourceId === i)), id);
+  await page.evaluate(() => {      // an oblique view, close, so the handles are a hand's width apart
+    state.camera.position.set(40, 36, 52); state.controls.target.set(0, 4, 0); state.camera.lookAt(0, 4, 0); state.controls.update();
+    state.renderer.render(state.scene, state.camera);
+  });
+  await page.click('#btn-crop-shape-box');
+  await settle(page);
   const ro = await page.evaluate(() => document.getElementById('crop-readout').textContent);
   console.log('   readout: ' + ro);
-  check('readout: 25.0 -> 35.0, 10 mm out, 60 -> 50', /25\.0 → 35\.0 mm \(10\.0 mm out\) → piece 60\.0 → 50\.0 mm/.test(ro), ro);
-  check('readout: the box selects the 8 long wall faces', /0 face\(s\) removed, 8 clipped/.test(ro), ro);
+  check('readout: Box 30 x 6 x 4 mm, holds the 12 faces of a box, 0.72 cm3', /^Box 30 × 6 × 4 mm · holds 12 faces, 0\.72 cm³$/.test(ro), ro);
+  check('CROP is on with a shape up', !(await page.evaluate(() => document.getElementById('btn-crop').disabled)));
 
-  console.log('\n=== 3. the box is drawn and a mouse drag moves it ===');
-  await page.check('#chk-crop-box');
-  const drawn = await page.evaluate(() => !!state.cropHelper && state.cropHelper.parent === state.scene);
-  check('box drawn in the scene', drawn);
-  const pts = await page.evaluate(() => {
-    const h = state.cropHelper;
-    const r = state.renderer.domElement.getBoundingClientRect();
-    const proj = v => { v.project(state.camera); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; };
-    // The middle of the box's top face: the surface a user sees and grabs.
-    h.updateMatrixWorld(true);
-    const c = new THREE.Vector3(0, 5, 0).applyMatrix4(h.matrixWorld);
-    const a = proj(c.clone()), b = proj(c.clone().add(new THREE.Vector3(5, 0, 0)));
-    const el = document.elementFromPoint(a.x, a.y);
-    return { a, b, onCanvas: el === state.renderer.domElement };
-  });
-  check('the box centre is on the canvas, clear of the menus', pts.onCanvas);
-  await page.mouse.move(pts.a.x, pts.a.y);
+  console.log('\n=== 3. a real mouse drag on a face of the box ===');
+  const hp = await page.evaluate(() => NSO_CropCard.handleScreen('x+'));
+  const x0 = await page.evaluate(() => NSO_CropCard.state().box.h[0]);
+  await page.mouse.move(hp.x, hp.y);
   await page.mouse.down();
-  for (let i = 1; i <= 8; i++) await page.mouse.move(pts.a.x + (pts.b.x - pts.a.x) * i / 8, pts.a.y + (pts.b.y - pts.a.y) * i / 8);
+  for (let i = 1; i <= 8; i++) await page.mouse.move(hp.x + 6 * i, hp.y + i);
   await page.mouse.up();
-  const moved = await page.evaluate(() => ({ s: state.crop.startMm, e: state.crop.endMm, orbit: state.controls.enabled,
-    same: state.editId }));
-  check('dragging the body slid the box ~5 mm along X', Math.abs(moved.s - 30) <= 0.3, moved.s + ' -> ' + moved.e);
-  check('and kept its length', Math.abs((moved.e - moved.s) - 10) < 1e-9);
-  check('orbit handed back after the drag, same piece selected', moved.orbit === true && moved.same === id);
+  await settle(page);
+  const x1 = await page.evaluate(() => ({ h: NSO_CropCard.state().box.h[0], orbit: state.controls.enabled, same: state.editId }));
+  check('dragging the +x face grew the box on that side', x1.h > x0 + 0.3, x0.toFixed(2) + ' -> ' + x1.h.toFixed(2));
+  check('orbit handed back after the drag, same piece selected', x1.orbit === true && x1.same === id);
+  await page.click('#btn-crop-shape-box');     // a fresh one, 30 x 6 x 4
+  await settle(page);
 
-  // Now grab the high end face and pull it 3 mm further out.
-  const endPts = await page.evaluate(() => {
-    const h = state.cropHelper;
-    h.updateMatrixWorld(true);
-    const r = state.renderer.domElement.getBoundingClientRect();
-    const proj = v => { v.project(state.camera); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; };
-    const len = state.crop.endMm - state.crop.startMm;
-    // The top of the end slab, where a user would grab it.
-    const top = new THREE.Vector3(len / 2 - 0.3, 5, 0).applyMatrix4(h.matrixWorld);
-    return { a: proj(top.clone()), b: proj(top.clone().add(new THREE.Vector3(3, 0, 0))) };
-  });
-  await page.mouse.move(endPts.a.x, endPts.a.y);
-  await page.mouse.down();
-  for (let i = 1; i <= 8; i++) await page.mouse.move(endPts.a.x + (endPts.b.x - endPts.a.x) * i / 8, endPts.a.y + (endPts.b.y - endPts.a.y) * i / 8);
-  await page.mouse.up();
-  const grown = await page.evaluate(() => ({ s: state.crop.startMm, e: state.crop.endMm }));
-  check('dragging the end face moved only that end, ~3 mm', grown.s === moved.s && Math.abs(grown.e - (moved.e + 3)) <= 0.5,
-    moved.s + '..' + moved.e + ' -> ' + grown.s + '..' + grown.e);
-  await setBox(page, 25, 35);
-
-  console.log('\n=== 4. Crop: one closed piece, 10 mm shorter ===');
-  const before = await rawOf(page);
+  console.log('\n=== 4. CROP: a new, closed piece beside nothing - in place, the original untouched ===');
+  const before = await rawOf(page, id);
   await page.click('#btn-crop');
-  await page.waitForFunction(() => /Crop (done|refused)/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  await page.waitForFunction(() => state.models.length === 2, null, { timeout: 30000 });
   const st = await statusOf(page);
   console.log('   status: ' + st);
-  check('status reports a completed crop', /Crop done/.test(st) && /60\.00 → 50\.00 mm/.test(st), st);
-  const after = await rawOf(page);
+  check('status reports the copy, by name', /^Crop: "bar60 crop 1" - copied 720\.0 mm³ in 12 faces, 30\.0 x 6\.0 x 4\.0 mm/.test(st), st);
+  const cid = await page.evaluate(() => state.models[1].id);
+  const after = await rawOf(page, cid);
   const rawV = validate(writeSTL(path.join(TMP, 'raw.stl'), after));
   check('rawTris PASS mesh_validate.py (self-intersection included)', rawV.verdict === 'PASS', summary(rawV));
-  check('rawTris: one shell, X 50 x Y 12 x Z 8, volume 4800',
-    rawV.euler_characteristic === 2 && rawV.bbox_size.join() === '50,12,8' && Math.abs(rawV.signed_volume - 4800) < 1e-3,
+  check('rawTris: one shell, 30 x 6 x 4, volume 720',
+    rawV.euler_characteristic === 2 && rawV.bbox_size.join() === '30,6,4' && Math.abs(rawV.signed_volume - 720) < 1e-3,
     rawV.bbox_size.join(' x ') + ', ' + rawV.signed_volume);
   const stl = await page.evaluate(() => Array.from(new Uint8Array(activeModelSTL().buffer)));
   const stlFile = path.join(TMP, 'export.stl');
   fs.writeFileSync(stlFile, Buffer.from(stl));
   const expV = validate(stlFile);
-  check('exported STL PASS mesh_validate.py', expV.verdict === 'PASS', summary(expV));
+  check('exported STL (the selected copy) PASS mesh_validate.py', expV.verdict === 'PASS', summary(expV));
   const wt = execFileSync('python3', [path.join(ROOT, 'tools', 'stl_watertight_check.py'), stlFile]).toString();
   check('exported STL watertight by stl_watertight_check.py',
     /open_edges\(count=1\) 0/.test(wt) && /nonmanifold_edges\(count>2\) 0/.test(wt) && /\nOK\s*$/.test(wt),
     wt.trim().split('\n').join(', '));
-  const shown = await page.evaluate(() => ({ x: getActiveModel().size.x, list: state.models.length }));
-  check('the app now draws a 50 mm piece, still one model', Math.abs(shown.x - 50) < 1e-4 && shown.list === 1, JSON.stringify(shown));
+  check('the original is byte for byte what it was', JSON.stringify(await rawOf(page, id)) === JSON.stringify(before));
+  const shown = await page.evaluate(i => ({ x: state.models.find(m => m.id === i).size.x, sel: state.models.find(m => m.id === state.placed[state.selectedIndex].sourceId).name }), cid);
+  check('the app draws a 30 mm piece, and it is the selected one', Math.abs(shown.x - 30) < 1e-4 && shown.sel === 'bar60 crop 1', JSON.stringify(shown));
 
-  console.log('\n=== 5. Undo names Crop and puts the soup back ===');
+  console.log('\n=== 5. one Undo takes the copy off ===');
   await page.click('#btn-undo');
   await page.waitForFunction(() => /Undo/.test(document.getElementById('status').textContent), null, { timeout: 15000 });
-  check('undo names Crop', /Undo: Crop reverted/.test(await statusOf(page)), await statusOf(page));
-  check('the whole soup is back, coordinate for coordinate', JSON.stringify(await rawOf(page)) === JSON.stringify(before));
+  check('undo names what it removed', /Undo: removed cloned pieces/.test(await statusOf(page)), await statusOf(page));
+  check('one model again, the plate still has the original, the soup is back coordinate for coordinate',
+    (await cropNames(page)).length === 1 && (await page.evaluate(() => state.placed.length)) === 1 && JSON.stringify(await rawOf(page, id)) === JSON.stringify(before));
+  check('the shape is still up for another crop', (await page.evaluate(() => NSO_CropCard.state().shape)) === 'box');
 
-  console.log('\n=== 6. paint wins: a painted piece is a stand-down ===');
-  await page.evaluate(() => { getActiveModel().faceMask = { exclude: [{ n: [0, 0, 1], d: 0, axisIdx: 2, keepMin: false, inner: false }] }; });
+  console.log('\n=== 6. paint is not read and not touched: a copy writes nothing to the original ===');
+  const mask = { exclude: [{ n: [0, 0, 1], d: 0, axisIdx: 2, keepMin: false, inner: false }] };
+  await page.evaluate(([i, m]) => { state.models.find(x => x.id === i).faceMask = m; }, [id, mask]);
+  await page.click('#btn-crop-shape-box');
+  await settle(page);
   await page.click('#btn-crop');
-  check('stood down, naming the paint', /Crop stood down - 1 painted face/.test(await statusOf(page)), await statusOf(page));
-  check('piece unchanged', JSON.stringify(await rawOf(page)) === JSON.stringify(before));
-  await page.evaluate(() => { getActiveModel().faceMask = null; });
+  await page.waitForFunction(() => state.models.length === 2, null, { timeout: 30000 });
+  check('CROP goes ahead on a painted piece', /^Crop: "bar60 crop 1"/.test(await statusOf(page)), await statusOf(page));
+  check('...the original\'s paint is exactly as it was, and the copy carries none',
+    await page.evaluate(([i, m]) => JSON.stringify(state.models.find(x => x.id === i).faceMask) === JSON.stringify(m) && !state.models[1].faceMask, [id, mask]));
+  await page.click('#btn-undo');
+  await page.evaluate(i => { state.models.find(x => x.id === i).faceMask = null; }, id);
 
-  console.log('\n=== 7. a refusal leaves the piece alone (hinge bore: step face with a hole) ===');
+  console.log('\n=== 7. a shape that holds nothing is refused in words, the plate untouched ===');
   const hid = await loadSTL(page, path.join(ROOT, 'library', 'hinge_knuckle_box.stl'));
-  await selectModel(page, hid);
-  await page.evaluate(() => { showEditPreview(); updateCutterUI(); });
-  const hBefore = await rawOf(page);
-  await setBox(page, 5.4, 9.9);
-  await page.click('#btn-crop');
-  await page.waitForFunction(() => /Crop (done|refused)/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
-  const hs = await statusOf(page);
-  check('refused, naming the hole', /Crop refused/.test(hs) && /hole/.test(hs), hs);
-  check('piece unchanged', JSON.stringify(await rawOf(page)) === JSON.stringify(hBefore));
+  await selectModel(page, id);
+  await page.evaluate(i => selectPlaced(state.placed.findIndex(p => p.sourceId === i)), id);
+  await page.evaluate(() => { state.camera.position.set(70, 60, 90); state.controls.target.set(20, 4, 0); state.camera.lookAt(20, 4, 0); state.controls.update(); state.renderer.render(state.scene, state.camera); });
+  await page.click('#btn-crop-shape-piece');
+  const hxy = await page.evaluate(hh => {
+    const p = state.placed.find(q => q.sourceId === hh), r = state.renderer.domElement.getBoundingClientRect();
+    const c = new THREE.Box3().setFromObject(p.mesh).getCenter(new THREE.Vector3()).project(state.camera);
+    return { x: r.left + (c.x + 1) / 2 * r.width, y: r.top + (1 - c.y) / 2 * r.height };
+  }, hid);
+  await page.mouse.click(hxy.x, hxy.y);
+  await page.waitForFunction(() => { const S = NSO_CropCard.state(); return S.piece.id != null && S.plan && !S.timer; }, null, { timeout: 30000 });
+  const refusal = await page.evaluate(() => ({ ro: document.getElementById('crop-readout').textContent, off: document.getElementById('btn-crop').disabled }));
+  check('the hinge, standing apart from the bar, is a cutter that holds nothing of it - said in words, CROP off',
+    /holds nothing of this piece/.test(refusal.ro) && refusal.off, refusal.ro);
+  const pre = await page.evaluate(() => ({ m: state.models.length, p: state.placed.length, u: state.undoStack.length }));
+  const forced = await page.evaluate(async () => {
+    const m = state.models.find(q => q.id === NSO_CropCard.state().forId);
+    const r = await NSO_Crop.copy(m, NSO_CropCard.shape());
+    return { r: { ok: r.ok, reason: r.reason }, s: document.getElementById('status').textContent };
+  });
+  const post = await page.evaluate(() => ({ m: state.models.length, p: state.placed.length, u: state.undoStack.length }));
+  check('asked anyway, the engine refuses, the status says so, and nothing was added', !forced.r.ok && /^Crop refused - nothing changed \(.*holds nothing/.test(forced.s) &&
+    JSON.stringify(pre) === JSON.stringify(post), forced.s);
 
-  console.log('\n=== 8. Split still cuts a cropped piece cleanly ===');
-  await setBox(page, 7.2, 10.8);
+  console.log('\n=== 8. Split still cuts a copy cleanly ===');
+  await page.click('#btn-crop-cancel');
+  await page.click('#btn-crop-shape-box');
+  await settle(page);
   await page.click('#btn-crop');
-  await page.waitForFunction(() => /Crop (done|refused)/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
-  check('hinge 7.2..10.8 cropped', /Crop done/.test(await statusOf(page)), await statusOf(page));
-  const halves = await page.evaluate(id => {
-    openCutter('cut');      // Cut is its own card now: arm it for the split
-    state.editId = id;
+  await page.waitForFunction(() => state.models.length === 3, null, { timeout: 30000 });
+  const halves = await page.evaluate(() => {
+    const cid2 = state.models[state.models.length - 1].id;
+    openCutter('cut');      // Cut is its own card: arm it for the split
+    state.editId = cid2;
     updateCutHelper();
     cutActiveModel();
     return state.models.filter(m => /-[AB]\d+$/.test(m.name)).map(m => Array.from(m.rawTris));
-  }, hid);
+  });
   check('Split made two raw halves', halves.length === 2);
   halves.forEach((h, i) => {
     const v = validate(writeSTL(path.join(TMP, 'half' + i + '.stl'), h));
