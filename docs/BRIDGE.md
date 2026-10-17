@@ -1,7 +1,7 @@
 # Bridge — a web from one place to another, welded
 
 `nso_bridge.js` (headless geometry) and `app-bridge.js` (the card), loaded
-straight after `app-bend.js` at `?v=bridge2`. The card is **Bridge** in the
+straight after `app-bend.js` (`nso_bridge.js` at `?v=bridge3`, `app-bridge.js` at `?v=bridge2`). The card is **Bridge** in the
 left column's **Shape** drop-down, in the row under Extend and Mirror (Bend
 moved to the top row in shell v2).
 

@@ -19,6 +19,7 @@
 //   2. two boxes face to face, one turned 10 degrees -> a twist-free loft
 //   3. two spheres, point to point -> one solid, the rod Ø2
 //   4. two bars, edge to edge -> the sheet as thick as set, welded
+//   4b. a sheet is wound outward whichever way its two edges run (and in one piece)
 //   5. every guard, in its own words
 //
 // Prints a table at the end; the PR quotes it.
@@ -272,6 +273,66 @@ const ms = t0 => (Date.now() - t0) + ' ms';
     const j = r.ok ? canonical('bars sheet', r.soup) : null;
     TABLE.push(['two bars, sheet', '12 + 12 → ' + (r.ok ? r.soup.length / 9 : '-'), 'sheet 2 mm', j ? 'Euler ' + j.euler_characteristic : '-',
       'thick ' + th.toFixed(4), ms(t0)]);
+  }
+
+  /* ================================================================== 4b */
+  console.log('\n=== 4b. a sheet is wound outward whichever way its edges run ===');
+  {
+    // Two bars; the sheet runs from A's top rim at y 5 to B's top rim at y 15. A face's
+    // edges run round its own loop, so which way a picked edge runs depends on which
+    // face it was picked from: A's top face and B's top face give edges running opposite
+    // ways, A's +y side face and B's top face give edges running the same way.
+    const A = L.box(0, 0, 0, 60, 5, 5), B = L.box(0, 15, 0, 60, 20, 5);
+    const want = 2 * 1500 + 60 * 10 * 2;
+    const ran = {};
+    for (const [name, ha, hb] of [
+      ['same direction', hitAt(A, [30, 5, 4.9], [0, 1, 0]), hitAt(B, [30, 15.1, 5], [0, 0, 1])],
+      ['opposite direction', hitAt(A, [30, 4.9, 5], [0, 0, 1]), hitAt(B, [30, 15.1, 5], [0, 0, 1])]]) {
+      const P = [A, B], T = P.map(s => BR.index(s));
+      const a = end(P, 0, T, ha), b = end(P, 1, T, hb);
+      ran[name] = Math.sign(b.target.b[0] - b.target.a[0]) * Math.sign(a.target.b[0] - a.target.a[0]);
+      const p = BR.plan(P, a, b, { thicknessMm: 2 });
+      check(name + ': plans a flush 2 mm sheet', p.ok && p.mode === 'flush', p.reason || p.text);
+      const wv = p.ok ? BR.volume(p.web) : NaN;
+      check(name + ': the slab is wound outward (positive volume)', wv > 0, 'web volume ' + wv.toFixed(3));
+      const r = await BR.weld(p, { union });
+      check(name + ': welds closed into ONE solid', r.ok && r.parts === 1 && r.topo.open === 0 && r.topo.nm === 0 && r.topo.badWinding === 0,
+        r.ok ? 'parts ' + r.parts : r.reason);
+      const vol = r.ok ? BR.volume(r.soup) : 0;
+      check(name + ': volume = two bars + the 2 mm sheet', Math.abs(vol - want) < 1e-3 * want, vol.toFixed(3) + ' vs ' + want);
+      ran[name + ' vol'] = vol;
+    }
+    check('the picked edges run the same way in one case and opposite ways in the other', ran['same direction'] === 1 && ran['opposite direction'] === -1,
+      JSON.stringify({ same: ran['same direction'], opposite: ran['opposite direction'] }));
+    check('both build the same sheet (same welded volume)', Math.abs(ran['same direction vol'] - ran['opposite direction vol']) < 1e-6 * want,
+      ran['same direction vol'].toFixed(3) + ' / ' + ran['opposite direction vol'].toFixed(3));
+
+    // The slab, the other way round: a plan's slab handed in inside-out is turned out again.
+    const P0 = [A, B], T0 = P0.map(s => BR.index(s));
+    const p0 = BR.plan(P0, end(P0, 0, T0, hitAt(A, [30, 4.9, 5], [0, 0, 1])), end(P0, 1, T0, hitAt(B, [30, 15.1, 5], [0, 0, 1])), { thicknessMm: 2 });
+    const rev = new Float32Array(p0.web);
+    for (let o = 0; o < rev.length; o += 9) for (let k = 0; k < 3; k++) { const t = rev[o + 3 + k]; rev[o + 3 + k] = rev[o + 6 + k]; rev[o + 6 + k] = t; }
+    const turned = BR.outward(new Float32Array(rev));
+    check('a slab handed in inside-out (volume ' + BR.volume(rev).toFixed(0) + ') is turned outward', BR.volume(rev) < 0 && Math.abs(BR.volume(turned) - BR.volume(p0.web)) < 1e-6,
+      BR.volume(turned).toFixed(3) + ' vs ' + BR.volume(p0.web).toFixed(3));
+
+    // Same piece: a U (a base and two arms, one solid), the sheet across its mouth
+    // between the arms' inner top edges.
+    const base = L.box(0, 0, 0, 60, 10, 5), arm1 = L.box(0, 8, 0, 15, 30, 5), arm2 = L.box(45, 8, 0, 60, 30, 5);
+    const u = await union(await union(base, arm1).then(x => x.soup), arm2);
+    const U = u.soup, PU = [U], TU = [BR.index(U)];
+    const e1 = end(PU, 0, TU, hitAt(U, [14.9, 20, 5], [0, 0, 1])), e2 = end(PU, 0, TU, hitAt(U, [45.1, 20, 5], [0, 0, 1]));
+    check('the two arm edges are picked as edges', e1.target.kind === 'edge' && e2.target.kind === 'edge', e1.target.text + ' | ' + e2.target.text);
+    for (const [name, x, y] of [['first to second arm', e1, e2], ['second to first arm', e2, e1]]) {
+      const p = BR.plan(PU, x, y, { thicknessMm: 2 });
+      check('same piece, ' + name + ': plans a sheet', p.ok && p.kind === 'sheet', p.reason || p.text);
+      const wv = p.ok ? BR.volume(p.web) : NaN;
+      check('same piece, ' + name + ': the slab is wound outward', wv > 0, 'web volume ' + wv.toFixed(3));
+      const r = await BR.weld(p, { union });
+      const uv = BR.volume(U), vol = r.ok ? BR.volume(r.soup) : 0, wantU = uv + 30 * 20 * 2;
+      check('same piece, ' + name + ': welds closed into ONE solid', r.ok && r.topo.open === 0 && r.topo.nm === 0 && r.topo.badWinding === 0 && r.topo.shells === 1 && Math.abs(vol - wantU) < 1e-3 * wantU,
+        r.ok ? 'shells ' + r.topo.shells + ', volume ' + vol.toFixed(3) + ' (U ' + uv.toFixed(3) + ')' : r.reason);
+    }
   }
 
   /* =================================================================== 5 */
