@@ -21,7 +21,12 @@
      5. clearing: clicking A again, a click on nothing, Escape; a click on a new
         place with both set replaces B (an orbit drag does not clear)
      6. a third piece in the way is refused in words, no ghost, Set off
-     7. Cancel drops the picks and keeps the card; again, closes it */
+     7. Cancel drops the picks and keeps the card; again, closes it
+     8. Sag and Ends: typing a Sag redraws the ghost as an arc (+6 up, -6 down,
+        measured off the ghost), a hoop is refused in words, the Ends dropdown
+        redraws it with a Foot pad / Ball, Flat with Weld is refused; then Set
+        (Keep separate + Ball + sag +6; Weld + Foot pad + sag -3) and Undo, the
+        pieces bit for bit */
 
 const fs = require('fs');
 const os = require('os');
@@ -118,6 +123,11 @@ function installHelpers() {
         overlay: kids, line: !!(C.line && C.line.parent), ghost: !!(C.ghost && C.ghost.parent),
         ghostTris: C.ghost ? C.ghost.geometry.attributes.position.count / 3 : 0,
         planTris: C.plan && C.plan.ok ? C.plan.web.length / 9 : 0, planOk: !!(C.plan && C.plan.ok),
+        sag: C.plan && C.plan.ok ? C.plan.sagMm : null, ends: C.plan && C.plan.ok ? C.plan.ends : null, straight: C.plan && C.plan.ok ? C.plan.path.straight : null,
+        pathLen: C.plan && C.plan.ok ? C.plan.pathLengthMm : null,
+        anchorZ: C.plan && C.plan.ok ? C.plan.anchors[0].p[2] : null,
+        zTop: C.plan && C.plan.ok ? Math.max(...Array.from({ length: C.plan.body.length / 3 }, (_, i) => C.plan.body[i * 3 + 2])) : null,
+        zBot: C.plan && C.plan.ok ? Math.min(...Array.from({ length: C.plan.body.length / 3 }, (_, i) => C.plan.body[i * 3 + 2])) : null,
         reason: C.plan && !C.plan.ok ? C.plan.reason : '', length: C.plan && C.plan.ok ? C.plan.lengthMm : null,
         a: C.a ? C.a.target.kind : null, b: C.b ? C.b.target.kind : null,
         aPoint: C.a ? C.a.target.point.slice() : null, aObj: C.a ? C.a.sourceId : null,
@@ -419,6 +429,127 @@ withApp(async (page, logs) => {
   await page.click('#btn-connect-cancel');
   C = await P(page);
   check('...pressed again with nothing picked, it closes the card', !C.open && C.hidden && C.overlay.length === 0);
+
+
+  console.log('\n=== 8. Sag and Ends: the ghost follows the fields; Set; Undo ===');
+  {
+    await page.click('#btn-connect');
+    await page.waitForFunction(() => state.connect && state.connect.open, null, { timeout: 5000 });
+    await page.selectOption('#sel-connect-shape', 'string');
+    await page.check('input[name="connect-result"][value="weld"]');
+    const ui2 = await page.evaluate(() => ({
+      sag: document.getElementById('inp-connect-sag'), ends: [...document.getElementById('sel-connect-ends').options].map(o => o.value + ':' + o.textContent),
+      sagVal: document.getElementById('inp-connect-sag').value, endsVal: document.getElementById('sel-connect-ends').value,
+      order: [...document.getElementById('connect-panel').querySelectorAll('select,input')].map(e => e.id || e.name) }));
+    check('the card has a Sag field (0) and an Ends dropdown (Weld, Flat, Foot pad, Ball; Weld chosen)', !!ui2.sag && ui2.sagVal === '0' && ui2.endsVal === 'weld' &&
+      ui2.ends.join(',') === 'weld:Weld,flat:Flat,pad:Foot pad,ball:Ball', ui2.ends.join(',') + ' | sag ' + ui2.sagVal);
+    const fr8 = () => page.evaluate(([pa, pb, V1, AT]) => window.__cn.frame([pa, pb], ['point', 'point'], V1, AT), [pa, pb, V1, AT]);
+    check('a front view with both sphere points on bare canvas', !!(await fr8()));
+    await clickAt(page, pa);
+    await clickAt(page, pb);
+    let S = await P(page);
+    check('both anchors picked: the straight String is previewed (Sag 0, Weld ends, readout unchanged from ticket 1)', S.planOk && S.straight === true && S.sag === 0 && S.ends === 'weld' &&
+      /^String Ø2\.0, [\d.]+ mm between the anchors · welds into A and B · Set welds it$/.test(S.readout) && Math.abs(+S.readout.match(/, ([\d.]+) mm between/)[1] - S.length) < 0.01, S.readout);
+    const straightTris = S.ghostTris, z0 = S.anchorZ;
+    await shot(page, '09-straight');
+
+    // ---- Sag: typed, live
+    const setSag = async v => { await page.fill('#inp-connect-sag', String(v)); await page.waitForTimeout(300); return P(page); };
+    S = await setSag(6);
+    check('typing a Sag of 6 redraws the ghost as an arc BOWING UP: the readout names the sag, the ghost reaches ' + (z0 + 6 + 1).toFixed(1) + ' mm (anchor + 6 + the string\'s radius)',
+      S.planOk && S.straight === false && S.sag === 6 && /^String Ø2\.0, [\d.]+ mm between the anchors, sag \+6\.0 \(path [\d.]+ mm\) · welds into A and B · Set welds it$/.test(S.readout) &&
+      S.ghost && S.ghostTris === S.planTris && S.ghostTris !== straightTris && Math.abs(S.zTop - (z0 + 6 + 1)) < 0.15, S.readout + ' | top ' + (S.zTop || 0).toFixed(2));
+    check('...the path is longer than the line, the ghost is still amber 0.75, Set is on', S.pathLen > S.length + 1 && S.ghostMat.color === 0xf59e0b && S.ghostMat.opacity === 0.75 && !S.goDisabled, S.pathLen.toFixed(2) + ' vs ' + S.length.toFixed(2));
+    await shot(page, '10-sag-plus-6');
+    // (These anchors sit 50° up the spheres' facing sides: a drape may fall 30° before it runs into the piece.)
+    S = await setSag(-3);
+    check('a Sag of -3 hangs it DOWN: the ghost reaches ' + (z0 - 3 - 1).toFixed(1) + ' mm', S.planOk && S.sag === -3 && /sag -3\.0 \(path/.test(S.readout) && Math.abs(S.zBot - (z0 - 3 - 1)) < 0.15, S.readout + ' | bottom ' + (S.zBot || 0).toFixed(2));
+    await shot(page, '11-sag-minus-3');
+    S = await setSag(-12);
+    check('a Sag of -12 would leave the surface into the piece: refused in words, no ghost, Set off', !S.planOk && S.bad && !S.ghost && S.goDisabled &&
+      /at anchor A it runs into the piece, not away from it - use less sag/.test(S.readout), S.readout);
+    await shot(page, '12-sag-refused');
+    S = await setSag(0);
+    check('Sag back to 0 is the straight String again, triangle for triangle', S.planOk && S.straight === true && S.ghostTris === straightTris, S.ghostTris + ' vs ' + straightTris);
+
+    // ---- Ends: the dropdown redraws
+    S = await setSag(6);
+    const ghostWeld = S.ghostTris;
+    for (const [ends, word] of [['ball', 'ball'], ['pad', 'foot pad']]) {
+      await page.selectOption('#sel-connect-ends', ends);
+      await page.waitForTimeout(150);
+      S = await P(page);
+      check('Ends = ' + ends + ': the readout names it and the sag, and the ghost now carries the ' + (ends === 'ball' ? 'spheres' : 'discs') + ' too',
+        S.planOk && S.ends === ends && new RegExp('sag \\+6\\.0 \\(path [\\d.]+ mm\\), ' + word + ' ends · welds into A and B').test(S.readout) && S.ghostTris > ghostWeld && S.ghostTris === S.planTris, S.readout + ' | ' + S.ghostTris + ' tris');
+      await shot(page, ends === 'ball' ? '13-ball-ends' : '14-pad-ends');
+    }
+    await page.selectOption('#sel-connect-ends', 'flat');
+    await page.waitForTimeout(150);
+    S = await P(page);
+    check('Ends = Flat with Weld into A and B: refused in words (a flush face has nothing to weld with), no ghost, Set off', !S.planOk && S.bad && !S.ghost && S.goDisabled &&
+      /Flat ends are cut flush with the surface and not sunk, so there is nothing to weld them with - pick Keep separate/.test(S.readout), S.readout);
+    await page.check('input[name="connect-result"][value="separate"]');
+    await page.waitForTimeout(150);
+    S = await P(page);
+    check('...Keep separate makes the Flat cut: it plans, "flat ends · kept as its own piece"', S.planOk && S.ends === 'flat' && /flat ends · kept as its own piece · Set adds it$/.test(S.readout), S.readout);
+
+    // ---- Set + Undo: Keep separate, Ball ends, sag +6
+    await page.selectOption('#sel-connect-ends', 'ball');
+    await page.waitForTimeout(150);
+    const spheres2 = await page.evaluate(() => window.__cn.snapshot());
+    S = await P(page);
+    check('Keep separate + Ball ends + sag +6 previews', S.planOk && /sag \+6\.0 \(path [\d.]+ mm\), ball ends · kept as its own piece · Set adds it$/.test(S.readout), S.readout);
+    let depth = await page.evaluate(() => state.undoStack.length);
+    let did = await setAndWait(page);
+    let after = await page.evaluate(() => {
+      const e = state.placed[state.placed.length - 1];
+      return { models: state.models.length, placed: state.placed.length, id: e.sourceId, name: state.models.find(m => m.id === e.sourceId).name,
+               status: document.getElementById('status').textContent, undo: state.undoStack.length };
+    });
+    let topo2 = await page.evaluate(id => window.__cn.topo(id), after.id);
+    const bb = await page.evaluate(id => window.__cn.bounds(window.__cn.up(id)), after.id);
+    check('Set adds ONE new piece (a third; the spheres stay), closed and manifold, one shell, ONE undo step', did && after.models === 3 && after.placed === 3 && after.undo === depth + 1 &&
+      /Connect done/.test(after.status) && topo2.open === 0 && topo2.nm === 0 && topo2.badWinding === 0 && topo2.shells === 1, JSON.stringify(topo2) + ' | ' + after.status);
+    check('...named Connector (string); on the plate it really bows up: its top is ' + (z0 + 6 + 1).toFixed(1) + ' mm (the anchor\'s height + 6 + the radius), read back off the scene',
+      after.name === 'Connector (string)' && Math.abs(bb.hi[2] - (z0 + 6 + 1)) < 0.2, after.name + ' | top ' + bb.hi[2].toFixed(2));
+    check('...the spheres untouched', sameSnap(spheres2, (await page.evaluate(() => window.__cn.snapshot())).filter(s => spheres2.some(x => x.id === s.id))));
+    await shot(page, '15-set-ball-separate');
+    await undo(page);
+    let back = await page.evaluate(() => ({ snap: window.__cn.snapshot(), status: document.getElementById('status').textContent, models: state.models.length }));
+    check('Undo: the connector is off the plate, the spheres as they were', back.models === 2 && sameSnap(spheres2, back.snap) && /Undo: Connect reverted/.test(back.status), back.status);
+
+    // ---- Set + Undo: Weld, Foot pad ends, sag -6
+    await fr8();
+    await clickAt(page, pa);
+    await clickAt(page, pb);
+    await page.check('input[name="connect-result"][value="weld"]');
+    await page.selectOption('#sel-connect-ends', 'pad');
+    await setSag(-3);
+    S = await P(page);
+    check('Weld + Foot pad ends + sag -3 previews', S.planOk && /sag -3\.0 \(path [\d.]+ mm\), foot pad ends · welds into A and B · Set welds it$/.test(S.readout), S.readout);
+    depth = await page.evaluate(() => state.undoStack.length);
+    did = await setAndWait(page);
+    after = await page.evaluate(() => {
+      const e = state.placed[state.placed.length - 1];
+      return { models: state.models.length, placed: state.placed.length, id: e.sourceId, name: state.models.find(m => m.id === e.sourceId).name,
+               status: document.getElementById('status').textContent, undo: state.undoStack.length, open: state.connect.open };
+    });
+    topo2 = await page.evaluate(id => window.__cn.topo(id), after.id);
+    check('Set: two spheres become ONE closed solid with a Foot pad at each end, ONE undo step, the card stays open', did && after.models === 1 && after.placed === 1 && after.undo === depth + 1 &&
+      /\(connected\)$/.test(after.name) && topo2.open === 0 && topo2.nm === 0 && topo2.badWinding === 0 && topo2.shells === 1 && after.open, JSON.stringify(topo2) + ' | ' + after.name);
+    await shot(page, '16-set-pad-weld');
+    await undo(page);
+    back = await page.evaluate(() => ({ snap: window.__cn.snapshot(), status: document.getElementById('status').textContent, models: state.models.length }));
+    check('Undo: both spheres back, bit for bit', back.models === 2 && sameSnap(spheres2, back.snap) && /Undo: Connect reverted/.test(back.status), back.status);
+
+    await page.selectOption('#sel-connect-ends', 'weld');
+    await page.fill('#inp-connect-sag', '0');
+    await page.check('input[name="connect-result"][value="weld"]');
+    await page.click('#btn-connect-cancel');          // no picks left after the Undo: it closes the card
+    S = await P(page);
+    const back8 = await page.evaluate(() => ({ sag: document.getElementById('inp-connect-sag').value, ends: document.getElementById('sel-connect-ends').value }));
+    check('Cancel with nothing picked closes the card, and the fields are back at Sag 0 / Weld ends', !S.open && S.hidden && back8.sag === '0' && back8.ends === 'weld', JSON.stringify(back8));
+  }
 
   const errs = logs.filter(l => /\[pageerror\]|\[error\]/.test(l) && !/favicon/.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));

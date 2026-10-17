@@ -5,8 +5,10 @@
 //
 // Bridge (app-bridge.js) is the quick gap-fill: the two picks decide the shape.
 // Connect is the builder: the two anchors are only WHERE, the card decides WHAT
-// runs between them - String, Ribbon, Tube or Tapered, welded into the pieces
-// or kept as a piece of its own.
+// runs between them - String, Ribbon, Tube or Tapered; along what PATH (Sag, mm,
+// signed: 0 straight, + bows it up, - hangs it down); with what ENDS (Weld, Flat,
+// Foot pad, Ball); and whether it is welded into the pieces or kept as a piece of
+// its own.
 //
 // TWO CLICKS, NOT A DRAG. Open Connect, then:
 //   - HOVER: whatever is under the pointer that Connect could take lights up -
@@ -17,9 +19,10 @@
 //     down and nothing captures the pointer: orbit, pan and zoom as much as you
 //     like - a line from A follows the pointer the whole time - then
 //   - CLICK another place: anchor B. The connector is built at once and drawn as
-//     a GHOST (amber, Bridge's), from the very soup Set would commit. A refusal
+//     a GHOST (amber, Bridge's), from the very soup Set would commit (a Foot pad's
+//     or a Ball's disc and sphere ride in it, not yet unioned). A refusal
 //     draws nothing and says why, in red. Changing the shape or any field
-//     redraws the ghost at once.
+//     redraws the ghost at once - Sag and Ends included.
 //   - Clicking an anchor again clears it. A click on nothing clears the picks (an
 //     orbit drag does not: it has to stay put to count as a click) and so does
 //     Escape. With both set, a click on a new place replaces B.
@@ -174,12 +177,13 @@ function NSO_connectResult() {
   for (var i = 0; i < els.length; i++) if (els[i].checked) return els[i].value;
   return 'weld';
 }
+function NSO_connectEnds() { var el = NSO_connectEl('sel-connect-ends'); return el && el.value ? el.value : 'weld'; }
 function NSO_connectOpts() {
   function num(id) { var el = NSO_connectEl(id); return el && el.value !== '' && isFinite(+el.value) ? +el.value : null; }
-  var o = { shape: NSO_connectShape(), result: NSO_connectResult() };
+  var o = { shape: NSO_connectShape(), result: NSO_connectResult(), ends: NSO_connectEnds() };
   [['inp-connect-dia', 'diameterMm'], ['inp-connect-width', 'widthMm'], ['inp-connect-thick', 'thicknessMm'],
    ['inp-connect-tube-dia', 'tubeDiaMm'], ['inp-connect-wall', 'wallMm'], ['inp-connect-dia-a', 'diaAMm'],
-   ['inp-connect-dia-b', 'diaBMm']].forEach(function (f) { var v = num(f[0]); if (v != null) o[f[1]] = v; });
+   ['inp-connect-dia-b', 'diaBMm'], ['inp-connect-sag', 'sagMm']].forEach(function (f) { var v = num(f[0]); if (v != null) o[f[1]] = v; });
   return o;
 }
 function NSO_connectSyncRows() {
@@ -316,7 +320,7 @@ function NSO_connectSet() {
     }
   }
   C.busy = true; NSO_connectSyncRows();
-  if (weld) NSO_connectSay('Connecting (loading CSG kernel)...');
+  if (weld || p.tips) NSO_connectSay('Connecting (loading CSG kernel)...');
   var unionFn = (typeof NSO_unionSoups === 'function') ? NSO_unionSoups : null;
   return NSO_Connect.weld(p, { union: unionFn }).then(function (r) {
     C.busy = false;
@@ -512,7 +516,7 @@ if (typeof document !== 'undefined') {
       // The ghost follows the fields as they change: a typed value after a short
       // pause, a finished one (change) at once.
       ['inp-connect-dia', 'inp-connect-width', 'inp-connect-thick', 'inp-connect-tube-dia', 'inp-connect-wall',
-       'inp-connect-dia-a', 'inp-connect-dia-b'].forEach(function (id) {
+       'inp-connect-dia-a', 'inp-connect-dia-b', 'inp-connect-sag'].forEach(function (id) {
         var el = NSO_connectEl(id);
         if (!el) return;
         el.addEventListener('input', function () {
@@ -524,6 +528,8 @@ if (typeof document !== 'undefined') {
       });
       var sel = NSO_connectEl('sel-connect-shape');
       if (sel) sel.addEventListener('change', function () { NSO_connectSyncRows(); redraw(); });
+      var ends = NSO_connectEl('sel-connect-ends');
+      if (ends) ends.addEventListener('change', redraw);
       var radios = document.getElementsByName('connect-result');
       for (var i = 0; i < radios.length; i++) radios[i].addEventListener('change', redraw);
       NSO_connectSyncRows();
