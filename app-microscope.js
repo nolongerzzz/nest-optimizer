@@ -2932,6 +2932,7 @@ var NSO_MICROSCOPE = (function () {
     if (!doc) return false;
     var want = (names || []).filter(function (n) { return !!doc.groups[n]; });
     if (!want.length) return false;
+    if (isolated) back();               // a new view filter: what was isolated is whole first
     if (doc.kind === 'toolpath') FEATURE_OFF = new Set(Object.keys(doc.groups).filter(function (g) { return want.indexOf(g) < 0; }));
     else HIDDEN = new Set(Object.keys(doc.groups).filter(function (g) { return want.indexOf(g) < 0; }));
     viewChanged();
@@ -2989,6 +2990,7 @@ var NSO_MICROSCOPE = (function () {
   /** Every row back on - parts, features and detector rows - nothing cleared. The slider is left alone. */
   function showAll() {
     if (!doc) return;
+    if (isolated) back();               // everything back means the whole part
     CLEARED.clear();
     HIDDEN = new Set();
     FEATURE_OFF = new Set(['Travel']);
