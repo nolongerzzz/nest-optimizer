@@ -9619,28 +9619,6 @@ function setupUI() {
   }
 
   document.getElementById('btn-optimize').addEventListener('click', runOptimize);
-  document.getElementById('btn-clear').addEventListener('click', () => {
-    state.models = [];
-    state.editId = null;
-    state.cutT = 0.5;
-    state.cutterOpen = false;
-    state.editYawDragging = false;
-    state.cutDragging = false;
-    clearUndo();
-    clearDisplayMeshes();
-    renderModelList();
-    clearPlaced();
-    removeCutHelper();
-    state.previewMesh = null;
-    state.selectedIndex = -1;
-    updateAdjustUI();
-    updateOptimizeButton();
-    updateEditSize();
-    updateCutterUI();
-    const fi = document.getElementById('file-input');
-    if (fi) fi.value = '';
-    setStatus('Cleared - click drop zone to load an STL again');
-  });
   document.getElementById('btn-export-stl').addEventListener('click', exportSTLs);
 
   // Manual adjust

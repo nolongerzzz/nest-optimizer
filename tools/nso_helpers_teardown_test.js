@@ -297,7 +297,7 @@ withApp(async (page, logs) => {
   }
 
   console.log('\n=== 2. Clear, load a piece: pieces and plate only ===');
-  await page.click('#btn-clear');
+  await page.click('#btn-clear-plate');
   await frames(page, 3);
   check('after Clear, the plate alone', (await audit(page)).length === 0, (await audit(page)).join('; '));
   const boxId = await loadSTL(page, BOX_CLOSED);
@@ -307,13 +307,13 @@ withApp(async (page, logs) => {
   check('box_closed.stl loaded and selected: pieces and plate only', a2.length === 0, a2.join('; '));
 
   console.log('\n=== 3. repro (a): a Bend session on a tube, Clear, box_closed.stl ===');
-  await page.click('#btn-clear');
+  await page.click('#btn-clear-plate');
   const t3 = await loadSTL(page, BEND_TUBE);
   await selectPiece(page, t3);
   await page.click('#btn-bend');
   await page.waitForFunction(() => state.bend.open && state.bend.marker && state.bend.marker.parent, null, { timeout: 30000 });
   check('Bend is open on the tube, its marker drawn', true);
-  await page.click('#btn-clear');
+  await page.click('#btn-clear-plate');
   check('Clear closes Bend', !(await page.evaluate(() => state.bend.open)));
   const b3 = await loadSTL(page, BOX_CLOSED);
   await selectPiece(page, b3);
@@ -327,7 +327,7 @@ withApp(async (page, logs) => {
   check('the scene is the box and the plate', a3.length === 0, a3.join('; '));
 
   console.log('\n=== 4. export: pieces only; repro (b), the slab on the top face ===');
-  await page.click('#btn-clear');
+  await page.click('#btn-clear-plate');
   const e1 = await loadSTL(page, BOX_CLOSED);
   const e2 = await loadSTL(page, STOCK_TUBE);
   await selectPiece(page, e2);
@@ -382,7 +382,7 @@ withApp(async (page, logs) => {
   check('after the leave, pieces and plate only', a4.length === 0, a4.join('; '));
 
   console.log('\n=== 5. Undo past a helper\'s step ===');
-  await page.click('#btn-clear');
+  await page.click('#btn-clear-plate');
   const u1 = await loadSTL(page, BEND_TUBE);
   await selectPiece(page, u1);
   await page.evaluate(() => nudgeSelected(2, 0));     // one step on the stack

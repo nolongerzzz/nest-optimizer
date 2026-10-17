@@ -54,36 +54,12 @@ body {
   height: 100dvh;
 }
 
-/* Header */
-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 20px;
-  background: var(--panel);
-  border-bottom: 1px solid var(--border);
-}
-
-.logo {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.logo-icon {
-  font-size: 28px;
-  color: var(--accent);
-}
-
+/* The page has no header: the shell's row and the pinned panel start at the
+   top edge of the window. h1 is G-scope's title (.ms-head h1 sets its size). */
 h1 {
   font-size: 18px;
   font-weight: 600;
   letter-spacing: -0.02em;
-}
-
-.tagline {
-  font-size: 12px;
-  color: var(--muted);
 }
 
 /* Main layout */
@@ -118,25 +94,6 @@ main {
   pointer-events: auto;
   background: var(--panel);
 }
-/* Narrow window: only the header tightens. The viewport fills the window at
-   every width, as it does above 900 px - the shell's row and column live on
-   it, so squashing it (this rule used to set it to 45vh, under a stacked
-   sidebar that is gone) cut the column off at the viewport's bottom edge and
-   left Pack, and on a short window Pieces, unreachable. */
-@media (max-width: 900px) {
-  header {
-    padding: 10px 14px;
-  }
-
-  h1 {
-    font-size: 16px;
-  }
-
-  .tagline {
-    font-size: 11px;
-  }
-}
-
 .card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -383,8 +340,8 @@ select:focus, input:focus {
    allowed to be wider than the Finish column because what moved in here -
    the Cut tool, the Export card - was built for the sidebar's width. It is
    bounded and scrolls for the same reason the Finish menu is: a menu taller
-   than the window makes the PAGE scroll, which drags the canvas under the
-   header and sends the next click somewhere the user did not aim it. */
+   than the window makes the PAGE scroll, which drags the canvas out from under
+   the pointer and sends the next click somewhere the user did not aim it. */
 .vp-top-menu > .vp-top-body {
   position: absolute;
   top: calc(100% + 4px);

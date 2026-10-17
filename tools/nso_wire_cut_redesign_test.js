@@ -159,7 +159,6 @@ window.__addDisplayPiece = function (soup, name) {
   placeModelMovable(m, 0, 0);
   return id;
 };
-window.__clearAll = function () { document.getElementById('btn-clear').click(); };
 `;
 
 /* Geometry, in node. */
@@ -213,6 +212,13 @@ const quatSame = (a, b) => Math.abs(Math.abs(a[0] * b[0] + a[1] * b[1] + a[2] * 
 
 withApp(async (page, logs) => {
   await page.addScriptTag({ content: PAGE });
+  /* The full reset is a page reload (there is no Clear button; CLEAR PLATE keeps
+     the library models), with the helpers put back after it. */
+  const reload = async () => {
+    await page.goto(page.url(), { waitUntil: 'load' });
+    await page.waitForFunction(() => typeof state !== 'undefined' && state.ready === true, null, { timeout: 30000 });
+    await page.addScriptTag({ content: PAGE });
+  };
   const armed = () => page.evaluate(() => ({ open: !!state.cutterOpen, tool: state.cutTool || null,
     blade: !!state.cutHelper, card: document.getElementById('menu-cut').open,
     crop: document.getElementById('menu-crop').open }));
@@ -277,7 +283,7 @@ withApp(async (page, logs) => {
   // cut it to length), and a bar lying along display Z.
   const SQUARE = [['post', box(10, 12, 50), 0.3], ['barZ', box(12, 60, 8), 0.7]];
   for (const [name, soup, f] of SQUARE) {
-    await page.evaluate(() => __clearAll());
+    await reload();
     const id = await loadSTL(page, stl(name + '.stl', soup));
     await ensureCut();
     const s = await clickPieceAt(id, f);
@@ -311,7 +317,7 @@ withApp(async (page, logs) => {
   /* ------------------------------------------------------------------ 3 */
   console.log('\n=== 3. a TIPPED piece: square to the piece in world space ===');
   {
-    await page.evaluate(() => __clearAll());
+    await reload();
     const id = await loadSTL(page, stl('bar60.stl', box(60, 12, 8)));
     // Stand it on end, then bank and tilt it: the pose the Tip menu writes,
     // on the mesh, off every plate axis.
@@ -352,7 +358,7 @@ withApp(async (page, logs) => {
   /* ------------------------------------------------------------------ 4 */
   console.log('\n=== 4. the mitre wheel: an angled face, the piece stays put ===');
   for (const route of ['raw', 'display']) {
-    await page.evaluate(() => __clearAll());
+    await reload();
     await shutCut();
     const id = route === 'raw'
       ? await loadSTL(page, stl('bar60m.stl', box(60, 12, 8)))
@@ -426,7 +432,7 @@ withApp(async (page, logs) => {
   /* ------------------------------------------------------------------ 4b */
   console.log('\n=== 4b. the mitre − / + buttons: 1°, Shift 0.1°, Alt 5°, both ways; wheel, number and blade agree ===');
   {
-    await page.evaluate(() => __clearAll());
+    await reload();
     await shutCut();
     const id = await loadSTL(page, stl('bar60b.stl', box(60, 12, 8)));
     await ensureCut();
@@ -539,7 +545,7 @@ withApp(async (page, logs) => {
   /* ------------------------------------------------------------------ 5 */
   console.log('\n=== 5. the slider and ← / → move the blade in 0.1 mm steps; the number tracks ===');
   {
-    await page.evaluate(() => __clearAll());
+    await reload();
     const id = await loadSTL(page, stl('bar60s.stl', box(60, 12, 8)));
     await ensureCut();
     await clickPieceAt(id, 0.5);
@@ -588,7 +594,7 @@ withApp(async (page, logs) => {
   /* ------------------------------------------------------------------ 6 */
   console.log('\n=== 6. Cut is a clean split on both engines; one Undo restores ===');
   for (const route of ['raw', 'display']) {
-    await page.evaluate(() => __clearAll());
+    await reload();
     await shutCut();
     const id = route === 'raw'
       ? await loadSTL(page, stl('bar8.stl', box(8, 12, 6)))
@@ -620,7 +626,7 @@ withApp(async (page, logs) => {
   /* ------------------------------------------------------------------ 7 */
   console.log('\n=== 7. Crop works from its own card ===');
   {
-    await page.evaluate(() => __clearAll());
+    await reload();
     await shutCut();
     const id = await loadSTL(page, stl('bar60c.stl', box(60, 12, 8)));
     await clickSummary('menu-crop');
@@ -652,7 +658,7 @@ withApp(async (page, logs) => {
   /* ------------------------------------------------------------------ 8 */
   console.log('\n=== 8. cut, then Join the halves: the original back ===');
   for (const [name, soup, f] of [['box20', box(20, 20, 20), 0.35], ['bar60', box(60, 12, 8), 0.4]]) {
-    await page.evaluate(() => __clearAll());
+    await reload();
     await shutCut();
     const id = await loadSTL(page, stl(name + 'j.stl', soup));
     const orig = await page.evaluate(id => Array.from(state.models.find(x => x.id === id).rawTris), id);
@@ -697,7 +703,7 @@ withApp(async (page, logs) => {
     // A piece whose record carries flipX (a scene 3MF puts one back): the
     // halves must land on the side of the plate their part of the piece was
     // on, not swapped across the cut.
-    await page.evaluate(() => __clearAll());
+    await reload();
     await shutCut();
     const id = await loadSTL(page, stl('barZf.stl', box(12, 60, 8)));
     await page.evaluate(id => {

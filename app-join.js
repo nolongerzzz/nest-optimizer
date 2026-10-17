@@ -3611,32 +3611,6 @@ function setupUI() {
   }
 
   document.getElementById('btn-optimize').addEventListener('click', runOptimize);
-  document.getElementById('btn-clear').addEventListener('click', () => {
-    // Every tool closed and every helper gone first, while the pieces they
-    // were drawn on still exist (nso-helpers.js). Before, Clear told only the
-    // cutter: a Bend left open drew its marker through the next piece loaded.
-    nsoHelpers.teardown('clear');
-    state.models = [];
-    state.editId = null;
-    state.cutT = 0.5;
-    state.cutterOpen = false;
-    state.editYawDragging = false;
-    state.cutDragging = false;
-    clearUndo();
-    clearDisplayMeshes();
-    renderModelList();
-    clearPlaced();
-    removeCutHelper();
-    state.previewMesh = null;
-    state.selectedIndex = -1;
-    updateAdjustUI();
-    updateOptimizeButton();
-    updateEditSize();
-    updateCutterUI();
-    const fi = document.getElementById('file-input');
-    if (fi) fi.value = '';
-    setStatus('Cleared - click drop zone to load an STL again');
-  });
   document.getElementById('btn-export-stl').addEventListener('click', exportPlate);
   setupCoolingProfileUI();
   setupExportFormatUI();
