@@ -2899,14 +2899,6 @@ select:focus, input:focus {
 .ms-seg button:first-child { border-radius: 6px 0 0 6px; }
 .ms-seg button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
 .ms-seg button.active { position: relative; z-index: 1; }
-/* G-scope Lift, Strip: one row per group of details - tick box, colour, name, count. */
-.ms-lift-groups { margin: 0 0 8px 0; }
-.ms-lift-group { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text); margin: 0 0 4px 0; }
-.ms-lift-group input { margin: 0; }
-.ms-lift-group input:disabled + .ms-lift-sw { opacity: 0.5; }
-.ms-lift-group .ms-lift-sw { width: 10px; height: 10px; border-radius: 2px; flex: none; }
-.ms-lift-group .ms-lift-n { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
-.ms-lift-why { font-size: 11px; color: var(--muted); margin: 0 0 4px 22px; line-height: 1.35; }
 .ms-card input[type="number"] {
   width: 62px;
   background: var(--bg);
@@ -2971,7 +2963,8 @@ select:focus, input:focus {
    out here rather than shared by class because the main page's checks count
    ".vp-shell-col" and ".vp-shell-row" slabs by those classes. */
 .ms-col > .vp-bar-btn,
-.ms-corner > .vp-bar-btn {
+.ms-corner > .vp-bar-btn,
+.ms-plate-seg > .vp-bar-btn {
   pointer-events: auto;
   display: flex;
   align-items: center;
@@ -3002,27 +2995,44 @@ select:focus, input:focus {
   text-align: center;
   white-space: normal;          /* a label longer than the column wraps inside its slab */
 }
-.ms-corner > .vp-bar-btn {
+.ms-corner > .vp-bar-btn,
+.ms-plate-seg > .vp-bar-btn {
   height: var(--shell-btn-h);
   letter-spacing: 0.07em;
   line-height: 1;
   white-space: nowrap;
 }
-.ms-corner > .vp-bar-btn[hidden] { display: none; }
+.ms-corner > .vp-bar-btn[hidden],
+.ms-plate-seg > .vp-bar-btn[hidden] { display: none; }
 .ms-col > .vp-bar-btn:hover:not(:disabled),
-.ms-corner > .vp-bar-btn:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.45); }
+.ms-corner > .vp-bar-btn:hover:not(:disabled),
+.ms-plate-seg > .vp-bar-btn:hover:not(:disabled) { border-color: rgba(255, 255, 255, 0.45); }
 .ms-col > .vp-bar-btn:focus-visible,
-.ms-corner > .vp-bar-btn:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 1px; }
+.ms-corner > .vp-bar-btn:focus-visible,
+.ms-plate-seg > .vp-bar-btn:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 1px; }
 .ms-col > .vp-bar-btn:disabled,
-.ms-corner > .vp-bar-btn:disabled { opacity: 0.38; cursor: not-allowed; }
+.ms-corner > .vp-bar-btn:disabled,
+.ms-plate-seg > .vp-bar-btn:disabled { opacity: 0.38; cursor: not-allowed; }
 /* Open: the lit border and glow the main shell's open drop-downs wear. */
 .ms-col > .vp-bar-btn.is-on,
-.ms-corner > .vp-bar-btn.is-on {
+.ms-corner > .vp-bar-btn.is-on,
+.ms-plate-seg > .vp-bar-btn.is-on {
   border-color: var(--glass-border-lit);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), var(--glass-glow);
 }
 
-/* Top-right: Back, Export, Close, one pinned row. */
+/* Top-right: Back, LENS | TAKE, Clear, Export, Close, one pinned row. LENS |
+   TAKE is one two-state control: two slabs sharing an edge, the plate shown lit. */
+.ms-plate-seg { display: flex; pointer-events: none; }
+.ms-plate-seg > .vp-bar-btn { border-radius: 0; min-width: 52px; }
+.ms-plate-seg > .vp-bar-btn:first-child { border-radius: 9px 0 0 9px; }
+.ms-plate-seg > .vp-bar-btn:last-child { border-radius: 0 9px 9px 0; margin-left: -1px; }
+.ms-plate-seg > .vp-bar-btn.active {
+  position: relative;
+  z-index: 1;
+  border-color: var(--glass-border-lit);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), var(--glass-glow);
+}
 .ms-corner {
   position: absolute;
   top: var(--shell-pad);
@@ -3112,7 +3122,7 @@ select:focus, input:focus {
 .ms-readouts {
   position: absolute;
   left: calc(var(--shell-pad) + 257px + 8px);
-  right: 88px;                 /* clear of the layer-range slider */
+  right: calc(88px + var(--ms-watch-w, 0px));   /* clear of the layer-range slider, and of Watch's log */
   bottom: 12px;
   z-index: 5;
   display: flex;
@@ -3146,7 +3156,8 @@ select:focus, input:focus {
 /* No backdrop-filter: solid slabs and cards, still readable over the canvas. */
 @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
   .ms-col > .vp-bar-btn,
-  .ms-corner > .vp-bar-btn { background: var(--glass-slab-solid); }
+  .ms-corner > .vp-bar-btn,
+  .ms-plate-seg > .vp-bar-btn { background: var(--glass-slab-solid); }
   .ms-card { background: var(--glass-panel-solid); }
 }
 
@@ -3197,7 +3208,7 @@ select:focus, input:focus {
 }
 /* Empty until a file is open, and an empty bordered box over the canvas is
    just a smudge. */
-#ms-legend-float:not(:has(.ms-legend-item)) { display: none; }
+#ms-legend-float:not(:has(#ms-legend > *)) { display: none; }
 
 /* Minimize: the header row stays (so it can be opened again), the list goes,
    and the panel shrinks to its title. The toggle sits outside
@@ -3229,18 +3240,7 @@ button#ms-legend-toggle {
 }
 button#ms-legend-toggle:hover { color: var(--text, #fff); border-color: var(--accent); }
 #ms-legend-float.collapsed { width: auto; }
-#ms-legend-float.collapsed #ms-legend,
-#ms-legend-float.collapsed #ms-detected { display: none; }
-/* The detector rows (Flange, Handle, Bracket, Lid, Hinge): under the parts,
-   set off by a rule, because they are found in the geometry rather than read
-   from the file. Show / hide toggles like the rows above them; one switched
-   off reads dim, as a hidden part does. */
-#ms-detected:not(:empty) {
-  border-top: 1px solid var(--border);
-  margin-top: 4px;
-  padding-top: 5px;
-}
-#ms-detected .ms-legend-item { margin-bottom: 0; }
+#ms-legend-float.collapsed #ms-legend { display: none; }
 #ms-legend-float.collapsed .ms-section-title,
 #ms-legend-float.collapsed button#ms-legend-toggle { margin-bottom: 0; }
 #ms-legend-float.collapsed button#ms-legend-toggle { margin-top: 0; }
@@ -3250,33 +3250,22 @@ button#ms-legend-toggle:hover { color: var(--text, #fff); border-color: var(--ac
    docked to the viewport's right edge.
    --------------------------------------------------------------------------- */
 .ms-legend-label { flex: 1 1 auto; min-width: 0; }
-/* Was .ms-sidebar button.ms-legend-only, which took its base look - the
-   panel background, the border, the text colour - from `.ms-sidebar button`.
-   The legend moved out of the sidebar, so that inheritance went with it and
-   these rows would have rendered as default browser buttons. Spelled out
-   here instead, and no longer scoped to an ancestor the legend does not
-   have. */
-button.ms-legend-only {
+/* The Features list: swatch, name (count), and the Display check at the row's end. */
+.ms-legend-display {
   flex: 0 0 auto;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 6px;
+  margin: 0;
   cursor: pointer;
-  font-family: inherit;
-  padding: 1px 6px;
-  font-size: 10.5px;
-  opacity: 0;
+  accent-color: var(--accent);
 }
-button.ms-legend-only:hover { border-color: var(--accent); }
-.ms-legend-item:hover .ms-legend-only,
-.ms-legend-only:focus { opacity: 1; }
+.ms-legend-note { font-size: 11px; color: var(--muted); padding: 2px 4px; line-height: 1.35; }
+.ms-legend-item .ms-legend-label { cursor: pointer; }
 
 .ms-zr {
   position: absolute;
   top: 56px;
   right: 12px;
-  bottom: 56px;
+  /* Watch's log docks under the slider's All button (nso-watch.js sets --ms-watch-h) */
+  bottom: var(--ms-watch-h, 56px);
   width: 64px;
   z-index: 6;
   display: flex;
@@ -3341,6 +3330,18 @@ button.ms-legend-only:hover { border-color: var(--accent); }
   cursor: pointer;
 }
 .ms-zr-all:hover { border-color: var(--accent); }
+/* The range as one card: the grip that is hovered, clicked and dragged like any layer card. */
+.ms-zr-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  font-size: 10.5px;
+  padding: 2px 6px;
+  cursor: grab;
+  touch-action: none;
+}
+.ms-zr-card:hover { border-color: #38bdf8; }
 
 /* G-scope supports: the popover a marker or a support opens. It sits over the
    canvas, beside the click, above the slider. */

@@ -18,7 +18,7 @@
      2. untick the lines: Confirm lifts 7 - seven closed pieces where they stood,
         the three lines stay, ONE undo step; Ctrl+Z puts it back bit for bit
      3. a click on the ring lifts it alone: closed, its bore open; Ctrl+Z
-     4. G-scope's Features row counts the same 10, grouped, read-only
+     4. (G-scope's Features row left G-scope with the SELECT ticket, docs/GSCOPE-SELECT.md)
      5. the dish: Lift reads it with Lift 3 - six dots and the long squiggle,
         each cut along the dish; a click lifts a dot; Ctrl+Z
      6. the dish, Strip: 7 lift, nothing left; Ctrl+Z
@@ -134,14 +134,6 @@ withApp(async (page, logs) => {
   check('one Ctrl+Z: the plate bit for bit', sameSoup(await raw(page, flatId), SRC) && (await plateState(page)).undo === b3.undo);
   await disarm(page);
 
-  /* ====================================================== 4. G-scope's row */
-  console.log('\n=== 4. G-scope: the Features row counts the same ===');
-  await openScopeOnPlate(page);
-  const f4 = await features(page);
-  check('Features: the same 10, grouped, read-only', f4.title === 'Features' && f4.count === 10 && f4.controls === 0 &&
-    f4.rows.join(' | ') === 'Lineslines ×3 | Large shapeslarge shape ×1 | Dotsdots ×6', f4.rows.join(' | '));
-  await shots.scope(page, '3-gscope-features-flat');
-  await page.evaluate(() => NSO_MICROSCOPE.close());
   await dropPieces(page, [flatId]);
 
   /* ========================================================== 5. the dish */

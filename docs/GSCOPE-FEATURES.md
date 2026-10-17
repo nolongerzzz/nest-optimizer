@@ -1,5 +1,10 @@
 # G-scope: the Handle, Bracket, Lid and Hinge rows
 
+> **Moved.** G-scope no longer shows the Handle / Bracket / Lid / Hinge rows
+> (G-scope's SELECT ticket, `docs/GSCOPE-SELECT.md`): surface features live on the
+> plate now. The detector (`nso_face_features.js`) and its checks stay; the rows,
+> their API and `gcode:gscope-features` are gone.
+
 `nso_flange.js` (`docs/GSCOPE-FLANGE.md`) showed a pattern that works. A
 feature is found by a named geometric rule. Every clause of the rule is a
 refusal with a worded reason. The rule is validated against ground truth that

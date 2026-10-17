@@ -49,3 +49,5 @@ tools/split-parts-out/
 tools/fixtures-local/
 tools/supports-out/
 tools/patch-out/
+tools/gscope-take-out/
+tools/gscope-select-out/

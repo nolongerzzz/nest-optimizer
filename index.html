@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=shelfb10" />
+  <link rel="stylesheet" href="styles.css?v=gselectb10" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1323,10 +1323,6 @@
 
       <button id="ms-nav-select" type="button" class="vp-bar-btn ms-nav ms-group-start"
               data-card="ms-card-select" aria-controls="ms-card-select" aria-expanded="false">Select</button>
-      <button id="ms-nav-line" type="button" class="vp-bar-btn ms-nav"
-              data-card="ms-card-line" aria-controls="ms-card-line" aria-expanded="false">Line</button>
-      <button id="ms-nav-layer" type="button" class="vp-bar-btn ms-nav"
-              data-card="ms-card-layer" aria-controls="ms-card-layer" aria-expanded="false">Layer</button>
       <button id="ms-nav-view" type="button" class="vp-bar-btn ms-nav"
               data-card="ms-card-view" aria-controls="ms-card-view" aria-expanded="false">View</button>
       <button id="ms-nav-render" type="button" class="vp-bar-btn ms-nav"
@@ -1344,10 +1340,20 @@
       <div id="ms-mode-badge">Whole part</div>
 
       <!-- The top-right corner: Back (only when the document's producer gave
-           one), Export (its card opens just under this row) and Close. -->
+           one), the LENS | TAKE plate toggle, Clear, Export (its card opens just
+           under this row) and Close. LENS is what was loaded; TAKE holds copies
+           pulled off it (docs/GSCOPE-TAKE.md). Back and Close are the only exits. -->
       <div id="ms-corner" class="ms-corner">
         <button id="ms-btn-back-producer" type="button" class="vp-bar-btn" hidden
                 title="Close G-scope and go back to where this came from, with everything there as you left it">Back</button>
+        <div id="ms-plate-toggle" class="ms-plate-seg" role="group" aria-label="Plate shown">
+          <button id="ms-plate-lens" type="button" class="vp-bar-btn active" aria-pressed="true"
+                  title="LENS: what you loaded - the plate read, or the file you imported. Nothing here changes when you pull from it">Lens</button>
+          <button id="ms-plate-take" type="button" class="vp-bar-btn" aria-pressed="false"
+                  title="TAKE: copies pulled off LENS. Press a selection on LENS and drag it here">Take</button>
+        </div>
+        <button id="ms-btn-take-clear" type="button" class="vp-bar-btn"
+                title="Empty TAKE. With Shift, also drop the imported file on LENS and read the plate again">Clear</button>
         <button id="ms-nav-export" type="button" class="vp-bar-btn ms-nav"
                 data-card="ms-card-export" aria-controls="ms-card-export" aria-expanded="false">Export</button>
         <button id="ms-close" type="button" class="vp-bar-btn">Close</button>
@@ -1356,36 +1362,30 @@
       <!-- The cards. One open at a time, each beside the column, top-left of
            the viewport (Export: under the corner row). The engine still shows
            and hides the rows inside them by id, as it did in the sidebar. -->
+      <!-- SELECT: one selection model, five ways in. In every mode: hover outlines
+           what a click would take, a click isolates it (again, or Escape: whole
+           again), a drag pulls it onto TAKE. A press on bare plate orbits. -->
       <div id="ms-card-select" class="ms-card" role="group" aria-label="Select" data-nav="ms-nav-select">
-        <div class="ms-btn-row">
-          <button id="ms-mode-orbit" type="button" class="active">Orbit whole part</button>
-          <button id="ms-mode-select" type="button">Click to select region</button>
-          <button id="ms-mode-line" type="button"
-                  title="Pick one extrusion move at a time (sliced files only)">Pick a line</button>
+        <div class="ms-btn-row ms-seg" id="ms-mode-row" role="group" aria-label="Select by">
+          <button id="ms-mode-piece" type="button" class="active" aria-pressed="true"
+                  title="A whole piece">Piece</button>
+          <button id="ms-mode-select" type="button" aria-pressed="false"
+                  title="The capture box: click a piece to drop one, size it by its dots">Region</button>
+          <button id="ms-mode-feature" type="button" aria-pressed="false"
+                  title="A slicer line type: a line of it, or its row in the Features list (slices only)">Feature</button>
+          <button id="ms-mode-line" type="button" aria-pressed="false"
+                  title="One extrusion line; the arrows step along it (slices only)">Line</button>
+          <button id="ms-mode-layer" type="button" aria-pressed="false"
+                  title="One layer, or the slider's whole range (slices only)">Layer</button>
         </div>
+        <p class="ms-note" id="ms-mode-note">Hover a piece, click to isolate it. Drag it onto TAKE.</p>
         <div id="ms-select-controls" style="display:none;">
-          <p class="ms-note">Click empty space to drop a flat box. Drag its
-            <b>blue centre dot</b> to move it. Drag its <b>green corner dot</b> to
-            size it along and across independently. A new box lines up with the
-            piece next to it. Drag its <b>side/face</b> to scale
-            the footprint. Drag the <b>small orange dot on top</b> to control how
-            thick (tall) it is &mdash; keep it thin to avoid grabbing unrelated
-            layers above/below.</p>
           <div class="ms-btn-row">
             <button id="ms-btn-isolate" type="button" disabled>Isolate all boxes &rarr;</button>
             <button id="ms-btn-clear" type="button">Clear all boxes</button>
           </div>
         </div>
-        <div id="ms-detail-controls" class="ms-btn-row" data-flex="1" style="display:none;">
-          <button id="ms-btn-back" type="button">&larr; Back to whole part</button>
-        </div>
-      </div>
-
-      <div id="ms-card-line" class="ms-card" role="group" aria-label="Line" data-nav="ms-nav-line">
         <div id="ms-line-controls" style="display:none;">
-          <p class="ms-note">Click a line to pick that one move; <b>Shift</b>-click
-            adds or removes one. The arrows step to the neighbouring move that is
-            drawn, so the layer-range slider and the legend decide what you step through.</p>
           <div class="ms-btn-row">
             <button id="ms-line-prev" type="button" title="Previous move (Left arrow)">&#9664; line</button>
             <button id="ms-line-next" type="button" title="Next move (Right arrow)">line &#9654;</button>
@@ -1393,9 +1393,6 @@
           </div>
           <p class="ms-note" id="ms-line-read">&mdash;</p>
         </div>
-      </div>
-
-      <div id="ms-card-layer" class="ms-card" role="group" aria-label="Layer" data-nav="ms-nav-layer">
         <div id="ms-layer-row" style="display:none;">
           <div class="ms-btn-row">
             <button id="ms-layer-prev" type="button" title="Previous layer">&#9660;</button>
@@ -1406,6 +1403,9 @@
                     title="Select every move at this layer's printing height, whatever feature printed it">Select layer</button>
           </div>
           <p class="ms-note" id="ms-layer-note">&mdash;</p>
+        </div>
+        <div id="ms-detail-controls" class="ms-btn-row" data-flex="1" style="display:none;">
+          <button id="ms-btn-back" type="button">&larr; Back to whole part</button>
         </div>
       </div>
 
@@ -1512,7 +1512,7 @@
            (a selection; a toolpath; a slice made here), as it always was. -->
       <div id="ms-card-export" class="ms-card ms-card-corner" role="group" aria-label="Export" data-nav="ms-nav-export">
         <div class="ms-xgroup">
-          <div class="ms-section-title">Selection</div>
+          <div class="ms-section-title" id="ms-export-sel-title">Selection</div>
           <div id="ms-export-row" data-flex="0" style="display:none;">
             <div class="ms-btn-row">
               <button id="ms-btn-export-plate" type="button"
@@ -1537,17 +1537,24 @@
                     title="Download the piece this slice was made from as an STL">Export piece as STL</button>
           </div>
         </div>
+        <!-- On TAKE only: the whole plate. The group above is then the selected piece. -->
+        <div class="ms-xgroup">
+          <div class="ms-section-title">Whole plate</div>
+          <div class="ms-btn-row" id="ms-take-export-row" data-flex="1" style="display:none;">
+            <button id="ms-btn-take-export-plate" type="button"
+                    title="Put every piece on TAKE onto the main plate, each as its own object (one Undo)">Export to plate</button>
+            <button id="ms-btn-take-export-stl" type="button"
+                    title="Download the whole TAKE plate as one STL, the pieces where they stand">Export as STL</button>
+          </div>
+        </div>
       </div>
 
       <!-- The readouts, always up and never a card: down the left wall under
-           the column, the file line over the feature legend (with its
-           minimize toggle); along the bottom, the selection / segment info,
-           the Features readout, the Slice report and the mode hint. app-microscope.js finds #ms-legend by id and
-           never by where it lives, so the rows, their show / hide toggle and
-           the per-row "only" button are the same code as before the move.
-           One list per view and no tab strip: a slice lists its features
-           (#ms-legend), a mesh lists its parts (#ms-legend) and, under a rule,
-           the five detector rows (#ms-detected). -->
+           the column, the file line over the FEATURES list (with its minimize
+           toggle); along the bottom, the selection / segment info, the Slice
+           report and the mode hint. The list is the slicer's line types and
+           nothing else - Bambu-style: swatch, name, count, a Display check -
+           and acts on both plates; surface features are the plate's now. -->
       <div id="ms-dock" class="ms-dock">
         <!-- Left wall, under the column: the file line, and the legend right
              below it. -->
@@ -1558,18 +1565,11 @@
           </div>
           <div id="ms-legend-float" class="ms-section">
             <div class="ms-legend-head">
-              <div class="ms-section-title" id="ms-legend-title">All features</div>
+              <div class="ms-section-title" id="ms-legend-title">Features</div>
               <button id="ms-legend-toggle" type="button" aria-expanded="true"
                       aria-controls="ms-legend" title="Minimize the list">&minus;</button>
             </div>
             <div id="ms-legend"></div>
-            <!-- Rows for what the geometry has but the file does not name, mesh
-                 only. The Flange row (nso_flange.js, docs/GSCOPE-FLANGE.md), then
-                 Handle, Bracket, Lid and Hinge (nso_face_features.js,
-                 docs/GSCOPE-FEATURES.md). Each a show / hide toggle like the part
-                 rows above it; kept apart from #ms-legend, whose rows are exactly
-                 the file's own groups. Empty on a slice. -->
-            <div id="ms-detected"></div>
           </div>
         </div>
         <!-- Along the bottom, right of the legend: the boxes sit side by side
@@ -1578,15 +1578,6 @@
           <div class="ms-glass ms-section">
             <div class="ms-section-title" id="ms-info-title">Selection / segment info</div>
             <div id="ms-info">No file open.</div>
-          </div>
-          <!-- Features (app-gscope-lift.js, docs/LIFT.md section 7): read-only.
-               What Lift would find on the piece under the lens - outlined over it,
-               and the grouped list - from the same read the Subtract card's Lift
-               makes (NSO_LIFT_PLATE.detectSoup). Lifting is done on the plate. -->
-          <div class="ms-glass ms-section" id="ms-lift-row" style="display:none;">
-            <div class="ms-section-title">Features</div>
-            <div id="ms-lift-groups" class="ms-lift-groups" style="display:none;"></div>
-            <p class="ms-note" id="ms-lift-read">&mdash;</p>
           </div>
           <div class="ms-glass ms-section" id="ms-slice-readout" style="display:none;">
             <p class="ms-note" id="ms-slice-read">&mdash;</p>
@@ -1634,6 +1625,8 @@
         </div>
         <div id="ms-zr-lo-read" class="ms-zr-read">&mdash;</div>
         <div id="ms-zr-count" class="ms-zr-count">&mdash;</div>
+        <button id="ms-zr-card" class="ms-zr-card" type="button"
+                title="The range, as one card: hover to outline it, click to isolate it, drag it onto TAKE">Range</button>
         <button id="ms-zr-all" class="ms-zr-all" type="button" title="Every layer">All</button>
       </div>
     </div>
@@ -1789,7 +1782,7 @@
   <script src="app-tip-orient.js?v=tip3"></script>
   <script src="app-rotate-handles.js?v=detents1"></script>
   <script src="app-move-vertical.js?v=helpers1"></script>
-  <script src="app-grab-drop.js?v=grabdrop2"></script>
+  <script src="app-grab-drop.js?v=gselectb10"></script>
   <script src="app-defects.js?v=helpers1"></script>
   <!-- After app-defects.js, whose hooks and scan it uses. -->
   <script src="app-findings.js?v=repairloop1"></script>
@@ -1809,7 +1802,7 @@
   <!-- Handle, bracket, lid and hinge detection for G-scope's Parts list, one
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=features1"></script>
-  <script src="app-microscope.js?v=scope18"></script>
+  <script src="app-microscope.js?v=take1"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
@@ -1824,7 +1817,7 @@
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
   <script src="app-supports-card.js?v=detectfirst2"></script>
-  <script src="app-gscope-slice.js?v=slice3"></script>
+  <script src="app-gscope-slice.js?v=take1"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js
@@ -1837,14 +1830,13 @@
   <script src="app-lift-plate.js?v=liftsurface1"></script>
   <script src="nso_split_parts.js?v=split1"></script>
   <script src="app-split-parts.js?v=split1"></script>
-  <script src="app-gscope-lift.js?v=liftplate2"></script>
 
 
   <script src="app-ux.js?v=inside9"></script>
   <!-- Live watch: off until its button is pressed, and it patches nothing
        until then. Deleting this tag and the #btn-watch button above removes
        the feature completely. -->
-  <script src="nso-watch.js?v=helpers1"></script>
+  <script src="nso-watch.js?v=take1"></script>
   <script src="app-cth-expose.js?v=cth15"></script>
   <script type="module" src="app-cth.js?v=cth15"></script>
 </body>

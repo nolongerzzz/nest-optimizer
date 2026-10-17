@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /* G-scope's feature legend, down the left wall under the shell's button column,
    with the G-scope file-line box directly above it. A layout move: the rows,
-   the click-to-isolate and the per-row "only" button are the same code, so
+   the Display checks and the click-to-isolate row are the same code, so
    this checks WHERE it is and that moving it cost none of what it does.
+   (The legend is the FEATURES list now - docs/GSCOPE-SELECT.md section 3: the
+   per-row "only" button is gone; a row click isolates that line type.)
    (It floated top-left over the sidebar-less viewport before the shell's
    readouts went to the bottom; docs: nso_gscope_shell_test.js has the layout.)
      node tools/nso_gscope_legend_float_test.js      exit 0 = every gate held */
@@ -31,7 +33,7 @@ const SIZES = [[1680, 1050], [1400, 900], [1366, 768], [1280, 720], [1024, 768],
 
 /* Everything that floats over this viewport. The legend has to clear all of
    them at every size. */
-const OVERLAYS = ['ms-sidebar', 'ms-corner', 'ms-legend-float', 'ms-title', 'ms-mode-badge', 'ms-info', 'ms-lift-row', 'ms-slice-readout',
+const OVERLAYS = ['ms-sidebar', 'ms-corner', 'ms-legend-float', 'ms-title', 'ms-mode-badge', 'ms-info', 'ms-slice-readout',
                   'ms-hint-badge', 'ms-zr'];
 
 withApp(async (page, logs) => {
@@ -71,62 +73,96 @@ withApp(async (page, logs) => {
       '(' + where.corner.join(', ') + ') from the viewport\'s left and bottom');
     check('the G-scope file-line box is directly above it', where.headAbove);
     check('and the whole stack is under the button column', where.clearOfColumn);
-    check('still titled for what it lists', /^(All features|Parts)$/.test(where.title), where.title);
+    check('still titled for what it lists', where.title === 'Features', where.title);
   }
 
   /* ------------------------------------------------------------------ 2 */
   console.log('\n=== 2. click-to-isolate is untouched ===');
   {
     /* The behaviour gate. Driven through the rows themselves - a real click
-       on the row, and a real click on its "only" button - and read back off
-       the module's own hidden set, so this passes only if the same handlers
-       are still bound to the same nodes after the move. */
-    const rowCount = await page.evaluate(() =>
-      document.querySelectorAll('#ms-legend .ms-legend-item').length);
-    check('every feature in the file has a row', rowCount === 10, rowCount + ' rows');
+       on the row's Display check, a real click on the row (off its check, the
+       Feature click) - and read back off the module's own state, so this
+       passes only if the same handlers are still bound to the same nodes
+       after the move. */
+    const rowInfo = await page.evaluate(() => {
+      const row = document.querySelectorAll('#ms-legend .ms-legend-item')[0];
+      const label = row.querySelector('.ms-legend-label').textContent;
+      return { name: row.dataset.group, label, hasSwatch: !!row.querySelector('.ms-swatch'),
+               hasCheck: !!row.querySelector('input.ms-legend-display'),
+               checked: row.querySelector('input.ms-legend-display').checked,
+               noOnly: !document.querySelector('.ms-legend-only') };
+    });
+    check('a row is swatch, "name (count)" and a Display check; the "only" button is gone',
+      rowInfo.hasSwatch && rowInfo.hasCheck && rowInfo.checked && rowInfo.noOnly &&
+      /^.+ \(\d+\)$/.test(rowInfo.label), rowInfo.label);
 
     const toggle = await page.evaluate(() => {
       const M = window.NSO_MICROSCOPE;
       const row = document.querySelectorAll('#ms-legend .ms-legend-item')[0];
       const name = row.dataset.group;
+      const chk = row.querySelector('input.ms-legend-display');
       const before = M.hidden().length;
-      row.click();
+      chk.click();
       const afterOn = M.hidden();
-      row.click();
+      const dimmedOff = document.querySelectorAll('#ms-legend .ms-legend-item')[0].classList.contains('dim');
+      const checkedOff = document.querySelectorAll('#ms-legend .ms-legend-item')[0]
+        .querySelector('input.ms-legend-display').checked;
+      document.querySelectorAll('#ms-legend .ms-legend-item')[0].querySelector('input.ms-legend-display').click();
       const afterOff = M.hidden();
       return { name, before, hidAfterOne: afterOn.indexOf(name) !== -1,
                countOne: afterOn.length, backTo: afterOff.length,
-               dimmed: row.classList.contains('dim') };
+               dimmedOff, checkedOff, isolated: M.isIsolated() };
     });
-    check('a click on a row hides that feature',
-      toggle.hidAfterOne && toggle.countOne === toggle.before + 1,
+    check('unchecking a row\'s Display check hides that feature',
+      toggle.hidAfterOne && toggle.countOne === toggle.before + 1 && toggle.dimmedOff && !toggle.checkedOff,
       toggle.name + ': hidden went ' + toggle.before + ' -> ' + toggle.countOne);
-    check('...and clicking again brings it back',
-      toggle.backTo === toggle.before, 'back to ' + toggle.backTo);
+    check('...and checking it again brings it back', toggle.backTo === toggle.before, 'back to ' + toggle.backTo);
+    check('the Display check hides but does not isolate', !toggle.isolated);
+
+    /* The old "only" button's job, two ways: the row click (Feature click -
+       this line type, isolated; again, whole) and the soloGroup API. */
+    const click = await page.evaluate(() => {
+      const M = window.NSO_MICROSCOPE;
+      const row = document.querySelectorAll('#ms-legend .ms-legend-item')[2];
+      const keep = row.dataset.group;
+      const before = M.hidden().length;
+      row.click();
+      const iso = M.isIsolated(), mode = M.mode(), hidAfter = M.hidden().length;
+      row.click();
+      return { keep, iso, mode, hidAfter, before, isoAgain: M.isIsolated() };
+    });
+    check('a click on a row (off its check) isolates that line type: Feature mode',
+      click.iso && click.mode === 'feature', click.keep + ' isolated=' + click.iso + ' mode=' + click.mode);
+    check('...and clicking it again makes it whole', !click.isoAgain);
+    check('the row click does not touch the Display set', click.hidAfter === click.before,
+      click.before + ' -> ' + click.hidAfter);
 
     const only = await page.evaluate(() => {
       const M = window.NSO_MICROSCOPE;
       const rows = [...document.querySelectorAll('#ms-legend .ms-legend-item')];
       const keep = rows[2].dataset.group;
-      rows[2].querySelector('.ms-legend-only').click();
+      M.soloGroup(keep);
       const hidden = M.hidden();
+      const checks = [...document.querySelectorAll('#ms-legend .ms-legend-item')]
+        .filter(r => r.querySelector('input.ms-legend-display').checked).map(r => r.dataset.group);
       return { keep, hiddenCount: hidden.length, total: M.groups().length,
-               keptVisible: hidden.indexOf(keep) === -1 };
+               keptVisible: hidden.indexOf(keep) === -1, checks };
     });
-    check('the "only" button leaves exactly one feature showing',
-      only.keptVisible && only.hiddenCount === only.total - 1,
-      only.keep + ' alone, ' + only.hiddenCount + ' of ' + only.total + ' hidden');
+    check('soloGroup leaves exactly one feature showing (one Display set)',
+      only.keptVisible && only.hiddenCount === only.total - 1 &&
+      only.checks.length === 1 && only.checks[0] === only.keep,
+      only.keep + ' alone, ' + only.hiddenCount + ' of ' + only.total + ' hidden, checked: ' + only.checks.join(','));
 
     const styled = await page.evaluate(() => {
-      const b = document.querySelector('.ms-legend-only');
+      const b = document.querySelector('.ms-legend-display');
       const cs = getComputedStyle(b);
-      return { border: cs.borderTopStyle, radius: cs.borderTopLeftRadius, size: cs.fontSize };
+      return { type: b.type, cursor: cs.cursor, accent: cs.accentColor, margin: cs.marginTop };
     });
     /* It used to take its look from `.ms-sidebar button`, an ancestor it no
-       longer has (and no sidebar remains). Left alone it would render as a
-       default browser button. */
-    check('the "only" button kept its styling outside the sidebar',
-      styled.border === 'solid' && styled.radius === '6px' && styled.size === '10.5px',
+       longer has (and no sidebar remains). The Display check carries its own
+       rule; left alone it would be a default browser checkbox. */
+    check('the Display check kept its styling outside the sidebar',
+      styled.type === 'checkbox' && styled.cursor === 'pointer' && styled.accent !== 'auto' && styled.margin === '0px',
       JSON.stringify(styled));
 
     await page.evaluate(() => {

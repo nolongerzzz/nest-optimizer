@@ -2,31 +2,29 @@
 /**
  * nest-optimizer / tools/gcode-test / gscope-one-list-drive-check.mjs
  *
- * One list per view, every row a show / hide toggle, and a box only when it
+ * One list per view, a Display check on every row, and a box only when it
  * is asked for - driven through the real app in headless Chromium with real
- * clicks, on the part this was found on (library/tape_on-edge-single.stl: one
- * piece, a flange, no handle / bracket / lid / hinge).
+ * clicks, on the part this was found on (library/tape_on-edge-single.stl).
  *
- *   1  SLICE VIEW SHOWS ONE LIST: All features, no tab strip in the page, no
- *      Overhang / Conflict / Flange rows. Every row off is an empty view;
- *      every row back on is the slice again.
- *   2  NORMAL SHOWS ONE LIST: Parts - the piece, then the five detector rows
- *      under their rule; titled "Parts". Every row off (real clicks) is an
- *      empty view; back on one at a time, each click draws exactly its own;
- *      the four "none detected" rows stay off when clicked and say why. The
- *      list is on screen throughout and nothing is isolated.
- *   3  EXPORT IS EXACTLY WHAT IS CHECKED: the flange alone (piece off) -
- *      Select shown, Export as STL: the flange's own triangles and bounds, a
- *      clean solid; Export to plate: the same triangles as a new piece. The
- *      piece alone (flange off): its own 46924 triangles. Both on: the piece
- *      once - the flange is inside it, not exported twice.
- *   4  BOXES ON A TOGGLE-BUILT VIEW: with the piece off, a real click on the
- *      flange drops a box that catches the flange; Isolate all boxes shows it
- *      alone with the list still up; switching the flange off takes it out of
- *      the selection; Clear all boxes clears. With both on, a box over the
- *      flange takes the piece once.
- *   5  A BOX ONLY WHEN ASKED: a fresh piece opens in orbit; a real click on it
- *      drops no box and selects nothing. Click to select region, then the same
+ * The surface-feature detector rows (Flange / Handle / Bracket / Lid / Hinge)
+ * and the Parts rows left G-scope (docs/GSCOPE-SELECT.md sections 3 and 4), so
+ * the sections that toggled, exported and boxed the FLANGE are gone; what
+ * remains is the same intent through the Features list.
+ *
+ *   1  SLICE VIEW SHOWS ONE LIST: Features, no tab strip in the page, no
+ *      Overhang / Conflict / Flange rows. Every Display check off is an empty
+ *      view; every check back on is the slice again.
+ *   2  NORMAL SHOWS ONE LIST: Features too - and a mesh has no line types, so
+ *      it holds no rows, only "Not sliced - no line types."; no detector rows.
+ *      The piece is drawn, G-scope is in Piece mode, nothing is isolated.
+ *   3  EXPORT IS EXACTLY WHAT IS SHOWN: Select shown, Export as STL: the
+ *      piece's own triangles, a clean solid; Export to plate: the same
+ *      triangles as a new piece.
+ *   4  BOXES: in Region mode a real click on the piece drops a box that catches
+ *      it; Isolate all boxes shows it alone with the list still up; Clear all
+ *      boxes clears.
+ *   5  A BOX ONLY WHEN ASKED: a fresh piece opens in Piece mode; a real click
+ *      on it drops no box (it isolates the piece); Region mode, then the same
  *      click: a box drops and catches the piece, as before.
  *   6  SCREENSHOTS of each, and no page errors.
  *
@@ -43,8 +41,6 @@ const check = mkCheck();
 const SHOTS = join(ROOT, 'tools', 'gscope-one-list-out');
 const PART = 'library/tape_on-edge-single.stl';
 const NAME = 'tape_on-edge-single';
-const FLANGE = `${NAME} - Flange`;
-const DET = ['flange', 'handle', 'bracket', 'lid', 'hinge'];
 
 function readSTL(buf) {
   const n = buf.readUInt32LE(80), o = new Float32Array(n * 9);
@@ -96,8 +92,11 @@ async function view(page) {
       badge: document.getElementById('ms-mode-badge').textContent,
       listUp: !!(float.offsetWidth && float.offsetHeight) && !float.classList.contains('collapsed'),
       title: document.getElementById('ms-legend-title').textContent,
-      rows: rows.map((e) => e.dataset.group || e.dataset.detected),
-      checked: rows.filter((e) => e.getAttribute('aria-checked') === 'true').map((e) => e.dataset.group || e.dataset.detected),
+      rows: rows.map((e) => e.dataset.group),
+      checked: rows.filter((e) => e.querySelector('input.ms-legend-display').checked).map((e) => e.dataset.group),
+      notes: Array.from(document.querySelectorAll('#ms-legend .ms-legend-note')).map((e) => e.textContent),
+      detectorUI: !!document.getElementById('ms-detected') || typeof M.flange === 'function',
+      isolated: M.isIsolated(),
       tabsInPage: !!document.querySelector('.ms-legend-tabs, #ms-tab-legend, #ms-tab-detected, [role="tab"]'),
       sel: M.selection().map((o) => o.name || o.feature), by: M.selectionSource(), boxes: M.boxes().length,
       mode: M.mode(), info: document.getElementById('ms-info').textContent,
@@ -106,7 +105,8 @@ async function view(page) {
   });
 }
 
-const row = (page, key) => page.click(DET.includes(key) ? `#ms-detected [data-detected="${key}"]` : `#ms-legend [data-group="${key}"]`);
+/** A real click on a row's Display check. */
+const row = (page, key) => page.click(`#ms-legend [data-group="${key}"] input.ms-legend-display`);
 
 /** Screen point of a view-space point. */
 async function screenOf(page, p) {
@@ -117,11 +117,11 @@ async function screenOf(page, p) {
     return [r.left + (c.x + 1) / 2 * r.width, r.top + (1 - c.y) / 2 * r.height];
   }, p);
 }
-/** A point on the top of a drawn mesh (a part, or a detector row's feature), found by raycast. */
+/** A point on the top of a drawn part, found by raycast. */
 async function pointOn(page, which) {
   return page.evaluate((w) => {
     const v = window.NSO_MICROSCOPE.getView();
-    const m = v.overviewMeshes[w] || v.detectedMeshes[w];
+    const m = v.overviewMeshes[w];
     const b = new THREE.Box3().setFromObject(m);
     const r = v.renderer.domElement.getBoundingClientRect();
     const rc = new THREE.Raycaster();
@@ -143,8 +143,7 @@ async function importPart(page) {
   await page.setInputFiles('#ms-input', join(ROOT, PART));
   await page.waitForFunction((n) => {
     const M = window.NSO_MICROSCOPE, d = M.getDoc();
-    return M.isOpen() && d && d !== window.__prevDoc && d.kind === 'mesh' && d.name.indexOf(n) === 0 &&
-      M.flange().status !== 'pending';
+    return M.isOpen() && d && d !== window.__prevDoc && d.kind === 'mesh' && d.name.indexOf(n) === 0;
   }, NAME, { timeout: 60000 });
   await frames(page);
 }
@@ -168,17 +167,17 @@ async function main() {
   page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text()); });
   await page.goto(served.base + '/index.html', { waitUntil: 'load' });
   await page.waitForFunction('window.state && window.state.ready', null, { timeout: 30000 });
-  await page.waitForFunction(() => !!(window.NSO_MICROSCOPE && window.NSO_GSCOPE_SLICE && window.NSO_Flange), null, { timeout: 30000 });
+  await page.waitForFunction(() => !!(window.NSO_MICROSCOPE && window.NSO_GSCOPE_SLICE), null, { timeout: 30000 });
   await page.click('#btn-microscope');                       // empty plate: panel + chooser
   await importPart(page);
   const truth = await page.evaluate(() => {
-    const M = window.NSO_MICROSCOPE, d = M.getDoc(), f = M.flange().objects[0];
-    return { pieceTris: d.objects[0].triangles, flangeTris: f.triangles, flangeBounds: f.bounds };
+    const M = window.NSO_MICROSCOPE, d = M.getDoc();
+    return { pieceTris: d.objects[0].triangles };
   });
-  console.log(`       ${NAME}: ${truth.pieceTris} triangles, flange ${truth.flangeTris}`);
+  console.log(`       ${NAME}: ${truth.pieceTris} triangles`);
 
   // =======================================================================
-  console.log('\n--- 1. Slice view: one list, All features, no tabs ---');
+  console.log('\n--- 1. Slice view: one list, Features, no tabs ---');
   // =======================================================================
   await page.click('#ms-cam-slice');
   await page.waitForFunction(() => {
@@ -187,131 +186,76 @@ async function main() {
   }, null, { timeout: 120000 });
   const s1 = await view(page);
   const groups = await page.evaluate(() => Object.keys(window.NSO_MICROSCOPE.getDoc().groups).filter((g) => g !== 'Travel').sort());
-  check('Slice view: one list, titled All features, no tab strip in the page',
-    [s1.title, s1.listUp, s1.tabsInPage], ['All features', true, false]);
-  check('... one row per feature the slice printed, every one on, nothing else in it',
+  check('Slice view: one list, titled Features, no tab strip in the page',
+    [s1.title, s1.listUp, s1.tabsInPage], ['Features', true, false]);
+  check('... one row per feature the slice printed, every Display check on, nothing else in it',
     [s1.rows.slice().sort(), s1.checked.slice().sort()], [groups, groups]);
   check(`... that is ${groups.length} rows`, s1.rows.length, groups.length);
-  check('... no Overhang, Conflict, Flange or "not on a slice" rows',
-    /Overhang:|Conflict:|Flange|not on a slice/.test(await page.textContent('#ms-legend-float')), false);
+  check('... no Overhang, Conflict, Flange or "not on a slice" rows, and no detector UI',
+    /Overhang:|Conflict:|Flange|not on a slice/.test(await page.textContent('#ms-legend-float')) || s1.detectorUI, false);
   await shot(page, '1-slice-one-list.png', 'Slice view, one list');
   for (const g of s1.rows) await row(page, g);
   const s0 = await view(page);
-  check('every row off: an empty view, the list still up', [s0.drawn, s0.checked, s0.listUp], [[], [], true]);
+  check('every Display check off: an empty view, the list still up', [s0.drawn, s0.checked, s0.listUp], [[], [], true]);
   await shot(page, '1b-slice-all-off.png', 'Slice view, every row off');
   for (const g of s1.rows) await row(page, g);
-  check('every row back on: the slice again', (await view(page)).drawn, s1.drawn);
+  check('every check back on: the slice again', (await view(page)).drawn, s1.drawn);
 
   // =======================================================================
-  console.log('\n--- 2. Normal: one list, Parts, every row a toggle ---');
+  console.log('\n--- 2. Normal: one list, Features - and a mesh has no line types ---');
   // =======================================================================
   await page.click('#ms-cam-normal');
-  await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'mesh' &&
-    window.NSO_MICROSCOPE.flange().status !== 'pending', null, { timeout: 60000 });
+  await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'mesh', null, { timeout: 60000 });
   const n1 = await view(page);
-  check('Normal: one list, titled Parts (not "click to isolate"), no tab strip in the page',
-    [n1.title, n1.listUp, n1.tabsInPage], ['Parts', true, false]);
-  check('... the piece, then Flange, Handle, Bracket, Lid, Hinge', n1.rows, [NAME, ...DET]);
-  check('... opening with the piece and the flange on - the four with nothing found off',
-    n1.checked, [NAME, 'flange']);
-  check('... both drawn: the piece, the flange over it', n1.drawn, [NAME, FLANGE].sort());
-  check('... in orbit, nothing isolated', [n1.mode, n1.detail, n1.badge], ['orbit', false, 'Whole part']);
-  const counts = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-detected .ms-legend-item'))
-    .map((e) => [e.dataset.detected, e.textContent, e.title.split('\n')[0]]));
-  check('the detector rows keep their numbers', counts[0][1], `Flange (2.94 mm, ${truth.flangeTris} tri)`);
-  check('... and the four with nothing found keep their "none detected" and its tooltip',
-    counts.slice(1).map((c) => [c[1], /^No \w+: .+/.test(c[2])]),
-    DET.slice(1).map((r) => [`${r[0].toUpperCase()}${r.slice(1)} - none detected`, true]));
+  check('Normal: one list, titled Features, no tab strip in the page',
+    [n1.title, n1.listUp, n1.tabsInPage], ['Features', true, false]);
+  check('... no rows (no Parts rows, no Flange / Handle / Bracket / Lid / Hinge rows), just the one note',
+    [n1.rows, n1.notes, n1.detectorUI], [[], ['Not sliced - no line types.'], false]);
+  check('... the piece is drawn', n1.drawn, [NAME]);
+  check('... in Piece mode, nothing isolated', [n1.mode, n1.detail, n1.badge, n1.isolated], ['piece', false, 'Whole part', false]);
   await shot(page, '2-normal-one-list.png', 'Normal, one list');
 
-  await row(page, NAME);
-  await row(page, 'flange');
-  const n0 = await view(page);
-  check('every Parts row off (real clicks): an empty viewport', [n0.drawn, n0.checked], [[], []]);
-  check('... the list still on screen, all six rows, nothing isolated, no Back to press',
-    [n0.listUp, n0.rows.length, n0.detail, await page.isVisible('#ms-btn-back')], [true, 6, false, false]);
-  check('... nothing shown to take', await page.evaluate(() => window.NSO_MICROSCOPE.shownCount()), 0);
-  await shot(page, '2b-normal-all-off.png', 'Normal, every Parts row off');
-  for (const r of DET.slice(1)) {
-    await row(page, r);
-    const vr = await view(page);
-    check(`"${r}" - none detected: a click leaves it off and draws nothing, and says why`,
-      [vr.checked, vr.drawn, new RegExp(`^No ${r} detected\\.`).test(vr.info)], [[], [], true]);
-  }
-  await row(page, 'flange');
-  const nf = await view(page);
-  check('back on one at a time - the flange: drawn alone', [nf.drawn, nf.checked], [[FLANGE], ['flange']]);
-  await shot(page, '2c-normal-flange-alone.png', 'Normal, the flange alone');
-  await row(page, NAME);
-  const nb = await view(page);
-  check('... then the piece: both again, the flange over it', [nb.drawn, nb.checked], [[NAME, FLANGE].sort(), [NAME, 'flange']]);
-  await row(page, 'flange');
-  const np = await view(page);
-  check('... and the flange off with the piece on: the piece alone', [np.drawn, np.checked], [[NAME], [NAME]]);
-
   // =======================================================================
-  console.log('\n--- 3. Export: exactly what is checked ---');
+  console.log('\n--- 3. Export: exactly what is shown ---');
   // =======================================================================
   await page.click('#ms-btn-select-visible');
   const vp = await view(page);
-  check('the piece alone: Select shown takes the piece', [vp.sel, vp.by, vp.exportShown], [[NAME], 'visible', true]);
+  check('the piece: Select shown takes the piece', [vp.sel, vp.by, vp.exportShown], [[NAME], 'visible', true]);
   const exP = await exportStl(page, 'export-piece.stl');
   check('... Export as STL writes the piece: its own triangles', [exP.name, exP.soup.length / 9], [`${NAME}_-_${NAME}.stl`, truth.pieceTris]);
-
-  await row(page, 'flange');                                  // both on
-  const vb = await view(page);
-  check('both on: the selection follows what is checked - the piece once, the flange is inside it',
-    [vb.drawn, vb.sel], [[NAME, FLANGE].sort(), [NAME]]);
-  const exB = await exportStl(page, 'export-both.stl');
-  check('... and Export writes the piece once, not the flange on top of it', exB.soup.length / 9, truth.pieceTris);
-
-  await row(page, NAME);                                      // the flange alone
-  const vf = await view(page);
-  check('the piece off: the selection is the flange alone', [vf.drawn, vf.sel], [[FLANGE], [FLANGE]]);
-  await shot(page, '3-export-flange-alone.png', 'the flange alone, selected');
-  const exF = await exportStl(page, 'export-flange.stl');
-  check('Export as STL writes exactly the flange: its name, its triangles',
-    [exF.name, exF.soup.length / 9], [`${NAME}_-_Flange.stl`, truth.flangeTris]);
-  check('... its bounds', tb(bounds(exF.soup)), pb(truth.flangeBounds));
-  check('... a clean solid (verdict, open, nm, inconsistent)', validate(exF.path), ['PASS', 0, 0, 0]);
+  check('... a clean solid (verdict, open, nm, inconsistent)', validate(exP.path), ['PASS', 0, 0, 0]);
   const before = await page.evaluate(() => ({ models: state.models.length, placed: state.placed.length }));
   await page.click('#ms-btn-export-plate');
   const landed = await page.evaluate(() => {
     const m = state.models[state.models.length - 1];
-    return { models: state.models.length, placed: state.placed.length, name: m.name, tris: m.rawTris.length / 9,
+    return { models: state.models.length, placed: state.placed.length, tris: m.rawTris.length / 9,
              open: window.NSO_MICROSCOPE.isOpen() };
   });
-  check('Export to plate lands exactly the flange as one new piece',
-    [landed.models - before.models, landed.placed - before.placed, landed.name, landed.tris, landed.open],
-    [1, 1, FLANGE, truth.flangeTris, false]);
+  check('Export to plate lands exactly the piece as one new piece',
+    [landed.models - before.models, landed.placed - before.placed, landed.tris, landed.open],
+    [1, 1, truth.pieceTris, false]);
 
   // =======================================================================
-  console.log('\n--- 4. boxes on a toggle-built view ---');
+  console.log('\n--- 4. boxes ---');
   // =======================================================================
   await importPart(page);
-  await row(page, NAME);                                      // the flange alone
   await page.click('#ms-mode-select');
-  const fp = await pointOn(page, FLANGE);
-  check('the flange is on screen to click', !!fp, true);
+  const fp = await pointOn(page, NAME);
+  check('the piece is on screen to click', !!fp, true);
   await page.mouse.click(fp[0], fp[1]);
   const b1 = await view(page);
-  check('the piece off, a real click on the flange: a box drops and catches the flange alone',
-    [b1.boxes, b1.sel, b1.by], [1, [FLANGE], 'box']);
+  check('Region mode, a real click on the piece: a box drops, catches it, and (a click isolates, in every mode) isolates it',
+    [b1.boxes, b1.sel, b1.by, b1.isolated, b1.detail, b1.detailDrawn], [1, [NAME], 'box', true, true, [NAME]]);
+  check('... the Features list still up (its note, no rows)', [b1.listUp, b1.notes], [true, ['Not sliced - no line types.']]);
+  await shot(page, '4-box-piece-isolated.png', 'a box on the piece, isolated');
+  await page.click('#ms-btn-back');
+  const b1b = await view(page);
+  check('Back to whole part: whole again, the box and the selection kept', [b1b.isolated, b1b.detail, b1b.boxes, b1b.sel], [false, false, 1, [NAME]]);
   await page.click('#ms-btn-isolate');
   const b2 = await view(page);
-  check('Isolate all boxes: the flange alone, isolated, the list still up',
-    [b2.detail, b2.detailDrawn, b2.listUp, b2.rows.length], [true, [FLANGE], true, 6]);
-  await shot(page, '4-box-flange-isolated.png', 'a box on the flange, isolated');
+  check('Isolate all boxes: the piece alone, isolated, the list still up',
+    [b2.detail, b2.detailDrawn, b2.listUp, b2.notes], [true, [NAME], true, ['Not sliced - no line types.']]);
   await page.click('#ms-btn-back');
-  await row(page, 'flange');                                  // the flange off too
-  const b3 = await view(page);
-  check('the flange switched off under the box: out of the selection - a box catches only what is shown',
-    [b3.boxes, b3.sel, b3.exportShown], [1, [], false]);
-  await row(page, 'flange');
-  check('... and back on: caught again', (await view(page)).sel, [FLANGE]);
-  await row(page, NAME);                                      // both on
-  const b4 = await view(page);
-  check('both on, the same box over the flange: the piece once, not the flange as well', b4.sel, [NAME]);
   await page.click('#ms-btn-clear');
   const b5 = await view(page);
   check('Clear all boxes: no box, nothing selected, nothing to export', [b5.boxes, b5.sel, b5.exportShown], [0, [], false]);
@@ -321,16 +265,24 @@ async function main() {
   // =======================================================================
   await importPart(page);
   const f0 = await view(page);
-  check('a fresh piece opens in orbit: Orbit lit, the box controls tucked away, no hint',
-    [f0.mode, await page.evaluate(() => document.getElementById('ms-mode-orbit').classList.contains('active')),
-     await page.isVisible('#ms-select-controls'), await page.isVisible('#ms-hint-badge')], ['orbit', true, false, false]);
+  check('a fresh piece opens in Piece mode: Piece lit, the box controls tucked away, no hint',
+    [f0.mode, await page.evaluate(() => document.getElementById('ms-mode-piece').classList.contains('active')),
+     await page.isVisible('#ms-select-controls'), await page.isVisible('#ms-hint-badge')], ['piece', true, false, false]);
   const pp = await pointOn(page, NAME);
   await page.mouse.click(pp[0], pp[1]);
   const f1 = await view(page);
-  check('a plain click on the piece, nothing armed: no box, nothing selected', [f1.boxes, f1.sel], [0, []]);
-  await shot(page, '5a-orbit-click-no-box.png', 'orbit: a click, no box');
+  // A press on a piece is not an orbit any more: a click isolates it (Piece mode's click).
+  check('a plain click on the piece, Region not armed: no box (the piece itself is isolated)',
+    [f1.boxes, f1.mode, f1.isolated], [0, 'piece', true]);
+  await shot(page, '5a-piece-click-no-box.png', 'Piece mode: a click, no box');
+  await gscopeCards.closeCards(page);                         // Escape shuts an open card first, then un-isolates
+  await page.keyboard.press('Escape');                        // Escape un-isolates
+  check('Escape makes it whole again', (await view(page)).isolated, false);
+  // The piece clicked above is still the selection, and a press on the selection takes the
+  // selection (not a new box); so the Region half starts from a fresh document.
+  await importPart(page);
   await page.click('#ms-mode-select');
-  check('Click to select region: armed, its controls up', [(await view(page)).mode, await page.isVisible('#ms-select-controls')],
+  check('Region: armed, its controls up', [(await view(page)).mode, await page.isVisible('#ms-select-controls')],
     ['select', true]);
   await page.mouse.click(pp[0], pp[1]);
   const f2 = await view(page);

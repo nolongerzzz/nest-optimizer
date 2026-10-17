@@ -1031,6 +1031,29 @@
       if (n.parentNode !== h) h.appendChild(n);
       n.classList.toggle('in-gscope', inG);
     });
+    dockMetrics();
+  }
+  /* The log docked bottom-right in G-scope takes room from the slider (above
+     it) and the readouts (to its left). The panel's size is published on the
+     viewport for styles.css; off, or on the main page, the variables go. */
+  var dockObs = null;
+  function dockMetrics() {
+    var vp = document.getElementById('ms-viewport');
+    if (!vp) return;
+    var p = el.panel;
+    var docked = !!(p && p.classList.contains('in-gscope') && p.offsetWidth > 0);
+    if (docked) {
+      vp.style.setProperty('--ms-watch-h', (p.offsetHeight + 12 + 8) + 'px');
+      vp.style.setProperty('--ms-watch-w', (p.offsetWidth + 12 - 76 > 0 ? p.offsetWidth + 12 - 76 : 0) + 'px');
+    } else {
+      vp.style.removeProperty('--ms-watch-h');
+      vp.style.removeProperty('--ms-watch-w');
+    }
+    if (p && !dockObs && typeof global.ResizeObserver === 'function') {
+      dockObs = new global.ResizeObserver(function () { dockMetrics(); });
+      dockObs.observe(p);
+      restores.push(function () { if (dockObs) dockObs.disconnect(); dockObs = null; });
+    }
   }
   /* A MutationObserver on the sheet's own `hidden` attribute, which is the one
      thing every way in and out of G-scope sets (the rail button, a .gcode.3mf
@@ -1083,7 +1106,7 @@
   /* A click or change the document-wide onClick / onChange above
      has already put in the trail (with its checks, as they always were) is
      not added a second time. */
-  var GS_IN_TRAIL = { 'legend-only': 1, view: 1, control: 1, set: 1 };
+  var GS_IN_TRAIL = { 'legend-only': 1, view: 1, control: 1, set: 1, display: 1 };
   function gsLog(action, what, detail) {
     if (!on) return null;
     var v = viewNow();
@@ -1123,7 +1146,7 @@
     return shorten(((l || n).textContent || '').trim(), 60) || '?';
   }
   function gsMode() {
-    var modes = ['orbit', 'select', 'line'];
+    var modes = ['piece', 'select', 'feature', 'line', 'layer'];
     for (var i = 0; i < modes.length; i++) {
       var b = document.getElementById('ms-mode-' + modes[i]);
       if (b && b.classList.contains('active')) return modes[i];
@@ -1147,9 +1170,7 @@
                                 v.raycaster.params.Line.threshold) || 0.6;
     rc.setFromCamera(new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1,
                                        -((ev.clientY - r.top) / r.height) * 2 + 1), v.camera);
-    /* A detector row's feature, drawn over its part or alone, is a target
-       too (v.detectedMeshes). */
-    var meshes = Object.assign({}, v.overviewMeshes || {}, v.detectedMeshes || {});
+    var meshes = Object.assign({}, v.overviewMeshes || {});
     var targets = Object.keys(meshes).map(function (k) { return meshes[k]; })
       .filter(function (m) { return m && m.visible; });
     var hits = rc.intersectObjects(targets, false);
@@ -1173,30 +1194,14 @@
       try {
         var t = ev.target;
         if (!t || !t.closest || !inside(t)) return;
-        var only = t.closest('#ms-legend .ms-legend-only');
         var row = t.closest('#ms-legend .ms-legend-item');
-        var det = t.closest('#ms-detected .ms-legend-item');
         var b = t.closest('button, [role="menuitem"], summary');   // onClick's own set
-        if (only && row) {
-          gsLog('legend-only', 'legend "' + row.dataset.group + '" only (every other row off)',
-                { group: row.dataset.group });
+        if (row && t.closest('.ms-legend-display')) {
+          return;     // the Display check: its change is logged by onGsChange, with the row's name
         } else if (row) {
-          /* The row flips its group (app-microscope.js buildLegend()); read
-             before G-scope's handler runs, so what it is about to become is
-             the other of what it is now. */
-          var g = row.dataset.group, hid = [];
-          try { hid = gsMS().hidden(); } catch (e) { hid = row.classList.contains('dim') ? [g] : []; }
-          var turnsOn = hid.indexOf(g) >= 0;
-          gsLog('legend', 'legend "' + g + '" ' + (turnsOn ? 'on' : 'off'), { group: g, on: turnsOn });
-        } else if (det) {
-          /* A detector row under the parts: a show / hide toggle like a part's
-             row (app-microscope.js toggleDetected()). Read before G-scope's
-             handler runs; a row with nothing found stays off. */
-          var was = det.getAttribute('aria-checked') === 'true';
-          var empty = det.dataset.status === 'none' || det.dataset.status === 'unavailable';
-          var turns = was ? 'off' : empty ? 'stays off (' + det.dataset.status + ')' : 'on';
-          gsLog('detected', 'Parts row "' + gsLabel(det) + '" ' + turns,
-                { row: det.dataset.detected || null, label: gsLabel(det), on: !was && !empty });
+          /* The row, off its check, is Feature mode's click: that line type,
+             isolated (app-microscope.js featureRowClick()). */
+          gsLog('legend', 'legend "' + row.dataset.group + '" - isolate that line type', { group: row.dataset.group });
         } else if (b && (b.id === 'ms-cam-normal' || b.id === 'ms-cam-slice')) {
           if (b.disabled) return;
           var from = viewNow() === 'gscope-slice' ? 'Slice' : 'Normal';
@@ -1215,6 +1220,11 @@
         var t = ev.target;
         if (!inside(t)) return;
         var val = t.type === 'checkbox' || t.type === 'radio' ? (t.checked ? 'on' : 'off') : shorten(t.value, 40);
+        var drow = t.closest && t.closest('#ms-legend .ms-legend-item');
+        if (drow && t.classList.contains('ms-legend-display')) {
+          gsLog('display', 'Display "' + drow.dataset.group + '" ' + val, { group: drow.dataset.group, on: t.checked });
+          return;
+        }
         gsLog('set', 'set ' + (t.id || t.name || t.tagName.toLowerCase()) + ' = ' + val,
               { id: t.id || null, value: val });
       } catch (e) {}
@@ -1332,10 +1342,11 @@
     '#nso-watch-report .wr-list{overflow:auto;flex:1 1 auto;padding:4px 0;overscroll-behavior:contain;min-height:0}',
     '#nso-watch-report .wr-run{padding:6px 9px 2px;color:#94a3b8;border-top:1px solid #26303f;margin-top:4px}',
     '#nso-watch-report .wr-note{padding:6px 9px;color:#94a3b8}',
-    /* Inside G-scope's viewport: bottom-left, above its hint badge (12px +
-       its ~60px), and clear of the layer-range slider docked to the right
-       edge (12px + 64px). */
-    '#nso-watch-panel.in-gscope{left:12px;bottom:84px;width:min(420px,calc(100% - 100px));max-height:40%}',
+    /* Inside G-scope's viewport: bottom-right, UNDER the layer-range slider's
+       All button. The slider ends where the panel starts and the readouts along
+       the bottom stop short of it: dockMetrics() publishes the panel's size as
+       --ms-watch-h / --ms-watch-w on the viewport, and styles.css reads them. */
+    '#nso-watch-panel.in-gscope{left:auto;right:12px;bottom:12px;width:min(300px,calc(100% - 100px));max-height:40%}',
     '#nso-watch-panel.in-gscope.is-collapsed{width:auto;max-width:calc(100% - 100px)}',
     '#nso-watch-report.in-gscope{inset:12px 88px 12px 12px}'
   ].join('');
@@ -1375,6 +1386,7 @@
     p.querySelector('#nso-watch-clear').addEventListener('click', function () { api.clear(); });
     p.querySelector('#nso-watch-collapse').addEventListener('click', function () { api.collapse(!api.isCollapsed()); });
     applyCollapsed(readCollapsed());
+    rehome();
   }
 
   /* Collapse. Expanded, the panel is up to 46vh tall in the bottom-left of

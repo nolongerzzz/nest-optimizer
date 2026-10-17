@@ -21,7 +21,7 @@
      1. Every ms-* id the sidebar had is still on the page exactly once, no
         <details> in #microscope, and the new ones are unique too.
      2. Every control is where the ticket lists it: the column, the cards, the
-        corner, the dock. The three mode buttons are siblings.
+        corner, the dock. The five mode buttons are siblings.
      3. The geometry: the column is the main shell's width and pitch, the cards
         open right of it at the top, the corner is pinned top-right, the dock
         is bottom-left, and the viewport fills the panel.
@@ -29,9 +29,11 @@
         a button whose rows the engine hides is disabled, and Escape shuts the
         open card first and G-scope only when none is open.
      5. Every control in an open card can be hit with a real click.
-     6. The readouts stay up with a card open; Lift's rows land in #ms-lift-row,
-        the overhang readout in its row, the Slice report in the dock.
-     7. A slice (Slice view) brings Line, Render and the Sliced piece group.
+     6. The readouts stay up with a card open; the overhang readout lands in its
+        row, the Slice report in the dock. (Lift's Features readout left
+        G-scope with the SELECT ticket: docs/GSCOPE-SELECT.md.)
+     7. A slice (Slice view) brings Render and the Sliced piece group, and the
+        Select card's Line and Layer rows.
      8. A short window (1024 x 720): the column, every card and the dock fit.
 
    Screenshots go to tools/gscope-shell-out/ (git-ignored).
@@ -53,17 +55,20 @@ const SHOTS = path.join(ROOT, 'tools', 'gscope-shell-out');
 /* ---------------------------------------------------------------- the ticket */
 const COLUMN = [
   ['ms-btn-open', 'IMPORT'], ['ms-btn-plate', 'READ PLATE'],
-  ['ms-nav-select', 'SELECT'], ['ms-nav-line', 'LINE'], ['ms-nav-layer', 'LAYER'], ['ms-nav-view', 'VIEW'],
+  ['ms-nav-select', 'SELECT'], ['ms-nav-view', 'VIEW'],
   ['ms-nav-render', 'RENDER'],
   ['ms-nav-overhangs', 'OVERHANGS'], ['ms-nav-crop', 'CROP Z'], ['ms-nav-slice', 'SLICE']
 ];
-const GROUPS = [2, 5, 3];                 // the column's three groups
-const CORNER = [['ms-btn-back-producer', 'BACK'], ['ms-nav-export', 'EXPORT'], ['ms-close', 'CLOSE']];
+const GROUPS = [2, 3, 3];                 // the column's three groups (Line and Layer folded into Select)
+/* BACK · LENS|TAKE · CLEAR · EXPORT · CLOSE (the LENS | TAKE toggle is one control of two slabs). */
+const CORNER = [['ms-btn-back-producer', 'BACK'], ['ms-plate-toggle', 'LENS TAKE'], ['ms-btn-take-clear', 'CLEAR'],
+                ['ms-nav-export', 'EXPORT'], ['ms-close', 'CLOSE']];
 /* card -> [its button, the ids it holds] */
 const CARDS = {
-  'ms-card-select': ['ms-nav-select', ['ms-mode-orbit', 'ms-mode-select', 'ms-mode-line', 'ms-btn-isolate', 'ms-btn-clear', 'ms-btn-back']],
-  'ms-card-line': ['ms-nav-line', ['ms-line-prev', 'ms-line-next', 'ms-btn-isolate-line']],
-  'ms-card-layer': ['ms-nav-layer', ['ms-layer-prev', 'ms-layer-index', 'ms-layer-next', 'ms-btn-layer-select']],
+  'ms-card-select': ['ms-nav-select', ['ms-mode-piece', 'ms-mode-select', 'ms-mode-feature', 'ms-mode-line', 'ms-mode-layer',
+                                       'ms-btn-isolate', 'ms-btn-clear', 'ms-btn-back',
+                                       'ms-line-prev', 'ms-line-next', 'ms-btn-isolate-line',
+                                       'ms-layer-prev', 'ms-layer-index', 'ms-layer-next', 'ms-btn-layer-select']],
   'ms-card-view': ['ms-nav-view', ['ms-cam-normal', 'ms-cam-slice', 'ms-btn-clear-view', 'ms-btn-show-all', 'ms-btn-select-visible']],
   'ms-card-render': ['ms-nav-render', ['ms-render-toolpath', 'ms-render-solid']],
   'ms-card-overhangs': ['ms-nav-overhangs', ['ms-btn-overhangs', 'ms-overhang-angle', 'ms-support-read']],
@@ -73,24 +78,25 @@ const CARDS = {
                                         'ms-btn-slice-export-plate', 'ms-btn-slice-export-stl']]
 };
 const EXPORT_GROUPS = { 'Selection': ['ms-btn-export-plate', 'ms-btn-export-stl', 'ms-btn-export-solid-plate', 'ms-btn-export-solid-stl'],
-                        'Sliced piece': ['ms-btn-slice-export-plate', 'ms-btn-slice-export-stl'] };
-const DOCK = ['ms-legend-float', 'ms-legend-toggle', 'ms-legend', 'ms-detected', 'ms-title', 'ms-sub', 'ms-info-title', 'ms-info',
-              'ms-lift-row', 'ms-lift-groups', 'ms-lift-read', 'ms-slice-read', 'ms-hint-badge'];
+                        'Sliced piece': ['ms-btn-slice-export-plate', 'ms-btn-slice-export-stl'],
+                        'Whole plate': ['ms-btn-take-export-plate', 'ms-btn-take-export-stl'] };   // the last shows on TAKE only
+const DOCK = ['ms-legend-float', 'ms-legend-toggle', 'ms-legend', 'ms-title', 'ms-sub', 'ms-info-title', 'ms-info',
+              'ms-slice-read', 'ms-hint-badge'];
 /* The ids the sidebar page had (claude-wip 6ca7251). */
 const BEFORE = ['microscope', 'ms-sidebar', 'ms-title', 'ms-sub', 'ms-btn-back-producer', 'ms-btn-plate', 'ms-btn-open',
-  'ms-close', 'ms-mode-orbit', 'ms-mode-select', 'ms-mode-line', 'ms-camera-row', 'ms-cam-normal',
+  'ms-close', 'ms-mode-select', 'ms-mode-line', 'ms-camera-row', 'ms-cam-normal',
   'ms-cam-slice', 'ms-select-controls', 'ms-btn-isolate', 'ms-btn-clear', 'ms-line-controls', 'ms-line-prev',
   'ms-line-next', 'ms-btn-isolate-line', 'ms-line-read', 'ms-detail-controls', 'ms-btn-back', 'ms-render-row',
   'ms-render-toolpath', 'ms-render-solid', 'ms-render-read', 'ms-layer-row', 'ms-layer-prev', 'ms-layer-index',
   'ms-layer-next', 'ms-btn-layer-select', 'ms-layer-note', 'ms-visibility-row', 'ms-btn-clear-view',
   'ms-btn-show-all', 'ms-btn-select-visible', 'ms-crop-row', 'ms-btn-crop', 'ms-crop-read', 'ms-support-row',
-  'ms-btn-overhangs', 'ms-overhang-angle', 'ms-support-read', 'ms-lift-row', 'ms-lift-groups', 'ms-lift-read',
+  'ms-btn-overhangs', 'ms-overhang-angle', 'ms-support-read',
   'ms-slice-row', 'ms-slice-export-row', 'ms-btn-slice-export-plate', 'ms-btn-slice-export-stl',
   'ms-slice-read', 'ms-slice-settings', 'ms-slice-nozzle', 'ms-slice-layer', 'ms-slice-walls',
   'ms-slice-density', 'ms-slice-pattern', 'ms-slice-angle', 'ms-export-row', 'ms-btn-export-plate',
   'ms-btn-export-stl', 'ms-export-solid-row', 'ms-btn-export-solid-plate', 'ms-btn-export-solid-stl',
   'ms-info-title', 'ms-info', 'ms-viewport', 'ms-mode-badge', 'ms-legend-float', 'ms-legend-title',
-  'ms-legend-toggle', 'ms-legend', 'ms-detected', 'ms-hint-badge', 'ms-support-pop', 'ms-sp-title',
+  'ms-legend-toggle', 'ms-legend', 'ms-hint-badge', 'ms-support-pop', 'ms-sp-title',
   'ms-sp-sub', 'ms-sp-style', 'ms-sp-size', 'ms-sp-rest', 'ms-sp-generate', 'ms-sp-apply', 'ms-sp-remove',
   'ms-sp-cancel', 'ms-sp-read', 'ms-zr', 'ms-zr-hi-read', 'ms-zr-track', 'ms-zr-fill', 'ms-zr-hi', 'ms-zr-lo',
   'ms-zr-lo-read', 'ms-zr-count', 'ms-zr-all'];
@@ -168,7 +174,6 @@ withApp(async (page, logs) => {
   await page.waitForTimeout(300);
   await page.click('#btn-microscope');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc() && window.NSO_MICROSCOPE.getDoc().kind === 'mesh', null, { timeout: 30000 });
-  await page.waitForFunction(() => window.NSO_MICROSCOPE.flange().status !== 'pending', null, { timeout: 30000 });
   await frames(page);
   const shot = name => page.screenshot({ path: path.join(SHOTS, name + '.png') });
 
@@ -218,9 +223,9 @@ withApp(async (page, logs) => {
       const dk = document.getElementById('ms-dock');
       out.dock = dock.filter(id => !dk.contains(document.getElementById(id)));
       out.dockInCard = dock.filter(id => document.getElementById(id).closest('.ms-card'));
-      const o = document.getElementById('ms-mode-orbit'), s = document.getElementById('ms-mode-select'), l = document.getElementById('ms-mode-line');
-      out.siblings = o.parentElement === s.parentElement && s.parentElement === l.parentElement &&
-        Array.from(o.parentElement.children).filter(k => k.tagName === 'BUTTON').length === 3;
+      const ms = ['piece', 'select', 'feature', 'line', 'layer'].map(m => document.getElementById('ms-mode-' + m));
+      out.siblings = ms.every(b => b.parentElement === ms[0].parentElement) &&
+        Array.from(ms[0].parentElement.children).filter(k => k.tagName === 'BUTTON').length === 5;
       out.navCount = document.querySelectorAll('#microscope .ms-nav').length;
       out.cornerOther = ['ms-btn-back-producer', 'ms-close'].every(id => document.getElementById(id).closest('#ms-corner'));
       return out;
@@ -229,16 +234,16 @@ withApp(async (page, logs) => {
       JSON.stringify(r.colKids) === JSON.stringify(COLUMN.map(c => c[0])), r.colKids.join(' '));
     const colWrong = COLUMN.filter(([, l], i) => norm(r.colText[i]) !== l).map(([, l], i) => l + '?');
     check('each carries the ticket\'s label', colWrong.length === 0, r.colText.map(norm).join(' | '));
-    check('the corner holds Back, Export, Close, in the viewport',
+    check('the corner holds Back, LENS|TAKE, Clear, Export, Close, in the viewport',
       JSON.stringify(r.cornerKids) === JSON.stringify(CORNER.map(c => c[0])) && r.cornerIn, r.cornerKids.join(' '));
-    check('...labelled BACK, EXPORT, CLOSE', JSON.stringify(r.cornerText.map(norm)) === JSON.stringify(CORNER.map(c => c[1])), r.cornerText.map(norm).join(' | '));
+    check('...labelled BACK, LENS TAKE, CLEAR, EXPORT, CLOSE', JSON.stringify(r.cornerText.map(norm)) === JSON.stringify(CORNER.map(c => c[1])), r.cornerText.map(norm).join(' | '));
     Object.keys(CARDS).forEach(c => check(c + ' holds its controls, and is in the viewport (not the column)', r.cards[c].length === 0 && r.cardInVp[c],
       r.cards[c].join(', ') || CARDS[c][1].length + ' ids'));
-    check('Export: "Selection" holds the four, "Sliced piece" the two',
+    check('Export: "Selection" holds the four, "Sliced piece" the two, "Whole plate" (TAKE only) the two',
       JSON.stringify(r.groups) === JSON.stringify(EXPORT_GROUPS), JSON.stringify(r.groups));
     check('the dock holds the legend, the file line, the info, Features, the Slice report and the hint', r.dock.length === 0, r.dock.join(', ') || DOCK.length + ' ids');
     check('...and none of it is in a card', r.dockInCard.length === 0, r.dockInCard.join(', '));
-    check('the three mode buttons are siblings, and only those three', r.siblings);
+    check('the five mode buttons are siblings, and only those five', r.siblings);
   }
 
   /* ------------------------------------------------------------------ 3 */
@@ -248,7 +253,7 @@ withApp(async (page, logs) => {
     const g = await page.evaluate(() => {
       const R = id => { const b = document.getElementById(id).getBoundingClientRect(); return { x: b.left, y: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height }; };
       const panel = R('microscope'), vp = R('ms-viewport'), col = R('ms-sidebar');
-      const slabs = ['ms-btn-open', 'ms-btn-plate', 'ms-nav-select', 'ms-nav-line', 'ms-nav-layer', 'ms-nav-view', 'ms-nav-render',
+      const slabs = ['ms-btn-open', 'ms-btn-plate', 'ms-nav-select', 'ms-nav-view', 'ms-nav-render',
                      'ms-nav-overhangs', 'ms-nav-crop', 'ms-nav-slice'].map(R);
       const main = document.getElementById('btn-microscope').getBoundingClientRect();
       const mainStyle = getComputedStyle(document.getElementById('btn-microscope'));
@@ -258,8 +263,8 @@ withApp(async (page, logs) => {
                slabFont: slab.fontSize, slabTrack: slab.letterSpacing, slabCls: document.getElementById('ms-nav-select').classList.contains('vp-bar-btn'),
                corner: ['ms-btn-back-producer', 'ms-nav-export', 'ms-close'].map(id => document.getElementById(id).hidden ? null : R(id)),
                legend: R('ms-legend-float'), head: (b => ({ x: b.left, y: b.top, r: b.right, b: b.bottom }))(document.querySelector('#ms-dock-left .ms-head').getBoundingClientRect()), info: R('ms-info'),
-               box: ['ms-info-title', 'ms-lift-row', 'ms-slice-readout'].map(id => { const e = document.getElementById(id).closest('.ms-glass'); if (getComputedStyle(e).display === 'none') return null; const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height }; }), W: innerWidth, H: innerHeight, colPos: cs('ms-sidebar').position,
-               cut: ['ms-btn-open', 'ms-btn-plate', 'ms-nav-select', 'ms-nav-line', 'ms-nav-layer', 'ms-nav-view', 'ms-nav-render',
+               box: ['ms-info-title', 'ms-slice-readout'].map(id => { const e = document.getElementById(id).closest('.ms-glass'); if (getComputedStyle(e).display === 'none') return null; const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height }; }), W: innerWidth, H: innerHeight, colPos: cs('ms-sidebar').position,
+               cut: ['ms-btn-open', 'ms-btn-plate', 'ms-nav-select', 'ms-nav-view', 'ms-nav-render',
                      'ms-nav-overhangs', 'ms-nav-crop', 'ms-nav-slice'].filter(id => {
                        const e = document.getElementById(id); return e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1; }),
                zr: (() => { const z = document.getElementById('ms-zr'); return z.hidden ? null : R('ms-zr'); })(),
@@ -305,8 +310,8 @@ withApp(async (page, logs) => {
     let st = await cardState(page);
     check('no card is open to begin with', st.open.length === 0, st.open.join(','));
     const dis = Object.keys(CARDS).filter(c => st.shown[c].disabled);
-    check('on a plate piece, nothing selected: Line, Render and Export are disabled (their rows are hidden); the rest are not',
-      JSON.stringify(dis.sort()) === JSON.stringify(['ms-card-export', 'ms-card-line', 'ms-card-render']), dis.join(','));
+    check('on a plate piece, nothing selected: Render and Export are disabled (their rows are hidden); the rest are not',
+      JSON.stringify(dis.sort()) === JSON.stringify(['ms-card-export', 'ms-card-render']), dis.join(','));
     const openable = Object.keys(CARDS).filter(c => !st.shown[c].disabled);
     for (const card of openable) {
       await openCard(page, card);
@@ -325,16 +330,16 @@ withApp(async (page, logs) => {
     }
     // swap: another button replaces the open card
     await openCard(page, 'ms-card-view');
-    await openCard(page, 'ms-card-layer');
+    await openCard(page, 'ms-card-crop');
     st = await cardState(page);
-    check('another button swaps the card: only one is open', JSON.stringify(st.open) === JSON.stringify(['ms-card-layer']), st.open.join(','));
+    check('another button swaps the card: only one is open', JSON.stringify(st.open) === JSON.stringify(['ms-card-crop']), st.open.join(','));
     // same button again shuts it
-    await openCard(page, 'ms-card-layer');
+    await openCard(page, 'ms-card-crop');
     st = await cardState(page);
-    check('its own button again shuts it', st.open.length === 0 && !st.shown['ms-card-layer'].on && st.shown['ms-card-layer'].aria === 'false', st.open.join(','));
+    check('its own button again shuts it', st.open.length === 0 && !st.shown['ms-card-crop'].on && st.shown['ms-card-crop'].aria === 'false', st.open.join(','));
     // a disabled button does nothing
     const before = await cardState(page);
-    await page.evaluate(() => document.getElementById('ms-nav-line').click());
+    await page.evaluate(() => document.getElementById('ms-nav-render').click());
     st = await cardState(page);
     check('a disabled button opens nothing', st.open.length === 0 && before.open.length === 0, st.open.join(','));
     // Escape
@@ -347,20 +352,20 @@ withApp(async (page, logs) => {
     await openCard(page, 'ms-card-select');
     await clickFace(page, '#ms-mode-select');
     const act = await page.evaluate(() => [document.getElementById('ms-mode-select').classList.contains('active'),
-      document.getElementById('ms-mode-orbit').classList.contains('active'), window.NSO_MICROSCOPE.mode(),
+      document.getElementById('ms-mode-piece').classList.contains('active'), window.NSO_MICROSCOPE.mode(),
       getComputedStyle(document.getElementById('ms-select-controls')).display]);
-    check('Select\'s mode buttons keep their active state, and select mode shows its rows in the card', act[0] && !act[1] && act[2] === 'select' && act[3] !== 'none', JSON.stringify(act));
-    check('every control in Select\'s card can be hit with a real click', (r => r.blocked.length === 0 && r.hit.length >= 5)(await reach(page, 'ms-card-select')),
+    check('Select\'s mode buttons keep their active state, and Region shows its rows in the card', act[0] && !act[1] && act[2] === 'select' && act[3] !== 'none', JSON.stringify(act));
+    check('every control in Select\'s card can be hit with a real click', (r => r.blocked.length === 0 && r.hit.length >= 6)(await reach(page, 'ms-card-select')),
       JSON.stringify(await reach(page, 'ms-card-select')));
     await shot('03-select-mode');
-    await clickFace(page, '#ms-mode-orbit');
+    await clickFace(page, '#ms-mode-piece');
     await openCard(page, 'ms-card-select');
   }
 
   /* ------------------------------------------------------------------ 5 */
   console.log('\n=== 5. every control in an open card can be hit ===');
   {
-    for (const card of ['ms-card-layer', 'ms-card-view', 'ms-card-overhangs', 'ms-card-crop', 'ms-card-slice']) {
+    for (const card of ['ms-card-view', 'ms-card-overhangs', 'ms-card-crop', 'ms-card-slice']) {
       await openCard(page, card);
       const r = await reach(page, card);
       const shown = r.hit.length, expect = CARDS[card][1].filter(id => !r.hidden.includes(id)).length;
@@ -385,17 +390,16 @@ withApp(async (page, logs) => {
     await openCard(page, 'ms-card-overhangs');
     const r = await page.evaluate(() => {
       const vis = id => { const e = document.getElementById(id); const b = e.getBoundingClientRect(); return getComputedStyle(e).display !== 'none' && b.width > 0 && b.height > 0; };
-      return { info: vis('ms-info'), legend: vis('ms-legend-float'), lift: vis('ms-lift-row'), sub: vis('ms-sub'),
-               liftIn: !!document.querySelector('#ms-lift-row #ms-lift-read'), liftRows: document.querySelectorAll('#ms-lift-row .ms-lift-group').length,
-               liftText: document.getElementById('ms-lift-read').textContent, info1: document.getElementById('ms-info').textContent,
+      return { info: vis('ms-info'), legend: vis('ms-legend-float'), sub: vis('ms-sub'),
+               info1: document.getElementById('ms-info').textContent,
+               legendNote: (document.querySelector('#ms-legend .ms-legend-note') || {}).textContent || '',
                legendRows: document.querySelectorAll('#ms-legend .ms-legend-item').length,
                support: document.getElementById('ms-support-read').textContent, sliceRead: document.getElementById('ms-slice-read').textContent,
                sliceReadOut: getComputedStyle(document.getElementById('ms-slice-readout')).display,
                sub1: document.getElementById('ms-sub').textContent };
     });
-    check('with a card open the legend, the file line, the info and Features are all still up', r.info && r.legend && r.lift && r.sub, JSON.stringify([r.info, r.legend, r.lift, r.sub]));
-    check('the legend lists the plate\'s parts', r.legendRows >= 1, String(r.legendRows));
-    check('Features (app-gscope-lift.js) landed in #ms-lift-row', r.liftIn && r.liftText.length > 1, r.liftText.slice(0, 70));
+    check('with a card open the Features list, the file line and the info are all still up', r.info && r.legend && r.sub, JSON.stringify([r.info, r.legend, r.sub]));
+    check('the Features list says a plate piece is not sliced (no rows: line types are a slice\'s)', r.legendRows === 0 && /Not sliced/.test(r.legendNote), r.legendNote);
     check('the overhang readout (app-gscope-support.js) landed in the Overhangs card', r.support.length > 1 && !/^—$/.test(r.support), r.support.slice(0, 70));
     check('the Slice report is up in the dock', r.sliceReadOut !== 'none' && r.sliceRead.length > 1, r.sliceRead.slice(0, 70));
     await shot('05-overhangs');
@@ -415,8 +419,8 @@ withApp(async (page, logs) => {
     check('Select shown is clickable in the View card', r0 && r0.ok, r0 && r0.why);
     await page.waitForTimeout(150);
     let st = await cardState(page);
-    check('with a selection Export is enabled; Line and Render still are not',
-      !st.shown['ms-card-export'].disabled && st.shown['ms-card-line'].disabled && st.shown['ms-card-render'].disabled);
+    check('with a selection Export is enabled; Render still is not',
+      !st.shown['ms-card-export'].disabled && st.shown['ms-card-render'].disabled);
     await openCard(page, 'ms-card-export');
     const ex = await page.evaluate(() => {
       const gs = Array.from(document.querySelectorAll('#ms-card-export .ms-xgroup')).map(g => ({
@@ -443,8 +447,8 @@ withApp(async (page, logs) => {
     check('slice progress text shows in the dock while it runs', /Slic/i.test(sawBusy), sawBusy.slice(0, 60));
     st = await cardState(page);
     const dis = Object.keys(CARDS).filter(c => st.shown[c].disabled).sort();
-    check('a slice is a toolpath: Render, Layer and Export are up; Line waits for Pick a line; Overhangs belong to a mesh',
-      JSON.stringify(dis) === JSON.stringify(['ms-card-line', 'ms-card-overhangs']), dis.join(','));
+    check('a slice is a toolpath: Render and Export are up; Overhangs belong to a mesh',
+      JSON.stringify(dis) === JSON.stringify(['ms-card-overhangs']), dis.join(','));
     const rep = await page.evaluate(() => document.getElementById('ms-slice-read').textContent);
     check('the slice report is in the dock', rep.length > 20 && /layer|wall|infill|slice/i.test(rep), rep.slice(0, 90));
     await shot('07-sliced-view');
@@ -456,26 +460,19 @@ withApp(async (page, logs) => {
     await shot('08-render');
     await openCard(page, 'ms-card-render');
 
-    // LINE
+    // LINE and LAYER, in the Select card now
     await openCard(page, 'ms-card-select');
     await clickFace(page, '#ms-mode-line');
     await page.waitForTimeout(100);
-    st = await cardState(page);
-    check('Pick a line turns the Line button on', !st.shown['ms-card-line'].disabled, JSON.stringify(st.shown['ms-card-line']));
-    const act = await page.evaluate(() => [document.getElementById('ms-mode-line').classList.contains('active'), window.NSO_MICROSCOPE.mode()]);
-    check('...with the mode button active as before', act[0] && act[1] === 'line', JSON.stringify(act));
-    await openCard(page, 'ms-card-line');
-    const ln = await reach(page, 'ms-card-line');
-    check('Line opens with line, line, Isolate - each hit-testable', ln.blocked.length === 0 && ln.hit.length === 3, JSON.stringify(ln));
-    await shot('09-line');
-    await openCard(page, 'ms-card-line');
-
-    // LAYER on a slice
-    await openCard(page, 'ms-card-layer');
-    const ly = await reach(page, 'ms-card-layer');
-    check('Layer: ▼ · index · ▲ · Select layer, each hit-testable', ly.blocked.length === 0 && ly.hit.length === 4, JSON.stringify(ly));
-    await shot('10-layer');
-    await openCard(page, 'ms-card-layer');
+    const act = await page.evaluate(() => [document.getElementById('ms-mode-line').classList.contains('active'), window.NSO_MICROSCOPE.mode(),
+      getComputedStyle(document.getElementById('ms-line-controls')).display, getComputedStyle(document.getElementById('ms-layer-row')).display,
+      ['piece', 'select', 'feature', 'line', 'layer'].map(m => !document.getElementById('ms-mode-' + m).disabled)]);
+    check('Line turns the Line mode on, as before; a slice has all five modes', act[0] && act[1] === 'line' && act[2] !== 'none' && act[3] !== 'none' && act[4].every(Boolean), JSON.stringify(act));
+    const sel = await reach(page, 'ms-card-select');
+    check('the Select card on a slice: five modes, the Line row and the Layer row, each hit-testable',
+      sel.blocked.length === 0 && sel.hit.length >= 12, JSON.stringify(sel));
+    await shot('09-select-slice');
+    await openCard(page, 'ms-card-select');
 
     // EXPORT, with a slice
     await openCard(page, 'ms-card-view');
@@ -484,8 +481,8 @@ withApp(async (page, logs) => {
     const ex2 = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-card-export .ms-xgroup')).map(g => ({
       t: g.querySelector('.ms-section-title').textContent.trim(), shown: getComputedStyle(g).display !== 'none' && g.getBoundingClientRect().height > 0,
       btns: Array.from(g.querySelectorAll('button')).filter(b => b.getBoundingClientRect().width > 0).map(b => b.id) })));
-    check('Export, a slice with a selection: all six - "Selection" four, "Sliced piece" two',
-      ex2.length === 2 && ex2[0].btns.length === 4 && ex2[1].btns.length === 2 && ex2[0].shown && ex2[1].shown, JSON.stringify(ex2));
+    check('Export, a slice with a selection on LENS: all six - "Selection" four, "Sliced piece" two; "Whole plate" waits for TAKE',
+      ex2.length === 3 && ex2[0].btns.length === 4 && ex2[1].btns.length === 2 && ex2[0].shown && ex2[1].shown && !ex2[2].shown, JSON.stringify(ex2));
     const rr2 = await reach(page, 'ms-card-export');
     check('...each hit-testable', rr2.blocked.length === 0 && rr2.hit.length === 6, JSON.stringify(rr2));
     await shot('11-export-slice');
@@ -497,8 +494,9 @@ withApp(async (page, logs) => {
     await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'mesh', null, { timeout: 30000 });
     await page.waitForTimeout(150);
     st = await cardState(page);
-    check('Normal goes back to the mesh: Line and Render are disabled again, and the View card stays open',
-      st.shown['ms-card-line'].disabled && st.shown['ms-card-render'].disabled && st.open.join() === 'ms-card-view', st.open.join());
+    check('Normal goes back to the mesh: Render is disabled again, Feature / Line / Layer are a slice\'s, and the View card stays open',
+      st.shown['ms-card-render'].disabled && st.open.join() === 'ms-card-view' &&
+      (await page.evaluate(() => ['feature', 'line', 'layer'].every(m => document.getElementById('ms-mode-' + m).disabled))), st.open.join());
     await openCard(page, 'ms-card-view');
   }
 
@@ -523,7 +521,7 @@ withApp(async (page, logs) => {
       const corner = Array.from(document.querySelectorAll('#ms-corner > button:not([hidden])')).map(b => b.getBoundingClientRect());
       const r = id => { const b = document.getElementById(id).getBoundingClientRect(); return { x: b.left, y: b.top, r: b.right, b: b.bottom }; };
       const left = r('ms-dock-left');
-      const boxes = ['ms-info-title', 'ms-lift-row', 'ms-slice-readout'].map(id => document.getElementById(id).closest('.ms-glass')).filter(e => getComputedStyle(e).display !== 'none')
+      const boxes = ['ms-info-title', 'ms-slice-readout'].map(id => document.getElementById(id).closest('.ms-glass')).filter(e => getComputedStyle(e).display !== 'none')
         .map(e => e.getBoundingClientRect());
       return { H, W, colB: Math.max(...slabs.map(b => b.bottom)), cornerR: Math.max(...corner.map(b => b.right)), left,
                rowTop: Math.min(...boxes.map(b => b.top)), rowR: Math.max(...boxes.map(b => b.right)) };
@@ -532,7 +530,7 @@ withApp(async (page, logs) => {
     check('1024 x 720: the corner row stays inside', short.cornerR <= short.W, String(short.cornerR));
     check('1024 x 720: the left wall\'s boxes end inside the window and start under the column', short.left.b <= short.H && short.left.y >= short.colB, JSON.stringify([short.left, short.colB]));
     check('1024 x 720: the bottom boxes are inside the window and clear of the slider', short.rowTop >= 0 && short.rowR <= short.W - 76, JSON.stringify([short.rowTop, short.rowR]));
-    for (const card of ['ms-card-select', 'ms-card-layer', 'ms-card-view', 'ms-card-overhangs', 'ms-card-crop', 'ms-card-slice', 'ms-card-export']) {
+    for (const card of ['ms-card-select', 'ms-card-view', 'ms-card-overhangs', 'ms-card-crop', 'ms-card-slice', 'ms-card-export']) {
       await openCard(page, card);
       const r = await page.evaluate(card => { const b = document.getElementById(card).getBoundingClientRect(); return { b: b.bottom, r: b.right, t: b.top, l: b.left, H: innerHeight, W: innerWidth,
         on: getComputedStyle(document.getElementById(card)).display !== 'none' }; }, card);

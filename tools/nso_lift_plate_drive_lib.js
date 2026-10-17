@@ -1,6 +1,5 @@
 /* Page helpers shared by the drive checks that work Lift on the plate (the
-   Subtract card's LIFT, app-lift-plate.js) and read G-scope's Features row
-   (app-gscope-lift.js): lift:plate, lift:drive, lift:auto-drive and
+   Subtract card's LIFT, app-lift-plate.js): lift:plate, lift:drive, lift:auto-drive and
    lift:curved-drive. Node only; every function takes the Playwright page.
 
    Every hover and click goes to the main canvas as a real pointer event, at
@@ -153,7 +152,7 @@ async function strip(page, untick) {
   await waitRead(page, /Lifted|refused|failed/);
 }
 
-/* G-scope on the plate, and what its Features row says. */
+/* G-scope on the plate. (Its Features row left G-scope with the SELECT ticket, docs/GSCOPE-SELECT.md.) */
 async function openScopeOnPlate(page) {
   await page.evaluate(() => { if (NSO_MICROSCOPE.isOpen()) NSO_MICROSCOPE.close(); });
   await page.click('#btn-microscope');
@@ -162,15 +161,6 @@ async function openScopeOnPlate(page) {
   await page.waitForFunction(() => NSO_MICROSCOPE.isOpen() && NSO_MICROSCOPE.getDoc() && NSO_MICROSCOPE.getDoc().source === 'plate', null, { timeout: 30000 });
   await page.waitForTimeout(300);
 }
-const features = page => page.evaluate(() => ({
-  title: document.querySelector('#ms-lift-row .ms-section-title').textContent,
-  shown: getComputedStyle(document.getElementById('ms-lift-row')).display !== 'none',
-  controls: document.querySelectorAll('#ms-lift-row button, #ms-lift-row input, #ms-lift-row select').length,
-  piece: NSO_GSCOPE_LIFT.piece(), count: NSO_GSCOPE_LIFT.count(),
-  rows: Array.from(document.querySelectorAll('#ms-lift-groups .ms-lift-group')).map(r => r.textContent),
-  read: document.getElementById('ms-lift-read').textContent,
-  lines: NSO_GSCOPE_LIFT.layer() ? NSO_GSCOPE_LIFT.layer().children.filter(c => c.type === 'LineSegments').length : 0
-}));
 /* The screen point of a triangle as G-scope draws it, and a real click there. */
 async function clickScopeTri(page, sourceId, tri) {
   const at = await page.evaluate(([sid, t]) => {
@@ -207,7 +197,7 @@ function shooter(OUT, KEEP, ROOT) {
       console.log('   [screenshot] ' + (KEEP ? path.relative(ROOT, file) : name));
     },
     async scope(page, name) {
-      await page.evaluate(() => { NSO_MICROSCOPE.flushView(); document.getElementById('ms-lift-row').scrollIntoView({ block: 'center' }); });
+      await page.evaluate(() => { NSO_MICROSCOPE.flushView(); });
       await page.waitForTimeout(400);
       const file = path.join(OUT, name + '.png');
       await page.screenshot({ path: file });
@@ -228,5 +218,5 @@ const dropPieces = (page, ids) => page.evaluate(ids => {
 module.exports = {
   makeCheck, rawTriNear, status, readout, card, raw, plateState, pieceInfo, overlaps, added, sameSoup, volumeOf,
   frameOn, screenOfTri, hoverTri, clickTri, ctrlZ, waitRead, selectRow, armOn, disarm, featureOf, topTriOf, setSlider, strip,
-  openScopeOnPlate, features, clickScopeTri, frameScope, shooter, dropPieces
+  openScopeOnPlate, clickScopeTri, frameScope, shooter, dropPieces
 };

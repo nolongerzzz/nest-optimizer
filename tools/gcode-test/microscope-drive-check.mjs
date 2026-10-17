@@ -166,18 +166,42 @@ async function main() {
   check('the header says what is loaded',
     /2895 extrusion moves, 50 layers/.test(opened.sub), true);
   check('and the legend is named for what a SLICE groups on',
-    await page.textContent('#ms-legend-title'), 'All features');
+    await page.textContent('#ms-legend-title'), 'Features');
+  check('each row is "name (count)" with a Display check; no "only" button any more',
+    await page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll('#ms-legend .ms-legend-item'));
+      return rows.length > 0 && !document.querySelector('.ms-legend-only') && rows.every((r) =>
+        /^.+ \(\d+\)$/.test(r.querySelector('.ms-legend-label').textContent) &&
+        r.querySelector('input.ms-legend-display').checked === (r.dataset.group !== 'Travel'));
+    }), true);
 
-  // Legend click isolates, exactly as the reference tool does.
-  await page.click('#ms-legend .ms-legend-item:first-child');
+  // The row's Display check hides / shows that line type (the old row click).
+  await page.click('#ms-legend .ms-legend-item:first-child input.ms-legend-display');
   const dimmed = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, v = M.getView();
     const name = document.querySelector('#ms-legend .ms-legend-item').dataset.group;
-    return { hidden: M.hidden(), visible: v.overviewMeshes[name].visible, name };
+    return { hidden: M.hidden(), visible: v.overviewMeshes[name].visible, name, iso: M.isIsolated() };
   });
-  check('clicking a legend row hides that feature', dimmed.visible, false);
+  check('unchecking a legend row\'s Display check hides that feature', dimmed.visible, false);
   check('and records it as hidden', dimmed.hidden.includes(dimmed.name), true);
-  await page.click('#ms-legend .ms-legend-item:first-child');   // back on
+  check('hiding is not isolating', dimmed.iso, false);
+  await page.click('#ms-legend .ms-legend-item:first-child input.ms-legend-display');   // back on
+  check('checking it again brings it back',
+    await page.evaluate(() => {
+      const M = window.NSO_MICROSCOPE;
+      const name = document.querySelector('#ms-legend .ms-legend-item').dataset.group;
+      return [M.hidden().includes(name), M.getView().overviewMeshes[name].visible];
+    }), [false, true]);
+
+  // A click on the row itself (off its check) is the Feature click: that line
+  // type, isolated; again, whole.
+  await page.click('#ms-legend .ms-legend-item:first-child .ms-legend-label');
+  check('clicking a legend row isolates that line type (Feature mode)',
+    await page.evaluate(() => [window.NSO_MICROSCOPE.isIsolated(), window.NSO_MICROSCOPE.mode()]),
+    [true, 'feature']);
+  await page.click('#ms-legend .ms-legend-item:first-child .ms-legend-label');
+  check('and clicking it again makes the view whole',
+    await page.evaluate(() => window.NSO_MICROSCOPE.isIsolated()), false);
 
   // =======================================================================
   console.log('\n--- the axis map, through the shipped code ---');
@@ -271,7 +295,7 @@ async function main() {
   // Isolate / Back. Isolate shows the selection ALONE and
   // AS-IS: each move as the same line the overview draws, nothing else.
   // The box controls - Isolate all boxes, Clear all boxes - are under Click
-  // to select region, and G-scope opens in orbit: arm it, as a user does.
+  // to select region (Region mode), and G-scope opens in Piece: arm it, as a user does.
   await page.click('#ms-mode-select');
   await page.click('#ms-btn-isolate');
   const isolated = await page.evaluate(() => {
@@ -463,7 +487,7 @@ async function main() {
   check('an STL is ONE object - the format has no object structure',
     stlDoc.objects, 1);
   check('so it draws as one whole, unsegmented part', stlDoc.overviewKinds, ['Mesh']);
-  check('the legend has that one part and nothing invented beside it',
+  check('the document has that one part and nothing invented beside it',
     stlDoc.groups.length, 1);
   check('it is named after the file', stlDoc.groups[0], 'box-20mm');
   check('it has no layers', stlDoc.layers, 0);
@@ -473,10 +497,13 @@ async function main() {
     /not sliced, so it has no layers/.test(stlDoc.note), true);
   check('the header says the same thing',
     /Not sliced: no layers and no features/.test(stlDoc.sub), true);
-  // A plain mesh has no features, so the legend must not claim it groups on
-  // them - it groups on build objects, and says so.
-  check('the legend is named for what a MESH groups on',
-    await page.textContent('#ms-legend-title'), 'Parts');
+  // A plain mesh has no line types: the Features list has no rows (no Parts
+  // rows any more) and says so in one note.
+  check('a mesh\'s Features list has no rows, only the "Not sliced" note',
+    await page.evaluate(() => [
+      document.querySelectorAll('#ms-legend .ms-legend-item').length,
+      Array.from(document.querySelectorAll('#ms-legend .ms-legend-note')).map((n) => n.textContent)]),
+    [0, ['Not sliced - no line types.']]);
 
   const refused = await page.evaluate(() => {
     window.NSO_MICROSCOPE.selectLayer(0);
@@ -537,11 +564,13 @@ async function main() {
       layers: M.layerCount(),
       kinds: [...new Set(v.overviewGroup.children.map((c) => c.type))],
       legend: document.querySelectorAll('#ms-legend .ms-legend-item').length,
+      note: Array.from(document.querySelectorAll('#ms-legend .ms-legend-note')).map((n) => n.textContent),
     };
   });
   check('a plain 3MF reads as a mesh', mfDoc.kind, 'mesh');
   check('with one part per build object - ten of them', mfDoc.objects, 10);
-  check('one legend row each, from the file\'s own object names', mfDoc.legend, 10);
+  check('no legend rows for them - a mesh has no line types, just the one note',
+    [mfDoc.legend, mfDoc.note], [0, ['Not sliced - no line types.']]);
   check('drawn as ten whole parts', mfDoc.kinds, ['Mesh']);
   check('still no layers, because it is still not sliced', mfDoc.layers, 0);
 

@@ -190,6 +190,7 @@ async function main() {
       legend: document.querySelectorAll('#ms-legend .ms-legend-item').length,
       sub: document.getElementById('ms-sub').textContent,
       legendTitle: document.getElementById('ms-legend-title').textContent,
+      legendNotes: Array.from(document.querySelectorAll('#ms-legend .ms-legend-note')).map((n) => n.textContent),
       bounds: d.objects[0].bounds,
     };
   });
@@ -198,13 +199,16 @@ async function main() {
   check('one group for the one piece on the plate', plateDoc.objects, 1);
   check('named for the piece, as the plate names it', plateDoc.groups, [onPlate.name]);
   check('drawn as a whole part', plateDoc.drawn, ['Mesh']);
-  check('with a legend row for it', plateDoc.legend, 1);
+  // (Parts rows are gone: a mesh document has no line types, so the Features
+  // list holds no row for the piece - it is chosen in Piece mode instead.)
+  check('the Features list has no row for it, just the "Not sliced" note',
+    [plateDoc.legend, plateDoc.legendNotes], [0, ['Not sliced - no line types.']]);
   check('the header says it is the plate, as it stands',
     /plate as it stands/i.test(plateDoc.sub), true);
   check('and says how many pieces and triangles', /1 piece, \d+ triangles/.test(plateDoc.sub), true);
   check('it claims no layers, because a plate piece has none', plateDoc.layers, 0);
-  check('the legend groups on parts, not on invented features',
-    plateDoc.legendTitle, 'Parts');
+  check('the legend is the Features list and invents no features for a plate piece',
+    [plateDoc.legendTitle, plateDoc.legend], ['Features', 0]);
 
   // Geometry, not a picture of it: the piece read off the plate must be the
   // piece that is on the plate, in the file's own Z-up millimetres, standing
@@ -277,7 +281,7 @@ async function main() {
   check('the export row came up with the selection', boxed.exportRow, true);
 
   // The box controls - Isolate all boxes, Clear all boxes - are under Click
-  // to select region, and G-scope opens in orbit: arm it, as a user does.
+  // to select region, and G-scope opens in Piece: arm it, as a user does.
   await page.click('#ms-mode-select');
   await page.click('#ms-btn-isolate');
   const isolated = await page.evaluate(() => {
@@ -352,12 +356,15 @@ async function main() {
   const two = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, d = M.getDoc();
     return { source: d.source, objects: d.objects.length, groups: M.groups().sort(),
-             legend: document.querySelectorAll('#ms-legend .ms-legend-item').length };
+             legend: document.querySelectorAll('#ms-legend .ms-legend-item').length,
+             notes: document.querySelectorAll('#ms-legend .ms-legend-note').length };
   });
   check('the button re-reads the plate every time it opens it', two.objects, 2);
   check('and it is still the plate, not a stale file', two.source, 'plate');
-  check('two pieces of one name get two legend rows, not one', two.legend, 2);
-  check('because the second is made unique rather than folded into the first',
+  // (No legend rows for plate pieces any more; the unique-name rule is read
+  // off the document's groups, which is what the rows used to list.)
+  check('two plate pieces make no line-type rows, only the one note', [two.legend, two.notes], [0, 1]);
+  check('two pieces of one name stay two groups, not one: the second is made unique rather than folded into the first',
     two.groups, ['box_closed', 'box_closed #2']);
 
   await page.click('#ms-close');
@@ -426,13 +433,14 @@ async function main() {
   // =======================================================================
   console.log('\n--- support, alone: feature isolation, with shipped controls ---');
   // =======================================================================
-  // The support interface out of the slice on its own, through the legend's
-  // "only" button and Select shown - no box, nothing written for it - then
+  // The support interface out of the slice on its own, through soloGroup (the
+  // old legend "only" button's job; a row click now isolates instead) and Select shown - no box, nothing written for it - then
   // onto the plate as an ordinary piece, and read back off the plate in the
   // slicer's own colour for it.
-  const supportRow = page.locator('#ms-legend .ms-legend-item[data-group="Support interface"]');
-  await supportRow.hover();
-  await supportRow.locator('.ms-legend-only').click();
+  check('the Support interface row is in the Features list',
+    await page.locator('#ms-legend .ms-legend-item[data-group="Support interface"]').count(), 1);
+  check('soloGroup takes the support interface', await page.evaluate(() =>
+    window.NSO_MICROSCOPE.soloGroup('Support interface')), true);
   await page.click('#ms-btn-select-visible');
   const supportOnly = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, d = M.getDoc();
@@ -446,7 +454,7 @@ async function main() {
       label: M.exportLabel(),
     };
   });
-  check('"only" leaves the support interface as the one group shown',
+  check('soloGroup leaves the support interface as the one group shown',
     supportOnly.hidden.includes('Support interface'), false);
   check('Select shown takes it and nothing else - no walls, no infill',
     supportOnly.isSupportOnly, true);
@@ -455,7 +463,7 @@ async function main() {
   console.log(`       ${supportOnly.label}: ${supportOnly.tris} triangles`);
 
   // The box controls - Isolate all boxes, Clear all boxes - are under Click
-  // to select region, and G-scope opens in orbit: arm it, as a user does.
+  // to select region, and G-scope opens in Piece: arm it, as a user does.
   await page.click('#ms-mode-select');
   await page.click('#ms-btn-isolate');
   check('and it isolates on screen as one body',

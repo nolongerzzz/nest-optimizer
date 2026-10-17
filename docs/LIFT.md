@@ -1,5 +1,9 @@
 # Lift - take any detail off a face, leave the face as it was round it
 
+> **G-scope's Features readout is gone** (`app-gscope-lift.js`, `#ms-lift-row`; G-scope's
+> SELECT ticket, `docs/GSCOPE-SELECT.md`). Lift is worked on the plate; the sections
+> below that describe the read-only G-scope row are history.
+
 **Where Lift is worked (section 7):** on the plate, from the Subtract card's
 **Lift** verb (`app-lift-plate.js`). G-scope's row is **Features**, read-only:
 it shows what Lift would find and nothing else. Sections 2 and 5's "In

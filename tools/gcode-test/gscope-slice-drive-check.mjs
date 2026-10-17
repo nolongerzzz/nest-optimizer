@@ -168,11 +168,11 @@ async function main() {
   // =======================================================================
   console.log('\n--- 4. G-scope\'s own tools, unchanged ---');
   // =======================================================================
-  check('a slice opens on its one list, All features: no tab strip, no detector rows',
+  check('a slice opens on its one list, Features: no tab strip, and the detector rows are gone from G-scope',
     [await page.textContent('#ms-legend-title'), await page.isVisible('#ms-legend'),
      await page.evaluate(() => !!document.querySelector('#ms-tab-legend, #ms-tab-detected, .ms-legend-tabs')),
-     await page.evaluate(() => document.querySelectorAll('#ms-detected .ms-legend-item').length)],
-    ['All features', true, false, 0]);
+     await page.evaluate(() => !document.getElementById('ms-detected') && !document.querySelector('#ms-legend .ms-legend-only'))],
+    ['Features', true, false, true]);
   const only = await page.evaluate(() => {
     const items = Array.from(document.querySelectorAll('#ms-legend .ms-legend-item, #ms-legend > *'));
     return items.map((el) => el.textContent.trim()).filter(Boolean).length;

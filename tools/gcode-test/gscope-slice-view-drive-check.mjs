@@ -12,7 +12,7 @@
  *      collapsed by default.
  *   2  SLICE VIEW slices at once with the settings as they stand, shows the
  *      real slice (layers, walls, infill - the same moves NSO_Slicer +
- *      parseGcode give directly) and ONE list, All features: one row per
+ *      parseGcode give directly) and ONE list, Features: one row per
  *      feature the slice printed, no tab strip anywhere in the page, and no
  *      Overhang / Conflict / Flange rows - the overhang call is the Supports
  *      tool's to mark and the Slice report's to state, and it still does.
@@ -23,7 +23,7 @@
  *      isolated box with features switched off: the whole-part state is
  *      exactly the one before slicing - same document, nothing selected,
  *      nothing isolated, nothing hidden or cleared, the same camera, the same
- *      one Parts list, in orbit.
+ *      one Features list (a mesh has no line types: the one note), in Piece mode.
  *   4  THE ROUND TRIP AGAIN: the settings kept their values, and the second
  *      slice is the first one, G-code for G-code; Normal is clean again.
  *   5  AN IMPORTED SLICE has nothing to slice: Slice view is disabled there.
@@ -91,11 +91,11 @@ async function snapshot(page) {
       legendTitle: document.getElementById('ms-legend-title').textContent,
       legendRows: Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map((e) => e.dataset.group),
       legendChecked: Array.from(document.querySelectorAll('#ms-legend .ms-legend-item'))
-        .map((e) => e.getAttribute('aria-checked')),
+        .map((e) => String(e.querySelector('input.ms-legend-display').checked)),
+      legendNotes: Array.from(document.querySelectorAll('#ms-legend .ms-legend-note')).map((e) => e.textContent),
       legendShown: vis('ms-legend'),
-      detectedRows: Array.from(document.querySelectorAll('#ms-detected .ms-legend-item')).map((e) => e.dataset.detected),
-      detectedShown: vis('ms-detected') && !!document.querySelector('#ms-detected .ms-legend-item'),
-      detectedOn: M.detectedOn(), mode: M.mode(),
+      detectorUI: !!document.getElementById('ms-detected') || typeof M.flange === 'function' || typeof M.detectedOn === 'function',
+      mode: M.mode(),
       camera: { target: r(v.controls.target), position: r(v.camera.position), near: v.camera.near, far: v.camera.far },
       toggle: [document.getElementById('ms-cam-normal').classList.contains('active'),
                document.getElementById('ms-cam-slice').classList.contains('active')],
@@ -128,7 +128,6 @@ async function main() {
   const written = await page.evaluate(() => ({ models: state.models.length, placed: state.placed.length, undo: state.undoStack.length }));
   await page.click('#btn-microscope');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc() && window.NSO_MICROSCOPE.getDoc().kind === 'mesh');
-  await page.waitForFunction(() => window.NSO_MICROSCOPE.flange().status !== 'pending', null, { timeout: 30000 });
   await frames(page);
 
   // =======================================================================
@@ -144,12 +143,16 @@ async function main() {
     await page.evaluate(() => [!!document.getElementById('ms-cam-close'), typeof window.NSO_MICROSCOPE.setCameraMode,
       typeof window.NSO_MICROSCOPE.cameraMode, /Close inspection/.test(document.getElementById('microscope').textContent)]),
     [false, 'undefined', 'undefined', false]);
-  check('Normal has one list: Parts, no tab strip in the page, the pieces, then Flange, Handle, Bracket, Lid and Hinge under them',
-    [base.tabsInPage, base.legendShown, base.legendTitle, base.legendRows.length, base.legendChecked, base.detectedRows],
-    [false, true, 'Parts', 2, ['true', 'true'], ['flange', 'handle', 'bracket', 'lid', 'hinge']]);
-  check('G-scope opens in orbit: no region armed', [base.mode,
-    await page.evaluate(() => document.getElementById('ms-mode-orbit').classList.contains('active')),
-    await page.isVisible('#ms-select-controls')], ['orbit', true, false]);
+  // (Parts rows and the Flange / Handle / Bracket / Lid / Hinge detector rows left G-scope.)
+  check('Normal has one list: Features, no tab strip in the page; a mesh has no line types, so no rows, just the note',
+    [base.tabsInPage, base.legendShown, base.legendTitle, base.legendRows.length, base.legendNotes],
+    [false, true, 'Features', 0, ['Not sliced - no line types.']]);
+  check('the detector rows and their API are gone from G-scope (no #ms-detected, flange(), detectedOn(), #ms-lift-row)',
+    [base.detectorUI, await page.evaluate(() => !!document.getElementById('ms-lift-row'))], [false, false]);
+  check('G-scope opens in Piece mode (no orbit mode, no region armed)', [base.mode,
+    await page.evaluate(() => document.getElementById('ms-mode-piece').classList.contains('active')),
+    await page.evaluate(() => !document.getElementById('ms-mode-orbit')),
+    await page.isVisible('#ms-select-controls')], ['piece', true, true, false]);
   check('the slice settings are plain fields in the Slice card: no disclosure, no <details>',
     await page.evaluate(() => [document.getElementById('ms-slice-settings').tagName,
       document.querySelectorAll('#microscope details, #microscope summary').length,
@@ -222,12 +225,12 @@ async function main() {
   });
   check('... the same G-code NSO_Slicer gives called directly on the same pieces', direct, true);
   check('the toggle reads Slice view', [s1.toggle, s1.viewMode], [[false, true], 'slice']);
-  check('one list, All features: the slice\'s own rows, every one on, no tab strip, no detector rows',
-    [s1.legendTitle, s1.legendShown, s1.tabsInPage, s1.detectedRows, s1.detectedShown],
-    ['All features', true, false, [], false]);
+  check('one list, Features: the slice\'s own rows, every one on, no tab strip, no detector rows',
+    [s1.legendTitle, s1.legendShown, s1.tabsInPage, s1.detectorUI, s1.legendNotes],
+    ['Features', true, false, false, []]);
   check('... exactly the groups the slice printed, one row each',
     s1.legendRows.slice().sort(), out1.groups.filter((g) => g !== 'Travel'));
-  check('... every one a checked toggle', s1.legendChecked.every((c) => c === 'true'), true);
+  check('... every one with its Display check on', s1.legendChecked.every((c) => c === 'true'), true);
   const words = await page.evaluate(() => document.getElementById('ms-legend-float').textContent);
   check('... and nothing in it of the Supports tool\'s, or a mesh\'s: no Overhang, Conflict or Flange rows',
     /Overhang:|Conflict:|Flange|not on a slice/.test(words), false);
@@ -235,13 +238,14 @@ async function main() {
     /mushroom: walls per layer [^.]*; needs support at z 5\.00 \([\d.]+ mm² on plate\)/.test(await page.textContent('#ms-slice-read')), true);
   await page.locator('#microscope').screenshot({ path: join(SHOTS, 'slice-view-01-one-list.png') });
 
-  // Every row a toggle, by real clicks: all off, then back one at a time.
+  // Every row a Display toggle, by real clicks on its check: all off, then back one at a time.
+  const disp = (g) => `#ms-legend [data-group="${g}"] input.ms-legend-display`;
   const drawnFeatures = () => page.evaluate(() => {
     const v = window.NSO_MICROSCOPE.getView();
     return Object.keys(v.overviewMeshes).filter((k) => v.overviewMeshes[k].visible &&
       v.overviewMeshes[k].geometry.attributes.position.count > 0).sort();
   });
-  for (const g of s1.legendRows) await page.click(`#ms-legend [data-group="${g}"]`);
+  for (const g of s1.legendRows) await page.click(disp(g));
   await frames(page);
   check('every row switched off: an empty view, the list still up',
     [await drawnFeatures(), await page.evaluate(() => window.NSO_MICROSCOPE.shownCount()), await page.isVisible('#ms-legend')],
@@ -249,7 +253,7 @@ async function main() {
   await page.locator('#microscope').screenshot({ path: join(SHOTS, 'slice-view-02-all-off.png') });
   const back = [];
   for (const g of s1.legendRows) {
-    await page.click(`#ms-legend [data-group="${g}"]`);
+    await page.click(disp(g));
     back.push(g);
     await frames(page);
     check(`on again, one at a time (${back.length}/${s1.legendRows.length}): exactly those drawn`,
@@ -257,7 +261,7 @@ async function main() {
   }
   // A partial set: the walls only. Select shown takes exactly them.
   const wallsOnly = s1.legendRows.filter((g) => /wall/i.test(g));
-  for (const g of s1.legendRows.filter((x) => !wallsOnly.includes(x))) await page.click(`#ms-legend [data-group="${g}"]`);
+  for (const g of s1.legendRows.filter((x) => !wallsOnly.includes(x))) await page.click(disp(g));
   await page.click('#ms-btn-select-visible');
   const walls = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, sel = M.selection();
@@ -305,8 +309,8 @@ async function main() {
   });
   check('the second Slice view used the persisted settings', out2.opts, out1.opts);
   check('... and is the first slice, G-code for G-code', out2.gcode === out1.gcode, true);
-  check('... the one All features list again, the same rows', [s2.legendTitle, s2.legendRows, s2.tabsInPage],
-    ['All features', s1.legendRows, false]);
+  check('... the one Features list again, the same rows', [s2.legendTitle, s2.legendRows, s2.tabsInPage],
+    ['Features', s1.legendRows, false]);
   check('Slice view again while on the slice changes nothing',
     await page.evaluate(async () => {
       const d = window.NSO_MICROSCOPE.getDoc();
@@ -328,9 +332,9 @@ async function main() {
   await page.evaluate(async (b) => { await window.NSO_MICROSCOPE.load('supportwithinsupport.gcode.3mf', new Uint8Array(b).buffer); }, bytes);
   await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'toolpath');
   const imp = await snapshot(page);
-  check('on an imported .gcode.3mf: Normal, Slice view disabled, the one All features list, no detector rows',
-    [imp.toggle, await page.isDisabled('#ms-cam-slice'), imp.legendTitle, imp.tabsInPage, imp.detectedRows],
-    [[true, false], true, 'All features', false, []]);
+  check('on an imported .gcode.3mf: Normal, Slice view disabled, the one Features list, no detector rows',
+    [imp.toggle, await page.isDisabled('#ms-cam-slice'), imp.legendTitle, imp.tabsInPage, imp.detectorUI],
+    [[true, false], true, 'Features', false, false]);
   await page.click('#ms-cam-normal');
   check('... and Normal there keeps the imported slice', await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().name),
     'supportwithinsupport.gcode.3mf');
