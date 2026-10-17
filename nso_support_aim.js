@@ -635,7 +635,7 @@
     for (k = 0; k < 3; k++) span = mMax(span, box[3 + k] - box[k]);
     var pad = 1e-6 + 1e-8 * span;
     for (i = 0; i < nodes; i++) for (k = 0; k < 3; k++) { box[i * 6 + k] -= pad; box[i * 6 + 3 + k] += pad; }
-    return { n: n, len: soup.length, sample: sampleOf(soup), full: null, nodes: nodes,
+    return { n: n, len: soup.length, sample: sampleOf(soup), full: fullOf(soup), nodes: nodes,
              box: box, left: left, right: right, start: start, count: count, order: order, tb: tb, wind: null, cross: undefined };
   }
 
@@ -646,13 +646,9 @@
     if (!indexCache || !soup || soup.length < INDEX_MIN_TRIS * 9) return null;
     var ix = indexCache.get(soup);
     if (ix === undefined || (ix && (ix.len !== soup.length || ix.sample !== sampleOf(soup)))) ix = undefined;
-    if (ix && verify) {
-      var f = fullOf(soup);
-      if (ix.full === null) ix.full = f; else if (ix.full !== f) ix = undefined;
-    }
+    if (ix && verify && ix.full !== fullOf(soup)) ix = undefined;
     if (ix === undefined) {
       ix = buildBVH(soup);
-      if (ix && verify) ix.full = fullOf(soup);
       indexCache.set(soup, ix);
     }
     return ix;
