@@ -271,11 +271,22 @@ whole result, and it is what the canonical check gates on.
 
 ## 5. The UI thread
 
-One button, **Attach**, in the Stock card beside **New stock**. Not a fourth
-viewport menu and not a second set of size boxes: what the blank is gets said
-in exactly one place, and `app-assemble.js` reads it through
-`window.nsoStockReadUI()` — app-stock.js's own reader — so there is one
-interpretation of those controls, not two.
+One button, **Attach**, in the **Connect** card, in a row of its own under
+**Set / Cancel** — the same act as Connect (a thing made at a point you click
+on a piece), and the Stock card is a shelf of tiles with no button on it. It
+keeps its id, `btn-stock-attach`. It generates a blank of the shape **last
+clicked on the Stock shelf** (`window.nsoStockShelf.lastShape()`), at the
+shelf's default size, so with no tile clicked yet it refuses to arm and says
+where to click. The old card's fields (height, radius, wall, waste, ratio…) are
+gone; `window.nsoAttachAt(placed, point, normal, blank)` still takes them as
+`blank`, over the shelf's defaults, which is how the drive checks size theirs.
+
+**Escape** turns it off; so does Cancel (the card stays open) and closing the
+card — the button is inside it, and a mode must not be left lit where it cannot
+be seen. While it is armed Connect's anchor picks stand down
+(`state.attachArmed`, read by `app-connect.js`'s pointer handlers): arming
+drops any anchors, the hover light goes, and the click on a piece is Attach's.
+When it is off again Connect's clicks are Connect's.
 
 Press it and it arms a click, on the same contract app-mask, app-carve and
 app-seat-surface all have: `window.nsoAttachTakesClick(event)`, asked by

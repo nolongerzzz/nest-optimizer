@@ -118,15 +118,14 @@ const setFields = (page, vals) => page.evaluate(v => {
 
 async function makeStock(page, shape) {
   const n = await page.evaluate(() => state.models.length);
-  await setFields(page, { 'sel-stock-shape': shape, 'inp-stock-height': 40, 'inp-stock-radius': null, 'inp-stock-prop': null });
-  await openMenuFor(page, '#btn-stock-make');
-  await page.click('#btn-stock-make');
+  await openMenuFor(page, '#btn-stock-' + shape);
+  await page.click('#btn-stock-' + shape);
   await page.waitForFunction(k => state.models.length > k, n, { timeout: 30000 });
   const id = await page.evaluate(() => state.models[state.models.length - 1].id);
   await select(page, id);
   // The generator's own numbers for the same ask, from the same module, the
   // same printer and the card's blank boxes (blank = nso_stock.js's defaults).
-  const sizing = await page.evaluate(sh => NSO_Stock.size({ shape: sh, height: 40, printer: NSO_fitCurrentPrinter() }), shape);
+  const sizing = await page.evaluate(sh => NSO_Stock.size(Object.assign(nsoStockShelf.defaultOptions(sh), { printer: NSO_fitCurrentPrinter() })), shape);
   return { id, sizing };
 }
 

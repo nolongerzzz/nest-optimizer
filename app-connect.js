@@ -58,6 +58,11 @@
 // Both pieces are read in the plate's world frame, Z up (meshToWorldSoup, then
 // (x, -z, y)), so their poses are in the numbers and the result needs none.
 //
+// ATTACH shares the card (app-assemble.js): its button sits under Set / Cancel.
+// While it is armed the clicks on a piece are its, not anchors - the pointer
+// handlers below stand down on state.attachArmed - and Cancel and closing the
+// card turn it off.
+//
 // PAINT SCOPE: WHOLE-PIECE, on every piece a WELD joins; none for Keep separate.
 // Per the scoping rule in docs/HANDOFF.md: a weld goes through the boolean
 // kernel, which rebuilds every face of the pieces it joins, so no face on
@@ -279,6 +284,8 @@ function NSO_connectOpen() {
 }
 
 function NSO_connectClose() {
+  // Attach's button is in the card: shut the card and it is out of sight, so it is off.
+  if (typeof state !== 'undefined' && state.attachArmed && typeof window.nsoAttachDisarm === 'function') window.nsoAttachDisarm();
   var C = NSO_connectUI(), panel = NSO_connectEl('connect-panel');
   C.open = false; C.hover = null; C.soups = {};
   if (panel) panel.hidden = true;
@@ -513,7 +520,7 @@ if (typeof document !== 'undefined') {
     // that is just moving: an orbit drag (a button down) is left alone.
     function onMove(ev) {
       var C = NSO_connectUI();
-      if (!C.open || C.busy || ev.buttons || !onCanvas(ev)) return;
+      if (!C.open || C.busy || state.attachArmed || ev.buttons || !onCanvas(ev)) return;
       var sel = target(ev);
       C.hover = sel;
       var held = C.a && !C.b ? C.a : (C.b && !C.a ? C.b : null);
@@ -535,7 +542,7 @@ if (typeof document !== 'undefined') {
     function onDown(ev) {
       var C = NSO_connectUI();
       C.press = null;
-      if (!C.open || C.busy || ev.button !== 0 || !onCanvas(ev)) return;
+      if (!C.open || C.busy || state.attachArmed || ev.button !== 0 || !onCanvas(ev)) return;
       var sel = target(ev);
       C.press = { x: ev.clientX, y: ev.clientY, sel: sel, shift: !!ev.shiftKey };
       if (sel) { ev.stopImmediatePropagation(); ev.preventDefault(); }
@@ -543,7 +550,7 @@ if (typeof document !== 'undefined') {
     function onUp(ev) {
       var C = NSO_connectUI(), pr = C.press;
       C.press = null;
-      if (!C.open || !pr || C.busy || ev.button !== 0) return;
+      if (!C.open || !pr || C.busy || state.attachArmed || ev.button !== 0) return;
       if (Math.hypot(ev.clientX - pr.x, ev.clientY - pr.y) > CONNECT_CLICK_PX) return;     // an orbit drag, not a click
       if (!onCanvas(ev)) return;
       if (pr.sel) {
@@ -580,7 +587,11 @@ if (typeof document !== 'undefined') {
       wireCard(menu);
       var go = NSO_connectEl('btn-connect-go'), cancel = NSO_connectEl('btn-connect-cancel');
       if (go) go.addEventListener('click', function () { NSO_connectSet(); });
-      if (cancel) cancel.addEventListener('click', NSO_connectCancel);
+      if (cancel) cancel.addEventListener('click', function () {
+        // Cancel with Attach armed is Attach's: it stops, the anchors and the card stay.
+        if (state.attachArmed && typeof window.nsoAttachDisarm === 'function') { window.nsoAttachDisarm(); return; }
+        NSO_connectCancel();
+      });
       var redraw = function () { var C = NSO_connectUI(); if (C.a && C.b) NSO_connectPreview(); else NSO_connectSyncRows(); };
       // The ghost follows the fields as they change: a typed value after a short
       // pause, a finished one (change) at once.

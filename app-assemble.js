@@ -1,12 +1,27 @@
 /* app-assemble.js - Attach: the one guided flow from "a blank" to "one solid".
  *
- * Pick a shape and a size in the Stock card, press Attach, click the point on
- * a piece where it should go. The blank is generated, auto-aim works out
+ * Pick a shape on the Stock shelf (Gen+ > Stock), open the CONNECT card, press
+ * Attach under its Set / Cancel row, and click the point on a piece where a
+ * blank of that shape should go. The blank is generated at the shelf's default
+ * size, auto-aim works out
  * which way it leaves that point, nso_assemble.js seats it, and app-join.js's
  * union makes the two into one piece. Nothing is left on the plate to tidy up
  * and no tool-hopping is required: before this the same result took New stock,
  * then a pose by hand, then Start Join, then two slot picks, then Complete
  * Join - and got the seat wrong on any curved face.
+ *
+ * WHERE THE BUTTON IS. btn-stock-attach lives in the Connect card (index.html,
+ * under Set / Cancel), because Attach is the same act as Connect - a thing
+ * made at a point you click on a piece - and because the Stock card is a shelf
+ * of tiles with no button on it (app-stock.js). The shape is the one LAST
+ * CLICKED on the shelf (nsoStockShelf.lastShape); with none clicked yet the
+ * button refuses to arm and says where to click. Escape disarms. So do Cancel,
+ * and closing the Connect card - the button is inside it, and a mode must not
+ * be left lit where it cannot be seen. While armed, Connect's own anchor picks
+ * stand down (app-connect.js asks state.attachArmed): the click is Attach's.
+ * Through nsoAttachAt the blank can still be stated outright - { shape,
+ * height, radius, wall, waste, ratio, ... } - which is how the drive checks
+ * size theirs.
  *
  * Thin on purpose, like app-stock.js and app-hollow.js. Every measurement is
  * in nso_assemble.js (THREE-free, node-tested); the union is app-join.js's;
@@ -59,7 +74,19 @@
   function $(id) { return document.getElementById(id); }
   function say(msg, bad) { if (typeof setStatus === 'function') setStatus(msg, !!bad); }
 
+  function shelfShape() {
+    return (window.nsoStockShelf && typeof window.nsoStockShelf.lastShape === 'function') ? window.nsoStockShelf.lastShape() : null;
+  }
+
   function setArmed(on) {
+    if (on) {
+      /* Nothing to generate until a shape has been clicked on the shelf. */
+      if (!shelfShape()) {
+        state.attachArmed = false;
+        say('Attach needs a shape - click one on the Stock shelf (Gen+ > Stock) first', true);
+        return;
+      }
+    }
     state.attachArmed = !!on;
     var btn = $('btn-stock-attach');
     if (btn) {
@@ -82,9 +109,21 @@
     }
     state.softenArmed = false;
     state.capArmed = false;
-    say('Attach armed - click the point on a piece where the blank should attach. ' +
-        'Click Attach again to stop.');
+    /* The click is Attach's now: Connect's picks, and the hover that goes with
+       them, are dropped (and it stays out of the way until Attach is off). */
+    if (typeof NSO_connectClearPicks === 'function') {
+      NSO_connectClearPicks();
+      if (typeof NSO_connectUI === 'function') {
+        NSO_connectUI().hover = null;
+        if (typeof NSO_connectDrawPicks === 'function') NSO_connectDrawPicks();     // the hover light goes too
+      }
+    }
+    say('Attach armed - click the point on a piece where the ' + shelfShape() + ' blank should attach. ' +
+        'Escape or Attach again to stop.');
   }
+
+  /* Exposed for the Connect card, which disarms it on Cancel and on closing. */
+  window.nsoAttachDisarm = function () { if (state.attachArmed) setArmed(false); };
 
   function hitPiece(event) {
     if (!state.renderer || !state.camera || !state.modelGroup) return null;
@@ -147,7 +186,7 @@
 
   /* One attach. Async, because the boolean loads a WASM kernel. Exposed on
      window so the drive check runs the same path the click runs rather than a
-     parallel copy of it, exactly as app-stock.js exposes nsoStockRun. */
+     parallel copy of it, exactly as app-stock.js exposes nsoStockShelf.drop. */
   window.nsoAttachAt = function (placed, worldPoint, localNormal, overrides) {
     if (busy) return Promise.resolve({ ok: false, reason: 'busy' });
     busy = true;
@@ -184,17 +223,18 @@
     var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([m]) : '';
     if (overlap) return fail('Attach refused - ' + overlap + ' - piece unchanged');
 
-    /* The blank: the Stock card's own controls, read by app-stock.js's own
-       reader, so there is one place the boxes are interpreted. */
-    if (typeof window.nsoStockReadUI !== 'function') return fail('Attach needs app-stock.js');
-    var read = window.nsoStockReadUI();
-    if (read.error) return fail(read.error);
-    var opts = read.opts;
+    /* The blank: the Stock shelf's default size for the shape in `overrides`,
+       else the shape last clicked on the shelf (a cylinder when none has
+       been), then whatever else `overrides` sets. */
+    if (!window.nsoStockShelf || typeof window.nsoStockShelf.defaultOptions !== 'function') {
+      return fail('Attach needs app-stock.js');
+    }
+    var opts = window.nsoStockShelf.defaultOptions((overrides && overrides.shape) || shelfShape() || 'cylinder');
     if (overrides) for (var k in overrides) if (Object.prototype.hasOwnProperty.call(overrides, k)) opts[k] = overrides[k];
     if (!opts.height) {
       return fail('Set a target height first (mm) - the blank is sized from the piece you mean to make');
     }
-    /* The same build-volume gate New stock applies, against the machine the
+    /* The same build-volume gate a Stock drop applies, against the machine the
        Plate card is pointed at, before any geometry exists. */
     if (typeof NSO_fitCurrentPrinter === 'function') opts.printer = NSO_fitCurrentPrinter();
 
@@ -248,6 +288,11 @@
 
   function wire() {
     bind('btn-stock-attach', 'click', function () { setArmed(!state.attachArmed); });
+    /* Escape stops it. Not consumed: whatever else listens for Escape still
+       does. */
+    window.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && state.attachArmed) setArmed(false);
+    }, true);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);

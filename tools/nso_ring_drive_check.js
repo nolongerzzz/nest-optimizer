@@ -242,12 +242,8 @@ withApp(async (page, logs) => {
 
   console.log('\n=== 7. Stock cylinder: Rod, Diameter only ===');
   const n1 = await page.evaluate(() => state.models.length);
-  await page.evaluate(() => {
-    const set = (id, v) => { const e = document.getElementById(id); e.value = v; e.dispatchEvent(new Event('change', { bubbles: true })); };
-    set('sel-stock-shape', 'cylinder'); set('inp-stock-height', '40');
-  });
-  await openMenuFor(page, '#btn-stock-make');
-  await page.click('#btn-stock-make');
+  await openMenuFor(page, '#btn-stock-cylinder');
+  await page.click('#btn-stock-cylinder');
   await page.waitForFunction(n => state.models.length > n, n1, { timeout: 30000 });
   const cylId = await page.evaluate(() => state.models[state.models.length - 1].id);
   await select(page, cylId);

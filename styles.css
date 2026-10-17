@@ -2493,18 +2493,43 @@ select:focus, input:focus {
   top: calc(100% + 4px);
   left: auto;
   right: 0;
-  min-width: 168px;
-  max-width: 176px;
   padding: 4px;
   gap: 3px;
+  /* The shelf is one row of tiles. Narrower than that (a phone), the row
+     scrolls rather than wrapping into a second shelf. */
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  overflow-x: auto;
 }
-.vp-stock-menu select { width: 100%; }
-/* The shape-specific box goes away for a sphere. `.vp-clone` sets
-   `display: flex`, which beats the UA's `[hidden] { display: none }` on
-   specificity, so the attribute needs a rule of its own or the field stays on
-   screen with nothing to type in it. */
+/* The shelf: a row of 56 px tiles, each a canvas app-stock.js paints from
+   nso_stock.js's own soup. A tile has no text, so its look is its focus and
+   hover ring. */
+.vp-stock-shelf {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+.stock-tile {
+  flex: 0 0 auto;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  margin: 0;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 6px;
+  background: #14171c;
+  cursor: pointer;
+  line-height: 0;
+  overflow: hidden;
+}
+.stock-tile:hover { border-color: rgba(56, 189, 248, 0.9); }
+.stock-tile:active { border-color: #38bdf8; transform: translateY(1px); }
+.stock-tile:focus-visible { outline: 2px solid #38bdf8; outline-offset: 1px; }
+.stock-tile canvas { display: block; width: 56px; height: 56px; }
+/* A [hidden] row in any menu body. `.vp-clone` sets `display: flex`, which
+   beats the UA's `[hidden] { display: none }` on specificity, so the
+   attribute needs a rule of its own or the row stays on screen. */
 .vp-menu-body [hidden] { display: none; }
-.vp-stock-menu .vp-row-opts .vp-clone input[type="text"] { width: 62px; }
 /* Picture (Gen+): the Stock card's shape, one menu further down. The Levels
    select sits in a label, so it gives up the panel-wide select width. */
 .vp-relief-menu {
@@ -3911,6 +3936,13 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
   font-size: 12.5px;
   letter-spacing: normal;
   text-transform: none;
+}
+/* Gen+ with the Stock shelf open: eight 56 px tiles are one row, and one row
+   is wider than the panel's 300px. It widens to hold them, as far as the
+   window allows; narrower than that the shelf scrolls (see .vp-stock-menu
+   .vp-menu-body, above). */
+.vp-shell-menu.vp-shell-menu > .vp-menu-body:has(.vp-stock-menu[open]) {
+  max-width: min(520px, calc(100vw - var(--shell-panel-x) - 2 * var(--shell-pad)));
 }
 /* The cards that were Finish's sections (and Bend, out of Shape) keep the
    176px column their rows are fitted to, to the pixel. */

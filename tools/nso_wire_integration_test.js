@@ -112,7 +112,7 @@ withApp(async (page, logs) => {
   /* app-ux.js re-stamps the HUD into the status line at 0 and 200 ms. */
   await page.waitForTimeout(400);
 
-  console.log('\n=== 1. Clone, and the five newer tools used straight after it ===');
+  console.log('\n=== 1. Clone, and the newer tools used straight after it ===');
   console.log('    The probe the ticket asked for. Before the fixes this provoked the');
   console.log('    desync every time: five tools in a row acted on a piece the viewport');
   console.log('    did not show as selected, and all five refused it for lacking a soup');
@@ -170,12 +170,10 @@ withApp(async (page, logs) => {
     const TOOLS = [
       ['Fatten', "function(){ return NSO_fattenSelectedModel('grow',0.4,{}); }"],
       ['Extend', "function(){ return NSO_extendSelectedModel({ delta: 3 }); }"],
-      ['Smooth', "function(){ return NSO_smoothSelectedModel(); }"],
-      ['Stock Match', "function(){ document.getElementById('sel-stock-shape').value='box';" +
-        " document.getElementById('sel-stock-shape').dispatchEvent(new Event('change',{bubbles:true}));" +
-        " document.getElementById('inp-stock-height').value='20';" +
-        " document.getElementById('chk-stock-match').checked=true;" +
-        " return window.nsoStockRun(null); }"]
+      ['Smooth', "function(){ return NSO_smoothSelectedModel(); }"]
+      /* Stock Match was the fifth: the card's Match box read the selected
+         piece's proportions. The card has no Match now (it is a shelf of tiles
+         and reads no piece), so there is no fifth tool to ask. */
     ];
     for (const [label, fn] of TOOLS) {
       const r = await runTool(page, id2, fn);
@@ -183,7 +181,6 @@ withApp(async (page, logs) => {
         !/needs a raw piece|no rawTris/.test(r.reason + ' ' + r.status),
         (r.ok ? 'ok' : 'refused') + ': ' + (r.reason || r.status).slice(0, 110));
     }
-    await page.evaluate(() => { document.getElementById('chk-stock-match').checked = false; });
 
     /* NEGATIVE CONTROL for fix 2, the other way: Clone must not INVENT a soup.
        A piece that legitimately has none - the header of addModel names Split
@@ -272,16 +269,12 @@ withApp(async (page, logs) => {
   console.log('    The section-2 bug of the headless suite, end to end through the UI.');
   console.log('    Before the union fix this refused with "the two pieces do not touch".');
   {
-    await openMenuOf(page, 'btn-stock-make');
-    await setF(page, { 'sel-stock-shape': 'box', 'inp-stock-height': 40, 'inp-stock-radius': 20,
-      'inp-stock-wall': 3, 'inp-stock-waste': 0, 'chk-stock-match': false, 'chk-stock-oversize': false });
-    // btn-stock-make moved into the top bar's Gen dropdown; unfold it first.
-    await page.evaluate(() => { const e = document.getElementById('btn-stock-make'); for (let n = e; n; n = n.parentElement) if (n.tagName === 'DETAILS') n.open = true; });
-    await page.click('#btn-stock-make');
+    // The Stock shelf's own drop, asked for the 40 mm box the card's fields used to give.
+    await page.evaluate(() => nsoStockShelf.drop('box', { height: 40, radius: 20, wall: 3, waste: 0 }));
     const idBody = await page.evaluate(() => state.models[state.models.length - 1].id);
     await selectPiece(page, idBody);
     const s0 = await info(page, idBody);
-    check('New stock puts a 12-triangle box on the plate', s0.raw && s0.tris === 12,
+    check('a Stock box tile puts a 12-triangle box on the plate', s0.raw && s0.tris === 12,
       s0.tris + ' tris, vol ' + s0.vol);
 
     await openMenuOf(page, 'btn-hollow');
@@ -292,10 +285,8 @@ withApp(async (page, logs) => {
     check('  ...and the shell is closed', s1.open === 0 && s1.nm === 0,
       s1.tris + ' tris, vol ' + s1.vol);
 
-    await openMenuOf(page, 'btn-stock-attach');
-    await setF(page, { 'sel-stock-shape': 'cylinder', 'inp-stock-height': 18, 'inp-stock-radius': 5,
-      'inp-stock-wall': 3, 'inp-stock-waste': 0, 'inp-stock-prop': 3 });
     const att = await page.evaluate(async i => {
+      const blank = { shape: 'cylinder', height: 18, radius: 5, wall: 3, waste: 0, ratio: 3 };
       const p = state.placed.find(x => x && x.sourceId === i);
       p.mesh.updateMatrixWorld(true);
       const bb = new THREE.Box3().setFromObject(p.mesh);
@@ -305,7 +296,7 @@ withApp(async (page, logs) => {
       const hits = new THREE.Raycaster(c.clone().addScaledVector(v, rr * 2), v.clone().negate())
         .intersectObject(p.mesh, true).filter(x => x.face);
       if (!hits.length) return { ok: false, reason: 'no hit' };
-      const r = await window.nsoAttachAt(p, hits[0].point.toArray(), hits[0].face.normal.toArray(), null);
+      const r = await window.nsoAttachAt(p, hits[0].point.toArray(), hits[0].face.normal.toArray(), blank);
       return { ok: r.ok, reason: (r.reason || '').slice(0, 170),
                parts: r.union ? r.union.parts : null,
                status: document.getElementById('status').textContent.slice(0, 170) };

@@ -36,7 +36,13 @@
         leaving along the corner's three faces' average), Shift keeps the old
         edge midpoint, Set leaves the card armed for the next pair (picks clear,
         fields stay, the last connector stays) - three Sets in a row on four
-        boxes, one solid, Undo x3 puts the boxes back - and Escape closes it */
+        boxes, one solid, Undo x3 puts the boxes back - and Escape closes it
+    11. Attach (app-assemble.js), the button under Set / Cancel: it refuses to
+        arm until a shape has been clicked on the Stock shelf; armed, it drops
+        Connect's picks and the click on a piece is Attach's (the blank of the
+        shelf's last shape is seated and unioned, Connect takes no anchor);
+        Escape, Cancel and closing the card each turn it off, and Connect's
+        clicks are Connect's again */
 
 const fs = require('fs');
 const os = require('os');
@@ -726,6 +732,126 @@ withApp(async (page, logs) => {
     await page.keyboard.press('Escape');
     C9 = await P(page);
     check('Escape with nothing picked closes the card', !C9.open && C9.hidden && C9.overlay.length === 0);
+  }
+
+  console.log('\n=== 11. Attach, under Set / Cancel ===');
+  {
+    const bigId = await loadSTL(page, L.writeSTL(path.join(TMP, 'big.stl'), L.sphere([0, 0, 30], 30, 48, 24)));
+    await page.evaluate(id => {
+      const b = window.__cn.bounds(window.__cn.up(id));
+      window.__cn.nudge(id, 0 - (b.lo[0] + b.hi[0]) / 2, 0 - (b.lo[1] + b.hi[1]) / 2);
+    }, bigId);
+    const attachState = () => page.evaluate(() => {
+      const b = document.getElementById('btn-stock-attach');
+      return { pressed: b.getAttribute('aria-pressed'), lit: b.classList.contains('is-armed'), flag: !!state.attachArmed,
+               status: document.getElementById('status').textContent };
+    });
+    const where = await page.evaluate(() => {
+      const b = document.getElementById('btn-stock-attach'), set = document.getElementById('btn-connect-go'),
+            cancel = document.getElementById('btn-connect-cancel'), panel = document.getElementById('connect-panel');
+      const rb = b.getBoundingClientRect();
+      return { inCard: panel.contains(b), hiddenWithCard: getComputedStyle(b).display === 'none' || !!b.closest('[hidden]'),
+               rowAfterPair: b.parentElement.previousElementSibling === cancel.parentElement,
+               cancelPeers: cancel.parentElement.contains(set), id: b.id, label: b.textContent.trim(), rb: [rb.width, rb.height] };
+    });
+    check('Attach is in the Connect card, in a row of its own right after the Set / Cancel row, labelled Attach, id btn-stock-attach',
+      where.inCard && where.rowAfterPair && where.cancelPeers && where.label === 'Attach' && where.id === 'btn-stock-attach', JSON.stringify(where));
+    check('...and it is out of sight while the card is shut', where.hiddenWithCard);
+
+    // The card, with the shelf not yet clicked.
+    await page.click('#menu-connect > summary');   // no gate: the column opens the card armed
+    await page.waitForFunction(() => state.connect && state.connect.open, null, { timeout: 5000 });
+    const geo = await page.evaluate(() => {
+      const cancel = document.getElementById('btn-connect-cancel').getBoundingClientRect(), a = document.getElementById('btn-stock-attach').getBoundingClientRect();
+      return { below: a.top >= cancel.bottom - 0.5, visible: a.width > 20 && a.height > 10 };
+    });
+    check('open, it is visible and sits BELOW Set / Cancel', geo.below && geo.visible, JSON.stringify(geo));
+    await page.click('#btn-stock-attach');
+    let A = await attachState();
+    check('with no shape clicked on the shelf yet it does not arm, and says where to click',
+      A.pressed === 'false' && !A.lit && !A.flag && /Attach needs a shape - click one on the Stock shelf/.test(A.status), A.status);
+
+    // A real click on a shelf tile; the dropped piece is not the target, so it goes.
+    await page.click('#menu-gen > summary');
+    await page.click('#menu-gen .vp-stock-menu > summary');
+    await page.click('#btn-stock-cylinder');
+    const droppedId = await page.evaluate(() => state.models[state.models.length - 1].id);
+    check('the shelf remembers the shape last clicked', await page.evaluate(() => nsoStockShelf.lastShape()) === 'cylinder');
+    await page.evaluate(id => {
+      const i = state.placed.findIndex(p => p && p.sourceId === id);
+      state.placed[i].mesh.parent.remove(state.placed[i].mesh);
+      state.placed.splice(i, 1); state.models = state.models.filter(m => m.id !== id);
+      state.placed.forEach((p, j) => { if (p.mesh) p.mesh.userData.placedIndex = j; });
+      state.selectedIndex = -1;
+    }, droppedId);
+
+    // Back to Connect: a point on the big sphere, bare canvas.
+    await page.click('#menu-connect > summary');
+    const open = await page.evaluate(() => !!(state.connect && state.connect.open));
+    if (!open) await page.click('#menu-connect > summary');
+    await page.waitForFunction(() => state.connect && state.connect.open, null, { timeout: 5000 });
+    const big = await page.evaluate(id => { const b = window.__cn.bounds(window.__cn.up(id)); return [(b.lo[0] + b.hi[0]) / 2, (b.lo[1] + b.hi[1]) / 2, (b.lo[2] + b.hi[2]) / 2]; }, bigId);
+    const pt = [big[0] + 30 * cp, big[1], big[2] + 30 * sp];
+    const V3 = [big[0] + 70, big[2] + 70, -big[1] + 70], AT3 = [big[0], big[2], -big[1]];
+    const fr3 = await page.evaluate(([pt, V3, AT3]) => window.__cn.frame([pt], ['point'], V3, AT3), [pt, V3, AT3]);
+    check('a view with a point on the big sphere on bare canvas', !!fr3);
+
+    await clickAt(page, pt);
+    C = await P(page);
+    check('Connect takes the click as anchor A while Attach is off', C.a === 'point' && !!C.aObj, C.aText);
+    await page.click('#btn-stock-attach');
+    A = await attachState();
+    C = await P(page);
+    check('Attach arms (pressed, lit), names the shape, and drops Connect\'s anchor',
+      A.pressed === 'true' && A.lit && A.flag && /Attach armed/.test(A.status) && /cylinder blank/.test(A.status) && !C.a && !C.b && C.goDisabled, A.status);
+    const s0 = await SP(page, pt);
+    await page.mouse.move(s0.x, s0.y);
+    await page.waitForTimeout(60);
+    C = await P(page);
+    check('...and Connect lights nothing under the pointer while it is armed', !C.overlay.some(o => /^hover/.test(o)), C.overlay.join(','));
+
+    // The click is Attach's.
+    const before = await page.evaluate(id => ({ models: state.models.length, tris: state.models.find(m => m.id === id).rawTris.length / 9,
+      undo: state.undoStack.length }), bigId);
+    await page.mouse.click(s0.x, s0.y);
+    await page.waitForFunction(() => /^Attach(ed| refused| failed| stood)/.test(document.getElementById('status').textContent), null, { timeout: 60000 });
+    A = await attachState();
+    C = await P(page);
+    const after = await page.evaluate(id => ({ models: state.models.length, tris: state.models.find(m => m.id === id).rawTris.length / 9,
+      undo: state.undoStack.length }), bigId);
+    console.log('   status: ' + A.status.slice(0, 170));
+    check('a click on a piece while armed is Attach\'s: the blank is seated and unioned into that piece, same readout',
+      /^Attached cylinder /.test(A.status) && /seated/.test(A.status) && after.tris > before.tris && after.models === before.models && after.undo === before.undo + 1,
+      before.tris + ' -> ' + after.tris + ' tris, models ' + before.models + ' -> ' + after.models);
+    check('...and Connect took no anchor from it', !C.a && !C.b, C.aText + ' | ' + C.bText);
+    check('...Attach stays armed for the next click', A.flag && A.pressed === 'true');
+    await page.evaluate(() => undoLast());
+
+    // Escape.
+    await page.keyboard.press('Escape');
+    A = await attachState();
+    check('Escape turns Attach off', !A.flag && A.pressed === 'false' && !A.lit && /Attach off/.test(A.status), A.status);
+    await clickAt(page, pt);
+    C = await P(page);
+    check('...and Connect\'s clicks are Connect\'s again', C.a === 'point', C.aText);
+    await page.keyboard.press('Escape');
+
+    // Cancel.
+    await page.click('#btn-stock-attach');
+    check('armed again', (await attachState()).flag);
+    await page.click('#btn-connect-cancel');
+    A = await attachState();
+    C = await P(page);
+    check('Cancel turns Attach off and leaves the card open', !A.flag && A.pressed === 'false' && C.open && !C.hidden, A.status);
+
+    // Closing the card.
+    await page.click('#btn-stock-attach');
+    check('armed once more', (await attachState()).flag);
+    await page.click('#menu-connect > summary');   // the column button shuts the card
+    A = await attachState();
+    C = await P(page);
+    check('closing the card turns Attach off - it is not left lit where it cannot be seen', !A.flag && A.pressed === 'false' && !C.open && C.hidden, A.status);
+    await shot(page, '09-attach');
   }
 
   const errs = logs.filter(l => /\[pageerror\]|\[error\]/.test(l) && !/favicon/.test(l));

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=cropb10" />
+  <link rel="stylesheet" href="styles.css?v=shelfb10" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -194,48 +194,30 @@
               </div>
               </div>
               </details>
+              <!-- Stock is a shelf: one tile per shape nso_stock.js makes, no fields.
+                   app-stock.js draws each tile once, from NSO_Stock.make itself, and a
+                   click drops that shape on the plate at its default size. The Scale
+                   card is how it is sized. -->
               <details class="vp-menu vp-stock-menu">
               <summary>Stock</summary>
               <div class="vp-menu-body vp-stock">
-              <div class="vp-row vp-row-full">
-              <select id="sel-stock-shape" title="What shape the blank is. The sizing is the same for all of them - only the last step, solving for the shape's own defining measurement, differs. Every shape here solves that step in closed form; see docs/STOCK.md for the ones that cannot and are deferred.">
-              <option value="sphere">Sphere</option>
-              <option value="box">Box</option>
-              <option value="cylinder">Cylinder</option>
-              <option value="cone">Cone</option>
-              <option value="tube">Tube</option>
-              <option value="torus">Torus</option>
-              <option value="capsule">Capsule</option>
-              <option value="ellipsoid">Ellipsoid</option>
-              </select>
-              </div>
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="The finished piece's height. The stock is sized from it by Pappus's centroid theorem: a thin-shell estimate of the piece plus the waste margin below.">H <input type="number" id="inp-stock-height" min="1" max="900" step="1" placeholder="mm"></label>
-              <label class="vp-clone" title="The finished piece's radius. Blank means half the height.">R <input type="number" id="inp-stock-radius" min="0.5" max="450" step="1" placeholder="mm"></label>
-              </div>
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Wall thickness of the finished piece - what the shell estimate is built on. Default 3 mm. Refused under the nozzle-safety floor from nso_thickness.js.">W <input type="number" id="inp-stock-wall" min="0.1" max="30" step="0.1" placeholder="3"></label>
-              <label class="vp-clone" title="Nozzle diameter. Sets the wall floor: nozzle x 1.05.">N <input type="number" id="inp-stock-nozzle" min="0.1" max="2" step="0.05" placeholder="0.4"></label>
-              </div>
-              <div class="vp-row vp-row-opts">
-              <label class="vp-clone" title="Waste margin, per cent. Real material allowance - the skin a carve takes off, the trimmings, the bit the process keeps. Default 30%. 0 means exactly the shell estimate and no allowance.">% <input type="number" id="inp-stock-waste" min="0" max="500" step="1" placeholder="30"></label>
-              <label class="vp-clone" id="row-stock-prop" hidden><span id="lab-stock-prop">x:y:z</span> <input type="text" id="inp-stock-prop" placeholder="e.g. 2:1:1"></label>
-              </div>
-              <label class="vp-check"
-              title="Take the block's proportions from the selected piece, via the same dominant-axis detection Extend uses. It reads that piece's bounding box only and writes to none of it. Not Sphere, which has one measurement, and not Torus, whose tube ratio a bounding box cannot say.">
-              <input type="checkbox" id="chk-stock-match"> Match selected piece
-              </label>
-              <label class="vp-check"
-              title="Generate a block bigger than the build volume anyway, to split with Cut before printing. A TARGET that does not fit the machine is refused either way - no setting makes a piece that cannot physically exist.">
-              <input type="checkbox" id="chk-stock-oversize"> Allow oversize block
-              </label>
-              <div class="vp-row vp-row-full">
-              <button id="btn-stock-make" class="btn btn-secondary" type="button"
-              title="Put a correctly-sized blank on the plate: the material the target needs, plus the waste margin, solved for this shape's defining measurement. Refuses before anything is added if the target cannot be printed on the current plate.">New stock</button>
-              </div>
-              <div class="vp-row vp-row-full">
-              <button id="btn-stock-attach" class="btn btn-secondary btn-attach" type="button" aria-pressed="false"
-              title="Generate the same blank and attach it to a piece in one go: click the point on the piece where it should go, and straight-line auto-aim works out which way it leaves that face, seats it deep enough for the whole rim to bite, and unions the two into one solid. Nothing is left on the plate to tidy up. See docs/ASSEMBLE.md.">Attach</button>
+              <div id="stock-shelf" class="vp-stock-shelf" role="group" aria-label="Stock shapes">
+              <button id="btn-stock-box" class="stock-tile" type="button" data-shape="box" aria-label="Box"
+              title="Box: a block. One click puts it on the plate at its default size, selected - size it with Scale. Click again for another."><canvas width="56" height="56" aria-hidden="true"></canvas></button>
+              <button id="btn-stock-cylinder" class="stock-tile" type="button" data-shape="cylinder" aria-label="Cylinder"
+              title="Cylinder: a plain round bar. One click puts it on the plate at its default size, selected - size it with Scale. Click again for another."><canvas width="56" height="56" aria-hidden="true"></canvas></button>
+              <button id="btn-stock-sphere" class="stock-tile" type="button" data-shape="sphere" aria-label="Sphere"
+              title="Sphere: a ball. One click puts it on the plate at its default size, selected - size it with Scale. Click again for another."><canvas width="56" height="56" aria-hidden="true"></canvas></button>
+              <button id="btn-stock-capsule" class="stock-tile" type="button" data-shape="capsule" aria-label="Capsule"
+              title="Capsule: a bar with a hemisphere at each end. One click puts it on the plate at its default size, selected - size it with Scale. Click again for another."><canvas width="56" height="56" aria-hidden="true"></canvas></button>
+              <button id="btn-stock-ellipsoid" class="stock-tile" type="button" data-shape="ellipsoid" aria-label="Ellipsoid"
+              title="Ellipsoid: a stretched or squashed ball. One click puts it on the plate at its default size, selected - size it with Scale. Click again for another."><canvas width="56" height="56" aria-hidden="true"></canvas></button>
+              <button id="btn-stock-torus" class="stock-tile" type="button" data-shape="torus" aria-label="Torus"
+              title="Torus: a ring with a round section. One click puts it on the plate at its default size, selected - size it with Scale. Click again for another."><canvas width="56" height="56" aria-hidden="true"></canvas></button>
+              <button id="btn-stock-tube" class="stock-tile" type="button" data-shape="tube" aria-label="Tube"
+              title="Tube: a pipe, bored through. One click puts it on the plate at its default size, selected - size it with Scale. Click again for another."><canvas width="56" height="56" aria-hidden="true"></canvas></button>
+              <button id="btn-stock-cone" class="stock-tile" type="button" data-shape="cone" aria-label="Cone"
+              title="Cone: a cone, to a point. One click puts it on the plate at its default size, selected - size it with Scale. Click again for another."><canvas width="56" height="56" aria-hidden="true"></canvas></button>
               </div>
               </div>
               </details>
@@ -693,12 +675,16 @@
                           title="Build the connector the ghost shows. One Undo puts everything back.">Set</button>
                   <button id="btn-connect-cancel" class="btn btn-secondary" type="button" title="Drop the anchors; with none picked, close the card.">Cancel</button>
                 </div>
+                <div class="vp-row vp-row-full">
+                  <button id="btn-stock-attach" class="btn btn-secondary btn-attach" type="button" aria-pressed="false"
+                          title="Generate a blank of the shape last clicked on the Stock shelf (Gen+ > Stock), at its default size, and attach it where you click on a piece: straight-line auto-aim works out which way it leaves that face, seats it deep enough for the whole rim to bite, and unions the two into one solid. Nothing is left on the plate to tidy up. Escape or a second click stops. See docs/ASSEMBLE.md.">Attach</button>
+                </div>
               </div>
               <!-- REATTACH (app-detach.js; docs/DETACH.md): put a flange taken off by Detach
                    (in the Subtract card) back on somewhere else. It moved here from the
                    Crop card, id for id; its readout is Detach's, in the Subtract card, and
-                   the status line. The last row of the Connect card (it goes under
-                   Attach's row once that lands). -->
+                   the status line. The last row of the Connect card, under Attach's
+                   row. -->
               <div class="edit-row">
               <button id="btn-reattach" class="btn btn-secondary btn-attach" type="button" aria-pressed="false" disabled
                       title="Reattach: put the detached flange back somewhere else - click the point on a piece where its root should go. It keeps lying the way it lay, reaches out of the clicked face, is seated deep enough for its whole root to bite (Attach's seat), and is unioned into that piece. One Undo puts both back.">Reattach</button>
@@ -1761,7 +1747,7 @@
        app-bridge.js (the pick and the overlay it reuses), nso_path_sweep.js
        and nso_assemble.js. See docs/CONNECT.md. -->
   <script src="nso_connect.js?v=connect3"></script>
-  <script src="app-connect.js?v=anchorb10"></script>
+  <script src="app-connect.js?v=shelfb10"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=polish2"></script>
@@ -1773,8 +1759,8 @@
   <script src="app-pull.js?v=pull1"></script>
   <script src="app-wheel.js?v=wheel3"></script>
   <script src="app-fit.js?v=wheel4"></script>
-  <script src="app-stock.js?v=shapes1"></script>
-  <script src="app-assemble.js?v=overlap2"></script>
+  <script src="app-stock.js?v=shelf2"></script>
+  <script src="app-assemble.js?v=shelfb10"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
   <script src="app-join.js?v=nogateb9"></script>
   <script src="app-center-lock.js?v=nogate2"></script>

@@ -1,7 +1,7 @@
 # New stock — a correctly-sized blank to start from
 
 `nso_stock.js` (headless, THREE-free, node-testable) plus `app-stock.js` (the
-app layer: read the controls, resolve the machine, add the piece). Wired into
+app layer: the shelf of tiles, the machine, the drop). Wired into
 `index.html` at a new `?v=stock1` tag — the module ahead of `app-wheel.js`,
 which now calls it, and the app layer after `app-fit.js`, whose
 `NSO_fitCurrentPrinter()` it uses.
@@ -256,7 +256,7 @@ them is the point:
 | the **stock block**, the primitive's own bbox | a refusal too, downgraded to a warning by `opts.warnOnly` — a block somebody means to split with `Cut` is a legitimate thing to want, and the refusal says so rather than just saying no. |
 
 ```
-New stock refused - nothing added: that target cannot be printed on Bambu A1 Mini
+Stock refused - nothing added: that target cannot be printed on Bambu A1 Mini
 at all - Z 260 mm is 80 mm over the 180 mm limit. The stock would be radius
 23.496 mm x 152.727 mm tall (ratio 3.250, the target's own height over
 diameter), but the finished 260.0 x 80.0 mm piece does not fit the machine.
@@ -265,10 +265,11 @@ Pick a smaller target, or a bigger plate.
 
 Refusing before generating is what makes it a gate: a block that cannot be
 printed never becomes a piece the user then has to delete.
-`tools/nso_wire_stock_test.js` §6 drives it through the real Plate card —
-refused on the A1 Mini, accepted on a 400 mm custom machine, refused again when
-the custom height drops to 50, with the target never touched and nothing added
-on any of the refusals.
+`tools/nso_stock_shelf_drive.js` §7 and `tools/nso_wire_stock_test.js` §3 drive
+it through the real Plate card — a 30 mm custom plate refuses the default
+block, in words, with nothing added; back on a real plate the same tile drops.
+(Before the card became a shelf this was a typed target against the A1 Mini, a
+400 mm custom machine and a 50 mm one.)
 
 **No printer is no guess.** Without one, `fit` is `null`,
 `checked_build_volume` is `false` and a named warning says so. A build-volume
@@ -451,163 +452,94 @@ the profile. The five shapes added since land in the same band, for the same
 reason and by the same arithmetic: the spread across all eight is their
 `built_volume × polygon_factor` and nothing else.
 
-## PAINT SCOPE: NONE for the create path, WHOLE-PIECE for the update path
+## PAINT SCOPE: NONE
 
-Two paths, two answers to the same question, both written down. This section
-is the **create** path — the New stock button. The live update is
-**whole-piece**, for the reason given in "The session ends rather than
-overwriting somebody else's work" above: an adjustment re-generates the whole
-block, so there is no face it can hold still, and any paint anywhere stands it
-down naming the count. Both rows are in the HANDOFF roster.
+`app-stock.js` adds a piece and edits none. Per the scoping rule in
+`docs/HANDOFF.md`: the question is whether the feature acts on an identifiable
+sub-region of a piece. A tile click acts on **no piece at all** — it adds one.
+Nothing is replaced, and the selected piece is read for its footprint only (to
+find the room beside it); no face of any piece is written to. That is a
+stronger statement than "paint is respected", and it is the same category
+`app-skin-patch.js` is in: `none`, which is why the file is not in
+`tools/nso_paint_scope_test.js`'s roster — that roster is the paint-**aware**
+features, and a row in it needs a paint test to assert.
 
-Per the scoping rule in `docs/HANDOFF.md`: the question is whether the feature
-acts on an identifiable sub-region of a piece. The create path acts on **no
-piece at all** — it adds one. Nothing is replaced, no geometry is read except a reference
-piece's bounding box when `Match` is ticked, and no face of any piece is
-written to. That is a stronger statement than "paint is respected", and it is
-the same category `app-skin-patch.js` is in: `none`, which is why neither file
-is in `tools/nso_paint_scope_test.js`'s roster — that roster is the
-paint-**aware** features, and a row in it needs a paint test to assert.
+There used to be a second answer here, **whole-piece**, for the live update a
+card field made to the piece it had dropped. That path is gone with the fields
+(see "The shelf"); sizing a dropped piece is the Scale card's act, and Scale
+declares its own scope.
 
-## Live editing — the card adjusts the piece it made
+## The shelf
 
-`npm run stock:live` (`tools/nso_stock_live_test.js`), in `npm test`.
+Stock is a **shelf**: one row of shape tiles, one per shape `NSO_Stock.SHAPES`
+makes — Box, Cylinder, Sphere, Capsule, Ellipsoid, Torus, Tube, Cone, in that
+order. The card has **no fields**: no select, no number box, no checkbox, no
+text. `npm run page:manifest` gates that on `index.html` itself.
 
-**New stock ADDS.** That is right the first time and wrong every time after.
-Measured on the shipped behaviour before this change: press it, then press it
-again with a different waste margin, and you have **two** blocks — two models,
-two meshes, the second placed 31.96 mm to the side — with your positioning,
-your pose and your selection all still on the first. Changing a card field on
-its own did nothing at all, so "try 50% instead of 30%" meant pressing the
-button again and then deleting the old block.
+**A tile is drawn from the generator.** Each is a 56 px canvas painted once,
+the first time the card opens, from `NSO_Stock.make`'s own soup for that shape
+(at 32 segments, which is all 56 px can show), lit flat on a dark ground. There
+is no image in the repo and no word on a tile.
 
-So the button now opens a **session** on the piece it made, and every control
-on the card edits that piece in place. This is the Pottery Wheel's pattern,
-deliberately and not by coincidence:
+**A click drops the shape.** It lands on the plate at once, at its default
+size, selected, named by what it is and a running number — `box 1`,
+`cylinder 2` — and tagged with its sizing so Scale's per-shape rows
+(`nso_shapes.js`) read its parameters instead of fitting its mesh. Where:
+centred on free plate space, or beside the selected piece when one is
+(`nsoFreeSpot`, the search Picture and Mold use). A second click on the same
+tile drops another. **Undo** takes the last one back off, through the same
+`addModels` entry Extract and Split use, and hands its number back.
 
-| | the wheel | here |
-|---|---|---|
-| what is held | `NSO_wheelSession` — the profile | `session` — the model id and a fingerprint of the soup this file last wrote |
-| what a move does | derives a new profile, revolves it | re-sizes from the card |
-| how it lands | `NSO_sculptCommitRaw` onto the same model | the same call, onto the same model |
+**The default size** is one figure — a 40 mm target, with `nso_stock.js`'s own
+defaults for the rest (3 mm wall, 30 % waste), so every shape holds the same
+~23 000 mm³ of material — except that the ellipsoid is dropped 1.5 tall,
+because at the module's own default (the target's height over its diameter, 1)
+an ellipsoid *is* a sphere and the shelf would hold the same piece twice.
+The build-volume gate is unchanged: a default block the Plate card's machine
+cannot hold is refused before anything is added.
 
-### What survives an adjustment, and what does not
+**Sizing is Scale's.** The Scale card shows a dropped piece its own rows:
 
-Everything below is asserted in the drive check, on the ticket's own scenario:
-place a block, move it to (40, −25), yaw it 90° and tilt it one step, then
-change the waste margin from 0% to 50%.
-
-| | |
+| shape | rows |
 |---|---|
-| the model id, and its index in the model list | **survives** |
-| the placed entry and its index | **survives** |
-| its x / z on the plate | **survives** — 40, −25 |
-| its pose fields — `rotY`, `tipX`, `tiltX`, `flipX` | **survives** |
-| the selection, both halves of it | **survives** |
-| the block's size | changes, which is the point — 26.070 → 29.843 mm |
-| the number of pieces on the plate | **1, before and after** |
-| the `THREE.Mesh` instance | **rebuilt** |
+| box | Length, Width, Height, Offset, Whole × |
+| cylinder | Height, Rod Ø, Whole × |
+| sphere, ellipsoid | A, B, C, Whole × |
+| capsule | Length, Diameter, Whole × |
+| torus | Ring Ø, Tube Ø, Whole ×, Longest |
+| tube | Height, Outer Ø, Wall, Whole × |
+| cone | Whole ×, Longest, Offset — **no dimension rows**: Scale reads a cone as curved or tapered all over |
 
-That last row is stated rather than hidden. `NSO_sculptCommitRaw` disposes and
-rebuilds the mesh, for Stock exactly as it does for Smooth, Extend, Fatten,
-Hollow and the wheel. **"The same object" here means the same PIECE, not the
-same Mesh**; keeping the Mesh itself would be a change to every bake in the
-app and is not this ticket. The drive check asserts the uuid *changes*, so
-nobody later reads a check that claims otherwise.
+### What the old card's fields became
 
-### One undo entry per session, not one per keystroke
-
-`NSO_sculptCommitRaw` pushes an undo entry every time, which is right for a
-bake somebody pressed a button for and wrong for a number field being nudged.
-So the **first** adjustment of a session keeps its entry — the one that takes
-the block back to the way it was made — and every later one drops the entry it
-just pushed. Measured: seven adjustments in a row leave **one** `stockReplace`
-on the stack, with the two `posePlaced` entries from the person's own yaw and
-tilt still underneath it, untouched.
-
-Done locally in `app-stock.js` rather than by teaching `NSO_sculptCommitRaw` a
-mode, because this is the first tool in the app that edits on a field change
-and one caller is not yet a pattern. The wheel's live drag has the same
-problem and does push per frame; if a second tool wants this, it moves into
-`pushUndo` as a coalesce flag and both take it.
-
-### A `change` goes straight through; typing waits to settle
-
-A number field fires `input` on every keystroke, and typing `45` in an empty
-box goes through `4` on the way. The live update waits **160 ms** of quiet
-before re-generating, so the piece is rebuilt once per value the person meant
-rather than once per digit — a 96-segment sphere is 18,240 triangles, so the
-difference is visible. `change` (blur, or a spinner click) is already the
-settled value and goes straight through.
-
-Deliberately not the wheel's per-frame cadence: a drag has no keystrokes to
-wait for, and a number box is not a drag.
-
-### The session ends rather than overwriting somebody else's work
-
-This is the one that would cost a person real work. Make a block, **Hollow**
-it, then nudge the waste margin: the card must not throw the hollow away. So
-the fingerprint of what this file last wrote — a triangle count and a
-coordinate sum — is checked before every update, and a piece that no longer
-matches has been baked by another tool.
-
-Five ways the session ends or stands down, each with its own negative control
-in the drive check:
-
-| | |
+| the old card | now |
 |---|---|
-| the piece was baked by another tool | session ends, the work is kept, and it says so: *"…has been changed by another tool, so the card has stopped editing it — your work is kept."* |
-| another piece is selected | session ends silently; the card edits nothing. The Match checkbox in particular is about the selection, so an update that fired here would resize the wrong block |
-| the piece was deleted | session ends silently |
-| a painted face | stands down naming the count, and ends the session — an update re-generates the whole block and cannot hold a face still |
-| the new size cannot be printed | **refused, block unchanged, session stays live** — the same build-volume gate New stock applies, so the next valid value still works |
-
-### New stock now selects the piece it made
-
-It did not before: `editId` stayed `null` and nothing was outlined. The session
-needs the piece selected to be editable from the card, and it goes through
-`selectPlaced` — the app's one selection path — rather than writing `editId`
-behind its back, which is the split `docs/INTEGRATION.md` finding 3 was about
-in Clone.
-
-## The UI
-
-Its own viewport menu — **Stock**, third in the top-right stack beside Finish
-and Wheel — and deliberately not a fifth button on the Pottery Wheel's card.
-The wheel's Ball starts a wheel *session* and bakes a vessel onto the
-selection; this puts a block on the plate. Different acts, different menus.
-
-The card is the shape selector, `H` / `R`, `W` / `%`, one shape-specific box
-whose label follows the selector, `N`, two checkboxes and the button. That one
-box carries every shape's second measurement, because all but one of eight
-fields would be blank at any moment:
-
-| shape | label | means |
-|---|---|---|
-| sphere | *hidden* | one measurement, nothing to proportion |
-| box | `x:y:z` | three proportions, any scale |
-| cylinder, capsule, ellipsoid | `h/d` | height over diameter |
-| cone | `h/d[:taper]` | …and optionally the top radius over the base radius |
-| tube | `h/d[:wall]` | …and optionally the wall as a fraction of the outer radius |
-| torus | `tube/ring` | the tube radius over the ring radius |
-
-That mapping lives in one table in `app-stock.js` (`PROP`), read by the parse,
-by the label and by the **Match selected piece** checkbox alike — Match is
-offered exactly where a height over a diameter can be read off a bounding box,
-so it is disabled and cleared for a sphere and for a torus. Adding a shape is
-a closed form and a meridian in `nso_stock.js`, a row in that table and an
-`<option>` in `index.html`; the self-test asserts the `<option>` list *is*
-`NSO_Stock.SHAPES`, in order, so the two cannot drift. Adding the third menu
-was a `--vp-menu-count` bump in `styles.css` and nothing else — the offsets
-were already derived from `--vp-menu-gap` and `--vp-menu-w` for exactly this,
-and `npm run overlay:test` measures the rendered strip and fails if a topbar
-button ends up underneath one.
+| shape select | the tile you click |
+| `H` target height, `R` target radius | the piece's own rows in Scale (table above); a drop is a fixed 40 mm target, not a typed one |
+| `W` wall, `N` nozzle | no equivalent for **sizing from a target** (the Pappus thin-shell estimate is what `W` / `N` fed); a tube's own wall is Scale's Wall row |
+| `%` waste margin | gone — a piece is sized directly, so there is no material estimate to pad |
+| shape-specific box (`h/d`, `x:y:z`, taper, tube wall, `tube/ring`) | Scale's Length / Diameter / Wall / Ring Ø / Tube Ø rows — except a **cone's** `h/d` and **taper**, which Scale has no row for |
+| Match selected piece | gone — Scale has no "take the proportions of another piece" |
+| Allow oversize block | gone — a drop is refused if the default block does not fit the plate; Scale's *fits* line and Fit to plate report a piece that grows past it |
+| live session (the card adjusts the piece it made) | Scale's live fields adjust the dropped piece in place — `npm run stock:live` drives it |
+| **Attach** button | moved to the **Connect** card, under Set / Cancel, same id (`btn-stock-attach`): it generates a blank of the shape **last clicked on the shelf**, at its default size, and attaches it where you click on a piece (`docs/ASSEMBLE.md`) |
 
 The new piece arrives through `addModelFromZUpGeometry` (`app-core.js`), the
 one ingest path an imported STL takes, so it has `rawTris` exactly as a loaded
-file does and every later tool sees an ordinary piece. It comes off the plate
-the way an import does — **Delete model**, which pushes its own undo entry —
-not through a bake-style `stockReplace` step, because nothing was replaced.
+file does and every later tool sees an ordinary piece.
+
+Its own viewport menu — **Stock**, in Gen+ beside Wheel, Picture, Mold and
+Photo — and deliberately not a fifth button on the Pottery Wheel's card. The
+wheel's Ball starts a wheel *session* and bakes a vessel onto the selection;
+this puts a block on the plate. Adding a shape is a closed form and a meridian
+in `nso_stock.js` and a tile in `index.html`; `nso_stock_test.js` asserts the
+tiles *are* `NSO_Stock.SHAPES`, so the two cannot drift.
+
+```
+node tools/nso_stock_shelf_drive.js   the shelf: tiles, the drop, where it lands, Scale's rows, Undo
+node tools/nso_stock_live_test.js     a dropped piece, sized in Scale, in place
+node tools/nso_wire_stock_test.js     every tile makes a closed ordinary piece; the plate refusal
+```
 
 ## Out of scope for this first version, named
 

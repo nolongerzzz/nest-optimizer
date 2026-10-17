@@ -266,14 +266,10 @@ withApp(async (page, logs) => {
   await waitSpan(page, 0, 100);
   check('...one Undo returns the tray', (await look(page, 'scale-offset')).soupIsStart);
 
-  // A tube: the Stock card's tube at its defaults, 40 tall.
+  // A tube: the Stock shelf's tube, at its default drop.
   const nModels = await page.evaluate(() => state.models.length);
-  await page.evaluate(() => {
-    const set = (id, v) => { const el = document.getElementById(id); el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); };
-    set('sel-stock-shape', 'tube'); set('inp-stock-height', '40'); set('inp-stock-radius', ''); set('inp-stock-prop', '');
-  });
-  await openMenuFor(page, '#btn-stock-make');
-  await page.click('#btn-stock-make');
+  await openMenuFor(page, '#btn-stock-tube');
+  await page.click('#btn-stock-tube');
   await page.waitForFunction(k => state.models.length > k, nModels, { timeout: 30000 });
   await select(page, await page.evaluate(() => state.models[state.models.length - 1].id));
   await card(page);

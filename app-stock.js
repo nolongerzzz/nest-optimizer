@@ -1,102 +1,48 @@
-/* app-stock.js - the New stock button: put a correctly-sized blank on the
-   plate, before any tool that starts from one.
+/* app-stock.js - the Stock shelf: one tile per shape, one click puts it on
+   the plate.
 
    Thin on purpose, the way app-hollow.js and app-skin-patch.js are thin: all
    the arithmetic and all the geometry live in nso_stock.js, which is
    THREE-free and node-tested, and all the floor lives in nso_thickness.js.
-   What is here is the four things that can only be done in the app - read the
-   controls, resolve the machine the user is actually pointed at, add the
-   piece, and say what happened.
+   What is here is the three things that can only be done in the app - draw
+   the tiles, resolve the machine the user is actually pointed at, and add the
+   piece.
 
-   NOT A BAKE. Every geometry tool in this app replaces the active piece's
-   geometry through NSO_sculptCommitRaw. This one ADDS A PIECE and edits none,
-   which is why it is its own file, its own menu, and not a fifth button on
-   the Pottery Wheel's card: the wheel's Ball starts a wheel SESSION and bakes
-   a vessel onto the selection, and that is a different act from putting a
-   block on the plate.
+   THE CARD HAS NO FIELDS. It used to: a shape select, a target height and
+   radius, wall, nozzle, waste, a proportions box, Match and Oversize, and a
+   live session that re-sized the block as they moved. Sizing a blank is the
+   Scale card's job now, and Scale reads the shape's own measurements (a
+   capsule's length, a torus's ring and tube Ø - nso_shapes.js), so a second
+   set of boxes saying the same thing in other words is gone. The card is a
+   shelf of tiles and a tile is a verb.
 
-   PAINT SCOPE, THE CREATE PATH: NONE - the New stock button reads no existing
-   geometry unless you ask it to match a piece's proportions, and even then it
-   reads that piece's bounding box and nothing else, writing to no face of it.
-   No face of any piece is touched, which is a stronger statement than "paint
-   is respected". See docs/HANDOFF.md, "Scoping" - `none` is a category there.
-   The UPDATE path, added with live editing below, is a different answer to
-   the same question and is WHOLE-PIECE; both rows are in the HANDOFF roster,
-   and the update path's is the one tools/nso_paint_scope_test.js asserts,
-   because a row in that roster needs a paint test to point at.
+   A TILE IS DRAWN FROM THE GENERATOR, NOT FROM A FILE. Each is a 56 px canvas
+   painted once, the first time the card opens, from NSO_Stock.make's own soup
+   for that shape - the soup a click drops, at a coarser tessellation - lit
+   flat from one side on a dark ground. No image is in the repo, no tile has a
+   word on it, and a shape added to nso_stock.js is a tile in index.html and
+   nothing else.
 
-   The new piece arrives through addModelFromZUpGeometry (app-core.js), the
-   one ingest path an imported STL takes, so the block has rawTris exactly as
-   a loaded file does and every later tool - Carve, Hollow, Cut, Seat, Skin,
-   auto-aim support, both exporters - sees an ordinary piece.
+   A CLICK DROPS THE SHAPE AT ITS DEFAULT SIZE. DEFAULT_TARGET is the one
+   figure here: a 40 mm target, sized by nso_stock.js with its own stated
+   defaults (3 mm wall, 30 % waste), so every shape arrives at the size the old
+   card's blank fields gave it - bar the ellipsoid's ratio, below. Where it lands is free plate space (nsoFreeSpot,
+   the same search Picture and Mold use), centred when the plate is empty and
+   beside the selected piece when one is. It is selected, named by what it is
+   and a running number - "box 1", "cylinder 2" - and tagged with its sizing
+   (NSO_shapeTagStock) so Scale's per-shape rows read the parameters instead of
+   fitting the mesh. A second click on the same tile drops another; Undo takes
+   the last one back off through the same 'addModels' entry Extract and Split
+   use.
 
-   THE SHAPE LIST IS nso_stock.js's, NOT THIS FILE'S. The <option> values in
-   index.html are NSO_Stock.SHAPES spelled out, and what each shape's one
-   free-text box means lives in the PROP table below - one row per shape,
-   read by the parse, by the label and by the Match checkbox alike. Adding a
-   shape is a closed form and a meridian in the module, a row here and an
-   <option> there; nothing in this file solves for anything.
+   The build-volume gate is still the machine the Plate card is pointed at
+   (NSO_fitCurrentPrinter): a default block the plate cannot hold is refused
+   before any geometry is added.
 
-   ---------------------------------------------------------------------------
-   LIVE EDITING - the card adjusts the piece it made, it does not make another
-   ---------------------------------------------------------------------------
-   New stock ADDS. That is right the first time and wrong every time after:
-   before this, seeing a 50% margin instead of 30% meant pressing New stock
-   again, which left a second block on the plate and left your positioning,
-   your pose and your selection on the first one. Measured before the change:
-   two presses, two pieces, two meshes, and the second one placed 31.96 mm to
-   the side of the first.
-
-   So the button opens a SESSION on the piece it made, and every control on
-   the card then edits THAT piece in place. This is the Pottery Wheel's
-   pattern, deliberately and not by coincidence:
-
-     the wheel      NSO_wheelSession holds the profile; each move derives a
-                    new profile from it and bakes the revolve onto the SAME
-                    model through NSO_sculptCommitRaw.
-     here           `session` holds the model id and a fingerprint of the soup
-                    this file last wrote; each control change re-sizes from the
-                    card and bakes onto the SAME model through the same call.
-
-   What survives an adjustment, because NSO_sculptCommitRaw is what every bake
-   in this app already goes through: the model id, the model's place in the
-   list, the placed entry and its index, its x / z on the plate, its pose
-   fields, and the selection. What does not: the THREE.Mesh instance, which
-   that function disposes and rebuilds from the new geometry - for Stock
-   exactly as for Smooth, Extend, Fatten, Hollow and the wheel. "Same object"
-   here means the same PIECE, not the same Mesh; changing that is a change to
-   every bake in the app and is not this ticket.
-
-   THE SESSION CLOSES RATHER THAN OVERWRITING SOMEBODY ELSE'S WORK. It is not
-   enough to remember which piece was made: a person who makes a block, hollows
-   it, and then nudges the waste margin must not lose the hollow. So the
-   fingerprint of what this file last wrote is checked before every update, and
-   a piece that no longer matches it has been baked by another tool - the
-   session ends, says so once, and the card goes back to making new blocks.
-
-   PAINT SCOPE: WHOLE-PIECE, for the UPDATE path only. Per the scoping rule in
-   docs/HANDOFF.md: an update re-generates the whole block from the card, so
-   there is no face it can promise to leave alone and no sub-region to scope a
-   check to - the same reading Smooth, Thicken, Fatten and Fusion have. Any
-   paint anywhere stands the update down, naming the count, and the session
-   ends rather than leaving the card silently inert. The CREATE path is still
-   `none`: it reads no existing geometry except a reference piece's bounding
-   box when Match is ticked, and writes to no face of anything.
-
-   ---------------------------------------------------------------------------
-   THE BUILD VOLUME IS THE MACHINE THE USER IS POINTED AT
-   ---------------------------------------------------------------------------
-   NSO_fitCurrentPrinter() (app-fit.js) is the app's one resolution path from
-   the Plate card - including the custom plate's live W / D / H fields - to an
-   nso_printer.js profile. It is passed into the sizing, so the refusal
-   happens BEFORE any geometry is built and before anything lands on the
-   plate. That is the whole point of checking at generation time: a block that
-   cannot be printed never becomes a piece the user then has to delete.
-
-   The one case that is a warning and not a refusal is a stock block bigger
-   than the machine whose TARGET still fits. That is a block somebody means to
-   split with Cut, so the checkbox says so in those words and nso_stock.js's
-   warnOnly carries it. */
+   PAINT SCOPE: NONE. A drop reads no existing geometry (the selected piece is
+   read for its footprint only, to find the room beside it) and writes to no
+   face of anything. See docs/HANDOFF.md, "Scoping" - `none` is a category
+   there. */
 
 (function () {
   'use strict';
@@ -104,457 +50,279 @@
   function $(id) { return document.getElementById(id); }
   function say(msg, bad) { if (typeof setStatus === 'function') setStatus(msg, !!bad); }
 
-  /* A number box, or undefined when it is blank - so "blank" reaches
-     nso_stock.js as "no opinion" and picks up that module's stated default
-     rather than a zero this file invented. */
-  function num(id) {
-    var el = $(id);
-    var v = el ? parseFloat(el.value) : NaN;
-    return isFinite(v) ? v : undefined;
+  /* The size every tile drops at: nso_stock.js sized for a 40 mm target, with
+     its own defaults for everything else. */
+  var DEFAULT_TARGET = { height: 40 };
+
+  /* The one shape whose own default would be another tile's: an ellipsoid
+     with nothing said is the target's height over its diameter, which for a
+     40 mm target is 1 - a sphere. It is dropped 1.5 tall instead, so the tile
+     and the piece are an ellipsoid. Every other shape takes the module's. */
+  var SHAPE_DEFAULTS = { ellipsoid: { ratio: 1.5 } };
+
+  /* mm between the selected piece and the one dropped beside it - what
+     addModel leaves, and what nsoFreeSpot keeps clear anyway. */
+  var BESIDE_GAP = 6;
+
+  /* The tiles' look. */
+  var TILE_BG = '#14171c';
+  var TILE_RGB = [56, 189, 248];         // the plate piece's own 0x38bdf8
+  var TILE_SEGMENTS = 32;                // coarser than a drop: 56 px cannot show more
+  var TILE_YAW = 0.62, TILE_ELEV = 0.62; // radians: a three-quarter view from above
+  var TILE_LIGHT = [-0.45, 0.55, 0.70];   // view frame: x right, y up, z toward the viewer
+
+  function shapeButtons() {
+    var shelf = $('stock-shelf');
+    return shelf ? Array.prototype.slice.call(shelf.querySelectorAll('button[data-shape]')) : [];
   }
-  function positive(id) {
-    var v = num(id);
-    return (typeof v === 'number' && v > 0) ? v : undefined;
+  function shelfShapes() {
+    return shapeButtons().map(function (b) { return b.getAttribute('data-shape'); });
   }
 
-  /* ------------------------------------------------ the shape-specific box
+  /* --------------------------------------------------------------- the tiles
 
-     ONE field, not one per shape, because all but one of them would be blank
-     at any moment. What it means follows the selector, and this table is the
-     only place that mapping is written down - the parse below, the label and
-     the placeholder in syncShape(), and the Match checkbox's own answer all
-     read it rather than each carrying a switch of their own.
-
-     A box is the exception and keeps its own branch: three numbers rather than
-     one or two, and they are proportions rather than ratios.
-
-       first / second   the nso_stock.js option each number fills
-       zeroOk           whether the SECOND number may be 0. A cone's taper of
-                        0 is a true point and is the default; a tube with no
-                        wall is not a tube.
-       ref              whether "Match selected piece" means anything here. A
-                        sphere has one measurement and a torus's tube ratio is
-                        not something a bounding box can say, so both refuse a
-                        reference by name in nso_stock.js and the checkbox is
-                        disabled rather than left to fail on the press. */
-  var PROP = {
-    cylinder:  { first: 'ratio', label: 'h/d', ph: 'e.g. 2', ref: true,
-                 hint: 'Cylinder height over diameter. Blank means the target\'s own height over its diameter.' },
-    cone:      { first: 'ratio', second: 'taper', zeroOk: true, label: 'h/d[:taper]', ph: 'e.g. 2 or 2:0.4', ref: true,
-                 hint: 'Cone height over base diameter, optionally followed by a taper - the top radius over the base radius, 0 for a true point and under 1 always. Blank means the target\'s own height over its diameter, to a point.' },
-    tube:      { first: 'ratio', second: 'tubeWall', label: 'h/d[:wall]', ph: 'e.g. 2 or 2:0.25', ref: true,
-                 hint: 'Tube height over outer diameter, optionally followed by the wall as a fraction of the outer radius (default 0.25). Blank means the target\'s own height over its diameter.' },
-    torus:     { first: 'tubeRatio', label: 'tube/ring', ph: 'e.g. 0.35', ref: false,
-                 hint: 'Torus tube radius over ring radius, strictly between 0 and 1 - at 1 the hole closes up. Blank means 0.35. A torus is never as tall as it is wide, so there is no height-over-diameter to read off the target.' },
-    capsule:   { first: 'ratio', label: 'h/d', ph: 'e.g. 2', ref: true,
-                 hint: 'Capsule total height over diameter, more than 1 - at exactly 1 it is a sphere. Blank means the target\'s own height over its diameter when the target is taller than it is wide, and 2 when it is not.' },
-    ellipsoid: { first: 'ratio', label: 'h/d', ph: 'e.g. 1.5', ref: true,
-                 hint: 'Ellipsoid height over diameter. 1 is a sphere, under 1 is squashed, over 1 is stretched. Blank means the target\'s own height over its diameter.' },
-    box:       { label: 'x:y:z', ph: 'e.g. 2:1:1', ref: true,
-                 hint: 'Box proportions, any scale - the block is grown or shrunk until it holds the material the target needs. Blank means the target\'s own bounding box.' }
-  };
-
-  function proportionsOf(shape) {
-    var spec = PROP[shape];
-    var raw = ($('inp-stock-prop') || {}).value;
-    if (!raw || !String(raw).trim()) return {};
-    var txt = String(raw).trim();
-    if (!spec) return {};                       // sphere: the box is hidden
-    if (shape === 'box') {
-      var parts = txt.split(/[:x,\s]+/).filter(function (s) { return s.length; }).map(parseFloat);
-      if (parts.length !== 3 || !parts.every(function (n) { return isFinite(n) && n > 0; })) {
-        return { error: 'the box proportions box wants three positive numbers, e.g. 2:1:1' };
-      }
-      return { proportions: { x: parts[0], y: parts[1], z: parts[2] } };
+     A tiny painter's-algorithm renderer: rotate the soup into the view frame,
+     cull the faces turned away, sort back to front by centroid and fill each
+     triangle flat. Enough for eight primitives at 56 px, and it needs neither
+     THREE nor a GL context - a canvas 2D context is all a tile owns. */
+  function signedVolume(s) {
+    var v = 0;
+    for (var i = 0; i < s.length; i += 9) {
+      v += s[i] * (s[i + 4] * s[i + 8] - s[i + 5] * s[i + 7]) -
+           s[i + 1] * (s[i + 3] * s[i + 8] - s[i + 5] * s[i + 6]) +
+           s[i + 2] * (s[i + 3] * s[i + 7] - s[i + 4] * s[i + 6]);
     }
-    /* One or two plain numbers, "a" or "a:b", for every other shape. */
-    var nums = txt.split(/[:x,\s]+/).filter(function (s) { return s.length; }).map(parseFloat);
-    var max = spec.second ? 2 : 1;
-    if (!nums.length || nums.length > max || !nums.every(function (n) { return isFinite(n); })) {
-      return { error: 'the ' + shape + ' box wants ' + (spec.second ? 'one or two numbers' : 'one number') +
-        ' - ' + spec.label + ', e.g. ' + spec.ph.replace(/^e\.g\. /, '') };
+    return v;
+  }
+
+  function paintTile(canvas, soup) {
+    var ctx = canvas.getContext && canvas.getContext('2d');
+    if (!ctx) return false;
+    var W = canvas.width, H = canvas.height, n = (soup.length / 9) | 0;
+    ctx.fillStyle = TILE_BG;
+    ctx.fillRect(0, 0, W, H);
+    if (!n) return false;
+
+    var cy = Math.cos(TILE_YAW), sy = Math.sin(TILE_YAW);
+    var ce = Math.cos(TILE_ELEV), se = Math.sin(TILE_ELEV);
+    /* Z-up soup: turn about Z by the yaw, then look down at it from `elev`.
+       Screen x is the turned x; screen y (up) is y*sin(e) + z*cos(e); depth
+       toward the viewer is z*sin(e) - y*cos(e). */
+    var P = new Float32Array(n * 9), D = new Float32Array(n);
+    var lox = Infinity, hix = -Infinity, loy = Infinity, hiy = -Infinity;
+    for (var i = 0; i < n * 3; i++) {
+      var x = soup[3 * i], y = soup[3 * i + 1], z = soup[3 * i + 2];
+      var x1 = x * cy - y * sy, y1 = x * sy + y * cy;
+      var sx = x1, sv = y1 * se + z * ce, d = z * se - y1 * ce;
+      P[3 * i] = sx; P[3 * i + 1] = sv; P[3 * i + 2] = d;
+      if (sx < lox) lox = sx; if (sx > hix) hix = sx;
+      if (sv < loy) loy = sv; if (sv > hiy) hiy = sv;
     }
-    if (!(nums[0] > 0)) {
-      return { error: 'the first number in the ' + shape + ' box (' + spec.label +
-        ') has to be positive - got ' + nums[0] };
+    var pad = 4, span = Math.max(hix - lox, hiy - loy, 1e-6);
+    var k = (Math.min(W, H) - 2 * pad) / span;
+    var ox = W / 2 - k * (lox + hix) / 2, oy = H / 2 + k * (loy + hiy) / 2;
+
+    var L = TILE_LIGHT, ll = Math.sqrt(L[0] * L[0] + L[1] * L[1] + L[2] * L[2]);
+    var flip = signedVolume(soup) < 0 ? -1 : 1;
+    var order = [];
+    for (var t = 0; t < n; t++) {
+      var o = 9 * t;
+      /* Facet normal in the view frame (x right, y up, z toward the viewer). */
+      var ax = P[o + 3] - P[o], ay = P[o + 4] - P[o + 1], az = P[o + 5] - P[o + 2];
+      var bx = P[o + 6] - P[o], by = P[o + 7] - P[o + 1], bz = P[o + 8] - P[o + 2];
+      var nx = (ay * bz - az * by) * flip, ny = (az * bx - ax * bz) * flip, nz = (ax * by - ay * bx) * flip;
+      var nl = Math.sqrt(nx * nx + ny * ny + nz * nz);
+      if (nl < 1e-12) continue;
+      nx /= nl; ny /= nl; nz /= nl;
+      if (nz <= 0) continue;                       // turned away from the viewer
+      var lam = (nx * L[0] + ny * L[1] + nz * L[2]) / ll;
+      order.push({ t: t, depth: (P[o + 2] + P[o + 5] + P[o + 8]) / 3, shade: 0.28 + 0.72 * Math.max(0, lam) });
     }
-    var out = {};
-    out[spec.first] = nums[0];
-    if (nums.length > 1) {
-      if (!(nums[1] > 0 || (spec.zeroOk && nums[1] === 0))) {
-        return { error: 'the second number in the ' + shape + ' box (' + spec.label + ') has to be ' +
-          (spec.zeroOk ? 'zero or more' : 'positive') + ' - got ' + nums[1] };
-      }
-      out[spec.second] = nums[1];
+    order.sort(function (a, b) { return a.depth - b.depth; });
+    ctx.lineWidth = 0.6;
+    ctx.lineJoin = 'round';
+    for (var q = 0; q < order.length; q++) {
+      var f = order[q], p = 9 * f.t;
+      var col = 'rgb(' + Math.round(TILE_RGB[0] * f.shade) + ',' + Math.round(TILE_RGB[1] * f.shade) + ',' + Math.round(TILE_RGB[2] * f.shade) + ')';
+      ctx.fillStyle = col; ctx.strokeStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(ox + k * P[p], oy - k * P[p + 1]);
+      ctx.lineTo(ox + k * P[p + 3], oy - k * P[p + 4]);
+      ctx.lineTo(ox + k * P[p + 6], oy - k * P[p + 7]);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
     }
-    return out;
+    return true;
   }
 
-  /* The selected piece's raw soup, for "match the selected piece". The same
-     rawAxis check Thicken and Hollow make: a piece with only a display
-     geometry is centred and rotated, so its extents are not the ones the user
-     is looking at, and it is refused by name rather than read anyway. */
-  function referenceSoup() {
-    var m = (typeof getActiveModel === 'function') ? getActiveModel() : null;
-    if (!m) return { error: 'Match needs a piece selected - pick one, or untick Match' };
-    if (!(m.rawTris && m.rawAxis === 'zup' && m.rawTris.length >= 9)) {
-      return { error: 'Match needs a raw piece - "' + m.name + '" has no untransformed soup to read proportions off' };
-    }
-    return { soup: m.rawTris, name: m.name };
+  /* What a tile asks nso_stock.js for: the shape at the default target. */
+  function stockOpts(shape) {
+    var o = { shape: shape };
+    for (var k in DEFAULT_TARGET) if (Object.prototype.hasOwnProperty.call(DEFAULT_TARGET, k)) o[k] = DEFAULT_TARGET[k];
+    var own = SHAPE_DEFAULTS[shape];
+    if (own) for (var j in own) if (Object.prototype.hasOwnProperty.call(own, j)) o[j] = own[j];
+    return o;
   }
 
-  function readUI() {
-    var shape = (($('sel-stock-shape') || {}).value) || 'sphere';
-    var o = {
-      shape: shape,
-      height: positive('inp-stock-height'),
-      radius: positive('inp-stock-radius'),
-      wall: positive('inp-stock-wall'),
-      nozzle: positive('inp-stock-nozzle')
-    };
-    /* Waste is typed as a PERCENTAGE because that is how a person says it, and
-       passed as a fraction because that is what the module takes. 0 is a legal
-       answer and must survive the conversion, so it is tested for finiteness
-       and not for truthiness. */
-    var w = num('inp-stock-waste');
-    if (typeof w === 'number' && w >= 0) o.waste = w / 100;
-
-    /* Whatever the shape box parsed, verbatim. Copied as a whole rather than
-       field by field: a per-field list here is a list that has to be extended
-       every time a shape gains an option, and the way it fails is silent -
-       the field parses, nothing complains, and the module quietly uses its
-       default instead. PROP already says which options exist; this does not
-       need a second opinion. */
-    var p = proportionsOf(shape);
-    if (p.error) return { error: p.error };
-    for (var pk in p) if (Object.prototype.hasOwnProperty.call(p, pk)) o[pk] = p[pk];
-
-    var match = $('chk-stock-match');
-    if (match && match.checked) {
-      if (!(PROP[shape] && PROP[shape].ref)) {
-        return { error: shape === 'sphere'
-          ? 'A sphere has one measurement, so there are no proportions to match - pick another shape, or untick Match'
-          : 'A torus is measured by its tube radius over its ring radius, which a reference piece\'s bounding box cannot say - give the tube ratio directly, or untick Match' };
-      }
-      var ref = referenceSoup();
-      if (ref.error) return { error: ref.error };
-      o.like = ref.soup;
-      o.likeName = ref.name;
-    }
-
-    var over = $('chk-stock-oversize');
-    if (over && over.checked) o.warnOnly = true;
-    return { opts: o };
+  var drawn = false;
+  function drawTiles() {
+    if (drawn) return 0;
+    if (typeof NSO_Stock === 'undefined' || !NSO_Stock) return 0;
+    drawn = true;
+    var done = 0;
+    shapeButtons().forEach(function (btn) {
+      var canvas = btn.querySelector('canvas');
+      if (!canvas) return;
+      var o = stockOpts(btn.getAttribute('data-shape'));
+      o.segments = TILE_SEGMENTS; o.profileN = TILE_SEGMENTS;
+      var r;
+      try { r = NSO_Stock.make(o); } catch (e) { r = null; }
+      if (r && r.ok && paintTile(canvas, r.soup)) { canvas.setAttribute('data-drawn', '1'); done++; }
+    });
+    return done;
   }
 
-  /* ------------------------------------------------------------- session
+  /* ------------------------------------------------------------------- drop */
 
-     { modelId, tris, sum } - which piece the card is editing, and a
-     fingerprint of the soup this file last wrote to it. The fingerprint is a
-     triangle count and a coordinate sum: cheap, and it does not have to be
-     cryptographic. It only has to notice the difference between "nobody has
-     touched this" and "Hollow / Fatten / Attach / Smooth has been over it",
-     and every one of those changes both numbers. */
-  var session = null;
-
-  function fingerprint(soup) {
-    var sum = 0;
-    for (var i = 0; i < soup.length; i++) sum += soup[i];
-    return { tris: (soup.length / 9) | 0, sum: sum };
-  }
-  function sessionModel() {
-    if (!session) return null;
-    var m = (state && state.models) ? state.models.find(function (x) { return x && x.id === session.modelId; }) : null;
-    return m || null;
-  }
-  function endSession(why) {
-    if (!session) return;
-    session = null;
-    if (why) say(why, false);
-  }
-  /* Exposed so a drive check can read the session rather than infer it. */
-  function sessionInfo() {
-    return session ? { modelId: session.modelId, tris: session.tris } : null;
+  /* "box 1", "cylinder 2": the shape and the next number up from the highest
+     the plate's pieces already carry, so an Undo hands its number back. */
+  function nextName(shape) {
+    var top = 0;
+    var re = new RegExp('^(?:' + (NSO_Stock.SHAPES || []).join('|') + ') (\\d+)$');
+    (state.models || []).forEach(function (m) {
+      var hit = m && re.exec(m.name || '');
+      if (hit) top = Math.max(top, parseInt(hit[1], 10));
+    });
+    return shape + ' ' + (top + 1);
   }
 
-  /* Generate and add. Exposed on window so the drive check runs the same path
-     the button runs rather than a parallel copy of it. */
-  function run(overrides) {
+  /* Where the drop should be asked to land: the middle of the plate, or the
+     room beside the selected piece. nsoFreeSpot then moves it to the nearest
+     spot that is actually free. */
+  function wantedSpot(made) {
+    var sel = (state.selectedIndex >= 0) ? state.placed[state.selectedIndex] : null;
+    if (!sel || !sel.mesh) return { x: 0, z: 0, beside: null };
+    var fp = (typeof placedFootprint === 'function') ? placedFootprint(sel) : null;
+    var right = fp ? fp.maxx : sel.x + (sel.width || 0) / 2;
+    var mid = fp ? (fp.minz + fp.maxz) / 2 : sel.z;
+    return { x: right + BESIDE_GAP + made.size.x / 2, z: mid, beside: sel.name || null };
+  }
+
+  /* `overrides` is for a drive check that needs a block of a stated size
+     (opts as nso_stock.js takes them: height, radius, waste, proportions...)
+     through the same path a click takes; a tile passes none. */
+  /* The shape last clicked on the shelf - what Connect's Attach button
+     generates a blank of. Set before anything can refuse the drop: it was
+     clicked. */
+  var lastShape = null;
+
+  function drop(shape, overrides) {
     if (typeof NSO_Stock === 'undefined' || !NSO_Stock) {
-      say('New stock needs nso_stock.js', true);
+      say('Stock needs nso_stock.js', true);
       return { ok: false, reason: 'NSO_Stock not loaded' };
     }
     if (typeof THREE === 'undefined' || typeof addModelFromZUpGeometry !== 'function') {
-      say('New stock needs the viewport', true);
+      say('Stock needs the viewport', true);
       return { ok: false, reason: 'no ingest path' };
     }
-
-    var read = readUI();
-    if (read.error) { say(read.error, true); return { ok: false, reason: read.error }; }
-    var opts = read.opts;
-    if (overrides) for (var k in overrides) if (Object.prototype.hasOwnProperty.call(overrides, k)) opts[k] = overrides[k];
-
-    if (!opts.height) {
-      say('Set a target height first (mm) - the stock is sized from the piece you mean to make', true);
-      return { ok: false, reason: 'no target height' };
+    if (NSO_Stock.SHAPES.indexOf(shape) < 0) {
+      say('Stock has no shape called "' + shape + '"', true);
+      return { ok: false, reason: 'unknown shape' };
     }
 
-    /* The machine the Plate card is pointed at, custom fields and all. Passed
-       in rather than looked up inside nso_stock.js, which has no app state by
-       design - see its header. */
+    lastShape = shape;
+    var opts = stockOpts(shape);
+    if (overrides) for (var ok in overrides) if (Object.prototype.hasOwnProperty.call(overrides, ok)) opts[ok] = overrides[ok];
+    /* The machine the Plate card is pointed at, passed in rather than looked
+       up inside nso_stock.js, which has no app state by design - see its
+       header. */
     if (typeof NSO_fitCurrentPrinter === 'function') opts.printer = NSO_fitCurrentPrinter();
 
     var r;
-    try {
-      r = NSO_Stock.make(opts);
-    } catch (e) {
-      say('New stock failed - nothing added (' + ((e && e.message) || e) + ')', true);
+    try { r = NSO_Stock.make(opts); }
+    catch (e) {
+      say('Stock failed - nothing added (' + ((e && e.message) || e) + ')', true);
       return { ok: false, reason: (e && e.message) || String(e) };
     }
     if (!r.ok) {
-      say('New stock refused - nothing added: ' + r.reason, true);
+      say('Stock refused - nothing added: ' + r.reason, true);
       return r;
     }
 
     var g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(r.soup), 3));
-    var name = 'stock_' + r.sizing.shape + '_' + Math.round(opts.height) + 'mm';
-    var id = addModelFromZUpGeometry(name + '.stl', g);
+    var name = nextName(shape);
+    var editBefore = state.editId, cutBefore = state.cutT;
+    /* keepSelection + silent: addModel's own auto-placement and status line
+       are for an uploaded file; this one is placed, selected and announced
+       below. */
+    var id = addModelFromZUpGeometry(name, g, { keepSelection: true, silent: true });
     if (id == null) {
-      say('New stock refused - the new piece looked empty', true);
+      say('Stock refused - the new piece looked empty', true);
       return { ok: false, reason: 'addModel refused' };
     }
+    var made = state.models.find(function (x) { return x && x.id === id; });
+    if (made.rawTris && typeof NSO_shapeTagStock === 'function') NSO_shapeTagStock(made.rawTris, r.sizing);
+    if (typeof pushUndo === 'function') pushUndo({ type: 'addModels', ids: [id], editId: editBefore, cutT: cutBefore });
+
+    var want = wantedSpot(made);
+    var entry = placeModelMovable(made, want.x, want.z);
+    var at = { x: want.x, z: want.z, onBed: true };
+    if (entry && typeof nsoFreeSpot === 'function') at = nsoFreeSpot(entry, want);
+    if (entry && typeof applyPlacedXZ === 'function') applyPlacedXZ(entry, at.x, at.z);
+
+    var idx = entry ? state.placed.indexOf(entry) : -1;
+    if (idx >= 0 && typeof selectPlaced === 'function') selectPlaced(idx);
+    if (typeof renderModelList === 'function') renderModelList();
+    if (typeof updateOptimizeButton === 'function') updateOptimizeButton();
+    if (typeof updateEditSize === 'function') updateEditSize();
+    if (typeof updateAdjustUI === 'function') updateAdjustUI();
+
+    var s = r.sizing;
+    var txt = 'Dropped ' + name + ' - ' + s.measure_text + (want.beside ? ', beside ' + want.beside : '') +
+      '. Size it with Scale.';
+    if (!at.onBed) txt += ' The plate has no free room left - it sits past the edge.';
+    if (s.warnings && s.warnings.length) txt += ' ' + s.warnings.join('; ');
+    say(txt, !at.onBed);
+
     r.modelId = id;
-
-    var s = r.sizing;
-    var txt = 'Added ' + name + ' - ' + s.measure_text + ', ' +
-      s.need_volume.toFixed(0) + ' mm^3 (' + s.shell_volume.toFixed(0) + ' mm^3 shell +' +
-      Math.round(s.waste * 100) + '% waste)';
-    if (opts.likeName) txt += ', matched to ' + opts.likeName;
-    if (!s.encloses_target) {
-      txt += ' - note: this block does NOT enclose the ' + s.height.toFixed(0) + ' x ' +
-        (2 * s.radius).toFixed(0) + ' mm target, so it is material for it, not a block to carve it out of';
-    }
-    if (s.warnings && s.warnings.length) txt += ' - ' + s.warnings.join('; ');
-
-    /* OPEN THE SESSION, and select the piece through the app's one selection
-       path. Both are needed for the card to edit what it just made: a session
-       with nothing selected would be edited from a card the user is not
-       looking at, and an editId written behind selectPlaced's back would leave
-       the red outline on whatever was selected before - the split that
-       docs/INTEGRATION.md finding 3 was about in Clone. */
-    session = { modelId: id };
-    var madeModel = state.models.find(function (x) { return x && x.id === id; });
-    /* The piece carries its shape and parameters, so Scale's shape rows
-       (nso_shapes.js) read them rather than fitting the mesh. Keyed on this
-       rawTris array: any later bake replaces it and the tag goes with it. */
-    if (madeModel && madeModel.rawTris && typeof NSO_shapeTagStock === 'function') NSO_shapeTagStock(madeModel.rawTris, r.sizing);
-    if (madeModel && madeModel.rawTris) {
-      var fp0 = fingerprint(madeModel.rawTris);
-      session.tris = fp0.tris; session.sum = fp0.sum;
-    }
-    var placedIdx = (state.placed || []).findIndex(function (p) { return p && p.sourceId === id; });
-    if (placedIdx >= 0 && typeof selectPlaced === 'function') selectPlaced(placedIdx);
-
-    say(txt, false);
-    if (typeof updateAdjustUI === 'function') updateAdjustUI();
+    r.name = name;
+    r.placedIndex = idx;
     return r;
-  }
-
-  /* --------------------------------------------------------------- update
-
-     One control moved. Re-size from the card and bake onto the piece the
-     session is holding - same model, same place on the plate, same pose, same
-     selection.
-
-     Every way out of this that is not a successful bake leaves the piece
-     exactly as it was; the refusals below are in the order the answers become
-     knowable, so nothing is generated before it is known that it may be. */
-  function update(reason) {
-    if (!session) return { ok: false, reason: 'no live piece' };
-    var m = sessionModel();
-    if (!m) { session = null; return { ok: false, reason: 'the piece is gone' }; }
-
-    /* The card edits the piece it is pointed at, and nothing else. Selecting
-       another piece is how a person says "I have moved on", and the Match
-       checkbox in particular is about the SELECTION, so an update that fired
-       while another piece was selected would resize the wrong block. */
-    var active = (typeof getActiveModel === 'function') ? getActiveModel() : null;
-    if (!active || active.id !== session.modelId) { session = null; return { ok: false, reason: 'another piece is selected' }; }
-
-    /* Somebody else has been over it - Hollow, Fatten, Attach, Smooth, a Cut.
-       Their work wins; the card stops editing and says so once. */
-    if (!(m.rawTris && m.rawTris.length)) {
-      endSession('Stock: "' + m.name + '" no longer has a raw soup, so the card has stopped editing it - press New stock for a new block');
-      return { ok: false, reason: 'no rawTris' };
-    }
-    var fp = fingerprint(m.rawTris);
-    if (session.tris != null && (fp.tris !== session.tris || fp.sum !== session.sum)) {
-      endSession('Stock: "' + m.name + '" has been changed by another tool, so the card has stopped editing it - your work is kept. Press New stock for a new block.');
-      return { ok: false, reason: 'piece changed elsewhere' };
-    }
-
-    /* PAINT SCOPE: WHOLE-PIECE - see the header. An update re-generates the
-       whole block, so there is no face it can hold still. */
-    var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
-    if (painted > 0) {
-      endSession('Stock stood down - ' + painted + ' painted face(s); an adjustment re-generates the whole block and cannot hold a face still. The card has stopped editing "' + m.name + '".');
-      return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
-    }
-
-    var read = readUI();
-    if (read.error) { say(read.error, true); return { ok: false, reason: read.error }; }
-    var opts = read.opts;
-    if (!opts.height) { say('Set a target height first (mm) - "' + m.name + '" is unchanged', true); return { ok: false, reason: 'no target height' }; }
-    /* The same build-volume gate New stock applies, against the machine the
-       Plate card is pointed at, before any geometry is built. */
-    if (typeof NSO_fitCurrentPrinter === 'function') opts.printer = NSO_fitCurrentPrinter();
-
-    var r;
-    try { r = NSO_Stock.make(opts); }
-    catch (e) { say('Stock update failed - "' + m.name + '" unchanged (' + ((e && e.message) || e) + ')', true); return { ok: false, reason: (e && e.message) || String(e) }; }
-    if (!r.ok) { say('Stock update refused - "' + m.name + '" unchanged: ' + r.reason, true); return r; }
-
-    var s = r.sizing;
-    var txt = 'Stock updated in place - ' + s.measure_text + ', ' +
-      s.need_volume.toFixed(0) + ' mm^3 (' + s.shell_volume.toFixed(0) + ' mm^3 shell +' +
-      Math.round(s.waste * 100) + '% waste)';
-    if (opts.likeName) txt += ', matched to ' + opts.likeName;
-    if (s.warnings && s.warnings.length) txt += ' - ' + s.warnings.join('; ');
-
-    if (typeof NSO_sculptCommitRaw !== 'function') { say('Stock update needs app-sculpt.js to commit', true); return { ok: false, reason: 'no commit path' }; }
-
-    /* ONE UNDO ENTRY PER SESSION, not one per keystroke.
-
-       NSO_sculptCommitRaw pushes an undo entry every time, which is right for
-       a bake somebody pressed a button for and wrong for a number field being
-       nudged: a dozen adjustments would bury everything else on the stack. So
-       the FIRST adjustment of a session keeps its entry - the one that takes
-       the piece back to the block as it was made - and every later one drops
-       the entry it just pushed. "Undo" then means "put the block back the way
-       it was before I started adjusting", which is the only thing a person
-       could want from it here.
-
-       Done locally rather than by teaching NSO_sculptCommitRaw a mode,
-       because this is the first tool in the app that edits on a field change
-       and one caller is not yet a pattern. The wheel's live drag has the same
-       problem and does push per frame; if a second tool wants this, it moves
-       into pushUndo as a coalesce flag and both take it. */
-    var depth = (state.undoStack || []).length;
-    var ok = NSO_sculptCommitRaw(m, r.soup, 'stockReplace', txt);
-    if (!ok) { say('Stock update refused - "' + m.name + '" unchanged: the commit was rejected', true); return { ok: false, reason: 'commit rejected' }; }
-    if (session.undoPushed && state.undoStack.length === depth + 1) state.undoStack.pop();
-    else session.undoPushed = true;
-    if (typeof updateUndoBtn === 'function') updateUndoBtn();
-
-    if (typeof NSO_shapeTagStock === 'function') NSO_shapeTagStock(m.rawTris, r.sizing);
-    var fp2 = fingerprint(m.rawTris);
-    session.tris = fp2.tris; session.sum = fp2.sum;
-    if (typeof updateAdjustUI === 'function') updateAdjustUI();
-    r.modelId = m.id;
-    r.updated = true;
-    r.why = reason || '';
-    return r;
-  }
-
-  /* The proportions box means something different per shape, so its label, its
-     placeholder and its tooltip follow the selector, and it goes away entirely
-     for a sphere - which has one measurement and nothing to proportion. A
-     field that says "x:y:z" while a cylinder is picked is a field that gets
-     filled in wrong. Only that one label changes: the wall, the nozzle and the
-     waste margin apply to every shape and stay put.
-
-     All of it comes off PROP, so adding a shape is a row in that table and an
-     <option> in index.html. The one thing NOT in the table is which shapes
-     hide the row: that is "has no second measurement at all", which is the
-     sphere alone and is the absence of a PROP entry. */
-  function syncShape() {
-    var shape = (($('sel-stock-shape') || {}).value) || 'sphere';
-    var lab = $('lab-stock-prop'), inp = $('inp-stock-prop'), row = $('row-stock-prop');
-    if (!lab || !inp || !row) return;
-    var spec = PROP[shape];
-    if (spec) {
-      row.hidden = false;
-      lab.textContent = spec.label;
-      inp.placeholder = spec.ph;
-      inp.title = spec.hint;
-    } else {
-      row.hidden = true;
-      inp.value = '';
-    }
-    /* Match is about reading a height over a diameter off a piece's bounding
-       box, so it is offered exactly where that means something. Cleared as
-       well as disabled, so switching to a sphere or a torus cannot leave a
-       ticked box that the next press would refuse on. */
-    var match = $('chk-stock-match');
-    if (match) {
-      match.disabled = !(spec && spec.ref);
-      if (match.disabled) match.checked = false;
-    }
-  }
-
-  function bind(id, ev, fn) {
-    var el = $(id);
-    if (!el || el.dataset.nsoWired === '1') return;
-    el.dataset.nsoWired = '1';
-    el.addEventListener(ev, fn);
-  }
-
-  /* Every control on the card, and the one reason they are listed rather than
-     queried: this file must not start editing a piece because some OTHER
-     card's field moved. A querySelector over the menu would pick up whatever
-     lands in it next. */
-  var LIVE_FIELDS = ['sel-stock-shape', 'inp-stock-height', 'inp-stock-radius',
-    'inp-stock-wall', 'inp-stock-nozzle', 'inp-stock-waste', 'inp-stock-prop',
-    'chk-stock-match', 'chk-stock-oversize'];
-
-  /* A number field fires `input` on every keystroke, and typing 4-5 in an
-     empty box goes through "4" on the way. Waiting for the typing to settle
-     means the piece is re-generated once per value the person meant, not once
-     per digit - and a 96-segment sphere is 18k triangles, so the difference
-     is visible. `change` fires on blur and on a spinner click and is already
-     the settled value, so it goes straight through.
-
-     Deliberately NOT the wheel's per-frame cadence: a drag has no keystrokes
-     to wait for, and a number box is not a drag. */
-  var QUIET_MS = 160;
-  var timer = null;
-  function later(reason) {
-    if (!session) return;
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(function () { timer = null; live(reason); }, QUIET_MS);
-  }
-  function live(reason) {
-    if (!session) return;
-    try { update(reason); }
-    catch (err) {
-      if (typeof console !== 'undefined') console.error('[stock]', err);
-      say('Stock update failed - the piece is unchanged (' + ((err && err.message) || err) + ')', true);
-    }
   }
 
   function wire() {
-    bind('btn-stock-make', 'click', function () { run(null); });
-    bind('sel-stock-shape', 'change', syncShape);
-    for (var i = 0; i < LIVE_FIELDS.length; i++) {
-      (function (id) {
-        var el = $(id);
-        if (!el || el.dataset.nsoStockLive === '1') return;
-        el.dataset.nsoStockLive = '1';
-        el.addEventListener('change', function () { if (timer) { clearTimeout(timer); timer = null; } live(id); });
-        if (el.tagName === 'INPUT' && el.type === 'number') {
-          el.addEventListener('input', function () { later(id); });
+    shapeButtons().forEach(function (btn) {
+      if (btn.dataset.nsoWired === '1') return;
+      btn.dataset.nsoWired = '1';
+      btn.addEventListener('click', function () {
+        try { drop(btn.getAttribute('data-shape')); }
+        catch (err) {
+          if (typeof console !== 'undefined') console.error('[stock]', err);
+          say('Stock failed - nothing added (' + ((err && err.message) || err) + ')', true);
         }
-      })(LIVE_FIELDS[i]);
+      });
+    });
+    var menu = document.querySelector('.vp-stock-menu');
+    if (menu) {
+      if (menu.open) drawTiles();
+      menu.addEventListener('toggle', function () { if (menu.open) drawTiles(); });
     }
-    syncShape();
   }
 
-  window.nsoStockRun = run;
-  window.nsoStockUpdate = update;
-  window.nsoStockSession = sessionInfo;
-  window.nsoStockEndSession = function () { endSession(''); };
-  window.nsoStockReadUI = readUI;
+  /* Exposed so a drive check runs the same path a click runs rather than a
+     parallel copy of it. */
+  window.nsoStockShelf = {
+    shapes: shelfShapes,
+    drop: drop,
+    draw: drawTiles,
+    drawn: function () { return drawn; },
+    lastShape: function () { return lastShape; },
+    /* What a drop asks nso_stock.js for, minus the machine. app-assemble.js
+       sizes its blank from the same figures. */
+    defaultOptions: stockOpts,
+    defaultTarget: function () { return Object.assign({}, DEFAULT_TARGET); }
+  };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
   else wire();
