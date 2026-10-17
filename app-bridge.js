@@ -58,6 +58,12 @@ function NSO_bridgePlacedBySource(id) {
   return (state.placed || []).find(function (p) { return p && p.sourceId === id && p.mesh; }) || null;
 }
 function NSO_bridgeModel(id) { return (state.models || []).find(function (m) { return m.id === id; }) || null; }
+// The overlap guard (nso-helpers.js, nsoOverlap): '' for clean solids, else the
+// sentence naming the first piece with overlapping shells. Bridge and Connect
+// ask it before the kernel; a band welds without the kernel and never asks.
+function NSO_bridgeOverlap(ids) {
+  return (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels(ids.map(NSO_bridgeModel)) : '';
+}
 
 // A placed piece's pose, as a string: its world matrix and its geometry.
 function NSO_bridgePoseKey(p) {
@@ -225,6 +231,7 @@ function NSO_bridgePreview() {
   try {
     p = NSO_Bridge.plan(pieces, { piece: 0, target: B.a.target }, { piece: ids.indexOf(B.b.sourceId), target: B.b.target }, o);
   } catch (err) { p = { ok: false, reason: (err && err.message) || String(err) }; }
+  if (p.ok && p.kind !== 'band') { var ov = NSO_bridgeOverlap(ids); if (ov) p = { ok: false, reason: ov, overlap: true }; }
   p.ids = ids;
   p.keys = [B.a.cache.key, B.b.cache.key];
   B.plan = p;
@@ -349,6 +356,13 @@ function NSO_bridgeSet() {
     var why = 'Bridge stood down - ' + painted + ' painted face(s); a bridge rebuilds both pieces into a new one. Clear paint to bridge.';
     NSO_bridgeSay(why, true); NSO_bridgeReadout(why, true);
     return Promise.resolve({ ok: false, reason: 'painted faces: ' + painted, painted: painted });
+  }
+  if (p.kind !== 'band') {
+    var overlap = NSO_bridgeOverlap(p.ids);
+    if (overlap) {
+      NSO_bridgeSay('Bridge refused - pieces unchanged (' + overlap + ')', true); NSO_bridgeReadout('Bridge: ' + overlap, true);
+      return Promise.resolve({ ok: false, reason: overlap, overlap: true });
+    }
   }
   B.busy = true; NSO_bridgeSyncRows();
   if (p.kind !== 'band') NSO_bridgeSay('Bridging (loading CSG kernel)...');

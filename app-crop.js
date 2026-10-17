@@ -1681,6 +1681,8 @@ async function NSO_cropMoveSelectedModel() {
     setStatus('Move stood down - ' + painted + ' painted face(s); the slab it rebuilds is chosen at lock-in. Clear paint to move.', true);
     return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
   }
+  var overlapMove = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([m]) : '';
+  if (overlapMove) { setStatus('Move refused - piece unchanged (' + overlapMove + ')', true); return { ok: false, reason: overlapMove }; }
   if (typeof NSO_Repair === 'undefined' || !NSO_Repair || typeof NSO_Repair.inspect !== 'function') {
     setStatus('Move unavailable - the mesh checker (NSO_Repair) is not loaded; piece unchanged', true);
     return { ok: false, reason: 'no checker' };
@@ -2392,6 +2394,8 @@ async function NSO_cropShapeSelectedModel() {
   }
   var sh = NSO_cropShapeState(), mesh = NSO_cropTargetMesh(m);
   function refuse(reason) { setStatus('Crop refused - piece unchanged (' + reason + ')', true); return { ok: false, reason: reason }; }
+  var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([m]) : '';
+  if (overlap) return refuse(overlap);
   var fr = NSO_cropPlateToRaw(m, mesh);
   if (!fr.M) return refuse(fr.reason);
   var now = NSO_cropShapeNow(m, mesh);

@@ -251,3 +251,110 @@
     pieceHits: pieceHits
   };
 })();
+
+/* Overlap guard - one check before the boolean kernel runs.
+
+   WHY. The kernel unions and subtracts closed solids. A piece that is several
+   shells laid over one another (library/box_closed.stl: a tray and a lid slab
+   that overlap by 0.1 mm, 74 piercing pairs) is not one solid to it, and what
+   comes back is a weld that "would not be closed (N wound the wrong way)" -
+   the right refusal, in words that point at the wrong thing. Every verb that
+   hands a piece to NSO_unionSoups / NSO_subtractSoups asks here first and
+   stands down in words, naming the piece, before anything is built: Bridge,
+   Connect (weld), Join, Subtract B from A, Crop Circle / Piece.
+
+   THE TEST. The checker's piercing pairs (NSO_Repair._selfIntersectionDetail,
+   the count tools/mesh_validate.py gives), kept only where the two triangles
+   truly cross: each one straddles the other's plane by more than CROSS_MM. Shells
+   that merely touch (a mark sitting on a bar's face, 0 mm apart) and the
+   checker's near-coplanar sliver pairs are contact, not overlap, and the kernel
+   unions them; box_closed's 0.1 mm lid overlap is 1e5 times CROSS_MM. A piece
+   with any crossing pair is refused, and the sentence quotes the checker's
+   count. Counted once per piece: the answer is cached on the piece's raw soup (a
+   WeakMap), which every edit replaces, and a pose does not change it. Unknown
+   (no checker loaded, no soup) is never a refusal.
+
+   THE REMEDY. Check & Repair -> Repair does NOT merge overlapping shells
+   (measured on box_closed.stl: "nothing to repair", 74 -> 74 pairs), so the
+   message points at tools/nso_fixture_union. Flip REPAIR_MERGES the day Repair
+   can, and the message becomes "run CHECK & REPAIR -> Repair on it first". */
+(function () {
+  var REPAIR_MERGES = false;
+  var CROSS_MM = 1e-3;
+  var cache = (typeof WeakMap === 'function') ? new WeakMap() : null;
+
+  // Do triangles fa and fb of mesh m cross, both straddling the other's plane by more than CROSS_MM?
+  function crosses(m, fa, fb) {
+    function tri(f) {
+      var v = [];
+      for (var i = 0; i < 3; i++) { var o = m.faces[f * 3 + i] * 3; v.push([m.pos[o], m.pos[o + 1], m.pos[o + 2]]); }
+      return v;
+    }
+    function straddles(T, U) {          // does U straddle T's plane?
+      var e1 = [T[1][0] - T[0][0], T[1][1] - T[0][1], T[1][2] - T[0][2]], e2 = [T[2][0] - T[0][0], T[2][1] - T[0][1], T[2][2] - T[0][2]];
+      var n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+      var L = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+      if (!(L > 0)) return false;
+      var pos = false, neg = false;
+      for (var i = 0; i < 3; i++) {
+        var d = ((U[i][0] - T[0][0]) * n[0] + (U[i][1] - T[0][1]) * n[1] + (U[i][2] - T[0][2]) * n[2]) / L;
+        if (d > CROSS_MM) pos = true; else if (d < -CROSS_MM) neg = true;
+      }
+      return pos && neg;
+    }
+    var A = tri(fa), B = tri(fb);
+    return straddles(A, B) && straddles(B, A);
+  }
+
+  // { pierce, crossing } for a raw soup: the checker's pairs, and those that truly cross; null when it cannot be asked.
+  function measure(soup) {
+    if (!soup || !soup.length) return null;
+    if (cache && cache.has(soup)) return cache.get(soup);
+    if (typeof NSO_Repair === 'undefined' || !NSO_Repair || typeof NSO_Repair._selfIntersectionDetail !== 'function' ||
+        typeof NSO_Repair._weldToIndexed !== 'function') return null;
+    var out;
+    try {
+      var mesh = NSO_Repair._weldToIndexed(soup, NSO_Repair.WELD_TOL).mesh;
+      var d = NSO_Repair._selfIntersectionDetail(mesh, { collect: true });
+      out = { pierce: d.pierce, crossing: 0 };
+      for (var i = 0; i < d.pairs.length; i++) {
+        if (d.pairs[i].kind === 'pierce' && crosses(mesh, d.pairs[i].a, d.pairs[i].b)) out.crossing++;
+      }
+    } catch (e) { return null; }
+    if (cache) cache.set(soup, out);
+    return out;
+  }
+
+  // The checker's piercing-pair count when the piece has overlapping shells, else 0; null when it cannot be asked.
+  function pairs(soup) {
+    var r = measure(soup);
+    return r ? (r.crossing > 0 ? r.pierce : 0) : null;
+  }
+
+  function sentence(name, n) {
+    return (name || 'this piece') + ' has overlapping shells (' + n + ' piercing pair' + (n === 1 ? '' : 's') + '); ' +
+      (REPAIR_MERGES ? 'run CHECK & REPAIR \u2192 Repair on it first' : 'clean it with tools/nso_fixture_union first');
+  }
+
+  /* items: [{ name, soup }] - the pieces about to go to the kernel. '' when
+     every one is a clean solid, else the sentence for the first that is not. */
+  function refusal(items) {
+    for (var i = 0; i < (items || []).length; i++) {
+      var it = items[i], n = it ? pairs(it.soup) : null;
+      if (n > 0) return sentence(it.name, n);
+    }
+    return '';
+  }
+
+  /* The same, for models off state.models (name, raw soup). */
+  function refusalOfModels(models) {
+    return refusal((models || []).map(function (m) {
+      if (!m) return null;
+      var soup = (m.rawTris && m.rawAxis === 'zup') ? m.rawTris
+        : (typeof getModelRawSoup === 'function' && m.geometry ? getModelRawSoup(m) : m.rawTris);
+      return { name: m.name, soup: soup };
+    }));
+  }
+
+  window.nsoOverlap = { pairs: pairs, refusal: refusal, refusalOfModels: refusalOfModels, repairMerges: REPAIR_MERGES };
+})();

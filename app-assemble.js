@@ -181,6 +181,8 @@
       return fail('Attach stood down - ' + painted + ' painted face(s); the union replaces ' +
         'every triangle on the piece and cannot hold a face still. Clear paint to attach.');
     }
+    var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([m]) : '';
+    if (overlap) return fail('Attach refused - ' + overlap + ' - piece unchanged');
 
     /* The blank: the Stock card's own controls, read by app-stock.js's own
        reader, so there is one place the boxes are interpreted. */

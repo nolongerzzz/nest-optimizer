@@ -109,6 +109,8 @@
       return fail('Detach stood down - ' + painted + ' painted face(s); the hull is a new soup and ' +
         'cannot hold a face still. Clear paint to detach.');
     }
+    var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([m]) : '';
+    if (overlap) return fail('Detach refused - ' + overlap + ' - piece unchanged');
     busy = true;
     try {
       var det = NSO_Flange.detect(m.rawTris);
@@ -253,6 +255,8 @@
       return fail('Reattach stood down - ' + painted + ' painted face(s); the union replaces every ' +
         'triangle on the piece and cannot hold a face still. Clear paint to reattach.');
     }
+    var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([m]) : '';
+    if (overlap) return fail('Reattach refused - ' + overlap + ' - piece unchanged');
     var pick = window.nsoAttachRawPick(m, placed.mesh, worldPoint, localNormal);
     if (pick.error) return fail(pick.error);
 
