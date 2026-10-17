@@ -112,7 +112,12 @@
    * The transform buildPlacedObjects3MF() bakes into one piece's geometry.
    *
    * @param {object} pose  x, z, rotY, rotated, flipX, tipX, tipZ, tiltX,
-   *                       tiltZ, liftY, height - the placed entry's own fields
+   *                       tiltZ, liftY, height - the placed entry's own fields;
+   *                       below (optional) - how far the posed geometry's lowest
+   *                       point is under its origin, which is what the exporter
+   *                       lifts by. Left out it is height / 2, the right figure
+   *                       only for a posed box centred on its origin (every
+   *                       file written before nso-bounds.js)
    * @param {{w:number, d:number}} plate
    * @returns {number[]} 12 numbers, row-vector convention (see the file head)
    */
@@ -132,7 +137,7 @@
 
     var tx = num(pose.x) + num(plate.w) / 2;
     var ty = -num(pose.z) + num(plate.d) / 2;
-    var tz = num(pose.height) / 2 + num(pose.liftY);
+    var tz = (pose.below != null ? num(pose.below) : num(pose.height) / 2) + num(pose.liftY);
 
     // column-convention A -> row-vector M is the transpose
     return [

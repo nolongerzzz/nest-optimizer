@@ -280,7 +280,8 @@
     "split:parts": "node tools/nso_split_parts_test.js",
     "split:parts-drive": "node tools/nso_split_parts_drive.js",
     "lift:curved-surface": "node tools/nso_lift_curved_surface_test.js",
-    "lift:curved-surface-drive": "node tools/nso_lift_curved_surface_drive.js"
+    "lift:curved-surface-drive": "node tools/nso_lift_curved_surface_drive.js",
+    "pose:bounds": "node tools/nso_pose_bounds_test.js"
   },
   "devDependencies": {
     "playwright": "1.56.1",
@@ -331,6 +332,7 @@
     "split:parts-drive",
     "lift:curved-surface",
     "lift:curved-surface-drive",
+    "pose:bounds",
     "foam:test",
     "foam:drive",
     "cavity:thickwall",
@@ -627,6 +629,7 @@
     "split:parts-drive": 33000,
     "lift:curved-surface": 10300,
     "lift:curved-surface-drive": 600,
+    "pose:bounds": 60000,
     "foam:test": 4200,
     "foam:drive": 85300,
     "cavity:thickwall": 110,

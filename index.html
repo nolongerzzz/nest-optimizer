@@ -1735,7 +1735,7 @@
   <script src="nso-cooling-profiles.js"></script>
   <script src="nso-3mf.js"></script>
   <script src="nso-3mf-read.js"></script>
-  <script src="nso-3mf-scene.js?v=scene2"></script>
+  <script src="nso-3mf-scene.js?v=scene3"></script>
   <script src="nso-surface-grid.js?v=inside6"></script>
   <script src="nso-gcode-lines.js"></script>
   <script src="nso-gcode-solid.js?v=solid1"></script>
@@ -1744,14 +1744,15 @@
   <script src="nso_relief.js?v=relief2"></script>
   <!-- Every tool helper goes in and out of the scene through this registry. -->
   <script src="nso-helpers.js?v=overlap2"></script>
-  <script src="app-core.js?v=leashb7"></script>
+  <script src="nso-bounds.js?v=bounds1"></script>
+  <script src="app-core.js?v=bounds1"></script>
 
 
 
 
 
   <script src="app-cut.js?v=mitrestep1"></script>
-  <script src="app-finish.js?v=helpers1"></script>
+  <script src="app-finish.js?v=bounds1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
   <script src="app-extend.js?v=scale1"></script>
   <!-- Mirror: exact reflection across the cut plane. After app-extend.js,
@@ -1807,7 +1808,7 @@
   <script src="app-stock.js?v=shapes1"></script>
   <script src="app-assemble.js?v=overlap2"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
-  <script src="app-join.js?v=overlap2"></script>
+  <script src="app-join.js?v=boundsb9"></script>
   <script src="app-center-lock.js?v=pull1"></script>
   <script src="app-oversize-washer.js?v=oversize2"></script>
   <script src="app-join-triple.js?v=triple1"></script>
@@ -1832,9 +1833,9 @@
        rather than three modules each hoping the other two are shut. -->
   <script src="app-input-mode.js?v=pull1"></script>
   <script src="app-tip-orient.js?v=tip3"></script>
-  <script src="app-rotate-handles.js?v=helpmrg1"></script>
+  <script src="app-rotate-handles.js?v=bounds1"></script>
   <script src="app-move-vertical.js?v=helpers1"></script>
-  <script src="app-grab-drop.js?v=grabdrop1"></script>
+  <script src="app-grab-drop.js?v=grabdrop2"></script>
   <script src="app-defects.js?v=helpers1"></script>
   <!-- After app-defects.js, whose hooks and scan it uses. -->
   <script src="app-findings.js?v=repairloop1"></script>
