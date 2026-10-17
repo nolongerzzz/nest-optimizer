@@ -432,7 +432,12 @@ withApp(async (page, logs) => {
       const after = await page.evaluate(() => ({ i: state.selectedIndex, id: state.editId }));
       // Opening Join starts the session, and Start Join always cleared the selection (slot A is picked afresh);
       // shutting the card then leaves it as it found it.
-      const want = id === 'menu-joins' ? { i: -1, id: null } : before;
+      // Opening Supports with nothing selected goes onto the only piece on the plate and selects it (detect first).
+      const sole = id === 'menu-supports' && before.i === -1 && await page.evaluate(() => {
+        const ps = state.placed.map((p, i) => ({ p, i })).filter(({ p }) => p && p.mesh && !(p.mesh.userData && p.mesh.userData.nsoSupport));
+        return ps.length === 1 ? { i: ps[0].i, id: ps[0].p.sourceId } : null;
+      });
+      const want = id === 'menu-joins' ? { i: -1, id: null } : sole || before;
       if (after.i !== want.i || after.id !== want.id) keeps.push(id + ' ' + JSON.stringify(want) + ' -> ' + JSON.stringify(after));
     }
     check('every drop-down opens on a click and holds the controls the ticket gives it', holdFails.length === 0,
