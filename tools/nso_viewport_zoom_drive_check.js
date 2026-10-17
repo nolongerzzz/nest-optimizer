@@ -117,7 +117,9 @@ withApp(async (page, logs) => {
     const spots = [
       ['on the box', [bt[0] + 12, bt[1] + 6]],
       ['lower left', [r[0] + r[2] * 0.22, r[1] + r[3] * 0.78]],
-      ['lower right', [r[0] + r[2] * 0.80, r[1] + r[3] * 0.62]]
+      // 0.70 down, not 0.62: with the header gone (#224) the canvas is 60 px taller and 0.62 fell in the
+      // gap between two pieces at d 300, where a zoom step crosses from the clamped plate edge onto a piece
+      ['lower right', [r[0] + r[2] * 0.80, r[1] + r[3] * 0.70]]
     ];
     for (const [name, at] of spots) {
       for (const dir of ['in', 'out']) {
