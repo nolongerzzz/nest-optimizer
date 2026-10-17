@@ -154,7 +154,7 @@ withApp(async (page, logs) => {
   const reg = await page.evaluate(() => ({ ok: typeof nsoHelpers === 'object', owners: nsoHelpers.owners() }));
   check('nsoHelpers is loaded ahead of the tools', reg.ok);
   const want = ['cut', 'crop', 'bend', 'tube-edge', 'bridge', 'foam', 'measure', 'brush', 'check', 'rotate', 'move',
-                'face-pick', 'seat-grid', 'fence', 'inspect', 'gscope-lift', 'gscope-support', 'lift-plate'];
+                'face-pick', 'seat-grid', 'fence', 'inspect', 'gscope-support', 'lift-plate'];
   const missing = want.filter(w => reg.owners.indexOf(w) < 0);
   check('every helper-drawing tool registered its session', !missing.length, missing.length ? 'missing ' + missing.join(', ') : reg.owners.length + ' owners');
   check('a fresh page holds pieces and plate only', (await audit(page)).length === 0, (await audit(page)).join('; '));

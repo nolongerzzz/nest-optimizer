@@ -115,6 +115,26 @@ async function drag(page, from, to) {
   await frames(page);
 }
 
+/**
+ * A pixel of BARE plate in the G-scope canvas: nothing drawn under it that a press would take
+ * (the engine's own answer, pressTargetAt) and the canvas itself on top (no card, no readout).
+ * A left press on the part or the selection is the click-isolates / drag-pulls gesture now;
+ * an orbit starts on bare plate.
+ */
+async function bareAt(page, x0, x1, y0, y1) {
+  const at = await page.evaluate(([a, b, c, d]) => {
+    const M = window.NSO_MICROSCOPE, cv = M.getView().renderer.domElement, r = cv.getBoundingClientRect();
+    const n = 24, sy = (d - c) / n, sx = (b - a) / n;
+    for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) {
+      const x = r.left + (a + sx * j) * r.width, y = r.top + (c + sy * i) * r.height;
+      if (document.elementFromPoint(x, y) === cv && !M.pressTargetAt(x, y)) return [x, y];
+    }
+    return null;
+  }, [x0, x1, y0, y1]);
+  if (!at) throw new Error(`no bare plate in x ${x0}-${x1}, y ${y0}-${y1} of the canvas`);
+  return at;
+}
+
 async function main() {
   await mkdir(SHOTS, { recursive: true });
   const served = await serveRoot();
@@ -206,18 +226,13 @@ async function main() {
   check('the two rectangles catch different moves', b1.n !== b2.n, true);
   await shot(page, 'cc-03-corner-drag-tall-y.png', 'corner drag: narrow in X, long in Y');
 
-  // Orbit half way round (Orbit mode, a real left-drag): the dot moves to the
-  // corner that is now in front, and the box itself does not change.
-  await page.click('#ms-mode-orbit');
-  const rect = await page.evaluate(() => {
-    const r = window.NSO_MICROSCOPE.getView().renderer.domElement.getBoundingClientRect();
-    return [r.left, r.top, r.width, r.height];
-  });
-  const oy = rect[1] + rect[3] * 0.5;
+  // Orbit half way round (a real left-drag from BARE plate - Piece mode, no region armed): the dot
+  // moves to the corner that is now in front, and the box itself does not change.
+  await page.click('#ms-mode-piece');
   // An orbit turns by the pixels dragged (2*pi per canvas height). The canvas was 1110 wide beside the
   // sidebar and is the whole panel now, so a drag of 0.7 of its width went further round than this
   // check means: keep the same 777 px of travel, from clear of the left wall's boxes.
-  const x1 = rect[0] + rect[2] * 0.25;
+  const [x1, oy] = await bareAt(page, 0.12, 0.4, 0.3, 0.9);
   await drag(page, [x1, oy], [x1 + 0.7 * 1110, oy]);
   await frames(page, 30);                                     // let the damping settle
   const orbited = await page.evaluate((c) => {

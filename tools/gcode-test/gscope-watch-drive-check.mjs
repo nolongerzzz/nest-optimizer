@@ -15,10 +15,10 @@
  *      with its rail button: on the very next frame the panel is in G-scope's
  *      viewport, on top (a hit test at the panel lands on the panel), still
  *      on, the SAME run - no second "watch on", no re-arm, the same counts.
- *   2  NORMAL VIEW. Legend rows hidden and shown again, a real click on a
- *      piece in G-scope's own 3D view - in orbit, as G-scope opens, it drops
- *      nothing; with Click to select region armed, a capture box drops -
- *      Normal re-frame.
+ *   2  NORMAL VIEW. A mesh has no line types (the Features list says so), a
+ *      real click on a piece in G-scope's own 3D view - in Piece mode, as
+ *      G-scope opens, it isolates the piece and drops nothing; in Region mode
+ *      a capture box drops (and isolates) - Normal re-frame.
  *      The panel stays visible throughout; it keeps its collapse state.
  *   3  SLICE VIEW. Slice view, its All features rows, Normal back to the
  *      mesh, Slice again - the panel is on top in each. The slice's own
@@ -47,10 +47,11 @@ import gscopeCards from '../nso_gscope_cards.js';        // opens the card a G-s
 
 const check = mkCheck();
 
-/* A legend row, pressed. Watch's log sits over the left wall in G-scope (nso-watch.js docks it at
-   left 12 / bottom 84, where the shell's legend now is), so a real click at the row's centre can land
-   on the log. What these checks assert is what Watch RECORDS when the row's own handler runs, so the
-   handler is run directly - a real click on the row is gscope:shell's and gcode:scope-legend's job. */
+/* A Features-list row, clicked (Feature mode's click: that line type isolated; again, whole). Watch's log
+   sits over the left wall in G-scope (nso-watch.js docks it at left 12 / bottom 84, where the shell's
+   legend now is), so a real click at the row's centre can land on the log. What these checks assert is
+   what Watch RECORDS when the row's own handler runs, so the handler is run directly - a real click on
+   the row is gscope:shell's and gcode:scope-legend's job. */
 const legendRow = (page, g) => page.evaluate((sel) => document.querySelector(sel).click(), `#ms-legend [data-group="${g}"]`);
 const SOAK_MS = Number(process.env.SOAK_MS || 0);
 const PROBE = 'gscope-watch probe: thrown while G-scope is up';
@@ -132,11 +133,14 @@ async function clickPiece(page, which) {
 
 /** One pass of ordinary G-scope use, in whichever view is up. */
 async function exerciseNormal(page) {
-  const groups = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map((e) => e.dataset.group));
-  for (const g of groups) await legendRow(page, g);       // hide each
-  for (const g of groups) await legendRow(page, g);       // and back
+  // (a mesh has no line types: no Features rows to click here - exerciseSlice does those)
+  await page.click('#ms-mode-piece');
+  await clickPiece(page, 'mushroom');          // isolates the piece
+  await page.click('#ms-btn-back');
+  await page.click('#ms-btn-clear');
   await page.click('#ms-mode-select');
-  await clickPiece(page, 'mushroom');
+  await clickPiece(page, 'mushroom');          // drops a box (and isolates it)
+  await page.click('#ms-btn-back');
   await page.click('#ms-btn-clear');
   await page.click('#ms-cam-normal');
   await frames(page);
@@ -146,8 +150,11 @@ async function exerciseSlice(page) {
   await sliced(page);
   await frames(page);
   const rows = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map((e) => e.dataset.group));
-  for (const g of rows.slice(0, 3)) await legendRow(page, g);   // off
-  for (const g of rows.slice(0, 3)) await legendRow(page, g);   // and on
+  for (const g of rows.slice(0, 3)) await legendRow(page, g);   // each line type isolated (feature click)
+  for (const g of rows.slice(0, 3)) await legendRow(page, g);   // and whole again
+  // and the Display check of one type, off and on
+  await page.evaluate(() => document.querySelector('#ms-legend .ms-legend-item .ms-legend-display').click());
+  await page.evaluate(() => document.querySelector('#ms-legend .ms-legend-item .ms-legend-display').click());
   await frames(page);
   return rows;
 }
@@ -215,25 +222,30 @@ async function main() {
   check('the collapse button works inside G-scope', (await panel(page)).collapsed, true);
   await page.click('#nso-watch-collapse');
   const boxes0 = await page.evaluate(() => window.NSO_MICROSCOPE.boxes().length);
-  const groups = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map((e) => e.dataset.group));
-  await legendRow(page, groups[0]);
-  check('a legend row hides its part', await page.evaluate(() => window.NSO_MICROSCOPE.hidden()), [groups[0]]);
-  await legendRow(page, groups[0]);
-  check('... and shows it again', await page.evaluate(() => window.NSO_MICROSCOPE.hidden()), []);
-  // G-scope opens in orbit: a plain click on a piece, nothing armed, is a
-  // look and nothing else. A box is something you ask for.
-  check('G-scope opened in orbit, nothing armed', await page.evaluate(() => [window.NSO_MICROSCOPE.mode(),
-    document.getElementById('ms-mode-orbit').classList.contains('active'),
-    document.getElementById('ms-mode-select').classList.contains('active')]), ['orbit', true, false]);
+  check('a mesh has no line types: the Features list has no rows, and says so',
+    await page.evaluate(() => [document.querySelectorAll('#ms-legend .ms-legend-item').length,
+      /Not sliced/.test(document.getElementById('ms-legend').textContent)]), [0, true]);
+  // G-scope opens in Piece: a plain click on a piece, nothing armed, takes the piece (isolated)
+  // and drops no box. A box is something you ask for - Region mode.
+  check('G-scope opened in Piece mode, nothing armed', await page.evaluate(() => [window.NSO_MICROSCOPE.mode(),
+    document.getElementById('ms-mode-piece').classList.contains('active'),
+    document.getElementById('ms-mode-select').classList.contains('active')]), ['piece', true, false]);
   await clickPiece(page, 'mushroom');
-  check('a real click on a piece with nothing armed drops no box, selects nothing',
-    await page.evaluate(() => [window.NSO_MICROSCOPE.boxes().length, window.NSO_MICROSCOPE.selection().length]), [boxes0, 0]);
+  check('a real click on a piece in Piece mode drops no box; it takes that piece and isolates it',
+    await page.evaluate(() => [window.NSO_MICROSCOPE.boxes().length, window.NSO_MICROSCOPE.selection().map((o) => o.name),
+      window.NSO_MICROSCOPE.isIsolated()]),
+    [boxes0, [await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().objects.find((o) => /mushroom/.test(o.name)).name)], true]);
+  // whole again and the selection emptied: a press on the SELECTION takes the selection, so a
+  // box would not drop while the piece is still the selection
+  await page.click('#ms-btn-back');
+  await page.click('#ms-btn-clear');
   await page.click('#ms-mode-select');
   await clickPiece(page, 'mushroom');
-  check('Click to select region, then a real click on the piece: a capture box drops, as before',
+  check('Region mode, then a real click on the piece: a capture box drops, as before',
     await page.evaluate(() => window.NSO_MICROSCOPE.boxes().length), boxes0 + 1);
   check('... and catches the piece', await page.evaluate(() => window.NSO_MICROSCOPE.selection().map((o) => o.name)),
     [await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().objects.find((o) => /mushroom/.test(o.name)).name)]);
+  await page.click('#ms-btn-back');
   await page.click('#ms-btn-clear');
   await page.click('#ms-cam-normal');
   await frames(page);

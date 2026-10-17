@@ -204,6 +204,27 @@ async function drag(page, from, to, button = 'left') {
   await frames(page, 3);
 }
 
+/**
+ * A pixel of BARE plate in the G-scope canvas: nothing drawn under it that a press would take
+ * (the engine's own answer, pressTargetAt), and the canvas itself on top (no card, no readout).
+ * A left press on the part is the gesture now (click isolates, drag pulls onto TAKE); orbiting
+ * starts on bare plate. Rows scan from `y0` to `y1` (fractions of the canvas height), columns
+ * from `x0` to `x1`.
+ */
+async function bareAt(page, x0, x1, y0, y1) {
+  const at = await page.evaluate(([a, b, c, d]) => {
+    const M = window.NSO_MICROSCOPE, cv = M.getView().renderer.domElement, r = cv.getBoundingClientRect();
+    const n = 24, sy = (d - c) / n, sx = (b - a) / n;
+    for (let i = 0; i <= n; i++) for (let j = 0; j <= n; j++) {
+      const x = r.left + (a + sx * j) * r.width, y = r.top + (c + sy * i) * r.height;
+      if (document.elementFromPoint(x, y) === cv && !M.pressTargetAt(x, y)) return [x, y];
+    }
+    return null;
+  }, [x0, x1, y0, y1]);
+  if (!at) throw new Error(`no bare plate in x ${x0}-${x1}, y ${y0}-${y1} of the canvas`);
+  return at;
+}
+
 /** Wait out OrbitControls' damping, so a reading is where the drag landed. */
 async function settle(page) {
   let last = null;
@@ -262,7 +283,7 @@ async function main() {
   console.log(`       opening distance ${openDist.toFixed(2)} mm; frameBox's far plane ${oldFar.toFixed(0)} mm`);
 
   // Orbit mode: the wheel and drags go to the camera, never to a capture box.
-  await page.click('#ms-mode-orbit');
+  await page.click('#ms-mode-piece');
 
   // In, checking the frustum all the way.
   let z = await wheelUntil(page, centre, -300, (c) => c.d < 0.002);
@@ -323,28 +344,37 @@ async function main() {
   // OrbitControls turns 2*pi per canvas HEIGHT of horizontal drag.
   const a0 = (await settle(page)).azimuth;
   const H = rect[3];
-  // The drag starts clear of the left wall's boxes (the shell's column and readouts are over the canvas now).
-  const y = rect[1] + H * 0.5, x0 = rect[0] + rect[2] * 0.3;
-  await drag(page, [x0, y], [x0 + H / 2, y]);
+  // The drag starts on BARE plate (a press on the part is the isolate / pull gesture, not an orbit)
+  // and clear of the left wall's boxes (the shell's column and readouts are over the canvas).
+  const y = rect[1] + H * 0.5;
+  const startA = await bareAt(page, 0.3, 0.5, 0.05, 0.95);
+  await drag(page, startA, [startA[0] + H / 2, startA[1]]);
   const half = (await settle(page)).azimuth;
   const dHalf = Math.abs(Math.atan2(Math.sin(half - a0), Math.cos(half - a0)));
   console.log(`       half drag: azimuth moved ${(dHalf * 180 / Math.PI).toFixed(1)} deg`);
   check('Normal orbit: half a turn goes round to the far side (~180 deg)', Math.abs(dHalf - Math.PI) < 0.1, true);
-  await drag(page, [x0, y], [x0 + H / 2, y]);
+  const startB = await bareAt(page, 0.3, 0.5, 0.05, 0.95);
+  await drag(page, startB, [startB[0] + H / 2, startB[1]]);
   const full = (await settle(page)).azimuth;
   const dFull = Math.abs(Math.atan2(Math.sin(full - a0), Math.cos(full - a0)));
   check('Normal orbit: a second half turn comes all the way round (360 deg)', dFull < 0.1, true);
 
   // Straight down onto the top...
   const xm = rect[0] + rect[2] * 0.5;
-  await drag(page, [xm, rect[1] + H * 0.05], [xm, rect[1] + H * 0.95]);
+  // (Each drag is 0.4 of the canvas high - 0.8 pi - from bare plate; the polar angle stops at 0, so a few reach it.)
+  for (let i = 0; i < 3; i++) {
+    const st = await bareAt(page, 0.3, 0.7, 0.05, 0.5);
+    await drag(page, st, [st[0], st[1] + H * 0.4]);
+  }
   const top = await settle(page);
   console.log(`       polar after dragging down: ${(top.polar * 180 / Math.PI).toFixed(2)} deg`);
   check('Normal orbit: all the way over the top (polar ~0, a view straight down)', top.polar < 0.01, true);
   await shot(page, 'nc-03-normal-orbit-top.png', 'Normal, orbited to straight down');
   // ...and straight up from under the bed.
-  await drag(page, [xm, rect[1] + H * 0.95], [xm, rect[1] + H * 0.05]);
-  await drag(page, [xm, rect[1] + H * 0.95], [xm, rect[1] + H * 0.05]);
+  for (let i = 0; i < 4; i++) {
+    const st = await bareAt(page, 0.3, 0.7, 0.95, 0.5);
+    await drag(page, st, [st[0], st[1] - H * 0.4]);
+  }
   const bottom = await settle(page);
   console.log(`       polar after dragging up: ${(bottom.polar * 180 / Math.PI).toFixed(2)} deg`);
   check('Normal orbit: all the way under (polar ~180, a view straight up)', bottom.polar > Math.PI - 0.01, true);
@@ -456,7 +486,7 @@ async function main() {
   await shot(page, 'nc-06-isolated-normal.png', 'Isolated in Normal: the selection alone, as-is');
 
   // Full zoom and pan while isolated in Normal.
-  await page.click('#ms-mode-orbit');
+  await page.click('#ms-mode-piece');
   await drag(page, [xm, y], [xm + 120, y + 60], 'right');
   const i2 = await settle(page);
   check('isolated, Normal: a right-drag pans', !near(i2.target, i1.target, 1e-3), true);

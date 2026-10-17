@@ -153,7 +153,7 @@ async function main() {
   await page.setInputFiles('#file-input', join(ROOT, SLICE));
   await page.waitForFunction(() => window.NSO_MICROSCOPE.isOpen() &&
     (window.NSO_MICROSCOPE.getDoc() || {}).kind === 'toolpath', null, { timeout: 30000 });
-  await page.click('#ms-mode-orbit');
+  await page.click('#ms-mode-piece');
   await page.evaluate(install);
 
   const N = page.evaluate.bind(page);
@@ -399,7 +399,13 @@ async function main() {
     await N(([t, dd, w]) => window.__gz.view(t, dd, w), [T0, D0, DIR0]);
     const b0 = await settle();
     const cdp = await context.newCDPSession(page);
-    const pts = (s) => [{ x: centre[0] - s, y: centre[1], id: 1 }, { x: centre[0] + s, y: centre[1], id: 2 }];
+    // On BARE plate: a press on the part is the gesture (click isolates, drag pulls), not an
+    // orbit, so a finger that lands on the part is taken by it. Along the bed's near edge nothing is drawn.
+    const pinchY = r[1] + r[3] * 0.95;
+    const pts = (s) => [{ x: centre[0] - s, y: pinchY, id: 1 }, { x: centre[0] + s, y: pinchY, id: 2 }];
+    const bare = await N(([a, b]) => [window.__gz.under(a[0], a[1]), window.__gz.under(b[0], b[1])],
+      [[centre[0] - 60, pinchY], [centre[0] + 60, pinchY]]);
+    check('the two fingers land on bare plate (nothing drawn under either)', bare.map((u) => u && u.kind), ['bed', 'bed']);
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(60) });
     for (let s = 70; s <= 200; s += 10) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(s) });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
@@ -443,7 +449,7 @@ async function main() {
     window.NSO_MICROSCOPE.openObjects('zoom box', [{ name: 'box', positions: new Float32Array(p) }]);
   });
   await page.waitForFunction(() => (window.NSO_MICROSCOPE.getDoc() || {}).kind === 'mesh');
-  await page.click('#ms-mode-orbit');
+  await page.click('#ms-mode-piece');
   await page.evaluate(install);
   await frames(3);
   {

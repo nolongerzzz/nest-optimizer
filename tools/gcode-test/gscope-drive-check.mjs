@@ -20,7 +20,7 @@
  *   3  LINE vs FEATURE ISOLATION. A real mouse click on a line picks THAT
  *      move and nothing else; its isolated solid and its exported STL are
  *      extrudeFlatLine's prism of that move, triangle for triangle. The
- *      legend's "only" + Select shown takes exactly one feature's moves, and
+ *      Features-list row click (or the Display checks + Select shown) takes exactly one feature's moves, and
  *      with the slider, exactly that feature inside the Z band.
  *   4  THE LAYER-RANGE SLIDER. Real drags on both handles; one layer (exactly
  *      the moves NSOGcodeLines.movesAtZ finds), a chunk (the window moved
@@ -469,6 +469,9 @@ async function main() {
   const LAYER = 10;
   await page.evaluate((L) => { const M = window.NSO_MICROSCOPE; M.setZRange(L, L); M.soloGroup('Outer wall'); M.flushView(); }, LAYER);
   await page.click('#ms-mode-line');
+  // soloGroup selected the layer's Outer wall; a press on the SELECTION takes the selection
+  // (pressTarget), not one line - so empty it first, as a user who wants one line would.
+  await page.evaluate(() => window.NSO_MICROSCOPE.setSelectionMoves([]));
   const aim = await page.evaluate(({ L, proj }) => {
     const project = new Function('return ' + proj)();
     const M = window.NSO_MICROSCOPE, d = M.getDoc(), v = M.getView();
@@ -492,6 +495,7 @@ async function main() {
   });
   check('a real click on a line picks exactly that move', picked.sel, [aim.idx]);
   check('as a line selection', picked.by, 'line');
+  check('and the click isolated it (a click isolates what it takes)', await page.evaluate(() => window.NSO_MICROSCOPE.isIsolated()), true);
   check('and the sidebar names it', new RegExp('Move ' + (aim.idx + 1) + ' - Outer wall').test(picked.info), true);
   await shot(page, '06-line-picked.png', 'one line picked and highlighted');
 
@@ -581,7 +585,7 @@ async function main() {
   await page.click('#ms-zr-all');
   const inner = page.locator('#ms-legend .ms-legend-item[data-group="Inner wall"]');
   await inner.hover();
-  await inner.click();
+  await inner.click();               // Feature mode's click: that line type, isolated
   const soloed = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, d = M.getDoc(), sel = M.selection();
     return { n: sel.length, want: d.parsed.moves.filter((m) => m.feature === 'Inner wall').length,
@@ -590,15 +594,24 @@ async function main() {
   });
   check('a click on the Inner wall row alone selects every Inner wall move, no Select shown needed',
     [soloed.n, soloed.onlyInner, soloed.exportShown], [soloed.want, true, true]);
-  // Select shown reads the identical "what is shown" - pressing it after
-  // "only" is a no-op on the selection, not a second, required step.
+  check('and it is a feature selection, isolated', await page.evaluate(() =>
+    [window.NSO_MICROSCOPE.selectionSource(), window.NSO_MICROSCOPE.isIsolated()]), ['feature', true]);
+  // Clicking the row again makes it whole (the selection stays). Then the view
+  // filter, by the Display checks: every other line type off. Select shown reads
+  // "what is shown" - the identical set - not a second, required step.
+  await inner.click();
+  check('the row again: whole again, still selected', await page.evaluate(() =>
+    [window.NSO_MICROSCOPE.isIsolated(), window.NSO_MICROSCOPE.selection().length]), [false, soloed.want]);
+  for (const g of await page.evaluate(() => window.NSO_MICROSCOPE.groups())) {
+    if (g !== 'Inner wall') await page.locator(`#ms-legend .ms-legend-item[data-group="${g}"] .ms-legend-display`).uncheck();
+  }
   await page.click('#ms-btn-select-visible');
   const feat = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, d = M.getDoc(), sel = M.selection();
     return { n: sel.length, want: d.parsed.moves.filter((m) => m.feature === 'Inner wall').length,
       onlyInner: sel.every((s) => s.feature === 'Inner wall'), by: M.selectionSource() };
   });
-  check('row click + Select shown takes every Inner wall move and nothing else',
+  check('Display checks (only Inner wall on) + Select shown takes every Inner wall move and nothing else',
     [feat.n, feat.onlyInner, feat.by], [feat.want, true, 'visible']);
   await shot(page, '09-feature-solo.png', 'one feature alone');
   const featBand = await page.evaluate(() => {
