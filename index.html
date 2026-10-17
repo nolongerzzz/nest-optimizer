@@ -959,7 +959,7 @@
           <!-- SUBTRACT: what takes material away - Subtract, Extract bit, Carve (from
                Sculpt), Hollow (from Shape), and Lift, on the plate (app-lift-plate.js). -->
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-bit">
-            <summary class="vp-bar-btn" title="Subtract B from A, Extract bit, Carve, Hollow, Lift">Subtract</summary>
+            <summary class="vp-bar-btn" title="Subtract B from A, Extract bit, Carve, Hollow, Lift, Split to parts">Subtract</summary>
             <div class="vp-menu-body vp-finish">
             <div class="vp-row vp-row-full">
               <button id="btn-subtract" class="btn btn-secondary" type="button">Subtract B from A</button>
@@ -1021,6 +1021,18 @@
               </div>
               <p id="lift-readout" class="carve-readout">&mdash;</p>
             </div>
+            <!-- SPLIT TO PARTS (app-split-parts.js, nso_split_parts.js): a piece made of
+                 several shells - the print-in-place hinge after Lift, any imported
+                 multi-body STL - becomes one piece per part, each where it stood.
+                 A part is an outer shell plus the cavity shells inside it. The count
+                 beside the button is read when the piece is selected, before the
+                 button is pressed; a one-part piece is refused with the reason. -->
+            <div class="vp-row vp-row-lift" style="grid-template-columns: 1fr auto;">
+              <button id="btn-split-parts" class="btn btn-secondary btn-lift" type="button" disabled
+                      title="Split the selected piece into one piece per part, each in place at the same pose, named '&lt;name&gt; part 1..n'. A part is an outer shell plus the cavity shells inside it (a hollow stays with its outer); shells that only touch are separate parts. The count beside the button is read when you select the piece. A piece of one part is refused, with the reason. One Undo puts the original back.">Split to parts</button>
+              <span id="split-count" class="lift-count">&mdash;</span>
+            </div>
+            <div class="vp-row vp-row-full"><p id="split-readout" class="carve-readout">Select a piece to see how many parts it is.</p></div>
             </div>
           </details>
           <details class="vp-menu vp-shell-menu vp-col-menu vp-group-start" id="menu-shape" data-sec="shape">
@@ -1868,6 +1880,8 @@
   <script src="nso_lift_curved.js?v=lift3"></script>
   <script src="nso_lift_auto.js?v=liftassembly1"></script>
   <script src="app-lift-plate.js?v=liftgrab1"></script>
+  <script src="nso_split_parts.js?v=split1"></script>
+  <script src="app-split-parts.js?v=split1"></script>
   <script src="app-gscope-lift.js?v=liftplate2"></script>
 
 
