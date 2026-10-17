@@ -21,6 +21,11 @@
         vp-col-menu) sits inside that column's .vp-menu-body. A button
         left between the body and </details> renders loose under the
         summary, outside the card (Patch did, under ADD).
+     5. index.html: no column card is a gate. A column card (.vp-col-menu) whose
+        body, outside the panel its one button points at (aria-controls), holds
+        nothing but that button has only a toggle in it: the column button
+        should open the real card itself. Connect was one (a "Connect" button
+        that opened #connect-panel); the card is the panel now.
    Each gate is run on a known-bad sample first, so a checker that has gone
    blind fails here instead of passing. */
 
@@ -75,6 +80,55 @@ function repeatedSteps(steps) {
   return reps;
 }
 
+/* The column cards whose body is one button that only toggles another panel.
+   A tiny tag walk, enough for this page: comments and scripts are blanked, the
+   elements form a tree, and for each <details class="... vp-col-menu ..."> the
+   controls in its .vp-menu-body (button, input, select, textarea, a) are
+   split into those inside a panel some button names with aria-controls and
+   the rest. A card is a gate when the rest is exactly one button and that
+   button names a panel inside the card. Returns { cards, gates }: how many
+   column cards were seen (so a walk gone blind fails) and the gate ids. */
+function columnCardGates(html) {
+  const live = html.replace(/<!--[\s\S]*?-->/g, '').replace(/<script\b[\s\S]*?<\/script>/gi, '');
+  const VOID = new Set(['input', 'br', 'hr', 'img', 'meta', 'link', 'source', 'wbr']);
+  const root = { tag: '#root', attrs: {}, kids: [], parent: null };
+  let cur = root;
+  const tagRe = /<(\/?)([a-zA-Z][\w-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+  let m;
+  while ((m = tagRe.exec(live))) {
+    const tag = m[2].toLowerCase();
+    if (m[1]) {
+      let n = cur;
+      while (n && n.tag !== tag) n = n.parent;
+      if (n && n.parent) cur = n.parent;
+      continue;
+    }
+    const attrs = {};
+    m[3].replace(/([\w:-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g,
+      (all, k, a, b, c) => { attrs[k.toLowerCase()] = a !== undefined ? a : b !== undefined ? b : c !== undefined ? c : ''; });
+    const node = { tag, attrs, kids: [], parent: cur };
+    cur.kids.push(node);
+    if (!VOID.has(tag) && !/\/\s*$/.test(m[3])) cur = node;
+  }
+  const all = (n, out = []) => { n.kids.forEach((k) => { out.push(k); all(k, out); }); return out; };
+  const hasClass = (n, c) => (n.attrs.class || '').split(/\s+/).includes(c);
+  const inside = (n, anc) => { for (let p = n; p; p = p.parent) if (p === anc) return true; return false; };
+  const CONTROL = new Set(['button', 'input', 'select', 'textarea', 'a']);
+  const cards = all(root).filter((n) => n.tag === 'details' && hasClass(n, 'vp-col-menu'));
+  const gates = [];
+  for (const card of cards) {
+    const body = card.kids.find((k) => hasClass(k, 'vp-menu-body'));
+    if (!body) continue;
+    const els = all(body);
+    const panels = els.filter((n) => n.attrs.id)
+      .filter((n) => els.some((b) => b.tag === 'button' && b.attrs['aria-controls'] === n.attrs.id));
+    const rest = els.filter((n) => CONTROL.has(n.tag) && !panels.some((p) => inside(n, p)));
+    if (rest.length === 1 && rest[0].tag === 'button' && rest[0].attrs['aria-controls'] &&
+        panels.some((p) => p.attrs.id === rest[0].attrs['aria-controls'])) gates.push(card.attrs.id || '(no id)');
+  }
+  return { cards: cards.length, gates };
+}
+
 // --- the checkers themselves, on known-bad and known-good samples ---------
 console.log('checker self-test');
 {
@@ -98,6 +152,16 @@ console.log('checker self-test');
     duplicateTargets('<script src="a.js?v=1"></script>\n<script src="b.js?v=1"></script>').length === 0);
   const reps = repeatedSteps(['a', 'b', 'a', 'c', 'b']);
   check('a repeated test step is caught', reps.length === 2 && reps[0].step === 'a' && reps[0].again === 2);
+  const gateCard = '<details class="vp-menu vp-col-menu" id="menu-x"><summary>X</summary>' +
+    '<div class="vp-menu-body"><div class="vp-row"><button id="btn-x" aria-controls="x-panel" aria-expanded="false">X</button></div>' +
+    '<div id="x-panel" hidden><input id="a"><button id="go">Set</button></div></div></details>';
+  const realCard = '<details class="vp-menu vp-col-menu" id="menu-y"><summary>Y</summary>' +
+    '<div class="vp-menu-body"><div id="y-panel"><input id="a"><button id="go">Set</button></div></div></details>';
+  const twoButtons = gateCard.replace('id="menu-x"', 'id="menu-z"').replace('<div id="x-panel"', '<button id="other">Other</button><div id="x-panel"');
+  const g = columnCardGates(gateCard + realCard + twoButtons);
+  check('a column card holding one button that opens another panel is caught', g.gates.length === 1 && g.gates[0] === 'menu-x', g.gates.join(','));
+  check('the gate walk sees every column card in the sample', g.cards === 3, String(g.cards));
+  check('a card that is its own panel, and one with a second control, are not gates', g.gates.length === 1 && !g.gates.includes('menu-y') && !g.gates.includes('menu-z'));
 }
 
 /* Buttons that sit in a column <details> but outside its .vp-menu-body.
@@ -165,6 +229,15 @@ console.log('index.html');
   check('every button in a column <details> is inside its .vp-menu-body', loose.length === 0,
     loose.length ? loose.length + ' loose' : '');
   for (const l of loose) console.log('       index.html:' + l.line + '  #' + l.id + ' is loose in #' + l.column);
+}
+
+// --- column cards ----------------------------------------------------------
+console.log('column cards');
+{
+  const html = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+  const g = columnCardGates(html);
+  check('found the column cards', g.cards >= 10, g.cards + ' cards');
+  check('no column card is a single button that only toggles another panel', g.gates.length === 0, g.gates.join(', '));
 }
 
 // --- package.json ----------------------------------------------------------

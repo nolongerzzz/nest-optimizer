@@ -30,7 +30,7 @@ const MENUS = ROW.filter(id => id.startsWith('menu-')).concat(COL.filter(id => i
    A-B-C under Join; Plate and Pieces in the pinned Plate & pieces panel;
    Pack's Optimize a slab of its own, under Export). */
 const HOME = {
-  'menu-joins': ['btn-join-start', 'join-slot-a', 'join-slot-b', 'join-slot-c',
+  'menu-joins': ['join-slot-a', 'join-slot-b', 'join-slot-c',
                 'join-name-a', 'join-name-b', 'join-name-c', 'btn-join', 'btn-join-clear',
                 'triple-join', 'triple-mode', 'triple-gap-ab', 'triple-gap-ab-value',
                 'triple-gap-bc', 'triple-gap-bc-value', 'btn-join-triple'],
@@ -273,13 +273,14 @@ withApp(async (page, logs) => {
       const st = await page.evaluate((id) => {
         const body = document.querySelector('#' + id + ' > .vp-menu-body').getBoundingClientRect();
         const cs = getComputedStyle(document.querySelector('#' + id + ' > .vp-menu-body'));
-        return { n: document.querySelectorAll('.vp-menu[open]').length, open: document.getElementById(id).open,
+        // A member open inside its drop-down (Join's first card, shown with its column) is part of that panel.
+        return { n: [...document.querySelectorAll('.vp-menu[open]')].filter(d => !d.parentElement.closest('.vp-menu[open]')).length, open: document.getElementById(id).open,
                  x: body.left, y: body.top, rad: cs.borderTopLeftRadius, fs: cs.fontSize, tt: cs.textTransform };
       }, id);
       if (st.n !== 1 || !st.open) counts.push(id + ' n=' + st.n);
       spots.push(Object.assign({ id }, st));
     }
-    check('opening each button in turn leaves exactly one .vp-menu[open]', counts.length === 0,
+    check('opening each button in turn leaves exactly one .vp-menu[open] (not counting a member inside it)', counts.length === 0,
       counts.join('; ') || MENUS.length + '/' + MENUS.length);
     const colRight = await page.evaluate(() => document.querySelector('#menu-scale > summary').getBoundingClientRect().right);
     const rowBottom = await page.evaluate(() => document.querySelector('#menu-import > summary').getBoundingClientRect().bottom);

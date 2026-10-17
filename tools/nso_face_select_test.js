@@ -45,6 +45,7 @@ const { execFileSync } = require('child_process');
 const NSO_Skin = require('../nso_skin.js');
 const { writeSTL } = require('./nso_stl_io.js');
 const { withApp, loadSTL, openFinishMenu, ROOT } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 let fails = 0;
@@ -256,7 +257,7 @@ withApp(async (page, logs) => {
   console.log('\n=== 2a. A + B, Join, B beside A on +X: Skin with NO target auto-picks the face that looks at B ===');
   const idA = await loadSTL(page, fx('box_hull_80x40x20-2.stl'));
   const idB = await loadSTL(page, fx('box-20mm.stl'));
-  await page.click('#btn-join-start');
+  await openJoin(page);
   await page.click('#join-slot-a');
   await page.click(`.model-item[data-edit-id="${idA}"]`);
   await page.click('#join-slot-b');

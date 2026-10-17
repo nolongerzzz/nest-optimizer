@@ -29,6 +29,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { withApp, loadSTL, openFinishMenu, ROOT } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 let fails = 0;
@@ -145,6 +146,9 @@ async function exportPlate(page, format, label) {
     page.waitForEvent('download', { timeout: 30000 }),
     page.click('#btn-export-stl')
   ]);
+  // Seat opens first: it takes over from Join, which hands it A and B. Shutting
+  // the Join card on its own (the fold below) is Cancel Join and ends the session.
+  await page.click('#menu-seat > summary');
   // folded back: this check clicks the canvas, and an open panel
   // hangs over the top of the viewport where some of those land.
   await page.evaluate(() => document.querySelectorAll('.viewport-overlay-topbar details').forEach(d => { d.open = false; }));
@@ -264,7 +268,7 @@ withApp(async (page, logs) => {
   await page.click('#btn-lock-pos');          // unlock B to stage it (the lock refuses the move, as it should)
   b = await pose(page, idB);
   check('B unlocked for staging', !b.locked);
-  await page.click('#btn-join-start');
+  await openJoin(page);
   await page.click('#join-slot-a');
   await selectRow(page, idA);
   await page.click('#join-slot-b');
@@ -277,6 +281,9 @@ withApp(async (page, logs) => {
      and the arrow keys are the vertical control now. liftSelected() is
      untouched, so the 22 mm this wanted is one call. */
   await page.evaluate(() => { for (let i = 0; i < 11; i++) liftSelected(1); });
+  // Seat opens first: it takes over from Join, which hands it A and B. Shutting
+  // the Join card on its own (the fold below) is Cancel Join and ends the session.
+  await page.click('#menu-seat > summary');
   // folded back: this check clicks the canvas, and an open panel
   // hangs over the top of the viewport where some of those land.
   await page.evaluate(() => document.querySelectorAll('.viewport-overlay-topbar details').forEach(d => { d.open = false; }));

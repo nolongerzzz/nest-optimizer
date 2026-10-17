@@ -772,7 +772,13 @@ async function partG(page) {
         if ((b.getAttribute('aria-pressed') === 'true') !== on) b.click(); },
       overlay: () => state.modelGroup.children.filter(o => o.isMesh && o.renderOrder === 40),
       paintFindings: from => NSOWatch.events().filter(e => e.seq > from && e.kind === 'phantom' && /paint/.test(e.msg)).map(e => e.msg),
-      mark: () => NSOWatch.events().length
+      mark: () => NSOWatch.events().length,
+      // Start Join is the Join column button now: a fresh session from it. A card
+      // already open is shut first (Cancel Join) and the observer given its turn,
+      // so the press is always a start, never a toggle off.
+      joinStart: async () => { const d = document.getElementById('menu-joins');
+        if (d.open) { d.open = false; await Promise.resolve(); }
+        d.querySelector(':scope > summary').click(); await Promise.resolve(); }
     };
   });
   await page.evaluate(([a, b]) => { __G.moveTo(b, 55, 0); selectPlaced(state.placed.findIndex(p => p.sourceId === b)); }, [idA, idB]);
@@ -800,8 +806,8 @@ async function partG(page) {
 
   // 2. Join: slot picks switch the active piece; 1b. Seat (support) moves painted B
   m = await page.evaluate(() => __G.mark());
-  await page.evaluate(([a, b]) => { __G.moveTo(b, 10, 0);
-    document.getElementById('btn-join-start').click();
+  await page.evaluate(async ([a, b]) => { __G.moveTo(b, 10, 0);
+    await __G.joinStart();
     document.getElementById('join-slot-a').click(); document.querySelector('.model-item[data-edit-id="' + a + '"]').click();
     document.getElementById('join-slot-b').click(); document.querySelector('.model-item[data-edit-id="' + b + '"]').click(); }, [idA, idB]);
   await page.waitForTimeout(2300);
@@ -821,7 +827,7 @@ async function partG(page) {
 
   // 3. paint click on A while B is the selected piece: logged against A
   await page.evaluate(() => document.getElementById('btn-undo').click());
-  await page.evaluate(b => { document.getElementById('btn-join-start').click(); __G.moveTo(b, 55, 0); }, idB);
+  await page.evaluate(async b => { await __G.joinStart(); __G.moveTo(b, 55, 0); }, idB);
   m = await page.evaluate(() => __G.mark());
   await page.evaluate(() => __G.arm(true));
   [x, y] = await page.evaluate(a => __G.top(a), idA);
@@ -840,8 +846,8 @@ async function partG(page) {
      'the status names the piece painted and says why its yellow is not drawn - no "0 tris yellow"', attr.status);
 
   // 4. Clear paint inside a Join names the piece it cleared
-  await page.evaluate(([a, b]) => {
-    document.getElementById('btn-join-start').click();
+  await page.evaluate(async ([a, b]) => {
+    await __G.joinStart();
     document.getElementById('join-slot-a').click(); document.querySelector('.model-item[data-edit-id="' + a + '"]').click();
     document.getElementById('join-slot-b').click(); document.querySelector('.model-item[data-edit-id="' + b + '"]').click();
     selectPlaced(state.placed.findIndex(p => p.sourceId === b));

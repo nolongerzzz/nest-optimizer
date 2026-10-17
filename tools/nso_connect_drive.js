@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /* Connect, driven through the real app: real index.html, real script tags, the
-   real Connect button, real mouse clicks on the canvas, real Set and real Undo.
+   real Connect column button, real mouse clicks on the canvas, real Set and real Undo.
      node tools/nso_connect_drive.js          exit 0 = every gate held
      npm run connect:drive
    Screenshots go to tools/connect-out/ (git-ignored, never committed).
 
    The geometry is proven headless in tools/nso_connect_test.js. What this file
    proves is the card on it:
-     1. the drop-down sits between Crop and Join; its button is wired, its card shut
+     1. the drop-down sits between Crop and Join; it is wired, its card shut, and
+        there is no gate button inside it (#btn-connect is gone)
      2. two clicks, not a drag: hover lights the target; a click on a sphere is
         anchor A and it STAYS marked; a line from A follows the pointer; the
         camera is orbited by a real mouse drag, zoomed by the wheel, and turned
@@ -21,7 +22,10 @@
      5. clearing: clicking A again, a click on nothing, Escape; a click on a new
         place with both set replaces B (an orbit drag does not clear)
      6. a third piece in the way is refused in words, no ghost, Set off
-     7. Cancel drops the picks and keeps the card; again, closes it */
+     7. Cancel drops the picks and keeps the card; again, closes it
+     8. no gate: the column button opens the card armed (picks live); the column
+        button again, Escape with nothing picked, and another column button each
+        shut it and put the picks, ghost and overlay away */
 
 const fs = require('fs');
 const os = require('os');
@@ -161,15 +165,15 @@ withApp(async (page, logs) => {
   const ui = await page.evaluate(() => {
     const m = document.getElementById('menu-connect'), crop = document.getElementById('menu-crop'), join = document.getElementById('menu-joins');
     const kids = [...m.parentElement.children];
-    const b = document.getElementById('btn-connect');
     return { menu: !!m, between: kids.indexOf(m) === kids.indexOf(crop) + 2 && kids.indexOf(m) + 2 === kids.indexOf(join) ||
                                  (kids.filter(k => k.tagName === 'DETAILS').indexOf(m) === kids.filter(k => k.tagName === 'DETAILS').indexOf(crop) + 1 &&
                                   kids.filter(k => k.tagName === 'DETAILS').indexOf(join) === kids.filter(k => k.tagName === 'DETAILS').indexOf(m) + 1),
-             title: m.querySelector('summary').textContent.trim(), wired: b && b.dataset.nsoWired === '1', hidden: document.getElementById('connect-panel').hidden,
+             title: m.querySelector('summary').textContent.trim(), wired: m.dataset.nsoWired === '1', noGate: !document.getElementById('btn-connect') && !m.querySelector('.vp-menu-body > button'), hidden: document.getElementById('connect-panel').hidden,
              sameLook: document.getElementById('connect-panel').className === document.getElementById('bridge-panel').className };
   });
   check('#menu-connect is a column drop-down named Connect, right after Crop and right before Join', ui.menu && ui.between && ui.title === 'Connect', ui.title);
-  check('...its button is wired, its card shut, and the card has Bridge\'s look', ui.wired && ui.hidden && ui.sameLook);
+  check('...it is wired, its card shut, and the card has Bridge\'s look', ui.wired && ui.hidden && ui.sameLook);
+  check('...no gate button inside it: #btn-connect is gone and the card is the drop-down\'s body', ui.noGate);
 
   console.log('\n=== 2. two clicks, not a drag: A stays marked through an orbit ===');
   const ids = [];
@@ -178,7 +182,7 @@ withApp(async (page, logs) => {
     const b = ids.map(id => window.__cn.bounds(window.__cn.up(id)));
     window.__cn.nudge(ids[1], (b[0].lo[0] + 34) - b[1].lo[0], -(b[0].lo[1] - b[1].lo[1]));
   }, ids);
-  await page.click('#btn-connect');
+  await page.click('#menu-connect > summary');
   await page.waitForFunction(() => state.connect && state.connect.open, null, { timeout: 5000 });
   let C = await P(page);
   check('Connect opens its card; the readout says what to do', C.open && !C.hidden && /Click anchor A on a piece, orbit as you like, then click anchor B/.test(C.readout), C.readout);
@@ -419,6 +423,44 @@ withApp(async (page, logs) => {
   await page.click('#btn-connect-cancel');
   C = await P(page);
   check('...pressed again with nothing picked, it closes the card', !C.open && C.hidden && C.overlay.length === 0);
+  check('...and the column drop-down is shut with it', await page.evaluate(() => !document.getElementById('menu-connect').open));
+
+  console.log('\n=== 8. no gate: the column button opens it armed; three ways shut ===');
+  const armed = () => page.evaluate(() => ({ open: !!state.connect.open, menu: document.getElementById('menu-connect').open,
+    hidden: document.getElementById('connect-panel').hidden, vis: document.getElementById('connect-panel').getBoundingClientRect().height > 0,
+    picks: !!(state.connect.a || state.connect.b), overlay: !!(state.connect.overlay && state.connect.overlay.parent),
+    ghost: !!(state.connect.ghost && state.connect.ghost.parent), line: !!(state.connect.line && state.connect.line.parent) }));
+  await page.click('#menu-connect > summary');
+  let A = await armed();
+  check('one click on the column button: the real card is open and visible, the picks are live', A.menu && A.open && !A.hidden && A.vis, JSON.stringify(A));
+  const pk = await page.evaluate(() => { const r = state.renderer.domElement.getBoundingClientRect();
+    for (let y = r.bottom - 30; y > r.top + 100; y -= 20) for (let x = r.right - 40; x > r.left + 400; x -= 20) {
+      if (document.elementFromPoint(x, y) !== state.renderer.domElement) continue;
+      const t = NSO_bridgeTargetAt({ clientX: x, clientY: y }); if (t) return { x, y }; }
+    return null; });
+  check('...a piece is there to pick (the spheres, back on the plate view)', !!pk);
+  if (pk) {
+    await page.mouse.click(pk.x, pk.y);
+    A = await armed();
+    check('...a click on a piece sets anchor A with no other button pressed first', A.picks && A.overlay, JSON.stringify(A));
+  }
+  await page.click('#menu-connect > summary');
+  A = await armed();
+  check('the column button again shuts it: card, picks, overlay and line gone', !A.menu && !A.open && A.hidden && !A.picks && !A.overlay && !A.line && !A.ghost, JSON.stringify(A));
+  await page.click('#menu-connect > summary');
+  if (pk) { await page.mouse.click(pk.x, pk.y); }
+  await page.keyboard.press('Escape');
+  A = await armed();
+  check('Escape with a pick clears it and keeps the card (as before)', A.open && A.menu && !A.picks, JSON.stringify(A));
+  await page.keyboard.press('Escape');
+  A = await armed();
+  check('Escape again, with nothing picked, shuts the card', !A.open && !A.menu && A.hidden, JSON.stringify(A));
+  await page.click('#menu-connect > summary');
+  if (pk) { await page.mouse.click(pk.x, pk.y); }
+  await page.click('#menu-seat > summary');
+  A = await armed();
+  check('another column button shuts it and puts the picks away', !A.open && !A.menu && A.hidden && !A.picks && !A.overlay, JSON.stringify(A));
+  await page.click('#menu-seat > summary');
 
   const errs = logs.filter(l => /\[pageerror\]|\[error\]/.test(l) && !/favicon/.test(l));
   check('no page errors', errs.length === 0, errs.slice(0, 3).join(' | '));

@@ -44,7 +44,7 @@ withApp(async (page, logs) => {
     document.querySelectorAll('.vp-menu').forEach(d => { d.open = false; });
     if (state.cutterOpen && typeof closeCutter === 'function') closeCutter(true);
   });
-  const openCount = () => page.evaluate(() => document.querySelectorAll('.vp-menu[open]').length);
+  const openCount = () => page.evaluate(() => [...document.querySelectorAll('.vp-menu[open]')].filter(d => !d.parentElement.closest('.vp-menu[open]')).length);
 
   /* ------------------------------------------------------------------ 1 */
   console.log('\n=== 1. a panel never covers the shell\'s plain buttons ===');
@@ -97,7 +97,7 @@ withApp(async (page, logs) => {
         if (!(await openMenu(id))) occluded.push(id);
         const st = await page.evaluate((id) => ({
           it: document.getElementById(id).open,
-          n: document.querySelectorAll('.vp-menu[open]').length
+          n: [...document.querySelectorAll('.vp-menu[open]')].filter(d => !d.parentElement.closest('.vp-menu[open]')).length
         }), id);
         if (!st.it || st.n !== 1) walk.push(id + ' ' + JSON.stringify(st));
       }
@@ -129,10 +129,10 @@ withApp(async (page, logs) => {
           if (!top || !top.closest('#' + b)) hidden.push(a + '->' + b);
           B.querySelector(':scope > summary').click();
           await Promise.resolve();
-          const n0 = document.querySelectorAll('.vp-menu[open]').length;
+          const n0 = [...document.querySelectorAll('.vp-menu[open]')].filter(d => !d.parentElement.closest('.vp-menu[open]')).length;
           if (n0 !== 1) early.push(a + '->' + b + ' n=' + n0);
           await tick();
-          const n = document.querySelectorAll('.vp-menu[open]').length;
+          const n = [...document.querySelectorAll('.vp-menu[open]')].filter(d => !d.parentElement.closest('.vp-menu[open]')).length;
           if (A.open || !B.open || n !== 1) bad.push(a + '->' + b + ' a=' + A.open + ' b=' + B.open + ' n=' + n);
         }
       }
@@ -199,7 +199,7 @@ withApp(async (page, logs) => {
       const st = await page.evaluate((o) => ({
         cut: document.getElementById('menu-cut').open,
         other: document.getElementById(o).open,
-        n: document.querySelectorAll('.vp-menu[open]').length,
+        n: [...document.querySelectorAll('.vp-menu[open]')].filter(d => !d.parentElement.closest('.vp-menu[open]')).length,
         cutting: !!state.cutterOpen && state.cutTool === 'cut', helper: !!state.cutHelper
       }), other);
       if (st.cut || !st.other || st.n !== 1 || st.cutting || st.helper) wrong.push(other + ' ' + JSON.stringify(st));
@@ -215,7 +215,7 @@ withApp(async (page, logs) => {
       const r = document.getElementById('btn-cut').getBoundingClientRect();
       return {
         menu: document.getElementById('menu-cut').open, cutter: !!state.cutterOpen,
-        n: document.querySelectorAll('.vp-menu[open]').length,
+        n: [...document.querySelectorAll('.vp-menu[open]')].filter(d => !d.parentElement.closest('.vp-menu[open]')).length,
         tools: document.getElementById('cutter-tools').classList.contains('is-open'),
         cutShown: r.width > 0 && r.height > 0
       };

@@ -155,7 +155,7 @@
     lastReason = '';
     var pr = pair();
     if (!pr) {
-      return refuse('Start Join, Pick A and B, then Center lock');
+      return refuse('Open JOIN, Pick A and B, then Center lock');
     }
     var mode = getRefMode();
     pr.a.mesh.updateMatrixWorld(true);
@@ -216,7 +216,7 @@
 
   function armPick() {
     if (!pair()) {
-      setStatus('Start Join, Pick A and B, then pick a target', true);
+      setStatus('Open JOIN, Pick A and B, then pick a target', true);
       return;
     }
     if (state.centerLockArmed) {

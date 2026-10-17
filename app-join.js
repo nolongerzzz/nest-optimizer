@@ -127,6 +127,44 @@ function startJoinSession() {
   updateJoinUI();
 }
 
+/* No Start Join: the Join column is the switch. Opening it starts the session
+   (startJoinSession, what the button ran) and shows the Join card, with its
+   slots, at once; shutting it with the column button again, with Escape, or by
+   the leave-tool gesture is Cancel Join (clearJoinSlots). A session already
+   live is kept as it is: Seat, Align and Center lock work on the A and B the
+   Join card holds, so opening one of THEIR columns shuts this one and leaves
+   the session standing - returning to Join finds the slots as they were. (The
+   Cancel Join button is unchanged.) A MutationObserver on `open`, for the
+   reason the one-panel rule below gives. */
+function joinWireCard() {
+  const menu = document.getElementById('menu-joins');
+  if (!menu || menu.dataset.nsoWired === '1') return;
+  menu.dataset.nsoWired = '1';
+  const anotherOpen = function () {
+    return Array.prototype.some.call(document.querySelectorAll('.vp-menu[open]'),
+      function (d) { return d !== menu && !menu.contains(d); });
+  };
+  const show = function () {
+    if (!state.joinSession) startJoinSession();
+    // The Join card shows first, unless a member (A-B-C) was opened with the column.
+    const card = document.getElementById('menu-join');
+    if (card && !menu.querySelector('.vp-sub-menu[open]')) card.open = true;
+  };
+  if (typeof MutationObserver === 'function') {
+    new MutationObserver(function () {
+      if (menu.open) show();
+      else if (!anotherOpen()) clearJoinSlots();
+    }).observe(menu, { attributes: true, attributeFilter: ['open'] });
+  }
+  window.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape' || e.defaultPrevented || !menu.open) return;
+    const tag = (e.target && e.target.tagName) || '';
+    if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return;
+    menu.open = false;
+  });
+  if (menu.open) show();
+}
+
 function armJoinSlot(slot) {
   if (!state.joinSession) startJoinSession();
   state.joinArmed = slot;
@@ -2177,7 +2215,7 @@ function centerJoinAxis(axis) {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Start Join, Pick A and B, then Center', true);
+    setStatus('Open JOIN, Pick A and B, then Center', true);
     return;
   }
   const placedA = state.placed.find(function (q) { return q && q.sourceId === idA && q.mesh; });
@@ -2218,7 +2256,7 @@ function flipPortOnPunch() {
   const bit = placedB && placedB.mesh;
   const hull = placedA && placedA.mesh;
   if (!bit || !hull) {
-    setStatus('Start Join, pick hull A and tunnel B, then Flip port', true);
+    setStatus('Open JOIN, pick hull A and tunnel B, then Flip port', true);
     return;
   }
   pushUndo(snapshotPlacedPose(state.placed.indexOf(placedB)));
@@ -2315,7 +2353,7 @@ function seatFlushBitToHull() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Start Join, A = hull, B = bit, then Seat flush', true);
+    setStatus('Open JOIN, A = hull, B = bit, then Seat flush', true);
     return;
   }
   const placedA = state.placed.find(function (p) { return p && p.sourceId === idA && p.mesh; });
@@ -2356,7 +2394,7 @@ function seatSupportBitToHull() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Start Join, A = hull, B = bit, then Seat (support)', true);
+    setStatus('Open JOIN, A = hull, B = bit, then Seat (support)', true);
     return;
   }
   const placedA = state.placed.find(function (p) { return p && p.sourceId === idA && p.mesh; });
@@ -2744,7 +2782,7 @@ async function joinSelectedModels() {
   const idA = state.editId;
   const idB = state.joinPartnerId;
   if (!state.joinSession || idA == null || idB == null || idA === idB) {
-    setStatus('Start Join, Pick A, Pick B, then Complete Join', true);
+    setStatus('Open JOIN, Pick A, Pick B, then Complete Join', true);
     return;
   }
   const modelA = state.models.find(x => x.id === idA);
@@ -3812,8 +3850,7 @@ function setupUI() {
   if (btnCap) btnCap.addEventListener('click', capSelectedOpenFaces);
   const btnJoinClear = document.getElementById('btn-join-clear');
   if (btnJoinClear) btnJoinClear.addEventListener('click', clearJoinSlots);
-  const btnJoinStart = document.getElementById('btn-join-start');
-  if (btnJoinStart) btnJoinStart.addEventListener('click', startJoinSession);
+  joinWireCard();
   const btnJoinAlign = document.getElementById('btn-join-align');
   if (btnJoinAlign) btnJoinAlign.addEventListener('click', alignJoinForSlide);
   const btnJoinCx = document.getElementById('btn-join-cx');

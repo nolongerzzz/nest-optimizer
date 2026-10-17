@@ -65,6 +65,7 @@
       very same click seats at 0.18 with it switched back on. */
 
 const { withApp, openFinishMenu } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
 const { soupMinDistance } = require('./nso_soup_distance');
 
 let fails = 0;
@@ -98,7 +99,7 @@ async function loadFromLibrary(page, file) {
 }
 const selectRow = (page, id) => page.click('.model-item[data-edit-id="' + id + '"]');
 async function joinAB(page, idA, idB) {
-  await page.click('#btn-join-start');
+  await openJoin(page);
   await page.click('#join-slot-a'); await selectRow(page, idA);
   await page.click('#join-slot-b'); await selectRow(page, idB);
   return page.evaluate(() => ({ session: state.joinSession, a: state.editId, b: state.joinPartnerId }));

@@ -33,6 +33,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
 const { writeSTL } = require('./nso_stl_io.js');
 const FX = require('./nso_lift_plate_fixtures.js');
 const AFX = require('./nso_lift_auto_fixtures.js');
@@ -218,7 +219,7 @@ withApp(async (page, logs) => {
   check('Move: it moves 5 mm across the plate', Math.abs(m6b.x - m6a.x - 5) < 1e-9 && m6b.z === m6a.z, m6a.x.toFixed(2) + ' -> ' + m6b.x.toFixed(2));
   const before6 = await plateState(page);
   const vLine = m6b.volume, vPlant = (await pieceInfo(page, plantId)).volume;
-  await page.click('#btn-join-start');
+  await openJoin(page);
   await page.click('#join-slot-a'); await selectRow(page, plantId);
   await page.click('#join-slot-b'); await selectRow(page, lineId);
   await page.evaluate(([a, b]) => {           // B laid over A, as Join's own slide would

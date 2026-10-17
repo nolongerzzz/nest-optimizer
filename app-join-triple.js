@@ -204,7 +204,7 @@
   function run() {
     var t = trio();
     if (!t) {
-      setStatus('Start Join, then pick three different pieces A, B and C', true);
+      setStatus('Open JOIN, then pick three different pieces A, B and C', true);
       return false;
     }
     var gapAB = readGap('triple-gap-ab');

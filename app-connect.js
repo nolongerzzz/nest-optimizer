@@ -3,6 +3,12 @@
 // file is the card on it, in its own drop-down in the column between Crop and
 // Join. docs/CONNECT.md.
 //
+// NO GATE: the column button IS the switch. Opening the Connect drop-down opens
+// the card and arms the anchor picks; shutting it - the column button again,
+// Escape with nothing picked, another column button, a double-click on the plate
+// - is what Cancel did with no picks: the picks, the ghost and the hover go.
+// (wireCard, at the foot of this file; the Cut and Crop cards work the same way.)
+//
 // Bridge (app-bridge.js) is the quick gap-fill: the two picks decide the shape.
 // Connect is the builder: the two anchors are only WHERE, the card decides WHAT
 // runs between them - String, Ribbon, Tube or Tapered, welded into the pieces
@@ -22,7 +28,8 @@
 //     redraws the ghost at once.
 //   - Clicking an anchor again clears it. A click on nothing clears the picks (an
 //     orbit drag does not: it has to stay put to count as a click) and so does
-//     Escape. With both set, a click on a new place replaces B.
+//     Escape (a second Escape, with none picked, shuts the card). With both
+//     set, a click on a new place replaces B.
 //   - SET commits it. Weld into A and B: the pieces leave the plate and one new
 //     piece takes their place (or the one, when both anchors are on it). Keep
 //     separate: the connector is added as a piece of its own and the pieces are
@@ -228,20 +235,18 @@ function NSO_connectClearPicks() {
 }
 
 function NSO_connectOpen() {
-  var C = NSO_connectUI(), panel = NSO_connectEl('connect-panel'), btn = NSO_connectEl('btn-connect');
+  var C = NSO_connectUI(), panel = NSO_connectEl('connect-panel');
   C.open = true; C.soups = {};
   if (panel) panel.hidden = false;
-  if (btn) { btn.setAttribute('aria-expanded', 'true'); btn.classList.add('is-on'); }
   NSO_connectClearPicks();
   NSO_connectReadout(NSO_connectReady() ? NSO_CONNECT_HINT : 'Connect needs Bridge\'s pick (nso_bridge.js, app-bridge.js) and nso_connect.js loaded.', !NSO_connectReady());
   NSO_connectTick();
 }
 
 function NSO_connectClose() {
-  var C = NSO_connectUI(), panel = NSO_connectEl('connect-panel'), btn = NSO_connectEl('btn-connect');
+  var C = NSO_connectUI(), panel = NSO_connectEl('connect-panel');
   C.open = false; C.hover = null; C.soups = {};
   if (panel) panel.hidden = true;
-  if (btn) { btn.setAttribute('aria-expanded', 'false'); btn.classList.remove('is-on'); }
   NSO_connectClearPicks();
   NSO_bridgeDispose(C.overlay); C.overlay = null;
   if (C.raf && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(C.raf);
@@ -261,11 +266,21 @@ if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('connect', {
   refresh: function () { var C = NSO_connectUI(); C.soups = {}; NSO_connectClearPicks(); }
 });
 
-// Cancel: drop the picks; with none, close the card.
+// Shut the card: the column drop-down closes and the session goes with it. The
+// drop-down's own `open` is the switch (wireCard), so this only has to
+// flip it; NSO_connectClose is called as well so the teardown has landed by
+// the time this returns, not a microtask later.
+function NSO_connectShut() {
+  var menu = NSO_connectEl('menu-connect');
+  if (menu && menu.open) menu.open = false;
+  NSO_connectClose();
+}
+
+// Cancel (and Escape): drop the picks; with none, close the card.
 function NSO_connectCancel() {
   var C = NSO_connectUI();
   if (C.a || C.b || C.plan) { NSO_connectClearPicks(); NSO_connectReadout(NSO_CONNECT_HINT, false); }
-  else NSO_connectClose();
+  else NSO_connectShut();
 }
 
 // Per frame while open: the card goes when its drop-down shuts (one panel at a
@@ -503,16 +518,27 @@ if (typeof document !== 'undefined') {
       }
     }
     function onKey(ev) {
-      var C = NSO_connectUI();
-      if (!C.open || ev.key !== 'Escape' || !(C.a || C.b)) return;
-      NSO_connectClearPicks();
-      NSO_connectReadout(NSO_CONNECT_HINT, false);
+      if (!NSO_connectUI().open || ev.key !== 'Escape') return;
+      NSO_connectCancel();
+    }
+    // The column drop-down is the switch: open arms the picks, shut puts them
+    // away. A MutationObserver on `open` rather than a 'toggle' listener, for
+    // the reason app-join.js's one-panel rule gives (it sees a programmatic
+    // `.open = true` too, and runs before the next event).
+    function wireCard(menu) {
+      if (typeof MutationObserver !== 'function') return;
+      new MutationObserver(function () {
+        var C = NSO_connectUI();
+        if (menu.open && !C.open) NSO_connectOpen();
+        else if (!menu.open && C.open) NSO_connectClose();
+      }).observe(menu, { attributes: true, attributeFilter: ['open'] });
+      if (menu.open && !NSO_connectUI().open) NSO_connectOpen();
     }
     function wire() {
-      var btn = NSO_connectEl('btn-connect');
-      if (!btn || btn.dataset.nsoWired === '1') return;
-      btn.dataset.nsoWired = '1';
-      btn.addEventListener('click', function () { if (NSO_connectUI().open) NSO_connectClose(); else NSO_connectOpen(); });
+      var menu = NSO_connectEl('menu-connect');
+      if (!menu || menu.dataset.nsoWired === '1') return;
+      menu.dataset.nsoWired = '1';
+      wireCard(menu);
       var go = NSO_connectEl('btn-connect-go'), cancel = NSO_connectEl('btn-connect-cancel');
       if (go) go.addEventListener('click', function () { NSO_connectSet(); });
       if (cancel) cancel.addEventListener('click', NSO_connectCancel);

@@ -59,6 +59,7 @@
    fetched by the library browser itself, so the test cannot load a file the
    shipped catalog does not actually offer. */
 const { withApp } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
 const LIBDIR = require('./nso_library_dir');
 
 let fails = 0;
@@ -91,7 +92,7 @@ async function loadFromLibrary(page, file) {
 }
 const selectRow = (page, id) => page.click('.model-item[data-edit-id="' + id + '"]');
 async function joinAB(page, idA, idB) {
-  await page.click('#btn-join-start');
+  await openJoin(page);
   await page.click('#join-slot-a'); await selectRow(page, idA);
   await page.click('#join-slot-b'); await selectRow(page, idB);
   return page.evaluate(() => ({ session: state.joinSession, a: state.editId, b: state.joinPartnerId }));

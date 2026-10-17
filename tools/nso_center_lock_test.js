@@ -32,6 +32,7 @@
 
 const path = require('path');
 const { withApp, loadSTL, statusOf, ROOT } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 const EPS = 1e-6;          // mm - exactness gate
@@ -123,7 +124,7 @@ async function setup(page, fileA, fileB) {
   await page.evaluate(() => {
     state.placed.forEach((p, i) => { if (p && p.mesh) p.mesh.userData.placedIndex = i; });
   });
-  await page.click('#btn-join-start');
+  await openJoin(page);
   await page.evaluate(([a, b]) => {
     state.joinArmed = 'a'; assignJoinClick(a);
     state.joinArmed = 'b'; assignJoinClick(b);
@@ -401,7 +402,7 @@ async function main(page) {
     return { ok: ok, status: document.getElementById('status').textContent };
   });
   check('run() with no pair refuses and says so',
-    noPair.ok === false && /Start Join/.test(noPair.status), noPair.status);
+    noPair.ok === false && /Open JOIN/.test(noPair.status), noPair.status);
 }
 
 withApp(async (page, logs) => {
