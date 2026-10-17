@@ -8,7 +8,8 @@ ignores. It is not a test step.
 ## 1. What it does
 
 Pick an open end by clicking it: a tube end, an open box's rim, or any flat rim
-with a hole in it. While the card is open, hovering outlines the rim under the
+with a hole in it. The opening's inner wall and the piece's outer wall pick it
+too (section 2), so the 1.5 mm rim need not be hit. While the card is open, hovering outlines the rim under the
 pointer in violet. A click picks it, outlines it in crimson, and shows the result
 as an amber ghost. **Set** builds the lid into the piece. One **Undo**
 (`closeReplace`) puts the whole piece back.
@@ -23,8 +24,11 @@ bit for bit.
 
 ## 2. Reading the rim
 
-The rim is the flat face under the click, edge-connected and in one plane
-(1e-3 mm). Its boundary loops are walked with Tube edge's walker. The outer loop
+The rim is the flat face under the click, edge-connected and in one plane. "In
+one plane" is every vertex within 1e-3 mm of it or 1e-5 × the piece's bounding
+diagonal, whichever is larger, so a float32 Cut rim (or a big piece's noise on a
+skinny rim triangle) still reads as one face. Its boundary loops are walked with
+Tube edge's walker. The outer loop
 runs counter-clockwise about the face's outward normal and the holes run
 clockwise. The hole nearest the click is the opening, and it can be any shape:
 round, rectangular, a star.
@@ -35,6 +39,23 @@ The **wall** is measured in the face's plane:
   `NSO_sectionFitCircle` fits;
 - a rectangle in a rectangle: the narrower side's margin;
 - anything else: the least distance from the opening's corners to the outer loop.
+
+**Clicking the wall.** When the clicked face has no hole in it, the pick walks
+from the clicked triangle, edge-connected, over the shell the click is on, to the
+flat face with a hole in it that is nearest the click (the click's distance to
+the face's triangles). It takes that face if it lies within one *wall-height* of
+the click, which is how far the opening's wall runs down from that rim: to the
+floor or step that ends it, or for a through-opening to the piece's lowest
+point. So the inner wall and the outer wall of an open box pick its rim, down
+to the height of the floor, and the box's bottom (farther than that) does not.
+A tube's whole wall picks its nearer end. Two open ends equally near the click
+are refused, not guessed at. The rim is read from its lowest triangle whichever
+triangle was clicked, so the rim, the inner wall and the outer wall build the
+same lid bit for bit.
+
+**A through-opening** (a frame: the wall ends at the piece's lowest point, facing
+away) is as deep as the piece is thick. The lid defaults to the rim's width but
+is capped at that depth, so a frame gets a panel its own depth, flush both sides.
 
 ## 3. Building the lid
 
@@ -72,10 +93,15 @@ readout says why.
 
 - "that edge isn't an open end — Patch repairs holes": the click is next to a
   hole in the mesh, or the piece has open edges anywhere.
-- A face with no opening ("that face has no opening in it"). A loop that is a
-  post standing on the face. A tangled outline.
+- A click that finds no open end says what it read first: "flat face, 1 loop, no
+  hole - this piece has no open end within reach", "... - the nearest open end is
+  24.07 mm from the click, more than its 18.00 mm wall", "... - 2 open ends are
+  15.00 mm from the click, as near as each other: click closer to the one to
+  close". A loop that is a post standing on the face. A tangled outline.
 - A lid thinner than 2 nozzle widths. A negative inset.
-- A lid that would reach a floor or a step inside the opening.
+- A lid that would reach a floor, a step or the far side of the opening, with
+  both depths: "opening found but the lid (8.00 mm) is deeper than the wall
+  (3.00 mm, down to a floor)".
 - Lid planes that cross more than one wall (a post or a divider inside the
   opening), or a wall that runs out to the outside.
 

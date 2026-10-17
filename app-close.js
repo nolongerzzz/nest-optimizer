@@ -26,7 +26,7 @@ var CLOSE_GHOST_COLOR = 0xf59e0b;       // Tube edge's ghost
 var CLOSE_PICK_COLOR = 0xe11d48;        // crimson: reads on the amber ghost and the blue piece
 var CLOSE_HOVER_COLOR = 0xa855f7;       // violet: the rim under the pointer
 var CLOSE_RENDER_ORDER = 20;
-var CLOSE_HINT = 'Click an open end - a tube end, an open box\'s rim.';
+var CLOSE_HINT = 'Click an open box or tube anywhere near its open end - the wall or the rim.';
 
 function NSO_closeUI() {
   if (typeof state === 'undefined') return {};
