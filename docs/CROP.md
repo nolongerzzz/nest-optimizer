@@ -67,7 +67,7 @@ does closing the card.
 | the slab crop itself (remove a slab, slide the far part back, seal the joint) | gone from the card. Crop copies; G-scope's Crop on its layer range and Detach's cap still use `NSO_cropRaw` / `NSO_cropSeal` (below) |
 | Move region (Up, Across, Lift, Lock in) | removed from Crop, with `NSO_cropMoveRaw` and the code under it: **CROP, grab the copy (grab-drop), JOIN if a weld is wanted.** `crop:move` and `wire:crop-move` are retired with it; the kernel union they ran is Join's (`csg:node`, `integration`), and every copy is checked by `crop:engine` |
 | Detach flange | the **Subtract** card, under Split to parts. Same ids (`btn-detach`, `detach-readout`), same behaviour |
-| Reattach | the **Join** card. Same id (`btn-reattach`), same behaviour; its readout is Detach's, in the Subtract card, and the status line |
+| Reattach | the **Connect** card, its last row (under Attach's row once that lands). Same id (`btn-reattach`), same behaviour; its readout is Detach's, in the Subtract card, and the status line |
 | the hidden axis selector `#edit-axis` | moved into the Cut card, where the cut code reads it |
 
 Two things the card needed of the rest of the app, both fixed where they were:

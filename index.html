@@ -681,6 +681,15 @@
                   <button id="btn-connect-cancel" class="btn btn-secondary" type="button" title="Drop the anchors; with none picked, close the card.">Cancel</button>
                 </div>
               </div>
+              <!-- REATTACH (app-detach.js; docs/DETACH.md): put a flange taken off by Detach
+                   (in the Subtract card) back on somewhere else. It moved here from the
+                   Crop card, id for id; its readout is Detach's, in the Subtract card, and
+                   the status line. The last row of the Connect card (it goes under
+                   Attach's row once that lands). -->
+              <div class="edit-row">
+              <button id="btn-reattach" class="btn btn-secondary btn-attach" type="button" aria-pressed="false" disabled
+                      title="Reattach: put the detached flange back somewhere else - click the point on a piece where its root should go. It keeps lying the way it lay, reaches out of the clicked face, is seated deep enough for its whole root to bite (Attach's seat), and is unioned into that piece. One Undo puts both back.">Reattach</button>
+              </div>
             </div>
           </details>
           <!-- JOIN: Join (Start / Complete / Cancel) and A-B-C, the two column
@@ -723,14 +732,6 @@
                   </div>
                 </div>
               </details>
-              <!-- REATTACH (app-detach.js; docs/DETACH.md): put a flange taken off by Detach
-                   (in the Subtract card) back on somewhere else. It moved here from the
-                   Crop card, id for id; its readout is Detach's, in the Subtract card, and
-                   the status line. -->
-              <div class="edit-row">
-              <button id="btn-reattach" class="btn btn-secondary btn-attach" type="button" aria-pressed="false" disabled
-                      title="Reattach: put the detached flange back somewhere else - click the point on a piece where its root should go. It keeps lying the way it lay, reaches out of the clicked face, is seated deep enough for its whole root to bite (Attach's seat), and is unioned into that piece. One Undo puts both back.">Reattach</button>
-              </div>
             </div>
           </details>
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-seat">
@@ -975,7 +976,7 @@
             <!-- DETACH (app-detach.js, nso_detach.js; docs/DETACH.md): a detected
                  flange comes off the piece, capped flush on its own neck wall, and
                  lands beside it as its own closed piece. It moved here from the
-                 Crop card, id for id; Reattach, its other half, is in the Join card. -->
+                 Crop card, id for id; Reattach, its other half, is in the Connect card. -->
             <div class="detach-tools" id="detach-tools">
             <div class="vp-row vp-row-full">
               <button id="btn-detach" class="btn btn-secondary" type="button"

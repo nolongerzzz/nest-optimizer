@@ -606,7 +606,7 @@ UI only: the engine is #222 as built, plus `planOn` / `resolve` /
   shape (Grow -> Outline's offsets); Keep outside -> gone (Subtract the copy);
   Move region (Up / Across / Lift / Lock in) -> removed from Crop with
   `NSO_cropMoveRaw` and `NSO_Crop.cut`: CROP, grab the copy, JOIN; Detach flange
-  -> the Subtract card under Split to parts; Reattach -> the Join card (same ids).
+  -> the Subtract card under Split to parts; Reattach -> the Connect card, last row (same ids).
 - **Retired:** `crop:move`, `wire:crop-move` (and their test files). Their cases
   tested `NSO_cropMoveRaw`, which is gone; the kernel unions are Join's.
   `nso_detach_test.js` lost its comparison against Move.

@@ -96,11 +96,13 @@ const HOLDS = {
   'menu-export': ['export-format', 'btn-export-model', 'btn-library-save', 'btn-export-stl', 'btn-delete-model'],
   'menu-scale': ['scale-card', 'scale-factor', 'scale-target', 'btn-scale-fit'],
   'menu-cut': ['edit-card', 'cut-miter-dial', 'cut-slider', 'cut-mm', 'btn-cut'],
-  // CROP: the Shape row, one readout, CROP, Cancel (Detach moved to Subtract, Reattach to Join)
+  // CROP: the Shape row, one readout, CROP, Cancel (Detach moved to Subtract, Reattach to Connect)
   'menu-crop': ['crop-card', 'crop-shape-row', 'btn-crop-shape-box', 'btn-crop-shape-cylinder', 'btn-crop-shape-sphere',
                 'btn-crop-shape-piece', 'btn-crop-shape-outline', 'crop-readout', 'btn-crop', 'btn-crop-cancel'],
+  // CONNECT: the builder, and Reattach as its last row (it moved here from the Crop card)
+  'menu-connect': ['btn-connect', 'connect-panel', 'btn-reattach'],
   'menu-joins': ['menu-join', 'btn-join-start', 'join-slot-a', 'join-slot-b', 'join-slot-c', 'btn-join', 'btn-join-clear',
-                 'menu-abc', 'triple-mode', 'btn-join-triple', 'btn-reattach'],
+                 'menu-abc', 'triple-mode', 'btn-join-triple'],
   'menu-seat': ['btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid'],
   'menu-supports': ['supports-card', 'btn-sup-all', 'btn-sup-none', 'btn-sup-paint', 'sel-sup-paint', 'sup-style', 'sup-size',
                     'sup-rest', 'btn-sup-remove'],
@@ -152,7 +154,7 @@ const BEFORE = ['menu-import', 'file-input', 'btn-load-stl', 'btn-library', 'men
   'btn-cut-nudge-m', 'cut-mm', 'btn-cut-nudge-p', 'btn-cut', 'btn-cut-right-side-out', 'menu-crop', 'edit-axis',
   /* The Crop card's axis buttons, box fields, Lift and Move controls are gone: one tool, a shape dragged to
      size (docs/CROP.md says where each job went). The ids that stay are the card's own, and Detach flange and
-     Reattach, which moved to the Subtract and Join cards under the same ids. */
+     Reattach, which moved to the Subtract and Connect cards under the same ids. */
   'btn-crop', 'btn-detach', 'btn-reattach', 'menu-joins', 'menu-join', 'btn-join-start', 'join-slot-a', 'join-slot-b',
   'join-slot-c', 'btn-join', 'btn-join-clear', 'menu-abc', 'triple-mode', 'triple-gap-ab', 'triple-gap-bc', 'btn-join-triple',
   'btn-lift', 'menu-seat', 'btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'oversize-gap',

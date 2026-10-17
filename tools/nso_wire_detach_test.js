@@ -79,7 +79,7 @@ const measure = (page, id) => page.evaluate(mid => {
 const rawOf = (page, id) => page.evaluate(mid => Array.from(state.models.find(x => x && x.id === mid).rawTris), id);
 const modelIds = page => page.evaluate(() => state.models.map(m => m.id));
 /* Detach is in the Subtract card, under Split to parts, and Reattach in the
-   Join card (they were both in the Crop card). Opening a card is a real click
+   Connect card (they were both in the Crop card). Opening a card is a real click
    on its summary. */
 const openCard = async (page, id) => {
   const open = await page.evaluate(i => document.getElementById(i).open, id);
@@ -109,14 +109,14 @@ withApp(async (page, logs) => {
   {
     const w = await page.evaluate(() => {
       const d = document.getElementById('btn-detach'), r = document.getElementById('btn-reattach');
-      const sub = document.getElementById('menu-bit'), join = document.getElementById('menu-joins');
+      const sub = document.getElementById('menu-bit'), join = document.getElementById('menu-connect');
       return { d: !!d, r: !!r, wired: d && r && d.dataset.nsoWired === '1' && r.dataset.nsoWired === '1',
                inCut: !!(sub && d && sub.contains(d) && join && r && join.contains(r)), rDisabled: r && r.disabled,
                core: typeof window.NSO_Detach, flange: typeof window.NSO_Flange, run: typeof window.nsoDetachRun,
                at: typeof window.nsoReattachAt, hook: typeof window.nsoReattachTakesClick,
                pick: typeof window.nsoAttachRawPick };
     });
-    check('the Subtract card carries Detach flange and the Join card Reattach, wired', w.d && w.r && w.wired && w.inCut, JSON.stringify(w));
+    check('the Subtract card carries Detach flange and the Connect card Reattach, wired', w.d && w.r && w.wired && w.inCut, JSON.stringify(w));
     check('Reattach is disabled until something is detached', w.rDisabled === true);
     check('nso_detach.js, nso_flange.js and app-detach.js are loaded', w.core === 'object' && w.flange === 'object' &&
       w.run === 'function' && w.at === 'function');
@@ -202,7 +202,7 @@ withApp(async (page, logs) => {
       return { x, y, onCanvas: document.elementFromPoint(x, y) === state.renderer.domElement };
     }, [id, atRaw]);
     check('the pixel aimed at is on the canvas', sp.onCanvas, sp.x.toFixed(1) + ', ' + sp.y.toFixed(1));
-    await openCard(page, 'menu-joins');
+    await openCard(page, 'menu-connect');
     await page.click('#btn-reattach');
     const armed = await page.evaluate(() => ({ a: !!state.reattachArmed, s: document.getElementById('status').textContent }));
     check('Reattach arms', armed.a && /click the point on a piece/.test(armed.s), armed.s.slice(0, 90));

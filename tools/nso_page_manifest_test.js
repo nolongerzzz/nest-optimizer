@@ -177,10 +177,10 @@ console.log('the Crop card');
   const card = cropCardOf(html);
   const bad = cropCardProblems(card);
   check('#crop-card is exactly the Shape row, one readout, CROP and Cancel', bad.length === 0, bad.join('; '));
-  check('Detach flange is in the Subtract card and Reattach in the Join card', (() => {
+  check('Detach flange is in the Subtract card and Reattach in the Connect card', (() => {
     const live = html.replace(/<!--[\s\S]*?-->/g, '');
-    const inCard = (id, btn) => { const a = live.search(new RegExp('<details\\b[^>]*\\bid="' + id + '"')); const b = live.indexOf('</details>\n          <details', a + 10); const seg = live.slice(a, b < 0 ? undefined : b); return seg.includes('id="' + btn + '"'); };
-    return inCard('menu-bit', 'btn-detach') && inCard('menu-joins', 'btn-reattach');
+    const inCard = (id, btn) => { const a = live.search(new RegExp('<details\\b[^>]*\\bid="' + id + '"')); const b = live.indexOf('<details class="vp-menu vp-shell-menu', a + 10); const seg = live.slice(a, b < 0 ? undefined : b); return seg.includes('id="' + btn + '"'); };
+    return inCard('menu-bit', 'btn-detach') && inCard('menu-connect', 'btn-reattach');
   })());
 }
 

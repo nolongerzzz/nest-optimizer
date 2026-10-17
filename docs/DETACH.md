@@ -2,7 +2,7 @@
 
 `nso_detach.js` (`window.NSO_Detach`, and a Node module) plus `app-detach.js`.
 Detach flange is a button of the Subtract card, under Split to parts, and Reattach
-a button of the Join card (both were in the Crop card; same ids, same behaviour).
+a button of the Connect card, its last row (both were in the Crop card; same ids, same behaviour).
 The first feature it works on is the flange that `nso_flange.js` finds
 (docs/GSCOPE-FLANGE.md).
 
@@ -179,7 +179,7 @@ Every refusal names its reason and makes nothing.
 
 ## UI
 
-Detach flange: the Subtract card, under Split to parts. Reattach: the Join card.
+Detach flange: the Subtract card, under Split to parts. Reattach: the Connect card, its last row.
 
 - **Detach flange** runs on the selected piece. The piece keeps its place and
   its id and becomes the hull. The flange lands beside it as its own piece,

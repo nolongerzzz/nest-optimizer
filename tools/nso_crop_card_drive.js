@@ -22,7 +22,7 @@
      6. OUTLINE: a click on a piece is its footprint, a Shift-click on a triangle its
         rim; d1, d2, z1, z2 dragged; the readout names them
      7. Escape and Cancel put the shape away; so does closing the card
-     8. Detach from the Subtract card, Reattach from the Join card
+     8. Detach from the Subtract card, Reattach from the Connect card
 */
 'use strict';
 
@@ -144,14 +144,14 @@ const snap = (page, id) => page.evaluate(i => {
       return { btns, inputs: c.querySelectorAll('input, select, textarea').length, readouts: c.querySelectorAll('p').length,
                row: Array.from(document.querySelectorAll('#crop-shape-row button')).map(b => b.textContent.trim()),
                detachHere: !!c.querySelector('#btn-detach, #btn-reattach'),
-               detachIn: !!document.querySelector('#menu-bit #btn-detach'), reattachIn: !!document.querySelector('#menu-joins #btn-reattach'),
+               detachIn: !!document.querySelector('#menu-bit #btn-detach'), reattachIn: !!document.querySelector('#menu-connect #btn-reattach'),
                readoutId: !!document.getElementById('crop-readout'), hit: NSO_CropCard.HIT_PX };
     });
     check('the Shape row is Box, Cylinder, Sphere, Piece, Outline', dom.row.join(',') === 'Box,Cylinder,Sphere,Piece,Outline', dom.row.join(','));
     check('the buttons are the five shapes, CROP and Cancel, and no others', dom.btns.join(',') ===
       'btn-crop-shape-box,btn-crop-shape-cylinder,btn-crop-shape-sphere,btn-crop-shape-piece,btn-crop-shape-outline,btn-crop,btn-crop-cancel', dom.btns.join(','));
     check('no field, checkbox or list, and one readout line', dom.inputs === 0 && dom.readouts === 1 && dom.readoutId, dom.inputs + ' inputs, ' + dom.readouts + ' lines');
-    check('Detach flange is in the Subtract card and Reattach in the Join card, not here', !dom.detachHere && dom.detachIn && dom.reattachIn);
+    check('Detach flange is in the Subtract card and Reattach in the Connect card, not here', !dom.detachHere && dom.detachIn && dom.reattachIn);
     check('a handle is grabbed within at least 12 px', dom.hit >= 12, dom.hit + ' px');
 
     /* ================================================================= 2 */
@@ -525,7 +525,7 @@ const snap = (page, id) => page.evaluate(i => {
     check('closing the card puts the shape away too', (await cardState(page)).shape === null && !(await page.evaluate(() => !!state.scene.getObjectByName('cropCardShape'))));
 
     /* ================================================================= 8 */
-    console.log('\n=== 8. Detach from the Subtract card, Reattach from the Join card ===');
+    console.log('\n=== 8. Detach from the Subtract card, Reattach from the Connect card ===');
     const vid = await loadSTL(page, V9);
     await selectModel(page, vid);
     await page.click('#menu-bit > summary');
@@ -537,11 +537,11 @@ const snap = (page, id) => page.evaluate(i => {
     const dst = await page.evaluate(() => document.getElementById('status').textContent);
     check('Detach from the Subtract card takes the flange off as a piece of its own', ids1.length === ids0.length + 1 && /^Detached/.test(dst), dst.slice(0, 90));
     check('...its readout is in the Subtract card', await page.evaluate(() => !!document.getElementById('detach-readout').closest('#menu-bit') && document.getElementById('detach-readout').textContent.length > 1));
-    await page.click('#menu-joins > summary');
-    check('Reattach is a button of the Join card, wired, and enabled now', await page.evaluate(() => { const b = document.getElementById('btn-reattach'); return !!b && b.dataset.nsoWired === '1' && !!b.closest('#menu-joins') && !b.disabled; }));
+    await page.click('#menu-connect > summary');
+    check('Reattach is a button of the Connect card, wired, and enabled now', await page.evaluate(() => { const b = document.getElementById('btn-reattach'); return !!b && b.dataset.nsoWired === '1' && !!b.closest('#menu-connect') && !b.disabled; }));
     await page.click('#btn-reattach');
     const arm = await page.evaluate(() => ({ armed: !!state.reattachArmed, s: document.getElementById('status').textContent }));
-    check('Reattach from the Join card arms, asking for the point on a piece', arm.armed && /click the point on a piece/.test(arm.s), arm.s.slice(0, 80));
+    check('Reattach from the Connect card arms, asking for the point on a piece', arm.armed && /click the point on a piece/.test(arm.s), arm.s.slice(0, 80));
     await page.click('#btn-reattach');
 
     const errs = logs.filter(l => l.startsWith('[pageerror]'));
