@@ -5,6 +5,15 @@
 # Work there is batched and CI is run manually via workflow_dispatch when a
 # batch is ready, rather than automatically on every push/merge.
 #
+# A dispatch runs on whichever branch it names: workflow_dispatch has no branch
+# filter, so the branches it is used on are listed here rather than in `on:`.
+# They are claude-wip and claude-wip-next - the staging branch a batch of merges
+# is pushed to and run on before claude-wip is fast-forwarded to it.
+#
+# The optional `shard` input (1-8; default all) runs only that shard: the
+# re-run after a fix to one failing step, without paying for the other seven.
+# A one-shard run is not a full run - "npm test" then gates on that shard alone.
+#
 # This is the REQUIRED status check on main (Settings -> Branches -> branch
 # protection -> "Require status checks to pass before merging"). The check name
 # is "npm test", from the job name below.
@@ -79,6 +88,13 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      shard:
+        description: 'Run only this shard (1-8); all runs the whole suite'
+        type: choice
+        required: false
+        default: 'all'
+        options: ['all', '1', '2', '3', '4', '5', '6', '7', '8']
 
 # One run per branch / PR. A superseded run is cancelled rather than left to burn
 # a runner. Note a cancelled run reads as "not passing" to branch protection
@@ -111,7 +127,9 @@ jobs:
       # was written to remove.
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        # Every shard, unless a dispatch asked for one (the `shard` input). Push and
+        # pull_request runs have no inputs, so they always get all eight.
+        shard: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.shard != '' && inputs.shard != 'all' && format('[{0}]', inputs.shard) || '[1, 2, 3, 4, 5, 6, 7, 8]') }}
 
     steps:
       - name: Check out
