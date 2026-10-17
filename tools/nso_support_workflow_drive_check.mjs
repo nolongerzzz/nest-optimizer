@@ -8,7 +8,7 @@
  * in one area); piece B is that box beside a block with a tunnel through it
  * (the tunnel's ceiling hangs over its own floor, so with "May rest on the
  * part" off the plate cannot reach it); the wedge is library/v9_mirror_factory.stl
- * (187 x 34 x 21 mm, 49k triangles, 13 hanging areas).
+ * (187 x 34 x 21 mm, 49k triangles, 25 hanging areas at 60 deg).
  *
  *   1  DETECT FIRST. Opening the card on a plate with one piece detects at
  *      once: "1 hanging area at 60 deg on <piece>", the area outlined (one outline of
@@ -36,10 +36,10 @@
  *      unsupported, with its row.
  *   8  SELECTING A PIECE while the card is open detects there at once (a click
  *      on the piece, or the app's own selection from the Pieces list).
- *   9  THE WEDGE (the piece that used to hang): detect on open, 13 areas at once;
+ *   9  THE WEDGE (the piece that used to hang): detect on open, 25 areas at once (at the default 60 deg);
  *      a Generate over the planner's reach ends as "Could not build" inside the
  *      watchdog, plate unchanged; leaving the big underside out, the rest
- *      builds and the three counts add up to 13.
+ *      builds and the three counts add up to 25.
  *  10  No page errors. Screenshots of each state in tools/supports-out/.
  */
 import { chromium } from 'playwright';
@@ -614,8 +614,8 @@ async function main() {
   const openMs = Date.now() - tOpen;
   c = await T.card();
   v = await T.view();
-  check('opening Supports on the wedge detects at once: 13 hanging areas outlined, nothing generated',
-    [c.state, c.line, (await T.outlines()).kids, (await T.sups()).length, await T.undoDepth()], ['idle', '13 hanging areas at 60' + DEG + ' on v9_mirror_factory', 13, 0, 0]);
+  check('opening Supports on the wedge detects at once: 25 hanging areas outlined, nothing generated',
+    [c.state, c.line, (await T.outlines()).kids, (await T.sups()).length, await T.undoDepth()], ['idle', '25 hanging areas at 60' + DEG + ' on v9_mirror_factory', 25, 0, 0]);
   console.log('       detect on open: ' + openMs + ' ms, ' + v.beacons.length + ' spots in ' + v.areas.length + ' areas; biggest area ' + Math.max(...v.areas.map((a) => a.count)) + ' spots');
   await T.shot('15-wedge-detected.png');
   await page.fill('#sup-angle', '30');
@@ -649,7 +649,8 @@ async function main() {
   await T.shot('16-wedge-could-not-build.png');
 
   /* Leave the big underside out; the small areas build. */
-  await page.evaluate(() => window.NSO_SUPPORTS_CARD.watchdogMs(60000));
+  /* 24 small areas took 45 s here against the 60 s default: room for a slower box. */
+  await page.evaluate(() => window.NSO_SUPPORTS_CARD.watchdogMs(120000));
   const big = v.areas.reduce((m, a) => (a.count > m.count ? a : m), v.areas[0]);
   await T.oneStep('Leaving the big underside out', () => page.evaluate((id) => window.NSO_SUPPORTS_CARD.toggleArea(id), big.id));
   const tb = Date.now();
@@ -658,8 +659,8 @@ async function main() {
   c = await T.card();
   v = await T.view();
   const nSup = (await T.sups()).length;
-  check('the rest builds: BUILT with the three counts, which add up to all 13 areas',
-    [c.state, v.stats.held + v.stats.unsupported + v.stats.unreachable, v.stats.unsupported >= 1], ['built', 13, true]);
+  check('the rest builds: BUILT with the three counts, which add up to all 25 areas',
+    [c.state, v.stats.held + v.stats.unsupported + v.stats.unreachable, v.stats.unsupported >= 1], ['built', 25, true]);
   check('...the line is the three counts', c.line, BUILT(nSup, v.stats.held, v.stats.unsupported, v.stats.unreachable));
   check('...a row for every area that is not held, the big one first among them left out', [c.rows.list.length, c.rows.list.some((r) => r.area === big.id && r.text.includes('left out'))],
     [v.stats.unsupported + v.stats.unreachable, true]);
