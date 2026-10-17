@@ -644,8 +644,19 @@
     );
   }
 
+  /* parse3MF for a worker (NSO_Work.run): the same result, the soups moved
+     back to the page rather than copied. */
+  function parse3MFTransfer(bytes, opts) {
+    return parse3MF(bytes, opts).then(function (r) {
+      var W = typeof self !== 'undefined' && self.NSO_Work;
+      if (!W) return r;
+      return W.transfer(r, r.objects.map(function (o) { return o.positions.buffer; }));
+    });
+  }
+
   return {
     parse3MF: parse3MF,
+    parse3MFTransfer: parse3MFTransfer,
     openZip: openZip,
     walkXml: walkXml,
     parseModelXml: parseModelXml,

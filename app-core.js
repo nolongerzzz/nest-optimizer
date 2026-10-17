@@ -735,6 +735,11 @@ function initThree() {
   state.modelGroup = new THREE.Group();
   state.scene.add(state.modelGroup);
 
+  /* Every raycast in the app goes through Mesh.raycast. For a big piece that
+     was a walk of all its triangles (58 ms a ray at 947k); nso_bvh.js answers
+     it from the piece's tree and asks three's own test about the few
+     triangles the ray can reach. Small meshes are left to three. */
+  if (window.NSO_BVH) window.NSO_BVH.installThree(THREE);
   state.raycaster = new THREE.Raycaster();
   state.pointer = new THREE.Vector2();
 
@@ -1290,7 +1295,7 @@ function handleFiles(files) {
         if (!geometry.attributes || !geometry.attributes.position) {
           throw new Error('Invalid geometry');
         }
-        addModelFromZUpGeometry(file.name, geometry);
+        addModelFromZUpGeometryAsync(file.name, geometry);
       } catch (err) {
         console.error(err);
         setStatus(`Failed to load ${file.name}. Try re-exporting as binary STL.`, true);
@@ -1332,6 +1337,38 @@ function addModelFromZUpGeometry(name, geometry, opts) {
 }
 
 /**
+ * addModelFromZUpGeometry for an import. A small piece goes in exactly as it
+ * always did (synchronously - the promise is only for the caller that wants
+ * one). A big piece is registered but NOT put on the plate until its tree is
+ * built (nso_bvh.js, in a worker, with a progress line), so that the first
+ * thing the user can click is already something a click can be answered for
+ * in microseconds, and the page is never held while the tree is made.
+ */
+function addModelFromZUpGeometryAsync(name, geometry, opts) {
+  const n = geometry && geometry.attributes && geometry.attributes.position
+    ? geometry.attributes.position.count / 3 : 0;
+  if (!(window.NSO_BVH && window.NSO_BVH.isBig(n))) {
+    return Promise.resolve(addModelFromZUpGeometry(name, geometry, opts));
+  }
+  const options = Object.assign({}, opts || {});
+  const wasSilent = !!options.silent;
+  options.silent = true;                       // registered now, placed once indexed
+  const t0 = performance.now();
+  setStatus(`Indexing ${name} (${n.toLocaleString()} triangles)...`);
+  const id = addModelFromZUpGeometry(name, geometry, options);
+  if (id == null) return Promise.resolve(id);
+  const model = state.models.find(x => x.id === id);
+  return window.NSO_BVH.ensureGeometry(model.geometry).then(() => {
+    if (!wasSilent && state.models.indexOf(model) >= 0) {
+      placeNewModel(id, name, options);
+      setStatus(`Loaded: ${name} (${model.size.x.toFixed(0)}x${model.size.y.toFixed(0)}x${model.size.z.toFixed(0)} mm, ` +
+                `${n.toLocaleString()} triangles, indexed in ${((performance.now() - t0) / 1000).toFixed(1)} s)`);
+    }
+    return id;
+  });
+}
+
+/**
  * 3MF import. nso-3mf-read.js pulls one triangle soup per build item out of the
  * archive (millimetres, Z up, transforms applied); each becomes its own model,
  * named from the file's own object names.
@@ -1355,7 +1392,18 @@ function import3MF(filename, arrayBuffer) {
     return Promise.resolve(null);
   }
   setStatus(`Reading ${filename}...`);
-  return window.NSO3MFRead.parse3MF(new Uint8Array(arrayBuffer), { name: filename })
+  /* A big file is read in a worker: the XML of a 947,000-triangle piece is 81 MB
+     and took 5 s of the page's thread, a window that could not be clicked. The
+     small ones - everything the checks import - are read where they always were. */
+  const inPage = () => window.NSO3MFRead.parse3MF(new Uint8Array(arrayBuffer), { name: filename });
+  const parsing = (arrayBuffer.byteLength >= 4 * 1024 * 1024 && window.NSO_Work && window.NSO_Work.isAvailable())
+    ? window.NSO_Work.run('3mf', ['nso-3mf-read.js'], 'NSO3MFRead.parse3MFTransfer',
+                          [new Uint8Array(arrayBuffer), { name: filename }]).promise.catch(err => {
+        console.warn(`${filename}: background read failed (${err && err.message}); reading here`);
+        return inPage();
+      })
+    : inPage();
+  return parsing
     .then(result => {
       result.warnings.forEach(w => console.warn(`${filename}: ${w}`));
 
@@ -1375,18 +1423,23 @@ function import3MF(filename, arrayBuffer) {
       }
 
       let loaded = 0;
+      let chain = Promise.resolve();
       result.objects.forEach(obj => {
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.BufferAttribute(obj.positions, 3));
-        if (addModelFromZUpGeometry(obj.name, geometry)) loaded++;
+        chain = chain.then(() => {
+          const geometry = new THREE.BufferGeometry();
+          geometry.setAttribute('position', new THREE.BufferAttribute(obj.positions, 3));
+          return addModelFromZUpGeometryAsync(obj.name, geometry).then(id => { if (id) loaded++; });
+        });
       });
-      if (loaded > 1) {
-        setStatus(`Loaded ${loaded} objects from ${filename}` +
-                  (result.application ? ` (${result.application})` : ''));
-      } else if (!loaded) {
-        setStatus(`${filename}: no usable geometry found`, true);
-      }
-      return result;
+      return chain.then(() => {
+        if (loaded > 1) {
+          setStatus(`Loaded ${loaded} objects from ${filename}` +
+                    (result.application ? ` (${result.application})` : ''));
+        } else if (!loaded) {
+          setStatus(`${filename}: no usable geometry found`, true);
+        }
+        return result;
+      });
     })
     .catch(err => {
       console.error(err);
@@ -1436,26 +1489,32 @@ function addModel(name, geometry, opts) {
   renderModelList();
   updateOptimizeButton();
   updateEditSize();
-  if (!options.silent) {
-    /* Cut's armed cutter shows one piece alone (showEditPreview empties the plate).
-       Crop's card is armed with no blade and keeps the plate: a piece imported while
-       it is open - the cutter for Piece or Outline - lands on the plate beside the rest. */
-    if (state.cutterOpen && state.cutTool !== 'crop' && !options.keepSelection) {
-      showEditPreview();
-      setStatus(`Loaded: ${name} (${size2.x.toFixed(0)}x${size2.y.toFixed(0)}x${size2.z.toFixed(0)} mm) - cutter open, slide red plane`);
-    } else if (!options.keepSelection) {
-      const model = state.models.find(x => x.id === id);
-      // Offset new uploads so they don't stack on existing plate pieces
-      let x = 0;
-      if (state.placed.length) {
-        const maxX = Math.max(...state.placed.map(p => p.x + (p.width || 0) / 2));
-        x = maxX + size2.x / 2 + 4;
-      }
-      if (model) placeModelMovable(model, x, 0);
-      setStatus(`Loaded: ${name} (${size2.x.toFixed(0)}x${size2.y.toFixed(0)}x${size2.z.toFixed(0)} mm) - drag to move, Open cutter, or Optimize`);
-    }
-  }
+  if (!options.silent) placeNewModel(id, name, options);
   return id;
+}
+
+/** What a fresh upload does once it exists: onto the plate beside what is
+    there (or into the open cutter), and the status line that says so. */
+function placeNewModel(id, name, options) {
+  const model = state.models.find(x => x.id === id);
+  if (!model) return;
+  const size2 = model.size;
+  /* Cut's armed cutter shows one piece alone (showEditPreview empties the plate).
+     Crop's card is armed with no blade and keeps the plate: a piece imported while
+     it is open - the cutter for Piece or Outline - lands on the plate beside the rest. */
+  if (state.cutterOpen && state.cutTool !== 'crop' && !options.keepSelection) {
+    showEditPreview();
+    setStatus(`Loaded: ${name} (${size2.x.toFixed(0)}x${size2.y.toFixed(0)}x${size2.z.toFixed(0)} mm) - cutter open, slide red plane`);
+  } else if (!options.keepSelection) {
+    // Offset new uploads so they don't stack on existing plate pieces
+    let x = 0;
+    if (state.placed.length) {
+      const maxX = Math.max(...state.placed.map(p => p.x + (p.width || 0) / 2));
+      x = maxX + size2.x / 2 + 4;
+    }
+    placeModelMovable(model, x, 0);
+    setStatus(`Loaded: ${name} (${size2.x.toFixed(0)}x${size2.y.toFixed(0)}x${size2.z.toFixed(0)} mm) - drag to move, Open cutter, or Optimize`);
+  }
 }
 
 // Clear display meshes only - never dispose shared model geometries

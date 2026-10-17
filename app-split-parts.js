@@ -102,6 +102,44 @@ var NSO_SPLIT_PARTS = (function () {
     return a;
   }
 
+  /* A BIG PIECE (nso_bvh.js's 300k triangles) is read by a worker, and only
+     once the card that shows the answer is open: the read is 25 s of JS on the
+     vase (cavityShells welds every vertex), which on the page's thread was a
+     frozen window after every selection. The card says "measuring…" until the
+     worker answers, and the answer is cached per soup exactly as before. */
+  var work = null;                         // { soup, job } while a worker is reading
+  function isBig(soup) { return !!(soup && window.NSO_BVH && window.NSO_BVH.isBig(soup.length / 9) && window.NSO_Work && window.NSO_Work.isAvailable()); }
+  function cardOpen() { var d = $('menu-bit'); return !!(d && d.open); }
+
+  function refreshBig(t) {
+    var soup = t.m.rawTris;
+    if (work && work.soup !== soup) { work.job.cancel(); work = null; }
+    if (!cardOpen() && !forced) {
+      paint('—', 'Not measured yet - this piece is big; open this card and it is read.', false, false);
+      return;
+    }
+    if (!work) {
+      var job = window.NSO_Work.run('split', ['nso_thickness.js', 'nso_hollow.js', 'nso_split_parts.js'],
+        'NSO_SplitParts.analyse', [soup]);
+      work = { soup: soup, job: job };
+      var mine = work;
+      job.promise.then(function (a) {
+        if (work !== mine) return;
+        work = null;
+        cache.set(soup, a);
+        refresh();
+      }, function (err) {
+        if (work !== mine) return;
+        work = null;
+        console.error('[split-parts]', err);
+        cache.set(soup, { ok: false, parts: [], words: '', reason: 'Could not read the piece (' + ((err && err.message) || err) + ').' });
+        refresh();
+      });
+    }
+    paint('…', 'measuring…', false, false);
+  }
+  var forced = false;                      // the button was pressed: read it now, card open or not
+
   // =========================================================================
   // The card: the count and the readout, before the button is pressed
   // =========================================================================
@@ -125,6 +163,7 @@ var NSO_SPLIT_PARTS = (function () {
     if (why) { shown = null; paint('—', why, false, false); return; }
     if (hold && hold.id !== t.m.id) hold = null;
     var a = cache.get(t.m.rawTris);
+    if (!a && isBig(t.m.rawTris)) return refreshBig(t);
     if (!a) {
       var my = ++token;
       paint('…', 'Reading ' + t.m.name + ' ...', false, false);
@@ -199,7 +238,13 @@ var NSO_SPLIT_PARTS = (function () {
     busy = true;
     var added = [];
     try {
-      var r = SP().split(m.rawTris);
+      var made = isBig(m.rawTris) ? cache.get(m.rawTris) : null;
+      if (isBig(m.rawTris) && !made) {
+        busy = false;
+        forced = true; refresh(); forced = false;
+        return fail('Split to parts: still measuring ' + m.name + ' - press again when the count shows. Nothing changed.');
+      }
+      var r = made ? SP().splitFrom(made, m.rawTris) : SP().split(m.rawTris);
       if (!r.ok) return fail(r.reason);
 
       /* The parts first, so a failure to add one leaves the plate alone. */
@@ -294,6 +339,8 @@ var NSO_SPLIT_PARTS = (function () {
     if (b && b.dataset.wired !== '1') { b.dataset.wired = '1'; b.addEventListener('click', function () { split(); }); }
     wrap('selectPlaced');
     wrap('renderModelList');
+    var card = $('menu-bit');
+    if (card && card.dataset.splitWired !== '1') { card.dataset.splitWired = '1'; card.addEventListener('toggle', function () { if (card.open) refresh(); }); }
     refresh();
   }
 

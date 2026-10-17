@@ -35,6 +35,8 @@
          per part, its triangles copied bit for bit in their original order.
          The input is never written to. Every triangle of the input lands in
          exactly one part, so the counts sum to the original.
+     splitFrom(a, soup)    -> the same, for an analysis already made (split is
+         analyse followed by this).
      describe(a)           -> "3 parts" / "1 part (2 shells, ...)": the readout.
 
    PAINT SCOPE: WHOLE-PIECE (docs/HANDOFF.md, "Scoping") - decided in the app
@@ -296,7 +298,12 @@
   }
 
   function split(rawTris, opts) {
-    var a = analyse(rawTris, opts);
+    return splitFrom(analyse(rawTris, opts), rawTris);
+  }
+
+  /* split() for an analysis already in hand (the page reads a big piece in a
+     worker and keeps the read): the parts' soups, copied from `rawTris`. */
+  function splitFrom(a, rawTris) {
     if (!a.ok) return a;
     a.parts.forEach(function (p) {
       var soup = new Float32Array(p.faces.length * 9);
@@ -319,7 +326,7 @@
     return a.words + more;
   }
 
-  var api = { analyse: analyse, split: split, describe: describe };
+  var api = { analyse: analyse, split: split, splitFrom: splitFrom, describe: describe };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   if (root) root.NSO_SplitParts = api;
 })(typeof window !== 'undefined' ? window : (typeof globalThis !== 'undefined' ? globalThis : this));

@@ -59,6 +59,12 @@ function rotateActiveModelY(deg) {
   setStatus('Piece yaw ' + (deg > 0 ? '+' : '') + deg + ' deg (Y only - no free orbit)');
 }
 
+/* The box of a geometry's own vertices; kept for a big one (nso-bounds.js). */
+function localBox3(geometry) {
+  return (window.nsoBounds && window.nsoBounds.localBox ? window.nsoBounds.localBox(geometry) : null) ||
+    new THREE.Box3().setFromBufferAttribute(geometry.attributes.position);
+}
+
 function getActiveModel() {
   if (state.editId != null) {
     const found = state.models.find(m => m.id === state.editId);
@@ -89,7 +95,7 @@ function resolveAxis(model) {
   const sel = (document.getElementById('edit-axis') || {}).value || 'auto';
   if (sel === 'x' || sel === 'z') return sel;
   if (model && model.geometry && model.geometry.attributes && model.geometry.attributes.position) {
-    const bb = new THREE.Box3().setFromBufferAttribute(model.geometry.attributes.position);
+    const bb = localBox3(model.geometry);
     const sx = bb.max.x - bb.min.x;
     const sz = bb.max.z - bb.min.z;
     return sx >= sz ? 'x' : 'z';
@@ -193,7 +199,7 @@ function cutTurnMatrix(v, deg) {
 function cutFrame(model) {
   const m = model || getActiveModel();
   if (!m || !m.geometry || !m.geometry.attributes || !m.geometry.attributes.position) return null;
-  const bbox = new THREE.Box3().setFromBufferAttribute(m.geometry.attributes.position);
+  const bbox = localBox3(m.geometry);
   const mesh = cutMeshOf(m);
   if (mesh) mesh.updateMatrixWorld(true);
   const toLocal = mesh ? new THREE.Matrix4().copy(mesh.matrixWorld).invert() : null;

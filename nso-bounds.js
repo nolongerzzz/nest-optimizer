@@ -190,6 +190,7 @@
   function invalidate(target) {
     geometriesOf(target).forEach(function (g) {
       cache.delete(g);
+      if (window.NSO_BVH) window.NSO_BVH.touch(g);     // a big piece's tree is stale: ask for the next one now
       if (positionOf(g)) {
         g.computeBoundingBox();
         g.computeBoundingSphere();
@@ -208,7 +209,28 @@
     return { x: size.x, y: size.y, z: size.z, minY: off.minY, maxY: off.maxY };
   }
 
+  /* The box of a geometry's own vertices (no matrix), as a fresh Box3. For a
+     BIG geometry (300k triangles and up) the walk over every vertex is 30-70 ms
+     and the cutter asks it on every blade move, so the answer is kept, keyed on
+     what it was measured from (the array, the attribute's version, its size) -
+     an edit that is drawn bumps the version and is re-measured. A small
+     geometry is measured every time, as it always was. */
+  var boxCache = new WeakMap();
+  function localBox(geometry) {
+    var three = T(), pos = positionOf(geometry);
+    if (!three || !pos) return null;
+    var big = pos.count >= 900000;
+    if (big) {
+      var e = boxCache.get(geometry);
+      if (e && e.array === pos.array && e.version === pos.version && e.count === pos.count) return e.box.clone();
+    }
+    var box = new three.Box3().setFromBufferAttribute(pos);
+    if (big) boxCache.set(geometry, { array: pos.array, version: pos.version, count: pos.count, box: box.clone() });
+    return box;
+  }
+
   window.nsoBounds = {
+    localBox: localBox,
     worldBox: worldBox,
     restOffsets: restOffsets,
     boxUnder: boxUnder,

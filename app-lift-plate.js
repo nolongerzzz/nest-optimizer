@@ -396,6 +396,7 @@ var NSO_LIFT_PLATE = (function () {
   var face = null;                          // the face under the cursor { key, n, area }; null = the top, the default
   var minH = null;
   var hoverId = -1;
+  var hoverTri = -1;                        // the raw triangle under the cursor, from the hit
   var pending = new Set();                  // a Shift group, not yet lifted
   var stripOpen = false;
   var stripTicks = { dots: true, lines: true, large: true };
@@ -601,12 +602,13 @@ var NSO_LIFT_PLATE = (function () {
   // =========================================================================
 
   /** The piece and raw triangle under a pointer event, or null. */
-  function hitAt(ev) {
+  function hitAt(ev, hover) {
     if (!state.renderer || !state.camera || !state.modelGroup) return null;
     var rect = state.renderer.domElement.getBoundingClientRect();
     var nx = ((ev.clientX - rect.left) / rect.width) * 2 - 1, ny = -((ev.clientY - rect.top) / rect.height) * 2 + 1;
     if (nx < -1 || nx > 1 || ny < -1 || ny > 1) return null;
     var rc = new THREE.Raycaster();
+    rc.nsoHover = !!hover;       // a big piece with no tree yet answers a hover with nothing, rather than walking its triangles
     rc.setFromCamera(new THREE.Vector2(nx, ny), state.camera);
     var hits = rc.intersectObjects(state.modelGroup.children, true);
     for (var i = 0; i < hits.length; i++) {
@@ -664,13 +666,22 @@ var NSO_LIFT_PLATE = (function () {
     });
   }
 
+  /** A BIG target (nso_bvh.js's 300k triangles): hover works from the tree's hit and never walks the piece. */
+  function bigTarget() {
+    var m = targetId != null ? modelOf(targetId) : null;
+    return !!(m && m.rawTris && window.NSO_BVH && window.NSO_BVH.isBig(m.rawTris.length / 9));
+  }
+
   function hoverAt(ev) {
-    var h = hitAt(ev), id = -1;
+    var h = hitAt(ev, true), id = -1;
+    hoverTri = h && h.id === targetId ? h.tri : -1;
     /* Only a pointer over the viewport itself picks a face: crossing the
        card or a menu on the way to a button leaves the face as it was. */
     var onCanvas = !!state.renderer && ev.target === state.renderer.domElement;
     if (h && h.id === targetId) {
-      if (onCanvas) settleFace(h);
+      /* Reading another face on hover sorts every triangle of the piece into
+         its plane (1.5 s at 947,000); a big piece reads another face on a click only. */
+      if (onCanvas && !bigTarget()) settleFace(h);
       var f = featureAt(h.tri);
       if (f) id = f.id;
     } else if (onCanvas && face && !face.surf) {
@@ -1016,6 +1027,22 @@ var NSO_LIFT_PLATE = (function () {
     if (tint && !(face && face.surf && A() === tint.A)) dropTint();
   }
 
+  var HOVER_WALK_MAX = 5000;                // a hovered feature of more triangles than this is drawn from the hit alone (big pieces)
+  var foundMemo = null;                     // the outline of everything offered, kept between hovers: { A, n, first, arr }
+
+  /** The outline of every offered feature but the hovered / gathered ones. It
+      only changes when the analysis, the slider or the gathering does, and a hover
+      redraws on every feature it crosses - so a big piece keeps the last one. */
+  function foundOutline(P, a, all) {
+    if (!bigTarget()) return outlineOf(P, all);
+    var sum = 0;
+    for (var i = 0; i < all.length; i++) sum += all[i] * (1 + (i & 7));
+    if (foundMemo && foundMemo.A === a && foundMemo.P === P && foundMemo.n === all.length && foundMemo.sum === sum) return foundMemo.arr;
+    var arr = outlineOf(P, all);
+    foundMemo = { A: a, P: P, n: all.length, sum: sum, arr: arr };
+    return arr;
+  }
+
   /** The outline of a set of triangles: the edges only one of them uses. */
   function outlineOf(P, tris) {
     var seen = new Map(), key = function (o) { return P[o].toFixed(4) + ',' + P[o + 1].toFixed(4) + ',' + P[o + 2].toFixed(4); };
@@ -1074,7 +1101,7 @@ var NSO_LIFT_PLATE = (function () {
     }
     var stripSet = stripOpen ? new Set(stripIds()) : null;
     off.forEach(function (id) { if (id !== hoverId && !pending.has(id)) all = all.concat(a.islands[id].tris); });
-    if (all.length) layer.add(lines(outlineOf(P, all), FOUND, stripOpen ? 0.35 : 0.55));
+    if (all.length) layer.add(lines(foundOutline(P, a, all), FOUND, stripOpen ? 0.35 : 0.55));
     if (stripSet && stripSet.size) {
       var ticked = [];
       stripSet.forEach(function (id) { ticked = ticked.concat(withParts(a.islands[id])); });
@@ -1088,8 +1115,16 @@ var NSO_LIFT_PLATE = (function () {
     }
     if (hoverId >= 0 && a.islands[hoverId]) {
       var I = a.islands[hoverId], ok = !whyNot(I);
-      layer.add(fill(P, withParts(I), ok ? HOVER : 0xb91c1c, 0.45));
-      layer.add(lines(outlineOf(P, I.tris), ok ? HOVER : 0xef4444, 1));
+      var shown = withParts(I);
+      if (bigTarget() && hoverTri >= 0 && shown.length > HOVER_WALK_MAX) {
+        /* A feature too big to outline by walking its triangles: the one under
+           the cursor, from the tree's hit, stands for it. */
+        layer.add(fill(P, [hoverTri], ok ? HOVER : 0xb91c1c, 0.8));
+        layer.add(lines(outlineOf(P, [hoverTri]), ok ? HOVER : 0xef4444, 1));
+      } else {
+        layer.add(fill(P, shown, ok ? HOVER : 0xb91c1c, 0.45));
+        layer.add(lines(outlineOf(P, I.tris), ok ? HOVER : 0xef4444, 1));
+      }
     }
   }
 

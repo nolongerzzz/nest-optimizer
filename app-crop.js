@@ -59,7 +59,22 @@
 
 var NSO_CROP_TOL = 1e-4;   // Cut's RAW_CUT_WELD_TOL; the checker's weld radius
 
+/* A big soup's box is kept (the cutter asks it on every blade move: 50 ms of
+   vertex walk at 947,000 triangles). Keyed on the array, its length and a
+   sample of its values, as the support planner keys its index on the same soup. */
+var NSO_cropBoundsKept = (typeof WeakMap === 'function') ? new WeakMap() : null;
 function NSO_cropBounds(soup) {
+  var big = NSO_cropBoundsKept && soup.length >= 9 * 300000;
+  if (big) {
+    var kept = NSO_cropBoundsKept.get(soup), at = soup.length > 48 ? soup.length / 48 | 0 : 1, fp = soup.length;
+    for (var q = 0; q < soup.length; q += at) fp += soup[q];
+    if (kept && kept.fp === fp) return { lo: kept.lo.slice(), hi: kept.hi.slice() };
+  }
+  var r = NSO_cropBoundsWalk(soup);
+  if (big) NSO_cropBoundsKept.set(soup, { fp: fp, lo: r.lo.slice(), hi: r.hi.slice() });
+  return r;
+}
+function NSO_cropBoundsWalk(soup) {
   var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   for (var i = 0; i < soup.length; i++) {
     var k = i % 3, v = soup[i];
