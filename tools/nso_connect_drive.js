@@ -290,14 +290,14 @@ withApp(async (page, logs) => {
   await page.waitForTimeout(250);
   await page.selectOption('#sel-connect-shape', 'ribbon');
   await page.fill('#inp-connect-width', '4');
-  await page.waitForTimeout(250);
+  await page.waitForFunction(() => /^Ribbon 4\.0 /.test(document.getElementById('connect-readout').textContent), null, { timeout: 3000 }).catch(() => {});
   C = await P(page);
   check('a Ribbon\'s width field redraws it too', /^Ribbon 4\.0 × 1\.2 mm, /.test(C.readout), C.readout);
   await page.fill('#inp-connect-width', '6');
   await page.waitForTimeout(250);
   await page.selectOption('#sel-connect-shape', 'tube');
   await page.fill('#inp-connect-wall', '2');
-  await page.waitForTimeout(250);
+  await page.waitForFunction(() => /leaves no bore/.test(document.getElementById('connect-readout').textContent), null, { timeout: 3000 }).catch(() => {});
   C = await P(page);
   check('a Tube whose wall is half its Ø is refused in words, no ghost, Set off', !C.planOk && C.bad && !C.ghost && C.goDisabled && /leaves no bore in a Ø4\.0 tube/.test(C.readout), C.readout);
   await page.fill('#inp-connect-wall', '0.8');
