@@ -2676,27 +2676,27 @@ function endMoveDrag() {
   }
 }
 
-/* Where the pointer puts the blade, along the piece's long axis.
+/* Where the pointer puts the blade, along the blade's own travel axis.
+
+   The travel axis is the plane's normal (cutFrame's `normal`): the piece's
+   long axis when square, turned by the mitre otherwise. The blade's place is
+   its offset along that axis, so the pointer's place along it IS the blade's
+   place, at every mitre, with nothing to divide by.
 
    `hitWorld` is the point a click landed on the piece: the blade goes
    through it. A drag (no point) reads the pointer on a plane that holds the
-   long axis and faces the camera as squarely as it can, through the blade's
-   current point - so the blade follows the pointer along the piece whether
-   it lies flat or stands on end (a horizontal plane at the piece's centre,
-   the old drag plane, holds a standing piece's axis only edge-on).
-
-   With a mitre the blade crosses the centre line off the clicked point, so
-   the position is solved for the plane through the point; near a mitre of
-   90 the plane barely moves along the axis and the point's own coordinate
-   is used instead. */
+   travel axis and faces the camera as squarely as it can, through a point
+   on the blade (where the drag began on the piece, or the blade's own
+   centre) - so the blade follows the pointer along its axis whether it lies
+   flat or stands on end (a horizontal plane at the piece's centre, the old
+   drag plane, holds a standing piece's axis only edge-on). */
 function cutTFromPointer(hitWorld) {
   const m = getActiveModel();
   const f = m ? cutFrame(m) : null;
   if (!f || !f.mesh) return;
   f.mesh.updateMatrixWorld(true);
   const toLocal = new THREE.Matrix4().copy(f.mesh.matrixWorld).invert();
-  const C = f.bbox.getCenter(new THREE.Vector3());
-  const e = new THREE.Vector3(f.axis === 'x' ? 1 : 0, f.axis === 'y' ? 1 : 0, f.axis === 'z' ? 1 : 0);
+  const n = f.normal;
   let local = null;
   if (hitWorld) {
     local = hitWorld.clone().applyMatrix4(toLocal);
@@ -2707,11 +2707,12 @@ function cutTFromPointer(hitWorld) {
     const ray = state.raycaster.ray;
     let at = state.cutDragFrom && state.cutDragging ? state.cutDragFrom.clone() : null;
     if (!at) {
-      at = C.clone();
-      at[f.axis] = f.origin + cutMmAt(state.cutT == null ? 0.5 : state.cutT, f.span);
+      // The blade's own centre: the piece's centre carried along n to the plane.
+      const C = f.bbox.getCenter(new THREE.Vector3());
+      at = C.addScaledVector(n, f.origin + cutMmAt(state.cutT == null ? 0.5 : state.cutT, f.span) - n.dot(C));
     }
     const P = at.applyMatrix4(f.mesh.matrixWorld);
-    const d = e.clone().transformDirection(f.mesh.matrixWorld);
+    const d = n.clone().transformDirection(f.mesh.matrixWorld);
     const nrm = ray.direction.clone().addScaledVector(d, -ray.direction.dot(d));
     const plane = nrm.lengthSq() > 1e-6
       ? new THREE.Plane().setFromNormalAndCoplanarPoint(nrm.normalize(), P)
@@ -2720,13 +2721,7 @@ function cutTFromPointer(hitWorld) {
     if (!ray.intersectPlane(plane, hit)) return;
     local = hit.applyMatrix4(toLocal);
   }
-  let mm = local[f.axis] - f.origin;
-  if (f.back) {
-    const n = e.clone().applyMatrix4(f.back);
-    const na = n[f.axis];
-    if (Math.abs(na) > 0.2) mm = n.dot(local.clone().sub(C)) / na + C[f.axis] - f.origin;
-  }
-  state.cutT = snapCutT(mm / f.span, f.span);
+  state.cutT = snapCutT((n.dot(local) - f.origin) / f.span, f.span);
   syncCutUI();
   updateCutHelper();
 }

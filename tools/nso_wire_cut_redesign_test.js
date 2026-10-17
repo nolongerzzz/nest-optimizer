@@ -387,8 +387,18 @@ withApp(async (page, logs) => {
     check(route + ': Cut made two pieces on the ' + route + ' engine', !!r.got && r.got.engine === route && r.got.deg === deg, r.status);
     if (!r.got) continue;
     const nL = [Math.cos(-deg * Math.PI / 180), 0, -Math.sin(-deg * Math.PI / 180)];   // piece frame = world (un-posed)
+    // The plane Cut used: n.x = (the piece's lowest n.v) + mm. mm is the blade's travel
+    // along its own axis, on a 0.1 grid, so after the turn the plane crosses the centre
+    // line (centred bar: y = z = 0) within half a grid step along n of the 30 mm it was
+    // turned about - that is asserted, not assumed.
     const lo = Math.min(...r.src.soup.filter((_, i) => i % 3 === 0));
-    const c = [lo + 30, 0, 0];     // the plane crosses the centre line at 30 mm (centred bar: y = z = 0)
+    let nMin = Infinity;
+    for (let i = 0; i < r.src.soup.length; i += 3) nMin = Math.min(nMin, V.dot(nL, r.src.soup.slice(i, i + 3)));
+    const d = nMin + r.got.mm;
+    const c = nL.map(v => v * d);  // a point on the plane
+    const cross = d / nL[0];       // where it meets the centre line, x
+    check(route + ': the plane still crosses the centre line at the 30 mm it was turned about, to the grid (' +
+      (cross - lo).toFixed(3) + ' mm)', Math.abs(cross - lo - 30) <= 0.05 / Math.cos(deg * Math.PI / 180) + 1e-6);
     const capA = capOf(r.got.left, c, nL), capB = capOf(r.got.right, c, nL);
     const wantArea = 96 / Math.cos(deg * Math.PI / 180);
     check(route + ': each half has one angled face on the plane, the whole section (' + wantArea.toFixed(2) + ' mm²)',

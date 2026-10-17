@@ -125,8 +125,14 @@ function resolveAxis(model) {
 // frame into the piece's own frame. Square, both are null and the cut frame
 // is the piece's own frame, bit for bit.
 //
-// `mm` is the plane's distance along the long axis from its low end: where
-// the plane crosses the piece's centre line. The plane may come no closer
+// `mm` is the plane's distance from its low end along the BLADE'S OWN TRAVEL
+// AXIS: the plane's normal, which is the long axis when square and the long
+// axis turned by the mitre otherwise. The low end is the piece's extreme
+// along that normal, and `span` is the piece's whole extent along it (the
+// piece's length when square). So one mm is one mm of blade travel at every
+// mitre, the slider and the pointer drag keep their full range however the
+// plane is turned, and at 90 the plane travels across the piece's width
+// where it used to be pinned to the centre line. The plane may come no closer
 // than CUT_END_MM to either end: a fixed distance, so a sliver is as
 // reachable on a 300 mm piece as on a 30 mm one. It is MIN_CUT_SIDE_MM
 // (app-core.js), the distance Cut itself demands, so the end of the slider is
@@ -210,19 +216,50 @@ function cutFrame(model) {
       plateAxis = (ay > ax && ay > az) ? 'y' : (ax >= az ? 'x' : 'z');
     }
   }
-  const span = bbox.max[axis] - bbox.min[axis];
-  if (!(span > 0)) return null;
-  const lim = cutEndLimits(span);
+  const length = bbox.max[axis] - bbox.min[axis];
+  if (!(length > 0)) return null;
   const deg = cutMiterDeg();
   let turn = null, back = null;
+  // The blade's travel axis in the piece's frame, and the piece's extent
+  // along it: `origin` is its low end, `span` its length (the piece's own
+  // when square).
+  const normal = new THREE.Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, axis === 'z' ? 1 : 0);
+  let origin = bbox.min[axis], span = length;
   if (deg) {
     // The plate vertical, in the piece's own frame.
     const up = toLocal ? new THREE.Vector3(0, 1, 0).transformDirection(toLocal) : new THREE.Vector3(0, 1, 0);
     turn = cutTurnMatrix(up, deg);
     back = cutTurnMatrix(up, -deg);
+    normal.applyMatrix4(back);
+    const ext = cutExtentAlong(m.geometry.attributes.position, normal);
+    if (ext && ext.hi > ext.lo) { origin = ext.lo; span = ext.hi - ext.lo; }
   }
-  return { plateAxis: plateAxis, axis: axis, bbox: bbox, span: span, origin: bbox.min[axis],
+  const lim = cutEndLimits(span);
+  return { plateAxis: plateAxis, axis: axis, bbox: bbox, span: span, origin: origin, normal: normal,
            lo: lim.lo, hi: lim.hi, mesh: mesh, deg: deg, turn: turn, back: back };
+}
+
+/** The lowest and highest n.v over the position attribute's vertices: the
+    piece's extent along the unit vector `n`. Null for an empty attribute. */
+function cutExtentAlong(attr, n) {
+  if (!attr || !(attr.count > 0)) return null;
+  let lo = Infinity, hi = -Infinity;
+  const nx = n.x, ny = n.y, nz = n.z;
+  if (attr.array && attr.itemSize === 3 && !attr.isInterleavedBufferAttribute) {
+    const a = attr.array;
+    for (let i = 0, e = attr.count * 3; i < e; i += 3) {
+      const d = nx * a[i] + ny * a[i + 1] + nz * a[i + 2];
+      if (d < lo) lo = d;
+      if (d > hi) hi = d;
+    }
+  } else {
+    for (let i = 0; i < attr.count; i++) {
+      const d = nx * attr.getX(i) + ny * attr.getY(i) + nz * attr.getZ(i);
+      if (d < lo) lo = d;
+      if (d > hi) hi = d;
+    }
+  }
+  return { lo: lo, hi: hi };
 }
 
 /** The mitre in degrees on a 0.1 grid, 0..359.9; 0 = square. Kept in tenths
@@ -266,13 +303,12 @@ function getCutPlaneLocal(model) {
   const f = cutFrame(model);
   if (!f) return null;
   const mm = cutMmAt(state.cutT == null ? 0.5 : state.cutT, f.span);
+  // The plane is n.x = origin + mm; in the cut frame, whose `axis` runs along
+  // n, that is the coordinate `origin + mm` (square: the piece's own).
   const out = { axis: f.axis, plateAxis: f.plateAxis, plane: f.origin + mm, mm: mm, bbox: f.bbox, span: f.span,
                 t: mm / f.span, origin: f.origin, lo: f.lo, hi: f.hi, localBox: f.bbox,
                 deg: f.deg, turn: f.turn, frame: f.back };
   if (f.turn) {
-    const P = f.bbox.getCenter(new THREE.Vector3());
-    P[f.axis] = f.origin + mm;
-    out.plane = P.applyMatrix4(f.turn)[f.axis];
     const b = f.bbox, c = new THREE.Vector3(), box = new THREE.Box3();
     for (let i = 0; i < 8; i++) {
       box.expandByPoint(c.set(i & 1 ? b.max.x : b.min.x, i & 2 ? b.max.y : b.min.y, i & 4 ? b.max.z : b.min.z)
@@ -300,11 +336,41 @@ function setCutMm(mm) {
   updateCutHelper();
 }
 
+/** The point (in the piece's frame) the plane turns about when the mitre
+    changes: where it crosses the piece's centre line, when it does inside
+    the piece; else the foot of the perpendicular from the piece's centre (a
+    plane at 90, or near it, runs along the centre line, so it has no
+    crossing to keep). Position `t` is read in the frame `f`. */
+function cutPivotLocal(f, t) {
+  const d = f.origin + cutMmAt(t, f.span);               // the plane: n.x = d
+  const n = f.normal, C = f.bbox.getCenter(new THREE.Vector3());
+  const nd = n.dot(C), na = n[f.axis];
+  if (Math.abs(na) > 1e-6) {
+    const x = C[f.axis] + (d - nd) / na;
+    if (x >= f.bbox.min[f.axis] && x <= f.bbox.max[f.axis]) {
+      const P = C.clone();
+      P[f.axis] = x;
+      return P;
+    }
+  }
+  return C.addScaledVector(n, d - nd);
+}
+
 /** Set the mitre (degrees clockwise seen from above; 0 = square), to the
-    nearest 0.1. The plane keeps crossing the centre line where it did. */
+    nearest 0.1. The plane turns about the pivot it had (cutPivotLocal): it
+    keeps crossing the centre line where it did, and near 90, where it has no
+    crossing, it turns about its foot from the piece's centre. The position
+    is held unsnapped through the turn, so a run of 0.1 steps does not walk
+    the plane off its pivot; the readout snaps it, as ever. */
 function setCutMiter(deg) {
+  const m = getActiveModel();
+  const was = cutMiterDeg();
+  const f0 = m ? cutFrame(m) : null;
+  const pivot = f0 ? cutPivotLocal(f0, state.cutT == null ? 0.5 : state.cutT) : null;
   state.cutMiterDeg = Number(deg) || 0;
   state.cutMiterDeg = cutMiterDeg();
+  const f1 = pivot && cutMiterDeg() !== was ? cutFrame(m) : null;
+  if (f1) state.cutT = Math.min(1, Math.max(0, (f1.normal.dot(pivot) - f1.origin) / f1.span));
   syncCutUI();
   updateCutHelper();
 }
