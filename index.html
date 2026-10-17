@@ -700,16 +700,14 @@
           <!-- CONNECT: the builder. Two anchors say where, the card says what runs
                between them (String, Ribbon, Tube, Tapered) and whether it is welded
                into the pieces or kept as one of its own (app-connect.js,
-               nso_connect.js). Bridge, in Add, stays the quick gap-fill.
+               nso_connect.js). Bridge, in Add, stays the quick gap-fill. Opening the
+               column opens the card and arms the anchor picks; no button in between.
                docs/CONNECT.md. -->
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-connect">
             <summary class="vp-bar-btn" title="Build a connector between two anchors: a string, a ribbon, a tube or a taper - welded into the pieces, or kept as a piece of its own">Connect</summary>
             <div class="vp-menu-body vp-top-body">
-              <div class="vp-row vp-row-full vp-row-bridge">
-                <button id="btn-connect" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="connect-panel"
-                        title="Click anchor A on a piece, orbit as you like, click anchor B. A face is its centre, an edge its middle (a ribbon takes the whole edge), a point itself. Then pick what runs between them and Set. Every connector is straight.">Connect</button>
-              </div>
-              <div class="vp-bend-panel vp-bridge-panel" id="connect-panel" hidden>
+              <div class="vp-bend-panel vp-bridge-panel" id="connect-panel" hidden
+                   title="Click anchor A on a piece, orbit as you like, click anchor B. A face is its centre, an edge its middle (a ribbon takes the whole edge), a point itself. Then pick what runs between them and Set. Every connector is straight.">
                 <p id="connect-readout" class="bend-readout">—</p>
                 <p id="connect-a-text" class="bend-readout">Anchor A: — click a piece</p>
                 <p id="connect-b-text" class="bend-readout">Anchor B: — click a piece</p>
@@ -752,15 +750,15 @@
               </div>
             </div>
           </details>
-          <!-- JOIN: Join (Start / Complete / Cancel) and A-B-C, the two column
-               menus merged; each keeps its own card. -->
+          <!-- JOIN: Join (pick A and B, Complete / Cancel) and A-B-C, the two column
+               menus merged; each keeps its own card. Opening the column starts the
+               Join session and shows the Join card (app-join.js, joinWireCard). -->
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-joins">
             <summary class="vp-bar-btn" title="Join two pieces (Start, pick A and B, Complete), or three at once with A-B-C">Join</summary>
             <div class="vp-menu-body vp-top-body">
               <details class="vp-menu vp-sub-menu" id="menu-join">
                 <summary title="Start a Join and pick the pieces A, B and C">Join</summary>
                 <div class="vp-menu-body vp-top-body">
-                  <button id="btn-join-start" class="btn btn-secondary" type="button">Start Join</button>
                   <div class="join-slots">
                     <button type="button" class="join-slot" id="join-slot-a" data-slot="a"><span class="join-badge join-badge-a">A</span><span class="join-slot-name" id="join-name-a">Pick piece A</span></button>
                     <button type="button" class="join-slot" id="join-slot-b" data-slot="b"><span class="join-badge join-badge-b">B</span><span class="join-slot-name" id="join-name-b">Pick piece B</span></button>
@@ -1780,7 +1778,7 @@
        app-bridge.js (the pick and the overlay it reuses), nso_path_sweep.js
        and nso_assemble.js. See docs/CONNECT.md. -->
   <script src="nso_connect.js?v=connect1"></script>
-  <script src="app-connect.js?v=connect1"></script>
+  <script src="app-connect.js?v=nogate1"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=polish2"></script>
@@ -1795,7 +1793,7 @@
   <script src="app-stock.js?v=shapes1"></script>
   <script src="app-assemble.js?v=asm2"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
-  <script src="app-join.js?v=helpmrg1"></script>
+  <script src="app-join.js?v=nogate1"></script>
   <script src="app-center-lock.js?v=pull1"></script>
   <script src="app-oversize-washer.js?v=oversize2"></script>
   <script src="app-join-triple.js?v=triple1"></script>

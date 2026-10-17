@@ -20,6 +20,7 @@ const fs = require('fs');
 const os = require('os');
 const { execFileSync } = require('child_process');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-flipport-'));
@@ -67,7 +68,7 @@ const gsum = g => g.j ? ('tris ' + g.j.triangles + ', open ' + g.j.open_edges + 
 
 const selectRow = (page, id) => page.click(`.model-item[data-edit-id="${id}"]`);
 async function joinAB(page, idA, idB) {
-  await page.click('#btn-join-start');
+  await openJoin(page);
   await page.click('#join-slot-a'); await selectRow(page, idA);
   await page.click('#join-slot-b'); await selectRow(page, idB);
   return page.evaluate(() => ({ session: state.joinSession, a: state.editId, b: state.joinPartnerId }));
@@ -249,7 +250,7 @@ withApp(async (page, logs) => {
   console.log('\n=== 8. nothing else on the page broke ===');
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   check('no uncaught page errors anywhere in this run', errs.length === 0, errs.join(' | '));
-  const missing = await page.evaluate(() => ['btn-join-start','btn-join','btn-subtract','btn-seat-flush',
+  const missing = await page.evaluate(() => ['btn-join','btn-subtract','btn-seat-flush',
     'btn-flip-port','btn-cap-open','btn-join-clear'].filter(i => !document.getElementById(i)));
   check('every Join button still present', missing.length === 0, missing.join(','));
 

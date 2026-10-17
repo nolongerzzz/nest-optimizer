@@ -48,6 +48,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { withApp, loadSTL, statusOf } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
 
 let fails = 0;
 const check = (name, cond, detail) => {
@@ -659,8 +660,7 @@ withApp(async (page, logs) => {
     check(name + ': cut into two', !!r.got && r.plate.length === 2, r.status);
     if (r.plate.length !== 2) continue;
     // Join through its own card, picking A and B on the plate with the mouse.
-    await clickSummary('menu-join');
-    await page.click('#btn-join-start');
+    await openJoin(page);
     await page.click('#join-slot-a');
     await clickPieceAt(r.plate[0].id, 0.5);
     await page.click('#join-slot-b');

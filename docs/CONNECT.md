@@ -9,6 +9,17 @@ Files: `nso_connect.js` (engine, headless), `app-connect.js` (the card),
 `tools/nso_connect_test.js` (`npm run connect:test`), `tools/nso_connect_drive.js`
 (`npm run connect:drive`, screenshots to `tools/connect-out/`, git-ignored).
 
+## Opening and closing: no gate
+
+The Connect column button is the switch. One click opens the card and arms the
+anchor picks (hover lights a target, the first click is A) - there is no
+"Connect" button inside it to press first. The card closes, and the picks, the
+ghost and the hover go with it, when you press the column button again, press
+Escape with nothing picked (the first Escape drops the picks, as it always did),
+press Cancel with nothing picked, open another column button, or double-click
+the plate. `tools/nso_page_manifest_test.js` keeps it that way: no column card
+may be a single button that only toggles another panel.
+
 ## Picking: two clicks
 
 Click anchor A on a piece; it stays marked. Orbit, pan and zoom as much as you

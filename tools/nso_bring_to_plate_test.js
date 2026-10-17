@@ -36,6 +36,7 @@
    7. Raise and Lower are unchanged. */
 
 const { withApp, openMenuFor } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
 
 let fails = 0;
 const check = (name, cond, detail) => {
@@ -97,7 +98,7 @@ withApp(async (page, logs) => {
 
   /* ---------- 2. a seated piece comes down in one press ---------- */
   console.log('\n--- 2. a piece Seat (support) stacked on the target ---');
-  await page.click('#btn-join-start');
+  await openJoin(page);
   await page.click('#join-slot-a'); await selectRow(page, idA);
   await page.click('#join-slot-b'); await selectRow(page, idB);
   await dragTo(page, idB, 0, 0);
@@ -142,7 +143,7 @@ withApp(async (page, logs) => {
        FROM those fields - so its first press throws the seat's angle away, and
        the piece is still in the air. */
     const seatOnSlope = async () => {
-      await page.click('#btn-join-start');
+      await openJoin(page);
       await page.click('#join-slot-a'); await selectRow(page, idA);
       await page.click('#join-slot-b'); await selectRow(page, idB);
       await dragTo(page, idB, 0, 0);

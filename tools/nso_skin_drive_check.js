@@ -23,6 +23,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { withApp, loadSTL, openFinishMenu, ROOT } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 let fails = 0;
@@ -132,7 +133,7 @@ withApp(async (page, logs) => {
     JSON.stringify(present.options) === '["crosshatch","crosshatch-fine","zigzag","ring"]', present.options.join(','));
 
   console.log('\n=== 2. Start Join, Pick A, Pick B - by clicking ===');
-  await page.click('#btn-join-start');
+  await openJoin(page);
   await page.click('#join-slot-a');
   await page.click(`.model-item[data-edit-id="${idA}"]`);
   await page.click('#join-slot-b');

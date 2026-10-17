@@ -40,6 +40,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
 const { soupMinDistance, soupShells } = require('./nso_soup_distance');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
@@ -182,7 +183,7 @@ async function oversizedPair(page) {
     return { ok: !!r.ok, id: r.modelId, extent: r.extent };
   });
   const idB = built.id;
-  await page.click('#btn-join-start');
+  await openJoin(page);
   await page.evaluate(([a, b]) => {
     state.joinArmed = 'a'; assignJoinClick(a);
     state.joinArmed = 'b'; assignJoinClick(b);

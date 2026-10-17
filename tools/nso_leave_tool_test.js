@@ -23,6 +23,7 @@
 const path = require('path');
 const fs = require('fs');
 const { withApp, loadSTL, openFinishMenu, ROOT } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
 
 let fails = 0;
 const check = (name, cond, detail) => {
@@ -191,10 +192,10 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 3 */
-  console.log('\n=== 3. Start Join, pick A, double-click ===');
+  console.log('\n=== 3. Open Join, pick A, double-click ===');
   {
-    await page.evaluate(() => document.getElementById('btn-join-start').scrollIntoView());
-    await page.click('#btn-join-start');
+    await page.evaluate(() => document.getElementById('menu-joins').scrollIntoView());
+    await openJoin(page);
     await page.click('#join-slot-a');
     const pc = await pieceAt(0);
     await page.mouse.click(pc.x, pc.y);

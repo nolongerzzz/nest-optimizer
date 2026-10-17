@@ -38,6 +38,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
+const { openJoin } = require('./nso_join_card');
 
 const fx = f => path.join(ROOT, 'fixtures', f);
 let fails = 0;
@@ -135,7 +136,7 @@ const moveTo = (page, id, x, z) => page.evaluate(([id, x, z]) => {
 
 /* Pick the three slots through the shipped buttons and list rows. */
 async function pickTrio(page, idA, idB, idC) {
-  await page.click('#btn-join-start');
+  await openJoin(page);
   await page.click('#join-slot-a');
   await page.click(`.model-item[data-edit-id="${idA}"]`);
   await page.click('#join-slot-b');
@@ -508,6 +509,55 @@ withApp(async (page, logs) => {
   const post = await page.evaluate(scene);
   check('and four undos put every piece back',
     [idA, idB, idC].every(id => samePose(byId(post, id), byId(pre, id))));
+
+  /* ============ 12. no gate: the Join column is the switch ============ */
+  console.log('\n=== 12. no Start Join: the column button starts the session and shows the Join card ===');
+  await page.click('#btn-join-clear');
+  await page.evaluate(() => document.querySelectorAll('.vp-menu').forEach(d => { d.open = false; }));
+  const jstate = () => page.evaluate(() => ({ session: state.joinSession, col: document.getElementById('menu-joins').open,
+    card: document.getElementById('menu-join').open, abc: document.getElementById('menu-abc').open,
+    slots: (() => { const e = document.getElementById('join-slot-a'), b = e.getBoundingClientRect();
+      const hit = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2);
+      return b.height > 0 && !!hit && e.contains(hit); })(),
+    a: state.editId, b: state.joinPartnerId }));
+  check('there is no #btn-join-start, and no button in the column card but the real ones',
+    await page.evaluate(() => !document.getElementById('btn-join-start') &&
+      ['join-slot-a', 'join-slot-b', 'join-slot-c', 'btn-join', 'btn-join-clear'].every(id => document.getElementById(id))));
+  let J = await jstate();
+  check('shut: no session, the slots not on screen', !J.session && !J.col && !J.slots, JSON.stringify(J));
+  await page.click('#menu-joins > summary');
+  J = await jstate();
+  check('one click on the column button: session live, the Join card open, its slots on screen',
+    J.session && J.col && J.card && !J.abc && J.slots && J.a == null && J.b == null, JSON.stringify(J));
+  await page.click('#join-slot-a'); await page.click(`.model-item[data-edit-id="${idA}"]`);
+  await page.click('#join-slot-b'); await page.click(`.model-item[data-edit-id="${idB}"]`);
+  await page.click('#menu-joins > summary');
+  J = await jstate();
+  check('the column button again shuts it: the session is Cancelled (B\'s pick gone, the slots off screen)',
+    !J.session && !J.col && !J.slots && J.b == null, JSON.stringify(J));
+  check('...and the Cancel Join teardown ran (A\'s slot reads empty)',
+    await page.evaluate(() => document.getElementById('join-name-a').textContent === 'Pick piece A'));
+  await page.click('#menu-joins > summary');
+  await page.click('#join-slot-a'); await page.click(`.model-item[data-edit-id="${idA}"]`);
+  await page.keyboard.press('Escape');
+  J = await jstate();
+  check('Escape shuts the card and ends the session', !J.session && !J.col, JSON.stringify(J));
+  await page.click('#menu-joins > summary');
+  await page.click('#join-slot-a'); await page.click(`.model-item[data-edit-id="${idA}"]`);
+  await page.click('#join-slot-b'); await page.click(`.model-item[data-edit-id="${idB}"]`);
+  await page.click('#menu-seat > summary');
+  J = await jstate();
+  check('another column button shuts the card but leaves the A and B it holds for Seat, Align and Center lock',
+    !J.col && J.session && J.a === idA && J.b === idB, JSON.stringify(J));
+  await page.click('#menu-joins > summary');
+  J = await jstate();
+  check('...and coming back to Join finds them as they were, not restarted', J.col && J.session && J.a === idA && J.b === idB, JSON.stringify(J));
+  await page.click('#btn-join-clear');
+  J = await jstate();
+  check('Cancel Join stays in the card: session off, the card still open', !J.session && J.col, JSON.stringify(J));
+  await page.click('#join-slot-a');
+  check('...and a slot click starts a session again', (await jstate()).session);
+  await page.click('#menu-joins > summary');
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   check('no page errors', errs.length === 0, errs.join(' | '));

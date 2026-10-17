@@ -97,7 +97,7 @@ const HOLDS = {
   'menu-scale': ['scale-card', 'scale-factor', 'scale-target', 'btn-scale-fit'],
   'menu-cut': ['edit-card', 'cut-miter-dial', 'cut-slider', 'cut-mm', 'btn-cut'],
   'menu-crop': ['crop-card', 'btn-crop-axis-x', 'btn-crop-axis-z', 'chk-crop-box', 'btn-crop', 'btn-crop-lockin', 'btn-detach', 'btn-reattach'],
-  'menu-joins': ['menu-join', 'btn-join-start', 'join-slot-a', 'join-slot-b', 'join-slot-c', 'btn-join', 'btn-join-clear',
+  'menu-joins': ['menu-join', 'join-slot-a', 'join-slot-b', 'join-slot-c', 'btn-join', 'btn-join-clear',
                  'menu-abc', 'triple-mode', 'btn-join-triple'],
   'menu-seat': ['btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid'],
   'menu-supports': ['supports-card', 'btn-sup-all', 'btn-sup-none', 'btn-sup-paint', 'sel-sup-paint', 'sup-style', 'sup-size',
@@ -150,7 +150,7 @@ const BEFORE = ['menu-import', 'file-input', 'btn-load-stl', 'btn-library', 'men
   'btn-cut-nudge-m', 'cut-mm', 'btn-cut-nudge-p', 'btn-cut', 'btn-cut-right-side-out', 'menu-crop', 'edit-axis',
   'btn-crop-axis-x', 'btn-crop-axis-z', 'chk-crop-box', 'crop-start-mm', 'crop-end-mm', 'btn-crop', 'crop-up-from',
   'crop-up-to', 'crop-across-from', 'crop-across-to', 'chk-crop-lift', 'crop-move-dx', 'crop-move-dy', 'crop-move-dz',
-  'btn-crop-lockin', 'btn-detach', 'btn-reattach', 'menu-joins', 'menu-join', 'btn-join-start', 'join-slot-a', 'join-slot-b',
+  'btn-crop-lockin', 'btn-detach', 'btn-reattach', 'menu-joins', 'menu-join', 'join-slot-a', 'join-slot-b',
   'join-slot-c', 'btn-join', 'btn-join-clear', 'menu-abc', 'triple-mode', 'triple-gap-ab', 'triple-gap-bc', 'btn-join-triple',
   'btn-lift', 'menu-seat', 'btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'oversize-gap',
   'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid', 'menu-supports', 'btn-sup-all', 'btn-sup-none', 'btn-sup-paint',
@@ -430,7 +430,10 @@ withApp(async (page, logs) => {
       await clickFace(page, '#' + id + ' > summary');
       await page.waitForTimeout(120);
       const after = await page.evaluate(() => ({ i: state.selectedIndex, id: state.editId }));
-      if (after.i !== before.i || after.id !== before.id) keeps.push(id + ' ' + JSON.stringify(before) + ' -> ' + JSON.stringify(after));
+      // Opening Join starts the session, and Start Join always cleared the selection (slot A is picked afresh);
+      // shutting the card then leaves it as it found it.
+      const want = id === 'menu-joins' ? { i: -1, id: null } : before;
+      if (after.i !== want.i || after.id !== want.id) keeps.push(id + ' ' + JSON.stringify(want) + ' -> ' + JSON.stringify(after));
     }
     check('every drop-down opens on a click and holds the controls the ticket gives it', holdFails.length === 0,
       holdFails.join('; ') || DROPDOWNS.length + ' drop-downs');
@@ -720,7 +723,9 @@ withApp(async (page, logs) => {
       await shutAll(page);
       let ok = true;
       for (const d of chain) {
-        const r = await clickFace(page, d + ' > summary');
+        // A card the one before it opened by itself (Join's column shows the Join card) is already there: a click would shut it.
+        const there = await page.evaluate((d) => document.querySelector(d).open, d);
+        const r = there ? { ok: true } : await clickFace(page, d + ' > summary');
         const open = await page.evaluate((d) => document.querySelector(d).open, d);
         if (!r.ok || !open) { ok = false; list.forEach(c => unreachable.push(c.id + ' (at ' + d + ': ' + (r.why || 'did not open') + ')')); break; }
       }
