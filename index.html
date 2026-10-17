@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=detectfirst1" />
+  <link rel="stylesheet" href="styles.css?v=detectfirst2" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -782,8 +782,8 @@
             <div class="vp-menu-body vp-top-body sup-card" id="supports-card" data-state="pick">
               <p id="sup-count" class="bend-readout sup-count">Click a piece to see where it needs holding.</p>
               <label class="vp-bend-field" for="sup-angle">Angle
-                <input type="number" id="sup-angle" value="45" min="1" max="89" step="1" aria-label="Overhang angle, degrees"
-                       title="A face hangs when it leans past this angle off the build plate: 45 is the usual limit, a smaller angle finds only the flatter undersides. The outlines follow as you type."><span>&deg;</span></label>
+                <input type="number" id="sup-angle" value="60" min="1" max="89" step="1" aria-label="Overhang angle, degrees"
+                       title="A face hangs when it is within this angle of horizontal. 60 is Bambu's 30 degree overhang threshold (Bambu measures from vertical: 90 minus this). A smaller angle finds only the flatter undersides. The outlines follow as you type."><span id="sup-angle-note" class="sup-angle-note">60&deg; &middot; Bambu 30&deg;</span></label>
               <div class="sup-go-row">
                 <button id="btn-sup-all" class="btn btn-primary sup-go" type="button" disabled
                         title="Build supports for every outlined area. When the piece already has supports they are all replaced. One Undo puts it back. A build that cannot finish says why and adds nothing.">Generate</button>
@@ -1736,7 +1736,7 @@
   <script src="app-gscope-support.js?v=exposed1"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
-  <script src="app-supports-card.js?v=detectfirst1"></script>
+  <script src="app-supports-card.js?v=detectfirst2"></script>
   <script src="app-gscope-slice.js?v=slice3"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
