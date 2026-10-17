@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=pullb6x1" />
+  <link rel="stylesheet" href="styles.css?v=detectfirst1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -766,22 +766,31 @@
             </div>
           </details>
           <!-- SUPPORTS: one card on the main page (app-supports-card.js,
-               docs/SUPPORTS-CARD.md), a verb with a state. Click a piece: its
-               overhang areas are outlined on it and the card says how many.
-               GENERATE builds; the card is locked while it does; once built it
-               reads the result and offers REGENERATE, REMOVE ALL and REMOVE.
-               G-scope's support row stays for layer-view work; both call the
-               same planner. -->
+               docs/SUPPORTS-CARD.md), a verb with a state. Opening it detects
+               at once on the selected piece: every hanging area is outlined on
+               it and the card says how many, at what angle, on which piece -
+               the angle is editable right here. Click an outline to leave that
+               area out (or put it back); Shift-click the piece to add a spot.
+               GENERATE builds; the card is locked while it does, and a build
+               ends as BUILT or as "Could not build: ...". Once built it reads
+               the result (held / unsupported / unreachable, a row for each
+               area that needs a look) and offers REGENERATE, REMOVE ALL and
+               REMOVE. G-scope's support row stays for layer-view work; both
+               call the same planner. -->
           <details class="vp-menu vp-shell-menu vp-col-menu" id="menu-supports">
-            <summary class="vp-bar-btn" title="Outline where a piece overhangs, then generate the supports that hold it">Supports</summary>
+            <summary class="vp-bar-btn" title="Outline where a piece hangs in air, then generate the supports that hold it">Supports</summary>
             <div class="vp-menu-body vp-top-body sup-card" id="supports-card" data-state="pick">
               <p id="sup-count" class="bend-readout sup-count">Click a piece to see where it needs holding.</p>
+              <label class="vp-bend-field" for="sup-angle">Angle
+                <input type="number" id="sup-angle" value="45" min="1" max="89" step="1" aria-label="Overhang angle, degrees"
+                       title="A face hangs when it leans past this angle off the build plate: 45 is the usual limit, a smaller angle finds only the flatter undersides. The outlines follow as you type."><span>&deg;</span></label>
               <div class="sup-go-row">
                 <button id="btn-sup-all" class="btn btn-primary sup-go" type="button" disabled
-                        title="Build supports for every outlined area. When the piece already has supports they are all replaced. One Undo puts it back.">Generate</button>
+                        title="Build supports for every outlined area. When the piece already has supports they are all replaced. One Undo puts it back. A build that cannot finish says why and adds nothing.">Generate</button>
                 <button id="btn-sup-none" class="btn btn-secondary" type="button" hidden disabled
                         title="Take every support off this piece. The areas stay outlined. One Undo puts them back.">Remove all</button>
               </div>
+              <ul id="sup-rows" class="sup-rows" hidden aria-label="Areas that need a look"></ul>
               <div class="vp-row vp-row-full">
                 <button id="btn-sup-remove" class="btn btn-secondary" type="button" hidden disabled
                         title="Take off the one support you clicked. One Undo puts it back.">Remove</button>
@@ -797,19 +806,7 @@
                        title="The cross-section side of the struts, trunks and branches. Never below the nozzle's wall floor - the planner raises it if asked for less."><span>mm</span></label>
               <label class="vp-check" for="sup-rest" title="Off: every support stands on the plate, and a spot with no clear way down is left unreachable. On: such a spot may be held from a part below it.">
                 <input type="checkbox" id="sup-rest"> May rest on the part</label>
-              <details class="sup-more" id="sup-more">
-                <summary title="Add or take away spots by painting on the piece">Paint spots</summary>
-                <div class="vp-row vp-row-pair">
-                  <button id="btn-sup-paint" class="btn btn-secondary btn-sup-paint" type="button" aria-pressed="false" disabled
-                          title="Paint on the piece. Hold adds spots to hold where you drag, one grid step apart; Skip takes spots away so nothing is built there. Each stroke is one Undo. Click again to stop.">Paint</button>
-                  <select id="sel-sup-paint" class="vp-select" aria-label="Paint mode"
-                          title="Hold: add spots where you paint. Skip: leave the spots you paint over unsupported.">
-                    <option value="hold">Hold</option>
-                    <option value="skip">Skip</option>
-                  </select>
-                </div>
-              </details>
-              <p class="hint sup-hint">Click an outlined area to leave it out, or put it back. Click a support to pick it. Shift-click the piece to add a spot.</p>
+              <p class="hint sup-hint">Click an outlined area to leave it out, or put it back. Shift-click the piece to add a spot. Click a support to pick it.</p>
             </div>
           </details>
           <!-- ADD: what builds material onto a piece - Fill / Densify, Foam, Thicken,
@@ -1739,7 +1736,7 @@
   <script src="app-gscope-support.js?v=exposed1"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
-  <script src="app-supports-card.js?v=supwork1"></script>
+  <script src="app-supports-card.js?v=detectfirst1"></script>
   <script src="app-gscope-slice.js?v=slice3"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the

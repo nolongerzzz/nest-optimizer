@@ -2,26 +2,38 @@
    The column's SUPPORTS drop-down (make/edit group, after Seat): one card on
    the main page, a verb with a state. docs/SUPPORTS-CARD.md.
 
-   No dots on the mesh. Each overhang AREA (one region of the beacon grid) is
+   No dots on the mesh. Each hanging AREA (one region of the beacon grid) is
    outlined faintly on the surface: an outline of the area's cells, not a grid.
 
-   IDLE      a piece is picked. The card says "N overhang areas"; GENERATE is
-             the one big button; Style, Size and "May rest on the part" sit
-             under it. A click on an outlined area leaves it out (outline
-             grey, the count drops) or puts it back. Nothing builds on a click.
-   BUILDING  GENERATE was pressed. The button reads "Building…", the card is
-             locked, a spinner turns over the piece.
-   BUILT     "Built: N supports · M of K areas held · J areas not reachable
-             from the plate". GENERATE is now REGENERATE (it replaces every
-             support on the piece); REMOVE ALL sits beside it. A click on a
-             built support picks it; REMOVE takes that one. Areas the plate
-             could not reach stay outlined in red.
-   Paint Hold / Skip is a secondary row, collapsed; shift-click on the piece
-   still adds a manual spot (an area of its own, or part of the nearest one).
-   The HUD (#status) mirrors the state line and nothing else. Every state
-   change - leaving an area out, a manual or painted spot, a build, a removal -
+   DETECT FIRST. Opening the card, or picking another piece while it is open,
+   runs detection at once on the selected piece (the only piece on the plate,
+   when nothing is selected). Every hanging area is outlined, and the card says
+   "N hanging areas at 45\u00b0 on <piece>" with the angle editable right there:
+   a new angle re-detects. Nothing is generated yet.
+   IDLE      the areas are editable before GENERATE: a click on an outline
+             leaves that area out (it dims) or puts it back; Shift-click on the
+             piece adds a spot (one beacon, outlined like the rest). Nothing
+             builds on a click. Style, Size and "May rest on the part" sit under
+             GENERATE.
+   BUILDING  GENERATE was pressed. The button reads "Building\u2026" (with the
+             seconds once it has run past 10), the card is locked, a spinner
+             turns over the piece. The planner runs in a worker so the page, the
+             counter and the watchdog stay live; the watchdog is 60 s.
+   BUILT     "Built: M supports \u00b7 held H \u00b7 unsupported K \u00b7 unreachable U".
+             Every area is exactly one of the three: held (every spot held from
+             the plate or resting on the part), unreachable (tried, no route to
+             the plate), unsupported (left out, or the planner gave it nothing).
+             The ones that need a look have a row under the readout; a click on
+             a row frames the area. GENERATE is now REGENERATE (it replaces every
+             support on the piece); REMOVE ALL sits beside it. A click on a built
+             support picks it; REMOVE takes that one. Areas the plate could not
+             reach stay outlined in red.
+   A build ENDS IN A STATE, every time: BUILT, or "Could not build: <reason> -
+   nothing was added" (planner refusal, exception, or the watchdog). On a
+   failure the plate is exactly as before and Undo has nothing to undo.
+   Every state change - leaving an area out, a manual spot, a build, a removal -
    is ONE Undo (a supportSwap step; its onUndone puts the card's own record of
-   the piece back).
+   the piece back). The angle is a setting, like Style: not an Undo step.
 
    WHAT IS REUSED, AND NOTHING HERE REPLACES
      detection   NSO_SupportAim.detectOverhangs - its beacon grid (det.beacons,
@@ -55,21 +67,28 @@ var NSO_SUPPORTS_CARD = (function () {
      is left out, red when the plate could not reach all of it. */
   var OUTLINE = { on: 0xffffff, off: 0x7b8494, red: 0xff2d2d };
   var OUTLINE_ALPHA = { on: 0.55, off: 0.6, red: 0.95 };
-  var ANGLE_DEG = 45;            // detectOverhangs' own default
+  var ANGLE_DEFAULT = 45;        // detectOverhangs' own default
+  var ANGLE_MIN = 1, ANGLE_MAX = 89;
+  var ANGLE_DEBOUNCE_MS = 220;   // typing "3" on the way to "30" does not detect at 3
   var JOIN_PITCHES = 1.5;        // a manual beacon this close to a region joins it (the grid's own z rule)
-  var PAINT_R_PITCHES = 0.5;     // the paint stroke's radius: one grid row wide
   var PICK_PITCHES = 1.0;        // a click this close to a beacon is in that beacon's area
   var UP_MAX = 0.26;             // a face whose normal points up more than this (15 deg) holds nothing
   var ORDER = 30;                // over the piece and its outline
+  var WATCHDOG_MS = 60000;       // a build that has not ended by now is stopped, and says so
+  var ELAPSED_FROM_MS = 10000;   // the readout counts seconds once a build has run this long
+  /* The planner's files, in index.html's order: what the build worker loads. */
+  var ENGINE = ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.js', 'nso_path_sweep.js',
+    'nso_support_tree.js', 'nso_support_gridpack.js'];
   /* The card's state when the picked piece has no beacons at all. Detection
      only asks what hangs in air; a tall, thin piece that may sway as it
      prints is a different question, not asked yet, and the words say so. */
   var NOTHING = 'Nothing hangs in air. Tall-and-thin sway isn\'t checked yet.';
 
   var S = {
-    open: false, hostId: null, selSupport: null, paint: null, stroke: null, busy: false,
-    det: null, occ: {}, eff: null, layer: null, ring: null, raf: 0, sig: '', mem: {}, msg: null,
-    hud: null, spin: null, geo: null
+    open: false, hostId: null, selSupport: null, busy: false,
+    det: null, occ: {}, eff: null, layer: null, raf: 0, sig: '', mem: {}, msg: null,
+    spin: null, geo: null, angle: ANGLE_DEFAULT, angleTimer: 0,
+    watchdogMs: WATCHDOG_MS, planner: null, job: null, elapsed: 0
   };
 
   function $(id) { return document.getElementById(id); }
@@ -144,10 +163,10 @@ var NSO_SUPPORTS_CARD = (function () {
     var p = placedOf(S.hostId), m = modelOf(S.hostId);
     if (!p || !m) return null;
     var occ = others(S.hostId);
-    var key = poseKey(p) + '#' + occ.map(poseKey).join('#') + '#' + ((typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0);
+    var key = poseKey(p) + '#' + occ.map(poseKey).join('#') + '#' + ((typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0) + '@' + S.angle;
     if (S.det && S.det.key === key) return S.det;
     var soup = worldUp(p.mesh), sk = skipListFor(m, p, soup);
-    var opts = { skipList: sk.list, angleDeg: ANGLE_DEG, occluders: occ.map(occluderSoup) };
+    var opts = { skipList: sk.list, angleDeg: S.angle, occluders: occ.map(occluderSoup) };
     var det = sk.reason ? null : window.NSO_SupportAim.detectOverhangs(soup, opts);
     var err = sk.reason || (det && !det.ok ? det.reason : null) ||
       (det && !det.beacons ? (det.beaconsReason || 'no beacon grid') : null);
@@ -168,9 +187,7 @@ var NSO_SUPPORTS_CARD = (function () {
    * The beacons the card shows and builds: the detected set, then the edits
    * in the order they were made. A manual beacon joins the area of the
    * nearest beacon within JOIN_PITCHES pitches, or starts an area of its
-   * own (numbered after detection's); a Skip disc takes out every beacon
-   * within its radius - detected or manual, as the list stands then. An
-   * 'exclude' leaves out the area of the beacon nearest its point, an
+   * own (numbered after detection's). An 'exclude' leaves out the area of the beacon nearest its point, an
    * 'include' puts it back (the list as it stands then, so ids stay put).
    */
   function effective() {
@@ -180,8 +197,12 @@ var NSO_SUPPORTS_CARD = (function () {
     var pitch = det.grid ? det.grid.pitch : 3;
     var regionOf = new Map();
     (det.beaconRegions || []).forEach(function (r) { r.beacons.forEach(function (b) { regionOf.set(b, r.id); }); });
-    var list = (det.beacons || []).map(function (b, i) {
-      return { key: 'd' + i, x: b.x, y: b.y, z: b.z, normal: b.normal.slice(), need: b.need, region: regionOf.get(b), manual: false };
+    /* A detected beacon is named by where it is, not by its place in the list:
+       a new angle detects a different set, and the supports already standing
+       (and the spots a build could not reach) must still find their beacons. */
+    var list = (det.beacons || []).map(function (b) {
+      return { key: 'd' + b.x.toFixed(2) + ',' + b.y.toFixed(2) + ',' + b.z.toFixed(2), x: b.x, y: b.y, z: b.z,
+        normal: b.normal.slice(), need: b.need, region: regionOf.get(b), manual: false };
     });
     var left = {};
     var next = (det.beaconRegions || []).length;
@@ -194,8 +215,6 @@ var NSO_SUPPORTS_CARD = (function () {
         list.push({ key: 'm' + op.id, x: w[0], y: w[1], z: w[2], normal: n,
           need: { kind: side ? 'side' : 'face', manual: true }, manual: true,
           region: best && bd <= JOIN_PITCHES * pitch ? best.region : next++ });
-      } else if (op.op === 'skip') {
-        list = list.filter(function (b) { return dist(pt(b), w) > op.r; });
       } else if (op.op === 'exclude' || op.op === 'include') {
         var near = null, nd = Infinity;
         list.forEach(function (b) { var d = dist(pt(b), w); if (d < nd) { nd = d; near = b; } });
@@ -230,41 +249,62 @@ var NSO_SUPPORTS_CARD = (function () {
   }
 
   /* A beacon's state, read off the supports on the plate now and what the
-     last build of its region could not reach. */
+     last build could not reach. */
   function statesFor(eff) {
     var holds = {};
     cardSupports(S.hostId).forEach(function (m) {
       var h = m.nsoSupport.holds || {};
       Object.keys(h).forEach(function (k) { holds[k] = h[k]; });
     });
-    var un = memOf(S.hostId).unreach, out = {};
-    eff.beacons.forEach(function (b) {
-      out[b.key] = holds[b.key] || ((un[b.region] || []).indexOf(b.key) >= 0 ? 'unreachable' : 'planned');
-    });
+    var un = memOf(S.hostId).unreach, lost = {}, out = {};
+    Object.keys(un).forEach(function (r) { un[r].forEach(function (k) { lost[k] = true; }); });
+    eff.beacons.forEach(function (b) { out[b.key] = holds[b.key] || (lost[b.key] ? 'unreachable' : 'planned'); });
     return out;
   }
-  /* The numbers on the BUILT line, over the areas not left out. An area is
-     held when every one of its spots is held from the plate or rests on the
-     part; it is not reachable when the plate could not reach at least one of
-     them. (An area can be neither - spots taken off by hand - and one area is
-     never both.) */
+  /* What one area is, over everything on the piece: HELD when every one of its
+     spots is held from the plate or rests on the part; UNREACHABLE when the
+     last build tried it and the plate could not reach at least one spot (an
+     area with a lost spot is never counted held); UNSUPPORTED otherwise - left
+     out, or something the planner skipped or a Remove took off. Each area is
+     exactly one of the three, so the three counts add up to every area. */
+  function areaKind(rg, st) {
+    if (rg.excluded) return 'unsupported';
+    if (rg.beacons.some(function (b) { return st[b.key] === 'unreachable'; })) return 'unreachable';
+    if (rg.beacons.every(function (b) { return st[b.key] === 'held' || st[b.key] === 'rest'; })) return 'held';
+    return 'unsupported';
+  }
+  /* areas: not left out (what GENERATE would build); left: left out; the
+     rest are the BUILT line's three. */
   function areaStats(eff, st) {
-    var out = { areas: 0, left: 0, held: 0, unreachable: 0, supports: cardSupports(S.hostId).length };
+    var out = { total: eff.regions.length, areas: 0, left: 0, held: 0, unsupported: 0, unreachable: 0,
+      supports: cardSupports(S.hostId).length };
     eff.regions.forEach(function (rg) {
-      if (rg.excluded) { out.left++; return; }
-      out.areas++;
-      var all = rg.beacons.every(function (b) { return st[b.key] === 'held' || st[b.key] === 'rest'; });
-      var un = rg.beacons.some(function (b) { return st[b.key] === 'unreachable'; });
-      if (un) out.unreachable++; else if (all) out.held++;
+      if (rg.excluded) out.left++; else out.areas++;
+      out[areaKind(rg, st)]++;
     });
     return out;
   }
   function builtLine(a) {
-    return 'Built: ' + plural(a.supports, 'support', 'supports') + ' \u00b7 ' + a.held + ' of ' + a.areas +
-      (a.areas === 1 ? ' area' : ' areas') + ' held \u00b7 ' + plural(a.unreachable, 'area', 'areas') + ' not reachable from the plate';
+    return 'Built: ' + plural(a.supports, 'support', 'supports') + ' \u00b7 held ' + a.held +
+      ' \u00b7 unsupported ' + a.unsupported + ' \u00b7 unreachable ' + a.unreachable;
   }
   function idleLine(a) {
-    return plural(a.areas, 'overhang area', 'overhang areas') + (a.left ? ' \u00b7 ' + a.left + ' left out' : '');
+    var m = modelOf(S.hostId);
+    return plural(a.areas, 'hanging area', 'hanging areas') + ' at ' + S.angle + '\u00b0 on ' + (m ? m.name : 'the piece') +
+      (a.left ? ' \u00b7 ' + a.left + ' left out' : '');
+  }
+  var WHY = { unsupported: 'left out or skipped', unreachable: 'no route to the plate' };
+  /* The rows under the BUILT line: every area that is not held, in order. */
+  function rowsFor(eff, st) {
+    var rows = [];
+    eff.regions.forEach(function (rg) {
+      var k = areaKind(rg, st);
+      if (k === 'held') return;
+      var why = k === 'unsupported' ? (rg.excluded ? 'left out' : 'not held') : WHY[k];
+      rows.push({ area: rg.id, kind: k, why: why, spots: rg.beacons.length,
+        text: 'Area ' + (rg.id + 1) + ' \u00b7 ' + k + ' \u00b7 ' + why + ' \u00b7 ' + plural(rg.beacons.length, 'spot', 'spots') });
+    });
+    return rows;
   }
 
   /* ------------------------------------------------------------- drawing */
@@ -386,20 +426,6 @@ var NSO_SUPPORTS_CARD = (function () {
     S.layer = g;
   }
 
-  function showRing(hit) {
-    if (S.ring) { dispose(S.ring); S.ring = null; }
-    if (!hit || !S.paint || !state.scene || !S.eff) return;
-    var R = S.eff.pitch * PAINT_R_PITCHES;
-    var m = overlay(new THREE.Mesh(new THREE.RingGeometry(R * 0.86, R, 32), new THREE.MeshBasicMaterial({
-      color: S.paint === 'skip' ? 0xff2d2d : 0x22d3ee, side: THREE.DoubleSide, transparent: true, opacity: 0.9,
-      depthTest: false, depthWrite: false })), ORDER + 4);
-    m.position.copy(upToView([hit.p[0] + hit.n[0] * 0.05, hit.p[1] + hit.n[1] * 0.05, hit.p[2] + hit.n[2] * 0.05]));
-    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), upToView(hit.n).normalize());
-    m.name = 'supportsCardRing';
-    state.scene.add(m);
-    S.ring = m;
-  }
-
   /* --------------------------------------------------------------- words */
 
   /* The card's state: 'pick' (no piece picked), 'error' (detection refused),
@@ -412,12 +438,6 @@ var NSO_SUPPORTS_CARD = (function () {
     if (!S.eff.beacons.length) return 'nothing';
     if (S.busy) return 'building';
     return memOf(S.hostId).built ? 'built' : 'idle';
-  }
-
-  /* The HUD says what the card's state line says, and nothing else. */
-  function mirror(text, bad) {
-    S.hud = text;
-    if (typeof setStatus === 'function') setStatus(text, !!bad);
   }
 
   function spinner() {
@@ -442,25 +462,28 @@ var NSO_SUPPORTS_CARD = (function () {
     e.style.top = (r.top + (1 - c.y) / 2 * r.height) + 'px';
   }
 
+  function buildingLine() {
+    return S.elapsed * 1000 >= ELAPSED_FROM_MS ? 'Building\u2026 ' + S.elapsed + ' s' : 'Building\u2026';
+  }
+
   function sync() {
     var head = $('sup-count'), card = $('supports-card');
     var hasHost = S.hostId != null && !!placedOf(S.hostId);
-    var eff = S.eff, text, bad = false, cs = cardState(), a = null;
-    if (hasHost && eff && !eff.error && eff.beacons.length) a = areaStats(eff, statesFor(eff));
+    var eff = S.eff, text, bad = false, cs = cardState(), a = null, st = null;
+    if (hasHost && eff && !eff.error && eff.beacons.length) { st = statesFor(eff); a = areaStats(eff, st); }
     if (card) { card.dataset.state = cs; card.classList.toggle('is-locked', !!S.busy); }
+    document.body.classList.toggle('sup-card-open', !!S.open);
     if (S.msg) { text = S.msg.text; bad = !!S.msg.bad; }
     else if (cs === 'pick') text = 'Click a piece to see where it needs holding.';
     else if (cs === 'error') { text = eff.error; bad = true; }
     else if (cs === 'nothing') text = NOTHING;
-    else if (cs === 'building') text = 'Building\u2026';
+    else if (cs === 'building') text = buildingLine();
     else if (cs === 'built') text = builtLine(a);
     else text = idleLine(a);
     if (head) { head.textContent = text; head.classList.toggle('is-bad', bad); }
-    if (S.open) mirror(text, bad);
-    var some = hasHost && eff && !eff.error;
     var en = function (id, on) { var e = $(id); if (e) e.disabled = !on || !!S.busy; };
     var go = $('btn-sup-all');
-    if (go) go.textContent = cs === 'building' ? 'Building\u2026' : cs === 'built' ? 'Regenerate' : 'Generate';
+    if (go) go.textContent = cs === 'building' ? buildingLine() : cs === 'built' ? 'Regenerate' : 'Generate';
     en('btn-sup-all', (cs === 'idle' || cs === 'built') && a && a.areas > 0);
     var none = $('btn-sup-none'), rm = $('btn-sup-remove');
     var wasBuilt = hasHost && memOf(S.hostId).built && (cs === 'built' || cs === 'building');
@@ -468,13 +491,58 @@ var NSO_SUPPORTS_CARD = (function () {
     if (rm) rm.hidden = !wasBuilt;
     en('btn-sup-none', cs === 'built');
     en('btn-sup-remove', cs === 'built' && S.selSupport != null && !!modelOf(S.selSupport));
-    en('btn-sup-paint', some);
-    ['sel-sup-paint', 'sup-style', 'sup-size', 'sup-rest'].forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
-    var pb = $('btn-sup-paint');
-    if (pb) { pb.setAttribute('aria-pressed', S.paint ? 'true' : 'false'); pb.classList.toggle('is-armed', !!S.paint); pb.textContent = S.paint ? 'Paint: on' : 'Paint'; }
+    ['sup-angle', 'sup-style', 'sup-size', 'sup-rest'].forEach(function (id) { var e = $(id); if (e) e.disabled = !!S.busy; });
+    var ang = $('sup-angle');
+    if (ang && document.activeElement !== ang && ang.value !== String(S.angle)) ang.value = String(S.angle);
+    drawRows(cs === 'built' && st ? rowsFor(eff, st) : []);
     var sp = spinner();
     sp.hidden = !(S.open && S.busy);
     placeSpinner();
+  }
+
+  /* The short list under the readout: one row for every area that is not
+     held. Rebuilt only when it changes, so a click on a row is not eaten by a
+     redraw between the press and the release. */
+  function drawRows(rows) {
+    var ul = $('sup-rows');
+    if (!ul) return;
+    var key = JSON.stringify(rows.map(function (r) { return [r.area, r.kind, r.why]; }));
+    ul.hidden = !rows.length;
+    if (ul.dataset.key === key) return;
+    ul.dataset.key = key;
+    ul.textContent = '';
+    rows.forEach(function (r) {
+      var li = document.createElement('li'), b = document.createElement('button');
+      b.type = 'button'; b.className = 'sup-row sup-row-' + r.kind; b.dataset.area = String(r.area);
+      b.textContent = r.text;
+      b.title = 'Frame this area';
+      b.addEventListener('click', function () { frameArea(r.area); });
+      li.appendChild(b);
+      ul.appendChild(li);
+    });
+  }
+
+  /* Bring an area to the middle of the view: the camera keeps the way it is
+     looking and moves in until the area fills a good part of it. */
+  function frameArea(rid) {
+    var rg = S.eff && S.eff.regions.find(function (r) { return r.id === rid; });
+    var cam = state.camera, ctl = state.controls;
+    if (!rg || !cam || !ctl) return { ok: false, reason: 'no such area' };
+    var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    rg.beacons.forEach(function (b) { pt(b).forEach(function (v, k) { lo[k] = Math.min(lo[k], v); hi[k] = Math.max(hi[k], v); }); });
+    var c = [0, 1, 2].map(function (k) { return (lo[k] + hi[k]) / 2; });
+    var r = Math.max(Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) / 2 + S.eff.pitch, S.eff.pitch * 1.5);
+    var target = upToView(c), dir = cam.position.clone().sub(ctl.target);
+    if (dir.lengthSq() < 1e-9) dir.set(0, 0.5, 1);
+    dir.normalize();
+    var half = Math.min(cam.fov || 45, 90) * Math.PI / 360;
+    var d = Math.max(r / Math.sin(half) * 1.15, 8);
+    ctl.target.copy(target);
+    cam.position.copy(target).addScaledVector(dir, d);
+    cam.updateProjectionMatrix();
+    ctl.update();
+    cam.updateMatrixWorld();
+    return { ok: true, area: rid, dist: d, radius: r };
   }
 
   /* Recompute what the piece shows, redraw, and say it. */
@@ -491,7 +559,8 @@ var NSO_SUPPORTS_CARD = (function () {
     if (!p || !m) return 'gone';
     return poseKey(p) + '|' + others(S.hostId).map(function (q) { return q.sourceId + ':' + q.mesh.position.toArray().join(','); }).join(';') +
       '|' + supportsOf(S.hostId).map(function (q) { return q.id; }).join(',') + '|' + editsOf(m).ops.length +
-      '|' + JSON.stringify(memOf(S.hostId).unreach).length + '|' + memOf(S.hostId).built + '|' + ((typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0);
+      '|' + JSON.stringify(memOf(S.hostId).unreach).length + '|' + memOf(S.hostId).built + '|' + ((typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0) +
+      '|' + S.angle;
   }
 
   /* ------------------------------------------------------------- picking */
@@ -532,30 +601,87 @@ var NSO_SUPPORTS_CARD = (function () {
     return { style: style, sideMm: isFinite(size) ? size : null, rest: !!(rs && rs.checked) };
   }
 
+  /* THE PLANNER'S THREAD. planTree is one synchronous call that can run for
+     minutes on a big piece (measured: 289 s for the 377 spots under
+     library/v9_mirror_factory.stl), and a thread that is inside it cannot
+     repaint, count seconds or fire a watchdog. So a build plans in a worker
+     that loads the same engine files, and a watchdog on the page can really
+     stop it: terminate() ends the call. The plan crosses back as plain data and
+     the union (NSO_unionSoups, wasm) stays here, on the page. A page that
+     cannot start a worker plans in-thread and can only be held to the clock
+     after the fact. `planner` (setPlanner) replaces all of it: the seam a test
+     forces a slow or a failing planner through. */
+  function engineUrls() {
+    var out = [];
+    for (var i = 0; i < ENGINE.length; i++) {
+      var el = document.querySelector('script[src^="' + ENGINE[i] + '"]');
+      if (!el || !el.src) return null;
+      out.push(el.src);
+    }
+    return out;
+  }
+  function startWorker() {
+    var urls = engineUrls();
+    if (!urls || typeof Worker !== 'function' || typeof Blob !== 'function' || !window.URL || !URL.createObjectURL) return null;
+    var code = 'importScripts(' + urls.map(function (u) { return JSON.stringify(u); }).join(',') + ');\n' +
+      'self.onmessage = function (e) {\n' +
+      '  var d = e.data, plan;\n' +
+      '  try { plan = self.NSO_SupportTree.planTree(d.soup, d.opts); } catch (err) {\n' +
+      '    self.postMessage({ id: d.id, error: (err && err.message) || String(err) }); return; }\n' +
+      '  try { self.postMessage({ id: d.id, plan: plan }); } catch (err) {\n' +
+      '    self.postMessage({ id: d.id, error: "the plan could not be passed back: " + ((err && err.message) || String(err)) }); }\n' +
+      '};\n';
+    var url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' })), w;
+    try { w = new Worker(url); } catch (err) { URL.revokeObjectURL(url); return null; }
+    return { w: w, url: url };
+  }
+  function stopWorker(job) {
+    if (!job || !job.worker) return;
+    try { job.worker.w.terminate(); } catch (e) { /* already gone */ }
+    try { URL.revokeObjectURL(job.worker.url); } catch (e) { /* ditto */ }
+    job.worker = null;
+  }
+  /* planTree(soup, opts) -> Promise of the plan, on the job's worker. */
+  function planAway(job, soup, opts) {
+    if (S.planner) return Promise.resolve().then(function () { return S.planner(soup, opts); });
+    if (job.worker === undefined) job.worker = startWorker();
+    if (!job.worker) {
+      return new Promise(function (go) { setTimeout(go, 0); }).then(function () { return window.NSO_SupportTree.planTree(soup, opts); });
+    }
+    return new Promise(function (resolve, reject) {
+      var w = job.worker.w, id = ++job.seq;
+      w.onmessage = function (e) { if (e.data.id !== id) return; if (e.data.error) reject(new Error(e.data.error)); else resolve(e.data.plan); };
+      w.onerror = function (e) { reject(new Error((e && e.message) || 'the planner stopped')); };
+      w.postMessage({ id: id, soup: soup, opts: opts });
+    });
+  }
+
   /* One region through the planner. Resolves { ok, rid, solids, unreachable,
      reason }: each solid { soup, keys, holds, landing } in the planner's
      own words - nothing is aimed or moved here. */
-  function planRegion(D, rid, beacons, o) {
+  function planRegion(job, D, rid, beacons, o) {
     var bs = beacons.map(function (b) { return { x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: rid, key: b.key }; });
     var opts = Object.assign({}, D.opts, { beacons: bs, style: o.style, restOnModel: o.rest });
     if (o.sideMm != null) opts.sideMm = o.sideMm;
-    var t = window.NSO_SupportTree.planTree(D.soup, opts);
-    var keyOf = function (id) { return t.beacons && t.beacons[id] ? t.beacons[id].key : null; };
-    if (!t.ok) {
-      var all = t.inside && t.inside.length ? beacons.map(function (b) { return b.key; }) : [];
-      return Promise.resolve({ ok: !!all.length, rid: rid, solids: [], unreachable: all, reason: t.reason });
-    }
-    var landingOf = {};
-    t.trunks.forEach(function (tr) { tr.beacons.forEach(function (id) { landingOf[id] = tr.landing; }); });
-    var unreach = t.unreachable.concat(t.inside).map(keyOf);
-    return window.NSO_SupportGridpack.solid(t).then(function (u) {
-      if (!u.ok) return { ok: false, rid: rid, solids: [], unreachable: [], reason: u.reason };
-      var solids = u.solids.map(function (x) {
-        var holds = {};
-        x.beacons.forEach(function (id) { holds[keyOf(id)] = landingOf[id] === 'rest' ? 'rest' : 'held'; });
-        return { soup: x.soup, keys: x.beacons.map(keyOf), holds: holds, landing: x.landing, regionIds: x.regionIds };
+    return planAway(job, D.soup, opts).then(function (t) {
+      if (!t || typeof t !== 'object') throw new Error('the planner gave no plan');
+      var keyOf = function (id) { return t.beacons && t.beacons[id] ? t.beacons[id].key : null; };
+      if (!t.ok) {
+        var all = t.inside && t.inside.length ? beacons.map(function (b) { return b.key; }) : [];
+        return { ok: !!all.length, rid: rid, solids: [], unreachable: all, reason: t.reason };
+      }
+      var landingOf = {};
+      t.trunks.forEach(function (tr) { tr.beacons.forEach(function (id) { landingOf[id] = tr.landing; }); });
+      var unreach = t.unreachable.concat(t.inside).map(keyOf);
+      return window.NSO_SupportGridpack.solid(t).then(function (u) {
+        if (!u.ok) return { ok: false, rid: rid, solids: [], unreachable: [], reason: u.reason };
+        var solids = u.solids.map(function (x) {
+          var holds = {};
+          x.beacons.forEach(function (id) { holds[keyOf(id)] = landingOf[id] === 'rest' ? 'rest' : 'held'; });
+          return { soup: x.soup, keys: x.beacons.map(keyOf), holds: holds, landing: x.landing, regionIds: x.regionIds };
+        });
+        return { ok: true, rid: rid, solids: solids, unreachable: unreach, sideMm: t.sideMm, reason: t.reason };
       });
-      return { ok: true, rid: rid, solids: solids, unreachable: unreach, sideMm: t.sideMm, reason: t.reason };
     });
   }
 
@@ -643,6 +769,14 @@ var NSO_SUPPORTS_CARD = (function () {
    * already on the piece off first: one undo step for the lot. An area the
    * plan cannot reach adds nothing; its spots are remembered as unreachable
    * until the next build or REMOVE ALL.
+   *
+   * A build ENDS IN A STATE. Planning is all that can take long, and it makes
+   * no change to the plate: the plate is touched in one stretch of
+   * synchronous code at the very end (commit), and only if the build is still
+   * live. So a refusal, an exception or the watchdog - which stops the worker
+   * and marks the build dead - leaves the plate exactly as it was, with no
+   * Undo step; the card says "Could not build: <why> - nothing was added" and
+   * is back in the state it was in before.
    */
   function build() {
     if (S.busy) return Promise.resolve({ ok: false, reason: 'busy' });
@@ -656,58 +790,89 @@ var NSO_SUPPORTS_CARD = (function () {
       sync();
       return Promise.resolve({ ok: false, reason: 'nothing to build' });
     }
-    S.busy = true; S.msg = null; sync();
+    var job = { seq: 0, dead: false, t0: Date.now(), worker: undefined, stop: null, timer: 0, clock: 0 };
+    var limit = S.watchdogMs, secs = Math.round(limit / 100) / 10;
+    function late() { var e = new Error('the planner was still working after ' + secs + ' s'); e.timeout = true; return e; }
+    S.job = job; S.busy = true; S.msg = null; S.elapsed = 0; sync();
+    var guard = new Promise(function (go, stop) { job.stop = stop; });
+    job.timer = setTimeout(function () { job.stop(late()); }, limit);
+    job.clock = setInterval(function () { S.elapsed = Math.floor((Date.now() - job.t0) / 1000); sync(); }, 1000);
+
     var results = [], chain = new Promise(function (go) {
       /* One frame and a tick first: the card and the spinner are on screen
-         before the planner takes the thread. */
+         before the planner starts. */
       requestAnimationFrame(function () { setTimeout(go, 0); });
     });
     regs.forEach(function (rg) {
-      chain = chain.then(function () { return planRegion(D, rg.id, rg.beacons, o).then(function (r) { results.push(r); }); });
+      chain = chain.then(function () {
+        if (job.dead) return null;
+        return planRegion(job, D, rg.id, rg.beacons, o).then(function (r) {
+          results.push(r);
+          /* A union step cannot be interrupted, so the clock is read again
+             here, and the page gets a turn before the next area. */
+          if (Date.now() - job.t0 > limit) throw late();
+          return new Promise(function (go) { setTimeout(go, 0); });
+        });
+      });
     });
-    return chain.then(function () {
+
+    /* The one place the plate changes. Synchronous from the first removal to
+       the Undo step, so nothing can interleave; on any failure inside it
+       everything is put back and no step is recorded. */
+    function commit() {
+      if (job.dead) return { ok: false, reason: 'the build was stopped' };
       var failed = results.filter(function (r) { return !r.ok; });
-      if (failed.length) {
-        S.busy = false;
-        S.msg = { text: 'Not built: ' + failed[0].reason, bad: true };
-        refresh();
-        return { ok: false, reason: failed[0].reason };
-      }
-      var undo = snapshot();
-      var removed = removePieces(removeIds), added = [], n = 0;
-      var mem = memOf(hostId);
-      mem.unreach = {};
-      for (var i = 0; i < results.length; i++) {
-        var r = results[i];
-        mem.unreach[r.rid] = r.unreachable.slice();
-        for (var k = 0; k < r.solids.length; k++) {
-          var s = r.solids[k];
-          var meta = { card: true, hostSourceId: hostId, hostName: hm.name, regionId: r.rid, style: o.style,
-            sideMm: r.sideMm || o.sideMm, rest: o.rest, angleDeg: ANGLE_DEG, keys: s.keys, holds: s.holds, landing: s.landing };
-          var pl = placeSolid(s.soup, meta, host, D.minZ, hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')');
-          if (!pl.ok) {
-            dropAdded(added); restorePieces(removed); undo();
-            S.busy = false;
-            S.msg = { text: 'Not built: ' + pl.reason + '.', bad: true };
-            afterCommit();
-            return { ok: false, reason: pl.reason };
+      if (failed.length) return { ok: false, reason: failed[0].reason || 'the planner refused' };
+      var undo = snapshot(), removed = [], added = [], n = 0, mem = memOf(hostId);
+      try {
+        removed = removePieces(removeIds);
+        mem.unreach = {};
+        for (var i = 0; i < results.length; i++) {
+          var r = results[i];
+          mem.unreach[r.rid] = r.unreachable.slice();
+          for (var k = 0; k < r.solids.length; k++) {
+            var sd = r.solids[k];
+            var meta = { card: true, hostSourceId: hostId, hostName: hm.name, regionId: r.rid, style: o.style,
+              sideMm: r.sideMm || o.sideMm, rest: o.rest, angleDeg: S.angle, keys: sd.keys, holds: sd.holds, landing: sd.landing };
+            var pl = placeSolid(sd.soup, meta, host, D.minZ, hm.name + ' - support ' + (r.rid + 1) + '.' + (++n) + ' (' + STYLES[o.style] + ')');
+            if (!pl.ok) throw new Error(pl.reason);
+            added.push(pl.id);
           }
-          added.push(pl.id);
         }
+      } catch (err) {
+        dropAdded(added); restorePieces(removed); undo();
+        return { ok: false, reason: (err && err.message) || String(err), undone: true };
       }
       mem.built = true;
       pushUndo({ type: 'supportSwap', removed: removed, addedIds: added,
         label: removed.length ? 'Undo: supports on the piece put back as they were' : 'Undo: supports taken off', onUndone: undo });
-      S.busy = false;
+      return { ok: true, added: added, removed: removed.map(function (x) { return x.placed.sourceId; }) };
+    }
+
+    var work = chain.then(commit);
+    work.catch(function () { /* the race below has the answer; a late one must not go unhandled */ });
+    function over() {
+      job.dead = true;
+      clearTimeout(job.timer); clearInterval(job.clock);
+      stopWorker(job);
+      if (S.job === job) S.job = null;
+      S.busy = false; S.elapsed = 0;
+    }
+    function fail(reason, restored) {
+      S.msg = { text: 'Could not build: ' + String(reason || 'no reason given').replace(/[.\s]+$/, '') + ' - nothing was added', bad: true };
+      if (restored) afterCommit(); else refresh();     // the plate was not touched: leave its selection alone
+      return { ok: false, reason: reason, line: ($('sup-count') || {}).textContent || '' };
+    }
+    return Promise.race([work, guard]).then(function (res) {
+      over();
+      if (!res.ok) return fail(res.reason, res.undone);
       afterCommit();
-      return { ok: true, added: added, removed: removed.map(function (x) { return x.placed.sourceId; }),
+      return { ok: true, added: res.added, removed: res.removed,
         stats: areaStats(S.eff, statesFor(S.eff)), line: ($('sup-count') || {}).textContent || '' };
-    }).catch(function (err) {
-      console.error('[supports card]', err);
-      S.busy = false;
-      S.msg = { text: 'Something went wrong - nothing was built.', bad: true };
-      refresh();
-      return { ok: false, reason: (err && err.message) || String(err) };
+    }, function (err) {
+      over();
+      if (!err || !err.timeout) console.error('[supports card]', err);
+      return fail((err && err.message) || String(err));
     });
   }
 
@@ -822,89 +987,67 @@ var NSO_SUPPORTS_CARD = (function () {
     return { ok: true, key: 'm' + E.serial, region: b ? b.region : null };
   }
 
-  /* One paint sample: Hold adds a beacon here when none is within a grid
-     pitch; Skip drops a disc that takes out every beacon inside it. */
-  function paintSample(p, n) {
-    var host = placedOf(S.hostId), m = modelOf(S.hostId), E = editsOf(m), eff = S.eff;
-    if (!eff || eff.error) return false;
-    if (S.paint === 'skip') {
-      var R = eff.pitch * PAINT_R_PITCHES;
-      E.ops.push({ op: 'skip', p: upToLocal(host, p), r: R });
-      var before = eff.beacons.length;
-      eff.beacons = eff.beacons.filter(function (b) { return dist(pt(b), p) > R; });
-      return eff.beacons.length !== before;
-    }
-    if (n[2] > UP_MAX) return false;
-    for (var i = 0; i < eff.beacons.length; i++) if (dist(pt(eff.beacons[i]), p) < eff.pitch * 0.999) return false;
-    E.ops.push({ op: 'add', id: ++E.serial, p: upToLocal(host, p), n: upDirToLocal(host, n) });
-    eff.beacons.push({ key: 'm' + E.serial, x: p[0], y: p[1], z: p[2], normal: n });   // spacing only; refresh() places it properly
-    return true;
-  }
-
-  function strokeTo(h) {
-    var s = S.stroke, step = S.eff.pitch * PAINT_R_PITCHES / 2, changed = false;
-    if (s.last) {
-      var d = dist(s.last, h.p), k = Math.max(1, Math.ceil(d / step));
-      for (var i = 1; i <= k; i++) {
-        var t = i / k;
-        changed = paintSample([s.last[0] + (h.p[0] - s.last[0]) * t, s.last[1] + (h.p[1] - s.last[1]) * t,
-          s.last[2] + (h.p[2] - s.last[2]) * t], h.n) || changed;
-      }
-    } else changed = paintSample(h.p, h.n);
-    s.last = h.p.slice();
-    if (changed) s.changed = true;
-    refresh();
-  }
-
-  function endStroke() {
-    var s = S.stroke;
-    S.stroke = null;
-    if (state.controls) state.controls.enabled = true;
-    if (!s) return;
-    var m = modelOf(S.hostId);
-    if (!s.changed) { if (m) m.nsoSupportEdits = { ops: s.ops, serial: s.serial }; refresh(); return; }
-    pushEdit(s.undo, S.paint === 'skip' ? 'Undo: skipped spots back' : 'Undo: painted spots taken away');
-    refresh();
-  }
-
-  function setPaint(mode) {
-    S.paint = mode === 'hold' || mode === 'skip' ? mode : null;
-    var sel = $('sel-sup-paint');
-    if (S.paint && sel) sel.value = S.paint;
-    if (!S.paint) showRing(null);
-    S.msg = null;
-    refresh();
-  }
-
   /* --------------------------------------------------------- open, close */
+
+  /* The piece the card should be on: the app's selection when it is a piece
+     (not a support), else the only piece on the plate. */
+  function wanted() {
+    var sel = state.selectedIndex >= 0 ? state.placed[state.selectedIndex] : null;
+    if (sel && sel.mesh && !isSupport(sel.sourceId)) return sel.sourceId;
+    if (sel && sel.mesh) return null;                 // a support is selected: stay on its piece
+    var all = (state.placed || []).filter(function (p) { return p && p.mesh && !isSupport(p.sourceId); });
+    return all.length === 1 ? all[0].sourceId : null;
+  }
 
   function tick() {
     if (!S.open) return;
     var menu = $('menu-supports');
     if (menu && !menu.open) { close(); return; }
-    if (!S.busy && !S.stroke) {
+    if (!S.busy) {
+      var w = wanted();
       if (S.hostId != null && !placedOf(S.hostId)) { S.hostId = null; S.selSupport = null; refresh(); }
+      else if (w != null && w !== S.hostId && state.selectedIndex >= 0) pick(w);   // the app's selection moved: detect there
+      else if (S.hostId == null && w != null) pick(w);
       else if (signature() !== S.sig) refresh();
     } else placeSpinner();
     S.raf = requestAnimationFrame(tick);
   }
+  /* Opening the card detects at once, on the selected piece. */
   function open() {
     if (S.open) return;
     S.open = true; S.hostId = null; S.selSupport = null; S.msg = null; S.det = null; S.occ = {};
-    refresh();
+    var w = wanted();
+    if (w != null) pick(w); else refresh();
     S.raf = requestAnimationFrame(tick);
   }
   function close() {
-    if (S.stroke) endStroke();
-    S.open = false; S.hostId = null; S.selSupport = null; S.paint = null; S.msg = null; S.det = null; S.occ = {};
-    showRing(null);
+    if (S.job && S.job.stop) { var j = S.job; j.dead = true; j.stop(new Error('the card was closed')); }
+    clearTimeout(S.angleTimer); S.angleTimer = 0;
+    S.open = false; S.hostId = null; S.selSupport = null; S.msg = null; S.det = null; S.occ = {};
     dispose(S.layer); S.layer = null;
     if (S.raf) cancelAnimationFrame(S.raf);
     S.raf = 0;
     sync();
-    var el = $('status');
-    if (el && S.hud != null && el.textContent === S.hud && typeof setStatus === 'function') setStatus('');
-    S.hud = null;
+  }
+
+  /* The angle, as typed. A number outside 1..89 is said so and changes
+     nothing; a good one re-detects once the typing has paused. */
+  function setAngle(v, now) {
+    var a = typeof v === 'number' ? v : parseFloat(v);
+    if (!(a >= ANGLE_MIN && a <= ANGLE_MAX)) {
+      S.msg = { text: 'The angle is between ' + ANGLE_MIN + '\u00b0 and ' + ANGLE_MAX + '\u00b0.', bad: true };
+      sync();
+      return { ok: false, reason: 'angle out of range' };
+    }
+    clearTimeout(S.angleTimer); S.angleTimer = 0;
+    var go = function () {
+      S.angleTimer = 0;
+      if (S.busy) return;
+      S.angle = a; S.msg = null; S.det = null;
+      refresh();
+    };
+    if (now) go(); else S.angleTimer = setTimeout(go, ANGLE_DEBOUNCE_MS);
+    return { ok: true, angle: a };
   }
 
   /* --------------------------------------------------------- the pointer */
@@ -917,37 +1060,13 @@ var NSO_SUPPORTS_CARD = (function () {
     if (!h) return;                                 // empty space: the view still orbits
     if (isSupport(h.id)) selectSupport(h.id);
     else if (h.id !== S.hostId) pick(h.id);
-    else if (S.paint && S.eff && !S.eff.error) {
-      var m = modelOf(S.hostId), E = editsOf(m);
-      S.stroke = { undo: snapshot(), ops: E.ops.slice(), serial: E.serial, last: null, changed: false };
-      if (state.controls) state.controls.enabled = false;
-      strokeTo(h);
-    } else if (ev.shiftKey) addBeacon(h.p, h.n);
+    else if (ev.shiftKey) addBeacon(h.p, h.n);
     else {
       var area = areaAt(ev);
       if (area != null) toggleArea(area);           // nothing builds on a click
       else if (S.selSupport != null || S.msg) { S.selSupport = null; S.msg = null; pick(S.hostId); }
     }
     ev.stopImmediatePropagation(); ev.preventDefault();
-  }
-  function onMove(ev) {
-    if (!S.open) return;
-    if (S.stroke) {
-      var h = hitAt(ev);
-      if (h && h.id === S.hostId) strokeTo(h); else S.stroke.last = null;
-      showRing(h && h.id === S.hostId ? h : null);
-      ev.stopImmediatePropagation();
-      return;
-    }
-    if (S.paint && onCanvas(ev)) {
-      var hv = hitAt(ev);
-      showRing(hv && hv.id === S.hostId ? hv : null);
-    }
-  }
-  function onUp(ev) {
-    if (!S.open || !S.stroke) return;
-    endStroke();
-    ev.stopImmediatePropagation();
   }
 
   function wire() {
@@ -959,15 +1078,9 @@ var NSO_SUPPORTS_CARD = (function () {
     on('btn-sup-all', 'click', function () { generate(); });
     on('btn-sup-none', 'click', function () { removeAll(); });
     on('btn-sup-remove', 'click', function () { removeSelected(); });
-    on('btn-sup-paint', 'click', function () { setPaint(S.paint ? null : (($('sel-sup-paint') || {}).value || 'hold')); });
-    on('sel-sup-paint', 'change', function () { if (S.paint) setPaint($('sel-sup-paint').value); });
+    on('sup-angle', 'input', function () { setAngle($('sup-angle').value, false); });
+    on('sup-angle', 'change', function () { setAngle($('sup-angle').value, true); });
     window.addEventListener('pointerdown', onDown, true);
-    window.addEventListener('pointermove', onMove, true);
-    window.addEventListener('pointerup', onUp, true);
-    window.addEventListener('keydown', function (e) {
-      if (!S.open || e.key !== 'Escape') return;
-      if (S.stroke) endStroke(); else if (S.paint) setPaint(null);
-    }, true);
     sync();
   }
   if (typeof document !== 'undefined') {
@@ -977,35 +1090,41 @@ var NSO_SUPPORTS_CARD = (function () {
 
   return {
     STYLES: Object.assign({}, STYLES),
-    PAINT_R_PITCHES: PAINT_R_PITCHES,
     isOpen: function () { return S.open; },
     host: function () { return S.hostId; },
     pick: pick,
     generate: generate,
     removeAll: removeAll,
     toggleArea: toggleArea,
+    frameArea: frameArea,
     selectSupport: selectSupport,
     selected: function () { return S.selSupport; },
     removeSelected: removeSelected,
     addBeacon: addBeacon,
-    setPaint: setPaint,
-    paint: function () { return S.paint; },
     busy: function () { return S.busy; },
-    /** What the card shows now: beacons with their states, regions, the words. */
+    /** The angle detection runs at (degrees); setting one re-detects at once. */
+    angle: function (v) { if (v !== undefined) setAngle(v, true); return S.angle; },
+    /** The watchdog, ms: a build still running past it is stopped. Default 60000. */
+    watchdogMs: function (v) { if (v !== undefined) S.watchdogMs = v > 0 ? +v : WATCHDOG_MS; return S.watchdogMs; },
+    /** A test seam: fn(soup, opts) -> Promise of a plan replaces the worker's planTree; null restores it. */
+    setPlanner: function (fn) { S.planner = typeof fn === 'function' ? fn : null; },
+    /** What the card shows now: beacons with their states, regions, rows, the words. */
     view: function () {
       var eff = S.eff || { beacons: [], regions: [], pitch: 3 };
       var st = S.hostId != null && eff.beacons.length ? statesFor(eff) : {};
       return {
-        host: S.hostId, state: cardState(), error: eff.error || null, pitch: eff.pitch,
+        host: S.hostId, state: cardState(), error: eff.error || null, pitch: eff.pitch, angle: S.angle,
         beacons: eff.beacons.map(function (b) {
           return { key: b.key, p: pt(b), normal: b.normal, region: b.region, manual: b.manual, kind: b.need && b.need.kind, state: st[b.key] };
         }),
         areas: eff.regions.map(function (r) {
           return { id: r.id, count: r.beacons.length, point: r.point, normal: r.normal, excluded: !!r.excluded,
-            built: S.hostId != null && cardSupports(S.hostId, r.id).length > 0 };
+            kind: S.hostId != null && eff.beacons.length ? areaKind(r, st) : null,
+            built: r.beacons.some(function (b) { return st[b.key] === 'held' || st[b.key] === 'rest'; }) };
         }),
         stats: S.hostId != null && eff.beacons.length ? areaStats(eff, st) : null,
-        count: ($('sup-count') || {}).textContent || '', hud: S.hud
+        rows: S.hostId != null && eff.beacons.length && cardState() === 'built' ? rowsFor(eff, st) : [],
+        count: ($('sup-count') || {}).textContent || ''
       };
     },
     supports: function (hostId) { return supportsOf(hostId == null ? S.hostId : hostId); }

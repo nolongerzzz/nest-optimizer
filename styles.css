@@ -3903,15 +3903,20 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 .sup-card .sup-go { padding: 11px 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; }
 .sup-card .sup-go-row .btn-secondary { padding: 11px 10px; font-size: 11px; letter-spacing: 0.04em; }
 .sup-card.is-locked { opacity: 0.7; pointer-events: none; }
-.sup-card .sup-more { margin-top: 2px; }
-.sup-card .sup-more > summary { cursor: pointer; font-size: 11px; color: #94a3b8; padding: 2px 0; }
-.sup-card .sup-more[open] > summary { margin-bottom: 4px; }
+.sup-card .sup-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; max-height: 8.5em; overflow-y: auto; }
+.sup-card .sup-row { width: 100%; margin: 0; padding: 3px 6px; text-align: left; font-size: 11px; line-height: 1.3; cursor: pointer;
+  background: rgba(148, 163, 184, 0.10); color: #e2e8f0; border: 1px solid #3a4558; border-radius: 6px; }
+.sup-card .sup-row:hover { background: rgba(148, 163, 184, 0.22); }
+.sup-card .sup-row-unreachable { border-left: 3px solid #ff2d2d; }
+.sup-card .sup-row-unsupported { border-left: 3px solid #7b8494; }
+/* The card's readout is the one place it speaks: while Supports is open the
+   build tag ("HUD inside7") is not drawn over the plate. */
+body.sup-card-open #adjust-status { display: none; }
 /* The ring turning over the piece while a build runs. */
 .sup-spinner { position: fixed; z-index: 20; width: 44px; height: 44px; margin: -22px 0 0 -22px; border-radius: 50%;
   border: 4px solid rgba(226, 232, 240, 0.25); border-top-color: #e2e8f0; pointer-events: none;
   animation: sup-spin 0.9s linear infinite; }
 @keyframes sup-spin { to { transform: rotate(360deg); } }
-.vp-menu-body .btn-sup-paint.is-armed { background: #22d3ee; color: #0b0f17; border-color: #22d3ee; font-weight: 600; }
 
 /* Crop's region row and the Circle / Piece rows (app-crop.js sections 6-7).
    An author display rule beats the UA sheet's [hidden], so it is said here. */
