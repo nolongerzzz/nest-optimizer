@@ -46,10 +46,43 @@
   17. A FIXED PIVOT: a drag turns the piece about one held point - it may
       pass through the plate - with the rings standing on it; a run of
       clicks the same; one seat at the end; Undo seated; nso-watch told.
-  18. A BIGGER BED, the same rings.                                       */
+  18. A BIGGER BED, the same rings.
+  19. THE DARTS sit on a major (45°) tick, the one nearest the camera, for 8
+      camera azimuths on every ring, never between two.
+  20. ...and re-seat only when the camera has orbited 10° past the half-way
+      point (hysteresis), so a camera hovering there does not flicker them.
+      A drag carries them; releasing seats them again.
+  21. THE LEANS ARE NAMED BY THE FOOTPRINT: a 60x20 piece lying along X, and
+      the same piece turned 90°, both call the lean that tips it ALONG its
+      length "front/back"; a square piece keeps the old mapping. Measured by
+      what each ring does to the piece, not by trusting the name.
+  22. ...re-evaluated after Turn, Tip (Roll), Scale and a bake, and held for
+      the length of a drag.
+  23. THE CARD: the row follows the ring, the tooltip says which way it tips.
+  24. UNDO of a lean is what it was.                                      */
 
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
+
+/* A closed box, x by y by z (z up, as an STL is), as a binary STL. */
+function writeBoxSTL(file, x, y, z) {
+  const V = [[0, 0, 0], [x, 0, 0], [x, y, 0], [0, y, 0], [0, 0, z], [x, 0, z], [x, y, z], [0, y, z]];
+  const F = [[0, 3, 2], [0, 2, 1], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4],
+             [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]];
+  const buf = Buffer.alloc(84 + 50 * F.length);
+  buf.writeUInt32LE(F.length, 80);
+  F.forEach((t, i) => {
+    const o = 84 + 50 * i, a = V[t[0]], b = V[t[1]], c = V[t[2]];
+    const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    const n = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+    const l = Math.hypot(n[0], n[1], n[2]) || 1;
+    [n[0] / l, n[1] / l, n[2] / l, ...a, ...b, ...c].forEach((v, k) => buf.writeFloatLE(v, o + 4 * k));
+  });
+  fs.writeFileSync(file, buf);
+  return file;
+}
 
 let fails = 0;
 const check = (name, cond, detail) => {
@@ -1190,6 +1223,477 @@ withApp(async (page, logs) => {
     await page.waitForTimeout(200);
     const back = await page.evaluate(() => window.nsoRotate.ringRadius());
     check('...and still 40 back on the A1 Mini', near(back, 40, 1e-9), back + ' mm');
+  }
+
+
+  /* ----------------------------------------------------------------- 19 */
+  console.log('\n=== 19. the darts sit on a major tick, the one nearest the camera ===');
+  {
+    {
+      await page.evaluate(() => {
+        const H = window.__rot;
+        /* the camera, round the vertical: azimuth 0 is straight in front (+Z).
+           No refresh() - the controls' own 'change' has to do that. */
+        H.cam = (az, el, R) => {
+          const c = new THREE.Vector3().fromArray(window.nsoRotate.ringCentre());
+          const a = az * Math.PI / 180, e = (el == null ? 25 : el) * Math.PI / 180, r = R || 220;
+          state.controls.target.copy(c);
+          state.camera.position.set(c.x + Math.sin(a) * Math.cos(e) * r, c.y + Math.sin(e) * r,
+                                    c.z + Math.cos(a) * Math.cos(e) * r);
+          state.camera.lookAt(c);
+          state.controls.update();
+          state.camera.updateMatrixWorld(true);
+        };
+        /* what the darts of a ring are doing, measured from the scene: the
+           angle of the camera about the ring in the ring's own frame, the tick
+           (if any) the pair's midpoint lies on, and where it is. */
+        H.darts = (ring) => {
+          const a = window.nsoRotate, F = a.ringFrame(ring);
+          const e1 = new THREE.Vector3().fromArray(F.e1), e2 = new THREE.Vector3().fromArray(F.e2);
+          const v = state.camera.position.clone().sub(new THREE.Vector3().fromArray(a.ringCentre()));
+          const cam = Math.atan2(v.dot(e2), v.dot(e1)) * 180 / Math.PI;
+          const g = state.scene.getObjectByName('nso-rotate-handles');
+          const cones = g.children.filter(c => c.userData.nsoRotateHandle &&
+            c.userData.nsoRotateHandle.ring === ring && c.material.visible);
+          const mid = new THREE.Vector3();
+          cones.forEach(c => mid.add(c.position));
+          mid.normalize();
+          const ticks = g.children.find(c => c.userData.nsoRotateTicks === ring).userData.nsoTickEnds;
+          let onTick = null;
+          for (let i = 0; i < ticks.length / 6; i++) {
+            const t = new THREE.Vector3(ticks[i * 6], ticks[i * 6 + 1], ticks[i * 6 + 2]).normalize();
+            if (t.dot(mid) > 1 - 1e-9) onTick = i * 5;       // the scale is a bar every 5°
+          }
+          const t = a.dartTick(ring);
+          const world = cones.reduce((m, c) => m.add(c.position), new THREE.Vector3()).multiplyScalar(1 / (cones.length || 1));
+          return { cones: cones.length, cam: cam, onTick: onTick, idx: t && t.index, deg: t && t.deg, at: t && t.at,
+                   world: world.toArray() };
+        };
+      });
+    }
+    const nearest = c => (((Math.round(c / 45) % 8) + 8) % 8) * 45;
+    const angDiff = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
+
+    await loadSTL(page, path.join(ROOT, 'fixtures', 'box-20mm.stl'));
+    await page.waitForTimeout(250);
+    await page.evaluate(() => { selectPlaced(state.placed.length - 1); window.__rot.zero(); });
+    if (!(await page.evaluate(() => document.getElementById('menu-rotate').open))) await page.click('#menu-rotate > summary');
+    await page.waitForTimeout(120);
+
+    const rows = [];
+    for (const az of [0, 45, 90, 135, 180, 225, 270, 315]) {
+      /* a fresh session each time, so the answer is the nearest tick and not
+         the hysteresis's memory of the last one */
+      await page.click('#menu-rotate > summary'); await page.waitForTimeout(60);
+      await page.click('#menu-rotate > summary'); await page.waitForTimeout(100);
+      const r = await page.evaluate(az => {
+        const a = window.nsoRotate, H = window.__rot;
+        a.setRing('fb', true); a.setRing('ss', true);
+        H.cam(az, 25);
+        a.refresh();
+        return ['turn', 'fb', 'ss'].map(k => Object.assign({ ring: k }, H.darts(k)));
+      }, az);
+      r.forEach(d => rows.push(Object.assign({ az: az }, d)));
+    }
+    for (const ring of ['turn', 'fb', 'ss']) {
+      const mine = rows.filter(r => r.ring === ring);
+      check(ring + ': 8 camera azimuths - the darts are on a 45° tick every time, two arrowheads',
+        mine.length === 8 && mine.every(r => r.cones === 2 && r.onTick != null && r.onTick % 45 === 0),
+        mine.map(r => r.az + '→' + r.onTick).join(' '));
+      check(ring + ': ...and it is the tick nearest the camera',
+        mine.every(r => r.deg === nearest(r.cam) && r.onTick === r.deg),
+        mine.map(r => Math.round(r.cam) + '→' + r.deg).join(' '));
+    }
+
+    /* The three places the ticket names, literally: where the pair sits in the
+       world, relative to the ring's centre (the ring is 40 mm, the pair's midpoint
+       a hair inside it). */
+    await page.click('#menu-rotate > summary'); await page.waitForTimeout(60);
+    await page.click('#menu-rotate > summary'); await page.waitForTimeout(100);
+    const lit = await page.evaluate(() => {
+      const a = window.nsoRotate, H = window.__rot;
+      a.setRing('fb', true); a.setRing('ss', true);
+      const out = {};
+      const place = (name, ring, az, el) => { H.cam(az, el); a.refresh(); out[name] = H.darts(ring).world; };
+      place('turn', 'turn', 0, 30);          // straight in front, from above
+      place('fb', 'fb', 0, 85);              // from almost overhead
+      place('ss', 'ss', 90, 10);             // from the side, low
+      const c = H.p().mesh.position.clone();
+      H.cam(0, 30); a.refresh();
+      const h1 = a.handleScreen('turn', 1), h2 = a.handleScreen('turn', -1), cs = a.centreScreen();
+      out.screen = { x: (h1.x + h2.x) / 2 - cs.x, y: (h1.y + h2.y) / 2 - cs.y };
+      return out;
+    });
+    const R = 39;
+    check('Turn, camera in front: the darts are at 6 o\'clock - toward the viewer on the plate, straight below the centre on screen',
+      lit.turn[2] > R && Math.abs(lit.turn[0]) < 0.5 && Math.abs(lit.turn[1]) < 0.5 && Math.abs(lit.screen.x) < 0.5 && lit.screen.y > 20,
+      JSON.stringify(lit.turn.map(v => +v.toFixed(1))) + ' screen ' + lit.screen.y.toFixed(0));
+    check('front/back, camera overhead: the darts are at the top of their ring', lit.fb[1] > R && Math.abs(lit.fb[0]) < 0.5 && Math.abs(lit.fb[2]) < 0.5,
+      JSON.stringify(lit.fb.map(v => +v.toFixed(1))));
+    check('side/side, camera at the side: the darts are on the side nearest the camera', lit.ss[0] > R && Math.abs(lit.ss[1]) < 0.5 && Math.abs(lit.ss[2]) < 0.5,
+      JSON.stringify(lit.ss.map(v => +v.toFixed(1))));
+  }
+
+  /* ----------------------------------------------------------------- 20 */
+  console.log('\n=== 20. the darts re-seat 10° past the half-way point, and a drag carries them ===');
+  {
+    await page.click('#menu-rotate > summary'); await page.waitForTimeout(60);
+    await page.click('#menu-rotate > summary'); await page.waitForTimeout(100);
+    const sweep = await page.evaluate(() => {
+      const a = window.nsoRotate, H = window.__rot;
+      /* On Turn the camera's angle about the ring IS its azimuth. */
+      const seq = az => { H.cam(az, 25); return a.dartTick('turn').deg; };
+      H.cam(0, 25); a.refresh();
+      const start = a.dartTick('turn').deg;
+      const fwd = [], back = [];
+      let last = start;
+      for (let az = 1; az <= 90; az++) { const d = seq(az); if (d !== last) { fwd.push(az + '→' + d); last = d; } }
+      for (let az = 89; az >= 0; az--) { const d = seq(az); if (d !== last) { back.push(az + '→' + d); last = d; } }
+      /* Hover at the half-way point: back and forth across 22.5 ten times. */
+      H.cam(0, 25); a.refresh();
+      let flips = 0; last = a.dartTick('turn').deg;
+      for (let i = 0; i < 10; i++) for (const az of [21, 24]) { const d = seq(az); if (d !== last) { flips++; last = d; } }
+      return { start: start, fwd: fwd, back: back, flips: flips,
+               drawn: a.dartTick('turn').at };
+    });
+    check('orbiting 0 → 90: seated on 0, moves to 45 only once past 32.5°, then to 90 past 77.5°',
+      sweep.start === 0 && sweep.fwd.join() === '33→45,78→90', sweep.fwd.join(', '));
+    check('...and back 90 → 0 it moves at different angles (57.5°, 12.5°): that gap is the hysteresis',
+      sweep.back.join() === '57→45,12→0', sweep.back.join(', '));
+    check('a camera hovering across the half-way point 20 times does not move them at all',
+      sweep.flips === 0, sweep.flips + ' moves');
+    check('...and the drawn pair is on the tick the memory says', near(sweep.drawn, 0, 1e-9), sweep.drawn + '°');
+
+    /* A drag carries the darts; releasing seats them. */
+    const dr = await page.evaluate(() => {
+      const a = window.nsoRotate, H = window.__rot;
+      H.zero(); H.cam(0, 25); a.refresh();
+      const c = a.centreScreen(), h = a.handleScreen('turn', 1);
+      const before = a.dartTick('turn');
+      a.beginDrag({ ring: 'turn', dir: 1 }, h.x, h.y, c.x, c.y);
+      const a0 = Math.atan2(h.y - c.y, h.x - c.x), R = Math.hypot(h.x - c.x, h.y - c.y);
+      for (let i = 1; i <= 17; i++) a.moveDrag(c.x + Math.cos(a0 + i * Math.PI / 180) * R, c.y + Math.sin(a0 + i * Math.PI / 180) * R);
+      const mid = a.dartTick('turn'), applied = a.dragState().applied;
+      a.endDrag();
+      const after = a.dartTick('turn');
+      return { before: before, mid: mid, after: after, applied: applied };
+    });
+    check('mid-drag the darts ride the piece off the tick (as they always have)',
+      Math.abs(dr.mid.at - (dr.before.at + dr.applied)) < 1e-6 && dr.mid.at % 45 !== 0 && Math.abs(dr.applied) > 10,
+      'tick ' + dr.before.at + '° → ' + dr.mid.at.toFixed(2) + '° (piece turned ' + dr.applied.toFixed(2) + '°)');
+    check('...released, they are back on a major tick - the one nearest the camera',
+      dr.after.at % 45 === 0 && dr.after.at === dr.before.at, dr.after.at + '°');
+
+    /* A click is a step of one degree and no more: the darts stay put. */
+    const ck = await page.evaluate(() => {
+      const a = window.nsoRotate, before = a.dartTick('turn').at;
+      a.step('turn', 1);
+      const after = a.dartTick('turn').at;
+      return { before: before, after: after };
+    });
+    check('a click steps the piece a degree but leaves the darts on their tick',
+      ck.before === ck.after && ck.after % 45 === 0, ck.before + '° → ' + ck.after + '°');
+    await page.evaluate(() => window.nsoRotate.seat());
+  }
+
+  /* ----------------------------------------------------------------- 21 */
+  console.log('\n=== 21. the leans are named by the footprint: front/back tips the piece ALONG its length ===');
+  const DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-rails-pieces-'));
+  const files = {
+    bar:    writeBoxSTL(path.join(DIR, 'bar60x20x10.stl'), 60, 20, 10),
+    near:   writeBoxSTL(path.join(DIR, 'box60x58x10.stl'), 60, 58, 10),
+    wide:   writeBoxSTL(path.join(DIR, 'box60x55x10.stl'), 60, 55, 10),
+    column: writeBoxSTL(path.join(DIR, 'column20x20x60.stl'), 20, 20, 60)
+  };
+  await page.evaluate(() => {
+    const H = window.__rot;
+    /* what leaning `ring` 20° does to the piece's LONG axis (its longest
+       local extent): how far the axis's height changes. A lean that tips the
+       piece along its length moves it; a roll about the length cannot. */
+    H.endsRise = (ring) => {
+      const p = H.p(), g = p.mesh.geometry;
+      if (!g.boundingBox) g.computeBoundingBox();
+      const sz = g.boundingBox.getSize(new THREE.Vector3());
+      const k = sz.x >= sz.y && sz.x >= sz.z ? 0 : sz.y >= sz.z ? 1 : 2;
+      const axis = new THREE.Vector3(k === 0 ? 1 : 0, k === 1 ? 1 : 0, k === 2 ? 1 : 0);
+      const q0 = H.q(), q1 = H.want(ring, q0, 20);
+      return Math.abs(axis.clone().applyQuaternion(q1).y - axis.clone().applyQuaternion(q0).y);
+    };
+    H.names = () => {
+      const a = window.nsoRotate, n = a.leanNames();
+      const fbRing = ['fb', 'ss'].find(r => a.ringLabel(r) === 'Lean front/back');
+      const ssRing = ['fb', 'ss'].find(r => a.ringLabel(r) === 'Lean side/side');
+      return { names: n, fbRing: fbRing, ssRing: ssRing,
+               fbRise: fbRing ? H.endsRise(fbRing) : null, ssRise: ssRing ? H.endsRise(ssRing) : null,
+               fbColour: fbRing ? a.ringColor(fbRing) : null, ssColour: ssRing ? a.ringColor(ssRing) : null,
+               w: H.p().width, d: H.p().depth };
+    };
+    /* select the piece just dropped and stand it on the middle of the plate:
+       pieces dropped one after another walk out toward the edge, where the
+       orbit leash would turn the camera off them */
+    H.drop = idx => {
+      const p = state.placed[idx];
+      p.x = 0; p.z = 0; applyMeshRotation(p);
+      selectPlaced(idx); window.nsoRotate.refresh();
+    };
+  });
+  const drop = async (file) => {
+    await loadSTL(page, file);
+    await page.waitForTimeout(250);
+    await page.evaluate(() => { window.__rot.drop(state.placed.length - 1); window.__rot.zero(); });
+    if (!(await page.evaluate(() => document.getElementById('menu-rotate').open))) await page.click('#menu-rotate > summary');
+    await page.waitForTimeout(100);
+  };
+  /* the ring named front/back lifts the piece's ends, the other cannot lift them
+     more: exactly nothing in a clean pose, a little once it is leaned about both */
+  const alongOK = (r) => r.fbRing && r.ssRing && r.fbRing !== r.ssRing && r.fbRise > 0.2 && r.fbRise > r.ssRise + 0.05;
+  {
+    await drop(files.bar);
+    const lying = await page.evaluate(() => window.__rot.names());
+    check('a 60x20 piece lying along X: the lean named front/back is the one that tips it along its length',
+      alongOK(lying) && lying.w > lying.d, 'footprint ' + lying.w.toFixed(1) + ' x ' + lying.d.toFixed(1) +
+      ', front/back = ring ' + lying.fbRing + ' (rise ' + lying.fbRise.toFixed(3) + '), side/side rise ' + lying.ssRise.toExponential(1));
+    check('...which is own Z (id "ss"): the ring stayed on the piece\'s own axis, only its name moved',
+      lying.fbRing === 'ss' && lying.names.along === 'ss' && lying.names.square === false);
+    check('...and the colours went with the names: the along-length ring is pink, the other amber',
+      lying.fbColour === 0xf472b6 && lying.ssColour === 0xfbbf24, lying.fbColour.toString(16) + ' / ' + lying.ssColour.toString(16));
+    const axes = await page.evaluate(() => {
+      const H = window.__rot, a = window.nsoRotate, q = H.q();
+      const want = k => new THREE.Vector3().fromArray(a.constants.LOCAL[k]).applyQuaternion(q);
+      return ['fb', 'ss'].map(k => H.axisVec(k).distanceTo(want(k)));
+    });
+    check('the rings did not move: "fb" is still the piece\'s own X, "ss" its own Z', axes.every(d => d < 1e-9),
+      axes.map(d => d.toExponential(1)).join(' '));
+
+    const turned = await page.evaluate(() => {
+      rotateSelected(1);                         // the 90° button
+      window.nsoRotate.refresh();
+      return window.__rot.names();
+    });
+    check('the same piece turned 90° (now along Z): front/back is still the lean along its length',
+      alongOK(turned) && turned.d > turned.w, 'footprint ' + turned.w.toFixed(1) + ' x ' + turned.d.toFixed(1) +
+      ', front/back = ring ' + turned.fbRing + ' (rise ' + turned.fbRise.toFixed(3) + ')');
+    const at30 = await page.evaluate(() => {
+      window.__rot.zero(); window.nsoRotate.turn('turn', 30); return window.__rot.names();
+    });
+    check('...and turned 30° (its box on the plate is 62 x 47): the same', alongOK(at30), 'footprint ' +
+      at30.w.toFixed(1) + ' x ' + at30.d.toFixed(1));
+    const leaned = await page.evaluate(() => {
+      window.__rot.zero(); window.nsoRotate.turn('ss', 15); window.nsoRotate.turn('fb', 10); return window.__rot.names();
+    });
+    check('...and leaned a little about both of its own axes: the same', alongOK(leaned), 'footprint ' +
+      leaned.w.toFixed(1) + ' x ' + leaned.d.toFixed(1));
+
+    await drop(files.near);
+    const near58 = await page.evaluate(() => window.__rot.names());
+    check('a 60x58 piece (3.3% off square) is square: the old mapping stands - front/back is own X',
+      near58.names.square === true && near58.fbRing === 'fb' && near58.ssRing === 'ss', JSON.stringify(near58.names));
+    await drop(files.wide);
+    const wide55 = await page.evaluate(() => window.__rot.names());
+    check('a 60x55 piece (8.3% off) is not: it follows the footprint',
+      wide55.names.square === false && alongOK(wide55), 'front/back = ' + wide55.fbRing);
+
+    await loadSTL(page, path.join(ROOT, 'fixtures', 'box-20mm.stl'));
+    await page.waitForTimeout(250);
+    await page.evaluate(() => { window.__rot.drop(state.placed.length - 1); window.__rot.zero(); });
+    const sq = await page.evaluate(() => window.__rot.names());
+    check('a square piece keeps today\'s mapping: Lean front/back is own X, Lean side/side own Z, pink and amber',
+      sq.names.square === true && sq.fbRing === 'fb' && sq.ssRing === 'ss' &&
+      sq.fbColour === 0xf472b6 && sq.ssColour === 0xfbbf24, JSON.stringify(sq.names.roles));
+    const sqT = await page.evaluate(() => { rotateSelected(1); window.nsoRotate.refresh(); const r = window.__rot.names(); window.__rot.zero(); return r; });
+    check('...turned 90°, still square, still the same mapping', sqT.names.square === true && sqT.fbRing === 'fb');
+  }
+
+  /* ----------------------------------------------------------------- 22 */
+  console.log('\n=== 22. re-evaluated after Turn, Tip (Roll), Scale and a bake - and held through a drag ===');
+  {
+    /* Roll: a 20x20x60 column stands (square footprint - old mapping); Roll Z
+       lays it along X, and now the lean along its length is own Z. */
+    await drop(files.column);
+    const stand = await page.evaluate(() => window.__rot.names());
+    check('a 20x20x60 column standing: square footprint, the old mapping', stand.names.square === true && stand.fbRing === 'fb',
+      'footprint ' + stand.w.toFixed(1) + ' x ' + stand.d.toFixed(1));
+    const rolled = await page.evaluate(() => { rollSelected(); window.nsoRotate.refresh(); return window.__rot.names(); });
+    check('Roll Z lays it along X: front/back is now the lean along it - own Z', alongOK(rolled) && rolled.fbRing === 'ss',
+      'footprint ' + rolled.w.toFixed(1) + ' x ' + rolled.d.toFixed(1) + ', front/back = ' + rolled.fbRing);
+    const tipped = await page.evaluate(() => { window.__rot.zero(); tipSelected(); window.nsoRotate.refresh(); return window.__rot.names(); });
+    check('Tip X lays it along Z instead: front/back is own X, about the plate\'s X, end over end along it',
+      alongOK(tipped) && tipped.fbRing === 'fb', 'footprint ' + tipped.w.toFixed(1) + ' x ' + tipped.d.toFixed(1));
+    const tilt = await page.evaluate(() => { tiltSelected(1); bankSelected(1); window.nsoRotate.refresh(); const r = window.__rot.names(); return r; });
+    check('...and the Tilt buttons (15° about each of its own axes) keep it consistent', alongOK(tilt),
+      'footprint ' + tilt.w.toFixed(1) + ' x ' + tilt.d.toFixed(1));
+
+    /* Scale and a bake, on a bar, with the names read cold - no refresh. */
+    await drop(files.bar);
+    const scaled = await page.evaluate(() => {
+      const before = window.__rot.names();
+      const r = NSO_scaleSelectedModel({ axis: 'x', targetMm: 120 });
+      return { ok: !!(r && r.ok), before: before, after: window.__rot.names() };
+    });
+    check('Scale (60 → 120 mm): names re-read on the new piece, still along-length = front/back',
+      scaled.ok && scaled.after.w > 100 && alongOK(scaled.after),
+      'footprint ' + scaled.before.w.toFixed(1) + ' → ' + scaled.after.w.toFixed(1));
+
+    await loadSTL(page, path.join(ROOT, 'fixtures', 'box-20mm.stl'));
+    await page.waitForTimeout(250);
+    await page.evaluate(() => { window.__rot.drop(state.placed.length - 1); window.__rot.zero(); });
+    const baked = await page.evaluate(() => {
+      const m = getActiveModel(), before = window.__rot.names();
+      const t = Array.from(m.rawTris);
+      for (let i = 0; i < t.length; i += 3) t[i] *= 3;              // raw X: 20 → 60 mm, a bake of the geometry
+      const ok = NSO_sculptCommitRaw(m, new Float32Array(t), 'scaleReplace', 'test bake');
+      return { ok: ok, before: before, after: window.__rot.names() };
+    });
+    check('a bake that stretches a square piece to 60x20: the names follow with no event to forget',
+      baked.ok && baked.before.names.square === true && baked.after.names.square === false && alongOK(baked.after) &&
+      baked.after.fbRing === 'ss', 'footprint ' + baked.before.w.toFixed(1) + ' x ' + baked.before.d.toFixed(1) +
+      ' → ' + baked.after.w.toFixed(1) + ' x ' + baked.after.d.toFixed(1));
+    const undone = await page.evaluate(() => { document.getElementById('btn-undo').click(); return window.__rot.names(); });
+    check('...and Undo of the bake puts the old mapping back', undone.names.square === true && undone.fbRing === 'fb',
+      JSON.stringify(undone.names.roles));
+
+    /* A drag holds the names. A 60x20 bar at 40° has the along lean on own Z;
+       dragged Turn through 45° its box goes square for a few degrees. */
+    await drop(files.bar);
+    const held = await page.evaluate(() => {
+      const a = window.nsoRotate, H = window.__rot;
+      a.turn('turn', 40);
+      a.setRing('ss', true);
+      H.cam(0, 35); a.refresh();
+      const start = a.leanNames().along;
+      const c = a.centreScreen(), h = a.handleScreen('turn', 1);
+      const a0 = Math.atan2(h.y - c.y, h.x - c.x), R = Math.hypot(h.x - c.x, h.y - c.y);
+      const yaw = () => { const e = new THREE.Euler().setFromQuaternion(H.q(), 'XYZ'); return e.y * 180 / Math.PI; };
+      const y0 = yaw();
+      /* try the pointer's two ways round for the one that carries the yaw toward 45 */
+      const tryWay = way => {
+        a.beginDrag({ ring: 'turn', dir: 1 }, h.x, h.y, c.x, c.y);
+        a.moveDrag(c.x + Math.cos(a0 + way * 6 * Math.PI / 180) * R, c.y + Math.sin(a0 + way * 6 * Math.PI / 180) * R);
+        const moved = Math.abs(yaw()) > Math.abs(y0);
+        return moved;
+      };
+      let way = 1;
+      if (!tryWay(1)) { a.endDrag(true); window.nsoRotate.turn('turn', 0); way = -1; tryWay(-1); }
+      const seen = [], squareNow = [];
+      for (let d = 6; d <= 9; d += 0.5) {
+        a.moveDrag(c.x + Math.cos(a0 + way * d * Math.PI / 180) * R, c.y + Math.sin(a0 + way * d * Math.PI / 180) * R);
+        seen.push(a.leanNames().along);
+        const p = H.p(), big = Math.max(p.width, p.depth);
+        squareNow.push(Math.abs(p.width - p.depth) <= 0.05 * big);
+      }
+      const mid = { yaw: yaw(), w: H.p().width, d: H.p().depth };
+      a.endDrag();
+      return { start: start, seen: seen, squareNow: squareNow, mid: mid, after: a.leanNames() };
+    });
+    check('mid-drag the names do not change, though the box passed through square',
+      held.seen.every(x => x === held.start) && held.squareNow.some(x => x),
+      'along = ' + held.start + ' throughout; box went square at ' + held.squareNow.filter(Boolean).length +
+      ' of ' + held.squareNow.length + ' steps (yaw ' + held.mid.yaw.toFixed(1) + '°, ' + held.mid.w.toFixed(1) + ' x ' + held.mid.d.toFixed(1) + ')');
+    check('...and on release they are read fresh from the footprint it landed on',
+      held.after.square === held.squareNow[held.squareNow.length - 1],
+      JSON.stringify({ square: held.after.square, along: held.after.along }));
+  }
+
+  /* ----------------------------------------------------------------- 23 */
+  console.log('\n=== 23. the card: a row follows its ring, the tooltip says which way it tips ===');
+  {
+    await page.click('#menu-rotate > summary'); await page.waitForTimeout(60);
+    await page.click('#menu-rotate > summary'); await page.waitForTimeout(100);
+    await page.evaluate(() => { window.__rot.drop(state.placed.length - 1); });
+    const titleOf = id => page.evaluate(i => document.getElementById(i).parentNode.title, id);
+    const boxes = () => page.evaluate(() => ['turn', 'fb', 'ss'].map(k => +document.getElementById('chk-rot-ring-' + k).checked).join(''));
+
+    /* the bar (60x20, along X): the front/back ROW ticks the ring that tips it along its length */
+    await page.evaluate(() => { window.__rot.zero(); window.nsoRotate.refresh(); });
+    await page.click('#chk-rot-ring-fb'); await page.waitForTimeout(60);
+    const onBar = await page.evaluate(() => ({ rings: window.nsoRotate.rings(), names: window.nsoRotate.leanNames(),
+      readoutLabel: window.nsoRotate.ringLabel('ss') }));
+    check('on the 60x20 bar the "Lean front/back" row ticks own Z (the ring along its length)',
+      onBar.rings.join() === 'turn,ss' && onBar.names.along === 'ss' && onBar.readoutLabel === 'Lean front/back', onBar.rings.join());
+    const tFb = await titleOf('chk-rot-ring-fb'), tSs = await titleOf('chk-rot-ring-ss');
+    check('...its tooltip says it tips the piece along its length, the ends going up and down',
+      /along its length/.test(tFb) && /ends go up and down/.test(tFb), tFb.slice(0, 70));
+    check('...and the side/side tooltip says across its width, one long edge up', /across its width/.test(tSs) && /long edge/.test(tSs), tSs.slice(0, 70));
+    const pressed = await page.evaluate(() => {
+      const a = window.nsoRotate, h = a.handleScreen('ss', 1), c = a.centreScreen();
+      a.beginDrag({ ring: 'ss', dir: 1 }, h.x, h.y, c.x, c.y);
+      const d = { readout: a.dragState() && a.readout(), };
+      a.moveDrag(h.x + 3, h.y + 30);
+      d.readout = a.readout();
+      a.endDrag();
+      return d;
+    });
+    check('...the readout beside the pointer carries the same name', /^Lean front\/back/.test(pressed.readout), pressed.readout);
+
+    /* a square piece: the old mapping, and a tooltip that admits it */
+    await page.evaluate(() => { document.getElementById('btn-undo').click(); });
+    await loadSTL(page, path.join(ROOT, 'fixtures', 'box-20mm.stl'));
+    await page.waitForTimeout(250);
+    await page.click('#menu-rotate > summary'); await page.waitForTimeout(60);      // a fresh session: Turn only
+    await page.click('#menu-rotate > summary'); await page.waitForTimeout(100);
+    await page.evaluate(() => { window.__rot.drop(state.placed.length - 1); window.__rot.zero(); window.nsoRotate.refresh(); });
+    const sFb = await titleOf('chk-rot-ring-fb');
+    check('on a square piece the tooltip says front over back, and that there is no long side',
+      /front over back/.test(sFb) && /square/.test(sFb), sFb.slice(0, 90));
+
+    /* the ring carries its row: tick front/back on the cube, bake it long, and the TICK moves to the other row */
+    await page.evaluate(() => { window.nsoRotate.setRing('turn', false); window.nsoRotate.setRing('fb', true); });
+    const before = await boxes();
+    await page.evaluate(() => {
+      const m = getActiveModel(), t = Array.from(m.rawTris);
+      for (let i = 0; i < t.length; i += 3) t[i] *= 3;
+      NSO_sculptCommitRaw(m, new Float32Array(t), 'scaleReplace', 'test bake');
+      window.nsoRotate.refresh();
+    });
+    const after = await boxes();
+    const ring = await page.evaluate(() => window.nsoRotate.rings().join());
+    check('a bake that makes the cube long: the same ring (own X) stays drawn, and its tick moves to the "side/side" row',
+      before === '010' && after === '001' && ring === 'fb', before + ' → ' + after + ', drawn ' + ring);
+    await page.click('#chk-rot-ring-ss'); await page.waitForTimeout(50);
+    check('...and unticking that row hides that ring', (await page.evaluate(() => window.nsoRotate.rings().length)) === 0);
+    await page.evaluate(() => { document.getElementById('btn-undo').click(); });
+  }
+
+  /* ----------------------------------------------------------------- 24 */
+  console.log('\n=== 24. Undo of a lean is unchanged, on a piece whose names are swapped ===');
+  {
+    await drop(files.bar);
+    await page.click('#menu-rotate > summary'); await page.waitForTimeout(60);
+    await page.click('#menu-rotate > summary'); await page.waitForTimeout(100);
+    await page.evaluate(() => { window.__rot.drop(state.placed.length - 1); window.__rot.zero(); window.__rot.home(); });
+    await page.click('#chk-rot-ring-fb'); await page.waitForTimeout(60);       // the row named front/back
+    const pose = () => page.evaluate(() => { const p = window.__rot.p();
+      return { q: window.__rot.q().toArray(), f: [p.tipX, p.tipZ, p.flipX, p.tiltX, p.tiltZ, p.rotY, p.liftY || 0] }; });
+    const p0 = await pose();
+    const drags = [];
+    for (const kind of ['drag', 'click']) {
+      const ring = await page.evaluate(() => window.nsoRotate.rings().find(r => r !== 'turn'));
+      const h = await page.evaluate(r => window.nsoRotate.handleScreen(r, 1), ring);
+      const c = await page.evaluate(() => window.nsoRotate.centreScreen());
+      if (kind === 'click') await page.mouse.click(h.x, h.y);
+      else {
+        await page.mouse.move(h.x, h.y); await page.mouse.down();
+        const a0 = Math.atan2(h.y - c.y, h.x - c.x), R = Math.hypot(h.x - c.x, h.y - c.y);
+        for (let i = 1; i <= 25; i++) {
+          const a = a0 + i * Math.PI / 180;
+          await page.mouse.move(c.x + Math.cos(a) * R, c.y + Math.sin(a) * R);
+        }
+        await page.mouse.up();
+      }
+      await page.waitForTimeout(700);                                          // let the run seat
+      drags.push({ ring: ring, pose: await pose() });
+    }
+    const ang = (a, b) => page.evaluate(([x, y]) => window.__rot.angleDeg(new THREE.Quaternion().fromArray(x), new THREE.Quaternion().fromArray(y)), [a, b]);
+    check('a drag and a click on the ring named front/back (own Z here) each move the piece',
+      drags[0].ring === 'ss' && (await ang(p0.q, drags[0].pose.q)) > 20 && (await ang(drags[0].pose.q, drags[1].pose.q)) > 0.9,
+      'ring ' + drags[0].ring);
+    await page.click('#btn-undo'); await page.waitForTimeout(80);
+    const u1 = await pose();
+    await page.click('#btn-undo'); await page.waitForTimeout(80);
+    const u2 = await pose();
+    check('Undo, Undo: each press stepped back exactly, pose fields and all',
+      (await ang(drags[0].pose.q, u1.q)) < 1e-6 && (await ang(p0.q, u2.q)) < 1e-6 &&
+      JSON.stringify(u2.f) === JSON.stringify(p0.f), 'fields ' + p0.f.join(',') + ' → ' + u2.f.join(','));
   }
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
