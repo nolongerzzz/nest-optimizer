@@ -166,6 +166,32 @@ at least the floor.
 G-scope's Generate on a region that already has supports replaces them as one
 undo step.
 
+**Progress.** `plan()`, `parts()` and `weld()` take `opts.onProgress(msg)` and
+tell it `{ phase, done, total }` as they go, once per unit finished:
+
+| phase | where | count |
+|---|---|---|
+| `detecting` | `plan()`: the plate and the spatial index | none (`null`, `null`) |
+| `planning` | `plan()`: beacons settled / beacons given (a beacon inside the piece is settled when it is refused) | `done` / `total` |
+| `building` | `parts()`: trunks swept / trunks | `done` / `total` |
+| `welding` | `weld()`: the unions | none: how many joins there will be is not known until the last is done |
+
+A phase with no count says so with nulls; no total is ever guessed. `done` never
+goes down within a phase and never passes `total`. Between units the last message
+is repeated once 200 ms (`HEARTBEAT_MS`) has passed, and `beat()` does the same
+from inside the steer, nudge and merge loops, so the gap between messages is at
+most 200 ms plus the longest single call that does not beat - the first detect
+and index of a piece, `padGaps`, one wasm union. A callback that throws is
+ignored.
+
+`solid(plan)` is two calls now: `parts(plan, opts)` (the BUILDING half, a trunk
+at a time, with `opts.yieldFn` given a turn between trunks) then
+`weld(plan, parts, opts)` (the unions, with `yieldFn` after each). `solid` with
+no callback and no `yieldFn` is the same bytes as before: it runs the sync
+`trunkParts`, which `parts()` shares with it, then `weld`. The Supports card calls
+`parts` (in its worker) and `weld` (on the page) itself, so it can run every area
+through one phase before the next and keep one bar.
+
 ## 3. Measured (`support:gridpack`, 80 checks; `support:exposed`, 114)
 
 | fixture | result |

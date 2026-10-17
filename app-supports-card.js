@@ -15,10 +15,17 @@
              piece adds a spot (one beacon, outlined like the rest). Nothing
              builds on a click. Style, Size and "May rest on the part" sit under
              GENERATE.
-   BUILDING  GENERATE was pressed. The button reads "Building\u2026" (with the
-             seconds once it has run past 10), the card is locked, a spinner
-             turns over the piece. The planner runs in a worker so the page, the
-             counter and the watchdog stay live; the watchdog is 60 s.
+   BUILDING  GENERATE was pressed. The card is locked and one bar fills under
+             the readout: "Planning 142 / 377 \u00b7 38 %" (beacons settled),
+             then "Building 12 / 40 \u00b7 30 %" (trunks swept), the phase word
+             changing as the build moves on; the bottom-right status says the
+             same. A phase with no count (detecting, welding) shows its word
+             and the seconds, "Welding \u00b7 14 s", on a bar that only moves;
+             no percent is ever guessed. Escape cancels: the worker is
+             terminated, the plate is as it was, Undo has nothing new. The
+             planner runs in a worker so the page, the counter and the watchdog
+             stay live; the watchdog is 60 s, and when it fires the bar is
+             replaced by "Could not build: ...".
    BUILT     "Built: M supports \u00b7 held H \u00b7 unsupported K \u00b7 unreachable U".
              Every area is exactly one of the three: held (every spot held from
              the plate or resting on the part), unreachable (tried, no route to
@@ -75,7 +82,12 @@ var NSO_SUPPORTS_CARD = (function () {
   var UP_MAX = 0.26;             // a face whose normal points up more than this (15 deg) holds nothing
   var ORDER = 30;                // over the piece and its outline
   var WATCHDOG_MS = 60000;       // a build that has not ended by now is stopped, and says so
-  var ELAPSED_FROM_MS = 10000;   // the readout counts seconds once a build has run this long
+  var ELAPSED_FROM_MS = 10000;   // a build the planner has said nothing about counts seconds once it has run this long
+  var SLICE_MS = 250;            // on the page, a build gives the page a turn after this much work (repaint, Escape, the clock); a turn costs a frame of the 3D view
+  /* The phases a build goes through, in order, as the planner names them
+     (nso_support_gridpack.js, PROGRESS). A phase never goes back. */
+  var PHASE_WORD = { detecting: 'Detecting', planning: 'Planning', building: 'Building', welding: 'Welding' };
+  var PHASE_RANK = { detecting: 0, planning: 1, building: 2, welding: 3 };
   /* The planner's files, in index.html's order: what the build worker loads. */
   var ENGINE = ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.js', 'nso_path_sweep.js',
     'nso_support_tree.js', 'nso_support_gridpack.js'];
@@ -87,8 +99,9 @@ var NSO_SUPPORTS_CARD = (function () {
   var S = {
     open: false, hostId: null, selSupport: null, busy: false,
     det: null, occ: {}, eff: null, layer: null, raf: 0, sig: '', mem: {}, msg: null,
-    spin: null, geo: null, angle: ANGLE_DEFAULT, angleTimer: 0,
-    watchdogMs: WATCHDOG_MS, planner: null, job: null, elapsed: 0
+    geo: null, angle: ANGLE_DEFAULT, angleTimer: 0,
+    watchdogMs: WATCHDOG_MS, planner: null, job: null, elapsed: 0,
+    prog: null, listeners: [], said: null
   };
 
   function $(id) { return document.getElementById(id); }
@@ -440,30 +453,56 @@ var NSO_SUPPORTS_CARD = (function () {
     return memOf(S.hostId).built ? 'built' : 'idle';
   }
 
-  function spinner() {
-    if (!S.spin) {
-      var e = document.createElement('div');
-      e.id = 'sup-spinner'; e.className = 'sup-spinner'; e.hidden = true;
-      e.setAttribute('role', 'status'); e.setAttribute('aria-label', 'Building supports');
-      document.body.appendChild(e);
-      S.spin = e;
-    }
-    return S.spin;
-  }
-  /* A ring turning over the piece's middle while a build runs. */
-  function placeSpinner() {
-    var e = S.spin;
-    if (!e || e.hidden) return;
-    var p = placedOf(S.hostId);
-    if (!p || !p.mesh || !state.camera || !state.renderer) return;
-    var c = new THREE.Box3().setFromObject(p.mesh).getCenter(new THREE.Vector3()).project(state.camera);
-    var r = state.renderer.domElement.getBoundingClientRect();
-    e.style.left = (r.left + (c.x + 1) / 2 * r.width) + 'px';
-    e.style.top = (r.top + (1 - c.y) / 2 * r.height) + 'px';
-  }
-
+  /* What a build says when the planner has told it nothing (a planner set
+     with setPlanner that does not report): "Building\u2026", and the seconds once
+     it has run past ELAPSED_FROM_MS. */
   function buildingLine() {
     return S.elapsed * 1000 >= ELAPSED_FROM_MS ? 'Building\u2026 ' + S.elapsed + ' s' : 'Building\u2026';
+  }
+  /* The percent of a counted phase: the nearest whole number, but 100 only
+     when the work is done (1999 of 2000 is 99), and null when there is no
+     count - a phase that has none shows its word and the seconds instead. */
+  function percentOf(pg) {
+    if (!pg || pg.done == null || !(pg.total > 0)) return null;
+    return pg.done >= pg.total ? 100 : Math.min(99, Math.round(100 * pg.done / pg.total));
+  }
+  /* "Planning 142 / 377 \u00b7 38 %", or "Welding \u00b7 14 s" for a phase with no
+     count. The seconds are the build's own, the ones the watchdog counts. */
+  function progressLine() {
+    var pg = S.prog;
+    if (!pg) return buildingLine();
+    var word = PHASE_WORD[pg.phase];
+    return percentOf(pg) == null ? word + ' \u00b7 ' + S.elapsed + ' s'
+      : word + ' ' + pg.done + ' / ' + pg.total + ' \u00b7 ' + percentOf(pg) + ' %';
+  }
+  /* The one bar, under the readout: shown while a build runs, filled to the
+     phase's percent, or sweeping when the phase has no count. The readout and
+     the bottom-right status say the same words as the bar. */
+  function paintBar() {
+    var bar = $('sup-progress'), fill = bar && bar.firstElementChild, on = !!(S.open && S.busy);
+    if (bar) {
+      bar.hidden = !on;
+      if (on) {
+        var pc = percentOf(S.prog), line = progressLine();
+        bar.classList.toggle('is-indeterminate', pc == null);
+        bar.dataset.phase = S.prog ? S.prog.phase : '';
+        if (pc == null) bar.removeAttribute('aria-valuenow'); else bar.setAttribute('aria-valuenow', String(pc));
+        bar.setAttribute('aria-valuetext', line);
+        if (fill) fill.style.width = pc == null ? '' : pc + '%';
+      }
+    }
+    if (S.busy) {
+      var line2 = progressLine(), head = $('sup-count');
+      if (head && head.textContent !== line2) head.textContent = line2;
+      if (S.said !== line2 && typeof setStatus === 'function') { S.said = line2; setStatus(line2, false); }
+    }
+  }
+  /* The status line is the app's, and a build is done with it: clear it if it still
+     says what the build last put there. */
+  function unsay() {
+    var el = $('status');
+    if (S.said != null && el && el.textContent === S.said && typeof setStatus === 'function') setStatus('', false);
+    S.said = null;
   }
 
   function sync() {
@@ -477,7 +516,7 @@ var NSO_SUPPORTS_CARD = (function () {
     else if (cs === 'pick') text = 'Click a piece to see where it needs holding.';
     else if (cs === 'error') { text = eff.error; bad = true; }
     else if (cs === 'nothing') text = NOTHING;
-    else if (cs === 'building') text = buildingLine();
+    else if (cs === 'building') text = progressLine();
     else if (cs === 'built') text = builtLine(a);
     else text = idleLine(a);
     if (head) { head.textContent = text; head.classList.toggle('is-bad', bad); }
@@ -497,9 +536,7 @@ var NSO_SUPPORTS_CARD = (function () {
     var ang = $('sup-angle');
     if (ang && document.activeElement !== ang && ang.value !== String(S.angle)) ang.value = String(S.angle);
     drawRows(cs === 'built' && st ? rowsFor(eff, st) : []);
-    var sp = spinner();
-    sp.hidden = !(S.open && S.busy);
-    placeSpinner();
+    paintBar();
   }
 
   /* The short list under the readout: one row for every area that is not
@@ -628,8 +665,17 @@ var NSO_SUPPORTS_CARD = (function () {
     var code = 'importScripts(' + urls.map(function (u) { return JSON.stringify(u); }).join(',') + ');\n' +
       'self.onmessage = function (e) {\n' +
       '  var d = e.data, plan;\n' +
-      '  try { plan = self.NSO_SupportTree.planTree(d.soup, d.opts); } catch (err) {\n' +
+      '  d.opts.onProgress = function (m) { self.postMessage({ id: d.id, progress: m, at: Date.now() }); };\n' +
+      '  if (d.soup) self.soup = d.soup;\n' +     // the piece comes once per build: the same array is indexed once, not once an area
+      '  if (d.plan) {\n' +                       // the trunks of a plan, swept (NSO_SupportGridpack.parts)
+      '    if (d.plan.rawTris === null) d.plan.rawTris = self.soup;\n' +
+      '    self.NSO_SupportGridpack.parts(d.plan, d.opts).then(function (tp) { self.postMessage({ id: d.id, parts: tp }); },\n' +
+      '      function (err) { self.postMessage({ id: d.id, error: (err && err.message) || String(err) }); });\n' +
+      '    return;\n' +
+      '  }\n' +
+      '  try { plan = self.NSO_SupportTree.planTree(self.soup, d.opts); } catch (err) {\n' +
       '    self.postMessage({ id: d.id, error: (err && err.message) || String(err) }); return; }\n' +
+      '  if (plan && plan.rawTris) plan.rawTris = null;\n' +     // the page has the piece; parts() below puts it back from self.soup
       '  try { self.postMessage({ id: d.id, plan: plan }); } catch (err) {\n' +
       '    self.postMessage({ id: d.id, error: "the plan could not be passed back: " + ((err && err.message) || String(err)) }); }\n' +
       '};\n';
@@ -643,48 +689,84 @@ var NSO_SUPPORTS_CARD = (function () {
     try { URL.revokeObjectURL(job.worker.url); } catch (e) { /* ditto */ }
     job.worker = null;
   }
-  /* planTree(soup, opts) -> Promise of the plan, on the job's worker. */
-  function planAway(job, soup, opts) {
-    if (S.planner) return Promise.resolve().then(function () { return S.planner(soup, opts); });
+  /* planTree(soup, opts) -> Promise of the plan, on the job's worker. The
+     planner's progress, { phase, done, total }, comes back to onProgress as it
+     is posted, with the time (ms since the epoch) the worker posted it; a
+     planner set with setPlanner gets it as opts.onProgress too. */
+  function planAway(job, soup, opts, onProgress) {
+    if (S.planner) return Promise.resolve().then(function () { return S.planner(soup, Object.assign({}, opts, { onProgress: onProgress })); });
     if (job.worker === undefined) job.worker = startWorker();
     if (!job.worker) {
-      return new Promise(function (go) { setTimeout(go, 0); }).then(function () { return window.NSO_SupportTree.planTree(soup, opts); });
+      return new Promise(function (go) { setTimeout(go, 0); }).then(function () {
+        return window.NSO_SupportTree.planTree(soup, Object.assign({}, opts, { onProgress: onProgress }));
+      });
     }
     return new Promise(function (resolve, reject) {
       var w = job.worker.w, id = ++job.seq;
-      w.onmessage = function (e) { if (e.data.id !== id) return; if (e.data.error) reject(new Error(e.data.error)); else resolve(e.data.plan); };
+      w.onmessage = function (e) {
+        if (e.data.id !== id) return;
+        if (e.data.progress) { if (onProgress) onProgress(e.data.progress, e.data.at); return; }
+        if (e.data.error) reject(new Error(e.data.error)); else resolve(e.data.plan);
+      };
       w.onerror = function (e) { reject(new Error((e && e.message) || 'the planner stopped')); };
-      w.postMessage({ id: id, soup: soup, opts: opts });
+      /* The piece goes over once. Every area is planned against the same
+         array, whose spatial index the planner then finds again: a fresh copy
+         per area was indexed afresh each time (about 0.4 s of 49k triangles). */
+      w.postMessage({ id: id, soup: job.sentSoup ? null : soup, opts: opts });
+      job.sentSoup = true;
+    });
+  }
+  /* The trunks of a plan swept (NSO_SupportGridpack.parts), on the job's
+     worker too, so that stretch of work is off the page as well. Without a
+     worker it is swept here, a trunk at a time, with a turn for the page
+     between (yieldFn). Progress comes back to onProgress as it is posted. */
+  function partsAway(job, plan, onProgress, yieldFn) {
+    if (job.worker === undefined) job.worker = startWorker();
+    if (!job.worker) return window.NSO_SupportGridpack.parts(plan, { onProgress: onProgress, yieldFn: yieldFn });
+    return new Promise(function (resolve, reject) {
+      var w = job.worker.w, id = ++job.seq;
+      w.onmessage = function (e) {
+        if (e.data.id !== id) return;
+        if (e.data.progress) { if (onProgress) onProgress(e.data.progress, e.data.at); return; }
+        if (e.data.error) reject(new Error(e.data.error)); else resolve(e.data.parts);
+      };
+      w.onerror = function (e) { reject(new Error((e && e.message) || 'the planner stopped')); };
+      /* A plan from the worker comes back without the piece (rawTris null), and the worker puts its own copy back. */
+      w.postMessage({ id: id, plan: plan, opts: {} });
     });
   }
 
-  /* One region through the planner. Resolves { ok, rid, solids, unreachable,
-     reason }: each solid { soup, keys, holds, landing } in the planner's
-     own words - nothing is aimed or moved here. */
-  function planRegion(job, D, rid, beacons, o) {
+  /* One area through the planner: the PLANNING step. Resolves { result } when
+     there is nothing to build (the planner refused it, or put every spot
+     inside the piece), else { rid, t, keyOf, landingOf, unreach } - the plan,
+     for building and welding to take up. */
+  function planArea(job, D, rid, beacons, o, onProgress) {
     var bs = beacons.map(function (b) { return { x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: rid, key: b.key }; });
     var opts = Object.assign({}, D.opts, { beacons: bs, style: o.style, restOnModel: o.rest });
     if (o.sideMm != null) opts.sideMm = o.sideMm;
-    return planAway(job, D.soup, opts).then(function (t) {
+    return planAway(job, D.soup, opts, onProgress).then(function (t) {
       if (!t || typeof t !== 'object') throw new Error('the planner gave no plan');
       var keyOf = function (id) { return t.beacons && t.beacons[id] ? t.beacons[id].key : null; };
       if (!t.ok) {
         var all = t.inside && t.inside.length ? beacons.map(function (b) { return b.key; }) : [];
-        return { ok: !!all.length, rid: rid, solids: [], unreachable: all, reason: t.reason };
+        return { result: { ok: !!all.length, rid: rid, solids: [], unreachable: all, reason: t.reason } };
       }
       var landingOf = {};
       t.trunks.forEach(function (tr) { tr.beacons.forEach(function (id) { landingOf[id] = tr.landing; }); });
-      var unreach = t.unreachable.concat(t.inside).map(keyOf);
-      return window.NSO_SupportGridpack.solid(t).then(function (u) {
-        if (!u.ok) return { ok: false, rid: rid, solids: [], unreachable: [], reason: u.reason };
-        var solids = u.solids.map(function (x) {
-          var holds = {};
-          x.beacons.forEach(function (id) { holds[keyOf(id)] = landingOf[id] === 'rest' ? 'rest' : 'held'; });
-          return { soup: x.soup, keys: x.beacons.map(keyOf), holds: holds, landing: x.landing, regionIds: x.regionIds };
-        });
-        return { ok: true, rid: rid, solids: solids, unreachable: unreach, sideMm: t.sideMm, reason: t.reason };
-      });
+      return { rid: rid, t: t, keyOf: keyOf, landingOf: landingOf, unreach: t.unreachable.concat(t.inside).map(keyOf) };
     });
+  }
+  /* The area's answer, from its plan and what welding made of it: { ok, rid,
+     solids, unreachable, reason }, each solid { soup, keys, holds, landing }
+     in the planner's own words - nothing is aimed or moved here. */
+  function areaResult(a, u) {
+    if (!u.ok) return { ok: false, rid: a.rid, solids: [], unreachable: [], reason: u.reason };
+    var solids = u.solids.map(function (x) {
+      var holds = {};
+      x.beacons.forEach(function (id) { holds[a.keyOf(id)] = a.landingOf[id] === 'rest' ? 'rest' : 'held'; });
+      return { soup: x.soup, keys: x.beacons.map(a.keyOf), holds: holds, landing: x.landing, regionIds: x.regionIds };
+    });
+    return { ok: true, rid: a.rid, solids: solids, unreachable: a.unreach, sideMm: a.t.sideMm, reason: a.t.reason };
   }
 
   /* Take pieces off the plate and out of the model list, recorded the way
@@ -766,19 +848,28 @@ var NSO_SUPPORTS_CARD = (function () {
   }
 
   /*
-   * GENERATE / REGENERATE: build every area not left out (planned one at a
-   * time, in order) and put every solid on the plate, taking every support
-   * already on the piece off first: one undo step for the lot. An area the
-   * plan cannot reach adds nothing; its spots are remembered as unreachable
-   * until the next build or REMOVE ALL.
+   * GENERATE / REGENERATE: build every area not left out and put every solid
+   * on the plate, taking every support already on the piece off first: one
+   * undo step for the lot. An area the plan cannot reach adds nothing; its
+   * spots are remembered as unreachable until the next build or REMOVE ALL.
+   *
+   * The work goes PHASE BY PHASE, every area through a phase before the next
+   * begins, so the bar's phase word only ever moves forward:
+   *   detecting / planning   each area through the planner, in the worker
+   *   building               each area's trunks swept (nso_support_gridpack parts), in the worker
+   *   welding                each area's unions (weld), on the page - the one stretch the page does
+   * and tells the bar as it goes (note). Planning and building have counts
+   * (beacons settled, trunks swept) summed over every area; detecting and
+   * welding have none, and the bar says so.
    *
    * A build ENDS IN A STATE. Planning is all that can take long, and it makes
    * no change to the plate: the plate is touched in one stretch of
    * synchronous code at the very end (commit), and only if the build is still
-   * live. So a refusal, an exception or the watchdog - which stops the worker
-   * and marks the build dead - leaves the plate exactly as it was, with no
-   * Undo step; the card says "Could not build: <why> - nothing was added" and
-   * is back in the state it was in before.
+   * live. So a refusal, an exception, Escape or the watchdog - which stop the
+   * worker and mark the build dead - leave the plate exactly as it was, with
+   * no Undo step; the card says "Could not build: <why> - nothing was added"
+   * (or "Build cancelled - nothing was added") and is back in the state it
+   * was in before.
    */
   function build() {
     if (S.busy) return Promise.resolve({ ok: false, reason: 'busy' });
@@ -792,30 +883,89 @@ var NSO_SUPPORTS_CARD = (function () {
       sync();
       return Promise.resolve({ ok: false, reason: 'nothing to build' });
     }
-    var job = { seq: 0, dead: false, t0: Date.now(), worker: undefined, stop: null, timer: 0, clock: 0 };
+    var job = { seq: 0, dead: false, t0: Date.now(), worker: undefined, sentSoup: false, stop: null, timer: 0, clock: 0, rank: -1 };
     var limit = S.watchdogMs, secs = Math.round(limit / 100) / 10;
     function late() { var e = new Error('the planner was still working after ' + secs + ' s'); e.timeout = true; return e; }
-    S.job = job; S.busy = true; S.msg = null; S.elapsed = 0; sync();
+    var spots = regs.reduce(function (n, r) { return n + r.beacons.length; }, 0);
+    S.job = job; S.busy = true; S.msg = null; S.elapsed = 0; S.prog = null; sync();
     var guard = new Promise(function (go, stop) { job.stop = stop; });
     job.timer = setTimeout(function () { job.stop(late()); }, limit);
     job.clock = setInterval(function () { S.elapsed = Math.floor((Date.now() - job.t0) / 1000); sync(); }, 1000);
 
-    var results = [], chain = new Promise(function (go) {
-      /* One frame and a tick first: the card and the spinner are on screen
+    /* A turn for the page between units of work on it: the bar repaints, the
+       clock and Escape are heard. It also reads the clock (a unit that blocks
+       the thread cannot be interrupted, so it is caught after) and refuses to
+       go on once the build is dead. */
+    var sliceFrom = Date.now();
+    function pause() {
+      if (job.dead) throw new Error('the build was stopped');
+      if (Date.now() - job.t0 > limit) throw late();
+      if (Date.now() - sliceFrom < SLICE_MS) return undefined;
+      return new Promise(function (go) { setTimeout(go, 0); }).then(function () {
+        sliceFrom = Date.now();
+        if (job.dead) throw new Error('the build was stopped');
+      });
+    }
+
+    var areas = [], solidsOf = [], chain = new Promise(function (go) {
+      /* One frame and a tick first: the card and the bar are on screen
          before the planner starts. */
       requestAnimationFrame(function () { setTimeout(go, 0); });
     });
+    var gp = function () { return window.NSO_SupportGridpack; };
+
+    /* 1. PLANNING (detecting, then beacons settled), area by area. */
+    var settledBefore = 0;
     regs.forEach(function (rg) {
       chain = chain.then(function () {
         if (job.dead) return null;
-        return planRegion(job, D, rg.id, rg.beacons, o).then(function (r) {
-          results.push(r);
-          /* A union step cannot be interrupted, so the clock is read again
-             here, and the page gets a turn before the next area. */
-          if (Date.now() - job.t0 > limit) throw late();
-          return new Promise(function (go) { setTimeout(go, 0); });
+        var at = settledBefore, mine = rg.beacons.length;
+        settledBefore += mine;
+        return planArea(job, D, rg.id, rg.beacons, o, function (m, sent) {
+          /* Each area's planner starts with its own 'detecting'; note() drops
+             it once the build is past that phase. The counts are this
+             build's, summed over the areas. */
+          note(job, m && m.phase === 'planning' ? { phase: 'planning', done: at + m.done, total: spots, own: mine, ownDone: m.done } : m, sent);
+        }).then(function (a) {
+          areas.push(a);
+          return pause() || new Promise(function (go) { setTimeout(go, 0); });
         });
       });
+    });
+
+    /* 2. BUILDING: the trunks of every area that has a plan, swept. */
+    var swept = [];
+    chain = chain.then(function () {
+      if (job.dead) return null;
+      /* Every area has been through the planner, and every spot in it is settled (an area the planner
+         refused counts: its spots are named unreachable or inside). */
+      note(job, { phase: 'planning', done: spots, total: spots, own: spots, ownDone: spots });
+      var live = areas.filter(function (a) { return a.t; });
+      var trunks = live.reduce(function (n, a) { return n + a.t.trunks.length; }, 0), before = 0, next = Promise.resolve();
+      live.forEach(function (a) {
+        next = next.then(function () {
+          var at = before;
+          before += a.t.trunks.length;
+          return partsAway(job, a.t, function (m, sent) {
+            note(job, m && m.phase === 'building' ? { phase: 'building', done: at + m.done, total: trunks } : m, sent);
+          }, pause).then(function (tp) { swept.push({ a: a, tp: tp }); });
+        });
+      });
+      return next.then(function () { stopWorker(job); });     // the worker's work is done; welding is the page's
+    });
+
+    /* 3. WELDING: every area's unions, joined into solids. */
+    chain = chain.then(function () {
+      if (job.dead) return null;
+      var next = Promise.resolve();
+      swept.forEach(function (x) {
+        next = next.then(function () {
+          if (!x.tp.ok) { solidsOf.push({ a: x.a, u: { ok: false, reason: x.tp.reason } }); return null; }
+          return gp().weld(x.a.t, x.tp, { yieldFn: pause, onProgress: function (m) { note(job, m); } })
+            .then(function (u) { solidsOf.push({ a: x.a, u: u }); });
+        });
+      });
+      return next;
     });
 
     /* The one place the plate changes. Synchronous from the first removal to
@@ -823,6 +973,11 @@ var NSO_SUPPORTS_CARD = (function () {
        everything is put back and no step is recorded. */
     function commit() {
       if (job.dead) return { ok: false, reason: 'the build was stopped' };
+      var results = areas.map(function (a) {
+        if (!a.t) return a.result;
+        var x = solidsOf.find(function (y) { return y.a === a; });
+        return areaResult(a, x ? x.u : { ok: false, reason: 'the area was not built' });
+      });
       var failed = results.filter(function (r) { return !r.ok; });
       if (failed.length) return { ok: false, reason: failed[0].reason || 'the planner refused' };
       var undo = snapshot(), removed = [], added = [], n = 0, mem = memOf(hostId);
@@ -858,7 +1013,8 @@ var NSO_SUPPORTS_CARD = (function () {
       clearTimeout(job.timer); clearInterval(job.clock);
       stopWorker(job);
       if (S.job === job) S.job = null;
-      S.busy = false; S.elapsed = 0;
+      S.busy = false; S.elapsed = 0; S.prog = null;
+      unsay();
     }
     function fail(reason, restored) {
       S.msg = { text: 'Could not build: ' + String(reason || 'no reason given').replace(/[.\s]+$/, '') + ' - nothing was added', bad: true };
@@ -873,9 +1029,56 @@ var NSO_SUPPORTS_CARD = (function () {
         stats: areaStats(S.eff, statesFor(S.eff)), line: ($('sup-count') || {}).textContent || '' };
     }, function (err) {
       over();
+      if (err && err.cancelled) {
+        S.msg = { text: 'Build cancelled - nothing was added', bad: false };
+        refresh();
+        return { ok: false, reason: 'cancelled', cancelled: true, line: ($('sup-count') || {}).textContent || '' };
+      }
       if (!err || !err.timeout) console.error('[supports card]', err);
       return fail((err && err.message) || String(err));
     });
+  }
+
+  /* What the planner has said, taken up by the bar. A phase never goes back
+     (every area's planner opens with its own 'detecting'), a count never
+     goes down or past its total (one that does is dropped, not clamped), and
+     a message with no count is a phase with none: the bar shows its word and
+     the seconds. Listeners (onProgress) hear
+     every message that is kept, repeats included, so the cadence is theirs
+     to read. `sent` is when the worker posted it (the page may take it up
+     later: a frame of the 3D view can hold the page's thread for a while). */
+  function note(job, m, sent) {
+    if (job.dead || S.job !== job || !m || !(m.phase in PHASE_RANK)) return;
+    var rank = PHASE_RANK[m.phase], counted = isFinite(m.done) && isFinite(m.total) && m.total > 0;
+    /* A count that makes no sense (below 0, past its total, past its own
+       area's share) is not shown: the bar never says more than it was told. */
+    if (counted && (m.done < 0 || m.done > m.total || (m.own != null && (m.ownDone < 0 || m.ownDone > m.own)))) return;
+    var next = { phase: m.phase, done: counted ? m.done : null, total: counted ? m.total : null };
+    if (rank < job.rank) return;
+    if (rank === job.rank && counted && S.prog && S.prog.done != null && next.done < S.prog.done) return;
+    job.rank = rank;
+    S.prog = next;
+    paintBar();
+    var now = Date.now();
+    var say = { phase: next.phase, done: next.done, total: next.total, percent: percentOf(next), line: progressLine(),
+      ms: now - job.t0, sent: (sent || now) - job.t0 };
+    S.listeners.slice().forEach(function (fn) { try { fn(say); } catch (err) { /* a listener must not stop the build */ } });
+  }
+
+  /* Escape stops the build that is running: the worker is terminated, the
+     plate is as it was, Undo has nothing new. */
+  function cancel() {
+    var job = S.job;
+    if (!job || job.dead || !job.stop) return { ok: false, reason: 'not building' };
+    var e = new Error('the build was cancelled');
+    e.cancelled = true;
+    job.stop(e);
+    return { ok: true };
+  }
+  function onKey(ev) {
+    if (ev.key !== 'Escape' || !S.busy || !S.job) return;
+    cancel();
+    ev.preventDefault(); ev.stopImmediatePropagation();
   }
 
   /* Supports off, one undo step; the card goes back to IDLE (`reset`) when
@@ -1011,7 +1214,7 @@ var NSO_SUPPORTS_CARD = (function () {
       else if (w != null && w !== S.hostId && state.selectedIndex >= 0) pick(w);   // the app's selection moved: detect there
       else if (S.hostId == null && w != null) pick(w);
       else if (signature() !== S.sig) refresh();
-    } else placeSpinner();
+    }
     S.raf = requestAnimationFrame(tick);
   }
   /* Opening the card detects at once, on the selected piece. */
@@ -1083,6 +1286,7 @@ var NSO_SUPPORTS_CARD = (function () {
     on('sup-angle', 'input', function () { setAngle($('sup-angle').value, false); });
     on('sup-angle', 'change', function () { setAngle($('sup-angle').value, true); });
     window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('keydown', onKey, true);
     sync();
   }
   if (typeof document !== 'undefined') {
@@ -1108,7 +1312,20 @@ var NSO_SUPPORTS_CARD = (function () {
     angle: function (v) { if (v !== undefined) setAngle(v, true); return S.angle; },
     /** The watchdog, ms: a build still running past it is stopped. Default 60000. */
     watchdogMs: function (v) { if (v !== undefined) S.watchdogMs = v > 0 ? +v : WATCHDOG_MS; return S.watchdogMs; },
-    /** A test seam: fn(soup, opts) -> Promise of a plan replaces the worker's planTree; null restores it. */
+    /** Stop the build that is running, as Escape does: nothing is added, Undo has nothing new. */
+    cancel: cancel,
+    /** fn({ phase, done, total, percent, line, ms, sent }) hears every progress message a build keeps; returns the function that stops it. ms: when the page took it up; sent: when the worker posted it - the planner's own cadence, which the page's frames do not blur. */
+    onProgress: function (fn) {
+      if (typeof fn !== 'function') return function () {};
+      S.listeners.push(fn);
+      return function () { var k = S.listeners.indexOf(fn); if (k >= 0) S.listeners.splice(k, 1); };
+    },
+    /** What the bar shows now: null when no build is running, else { phase, done, total, percent, line }. */
+    progress: function () {
+      return S.busy ? { phase: S.prog ? S.prog.phase : null, done: S.prog ? S.prog.done : null, total: S.prog ? S.prog.total : null,
+        percent: percentOf(S.prog), line: progressLine() } : null;
+    },
+    /** A test seam: fn(soup, opts) -> Promise of a plan replaces the worker's planTree (opts.onProgress takes its progress); null restores it. */
     setPlanner: function (fn) { S.planner = typeof fn === 'function' ? fn : null; },
     /** What the card shows now: beacons with their states, regions, rows, the words. */
     view: function () {
