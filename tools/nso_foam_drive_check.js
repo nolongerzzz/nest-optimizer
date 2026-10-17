@@ -146,7 +146,9 @@ withApp(async (page, logs) => {
   const i1 = await info(page);
   const want = 26 / 3 * held / 1000;
   check('holding the mouse on the piece raised the level', i1.height > 0, i1.height.toFixed(2) + ' mm');
-  check('...at a steady speed that fills the hollow in about 3 s', i1.height > want * 0.6 && i1.height < want * 1.15,
+  // 0.5, not 0.6: the fill advances per frame (each step capped at 0.5 s) and a starved CI runner drops frames the
+  // wall-clock hold still counts - Tests #277 (10.71 of 18.05 mm) and #284 (11.34 of 19.01) sat just under 0.6.
+  check('...at a steady speed that fills the hollow in about 3 s', i1.height > want * 0.5 && i1.height < want * 1.15,
         i1.height.toFixed(2) + ' mm in ' + held + ' ms (' + want.toFixed(2) + ' expected)');
   await page.waitForTimeout(500);
   const i2 = await info(page);
