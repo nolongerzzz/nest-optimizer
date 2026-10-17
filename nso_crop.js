@@ -74,7 +74,7 @@
    to the last bit. (A band of no width would hold nothing; asking for one is
    never what the user means, so zero on both is read as "the whole outline".)
    `solid: true` keeps the whole of the grown (d1) or shrunk (d2) footprint
-   instead of the band between; the old Crop card's Grow is exactly that.
+   instead of the band between.
 
    ---------------------------------------------------------------------------
    THE KERNEL AND THE CHECKS
@@ -101,13 +101,13 @@
    twice as finely cut, since its error runs both ways).
 
    ---------------------------------------------------------------------------
-   LEGACY, until the card is replaced
+   THE CARD (app-crop-card.js)
    ---------------------------------------------------------------------------
-   The old Crop card's Circle and Piece regions run on this engine too
-   (app-crop.js section 6): its circle is a vertical cylinder, its outline a
-   solid outline with Grow. It also keeps the part OUTSIDE the region, which is
-   not a copy, so cut() takes `keep` and the two gates the card wants (a refusal
-   before the kernel runs, one after). cut() goes with the card.
+   The Crop card is this engine and nothing else: a shape dragged to size, a
+   readout from planOn(), a button that calls copy(). planOn(model, shape) is
+   plan() for a model on the plate - it finds the pose and any `pieceId`
+   source as copy() does - and footprintPolys(shape) hands the card the
+   outline's boundary so it can put the offset handles on it.
    ===================================================================== */
 (function (root) {
   'use strict';
@@ -529,11 +529,11 @@
     try {
       if (!(d1 > 0) && !(d2 > 0)) { out = base; base = null; return { cs: out, what: what, note: note, mode: mode }; }
       if (shape.solid) {
-        // the whole of the grown (or shrunk) footprint, the old card's Grow
+        // the whole of the grown (or shrunk) footprint
         out = d1 > 0 ? base.offset(d1, 'Round', 2, DEFAULTS.growSeg) : base.offset(-d2, 'Round', 2, DEFAULTS.growSeg);
         if (out.isEmpty() || !(out.area() > 1e-6)) {
           out.delete(); out = null;
-          return { reason: 'Grow ' + (d1 > 0 ? f2(d1) : f2(-d2)) + ' mm shrinks the outline to nothing' };
+          return { reason: 'an offset of ' + (d1 > 0 ? '+' + f2(d1) : '-' + f2(d2)) + ' mm leaves nothing of the outline' };
         }
         return { cs: out, what: what, note: note, mode: mode };
       }
@@ -703,17 +703,12 @@
     return f1(b.hi[0] - b.lo[0]) + ' x ' + f1(b.hi[1] - b.lo[1]) + ' x ' + f1(b.hi[2] - b.lo[2]) + ' mm';
   }
 
-  /* The one pipeline under plan, run and the old card.
-       keep      'inside' (a copy) or 'outside' (the old card's remainder)
+  /* The one pipeline under plan and run.
        build     false: ask the kernel and stop, true: make the mesh
-       opts.pre  fn(res) -> reason | '' : after the cutter, before the kernel runs
-       opts.post fn(res) -> reason | '' : after the volumes are known
      On refusal ok is false and tris is the input soup object. */
-  async function cut(piece, shape, keep, build, opts) {
-    opts = opts || {};
-    keep = keep === 'outside' ? 'outside' : 'inside';
+  async function crop(piece, shape, build) {
     var soup = soupOf(piece);
-    var res = { ok: false, reason: '', tris: soup, keep: keep };
+    var res = { ok: false, reason: '', tris: soup };
     if (!soup || soup.length < 9) { res.reason = 'empty piece'; return res; }
     var why = shapeProblem(shape);
     if (why) { res.reason = why; return res; }
@@ -736,20 +731,18 @@
       cutter = c.m;
       res.what = c.what; res.segments = c.segments || null; res.areaMm2 = c.areaMm2 || null;
       res.regionP = c.regionP || null; res.note = c.note || '';
-      var gate = opts.pre ? opts.pre(res) : '';
-      if (gate) { res.reason = gate; return res; }
 
       var mp = manifoldOfPiece(wasm, soup, 'this piece');
       if (!mp.man) { res.reason = mp.reason; return res; }
       man = mp.man;
       var v0 = man.volume();
-      out = keep === 'inside' ? man.intersect(cutter) : man.subtract(cutter);
+      out = man.intersect(cutter);
       if (out.status && out.status() !== 'NoError') { res.reason = 'the kernel refused the cut (' + out.status() + ')'; return res; }
       var v1 = out.isEmpty() ? 0 : out.volume();
       res.volumeBefore = v0; res.keptMm3 = v1; res.removedMm3 = v0 - v1;
       var tiny = Math.max(DEFAULTS.tinyMm3, Math.abs(v0) * 1e-7);
       res.tinyMm3 = tiny;
-      gate = opts.post ? opts.post(res) : '';
+      var gate = holdsNothing(res);
       if (gate) { res.reason = gate; return res; }
 
       if (!build) {
@@ -839,14 +832,14 @@
   }
 
   async function plan(piece, shape) {
-    var r = await cut(piece, shape, 'inside', false, { post: holdsNothing });
+    var r = await crop(piece, shape, false);
     if (!r.ok) return { ok: false, reason: r.reason };
     return { ok: true, faces: r.faces, volumeMm3: r.volumeMm3, bbox: r.bbox, what: r.what, note: r.note,
              text: say(r, 'Would copy') };
   }
 
   async function run(piece, shape) {
-    var r = await cut(piece, shape, 'inside', true, { post: holdsNothing });
+    var r = await crop(piece, shape, true);
     if (!r.ok) return { ok: false, reason: r.reason };
     return { ok: true, tris: r.tris, faces: r.faces, volumeMm3: r.volumeMm3, bbox: r.bbox, parts: r.parts,
              dropped: r.dropped, census: r.census, what: r.what, note: r.note, text: say(r, 'Copied') };
@@ -938,6 +931,57 @@
     if (typeof setStatus === 'function') setStatus(msg, !!bad);
   }
 
+  /* A model on the plate and a shape, ready for plan / run: the pose through
+     the mesh as drawn, and a `pieceId` (a piece on the plate, read as drawn -
+     it may be m itself) turned into the soup it names.
+     -> { piece, shape, host } or { reason } */
+  function resolve(m, shape) {
+    if (typeof state === 'undefined' || typeof THREE === 'undefined') return { reason: 'Crop needs the app' };
+    if (!m || !m.rawTris) return { reason: 'select a raw piece first' };
+    var host = placedOf(m.id);
+    if (!host) return { reason: 'that piece is not on the plate' };
+    var fr = plateToRaw(m, host.mesh);
+    if (fr.reason) return { reason: fr.reason };
+    var sh = {};
+    Object.keys(shape || {}).forEach(function (k) { sh[k] = shape[k]; });
+    if (sh.pieceId != null) {
+      var other = placedOf(sh.pieceId);
+      if (!other) return { reason: 'the other piece is no longer on the plate' };
+      sh.source = meshSoupP(other.mesh);
+    }
+    return { piece: { name: m.name, rawTris: m.rawTris, toRaw: fr.M }, shape: sh, host: host };
+  }
+
+  /* plan() for a model on the plate: what the card's readout asks. */
+  async function planOn(m, shape) {
+    var r = resolve(m, shape);
+    if (r.reason) return { ok: false, reason: r.reason };
+    return plan(r.piece, r.shape);
+  }
+
+  /* The outline's footprint F - before any offset - as plain loops in P:
+     { polys: [[[x, y], ...], ...], area } or { reason }. For the card's
+     handles, which sit on its boundary. */
+  async function footprintPolys(shape) {
+    var kern = kernel(), wasm;
+    if (!kern) return { reason: 'no boolean kernel in this build' };
+    try { wasm = await kern.load(); }
+    catch (err) { return { reason: 'the boolean kernel failed to load' }; }
+    if (!shape || shape.kind !== 'outline' || !shape.source) return { reason: 'no outline' };
+    var plain = {};
+    Object.keys(shape).forEach(function (k) { plain[k] = shape[k]; });
+    plain.d1 = 0; plain.d2 = 0;
+    var fp = footprint(wasm, plain);
+    if (!fp.cs) return { reason: fp.reason };
+    try {
+      var polys = fp.cs.toPolygons().map(function (ring) {
+        return ring.map(function (p) { return p.x !== undefined ? [p.x, p.y] : [p[0], p[1]]; });
+      });
+      return { polys: polys, area: fp.cs.area() };
+    } catch (err) { return { reason: (err && err.message) || String(err) }; }
+    finally { fp.cs.delete(); }
+  }
+
   /* NSO_Crop.copy(m, shape) -> Promise<{ ok, id, name, ... } | { ok: false, reason }>
      m is a model of state.models that is on the plate. A shape's `piece` or
      `source` may be { pieceId } instead: a piece on the plate, read as drawn
@@ -952,22 +996,12 @@
       return { ok: false, reason: 'Crop copy needs the app' };
     }
     if (busy) return { ok: false, reason: 'busy' };
-    if (!m || !m.rawTris) return refuse('select a raw piece first');
-    var host = placedOf(m.id);
-    if (!host) return refuse('that piece is not on the plate');
-    var fr = plateToRaw(m, host.mesh);
-    if (fr.reason) return refuse(fr.reason);
-
-    var sh = {};
-    Object.keys(shape || {}).forEach(function (k) { sh[k] = shape[k]; });
-    if (sh.pieceId != null) {
-      var other = placedOf(sh.pieceId);
-      if (!other) return refuse('the other piece is no longer on the plate');
-      sh.source = meshSoupP(other.mesh);
-    }
+    var rs = resolve(m, shape);
+    if (rs.reason) return refuse(rs.reason);
+    var host = rs.host;
     busy = true;
     try {
-      var r = await run({ name: m.name, rawTris: m.rawTris, toRaw: fr.M }, sh);
+      var r = await run(rs.piece, rs.shape);
       if (!r.ok) return refuse(r.reason);
 
       var geo = rawResultToDisplayGeometry(r.tris);
@@ -1002,8 +1036,10 @@
     DEFAULTS: DEFAULTS,
     plan: plan,
     run: run,
-    cut: cut,
     cutterSoup: cutterSoup,
+    resolve: resolve,
+    planOn: planOn,
+    footprintPolys: footprintPolys,
     rimLoop: rimLoop,
     census: census,
     weldSoup: weldSoup,

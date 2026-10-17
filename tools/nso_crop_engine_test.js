@@ -556,6 +556,17 @@ async function crop(label, piece, shape, expect) {
     const sr = C.rimLoop(sph, 100);
     check('a sphere has no rim: it is a closed surface all the way round', !sr.loop && /no edge|closed surface/.test(sr.reason || ''), sr.reason);
     check('a triangle that is not there is refused', !!C.rimLoop(TUBE, 99999).reason && !!C.rimLoop(TUBE, -1).reason);
+    // the footprint the card puts its handles on: the loops of F before any offset
+    const barSoup = boxSoup([0, 0, 0], [18, 8, 8]);
+    const fpBar = await C.footprintPolys({ kind: 'outline', source: barSoup });
+    check('footprintPolys: a bar\'s silhouette is one loop of 4 corners, 144 mm2', fpBar.polys && fpBar.polys.length === 1 && fpBar.polys[0].length === 4 && near(fpBar.area, 144, 1e-6),
+      fpBar.polys ? fpBar.polys.length + ' loop(s), ' + fpBar.polys[0].length + ' points, ' + f3(fpBar.area) + ' mm2' : fpBar.reason);
+    const fpTube = await C.footprintPolys({ kind: 'outline', source: TUBE });
+    check('...a tube\'s is an annulus: two loops', fpTube.polys && fpTube.polys.length === 2, fpTube.polys ? fpTube.polys.map(r => r.length).join(' + ') + ' points' : fpTube.reason);
+    const fpRim = await C.footprintPolys({ kind: 'outline', source: TUBE, mode: 'rim', tri: outerTri, d1: 5, d2: 5 });
+    check('...a rim\'s is the one loop, and the offsets are not applied to it', fpRim.polys && fpRim.polys.length === 1 && fpRim.polys[0].length === TUBE_SEG &&
+      fpRim.polys[0].every(q => near(Math.hypot(q[0], q[1]), TUBE_R, 1e-3)), fpRim.polys ? fpRim.polys[0].length + ' points' : fpRim.reason);
+    check('...and a shape with no outline in it is refused', !!(await C.footprintPolys({ kind: 'box', c: [0, 0, 0], h: [1, 1, 1] })).reason);
   }
 
   /* =========================================================================
@@ -661,7 +672,15 @@ async function crop(label, piece, shape, expect) {
 
       const c0 = await centreP();
       shape.c = [c0[0], c0[1], c0[2]];
+      const planned = await page.evaluate(async ([hid, sh]) => {
+        const p = await NSO_Crop.planOn(state.models.find(x => x.id === hid), sh);
+        const rs = NSO_Crop.resolve(state.models.find(x => x.id === hid), { kind: 'outline', pieceId: hid, d1: 0, d2: 1 });
+        return { ok: p.ok, faces: p.faces, vol: p.volumeMm3, reason: p.reason, resolved: !!rs.piece && rs.shape.source && rs.shape.source.length > 0 && !!rs.piece.toRaw && rs.piece.toRaw.length === 16 };
+      }, [id, shape]);
+      check('planOn(model, shape): the card\'s plan, on a piece on the plate', planned.ok && planned.faces > 0 && planned.vol > 0, planned.ok ? planned.faces + ' faces, ' + f3(planned.vol) + ' mm3' : planned.reason);
+      check('resolve(model, shape): the pose through the mesh as drawn, and a pieceId turned into its soup', planned.resolved);
       const r1 = await copyOnce(shape);
+      check('...and it is what copy then made', r1.ok && planned.faces === r1.faces && Math.abs(planned.vol - r1.volumeMm3) < 1e-3, r1.ok ? r1.faces + ' faces, ' + f3(r1.volumeMm3) : r1.reason);
       check('copy: a box through the middle of the hinge on the plate', r1.ok, r1.ok ? r1.text : r1.reason);
       const after = await snapshot();
       check('the copy is named "<name> crop 1"', r1.ok && r1.name === 'hinge_knuckle_box crop 1', r1.name);

@@ -221,7 +221,10 @@ function undoLastStep() {
     else state.editId = state.models.length ? state.models[state.models.length - 1].id : null;
     if (entry.cutT != null) state.cutT = entry.cutT;
     renderModelList(); updateOptimizeButton(); updateCutterUI(); updateEditSize(); updateAdjustUI();
-    if (state.cutterOpen && state.editId) showEditPreview();
+    /* Cut's one-piece preview rebuilds the plate from a single model and empties
+       state.placed. Crop's card is armed with no blade and keeps the whole plate
+       up, and its CROP is an addModels step: its Undo must leave the plate alone. */
+    if (state.cutterOpen && state.editId && state.cutTool !== 'crop') showEditPreview();
     else if (!state.models.length) { clearDisplayMeshes(); removeCutHelper(); state.previewMesh = null; }
     setStatus('Undo: removed cloned pieces');
     return;
@@ -1433,7 +1436,10 @@ function addModel(name, geometry, opts) {
   updateOptimizeButton();
   updateEditSize();
   if (!options.silent) {
-    if (state.cutterOpen && !options.keepSelection) {
+    /* Cut's armed cutter shows one piece alone (showEditPreview empties the plate).
+       Crop's card is armed with no blade and keeps the plate: a piece imported while
+       it is open - the cutter for Piece or Outline - lands on the plate beside the rest. */
+    if (state.cutterOpen && state.cutTool !== 'crop' && !options.keepSelection) {
       showEditPreview();
       setStatus(`Loaded: ${name} (${size2.x.toFixed(0)}x${size2.y.toFixed(0)}x${size2.z.toFixed(0)} mm) - cutter open, slide red plane`);
     } else if (!options.keepSelection) {

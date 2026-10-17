@@ -1261,30 +1261,11 @@ select:focus, input:focus {
   margin: 0;
 }
 
-/* Crop, its own card in the column (app-crop.js); Detach under it */
-.crop-tools {
-  margin-top: 0;
-}
+/* Detach, in the Subtract card under Split to parts (app-detach.js) */
 .detach-tools {
   margin-top: 10px;
   padding-top: 8px;
   border-top: 1px solid rgba(148, 163, 184, 0.25);
-}
-.crop-row { align-items: center; }
-.crop-move {
-  margin-top: 8px;
-  padding-top: 6px;
-  border-top: 1px dashed rgba(148, 163, 184, 0.25);
-}
-.crop-lbl {
-  flex: 0 0 44px;
-  font-size: 12px;
-  opacity: 0.85;
-}
-.crop-row input[type="number"] {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
 }
 
 #edit-card input[type="range"] {
@@ -1492,16 +1473,13 @@ select:focus, input:focus {
 .more-tools { margin-top: 8px; font-size: 13px; }
 .more-tools summary { cursor: pointer; color: #94a3b8; font-weight: 600; }
 .more-tools label { display: block; margin: 6px 0; }
-#edit-card label,
-#crop-card label {
+#edit-card label {
   display: block;
   margin: 8px 0 4px;
   font-size: 13px;
 }
 #edit-card input[type="number"],
-#edit-card select,
-#crop-card input[type="number"],
-#crop-card select {
+#edit-card select {
   width: 100%;
   margin-top: 4px;
 }
@@ -4090,17 +4068,16 @@ button.findings-go:hover .findings-title { text-decoration: underline; }
 @keyframes sup-spin { to { transform: rotate(360deg); } }
 .vp-menu-body .btn-sup-paint.is-armed { background: #22d3ee; color: #0b0f17; border-color: #22d3ee; font-weight: 600; }
 
-/* Crop's region row and the Circle / Piece rows (app-crop.js sections 6-7).
-   An author display rule beats the UA sheet's [hidden], so it is said here. */
-#crop-card [hidden] { display: none !important; }
-.crop-region-row .btn,
-.crop-keep-row .btn { flex: 1; }
-.crop-shape { margin-top: 0; }
-.crop-pick-name {
-  flex: 1;
+/* The Crop card (app-crop-card.js): the Shape row, one readout line, CROP, Cancel.
+   The five shapes share the row; the buttons are small enough to stay on it. */
+#crop-card .crop-shape-row { flex-wrap: nowrap; gap: 4px; }
+#crop-readout { font-size: 12px; margin: 8px 0; }
+#crop-readout.is-refusal { color: #f87171; }
+#crop-card .crop-shape-row .btn {
+  flex: 1 1 0;
+  width: auto;
+  min-width: 0;
+  margin-top: 0;
+  padding: 5px 2px;
   font-size: 12px;
-  opacity: 0.85;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
