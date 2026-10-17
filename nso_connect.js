@@ -33,6 +33,28 @@
    valid; where they close in on it (a U's inside corner, concave) it must clear
    every one of them. The averaged normal still orients a Ribbon and a pad.
 
+   DRAW (NSO_Connect.drawPlan): the path is a freehand stroke instead of two
+   anchors. The card hands over the surface points the pointer crossed - on the
+   plate or on a piece, each with its normal - and the engine
+     1. smooths them (Chaikin x2; a turn sharper than 60 degrees is a corner and
+        stays one), resamples at 1 mm, and refuses a stroke under 3 mm;
+     2. rides the centre of the shape along the surface: over bare plate the
+        shape's bottom sits ON the plate (the centre is its half-height up), over
+        a piece the shape lies on the piece's surface at its half-height. Where a
+        stretch is to be welded to the piece under it, it is sunk a little (the
+        sink, at most 40% of the half-height) so the boolean has material to merge;
+     3. lifts the whole stroke by Sag: sin^2 of the stroke's length fraction, so
+        the middle rises by exactly Sag, the ends do not move and the stroke lands
+        flat; 0 is flat on the plate (Draw does not hang a stroke: no negative Sag);
+     4. sweeps the shape along it (the same rod as the anchored path's).
+   Ends: an end on the PLATE is a flat foot (a square cut, the bottom on the
+   plate), whatever Ends says; an end on a PIECE follows Ends (Weld: the tip dives
+   into the piece and is unioned; Flat: a square cut, Keep separate only; Foot pad
+   and Ball as ever). Result: Weld unions the connector with whatever the stroke
+   touches - the pieces its ends stand on AND the ones it crosses on the way; a
+   stroke that touches no piece (both ends on the plate, nothing crossed) is a piece
+   of its own.
+
    SHAPES.
      string    Ø                       a round rod
      ribbon    width x thickness       a flat strap; its flat face is
@@ -143,6 +165,16 @@
     diaAMm: 4,              // Tapered, at A
     diaBMm: 1.5,            // ... at B
     sameFaceCos: Math.cos(8 * Math.PI / 180),   // normals this near one another are one face (a corner's average counts each face once)
+    cornerKeepDeg: 60,      // Draw: a turn sharper than this in the stroke is a corner, kept
+    drawThinMm: 1,          // Draw: raw points closer than this are one (a pointer's jitter)
+    drawStepMm: 1,          // Draw: the smoothed stroke is resampled at this spacing
+    chaikinPasses: 2,
+    minStrokeMm: 3,
+    creaseDeg: 35,          // Draw: neighbours whose normals differ by more than this had a crease between them
+    creaseReachMm: 3,       // ...within this of the segment joining them
+    bendStepDeg: 6,         // Draw: ...in arcs of steps this fine
+    bendOverRadius: 1.6,    // Draw: the centre bends round a corner with at least this many half-heights of radius
+    rideClearFrac: 0.97,    // Draw: a point of the path nearer a surface than this fraction of the half-height is dropped
     sharpCos: Math.cos(30 * Math.PI / 180),     // faces meeting at more than this are a crease; a curved surface's facets are not
     cornerDeg: 15,          // a face outline turns this much or more at a corner
     cornerReachMm: 1e-3,    // faces this near the clicked point (past its distance to the edge) are the ones that meet there
@@ -1030,6 +1062,315 @@
       (result === 'weld' ? 'welds into A and B' : 'kept as its own piece');
   }
 
+  /* ---------------------------------------------------------------- draw
+
+     The stroke, as the card collects it: [{ p: [x, y, z], n: [x, y, z], piece }]
+     one entry for each place the pointer's ray met the plate (piece -1, n up) or
+     a piece (its index in `pieces`, the face's normal there). */
+  // A corner's own normal is one face's: next to a corner a point takes the normal of the face it is on (the other end's).
+  function mixPt(a, b, t, aCorner, bCorner) {
+    var n = (aCorner && !bCorner) ? b.n : ((bCorner && !aCorner) ? a.n : (unit(lerp(a.n, b.n, t)) || a.n));
+    return { p: lerp(a.p, b.p, t), n: n, piece: t < 0.5 ? a.piece : b.piece, keep: false };
+  }
+  function turnIsCorner(a, b, c) {
+    var u1 = unit(sub(b, a)), u2 = unit(sub(c, b));
+    return !!(u1 && u2) && dot(u1, u2) < Math.cos(rad(DEFAULTS.cornerKeepDeg));
+  }
+  function chaikinOnce(P) {
+    var n = P.length;
+    if (n < 3) return P;
+    var corner = P.map(function (q, i) { return i === 0 || i === n - 1 || q.keep || turnIsCorner(P[i - 1].p, q.p, P[i + 1].p); });
+    var out = [{ p: P[0].p, n: P[0].n, piece: P[0].piece, keep: true }];
+    for (var i = 0; i + 1 < n; i++) {
+      var a = P[i], b = P[i + 1];
+      if (!corner[i]) out.push(mixPt(a, b, 0.25, false, corner[i + 1] && i + 1 !== n - 1));
+      if (!corner[i + 1]) out.push(mixPt(a, b, 0.75, corner[i] && i !== 0, false));
+      else out.push({ p: b.p, n: b.n, piece: b.piece, keep: true });
+    }
+    return out;
+  }
+  function solve3(M, b) {                                   // M x = b (rows of M), Cramer's rule
+    var D = dot(M[0], cross(M[1], M[2]));
+    if (Math.abs(D) < 1e-9) return null;
+    var c0 = cross(M[1], M[2]), c1 = cross(M[2], M[0]), c2 = cross(M[0], M[1]);
+    return [(b[0] * c0[0] + b[1] * c1[0] + b[2] * c2[0]) / D, (b[0] * c0[1] + b[1] * c1[1] + b[2] * c2[1]) / D, (b[0] * c0[2] + b[1] * c1[2] + b[2] * c2[2]) / D];
+  }
+  /* The stroke smoothed: the raw points thinned to a mm apart (a pointer's
+     jitter is not a corner), Chaikin's corner cutting twice with the corners
+     kept, then resampled every mm along each run between corners. */
+  function smoothStroke(raw, o) {
+    o = o || {};
+    var P = [], i;
+    for (i = 0; i < (raw || []).length; i++) {
+      var r = raw[i];
+      if (!r || !r.p || !isFinite(r.p[0] + r.p[1] + r.p[2])) continue;
+      var q = { p: r.p.slice(), n: (r.n && unit(r.n)) || [0, 0, 1], piece: r.piece == null ? -1 : r.piece, keep: false };
+      if (P.length && len(sub(q.p, P[P.length - 1].p)) < DEFAULTS.drawThinMm) {
+        if (i === raw.length - 1 && P.length > 1) P[P.length - 1] = q;       // the end stays where the pointer was let go
+        continue;
+      }
+      P.push(q);
+    }
+    if (P.length < 2) return { ok: false, reason: 'the stroke is a point - drag across the plate or a piece', lengthMm: 0 };
+    // Two neighbours on faces that meet at a crease (their normals well apart) had the crease between them: it is a corner of
+    // the stroke, where the two faces' planes meet. A fast drag steps over it; this puts it back.
+    var Q = [P[0]];
+    for (i = 1; i < P.length; i++) {
+      var pa = P[i - 1], pb = P[i], dn = cross(pa.n, pb.n);
+      if (dot(pa.n, pb.n) < Math.cos(rad(DEFAULTS.creaseDeg)) && len(dn) > 1e-6) {
+        var m = lerp(pa.p, pb.p, 0.5), X = solve3([pa.n, pb.n, dn], [dot(pa.n, pa.p), dot(pb.n, pb.p), dot(dn, m)]);
+        if (X && len(sub(X, m)) < DEFAULTS.creaseReachMm) {
+          // (a sample that already sits at the crease is the corner: it gives way to it, not stands beside it)
+          if (len(sub(X, pa.p)) < DEFAULTS.drawThinMm && Q.length > 1) Q.pop();
+          Q.push({ p: X, n: pa.n, piece: pa.piece, keep: true });
+          if (len(sub(X, pb.p)) < DEFAULTS.drawThinMm && i < P.length - 1) continue;
+        }
+      }
+      Q.push(pb);
+    }
+    P = Q;
+    for (i = 0; i < DEFAULTS.chaikinPasses; i++) P = chaikinOnce(P);
+    var G = [], step = o.stepMm || DEFAULTS.drawStepMm, r0 = 0;
+    for (var k = 1; k < P.length; k++) {
+      if (!P[k].keep && k !== P.length - 1) continue;
+      var run = P.slice(r0, k + 1), cum = [0], j;
+      // A corner belongs to two faces: each run takes the normal of its own side at the corner.
+      if (r0 !== 0) run[0] = { p: run[0].p, n: run[1].n, piece: run[1].piece, keep: true };
+      if (k !== P.length - 1) run[run.length - 1] = { p: run[run.length - 1].p, n: run[run.length - 2].n, piece: run[run.length - 2].piece, keep: true };
+      for (j = 1; j < run.length; j++) cum.push(cum[j - 1] + len(sub(run[j].p, run[j - 1].p)));
+      var Lr = cum[cum.length - 1], N = Math.max(1, Math.round(Lr / step));
+      for (var m = (r0 === 0 ? 0 : 1); m <= N; m++) {
+        var sAt = Lr * m / N, seg = 0;
+        while (seg + 2 < run.length && cum[seg + 1] < sAt) seg++;
+        var f = cum[seg + 1] > cum[seg] ? (sAt - cum[seg]) / (cum[seg + 1] - cum[seg]) : 0;
+        var gp = mixPt(run[seg], run[seg + 1], Math.max(0, Math.min(1, f)), false, false);
+        if (m === N && P[k].keep && k !== P.length - 1) gp.corner = true;
+        G.push(gp);
+      }
+      r0 = k;
+    }
+    var arc = [0];
+    for (i = 1; i < G.length; i++) arc.push(arc[i - 1] + len(sub(G[i].p, G[i - 1].p)));
+    return { ok: true, points: G, arc: arc, lengthMm: arc[arc.length - 1] };
+  }
+
+  // A soup's triangle boxes, once (the soup is read-only).
+  var _boxes = typeof WeakMap === 'function' ? new WeakMap() : null;
+  function triBoxes(soup) {
+    var hit = _boxes && _boxes.get(soup);
+    if (hit) return hit;
+    var n = triCount(soup), b = new Float32Array(n * 6);
+    for (var t = 0; t < n; t++) {
+      var o = t * 9;
+      for (var c = 0; c < 3; c++) {
+        var a0 = soup[o + c], a1 = soup[o + 3 + c], a2 = soup[o + 6 + c];
+        b[t * 6 + c] = Math.min(a0, a1, a2); b[t * 6 + 3 + c] = Math.max(a0, a1, a2);
+      }
+    }
+    if (_boxes) _boxes.set(soup, b);
+    return b;
+  }
+  // Is any triangle of `soup` nearer than r to c?
+  function nearer(soup, b, c, r) {
+    var n = triCount(soup);
+    for (var t = 0; t < n; t++) {
+      var k = t * 6;
+      if (c[0] < b[k] - r || c[0] > b[k + 3] + r || c[1] < b[k + 1] - r || c[1] > b[k + 4] + r || c[2] < b[k + 2] - r || c[2] > b[k + 5] + r) continue;
+      var o = t * 9;
+      if (ptTri(c, [soup[o], soup[o + 1], soup[o + 2]], [soup[o + 3], soup[o + 4], soup[o + 5]], [soup[o + 6], soup[o + 7], soup[o + 8]]) < r) return true;
+    }
+    return false;
+  }
+
+  function drawPlan(pieces, stroke, opts) {
+    opts = opts || {};
+    var shape = opts.shape || DEFAULTS.shape;
+    if (SHAPES.indexOf(shape) < 0) return refuse(null, 'unknown shape "' + shape + '" - String, Ribbon, Tube or Tapered');
+    var ends = (opts.ends == null || opts.ends === '') ? DEFAULTS.ends : opts.ends;
+    if (ENDS.indexOf(ends) < 0) return refuse(shape, 'unknown ends "' + ends + '" - Weld, Flat, Foot pad or Ball');
+    var spec = readShape(shape, opts);
+    if (spec.ok === false) return spec;
+    var sag = opt(opts, 'sagMm');
+    if (sag < -DEFAULTS.sagEps) return refuse(shape, 'Draw lifts the stroke: Sag is the height the middle is raised by, 0 or more (' + signed(sag) + ' mm hangs it)');
+    if (!(Math.abs(sag) >= DEFAULTS.sagEps)) sag = 0;
+    var sm = smoothStroke(stroke);
+    if (!sm.ok) return refuse(shape, sm.reason);
+    var G = sm.points, S = sm.arc, Lg = sm.lengthMm, n = G.length;
+    if (Lg < DEFAULTS.minStrokeMm - 1e-9) return refuse(shape, 'the stroke is ' + show(Lg) + ' mm long - draw at least ' + show(DEFAULTS.minStrokeMm) + ' mm');
+
+    // What the stroke touches, and so what is welded: every piece it stands on at any point, the two ends' and the ones it
+    // crosses on the way. A stroke that touches none (both ends on the plate, nothing crossed) is a piece of its own.
+    var onA = G[0].piece, onB = G[n - 1].piece, welds = [];
+    if (opts.result !== 'separate') G.forEach(function (q) { if (q.piece >= 0 && welds.indexOf(q.piece) < 0) welds.push(q.piece); });
+    var result = welds.length ? 'weld' : 'separate';
+    if (ends === 'flat' && result === 'weld' && (onA >= 0 || onB >= 0)) {
+      return refuse(shape, 'Flat ends are cut flush with the surface and not sunk, so there is nothing to weld them with - pick Keep separate, or Weld, Foot pad or Ball ends');
+    }
+    if (welds.length && ends === 'pad') need('nso_assemble.js (NSO_Assemble.rootGap)', typeof NSO_Assemble !== 'undefined' && NSO_Assemble && NSO_Assemble.rootGap);
+    var sink = bopt(opts, 'sinkMm');
+
+    // The centre of the shape, along the surface.
+    var rA = spec.dA ? spec.dA / 2 : 0, rB = spec.dB ? spec.dB / 2 : 0;
+    function half(s) {
+      if (spec.shape === 'ribbon') return spec.t / 2;
+      if (spec.shape === 'tapered') return rA + (rB - rA) * s / Lg;
+      return spec.d / 2;
+    }
+    var diveA = ends === 'weld' && welds.indexOf(onA) >= 0, diveB = ends === 'weld' && welds.indexOf(onB) >= 0;
+    var D = Math.min(0.4 * Lg, Math.max(3, 2.5 * spec.rMax));
+    var smooth = function (u) { u = Math.max(0, Math.min(1, u)); return u * u * (3 - 2 * u); };
+    var plateZ = opts.plateZ || 0, boxes = pieces.map(triBoxes);
+    // Is the point clear of the plate and every piece by `r` (a hair under)? A stretch of the path that has to ride round a
+    // concave corner, or into a crease, has points that are not: the offset of a stroke folds back on itself there.
+    function clear(c, r) {
+      if (c[2] - plateZ < r * DEFAULTS.rideClearFrac) return false;
+      for (var k = 0; k < pieces.length; k++) if (nearer(pieces[k], boxes[k], c, r * DEFAULTS.rideClearFrac)) return false;
+      return true;
+    }
+    var C = [], Cs = [], i, drop = [], plan3 = [], hrOv = [];
+    // Sag lifts the stroke by sin^2 of its length fraction: the middle rises by Sag, the ends stay. It is height above the
+    // surface (on the plate that is straight up), so every bend round a corner is offset the same, a little wider.
+    function hrAt(j) { var h = half(S[j]); return h - (welds.indexOf(G[j].piece) >= 0 ? Math.min(sink, 0.4 * h) : 0) + sag * Math.pow(Math.sin(Math.PI * S[j] / Lg), 2); }
+    // Where the stroke turns from one face to another the centre goes round it, and it has to bend with a radius over the
+    // shape's own (the sweep folds an inside that is tighter): an arc about the edge on the outside, a fillet tangent to the
+    // two offset lines on the inside, the samples it replaces dropped.
+    var stepA = rad(DEFAULTS.bendStepDeg), corners = [];
+    for (i = 1; i + 1 < n; i++) {
+      if (!G[i].corner) continue;
+      var n1 = G[i - 1].n, n2 = G[i + 1].n, ca = dot(n1, n2), t1 = unit(sub(G[i].p, G[i - 1].p)), t2 = unit(sub(G[i + 1].p, G[i].p));
+      if (!t1 || !t2 || ca > Math.cos(rad(10))) continue;
+      var hh = half(S[i]), hA = hrAt(i - 1), hB = hrAt(i + 1), Rb = Math.max(hA, hB, DEFAULTS.bendOverRadius * hh), c = { i: i, Rb: Rb, convex: dot(t1, n2) > 0, g0: 0 };
+      if (c.convex) {                                                  // round the edge
+        var om = Math.acos(clamp1(ca)), K = Math.max(1, Math.ceil(om / stepA)), sn = Math.sin(om);
+        c.pts = [];
+        for (var kk = 0; kk <= K; kk++) {
+          var tt = kk / K, nn = sn > 1e-6 ? add(mul(n1, Math.sin((1 - tt) * om) / sn), mul(n2, Math.sin(tt * om) / sn)) : unit(lerp(n1, n2, tt));
+          c.pts.push(add(G[i].p, mul(nn, Rb)));
+        }
+      } else {                                                          // the point at hA above face 1 and hB above face 2, filleted
+        var den = 1 - ca * ca, ma = (hA - hB * ca) / den, mb = (hB - hA * ca) / den;
+        c.Rb = Rb = DEFAULTS.bendOverRadius * hh;                       // (the fillet's radius needs only to clear the shape's own)
+        var M = add(G[i].p, add(mul(n1, ma), mul(n2, mb))), th = Math.acos(clamp1(dot(t1, t2))), d = Rb * Math.tan(th / 2);
+        var cd = unit(sub(t2, t1));
+        c.pts = [M];
+        if (cd && th < Math.PI - 0.2) {
+          var T1 = sub(M, mul(t1, d)), T2 = add(M, mul(t2, d)), O = add(M, mul(cd, Rb / Math.cos(th / 2)));
+          var u1 = unit(sub(T1, O)), u2 = unit(sub(T2, O)), oa = Math.acos(clamp1(dot(u1, u2))), so = Math.sin(oa), K2 = Math.max(1, Math.ceil(oa / stepA));
+          c.pts = [];
+          for (var jj = 0; jj <= K2; jj++) {
+            var t3 = jj / K2, vv = so > 1e-6 ? add(mul(u1, Math.sin((1 - t3) * oa) / so), mul(u2, Math.sin(t3 * oa) / so)) : u1;
+            c.pts.push(add(O, mul(vv, Rb)));
+          }
+          c.g0 = Math.max(hA, hB) + d;                                  // the samples the fillet replaces
+        }
+      }
+      corners.push(c);
+    }
+    corners.forEach(function (c, ci) {
+      plan3[c.i] = c.pts;
+      for (var j = 0; j < n; j++) if (j !== c.i && Math.abs(S[j] - S[c.i]) < c.g0) drop[j] = true;
+      if (!c.convex) return;
+      // The centre rises to the arc's radius over a few mm before it and falls back after (no bend sharper than the arc's), in
+      // the room the neighbouring corners leave.
+      var room = function (o) {
+        if (!o) return Infinity;
+        var gap = Math.abs(S[o.i] - S[c.i]);
+        return o.convex ? gap / 2 : gap - o.g0;
+      };
+      var Wb = Math.min(Math.max(3, 3 * c.Rb), room(corners[ci - 1]), room(corners[ci + 1]));
+      if (!(Wb >= 0.5)) return;
+      for (var jb = 0; jb < n; jb++) {
+        var gb = Math.abs(S[jb] - S[c.i]);
+        if (jb === c.i || gb >= Wb) continue;
+        var hb = hrAt(jb), fb = smooth(1 - gb / Wb);
+        hrOv[jb] = Math.max(hrOv[jb] || 0, hb + (c.Rb - hb) * fb);
+      }
+    });
+    for (i = 0; i < n; i++) {
+      if (drop[i] && i !== 0 && i !== n - 1) continue;
+      var q = G[i], h = half(S[i]), hr2 = hrOv[i] != null ? hrOv[i] : hrAt(i), at = plan3[i] || [add(q.p, mul(q.n, hr2))], exempt = i === 0 || i === n - 1 || !!plan3[i];
+      var dive = (diveA && S[i] < D) || (diveB && Lg - S[i] < D);
+      at.forEach(function (c) {
+        var zc = c;
+        if (dive) {                                                       // the tip dives: its centre a radius below the surface
+          var u = Math.min(diveA ? S[i] / D : 1, diveB ? (Lg - S[i]) / D : 1);
+          zc = add(q.p, mul(q.n, -h + (hr2 + h) * smooth(u)));
+        } else if (!exempt && !clear(c, hr2)) return;
+        if (C.length && len(sub(zc, C[C.length - 1])) < 0.02) return;
+        C.push(zc); Cs.push(S[i]);
+      });
+    }
+    if (C.length < 2) return refuse(shape, 'the stroke leaves no room for the shape to ride on - draw it on open surface');
+    // A taper's radius, along the centre's own length from here.
+    var st0 = [0];
+    for (i = 1; i < C.length; i++) st0.push(st0[i - 1] + len(sub(C[i], C[i - 1])));
+    var radii = spec.shape === 'tapered' ? st0.map(function (v) { return half(v / st0[st0.length - 1] * Lg); }) : null;
+    var path = { pts: C, st: [0], straight: false };
+    for (i = 1; i < C.length; i++) path.st.push(path.st[i - 1] + len(sub(C[i], C[i - 1])));
+    var Lc = path.st[C.length - 1];
+
+    // The sweep. Round sections are turned half a facet off the horizontal (no ring vertex in the surface's plane); a ribbon lies
+    // with its thickness along the surface normal.
+    var u0 = unit(sub(C[1], C[0])), up;
+    if (shape === 'ribbon') up = unit(cross(u0, G[0].n)) || anyPerp(u0);
+    else {
+      var base = unit(cross(u0, [0, 0, 1])) || anyPerp(u0), hf = Math.PI / sidesFor(spec.rMax);
+      up = add(mul(base, Math.cos(hf)), mul(cross(u0, base), Math.sin(hf)));
+    }
+    var sw = rod(spec, up, C, radii, 1);
+    if (!sw.ok) { var rf = refuse(shape, 'the connector will not sweep along that stroke (' + sw.reason + ') - draw it gentler, or use a slimmer shape' + (sag ? ', or less Sag' : '')); rf.centre = C; return rf; }
+    var em = emitRod(sw, DEFAULTS.stationMm, null), web = em.tris;
+
+    // The tube's bore: sealed, a wall clear of both ends.
+    var bore = null;
+    if (shape === 'tube') {
+      var dA = spec.wall, dB = spec.wall;
+      if (dA + dB >= Lc) return refuse(shape, 'the tube is too short for its bore - it needs ' + show(dA + dB) + ' mm of stroke to keep a ' + show(spec.wall) + ' mm wall at each end, and has ' + show(Lc));
+      var bf = sweeper().buildFrames(C, { up: up });
+      if (!bf.ok) return refuse(shape, 'the stroke could not be framed (' + bf.reason + ')');
+      var bc = cutPath(path, dA, Lc - dB, 0.3 * spec.rBore + 0.1);
+      var bs = rod({ shape: 'string', d: 2 * spec.rBore, rMax: spec.rBore }, bf.frames[bc.seg].r, bc.pts, null, 1);
+      if (!bs.ok) return refuse(shape, bs.reason);
+      bore = { fromMm: dA, toMm: Lc - dB, lengthMm: Lc - dA - dB, rBore: spec.rBore };
+      web = concat(web, flipped(emitRod(bs, DEFAULTS.stationMm, null).tris));
+    }
+
+    // Foot pads and balls, on the ends that stand on a piece.
+    var tips = null, tipsFor = null, ropt = opts.aim ? { aim: opts.aim } : {};
+    if (ends === 'pad' || ends === 'ball') {
+      var ep = [onA, onB], ew = [spec.wA, spec.wB], ei = [0, n - 1], skirt = [0, 0], rp = ew.map(function (w) { return DEFAULTS.padScale * w / 2; }), bad = null;
+      if (ends === 'pad') {
+        [0, 1].forEach(function (e) {
+          if (bad || ep[e] < 0 || welds.indexOf(ep[e]) < 0) return;
+          var g = NSO_Assemble.rootGap(pieces[ep[e]], ringAbout(G[ei[e]].p, G[ei[e]].n, rp[e], 0), ropt);
+          if (!g.ok) bad = g; else skirt[e] = g.gapMm + sink;
+        });
+        if (bad) return refuse(shape, bad.reason);
+      }
+      tipsFor = function (ph) {
+        return [0, 1].map(function (e) {
+          if (ep[e] < 0) return null;                                    // an end on the plate is the flat foot
+          var q = G[ei[e]];
+          return ends === 'pad' ? discSoup(q.p, q.n, rp[e], -skirt[e], DEFAULTS.padThickMm, ph) : ballSoup(q.p, DEFAULTS.ballScale * ew[e] / 2, ph * 0.09);
+        });
+      };
+      tips = tipsFor(0);
+      if (!tips[0] && !tips[1]) { tips = null; tipsFor = null; }
+    }
+    var whole = web;
+    if (tips) tips.forEach(function (t) { if (t) whole = concat(whole, t); });
+
+    var kinds = [onA < 0 ? 'plate' : 'piece', onB < 0 ? 'plate' : 'piece'];
+    var name = { string: 'String', ribbon: 'Ribbon', tube: 'Tube', tapered: 'Tapered' }[shape];
+    var text = 'Draw: ' + name + ' ' + spec.size + ', ' + show(Lg) + ' mm along the stroke' + (sag ? ', lift ' + signed(sag) : '') +
+      (ends !== 'weld' && (onA >= 0 || onB >= 0) ? ', ' + ENDS_WORD[ends] + ' ends' : '') + ' · ' + kinds.join(' to ') + ' · ' +
+      (result === 'weld' ? 'welds into ' + (welds.length === 1 ? 'the piece' : (welds.length === 2 ? 'both pieces' : 'all ' + welds.length + ' pieces')) : 'kept as its own piece');
+    return { ok: true, kind: shape, shape: shape, drawn: true, result: result, ends: ends, sagMm: sag, web: whole,
+             body: web, tips: tips, tipsFor: tipsFor, A: { piece: welds.length ? welds[0] : 0 }, B: { piece: welds.length ? welds[Math.min(1, welds.length - 1)] : 0 }, pieces: pieces,
+             welds: welds, endsOn: kinds, lengthMm: Lg, pathLengthMm: Lc, ground: G.map(function (q) { return q.p; }), centre: C, spec: spec,
+             segments: sidesFor(spec.rMax), bore: bore, stations: em.stations, text: text };
+  }
+
   /* --------------------------------------------------------------- weld
 
      The ends first: a pad or a ball is unioned with the connector (A's, then
@@ -1053,12 +1394,40 @@
       var word = ENDS_WORD[p.ends];
       if (typeof unionFn !== 'function') return Promise.resolve({ ok: false, reason: 'no boolean kernel to join the ' + word + ' ends to the connector with' });
       var tips = attempt ? p.tipsFor(TIP_PHASES[attempt]) : p.tips;
-      return unionFn(p.body, tips[0]).then(function (u1) {
+      // An end with no tip of its own (Draw: the flat foot on the plate) is the connector as it stands.
+      var first = tips[0] ? unionFn(p.body, tips[0]) : Promise.resolve({ ok: true, soup: p.body, stats: null });
+      return first.then(function (u1) {
         if (!u1 || !u1.ok) return { ok: false, reason: 'the ' + word + ' at A would not join the connector (' + ((u1 && u1.reason) || 'union failed') + ')' };
-        return unionFn(u1.soup, tips[1]).then(function (u2) {
+        var second = tips[1] ? unionFn(u1.soup, tips[1]) : Promise.resolve({ ok: true, soup: u1.soup, stats: u1.stats });
+        return second.then(function (u2) {
           if (!u2 || !u2.ok) return { ok: false, reason: 'the ' + word + ' at B would not join the connector (' + ((u2 && u2.reason) || 'union failed') + ')' };
           return { ok: true, soup: u2.soup, stats: u2.stats };
         });
+      });
+    }
+    // Bridge's weld joins two pieces; a stroke can touch more. Each further piece is unioned onto the result, and must merge.
+    function chainWelds(pr) {
+      return pr.then(function (r) {
+        if (!r || !r.ok || !p.drawn || p.welds.length <= 2) return r;
+        var acc = r, k = 2;
+        function next() {
+          if (k >= p.welds.length) {
+            var t = bridge().topology(acc.soup), open = acc.kernel ? acc.kernel.open : t.open, nm = acc.kernel ? acc.kernel.nm : t.nm;
+            if (open || nm || t.badWinding) {
+              return refuse(p.kind, 'the welded piece would not be closed (' + open + ' open edge(s), ' + nm + ' non-manifold, ' + t.badWinding + ' wound the wrong way) - nothing changed');
+            }
+            return acc;
+          }
+          return unionFn(acc.soup, p.pieces[p.welds[k]]).then(function (u) {
+            if (!u || !u.ok) return refuse(p.kind, 'the stroke would not weld to a piece it crosses (' + ((u && u.reason) || 'union failed') + ')');
+            var o = {};
+            for (var key in acc) if (Object.prototype.hasOwnProperty.call(acc, key)) o[key] = acc[key];
+            o.soup = u.soup; o.kernel = u.stats; o.topo = bridge().topology(u.soup);
+            acc = o; k++;
+            return next();
+          });
+        }
+        return next();
       });
     }
     function clean(soup) {
@@ -1082,7 +1451,7 @@
         }
         var q = p;
         if (p.tips) { q = {}; for (var k in p) if (Object.prototype.hasOwnProperty.call(p, k)) q[k] = p[k]; q.web = j.soup; }
-        return bridge().weld(q, opts).then(function (r) {
+        return chainWelds(bridge().weld(q, opts)).then(function (r) {
           if (r && r.ok) { r.result = 'weld'; r.plan = p; }
           if (!again || !r || !r.ok || clean(r.soup)) return r;
           return build(attempt + 1).then(function (r2) { return (r2 && r2.ok && clean(r2.soup)) ? r2 : r; });
@@ -1097,6 +1466,8 @@
     ENDS: ENDS,
     DEFAULTS: DEFAULTS,
     plan: plan,
+    drawPlan: drawPlan,
+    smoothStroke: smoothStroke,
     anchor: anchor,
     weld: weld,
     emitRod: emitRod

@@ -647,7 +647,8 @@
                   <label class="vp-bend-field" title="The diameter at anchor B.">Ø at B
                     <input type="number" id="inp-connect-dia-b" min="0.4" step="0.1" value="1.5" aria-label="Diameter at B, mm"><span>mm</span></label>
                 </div>
-                <label class="vp-bend-field" title="How far the connector bows at mid-span, mm, signed. 0 is straight. Positive bows it UP (an arc: a handle, a hoop), negative hangs it DOWN (a drape: a cable). A circular arc through both anchors, in the vertical plane through them; anchors one straight above the other bow away from the piece's centre. The last 3 mm at each end stays straight. Refused when the curve would pass through a piece.">Sag
+                <label class="vp-clone" title="Draw the path freehand instead of picking two anchors. Press anywhere - on the plate or on a piece - and drag: the stroke follows the cursor across the plate (and up onto the pieces it crosses), is smoothed, and on release the shape is swept along it and built (Result and Ends as below). An end on the plate is a flat foot on it; an end on a piece follows Ends. A stroke with both ends on the plate is always a piece of its own. Esc mid-drag cancels. The card stays armed for the next stroke. Left-drag draws while this is on; right or middle drag still orbits and pans."><input type="checkbox" id="chk-connect-draw"> Draw</label>
+                <label class="vp-bend-field" title="How far the connector bows at mid-span, mm, signed. 0 is straight. Positive bows it UP (an arc: a handle, a hoop), negative hangs it DOWN (a drape: a cable). A circular arc through both anchors, in the vertical plane through them; anchors one straight above the other bow away from the piece's centre. The last 3 mm at each end stays straight. Refused when the curve would pass through a piece. With Draw on, Sag is a lift: the middle of the stroke is raised by this much (positive only; the ends stay put and the stroke lands flat), 0 is flat on the plate.">Sag
                   <input type="number" id="inp-connect-sag" step="0.5" value="0" aria-label="Sag, mm, signed"><span>mm</span></label>
                 <label class="vp-bend-field" title="What the connector's own tips look like, both ends. Weld: sunk and unioned (kept separate it is the flush cut). Flat: cut flush at the surface, not sunk. Foot pad: a disc 2.5 x the local width across, 0.6 mm thick, flush on the surface. Ball: a sphere 1.5 x the local width across, centred on the anchor.">Ends
                   <select id="sel-connect-ends" class="vp-select" aria-label="Connector ends">
@@ -1731,8 +1732,8 @@
   <!-- Connect: the builder on Bridge's pick. After nso_bridge.js and
        app-bridge.js (the pick and the overlay it reuses), nso_path_sweep.js
        and nso_assemble.js. See docs/CONNECT.md. -->
-  <script src="nso_connect.js?v=connect3"></script>
-  <script src="app-connect.js?v=attachescb10"></script>
+  <script src="nso_connect.js?v=connect4"></script>
+  <script src="app-connect.js?v=drawb11"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=polish2"></script>

@@ -97,6 +97,59 @@ result is a piece like any other (a welded one is named `… (connected)`), so t
 next pair can be anchored on it. Cancel drops the picks; with none, Cancel - and
 Escape - close the card.
 
+## Draw
+
+The **Draw** switch (beside Sag) makes the path a freehand stroke instead of two
+anchors. Press anywhere - on the plate or on a piece - and drag; release builds it.
+Left-drag draws while it is on; a press that finds nothing under it, and the right
+and middle buttons, still orbit and pan. **Esc mid-drag cancels** the stroke and
+builds nothing. After release the card stays armed for the next stroke (Set is for
+anchors; a stroke needs no Set). One Undo per stroke.
+
+The card turns the pointer into a ray at every move (and between moves, a ray every
+few px, so a fast drag does not skip a wall): the point where it meets the plate (at
+the height a piece rests on it, 0.2 mm) or a piece, with that face's normal.
+`NSO_Connect.drawPlan(pieces, stroke, opts)` does the rest:
+
+1. **Smooth.** The raw points are thinned to a mm apart (a pointer's jitter is not a
+   corner), Chaikin's corner cutting runs twice with a turn over **60°** kept as a
+   corner, and the stroke is resampled every **1 mm**. Two neighbours on faces that meet
+   at a crease (normals more than 35° apart) had the crease between them: a fast drag
+   steps over it, so the corner is put back where the two faces' planes meet.
+   Under **3 mm** is refused.
+2. **Ride.** Over bare plate the shape's bottom sits ON the plate (the centre is its
+   half-height up: a String's radius, a Ribbon's half-thickness, a Tapered's local
+   radius). Over a piece it lies on the piece's surface at the same half-height. Where
+   a stretch is to be welded into the piece under it, it is sunk 0.4 of the half-height
+   at most (the sink), so the boolean has material to merge. Where the stroke turns from
+   one face to another the centre goes round the corner with a bend radius over the
+   shape's own (the sweep folds an inside that is tighter): an arc about a convex edge,
+   a fillet inside a concave one.
+3. **Lift (Sag).** Draw lifts the whole stroke by `Sag · sin²(π s / L)`: the middle rises
+   by exactly Sag, the ends stay where they are (so it lands flat), 0 is flat on the
+   plate. It is height above the surface (on the plate: straight up). Draw never hangs a
+   stroke: Sag below 0 is refused. A big Sag over a climb (a 10 mm wall, Sag 2 or more)
+   can ask for a bend the shape cannot make and is refused in words.
+4. **Sweep** the Shape along it (the same rod as the anchored path's), closed, with the
+   Tube's bore sealed.
+
+**Ends.** An end on the **plate** is a flat foot: a square cut, the bottom on the plate,
+whatever Ends says. An end on a **piece** follows Ends: Weld sinks the tip into the piece
+(it dives a radius below the surface over the last few mm, and is unioned); Flat is a
+square cut and, like the anchored Flat, is Keep separate only; Foot pad and Ball are the
+disc and the sphere, at that end only.
+
+**Result.** Weld unions the stroke with **whatever it touches**: the pieces its ends
+stand on and the ones it crosses on the way (a stroke from the plate over a box and
+down to the plate welds into the box; one from a piece over a third to another piece
+welds all three into one). Every stretch lying on a piece being welded is sunk into it a
+little, so the boolean has material to merge. A stroke that touches no piece (both ends
+on the plate, nothing crossed) is a piece of its own. Keep separate never touches a
+piece.
+
+Not in Draw: anchors A and B, the straight and arc paths. Switching Draw off is the
+anchored card again.
+
 ## Shapes
 
 | shape   | fields (defaults)             | notes |
