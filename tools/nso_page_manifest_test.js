@@ -17,6 +17,10 @@
         since the browser never loads them.
      2. package.json parses as JSON.
      3. package.json "testSteps": no step listed twice.
+     4. index.html: every <button> inside a column <details> (class
+        vp-col-menu) sits inside that column's .vp-menu-body. A button
+        left between the body and </details> renders loose under the
+        summary, outside the card (Patch did, under ADD).
    Each gate is run on a known-bad sample first, so a checker that has gone
    blind fails here instead of passing. */
 
@@ -96,6 +100,42 @@ console.log('checker self-test');
   check('a repeated test step is caught', reps.length === 2 && reps[0].step === 'a' && reps[0].again === 2);
 }
 
+/* Buttons that sit in a column <details> but outside its .vp-menu-body.
+   Walks the page's div/details/button tags with a stack (comments and
+   script bodies blanked first) and returns [{ line, id, column }]. */
+function looseColumnButtons(html) {
+  const live = html
+    .replace(/<!--[\s\S]*?-->/g, (c) => c.replace(/[^\n]/g, ' '))
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, (c) => c.replace(/[^\n]/g, ' '));
+  const tagRe = /<(\/?)(div|details|button)\b((?:[^>"']|"[^"]*"|'[^']*')*)>/gi;
+  const stack = [];
+  const loose = [];
+  let m;
+  while ((m = tagRe.exec(live))) {
+    const name = m[2].toLowerCase();
+    const attrs = m[3];
+    if (m[1]) {
+      for (let i = stack.length - 1; i >= 0; i--) {
+        if (stack[i].name === name) { stack.length = i; break; }
+      }
+      continue;
+    }
+    const cls = (/\bclass\s*=\s*"([^"]*)"/.exec(attrs) || [, ''])[1].split(/\s+/);
+    const id = (/\bid\s*=\s*"([^"]*)"/.exec(attrs) || [, ''])[1];
+    const line = live.slice(0, m.index).split('\n').length;
+    if (name === 'button') {
+      for (let i = 0; i < stack.length; i++) {
+        if (stack[i].name !== 'details' || !stack[i].col) continue;
+        const inBody = stack.slice(i + 1).some((e) => e.name === 'div' && e.body);
+        if (!inBody) loose.push({ line, id, column: stack[i].id });
+      }
+    }
+    stack.push({ name, id, col: name === 'details' && cls.includes('vp-col-menu'),
+      body: name === 'div' && cls.includes('vp-menu-body') });
+  }
+  return loose;
+}
+
 // --- index.html ------------------------------------------------------------
 console.log('index.html');
 {
@@ -109,6 +149,22 @@ console.log('index.html');
     console.log('       ' + target + ' is loaded ' + ts.length + ' times:');
     for (const t of ts) console.log('         index.html:' + t.line + '  ' + t.raw);
   }
+  {
+    const bad = [
+      '<details class="vp-menu vp-col-menu" id="menu-a"><summary>A</summary>',
+      '<div class="vp-menu-body"><button id="in">In</button></div>',
+      '<button id="loose">Loose</button></details>',
+    ].join('\n');
+    const l = looseColumnButtons(bad);
+    check('a button under a column summary but outside its body is caught',
+      l.length === 1 && l[0].id === 'loose' && l[0].column === 'menu-a' && l[0].line === 3, JSON.stringify(l));
+    check('a button inside the body, and one in a plain details, are not',
+      looseColumnButtons('<details class="vp-col-menu"><div class="vp-menu-body"><button>x</button></div></details><details><button>y</button></details>').length === 0);
+  }
+  const loose = looseColumnButtons(html);
+  check('every button in a column <details> is inside its .vp-menu-body', loose.length === 0,
+    loose.length ? loose.length + ' loose' : '');
+  for (const l of loose) console.log('       index.html:' + l.line + '  #' + l.id + ' is loose in #' + l.column);
 }
 
 // --- package.json ----------------------------------------------------------
