@@ -996,6 +996,8 @@
       return { ok: false, reason: 'Crop copy needs the app' };
     }
     if (busy) return { ok: false, reason: 'busy' };
+    var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([m]) : '';
+    if (overlap) return refuse(overlap);
     var rs = resolve(m, shape);
     if (rs.reason) return refuse(rs.reason);
     var host = rs.host;

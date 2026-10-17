@@ -15,7 +15,7 @@
    3. each verb, box_closed refused in the one sentence and nothing changed,
       the cleaned box accepted:
         Bridge (sheet), Connect (weld), Join, Subtract B from A,
-        Crop Circle, Crop Piece, Extract bit, Carve, Crop Move,
+        Crop (the card's copy, a sphere and a piece cutter), Extract bit, Carve,
         Attach, Detach, Reattach
       Close and Supports are not in the list: Close fills its opening with its
       own lid, no kernel; supports are shells of their own and never union into
@@ -255,28 +255,22 @@ function installHelpers() {
       }
     }
 
-    console.log('\n=== 3e. Crop Circle and Crop Piece ===');
+    console.log('\n=== 3e. Crop (the card\'s copy) ===');
     for (const [label, file] of [['box_closed', BAD], ['the cleaned box', CLEAN]]) {
       await page.evaluate(() => window.__ov.clear());
       const a = await loadSTL(page, file), t = await loadSTL(page, CLEAN);
       await page.evaluate(([a, t]) => window.__ov.stand(a, t, 80, 0), [a, t]);
-      for (const mode of ['circle', 'piece']) {
-        await page.evaluate(([a, t, mode]) => {
-          state.editId = a;
-          const sh = NSO_cropShapeState();
-          sh.mode = mode; sh.keep = 'inside'; sh.templateId = mode === 'piece' ? t : null; sh.grow = 0;
-          if (mode === 'piece') {   // the template stands over the piece, so its outline cuts it
-            window.__ov.stand(a, t, 5, 5);
-          }
-        }, [a, t, mode]);
-        const before = await page.evaluate(id => window.__ov.model(id).rawTris.length, a);
-        const r = await page.evaluate(() => NSO_cropShapeSelectedModel());
+      for (const mode of ['sphere', 'piece']) {
+        if (mode === 'piece') await page.evaluate(([a, t]) => window.__ov.stand(a, t, 5, 5), [a, t]);   // the cutter stands over the piece
+        const before = await page.evaluate(id => [window.__ov.model(id).rawTris.length, state.models.length], a);
+        const r = await page.evaluate(([a, t, mode]) => NSO_Crop.copy(state.models.find(x => x.id === a),
+          mode === 'piece' ? { kind: 'piece', pieceId: t } : { kind: 'sphere', c: [0, 0, 0], r: 1000 }), [a, t, mode]);
         const st = await page.evaluate(() => window.__ov.status());
-        const after = await page.evaluate(id => window.__ov.model(id).rawTris.length, a);
+        const after = await page.evaluate(id => [window.__ov.model(id).rawTris.length, state.models.length], a);
         console.log('  [' + label + ' ' + mode + '] status:', st);
         if (label === 'box_closed') {
-          check('Crop ' + mode + ' refuses in the one sentence, the piece unchanged', r.ok === false && SENTENCE.test(r.reason) && before === after &&
-            /^Crop refused - piece unchanged \(box_closed has overlapping shells/.test(st), st);
+          check('Crop (' + mode + ') refuses in the one sentence, nothing changed', r.ok === false && SENTENCE.test(r.reason) && before.join() === after.join() &&
+            /^Crop refused - nothing changed \(box_closed has overlapping shells/.test(st), st);
         } else {
           check('the cleaned box is not refused for its shells (Crop ' + mode + ')', !mentions(st) && !mentions(r.reason), st);
         }
@@ -320,21 +314,6 @@ function installHelpers() {
       } else {
         check('the cleaned box is not refused for its shells (Carve)', !mentions(st) && !mentions(r && r.reason), st);
       }
-    }
-
-    console.log('\n=== 3h. Crop Move ===');
-    for (const [label, file] of [['box_closed', BAD], ['the cleaned box', CLEAN]]) {
-      const id = await oneBox(file);
-      await page.evaluate(() => { NSO_cropState().move = [0, 0, 5]; });
-      const { r, same } = await sameCounts(() => page.evaluate(() => NSO_cropMoveSelectedModel()));
-      const st = await page.evaluate(() => window.__ov.status());
-      console.log('  [' + label + '] status:', st);
-      if (label === 'box_closed') {
-        check('Crop Move refuses in the one sentence, the piece unchanged', r.ok === false && SENTENCE.test(r.reason) && same && /^Move refused - piece unchanged \(box_closed has overlapping shells/.test(st), st);
-      } else {
-        check('the cleaned box is not refused for its shells (Crop Move)', !mentions(st) && !mentions(r.reason), st);
-      }
-      void id;
     }
 
     console.log('\n=== 3i. Attach, Detach, Reattach ===');
