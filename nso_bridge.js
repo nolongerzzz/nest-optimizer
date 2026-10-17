@@ -726,7 +726,7 @@
     var S = NSO_PathSweep;
     var rod = S.sweep({ points: [sub(pA, mul(u, engA)), add(pB, mul(u, engB))], profile: S.profileRegular(n, r), up: e1 });
     if (!rod.ok) return refuse('string', rod.reason);
-    var plan = { ok: true, kind: 'string', web: rod.tris, A: A, B: B, pieces: pieces, diameterMm: d, segments: n,
+    var plan = { ok: true, kind: 'string', web: outward(rod.tris), A: A, B: B, pieces: pieces, diameterMm: d, segments: n,
                  lengthMm: L, engageMm: [engA, engB], rimGapMm: [gA.gapMm, gB.gapMm], axis: u };
     // Guard: the exposed rod through either piece. It stays clear of each
     // end by the rim gap plus how far its side runs on past the point when
@@ -774,21 +774,26 @@
     return { mm: Math.max(floor, Math.round(w * 100) / 100), wallMm: walls.length ? Math.min.apply(null, walls) : null, floorMm: floor };
   }
 
+  /* A closed web (the sheet's slab, the string's rod) must have its triangles
+     wound outward whichever way its edges or points were clicked: if the signed
+     volume came out negative the whole soup is inside-out, so flip every triangle. */
+  function outward(soup) {
+    var vol = 0, o, t, n = soup.length;
+    for (o = 0; o + 8 < n; o += 9) {
+      vol += dot([soup[o], soup[o + 1], soup[o + 2]], cross([soup[o + 3], soup[o + 4], soup[o + 5]], [soup[o + 6], soup[o + 7], soup[o + 8]]));
+    }
+    if (vol < 0) for (o = 0; o + 8 < n; o += 9) for (t = 0; t < 3; t++) {
+      var a = o + 3 + t, b = o + 6 + t, tmp = soup[a]; soup[a] = soup[b]; soup[b] = tmp;
+    }
+    return soup;
+  }
+
   function hexa(c) {
     // c: 8 corners, 0-3 bottom ring, 4-7 top ring above them
     var F = [[0, 2, 1], [0, 3, 2], [4, 5, 6], [4, 6, 7], [0, 1, 5], [0, 5, 4], [1, 2, 6], [1, 6, 5], [2, 3, 7], [2, 7, 6], [3, 0, 4], [3, 4, 7]];
     var out = new Float32Array(F.length * 9), v = 0;
     F.forEach(function (f) { f.forEach(function (i) { out[v++] = c[i][0]; out[v++] = c[i][1]; out[v++] = c[i][2]; }); });
-    // outward: flip if the signed volume came out negative
-    var vol = 0;
-    for (var t = 0; t < F.length; t++) {
-      var o = t * 9;
-      vol += dot([out[o], out[o + 1], out[o + 2]], cross([out[o + 3], out[o + 4], out[o + 5]], [out[o + 6], out[o + 7], out[o + 8]]));
-    }
-    if (vol < 0) for (var t2 = 0; t2 < F.length; t2++) for (var k = 0; k < 3; k++) {
-      var a = t2 * 9 + 3 + k, b = t2 * 9 + 6 + k, tmp = out[a]; out[a] = out[b]; out[b] = tmp;
-    }
-    return out;
+    return outward(out);
   }
 
   function planSheet(pieces, A, B, opts) {
@@ -998,6 +1003,7 @@
     sheetDefault: sheetDefault,
     topology: topology,
     volume: volume,
+    outward: outward,
     matchLoops: matchLoops
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = API;
