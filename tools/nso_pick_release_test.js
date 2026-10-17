@@ -324,7 +324,7 @@ const ROSTER = [
 
   { name: 'Connect', two: true,
     arm: async page => {
-      await page.click('#btn-connect');
+      await page.click('#menu-connect > summary');   // Connect opens on its column button (#218: no gate card)
       await page.waitForFunction(() => state.connect && state.connect.open, null, { timeout: 5000 });
     },
     verb: async page => {
