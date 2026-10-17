@@ -1639,8 +1639,11 @@
   <!-- Support beacons: the plan-grid detector detectOverhangs wraps. Before
        nso_support_aim.js so its beacons ride along on every detection. See
        docs/SUPPORT-BEACONS.md. -->
+  <script src="nso_bvh.js?v=bigmesh1"></script>
+  <script src="nso_work.js?v=bigmesh1"></script>
+  <script src="nso_edges.js?v=bigmesh1"></script>
   <script src="nso_support_beacons.js?v=followups1"></script>
-  <script src="nso_support_aim.js?v=index1"></script>
+  <script src="nso_support_aim.js?v=bigmesh1"></script>
   <!-- Attach: the connective tissue between Stock, auto-aim and Join's union.
        After nso_support_aim.js, whose nearestBase and place it calls. See
        docs/ASSEMBLE.md. -->
@@ -1667,7 +1670,7 @@
   <script src="nso_photoset.js?v=photoset1"></script>
   <script src="nso-cooling-profiles.js"></script>
   <script src="nso-3mf.js"></script>
-  <script src="nso-3mf-read.js"></script>
+  <script src="nso-3mf-read.js?v=bigmesh1"></script>
   <script src="nso-3mf-scene.js?v=scene3"></script>
   <script src="nso-surface-grid.js?v=inside6"></script>
   <script src="nso-gcode-lines.js"></script>
@@ -1677,14 +1680,14 @@
   <script src="nso_relief.js?v=relief2"></script>
   <!-- Every tool helper goes in and out of the scene through this registry. -->
   <script src="nso-helpers.js?v=overlap2"></script>
-  <script src="nso-bounds.js?v=bounds1"></script>
-  <script src="app-core.js?v=cropb10"></script>
+  <script src="nso-bounds.js?v=bigmesh1"></script>
+  <script src="app-core.js?v=bigmeshb10"></script>
 
 
 
 
 
-  <script src="app-cut.js?v=mitredrag1"></script>
+  <script src="app-cut.js?v=bigmeshb10"></script>
   <script src="app-finish.js?v=bounds1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
   <script src="app-extend.js?v=scale1"></script>
@@ -1697,7 +1700,7 @@
   <script src="nso_crop.js?v=cropb10"></script>
   <!-- Crop, stage 1: box -> remove slab -> seal the joint. After app-cut.js
        (rawCutOpen, rawFlatCapLoop, mapPlaneToRaw) and app-sculpt.js (commit). -->
-  <script src="app-crop.js?v=cropb10"></script>
+  <script src="app-crop.js?v=bigmeshb10"></script>
   <!-- The Crop card: a shape dragged to size, CROP (docs/CROP.md). After app-crop.js
        and app-cut.js, whose updateCutterUI it follows. -->
   <script src="app-crop-card.js?v=cropcard1"></script>
@@ -1747,7 +1750,7 @@
   <script src="app-fit.js?v=wheel4"></script>
   <script src="app-stock.js?v=shelf2"></script>
   <script src="app-assemble.js?v=shelfb10"></script>
-  <script src="app-sel-outline.js?v=inside4"></script>
+  <script src="app-sel-outline.js?v=bigmesh1"></script>
   <script src="app-join.js?v=nohdrb10"></script>
   <script src="app-center-lock.js?v=nogate2"></script>
   <script src="app-oversize-washer.js?v=oversize2"></script>
@@ -1809,7 +1812,7 @@
   <script src="app-gscope-support.js?v=exposed1"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
-  <script src="app-supports-card.js?v=progress1"></script>
+  <script src="app-supports-card.js?v=bigmeshb10"></script>
   <script src="app-gscope-slice.js?v=take1"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
@@ -1820,9 +1823,9 @@
   <script src="nso_lift.js?v=lift2"></script>
   <script src="nso_lift_curved.js?v=liftsurface1"></script>
   <script src="nso_lift_auto.js?v=liftsurface1"></script>
-  <script src="app-lift-plate.js?v=liftsurface1"></script>
-  <script src="nso_split_parts.js?v=split1"></script>
-  <script src="app-split-parts.js?v=split1"></script>
+  <script src="app-lift-plate.js?v=bigmesh1"></script>
+  <script src="nso_split_parts.js?v=bigmesh1"></script>
+  <script src="app-split-parts.js?v=bigmesh1"></script>
 
 
   <script src="app-ux.js?v=inside9"></script>

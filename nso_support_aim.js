@@ -644,6 +644,11 @@
      non-finite coordinate - to index). `verify` reads every value instead of
      a sample, once, and rebuilds if the soup changed under its index. */
   function indexFor(soup, verify) {
+    /* On the page the tree is nso_bvh.js's: the one the viewer's raycast asks,
+       built by this very code (buildBVH below is its copy, kept for the
+       contexts that load this file alone - the worker, the node checks - and
+       held equal to it by tools/nso_bvh_test.js). */
+    if (root && root.NSO_BVH) return root.NSO_BVH.indexFor(soup, verify, INDEX_MIN_TRIS);
     if (!indexCache || !soup || soup.length < INDEX_MIN_TRIS * 9) return null;
     var ix = indexCache.get(soup);
     if (ix === undefined || (ix && (ix.len !== soup.length || ix.sample !== sampleOf(soup)))) ix = undefined;

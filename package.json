@@ -286,7 +286,11 @@
     "split:parts-drive": "node tools/nso_split_parts_drive.js",
     "lift:curved-surface": "node tools/nso_lift_curved_surface_test.js",
     "lift:curved-surface-drive": "node tools/nso_lift_curved_surface_drive.js",
-    "pose:bounds": "node tools/nso_pose_bounds_test.js"
+    "pose:bounds": "node tools/nso_pose_bounds_test.js",
+    "bvh:test": "node tools/nso_bvh_test.js",
+    "edges:test": "node tools/nso_edges_test.js",
+    "big:mesh": "node tools/nso_big_mesh_test.js",
+    "big:profile": "node tools/nso_big_mesh_profile.js"
   },
   "devDependencies": {
     "playwright": "1.56.1",
@@ -336,6 +340,8 @@
     "lift:curved-surface",
     "lift:curved-surface-drive",
     "pose:bounds",
+    "bvh:test",
+    "edges:test",
     "foam:test",
     "foam:drive",
     "cavity:thickwall",
@@ -637,6 +643,8 @@
     "lift:curved-surface": 10300,
     "lift:curved-surface-drive": 600,
     "pose:bounds": 60000,
+    "bvh:test": 8000,
+    "edges:test": 2000,
     "foam:test": 4200,
     "foam:drive": 85300,
     "cavity:thickwall": 110,

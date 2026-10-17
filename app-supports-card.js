@@ -180,11 +180,41 @@ var NSO_SUPPORTS_CARD = (function () {
     if (S.det && S.det.key === key) return S.det;
     var soup = worldUp(p.mesh), sk = skipListFor(m, p, soup);
     var opts = { skipList: sk.list, angleDeg: S.angle, occluders: occ.map(occluderSoup) };
-    var det = sk.reason ? null : window.NSO_SupportAim.detectOverhangs(soup, opts);
-    var err = sk.reason || (det && !det.ok ? det.reason : null) ||
+    /* A BIG piece is read in a worker (detection is 10 s of JS on the vase, and
+       the card used to freeze the page for all of it on opening). The card
+       says "measuring…" and redraws when the read comes back. */
+    if (!sk.reason && bigPiece(soup)) return detectInWorker(key, soup, opts);
+    return settle(key, soup, opts, sk.reason ? null : window.NSO_SupportAim.detectOverhangs(soup, opts), sk.reason);
+  }
+
+  var PENDING = { pending: true };
+  function bigPiece(soup) {
+    return !!(window.NSO_BVH && window.NSO_BVH.isBig(soup.length / 9) && window.NSO_Work && window.NSO_Work.isAvailable());
+  }
+  function settle(key, soup, opts, det, reason) {
+    var err = reason || (det && !det.ok ? det.reason : null) ||
       (det && !det.beacons ? (det.beaconsReason || 'no beacon grid') : null);
     S.det = { key: key, soup: soup, opts: opts, det: det, error: err, minZ: boundsOf(soup).lo[2] };
     return S.det;
+  }
+  function detectInWorker(key, soup, opts) {
+    if (S.detJob && S.detJob.key === key) return PENDING;
+    if (S.detJob) { S.detJob.job.cancel(); S.detJob = null; }
+    var job = window.NSO_Work.run('support-detect', ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.js'],
+      'NSO_SupportAim.detectOverhangs', [soup, opts]);
+    var mine = S.detJob = { key: key, job: job };
+    job.promise.then(function (det) {
+      if (S.detJob !== mine) return;
+      S.detJob = null;
+      settle(key, soup, opts, det, null);
+      if (S.open) refresh();
+    }, function (err) {
+      if (S.detJob !== mine) return;
+      S.detJob = null;
+      settle(key, soup, opts, null, 'Could not read the piece (' + ((err && err.message) || err) + ').');
+      if (S.open) refresh();
+    });
+    return PENDING;
   }
 
   function editsOf(m) {
@@ -205,6 +235,7 @@ var NSO_SUPPORTS_CARD = (function () {
    */
   function effective() {
     var D = detect();
+    if (D === PENDING) return { beacons: [], regions: [], pitch: 3, error: null, measuring: true };
     if (!D || D.error) return { beacons: [], regions: [], pitch: 3, error: D ? D.error : 'that piece is gone' };
     var det = D.det, p = placedOf(S.hostId), m = modelOf(S.hostId);
     var pitch = det.grid ? det.grid.pitch : 3;
@@ -448,6 +479,7 @@ var NSO_SUPPORTS_CARD = (function () {
   function cardState() {
     if (S.hostId == null || !placedOf(S.hostId) || !S.eff) return 'pick';
     if (S.eff.error) return 'error';
+    if (S.eff.measuring) return 'measuring';
     if (!S.eff.beacons.length) return 'nothing';
     if (S.busy) return 'building';
     return memOf(S.hostId).built ? 'built' : 'idle';
@@ -515,6 +547,7 @@ var NSO_SUPPORTS_CARD = (function () {
     if (S.msg) { text = S.msg.text; bad = !!S.msg.bad; }
     else if (cs === 'pick') text = 'Click a piece to see where it needs holding.';
     else if (cs === 'error') { text = eff.error; bad = true; }
+    else if (cs === 'measuring') text = 'measuring\u2026';
     else if (cs === 'nothing') text = NOTHING;
     else if (cs === 'building') text = progressLine();
     else if (cs === 'built') text = builtLine(a);
@@ -874,6 +907,7 @@ var NSO_SUPPORTS_CARD = (function () {
   function build() {
     if (S.busy) return Promise.resolve({ ok: false, reason: 'busy' });
     var host = placedOf(S.hostId), hm = modelOf(S.hostId), D = detect();
+    if (D === PENDING) return Promise.resolve({ ok: false, reason: 'still measuring' });
     if (!host || !D || D.error) return Promise.resolve({ ok: false, reason: D ? D.error : 'no piece' });
     var eff = S.eff = effective(), o = cardOpts(), hostId = S.hostId;
     var regs = eff.regions.filter(function (r) { return !r.excluded; });
@@ -1226,6 +1260,7 @@ var NSO_SUPPORTS_CARD = (function () {
     S.raf = requestAnimationFrame(tick);
   }
   function close() {
+    if (S.detJob) { S.detJob.job.cancel(); S.detJob = null; }
     if (S.job && S.job.stop) { var j = S.job; j.dead = true; j.stop(new Error('the card was closed')); }
     clearTimeout(S.angleTimer); S.angleTimer = 0;
     S.open = false; S.hostId = null; S.selSupport = null; S.msg = null; S.det = null; S.occ = {};
