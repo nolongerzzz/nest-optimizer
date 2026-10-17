@@ -112,6 +112,8 @@ withApp(async (page, logs) => {
     const rowTop = r.row[0].y;
     check('the top row is one line', r.row.every(b => Math.abs(b.y - rowTop) < 0.5),
       r.row.filter(b => Math.abs(b.y - rowTop) >= 0.5).map(b => b.id).join(', ') || 'all at y ' + rowTop);
+    check('the row starts 8 px from the top edge of the window: there is no header above it', Math.abs(rowTop - 8) < 0.5,
+      'row top ' + rowTop);
     check('the row runs left to right in the drawing\'s order',
       r.row.every((b, i) => i === 0 || b.x > r.row[i - 1].r - 0.5),
       r.row.map(b => b.id.replace(/^(menu|btn)-/, '') + '@' + Math.round(b.x)).join(' '));
@@ -210,11 +212,11 @@ withApp(async (page, logs) => {
         const hit = document.elementFromPoint(s.left + s.width / 2, s.top + s.height / 2);
         return !!(hit && hit.closest(sel)) && s.bottom <= innerHeight;
       };
-      return { vBottom: v.bottom, H: innerHeight, vW: v.width, W: innerWidth,
+      return { vTop: v.top, vBottom: v.bottom, H: innerHeight, vW: v.width, W: innerWidth,
                lastHit: hits('#btn-frame-view'), optHit: hits('#btn-optimize'), plateHit: hits('#plate-select') };
     });
     check('at 900x' + h + ' the viewport fills the window; the column\'s last slab, Optimize and the Plate & pieces panel are clickable',
-      Math.abs(r.vBottom - r.H) < 0.5 && Math.abs(r.vW - r.W) < 0.5 && r.lastHit && r.optHit && r.plateHit, JSON.stringify(r));
+      Math.abs(r.vTop) < 0.5 && Math.abs(r.vBottom - r.H) < 0.5 && Math.abs(r.vW - r.W) < 0.5 && r.lastHit && r.optHit && r.plateHit, JSON.stringify(r));
   }
   await page.setViewportSize({ width: 1500, height: 820 });
   await page.waitForTimeout(150);

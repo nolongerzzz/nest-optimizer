@@ -235,7 +235,7 @@ async function main() {
   await page.click('#ms-close');
   // Clean plate for what follows.
   await page.evaluate(() => { state.undoStack.length = 0; });
-  await page.click('#btn-clear').catch(() => {});
+  await page.click('#btn-clear-plate').catch(() => {});
   await page.evaluate(() => { if (state.models.length) { state.models = []; } });
 
   // =======================================================================

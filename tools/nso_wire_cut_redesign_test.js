@@ -158,7 +158,7 @@ window.__addDisplayPiece = function (soup, name) {
   placeModelMovable(m, 0, 0);
   return id;
 };
-window.__clearAll = function () { document.getElementById('btn-clear').click(); };
+window.__clearAll = function () { document.getElementById('btn-clear-plate').click(); };
 `;
 
 /* Geometry, in node. */

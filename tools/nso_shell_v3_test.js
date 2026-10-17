@@ -309,6 +309,7 @@ withApp(async (page, logs) => {
                   cut: f.scrollWidth > f.clientWidth + 1 || f.scrollHeight > f.clientHeight + 1 };
     });
     const v = document.getElementById('viewport').getBoundingClientRect();
+    out._headers = document.querySelectorAll('header').length;
     out._vp = { top: v.top, bottom: v.bottom, left: v.left, right: v.right, h: v.height, W: innerWidth, H: innerHeight };
     out._marks = all.map(([id]) => (FACE(id) || {}).textContent || '').join('').match(/[▾▼⌄]/g) || [];
     out._gone = gone.filter(id => document.getElementById(id));
@@ -393,6 +394,18 @@ withApp(async (page, logs) => {
     check('the column fits inside the viewport at 1280 x 800',
       colBottom <= geo._vp.bottom && first.y >= geo._vp.top && lastAbove.b < repair.y,
       'column ' + Math.round(first.y - geo._vp.top) + '..' + Math.round(colBottom - geo._vp.top) + ' px of a ' + geo._vp.h + ' px viewport');
+    /* No page header: the viewport is the window - it starts at 0 and is all
+       800 px (it was 739, under a 61 px header) - and the row and the pinned
+       panel start 8 px from the top edge of it. */
+    check('the viewport is the whole window at 1280 x 800: no header, top 0, 800 px tall; the column runs 50..792 of it',
+      geo._headers === 0 && geo._vp.top === 0 && geo._vp.h === 800 && geo._vp.H === 800 &&
+      Math.abs(first.y - 50) < 0.5 && Math.abs(colBottom - 792) < 0.5,
+      'headers ' + geo._headers + ', viewport ' + geo._vp.top + '..' + geo._vp.bottom + ', column ' + Math.round(first.y) + '..' + Math.round(colBottom));
+    const rowTop = Math.min(...ROW.map(([id]) => geo[id].y));
+    check('the top row and the pinned panel start 8 px from the top edge, and the panel keeps its 8 px from the right edge',
+      Math.abs(rowTop - 8) < 0.5 && geo._panel && Math.abs(geo._panel.y - 8) < 0.5 &&
+      Math.abs(geo._vp.right - geo._panel.r - 8) < 0.5,
+      'row top ' + Math.round(rowTop) + ', panel top ' + (geo._panel && Math.round(geo._panel.y)) + ', right gap ' + (geo._panel && Math.round(geo._vp.right - geo._panel.r)));
   }
 
   /* ------------------------------------------------------------------ 3 */
@@ -786,7 +799,7 @@ withApp(async (page, logs) => {
       });
       const p = document.getElementById('plate-panel').getBoundingClientRect();
       const stacks = ['btn-clear-plate', 'btn-optimize'].map(id => document.getElementById(id).getBoundingClientRect());
-      return { vBottom: v.bottom, H: innerHeight, vW: v.width, W: innerWidth, blocked, overlap,
+      return { vTop: v.top, vBottom: v.bottom, H: innerHeight, vW: v.width, W: innerWidth, blocked, overlap,
                panelBelow: stacks.every(s => p.top >= s.bottom), panelRight: Math.round(innerWidth - p.right) };
     }, GROUPS.flat().map(([id]) => id).concat(ROW.map(([id]) => id), RIGHT.map(([id]) => id), UNDER.map(([id]) => id)));
     const ps = await panelState(page);
@@ -794,7 +807,7 @@ withApp(async (page, logs) => {
     check('at 900x' + h + ' the capture report drawer clears the panel; its Close can be clicked', dr.close && dr.apart && dr.rightOfCol,
       JSON.stringify(dr));
     check('at 900x' + h + ' the viewport fills the window, the panel sits under the stacks at the right edge, and every slab and panel control can be clicked',
-      Math.abs(r.vBottom - r.H) < 0.5 && Math.abs(r.vW - r.W) < 0.5 && r.blocked.length === 0 && r.overlap.length === 0 &&
+      Math.abs(r.vTop) < 0.5 && Math.abs(r.vBottom - r.H) < 0.5 && Math.abs(r.vW - r.W) < 0.5 && r.blocked.length === 0 && r.overlap.length === 0 &&
       r.panelBelow && r.panelRight === 8 && ps.blocked.length === 0,
       JSON.stringify(r) + (ps.blocked.length ? ' panel blocked: ' + ps.blocked.join(',') : ''));
   }

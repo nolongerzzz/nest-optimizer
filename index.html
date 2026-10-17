@@ -4,25 +4,13 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=gshellb7" />
+  <link rel="stylesheet" href="styles.css?v=nohdr1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
 </head>
 <body>
   <div id="app">
-    <header>
-      <div class="logo">
-        <span class="logo-icon">⬡</span>
-        <div>
-          <h1>Nest Optimizer</h1>
-          <p class="tagline">Max models • Minimal supports • Any plate</p>
-        </div>
-      </div>
-      <div class="header-actions">
-        <button id="btn-clear" class="btn btn-ghost">Clear</button>
-      </div>
-    </header>
     <main>
       <section class="viewport-section">
         <div id="viewport"></div>
@@ -1317,12 +1305,12 @@
              edge under the top-right buttons. app-findings.js fills it and
              positions it; hidden until Check runs. docs/FINDINGS.md. -->
         <section id="findings-card" class="findings-card" hidden aria-label="Findings" aria-live="polite">
-          <header class="findings-head">
+          <div class="findings-head">
             <h2>Findings</h2>
             <span id="findings-piece" class="findings-piece"></span>
             <button id="btn-findings-close" class="findings-close" type="button" aria-label="Close findings"
                     title="Close the card and clear the check's marks">&times;</button>
-          </header>
+          </div>
           <div id="findings-stale" class="findings-stale" hidden>
             <span>The piece changed. Check again</span>
             <button id="btn-findings-recheck" class="btn btn-secondary findings-recheck" type="button">Check again</button>
@@ -1807,7 +1795,7 @@
   <script src="app-stock.js?v=shapes1"></script>
   <script src="app-assemble.js?v=asm2"></script>
   <script src="app-sel-outline.js?v=inside4"></script>
-  <script src="app-join.js?v=helpmrg1"></script>
+  <script src="app-join.js?v=nohdr1"></script>
   <script src="app-center-lock.js?v=pull1"></script>
   <script src="app-oversize-washer.js?v=oversize2"></script>
   <script src="app-join-triple.js?v=triple1"></script>

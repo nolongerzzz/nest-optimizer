@@ -270,7 +270,7 @@ withApp(async (page, logs) => {
   section('wipe the app');
   // -----------------------------------------------------------------------
   await page.evaluate(() => { window.nsoPlateLockSet(false); });
-  await page.click('#btn-clear');
+  await page.click('#btn-clear-plate');
   const wiped = await page.evaluate(plateSnapshot);
   eq('nothing left: no pieces, no library, no plate lock',
      [wiped.pieces, wiped.models, wiped.plateLock], [0, 0, false]);
@@ -352,7 +352,7 @@ withApp(async (page, logs) => {
   section('a file with no scene block - straight from Bambu Studio');
   // -----------------------------------------------------------------------
   await page.evaluate(() => { window.nsoPlateLockSet(false); });
-  await page.click('#btn-clear');
+  await page.click('#btn-clear-plate');
   const foreign = path.join(ROOT, 'fixtures', '3mf', 'pa_pattern.3mf');
   const fbytes = Array.from(fs.readFileSync(foreign));
   await page.evaluate(([b, n]) => { handleFiles([new File([new Uint8Array(b)], n)]); },
@@ -381,7 +381,7 @@ withApp(async (page, logs) => {
                 triangles: [0, 1, 2, 0, 2, 3, 0, 3, 1, 1, 3, 2] }],
     profileId: 'default', plateName: 'Bambu A1 Mini'
   });
-  await page.click('#btn-clear');
+  await page.click('#btn-clear-plate');
   await page.evaluate(([b, n]) => { handleFiles([new File([new Uint8Array(b)], n)]); },
                       [Array.from(bare.bytes), 'no-scene.3mf']);
   await page.waitForFunction(() => state.models.length > 0, null, { timeout: 30000 });

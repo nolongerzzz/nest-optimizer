@@ -166,6 +166,16 @@ withApp(async (page, logs) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await loadSTL(page, path.join(ROOT, 'fixtures', 'box-20mm.stl'));
   await page.waitForTimeout(300);
+  /* Where the main page's corner sits, measured before G-scope covers it: the
+     page has no header, so its viewport, Import slab and pinned panel start at
+     the window's top edge - the spot G-scope's own panel, Import and corner
+     row use - and switching between the two must not jump. */
+  const mainPage = await page.evaluate(() => {
+    const R = el => el.getBoundingClientRect();
+    const imp = R(document.querySelector('#menu-import > summary')), pan = R(document.getElementById('plate-panel'));
+    return { vpTop: R(document.getElementById('viewport')).top, impTop: imp.top, impLeft: imp.left,
+             panelTop: pan.top, panelGap: innerWidth - pan.right };
+  });
   await page.click('#btn-microscope');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc() && window.NSO_MICROSCOPE.getDoc().kind === 'mesh', null, { timeout: 30000 });
   await page.waitForFunction(() => window.NSO_MICROSCOPE.flange().status !== 'pending', null, { timeout: 30000 });
@@ -296,6 +306,11 @@ withApp(async (page, logs) => {
       row.length >= 2 && row.every(b => Math.abs(b.b - row[0].b) < 2) && row.every((b, i) => i === 0 || b.x >= row[i - 1].r) && row[row.length - 1].r <= (g.zr ? g.zr.x : g.W),
       JSON.stringify(row.map(b => [Math.round(b.x), Math.round(b.r), Math.round(b.b)])));
     check('the bottom row is short: its tallest box is under a quarter of the window', row.every(b => b.h < g.H / 4), row.map(b => Math.round(b.h)).join(','));
+    check('switching to G-scope does not jump: its panel, Import and corner row sit where the main page\'s viewport, Import and pinned panel do',
+      mainPage.vpTop === 0 && Math.abs(g.panel.y - mainPage.vpTop) < 0.5 &&
+      Math.abs(g.slabs[0].y - mainPage.impTop) < 0.5 && Math.abs(g.slabs[0].x - mainPage.impLeft) < 0.5 &&
+      g.corner[2] && Math.abs(g.corner[2].y - mainPage.panelTop) < 0.5 && Math.abs((g.W - g.corner[2].r) - mainPage.panelGap) < 0.5,
+      JSON.stringify({ main: mainPage, gscope: { panelY: g.panel.y, importY: g.slabs[0].y, importX: g.slabs[0].x, closeY: g.corner[2] && g.corner[2].y, closeGap: g.corner[2] && g.W - g.corner[2].r } }));
     check('the layer-range slider (when up) is clear of the corner row', !g.zr || g.zr.y >= g.corner[1].b, JSON.stringify(g.zr));
   }
 
