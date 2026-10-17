@@ -22,6 +22,7 @@ const FILE = argv.find(a => !a.startsWith('--') && /\.(3mf|stl)$/i.test(a));
 const LABEL = flag('--label', 'run');
 const OUT = path.resolve(flag('--out', path.join(__dirname, 'big-mesh-out')));
 const QUICK = argv.includes('--quick');
+const LIFT_ONLY = argv.includes('--lift-only');   // import, select, arm Lift (verified), 20 hovers: nothing else
 if (!FILE) { console.error('usage: nso_big_mesh_profile.js <file.3mf|file.stl> [--label before|after] [--out dir]'); process.exit(2); }
 fs.mkdirSync(OUT, { recursive: true });
 
@@ -73,6 +74,25 @@ const pause = (page, ms) => page.waitForTimeout(ms);
       await pause(page, 3000);
     });
     await shot('02-selected');
+
+    if (LIFT_ONLY) {
+      /* Lift, self-contained: select the piece (so Lift has a target), arm it, check it read the piece, hover. */
+      const lp = await L.hoverPoints(page, 0, 20);
+      await run('arm Lift (piece selected)', async () => {
+        await page.evaluate(() => NSO_LIFT_PLATE.setArmed(true));
+        await page.waitForFunction(() => !!NSO_LIFT_PLATE.detection(), null, { timeout: 240000, polling: 100 });
+        await pause(page, 1500);
+        return page.evaluate(() => ({ armed: NSO_LIFT_PLATE.isArmed(), target: NSO_LIFT_PLATE.targetId(), read: NSO_LIFT_PLATE.detection() }));
+      });
+      console.log('    ' + JSON.stringify(results[results.length - 1].value));
+      await run('Lift armed: 20 hovers', async () => {
+        for (const p of lp) { await page.mouse.move(p.x, p.y, { steps: 2 }); await pause(page, 250); }
+        return page.evaluate(() => ({ hover: NSO_LIFT_PLATE.hover(), readout: document.getElementById('lift-readout').textContent.slice(0, 80) }));
+      });
+      console.log('    ' + JSON.stringify(results[results.length - 1].value));
+      results.tris = tris;
+      return;
+    }
 
     // ---- 20 hovers across the piece ----
     const pts = await L.hoverPoints(page, 0, 20);
