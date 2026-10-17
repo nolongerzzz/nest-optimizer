@@ -565,6 +565,8 @@ if (typeof document !== 'undefined') {
     function onKey(ev) {
       var C = NSO_connectUI();
       if (!C.open || ev.key !== 'Escape') return;
+      // Escape with Attach armed is Attach's, as Cancel is: it stops, the anchors and the card stay.
+      if (state.attachArmed && typeof window.nsoAttachDisarm === 'function') { window.nsoAttachDisarm(); return; }
       NSO_connectCancel();
     }
     // The column drop-down is the switch: open arms the picks, shut puts them
