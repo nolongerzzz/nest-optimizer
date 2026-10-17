@@ -37,9 +37,8 @@
  *   8  SELECTING A PIECE while the card is open detects there at once (a click
  *      on the piece, or the app's own selection from the Pieces list).
  *   9  THE WEDGE (the piece that used to hang): detect on open, 25 areas at once (at the default 60 deg);
- *      a Generate over the planner's reach ends as "Could not build" inside the
- *      watchdog, plate unchanged; leaving the big underside out, the rest
- *      builds and the three counts add up to 25.
+ *      Generate over all 25 ends BUILT in seconds (the planner has a spatial
+ *      index now), the three counts pinned. The watchdog is section 8's.
  *  10  No page errors. Screenshots of each state in tools/supports-out/.
  */
 import { chromium } from 'playwright';
@@ -48,6 +47,9 @@ import { join } from 'node:path';
 import { serveRoot, routeCdn, mkCheck, launchOpts, ROOT } from './cth-test/browser-lib.mjs';
 
 const check = mkCheck();
+/* The wedge (section 9) pinned: spots held / unsupported / unreachable over 25 areas, and the time budget. */
+/* (measured: 51 supports in ~30.5 s on this box, twice; the default watchdog is 60 s) */
+const WEDGE_HELD = 25, WEDGE_UNSUPPORTED = 0, WEDGE_UNREACHABLE = 0, WEDGE_BUILD_MS = 50000;
 const SHOTS = join(ROOT, 'tools', 'supports-out');
 const W = 1280, H = 800;
 
@@ -630,41 +632,26 @@ async function main() {
   await page.evaluate(() => document.activeElement && document.activeElement.blur());
   await frames(page);
 
-  /* The build that used to hang: the 377 spots under the slab take the planner
-     minutes (nso_support_aim.js's inside test walks every triangle on every
-     probe). With the watchdog at 15 s the build must END, in a state. */
-  await page.evaluate(() => window.NSO_SUPPORTS_CARD.watchdogMs(15000));
+  /* The build that used to hang: the 377 spots under the slab took the planner
+     minutes (nso_support_aim.js's inside test walked every triangle on every
+     probe). With the spatial index it takes seconds, so Generate over all 25
+     areas ENDS BUILT, inside the default 60 s watchdog. The watchdog path is
+     covered by section 8's planner that never answers, not by this piece. */
   before = await T.plate();
-  const tw = Date.now();
-  await page.click('#btn-sup-all');
-  await T.idle(40000);
-  const wedgeMs = Date.now() - tw;
-  await frames(page);
-  c = await T.card();
-  check('Generate over the planner\'s reach ends in a state inside the watchdog (15 s + a little), never a spinner that stays',
-    [wedgeMs < 25000, c.state !== 'building', c.spinner.shown, c.locked], [true, true, false, false]);
-  check('...and it is a plain-words failure with the plate untouched',
-    [c.line, (await T.plate()).placed, (await T.plate()).undo], ['Could not build: the planner was still working after 15 s - nothing was added', before.placed, before.undo]);
-  console.log('       ' + c.line + '  (' + (wedgeMs / 1000).toFixed(1) + ' s)');
-  await T.shot('16-wedge-could-not-build.png');
-
-  /* Leave the big underside out; the small areas build. */
-  /* 24 small areas took 45 s here against the 60 s default: room for a slower box. */
-  await page.evaluate(() => window.NSO_SUPPORTS_CARD.watchdogMs(120000));
-  const big = v.areas.reduce((m, a) => (a.count > m.count ? a : m), v.areas[0]);
-  await T.oneStep('Leaving the big underside out', () => page.evaluate((id) => window.NSO_SUPPORTS_CARD.toggleArea(id), big.id));
   const tb = Date.now();
-  await T.oneStep('Generate without it', () => page.click('#btn-sup-all'));
+  await T.oneStep('Generate over all 25 areas', () => page.click('#btn-sup-all'));
   const buildMs = Date.now() - tb;
+  await frames(page);
   c = await T.card();
   v = await T.view();
   const nSup = (await T.sups()).length;
-  check('the rest builds: BUILT with the three counts, which add up to all 25 areas',
-    [c.state, v.stats.held + v.stats.unsupported + v.stats.unreachable, v.stats.unsupported >= 1], ['built', 25, true]);
+  console.log('       BUILT: ' + c.line + '  (' + (buildMs / 1000).toFixed(1) + ' s); stats ' + JSON.stringify(v.stats));
+  check('Generate over all 25 areas ends BUILT, inside the watchdog and well inside the old planner\'s minutes',
+    [c.state, c.spinner.shown, c.locked, buildMs < WEDGE_BUILD_MS], ['built', false, false, true]);
+  check('...with the three counts pinned, which add up to all 25 areas',
+    [v.stats.held, v.stats.unsupported, v.stats.unreachable, v.stats.held + v.stats.unsupported + v.stats.unreachable], [WEDGE_HELD, WEDGE_UNSUPPORTED, WEDGE_UNREACHABLE, 25]);
   check('...the line is the three counts', c.line, BUILT(nSup, v.stats.held, v.stats.unsupported, v.stats.unreachable));
-  check('...a row for every area that is not held, the big one first among them left out', [c.rows.list.length, c.rows.list.some((r) => r.area === big.id && r.text.includes('left out'))],
-    [v.stats.unsupported + v.stats.unreachable, true]);
-  console.log('       ' + c.line + '  (' + (buildMs / 1000).toFixed(1) + ' s); rows: ' + c.rows.list.map((r) => r.text).join(' | '));
+  check('...a row for every area that is not held', c.rows.list.length, v.stats.unsupported + v.stats.unreachable);
   await T.shot('17-wedge-built.png');
   await page.close();
 
