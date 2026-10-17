@@ -20,16 +20,18 @@
  *   3  EDIT BEFORE GENERATE. A click on the outline leaves the area out (it dims,
  *      GENERATE off); a click puts it back; Shift-click on the wall adds a spot
  *      (an area of its own, outlined like the rest). Each is one Undo.
- *   4  BUILDING. GENERATE: the button reads "Building...", every control is
- *      locked, a spinner turns over the piece, the planner runs off the page's
- *      thread. (The planner's solid step is held for the screenshot.)
+ *   4  BUILDING. GENERATE: every control is locked, one bar fills under the
+ *      readout (no spinner), the bottom-right status says what the readout says,
+ *      the planner runs off the page's thread. (The weld step is held for the
+ *      screenshot.)
  *   5  BUILT. "Built: N supports - held H - unsupported K - unreachable U";
  *      REGENERATE replaces (one Undo); REMOVE takes one; REMOVE ALL back to IDLE.
  *   6  EVERY BUILD ENDS IN A STATE. A planner that throws, one that refuses, and
  *      one that never answers (the watchdog: 60 s by default, the readout counts
  *      seconds past 10) each end as "Could not build: <why> - nothing was
  *      added": the plate exactly as before, Undo with nothing new, the card
- *      live again; a REGENERATE that fails leaves the old supports standing.
+ *      live again, the bar gone; a REGENERATE that fails leaves the old
+ *      supports standing.
  *   7  THE THREE COUNTS. Piece B: 2 areas, one the plate cannot reach: "held 1 -
  *      unsupported 0 - unreachable 1", a row for it under the readout, a click
  *      on the row frames the area. Leaving an area out before GENERATE counts it
@@ -39,7 +41,19 @@
  *   9  THE WEDGE (the piece that used to hang): detect on open, 25 areas at once (at the default 60 deg);
  *      Generate over all 25 ends BUILT in seconds (the planner has a spatial
  *      index now), the three counts pinned. The watchdog is section 8's.
- *  10  No page errors. Screenshots of each state in tools/supports-out/.
+ *      Its build shows well over 10 progress updates, planning 427 / 427 and
+ *      building n / n both at 100 % before BUILT; Escape in the middle of
+ *      planning terminates the real worker and changes nothing.
+ *  10  PROGRESS. One bar, one phase word at a time: Detecting, Planning (beacons
+ *      settled / total), Building (trunks swept / total), Welding. The messages
+ *      arrive in that order, done <= total, percent never down within a phase,
+ *      100 only when the work is; a phase with no count (detecting, welding)
+ *      shows its word and the seconds on a bar that only sweeps - no percent is
+ *      guessed. REGENERATE and REMOVE ALL are off while the bar is live; Escape
+ *      cancels (plate unchanged, Undo empty-handed, old supports standing, a
+ *      late planner cannot touch the plate). A planner that reports nonsense
+ *      (backwards, past its total, an unknown phase) is not believed.
+ *  11  No page errors. Screenshots of each state in tools/supports-out/.
  */
 import { chromium } from 'playwright';
 import { mkdir, readFile } from 'node:fs/promises';
@@ -103,6 +117,37 @@ const tilted = box([0, 0, 0], [40, 30, 10]).map((v, i, a) => {
 const TILTED = stl(tilted);
 const WITH_TUNNEL = stl([...tilted, ...tunnelBlock(60, 100, 30)]);
 
+/** What a build's progress stream must look like, however long the piece: `log` is every message the card kept
+    (NSO_SUPPORTS_CARD.onProgress), `spots` the beacons it was asked to plan. */
+function progressChecks(label, log, spots) {
+  const RANK = { detecting: 0, planning: 1, building: 2, welding: 3 }, WORD = { detecting: 'Detecting', planning: 'Planning', building: 'Building', welding: 'Welding' };
+  const counted = log.filter((m) => m.done != null);
+  check(label + ': the phases arrive in order - detecting, planning, building, welding', [...new Set(log.map((m) => m.phase))], ['detecting', 'planning', 'building', 'welding']);
+  check('...no message goes back to an earlier phase', log.every((m, i) => !i || RANK[m.phase] >= RANK[log[i - 1].phase]), true);
+  check('...every count is a whole number, 0 <= done <= total', counted.every((m) => Number.isInteger(m.done) && Number.isInteger(m.total) && m.done >= 0 && m.done <= m.total), true);
+  check('...within planning and within building, done and percent never go down and the total does not move',
+    ['planning', 'building'].map((ph) => { const q = counted.filter((m) => m.phase === ph); return q.length > 1 && q.every((m, i) => !i || (m.done >= q[i - 1].done && m.percent >= q[i - 1].percent && m.total === q[i - 1].total)); }), [true, true]);
+  check('...detecting and welding have no count: done, total and percent are all null - no percent is guessed',
+    log.filter((m) => m.phase === 'detecting' || m.phase === 'welding').every((m) => m.done == null && m.total == null && m.percent == null), true);
+  check('...the percent is the nearest whole number, and 100 only when the work is done',
+    counted.every((m) => m.percent === (m.done === m.total ? 100 : Math.min(99, Math.round(100 * m.done / m.total)))), true);
+  check('...the line is the word, the count and the percent: "Planning 142 / 377 · 38 %"',
+    counted.every((m) => m.line === WORD[m.phase] + ' ' + m.done + ' / ' + m.total + ' \u00b7 ' + m.percent + ' %') && log.filter((m) => m.done == null).every((m) => /^(Detecting|Welding) \u00b7 \d+ s$/.test(m.line)), true);
+  const last = (ph) => [...log].reverse().find((m) => m.phase === ph), firstOf = (ph) => log.findIndex((m) => m.phase === ph);
+  const lp = last('planning'), lb = last('building');
+  check('...planning reaches ' + spots + ' / ' + spots + ' = 100 %, building n / n = 100 %, each before the next phase begins',
+    [lp.done, lp.total, lp.percent, lb.done === lb.total && lb.total > 0, lb.percent, log.indexOf(lp) < firstOf('building'), log.indexOf(lb) < firstOf('welding')], [spots, spots, 100, true, 100, true, true]);
+}
+/** What a person saw on every frame of a build: the bar is there, the bottom-right status says what the readout says,
+    and the bar is filled to the readout's percent - or sweeping, with no percent, when the readout has none. */
+function frameChecks(label, fr) {
+  const pc = (f) => { const m = /(\d+) %$/.exec(f.line); return m ? Number(m[1]) : null; };
+  check(label + ': on all ' + fr.length + ' frames the bar is shown and the status says what the readout says', fr.length > 0 && fr.every((f) => f.shown && f.status === f.line), true);
+  check('...a readout with a percent has the bar filled to exactly it', fr.filter((f) => pc(f) != null).every((f) => !f.indeterminate && f.now === String(pc(f)) && f.width === pc(f) + '%'), true);
+  check('...a readout without one is "Building…", "Detecting · N s" or "Welding · N s" on a bar that sweeps, with no value',
+    fr.filter((f) => pc(f) == null).every((f) => /^(Building…|Detecting \u00b7 \d+ s|Welding \u00b7 \d+ s)$/.test(f.line) && f.indeterminate && f.now === null), true);
+}
+
 const frames = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const DEG = '°';
@@ -149,7 +194,7 @@ async function main() {
     t.card = () => page.evaluate(() => {
       const $ = (id) => document.getElementById(id);
       const shown = (e) => { if (!e) return false; const r = e.getBoundingClientRect(); return !e.hidden && r.width > 0 && r.height > 0 && getComputedStyle(e).display !== 'none'; };
-      const sp = $('sup-spinner'), spr = sp && sp.getBoundingClientRect();
+      const bar = $('sup-progress');
       const rows = [...$('sup-rows').querySelectorAll('button')].map((b) => ({ area: Number(b.dataset.area), text: b.textContent, kind: b.className.replace('sup-row ', '').replace('sup-row-', '') }));
       return {
         state: $('supports-card').dataset.state, line: $('sup-count').textContent, status: $('status').textContent,
@@ -161,7 +206,10 @@ async function main() {
         angle: $('sup-angle').value, note: $('sup-angle-note').textContent,
         locked: $('supports-card').classList.contains('is-locked'),
         rows: { shown: shown($('sup-rows')), list: rows },
-        spinner: sp ? { shown: shown(sp), anim: getComputedStyle(sp).animationName, at: spr && [spr.left + spr.width / 2, spr.top + spr.height / 2] } : null,
+        bar: bar ? { shown: shown(bar), indeterminate: bar.classList.contains('is-indeterminate'), now: bar.getAttribute('aria-valuenow'),
+          width: bar.firstElementChild.style.width, text: bar.getAttribute('aria-valuetext'), phase: bar.dataset.phase,
+          anim: getComputedStyle(bar.firstElementChild).animationName } : null,
+        spinnerGone: !$('sup-spinner'),
         inside: (() => { const c = $('supports-card').getBoundingClientRect(); return c.width > 0 && c.left >= 0 && c.top >= 0 && c.right <= innerWidth && c.bottom <= innerHeight; })()
       };
     });
@@ -231,21 +279,40 @@ async function main() {
       check(label + ' is one Undo step', await t.undoDepth(), d0 + 1);
       return r;
     };
-    /** The debug HUD is gone: the build tag is not drawn, and the HUD does not repeat the card's line. */
-    t.hudClean = async (label) => {
+    /** The debug HUD is gone: the build tag is not drawn, and the bottom-right status does not repeat the
+        card's line - except while the bar is live (`building`), when it says the same words. */
+    t.hudClean = async (label, building = false) => {
       const c = await t.card();
-      check(label + ': no build tag drawn, and the HUD does not repeat the readout', [c.tagShown, c.status === c.line], [false, false]);
+      check(label + ': no build tag drawn, and the status ' + (building ? 'says what the readout says' : 'does not repeat the readout'),
+        [c.tagShown, c.status === c.line], [false, building]);
       return c;
     };
-    /** Hold the planner's solid step until released, so BUILDING can be looked at. */
+    /** Listen to the card's progress (and sample what a person sees on every frame) until `unwatch`. */
+    t.watch = () => page.evaluate(() => {
+      window.__log = []; window.__frames = []; window.__sampling = true;
+      window.__off = window.NSO_SUPPORTS_CARD.onProgress((m) => window.__log.push(m));
+      const sample = () => {
+        if (!window.__sampling) return;
+        if (window.NSO_SUPPORTS_CARD.busy()) {
+          const bar = document.getElementById('sup-progress');
+          window.__frames.push({ line: document.getElementById('sup-count').textContent, status: document.getElementById('status').textContent,
+            shown: !bar.hidden, indeterminate: bar.classList.contains('is-indeterminate'), now: bar.getAttribute('aria-valuenow'), width: bar.firstElementChild.style.width });
+        }
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    t.unwatch = () => page.evaluate(() => { window.__sampling = false; window.__off(); return { log: window.__log, frames: window.__frames }; });
+    t.logLen = () => page.evaluate(() => window.__log.length);
+    /** Hold the planner's weld step (the unions, on the page) until released, so BUILDING can be looked at. */
     t.holdBuild = () => page.evaluate(() => {
-      const orig = NSO_SupportGridpack.solid;
+      const orig = NSO_SupportGridpack.weld;
       window.__held = false; window.__release = null;
       const gate = new Promise((r) => { window.__release = r; });
-      NSO_SupportGridpack.solid = function (plan) {
-        const p = orig.call(this, plan);
+      NSO_SupportGridpack.weld = function (plan, tp, o) {
+        const p = orig.call(this, plan, tp, o);
         window.__held = true;
-        NSO_SupportGridpack.solid = orig;
+        NSO_SupportGridpack.weld = orig;
         return gate.then(() => p);
       };
     });
@@ -254,8 +321,8 @@ async function main() {
       const c = await t.card(), now = await t.plate();
       check(label + ': the card says "Could not build: ' + why + ' - nothing was added"', c.line, 'Could not build: ' + why + ' - nothing was added');
       check('...the plate is exactly as before, and Undo has nothing new', [now.placed, now.models, now.undo, now.top], [before.placed, before.models, before.undo, before.top]);
-      check('...the card is live again: not building, not locked, no spinner, GENERATE on',
-        [c.state !== 'building', c.locked, c.spinner.shown, c.go.on, c.controls], [true, false, false, true, [true, true, true, true]]);
+      check('...the card is live again: not building, not locked, the bar gone (and no spinner), the status line cleared, GENERATE on',
+        [c.state !== 'building', c.locked, c.bar.shown, c.spinnerGone, c.status, c.go.on, c.controls], [true, false, false, true, '', true, [true, true, true, true]]);
       return c;
     };
     return t;
@@ -389,18 +456,12 @@ async function main() {
   await page.waitForFunction(() => window.__held === true, null, { timeout: 120000 });
   await frames(page);
   c = await T.card();
-  check('BUILDING: the button reads "Building…", off', c.go, { text: 'Building…', on: false });
-  check('...the card says "Building…" and is locked: Angle, Style, Size, May-rest all off',
-    [c.state, c.line, c.locked, c.controls], ['building', 'Building…', true, [false, false, false, false]]);
-  await T.hudClean('building');
-  const centre = await page.evaluate(() => {
-    const p = state.placed.find((q) => !state.models.find((m) => m.id === q.sourceId).nsoSupport);
-    const n = new THREE.Box3().setFromObject(p.mesh).getCenter(new THREE.Vector3()).project(state.camera);
-    const r = state.renderer.domElement.getBoundingClientRect();
-    return [r.left + (n.x + 1) / 2 * r.width, r.top + (1 - n.y) / 2 * r.height];
-  });
-  check('...a spinner is turning on the piece',
-    [c.spinner.shown, c.spinner.anim, c.spinner.at && Math.hypot(c.spinner.at[0] - centre[0], c.spinner.at[1] - centre[1]) < 3], [true, 'sup-spin', true]);
+  check('BUILDING: the button is off and reads "Building…" (the seconds only past 10)', c.go, { text: 'Building…', on: false });
+  check('...the card says the phase and is locked: Angle, Style, Size, May-rest all off. The weld is held, so: "Welding · N s"',
+    [c.state, /^Welding \u00b7 \d+ s$/.test(c.line), c.locked, c.controls], ['building', true, true, [false, false, false, false]]);
+  await T.hudClean('building', true);
+  check('...one bar is under the readout, sweeping (welding has no count, so no percent), carrying the same words; the spinner is gone',
+    [c.bar.shown, c.bar.indeterminate, c.bar.now, c.bar.text === c.line, c.bar.phase, c.bar.anim, c.spinnerGone], [true, true, null, true, 'welding', 'sup-sweep', true]);
   check('...nothing is on the plate yet, and no Undo step yet', [(await T.sups()).length, await T.undoDepth()], [0, d4]);
   await T.shot('05-building.png');
   await page.evaluate(() => window.__release());
@@ -418,7 +479,7 @@ async function main() {
   check('BUILT: "Built: N supports · held 1 · unsupported 0 · unreachable 0", N the supports on the plate',
     [c.state, c.line, N > 0], ['built', BUILT(N, 1, 0, 0), true]);
   check('...GENERATE reads REGENERATE and REMOVE ALL sits beside it; Remove (one) is shown, off until a support is picked; no rows (nothing needs a look)',
-    [c.go, c.removeAll, c.remove, c.spinner.shown, c.locked, c.rows.shown], [{ text: 'Regenerate', on: true }, { shown: true, on: true }, { shown: true, on: false }, false, false, false]);
+    [c.go, c.removeAll, c.remove, c.bar.shown, c.locked, c.rows.shown], [{ text: 'Regenerate', on: true }, { shown: true, on: true }, { shown: true, on: false }, false, false, false]);
   await T.hudClean('built');
   check('...every spot is held, the area is still outlined in white', [(await T.view()).beacons.every((b) => b.state === 'held'), (await T.outlines()).areas.map((a) => a.kind)], [true, ['on']]);
   check('...the supports are card supports of area 0', s.length > 0 && (await page.evaluate(() => state.models.filter((m) => m.nsoSupport).every((m) => m.nsoSupport.card && m.nsoSupport.regionId === 0))), true);
@@ -486,7 +547,8 @@ async function main() {
   await page.click('#btn-sup-all');
   await sleep(3000);
   c = await T.card();
-  check('3 s in: "Building…" with no seconds yet, locked, the spinner turning', [c.state, c.line, c.locked, c.spinner.shown], ['building', 'Building…', true, true]);
+  check('3 s in: a planner that says nothing gets "Building…" with no seconds yet, locked, the bar up and sweeping with no percent',
+    [c.state, c.line, c.locked, c.bar.shown, c.bar.indeterminate, c.bar.now], ['building', 'Building…', true, true, true, null]);
   await sleep(Math.max(0, 12500 - (Date.now() - t0)));
   c = await T.card();
   check('past 10 s the readout counts the seconds, on the card and on the button',
@@ -496,6 +558,7 @@ async function main() {
   const took = (Date.now() - t0) / 1000;
   await frames(page);
   check('the watchdog stops the build at 60 s (default), not before and not long after', [took >= 59.5, took < 64], [true, true]);
+  check('...and the bar turns into the message: gone, the readout says "Could not build"', [(await T.card()).bar.shown, (await T.card()).line.startsWith('Could not build: ')], [false, true]);
   c = await T.failed('a planner that never answers', before, 'the planner was still working after 60 s');
   check('...the old supports still stand', T.ids(await T.sups()), built1);
   await T.shot('10-timed-out.png');
@@ -638,21 +701,148 @@ async function main() {
      areas ENDS BUILT, inside the default 60 s watchdog. The watchdog path is
      covered by section 8's planner that never answers, not by this piece. */
   before = await T.plate();
+  const wedgeSpots = (await T.view()).beacons.length;
+  await T.watch();
   const tb = Date.now();
   await T.oneStep('Generate over all 25 areas', () => page.click('#btn-sup-all'));
   const buildMs = Date.now() - tb;
+  const wedgeRun = await T.unwatch();
   await frames(page);
   c = await T.card();
   v = await T.view();
   const nSup = (await T.sups()).length;
   console.log('       BUILT: ' + c.line + '  (' + (buildMs / 1000).toFixed(1) + ' s); stats ' + JSON.stringify(v.stats));
   check('Generate over all 25 areas ends BUILT, inside the watchdog and well inside the old planner\'s minutes',
-    [c.state, c.spinner.shown, c.locked, buildMs < WEDGE_BUILD_MS], ['built', false, false, true]);
+    [c.state, c.bar.shown, c.locked, buildMs < WEDGE_BUILD_MS], ['built', false, false, true]);
   check('...with the three counts pinned, which add up to all 25 areas',
     [v.stats.held, v.stats.unsupported, v.stats.unreachable, v.stats.held + v.stats.unsupported + v.stats.unreachable], [WEDGE_HELD, WEDGE_UNSUPPORTED, WEDGE_UNREACHABLE, 25]);
   check('...the line is the three counts', c.line, BUILT(nSup, v.stats.held, v.stats.unsupported, v.stats.unreachable));
   check('...a row for every area that is not held', c.rows.list.length, v.stats.unsupported + v.stats.unreachable);
   await T.shot('17-wedge-built.png');
+
+  /* The progress of that build: at least 10 updates, counted the way a person sees them (a change of
+     phase, done or total - a repeat of the last message is a beat, not an update). */
+  const key = (m) => m.phase + '|' + m.done + '|' + m.total;
+  const updates = wedgeRun.log.filter((m, i) => !i || key(m) !== key(wedgeRun.log[i - 1])).length;
+  check('the wedge build showed at least 10 progress updates', updates >= 10, true);
+  progressChecks('the wedge build', wedgeRun.log, wedgeSpots);
+  frameChecks('the wedge build, as a person saw it', wedgeRun.frames);
+  /* The planner's own cadence: gaps between the times the WORKER posted (the page may take a message up later,
+     busy drawing a frame). The planning and building loops beat every 200 ms; the stretches that cannot
+     (the first detect, the pad gaps) are single calls. Welding is the page's own, one wasm union at a time. */
+  const sentGaps = (ph) => { const q = wedgeRun.log.filter((m) => ph.includes(m.phase)); return q.slice(1).map((m, i) => m.sent - q[i].sent); };
+  const gaps = sentGaps(['planning', 'building']).sort((a, b) => a - b), gW = sentGaps(['welding']).sort((a, b) => a - b);
+  const over = gaps.filter((g) => g > 250).length;
+  console.log('       ' + updates + ' updates in ' + (buildMs / 1000).toFixed(1) + ' s; planner gaps (planning + building): median ' + gaps[gaps.length >> 1] +
+    ' ms, max ' + gaps[gaps.length - 1] + ' ms, ' + over + ' of ' + gaps.length + ' over 250 ms; welding on the page: max ' + gW[gW.length - 1] + ' ms (one union step)');
+  check('the planner is heard from at least every 250 ms in all but a handful of its messages, and never goes quiet for a second',
+    [over <= Math.ceil(gaps.length * 0.02), gaps[gaps.length - 1] < 1000], [true, true]);
+
+  /* Escape in the middle of planning, on the real worker: REGENERATE over the standing supports, stopped at once. */
+  const standing = T.ids(await T.sups());
+  await page.evaluate(() => { window.__terminated = 0; const t = Worker.prototype.terminate; Worker.prototype.terminate = function () { window.__terminated++; return t.call(this); }; });
+  before = await T.plate();
+  await T.watch();
+  await page.click('#btn-sup-all');
+  await page.waitForFunction(() => { const q = window.NSO_SUPPORTS_CARD.progress(); return q && q.phase === 'planning' && q.done > 0; }, null, { timeout: 60000 });
+  c = await T.card();
+  check('REGENERATE over the wedge, the bar live in planning: the line is "Planning n / ' + wedgeSpots + ' · p %", REGENERATE and REMOVE ALL are off',
+    [new RegExp('^Planning \\d+ / ' + wedgeSpots + ' \u00b7 \\d+ %$').test(c.line), c.go.on, c.removeAll.shown, c.removeAll.on], [true, false, true, false]);
+  await T.shot('18a-wedge-planning.png');
+  await page.keyboard.press('Escape');
+  await T.idle(20000);
+  await frames(page);
+  const nAtStop = await T.logLen();
+  c = await T.card();
+  check('Escape: the card says "Build cancelled - nothing was added", the bar gone, the status line cleared, the card live and still BUILT',
+    [c.line, c.bar.shown, c.status, c.locked, c.state, c.go.on], ['Build cancelled - nothing was added', false, '', false, 'built', true]);
+  check('...the worker was terminated', await page.evaluate(() => window.__terminated >= 1), true);
+  const nowPlate = await T.plate();
+  check('...the plate is exactly as before, Undo has nothing new, the old supports stand', [nowPlate.placed, nowPlate.models, nowPlate.undo, nowPlate.top, T.ids(await T.sups())],
+    [before.placed, before.models, before.undo, before.top, standing]);
+  await sleep(1500);
+  check('...and the stopped worker says nothing more: no message after Escape, the plate still untouched',
+    [await T.logLen(), (await T.plate()).undo], [nAtStop, before.undo]);
+  await T.unwatch();
+  await T.shot('18b-wedge-escape.png');
+  await page.close();
+
+  // =======================================================================
+  console.log('\n--- 10. PROGRESS: one bar, the phase word, a percent only where there is a count ---');
+  // =======================================================================
+  page = await freshPage([['tilted.stl', TILTED]]);
+  T = tools(page);
+  const pId = await page.evaluate(() => state.placed[0].sourceId);
+  await T.lookAtPiece(pId, DIR, 105);
+  await page.click('#menu-supports > summary');
+  await frames(page);
+  const boxSpots = (await T.view()).beacons.length;
+  await T.watch();
+  await T.oneStep('Generate, watched', () => page.click('#btn-sup-all'));
+  const boxRun = await T.unwatch();
+  progressChecks('the box build', boxRun.log, boxSpots);
+  frameChecks('the box build, as a person saw it', boxRun.frames);
+  c = await T.card();
+  check('...and it ends BUILT: the bar gone, the status line cleared', [c.state, c.bar.shown, c.status], ['built', false, '']);
+  const builtIds = T.ids(await T.sups());
+
+  /* REGENERATE with the weld held: the bar is live, and nothing that changes the plate can be pressed. */
+  await T.holdBuild();
+  before = await T.plate();
+  await page.click('#btn-sup-all');
+  await page.waitForFunction(() => window.__held === true, null, { timeout: 120000 });
+  await frames(page);
+  c = await T.card();
+  check('while the bar is live REGENERATE and REMOVE ALL are shown and off, Remove is off, Angle / Style / Size / May-rest are off, the card is locked',
+    [c.go.on, c.removeAll.shown, c.removeAll.on, c.remove.on, c.controls, c.locked, c.bar.shown], [false, true, false, false, [false, false, false, false], true, true]);
+  await page.evaluate(() => { for (const id of ['btn-sup-all', 'btn-sup-none', 'btn-sup-remove']) document.getElementById(id).click(); });
+  await frames(page);
+  check('...a click on any of them (even forced) does nothing: no second build, nothing taken off, nothing new in Undo',
+    [(await T.card()).state, T.ids(await T.sups()), (await T.plate()).undo], ['building', builtIds, before.undo]);
+  await T.shot('19-regenerating-welding.png');
+
+  /* Escape: cancelled, and the late weld cannot touch the plate. */
+  await page.keyboard.press('Escape');
+  await T.idle(20000);
+  await frames(page);
+  c = await T.card();
+  check('Escape cancels: "Build cancelled - nothing was added", the bar gone, the status line cleared, the card live and still BUILT',
+    [c.line, c.bar.shown, c.status, c.locked, c.state, c.go.on, c.go.text], ['Build cancelled - nothing was added', false, '', false, 'built', true, 'Regenerate']);
+  let now = await T.plate();
+  check('...the plate is exactly as before, Undo has nothing new, the old supports stand', [now.placed, now.models, now.undo, now.top, T.ids(await T.sups())],
+    [before.placed, before.models, before.undo, before.top, builtIds]);
+  await page.evaluate(() => window.__release());
+  await sleep(2500);
+  now = await T.plate();
+  check('...and when the held weld finishes afterwards it changes nothing: same plate, same Undo, still "Build cancelled"',
+    [now.placed, now.models, now.undo, T.ids(await T.sups()), (await T.card()).line], [before.placed, before.models, before.undo, builtIds, 'Build cancelled - nothing was added']);
+  await T.shot('20-cancelled.png');
+  await T.oneStep('Regenerate after a cancel', () => page.click('#btn-sup-all'));
+  check('...the card builds again straight after: BUILT', [(await T.card()).state, (await T.card()).line], ['built', BUILT((await T.sups()).length, 1, 0, 0)]);
+
+  /* A planner that reports nonsense is not believed: a count that goes backwards, past its total, an unknown
+     phase, an earlier phase. Only what makes sense reaches the bar. Then it refuses, and the bar is the message. */
+  await page.evaluate((n) => {
+    window.NSO_SUPPORTS_CARD.setPlanner((soup, opts) => new Promise((resolve) => {
+      const say = opts.onProgress, wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const steps = [{ phase: 'planning', done: Math.round(n / 4), total: n }, { phase: 'planning', done: 3, total: n },
+        { phase: 'planning', done: n * 9, total: n }, { phase: 'planning', done: -1, total: n }, { phase: 'sweeping', done: 1, total: 2 },
+        { phase: 'detecting', done: null, total: null }, { phase: 'planning', done: n, total: n }];
+      (async () => { for (const m of steps) { say(m); await wait(120); } await wait(400); resolve({ ok: false, reason: 'seam done', inside: [] }); })();
+    }));
+  }, boxSpots);
+  before = await T.plate();
+  await T.watch();
+  await page.click('#btn-sup-all');
+  await T.idle();
+  await frames(page);
+  const seamRun = await T.unwatch();
+  check('a planner that reports nonsense: the bar was told only what makes sense - ' + Math.round(boxSpots / 4) + ' / ' + boxSpots + ' (25 %), then ' + boxSpots + ' / ' + boxSpots + ' (100 %)',
+    /* a repeat of the last message is a beat, not an update */
+    seamRun.log.filter((m, i) => !i || key(m) !== key(seamRun.log[i - 1])).map((m) => [m.phase, m.done, m.total, m.percent]), [['planning', Math.round(boxSpots / 4), boxSpots, Math.round(100 * Math.round(boxSpots / 4) / boxSpots)], ['planning', boxSpots, boxSpots, 100]]);
+  frameChecks('...as a person saw it', seamRun.frames);
+  await T.failed('the refusal after it', before, 'seam done');
+  await page.evaluate(() => window.NSO_SUPPORTS_CARD.setPlanner(null));
   await page.close();
 
   // =======================================================================

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=gselectb10" />
+  <link rel="stylesheet" href="styles.css?v=progressb10" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -765,8 +765,11 @@
                it and the card says how many, at what angle, on which piece -
                the angle is editable right here. Click an outline to leave that
                area out (or put it back); Shift-click the piece to add a spot.
-               GENERATE builds; the card is locked while it does, and a build
-               ends as BUILT or as "Could not build: ...". Once built it reads
+               GENERATE builds; the card is locked while it does and one bar
+               under the readout fills with the build ("Planning 142 / 377 -
+               38 %", then "Building ...", then "Welding - 14 s"; Escape
+               cancels), and a build ends as BUILT or as "Could not build: ...".
+               Once built it reads
                the result (held / unsupported / unreachable, a row for each
                area that needs a look) and offers REGENERATE, REMOVE ALL and
                REMOVE. G-scope's support row stays for layer-view work; both
@@ -775,6 +778,7 @@
             <summary class="vp-bar-btn" title="Outline where a piece hangs in air, then generate the supports that hold it">Supports</summary>
             <div class="vp-menu-body vp-top-body sup-card" id="supports-card" data-state="pick">
               <p id="sup-count" class="bend-readout sup-count">Click a piece to see where it needs holding.</p>
+              <div id="sup-progress" class="sup-progress" role="progressbar" aria-label="Building supports" aria-valuemin="0" aria-valuemax="100" hidden><div class="sup-progress-fill"></div></div>
               <label class="vp-bend-field" for="sup-angle">Angle
                 <input type="number" id="sup-angle" value="60" min="1" max="89" step="1" aria-label="Overhang angle, degrees"
                        title="A face hangs when it is within this angle of horizontal. 60 is Bambu's 30 degree overhang threshold (Bambu measures from vertical: 90 minus this). A smaller angle finds only the flatter undersides. The outlines follow as you type."><span id="sup-angle-note" class="sup-angle-note">60&deg; &middot; Bambu 30&deg;</span></label>
@@ -1669,7 +1673,7 @@
        merged pairwise on a node lattice, plate first. planTree above is
        this; it needs nso_support_tree.js's contactPoints and union. See
        docs/SUPPORT-GRIDPACK.md. -->
-  <script src="nso_support_gridpack.js?v=index1"></script>
+  <script src="nso_support_gridpack.js?v=progress1"></script>
   <script src="nso_exif.js?v=photoset1"></script>
   <script src="nso_photoset.js?v=photoset1"></script>
   <script src="nso-cooling-profiles.js"></script>
@@ -1816,7 +1820,7 @@
   <script src="app-gscope-support.js?v=exposed1"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
-  <script src="app-supports-card.js?v=detectfirst2"></script>
+  <script src="app-supports-card.js?v=progress1"></script>
   <script src="app-gscope-slice.js?v=take1"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the

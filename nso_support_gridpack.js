@@ -127,6 +127,25 @@
          optionally with regionId and key) planned instead of detecting.
    Every plan.trunks[i] carries regionIds; every solid(plan).solids[i]
    carries beacons (ids), regionIds and landing.
+
+   PROGRESS. opts.onProgress(msg), on plan(), parts() and weld(), is told
+   { phase, done, total } as the work goes, once per unit finished:
+     'detecting'  plan(): the plate and the spatial index; no count (null, null)
+     'planning'   plan(): beacons settled / beacons given (a beacon inside the
+                  piece is settled when it is refused)
+     'building'   parts(): trunks swept / trunks
+     'welding'    weld(): the unions; no count (the number of joins is not
+                  known until the last one is done), so null, null
+   A phase with no count says so with nulls; no total is ever guessed. done
+   never goes down within a phase and never passes total. Between units the
+   last message is repeated once HEARTBEAT_MS has passed, so the gap between
+   messages is at most HEARTBEAT_MS plus the longest single unit: a unit is
+   not interrupted, so one that runs for a second is a second between
+   messages. A callback that throws is ignored. parts() and weld() also take
+   opts.yieldFn(): called between units, and awaited when it returns a
+   promise - the page's turn to repaint, or to stop the work by rejecting.
+   solid(plan) is parts() then weld() with no callback and no yields: the
+   same bytes as before.
    ============================================================ */
 (function (root) {
   'use strict';
@@ -157,11 +176,28 @@
   var GAP_DILATE = 2;          /* a gap is filled this many cells past its own edge, so the fill overlaps the pads round it */
   var LEAN_TOL = 1e-4;          /* a face tilted exactly the lean limit is not a side face: float32 noise on its normal must not decide */
   var EAGERNESS = { strut: 0, tree: 1, 'gecko-hand': 1 };
+  var HEARTBEAT_MS = 200;      /* a repeat of the last progress message goes out once this long has passed (see PROGRESS above) */
 
   function SA(o) { return (o && o.supportAim) || (root && root.NSO_SupportAim) || null; }
   function ST(o) { return (o && o.supportTree) || (root && root.NSO_SupportTree) || null; }
   function SBM(o) { return (o && o.beaconsModule) || (root && root.NSO_SupportBeacons) || null; }
   function PS(o) { return (o && o.pathSweep) || (root && root.NSO_PathSweep) || null; }
+
+  /* say(phase, done, total, force): tells opts.onProgress. A repeat of the
+     last message is dropped unless HEARTBEAT_MS has passed since it was sent,
+     or `force` is set; so a loop can call it on every unit and on every level
+     and the listener still hears one message per change and a beat in between. */
+  function progressOf(opts) {
+    var cb = opts && opts.onProgress;
+    if (typeof cb !== 'function') return function () {};
+    var last = { phase: null, done: null, total: null, at: 0 };
+    return function say(phase, done, total, force) {
+      var now = Date.now();
+      if (!force && last.phase === phase && last.done === done && last.total === total && now - last.at < HEARTBEAT_MS) return;
+      last = { phase: phase, done: done, total: total, at: now };
+      try { cb({ phase: phase, done: done, total: total }); } catch (err) { /* a listener must not stop the plan */ }
+    };
+  }
 
   function sub(a, b) { return [a[0] - b[0], a[1] - b[1], a[2] - b[2]]; }
   function add(a, b) { return [a[0] + b[0], a[1] + b[1], a[2] + b[2]]; }
@@ -348,7 +384,7 @@
     opts = opts || {};
     var out = { ok: false, reason: '', stage: 'beacons', members: [], stubs: [], merges: [], pickups: [],
                 steered: [], nudged: [], tight: [], unreachable: [], resting: [], inside: [], held: 0 };
-    var A = SA(opts), T = ST(opts);
+    var A = SA(opts), T = ST(opts), say = progressOf(opts);
     if (!A || !T || typeof A.detectOverhangs !== 'function') {
       out.reason = 'nso_support_aim.js and nso_support_tree.js must be loaded'; return out;
     }
@@ -357,6 +393,7 @@
     var eager = opts.mergeEagerness == null ? EAGERNESS[style] : +opts.mergeEagerness;
     out.style = style; out.eagerness = eager;
 
+    say('detecting', null, null, true);
     var bc = beaconsFor(rawTris, opts);
     out.detect = bc.detect;
     if (!bc.ok) { out.reason = bc.reason; return out; }
@@ -397,6 +434,11 @@
       return out;
     }
     live.sort(function (a, b) { return (b.p[2] - a.p[2]) || (a.p[0] - b.p[0]) || (a.p[1] - b.p[1]) || (a.id - b.id); });
+    /* A beacon is settled when it has a place in the plan or is refused: the
+       ones inside the piece are settled already; the rest settle as the
+       descent below starts them. */
+    var nBeacons = bc.beacons.length, next = 0;
+    say('planning', out.inside.length, nBeacons, true);
 
     /* ---- members ---- */
     var M = out.members;
@@ -436,6 +478,11 @@
       return true;
     }
 
+    /* A beat for the listener from inside a long step (a steer, a level's
+       merges): the same numbers again, let through once HEARTBEAT_MS has
+       passed since the last message. */
+    function beat() { say('planning', out.inside.length + next, nBeacons); }
+
     /* A member just made: a clear drop, a steer, a rest, or nothing. */
     function settle(m) {
       var a = anchor(m), cap = m.path.length === 1 ? m.tipCap : 0;
@@ -457,6 +504,7 @@
         for (var si = 0; si < NUDGE_STEPS.length; si++) {
           var dd = NUDGE_STEPS[si] * s0;
           for (var h0 = 0; h0 < STEER_HEADINGS; h0++) {
+            beat();
             var th = 2 * Math.PI * h0 / STEER_HEADINGS, dx = Math.cos(th) * dd, dy = Math.sin(th) * dd;
             var q = [a[0] + dx, a[1] + dy, a[2] - (n[0] * dx + n[1] * dy) / n[2]];
             if (!(A._nearestHit(obstacles, [q[0], q[1], q[2] - 0.2], [0, 0, 1], 0, 0.4) > 0)) continue;
@@ -507,6 +555,7 @@
       var best = null;
       for (var li = 0; li < STEER_LEANS.length; li++) {
         for (var hi = 0; hi < STEER_HEADINGS; hi++) {
+          beat();
           var t = 2 * Math.PI * hi / STEER_HEADINGS, u = [Math.cos(t), Math.sin(t)], lean = tanT * STEER_LEANS[li];
           for (var k = Math.floor((a[2] - plateZ) / g - 1e-9); k >= 0; k--) {
             var z = plateZ + k * g, D = a[2] - z;
@@ -531,7 +580,6 @@
     /* ---- the descent ---- */
     var zTop = live[0].p[2];
     var kTop = Math.ceil((zTop - plateZ) / g - 1e-9);
-    var next = 0;
     for (var k = kTop; k >= 0; k--) {
       var zk = plateZ + k * g;
 
@@ -563,6 +611,7 @@
             ch.parents.push(pm.id); pm.child = ch.id; pm.childSide = ch.side;
             out.stubs.push({ beacon: b.id, from: pick.Q.slice(), via: V, to: b.p.slice(), side: s0, member: ch.id });
             out.pickups.push({ beacon: b.id, by: pm.id, at: pick.Q.slice(), member: ch.id });
+            say('planning', out.inside.length + next, nBeacons);
             continue;
           }
         }
@@ -574,6 +623,7 @@
         var nm = newMember(path, 1, [b.id], sideBeacon ? 'side' : 'beacon', s0);
         nm.beacon = b.id;
         if (!settle(nm)) drop(nm);
+        say('planning', out.inside.length + next, nBeacons);
       }
 
       /* 2. merges at this level */
@@ -581,6 +631,7 @@
         var free = M.filter(function (m) { return m.free && !m.dead && anchor(m)[2] > zk + 1e-9; });
         var cand = [];
         for (var i = 0; i < free.length; i++) {
+          beat();
           for (var j = i + 1; j < free.length; j++) {
             var A0 = anchor(free[i]), B0 = anchor(free[j]);
             var rA = (A0[2] - zk) * tanT * eager, rB = (B0[2] - zk) * tanT * eager, d = hdist(A0, B0);
@@ -602,6 +653,7 @@
            makes the merge wait a level. */
         var used = {}, born = [];
         cand.forEach(function (c) {
+          beat();
           if (used[c.a.id] || used[c.b.id]) return;
           var group = [c.a, c.b], ok = true;
           for (var round = 0; round < 4 && ok; round++) {
@@ -642,7 +694,9 @@
           m.path.push([a[0], a[1], plateZ]); m.free = false; m.end = 'plate';
         });
       }
+      say('planning', out.inside.length + next, nBeacons);
     }
+    say('planning', out.inside.length + next, nBeacons, true);
     /* ---- trunks ---- */
     var trunks = [];
     M.forEach(function (m) {
@@ -1147,7 +1201,7 @@
   /* The parts of every trunk, in union order: the landing member, then up
      the tree breadth first, each member's pickup stubs right after it, the
      resting pad right after the root, gecko fingers last. */
-  function trunkParts(p, opts) {
+  function trunkStepper(p, opts) {
     var P = PS(opts), T = ST(opts), A = SA(opts);
     if (!P || typeof P.sweep !== 'function') return { ok: false, reason: 'nso_path_sweep.js is not loaded' };
     var probe = makeProbe(A, [opts.rawTris || []].concat(opts.occluders || []));
@@ -1162,7 +1216,9 @@
       });
       p.stubs.forEach(function (st) { shafts.push({ beacon: st.beacon, a: st.to, b: st.via, r: st.side / Math.SQRT2 }); });
     }
-    for (var t = 0; t < p.trunks.length; t++) {
+    /* One trunk's parts: null once swept, { ok: false, reason } when a member
+       would not sweep. */
+    function step(t) {
       var tr = p.trunks[t], parts = [], fingers = [];
       for (var i = 0; i < tr.members.length; i++) {
         var m = p.members[tr.members[i]];
@@ -1228,25 +1284,39 @@
         }
       }
       out.push({ trunk: t, parts: parts, fingerParts: fingers, fingers: fingers.length });
+      return null;
     }
-    /* The gaps between pads that overlap in a ring are filled, each by the
-       pad nearest it, so every group of pads is one disc-shaped slab. */
-    var gaps = { fills: [], found: 0, left: 0 };
-    if (foot && opts.padGaps !== false) {
-      gaps = padGaps(A, [opts.rawTris || []].concat(opts.occluders || []), padList, p.plateZ, foot);
-      gaps.bridges.forEach(function (b) {
-        var soup = prismSoup(b.poly, p.plateZ, p.plateZ + foot);
-        if (soup) { out[b.owner].parts.push({ soup: soup, foot: true, bridge: true }); gaps.bridged = (gaps.bridged || 0) + 1; }
-      });
-      gaps.fills.forEach(function (f) {
-        var soup = prismSoup(f.poly, p.plateZ, p.plateZ + foot);
-        if (!soup) { gaps.left++; return; }
-        out[f.owner].parts.push({ soup: soup, foot: true, fill: true });
-        gaps.filled = (gaps.filled || 0) + 1;
-      });
+    function finish() {
+      /* The gaps between pads that overlap in a ring are filled, each by the
+         pad nearest it, so every group of pads is one disc-shaped slab. */
+      var gaps = { fills: [], found: 0, left: 0 };
+      if (foot && opts.padGaps !== false) {
+        gaps = padGaps(A, [opts.rawTris || []].concat(opts.occluders || []), padList, p.plateZ, foot);
+        gaps.bridges.forEach(function (b) {
+          var soup = prismSoup(b.poly, p.plateZ, p.plateZ + foot);
+          if (soup) { out[b.owner].parts.push({ soup: soup, foot: true, bridge: true }); gaps.bridged = (gaps.bridged || 0) + 1; }
+        });
+        gaps.fills.forEach(function (f) {
+          var soup = prismSoup(f.poly, p.plateZ, p.plateZ + foot);
+          if (!soup) { gaps.left++; return; }
+          out[f.owner].parts.push({ soup: soup, foot: true, fill: true });
+          gaps.filled = (gaps.filled || 0) + 1;
+        });
+      }
+      out.forEach(function (o) { o.parts = o.parts.concat(o.fingerParts); delete o.fingerParts; });
+      return { ok: true, trunks: out, fingersDropped: droppedFingers, padGaps: { found: gaps.found, filled: gaps.filled || 0, bridged: gaps.bridged || 0, left: gaps.left } };
     }
-    out.forEach(function (o) { o.parts = o.parts.concat(o.fingerParts); delete o.fingerParts; });
-    return { ok: true, trunks: out, fingersDropped: droppedFingers, padGaps: { found: gaps.found, filled: gaps.filled || 0, bridged: gaps.bridged || 0, left: gaps.left } };
+    return { ok: true, n: p.trunks.length, step: step, finish: finish };
+  }
+  /* The parts of every trunk at once - the sync path solid() has always taken. */
+  function trunkParts(p, opts) {
+    var sp = trunkStepper(p, opts);
+    if (!sp.ok) return sp;
+    for (var t = 0; t < sp.n; t++) {
+      var r = sp.step(t);
+      if (r) return r;
+    }
+    return sp.finish();
   }
 
   /* Promise of { ok, soup, solids, reason }. One solid per landed trunk;
@@ -1259,13 +1329,55 @@
      counted in `detached` - it is never silently dropped. */
   function solid(p, opts) {
     opts = opts || {};
-    var T = ST(opts);
     if (!p || !p.ok) return Promise.resolve({ ok: false, reason: (p && p.reason) || 'no plan' });
     if (!p.trunks.length) return Promise.resolve({ ok: true, soup: new Float32Array(0), solids: [], reason: p.reason });
     var tp = trunkParts(p, Object.assign({}, opts, { rawTris: opts.rawTris || p.rawTris, occluders: opts.occluders || p.occluders }));
     if (!tp.ok) return Promise.resolve({ ok: false, reason: tp.reason });
+    return weld(p, tp, opts);
+  }
+
+  /* Promise of the trunks' parts (trunkParts' result): the BUILDING half of
+     solid(), a trunk at a time, with opts.onProgress told 'building', trunks
+     swept / trunks, and opts.yieldFn given a turn between trunks. Resolves
+     { ok: false, reason } when a member would not sweep. */
+  function parts(p, opts) {
+    opts = opts || {};
+    if (!p || !p.ok) return Promise.resolve({ ok: false, reason: (p && p.reason) || 'no plan' });
+    if (!p.trunks.length) return Promise.resolve({ ok: true, trunks: [], fingersDropped: 0, padGaps: { found: 0, filled: 0, bridged: 0, left: 0 } });
+    var sp = trunkStepper(p, Object.assign({}, opts, { rawTris: opts.rawTris || p.rawTris, occluders: opts.occluders || p.occluders }));
+    if (!sp.ok) return Promise.resolve(sp);
+    var say = progressOf(opts), t = 0;
+    say('building', 0, sp.n, true);
+    function run() {
+      while (t < sp.n) {
+        var r = sp.step(t++);
+        if (r) return r;
+        say('building', t, sp.n);
+        var y = opts.yieldFn && opts.yieldFn();
+        if (y && typeof y.then === 'function') return y.then(run);
+      }
+      var done = sp.finish();            /* the pad gaps: one call, after the last trunk */
+      if (done.ok) say('building', sp.n, sp.n, true);
+      return done;
+    }
+    return new Promise(function (go) { go(run()); });
+  }
+
+  /* Promise of solid()'s result from the trunks' parts: the WELDING half. The
+     unions are the app's one boolean and each is one step the page cannot cut
+     short; opts.yieldFn gets a turn after every one, and opts.onProgress is
+     told 'welding' with no count. */
+  function weld(p, tp, opts) {
+    opts = opts || {};
+    var T = ST(opts);
+    if (!p || !p.ok) return Promise.resolve({ ok: false, reason: (p && p.reason) || 'no plan' });
+    if (!p.trunks.length) return Promise.resolve({ ok: true, soup: new Float32Array(0), solids: [], reason: p.reason });
     var U = opts.unionSoups || (root && root.NSO_unionSoups);
     if (typeof U !== 'function') return Promise.resolve({ ok: false, reason: 'app-join.js is not loaded - NSO_unionSoups joins the support' });
+    var say = progressOf(opts);
+    /* After every union: the beat, then the page's turn. */
+    function between() { say('welding', null, null); return opts.yieldFn ? opts.yieldFn() : undefined; }
+    say('welding', null, null, true);
     var solids = [], dropped = 0, detached = 0;
     var chain = Promise.resolve();
     tp.trunks.forEach(function (tr) {
@@ -1278,13 +1390,13 @@
             if (!r || !r.soup) throw new Error('trunk ' + tr.trunk + ', part ' + k + ': ' + ((r && r.reason) || 'the kernel gave no result'));
             if (part.optional) { dropped++; return; }
             detached++; acc = r.soup;
-          });
+          }).then(between);
         });
       });
       chain = chain.then(function () {
         var fin = T._finishUnion(acc);
         solids.push({ soup: fin.soup, box: bounds(fin.soup), trunks: [tr.trunk] });
-      });
+      }).then(between);
     });
     /* Trunks whose boxes meet are offered to the union; it joins them only
        when they really touch. With foot pads a whole slope's trunks can end
@@ -1326,7 +1438,7 @@
               } else {
                 A.ids.forEach(function (i) { B.ids.forEach(function (j) { failed.add(pk(i, j)); }); });
               }
-            });
+            }).then(between);
           });
         });
         return c2.then(function () {
@@ -1458,6 +1570,8 @@
     gridBeacons: gridBeacons,
     plan: planSupport,
     solid: solid,
+    parts: parts,
+    weld: weld,
     describe: describe,
     _sideFor: sideFor,
     _squareProfile: squareProfile,
