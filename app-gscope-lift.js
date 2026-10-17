@@ -37,7 +37,7 @@ var NSO_GSCOPE_LIFT = (function () {
   function MS() { return window.NSO_MICROSCOPE; }
   function LP() { return window.NSO_LIFT_PLATE; }
   function f2(x) { return (+x).toFixed(2); }
-  function meshDoc() { var d = MS() && MS().getDoc(); return d && d.kind === 'mesh' ? d : null; }
+  function meshDoc() { var d = MS() && MS().getDoc(); return d && d.kind === 'mesh' && d.source !== 'take' ? d : null; }
   function minH() { return LP() ? LP().minHeight() : 0.42; }
 
   /** The piece under the lens, or null. */

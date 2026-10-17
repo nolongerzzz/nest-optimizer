@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=gshellb7" />
+  <link rel="stylesheet" href="styles.css?v=take1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1397,10 +1397,20 @@
       <div id="ms-mode-badge">Whole part</div>
 
       <!-- The top-right corner: Back (only when the document's producer gave
-           one), Export (its card opens just under this row) and Close. -->
+           one), the LENS | TAKE plate toggle, Clear, Export (its card opens just
+           under this row) and Close. LENS is what was loaded; TAKE holds copies
+           pulled off it (docs/GSCOPE-TAKE.md). Back and Close are the only exits. -->
       <div id="ms-corner" class="ms-corner">
         <button id="ms-btn-back-producer" type="button" class="vp-bar-btn" hidden
                 title="Close G-scope and go back to where this came from, with everything there as you left it">Back</button>
+        <div id="ms-plate-toggle" class="ms-plate-seg" role="group" aria-label="Plate shown">
+          <button id="ms-plate-lens" type="button" class="vp-bar-btn active" aria-pressed="true"
+                  title="LENS: what you loaded - the plate read, or the file you imported. Nothing here changes when you pull from it">Lens</button>
+          <button id="ms-plate-take" type="button" class="vp-bar-btn" aria-pressed="false"
+                  title="TAKE: copies pulled off LENS. Press a selection on LENS and drag it here">Take</button>
+        </div>
+        <button id="ms-btn-take-clear" type="button" class="vp-bar-btn"
+                title="Empty TAKE. With Shift, also drop the imported file on LENS and read the plate again">Clear</button>
         <button id="ms-nav-export" type="button" class="vp-bar-btn ms-nav"
                 data-card="ms-card-export" aria-controls="ms-card-export" aria-expanded="false">Export</button>
         <button id="ms-close" type="button" class="vp-bar-btn">Close</button>
@@ -1565,7 +1575,7 @@
            (a selection; a toolpath; a slice made here), as it always was. -->
       <div id="ms-card-export" class="ms-card ms-card-corner" role="group" aria-label="Export" data-nav="ms-nav-export">
         <div class="ms-xgroup">
-          <div class="ms-section-title">Selection</div>
+          <div class="ms-section-title" id="ms-export-sel-title">Selection</div>
           <div id="ms-export-row" data-flex="0" style="display:none;">
             <div class="ms-btn-row">
               <button id="ms-btn-export-plate" type="button"
@@ -1588,6 +1598,16 @@
                     title="Put the piece this slice was made from onto the plate as its own object">Export piece to plate</button>
             <button id="ms-btn-slice-export-stl" type="button"
                     title="Download the piece this slice was made from as an STL">Export piece as STL</button>
+          </div>
+        </div>
+        <!-- On TAKE only: the whole plate. The group above is then the selected piece. -->
+        <div class="ms-xgroup">
+          <div class="ms-section-title">Whole plate</div>
+          <div class="ms-btn-row" id="ms-take-export-row" data-flex="1" style="display:none;">
+            <button id="ms-btn-take-export-plate" type="button"
+                    title="Put every piece on TAKE onto the main plate, each as its own object (one Undo)">Export to plate</button>
+            <button id="ms-btn-take-export-stl" type="button"
+                    title="Download the whole TAKE plate as one STL, the pieces where they stand">Export as STL</button>
           </div>
         </div>
       </div>
@@ -1834,7 +1854,7 @@
   <script src="app-tip-orient.js?v=tip3"></script>
   <script src="app-rotate-handles.js?v=helpmrg1"></script>
   <script src="app-move-vertical.js?v=helpers1"></script>
-  <script src="app-grab-drop.js?v=grabdrop1"></script>
+  <script src="app-grab-drop.js?v=take1"></script>
   <script src="app-defects.js?v=helpers1"></script>
   <!-- After app-defects.js, whose hooks and scan it uses. -->
   <script src="app-findings.js?v=repairloop1"></script>
@@ -1854,7 +1874,7 @@
   <!-- Handle, bracket, lid and hinge detection for G-scope's Parts list, one
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=features1"></script>
-  <script src="app-microscope.js?v=scope18"></script>
+  <script src="app-microscope.js?v=take1"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
@@ -1869,7 +1889,7 @@
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
   <script src="app-supports-card.js?v=supwork1"></script>
-  <script src="app-gscope-slice.js?v=slice3"></script>
+  <script src="app-gscope-slice.js?v=take1"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js
@@ -1882,14 +1902,14 @@
   <script src="app-lift-plate.js?v=liftsurface1"></script>
   <script src="nso_split_parts.js?v=split1"></script>
   <script src="app-split-parts.js?v=split1"></script>
-  <script src="app-gscope-lift.js?v=liftplate2"></script>
+  <script src="app-gscope-lift.js?v=take1"></script>
 
 
   <script src="app-ux.js?v=inside9"></script>
   <!-- Live watch: off until its button is pressed, and it patches nothing
        until then. Deleting this tag and the #btn-watch button above removes
        the feature completely. -->
-  <script src="nso-watch.js?v=helpers1"></script>
+  <script src="nso-watch.js?v=take1"></script>
   <script src="app-cth-expose.js?v=cth15"></script>
   <script type="module" src="app-cth.js?v=cth15"></script>
 </body>

@@ -7,8 +7,8 @@
 
    THE FLOW, as a person runs it: open Cut, Split, double-click the plate;
    open Rotate, double-click; Start Join, pick A, double-click; Finish ->
-   Soften, double-click; G-scope, Click to select region, double-click (back
-   to orbit), double-click (G-scope closed). Then Carve armed and a
+   Soften, double-click; G-scope, Click to select region, double-click twice
+   (G-scope takes no double-click: still open, still armed). Then Carve armed and a
    double-click; then a double-click on Rotate's 90 button, which must stay
    two clicks. Undo at the end. Last, each of the left column's eight
    menus (Join .. Pack) opened and shut by a double-click on the plate.
@@ -239,7 +239,7 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 5 */
-  console.log('\n=== 5. G-scope: Click to select region, double-click, double-click ===');
+  console.log('\n=== 5. G-scope: Click to select region, double-click, double-click (no exit) ===');
   {
     const before = await snap();
     await page.click('#btn-microscope');
@@ -268,16 +268,22 @@ withApp(async (page, logs) => {
       return null;
     });
     check('a clear point on G-scope\'s canvas', !!gp);
+    /* G-scope has two exits, Back and Close. A double-click on the view is
+       neither: it does nothing - not a step back to orbit, not a close. */
     await page.mouse.dblclick(gp.x, gp.y);
     await page.waitForTimeout(250);
     const m1 = await modeOf();
     await shot('gscope-dblclick-orbit');
-    check('first double-click: back to orbit, G-scope still open', m1.open && m1.orbit && !m1.select, JSON.stringify(m1));
+    check('first double-click: nothing happens - G-scope still open, region pick still armed', m1.open && m1.select && !m1.orbit, JSON.stringify(m1));
     await page.mouse.dblclick(gp.x, gp.y);
     await page.waitForTimeout(250);
     const m2 = await modeOf();
     await shot('gscope-dblclick-closed');
-    check('second double-click: G-scope closed', !m2.open, JSON.stringify(m2));
+    check('second double-click: nothing happens either - still open', m2.open && m2.select, JSON.stringify(m2));
+    check('G-scope rail button still on', await page.evaluate(() => document.getElementById('btn-microscope').classList.contains('is-on')));
+    await page.click('#ms-close');
+    await page.waitForTimeout(250);
+    check('Close closes it', await page.evaluate(() => !NSO_MICROSCOPE.isOpen()));
     check('G-scope rail button off', await page.evaluate(() => !document.getElementById('btn-microscope').classList.contains('is-on')));
     held('G-scope', before, await snap());
   }

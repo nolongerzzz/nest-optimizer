@@ -1031,6 +1031,29 @@
       if (n.parentNode !== h) h.appendChild(n);
       n.classList.toggle('in-gscope', inG);
     });
+    dockMetrics();
+  }
+  /* The log docked bottom-right in G-scope takes room from the slider (above
+     it) and the readouts (to its left). The panel's size is published on the
+     viewport for styles.css; off, or on the main page, the variables go. */
+  var dockObs = null;
+  function dockMetrics() {
+    var vp = document.getElementById('ms-viewport');
+    if (!vp) return;
+    var p = el.panel;
+    var docked = !!(p && p.classList.contains('in-gscope') && p.offsetWidth > 0);
+    if (docked) {
+      vp.style.setProperty('--ms-watch-h', (p.offsetHeight + 12 + 8) + 'px');
+      vp.style.setProperty('--ms-watch-w', (p.offsetWidth + 12 - 76 > 0 ? p.offsetWidth + 12 - 76 : 0) + 'px');
+    } else {
+      vp.style.removeProperty('--ms-watch-h');
+      vp.style.removeProperty('--ms-watch-w');
+    }
+    if (p && !dockObs && typeof global.ResizeObserver === 'function') {
+      dockObs = new global.ResizeObserver(function () { dockMetrics(); });
+      dockObs.observe(p);
+      restores.push(function () { if (dockObs) dockObs.disconnect(); dockObs = null; });
+    }
   }
   /* A MutationObserver on the sheet's own `hidden` attribute, which is the one
      thing every way in and out of G-scope sets (the rail button, a .gcode.3mf
@@ -1332,10 +1355,11 @@
     '#nso-watch-report .wr-list{overflow:auto;flex:1 1 auto;padding:4px 0;overscroll-behavior:contain;min-height:0}',
     '#nso-watch-report .wr-run{padding:6px 9px 2px;color:#94a3b8;border-top:1px solid #26303f;margin-top:4px}',
     '#nso-watch-report .wr-note{padding:6px 9px;color:#94a3b8}',
-    /* Inside G-scope's viewport: bottom-left, above its hint badge (12px +
-       its ~60px), and clear of the layer-range slider docked to the right
-       edge (12px + 64px). */
-    '#nso-watch-panel.in-gscope{left:12px;bottom:84px;width:min(420px,calc(100% - 100px));max-height:40%}',
+    /* Inside G-scope's viewport: bottom-right, UNDER the layer-range slider's
+       All button. The slider ends where the panel starts and the readouts along
+       the bottom stop short of it: dockMetrics() publishes the panel's size as
+       --ms-watch-h / --ms-watch-w on the viewport, and styles.css reads them. */
+    '#nso-watch-panel.in-gscope{left:auto;right:12px;bottom:12px;width:min(300px,calc(100% - 100px));max-height:40%}',
     '#nso-watch-panel.in-gscope.is-collapsed{width:auto;max-width:calc(100% - 100px)}',
     '#nso-watch-report.in-gscope{inset:12px 88px 12px 12px}'
   ].join('');
@@ -1375,6 +1399,7 @@
     p.querySelector('#nso-watch-clear').addEventListener('click', function () { api.clear(); });
     p.querySelector('#nso-watch-collapse').addEventListener('click', function () { api.collapse(!api.isCollapsed()); });
     applyCollapsed(readCollapsed());
+    rehome();
   }
 
   /* Collapse. Expanded, the panel is up to 46vh tall in the bottom-left of

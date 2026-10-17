@@ -207,8 +207,13 @@ Now, while it is on, the panel and the Report view follow the view: a
 way in and out sets (the rail button, a `.gcode.3mf` import, Close, Escape,
 Export to plate) - moves them into `#ms-viewport` the moment G-scope opens and
 back the moment it closes. Same instance, same run, same events and counts on
-both sides; no re-arm. Inside G-scope the panel sits bottom-left above the
-hint badge, clear of the layer-range slider on the right edge.
+both sides; no re-arm. Inside G-scope the panel docks in the bottom-right
+corner, UNDER the layer-range slider's All button: the panel publishes its size
+as `--ms-watch-h` / `--ms-watch-w` on `#ms-viewport`, the slider ends above it
+and the readouts along the bottom stop short of it (styles.css reads both), so
+it covers neither the legend on the left wall nor anything of the piece. Collapsed
+to its bar it still sits under the button; Watch off, the variables go and the
+slider has its room back (`tools/nso_gscope_take_test.js`, section 9).
 
 Off, it stays off: the observer is installed by `start()` and removed by
 `stop()`, so a watch that was never armed is not started, shown, moved or

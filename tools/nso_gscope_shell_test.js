@@ -58,7 +58,9 @@ const COLUMN = [
   ['ms-nav-overhangs', 'OVERHANGS'], ['ms-nav-crop', 'CROP Z'], ['ms-nav-slice', 'SLICE']
 ];
 const GROUPS = [2, 5, 3];                 // the column's three groups
-const CORNER = [['ms-btn-back-producer', 'BACK'], ['ms-nav-export', 'EXPORT'], ['ms-close', 'CLOSE']];
+/* BACK · LENS|TAKE · CLEAR · EXPORT · CLOSE (the LENS | TAKE toggle is one control of two slabs). */
+const CORNER = [['ms-btn-back-producer', 'BACK'], ['ms-plate-toggle', 'LENS TAKE'], ['ms-btn-take-clear', 'CLEAR'],
+                ['ms-nav-export', 'EXPORT'], ['ms-close', 'CLOSE']];
 /* card -> [its button, the ids it holds] */
 const CARDS = {
   'ms-card-select': ['ms-nav-select', ['ms-mode-orbit', 'ms-mode-select', 'ms-mode-line', 'ms-btn-isolate', 'ms-btn-clear', 'ms-btn-back']],
@@ -73,7 +75,8 @@ const CARDS = {
                                         'ms-btn-slice-export-plate', 'ms-btn-slice-export-stl']]
 };
 const EXPORT_GROUPS = { 'Selection': ['ms-btn-export-plate', 'ms-btn-export-stl', 'ms-btn-export-solid-plate', 'ms-btn-export-solid-stl'],
-                        'Sliced piece': ['ms-btn-slice-export-plate', 'ms-btn-slice-export-stl'] };
+                        'Sliced piece': ['ms-btn-slice-export-plate', 'ms-btn-slice-export-stl'],
+                        'Whole plate': ['ms-btn-take-export-plate', 'ms-btn-take-export-stl'] };   // the last shows on TAKE only
 const DOCK = ['ms-legend-float', 'ms-legend-toggle', 'ms-legend', 'ms-detected', 'ms-title', 'ms-sub', 'ms-info-title', 'ms-info',
               'ms-lift-row', 'ms-lift-groups', 'ms-lift-read', 'ms-slice-read', 'ms-hint-badge'];
 /* The ids the sidebar page had (claude-wip 6ca7251). */
@@ -229,12 +232,12 @@ withApp(async (page, logs) => {
       JSON.stringify(r.colKids) === JSON.stringify(COLUMN.map(c => c[0])), r.colKids.join(' '));
     const colWrong = COLUMN.filter(([, l], i) => norm(r.colText[i]) !== l).map(([, l], i) => l + '?');
     check('each carries the ticket\'s label', colWrong.length === 0, r.colText.map(norm).join(' | '));
-    check('the corner holds Back, Export, Close, in the viewport',
+    check('the corner holds Back, LENS|TAKE, Clear, Export, Close, in the viewport',
       JSON.stringify(r.cornerKids) === JSON.stringify(CORNER.map(c => c[0])) && r.cornerIn, r.cornerKids.join(' '));
-    check('...labelled BACK, EXPORT, CLOSE', JSON.stringify(r.cornerText.map(norm)) === JSON.stringify(CORNER.map(c => c[1])), r.cornerText.map(norm).join(' | '));
+    check('...labelled BACK, LENS TAKE, CLEAR, EXPORT, CLOSE', JSON.stringify(r.cornerText.map(norm)) === JSON.stringify(CORNER.map(c => c[1])), r.cornerText.map(norm).join(' | '));
     Object.keys(CARDS).forEach(c => check(c + ' holds its controls, and is in the viewport (not the column)', r.cards[c].length === 0 && r.cardInVp[c],
       r.cards[c].join(', ') || CARDS[c][1].length + ' ids'));
-    check('Export: "Selection" holds the four, "Sliced piece" the two',
+    check('Export: "Selection" holds the four, "Sliced piece" the two, "Whole plate" (TAKE only) the two',
       JSON.stringify(r.groups) === JSON.stringify(EXPORT_GROUPS), JSON.stringify(r.groups));
     check('the dock holds the legend, the file line, the info, Features, the Slice report and the hint', r.dock.length === 0, r.dock.join(', ') || DOCK.length + ' ids');
     check('...and none of it is in a card', r.dockInCard.length === 0, r.dockInCard.join(', '));
@@ -484,8 +487,8 @@ withApp(async (page, logs) => {
     const ex2 = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-card-export .ms-xgroup')).map(g => ({
       t: g.querySelector('.ms-section-title').textContent.trim(), shown: getComputedStyle(g).display !== 'none' && g.getBoundingClientRect().height > 0,
       btns: Array.from(g.querySelectorAll('button')).filter(b => b.getBoundingClientRect().width > 0).map(b => b.id) })));
-    check('Export, a slice with a selection: all six - "Selection" four, "Sliced piece" two',
-      ex2.length === 2 && ex2[0].btns.length === 4 && ex2[1].btns.length === 2 && ex2[0].shown && ex2[1].shown, JSON.stringify(ex2));
+    check('Export, a slice with a selection on LENS: all six - "Selection" four, "Sliced piece" two; "Whole plate" waits for TAKE',
+      ex2.length === 3 && ex2[0].btns.length === 4 && ex2[1].btns.length === 2 && ex2[0].shown && ex2[1].shown && !ex2[2].shown, JSON.stringify(ex2));
     const rr2 = await reach(page, 'ms-card-export');
     check('...each hit-testable', rr2.blocked.length === 0 && rr2.hit.length === 6, JSON.stringify(rr2));
     await shot('11-export-slice');
