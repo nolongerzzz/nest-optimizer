@@ -21,7 +21,7 @@
 //   6. whole plans     the small pieces plan to the same JSON with the index
 //                      as with the walk
 //   7. THE WEDGE       library/v9_mirror_factory.stl, its big underside: 377
-//                      support points, 49,026 triangles. It took ~290 s to plan
+//                      support points, 49,026 triangles. It took 478 s to plan
 //                      with every query walking the piece; it plans under
 //                      WEDGE_BUDGET_S here (the timing gate), to the plan it
 //                      always planned (pinned by hash)
@@ -304,7 +304,7 @@ console.log('\n=== 7. THE WEDGE: 377 points, 49,026 triangles, under ' + WEDGE_B
   const p = ST.planTree(CLAMP, { skipList: [], regionId: 0 });
   const secs = (Date.now() - t0) / 1000;
   const json = planJSON(p);
-  console.log('        planned in ' + secs.toFixed(1) + ' s (it took ~290 s when every query walked the piece)');
+  console.log('        planned in ' + secs.toFixed(1) + ' s (it took 478 s when every query walked the piece)');
   check('the big underside: 377 support points, all held', p.ok && p.beacons.length === 377 && p.held === 377,
     `${p.beacons && p.beacons.length} points, ${p.held} held, ${p.members && p.members.length} members`);
   check(`TIMING GATE: planTree on the wedge's 377 points takes under ${WEDGE_BUDGET_S} s`, secs < WEDGE_BUDGET_S, secs.toFixed(1) + ' s');

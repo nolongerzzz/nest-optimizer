@@ -144,7 +144,7 @@ triangle of `tape_on-edge-single-B101_rounded_v8_FINAL.stl` (32,862 triangles)
 took **169 s** that way. The grid that first fixed it (below) only covered
 straight-down rays; the planner asks thousands of every other kind, and on
 `library/v9_mirror_factory.stl` (49,026 triangles, a 377-point underside) the
-walk cost **~290 s** in a plan, most of it the inside test.
+walk cost **478 s** in a plan, most of it the inside test.
 
 So a piece gets **one index**, a BVH over its triangles (a binned
 surface-area split, four triangles to a leaf), built the first time the soup is
@@ -191,19 +191,22 @@ put to; each one is then asked with the routine that was always used.
   Each answer is only taken when it is clear of the threshold by more than its
   own error, so it is the answer the full sum gives.
 
-**Measured** (Node `vm`, the way the suites load the files; `support:index`):
+**Measured** (Node, the files run in the main context, as a page runs them; the
+same plans in a `vm` context, the way the suites load the files, are 4.2 s for
+the wedge and 4.4 s → 1.0 s for the tunnel block, because every global in a
+sandbox is a slow lookup; the wedge's walk never finished there in 43 minutes):
 
 | | walk | index |
 |---|---|---|
-| `planTree`, the clamp bar's 377-point underside | ~290 s | 3-5 s |
-| `planTree`, tunnel block (21 points, 64 triangles) | 4.6 s | 1.0 s |
-| `planTree`, tilted box 30° (44 points, 12 triangles) | 0.10 s | 0.10 s |
+| `planTree`, the clamp bar's 377-point underside (49,026 triangles) | 478 s | 1.3 s |
+| `planTree`, tunnel block (21 points, 64 triangles) | 0.8 s | 0.27 s |
+| `planTree`, tilted box 30° (44 points, 12 triangles) | 0.04 s | 0.05 s (under the index floor: unchanged) |
 
 (Every plan is the same JSON, byte for byte; `support:index` pins the wedge's by
-hash and holds the small ones to their walked twins.) Part of the gain on the
-small pieces is not the index but `Math`: in a `vm` context every `Math.sqrt` is
-a global lookup across the sandbox, 6-17x slower than a local, so the hot loops
-read `mSqrt`, `mAbs`, `mAtan2` and friends from locals.
+hash and holds the small ones to their walked twins.) The hot loops also read
+`mSqrt`, `mAbs`, `mAtan2` and friends from locals: in a `vm` context every
+`Math.sqrt` is a global lookup across the sandbox, 6-17x slower than a local,
+and the suites run the files that way.
 
 `support:index` holds every query to its brute-force twin (`_nearestHitBrute`,
 `_closestOnSoupBrute`, `windingAt`, kept for exactly this) on the clamp bar, the

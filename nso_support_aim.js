@@ -153,7 +153,8 @@
    changes no answer - the queries are held to their brute-force twins, bit
    for bit, by tools/nso_support_index_test.js - it only stops each question
    from walking all of the piece. On a 49,026-triangle piece with 377 support
-   points that is the difference between ~290 s and a few seconds for a plan.
+   points that is the difference between minutes (478 s, measured) and a few
+   seconds for a plan.
 
    ---------------------------------------------------------------------------
    API
@@ -458,7 +459,7 @@
      each, with three arrays allocated apiece), and "is this point inside?"
      (a winding-number term for each). A support plan asks them by the
      hundred thousand, and on a 49,026-triangle piece with 377 support points
-     the inside test alone was the better part of the run.
+     (478 s, measured) the inside test alone was the better part of the run.
 
      So a piece gets a BVH over its triangles: axis-aligned boxes, a median
      split on the longest axis of the centroids, four triangles to a leaf.
