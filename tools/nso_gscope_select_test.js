@@ -298,6 +298,8 @@ withApp(async (page, logs) => {
     await page.waitForTimeout(150);
     const r1 = await page.evaluate(() => ({ iso: NSO_MICROSCOPE.isIsolated(), sel: NSO_MICROSCOPE.selection().length, src: NSO_MICROSCOPE.selectionSource(), mode: NSO_MICROSCOPE.mode() }));
     check('a click on a legend row isolates that line type (and switches to Feature)', r1.iso && r1.sel === want && r1.src === 'feature' && r1.mode === 'feature', J(r1));
+    check('while it is isolated, "Select shown" is the isolated thing: what is shown is the selection',
+      await page.evaluate(() => NSO_MICROSCOPE.selectVisible().length) === want && await page.evaluate(() => NSO_MICROSCOPE.selection().length) === want);
     await page.click('#ms-legend .ms-legend-item[data-group="Outer wall"] .ms-legend-label');
     await page.waitForTimeout(120);
     check('...the row again, whole again', await page.evaluate(() => !NSO_MICROSCOPE.isIsolated()));

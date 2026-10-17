@@ -1425,14 +1425,18 @@ var NSO_MICROSCOPE = (function () {
 
   /** Taking the press from the orbit. A click still reaches the click hooks and the click below. */
   function claimPress(e) {
-    e.stopImmediatePropagation();
     view.mouseDownPos = [e.clientX, e.clientY];
     view.hookTook = false;
+    // A finger is not taken from the orbit: a second one down is a pinch, and a drag is the
+    // touch orbit. A tap still clicks (below); the pull is the mouse's and the pen's.
+    if (e.pointerType === 'touch') return;
+    e.stopImmediatePropagation();
     view.controls.enabled = false;
   }
 
   function onPressCapture(e) {
     var v = view;
+    if (pull && pull.touch) pull.cancelled = true;          // a second finger: the pinch's, not a click's
     if (!v || e.button !== 0 || pull || !doc) return;
     if (boxOwnsPress(e)) {                         // the box's dots and face: the older handler has them
       v.boxPress = [e.clientX, e.clientY];           // ...but a click on it (no travel) toggles the isolation of what it holds
@@ -1443,14 +1447,15 @@ var NSO_MICROSCOPE = (function () {
       var tgt = pressTarget(e);
       if (!tgt) return;                           // bare plate: orbit
       claimPress(e);
-      pull = { kind: 'new', tgt: tgt, x0: e.clientX, y0: e.clientY, live: false, cancelled: false };
+      pull = { kind: 'new', tgt: tgt, x0: e.clientX, y0: e.clientY, live: false, cancelled: false, touch: e.pointerType === 'touch' };
       return;
     }
     // TAKE: a piece is grabbed (moved); isolated, the piece drawn is the selection
+    if (e.pointerType === 'touch' && !isolated) return;     // a finger orbits TAKE; moving a piece is the mouse's
     if (isolated) {
       if (!selectedHit(e)) return;
       claimPress(e);
-      pull = { kind: 'iso', tgt: { items: currentSelection, source: selectionSource, selected: true }, x0: e.clientX, y0: e.clientY, live: false, cancelled: false };
+      pull = { kind: 'iso', touch: e.pointerType === 'touch', tgt: { items: currentSelection, source: selectionSource, selected: true }, x0: e.clientX, y0: e.clientY, live: false, cancelled: false };
       return;
     }
     var o = takePieceAt(e);
@@ -1495,6 +1500,8 @@ var NSO_MICROSCOPE = (function () {
 
   function onPullMove(e) {
     if (!pull || pull.cancelled) return;
+    // a finger that travels is the orbit's: the press was never taken from it
+    if (pull.touch) { if (Math.hypot(e.clientX - pull.x0, e.clientY - pull.y0) >= pullSlop()) pull.cancelled = true; return; }
     if (pull.kind === 'iso') return;                        // an isolated piece on TAKE is clicked, not moved
     if (pull.kind === 'new' && !pull.live) {
       if (Math.hypot(e.clientX - pull.x0, e.clientY - pull.y0) < pullSlop()) return;
@@ -2992,6 +2999,8 @@ var NSO_MICROSCOPE = (function () {
   /** Everything the filters leave on screen, as the selection. */
   function selectVisible() {
     if (!doc) return [];
+    // isolated, what is shown IS the selection
+    if (isolated && currentSelection.length) return currentSelection;
     removeAllBalls();
     if (doc.kind === 'toolpath') setSelection(shownSegments(), 'visible');
     else setSelection(shownObjects(), 'visible');

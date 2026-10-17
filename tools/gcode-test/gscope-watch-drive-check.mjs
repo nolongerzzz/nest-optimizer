@@ -137,8 +137,8 @@ async function exerciseNormal(page) {
   await page.click('#ms-mode-piece');
   await clickPiece(page, 'mushroom');          // isolates the piece
   await page.click('#ms-btn-back');
+  await page.click('#ms-mode-select');         // (Clear all boxes lives under Region)
   await page.click('#ms-btn-clear');
-  await page.click('#ms-mode-select');
   await clickPiece(page, 'mushroom');          // drops a box (and isolates it)
   await page.click('#ms-btn-back');
   await page.click('#ms-btn-clear');
@@ -216,7 +216,7 @@ async function main() {
     }), true);
 
   // =======================================================================
-  console.log('\n--- 2. Normal view: legend rows, a piece clicked, re-frame ---');
+  console.log('\n--- 2. Normal view: no line types, a piece clicked, re-frame ---');
   // =======================================================================
   await page.click('#nso-watch-collapse');
   check('the collapse button works inside G-scope', (await panel(page)).collapsed, true);
@@ -238,8 +238,8 @@ async function main() {
   // whole again and the selection emptied: a press on the SELECTION takes the selection, so a
   // box would not drop while the piece is still the selection
   await page.click('#ms-btn-back');
-  await page.click('#ms-btn-clear');
   await page.click('#ms-mode-select');
+  await page.click('#ms-btn-clear');
   await clickPiece(page, 'mushroom');
   check('Region mode, then a real click on the piece: a capture box drops, as before',
     await page.evaluate(() => window.NSO_MICROSCOPE.boxes().length), boxes0 + 1);

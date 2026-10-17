@@ -399,13 +399,9 @@ async function main() {
     await N(([t, dd, w]) => window.__gz.view(t, dd, w), [T0, D0, DIR0]);
     const b0 = await settle();
     const cdp = await context.newCDPSession(page);
-    // On BARE plate: a press on the part is the gesture (click isolates, drag pulls), not an
-    // orbit, so a finger that lands on the part is taken by it. Along the bed's near edge nothing is drawn.
-    const pinchY = r[1] + r[3] * 0.95;
+    // A finger is the orbit's even over the part (the pull is the mouse's): the pinch starts on the part.
+    const pinchY = centre[1];
     const pts = (s) => [{ x: centre[0] - s, y: pinchY, id: 1 }, { x: centre[0] + s, y: pinchY, id: 2 }];
-    const bare = await N(([a, b]) => [window.__gz.under(a[0], a[1]), window.__gz.under(b[0], b[1])],
-      [[centre[0] - 60, pinchY], [centre[0] + 60, pinchY]]);
-    check('the two fingers land on bare plate (nothing drawn under either)', bare.map((u) => u && u.kind), ['bed', 'bed']);
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(60) });
     for (let s = 70; s <= 200; s += 10) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(s) });
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });

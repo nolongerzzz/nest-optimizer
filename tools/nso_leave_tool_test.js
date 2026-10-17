@@ -7,7 +7,7 @@
 
    THE FLOW, as a person runs it: open Cut, Split, double-click the plate;
    open Rotate, double-click; Start Join, pick A, double-click; Finish ->
-   Soften, double-click; G-scope, Click to select region, double-click twice
+   Soften, double-click; G-scope, Region mode, double-click twice
    (G-scope takes no double-click: still open, still armed). Then Carve armed and a
    double-click; then a double-click on Rotate's 90 button, which must stay
    two clicks. Undo at the end. Last, each of the left column's eight
@@ -239,7 +239,7 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 5 */
-  console.log('\n=== 5. G-scope: Click to select region, double-click, double-click (no exit) ===');
+  console.log('\n=== 5. G-scope: Region mode, double-click, double-click (no exit) ===');
   {
     const before = await snap();
     await page.click('#btn-microscope');
@@ -248,38 +248,44 @@ withApp(async (page, logs) => {
     await page.click('#ms-mode-select');
     const modeOf = () => page.evaluate(() => ({
       open: NSO_MICROSCOPE.isOpen(),
-      orbit: document.getElementById('ms-mode-orbit').classList.contains('active'),
+      mode: NSO_MICROSCOPE.mode(),
+      isolated: NSO_MICROSCOPE.isIsolated(),
+      boxes: NSO_MICROSCOPE.boxes().length,
       select: document.getElementById('ms-mode-select').classList.contains('active')
     }));
-    check('G-scope open, region pick armed', (m => m.open && m.select && !m.orbit)(await modeOf()));
+    check('G-scope open, region pick armed', (m => m.open && m.select && m.mode === 'select')(await modeOf()));
     await shot('gscope-select-region');
     /* G-scope's canvas, at a corner the part does not reach - a click on the
-       part in select mode drops a capture box, which is the click doing its
-       job, not the gesture. */
+       part in select mode drops a capture box (and isolates it), and a drag
+       pulls it onto TAKE: that is the click doing its job, not the gesture.
+       So the point is bare plate by G-scope's own answer (pressTargetAt). */
     const gp = await page.evaluate(() => {
       const c = document.querySelector('#microscope canvas');
       const r = c.getBoundingClientRect();
       for (let fy = 0.92; fy > 0.5; fy -= 0.04) {
         for (let fx = 0.08; fx < 0.5; fx += 0.04) {
           const x = Math.round(r.left + fx * r.width), y = Math.round(r.top + fy * r.height);
-          if (document.elementFromPoint(x, y) === c) return { x, y };
+          if (document.elementFromPoint(x, y) === c && !NSO_MICROSCOPE.pressTargetAt(x, y)) return { x, y };
         }
       }
       return null;
     });
-    check('a clear point on G-scope\'s canvas', !!gp);
+    check('a bare-plate point on G-scope\'s canvas', !!gp);
+    const m0 = await modeOf();
     /* G-scope has two exits, Back and Close. A double-click on the view is
        neither: it does nothing - not a step back to orbit, not a close. */
     await page.mouse.dblclick(gp.x, gp.y);
     await page.waitForTimeout(250);
     const m1 = await modeOf();
     await shot('gscope-dblclick-orbit');
-    check('first double-click: nothing happens - G-scope still open, region pick still armed', m1.open && m1.select && !m1.orbit, JSON.stringify(m1));
+    check('first double-click: nothing happens - G-scope still open, region pick still armed, no box dropped, nothing isolated',
+      m1.open && m1.select && m1.mode === 'select' && m1.boxes === m0.boxes && !m1.isolated, JSON.stringify(m1));
     await page.mouse.dblclick(gp.x, gp.y);
     await page.waitForTimeout(250);
     const m2 = await modeOf();
     await shot('gscope-dblclick-closed');
-    check('second double-click: nothing happens either - still open', m2.open && m2.select, JSON.stringify(m2));
+    check('second double-click: nothing happens either - still open, still armed, no box, nothing isolated',
+      m2.open && m2.select && m2.boxes === m0.boxes && !m2.isolated, JSON.stringify(m2));
     check('G-scope rail button still on', await page.evaluate(() => document.getElementById('btn-microscope').classList.contains('is-on')));
     await page.click('#ms-close');
     await page.waitForTimeout(250);
