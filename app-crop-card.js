@@ -53,6 +53,7 @@
   var NAMES = { box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', piece: 'Piece', outline: 'Outline' };
   var COL = { body: 0xef4444, edge: 0xb91c1c, rail: 0xfbbf24, dart: 0xfde68a, held: 0xffffff };
   var PLAN_MS = 90;
+  var PLAN_BIG_MS = 400;       // a big piece's plan is a worker job of seconds: ask when the drag has settled, not at every pause
 
   var S = {
     shape: null,               // 'box' | 'cylinder' | 'sphere' | 'piece' | 'outline' | null
@@ -163,6 +164,8 @@
 
   function readoutText() {
     if (!live()) return '—';
+    var busy = (typeof NSO_BoolBusy !== 'undefined') ? NSO_BoolBusy.line('crop-readout') : '';
+    if (busy) return busy;               // "Cropping… 12 s" while the worker has it
     var t = target();
     if (!t) return 'Select a piece, then pick a shape.';
     if (!S.shape) return 'Pick a shape: it appears on ' + t.m.name + ', ready to drag.';
@@ -201,7 +204,9 @@
     S.plan = null;
     syncUI();
     if (S.timer) clearTimeout(S.timer);
-    S.timer = setTimeout(runPlan, PLAN_MS);
+    var t = target(), big = t && t.m.rawTris && typeof NSO_BoolConfig !== 'undefined' &&
+      t.m.rawTris.length / 9 >= NSO_BoolConfig.bigTris;
+    S.timer = setTimeout(runPlan, big ? PLAN_BIG_MS : PLAN_MS);
   }
 
   async function runPlan() {
@@ -213,6 +218,7 @@
     try { r = await NSO_Crop.planOn(t.m, sh); }
     catch (err) { r = { ok: false, reason: (err && err.message) || String(err) }; }
     if (seq !== S.seq) return;                     // the shape moved on while the kernel worked
+    if (r.superseded) return;                      // a newer plan took its place and will land
     S.plan = r;
     syncUI();
     if (S.shape === 'outline') refreshPreview(seq);
@@ -722,6 +728,7 @@
 
   function putAway(silent) {
     var had = !!S.shape;
+    if (typeof NSO_boolCancelKey === 'function') NSO_boolCancelKey('crop-plan');   // a plan still measuring has no shape to measure
     S.shape = null; S.plan = null; setPreview(null); S.drag = null; S.seq++;
     if (S.timer) { clearTimeout(S.timer); S.timer = null; }
     if (state.controls) state.controls.enabled = true;
@@ -811,7 +818,16 @@
     shape: function () { return engineShape(); },
     handles: function () { return S.handles.map(function (h) { return h.id; }); },
     handleScreen: handleScreen,
-    pick: pick, cancel: function () { putAway(false); }, crop: doCrop, sync: sync
+    pick: pick, cancel: function () { putAway(false); }, crop: doCrop, sync: sync,
+    /* Ask the engine about the shape as it now stands (the checks set the shape's numbers, the mouse would). */
+    replan: schedulePlan,
+    /* The box's centre and half-sizes in P, set the way a drag sets them (a check has no mouse worth the name on a 1.4 M-triangle piece). */
+    setBox: function (c, h) {
+      if (S.shape !== 'box' || !S.box) return false;
+      S.box.c = c.slice(); S.box.h = h.slice();
+      rebuild(); schedulePlan();
+      return true;
+    }
   };
 
   if (typeof document !== 'undefined') {

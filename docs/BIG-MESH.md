@@ -35,7 +35,9 @@ piece the existing checks use is handled exactly as before.
   frame's GPU upload.
 - Hover tools other than Lift (Bridge, Connect, Close, Patch) now get a fast ray
   but still build their own per-piece analyses on the page's thread when armed.
-- The overlap check (`nsoOverlap`) runs when a verb asks for it, as before.
+- The overlap check (`nsoOverlap`) runs when a verb asks for it. Crop, Join, Subtract, Connect and Bridge now
+  ask it from a worker for a big piece (docs/BOOLEAN-WORKER.md); Attach, Detach, Carve and the rest still ask on
+  the page's thread.
 
 ## Measuring in the headless browser
 

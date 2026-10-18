@@ -3,7 +3,7 @@
  *
  * The point of the exercise is that the page loads manifold from CLASSIC
  * <script> tags with no bundler, so the adapter under test is spliced out of
- * app-join.js verbatim rather than reimplemented here. Only NSO_CSG_URL is
+ * nso_csg.js verbatim rather than reimplemented here. Only NSO_CSG_URL is
  * rewritten, to point at the vendored copy instead of the CDN.
  *
  * Usage: node tools/csg_bench/run.js [--out DIR] [--url URL]
@@ -18,11 +18,11 @@ const argOf = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1]
 const OUT = path.resolve(argOf('--out', path.join(REPO, 'out', 'csg')));
 const CSG_URL = argOf('--url', '/vendor/manifold/manifold.js');
 
-// ---- splice the real adapter out of app-join.js ---------------------------
+// ---- splice the real adapter out of nso_csg.js ----------------------------
 function adapterSource() {
-  const src = fs.readFileSync(path.join(REPO, 'app-join.js'), 'utf8').split('\n');
+  const src = fs.readFileSync(path.join(REPO, 'nso_csg.js'), 'utf8').split('\n');
   const start = src.findIndex(l => /^var NSO_CSG_URL\s*=/.test(l));
-  if (start < 0) throw new Error('NSO_CSG_URL not found in app-join.js');
+  if (start < 0) throw new Error('NSO_CSG_URL not found in nso_csg.js');
   let end = -1;
   for (let i = start; i < src.length; i++) {
     if (/^\}\)\(\);\s*$/.test(src[i])) { end = i; break; }
@@ -86,7 +86,7 @@ function writeStl(file, soup) {
 
   const plan = JSON.parse(fs.readFileSync(argOf('--plan', path.join(__dirname, 'plan.json')), 'utf8'));
   const ad = adapterSource();
-  console.log(`[run] adapter spliced from app-join.js lines ${ad.lines[0]}-${ad.lines[1]} (${ad.text.length} bytes)`);
+  console.log(`[run] adapter spliced from nso_csg.js lines ${ad.lines[0]}-${ad.lines[1]} (${ad.text.length} bytes)`);
   console.log(`[run] NSO_CSG_URL -> ${CSG_URL}`);
 
   fs.mkdirSync(OUT, { recursive: true });

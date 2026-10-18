@@ -151,6 +151,10 @@
   var api = {
     run: run,
     isAvailable: function () { return canWorker; },
+    /* Whether run() with these engine files would start a worker: a worker can be had and every file is
+       a <script> on the page. A caller that asks first keeps its in-thread path for a page that cannot,
+       instead of finding out from a rejection. */
+    canRun: function (names) { return canWorker && urlsOf(names) !== null; },
     _channels: function () { return channels; }
   };
   if (root) root.NSO_Work = api;

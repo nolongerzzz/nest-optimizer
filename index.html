@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=nohdrb10" />
+  <link rel="stylesheet" href="styles.css?v=boolw1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1640,7 +1640,9 @@
        nso_support_aim.js so its beacons ride along on every detection. See
        docs/SUPPORT-BEACONS.md. -->
   <script src="nso_bvh.js?v=bigmesh1"></script>
-  <script src="nso_work.js?v=bigmesh1"></script>
+  <script src="nso_work.js?v=boolw1"></script>
+  <script src="nso_csg.js?v=boolw1"></script>
+  <script src="app-bool-busy.js?v=boolw1"></script>
   <script src="nso_edges.js?v=bigmesh1"></script>
   <script src="nso_support_beacons.js?v=followups1"></script>
   <script src="nso_support_aim.js?v=bigmesh1"></script>
@@ -1679,7 +1681,7 @@
   <script src="nso_raster_lines.js?v=raster1"></script>
   <script src="nso_relief.js?v=relief2"></script>
   <!-- Every tool helper goes in and out of the scene through this registry. -->
-  <script src="nso-helpers.js?v=overlap2"></script>
+  <script src="nso-helpers.js?v=boolw1"></script>
   <script src="nso-bounds.js?v=bigmesh1"></script>
   <script src="app-core.js?v=bigmeshb10"></script>
 
@@ -1688,7 +1690,7 @@
 
 
   <script src="app-cut.js?v=bigmeshb10"></script>
-  <script src="app-finish.js?v=bounds1"></script>
+  <script src="app-finish.js?v=boolw1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
   <script src="app-extend.js?v=scale1"></script>
   <!-- Mirror: exact reflection across the cut plane. After app-extend.js,
@@ -1697,13 +1699,13 @@
   <!-- Crop's engine: copy what a shape holds out of a piece (docs/CROP.md). On
        the boolean kernel in app-join.js and app-sculpt.js's commit helpers;
        the Crop card (app-crop-card.js) runs on it, so it comes first. -->
-  <script src="nso_crop.js?v=cropb10"></script>
+  <script src="nso_crop.js?v=boolw1"></script>
   <!-- Crop, stage 1: box -> remove slab -> seal the joint. After app-cut.js
        (rawCutOpen, rawFlatCapLoop, mapPlaneToRaw) and app-sculpt.js (commit). -->
   <script src="app-crop.js?v=bigmeshb10"></script>
   <!-- The Crop card: a shape dragged to size, CROP (docs/CROP.md). After app-crop.js
        and app-cut.js, whose updateCutterUI it follows. -->
-  <script src="app-crop-card.js?v=cropcard1"></script>
+  <script src="app-crop-card.js?v=boolw1"></script>
   <script src="app-fatten.js?v=box2"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
@@ -1729,14 +1731,14 @@
        nso_assemble.js (the seat), nso_path_sweep.js (the rod) and
        nso_section.js (the face's shape). See docs/BRIDGE.md. -->
   <script src="nso_bridge.js?v=bridgeb9"></script>
-  <script src="app-bridge.js?v=overlap2"></script>
+  <script src="app-bridge.js?v=boolw1"></script>
   <script src="nso_close.js?v=close2"></script>
   <script src="app-close.js?v=close2"></script>
   <!-- Connect: the builder on Bridge's pick. After nso_bridge.js and
        app-bridge.js (the pick and the overlay it reuses), nso_path_sweep.js
        and nso_assemble.js. See docs/CONNECT.md. -->
   <script src="nso_connect.js?v=connect4"></script>
-  <script src="app-connect.js?v=drawb11"></script>
+  <script src="app-connect.js?v=boolw1"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
   <script src="nso_ring.js?v=polish2"></script>
@@ -1751,7 +1753,7 @@
   <script src="app-stock.js?v=shelf2"></script>
   <script src="app-assemble.js?v=shelfb10"></script>
   <script src="app-sel-outline.js?v=bigmesh1"></script>
-  <script src="app-join.js?v=nohdrb10"></script>
+  <script src="app-join.js?v=boolw1"></script>
   <script src="app-center-lock.js?v=nogate2"></script>
   <script src="app-oversize-washer.js?v=oversize2"></script>
   <script src="app-join-triple.js?v=nogate2"></script>

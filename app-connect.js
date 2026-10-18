@@ -359,7 +359,7 @@ function NSO_connectPreview() {
   try {
     p = NSO_Connect.plan(pieces, { piece: 0, target: C.a.target }, { piece: ids.indexOf(C.b.sourceId), target: C.b.target }, o);
   } catch (err) { p = { ok: false, reason: (err && err.message) || String(err) }; }
-  if (p.ok && p.result === 'weld') { var ov = NSO_bridgeOverlap(ids); if (ov) p = { ok: false, reason: ov, overlap: true }; }
+  if (p.ok && p.result === 'weld') { var ov = NSO_bridgeOverlap(ids, true); if (ov) p = { ok: false, reason: ov, overlap: true }; }
   p.ids = ids;
   p.keys = [NSO_bridgePoseKey(C.a.placed), NSO_bridgePoseKey(C.b.placed)];
   C.plan = p;
@@ -461,7 +461,7 @@ function NSO_connectSay(text, bad) { if (typeof setStatus === 'function') setSta
 function NSO_connectSet() { return NSO_connectRun(NSO_connectUI().plan); }
 
 // Build a plan: Set's, or a finished stroke's.
-function NSO_connectRun(p) {
+async function NSO_connectRun(p) {
   var C = NSO_connectUI();
   if (!p || !p.ok) return Promise.resolve({ ok: false, reason: p ? p.reason : 'nothing to connect - pick two anchors' });
   if (C.busy) return Promise.resolve({ ok: false, reason: 'busy' });
@@ -486,7 +486,11 @@ function NSO_connectRun(p) {
     }
   }
   if (weld) {
-    var overlap = NSO_bridgeOverlap(p.ids);
+    // busy while the check runs, so a second press does not start a second
+    C.busy = true; NSO_connectSyncRows();
+    var overlap;
+    try { overlap = await NSO_bridgeOverlapAsync(p.ids, 'connect-readout'); }
+    finally { C.busy = false; NSO_connectSyncRows(); }
     if (overlap) {
       NSO_connectSay('Connect refused - pieces unchanged (' + overlap + ')', true); NSO_connectReadout('Connect: ' + overlap, true);
       return Promise.resolve({ ok: false, reason: overlap, overlap: true });
@@ -494,7 +498,8 @@ function NSO_connectRun(p) {
   }
   C.busy = true; NSO_connectSyncRows();
   if (weld || p.tips) NSO_connectSay('Connecting (loading CSG kernel)...');
-  var unionFn = (typeof NSO_unionSoups === 'function') ? NSO_unionSoups : null;
+  var unionFn = (typeof NSO_unionSoups === 'function')
+    ? function (a, b) { return NSO_unionSoups(a, b, { label: 'Connecting', host: 'connect-readout' }); } : null;
   return NSO_Connect.weld(p, { union: unionFn }).then(function (r) {
     C.busy = false;
     if (!r.ok) {

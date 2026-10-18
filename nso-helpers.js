@@ -280,54 +280,49 @@
    can, and the message becomes "run CHECK & REPAIR -> Repair on it first". */
 (function () {
   var REPAIR_MERGES = false;
-  var CROSS_MM = 1e-3;
   var cache = (typeof WeakMap === 'function') ? new WeakMap() : null;
 
-  // Do triangles fa and fb of mesh m cross, both straddling the other's plane by more than CROSS_MM?
-  function crosses(m, fa, fb) {
-    function tri(f) {
-      var v = [];
-      for (var i = 0; i < 3; i++) { var o = m.faces[f * 3 + i] * 3; v.push([m.pos[o], m.pos[o + 1], m.pos[o + 2]]); }
-      return v;
-    }
-    function straddles(T, U) {          // does U straddle T's plane?
-      var e1 = [T[1][0] - T[0][0], T[1][1] - T[0][1], T[1][2] - T[0][2]], e2 = [T[2][0] - T[0][0], T[2][1] - T[0][1], T[2][2] - T[0][2]];
-      var n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
-      var L = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-      if (!(L > 0)) return false;
-      var pos = false, neg = false;
-      for (var i = 0; i < 3; i++) {
-        var d = ((U[i][0] - T[0][0]) * n[0] + (U[i][1] - T[0][1]) * n[1] + (U[i][2] - T[0][2]) * n[2]) / L;
-        if (d > CROSS_MM) pos = true; else if (d < -CROSS_MM) neg = true;
-      }
-      return pos && neg;
-    }
-    var A = tri(fa), B = tri(fb);
-    return straddles(A, B) && straddles(B, A);
+  /* A big piece (the boolean worker's threshold) is not measured on the page's thread: its first answer comes from a
+     worker (measureAsync) and is kept here like any other. What a verb's PLAN asks, over and over as the pointer moves
+     (cachedOnly), takes a big piece's answer only if it is already known; the verb's run, which awaits, asks for real. */
+  function big(soup) {
+    return soup.length / 9 >= (typeof NSO_BoolConfig !== 'undefined' ? NSO_BoolConfig.bigTris : 50000);
   }
 
   // { pierce, crossing } for a raw soup: the checker's pairs, and those that truly cross; null when it cannot be asked.
-  function measure(soup) {
+  // The measuring itself is NSO_overlapMeasure (nso_csg.js - a file the boolean worker loads too); this keeps its answer.
+  function measure(soup, cachedOnly) {
     if (!soup || !soup.length) return null;
     if (cache && cache.has(soup)) return cache.get(soup);
-    if (typeof NSO_Repair === 'undefined' || !NSO_Repair || typeof NSO_Repair._selfIntersectionDetail !== 'function' ||
-        typeof NSO_Repair._weldToIndexed !== 'function') return null;
-    var out;
-    try {
-      var mesh = NSO_Repair._weldToIndexed(soup, NSO_Repair.WELD_TOL).mesh;
-      var d = NSO_Repair._selfIntersectionDetail(mesh, { collect: true });
-      out = { pierce: d.pierce, crossing: 0 };
-      for (var i = 0; i < d.pairs.length; i++) {
-        if (d.pairs[i].kind === 'pierce' && crosses(mesh, d.pairs[i].a, d.pairs[i].b)) out.crossing++;
-      }
-    } catch (e) { return null; }
-    if (cache) cache.set(soup, out);
+    if (cachedOnly && big(soup)) return null;
+    if (typeof NSO_overlapMeasure !== 'function') return null;
+    var out = NSO_overlapMeasure(soup);
+    if (out && cache) cache.set(soup, out);
     return out;
   }
 
+  /* The same, without holding the page: a big piece is measured in the worker, under the bar ("Checking\u2026 N s") and
+     Escape. -> { pierce, crossing }, null when it cannot be asked, or { stopped, cancelled | timedOut } if it was ended. */
+  function measureAsync(soup, host) {
+    if (!soup || !soup.length) return Promise.resolve(null);
+    if (cache && cache.has(soup)) return Promise.resolve(cache.get(soup));
+    if (!big(soup) || typeof NSO_boolRun !== 'function') return Promise.resolve(measure(soup));
+    var spec = {
+      path: 'NSO_overlapJob', channel: 'bool-check', label: 'Checking', host: host || null,
+      files: function () { return ['NSO_Repair.js', 'nso_csg.js']; },
+      tris: function (a) { return (a[0].length / 9) | 0; },
+      refuse: function (a, why) { return { stopped: why }; },
+      restore: function (r) { return r; }
+    };
+    return NSO_boolRun(spec, [soup], function () { return measure(soup); }).then(function (r) {
+      if (r && !r.stopped && cache) cache.set(soup, r);
+      return r;
+    });
+  }
+
   // The checker's piercing-pair count when the piece has overlapping shells, else 0; null when it cannot be asked.
-  function pairs(soup) {
-    var r = measure(soup);
+  function pairs(soup, cachedOnly) {
+    var r = measure(soup, cachedOnly);
     return r ? (r.crossing > 0 ? r.pierce : 0) : null;
   }
 
@@ -338,23 +333,40 @@
 
   /* items: [{ name, soup }] - the pieces about to go to the kernel. '' when
      every one is a clean solid, else the sentence for the first that is not. */
-  function refusal(items) {
+  function refusal(items, cachedOnly) {
     for (var i = 0; i < (items || []).length; i++) {
-      var it = items[i], n = it ? pairs(it.soup) : null;
+      var it = items[i], n = it ? pairs(it.soup, cachedOnly) : null;
+      if (n > 0) return sentence(it.name, n);
+    }
+    return '';
+  }
+
+  /* refusal(), awaited: the answer is the same sentence, but a big piece is measured off the page's thread. If the
+     check is ended (Escape, the watchdog) the verb is refused in words rather than let through unchecked. */
+  async function refusalAsync(items, host) {
+    for (var i = 0; i < (items || []).length; i++) {
+      var it = items[i];
+      if (!it) continue;
+      var r = await measureAsync(it.soup, host);
+      if (r && r.stopped) return 'the overlap check ' + (r.timedOut ? 'ran too long and ' : '') + 'was stopped';
+      var n = r ? (r.crossing > 0 ? r.pierce : 0) : null;
       if (n > 0) return sentence(it.name, n);
     }
     return '';
   }
 
   /* The same, for models off state.models (name, raw soup). */
-  function refusalOfModels(models) {
-    return refusal((models || []).map(function (m) {
+  function itemsOfModels(models) {
+    return (models || []).map(function (m) {
       if (!m) return null;
       var soup = (m.rawTris && m.rawAxis === 'zup') ? m.rawTris
         : (typeof getModelRawSoup === 'function' && m.geometry ? getModelRawSoup(m) : m.rawTris);
       return { name: m.name, soup: soup };
-    }));
+    });
   }
+  function refusalOfModels(models, cachedOnly) { return refusal(itemsOfModels(models), cachedOnly); }
+  function refusalOfModelsAsync(models, host) { return refusalAsync(itemsOfModels(models), host); }
 
-  window.nsoOverlap = { pairs: pairs, refusal: refusal, refusalOfModels: refusalOfModels, repairMerges: REPAIR_MERGES };
+  window.nsoOverlap = { pairs: pairs, refusal: refusal, refusalOfModels: refusalOfModels, refusalOfModelsAsync: refusalOfModelsAsync,
+                        repairMerges: REPAIR_MERGES };
 })();
