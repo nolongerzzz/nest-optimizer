@@ -4,6 +4,7 @@
   "private": true,
   "description": "3D print optimizer. Node is only used for the checks under tools/ - the app itself is plain classic scripts served as static files.",
   "scripts": {
+    "qa:tour": "node tools/nso_qa_tour.js",
     "cth:unit": "sh tools/cth-test/run-all.sh",
     "cth:capture": "node tools/cth-test/capture-check.mjs",
     "cth:drive": "node tools/cth-test/drive-check.mjs",
