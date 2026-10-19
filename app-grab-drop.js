@@ -41,8 +41,8 @@
    plate. begin() takes an optional WORLD - the few things that differ: how
    the pointer becomes a ray, what is under it, where a piece's pose is read
    and put back, what a drop in the air and a drop onto a piece do. The
-   default world (MAIN, below) is the main plate, unchanged. G-scope's TAKE
-   plate (app-microscope.js) hands its own, so a piece pulled onto TAKE, or
+   default world (MAIN, below) is the main plate, unchanged. G-scope's second
+   plate (app-microscope.js) hands its own, so a piece pulled onto it, or
    moved about on it, is carried by this same code with this same wording.
 
    PAINT SCOPE: none of its own. A drop over the plate or into the air is a

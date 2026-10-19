@@ -232,6 +232,16 @@ async function main() {
   // An orbit turns by the pixels dragged (2*pi per canvas height). The canvas was 1110 wide beside the
   // sidebar and is the whole panel now, so a drag of 0.7 of its width went further round than this
   // check means: keep the same 777 px of travel, from clear of the left wall's boxes.
+  // G-scope opens framed on both plates now (docs/GSCOPE.md), from the front, its target between
+  // them, so an orbit turns about that point. Turn about the box instead, from the corner the opening
+  // view used to look from (the camera stays on the box's same side): the target on the box.
+  await page.evaluate((c) => {
+    const v = window.NSO_MICROSCOPE.getView();
+    v.controls.target.set(c[0], c[1], c[2]);
+    v.camera.position.copy(v.controls.target).add(new THREE.Vector3(1, 1, 1).setLength(90));
+    v.controls.update();
+  }, b0v);
+  await frames(page, 3);
   const [x1, oy] = await bareAt(page, 0.12, 0.4, 0.3, 0.9);
   await drag(page, [x1, oy], [x1 + 0.7 * 1110, oy]);
   await frames(page, 30);                                     // let the damping settle

@@ -65,7 +65,8 @@ const PAGE_HELPERS = `
       countWhere: (feature, layer) => { const s = find(feature, layer), sh = M().getDoc().segments.filter(g => !(M().hidden().indexOf(g.feature) >= 0));
         return { piece: sh.filter(g => g.obj === s.obj).length, feature: sh.filter(g => g.obj === s.obj && g.feature === s.feature).length, layer: sh.filter(g => g.zi === s.zi).length, all: sh.length }; },
       pxObject: () => { const d = M().getDoc(), o = d.objects[0], b = o.bounds; return pxOf((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, b.maxZ); },
-      bedPx: (x, y) => pxOf(x, y, 0),
+      /* a point on plate 2's bed (its own Z-up mm), whichever plate is active (docs/GSCOPE.md) */
+      bedPx: (x, y) => toPx(new THREE.Vector3(M().plateOffset('take') + x, 0, -y)),
       emptyPx: () => {
         const v = M().getView(), r = rect(), rc = new THREE.Raycaster(); rc.params.Line.threshold = 2;
         const roots = [v.overviewGroup, v.detailGroup, v.highlightGroup];
@@ -94,7 +95,10 @@ async function drag(page, from, to) {
   await page.mouse.up();
   await frames(page);
 }
-async function showLens(page) { if (await plate(page) !== 'lens') { await page.click('#ms-plate-lens'); await frames(page); } }
+/* The plates stand side by side and a click on one makes it active (docs/GSCOPE.md); these checks are
+   about the Select card, so the plate is made active through the engine's own call. */
+const activate = async (page, n) => { await page.evaluate(n => NSO_MICROSCOPE.showPlate(n), n); await frames(page); };
+async function showLens(page) { if (await plate(page) !== 'lens') await activate(page, 'lens'); }
 async function setMode(page, id) {
   await page.click('#ms-mode-' + id);
   await cards.closeCards(page);
@@ -113,11 +117,9 @@ withApp(async (page, logs) => {
   await frames(page);
   const shot = name => page.screenshot({ path: path.join(SHOTS, name + '.png') });
 
-  /* the TAKE bed's pixels are read once: its camera is the same for every pull */
-  await page.click('#ms-plate-take'); await frames(page);
+  /* plate 2's bed pixels are read once: the opening view is the same for every pull */
   const dest = [];
   for (const [x, y] of [[-30, -25], [-12, -25], [6, -25], [24, -25], [-30, 0], [-12, 0], [6, 0], [24, 0]]) dest.push(await page.evaluate(([x, y]) => window.__t.bedPx(x, y), [x, y]));
-  await page.click('#ms-plate-lens'); await frames(page);
 
   /* ------------------------------------------------------------------ 1 */
   console.log('\n=== 1. the card ===');
@@ -211,7 +213,7 @@ withApp(async (page, logs) => {
     const after = await page.evaluate(() => ({ plate: NSO_MICROSCOPE.plate(), pieces: window.__t.pieces() }));
     const piece = after.pieces[after.pieces.length - 1];
     check(label + ': a drag pulls it onto TAKE - one new piece with exactly the hovered ' + (hv2 ? hv2.count : '?') + ' move(s)', after.plate === 'take' && after.pieces.length === n0 + 1 && hv2 && piece.moves === hv2.count, J([after.plate, after.pieces.length, piece && piece.moves, hv2 && hv2.count, piece && piece.name]));
-    await page.click('#ms-plate-lens'); await frames(page);
+    await activate(page, 'lens');
     check(label + ': LENS is byte-identical after the pull', await lensState(page) === before);
     pulled++;
   }
@@ -245,7 +247,7 @@ withApp(async (page, logs) => {
     const after = await page.evaluate(() => ({ plate: NSO_MICROSCOPE.plate(), pieces: window.__t.pieces() }));
     const piece = after.pieces[after.pieces.length - 1];
     check('a drag from the card pulls the range onto TAKE as ONE piece', after.plate === 'take' && after.pieces.length === n0 + 1 && piece.moves === want, J([after.pieces.length, piece && piece.moves, want]));
-    await page.click('#ms-plate-lens'); await frames(page);
+    await activate(page, 'lens');
     check('LENS is byte-identical after it', await lensState(page) === before);
     await page.evaluate(() => NSO_MICROSCOPE.setZRange(0, 1e6)); await frames(page);
     check('the slider\'s range also works on a slice: All gives the whole range back', await page.evaluate(() => NSO_MICROSCOPE.shownCount()) === full);
@@ -278,7 +280,7 @@ withApp(async (page, logs) => {
     check('...and where they were there is nothing to take', !pt1 || pt1.count === 0 || pt1.source !== 'feature', J(pt1));
     await shot('06-display-off');
     // on TAKE: a piece that holds Support lines is drawn without them
-    await page.click('#ms-plate-take'); await frames(page);
+    await activate(page, 'take');
     const tk = await page.evaluate(() => { const v = NSO_MICROSCOPE.getView(); let tri = 0, support = 0;
       Object.keys(v.overviewMeshes).forEach(k => { const m = v.overviewMeshes[k]; if (m.visible) tri += m.geometry.attributes.position.count / 3; });
       const d = NSO_MICROSCOPE.getDoc(); d.objects.forEach(o => (o.moves || []).forEach(m => { if (m.feature === 'Support') support++; }));
@@ -289,7 +291,7 @@ withApp(async (page, logs) => {
     await frames(page);
     const trisOn = await page.evaluate(() => { const v = NSO_MICROSCOPE.getView(); let tri = 0; Object.keys(v.overviewMeshes).forEach(k => { const m = v.overviewMeshes[k]; if (m.visible) tri += m.geometry.attributes.position.count / 3; }); return tri; });
     check('checked on TAKE, it comes back on both: more triangles drawn', trisOn > trisOff, trisOff + ' -> ' + trisOn);
-    await page.click('#ms-plate-lens'); await frames(page);
+    await activate(page, 'lens');
     check('...and on LENS the lines are drawn again', await page.evaluate(() => NSO_MICROSCOPE.getView().overviewMeshes['Support'].visible && NSO_MICROSCOPE.hidden().indexOf('Support') < 0));
     // a row, off its check, is the Feature click
     const n0 = await page.evaluate(() => window.__t.pieces().length);
@@ -310,7 +312,7 @@ withApp(async (page, logs) => {
     await drag(page, rowPt, dest[6]);
     const after = await page.evaluate(() => ({ plate: NSO_MICROSCOPE.plate(), pieces: window.__t.pieces() }));
     check('a drag from the row pulls the line type onto TAKE', after.plate === 'take' && after.pieces.length === n0 + 1 && after.pieces[after.pieces.length - 1].moves === want, J([after.pieces.length, n0, want]));
-    await page.click('#ms-plate-lens'); await frames(page);
+    await activate(page, 'lens');
     check('LENS is byte-identical after it', await lensState(page) === before);
   }
 
@@ -392,7 +394,7 @@ withApp(async (page, logs) => {
     await drag(page, px2, dest[7]);
     const after = await page.evaluate(() => ({ plate: NSO_MICROSCOPE.plate(), pieces: window.__t.pieces() }));
     check('Piece: a drag pulls the piece onto TAKE', after.plate === 'take' && after.pieces.length === n0 + 1 && /box-20mm/.test(after.pieces[after.pieces.length - 1].name), J(after.pieces.map(p => p.name).slice(-1)));
-    await page.click('#ms-plate-lens'); await frames(page);
+    await activate(page, 'lens');
     check('LENS is byte-identical after it', await lensState(page) === before);
     // Region on a mesh
     await setMode(page, 'select');

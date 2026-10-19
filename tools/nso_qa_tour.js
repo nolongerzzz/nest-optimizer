@@ -353,13 +353,13 @@ function buildPlan() {
   V(GS, 'Overhangs', 'ms-btn-overhangs', 'Show overhangs', gs('ms-nav-overhangs', null, { run: press(['ms-btn-overhangs']) }));
   V(GS, 'Crop Z', 'ms-btn-crop', 'Crop out band', gs('ms-nav-crop', null, { view: false, run: press(['ms-btn-crop']) }));
   V(GS, 'Slice', 'ms-slice-walls', 'Walls 3, then Slice view', gs('ms-nav-slice', null, { run: async x => { await x.fill('ms-slice-walls', 3); await x.nav('ms-nav-view'); await x.click('ms-cam-slice'); } }));
-  V(GS, 'Take', 'ms-plate-take', 'Pull the piece onto TAKE (drag)', gs(null, null, { run: async x => { await x.gsTake(); } }));
-  V(GS, 'Take', 'ms-plate-lens', 'Toggle TAKE, back to LENS', gs(null, null, { run: async x => { await x.click('ms-plate-take'); await x.wait(300); await x.click('ms-plate-lens'); } }));
+  V(GS, 'Plates', 'ms-viewport', 'Copy the piece onto plate 2 (drag across)', gs(null, null, { run: async x => { await x.gsTake(); } }));
+  V(GS, 'Plates', 'ms-btn-frame', 'Frame both plates (\u25ce)', gs(null, null, { run: press(['ms-btn-frame']) }));
   V(GS, 'Export', 'ms-btn-export-plate', 'Export to plate (a piece isolated)', gs('ms-nav-export', isolated, { view: false, run: press(['ms-btn-export-plate']) }));
   V(GS, 'Export', 'ms-btn-export-stl', 'Export as STL (a piece isolated)', gs('ms-nav-export', isolated, { run: async x => { await x.download('ms-btn-export-stl'); } }));
-  V(GS, 'Export', 'ms-btn-take-export-stl', 'Export TAKE as STL', gs('ms-nav-export', taken, { run: async x => { await x.download('ms-btn-take-export-stl'); } }));
-  V(GS, 'Export', 'ms-btn-take-export-plate', 'Export TAKE to plate', gs('ms-nav-export', taken, { view: false, run: press(['ms-btn-take-export-plate']) }));
-  V(GS, 'Take', 'ms-btn-take-clear', 'Clear (after a pull)', gs(null, taken, { run: press(['ms-btn-take-clear']) }));
+  V(GS, 'Export', 'ms-btn-take-export-stl', 'Export plate 2 as STL', gs('ms-nav-export', taken, { run: async x => { await x.download('ms-btn-take-export-stl'); } }));
+  V(GS, 'Export', 'ms-btn-take-export-plate', 'Export plate 2 to the main plate', gs('ms-nav-export', taken, { view: false, run: press(['ms-btn-take-export-plate']) }));
+  V(GS, 'Plates', 'ms-btn-take-clear', 'Clear (after a copy)', gs(null, taken, { run: press(['ms-btn-take-clear']) }));
   V(GS, 'G-scope', 'ms-btn-back-producer', 'Back (G-scope opened by Picture › Make piece)', { setup: 'none', menu: null, view: true,
     pre: async x => { await x.chooser('btn-relief-pick', x.png()); await x.wait(800); await x.click('btn-relief-make'); await x.wait(1500); }, run: press(['ms-btn-back-producer']) });
   V(GS, 'G-scope', 'ms-close', 'Close', gs(null, null, { run: press(['ms-close']) }));
@@ -773,10 +773,15 @@ async function worker(key, items) {
       const p = o.positions; return at((p[0] + p[3] + p[6]) / 3, (p[1] + p[4] + p[7]) / 3, (p[2] + p[5] + p[8]) / 3);
     }, which));
     
+    /* G-scope: plate 2's bed centre, as a screen pixel (the plates stand side by side, docs/GSCOPE.md) */
+    const gsPlate2 = () => G('gsPx', () => page.evaluate(() => {
+      const M = window.NSO_MICROSCOPE, v = M.getView(), r = v.renderer.domElement.getBoundingClientRect();
+      const p = new THREE.Vector3(M.plateOffset('take'), 0, 0).project(v.camera);
+      return { x: r.left + (p.x + 1) / 2 * r.width, y: r.top + (1 - p.y) / 2 * r.height };
+    }));
     X.gsTake = async () => {
-      await X.click('ms-plate-take'); await sleep(500);
-      const bed = await gsPixel('bed');
-      await X.click('ms-plate-lens'); await sleep(500);
+      if (await page.evaluate(() => window.NSO_MICROSCOPE.plate()) !== 'lens') await page.evaluate(() => window.NSO_MICROSCOPE.showPlate('lens'));
+      const bed = await gsPlate2();
       const from = await gsPixel('piece');
       if (!from || !bed) { X.note('G-scope shows no piece to pull'); return; }
       await X.dragAt(from, bed, { steps: 10 });

@@ -5,6 +5,11 @@
 logs). Checked by `gscope:select` (`tools/nso_gscope_select_test.js`, 1280 x 800),
 on top of ticket 1's LENS | TAKE plates (`docs/GSCOPE-TAKE.md`).
 
+> **Since the G-scope redo, read docs/GSCOPE.md first.** The two plates stand
+> side by side now and a click on one makes it active: where this file says
+> LENS read *plate 1* (the loaded plate), where it says TAKE read *plate 2*, and
+> "pulls it onto TAKE" is "drags it over plate 2". There is no LENS | TAKE toggle.
+
 ## 1. The modes
 
 A row of five in the Select card: **Piece · Region · Feature · Line · Layer**.

@@ -172,9 +172,18 @@ async function main() {
   let T_LAP = Date.now();
   const lap = () => { console.log(`       (${((Date.now() - T_LAP) / 1000).toFixed(0)} s)`); T_LAP = Date.now(); };
   const C0 = await settle();
-  const T0 = C0.tgt, D0 = C0.d;
-  const DIR0 = C0.pos.map((x, i) => x - T0[i]);
-  console.log(`       opening view: distance ${D0.toFixed(2)} mm, target ${px(T0)}...`);
+  // G-scope opens framed on both plates (docs/GSCOPE.md). The levels below are
+  // about the part, so they start from the view that frames the part alone -
+  // frameBox's own target and distance for it - looking the way G-scope opens.
+  const PART = await N(() => {
+    const v = window.NSO_MICROSCOPE.getView(), box = new THREE.Box3();
+    v.overviewGroup.children.forEach((m) => { m.geometry.computeBoundingBox(); box.union(m.geometry.boundingBox.clone().applyMatrix4(m.matrixWorld)); });
+    const r = box.getSize(new THREE.Vector3()).length() / 2;
+    return { t: box.getCenter(new THREE.Vector3()).toArray(), d: (r / Math.sin((v.camera.fov * Math.PI / 180) / 2)) * 1.1 };
+  });
+  const T0 = PART.t, D0 = PART.d;
+  const DIR0 = C0.pos.map((x, i) => x - C0.tgt[i]);
+  console.log(`       opening view: distance ${C0.d.toFixed(2)} mm (both plates); the part framed: distance ${D0.toFixed(2)} mm, target ${px(T0)}...`);
 
   /**
    * One run: from the view (tgt, d), wheel `steps` times one way at `at` and

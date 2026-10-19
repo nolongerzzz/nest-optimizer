@@ -673,8 +673,12 @@ async function main() {
   await page.focus('#microscope');
   await page.keyboard.press('Escape');
   check('Escape closes it too', await page.isVisible('#microscope'), false);
+  // A close ends the visit whole (docs/GSCOPE.md, item 3): only the imported
+  // file survives it, and the next open reads it again.
+  await openPanelViaRail(page);
   check('and the file stays loaded for the next open',
     await page.evaluate(() => window.NSO_MICROSCOPE.getDoc().segments.length), 202877);
+  await page.click('#ms-close');
   check('and the plate is untouched by looking',
     await page.evaluate(() => state.models.length), stlBefore + 1);
 
