@@ -31,8 +31,19 @@
 // axis, its vertices all at one radius, the outside facing out and the bore
 // facing in. That gives the outside radius, the bore and the wall t at the
 // neck; anything else there (a neck already made, a taper, a flange, the end)
-// refuses in words, naming where along the tube the wall stops being straight.
-// So necks may not overlap, and need not be told apart from other shaping.
+// refuses in words, naming where along the tube the wall stops being straight
+// and how much its outside and bore vary across the band. So necks may not
+// overlap, and need not be told apart from other shaping.
+//
+// ONE RADIUS means every vertex of the face within max(0.02 mm, 2e-4 × R) of
+// the face's mean radius R, outside and bore alike. The figure is stated, not
+// measured: a 0.4 mm nozzle cannot lay down a 20 µm difference, so a wall that
+// close to round is one cylinder to any printer; the 2e-4 × R part takes over
+// past R = 100 mm, where a float32 coordinate's own rounding and an exporter's
+// grow with the part. It was 0.001 mm absolute, and MINI_TPU_TEST's own
+// vertices spread 0.0011 mm round its outside (r 9.99952 - 10.00060); scaled
+// ×3.175 to Ø63.5 they spread 0.0037, and a plain tube was refused as "not one
+// tube". The mean, not the middle of the range, is the R the neck is built to.
 //
 // THE BUILD. On each face the triangles the band crosses are taken out: a
 // band of the cylinder between two whole rings of its vertices (the ring
@@ -65,7 +76,8 @@ var NSO_TN_SAG_MM = 0.01;            // chord sag on every curved face of the ne
 var NSO_TN_WALL_TOL_MM = 0.02;       // wall through the neck vs the tube's wall
 var NSO_TN_BORE_NOZZLES = 2;         // the bore at the waist: at least 2 nozzle widths across
 var NSO_TN_AXIAL_SIN = 1e-4;         // a straight wall triangle: its normal this square to the axis
-var NSO_TN_RADIUS_TOL_MM = 1e-3;     // one cylinder: every vertex within this of one radius
+var NSO_TN_RADIUS_TOL_MM = 0.02;     // one cylinder: every vertex within this of the face's mean radius...
+var NSO_TN_RADIUS_TOL_FRAC = 2e-4;   // ...or within this × that radius, whichever is more (stated, not measured)
 var NSO_TN_RING_TOL_MM = 1e-4;       // one ring: every vertex within this of one height
 var NSO_TN_STATION_MIN_MM = 1e-4;    // a straight station closer than this to its ring is not laid
 var NSO_TN_MAX_TAPER_DEG = 75;       // Funnel: the taper, off the axis
@@ -140,15 +152,13 @@ function NSO_tnBand(rd, ha, hb) {
   var W = rd.weld, n = W.n, eps = 1e-6, out = { ok: false, reason: '' };
   var tube = rd.tube, hMin = tube.hMin, hMax = tube.hMax;
   var outer = [], inner = [], bent = [], degen = 0;
-  var oLo = Infinity, oHi = -Infinity, iLo = Infinity, iHi = -Infinity;
+  var oFace = [], iFace = [];          // every triangle the band crosses facing out / in, bent or not: the spread's
   for (var t = 0; t < n; t++) {
     if (!(rd.TH1[t] > ha + eps && rd.TH0[t] < hb - eps)) continue;
     if (W.degen[t]) { degen++; continue; }
+    if (rd.TNR[t] >= 0.5) oFace.push(t); else if (rd.TNR[t] <= -0.5) iFace.push(t);
     if (Math.abs(rd.TNA[t]) > NSO_TN_AXIAL_SIN || Math.abs(rd.TNR[t]) < 0.5) { bent.push(t); continue; }
-    var lo = Infinity, hi = -Infinity;
-    for (var k = 0; k < 3; k++) { var r = rd.VR[W.vid[t * 3 + k]]; if (r < lo) lo = r; if (r > hi) hi = r; }
-    if (rd.TNR[t] > 0) { outer.push(t); if (lo < oLo) oLo = lo; if (hi > oHi) oHi = hi; }
-    else { inner.push(t); if (lo < iLo) iLo = lo; if (hi > iHi) iHi = hi; }
+    if (rd.TNR[t] > 0) outer.push(t); else inner.push(t);
   }
   if (degen) { out.reason = 'the wall has ' + degen + ' zero-area triangle(s) where the neck would go - Repair it first'; return out; }
   if (bent.length) {
@@ -174,8 +184,10 @@ function NSO_tnBand(rd, ha, hb) {
     if (!hit.length) { bent.forEach(function (t2) { p = Math.min(p, rd.TH0[t2]); q2 = Math.max(q2, rd.TH1[t2]); }); }
     var move = Math.min(q2 - ha, hb - p);
     out.shaped = { from: p, to: q2, moveMm: move };
+    var vary = [NSO_tnSpread('outside', NSO_tnRadii(rd, oFace)), NSO_tnSpread('bore', NSO_tnRadii(rd, iFace))].filter(Boolean);
     out.reason = 'the wall is not straight from ' + NSO_tnIn(q2) + ' to ' + NSO_tnIn(p) + ' mm in from the end, where this neck would go (' +
-      NSO_tnIn(hb) + ' to ' + NSO_tnIn(ha) + ' mm) - a neck already there, or the piece\'s own shape. Necks may not overlap, and a neck ' +
+      NSO_tnIn(hb) + ' to ' + NSO_tnIn(ha) + ' mm)' + (vary.length ? ': ' + vary.join('; ') : '') +
+      ' - a neck already there, or the piece\'s own shape. Necks may not overlap, and a neck ' +
       'is made on a straight stretch of tube: move it ' + NSO_tnFmt(move) + ' mm or more along the tube, or shorten it';
     return out;
   }
@@ -183,15 +195,54 @@ function NSO_tnBand(rd, ha, hb) {
     out.reason = 'there is no ' + (outer.length ? 'bore' : 'outside wall') + ' across the band - Neck works on a tube, a wall round a bore';
     return out;
   }
-  if (oHi - oLo > NSO_TN_RADIUS_TOL_MM || iHi - iLo > NSO_TN_RADIUS_TOL_MM) {
-    out.reason = 'the wall is not one tube across the band - its ' + (oHi - oLo > NSO_TN_RADIUS_TOL_MM ? 'outside runs from Ø' + NSO_tnFmt(2 * oLo) + ' to Ø' + NSO_tnFmt(2 * oHi)
-      : 'bore runs from Ø' + NSO_tnFmt(2 * iLo) + ' to Ø' + NSO_tnFmt(2 * iHi)) + '. Neck works on a straight stretch of one tube';
+  // one cylinder each: every vertex within the tolerance of the face's mean radius
+  var SO = NSO_tnRadii(rd, outer), SI = NSO_tnRadii(rd, inner), off = [];
+  out.radii = { outer: SO, inner: SI };
+  [['outside', SO], ['bore', SI]].forEach(function (f) {
+    var S = f[1], tol = NSO_tnRadiusTol(S.mean);
+    S.tolMm = tol;
+    if (S.dev > tol) off.push((NSO_tnSpread(f[0], S) || 'its ' + f[0] + ' varies') + ' (' + NSO_tnFmt(S.dev, 3) + ' mm off its mean radius; one tube holds every vertex within ' +
+      NSO_tnFmt(tol, 3) + ' mm of it)');
+  });
+  if (off.length) {
+    out.reason = 'the wall is not one tube across the band - ' + off.join('; ') + '. Neck works on a straight stretch of one tube';
     return out;
   }
-  var Ro = (oLo + oHi) / 2, Ri = (iLo + iHi) / 2;
+  var Ro = SO.mean, Ri = SI.mean;
   if (!(Ro > Ri)) { out.reason = 'internal: the bore reads wider than the outside'; return out; }
   out.ok = true; out.outerTris = outer; out.innerTris = inner; out.Ro = Ro; out.Ri = Ri; out.wallMm = Ro - Ri;
   return out;
+}
+
+/* How far a face's vertices may sit off its mean radius R and still be one
+   cylinder: max(NSO_TN_RADIUS_TOL_MM, NSO_TN_RADIUS_TOL_FRAC × R). */
+function NSO_tnRadiusTol(R) { return Math.max(NSO_TN_RADIUS_TOL_MM, NSO_TN_RADIUS_TOL_FRAC * R); }
+
+/* The radii of the vertices of some triangles, each vertex counted once:
+   { n, lo, hi, mean, dev (the most any sits off the mean) }. */
+function NSO_tnRadii(rd, tris) {
+  var W = rd.weld, seen = new Set(), lo = Infinity, hi = -Infinity, sum = 0;
+  for (var i = 0; i < tris.length; i++) for (var k = 0; k < 3; k++) {
+    var v = W.vid[tris[i] * 3 + k];
+    if (seen.has(v)) continue;
+    seen.add(v);
+    var r = rd.VR[v]; sum += r; if (r < lo) lo = r; if (r > hi) hi = r;
+  }
+  var m = seen.size ? sum / seen.size : NaN;
+  return { n: seen.size, lo: lo, hi: hi, mean: m, dev: seen.size ? Math.max(hi - m, m - lo) : 0 };
+}
+
+/* "its outside varies by 0.31 mm across the band, Ø63.19 to Ø63.50": the
+   spread as a diameter, printed to as many places (2 to 4) as it takes for
+   the two ends to read differently - never two equal numbers. null when no
+   vertex, or a spread too small to show at 4 places. */
+function NSO_tnSpread(what, S) {
+  if (!S || !S.n) return null;
+  for (var dp = 2; dp <= 4; dp++) {
+    var a = NSO_tnFmt(2 * S.lo, dp), b = NSO_tnFmt(2 * S.hi, dp), d = NSO_tnFmt(2 * (S.hi - S.lo), dp);
+    if (a !== b && +d > 0) return 'its ' + what + ' varies by ' + d + ' mm across the band, Ø' + a + ' to Ø' + b;
+  }
+  return null;
 }
 
 /* The boundary of one face's band: its two rings, each in the order the

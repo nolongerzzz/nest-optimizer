@@ -283,11 +283,15 @@ The waist's bore is the tube's bore + 2Δr across, its outside the outside +
 end): its fitted centre and its face normal. **The wall at the band** is read
 off the mesh: every triangle the band crosses must be a piece of one of two
 cylinders about that axis — normal square to the axis, all its vertices at one
-radius (within 0.001 mm), the outside facing out and the bore facing in. That
-gives Ro, Ri and t at the neck. Anything else across the band — a neck already
-there, a taper, a flange — refuses, naming the stretch where the wall is not
-straight and how far to move: **necks may not overlap** (bands that just meet
-end to end are fine).
+radius (within max(0.02 mm, 2e-4 × R) of the face's mean radius R: a 0.4 mm
+nozzle cannot lay down 20 µm; stated, not measured), the outside facing out and
+the bore facing in. That gives Ro, Ri (the means) and t at the neck. Anything
+else across the band — a neck already there, a taper, a flange — refuses,
+naming the stretch where the wall is not straight, how much the outside and
+bore vary across the band, and how far to move: **necks may not overlap**
+(bands that just meet end to end are fine). A wall that is square to the axis
+but not round within that (an oval) refuses with its spread, e.g. "its outside
+varies by 0.18 mm across the band, Ø20.00 to Ø20.18".
 
 **The build.** On each face, the triangles the band crosses are taken out —
 a band of the cylinder between two whole rings of its vertices (for a Stock
