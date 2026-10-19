@@ -233,3 +233,11 @@ every one exactly 0.176400 mm², none spanning more than one line width's
 diagonal** — against the bidirectional lattice's 519.750 mm² in a single patch
 across the whole footprint. `crosshatch.json` records both sizes' contact,
 per-layer angle histograms and line centres. See `docs/CROSSHATCH.md`.
+
+## supports/ - pieces the support suites plan against
+
+- clamp_body.stl — a 77 x 94 x 40 mm clamp body (2214 triangles), as it lies
+  in the file. `support:interface` stands it on its 94 mm axis, the way the
+  Bambu Studio reference print was sliced (ceilings at z 72 and z 80), and
+  holds the support interface sheet to that reference. See
+  docs/SUPPORT-INTERFACE.md.
