@@ -77,9 +77,9 @@
   var LABEL_SCALE = 0.032;   // sprite, size-attenuation off: ~3.5% of the view height
 
   var ACTION_LABEL = { 'btn-cap-open': 'Cap open faces', 'btn-seal': 'Seal', 'btn-solidify': 'Solidify', 'btn-thicken-out': 'Thicken out',
-                       patch: 'Patch', cap: 'Cap', bridge: 'Bridge' };
+                       patch: 'Patch', cap: 'Cap', bridge: 'Bridge', mergeShells: 'Merge shells' };
   var ACTION_KINDS = { 'btn-cap-open': ['open'], 'btn-seal': ['open'], 'btn-solidify': ['open'], 'btn-thicken-out': ['thin'],
-                       patch: ['open'], cap: ['open'], bridge: ['open', 'gap'] };
+                       patch: ['open'], cap: ['open'], bridge: ['open', 'gap'], mergeShells: ['pierce'] };
 
   var F = function () { return window.NSO_Findings; };
 
@@ -424,7 +424,7 @@
     return out;
   }
   function itemSig(it) {
-    if (it.fix === 'sealRepair' || it.fix === 'thickenOut') return it.fix;
+    if (it.fix === 'sealRepair' || it.fix === 'thickenOut' || it.fix === 'mergeShells') return it.fix;
     return it.fix + '|' + (it.anchors || []).map(function (a) { return a.map(function (x) { return x.toFixed(3); }).join(','); }).join(';');
   }
 
@@ -446,10 +446,54 @@
     try { btn.click(); } finally { if (inp && was != null) inp.value = was; }
   }
 
+  /* MERGE SHELLS: the piece's overlapping shells unioned into one solid, on the piece itself - the same merge
+     the boolean verbs make for their own operation (nso-helpers.js, nsoOverlap.solid; the worker for a big piece).
+     One Undo puts the shells back. Paint stands it down: the union replaces every triangle (docs/HANDOFF.md's
+     whole-piece rule). -> Promise of { ok, reason }. */
+  window.nsoMergeShellsRun = async function (modelId) {
+    var m = modelId != null ? modelById(modelId) : activeModel();
+    function say(t, bad) { if (typeof setStatus === 'function') setStatus(t, !!bad); return { ok: false, reason: t }; }
+    if (!m) return say('Merge shells: select a piece first', true);
+    if (!(m.rawTris && m.rawAxis === 'zup')) return say('Merge shells needs a raw piece - "' + m.name + '" has no untransformed soup', true);
+    if (typeof nsoOverlap === 'undefined' || !nsoOverlap || typeof NSO_sculptCommitRaw !== 'function') {
+      return say('Merge shells needs nso-helpers.js and app-sculpt.js', true);
+    }
+    var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
+    if (painted > 0) {
+      return say('Merge shells stood down - ' + painted + ' painted face(s); the merge replaces every triangle on the ' +
+        'piece and cannot hold a face still. Clear paint to merge.', true);
+    }
+    var raw = m.rawTris;
+    var sol = await nsoOverlap.solid(m);
+    if (!sol.ok) return say(sol.cancelled ? 'Merge shells stopped - piece unchanged' : 'Merge shells refused - ' + sol.reason + ' - piece unchanged', !sol.cancelled);
+    if (!sol.merged) return say('Merge shells: ' + m.name + ' has no overlapping shells - nothing changed');
+    if (m.rawTris !== raw) return say('Merge shells: the piece changed while its shells were merged - nothing changed', true);
+    var txt = 'Merge shells: ' + m.name + '\u2019s ' + sol.shells + ' overlapping shells are one solid now - ' + (sol.soup.length / 9) +
+      ' faces. One Undo puts them back.';
+    if (!NSO_sculptCommitRaw(m, sol.soup, 'mergeShellsReplace', txt)) return say('Merge shells: the commit was rejected - nothing changed', true);
+    if (typeof updateAdjustUI === 'function') updateAdjustUI();
+    if (typeof setStatus === 'function') setStatus(txt);
+    return { ok: true, reason: txt, shells: sol.shells, tris: sol.soup.length / 9 };
+  };
+
   /* One item's own fix, on that finding only. CAP / PATCH / BRIDGE are
      bracketed here (the document-level watcher only knows the Finish
-     buttons): the "before" is taken, nsoRepairRun runs, the "after" is read. */
+     buttons): the "before" is taken, nsoRepairRun runs, the "after" is read.
+     MERGE SHELLS is bracketed the same way around an await (the kernel), so it
+     hands back a promise. */
   function runItem(item) {
+    if (item.fix === 'mergeShells') {
+      begin('mergeShells');
+      if (pending) pending.item = item;
+      var at = pending;
+      return window.nsoMergeShellsRun().then(function (r) {
+        if (pending === at) finish('mergeShells');
+        return r;
+      }, function (err) {
+        if (pending === at) finish('mergeShells');
+        return { ok: false, reason: (err && err.message) || String(err) };
+      });
+    }
     if (item.fix === 'cap' || item.fix === 'patch' || item.fix === 'bridge') {
       begin(item.fix);
       if (pending) pending.item = item;
@@ -478,7 +522,9 @@
   }
   var itemRiding = null;
 
-  function fixAll() {
+  /* Every item's own fix in the card's order. Async only for MERGE SHELLS (the kernel): the other fixes run in
+     the same turn, as they always did. */
+  async function fixAll() {
     if (card.working || !cur || card.stale) return;
     card.working = true;
     card.done = [];
@@ -494,7 +540,8 @@
         if (!next) break;
         tried[itemSig(next)] = 1;
         keepDone = true;
-        runItem(next);
+        if (next.fix === 'mergeShells') await runItem(next);
+        else runItem(next);
         ran++;
       }
     } finally { card.working = false; keepDone = false; }

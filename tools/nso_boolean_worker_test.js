@@ -11,7 +11,8 @@
 
      1. ROUTING AND BYTES. Two boxes (12 triangles each) never reach the worker. Past the threshold the same call
         does, and the answer is the in-thread core's, byte for byte: union, subtract, the plug punch with a real
-        plug frame (three.js objects over the boundary as numbers and back), and the two fills.
+        plug frame (three.js objects over the boundary as numbers and back), the two fills, and the overlapping-
+        shells measure and merge (nso-helpers.js nsoOverlap: work as is).
      2. CROP ON THE SPHERE, through the Crop card: the plan and the copy both run in the worker; the main thread
         has NO stretch of JS over 100 ms through either (the profiler reads the app's own time, as big:mesh does);
         the card shows the bar and "Cropping… N s", no percent; the copy lands, and it is the bytes the main
@@ -165,6 +166,21 @@ function pageKit() {
     check('Subtract (the plug punch, a real plug frame): in the worker, and the in-thread core\'s answer byte for byte (' + punch.tris + ' triangles)',
       punch.calls === 1 && punch.mineOk && punch.ok && punch.same, 'worker calls ' + punch.calls + ', ok ' + punch.ok + ', same ' + punch.same + ' ' + punch.reason);
     check('...with its nozzle-safety readout (the clearance probe ran in the worker too)', punch.warned);
+
+    // overlapping shells (work as is): the measure and the merge of library/box_closed.stl, past the threshold
+    const cid = await loadSTL(page, path.join(ROOT, 'library', 'box_closed.stl'));
+    const shells = await page.evaluate(async cid => {
+      const K = window.__k, raw = state.models.find(m => m.id === cid).rawTris;
+      const mineM = NSO_overlapMeasure(raw.slice()), mineS = await NSO_shellMergeCore(raw.slice());
+      NSO_BoolConfig.bigTris = 5;
+      K.spy();
+      let m, s;
+      try { m = await nsoOverlap.measureAsync(raw.slice()); s = await nsoOverlap.merge(raw.slice()); } finally { NSO_BoolConfig.bigTris = 50000; }
+      const calls = K.calls; K.unspy();
+      return { calls, measure: JSON.stringify(m) === JSON.stringify(mineM), m, ok: !!s.ok, same: K.sameResult(s, mineS), tris: (s.soup || []).length / 9 };
+    }, cid);
+    check('overlapping shells: the measure and the merge go to the worker, and are the in-thread answers byte for byte (' + shells.tris + ' triangles)',
+      shells.calls === 2 && shells.measure && shells.ok && shells.same, 'worker calls ' + shells.calls + ', ' + JSON.stringify(shells.m) + ', same ' + shells.same);
 
     /* ================================================================ 2 */
     console.log('\n=== 2. Crop on the 1,000,000-triangle sphere, through the card ===');

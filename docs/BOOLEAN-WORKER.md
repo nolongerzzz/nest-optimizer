@@ -54,6 +54,11 @@ under the same bar and Escape). The sentence is the same. If the check is stoppe
 let through unchecked. Crop, Join, Subtract, Connect and Bridge ask the awaited form; their plan step, which asks at
 every pointer move, takes a big piece's answer only if it is already known.
 
+**Since work-as-is (docs/WORK-AS-IS.md) the guard no longer refuses.** The same measure (now also counting the shells
+that cross) decides whether `nsoOverlap.solid` merges the piece's shells for the operation; the merge
+(`NSO_shellMergeJob`) runs in the worker for a big piece too (`Merging shells… N s`). A stopped check or merge still
+refuses in words.
+
 ## What the page shows
 
 `app-bool-busy.js`. While a job is in a worker: the #226 bar (the Supports card's
@@ -80,9 +85,10 @@ run) in that readout and in the status line.
 `npm run bool:3mf` drives it (the file is not in the repo; see the script's head). Measured here, in the headless
 browser with software GL:
 
-- The guard's verdict on the vase is **"has overlapping shells (4 piercing pairs)"**, the same sentence the unmodified
-  app gives after freezing the page for 36 s. So CROP on it is refused, as it was; what changed is that the check is a
-  `Checking… N s` bar over a live page (longest stretch of JS on the page's thread: 20 ms).
+- The guard's verdict on the vase was **"has overlapping shells (4 piercing pairs)"**, the same sentence the unmodified
+  app gives after freezing the page for 36 s, so CROP on it was refused; what this change made of it is that the check
+  is a `Checking… N s` bar over a live page (longest stretch of JS on the page's thread: 20 ms). Since work-as-is
+  (docs/WORK-AS-IS.md) CROP takes the copy: the vase's shells are merged for it, and `bool:3mf` gates that.
 - The boolean itself (`NSO_Crop.run`, what CROP asks the worker): 20,188 faces, ~20-27 s, longest stretch of JS on the
   page's thread **20 ms**; on the page's thread the same copy is ~20 s with the page unresponsive. The bytes are equal.
 - With the guard overridden (the drive's doing) the copy lands. What is left on the page's thread there is not the

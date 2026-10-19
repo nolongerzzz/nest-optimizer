@@ -394,6 +394,9 @@
     }
     var pierceXYZ = [];
     for (var pf in pierceFaces) triVerts(m, +pf, pierceXYZ);
+    /* Of those pairs, the ones that are whole shells laid through one another (NSO_Repair._overlapShells): the
+       card's MERGE SHELLS row. Counted, never a verdict of its own - the pairs already are. */
+    var ov = (typeof R._overlapShells === 'function') ? R._overlapShells(m, si.pairs) : null;
 
     var wall = wallThickness(m, minWall, probe, EPS, weldTol);
     var thinSet = Object.create(null);
@@ -420,6 +423,8 @@
       pierce: si.pierce,
       coplanar: si.coplanar,
       piercePairs: si.pairs.filter(function (p) { return p.kind === 'pierce'; }),
+      shells: ov ? ov.shells : null,
+      overlapShells: ov && ov.overlapShells >= 2 ? ov.overlapShells : 0,
       wall: wall,
       nonSolid: nonSolid,
       marks: {

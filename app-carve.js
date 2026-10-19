@@ -374,6 +374,13 @@
     return { soup: welded, dropped: dropped, weldTol: weldTol };
   }
 
+  /* The piece as the kernel will take it (nso-helpers.js, nsoOverlap.solid): its shells merged into one solid in
+     world, when they overlap. */
+  function solidFor(model, placed) {
+    if (typeof nsoOverlap === 'undefined' || !nsoOverlap) return Promise.resolve({ ok: true, merged: false });
+    return nsoOverlap.solid(model, { geometry: placed.mesh.geometry, mesh: placed.mesh });
+  }
+
   /* One carve. Returns the plan + numbers so the check can drive it headlessly
      and read what happened, not just the status text. */
   async function carveAt(target) {
@@ -381,8 +388,13 @@
     var placed = target.placed;
     var model = state.models.find(function (m) { return m && m.id === placed.sourceId; });
     if (!model || !placed.mesh) { say('Carve: that piece is not on the plate', true); return null; }
-    var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([model]) : '';
-    if (overlap) { say('Carve refused - ' + overlap + ' - piece unchanged', true); return { ok: false, reason: overlap }; }
+    // Work as is (nso-helpers.js, nsoOverlap): a piece whose shells overlap is carved as those shells merged into
+    // one solid; the carve replaces the piece with its result, as it always did.
+    var sol = await solidFor(model, placed);
+    if (!sol.ok) {
+      say(sol.cancelled ? 'Carve stopped - piece unchanged' : 'Carve refused - ' + sol.reason + ' - piece unchanged', !sol.cancelled);
+      return { ok: false, reason: sol.reason };
+    }
 
     var blade = currentBlade();
     var depth = numOf($('carve-depth'), 1);
@@ -390,7 +402,7 @@
     var params = currentParams(blade, depth);
 
     placed.mesh.updateMatrixWorld(true);
-    var hullSoup = meshToWorldSoup(placed.mesh);
+    var hullSoup = sol.merged ? sol.world : meshToWorldSoup(placed.mesh);
     var pt = target.hit.point;
 
     var planned = NSO_Carve.plan(hullSoup, [pt.x, pt.y, pt.z], blade, params, { depth: depth, roll: roll });
@@ -551,7 +563,8 @@
       ', non-manifold ' + res.nmBefore + '→' + res.nmAfter +
       (dropped ? ', welded away ' + dropped + ' seam sliver' + (dropped === 1 ? '' : 's') : '') +
       (wallNote ? ' - ' + wallNote : '') +
-      (cutWarn ? ' - ' + cutWarn : '');
+      (cutWarn ? ' - ' + cutWarn : '') +
+      (sol.merged ? ' - ' + sol.note : '');
     if (!NSO_sculptCommitRaw(model, raw, 'carveReplace', status)) {
       say('Carve: could not commit the result', true);
       return { ok: false, reason: 'commit failed', planned: planned };
@@ -589,15 +602,18 @@
     if (!window.NSO_Carve || !NSO_Carve.planStroke) { say('Carve needs nso_carve.js', true); return null; }
     var model = state.models.find(function (m) { return m && m.id === placed.sourceId; });
     if (!model || !placed.mesh) { say('Carve: that piece is not on the plate', true); return null; }
-    var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([model]) : '';
-    if (overlap) { say('Carve refused - ' + overlap + ' - piece unchanged', true); return { ok: false, reason: overlap, stroke: true }; }
+    var sol = await solidFor(model, placed);
+    if (!sol.ok) {
+      say(sol.cancelled ? 'Carve stopped - piece unchanged' : 'Carve refused - ' + sol.reason + ' - piece unchanged', !sol.cancelled);
+      return { ok: false, reason: sol.reason, stroke: true };
+    }
 
     var blade = currentBlade();
     var depth = numOf($('carve-depth'), 1);
     var params = currentParams(blade, depth);
 
     placed.mesh.updateMatrixWorld(true);
-    var hullSoup = meshToWorldSoup(placed.mesh);
+    var hullSoup = sol.merged ? sol.world : meshToWorldSoup(placed.mesh);
     var planned = NSO_Carve.planStroke(hullSoup, samples, blade, params, { depth: depth });
     if (!planned.ok && planned.short && pressTarget) return carveAt(pressTarget);
     if (!planned.ok) { say('Carve: ' + planned.reason, true); return { ok: false, reason: planned.reason, stroke: true }; }
@@ -678,7 +694,8 @@
       ' - open edges ' + before.open + '→' + out.after.open +
       ', non-manifold ' + before.nm + '→' + out.after.nm +
       (wd.dropped ? ', welded away ' + wd.dropped + ' seam sliver' + (wd.dropped === 1 ? '' : 's') : '') +
-      (wall ? ' - wall: ' + wall.reason + ' (two ' + STROKE_NOZZLE + ' mm nozzle widths)' : '');
+      (wall ? ' - wall: ' + wall.reason + ' (two ' + STROKE_NOZZLE + ' mm nozzle widths)' : '') +
+      (sol.merged ? ' - ' + sol.note : '');
     if (!NSO_sculptCommitRaw(model, raw, 'carveReplace', status)) {
       say('Carve: could not commit the result', true);
       return { ok: false, reason: 'commit failed', planned: planned, stroke: true };

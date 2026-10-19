@@ -66,14 +66,14 @@ the overlap), but the overlap is 74 real piercing pairs and 34 coplanar
 overlaps, so **do not run Join or Subtract on it** expecting a clean result.
 It is raw hull material for chopping and reassembling, not a CSG-safe part.
 
-The verbs that hand a piece to the boolean kernel now say so instead of failing
-downstream: Bridge (sheet, string), Connect (weld), Join, Subtract B from A and
-Crop Circle / Piece, Crop Move, Carve, Extract bit, Attach, Detach and Reattach refuse a piece whose shells cross one another (not merely touch) before anything is built -
-"box_closed has overlapping shells (74 piercing pairs); clean it with
-tools/nso_fixture_union first" (`nsoOverlap` in `nso-helpers.js`; driven by
-`npm run overlap:drive`). CHECK & REPAIR -> Repair does not merge overlapping
-shells ("nothing to repair", 74 -> 74 pairs), so the sentence points at the union
-tool, not at Repair.
+The verbs that hand a piece to the boolean kernel work on it as is: Crop's copy,
+Subtract B from A, Extract bit, the welds of Join / Connect / Bridge, Carve, Attach
+and Reattach union its shells into one solid for that operation and say so -
+"box_closed had 2 overlapping shells - merged for this operation" (`nsoOverlap` in
+`nso-helpers.js`; docs/WORK-AS-IS.md; driven by `npm run overlap:drive`). Crop
+leaves the piece on the plate byte for byte as it was. CHECK & REPAIR lists "2
+overlapping shells" with a MERGE SHELLS button that applies the same union to the
+piece itself.
 
 It is deliberately left as is rather than regenerated as a union, because
 `tools/sculpt_selftest.js` (section 10), `docs/SCULPT-TIER1.md` and the

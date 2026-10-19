@@ -9,10 +9,10 @@
 
    It imports the file through the app's own Import, picks the Crop card's Box, puts it across the vase's wall (a box
    in the middle of a vase holds air), lets the plan run, presses CROP, and writes to tools/boolean-out/ (git-ignored).
-   THE VASE FAILS THE OVERLAP GUARD: its shells cross at 4 places (the unmodified app says "has overlapping shells (4
-   piercing pairs)" after a 36 s freeze), so the first CROP is refused, now behind a "Checking\u2026" bar with the page
-   alive. The drive records that, then overrides the guard (the drive's doing, nothing in the app) so the boolean itself
-   is timed:
+   THE VASE'S SHELLS CROSS at 4 places (before work-as-is the app said "has overlapping shells (4 piercing pairs)" and
+   refused). Now the first CROP measures them ("Checking\u2026") and, if they are whole shells laid through one another,
+   merges them for the copy ("Merging shells\u2026"), in the worker with the page alive, and the copy lands; the readout
+   names the merge. The second CROP finds both answers kept and times the boolean alone:
      3mf-1-before.png    the vase on the plate, nothing cut
      3mf-2-during.png    the card three seconds into the copy: "Cropping… 3 s", the bar under it, the page alive
      3mf-3-after.png     the copy landed, selected, where it was cut from
@@ -137,19 +137,22 @@ const secs = ms => (ms / 1000).toFixed(1) + ' s';
     const jsLine = r => 'the page\'s thread: js ' + r.jsMs.toFixed(0) + ' ms in all, longest stretch ' + r.maxJsMs.toFixed(0) + ' ms; browser long tasks ' + r.longTasks.length +
       ' (max ' + Math.max(0, ...r.longTasks) + ' ms) - software GL draws a frame in ~0.4 s per million triangles whatever the app does';
 
-    // 1. as the app stands: the overlap guard looks at the vase first
-    console.log('\n=== CROP, as the app stands: the overlap guard checks the vase first ===');
+    // 1. as the app stands: the vase's shells are checked (and merged, if they cross) first, for the copy only
+    console.log('\n=== CROP, as the app stands: the shells are checked, and merged for the copy ===');
     const n0 = await page.evaluate(() => state.models.length);
-    const first = await press('CROP (guard on)', '3mf-2a-checking.png');
+    const raw0 = await page.evaluate(id => { window.__vaseRaw = state.models.find(m => m.id === id).rawTris; return window.__vaseRaw.length; }, big.id);
+    const first = await press('CROP (first: check and merge)', '3mf-2a-checking.png');
     summary.guard = { wallMs: first.run.value.ms, ok: !!(first.res && first.res.ok), reason: first.res && first.res.reason, longestJsMs: first.run.maxJsMs, jsMs: first.run.jsMs, longTasks: first.run.longTasks,
       barSeen: first.seen.some(s => s.label === 'Checking' && s.bar), lines: first.seen.length };
     console.log('  CROP took ' + secs(first.run.value.ms) + ' and was ' + (first.res && first.res.ok ? 'done' : 'refused: ' + (first.res && first.res.reason)));
     console.log('  ' + jsLine(first.run));
-    check('the vase\'s own overlapping shells are the guard\'s finding, as they were before (the unmodified app says the same after a 36 s freeze)',
-      !(first.res && first.res.ok) && /has overlapping shells \(\d+ piercing pairs\)/.test((first.res && first.res.reason) || ''), first.res && first.res.reason);
+    const mergedNote = /had \d+ overlapping shells - merged for this operation/.test((first.res && first.res.text) || '');
+    summary.guard.merged = mergedNote;
+    check('CROP is not refused for the vase\'s shells: the copy lands' + (mergedNote ? ', and the readout names the merge' : ' (its crossings are not whole shells, so nothing was merged)'),
+      !!(first.res && first.res.ok) && (await page.evaluate(() => state.models.length)) === n0 + 1, (first.res && (first.res.text || first.res.reason)));
     check('while it checked, the card said "Checking\u2026 N s" with the bar under it', first.seen.some(s => /^Checking\u2026 \d+ s$/.test(s.ro) && s.bar), first.seen.length + ' samples');
-    check('...and no stretch of JS over 100 ms on the page\'s thread', first.run.maxJsMs < 100, first.run.maxJsMs.toFixed(0) + ' ms');
-    check('nothing was added to the plate', (await page.evaluate(() => state.models.length)) === n0);
+    check('the vase on the plate is untouched', await page.evaluate(([id, n]) => state.models.find(m => m.id === id).rawTris === window.__vaseRaw && window.__vaseRaw.length === n, [big.id, raw0]));
+    await page.evaluate(i => { selectPlaced(state.placed.findIndex(q => q.sourceId === i)); }, big.id);
 
     // 2a. the boolean on its own - NSO_Crop.run, the engine the card's CROP calls once the guard has passed: no landing, no selection
     console.log('\n=== the boolean itself: NSO_Crop.run on the vase (what CROP asks the worker; no guard, no landing) ===');
@@ -159,6 +162,7 @@ const secs = ms => (ms / 1000).toFixed(1) + ' s';
         window.__eng = null;
         const m = state.models.reduce((a, b) => (b.rawTris.length > a.rawTris.length ? b : a));
         const rs = NSO_Crop.resolve(m, NSO_CropCard.shape());
+        rs.piece.rawTris = nsoOverlap.cachedMerge(m.rawTris) || rs.piece.rawTris;   // the solid CROP cuts from
         NSO_Crop.run(rs.piece, rs.shape).then(r => { window.__eng = { ok: r.ok, faces: r.faces, reason: r.reason, tris: r.tris }; });
       });
       while (!(await page.evaluate(() => !!window.__eng))) await sleep(500);
@@ -171,21 +175,19 @@ const secs = ms => (ms / 1000).toFixed(1) + ' s';
     check('NO stretch of JS over 100 ms on the page\'s thread while it ran', eng.maxJsMs < 100, eng.maxJsMs.toFixed(0) + ' ms' +
       (eng.jsRuns.length ? ' | ' + eng.jsRuns.map(r => r.ms.toFixed(0) + ' ms in ' + (r.incl[0] || ['?'])[0] + ' (self: ' + r.self.slice(0, 4).map(x => x[0].split(' @ ')[0] + ' ' + x[1].toFixed(0)).join(', ') + ')').join('; ') : ''));
 
-    // 2b. the guard overridden, so CROP runs and lands (the drive's doing; nothing in the app)
-    console.log('\n=== CROP with the guard overridden, to time the boolean ===');
-    await page.evaluate(() => { window.__guard = nsoOverlap.refusalOfModelsAsync; nsoOverlap.refusalOfModelsAsync = async () => ''; });
+    // 2b. CROP again: the check and the merge are kept, so this times the boolean and the landing
+    console.log('\n=== CROP again, the check and the merge kept: the boolean and the landing ===');
     await page.waitForFunction(() => { const S = NSO_CropCard.state(); return !!S.plan && !S.timer && NSO_BoolBusy.active() === 0; }, null, { timeout: 600000, polling: 200 });
     await frame();
-    const second = await press('CROP (guard overridden)', '3mf-2b-cropping.png');
+    const second = await press('CROP (again)', '3mf-2b-cropping.png');
     const run = second.run, res = second.res;
-    await page.evaluate(() => { nsoOverlap.refusalOfModelsAsync = window.__guard; });
-    summary.crop = { wallMs: run.value.ms, ok: !!(res && res.ok), faces: res && res.faces, name: res && res.name, longestJsMs: run.maxJsMs, jsMs: run.jsMs, longTasks: run.longTasks, guardOverridden: true };
+    summary.crop = { wallMs: run.value.ms, ok: !!(res && res.ok), faces: res && res.faces, name: res && res.name, longestJsMs: run.maxJsMs, jsMs: run.jsMs, longTasks: run.longTasks };
     console.log('  CROP took ' + secs(run.value.ms) + '; ' + (res && res.ok ? res.faces + ' faces landed as "' + res.name + '"' : 'refused: ' + (res && res.reason)));
     console.log('  ' + jsLine(run));
     await page.waitForTimeout(1200);
     await frame();
     await page.screenshot({ path: path.join(SHOTS, '3mf-3-after.png') });
-    check('the copy landed', res && res.ok && (await page.evaluate(() => state.models.length)) === n0 + 1, res && res.reason);
+    check('the copy landed', res && res.ok && (await page.evaluate(() => state.models.length)) === n0 + 2, res && res.reason);
     check('the card said "Cropping\u2026 N s" with the bar while it ran', second.seen.some(s => /^Cropping\u2026 \d+ s$/.test(s.ro) && s.bar), second.seen.length + ' samples');
     /* What is left on the page's thread is the LANDING of a 20,000-face copy beside a 1.46 M-triangle host, and the app's own
        reading of the piece just selected (Split to parts' index, app-split-parts.js): not the boolean. Reported, with names. */
@@ -205,6 +207,7 @@ const secs = ms => (ms / 1000).toFixed(1) + ' s';
       const main = await page.evaluate(async ([id, made]) => {
         const m = state.models.find(q => q.id === id), mine = state.models.find(q => q.id === made);
         const rs = NSO_Crop.resolve(m, NSO_CropCard.shape());
+        rs.piece.rawTris = nsoOverlap.cachedMerge(m.rawTris) || rs.piece.rawTris;
         const t = performance.now();
         const r = await NSO_Crop.cropCore(rs.piece, rs.shape, true);
         const ms = performance.now() - t;

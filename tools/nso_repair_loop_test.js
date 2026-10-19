@@ -27,6 +27,9 @@
  *   8. THE CHOICE ITSELF, on every fixture: flat rim CAP, curved rim PATCH, a pair BRIDGE, no clean
  *      loop REPAIR (whole piece), thin THICKEN OUT. (nso_findings_test.js pins the rows; this pins
  *      that the fix then does what its button says.)
+ *   9. MERGE SHELLS. library/box_closed.stl: "2 overlapping shells, 74 piercing pairs", one MERGE SHELLS
+ *      item; after the merge (nso_csg.js NSO_shellMergeCore, the verbs' own) 0 piercing pairs and a
+ *      canonical PASS. A lid with a triangle gone cannot be merged, and says so; contact is not overlap.
  */
 'use strict';
 const fs = require('fs');
@@ -259,6 +262,55 @@ console.log('8. the choice of fix, on every fixture that has a hole');
   }
 }
 
-console.log('\n' + pass + ' passed, ' + fail + ' failed');
-console.log(fail ? 'FAIL' : 'PASS');
-process.exit(fail ? 1 : 0);
+/* ------------------------------------------------------------------ 9. MERGE SHELLS */
+/* library/box_closed.stl is a tray and a lid slab laid through one another (74 piercing pairs). Check names it as
+   overlapping shells with one MERGE SHELLS item; the fix is NSO_shellMergeCore (nso_csg.js, the shipped file, the
+   same merge the boolean verbs make for their own operation) and after it the piece is one closed solid to the
+   canonical checker. A shell that is itself open cannot be merged into a closed solid: the merge says so in words.
+   A piece whose shells only touch, or that is one shell, gets no MERGE SHELLS. */
+async function mergeShells() {
+  console.log('9. MERGE SHELLS on library/box_closed.stl');
+  const fsx = require('fs'), vm = require('vm');
+  const { csgContext } = require('./nso_csg_node.js');
+  const { readSTL } = require('./nso_stl_io.js');
+  const K = csgContext();
+  vm.runInContext(fsx.readFileSync(path.join(L.ROOT, 'NSO_Repair.js'), 'utf8'), K, { filename: 'NSO_Repair.js' });
+  const box = new Float32Array(readSTL(path.join(L.ROOT, 'library', 'box_closed.stl')));
+  const { r, rows } = items(box), its = flat(rows);
+  const row = rows.find(x => x.kind === 'pierce');
+  ok(r.pierce === 74 && r.shells === 2 && r.overlapShells === 2, 'the report: 74 piercing pairs, 2 shells, both overlapping',
+     JSON.stringify({ pierce: r.pierce, shells: r.shells, overlapShells: r.overlapShells }));
+  ok(row && /^2 overlapping shells, 74 piercing pairs - shells passing through each other$/.test(row.title), 'the row: ' + (row && row.title));
+  const pi = (row && row.items) || [];
+  ok(pi.length === 1 && pi[0].fix === 'mergeShells' && pi[0].fixLabel === 'MERGE SHELLS' && pi[0].scope === 'whole piece' &&
+     its.filter(i => i.fix === 'mergeShells').length === 1, 'one item on the row, the button reads MERGE SHELLS, whole piece', JSON.stringify(its.map(i => i.fixLabel)));
+  const m = await K.NSO_shellMergeCore(box);
+  ok(m.ok && m.shells === 2, 'the merge ran on 2 shells', m.reason);
+  const after = items(m.soup);
+  ok(after.r.pierce === 0 && after.r.overlapShells === 0 && after.r.openEdges === 0 && after.r.nonManifoldEdges === 0,
+     'after: 0 piercing pairs, no overlapping shells, 0 open, 0 non-manifold',
+     JSON.stringify({ pierce: after.r.pierce, overlap: after.r.overlapShells, open: after.r.openEdges, nm: after.r.nonManifoldEdges }));
+  ok(!flat(after.rows).some(i => i.fix === 'mergeShells'), 'and the card offers MERGE SHELLS no more');
+  const can = L.canonical(m.soup, 'merge_shells');
+  ok(can.verdict === 'PASS' && can.pierce === 0 && can.open === 0 && can.nm === 0, 'canonical checker: PASS, 0 piercing, closed', JSON.stringify(can));
+  ok(Math.abs(Math.abs(can.volume) - m.volumeMm3) < 1e-2 * m.volumeMm3, 'the solid\'s volume is the union\'s: ' + Math.abs(can.volume).toFixed(1) + ' mm3',
+     String(m.volumeMm3));
+  // unmendable: the lid slab with a triangle gone is no closed shell, so no closed solid can come of the merge
+  const open = box.slice(0, box.length - 9);
+  const ro = items(open);
+  ok(ro.r.overlapShells === 2 && flat(ro.rows).some(i => i.fix === 'mergeShells'), 'an open lid still reads as overlapping shells, with MERGE SHELLS');
+  const mo = await K.NSO_shellMergeCore(open);
+  ok(!mo.ok && /^a shell is not closed, so there is no solid to merge/.test(mo.reason), 'its merge refuses in words: ' + mo.reason);
+  // contact is not overlap: a mark standing on a bar's face
+  const bx = (x0, y0, z0, x1, y1, z1) => { const vv = [[x0,y0,z0],[x1,y0,z0],[x1,y1,z0],[x0,y1,z0],[x0,y0,z1],[x1,y0,z1],[x1,y1,z1],[x0,y1,z1]], F2 = [[0,2,1],[0,3,2],[4,5,6],[4,6,7],[0,1,5],[0,5,4],[1,2,6],[1,6,5],[2,3,7],[2,7,6],[3,0,4],[3,4,7]], o = []; F2.forEach(f => f.forEach(i => o.push(...vv[i]))); return o; };
+  const marked = new Float32Array(bx(0, 0, 0, 60, 10, 6).concat(bx(50, 7, 6, 58, 10, 9)));
+  const rm = items(marked);
+  ok(rm.r.overlapShells === 0 && !flat(rm.rows).some(i => i.fix === 'mergeShells'), 'shells that only touch: no MERGE SHELLS',
+     JSON.stringify({ pierce: rm.r.pierce, overlap: rm.r.overlapShells }));
+}
+
+mergeShells().catch(e => { ok(false, 'MERGE SHELLS threw', e && e.stack); }).then(() => {
+  console.log('\n' + pass + ' passed, ' + fail + ' failed');
+  console.log(fail ? 'FAIL' : 'PASS');
+  process.exit(fail ? 1 : 0);
+});

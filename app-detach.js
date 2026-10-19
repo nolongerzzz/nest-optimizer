@@ -109,8 +109,6 @@
       return fail('Detach stood down - ' + painted + ' painted face(s); the hull is a new soup and ' +
         'cannot hold a face still. Clear paint to detach.');
     }
-    var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([m]) : '';
-    if (overlap) return fail('Detach refused - ' + overlap + ' - piece unchanged');
     busy = true;
     try {
       var det = NSO_Flange.detect(m.rawTris);
@@ -255,8 +253,11 @@
       return fail('Reattach stood down - ' + painted + ' painted face(s); the union replaces every ' +
         'triangle on the piece and cannot hold a face still. Clear paint to reattach.');
     }
-    var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([m]) : '';
-    if (overlap) return fail('Reattach refused - ' + overlap + ' - piece unchanged');
+    /* Work as is (nso-helpers.js, nsoOverlap): a piece whose shells overlap takes the flange as those shells
+       merged into one solid, in the same raw frame; the union replaces the piece, as it always did. */
+    var sol = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? await nsoOverlap.solid(m) : { ok: true, merged: false };
+    if (!sol.ok) return fail(sol.cancelled ? 'Reattach stopped - piece unchanged' : 'Reattach refused - ' + sol.reason + ' - piece unchanged');
+    var hull = sol.merged ? sol.soup : m.rawTris;
     var pick = window.nsoAttachRawPick(m, placed.mesh, worldPoint, localNormal);
     if (pick.error) return fail(pick.error);
 
@@ -276,18 +277,18 @@
       dir = [dir[0] / L, dir[1] / L, dir[2] / L];
     }
 
-    var r = NSO_Detach.reattach(m.rawTris, piece, { at: pick.at, dir: dir, up: up });
+    var r = NSO_Detach.reattach(hull, piece, { at: pick.at, dir: dir, up: up });
     if (!r.ok) return fail('Reattach refused - nothing changed: ' + r.reason);
 
     say('Reattaching (loading CSG kernel)...');
-    var u = await NSO_unionSoups(m.rawTris, r.soup);
+    var u = await NSO_unionSoups(hull, r.soup);
     if (!u.ok || !u.soup || u.soup.length < 9 || (u.parts != null && u.parts !== 1)) {
       return fail('Reattach refused - nothing changed: the union ' + (u.reason ? '- ' + u.reason : 'missed') +
         (u.parts > 1 ? ' (' + u.parts + ' parts)' : ''));
     }
     var fin = NSO_Detach.finishUnion(u.soup);
     if (!fin.ok) return fail('Reattach refused - nothing changed: ' + fin.reason);
-    var chk = NSO_Detach.unionCheck(m.rawTris, r.soup, fin.soup, r, piece);
+    var chk = NSO_Detach.unionCheck(hull, r.soup, fin.soup, r, piece);
     if (!chk.ok) return fail('Reattach refused - nothing changed: ' + chk.reason);
     var cc = (typeof NSO_cropCensus === 'function') ? NSO_cropCensus(fin.soup) : null;
     if (!cc) return fail('Reattach unavailable - the mesh checker (NSO_Repair) is not loaded; nothing changed');
@@ -301,6 +302,7 @@
       '), ' + r.exposedLengthMm.toFixed(2) + ' mm proud' + (r.keptLength ? ', full length' : '') + '; ' +
       chk.reason + '; ' + (fin.soup.length / 9) + ' tris, 0 open / 0 non-manifold';
     if (r.growWarning) txt += ' - ' + r.growWarning;
+    if (sol.merged) txt += ' - ' + sol.note;
 
     var removed = takeOff([fm.id]);
     if (!commitSwap(m, fin.soup, 'reattachReplace', txt,

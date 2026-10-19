@@ -359,7 +359,6 @@ function NSO_connectPreview() {
   try {
     p = NSO_Connect.plan(pieces, { piece: 0, target: C.a.target }, { piece: ids.indexOf(C.b.sourceId), target: C.b.target }, o);
   } catch (err) { p = { ok: false, reason: (err && err.message) || String(err) }; }
-  if (p.ok && p.result === 'weld') { var ov = NSO_bridgeOverlap(ids, true); if (ov) p = { ok: false, reason: ov, overlap: true }; }
   p.ids = ids;
   p.keys = [NSO_bridgePoseKey(C.a.placed), NSO_bridgePoseKey(C.b.placed)];
   C.plan = p;
@@ -485,22 +484,25 @@ async function NSO_connectRun(p) {
       return Promise.resolve({ ok: false, reason: 'painted faces: ' + painted, painted: painted });
     }
   }
+  var merged = '', wp = p;
   if (weld) {
-    // busy while the check runs, so a second press does not start a second
+    // busy while the shells are checked (and merged), so a second press does not start a second
     C.busy = true; NSO_connectSyncRows();
-    var overlap;
-    try { overlap = await NSO_bridgeOverlapAsync(p.ids, 'connect-readout'); }
+    var sol;
+    try { sol = await NSO_bridgeSolidPlan(p, 'connect-readout'); }
     finally { C.busy = false; NSO_connectSyncRows(); }
-    if (overlap) {
-      NSO_connectSay('Connect refused - pieces unchanged (' + overlap + ')', true); NSO_connectReadout('Connect: ' + overlap, true);
-      return Promise.resolve({ ok: false, reason: overlap, overlap: true });
+    if (!sol.ok) {
+      NSO_connectSay(sol.cancelled ? 'Connect stopped - pieces unchanged' : 'Connect refused - pieces unchanged (' + sol.reason + ')', !sol.cancelled);
+      NSO_connectReadout('Connect: ' + sol.reason, !sol.cancelled);
+      return Promise.resolve({ ok: false, reason: sol.reason, cancelled: !!sol.cancelled });
     }
+    wp = sol.plan; merged = sol.note;
   }
   C.busy = true; NSO_connectSyncRows();
   if (weld || p.tips) NSO_connectSay('Connecting (loading CSG kernel)...');
   var unionFn = (typeof NSO_unionSoups === 'function')
     ? function (a, b) { return NSO_unionSoups(a, b, { label: 'Connecting', host: 'connect-readout' }); } : null;
-  return NSO_Connect.weld(p, { union: unionFn }).then(function (r) {
+  return NSO_Connect.weld(wp, { union: unionFn }).then(function (r) {
     C.busy = false;
     if (!r.ok) {
       NSO_connectSay('Connect refused - pieces unchanged (' + r.reason + ')', true);
@@ -521,12 +523,14 @@ async function NSO_connectRun(p) {
       ? 'Connect done - ' + p.text + '; ' + (models.length === 2 ? 'two pieces are one' : 'the piece is closed on itself') + ', ' + (r.soup.length / 9) +
         ' faces. One Undo puts ' + (models.length === 2 ? 'both back.' : 'it back.')
       : 'Connect done - ' + p.text + '; ' + (r.soup.length / 9) + ' faces. One Undo takes it off the plate.';
+    if (merged) msg += ' (' + merged + '.)';
     NSO_connectSay(msg);
     // Armed for the next pair: A and B clear, the fields keep their values. What
     // was hovered may be a piece the weld has just consumed.
     C.hover = null; C.soups = {};
     NSO_connectClearPicks();
-    NSO_connectReadout('Connected. ' + (p.drawn ? NSO_CONNECT_DRAW_HINT : NSO_CONNECT_HINT), false);
+    NSO_connectReadout('Connected. ' + (merged ? merged + '. ' : '') + (p.drawn ? NSO_CONNECT_DRAW_HINT : NSO_CONNECT_HINT), false);
+    r.merged = merged;
     r.newId = c.id;
     return r;
   }).catch(function (err) {

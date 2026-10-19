@@ -1583,6 +1583,69 @@
     return out;
   }
 
+  /* ------------------------------------------------------------------ *
+   * Overlapping shells
+   *
+   * Which of the checker's piercing pairs are SHELLS laid through one
+   * another (library/box_closed.stl: a tray and a lid slab, 74 pairs) rather
+   * than contact. A pair counts when its two triangles truly cross - each
+   * straddles the other's plane by more than OVERLAP_CROSS_MM, so shells that
+   * merely touch (a mark sitting on a bar's face) and near-coplanar slivers do
+   * not - and lies on two different shells (faces joined through a shared
+   * welded vertex). A shell that pierces only itself is not this.
+   *
+   * m: the welded mesh (weldToIndexed). pairs: _selfIntersectionDetail's,
+   * with collect on. -> { shells, crossing, overlapShells }: every shell in
+   * the piece, the crossing pairs, and how many shells take part in one.
+   * nso_csg.js (the boolean verbs' merge) and nso-defects.js (Check's
+   * "N overlapping shells" finding) both ask this.
+   * ------------------------------------------------------------------ */
+  var OVERLAP_CROSS_MM = 1e-3;
+
+  function pairCrosses(m, fa, fb) {
+    function tri(f) {
+      var v = [];
+      for (var i = 0; i < 3; i++) { var o = m.faces[f * 3 + i] * 3; v.push([m.pos[o], m.pos[o + 1], m.pos[o + 2]]); }
+      return v;
+    }
+    function straddles(T, U) {          // does U straddle T's plane?
+      var e1 = [T[1][0] - T[0][0], T[1][1] - T[0][1], T[1][2] - T[0][2]], e2 = [T[2][0] - T[0][0], T[2][1] - T[0][1], T[2][2] - T[0][2]];
+      var n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+      var L = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+      if (!(L > 0)) return false;
+      var pos = false, neg = false;
+      for (var i = 0; i < 3; i++) {
+        var d = ((U[i][0] - T[0][0]) * n[0] + (U[i][1] - T[0][1]) * n[1] + (U[i][2] - T[0][2]) * n[2]) / L;
+        if (d > OVERLAP_CROSS_MM) pos = true; else if (d < -OVERLAP_CROSS_MM) neg = true;
+      }
+      return pos && neg;
+    }
+    var A = tri(fa), B = tri(fb);
+    return straddles(A, B) && straddles(B, A);
+  }
+
+  function overlapShells(m, pairs) {
+    var nf = faceCount(m), nv = m.pos.length / 3;
+    var parent = new Int32Array(nv);
+    for (var i = 0; i < nv; i++) parent[i] = i;
+    function find(a) { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; }
+    function unite(a, b) { a = find(a); b = find(b); if (a !== b) parent[a] = b; }
+    for (var f = 0; f < nf; f++) { unite(m.faces[f * 3], m.faces[f * 3 + 1]); unite(m.faces[f * 3], m.faces[f * 3 + 2]); }
+    var roots = Object.create(null), shells = 0;
+    for (f = 0; f < nf; f++) { var r = find(m.faces[f * 3]); if (!roots[r]) { roots[r] = 1; shells++; } }
+    var crossing = 0, inOverlap = Object.create(null), overlapShells = 0;
+    for (i = 0; i < (pairs || []).length; i++) {
+      var p = pairs[i];
+      if (p.kind !== 'pierce' || !pairCrosses(m, p.a, p.b)) continue;
+      crossing++;
+      var ra = find(m.faces[p.a * 3]), rb = find(m.faces[p.b * 3]);
+      if (ra === rb) continue;
+      if (!inOverlap[ra]) { inOverlap[ra] = 1; overlapShells++; }
+      if (!inOverlap[rb]) { inOverlap[rb] = 1; overlapShells++; }
+    }
+    return { shells: shells, crossing: crossing, overlapShells: overlapShells };
+  }
+
   global.NSO_Repair = {
     VERSION: VERSION,
     WELD_TOL: WELD_TOL,
@@ -1599,7 +1662,9 @@
      * adjacency it draws is the one this file counts rather than a second
      * transcription of the same loop. */
     _buildEdges: buildEdges,
-    _analyze: analyze
+    _analyze: analyze,
+    /* Overlapping shells (above), for nso_csg.js and nso-defects.js. */
+    _overlapShells: overlapShells
   };
 
 })(typeof window !== 'undefined' ? window : this);

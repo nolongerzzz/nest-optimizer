@@ -1423,9 +1423,13 @@ async function subtractBFromA() {
     setStatus('Select hull A and bit B', true);
     return;
   }
-  const overlapSub = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? await nsoOverlap.refusalOfModelsAsync([modelA, modelB]) : '';
-  if (overlapSub) {
-    setStatus('Subtract refused - ' + overlapSub + ' - A and B unchanged', true);
+  // Work as is (nso-helpers.js, nsoOverlap): a piece whose shells overlap goes to the kernel as those shells
+  // merged into one solid. A is replaced by the result anyway; B is used up.
+  const solSub = (typeof nsoOverlap !== 'undefined' && nsoOverlap)
+    ? await nsoOverlap.solids([modelA, modelB], (m, i) => { const pl = i ? placedB : placedA; return { geometry: pl.mesh.geometry, mesh: pl.mesh }; })
+    : { ok: true, list: [], note: '' };
+  if (!solSub.ok) {
+    setStatus(solSub.cancelled ? 'Subtract stopped - nothing was changed' : 'Subtract refused - ' + solSub.reason + ' - A and B unchanged', !solSub.cancelled);
     return;
   }
 
@@ -1433,8 +1437,8 @@ async function subtractBFromA() {
   try {
     placedA.mesh.updateMatrixWorld(true);
     placedB.mesh.updateMatrixWorld(true);
-    const aWorld = meshToWorldSoup(placedA.mesh);
-    const bWorld = meshToWorldSoup(placedB.mesh);
+    const aWorld = (solSub.list[0] && solSub.list[0].merged) ? solSub.list[0].world : meshToWorldSoup(placedA.mesh);
+    const bWorld = (solSub.list[1] && solSub.list[1].merged) ? solSub.list[1].world : meshToWorldSoup(placedB.mesh);
     placedA.mesh.updateMatrixWorld(true);
     if (!placedA.mesh.geometry.boundingBox) placedA.mesh.geometry.computeBoundingBox();
     const hullCenter = new THREE.Vector3();
@@ -1467,6 +1471,7 @@ async function subtractBFromA() {
     var cutWarn = (typeof NSO_Thickness !== 'undefined' && res.clearance)
       ? NSO_Thickness.cutWarning(res.clearance) : '';
     if (cutWarn) window.__nestSubtractMsg += ' - ' + cutWarn;
+    if (solSub.note) window.__nestSubtractMsg += ' - ' + solSub.note;
   } catch (err) {
     const why = (err && err.message) ? String(err.message) : 'unknown';
     console.warn('[subtract] failed:', why);
@@ -2015,7 +2020,7 @@ function NSO_floodFillLargestEmptyCluster(empty, nx, ny, nz) {
   return best;
 }
 
-function extractBitFromSelected() {
+async function extractBitFromSelected() {
   const p = state.selectedIndex >= 0 ? state.placed[state.selectedIndex] : null;
   const model = p && p.sourceId != null
     ? state.models.find(function (m) { return m.id === p.sourceId; })
@@ -2025,14 +2030,24 @@ function extractBitFromSelected() {
     return;
   }
   // The cavity is found by even-odd inside tests, which shells laid over one
-  // another turn inside out (nso-helpers.js, nsoOverlap).
-  const overlapBit = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([model]) : '';
-  if (overlapBit) {
-    setStatus('Extract refused - ' + overlapBit + ' - piece unchanged', true);
+  // another turn inside out: such a piece is read as its shells merged into one
+  // solid (nso-helpers.js, nsoOverlap). The piece itself is not touched.
+  const solBit = (typeof nsoOverlap !== 'undefined' && nsoOverlap)
+    ? await nsoOverlap.solid(model, { geometry: model.geometry }) : { ok: true, merged: false };
+  if (!solBit.ok) {
+    setStatus(solBit.cancelled ? 'Extract stopped - piece unchanged' : 'Extract refused - ' + solBit.reason + ' - piece unchanged', !solBit.cancelled);
     return;
   }
   const py = p.mesh.position.y;
-  const soupPiece = geomToWorldSoup(model.geometry, p.x, py, p.z);
+  let soupPiece;
+  if (solBit.merged) {
+    soupPiece = new Float32Array(solBit.soup.length);
+    for (let i = 0; i < soupPiece.length; i += 3) {
+      soupPiece[i] = solBit.soup[i] + p.x; soupPiece[i + 1] = solBit.soup[i + 1] + py; soupPiece[i + 2] = solBit.soup[i + 2] + p.z;
+    }
+  } else {
+    soupPiece = geomToWorldSoup(model.geometry, p.x, py, p.z);
+  }
   if (!soupPiece || soupPiece.length < 9) {
     setStatus('Extract failed - piece unchanged', true);
     return;
@@ -2126,7 +2141,8 @@ function extractBitFromSelected() {
   const xPlace = p.x + (p.width || size.x) / 2 + size.x / 2 + 6;
   const m = state.models.find(function (mm) { return mm.id === id; });
   if (m) placeModelMovable(m, xPlace, p.z);
-  setStatus('Extract bit ok - solid ' + size.x.toFixed(1) + 'x' + size.y.toFixed(1) + 'x' + size.z.toFixed(1) + ' mm');
+  setStatus('Extract bit ok - solid ' + size.x.toFixed(1) + 'x' + size.y.toFixed(1) + 'x' + size.z.toFixed(1) + ' mm' +
+    (solBit.merged ? ' - ' + solBit.note : ''));
 }
 
 async function joinSelectedModels() {
@@ -2143,17 +2159,20 @@ async function joinSelectedModels() {
     return;
   }
 
-  // Pieces with overlapping shells are refused here, before any route runs
-  // (nso-helpers.js, nsoOverlap): the plate weld would stack them, the kernel
-  // would call the result open, and neither says why.
-  const overlapJoin = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? await nsoOverlap.refusalOfModelsAsync([modelA, modelB]) : '';
-  if (overlapJoin) {
-    setStatus('Join refused - ' + overlapJoin + ' - A and B unchanged', true);
-    return;
-  }
-
   const placedA = state.placed.find(p => p && p.sourceId === idA);
   const placedB = state.placed.find(p => p && p.sourceId === idB);
+
+  // Work as is (nso-helpers.js, nsoOverlap): a piece whose shells overlap is
+  // welded as those shells merged into one solid. The fuse and the plate weld
+  // would stack the shells, so a merged pair goes to the kernel union alone.
+  const solJoin = (typeof nsoOverlap !== 'undefined' && nsoOverlap && placedA && placedB && placedA.mesh && placedB.mesh)
+    ? await nsoOverlap.solids([modelA, modelB], (m, i) => { const pl = i ? placedB : placedA; return { geometry: pl.mesh.geometry, mesh: pl.mesh }; })
+    : { ok: true, list: [], note: '' };
+  if (!solJoin.ok) {
+    setStatus(solJoin.cancelled ? 'Join stopped - nothing was changed' : 'Join refused - ' + solJoin.reason + ' - A and B unchanged', !solJoin.cancelled);
+    return;
+  }
+  const solidOnly = !!solJoin.note;
   const poseA = placedA ? { x: placedA.x, z: placedA.z } : { x: 0, z: 0 };
   const poseB = placedB ? { x: placedB.x, z: placedB.z } : { x: 0, z: 0 };
 
@@ -2169,8 +2188,8 @@ async function joinSelectedModels() {
       const mA = placedA.mesh || placedA, mB = placedB.mesh || placedB;
       if (mA.updateMatrixWorld) mA.updateMatrixWorld(true);
       if (mB.updateMatrixWorld) mB.updateMatrixWorld(true);
-      joinSoupA = meshToWorldSoup(mA);
-      joinSoupB = meshToWorldSoup(mB);
+      joinSoupA = (solJoin.list[0] && solJoin.list[0].merged) ? solJoin.list[0].world : meshToWorldSoup(mA);
+      joinSoupB = (solJoin.list[1] && solJoin.list[1].merged) ? solJoin.list[1].world : meshToWorldSoup(mB);
       if (!NSO_soupLen(joinSoupA) || !NSO_soupLen(joinSoupB)) joinSoupA = joinSoupB = null;
     } catch (e) { joinSoupA = joinSoupB = null; }
   }
@@ -2201,7 +2220,9 @@ async function joinSelectedModels() {
   let fuseGeo = null, fuseStats = null, fuseInfo = null, fuseWhy = '';
   const paintedJoin = (typeof nsoMaskCount === 'function')
     ? (nsoMaskCount(modelA) + nsoMaskCount(modelB)) : 0;
-  if (typeof NSO_fuseFindMating !== 'function' || typeof NSO_planarFusePair !== 'function') {
+  if (solidOnly) {
+    fuseWhy = 'overlapping shells merged - the kernel union welds them';
+  } else if (typeof NSO_fuseFindMating !== 'function' || typeof NSO_planarFusePair !== 'function') {
     fuseWhy = 'fusion module not loaded';
   } else if (paintedJoin > 0) {
     // Paint wins (docs/HANDOFF.md), and the Paint faces button says so in as
@@ -2281,6 +2302,8 @@ async function joinSelectedModels() {
     // A real fuse already landed. Skip the plate route rather than let it
     // nudge the poses to close a kerf that is no longer there.
     legacyWhy = 'not needed - planar fuse succeeded';
+  } else if (solidOnly) {
+    legacyWhy = 'overlapping shells merged - the kernel union welds them';
   } else try {
     if (placedA && placedB) {
       const yA = placedA.mesh ? placedA.mesh.position.y : 0;
@@ -2486,7 +2509,8 @@ async function joinSelectedModels() {
   setStatus('Join ok (' + route + ') - open edges ' + before.open + '\u2192' + after.open +
             ', non-manifold ' + before.nm + '\u2192' + after.nm +
             (fuseInfo ? '; seam fused, ' + fuseInfo.removed + ' cap tri(s) removed, ' +
-                        fuseInfo.triIn + '\u2192' + fuseInfo.triOut + ' tris' : ''));
+                        fuseInfo.triIn + '\u2192' + fuseInfo.triOut + ' tris' : '') +
+            (solJoin.note ? ' - ' + solJoin.note : ''));
 }
 
 

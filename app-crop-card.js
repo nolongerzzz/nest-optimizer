@@ -173,7 +173,7 @@
     if (S.shape === 'outline' && S.outline.id == null) return 'Outline: click a piece for its footprint, or Shift-click a triangle for its rim.';
     var d = describe();
     if (!S.plan) return d + ' · …';
-    if (S.plan.ok) return d + ' · holds ' + S.plan.faces + ' faces, ' + cm3(S.plan.volumeMm3);
+    if (S.plan.ok) return d + ' · holds ' + S.plan.faces + ' faces, ' + cm3(S.plan.volumeMm3) + (S.plan.merged ? ' · ' + S.plan.merged : '');
     return d + ' · ' + S.plan.reason;
   }
 

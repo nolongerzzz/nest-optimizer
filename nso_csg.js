@@ -779,58 +779,90 @@ function weldSoupVerts(soup, eps) {
 
 
 /* =====================================================================
-   THE OVERLAP GUARD'S MEASURING  (nso-helpers.js, nsoOverlap)
+   OVERLAPPING SHELLS: THE MEASURE AND THE MERGE  (nso-helpers.js, nsoOverlap)
 
-   Every boolean verb asks "are there overlapping shells?" before the kernel runs. Measuring it walks every
-   triangle of the piece (a weld, then the checker's self-intersection pairs): 25 s on a 1,000,000-triangle piece,
-   on the thread the page is painted by. The measuring moved here, unchanged, so the boolean worker can run it;
-   nso-helpers.js keeps the per-piece answer and the sentence, and asks the worker for a big piece
-   (nsoOverlap.refusalOfModelsAsync). Needs NSO_Repair.js, which the worker loads too.
+   A piece that is several shells laid through one another (library/box_closed.stl: a tray and a lid slab that
+   overlap by 0.1 mm, 74 piercing pairs) is not one solid to the kernel. No verb refuses it for that any more: the
+   verbs that need a solid (Crop's copy, Subtract, Extract bit, the welds of Join / Connect / Bridge, Carve, Attach,
+   Reattach) ask nsoOverlap.solid first, which measures the piece here and, when its shells cross, merges them here
+   into one solid for that operation. Both walk every triangle (the measure: 25 s on a 1,000,000-triangle piece), so
+   both live in this file, which the boolean worker loads too; nso-helpers.js keeps their answers per piece and asks
+   the worker for a big one. Needs NSO_Repair.js for the measure (the worker loads it too).
    ===================================================================== */
-var NSO_OVERLAP_CROSS_MM = 1e-3;
 
-// Do triangles fa and fb of mesh m cross, both straddling the other's plane by more than NSO_OVERLAP_CROSS_MM?
-function NSO_overlapCrosses(m, fa, fb) {
-  function tri(f) {
-    var v = [];
-    for (var i = 0; i < 3; i++) { var o = m.faces[f * 3 + i] * 3; v.push([m.pos[o], m.pos[o + 1], m.pos[o + 2]]); }
-    return v;
-  }
-  function straddles(T, U) {          // does U straddle T's plane?
-    var e1 = [T[1][0] - T[0][0], T[1][1] - T[0][1], T[1][2] - T[0][2]], e2 = [T[2][0] - T[0][0], T[2][1] - T[0][1], T[2][2] - T[0][2]];
-    var n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
-    var L = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-    if (!(L > 0)) return false;
-    var pos = false, neg = false;
-    for (var i = 0; i < 3; i++) {
-      var d = ((U[i][0] - T[0][0]) * n[0] + (U[i][1] - T[0][1]) * n[1] + (U[i][2] - T[0][2]) * n[2]) / L;
-      if (d > NSO_OVERLAP_CROSS_MM) pos = true; else if (d < -NSO_OVERLAP_CROSS_MM) neg = true;
-    }
-    return pos && neg;
-  }
-  var A = tri(fa), B = tri(fb);
-  return straddles(A, B) && straddles(B, A);
-}
-
-// { pierce, crossing } for a raw soup: the checker's pairs, and those that truly cross; null when it cannot be asked.
+// { pierce, crossing, shells, overlapShells } for a raw soup: the checker's pairs, those that truly cross, the
+// piece's shells and how many of them cross another (NSO_Repair._overlapShells); null when it cannot be asked.
 function NSO_overlapMeasure(soup) {
   if (!soup || !soup.length) return null;
   if (typeof NSO_Repair === 'undefined' || !NSO_Repair || typeof NSO_Repair._selfIntersectionDetail !== 'function' ||
-      typeof NSO_Repair._weldToIndexed !== 'function') return null;
+      typeof NSO_Repair._weldToIndexed !== 'function' || typeof NSO_Repair._overlapShells !== 'function') return null;
   var out;
   try {
     var mesh = NSO_Repair._weldToIndexed(soup, NSO_Repair.WELD_TOL).mesh;
     var d = NSO_Repair._selfIntersectionDetail(mesh, { collect: true });
-    out = { pierce: d.pierce, crossing: 0 };
-    for (var i = 0; i < d.pairs.length; i++) {
-      if (d.pairs[i].kind === 'pierce' && NSO_overlapCrosses(mesh, d.pairs[i].a, d.pairs[i].b)) out.crossing++;
-    }
+    var o = NSO_Repair._overlapShells(mesh, d.pairs);
+    out = { pierce: d.pierce, crossing: o.crossing, shells: o.shells, overlapShells: o.overlapShells };
   } catch (e) { return null; }
   return out;
 }
 
 /* In the worker: the measuring of the soup it was sent. */
 function NSO_overlapJob(soup) { return NSO_overlapMeasure(soup); }
+
+/* The merge: every shell of the piece, as one closed solid. The pass tools/nso_fixture_union.mjs makes, in the
+   kernel the verbs use. The soup is welded as a union's input is, lifted whole (so a shell that is not closed
+   stops it here: the kernel will not take an open or non-manifold mesh), split into its shells, and the shells
+   that hold volume are unioned. A shell wound inward is a cavity (a hollowed piece's inner wall): it is turned
+   the right way out and taken away from the union, so a hollow piece stays hollow.
+   -> { ok, soup, shells, cavities, volumeMm3 } or { ok: false, reason } - the reason in words a readout can use. */
+async function NSO_shellMergeCore(soup) {
+  if (!NSO_soupLen(soup)) return { ok: false, reason: 'empty soup' };
+  var wasm;
+  try { wasm = await NSO_CSG.load(); }
+  catch (err) { return { ok: false, reason: 'CSG kernel failed to load: ' + NSO_errMsg(err) }; }
+  var live = [];                                  // every kernel object made here, deleted at the end
+  function keep(m) { live.push(m); return m; }
+  function inward(c) {                            // a shell wound inward, turned the right way out
+    var mesh = c.getMesh(), tv = mesh.triVerts.slice();
+    for (var i = 0; i < tv.length; i += 3) { var t = tv[i + 1]; tv[i + 1] = tv[i + 2]; tv[i + 2] = t; }
+    return keep(new wasm.Manifold(new wasm.Mesh({ numProp: mesh.numProp, vertProperties: mesh.vertProperties, triVerts: tv })));
+  }
+  try {
+    var aIn = soup;
+    try { aIn = weldSoupVerts(soup, NSO_weldEpsFor(soup, 0.08)); } catch (e0) { aIn = soup; }
+    var whole = null, st0;
+    try { whole = keep(NSO_CSG.soupToManifold(wasm, aIn)); st0 = whole.status(); }
+    catch (e1) { st0 = NSO_errMsg(e1); }
+    if (st0 !== 'NoError') {
+      return { ok: false, reason: 'a shell is not closed, so there is no solid to merge (the kernel says ' + st0 + ')' };
+    }
+    var comps = whole.decompose(), solids = [], voids = [];
+    comps.forEach(function (c) {
+      keep(c);
+      var v = c.volume();
+      if (v > 0) solids.push(c);
+      else if (v < 0) voids.push(inward(c));
+    });
+    if (!solids.length) return { ok: false, reason: 'no shell encloses any volume' };
+    var out = solids.length === 1 ? solids[0] : keep(wasm.Manifold.union(solids));
+    for (var i = 0; i < voids.length; i++) out = keep(out.subtract(voids[i]));
+    var st = out.status();
+    if (st !== 'NoError') return { ok: false, reason: 'the kernel would not merge them (' + st + ')' };
+    if (out.isEmpty()) return { ok: false, reason: 'the merge came back empty' };
+    var ms = NSO_manifoldStats(out);
+    if (ms.exact && (ms.open || ms.nm)) {
+      return { ok: false, reason: 'the merge came back open (' + ms.open + ' open, ' + ms.nm + ' non-manifold edges)' };
+    }
+    return { ok: true, soup: NSO_CSG.manifoldToSoup(out), shells: comps.length, cavities: voids.length, volumeMm3: out.volume() };
+  } catch (err) {
+    return { ok: false, reason: NSO_errMsg(err) };
+  } finally {
+    live.forEach(function (m) { try { m.delete(); } catch (e) { /* already gone */ } });
+  }
+}
+
+/* In the worker: the merge of the soup it was sent, its result moved back. */
+function NSO_shellMergeJob(soup) { return NSO_shellMergeCore(soup).then(NSO_boolHandBack); }
 
 
 /* =====================================================================

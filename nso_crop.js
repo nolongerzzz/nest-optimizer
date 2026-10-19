@@ -310,6 +310,14 @@
             M[1] * x + M[5] * y + M[9] * z + M[13],
             M[2] * x + M[6] * y + M[10] * z + M[14]];
   }
+  function matApplySoup(M, s) {
+    var out = new Float32Array(s.length);
+    for (var i = 0; i < s.length; i += 3) {
+      var q = matApply(M, s[i], s[i + 1], s[i + 2]);
+      out[i] = q[0]; out[i + 1] = q[1]; out[i + 2] = q[2];
+    }
+    return out;
+  }
   function matInvert(M) {
     var a = M[0], b = M[4], c = M[8], d = M[1], e = M[5], f = M[9], g = M[2], h = M[6], i = M[10];
     var A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
@@ -1008,7 +1016,14 @@
   async function planOn(m, shape) {
     var r = resolve(m, shape);
     if (r.reason) return { ok: false, reason: r.reason };
-    return plan(r.piece, r.shape);
+    // a piece whose shells a CROP already merged is planned on that solid, as its copy will be
+    var mergedRaw = root && root.nsoOverlap ? root.nsoOverlap.cachedMerge(r.piece.rawTris) : null;
+    if (!mergedRaw) return plan(r.piece, r.shape);
+    var n = root.nsoOverlap.shells(r.piece.rawTris, true);
+    r.piece.rawTris = mergedRaw;
+    var p = await plan(r.piece, r.shape);
+    if (p && p.ok) p.merged = root.nsoOverlap.note(m.name, n);
+    return p;
   }
 
   /* The outline's footprint F - before any offset - as plain loops in P:
@@ -1048,13 +1063,30 @@
       return { ok: false, reason: 'Crop copy needs the app' };
     }
     if (busy) return { ok: false, reason: 'busy' };
-    var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? await nsoOverlap.refusalOfModelsAsync([m], 'crop-readout') : '';
-    if (overlap) return refuse(overlap);
     var rs = resolve(m, shape);
     if (rs.reason) return refuse(rs.reason);
     var host = rs.host;
     busy = true;
     try {
+      /* Work as is (nso-helpers.js, nsoOverlap): a piece - or a Piece cutter - whose shells overlap is cut from
+         those shells merged into one solid, for this copy only. The piece on the plate is not touched. */
+      var merged = [];
+      if (root && root.nsoOverlap) {
+        var sol = await root.nsoOverlap.solid(m, null, 'crop-readout');
+        if (!sol.ok) return refuse(sol.reason, sol);
+        if (sol.merged) { rs.piece.rawTris = sol.soup; merged.push(sol.note); }
+        // a Piece cutter is a solid too; an Outline reads its piece's triangles by index, so it is left as drawn
+        var cutter = rs.shape.kind === 'piece' && rs.shape.pieceId != null ? placedOf(rs.shape.pieceId) : null;
+        var cm = cutter && cutter.sourceId !== m.id ? (state.models || []).find(function (x) { return x.id === cutter.sourceId; }) : null;
+        if (cm) {
+          var cs = await root.nsoOverlap.solid(cm, { geometry: cutter.mesh.geometry, mesh: cutter.mesh }, 'crop-readout');
+          if (!cs.ok) return refuse(cs.reason, cs);
+          if (cs.merged) { rs.shape.source = root.nsoOverlap.zUp(cs.world); merged.push(cs.note); }
+        } else if (cutter && sol.merged) {
+          // the piece is its own cutter: the same merged solid, through the pose it is drawn with
+          rs.shape.source = matApplySoup(matInvert(rs.piece.toRaw), sol.soup);
+        }
+      }
       var r = await run(rs.piece, rs.shape);
       if (!r.ok) return refuse(r.reason, r);
 
@@ -1075,7 +1107,8 @@
       if (typeof renderModelList === 'function') renderModelList();
       if (typeof updateAdjustUI === 'function') updateAdjustUI();
       var text = 'Crop: "' + name + '" - ' + say(r, 'copied') +
-        ' It sits where it was cut from; grab it to move it. One Undo removes it.';
+        ' It sits where it was cut from; grab it to move it. One Undo removes it.' +
+        (merged.length ? ' (' + merged.join('; ') + '.)' : '');
       status(text);
       return { ok: true, id: id, name: name, faces: r.faces, volumeMm3: r.volumeMm3, bbox: r.bbox, text: text };
     } catch (err) {
