@@ -24,6 +24,9 @@
    (_buildDownGrid / _nearestHitDown) - the index every detection ray in the
    planner already goes through - not a second one.
 
+   A spot inside another solid (two parts that overlap without being
+   unioned) stands on material and is not flagged.
+
    Flagged triangles are grouped into regions by shared (welded) vertices.
    Each region reports its area, its box and its centroid, per object.
 
@@ -44,6 +47,13 @@
    of one of its points, and between 0 and MATCH_DZ above it. An audit region
    Bambu LEFT ALONE is one none of whose flagged samples has a Bambu top
    interface point that close.
+
+   THE SHADOW (also --gcode): straight up from every interface line, what is
+   met first - the part; a tree, with the part above it; a tree and nothing
+   above it (and of those, the ones with the tree within 1 mm, which is
+   interface holding up a tree alone); or nothing. Bambu projects its support
+   down from the overhangs it found, so the column says whose overhang a line
+   belongs to even where a tree crosses the column on the way down.
 
    USAGE
      node tools/nso_slicer_audit.js export.3mf
@@ -82,6 +92,23 @@ function triNormal(s, o) {
   const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
   const L = Math.sqrt(nx * nx + ny * ny + nz * nz);
   return L > 1e-15 ? { n: [nx / L, ny / L, nz / L], area: L / 2 } : null;
+}
+
+function boundsOf(s) {
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (let i = 0; i < s.length; i++) { const k = i % 3; if (s[i] < lo[k]) lo[k] = s[i]; if (s[i] > hi[k]) hi[k] = s[i]; }
+  return { lo, hi };
+}
+
+/* A spot just under a face that is inside a solid - another part, or a part
+   of the same object that overlaps it without being unioned - stands on
+   material, however far the down ray has to go to leave it. */
+function insideAny(boxes, q) {
+  for (const { soup, b } of boxes) {
+    if (q[0] < b.lo[0] || q[0] > b.hi[0] || q[1] < b.lo[1] || q[1] > b.hi[1] || q[2] < b.lo[2] || q[2] > b.hi[2]) continue;
+    if (SA._windingInside(soup, q)) return true;
+  }
+  return false;
 }
 
 function lowestZ(soups) {
@@ -130,6 +157,7 @@ function audit(supports, occluders, opts) {
   const occ = (occluders || []).filter(s => s && s.length >= 9);
   const plateZ = opts.plateZ == null ? lowestZ(soups.concat(occ)) : +opts.plateZ;
   const grid = SA._buildDownGrid(soups.concat(occ));
+  const boxes = soups.concat(occ).map(soup => ({ soup, b: boundsOf(soup) }));
   const out = { ok: true, maxFromVerticalDeg: maxDeg, layerMm: layer, plateZ, samples: k,
                 flaggedAreaMm2: 0, downAreaMm2: 0, objects: [], regions: [] };
 
@@ -145,8 +173,10 @@ function audit(supports, occluders, opts) {
       const pts = samplesOf(s, t * 9, k), air = [];
       for (const p of pts) {
         if (p[2] - plateZ <= layer) continue;                         /* on the plate */
-        const hit = SA._nearestHitDown(grid, [p[0], p[1], p[2] - RAY_EPS_MM], 0, layer);
-        if (!(hit >= 0)) air.push(p);
+        const q = [p[0], p[1], p[2] - RAY_EPS_MM];
+        if (SA._nearestHitDown(grid, q, 0, layer) >= 0) continue;
+        if (insideAny(boxes, q)) continue;                            /* in another solid (parts that overlap) */
+        air.push(p);
       }
       if (!air.length) continue;
       flagged.push(t); frac.set(t, tn.area * air.length / pts.length); spots.set(t, air);
@@ -246,9 +276,18 @@ function clusterPoints(pts) {
 function bambuInterface(gcode, objects, opts) {
   opts = opts || {};
   const pts = interfacePoints(gcode, opts);
-  const counts = { points: pts.length, topTree: 0, topPart: 0, bottom: 0, none: 0 };
-  const top = [];
+  const counts = { points: pts.length, topTree: 0, topPart: 0, bottom: 0, none: 0,
+                   shadow: { partFirst: 0, treeThenPart: 0, treeOnly: 0, treeOnlyNear: 0, nothing: 0 } };
+  const top = [], alone = [];
+  const upPart = objects.filter(o => !o.support).map(o => o.soup), upSup = objects.filter(o => o.support).map(o => o.soup);
   for (const p of pts) {
+    /* the column straight up: what this line is ultimately under */
+    const hp = SA._nearestHit(upPart, p, [0, 0, 1], 0, Infinity), ht = SA._nearestHit(upSup, p, [0, 0, 1], 0, Infinity);
+    const sh = counts.shadow;
+    if (hp < 0 && ht < 0) sh.nothing++;
+    else if (ht < 0 || (hp >= 0 && hp < ht)) sh.partFirst++;
+    else if (hp >= 0) sh.treeThenPart++;
+    else { sh.treeOnly++; if (ht <= 1.0) sh.treeOnlyNear++; }
     let best = null;
     for (const o of objects) {
       const c = SA._closestOnSoup(p, o.soup);
@@ -258,15 +297,18 @@ function bambuInterface(gcode, objects, opts) {
           (Math.abs(c.distance - best.d) <= 1e-9 && !o.support)))) best = { o, d: c.distance, above };
     }
     if (best && best.above) {
-      if (best.o.support) { counts.topTree++; top.push(p); } else counts.topPart++;
+      if (best.o.support) { counts.topTree++; top.push(p); if (hp < 0) alone.push(p); } else counts.topPart++;
     } else if (best) counts.bottom++; else counts.none++;
   }
-  const regions = clusterPoints(top).map(g => {
+  const boxed = groups => groups.map(g => {
     const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
     for (const p of g) for (let q = 0; q < 3; q++) { if (p[q] < lo[q]) lo[q] = p[q]; if (p[q] > hi[q]) hi[q] = p[q]; }
     return { points: g, lo, hi };
   }).sort((a, b) => b.points.length - a.points.length);
-  return { points: pts, top, regions, counts };
+  /* regions: every line under a tree; aloneRegions: those with no part
+     anywhere above them - a tree's own overhang, not the part's support
+     passing under a branch */
+  return { points: pts, top, regions: boxed(clusterPoints(top)), alone, aloneRegions: boxed(clusterPoints(alone)), counts };
 }
 
 /* Does a Bambu point hold an audit spot: within MATCH_XY in plan, and
@@ -294,6 +336,11 @@ function calibrate(res, bambu) {
     }
   }
   const auditHit = new Set();
+  function rate(list) {
+    let m = 0;
+    list.forEach(r => { if (r.points.some(b => { let h = false; near(b, () => { h = true; }); return h; })) m++; });
+    return { regions: list.length, matched: m, matchRate: list.length ? m / list.length : 1 };
+  }
   let matched = 0, matchedPts = 0;
   const regions = bambu.regions.map(r => {
     let ok = false;
@@ -313,6 +360,7 @@ function calibrate(res, bambu) {
     pointRate: bambu.top.length ? matchedPts / bambu.top.length : 1,
     auditRegions: res.regions.length, auditAlone: alone, auditAreaMm2: area, auditAloneAreaMm2: aloneArea,
     aloneAreaRate: area ? aloneArea / area : 0,
+    treeAlone: rate(bambu.aloneRegions || []),
     unmatched: regions.filter(r => !r.matched)
   };
 }
@@ -367,8 +415,14 @@ async function main(argv) {
     const b = out.bambu, c = out.calibration;
     console.log(`Bambu support interface: ${b.points} samples - under a tree ${b.topTree} (${(100 * b.treeShare).toFixed(1)}%), ` +
                 `under the part ${b.topPart}, resting only ${b.bottom}, neither ${b.none}`);
+    const sh = b.shadow, n = Math.max(1, b.points);
+    console.log(`  straight up from each line: the part first ${(100 * sh.partFirst / n).toFixed(1)}%, a tree then the part ` +
+                `${(100 * sh.treeThenPart / n).toFixed(1)}%, a tree only ${(100 * sh.treeOnly / n).toFixed(1)}% ` +
+                `(within 1 mm: ${(100 * sh.treeOnlyNear / n).toFixed(2)}%), nothing ${(100 * sh.nothing / n).toFixed(1)}%`);
     console.log(`  Bambu regions under a tree: ${c.bambuRegions}, matched by an audit region: ${c.matched} (${(100 * c.matchRate).toFixed(1)}%); ` +
                 `samples matched ${(100 * c.pointRate).toFixed(1)}%`);
+    console.log(`  of those, under a tree with no part above: ${c.treeAlone.regions}, matched ${c.treeAlone.matched} ` +
+                `(${(100 * c.treeAlone.matchRate).toFixed(1)}%)`);
     console.log(`  audit regions Bambu left alone: ${c.auditAlone} of ${c.auditRegions}, ` +
                 `${c.auditAloneAreaMm2.toFixed(2)} of ${c.auditAreaMm2.toFixed(2)} mm^2 (${(100 * c.aloneAreaRate).toFixed(1)}%)`);
   }
