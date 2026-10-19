@@ -188,7 +188,10 @@ function pageKit() {
     const before = await page.evaluate(() => state.models.length);
     await page.setInputFiles('#file-input', SPHERE);
     await page.waitForFunction(n => state.models.length > n, before, { timeout: 120000, polling: 50 });
-    await page.waitForFunction(() => state.placed.length > 0 && !!state.placed[0].mesh, null, { timeout: 120000, polling: 50 });
+    // a big piece is registered, indexed and only then put on the plate (~5 s here): wait for the sphere's own mesh,
+    // not for any piece's - section 1 left two small ones on the plate
+    await page.waitForFunction(() => { const id = state.models[state.models.length - 1].id; return state.placed.some(p => p && p.sourceId === id && p.mesh); },
+      null, { timeout: 120000, polling: 50 });
     await page.waitForTimeout(2500);
     const sid = await page.evaluate(() => state.models[state.models.length - 1].id);
     check('the piece is on the plate with all of its triangles', (await page.evaluate(i => state.models.find(m => m.id === i).rawTris.length / 9, sid)) === TRIS);
