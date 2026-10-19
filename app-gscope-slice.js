@@ -109,7 +109,7 @@ var NSO_GSCOPE_SLICE = (function () {
     if (busy) return Promise.resolve({ ok: false, reason: 'already slicing' });
     var d = MS() && MS().getDoc();
     if (!d) return refuse('Open something first: Read the plate, or Import an STL / 3MF.');
-    if (d.source === 'take') return refuse('Slice works on LENS. TAKE holds copies; switch to LENS to slice what you loaded.');
+    if (d.source === 'take') return refuse('Slice works on plate 1. Plate 2 holds copies; click plate 1 to slice what you loaded.');
     if (d.kind !== 'mesh') return refuse('This is already a toolpath. Slice works on a mesh - the plate, an STL or a 3MF.');
     if (!SL()) return refuse('The slicer (nso_slicer.js) did not load - check console.');
     if (!window.NSOGcodeLines) return refuse('The toolpath reader did not load - check console.');

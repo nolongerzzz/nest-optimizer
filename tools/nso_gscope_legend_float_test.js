@@ -119,23 +119,20 @@ withApp(async (page, logs) => {
     check('...and checking it again brings it back', toggle.backTo === toggle.before, 'back to ' + toggle.backTo);
     check('the Display check hides but does not isolate', !toggle.isolated);
 
-    /* The old "only" button's job, two ways: the row click (Feature click -
-       this line type, isolated; again, whole) and the soloGroup API. */
+    /* Checkboxes only (docs/GSCOPE.md, item 4): a click on a row off its
+       check (its swatch, its gap) does nothing; the old "only" button's job is
+       the soloGroup API. */
     const click = await page.evaluate(() => {
       const M = window.NSO_MICROSCOPE;
       const row = document.querySelectorAll('#ms-legend .ms-legend-item')[2];
       const keep = row.dataset.group;
-      const before = M.hidden().length;
+      const before = M.hidden().slice().sort().join();
       row.click();
-      const iso = M.isIsolated(), mode = M.mode(), hidAfter = M.hidden().length;
-      row.click();
-      return { keep, iso, mode, hidAfter, before, isoAgain: M.isIsolated() };
+      row.querySelector('.ms-swatch').click();
+      return { keep, iso: M.isIsolated(), mode: M.mode(), sel: M.selection().length, same: M.hidden().slice().sort().join() === before };
     });
-    check('a click on a row (off its check) isolates that line type: Feature mode',
-      click.iso && click.mode === 'feature', click.keep + ' isolated=' + click.iso + ' mode=' + click.mode);
-    check('...and clicking it again makes it whole', !click.isoAgain);
-    check('the row click does not touch the Display set', click.hidAfter === click.before,
-      click.before + ' -> ' + click.hidAfter);
+    check('a click on a row off its check and text does nothing: no isolate, no selection, no box toggled',
+      !click.iso && click.mode === 'piece' && click.sel === 0 && click.same, click.keep + ' isolated=' + click.iso + ' mode=' + click.mode);
 
     const only = await page.evaluate(() => {
       const M = window.NSO_MICROSCOPE;

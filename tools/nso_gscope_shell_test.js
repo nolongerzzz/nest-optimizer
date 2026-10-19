@@ -7,10 +7,12 @@
 
    LAYOUT
      Left, a narrow column of vp-bar-btn slabs as wide as the main shell's:
-       IMPORT, READ PLATE | SELECT, LINE, LAYER, VIEW, RENDER | OVERHANGS, CROP Z, SLICE
-     A card under each of the last eight, opening to the RIGHT of the column,
+       IMPORT, READ PLATE | SELECT, VIEW   (round 1b, docs/GSCOPE.md item 5: Render and
+       the Slice settings are rows of VIEW, Crop Z is SELECT > Layer's Take band,
+       Overhangs left G-scope for the plate SUPPORTS card)
+     A card under each of the last two, opening to the RIGHT of the column,
      top-left of the viewport; one at a time; Escape shuts it.
-     Top-right, a pinned row: BACK, EXPORT, CLOSE. EXPORT's card opens under it.
+     Top-right, a pinned row: BACK, ◎, CLEAR, EXPORT, CLOSE. EXPORT's card opens under it.
      Down the left wall, under the column: the file line (G-scope) and, right
      under it, the ALL FEATURES legend. Along the bottom, side by side to the
      right of them: SELECTION / SEGMENT INFO, FEATURES, the Slice report and the
@@ -18,10 +20,12 @@
      The viewport takes the whole panel (the sidebar's width is given back).
 
    GATES
-     1. Every ms-* id the sidebar had is still on the page exactly once, no
-        <details> in #microscope, and the new ones are unique too.
+     1. Every ms-* id the sidebar had (less the ones round 1b retired) is
+        still on the page exactly once, no <details> in #microscope, the new
+        ones are unique too, and the retired ones are gone.
      2. Every control is where the ticket lists it: the column, the cards, the
-        corner, the dock. The five mode buttons are siblings.
+        corner, the dock. The five mode buttons are siblings. The View card's
+        rows are in the ticket's order; Take band is in the Layer row.
      3. The geometry: the column is the main shell's width and pitch, the cards
         open right of it at the top, the corner is pinned top-right, the dock
         is bottom-left, and the viewport fills the panel.
@@ -29,11 +33,10 @@
         a button whose rows the engine hides is disabled, and Escape shuts the
         open card first and G-scope only when none is open.
      5. Every control in an open card can be hit with a real click.
-     6. The readouts stay up with a card open; the overhang readout lands in its
-        row, the Slice report in the dock. (Lift's Features readout left
-        G-scope with the SELECT ticket: docs/GSCOPE-SELECT.md.)
-     7. A slice (Slice view) brings Render and the Sliced piece group, and the
-        Select card's Line and Layer rows.
+     6. The readouts stay up with a card open; the Slice report is in the dock.
+     7. A slice (Slice view) enables Toolpath / Solid and brings the Sliced
+        piece group and the Select card's Line and Layer rows; Normal disables
+        Toolpath / Solid again.
      8. A short window (1024 x 720): the column, every card and the dock fit.
 
    Screenshots go to tools/gscope-shell-out/ (git-ignored).
@@ -44,6 +47,7 @@ const path = require('path');
 const fs = require('fs');
 const { withApp, loadSTL, ROOT } = require('./nso_app_harness');
 
+const J = JSON.stringify;
 let fails = 0;
 const check = (name, cond, detail) => {
   console.log('  ' + (cond ? 'ok   ' : 'FAIL ') + name + (detail ? ' - ' + detail : ''));
@@ -53,44 +57,47 @@ const check = (name, cond, detail) => {
 const SHOTS = path.join(ROOT, 'tools', 'gscope-shell-out');
 
 /* ---------------------------------------------------------------- the ticket */
+/* IMPORT . READ PLATE | SELECT . VIEW (docs/GSCOPE.md, item 5): Render and the Slice settings are
+   rows of the View card, Crop Z is Select > Layer's Take band, Overhangs is the plate SUPPORTS card's. */
 const COLUMN = [
   ['ms-btn-open', 'IMPORT'], ['ms-btn-plate', 'READ PLATE'],
-  ['ms-nav-select', 'SELECT'], ['ms-nav-view', 'VIEW'],
-  ['ms-nav-render', 'RENDER'],
-  ['ms-nav-overhangs', 'OVERHANGS'], ['ms-nav-crop', 'CROP Z'], ['ms-nav-slice', 'SLICE']
+  ['ms-nav-select', 'SELECT'], ['ms-nav-view', 'VIEW']
 ];
-const GROUPS = [2, 3, 3];                 // the column's three groups (Line and Layer folded into Select)
-/* BACK · LENS|TAKE · CLEAR · EXPORT · CLOSE (the LENS | TAKE toggle is one control of two slabs). */
-const CORNER = [['ms-btn-back-producer', 'BACK'], ['ms-plate-toggle', 'LENS TAKE'], ['ms-btn-take-clear', 'CLEAR'],
+const GROUPS = [2, 2];                    // the column's two groups
+/* BACK · ◎ · CLEAR · EXPORT · CLOSE. The two plates stand side by side in the view and a click on one
+   makes it active, so there is no plate toggle (docs/GSCOPE.md); ◎ frames both plates. */
+const CORNER = [['ms-btn-back-producer', 'BACK'], ['ms-btn-frame', '◎'], ['ms-btn-take-clear', 'CLEAR'],
                 ['ms-nav-export', 'EXPORT'], ['ms-close', 'CLOSE']];
 /* card -> [its button, the ids it holds] */
 const CARDS = {
   'ms-card-select': ['ms-nav-select', ['ms-mode-piece', 'ms-mode-select', 'ms-mode-feature', 'ms-mode-line', 'ms-mode-layer',
                                        'ms-btn-isolate', 'ms-btn-clear', 'ms-btn-back',
                                        'ms-line-prev', 'ms-line-next', 'ms-btn-isolate-line',
-                                       'ms-layer-prev', 'ms-layer-index', 'ms-layer-next', 'ms-btn-layer-select']],
-  'ms-card-view': ['ms-nav-view', ['ms-cam-normal', 'ms-cam-slice', 'ms-btn-clear-view', 'ms-btn-show-all', 'ms-btn-select-visible']],
-  'ms-card-render': ['ms-nav-render', ['ms-render-toolpath', 'ms-render-solid']],
-  'ms-card-overhangs': ['ms-nav-overhangs', ['ms-btn-overhangs', 'ms-overhang-angle', 'ms-support-read']],
-  'ms-card-crop': ['ms-nav-crop', ['ms-btn-crop']],
-  'ms-card-slice': ['ms-nav-slice', ['ms-slice-nozzle', 'ms-slice-layer', 'ms-slice-walls', 'ms-slice-density', 'ms-slice-pattern', 'ms-slice-angle']],
+                                       'ms-layer-prev', 'ms-layer-index', 'ms-layer-next', 'ms-btn-layer-select', 'ms-btn-take-band']],
+  'ms-card-view': ['ms-nav-view', ['ms-cam-normal', 'ms-cam-slice', 'ms-render-toolpath', 'ms-render-solid',
+                                   'ms-slice-nozzle', 'ms-slice-layer', 'ms-slice-walls', 'ms-slice-density', 'ms-slice-pattern', 'ms-slice-angle',
+                                   'ms-btn-show-all', 'ms-btn-clear-view', 'ms-btn-select-visible']],
   'ms-card-export': ['ms-nav-export', ['ms-btn-export-plate', 'ms-btn-export-stl', 'ms-btn-export-solid-plate', 'ms-btn-export-solid-stl',
                                         'ms-btn-slice-export-plate', 'ms-btn-slice-export-stl']]
 };
 const EXPORT_GROUPS = { 'Selection': ['ms-btn-export-plate', 'ms-btn-export-stl', 'ms-btn-export-solid-plate', 'ms-btn-export-solid-stl'],
                         'Sliced piece': ['ms-btn-slice-export-plate', 'ms-btn-slice-export-stl'],
-                        'Whole plate': ['ms-btn-take-export-plate', 'ms-btn-take-export-stl'] };   // the last shows on TAKE only
+                        'Whole plate': ['ms-btn-take-export-plate', 'ms-btn-take-export-stl'] };   // the last shows with plate 2 active only
 const DOCK = ['ms-legend-float', 'ms-legend-toggle', 'ms-legend', 'ms-title', 'ms-sub', 'ms-info-title', 'ms-info',
               'ms-slice-read', 'ms-hint-badge'];
-/* The ids the sidebar page had (claude-wip 6ca7251). */
+/* What round 1b took out of G-scope: no element keeps these ids. */
+const GONE = ['ms-nav-render', 'ms-nav-overhangs', 'ms-nav-crop', 'ms-nav-slice', 'ms-card-render', 'ms-card-overhangs', 'ms-card-crop',
+              'ms-card-slice', 'ms-support-row', 'ms-btn-overhangs', 'ms-overhang-angle', 'ms-support-read', 'ms-crop-row', 'ms-btn-crop', 'ms-crop-read'];
+/* The VIEW card, top to bottom: Normal . Slice view | Toolpath . Solid | Slice settings | Check all . Clear from view . Select shown. */
+const VIEW_ROWS = ['ms-camera-row', 'ms-render-row', 'ms-slice-row', 'ms-visibility-row'];
+/* The ids the sidebar page had (claude-wip 6ca7251), less the ones round 1b retired (GONE). */
 const BEFORE = ['microscope', 'ms-sidebar', 'ms-title', 'ms-sub', 'ms-btn-back-producer', 'ms-btn-plate', 'ms-btn-open',
   'ms-close', 'ms-mode-select', 'ms-mode-line', 'ms-camera-row', 'ms-cam-normal',
   'ms-cam-slice', 'ms-select-controls', 'ms-btn-isolate', 'ms-btn-clear', 'ms-line-controls', 'ms-line-prev',
   'ms-line-next', 'ms-btn-isolate-line', 'ms-line-read', 'ms-detail-controls', 'ms-btn-back', 'ms-render-row',
   'ms-render-toolpath', 'ms-render-solid', 'ms-render-read', 'ms-layer-row', 'ms-layer-prev', 'ms-layer-index',
   'ms-layer-next', 'ms-btn-layer-select', 'ms-layer-note', 'ms-visibility-row', 'ms-btn-clear-view',
-  'ms-btn-show-all', 'ms-btn-select-visible', 'ms-crop-row', 'ms-btn-crop', 'ms-crop-read', 'ms-support-row',
-  'ms-btn-overhangs', 'ms-overhang-angle', 'ms-support-read',
+  'ms-btn-show-all', 'ms-btn-select-visible',
   'ms-slice-row', 'ms-slice-export-row', 'ms-btn-slice-export-plate', 'ms-btn-slice-export-stl',
   'ms-slice-read', 'ms-slice-settings', 'ms-slice-nozzle', 'ms-slice-layer', 'ms-slice-walls',
   'ms-slice-density', 'ms-slice-pattern', 'ms-slice-angle', 'ms-export-row', 'ms-btn-export-plate',
@@ -204,6 +211,8 @@ withApp(async (page, logs) => {
     check('every id the ticket lists, and the new ones, appear exactly once', r.listedBad.length === 0 && r.dup.length === 0,
       (r.listedBad.concat(r.dup)).join(', ') || 'no duplicates inside #microscope');
     check('no <details> or <summary> in #microscope', r.details === 0, String(r.details));
+    const gone = await page.evaluate(ids => ids.filter(id => document.getElementById(id)), GONE);
+    check('Render, Overhangs, Crop Z and Slice are gone as buttons and cards, and Overhangs\' and Crop\'s controls with them', gone.length === 0, gone.join(', ') || GONE.length + ' ids gone');
     check('the sidebar class is gone', !r.gone);
   }
 
@@ -244,16 +253,25 @@ withApp(async (page, logs) => {
       JSON.stringify(r.colKids) === JSON.stringify(COLUMN.map(c => c[0])), r.colKids.join(' '));
     const colWrong = COLUMN.filter(([, l], i) => norm(r.colText[i]) !== l).map(([, l], i) => l + '?');
     check('each carries the ticket\'s label', colWrong.length === 0, r.colText.map(norm).join(' | '));
-    check('the corner holds Back, LENS|TAKE, Clear, Export, Close, in the viewport',
+    check('the corner holds Back, the framing, Clear, Export, Close, in the viewport',
       JSON.stringify(r.cornerKids) === JSON.stringify(CORNER.map(c => c[0])) && r.cornerIn, r.cornerKids.join(' '));
-    check('...labelled BACK, LENS TAKE, CLEAR, EXPORT, CLOSE', JSON.stringify(r.cornerText.map(norm)) === JSON.stringify(CORNER.map(c => c[1])), r.cornerText.map(norm).join(' | '));
+    check('...labelled BACK, ◎, CLEAR, EXPORT, CLOSE', JSON.stringify(r.cornerText.map(norm)) === JSON.stringify(CORNER.map(c => c[1])), r.cornerText.map(norm).join(' | '));
     Object.keys(CARDS).forEach(c => check(c + ' holds its controls, and is in the viewport (not the column)', r.cards[c].length === 0 && r.cardInVp[c],
       r.cards[c].join(', ') || CARDS[c][1].length + ' ids'));
-    check('Export: "Selection" holds the four, "Sliced piece" the two, "Whole plate" (TAKE only) the two',
+    check('Export: "Selection" holds the four, "Sliced piece" the two, "Whole plate" (plate 2 only) the two',
       JSON.stringify(r.groups) === JSON.stringify(EXPORT_GROUPS), JSON.stringify(r.groups));
     check('the dock holds the legend, the file line, the info, Features, the Slice report and the hint', r.dock.length === 0, r.dock.join(', ') || DOCK.length + ' ids');
     check('...and none of it is in a card', r.dockInCard.length === 0, r.dockInCard.join(', '));
     check('the five mode buttons are siblings, and only those five', r.siblings);
+    const vo = await page.evaluate(rows => {
+      const kids = Array.from(document.getElementById('ms-card-view').children).map(e => e.id).filter(id => rows.includes(id));
+      const vis = Array.from(document.querySelectorAll('#ms-visibility-row button')).map(b => [b.id, b.textContent.trim()]);
+      const band = document.getElementById('ms-btn-take-band');
+      return { kids, vis, band: !!band && !!band.closest('#ms-layer-row') && band.textContent.trim(), slice: document.querySelector('#ms-slice-row .ms-section-title').textContent.trim() };
+    }, VIEW_ROWS);
+    check('the View card: Normal . Slice view | Toolpath . Solid | Slice settings | Check all . Clear from view . Select shown, in that order',
+      J(vo.kids) === J(VIEW_ROWS) && J(vo.vis) === J([['ms-btn-show-all', 'Check all'], ['ms-btn-clear-view', 'Clear from view'], ['ms-btn-select-visible', 'Select shown']]) && vo.slice === 'Slice settings', J(vo));
+    check('Take band is in the Select card\'s Layer row', vo.band === 'Take band', J(vo.band));
   }
 
   /* ------------------------------------------------------------------ 3 */
@@ -263,8 +281,7 @@ withApp(async (page, logs) => {
     const g = await page.evaluate(() => {
       const R = id => { const b = document.getElementById(id).getBoundingClientRect(); return { x: b.left, y: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height }; };
       const panel = R('microscope'), vp = R('ms-viewport'), col = R('ms-sidebar');
-      const slabs = ['ms-btn-open', 'ms-btn-plate', 'ms-nav-select', 'ms-nav-view', 'ms-nav-render',
-                     'ms-nav-overhangs', 'ms-nav-crop', 'ms-nav-slice'].map(R);
+      const slabs = ['ms-btn-open', 'ms-btn-plate', 'ms-nav-select', 'ms-nav-view'].map(R);
       const main = document.getElementById('btn-microscope').getBoundingClientRect();
       const mainStyle = getComputedStyle(document.getElementById('btn-microscope'));
       const slab = getComputedStyle(document.getElementById('ms-nav-select'));
@@ -274,8 +291,7 @@ withApp(async (page, logs) => {
                corner: ['ms-btn-back-producer', 'ms-nav-export', 'ms-close'].map(id => document.getElementById(id).hidden ? null : R(id)),
                legend: R('ms-legend-float'), head: (b => ({ x: b.left, y: b.top, r: b.right, b: b.bottom }))(document.querySelector('#ms-dock-left .ms-head').getBoundingClientRect()), info: R('ms-info'),
                box: ['ms-info-title', 'ms-slice-readout'].map(id => { const e = document.getElementById(id).closest('.ms-glass'); if (getComputedStyle(e).display === 'none') return null; const b = e.getBoundingClientRect(); return { x: b.left, y: b.top, r: b.right, b: b.bottom, w: b.width, h: b.height }; }), W: innerWidth, H: innerHeight, colPos: cs('ms-sidebar').position,
-               cut: ['ms-btn-open', 'ms-btn-plate', 'ms-nav-select', 'ms-nav-view', 'ms-nav-render',
-                     'ms-nav-overhangs', 'ms-nav-crop', 'ms-nav-slice'].filter(id => {
+               cut: ['ms-btn-open', 'ms-btn-plate', 'ms-nav-select', 'ms-nav-view'].filter(id => {
                        const e = document.getElementById(id); return e.scrollWidth > e.clientWidth + 1 || e.scrollHeight > e.clientHeight + 1; }),
                zr: (() => { const z = document.getElementById('ms-zr'); return z.hidden ? null : R('ms-zr'); })(),
                badge: R('ms-mode-badge') };
@@ -293,7 +309,7 @@ withApp(async (page, logs) => {
     const edges = GROUPS.map(n => { const e = at + n - 1; at += n; return e; });      // last slab of each group
     const inGroup = gaps.filter((_, i) => !edges.includes(i)), between = gaps.filter((_, i) => edges.includes(i));
     check('slabs run on one pitch inside a group', inGroup.every(x => Math.abs(x - inGroup[0]) < 0.6), inGroup.join(','));
-    check('...with a wider gap between the three groups', between.length === 2 && between.every(x => x > inGroup[0] + 4), between.join(',') + ' vs ' + inGroup[0]);
+    check('...with a wider gap between the two groups', between.length === 1 && between.every(x => x > inGroup[0] + 4), between.join(',') + ' vs ' + inGroup[0]);
     check('the column fits inside the window', g.slabs[g.slabs.length - 1].b <= g.H, String(g.slabs[g.slabs.length - 1].b));
     check('the corner row is pinned top-right: Export and Close at the right edge, a pitch from the top',
       g.corner[2] && g.corner[1] && Math.abs(g.W - g.corner[2].r - 8) < 1.5 && g.corner[2].y <= 12 && g.corner[1].r <= g.corner[2].x + 0.5,
@@ -325,8 +341,8 @@ withApp(async (page, logs) => {
     let st = await cardState(page);
     check('no card is open to begin with', st.open.length === 0, st.open.join(','));
     const dis = Object.keys(CARDS).filter(c => st.shown[c].disabled);
-    check('on a plate piece, nothing selected: Render and Export are disabled (their rows are hidden); the rest are not',
-      JSON.stringify(dis.sort()) === JSON.stringify(['ms-card-export', 'ms-card-render']), dis.join(','));
+    check('on a plate piece, nothing selected: Export is disabled (its rows are hidden); Select and View are not',
+      JSON.stringify(dis.sort()) === JSON.stringify(['ms-card-export']), dis.join(','));
     const openable = Object.keys(CARDS).filter(c => !st.shown[c].disabled);
     for (const card of openable) {
       await openCard(page, card);
@@ -345,16 +361,16 @@ withApp(async (page, logs) => {
     }
     // swap: another button replaces the open card
     await openCard(page, 'ms-card-view');
-    await openCard(page, 'ms-card-crop');
+    await openCard(page, 'ms-card-select');
     st = await cardState(page);
-    check('another button swaps the card: only one is open', JSON.stringify(st.open) === JSON.stringify(['ms-card-crop']), st.open.join(','));
+    check('another button swaps the card: only one is open', JSON.stringify(st.open) === JSON.stringify(['ms-card-select']), st.open.join(','));
     // same button again shuts it
-    await openCard(page, 'ms-card-crop');
+    await openCard(page, 'ms-card-select');
     st = await cardState(page);
-    check('its own button again shuts it', st.open.length === 0 && !st.shown['ms-card-crop'].on && st.shown['ms-card-crop'].aria === 'false', st.open.join(','));
+    check('its own button again shuts it', st.open.length === 0 && !st.shown['ms-card-select'].on && st.shown['ms-card-select'].aria === 'false', st.open.join(','));
     // a disabled button does nothing
     const before = await cardState(page);
-    await page.evaluate(() => document.getElementById('ms-nav-render').click());
+    await page.evaluate(() => document.getElementById('ms-nav-export').click());
     st = await cardState(page);
     check('a disabled button opens nothing', st.open.length === 0 && before.open.length === 0, st.open.join(','));
     // Escape
@@ -380,7 +396,7 @@ withApp(async (page, logs) => {
   /* ------------------------------------------------------------------ 5 */
   console.log('\n=== 5. every control in an open card can be hit ===');
   {
-    for (const card of ['ms-card-view', 'ms-card-overhangs', 'ms-card-crop', 'ms-card-slice']) {
+    for (const card of ['ms-card-view']) {
       await openCard(page, card);
       const r = await reach(page, card);
       const shown = r.hit.length, expect = CARDS[card][1].filter(id => !r.hidden.includes(id)).length;
@@ -388,42 +404,38 @@ withApp(async (page, logs) => {
         'hit ' + r.hit.join(',') + (r.hidden.length ? ' | hidden by state: ' + r.hidden.join(',') : '') + (r.blocked.length ? ' | blocked: ' + r.blocked.join(',') : ''));
       await openCard(page, card);
     }
-    // the slice settings are plain fields now
-    await openCard(page, 'ms-card-slice');
+    // the slice settings are plain fields, under Normal / Slice view and Toolpath / Solid
+    await openCard(page, 'ms-card-view');
     const f = await page.evaluate(() => ['nozzle', 'layer', 'walls', 'density', 'pattern', 'angle'].map(k => {
       const e = document.getElementById('ms-slice-' + k); const b = e.getBoundingClientRect();
       return [k, b.width > 0 && b.height > 0, e.closest('details') === null];
     }));
-    check('Slice: nozzle, layer, walls, infill %, pattern, support below - all showing, none in a <details>', f.every(x => x[1] && x[2]), JSON.stringify(f));
-    await shot('04-slice-settings');
-    await openCard(page, 'ms-card-slice');
+    check('Slice settings: nozzle, layer, walls, infill %, pattern, support below - all showing, none in a <details>', f.every(x => x[1] && x[2]), JSON.stringify(f));
+    const rnd = await page.evaluate(() => ['ms-render-toolpath', 'ms-render-solid'].map(id => document.getElementById(id).disabled));
+    check('on a mesh (Slice view off) Toolpath and Solid are there but disabled', rnd.every(Boolean), J(rnd));
+    await shot('04-view-card');
+    await openCard(page, 'ms-card-view');
   }
 
   /* ------------------------------------------------------------------ 6 */
   console.log('\n=== 6. the readouts stay up; their rows land where they did ===');
   {
-    await openCard(page, 'ms-card-overhangs');
+    await openCard(page, 'ms-card-view');
     const r = await page.evaluate(() => {
       const vis = id => { const e = document.getElementById(id); const b = e.getBoundingClientRect(); return getComputedStyle(e).display !== 'none' && b.width > 0 && b.height > 0; };
       return { info: vis('ms-info'), legend: vis('ms-legend-float'), sub: vis('ms-sub'),
                info1: document.getElementById('ms-info').textContent,
                legendNote: (document.querySelector('#ms-legend .ms-legend-note') || {}).textContent || '',
                legendRows: document.querySelectorAll('#ms-legend .ms-legend-item').length,
-               support: document.getElementById('ms-support-read').textContent, sliceRead: document.getElementById('ms-slice-read').textContent,
+               sliceRead: document.getElementById('ms-slice-read').textContent,
                sliceReadOut: getComputedStyle(document.getElementById('ms-slice-readout')).display,
                sub1: document.getElementById('ms-sub').textContent };
     });
     check('with a card open the Features list, the file line and the info are all still up', r.info && r.legend && r.sub, JSON.stringify([r.info, r.legend, r.sub]));
     check('the Features list says a plate piece is not sliced (no rows: line types are a slice\'s)', r.legendRows === 0 && /Not sliced/.test(r.legendNote), r.legendNote);
-    check('the overhang readout (app-gscope-support.js) landed in the Overhangs card', r.support.length > 1 && !/^—$/.test(r.support), r.support.slice(0, 70));
     check('the Slice report is up in the dock', r.sliceReadOut !== 'none' && r.sliceRead.length > 1, r.sliceRead.slice(0, 70));
-    await shot('05-overhangs');
-    await clickFace(page, '#ms-btn-overhangs');
-    await page.waitForTimeout(400);
-    const after = await page.evaluate(() => document.getElementById('ms-support-read').textContent);
-    check('Show overhangs still writes its readout into the card', after !== r.support || /overhang/i.test(after), after.slice(0, 90));
-    await clickFace(page, '#ms-btn-overhangs');
-    await openCard(page, 'ms-card-overhangs');
+    await shot('05-readouts');
+    await openCard(page, 'ms-card-view');
   }
 
   /* ------------------------------------------------------------------ 7 */
@@ -434,8 +446,8 @@ withApp(async (page, logs) => {
     check('Select shown is clickable in the View card', r0 && r0.ok, r0 && r0.why);
     await page.waitForTimeout(150);
     let st = await cardState(page);
-    check('with a selection Export is enabled; Render still is not',
-      !st.shown['ms-card-export'].disabled && st.shown['ms-card-render'].disabled);
+    check('with a selection Export is enabled; Toolpath / Solid still are not (Slice view is off)',
+      !st.shown['ms-card-export'].disabled && await page.evaluate(() => document.getElementById('ms-render-solid').disabled));
     await openCard(page, 'ms-card-export');
     const ex = await page.evaluate(() => {
       const gs = Array.from(document.querySelectorAll('#ms-card-export .ms-xgroup')).map(g => ({
@@ -462,18 +474,18 @@ withApp(async (page, logs) => {
     check('slice progress text shows in the dock while it runs', /Slic/i.test(sawBusy), sawBusy.slice(0, 60));
     st = await cardState(page);
     const dis = Object.keys(CARDS).filter(c => st.shown[c].disabled).sort();
-    check('a slice is a toolpath: Render and Export are up; Overhangs belong to a mesh',
-      JSON.stringify(dis) === JSON.stringify(['ms-card-overhangs']), dis.join(','));
+    check('a slice is a toolpath: every card is up', dis.length === 0, dis.join(','));
     const rep = await page.evaluate(() => document.getElementById('ms-slice-read').textContent);
     check('the slice report is in the dock', rep.length > 20 && /layer|wall|infill|slice/i.test(rep), rep.slice(0, 90));
     await shot('07-sliced-view');
 
-    // RENDER
-    await openCard(page, 'ms-card-render');
-    const rd = await reach(page, 'ms-card-render');
-    check('Render opens with Toolpath and Solid, both hit-testable', rd.blocked.length === 0 && rd.hit.length === 2, JSON.stringify(rd));
+    // Toolpath / Solid, in the View card (still open from Slice view)
+    if (!(await cardState(page)).open.includes('ms-card-view')) await openCard(page, 'ms-card-view');
+    const rd = await reach(page, 'ms-card-view');
+    const rdOn = await page.evaluate(() => ['ms-render-toolpath', 'ms-render-solid'].map(id => !document.getElementById(id).disabled));
+    check('Slice view on: Toolpath and Solid are enabled in the View card, and hit-testable', rd.blocked.length === 0 && rd.hit.includes('ms-render-toolpath') && rd.hit.includes('ms-render-solid') && rdOn.every(Boolean), JSON.stringify(rd));
     await shot('08-render');
-    await openCard(page, 'ms-card-render');
+    await openCard(page, 'ms-card-view');
 
     // LINE and LAYER, in the Select card now
     await openCard(page, 'ms-card-select');
@@ -496,7 +508,7 @@ withApp(async (page, logs) => {
     const ex2 = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-card-export .ms-xgroup')).map(g => ({
       t: g.querySelector('.ms-section-title').textContent.trim(), shown: getComputedStyle(g).display !== 'none' && g.getBoundingClientRect().height > 0,
       btns: Array.from(g.querySelectorAll('button')).filter(b => b.getBoundingClientRect().width > 0).map(b => b.id) })));
-    check('Export, a slice with a selection on LENS: all six - "Selection" four, "Sliced piece" two; "Whole plate" waits for TAKE',
+    check('Export, a slice with a selection on plate 1: all six - "Selection" four, "Sliced piece" two; "Whole plate" waits for plate 2',
       ex2.length === 3 && ex2[0].btns.length === 4 && ex2[1].btns.length === 2 && ex2[0].shown && ex2[1].shown && !ex2[2].shown, JSON.stringify(ex2));
     const rr2 = await reach(page, 'ms-card-export');
     check('...each hit-testable', rr2.blocked.length === 0 && rr2.hit.length === 6, JSON.stringify(rr2));
@@ -509,8 +521,8 @@ withApp(async (page, logs) => {
     await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'mesh', null, { timeout: 30000 });
     await page.waitForTimeout(150);
     st = await cardState(page);
-    check('Normal goes back to the mesh: Render is disabled again, Feature / Line / Layer are a slice\'s, and the View card stays open',
-      st.shown['ms-card-render'].disabled && st.open.join() === 'ms-card-view' &&
+    check('Normal goes back to the mesh: Toolpath / Solid are disabled again, Feature / Line / Layer are a slice\'s, and the View card stays open',
+      (await page.evaluate(() => document.getElementById('ms-render-solid').disabled)) && st.open.join() === 'ms-card-view' &&
       (await page.evaluate(() => ['feature', 'line', 'layer'].every(m => document.getElementById('ms-mode-' + m).disabled))), st.open.join());
     await openCard(page, 'ms-card-view');
   }
@@ -518,8 +530,8 @@ withApp(async (page, logs) => {
   /* ------------------------------------------------------------------ 8 */
   console.log('\n=== 8. the ladder of Escapes, and the short window ===');
   {
-    await openCard(page, 'ms-card-crop');
-    await page.focus('#ms-nav-crop');
+    await openCard(page, 'ms-card-view');
+    await page.focus('#ms-nav-view');
     await page.keyboard.press('Escape');
     let st = await cardState(page);
     check('Escape 1: the card shuts, G-scope stays', st.open.length === 0 && !st.panelHidden);
@@ -545,12 +557,12 @@ withApp(async (page, logs) => {
     check('1024 x 720: the corner row stays inside', short.cornerR <= short.W, String(short.cornerR));
     check('1024 x 720: the left wall\'s boxes end inside the window and start under the column', short.left.b <= short.H && short.left.y >= short.colB, JSON.stringify([short.left, short.colB]));
     check('1024 x 720: the bottom boxes are inside the window and clear of the slider', short.rowTop >= 0 && short.rowR <= short.W - 76, JSON.stringify([short.rowTop, short.rowR]));
-    for (const card of ['ms-card-select', 'ms-card-view', 'ms-card-overhangs', 'ms-card-crop', 'ms-card-slice', 'ms-card-export']) {
+    for (const card of ['ms-card-select', 'ms-card-view', 'ms-card-export']) {
       await openCard(page, card);
       const r = await page.evaluate(card => { const b = document.getElementById(card).getBoundingClientRect(); return { b: b.bottom, r: b.right, t: b.top, l: b.left, H: innerHeight, W: innerWidth,
         on: getComputedStyle(document.getElementById(card)).display !== 'none' }; }, card);
       check('1024 x 720: ' + card + ' opens inside the window', r.on && r.b <= r.H && r.r <= r.W && r.t >= 0 && r.l >= 0, JSON.stringify(r));
-      if (card === 'ms-card-slice') await shot('12-short-window-slice');
+      if (card === 'ms-card-view') await shot('12-short-window-view');
       await openCard(page, card);
     }
     await page.setViewportSize({ width: 1280, height: 800 });

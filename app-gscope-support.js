@@ -6,6 +6,10 @@
  *
  * READ docs/GCODE-SUPPORTS.md FIRST.
  *
+ * DORMANT SINCE THE G-SCOPE REDO (docs/GSCOPE.md, item 5). G-scope's Overhangs
+ * row - the only switch for the markers - is gone: overhang detection lives on
+ * the plate SUPPORTS card. This file still loads and still answers setOn().
+ *
  * WHAT IS REUSED, AND NOTHING HERE REPLACES
  *   detection   NSO_SupportAim.detectOverhangs, called as it is and read as it
  *               comes back. A marker is one of its `regions`, drawn where the
@@ -631,8 +635,6 @@ var NSO_GSCOPE_SUPPORT = (function () {
     on = !!v;
     if (on && !plateDoc() && MS()) MS().openPlate();
     refresh();
-    var b = $('ms-btn-overhangs');
-    if (b) b.classList.toggle('active', on);
   }
 
   // =========================================================================
@@ -1160,25 +1162,12 @@ var NSO_GSCOPE_SUPPORT = (function () {
   // Panel
   // =========================================================================
 
-  function syncPanel() {
-    var row = $('ms-support-row');
-    var d = MS() && MS().getDoc();
-    if (row) row.style.display = d && d.kind === 'mesh' ? 'block' : 'none';
-    var read = $('ms-support-read');
-    if (!read) return;
-    if (!plateDoc()) { read.textContent = 'Supports are placed on plate pieces: Read the plate first.'; return; }
-    if (!on) { read.textContent = 'Show overhangs to see where the pieces need support.'; return; }
-    var errs = scan.filter(function (s) { return s.error; });
-    var red = markers.filter(function (m) { return !m.supported; }).length;
-    var nSup = (state.models || []).filter(function (m) { return m && m.nsoSupport; }).length;
-    var stale = [];
-    markers.forEach(function (m) { if (!m.supported) (m.stale || []).forEach(function (n) { stale.push(n); }); });
-    read.textContent = markers.length + ' overhang(s) found at ' + angleDeg + '° - ' + red +
-      ' unsupported (red), ' + (markers.length - red) + ' supported (green); ' + nSup +
-      ' support piece(s). Click a marker to generate there; click a support to change or remove it.' +
-      (stale.length ? ' No longer touching the overhang it was made for (red): ' + stale.join(', ') + '.' : '') +
-      (errs.length ? ' ' + errs.map(function (s) { return s.error; }).join(' ') : '');
-  }
+  /* G-scope's Overhangs row (Show overhangs, the angle, its readout) was
+     removed in the G-scope redo, round 1b (docs/GSCOPE.md, item 5): overhang
+     detection is the plate SUPPORTS card's. Nothing in G-scope switches the
+     markers on now; setOn() is the only way in (the helper registry's checks
+     use it), and there is no row left to report into. */
+  function syncPanel() {}
 
   function bind(id, ev, fn) {
     var el = $(id);
@@ -1189,11 +1178,6 @@ var NSO_GSCOPE_SUPPORT = (function () {
     if (!MS()) return;
     MS().addClickHook(clickHook);
     MS().onDocument(function () { closePop(); ensureLayer(); refresh(); });
-    bind('ms-btn-overhangs', 'click', function () { setOn(!on); });
-    bind('ms-overhang-angle', 'change', function () {
-      var a = parseFloat($('ms-overhang-angle').value);
-      if (a > 0 && a < 90) { angleDeg = a; refresh(); } else $('ms-overhang-angle').value = String(angleDeg);
-    });
     bind('ms-sp-generate', 'click', popGenerate);
     bind('ms-sp-apply', 'click', popApply);
     bind('ms-sp-remove', 'click', function () { if (pop && pop.kind === 'edit') removeSupport(pop.supportId); });

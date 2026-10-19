@@ -277,10 +277,18 @@ async function main() {
   const openDist = c0.d;
   // The old limit: frameBox() sets far to max(span, distance) x 100 for the
   // box it frames, and Normal used to keep that far plane whatever the wheel
-  // did. The whole part's span is under its framing distance, so it is 100x
-  // the opening distance.
-  const oldFar = openDist * 100;
-  console.log(`       opening distance ${openDist.toFixed(2)} mm; frameBox's far plane ${oldFar.toFixed(0)} mm`);
+  // did. The whole part's span is under its framing distance, so it was 100x
+  // the distance that frames the part. (G-scope now opens on both plates,
+  // docs/GSCOPE.md - farther out - so that distance is worked out from the
+  // part itself, the way frameBox() framed it when the part was all it framed.)
+  const partDist = await page.evaluate(() => {
+    const v = window.NSO_MICROSCOPE.getView(), box = new THREE.Box3();
+    v.overviewGroup.children.forEach((m) => { m.geometry.computeBoundingBox(); box.union(m.geometry.boundingBox.clone().applyMatrix4(m.matrixWorld)); });
+    const r = box.getSize(new THREE.Vector3()).length() / 2;
+    return (r / Math.sin((v.camera.fov * Math.PI / 180) / 2)) * 1.1;
+  });
+  const oldFar = partDist * 100;
+  console.log(`       opening distance ${openDist.toFixed(2)} mm (both plates); the part's framing ${partDist.toFixed(2)} mm, its far plane ${oldFar.toFixed(0)} mm`);
 
   // Orbit mode: the wheel and drags go to the camera, never to a capture box.
   await page.click('#ms-mode-piece');
@@ -386,7 +394,8 @@ async function main() {
   const afterPan = await settle(page);
   check('Normal: a right-drag pans (the target moves)', !near(afterPan.target, beforePan.target, 1e-3), true);
 
-  // Nothing re-locks it: a slider redraw, then closing and reopening the panel.
+  // Nothing re-locks it: a slider redraw. Closing and reopening the panel ends
+  // the visit (docs/GSCOPE.md, item 3): the default view again, nothing locked.
   await page.evaluate(() => { const M = window.NSO_MICROSCOPE, z = M.zRange(); M.setZRange(z.lo, z.hi - 3); M.flushView(); });
   await frames(page, 3);
   const afterFilter = await settle(page);
@@ -397,8 +406,9 @@ async function main() {
   await page.click('#btn-microscope');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.isOpen());
   const afterReopen = await settle(page);
-  check('Normal: closing and reopening the panel leaves the camera where it was',
-    near(afterReopen.pos, afterPan.pos, 1e-6) && near(afterReopen.target, afterPan.target, 1e-6), true);
+  check('Normal: closing and reopening the panel opens on the default view - the one it opened on - unlocked',
+    near(afterReopen.pos, c0.pos, 1e-6) && near(afterReopen.target, c0.target, 1e-6) &&
+    [afterReopen.minD, afterReopen.maxD, afterReopen.pan, afterReopen.zoom, afterReopen.rotate].join() === [0, Infinity, true, true, true].join(), true);
 
   // =======================================================================
   console.log('\n--- 3. Isolate: the selection alone ---');

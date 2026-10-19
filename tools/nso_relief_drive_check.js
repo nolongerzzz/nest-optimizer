@@ -156,7 +156,13 @@ const scopeDoc = page => page.evaluate(() => {
 async function sendToPlate(page) {
   const before = await page.evaluate(() => state.models.length);
   await page.click('#ms-mode-select');
-  const r = await page.evaluate(() => { const b = document.getElementById('ms-viewport').getBoundingClientRect(); return [b.x + b.width / 2, b.y + b.height / 2]; });
+  // the slab's top, in the middle: G-scope opens framed on both of its plates (docs/GSCOPE.md), so the
+  // middle of the view is the gap between them, not the slab
+  const r = await page.evaluate(() => {
+    const M = window.NSO_MICROSCOPE, b = M.getDoc().objects[0].bounds, v = M.getView(), c = v.renderer.domElement.getBoundingClientRect();
+    const p = M.toView((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, b.maxZ).project(v.camera);
+    return [c.left + (p.x + 1) / 2 * c.width, c.top + (1 - p.y) / 2 * c.height];
+  });
   await page.mouse.click(r[0], r[1]);
   await page.waitForFunction(() => window.NSO_MICROSCOPE.selection().length === 1, null, { timeout: 30000 });
   await page.click('#ms-btn-export-plate');
