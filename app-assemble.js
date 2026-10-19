@@ -220,8 +220,11 @@
       return fail('Attach stood down - ' + painted + ' painted face(s); the union replaces ' +
         'every triangle on the piece and cannot hold a face still. Clear paint to attach.');
     }
-    var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([m]) : '';
-    if (overlap) return fail('Attach refused - ' + overlap + ' - piece unchanged');
+    /* Work as is (nso-helpers.js, nsoOverlap): a piece whose shells overlap is attached to as those shells
+       merged into one solid, in the same raw frame; the union replaces the piece, as it always did. */
+    var sol = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? await nsoOverlap.solid(m) : { ok: true, merged: false };
+    if (!sol.ok) return fail(sol.cancelled ? 'Attach stopped - piece unchanged' : 'Attach refused - ' + sol.reason + ' - piece unchanged', !sol.cancelled);
+    var hull = sol.merged ? sol.soup : m.rawTris;
 
     /* The blank: the Stock shelf's default size for the shape in `overrides`,
        else the shape last clicked on the shelf (a cylinder when none has
@@ -246,11 +249,11 @@
     var pick = rawPickFrom(m, placed.mesh, worldPoint, localNormal);
     if (pick.error) return fail(pick.error);
 
-    var r = NSO_Assemble.attach(m.rawTris, arm.soup, { at: pick.at, dir: pick.dir });
+    var r = NSO_Assemble.attach(hull, arm.soup, { at: pick.at, dir: pick.dir });
     if (!r.ok) return fail('Attach refused - nothing changed: ' + r.reason);
 
     say('Attaching (loading CSG kernel)...');
-    var u = await NSO_unionSoups(m.rawTris, r.soup);
+    var u = await NSO_unionSoups(hull, r.soup);
     if (!u.ok || !u.soup || u.soup.length < 9) {
       return fail('Attach refused - nothing changed: the union ' +
         (u.reason ? '- ' + u.reason : 'missed') + '. Seated ' + r.engageMm.toFixed(3) +
@@ -269,6 +272,7 @@
       (r.marginMm == null ? 'as asked' : r.marginMm.toFixed(2) + ' mm floor') + '), ' +
       (u.soup.length / 9) + ' tris, 0 open / 0 non-manifold';
     if (r.growWarning) txt += ' - ' + r.growWarning;
+    if (sol.merged) txt += ' - ' + sol.note;
 
     if (typeof NSO_sculptCommitRaw !== 'function') return fail('Attach needs app-sculpt.js to commit');
     if (!NSO_sculptCommitRaw(m, u.soup, 'attachReplace', txt)) {

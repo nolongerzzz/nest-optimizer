@@ -182,7 +182,8 @@ const UNDO_REPLACE_LABEL = {
   foamReplace: 'Undo: Foam reverted',
   patchReplace: 'Undo: Patch reverted',
   bridgeReplace: 'Undo: Bridge reverted',
-  pullReplace: 'Undo: Pull reverted'
+  pullReplace: 'Undo: Pull reverted',
+  mergeShellsReplace: 'Undo: Merge shells reverted'
 };
 
 /* Undo, then the helper rule (nso-helpers.js): a helper drawn after the step

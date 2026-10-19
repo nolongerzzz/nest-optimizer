@@ -310,6 +310,14 @@
             M[1] * x + M[5] * y + M[9] * z + M[13],
             M[2] * x + M[6] * y + M[10] * z + M[14]];
   }
+  function matApplySoup(M, s) {
+    var out = new Float32Array(s.length);
+    for (var i = 0; i < s.length; i += 3) {
+      var q = matApply(M, s[i], s[i + 1], s[i + 2]);
+      out[i] = q[0]; out[i + 1] = q[1]; out[i + 2] = q[2];
+    }
+    return out;
+  }
   function matInvert(M) {
     var a = M[0], b = M[4], c = M[8], d = M[1], e = M[5], f = M[9], g = M[2], h = M[6], i = M[10];
     var A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g;
@@ -706,7 +714,7 @@
   /* The one pipeline under plan and run.
        build     false: ask the kernel and stop, true: make the mesh
      On refusal ok is false and tris is the input soup object. */
-  async function crop(piece, shape, build) {
+  async function cropCore(piece, shape, build) {
     var soup = soupOf(piece);
     var res = { ok: false, reason: '', tris: soup };
     if (!soup || soup.length < 9) { res.reason = 'empty piece'; return res; }
@@ -822,6 +830,42 @@
     }
   }
 
+  /* WHERE IT RUNS. crop() is cropCore() on the page's thread for a small piece, exactly as it was, and in a
+     worker (nso_csg.js NSO_boolRun, nso_work.js) when the piece or the other shape is big: the page posts
+     copies of the soups, the worker runs cropCore on them and posts the result back, and the page's thread
+     stays free while the kernel works. The answer is the same object either way; a refusal still carries the
+     input soup as tris. Stopped (Escape) or timed out, it is a refusal with cancelled / timedOut set.
+     A plan() is a crop with build false: it has a channel of its own, and a newer plan replaces the one
+     still running, since the card asks again at every drag. */
+  function trisOf(v) {
+    if (!v) return 0;
+    if (typeof v.length === 'number') return (v.length / 9) | 0;
+    var s = soupOf(v);
+    return s ? (s.length / 9) | 0 : 0;
+  }
+
+  async function crop(piece, shape, build) {
+    var boolRun = root && root.NSO_boolRun;
+    if (typeof boolRun !== 'function') return cropCore(piece, shape, build);
+    var soup = soupOf(piece);
+    var spec = {
+      path: 'NSO_Crop.job', channel: build ? 'bool' : 'bool-plan', key: build ? null : 'crop-plan',
+      label: build ? 'Cropping' : 'Measuring', host: 'crop-readout',
+      files: function () { return ['nso_csg.js', 'nso_crop.js']; },
+      tris: function (a) { return Math.max(trisOf(a[0]), trisOf(a[1] && a[1].source)); },
+      refuse: function (a, why) { return { ok: false, reason: why, tris: soup }; },
+      restore: function (r) { if (r && !r.ok && !r.tris) r.tris = soup; return r; }
+    };
+    return boolRun(spec, [piece, shape, build], function () { return cropCore(piece, shape, build); });
+  }
+
+  /* In the worker: cropCore, the copy handed back moved. */
+  function job(piece, shape, build) {
+    return cropCore(piece, shape, build).then(function (r) {
+      return root && root.NSO_boolHandBack ? root.NSO_boolHandBack(r) : r;
+    });
+  }
+
   function holdsNothing(res) {
     return res.keptMm3 > res.tinyMm3 ? '' : res.what + ' holds nothing of this piece - move it over the piece';
   }
@@ -831,16 +875,24 @@
       ' - the original is not touched.';
   }
 
+  /* A refusal that was a stop, not a finding: say so, so the card does not report it as the kernel's no. */
+  function stopped(from, to) {
+    if (from.cancelled) to.cancelled = true;
+    if (from.timedOut) to.timedOut = true;
+    if (from.superseded) to.superseded = true;
+    return to;
+  }
+
   async function plan(piece, shape) {
     var r = await crop(piece, shape, false);
-    if (!r.ok) return { ok: false, reason: r.reason };
+    if (!r.ok) return stopped(r, { ok: false, reason: r.reason });
     return { ok: true, faces: r.faces, volumeMm3: r.volumeMm3, bbox: r.bbox, what: r.what, note: r.note,
              text: say(r, 'Would copy') };
   }
 
   async function run(piece, shape) {
     var r = await crop(piece, shape, true);
-    if (!r.ok) return { ok: false, reason: r.reason };
+    if (!r.ok) return stopped(r, { ok: false, reason: r.reason });
     return { ok: true, tris: r.tris, faces: r.faces, volumeMm3: r.volumeMm3, bbox: r.bbox, parts: r.parts,
              dropped: r.dropped, census: r.census, what: r.what, note: r.note, text: say(r, 'Copied') };
   }
@@ -867,9 +919,17 @@
   function plateToRaw(m, mesh) {
     if (!m || !m.rawTris || m.rawAxis !== 'zup' || !m.centerOffset) return { reason: 'Crop needs a raw piece' };
     if (!mesh || !mesh.geometry) return { reason: 'the piece is not drawn' };
-    var off = m.centerOffset, rb = bounds(m.rawTris);
-    mesh.geometry.computeBoundingBox();
-    var bb = mesh.geometry.boundingBox;
+    /* Both boxes are the same numbers either way; a big piece's are kept (app-crop.js NSO_cropBounds, nso-bounds.js
+       localBox), because the card asks at every pause of a drag and each walk of a million triangles is ~30 ms of the
+       page's thread. A small piece is measured afresh, as ever. */
+    var off = m.centerOffset, rb = (typeof NSO_cropBounds === 'function' ? NSO_cropBounds : bounds)(m.rawTris);
+    var posAttr = mesh.geometry.attributes && mesh.geometry.attributes.position, bb;
+    if (posAttr && posAttr.count >= 900000 && root && root.nsoBounds && typeof root.nsoBounds.localBox === 'function') {
+      bb = root.nsoBounds.localBox(mesh.geometry);
+    } else {
+      mesh.geometry.computeBoundingBox();
+      bb = mesh.geometry.boundingBox;
+    }
     var pairs = [[rb.lo[0] - off.x, bb.min.x], [rb.hi[0] - off.x, bb.max.x], [rb.lo[2] - off.y, bb.min.y],
                  [rb.hi[2] - off.y, bb.max.y], [-rb.hi[1] - off.z, bb.min.z], [-rb.lo[1] - off.z, bb.max.z]];
     for (var i = 0; i < pairs.length; i++) {
@@ -956,7 +1016,14 @@
   async function planOn(m, shape) {
     var r = resolve(m, shape);
     if (r.reason) return { ok: false, reason: r.reason };
-    return plan(r.piece, r.shape);
+    // a piece whose shells a CROP already merged is planned on that solid, as its copy will be
+    var mergedRaw = root && root.nsoOverlap ? root.nsoOverlap.cachedMerge(r.piece.rawTris) : null;
+    if (!mergedRaw) return plan(r.piece, r.shape);
+    var n = root.nsoOverlap.shells(r.piece.rawTris, true);
+    r.piece.rawTris = mergedRaw;
+    var p = await plan(r.piece, r.shape);
+    if (p && p.ok) p.merged = root.nsoOverlap.note(m.name, n);
+    return p;
   }
 
   /* The outline's footprint F - before any offset - as plain loops in P:
@@ -988,23 +1055,40 @@
      (it may be m itself). */
   var busy = false;
   async function copy(m, shape) {
-    function refuse(why) {
-      status('Crop refused - nothing changed (' + why + ')', true);
-      return { ok: false, reason: why };
+    function refuse(why, flags) {
+      status(flags && flags.cancelled ? 'Crop stopped - nothing changed' : 'Crop refused - nothing changed (' + why + ')', !(flags && flags.cancelled));
+      return stopped(flags || {}, { ok: false, reason: why });
     }
     if (typeof state === 'undefined' || typeof THREE === 'undefined' || typeof addModel !== 'function') {
       return { ok: false, reason: 'Crop copy needs the app' };
     }
     if (busy) return { ok: false, reason: 'busy' };
-    var overlap = (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels([m]) : '';
-    if (overlap) return refuse(overlap);
     var rs = resolve(m, shape);
     if (rs.reason) return refuse(rs.reason);
     var host = rs.host;
     busy = true;
     try {
+      /* Work as is (nso-helpers.js, nsoOverlap): a piece - or a Piece cutter - whose shells overlap is cut from
+         those shells merged into one solid, for this copy only. The piece on the plate is not touched. */
+      var merged = [];
+      if (root && root.nsoOverlap) {
+        var sol = await root.nsoOverlap.solid(m, null, 'crop-readout');
+        if (!sol.ok) return refuse(sol.reason, sol);
+        if (sol.merged) { rs.piece.rawTris = sol.soup; merged.push(sol.note); }
+        // a Piece cutter is a solid too; an Outline reads its piece's triangles by index, so it is left as drawn
+        var cutter = rs.shape.kind === 'piece' && rs.shape.pieceId != null ? placedOf(rs.shape.pieceId) : null;
+        var cm = cutter && cutter.sourceId !== m.id ? (state.models || []).find(function (x) { return x.id === cutter.sourceId; }) : null;
+        if (cm) {
+          var cs = await root.nsoOverlap.solid(cm, { geometry: cutter.mesh.geometry, mesh: cutter.mesh }, 'crop-readout');
+          if (!cs.ok) return refuse(cs.reason, cs);
+          if (cs.merged) { rs.shape.source = root.nsoOverlap.zUp(cs.world); merged.push(cs.note); }
+        } else if (cutter && sol.merged) {
+          // the piece is its own cutter: the same merged solid, through the pose it is drawn with
+          rs.shape.source = matApplySoup(matInvert(rs.piece.toRaw), sol.soup);
+        }
+      }
       var r = await run(rs.piece, rs.shape);
-      if (!r.ok) return refuse(r.reason);
+      if (!r.ok) return refuse(r.reason, r);
 
       var geo = rawResultToDisplayGeometry(r.tris);
       var name = cropName(m.name || 'piece');
@@ -1023,7 +1107,8 @@
       if (typeof renderModelList === 'function') renderModelList();
       if (typeof updateAdjustUI === 'function') updateAdjustUI();
       var text = 'Crop: "' + name + '" - ' + say(r, 'copied') +
-        ' It sits where it was cut from; grab it to move it. One Undo removes it.';
+        ' It sits where it was cut from; grab it to move it. One Undo removes it.' +
+        (merged.length ? ' (' + merged.join('; ') + '.)' : '');
       status(text);
       return { ok: true, id: id, name: name, faces: r.faces, volumeMm3: r.volumeMm3, bbox: r.bbox, text: text };
     } catch (err) {
@@ -1039,6 +1124,8 @@
     plan: plan,
     run: run,
     cutterSoup: cutterSoup,
+    cropCore: cropCore,
+    job: job,
     resolve: resolve,
     planOn: planOn,
     footprintPolys: footprintPolys,

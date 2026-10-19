@@ -17,6 +17,36 @@
    gates read jsRuns (the app's own time) and the tables print both, with the
    idle frame beside them so the difference is on the page. */
 
+const fs = require('fs');
+
+/* The gate piece: a UV sphere of nu x (2 nv - 2) triangles (1000 x 501 = exactly 1,000,000), binary STL.
+   Shared by big:mesh and bool:worker. The winding is the one big:mesh has always used (normals inward: it only
+   needs the surface for rays); `outward` flips it to a proper solid, which a boolean needs. */
+function writeSphereSTL(file, nu, nv, r, outward) {
+  const tris = nu * (2 * nv - 2);
+  const buf = Buffer.alloc(84 + tris * 50);
+  buf.write('nso big-mesh gate sphere', 0);
+  buf.writeUInt32LE(tris, 80);
+  const P = (i, j) => {
+    const th = Math.PI * j / nv, ph = 2 * Math.PI * (i % nu) / nu;
+    return [r * Math.sin(th) * Math.cos(ph), r * Math.sin(th) * Math.sin(ph), r * Math.cos(th)];
+  };
+  let off = 84;
+  const put = (a, b, c) => {
+    // facet normal left zero: STLLoader recomputes what it needs and the app recomputes vertex normals
+    off += 12;
+    for (const v of [a, b, c]) for (let k = 0; k < 3; k++) { buf.writeFloatLE(v[k], off); off += 4; }
+    off += 2;
+  };
+  for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
+    const a = P(i, j), b = P(i + 1, j), c = P(i + 1, j + 1), d = P(i, j + 1);
+    if (j > 0) { if (outward) put(a, c, b); else put(a, b, c); }
+    if (j < nv - 1) { if (outward) put(a, d, c); else put(a, c, d); }
+  }
+  fs.writeFileSync(file, buf);
+  return tris;
+}
+
 const NATIVE = new Set(['(program)', '(idle)', '(root)']);
 
 /* In-page recorder for Long Task entries. Installed once per page. */
@@ -146,4 +176,4 @@ async function hoverPoints(page, index, n) {
 
 const q = (a, p) => { const s = a.slice().sort((x, y) => x - y); return s.length ? s[Math.min(s.length - 1, Math.floor(p * s.length))] : 0; };
 
-module.exports = { installRecorder, installProjector, openProfiler, measure, hoverPoints, jsRunsOf, frameKey, isApp, q };
+module.exports = { writeSphereSTL, installRecorder, installProjector, openProfiler, measure, hoverPoints, jsRunsOf, frameKey, isApp, q };

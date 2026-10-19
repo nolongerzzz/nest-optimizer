@@ -229,7 +229,7 @@
   var TWO_LINES_MM = 2 * NOZZLE_MM;      // the thinnest wall that prints as two lines
 
   function mm1(x) { return (Math.round(x * 10) / 10).toFixed(1); }
-  var FIX_LABEL = { cap: 'CAP', patch: 'PATCH', bridge: 'BRIDGE', sealRepair: 'REPAIR', thickenOut: 'THICKEN OUT' };
+  var FIX_LABEL = { cap: 'CAP', patch: 'PATCH', bridge: 'BRIDGE', sealRepair: 'REPAIR', thickenOut: 'THICKEN OUT', mergeShells: 'MERGE SHELLS' };
 
   function keyOf(x, y, z) { return x.toFixed(4) + ',' + y.toFixed(4) + ',' + z.toFixed(4); }
 
@@ -360,7 +360,23 @@
         handledBy: null
       });
     }
-    if (report.pierce) {
+    if (report.pierce && report.overlapShells >= 2 && !report.openEdges && !report.nonManifoldEdges) {
+      /* Whole shells laid through one another (NSO_Defects: report.overlapShells). The boolean verbs merge them
+         for their own operation and leave the piece as it is; MERGE SHELLS does the same union to the piece.
+         Only on a piece whose every shell is closed: an open or pinched shell cannot be merged into a closed
+         solid (the merge would only refuse), so such a piece keeps the plain piercing row until its edges are
+         fixed. */
+      out.push({
+        kind: 'pierce', problems: P.pierce,
+        items: [{ kind: 'pierce', fix: 'mergeShells', fixLabel: FIX_LABEL.mergeShells, scope: 'whole piece',
+                  problems: P.pierce.map(function (_, i) { return i; }),
+                  text: 'Overlapping shells, whole piece' }],
+        title: plural(report.overlapShells, 'overlapping shell') + ', ' + plural(report.pierce, 'piercing pair') +
+               ' - shells passing through each other',
+        meaning: 'The piece is closed shells laid through one another. A slicer fills the overlap; Crop, Join, Subtract and the other cuts and welds merge them for themselves. Merge shells makes them one solid on the piece.',
+        handledBy: null
+      });
+    } else if (report.pierce) {
       out.push({
         kind: 'pierce', problems: P.pierce, items: [],
         title: plural(P.pierce.length, 'place') + ', ' + plural(report.pierce, 'piercing pair') +

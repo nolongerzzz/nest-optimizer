@@ -18,6 +18,7 @@ check measures or what colour it paints. It adds three things:
    | holes (open edges) | `2 holes, 221 open edges` | **CAP**, **PATCH** or **BRIDGE** per hole or pair of holes; **REPAIR** for open edges that are no clean loop |
    | doubled or pinched (non-manifold) | `5 places, 132 doubled or pinched edges` | **REPAIR** — Seal with Repair, whole piece: ticks `#chk-seal-repair`, clicks `#btn-seal`, puts the tick back |
    | piercing | `1 place, 7 piercing pairs - pieces passing through each other` | none. Says no tool in the app removes it yet |
+  | overlapping shells (piercing pairs between whole shells) | `2 overlapping shells, 74 piercing pairs - shells passing through each other` | **MERGE SHELLS** — the shells unioned into one solid on the piece itself, whole piece (docs/WORK-AS-IS.md) |
    | thin walls | `1 place, 96 faces under 0.42 mm (thinnest 0.249 mm)` | **THICKEN OUT +0.56 mm** — types the mm that reaches two nozzle widths into `#inp-thicken-mm`, clicks `#btn-thicken-out`, puts the box back |
    | gap between faces (advisory) | `1 gap between faces that look at each other` | **BRIDGE** |
    | clean | `Nothing wrong found`, green, shown exactly when the verdict is PASS and there is no gap | — |

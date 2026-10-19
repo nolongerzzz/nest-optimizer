@@ -290,7 +290,9 @@
     "bvh:test": "node tools/nso_bvh_test.js",
     "edges:test": "node tools/nso_edges_test.js",
     "big:mesh": "node tools/nso_big_mesh_test.js",
-    "big:profile": "node tools/nso_big_mesh_profile.js"
+    "big:profile": "node tools/nso_big_mesh_profile.js",
+    "bool:worker": "node tools/nso_boolean_worker_test.js",
+    "bool:3mf": "node tools/nso_boolean_3mf_drive.js"
   },
   "devDependencies": {
     "playwright": "1.56.1",

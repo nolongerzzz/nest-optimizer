@@ -34,6 +34,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 const { withApp } = require('./nso_app_harness');
 const L = require('./nso_big_mesh_lib');
+const { writeSphereSTL } = L;
 
 const argv = process.argv.slice(2);
 const QUICK = argv.includes('--quick');
@@ -45,32 +46,6 @@ const check = (name, cond, detail) => {
   console.log('  ' + (cond ? 'ok   ' : 'FAIL ') + name + (detail ? ' - ' + detail : ''));
   if (!cond) fails++;
 };
-
-/* ---- the piece: a UV sphere of exactly 1,000,000 triangles, binary STL ---- */
-function writeSphereSTL(file, nu, nv, r) {
-  const tris = nu * (2 * nv - 2);
-  const buf = Buffer.alloc(84 + tris * 50);
-  buf.write('nso big-mesh gate sphere', 0);
-  buf.writeUInt32LE(tris, 80);
-  const P = (i, j) => {
-    const th = Math.PI * j / nv, ph = 2 * Math.PI * (i % nu) / nu;
-    return [r * Math.sin(th) * Math.cos(ph), r * Math.sin(th) * Math.sin(ph), r * Math.cos(th)];
-  };
-  let off = 84;
-  const put = (a, b, c) => {
-    // facet normal left zero: STLLoader recomputes what it needs and the app recomputes vertex normals
-    off += 12;
-    for (const v of [a, b, c]) for (let k = 0; k < 3; k++) { buf.writeFloatLE(v[k], off); off += 4; }
-    off += 2;
-  };
-  for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) {
-    const a = P(i, j), b = P(i + 1, j), c = P(i + 1, j + 1), d = P(i, j + 1);
-    if (j > 0) put(a, b, c);
-    if (j < nv - 1) put(a, c, d);
-  }
-  fs.writeFileSync(file, buf);
-  return tris;
-}
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'nso-big-mesh-'));
 const SPHERE = path.join(TMP, 'sphere_1M.stl');

@@ -3606,55 +3606,7 @@ function brickSkipLists(brick, faceList, soup) {
   return { hull: hull, pocket: pocket, nHull: nHull, nPocket: nPocket };
 }
 
-// Add one soup to another with the kernel the app already carries.
-async function nsoUnionSoups(aSoup, bSoup) {
-  if (typeof NSO_CSG === 'undefined') return { ok: false, reason: 'no CSG kernel in this build' };
-  let wasm;
-  try { wasm = await NSO_CSG.load(); }
-  catch (err) { return { ok: false, reason: 'CSG kernel failed to load: ' + (err && err.message ? err.message : err) }; }
-  let A = null, B = null, out = null;
-  try {
-    A = NSO_CSG.soupToManifold(wasm, aSoup);
-    B = NSO_CSG.soupToManifold(wasm, bSoup);
-    out = A.add(B);
-    if (out.status() !== 'NoError') throw new Error('kernel refused the fill: ' + out.status());
-    if (out.isEmpty()) throw new Error('the fill produced nothing');
-    return { ok: true, soup: NSO_CSG.manifoldToSoup(out) };
-  } catch (err) {
-    return { ok: false, reason: (err && err.message ? err.message : String(err)) };
-  } finally {
-    if (A) A.delete();
-    if (B) B.delete();
-    if (out) out.delete();
-  }
-}
-
-// Subtract one soup from another with the kernel the app already carries.
-// Nothing here reaches into the kernel; it is the same adapter Subtract and
-// Join use, called on two boxes this file generated.
-async function nsoSubtractSoups(aSoup, bSoup) {
-  if (typeof NSO_CSG === 'undefined') return { ok: false, reason: 'no CSG kernel in this build' };
-  let wasm;
-  try { wasm = await NSO_CSG.load(); }
-  catch (err) { return { ok: false, reason: 'CSG kernel failed to load: ' + (err && err.message ? err.message : err) }; }
-  let A = null, B = null, out = null;
-  try {
-    A = NSO_CSG.soupToManifold(wasm, aSoup);
-    if (A.status && A.status() !== 'NoError') throw new Error('hull rejected: ' + A.status());
-    B = NSO_CSG.soupToManifold(wasm, bSoup);
-    if (B.status && B.status() !== 'NoError') throw new Error('pocket rejected: ' + B.status());
-    out = A.subtract(B);
-    if (out.status() !== 'NoError') throw new Error('kernel refused the cut: ' + out.status());
-    if (out.isEmpty()) throw new Error('the cut left nothing');
-    return { ok: true, soup: NSO_CSG.manifoldToSoup(out) };
-  } catch (err) {
-    return { ok: false, reason: (err && err.message ? err.message : String(err)) };
-  } finally {
-    if (A) A.delete();
-    if (B) B.delete();
-    if (out) out.delete();
-  }
-}
+/* nsoUnionSoups / nsoSubtractSoups: nso_csg.js (they run in the boolean worker when the piece is big) */
 
 // The whole-solid wrap for a brick: the hull wrapped by the same generator a
 // plain box uses, with the pocket - wrapped by that same generator - taken
@@ -4885,36 +4837,7 @@ function stripFacingInBand(soup, axisIdx, plane, band, win) {
   return { tris: new Float32Array(out), stripped };
 }
 
-function weldSoupVerts(soup, eps) {
-  eps = eps || 0.2;
-  const inv = 1 / eps;
-  const map = new Map();
-  const verts = [];
-  function key(x, y, z) {
-    return (Math.round(x * inv)) + ',' + (Math.round(y * inv)) + ',' + (Math.round(z * inv));
-  }
-  function vid(x, y, z) {
-    const k = key(x, y, z);
-    if (map.has(k)) return map.get(k);
-    const id = verts.length / 3;
-    verts.push(x, y, z);
-    map.set(k, id);
-    return id;
-  }
-  const out = [];
-  const triCount = soup.length / 9;
-  for (let t = 0; t < triCount; t++) {
-    const i0 = t * 9;
-    const a = vid(soup[i0], soup[i0 + 1], soup[i0 + 2]);
-    const b = vid(soup[i0 + 3], soup[i0 + 4], soup[i0 + 5]);
-    const c = vid(soup[i0 + 6], soup[i0 + 7], soup[i0 + 8]);
-    if (a === b || b === c || c === a) continue;
-    out.push(verts[a * 3], verts[a * 3 + 1], verts[a * 3 + 2]);
-    out.push(verts[b * 3], verts[b * 3 + 1], verts[b * 3 + 2]);
-    out.push(verts[c * 3], verts[c * 3 + 1], verts[c * 3 + 2]);
-  }
-  return new Float32Array(out);
-}
+/* weldSoupVerts: nso_csg.js (the boolean worker welds before the kernel too) */
 
 function openBoundaryEdges(soup) {
   const edges = new Map();

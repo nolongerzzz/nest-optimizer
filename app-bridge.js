@@ -58,11 +58,22 @@ function NSO_bridgePlacedBySource(id) {
   return (state.placed || []).find(function (p) { return p && p.sourceId === id && p.mesh; }) || null;
 }
 function NSO_bridgeModel(id) { return (state.models || []).find(function (m) { return m.id === id; }) || null; }
-// The overlap guard (nso-helpers.js, nsoOverlap): '' for clean solids, else the
-// sentence naming the first piece with overlapping shells. Bridge and Connect
-// ask it before the kernel; a band welds without the kernel and never asks.
-function NSO_bridgeOverlap(ids) {
-  return (typeof nsoOverlap !== 'undefined' && nsoOverlap) ? nsoOverlap.refusalOfModels(ids.map(NSO_bridgeModel)) : '';
+// Work as is (nso-helpers.js, nsoOverlap): the plan with each picked piece whose shells overlap swapped for those
+// shells merged into one solid, Z up as the plan reads its pieces, for the weld only - the picks, the preview and
+// the plan stay on the pieces as drawn. A band welds without the kernel and never asks; Bridge's sheet and string
+// and Connect's weld do. -> Promise of { ok: true, plan, note } (note '' when nothing was merged) or a refusal
+// { ok: false, reason, cancelled? }. The plan's pieces are its ids in order, or, for a drawn stroke, p.welds' slots.
+async function NSO_bridgeSolidPlan(p, host) {
+  if (typeof nsoOverlap === 'undefined' || !nsoOverlap) return { ok: true, plan: p, note: '' };
+  var placed = p.ids.map(NSO_bridgePlacedBySource);
+  var s = await nsoOverlap.solids(p.ids.map(NSO_bridgeModel),
+    function (m, i) { return { geometry: placed[i].mesh.geometry, mesh: placed[i].mesh }; }, host);
+  if (!s.ok || !s.note) return s.ok ? { ok: true, plan: p, note: '' } : s;
+  var q = {};
+  for (var k in p) if (Object.prototype.hasOwnProperty.call(p, k)) q[k] = p[k];
+  q.pieces = p.pieces.slice();
+  s.list.forEach(function (x, i) { if (x.merged) q.pieces[p.drawn ? p.welds[i] : i] = nsoOverlap.zUp(x.world); });
+  return { ok: true, plan: q, note: s.note };
 }
 
 // A placed piece's pose, as a string: its world matrix and its geometry.
@@ -231,7 +242,6 @@ function NSO_bridgePreview() {
   try {
     p = NSO_Bridge.plan(pieces, { piece: 0, target: B.a.target }, { piece: ids.indexOf(B.b.sourceId), target: B.b.target }, o);
   } catch (err) { p = { ok: false, reason: (err && err.message) || String(err) }; }
-  if (p.ok && p.kind !== 'band') { var ov = NSO_bridgeOverlap(ids); if (ov) p = { ok: false, reason: ov, overlap: true }; }
   p.ids = ids;
   p.keys = [B.a.cache.key, B.b.cache.key];
   B.plan = p;
@@ -335,7 +345,7 @@ function NSO_bridgeSay(text, bad) { if (typeof setStatus === 'function') setStat
 /* Weld the pending plan and put the result on the plate in place of its
    inputs. One undo step (supportSwap: the new piece off, every input back
    exactly as it was - model, placed record, mesh, pose). */
-function NSO_bridgeSet() {
+async function NSO_bridgeSet() {
   var B = NSO_bridgeUI(), p = B.plan;
   if (!p || !p.ok) return Promise.resolve({ ok: false, reason: p ? p.reason : 'nothing to bridge - pick two places' });
   if (B.busy) return Promise.resolve({ ok: false, reason: 'busy' });
@@ -357,17 +367,25 @@ function NSO_bridgeSet() {
     NSO_bridgeSay(why, true); NSO_bridgeReadout(why, true);
     return Promise.resolve({ ok: false, reason: 'painted faces: ' + painted, painted: painted });
   }
+  var merged = '', wp = p;
   if (p.kind !== 'band') {
-    var overlap = NSO_bridgeOverlap(p.ids);
-    if (overlap) {
-      NSO_bridgeSay('Bridge refused - pieces unchanged (' + overlap + ')', true); NSO_bridgeReadout('Bridge: ' + overlap, true);
-      return Promise.resolve({ ok: false, reason: overlap, overlap: true });
+    // busy while the shells are checked (and merged), so a second press does not start a second
+    B.busy = true; NSO_bridgeSyncRows();
+    var sol;
+    try { sol = await NSO_bridgeSolidPlan(p, 'bridge-readout'); }
+    finally { B.busy = false; NSO_bridgeSyncRows(); }
+    if (!sol.ok) {
+      NSO_bridgeSay(sol.cancelled ? 'Bridge stopped - pieces unchanged' : 'Bridge refused - pieces unchanged (' + sol.reason + ')', !sol.cancelled);
+      NSO_bridgeReadout('Bridge: ' + sol.reason, !sol.cancelled);
+      return Promise.resolve({ ok: false, reason: sol.reason, cancelled: !!sol.cancelled });
     }
+    wp = sol.plan; merged = sol.note;
   }
   B.busy = true; NSO_bridgeSyncRows();
   if (p.kind !== 'band') NSO_bridgeSay('Bridging (loading CSG kernel)...');
-  var unionFn = (typeof NSO_unionSoups === 'function') ? NSO_unionSoups : null;
-  return NSO_Bridge.weld(p, { union: unionFn }).then(function (r) {
+  var unionFn = (typeof NSO_unionSoups === 'function')
+    ? function (a, b) { return NSO_unionSoups(a, b, { label: 'Bridging', host: 'bridge-readout' }); } : null;
+  return NSO_Bridge.weld(wp, { union: unionFn }).then(function (r) {
     B.busy = false;
     if (!r.ok) {
       NSO_bridgeSay('Bridge refused - pieces unchanged (' + r.reason + ')', true);
@@ -385,10 +403,11 @@ function NSO_bridgeSet() {
     var t = r.topo || {};
     var msg = 'Bridge done - ' + p.text + '; ' + (models.length === 2 ? 'two pieces are one' : 'the piece is closed on itself') +
       ', ' + (r.soup.length / 9) + ' faces, ' + (r.kernel ? r.kernel.open : t.open) + ' open edge(s). One Undo puts ' +
-      (models.length === 2 ? 'both back.' : 'it back.');
+      (models.length === 2 ? 'both back.' : 'it back.') + (merged ? ' (' + merged + '.)' : '');
     NSO_bridgeSay(msg);
     NSO_bridgeClearPicks();
-    NSO_bridgeReadout('Bridged. ' + NSO_BRIDGE_HINT, false);
+    NSO_bridgeReadout('Bridged. ' + (merged ? merged + '. ' : '') + NSO_BRIDGE_HINT, false);
+    r.merged = merged;
     r.newId = c.id;
     return r;
   }).catch(function (err) {

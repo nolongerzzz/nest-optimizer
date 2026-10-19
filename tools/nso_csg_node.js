@@ -4,13 +4,16 @@
  *   const csg = csgContext();
  *   const u = await csg.NSO_unionSoups(aSoup, bSoup);
  *
- * NOTHING IS REIMPLEMENTED HERE. app-join.js's NSO_CSG IIFE and its
- * NSO_unionSoups / NSO_manifoldStats / NSO_weldEpsFor / NSO_soupLen /
- * NSO_errMsg, plus app-finish.js's weldSoupVerts, are spliced out of the
- * shipped files by name and run in a vm context. A test that retyped the
- * union would only ever prove the copy right; what matters here is that the
- * solid under test went through the same welds, the same pre-checks and the
- * same kernel call the Complete Join button makes.
+ * NOTHING IS REIMPLEMENTED HERE. nso_csg.js - the NSO_CSG adapter, the weld
+ * and edge helpers and the union / subtract / punch booleans the app's
+ * Join, Subtract, Connect and Bridge stand on - is the shipped file, run
+ * whole in a vm context. A test that retyped the union would only ever
+ * prove the copy right; what matters here is that the solid under test went
+ * through the same welds, the same pre-checks and the same kernel call the
+ * Complete Join button makes. (It used to splice these out of app-join.js
+ * and app-finish.js by name; they moved to nso_csg.js so the boolean worker
+ * can load them too. There is no worker in a vm context: every boolean here
+ * takes the in-thread path, which is the same core the worker runs.)
  *
  * TWO THINGS ARE CHANGED, both of them the loader and neither of them the
  * adapter:
@@ -62,23 +65,12 @@ function extractFns(file, names) {
   return out;
 }
 
-/* The adapter IIFE, verbatim from `var NSO_CSG_URL =` down to its closing
-   `})();`, with only the URL rewritten. */
+/* nso_csg.js, verbatim, with only NSO_CSG_URL rewritten. */
 function csgSource() {
-  const lines = fs.readFileSync(path.join(REPO, 'app-join.js'), 'utf8').split('\n');
-  const start = lines.findIndex(l => /^var NSO_CSG_URL\s*=/.test(l));
-  if (start < 0) throw new Error('NSO_CSG_URL not found in app-join.js');
-  let end = -1;
-  for (let i = start; i < lines.length; i++) if (/^\}\)\(\);\s*$/.test(lines[i])) { end = i; break; }
-  if (end < 0) throw new Error('end of the NSO_CSG IIFE not found in app-join.js');
   const local = 'file://' + path.join(REPO, 'vendor', 'manifold', 'manifold.js');
-  return lines.slice(start, end + 1).join('\n')
+  return fs.readFileSync(path.join(REPO, 'nso_csg.js'), 'utf8')
     .replace(/^var NSO_CSG_URL\s*=.*$/m, 'var NSO_CSG_URL = ' + JSON.stringify(local) + ';');
 }
-
-const JOIN_FNS = ['NSO_soupLen', 'NSO_errMsg', 'NSO_manifoldStats',
-                  'NSO_weldEpsFor', 'NSO_unionSoups', 'NSO_subtractSoups'];
-const FIN_FNS = ['weldSoupVerts'];
 
 /* Two node warnings, neither of them about the code under test: the dynamic
    import hook is flagged experimental, and vendor/manifold/manifold.js has no
@@ -103,17 +95,12 @@ function csgContext() {
   quietLoaderWarnings();
   const ctx = {
     Math, Map, Set, console, Array, Object, Number, String, JSON, Error, Promise,
-    isFinite, isNaN, Infinity, NaN,
+    isFinite, isNaN, Infinity, NaN, setTimeout, clearTimeout,
     Float32Array, Float64Array, Int32Array, Uint32Array, Uint8Array, ArrayBuffer
   };
   vm.createContext(ctx);
   const opts = { importModuleDynamically: vm.constants.USE_MAIN_CONTEXT_DEFAULT_LOADER };
-  vm.runInContext(csgSource(), ctx,
-    Object.assign({ filename: 'app-join.js (NSO_CSG)' }, opts));
-  const join = extractFns(path.join(REPO, 'app-join.js'), JOIN_FNS);
-  const fin = extractFns(path.join(REPO, 'app-finish.js'), FIN_FNS);
-  vm.runInContext(Object.values(join).concat(Object.values(fin)).join('\n\n'), ctx,
-    Object.assign({ filename: 'app-join.js / app-finish.js (union)' }, opts));
+  vm.runInContext(csgSource(), ctx, Object.assign({ filename: 'nso_csg.js' }, opts));
   return ctx;
 }
 

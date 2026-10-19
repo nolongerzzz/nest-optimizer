@@ -35,7 +35,8 @@ piece the existing checks use is handled exactly as before.
   frame's GPU upload.
 - Hover tools other than Lift (Bridge, Connect, Close, Patch) now get a fast ray
   but still build their own per-piece analyses on the page's thread when armed.
-- The overlap check (`nsoOverlap`) runs when a verb asks for it, as before.
+- The overlap check and the shell merge (`nsoOverlap.solid`, docs/WORK-AS-IS.md) run when a verb that needs a
+  solid asks for them, in a worker for a big piece (docs/BOOLEAN-WORKER.md), for every such verb.
 
 ## Measuring in the headless browser
 
