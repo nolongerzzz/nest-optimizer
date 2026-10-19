@@ -29,7 +29,8 @@
  *      that the fix then does what its button says.)
  *   9. MERGE SHELLS. library/box_closed.stl: "2 overlapping shells, 74 piercing pairs", one MERGE SHELLS
  *      item; after the merge (nso_csg.js NSO_shellMergeCore, the verbs' own) 0 piercing pairs and a
- *      canonical PASS. A lid with a triangle gone cannot be merged, and says so; contact is not overlap.
+ *      canonical PASS. A lid with a triangle gone cannot be merged (the card offers no MERGE SHELLS for an open
+ *      piece, and the merge itself says so in words); contact is not overlap.
  */
 'use strict';
 const fs = require('fs');
@@ -298,7 +299,8 @@ async function mergeShells() {
   // unmendable: the lid slab with a triangle gone is no closed shell, so no closed solid can come of the merge
   const open = box.slice(0, box.length - 9);
   const ro = items(open);
-  ok(ro.r.overlapShells === 2 && flat(ro.rows).some(i => i.fix === 'mergeShells'), 'an open lid still reads as overlapping shells, with MERGE SHELLS');
+  ok(ro.r.overlapShells === 2 && !flat(ro.rows).some(i => i.fix === 'mergeShells'),
+     'an open lid still counts as overlapping shells, but gets no MERGE SHELLS until its hole is closed');
   const mo = await K.NSO_shellMergeCore(open);
   ok(!mo.ok && /^a shell is not closed, so there is no solid to merge/.test(mo.reason), 'its merge refuses in words: ' + mo.reason);
   // contact is not overlap: a mark standing on a bar's face

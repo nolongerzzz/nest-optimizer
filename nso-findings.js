@@ -360,14 +360,17 @@
         handledBy: null
       });
     }
-    if (report.pierce && report.overlapShells >= 2) {
+    if (report.pierce && report.overlapShells >= 2 && !report.openEdges && !report.nonManifoldEdges) {
       /* Whole shells laid through one another (NSO_Defects: report.overlapShells). The boolean verbs merge them
-         for their own operation and leave the piece as it is; MERGE SHELLS does the same union to the piece. */
+         for their own operation and leave the piece as it is; MERGE SHELLS does the same union to the piece.
+         Only on a piece whose every shell is closed: an open or pinched shell cannot be merged into a closed
+         solid (the merge would only refuse), so such a piece keeps the plain piercing row until its edges are
+         fixed. */
       out.push({
         kind: 'pierce', problems: P.pierce,
         items: [{ kind: 'pierce', fix: 'mergeShells', fixLabel: FIX_LABEL.mergeShells, scope: 'whole piece',
                   problems: P.pierce.map(function (_, i) { return i; }),
-                  text: plural(report.overlapShells, 'overlapping shell') + ', whole piece' }],
+                  text: 'Overlapping shells, whole piece' }],
         title: plural(report.overlapShells, 'overlapping shell') + ', ' + plural(report.pierce, 'piercing pair') +
                ' - shells passing through each other',
         meaning: 'The piece is closed shells laid through one another. A slicer fills the overlap; Crop, Join, Subtract and the other cuts and welds merge them for themselves. Merge shells makes them one solid on the piece.',

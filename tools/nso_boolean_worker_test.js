@@ -168,9 +168,10 @@ function pageKit() {
     check('...with its nozzle-safety readout (the clearance probe ran in the worker too)', punch.warned);
 
     // overlapping shells (work as is): the measure and the merge of library/box_closed.stl, past the threshold
-    const cid = await loadSTL(page, path.join(ROOT, 'library', 'box_closed.stl'));
-    const shells = await page.evaluate(async cid => {
-      const K = window.__k, raw = state.models.find(m => m.id === cid).rawTris;
+    // the soup handed in, not loaded: the plate stays as section 2 expects it
+    const closedSoup = Array.from(require('./nso_stl_io.js').readSTL(path.join(ROOT, 'library', 'box_closed.stl')));
+    const shells = await page.evaluate(async arr => {
+      const K = window.__k, raw = new Float32Array(arr);
       const mineM = NSO_overlapMeasure(raw.slice()), mineS = await NSO_shellMergeCore(raw.slice());
       NSO_BoolConfig.bigTris = 5;
       K.spy();
@@ -178,7 +179,7 @@ function pageKit() {
       try { m = await nsoOverlap.measureAsync(raw.slice()); s = await nsoOverlap.merge(raw.slice()); } finally { NSO_BoolConfig.bigTris = 50000; }
       const calls = K.calls; K.unspy();
       return { calls, measure: JSON.stringify(m) === JSON.stringify(mineM), m, ok: !!s.ok, same: K.sameResult(s, mineS), tris: (s.soup || []).length / 9 };
-    }, cid);
+    }, closedSoup);
     check('overlapping shells: the measure and the merge go to the worker, and are the in-thread answers byte for byte (' + shells.tris + ' triangles)',
       shells.calls === 2 && shells.measure && shells.ok && shells.same, 'worker calls ' + shells.calls + ', ' + JSON.stringify(shells.m) + ', same ' + shells.same);
 
