@@ -3408,6 +3408,15 @@ button#ms-legend-toggle:hover { color: var(--text, #fff); border-color: var(--ac
    the verb's rows in a block that hides whole. */
 .te-rows { display: flex; flex-direction: column; gap: 3px; }
 .te-rows[hidden] { display: none; }
+/* Neck's handles on the canvas (app-tube-edge.js NSO_teCursor): an end ring
+   resizes along the tube's axis as it lies on screen, the waist across it,
+   the band is a hand. */
+#viewport canvas.te-cur-ew { cursor: ew-resize; }
+#viewport canvas.te-cur-ns { cursor: ns-resize; }
+#viewport canvas.te-cur-nesw { cursor: nesw-resize; }
+#viewport canvas.te-cur-nwse { cursor: nwse-resize; }
+#viewport canvas.te-cur-grab { cursor: grab; }
+#viewport canvas.te-cur-grabbing { cursor: grabbing; }
 .vp-menu-body .vp-row-bend .btn { min-width: 0; }
 
 /* Bridge (app-bridge.js): Bend's panel classes, its readout on top - it

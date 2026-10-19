@@ -1714,6 +1714,16 @@ the same way. Before a later ticket touches it:
   ring by angle. Each neck is its own commit and its own Undo
   (`tubeNeckReplace`). `npm run tube:neck`; screenshots from
   `TUBE_NECK_SHOTS=dir npm run tube:neck-shots` (not a test step).
+- **The neck is dragged** (2026-10-19, `app-tube-edge.js?v=neckdrag1`): its
+  three rings are handles - the two END rings stretch the band (Length moves
+  twice the drag, centre held), the WAIST ring is Δr (toward the axis pinches),
+  the BAND between the end rings slides the neck along the axis; 0.5 mm steps,
+  0.1 with Shift. Arrows while the card is open: Up / Down the band 1 mm, Left
+  / Right Δr; Escape puts a drag back, then shuts the card. The handles draw
+  from the read and the fields (`NSO_teNeckGeom`), not the last result, so
+  they stay up through a refusal. The press is taken at the window (capture),
+  so no drag reaches OrbitControls. UI only: `nso_tube_neck.js` is unchanged.
+  Gates: `tools/nso_tube_neck_drag_check.js`, chained into `npm run tube:neck`.
 
 `npm run tube:edges` (headless) and `npm run tube:edges-drive` (real app),
 both in `npm test`.
