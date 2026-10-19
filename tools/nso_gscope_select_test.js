@@ -9,7 +9,9 @@
    and a press on bare plate orbits in every mode.
 
    The legend is the FEATURES list: the slicer's line types only, Bambu-style -
-   swatch, name, count, a Display check - and Display acts on both plates.
+   swatch, name, count, a checkbox - and CHECKBOXES ONLY (docs/GSCOPE.md, item
+   4): shown is the union of the checked rows, the text toggles its box, hover
+   does nothing, and what is shown is what Select, a drag and Export act on.
    Surface features (flange, handle ...) and Lift's Features readout are gone
    from G-scope: they live on the plate.
 
@@ -18,14 +20,18 @@
    GATES
      1. The card: the five modes in a row, none of the old Orbit / Pick a line /
         Select layer buttons, no LINE / LAYER column buttons, the old ids that
-        stay on the new controls; Feature / Line / Layer are a slice's.
+        stay on the new controls; Feature / Line / Layer are a slice's. The
+        column is IMPORT . READ PLATE | SELECT . VIEW.
      2. Each mode isolates: hover outlines, click isolates (the rest out of the
         view), click again un-isolates, Escape un-isolates.
      3. Each mode pulls: a press on the hovered thing and a drag lands exactly
         that thing on TAKE, and LENS is byte-identical afterwards.
      4. The slider's range is one card: hover, click, drag - one piece.
-     5. The Features list: rows, counts, Display on both plates, a row isolates
-        and is dragged like any feature.
+     5. The Features list, checkboxes only: hover changes nothing; the row text
+        toggles its box and nothing else; a row is not dragged; two rows
+        checked - exactly those two line types drawn; none - nothing; checked
+        again, type by type; Check all checks every box; what is shown is what
+        Export and a drag take; the boxes are one set for both plates.
      6. A mode switch keeps the camera; a press on bare plate orbits in every
         mode; Line's arrows and Layer's steps; the Escape ladder.
      7. A plate piece (mesh): Piece and Region only, the list says "not sliced".
@@ -81,6 +87,8 @@ const PAGE_HELPERS = `
       pieces: () => M().takePieces()
     };
   })();
+  window.__dl = [];
+  window.downloadBlob = function (blob, name) { window.__dl.push({ name: name, size: blob.size }); };
 `;
 const evalT = (page, fn, arg) => page.evaluate(fn, arg);
 const plate = page => page.evaluate(() => NSO_MICROSCOPE.plate());
@@ -143,7 +151,7 @@ withApp(async (page, logs) => {
       J(r.kids) === J(['ms-mode-piece', 'ms-mode-select', 'ms-mode-feature', 'ms-mode-line', 'ms-mode-layer']) && J(r.text) === J(['PIECE', 'REGION', 'FEATURE', 'LINE', 'LAYER']) && r.inCard, J(r.text));
     check('Orbit is not a mode any more, and the Line and Layer cards folded into Select', r.gone.length === 0, r.gone.join(',') || 'gone');
     check('the controls that kept their ids are in the Select card now', r.stay.length === 0, r.stay.join(',') || 'all there');
-    check('the column is Import, Read plate | Select, View, Render | Overhangs, Crop Z, Slice', J(r.column) === J(['ms-btn-open', 'ms-btn-plate', 'ms-nav-select', 'ms-nav-view', 'ms-nav-render', 'ms-nav-overhangs', 'ms-nav-crop', 'ms-nav-slice']), J(r.column));
+    check('the column is Import, Read plate | Select, View', J(r.column) === J(['ms-btn-open', 'ms-btn-plate', 'ms-nav-select', 'ms-nav-view']), J(r.column));
     check('Piece is the mode a document opens in; on a slice every mode is available', r.mode === 'piece' && r.avail.every(Boolean) && J(r.pressed) === J(['true', 'false', 'false', 'false', 'false']), J(r.pressed));
     await page.click('#ms-nav-select'); await frames(page);
     await shot('01-select-card');
@@ -163,7 +171,7 @@ withApp(async (page, logs) => {
   let pulled = 0;
   for (const [id, label, feat, layer, expect, source] of CASES) {
     await showLens(page);
-    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.clearBoxes(); M.showAll(); if (M.isIsolated()) M.back(); M.normalView(); });
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.clearBoxes(); M.checkAll(); M.setFeatureDisplay('Travel', false); if (M.isIsolated()) M.back(); M.normalView(); });
     await setMode(page, id);
     const want = await page.evaluate(([f, l]) => window.__t.countWhere(f, l), [feat, layer]);
     let px = await page.evaluate(([f, l]) => window.__t.pxSeg(f, l), [feat, layer]);
@@ -223,7 +231,7 @@ withApp(async (page, logs) => {
   console.log('\n=== 4. the slider\'s range is one card ===');
   {
     await showLens(page);
-    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.clearBoxes(); M.showAll(); if (M.isIsolated()) M.back(); M.setMode('layer'); M.setZRange(0, 1); M.flushView(); });
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.clearBoxes(); M.checkAll(); M.setFeatureDisplay('Travel', false); if (M.isIsolated()) M.back(); M.setMode('layer'); M.setZRange(0, 1); M.flushView(); });
     await frames(page);
     const want = await page.evaluate(() => NSO_MICROSCOPE.shownCount());
     const full = await page.evaluate(() => NSO_MICROSCOPE.getDoc().segments.length);
@@ -255,72 +263,126 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 5 */
-  console.log('\n=== 5. the Features list ===');
+  console.log('\n=== 5. the Features list: checkboxes only ===');
   {
     await showLens(page);
-    const rows = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map(r => ({
-      name: r.dataset.group, label: r.querySelector('.ms-legend-label').textContent, swatch: !!r.querySelector('.ms-swatch'),
-      check: !!r.querySelector('input.ms-legend-display'), only: !!r.querySelector('.ms-legend-only'), sw: r.querySelector('.ms-swatch').style.background })));
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.clearBoxes(); M.setSelectionMoves([]); if (M.isIsolated()) M.back(); });
+    await frames(page);
+    const rows = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map(r => {
+      const lab = r.querySelector('.ms-legend-label'), cb = r.querySelector('input.ms-legend-display');
+      return { name: r.dataset.group, label: lab.textContent, swatch: !!r.querySelector('.ms-swatch'), check: !!cb,
+               labelFor: lab.tagName === 'LABEL' && lab.htmlFor === cb.id, sw: r.querySelector('.ms-swatch').style.background };
+    }));
     const title = await page.evaluate(() => document.getElementById('ms-legend-title').textContent);
-    check('the list is titled Features and holds the slice\'s line types, Bambu order: swatch, name (count), Display check',
+    check('the list is titled Features and holds the slice\'s line types, Bambu order: swatch, name (count), checkbox - the text is the box\'s label',
       title === 'Features' && J(rows.map(r => r.name)) === J(['Outer wall', 'Inner wall', 'Sparse infill', 'Support', 'Support interface']) &&
-      rows.every(r => r.swatch && r.check && !r.only && /\(\d+\)$/.test(r.label) && r.sw), J(rows.map(r => r.label)));
+      rows.every(r => r.swatch && r.check && r.labelFor && /\(\d+\)$/.test(r.label) && r.sw), J(rows.map(r => r.label)));
     check('no detector rows, no Parts', await page.evaluate(() => !document.getElementById('ms-detected') && !document.querySelector('.ms-detected-item')));
-    // Display: Support off - a click on the real check
-    const sup = await page.evaluate(() => window.__t.pxSeg('Support', 0));
-    await page.evaluate(() => { NSO_MICROSCOPE.setMode('feature'); });
-    const pt0 = await page.evaluate(() => NSO_MICROSCOPE.pressTargetAt(...window.__t.pxSeg('Support', 0)));
-    check('before: a press on a Support line has something to take', !!pt0 && pt0.source === 'feature', J(pt0));
-    await page.click('#ms-legend .ms-legend-item[data-group="Support"] .ms-legend-display');
+    const NAMES = rows.map(r => r.name);
+    /* what is drawn, per line type: the overview meshes that are visible and hold lines */
+    const drawnTypes = () => page.evaluate(() => { const v = NSO_MICROSCOPE.getView();
+      return Object.keys(v.overviewMeshes).filter(k => { const m = v.overviewMeshes[k]; return m.visible && m.geometry.attributes.position.count > 0; }).sort(); });
+    const box = name => '#ms-legend .ms-legend-item[data-group="' + name + '"] .ms-legend-display';
+    const lbl = name => '#ms-legend .ms-legend-item[data-group="' + name + '"] .ms-legend-label';
+
+    // hover does nothing
+    const s0 = await lensState(page);
+    const lp = await page.evaluate(sel => { const b = document.querySelector(sel).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }, lbl('Outer wall'));
+    await page.mouse.move(lp[0], lp[1]);
+    await page.waitForTimeout(200);
+    const hv = await page.evaluate(() => ({ info: NSO_MICROSCOPE.hoverInfo(), kids: NSO_MICROSCOPE.getView().hoverGroup.children.length }));
+    check('hovering a row changes nothing: no outline, nothing on the plate changes', !hv.info && hv.kids === 0 && await lensState(page) === s0, J(hv));
+
+    // a click on the row text toggles its box, and nothing else
+    await page.click(lbl('Support'));
     await frames(page);
-    const off = await page.evaluate(() => ({ vis: NSO_MICROSCOPE.getView().overviewMeshes['Support'].visible, dim: document.querySelector('#ms-legend .ms-legend-item[data-group="Support"]').classList.contains('dim'),
-      checked: document.querySelector('#ms-legend .ms-legend-item[data-group="Support"] input').checked, off: NSO_MICROSCOPE.hidden(), mid: NSO_MICROSCOPE.getView().overviewMeshes['Outer wall'].visible }));
-    check('Display unchecked: the Support lines are not drawn, the row dims, the others stay', !off.vis && off.dim && !off.checked && off.mid && off.off.indexOf('Support') >= 0, J(off));
-    const pt1 = await page.evaluate(() => NSO_MICROSCOPE.pressTargetAt(...window.__t.pxSeg('Support', 0)));
-    check('...and where they were there is nothing to take', !pt1 || pt1.count === 0 || pt1.source !== 'feature', J(pt1));
-    await shot('06-display-off');
-    // on TAKE: a piece that holds Support lines is drawn without them
-    await activate(page, 'take');
-    const tk = await page.evaluate(() => { const v = NSO_MICROSCOPE.getView(); let tri = 0, support = 0;
-      Object.keys(v.overviewMeshes).forEach(k => { const m = v.overviewMeshes[k]; if (m.visible) tri += m.geometry.attributes.position.count / 3; });
-      const d = NSO_MICROSCOPE.getDoc(); d.objects.forEach(o => (o.moves || []).forEach(m => { if (m.feature === 'Support') support++; }));
-      return { tri, support, row: document.querySelector('#ms-legend .ms-legend-item[data-group="Support"]'), dim: !!document.querySelector('#ms-legend .ms-legend-item[data-group="Support"].dim') }; });
-    check('on TAKE the same type is off: the pieces keep their Support beads but do not draw them, and its row is dimmed', tk.support > 0 && tk.dim, J([tk.tri, tk.support, tk.dim]));
-    const trisOff = tk.tri;
-    await page.click('#ms-legend .ms-legend-item[data-group="Support"] .ms-legend-display');
+    const t1 = await page.evaluate(sel => ({ checked: document.querySelector(sel).checked, off: NSO_MICROSCOPE.hidden(), iso: NSO_MICROSCOPE.isIsolated(),
+      sel: NSO_MICROSCOPE.selection().length, mode: NSO_MICROSCOPE.mode(), n: window.__t.pieces().length }), box('Support'));
+    check('a click on the row text toggles its box: Support unchecked - and nothing isolated, selected or moved', !t1.checked && t1.off.indexOf('Support') >= 0 && !t1.iso && t1.sel === 0, J(t1));
+    check('...the Support lines are not drawn', (await drawnTypes()).indexOf('Support') < 0, J(await drawnTypes()));
+    await page.click(lbl('Support'));
     await frames(page);
-    const trisOn = await page.evaluate(() => { const v = NSO_MICROSCOPE.getView(); let tri = 0; Object.keys(v.overviewMeshes).forEach(k => { const m = v.overviewMeshes[k]; if (m.visible) tri += m.geometry.attributes.position.count / 3; }); return tri; });
-    check('checked on TAKE, it comes back on both: more triangles drawn', trisOn > trisOff, trisOff + ' -> ' + trisOn);
-    await activate(page, 'lens');
-    check('...and on LENS the lines are drawn again', await page.evaluate(() => NSO_MICROSCOPE.getView().overviewMeshes['Support'].visible && NSO_MICROSCOPE.hidden().indexOf('Support') < 0));
-    // a row, off its check, is the Feature click
+    check('the text again: checked, drawn again', await page.evaluate(sel => document.querySelector(sel).checked, box('Support')) && (await drawnTypes()).indexOf('Support') >= 0);
+    // a drag from a row pulls nothing (rows are not cards any more)
     const n0 = await page.evaluate(() => window.__t.pieces().length);
-    const want = await page.evaluate(() => NSO_MICROSCOPE.getDoc().segments.filter(g => g.feature === 'Outer wall').length);
-    await page.click('#ms-legend .ms-legend-item[data-group="Outer wall"] .ms-legend-label');
-    await page.waitForTimeout(150);
-    const r1 = await page.evaluate(() => ({ iso: NSO_MICROSCOPE.isIsolated(), sel: NSO_MICROSCOPE.selection().length, src: NSO_MICROSCOPE.selectionSource(), mode: NSO_MICROSCOPE.mode() }));
-    check('a click on a legend row isolates that line type (and switches to Feature)', r1.iso && r1.sel === want && r1.src === 'feature' && r1.mode === 'feature', J(r1));
-    check('while it is isolated, "Select shown" is the isolated thing: what is shown is the selection',
-      await page.evaluate(() => NSO_MICROSCOPE.selectVisible().length) === want && await page.evaluate(() => NSO_MICROSCOPE.selection().length) === want);
-    await page.click('#ms-legend .ms-legend-item[data-group="Outer wall"] .ms-legend-label');
-    await page.waitForTimeout(120);
-    check('...the row again, whole again', await page.evaluate(() => !NSO_MICROSCOPE.isIsolated()));
+    await drag(page, lp, dest[6]);
+    check('a drag from a row copies nothing and isolates nothing', await page.evaluate(() => window.__t.pieces().length) === n0 && !(await iso(page)) && await plate(page) === 'lens');
+
+    // check two rows -> exactly those two line types visible
+    for (const n of NAMES) if (n !== 'Outer wall' && n !== 'Support') await page.click(box(n));
+    await frames(page);
+    const two = await drawnTypes();
+    const twoShown = await page.evaluate(() => [...new Set(NSO_MICROSCOPE.selectVisible().map(s => s.feature))].sort());
+    check('two rows checked: exactly those two line types are drawn', J(two) === J(['Outer wall', 'Support']), J(two));
+    check('...and Select shown takes exactly those two', J(twoShown) === J(['Outer wall', 'Support']), J(twoShown));
+    await shot('06-two-checked');
     await page.evaluate(() => NSO_MICROSCOPE.setSelectionMoves([]));
-    // hover on a row outlines the type; a drag from the row pulls it
-    const rowPt = await page.evaluate(() => { const b = document.querySelector('#ms-legend .ms-legend-item[data-group="Outer wall"] .ms-legend-label').getBoundingClientRect(); return [b.left + 20, b.top + b.height / 2]; });
+    // uncheck all -> nothing
+    await page.click(box('Outer wall'));
+    await page.click(box('Support'));
+    await frames(page);
+    const none = { drawn: await drawnTypes(), count: await page.evaluate(() => NSO_MICROSCOPE.shownCount()), sel: await page.evaluate(() => NSO_MICROSCOPE.selectVisible().length) };
+    check('every box unchecked: nothing is drawn, nothing is shown, Select shown takes nothing', none.drawn.length === 0 && none.count === 0 && none.sel === 0, J(none));
+    const px0 = await page.evaluate(() => window.__t.pxSeg('Outer wall', 1));
+    check('...and a press where a line was has nothing to take', !(await page.evaluate(p => NSO_MICROSCOPE.pressTargetAt(p[0], p[1]), px0)));
+    await shot('06-none-checked');
+    // re-checking rebuilds feature by feature
+    await page.click(box('Inner wall'));
+    await frames(page);
+    const r1 = await drawnTypes();
+    await page.click(lbl('Sparse infill'));
+    await frames(page);
+    const r2 = await drawnTypes();
+    check('re-checking rebuilds feature by feature: Inner wall, then Inner wall + Sparse infill', J(r1) === J(['Inner wall']) && J(r2) === J(['Inner wall', 'Sparse infill']), J([r1, r2]));
+    // Check all: every box
+    await page.click('#ms-nav-view');
+    await page.click('#ms-btn-show-all');
+    await frames(page);
+    await cards.closeCards(page);
+    const all = await page.evaluate(() => ({ checks: Array.from(document.querySelectorAll('#ms-legend .ms-legend-display')).map(c => c.checked), off: NSO_MICROSCOPE.hidden(),
+      label: document.getElementById('ms-btn-show-all').textContent.trim() }));
+    check('Check all (same id as Show all) checks every box - the whole piece', all.label === 'Check all' && all.checks.every(Boolean) && all.off.length === 0 && J(await drawnTypes()) === J(NAMES.slice().sort()), J(all));
+
+    // whatever is shown is what Select / drag / export act on
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.setMode('layer'); M.selectLayer(1); });
+    const lay = await page.evaluate(() => ({ n: NSO_MICROSCOPE.selection().length, sup: NSO_MICROSCOPE.selection().filter(s => s.feature === 'Support').length }));
+    await page.click(box('Support'));
+    await frames(page);
+    await page.evaluate(() => { window.__dl.length = 0; });
+    await page.click('#ms-nav-export');
+    await page.click('#ms-btn-export-stl');
+    await cards.closeCards(page);
+    const dl = await page.evaluate(() => window.__dl.map(d => d.size));
+    check('a layer selected, Support unchecked: Export writes only what is shown (12 triangles a shown move)',
+      lay.sup > 0 && dl.length === 1 && dl[0] === 84 + (lay.n - lay.sup) * 12 * 50, J([lay, dl]));
     const before = await lensState(page);
-    await drag(page, rowPt, dest[6]);
-    const after = await page.evaluate(() => ({ plate: NSO_MICROSCOPE.plate(), pieces: window.__t.pieces() }));
-    check('a drag from the row pulls the line type onto TAKE', after.plate === 'take' && after.pieces.length === n0 + 1 && after.pieces[after.pieces.length - 1].moves === want, J([after.pieces.length, n0, want]));
+    const from = await page.evaluate(() => window.__t.pxSeg('Outer wall', 1));
+    await page.evaluate(() => NSO_MICROSCOPE.isolate());
+    await frames(page);
+    const fromIso = await page.evaluate(() => { const M = NSO_MICROSCOPE, d = M.getDoc(), s = M.selection().find(g => g.feature === 'Outer wall'), v = M.getView();
+      const p = new THREE.Vector3((s.x0 + s.x1) / 2 - d.cx, s.z, -((s.y0 + s.y1) / 2 - d.cy)).project(v.camera); const r = v.renderer.domElement.getBoundingClientRect();
+      return [r.left + (p.x + 1) / 2 * r.width, r.top + (1 - p.y) / 2 * r.height]; });
+    const destNow = await page.evaluate(() => window.__t.bedPx(20, 20));
+    await drag(page, fromIso, destNow);
+    const pulled = await page.evaluate(() => window.__t.pieces().slice(-1)[0]);
+    check('...and a drag copies only what is shown onto plate 2', pulled && pulled.moves === lay.n - lay.sup, J([pulled && pulled.moves, lay.n - lay.sup, from]));
     await activate(page, 'lens');
-    check('LENS is byte-identical after it', await lensState(page) === before);
+    // Display acts on both plates
+    await activate(page, 'take');
+    const tk = await page.evaluate(() => ({ dim: !!document.querySelector('#ms-legend .ms-legend-item[data-group="Support"] input:not(:checked)'), off: NSO_MICROSCOPE.plateState('take').featuresOff }));
+    check('plate 2 reads the same boxes: Support is unchecked there too', tk.dim && tk.off.indexOf('Support') >= 0, J(tk));
+    await page.click(box('Support'));
+    await activate(page, 'lens');
+    check('...checked on plate 2, it is checked on plate 1 too', await page.evaluate(sel => document.querySelector(sel).checked, box('Support')));
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; if (M.isIsolated()) M.back(); M.selectLayer(0); M.setSelectionMoves([]); M.setFeatureDisplay('Travel', false); M.setMode('piece'); });
+    check('plate 1 was never changed by any of it', JSON.parse(await lensState(page)).sum === JSON.parse(before).sum);
   }
 
   /* ------------------------------------------------------------------ 6 */
   console.log('\n=== 6. the camera, the orbit, the arrows, the Escape ladder ===');
   {
     await showLens(page);
-    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.clearBoxes(); M.showAll(); M.setSelectionMoves([]); if (M.isIsolated()) M.back(); M.normalView(); });
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.clearBoxes(); M.checkAll(); M.setFeatureDisplay('Travel', false); M.setSelectionMoves([]); if (M.isIsolated()) M.back(); M.normalView(); });
     await frames(page);
     const cam0 = await page.evaluate(() => window.__t.cam());
     for (const id of ['select', 'feature', 'line', 'layer', 'piece']) await setMode(page, id);

@@ -193,15 +193,16 @@ async function main() {
       return [M.hidden().includes(name), M.getView().overviewMeshes[name].visible];
     }), [false, true]);
 
-  // A click on the row itself (off its check) is the Feature click: that line
-  // type, isolated; again, whole.
+  // The row's text is its check's label (docs/GSCOPE.md, item 4: checkboxes
+  // only): a click on it toggles the check, and isolates nothing.
   await page.click('#ms-legend .ms-legend-item:first-child .ms-legend-label');
-  check('clicking a legend row isolates that line type (Feature mode)',
-    await page.evaluate(() => [window.NSO_MICROSCOPE.isIsolated(), window.NSO_MICROSCOPE.mode()]),
-    [true, 'feature']);
+  check('clicking a legend row\'s text toggles its check - hidden, not isolated, mode unchanged',
+    await page.evaluate(() => { const M = window.NSO_MICROSCOPE, name = document.querySelector('#ms-legend .ms-legend-item').dataset.group;
+      return [M.hidden().includes(name), M.isIsolated(), M.mode()]; }),
+    [true, false, 'piece']);
   await page.click('#ms-legend .ms-legend-item:first-child .ms-legend-label');
-  check('and clicking it again makes the view whole',
-    await page.evaluate(() => window.NSO_MICROSCOPE.isIsolated()), false);
+  check('and clicking it again checks it again',
+    await page.evaluate(() => { const name = document.querySelector('#ms-legend .ms-legend-item').dataset.group; return window.NSO_MICROSCOPE.hidden().includes(name); }), false);
 
   // =======================================================================
   console.log('\n--- the axis map, through the shipped code ---');

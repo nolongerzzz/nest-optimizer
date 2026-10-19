@@ -2777,14 +2777,14 @@ select:focus, input:focus {
   overflow: hidden;
 }
 .ms-panel[hidden] { display: none; }
-/* How far down the column reaches (10 slabs, 2 group gaps, the top pad), plus a
+/* How far down the column reaches (4 slabs, 1 group gap, the top pad), plus a
    gap: the left wall's readouts stay below it. The shell's short-window
    tightening (under 760 high) shortens the column, and this with it. */
-.ms-panel { --ms-col-h: 392px; }
-@media (max-height: 759px) { .ms-panel { --ms-col-h: 330px; } }
+.ms-panel { --ms-col-h: 240px; }
+@media (max-height: 759px) { .ms-panel { --ms-col-h: 204px; } }
 
-/* The column: the shell's slabs, 32px on a 36px pitch, in three groups
-   (Import, Read plate | Select .. Render | Overhangs, Crop Z, Slice), floated
+/* The column: the shell's slabs, 32px on a 36px pitch, in two groups
+   (Import, Read plate | Select, View - docs/GSCOPE.md, item 5), floated
    over the viewport. The strip itself passes clicks through to the canvas;
    only the slabs take them. */
 .ms-col {

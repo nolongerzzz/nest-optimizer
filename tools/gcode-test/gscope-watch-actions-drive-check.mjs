@@ -117,8 +117,8 @@ const legendGroups = (page) => page.evaluate(() =>
 /* Watch's log sits over the left wall in G-scope (nso-watch.js docks it at left 12 / bottom 84, where
    the shell's legend now is), so a real click at the row's centre can land on the log. These checks
    assert what Watch RECORDS when the row's own handler runs, so the handler is run directly.
-   A click on a Features row is Feature mode's click (that line type, isolated; again, whole). */
-const legend = (page, g) => page.evaluate((sel) => document.querySelector(sel).click(), `#ms-legend [data-group="${g}"]`);
+   A Features row is checkboxes only (docs/GSCOPE.md, item 4): a click on its text toggles its check. */
+const legend = (page, g) => page.evaluate((sel) => document.querySelector(sel).click(), `#ms-legend [data-group="${g}"] .ms-legend-label`);
 /* The Display check of a Features row (a change event, logged as 'Display "X" on|off'). */
 const display = (page, g) => page.evaluate((sel) => document.querySelector(sel).click(), `#ms-legend [data-group="${g}"] .ms-legend-display`);
 const pieces = (page) => page.evaluate(() => window.NSO_MICROSCOPE.groups());
@@ -232,13 +232,13 @@ async function main() {
   await sliced(page);
   const sliceGroups = await legendGroups(page);
   const wall = sliceGroups.find((g) => g === 'Outer wall') || sliceGroups[0];
-  // A slice opens on its Features list; a click on a row is Feature mode's click, its check is Display.
-  await legend(page, wall); expect.push(new RegExp(`^G-scope Slice: legend "${wall}" - isolate that line type$`));
-  check('... and the row click really isolated that line type',
-    await page.evaluate(() => [window.NSO_MICROSCOPE.isIsolated(), window.NSO_MICROSCOPE.selectionSource(), window.NSO_MICROSCOPE.mode()]),
-    [true, 'feature', 'feature']);
-  await legend(page, wall); expect.push(new RegExp(`^G-scope Slice: legend "${wall}" - isolate that line type$`));
-  check('... and the same row again makes it whole', await page.evaluate(() => window.NSO_MICROSCOPE.isIsolated()), false);
+  // A slice opens on its Features list: checkboxes only. A click on a row's text toggles its check -
+  // one Display line - and isolates nothing.
+  await legend(page, wall); expect.push(new RegExp(`^G-scope Slice: Display "${wall}" off$`));
+  check('... and the row text click toggled the check and isolated nothing',
+    await page.evaluate((w) => [window.NSO_MICROSCOPE.hidden().indexOf(w) >= 0, window.NSO_MICROSCOPE.isIsolated()], wall), [true, false]);
+  await legend(page, wall); expect.push(new RegExp(`^G-scope Slice: Display "${wall}" on$`));
+  check('... and the text again checks it again', await page.evaluate((w) => window.NSO_MICROSCOPE.hidden().indexOf(w) < 0, wall), true);
   await display(page, wall); expect.push(new RegExp(`^G-scope Slice: Display "${wall}" off$`));
   check('... the Display check really hid that line type (a new slice opens with Travel off)',
     await page.evaluate(() => window.NSO_MICROSCOPE.hidden().slice().sort()), [wall, 'Travel'].sort());
@@ -268,9 +268,8 @@ async function main() {
   check('... each carries its view as a field too (main only for "left")',
     lines1.map((e) => e.view).filter((v, i, a) => a.indexOf(v) === i), ['gscope-normal', 'gscope-slice', 'main']);
   check('... and its action', lines1.map((e) => e.detail.action).filter((v, i, a) => a.indexOf(v) === i).sort(),
-    ['click3d', 'control', 'display', 'enter', 'leave', 'legend', 'view']);
-  const legendRowLine = lines1.find((e) => e.detail.action === 'legend');
-  check('a Features row click line says which row in its detail', legendRowLine.detail.group, wall);
+    ['click3d', 'control', 'display', 'enter', 'leave', 'view']);
+  check('a Features row is not a line of its own (its check\'s change is)', lines1.some((e) => e.detail.action === 'legend'), false);
   const dispOff = lines1.find((e) => e.detail.action === 'display' && !e.detail.on);
   check('a Display line says which row and on/off in its detail', [dispOff.detail.group, dispOff.detail.on], [wall, false]);
   const hit = lines1.find((e) => e.detail.action === 'click3d' && e.detail.hit);

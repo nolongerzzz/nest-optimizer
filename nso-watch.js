@@ -1196,12 +1196,12 @@
         if (!t || !t.closest || !inside(t)) return;
         var row = t.closest('#ms-legend .ms-legend-item');
         var b = t.closest('button, [role="menuitem"], summary');   // onClick's own set
-        if (row && t.closest('.ms-legend-display')) {
-          return;     // the Display check: its change is logged by onGsChange, with the row's name
-        } else if (row) {
-          /* The row, off its check, is Feature mode's click: that line type,
-             isolated (app-microscope.js featureRowClick()). */
-          gsLog('legend', 'legend "' + row.dataset.group + '" - isolate that line type', { group: row.dataset.group });
+        if (row) {
+          /* A Features row is checkboxes only (docs/GSCOPE.md, item 4): its text
+             is the check's label, so a click there toggles the check, and the
+             change is logged by onGsChange with the row's name. The rest of
+             the row does nothing, and is not a line. */
+          return;
         } else if (b && (b.id === 'ms-cam-normal' || b.id === 'ms-cam-slice')) {
           if (b.disabled) return;
           var from = viewNow() === 'gscope-slice' ? 'Slice' : 'Normal';

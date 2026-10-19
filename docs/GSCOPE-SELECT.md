@@ -9,6 +9,8 @@ on top of ticket 1's LENS | TAKE plates (`docs/GSCOPE-TAKE.md`).
 > side by side now and a click on one makes it active: where this file says
 > LENS read *plate 1* (the loaded plate), where it says TAKE read *plate 2*, and
 > "pulls it onto TAKE" is "drags it over plate 2". There is no LENS | TAKE toggle.
+> Since round 1b the Features list is checkboxes only (GSCOPE.md item 4): a row
+> no longer isolates, previews on hover or drags, and Show all is Check all.
 
 ## 1. The modes
 

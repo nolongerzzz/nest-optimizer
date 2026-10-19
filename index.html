@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=plates1" />
+  <link rel="stylesheet" href="styles.css?v=column1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1318,15 +1318,6 @@
               data-card="ms-card-select" aria-controls="ms-card-select" aria-expanded="false">Select</button>
       <button id="ms-nav-view" type="button" class="vp-bar-btn ms-nav"
               data-card="ms-card-view" aria-controls="ms-card-view" aria-expanded="false">View</button>
-      <button id="ms-nav-render" type="button" class="vp-bar-btn ms-nav"
-              data-card="ms-card-render" aria-controls="ms-card-render" aria-expanded="false">Render</button>
-
-      <button id="ms-nav-overhangs" type="button" class="vp-bar-btn ms-nav ms-group-start"
-              data-card="ms-card-overhangs" aria-controls="ms-card-overhangs" aria-expanded="false">Overhangs</button>
-      <button id="ms-nav-crop" type="button" class="vp-bar-btn ms-nav"
-              data-card="ms-card-crop" aria-controls="ms-card-crop" aria-expanded="false">Crop Z</button>
-      <button id="ms-nav-slice" type="button" class="vp-bar-btn ms-nav"
-              data-card="ms-card-slice" aria-controls="ms-card-slice" aria-expanded="false">Slice</button>
     </div>
 
     <div id="ms-viewport" class="ms-viewport">
@@ -1394,12 +1385,23 @@
                     title="Select every move at this layer's printing height, whatever feature printed it">Select layer</button>
           </div>
           <p class="ms-note" id="ms-layer-note">&mdash;</p>
+          <!-- The slider's range IS the band: Take band isolates it as one piece,
+               to drag onto plate 2 or export. (It was Crop Z's "Crop out band".) -->
+          <div class="ms-btn-row">
+            <button id="ms-btn-take-band" type="button" disabled
+                    title="Isolate everything inside the layer-range slider's band as one piece - drag it onto plate 2, or Export it">Take band</button>
+          </div>
+          <p class="ms-note" id="ms-band-read">&mdash;</p>
         </div>
         <div id="ms-detail-controls" class="ms-btn-row" data-flex="1" style="display:none;">
           <button id="ms-btn-back" type="button">&larr; Back to whole part</button>
         </div>
       </div>
 
+      <!-- VIEW: everything about how the plate is drawn, in this order -
+           Normal · Slice view | Toolpath · Solid | Slice settings | Check all ·
+           Clear from view · Select shown (docs/GSCOPE.md, item 5). View only:
+           none of it writes to the plate. -->
       <div id="ms-card-view" class="ms-card" role="group" aria-label="View" data-nav="ms-nav-view">
         <!-- Normal / Slice view. app-gscope-slice.js owns both buttons: Slice
              view slices the open mesh with the in-house slicer and shows the
@@ -1408,25 +1410,12 @@
           <button id="ms-cam-normal" type="button" class="active" aria-pressed="true"
                   title="Free orbit, pan and zoom. Isolated, it shows the selection alone, as drawn. From Slice view, back to the mesh">Normal</button>
           <button id="ms-cam-slice" type="button" aria-pressed="false"
-                  title="Slice every piece into real layers, walls and infill with the in-house slicer (the Slice settings) and list its features">Slice view</button>
+                  title="Slice every piece into real layers, walls and infill with the in-house slicer (the Slice settings below) and list its features">Slice view</button>
         </div>
-        <div class="ms-section" id="ms-visibility-row">
-          <div class="ms-section-title">Visibility (view only)</div>
-          <div class="ms-btn-row">
-            <button id="ms-btn-clear-view" type="button" disabled
-                    title="Hide what is selected. View only: nothing is exported, the plate is not touched, and there is nothing to undo">Clear from view</button>
-            <button id="ms-btn-show-all" type="button" disabled
-                    title="Bring back every cleared line or piece and every legend group">Show all</button>
-            <button id="ms-btn-select-visible" type="button" disabled
-                    title="Select everything drawn right now - the legend, the cleared set and the layer range decide what that is. How an isolated feature becomes something you can export or crop.">Select shown</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Live toolpath / solid toggle. View only: it changes what is drawn,
-           never what is selected, and nothing on the plate. Toolpath only. -->
-      <div id="ms-card-render" class="ms-card" role="group" aria-label="Render" data-nav="ms-nav-render">
-        <div id="ms-render-row" style="display:none;">
+        <!-- Live toolpath / solid toggle. View only: it changes what is drawn,
+             never what is selected. Enabled while a slice is shown (Slice view,
+             or a sliced file, which is a slice already). -->
+        <div id="ms-render-row" class="ms-section">
           <div class="ms-btn-row ms-seg" role="group" aria-label="Render the toolpath as">
             <button id="ms-render-toolpath" type="button" class="active" aria-pressed="true"
                     title="Every move as a line, as the slicer wrote it">Toolpath</button>
@@ -1435,42 +1424,13 @@
           </div>
           <p class="ms-note" id="ms-render-read">&mdash;</p>
         </div>
-      </div>
-
-      <div id="ms-card-overhangs" class="ms-card" role="group" aria-label="Overhangs" data-nav="ms-nav-overhangs">
-        <div id="ms-support-row" style="display:none;">
-          <div class="ms-btn-row">
-            <button id="ms-btn-overhangs" type="button"
-                    title="Mark every overhang auto-aim's detection finds on the plate pieces: red needs a support, green has one">Show overhangs</button>
-            <label class="ms-note" for="ms-overhang-angle" style="margin:0">at
-              <input type="number" id="ms-overhang-angle" value="45" min="1" max="89" step="1"
-                     title="The printable angle, degrees off the plate - the same threshold auto-aim detects at" />&deg;</label>
-          </div>
-          <p class="ms-note" id="ms-support-read">&mdash;</p>
-        </div>
-      </div>
-
-      <div id="ms-card-crop" class="ms-card" role="group" aria-label="Crop Z" data-nav="ms-nav-crop">
-        <div id="ms-crop-row" style="display:none;">
-          <p class="ms-note">Select what to crop, then narrow the layer-range slider
-            on the right to the band to take out. Crop removes that band and joins
-            what is above onto what is below, through the <b>Crop</b> tool itself.</p>
-          <div class="ms-btn-row">
-            <button id="ms-btn-crop" type="button" disabled
-                    title="Remove the slider's Z band from the selection and rejoin it, with the Crop tool. A plate piece is edited in place (undo reverts it); a slice or a file selection lands on the plate as a new, cropped piece.">Crop out band</button>
-          </div>
-          <p class="ms-note" id="ms-crop-read">&mdash;</p>
-        </div>
-      </div>
-
-      <!-- In-house slicer (nso_slicer.js). app-gscope-slice.js owns this row:
-           it slices the open mesh and opens the result as a toolpath, through
-           the same parser an imported .gcode.3mf takes. docs/SLICER.md. The
-           build's slice settings, always out: Slice view uses whatever they
-           hold, and they keep their values across every Normal / Slice view
-           round trip. The report (#ms-slice-read) is in the readouts. -->
-      <div id="ms-card-slice" class="ms-card" role="group" aria-label="Slice" data-nav="ms-nav-slice">
-        <div id="ms-slice-row" style="display:none;">
+        <!-- The in-house slicer's settings (nso_slicer.js, docs/SLICER.md).
+             app-gscope-slice.js owns this row: Slice view uses whatever they
+             hold when it is (re)entered, and they keep their values across
+             every Normal / Slice view round trip. The report (#ms-slice-read)
+             is in the readouts. -->
+        <div id="ms-slice-row" class="ms-section" style="display:none;">
+          <div class="ms-section-title">Slice settings</div>
           <div id="ms-slice-settings">
             <div class="ms-btn-row" data-flex="1">
               <label class="ms-note" for="ms-slice-nozzle" style="margin:0">nozzle
@@ -1495,6 +1455,18 @@
                 <input type="number" id="ms-slice-angle" value="30" min="1" max="89" step="1" style="width:3.5em"
                        title="Printable angle off the plate. 30 is the real Bambu profile's support_threshold_angle; auto-aim uses 45" />&deg;</label>
             </div>
+          </div>
+          <p class="ms-note">They take effect when Slice view is entered (from a slice: Normal, then Slice view again).</p>
+        </div>
+        <div class="ms-section" id="ms-visibility-row">
+          <div class="ms-section-title">Visibility (view only)</div>
+          <div class="ms-btn-row">
+            <button id="ms-btn-show-all" type="button" disabled
+                    title="Check every box in the Features list: every line type shown">Check all</button>
+            <button id="ms-btn-clear-view" type="button" disabled
+                    title="Hide what is selected. View only: nothing is exported, the plate is not touched, and there is nothing to undo. CLEAR brings it back">Clear from view</button>
+            <button id="ms-btn-select-visible" type="button" disabled
+                    title="Select everything drawn right now - the Features list's checks, the cleared set and the layer range decide what that is">Select shown</button>
           </div>
         </div>
       </div>
@@ -1798,7 +1770,7 @@
   <!-- Handle, bracket, lid and hinge detection for G-scope's Parts list, one
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=features1"></script>
-  <script src="app-microscope.js?v=plates1"></script>
+  <script src="app-microscope.js?v=column1"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
@@ -1809,7 +1781,7 @@
        edit / remove. After app-microscope.js, whose hooks it uses, and after
        nso_support_aim.js / nso_support_tree.js / app-join.js, whose
        detection, generators and union it calls. See docs/GCODE-SUPPORTS.md. -->
-  <script src="app-gscope-support.js?v=exposed1"></script>
+  <script src="app-gscope-support.js?v=column1"></script>
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
   <script src="app-supports-card.js?v=bigmeshb10"></script>
@@ -1832,7 +1804,7 @@
   <!-- Live watch: off until its button is pressed, and it patches nothing
        until then. Deleting this tag and the #btn-watch button above removes
        the feature completely. -->
-  <script src="nso-watch.js?v=take1"></script>
+  <script src="nso-watch.js?v=column1"></script>
   <script src="app-cth-expose.js?v=cth15"></script>
   <script type="module" src="app-cth.js?v=cth15"></script>
 </body>

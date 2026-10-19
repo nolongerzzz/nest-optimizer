@@ -476,7 +476,8 @@ async function main() {
   const undone = await page.evaluate((id) => Array.from(state.models.find((q) => q.id === id).rawTris), ex.id);
   check('one Undo puts the exported solid back bit for bit', undone.length === ex.raw.length && undone.every((v, i) => v === ex.raw[i]), true);
 
-  // A mesh document has no Render row and no solid export.
+  // A mesh document: Toolpath / Solid are disabled (they are a slice's - the
+  // View card's row, docs/GSCOPE.md item 5) and there is no solid export.
   if (await page.evaluate(() => window.NSO_MICROSCOPE.isOpen())) await page.click('#ms-close');
   const cubeBytes = Array.from(await readFile(join(ROOT, CUBE)));
   const nb = await page.evaluate(() => state.models.length);
@@ -488,9 +489,10 @@ async function main() {
   await heavyClick(page, '#ms-btn-plate');
   await page.waitForFunction(() => window.NSO_MICROSCOPE.getDoc().kind === 'mesh', null, { timeout: 10000 });
   await page.evaluate(() => { const M = window.NSO_MICROSCOPE; M.selectVisible(); });
-  check('a mesh document: no Render row, no Export as solid (it already is a mesh)',
-    [await page.isVisible('#ms-render-row'), await page.isVisible('#ms-btn-export-solid-plate'), await page.isVisible('#ms-btn-export-plate')],
-    [false, false, true]);
+  check('a mesh document: Toolpath / Solid disabled, no Export as solid (it already is a mesh)',
+    [await page.evaluate(() => ['ms-render-toolpath', 'ms-render-solid'].every((id) => document.getElementById(id).disabled)),
+      await page.isVisible('#ms-btn-export-solid-plate'), await page.isVisible('#ms-btn-export-plate')],
+    [true, false, true]);
 
   check('no page errors', errors, []);
   await browser.close();

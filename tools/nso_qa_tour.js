@@ -347,12 +347,11 @@ function buildPlan() {
   V(GS, 'Select', 'ms-btn-back', 'Back to whole part (after isolating)', gs('ms-nav-select', isolated, { run: press(['ms-btn-back']) }));
   V(GS, 'View', 'ms-cam-slice', 'Slice view', gs('ms-nav-view', null, { run: press(['ms-cam-slice']) }));
   V(GS, 'View', 'ms-btn-clear-view', 'Clear from view (after isolating)', gs('ms-nav-view', isolated, { run: press(['ms-btn-clear-view']) }));
-  V(GS, 'View', 'ms-btn-show-all', 'Show all', gs('ms-nav-view', null, { run: press(['ms-btn-show-all']) }));
+  V(GS, 'View', 'ms-btn-show-all', 'Check all', gs('ms-nav-view', null, { run: press(['ms-btn-show-all']) }));
   V(GS, 'View', 'ms-btn-select-visible', 'Select shown', gs('ms-nav-view', null, { run: press(['ms-btn-select-visible']) }));
-  V(GS, 'Render', 'ms-render-solid', 'Solid', gs('ms-nav-render', null, { run: press(['ms-render-solid']) }));
-  V(GS, 'Overhangs', 'ms-btn-overhangs', 'Show overhangs', gs('ms-nav-overhangs', null, { run: press(['ms-btn-overhangs']) }));
-  V(GS, 'Crop Z', 'ms-btn-crop', 'Crop out band', gs('ms-nav-crop', null, { view: false, run: press(['ms-btn-crop']) }));
-  V(GS, 'Slice', 'ms-slice-walls', 'Walls 3, then Slice view', gs('ms-nav-slice', null, { run: async x => { await x.fill('ms-slice-walls', 3); await x.nav('ms-nav-view'); await x.click('ms-cam-slice'); } }));
+  V(GS, 'View', 'ms-slice-walls', 'Slice settings: walls 3, then Slice view', gs('ms-nav-view', null, { run: async x => { await x.fill('ms-slice-walls', 3); await x.click('ms-cam-slice'); } }));
+  V(GS, 'View', 'ms-render-solid', 'Solid (Slice view on)', gs('ms-nav-view', null, { pre: async x => { await gsOpen(x); await x.nav('ms-nav-view'); await x.click('ms-cam-slice'); await x.wait(3000); }, run: press(['ms-render-solid']) }));
+  V(GS, 'Select', 'ms-btn-take-band', 'Layer: Take band (Slice view on)', gs('ms-nav-select', null, { pre: async x => { await gsOpen(x); await x.nav('ms-nav-view'); await x.click('ms-cam-slice'); await x.wait(3000); await x.nav('ms-nav-select'); await x.click('ms-mode-layer'); }, run: press(['ms-btn-take-band']) }));
   V(GS, 'Plates', 'ms-viewport', 'Copy the piece onto plate 2 (drag across)', gs(null, null, { run: async x => { await x.gsTake(); } }));
   V(GS, 'Plates', 'ms-btn-frame', 'Frame both plates (\u25ce)', gs(null, null, { run: press(['ms-btn-frame']) }));
   V(GS, 'Export', 'ms-btn-export-plate', 'Export to plate (a piece isolated)', gs('ms-nav-export', isolated, { view: false, run: press(['ms-btn-export-plate']) }));

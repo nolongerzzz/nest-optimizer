@@ -83,7 +83,7 @@
  *   view filters  legend (with "only"), Clear from view, the layer-range
  *                 slider. VIEW ONLY - none of them writes to `state`.
  *   line picking  one move at a time, isolated as its extrudeFlatLine prism.
- *   Crop          the slider's Z band, cut out through app-crop.js.
+ *   Take band     the slider's Z band, isolated as one piece (Select > Layer).
  *   the seam      setSelection() / selectionRegion() / onSelection() - where a
  *                 later support-generation step reads what was isolated.
  *
@@ -389,7 +389,7 @@ var NSO_MICROSCOPE = (function () {
     // (Picture, app-relief.js, is the one caller that sets them):
     //   back     a way back to the producer: shows the Back button, named
     //            `backLabel`, which closes this view and calls it;
-    //   onPlate  called with the model id after Export to plate or Crop puts
+    //   onPlate  called with the model id after Export to plate puts
     //            a piece of this document on the plate, so the producer can
     //            seat it. The piece is already added and on the Undo stack.
     d.back = typeof o.back === 'function' ? o.back : null;
@@ -920,7 +920,7 @@ var NSO_MICROSCOPE = (function () {
     syncExportRow();
     syncRenderRow();
     syncZRangeUI();
-    syncCropRow();
+    syncTakeBand();
     syncLineRead();
     syncBackButton();
     if (doc && currentSelection.length) describeSelection(); else info(introInfo());
@@ -1101,7 +1101,7 @@ var NSO_MICROSCOPE = (function () {
    */
   function pullSpec(tgt) {
     if (!doc || plateName !== 'lens') return null;
-    var items = tgt ? tgt.items : currentSelection, source = tgt ? tgt.source : selectionSource;
+    var items = actedOn(tgt ? tgt.items : currentSelection), source = tgt ? tgt.source : selectionSource;
     if (!items || !items.length) return null;
     return withSelection(items, source, function () {
       var geo = microscopeGeometry();
@@ -1243,7 +1243,7 @@ var NSO_MICROSCOPE = (function () {
   /**
    * What a click here would take, in the current mode: { items, source, point,
    * label } or null. Items are a slice's segments or a mesh's objects - the one
-   * selection every export, crop and pull already reads.
+   * selection every export and pull already reads.
    */
   function targetAt(e) {
     if (!view || !doc || isolated) return null;     // isolated, the selection is all there is (selectedHit)
@@ -1286,13 +1286,6 @@ var NSO_MICROSCOPE = (function () {
       return { items: currentSelection, source: selectionSource, selected: true, label: 'selection' };
     }
     return targetAt(e);
-  }
-
-  /** The line type's moves, everywhere it is drawn. */
-  function featureTarget(name) {
-    if (!doc || doc.kind !== 'toolpath') return null;
-    var t = shownSegments().filter(function (x) { return x.feature === name; });
-    return t.length ? { items: t, source: 'feature', label: name } : null;
   }
 
   /** Everything the slider's range leaves drawn: one card. */
@@ -1394,8 +1387,8 @@ var NSO_MICROSCOPE = (function () {
   function onHoverMove(e) {
     if (!view || !isOpen() || pull || e.buttons || view.dragState) { if (e.buttons) clearHover(); return; }
     if (e.target !== view.renderer.domElement) {
-      // the legend rows and the range card outline what they would take; moving over them is not leaving them
-      if (hoverKey && !(e.target.closest && e.target.closest('#ms-zr-card, #ms-legend'))) clearHover();
+      // the range card outlines what it would take; moving over it is not leaving it
+      if (hoverKey && !(e.target.closest && e.target.closest('#ms-zr-card'))) clearHover();
       return;
     }
     var now = Date.now();
@@ -1810,18 +1803,6 @@ var NSO_MICROSCOPE = (function () {
     return true;
   }
 
-  function featureRowClick(name) {
-    if (!doc || doc.kind !== 'toolpath' || plateName !== 'lens') return;
-    var t = featureTarget(name);
-    if (!t) return;
-    setMode('feature');
-    t.selected = isolated && selectionSource === 'feature' && sameItems(t.items, currentSelection);
-    clickTarget(t);
-  }
-  function featureRowPress(ev, name) {
-    if (ev.target.closest && ev.target.closest('.ms-legend-display')) return;
-    pressCard(ev, function () { return featureTarget(name); });
-  }
   function rangeCardClick() {
     if (!doc) return;
     var t = rangeTarget();
@@ -2454,12 +2435,13 @@ var NSO_MICROSCOPE = (function () {
   //
   // ONE list, the slicer's own line types - Outer wall, Inner wall, Sparse
   // infill, Support ... - the way Bambu Studio's preview lists them: a colour
-  // swatch, the name, a count, and a Display check that hides or shows that
-  // type in the view. The check is the whole of the row's visibility: it acts
-  // on both plates (FEATURE_OFF is one set), and nothing else decides what a
-  // type shows as. Clicking the row anywhere else is the Feature mode's click:
-  // that type, isolated. A part that is not sliced has no line types and the
-  // list says so; surface features (flange, handle ...) are the plate's now.
+  // swatch, the name, a count, and a checkbox. CHECKBOXES ONLY (docs/GSCOPE.md,
+  // item 4): what is shown is the union of the checked rows - all checked, the
+  // whole piece; none, nothing - and a re-checked row is drawn again. The row's
+  // text is its box's label (a click on it toggles the box, nothing else);
+  // hovering a row does nothing. What is shown is what Select, a drag and
+  // Export act on (actedOn). One set for both plates (FEATURE_OFF). A part
+  // that is not sliced has no line types and the list says so.
 
   var FEATURE_ORDER = ['Outer wall', 'Inner wall', 'Overhang wall', 'Sparse infill', 'Internal solid infill',
     'Top surface', 'Bottom surface', 'Bridge', 'Gap infill', 'Support', 'Support interface', 'Floating vertical shell',
@@ -2479,6 +2461,12 @@ var NSO_MICROSCOPE = (function () {
     var rank = function (n) { var i = FEATURE_ORDER.indexOf(n); return i < 0 ? 1000 : i; };
     return Object.keys(counts).sort(function (a, b) { return rank(a) - rank(b) || (a < b ? -1 : a > b ? 1 : 0); })
       .map(function (n) { return { name: n, count: counts[n] }; });
+  }
+
+  /** Does the active plate have line types - Features rows to check? */
+  function hasLineTypes() {
+    return !!doc && (doc.kind === 'toolpath' ||
+      (doc.source === 'take' && doc.objects.some(function (o) { return o.moves && o.moves.length; })));
   }
 
   function buildLegend() {
@@ -2505,24 +2493,20 @@ var NSO_MICROSCOPE = (function () {
       var swatch = document.createElement('div');
       swatch.className = 'ms-swatch';
       swatch.style.background = '#' + ('000000' + featureColor(name, gi).toString(16)).slice(-6);
-      var label = document.createElement('span');
+      var label = document.createElement('label');
       label.className = 'ms-legend-label';
       label.textContent = name + ' (' + r.count + ')';
       var disp = document.createElement('input');
       disp.type = 'checkbox';
       disp.className = 'ms-legend-display';
+      disp.id = 'ms-legend-cb-' + gi;
       disp.checked = !off;
-      disp.title = 'Display ' + name + ' - hide or show this line type in the view, on both plates';
-      disp.setAttribute('aria-label', 'Display ' + name);
-      disp.addEventListener('click', function (ev) { ev.stopPropagation(); });
+      disp.title = 'Show ' + name + ' - checked, it is drawn, and Select, drag and Export take it; unchecked, it is not';
+      disp.setAttribute('aria-label', 'Show ' + name);
       disp.addEventListener('change', function () { setFeatureDisplay(name, disp.checked); });
+      // The row text is the box's label: a click on it toggles the box, and nothing else.
+      label.htmlFor = disp.id;
       item.appendChild(swatch); item.appendChild(label); item.appendChild(disp);
-      // The row: Feature mode's click - this line type, isolated.
-      item.title = 'Click to isolate ' + name + '. Drag it onto plate 2.';
-      item.addEventListener('click', function () { featureRowClick(name); });
-      item.addEventListener('pointerenter', function () { if (plateName === 'lens' && !pull) drawHover(featureTarget(name)); });
-      item.addEventListener('pointerleave', function () { clearHover(); });
-      item.addEventListener('pointerdown', function (ev) { featureRowPress(ev, name); });
       legend.appendChild(item);
     });
   }
@@ -2539,6 +2523,7 @@ var NSO_MICROSCOPE = (function () {
     if (on) FEATURE_OFF.delete(name); else FEATURE_OFF.add(name);
     viewChanged();
     rescopeSelection();
+    syncExportRow();
   }
 
   // --- viewport interaction -------------------------------------------------
@@ -2549,7 +2534,7 @@ var NSO_MICROSCOPE = (function () {
   //
   //   Piece    a whole piece
   //   Region   the capture box (a box dropped where you click, sized by its dots)
-  //   Feature  a slicer line type - a line of it on the piece, or its legend row
+  //   Feature  a slicer line type - a line of it on the piece
   //   Line     one extrusion line (slices only); the arrows step along it
   //   Layer    every layer of a slice is a card; the slider's range is one more
   //
@@ -2588,9 +2573,9 @@ var NSO_MICROSCOPE = (function () {
     var text = {
       piece: 'Hover a piece, click to isolate it. Drag it onto plate 2.',
       select: 'Click a piece to drop a flat capture box there. Drag its blue centre dot to move it, the green corner dot to size it along and across, a side to scale the footprint, the orange top dot to set how thick it is.',
-      feature: 'Hover a line, or a legend row, for that line type. Click to isolate it. Drag it onto plate 2.',
+      feature: 'Hover a line for that line type. Click to isolate it. Drag it onto plate 2. (The Features list only shows and hides line types.)',
       line: 'Hover a line. Click to isolate that one move; Shift-click adds or removes one. The arrows step to the neighbouring move.',
-      layer: 'Every layer is a card: hover one, click to isolate it, drag it onto plate 2. The slider\'s range is one card more - its grip beside the slider.'
+      layer: 'Every layer is a card: hover one, click to isolate it, drag it onto plate 2. The slider\'s range is the band: Take band isolates it as one piece.'
     }[mode];
     if (note) note.textContent = text;
     var hint = $('ms-hint-badge');
@@ -3007,15 +2992,15 @@ var NSO_MICROSCOPE = (function () {
   }
 
   // ===========================================================================
-  // G-scope: the selection seam, the view filters, line picking, the layer
-  // range and Crop
+  // G-scope: the selection seam, the view filters, line picking and the layer
+  // range
   // ===========================================================================
   //
   // THE SELECTION IS ONE THING. Whatever produced it - a capture box, a whole
   // layer, a picked line, "everything shown" - it is an array of segments
   // (toolpath) or of objects (mesh), and it reaches the rest of the view
   // through setSelection() and nowhere else. Isolate, the highlight, both
-  // exports and Crop read `currentSelection`; none of them knows or asks which
+  // exports and a pull read `currentSelection`; none of them knows or asks which
   // control made it. docs/GCODE-MICROSCOPE.md, "The selection seam", is where
   // a future support-generation step plugs in.
 
@@ -3029,7 +3014,6 @@ var NSO_MICROSCOPE = (function () {
     // Isolated, the view IS the selection: a box dragged, a line stepped,
     // redraws it. One rebuild per frame, however many steps a drag makes.
     if (isolated) isolateRedrawSoon();
-    syncCropRow();
     if (!selectionListeners.length) return;
     var region = selectionRegion();
     selectionListeners.forEach(function (fn) {
@@ -3131,7 +3115,7 @@ var NSO_MICROSCOPE = (function () {
     applyFeatureVisibility();
     refreshHighlight();
     syncZRangeUI();
-    syncCropRow();
+    syncTakeBand();
     syncLineRead();
     syncRenderRow();
   }
@@ -3189,7 +3173,7 @@ var NSO_MICROSCOPE = (function () {
    * A row was switched on or off: a mesh selection follows what is shown. A
    * box selection is taken again (a box catches only what is drawn), "Select
    * shown" stays everything shown, and anything else loses what was switched
-   * off. So Export, Crop and Isolate always act on the parts and features the
+   * off. So Export and Isolate always act on the parts and features the
    * list has on, never on one switched off after it was selected. A slice's
    * selection is left as it was, as it always has been.
    */
@@ -3232,15 +3216,17 @@ var NSO_MICROSCOPE = (function () {
     return n;
   }
 
-  /** Every row back on - parts, features and detector rows - nothing cleared. The slider is left alone. */
-  function showAll() {
+  /**
+   * Check all: every box in the Features list checked - every line type shown,
+   * Travel too - and nothing else. What was isolated stays isolated, what was
+   * cleared from view stays cleared (CLEAR is what makes a plate whole again).
+   */
+  function checkAll() {
     if (!doc) return;
-    if (isolated) back();               // everything back means the whole part
-    CLEARED.clear();
-    HIDDEN = new Set();
-    FEATURE_OFF = new Set(['Travel']);
+    FEATURE_OFF = new Set();
     viewChanged();
     rescopeSelection();
+    syncExportRow();
   }
 
   /** Everything the filters leave on screen, as the selection. */
@@ -3479,7 +3465,7 @@ var NSO_MICROSCOPE = (function () {
   // own printing heights, so both handles on one step is one layer, and
   // spread apart is a chunk of layers; on a mesh (no layers - see syncLayerRow)
   // the steps are millimetres across the part and the view is clipped. A VIEW:
-  // it changes what is drawn and what a click can catch. Crop reads the band.
+  // it changes what is drawn and what a click can catch. Take band reads the band.
 
   var MESH_Z_STEPS = 201;
 
@@ -3500,7 +3486,7 @@ var NSO_MICROSCOPE = (function () {
   function zRangeFull() { return !zr || (zr.lo === 0 && zr.hi === zr.n - 1); }
 
   /**
-   * The band the slider holds, in mm, bottom to top - what Crop removes. On a
+   * The band the slider holds, in mm, bottom to top - what Take band takes. On a
    * slice the bottom is the BOTTOM of the lowest layer's beads (a bead hangs
    * down from its printing Z), so the band covers exactly the beads drawn.
    */
@@ -3639,129 +3625,50 @@ var NSO_MICROSCOPE = (function () {
     if (all) all.addEventListener('click', function () { if (zr) setZRange(0, zr.n - 1); });
   }
 
-  // --- Crop, through the real Crop tool ----------------------------------------
+  // --- Take band: the slider's range, as one piece -----------------------------
   //
-  // Crop out the slider's Z band and rejoin what is above onto what is below.
-  // G-scope does not crop anything itself: every route ends in app-crop.js -
-  // NSO_cropRaw (Cut's clip, the joint seal, the gate) and NSO_cropModel (the
-  // painted-face stand-down, the in-page canonical checker, the commit with
-  // its 'cropReplace' undo) - the functions behind the Cut menu's Crop row.
-  //
-  //   plate piece   crops THAT piece in place. The band is mapped from the
-  //                 view's Z to the piece's raw Z by the offset between the
-  //                 two, and refused if the piece was tilted (spans differ).
-  //   slice         the selection's beads (buildLineGeometry - one closed
-  //                 prism per move) become a piece on the plate, and that
-  //                 piece is cropped. Beads are touching closed shells, not one
-  //                 closed solid, so Crop runs with `shells` - see NSO_cropRaw.
-  //   file mesh     as a slice, without `shells`.
-  // A refusal is checked BEFORE anything reaches the plate, so a refused crop
-  // leaves the plate exactly as it was.
+  // The Select card's Layer row. The layer-range slider's range IS the band:
+  // Take band selects everything it leaves drawn - the Range card's own
+  // selection (rangeTarget) - and isolates it, one piece, to drag onto plate 2
+  // or export like any isolation. It replaced Crop Z's "Crop out band" (round
+  // 1b, docs/GSCOPE.md item 5): nothing is cut out of anything any more.
 
-  function cropAvailable() {
-    return typeof NSO_cropRaw === 'function' && typeof NSO_cropModel === 'function';
-  }
-
-  function cropReason() {
+  // The band does not depend on the selection, so this is not on setSelection's
+  // path (a box drag re-selects every pointermove); the slider and the document
+  // re-read it.
+  function bandReason(n) {
     if (!doc) return 'Open something first';
-    if (!cropAvailable()) return 'The Crop tool (app-crop.js) is not loaded';
-    if (!currentSelection.length) return 'Select what to crop first';
-    if (!zr || zRangeFull()) return 'Narrow the layer range to the band to remove';
-    if (cropsPiece() && currentSelection.length !== 1) return 'Crop edits one plate piece at a time';
+    if (doc.kind !== 'toolpath') return 'A band is a slice\'s layers: turn Slice view on';
+    if (!(n != null ? n : shownSegments().length)) return 'Nothing is drawn in the slider\'s range';
     return '';
   }
 
-  /**
-   * Crop edits a plate piece in place only when the selection IS a plate
-   * piece. A flange lifted out of one is not: it goes the file route, as a
-   * new piece that is then cropped, and the piece it came from is untouched.
-   */
-  function cropsPiece() {
-    return doc && doc.source === 'plate';
-  }
-
-  function syncCropRow() {
-    var row = $('ms-crop-row');
-    if (!row) return;
-    row.style.display = doc ? 'block' : 'none';
-    var btn = $('ms-btn-crop'), read = $('ms-crop-read');
-    var why = cropReason();
+  function syncTakeBand() {
+    var btn = $('ms-btn-take-band'), read = $('ms-band-read');
+    var n = doc && doc.kind === 'toolpath' ? shownSegments().length : 0;
+    var why = bandReason(n);
     if (btn) btn.disabled = !!why;
     if (!read) return;
     if (why) { read.textContent = why + '.'; return; }
     var band = zBandMm();
-    read.textContent = 'Removes Z ' + band[0].toFixed(2) + ' - ' + band[1].toFixed(2) + ' mm (' +
-      (band[1] - band[0]).toFixed(2) + ' mm) from ' +
-      (cropsPiece() ? '"' + currentSelection[0].name + '", in place'
-        : 'the selection, as a new piece on the plate') + ', and joins the rest.';
+    read.textContent = 'The slider\'s range is the band: Z ' + band[0].toFixed(2) + ' - ' + band[1].toFixed(2) + ' mm, ' +
+      n + ' move' + (n === 1 ? '' : 's') + '.';
   }
 
-  function cropLabel(band) {
-    return 'removed Z ' + band[0].toFixed(2) + '–' + band[1].toFixed(2) + ' mm (G-scope)';
-  }
-
-  function cropZBand() {
-    var why = cropReason();
-    if (why) { say('Crop: ' + why, true); return { ok: false, reason: why }; }
+  /** The band isolated as one piece. Returns the selection, or null (and says why). */
+  function takeBand() {
+    var why = bandReason();
+    if (why) { say('Take band: ' + why, true); return null; }
+    var t = rangeTarget();
+    if (isolated) back();
+    setMode('layer');
+    removeAllBalls();
+    setSelection(t.items, 'range');
+    isolate();
     var band = zBandMm();
-    var label = cropLabel(band);
-
-    if (cropsPiece()) {
-      var o = currentSelection[0];
-      var p = state.placed && state.placed[o.placedIndex];
-      var m = p && (state.models || []).find(function (mm) { return mm && mm.id === p.sourceId; });
-      if (!m || !m.rawTris) { say('Crop: that piece has no raw mesh to crop', true); return { ok: false, reason: 'no raw piece' }; }
-      var rb = NSO_cropBounds(m.rawTris);
-      var spanRaw = rb.hi[2] - rb.lo[2], spanView = o.bounds.maxZ - o.bounds.minZ;
-      if (Math.abs(spanRaw - spanView) > 1e-3) {
-        var why2 = 'the piece was tilted since it was loaded, so its raw Z no longer matches the view';
-        say('Crop refused - piece unchanged (' + why2 + ')', true);
-        return { ok: false, reason: why2 };
-      }
-      var off = o.bounds.minZ - rb.lo[2];
-      var r = NSO_cropModel(m, { axisIdx: 2, lo: band[0] - off, hi: band[1] - off }, { label: label });
-      if (r.ok) {
-        // Read the plate again so the view shows the piece as it now is.
-        // The status line keeps Crop's own report.
-        openPlate();
-      }
-      r.modelId = m.id;
-      return r;
-    }
-
-    var shells = doc.kind === 'toolpath';
-    var geo = microscopeGeometry();
-    if (!geo) { say('Crop: the selection has no geometry', true); return { ok: false, reason: 'empty' }; }
-    var soup = geo.attributes.position.array;
-    // Dry run first, on the same soup and with the same two gates
-    // NSO_cropModel applies, so a refusal never leaves a stray piece behind.
-    var dry = NSO_cropRaw(soup, { axisIdx: 2, lo: band[0], hi: band[1], shells: shells });
-    if (dry.ok && typeof NSO_cropCensus === 'function') {
-      var cb = NSO_cropCensus(soup), ca = NSO_cropCensus(dry.tris);
-      if (cb && ca && (ca.open || ca.nm > cb.nm || ca.degen > cb.degen)) {
-        dry.ok = false;
-        dry.reason = 'checker: open ' + ca.open + ', non-manifold ' + cb.nm + '→' + ca.nm +
-          ', degenerate ' + cb.degen + '→' + ca.degen;
-      }
-    }
-    if (!dry.ok) {
-      say('Crop refused - nothing added to the plate (' + dry.reason + ')', true);
-      return dry;
-    }
-    var name = exportLabel() + ' - cropped';
-    var id = addModelFromZUpGeometry(name, geo);
-    if (!id) { say('Crop failed - nothing was added', true); return { ok: false, reason: 'ingest failed' }; }
-    if (typeof pushUndo === 'function') {
-      pushUndo({ type: 'addModels', ids: [id], editId: state.editId, cutT: state.cutT });
-    }
-    var model = state.models.find(function (mm) { return mm && mm.id === id; });
-    var res = NSO_cropModel(model, { axisIdx: 2, lo: band[0], hi: band[1] }, { shells: shells, label: label });
-    res.modelId = id;
-    landed(id);
-    // Crop's own status line stands: it says what was removed and what the
-    // checker found. Back to the plate, where the new piece is.
-    if (res.ok) close();
-    return res;
+    say('Band Z ' + band[0].toFixed(2) + ' - ' + band[1].toFixed(2) + ' mm isolated as one piece (' + t.items.length +
+        ' moves) - drag it onto plate 2, or Export it.');
+    return currentSelection;
   }
 
   // ===========================================================================
@@ -3780,6 +3687,24 @@ var NSO_MICROSCOPE = (function () {
    *   each move's own measured width and height.
    * - mesh: the selected build objects' triangles, as read.
    */
+  /**
+   * What a selection ACTS on: the part of it that is shown. A slice's moves
+   * whose line type is unchecked in the Features list are not drawn, so they
+   * are not exported, copied or swept either (docs/GSCOPE.md, item 4) - and
+   * checked again, they are back, the selection itself never having changed.
+   */
+  function actedOn(items) {
+    if (!doc || doc.kind !== 'toolpath') return items;
+    return items.filter(function (sg) { return !FEATURE_OFF.has(sg.feature); });
+  }
+
+  /** A mesh object's triangles as drawn: a plate 2 piece that is still a slice's beads, minus the unchecked line types. */
+  function shownPositions(o) {
+    if (!o.moves || !o.moves.length || !o.moves.some(function (m) { return FEATURE_OFF.has(m.feature); })) return o.positions;
+    var keep = o.moves.filter(function (m) { return !FEATURE_OFF.has(m.feature); });
+    return keep.length ? window.NSOGcodeLines.buildLineGeometry(keep).positions : new Float32Array(0);
+  }
+
   function microscopeGeometry(asSolid) {
     if (!doc || !currentSelection.length) return null;
     var positions;
@@ -3792,16 +3717,18 @@ var NSO_MICROSCOPE = (function () {
       return sg;
     }
     if (doc.kind === 'toolpath') {
-      var built = window.NSOGcodeLines.buildLineGeometry(
-        currentSelection.map(function (s) { return s.mv; }));
+      var moves = actedOn(currentSelection).map(function (s) { return s.mv; });
+      if (!moves.length) return null;
+      var built = window.NSOGcodeLines.buildLineGeometry(moves);
       if (!built.positions.length) return null;
       positions = built.positions;
     } else {
-      var total = currentSelection.reduce(function (a, o) { return a + o.positions.length; }, 0);
+      var soups = currentSelection.map(shownPositions);
+      var total = soups.reduce(function (a, p) { return a + p.length; }, 0);
       if (!total) return null;
       positions = new Float32Array(total);
       var at = 0;
-      currentSelection.forEach(function (o) { positions.set(o.positions, at); at += o.positions.length; });
+      soups.forEach(function (p) { positions.set(p, at); at += p.length; });
     }
     var geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -3896,15 +3823,16 @@ var NSO_MICROSCOPE = (function () {
   function solidOfSelection() {
     if (doc && doc.source === 'take' && currentSelection.length) return solidOfTake();
     if (!doc || doc.kind !== 'toolpath' || !currentSelection.length) return null;
-    return window.NSOGcodeSolid.buildSolid(currentSelection.map(function (s) { return s.mv; }),
-                                           { cache: solidCache() });
+    var moves = actedOn(currentSelection).map(function (s) { return s.mv; });
+    if (!moves.length) return null;
+    return window.NSOGcodeSolid.buildSolid(moves, { cache: solidCache() });
   }
 
   /** Plate 2's selected pieces that still have their beads, swept. Each piece keeps its own index range. */
   function solidOfTake() {
     var mv = [];
     currentSelection.forEach(function (o, i) {
-      (o.moves || []).forEach(function (m) { mv.push(Object.assign({}, m, { index: m.index + i * 10000000 })); });
+      (o.moves || []).forEach(function (m) { if (!FEATURE_OFF.has(m.feature)) mv.push(Object.assign({}, m, { index: m.index + i * 10000000 })); });
     });
     if (!mv.length) return null;
     return window.NSOGcodeSolid.buildSolid(mv, { cache: new Map() });
@@ -4024,15 +3952,19 @@ var NSO_MICROSCOPE = (function () {
     return renderMode;
   }
 
+  /**
+   * Toolpath / Solid, a row of the View card: always there, enabled only while
+   * a slice is shown - Slice view on, or a sliced file (a slice already). On a
+   * mesh there is nothing to draw as a toolpath, and the row says so.
+   */
   function syncRenderRow() {
     var isPath = !!(doc && doc.kind === 'toolpath');
-    show('ms-render-row', isPath);
     var a = $('ms-render-toolpath'), b = $('ms-render-solid');
-    if (a) { a.classList.toggle('active', renderMode === 'toolpath'); a.setAttribute('aria-pressed', String(renderMode === 'toolpath')); }
-    if (b) { b.classList.toggle('active', renderMode === 'solid'); b.setAttribute('aria-pressed', String(renderMode === 'solid')); }
+    if (a) { a.classList.toggle('active', renderMode === 'toolpath'); a.setAttribute('aria-pressed', String(renderMode === 'toolpath')); a.disabled = !isPath; }
+    if (b) { b.classList.toggle('active', renderMode === 'solid'); b.setAttribute('aria-pressed', String(renderMode === 'solid')); b.disabled = !isPath; }
     var rd = $('ms-render-read');
     if (rd) {
-      if (!isPath) rd.textContent = '';
+      if (!isPath) rd.textContent = 'Turn Slice view on to draw the slice as a toolpath or as a solid.';
       else if (renderMode !== 'solid') rd.textContent = 'Each move drawn as a line; a small selection is highlighted as its flat beads.';
       else if (view && view.solidBuilt) rd.textContent = 'Shown: ' + describeSolid(view.solidBuilt.stats) + '.';
       else rd.textContent = 'Nothing shown.';
@@ -4148,8 +4080,9 @@ var NSO_MICROSCOPE = (function () {
   }
 
   function syncExportRow() {
-    show('ms-export-row', !!(doc && currentSelection.length));
-    show('ms-export-solid-row', !!(doc && ((doc.kind === 'toolpath' && currentSelection.length) || takeSolidable())));
+    var acts = !!(doc && currentSelection.length && actedOn(currentSelection).length);
+    show('ms-export-row', acts);
+    show('ms-export-solid-row', !!(doc && ((doc.kind === 'toolpath' && acts) || takeSolidable())));
     var isTake = !!(doc && doc.source === 'take');
     show('ms-take-export-row', isTake && takeDoc.objects.length > 0);
     var selTitle = $('ms-export-sel-title');
@@ -4163,7 +4096,7 @@ var NSO_MICROSCOPE = (function () {
     var sv = $('ms-btn-select-visible');
     if (sv) sv.disabled = !doc;
     var sa = $('ms-btn-show-all');
-    if (sa) sa.disabled = !doc;
+    if (sa) sa.disabled = !hasLineTypes();
   }
 
   function syncLayerRow() {
@@ -4455,7 +4388,7 @@ var NSO_MICROSCOPE = (function () {
     syncExportRow();
     syncRenderRow();
     syncZRangeUI();
-    syncCropRow();
+    syncTakeBand();
     syncLineRead();
     syncBackButton();
     docListeners.forEach(function (fn) {
@@ -4558,7 +4491,7 @@ var NSO_MICROSCOPE = (function () {
     clearHover();
     if (view) { applyClip(); applyDisplay(); ensureTake(); }
     syncZRangeUI();
-    syncCropRow();
+    syncTakeBand();
     buildLegend();
     syncHeader();
     syncLayerRow();
@@ -4616,13 +4549,12 @@ var NSO_MICROSCOPE = (function () {
   // ===========================================================================
 
   // [button, card, the rows the engine shows for it - null: always available]
+  // The column is IMPORT . READ PLATE | SELECT . VIEW (docs/GSCOPE.md, item 5):
+  // Render and the Slice settings are rows of the View card, Take band is the
+  // Select card's (Layer), Overhangs is the plate SUPPORTS card's.
   var SHELL_CARDS = [
     ['ms-nav-select', 'ms-card-select', null],
     ['ms-nav-view', 'ms-card-view', null],
-    ['ms-nav-render', 'ms-card-render', ['ms-render-row']],
-    ['ms-nav-overhangs', 'ms-card-overhangs', ['ms-support-row']],
-    ['ms-nav-crop', 'ms-card-crop', ['ms-crop-row']],
-    ['ms-nav-slice', 'ms-card-slice', ['ms-slice-row']],
     ['ms-nav-export', 'ms-card-export', ['ms-export-row', 'ms-export-solid-row', 'ms-slice-export-row', 'ms-take-export-row']]
   ];
   var shellOpen = null;      // the card id that is open, or null
@@ -4691,7 +4623,9 @@ var NSO_MICROSCOPE = (function () {
     if (typeof MutationObserver === 'undefined') { syncShell(); return; }
     var watch = new MutationObserver(syncShell);
     var seen = {};
-    SHELL_CARDS.forEach(function (c) {
+    // the Slice settings are a row of the View card (always available), but the
+    // Slice report in the dock follows them, so they are watched too
+    SHELL_CARDS.concat([[null, null, ['ms-slice-row']]]).forEach(function (c) {
       (c[2] || []).forEach(function (id) {
         var el = $(id);
         if (el && !seen[id]) { seen[id] = 1; watch.observe(el, { attributes: true, attributeFilter: ['style'] }); }
@@ -4748,15 +4682,9 @@ var NSO_MICROSCOPE = (function () {
     bind('ms-line-prev', 'click', function () { setMode('line'); stepLine(-1); });
     bind('ms-line-next', 'click', function () { setMode('line'); stepLine(1); });
     bind('ms-btn-clear-view', 'click', clearFromView);
-    bind('ms-btn-show-all', 'click', showAll);
+    bind('ms-btn-show-all', 'click', checkAll);
     bind('ms-btn-select-visible', 'click', selectVisible);
-    bind('ms-btn-crop', 'click', function () {
-      try { cropZBand(); }
-      catch (err) {
-        console.error('[g-scope crop]', err);
-        say('Crop failed - nothing changed (' + ((err && err.message) || err) + ')', true);
-      }
-    });
+    bind('ms-btn-take-band', 'click', function () { takeBand(); });
     wireZRange();
     bind('ms-btn-export-plate', 'click', exportToPlate);
     bind('ms-btn-export-stl', 'click', exportAsSTL);
@@ -4813,7 +4741,7 @@ var NSO_MICROSCOPE = (function () {
   /**
    * A file handed over by the app's own Import (app-core.js handleFiles):
    * into G-scope, and NOT onto the plate. A slice is something you look
-   * through; what leaves the view does so through Export or Crop, by choice.
+   * through; what leaves the view does so through Export, by choice.
    */
   function openFile(filename, arrayBuffer) {
     openPanel();
@@ -4888,7 +4816,11 @@ var NSO_MICROSCOPE = (function () {
     },
     soloGroup: soloGroup,
     soloGroups: soloGroups,
-    showAll: showAll,
+    /** Check all (the View card's #ms-btn-show-all): every Features box checked. */
+    checkAll: checkAll,
+    showAll: checkAll,
+    /** One Features box, checked or not - what a click on it does. */
+    setFeatureDisplay: function (name, on) { setFeatureDisplay(name, !!on); },
     clearFromView: clearFromView,
     cleared: function () { return Array.from(CLEARED); },
     selectVisible: selectVisible,
@@ -4911,8 +4843,8 @@ var NSO_MICROSCOPE = (function () {
       if (viewPending) { viewPending = false; viewChanged(); }
       if (highlightPending) { highlightPending = false; refreshHighlight(); }
     },
-    cropZBand: cropZBand,
-    cropReason: cropReason,
+    takeBand: takeBand,
+    bandReason: function () { return bandReason(); },
     exportLabel: function () { return doc && currentSelection.length ? exportLabel() : null; },
     exportToPlate: exportToPlate,
     exportAsSTL: exportAsSTL,

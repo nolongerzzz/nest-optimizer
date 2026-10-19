@@ -25,11 +25,8 @@
  *   4  THE LAYER-RANGE SLIDER. Real drags on both handles; one layer (exactly
  *      the moves NSOGcodeLines.movesAtZ finds), a chunk (the window moved
  *      with Shift+Arrow), everything (All). On a mesh document it clips.
- *   5  CROP THROUGH G-SCOPE, END TO END, through app-crop.js: a slice's
- *      isolated feature becomes a piece and has a Z band cropped out (height
- *      and volume exact, closed shells, two undo steps); a plate piece is
- *      cropped IN PLACE (canonical checker on the result, one undo reverts);
- *      and refusals leave the plate untouched.
+ *   5  TAKE BAND (was Crop Z, docs/GSCOPE.md item 5): the slider's range,
+ *      isolated as one piece - exactly the band's moves, nothing on the plate.
  *   6  SCREENSHOTS of every visual claim, each asserted to be a drawn view.
  *
  * Usage:
@@ -39,7 +36,6 @@ import { chromium } from 'playwright';
 import { mkdir, readFile, writeFile, stat, mkdtemp, copyFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
 import { serveRoot, routeCdn, mkCheck, launchOpts, ROOT } from '../cth-test/browser-lib.mjs';
 import gscopeCards from '../nso_gscope_cards.js';        // opens the card a G-scope control lives in, before the click
 
@@ -59,13 +55,6 @@ function stlTriangles(buf) {
     out.push(t);
   }
   return out;
-}
-
-function soupToSTL(soup) {
-  const n = soup.length / 9, b = Buffer.alloc(84 + n * 50);
-  b.writeUInt32LE(n, 80);
-  for (let t = 0; t < n; t++) for (let k = 0; k < 9; k++) b.writeFloatLE(soup[t * 9 + k], 84 + t * 50 + 12 + k * 4);
-  return b;
 }
 
 async function frames(page) {
@@ -286,11 +275,15 @@ async function main() {
   await page.click('#ms-mode-select');
   await page.click('#ms-btn-isolate');
   await page.click('#ms-btn-back');
-  await page.click('#ms-btn-show-all');
-  check('Show all brings the cleared piece back',
+  // Check all is the Features list's (a mesh has none: it is disabled); CLEAR is
+  // what makes plate 1 whole again (docs/GSCOPE.md, items 2 and 4).
+  check('a mesh has no Features boxes, so Check all is disabled',
+    await page.evaluate(() => { const b = document.getElementById('ms-btn-show-all'); return [b.textContent.trim(), b.disabled]; }), ['Check all', true]);
+  await page.click('#ms-btn-take-clear');
+  check('CLEAR brings the cleared piece back',
     await page.evaluate(() => [window.NSO_MICROSCOPE.hidden(), Object.values(window.NSO_MICROSCOPE.getView().overviewMeshes).every((m) => m.visible)]),
     [[], true]);
-  check('after only / select shown / isolate / back / show all: the plate is still untouched',
+  check('after only / select shown / isolate / back / CLEAR: the plate is still untouched',
     await plateSnapshot(page), snap0);
   check('and still no file written', downloads, dl0);
 
@@ -313,80 +306,6 @@ async function main() {
   check('and the view is clipped to it', [zr.clipped, zr.planes], [true, [-8, 12]]);
   await shot(page, '02-mesh-z-band.png', 'a mesh clipped to a Z band');
   check('the slider did not touch the plate either', await plateSnapshot(page), snap0);
-
-  // =======================================================================
-  console.log('\n--- 5b. crop a plate piece IN PLACE, through the Crop tool ---');
-  // =======================================================================
-  await page.evaluate(() => {
-    const M = window.NSO_MICROSCOPE, o = M.getDoc().objects[0], b = o.bounds;
-    M.setZRange(0, M.zRange().steps - 1);
-    M.clearBoxes();
-    M.addBoxAt((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, (b.minZ + b.maxZ) / 2, 10.2, 10.2);
-  });
-  // Refusal first: a band over the bottom is a trim.
-  const refused = await page.evaluate(() => {
-    const M = window.NSO_MICROSCOPE, b = M.getDoc().objects[0].bounds;
-    M.setZRangeMm(b.minZ, b.minZ + 5); M.flushView();
-    const r = M.cropZBand();
-    return { ok: r.ok, reason: r.reason, status: document.getElementById('status').textContent };
-  });
-  check('a band over the bottom is refused by name - that is a trim', [refused.ok, /trim - use Cut/.test(refused.reason)], [false, true]);
-  check('and the refusal left the plate untouched', await plateSnapshot(page), snap0);
-
-  const target = await page.evaluate(() => {
-    const M = window.NSO_MICROSCOPE, o = M.selection()[0], b = o.bounds;
-    const p = state.placed[o.placedIndex];
-    const m = state.models.find((mm) => mm.id === p.sourceId);
-    M.setZRangeMm(b.minZ + 8, b.minZ + 12); M.flushView();
-    return { id: m.id, name: o.name, h: b.maxZ - b.minZ, band: M.zRange().bandMm,
-      rawLen: m.rawTris.length, read: document.getElementById('ms-crop-read').textContent,
-      enabled: !document.getElementById('ms-btn-crop').disabled };
-  });
-  check('Crop is live and says what it will do', [target.enabled, /in place/.test(target.read)], [true, true]);
-  await page.click('#ms-btn-crop');
-  const inPlace = await page.evaluate((id) => {
-    const M = window.NSO_MICROSCOPE, m = state.models.find((mm) => mm.id === id);
-    let lo = Infinity, hi = -Infinity;
-    for (let i = 2; i < m.rawTris.length; i += 3) { lo = Math.min(lo, m.rawTris[i]); hi = Math.max(hi, m.rawTris[i]); }
-    return {
-      same: !!m, models: state.models.length, h: hi - lo,
-      undo: state.undoStack[state.undoStack.length - 1].type,
-      status: document.getElementById('status').textContent,
-      open: M.isOpen(), source: M.getDoc().source,
-      viewH: (() => { const o = M.getDoc().objects.find((x) => x.sourceId === id); return o.bounds.maxZ - o.bounds.minZ; })(),
-      raw: Array.from(m.rawTris),
-    };
-  }, target.id);
-  const bandH = target.band[1] - target.band[0];
-  check('the SAME piece was edited - no new piece', [inPlace.same, inPlace.models], [true, 2]);
-  check('shorter by exactly the band', Math.abs(inPlace.h - (target.h - bandH)) < 1e-3, true);
-  check('committed by the Crop tool, with its own undo type', inPlace.undo, 'cropReplace');
-  check('its status line is Crop\'s own', /^Crop done - removed Z/.test(inPlace.status), true);
-  check('G-scope stayed open and re-read the plate', [inPlace.open, inPlace.source], [true, 'plate']);
-  check('and shows the piece at its new height', Math.abs(inPlace.viewH - inPlace.h) < 1e-3, true);
-  console.log(`       ${target.name}: ${target.h.toFixed(2)} mm -> ${inPlace.h.toFixed(2)} mm (band ${bandH.toFixed(2)} mm)`);
-  const cubeStl = join(TMP, 'cube-cropped.stl');
-  await writeFile(cubeStl, soupToSTL(inPlace.raw));
-  const canon = JSON.parse(execFileSync('python3', [join(ROOT, 'tools', 'mesh_validate.py'), cubeStl, '--json']).toString());
-  check('the canonical checker passes it: closed, manifold, consistently wound, no self-intersection',
-    [canon.open_edges, canon.nonmanifold_edges, canon.inconsistent_winding_edges, canon.degenerate_tris,
-      canon.self_intersection ? canon.self_intersection.pierce : 0], [0, 0, 0, 0, 0]);
-  // Side-on, so the height difference between the cropped cube and its
-  // untouched twin reads straight off the picture.
-  await page.evaluate(() => {
-    const v = window.NSO_MICROSCOPE.getView();
-    const box = new THREE.Box3();
-    v.overviewGroup.children.forEach((c) => { c.geometry.computeBoundingBox(); box.union(c.geometry.boundingBox); });
-    const c = box.getCenter(new THREE.Vector3()), size = box.getSize(new THREE.Vector3());
-    v.controls.target.copy(c);
-    v.camera.position.set(c.x, c.y, c.z + Math.max(size.x, size.y) * 2.2);
-    v.controls.update();
-  });
-  await shot(page, '03-plate-piece-cropped-in-place.png', 'a plate piece cropped through G-scope');
-  await page.click('#ms-close');
-  await page.click('#btn-undo');
-  check('one Undo gives the whole piece back',
-    await page.evaluate((id) => state.models.find((m) => m.id === id).rawTris.length, target.id), target.rawLen);
 
   // =======================================================================
   console.log('\n--- 3. line-level vs feature-level isolation, on a real slice ---');
@@ -575,33 +494,51 @@ async function main() {
   check('one fewer line shown', lineCleared.shown, aim.n - 1);
   await shot(page, '08-line-cleared.png', 'a line cleared from view');
 
-  // Feature-level: a click on a Features row (Feature mode's click) is this method's one-click isolate -
-  // Export must be offered right after it, same as a picked line or a box,
-  // with no separate "Select shown" required. (It used to be view-only:
-  // nothing selected, Export never appeared until Select shown was pressed
-  // as a second, undiscoverable step - the one path in that a plain click on
-  // any of the other isolation methods never needed.)
+  // Feature-level: Feature mode's click on a line of the type is the one-click
+  // isolate - Export must be offered right after it, same as a picked line or
+  // a box, with no separate "Select shown" required. The Features list is
+  // checkboxes only now (docs/GSCOPE.md, item 4): its row text toggles its box
+  // and nothing else, so it is not this click any more.
   await page.click('#ms-btn-show-all');
   await page.click('#ms-zr-all');
-  const inner = page.locator('#ms-legend .ms-legend-item[data-group="Inner wall"]');
+  const inner = page.locator('#ms-legend .ms-legend-item[data-group="Inner wall"] .ms-legend-label');
   await inner.hover();
-  await inner.click();               // Feature mode's click: that line type, isolated
+  await inner.click();
+  check('a click on the Inner wall row text toggles its box, and selects and isolates nothing',
+    await page.evaluate(() => [window.NSO_MICROSCOPE.hidden().indexOf('Inner wall') >= 0, window.NSO_MICROSCOPE.isIsolated(),
+      window.NSO_MICROSCOPE.selection().length]), [true, false, 0]);
+  await inner.click();
+  await page.evaluate(() => { window.NSO_MICROSCOPE.setMode('feature'); window.NSO_MICROSCOPE.flushView(); });
+  const innerPx = await page.evaluate(() => {
+    const M = window.NSO_MICROSCOPE, d = M.getDoc(), v = M.getView(), r = v.renderer.domElement.getBoundingClientRect();
+    const segs = d.segments.filter((g) => g.feature === 'Inner wall');
+    for (const s of segs) {
+      const p = M.toView((s.x0 + s.x1) / 2, (s.y0 + s.y1) / 2, s.z).project(v.camera);
+      const x = r.left + (p.x + 1) / 2 * r.width, y = r.top + (1 - p.y) / 2 * r.height;
+      const t = M.pressTargetAt(x, y);
+      if (t && t.source === 'feature' && document.elementFromPoint(x, y) === v.renderer.domElement) return [x, y];
+    }
+    return null;
+  });
+  await page.mouse.move(innerPx[0], innerPx[1]);
+  await page.waitForTimeout(150);
+  const hovered = await page.evaluate(() => window.NSO_MICROSCOPE.hoverInfo());
+  await page.mouse.click(innerPx[0], innerPx[1]);
+  await page.waitForTimeout(150);
   const soloed = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE, d = M.getDoc(), sel = M.selection();
     return { n: sel.length, want: d.parsed.moves.filter((m) => m.feature === 'Inner wall').length,
       onlyInner: sel.every((s) => s.feature === 'Inner wall'), by: M.selectionSource(),
       exportShown: getComputedStyle(document.getElementById('ms-export-row')).display !== 'none' };
   });
-  check('a click on the Inner wall row alone selects every Inner wall move, no Select shown needed',
-    [soloed.n, soloed.onlyInner, soloed.exportShown], [soloed.want, true, true]);
+  check('Feature mode: a click on an Inner wall line selects every Inner wall move of that piece, no Select shown needed',
+    [soloed.n > 0, soloed.onlyInner, soloed.exportShown, !!hovered && hovered.label === 'Inner wall'], [true, true, true, true]);
   check('and it is a feature selection, isolated', await page.evaluate(() =>
     [window.NSO_MICROSCOPE.selectionSource(), window.NSO_MICROSCOPE.isIsolated()]), ['feature', true]);
-  // Clicking the row again makes it whole (the selection stays). Then the view
-  // filter, by the Display checks: every other line type off. Select shown reads
-  // "what is shown" - the identical set - not a second, required step.
-  await inner.click();
-  check('the row again: whole again, still selected', await page.evaluate(() =>
-    [window.NSO_MICROSCOPE.isIsolated(), window.NSO_MICROSCOPE.selection().length]), [false, soloed.want]);
+  // Then the view filter, by the Features boxes: every other line type off.
+  // Select shown reads "what is shown" - the identical set - not a second,
+  // required step.
+  await page.evaluate(() => { const M = window.NSO_MICROSCOPE; M.back(); M.setMode('piece'); });
   for (const g of await page.evaluate(() => window.NSO_MICROSCOPE.groups())) {
     if (g !== 'Inner wall') await page.locator(`#ms-legend .ms-legend-item[data-group="${g}"] .ms-legend-display`).uncheck();
   }
@@ -627,79 +564,34 @@ async function main() {
   check('only the one STL asked for was written', downloads, dl1 + 1);
 
   // =======================================================================
-  console.log('\n--- 5a. crop a slice through G-scope, end to end ---');
+  console.log('\n--- 5. Take band: the slider\'s range, as one piece ---');
   // =======================================================================
-  // Refused first: a selection that sits wholly inside the band.
-  const refusedSlice = await page.evaluate(() => {
+  // Crop Z's "Crop out band" became Select > Layer's Take band (docs/GSCOPE.md,
+  // item 5): the slider's range IS the band, isolated as one piece to drag
+  // onto plate 2 or export. Nothing is cut out of anything.
+  const band = await page.evaluate(() => {
     const M = window.NSO_MICROSCOPE;
-    const before = state.models.length;
-    const r = M.cropZBand();
-    return { ok: r.ok, reason: r.reason, added: state.models.length - before };
-  });
-  check('a selection wholly inside the band is refused, and nothing reaches the plate',
-    [refusedSlice.ok, refusedSlice.added], [false, 0]);
-  check('refusal left the plate untouched', await plateSnapshot(page), snap1);
-
-  // The real one: the whole Outer wall, band layers 10..19 cropped out.
-  const plan = await page.evaluate(() => {
-    const M = window.NSO_MICROSCOPE, d = M.getDoc();
-    M.setZRange(0, M.zRange().steps - 1); M.flushView();
-    M.soloGroup('Outer wall'); M.flushView();
-    M.selectVisible();
-    const sel = M.selection();
+    M.setSelectionMoves([]);
+    if (M.isIsolated()) M.back();
     M.setZRange(10, 19); M.flushView();
-    const band = M.zRange().bandMm;
-    const G = window.NSOGcodeLines;
-    const vol = (mvs) => mvs.reduce((a, s) => a + NSO_cropVolume(new Float32Array(G.extrudeFlatLine(s.mv, []))), 0);
-    const kept = sel.filter((s) => !(s.z > band[0] + 1e-6 && s.z <= band[1] + 1e-6));
-    let lo = Infinity, hi = -Infinity;
-    sel.forEach((s) => { lo = Math.min(lo, s.z - s.mv.height); hi = Math.max(hi, s.z); });
-    return { n: sel.length, band, keptVol: vol(kept), h: hi - lo, models: state.models.length,
-      undo: state.undoStack.length, read: document.getElementById('ms-crop-read').textContent };
+    const zr = M.zRange();
+    const want = M.getDoc().segments.filter((s) => s.zi >= zr.lo && s.zi <= zr.hi && M.hidden().indexOf(s.feature) < 0).length;
+    return { want, models: state.models.length, read: document.getElementById('ms-band-read').textContent };
   });
-  check('Crop says it will make a new piece from the selection', /as a new piece on the plate/.test(plan.read), true);
-  await page.click('#ms-btn-crop');
-  await page.waitForFunction((n) => state.models.length === n, plan.models + 1, { timeout: 30000 });
-  const cropped = await page.evaluate(() => {
-    const m = state.models[state.models.length - 1];
-    let lo = Infinity, hi = -Infinity;
-    for (let i = 2; i < m.rawTris.length; i += 3) { lo = Math.min(lo, m.rawTris[i]); hi = Math.max(hi, m.rawTris[i]); }
-    const ins = NSO_Repair.inspect(m.rawTris, { selfIntersections: false });
-    return { name: m.name, h: hi - lo, vol: NSO_cropVolume(m.rawTris), open: ins.openEdges,
-      undo: state.undoStack.slice(-2).map((u) => u.type), placed: state.placed.some((p) => p.sourceId === m.id),
-      scope: window.NSO_MICROSCOPE.isOpen(), status: document.getElementById('status').textContent,
-      rawLen: m.rawTris.length };
+  check('Take band says what the band holds', /the band: Z [\d.]+ - [\d.]+ mm, \d+ moves/.test(band.read), true);
+  await page.click('#ms-btn-take-band');
+  await page.evaluate(() => window.NSO_MICROSCOPE.flushView());
+  const taken = await page.evaluate(() => {
+    const M = window.NSO_MICROSCOPE;
+    return { iso: M.isIsolated(), n: M.selection().length, src: M.selectionSource(), mode: M.mode(),
+             tris: M.geometry().attributes.position.count / 3, models: state.models.length };
   });
-  const bandMm = plan.band[1] - plan.band[0];
-  check('the isolated feature is on the plate as a real piece', cropped.placed, true);
-  check('shorter by exactly the band', Math.abs(cropped.h - (plan.h - bandMm)) < 1e-3, true);
-  check('holding exactly the volume of the beads outside the band',
-    Math.abs(cropped.vol - plan.keptVol) <= 1e-4 * plan.keptVol, true);
-  check('closed: no open edge anywhere', cropped.open, 0);
-  check('two undo steps: the piece, then the Crop tool\'s own commit', cropped.undo, ['addModels', 'cropReplace']);
-  check('Crop\'s status line, and G-scope handed the plate back',
-    [/^Crop done - removed Z/.test(cropped.status), cropped.scope], [true, false]);
-  console.log(`       ${cropped.name}: ${plan.h.toFixed(2)} -> ${cropped.h.toFixed(2)} mm, ` +
-    `band ${plan.band.map((z) => z.toFixed(2)).join('..')} mm, ${cropped.rawLen / 9} triangles`);
-  await page.evaluate(() => { if (typeof frameAllModels === 'function') frameAllModels(); });
-  await shot(page, '10-slice-crop-on-the-plate.png', 'the cropped slice piece on the plate', 'main');
-
-  // And it can be looked at again in G-scope, as a plate piece.
-  await page.click('#btn-microscope');
-  await page.click('#ms-btn-plate');
-  const back = await page.evaluate((name) => {
-    const d = window.NSO_MICROSCOPE.getDoc();
-    const o = d.objects.find((x) => x.name === name);
-    return o ? o.bounds.maxZ - o.bounds.minZ : null;
-  }, cropped.name);
-  check('read back off the plate at its cropped height', back != null && Math.abs(back - cropped.h) < 1e-3, true);
-  await shot(page, '11-cropped-piece-in-gscope.png', 'the cropped piece, back under G-scope');
-  await page.click('#ms-close');
-  await page.click('#btn-undo');
-  check('first Undo reverts the crop',
-    await page.evaluate(() => state.models[state.models.length - 1].rawTris.length), plan.n * 12 * 9);
-  await page.click('#btn-undo');
-  check('second Undo takes the piece away', await page.evaluate(() => state.models.length), plan.models);
+  check('Take band isolates exactly the moves the slider\'s range shows, as one selection (Layer mode)',
+    [taken.iso, taken.n, taken.src, taken.mode], [true, band.want, 'range', 'layer']);
+  check('...one piece: what Export would write is 12 triangles a move', taken.tris, band.want * 12);
+  check('...and nothing reached the plate', taken.models, band.models);
+  check('Take band did not touch the plate', await plateSnapshot(page), snap1);
+  await shot(page, '10-take-band.png', 'the band, isolated as one piece');
 
   // =======================================================================
   console.log('\n--- the build ---');

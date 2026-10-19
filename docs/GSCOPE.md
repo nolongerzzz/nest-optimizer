@@ -102,13 +102,49 @@ file**; Shift-CLEAR drops that too.
 only `importedDoc`; the rail button reopens `importedDoc` with `open()` (which
 resets everything about it) or reads the plate.
 
+## 4. The Features list: checkboxes only (round 1b)
+
+**What it is.** The slicer's line types, Bambu-style - swatch, name (count), a
+checkbox - and nothing but checkboxes:
+
+- **Shown = the union of the checked rows.** All checked is the whole piece;
+  none checked is nothing; checking a row again draws that line type again,
+  type by type.
+- **A click on the row text toggles its box** (the text is the box's
+  `<label>`), and does nothing else. **Hovering a row does nothing.** There is no
+  row-click isolate, no hover preview, no snap-back, and a row is not dragged.
+- **Whatever is shown is what Select, a drag and Export act on.** A selection
+  keeps its moves, but only the checked line types' moves are exported, copied
+  onto plate 2 or swept as a solid (`actedOn()`); a press where an unchecked
+  type is drawn has nothing to take. Check it again and it is acted on again.
+- **Check all** (VIEW card, `#ms-btn-show-all`, the old Show all) checks every
+  box - Travel too - and nothing else: an isolation stays, and what was cleared
+  from view stays cleared (CLEAR makes a plate whole again).
+- One set of boxes for both plates (`FEATURE_OFF`): unchecked on plate 1 is
+  unchecked on plate 2.
+
+## 5. The column: IMPORT · READ PLATE | SELECT · VIEW (round 1b)
+
+Every removed button's job, and where it went:
+
+| was | now |
+|---|---|
+| **OVERHANGS** | Gone from G-scope. Overhang detection is the plate **SUPPORTS** card's. The row (`ms-support-row`, `ms-btn-overhangs`, `ms-overhang-angle`, `ms-support-read`) is deleted; `app-gscope-support.js` still loads but nothing in G-scope switches its markers on (only its `setOn()` API). `gcode:gscope-support` and `support:ui` tested that G-scope UI, not the engine (the engine is `support:*`, `tree:*`, `support:card`, `support:workflow`), so both are **retired**. |
+| **RENDER** (Toolpath / Solid) | A row of the **VIEW** card, enabled only while a slice is shown (Slice view on, or a sliced file, which is a slice already); on a mesh it says to turn Slice view on. |
+| **SLICE** (nozzle, layer, walls, infill, pattern, support below) | **"Slice settings"** in the VIEW card, under Normal / Slice view. They take effect when Slice view is entered (from a slice: Normal, then Slice view). The two Slice exports (piece to plate / as STL) were already the EXPORT card's "Sliced piece". |
+| **CROP Z** ("Crop out band") | **SELECT › Layer**: the slider's range IS the band, and **Take band** (`#ms-btn-take-band`) isolates it as one piece - the Range card's selection (`rangeTarget`) - to drag onto plate 2 or export. No separate card; nothing is cut out of anything any more (`cropZBand` is gone). |
+
+**VIEW card order:** Normal · Slice view | Toolpath · Solid | Slice settings |
+Check all · Clear from view · Select shown.
+
 ## Checks
 
 | check | what it holds |
 |---|---|
 | `gscope:take` (`tools/nso_gscope_take_test.js`) | items 1-3: the two plates, click-to-activate, copying across (five kinds), the refusals, plate 2's grab and drop, Export on the active plate, CLEAR / Shift-CLEAR from a fresh page and mid-session, CLOSE / BACK then reopen clean, an import surviving a close |
-| `gscope:shell` | the column, the cards, the corner row (BACK · ◎ · CLEAR · EXPORT · CLOSE), the dock |
-| the #205 set | the older G-scope drive checks (camera, zoom, slice, solid, watch, legend, ...) still hold |
+| `gscope:shell` | the four-button column, the three cards (Select, View in its order, Export), the corner row (BACK · ◎ · CLEAR · EXPORT · CLOSE), the dock, the retired ids gone |
+| `gscope:select` | the Select card's five modes; item 4's checkbox contract (two rows checked - exactly those two types drawn; none - nothing; hover changes nothing; the text toggles; Check all; Export and a drag take only what is shown) |
+| the #205 set | the older G-scope drive checks (camera, zoom, slice, solid, watch, legend, ...) still hold; `gcode:gscope`'s Crop sections are its Take band section now; `gcode:gscope-support` and `support:ui` are retired (item 5) |
 | `page:manifest` | the page loads each script once |
 
 ## Not done here
