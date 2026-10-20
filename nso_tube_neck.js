@@ -15,6 +15,20 @@
 //           the wall bent sharp on the inside of each corner and round on
 //           the outside, as sheet bends.
 //
+// WALLS (opts.walls): Both (the default, all of the above and below) moves
+// the whole wall, its thickness kept. Outside only / Bore only moves that
+// one face by Δr and leaves the other exactly as it was - its triangles bit
+// for bit - so the wall's thickness changes through the band: the moved face
+// itself follows the Profile (no section is carried, so nothing can fold;
+// how steep it stands is held to Funnel's 75°). Refused in words, with the
+// numbers, when the wall left would be under the nozzle-safety floor
+// (NSO_Thickness.floorFor, nso_thickness.js) or the faces would cross. With
+// one face the band may reach an END of the tube (centred inside it or on
+// the end ring): it is then laid from that end, Length in, and the face is
+// stepped all the way out to the end ring, back square at Length in - a
+// counterbore (the bore out: a socket), a spigot (the outside in). The end's
+// flat ring is laid again between the moved ring and its other ring.
+//
 // THE SECTION CARRIED EXACTLY, as Flare and Roll carry it. Smooth: both faces
 // are offsets of the mid-wall curve, t/2 either side along its normal; when
 // the curve turns no tighter than t/2 (refused otherwise, in words) neither
@@ -63,7 +77,9 @@
 //
 // REFUSALS, before anything is built, in words, the piece unchanged:
 //   - no open round end to read the axis from (Tube edge's words);
-//   - the band would run past an end of the tube;
+//   - the band would run past an end of the tube (Both; one face steps to it);
+//   - one face: the wall left under nso_thickness.js's floor, or the faces
+//     crossing; a step at an end that is closed;
 //   - the wall is not straight across the band (a neck already there, or the
 //     piece's own shape): necks may not overlap, and how far to move it;
 //   - the pinch would close the bore below 2 nozzle widths across;
@@ -392,6 +408,98 @@ function NSO_tnProfile(band, ha, hb, dr, L, prof) {
   return res;
 }
 
+/* ONE FACE (Walls: Outside only or Bore only): the chosen face's meridian
+   moves by dr over the band and the other face stays the straight line it
+   was. Mid-tube the moved face follows the Profile itself (Smooth: the
+   cosine; Funnel: straight in to the waist and straight out); there is no
+   section to carry, so no bend can fold it - only how steep the face stands
+   is held, to Funnel's 75°. At an end (atEnd 'top' | 'bottom') the face holds
+   R + dr out to the end ring and steps back to R square at the band's other
+   end: a counterbore when the bore moves out, a spigot when the outside moves
+   in. Returns { ok, reason, O, I, moved, R, waistBoreR, waistOuterR }. */
+function NSO_tnProfileOne(band, ha, hb, dr, L, prof, walls, atEnd) {
+  var res = { ok: false, reason: '' }, bore = walls === 'bore', hm = (ha + hb) / 2;
+  var R = bore ? band.Ri : band.Ro, Rk = bore ? band.Ro : band.Ri, M;
+  if (atEnd === 'top') M = [[R, ha], [R + dr, ha], [R + dr, hb]];
+  else if (atEnd === 'bottom') M = [[R + dr, ha], [R + dr, hb], [R, hb]];
+  else {
+    var steep = (prof === 'funnel' ? Math.atan2(Math.abs(dr), L / 2) : Math.atan(Math.abs(dr) * Math.PI / L)) * 180 / Math.PI;
+    if (steep > NSO_TN_MAX_TAPER_DEG + 1e-9) {
+      res.reason = 'a ' + NSO_tnFmt(L, 1) + ' mm ' + prof + ' neck moving the ' + (bore ? 'bore' : 'outside') + ' by ' + NSO_tnSigned(dr) + ' mm would stand ' +
+        NSO_tnFmt(steep, 1) + '° off the axis, past the ' + NSO_TN_MAX_TAPER_DEG + '° limit - lengthen it or use less Δr';
+      return res;
+    }
+    if (prof === 'funnel') M = [[R, ha], [R + dr, hm], [R, hb]];
+    else {
+      var w = 2 * Math.PI / L, at = function (s) { return [R + dr * (1 - Math.cos(w * s)) / 2, ha + s]; }, N = 8;
+      for (;;) {
+        var worst = 0;
+        for (var k = 0; k < N; k++) {
+          var d = NSO_teSegDist(at(L * (k + 0.5) / N), at(L * k / N), at(L * (k + 1) / N)).d;
+          if (d > worst) worst = d;
+        }
+        if (worst <= NSO_TN_SAG_MM) break;
+        N *= 2;
+        if (N > NSO_TN_MAX_STEPS) { res.reason = 'internal: the neck needs more than ' + NSO_TN_MAX_STEPS + ' stations to hold its sag'; return res; }
+      }
+      M = [];
+      for (var j = 0; j <= N; j++) M.push(at(L * j / N));
+      M[0] = [R, ha]; M[N] = [R, hb];
+      res.steps = N;
+    }
+  }
+  var K = [[Rk, ha], [Rk, hb]];
+  res.O = bore ? K : M; res.I = bore ? M : K; res.moved = M; res.R = R;
+  res.waistBoreR = bore ? R + dr : Rk; res.waistOuterR = bore ? Rk : R + dr;
+  res.ok = true;
+  return res;
+}
+
+/* The end a one-face step reaches: its flat face (every triangle at that
+   height, square to the axis) bounded by two rings, one of them the moved
+   face's own end ring (ring null: only that the end is such a ring).
+   Returns { ok, reason, tris, keep (the other ring's vertex ids, as the
+   end face walks it) }. */
+function NSO_tnEndFace(rd, hE, ring) {
+  var W = rd.weld, res = { ok: false, reason: '' }, tris = [];
+  for (var t = 0; t < W.n; t++) {
+    if (W.degen[t]) continue;
+    if (rd.TH0[t] >= hE - NSO_TN_RING_TOL_MM && rd.TH1[t] <= hE + NSO_TN_RING_TOL_MM && Math.abs(rd.TNA[t]) > 0.999) tris.push(t);
+  }
+  var inSet = new Set(tris), next = new Map(), bad = 0;
+  tris.forEach(function (q) {
+    for (var k = 0; k < 3; k++) {
+      var u = NSO_teAcross(W, q * 3 + k);
+      if (u >= 0 && inSet.has(u)) continue;
+      if (u < 0) { bad++; continue; }
+      var a = W.vid[q * 3 + k];
+      if (next.has(a)) bad++;
+      next.set(a, W.vid[q * 3 + (k + 1) % 3]);
+    }
+  });
+  var loops = [], seen = new Set();
+  next.forEach(function (b0, a0) {
+    if (seen.has(a0)) return;
+    var lp = [], v = a0, guard = 0;
+    while (!seen.has(v) && next.has(v) && guard++ <= next.size) { seen.add(v); lp.push(v); v = next.get(v); }
+    if (v !== a0) bad++;
+    loops.push(lp);
+  });
+  var words = ' - a step at the end is cut into the open end of a tube: a flat ring square to the axis, bounded by the outside and the bore';
+  if (!tris.length) { res.reason = 'there is no flat face at that end' + words; return res; }
+  if (bad || loops.length !== 2) {
+    res.reason = (loops.length === 1 && !bad ? 'that end is closed - a flat face with no bore through it' : 'the end there is not one flat ring (' + loops.length + ' outlines)') + words;
+    return res;
+  }
+  res.loops = loops;
+  if (!ring) { res.ok = true; return res; }
+  var mine = new Set(ring.v);
+  var hit = loops.map(function (lp) { return lp.length === mine.size && lp.every(function (v) { return mine.has(v); }); });
+  if (hit[0] === hit[1]) { res.reason = 'the end there is not bounded by the wall it would step' + words; return res; }
+  res.ok = true; res.tris = tris; res.keep = hit[0] ? loops[1] : loops[0];
+  return res;
+}
+
 /* The wall through the neck: every station of each face against the other
    face's polyline, run on straight past both ends of the band (the tube's
    wall goes on there), so no station is measured to an end. */
@@ -429,7 +537,9 @@ function NSO_tubeNeckRaw(soup, opts) {
   var tube = rd.tube, W = rd.weld, C = tube.center, a = tube.axis, nozzle = NSO_teNozzle(opts);
   res.nozzleMm = nozzle; res.tube = tube;
 
-  var L = +opts.length, dr = +opts.dr, prof = opts.profile === 'funnel' ? 'funnel' : 'smooth';
+  var L = +opts.length, dr = +opts.dr, prof = opts.profile === 'funnel' ? 'funnel' : 'smooth', walls = NSO_teWalls(opts);
+  if (!walls) { res.reason = 'Walls is Both, Outside only or Bore only'; return res; }
+  res.walls = walls;
   if (opts.length == null || opts.length === '' || !(L > 0) || !isFinite(L)) { res.reason = 'enter the neck\'s length in mm, more than 0'; return res; }
   if (opts.dr == null || opts.dr === '' || !isFinite(dr)) { res.reason = 'enter the neck\'s Δr in mm: below 0 pinches, above 0 bulges'; return res; }
   if (dr === 0) { res.reason = 'a Δr of 0 is no neck - below 0 pinches the tube, above 0 bulges it'; return res; }
@@ -439,13 +549,32 @@ function NSO_tubeNeckRaw(soup, opts) {
     h0 = (p[0] - C[0]) * a[0] + (p[1] - C[1]) * a[1] + (p[2] - C[2]) * a[2];
   } else if (opts.at != null && opts.at !== '' && isFinite(+opts.at)) h0 = -(+opts.at);
   else h0 = (tube.hMin + tube.hMax) / 2;
-  var ha = h0 - L / 2, hb = h0 + L / 2;
-  res.band = { h0: h0, ha: ha, hb: hb, lengthMm: L, atMm: -h0 };
+  var ha = h0 - L / 2, hb = h0 + L / 2, atEnd = null;
+  // ONE FACE AT AN END: a band that reaches an end of the tube (centred
+  // inside it or on the end ring itself) is laid from that end, L in - the
+  // moved face is stepped out to the end ring (a counterbore, a spigot)
+  if (walls !== 'both' && h0 >= tube.hMin - 1e-4 && h0 <= tube.hMax + 1e-4 && (hb >= tube.hMax - 1e-6 || ha <= tube.hMin + 1e-6)) {
+    if (!(L < tube.lengthMm - 1e-6)) {
+      res.reason = 'a ' + NSO_tnFmt(L, 1) + ' mm step from the end is as long as the tube or longer (it is ' + NSO_tnFmt(tube.lengthMm) + ' mm long) - shorten it';
+      return res;
+    }
+    atEnd = hb >= tube.hMax - 1e-6 ? 'top' : 'bottom';
+    if (atEnd === 'top') { hb = tube.hMax; ha = hb - L; } else { ha = tube.hMin; hb = ha + L; }
+    h0 = (ha + hb) / 2;
+  }
+  res.band = { h0: h0, ha: ha, hb: hb, lengthMm: L, atMm: -h0, atEnd: atEnd };
 
   if (ha < tube.hMin - 1e-6 || hb > tube.hMax + 1e-6) {
     res.reason = 'a ' + NSO_tnFmt(L, 1) + ' mm neck centred ' + NSO_tnIn(h0) + ' mm in would run past the end of the tube (it is ' +
       NSO_tnFmt(tube.lengthMm) + ' mm long) - centre it at least ' + NSO_tnFmt(L / 2) + ' mm in from either end, or shorten it';
     return res;
+  }
+  if (atEnd) {
+    var E0 = NSO_tnEndFace(rd, atEnd === 'top' ? tube.hMax : tube.hMin, null);
+    if (!E0.ok) {
+      res.reason = E0.reason + '. To move the wall short of that end, centre the neck more than ' + NSO_tnFmt(L / 2) + ' mm in from it';
+      return res;
+    }
   }
   var band = NSO_tnBand(rd, ha, hb);
   res.wallRead = band;
@@ -455,7 +584,7 @@ function NSO_tubeNeckRaw(soup, opts) {
 
   // the bore limit: a pinch may narrow it to no less than 2 nozzle widths across
   var boreMin = NSO_TN_BORE_NOZZLES * nozzle;
-  if (dr < 0 && 2 * (Ri + dr) < boreMin - 1e-5) {          // 1e-5: a float32 radius's last bit
+  if (walls !== 'outside' && dr < 0 && 2 * (Ri + dr) < boreMin - 1e-5) {          // 1e-5: a float32 radius's last bit
     var most = Ri - boreMin / 2;
     res.reason = 'a pinch of ' + NSO_tnFmt(-dr) + ' mm would close the bore - the Ø' + NSO_tnFmt(2 * Ri) + ' bore would come to ' +
       (Ri + dr > 0 ? 'Ø' + NSO_tnFmt(2 * (Ri + dr)) : 'nothing') + ' at the waist, under the bore limit of Ø' + NSO_tnFmt(boreMin) + ' (' +
@@ -464,24 +593,42 @@ function NSO_tubeNeckRaw(soup, opts) {
     return res;
   }
 
-  var pr = NSO_tnProfile(band, ha, hb, dr, L, prof);
+  // one face: the wall it leaves, against the floor (nso_thickness.js)
+  var one = null;
+  if (walls !== 'both') {
+    one = NSO_teOneFaceWall(walls, t, dr, nozzle, atEnd ? ' at the end' : ' at the waist');
+    res.oneFace = one;
+    if (!one.ok) { res.reason = one.reason; return res; }
+  }
+
+  var pr = one ? NSO_tnProfileOne(band, ha, hb, dr, L, prof, walls, atEnd) : NSO_tnProfile(band, ha, hb, dr, L, prof);
   res.profile = pr;
   if (!pr.ok) { res.reason = pr.reason; return res; }
   var wall = NSO_tnWallCheck(pr.O, pr.I, t);
-  res.wall = { minMm: wall.lo, maxMm: wall.hi, stations: wall.n, wantMm: t };
-  if (!(wall.lo >= t - NSO_TN_WALL_TOL_MM && wall.hi <= t + NSO_TN_WALL_TOL_MM)) {
-    res.reason = 'internal: the wall through the neck reads ' + NSO_tnFmt(wall.lo, 3) + '–' + NSO_tnFmt(wall.hi, 3) + ' mm, not ' + NSO_tnFmt(t, 3) + ' ± ' + NSO_TN_WALL_TOL_MM;
+  var wLo = one ? Math.min(t, one.wallMm) : t, wHi = one ? Math.max(t, one.wallMm) : t;
+  res.wall = { minMm: wall.lo, maxMm: wall.hi, stations: wall.n, wantMm: one ? one.wallMm : t };
+  if (one) { res.wall.ringMm = t; res.wall.floorMm = one.floorMm; }
+  if (!(wall.lo >= wLo - NSO_TN_WALL_TOL_MM && wall.hi <= wHi + NSO_TN_WALL_TOL_MM)) {
+    res.reason = 'internal: the wall through the neck reads ' + NSO_tnFmt(wall.lo, 3) + '–' + NSO_tnFmt(wall.hi, 3) + ' mm, not ' +
+      (one ? 'between ' + NSO_tnFmt(wLo, 3) + ' and ' + NSO_tnFmt(wHi, 3) : NSO_tnFmt(t, 3) + ' ± ' + NSO_TN_WALL_TOL_MM);
     return res;
   }
 
-  var RO = NSO_tnRings(rd, band.outerTris);
-  if (!RO.ok) { res.reason = RO.reason; return res; }
-  var RI = NSO_tnRings(rd, band.innerTris);
-  if (!RI.ok) { res.reason = RI.reason; return res; }
+  var RO = walls === 'bore' ? null : NSO_tnRings(rd, band.outerTris);
+  if (RO && !RO.ok) { res.reason = RO.reason; return res; }
+  var RI = walls === 'outside' ? null : NSO_tnRings(rd, band.innerTris);
+  if (RI && !RI.ok) { res.reason = RI.reason; return res; }
+  var faces = [];
+  if (RO) faces.push({ tris: band.outerTris, rings: RO, R: Ro, M: pr.O });
+  if (RI) faces.push({ tris: band.innerTris, rings: RI, R: Ri, M: pr.I });
+  if (atEnd) {
+    var hE = atEnd === 'top' ? tube.hMax : tube.hMin, F1 = faces[0];
+    var EF = NSO_tnEndFace(rd, hE, atEnd === 'top' ? F1.rings.upper : F1.rings.lower);
+    if (!EF.ok) { res.reason = EF.reason; return res; }
+    F1.end = { at: atEnd, dr: dr, tris: EF.tris, keep: EF.keep, normal: atEnd === 'top' ? 1 : -1 };
+  }
 
-  var built = NSO_tnBuild(f32in, rd, [
-    { tris: band.outerTris, rings: RO, R: Ro, M: pr.O },
-    { tris: band.innerTris, rings: RI, R: Ri, M: pr.I }], ha, hb);
+  var built = NSO_tnBuild(f32in, rd, faces, ha, hb);
   if (!built.ok) { res.reason = built.reason; return res; }
   var out = built.tris;
   res.counts = { trisIn: W.n, trisOut: out.length / 9, removed: built.removed, added: built.added };
@@ -511,7 +658,7 @@ function NSO_tubeNeckRaw(soup, opts) {
     return s;
   }
   function pf(nSeg) { return nSeg * Math.sin(2 * Math.PI / nSeg) / (2 * Math.PI); }
-  var pappus = Math.PI * (pf(RO.lower.v.length) * (r2dh(pr.O) - Ro * Ro * L) - pf(RI.lower.v.length) * (r2dh(pr.I) - Ri * Ri * L));
+  var pappus = Math.PI * ((RO ? pf(RO.lower.v.length) * (r2dh(pr.O) - Ro * Ro * L) : 0) - (RI ? pf(RI.lower.v.length) * (r2dh(pr.I) - Ri * Ri * L) : 0));
   var vol0 = NSO_teVolume(f32in, C), vol1 = NSO_teVolume(out, C);
   res.volume = { before: vol0, after: vol1, change: vol1 - vol0, pappus: pappus };
   if (!(Math.abs((vol1 - vol0) - pappus) <= NSO_TN_VOLUME_TOL * Math.abs(pappus) + 1e-3)) {
@@ -561,9 +708,11 @@ function NSO_tnBuild(soup, rd, faces, ha, hb) {
     if (ha - lower.h > NSO_TN_STATION_MIN_MM) st.push([R, ha]);
     for (var k = 1; k + 1 < M.length; k++) st.push(M[k]);
     if (upper.h - hb > NSO_TN_STATION_MIN_MM) st.push([R, hb]);
-    var n = lower.v.length, rings = [];
+    var n = lower.v.length, rings = [], E = F.end || null;
     var R0 = new Float32Array(n * 3);
     for (var j = 0; j < n; j++) { var v = lower.v[j] * 3; R0[j * 3] = P[v]; R0[j * 3 + 1] = P[v + 1]; R0[j * 3 + 2] = P[v + 2]; }
+    // a step at the bottom end: the end ring itself moves out along its radial lines
+    if (E && E.at === 'bottom') R0 = NSO_tnMoveRing(rd, lower.v, E.dr);
     rings.push(R0);
     for (var s = 0; s < st.length; s++) {
       var Rk = new Float32Array(n * 3), dr = st[s][0] - R, dh = st[s][1] - lower.h;
@@ -580,9 +729,23 @@ function NSO_tnBuild(soup, rd, faces, ha, hb) {
     }
     var U = new Float32Array(up.length * 3);
     for (var u = 0; u < up.length; u++) { var vu = up[u] * 3; U[u * 3] = P[vu]; U[u * 3 + 1] = P[vu + 1]; U[u * 3 + 2] = P[vu + 2]; }
+    // ...and at the top end, the upper (end) ring does
+    if (E && E.at === 'top') U = NSO_tnMoveRing(rd, up, E.dr);
     F.tris.forEach(function (t) { if (!skip[t]) { skip[t] = 1; removed++; } });
     planned += 2 * n * (rings.length - 1) + n + up.length;
-    plans.push({ rings: rings, n: n, U: U, m: up.length, sgn: sgn });
+    var endPlan = null;
+    if (E) {
+      // the end face comes out and is laid again, between the moved ring
+      // and the end's other ring (its vertices bit for bit)
+      E.tris.forEach(function (t) { if (!skip[t]) { skip[t] = 1; removed++; } });
+      var keep = E.keep.slice(), K = new Float32Array(keep.length * 3);
+      if (!(turn(keep) * sgn > 0)) keep.reverse();
+      for (var kk = 0; kk < keep.length; kk++) { var vk = keep[kk] * 3; K[kk * 3] = P[vk]; K[kk * 3 + 1] = P[vk + 1]; K[kk * 3 + 2] = P[vk + 2]; }
+      var A0 = E.at === 'top' ? U : R0, nA = E.at === 'top' ? up.length : n;
+      endPlan = { A: A0, n: nA, K: K, m: keep.length, normal: E.normal };
+      planned += nA + keep.length;
+    }
+    plans.push({ rings: rings, n: n, U: U, m: up.length, sgn: sgn, end: endPlan });
   }
   var out = new Float32Array((W.n - removed + planned) * 9), w = 0;
   for (var t = 0; t < W.n; t++) {
@@ -607,7 +770,25 @@ function NSO_tnBuild(soup, rd, faces, ha, hb) {
     }
     // the zip: the last station (in the lower ring's order, its turning way)
     // to the upper ring reversed to run the same way, merged by angle
-    var A = rings[rings.length - 1], B = pl.U, m = pl.m, sg = pl.sgn;
+    zip(rings[rings.length - 1], n, pl.U, pl.m, pl.sgn);
+    if (pl.end) {
+      // the end face: the moved ring and the kept one, both run the same way
+      // round, zipped the same way; flipped as a whole if it faces into the
+      // piece (it faces out along the axis at the top, in at the bottom)
+      var w0 = w;
+      zip(pl.end.A, pl.end.n, pl.end.K, pl.end.m, pl.sgn);
+      var nx = 0, ny = 0, nz = 0;
+      for (var o = w0; o < w; o += 9) {
+        var ux = out[o + 3] - out[o], uy = out[o + 4] - out[o + 1], uz = out[o + 5] - out[o + 2];
+        var vx = out[o + 6] - out[o], vy = out[o + 7] - out[o + 1], vz = out[o + 8] - out[o + 2];
+        nx += uy * vz - uz * vy; ny += uz * vx - ux * vz; nz += ux * vy - uy * vx;
+      }
+      if ((nx * a[0] + ny * a[1] + nz * a[2]) * pl.end.normal < 0) {
+        for (var o2 = w0; o2 < w; o2 += 9) for (var c3 = 3; c3 < 6; c3++) { var tmp = out[o2 + c3]; out[o2 + c3] = out[o2 + c3 + 3]; out[o2 + c3 + 3] = tmp; }
+      }
+    }
+  });
+  function zip(A, n, B, m, sg) {
     function ang(Q, i) { return sg * theta(Q[i * 3], Q[i * 3 + 1], Q[i * 3 + 2]); }
     var base = ang(A, 0);
     function rel(x) { var d = x - base; d -= TWO * Math.floor(d / TWO); return d; }
@@ -633,14 +814,37 @@ function NSO_tnBuild(soup, rd, faces, ha, hb) {
       if (jo < n && (ki >= m || ao[jo + 1] <= ai[ki + 1])) { put(A, pA, A, pA1, B, qB); jo++; }
       else { put(A, pA, B, qB1, B, qB); ki++; }
     }
-  });
+  }
   if (w !== out.length) return { ok: false, reason: 'internal: built ' + w / 9 + ' triangles, planned ' + out.length / 9 };
   return { ok: true, tris: out, removed: removed, added: planned };
+}
+
+/* A ring's vertices moved along their own radial lines by d, in float32:
+   the end ring of a one-face step, its height untouched. */
+function NSO_tnMoveRing(rd, ids, d) {
+  var P = rd.weld.P, C = rd.tube.center, a = rd.tube.axis, f32 = NSO_teF32, Q = new Float32Array(ids.length * 3);
+  for (var j = 0; j < ids.length; j++) {
+    var v = ids[j] * 3, X = P[v], Y = P[v + 1], Z = P[v + 2];
+    var wx = X - C[0], wy = Y - C[1], wz = Z - C[2], h = wx * a[0] + wy * a[1] + wz * a[2];
+    var ex = wx - h * a[0], ey = wy - h * a[1], ez = wz - h * a[2], el = Math.hypot(ex, ey, ez);
+    Q[j * 3] = f32(X + d * ex / el); Q[j * 3 + 1] = f32(Y + d * ey / el); Q[j * 3 + 2] = f32(Z + d * ez / el);
+  }
+  return Q;
 }
 
 /* One line: what was done, the numbers that matter. */
 function NSO_tubeNeckDescribe(r) {
   var b = r.band, pinch = r.dr < 0;
+  if (r.walls && r.walls !== 'both') {
+    // "Bore only: Ø30.47 → Ø33.47, outside kept Ø40.62, wall 5.08 → 3.58 · ..."
+    var bo = r.walls === 'bore', R0 = bo ? b.Ri : b.Ro, Rk = bo ? b.Ro : b.Ri;
+    var name = bo ? (r.dr > 0 ? ' - a counterbore' : '') : (r.dr < 0 ? ' - a spigot' : '');
+    return NSO_TE_WALLS_WORDS[r.walls] + ': Ø' + NSO_tnFmt(2 * R0) + ' → Ø' + NSO_tnFmt(2 * (R0 + r.dr)) + ', ' + (bo ? 'outside' : 'bore') + ' kept Ø' +
+      NSO_tnFmt(2 * Rk) + ', wall ' + NSO_tnFmt(r.wallMm) + ' → ' + NSO_tnFmt(r.oneFace.wallMm) + ' · ' +
+      (b.atEnd ? 'stepped ' + NSO_tnFmt(r.lengthMm, 1) + ' mm in from the ' + (b.atEnd === 'top' ? 'end' : 'far end') + ', square shoulder' + name
+               : r.profileName + ' over ' + NSO_tnFmt(r.lengthMm, 1) + ' mm, centred ' + NSO_tnIn(b.h0) + ' mm in') +
+      ' (wall ' + NSO_tnFmt(r.wall.minMm, 3) + '–' + NSO_tnFmt(r.wall.maxMm, 3) + ' mm through it, floor ' + NSO_tnFmt(r.oneFace.floorMm) + ')';
+  }
   return (pinch ? 'Pinch ' : 'Bulge ') + NSO_tnSigned(r.dr) + ' mm over ' + NSO_tnFmt(r.lengthMm, 1) + ' mm, ' + r.profileName +
     ', centred ' + NSO_tnIn(b.h0) + ' mm in: bore Ø' + NSO_tnFmt(2 * b.Ri) + ' → Ø' + NSO_tnFmt(r.waistBoreDiaMm) + ', outside Ø' +
     NSO_tnFmt(2 * b.Ro) + ' → Ø' + NSO_tnFmt(r.waistOuterDiaMm) + ' at the waist · wall ' + NSO_tnFmt(r.wallMm) + ' held (' +

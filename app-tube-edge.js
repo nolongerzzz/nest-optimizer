@@ -95,13 +95,16 @@ function NSO_teOpts() {
   function num(id) { var el = NSO_teEl(id); return el && el.value !== '' ? +el.value : null; }
   function val(id, d) { var el = NSO_teEl(id); return el ? el.value : d; }
   var B = NSO_teUI(), verb = val('sel-te-verb', 'flare');
+  // Walls (Both / Outside only / Bore only), Neck's and Flare's: the card's
+  // sel-te-walls when it has one, Both when it does not
+  var walls = val('sel-te-walls', 'both');
   if (verb === 'neck') {
     return { verb: 'neck', point: B.point, length: num('inp-te-neck-length'), dr: num('inp-te-neck-dr'),
-             profile: val('sel-te-neck-profile', 'smooth') };
+             profile: val('sel-te-neck-profile', 'smooth'), walls: walls };
   }
   var o = { verb: verb, direction: val('sel-te-dir', 'out'), point: B.point };
   if (verb === 'flare') {
-    o.length = num('inp-te-length'); o.profile = val('sel-te-profile', 'straight');
+    o.length = num('inp-te-length'); o.profile = val('sel-te-profile', 'straight'); o.walls = walls;
     if (B.lead === 'dr') o.dr = num('inp-te-dr'); else o.angle = num('inp-te-angle');
   } else {
     o.radius = num('inp-te-radius'); o.angle = num('inp-te-roll-angle');

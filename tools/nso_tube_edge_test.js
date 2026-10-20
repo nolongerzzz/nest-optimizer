@@ -450,11 +450,10 @@ console.log('\n=== 6. refusals, the piece unchanged ===');
   check('roll 270° r 1 on a 0.8 mm wall: refused by the thin-wall rule, stated', !r.ok && r.tris === thin &&
         /too thin to roll/.test(r.reason) && /2 nozzle widths \(0\.80 mm at a 0\.4 mm nozzle\)/.test(r.reason) &&
         /The rule: wall × \(ring radius ÷ largest radius\)/.test(r.reason));
-  const ri = NSO_tubeEdgeRaw(tube, { verb: 'flare', length: 8, angle: -20 });
+  const ri = NSO_tubeEdgeRaw(tube, { verb: 'flare', length: 8, angle: -60 });
   console.log('   ' + ri.reason);
-  check('an inward flare (negative angle) is refused: not supported yet', !ri.ok && /inward flare is not supported yet/.test(ri.reason) && ri.tris === tube);
-  const ri2 = NSO_tubeEdgeRaw(tube, { verb: 'flare', length: 8, angle: 20, direction: 'in' });
-  check('...and by direction In', !ri2.ok && /inward flare is not supported yet/.test(ri2.reason));
+  check('an inward flare that would close the bore is refused, naming the bore limit (Ø0.80, 2 nozzle widths)', !ri.ok && ri.tris === tube &&
+        /that flare would close the bore - the Ø16\.80 bore would come to nothing at the lip, under the bore limit of Ø0\.80 \(2 nozzle widths at a 0\.4 mm nozzle\)/.test(ri.reason), ri.reason);
   const rr = NSO_tubeEdgeRaw(tube, { verb: 'roll', radius: 2, angle: 180, direction: 'in' });
   check('an inward roll is refused: not supported yet', !rr.ok && /inward roll is not supported yet/.test(rr.reason), rr.reason);
   const bx = box(0, 0, 0, 30, 20, 10);
@@ -513,7 +512,89 @@ console.log('\n=== 7. a thrown vessel (the Wheel), an Extend-made pipe, an impor
   }
 }
 
-console.log('\n=== 8. time ===');
+console.log('\n=== 8. Walls and inward (tube-walls) ===');
+{
+  const crypto = require('crypto');
+  const sha = r => r.ok ? crypto.createHash('sha1').update(Buffer.from(r.tris.buffer, r.tris.byteOffset, r.tris.byteLength)).digest('hex') : 'refused';
+  // Both is today's behaviour: these are the output buffers' SHA-1s from
+  // claude-wip b0697c1, before Walls existed
+  const PINNED = [
+    ['flare 8 mm 20° straight', { verb: 'flare', length: 8, angle: 20 }, '459a83756387c5538a39bb81a205dad6d8cf807f'],
+    ['flare 8 mm Δr 3 trumpet', { verb: 'flare', length: 8, dr: 3, profile: 'trumpet' }, '66185547b118ce2ebcaff4146c4da4b63ccb7af8'],
+    ['roll 180° r 2', { verb: 'roll', radius: 2, angle: 180 }, '546d8a9c38f72d6078f3ac026589a09756c43cd1']];
+  for (const [name, o, want] of PINNED) {
+    const a = NSO_tubeEdgeRaw(tube, o), b = NSO_tubeEdgeRaw(tube, Object.assign({ walls: 'both' }, o));
+    check('Both is byte-identical to today: ' + name + ' (pinned SHA-1, and walls: \'both\' the same as no Walls)', sha(a) === want && sha(b) === want, sha(a));
+  }
+
+  // inward, both faces: Δr −4 over 10, Straight and Trumpet, on the Stock tube
+  for (const prof of ['straight', 'trumpet']) {
+    const tag = 'inward flare −4 over 10, ' + prof;
+    const t0 = Date.now(), r = NSO_tubeEdgeRaw(tube, { verb: 'flare', length: 10, dr: -4, profile: prof }), ms = Date.now() - t0;
+    console.log('   ' + r.reason);
+    if (!common(tag, tube, r, 1.6)) continue;
+    const G = graph(r.tris);
+    let lo = Infinity, hi = -Infinity, zTop = -Infinity;
+    G.P.forEach(p => { if (p && Math.abs(p[2] - 50) < 1e-4) { const q = Math.hypot(p[0], p[1]); lo = Math.min(lo, q); hi = Math.max(hi, q); } if (p) zTop = Math.max(zTop, p[2]); });
+    check(tag + ': the lip 10 mm out, its bore radius 4 smaller (8.40 → 4.40 ± 0.05), its outside inside the tube\'s', Math.abs(zTop - 50) < 1e-4 &&
+          Math.abs(lo - 4.4) <= 0.05 && hi < 10 - 4 + 1.6, 'lip bore r ' + f3(lo) + ', outside r ' + f3(hi));
+    const Oc = meridianChain(G, [10, 0], 0, [0, 1]), Ic = meridianChain(G, [8.4, 0], 0, [0, 1]);
+    const W = chainWall(Oc, Ic);
+    check(tag + ': wall 1.6 ± 0.02 held through the turn (meridian walked out of the mesh)', W.lo >= 1.58 && W.hi <= 1.62 && W.n >= 4,
+      f3(W.lo) + '–' + f3(W.hi) + ' over ' + W.n + ' points');
+    const RW = rayWall(G, 40, 0, 0, 30, 50 - 1.6);
+    check(tag + ': ...and in 3D', RW.lo >= 1.58 && RW.hi <= 1.62 && RW.n >= RW.tried * 0.5, f3(RW.lo) + '–' + f3(RW.hi) + ' from ' + RW.n + ' of ' + RW.tried);
+    check(tag + ': the lip square to the wall at u = L (every lip vertex at z 50)', [...G.P.values()].filter(p => p && p[2] > 50 + 1e-4).length === 0);
+    row('Stock tube Ø20/1.6, inward flare −4 over 10, ' + prof, tube, r, ms, 'lip bore r ' + f3(lo) + ', wall ' + f3(W.lo) + '–' + f3(W.hi));
+  }
+  const wayIn = NSO_tubeEdgeRaw(tube, { verb: 'flare', length: 8, angle: 20, direction: 'in' }), neg = NSO_tubeEdgeRaw(tube, { verb: 'flare', length: 8, angle: -20 });
+  check('Way In is the same as a negative angle, byte for byte', wayIn.ok && neg.ok && sha(wayIn) === sha(neg), wayIn.reason);
+
+  // one face: a Ø40.62 / Ø30.47 pipe (wall 5.08)
+  const pipe = stockTube(20.31, 5.076, 40);
+  const faceSet = (s, sign) => {
+    const S = new Set();
+    for (let t = 0; t < s.length / 9; t++) {
+      const fn = faceNormal(s, t), o = t * 9, cx = (s[o] + s[o + 3] + s[o + 6]) / 3, cy = (s[o + 1] + s[o + 4] + s[o + 7]) / 3, L = Math.hypot(cx, cy);
+      if ((fn.n[0] * cx + fn.n[1] * cy) / L * sign > 0.5) S.add(Array.from(s.subarray(o, o + 9)).join(','));
+    }
+    return S;
+  };
+  const sameFace = (a, b, sign) => { const A = faceSet(a, sign); let n = 0; for (const k of A) if (faceSet(b, sign).has(k)) n++; return { kept: n, of: A.size }; };
+  const radiiAtZ = (s, z) => { let lo = Infinity, hi = -Infinity; for (let i = 0; i < s.length; i += 3) if (Math.abs(s[i + 2] - z) < 1e-4) { const q = Math.hypot(s[i], s[i + 1]); lo = Math.min(lo, q); hi = Math.max(hi, q); } return { lo, hi }; };
+  for (const [walls, dr, prof] of [['bore', 3, 'straight'], ['bore', 3, 'trumpet'], ['outside', -3, 'straight'], ['bore', -3, 'trumpet'], ['outside', 3, 'trumpet']]) {
+    const tag = (walls === 'bore' ? 'Bore only ' : 'Outside only ') + (dr > 0 ? '+' : '−') + Math.abs(dr) + ' flare over 10, ' + prof;
+    const r = NSO_tubeEdgeRaw(pipe, { verb: 'flare', length: 10, dr, profile: prof, walls });
+    console.log('   ' + r.reason);
+    if (!common(tag, pipe, r)) continue;
+    const bore = walls === 'bore', thin = bore ? dr > 0 : dr < 0, tl = bore ? 5.076 - dr : 5.076 + dr;
+    const kept = sameFace(pipe, r.tris, bore ? 1 : -1);
+    check(tag + ': the ' + (bore ? 'outside' : 'bore') + ' untouched - every one of its triangles in the output, bit for bit', kept.kept === kept.of, kept.kept + ' of ' + kept.of);
+    const lip = radiiAtZ(r.tris, 50);
+    const mv = bore ? lip.lo : lip.hi, kp = bore ? lip.hi : lip.lo;
+    check(tag + ': at the lip the ' + walls + ' stands ' + dr + ' off its line (r ' + f3((bore ? 15.234 : 20.31) + dr) + ') and the other face runs on at its own radius',
+      Math.abs(mv - ((bore ? 15.234 : 20.31) + dr)) <= 0.05 && Math.abs(kp - (bore ? 20.31 : 15.234)) <= 1e-4, 'moved r ' + f3(mv) + ', kept r ' + f3(kp));
+    check(tag + ': the wall runs from 5.08 at the ring to ' + f3(tl) + ' at the lip, never under the lesser', Math.abs(r.wall.lipMm - tl) < 1e-4 &&
+          r.wall.minMm >= Math.min(5.076, tl) - 0.02 && r.wall.maxMm <= Math.max(5.076, tl) + 0.02 && Math.abs((mv - kp) * (bore ? -1 : 1) - tl) <= 0.05,
+      f3(r.wall.minMm) + '–' + f3(r.wall.maxMm) + ' (thinning: ' + thin + ')');
+    const want = (bore ? 'Bore only: Ø30.47 → Ø' : 'Outside only: Ø40.62 → Ø') + (2 * ((bore ? 15.234 : 20.31) + dr)).toFixed(2) + ' at the lip, ' +
+      (bore ? 'outside kept Ø40.62' : 'bore kept Ø30.47') + ', wall 5.08 → ' + tl.toFixed(2);
+    check(tag + ': the readout names the walls: "' + want + '"', r.reason.indexOf(want) === 0, r.reason);
+    row('Ø40.62/Ø30.47 pipe, ' + tag, pipe, r, 0, 'lip moved r ' + f3(mv) + ', wall ' + f3(r.wall.minMm) + '–' + f3(r.wall.maxMm));
+  }
+  const rfl = NSO_tubeEdgeRaw(pipe, { verb: 'flare', length: 10, dr: 4.8, walls: 'bore' });
+  console.log('   ' + rfl.reason);
+  check('Bore only +4.8 refused under the floor, with the numbers: "bore +4.80 mm would leave a 0.28 mm wall at the lip; the floor is 0.42 mm"', !rfl.ok && rfl.tris === pipe &&
+        /^bore \+4\.80 mm would leave a 0\.28 mm wall at the lip; the floor is 0\.42 mm \(nso_thickness\.js: one extrusion line at a 0\.4 mm nozzle\)\. This wall lets its bore move out by 4\.65 mm at most$/.test(rfl.reason), rfl.reason);
+  const rcx = NSO_tubeEdgeRaw(pipe, { verb: 'flare', length: 10, dr: -6, walls: 'outside' });
+  check('Outside only −6 refused: the faces would cross', !rcx.ok && rcx.tris === pipe && /^outside −6\.00 mm would carry the outside through the other face of a 5\.08 mm wall - the faces would cross/.test(rcx.reason), rcx.reason);
+  const rw = NSO_tubeEdgeRaw(pipe, { verb: 'flare', length: 10, dr: 3, walls: 'middle' });
+  check('an unknown Walls is refused in words', !rw.ok && /Walls is Both, Outside only or Bore only/.test(rw.reason), rw.reason);
+  const rr = NSO_tubeEdgeRaw(tube, { verb: 'roll', radius: 2, angle: 180, direction: 'in' });
+  check('an inward roll is still refused: not supported yet', !rr.ok && /inward roll is not supported yet/.test(rr.reason), rr.reason);
+}
+
+console.log('\n=== 9. time ===');
 {
   const big = NSO_Stock.revolve(NSO_Stock.profileTube(30, 28, 120), 2000);
   const t0 = Date.now(), r = NSO_tubeEdgeRaw(big, { verb: 'roll', radius: 3, angle: 180 }), ms = Date.now() - t0;
