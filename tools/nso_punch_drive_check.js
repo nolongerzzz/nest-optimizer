@@ -19,7 +19,7 @@
      8. an arrow nudges the anchor 1 mm
      9. two holes 0.5 mm apart: the refusal in the readout with its numbers,
         PUNCH off, and PUNCH forced anyway cuts nothing
-    10. Escape disarms; no page errors */
+    10. Escape disarms; Carve armed over Punch puts Punch away; no page errors */
 
 const fs = require('fs');
 const os = require('os');
@@ -254,6 +254,13 @@ withApp(async (page, logs) => {
   const pressed = await page.evaluate(() => document.getElementById('btn-punch').getAttribute('aria-pressed'));
   check('Escape puts Punch away: no card, no ghost', !st.open && st.ghosts === 0 && pressed === 'false' &&
     await page.evaluate(() => document.getElementById('punch-card').hidden));
+  await page.click('#btn-punch');
+  await page.waitForFunction(() => nsoPunchState().open, null, { timeout: 5000 });
+  await page.click('#btn-carve');
+  await frames(page, 3);
+  const carveOver = await page.evaluate(() => ({ punch: nsoPunchState().open, carve: !!state.carveArmed }));
+  check('Carve armed over Punch puts Punch away (one click-owning tool at a time)', !carveOver.punch && carveOver.carve, JSON.stringify(carveOver));
+  await page.click('#btn-carve');
   const errs = logs.filter(l => /\[pageerror\]/.test(l));
   check('no uncaught page errors', errs.length === 0, errs.slice(0, 3).join(' | '));
 }).then(() => {

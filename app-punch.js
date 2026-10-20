@@ -656,6 +656,8 @@ if (typeof nsoHelpers !== 'undefined') nsoHelpers.owner('punch', {
 function NSO_punchTick() {
   var B = NSO_punchUI();
   if (!B.open) return;
+  // one click-owning tool at a time: Carve or Paint armed over Punch puts Punch away
+  if (!B.busy && (state.carveArmed || state.maskPaint)) { NSO_punchClose(); return; }
   var m = NSO_punchModel();
   if ((m ? m.id : null) !== B.modelId) { B.modelId = m ? m.id : null; B.hit = null; NSO_punchPreview(); }
   else if (m && B.hit && m.rawTris !== B.soup && !B.busy) NSO_punchPreview();
