@@ -717,6 +717,7 @@
     'Sparse infill':           0x4ecf8f,
     'Support':                 0xff6b5b,
     'Support interface':       0xff9d4d,
+    'Support transition':      0xffc98a,
     'Top surface':             0xc9c9c9,
     'Custom':                  0x999999,
     'Travel':                  0xffffff

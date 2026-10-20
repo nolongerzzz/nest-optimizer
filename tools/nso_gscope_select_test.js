@@ -41,6 +41,11 @@
      9. A big piece (400,000 triangles) whose search tree (nso_bvh.js) is still
         building: Piece and Region hover report anyway - its box answers
         until the tree is ready.
+    10. An NSO slice of a piece and the supports the card built for it (the
+        clip coupon, slicer:supports): the Features list carries Support,
+        Support interface and Support transition, no wall or infill row comes
+        from a support, the readout credits the host, and Feature mode and
+        the checkboxes treat the new rows as any other.
 
    Every hover is waited for (waitHover: up to 2 s, then a failure that says
    how long it waited), never read once after a fixed pause.
@@ -62,6 +67,7 @@ const check = (name, cond, detail) => {
 const SHOTS = path.join(ROOT, 'tools', 'gscope-select-out');
 const SLICE = path.join(ROOT, 'fixtures', '3mf', 'toolpath-ground-truth.gcode.3mf');
 const BOX = path.join(ROOT, 'fixtures', 'box-20mm.stl');
+const CLIP = path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2.stl');   // slicer:supports' coupon
 const J = JSON.stringify;
 const frames = page => page.evaluate(() => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r))));
 
@@ -598,6 +604,73 @@ withApp(async (page, logs) => {
         hoverSays(hv) + '; pointer off the canvas on #' + (off ? off.id : '(no button found)') + '; tree before / after: ' + tree0 + ' / ' + tree1);
       await page.mouse.move(at[0] - 200, at[1] - 200);
     }
+  }
+
+  /* ------------------------------------------------------------------ 10 */
+  console.log('\n=== 10. an NSO slice of a piece and its supports: the support rows (slicer:supports) ===');
+  {
+    await activate(page, 'lens');
+    const host = await loadSTL(page, CLIP);
+    await page.waitForFunction(id => state.placed.some(p => p && p.sourceId === id), host, { timeout: 30000 });
+    const picked = await page.evaluate(id => window.NSO_SUPPORTS_CARD.pick(id), host);
+    await page.evaluate(() => window.NSO_SUPPORTS_CARD.generate());
+    await page.waitForFunction(() => !window.NSO_SUPPORTS_CARD.busy(), null, { timeout: 120000 });
+    const sups = await page.evaluate(id => state.models.filter(m => m.nsoSupport && m.nsoSupport.hostSourceId === id).map(m => m.name), host);
+    check('the Supports card builds the clip coupon its two supports, at its defaults', picked.ok && sups.length === 2, J(sups));
+    await page.click('#ms-btn-plate');
+    await page.waitForFunction(() => NSO_MICROSCOPE.lensDoc() && NSO_MICROSCOPE.lensDoc().source === 'plate' && NSO_MICROSCOPE.lensDoc().kind === 'mesh', null, { timeout: 30000 });
+    /* the nozzle and layer the card builds for (the sheet's 0.42 mm lines, 0.2 mm layers) */
+    await page.selectOption('#ms-slice-nozzle', '0.4');
+    await page.fill('#ms-slice-layer', '0.2');
+    await page.click('#ms-cam-slice');
+    await page.waitForFunction(() => { const d = NSO_MICROSCOPE.getDoc(); return d && d.kind === 'toolpath' && d.nsoSlice && !NSO_GSCOPE_SLICE.busy(); }, null, { timeout: 120000 });
+    await cards.closeCards(page);
+    await frames(page);
+    const rows = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-legend .ms-legend-item')).map(r => ({
+      name: r.dataset.group, label: r.querySelector('.ms-legend-label').textContent, check: !!r.querySelector('input.ms-legend-display') })));
+    const names = rows.map(r => r.name), at = names.indexOf('Support');
+    check('the Features list shows the three support rows, Bambu order, each with its count and checkbox',
+      at >= 0 && J(names.slice(at, at + 3)) === J(['Support', 'Support interface', 'Support transition']) &&
+      rows.slice(at, at + 3).every(r => r.check && /\(\d+\)$/.test(r.label)), J(rows.map(r => r.label)));
+    check('...and no wall or infill row comes from a support', await page.evaluate(() => {
+      const d = NSO_MICROSCOPE.getDoc(), sup = new Set(d.nsoSlice.result.objects.filter(o => o.role === 'support').map(o => o.id));
+      return d.segments.filter(g => sup.has(g.mv.objectId)).every(g => /^Support/.test(g.feature));
+    }));
+    const read = await page.evaluate(() => document.getElementById('ms-slice-read').textContent);
+    check('the readout credits the host - the covering support named - and each support says what it holds',
+      sups.every(n => read.includes('covered by ' + n.replace(/^.* - /, '').replace(/\s*\([^)]*\)$/, '') + ',')) &&
+      (read.match(/: support for /g) || []).length === 2, read);
+    /* Feature mode on the new rows, checkboxes only: just Support interface shown, hover takes all of it */
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.clearBoxes(); M.setSelectionMoves([]); if (M.isIsolated()) M.back(); });
+    const boxOf = n => '#ms-legend .ms-legend-item[data-group="' + n + '"] input.ms-legend-display';
+    const lblOf = n => '#ms-legend .ms-legend-item[data-group="' + n + '"] .ms-legend-label';
+    for (const n of names) if (n !== 'Support interface' && await page.evaluate(sel => document.querySelector(sel).checked, boxOf(n))) await page.click(boxOf(n));
+    await frames(page);
+    const drawn = () => page.evaluate(() => { const v = NSO_MICROSCOPE.getView();
+      return Object.keys(v.overviewMeshes).filter(k => { const m = v.overviewMeshes[k]; return m.visible && m.geometry.attributes.position.count > 0; }).sort(); });
+    check('only Support interface checked: only its lines are drawn', J(await drawn()) === J(['Support interface']), J(await drawn()));
+    await setMode(page, 'feature');
+    await page.evaluate(() => NSO_MICROSCOPE.normalView());
+    await frames(page);
+    const layer = await page.evaluate(() => NSO_MICROSCOPE.getDoc().segments.find(g => g.feature === 'Support interface').layer);
+    const want = await page.evaluate(l => window.__t.countWhere('Support interface', l), layer);
+    const px = await page.evaluate(l => window.__t.pxSeg('Support interface', l), layer);
+    await page.mouse.move(px[0] - 40, px[1] - 40);
+    await page.mouse.move(px[0], px[1], { steps: 3 });
+    const hv = await waitHover(page);
+    check('Feature mode sees the row: hover takes the support\'s whole Support interface (' + want.feature + ' moves)',
+      !!hv.info && hv.info.source === 'feature' && hv.info.count === want.feature, hoverSays(hv));
+    await page.mouse.click(px[0], px[1]);
+    await page.waitForTimeout(150);
+    const c = await page.evaluate(() => ({ iso: NSO_MICROSCOPE.isIsolated(), feats: [...new Set(NSO_MICROSCOPE.selection().map(s => s.feature))] }));
+    check('...a click isolates exactly it', c.iso && J(c.feats) === J(['Support interface']), J(c));
+    await page.keyboard.press('Escape'); await frames(page);
+    await page.click(lblOf('Support transition'));
+    await frames(page);
+    check('the row text toggles its box: Support transition checked, drawn beside the interface',
+      await page.evaluate(sel => document.querySelector(sel).checked, boxOf('Support transition')) && J(await drawn()) === J(['Support interface', 'Support transition']), J(await drawn()));
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.setSelectionMoves([]); M.checkAll(); M.setFeatureDisplay('Travel', false); M.setMode('piece'); });
+    await shot('10-support-rows');
   }
 
   const errs = logs.filter(l => /^\[pageerror\]/.test(l) || /^\[error\]/.test(l)).filter(l => !/Failed to load resource/.test(l));

@@ -45,6 +45,16 @@
  * own Export to plate does. Paint has nothing to protect from either
  * (docs/HANDOFF.md, "Scoping"; the same category as Skin patch's).
  *
+ * SUPPORTS ARE SLICED AS SUPPORT. A plate piece labelled m.nsoSupport (the
+ * Supports card's, G-scope's own) goes to the slicer with role 'support' and
+ * its host's id (hostSourceId); every piece goes with its own id (sourceId).
+ * The slicer types the support's lines Support / Support transition / Support
+ * interface from its geometry and credits the host with what the support's
+ * top covers, so the readout says "needs support" only of what is left
+ * uncovered and names the support that holds the rest; a support's own line
+ * says what it holds, never its own sheet as an overhang. With no support on
+ * the plate the slice is the one it always was.
+ *
  * NON-SOLID SCOPE (docs/NON-SOLID.md): read through nsoNonSolid for plate
  * pieces, never inferred. A piece flagged non-solid is sliced with
  * gapCloseMm 0: its open section chains are left open and counted, not
@@ -94,6 +104,13 @@ var NSO_GSCOPE_SLICE = (function () {
     return !!(m && typeof window.nsoNonSolid === 'function' && window.nsoNonSolid(m));
   }
 
+  /** The support label (m.nsoSupport) of the plate piece behind a mesh-document object, or null. */
+  function supportOf(o) {
+    if (o.sourceId == null || typeof state === 'undefined' || !state || !state.models) return null;
+    var m = state.models.find(function (x) { return x && x.id === o.sourceId; });
+    return m && m.nsoSupport ? m.nsoSupport : null;
+  }
+
   function refuse(why) {
     var read = $('ms-slice-read');
     if (read) read.textContent = why;
@@ -119,7 +136,9 @@ var NSO_GSCOPE_SLICE = (function () {
     var objects = d.objects.map(function (o) {
       var ns = nonSolidOf(o);
       if (ns) flagged.push(o.name);
-      return { name: o.name, soup: o.positions, gapCloseMm: ns ? 0 : undefined };
+      var sup = supportOf(o);
+      return { name: o.name, soup: o.positions, gapCloseMm: ns ? 0 : undefined, key: o.sourceId,
+               role: sup ? 'support' : 'part', hostKey: sup ? sup.hostSourceId : undefined };
     });
     var source = { label: d.name, objects: d.objects, docSource: d.source, subtitle: d.subtitle };
     busy = true;
@@ -275,17 +294,55 @@ var NSO_GSCOPE_SLICE = (function () {
     }
   }
 
+  /** "support 1.1" out of "<host> - support 1.1 (Tree)": the card's name, less the host and the style. */
+  function supportLabel(name, hostName) {
+    var n = String(name);
+    if (hostName && n.indexOf(hostName + ' - ') === 0) n = n.slice(hostName.length + 3);
+    return n.replace(/\s*\([^)]*\)$/, '');
+  }
+
+  /**
+   * What the slice says about each piece's overhangs. With no support in the
+   * slice a region reads "z 12.00 (61.2 mm² on plate)", as it always did.
+   * With supports, a region they hold is credited: only what is left
+   * uncovered needs support, and the covering support is named.
+   */
+  function overhangWords(ob) {
+    var need = [], held = [], by = {}, total = 0;
+    ob.overhang.forEach(function (g) {
+      var z = 'z ' + g.firstZ.toFixed(2);
+      var plain = z + ' (' + g.footprintMm2.toFixed(1) + ' mm² on ' + g.standsOn + ')';
+      if (g.coveredMm2 == null || !g.coveredBy.length) { need.push(plain); return; }
+      var names = g.coveredBy.map(function (c) { by[c.id] = 1; return supportLabel(c.name, ob.name); }).join(' + ');
+      total += g.coveredMm2;
+      if (g.uncoveredMm2 > 0) {
+        need.push(z + ': ' + g.footprintMm2.toFixed(1) + ' mm² overhang, ' + g.coveredMm2.toFixed(1) + ' covered by ' + names +
+          ', ' + g.uncoveredMm2.toFixed(1) + ' uncovered');
+      } else held.push(z + ' (' + g.coveredMm2.toFixed(1) + ' mm², ' + names + ')');
+    });
+    var n = Object.keys(by).length;
+    if (!need.length) {
+      return held.length ? 'no support needed (' + n + ' support' + (n === 1 ? ' covers ' : 's cover ') + total.toFixed(1) + ' mm²)'
+        : 'no support needed';
+    }
+    return 'needs support at ' + need.join(', ') + (held.length ? '; held by support at ' + held.join(', ') : '');
+  }
+
+  /** A support object's own line: what it holds, never its own sheet as an overhang (that is held by design). */
+  function supportWords(sp) {
+    var who = sp.hostName ? 'support for ' + sp.hostName : 'support (its piece is not in this slice)';
+    if (!sp.sheets.length) return who + ': no sheet under ' + (sp.hostName ? 'it' : 'a piece');
+    return who + ': ' + sp.tips + ' tip' + (sp.tips === 1 ? '' : 's') + ', sheet at z ' + sp.zLo.toFixed(2) + '–' + sp.zHi.toFixed(2);
+  }
+
   function report(r, flagged) {
     var lines = [];
     var o = r.options;
     lines.push(r.planes.length + ' layers at ' + o.layerMm + ' mm, walls ' + o.outerWallWidthMm + ' mm x ' + o.wallLoops +
       ', ' + Math.round(o.sparseDensity * 100) + ' % ' + o.sparsePattern + ', support below ' + o.supportThresholdDeg + '° (' + r.ms + ' ms).');
     r.objects.forEach(function (ob) {
-      var regions = ob.overhang.map(function (g) {
-        return 'z ' + g.firstZ.toFixed(2) + ' (' + g.footprintMm2.toFixed(1) + ' mm² on ' + g.standsOn + ')';
-      });
       var wc = Object.keys(ob.wallCountHistogram).map(function (k) { return k + '×' + ob.wallCountHistogram[k]; }).join(' ');
-      lines.push(ob.name + ': walls per layer ' + wc + '; ' + (regions.length ? 'needs support at ' + regions.join(', ') : 'no support needed') +
+      lines.push(ob.name + ': ' + (ob.role === 'support' ? supportWords(ob.support) : 'walls per layer ' + wc + '; ' + overhangWords(ob)) +
         (ob.sectionStats.openChains ? '; ' + ob.sectionStats.openChains + ' open section chain(s)' +
           (ob.nonSolid ? ' left open (non-solid)' : ', ' + ob.sectionStats.closedByGap + ' closed, ' + ob.sectionStats.droppedChains + ' dropped') : '') +
         (ob.flipped ? '; mesh wound inside out' : '') + '.');
@@ -348,7 +405,9 @@ var NSO_GSCOPE_SLICE = (function () {
     exportPieceAsSTL: exportPieceAsSTL,
     last: function () { return last; },
     busy: function () { return busy; },
-    panelOpts: panelOpts
+    panelOpts: panelOpts,
+    /** The readout's words for a slice result (what #ms-slice-read shows). */
+    report: report
   };
 })();
 

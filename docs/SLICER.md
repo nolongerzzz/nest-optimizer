@@ -342,6 +342,59 @@ slice.
 - **Non-solid scope.** It reads `nsoNonSolid`. A flagged piece keeps its open
   chains open.
 
+### Supports slice as support
+
+Bambu's slice of an NSO export labels NSO's supports **Support** /
+**Support interface** and prints them as their own line types. The in-house
+slicer now does the same, and stops reporting a host as needing support
+right over the sheet that holds it.
+
+- **Roles in.** `app-gscope-slice.js` passes every piece with its id
+  (`key` = `sourceId`) and a role: a piece labelled `m.nsoSupport` goes as
+  `role: 'support'` with `hostKey` = its `hostSourceId`; every other piece is
+  a `part`. A file opened straight into G-scope has no labels: all parts.
+- **Typed from the geometry, not a tag** (`typeSupports`, `nso_slicer.js`).
+  A support's TOP is the part of a layer lying under its host's section
+  within gap (0.18 mm) + one layer, with nothing of the support over it.
+  The layer's islands that reach under the host are closed by 0.5 mm, so a
+  layer of 0.84 mm-pitch lines reads as the footprint it holds. From each top
+  the sheet is followed down island by island (each layer's lines cross the
+  ones above): its top 2 layers are **Support interface**, the 2 under them
+  **Support transition** (`nso_support_interface.js` SHEET_ROLES), and every
+  other line of the object is **Support**. No wall, infill or overhang wall
+  comes out of a support object: the same beads, one type, as Bambu prints
+  support.
+- **The host is credited.** Each of the host's overhang islands is cut,
+  layer by layer, by the closed tops of its supports within gap + one layer
+  under it. The region carries `coveredMm2`, `coveredBy` (which support, how
+  much) and `uncoveredMm2`. The uncovered part is opened by half a line and
+  its islands under the overhang floor are dropped: a strip narrower than a
+  line beside a sheet is bridged by the first layer. The readout lists only
+  what is uncovered:
+  `z 12.00: 61.2 mm² overhang, 49.0 covered by support 2.1, 12.2 uncovered`.
+  A host with nothing uncovered reads
+  `no support needed (2 supports cover 311.7 mm²)`.
+- **A support's own line** says what it holds:
+  `support for top_clip_x2: 6 tips, sheet at z 11.00–11.80` (the bottom of
+  the sheet's lowest layer to its top). It never lists its own sheet as an
+  overhang, because the sheet is held by design.
+- **With no support in the slice, nothing changes.** The G-code is byte for
+  byte what it was, and so is the report: no credit fields, the same words.
+  This was checked against the pre-change slicer on the sphere, the 20 mm
+  box, the coupon and the wedge at both nozzles, and on a two-object plate.
+- **The nozzle has to fit the sheet.** The card builds the sheet for a
+  0.4 mm nozzle at 0.2 mm layers, with 0.42 mm lines. Sliced at the panel's
+  0.6 default (0.63 mm walls), a 0.42 mm line is narrower than a wall, so
+  those layers print nothing. The rule still types the top 4 layers *with
+  geometry*. At 0.3 mm layers the sheet's 0.8 mm spans fewer slicer layers
+  than it has, so the trunk tips under it take the transition rows. This
+  existed before this change and is not fixed by it. `slicer:supports` and
+  `gscope:select` §9 slice at 0.4 / 0.2.
+
+`slicer:supports` holds all of this on the clip coupon,
+`fixtures/supports/top_clip_x2.stl`: a 10 x 10 x 16 post with an 8 x 8 clip
+under its top on each side, and the card-default supports built for it.
+
 ---
 
 ## 7. Scope and complexity, as found
@@ -366,4 +419,5 @@ slice.
 | `slicer:test` | 52 checks: sections equal manifold's own `Manifold.slice` on 6 repo meshes (worst rel 1.3e-9); orientation; open and inside-out meshes; wall offsets and counts; grid pitch and angles; density scaling; shells; overhang on cones either side of 30° / 45°, a mushroom (area exact to the step), model vs plate; G-code round trip; conflicts; constants | ~2 s |
 | `slicer:bambu` | §5 above: 51 checks, 7 findings | ~70 s |
 | `gcode:gscope-slice` | 45 checks, real clicks, screenshots in `tools/gscope-slice-out/` | ~10 s |
+| `slicer:supports` | 26 checks on the clip coupon and its 2 card-default supports: every support line Support / transition / interface, interface exactly the top 2 layers' moves and transition the 2 below, the three Features rows, each clip's overhang credited to the support under it (uncovered 0 under the sheet), the readout's words, byte-identical G-code without supports | ~2 s |
 | `gcode:gscope-slice-view` | 50 checks: Normal -> Slice view -> Normal twice, the one All features list and its toggles, settings persisted, the whole-part state restored exactly | ~15 s |
