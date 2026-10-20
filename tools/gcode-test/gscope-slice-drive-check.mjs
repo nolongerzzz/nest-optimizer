@@ -143,7 +143,9 @@ async function main() {
   const shape = await page.evaluate(async (b) => {
     const M = window.NSO_MICROSCOPE;
     const ours = M.getDoc();
-    const keysOf = (d) => Object.keys(d).filter((k) => k !== 'nsoSlice' && k !== 'groups').sort();
+    // nsoSlice / groups are the slice's own bookkeeping, importOf the plate copy's link back to the
+    // imported file (app-microscope.js importCopy) - none of them is the document's schema
+    const keysOf = (d) => Object.keys(d).filter((k) => k !== 'nsoSlice' && k !== 'groups' && k !== 'importOf').sort();
     const segKeys = (d) => Object.keys(d.segments[0]).sort();
     const a = { doc: keysOf(ours), seg: segKeys(ours), mv: Object.keys(ours.segments[0].mv).sort() };
     const saved = window.NSO_GSCOPE_SLICE.last();
