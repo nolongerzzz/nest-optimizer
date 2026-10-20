@@ -509,7 +509,12 @@
 
      IN THE CARD'S WORKER. sheet() runs inside NSO_SupportGridpack.parts(),
      which the Supports card runs in its build worker; opts.beat() is called
-     through the long loops so the worker's progress never goes quiet.
+     through the long loops so the worker's progress never goes quiet, and
+     opts.progress(done, total) counts the tips (every one that is not a
+     side tip): a tip is done when its level's gap holds (or the level fails
+     and it is cut at the gap) - and, while a level is being solved, its
+     tips are told off by the share of the level's footprint raster read in
+     its first pass (never the last of them, and never back).
 
      sheet(piece, stations, opts) -> plan (plain data, plus .probe, a function
        for the caller's own clearance checks - drop it before posting the plan)
@@ -519,7 +524,7 @@
                  not carry
        opts: gapMm, layerMm, widthMm | nozzle, pitchMm, sideMm, plateZ,
              footMm, occluders, angleDeg (forces T1's), thickness, crosshatch,
-             rasterLines
+             rasterLines, beat, progress
      =================================================================== */
   var SHEET_PITCH_MM = 0.84;   /* the reference's interface and transition pitch (0.42 line + 0.42 channel) */
   var SHEET_ROLES = ['transition', 'transition', 'interface', 'interface'];
@@ -559,6 +564,13 @@
     /* opts.beat(): called through the long loops, so a caller that reports
        progress (the card's build worker) is never silent for long */
     var beat = typeof opts.beat === 'function' ? opts.beat : function () {};
+    var tell = typeof opts.progress === 'function' ? opts.progress : null, nTips = 0, settled = 0, levels = [];
+    function told() {
+      if (!tell) return;
+      var d = settled;
+      levels.forEach(function (L) { d += L.told || 0; });
+      try { tell(d, nTips); } catch (err) { /* a listener must not stop the sheet */ }
+    }
     function hitIn(x, y, z0, z1) {
       for (var i = 0; i < PPs.length; i++) if (PPs[i].hitsAlong([x, y, z0], [0, 0, 1], z1 - z0).length) return true;
       return false;
@@ -583,6 +595,7 @@
                mode: st.side ? 'side' : 'sheet', level: -1 };
     });
     var cand = tips.filter(function (t) { return t.mode === 'sheet'; });
+    nTips = cand.length;
 
     /* the tips' own spacing: the median nearest neighbour */
     var nn = cand.map(function (t) {
@@ -613,12 +626,14 @@
     tips.forEach(function (t) { tipOfCol[t.col] = t; });
 
     /* ---- levels ---- */
-    var levels = [];
     cand.filter(function (t) { return t.mode === 'sheet'; }).sort(function (a, b) { return a.zTop - b.zTop; }).forEach(function (t) {
       var L = levels[levels.length - 1];
-      if (!L || t.zTop - L.first > LEVEL_TOL_MM) { L = { id: levels.length, first: t.zTop, tips: [] }; levels.push(L); }
+      if (!L || t.zTop - L.first > LEVEL_TOL_MM) { L = { id: levels.length, first: t.zTop, tips: [], told: 0 }; levels.push(L); }
       L.tips.push(t); t.level = L.id;
     });
+    /* a tip on no level (no room for the stack) is settled already */
+    settled = nTips - levels.reduce(function (n, L) { return n + L.tips.length; }, 0);
+    told();
 
     /* where a column's axis crosses z (the column's own polyline, top first) */
     function colAt(col, z) {
@@ -687,13 +702,20 @@
          row at a few heights through the column (parity, from outside the
          piece's box): a column standing in a wall is in material. */
       var hit = new Uint8Array(nx * ny);
-      for (var j = 0; j < ny; j++) for (var i = 0, b0 = beat(); i < nx; i++) {
+      var NH = Math.max(3, Math.ceil((z1 - z0) / (o.layer / 2)));
+      /* the level's tips told off by the share of the raster read (see opts.progress) */
+      var rows = 0, rowsAll = ny * (1 + NH), nL = L.tips.length;
+      function rowRead() {
+        rows++;
+        var k = Math.min(nL - 1, Math.floor(nL * rows / rowsAll));
+        if (k > L.told) { L.told = k; told(); }
+      }
+      for (var j = 0; j < ny; j++, rowRead()) for (var i = 0, b0 = beat(); i < nx; i++) {
         if (hitIn(ox + i * CELL_MM, oy + j * CELL_MM, z0, z1)) hit[j * nx + i] = 1;
       }
-      var NH = Math.max(3, Math.ceil((z1 - z0) / (o.layer / 2)));
       for (var hk = 0; hk < NH; hk++) {
         var zh = z0 + (z1 - z0) * (hk + 0.5) / NH;
-        for (var jr = 0; jr < ny; jr++, beat()) markInside(oy + jr * CELL_MM, zh, function (i0) { hit[jr * nx + i0] = 1; });
+        for (var jr = 0; jr < ny; jr++, beat(), rowRead()) markInside(oy + jr * CELL_MM, zh, function (i0) { hit[jr * nx + i0] = 1; });
       }
       function markInside(y, z, mark) {
         PPs.forEach(function (P) {
@@ -1041,6 +1063,8 @@
       }
       if (!L.ok && !L.reason) L.reason = 'the gap would not hold after 8 tries (closest ' + (L.lastMinMm || 0).toFixed(4) + ' mm)';
       if (!L.ok) L.tips.forEach(function (t) { if (t.mode === 'sheet') { t.mode = 'gap'; t.level = -1; t.why = 'its level failed: ' + L.reason; } });
+      L.told = L.tips.length;
+      told();
     });
 
     /* the cut heights */

@@ -40,7 +40,7 @@ The areas are editable before GENERATE, on the mesh, where the effect shows:
 | state | the card says | what is live |
 | --- | --- | --- |
 | **IDLE** (a piece is picked) | **"N hanging areas at 45&deg; on &lt;piece&gt;"** (`&middot; K left out` once any is) | **GENERATE**; Angle, Style, Size, "May rest on the part" (off); a click on an outlined area leaves it out (grey) or puts it back. Nothing builds on a click. |
-| **BUILDING** (GENERATE pressed) | one **bar** under the readout and the phase in words: **"Planning 142 / 377 &middot; 38 %"**, then **"Building 12 / 40 &middot; 30 %"**, then **"Welding &middot; 14 s"** (section 1a) | every control is locked, **REGENERATE** and **REMOVE ALL** (shown once built) are off; **Escape** cancels |
+| **BUILDING** (GENERATE pressed) | one **bar** under the readout, 0 to 100 % over the whole build, and the phase in words: **"Planning 142 / 344 &middot; 21 %"**, then **"Building 41 / 436 &middot; 55 %"** (section 1a) | every control is locked, **REGENERATE** and **REMOVE ALL** (shown once built) are off; **Escape** cancels |
 | **BUILT** | **"Built: M supports &middot; held H &middot; unsupported K &middot; unreachable U"** | **REGENERATE** (replaces every support on the piece) and **REMOVE ALL** beside it; a click on a built support picks it and **REMOVE** takes that one; areas the plate could not reach stay outlined **red**; a row under the readout for every area that is not held |
 
 **Every area is exactly one of the three**, so H + K + U is the number of areas:
@@ -67,18 +67,24 @@ begins**, so the phase word only moves forward:
 
 | phase | the readout | the count |
 | --- | --- | --- |
-| detecting | **"Detecting &middot; 3 s"** | none |
-| planning | **"Planning 142 / 377 &middot; 38 %"** | beacons settled / beacons, summed over every area |
-| building | **"Building 12 / 40 &middot; 30 %"** | trunks swept / trunks, summed over every area |
-| welding | **"Welding &middot; 14 s"** | none |
+| detecting | **"Detecting &middot; 0 s"** | none |
+| planning | **"Planning 142 / 344 &middot; 21 %"** | beacons settled / beacons, summed over every area: the bar's first half |
+| building | **"Building 41 / 436 &middot; 55 %"** | the interface sheet's tips settled, then trunks swept (`NSO_SupportGridpack.buildUnits`), summed over every area: the bar's second half |
 
-The percent is the phase's own, so the bar starts again at each counted phase; it
-is the nearest whole number, and **100 only when the work is done** (1999 of 2000
-reads 99). **No percent is ever invented**: a phase with no count (detecting;
-welding, where the number of joins is not known until the last is made) shows
-its word and the seconds (the build's own, the ones the watchdog counts) on a bar
-that only sweeps. A planner that says nothing at all (`setPlanner`'s) gets
-**"Building&hellip;"**, with the seconds once past 10, on a sweeping bar, as before.
+There is **no welding**: the parts come back as shells (`NSO_SupportGridpack.shells`,
+section "Why the watchdog needs a worker"). The count is the phase's own; the
+**percent is the whole build's** (`PHASE_SPAN`: planning fills 0-50 %, building
+50-100 %, measured on the standing clamp at 3.4 s and 3.1 s), so the bar only ever
+moves forward, the nearest whole number, and **100 only when the work is done**
+(1999 of 2000 reads 99). **No count is ever invented**: a phase with none
+(detecting) shows its word and the seconds on a bar that only sweeps. A planner
+that says nothing at all (`setPlanner`'s) gets **"Building&hellip;"**, with the
+seconds once past 10, on a sweeping bar, as before.
+
+Building moves from its first second: the sheet is planned before the first trunk
+is swept (on the clamp's big area, 78 % of its building time), and its tips are
+counted as the level's footprint is read and its gap holds. Before, building sat
+at 0 through all of it and only the trunks were counted.
 
 The card believes only what makes sense: a phase never goes back (each area's
 planner opens with its own *detecting*, which is dropped once the build is past
@@ -94,16 +100,22 @@ is what the bar shows now. The planner's side of the contract is in
 and every control on the card). **Escape cancels** the build
 (`NSO_SUPPORTS_CARD.cancel()` does the same): the worker is terminated, the
 plate is exactly as it was, Undo has nothing new, the supports already standing
-stay, and the card says **"Build cancelled - nothing was added"**. A weld that
-was mid-step finishes into nothing: a dead build does not touch the plate.
+stay, and the card says **"Build cancelled - nothing was added"**. A worker
+message that arrives late finishes into nothing: a dead build does not touch
+the plate.
 
 ### A build ends in a state
 
 BUILDING always finishes: as BUILT, as **"Build cancelled - nothing was
 added"** (Escape), or as **"Could not build: &lt;reason&gt; - nothing was
-added"** - a planner refusal, an exception, or the **watchdog** (60 s by
-default; `NSO_SUPPORTS_CARD.watchdogMs(ms)` sets it), when the bar turns into
-that message. On any failure the plate is exactly as before, **Undo has nothing
+added"** - a planner refusal, an exception, or the **watchdog**, when the bar
+turns into that message. **The watchdog is silence, not time**: every progress
+message the planner posts starts it again, and it fires only when nothing has
+come for 60 s ("the planner was still working after 60 s";
+`NSO_SUPPORTS_CARD.watchdogMs(ms)` sets it). A build that is still reporting is
+not hung, however long it takes - up to the **ceiling**, 10 min
+(`NSO_SUPPORTS_CARD.ceilingMs(ms)`), where a runaway is stopped however it
+reports ("the build was still running after 10 min"). On any failure the plate is exactly as before, **Undo has nothing
 new**, the old supports (if any) still stand and the card is live again. The
 plate is touched in one synchronous stretch at the very end, only if the build is
 still live, and everything is put back if anything in it throws.
@@ -115,24 +127,25 @@ card therefore plans in a Web Worker that loads the same engine files
 `nso_support_tree`, `nso_support_gridpack`, and for the interface sheet
 `nso_raster_lines`, `nso_crosshatch`, `nso_support_interface`); the watchdog and
 Escape on the page call `terminate()` on it. The worker plans every area, then
-sweeps their trunks (`NSO_SupportGridpack.parts` with `{ interface: true }`:
-every tip that meets the part is cut under a sheet of 2 transition + 2
-interface layers, 0.18 mm under the part - docs/SUPPORT-INTERFACE.md), posting
-`{ phase, done, total }` as it goes, and
-is stopped when that is done. The piece's mesh is sent to it **once** per build:
+builds each (`NSO_SupportGridpack.parts` with `{ interface: true }`: every tip
+that meets the part is cut under a sheet of 2 transition + 2 interface layers,
+0.18 mm under the part - docs/SUPPORT-INTERFACE.md) and hands it back as
+**shells** (`NSO_SupportGridpack.shells`): every part its own closed shell, one
+plate piece per group of trunks whose feet touch, with the sheet over their tips.
+**Nothing is welded.** A slicer fills an object's overlapping shells as one
+(Bambu Studio; NSO's own `nso_slicer.js` fills every section with the Positive
+rule), and `support:shells` cuts both at every 0.2 mm layer and holds them to
+two microns. The weld was 16 s of the clamp's 23 s; nothing on the plate needs a
+support to be one shell (Crop, Join, Subtract and the other booleans merge a
+piece's shells for themselves, `nsoOverlap`; Findings names overlapping shells
+as such). The worker posts `{ phase, done, total }` as it goes, and is stopped
+when that is done. The piece's mesh is sent to it **once** per build:
 every area is planned against the same array, whose spatial index the planner
 then finds again (a fresh copy per area was indexed afresh each time, about 0.4 s
-of the wedge's 49k triangles, 25 times over). The union (`NSO_SupportGridpack.weld`,
-wasm) runs on the page - one union is one call that cannot be interrupted - and
-the page gives itself a turn every 250 ms (`SLICE_MS`: repaint, the clock,
-Escape; a turn costs a frame of the 3D view, so it is not made oftener), and
-reads the watchdog's clock there. An area that carries an interface sheet
-(docs/SUPPORT-INTERFACE.md) is welded in the worker instead (it loads
-`nso_csg.js` for it), at the same time as the page welds the rest: its unions
-are large (the sheet's lattice, then the sheet with every trunk it stands on),
-and on the page they went to the boolean worker, whose own bar and words took
-the status line from the card. A page that cannot start a worker does the
-same work in-thread and can only be held to the clock after the fact.
+of the wedge's 49k triangles, 25 times over). A page that cannot start a
+worker does the same work in-thread, giving itself a turn every 250 ms
+(`SLICE_MS`: repaint, the clock, Escape; a turn costs a frame of the 3D view, so
+it is not made oftener), and can only be held to the clocks after the fact.
 `NSO_SUPPORTS_CARD.setPlanner(fn)` replaces the planner (a test seam; its
 `opts.onProgress` is the bar's).
 
@@ -234,16 +247,23 @@ other 12 areas build in 18 s: "Built: 12 supports &middot; held 12 &middot; unsu
 unreachable 0", one row (Area 1, left out, 377 spots).
 
 **Progress on the wedge** (`support:workflow` sections 9 and 10, headless Chromium
-with software GL): Generate over all 25 areas is **20-25 s** over four runs (it was
-27.3 s before the mesh went to the worker once), **589 updates**: *detecting* once, *planning*
-0 to 427 / 427, *building* 0 to 158 / 158, then *welding* (about 10 s of it, a
-union at a time). Planning reaches 100 % and building reaches 100 % before BUILT,
-every frame's status line equals its readout, and every frame's bar is filled to
-its readout's percent or sweeping with no value. Between the planner's own
-messages (planning and building, by the time the worker posted them) the median
-gap is 0 ms and the largest 440-520 ms, 1-2 of about 685 over 250 ms; welding on
-the page is one union at a time, up to about 0.8 s. Escape in the middle of planning on the
-real worker: terminated, nothing after it, the plate and Undo as before.
+with software GL): Generate over all 25 areas is **11.9 s** (20-25 s with the
+weld), 36 supports, **907 updates**: *detecting* once, *planning* 0 to 427 / 427
+(the bar's first half), *building* to n / n (the second half); no welding.
+Planning reaches 50 % before building begins and building's n / n = 100 % is the
+last message, every frame's status line equals its readout, and every frame's bar
+is filled to its readout's percent or sweeping with no value. Between the
+planner's own messages (by the time the worker posted them) the median gap is
+0 ms and the largest about 590 ms, 3 of about 1009 over 250 ms. Escape in the
+middle of planning on the real worker: terminated, nothing after it, the plate
+and Undo as before.
+
+**The clamp** (`support:workflow` section 11, `fixtures/supports/clamp_body.stl`
+standing): **7.6 s** (23-27 s with the weld), planning 3.5 s over 345 counts,
+building 3.0 s over 437 (436 units: 238 sheet tips, 198 trunks), the bar to
+100 %. **The watchdog** (section 12): a planner that posts every 5 s for 90 s
+ends with its own answer; one that says nothing is stopped at 60 s; one that
+reports forever is stopped at the ceiling.
 
 ## 5. Flags
 
@@ -266,17 +286,15 @@ real worker: terminated, nothing after it, the plate and Undo as before.
   the inside test in `nso_support_aim.js`), not here; leave the area out, or
   raise `NSO_SUPPORTS_CARD.watchdogMs()`, until then. No planner in this tree has
   a per-spot time-based give-up, so there is none to cap.
-- The union (`NSO_SupportGridpack.weld`) runs on the page (an area with a sheet:
-  in the worker, which Escape and the watchdog terminate) and cannot be
-  interrupted mid-step: the clock and Escape are read after every union, so one
-  that runs long (up to about 0.8 s on the wedge) is only caught afterwards.
-- **Welding has no percent**, on purpose: how many joins a build will make is
-  not known until the last is made, and the bar does not guess. It is the longest
-  phase on a large piece (half of the wedge's build), and shows the seconds.
+- **No weld.** A card support is its parts as overlapping closed shells, one
+  plate piece per group of trunks that share a foot. Findings reads such a piece
+  as overlapping shells (a slicer fills the overlap; Merge shells makes them one
+  solid on the piece). The welded build was no cleaner: the clamp's area 1 was
+  one shell with 6809 piercing pairs inside it.
 - The bar's cadence is the planner's: it beats every 200 ms between its units,
-  but not inside the first detect of a piece, `padGaps`, or a union. The kickoff
-  asked for 250 ms or better; on the wedge all but one or two of about 685 planning
-  and building gaps meet it, and the page's own welding does not.
+  but not inside the first detect of a piece or `padGaps`. The kickoff asked for
+  250 ms or better; on the wedge all but a handful of the planning and building
+  gaps meet it.
 - Each page turn costs a rendered frame of the 3D view, which is slow in software
   GL (about 100 ms in the test browser). Measured on the wedge with the trunks
   still swept on the page: a 40 ms slice took 47 s, 100 ms took 39 s, 200 ms 33 s,
