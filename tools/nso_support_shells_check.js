@@ -350,7 +350,7 @@ function extruded(layer) {
     const PR = ctx.NSO_Thickness.prepare(S.piece, {}), pz = S.plans[0].plateZ || 0;
     const hemmedHere = (f) => {
       const rIn = f.r * Math.SQRT1_2;
-      for (let dr = 0.05; dr <= 0.4 + 1e-9; dr += 0.05) for (let k = 0; k < 36; k++) {
+      for (let dr = 0.05; dr <= 0.2 + 1e-9; dr += 0.05) for (let k = 0; k < 36; k++) {
         const an = 2 * Math.PI * k / 36, x = f.c[0] + (rIn + dr) * Math.cos(an), y = f.c[1] + (rIn + dr) * Math.sin(an);
         let clear = true;
         for (let z = 0.02; z <= 0.4 + 1e-9 && clear; z += 0.06) {

@@ -1081,16 +1081,18 @@
     for (i = 0; i < nF; i++) (sup[SUP.find(i)] || (sup[SUP.find(i)] = [])).push(feet[i].key);
     res.groups = Object.keys(sup).map(function (r0) { return sup[r0]; });
     /* A FOOT THE PIECE HEMS IN, measured, not read off the raster: no point
-       on rings just outside its end square (out to the raster's own slack)
-       stands FOOT_GAP_MM clear of the piece anywhere through the slab and
-       the gap above it - the wedge's trunk in a pocket of v9_mirror_factory
-       has none within 1 mm. A thin trunk the raster's slack rang round (a
-       thin pin of the piece beside it) has some, and stays a split. */
+       in the band a pad touching its end square would cover (rings out to
+       FOOT_GAP_MM from the square) stands FOOT_GAP_MM clear of the piece
+       anywhere through the slab and the gap above it - so no pad can touch
+       the trunk and keep the gap: the wedge's trunk in a pocket of
+       v9_mirror_factory has none within 0.95 mm of its middle. A thin trunk
+       the raster's slack rang round (a thin pin of the piece beside it) has
+       some right at its square, and stays a split. */
     var probes = obstacles.map(function (sp) { return probeOf(TH, sp); }).filter(Boolean);
     function hemmedExactly(f) {
       var rIn = f.r * Math.SQRT1_2, zs = [];
       for (var zz = 0.02; zz <= thick + FOOT_GAP_MM + 1e-9; zz += 0.06) zs.push(plateZ + zz);
-      for (var dr = 0.05; dr <= FOOT_GAP_MM + 3 * res.cellMm + 1e-9; dr += 0.05) {
+      for (var dr = 0.05; dr <= FOOT_GAP_MM + 1e-9; dr += 0.05) {
         for (var k2 = 0; k2 < 36; k2++) {
           var a = 2 * Math.PI * k2 / 36, x = f.c[0] + (rIn + dr) * Math.cos(a), y = f.c[1] + (rIn + dr) * Math.sin(a);
           var clear = zs.every(function (z) {

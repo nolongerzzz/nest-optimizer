@@ -545,7 +545,7 @@ fs.mkdirSync(OUT, { recursive: true });
       const PR = ctx.NSO_Thickness.prepare(piece, {}), plateZ0 = p.plateZ || 0;
       const hemmedHere = f => {
         const rIn = f.r * Math.SQRT1_2;
-        for (let dr = 0.05; dr <= GAP + 0.2 + 1e-9; dr += 0.05) for (let k = 0; k < 36; k++) {
+        for (let dr = 0.05; dr <= 0.2 + 1e-9; dr += 0.05) for (let k = 0; k < 36; k++) {
           const a = 2 * Math.PI * k / 36, x = f.c[0] + (rIn + dr) * Math.cos(a), y = f.c[1] + (rIn + dr) * Math.sin(a);
           let clear = true;
           for (let z = 0.02; z <= FOOT + GAP + 1e-9 && clear; z += 0.06) {

@@ -159,9 +159,10 @@ support 1.1 and 2.2. Bambu's own tree (baselineV2, the same coupon): pads of
   cluster split is counted (`clustersSplit`) when a cluster's feet still
   stand in more than one support - unless every foot apart from the rest is
   one the piece itself hems in, measured exactly (`clustersHemmed`: no point
-  on rings just outside its end square, out to the raster's slack, stands
-  0.2 mm clear of the piece through the slab - the wedge's trunk in a pocket
-  of `v9_mirror_factory` has none within 1 mm). A pad that is nothing but a
+  in the band a pad touching its end square would cover, out to 0.2 mm from
+  the square, stands 0.2 mm clear of the piece through the slab, so no pad
+  can touch it and keep the gap - the wedge's trunk in a pocket of
+  `v9_mirror_factory` has none within 0.95 mm of its middle). A pad that is nothing but a
   foot's own end is counted (`hemmed`), and a sliver of that kind that will
   not triangulate is no pad (`padsDropped`): its trunk stands on its own end,
   in its linked support.
