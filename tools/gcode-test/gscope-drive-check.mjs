@@ -279,10 +279,14 @@ async function main() {
   // what makes plate 1 whole again (docs/GSCOPE.md, items 2 and 4).
   check('a mesh has no Features boxes, so Check all is disabled',
     await page.evaluate(() => { const b = document.getElementById('ms-btn-show-all'); return [b.textContent.trim(), b.disabled]; }), ['Check all', true]);
+  // CLEAR empties the active plate (docs/GSCOPE.md item 9); Read plate fills it again from the plate.
   await page.click('#ms-btn-take-clear');
-  check('CLEAR brings the cleared piece back',
-    await page.evaluate(() => [window.NSO_MICROSCOPE.hidden(), Object.values(window.NSO_MICROSCOPE.getView().overviewMeshes).every((m) => m.visible)]),
-    [[], true]);
+  check('CLEAR empties plate 1', await page.evaluate(() => window.NSO_MICROSCOPE.getDoc()), null);
+  await page.click('#ms-btn-plate');
+  check('...and Read plate brings both pieces back, the cleared one drawn again',
+    await page.evaluate(() => { const M = window.NSO_MICROSCOPE, ms = Object.values(M.getView().overviewMeshes);
+      return [M.hidden(), M.groups().length, ms.length > 0 && ms.every((m) => m.visible)]; }),
+    [[], 2, true]);
   check('after only / select shown / isolate / back / CLEAR: the plate is still untouched',
     await plateSnapshot(page), snap0);
   check('and still no file written', downloads, dl0);
