@@ -480,3 +480,151 @@ Flag: the ticket says Both is "on the wall's mid-line (as Neck today)". Neck
 today draws its waist on the **outside** (Ro + Δr), and #241's gates grab it
 there. Neck with Both is left where it was; Flare with Both is on the
 mid-line, as the ticket asks.
+
+## Run — the reducer and the expander (tube-run, 2026-10-20)
+
+`nso_tube_edge.js?v=run1`, `app-tube-edge.js?v=run1` (option plumbing only:
+`NSO_teOpts` reads an `inp-te-run` field when the card has one, and passes
+no run when it has not; the UI ticket draws it).
+
+**RUN** (`opts.runMm`, Flare only) is a straight run of tube after the flare:
+fat pipe → cone → skinny pipe (a **reducer**, Way In), or the reverse (an
+**expander**, Way Out). **0 or blank is no run.** The output is then
+byte-identical to before: the three pinned SHA-1s from `b0697c1` and four more
+from `695808a` (inward, Trumpet inward, Bore only, Outside only Trumpet), each
+with `runMm` left out, `0`, `''` and `null`.
+
+- **The run's outside Ø and bore Ø are exactly the lip's.** It runs parallel
+  to the axis for Run mm, measured along the axis from the lip's plane (from
+  the lip's higher corner where a leaning rim tilts that plane: 0.03 mm on
+  the Wheel vessel). Its end is cut square to the axis and left open, a flat
+  ring like the tube's own end.
+- **No weld, no step.** The run is one more station on each face: the lip
+  ring's vertices carried straight up their own lines. The run shares the
+  lip ring's edges, and the lip face moves to the run's end. The test checks
+  that the end ring has the lip ring's x and y bits, vertex for vertex.
+- **Its wall is the lip's width**, whatever the flare left there. With
+  Outside only or Bore only that is the changed wall (5.08 → 2.08 runs on at
+  2.08), and the face that did not move keeps its Ø through the run. With
+  Both, the lip is cut square to the axis, so it is `t / cos(lip angle)` wide.
+  A Straight flare at 33.7° on a 2.54 mm wall leaves a 3.05 mm run (see the
+  flag below).
+- **Trumpet + Run**: the trumpet's lip is not parallel to the axis. The run
+  still is, so the join is a crease at the trumpet's lip angle (49.1° for
+  8 mm at 30°). The readout says so: `· joined at 49.1°, the trumpet's lip
+  angle (the run is parallel to the axis)`. Straight + Run is the reducer
+  case, and the crease there is the cone's own angle.
+- **Readout**: `Straight flare 21.0 mm at −36.0° inward, then 30.0 mm run at
+  Ø21.84 / bore Ø15.56 · wall 2.54 held (2.532–2.540 mm through the flare;
+  the run's wall 3.14, the lip's width) · Ø51.15 end`. With one face, the
+  Walls line gains `, then 20.0 mm run at Ø40.62 / bore Ø36.47, wall 2.08`.
+- **Checks**: the flare's own wall check reads the flare's stations alone.
+  The clearance, the region, Pappus's volume and the build read the run too.
+
+### Refusals, in words, the piece unchanged
+
+| what | says |
+|---|---|
+| a run whose bore would be under 2 nozzle widths (the inward-flare limit; a run's bore is the lip's), before building | `that flare would close the bore - the Ø16.80 bore would come to Ø0.60 at the lip and down its 30.0 mm run, under the bore limit of Ø0.80 (2 nozzle widths at a 0.4 mm nozzle). Use a shorter or a shallower flare` |
+| Run on a Roll | `a 10.0 mm run is refused on a Roll - a Roll has no lip direction to run along (the wall curls round its bead and stops where the Angle ends). Run is a Flare's: set it to 0 to roll` |
+| a negative run | `enter a run length in mm, 0 or more (0: no run past the lip)` |
+| the run meeting the piece (gated: a plate 20 mm over the end, Run 30; Run 10 stops 2 mm under it and builds) | the clearance's words, `that flare and its run would bring the new wall within 0.40 mm of the piece (20.0 mm out from the end, …) - …`, then `Use a shorter run, or a shorter or shallower flare` |
+
+### Numbers
+
+From `tools/nso_tube_edge_test.js` section 9 (242 checks in the file, 83 of
+them new).
+
+| piece and treatment | in → out triangles | measured on the output |
+|---|---|---|
+| Ø40 / wall 2.54 tube, reducer: Flare In −10 over 15, Run 30 | 768 → 2,304 | the last 30 mm one cylinder: outside Ø21.025, bore Ø14.920 (each to the float); wall 3.053; flare's wall 2.532–2.540 in 3D |
+| …expander: Flare Out +10 over 15, Run 20 | 768 → 2,304 | outside Ø60.000, bore Ø53.895; wall 3.053 |
+| Ø51.15 / 2.54 tube, −36° over 21, Run 30 | 768 → 2,304 | the ticket's readout line, character for character |
+| Stock tube Ø20 / 1.6, Trumpet 8 mm 30°, Run 10 | 768 → 7,104 | Ø29.238 / Ø24.567; last chord 47.6° into the lip, then 0° up the run |
+| Ø40.62 / Ø30.47 pipe, Bore only +3 over 10, Run 20 | 768 → 1,536 | outside Ø40.620 at every vertex, foot to run's end; run bore Ø36.468, wall 2.076 |
+| …Outside only −3 over 10, Trumpet, Run 20 | 768 → 3,264 | bore Ø30.468 at every vertex; run outside Ø34.620 |
+| Wheel vessel, flare 6 mm 25°, Run 8 | | parallel to the axis, the end square to it |
+| imported Ø16 / Ø12 tube along X, flare 6 mm 20°, Run 12 | | the run along +X to x 98 |
+
+Every output is closed, 2-manifold and consistently wound, with Euler
+unchanged. Each passes `mesh_validate --gate` with 0 piercing pairs, copies
+the rest of the piece bit for bit, and adds Pappus's volume.
+
+### Flags — not in the ticket, or not as the ticket said
+
+1. **The reducer's outside is Ø21.03, not Ø20.** The ticket's gate says "the
+   last 30 mm reads as one cylinder Ø20 bore Ø14.92". In the same ticket, the
+   run's Ø is "exactly the lip's", with no step. An inward Straight flare with
+   Both leads with the bore, which stands exactly |Δr| in at the lip
+   (Ø34.92 → Ø14.92, as the ticket says). The outside goes round the crease a
+   wall away. The lip is cut square to the axis, so it is
+   `t / cos θ = 2.54 / cos 33.69° = 3.053` wide, and the outside there is
+   **Ø21.03**. Ø20 would need a wall of 2.54 measured across the axis. That is
+   a different construction: a second bend at the end of the cone, with the
+   outside going round a crease on the bore. It would move the run's start
+   `t·tan(θ/2)` past the lip plane and change the flare itself when Run > 0.
+   The ticket's own readout example (`Ø21.84 / bore Ø15.56 · wall 2.54`) is
+   this file's construction: 3.14 = 2.54 / cos 36°. The test gates the bore
+   at the ticket's Ø14.92, and the outside at the lip's Ø21.03 ± 0.02.
+   The expander is the mirror case: its outside is the ticket's Ø60.00
+   exactly, and its bore is Ø53.89.
+2. **"Both keeps t"**: through the flare it does, and the readout's `wall 2.54
+   held` is that wall. The run's wall is the lip's width, 3.05 above, and the
+   readout names it (`the run's wall 3.05, the lip's width`).
+3. **"along the wall's direction at the lip"** is read as the ticket's DO
+   items say: along the axis. That applies on a leaning rim too, where
+   Length is along the rim's wall. The run is a cylinder about the axis.
+4. **The readout example's tube** is Ø51.15 / Ø46.07 (wall 2.54). On that
+   tube −36° over 21 gives the line exactly. Outward runs read `… at 33.7°
+   outward, then …`.
+
+## The card: Run, and its END ring (tube-run-card, 2026-10-20)
+
+`app-tube-edge.js?v=runcard1`. The card gains a **Run** field (mm, `inp-te-run`,
+0 by default) right under Length, in the Flare rows. Roll and Neck hide it,
+and a Roll is never handed a run. The live ghost is the engine's soup, so it
+shows the run as soon as Run is over 0.
+
+**The END ring** (amber, Neck's end-ring colour) sits at the run's far end:
+Run along the axis past the lip ring, at the lip ring's radius (the face the
+flare moves, the mid-line with Both; the run is at the lip's outside and
+bore).
+- The lip ring stays the flare's handle: Δr, and Length, which carries the
+  run with it.
+- Drag the END ring along the axis and that is the **Run**. It is read on
+  the plane through the point taken hold of, as Neck's end rings are, and it
+  stops at 0. **Hover**: `Run 30.0 mm`, with a resize cursor along the axis.
+- 0.5 mm steps, 0.1 with Shift. Escape puts a drag back, then shuts the card.
+  No drag orbits the camera, and Escape restores the Run field with the others.
+- **Arrows**: Left / Right are Δr, as before. Up / Down step the **Run**
+  while the END ring is the last handle under the pointer or in hand, and the
+  Length otherwise (after the lip ring, or before either). Up goes the way
+  the axis runs up the screen. 1 mm, 0.1 with Shift.
+- At Run 0 there is no run's end and **no END ring**: a ring there would sit
+  exactly on the lip ring, and a press on it could not say which one it
+  meant. Type a Run to start one. An END ring dragged down to 0 stays in hand
+  until the release, then goes.
+
+Gates (`tools/nso_tube_neck_drag_check.js` section 11, in `tube:neck`), on
+the Stock tube Ø20 / 1.6, Flare 8 mm Δr +3:
+- the field is under Length, 0. Run 0's ghost ends at the lip, z 48, at
+  Ø26.00 / Ø22.58, with no END ring;
+- **Run 30**: the ghost's top is z 78. Its end ring has the lip's outside and
+  bore (Run 0's, measured off the ghost), with no vertex between the lip and
+  the end. The END ring is drawn at z 78 on the lip ring's radius;
+- **the END ring dragged 10 mm along the axis**: the field reads **40.0**, the
+  Length and Δr are untouched, the ghost's top is at z 88, the camera has not
+  moved, and the lip ring is still the handle at the lip;
+- **Set** commits the ghost's soup (`Tube edge done - Straight flare 8.0 mm at
+  20.6° outward, then 40.0 mm run at Ø26.00 …`), and **one Undo** puts the
+  tube back bit for bit;
+- Up after hovering the END ring gives Run 41.0, Shift+Down 40.9, and a
+  Shift drag of 2.34 mm adds 2.3. Escape mid-drag puts it back. Up after
+  hovering the lip ring is the Length again;
+- dragged down past the lip, the Run stops at 0.0: the END ring goes and the
+  ghost ends at the lip;
+- **Roll hides the field** and draws no END ring, and the roll rolls. Neck
+  hides it too. Flare shows it again, with its Run.
+
+`styles.css` is unchanged: the END ring uses the resize cursors Neck's end
+rings already have.

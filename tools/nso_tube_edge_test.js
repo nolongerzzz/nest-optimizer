@@ -594,7 +594,211 @@ console.log('\n=== 8. Walls and inward (tube-walls) ===');
   check('an inward roll is still refused: not supported yet', !rr.ok && /inward roll is not supported yet/.test(rr.reason), rr.reason);
 }
 
-console.log('\n=== 9. time ===');
+console.log('\n=== 9. Run: the reducer and the expander (tube-run) ===');
+{
+  const crypto = require('crypto');
+  const sha = r => r.ok ? crypto.createHash('sha1').update(Buffer.from(r.tris.buffer, r.tris.byteOffset, r.tris.byteLength)).digest('hex') : 'refused';
+  const pipe = stockTube(20.31, 5.076, 40);
+  // Run 0 is today's Flare: section 8's SHA-1s from b0697c1, and four more
+  // from claude-wip 695808a (inward and one-face, which b0697c1 did not have)
+  const PINNED = [
+    ['flare 8 mm 20° straight', tube, { verb: 'flare', length: 8, angle: 20 }, '459a83756387c5538a39bb81a205dad6d8cf807f'],
+    ['flare 8 mm Δr 3 trumpet', tube, { verb: 'flare', length: 8, dr: 3, profile: 'trumpet' }, '66185547b118ce2ebcaff4146c4da4b63ccb7af8'],
+    ['roll 180° r 2', tube, { verb: 'roll', radius: 2, angle: 180 }, '546d8a9c38f72d6078f3ac026589a09756c43cd1'],
+    ['inward −4 over 10 straight', tube, { verb: 'flare', length: 10, dr: -4 }, 'fed95faa32b65a522e5ea43f8b3aa147a3e86654'],
+    ['inward −4 over 10 trumpet', tube, { verb: 'flare', length: 10, dr: -4, profile: 'trumpet' }, '4af342585be350f2db1bfe8ae1c4878d7346d463'],
+    ['bore only +3 over 10', pipe, { verb: 'flare', length: 10, dr: 3, walls: 'bore' }, 'aefe2a958a38a1e3fd3e5188202273612a392caa'],
+    ['outside only +3 over 10 trumpet', pipe, { verb: 'flare', length: 10, dr: 3, walls: 'outside', profile: 'trumpet' }, '2caf953a1f82fe504d3ae671b30ed9b468e8957a']];
+  for (const [name, s, o, want] of PINNED) {
+    const got = [undefined, 0, '', null].map(run => sha(NSO_tubeEdgeRaw(s, Object.assign({}, o, run === undefined ? {} : { runMm: run }))));
+    check('Run 0 is byte-identical to the pinned hash: ' + name + ' (no runMm, 0, \'\' and null)', got.every(h => h === want), got[1]);
+  }
+
+  /* The run, read off the output: every triangle wholly at or past the lip's
+     plane (zLip) is the end face (all three corners at zEnd), or a piece of
+     one of two cylinders about the axis - its three corners at one radius
+     within 0.02, the outside facing out and the bore in. Anything else there
+     ('other'), or a flat face left on the lip's plane, is not a run. */
+  function runRead(s, zLip, zEnd) {
+    const O = { lo: Infinity, hi: -Infinity, n: 0 }, I = { lo: Infinity, hi: -Infinity, n: 0 };
+    let ends = 0, lipFlat = 0, other = 0, offStation = 0;
+    for (let t = 0; t < s.length / 9; t++) {
+      const o = t * 9, z = [s[o + 2], s[o + 5], s[o + 8]];
+      if (Math.min(...z) < zLip - 1e-4) continue;
+      if (z.every(q => Math.abs(q - zEnd) < 1e-4)) { ends++; continue; }
+      if (z.every(q => Math.abs(q - zLip) < 1e-4)) { lipFlat++; continue; }
+      if (!z.every(q => Math.abs(q - zLip) < 1e-4 || Math.abs(q - zEnd) < 1e-4)) offStation++;
+      const r = [0, 1, 2].map(k => Math.hypot(s[o + k * 3], s[o + k * 3 + 1]));
+      if (Math.max(...r) - Math.min(...r) > 0.02) { other++; continue; }
+      const fn = faceNormal(s, t), cx = (s[o] + s[o + 3] + s[o + 6]) / 3, cy = (s[o + 1] + s[o + 4] + s[o + 7]) / 3;
+      const C = (fn.n[0] * cx + fn.n[1] * cy) > 0 ? O : I;
+      C.n++; for (const q of r) { C.lo = Math.min(C.lo, q); C.hi = Math.max(C.hi, q); }
+    }
+    return { O, I, ends, lipFlat, other, offStation };
+  }
+  // the run's end ring is the lip ring carried straight up: the same x and y
+  // bits at zEnd as at zLip, vertex for vertex
+  function straightUp(s, zLip, zEnd) {
+    const at = z => { const S = new Set(); for (let i = 0; i < s.length; i += 3) if (Math.abs(s[i + 2] - z) < 1e-4) S.add(s[i] + ',' + s[i + 1]); return S; };
+    const A = at(zLip), B = at(zEnd);
+    let same = 0; for (const k of A) if (B.has(k)) same++;
+    return { lip: A.size, end: B.size, same };
+  }
+  const dia = x => 'Ø' + (2 * x).toFixed(3);
+
+  // THE REDUCER: a Ø40 / wall 2.54 tube (bore Ø34.92), Flare In −10 over 15, Run 30
+  const t40 = stockTube(20, 2.54, 40);
+  const lipW = 2.54 / Math.cos(Math.atan2(10, 15));          // the lip's width, cut square to the axis
+  for (const [tag, o] of [['reducer: Ø40 tube, Flare In −10 over 15, Run 30', { verb: 'flare', length: 15, dr: -10, runMm: 30 }],
+                          ['expander: Ø40 tube, Flare Out +10 over 15, Run 20', { verb: 'flare', length: 15, dr: 10, runMm: 20 }]]) {
+    const t0 = Date.now(), r = NSO_tubeEdgeRaw(t40, o), ms = Date.now() - t0;
+    console.log('   ' + r.reason);
+    if (!common(tag, t40, r)) continue;
+    const red = o.dr < 0, zLip = 55, zEnd = 55 + o.runMm;
+    const R = runRead(r.tris, zLip, zEnd);
+    // the reducer's bore and the expander's outside stand exactly Δr off the
+    // tube's; the other face is the lip's width away
+    const wantI = red ? 7.46 : 30 - lipW, wantO = red ? 7.46 + lipW : 30;
+    check(tag + ': the last ' + o.runMm + ' mm reads as one cylinder - every face there is the run\'s outside, its bore or its end, and no flat face is left on the lip\'s plane',
+      R.other === 0 && R.offStation === 0 && R.lipFlat === 0 && R.O.n === 2 * 96 && R.I.n === 2 * 96 && R.ends > 0,
+      `outside ${R.O.n}, bore ${R.I.n}, end ${R.ends}, other ${R.other}, lip-plane flats ${R.lipFlat}`);
+    check(tag + ': outside ' + dia(wantO) + ' / bore ' + dia(wantI) + ' within 0.02, all the way along' + (red ? ' (bore Ø14.92, the ticket\'s)' : ' (outside Ø60, the ticket\'s)'),
+      Math.abs(R.O.lo - wantO) <= 0.01 && Math.abs(R.O.hi - wantO) <= 0.01 && Math.abs(R.I.lo - wantI) <= 0.01 && Math.abs(R.I.hi - wantI) <= 0.01,
+      dia(R.O.lo) + '–' + dia(R.O.hi) + ' / ' + dia(R.I.lo) + '–' + dia(R.I.hi));
+    check(tag + ': the run\'s wall is the lip\'s width, ' + f3(lipW) + ' (2.54 / cos ' + (Math.atan2(10, 15) * 180 / Math.PI).toFixed(1) + '°)',
+      Math.abs((R.O.lo - R.I.hi) - lipW) <= 0.02 && Math.abs(r.run.wallMm - lipW) <= 1e-4, f3(R.O.lo - R.I.hi));
+    const U = straightUp(r.tris, zLip, zEnd);
+    check(tag + ': no step - the run\'s end ring is the lip ring carried straight up, x and y bit for bit', U.lip === 192 && U.end === 192 && U.same === 192, JSON.stringify(U));
+    let top = -Infinity; for (let i = 2; i < r.tris.length; i += 3) top = Math.max(top, r.tris[i]);
+    check(tag + ': the end cut square to the axis, ' + o.runMm + ' mm past the lip (z ' + zEnd + ')', Math.abs(top - zEnd) < 1e-4, f3(top));
+    check(tag + ': the flare\'s wall is held, 2.54 ± 0.02 (on the construction)', r.wall.minMm >= 2.52 && r.wall.maxMm <= 2.56, f3(r.wall.minMm) + '–' + f3(r.wall.maxMm));
+    const G = graph(r.tris), RW = rayWall(G, 40, 0, 0, 30, zLip - 2.54);
+    check(tag + ': ...and in 3D through the flare', RW.lo >= 2.52 && RW.hi <= 2.56 && RW.n > 0, f3(RW.lo) + '–' + f3(RW.hi) + ' from ' + RW.n + ' of ' + RW.tried);
+    const want = 'Straight flare 15.0 mm at ' + (red ? '−33.7° inward' : '33.7° outward') + ', then ' + o.runMm.toFixed(1) + ' mm run at Ø' + (2 * wantO).toFixed(2) +
+      ' / bore Ø' + (2 * wantI).toFixed(2) + ' · wall 2.54 held';
+    check(tag + ': the readout: "' + want + ' …"', r.reason.indexOf(want) === 0, r.reason);
+    row('Ø40/2.54 tube, ' + (red ? 'reducer In −10 over 15, run 30' : 'expander Out +10 over 15, run 20'), t40, r, ms,
+      'run ' + dia(R.O.lo) + ' / ' + dia(R.I.lo) + ', wall ' + f3(R.O.lo - R.I.hi));
+    if (red) {
+      const wi = NSO_tubeEdgeRaw(t40, Object.assign({}, o, { dr: 10, direction: 'in' }));
+      check(tag + ': Way In with Δr +10 is the same, byte for byte', sha(wi) === sha(r));
+    }
+  }
+
+  // the ticket's readout line, character for character, on the tube it describes
+  const t51 = stockTube(25.577, 2.54, 40);
+  const rt = NSO_tubeEdgeRaw(t51, { verb: 'flare', length: 21, angle: -36, runMm: 30 });
+  console.log('   ' + rt.reason);
+  common('Ø51.15/2.54 tube, Flare −36° over 21, Run 30', t51, rt);
+  check('the ticket\'s readout: "Straight flare 21.0 mm at −36.0° inward, then 30.0 mm run at Ø21.84 / bore Ø15.56 · wall 2.54 held"',
+    rt.reason.indexOf('Straight flare 21.0 mm at −36.0° inward, then 30.0 mm run at Ø21.84 / bore Ø15.56 · wall 2.54 held') === 0, rt.reason);
+
+  // TRUMPET + RUN: the run is parallel to the axis, and meets the trumpet's
+  // lip at its lip angle
+  {
+    const t0 = Date.now(), r = NSO_tubeEdgeRaw(tube, { verb: 'flare', length: 8, angle: 30, profile: 'trumpet', runMm: 10 }), ms = Date.now() - t0;
+    console.log('   ' + r.reason);
+    if (common('trumpet 8 mm 30°, run 10', tube, r)) {
+      const R = runRead(r.tris, 48, 58), U = straightUp(r.tris, 48, 58);
+      check('trumpet + run: the last 10 mm is one cylinder at the lip\'s outside and bore, parallel to the axis', R.other === 0 && R.offStation === 0 && R.lipFlat === 0 &&
+        Math.abs(R.O.lo - r.lipOuterRadiusMm) <= 1e-4 && Math.abs(R.O.hi - r.lipOuterRadiusMm) <= 1e-4 && U.same === U.lip && U.lip === 192,
+        dia(R.O.lo) + ' / ' + dia(R.I.lo));
+      // the outside face's last chord into the lip, off the mesh (the walk
+      // stops at the lip: the join turns more than its 35°), within one
+      // station's turn of the trumpet's lip angle; then the mesh's own edge
+      // from that lip vertex up the run
+      const G = graph(r.tris), Oc = meridianChain(G, [10, 0], 0, [0, 1]);
+      const k = Oc.length - 1, a = Oc[k - 1], b = Oc[k];
+      const lipId = [...G.P.keys()].find(id => G.P[id] && Math.abs(G.P[id][1]) < 1e-6 && G.P[id][0] === b[0] && G.P[id][2] === b[1]);
+      const upId = lipId == null ? null : [...G.nb[lipId]].find(q => Math.abs(G.P[q][2] - 58) < 1e-4 && Math.abs(G.P[q][1]) < 1e-6);
+      const c = upId == null ? b : [G.P[upId][0], G.P[upId][2]];
+      const chord = Math.atan2(b[0] - a[0], b[1] - a[1]) * 180 / Math.PI, up = upId == null ? NaN : Math.atan2(c[0] - b[0], c[1] - b[1]) * 180 / Math.PI;
+      check('trumpet + run: the outside face\'s walk ends at the lip, z 48', Math.abs(b[1] - 48) < 1e-4, f3(b[1]));
+      check('trumpet + run: the join is the trumpet\'s lip angle - its last chord ' + f3(chord) + '°, then the run straight up (0°)',
+        k > 0 && up === 0 && chord <= r.lipAngleDeg + 1e-9 && chord > r.lipAngleDeg - 10, f3(chord) + '° then ' + f3(up) + '°');
+      check('trumpet + run: the readout says so - "joined at 49.1°, the trumpet\'s lip angle (the run is parallel to the axis)"',
+        /^Trumpet flare 8\.0 mm at 30\.0° outward, then 10\.0 mm run at Ø29\.24 \/ bore Ø[\d.]+ · wall 1\.60 held/.test(r.reason) &&
+        r.reason.indexOf('joined at 49.1°, the trumpet\'s lip angle (the run is parallel to the axis)') > 0, r.reason);
+      row('Stock tube Ø20/1.6, trumpet 8 mm 30°, run 10', tube, r, ms, 'run ' + dia(R.O.lo) + ' / ' + dia(R.I.lo) + ', joined at ' + f3(r.lipAngleDeg) + '°');
+    }
+  }
+
+  // WALLS + RUN: one face moved; the other runs on, unmoved, through the run
+  for (const [walls, dr, prof] of [['bore', 3, 'straight'], ['outside', -3, 'trumpet']]) {
+    const bore = walls === 'bore', tag = (bore ? 'Bore only +3' : 'Outside only −3') + ' over 10, ' + prof + ', run 20';
+    const r = NSO_tubeEdgeRaw(pipe, { verb: 'flare', length: 10, dr, profile: prof, walls, runMm: 20 });
+    console.log('   ' + r.reason);
+    if (!common(tag, pipe, r)) continue;
+    const R = runRead(r.tris, 50, 70);
+    // the kept face, every vertex of it from the pipe's foot to the run's end
+    let lo = Infinity, hi = -Infinity;
+    for (let t = 0; t < r.tris.length / 9; t++) {
+      const fn = faceNormal(r.tris, t), o = t * 9, cx = (r.tris[o] + r.tris[o + 3] + r.tris[o + 6]) / 3, cy = (r.tris[o + 1] + r.tris[o + 4] + r.tris[o + 7]) / 3;
+      if (Math.abs(fn.n[2]) > 1e-6 || ((fn.n[0] * cx + fn.n[1] * cy) > 0) !== bore) continue;
+      for (let k = 0; k < 3; k++) { const q = Math.hypot(r.tris[o + k * 3], r.tris[o + k * 3 + 1]); lo = Math.min(lo, q); hi = Math.max(hi, q); }
+    }
+    const kept = bore ? 20.31 : 15.234, moved = kept + (bore ? -(5.076 - dr) : (5.076 + dr));
+    check(tag + ': the ' + (bore ? 'outside' : 'bore') + ' keeps its Ø' + (2 * kept).toFixed(2) + ' through the run - every vertex of it, the pipe\'s foot to the run\'s end',
+      Math.abs(lo - kept) <= 1e-4 && Math.abs(hi - kept) <= 1e-4, dia(lo) + '–' + dia(hi));
+    const M = bore ? R.I : R.O;
+    check(tag + ': the run is one cylinder, its ' + (bore ? 'bore' : 'outside') + ' at the lip\'s Ø' + (2 * moved).toFixed(2) + ' - the changed wall, 2.08, kept',
+      R.other === 0 && R.offStation === 0 && R.lipFlat === 0 && Math.abs(M.lo - moved) <= 0.01 && Math.abs(M.hi - moved) <= 0.01 &&
+      Math.abs(r.run.wallMm - 2.076) <= 1e-3, dia(M.lo) + '–' + dia(M.hi) + ', wall ' + f3(r.run.wallMm));
+    check(tag + ': the readout carries the run: ", then 20.0 mm run at Ø' + (2 * Math.max(kept, moved)).toFixed(2) + ' / bore Ø' + (2 * Math.min(kept, moved)).toFixed(2) + ', wall 2.08"',
+      r.reason.indexOf(', then 20.0 mm run at Ø' + (2 * Math.max(kept, moved)).toFixed(2) + ' / bore Ø' + (2 * Math.min(kept, moved)).toFixed(2) + ', wall 2.08') > 0 &&
+      r.reason.indexOf(bore ? 'Bore only: Ø30.47 → Ø36.47 at the lip, outside kept Ø40.62, wall 5.08 → 2.08' : 'Outside only: Ø40.62 → Ø34.62 at the lip, bore kept Ø30.47, wall 5.08 → 2.08') === 0, r.reason);
+    row('Ø40.62/Ø30.47 pipe, ' + tag, pipe, r, 0, 'run ' + dia(R.O.lo) + ' / ' + dia(R.I.lo));
+  }
+
+  // a leaning rim (the Wheel vessel, −0.47°): the run is parallel to the
+  // axis, not to the rim, and its end square to the axis
+  {
+    const V = wheelVessel();
+    const r = NSO_tubeEdgeRaw(V.soup, { verb: 'flare', length: 6, angle: 25, runMm: 8 });
+    console.log('   ' + r.reason);
+    if (common('Wheel vessel, flare 6 mm 25°, run 8', V.soup, r)) {
+      const zE = r.end.center[2] + r.run.endH;
+      let n = 0, off = 0; for (let i = 2; i < r.tris.length; i += 3) if (r.tris[i] > zE - 1e-3) { n++; if (Math.abs(r.tris[i] - zE) > 1e-4) off++; }
+      const Om = r.meridian.outer, Im = r.meridian.inner;
+      check('Wheel vessel + run: the run parallel to the axis (both faces at one radius along it), the end cut square to the axis',
+        n > 0 && off === 0 && Om[Om.length - 1][0] === Om[Om.length - 2][0] && Im[Im.length - 1][0] === Im[Im.length - 2][0] &&
+        Math.abs(Math.max(Om[Om.length - 2][1], Im[Im.length - 2][1]) + 8 - r.run.endH) < 1e-12, n + ' end vertices at z ' + f3(zE));
+    }
+  }
+  // an imported tube along X: the run along +X
+  {
+    const tx = tubeAlongX(80, 48);
+    const r = NSO_tubeEdgeRaw(tx, { verb: 'flare', length: 6, angle: 20, point: [80, 20, 18], runMm: 12 });
+    if (common('imported tube along X, flare + run 12 at its far end', tx, r)) {
+      let top = -Infinity; for (let i = 0; i < r.tris.length; i += 3) top = Math.max(top, r.tris[i]);
+      check('...the run along +X, its end at x 98 (80 + 6 + 12)', Math.abs(top - 98) < 1e-4, f3(top));
+    }
+  }
+
+  // refusals, before building, the piece unchanged
+  const rr = NSO_tubeEdgeRaw(tube, { verb: 'roll', radius: 2, angle: 180, runMm: 10 });
+  console.log('   ' + rr.reason);
+  check('Roll + Run is refused in words: Roll has no lip direction to run along', !rr.ok && rr.tris === tube &&
+    rr.reason === 'a 10.0 mm run is refused on a Roll - a Roll has no lip direction to run along (the wall curls round its bead and stops where the Angle ends). Run is a Flare\'s: set it to 0 to roll', rr.reason);
+  check('...a Roll with Run 0 rolls as before', NSO_tubeEdgeRaw(tube, { verb: 'roll', radius: 2, angle: 180, runMm: 0 }).ok);
+  const rb = NSO_tubeEdgeRaw(tube, { verb: 'flare', length: 8, dr: -8.1, runMm: 30 });
+  console.log('   ' + rb.reason);
+  check('a run whose bore would be under 2 nozzle widths is refused before building, naming the run', !rb.ok && rb.tris === tube && !rb.counts &&
+    /^that flare would close the bore - the Ø16\.80 bore would come to Ø0\.60 at the lip and down its 30\.0 mm run, under the bore limit of Ø0\.80 \(2 nozzle widths at a 0\.4 mm nozzle\)/.test(rb.reason), rb.reason);
+  // a plate floating 20 mm over the tube's end (its own shell): a run into it
+  // is refused by the clearance, a run that stops short of it is not
+  const roofed = new Float32Array([...tube, ...box(-30, -30, 60, 30, 30, 62)]);
+  const rc = NSO_tubeEdgeRaw(roofed, { verb: 'flare', length: 8, angle: 20, runMm: 30 });
+  console.log('   ' + rc.reason);
+  check('a run into the piece is refused by the clearance, naming the run', !rc.ok && rc.tris === roofed &&
+    /^that flare and its run would (run the new wall into|bring the new wall within [\d.]+ mm of) the piece \(20\.0 mm out from the end, [\d.]+ mm from the axis\) - it may come no closer than 0\.40 mm \(one nozzle width\)\. Use a shorter run, or a shorter or shallower flare$/.test(rc.reason), rc.reason);
+  const rc2 = NSO_tubeEdgeRaw(roofed, { verb: 'flare', length: 8, angle: 20, runMm: 10 });
+  check('...and a run stopping 2 mm under it is built', rc2.ok && rc2.counts.trisOut > 0, rc2.reason);
+  const rn = NSO_tubeEdgeRaw(tube, { verb: 'flare', length: 8, dr: 3, runMm: -2 });
+  check('a negative run is refused in words', !rn.ok && rn.tris === tube && /enter a run length in mm, 0 or more/.test(rn.reason), rn.reason);
+}
+
+console.log('\n=== 10. time ===');
 {
   const big = NSO_Stock.revolve(NSO_Stock.profileTube(30, 28, 120), 2000);
   const t0 = Date.now(), r = NSO_tubeEdgeRaw(big, { verb: 'roll', radius: 3, angle: 180 }), ms = Date.now() - t0;
