@@ -256,6 +256,48 @@ console.log('\n=== 5. --sheet: how the sheet\'s lines printed ===');
     m82.map(m => m.e.toFixed(3)).join(', '));
   const nm = AU.sliceNames('<object identify_id="7" name="Tom &amp; Jerry - support 1.1 (Tree)" skipped="false" />');
   check('slice_info names are decoded', nm[7] === 'Tom & Jerry - support 1.1 (Tree)', JSON.stringify(nm[7]));
+  /* a sheet beside other trees' trunks in the same object (one support holds
+     several now): still found, and read */
+  const trunks = layer('B').replace('; stop printing object, unique label id: 2',
+    [0, 1, 2, 3, 4, 5, 6, 7].map(k => { const x0 = 80 + 3 * k; return `G1 X${x0} Y50 F3000\nG1 X${x0 + 2} Y50 E0.07\nG1 X${x0 + 2} Y52 E0.07\nG1 X${x0} Y52 E0.07\nG1 X${x0} Y50 E0.07`; }).join('\n') +
+    '\n; stop printing object, unique label id: 2');
+  const TB = AU.sheetAudit(trunks, { names });
+  check('a chopped sheet beside eight trunk loops of the same object is still read: NOT OK', TB.layers.length === 1 && !TB.layers[0].ok && near(TB.layers[0].passes, 2, 0.05),
+    TB.layers[0] ? `${TB.layers[0].segments} segments, passes ${TB.layers[0].passes.toFixed(3)}` : '0 layers');
+  /* label objects off: objects by '; OBJECT_ID:' */
+  const unl = layer('A').replace(/; start printing object, unique label id: (\d+)/g, '; OBJECT_ID: $1').replace(/; stop printing object, unique label id: \d+/g, '');
+  const UL = AU.sheetAudit(unl, { names });
+  check('label objects off: the objects by OBJECT_ID, the sheet found', UL.layers.length === 1 && UL.layers[0].ok, `${UL.layers.length} layer(s)`);
+  /* registered: the g-code 0.4 mm left of and 0.1 mm above the export, a
+     layer of lines along x and one across it along y (lines one way only
+     pin a shift across them, not along) */
+  const two = ['; start printing object, unique label id: 2', '; Z_HEIGHT: 13.2', '; LAYER_HEIGHT: 0.2'], boxes2 = [];
+  for (let k = 0; k < 10; k++) { const y = 50 + 0.84 * k; two.push(`G1 X${r3(50 - 0.4)} Y${r3(y + 0.1)} F3000`, `G1 X${r3(60 - 0.4)} Y${r3(y + 0.1)} E0.342`); boxes2.push({ obj: names[2], z0: 13.0, z1: 13.2, a: [50, y], b: [60, y] }); }
+  two.push('; Z_HEIGHT: 13.4', '; LAYER_HEIGHT: 0.2');
+  for (let k = 0; k < 10; k++) { const x = 50 + 0.84 * k; two.push(`G1 X${r3(x - 0.4)} Y${r3(50 + 0.1)} F3000`, `G1 X${r3(x - 0.4)} Y${r3(60 + 0.1)} E0.342`); boxes2.push({ obj: names[2], z0: 13.2, z1: 13.4, a: [x, 50], b: [x, 60] }); }
+  two.push('; stop printing object, unique label id: 2');
+  const twoG = head.concat(two).join('\n');
+  const reg = AU.registerShift(AU.extrusions(twoG), names, boxes2);
+  const RG = AU.sheetAudit(twoG, { names, boxes: boxes2, shift: reg && reg.shift });
+  check('registered to the export: the shift found, every line printed', reg && near(reg.shift[0], -0.4, 0.01) && near(reg.shift[1], 0.1, 0.01) && RG.layers.every(l => l.printed === 10),
+    reg ? `shift ${reg.shift.join(', ')}, ${RG.layers.map(l => l.printed).join(' / ')} of 10 printed` : 'no shift');
+  /* with the export, the passes are the toolpath on the lines over their length: lines joined by extruding hops read 1, not NaN */
+  const hops = ['; start printing object, unique label id: 2', '; Z_HEIGHT: 13.2', '; LAYER_HEIGHT: 0.2', 'G1 X50 Y50 F3000'];
+  for (let k = 0; k < 10; k++) { const y = 50 + 0.84 * k; hops.push(`G1 X${k % 2 ? 50 : 60} Y${r3(y)} E${r3(10 * 0.0342)}`); if (k < 9) hops.push(`G1 X${k % 2 ? 50 : 60} Y${r3(y + 0.84)} E0.02`); }
+  hops.push('; stop printing object, unique label id: 2');
+  const HP = AU.sheetAudit(head.concat(hops).join('\n'), { names, boxes: boxes.slice(0, 10) });
+  check('with the export, lines joined by extruding hops: 1.00 pass, not NaN', HP.layers.length === 1 && near(HP.layers[0].passes, 1, 0.02), HP.layers[0] && `passes ${HP.layers[0].passes.toFixed(3)}`);
+  /* the parser: R arcs, full circles, E kept through M83 for a later M82, G92E0 */
+  const rArc = AU.extrusions(['M83', '; Z_HEIGHT: 1', 'G1 X10 Y0 F3000', 'G2 X0 Y-10 R10 E1'].join('\n'));
+  const circ = AU.extrusions(['M83', '; Z_HEIGHT: 1', 'G1 X10 Y0 F3000', 'G2 X10 Y0 I-5 J0 E1.5'].join('\n'));
+  check('an R arc counts its arc (15.708 mm), a full circle its round (31.416 mm)', rArc.length === 1 && near(rArc[0].len, Math.PI * 5, 1e-6) && circ.length === 1 && near(circ[0].len, Math.PI * 10, 1e-6),
+    `${rArc[0] && rArc[0].len.toFixed(4)}, ${circ[0] && circ[0].len.toFixed(4)}`);
+  const eK = AU.extrusions(['M83', '; Z_HEIGHT: 1', 'G1 X10 Y0 E5', 'M82', 'G1 X20 Y0 E5.4', 'G92E0', 'G1 X30 Y0 E0.4'].join('\n'));
+  check('E kept through M83 for a later M82, and G92E0 read', eK.length === 3 && near(eK[1].e, 0.4, 1e-9) && near(eK[2].e, 0.4, 1e-9), eK.map(m => m.e.toFixed(3)).join(', '));
+  /* the reference: the slicer's interface under the part, not under an NSO support */
+  const refG = head.concat(['; start printing object, unique label id: 2', '; Z_HEIGHT: 12.0', '; LAYER_HEIGHT: 0.2', '; FEATURE: Support interface', 'G1 X0 Y0 F3000', 'G1 X10 Y0 E0.3',
+    '; stop printing object, unique label id: 2']).join('\n');
+  check('the reference leaves out interface printed under an NSO support', AU.sheetAudit(refG, { names }).reference.length === 0);
   /* a print of 200k moves: no spread into one call */
   const big = ['M83', '; FEATURE: Outer wall'];
   for (let k = 0; k < 2000; k++) { big.push('; Z_HEIGHT: ' + (0.2 * (k + 1)).toFixed(1)); for (let q = 0; q < 100; q++) big.push(`G1 X${q % 2 ? 10 : 0} Y${q} E0.3`); }

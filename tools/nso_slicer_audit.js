@@ -59,7 +59,9 @@
      node tools/nso_slicer_audit.js export.3mf
      node tools/nso_slicer_audit.js export.3mf --gcode sliced.gcode.3mf --shift -2.25,0
      node tools/nso_slicer_audit.js --sheet sliced.gcode.3mf [--export export.3mf] [--shift dx,dy]
-                                    the interface sheet as printed (THE SHEET, AS PRINTED, below)
+                                    the interface sheet as printed (THE SHEET, AS PRINTED, below),
+                                    every plate in the file; with --export and no --shift the
+                                    g-code is registered to the export by its objects
      options: --supports 2-12   object ids that are supports (default: every
                                 object named "... - support N.M (...)")
               --json            the full result as JSON
@@ -374,8 +376,8 @@ function calibrate(res, bambu) {
    as model geometry, so a line becomes walls - and, with classic walls and
    thin walls off, a 0.42 mm line is a loop round a sliver (out and back, two
    passes) cut into 0.02 - 0.35 mm pieces wherever its overhang speed grade
-   changes, and a line of 7.14 mm^2 or more is not printed at all
-   (docs/SUPPORT-INTERFACE.md). Per sheet layer of every support object:
+   changes (docs/SUPPORT-INTERFACE.md). Per sheet layer of every support
+   object:
      segments     extrusion moves in the layer's sheet lines
      mean / median segment length, and the share of the extruded length in
                   segments under SEGMENT_MIN_MM
@@ -389,17 +391,22 @@ function calibrate(res, bambu) {
    A layer is OK when the E per mm of line is RATIO_TARGET +- RATIO_TOL of the
    outer wall's and at least SEGMENT_SHARE of its toolpath is in segments of
    SEGMENT_MIN_MM or more.
-   A SHEET LAYER is one whose toolpath is mostly THIN CHAINS: unbroken runs
-   of extrusion no wider across than THIN_MM - a sheet line printed in one
-   pass, or as a loop round a sliver - where a column's loop, a cap's or a
-   pad's are as wide as the column, cap or pad. With --export (the NSO 3MF
-   that was sliced) the sheet's own lines are read off the export instead:
+   A SHEET LAYER is one with MIN_SHEET_MM of THIN CHAINS, MIN_SHEET_CHAINS
+   or more: unbroken runs of extrusion no wider across than THIN_MM - a
+   sheet line printed in one pass, or as a loop round a sliver - where a
+   column's loop, a cap's or a pad's are as wide as the column, cap or pad
+   (arcs measured along themselves), whatever else the object prints at that
+   z - one support holds several trees now (shareFeet). With --export (the
+   NSO 3MF that was sliced) the sheet's own lines are read off the export
+   instead, the g-code registered to it (registerShift, unless --shift):
    only the moves on them are counted (a trunk or cap of the same object at
-   that z is not), and each line is counted printed (its centreline covered
-   by toolpath for COVER_SHARE of its length) or missing.
+   that z is not), the passes are their toolpath over the lines printed,
+   and each line is counted printed (its centreline covered by toolpath for
+   COVER_SHARE of its length) or missing. The reference is the slicer's own
+   support interface under the part (not under an NSO support).
    sheetAudit(gcode, { names, boxes, shift }) -> { outerWallEmm, layers, ok } */
 const SEGMENT_MIN_MM = 2, SEGMENT_SHARE = 0.9, RATIO_TARGET = 1, RATIO_TOL = 0.15;
-const THIN_MM = 0.6, PASS_NEAR_MM = 0.3, COVER_SHARE = 0.8, THIN_SHARE = 0.75, MIN_SHEET_MM = 10;   /* PASS_NEAR_MM: a line is printed where toolpath runs this close to its centreline */
+const THIN_MM = 0.6, PASS_NEAR_MM = 0.3, COVER_SHARE = 0.8, MIN_SHEET_MM = 10, MIN_SHEET_CHAINS = 3;   /* PASS_NEAR_MM: a line is printed where toolpath runs this close to its centreline */
 
 /* Every extrusion move: { z, h, feat, obj, x0, y0, x1, y1, e, len, chain }.
    G2/G3 arcs with E count as one move of their arc length, and carry pts:
@@ -410,6 +417,8 @@ const THIN_MM = 0.6, PASS_NEAR_MM = 0.3, COVER_SHARE = 0.8, THIN_SHARE = 0.75, M
 function extrusions(gcode) {
   const out = [];
   let x = 0, y = 0, z = null, h = null, feat = null, obj = null, rel = false, chain = 0, prevZ = 0, absE = false, lastE = 0;
+  /* objects by their labels, or - label objects off - by '; OBJECT_ID:' */
+  const labelled = gcode.includes('; start printing object');
   for (const line of gcode.split('\n')) {
     if (line.startsWith('; Z_HEIGHT:')) { prevZ = z == null ? 0 : z; z = parseFloat(line.slice(11)); chain++; continue; }
     if (line.startsWith('; LAYER_HEIGHT:')) { h = parseFloat(line.slice(15)); continue; }
@@ -417,30 +426,43 @@ function extrusions(gcode) {
     let m = /^; start printing object, unique label id: (\d+)/.exec(line);
     if (m) { obj = +m[1]; chain++; continue; }
     if (line.startsWith('; stop printing object')) { obj = null; chain++; continue; }
+    if (!labelled && line.startsWith('; OBJECT_ID:')) { obj = parseInt(line.slice(12), 10); chain++; continue; }
     const s = line.split(';')[0].trim();
     if (!s) continue;
     if (s.startsWith('G90')) { rel = false; continue; }
     if (s.startsWith('G91')) { rel = true; continue; }
     if (/^M82\b/.test(s)) { absE = true; continue; }
     if (/^M83\b/.test(s)) { absE = false; continue; }
-    if (/^G92\b/.test(s)) { const me = /\bE(-?[\d.]+)/.exec(s); if (me) lastE = parseFloat(me[1]); continue; }
+    if (/^G92(?![0-9])/.test(s)) { const me = /E(-?[\d.]+)/.exec(s); if (me) lastE = parseFloat(me[1]); continue; }
     const g = /^G([0-3])\s/.exec(s + ' ');
     if (!g) continue;
-    let nx = x, ny = y, e = null, I = 0, J = 0;
+    let nx = x, ny = y, e = null, I = 0, J = 0, Rr = null;
     for (const w of s.split(/\s+/).slice(1)) {
       const v = parseFloat(w.slice(1));
       if (!isFinite(v)) continue;
       if (w[0] === 'X') nx = (rel ? x : 0) + v; else if (w[0] === 'Y') ny = (rel ? y : 0) + v;
-      else if (w[0] === 'E') e = v; else if (w[0] === 'I') I = v; else if (w[0] === 'J') J = v;
+      else if (w[0] === 'E') e = v; else if (w[0] === 'I') I = v; else if (w[0] === 'J') J = v; else if (w[0] === 'R') Rr = v;
     }
-    if (e != null && absE) { const de = e - lastE; lastE = e; e = de; }
-    const moved = nx !== x || ny !== y;
+    /* E as the move's own filament: absolute (M82) from the last E, and the
+       last E kept up in relative mode too, for a later M82 */
+    if (e != null) { if (absE) { const de = e - lastE; lastE = e; e = de; } else lastE += e; }
+    const arc = g[1] === '2' || g[1] === '3';
+    /* an R arc: its centre off the chord's middle, on the side its turn and
+       R's sign say (a negative R takes the long way round) */
+    if (arc && Rr != null && (nx !== x || ny !== y)) {
+      const c2 = Math.hypot(nx - x, ny - y) / 2, hh = Math.sqrt(Math.max(0, Rr * Rr - c2 * c2)), ux = (nx - x) / (2 * c2), uy = (ny - y) / (2 * c2);
+      const sgn = (g[1] === '3' ? 1 : -1) * (Rr < 0 ? -1 : 1);
+      I = (nx - x) / 2 - sgn * uy * hh; J = (ny - y) / 2 + sgn * ux * hh;
+    }
+    const full = arc && nx === x && ny === y && (I !== 0 || J !== 0);
+    const moved = nx !== x || ny !== y || full;
     if (moved && e > 0 && z != null) {
       let len = Math.hypot(nx - x, ny - y), pts = null;
-      if (g[1] === '2' || g[1] === '3') {
+      if (arc && (I !== 0 || J !== 0)) {
         const cx = x + I, cy = y + J, r = Math.hypot(I, J);
         let a0 = Math.atan2(y - cy, x - cx), a1 = Math.atan2(ny - cy, nx - cx), da = a1 - a0;
-        if (g[1] === '3') { while (da <= 0) da += 2 * Math.PI; } else { while (da >= 0) da -= 2 * Math.PI; }
+        if (full) da = g[1] === '3' ? 2 * Math.PI : -2 * Math.PI;
+        else if (g[1] === '3') { while (da <= 0) da += 2 * Math.PI; } else { while (da >= 0) da -= 2 * Math.PI; }
         len = r * Math.abs(da);
         const n = Math.max(2, Math.ceil(len / 0.2));
         pts = [];
@@ -462,6 +484,62 @@ function sliceNames(xml) {
     k[0] === '#' ? String.fromCodePoint(k[1] === 'x' || k[1] === 'X' ? parseInt(k.slice(2), 16) : +k.slice(1)) : ent[k.toLowerCase()]);
   for (const m of String(xml || '').matchAll(/<object\s+identify_id="(\d+)"\s+name="([^"]*)"/g)) names[+m[1]] = decode(m[2]);
   return names;
+}
+/* Where the slicer put the export: the shift (g-code minus export) that
+   lays the most of the export's sheet lines on toolpath of their own object
+   and layer - a search over +-1.5 mm, then a finer one round the best.
+   Bambu Studio arranges the plate: the 2026-10-20 slice sits 0.425 mm off
+   its export in x, and unregistered its diagonal sheet lines read as
+   missing. The objects' own extents do not register it: a brim, a pad, a
+   wall the slicer drops each move a middle by more than that. */
+function registerShift(moves, names, boxes) {
+  if (!boxes || !boxes.length) return null;
+  const CELL = 0.25, grid = new Map(), key = (i, j) => i + ',' + j;
+  const zs = boxes.map(b => [b.obj, b.z0, b.z1]);
+  for (const m of moves) {
+    const nm = names[m.obj]; if (nm == null) continue;
+    const zm = m.z - (m.h || 0.2) / 2;
+    if (!zs.some(q => q[0] === nm && q[1] < zm && q[2] > zm)) continue;
+    const P = movePts(m);
+    for (let q = 0; q + 1 < P.length; q++) {
+      const n = Math.max(1, Math.ceil(Math.hypot(P[q + 1][0] - P[q][0], P[q + 1][1] - P[q][1]) / 0.05));
+      for (let r = 0; r <= n; r++) {
+        const x = P[q][0] + (P[q + 1][0] - P[q][0]) * r / n, y = P[q][1] + (P[q + 1][1] - P[q][1]) * r / n, k = key(Math.floor(x / CELL), Math.floor(y / CELL));
+        if (!grid.has(k)) grid.set(k, []); grid.get(k).push(x, y);
+      }
+    }
+  }
+  if (!grid.size) return null;
+  const samples = [];
+  for (const b of boxes) {
+    const L = Math.hypot(b.b[0] - b.a[0], b.b[1] - b.a[1]), n = Math.max(2, Math.ceil(L / 0.25));
+    for (let q = 1; q < n; q++) samples.push([b.a[0] + (b.b[0] - b.a[0]) * q / n, b.a[1] + (b.b[1] - b.a[1]) * q / n]);
+  }
+  /* the samples within tol of toolpath, and how near they are in all */
+  const score = (dx, dy, tol, every) => {
+    let hit = 0, sum = 0;
+    for (let si = 0; si < samples.length; si += every) {
+      const p = samples[si];
+      const x = p[0] + dx, y = p[1] + dy, i0 = Math.floor(x / CELL), j0 = Math.floor(y / CELL);
+      let d = Infinity;
+      for (let i = i0 - 1; i <= i0 + 1; i++) for (let j = j0 - 1; j <= j0 + 1; j++) {
+        const l = grid.get(key(i, j)); if (!l) continue;
+        for (let k = 0; k < l.length; k += 2) if (Math.abs(l[k] - x) <= tol && Math.abs(l[k + 1] - y) <= tol) d = Math.min(d, Math.hypot(l[k] - x, l[k + 1] - y));
+      }
+      if (d <= tol) { hit++; sum += d; }
+    }
+    return { hit, sum };
+  };
+  let best = null;
+  for (const [span, step, tol, every] of [[1.5, 0.1, 0.15, 3], [0.15, 0.02, 0.06, 1], [0.03, 0.005, 0.03, 1]]) {
+    const cx = best ? best.dx : 0, cy = best ? best.dy : 0;
+    best = null;
+    for (let dx = cx - span; dx <= cx + span + 1e-9; dx += step) for (let dy = cy - span; dy <= cy + span + 1e-9; dy += step) {
+      const sc = score(dx, dy, tol, every);
+      if (!best || sc.hit > best.hit || (sc.hit === best.hit && sc.sum < best.sum)) best = { dx, dy, hit: sc.hit, sum: sc.sum };
+    }
+  }
+  return { shift: [+best.dx.toFixed(3), +best.dy.toFixed(3)], share: best.hit / samples.length };
 }
 /* the lowest z of a list of moves, without spreading it into one call (a
    print has hundreds of thousands) */
@@ -528,26 +606,45 @@ function sheetAudit(gcode, opts) {
     if (z <= first + 1e-6) continue;                                               /* the first layer is the pads */
     const chains = new Map();
     ms.forEach(m => { if (!chains.has(m.chain)) chains.set(m.chain, []); chains.get(m.chain).push(m); });
-    let thinLen = 0, allLen = 0, thinAlong = 0;
+    let thinLen = 0, allLen = 0, thinAlong = 0, thinChains = 0;
     const sheetMoves = [];
     for (const c of chains.values()) {
       const sh = chainShape(c);
       allLen += sh.len;
-      if (sh.across <= THIN_MM && sh.along >= SEGMENT_MIN_MM / 2) { thinLen += sh.len; thinAlong += sh.along; sheetMoves.push(...c); }
+      if (sh.across <= THIN_MM && sh.along >= SEGMENT_MIN_MM / 2) { thinLen += sh.len; thinAlong += sh.along; thinChains++; sheetMoves.push(...c); }
     }
     let lines = null;
     if (opts.boxes) {
       lines = opts.boxes.filter(b => b.obj === names[obj] && b.z0 < zs && b.z1 > zs);
       if (!lines.length) continue;
-    } else if (!(allLen >= MIN_SHEET_MM && thinLen / allLen >= THIN_SHARE)) continue;
+    } else if (!(thinLen >= MIN_SHEET_MM && thinChains >= MIN_SHEET_CHAINS)) continue;     /* a sheet beside an object's trunks is still a sheet */
     /* with the export's lines, the moves ON them - not the columns, caps or
        trunks of the same object that pass this z */
-    const onLine = m => { const mx = (m.x0 + m.x1) / 2 - shift[0], my = (m.y0 + m.y1) / 2 - shift[1];
-      return lines.some(b => segDist([mx, my], b.a, b.b) <= (b.widthMm || 0.43) / 2 + PASS_NEAR_MM); };
+    /* a move is on the lines when COVER_SHARE of its length runs near one
+       AND along it (within 45 deg): a hop from one line's end to the next
+       is near both and along neither */
+    const onLine = m => {
+      const P = movePts(m);
+      let on = 0, tot = 0;
+      for (let q = 0; q + 1 < P.length; q++) {
+        const ax = P[q][0], ay = P[q][1], bx = P[q + 1][0], by = P[q + 1][1], L0 = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.ceil(L0 / 0.2));
+        for (let r = 0; r < n; r++) {
+          const l = L0 / n, mid = [ax + (bx - ax) * (r + 0.5) / n - shift[0], ay + (by - ay) * (r + 0.5) / n - shift[1]];
+          tot += l;
+          if (lines.some(b => {
+            if (segDist(mid, b.a, b.b) > (b.widthMm || 0.43) / 2 + PASS_NEAR_MM) return false;
+            if (L0 < 0.05) return true;
+            const lx = b.b[0] - b.a[0], ly = b.b[1] - b.a[1];
+            return Math.abs(((bx - ax) * lx + (by - ay) * ly) / (L0 * Math.hypot(lx, ly))) >= Math.SQRT1_2;
+          })) on += l;
+        }
+      }
+      return tot > 0 && on >= COVER_SHARE * tot;
+    };
     const use = lines ? ms.filter(onLine) : sheetMoves;
     const segs = use.map(m => m.len).sort((a, b) => a - b), L = segs.reduce((s, v) => s + v, 0), E = use.reduce((s, m) => s + m.e, 0);
     const shortLen = segs.filter(v => v < SEGMENT_MIN_MM).reduce((s, v) => s + v, 0);
-    const passes = thinAlong > 0 ? thinLen / thinAlong : NaN;
+    let passes = thinAlong > 0 ? thinLen / thinAlong : NaN;
     const rec = { object: obj, name: names[obj] || String(obj), z, sliceZ: zs, segments: segs.length, meanSegMm: L / Math.max(1, segs.length),
                   medianSegMm: segs.length ? segs[segs.length >> 1] : 0, shortSegments: segs.filter(v => v < SEGMENT_MIN_MM).length,
                   longShare: L > 0 ? 1 - shortLen / L : 0, toolpathMm: L, eMm: L > 0 ? E / L : NaN, ratio: L > 0 ? E / L / ow : NaN, passes };
@@ -570,6 +667,10 @@ function sheetAudit(gcode, opts) {
         if (c / (n - 1) >= COVER_SHARE) printed++; else missing.push(+len.toFixed(2));
       });
       rec.exportLines = lines.length; rec.printed = printed; rec.missingMm = missing.sort((a, b) => b - a);
+      /* with the export, the passes are the toolpath on its lines over the lines printed */
+      const printedMm = lines.reduce((s2, b) => s2 + Math.hypot(b.b[0] - b.a[0], b.b[1] - b.a[1]), 0) - missing.reduce((s2, v) => s2 + v, 0);
+      rec.passes = printedMm > 0 ? L / printedMm : NaN;
+      rec.lineRatio = rec.ratio * rec.passes;
     }
     rec.ok = Math.abs(rec.lineRatio - RATIO_TARGET) <= RATIO_TOL && rec.longShare >= SEGMENT_SHARE && (!lines || rec.printed === lines.length);
     layers.push(rec);
@@ -578,7 +679,7 @@ function sheetAudit(gcode, opts) {
   /* the slicer's OWN interface, where it printed one (a reference: Bambu's
      tree on the same coupon), layer by layer */
   const ref = new Map();
-  for (const m of all) if (m.feat === 'Support interface') { const k = m.z.toFixed(3); if (!ref.has(k)) ref.set(k, []); ref.get(k).push(m); }
+  for (const m of all) if (m.feat === 'Support interface' && !isSupport(m.obj)) { const k = m.z.toFixed(3); if (!ref.has(k)) ref.set(k, []); ref.get(k).push(m); }
   const reference = [...ref.values()].map(ms => {
     const segs = ms.map(m => m.len).sort((a, b) => a - b), L = segs.reduce((s, v) => s + v, 0), E = ms.reduce((s, m) => s + m.e, 0);
     const shortLen = segs.filter(v => v < SEGMENT_MIN_MM).reduce((s, v) => s + v, 0);
@@ -624,7 +725,7 @@ function exportSheetBoxes(objects) {
   return out;
 }
 
-module.exports = { audit, bambuInterface, calibrate, interfacePoints, sheetAudit, extrusions, sliceNames, exportSheetBoxes,
+module.exports = { audit, bambuInterface, calibrate, interfacePoints, sheetAudit, extrusions, sliceNames, exportSheetBoxes, registerShift,
                    MAX_FROM_VERTICAL_DEG, LAYER_MM, MATCH_XY_MM, MATCH_DZ_MM, IFACE_REACH_MM,
                    SHEET: { SEGMENT_MIN_MM, SEGMENT_SHARE, RATIO_TARGET, RATIO_TOL, THIN_MM, PASS_NEAR_MM, COVER_SHARE } };
 
@@ -699,41 +800,57 @@ async function sheetMain(argv, fs, R) {
   const opt = name => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : null; };
   const gfile = opt('--sheet');
   if (!gfile || !/\.3mf$/i.test(gfile)) { console.log('usage: node tools/nso_slicer_audit.js --sheet sliced.gcode.3mf [--export export.3mf] [--shift dx,dy] [--json]'); return 2; }
+  let shiftArg = null;
+  if (opt('--shift') != null) {
+    shiftArg = String(opt('--shift')).split(',').map(Number);
+    if (shiftArg.length !== 2 || !shiftArg.every(isFinite)) { console.log('--shift takes two numbers, dx,dy (g-code minus export), e.g. --shift -0.425,0'); return 2; }
+  }
   const dec = new TextDecoder();
   const zip = R.openZip(new Uint8Array(fs.readFileSync(gfile)));
-  const gname = zip.names().find(n => /plate_\d+\.gcode$/.test(n));
-  if (!gname) { console.log(path.basename(gfile) + ': no Metadata/plate_N.gcode in it - slice the plate and save the .gcode.3mf'); return 2; }
-  const gcode = dec.decode(await zip.read(gname));
+  /* every plate the file holds, in order */
+  const plates = zip.names().filter(n => /plate_\d+\.gcode$/.test(n)).sort((u, v) => +/(\d+)\.gcode$/.exec(u)[1] - +/(\d+)\.gcode$/.exec(v)[1]);
+  if (!plates.length) { console.log(path.basename(gfile) + ': no Metadata/plate_N.gcode in it - slice the plate and save the .gcode.3mf'); return 2; }
   const info = zip.names().includes('Metadata/slice_info.config') ? dec.decode(await zip.read('Metadata/slice_info.config')) : '';
   const names = sliceNames(info);
-  let boxes = null;
+  let boxes = null, objects = null;
   if (opt('--export')) {
     const parsed = await R.parse3MF(new Uint8Array(fs.readFileSync(opt('--export'))), { name: path.basename(opt('--export')) });
-    boxes = exportSheetBoxes(parsed.objects.map(o => ({ name: o.name || '', soup: new Float32Array(o.positions) })));
+    objects = parsed.objects.map(o => ({ name: o.name || '', soup: new Float32Array(o.positions) }));
+    boxes = exportSheetBoxes(objects);
   }
-  const shift = (opt('--shift') || '0,0').split(',').map(Number);
-  const r = sheetAudit(gcode, { names, boxes, shift });
-  if (argv.includes('--json')) { console.log(JSON.stringify(r, null, 1)); return 0; }
-  const T = r.target, f2 = v => (+v).toFixed(2), f4 = v => (+v).toFixed(4);
-  console.log(`${path.basename(gfile)}: the sheet as printed - outer wall ${f4(r.outerWallEmm)} E/mm; target: E per mm of line ` +
-              `${f2(T.ratio)} +- ${f2(T.tol)} x the outer wall's, ${Math.round(100 * T.segmentShare)} % of the toolpath in segments of ${T.segmentMinMm} mm or more`);
-  if (!r.layers.length) console.log('  no NSO sheet layer found' + (boxes ? ' (the export has ' + boxes.length + ' sheet lines)' : ''));
-  let last = null;
-  for (const L of r.layers) {
-    if (L.name !== last) { console.log('  ' + L.name); last = L.name; }
-    console.log(`    z ${L.z.toFixed(2)}: ${L.segments} segments, mean ${f2(L.meanSegMm)} mm (median ${f2(L.medianSegMm)}), ` +
-                `${Math.round(100 * L.longShare)} % of ${L.toolpathMm.toFixed(0)} mm in segments >= ${T.segmentMinMm} mm; ` +
-                `E/mm ${f4(L.eMm)} = ${f2(L.ratio)} x outer wall; ${f2(L.passes)} passes -> ${f2(L.lineRatio)} x per mm of line` +
-                (L.exportLines != null ? `; ${L.printed} of ${L.exportLines} lines printed` + (L.missingMm.length ? ' (missing: ' + L.missingMm.join(', ') + ' mm)' : '') : '') +
-                `   ${L.ok ? 'OK' : 'NOT OK'}`);
+  const results = [];
+  for (const gname of plates) {
+    const gcode = dec.decode(await zip.read(gname));
+    let shift = shiftArg || [0, 0], reg = null;
+    if (!shiftArg && boxes) { reg = registerShift(extrusions(gcode), names, boxes); if (reg) shift = reg.shift; }
+    results.push({ plate: gname, shift, reg, r: sheetAudit(gcode, { names, boxes, shift }) });
   }
-  if (r.reference.length) {
-    console.log('  the slicer\'s own support interface (reference):');
-    r.reference.forEach(L => console.log(`    z ${L.z.toFixed(2)}: ${L.segments} segments, mean ${f2(L.meanSegMm)} mm (median ${f2(L.medianSegMm)}), ` +
-      `${Math.round(100 * L.longShare)} % of ${L.toolpathMm.toFixed(0)} mm in segments >= ${T.segmentMinMm} mm; E/mm ${f4(L.eMm)} = ${f2(L.ratio)} x outer wall`));
+  if (argv.includes('--json')) { console.log(JSON.stringify(results.length === 1 ? results[0].r : results, null, 1)); return 0; }
+  const f2 = v => (+v).toFixed(2), f3 = v => (+v).toFixed(3), f4 = v => (+v).toFixed(4);
+  for (const { plate, shift, reg, r } of results) {
+    const T = r.target;
+    console.log(`${path.basename(gfile)}${plates.length > 1 ? ' ' + path.basename(plate) : ''}: the sheet as printed - outer wall ${f4(r.outerWallEmm)} E/mm; target: E per mm of line ` +
+                `${f2(T.ratio)} +- ${f2(T.tol)} x the outer wall's, ${Math.round(100 * T.segmentShare)} % of the toolpath in segments of ${T.segmentMinMm} mm or more`);
+    if (boxes) console.log(`  registered to the export: shift ${f3(shift[0])}, ${f3(shift[1])} mm` +
+      (shiftArg ? ' (--shift)' : reg ? ` (laying ${Math.round(100 * reg.share)} % of the export's sheet lines on toolpath)` : ' (no sheet line on toolpath of its object: unregistered)'));
+    if (!r.layers.length) console.log('  no NSO sheet layer found' + (boxes ? ' (the export has ' + boxes.length + ' sheet lines)' : ''));
+    let last = null;
+    for (const L of r.layers) {
+      if (L.name !== last) { console.log('  ' + L.name); last = L.name; }
+      console.log(`    z ${L.z.toFixed(2)}: ${L.segments} segments, mean ${f2(L.meanSegMm)} mm (median ${f2(L.medianSegMm)}), ` +
+                  `${Math.round(100 * L.longShare)} % of ${L.toolpathMm.toFixed(0)} mm in segments >= ${T.segmentMinMm} mm; ` +
+                  `E/mm ${f4(L.eMm)} = ${f2(L.ratio)} x outer wall; ${f2(L.passes)} passes -> ${f2(L.lineRatio)} x per mm of line` +
+                  (L.exportLines != null ? `; ${L.printed} of ${L.exportLines} lines printed` + (L.missingMm.length ? ' (missing: ' + L.missingMm.join(', ') + ' mm)' : '') : '') +
+                  `   ${L.ok ? 'OK' : 'NOT OK'}`);
+    }
+    if (r.reference.length) {
+      console.log('  the slicer\'s own support interface, under the part (reference):');
+      r.reference.forEach(L => console.log(`    z ${L.z.toFixed(2)}: ${L.segments} segments, mean ${f2(L.meanSegMm)} mm (median ${f2(L.medianSegMm)}), ` +
+        `${Math.round(100 * L.longShare)} % of ${L.toolpathMm.toFixed(0)} mm in segments >= ${T.segmentMinMm} mm; E/mm ${f4(L.eMm)} = ${f2(L.ratio)} x outer wall`));
+    }
+    console.log(!r.layers.length ? 'sheet: no NSO sheet layer in this file' :
+      r.ok ? 'sheet: every layer OK' : 'sheet: ' + r.layers.filter(l => !l.ok).length + ' of ' + r.layers.length + ' layer(s) NOT OK');
   }
-  console.log(!r.layers.length ? 'sheet: no NSO sheet layer in this file' :
-    r.ok ? 'sheet: every layer OK' : 'sheet: ' + r.layers.filter(l => !l.ok).length + ' of ' + r.layers.length + ' layer(s) NOT OK');
   return 0;
 }
 

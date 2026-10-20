@@ -486,10 +486,11 @@
      on the 2026-10-20 export, 16-20 % of a line crossing tip columns (the
      union's corners are all the offset has to hold on to) - the short pieces
      with holes between them; from 0.4225 up every line is one unbroken pass.
-     Bambu Studio (classic walls, thin walls off) rescues a short 0.42 strip
-     as a 0.3785 loop - out and back, two passes - and drops a strip of
-     7.14 mm^2 or more (17 mm of line) altogether: the coupon's two 22 mm
-     lines are missing from every sheet layer of slice_w_supports.gcode.3mf.
+     Bambu Studio (classic walls, thin walls off) prints a 0.42 strip as a
+     loop round a sliver - out and back, two passes, 1.8 x the bead per mm
+     of line on slice_w_supports.gcode.3mf - in 0.02 - 0.35 mm pieces; every
+     line of that slice was printed, registered to its export (an earlier
+     reading of two 22 mm lines as missing was the plate's 0.42 mm offset).
 
      OPEN LINES, NOT A BOUSTROPHEDON. nso_crosshatch.js refuses end turns at a
      0.84 mm pitch with a 0.42 mm line (clearance 0, measured: a turn there
@@ -514,7 +515,12 @@
      under the cap's top and inside the cap's height (the rise is never less
      than that and CAP_TUCK_MM again: a strut of 2.7 mm would end under a
      2 mm cap's foot); the end's corners may stand out of the cap's flank,
-     where the column stood before it was cut. The cap's top stands
+     where the column stood before it was cut. Its top CAP_BAND_MM stands
+     upright: I1's underside, CAP_INTO_MM under the top, cuts that band and
+     not the flank - cut 10 um from its end, the kernel retriangulated the
+     whole 2 mm flank into needles, which NSO's slicer could not close
+     (the wedge's weld lost a cap's section at z 6.83; the clamp's an I1
+     line, the union taken the other way). The cap's top stands
      CAP_INTO_MM into I1, not EPS_MM:
      under a 2 um overlap the union of a line's side with ~170 caps' tops left
      slivers it read as piercing (one on the clamp's area 1). Standing the
@@ -600,6 +606,7 @@
   var CAP_SIDES = 32;          /* the cap's rim, sampled for its clearance */
   var CAP_PART_MM = 0.05;      /* a cap stops this far short of its neighbour's: caps never overlap (see THE CAPS) */
   var CAP_INTO_MM = 0.01;      /* a cap's flat top stands this far into I1 (see THE CAPS) */
+  var CAP_BAND_MM = 0.02;      /* a cap's top band: upright, this tall, so I1's underside cuts it and not the flank (see THE CAPS) */
   var LINE_ANGLES = [0, 90, 26.565051177077994, 116.56505117707799, 63.43494882292201, 153.43494882292202, 45, 135];
 
   function sheet(piece, stations, opts) {
@@ -954,7 +961,7 @@
           if (w <= o.side + 1e-9 + CAP_STEP_MM && w - CAP_STEP_MM <= o.side + 1e-9) { w = o.side; break; }
         }
         if (!c) { t.cap = null; t.capWhy = 'no room for a cap: the column\'s own top'; return; }
-        t.cap = { c: c, b: t.capFoot.slice(), w: w, z0: zCap - o.capRise, z1: zCap, footD: CAP_FOOT * o.side, nnMm: nnTop, why: why,
+        t.cap = { c: c, b: t.capFoot.slice(), w: w, z0: zCap - o.capRise, z1: zCap, footD: CAP_FOOT * o.side, band: CAP_BAND_MM, nnMm: nnTop, why: why,
                   slidMm: Math.hypot(c[0] - t.top[0], c[1] - t.top[1]) };
         t.capWhy = why;
       });
@@ -1000,9 +1007,31 @@
       function noCap(t, why) { t.cap = null; t.capWhy = why; t.top = bareTop(t); }
       var pending = live.filter(function (t) { return t.cap; });
       live.forEach(function (t) { if (!t.cap) t.top = bareTop(t); });
+      /* THE LEVELS BUILT BEFORE THIS ONE: their caps and bare tops standing
+         within a cap's rise of this level hold this level's caps CAP_PART_MM
+         short too - on a tilted ceiling each row of tips is a level of its
+         own, 3 mm from the next row's, and caps sized row by row overlapped
+         with their tops 12 - 74 um apart */
+      var others = [];
+      levels.forEach(function (M) {
+        if (M === L || !M.ok || !M.res) return;
+        if (!(Math.abs(M.res.zCap - zCap) < o.capRise)) return;
+        M.tips.forEach(function (u) { if (u.mode === 'sheet' && (u.cap || u.top)) others.push(u); });
+      });
       for (var settle = 0; settle < 64; settle++) {
         var changed = false;
         live.forEach(function (t) {
+          if (!t.cap) return;
+          others.forEach(function (u) {
+            if (!t.cap) return;
+            var at = u.cap ? u.cap.c : u.top, reachU = u.cap ? u.cap.w / 2 : o.side * Math.SQRT1_2;
+            var room = Math.hypot(t.cap.c[0] - at[0], t.cap.c[1] - at[1]) - reachU - CAP_PART_MM;
+            if (t.cap.w / 2 > room + 1e-9) {
+              t.cap.w = Math.max(0, 2 * room); t.cap.why = t.capWhy = 'held short of a neighbour of another level ' + Math.hypot(t.cap.c[0] - at[0], t.cap.c[1] - at[1]).toFixed(2) + ' mm away';
+              changed = true;
+              if (t.cap.w <= o.side + 1e-9) noCap(t, 'no room for a cap: the column\'s own top');
+            }
+          });
           if (!t.cap) return;
           live.forEach(function (u) {
             if (u === t || u.cap || !t.cap) return;
@@ -1231,7 +1260,7 @@
       cap: { riseMm: o.capRise, minMm: o.capMin, maxMm: o.capMax, gapMaxMm: CAP_GAP_MAX_MM, tuckMm: CAP_TUCK_MM, foot: CAP_FOOT },
       levels: lv, failed: levels.filter(function (L) { return !L.ok; }).map(function (L) { return { id: L.id, zTop: L.first, reason: L.reason }; }),
       tips: tips.map(function (t) {
-        var cap = t.mode === 'sheet' && t.cap ? { c: t.cap.c, b: t.cap.b, w: t.cap.w, z0: t.cap.z0, z1: t.cap.z1, footD: t.cap.footD, why: t.cap.why } : null;
+        var cap = t.mode === 'sheet' && t.cap ? { c: t.cap.c, b: t.cap.b, w: t.cap.w, z0: t.cap.z0, z1: t.cap.z1, footD: t.cap.footD, band: t.cap.band, why: t.cap.why } : null;
         return { i: t.i, label: t.label, beacon: t.beacon, col: t.col, mode: t.mode, level: t.level, carried: t.mode === 'sheet' ? t.carried !== false : null,
                  zTop: t.zTop, zBase: t.zBase, cutZ: t.cutZ, rise: t.mode === 'sheet' ? t.rise : null, cap: cap,
                  why: t.why || (t.mode === 'sheet' && !t.cap ? t.capWhy : null) || null };
@@ -1303,16 +1332,21 @@
      frustum of the two circles' circumscribed 32-gons, which holds every
      such polygon - so a cap measured clear on it is clear as built. */
   function capHull(cap) {
-    var n = 32, k = 1 / Math.cos(Math.PI / n), r0 = cap.footD / 2 * k, r1 = cap.w / 2 * k, out = new Float32Array(n * 36), w = 0;
+    var n = 32, k = 1 / Math.cos(Math.PI / n), r0 = cap.footD / 2 * k, r1 = cap.w / 2 * k, out = new Float32Array(n * 54), w = 0;
+    var bd = cap.band > 0 && cap.band < cap.z1 - cap.z0 ? cap.band : 0, zm = cap.z1 - bd, f = (zm - cap.z0) / (cap.z1 - cap.z0);
+    var m = [cap.b[0] + (cap.c[0] - cap.b[0]) * f, cap.b[1] + (cap.c[1] - cap.b[1]) * f];
     function put(p) { out[w++] = p[0]; out[w++] = p[1]; out[w++] = p[2]; }
     for (var i = 0; i < n; i++) {
       var a0 = 2 * Math.PI * i / n, a1 = 2 * Math.PI * (i + 1) / n;
       var p0 = [cap.b[0] + r0 * Math.cos(a0), cap.b[1] + r0 * Math.sin(a0), cap.z0], p1 = [cap.b[0] + r0 * Math.cos(a1), cap.b[1] + r0 * Math.sin(a1), cap.z0];
+      var m0 = [m[0] + r1 * Math.cos(a0), m[1] + r1 * Math.sin(a0), zm], m1 = [m[0] + r1 * Math.cos(a1), m[1] + r1 * Math.sin(a1), zm];
       var q0 = [cap.c[0] + r1 * Math.cos(a0), cap.c[1] + r1 * Math.sin(a0), cap.z1], q1 = [cap.c[0] + r1 * Math.cos(a1), cap.c[1] + r1 * Math.sin(a1), cap.z1];
       put([cap.b[0], cap.b[1], cap.z0]); put(p1); put(p0);
       put([cap.c[0], cap.c[1], cap.z1]); put(q0); put(q1);
-      put(p0); put(p1); put(q1);
-      put(p0); put(q1); put(q0);
+      put(p0); put(p1); put(m1);
+      put(p0); put(m1); put(m0);
+      put(m0); put(m1); put(q1);
+      put(m0); put(q1); put(q0);
     }
     return out;
   }
@@ -1328,7 +1362,7 @@
     SHEET: { pitchMm: SHEET_PITCH_MM, roles: SHEET_ROLES.slice(), overMm: SHEET_OVER_MM, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
              sampleMm: SAMPLE_MM, lineAngles: LINE_ANGLES.slice() },
     CAP: { riseMm: CAP_RISE_MM, minMm: CAP_MIN_MM, maxMm: CAP_MAX_MM, spaceMm: CAP_SPACE_MM, gapMaxMm: CAP_GAP_MAX_MM,
-           tuckMm: CAP_TUCK_MM, partMm: CAP_PART_MM, intoMm: CAP_INTO_MM, foot: CAP_FOOT },
+           tuckMm: CAP_TUCK_MM, partMm: CAP_PART_MM, intoMm: CAP_INTO_MM, bandMm: CAP_BAND_MM, foot: CAP_FOOT },
     sheet: sheet,
     cutPath: cutPath,
     finish: finish,

@@ -61,20 +61,29 @@ transition layer: its branches widen into flat caps of 2-7 mm (35 under a 40 x
   a round flat cap that follows its own leg: a frustum from where the leg's
   axis crosses 2 mm (`CAP_RISE_MM`) under I1 - 0.9 of the column's side
   across there, inside its square however it is turned - up to where it
-  crosses I1's underside, its top 0.01 mm (`CAP_INTO_MM`) into I1. The column
-  is cut along its own axis just under the cap's top, so its whole end is
-  inside the cap. A cap is as wide as its nearest neighbour allows less 0.5 mm
-  (`CAP_SPACE_MM`), held to 2.5-4 mm (`CAP_MIN_MM` - `CAP_MAX_MM`); where it
+  crosses I1's underside, its top 0.01 mm (`CAP_INTO_MM`) into I1, its last
+  0.02 mm upright (`CAP_BAND_MM`: I1's underside cuts that band, not the 2 mm
+  flank - cut 10 um from its top, the flank came back from the union as
+  needles NSO's slicer could not close). The column is cut along its own axis
+  just under the cap's top, its end inside the cap's height (the rise is
+  never shorter than that needs: a 3 mm strut's cap rises 2.32 mm); the end's
+  corners may stand out of the cap's flank, where the column stood before.
+  A cap is as wide as its nearest neighbour allows less 0.5 mm
+  (`CAP_SPACE_MM`), held to 2.5-4 mm (`CAP_MIN_MM` - `CAP_MAX_MM`). Where it
   would come nearer the piece than the gap, or near another tree's column, it
-  is first slid off (no further than keeps the column's end inside it), then
-  narrowed by 0.25 mm steps, down to the column's side - where the tip has no
-  cap and is cut flat at I1's underside, said per tip. **Caps never overlap**:
-  two caps nearer than their widths allow are held 0.05 mm (`CAP_PART_MM`)
-  apart, the narrower keeping its width. Tips closer than 3 mm get caps under
-  2.5 mm (section 4): overlapping caps, or caps whose tops lie in one plane,
-  are what the kernel's union could not take (the clamp's area 2, tips 1.3-2.1
-  mm apart: 70 piercing pairs in its welded sheet with 2.5 mm caps
-  overlapping; 55 with their tops' heights staggered).
+  is first slid off (by at most its top's radius less the column's half
+  diagonal), then narrowed by 0.25 mm steps, down to the column's side -
+  where the tip has no cap and is cut flat at I1's underside, said per tip.
+  Those clearances are sampled; then every cap is **measured** against the
+  piece with the exact triangle distance and narrowed until it keeps the gap.
+  **Caps never overlap**: two caps nearer than their widths allow are held
+  0.05 mm (`CAP_PART_MM`) apart, the narrower keeping its width - and so are
+  a cap and a neighbour's bare column top, and caps of neighbouring levels (a
+  tilted ceiling makes each row of tips a level of its own). Tips closer than
+  3 mm get caps under 2.5 mm (section 4): overlapping caps, or caps whose
+  tops lie in one plane, are what the kernel's union could not take (the
+  clamp's area 2, tips 1.3-2.1 mm apart: 70 piercing pairs in its welded
+  sheet with 2.5 mm caps overlapping; 55 with their tops' heights staggered).
 - **One line, one box, at least 2 mm** (`MIN_RUN_MM`): every interface line
   is a single straight run (`NSO_RasterLines.extrudeFlat`'s section) - no
   turn, no joint, nothing cut into it. An I1 line is kept only where it lies
@@ -224,11 +233,12 @@ a bead for its outer wall - a 0.42 line is a **zero-width wall**.
   line; on the export, 16-20 % of a line crossing tip columns survives, on the
   corners the union left - the short pieces in the screenshot. From 0.4225 up
   every line is one unbroken pass.
-- **Bambu Studio** (classic walls, thin walls off): a short 0.42 strip is
-  rescued as a 0.3785 loop round a sliver - out and back, two passes - and cut
-  into 0.02-0.35 mm pieces wherever its overhang speed grade changes; a strip
-  of 7.14 mm² or more (17 mm of line) is dropped altogether: the coupon's two
-  22 mm lines are missing from every sheet layer of that slice. With
+- **Bambu Studio** (classic walls, thin walls off): a 0.42 strip is printed
+  as a loop round a sliver - out and back, two passes - cut into 0.02-0.35 mm
+  pieces wherever its overhang speed grade changes. Every line of that slice
+  was printed (52 of 52 in each layer, registered to the export: Bambu set
+  the plate 0.42 mm off it in x; read unregistered, two 22 mm lines looked
+  missing, which an earlier version of this page took at its word). With
   `detect_thin_wall` on, a line is one medial-axis pass at its width + 0.043.
 
 So the line is **0.43 mm** (`SHEET_OVER_MM` 0.01 over the bead) and **one

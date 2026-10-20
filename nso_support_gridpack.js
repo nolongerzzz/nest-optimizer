@@ -847,9 +847,13 @@
 
   /* A cap under the sheet: a round frustum (n sides) from radius r0 round
      (bx, by) at z0 up to r1 round (cx, cy) at z1 - oblique when it follows a
-     leaning leg - outward-wound, its corners turned by `phase`. */
-  function frustumSoup(bx, by, cx, cy, z0, z1, r0, r1, n, phase) {
-    var out = new Float32Array(n * 4 * 9), w = 0;
+     leaning leg - outward-wound, its corners turned by `phase`. With `band`,
+     its top `band` stands upright at r1 (sheet()'s THE CAPS: the sheet's
+     underside cuts that band, not the long flank). */
+  function frustumSoup(bx, by, cx, cy, z0, z1, r0, r1, n, phase, band) {
+    var bd = band > 0 && band < z1 - z0 ? band : 0, zm = z1 - bd, f = (zm - z0) / (z1 - z0);
+    var mx = bx + (cx - bx) * f, my = by + (cy - by) * f;
+    var out = new Float32Array(n * (bd ? 6 : 4) * 9), w = 0;
     function tri(a, b, c) {
       out[w++] = a[0]; out[w++] = a[1]; out[w++] = a[2];
       out[w++] = b[0]; out[w++] = b[1]; out[w++] = b[2];
@@ -861,8 +865,16 @@
       var q0 = [cx + r1 * Math.cos(a0), cy + r1 * Math.sin(a0), z1], q1 = [cx + r1 * Math.cos(a1), cy + r1 * Math.sin(a1), z1];
       tri([cx, cy, z1], q0, q1);
       tri([bx, by, z0], p1, p0);
-      tri(p0, p1, q1);
-      tri(p0, q1, q0);
+      if (bd) {
+        var m0 = [mx + r1 * Math.cos(a0), my + r1 * Math.sin(a0), zm], m1 = [mx + r1 * Math.cos(a1), my + r1 * Math.sin(a1), zm];
+        tri(p0, p1, m1);
+        tri(p0, m1, m0);
+        tri(m0, m1, q1);
+        tri(m0, q1, q0);
+      } else {
+        tri(p0, p1, q1);
+        tri(p0, q1, q0);
+      }
     }
     return out;
   }
@@ -966,11 +978,20 @@
      first layers of two supports overlapped and Bambu Studio reported a path
      conflict between them. A cluster's grown footprints always meet (6 mm is
      under twice the growth), so a cluster stands on one pad unless the piece
-     itself stands between its feet (counted in clustersSplit), or hems one
-     of them in: a trunk standing nearer the piece than the gap and its
-     growth all round leaves nothing but its own end square (a pad no bigger
-     than its core: counted in hemmed, and not as a split - the wedge's one,
-     in a pocket of v9_mirror_factory, 0.8 mm2).
+     itself stands between its feet. Pads the piece's keep-off leaves less
+     than FOOT_TOUCH_MM apart (and their outlines' simplification) cannot
+     print apart either: they are LINKED, and their trunks one support too
+     (groups). clustersSplit counts the clusters whose feet still stand in
+     more than one support; hemmed, the pads that are nothing but a foot's
+     own end (the piece all round it, or the raster's slack round a thin
+     trunk beside a thin pin of the piece); a sliver of that kind that will
+     not triangulate is no pad (padsDropped): the trunk stands on its own end.
+
+     EACH GROUP OF FEET HAS ITS OWN RASTER (rasterPads): feet whose grown
+     footprints could come within FOOT_TOUCH_MM of each other. One raster
+     over every foot coarsened its cells with their spread - one foot 250 mm
+     away made them 0.13 mm, and the slack rang a thin trunk round with
+     piece that was not there.
 
      Drawn on a raster of FOOT_CELL_MM, since the union of grown circles has no
      closed form a soup wants: a cell is pad when its centre is within
@@ -993,8 +1014,9 @@
 
      footPads(TH, obstacles, feet, plateZ, thick)
        feet: [{ key, c: [x, y], r }] - footprintOf's circles
-       -> { pads: [{ keys, poly, soup, areaMm2 }], clusters: [[keys]],
-            clustersSplit, hemmed, holesFilled, holesSlotted, cellMm, failed: [why] }
+       -> { pads: [{ keys, poly, soup, areaMm2, hemmed }], groups: [[keys]] (one
+            support each), clusters: [[keys]], clustersSplit, hemmed,
+            padsDropped, holesFilled, holesSlotted, cellMm, failed: [why] }
      ===================================================================== */
   var PROBES = typeof WeakMap === 'function' ? new WeakMap() : null;
   function probeOf(TH, soup) {
@@ -1007,17 +1029,71 @@
   }
   function TM(o) { return (o && o.thickness) || (root && root.NSO_Thickness) || null; }
   function footPads(TH, obstacles, feet, plateZ, thick) {
-    var res = { pads: [], clusters: [], clustersSplit: 0, hemmed: 0, holesFilled: 0, holesSlotted: 0, cellMm: FOOT_CELL_MM, failed: [] };
+    var res = { pads: [], groups: [], clusters: [], clustersSplit: 0, hemmed: 0, padsDropped: 0, holesFilled: 0, holesSlotted: 0, cellMm: FOOT_CELL_MM, failed: [] };
     if (!feet.length) return res;
-    var nF = feet.length, i, j, k;
+    var nF = feet.length, i, j;
+    function uf(n) { var par = []; for (var q = 0; q < n; q++) par.push(q); return { find: function (x) { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; },
+      join: function (x, y) { x = this.find(x); y = this.find(y); if (x !== y) par[Math.max(x, y)] = Math.min(x, y); } }; }
     /* the clusters: feet within FOOT_CLUSTER_MM, single linkage */
-    var cp = feet.map(function (f, q) { return q; });
-    function cfind(x) { while (cp[x] !== x) { cp[x] = cp[cp[x]]; x = cp[x]; } return x; }
+    var CL = uf(nF), rMax = 0;
+    feet.forEach(function (f) { rMax = Math.max(rMax, f.r); });
     for (i = 0; i < nF; i++) for (j = i + 1; j < nF; j++) {
-      if (Math.hypot(feet[i].c[0] - feet[j].c[0], feet[i].c[1] - feet[j].c[1]) <= FOOT_CLUSTER_MM + 1e-9) { var ra = cfind(i), rb = cfind(j); if (ra !== rb) cp[Math.max(ra, rb)] = Math.min(ra, rb); }
+      if (Math.hypot(feet[i].c[0] - feet[j].c[0], feet[i].c[1] - feet[j].c[1]) <= FOOT_CLUSTER_MM + 1e-9) CL.join(i, j);
     }
     var cl = {};
-    for (i = 0; i < nF; i++) (cl[cfind(i)] || (cl[cfind(i)] = [])).push(i);
+    for (i = 0; i < nF; i++) (cl[CL.find(i)] || (cl[CL.find(i)] = [])).push(i);
+    /* EACH GROUP OF FEET ON ITS OWN RASTER: feet whose grown footprints
+       could come within FOOT_TOUCH_MM (and a millimetre more) of each other.
+       One raster over every foot coarsened its cells with the spread of the
+       feet (FOOT_CELLS_MAX) - one far foot made a small trunk's cells 0.13 mm
+       and the raster's slack rang its foot round with "piece" that was not
+       there - and cost a flood of every cell per hole. */
+    var GR = uf(nF), reach = 2 * (rMax + FOOT_GROW_MM) + FOOT_TOUCH_MM + 1;
+    for (i = 0; i < nF; i++) for (j = i + 1; j < nF; j++) {
+      if (Math.abs(feet[i].c[0] - feet[j].c[0]) <= reach && Math.abs(feet[i].c[1] - feet[j].c[1]) <= reach &&
+          Math.hypot(feet[i].c[0] - feet[j].c[0], feet[i].c[1] - feet[j].c[1]) <= reach) GR.join(i, j);
+    }
+    var groups = {};
+    for (i = 0; i < nF; i++) (groups[GR.find(i)] || (groups[GR.find(i)] = [])).push(i);
+    /* every foot on a pad, and pads that come within FOOT_TOUCH_MM of each
+       other (a gap the piece's keep-off leaves, too narrow to print apart),
+       are ONE support: SUP joins the feet */
+    var SUP = uf(nF), all = [];
+    Object.keys(groups).forEach(function (g0) {
+      var idx = groups[g0], r = rasterPads(TH, obstacles, idx.map(function (q) { return feet[q]; }), plateZ, thick);
+      res.cellMm = Math.max(res.cellMm, r.cellMm); res.holesFilled += r.holesFilled; res.holesSlotted += r.holesSlotted;
+      res.failed = res.failed.concat(r.failed);
+      var base = all.length;
+      r.pads.forEach(function (pd) {
+        pd.feet = pd.feet.map(function (l) { return idx[l]; });
+        for (var q = 1; q < pd.feet.length; q++) SUP.join(pd.feet[0], pd.feet[q]);
+        all.push(pd);
+      });
+      r.links.forEach(function (lk) { SUP.join(all[base + lk[0]].feet[0], all[base + lk[1]].feet[0]); });
+    });
+    all.forEach(function (pd) {
+      if (pd.hemmed) res.hemmed++;
+      if (!pd.soup) { res.padsDropped++; return; }
+      res.pads.push({ keys: pd.feet.map(function (f) { return feet[f].key; }), poly: pd.poly, soup: pd.soup, areaMm2: pd.areaMm2, hemmed: pd.hemmed });
+    });
+    var sup = {};
+    for (i = 0; i < nF; i++) (sup[SUP.find(i)] || (sup[SUP.find(i)] = [])).push(feet[i].key);
+    res.groups = Object.keys(sup).map(function (r0) { return sup[r0]; });
+    /* clusters, by key, and how many stand in more than one support */
+    Object.keys(cl).forEach(function (r0) {
+      var fs = cl[r0], ss = {};
+      fs.forEach(function (f) { ss[SUP.find(f)] = true; });
+      if (Object.keys(ss).length > 1) res.clustersSplit++;
+      res.clusters.push(fs.map(function (f) { return feet[f].key; }));
+    });
+    return res;
+  }
+  /* One group's raster (footPads): its pads [{ feet (local), poly, soup, areaMm2,
+     hemmed }] - soup null for a sliver that would not triangulate - and links
+     [[pad, pad]] between pads within FOOT_TOUCH_MM of each other. */
+  function rasterPads(TH, obstacles, feet, plateZ, thick) {
+    var res = { pads: [], links: [], holesFilled: 0, holesSlotted: 0, cellMm: FOOT_CELL_MM, failed: [] };
+    var i, j, k;
 
     /* the raster */
     var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -1164,14 +1240,14 @@
        two, 0.15 mm apart: two supports). A cut that joins a hole to the
        outside cannot part the pad; it is widened only where it cuts. */
     if (toSlot.length) {
-      var seen = new Uint8Array(N), from = new Int32Array(N);
-      toSlot.forEach(function (cells) {
-        var out1 = outside();
+      /* the outside is flooded once; each cut's air is added to it */
+      var out1 = outside(), seen = new Int32Array(N), from = new Int32Array(N);
+      toSlot.forEach(function (cells, hk) {
+        var mark = hk + 1;
         cells = cells.filter(function (c7) { return !reg[c7]; });
         if (!cells.length || cells.some(function (c7) { return out1[c7]; })) return;
-        seen.fill(0);
         var cur = [], next = [], end = -1;
-        cells.forEach(function (c7) { seen[c7] = 1; from[c7] = -1; cur.push(c7); });
+        cells.forEach(function (c7) { seen[c7] = mark; from[c7] = -1; cur.push(c7); });
         while (cur.length && end < 0) {
           while (cur.length) {
             var c8 = cur.pop();
@@ -1180,31 +1256,42 @@
             var nb8 = [ci8 > 0 ? c8 - 1 : -1, ci8 < nx - 1 ? c8 + 1 : -1, cj8 > 0 ? c8 - nx : -1, cj8 < ny - 1 ? c8 + nx : -1];
             for (var e8 = 0; e8 < 4; e8++) {
               var q8 = nb8[e8];
-              if (q8 < 0 || seen[q8] || core[q8] >= 0) continue;
+              if (q8 < 0 || seen[q8] === mark || core[q8] >= 0) continue;
               if (reg[q8]) next.push(q8, c8);
-              else { seen[q8] = 1; from[q8] = c8; cur.push(q8); }
+              else { seen[q8] = mark; from[q8] = c8; cur.push(q8); }
             }
           }
           if (end >= 0) break;
           cur = [];
           for (var n8 = 0; n8 < next.length; n8 += 2) {
-            if (seen[next[n8]]) continue;
-            seen[next[n8]] = 1; from[next[n8]] = next[n8 + 1]; cur.push(next[n8]);
+            if (seen[next[n8]] === mark) continue;
+            seen[next[n8]] = mark; from[next[n8]] = next[n8 + 1]; cur.push(next[n8]);
           }
           next = [];
         }
         if (end < 0) { res.failed.push('a pad round the piece could not be opened to the outside (its feet ring it)'); return; }
-        var cut = [];
-        for (var c9 = end; c9 >= 0; c9 = from[c9]) if (reg[c9]) cut.push(c9);
+        var cut = [], opened = [];
+        for (var c9 = end; c9 >= 0; c9 = from[c9]) { opened.push(c9); if (reg[c9]) cut.push(c9); }
         cut.forEach(function (c10) {
           var ci = c10 % nx, cj = (c10 - ci) / nx;
           for (var dj = -1; dj <= 1; dj++) for (var di = -1; di <= 1; di++) {
             var ii = ci + di, jj = cj + dj;
             if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue;
             var c11 = jj * nx + ii;
-            if (core[c11] < 0) reg[c11] = 0;
+            if (core[c11] < 0 && reg[c11]) { reg[c11] = 0; opened.push(c11); }
           }
         });
+        /* the cut, the hole and any air they reach are outside now */
+        while (opened.length) {
+          var c12 = opened.pop();
+          if (reg[c12] || out1[c12]) continue;
+          out1[c12] = 1;
+          var ci12 = c12 % nx, cj12 = (c12 - ci12) / nx;
+          if (ci12 > 0) opened.push(c12 - 1);
+          if (ci12 < nx - 1) opened.push(c12 + 1);
+          if (cj12 > 0) opened.push(c12 - nx);
+          if (cj12 < ny - 1) opened.push(c12 + nx);
+        }
         res.holesSlotted++;
       });
       unpinch();
@@ -1230,6 +1317,23 @@
       var cc = jj * nx + ii;
       if (lab[cc] >= 0) comps[lab[cc]].feet.push(fi);
       else res.failed.push('a trunk\'s foot is on no pad');
+    });
+    /* pads within FOOT_TOUCH_MM of each other, and the outlines' own
+       simplification, across cells the keep-off left between them: linked */
+    var LK = Math.ceil((FOOT_TOUCH_MM + 2 * h) / h) + 1, win = [], linked = {};
+    for (var lj = -LK; lj <= LK; lj++) for (var li = -LK; li <= LK; li++) if ((li || lj) && Math.hypot(li, lj) <= LK) win.push([li, lj]);
+    comps.forEach(function (cm, ca) {
+      if (!cm.feet.length) return;
+      cm.cells.forEach(function (c14) {
+        var i4 = c14 % nx, j4 = (c14 - i4) / nx;
+        if (i4 > 0 && i4 < nx - 1 && j4 > 0 && j4 < ny - 1 && reg[c14 - 1] && reg[c14 + 1] && reg[c14 - nx] && reg[c14 + nx]) return;
+        for (var w4 = 0; w4 < win.length; w4++) {
+          var i5 = i4 + win[w4][0], j5 = j4 + win[w4][1];
+          if (i5 < 0 || j5 < 0 || i5 >= nx || j5 >= ny) continue;
+          var cb = lab[j5 * nx + i5];
+          if (cb >= 0 && cb !== ca && comps[cb].feet.length) linked[Math.min(ca, cb) + ',' + Math.max(ca, cb)] = true;
+        }
+      });
     });
     /* each pad's outline: unit edges with the pad on their left, walked into loops */
     var next = new Map();
@@ -1266,8 +1370,13 @@
         (loopsOf[start.comp] || (loopsOf[start.comp] = [])).push({ loop: loop, area2: A2 });
       });
     });
+    var padOf = {};
     comps.forEach(function (cm, ci4) {
       if (!cm.feet.length) return;
+      var hemmed = cm.cells.every(function (c13) { return core[c13] >= 0; });
+      padOf[ci4] = res.pads.length;
+      var pd = { feet: cm.feet, poly: null, soup: null, areaMm2: cm.cells.length * h * h, hemmed: hemmed };
+      res.pads.push(pd);
       var ls = (loopsOf[ci4] || []).slice().sort(function (a, b) { return b.area2 - a.area2; });
       if (!ls.length || !(ls[0].area2 > 0)) { res.failed.push('a pad has no outline'); return; }
       if (ls.length > 1) { res.failed.push('a pad still has a hole in it'); return; }
@@ -1277,24 +1386,14 @@
         poly = simplifyLoop(world, h * (1 + tries));
         soup = prismSoup(poly, plateZ, plateZ + thick);
       }
-      if (!soup) { res.failed.push('a pad\'s outline would not triangulate'); return; }
+      /* a sliver round a foot that will not triangulate: no pad - the trunk
+         stands on its own end, in the support of the pads it is linked to */
+      if (!soup) { if (!(hemmed || pd.areaMm2 < 1)) res.failed.push('a pad\'s outline would not triangulate'); return; }
       var ar = 0;
       for (var q4 = 0; q4 < poly.length; q4++) { var a5 = poly[q4], b5 = poly[(q4 + 1) % poly.length]; ar += a5[0] * b5[1] - b5[0] * a5[1]; }
-      var hemmed = cm.cells.every(function (c13) { return core[c13] >= 0; });
-      if (hemmed) res.hemmed++;
-      res.pads.push({ keys: cm.feet.map(function (f) { return feet[f].key; }), feet: cm.feet, poly: poly, soup: soup, areaMm2: ar / 2, hemmed: hemmed });
+      pd.poly = poly; pd.soup = soup; pd.areaMm2 = ar / 2;
     });
-    /* clusters, by key, and how many stand on more than one pad - a hemmed
-       foot's own pad aside */
-    var padOfFoot = {};
-    res.pads.forEach(function (pd, pi2) { pd.feet.forEach(function (f) { padOfFoot[f] = pi2; }); });
-    Object.keys(cl).forEach(function (r0) {
-      var fs = cl[r0], ps = {};
-      fs.forEach(function (f) { if (!(res.pads[padOfFoot[f]] || {}).hemmed) ps[padOfFoot[f]] = true; });
-      if (Object.keys(ps).length > 1) res.clustersSplit++;
-      res.clusters.push(fs.map(function (f) { return feet[f].key; }));
-    });
-    res.pads.forEach(function (pd) { delete pd.feet; });
+    Object.keys(linked).forEach(function (k5) { var ab = k5.split(','); res.links.push([padOf[+ab[0]], padOf[+ab[1]]]); });
     return res;
   }
 
@@ -1325,8 +1424,9 @@
     if (fp.failed.length) return { ok: false, reason: 'the feet: ' + fp.failed[0] };
     var par = ids.map(function (x, q) { return q; });
     function find(x) { while (par[x] !== x) { par[x] = par[par[x]]; x = par[x]; } return x; }
-    fp.pads.forEach(function (pd) {
-      for (var q = 1; q < pd.keys.length; q++) { var a = find(idOf[pd.keys[0]]), b = find(idOf[pd.keys[q]]); if (a !== b) par[Math.max(a, b)] = Math.min(a, b); }
+    /* one support per group of feet: on one pad, or on pads too near to print apart */
+    fp.groups.forEach(function (g) {
+      for (var q = 1; q < g.length; q++) { var a = find(idOf[g[0]]), b = find(idOf[g[q]]); if (a !== b) par[Math.max(a, b)] = Math.min(a, b); }
     });
     var groups = {}, order = [];
     ids.forEach(function (id, q) { var r = find(q); if (!groups[r]) { groups[r] = { from: [], pads: [] }; order.push(r); } groups[r].from.push(id); });
@@ -1336,9 +1436,9 @@
       return { from: g.from, soup: joinAll(list), pads: g.pads.length };
     });
     return { ok: true, objects: objects, pads: fp.pads.length, clusters: fp.clusters.length, clustersSplit: fp.clustersSplit,
-             hemmed: fp.hemmed, holesFilled: fp.holesFilled, holesSlotted: fp.holesSlotted,
+             hemmed: fp.hemmed, padsDropped: fp.padsDropped, holesFilled: fp.holesFilled, holesSlotted: fp.holesSlotted,
              reason: fp.pads.length + ' pad(s) under ' + fp.clusters.length + ' cluster(s) of feet' +
-               (fp.hemmed ? ' (' + fp.hemmed + ' a trunk hemmed in by the piece, on its own end)' : '') + '; ' + objects.length + ' support(s)' };
+               (fp.padsDropped ? ' (' + fp.padsDropped + ' a trunk with no room for a pad, on its own end)' : '') + '; ' + objects.length + ' support(s)' };
   }
 
   function boxSoup(lo, hi) {
@@ -1426,6 +1526,14 @@
       return bad;
     }
     return census(fixed) <= census(soup) ? fixed : soup;
+  }
+  /* flatSplit until nothing changes: a run of flat triangles along one line
+     (the clamp's area 1: six on one trunk edge, z 57.79, after the sheet's
+     join) comes apart one triangle a pass, each split giving the next flat
+     one a proper neighbour */
+  function flatSplits(soup) {
+    for (var pass = 0; pass < 8; pass++) { var next = flatSplit(soup); if (next === soup) break; soup = next; }
+    return soup;
   }
   function boxesTouch(a, b) {
     for (var k = 0; k < 3; k++) if (a.lo[k] > b.hi[k] + 1e-3 || b.lo[k] > a.hi[k] + 1e-3) return false;
@@ -1569,7 +1677,7 @@
     function capped(t, res, k) {
       if (!res || !res.ok || t.mode !== 'sheet' || !t.cap) return res;
       var c = t.cap, ph = ((GOLDEN_DEG * (k + 1)) % (360 / CAP_SIDES)) * Math.PI / 180;
-      res.capSoup = frustumSoup(c.b[0], c.b[1], c.c[0], c.c[1], c.z0, c.z1, c.footD / 2, c.w / 2, CAP_SIDES, ph);
+      res.capSoup = frustumSoup(c.b[0], c.b[1], c.c[0], c.c[1], c.z0, c.z1, c.footD / 2, c.w / 2, CAP_SIDES, ph, c.band);
       if (res.soups) res.soups = res.soups.concat([res.capSoup]);
       return res;
     }
@@ -1734,7 +1842,7 @@
     function finish() {
       /* THE PADS (FEET): one per group of feet, each the first part of the
          lowest trunk standing on it - the others join it through the pad */
-      var pads = { count: 0, clusters: 0, clustersSplit: 0, hemmed: 0, holesFilled: 0, holesSlotted: 0, shared: shared }, padGroups = [];
+      var pads = { count: 0, clusters: 0, clustersSplit: 0, hemmed: 0, padsDropped: 0, holesFilled: 0, holesSlotted: 0, shared: shared }, padGroups = [];
       if (foot && feet.length && !shared) {
         var TH = TM(opts);
         if (!TH) return { ok: false, reason: 'nso_thickness.js is not loaded - the foot pads are drawn with its probe' };
@@ -1742,10 +1850,11 @@
         if (fp.failed.length) return { ok: false, reason: 'the feet: ' + fp.failed[0] };
         fp.pads.forEach(function (pd) {
           var keys = pd.keys.slice().sort(function (a, b) { return a - b; });
-          out[keys[0]].parts.push({ soup: pd.soup, foot: true, pad: true });
-          if (keys.length > 1) padGroups.push(keys);
+          out[keys[0]].parts.push({ soup: pd.soup, foot: true, pad: true, keys: keys });
         });
-        pads = { count: fp.pads.length, clusters: fp.clusters.length, clustersSplit: fp.clustersSplit, hemmed: fp.hemmed, holesFilled: fp.holesFilled,
+        /* the trunks of one support: on one pad, or on pads too near to print apart */
+        fp.groups.forEach(function (g) { if (g.length > 1) padGroups.push(g.slice().sort(function (a, b) { return a - b; })); });
+        pads = { count: fp.pads.length, clusters: fp.clusters.length, clustersSplit: fp.clustersSplit, hemmed: fp.hemmed, padsDropped: fp.padsDropped, holesFilled: fp.holesFilled,
                  holesSlotted: fp.holesSlotted, cellMm: fp.cellMm, shared: false,
                  areasMm2: fp.pads.map(function (pd) { return pd.areaMm2; }), outlines: fp.pads.map(function (pd) { return pd.poly; }) };
       }
@@ -1958,7 +2067,11 @@
          dropped a whole I1 line over uncapped tips cut 2 um into it (the
          clamp's area 1: 8.9 mm2 of its section at z 71.5, two slivers left) -
          the other way it keeps every line, at every height of those tops
-         from 71.423 to 71.432 (measured). */
+         from 71.423 to 71.432 (measured). Either way round the cut was
+         a cap's flank cut 10 um from its top, retriangulated into needles
+         NSO's slicer could not close (the wedge lost a cap's section the
+         carriers-first way); the caps' upright top band (sheet()'s THE
+         CAPS) keeps that cut off the flank, and the wedge's join is clean. */
       function joinSheets() {
         var c3 = Promise.resolve();
         sheets.forEach(function (sh) {
@@ -1978,7 +2091,7 @@
                 /* a sheet that meets none of its own tips would be placed in
                    mid-air: the build says so instead */
                 if (!u || !u.ok) throw new Error('sheet ' + sh.sheet + ' does not meet the tips it was built on: ' + ((u && u.reason) || 'no result'));
-                var fin = flatSplit(T._finishUnion(u.soup).soup), trunks = [], sh2 = [sh.sheet];
+                var fin = flatSplits(T._finishUnion(u.soup).soup), trunks = [], sh2 = [sh.sheet];
                 mine.forEach(function (g) { trunks = trunks.concat(g.soup.trunks); sh2 = sh2.concat(g.soup.sheets); });
                 groups = groups.filter(function (g) { return mine.indexOf(g) < 0; });
                 groups.push({ ids: [], soup: { soup: fin, box: bounds(fin), trunks: trunks, sheets: sh2 } });
@@ -1988,7 +2101,20 @@
         });
         return c3;
       }
-      return rounds().then(joinSheets).then(function () {
+      /* trunks on pads too near to print apart (FEET: linked, not touching)
+         are one support all the same: their solids go side by side, as
+         shells() groups them */
+      function joinPadGroups() {
+        (tp.padGroups || []).forEach(function (pg) {
+          var mine = groups.filter(function (g) { return g.soup.trunks.some(function (t) { return pg.indexOf(t) >= 0; }); });
+          if (mine.length < 2) return;
+          var S = joinAll(mine.map(function (g) { return g.soup.soup; })), trunks = [], sh2 = [];
+          mine.forEach(function (g) { trunks = trunks.concat(g.soup.trunks); sh2 = sh2.concat(g.soup.sheets); });
+          groups = groups.filter(function (g) { return mine.indexOf(g) < 0; });
+          groups.push({ ids: [], soup: { soup: S, box: bounds(S), trunks: trunks, sheets: sh2 } });
+        });
+      }
+      return rounds().then(joinSheets).then(joinPadGroups).then(function () {
         var out = groups.map(function (g) { return g.soup; });
         /* Each solid carries what it holds: its trunks' beacon ids, their
            regions, and where it lands ('plate', 'rest', or 'mixed'). A

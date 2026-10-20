@@ -6095,25 +6095,28 @@ caps of 2-7 mm under its interface and 15-24 mm pads.
 - **No transition layer**: the sheet is I1 + I2.
 - **Lines**: one straight box per line, at least 2 mm, 0.43 mm wide (a 0.42
   line is a zero-width wall to a slicer: NSO's slicer broke it into the short
-  pieces the owner's screenshot shows; Bambu printed short ones as 0.3785 loops
-  - two passes, 1.8 x the bead per mm of line - and dropped lines of 17 mm and
-  more). Single pass in Bambu needs its thin-wall detection: see the open
-  questions.
+  pieces the owner's screenshot shows; Bambu printed each as a loop round a
+  sliver - two passes, 1.8 x the bead per mm of line, in ~0.2 mm pieces).
+  Single pass in Bambu needs its thin-wall detection: see the open questions.
 - **Feet** (`nso_support_gridpack.js` footPads / shareFeet, FEET): one 0.2 mm
   pad per cluster of feet within 6 mm, the footprints grown 4 mm, 0.2 mm off
-  the piece; trees on one pad are one support. The card builds each area with
+  the piece; trees on one pad - or on pads too near to print apart - are one
+  support; one raster per group of feet; a pad round a leg of the piece is
+  opened by a slot that bends between the feet. The card builds each area with
   `footPads: 'shared'` and draws the pads over every area at commit
   (`app-supports-card.js` shareFeet): the coupon is ONE support now (the
   Bambu layer-1 conflict between support 1.1 and 2.2 was two supports' pads).
 - **Weld** (the reference path, not the card's): the sheet's join takes the
-  carriers first - with the sheet first the kernel dropped a whole I1 line over
-  uncapped tips cut 2 um into it (clamp area 1, z 71.5).
+  carriers first, the caps' top 0.02 mm stands upright (I1's underside cuts
+  that band, not the flank: cut 10 um from its top, a flank came back as
+  needles NSO's slicer could not close - a lost I1 line on the clamp, a lost
+  cap section on the wedge), and flat triangles are split to a fixed point.
 - **Audit**: `node tools/nso_slicer_audit.js --sheet sliced.gcode.3mf [--export
   x.3mf]` - per sheet layer the segments, mean length, E/mm, its ratio to the
-  file's outer wall, the passes per line and the lines missing. On the
-  2026-10-20 slice: 2 passes, 1.8 x per mm of line, 1 % of the toolpath in
-  segments of 2 mm or more, two 22 mm lines missing; Bambu's own interface
-  1.00 x and 90 %.
+  file's outer wall, the passes per line and (with the export, the g-code
+  registered to it) the lines printed. On the 2026-10-20 slice: 2 passes,
+  1.8 x per mm of line, 1 % of the toolpath in segments of 2 mm or more, all
+  52 lines printed in each layer; Bambu's own interface 1.00 x and 90 %.
 - **Export**: `npm run support:print-export` writes
   `tools/supports-print-out/top_clip_x2_supports.3mf` (as the card builds it)
   and `..._thinwall.3mf` (the same, `detect_thin_wall = 1` on the support

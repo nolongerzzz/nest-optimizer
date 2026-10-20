@@ -40,9 +40,9 @@
 //      no sheet left standing alone. The trees and feet below are held to
 //      the bare build: no nearer the piece, counts reported beside its own.
 //   6. THE FEET: every trunk on the plate stands on a pad, every cluster of
-//      feet (within 6 mm) on ONE pad, the pads 0.18 mm or more off the piece
-//      - or, inside a trunk's own end square, no nearer than that trunk - and
-//      the trunks on one pad in one support (shells()).
+//      feet (within 6 mm) on ONE pad, each pad 0.18 mm or more off the piece
+//      - or, inside a trunk's own end square, no nearer than the trunks
+//      standing on it - and the trunks on one pad in one support (shells()).
 // THE COUPON, across its two areas as the card builds them (footPads
 //   'shared', then shareFeet): one pad under every cluster whatever area it
 //   holds, the trees on one pad one support - so no two supports' first
@@ -485,23 +485,30 @@ fs.mkdirSync(OUT, { recursive: true });
         Math.abs(feet0 - feet1) < 1e-6 || (feet0 === Infinity && feet1 === Infinity),
         `${fmt(feet1)} with the sheet, ${fmt(feet0)} without` + (feet1 < GAP ? ' (UNDER the gap: a trunk\'s own end in its pad - the pads keep 0.2 mm, the planner keeps the trunk off on rays)' : ''));
       /* 6. the feet: one pad per cluster, the trunks on a pad one support */
-      const padSoups = [];
-      tp.trunks.forEach(tr => tr.parts.forEach(pt => { if (pt.pad) padSoups.push(pt.soup); }));
-      const padD = padSoups.length ? SI.exactDistance(new Float32Array([].concat(...padSoups.map(x => Array.from(x)))), piece, { reach: 1 }).mm : Infinity;
-      /* a pad is always under its trunk's own end square: where the planner
-         stood a trunk nearer the piece than the gap, the pad there is no
-         nearer than that trunk */
-      const colSoups = [];
-      tp.trunks.forEach(tr => tr.parts.forEach(pt => { if (!pt.pad) colSoups.push(feetOf(pt.soup, FOOT)); }));
-      const colD = SI.exactDistance(new Float32Array([].concat(...colSoups.map(x => Array.from(x)))), piece, { reach: 1 }).mm;
+      /* each pad against the piece, and against the trunks standing on IT:
+         a pad is always under its trunks' own end squares, so where the
+         planner stood one nearer the piece than the gap, that pad may come as
+         near as that trunk - and no nearer */
+      const padSoups = [], trunkFoot = {};
+      tp.trunks.forEach(tr => { trunkFoot[tr.trunk] = tr.parts.filter(pt => !pt.pad).map(pt => feetOf(pt.soup, FOOT)); });
+      let padD = Infinity, colD = Infinity, padsUnder = 0;
+      tp.trunks.forEach(tr => tr.parts.forEach(pt => {
+        if (!pt.pad) return;
+        padSoups.push(pt.soup);
+        const dP = SI.exactDistance(pt.soup, piece, { reach: 1 }).mm;
+        const own = [].concat(...(pt.keys || [tr.trunk]).map(t => trunkFoot[t] || []));
+        const dT = own.length ? SI.exactDistance(new Float32Array([].concat(...own.map(x => Array.from(x)))), piece, { reach: 1 }).mm : Infinity;
+        if (dP < Math.min(GAP, dT) - 1e-6) padsUnder++;
+        if (dP < padD) { padD = dP; colD = dT; }
+      }));
       const shl = GP.shells(p, tp), solidOf = {};
       shl.solids.forEach((x, k) => x.trunks.forEach(t => { solidOf[t] = k; }));
       const groupsWhole = (tp.padGroups || []).every(g => g.every(t => solidOf[t] === solidOf[g[0]]));
       const onPads = p.trunks.filter(tr => tr.landing === 'plate').length;
       check(`${label}: feet - ${tp.pads.count} pad(s) under ${onPads} trunk(s) on the plate, every cluster of feet (6 mm) on one pad, the pads ${GAP} mm or more off the piece (or no nearer than the trunk standing there), the trunks on one pad one support`,
-        tp.pads.count >= 1 && tp.pads.clustersSplit === 0 && padD >= Math.min(GAP, colD) - 1e-6 && groupsWhole && padSoups.length === tp.pads.count,
+        tp.pads.count >= 1 && tp.pads.clustersSplit === 0 && padsUnder === 0 && groupsWhole && padSoups.length === tp.pads.count,
         `${tp.pads.clusters} cluster(s), ${tp.pads.clustersSplit} split, ${tp.pads.hemmed || 0} hemmed in by the piece, pads ${(tp.pads.areasMm2 || []).map(a => a.toFixed(0) + ' mm2').join(', ')}; ` +
-        `closest pad to the piece ${fmt(padD)}, closest trunk end ${fmt(colD)}; ${shl.solids.length} support(s)`);
+        `closest pad to the piece ${fmt(padD)} (its own trunks ${fmt(colD)}), ${padsUnder} pad(s) nearer than the gap and their trunks; ${shl.solids.length} support(s)`);
       /* 5. solids: closed, manifold, no degenerate triangle (the canonical
          checker, tools/mesh_validate.py), and NO PIERCING PAIR IN THE SHEET:
          none with a triangle above the sheet's underside. Self-intersection
