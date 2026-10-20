@@ -1339,7 +1339,23 @@ var NSO_MICROSCOPE = (function () {
     var meshes = Object.keys(v.overviewMeshes).map(function (k) { return v.overviewMeshes[k]; })
       .filter(function (m) { return m.visible && m.userData.object; });
     var hit = rc.intersectObjects(meshes, false).filter(drawnAt)[0];
-    return hit ? { obj: hit.object.userData.object, point: hit.point } : null;
+    var out = hit ? { obj: hit.object.userData.object, point: hit.point, distance: hit.distance } : null;
+    // A hover over a big piece whose tree (nso_bvh.js) is still building gets
+    // nothing from its raycast (that file's hover rule: no walk of a million
+    // triangles to repaint an outline). The hover still answers: where the ray
+    // enters the piece's box stands in for its surface until the tree is ready -
+    // as a drag holds such a piece (pieceWorld.hitOn). A press asks without the
+    // hover flag and gets the real surface.
+    if (rc.nsoHover) {
+      meshes.forEach(function (m) {
+        if (treeReady(m.geometry)) return;
+        m.updateMatrixWorld(true);
+        var p = rc.ray.intersectBox(new THREE.Box3().setFromObject(m), new THREE.Vector3());
+        var d = p ? p.distanceTo(rc.ray.origin) : Infinity;
+        if (p && (!out || d < out.distance)) out = { obj: m.userData.object, point: p, distance: d, box: true };
+      });
+    }
+    return out;
   }
 
   /** The default-sized capture box a click at `pt` (view space) would drop, as data. */

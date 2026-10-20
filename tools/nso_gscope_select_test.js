@@ -36,6 +36,12 @@
         mode; Line's arrows and Layer's steps; the Escape ladder.
      7. A plate piece (mesh): Piece and Region only, the list says "not sliced".
      8. What left: detector rows, the Features readout, the old controls.
+     9. A big piece (400,000 triangles) whose search tree (nso_bvh.js) is still
+        building: Piece and Region hover report anyway - its box answers
+        until the tree is ready.
+
+   Every hover is waited for (waitHover: up to 2 s, then a failure that says
+   how long it waited), never read once after a fixed pause.
 
    Screenshots go to tools/gscope-select-out/ (git-ignored).
 
@@ -70,6 +76,7 @@ const PAGE_HELPERS = `
       segOf: (feature, layer) => { const s = find(feature, layer); return { index: s.mv.index, zi: s.zi, obj: s.obj }; },
       countWhere: (feature, layer) => { const s = find(feature, layer), sh = M().getDoc().segments.filter(g => !(M().hidden().indexOf(g.feature) >= 0));
         return { piece: sh.filter(g => g.obj === s.obj).length, feature: sh.filter(g => g.obj === s.obj && g.feature === s.feature).length, layer: sh.filter(g => g.zi === s.zi).length, all: sh.length }; },
+      pxOf: pxOf,
       pxObject: () => { const d = M().getDoc(), o = d.objects[0], b = o.bounds; return pxOf((b.minX + b.maxX) / 2, (b.minY + b.maxY) / 2, b.maxZ); },
       /* a point on plate 2's bed (its own Z-up mm), whichever plate is active (docs/GSCOPE.md) */
       bedPx: (x, y) => toPx(new THREE.Vector3(M().plateOffset('take') + x, 0, -y)),
@@ -92,6 +99,22 @@ const PAGE_HELPERS = `
 `;
 const evalT = (page, fn, arg) => page.evaluate(fn, arg);
 const plate = page => page.evaluate(() => NSO_MICROSCOPE.plate());
+
+/* The hover, waited for. A hover is drawn on G-scope's own clock - one every 40 ms,
+   the last move of a burst on a 45 ms timer - and behind the box's frames, so a
+   fixed wait races it. Polled until it answers, up to `ms` (2 s): { info, kids,
+   cursor, ms }, `info` null if nothing came in time - never read off a null. */
+async function waitHover(page, ms) {
+  const limit = ms || 2000, t0 = Date.now();
+  for (;;) {
+    const h = await page.evaluate(() => ({ info: NSO_MICROSCOPE.hoverInfo(), kids: NSO_MICROSCOPE.getView().hoverGroup.children.length,
+                                           cursor: NSO_MICROSCOPE.getView().renderer.domElement.style.cursor }));
+    const el = Date.now() - t0;
+    if (h.info || el >= limit) return Object.assign(h, { ms: el });
+    await page.waitForTimeout(20);
+  }
+}
+const hoverSays = h => h.info ? J(h.info) + ' - after ' + h.ms + ' ms' : 'no hover after ' + h.ms + ' ms';
 const lensState = page => page.evaluate(() => window.__t.state('lens'));
 const iso = page => page.evaluate(() => NSO_MICROSCOPE.isIsolated());
 
@@ -179,11 +202,11 @@ withApp(async (page, logs) => {
     await page.mouse.move(px[0] - 40, px[1] - 40);
     await page.mouse.move(px[0], px[1], { steps: 3 });
     await page.waitForTimeout(160);
-    const hv = await page.evaluate(() => ({ info: NSO_MICROSCOPE.hoverInfo(), kids: NSO_MICROSCOPE.getView().hoverGroup.children.length, cursor: NSO_MICROSCOPE.getView().renderer.domElement.style.cursor }));
+    const hv = await waitHover(page);
     const n = expect(want);
-    check(label + ': hover outlines what a click would take (' + (n == null ? 'the box region' : n + ' move(s)') + ')', hv.info && hv.info.source === source && hv.kids > 0 && hv.cursor === 'pointer' && (n == null ? hv.info.count > 0 : hv.info.count === n), J(hv.info));
+    check(label + ': hover outlines what a click would take (' + (n == null ? 'the box region' : n + ' move(s)') + ')', !!hv.info && hv.info.source === source && hv.kids > 0 && hv.cursor === 'pointer' && (n == null ? hv.info.count > 0 : hv.info.count === n), hoverSays(hv));
     if (id === 'piece') await shot('02-hover-piece');
-    const hoverCount = hv.info.count;
+    const hoverCount = hv.info ? hv.info.count : -1;
     // click isolates
     await page.mouse.click(px[0], px[1]);
     await page.waitForTimeout(120);
@@ -216,7 +239,7 @@ withApp(async (page, logs) => {
     const n0 = await page.evaluate(() => window.__t.pieces().length);
     await page.mouse.move(px[0], px[1]);
     await page.waitForTimeout(160);
-    const hv2 = await page.evaluate(() => NSO_MICROSCOPE.hoverInfo());
+    const hv2 = (await waitHover(page)).info;
     await drag(page, px, dest[pulled % dest.length]);
     const after = await page.evaluate(() => ({ plate: NSO_MICROSCOPE.plate(), pieces: window.__t.pieces() }));
     const piece = after.pieces[after.pieces.length - 1];
@@ -239,8 +262,8 @@ withApp(async (page, logs) => {
     check('the slider has a Range card, and the range (two handles) narrows what is shown', card[2] && want > 0 && want < full, want + ' of ' + full + ' moves');
     await page.mouse.move(card[0], card[1]);
     await page.waitForTimeout(160);
-    const hv = await page.evaluate(() => ({ info: NSO_MICROSCOPE.hoverInfo(), kids: NSO_MICROSCOPE.getView().hoverGroup.children.length }));
-    check('hovering the card outlines the whole range', hv.info && hv.info.source === 'range' && hv.info.count === want && hv.kids > 0, J(hv.info));
+    const hv = await waitHover(page);
+    check('hovering the card outlines the whole range', !!hv.info && hv.info.source === 'range' && hv.info.count === want && hv.kids > 0, hoverSays(hv));
     await page.mouse.click(card[0], card[1]);
     await page.waitForTimeout(150);
     const c = await page.evaluate(() => ({ iso: NSO_MICROSCOPE.isIsolated(), sel: NSO_MICROSCOPE.selection().length, src: NSO_MICROSCOPE.selectionSource() }));
@@ -290,8 +313,8 @@ withApp(async (page, logs) => {
     const lp = await page.evaluate(sel => { const b = document.querySelector(sel).getBoundingClientRect(); return [b.left + b.width / 2, b.top + b.height / 2]; }, lbl('Outer wall'));
     await page.mouse.move(lp[0], lp[1]);
     await page.waitForTimeout(200);
-    const hv = await page.evaluate(() => ({ info: NSO_MICROSCOPE.hoverInfo(), kids: NSO_MICROSCOPE.getView().hoverGroup.children.length }));
-    check('hovering a row changes nothing: no outline, nothing on the plate changes', !hv.info && hv.kids === 0 && await lensState(page) === s0, J(hv));
+    const hv = await waitHover(page);       // the whole 2 s: an outline that came late would be caught
+    check('hovering a row changes nothing: no outline, nothing on the plate changes', !hv.info && hv.kids === 0 && await lensState(page) === s0, hoverSays(hv));
 
     // a click on the row text toggles its box, and nothing else
     await page.click(lbl('Support'));
@@ -443,8 +466,8 @@ withApp(async (page, logs) => {
     await page.evaluate(() => NSO_MICROSCOPE.normalView()); await frames(page);
     const px = await page.evaluate(() => window.__t.pxObject());
     await page.mouse.move(px[0], px[1]); await page.waitForTimeout(160);
-    const hv = await page.evaluate(() => ({ info: NSO_MICROSCOPE.hoverInfo(), kids: NSO_MICROSCOPE.getView().hoverGroup.children.length }));
-    check('Piece: hover outlines the piece', hv.info && hv.info.source === 'pick' && hv.info.count === 1 && hv.kids > 0, J(hv.info));
+    const hv = await waitHover(page);
+    check('Piece: hover outlines the piece', !!hv.info && hv.info.source === 'pick' && hv.info.count === 1 && hv.kids > 0, hoverSays(hv));
     await shot('08-plate-hover');
     await page.mouse.click(px[0], px[1]); await page.waitForTimeout(150);
     check('...click isolates it', await page.evaluate(() => NSO_MICROSCOPE.isIsolated() && NSO_MICROSCOPE.selection().length === 1));
@@ -463,7 +486,7 @@ withApp(async (page, logs) => {
     await page.evaluate(() => NSO_MICROSCOPE.normalView()); await frames(page);
     const px3 = await page.evaluate(() => window.__t.pxObject());
     await page.mouse.move(px3[0], px3[1]); await page.waitForTimeout(160);
-    const hv3 = await page.evaluate(() => NSO_MICROSCOPE.hoverInfo());
+    const hv3 = (await waitHover(page)).info;
     await page.mouse.click(px3[0], px3[1]); await page.waitForTimeout(150);
     const c3 = await page.evaluate(() => ({ iso: NSO_MICROSCOPE.isIsolated(), boxes: NSO_MICROSCOPE.boxes().length, sel: NSO_MICROSCOPE.selection().length }));
     check('Region: hover shows the box a click would drop; the click drops it and isolates what it holds', hv3 && hv3.source === 'box' && c3.iso && c3.boxes === 1 && c3.sel === 1, J([hv3, c3]));
@@ -480,6 +503,38 @@ withApp(async (page, logs) => {
       api: ['flange', 'detectFlanges', 'toggleDetected', 'detectedOn', 'feature', 'featureRules', 'detectFeatures'].filter(k => typeof NSO_MICROSCOPE[k] === 'function'),
       only: !!document.querySelector('.ms-legend-only'), liftCss: !!document.querySelector('.ms-lift-group') }));
     check('no detector rows, no Features readout, no Lift script, no detector API', !r.detectedRow && !r.liftRow && r.liftObj === 'undefined' && !r.liftScript && r.api.length === 0 && !r.only, J(r));
+  }
+
+  /* ------------------------------------------------------------------ 9 */
+  console.log('\n=== 9. a big piece, its tree still building: the hover reports anyway ===');
+  {
+    for (const [m, source] of [['piece', 'pick'], ['select', 'box']]) {
+      // a fresh sheet for each mode: a new geometry, so no tree for it yet
+      // a flat 20 mm sheet of 400,000 triangles: big enough that nso_bvh.js's hover
+      // rule answers nothing until its tree is built (in a worker, after the first ask)
+      await page.evaluate(() => {
+        const n = 448, side = 20, p = new Float32Array(n * n * 2 * 9);
+        let w = 0;
+        for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+            const x0 = i * side / n, x1 = (i + 1) * side / n, y0 = j * side / n, y1 = (j + 1) * side / n;
+            p.set([x0, y0, 1, x1, y0, 1, x1, y1, 1, x0, y0, 1, x1, y1, 1, x0, y1, 1], w); w += 18;
+        }
+        NSO_MICROSCOPE.openObjects('Sheet', [{ name: 'Sheet', positions: p }], { source: 'objects' });
+        NSO_MICROSCOPE.normalView();
+      });
+      await frames(page);
+      await page.evaluate(m => NSO_MICROSCOPE.setMode(m), m);
+      const at = await page.evaluate(() => { const M = NSO_MICROSCOPE, d = M.getDoc(), b = d.objects[0].bounds;
+        return window.__t.pxOf ? window.__t.pxOf((b.minX + b.maxX) / 2 + 2, (b.minY + b.maxY) / 2 + 1, b.maxZ) : null; });
+      const tree0 = await page.evaluate(() => { const m = NSO_MICROSCOPE.getView().overviewMeshes.Sheet; return !!NSO_BVH.peek(m.geometry.attributes.position.array); });
+      await page.mouse.move(at[0] - 30, at[1] - 20);
+      await page.mouse.move(at[0], at[1], { steps: 3 });
+      const hv = await waitHover(page);
+      const tree1 = await page.evaluate(() => { const m = NSO_MICROSCOPE.getView().overviewMeshes.Sheet; return !!NSO_BVH.peek(m.geometry.attributes.position.array); });
+      check((m === 'piece' ? 'Piece' : 'Region') + ': hover over the big piece reports while its tree is still building (none when the pointer came)',
+        !tree0 && !!hv.info && hv.info.source === source && hv.info.count >= 1, hoverSays(hv) + '; tree before / after: ' + tree0 + ' / ' + tree1);
+      await page.mouse.move(at[0] - 200, at[1] - 200);
+    }
   }
 
   const errs = logs.filter(l => /^\[pageerror\]/.test(l) || /^\[error\]/.test(l)).filter(l => !/Failed to load resource/.test(l));

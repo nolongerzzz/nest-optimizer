@@ -155,9 +155,14 @@ answers within a frame. Nothing is drawn differently for it.
   its worker. Its `raycast` runs three.js's own segment test on just the
   segments within reach of the ray, so it picks exactly the line the walk picked.
   Until the tree is ready, it walks. Plate 2's pieces are meshes, so the viewer's
-  `Mesh.raycast` already asks the same file. A hover over a big piece whose tree
-  is not built yet outlines nothing until it is, as the main viewport's hover
-  does.
+  `Mesh.raycast` already asks the same file.
+- **A hover always answers.** Over a big piece (300,000 triangles and up)
+  whose tree is still building, `nso_bvh.js` answers a hover's raycast with
+  nothing rather than walk every triangle. G-scope's hover (Piece and Region)
+  then takes where the ray enters the piece's bounding box (`objectHitAt`), as
+  a drag holds such a piece, until the tree is ready. A press asks without
+  the hover flag and gets the real surface. `gscope:select` holds it on a
+  400,000-triangle sheet with no tree when the pointer comes.
 - **A plate 2 piece is built once.** Its drawn geometry (a slice's beads as
   12-triangle prisms coloured by line type, or a mesh's own triangles) is kept
   with the piece (`pieceGeometry`). A redraw of plate 2 (a pull, a drop, a
@@ -215,7 +220,7 @@ the old build, bit for bit.
 |---|---|
 | `gscope:take` (`tools/nso_gscope_take_test.js`) | items 1-3: the two plates, click-to-activate, copying across (five kinds), the refusals, plate 2's grab and drop, Export on the active plate, CLEAR / Shift-CLEAR from a fresh page and mid-session, CLOSE / BACK then reopen clean, an import surviving a close |
 | `gscope:shell` | the four-button column, the three cards (Select, View in its order, Export), the corner row (BACK · ◎ · CLEAR · EXPORT · CLOSE), the dock, the retired ids gone |
-| `gscope:select` | the Select card's five modes; item 4's checkbox contract (two rows checked - exactly those two types drawn; none - nothing; hover changes nothing; the text toggles; Check all; Export and a drag take only what is shown) |
+| `gscope:select` | every hover waited for (up to 2 s, the failure says how long); a big piece's hover answering while its tree builds (item 10); the Select card's five modes; item 4's checkbox contract (two rows checked - exactly those two types drawn; none - nothing; hover changes nothing; the text toggles; Check all; Export and a drag take only what is shown) |
 | the #205 set | the older G-scope drive checks (camera, zoom, slice, solid, watch, legend, ...) still hold; `gcode:gscope`'s Crop sections are its Take band section now; `gcode:gscope-support` and `support:ui` are retired (item 5) |
 | `gscope:speed` | item 10: a 60-move drag follows on plate 1, across and on plate 2; orbit (the main thread's share of a frame on the file, the frame rate on the small slice); the pick <= 16 ms; nothing renders under G-scope; no press or held move past a frame; a pull's first move per thousand moves copied |
 | `gcode:lines-build` | item 10: `buildLineGeometry`'s typed-array prisms are the old build's, bit for bit |
