@@ -28,6 +28,17 @@
        3 mm out is the bore Ø +6 at the lip with the outside unchanged (a
        Ø40.62 / Ø30.47 pipe, wall 5.08); Set commits it, one Undo.
      - Neck with Bore only: its rings sit on the bore.
+   And the RUN (tube-run-card):
+     - a Run field under Length, Flare only, 0 by default; Run 30 runs the
+       ghost on 30 mm past the lip at the lip's own Ø (Run 0's lip, measured
+       off the ghost), one band, nothing between;
+     - the END ring at the run's far end: hover "Run 30.0 mm", dragged 10 mm
+       along the axis it reads Run 40.0, the ghost following; Set commits it
+       and one Undo puts the tube back;
+     - Up / Down step the Run while the END ring was the last handle under
+       the pointer (the Length again after the lip ring), Shift tenths,
+       Escape mid-drag, dragged down past the lip it stops at 0 and goes;
+     - Roll and Neck hide the field; Flare shows it again.
    Every grab point and target is a point on the tube, projected through the
    page's own camera; the drag's numbers are read back off the fields, the
    ghost and the readout. */
@@ -110,8 +121,16 @@ const flare = page => page.evaluate(() => {
     ghostTop = top; lipBoreDia = isFinite(lo) ? 2 * lo : null; maxDia = 2 * hi;
   }
   const zEnd = B.read && B.read.end ? B.read.end.center[2] : 0;
+  // the END ring as drawn: its first point, back to raw (z, and r off the axis)
+  let runZ = null, runR = null;
+  const er = B.ring ? B.ring.children.find(c => c.userData.teHandle === 'end') : null;
+  if (er) {
+    const o = getActiveModel().centerOffset, q = er.geometry.attributes.position.array;
+    runZ = q[1] + o.y; runR = Math.hypot(q[0] + o.x, q[2] + o.z);
+  }
   return {
     open: !!B.open, length: el('inp-te-length').value, dr: el('inp-te-dr').value, dir: el('sel-te-dir').value,
+    run: el('inp-te-run').value, runZ, runR,
     readout: el('te-readout').textContent, bad: el('te-readout').classList.contains('is-bad'),
     ghost: !!(B.ghost && B.ghost.parent), lipBoreDia, ghostTop, maxDia,
     rings: B.ring ? B.ring.children.map(c => c.userData.teHandle).filter(Boolean) : [],
@@ -120,6 +139,24 @@ const flare = page => page.evaluate(() => {
     cursor: Array.from(cv.classList).filter(c => /^te-cur-/.test(c)), controls: state.controls.enabled
   };
 });
+// The ghost past a flare's lip plane (raw z zLip): its top, the radii of its
+// vertices at the lip and at the top (lo the bore, hi the outside), how many
+// vertices lie strictly between the two (none, for a run: it is one band),
+// and how many at the top are on neither circle.
+const runGhost = (page, zLip) => page.evaluate((zLip) => {
+  const B = state.tubeEdge, o = getActiveModel().centerOffset, P = B.ghost ? B.ghost.geometry.attributes.position.array : [];
+  let top = -Infinity;
+  for (let i = 0; i < P.length; i += 3) top = Math.max(top, P[i + 1] + o.y);
+  const ring = z => { let lo = Infinity, hi = -Infinity; for (let i = 0; i < P.length; i += 3) if (Math.abs(P[i + 1] + o.y - z) < 2e-3) { const r = Math.hypot(P[i] + o.x, P[i + 2] + o.z); lo = Math.min(lo, r); hi = Math.max(hi, r); } return { lo, hi }; };
+  const lip = ring(zLip), end = ring(top);
+  let between = 0, offTop = 0;
+  for (let i = 0; i < P.length; i += 3) {
+    const z = P[i + 1] + o.y, r = Math.hypot(P[i] + o.x, P[i + 2] + o.z);
+    if (z > zLip + 2e-3 && z < top - 2e-3) between++;
+    if (Math.abs(z - top) < 2e-3 && Math.abs(r - end.lo) > 1e-3 && Math.abs(r - end.hi) > 1e-3) offTop++;
+  }
+  return { top, lip, end, between, offTop };
+}, zLip);
 const camera = page => page.evaluate(() => [...state.camera.position.toArray(), ...state.controls.target.toArray()].map(v => +v.toFixed(6)).join(','));
 async function frame(page, elevDeg, dist) {
   await page.evaluate(([elev, dist]) => {
@@ -441,6 +478,124 @@ withApp(async (page, logs) => {
   check('the rings sit on the bore (r 15.234) and the waist at the bore + Δr, named "Bore"', near(N.Rf, 15.234, 1e-3) && near(N.Rw, 17.234, 1e-3) && /^Bore Δr \+2\.0 mm$/.test(N.text) &&
         /^Bore only: Ø30\.47 → Ø34\.47/.test(N.readout), N.Rf + ' / ' + N.Rw + ' · ' + N.text + ' · ' + N.readout);
   await page.click('#btn-te-cancel');
+
+  console.log('\n=== 11. Flare Run: Run 30 runs the ghost 30 mm past the lip at the lip\'s Ø; the END ring dragged +10 is Run 40 ===');
+  await selectModel(page, tubeId);
+  await page.click('#btn-tube-edge');
+  await page.waitForFunction(() => state.tubeEdge.open && state.tubeEdge.read && state.tubeEdge.read.ok, null, { timeout: 30000 });
+  await setField(page, 'sel-te-verb', 'flare');
+  await setField(page, 'sel-te-walls', 'both');
+  await page.waitForFunction(() => state.tubeEdge.readVerb === 'end' && state.tubeEdge.read && state.tubeEdge.read.ok, null, { timeout: 30000 });
+  await page.evaluate(() => { state.tubeEdge.point = [0, 9, 39.5]; NSO_teLoad(); });      // the top end
+  await setField(page, 'inp-te-length', '8');
+  await setField(page, 'inp-te-dr', '3');
+  await frame(page, 15, 230);            // wide enough for the run's end up to 50 mm past the lip
+  const tubeBefore = await soupOf(page);
+  const row = await page.evaluate(() => {
+    const el = document.getElementById('inp-te-run'), lbl = el.closest('label'), rows = document.getElementById('te-flare-rows');
+    const labels = Array.from(rows.querySelectorAll(':scope > label'));
+    return { value: el.value, shown: el.getClientRects().length > 0, inFlare: rows.contains(el), afterLength: labels.indexOf(lbl) === labels.indexOf(document.getElementById('inp-te-length').closest('label')) + 1 };
+  });
+  check('the Run field is on the card for Flare, right under Length, 0 by default', row.value === '0' && row.shown && row.inFlare && row.afterLength, JSON.stringify(row));
+  F = await flare(page);
+  let R = await runGhost(page, 48);
+  const lip0 = R.lip;
+  check('Run 0: the ghost ends at the lip (z 48) - lip Ø' + (2 * lip0.hi).toFixed(2) + ' / bore Ø' + (2 * lip0.lo).toFixed(2) + ' - and there is no END ring',
+    F.ghost && near(R.top, 48, 1e-3) && near(2 * lip0.hi, 26, 1e-3) && F.rings.join() === 'lip', R.top + ' · ' + F.rings.join());
+  await setField(page, 'inp-te-run', '30');
+  F = await flare(page); R = await runGhost(page, 48);
+  console.log('   readout: ' + F.readout);
+  check('Run 30: the ghost runs on 30 mm past the lip (its top at z 78)', F.ghost && near(R.top, 78, 1e-3), String(R.top));
+  check('...at the lip\'s Ø: the run\'s end ring has the lip\'s outside and bore (Run 0\'s), and no vertex between the lip and the end',
+    near(R.end.hi, lip0.hi, 1e-4) && near(R.end.lo, lip0.lo, 1e-4) && near(R.lip.hi, lip0.hi, 1e-4) && R.between === 0 && R.offTop === 0,
+    'end Ø' + (2 * R.end.hi).toFixed(3) + ' / Ø' + (2 * R.end.lo).toFixed(3) + ', ' + R.between + ' between');
+  check('...the readout: "Straight flare 8.0 mm at 20.6° outward, then 30.0 mm run at Ø26.00 / bore Ø…"', /^Straight flare 8\.0 mm at 20\.6° outward, then 30\.0 mm run at Ø26\.00 \/ bore Ø/.test(F.readout), F.readout);
+  check('the END ring is up at the run\'s far end (z 78), on the lip ring\'s radius', F.rings.join() === 'lip,end' && near(F.runZ, 78, 1e-4) && near(F.runR, F.lipR, 1e-4), F.rings.join() + ' z ' + F.runZ + ' r ' + F.runR + ' vs ' + F.lipR);
+  const rq0 = await onTube(page, 78, F.lipR, 'side'), rq1 = await onTube(page, 88, F.lipR, 'side');
+  check('the END ring, edge-on at the side, is the handle there (on the canvas, and so is 10 mm past it)', rq0.hit === 'end' && rq0.onCanvas && rq1.onCanvas, JSON.stringify(rq0));
+  await page.mouse.move(rq0.x, rq0.y);
+  F = await flare(page);
+  check('hover: "Run 30.0 mm", lit, a resize along the axis', /^Run 30\.0 mm · /.test(F.readout) && F.hot.join() === 'end' && F.cursor.join() === 'te-cur-ns', F.readout + ' · ' + F.cursor.join());
+  cam0 = await camera(page);
+  await drag(page, rq0, rq1);
+  F = await flare(page); R = await runGhost(page, 48);
+  console.log('   readout: ' + F.readout);
+  check('the END ring 10 mm along the axis: the Run field reads 40.0; Length and Δr untouched', F.run === '40.0' && F.length === '8' && F.dr === '3', F.run + ' / ' + F.length + ' / ' + F.dr);
+  check('...the ghost follows: its top at z 88, still the lip\'s Ø', F.ghost && near(R.top, 88, 1e-3) && near(R.end.hi, lip0.hi, 1e-4) && near(R.end.lo, lip0.lo, 1e-4) &&
+    /then 40\.0 mm run at Ø26\.00/.test(F.readout), R.top + ' · ' + F.readout);
+  check('the drag did not move the camera; OrbitControls on again', (await camera(page)) === cam0 && F.controls && !F.drag);
+  const lipHit = await onTube(page, 48, F.lipR, 'side');
+  check('the lip ring is still the flare\'s handle, at the lip', lipHit.hit === 'lip', JSON.stringify(lipHit));
+  const expectR = await page.evaluate(() => Array.from(state.tubeEdge.result.tris).join(','));
+  await page.click('#btn-te-go');
+  await page.waitForFunction(() => /Tube edge done|Tube edge refused/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  const stR = await statusOf(page);
+  check('Set: "Tube edge done - Straight flare 8.0 mm at 20.6° outward, then 40.0 mm run …", the piece is the ghost\'s soup',
+    /Tube edge done - Straight flare 8\.0 mm at 20\.6° outward, then 40\.0 mm run at Ø26\.00/.test(stR) && (await soupOf(page)) === expectR, stR);
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => /Undo: /.test(document.getElementById('status').textContent), null, { timeout: 15000 });
+  check('one Undo puts the tube back, bit for bit', (await soupOf(page)) === tubeBefore);
+
+  // arrows, Shift and Escape, as the other handles
+  await page.click('#btn-tube-edge');
+  await page.waitForFunction(() => state.tubeEdge.open && state.tubeEdge.read && state.tubeEdge.read.ok && state.tubeEdge.result, null, { timeout: 30000 });
+  await page.evaluate(() => { state.tubeEdge.point = [0, 9, 39.5]; NSO_teLoad(); });
+  F = await flare(page);
+  check('reopened: the fields kept (Run 40.0), the END ring at z 88', F.run === '40.0' && F.rings.join() === 'lip,end' && near(F.runZ, 88, 1e-4), F.run + ' · ' + F.runZ);
+  const rk0 = await onTube(page, 88, F.lipR, 'side');
+  await page.mouse.move(rk0.x, rk0.y);
+  await page.mouse.move(5, 5);
+  await page.evaluate(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); });
+  await page.keyboard.press('ArrowUp');
+  F = await flare(page);
+  check('the END ring last under the pointer: Up is the Run 1 mm longer (41.0), the Length kept', rk0.hit === 'end' && F.run === '41.0' && F.length === '8' && /^Run 41\.0 mm · /.test(F.readout), F.run + ' · ' + F.readout);
+  await page.keyboard.press('Shift+ArrowDown');
+  F = await flare(page);
+  check('Shift+Down: 0.1 back (40.9)', F.run === '40.9', F.run);
+  const rs0 = await onTube(page, 48 + 40.9, F.lipR, 'side'), rs1 = await onTube(page, 48 + 40.9 + 2.34, F.lipR, 'side');
+  await page.keyboard.down('Shift');
+  await drag(page, rs0, rs1);
+  await page.keyboard.up('Shift');
+  F = await flare(page);
+  check('with Shift, the END ring in 0.1 mm steps: 2.34 mm is Run 43.2', rs0.hit === 'end' && F.run === '43.2', F.run);
+  const rx0 = await onTube(page, 48 + 43.2, F.lipR, 'side'), rx1 = await onTube(page, 48 + 43.2 + 5, F.lipR, 'side');
+  await page.mouse.move(rx0.x, rx0.y);
+  await page.mouse.down();
+  await page.mouse.move(rx1.x, rx1.y, { steps: 8 });
+  F = await flare(page);
+  check('mid-drag: Run 48.2, the orbit off', rx0.hit === 'end' && F.drag && F.run === '48.2' && !F.controls, F.run);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  F = await flare(page);
+  check('Escape: the drag put back (Run 43.2), the card open, the orbit on', !F.drag && F.open && F.run === '43.2' && F.controls && F.ghost, F.run);
+  const rlp = await onTube(page, 48, F.lipR, 'side');
+  await page.mouse.move(rlp.x, rlp.y);
+  await page.mouse.move(5, 5);
+  await page.keyboard.press('ArrowUp');
+  F = await flare(page);
+  check('the lip ring last under the pointer: Up is the Length again (9.0), the Run kept', rlp.hit === 'lip' && F.length === '9.0' && F.run === '43.2', F.length + ' / ' + F.run);
+  // down past the lip: the Run stops at 0, and with no run the END ring goes
+  const rz0 = await onTube(page, 49 + 43.2, F.lipR, 'side'), rz1 = await onTube(page, 30, F.lipR, 'side');
+  await drag(page, rz0, rz1, 16);
+  F = await flare(page); R = await runGhost(page, 49);
+  check('the END ring dragged down past the lip: Run 0.0, no END ring, the ghost ends at the lip again (z 49)',
+    rz0.hit === 'end' && F.run === '0.0' && F.rings.join() === 'lip' && near(R.top, 49, 1e-3) && !/ run at /.test(F.readout), F.run + ' · ' + F.rings.join() + ' · ' + R.top);
+  // Roll hides the field (and Neck); Flare shows it again
+  await setField(page, 'inp-te-run', '30');
+  await setField(page, 'sel-te-verb', 'roll');
+  const shown = () => page.evaluate(() => document.getElementById('inp-te-run').getClientRects().length > 0);
+  F = await flare(page);
+  check('Roll hides the Run field, and there is no END ring', !(await shown()) && !F.rings.includes('end'), F.rings.join());
+  check('...Roll is not given the run: it rolls (no refusal)', !F.bad && /^Roll /.test(F.readout), F.readout);
+  await setField(page, 'sel-te-verb', 'neck');
+  await page.waitForFunction(() => state.tubeEdge.readVerb === 'neck' && state.tubeEdge.result, null, { timeout: 30000 });
+  check('Neck hides it too', !(await shown()));
+  await setField(page, 'sel-te-verb', 'flare');
+  await page.waitForFunction(() => state.tubeEdge.readVerb === 'end' && state.tubeEdge.read && state.tubeEdge.read.ok, null, { timeout: 30000 });
+  F = await flare(page);
+  check('Flare shows it again, with its Run 30 and the END ring', (await shown()) && F.run === '30' && F.rings.join() === 'lip,end', F.run + ' · ' + F.rings.join());
+  await page.click('#btn-te-cancel');
+  check('Cancel: the piece unchanged', (await soupOf(page)) === tubeBefore);
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   check('no uncaught page errors', errs.length === 0, errs.join(' | '));

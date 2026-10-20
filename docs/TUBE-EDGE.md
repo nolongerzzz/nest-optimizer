@@ -577,3 +577,54 @@ the rest of the piece bit for bit, and adds Pappus's volume.
 4. **The readout example's tube** is Ø51.15 / Ø46.07 (wall 2.54). On that
    tube −36° over 21 gives the line exactly. Outward runs read `… at 33.7°
    outward, then …`.
+
+## The card: Run, and its END ring (tube-run-card, 2026-10-20)
+
+`app-tube-edge.js?v=runcard1`. The card gains a **Run** field (mm, `inp-te-run`,
+0 by default) right under Length, in the Flare rows. Roll and Neck hide it,
+and a Roll is never handed a run. The live ghost is the engine's soup, so it
+shows the run as soon as Run is over 0.
+
+**The END ring** (amber, Neck's end-ring colour) sits at the run's far end:
+Run along the axis past the lip ring, at the lip ring's radius (the face the
+flare moves, the mid-line with Both; the run is at the lip's outside and
+bore).
+- The lip ring stays the flare's handle: Δr, and Length, which carries the
+  run with it.
+- Drag the END ring along the axis and that is the **Run**. It is read on
+  the plane through the point taken hold of, as Neck's end rings are, and it
+  stops at 0. **Hover**: `Run 30.0 mm`, with a resize cursor along the axis.
+- 0.5 mm steps, 0.1 with Shift. Escape puts a drag back, then shuts the card.
+  No drag orbits the camera, and Escape restores the Run field with the others.
+- **Arrows**: Left / Right are Δr, as before. Up / Down step the **Run**
+  while the END ring is the last handle under the pointer or in hand, and the
+  Length otherwise (after the lip ring, or before either). Up goes the way
+  the axis runs up the screen. 1 mm, 0.1 with Shift.
+- At Run 0 there is no run's end and **no END ring**: a ring there would sit
+  exactly on the lip ring, and a press on it could not say which one it
+  meant. Type a Run to start one. An END ring dragged down to 0 stays in hand
+  until the release, then goes.
+
+Gates (`tools/nso_tube_neck_drag_check.js` section 11, in `tube:neck`), on
+the Stock tube Ø20 / 1.6, Flare 8 mm Δr +3:
+- the field is under Length, 0. Run 0's ghost ends at the lip, z 48, at
+  Ø26.00 / Ø22.58, with no END ring;
+- **Run 30**: the ghost's top is z 78. Its end ring has the lip's outside and
+  bore (Run 0's, measured off the ghost), with no vertex between the lip and
+  the end. The END ring is drawn at z 78 on the lip ring's radius;
+- **the END ring dragged 10 mm along the axis**: the field reads **40.0**, the
+  Length and Δr are untouched, the ghost's top is at z 88, the camera has not
+  moved, and the lip ring is still the handle at the lip;
+- **Set** commits the ghost's soup (`Tube edge done - Straight flare 8.0 mm at
+  20.6° outward, then 40.0 mm run at Ø26.00 …`), and **one Undo** puts the
+  tube back bit for bit;
+- Up after hovering the END ring gives Run 41.0, Shift+Down 40.9, and a
+  Shift drag of 2.34 mm adds 2.3. Escape mid-drag puts it back. Up after
+  hovering the lip ring is the Length again;
+- dragged down past the lip, the Run stops at 0.0: the END ring goes and the
+  ghost ends at the lip;
+- **Roll hides the field** and draws no END ring, and the roll rolls. Neck
+  hides it too. Flare shows it again, with its Run.
+
+`styles.css` is unchanged: the END ring uses the resize cursors Neck's end
+rings already have.

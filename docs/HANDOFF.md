@@ -1749,6 +1749,12 @@ the same way. Before a later ticket touches it:
   Run 0 is byte-identical (SHA-1-pinned). Roll refuses a Run in words, and a
   run's bore is held to the inward-flare bore limit. The card's `inp-te-run`
   is read when present; the UI PR draws it. `docs/TUBE-EDGE.md`, "Run".
+- **Run on the card** (2026-10-20, `app-tube-edge.js?v=runcard1`): a Run field
+  under Length (Flare only, 0 by default), and an END ring at the run's far
+  end that drags along the axis = Run. Hover says `Run 30.0 mm`. Up / Down
+  step the Run while the END ring was the last handle touched, and the Length
+  otherwise. There is no END ring at Run 0. Gates: section 11 of
+  `tools/nso_tube_neck_drag_check.js`.
 
 `npm run tube:edges` (headless) and `npm run tube:edges-drive` (real app),
 both in `npm test`.
