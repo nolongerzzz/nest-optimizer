@@ -436,3 +436,47 @@ still refused.
 4. **The hoop-stretch rule does not apply to one face**: it guards forming a
    sheet of one thickness; a one-face move models the wall it leaves
    explicitly, and that wall is held to the floor.
+
+## The card: Walls, and Flare's lip ring (tube-end-drag, 2026-10-20)
+
+`app-tube-edge.js?v=enddrag1`. The card gains a **Walls** select (Both ·
+Outside only · Bore only, `sel-te-walls`) under Way, shown for Flare and
+Neck and hidden for Roll. Δr and Angle take negative values now (below 0 is
+inward); Way In stays, and for a Flare it means the same as a negative Δr.
+
+**Flare's handle, the LIP ring** (orange, Neck's waist colour), where the
+moving face's lip will be, u = L out along the wall:
+- drag it toward or away from the axis: **Δr** (through 0 and inward);
+- drag it along the axis: **Length**; both at once, read on the plane through
+  the axis that faces the camera (Neck's waist plane);
+- 0.5 mm steps, 0.1 with Shift; **Left / Right** Δr ±1, **Up / Down** the
+  Length ±1 (Up the way the axis runs up the screen), Shift 0.1; Escape puts
+  a drag back, then shuts the card; no drag orbits the camera;
+- a drag writes **Length and Δr** (Angle follows, linked) and sets Way back to
+  Out: the sign is Δr's;
+- the live ghost follows, as typing does; the fields stay editable.
+
+**Where the handle sits**: with Bore only on the bore, with Outside only on
+the outside; with Both, Flare's lip ring on the wall's mid-line. Neck's rings
+follow Walls the same way: on the bore with Bore only. With Both they stay
+on the outside, as #241 drew them (see the flag below). A one-face neck that
+reaches an end is drawn where the engine lays it, from that end; its free
+end ring sets the depth, and the ring on the end stays put. **Hover names the
+face**: `Bore Δr +3.0 mm, Length 10.0 mm` (lip), `Wall Δr −5.0 mm` (a
+neck's waist with Both).
+
+Gates (`tools/nso_tube_neck_drag_check.js`, sections 8–10, in `tube:neck`):
+- the lip ring dragged 4 mm in reads **Δr −4.0**, and the ghost's lip bore is
+  **Ø8.80**, Ø 8 under the tube's Ø16.80;
+- 6 mm along the axis gives **Length 6 → 12**, with the ghost's lip at z 52;
+- Shift tenths, the arrows, and Escape mid-drag;
+- Bore only on a Ø40.62 / Ø30.47 pipe: the ring sits on the bore, and 3 mm
+  out makes the ghost's lip bore **Ø36.47** (Ø +6), its outside Ø40.62 at
+  every vertex;
+- Set commits the ghost's soup, and one Undo puts the pipe back;
+- Neck Bore only: its rings sit on the bore.
+
+Flag: the ticket says Both is "on the wall's mid-line (as Neck today)". Neck
+today draws its waist on the **outside** (Ro + Δr), and #241's gates grab it
+there. Neck with Both is left where it was; Flare with Both is on the
+mid-line, as the ticket asks.

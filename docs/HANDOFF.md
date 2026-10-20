@@ -1734,6 +1734,12 @@ the same way. Before a later ticket touches it:
   takes Δr < 0 or Way In: inward, the outward construction mirrored, the bore
   leading. The card's `sel-te-walls` is read when present; the UI PR draws
   it. `docs/TUBE-EDGE.md`, "Walls".
+- **Flare is dragged** (2026-10-20, `app-tube-edge.js?v=enddrag1`): the Walls
+  select is on the card (hidden for Roll). Flare has a LIP ring handle:
+  toward or away from the axis is Δr (negative turns it in), along the axis is
+  Length. Arrows, Shift and Escape work as Neck's. Handles sit on the moving
+  face (the mid-line for a Flare with Both), and hover names the face. Gates:
+  sections 8-10 of `tools/nso_tube_neck_drag_check.js`.
 
 `npm run tube:edges` (headless) and `npm run tube:edges-drive` (real app),
 both in `npm test`.

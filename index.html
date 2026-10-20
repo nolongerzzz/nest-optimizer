@@ -1021,7 +1021,7 @@
               <button id="btn-bend" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="bend-panel"
                       title="Bend the piece like a pipe or plate bender, inside one straight stretch: the section is carried round the arc exactly - a plate's thickness, a tube's bore and wall do not change - and everything past the bend turns with it, rigidly. Opens a panel with a live ghost of the result; click the piece to set where.">Bend</button>
               <button id="btn-tube-edge" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="te-panel"
-                      title="Flare or roll the open end of a tube outward, or neck it anywhere along its length (a pinch or a bulge). The wall's thickness is carried exactly through the new section and the new wall is welded to the old. Opens a card with a live ghost of the result; click the piece near the end to treat, or where the neck goes. A neck's three rings are handles: drag the waist in or out, an end ring to stretch the band, the band itself to slide it along the tube.">Tube edge</button>
+                      title="Flare the open end of a tube out or in, roll it outward, or neck it anywhere along its length (a pinch or a bulge) - the whole wall, or with Walls only its outside or its bore (a socket, a spigot, a funnel mouth). The wall's thickness is carried exactly through the new section and the new wall is welded to the old. Opens a card with a live ghost of the result; click the piece near the end to treat, or where the neck goes. A neck's three rings are handles: drag the waist in or out, an end ring to stretch the band, the band itself to slide it along the tube.">Tube edge</button>
             </div>
             <div class="vp-bend-panel" id="bend-panel" hidden>
               <label class="vp-bend-field" title="Where the bend's middle goes, in mm along the piece from its near (low) end. Click the piece to set it.">Where
@@ -1048,18 +1048,24 @@
                   <option value="roll">Roll</option>
                   <option value="neck">Neck</option>
                 </select></label>
-              <label class="vp-bend-field" id="te-dir-row" title="Out, away from the axis. In (toward the axis) is not supported yet and says so.">Way
+              <label class="vp-bend-field" id="te-dir-row" title="Out, away from the axis; In, toward it - for a Flare the same as a negative Δr. A Roll goes Out only (In is refused, not yet).">Way
                 <select id="sel-te-dir" class="vp-select" aria-label="Tube edge direction">
                   <option value="out" selected>Out</option>
                   <option value="in">In</option>
                 </select></label>
+              <label class="vp-bend-field" id="te-walls-row" title="Which of the wall's faces Flare or Neck moves. Both: the whole wall, its thickness kept. Outside only / Bore only: that face moves by Δr and the other stays exactly where it was, so the wall gets thinner or thicker - refused under the nozzle-safety floor from nso_thickness.js. Neck with one face can step the end of the tube: Bore only out is a socket (a counterbore), Outside only in is a spigot.">Walls
+                <select id="sel-te-walls" class="vp-select" aria-label="Walls: which face moves">
+                  <option value="both" selected>Both</option>
+                  <option value="outside">Outside only</option>
+                  <option value="bore">Bore only</option>
+                </select></label>
               <div id="te-flare-rows" class="te-rows">
-                <label class="vp-bend-field" title="How far the flare runs past the end, in mm along the wall.">Length
+                <label class="vp-bend-field" title="How far the flare runs past the end, in mm along the wall. Or drag the lip ring on the ghost along the axis (Shift: 0.1 mm steps); Up / Down arrows step it 1 mm.">Length
                   <input type="number" id="inp-te-length" min="0.1" step="0.5" aria-label="Flare length, mm"><span>mm</span></label>
-                <label class="vp-bend-field" title="The flare's angle off the wall. Linked to Δr over the Length: edit either.">Angle
-                  <input type="number" id="inp-te-angle" min="0.1" max="75" step="1" aria-label="Flare angle, degrees"><span>°</span></label>
-                <label class="vp-bend-field" title="How far the lip stands out from the wall's line, in mm. Linked to Angle over the Length: edit either.">Δr
-                  <input type="number" id="inp-te-dr" min="0.01" step="0.1" aria-label="Flare delta r, mm"><span>mm</span></label>
+                <label class="vp-bend-field" title="The flare's angle off the wall: above 0 out, below 0 in. Linked to Δr over the Length: edit either.">Angle
+                  <input type="number" id="inp-te-angle" min="-75" max="75" step="1" aria-label="Flare angle, degrees"><span>°</span></label>
+                <label class="vp-bend-field" title="How far the lip stands off the wall's line, in mm: above 0 out, below 0 in (the bore leads). Linked to Angle over the Length: edit either. Or drag the lip ring on the ghost toward or away from the axis (Shift: 0.1 mm steps); Left / Right arrows step it 1 mm.">Δr
+                  <input type="number" id="inp-te-dr" step="0.1" aria-label="Flare delta r, mm (negative turns inward)"><span>mm</span></label>
                 <label class="vp-bend-field" title="Straight: a cone. Trumpet: tangent to the tube at the end, its radius growing as the square of the length (an ease-in) to the same lip.">Profile
                   <select id="sel-te-profile" class="vp-select" aria-label="Flare profile">
                     <option value="straight" selected>Straight</option>
@@ -1076,7 +1082,7 @@
               <div id="te-neck-rows" class="te-rows" hidden>
                 <label class="vp-bend-field" title="How long the neck runs along the tube, in mm, centred where you click the tube. Or drag either end ring on the tube along its axis: the band stretches, its centre held (Shift: 0.1 mm steps).">Length
                   <input type="number" id="inp-te-neck-length" min="0.1" step="0.5" aria-label="Neck length, mm"><span>mm</span></label>
-                <label class="vp-bend-field" title="How far the wall moves at the neck's waist, in mm: below 0 pinches the tube in, above 0 bulges it out. The wall's thickness is kept. Or drag the waist ring on the tube: toward the axis pinches, away bulges (Shift: 0.1 mm steps); Left / Right arrows step it 1 mm, Up / Down move the band.">Δr
+                <label class="vp-bend-field" title="How far the wall moves at the neck's waist, in mm: below 0 pinches the tube in, above 0 bulges it out. With Walls Both the wall's thickness is kept; with one face only that face moves. Or drag the waist ring on the tube (it sits on the face that moves): toward the axis pinches, away bulges (Shift: 0.1 mm steps); Left / Right arrows step it 1 mm, Up / Down move the band.">Δr
                   <input type="number" id="inp-te-neck-dr" step="0.5" aria-label="Neck delta r, mm (negative pinches, positive expands)"><span>mm</span></label>
                 <label class="vp-bend-field" title="Smooth: a cosine ease in and out, tangent to the tube at both ends. Funnel: a straight taper in and a straight taper out.">Profile
                   <select id="sel-te-neck-profile" class="vp-select" aria-label="Neck profile">
@@ -1735,7 +1741,7 @@
   <!-- Neck: a pinch or a bulge along a tube. After nso_tube_edge.js (its end
        reader, weld and helpers). See docs/TUBE-EDGE.md, "Neck". -->
   <script src="nso_tube_neck.js?v=walls1"></script>
-  <script src="app-tube-edge.js?v=walls1"></script>
+  <script src="app-tube-edge.js?v=enddrag1"></script>
   <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
        nso_planar_fuse.js (the vertex space), nso_thickness.js,
        nso_assemble.js (the seat), nso_path_sweep.js (the rod) and

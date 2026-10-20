@@ -19,6 +19,15 @@
      - Escape puts a drag back where it began, then shuts the card;
      - no drag moves the camera, and OrbitControls is on again after each;
      - Set commits the dragged ghost and one Undo puts the piece back.
+   And FLARE's lip ring (tube-end-drag):
+     - the lip ring dragged 4 mm toward the axis reads Δr −4.0 (the flare
+       turned in), the ghost's lip bore Ø 8 under the tube's;
+     - dragged 6 mm along the axis, the Length 6 longer, the ghost's lip there;
+     - the arrows (Left / Right Δr, Up / Down the Length), Escape mid-drag;
+     - Walls Bore only: the ring sits on the bore, hover says "Bore", and
+       3 mm out is the bore Ø +6 at the lip with the outside unchanged (a
+       Ø40.62 / Ø30.47 pipe, wall 5.08); Set commits it, one Undo.
+     - Neck with Bore only: its rings sit on the bore.
    Every grab point and target is a point on the tube, projected through the
    page's own camera; the drag's numbers are read back off the fields, the
    ghost and the readout. */
@@ -82,6 +91,33 @@ const neck = page => page.evaluate(() => {
     h0: g ? g.h0 : null, L: g ? g.L : null, drNum: g ? g.dr : null, drag: !!B.drag, hover: B.hover,
     cursor: Array.from(cv.classList).filter(c => /^te-cur-/.test(c)),
     controls: state.controls.enabled
+  };
+});
+// Flare and its lip ring as the page has them. The tube's axis is raw +Z
+// through x = y = 0; the top end is read, so the lip is at z = 40 + h0.
+const flare = page => page.evaluate(() => {
+  const B = state.tubeEdge, el = id => document.getElementById(id), g = NSO_teFlareGeom(), cv = state.renderer.domElement;
+  let lipBoreDia = null, ghostTop = null, maxDia = null;
+  if (B.ghost) {
+    const o = getActiveModel().centerOffset, P = B.ghost.geometry.attributes.position.array;
+    let top = -Infinity, hi = -Infinity;
+    for (let i = 0; i < P.length; i += 3) { const Z = P[i + 1] + o.y; top = Math.max(top, Z); hi = Math.max(hi, Math.hypot(P[i] + o.x, P[i + 2] + o.z)); }
+    let lo = Infinity;
+    for (let i = 0; i < P.length; i += 3) {
+      const X = P[i] + o.x, Y = -(P[i + 2] + o.z), Z = P[i + 1] + o.y;
+      if (Math.abs(Z - top) < 2e-3) lo = Math.min(lo, Math.hypot(X, Y));
+    }
+    ghostTop = top; lipBoreDia = isFinite(lo) ? 2 * lo : null; maxDia = 2 * hi;
+  }
+  const zEnd = B.read && B.read.end ? B.read.end.center[2] : 0;
+  return {
+    open: !!B.open, length: el('inp-te-length').value, dr: el('inp-te-dr').value, dir: el('sel-te-dir').value,
+    readout: el('te-readout').textContent, bad: el('te-readout').classList.contains('is-bad'),
+    ghost: !!(B.ghost && B.ghost.parent), lipBoreDia, ghostTop, maxDia,
+    rings: B.ring ? B.ring.children.map(c => c.userData.teHandle).filter(Boolean) : [],
+    hot: B.ring ? B.ring.children.filter(c => c.userData.teHandle && c.material.color.getHex() === 0xffffff).map(c => c.userData.teHandle) : [],
+    lipR: g ? g.Rl : null, lipZ: g ? zEnd + g.h0 : null, drag: !!B.drag,
+    cursor: Array.from(cv.classList).filter(c => /^te-cur-/.test(c)), controls: state.controls.enabled
   };
 });
 const camera = page => page.evaluate(() => [...state.camera.position.toArray(), ...state.controls.target.toArray()].map(v => +v.toFixed(6)).join(','));
@@ -166,8 +202,8 @@ withApp(async (page, logs) => {
   check('the waist ring, edge-on at the side, is the handle there', w0.hit === 'waist' && w0.onCanvas, JSON.stringify(w0));
   await page.mouse.move(w0.x, w0.y);
   N = await neck(page);
-  check('hover: the readout names it ("Δr 0.0 mm"), lit, the cursor a resize across the axis',
-        /^Δr 0\.0 mm · /.test(N.readout) && N.hot.join() === 'waist' && N.cursor.join() === 'te-cur-ew', N.readout + ' · ' + N.cursor.join());
+  check('hover: the readout names it and the face it moves ("Wall Δr 0.0 mm"), lit, the cursor a resize across the axis',
+        /^Wall Δr 0\.0 mm · /.test(N.readout) && N.hot.join() === 'waist' && N.cursor.join() === 'te-cur-ew', N.readout + ' · ' + N.cursor.join());
   cam0 = await camera(page);
   await drag(page, w0, w1);
   N = await neck(page);
@@ -239,12 +275,12 @@ withApp(async (page, logs) => {
   check('Shift+Up: 0.1 mm', near(N.h0 - k0, -0.9, 1e-9), String(N.h0 - k0));
   await page.keyboard.press('ArrowLeft');
   N = await neck(page);
-  check('Left: Δr 1 mm more pinch (−6.0)', near(N.drNum - d0, -1, 1e-9) && N.dr === '-6.0' && /^Δr −6\.0 mm/.test(N.readout), N.dr + ' · ' + N.readout);
+  check('Left: Δr 1 mm more pinch (−6.0)', near(N.drNum - d0, -1, 1e-9) && N.dr === '-6.0' && /^Wall Δr −6\.0 mm/.test(N.readout), N.dr + ' · ' + N.readout);
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('Shift+ArrowRight');
   N = await neck(page);
   check('Right, Shift+Right: Δr +1.1 back (−4.9)', near(N.drNum, -4.9, 1e-9) && N.dr === '-4.9', N.dr);
-  check('...the ghost follows the keys as it does the fields', N.ghost && /Pinch −4\.90 mm over 12\.0 mm/.test(N.readout.replace(/^Δr [^·]*· /, '')), N.readout);
+  check('...the ghost follows the keys as it does the fields', N.ghost && /Pinch −4\.90 mm over 12\.0 mm/.test(N.readout.replace(/^Wall Δr [^·]*· /, '')), N.readout);
   check('the keys never moved the camera', N.controls);
 
   console.log('\n=== 6. Escape: the drag goes back, then the card shuts ===');
@@ -287,6 +323,124 @@ withApp(async (page, logs) => {
   await page.click('#btn-undo');
   await page.waitForFunction(() => /Undo: Neck reverted/.test(document.getElementById('status').textContent), null, { timeout: 15000 });
   check('one Undo puts it back, bit for bit', (await soupOf(page)) === before);
+
+  console.log('\n=== 8. Flare: the lip ring - 4 mm in is Δr −4, 6 mm along is Length +6 ===');
+  await page.click('#btn-tube-edge');
+  await page.waitForFunction(() => state.tubeEdge.open && state.tubeEdge.result, null, { timeout: 30000 });
+  await setField(page, 'sel-te-verb', 'flare');
+  await page.waitForFunction(() => state.tubeEdge.readVerb === 'end' && state.tubeEdge.read && state.tubeEdge.read.ok, null, { timeout: 30000 });
+  await page.evaluate(() => { state.tubeEdge.point = [0, 9, 39.5]; NSO_teLoad(); });      // the top end
+  await setField(page, 'inp-te-dr', '0');
+  await frame(page, 15, 140);            // wide enough for a lip up to 15 mm past the end
+  let F = await flare(page);
+  check('Flare on the top end: the lip ring is up, on the wall\'s mid-line, 6 mm out (Length 6, Δr 0 - refused, the ring still a handle)',
+    F.rings.includes('lip') && near(F.lipR, 9.2, 1e-6) && near(F.lipZ, 46, 1e-6) && F.bad && /a 0° flare is no flare/.test(F.readout) && !F.ghost,
+    F.rings.join(',') + ' r ' + F.lipR + ' z ' + F.lipZ + ' · ' + F.readout);
+  const l0 = await onTube(page, 46, 9.2, 'side'), l1 = await onTube(page, 46, 5.2, 'side');
+  check('the lip ring, edge-on at the side, is the handle there', l0.hit === 'lip' && l0.onCanvas, JSON.stringify(l0));
+  await page.mouse.move(l0.x, l0.y);
+  F = await flare(page);
+  check('hover: "Wall Δr 0.0 mm, Length 6.0 mm", lit, a hand', /^Wall Δr 0\.0 mm, Length 6\.0 mm · /.test(F.readout) && F.hot.join() === 'lip' && F.cursor.join() === 'te-cur-grab',
+    F.readout + ' · ' + F.cursor.join());
+  cam0 = await camera(page);
+  await drag(page, l0, l1);
+  F = await flare(page);
+  console.log('   readout: ' + F.readout);
+  check('4 mm toward the axis: the Δr field reads −4.0, the Length 6, Way Out (the sign is Δr\'s)', F.dr === '-4.0' && F.length === '6.0' && F.dir === 'out', F.dr + ' / ' + F.length + ' / ' + F.dir);
+  check('the ghost is up and its lip bore is Ø8.80 ± 0.05 - Ø 8 under the tube\'s Ø16.80', F.ghost && F.lipBoreDia != null && near(F.lipBoreDia, 8.8, 0.05), F.lipBoreDia && F.lipBoreDia.toFixed(3));
+  check('...the readout says the same: inward, lip bore Ø8.80', /Δr −4\.00 mm\), inward: lip bore Ø8\.80/.test(F.readout), F.readout);
+  check('the drag did not move the camera; OrbitControls on again', (await camera(page)) === cam0 && F.controls && !F.drag);
+  const m0 = await onTube(page, 46, F.lipR, 'side'), m1 = await onTube(page, 52, F.lipR, 'side');
+  check('the lip ring has followed (r ' + F.lipR.toFixed(2) + '), still the handle', m0.hit === 'lip' && m1.onCanvas, JSON.stringify(m0));
+  await drag(page, m0, m1);
+  F = await flare(page);
+  console.log('   readout: ' + F.readout);
+  check('6 mm along the axis: Length 6 → 12.0, Δr held at −4.0', F.length === '12.0' && F.dr === '-4.0', F.length + ' / ' + F.dr);
+  check('...the ghost\'s lip 12 mm out (z 52), its bore Ø8.80 there', F.ghost && near(F.ghostTop, 52, 1e-3) && near(F.lipBoreDia, 8.8, 0.05) && /Straight flare 12\.0 mm/.test(F.readout),
+    F.ghostTop + ' · ' + F.lipBoreDia);
+  // Shift: tenths, both ways at once
+  const f0 = await onTube(page, 52, F.lipR, 'side'), f1 = await onTube(page, 52.27, F.lipR + 1.23, 'side');
+  check('...and at 12 mm out it is the handle on the canvas', f0.hit === 'lip' && f0.onCanvas, JSON.stringify(f0));
+  await page.keyboard.down('Shift');
+  await drag(page, f0, f1);
+  await page.keyboard.up('Shift');
+  F = await flare(page);
+  check('with Shift, 0.1 mm steps: Δr −2.8, Length 12.3', F.dr === '-2.8' && F.length === '12.3', F.dr + ' / ' + F.length);
+  await setField(page, 'inp-te-length', '12');
+  await setField(page, 'inp-te-dr', '-4');
+  await page.evaluate(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); });
+  await page.keyboard.press('ArrowRight');
+  F = await flare(page);
+  check('Right: Δr 1 mm out (−3.0), the hover text in front', F.dr === '-3.0' && /^Wall Δr −3\.0 mm, Length 12\.0 mm/.test(F.readout), F.dr + ' · ' + F.readout);
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Shift+ArrowUp');
+  F = await flare(page);
+  check('Up, Shift+Up: the Length 1.1 mm longer (13.1)', F.length === '13.1', F.length);
+  await page.keyboard.press('ArrowLeft');
+  F = await flare(page);
+  check('Left: Δr −4.0 again, the ghost following', F.dr === '-4.0' && F.ghost && /Straight flare 13\.1 mm/.test(F.readout), F.readout);
+  const e8a = await onTube(page, F.lipZ, F.lipR, 'side'), e8b = await onTube(page, F.lipZ, F.lipR - 2, 'side');
+  await page.mouse.move(e8a.x, e8a.y);
+  await page.mouse.down();
+  await page.mouse.move(e8b.x, e8b.y, { steps: 8 });
+  F = await flare(page);
+  check('mid-drag: Δr −6.0, the orbit off', e8a.hit === 'lip' && F.drag && F.dr === '-6.0' && !F.controls, F.dr);
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  F = await flare(page);
+  check('Escape: the drag put back (Δr −4.0, Length 13.1), the card open, the orbit on', !F.drag && F.open && F.dr === '-4.0' && F.length === '13.1' && F.controls && F.ghost, F.dr + ' / ' + F.length);
+  await page.mouse.move(5, 5);
+  await page.keyboard.press('Escape');
+  F = await flare(page);
+  check('Escape again shuts the card, the piece unchanged', !F.open && !F.ghost && (await soupOf(page)) === before);
+
+  console.log('\n=== 9. Walls = Bore only: the ring on the bore; 3 mm out is the bore Ø +6, the outside unchanged ===');
+  const pipeId = await loadSTL(page, writeSTL('pipe.stl', stockTube(20.31, 5.076, 30)));
+  await selectModel(page, pipeId);
+  const pipeBefore = await soupOf(page);
+  await page.click('#btn-tube-edge');
+  await page.waitForFunction(() => state.tubeEdge.open && state.tubeEdge.read && state.tubeEdge.read.ok, null, { timeout: 30000 });
+  await setField(page, 'sel-te-verb', 'flare');
+  check('the Walls row shows for Flare', await page.evaluate(() => !document.getElementById('te-walls-row').hidden));
+  await setField(page, 'sel-te-walls', 'bore');
+  await setField(page, 'inp-te-length', '10');
+  await setField(page, 'inp-te-dr', '0');
+  await page.evaluate(() => { state.tubeEdge.point = [0, 18, 29.5]; NSO_teLoad(); });
+  await frame(page, 15, 150);
+  F = await flare(page);
+  check('Bore only: the lip ring sits on the bore (r 15.234), 10 mm out', near(F.lipR, 15.234, 1e-3) && near(F.lipZ, 40, 1e-6) && F.rings.includes('lip'), F.lipR + ' / ' + F.lipZ);
+  const p0 = await onTube(page, 40, 15.234, 'side'), p1 = await onTube(page, 40, 18.234, 'side');
+  await page.mouse.move(p0.x, p0.y);
+  F = await flare(page);
+  check('hover names the face it moves: "Bore Δr 0.0 mm, Length 10.0 mm"', p0.hit === 'lip' && /^Bore Δr 0\.0 mm, Length 10\.0 mm · /.test(F.readout), F.readout);
+  await drag(page, p0, p1);
+  F = await flare(page);
+  console.log('   readout: ' + F.readout);
+  check('3 mm out: Δr +3.0', F.dr === '3.0', F.dr);
+  check('the ghost\'s lip bore is Ø36.47 ± 0.05 - the bore Ø +6 - and its outside Ø40.62 everywhere (unchanged)',
+    F.ghost && near(F.lipBoreDia, 36.468, 0.05) && near(F.maxDia, 40.62, 1e-3), F.lipBoreDia + ' / ' + F.maxDia);
+  check('...the readout names the walls: "Bore only: Ø30.47 → Ø36.47 at the lip, outside kept Ø40.62, wall 5.08 → 2.08"',
+    /^Bore only: Ø30\.47 → Ø36\.47 at the lip, outside kept Ø40\.62, wall 5\.08 → 2\.08/.test(F.readout), F.readout);
+  const expectF = await page.evaluate(() => Array.from(state.tubeEdge.result.tris).join(','));
+  await page.click('#btn-te-go');
+  await page.waitForFunction(() => /Tube edge done|Tube edge refused/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
+  const stF = await statusOf(page);
+  check('Set: "Tube edge done - Bore only: …", the piece is the ghost\'s soup', /Tube edge done - Bore only: Ø30\.47 → Ø36\.47/.test(stF) && (await soupOf(page)) === expectF, stF);
+  await page.click('#btn-undo');
+  await page.waitForFunction(() => /Undo: /.test(document.getElementById('status').textContent), null, { timeout: 15000 });
+  check('one Undo puts the pipe back, bit for bit', (await soupOf(page)) === pipeBefore);
+
+  console.log('\n=== 10. Neck with Bore only: its rings on the bore ===');
+  await page.click('#btn-tube-edge');
+  await page.waitForFunction(() => state.tubeEdge.open && state.tubeEdge.read && state.tubeEdge.read.ok, null, { timeout: 30000 });
+  await setField(page, 'sel-te-verb', 'neck');
+  await page.waitForFunction(() => state.tubeEdge.readVerb === 'neck' && state.tubeEdge.result, null, { timeout: 30000 });
+  await setField(page, 'sel-te-walls', 'bore');
+  await setField(page, 'inp-te-neck-dr', '2');
+  N = await page.evaluate(() => { const g = NSO_teNeckGeom(); return { Rf: g.Rf, Rw: g.Rw, text: NSO_teHandleText('waist'), readout: document.getElementById('te-readout').textContent }; });
+  check('the rings sit on the bore (r 15.234) and the waist at the bore + Δr, named "Bore"', near(N.Rf, 15.234, 1e-3) && near(N.Rw, 17.234, 1e-3) && /^Bore Δr \+2\.0 mm$/.test(N.text) &&
+        /^Bore only: Ø30\.47 → Ø34\.47/.test(N.readout), N.Rf + ' / ' + N.Rw + ' · ' + N.text + ' · ' + N.readout);
+  await page.click('#btn-te-cancel');
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));
   check('no uncaught page errors', errs.length === 0, errs.join(' | '));
