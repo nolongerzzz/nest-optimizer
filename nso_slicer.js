@@ -47,6 +47,17 @@
  *                                     NSO_SupportAim.detectOverhangs (facet
  *                                     normals + a downward ray), which is the
  *                                     point: the two can be compared.
+ *   7b. supports  typeSupports()    - an object passed with role 'support' is
+ *                                     printed as support, the way Bambu prints
+ *                                     its own: every line of it is Support,
+ *                                     Support transition or Support interface,
+ *                                     never a wall or infill. Which layer is
+ *                                     which is read off the geometry: where its
+ *                                     top lies within gap + one layer under the
+ *                                     host's underside, its top 2 layers are the
+ *                                     interface and the 2 below the transition.
+ *                                     The host's overhang regions are credited
+ *                                     with what those tops cover.
  *   8. G-code     toGcode()         - Bambu-style tags (; CHANGE_LAYER,
  *                                     ; Z_HEIGHT, ; LAYER_HEIGHT, ; FEATURE),
  *                                     E from the stadium flow model that
@@ -58,6 +69,11 @@
  * FRAME. Soups are the app's raw convention: 9 floats per triangle, Z up,
  * millimetres. Objects are dropped onto the plate together (one shift, their
  * relative placement kept) unless `dropToPlate: false`.
+ *
+ * OBJECTS. { name, soup, gapCloseMm?, role?, key?, hostKey? }. role is 'part'
+ * (the default) or 'support'; a support names the part it holds by that
+ * part's key (hostKey). With no support among them the slice is exactly what
+ * it was before roles existed.
  *
  * API
  *   CONSTANTS                          the measured defaults, each with its source
@@ -153,6 +169,15 @@
               'strand 0.61 mm (tools/gcode-test/gcode-zfilter-check.js) at a 1.09 mm pitch ' +
               '(docs/SUPPORT-TREE.md section 1, npm run tree:reference)'
     },
+    // --- a support object's own layers, read off its geometry ---------------
+    supportSheet: {
+      interfaceLayers: 2, transitionLayers: 2, closeMm: 0.5,
+      source: 'nso_support_interface.js sheet(): SHEET_ROLES transition, transition, interface, ' +
+              'interface - two one-direction transition layers under two interface layers, open ' +
+              'lines at 0.84 mm (0.42 line + 0.42 channel). closeMm is STATED, not measured: a ' +
+              'closing that shuts channels up to 1.0 mm, so a sheet layer of lines reads as the ' +
+              'footprint it holds (finish()\'s 1.2 mm patches leave 0.78 mm)'
+    },
     // --- the flow model, shared with the importer ----------------------------
     flow: {
       filamentDiameterMm: 1.75,
@@ -223,6 +248,9 @@
       // chord when its ends are this close; wider, it is dropped and counted.
       // STATED, not measured - a robustness choice for damaged input.
       gapCloseMm: 2,
+      // A support object (role 'support') holds its host where its top lies
+      // within this gap + one layer under the host's underside.
+      supportGapMm: CONSTANTS.supportGap.designMm,
       weldMm: 1e-4,
       dropToPlate: true,
       filamentDiameterMm: CONSTANTS.flow.filamentDiameterMm,
@@ -781,6 +809,7 @@
         });
         return { name: ob.name || ('object ' + (oi + 1)), id: oi, mesh: sm, S: S, flipped: flipped,
                  nonSolid: ob.gapCloseMm === 0,
+                 role: ob.role === 'support' ? 'support' : 'part', key: ob.key, hostKey: ob.hostKey,
                  layers: [] };
       });
 
@@ -936,7 +965,11 @@
       }
 
       var linkMm = o.layerMm / Math.tan(th) + o.outerWallWidthMm;
-      var overhang = perObject.map(function (P) { return overhangRegions(g, P, planes, linkMm); });
+      var withSupports = perObject.some(function (P) { return P.role === 'support'; });
+      if (withSupports) typeSupports(g, perObject, planes, o, minOver);
+      var overhang = perObject.map(function (P) {
+        return overhangRegions(g, P, planes, linkMm, withSupports && P.role === 'part' ? coverFor(g, P, perObject, planes, o, minOver) : null);
+      });
 
       var result = {
         ok: true,
@@ -954,7 +987,8 @@
             st.closedByGap += s.closedByGap; st.droppedChains += s.droppedChains;
           });
           return {
-            id: P.id, name: P.name, flipped: P.flipped, nonSolid: P.nonSolid,
+            id: P.id, name: P.name, flipped: P.flipped, nonSolid: P.nonSolid, role: P.role,
+            support: P.sheet || null,
             triangles: P.mesh.triangles, degenerate: P.mesh.degenerate,
             sectionStats: st,
             wallCountHistogram: wc,
@@ -1017,16 +1051,191 @@
     return runs;
   }
 
+  // ===========================================================================
+  // Supports - a support object prints as support, and holds its host up
+  // ===========================================================================
+
+  /** Layers k whose underside (printZ - h) is within gap + one layer over layer i's top. */
+  function layersOver(planes, i, gap) {
+    var out = [];
+    for (var k = i + 1; k < planes.length; k++) {
+      var d = planes[k].printZ - planes[k].h - planes[i].printZ;
+      if (d > gap + planes[i].h + 1e-6) break;
+      if (d >= -1e-6) out.push(k);
+    }
+    return out;
+  }
+
+  /** Layers i whose top is within gap + one layer under layer k's underside. */
+  function layersUnder(planes, k, gap) {
+    var out = [];
+    for (var i = k - 1; i >= 0; i--) {
+      var d = planes[k].printZ - planes[k].h - planes[i].printZ;
+      if (d > gap + planes[i].h + 1e-6) break;
+      if (d >= -1e-6) out.push(i);
+    }
+    return out;
+  }
+
+  /** Share of a path's length whose edge midpoints fall inside `polys`. */
+  function shareInside(path, polys) {
+    if (!polys.length) return 0;
+    var pts = path.pts, n = pts.length, m = path.closed ? n : n - 1;
+    var all = 0, inn = 0;
+    for (var i = 0; i < m; i++) {
+      var p = pts[i], q = pts[(i + 1) % n];
+      var l = Math.hypot(q[0] - p[0], q[1] - p[1]);
+      all += l;
+      if (inside(polys, (p[0] + q[0]) / 2, (p[1] + q[1]) / 2)) inn += l;
+    }
+    return all > 0 ? inn / all : 0;
+  }
+
+  /**
+   * Type every line of every support object, and say what each one is.
+   *
+   * THE SHEET IS FOUND, NOT TAGGED. A support's TOP is the part of a layer
+   * under one of its hosts' sections within gap + one layer above (the host's
+   * underside), with nothing of the support itself over it: the islands of
+   * the layer that reach under the host, closed by closeMm so a layer of
+   * lines reads as the footprint it covers, less what is within closeMm of
+   * the support's own next layer, opened by half a line (a strip narrower
+   * than a line is an edge, not a top). From each top down the sheet is
+   * followed island by island - a layer's islands that overlap the sheet's on
+   * the layer above, as each layer's lines cross the ones above (the bottom
+   * transition layer runs tip to tip, past the top's footprint): the top 2
+   * layers are Support interface, the 2 under them Support transition.
+   * Every other line of the object is Support. A path takes the zone (the
+   * islands, grown by half a line) holding most of its length.
+   *
+   * The host is the part the support names (hostKey = that part's key); a
+   * support that names none in this slice is read against every part.
+   * Writes P.host, P.footAt(i) (the closed layer, for the host's credit) and
+   * P.sheet (the readout's numbers).
+   */
+  function typeSupports(g, perObject, planes, o, minOver) {
+    var C = CONSTANTS.supportSheet;
+    var NI = C.interfaceLayers, NT = C.transitionLayers, R = C.closeMm;
+    var gap = o.supportGapMm, w = o.outerWallWidthMm;
+    var parts = perObject.filter(function (Q) { return Q.role !== 'support'; });
+    var n = planes.length;
+    perObject.forEach(function (P) {
+      if (P.role !== 'support') return;
+      var host = P.hostKey != null ? parts.find(function (Q) { return Q.key != null && Q.key === P.hostKey; }) || null : null;
+      var hosts = host ? [host] : parts;
+      P.host = host;
+      var feet = [];
+      P.footAt = function (i) {
+        if (i < 0 || i >= n || g.isEmpty(P.S[i])) return g.empty();
+        if (!feet[i]) feet[i] = g.offset(g.offset(P.S[i], R), -R);
+        return feet[i];
+      };
+      var tops = [], held = {};
+      for (var i = 0; i < n; i++) {
+        tops.push(null);
+        if (g.isEmpty(P.S[i])) continue;
+        var over = [];
+        layersOver(planes, i, gap).forEach(function (k) {
+          hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) over.push({ Q: Q, cs: Q.S[k] }); });
+        });
+        if (!over.length) continue;
+        var H = g.unionAll(over.map(function (x) { return x.cs; }));
+        var isl = g.parts(P.S[i]).filter(function (p) { return g.area(g.inter(p, H)) > 1e-6; });
+        if (!isl.length) continue;
+        var t = g.offset(g.offset(g.unionAll(isl), R), -R);
+        t = g.diff(t, g.offset(P.footAt(i + 1), R));
+        t = g.dropSmall(g.offset(g.offset(t, -w / 2), w / 2), minOver);
+        if (g.isEmpty(t)) continue;
+        tops[i] = t;
+        over.forEach(function (x) { if (!g.isEmpty(g.inter(x.cs, t))) held[x.Q.id] = x.Q; });
+      }
+      // Each top down through its stack: a layer's islands that overlap the
+      // sheet's islands on the layer above are the sheet's (each layer's lines
+      // cross the ones above), for NI + NT layers; the islands under the last
+      // that overlap it are its tips.
+      var zones = P.layers.map(function () { return { i: [], t: [] }; });
+      var sheets = [];
+      tops.forEach(function (t, i0) {
+        if (!t) return;
+        var lvl = g.parts(P.S[i0]).filter(function (p) { return !g.isEmpty(g.inter(p, t)); });
+        var lo = i0;
+        for (var m = 0; m < NI + NT && lvl.length; m++) {
+          var j = i0 - m;
+          (m < NI ? zones[j].i : zones[j].t).push(g.unionAll(lvl));
+          lo = j;
+          if (j - 1 < 0) { lvl = []; break; }
+          var U = g.unionAll(lvl);
+          lvl = g.parts(P.S[j - 1]).filter(function (p) { return g.area(g.inter(p, U)) > 1e-6; });
+        }
+        sheets.push({ topLayer: i0, zLo: planes[lo].printZ - planes[lo].h, zHi: planes[i0].printZ,
+                      areaMm2: g.area(t), tips: m === NI + NT ? lvl.length : 0 });
+      });
+      var counts = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 };
+      P.layers.forEach(function (L, j) {
+        if (!L.paths.length) return;
+        var zi = zones[j].i.length ? g.polys(g.offset(g.unionAll(zones[j].i), w / 2)) : [];
+        var zt = zones[j].t.length ? g.polys(g.offset(g.unionAll(zones[j].t), w / 2)) : [];
+        L.paths.forEach(function (p) {
+          var si = zi.length ? shareInside(p, zi) : 0;
+          var st = zt.length && si < 0.5 ? shareInside(p, zt) : 0;
+          p.feature = si >= 0.5 ? 'Support interface' : (si + st >= 0.5 ? 'Support transition' : 'Support');
+          counts[p.feature]++;
+        });
+      });
+      var heldBy = Object.keys(held).map(function (k) { return held[k]; });
+      P.sheet = {
+        hostName: host ? host.name : (heldBy.length ? heldBy.map(function (Q) { return Q.name; }).join(', ') : null),
+        hostFound: !!host,
+        sheets: sheets,
+        tips: sheets.reduce(function (a, s) { return a + s.tips; }, 0),
+        zLo: sheets.length ? Math.min.apply(null, sheets.map(function (s) { return s.zLo; })) : null,
+        zHi: sheets.length ? Math.max.apply(null, sheets.map(function (s) { return s.zHi; })) : null,
+        pathCounts: counts
+      };
+    });
+  }
+
+  /**
+   * What holds part Q up: for its layer k, each support that holds Q (names
+   * it, or names no part in this slice) with the closed layers whose tops
+   * lie within gap + one layer under k's underside.
+   */
+  function coverFor(g, Q, perObject, planes, o, minOver) {
+    var sups = perObject.filter(function (P) { return P.role === 'support' && (P.host === Q || !P.host); });
+    if (!sups.length) return null;
+    return {
+      openMm: o.outerWallWidthMm / 2,
+      minMm2: minOver,
+      at: function (k) {
+        var under = layersUnder(planes, k, o.supportGapMm);
+        var out = [];
+        sups.forEach(function (P) {
+          var cs = g.unionAll(under.map(function (i) { return P.footAt(i); }));
+          if (!g.isEmpty(cs)) out.push({ sup: P, cs: cs });
+        });
+        return out;
+      }
+    };
+  }
+
   /**
    * Link each layer's overhang islands into 3D regions: an island belongs to
    * the region of any island on the layer below it touches. For each region,
    * also say what a support under it would stand on: its footprint against
    * everything of the object printed below its first layer ('plate' where
    * nothing is, 'model' where the piece itself is).
+   *
+   * `cover` (coverFor(), only when the slice holds supports): each island is
+   * also cut by what the supports under it hold, layer by layer, and the
+   * region says how much of its footprint is covered, by which support, and
+   * what is left: the uncovered part opened by half a line and its islands
+   * under the overhang floor dropped - a strip narrower than a line beside a
+   * sheet is bridged by the first layer, as any overhang under that floor is.
    */
-  function overhangRegions(g, P, planes, linkMm) {
+  function overhangRegions(g, P, planes, linkMm, cover) {
     var regions = [];
     var prev = [];      // [{ cs, region }]
+    var coverCache = new Map();
     for (var i = 0; i < P.layers.length; i++) {
       var L = P.layers[i];
       var cur = [];
@@ -1043,7 +1252,7 @@
           if (!owner) {
             owner = { id: regions.length, firstLayer: i, lastLayer: i, layers: 0, areaMm2: 0,
                       firstZ: planes[i].printZ - planes[i].h, footprint: null,
-                      min: [Infinity, Infinity], max: [-Infinity, -Infinity] };
+                      min: [Infinity, Infinity], max: [-Infinity, -Infinity], open: null, by: {} };
             regions.push(owner);
           }
           owner.lastLayer = i;
@@ -1054,17 +1263,32 @@
           var b = isl.bounds();
           owner.min[0] = Math.min(owner.min[0], b.min[0]); owner.min[1] = Math.min(owner.min[1], b.min[1]);
           owner.max[0] = Math.max(owner.max[0], b.max[0]); owner.max[1] = Math.max(owner.max[1], b.max[1]);
+          if (cover) {
+            var held = coverAt(i);
+            var rest = held.length ? g.diff(isl, g.unionAll(held.map(function (c) { return c.cs; }))) : isl;
+            owner.open = owner.open ? g.union(owner.open, rest) : rest;
+            held.forEach(function (c) {
+              var piece = g.inter(isl, c.cs);
+              if (g.isEmpty(piece)) return;
+              var e = owner.by[c.sup.id] || (owner.by[c.sup.id] = { sup: c.sup, cs: null });
+              e.cs = e.cs ? g.union(e.cs, piece) : piece;
+            });
+          }
           cur.push({ cs: isl, region: owner });
         });
       }
       prev = cur;
+    }
+    function coverAt(i) {
+      if (!coverCache.has(i)) coverCache.set(i, cover.at(i));
+      return coverCache.get(i);
     }
     return regions.map(function (r) {
       var belowAll = g.unionAll(P.S.slice(0, r.firstLayer));
       var fp = r.footprint;
       var fpA = g.area(fp);
       var onModel = g.area(g.inter(fp, belowAll));
-      return {
+      var out = {
         id: r.id, firstLayer: r.firstLayer, lastLayer: r.lastLayer, layers: r.layers,
         firstZ: r.firstZ, areaMm2: r.areaMm2, footprintMm2: fpA,
         footprintPolys: g.polys(fp),
@@ -1072,6 +1296,19 @@
         standsOn: onModel <= 1e-6 ? 'plate' : (fpA - onModel <= 1e-6 ? 'model' : 'both'),
         min: r.min, max: r.max
       };
+      if (cover) {
+        // Nothing under it: all of it is uncovered, slivers and all.
+        var any = Object.keys(r.by).length > 0;
+        var open = any ? g.dropSmall(g.offset(g.offset(r.open, -cover.openMm), cover.openMm), cover.minMm2) : fp;
+        var openA = any ? g.area(open) : fpA;
+        out.uncoveredMm2 = openA;
+        out.uncoveredPolys = g.polys(open);
+        out.coveredMm2 = Math.max(0, fpA - openA);
+        out.coveredBy = Object.keys(r.by).map(function (k) {
+          return { id: r.by[k].sup.id, name: r.by[k].sup.name, mm2: g.area(r.by[k].cs) };
+        }).sort(function (a, b) { return b.mm2 - a.mm2; });
+      }
+      return out;
     });
   }
 
@@ -1086,7 +1323,12 @@
       var hist = Object.keys(ob.wallCountHistogram).sort().map(function (k) {
         return k + ' wall' + (k === '1' ? '' : 's') + ' x' + ob.wallCountHistogram[k];
       }).join(', ');
-      lines.push(ob.name + ': ' + hist + '; ' + ob.overhang.length + ' support-need region(s)' +
+      var need = ob.role === 'support' ? null
+        : ob.overhang.filter(function (r) { return r.uncoveredMm2 == null || r.uncoveredMm2 > 0; }).length;
+      var sp = ob.support;
+      lines.push(ob.name + ': ' + hist + '; ' +
+        (need == null ? 'support for ' + (sp.hostName || 'no piece in this slice') + ', ' + sp.tips + ' tip(s), ' +
+          sp.sheets.length + ' sheet(s)' : need + ' support-need region(s)') +
         (st.openChains ? '; ' + st.openChains + ' open section chain(s) - ' + st.closedByGap + ' closed across a gap, ' +
           st.droppedChains + ' dropped' : '') + (ob.flipped ? '; mesh was wound inside out - read reversed' : ''));
     });
