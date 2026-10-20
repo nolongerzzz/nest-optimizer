@@ -26,7 +26,8 @@ const vm = require('vm');
 const { execFileSync } = require('child_process');
 
 const ROOT = path.join(__dirname, '..');
-const { writeSTL } = require('./nso_stl_io.js');
+const { writeSTL, readSTL } = require('./nso_stl_io.js');
+const LIBDIR = require('./nso_library_dir.js');
 
 const ctx = {
   Math, Map, Set, console, Array, Object, Number, String, JSON, isFinite, Date,
@@ -36,10 +37,10 @@ ctx.window = ctx; ctx.globalThis = ctx;
 vm.createContext(ctx);
 vm.runInContext('var state = {}; var THREE = {};', ctx);
 for (const f of ['NSO_Repair.js', 'nso_thickness.js', 'nso_stock.js', 'nso_path_sweep.js', 'app-cut.js', 'app-sculpt.js',
-                 'app-extend.js', 'nso_section.js', 'nso_bend.js', 'app-wheel.js', 'nso_tube_edge.js', 'nso_tube_neck.js']) {
+                 'app-extend.js', 'nso_section.js', 'nso_bend.js', 'app-wheel.js', 'nso_tube_edge.js', 'nso_tube_neck.js', 'app-scale.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
-const { NSO_tubeNeckRaw, NSO_tubeNeckRead, NSO_Stock, NSO_extendRaw } = ctx;
+const { NSO_tubeNeckRaw, NSO_tubeNeckRead, NSO_Stock, NSO_extendRaw, NSO_tubeEdgeRaw, NSO_scaleSoup } = ctx;
 
 let pass = 0, fail = 0;
 const FAILS = [];
@@ -460,6 +461,84 @@ console.log('\n=== 8. an hourglass, and time ===');
   const t0 = Date.now(), rb = NSO_tubeNeckRaw(big, { length: 30, dr: -6 }), ms = Date.now() - t0;
   check('a 2000-sided tube (' + big.length / 9 + ' triangles) necks in under 5 s', rb.ok && ms < 5000, ms + ' ms · ' + (rb.ok ? rb.tris.length / 9 + ' out' : rb.reason));
   if (rb.ok) row('2000-sided Ø60/2 tube, pinch −6 over 30, smooth', big, rb, ms, '');
+}
+
+console.log('\n=== 9. one tube to a printer: a scaled, Rolled export necks; a real taper and an oval are refused with their spread ===');
+{
+  // An exported tube: MINI_TPU_TEST's size (Ø20 / Ø18, 8 long, 96 sides), its
+  // coordinates rounded to 0.001 mm as an STL exporter writing three places
+  // leaves them. Its outside's vertices then spread ~0.0012 mm in radius, as
+  // MINI_TPU_TEST's own do (9.99952 - 10.00060); a scale multiplies that.
+  const round3 = q => { const o = new Float32Array(q.length); for (let i = 0; i < q.length; i++) o[i] = Math.round(q[i] * 1000) / 1000; return o; };
+  const radii = q => { const rr = []; for (let i = 0; i < q.length; i += 3) rr.push(Math.hypot(q[i], q[i + 1])); return rr; };
+  const scaledRolled = (soup, factor) => {
+    const S = NSO_scaleSoup(soup, { factor });
+    if (!S.ok) return { ok: false, reason: 'scale: ' + S.reason };
+    let zl = Infinity, zh = -Infinity;
+    for (let i = 2; i < S.tris.length; i += 3) { zl = Math.min(zl, S.tris[i]); zh = Math.max(zh, S.tris[i]); }
+    // Roll the bottom end, with the card's default bead (radius 1.5 walls; the
+    // wall is 1 mm × the factor), 180°. The top stays a plain end for Neck to
+    // read the axis off: Neck reads the highest open end, and a top Roll's lip,
+    // standing highest, is not read as an end at every size (×2.37 is one).
+    const ro = Math.max(...radii(S.tris));
+    const R = NSO_tubeEdgeRaw(S.tris, { verb: 'roll', point: [ro, 0, zl], radius: Math.max(1, Math.round(3 * factor) / 2), angle: 180 });
+    return { ok: R.ok, reason: R.reason, scaled: S.tris, tris: R.tris, zl, zh };
+  };
+  const pinchMid = (tag, base, factor, wantRo) => {
+    const P = scaledRolled(base, factor);
+    check(tag + ': scaled ×' + factor + ' and Rolled at its bottom end', P.ok, P.reason);
+    if (!P.ok) return;
+    const zm = (P.zl + P.zh) / 2;
+    const r = NSO_tubeNeckRaw(P.tris, { point: [wantRo, 0, zm], length: 12, dr: -2 });
+    console.log('   ' + r.reason);
+    const S = r.wallRead && r.wallRead.radii;
+    if (S) console.log('   band: outside r ' + S.outer.lo.toFixed(6) + ' - ' + S.outer.hi.toFixed(6) + ' (mean ' + S.outer.mean.toFixed(6) + ', ' +
+      (S.outer.dev * 1000).toFixed(2) + ' µm off it), bore ' + S.inner.lo.toFixed(6) + ' - ' + S.inner.hi.toFixed(6) + ' (' + (S.inner.dev * 1000).toFixed(2) +
+      ' µm off it), allowed ' + f3(S.outer.tolMm) + ' / ' + f3(S.inner.tolMm));
+    check(tag + ': the band\'s outside spreads more than 0.001 mm (the old limit, which refused it)', S && S.outer.hi - S.outer.lo > 1e-3,
+      S ? (1000 * (S.outer.hi - S.outer.lo)).toFixed(2) + ' µm' : 'no reading');
+    if (!common(tag + ', pinch −2 over 12 mid-tube', P.tris, r)) return;
+    const Ro = r.band.Ro, Ri = r.band.Ri, w = radiiAt(r.tris, zm);
+    check(tag + ': outside Ø' + f3(2 * wantRo) + ' read (the mean), within 0.01', Math.abs(2 * Ro - 2 * wantRo) <= 0.01, 'Ø' + f3(2 * Ro) + ' / bore Ø' + f3(2 * Ri));
+    check(tag + ': bore and outside at the waist 4 mm narrower, ± 0.05', Math.abs(2 * w.lo - (2 * Ri - 4)) <= 0.05 && Math.abs(2 * w.hi - (2 * Ro - 4)) <= 0.05,
+      'Ø' + f3(2 * w.lo) + ' / Ø' + f3(2 * w.hi));
+    const RW = rayWall(graph(r.tris), zm - 6, zm + 6, 30), t = Ro - Ri;
+    check(tag + ': wall ' + f3(t) + ' ± 0.02 in 3D through the neck', RW.lo >= t - 0.02 && RW.hi <= t + 0.02 && RW.n >= RW.tried * 0.95,
+      f3(RW.lo) + '–' + f3(RW.hi) + ' from ' + RW.n + ' of ' + RW.tried + ' vertices');
+    row(tag + ' ×' + factor + ', Rolled, pinch −2 over 12', P.tris, r, null, 'outside spread ' + (1000 * (S.outer.hi - S.outer.lo)).toFixed(1) + ' µm, wall ' + f3(RW.lo) + '–' + f3(RW.hi));
+  };
+  const exported = round3(stockTube(10, 1, 8));
+  const ev = radii(exported).filter(q => q > 9.5);
+  check('the exported tube\'s outside vertices spread over 0.001 mm in radius, as MINI_TPU_TEST\'s do', Math.max(...ev) - Math.min(...ev) > 1e-3,
+    Math.min(...ev).toFixed(6) + ' - ' + Math.max(...ev).toFixed(6));
+  pinchMid('exported tube', exported, 2.37, 10 * 2.37);
+
+  // ...and MINI_TPU_TEST itself, where a nest-library checkout is (CI has one)
+  const TPU_FILE = LIBDIR.libraryDir() && LIBDIR.catalogFile('MINI_TPU_TEST.stl');
+  if (!TPU_FILE) LIBDIR.skip('section 9\'s MINI_TPU_TEST.stl case (the generated export above still runs)');
+  else pinchMid('MINI_TPU_TEST.stl', readSTL(TPU_FILE), 2.37, 10 * 2.37);
+
+  // A real taper: the outside narrows 0.025 mm in diameter per mm (stations
+  // every 2 mm), so across a 12 mm band 14 - 26 mm up it runs Ø19.65 to Ø19.35.
+  const prof = [{ z: 0, r: 9.2 }];
+  for (let z = 0; z <= 40; z += 2) prof.push({ z, r: 10 - 0.0125 * z });
+  prof.push({ z: 40, r: 9.2 }, { z: 0, r: 9.2 });
+  const taper = NSO_Stock.revolve(prof, 96);
+  const rt = NSO_tubeNeckRaw(taper, { point: [10, 0, 20], length: 12, dr: -2 });
+  console.log('   taper: ' + rt.reason);
+  check('a tube whose outside tapers 0.30 mm across the band is refused, the piece unchanged, with the spread: Ø19.35 to Ø19.65',
+    !rt.ok && rt.tris === taper && /its outside varies by 0\.30 mm across the band, Ø19\.35 to Ø19\.65/.test(rt.reason), rt.reason);
+
+  // An oval: the outside 0.9% wider along X than along Y (Ø20.00 by Ø20.18),
+  // every face still square to the axis - the one-radius test itself refuses it.
+  const oval = stockTube(10, 1.6, 40).slice();
+  for (let i = 0; i < oval.length; i += 3) if (Math.hypot(oval[i], oval[i + 1]) > 9) oval[i] = Math.fround(oval[i] * 1.009);
+  const ro = NSO_tubeNeckRaw(oval, { point: [10, 0, 20], length: 12, dr: -2 });
+  console.log('   oval: ' + ro.reason);
+  const nums = (ro.reason.match(/Ø\d+\.\d+ to Ø\d+\.\d+/) || [''])[0].match(/\d+\.\d+/g) || [];
+  check('an oval outside (Ø20.00 by Ø20.18) is refused as not one tube, with the spread: varies by 0.18 mm, Ø20.00 to Ø20.18, and the limit',
+    !ro.ok && ro.tris === oval && /not one tube across the band - its outside varies by 0\.18 mm across the band, Ø20\.00 to Ø20\.18 \(0\.0\d\d mm off its mean radius; one tube holds every vertex within 0\.020 mm of it\)/.test(ro.reason) &&
+    nums.length === 2 && nums[0] !== nums[1], ro.reason);
 }
 
 console.log('\n| piece and neck | in → out triangles | ms | measured |');
