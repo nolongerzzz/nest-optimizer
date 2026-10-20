@@ -2579,69 +2579,14 @@ function poseOverlapsOthers(p, selfIdx, x, z) {
   return false;
 }
 
-function magnetTowardNeighbors(p, selfIdx, x, z) {
-  const MAG = 12;
-  let nx = x;
-  let nz = z;
-  const fp = placedFootprint(p, x, z);
-  for (let i = 0; i < state.placed.length; i++) {
-    if (i === selfIdx) continue;
-    const q = state.placed[i];
-    if (!q) continue;
-    const o = placedFootprint(q);
-    const overZ = Math.min(fp.maxz, o.maxz) - Math.max(fp.minz, o.minz);
-    const overX = Math.min(fp.maxx, o.maxx) - Math.max(fp.minx, o.minx);
-    if (overZ > 1) {
-      const gapR = o.minx - fp.maxx;
-      const gapL = fp.minx - o.maxx;
-      if (gapR >= 0 && gapR < MAG) nx += gapR;
-      else if (gapL >= 0 && gapL < MAG) nx -= gapL;
-    }
-    if (overX > 1) {
-      const gapF = o.minz - fp.maxz;
-      const gapB = fp.minz - o.maxz;
-      if (gapF >= 0 && gapF < MAG) nz += gapF;
-      else if (gapB >= 0 && gapB < MAG) nz -= gapB;
-    }
-  }
-  return { x: nx, z: nz };
-}
-
-function clampToApproachWalls(p, selfIdx, fromX, fromZ, toX, toZ) {
-  const from = placedFootprint(p, fromX, fromZ);
-  let x = toX;
-  let z = toZ;
-  for (let i = 0; i < state.placed.length; i++) {
-    if (i === selfIdx) continue;
-    const q = state.placed[i];
-    if (!q) continue;
-    const o = placedFootprint(q);
-    if (from.minx >= o.maxx - 0.25) {
-      const limit = fromX + (o.maxx - from.minx);
-      if (x < limit) x = limit;
-    } else if (from.maxx <= o.minx + 0.25) {
-      const limit = fromX + (o.minx - from.maxx);
-      if (x > limit) x = limit;
-    }
-    if (from.minz >= o.maxz - 0.25) {
-      const limit = fromZ + (o.maxz - from.minz);
-      if (z < limit) z = limit;
-    } else if (from.maxz <= o.minz + 0.25) {
-      const limit = fromZ + (o.minz - from.maxz);
-      if (z > limit) z = limit;
-    }
-  }
-  return { x: x, z: z };
-}
-
 function resolveDragPose(p, selfIdx, fromX, fromZ, toX, toZ) {
-  /* Grid first, neighbours last. The neighbour magnet closes a contact gap
-     outright, and touching the piece next door is a stronger intent than
-     lining up on the bed, so it gets the final word - a piece pulled into
-     contact stays in contact even when that lands it off the lattice. */
+  /* Free movement: the piece goes where the pointer puts it, with only the
+     bed grid's pull when Snap to grid is on. Neighbours do not pull it into
+     contact or wall it off - it may pass over and through another piece,
+     and an overlap at release stays (the fit / overlap paint shows it).
+     Butting two pieces together exactly is ALIGN's and Join's job. */
   const g = plateGridSnapXZ(toX, toZ);
-  const mag = magnetTowardNeighbors(p, selfIdx, g.x, g.z);
-  applyPlacedXZ(p, mag.x, mag.z);
+  applyPlacedXZ(p, g.x, g.z);
 }
 
 function startMoveDrag(idx, event) {
