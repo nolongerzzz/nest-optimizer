@@ -962,6 +962,9 @@ console.log('\n=== 11. Reducer: the tube defined by its result (tube-reducer) ==
     const rd = NSO_tubeEdgeRead(p), o = { od2: 30, id2: 22, transitionMm: 8, runMm: 5 };
     const a = NSO_TubeEdge.reducer(p, rd, o), b = NSO_TubeEdge.reducer(p, null, o), c = NSO_tubeEdgeRaw(p, Object.assign({ verb: 'reducer' }, o));
     check('the end: a reading reused, none, and NSO_tubeEdgeRaw verb \'reducer\' - one result, byte for byte', a.ok && a.read === rd && sha(a) === sha(b) && sha(b) === sha(c));
+    const bp = NSO_tubeEdgeRaw(p, Object.assign({ verb: 'reducer', point: [0, 17, 0.5] }, o)), bq = NSO_TubeEdge.reducer(p, rd, Object.assign({ point: [0, 17, 0.5] }, o));
+    check('...NSO_tubeEdgeRaw verb \'reducer\' with a point and no reading takes the end at the point (the bottom)', bp.ok && bp.end.axis[2] === -1, bp.reason);
+    check('...a reading of the top with a point at the bottom: the reading wins (it is this soup\'s)', bq.ok && bq.end.axis[2] === 1, bq.reason);
     const bt = NSO_TubeEdge.reducer(p, [0, 17, 0.5], o);
     let zmin = Infinity; if (bt.ok) for (let i = 2; i < bt.tris.length; i += 3) zmin = Math.min(zmin, bt.tris[i]);
     check('...a point near the bottom: that end, facing down, the run\'s end at z −13', bt.ok && bt.end.axis[2] === -1 && Math.abs(zmin + 13) < 1e-4, bt.reason);

@@ -969,7 +969,7 @@ function NSO_teSelfClearance(poly, t, gap) {
 function NSO_tubeEdgeRaw(soup, opts) {
   opts = opts || {};
   if (opts.verb === 'flare') return NSO_tubeEdgeFlare(soup, opts);
-  if (opts.verb === 'reducer') return NSO_tubeEdgeReducer(soup, opts.read || null, opts);
+  if (opts.verb === 'reducer') return NSO_tubeEdgeReducer(soup, opts.read || opts.point || null, opts);
   return NSO_teTreat(soup, opts);
 }
 
@@ -982,8 +982,9 @@ function NSO_tubeEdgeRaw(soup, opts) {
 function NSO_tubeEdgeReducer(soup, end, ro) {
   var o = {}, k;
   ro = ro || {};
-  for (k in ro) if (k !== 'read' && k !== 'point' && k !== '_flare' && k !== '_oneFace' && k !== '_exact' && k !== 'section') o[k] = ro[k];
+  for (k in ro) if (k !== 'read' && k !== '_flare' && k !== '_oneFace' && k !== '_exact' && k !== 'section') o[k] = ro[k];
   o.verb = 'reducer';
+  // a reading that is not this soup's is read again, at ro.point
   if (end && end.ok !== undefined) o.read = end;
   else if (end && end.length === 3) o.point = end;
   else if (end && end.point) o.point = end.point;

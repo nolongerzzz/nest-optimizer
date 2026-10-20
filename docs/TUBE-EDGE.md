@@ -719,7 +719,7 @@ frame, read back as a radius.
 
 ### Numbers
 
-From `tools/nso_tube_edge_test.js` section 11 (324 checks in the file, 82 of
+From `tools/nso_tube_edge_test.js` section 11 (326 checks in the file, 84 of
 them new). Every output is closed, 2-manifold and consistently wound, with
 Euler unchanged. Each passes `mesh_validate --gate`, copies the rest of the
 piece bit for bit and adds Pappus's volume.
