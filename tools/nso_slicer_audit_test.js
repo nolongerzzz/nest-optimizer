@@ -68,6 +68,10 @@ console.log('\n=== 1. The rule: more than 30 deg off vertical, nothing within a 
     check(`a column leaning ${deg} deg: ${flag ? 'its downward face flags, all of it' : 'nothing'}`,
       near(r.flaggedAreaMm2, want, 1e-3), `${r.flaggedAreaMm2.toFixed(4)} mm^2, want ${want.toFixed(4)}`);
   }
+  const noPlate = AU.audit([{ id: 1, name: 't', soup: S(box([0, 0, 0], [2, 2, 10]), box([0, 0, 5], [10, 2, 7])) }], [], {});
+  const withPlate = AU.audit([{ id: 1, name: 't', soup: S(box([0, 0, 0], [2, 2, 10]), box([0, 0, 5], [10, 2, 7])) }], [], { plateZ: 0 });
+  check('with no plateZ given, the plate is the lowest z: the same as plateZ 0', near(noPlate.flaggedAreaMm2, withPlate.flaggedAreaMm2, 1e-9) && withPlate.flaggedAreaMm2 > 0,
+    `${noPlate.flaggedAreaMm2.toFixed(4)} mm^2 against ${withPlate.flaggedAreaMm2.toFixed(4)}`);
   const steep = one(lean(45, 10), [], { maxFromVerticalDeg: 50 });
   check('the limit is a dial: at 50 deg the 45 deg lean is clean', steep.flaggedAreaMm2 === 0, `${steep.flaggedAreaMm2} mm^2`);
 }

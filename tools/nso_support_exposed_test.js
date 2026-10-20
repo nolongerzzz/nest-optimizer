@@ -520,6 +520,38 @@ fs.mkdirSync(OUT, { recursive: true });
 
 
   /* ===================================================================== */
+  console.log('\n=== 4c. A POST WITH FEET ALL ROUND IT: a slot, one pad ===');
+  {
+    /* A leg of the piece standing on the plate with trunks landing all round
+       it: the pad rings the leg, and is opened to the outside by a slot that
+       bends between the feet (a straight one met a foot every way and the
+       build was refused); with two posts, one slot does not run through the
+       other's hole and on across the pad, cutting it in two (two supports,
+       0.15 mm apart). The feet go straight to footPads and shareFeet: one
+       solid per foot, as the card hands them over. */
+    const TH = ctx.NSO_Thickness, R = 1.2 * Math.SQRT1_2;
+    const post = (x, y, w, d) => box([x - w / 2, y - d / 2, 0], [x + w / 2, y + d / 2, 5]);
+    const cases = [];
+    const ring = []; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) if (a || b) ring.push([0.5 + 3 * a, 0.5 + 3 * b]);
+    cases.push(['a 1 mm post ringed by 8 feet 3 mm apart', soupOf(post(0, 0, 1, 1)), ring, 1]);
+    const ring4 = []; for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) if (a || b) ring4.push([0.5 + 4 * a, 0.5 + 4 * b]);
+    cases.push(['two posts, one beside the other\'s ring', soupOf(post(0, 0, 1, 1), post(-0.6, -2, 0.6, 0.6)), ring4, 2]);
+    const posts = [[14.3, 13.5], [19.5, 7.5]], grid = [];
+    for (let i = 0; i <= 10; i++) for (let j = 0; j <= 10; j++) if (posts.every(q => Math.hypot(3 * i - q[0], 3 * j - q[1]) > 2.45)) grid.push([3 * i, 3 * j]);
+    cases.push(['an 11 x 11 grid of feet round two posts', soupOf(...posts.map(q => post(q[0], q[1], 0.8, 0.8))), grid, 2]);
+    for (const [label, piece, cs, holes] of cases) {
+      const feet = cs.map((c, i) => ({ key: 'k' + i, c, r: R }));
+      const fp = GP._footPads([new Float32Array(piece)], feet, 0, 0.2, { thickness: TH });
+      const sf = GP.shareFeet([{ solids: cs.map(c => ({ soup: new Float32Array(box([c[0] - 0.6, c[1] - 0.6, 0], [c[0] + 0.6, c[1] + 0.6, 3])), feet: [{ c, r: R }] })) }],
+        new Float32Array(piece), { plateZ: 0, thickness: TH });
+      const gap = fp.pads.length ? Math.min(...fp.pads.map(pd => minTriDistance(pd.soup, new Float32Array(piece), { reach: 1 }).mm)) : Infinity;
+      check(`${label}: one pad, ${holes} slot(s), one support; the pad 0.2 mm off the piece`,
+        !fp.failed.length && fp.pads.length === 1 && fp.holesSlotted === holes && fp.clustersSplit === 0 && sf.ok && sf.objects.length === 1 && gap >= 0.2 - 1e-6,
+        `${fp.failed.join('; ') || 'ok'}; ${fp.pads.length} pad(s), ${fp.holesSlotted} slotted, ${fp.clustersSplit} split; ${sf.ok ? sf.objects.length + ' support(s)' : sf.reason}; pad to piece ${gap.toFixed(3)} mm`);
+    }
+  }
+
+  /* ===================================================================== */
   console.log('\n=== 5. OVERHANG OVER THE SAME PIECE: beacons are geometry only ===');
   {
     /* The air an overhang hangs in has a way out along the face: the brute-

@@ -985,9 +985,11 @@
      trunk off; the circle round the square would reach a quarter of a
      millimetre past its sides - 0.14 mm off the clamp). Air the
      pad closes round is pad, and a crack under FOOT_TOUCH_MM between two
-     parts of it is closed; a hole the piece stands in is opened to the
-     outside by a slot three cells wide, so every pad is one simple outline,
-     traced on the cells' edges, simplified to a cell and extruded.
+     parts of it is closed; a hole the piece stands in (a leg of it, with
+     trunks all round) is opened to the outside by a slot three cells wide,
+     the way that cuts least pad and bends between the feet, so every pad is
+     one simple outline, traced on the cells' edges, simplified to a cell and
+     extruded.
 
      footPads(TH, obstacles, feet, plateZ, thick)
        feet: [{ key, c: [x, y], r }] - footprintOf's circles
@@ -1150,31 +1152,60 @@
       }
     }
     unpinch();
-    /* a hole the piece stands in: a slot to the outside, three cells wide */
+    /* A HOLE THE PIECE STANDS IN (a post, a table leg, with trunks landing
+       all round it): a slot to the outside air, three cells wide, along the
+       way that cuts the least pad and crosses no foot - a search outward
+       from the hole, through air for nothing and through pad a cell at a
+       time, round the feet's own cells, so it bends between feet where a
+       straight one would meet one. One hole at a time, the outside read
+       again before each: a hole an earlier slot opened is left as it is,
+       and a slot ends at the first air it meets - an earlier slot's too -
+       instead of running on across the pad (crossing slots cut a pad in
+       two, 0.15 mm apart: two supports). A cut that joins a hole to the
+       outside cannot part the pad; it is widened only where it cuts. */
     if (toSlot.length) {
-      var out1 = outside();
+      var seen = new Uint8Array(N), from = new Int32Array(N);
       toSlot.forEach(function (cells) {
-        var top = cells.reduce(function (m, c7) { return c7 > m ? c7 : m; }, -1), ti = top % nx, tj = (top - ti) / nx;
-        var ways = [[0, 1], [0, -1], [1, 0], [-1, 0]];
-        for (var w = 0; w < ways.length; w++) {
-          var path = [], ok = false, si = ti, sj = tj;
-          for (var step = 0; step < nx + ny; step++) {
-            si += ways[w][0]; sj += ways[w][1];
-            if (si < 0 || sj < 0 || si >= nx || sj >= ny) { ok = true; break; }
-            var c8 = sj * nx + si;
-            if (out1[c8]) { ok = true; break; }
-            for (var t = -1; t <= 1; t++) {
-              var pi = si + (ways[w][1] ? t : 0), pj = sj + (ways[w][0] ? t : 0);
-              if (pi < 0 || pj < 0 || pi >= nx || pj >= ny) continue;
-              var c9 = pj * nx + pi;
-              if (core[c9] >= 0) { path = null; break; }
-              path.push(c9);
+        var out1 = outside();
+        cells = cells.filter(function (c7) { return !reg[c7]; });
+        if (!cells.length || cells.some(function (c7) { return out1[c7]; })) return;
+        seen.fill(0);
+        var cur = [], next = [], end = -1;
+        cells.forEach(function (c7) { seen[c7] = 1; from[c7] = -1; cur.push(c7); });
+        while (cur.length && end < 0) {
+          while (cur.length) {
+            var c8 = cur.pop();
+            if (out1[c8]) { end = c8; break; }
+            var ci8 = c8 % nx, cj8 = (c8 - ci8) / nx;
+            var nb8 = [ci8 > 0 ? c8 - 1 : -1, ci8 < nx - 1 ? c8 + 1 : -1, cj8 > 0 ? c8 - nx : -1, cj8 < ny - 1 ? c8 + nx : -1];
+            for (var e8 = 0; e8 < 4; e8++) {
+              var q8 = nb8[e8];
+              if (q8 < 0 || seen[q8] || core[q8] >= 0) continue;
+              if (reg[q8]) next.push(q8, c8);
+              else { seen[q8] = 1; from[q8] = c8; cur.push(q8); }
             }
-            if (!path) break;
           }
-          if (ok && path) { path.forEach(function (c10) { reg[c10] = 0; }); res.holesSlotted++; return; }
+          if (end >= 0) break;
+          cur = [];
+          for (var n8 = 0; n8 < next.length; n8 += 2) {
+            if (seen[next[n8]]) continue;
+            seen[next[n8]] = 1; from[next[n8]] = next[n8 + 1]; cur.push(next[n8]);
+          }
+          next = [];
         }
-        res.failed.push('a pad round the piece could not be opened to the outside');
+        if (end < 0) { res.failed.push('a pad round the piece could not be opened to the outside (its feet ring it)'); return; }
+        var cut = [];
+        for (var c9 = end; c9 >= 0; c9 = from[c9]) if (reg[c9]) cut.push(c9);
+        cut.forEach(function (c10) {
+          var ci = c10 % nx, cj = (c10 - ci) / nx;
+          for (var dj = -1; dj <= 1; dj++) for (var di = -1; di <= 1; di++) {
+            var ii = ci + di, jj = cj + dj;
+            if (ii < 0 || jj < 0 || ii >= nx || jj >= ny) continue;
+            var c11 = jj * nx + ii;
+            if (core[c11] < 0) reg[c11] = 0;
+          }
+        });
+        res.holesSlotted++;
       });
       unpinch();
     }

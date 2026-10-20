@@ -465,14 +465,14 @@ function sliceNames(xml) {
 }
 /* the lowest z of a list of moves, without spreading it into one call (a
    print has hundreds of thousands) */
-function lowestZ(moves) { let z = Infinity; for (const m of moves) if (m.z < z) z = m.z; return z; }
+function lowestMoveZ(moves) { let z = Infinity; for (const m of moves) if (m.z < z) z = m.z; return z; }
 /* a move's points: its two ends, or along its arc */
 function movePts(m) { return m.pts || [[m.x0, m.y0], [m.x1, m.y1]]; }
 
 /* The file's own outer wall: filament per mm over its non-support objects'
    outer walls above the first layer (every object's, when there is no part). */
 function outerWallEmm(moves, isSupport) {
-  const first = lowestZ(moves);
+  const first = lowestMoveZ(moves);
   let E = 0, L = 0;
   const take = m => m.feat === 'Outer wall' && m.z > first + 1e-6;
   for (const m of moves) if (take(m) && !isSupport(m.obj)) { E += m.e; L += m.len; }
@@ -522,7 +522,7 @@ function sheetAudit(gcode, opts) {
     byLayer.get(k).push(m);
   }
   const layers = [];
-  const first = all.length ? lowestZ(all) : 0;
+  const first = all.length ? lowestMoveZ(all) : 0;
   for (const [k, ms] of byLayer) {
     const z = ms[0].z, obj = ms[0].obj, h = ms[0].h || 0.2, zs = z - h / 2;
     if (z <= first + 1e-6) continue;                                               /* the first layer is the pads */

@@ -144,9 +144,11 @@ support 1.1 and 2.2. Bambu's own tree (baselineV2, the same coupon): pads of
   every 0.04 mm up). The cells in the circle INSIDE the trunk's square are
   always pad, so a pad comes no nearer the piece than the trunk standing on it.
   Air the pad closes round is filled (no handle), a crack under 0.1 mm is
-  closed, a hole the piece stands in is opened to the outside by a slot three
-  cells wide, and every pad is one simple outline, simplified to a cell,
-  ear-clipped and extruded.
+  closed, and a hole the piece stands in (a leg of it with trunks all round)
+  is opened to the outside by a slot three cells wide - one hole at a time,
+  along the way that cuts least pad, bending between the feet, ending at the
+  first air it meets (`support:exposed` 4c) - so every pad is one simple
+  outline, simplified to a cell, ear-clipped and extruded.
 - **A cluster split** is counted (`clustersSplit`) where the piece stands
   between its feet; a trunk the piece hems in on every side - nothing but its
   own end square left - is counted apart (`hemmed`): the wedge's one, in a
