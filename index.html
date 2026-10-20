@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=punchb16" />
+  <link rel="stylesheet" href="styles.css?v=reducercard1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -1077,13 +1077,13 @@
               <button id="btn-smooth" class="btn btn-secondary" type="button"
                       title="Global Laplacian smoothing over the whole piece. No feature preservation - sharp edges round off too. Refuses if volume moves more than 25% either way, or if any face is painted.">Smooth</button>
             </div>
-            <!-- BEND: the Bend button and its panel, Tube edge (Flare, Roll, Neck)
+            <!-- BEND: the Bend button and its panel, Tube edge (Reducer, Roll, Neck)
                  beside it; the old Bend card, unchanged (app-bend.js). -->
             <div class="vp-row vp-row-pair vp-row-bend">
               <button id="btn-bend" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="bend-panel"
                       title="Bend the piece like a pipe or plate bender, inside one straight stretch: the section is carried round the arc exactly - a plate's thickness, a tube's bore and wall do not change - and everything past the bend turns with it, rigidly. Opens a panel with a live ghost of the result; click the piece to set where.">Bend</button>
               <button id="btn-tube-edge" class="btn btn-secondary" type="button" aria-expanded="false" aria-controls="te-panel"
-                      title="Flare the open end of a tube out or in, roll it outward, or neck it anywhere along its length (a pinch or a bulge) - the whole wall, or with Walls only its outside or its bore (a socket, a spigot, a funnel mouth). The wall's thickness is carried exactly through the new section and the new wall is welded to the old. Opens a card with a live ghost of the result; click the piece near the end to treat, or where the neck goes. A neck's three rings are handles: drag the waist in or out, an end ring to stretch the band, the band itself to slide it along the tube. A flare's lip ring is its handle (Δr and Length), and with a Run the ring at the run's far end drags its length.">Tube edge</button>
+                      title="Make the open end of a tube a new pipe - a reducer or an expander, its outside and bore set apart - roll it outward, or neck it anywhere along its length (a pinch or a bulge) - the whole wall, or with Walls only its outside or its bore (a socket, a spigot, a funnel mouth). The wall's thickness is carried exactly through the new section and the new wall is welded to the old. Opens a card with a live ghost of the result; click the piece near the end to treat, or where the neck goes. A neck's three rings are handles: drag the waist in or out, an end ring to stretch the band, the band itself to slide it along the tube. A reducer's four rings are handles: the OD and ID rings at the transition's end set the new Ø and bore, the T ring the transition, the R ring the run.">Tube edge</button>
             </div>
             <div class="vp-bend-panel" id="bend-panel" hidden>
               <label class="vp-bend-field" title="Where the bend's middle goes, in mm along the piece from its near (low) end. Click the piece to set it.">Where
@@ -1104,34 +1104,38 @@
               </div>
             </div>
             <div class="vp-bend-panel te-panel" id="te-panel" hidden>
-              <label class="vp-bend-field" title="Flare turns the end outward over a length; Roll curls it over round a bead.">Verb
+              <label class="vp-bend-field" title="Reducer makes the end a new pipe: a new outside Ø and bore over a transition, then a straight run. Roll curls the end over round a bead. Neck pinches or bulges the tube anywhere along it.">Verb
                 <select id="sel-te-verb" class="vp-select" aria-label="Tube edge verb">
-                  <option value="flare" selected>Flare</option>
+                  <option value="reducer" selected>Reducer</option>
                   <option value="roll">Roll</option>
                   <option value="neck">Neck</option>
                 </select></label>
-              <label class="vp-bend-field" id="te-dir-row" title="Out, away from the axis; In, toward it - for a Flare the same as a negative Δr. A Roll goes Out only (In is refused, not yet).">Way
+              <label class="vp-bend-field" id="te-dir-row" hidden title="A Roll goes Out only (In is refused, not yet).">Way
                 <select id="sel-te-dir" class="vp-select" aria-label="Tube edge direction">
                   <option value="out" selected>Out</option>
                   <option value="in">In</option>
                 </select></label>
-              <label class="vp-bend-field" id="te-walls-row" title="Which of the wall's faces Flare or Neck moves. Both: the whole wall, its thickness kept. Outside only / Bore only: that face moves by Δr and the other stays exactly where it was, so the wall gets thinner or thicker - refused under the nozzle-safety floor from nso_thickness.js. Neck with one face can step the end of the tube: Bore only out is a socket (a counterbore), Outside only in is a spigot.">Walls
+              <label class="vp-bend-field" id="te-walls-row" hidden title="Which of the wall's faces Neck moves. Both: the whole wall, its thickness kept. Outside only / Bore only: that face moves by Δr and the other stays exactly where it was, so the wall gets thinner or thicker - refused under the nozzle-safety floor from nso_thickness.js. Neck with one face can step the end of the tube: Bore only out is a socket (a counterbore), Outside only in is a spigot.">Walls
                 <select id="sel-te-walls" class="vp-select" aria-label="Walls: which face moves">
                   <option value="both" selected>Both</option>
                   <option value="outside">Outside only</option>
                   <option value="bore">Bore only</option>
                 </select></label>
-              <div id="te-flare-rows" class="te-rows">
-                <label class="vp-bend-field" title="How far the flare runs past the end, in mm along the wall. Or drag the lip ring on the ghost along the axis (Shift: 0.1 mm steps); Up / Down arrows step it 1 mm.">Length
-                  <input type="number" id="inp-te-length" min="0.1" step="0.5" aria-label="Flare length, mm"><span>mm</span></label>
-                <label class="vp-bend-field" id="te-run-row" title="A straight run of tube on past the lip, in mm along the axis, at the lip's outside and bore exactly, its end square and open: with Way In a reducer (fat pipe, cone, skinny pipe), with Out an expander. 0: no run. Or drag the END ring at the run's far end along the axis (Shift: 0.1 mm steps); with that ring the last one under the pointer or in hand, Up / Down arrows step it 1 mm.">Run
-                  <input type="number" id="inp-te-run" min="0" step="0.5" value="0" aria-label="Run past the lip, mm"><span>mm</span></label>
-                <label class="vp-bend-field" title="The flare's angle off the wall: above 0 out, below 0 in. Linked to Δr over the Length: edit either.">Angle
-                  <input type="number" id="inp-te-angle" min="-75" max="75" step="1" aria-label="Flare angle, degrees"><span>°</span></label>
-                <label class="vp-bend-field" title="How far the lip stands off the wall's line, in mm: above 0 out, below 0 in (the bore leads). Linked to Angle over the Length: edit either. Or drag the lip ring on the ghost toward or away from the axis (Shift: 0.1 mm steps); Left / Right arrows step it 1 mm.">Δr
-                  <input type="number" id="inp-te-dr" step="0.1" aria-label="Flare delta r, mm (negative turns inward)"><span>mm</span></label>
-                <label class="vp-bend-field" title="Straight: a cone. Trumpet: tangent to the tube at the end, its radius growing as the square of the length (an ease-in) to the same lip.">Profile
-                  <select id="sel-te-profile" class="vp-select" aria-label="Flare profile">
+              <div id="te-reducer-rows" class="te-rows">
+                <div class="te-pair">
+                  <label class="vp-bend-field" title="The new pipe's outside Ø, mm. Above the tube's Ø it is an expander, below it a reducer; the tube's own Ø keeps the outside where it is (bore only). Or drag the OD ring at the transition's end toward or away from the axis (Shift: 0.1 mm steps); Left / Right arrows step it 1 mm."><i class="te-lbl">New Ø</i>
+                    <input type="number" id="inp-te-od2" min="0.1" step="0.1" aria-label="New outside diameter, mm"><span>mm</span></label>
+                  <label class="vp-bend-field" title="The new pipe's bore Ø, mm. Change it by as much as the New Ø to keep the wall; set the two apart to thin or thicken it (the readout says the wall), held to the nozzle-safety floor. Or drag the ID ring at the transition's end (Shift: 0.1 mm steps)."><i class="te-lbl">New bore</i>
+                    <input type="number" id="inp-te-id2" min="0.1" step="0.1" aria-label="New bore diameter, mm"><span>mm</span></label>
+                </div>
+                <div class="te-pair">
+                  <label class="vp-bend-field" title="How long the change from the tube's Ø to the new pipe's takes, in mm along the wall. Or drag the T ring at the transition's end along the axis (Shift: 0.1 mm steps); Up / Down arrows step it 1 mm."><i class="te-lbl">Transition</i>
+                    <input type="number" id="inp-te-trans" min="0" step="0.5" aria-label="Transition length, mm"><span>mm</span></label>
+                  <label class="vp-bend-field" id="te-run-row" title="A straight run of the new pipe on past the transition, in mm along the axis, its end square and open. 0: no run. Or drag the R ring at the run's far end along the axis; with Run 0, grab the T ring with Shift to pull a run out of it. With the R ring the last length ring touched, Up / Down step it 1 mm."><i class="te-lbl">Run</i>
+                    <input type="number" id="inp-te-run" min="0" step="0.5" value="0" aria-label="Run past the transition, mm"><span>mm</span></label>
+                </div>
+                <label class="vp-bend-field" title="Straight: each face a cone. Trumpet: each face tangent to the tube at the end, easing in (its radius changing as the square of the length) to the new Ø.">Profile
+                  <select id="sel-te-profile" class="vp-select" aria-label="Transition profile">
                     <option value="straight" selected>Straight</option>
                     <option value="trumpet">Trumpet</option>
                   </select></label>
@@ -1157,7 +1161,7 @@
               <p id="te-readout" class="bend-readout">—</p>
               <div class="vp-row vp-row-pair">
                 <button id="btn-te-go" class="btn btn-secondary" type="button" disabled
-                        title="Flare, roll or neck the tube as the ghost shows. One Undo puts it back.">Set</button>
+                        title="Reduce, expand, roll or neck the tube as the ghost shows. One Undo puts it back.">Set</button>
                 <button id="btn-te-cancel" class="btn btn-secondary" type="button" title="Close the card; the piece is unchanged.">Cancel</button>
               </div>
             </div>
@@ -1805,7 +1809,7 @@
   <!-- Neck: a pinch or a bulge along a tube. After nso_tube_edge.js (its end
        reader, weld and helpers). See docs/TUBE-EDGE.md, "Neck". -->
   <script src="nso_tube_neck.js?v=walls1"></script>
-  <script src="app-tube-edge.js?v=runcard1"></script>
+  <script src="app-tube-edge.js?v=reducercard1"></script>
   <!-- Bridge: a web between two places, welded. After NSO_Repair.js,
        nso_planar_fuse.js (the vertex space), nso_thickness.js,
        nso_assemble.js (the seat), nso_path_sweep.js (the rod) and

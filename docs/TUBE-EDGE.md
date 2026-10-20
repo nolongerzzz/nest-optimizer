@@ -760,3 +760,102 @@ piece bit for bit and adds Pappus's volume.
    did, and each face's target is a radius at the transition's end. On a
    leaning rim the face given its own Ø turns very slightly back to the axis
    rather than running on along the leaning wall.
+
+## The card: Reducer (tube-reducer-card, 2026-10-20)
+
+`app-tube-edge.js?v=reducercard1`, `styles.css?v=reducercard1`. The card's
+first verb is now **Reducer** (Flare is gone from the card; the engine keeps
+it as the reducer's wrapper). Roll and Neck are unchanged.
+
+```
+Verb        [Reducer ▾ | Roll | Neck]
+New Ø       [47.52] mm      New bore  [38.82] mm
+Transition  [10]    mm      Run       [0]     mm
+Profile     [Straight ▾ | Trumpet]
+readout · Set · Cancel
+```
+
+The card is 166 px wide, so each of the paired fields has its label over
+it (`.te-pair`), two to a line. **Defaults**: New Ø = the end's Ø + 4 and New
+bore = its bore + 4 (a wall-held 2 mm flare), Transition 10, Run 0. The Ø
+fields default again whenever the end's Ø is not the one they were typed for:
+another tube, or this one after a Set. Otherwise typed values are kept, as
+before.
+
+| removed | where its job went |
+|---|---|
+| Way | the sign of New Ø against the tube's Ø; the readout says `Reducer` / `Expander` (Way stays on the card for Roll only) |
+| Angle | derived, in the readout, per face |
+| Δr | New Ø |
+| Walls | New Ø and New bore set apart: Both is the same change to both, and the readout shows the wall. Walls stays for Neck |
+| Length | Transition |
+
+**Handles** (#241's rules: on top, they own the pointer, no orbit, Escape
+puts a drag back):
+- **OD ring**: at the transition's end, on the new outside. Drag it toward
+  or away from the axis for **New Ø**. The ring follows the pointer, so
+  2.5 mm in is Ø −5.
+- **ID ring**: in the same plane, on the new bore. Drag it the same way for
+  **New bore**.
+- **T ring**: the transition's end plane, outside both the tube and the new
+  outside (radius + max(2 mm, 12%)). Drag it along the axis for
+  **Transition**.
+- **R ring**: at the run's far end, the same radius. Drag it along the axis
+  for **Run**. It is shown while Run > 0. **With Run 0, Shift + a press on
+  the T ring pulls a run out of it**: an R drag from the T plane, in 0.1 mm
+  steps while Shift is held. With a run already, Shift on the T ring is just
+  its 0.1 mm steps.
+- Steps are 0.5 mm, 0.1 with Shift. **Arrows**: ↑ / ↓ step the length ring
+  touched last (T before any, R only while it is up). ← / → step the Ø ring
+  touched last (OD before any). 1 mm, 0.1 with Shift. Hover names the value
+  in the readout (`New Ø38.52 mm`, `New bore Ø36.82 mm`,
+  `Transition 16.1 mm`, `Run 17.5 mm`) and sets which ring the arrows step.
+
+**The measure on the piece**, while a handle is in hand. It uses MEASURE's
+chip (`.measure-label`), with amber edges (`.te-callout`, `#te-callout`).
+- **OD / ID**: the chip reads `Ø38.52` on the ring, where it was taken hold
+  of.
+- **T / R**: a dimension line along the axis between the two planes, ticked
+  at both. T runs from the end to the transition's end, R from there to the
+  run's end. It sits just outside the length rings, on the side the ring was
+  taken hold of, with the chip (`16.1 mm`) at its middle.
+- It follows the handle and goes on the release (or on Escape, or when the
+  card shuts). A hover shows the value in the readout only, never on the
+  piece.
+
+Gates: `tools/nso_tube_neck_drag_check.js` sections 8, 9 and 11, in
+`tube:neck`. They replace the Flare lip-ring and END-ring sections.
+`tools/nso_tube_edge_drive_check.js` sections 2, 3, 5 and 7 cover the
+Reducer's fields, its refusals in the card, and Set / Undo.
+- the defaults, and that ghost against Flare Out +2 over 10 (Both): the same
+  outside vertex for vertex (to 1e-4) and the same lip Ø47.52. Its bore is
+  Ø38.82 with the end's wall 4.35 exactly, where Flare's carried lip cut is
+  Ø38.65 (flag 1 above);
+- from 43.52 / 34.82 / 12.1 / 7.5: the OD ring in 2.5 gives **New Ø 38.52**,
+  bore unchanged. The ID ring out 1 gives **36.82**, outside unchanged. The
+  T ring +4 gives **Transition 16.1**, and the R ring +10 gives **Run 17.5**.
+  Each one is read back off the fields and off the ghost's own vertices;
+- the chip (`Ø38.52`, `Ø36.82`, `16.1 mm`, `17.5 mm`) is up mid-drag,
+  within 3 px of its anchor. The dimension line's two heights are 0 → 16.1
+  and 16.1 → 33.6. Both are gone after each release, and neither shows on a
+  hover;
+- the arrows and Shift tenths, Escape mid-drag, and Shift + the T ring at
+  Run 0;
+- Set (`Tube edge done - Reducer: …`) and one Undo, bit for bit. The ID ring
+  alone on the Ø40.62 / Ø30.47 pipe gives `Expander (bore only): …`, then
+  Set and one Undo;
+- Roll shows Way and hides the Reducer's rows, Neck shows Walls, and the
+  Reducer comes back with its Run and R ring. Neck's own sections, 1–7
+  and 10, are unchanged.
+
+Flags:
+1. **"drag OD ring in 5 → New Ø 38.52"** is read as New Ø −5 from 43.52, with
+   the ring following the pointer: a 2.5 mm move toward the axis. "Defaults →
+   ghost matches Flare Out +2/2 wall-held" holds for the outside exactly. The
+   bore is the reducer's Ø38.82, not Flare's carried cut, and the gate says
+   by how much.
+2. **The gates start from the card mock's numbers** (43.52 / 34.82 / 12.1 /
+   7.5), typed on a Ø43.52 / Ø34.82 tube. There New Ø and bore are the
+   tube's own: `Straight on`, until the OD ring moves.
+3. **"Pull"** in the mock is the next tool's button under the card. It is
+   unchanged.

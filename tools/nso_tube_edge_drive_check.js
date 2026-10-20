@@ -7,8 +7,9 @@
    The geometry is proven headless in tools/nso_tube_edge_test.js. What this
    file proves is the card: the button sits beside Bend in Finish -> Shape,
    the ghost on the piece is the very soup Set commits, the ring marks the end
-   being treated, a click on the piece picks the end nearest it, Angle and Δr
-   follow each other, a refusal is said in words and takes the ghost away,
+   being treated, a click on the piece picks the end nearest it, the Reducer's
+   fields make the reducer they say (its angles derived, in the readout), a
+   refusal is said in words and takes the ghost away,
    Set bakes, one Undo restores the piece bit for bit, Cancel leaves it
    alone, and paint stands it down. Fixtures are generated here and written
    to a temp directory. */
@@ -43,10 +44,10 @@ const cardState = page => page.evaluate(() => {
   const B = state.tubeEdge || {}, el = id => document.getElementById(id);
   return {
     open: !!B.open, hidden: el('te-panel').hidden,
-    verb: el('sel-te-verb').value, dir: el('sel-te-dir').value,
-    length: el('inp-te-length').value, angle: el('inp-te-angle').value, dr: el('inp-te-dr').value,
+    verb: el('sel-te-verb').value, dir: el('sel-te-dir').value, dirShown: !el('te-dir-row').hidden, wallsShown: !el('te-walls-row').hidden,
+    od2: el('inp-te-od2').value, id2: el('inp-te-id2').value, trans: el('inp-te-trans').value, run: el('inp-te-run').value,
     profile: el('sel-te-profile').value, radius: el('inp-te-radius').value, rollAngle: el('inp-te-roll-angle').value,
-    flareShown: !el('te-flare-rows').hidden, rollShown: !el('te-roll-rows').hidden,
+    reducerShown: !el('te-reducer-rows').hidden, rollShown: !el('te-roll-rows').hidden,
     readout: el('te-readout').textContent, bad: el('te-readout').classList.contains('is-bad'),
     goDisabled: el('btn-te-go').disabled,
     ghost: !!(B.ghost && B.ghost.parent), ring: !!(B.ring && B.ring.parent),
@@ -109,30 +110,33 @@ withApp(async (page, logs) => {
   await page.waitForFunction(() => state.tubeEdge && state.tubeEdge.open && state.tubeEdge.result, null, { timeout: 30000 });
   let P = await cardState(page);
   console.log('   readout: ' + P.readout);
-  check('the card opens on Flare, Out', P.open && !P.hidden && P.verb === 'flare' && P.dir === 'out' && P.flareShown && !P.rollShown);
-  check('defaults from the wall: Length 6 (4 walls), Angle 30, Δr linked to them', P.length === '6' && P.angle === '30' && P.dr === '3.46',
-        P.length + ' / ' + P.angle + '° / ' + P.dr);
+  check('the card opens on Reducer: its rows up, Way (a Roll\'s) and Walls (Neck\'s) hidden', P.open && !P.hidden && P.verb === 'reducer' && P.reducerShown && !P.rollShown && !P.dirShown && !P.wallsShown);
+  check('defaults: New Ø = the tube\'s Ø + 4, New bore = its bore + 4 (a wall-held 2 mm flare), Transition 10, Run 0',
+        P.od2 === '24.00' && P.id2 === '20.80' && P.trans === '10' && P.run === '0', P.od2 + ' / ' + P.id2 + ' / ' + P.trans + ' / ' + P.run);
   check('the top end is picked, facing up', P.endAxis && P.endAxis[2] === 1);
-  check('the readout states the flare and the wall held', /Straight flare 6\.0 mm at 30\.0° .* wall 1\.60 held/.test(P.readout) && !P.bad, P.readout);
+  check('the readout states it, the angles derived: "Expander: Ø20.00 / bore Ø16.80 → Ø24.00 / bore Ø20.80 over 10.0 mm (11.3° outside, 11.3° bore) · wall 1.60 → 1.60"',
+        P.readout.indexOf('Expander: Ø20.00 / bore Ø16.80 → Ø24.00 / bore Ø20.80 over 10.0 mm (11.3° outside, 11.3° bore) · wall 1.60 → 1.60') === 0 && !P.bad, P.readout);
   check('the ghost is on the piece, the soup Set would commit', P.ghost && P.ghostTris === P.resultTris && P.ghostTris > 768, P.ghostTris + ' triangles');
   check('...drawn as Bend\'s ghost is (amber, 0.75)', P.ghostMat && P.ghostMat.color === 0xf59e0b && P.ghostMat.opacity === 0.75);
   check('the ring marks the end, read through the piece', P.ring && P.ringDepth);
   check('opening the card changes nothing', (await soupOf(page)) === before);
 
-  console.log('\n=== 3. Angle and Δr are linked ===');
-  await setField(page, 'inp-te-length', '8');
+  console.log('\n=== 3. the fields make the reducer they say ===');
+  await setField(page, 'inp-te-od2', '14');
+  await setField(page, 'inp-te-id2', '10.8');
+  await setField(page, 'inp-te-trans', '8');
   P = await cardState(page);
-  check('a new Length keeps the angle and moves Δr (8 · tan 30 = 4.62)', P.angle === '30' && P.dr === '4.62', P.dr);
-  await setField(page, 'inp-te-dr', '8');
+  check('New Ø 14 / bore 10.8 over 8: a reducer, its angles derived (atan 3/8 = 20.6° on both faces)',
+    P.readout.indexOf('Reducer: Ø20.00 / bore Ø16.80 → Ø14.00 / bore Ø10.80 over 8.0 mm (20.6° outside, 20.6° bore) · wall 1.60 → 1.60') === 0 && P.ghost && !P.bad, P.readout);
+  await setField(page, 'inp-te-id2', '12.8');
   P = await cardState(page);
-  check('typing Δr 8 over 8 mm sets the angle to 45', P.angle === '45' && /at 45\.0°/.test(P.readout), P.angle + ' · ' + P.readout);
-  await setField(page, 'inp-te-length', '4');
+  check('...the bore set apart from the outside: the wall says so (1.60 → 0.60), the bore\'s angle its own (atan 2/8 = 14.0°)',
+    P.readout.indexOf('Reducer: Ø20.00 / bore Ø16.80 → Ø14.00 / bore Ø12.80 over 8.0 mm (20.6° outside, 14.0° bore) · wall 1.60 → 0.60') === 0 && P.ghost, P.readout);
+  await setField(page, 'inp-te-run', '5');
   P = await cardState(page);
-  check('...and then a new Length keeps Δr, the angle follows (atan 8/4 = 63.4)', P.dr === '8' && P.angle === '63.4', P.angle);
-  await setField(page, 'inp-te-length', '8');
-  await setField(page, 'inp-te-angle', '30');
-  P = await cardState(page);
-  check('back to 8 mm at 30°', P.dr === '4.62' && /Straight flare 8\.0 mm at 30\.0° \(Δr 4\.62 mm\): lip Ø29\.24/.test(P.readout), P.readout);
+  check('a Run: ", then 5.0 mm run"', /over 8\.0 mm \(20\.6° outside, 14\.0° bore\), then 5\.0 mm run · wall 1\.60 → 0\.60/.test(P.readout), P.readout);
+  await setField(page, 'inp-te-id2', '10.8');
+  await setField(page, 'inp-te-run', '0');
 
   console.log('\n=== 4. a click on the piece picks the end nearest it ===');
   await frame(page, 20, 90);
@@ -158,37 +162,31 @@ withApp(async (page, logs) => {
   P = await cardState(page);
   check('...and back at the top', P.endAxis[2] === 1 && P.ghost);
 
-  console.log('\n=== 5. In turns the flare toward the axis; refusals take the ghost away and say why ===');
-  await setField(page, 'sel-te-dir', 'in');
+  console.log('\n=== 5. refusals take the ghost away and say why; Roll; Trumpet ===');
+  await setField(page, 'inp-te-id2', '15');
   P = await cardState(page);
   console.log('   readout: ' + P.readout);
-  check('In: the same 8 mm flare at 30° made inward - the bore at the lip 2·8·tan30 narrower', !P.bad && P.ghost && !P.goDisabled &&
-        /Straight flare 8\.0 mm at −30\.0° \(Δr −4\.62 mm\), inward: lip bore Ø7\.56/.test(P.readout), P.readout);
-  await setField(page, 'inp-te-dr', '-4');
-  P = await cardState(page);
-  check('Δr typed −4 (Out): the same inward flare, read in the engine\'s own figures (Δr −4.00 mm, −26.6°)',
-    !P.bad && P.ghost && /Straight flare 8\.0 mm at −26\.6° \(Δr −4\.00 mm\), inward: lip bore Ø8\.80/.test(P.readout), P.readout);
-  await setField(page, 'inp-te-angle', '60');
-  P = await cardState(page);
-  console.log('   readout: ' + P.readout);
-  check('In at 60°: refused in words - it would close the bore', P.bad && /that flare would close the bore/.test(P.readout), P.readout);
+  check('New bore Ø15 inside a New Ø14: refused in words - the faces would cross', P.bad && /the faces would cross - the new outside Ø14\.00 is inside the new bore Ø15\.00/.test(P.readout), P.readout);
   check('...the ghost goes, Set is disabled, the ring stays', !P.ghost && P.goDisabled && P.ring);
-  await setField(page, 'inp-te-angle', '30');
-  await setField(page, 'sel-te-dir', 'out');
+  await setField(page, 'inp-te-id2', '10.8');
+  await setField(page, 'inp-te-trans', '0');
+  P = await cardState(page);
+  check('Transition 0 with a new Ø: "transition 0: use Scale\'s ring rows for a step"', P.bad && /transition 0: use Scale's ring rows for a step/.test(P.readout) && !P.ghost, P.readout);
+  await setField(page, 'inp-te-trans', '8');
   await setField(page, 'sel-te-verb', 'roll');
   await setField(page, 'inp-te-roll-angle', '330');
   P = await cardState(page);
   console.log('   readout: ' + P.readout);
-  check('Roll rows shown; 330° refused before it reaches the tube, naming the most it rolls', P.rollShown && !P.flareShown && P.bad &&
+  check('Roll rows shown (and Way); 330° refused before it reaches the tube, naming the most it rolls', P.rollShown && !P.reducerShown && P.dirShown && P.bad &&
         /it rolls up to \d+°/.test(P.readout), P.readout);
   await setField(page, 'inp-te-roll-angle', '180');
   P = await cardState(page);
   check('180° with the default radius (2.5 = 1.5 walls) is good again', !P.bad && P.ghost && !P.goDisabled && P.radius === '2.5' &&
         /Roll 180° round a 2\.50 mm bead/.test(P.readout), P.readout);
-  await setField(page, 'sel-te-verb', 'flare');
+  await setField(page, 'sel-te-verb', 'reducer');
   await setField(page, 'sel-te-profile', 'trumpet');
   P = await cardState(page);
-  check('Trumpet reads its lip angle', /Trumpet flare 8\.0 mm at 30\.0° .*49\.1° at the lip/.test(P.readout), P.readout);
+  check('Trumpet reads each face\'s angle where it ends (atan 2·3/8 = 36.9°)', /^Reducer: Ø20\.00 \/ bore Ø16\.80 → Ø14\.00 \/ bore Ø10\.80 over 8\.0 mm, trumpet \(36\.9° outside, 36\.9° bore where it ends\)/.test(P.readout) && P.ghost, P.readout);
   await frame(page, 22, 100);
   await shot(page, 'tube-edge-card-trumpet-ghost.png');
   await setField(page, 'sel-te-profile', 'straight');
@@ -198,11 +196,11 @@ withApp(async (page, logs) => {
   P = await cardState(page);
   check('the card shuts, ghost and ring gone, piece unchanged', !P.open && P.hidden && !P.ghost && !P.ring && (await soupOf(page)) === before);
 
-  console.log('\n=== 7. Set: a straight flare, one bake ===');
+  console.log('\n=== 7. Set: a straight reducer, one bake ===');
   await page.click('#btn-tube-edge');
   await page.waitForFunction(() => state.tubeEdge.open && state.tubeEdge.result, null, { timeout: 30000 });
   P = await cardState(page);
-  check('reopened, it keeps the numbers typed: 8 mm at 30°, straight', P.length === '8' && P.angle === '30' && P.profile === 'straight' && P.ghost, P.readout);
+  check('reopened, it keeps the numbers typed: Ø14 / bore 10.8 over 8, straight', P.od2 === '14' && P.id2 === '10.8' && P.trans === '8' && P.profile === 'straight' && P.ghost, P.readout);
   const expect = await page.evaluate(() => Array.from(state.tubeEdge.result.tris).join(','));
   await page.click('#btn-te-go');
   await page.waitForFunction(() => /Tube edge done|Tube edge refused/.test(document.getElementById('status').textContent), null, { timeout: 30000 });
@@ -212,13 +210,13 @@ withApp(async (page, logs) => {
     const m = getActiveModel();
     return { T: NSO_bendTopology(m.rawTris), soup: Array.from(m.rawTris).join(','), h: m.size.y, open: state.tubeEdge.open, ghost: !!state.tubeEdge.ghost };
   });
-  check('status: Tube edge done, with the numbers', /Tube edge done - Straight flare 8\.0 mm at 30\.0° \(Δr 4\.62 mm\): lip Ø29\.24 .* 768 → 1728 faces/.test(st), st);
+  check('status: Tube edge done, with the numbers', /Tube edge done - Reducer: Ø20\.00 \/ bore Ø16\.80 → Ø14\.00 \/ bore Ø10\.80 over 8\.0 mm .* 768 → 1152 faces/.test(st), st);
   check('the piece is the ghost\'s soup, bit for bit', after.soup === expect);
   check('closed, 2-manifold, consistently wound', after.T.open === 0 && after.T.nm === 0 && after.T.flip === 0 && after.T.euler === 0, JSON.stringify(after.T));
   check('it stands 48 mm tall now', Math.abs(after.h - 48) < 1e-3, after.h.toFixed(3));
   check('the card closed, ghost gone', !after.open && !after.ghost);
   await frame(page, 28, 75);
-  await shot(page, 'tube-edge-flared.png');
+  await shot(page, 'tube-edge-reduced.png');
 
   console.log('\n=== 8. one Undo puts it back, bit for bit ===');
   await page.click('#btn-undo');
@@ -258,7 +256,7 @@ withApp(async (page, logs) => {
   console.log('\n=== 11. paint stands it down; Bend and Tube edge take turns ===');
   await selectModel(page, tubeId);
   await page.evaluate(() => { getActiveModel().faceMask = { exclude: [{ n: [0, 0, 1], d: 40, axisIdx: 2, keepMin: false, inner: false }] }; });
-  const pr = await page.evaluate(() => NSO_teSelectedModel({ verb: 'flare', length: 8, angle: 30 }));
+  const pr = await page.evaluate(() => NSO_teSelectedModel({ verb: 'reducer', od2: 14, id2: 10.8, transitionMm: 8 }));
   const st4 = await statusOf(page);
   check('declined, naming the painted count', !pr.ok && /Tube edge stood down - 1 painted face/.test(st4), st4);
   check('...piece unchanged', (await soupOf(page)) === before);
