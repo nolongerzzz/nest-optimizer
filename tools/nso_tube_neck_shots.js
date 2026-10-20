@@ -103,7 +103,7 @@ withApp(async (page, logs) => {
   check('defaults from the wall: Length 12 (7.5 walls), Δr −4 (2.5 walls), Smooth', P.length === '12' && P.dr === '-4' && P.profile === 'smooth',
     P.length + ' / ' + P.dr + ' / ' + P.profile);
   check('blank: the band centred at the middle of the tube, said in words', /Pinch −4\.00 mm over 12\.0 mm, smooth, centred 20\.00 mm in: bore Ø16\.80 → Ø8\.80/.test(P.readout) && !P.bad, P.readout);
-  check('the ghost is the soup Set would commit; two rings mark the band', P.ghost && P.ghostTris === P.resultTris && P.ring && P.rings === 2 &&
+  check('the ghost is the soup Set would commit; two rings mark the band, a third its waist', P.ghost && P.ghostTris === P.resultTris && P.ring && P.rings === 3 &&
     P.band && Math.abs(P.band[0] + 26) < 1e-9 && Math.abs(P.band[1] + 14) < 1e-9, JSON.stringify(P.band));
   check('the piece is hidden while the ghost stands in it (a pinch lies inside it)', !P.pieceShown);
   check('opening it changes nothing', (await soupOf(page)) === before);

@@ -18,11 +18,27 @@
 //     NSO_tubeEdgeRaw and the ghost is what came back. A refusal takes the
 //     ghost away and the readout says why;
 //   - an amber RING marks the end being treated, drawn through the piece -
-//     for Neck, two rings mark the band's two ends;
+//     for Neck, two rings mark the band's two ends and a third its waist
+//     (the handles, below);
 //   - a click on the piece picks the end nearest the click (captured ahead
 //     of select-and-drag, so the click does not move the piece). Bend's
 //     "where" interaction, for an end. For Neck the click is where the band
 //     is centred, along the tube.
+//   - NECK HANDLES: three rings on the tube, each one a grab. The two END
+//     rings are the band's length: drag one along the axis and the Length
+//     changes by twice the move, the centre held. The WAIST ring is Δr: drag
+//     it toward the axis to pinch, away to bulge. The BAND - anywhere between
+//     the end rings - drags along the axis and moves the neck; a press on it
+//     that does not travel is still the click that centres the band there.
+//     Steps of 0.5 mm, 0.1 with Shift (the Length moves two steps, one per
+//     end). Arrow keys: Up / Down move the band 1 mm along the axis (Up is
+//     the way the axis goes up the screen), Left / Right Δr -1 / +1; Shift
+//     0.1 - Rotate's rails convention. Escape puts a drag back where it
+//     started, and with no drag shuts the card. Hover names the handle's
+//     value in the readout. The Length / Δr fields are the readouts: the
+//     handles write them and the ghost follows, as typing does. A press on a
+//     handle is taken at the window, ahead of app-core and OrbitControls, so
+//     no drag here ever orbits the camera.
 //
 // Set commits through the sculpt commit (undo type 'tubeEdgeReplace', or
 // 'tubeNeckReplace' for a neck), so one Undo puts the whole piece back, and
@@ -37,12 +53,20 @@
 var TUBE_EDGE_GHOST_COLOR = 0xf59e0b;      // Bend's ghost
 var TUBE_EDGE_RING_COLOR = 0xffc83d;       // Bend's marker frame
 var TUBE_EDGE_RENDER_ORDER = 20;
+var TUBE_EDGE_WAIST_COLOR = 0xff8a3d;      // the neck's waist ring, told from its two ends
+var TUBE_EDGE_HOT_COLOR = 0xffffff;        // the handle under the pointer, or in hand
+var TUBE_NECK_STEP_MM = 0.5;               // a drag's step (the fields' own)
+var TUBE_NECK_KEY_MM = 1;                  // an arrow key
+var TUBE_NECK_FINE_MM = 0.1;               // either, with Shift
+var TUBE_NECK_HIT_PX = 8;                  // how near a ring the pointer must be to take it
+var TUBE_NECK_SLOP_PX = 4;                 // a press on the band that travels less is a click
 
 function NSO_teUI() {
   if (typeof state === 'undefined') return {};
   if (!state.tubeEdge) {
     state.tubeEdge = { open: false, modelId: null, soup: null, read: null, point: null, result: null, key: '',
-                       ghost: null, ring: null, raf: 0, lead: 'angle', readVerb: '', hidPiece: null };
+                       ghost: null, ring: null, raf: 0, lead: 'angle', readVerb: '', hidPiece: null,
+                       drag: null, hover: null, said: null };
   }
   return state.tubeEdge;
 }
@@ -173,33 +197,322 @@ function NSO_teSetRing(m, end) {
   NSO_teFollow();
 }
 
-// The neck's band: the outside circle at each of its two ends.
-function NSO_teSetBandRing(m, r) {
+/* The neck as the handles see it, from the read and the card - not from the
+   last result, so the rings stay up (and can be dragged back) through a
+   refusal: the axis, the centre h0 (mm along the axis from the end it was
+   read off; B.point projected, else the middle), the band's ends ha / hb,
+   the wall's outside radius there and the waist's (Ro + Δr). Null when there
+   is no tube read or no Length to draw. */
+function NSO_teNeckGeom() {
+  var B = NSO_teUI(), m = NSO_teModel();
+  if (!m || !B.read || !B.read.ok || B.readVerb !== 'neck' || NSO_teVerb() !== 'neck') return null;
+  var tb = B.read.tube, C = tb.center, a = tb.axis;
+  var NL = NSO_teEl('inp-te-neck-length'), ND = NSO_teEl('inp-te-neck-dr');
+  var L = NL ? +NL.value : NaN, dr = ND && ND.value !== '' ? +ND.value : 0;
+  if (!(L > 0) || !isFinite(L)) return null;
+  if (!isFinite(dr)) dr = 0;
+  var h0 = (tb.hMin + tb.hMax) / 2;
+  if (B.point) h0 = (B.point[0] - C[0]) * a[0] + (B.point[1] - C[1]) * a[1] + (B.point[2] - C[2]) * a[2];
+  // the band's own outside radius once a preview has read it there, else the end's
+  var Ro = B.result && B.result.band && B.result.band.Ro != null ? B.result.band.Ro : tb.endRo;
+  return { m: m, tube: tb, C: C, a: a, e1: tb.frame.e1, e2: tb.frame.e2, h0: h0, L: L, dr: dr,
+           ha: h0 - L / 2, hb: h0 + L / 2, Ro: Ro, Rw: Math.max(0.05, Ro + dr) };
+}
+function NSO_teAxisPoint(g, h) { return [g.C[0] + h * g.a[0], g.C[1] + h * g.a[1], g.C[2] + h * g.a[2]]; }
+
+// The neck's handles: the outside circle at each end of the band ('a' the
+// lower end along the axis, 'b' the upper) and the waist's ('waist').
+function NSO_teSetNeckRings(m) {
   NSO_teRemoveRing();
-  if (typeof THREE === 'undefined' || !state.scene || !r || !r.band || !r.tube) return;
-  var tb = r.tube, b = r.band, C = tb.center, a = tb.axis, e1 = tb.frame.e1, e2 = tb.frame.e2;
-  var rad = b.Ro != null ? b.Ro : tb.endRo;
+  var g = NSO_teNeckGeom();
+  if (typeof THREE === 'undefined' || !state.scene || !g) return;
+  var B = NSO_teUI(), hot = B.drag ? B.drag.handle : B.hover;
   var group = new THREE.Group();
   group.name = 'tubeEdgeRing';
   group.matrixAutoUpdate = false;
-  [b.ha, b.hb].forEach(function (h) {
-    var pts = [], O = [C[0] + h * a[0], C[1] + h * a[1], C[2] + h * a[2]];
+  [['a', g.ha, g.Ro, TUBE_EDGE_RING_COLOR], ['b', g.hb, g.Ro, TUBE_EDGE_RING_COLOR], ['waist', g.h0, g.Rw, TUBE_EDGE_WAIST_COLOR]].forEach(function (q) {
+    var pts = [], O = NSO_teAxisPoint(g, q[1]), rad = q[2], e1 = g.e1, e2 = g.e2;
     for (var i = 0; i < 96; i++) {
       var ang = 2 * Math.PI * i / 96, c = Math.cos(ang) * rad, s = Math.sin(ang) * rad;
       pts.push(NSO_teRawToDisplay(m, [O[0] + c * e1[0] + s * e2[0], O[1] + c * e1[1] + s * e2[1], O[2] + c * e1[2] + s * e2[2]]));
     }
     var geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts.flat()), 3));
-    var line = new THREE.LineLoop(geo, new THREE.LineBasicMaterial({ color: TUBE_EDGE_RING_COLOR, transparent: true, depthTest: false, depthWrite: false }));
+    var line = new THREE.LineLoop(geo, new THREE.LineBasicMaterial({ color: hot === q[0] ? TUBE_EDGE_HOT_COLOR : q[3], transparent: true, depthTest: false, depthWrite: false }));
     line.renderOrder = TUBE_EDGE_RENDER_ORDER; line.userData.skipXray = true; line.userData.tubeEdgeRing = true;
+    line.userData.teHandle = q[0]; line.userData.teColor = q[3];
     line.raycast = function () {}; line.frustumCulled = false;
     group.add(line);
   });
-  group.userData.center = NSO_teRawToDisplay(m, [C[0] + b.h0 * a[0], C[1] + b.h0 * a[1], C[2] + b.h0 * a[2]]);
-  group.userData.band = [b.ha, b.hb];
+  group.userData.center = NSO_teRawToDisplay(m, NSO_teAxisPoint(g, g.h0));
+  group.userData.band = [g.ha, g.hb];
+  group.userData.waist = { h: g.h0, r: g.Rw };
   state.scene.add(group);
-  NSO_teUI().ring = group;
+  B.ring = group;
   NSO_teFollow();
+}
+// Light the handle under the pointer (or in hand), the others their own colour.
+function NSO_teLight(handle) {
+  var B = NSO_teUI();
+  if (!B.ring) return;
+  B.ring.children.forEach(function (o) {
+    if (o.userData.teHandle) o.material.color.setHex(o.userData.teHandle === handle ? TUBE_EDGE_HOT_COLOR : o.userData.teColor);
+  });
+}
+
+/* ------------------------------------------------------- the neck handles */
+
+// The pointer's ray in the piece's raw frame: { o, d }, d a unit vector.
+function NSO_teRawRay(m, clientX, clientY) {
+  var mesh = NSO_teMeshOf(m);
+  if (!mesh || !state.raycaster || !state.camera || !state.renderer) return null;
+  setPointerFromEvent({ clientX: clientX, clientY: clientY });
+  state.raycaster.setFromCamera(state.pointer, state.camera);
+  mesh.updateMatrixWorld(true);
+  var inv = new THREE.Matrix4().copy(mesh.matrixWorld).invert();
+  var o = state.raycaster.ray.origin.clone().applyMatrix4(inv);
+  var p = state.raycaster.ray.origin.clone().add(state.raycaster.ray.direction).applyMatrix4(inv).sub(o);
+  var O = NSO_teDisplayToRaw(m, o), d = [p.x, -p.z, p.y], n = Math.hypot(d[0], d[1], d[2]);
+  return n > 0 ? { o: O, d: [d[0] / n, d[1] / n, d[2] / n] } : null;
+}
+// A raw point on the screen, in client pixels.
+function NSO_teScreen(m, raw) {
+  var mesh = NSO_teMeshOf(m);
+  var v = new THREE.Vector3().fromArray(NSO_teRawToDisplay(m, raw)).applyMatrix4(mesh.matrixWorld).project(state.camera);
+  var r = state.renderer.domElement.getBoundingClientRect();
+  return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height, z: v.z };
+}
+
+/* What is under the pointer: the nearest ring within TUBE_NECK_HIT_PX on
+   screen ('a', 'b', 'waist'), else 'band' when the ray meets the tube between
+   the end rings, else null. NSO_teNeckHitAt also gives the raw point taken
+   hold of (on the ring, or where the ray meets the tube). */
+function NSO_teNeckHit(clientX, clientY) { var h = NSO_teNeckHitAt(clientX, clientY); return h ? h.handle : null; }
+function NSO_teNeckHitAt(clientX, clientY) {
+  var B = NSO_teUI(), g = NSO_teNeckGeom();
+  if (!g || !B.ring || !NSO_teMeshOf(g.m)) return null;
+  var best = null, bd = TUBE_NECK_HIT_PX;
+  [['a', g.ha, g.Ro], ['b', g.hb, g.Ro], ['waist', g.h0, g.Rw]].forEach(function (q) {
+    var O = NSO_teAxisPoint(g, q[1]), prev = null, prevRaw = null;
+    for (var i = 0; i <= 48; i++) {
+      var ang = 2 * Math.PI * i / 48, c = Math.cos(ang) * q[2], s = Math.sin(ang) * q[2];
+      var raw = [O[0] + c * g.e1[0] + s * g.e2[0], O[1] + c * g.e1[1] + s * g.e2[1], O[2] + c * g.e1[2] + s * g.e2[2]];
+      var P = NSO_teScreen(g.m, raw);
+      if (prev && P.z < 1 && prev.z < 1) {
+        var ex = P.x - prev.x, ey = P.y - prev.y, L2 = ex * ex + ey * ey;
+        var t = L2 > 0 ? Math.max(0, Math.min(1, ((clientX - prev.x) * ex + (clientY - prev.y) * ey) / L2)) : 0;
+        var d = Math.hypot(clientX - prev.x - t * ex, clientY - prev.y - t * ey);
+        // the waist wins a tie: at Δr 0 it is the one ring inside the band
+        if (d < bd || (d <= bd && q[0] === 'waist')) {
+          bd = d;
+          best = { handle: q[0], at: [prevRaw[0] + t * (raw[0] - prevRaw[0]), prevRaw[1] + t * (raw[1] - prevRaw[1]), prevRaw[2] + t * (raw[2] - prevRaw[2])] };
+        }
+      }
+      prev = P; prevRaw = raw;
+    }
+  });
+  if (best) return best;
+  // the band: the ray against the cylinder the tube's outside makes there
+  var ray = NSO_teRawRay(g.m, clientX, clientY);
+  if (!ray) return null;
+  var R = Math.max(g.Ro, g.Rw), a = g.a, w = [ray.o[0] - g.C[0], ray.o[1] - g.C[1], ray.o[2] - g.C[2]];
+  var da = ray.d[0] * a[0] + ray.d[1] * a[1] + ray.d[2] * a[2], wa = w[0] * a[0] + w[1] * a[1] + w[2] * a[2];
+  var dp = [ray.d[0] - da * a[0], ray.d[1] - da * a[1], ray.d[2] - da * a[2]], wp = [w[0] - wa * a[0], w[1] - wa * a[1], w[2] - wa * a[2]];
+  var A = dp[0] * dp[0] + dp[1] * dp[1] + dp[2] * dp[2], Bq = 2 * (dp[0] * wp[0] + dp[1] * wp[1] + dp[2] * wp[2]);
+  var Cq = wp[0] * wp[0] + wp[1] * wp[1] + wp[2] * wp[2] - R * R, disc = Bq * Bq - 4 * A * Cq;
+  if (!(A > 1e-12) || disc < 0) return null;
+  var t0 = (-Bq - Math.sqrt(disc)) / (2 * A);
+  if (!(t0 > 0)) return null;
+  var h = wa + t0 * da;
+  if (!(h >= g.ha && h <= g.hb)) return null;
+  return { handle: 'band', at: [ray.o[0] + t0 * ray.d[0], ray.o[1] + t0 * ray.d[1], ray.o[2] + t0 * ray.d[2]] };
+}
+
+/* The plane a drag is read on: it holds the axis's direction and faces the
+   camera as near as such a plane can. On it, a pointer is h (mm along the
+   axis) and s (mm out from the axis line). The band and the end rings are
+   read on the plane through the point taken hold of, so that point stays
+   under the pointer as it slides; the waist on the plane through the axis
+   itself, so "toward the axis" is toward the axis as it is seen, from
+   anywhere on the ring. */
+function NSO_teDragPlane(g, ray, through) {
+  var a = g.a, da = ray.d[0] * a[0] + ray.d[1] * a[1] + ray.d[2] * a[2];
+  var n = [ray.d[0] - da * a[0], ray.d[1] - da * a[1], ray.d[2] - da * a[2]], L = Math.hypot(n[0], n[1], n[2]);
+  if (!(L > 1e-6)) return null;                     // looking straight down the axis
+  return { O: through || g.C, C: g.C, a: a, n: [n[0] / L, n[1] / L, n[2] / L] };
+}
+function NSO_teOnPlane(pl, ray) {
+  var dn = ray.d[0] * pl.n[0] + ray.d[1] * pl.n[1] + ray.d[2] * pl.n[2];
+  if (Math.abs(dn) < 1e-9) return null;
+  var t = ((pl.O[0] - ray.o[0]) * pl.n[0] + (pl.O[1] - ray.o[1]) * pl.n[1] + (pl.O[2] - ray.o[2]) * pl.n[2]) / dn;
+  var v = [ray.o[0] + t * ray.d[0] - pl.C[0], ray.o[1] + t * ray.d[1] - pl.C[1], ray.o[2] + t * ray.d[2] - pl.C[2]];
+  var h = v[0] * pl.a[0] + v[1] * pl.a[1] + v[2] * pl.a[2];
+  return { h: h, s: Math.hypot(v[0] - h * pl.a[0], v[1] - h * pl.a[1], v[2] - h * pl.a[2]) };
+}
+
+function NSO_teFmtMm(v) {
+  var r = Math.round(v * 100) / 100;
+  return Math.abs(r * 10 - Math.round(r * 10)) < 1e-6 ? r.toFixed(1) : r.toFixed(2);
+}
+function NSO_teSigned(v) { var s = NSO_teFmtMm(Math.abs(v)); return (v > 0 ? '+' : v < 0 ? '−' : '') + s; }
+// A handle's value, in words: what hover and a drag put in the readout.
+function NSO_teHandleText(handle) {
+  var g = NSO_teNeckGeom();
+  if (!g) return '';
+  if (handle === 'waist') return 'Δr ' + NSO_teSigned(g.dr) + ' mm';
+  if (handle === 'band') return 'Centre ' + NSO_teFmtMm(Math.max(0, -g.h0)) + ' mm in';
+  return 'Length ' + NSO_teFmtMm(g.L) + ' mm';
+}
+// The readout with a handle's value in front of what the preview said.
+function NSO_teSayHandle(handle) {
+  var B = NSO_teUI(), last = B.said || { text: '—', bad: false }, t = NSO_teHandleText(handle);
+  var el = NSO_teEl('te-readout');
+  if (el) { el.textContent = t ? t + ' · ' + last.text : last.text; el.classList.toggle('is-bad', !!last.bad); }
+}
+
+/* Set the neck to { h0, L, dr } (any left out stay): the band's centre goes
+   in B.point (on the axis), the numbers in the fields - the fields are the
+   readouts - and the preview runs, as it does for typing. The band is kept on
+   the tube: the centre and the Length stop where an end ring meets an end. */
+function NSO_teNeckSet(v) {
+  var B = NSO_teUI(), g = NSO_teNeckGeom();
+  if (!g) return false;
+  var tb = g.tube, L = v.L != null ? v.L : g.L, h0 = v.h0 != null ? v.h0 : g.h0, dr = v.dr != null ? v.dr : g.dr;
+  L = Math.max(TUBE_NECK_FINE_MM, L);
+  if (L <= tb.lengthMm) {
+    if (v.h0 != null) h0 = Math.min(tb.hMax - L / 2, Math.max(tb.hMin + L / 2, h0));
+    else if (v.L != null) L = Math.min(L, 2 * Math.min(h0 - tb.hMin, tb.hMax - h0));
+  }
+  dr = Math.max(-g.Ro, dr);
+  B.point = NSO_teAxisPoint(g, h0);
+  var NL = NSO_teEl('inp-te-neck-length'), ND = NSO_teEl('inp-te-neck-dr');
+  if (NL && v.L != null) NL.value = NSO_teFmtMm(L);
+  if (ND && v.dr != null) ND.value = NSO_teFmtMm(dr);
+  NSO_tePreview();
+  return true;
+}
+// Snap a move to its step: whole steps of the move, so a centre the click put
+// off the grid keeps its fraction.
+function NSO_teSnap(d, fine) { var st = fine ? TUBE_NECK_FINE_MM : TUBE_NECK_STEP_MM; return Math.round(d / st) * st; }
+
+// Which way Up goes along the axis: +1 when the axis runs up the screen.
+function NSO_teUpSign(g) {
+  var p = NSO_teScreen(g.m, NSO_teAxisPoint(g, g.h0)), q = NSO_teScreen(g.m, NSO_teAxisPoint(g, g.h0 + 1));
+  if (Math.abs(q.y - p.y) > 1e-3) return q.y < p.y ? 1 : -1;
+  var up = NSO_teRawToDisplay(g.m, [g.C[0] + g.a[0], g.C[1] + g.a[1], g.C[2] + g.a[2]])[1] - NSO_teRawToDisplay(g.m, g.C)[1];
+  return up >= 0 ? 1 : -1;
+}
+// One arrow key: 'up' / 'down' move the band, 'left' / 'right' Δr.
+function NSO_teNeckKey(key, fine) {
+  var g = NSO_teNeckGeom();
+  if (!g) return false;
+  var st = fine ? TUBE_NECK_FINE_MM : TUBE_NECK_KEY_MM;
+  if (key === 'left' || key === 'right') {
+    NSO_teNeckSet({ dr: Math.round((g.dr + (key === 'right' ? st : -st)) * 100) / 100 });
+    NSO_teSayHandle('waist');
+  } else {
+    NSO_teNeckSet({ h0: g.h0 + (key === 'up' ? 1 : -1) * NSO_teUpSign(g) * st });
+    NSO_teSayHandle('band');
+  }
+  return true;
+}
+
+/* The cursor over a handle: a resize along the axis as it lies on screen for
+   an end ring, across it for the waist, a hand for the band. */
+var NSO_TE_CURSORS = ['te-cur-ew', 'te-cur-nwse', 'te-cur-ns', 'te-cur-nesw', 'te-cur-grab', 'te-cur-grabbing'];
+function NSO_teCursor(handle, grabbing) {
+  var cv = state.renderer && state.renderer.domElement;
+  if (!cv) return;
+  NSO_TE_CURSORS.forEach(function (c) { cv.classList.remove(c); });
+  var g = handle ? NSO_teNeckGeom() : null;
+  if (!g) return;
+  if (handle === 'band') { cv.classList.add(grabbing ? 'te-cur-grabbing' : 'te-cur-grab'); return; }
+  var p = NSO_teScreen(g.m, NSO_teAxisPoint(g, g.h0)), q = NSO_teScreen(g.m, NSO_teAxisPoint(g, g.h0 + 1));
+  var ang = Math.atan2(-(q.y - p.y), q.x - p.x) * 180 / Math.PI + (handle === 'waist' ? 90 : 0);
+  var k = ((Math.round(ang / 45) % 4) + 4) % 4;      // 0 ew, 1 nesw, 2 ns, 3 nwse (screen y up)
+  cv.classList.add(['te-cur-ew', 'te-cur-nesw', 'te-cur-ns', 'te-cur-nwse'][k]);
+}
+function NSO_teHover(handle) {
+  var B = NSO_teUI();
+  if (B.hover === handle) return;
+  B.hover = handle;
+  NSO_teLight(handle);
+  NSO_teCursor(handle, false);
+  if (handle) NSO_teSayHandle(handle);
+  else if (B.said) NSO_teReadout(B.said.text, B.said.bad);
+}
+
+/* A drag. Begun on a press on a handle; the plane it is read on is fixed at
+   the press (the camera does not move during it). The band's press is a
+   click until it travels TUBE_NECK_SLOP_PX. */
+function NSO_teDragBegin(hit, ev) {
+  var B = NSO_teUI(), g = NSO_teNeckGeom(), ray = g && NSO_teRawRay(g.m, ev.clientX, ev.clientY), handle = hit.handle;
+  var pl = ray && NSO_teDragPlane(g, ray, handle === 'waist' ? null : hit.at), at = pl && NSO_teOnPlane(pl, ray);
+  if (!at) return false;
+  var NL = NSO_teEl('inp-te-neck-length'), ND = NSO_teEl('inp-te-neck-dr');
+  B.drag = { handle: handle, x0: ev.clientX, y0: ev.clientY, moved: handle !== 'band', plane: pl, at0: at,
+             h0: g.h0, L: g.L, dr: g.dr,
+             undo: { point: B.point ? B.point.slice() : null, L: NL ? NL.value : '', dr: ND ? ND.value : '' } };
+  if (state.controls) state.controls.enabled = false;
+  NSO_teLight(handle);
+  NSO_teCursor(handle, true);
+  NSO_teSayHandle(handle);
+  return true;
+}
+function NSO_teDragMove(ev) {
+  var B = NSO_teUI(), D = B.drag, g = NSO_teNeckGeom();
+  if (!D || !g) return;
+  if (!D.moved) {
+    if (Math.hypot(ev.clientX - D.x0, ev.clientY - D.y0) < TUBE_NECK_SLOP_PX) return;
+    D.moved = true;
+  }
+  var ray = NSO_teRawRay(g.m, ev.clientX, ev.clientY), at = ray && NSO_teOnPlane(D.plane, ray);
+  if (!at) return;
+  var fine = !!ev.shiftKey, dh = NSO_teSnap(at.h - D.at0.h, fine), v;
+  if (D.handle === 'band') v = { h0: D.h0 + dh };
+  else if (D.handle === 'a') v = { L: D.L - 2 * dh };
+  else if (D.handle === 'b') v = { L: D.L + 2 * dh };
+  else v = { dr: Math.round((D.dr + NSO_teSnap(at.s - D.at0.s, fine)) * 100) / 100 };
+  var key = JSON.stringify(v);
+  if (key !== D.last) { D.last = key; NSO_teNeckSet(v); }
+  NSO_teSayHandle(D.handle);
+}
+// End a drag: kept (a release), or put back where it began (Escape, or the
+// card going away). A band press that never travelled is the placing click.
+function NSO_teDragEnd(keep, ev) {
+  var B = NSO_teUI(), D = B.drag;
+  if (!D) return;
+  B.drag = null;
+  if (state.controls) state.controls.enabled = true;
+  if (!keep && D.moved) {
+    var NL = NSO_teEl('inp-te-neck-length'), ND = NSO_teEl('inp-te-neck-dr');
+    B.point = D.undo.point;
+    if (NL) NL.value = D.undo.L;
+    if (ND) ND.value = D.undo.dr;
+    NSO_tePreview();
+  } else if (keep && !D.moved && ev) {
+    NSO_tePlaceAt(D.x0, D.y0);
+  }
+  B.hover = null;
+  NSO_teLight(null);
+  NSO_teCursor(null);
+  if (B.said) NSO_teReadout(B.said.text, B.said.bad);
+}
+
+// The click that places the neck (or picks an end): the point on the piece
+// under (x, y). False when the click misses the piece.
+function NSO_tePlaceAt(clientX, clientY) {
+  var B = NSO_teUI(), m = NSO_teModel(), mesh = m && NSO_teMeshOf(m);
+  if (!mesh) return false;
+  setPointerFromEvent({ clientX: clientX, clientY: clientY });
+  state.raycaster.setFromCamera(state.pointer, state.camera);
+  var hits = state.raycaster.intersectObject(mesh, false);
+  if (!hits.length) return false;
+  mesh.updateMatrixWorld(true);
+  var local = hits[0].point.clone().applyMatrix4(new THREE.Matrix4().copy(mesh.matrixWorld).invert());
+  B.point = NSO_teDisplayToRaw(m, local);
+  if (NSO_teVerb() === 'neck' && B.read && B.read.ok && B.readVerb === 'neck') NSO_tePreview(); else NSO_teLoad();
+  return true;
 }
 
 function NSO_teFollow() {
@@ -218,6 +531,7 @@ function NSO_teFollow() {
 function NSO_teReadout(text, bad) {
   var el = NSO_teEl('te-readout');
   if (el) { el.textContent = text; el.classList.toggle('is-bad', !!bad); }
+  NSO_teUI().said = { text: text, bad: !!bad };     // what a handle's hover puts back
 }
 function NSO_teSyncRows() {
   var verb = (NSO_teEl('sel-te-verb') || {}).value || 'flare';
@@ -284,7 +598,7 @@ function NSO_tePreview() {
   try { r = neck ? NSO_tubeNeckRaw(m.rawTris, o) : NSO_tubeEdgeRaw(m.rawTris, o); }
   catch (err) { r = { ok: false, reason: (err && err.message) || String(err) }; }
   B.result = r; B.key = key; B.soup = m.rawTris;
-  if (neck) { if (r.band && r.tube) NSO_teSetBandRing(m, r); else NSO_teRemoveRing(); }
+  if (neck) NSO_teSetNeckRings(m);
   var aligned = (typeof NSO_bendFrameMatches === 'function') ? NSO_bendFrameMatches(m) : true;
   if (r.ok) {
     if (aligned) NSO_teSetGhost(m, r.tris, neck); else NSO_teRemoveGhost();
@@ -310,6 +624,8 @@ function NSO_teOpen() {
 }
 function NSO_teClose() {
   var B = NSO_teUI(), panel = NSO_teEl('te-panel'), btn = NSO_teEl('btn-tube-edge');
+  if (B.drag) NSO_teDragEnd(false);
+  NSO_teHover(null);
   B.open = false; B.result = null; B.key = '';
   if (panel) panel.hidden = true;
   if (btn) { btn.setAttribute('aria-expanded', 'false'); btn.classList.remove('is-on'); }
@@ -371,18 +687,65 @@ if (typeof document !== 'undefined') {
       var B = NSO_teUI();
       if (!B.open || ev.button !== 0 || !state.raycaster || !state.camera || !state.renderer) return;
       if (ev.target !== state.renderer.domElement) return;
-      var m = NSO_teModel(), mesh = m && NSO_teMeshOf(m);
-      if (!mesh) return;
-      setPointerFromEvent(ev);
-      state.raycaster.setFromCamera(state.pointer, state.camera);
-      var hits = state.raycaster.intersectObject(mesh, false);
-      if (!hits.length) return;
-      mesh.updateMatrixWorld(true);
-      var local = hits[0].point.clone().applyMatrix4(new THREE.Matrix4().copy(mesh.matrixWorld).invert());
-      B.point = NSO_teDisplayToRaw(m, local);
-      if (NSO_teVerb() === 'neck' && B.read && B.read.ok && B.readVerb === 'neck') NSO_tePreview(); else NSO_teLoad();
+      if (B.drag) NSO_teDragEnd(false);
+      // a neck's handle first: a ring, or the band between the end rings
+      var hit = NSO_teNeckHitAt(ev.clientX, ev.clientY);
+      if (hit && NSO_teDragBegin(hit, ev)) {
+        // the press keeps the focus where it was; out of a field, so the
+        // arrows are the handles' after the drag
+        var f = document.activeElement, card = NSO_teEl('te-panel');
+        if (f && card && card.contains(f) && typeof f.blur === 'function') f.blur();
+        ev.stopImmediatePropagation();
+        ev.preventDefault();
+        return;
+      }
+      if (!NSO_tePlaceAt(ev.clientX, ev.clientY)) return;
       ev.stopImmediatePropagation();
       ev.preventDefault();
+    }
+    // A drag in hand takes every move and the release, ahead of app-core's
+    // window listeners; with none, a move over the canvas is a hover.
+    function onMove(ev) {
+      var B = NSO_teUI();
+      if (B.drag) { NSO_teDragMove(ev); ev.stopImmediatePropagation(); ev.preventDefault(); return; }
+      if (!B.open || NSO_teVerb() !== 'neck' || !state.renderer || ev.target !== state.renderer.domElement || ev.buttons) {
+        if (B.hover) NSO_teHover(null);
+        return;
+      }
+      NSO_teHover(NSO_teNeckHit(ev.clientX, ev.clientY));
+    }
+    function onUp(ev) {
+      var B = NSO_teUI();
+      if (!B.drag) return;
+      NSO_teDragEnd(ev.type === 'pointerup', ev);
+      ev.stopImmediatePropagation();
+    }
+    // Arrows and Escape while the Neck card is open (Rotate's rails
+    // convention): text fields keep their own arrows and Escape.
+    var NECK_KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
+    function onKey(ev) {
+      var B = NSO_teUI();
+      if (!B.open || NSO_teVerb() !== 'neck' || ev.metaKey || ev.ctrlKey || ev.altKey) return;
+      if (ev.key === 'Escape' && B.drag) {
+        NSO_teDragEnd(false);
+        ev.preventDefault(); ev.stopImmediatePropagation();
+        return;
+      }
+      var t = ev.target, text = t && ((t.tagName === 'INPUT' && t.type !== 'checkbox') || t.tagName === 'TEXTAREA' || t.isContentEditable);
+      if (text || (t && t.tagName === 'SELECT' && ev.key !== 'Escape')) return;
+      // a top-bar menu that owns the arrows (Rotate, Tip, Move) keeps them:
+      // one press is answered once (app-input-mode.js)
+      var IM = window.nsoInputMode, owner = IM && IM.active && IM.active();
+      if (owner && IM.registered && IM.registered().indexOf(owner) >= 0) return;
+      if (ev.key === 'Escape') {
+        NSO_teClose();
+        ev.preventDefault(); ev.stopImmediatePropagation();
+        return;
+      }
+      var k = NECK_KEYS[ev.key];
+      if (!k || B.drag || !NSO_teNeckGeom()) return;
+      NSO_teNeckKey(k, ev.shiftKey);
+      ev.preventDefault(); ev.stopImmediatePropagation();
     }
     function wire() {
       var btn = NSO_teEl('btn-tube-edge');
@@ -420,6 +783,10 @@ if (typeof document !== 'undefined') {
       // Capture on window: ahead of app-core's canvas handler, so a click that
       // picks the end does not also start a drag or a selection.
       window.addEventListener('pointerdown', onDown, true);
+      window.addEventListener('pointermove', onMove, true);
+      window.addEventListener('pointerup', onUp, true);
+      window.addEventListener('pointercancel', onUp, true);
+      window.addEventListener('keydown', onKey, true);
     }
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire);
     else wire();
