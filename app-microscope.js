@@ -466,7 +466,8 @@ var NSO_MICROSCOPE = (function () {
    */
   function load(filename, arrayBuffer) {
     return loadFile(filename, arrayBuffer).then(function (d) {
-      if (d) importedDoc = d;
+      // the plate holds a copy of what was read (importCopy): the import is kept as read
+      if (d) { importedDoc = Object.assign({}, d); d.importOf = importedDoc; }
       return d;
     });
   }
@@ -608,13 +609,14 @@ var NSO_MICROSCOPE = (function () {
   // Two plates, side by side (docs/GSCOPE.md)
   // ===========================================================================
   //
-  // Bambu Studio's multi-plate view: both plates stand on one floor, the loaded
-  // plate (plate 1, 'lens') on the left and the second plate (plate 2, 'take')
-  // to its right, the same size, each with its label. Plate 1 is what was
-  // loaded - the plate read, or an imported file - and is the only plate
-  // anything is loaded INTO: open() always lands there. Plate 2 starts empty and
-  // holds COPIES pulled off plate 1; it is a jump point and an export staging
-  // area, nothing more. Nothing on plate 1 changes by anything done on plate 2.
+  // Bambu Studio's multi-plate view: both plates stand on one floor, plate 1
+  // ('lens' inside this file) on the left and plate 2 ('take') to its right,
+  // the same size, each with its label. THE TWO PLATES ARE THE SAME (round 2b):
+  // each is its own zone, empty or holding one document - a plate read, an
+  // imported file, a slice made here, or the pieces dragged onto it - and every
+  // control acts on the ACTIVE plate and works identically on either: Import
+  // and Read plate load into it, CLEAR empties it, Export writes it, and a drag
+  // copies across in either direction.
   //
   // One plate is ACTIVE. The module variables above and below (doc, HIDDEN,
   // balls, the selection, the layer range, ...) are the active plate's, so the
@@ -624,36 +626,53 @@ var NSO_MICROSCOPE = (function () {
   // planes, and nothing of the plate not active is touched while it is not.
   //
   // THE ACTIVE PLATE STANDS AT THE ORIGIN. Every coordinate in this file - a
-  // pick, a capture box, the clip planes, a pull's drop, the TAKE world - is in
-  // the active plate's own frame, as it was when one plate was shown at a time.
-  // The other plate's groups and floor are drawn beside it (placePlates), and
-  // a change of the active plate moves the camera by the same step the plates
-  // move, so on screen nothing moves: the plates stay where they stand, left and
-  // right, and only which one is lit changes.
+  // pick, a capture box, the clip planes, a drag's drop - is in the active
+  // plate's own frame, as it was when one plate was shown at a time. The other
+  // plate's groups and floor are drawn beside it (placePlates), and a change of
+  // the active plate moves the camera by the same step the plates move, so on
+  // screen nothing moves: the plates stay where they stand, left and right, and
+  // only which one is lit changes.
   //
-  // Plate 2 is a mesh document ('take' source) whose objects are the pieces, in
-  // the Z-up millimetres of a bed centred on its origin (cx = cy = 0), so the
-  // legend, the box, the clip slider, Isolate and the exports read it as they
-  // read any mesh. A piece pulled off a slice also keeps its moves (shifted with
-  // it), so "as solid" still has the beads to sweep. Internally the two plates
-  // keep the names they had ('lens' and 'take'); nothing the user reads says
-  // either.
+  // A piece dragged onto an EMPTY plate makes it a pieces document (source
+  // 'take'): a mesh document whose objects are the pieces, in the Z-up
+  // millimetres of a bed centred on its origin (cx = cy = 0), so the legend, the
+  // box, the clip slider, Isolate and the exports read it as they read any mesh.
+  // A piece copied off a slice keeps its moves (shifted with it), so "as solid"
+  // still has the beads to sweep. Dragged onto a plate that holds a document,
+  // a piece joins it (setDownOn). Nothing the user reads says 'lens' or 'take'.
 
   var plateName = 'lens';                         // the ACTIVE plate
   var plateSaved = { lens: null, take: null };   // a plate's stash while it is NOT active
-  var takeDoc = null;
   var plateListeners = [];                       // fn(name) after the active plate changed
   var SLOT = { lens: 0, take: 1 };               // left to right
-  var PLATE_LABEL = { lens: 'Plate 1 - loaded', take: 'Plate 2' };
+  var PLATE_LABEL = { lens: 'Plate 1', take: 'Plate 2' };
   var importedDoc = null;                        // the file Import opened, kept across a close
 
-  function newTakeDoc() {
+  /** "Plate 1" / "Plate 2". */
+  function plateTitle(name) { return PLATE_LABEL[name === 'take' ? 'take' : 'lens']; }
+
+  /** A plate's document, active or not (null: the plate is empty). */
+  function plateDoc(name) {
+    name = name === 'take' ? 'take' : 'lens';
+    return name === plateName ? doc : (plateSaved[name] ? plateSaved[name].doc : null);
+  }
+
+  /** A plate that pieces were dragged onto while it was empty. */
+  function newPiecesDoc(name) {
     return {
-      kind: 'mesh', source: 'take', name: 'Plate 2', objects: [], segments: null, parsed: null,
+      kind: 'mesh', source: 'take', name: plateTitle(name), objects: [], segments: null, parsed: null,
       zMin: 0, zMax: 0, cx: 0, cy: 0, unit: 'triangle', groups: {},
-      subtitle: 'Copies pulled off plate 1. Press a selection there and drag it here; drag a piece to move it, ' +
-                'drop it on another to seat it, or on the bed to set it down.'
+      subtitle: 'Pieces dragged here. Drag a piece to move it, drop it on another to seat it, or on the bed to ' +
+                'set it down; drag it over the other plate to copy it there.'
     };
+  }
+
+  /** Is this a pieces document (what a drag onto an empty plate makes)? */
+  function isPieces(d) { return !!(d && d.kind === 'mesh' && d.source === 'take'); }
+
+  /** Does this mesh document hold a piece that is still a slice's beads? Its Features list is those beads' line types. */
+  function hasBeads(d) {
+    return !!(d && d.kind === 'mesh' && d.objects && d.objects.some(function (o) { return o.moves && o.moves.length; }));
   }
 
   function clipPair() {
@@ -665,7 +684,7 @@ var NSO_MICROSCOPE = (function () {
     var dg = G();
     dg.visible = false;
     return {
-      doc: name === 'take' ? (takeDoc || (takeDoc = newTakeDoc())) : null,
+      doc: null,
       HIDDEN: new Set(), CLEARED: new Set(), zr: null, lineCursor: -1,
       mode: 'piece', balls: [], currentSelection: [], selectionSource: 'box', isolated: false,
       groups: [G(), dg, G()], overviewMeshes: {}, solidMeshes: {}, solidBuilt: null, clip: clipPair()
@@ -707,10 +726,8 @@ var NSO_MICROSCOPE = (function () {
     });
   }
 
-  /** The loaded plate's document, whichever plate is active. */
-  function lensDoc() {
-    return plateName === 'lens' ? doc : (plateSaved.lens ? plateSaved.lens.doc : null);
-  }
+  /** Plate 1's document, whichever plate is active. */
+  function lensDoc() { return plateDoc('lens'); }
 
   function otherPlate() { return plateName === 'lens' ? 'take' : 'lens'; }
 
@@ -835,25 +852,59 @@ var NSO_MICROSCOPE = (function () {
     v.controls.update();
   }
 
-  /** Plate 2, on the floor and in the scene, empty if it is new. */
-  function ensureTake() {
+  /** Both plates on the floor and in the scene; the one not active, empty if it is new. */
+  function ensurePlates() {
     if (!view) return;
-    if (plateName !== 'take' && !plateSaved.take) plateSaved.take = freshPlate('take');
+    var o = otherPlate();
+    if (!plateSaved[o]) plateSaved[o] = freshPlate(o);
     placePlates();
   }
 
-  /** Plate 2 thrown away whole - its pieces, groups and boxes. It comes back empty (ensureTake). */
-  function dropTake() {
-    if (pull) cancelPull();
-    if (plateName === 'take') showPlate('lens', { quiet: true });
-    var s = plateSaved.take;
-    if (s && view) {
-      s.groups.forEach(function (g) { clearGroup(g); view.scene.remove(g); });
-      s.balls.forEach(function (b) { boxParts(b).forEach(function (o) { view.scene.remove(o); }); });
+  /** The side both plates take: what either holds decides it (both grow together). */
+  function sizePlates() {
+    var was = plateSide;
+    plateSide = Math.max(sideFor(plateDoc('lens')), sideFor(plateDoc('take')));
+    return plateSide !== was;
+  }
+
+  /**
+   * Plate `name` emptied, active or not - its document, pieces, selection,
+   * boxes, isolation, clears and slider - ready for Import or Read plate. The
+   * other plate is not touched. The plate stays where it is and so does the
+   * camera; which plate is active does not change.
+   */
+  function emptyPlate(name) {
+    name = name === 'take' ? 'take' : 'lens';
+    var d = plateDoc(name);
+    if (d && d.objects) d.objects.forEach(dropPieceGeometry);
+    if (name !== plateName) {
+      var s = plateSaved[name];
+      if (s && view) {
+        s.groups.forEach(function (g) { clearGroup(g); view.scene.remove(g); });
+        s.balls.forEach(function (b) { boxParts(b).forEach(function (o) { view.scene.remove(o); disposeTree(o); }); });
+      }
+      plateSaved[name] = null;
+      ensurePlates();
+      return;
     }
-    plateSaved.take = null;
-    takeDoc = null;
-    Array.from(pieceGeoms.keys()).forEach(dropPieceGeometry);
+    removeAllBalls();
+    if (view) {
+      clearGroup(view.overviewGroup);
+      clearGroup(view.detailGroup);
+      clearGroup(view.highlightGroup);
+      view.overviewMeshes = {};
+      view.solidMeshes = {};
+      view.solidBuilt = null;
+    }
+    doc = null;
+    HIDDEN = new Set();
+    CLEARED = new Set();
+    currentSelection = [];
+    selectionSource = 'box';
+    isolated = false;
+    lineCursor = -1;
+    zr = null;
+    mode = 'piece';
   }
 
   /** One burst of coalesced redraws, run now so it lands on the plate that asked for it. */
@@ -906,7 +957,7 @@ var NSO_MICROSCOPE = (function () {
   function redrawDoc(rebuild) {
     var v = view;
     applyClip();
-    if (v && (rebuild !== false || (doc && doc.source === 'take' && v.takeSig !== featureSig()))) {
+    if (v && (rebuild !== false || (hasBeads(doc) && v.takeSig !== featureSig()))) {
       buildOverview();
       buildDetail_();
     }
@@ -932,24 +983,22 @@ var NSO_MICROSCOPE = (function () {
 
   /** The line under the info box when nothing is selected. */
   function introInfo() {
-    if (!doc) return 'No file open.';
-    if (doc.source === 'take') {
-      return doc.objects.length
-        ? 'Plate 2. Drag a piece to move it. Hover and click one to isolate it - and Export acts on it.'
-        : 'Nothing on plate 2 yet. Press the isolated thing on plate 1 and drag it over here.';
+    var me = plateTitle(plateName), other = plateTitle(otherPlate());
+    if (!doc) return me + ' is empty. <b>Import</b> a file or <b>Read plate</b> into it, or drag something here from ' + other + '.';
+    if (isPieces(doc)) {
+      return me + '. Drag a piece to move it, or over ' + other + ' to copy it there. Hover and click one to isolate it - and Export acts on it.';
     }
     return 'Hover what a click would take and it is outlined. <b>Click</b> isolates it (click it again, or Escape, to see the ' +
-           'whole part), <b>drag</b> it onto plate 2 to copy it there; drag bare floor to orbit. Click a plate to make it the active one.';
+           'whole part), <b>drag</b> it onto ' + other + ' to copy it there; drag bare floor to orbit. Click a plate to make it the active one.';
   }
 
   /** CLEAR and Export follow the plates. */
   function syncPlateUI() {
     var t = $('ms-btn-take-clear');
     if (t) {
-      var n = takeDoc ? takeDoc.objects.length : 0;
-      t.title = 'Empty plate 2' + (n ? ' (' + n + ' piece' + (n === 1 ? '' : 's') + ')' : '') +
-                ' and make plate 1 whole again. With Shift, also drop an imported file and read the plate again';
-      t.dataset.count = String(n);
+      t.title = 'Empty ' + plateTitle(plateName) + ', the active plate - ' + plateTitle(otherPlate()) + ' is not touched. ' +
+                'An emptied plate is ready for Import or Read plate';
+      t.dataset.plate = plateName === 'take' ? '2' : '1';
     }
     var vp = $('ms-viewport');
     if (vp) vp.dataset.plate = plateName === 'take' ? '2' : '1';
@@ -957,16 +1006,22 @@ var NSO_MICROSCOPE = (function () {
   }
   function syncPlate() { syncPlateUI(); badgeFor(); }
   function badgeFor() {
-    if (plateName === 'take') badge('Plate 2: ' + (takeDoc ? takeDoc.objects.length : 0) + ' piece(s)');
+    if (!isolated) badge(plateBadge());
+  }
+  /** What the badge says of the active plate, nothing isolated. */
+  function plateBadge() {
+    if (!doc) return plateTitle(plateName) + ': empty';
+    if (isPieces(doc)) return plateTitle(plateName) + ': ' + doc.objects.length + ' piece(s)';
+    return 'Whole part';
   }
 
   // ===========================================================================
-  // Plate 2's pieces
+  // Pieces: what a drag sets down on a plate
   // ===========================================================================
 
-  function uniqueTakeName(base) {
+  function uniquePieceName(d, base) {
     var used = {};
-    takeDoc.objects.forEach(function (o) { used[o.name] = 1; });
+    (d.objects || []).forEach(function (o) { used[o.name] = 1; });
     var name = base, n = 2;
     while (used[name]) { name = base + ' #' + n; n++; }
     return name;
@@ -987,7 +1042,7 @@ var NSO_MICROSCOPE = (function () {
     return out;
   }
 
-  /** A piece moved by (dx, dy, dz) mm in plate 2's own Z-up frame, baked into its triangles and beads. */
+  /** A piece moved by (dx, dy, dz) mm in its plate's own Z-up frame, baked into its triangles and beads. */
   function bakePiece(o, dx, dy, dz) {
     if (!dx && !dy && !dz) return o;
     var p0 = o.positions, m0 = o.moves;
@@ -997,8 +1052,8 @@ var NSO_MICROSCOPE = (function () {
     return prepObject(o);
   }
 
-  /** Plate 2, active, after its pieces changed: the bounds, the slider, what is selected, all redrawn. */
-  function takeRefresh() {
+  /** A mesh plate, active, after its pieces changed: the bounds, the slider, what is selected, all redrawn. */
+  function pieceRefresh() {
     var d = doc, os = d.objects, lo = Infinity, hi = -Infinity;
     os.forEach(function (o) {
       if (o.bounds.minZ < lo) lo = o.bounds.minZ;
@@ -1016,33 +1071,6 @@ var NSO_MICROSCOPE = (function () {
     if (selectionSource === 'box' && balls.length) setSelection(selectByBox(), 'box');
     if (view) view.worldSphere = worldSphere();
     syncPlate();
-  }
-
-  /** Run fn with plate 2 as the live plate, then put the active plate back - and its readouts. */
-  function onTake(fn) {
-    var was = plateName;
-    if (was !== 'take') showPlate('take', { quiet: true });
-    try { return fn(); }
-    finally { if (was !== 'take') { showPlate(was, { quiet: true }); redrawDoc(false); syncPlate(); } }
-  }
-
-  /** Plate 2 emptied - the pieces, what was selected of them, the boxes. Plate 1 is not touched. */
-  function takeClear() {
-    var n = takeDoc ? takeDoc.objects.length : 0;
-    if (pull) cancelPull();
-    if (!takeDoc && !plateSaved.take) { syncPlateUI(); return 0; }
-    onTake(function () {
-      takeDoc.objects = [];
-      removeAllBalls();
-      HIDDEN = new Set();
-      currentSelection = [];
-      selectionSource = 'box';
-      isolated = false;
-      takeRefresh();
-      info(introInfo());
-    });
-    syncPlateUI();
-    return n;
   }
 
   /**
@@ -1083,35 +1111,53 @@ var NSO_MICROSCOPE = (function () {
     };
   }
 
-  /** Plate 2's pieces, for a reader (and the checks). */
-  function takePieces() {
-    return (takeDoc ? takeDoc.objects : []).map(function (o) {
+  /** A plate's mesh objects (plate 2's by default), for a reader (and the checks). */
+  function takePieces(name) {
+    var d = plateDoc(name || 'take');
+    return (d && d.kind === 'mesh' ? d.objects : []).map(function (o) {
       return { name: o.name, triangles: o.triangles, bounds: o.bounds, moves: o.moves ? o.moves.length : 0,
                from: o.take ? o.take.from : null, turned: !!o.turned };
     });
   }
 
   // ---------------------------------------------------------------------------
-  // Pulling: the selection, copied onto plate 2
+  // A drag across: the thing pressed, copied onto the other plate
   // ---------------------------------------------------------------------------
 
   /**
-   * What is being pulled, as a piece to put on plate 2, or null. `tgt` is what the
-   * press was on ({ items, source }); with none it is plate 1's selection. Whatever
-   * the thing is - a piece, a box's region, a line type, a line, a layer, the
-   * slider's range - it is the same here: items, and the piece is what Export
-   * would write: a slice's beads as their prisms (with the moves kept for "as
-   * solid"), a mesh's own triangles. Plate 1 is not touched: the selection the
-   * name and the geometry are read from is only borrowed for the read.
+   * What a drag carries, or null. `tgt` is what the press was on ({ items,
+   * source }); with none it is the active plate's selection. Whatever the thing
+   * is - a piece, a box's region, a line type, a line, a layer, the slider's
+   * range - it is the same here: items, and the copy is what Export would
+   * write: a slice's beads as their prisms (with the moves kept, so it can join
+   * a slice or be swept "as solid"), a mesh's own triangles. Pieces that are
+   * still beads carry their shown moves the same way. The plate the copy comes
+   * from is not touched: its selection is only borrowed for the read.
+   * { name, from, positions (Z-up, this plate's frame), moves, moveIds, trisPerMove }
    */
   function pullSpec(tgt) {
-    if (!doc || plateName !== 'lens') return null;
+    if (!doc) return null;
     var items = actedOn(tgt ? tgt.items : currentSelection), source = tgt ? tgt.source : selectionSource;
     if (!items || !items.length) return null;
+    if (doc.kind === 'mesh' && items.every(function (o) { return o.moves && o.moves.length; })) {
+      // pieces that are still beads: their shown moves, one prism each (more than
+      // one piece: each keeps its own move numbers, as Export as solid does)
+      var mv = [];
+      items.forEach(function (o, i) {
+        o.moves.forEach(function (m) {
+          if (!FEATURE_OFF.has(m.feature)) mv.push(items.length > 1 ? Object.assign({}, m, { index: m.index + i * 10000000 }) : m);
+        });
+      });
+      var built = mv.length ? window.NSOGcodeLines.buildLineGeometry(mv) : null;
+      if (!built || built.positions.length < 9) return null;
+      return withSelection(items, source, function () {
+        return { name: exportLabel(), from: doc.name, positions: built.positions, moves: mv, moveIds: built.moveIds, trisPerMove: built.trisPerMove };
+      });
+    }
     return withSelection(items, source, function () {
       var geo = microscopeGeometry();
       if (!geo) return null;
-      var pos = geo.attributes.position.array;       // the geometry's own, new - takeAddAt shifts it into a copy
+      var pos = geo.attributes.position.array;       // the geometry's own, new
       if (pos.length < 9) return null;
       return {
         name: exportLabel(), positions: pos, from: doc.name,
@@ -1129,25 +1175,145 @@ var NSO_MICROSCOPE = (function () {
     finally { currentSelection = s0; selectionSource = src0; lineCursor = c0; if (doc) doc.layerIndex = li0; }
   }
 
-  /** A spec set down on plate 2's bed, its footprint centred on the Z-up point (x, y). Returns the piece. */
-  function takeAddAt(spec, x, y) {
-    var p = spec.positions, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  /** A Z-up soup's footprint centre and its bottom: the point a carried copy stands on. */
+  function soupAnchor(p) {
+    var x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity;
     for (var i = 0; i < p.length; i += 3) {
-      var px = p[i], py = p[i + 1], pz = p[i + 2];
-      if (px < lo[0]) lo[0] = px; if (px > hi[0]) hi[0] = px;
-      if (py < lo[1]) lo[1] = py; if (py > hi[1]) hi[1] = py;
-      if (pz < lo[2]) lo[2] = pz; if (pz > hi[2]) hi[2] = pz;
+      var x = p[i], y = p[i + 1], z = p[i + 2];
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+      if (z < z0) z0 = z;
     }
-    var dx = x - (lo[0] + hi[0]) / 2, dy = y - (lo[1] + hi[1]) / 2, dz = -lo[2];
+    return { x: (x0 + x1) / 2, y: (y0 + y1) / 2, z: z0 };
+  }
+
+  /** The material a piece is drawn in on a plate - the ghost's too, so nothing changes when it lands. */
+  function pieceMaterial(beads, colour) {
+    return beads
+      ? new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes() })
+      : new THREE.MeshStandardMaterial({ color: colour, metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes() });
+  }
+
+  /**
+   * THE GHOST: the copy in hand, drawn as it will land - a slice's beads as
+   * their prisms in their line types' colours, a mesh in its piece colour - in
+   * the scene itself, not on either plate, with its footprint's centre and its
+   * bottom at the mesh's origin. It is under the pointer from the slop to the
+   * release, over either plate's floor (sliding on it), a piece, or nothing,
+   * and it is what lands: set down on a mesh plate, its geometry IS the piece's
+   * from then on, standing where the ghost stood (setDownOn).
+   */
+  function makeGhost(spec) {
+    var at = soupAnchor(spec.positions);
+    var beads = !!(spec.moves && spec.moveIds && spec.trisPerMove &&
+                   spec.moveIds.length * spec.trisPerMove * 9 === spec.positions.length);
+    var geo = beads
+      ? beadGeometry(spec.positions, spec.moveIds, spec.trisPerMove, spec.moves.filter(function (m) { return !FEATURE_OFF.has(m.feature); }), at)
+      : keptGeometry(soupGeometry(viewPositions(spec.positions, at)));
+    var n = doc && doc.kind === 'mesh' ? doc.objects.length : 0;
+    var colour = beads ? 0xffffff : (doc && doc.kind === 'toolpath' ? OBJECT_COLORS[0] : colorForGroup(spec.name, n));
+    var mesh = new THREE.Mesh(geo, pieceMaterial(beads, colour));
+    mesh.material.clippingPlanes = [];
+    mesh.name = 'gscopeGhost';
+    view.scene.add(mesh);
+    mesh.updateMatrixWorld(true);
+    return { ghost: true, name: spec.name, spec: spec, at: at, beads: beads, geo: geo, mesh: mesh, colour: colour };
+  }
+
+  /** The ghost out of the scene; its geometry kept when it became a piece's. */
+  function dropGhost(g, keepGeometry) {
+    if (!g || !g.mesh) return;
+    if (g.mesh.parent) g.mesh.parent.remove(g.mesh);
+    g.mesh.material.dispose();
+    if (!keepGeometry) g.geo.dispose();
+    g.mesh = null;
+  }
+
+  /**
+   * The carried copy set down on the ACTIVE plate where the ghost stands now
+   * (`pos`, view space in the active plate's frame), or seated (`placed`: its
+   * Z-up triangles already where they go, turned). Returns what landed (the
+   * piece, or the slice's new segments), or null with the reason said:
+   *   an empty plate  - a pieces document with this one piece
+   *   a mesh plate    - one more object, a piece (grab it to move it)
+   *   a slice         - the piece's moves join it, one more object of the slice,
+   *                     drawn as its lines; a mesh (no moves) cannot, and is refused
+   * A document is never edited in place: it gets new arrays, so an imported
+   * file the plate shows (importCopy) is not changed by it.
+   */
+  function setDownOn(g, pos, placed) {
+    var spec = g.spec, me = plateTitle(plateName);
+    if (doc && doc.kind === 'toolpath') {
+      if (!spec.moves || placed) {
+        say(me + ' holds a slice, and a mesh piece cannot join one - nothing copied. Set it down on an empty plate or a plate of pieces.', true);
+        return null;
+      }
+      var sd = [pos.x + doc.cx - g.at.x, -pos.z + doc.cy - g.at.y, pos.y - g.at.z];
+      var segs = appendToSlice(doc, shiftedMoves(spec.moves, sd[0], sd[1], sd[2]));
+      dropGhost(g, false);
+      if (sizePlates()) placePlates();
+      zr = { lo: 0, hi: Math.max(0, zSteps() - 1), n: zSteps() };
+      currentSelection = [];
+      isolated = false;
+      redrawDoc();
+      setSelection(segs, 'pick');
+      if (view) view.worldSphere = worldSphere();
+      say('"' + spec.name + '" set down on ' + me.toLowerCase() + ' - it joins the slice there as one more object (' + segs.length + ' moves).');
+      return segs;
+    }
+    if (!doc) {
+      doc = newPiecesDoc(plateName);
+      HIDDEN = new Set(); CLEARED = new Set(); currentSelection = []; isolated = false; mode = 'piece';
+    }
+    var d = [pos.x + doc.cx - g.at.x, -pos.z + doc.cy - g.at.y, pos.y - g.at.z];
     var o = prepObject({
-      name: uniqueTakeName(spec.name),
-      positions: shiftedPositions(p, dx, dy, dz),
-      moves: spec.moves ? shiftedMoves(spec.moves, dx, dy, dz) : null,
+      name: uniquePieceName(doc, spec.name),
+      positions: placed || shiftedPositions(spec.positions, d[0], d[1], d[2]),
+      moves: placed ? null : (spec.moves ? shiftedMoves(spec.moves, d[0], d[1], d[2]) : null),
       take: { from: spec.from }
     });
-    seedPieceGeometry(o, spec.moveIds, spec.trisPerMove);
-    takeDoc.objects.push(o);
+    if (placed) { o.turned = true; dropGhost(g, false); }
+    else if (g.geo) {
+      // the ghost's geometry is the piece's: it stood where the piece now is
+      pieceGeoms.set(o, { geo: g.geo, sig: featureSig(), positions: o.positions, moves: o.moves, base: pos.clone(),
+                          beads: g.beads, edges: null, doc: doc });
+      dropGhost(g, true);
+    }
+    doc.objects = doc.objects.concat([o]);
+    if (sizePlates()) placePlates();
+    pieceRefresh();
+    setSelection([o], 'pick');
+    treeSoon(o);
     return o;
+  }
+
+  /**
+   * A slice with more moves: `moves` (already where they go, in its Z-up frame)
+   * appended as one more object - new move numbers, a new object id, runs of
+   * their own - and every segment, Z level and the slider's steps made again.
+   * The slice's centre stays (the plate does not move under it); what was
+   * cleared from view stays cleared. Returns the new segments.
+   */
+  function appendToSlice(d, moves) {
+    var old = d.parsed.moves, obj = -1, run = -1;
+    old.forEach(function (m) {
+      if (m.objectId != null && m.objectId > obj) obj = m.objectId;
+      if (m.run != null && m.run > run) run = m.run;
+    });
+    var add = moves.map(function (m, k) {
+      var c = Object.assign({}, m);
+      c.index = old.length + k;
+      c.objectId = obj + 1;
+      c.run = (m.run || 0) + run + 1;
+      return c;
+    });
+    var parsed = Object.assign({}, d.parsed, { moves: old.concat(add) });
+    var nd = toolpathDoc(d.name, { parsed: parsed });
+    d.parsed = parsed;
+    d.segments = nd.segments;
+    d.zLevels = nd.zLevels;
+    d.zBottom = nd.zBottom;
+    return d.segments.slice(old.length);
   }
 
   var pull = null;     // the press in progress: { kind: 'new' | 'move', tgt, x0, y0, live, cancelled }
@@ -1339,7 +1505,23 @@ var NSO_MICROSCOPE = (function () {
     var meshes = Object.keys(v.overviewMeshes).map(function (k) { return v.overviewMeshes[k]; })
       .filter(function (m) { return m.visible && m.userData.object; });
     var hit = rc.intersectObjects(meshes, false).filter(drawnAt)[0];
-    return hit ? { obj: hit.object.userData.object, point: hit.point } : null;
+    var out = hit ? { obj: hit.object.userData.object, point: hit.point, distance: hit.distance } : null;
+    // A hover over a big piece whose tree (nso_bvh.js) is still building gets
+    // nothing from its raycast (that file's hover rule: no walk of a million
+    // triangles to repaint an outline). The hover still answers: where the ray
+    // enters the piece's box stands in for its surface until the tree is ready -
+    // as a drag holds such a piece (pieceWorld.hitOn). A press asks without the
+    // hover flag and gets the real surface.
+    if (rc.nsoHover) {
+      meshes.forEach(function (m) {
+        if (treeReady(m.geometry)) return;
+        m.updateMatrixWorld(true);
+        var p = rc.ray.intersectBox(new THREE.Box3().setFromObject(m), new THREE.Vector3());
+        var d = p ? p.distanceTo(rc.ray.origin) : Infinity;
+        if (p && (!out || d < out.distance)) out = { obj: m.userData.object, point: p, distance: d, box: true };
+      });
+    }
+    return out;
   }
 
   /** The default-sized capture box a click at `pt` (view space) would drop, as data. */
@@ -1385,9 +1567,10 @@ var NSO_MICROSCOPE = (function () {
     if (mode === 'select') {
       var tb2 = tempBoxAt(oh.point);
       t = selectByBox([gcodeBoxOf(tb2)]);
-      return t.length ? { items: t, source: 'box', point: oh.point, box: tb2, label: 'region' } : null;
+      return t.length ? { items: t, source: 'box', point: oh.point, box: tb2, label: 'region', stand: oh.box ? 'box' : null } : null;
     }
-    return { items: [oh.obj], source: 'pick', point: oh.point, label: 'piece' };
+    // stand: 'box' when the piece's box answered for its surface (a big piece, its tree still building)
+    return { items: [oh.obj], source: 'pick', point: oh.point, label: 'piece', stand: oh.box ? 'box' : null };
   }
 
   /** A press here: the selection when it is under the pointer, else what the mode takes. */
@@ -1470,7 +1653,7 @@ var NSO_MICROSCOPE = (function () {
         h.renderOrder = 8;
         h.userData.sharedGeometry = true;
         g.add(h);
-        var kept = doc.source === 'take' && pieceEdges(o);
+        var kept = pieceEdges(o);
         var edges = new THREE.LineSegments(kept || new THREE.EdgesGeometry(m.geometry, 30), mat());
         if (kept) edges.userData.sharedGeometry = true;
         edges.position.copy(m.position);
@@ -1491,24 +1674,42 @@ var NSO_MICROSCOPE = (function () {
     if (view.renderer.domElement) view.renderer.domElement.style.cursor = 'pointer';
   }
 
-  var hoverPending = null, hoverAt = 0;
+  // One hover per HOVER_EVERY ms at most - and the LAST move always gets one. A
+  // move inside the window is kept as the one pending (a newer move replaces
+  // it), and ONE timer runs it when the window is up; a timer that finds the
+  // window not yet up waits out the rest instead of letting go of the move.
+  // (Each such move used to arm a timer of its own, and a stale one that fired
+  // within 40 ms of a hover took the newest move and dropped it: the pointer
+  // came to rest on a piece with no outline at all, in whichever mode lost the
+  // race on that machine. gscope:select drives that exact sequence on a fake
+  // clock.) The clock is performance.now(), which does not jump as the wall
+  // clock can, and a last hover stamped AHEAD of it (a clock swapped or set
+  // back) waits for nothing - it can never hold the hover off.
+  var hoverPending = null, hoverAt = -Infinity, hoverTimer = null, HOVER_EVERY = 40;
+  function hoverWait() {
+    var since = performance.now() - hoverAt;
+    return since < 0 || since >= HOVER_EVERY ? 0 : HOVER_EVERY - since;
+  }
   function onHoverMove(e) {
-    if (!view || !isOpen() || pull || e.buttons || view.dragState) { if (e.buttons) clearHover(); return; }
+    if (!view || !isOpen() || pull || e.buttons || view.dragState) { hoverPending = null; if (e.buttons) clearHover(); return; }
     if (e.target !== view.renderer.domElement) {
+      hoverPending = null;            // off the canvas: a move made on it is not answered late
       // the range card outlines what it would take; moving over it is not leaving it
       if (hoverKey && !(e.target.closest && e.target.closest('#ms-zr-card'))) clearHover();
       return;
     }
-    var now = Date.now();
-    if (now - hoverAt < 40) { hoverPending = e; setTimeout(flushHover, 45); return; }
-    hoverAt = now;
-    hoverNow(e);
+    hoverPending = e;
+    var wait = hoverWait();
+    if (!wait) flushHover();
+    else if (!hoverTimer) hoverTimer = setTimeout(flushHover, Math.ceil(wait));
   }
   function flushHover() {
+    hoverTimer = null;
     if (!hoverPending) return;
+    var wait = hoverWait();
+    if (wait) { hoverTimer = setTimeout(flushHover, Math.ceil(wait)); return; }
     var e = hoverPending; hoverPending = null;
-    if (Date.now() - hoverAt < 40) return;
-    hoverAt = Date.now();
+    hoverAt = performance.now();
     hoverNow(e);
   }
   function hoverNow(e) {
@@ -1523,24 +1724,30 @@ var NSO_MICROSCOPE = (function () {
     drawHover(tgt);
   }
 
-  /** The plate 2 piece under the pointer, or null. */
+  /** A piece dragged onto the active plate (one that moves when dragged) under the pointer, or null. */
   function takePieceAt(e) {
-    if (boxOwnsPress(e)) return null;
+    if (!doc || doc.kind !== 'mesh' || boxOwnsPress(e)) return null;
     var oh = objectHitAt(e);
-    return oh ? oh.obj : null;
+    return oh && oh.obj.take ? oh.obj : null;
   }
 
-  // --- the TAKE world (plate 2's), for app-grab-drop.js --------------------------
+  // --- carrying a thing across the floor, for app-grab-drop.js ---------------------
   //
-  // Plate 1 stands beside it. A piece carried over plate 1's floor is in the air
-  // as far as the grab is concerned (it follows the pointer), but it is not let
-  // go there: a pull let go over plate 1 copies nothing, and a piece of plate 2
-  // let go over plate 1 goes back where it was - plate 1 is never changed.
+  // Two worlds, one floor. PIECE WORLD: a piece on the active plate, grabbed -
+  // it moves on its bed, onto another piece (seated), into the air, and carried
+  // over the OTHER plate's bed and let go it is COPIED there (it stays where it
+  // was). GHOST WORLD: a pull's copy (makeGhost), carried from the plate it was
+  // pressed on - its home - over to the other plate, which is active for the
+  // drag; let go there it lands (setDownOn), let go back over home nothing is
+  // copied. In both, whatever is carried slides on WHICHEVER BED is under the
+  // pointer - the active plate's or the other one - so it is under the pointer
+  // every frame of the way and lands exactly where it was let go.
 
   function takeMesh(o) { return view && view.overviewMeshes[o.name]; }
   function takeBox(o) { var m = takeMesh(o); m.updateMatrixWorld(true); return new THREE.Box3().setFromObject(m); }
 
-  var grabOverOther = false;     // the carried piece is over plate 1's floor
+  var BED_PLANE = null;
+  var carriedOver = null;        // what the last under() found: { kind: 'plate' | 'piece' | 'air', plate }
 
   /** Is this ray's meeting with the floor plane on plate `name`'s floor (its label strip too)? */
   function onFloorOf(name, rc) {
@@ -1551,51 +1758,74 @@ var NSO_MICROSCOPE = (function () {
     return (Math.abs(x) <= half && bp.z >= -half && bp.z <= half + 14) ? bp : null;
   }
 
-  /** Lowest point of the carried piece on the bed: raised if it would be under it. */
-  function takePlace(o, pos) {
-    var m = takeMesh(o);
+  /** Where this ray meets plate `name`'s bed (its square), in the active plate's frame, or null. */
+  function bedOf(name, rc) {
+    if (!BED_PLANE) BED_PLANE = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    var bp = new THREE.Vector3(), half = plateSide / 2;
+    if (!rc.ray.intersectPlane(BED_PLANE, bp) || bp.distanceTo(rc.ray.origin) > view.camera.far) return null;
+    return (Math.abs(bp.x - plateOffset(name)) <= half && Math.abs(bp.z) <= half) ? bp : null;
+  }
+
+  /**
+   * What is under the pointer for a carried thing: a piece of the active plate
+   * (not `self`) to seat onto, either plate's bed to slide on, or the air.
+   */
+  function underCarry(ev, self) {
+    var rc = pieceWorld.ray(ev);
+    var meshes = Object.keys(view.overviewMeshes).map(function (k) { return view.overviewMeshes[k]; })
+      .filter(function (m) { return m.visible && m.userData.object && m.userData.object !== self; });
+    var hit = rc.intersectObjects(meshes, false).filter(function (h) { return h.face && drawnAt(h); })[0];
+    var bed = null, which = null;
+    [plateName, otherPlate()].some(function (n) {
+      var bp = bedOf(n, rc);
+      if (bp) { bed = { point: bp, distance: bp.distanceTo(rc.ray.origin) }; which = n; }
+      return !!bp;
+    });
+    if (hit && (!bed || hit.distance <= bed.distance)) {
+      carriedOver = { kind: 'piece', plate: plateName };
+      var n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
+      return { kind: 'piece', placed: hit.object.userData.object, point: hit.point.clone(), normal: n };
+    }
+    if (bed) { carriedOver = { kind: 'plate', plate: which }; return { kind: 'plate', point: bed.point, plate: which }; }
+    carriedOver = { kind: 'air', plate: onFloorOf(otherPlate(), rc) ? otherPlate() : plateName };
+    return { kind: 'air' };
+  }
+
+  /** The carried mesh slid on the bed under the pointer: its bottom on y = 0, held where it was grabbed. */
+  function slideOnBed(m, G, u) {
+    m.position.set(u.point.x + G.grabOff.x, 0, u.point.z + G.grabOff.z);
+    m.updateMatrixWorld(true);
+    m.position.y -= new THREE.Box3().setFromObject(m).min.y;
+    m.updateMatrixWorld(true);
+    return true;
+  }
+
+  /** Lowest point of the carried mesh on the bed: raised if it would be under it. */
+  function placeAbove(m, pos) {
     m.position.copy(pos);
     m.updateMatrixWorld(true);
-    var lo = takeBox(o).min.y;
+    var lo = new THREE.Box3().setFromObject(m).min.y;
     if (lo < 0) { m.position.y -= lo; m.updateMatrixWorld(true); }
   }
 
-  var takeWorld = {
-    name: 'take',
+  var pieceWorld = {
+    name: 'piece',
     ray: function (ev) {
       var q = ndc(ev);
       view.raycaster.setFromCamera(new THREE.Vector2(q[0], q[1]), view.camera);
       return view.raycaster;
     },
     camera: function () { return view.camera; },
-    under: function (ev, self) {
-      var rc = takeWorld.ray(ev);
-      var meshes = Object.keys(view.overviewMeshes).map(function (k) { return view.overviewMeshes[k]; })
-        .filter(function (m) { return m.visible && m.userData.object && m.userData.object !== self; });
-      var hit = rc.intersectObjects(meshes, false).filter(function (h) { return h.face && drawnAt(h); })[0];
-      var bp = new THREE.Vector3(), bed = null;
-      grabOverOther = false;
-      if (rc.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), bp) &&
-          Math.abs(bp.x) <= plateSide / 2 && Math.abs(bp.z) <= plateSide / 2 && bp.distanceTo(rc.ray.origin) <= view.camera.far) {
-        bed = { point: bp, distance: bp.distanceTo(rc.ray.origin) };
-      }
-      if (hit && (!bed || hit.distance <= bed.distance)) {
-        var n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld).normalize();
-        return { kind: 'piece', placed: hit.object.userData.object, point: hit.point.clone(), normal: n };
-      }
-      if (bed) return { kind: 'plate', point: bed.point };
-      grabOverOther = !!onFloorOf('lens', rc);
-      return { kind: 'air' };
-    },
+    under: underCarry,
     meshOf: takeMesh,
     boxOf: takeBox,
     posOf: function (o) { return takeMesh(o).position.clone(); },
     hitOn: function (o, rc) {
       var m = takeMesh(o);
       m.updateMatrixWorld(true);
-      // where the grab holds it. A big piece with no tree yet (a pull's fresh copy:
-      // 2.4M triangles for a 200,000-move slice) is held where the ray enters its
-      // box - a walk of every triangle was 0.3 s before the copy could move
+      // where the grab holds it. A big piece with no tree yet (a piece just set
+      // down: 2.4M triangles for a 200,000-move slice) is held where the ray
+      // enters its box - a walk of every triangle was 0.3 s before it could move
       if (!treeReady(m.geometry)) {
         var pt = rc.ray.intersectBox(takeBox(o), new THREE.Vector3());
         return pt ? { point: pt, distance: pt.distanceTo(rc.ray.origin), object: m } : undefined;
@@ -1607,61 +1837,153 @@ var NSO_MICROSCOPE = (function () {
     isSupport: function () { return false; },
     snapshot: function (o) { return { pos: takeMesh(o).position.clone() }; },
     restore: function (G) { var m = takeMesh(G.p); if (m) { m.position.copy(G.from.pos); m.updateMatrixWorld(true); } },
-    placeAt: takePlace,
-    // over the bed it slides on the bed: the bottom on z = 0
-    onPlate: function (G, ev, u) {
-      var m = takeMesh(G.p);
-      m.position.set(u.point.x + G.grabOff.x, 0, u.point.z + G.grabOff.z);
-      m.updateMatrixWorld(true);
-      m.position.y -= takeBox(G.p).min.y;
-      m.updateMatrixWorld(true);
-      return true;
-    },
+    placeAt: function (o, pos) { placeAbove(takeMesh(o), pos); },
+    onPlate: function (G, ev, u) { return slideOnBed(takeMesh(G.p), G, u); },
     endPlate: function (G) {
+      if (carriedOver && carriedOver.plate !== plateName) return copyAcross(G);
       var h = takeCommit(G);
-      say(takeWorld.nameOf(G.p) + ' set down on plate 2.');
+      say(pieceWorld.nameOf(G.p) + ' set down on ' + plateTitle(plateName).toLowerCase() + '.');
       return { handled: true, mode: 'plate', liftY: h };
     },
     endAir: function (G) {
-      if (grabOverOther) return takeOverLens(G);
       var h = takeCommit(G);
-      say(takeWorld.nameOf(G.p) + ' left in the air, ' + h.toFixed(2) + ' mm over plate 2\'s bed - it stays there; grab it again to move it.');
+      say(pieceWorld.nameOf(G.p) + ' left in the air, ' + h.toFixed(2) + ' mm over ' + plateTitle(plateName).toLowerCase() +
+          '\'s bed - it stays there; grab it again to move it.');
       return { handled: true, mode: 'air', liftY: h };
     },
     seat: function (G, T, pt) { return takeSeat(G, T, pt); },
-    onCancel: function (G) {
-      if (!G.p.pulling) return;
-      // a pull that was never dropped: the piece is not kept, and plate 1 is active again
-      dropPulled(G.p);
-    },
+    onCancel: function () {},
     scene: function () { return view.scene; },
     attach: function (sc, lyr) { sc.add(lyr); }
   };
 
-
-  /** A pull that ends without a piece: the copy thrown away, plate 1 active again as it was. */
-  function dropPulled(o) {
-    onTake(function () {
-      takeDoc.objects = takeDoc.objects.filter(function (x) { return x !== o; });
-      takeRefresh();
-    });
-    if (pull) pull.cancelled = true;
-    showPlate('lens');
-    if (view) { view.controls.enabled = true; view.mouseDownPos = null; }
+  /**
+   * A piece of the active plate let go over the OTHER plate's bed: a copy of it
+   * set down there, where it was let go, and that plate active; the piece itself
+   * is back where it was. Refused (a mesh onto a slice): it is back, nothing copied.
+   */
+  function copyAcross(G) {
+    var o = G.p, m = takeMesh(o), home = plateName, other = otherPlate();
+    var at = soupAnchor(o.positions);
+    var disp = m.position.clone().sub(m.userData.base || new THREE.Vector3());
+    var off = plateOffset(other);
+    // the anchor where it stands now, in the other plate's frame
+    var pos = new THREE.Vector3(at.x - doc.cx + disp.x - off, at.z + disp.y, -(at.y - doc.cy) + disp.z);
+    pieceWorld.restore(G);
+    var g = { name: o.name, spec: { name: o.name, from: o.take ? o.take.from : doc.name, positions: o.positions, moves: o.moves },
+              at: at, geo: null, mesh: null, beads: false };
+    showPlate(other);
+    var landed = setDownOn(g, pos, null);
+    if (!landed) { showPlate(home); return { handled: true, mode: 'cancel', reason: 'refused' }; }
+    if (!Array.isArray(landed)) {          // (a slice joined says so itself)
+      say(pieceWorld.nameOf(o) + ' copied onto ' + plateTitle(other).toLowerCase() + ', where it was let go; it is still on ' +
+          plateTitle(home).toLowerCase() + ' too.');
+    }
+    return { handled: true, mode: 'plate', copied: true };
   }
 
-  /** Let go over plate 1: nothing is put there. A pull copies nothing; a piece of plate 2 goes back. */
-  function takeOverLens(G) {
-    var nm = takeWorld.nameOf(G.p);
-    grabOverOther = false;
-    if (G.p.pulling) {
-      dropPulled(G.p);
-      say('Let go over plate 1 - nothing copied. Drag it over plate 2 to copy it there.');
-    } else {
-      takeWorld.restore(G);
-      say('Plate 1 is the loaded plate and nothing is put on it - ' + nm + ' is back where it was on plate 2.', true);
+  /** The ghost's world: GHOST WORLD above. The other plate is active for the drag; `pull.home` is where it came from. */
+  var ghostWorld = {
+    name: 'ghost',
+    ray: pieceWorld.ray,
+    camera: pieceWorld.camera,
+    under: function (ev) { return underCarry(ev, null); },
+    meshOf: function (g) { return g.mesh; },
+    // the ghost's box - or, for the seat's outline, the box of the piece it is over
+    boxOf: function (q) {
+      if (!q || !q.ghost) return takeBox(q);
+      q.mesh.updateMatrixWorld(true);
+      return new THREE.Box3().setFromObject(q.mesh);
+    },
+    posOf: function (g) { return g.mesh.position.clone(); },
+    // the copy has no tree yet: it is held where the ray enters its box
+    hitOn: function (g, rc) {
+      var pt = rc.ray.intersectBox(ghostWorld.boxOf(g), new THREE.Vector3());
+      return pt ? { point: pt, distance: pt.distanceTo(rc.ray.origin), object: g.mesh } : undefined;
+    },
+    keyOf: function (q) { return q && q.ghost ? 'ghost:' + q.name : q.name; },
+    nameOf: function (g) { return '"' + (g && g.name || 'piece') + '"'; },
+    isSupport: function () { return false; },
+    snapshot: function (g) { return { pos: g.mesh.position.clone() }; },
+    restore: function (G) { if (G.p.mesh) { G.p.mesh.position.copy(G.from.pos); G.p.mesh.updateMatrixWorld(true); } },
+    placeAt: function (g, pos) { placeAbove(g.mesh, pos); },
+    onPlate: function (G, ev, u) { return slideOnBed(G.p.mesh, G, u); },
+    endPlate: function (G) {
+      if (carriedOver && pull && carriedOver.plate === pull.home) return ghostHome(G.p);
+      return ghostLand(G.p, G.p.mesh.position.clone(), null, 'plate');
+    },
+    endAir: function (G) { return ghostLand(G.p, G.p.mesh.position.clone(), null, 'air'); },
+    seat: function (G, T, pt) { return ghostSeat(G, T, pt); },
+    onCancel: function (G) {
+      // Escape: nothing kept, the plate it came from active again
+      var home = pull ? pull.home : otherPlate();
+      dropGhost(G.p, false);
+      if (pull) pull.cancelled = true;
+      showPlate(home);
+      if (view) { view.controls.enabled = true; view.mouseDownPos = null; }
+    },
+    scene: pieceWorld.scene,
+    attach: pieceWorld.attach
+  };
+
+  /** Let go over the plate it came from: nothing copied, that plate active again. */
+  function ghostHome(g) {
+    var home = pull ? pull.home : otherPlate();
+    dropGhost(g, false);
+    showPlate(home);
+    say('Let go over ' + plateTitle(home).toLowerCase() + ' - nothing copied. Drag it over ' +
+        plateTitle(otherPlate()).toLowerCase() + ' to copy it there.');
+    return { handled: true, mode: 'cancel', reason: 'over home' };
+  }
+
+  /** The ghost set down on the active plate at `pos` (or seated: `placed`); refused, it is as if let go over home. */
+  function ghostLand(g, pos, placed, how) {
+    var me = plateTitle(plateName).toLowerCase();
+    var landed = setDownOn(g, pos, placed);
+    if (!landed) {
+      var home = pull ? pull.home : otherPlate();
+      dropGhost(g, false);
+      showPlate(home);
+      return { handled: true, mode: 'cancel', reason: 'refused' };
     }
-    return { handled: true, mode: 'cancel', reason: 'over plate 1' };
+    if (!Array.isArray(landed)) {
+      var h = Math.max(0, landed.bounds.minZ);
+      if (how === 'air' && h > 1e-3) say('"' + landed.name + '" left in the air, ' + h.toFixed(2) + ' mm over ' + me + '\'s bed - grab it to move it.');
+      else if (how !== 'seat') say('"' + landed.name + '" set down on ' + me + '.');
+    }
+    return { handled: true, mode: how };
+  }
+
+  /** The ghost dropped onto a piece of the active plate: seated as a piece is (takeSeat), then set down. */
+  function ghostSeat(G, T, pt) {
+    var g = G.p, S = window.NSO_SeatSurface, nm = ghostWorld.nameOf;
+    var fail = function (msg, reason) { say(msg, true); ghostHome(g); return { handled: true, mode: 'piece', ok: false, reason: reason }; };
+    if (!S) return fail('Dropping onto a piece needs nso_seat_surface.js - nothing copied.', 'no seat');
+    var gap = typeof readSeatGapInput === 'function' ? readSeatGapInput() : NaN;
+    if (!isFinite(gap)) return fail('Seat gap slider is missing or out of range - nothing copied', 'no gap');
+    // the copy as it stands now (restored to where the drag began), Z-up in the active plate's frame
+    var p0 = g.mesh.position, sp = g.spec.positions;
+    var d = [p0.x + doc.cx - g.at.x, -p0.z + doc.cy - g.at.y, p0.y - g.at.z];
+    var soup = shiftedPositions(sp, d[0], d[1], d[2]);
+    var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (var i = 0; i < soup.length; i += 3) for (var a = 0; a < 3; a++) {
+      if (soup[i + a] < lo[a]) lo[a] = soup[i + a];
+      if (soup[i + a] > hi[a]) hi[a] = soup[i + a];
+    }
+    var plan = S.plan(T.positions, { soup: soup, box: { min: lo, max: hi }, matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
+                      { point: [pt.x + doc.cx, -pt.z + doc.cy, pt.y], gap: gap });
+    if (!plan.ok) return fail('Drop refused - nothing copied (' + plan.reason + ')', plan.reason);
+    var placed = S.transformSoup(soup, plan.matrix);
+    var zlo = Infinity;
+    for (var k = 2; k < placed.length; k += 3) if (placed[k] < zlo) zlo = placed[k];
+    if (zlo < -1e-4) return fail('Drop refused - that pose would put ' + nm(g) + ' ' + (-zlo).toFixed(2) + ' mm below the plate. Aim at a face that does not look down.', 'below the plate');
+    var turned = plan.rotationDeg > 1e-3, mx = plan.matrix;
+    var r = turned ? ghostLand(g, null, new Float32Array(placed), 'seat')
+                   : ghostLand(g, new THREE.Vector3(p0.x + mx[12], p0.y + mx[14], p0.z - mx[13]), null, 'seat');
+    if (r.mode === 'cancel') return Object.assign(r, { mode: 'piece', ok: false });
+    var cl = isFinite(plan.clearance) ? plan.clearance.toFixed(3) : '-';
+    say('Dropped onto ' + nm(T) + ': seated (clearance ' + cl + ' mm' + (turned ? ', ' + nm(g) + ' turned ' + plan.rotationDeg.toFixed(1) + ' degrees' : ', no turn needed') + ').');
+    return { handled: true, mode: 'piece', ok: true, onto: T.name, seat: plan };
   }
 
   /** False only for a big geometry nso_bvh.js has no tree for yet (a pick on it would walk every triangle). */
@@ -1681,17 +2003,16 @@ var NSO_MICROSCOPE = (function () {
     var o = G.p, m = takeMesh(o);
     var d = m.position.clone().sub(m.userData.base || new THREE.Vector3());
     bakePiece(o, d.x, -d.z, d.y);
-    o.pulling = false;
     var h = Math.max(0, o.bounds.minZ);
-    takeRefresh();
+    pieceRefresh();
     setSelection([o], 'pick');
     treeSoon(o);
     return h;
   }
 
-  /** A drop onto another plate 2 piece: NSO_SeatSurface's plan, the one Seat here and a main-plate drop use. */
+  /** A drop onto another piece of the plate: NSO_SeatSurface's plan, the one Seat here and a main-plate drop use. */
   function takeSeat(G, T, pt) {
-    var o = G.p, nm = takeWorld.nameOf;
+    var o = G.p, nm = pieceWorld.nameOf;
     var S = window.NSO_SeatSurface;
     var fin = function (ok, reason, extra) {
       takeCommit(G);
@@ -1705,10 +2026,10 @@ var NSO_MICROSCOPE = (function () {
       if (o.positions[i + a] < lo[a]) lo[a] = o.positions[i + a];
       if (o.positions[i + a] > hi[a]) hi[a] = o.positions[i + a];
     }
-    // the point under the pointer, in plate 2's Z-up frame
+    // the point under the pointer, in the plate's Z-up frame
     var plan = S.plan(T.positions, { soup: o.positions, box: { min: lo, max: hi },
                                      matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] },
-                      { point: [pt.x, -pt.z, pt.y], gap: gap });
+                      { point: [pt.x + doc.cx, -pt.z + doc.cy, pt.y], gap: gap });
     if (!plan.ok) { say('Drop refused - ' + nm(o) + ' is where it was (' + plan.reason + ')', true); return fin(false, plan.reason, { seat: plan }); }
     var placed = S.transformSoup(o.positions, plan.matrix);
     var zlo = Infinity;
@@ -1737,9 +2058,11 @@ var NSO_MICROSCOPE = (function () {
 
   // --- the gesture ---------------------------------------------------------------
   //
-  // One press, decided by what follows it:
-  //   it travels past the slop  -> PULL: the thing under it is copied onto plate 2
-  //                                (a piece already on plate 2 is moved instead)
+  // One press, decided by what follows it - the same on either plate:
+  //   it travels past the slop  -> a piece dragged onto this plate MOVES (and let
+  //                                go over the other plate, is copied there);
+  //                                anything else is PULLED: a copy of it, the
+  //                                ghost, carried over to the other plate
   //   it is let go in place     -> CLICK: the thing is isolated; its click again un-isolates
   //   it was on bare floor      -> never taken: OrbitControls has it
   //   it was on the OTHER plate -> never taken either (a drag there orbits); let go
@@ -1750,7 +2073,7 @@ var NSO_MICROSCOPE = (function () {
     view.mouseDownPos = [e.clientX, e.clientY];
     view.hookTook = false;
     // A finger is not taken from the orbit: a second one down is a pinch, and a drag is the
-    // touch orbit. A tap still clicks (below); the pull is the mouse's and the pen's.
+    // touch orbit. A tap still clicks (below); the drag is the mouse's and the pen's.
     if (e.pointerType === 'touch') return;
     e.stopImmediatePropagation();
     view.controls.enabled = false;
@@ -1778,6 +2101,7 @@ var NSO_MICROSCOPE = (function () {
 
   function onPressCapture(e) {
     var v = view;
+    hoverPending = null;                                    // the press picks for itself (pressTarget); a move still waiting is not drawn after it
     if (pull && pull.touch) pull.cancelled = true;          // a second finger: the pinch's, not a click's
     if (v) v.platePress = null;
     if (!v || e.button !== 0 || pull) return;
@@ -1787,65 +2111,53 @@ var NSO_MICROSCOPE = (function () {
       return;
     }
     v.boxPress = null;
-    if (plateName === 'lens') {
-      var tgt = pressTarget(e);
-      if (!tgt) { notePlatePress(e); return; }    // bare floor: orbit (the other plate: a click there activates it)
+    var tgt = pressTarget(e);
+    if (!tgt) { notePlatePress(e); return; }    // bare floor: orbit (the other plate: a click there activates it)
+    // a piece dragged here, nothing isolated, by the mouse: it is grabbed - it moves
+    var o = !isolated && e.pointerType !== 'touch' ? takePieceAt(e) : null;
+    if (o && window.nsoGrab && window.nsoGrab.begin(o, null, e, pieceWorld)) {
+      var tg = (currentSelection.length === 1 && currentSelection[0] === o && selectedHit(e))
+        ? { items: currentSelection, source: selectionSource, selected: true } : tgt;
       claimPress(e);
-      pull = { kind: 'new', tgt: tgt, x0: e.clientX, y0: e.clientY, live: false, cancelled: false, touch: e.pointerType === 'touch' };
+      pull = { kind: 'move', piece: o, tgt: tg, home: plateName, x0: e.clientX, y0: e.clientY, live: false, cancelled: false };
       return;
     }
-    // Plate 2: a piece is grabbed (moved); isolated, the piece drawn is the selection
-    if (e.pointerType === 'touch' && !isolated) { notePlatePress(e); return; }   // a finger orbits; moving a piece is the mouse's
-    if (isolated) {
-      if (!selectedHit(e)) { notePlatePress(e); return; }
-      claimPress(e);
-      pull = { kind: 'iso', touch: e.pointerType === 'touch', tgt: { items: currentSelection, source: selectionSource, selected: true }, x0: e.clientX, y0: e.clientY, live: false, cancelled: false };
-      return;
-    }
-    var o = takePieceAt(e);
-    if (!o) { notePlatePress(e); return; }
-    if (!window.nsoGrab || !window.nsoGrab.begin(o, null, e, takeWorld)) return;
-    var tg = (currentSelection.length === 1 && currentSelection[0] === o && selectedHit(e))
-      ? { items: currentSelection, source: selectionSource, selected: true } : targetAt(e);
     claimPress(e);
-    pull = { kind: 'move', piece: o, tgt: tg, x0: e.clientX, y0: e.clientY, live: false, cancelled: false };
+    pull = { kind: 'new', tgt: tgt, home: plateName, x0: e.clientX, y0: e.clientY, live: false, cancelled: false, touch: e.pointerType === 'touch' };
   }
 
-  /** A press that began on a DOM card (a legend row, the range grip): the target is given. */
+  /** A press that began on a DOM card (the range grip): the target is given. */
   function pressCard(ev, tgtFn) {
-    if (ev.button !== 0 || pull || !doc || plateName !== 'lens') return;
+    if (ev.button !== 0 || pull || !doc) return;
     var tgt = tgtFn();
     if (!tgt) return;
-    pull = { kind: 'new', tgt: tgt, x0: ev.clientX, y0: ev.clientY, live: false, cancelled: false, dom: true };
+    pull = { kind: 'new', tgt: tgt, home: plateName, x0: ev.clientX, y0: ev.clientY, live: false, cancelled: false, dom: true };
   }
 
   /**
-   * The slop is crossed: plate 1 stays as it is, plate 2 becomes the active
-   * plate (the camera moves with the plates, so nothing on screen jumps), and
-   * the copy is in hand under the pointer - still over plate 1, until it is
-   * carried across.
+   * The slop is crossed: the plate it was pressed on stays as it is, the other
+   * plate becomes the active one (the camera moves with the plates, so nothing
+   * on screen jumps), and the copy - the ghost - is in hand under the pointer,
+   * still over its home plate until it is carried across.
    */
   function startPull(e) {
     var spec = pullSpec(pull.tgt);
     if (!spec) { pull.cancelled = true; view.controls.enabled = true; return false; }
     clearHover();
-    showPlate('take');
-    var q = ndc(e), bp = new THREE.Vector3();
-    view.raycaster.setFromCamera(new THREE.Vector2(q[0], q[1]), view.camera);
-    var onBed = view.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), bp) &&
-                bp.distanceTo(view.raycaster.ray.origin) <= view.camera.far;
-    var o = takeAddAt(spec, onBed ? bp.x : 0, onBed ? -bp.z : 0);
-    o.pulling = true;
-    takeRefresh();
-    if (!window.nsoGrab || !window.nsoGrab.begin(o, null, e, takeWorld, { live: true })) {
-      takeDoc.objects = takeDoc.objects.filter(function (x) { return x !== o; });
-      takeRefresh();
-      showPlate('lens');
+    showPlate(otherPlate());
+    var g = makeGhost(spec);
+    var rc = pieceWorld.ray(e), bp = new THREE.Vector3();
+    var onBed = rc.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), bp) && bp.distanceTo(rc.ray.origin) <= view.camera.far;
+    g.mesh.position.set(onBed ? bp.x : 0, 0, onBed ? bp.z : 0);
+    g.mesh.updateMatrixWorld(true);
+    if (!window.nsoGrab || !window.nsoGrab.begin(g, null, e, ghostWorld, { live: true })) {
+      dropGhost(g, false);
+      showPlate(pull.home);
       pull.cancelled = true; view.controls.enabled = true;
       return false;
     }
-    pull.live = true; pull.piece = o;
-    say('Copying "' + o.name + '" - carry it over plate 2 and let go there. Esc cancels.');
+    pull.live = true; pull.piece = g;
+    say('Copying "' + g.name + '" - carry it over ' + plateTitle(plateName).toLowerCase() + ' and let go there. Esc cancels.');
     return true;
   }
 
@@ -1853,7 +2165,6 @@ var NSO_MICROSCOPE = (function () {
     if (!pull || pull.cancelled) return;
     // a finger that travels is the orbit's: the press was never taken from it
     if (pull.touch) { if (Math.hypot(e.clientX - pull.x0, e.clientY - pull.y0) >= pullSlop()) pull.cancelled = true; return; }
-    if (pull.kind === 'iso') return;                        // an isolated piece on plate 2 is clicked, not moved
     if (pull.kind === 'new' && !pull.live) {
       if (Math.hypot(e.clientX - pull.x0, e.clientY - pull.y0) < pullSlop()) return;
       if (!startPull(e)) return;
@@ -1861,12 +2172,15 @@ var NSO_MICROSCOPE = (function () {
     if (window.nsoGrab && window.nsoGrab.active()) {
       window.nsoGrab.move(e);
       if (pull) pull.live = pull.live || window.nsoGrab.live();
-      // over plate 1 the grab sees "nothing"; it is said apart, because nothing is let go there
-      var over = window.nsoGrab.mode() === 'air' ? (grabOverOther ? 'lens' : 'air') : 'plate';
+      // which plate it would be let go over, said once each time it changes
+      var c = carriedOver || { kind: 'air', plate: plateName };
+      var over = c.kind === 'air' ? 'air' : c.plate === plateName ? 'active' : 'other';
       if (pull && over !== pull.over) {
         var nm = '"' + ((pull.piece && pull.piece.name) || 'piece') + '"';
-        if (over === 'lens') say('Over plate 1 - let go here and ' + (pull.kind === 'new' ? 'nothing is copied' : nm + ' goes back') + '. Carry it over plate 2.');
-        else if (over === 'air' && pull.over === 'lens') say('Over nothing - let go to leave ' + nm + ' in the air where it is. Esc puts it back.');
+        var oth = plateTitle(otherPlate()).toLowerCase(), me = plateTitle(plateName).toLowerCase();
+        if (pull.kind === 'new' && over === 'other') say('Over ' + oth + ', where it came from - let go here and nothing is copied. Carry it over ' + me + '.');
+        else if (pull.kind === 'move' && over === 'other') say('Over ' + oth + ' - let go to copy ' + nm + ' there; it stays on ' + me + ' too.');
+        else if (over === 'air' && pull.over === 'other') say('Over nothing - let go to leave ' + nm + ' in the air where it is. Esc puts it back.');
         pull.over = over;
       }
     }
@@ -1887,10 +2201,11 @@ var NSO_MICROSCOPE = (function () {
       return;
     }
     var P = pull;
+    var r = !P.cancelled && window.nsoGrab && window.nsoGrab.active() ? window.nsoGrab.end() : null;
     pull = null;
+    carriedOver = null;
     if (view) view.controls.enabled = true;
     if (P.cancelled) return;
-    var r = window.nsoGrab && window.nsoGrab.active() ? window.nsoGrab.end() : null;
     if (P.live || (r && r.handled)) { if (view) view.mouseDownPos = null; return; }
     if (P.dom) return;                                      // the card's own click does it
     if (view && view.hookTook) { view.hookTook = false; return; }
@@ -2038,7 +2353,7 @@ var NSO_MICROSCOPE = (function () {
 
     wireViewport();
     wireLegendToggle();
-    ensureTake();
+    ensurePlates();
     return view;
   }
 
@@ -2072,7 +2387,7 @@ var NSO_MICROSCOPE = (function () {
 
   function disposeTree(obj) {
     obj.traverse(function (n) {
-      if (n.geometry && !n.geometry.userData.kept) n.geometry.dispose();     // a plate 2 piece's is kept (pieceGeometry)
+      if (n.geometry && !n.geometry.userData.kept) n.geometry.dispose();     // a piece's is kept (pieceGeometry)
       if (n.material) {
         (Array.isArray(n.material) ? n.material : [n.material]).forEach(function (m) { m.dispose(); });
       }
@@ -2145,12 +2460,12 @@ var NSO_MICROSCOPE = (function () {
     // colours, minus the types Display has switched off.
     var byObject = {};
     var sig = featureSig();
-    if (doc.source === 'take') prunePieceGeometry(doc.objects, sig);
+    prunePieceGeometry(doc, sig);
     doc.objects.forEach(function (o, gi) {
       byObject[o.name] = o;
       var mesh = null;
-      if (doc.source === 'take') {
-        // plate 2: built once per piece and kept (pieceGeometry), sitting where the piece was moved to
+      if (isPieces(doc) || o.take) {
+        // a piece dragged here: built once and kept (pieceGeometry), sitting where it was moved to
         var pg = pieceGeometry(o, sig);
         mesh = new THREE.Mesh(pg.geo, pg.beads
           ? new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes() })
@@ -2178,7 +2493,7 @@ var NSO_MICROSCOPE = (function () {
     v.takeSig = sig;
   }
 
-  /** What Display has switched off, as one string: plate 2 is drawn from it, and is rebuilt when it changes. */
+  /** What Display has switched off, as one string: a plate of bead pieces is drawn from it, and rebuilt when it changes. */
   function featureSig() { return Array.from(FEATURE_OFF).sort().join('|'); }
 
   // --- plate 2's pieces, built once -------------------------------------------
@@ -2193,8 +2508,9 @@ var NSO_MICROSCOPE = (function () {
   // switched on or off (the signature). Kept, it also keeps nso_bvh.js's tree,
   // which every pick and hover on the piece asks.
   //
-  // A pull builds the copy's prisms once (pullSpec) and they are handed in here
-  // as they are (seedPieceGeometry), not built a second time.
+  // A drag's copy is drawn from the prisms the drag built (pullSpec), as a ghost
+  // (makeGhost); set down on a mesh plate, that ghost's geometry is the piece's
+  // from then on (setDownOn) - nothing is built a second time.
 
   var pieceGeoms = new Map();     // piece -> { geo, sig, positions, moves, base, beads, edges }
 
@@ -2209,18 +2525,23 @@ var NSO_MICROSCOPE = (function () {
   }
 
   /** Throw away what no piece of `objects` draws any more (gone, or drawn from other data now). */
-  function prunePieceGeometry(objects, sig) {
-    var live = new Set(objects);
+  function prunePieceGeometry(d, sig) {
+    var live = new Set(d.objects);
     Array.from(pieceGeoms.keys()).forEach(function (o) {
       var e = pieceGeoms.get(o);
+      if (e.doc !== d) return;                // the other plate's pieces are its own business
       if (!live.has(o) || e.positions !== o.positions || e.moves !== o.moves || (e.beads && e.sig !== sig)) dropPieceGeometry(o);
     });
   }
 
-  /** Z-up mm triangles into a view-space position attribute: (x, y, z) -> (x - cx, z, -(y - cy)), toThree's map. */
-  function viewPositions(p) {
-    var out = new Float32Array(p.length), cx = doc.cx, cy = doc.cy;
-    for (var i = 0; i < p.length; i += 3) { out[i] = p[i] - cx; out[i + 1] = p[i + 2]; out[i + 2] = -(p[i + 1] - cy); }
+  /**
+   * Z-up mm triangles into a view-space position attribute: (x, y, z) ->
+   * (x - cx, z - cz, -(y - cy)), toThree's map about `at` - the document's
+   * centre by default, a carried copy's footprint and bottom for a ghost.
+   */
+  function viewPositions(p, at) {
+    var out = new Float32Array(p.length), cx = at ? at.x : doc.cx, cy = at ? at.y : doc.cy, cz = at ? at.z : 0;
+    for (var i = 0; i < p.length; i += 3) { out[i] = p[i] - cx; out[i + 1] = p[i + 2] - cz; out[i + 2] = -(p[i + 1] - cy); }
     return out;
   }
 
@@ -2279,7 +2600,7 @@ var NSO_MICROSCOPE = (function () {
    * held as bytes, which is what a line type's hex colour is (a quarter of the
    * upload of floats, the same colour on screen).
    */
-  function beadGeometry(pos, moveIds, trisPerMove, moves) {
+  function beadGeometry(pos, moveIds, trisPerMove, moves, at) {
     var featOf = {}, rgb = {};
     moves.forEach(function (m) { featOf[m.index] = m.feature; });
     var colors = new Uint8Array(pos.length), per = trisPerMove * 9;
@@ -2289,7 +2610,7 @@ var NSO_MICROSCOPE = (function () {
       var r = (c >> 16) & 255, gr = (c >> 8) & 255, b = c & 255;
       for (var k = mi * per, end = k + per; k < end; k += 3) { colors[k] = r; colors[k + 1] = gr; colors[k + 2] = b; }
     }
-    var bg = soupGeometry(viewPositions(pos));
+    var bg = soupGeometry(viewPositions(pos, at));
     bg.setAttribute('color', new THREE.BufferAttribute(colors, 3, true));
     return keptGeometry(bg);
   }
@@ -2308,23 +2629,9 @@ var NSO_MICROSCOPE = (function () {
     } else {
       geo = keptGeometry(soupGeometry(viewPositions(o.positions)));
     }
-    e = { geo: geo, sig: sig, positions: o.positions, moves: o.moves, base: new THREE.Vector3(), beads: beads, edges: null };
+    e = { geo: geo, sig: sig, positions: o.positions, moves: o.moves, base: new THREE.Vector3(), beads: beads, edges: null, doc: doc };
     pieceGeoms.set(o, e);
     return e;
-  }
-
-  /**
-   * A new piece whose triangles ARE its shown beads' prisms (a pull: pullSpec
-   * built them from exactly the moves the Features list shows), kept as its
-   * drawn geometry so the redraw that follows builds nothing.
-   */
-  function seedPieceGeometry(o, moveIds, trisPerMove) {
-    if (!o.moves || !moveIds) return;
-    var shown = o.moves.filter(function (m) { return !FEATURE_OFF.has(m.feature); });
-    if (moveIds.length * trisPerMove * 9 !== o.positions.length) return;
-    dropPieceGeometry(o);
-    pieceGeoms.set(o, { geo: beadGeometry(o.positions, moveIds, trisPerMove, shown), sig: featureSig(), positions: o.positions,
-                        moves: o.moves, base: new THREE.Vector3(), beads: true, edges: null });
   }
 
   /**
@@ -2760,7 +3067,7 @@ var NSO_MICROSCOPE = (function () {
     var counts = {};
     if (doc.kind === 'toolpath') {
       doc.segments.forEach(function (sg) { counts[sg.feature] = (counts[sg.feature] || 0) + 1; });
-    } else if (doc.source === 'take') {
+    } else if (hasBeads(doc)) {
       doc.objects.forEach(function (o) {
         (o.moves || []).forEach(function (m) { counts[m.feature] = (counts[m.feature] || 0) + 1; });
       });
@@ -2772,8 +3079,7 @@ var NSO_MICROSCOPE = (function () {
 
   /** Does the active plate have line types - Features rows to check? */
   function hasLineTypes() {
-    return !!doc && (doc.kind === 'toolpath' ||
-      (doc.source === 'take' && doc.objects.some(function (o) { return o.moves && o.moves.length; })));
+    return !!doc && (doc.kind === 'toolpath' || hasBeads(doc));
   }
 
   function buildLegend() {
@@ -2785,8 +3091,7 @@ var NSO_MICROSCOPE = (function () {
     if (!rows.length) {
       var note = document.createElement('div');
       note.className = 'ms-legend-note';
-      note.textContent = doc.source === 'take'
-        ? (doc.objects.length ? 'No line types on plate 2 - these pieces are not slices.' : 'Nothing on plate 2 yet.')
+      note.textContent = isPieces(doc) ? 'No line types on ' + plateTitle(plateName) + ' - these pieces are not slices.'
         : 'Not sliced - no line types.';
       legend.appendChild(note);
       return;
@@ -2877,12 +3182,13 @@ var NSO_MICROSCOPE = (function () {
     });
     show('ms-select-controls', mode === 'select' && !isolated);
     var note = $('ms-mode-note');
+    var other = plateTitle(otherPlate()).toLowerCase();
     var text = {
-      piece: 'Hover a piece, click to isolate it. Drag it onto plate 2.',
+      piece: 'Hover a piece, click to isolate it. Drag it onto ' + other + '.',
       select: 'Click a piece to drop a flat capture box there. Drag its blue centre dot to move it, the green corner dot to size it along and across, a side to scale the footprint, the orange top dot to set how thick it is.',
-      feature: 'Hover a line for that line type. Click to isolate it. Drag it onto plate 2. (The Features list only shows and hides line types.)',
+      feature: 'Hover a line for that line type. Click to isolate it. Drag it onto ' + other + '. (The Features list only shows and hides line types.)',
       line: 'Hover a line. Click to isolate that one move; Shift-click adds or removes one. The arrows step to the neighbouring move.',
-      layer: 'Every layer is a card: hover one, click to isolate it, drag it onto plate 2. The slider\'s range is the band: Take band isolates it as one piece.'
+      layer: 'Every layer is a card: hover one, click to isolate it, drag it onto ' + other + '. The slider\'s range is the band: Take band isolates it as one piece.'
     }[mode];
     if (note) note.textContent = text;
     var hint = $('ms-hint-badge');
@@ -3118,7 +3424,7 @@ var NSO_MICROSCOPE = (function () {
 
     // Hover: an outline of what a click would take.
     window.addEventListener('pointermove', onHoverMove);
-    el.addEventListener('pointerleave', function () { clearHover(); });
+    el.addEventListener('pointerleave', function () { hoverPending = null; clearHover(); });
   }
 
   // --- Isolate / Back -------------------------------------------------------
@@ -3209,8 +3515,7 @@ var NSO_MICROSCOPE = (function () {
     v.overviewGroup.visible = !detail;
     v.highlightGroup.visible = !detail;
     var unit = doc && doc.kind === 'toolpath' ? 'segments' : 'object(s)';
-    badge(detail ? 'Detail: ' + currentSelection.length + ' ' + unit
-          : plateName === 'take' ? 'Plate 2: ' + (takeDoc ? takeDoc.objects.length : 0) + ' piece(s)' : 'Whole part');
+    badge(detail ? 'Detail: ' + currentSelection.length + ' ' + unit : plateBadge());
     show('ms-detail-controls', isolated);
     show('ms-select-controls', !isolated && mode === 'select');
     applyFeatureVisibility();
@@ -3408,8 +3713,8 @@ var NSO_MICROSCOPE = (function () {
   var shownKept = null;
   function shownMemo() {
     var key = [featureSig(), CLEARED.size, zr ? zr.lo + ':' + zr.hi : ''].join('/');
-    if (!shownKept || shownKept.doc !== doc || shownKept.cleared !== CLEARED || shownKept.key !== key) {
-      shownKept = { doc: doc, cleared: CLEARED, key: key, list: shownSegments(), byObj: new Map() };
+    if (!shownKept || shownKept.doc !== doc || shownKept.segs !== doc.segments || shownKept.cleared !== CLEARED || shownKept.key !== key) {
+      shownKept = { doc: doc, segs: doc.segments, cleared: CLEARED, key: key, list: shownSegments(), byObj: new Map() };
     }
     return shownKept;
   }
@@ -3438,7 +3743,7 @@ var NSO_MICROSCOPE = (function () {
       if (isolated) isolateRedraw();
     } else {
       applyClip();
-      if (doc.source === 'take' && view.takeSig !== featureSig()) { buildOverview(); buildDetail_(); }
+      if (hasBeads(doc) && view.takeSig !== featureSig()) { buildOverview(); buildDetail_(); }
     }
     applyFeatureVisibility();
     refreshHighlight();
@@ -3990,7 +4295,7 @@ var NSO_MICROSCOPE = (function () {
     isolate();
     var band = zBandMm();
     say('Band Z ' + band[0].toFixed(2) + ' - ' + band[1].toFixed(2) + ' mm isolated as one piece (' + t.items.length +
-        ' moves) - drag it onto plate 2, or Export it.');
+        ' moves) - drag it onto ' + plateTitle(otherPlate()).toLowerCase() + ', or Export it.');
     return currentSelection;
   }
 
@@ -4021,7 +4326,7 @@ var NSO_MICROSCOPE = (function () {
     return items.filter(function (sg) { return !FEATURE_OFF.has(sg.feature); });
   }
 
-  /** A mesh object's triangles as drawn: a plate 2 piece that is still a slice's beads, minus the unchecked line types. */
+  /** A mesh object's triangles as drawn: a piece that is still a slice's beads, minus the unchecked line types. */
   function shownPositions(o) {
     if (!o.moves || !o.moves.length || !o.moves.some(function (m) { return FEATURE_OFF.has(m.feature); })) return o.positions;
     var keep = o.moves.filter(function (m) { return !FEATURE_OFF.has(m.feature); });
@@ -4147,14 +4452,14 @@ var NSO_MICROSCOPE = (function () {
 
   /** The selection's swept shells - every selected move, as the toolpath export takes them. */
   function solidOfSelection() {
-    if (doc && doc.source === 'take' && currentSelection.length) return solidOfTake();
+    if (doc && doc.kind === 'mesh' && currentSelection.length) return takeSolidable() ? solidOfTake() : null;
     if (!doc || doc.kind !== 'toolpath' || !currentSelection.length) return null;
     var moves = actedOn(currentSelection).map(function (s) { return s.mv; });
     if (!moves.length) return null;
     return window.NSOGcodeSolid.buildSolid(moves, { cache: solidCache() });
   }
 
-  /** Plate 2's selected pieces that still have their beads, swept. Each piece keeps its own index range. */
+  /** The selected pieces that still have their beads, swept. Each piece keeps its own index range. */
   function solidOfTake() {
     var mv = [];
     currentSelection.forEach(function (o, i) {
@@ -4166,7 +4471,7 @@ var NSO_MICROSCOPE = (function () {
 
   /** Can every selected piece be swept? Only a slice's pieces, and not one a seat turned. */
   function takeSolidable() {
-    return !!(doc && doc.source === 'take' && currentSelection.length &&
+    return !!(doc && doc.kind === 'mesh' && currentSelection.length &&
               currentSelection.every(function (o) { return o.moves && o.moves.length; }));
   }
 
@@ -4217,7 +4522,7 @@ var NSO_MICROSCOPE = (function () {
 
   function solidExportGuard() {
     if (!doc) { say('Open a file in the microscope first', true); return false; }
-    if (doc.source === 'take') {
+    if (hasBeads(doc)) {
       if (!currentSelection.length) { say('Nothing selected to export', true); return false; }
       if (!takeSolidable()) {
         say('Export as solid needs a piece that is still a slice\'s beads - this one is a mesh, or a seat turned it', true);
@@ -4309,7 +4614,10 @@ var NSO_MICROSCOPE = (function () {
     return name;
   }
 
-  // --- the whole of plate 2 ------------------------------------------------------
+  // --- the whole plate ----------------------------------------------------------
+  //
+  // The active plate's every piece (a mesh plate: its pieces, a plate read's
+  // pieces, an imported file's objects) - the same on either plate.
 
   function takeGeometryOf(o) {
     var geo = new THREE.BufferGeometry();
@@ -4317,10 +4625,12 @@ var NSO_MICROSCOPE = (function () {
     return geo;
   }
 
-  /** Every plate 2 piece onto the main plate, each its own object, one Undo. G-scope closes, as after any export. */
+  function wholePlateObjects() { return doc && doc.kind === 'mesh' ? doc.objects : []; }
+
+  /** Every piece of the active plate onto the main plate, each its own object, one Undo. G-scope closes, as after any export. */
   function exportTakeToPlate() {
-    var os = takeDoc ? takeDoc.objects : [];
-    if (!os.length) { say('Plate 2 is empty - nothing to export', true); return null; }
+    var os = wholePlateObjects(), me = plateTitle(plateName);
+    if (!os.length) { say(me + ' has no pieces - nothing to export', true); return null; }
     var ids = [];
     os.forEach(function (o) {
       var id = addModelFromZUpGeometry(o.name, takeGeometryOf(o));
@@ -4331,64 +4641,51 @@ var NSO_MICROSCOPE = (function () {
       pushUndo({ type: 'addModels', ids: ids, editId: state.editId, cutT: state.cutT });
     }
     close();
-    say('Export to plate ok - ' + ids.length + ' piece' + (ids.length === 1 ? '' : 's') + ' from plate 2, each its own object');
+    say('Export to plate ok - ' + ids.length + ' piece' + (ids.length === 1 ? '' : 's') + ' from ' + me.toLowerCase() + ', each its own object');
     return ids;
   }
 
-  /** The whole of plate 2 as one STL, the pieces where they stand on it. */
+  /** The whole of the active plate as one STL, the pieces where they stand on it: Plate_1.stl / Plate_2.stl. */
   function exportTakeAsSTL() {
-    var os = takeDoc ? takeDoc.objects : [];
-    if (!os.length) { say('Plate 2 is empty - nothing to export', true); return null; }
+    var os = wholePlateObjects(), me = plateTitle(plateName);
+    if (!os.length) { say(me + ' has no pieces - nothing to export', true); return null; }
     var total = os.reduce(function (a, o) { return a + o.positions.length; }, 0);
     var all = new Float32Array(total), at = 0;
     os.forEach(function (o) { all.set(o.positions, at); at += o.positions.length; });
     var geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(all, 3));
-    var name = 'Plate_2.stl';
+    var name = me.replace(' ', '_') + '.stl';
     downloadBlob(new Blob([geometryToBinarySTL(geo)], { type: 'application/octet-stream' }), name);
     say('Downloaded ' + name + ' (' + os.length + ' piece' + (os.length === 1 ? '' : 's') + ', ' + (all.length / 9) + ' triangles)');
     return name;
   }
 
   /**
-   * CLEAR: plate 2 emptied, and everything on plate 1 whole again - nothing
-   * isolated, selected, boxed, cleared from view or switched off, the slider
-   * at All - with plate 1 active. Its document stays. With shift, plate 1 too:
-   * an imported file is dropped and the plate is read again.
+   * CLEAR: the ACTIVE plate emptied - its document, pieces, selection, boxes,
+   * isolation, clears and slider - and nothing else: the other plate is not
+   * touched, and the active plate stays active, ready for Import or Read plate.
+   * The same on either plate; there is no Shift-CLEAR. A plate that showed the
+   * imported file forgets it (unless the other plate shows it too), so the next
+   * open reads the plate: CLEAR on plate 1 is the start-over.
    */
-  function clearPlates(withLens) {
+  function clearPlates() {
     if (!buildWorld()) return 0;
-    var n = takeClear();
-    var nT = n + ' piece' + (n === 1 ? '' : 's');
-    if (withLens) {
-      importedDoc = null;
-      reset();
-      FEATURE_OFF = new Set(['Travel']);
-      if (!openPlate()) { normalView(); say('Plate 2 cleared (' + nT + '); plate 1 is empty - nothing on the plate to read'); }
-      else say('Plate 2 cleared (' + nT + '); plate 1 read again from the plate');
-      return n;
-    }
-    showPlate('lens');
-    wholeAgain();
-    say('Plate 2 cleared (' + nT + '); plate 1 whole again');
-    return n;
-  }
-
-  /** Plate 1 (active) with nothing isolated, selected, boxed, cleared or switched off; the slider at All. */
-  function wholeAgain() {
-    removeAllBalls();
-    currentSelection = [];
-    selectionSource = 'box';
-    isolated = false;
-    lineCursor = -1;
-    HIDDEN = new Set();
-    CLEARED = new Set();
-    FEATURE_OFF = new Set(['Travel']);
-    if (view) clearGroup(view.detailGroup);
-    zr = doc ? { lo: 0, hi: Math.max(0, zSteps() - 1), n: zSteps() } : null;
-    setSelection([], 'box');
+    cancelPull();
+    var me = plateTitle(plateName);
+    var n = doc ? (doc.kind === 'mesh' ? doc.objects.length : 1) : 0;
+    if (doc && showsImport(doc) && !showsImport(plateDoc(otherPlate()))) importedDoc = null;
+    clearHover();
+    emptyPlate(plateName);
+    if (sizePlates()) placePlates();
+    if (view) view.worldSphere = worldSphere();
+    applyClip();
     redrawDoc();
-    normalView();
+    syncPlate();
+    docListeners.forEach(function (fn) {
+      try { fn(doc); } catch (err) { console.error('[g-scope] document listener', err); }
+    });
+    say(n ? me + ' cleared - empty, ready for Import or Read plate' : me + ' was already empty');
+    return n;
   }
 
   // ===========================================================================
@@ -4409,10 +4706,9 @@ var NSO_MICROSCOPE = (function () {
     var acts = !!(doc && currentSelection.length && actedOn(currentSelection).length);
     show('ms-export-row', acts);
     show('ms-export-solid-row', !!(doc && ((doc.kind === 'toolpath' && acts) || takeSolidable())));
-    var isTake = !!(doc && doc.source === 'take');
-    show('ms-take-export-row', isTake && takeDoc.objects.length > 0);
+    show('ms-take-export-row', wholePlateObjects().length > 0);
     var selTitle = $('ms-export-sel-title');
-    if (selTitle) selTitle.textContent = isTake ? 'Selected piece' : 'Selection';
+    if (selTitle) selTitle.textContent = isPieces(doc) ? 'Selected piece' : 'Selection';
     var iso = $('ms-btn-isolate');
     if (iso) iso.disabled = !currentSelection.length;
     var iso2 = $('ms-btn-isolate-line');
@@ -4466,7 +4762,7 @@ var NSO_MICROSCOPE = (function () {
     }
     var sub = $('ms-sub');
     if (!sub) return;
-    if (!doc) { sub.textContent = 'The plate, or an STL, a 3MF or a sliced .gcode.3mf.'; return; }
+    if (!doc) { sub.textContent = plateTitle(plateName) + ' - empty. Import the plate, an STL, a 3MF or a sliced .gcode.3mf into it.'; return; }
     if (doc.kind === 'toolpath') {
       sub.textContent = doc.name + ' - ' + doc.segments.length + ' extrusion moves, ' +
         doc.parsed.layers.length + ' layers, true layer heights. ' +
@@ -4682,12 +4978,12 @@ var NSO_MICROSCOPE = (function () {
 
   function open(d) {
     if (!buildWorld()) { say('Microscope failed to start - check console', true); return null; }
-    // Everything is loaded INTO plate 1: plate 2's pieces are copies and never change by a load.
-    var wasTake = plateName !== 'lens';
-    if (wasTake) { cancelPull(); showPlate('lens', { quiet: true }); }
+    // Loaded INTO THE ACTIVE PLATE, in place of what it held; the other plate is not touched.
+    cancelPull();
+    if (doc && doc.objects) doc.objects.forEach(dropPieceGeometry);
     doc = d;
-    plateSide = sideFor(d);
-    ensureTake();
+    if (sizePlates()) placePlates();
+    ensurePlates();
     HIDDEN = new Set();
     // a new slice opens with Travel off, as every one has; Display survives a plate flip, not a load
     if (doc.kind === 'toolpath') FEATURE_OFF = new Set(['Travel']);
@@ -4721,15 +5017,11 @@ var NSO_MICROSCOPE = (function () {
     syncTakeBand();
     syncLineRead();
     syncBackButton();
+    if (view) view.worldSphere = worldSphere();
     docListeners.forEach(function (fn) {
       try { fn(doc); } catch (err) { console.error('[g-scope] document listener', err); }
     });
     syncPlate();
-    if (wasTake) {
-      plateListeners.forEach(function (fn) {
-        try { fn(plateName); } catch (err) { console.error('[g-scope] plate listener', err); }
-      });
-    }
     return doc;
   }
 
@@ -4772,8 +5064,7 @@ var NSO_MICROSCOPE = (function () {
     if (btn) btn.classList.remove('is-on');
     if (view) view.running = false;
     loop++;                       // retires any frame already in flight
-    var ld = lensDoc();
-    if (!showsImport(ld)) importedDoc = null;
+    if (!showsImport(lensDoc()) && !showsImport(plateDoc('take'))) importedDoc = null;
     shellCardClose();
     reset();
     FEATURE_OFF = new Set(['Travel']);
@@ -4781,45 +5072,44 @@ var NSO_MICROSCOPE = (function () {
     mode = 'piece';
   }
 
-  /** Is this plate-1 document the imported file - itself, re-opened, or a slice made from it? */
+  /** Is this plate's document the imported file - as opened, re-opened, or a slice made from it? */
   function showsImport(d) {
     var I = importedDoc;
     if (!I || !d) return false;
-    if (d === I) return true;
+    if (d === I || d.importOf === I) return true;
     if (I.objects && d.objects === I.objects) return true;
     return !!(I.objects && d.nsoSlice && d.nsoSlice.source && d.nsoSlice.source.objects === I.objects);
   }
 
-  /** The imported file back on plate 1, as Import opened it: nothing selected, isolated or hidden. */
-  function reopenImport() {
-    var d = importedDoc;
-    if (!d) return null;
+  /**
+   * The imported file as a plate holds it: a copy of the document as Import
+   * opened it, so what is done on the plate - a piece set down on it - never
+   * reaches the import itself (setDownOn assigns new arrays, it never edits
+   * one in place).
+   */
+  function importCopy(I) {
+    var d = Object.assign({}, I);
+    d.importOf = I;
     d.layerIndex = undefined;
-    openPanel();
-    return open(d);
+    return d;
   }
 
-  /** Both plates empty: plate 1 has no document, plate 2 is new. */
+  /** The imported file back on plate 1, as Import opened it: nothing selected, isolated or hidden. */
+  function reopenImport() {
+    if (!importedDoc) return null;
+    openPanel();
+    return open(importCopy(importedDoc));
+  }
+
+  /** Both plates empty, plate 1 active. */
   function reset() {
     cancelPull();
-    dropTake();
-    if (view) {
-      removeAllBalls();
-      clearGroup(view.overviewGroup);
-      clearGroup(view.detailGroup);
-      view.overviewMeshes = {};
-    }
-    doc = null;
-    HIDDEN = new Set();
-    currentSelection = [];
-    selectionSource = 'box';
-    isolated = false;
-    CLEARED = new Set();
-    lineCursor = -1;
-    zr = null;
-    if (view) clearGroup(view.highlightGroup);
+    if (view && plateName !== 'lens') showPlate('lens', { quiet: true });
+    emptyPlate('take');
+    emptyPlate('lens');
+    plateSide = BED_GRID;
     clearHover();
-    if (view) { applyClip(); applyDisplay(); ensureTake(); }
+    if (view) { applyClip(); applyDisplay(); ensurePlates(); }
     syncZRangeUI();
     syncTakeBand();
     buildLegend();
@@ -4980,7 +5270,7 @@ var NSO_MICROSCOPE = (function () {
       normalView();
       if (!lensDoc()) openPicker();
     });
-    bind('ms-btn-take-clear', 'click', function (ev) { clearPlates(!!ev.shiftKey); });
+    bind('ms-btn-take-clear', 'click', function () { clearPlates(); });
     bind('ms-btn-frame', 'click', function () { if (buildWorld()) frame(); });
     bind('ms-btn-take-export-plate', 'click', exportTakeToPlate);
     bind('ms-btn-take-export-stl', 'click', exportTakeAsSTL);
@@ -4997,7 +5287,7 @@ var NSO_MICROSCOPE = (function () {
       zcard.dataset.wired = '1';
       zcard.addEventListener('click', rangeCardClick);
       zcard.addEventListener('pointerdown', rangeCardPress);
-      zcard.addEventListener('pointerenter', function () { if (plateName === 'lens' && !pull) drawHover(rangeTarget()); });
+      zcard.addEventListener('pointerenter', function () { if (!pull) drawHover(rangeTarget()); });
       zcard.addEventListener('pointerleave', clearHover);
     }
     bind('ms-btn-clear', 'click', function () {
@@ -5100,7 +5390,12 @@ var NSO_MICROSCOPE = (function () {
     openPicker: openPicker,
     setMode: function (m) { setMode(m); },
     /** What the outline under the pointer stands for: { source, count, label } or null. */
-    hoverInfo: function () { return hoverTgt ? { source: hoverTgt.source, count: hoverTgt.items.length, label: hoverTgt.label } : null; },
+    hoverInfo: function () {
+      if (!hoverTgt) return null;
+      var o = { source: hoverTgt.source, count: hoverTgt.items.length, label: hoverTgt.label };
+      if (hoverTgt.stand) o.stand = hoverTgt.stand;     // 'box': the piece's box stood in for its surface
+      return o;
+    },
     isIsolated: function () { return isolated; },
     pressTargetAt: function (x, y) { var t = pressTarget({ clientX: x, clientY: y }); return t ? { source: t.source, count: t.items.length, selected: !!t.selected } : null; },
     mode: function () { return mode; },
@@ -5202,10 +5497,10 @@ var NSO_MICROSCOPE = (function () {
     frame: function () { if (buildWorld()) frame(); },
     onPlate: function (fn) { if (typeof fn === 'function') plateListeners.push(fn); },
     lensDoc: lensDoc,
-    takeDoc: function () { return takeDoc; },
+    plateDoc: plateDoc,
+    takeDoc: function () { return plateDoc('take'); },
     takePieces: takePieces,
     plateState: plateState,
-    takeClear: function () { var n = takeClear(); say('Plate 2 cleared (' + n + ' piece' + (n === 1 ? '' : 's') + ')'); return n; },
     clearPlates: clearPlates,
     pullSpec: pullSpec,
     exportTakeToPlate: exportTakeToPlate,

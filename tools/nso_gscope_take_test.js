@@ -1,13 +1,16 @@
 #!/usr/bin/env node
-/* G-scope's two plates, side by side (docs/GSCOPE.md, items 1-3).
+/* G-scope's two plates, side by side - and the same (docs/GSCOPE.md, items
+   1-3, 6, 9, 11).
 
-   Both plates stand on one floor, Bambu Studio's multi-plate view: the loaded
-   plate (plate 1) on the left, the second plate (plate 2) to its right, the
-   same size, each labelled. A click on a plate makes it ACTIVE - its outline
-   lit, the other's dimmed - and every tool, the Features list, the slider and
-   Export act on the active plate. A selection on plate 1 dragged over plate 2
-   is copied there, in one view: nothing flips, and plate 1 never changes.
-   There is no LENS | TAKE toggle and no plate is called either.
+   Both plates stand on one floor, Bambu Studio's multi-plate view: plate 1 on
+   the left, plate 2 to its right, the same size, each labelled. A click on a
+   plate makes it ACTIVE - its outline lit, the other's dimmed - and every
+   control acts on the active plate and works identically on either: Import and
+   Read plate load into it, the Features list, the slider, Select, View and
+   Export act on it, CLEAR empties it. A thing pressed on one plate and dragged
+   over the other is copied there, in one view: nothing flips, and the plate it
+   came from never changes. There is no LENS | TAKE toggle, and no plate is
+   called either.
 
    Every drive below is a real mouse - a click on a floor, a press on the
    isolated thing and a drag - not a call.
@@ -20,35 +23,39 @@
         button) frames both plates.
      2. Click to activate: a click on plate 2's floor makes it active - the
         outlines swap, the legend / header / badge are plate 2's, and NOTHING
-        moves on screen; a click on plate 1's floor (or on a piece standing on
-        it) makes plate 1 active again, byte-identical; a drag on the other
-        plate orbits and activates nothing.
-     3. Drag across: five pulls - a capture-box region, a picked line, a layer,
-        a legend feature (off a slice) and a whole piece (off the plate) -
-        each pressed on plate 1 and let go over plate 2's bed. Mid-drag the
-        floors have not moved on screen and the copy is in hand; after the drop
-        plate 2 is active with one more piece; plate 1 is byte-identical.
-     4. Refusals and edges: let go over plate 1 copies nothing; Escape mid-drag
-        cancels; a press that never travels is a click; a capture box's dots
-        keep their press; a press on bare floor orbits; a plate 2 piece
-        carried over plate 1 goes back where it was.
-     5. Pieces on plate 2 are grabbable and droppable like the main plate's
+        moves on screen; a click on plate 1's floor makes plate 1 active again,
+        byte-identical; a drag on the other plate orbits and activates nothing.
+     3. Drag across, plate 1 -> 2: five pulls - a capture-box region, a picked
+        line, a layer, a legend feature (off a slice) and a whole piece (off
+        the plate) - each pressed on plate 1 and let go over plate 2's bed. The
+        copy (the ghost) is under the pointer on EVERY move of the drag, the
+        floors do not move, after the drop plate 2 is active with one more
+        piece where it was let go, and plate 1 is byte-identical.
+     4. Refusals and edges: let go over the plate it came from copies nothing;
+        Escape mid-drag cancels; a press that never travels is a click; a
+        capture box's dots keep their press; a press on bare floor orbits.
+     5. Pieces on a plate are grabbable and droppable like the main plate's
         (the same app-grab-drop): onto the bed, onto another piece (seated at
         the Seat gap), into the air; Escape puts one back.
-     6. Export acts on the active plate: plate 2 active - Selected piece (lines
-        and solid) and Whole plate (to plate / as STL); plate 1 active - the
-        Selection, as it always was.
-     7. CLEAR, from a fresh page and mid-session: plate 2 emptied, everything
-        on plate 1 whole again (nothing isolated, selected, boxed, cleared or
-        switched off, the slider at All), plate 1 active. Shift-CLEAR also
-        drops an imported file and reads the plate again - from a fresh page
-        too.
-     8. CLOSE and BACK end the visit whole: the next open is a fresh read of
-        the plate (or the imported file, if one is loaded), nothing isolated,
+     6. Drag the other way, plate 2 -> 1: a plate 2 piece carried over plate 1
+        slides on plate 1's bed under the pointer and, let go, is copied there
+        where it was let go (plate 1 a plate read: one more piece; plate 1 a
+        slice: its moves join the slice); plate 2 keeps it.
+     7. Import and Read plate load into the ACTIVE plate - plate 2 too - and
+        leave the other plate as it was.
+     8. Export acts on the active plate, the same on either: the same content on
+        plate 1 and on plate 2 exports byte-identical files (Selection, as STL;
+        Whole plate, as STL); Whole plate to the main plate, one Undo.
+     9. CLEAR empties the ACTIVE plate and nothing else - on either plate, from a
+        fresh page and mid-session; an emptied plate takes Import / Read plate;
+        Shift-CLEAR is CLEAR. CLEAR on plate 1 straight after opening is the
+        start-over: the next open reads the plate again.
+    10. CLOSE and BACK end the visit whole: the next open is a fresh read of the
+        plate (or the imported file, if one is loaded), nothing isolated,
         nothing selected, the slider at All, the default view (the framing of
         both plates), plate 2 empty. Only an imported file survives.
-     9. A double-click on the view does nothing, on either plate.
-    10. Watch's log docks bottom-right, under the slider's All button.
+    11. A double-click on the view does nothing, on either plate.
+    12. Watch's log docks bottom-right, under the slider's All button.
 
    Screenshots go to tools/gscope-take-out/ (git-ignored).
 
@@ -86,6 +93,8 @@ const PAGE_HELPERS = `
     const onCanvas = (p) => !!p && document.elementFromPoint(p[0], p[1]) === M().getView().renderer.domElement;
     return {
       state: (n) => JSON.stringify(M().plateState(n)),
+      /* a plate's state without where the camera stands (a load frames the view) */
+      content: (n) => { const s = M().plateState(n); if (s) delete s.camera; return JSON.stringify(s); },
       floorPx: floorPx,
       /* a point of plate n's bare floor that the canvas owns, nothing drawn over it */
       bareFloorPx: (n) => {
@@ -152,6 +161,33 @@ const PAGE_HELPERS = `
         return null;
       },
       camera: () => { const v = M().getView(); return v.camera.position.toArray().concat(v.controls.target.toArray()).map(x => +x.toFixed(3)); },
+      /* what a drag carries right now - the ghost of a copy, or the piece grabbed - as a screen rectangle; and is (x, y) in it? */
+      carried: (x, y) => {
+        const v = M().getView(), g = window.nsoGrab && nsoGrab.active() && nsoGrab.world();
+        if (!g) return { on: false };
+        let m = v.scene.getObjectByName('gscopeGhost');
+        const ghost = !!m;
+        if (!m && window.__grabbedName) m = v.overviewMeshes[window.__grabbedName];
+        if (!m || !m.parent) return { on: false, ghost };
+        m.updateMatrixWorld(true);
+        const b = new THREE.Box3().setFromObject(m), r = rect();
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (const cx of [b.min.x, b.max.x]) for (const cy of [b.min.y, b.max.y]) for (const cz of [b.min.z, b.max.z]) {
+          const p = toPx(new THREE.Vector3(cx, cy, cz));
+          x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]);
+        }
+        const pad = 6;
+        return { on: true, ghost, under: x >= x0 - pad && x <= x1 + pad && y >= y0 - pad && y <= y1 + pad,
+                 box: [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z].map(q => +q.toFixed(3)) };
+      },
+      /* a plate's piece (by name) as a world box, rounded */
+      pieceBox: (name) => {
+        const m = M().getView().overviewMeshes[name];
+        if (!m) return null;
+        m.updateMatrixWorld(true);
+        const b = new THREE.Box3().setFromObject(m);
+        return [b.min.x, b.min.y, b.min.z, b.max.x, b.max.y, b.max.z].map(q => +q.toFixed(3));
+      },
       pieces: () => M().takePieces(),
       status: () => document.getElementById('status').textContent
     };
@@ -179,13 +215,40 @@ async function drag(page, from, to, hold) {
   await frames(page);
 }
 
+/* A press and `n` single moves to `to`, the carried thing looked at after every
+   one: { carried: moves it was there and under the pointer, of the moves past
+   the slop; frames: the moves; last: its world box on the last move }. The
+   button is left DOWN. */
+async function driveDrag(page, from, to, n) {
+  await page.mouse.move(from[0], from[1]);
+  await page.mouse.down();
+  let seen = 0, live = 0, last = null, misses = [];
+  for (let i = 1; i <= n; i++) {
+    const x = from[0] + (to[0] - from[0]) * i / n, y = from[1] + (to[1] - from[1]) * i / n;
+    await page.mouse.move(x, y);
+    if (Math.hypot(x - from[0], y - from[1]) < 4) continue;     // inside the slop: nothing is carried yet
+    live++;
+    const c = await page.evaluate(([x, y]) => window.__t.carried(x, y), [x, y]);
+    if (c.on && c.under) seen++; else misses.push(i);
+    if (c.on) last = c.box;
+  }
+  return { carried: seen, moves: live, last, misses };
+}
+
 /* a real click on a plate's bare floor */
 async function clickPlate(page, n) {
   const p = await T(page, n => window.__t.bareFloorPx(n), n);
   if (!p) return false;
   await page.mouse.click(p[0], p[1]);
   await frames(page);
-  return true;
+  return (await page.evaluate(() => NSO_MICROSCOPE.plate())) === n;
+}
+
+/* Import through the Import button's own file input - emptied first, as the
+   button empties it, so the same file picked again is a change */
+async function importFile(page, file) {
+  await page.evaluate(() => { document.getElementById('ms-input').value = ''; });
+  await page.setInputFiles('#ms-input', file);
 }
 
 /* plate 1 active, by a click on its floor (the real way) */
@@ -240,21 +303,35 @@ async function pull(page, label, select, pickPx, to) {
   await page.mouse.move(from[0], from[1]);
   await page.mouse.down();
   await page.mouse.move(from[0] + 25, from[1] + 18, { steps: 4 });
-  const held = await page.evaluate(() => ({ grab: nsoGrab.active(), live: nsoGrab.live(), world: nsoGrab.world() && nsoGrab.world().name, floors: window.__t.floorsPx() }));
-  check(label + ': held, the copy is in hand - and nothing moved on screen (no view flip)',
-    held.grab && held.live && held.world === 'take' && J(held.floors) === J(floors0), J({ grab: held.grab, live: held.live, world: held.world, moved: J(held.floors) !== J(floors0) }));
-  await page.mouse.move(to[0], to[1], { steps: 6 });
+  const held = await page.evaluate(() => ({ grab: nsoGrab.active(), live: nsoGrab.live(), world: nsoGrab.world() && nsoGrab.world().name, floors: window.__t.floorsPx(),
+                                            n: NSO_MICROSCOPE.takePieces().length }));
+  check(label + ': held, the copy (the ghost) is in hand, plate 2 not changed yet - and nothing moved on screen (no view flip)',
+    held.grab && held.live && held.world === 'ghost' && held.n === n0 && J(held.floors) === J(floors0), J({ grab: held.grab, live: held.live, world: held.world, n: held.n, moved: J(held.floors) !== J(floors0) }));
+  // the rest of the way, one move at a time: the ghost under the pointer on every one
+  const at = [from[0] + 25, from[1] + 18];
+  let under = 0, last = null;
+  for (let i = 1; i <= 12; i++) {
+    const x = at[0] + (to[0] - at[0]) * i / 12, y = at[1] + (to[1] - at[1]) * i / 12;
+    await page.mouse.move(x, y);
+    const c = await page.evaluate(([x, y]) => window.__t.carried(x, y), [x, y]);
+    if (c.on && c.ghost && c.under) under++;
+    if (c.on) last = c.box;
+  }
+  check(label + ': the ghost is under the pointer on every move of the drag', under === 12, under + '/12');
   await page.mouse.up();
   await frames(page);
   const after = await page.evaluate(() => ({ plate: NSO_MICROSCOPE.plate(), n: NSO_MICROSCOPE.takePieces().length, grab: nsoGrab.active(), floors: window.__t.floorsPx(), out: window.__t.outlines() }));
   check(label + ': let go over plate 2 - one more piece there, plate 2 active (its outline lit), the floors where they were',
     after.plate === 'take' && after.n === n0 + 1 && !after.grab && J(after.floors) === J(floors0) && after.out[1] !== after.out[0], J({ plate: after.plate, n: after.n, n0 }));
+  const landed = await page.evaluate(() => { const ps = NSO_MICROSCOPE.takePieces(); return window.__t.pieceBox(ps[ps.length - 1].name); });
+  check(label + ': it landed exactly where it was let go - no jump on release', !!landed && !!last && landed.every((v, i) => Math.abs(v - last[i]) < 1e-3), J({ last, landed }));
   const lens = await lensState(page);
   check(label + ': plate 1 is byte-identical', lens === before, lens === before ? JSON.parse(lens).coords + ' coordinates, selection ' + J(JSON.parse(lens).selection).slice(0, 40) : 'before ' + before + '\n after ' + lens);
   return after;
 }
 
 withApp(async (page, logs) => {
+  page.on('pageerror', e => console.log('[pageerror stack] ' + (e.stack || e.message).split('\n').slice(0, 6).join(' <- ')));
   fs.mkdirSync(SHOTS, { recursive: true });
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.evaluate(PAGE_HELPERS);
@@ -272,8 +349,14 @@ withApp(async (page, logs) => {
     await frames(page);
     await page.click('#ms-btn-take-clear');
     await frames(page);
-    const f = await freshness(page);
-    check('CLEAR straight after opening: plate 2 empty, plate 1 whole and active, the plate still read', isFresh(f) && f.source === 'plate', J(f));
+    const f = await page.evaluate(() => ({ open: NSO_MICROSCOPE.isOpen(), plate: NSO_MICROSCOPE.plate(), lens: NSO_MICROSCOPE.plateDoc('lens'), take: NSO_MICROSCOPE.plateDoc('take'),
+                                           st: window.__t.status(), sub: document.getElementById('ms-sub').textContent }));
+    check('CLEAR straight after opening: the start-over - plate 1 (the plate read) empty and active, plate 2 empty, G-scope open',
+      f.open && f.plate === 'lens' && f.lens === null && f.take === null && /Plate 1 cleared/.test(f.st) && /^Plate 1 - empty/.test(f.sub), J(f));
+    await page.click('#ms-btn-plate');
+    await page.waitForFunction(() => NSO_MICROSCOPE.lensDoc() && NSO_MICROSCOPE.lensDoc().source === 'plate', null, { timeout: 30000 });
+    await frames(page);
+    check('...and Read plate fills it again: a fresh read, nothing kept', isFresh(await freshness(page)));
     check('...and no page error so far', logs.filter(l => /^\[pageerror\]/.test(l)).length === 0, logs.filter(l => /^\[pageerror\]/.test(l)).slice(0, 2).join(' | '));
     await page.evaluate(() => NSO_MICROSCOPE.close());
   }
@@ -326,7 +409,7 @@ withApp(async (page, logs) => {
       sub: document.getElementById('ms-sub').textContent, info: document.getElementById('ms-info').textContent, zr: document.getElementById('ms-zr').hidden,
       badge: document.getElementById('ms-mode-badge').textContent, out: window.__t.outlines(), floors: window.__t.floorsPx(), st: window.__t.status() }));
     check('a click on plate 2: it is active - its outline lit, plate 1\'s dimmed', t.plate === 'take' && t.out[1] !== t.out[0], J(t.out));
-    check('...and the Features list, the header, the info and the slider are plate 2\'s (empty)', t.rows === 0 && /^Plate 2/.test(t.sub) && /Nothing on plate 2/.test(t.info) && t.zr && /Plate 2: 0/.test(t.badge), J({ sub: t.sub.slice(0, 30), info: t.info.slice(0, 40), badge: t.badge }));
+    check('...and the Features list, the header, the info and the slider are plate 2\'s (empty)', t.rows === 0 && /^Plate 2/.test(t.sub) && /Plate 2 is empty/.test(t.info) && t.zr && /Plate 2: empty/.test(t.badge), J({ sub: t.sub.slice(0, 30), info: t.info.slice(0, 40), badge: t.badge }));
     check('...and nothing moved on screen: both floors where they were', J(t.floors) === J(floors0));
     await shot('02-plate2-active');
     await clickPlate(page, 'lens');
@@ -397,12 +480,13 @@ withApp(async (page, logs) => {
     await page.mouse.move(from[0], from[1]);
     await page.mouse.down();
     await page.mouse.move(from[0] + 40, from[1] + 30, { steps: 5 });
-    const mid = await page.evaluate(() => ({ n: NSO_MICROSCOPE.takePieces().length, live: nsoGrab.live() }));
-    check('mid-drag: a sixth piece is in hand', mid.live && mid.n === n0 + 1, J(mid));
+    const mid = await page.evaluate(() => ({ n: NSO_MICROSCOPE.takePieces().length, live: nsoGrab.live(), ghost: !!NSO_MICROSCOPE.getView().scene.getObjectByName('gscopeGhost') }));
+    check('mid-drag: the copy is in hand - the ghost - and plate 2 is not changed yet', mid.live && mid.ghost && mid.n === n0, J(mid));
     await page.keyboard.press('Escape');
     await frames(page);
     const esc = await page.evaluate(() => ({ plate: NSO_MICROSCOPE.plate(), n: NSO_MICROSCOPE.takePieces().length, grab: nsoGrab.active(), open: NSO_MICROSCOPE.isOpen() }));
-    check('Escape mid-drag: cancelled, plate 1 active, nothing kept, G-scope still open', esc.plate === 'lens' && esc.n === n0 && !esc.grab && esc.open, J(esc));
+    check('Escape mid-drag: cancelled, plate 1 active, nothing kept, the ghost gone, G-scope still open', esc.plate === 'lens' && esc.n === n0 && !esc.grab && esc.open &&
+      await page.evaluate(() => !NSO_MICROSCOPE.getView().scene.getObjectByName('gscopeGhost')), J(esc));
     await page.mouse.move(from[0] + 80, from[1] + 50, { steps: 3 });
     await page.mouse.up();
     await frames(page);
@@ -435,26 +519,13 @@ withApp(async (page, logs) => {
     const dist = Math.hypot(moved.at[0] - dot.at[0], moved.at[1] - dot.at[1], moved.at[2] - dot.at[2]);
     check('pressing the box\'s centre dot moves the box - it does not copy', moved.plate === 'lens' && dist > 2 && moved.n === n0, J(moved) + ' moved ' + dist.toFixed(1) + ' mm');
     await page.evaluate(() => { const M = NSO_MICROSCOPE; M.clearBoxes(); M.setMode('orbit'); });
-    // a plate 2 piece carried over plate 1 goes back
-    await clickPlate(page, 'take');
-    const nm = (await T(page, () => NSO_MICROSCOPE.takePieces().map(p => p.name)))[4];
-    const lens0 = await lensState(page);
-    const b0 = await T(page, n => NSO_MICROSCOPE.takePieces().find(p => p.name === n).bounds, nm);
-    const fromP = await T(page, n => window.__t.piecePx(n, 0), nm);
-    const overLens = await T(page, () => window.__t.bareFloorPx('lens'));
-    await drag(page, fromP, overLens, true);
-    const ov = await page.evaluate(() => ({ mode: nsoGrab.mode(), st: window.__t.status() }));
-    check('a plate 2 piece carried over plate 1: "let go here and it goes back"', ov.mode === 'air' && /Over plate 1/.test(ov.st), J(ov));
-    await page.mouse.up();
-    await frames(page);
-    const b1 = await T(page, n => NSO_MICROSCOPE.takePieces().find(p => p.name === n).bounds, nm);
-    check('...let go there: back where it was on plate 2, plate 1 untouched', J(b0) === J(b1) && await plate(page) === 'take' && await lensState(page) === lens0, J([b0.minX, b1.minX, await plate(page)]));
   }
 
   /* ------------------------------------------------------------------ 5 */
   console.log('\n=== 5. pieces on plate 2: grab and drop ===');
   let layerPiece, boxPiece;
   {
+    await clickPlate(page, 'take');
     await page.evaluate(() => { NSO_MICROSCOPE.showAll(); NSO_MICROSCOPE.setMode('orbit'); NSO_MICROSCOPE.clearBoxes(); });
     const names = await page.evaluate(() => NSO_MICROSCOPE.takePieces().map(p => p.name));
     boxPiece = names[4]; layerPiece = names[2];
@@ -462,7 +533,7 @@ withApp(async (page, logs) => {
     const b0 = (await info(layerPiece)).b;
     await drag(page, await T(page, n => window.__t.piecePx(n, 0), layerPiece), await T(page, () => window.__t.bedPx(30, 30)), true);
     const live = await page.evaluate(() => ({ g: nsoGrab.active(), mode: nsoGrab.mode(), w: nsoGrab.world() && nsoGrab.world().name, st: window.__t.status() }));
-    check('pressed on a plate 2 piece and carried: the main plate\'s grab, in plate 2\'s world', live.g && live.w === 'take' && live.mode === 'plate' && /Over the plate - let go to set/.test(live.st), J(live));
+    check('pressed on a plate 2 piece and carried: the main plate\'s grab, the piece world', live.g && live.w === 'piece' && live.mode === 'plate' && /Over the plate - let go to set/.test(live.st), J(live));
     await page.mouse.up();
     await frames(page);
     const b1 = (await info(layerPiece)).b;
@@ -502,8 +573,38 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 6 */
-  console.log('\n=== 6. Export acts on the active plate ===');
+  console.log('\n=== 6. the other way: a plate 2 piece dragged onto plate 1 ===');
   {
+    await page.evaluate(() => { NSO_MICROSCOPE.setMode('orbit'); NSO_MICROSCOPE.clearBoxes(); });
+    const nm = boxPiece;
+    const lens0 = await page.evaluate(() => NSO_MICROSCOPE.plateDoc('lens').objects.length);
+    const b0 = await T(page, n => NSO_MICROSCOPE.takePieces().find(p => p.name === n).bounds, nm);
+    await page.evaluate(n => { window.__grabbedName = n; }, nm);
+    const from = await T(page, n => window.__t.piecePx(n, 0), nm);
+    const to = await T(page, () => window.__t.floorPx('lens', 0.3, 0.3));
+    const dd = await driveDrag(page, from, to, 16);
+    const ov = await page.evaluate(() => ({ mode: nsoGrab.mode(), st: window.__t.status() }));
+    check('a plate 2 piece carried over plate 1 slides on plate 1\'s bed, under the pointer on every move', dd.carried === dd.moves && ov.mode === 'plate' &&
+      /Over plate 1 - let go to copy/.test(ov.st), J({ carried: dd.carried, moves: dd.moves, misses: dd.misses, mode: ov.mode, st: ov.st.slice(0, 60) }));
+    const spacing = await page.evaluate(() => -NSO_MICROSCOPE.plateOffset('lens'));     // plate 2 is active: plate 1 stands one spacing left
+    await page.mouse.up();
+    await frames(page);
+    await page.evaluate(() => { window.__grabbedName = null; });
+    const after = await page.evaluate(() => { const d = NSO_MICROSCOPE.plateDoc('lens'), o = d.objects[d.objects.length - 1];
+      return { plate: NSO_MICROSCOPE.plate(), n: d.objects.length, name: o.name, box: window.__t.pieceBox(o.name), st: window.__t.status() }; });
+    check('let go over plate 1: copied there - one more piece on plate 1 (a plate read), plate 1 active', after.plate === 'lens' && after.n === lens0 + 1 && /copied onto plate 1/.test(after.st), J(after));
+    // the carried box was in plate 2's frame; plate 1 is at the origin now, one spacing to the right
+    const want = dd.last && dd.last.map((v, i) => i % 3 === 0 ? v + spacing : v);
+    check('...where it was let go - no jump on release', !!want && after.box.every((v, i) => Math.abs(v - want[i]) < 1e-3), J({ want, got: after.box }));
+    const b1 = await page.evaluate(n => { const d = NSO_MICROSCOPE.plateDoc('take'); return d.objects.find(o => o.name === n).bounds; }, nm);
+    check('...and plate 2 keeps it, where it was', J(b0) === J(b1));
+    await shot('06-copied-back');
+  }
+
+  /* ------------------------------------------------------------------ 6b */
+  console.log('\n=== 6b. Export acts on the active plate ===');
+  {
+    await clickPlate(page, 'take');
     const sliced = await page.evaluate(() => NSO_MICROSCOPE.takePieces().filter(p => p.moves > 0).map(p => p.name));
     check('the pieces copied off the slice kept their beads; the plate piece did not', sliced.length === 4, J(sliced));
     await page.evaluate(n => NSO_MICROSCOPE.selectObjects([n], 'pick'), sliced[0]);
@@ -529,10 +630,10 @@ withApp(async (page, logs) => {
     // plate 1 active: the Selection, as always
     await clickPlate(page, 'lens');
     await page.evaluate(() => { const M = NSO_MICROSCOPE; M.selectObjects([M.getDoc().objects[0].name], 'pick'); });
-    await page.click('#ms-nav-export');
+    if (!(await page.evaluate(() => document.getElementById('ms-card-export').classList.contains('is-open')))) await page.click('#ms-nav-export');
     const lg = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-card-export .ms-xgroup')).map(x => ({
       t: x.querySelector('.ms-section-title').textContent.trim(), shown: getComputedStyle(x).display !== 'none' && x.getBoundingClientRect().height > 0 })));
-    check('plate 1 active: Export is the Selection, no "Whole plate"', lg[0].t === 'Selection' && lg[0].shown && !lg[2].shown, J(lg));
+    check('plate 1 active (a plate read): Export is the Selection, and "Whole plate" - its pieces', lg[0].t === 'Selection' && lg[0].shown && lg[2].shown, J(lg));
     await page.click('#ms-nav-export');
     await page.evaluate(() => { window.__dl.length = 0; });
     await page.click('#ms-btn-export-stl');
@@ -624,7 +725,7 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 7b */
-  console.log('\n=== 7b. CLEAR and Shift-CLEAR mid-session ===');
+  console.log('\n=== 7b. CLEAR empties the active plate and nothing else ===');
   {
     // plate 1 is the import: dirty it, put a piece on plate 2
     await page.evaluate(() => { const M = NSO_MICROSCOPE; M.setMode('orbit'); M.clearBoxes(); M.selectLayer(1); });
@@ -644,26 +745,121 @@ withApp(async (page, logs) => {
     const dirty = await freshness(page);
     check('mid-session: plate 1 isolated, cleared from view, a line type soloed, the slider narrowed; a piece on plate 2',
       dirty.isolated && dirty.cleared > 0 && dirty.featuresOff.length > 1 && !dirty.zrAll && dirty.take === 1, J(dirty));
-    await clickPlate(page, 'take');
+    // CLEAR on plate 2: plate 2 empty, plate 1 exactly as it was (still dirty)
+    await page.click('#ms-btn-frame');                 // Isolate turned to plate 1's layer: both plates in view again
+    await frames(page);
+    const lens0 = await lensState(page);
+    check('plate 2 is clickable', await clickPlate(page, 'take'));
     await page.click('#ms-btn-take-clear');
     await frames(page);
-    const c = await freshness(page);
-    check('CLEAR: plate 2 empty, plate 1 whole again (nothing isolated, cleared, switched off or selected; slider at All) and active', isFresh(c), J(c));
-    check('...plate 1 is still the import', c.doc === 'gt.gcode.3mf' && await page.evaluate(() => NSO_MICROSCOPE.getDoc().name) === 'gt.gcode.3mf');
-    // Shift-CLEAR: the import dropped, the plate read again
-    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.selectLayer(1); });
-    await drag(page, await T(page, () => window.__t.segPx()), await T(page, () => window.__t.bedPx(0, 0)));
-    check('one piece copied again', await takeN(page) === 1);
-    await page.click('#ms-btn-take-clear', { modifiers: ['Shift'] });
-    await page.waitForFunction(() => NSO_MICROSCOPE.lensDoc() && NSO_MICROSCOPE.lensDoc().source === 'plate', null, { timeout: 30000 });
+    const c2 = await page.evaluate(() => ({ plate: NSO_MICROSCOPE.plate(), take: NSO_MICROSCOPE.plateDoc('take'), st: window.__t.status() }));
+    check('CLEAR with plate 2 active: plate 2 empty, plate 2 still active', c2.plate === 'take' && c2.take === null && /Plate 2 cleared/.test(c2.st), J(c2));
+    check('...and plate 1 not touched - byte-identical, still isolated and narrowed', await lensState(page) === lens0);
+    // a piece back on plate 2, then CLEAR on plate 1: plate 1 empty, plate 2 not touched
+    await activateLens(page);
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.back(); M.selectLayer(1); });
     await frames(page);
-    const s = await freshness(page);
-    check('Shift-CLEAR: plate 2 empty, the import dropped, the plate read again, all clean', isFresh(s) && s.source === 'plate' &&
-      await page.evaluate(() => NSO_MICROSCOPE.lensDoc().objects.length === state.placed.length && NSO_MICROSCOPE.imported() === null), J(s));
+    await drag(page, await T(page, () => window.__t.segPx()), await T(page, () => window.__t.bedPx(0, 0)));
+    const take0 = await T(page, () => window.__t.content('take'));
+    await activateLens(page);
+    await page.click('#ms-btn-take-clear');
+    await frames(page);
+    const c1 = await page.evaluate(() => ({ plate: NSO_MICROSCOPE.plate(), lens: NSO_MICROSCOPE.plateDoc('lens'), rows: document.querySelectorAll('#ms-legend .ms-legend-item').length,
+                                            sub: document.getElementById('ms-sub').textContent, imported: NSO_MICROSCOPE.imported() }));
+    check('CLEAR with plate 1 active: plate 1 empty (no document, no Features rows), plate 1 still active', c1.plate === 'lens' && c1.lens === null && c1.rows === 0 && /^Plate 1 - empty/.test(c1.sub), J(c1));
+    check('...and plate 2 not touched', await T(page, () => window.__t.content('take')) === take0);
+    check('...and the import it showed is forgotten (the start-over)', c1.imported === null);
+    // an emptied plate is ready for Import and Read plate
+    await page.click('#ms-btn-plate');
+    await page.waitForFunction(() => NSO_MICROSCOPE.lensDoc() && NSO_MICROSCOPE.lensDoc().source === 'plate', null, { timeout: 30000 });
+    check('Read plate onto the emptied plate 1', await page.evaluate(() => NSO_MICROSCOPE.lensDoc().objects.length === state.placed.length));
+    // Shift-CLEAR is CLEAR
+    await page.click('#ms-btn-take-clear', { modifiers: ['Shift'] });
+    await frames(page);
+    const sc = await page.evaluate(() => ({ lens: NSO_MICROSCOPE.plateDoc('lens'), plate: NSO_MICROSCOPE.plate() }));
+    check('Shift-CLEAR is CLEAR: plate 1 empty, nothing read again, plate 2 not touched',
+      sc.lens === null && sc.plate === 'lens' && await T(page, () => window.__t.content('take')) === take0, J({ lens: sc.lens && sc.lens.name, plate: sc.plate }));
+    await importFile(page, SLICE);
+    await page.waitForFunction(() => NSO_MICROSCOPE.lensDoc() && NSO_MICROSCOPE.lensDoc().kind === 'toolpath', null, { timeout: 30000 });
+    check('Import onto the emptied plate 1', await page.evaluate(() => NSO_MICROSCOPE.lensDoc().name) === 'toolpath-ground-truth.gcode.3mf');
+    await page.click('#ms-btn-take-clear');
     await page.click('#ms-close');
     await page.click('#btn-microscope');
     await page.waitForFunction(() => NSO_MICROSCOPE.isOpen() && NSO_MICROSCOPE.lensDoc(), null, { timeout: 30000 });
-    check('...and the import stays dropped across a CLOSE', await page.evaluate(() => NSO_MICROSCOPE.lensDoc().source) === 'plate');
+    check('...CLEAR on it, CLOSE, open: the plate read again (the import went with the CLEAR)', await page.evaluate(() => NSO_MICROSCOPE.lensDoc().source) === 'plate');
+  }
+
+  /* ------------------------------------------------------------------ 7 */
+  console.log('\n=== 7. Import and Read plate load into the active plate; the same content exports the same from either ===');
+  {
+    // plate 2 active: Read plate, then Import, land there; plate 1 is not touched
+    const lens0 = await lensState(page);
+    await clickPlate(page, 'take');
+    await page.click('#ms-btn-plate');
+    await page.waitForFunction(() => NSO_MICROSCOPE.plateDoc('take') && NSO_MICROSCOPE.plateDoc('take').source === 'plate', null, { timeout: 30000 });
+    check('Read plate with plate 2 active: the plate read onto plate 2, plate 2 active', await plate(page) === 'take' &&
+      await page.evaluate(() => NSO_MICROSCOPE.plateDoc('take').objects.length === state.placed.length));
+    check('...plate 1 not touched', await lensState(page) === lens0);
+    await importFile(page, SLICE);
+    await page.waitForFunction(() => NSO_MICROSCOPE.plateDoc('take') && NSO_MICROSCOPE.plateDoc('take').kind === 'toolpath', null, { timeout: 30000 });
+    await frames(page);
+    const t = await page.evaluate(() => ({ plate: NSO_MICROSCOPE.plate(), rows: document.querySelectorAll('#ms-legend .ms-legend-item').length, zr: !document.getElementById('ms-zr').hidden,
+                                           layers: NSO_MICROSCOPE.layerCount(), sub: document.getElementById('ms-sub').textContent }));
+    check('Import with plate 2 active: the slice on plate 2 - its Features list, slider and layers', t.plate === 'take' && t.rows >= 3 && t.zr && t.layers > 1, J(t));
+    check('...plate 1 not touched', await lensState(page) === lens0);
+    // the same slice on plate 1 too: Select and Export the same on either plate
+    await activateLens(page);
+    await importFile(page, SLICE);
+    await page.waitForFunction(() => NSO_MICROSCOPE.lensDoc() && NSO_MICROSCOPE.lensDoc().kind === 'toolpath', null, { timeout: 30000 });
+    const exportOn = async (n) => {
+      if (await plate(page) !== n) await clickPlate(page, n);
+      await page.evaluate(() => { const M = NSO_MICROSCOPE; M.clearBoxes(); M.selectLayer(2); window.__dl.length = 0; });
+      await page.click('#ms-nav-export');
+      await page.click('#ms-btn-export-stl');
+      await page.click('#ms-nav-export');
+      return page.evaluate(async () => { const d = window.__dl[0]; return d ? { name: d.name, bytes: Array.from(new Uint8Array(await d.blob.arrayBuffer())) } : null; });
+    };
+    const e1 = await exportOn('lens'), e2 = await exportOn('take');
+    check('the same slice on both plates: the same layer exported from plate 1 and from plate 2 - byte-identical STLs', !!e1 && !!e2 && e1.bytes.length > 84 &&
+      J(e1.bytes) === J(e2.bytes) && e1.name === e2.name, J({ a: e1 && [e1.name, e1.bytes.length], b: e2 && [e2.name, e2.bytes.length] }));
+    // Whole plate: the same STL on both plates
+    const whole = async (n) => {
+      if (await plate(page) !== n) await clickPlate(page, n);
+      await importFile(page, BOX);
+      await page.waitForFunction(() => NSO_MICROSCOPE.getDoc() && NSO_MICROSCOPE.getDoc().kind === 'mesh', null, { timeout: 30000 });
+      await page.evaluate(() => { window.__dl.length = 0; });
+      await page.click('#ms-nav-export');
+      await page.click('#ms-btn-take-export-stl');
+      await page.click('#ms-nav-export');
+      return page.evaluate(async () => { const d = window.__dl[0]; return d ? { name: d.name, bytes: Array.from(new Uint8Array(await d.blob.arrayBuffer())) } : null; });
+    };
+    const w1 = await whole('lens'), w2 = await whole('take');
+    const boxTris = await page.evaluate(() => NSO_MICROSCOPE.getDoc().objects.reduce((a, o) => a + o.triangles, 0));
+    check('the same STL on both plates: Whole plate as STL from each - byte-identical (Plate_1.stl, Plate_2.stl)', !!w1 && !!w2 && w1.name === 'Plate_1.stl' && w2.name === 'Plate_2.stl' &&
+      J(w1.bytes) === J(w2.bytes) && w1.bytes.length === 84 + 50 * boxTris, J({ a: w1 && [w1.name, w1.bytes.length], b: w2 && [w2.name, w2.bytes.length], tris: boxTris }));
+    // a slice on plate 1, pieces of plate 2 go INTO it
+    await activateLens(page);
+    await importFile(page, SLICE);
+    await page.waitForFunction(() => NSO_MICROSCOPE.lensDoc() && NSO_MICROSCOPE.lensDoc().kind === 'toolpath', null, { timeout: 30000 });
+    await clickPlate(page, 'take');
+    await page.click('#ms-btn-take-clear');
+    await activateLens(page);
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.clearBoxes(); M.selectLayer(1); });
+    await frames(page);
+    await drag(page, await T(page, () => window.__t.segPx()), await T(page, () => window.__t.bedPx(0, 0)));
+    check('a layer of the slice on plate 1 copied onto the empty plate 2: one piece', await plate(page) === 'take' && await takeN(page) === 1);
+    const n1 = await page.evaluate(() => NSO_MICROSCOPE.lensDoc().segments.length);
+    const pc = await page.evaluate(() => NSO_MICROSCOPE.takePieces()[0]);
+    await page.evaluate(n => { window.__grabbedName = n; }, pc.name);
+    const dd = await driveDrag(page, await T(page, n => window.__t.piecePx(n, 0), pc.name), await T(page, () => window.__t.floorPx('lens', 0.25, -0.25)), 14);
+    await page.mouse.up();
+    await frames(page);
+    await page.evaluate(() => { window.__grabbedName = null; });
+    const j = await page.evaluate(() => { const d = NSO_MICROSCOPE.lensDoc(); return { plate: NSO_MICROSCOPE.plate(), n: d.segments.length, sel: NSO_MICROSCOPE.selection().length,
+      objs: new Set(d.segments.map(s => s.obj)).size, layers: NSO_MICROSCOPE.layerCount(), st: window.__t.status() }; });
+    check('...dragged back onto plate 1, a slice: carried under the pointer every move; its moves JOIN the slice as one more object, selected', dd.carried === dd.moves &&
+      j.plate === 'lens' && j.n === n1 + pc.moves && j.sel === pc.moves && /joins the slice/.test(j.st), J({ carried: dd.carried, moves: dd.moves, j, n1, pcMoves: pc.moves }));
+    await shot('07-joined-slice');
   }
 
   /* ------------------------------------------------------------------ 9 */
@@ -703,7 +899,7 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 7c */
-  console.log('\n=== 7c. Shift-CLEAR from a fresh page ===');
+  console.log('\n=== 7c. Shift-CLEAR from a fresh page is CLEAR ===');
   {
     await page.reload();
     await page.waitForFunction(() => window.NSO_MICROSCOPE && window.state, null, { timeout: 30000 });
@@ -714,16 +910,14 @@ withApp(async (page, logs) => {
     await page.waitForFunction(() => NSO_MICROSCOPE.isOpen() && NSO_MICROSCOPE.getDoc(), null, { timeout: 30000 });
     await frames(page);
     await page.click('#ms-btn-take-clear', { modifiers: ['Shift'] });
-    await page.waitForFunction(() => NSO_MICROSCOPE.lensDoc() && NSO_MICROSCOPE.lensDoc().source === 'plate', null, { timeout: 30000 });
     await frames(page);
-    const f = await freshness(page);
-    check('Shift-CLEAR straight after opening a fresh page: the plate read again, both plates clean', isFresh(f) && f.source === 'plate', J(f));
-    // and an import on a fresh page, dropped by Shift-CLEAR
+    check('Shift-CLEAR straight after opening a fresh page: plate 1 empty (nothing read again), plate 2 empty',
+      await page.evaluate(() => NSO_MICROSCOPE.plateDoc('lens') === null && NSO_MICROSCOPE.plateDoc('take') === null && NSO_MICROSCOPE.isOpen()));
+    // an import there, then CLEAR: the import is forgotten
     await page.evaluate(([b, n]) => NSO_MICROSCOPE.openFile(n, new Uint8Array(b).buffer), [bytes, 'gt.gcode.3mf']);
     await page.waitForFunction(() => NSO_MICROSCOPE.lensDoc() && NSO_MICROSCOPE.lensDoc().kind === 'toolpath', null, { timeout: 30000 });
-    await page.click('#ms-btn-take-clear', { modifiers: ['Shift'] });
-    await page.waitForFunction(() => NSO_MICROSCOPE.lensDoc() && NSO_MICROSCOPE.lensDoc().source === 'plate', null, { timeout: 30000 });
-    check('...and an import there is dropped by it too', await page.evaluate(() => NSO_MICROSCOPE.imported()) === null);
+    await page.click('#ms-btn-take-clear');
+    check('...an import there, CLEAR: plate 1 empty and the import forgotten', await page.evaluate(() => NSO_MICROSCOPE.imported() === null && NSO_MICROSCOPE.lensDoc() === null));
   }
 
   const errs = logs.filter(l => /^\[pageerror\]/.test(l) || /^\[error\]/.test(l)).filter(l => !/Failed to load resource/.test(l));

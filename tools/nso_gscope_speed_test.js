@@ -46,6 +46,8 @@
         (33 ms), and neither does a press on plate 2
      6. the move that makes a pull's copy at most half d7abbea's: <= 7.2 ms
         per thousand moves copied (d7abbea 14.4, 346bc38 13.6)
+     7. the copy in hand - the ghost - is drawn on every frame of the pull, from
+        the slop to the release (docs/GSCOPE.md item 11), on both files
 
    NSO_GSCOPE_SPEED_ROOT=<a checkout> measures that tree with this script
    (an older commit, for the before / after).
@@ -112,7 +114,9 @@ const HELPERS = `
 window.__s = (function () {
   const M = () => window.NSO_MICROSCOPE, V = () => M().getView();
   let clock = null;
-  const tick = ts => { if (!clock) return; clock.ts.push(ts); requestAnimationFrame(tick); };
+  const ghostNow = () => !!V().scene.getObjectByName('gscopeGhost');
+  // every frame: the time, and whether a pull's copy (the ghost) is in the scene
+  const tick = ts => { if (!clock) return; clock.ts.push(ts); clock.ghost.push(ghostNow()); requestAnimationFrame(tick); };
   /* both renderers' render(), timed and counted */
   const timeRender = (r, key) => {
     if (r.__timed) return;
@@ -126,7 +130,7 @@ window.__s = (function () {
     start() {
       timeRender(V().renderer, 'gs');
       if (window.state && state.renderer) timeRender(state.renderer, 'main');
-      clock = { ts: [], gs: [], main: [] };
+      clock = { ts: [], gs: [], main: [], ghost: [] };
       window.__cpu.evs = []; window.__cpu.on = true;
       requestAnimationFrame(tick);
     },
@@ -136,12 +140,11 @@ window.__s = (function () {
       window.__cpu.evs.forEach(e => { (c.ev[e.type] = c.ev[e.type] || []).push(e.__cpu); });
       return c;
     },
-    /* the piece being carried (a pull's copy, or the plate 2 piece grabbed): where it stands */
+    /* what is being carried (a pull's copy - the ghost - or the piece grabbed): where it stands */
     carried() {
-      const d = M().getDoc();
-      if (!d || !d.objects || !(window.nsoGrab && nsoGrab.active())) return null;
-      const o = d.objects.find(x => x.pulling) || d.objects.find(x => x.name === window.__grabbed);
-      const m = o && V().overviewMeshes[o.name];
+      if (!(window.nsoGrab && nsoGrab.active())) return null;
+      let m = V().scene.getObjectByName('gscopeGhost');
+      if (!m) { const d = M().getDoc(); const o = d && d.objects && d.objects.find(x => x.name === window.__grabbed); m = o && V().overviewMeshes[o.name]; }
       return m && m.parent ? m.position.toArray().map(x => +x.toFixed(4)) : null;
     },
     /* a canvas pixel a press would take as the piece (piece mode) */
@@ -269,6 +272,7 @@ async function pullDrive(page, n) {
     followedTo2: moved.slice(h).filter(Boolean).length + '/' + h,
     followed: moved.filter(Boolean).length,
     moveMaxAfterStart: r1(Math.max(0, ...pm.slice(live + 1))),
+    ghostFrames: (() => { const g = c.ghost, a = g.indexOf(true), b = g.lastIndexOf(true); return a < 0 ? '0/0' : g.slice(a, b + 1).filter(Boolean).length + '/' + (b - a + 1); })(),
     slowest: pm.map((t, i) => [i, r1(t)]).slice(live + 1).sort((x, y) => y[1] - x[1]).slice(0, 3),
     releaseMs: r1(Math.max(0, ...(c.ev.pointerup || [0])))
   });
@@ -351,7 +355,8 @@ withApp(async (page, logs) => {
   if (JSON_ONLY) { console.log(JSON.stringify(R)); return; }
 
   const pullLine = (p) => 'mousedown -> first frame drawn ' + p.downToFirstFrameMs + ' ms; the move that starts it ' + p.startMoveMs + ' ms (' + p.copied +
-    ' moves copied); later moves max ' + p.moveMaxAfterStart + ' ms; followed ' + p.followedOn1 + ' on plate 1, ' + p.followedTo2 + ' to plate 2; release ' + p.releaseMs + ' ms';
+    ' moves copied); later moves max ' + p.moveMaxAfterStart + ' ms; followed ' + p.followedOn1 + ' on plate 1, ' + p.followedTo2 + ' to plate 2; ghost on ' +
+    p.ghostFrames + ' frames; release ' + p.releaseMs + ' ms';
   const p2Line = (q) => 'press ' + q.pressMs + ' ms; followed ' + q.followed + '/' + q.n + '; moves max ' + q.moveMax + ' ms; release ' + q.releaseMs + ' ms';
   say('  idle   ' + R.idle.fps + ' fps; main viewport rendered ' + R.idle.mainRenders + 'x');
   say('  orbit  ' + R.orbit.fps + ' fps on the box\'s software GPU (' + R.orbit.frameMs + ' ms/frame); main thread ' + R.orbit.cpuPerFrame + ' ms a frame; per pointermove ' +
@@ -385,6 +390,10 @@ withApp(async (page, logs) => {
   const perK = R.pull && R.pull.startMoveMs != null && R.pull.copied ? r1(R.pull.startMoveMs / (R.pull.copied / 1000)) : null;
   check('6. the move that makes the copy (12 triangles a move, built and drawn) at most half d7abbea\'s: <= 7.2 ms per thousand moves copied (d7abbea: 14.4)',
     perK != null && perK <= 7.2, R.pull && (R.pull.startMoveMs + ' ms for ' + R.pull.copied + ' moves - ' + perK + ' ms per thousand'));
+  [['the small slice', R.small.pull], [path.basename(FILE), R.pull]].forEach(([nm, p]) => {
+    const g = p && p.ghostFrames ? p.ghostFrames.split('/').map(Number) : [0, 0];
+    check('7. the copy (the ghost) is drawn on every frame from the slop to the release (' + nm + ')', g[1] > 0 && g[0] === g[1], p && p.ghostFrames);
+  });
   check('no page error', !R.pageErrors.length, R.pageErrors.join(' | '));
   console.log(fails ? '\n' + fails + ' gate(s) FAILED' : '\nevery gate held');
   process.exitCode = fails ? 1 : 0;
