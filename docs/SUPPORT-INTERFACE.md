@@ -50,9 +50,10 @@ The same four layers and gap under the z 80 ceiling.
 ```
 
 Each of the four layers is **one closed perimeter loop round the sheet's
-footprint, then one serpentine inside it** - line, U-turn, line ... at a 0.84
-mm pitch - its turns joined to the loop, the whole layer one connected thin
-wall. T1, T2 and I2 are the same; I1 runs across them in the same loop. That is
+footprint, then, apart from it, one serpentine inside it** - line, U-turn,
+line ... at a 0.84 mm pitch - its turns standing in from the loop, never
+touching it: two thin walls, each drawn once. T1, T2 and I2 are the same; I1
+runs across them in the same loop. That is
 Bambu's own tree on the same coupon (`thinwall_sideXside.gcode.3mf`, tree
 slim): every layer at z 12.58 / 12.86 / 13.13 / 13.40 opens with its loop,
 22.24 x 14.34 mm, then 13.6 mm lines with 0.84 mm turns (I1: across), 29 / 29
@@ -81,30 +82,33 @@ printed in the same layers as the lines, and every line was an island. So now:
   cap's top, the union left a T-junction it read as piercing (2 pairs on the
   clamp's area 2); sunk, it cuts the caps' upright top band. The parts, and so
   the export and every slice, keep z_cap exact.
-- **A loop and a serpentine each piece, each layer.** The sheet lies on a grid
-  at the pitch both ways in its frame (A along T's lines, B across). Each
-  piece of it has ONE loop round its outline - a rectangle, or a stepped
-  rectilinear outline, as Bambu's loops follow the region, not a bounding box
-  - and ONE serpentine inside it whose lines run from one side of the loop to
-  the other and whose turns are walked along the loop (the loop's own segments:
-  Bambu draws its turns 0.36 mm in from its loop's middle, inside the bead -
-  the same solid). A piece with a hole (a ring round a boss) has the hole's
-  outline joined to its loop by a slit along its own inner edges: still one
-  closed loop. Loop and serpentine go through `NSO_RasterLines.extrudeFlat` as
-  one graph; the channels between the lines are closed at both ends, so a
-  piece's section is ONE region whose holes are the channels and whose outer
-  boundary is its loop, one bead wide (`support:interface` 1c, measured on the
-  parts built).
+- **A loop and, apart from it, a serpentine each piece, each layer.** The sheet
+  lies on a grid at the pitch both ways in its frame (A along T's lines, B
+  across). Each piece has ONE loop round its outline - a rectangle, or a
+  stepped rectilinear outline, as Bambu's loops follow the region - and ONE
+  serpentine on the piece's inner grid points (a point all four of whose cells
+  are the piece's), so every line and turn of it stands a pitch off the loop: a
+  clear gap of 0.41 mm, a line width (Bambu's turns stand 0.36 mm in from its
+  loop). **The turns never touch the loop.** With them on it (this branch's
+  first build) loop and lines fused into one region with every channel closed
+  and a slicer traced every channel - each line twice: on the owner's plate
+  (`thinwall_supports_bambu.gcode.3mf`) our layers printed 610-856 mm in
+  1,350-2,700 segments, Bambu's 434 mm in 54. Now a layer's section is exactly
+  TWO regions a piece - the loop, one bead wide, and the serpentine inside it
+  - with no hole but the loop's own inside (`support:interface` 1c, measured
+  on the parts built).
 - **The pieces.** The field is every cap of the level dilated by 1.25 mm
   (`FIELD_MM`: caps 2 mm apart meet in it), inside the footprint (below), out
   of another level's cells. A grid cell is the sheet's when its four edges lie
-  in the field; runs of cells shorter than 2 mm either way go (every channel is
-  2 mm or longer; a rung between two of an outline's walls may be one pitch),
-  and so does a cell meeting another only at a corner. Each 4-connected set
-  left that carries two caps or more is a piece. **A piece whose largest
-  rectangle carries every cap it does is that rectangle** - the coupon's slab:
-  one, 21.84 x 14.28 mm - else its outline is stepped (the clamp's rings).
-  **No line ends in mid-air**: every line ends on its piece's loop.
+  in the field; runs of cells shorter than 2 mm either way go, and so does a
+  cell meeting another only at a corner; each 4-connected set left is a piece
+  of the field. **It is its largest rectangle where that carries as many caps
+  as its strips do** - the coupon's slab (21.84 x 14.28 mm) and leg (2.52 x
+  13.44 mm), one each - else its column strips: where a column splits round a
+  hole or two meet, the strips end and that column goes (a pitch between two
+  loops), so the clamp's ring round its boss is four strips, each its own loop
+  and serpentine. A cap is carried when a wall of T1, loop or serpentine,
+  either way, lies across it with its whole width on it.
 - **Caps spread before they narrow**: legs that lean to one node cross z_cap
   closer than their tips stand (the coupon's slab: caps 2.11 mm wide where
   they crossed), so two caps nearer than their widths allow first slide apart,
@@ -158,10 +162,12 @@ is 0.18.
 
 **The angle is chosen.** Of the candidates (0, 90, and the 1:2 and 1:1
 diagonals) the sheet takes the direction A whose pieces leave the fewest caps
-with no T line on them, then has the fewest pieces, then the fewest that are
-not rectangles, then the most sheet (in 5 % bands), then the shorter line (A
-across a rectangle's short side, as Bambu's), then the axes. The coupon's area
-1: 90 deg, as Bambu's.
+with no T wall on them, then has the fewest pieces, then the fewest that are
+not rectangles, then T's lines 2 mm or longer (a piece three cells across has
+room for 0.84 mm lines one way only: T, three layers of four, takes the long
+way, and I1 across it is short-lined, as Bambu's own I1 on the leg), then the
+most sheet (in 5 % bands), then the shorter line (A across a rectangle's short
+side, as Bambu's), then the axes. The coupon's area 1: 90 deg, as Bambu's.
 
 **The tips the sheet does not carry.**
 
@@ -181,24 +187,26 @@ across a rectangle's short side, as Bambu's), then the axes. The coupon's area
 The clamp at the card's defaults has four areas. Every flat ceiling carries a
 sheet, a piece at a time:
 
-| area | ceiling | tips carried / under a sheet / cut at the gap / side | pieces | lines T / I1 | caps (at 2.5-4 mm), widths |
+| area | ceiling | tips carried / under a sheet / cut at the gap / side | pieces (each a loop and a serpentine) | lines T / I1 | caps (at 2.5-4 mm), widths |
 | --- | --- | --- | --- | --- | --- |
-| 1 | z 72 flat (+ 45 deg chamfer 62-71, fillet 72-75) | 172 / 176 / 14 / 69 | one stepped outline, 57.12 x 57.96 mm, its ring round the boss joined by a slit | 95 / 96, 45 deg | 167 (142), 2.13-2.50 |
-| 2 | z 80 flat (a ring round the boss) | 45 / 45 / 0 / 0 | one stepped outline, 22.68 x 20.16 mm, its ring joined by a slit | 43 / 42, 63.43 deg | 37 (1), 1.29-2.50 |
+| 1 | z 72 flat (+ 45 deg chamfer 62-71, fillet 72-75) | 176 / 176 / 14 / 69 | four strips round the boss, stepped outlines 12.6 x 27.7, 21.0 x 31.9, 21.0 x 17.6, 21.8 x 46.2 mm | 87 / 130, 45 deg | 167 (142), 2.13-2.50 |
+| 2 | z 80 flat (a ring round the boss) | 45 / 45 / 0 / 0 | four strips, 5.0 x 16.8, 12.6 x 5.9, 12.6 x 11.8, 3.4 x 12.6 mm | 36 / 30, 63.43 deg | 37 (1), 1.29-2.50 |
 | 3 | z 0.8-2.0 (the bottom fillet, over the plate) | 0 / 0 / 0 / 27 | - | - | none: every tip is a side tip |
-| 4 | z 86 ridge | 3 / 3 / 0 / 0 | one rectangle, 8.40 x 3.36 mm | 9 / 3, 0 deg | 3 (3), 2.50 |
+| 4 | z 86 ridge | 3 / 3 / 0 / 0 | one rectangle, 3.36 x 8.40 mm | 3 / 9, 90 deg | 3 (3), 2.50 |
 
 `support:interface` holds the clamp's coverage: area 1 at least 161 tips
-carried, area 2 at least 34 - what one serpentine a level carried; one
-rectangle a level carried 84 and 14. Area 1's 14 tips cut at the gap sit on
+carried, area 2 at least 34 - what one serpentine a level carried (one
+rectangle a level carried 84 and 14). Area 1's 14 tips cut at the gap sit on
 two small levels (z 72.0) no piece of 2 mm lines fits.
 
 The coupon (`top_clip_x2`): area 1, the slab at z 13.5, 40 tips, 40 caps of
 2.50 mm, a 21.84 x 14.28 mm loop (Bambu's: 22.24 x 14.34) with 25 lines of
 14.28 mm at 90 deg in T1, T2 and I2 and 16 of 21.84 mm at 0 deg in I1; area 2,
 the leg at z 6.5, 9 tips 1.8 mm apart, 9 caps of 1.66-1.78 mm (left as they
-are for this print), one rectangle, 13.44 x 2.52 mm, its T lines across the
-short side (15 of 2.52 mm). Each area one rectangle. One support (one pad
+are for this print), one rectangle, 2.52 x 13.44 mm: T's two lines of 11.76 mm
+along it, I1's 15 lines of 0.84 mm across (a piece three cells across has
+room for no more; Bambu's own I1 on the leg is 55 % one way, 2.6 mm lines).
+Each area one rectangle. One support (one pad
 under both areas' trees) built in about 1.5-2 s.
 
 **Caps under 2.5 mm**: where tips stand under 2.55 mm apart even after the
@@ -213,18 +221,21 @@ gaps edge to edge 0.05-0.84 mm, never over 2 mm.
 - **Stack**: T1, T2, I1, I2, each one 0.2 mm layer, T1 on z_cap, the top 0.18
   mm under the ceiling; every cap's flat top exactly z_cap, measured on the
   parts built.
-- **Layers**: every piece a closed loop and one serpentine inside it, turns on
-  the loop, T2 and I2 T1's; every layer's mid-layer section one region a piece:
-  a rectangle's outline 0.000 mm off a rectangle the loop's size and a bead,
-  the loop 0.430 mm wide on all four sides; a stepped outline's edges on the
-  axes (under 2e-5) and its area the loop's polygon grown half a bead all
-  round (the clamp's area 1: 1863.77 mm2 against 1863.77). Lines: a
-  rectangle's 2 mm or longer, an outline's rungs 1.68 mm at the least. One
-  direction per layer (share 1.000 on the serpentine's lines), pitch 0.840.
-- **NSO's slicer**: every layer in closed paths, the shortest 3.3 mm (the
-  clamp's area 1) - the outline's loop and one round each channel, about two
-  passes over each line. It has no thin-wall mode; printing a layer in one
-  pass is a slicer ticket (`nso_slicer.js`), not this one.
+- **Layers**: every piece a closed loop and one serpentine a pitch inside it,
+  never touching it (0.840 mm centre to centre, a 0.410 mm gap), T2 and I2
+  T1's; every layer's mid-layer section TWO regions a piece - the loop, its
+  outline and its hole the loop's polygon grown and shrunk half a bead (the
+  coupon's slab: 22.270 x 14.710 round 21.410 x 13.850, the ring 31.06 mm2
+  against 31.06), and the serpentine inside it, with no hole of its own. One
+  direction per layer (share 0.94-0.96 on the coupon's slab), pitch 0.840; a
+  layer whose lines are under 2 mm on the whole (I1 on the coupon's leg and
+  the clamp's ridge) is read from the plan, and says so.
+- **NSO's slicer**: every layer in closed paths in its two regions a piece,
+  the shortest 23.5 mm (the clamp's ridge) - the coupon's slab: 3 paths a
+  layer (the loop's sliver as its two contours, 72.3 and 72.2 mm, the
+  serpentine's as one, 669.5 mm), about two passes over each line. It has no
+  thin-wall mode; printing a layer in one pass is a slicer ticket
+  (`nso_slicer.js`), not this one.
 - **Nothing above z_cap but the sheet** under any of its paths.
 - **Feet**: one pad per cluster, none split; pads 0.28 mm or more from the
   part. Below the zone the trunks are the planner's: area 1's nearest is
@@ -298,25 +309,30 @@ a bead for its outer wall - a 0.42 line is a **zero-width wall**.
   `detect_thin_wall` on, a line is one medial-axis pass at its width + 0.043.
 
 So the line is **0.43 mm** (`SHEET_OVER_MM` 0.01 over the bead), and each
-layer is **a loop and a serpentine** (section 3). NSO's slicer has no thin-wall
-mode: it draws a 0.43 wall as a closed loop round its sliver - the outline's,
-and one round each closed channel - so the coupon's slab prints in 27 closed
-paths a transition layer (18 in I1), every one 30 mm or longer, two passes
-over each line (`support:interface` 1d). Under a bead (0.40, 0.36, 0.30) it
-draws nothing.
+layer is **a loop and, apart from it, a serpentine** (section 3): two thin
+walls, each drawn once. The first build of that joined the serpentine's turns
+to the loop; loop and lines fused into one region with every channel closed,
+and on the owner's plate (`thinwall_supports_bambu.gcode.3mf`) our layers
+printed 610-856 mm in 1,350-2,700 segments - each line twice - against
+Bambu's 434 mm in 54. NSO's slicer has no thin-wall mode: it draws a 0.43 wall
+round its sliver, the loop as its two contours and the serpentine as one - 3
+closed paths a layer on the coupon's slab, every one 72 mm or longer, about two
+passes over each line (`support:interface` 1d). Under a bead (0.40, 0.36,
+0.30) it draws nothing. One pass is a slicer ticket.
 
-**The width matrix.** One pass per line in Bambu takes its thin-wall
-detection, and a strip under a bead to detect. `npm run support:print-export`
-writes, beside the card's export and its `_thinwall` A/B file, the coupon with
-the sheet's lines 0.40 / 0.36 / 0.30 mm wide (`sheetWidthMm`) and
-`detect_thin_wall = 1` on the support objects only:
-`top_clip_x2_supports_w040_thinwall.3mf`, `_w036_`, `_w030_`. The layers are
-the same (the slab: a 21.84 x 14.28 loop, 25 / 25 / 16 / 25 lines inside it,
-40 caps of 2.50 mm). The card exports 0.43 and does not set thin walls, and
-stays so until the width matrix says otherwise (the owner's call). In the owner's
-`thinwall_sideXside.gcode.3mf` (thin walls off in its settings) the 0.43
-lines of the earlier export printed as 2.00 passes, and Bambu's own tree's
-layers as one pass at 1.30 x the outer wall's E/mm.
+**The export.** `npm run support:print-export` writes the coupon as the card
+exports it - 0.43 mm lines, no thin-wall override: a 0.43 wall is wider than a
+bead, so the override had nothing to detect, and it is gone from the export -
+and **the width matrix**: the sheet's lines 0.40 / 0.36 / 0.30 mm wide
+(`sheetWidthMm`) with `detect_thin_wall = 1` on the support objects only,
+`top_clip_x2_supports_w040_thinwall.3mf`, `_w036_`, `_w030_` - under a bead, for
+Bambu's thin-wall pass. The slab is the same in each (a 21.84 x 14.28 loop, the
+serpentine a pitch inside it, 25 / 25 / 16 / 25 lines, 40 caps of 2.50 mm). The
+card exports 0.43 and does not set thin walls, and stays so until the width
+matrix says otherwise (the owner's call). In the owner's
+`thinwall_sideXside.gcode.3mf` (thin walls off in its settings) the 0.43 lines
+of an earlier export printed as 2.00 passes, and Bambu's own tree's layers as
+one pass at 1.30 x the outer wall's E/mm.
 
 **Reading a slice back**: `node tools/nso_slicer_audit.js --sheet
 sliced.gcode.3mf [--export the.3mf]` reports, per sheet layer of each support

@@ -1769,7 +1769,7 @@
           return { id: L.id, zTop: L.zTop, zBase: L.zBase, zCap: L.zCap, tips: L.tips, caps: L.caps, lines: L.lines,
                    minDistanceMm: L.minDistanceMm, solvedDropMm: L.solvedDropMm,
                    layers: L.layers.map(function (x) { return { role: x.role, angleDeg: x.angleDeg, z0: x.z0, z1: x.z1, lines: x.lines, lengthMm: x.lengthMm,
-                                                                linesMm: x.linesMm, loopMm: x.loopMm, pieces: (x.pieces || []).map(function (q) { return { kind: q.kind, sizeMm: q.sizeMm, areaMm2: q.areaMm2, perimMm: q.perimMm, holes: q.holes, caps: q.caps, lines: q.lines }; }), shortestMm: x.shortestMm, paths: x.paths }; }) };
+                                                                linesMm: x.linesMm, loopMm: x.loopMm, pieces: (x.pieces || []).map(function (q) { return { kind: q.kind, sizeMm: q.sizeMm, areaMm2: q.areaMm2, perimMm: q.perimMm, caps: q.caps, lines: q.lines }; }), shortestMm: x.shortestMm, paths: x.paths }; }) };
         })
       };
     }

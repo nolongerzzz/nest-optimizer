@@ -6201,3 +6201,39 @@ accident, and they released cleanly - the loop is load-bearing for release.
 - **For this print, as the owner said**: the leg's caps stay 1.66-1.78 mm; the
   card stays at 0.43 mm lines without thin walls until the width matrix says
   otherwise.
+
+### Correction: the serpentine stands apart from the loop (2026-10-20, same branch)
+
+The owner's plate (`thinwall_supports_bambu.gcode.3mf`): our sheet layers
+printed 610-856 mm in 1,350-2,700 segments, Bambu's 434 mm in 54 - the jail-
+cell-bars bug. The serpentine's U-turns lay on the loop's centreline, so loop
+and lines fused into one region with every channel closed, and the slicer
+traced every channel: each line twice.
+
+- **Two thin walls a piece, apart.** The serpentine runs on the piece's inner
+  grid points only (all four cells round the point the piece's): every line
+  and turn a pitch off the loop, a clear gap of 0.41 mm (a line width; Bambu's
+  turns stand 0.36 mm in from its loop). The loop is one closed wall, the
+  serpentine a second, connected one; each drawn once. The 0.43 line stays.
+- **Pieces**: a field piece is its largest rectangle where that carries as
+  many caps as its column strips do (the coupon's slab and leg: one each),
+  else its strips - a column that splits round a hole, or where two meet,
+  goes, a pitch between two loops: the clamp's rings are four strips each,
+  each its own loop and serpentine (no slits now). The clamp carries 176 tips
+  in area 1 and 45 of 45 in area 2.
+- **A cap is carried** when a wall of T1, loop or serpentine, either way, lies
+  across it with its whole width on it (the serpentine standing in, a cap
+  near the loop's short side is on the loop, not on a line along A).
+- **Direction**: T's lines 2 mm or longer where a piece allows it one way only
+  (the coupon's leg, three cells across: T along it, two lines of 11.76 mm;
+  I1 across, 15 lines of 0.84 mm - as Bambu's own I1 there, 55 % one way).
+- **Gates** (`support:interface`, 131): every piece a closed loop and one
+  serpentine a pitch inside it, never touching it; each layer's section
+  exactly TWO regions a piece (loop, serpentine), no hole but the loop's own
+  inside, the ring between the loop's outline and its hole the loop's
+  perimeter x a bead; NSO's slicer draws each layer in those two regions,
+  every path closed, none under 2 mm (the loop as its sliver's two contours,
+  the serpentine as one - no thin-wall mode, a slicer ticket); a layer whose
+  lines are under 2 mm on the whole is read from the plan, and says so.
+- **Export**: the 0.43 thin-wall override is gone (nothing for it to detect at
+  0.43); the card's 0.43 export and the 0.40 / 0.36 / 0.30 width matrix stay.

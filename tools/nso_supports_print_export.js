@@ -12,13 +12,10 @@
    that stand on one pad joined into one. Named as the card names them.
 
    Writes, to tools/supports-print-out/ (git-ignored):
-     top_clip_x2_supports.3mf            the export as the card makes it
-     top_clip_x2_supports_thinwall.3mf   the same, with detect_thin_wall = 1
-                                         on every support object (and only
-                                         there) in Metadata/model_settings.config:
-                                         a TEST of the thin-wall route
-                                         (docs/SUPPORT-INTERFACE.md, LINE
-                                         WIDTH), not what the card exports
+     top_clip_x2_supports.3mf            the export as the card makes it:
+                                         0.43 mm lines, no thin-wall
+                                         override (a 0.43 wall is wider than
+                                         a bead: nothing for it to detect)
      top_clip_x2_supports_w040_thinwall.3mf  THE WIDTH MATRIX: the sheet's
      top_clip_x2_supports_w036_thinwall.3mf  lines 0.40 / 0.36 / 0.30 mm wide
      top_clip_x2_supports_w030_thinwall.3mf  (sheetWidthMm), detect_thin_wall
@@ -26,7 +23,7 @@
                                          for Bambu's thin-wall pass (NSO's
                                          own slicer draws none of them)
 
-   Slice either in Bambu Studio, save the .gcode.3mf, and read the sheet with
+   Slice any in Bambu Studio, save the .gcode.3mf, and read the sheet with
      node tools/nso_slicer_audit.js --sheet sliced.gcode.3mf --export tools/supports-print-out/top_clip_x2_supports.3mf
    ============================================================ */
 'use strict';
@@ -110,7 +107,7 @@ async function write(file, objects, thin) {
 (async () => {
   const piece = readSTL(path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_coupon.stl'));
   fs.mkdirSync(OUT, { recursive: true });
-  const runs = [{ w: null, files: [['_supports.3mf', false], ['_supports_thinwall.3mf', true]] },
+  const runs = [{ w: null, files: [['_supports.3mf', false]] },
                 { w: 0.40, files: [['_supports_w040_thinwall.3mf', true]] },
                 { w: 0.36, files: [['_supports_w036_thinwall.3mf', true]] },
                 { w: 0.30, files: [['_supports_w030_thinwall.3mf', true]] }];
