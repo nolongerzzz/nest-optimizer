@@ -401,13 +401,13 @@ function coverage(footprintPolys, ifaceMoves, reach, grow) {
   check('layer 90 is empty of support; the underside starts printing at layer 91 (the gap: CONSTANTS.supportGap, 0.182 mm < one 0.2 layer)',
         rIf.objects[1].layers[89].areaMm2 === 0 && rIf.objects[2].layers[89].areaMm2 === 0 && pieceFirstUnder === 91,
         'piece from ' + pieceFirstUnder);
-  // The tree stands on its foot pads again (supports-followups; #195 built it
-  // without them). Layer 1 is the feet: two whole discs of r = 3 mm, 2 x 28.19
-  // mm^2 (a 48-gon of that radius), an outline each and no hole in either;
-  // above them the section is the two trunks alone.
+  // The tree stands on ONE foot pad (supports-print-1): its two trunks stand
+  // within 6 mm, so they share a pad - their footprints grown by 4 mm, kept
+  // 0.2 mm off the piece (it was two discs of r = 3 mm, 2 x 28.19 mm^2). One
+  // outline and no hole in it; above it the section is the two trunks alone.
   const footL = rIf.objects[2].layers[0], trunkL = rIf.objects[2].layers[1];
-  check('the tree stands on two feet: layer 1 is two whole discs, 2 x 28.19 mm^2, every outline an outer one (no ring)',
-        footL.sectionPolys.length === 2 && footL.sectionPolys.every(p => SL.signedArea(p) > 0) && Math.abs(footL.areaMm2 - 56.387) < 0.01,
+  check('the tree stands on one shared foot: layer 1 is one whole pad, 178.77 mm^2, its one outline an outer one (no ring)',
+        footL.sectionPolys.length === 1 && footL.sectionPolys.every(p => SL.signedArea(p) > 0) && Math.abs(footL.areaMm2 - 178.766) < 0.01,
         footL.sectionPolys.length + ' outline(s), ' + footL.areaMm2.toFixed(3) + ' mm^2');
   check('... walled, and layer 2 is the trunks alone (8.640 mm^2)', footL.wallCount >= 1 && Math.abs(trunkL.areaMm2 - 8.64) < 0.01,
         footL.wallCount + ' wall(s); layer 2 ' + trunkL.areaMm2.toFixed(3) + ' mm^2');

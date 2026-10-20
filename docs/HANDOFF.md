@@ -6072,3 +6072,61 @@ PAINT SCOPE: unchanged, **WHOLE-PIECE** (the Scale card's).
   Ø38 bore`; `bore would reach the outer - Ø45 bore against a Ø44 outer`.
 - **A shaped tube** (Flare, Run, Neck) reads as not round, so no ring row shows
   and the engine refuses in the reader's words - unchanged, now pinned.
+
+## Supports print 1 - flat caps, two interface layers, one foot per cluster (2026-10-20)
+
+Branch `claude/supports-print-1` off `claude-wip`. Write-ups:
+docs/SUPPORT-INTERFACE.md (caps, line width, the audit), docs/SUPPORT-GRIDPACK.md
+(*Feet*), docs/SUPPORTS-CARD.md (the feet across areas at commit).
+
+THE PRINT (top_clip_x2, now `fixtures/supports/top_clip_x2_coupon.stl`): the part came
+out clean and the sheet released, but the trees wobbled as the sheet started,
+the two transition layers sagged, and half the interface welded and was torn.
+Bambu's tree on the same coupon (baselineV2) has no transition layer, flat
+caps of 2-7 mm under its interface and 15-24 mm pads.
+
+- **Tips** (`nso_support_interface.js` sheet(), THE CAPS): every tip under a
+  sheet ends in a round flat cap following its leg, 2.5-4 mm across in the
+  last 2 mm of rise (never less rise than the column's own cut needs), the
+  interface's underside on it. Caps never overlap (held 0.05 mm apart) -
+  overlapping or coplanar cap tops are what the union could not take - so
+  tips under 3 mm apart get narrower caps (the coupon's leg: 1.77 mm). Every
+  cap is measured against the piece with the exact distance.
+- **No transition layer**: the sheet is I1 + I2.
+- **Lines**: one straight box per line, at least 2 mm, 0.43 mm wide (a 0.42
+  line is a zero-width wall to a slicer: NSO's slicer broke it into the short
+  pieces the owner's screenshot shows; Bambu printed short ones as 0.3785 loops
+  - two passes, 1.8 x the bead per mm of line - and dropped lines of 17 mm and
+  more). Single pass in Bambu needs its thin-wall detection: see the open
+  questions.
+- **Feet** (`nso_support_gridpack.js` footPads / shareFeet, FEET): one 0.2 mm
+  pad per cluster of feet within 6 mm, the footprints grown 4 mm, 0.2 mm off
+  the piece; trees on one pad are one support. The card builds each area with
+  `footPads: 'shared'` and draws the pads over every area at commit
+  (`app-supports-card.js` shareFeet): the coupon is ONE support now (the
+  Bambu layer-1 conflict between support 1.1 and 2.2 was two supports' pads).
+- **Weld** (the reference path, not the card's): the sheet's join takes the
+  carriers first - with the sheet first the kernel dropped a whole I1 line over
+  uncapped tips cut 2 um into it (clamp area 1, z 71.5).
+- **Audit**: `node tools/nso_slicer_audit.js --sheet sliced.gcode.3mf [--export
+  x.3mf]` - per sheet layer the segments, mean length, E/mm, its ratio to the
+  file's outer wall, the passes per line and the lines missing. On the
+  2026-10-20 slice: 2 passes, 1.8 x per mm of line, 1 % of the toolpath in
+  segments of 2 mm or more, two 22 mm lines missing; Bambu's own interface
+  1.00 x and 90 %.
+- **Export**: `npm run support:print-export` writes
+  `tools/supports-print-out/top_clip_x2_supports.3mf` (as the card builds it)
+  and `..._thinwall.3mf` (the same, `detect_thin_wall = 1` on the support
+  objects only - an A/B file, not what the card exports). Git-ignored.
+- **Tags**: `nso_support_gridpack.js`, `nso_support_interface.js`,
+  `app-supports-card.js` shells1 -> print1.
+
+OPEN, the owner's call (standing rule: ask first):
+1. Should the card's 3MF set `detect_thin_wall = 1` on each support object
+   (Bambu then draws each 0.43 line as one centre pass, at its thin-wall
+   width: about 1.14 x the outer wall's bead per mm)? Not done.
+2. Caps under 2.5 mm where tips stand under 3 mm apart, or overlapping 2.5 mm
+   caps (fine for the card's shells; the weld reference cannot take them)?
+3. The line is 0.43, outside the kickoff's 0.40-0.42: a line of 0.42 is a
+   zero-width wall to both slicers and a narrower one is less than none
+   (measured, docs/SUPPORT-INTERFACE.md, LINE WIDTH).

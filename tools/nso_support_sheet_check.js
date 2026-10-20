@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // The interface SHEET under a support tree (nso_support_interface.js sheet(),
 // built by nso_support_gridpack.js parts({ interface: true }) - the Supports
-// card's build), held to the Bambu Studio reference: clamp_body sliced with
-// tree supports, 0.2 mm layers (docs/SUPPORT-INTERFACE.md).
+// card's build), held to the Bambu Studio references: clamp_body sliced with
+// tree supports, and the top_clip_x2 coupon (baselineV2, Bambu's tree in its
+// default style: tip caps, two interface layers on them, shared pads), 0.2 mm
+// layers (docs/SUPPORT-INTERFACE.md).
 //
 //   node tools/nso_support_sheet_check.js            exit 0 = every gate held
 //   node tools/nso_support_sheet_check.js --export   also writes the clamp with
@@ -14,8 +16,16 @@
 //
 // PER AREA
 //   1. THE STACK. Every area with a tip that meets a ceiling carries a sheet:
-//      4 layers - transition, transition, interface, interface - each one
-//      0.2 mm layer, its top GAP under the ceiling.
+//      2 interface layers and NO transition layer, each one 0.2 mm layer,
+//      its top GAP under the ceiling.
+//   1b. THE CAPS. Every tip under the sheet ends in a flat cap 2.5 - 4 mm
+//      across (narrower only where the tips stand closer than that: a cap
+//      stops CAP_PART short of its neighbour, never over it), every cap's
+//      nearest neighbour at most 2 mm away edge to edge, the cap's flat top
+//      exactly the interface's underside (0.01 mm into it).
+//   1c. THE LINES' BOXES: every line of the sheet is one straight box (two
+//      ends, nothing between, 8 vertices on its own) and none is shorter than
+//      2 mm.
 //   2. THE LINES, read off the welded support itself (a horizontal slice at
 //      each layer's middle): one direction per layer, each across the one
 //      below (90 deg), line pitch 0.84 +- 0.05 mm.
@@ -29,6 +39,14 @@
 //      piercing pair in the sheet (NSO_Repair.js's count, = the checker's);
 //      no sheet left standing alone. The trees and feet below are held to
 //      the bare build: no nearer the piece, counts reported beside its own.
+//   6. THE FEET: every trunk on the plate stands on a pad, every cluster of
+//      feet (within 6 mm) on ONE pad, the pads 0.18 mm or more off the piece
+//      - or, inside a trunk's own end square, no nearer than that trunk - and
+//      the trunks on one pad in one support (shells()).
+// THE COUPON, across its two areas as the card builds them (footPads
+//   'shared', then shareFeet): one pad under every cluster whatever area it
+//   holds, the trees on one pad one support - so no two supports' first
+//   layers touch - and the whole build under 10 s.
 
 const fs = require('fs');
 const path = require('path');
@@ -87,6 +105,7 @@ function standing(soup) {
 }
 
 const PIECES = [
+  ['top_clip_x2 (the 2026-10-20 coupon)', readSTL(path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_coupon.stl')), 'coupon'],
   ['clamp_body (standing, as the reference)', standing(readSTL(path.join(ROOT, 'fixtures', 'supports', 'clamp_body.stl'))), 'clamp'],
   /* tree:interface's own fixtures */
   ['shelf', soupOf(box([0, 0, 0], [10, 10, 20]), box([10, 0, 16], [22, 10, 20])), 'shelf'],
@@ -129,7 +148,7 @@ function lineIndex(level) {
 }
 
 /* the lines of one layer, read off a slice: direction, pitch */
-function layerLines(segs, inFoot) {
+function layerLines(segs, inFoot, width) {
   const hist = new Map();
   let total = 0;
   const S = segs.filter(s => inFoot((s[0][0] + s[1][0]) / 2, (s[0][1] + s[1][1]) / 2));
@@ -177,7 +196,7 @@ function layerLines(segs, inFoot) {
   /* a strip is two edges a line width apart; its centre is their middle */
   const centres = [];
   for (let i = 0; i + 1 < uniq.length; i++) {
-    if (Math.abs(uniq[i + 1] - uniq[i] - 0.42) < 0.03) { centres.push((uniq[i] + uniq[i + 1]) / 2); i++; }
+    if (Math.abs(uniq[i + 1] - uniq[i] - width) < 0.03) { centres.push((uniq[i] + uniq[i + 1]) / 2); i++; }
   }
   const diffs = [];
   for (let i = 0; i + 1 < centres.length; i++) diffs.push(centres[i + 1] - centres[i]);
@@ -263,6 +282,23 @@ function band(A, z0, z1) {
 /* the surface of A in the foot layer */
 function feetOf(A, z) { return band(A, -Infinity, z); }
 
+/* the connected pieces of a soup (shared corners), and how many of them are
+   one box: 8 distinct corners */
+function boxesIn(soup) {
+  const key = i => soup[i] + ',' + soup[i + 1] + ',' + soup[i + 2], par = new Map();
+  const find = x => { while (par.get(x) !== x) { par.set(x, par.get(par.get(x))); x = par.get(x); } return x; };
+  for (let t = 0; t < soup.length; t += 9) {
+    const ks = [key(t), key(t + 3), key(t + 6)];
+    ks.forEach(k => { if (!par.has(k)) par.set(k, k); });
+    const a = find(ks[0]); ks.slice(1).forEach(k => { const b = find(k); if (a !== b) par.set(b, a); });
+  }
+  const size = new Map();
+  for (const k of par.keys()) { const r = find(k); size.set(r, (size.get(r) || 0) + 1); }
+  let boxes = 0, other = 0;
+  size.forEach(n => { if (n === 8) boxes++; else other++; });
+  return { boxes, other };
+}
+
 const REPAIR = loadRepairModule(path.join(ROOT, 'NSO_Repair.js'));
 /* piercing / coplanar pairs (NSO_Repair.js, welded at 1e-6 as the checker
    below); inSheet: piercing pairs with a triangle reaching above zSheet;
@@ -317,7 +353,8 @@ fs.mkdirSync(OUT, { recursive: true });
       T.weldBare += Date.now() - t;
       /* the build with the sheet */
       t = Date.now();
-      const tp = await GP.parts(p, { interface: true });
+      /* as the card builds it: the sheet's layers left as they are (weld() folds them itself) */
+      const tp = await GP.parts(p, { interface: true, foldSheets: false });
       T.parts += Date.now() - t;
       if (!tp.ok) { check(label + ': builds with the sheet', false, tp.reason); continue; }
       t = Date.now();
@@ -342,13 +379,44 @@ fs.mkdirSync(OUT, { recursive: true });
         const roles = L.layers.map(x => x.role).join(',');
         const hs = L.layers.map(x => x.z1 - x.z0);
         const ceiling = Math.min(...L.tips.map(i => sh.tips[i].zTop)) + GAP;
-        check(`${label}, sheet at ${f3(L.zTop)}: 2 transition + 2 interface layers, each one ${LAYER} mm layer, the top ${GAP} mm under the ceiling`,
-          roles === 'transition,transition,interface,interface' && hs.every(h => Math.abs(h - LAYER) < 1e-9) &&
-          Math.abs(L.layers[3].z1 - L.zTop) < 1e-6 && Math.abs(L.layers[0].z0 - L.zBase) < 1e-6,
+        check(`${label}, sheet at ${f3(L.zTop)}: 2 interface layers and no transition layer, each one ${LAYER} mm layer, the top ${GAP} mm under the ceiling`,
+          roles === 'interface,interface' && hs.every(h => Math.abs(h - LAYER) < 1e-9) &&
+          Math.abs(L.layers[1].z1 - L.zTop) < 1e-6 && Math.abs(L.layers[0].z0 - L.zBase) < 1e-6,
           `${L.tips.length} tips, layers ${L.layers.map(x => f3(x.z0) + '-' + f3(x.z1)).join(' | ')}, ceiling ${f3(ceiling)}`);
+        /* 1b. the caps */
+        const CAP = SI.CAP, tipsHere = L.tips.map(i => sh.tips[i]), carried = tipsHere.filter(t => t.carried !== false);
+        const caps = tipsHere.filter(t => t.cap).map(t => t.cap);
+        const gapsOf = caps.map(c => caps.length < 2 ? null : Math.min(...caps.filter(d => d !== c).map(d => Math.hypot(d.c[0] - c.c[0], d.c[1] - c.c[1]) - (c.w + d.w) / 2)));
+        const inRange = caps.filter(c => c.w >= CAP.minMm - 1e-9 && c.w <= CAP.maxMm + 1e-9).length;
+        /* a cap under CAP.minMm was held short of a neighbour (tips under
+           2.55 mm apart: caps never overlap) or narrowed off the piece */
+        const shortOk = caps.every(c => (c.w >= CAP.minMm - 1e-9 && c.w <= CAP.maxMm + 1e-9) ||
+          (c.w < CAP.minMm && /held short of a neighbour|piece|another support/.test(c.why || '')));
+        const capless = carried.filter(t => !t.cap);
+        const narrowWhy = {};
+        caps.filter(c => c.w < CAP.minMm - 1e-9).forEach(c => { const k = (c.why || '').replace(/[\d.]+ mm away/, 'n mm away'); narrowWhy[k] = (narrowWhy[k] || 0) + 1; });
+        check(`${label}, sheet at ${f3(L.zTop)}: every tip under it ends in a flat cap ${CAP.minMm} - ${CAP.maxMm} mm across, narrower only short of a neighbour or the piece`,
+          caps.length > 0 && shortOk && capless.every(t => /no room for a cap/.test(t.why || '')),
+          `${caps.length} caps on ${carried.length} tips (${capless.length} with no room for one); ${inRange} of ${caps.length} at ${CAP.minMm} - ${CAP.maxMm} mm, ` +
+          `widths ${f3(Math.min(...caps.map(c => c.w)))} - ${f3(Math.max(...caps.map(c => c.w)))}` +
+          (Object.keys(narrowWhy).length ? '; narrower: ' + Object.keys(narrowWhy).map(k => narrowWhy[k] + ' x ' + k).join(', ') : ''));
+        const gs = gapsOf.filter(g => g != null);
+        check(`${label}, sheet at ${f3(L.zTop)}: every cap's nearest neighbour ${CAP.gapMaxMm} mm or less away edge to edge, and none over another`,
+          gs.length === 0 || (Math.max(...gs) <= CAP.gapMaxMm + 1e-9 && Math.min(...gs) >= SI.CAP.partMm - 1e-6),
+          gs.length ? `nearest-neighbour gaps ${f3(Math.min(...gs))} - ${f3(Math.max(...gs))} mm` : 'one cap');
+        check(`${label}, sheet at ${f3(L.zTop)}: the interface's underside lies exactly on the caps (their flat tops ${SI.CAP.intoMm} mm into it)`,
+          caps.every(c => Math.abs(c.z1 - (L.zBase + SI.CAP.intoMm)) < 1e-9) && Math.abs(L.layers[0].z0 - L.zBase) < 1e-9,
+          `caps topped at ${[...new Set(caps.map(c => f4(c.z1)))].join(', ')}, I1 from ${f4(L.layers[0].z0)}`);
+        /* 1c. one box a line, none under 2 mm - in the plan and in the parts built */
+        const sheetEntry = tp.trunks.find(tr => tr.sheet === L.id);
+        const boxCounts = sheetEntry ? sheetEntry.parts.map(pt => boxesIn(pt.soup)) : [];
+        check(`${label}, sheet at ${f3(L.zTop)}: every line one straight box (8 vertices, two ends), none shorter than ${SI.SHEET.minRunMm} mm`,
+          L.layers.every(x => x.paths.every(q => q.length === 2 && Math.hypot(q[1][0] - q[0][0], q[1][1] - q[0][1]) >= SI.SHEET.minRunMm - 1e-9)) &&
+          boxCounts.length === L.layers.length && boxCounts.every((b, k) => b.boxes === L.layers[k].lines && b.other === 0),
+          L.layers.map((x, k) => `${x.lines} lines, ${boxCounts[k] ? boxCounts[k].boxes : '-'} boxes, shortest ${f3(x.shortestMm)} mm`).join(' | '));
         /* 2. the lines, off the welded solid */
         const under = lineIndex(L);
-        const lines = L.layers.map(x => layerLines(sliceAt(w.soup, (x.z0 + x.z1) / 2), (px, py) => under(px, py, 0.3)));
+        const lines = L.layers.map(x => layerLines(sliceAt(w.soup, (x.z0 + x.z1) / 2), (px, py) => under(px, py, 0.3), sh.widthMm));
         const dirs = lines.map(l => l ? l.dir : NaN);
         const alt = dirs.every((d, k) => k === 0 || Math.abs(Math.abs(d - dirs[k - 1]) - 90) <= 1);
         check(`${label}, sheet at ${f3(L.zTop)}: one direction per layer, each across the one below`,
@@ -357,7 +425,7 @@ fs.mkdirSync(OUT, { recursive: true });
         const pitchOk = lines.every(l => l && l.medianPitch != null && Math.abs(l.medianPitch - PITCH) <= 0.05 && l.offGrid === 0);
         check(`${label}, sheet at ${f3(L.zTop)}: line pitch ${PITCH} +- 0.05 mm, measured on the welded support`,
           pitchOk, lines.map(l => l ? `${l.lines} lines, median ${f3(l.medianPitch)}, ${l.adjacent} adjacent pairs at ${PITCH}+-0.05, ${l.offGrid} off the pitch` : '-').join(' | '));
-        report.push({ label, zTop: L.zTop, tips: L.tips.length, t1: L.t1, lines });
+        report.push({ label, zTop: L.zTop, tips: L.tips.length, angle: L.lines, caps: L.caps.length, lines });
         /* 4. no tip above the sheet's underside */
         let above = 0, worst = -Infinity;
         tp.trunks.forEach(tr => {
@@ -366,14 +434,14 @@ fs.mkdirSync(OUT, { recursive: true });
             const s = pt.soup;
             for (let i = 0; i < s.length; i += 3) {
               const z = s[i + 2];
-              if (z <= L.zBase + EPS + 1e-4 || z > L.zTop + GAP) continue;
+              if (z <= L.zBase + Math.max(EPS, SI.CAP.intoMm) + 1e-4 || z > L.zTop + GAP) continue;
               if (!under(s[i], s[i + 1], 0.21 + 0.05)) continue;
               above++; worst = Math.max(worst, z - L.zBase);
             }
           });
         });
-        check(`${label}, sheet at ${f3(L.zTop)}: no tip reaches above the sheet's underside (${f3(L.zBase)}) under its lines`,
-          above === 0, above ? `${above} vertices, up to ${f3(worst)} mm above it` : 'every tip under it is cut at ' + f3(L.zBase + EPS));
+        check(`${label}, sheet at ${f3(L.zTop)}: no tip reaches above the sheet's underside (${f3(L.zBase)}) under its lines, but a cap's ${SI.CAP.intoMm} mm into it`,
+          above === 0, above ? `${above} vertices, up to ${f3(worst)} mm above it` : 'every tip under it ends in its cap, or is cut flat at ' + f3(L.zBase + EPS));
       }
       /* 3. THE GAP, in two parts.
          THE INTERFACE ZONE - the sheet, every tip, and everything within
@@ -415,7 +483,25 @@ fs.mkdirSync(OUT, { recursive: true });
       const feet0 = SI.exactDistance(feetOf(w0.soup, FOOT), piece, { reach: 1 }).mm, feet1 = SI.exactDistance(feetOf(w.soup, FOOT), piece, { reach: 1 }).mm;
       check(`${label}: the feet are as they were - their distance to the piece unchanged by the sheet`,
         Math.abs(feet0 - feet1) < 1e-6 || (feet0 === Infinity && feet1 === Infinity),
-        `${fmt(feet1)} with the sheet, ${fmt(feet0)} without` + (feet1 < GAP ? ' (UNDER the gap: the pads, not this build - footRadii keeps 0.2 mm on rays at the corners only)' : ''));
+        `${fmt(feet1)} with the sheet, ${fmt(feet0)} without` + (feet1 < GAP ? ' (UNDER the gap: a trunk\'s own end in its pad - the pads keep 0.2 mm, the planner keeps the trunk off on rays)' : ''));
+      /* 6. the feet: one pad per cluster, the trunks on a pad one support */
+      const padSoups = [];
+      tp.trunks.forEach(tr => tr.parts.forEach(pt => { if (pt.pad) padSoups.push(pt.soup); }));
+      const padD = padSoups.length ? SI.exactDistance(new Float32Array([].concat(...padSoups.map(x => Array.from(x)))), piece, { reach: 1 }).mm : Infinity;
+      /* a pad is always under its trunk's own end square: where the planner
+         stood a trunk nearer the piece than the gap, the pad there is no
+         nearer than that trunk */
+      const colSoups = [];
+      tp.trunks.forEach(tr => tr.parts.forEach(pt => { if (!pt.pad) colSoups.push(feetOf(pt.soup, FOOT)); }));
+      const colD = SI.exactDistance(new Float32Array([].concat(...colSoups.map(x => Array.from(x)))), piece, { reach: 1 }).mm;
+      const shl = GP.shells(p, tp), solidOf = {};
+      shl.solids.forEach((x, k) => x.trunks.forEach(t => { solidOf[t] = k; }));
+      const groupsWhole = (tp.padGroups || []).every(g => g.every(t => solidOf[t] === solidOf[g[0]]));
+      const onPads = p.trunks.filter(tr => tr.landing === 'plate').length;
+      check(`${label}: feet - ${tp.pads.count} pad(s) under ${onPads} trunk(s) on the plate, every cluster of feet (6 mm) on one pad, the pads ${GAP} mm or more off the piece (or no nearer than the trunk standing there), the trunks on one pad one support`,
+        tp.pads.count >= 1 && tp.pads.clustersSplit === 0 && padD >= Math.min(GAP, colD) - 1e-6 && groupsWhole && padSoups.length === tp.pads.count,
+        `${tp.pads.clusters} cluster(s), ${tp.pads.clustersSplit} split, ${tp.pads.hemmed || 0} hemmed in by the piece, pads ${(tp.pads.areasMm2 || []).map(a => a.toFixed(0) + ' mm2').join(', ')}; ` +
+        `closest pad to the piece ${fmt(padD)}, closest trunk end ${fmt(colD)}; ${shl.solids.length} support(s)`);
       /* 5. solids: closed, manifold, no degenerate triangle (the canonical
          checker, tools/mesh_validate.py), and NO PIERCING PAIR IN THE SHEET:
          none with a triangle above the sheet's underside. Self-intersection
@@ -438,6 +524,40 @@ fs.mkdirSync(OUT, { recursive: true });
       if (tag === 'clamp') w.solids.forEach((x, k) => exportObjects.push({ name: `support ${rg.id + 1}.${k + 1}`, soup: x.soup }));
     }
     console.log(`  time  ${name}: plan ${T.plan} ms; parts ${T.partsBare} -> ${T.parts} ms, weld ${T.weldBare} -> ${T.weld} ms (without -> with the sheet)`);
+  }
+
+  /* THE COUPON AS THE CARD BUILDS IT: every area planned, built with its
+     trunks on their feet and no pad (app-supports-card.js PARTS_OPTS), handed
+     back as shells, then the pads drawn over every area at once (shareFeet) */
+  {
+    console.log('\n=== top_clip_x2: the card\'s build, across its areas ===');
+    const piece = PIECES.find(x => x[2] === 'coupon')[1];
+    const t0 = Date.now();
+    const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [] });
+    const builds = [];
+    let plateZ = 0;
+    for (const rg of det.beaconRegions) {
+      const bs = rg.beacons.map(b => ({ x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: rg.id, key: 'k' }));
+      const p = ST.planTree(piece, Object.assign({}, CARD, { beacons: bs }));
+      if (!p.ok) continue;
+      plateZ = p.plateZ;
+      const tp = await GP.parts(p, { interface: true, foldSheets: false, footPads: 'shared' });
+      builds.push({ p, tp, sh: GP.shells(p, tp) });
+    }
+    const sf = GP.shareFeet(builds.map(b => ({ solids: b.sh.solids })), piece, { plateZ });
+    const ms = Date.now() - t0;
+    check('top_clip_x2: the card\'s build - detect, plan, build every area, shells, shared feet - in under 10 s',
+      sf.ok && ms < 10000, `${ms} ms; ${builds.length} area(s); ${sf.reason}`);
+    check('top_clip_x2: every cluster of feet on one pad, whatever area its trees hold; the slab\'s and the leg\'s trees on one pad are ONE support',
+      sf.ok && sf.clustersSplit === 0 && sf.objects.length === 1 && sf.objects[0].from.length === builds.reduce((n, b) => n + b.sh.solids.length, 0) && sf.pads === 1,
+      sf.ok ? `${sf.pads} pad(s), ${sf.clusters} cluster(s), ${sf.objects.length} support(s): ` + sf.objects.map(o => JSON.stringify(o.from)).join(' ') : sf.reason);
+    /* no two supports' first layers touch: the path conflict Bambu reported between support 1.1 and 2.2 */
+    let closest = Infinity;
+    for (let a = 0; a < sf.objects.length; a++) for (let b = a + 1; b < sf.objects.length; b++) {
+      closest = Math.min(closest, SI.exactDistance(feetOf(sf.objects[a].soup, 0.2 + 1e-3), feetOf(sf.objects[b].soup, 0.2 + 1e-3), { reach: 1 }).mm);
+    }
+    check('top_clip_x2: no two supports\' first layers within 0.1 mm of each other', closest >= 0.1,
+      sf.objects.length > 1 ? `closest ${closest === Infinity ? 'over 1 mm' : closest.toFixed(4) + ' mm'}` : 'one support');
   }
 
   if (EXPORT && exportObjects.length) {

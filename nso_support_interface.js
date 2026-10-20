@@ -86,10 +86,11 @@
    minDistance(soupA, soupB, opts) -> { mm, at }  sampled true minimum distance
    exactDistance(soupA, soupB, { reach }) -> { mm, at }  every triangle pair, closed form
    sheet(piece, stations, opts) -> the region-wide sheet a tree's tips carry:
-       2 transition + 2 interface layers at 0.84 mm (THE SHEET, below;
-       docs/SUPPORT-INTERFACE.md). nso_support_gridpack.js parts() builds it
-       with opts.interface.
-   cutPath(pts, cutZ, side) -> a column (top first) cut flat at cutZ
+       2 interface layers at 0.84 mm lying on the tips' flat caps (THE SHEET,
+       below; docs/SUPPORT-INTERFACE.md). nso_support_gridpack.js parts()
+       builds it, and the caps, with opts.interface.
+   cutPath(pts, cutZ, side, rise) -> a column (top first) cut flat at cutZ,
+       standing straight up from `rise` (default: side) under the cut
    ============================================================ */
 (function (root) {
   'use strict';
@@ -181,7 +182,7 @@
      result past reach is Infinity. Used by sheet(): a flat top parallel to a
      ceiling at exactly the gap is the sampler's worst case (no bound prunes
      it) and this one's best (two big triangles). */
-  function exactDistance(A, B, reach, beat) {
+  function exactDistance(A, B, reach, beat, under) {
     var cell = Math.max(1, reach * 4), grid = new Map(), BT = [];
     function key(i, j, k) { return i + ',' + j + ',' + k; }
     function triAt(S, o) { return [[S[o], S[o + 1], S[o + 2]], [S[o + 3], S[o + 4], S[o + 5]], [S[o + 6], S[o + 7], S[o + 8]]]; }
@@ -200,9 +201,12 @@
       }
     }
     var big = grid.get('big') || [], best = { mm: Infinity, at: null, topZ: null, pairs: 0 };
+    /* under: every triangle of A nearer B than it, by index (best.under) -
+       pruned at `under`, not at the best so far */
+    var collect = under == null ? null : [];
     for (var a = 0, ai = 0; a < A.length; a += 9, ai++) {
       if (beat && (ai & 1023) === 0) beat();
-      var TA = triAt(A, a), ba = boxOf(TA), lim = Math.min(best.mm, reach);
+      var TA = triAt(A, a), ba = boxOf(TA), lim = collect ? under : Math.min(best.mm, reach), dA = Infinity;
       var cands = big.slice();
       for (var i2 = Math.floor((ba.lo[0] - lim) / cell); i2 <= Math.floor((ba.hi[0] + lim) / cell); i2++)
         for (var j2 = Math.floor((ba.lo[1] - lim) / cell); j2 <= Math.floor((ba.hi[1] + lim) / cell); j2++)
@@ -215,17 +219,20 @@
         b.mark = ai;
         var g = Math.hypot(Math.max(0, ba.lo[0] - b.hi[0], b.lo[0] - ba.hi[0]), Math.max(0, ba.lo[1] - b.hi[1], b.lo[1] - ba.hi[1]),
                            Math.max(0, ba.lo[2] - b.hi[2], b.lo[2] - ba.hi[2]));
-        if (g > Math.min(best.mm, reach)) continue;
+        if (g > (collect ? under : Math.min(best.mm, reach))) continue;
         best.pairs++;
         var d = triTri(TA, b.T);
+        if (d < dA) dA = d;
         if (d < best.mm) {
           best.mm = d;
           best.at = [(TA[0][0] + TA[1][0] + TA[2][0]) / 3, (TA[0][1] + TA[1][1] + TA[2][1]) / 3, (TA[0][2] + TA[1][2] + TA[2][2]) / 3];
           best.topZ = ba.hi[2]; best.lowZ = ba.lo[2];
         }
       }
+      if (collect && dA < under) collect.push(ai);
     }
     if (best.mm > reach) best.mm = Infinity;
+    if (collect) best.under = collect;
     return best;
   }
   function dot3(a, b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
@@ -452,33 +459,77 @@
      ===================================================================
      finish() above puts one 2 x 2 patch on each tip. Under a ceiling the
      patches are islands 3.29 mm apart and the part's first layer still bridges
-     between them. Bambu's tree (the clamp_body reference, 0.2 mm layers,
-     interface spacing 0.5) builds a SHEET instead, bottom to top:
-        T1, T2   two TRANSITION layers, 0.84 mm pitch, the first one bridging
-                 tip to tip
-        I1, I2   two INTERFACE layers, 0.84 mm pitch, one direction per layer
-        gap      0.18 mm of air (one empty slicer layer at 0.2 mm), then the part
-     This builds that sheet over every group of tips that holds one ceiling.
+     between them. Bambu's tree (default style) builds this instead, measured
+     on the top_clip_x2 coupon (baselineV2: 35 tip tops of 2 - 4 mm under the
+     slab, two interface layers straight on them, no transition), bottom to top:
+        caps     every tip under the ceiling widens over its last CAP_RISE_MM
+                 to a flat cap CAP_MIN_MM - CAP_MAX_MM across, its neighbours
+                 at most CAP_GAP_MAX_MM away edge to edge
+        I1, I2   two INTERFACE layers, 0.84 mm pitch, one direction per layer,
+                 I1 lying on the caps
+        gap      0.18 mm of air, then the part
+     There are no transition layers: the two the sheet had sagged in the
+     2026-10-20 print, between tips 3 mm apart, and the reference has none.
 
-     ONE DIRECTION PER LAYER, EACH ACROSS THE ONE BELOW: T1 at theta, T2 at
-     theta + 90, I1 at theta, I2 at theta + 90. Each layer is checked with
-     NSO_Crosshatch.oneDirection, the crosshatch's own guard, and extruded with
-     NSO_RasterLines.extrudeFlat, the crosshatch's own line section.
+     ONE DIRECTION PER LAYER, I2 ACROSS I1. I1 at theta, I2 at theta + 90.
+     Each layer is checked with NSO_Crosshatch.oneDirection, the crosshatch's
+     own guard, and extruded with NSO_RasterLines.extrudeFlat, the crosshatch's
+     own line section.
+
+     ONE LINE, ONE BOX. Every line is a single straight run: one box, no turn,
+     no joint, nothing cut into it, and never shorter than MIN_RUN_MM.
+
+     LINE WIDTH. One bead and SHEET_OVER_MM: 0.43 at a 0.4 nozzle. A line
+     exactly one bead wide (0.42, NSO_Thickness.floorFor) is a ZERO-WIDTH
+     wall to a slicer, which insets the region by half a bead for its outer
+     wall: NSO's slicer (Clipper2) keeps none of an isolated 0.42 line and,
+     on the 2026-10-20 export, 16-20 % of a line crossing tip columns (the
+     union's corners are all the offset has to hold on to) - the short pieces
+     with holes between them; from 0.4225 up every line is one unbroken pass.
+     Bambu Studio (classic walls, thin walls off) rescues a short 0.42 strip
+     as a 0.3785 loop - out and back, two passes - and drops a strip of
+     7.14 mm^2 or more (17 mm of line) altogether: the coupon's two 22 mm
+     lines are missing from every sheet layer of slice_w_supports.gcode.3mf.
 
      OPEN LINES, NOT A BOUSTROPHEDON. nso_crosshatch.js refuses end turns at a
      0.84 mm pitch with a 0.42 mm line (clearance 0, measured: a turn there
-     welds along the layer above). Its reason is about TURNS: open lines at
-     0.84 are allowed. A run ends where the ceiling ends (or a wall, or another
-     support's column), not at a rectangle's edge, so turns would not join
-     neighbours anyway. finish() keeps its 1.2 mm boustrophedon patches - the
-     pitch at which its turns clear.
+     welds along the layer above). A run ends where the ceiling ends (or a
+     wall, or another support's column), not at a rectangle's edge. finish()
+     keeps its 1.2 mm boustrophedon patches - the pitch at which its turns
+     clear.
 
      THE LEVEL. A tip's sheet top is GAP_MM under the lowest point of the
      ceiling over the tip's cell (vertical rays; a point more than one layer
      below the tip is a lip or a wall, not the ceiling, and is left to the
      footprint below). Tips whose tops agree within LEVEL_TOL_MM are one level:
-     one sheet. The stack is four layers of layerMm, each set EPS_MM into the
-     one below (finish()'s joining overlap), T1 EPS_MM into the cut tips.
+     one sheet. The stack is two layers of layerMm, I2 set EPS_MM into I1
+     (finish()'s joining overlap) and the caps CAP_INTO_MM into I1.
+
+     THE CAPS. A tip of the level ends in a cap that follows its own leg: a
+     round frustum from where the leg's axis crosses CAP_RISE_MM under the
+     interface (CAP_FOOT of the column's side across: inside its square
+     however it is turned) up to where it crosses the interface's underside,
+     its flat top CAP_INTO_MM into I1. The column is cut along its own axis
+     CAP_TUCK_MM and half its diagonal under the cap's top, so its end is
+     under the cap's top and inside the cap's height (the rise is never less
+     than that and CAP_TUCK_MM again: a strut of 2.7 mm would end under a
+     2 mm cap's foot); the end's corners may stand out of the cap's flank,
+     where the column stood before it was cut. The cap's top stands
+     CAP_INTO_MM into I1, not EPS_MM:
+     under a 2 um overlap the union of a line's side with ~170 caps' tops left
+     slivers it read as piercing (one on the clamp's area 1). Standing the
+     tip upright under the cap instead walks
+     its top up to 1.2 mm along a 30 deg leg and bunches the caps of tips
+     that lean to one node (measured: caps 0.9 mm apart on the coupon's leg).
+     A cap's width is the distance to the nearest tip of the level less
+     CAP_SPACE_MM, held to CAP_MIN_MM - CAP_MAX_MM, and narrowed by
+     CAP_STEP_MM while any of it comes nearer the piece than the gap or within
+     COLUMN_CLEAR_MM of a column of a tree that does not carry this level -
+     down to the column's own side, where the tip has no cap (said, per tip)
+     and is cut at the interface's underside as before (its top where that
+     cut puts it, and no cap within CAP_PART_MM of it). Those clearances are
+     sampled first, then every cap is MEASURED: a hull round it against the
+     piece with exactDistance, narrowed until it keeps the gap.
 
      THE FOOTPRINT. Each sample along a line belongs to the nearest sheet tip
      (within CELL_PITCHES of the tips' own spacing). It is kept only where the
@@ -488,18 +539,16 @@
      other support's column passes through the stack there. A run that would
      meet a sheet of another level stops LEVEL_EDGE_MM short of it.
 
-     NOTHING FLOATS. A T1 run is kept only if it crosses a cut tip; T2 only if
-     it crosses a kept T1 run; and so on up. A tip that no T1 run crosses is
-     cut at the gap line instead ('gap', finish()'s last rung) and the sheet
-     is rebuilt round its column.
+     NOTHING FLOATS. An I1 line is kept only if it lies across a cap (its whole
+     width on the cap where it crosses); I2 only if it crosses a kept I1 line.
+     A tip whose cap no I1 line lies on is cut under the sheet all the same
+     if a line passes over it, or else cut at the gap line ('gap', finish()'s
+     last rung, no cap) and the sheet is rebuilt round its column.
 
-     T1's ANGLE is chosen, and reported. The planner's tips stand on the
-     beacon grid's square lattice; a T1 line parallel to the lattice and
-     between two columns of it crosses no tip at all and would be printed in
-     air from end to end. The reference's tips are irregular, so its axis-
-     aligned lines meet them. Here theta is the candidate that drops the least
-     T1 line, then leaves the least of it hung from turns alone, then the axes
-     (each compared in bands, so a near tie goes to the axes).
+     THE ANGLE is chosen, and reported. The planner's tips stand on the beacon
+     grid's square lattice; theta is the candidate that drops the least I1
+     line (no cap under it), then leaves the fewest caps with no line on them,
+     then the axes (each compared in bands, so a near tie goes to the axes).
 
      THE GAP IS MEASURED, not trusted: each level's stack is measured with
      exactDistance against the piece (minDistance's sampler cannot prune a
@@ -519,25 +568,39 @@
      sheet(piece, stations, opts) -> plan (plain data, plus .probe, a function
        for the caller's own clearance checks - drop it before posting the plan)
        stations: [{ label, beacon, contact, side, col }] - col indexes
-                 opts.columns: [{ pts (top first), side }], every support
-                 member's polyline, so the sheet keeps out of the ones it does
-                 not carry
+                 opts.columns: [{ pts (top first), side, tree }], every
+                 support member's polyline (tree: the trunk it belongs to),
+                 so the sheet and its caps keep out of the ones it does not
+                 carry
        opts: gapMm, layerMm, widthMm | nozzle, pitchMm, sideMm, plateZ,
-             footMm, occluders, angleDeg (forces T1's), thickness, crosshatch,
-             rasterLines, beat, progress
+             footMm, occluders, angleDeg (forces I1's), capRiseMm, capMinMm,
+             capMaxMm, thickness, crosshatch, rasterLines, beat, progress
+       every sheet tip carries cutZ, rise (cutPath's) and cap ({ c, w, z0,
+       z1, footD } or null); every level its caps
      =================================================================== */
-  var SHEET_PITCH_MM = 0.84;   /* the reference's interface and transition pitch (0.42 line + 0.42 channel) */
-  var SHEET_ROLES = ['transition', 'transition', 'interface', 'interface'];
+  var SHEET_PITCH_MM = 0.84;   /* the reference's interface pitch (0.42 line + 0.42 channel) */
+  var SHEET_ROLES = ['interface', 'interface'];
+  var SHEET_OVER_MM = 0.01;    /* a line is one bead and this much wide: see LINE WIDTH */
   var CELL_MM = 0.1;           /* the footprint raster */
   var SAMPLE_MM = 0.05;        /* along a line */
   var LEVEL_TOL_MM = 0.01;
   var CELL_PITCHES = 0.6;      /* a sample belongs to a tip within this many tip spacings (Chebyshev) */
-  var MIN_RUN_MM = 0.84;       /* a run shorter than one pitch is not kept */
+  var MIN_RUN_MM = 2;          /* a line shorter than this is not kept: no printed segment under 2 mm */
   var LEVEL_EDGE_MM = 0.25;    /* runs of two levels stop this far apart */
-  var COLUMN_CLEAR_MM = 0.2;   /* the sheet keeps this far off another support's column */
-  var TURN_SKEW_MM = 1.0;      /* a T1 turn joins two runs whose ends are at most this much more than a pitch apart */
+  var COLUMN_CLEAR_MM = 0.2;   /* the sheet and its caps keep this far off another support's column */
   var ROOM_MM = 0.5;           /* a cut tip keeps this much of itself above the foot */
-  var T1_ANGLES = [0, 90, 26.565051177077994, 116.56505117707799, 63.43494882292201, 153.43494882292202, 45, 135];
+  var CAP_RISE_MM = 2;         /* a tip widens to its cap over this much of its rise */
+  var CAP_MIN_MM = 2.5;        /* a cap is this wide at least... */
+  var CAP_MAX_MM = 4;          /* ...and at most */
+  var CAP_SPACE_MM = 0.5;      /* where there is room, a cap leaves this much air to its nearest neighbour */
+  var CAP_GAP_MAX_MM = 2;      /* the most air between a cap and its nearest neighbour (CAP_MAX_MM caps on tips 6 mm apart) */
+  var CAP_STEP_MM = 0.25;      /* a cap too near the piece or another support narrows by this */
+  var CAP_FOOT = 0.9;          /* the cap's foot across, as a share of the column's side: inside its square however either is turned */
+  var CAP_TUCK_MM = 0.1;       /* the column under a cap ends this far (and half its diagonal) inside it: no face of the two shares a plane */
+  var CAP_SIDES = 32;          /* the cap's rim, sampled for its clearance */
+  var CAP_PART_MM = 0.05;      /* a cap stops this far short of its neighbour's: caps never overlap (see THE CAPS) */
+  var CAP_INTO_MM = 0.01;      /* a cap's flat top stands this far into I1 (see THE CAPS) */
+  var LINE_ANGLES = [0, 90, 26.565051177077994, 116.56505117707799, 63.43494882292201, 153.43494882292202, 45, 135];
 
   function sheet(piece, stations, opts) {
     opts = opts || {};
@@ -548,11 +611,14 @@
     var o = {
       gap: opts.gapMm == null ? GAP_MM : +opts.gapMm,
       layer: opts.layerMm == null ? LAYER_MM : +opts.layerMm,
-      width: opts.widthMm == null ? TH.floorFor(opts.nozzle) : +opts.widthMm,
+      width: opts.widthMm == null ? Math.round((TH.floorFor(opts.nozzle) + SHEET_OVER_MM) * 1e6) / 1e6 : +opts.widthMm,
       pitch: opts.pitchMm == null ? SHEET_PITCH_MM : +opts.pitchMm,
       side: opts.sideMm == null ? 1.2 : +opts.sideMm,
       plateZ: opts.plateZ == null ? 0 : +opts.plateZ,
       foot: opts.footMm == null ? 0 : +opts.footMm,
+      capRise: opts.capRiseMm == null ? CAP_RISE_MM : +opts.capRiseMm,
+      capMin: opts.capMinMm == null ? CAP_MIN_MM : +opts.capMinMm,
+      capMax: opts.capMaxMm == null ? CAP_MAX_MM : +opts.capMaxMm,
       eps: EPS_MM
     };
     if (!(o.pitch > o.width)) return { ok: false, reason: 'pitch ' + o.pitch + ' does not clear the ' + o.width + ' mm line' };
@@ -560,6 +626,25 @@
     var obstacles = [piece].concat(opts.occluders || []).filter(function (s) { return s && s.length >= 9; });
     var PPs = obstacles.map(function (s) { return prepared(TH, s); });
     var NL = SHEET_ROLES.length, stackH = NL * o.layer - (NL - 1) * o.eps;
+    /* how far under the cap's top a capped column ends: CAP_TUCK and half its
+       diagonal - and the cap rises at least that and CAP_TUCK again, so the
+       column always ends inside its cap's height (a strut of 2.7 mm or more,
+       or a short capRiseMm, would otherwise end under the cap's foot and the
+       cap, and the sheet on it, float) */
+    var sink = CAP_TUCK_MM + o.side * Math.SQRT1_2;
+    o.capRise = Math.max(o.capRise, sink + CAP_TUCK_MM);
+    /* where a column's axis crosses z (its polyline, top first; above it, its top) */
+    function colAxisAt(pts, z) {
+      if (pts.length < 2 || z >= pts[0][2]) return [pts[0][0], pts[0][1]];
+      for (var k = 0; k + 1 < pts.length; k++) {
+        var a = pts[k], b = pts[k + 1];
+        if (z <= a[2] + 1e-12 && z >= b[2] - 1e-12) {
+          var dz = a[2] - b[2], f = dz > 1e-12 ? (a[2] - z) / dz : 0;
+          return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
+        }
+      }
+      var e = pts[pts.length - 1]; return [e[0], e[1]];
+    }
 
     /* opts.beat(): called through the long loops, so a caller that reports
        progress (the card's build worker) is never silent for long */
@@ -587,6 +672,11 @@
     function nearestMm(p, r) {
       var best = Infinity;
       for (var i = 0; i < PPs.length; i++) { var nr = PPs[i].nearest(p, r); if (nr && nr.dist < best) best = nr.dist; }
+      return best;
+    }
+    function nearestPt(p, r) {
+      var best = null;
+      for (var i = 0; i < PPs.length; i++) { var nr = PPs[i].nearest(p, r); if (nr && (!best || nr.dist < best.dist)) best = nr; }
       return best;
     }
 
@@ -618,8 +708,8 @@
       }
       t.zu = zu; t.zTop = zu - o.gap; t.zBase = t.zTop - stackH;
       var col = columns[t.col];
-      /* ROOM: the cut must leave a tip under the stack, above its foot. */
-      if (!(t.zBase - o.side - ROOM_MM > o.plateZ + o.foot) || !col) { t.mode = 'gap'; t.why = 'no room for the stack above the plate'; }
+      /* ROOM: the cut must leave a tip under the stack and its cap, above its foot. */
+      if (!(t.zBase - Math.max(o.side, o.capRise) - ROOM_MM > o.plateZ + o.foot) || !col) { t.mode = 'gap'; t.why = 'no room for the stack and its cap above the plate'; }
     });
 
     var tipOfCol = {};
@@ -634,21 +724,6 @@
     /* a tip on no level (no room for the stack) is settled already */
     settled = nTips - levels.reduce(function (n, L) { return n + L.tips.length; }, 0);
     told();
-
-    /* where a column's axis crosses z (the column's own polyline, top first) */
-    function colAt(col, z) {
-      if (col.pts.length < 2) return [col.pts[0][0], col.pts[0][1]];
-      var p = col.pts;
-      if (z >= p[0][2]) return [p[0][0], p[0][1]];
-      for (var k = 0; k + 1 < p.length; k++) {
-        var a = p[k], b = p[k + 1];
-        if (z <= a[2] + 1e-12 && z >= b[2] - 1e-12) {
-          var dz = a[2] - b[2], f = dz > 1e-12 ? (a[2] - z) / dz : 0;
-          return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f];
-        }
-      }
-      var e = p[p.length - 1]; return [e[0], e[1]];
-    }
 
     /* every sheet tip (all levels), bucketed for the nearest-tip lookup */
     var bucket = new Map();
@@ -682,15 +757,15 @@
       var live = L.tips.filter(function (t) { return t.mode === 'sheet'; });
       /* a sheet spans from tip to tip: one tip alone carries a patch, not a sheet */
       if (live.length < 2) return { ok: false, reason: 'a sheet needs two tips at one level; this one has ' + live.length };
-      var zTop = L.zTop, zBase = zTop - stackH;
-      /* where each tip's top stands once cut: its column at one side under the cut */
-      live.forEach(function (t) { var cp = cutPath(columns[t.col].pts, zBase + o.eps, o.side); t.top = [cp[0][0], cp[0][1]]; });
+      var zTop = L.zTop, zBase = zTop - stackH, zCap = zBase + CAP_INTO_MM;
+      /* each tip's cap: its top where the leg crosses the interface's underside, its foot CAP_RISE_MM down the leg */
+      live.forEach(function (t) { var pts = columns[t.col].pts; t.top = colAxisAt(pts, zCap); t.capFoot = colAxisAt(pts, zCap - o.capRise); });
       var lo = [Infinity, Infinity], hi = [-Infinity, -Infinity];
       live.forEach(function (t) {
         for (var k = 0; k < 2; k++) { lo[k] = Math.min(lo[k], t.contact[k] - H); hi[k] = Math.max(hi[k], t.contact[k] + H); }
       });
-      /* the reach of a line's edge off its centreline: half a width, and at a
-         turn's mitred corner half a width times root 2 */
+      /* the reach of a line's edge off its centreline: half a width (at a
+         line's square end, half a width times root 2) */
       var r = o.gap + o.width / 2 * Math.SQRT2 + CELL_MM * Math.SQRT1_2 + 1e-3;
       var pad = r + 2 * CELL_MM;
       var ox = lo[0] - pad, oy = lo[1] - pad;
@@ -758,8 +833,8 @@
       /* the columns this level does not carry: every other member through the stack */
       /* a tip of this level cut at the gap instead stands flush with the
          sheet's top: the sheet may meet it, so it is no obstacle either */
-      var mine = {};
-      L.tips.forEach(function (t) { mine[t.col] = true; });
+      var mine = {}, trees = {};
+      L.tips.forEach(function (t) { mine[t.col] = true; var cl = columns[t.col]; if (cl && cl.tree != null) trees[cl.tree] = true; });
       function blockSeg(a, b, rad) {
         var x0 = Math.min(a[0], b[0]) - rad, x1 = Math.max(a[0], b[0]) + rad, y0 = Math.min(a[1], b[1]) - rad, y1 = Math.max(a[1], b[1]) + rad;
         var i0 = Math.max(0, Math.floor((x0 - ox) / CELL_MM)), i1 = Math.min(nx - 1, Math.ceil((x1 - ox) / CELL_MM));
@@ -779,25 +854,25 @@
            sheet or at the gap - since a cut stands its top straight up from
            lower down its leg, somewhere the planned leg is not */
         var variants = [col.pts], tt = tipOfCol[ci];
-        if (tt && tt.zTop != null) variants.push(cutPath(col.pts, tt.zTop, col.side), cutPath(col.pts, tt.zBase + o.eps, col.side));
+        if (tt && tt.zTop != null) variants.push(cutPath(col.pts, tt.zTop, col.side), cutPath(col.pts, tt.zBase + o.eps - sink, col.side, 0));
         variants.forEach(function (p) { blockPath(p, col.side, rad); });
       });
-      function blockPath(p, side, rad) {
-        if (p.length === 1) { if (p[0][2] >= zb0 && p[0][2] <= zb1 + side) blockSeg(p[0], p[0], rad); return; }
-        var col = { side: side };
+      /* where a column's polyline passes through the band [za, zb], in xy: its pieces */
+      function bandPieces(p, side, za, zb, fn) {
+        if (p.length === 1) { if (p[0][2] >= za - side && p[0][2] <= zb + side) fn(p[0], p[0]); return; }
         for (var k = 0; k + 1 < p.length; k++) {
-          var a = p[k], b2 = p[k + 1], za = Math.max(a[2], b2[2]) + col.side, zz = Math.min(a[2], b2[2]) - col.side;
-          if (za < zb0 || zz > zb1) continue;
-          /* the part of the segment inside the band, in xy */
+          var a = p[k], b2 = p[k + 1], zhi = Math.max(a[2], b2[2]) + side, zlo = Math.min(a[2], b2[2]) - side;
+          if (zhi < za || zlo > zb) continue;
           var dz = b2[2] - a[2], ta = 0, tb = 1;
           if (Math.abs(dz) > 1e-9) {
-            var t0 = (zb0 - col.side - a[2]) / dz, t1 = (zb1 + col.side - a[2]) / dz;
+            var t0 = (za - side - a[2]) / dz, t1 = (zb + side - a[2]) / dz;
             ta = Math.max(0, Math.min(t0, t1)); tb = Math.min(1, Math.max(t0, t1));
             if (ta > tb) continue;
           }
-          blockSeg([a[0] + (b2[0] - a[0]) * ta, a[1] + (b2[1] - a[1]) * ta], [a[0] + (b2[0] - a[0]) * tb, a[1] + (b2[1] - a[1]) * tb], rad);
+          fn([a[0] + (b2[0] - a[0]) * ta, a[1] + (b2[1] - a[1]) * ta], [a[0] + (b2[0] - a[0]) * tb, a[1] + (b2[1] - a[1]) * tb]);
         }
       }
+      function blockPath(p, side, rad) { bandPieces(p, side, zb0, zb1, function (a, b2) { blockSeg(a, b2, rad); }); }
       L.extraBlocks = L.extraBlocks || [];
       L.extraBlocks.forEach(function (eb) { blockSeg(eb, eb, eb[2]); });
       function freeAt(x, y) {
@@ -819,8 +894,155 @@
         return k < 0 ? null : tips[k];
       }
 
+      /* THE CAPS: as wide as the nearest tip allows, then narrowed off the
+         piece and off every column of a tree this level does not carry */
+      /* null when a cap of width w topped at c keeps its clearances, else
+         what it comes too near: { push } - the horizontal way out from the
+         piece, when it is the piece - or { column: true } */
+      function capFoul(t, c, w) {
+        var f = t.capFoot, Rc = w / 2, rb = CAP_FOOT * o.side / 2, aim = o.gap + Rc * (1 - Math.cos(Math.PI / CAP_SIDES)) + 0.003;
+        function at(s) { return [f[0] + (c[0] - f[0]) * s, f[1] + (c[1] - f[1]) * s]; }
+        /* [z, centre, radius]: the top, half way in on it, half way up, the foot */
+        var rings = [[zCap, c, Rc], [zCap, c, Rc / 2], [zCap - o.capRise / 2, at(0.5), (Rc + rb) / 2], [zCap - o.capRise, f, rb]];
+        var samples = [[c[0], c[1], zCap]];
+        for (var ri = 0; ri < rings.length; ri++) for (var k = 0; k < CAP_SIDES; k++) {
+          var a = 2 * Math.PI * k / CAP_SIDES, q = rings[ri][1];
+          samples.push([q[0] + rings[ri][2] * Math.cos(a), q[1] + rings[ri][2] * Math.sin(a), rings[ri][0]]);
+        }
+        /* the deepest offence: a sample in the piece (out through its nearest
+           face, then the gap) or one nearer it than the gap */
+        var worst = null;
+        for (var si = 0; si < samples.length; si++) {
+          var p = samples[si], ins = inside(p), nr = nearestPt(p, ins ? Math.max(1, Rc * 2) : aim);
+          if (ins && !nr) return { inside: true };
+          if (!nr || (!ins && !(nr.dist < aim))) continue;
+          var need = ins ? nr.dist + aim : aim - nr.dist;
+          if (!worst || need > worst.need) worst = { need: need, ins: ins, from: p, to: nr.point };
+        }
+        if (worst) {
+          var dx = worst.from[0] - worst.to[0], dy = worst.from[1] - worst.to[1], dl = Math.hypot(dx, dy), sg = worst.ins ? -1 : 1;
+          return { push: dl > 1e-9 ? [sg * dx / dl * (worst.need + 0.01), sg * dy / dl * (worst.need + 0.01)] : null };
+        }
+        for (var ci = 0; ci < columns.length; ci++) {
+          var col = columns[ci];
+          if (mine[ci] || !col || !col.pts || !col.pts.length || (col.tree != null && trees[col.tree])) continue;
+          var rad = Rc + col.side * Math.SQRT1_2 + COLUMN_CLEAR_MM, near = false;
+          bandPieces(col.pts, col.side, zCap - o.capRise, zCap, function (a2, b2) { if (!near && segSeg2(c, f, a2, b2) <= rad) near = true; });
+          if (near) return { column: true };
+        }
+        return null;
+      }
+      /* A cap too near the piece first slides its top away from it - as far
+         as still covers the column's end (its top less the column's half
+         diagonal) - and only then narrows */
+      live.forEach(function (t) {
+        beat();
+        var nnTop = Infinity;
+        live.forEach(function (u) { if (u !== t) nnTop = Math.min(nnTop, Math.hypot(u.top[0] - t.top[0], u.top[1] - t.top[1])); });
+        var w = Math.min(o.capMax, Math.max(o.capMin, nnTop - CAP_SPACE_MM)), why = null, c = null;
+        for (; w > o.side + 1e-9; w = Math.max(o.side, w - CAP_STEP_MM)) {
+          var cc = t.top.slice(), slack = w / 2 - o.side * Math.SQRT1_2, bad = null;
+          for (var it2 = 0; it2 < 8; it2++) {
+            bad = capFoul(t, cc, w);
+            if (!bad || !bad.push) break;
+            var nc = [cc[0] + bad.push[0], cc[1] + bad.push[1]];
+            if (!(Math.hypot(nc[0] - t.top[0], nc[1] - t.top[1]) <= slack)) break;
+            cc = nc; why = 'slid off the piece';
+          }
+          if (!bad) { c = cc; break; }
+          why = 'narrowed off the piece or another support';
+          if (w <= o.side + 1e-9 + CAP_STEP_MM && w - CAP_STEP_MM <= o.side + 1e-9) { w = o.side; break; }
+        }
+        if (!c) { t.cap = null; t.capWhy = 'no room for a cap: the column\'s own top'; return; }
+        t.cap = { c: c, b: t.capFoot.slice(), w: w, z0: zCap - o.capRise, z1: zCap, footD: CAP_FOOT * o.side, nnMm: nnTop, why: why,
+                  slidMm: Math.hypot(c[0] - t.top[0], c[1] - t.top[1]) };
+        t.capWhy = why;
+      });
+      /* CAPS NEVER OVERLAP. Two flat tops in one plane that overlap are the
+         one input the union cannot be trusted with - measured on the clamp's
+         area 2, tips 1.3 - 2.1 mm apart, 2.5 mm caps: 70 piercing pairs in
+         the welded sheet; none with the caps apart - so a cap stops
+         CAP_PART_MM short of every neighbour, both shrinking alike: tips
+         closer than CAP_MIN_MM + CAP_PART_MM get the widest caps that fit
+         (said, per tip), which a slicer's closing (0.049 mm at Bambu's
+         defaults) prints as one region with them. A cap that would be no
+         wider than its column is no cap. */
+      var capped = live.filter(function (t) { return t.cap; });
+      for (var pass = 0, moved = true; moved && pass < 8; pass++) {
+        moved = false;
+        for (var ia = 0; ia < capped.length; ia++) for (var ib = ia + 1; ib < capped.length; ib++) {
+          var A = capped[ia].cap, B = capped[ib].cap, dd = Math.hypot(A.c[0] - B.c[0], A.c[1] - B.c[1]) - CAP_PART_MM;
+          if ((A.w + B.w) / 2 <= dd + 1e-9) continue;
+          /* the narrower keeps its width when the wider can give the rest */
+          var span = Math.max(dd, 0);
+          if (A.w <= span) B.w = 2 * span - A.w;
+          else if (B.w <= span) A.w = 2 * span - B.w;
+          else { A.w = span; B.w = span; }
+          A.why = B.why = 'held short of a neighbour ' + (dd + CAP_PART_MM).toFixed(2) + ' mm away'; moved = true;
+        }
+      }
+      capped.forEach(function (t) {
+        if (t.cap.w <= o.side + 1e-9) { t.cap = null; t.capWhy = 'no room for a cap: the column\'s own top'; }
+        else t.capWhy = t.cap.why;
+      });
+      /* A TIP WITH NO CAP stands as before: its column cut flat EPS_MM into
+         I1 after an upright run of its side, so its top is THERE, not where
+         its leg crosses zCap (a 30 deg leg: 0.7 mm apart) - and no cap comes
+         within CAP_PART_MM of that top's square either: a cap's top 8 um over
+         a column's top is the near-coplanar pair the union cannot take.
+         EVERY CAP IS MEASURED: capFoul samples a few rings, which a rib or a
+         post between them gets past, so each cap - as a hull round the
+         polygon gridpack builds - is measured against the piece with the
+         exact triangle distance and narrowed by CAP_STEP_MM until it keeps
+         the gap. Narrowing only ever takes a cap in (its foot stays), so a
+         cap measured clear stays clear. */
+      function bareTop(t) { var cp = cutPath(columns[t.col].pts, zBase + o.eps, o.side, o.side); return [cp[0][0], cp[0][1]]; }
+      function noCap(t, why) { t.cap = null; t.capWhy = why; t.top = bareTop(t); }
+      var pending = live.filter(function (t) { return t.cap; });
+      live.forEach(function (t) { if (!t.cap) t.top = bareTop(t); });
+      for (var settle = 0; settle < 64; settle++) {
+        var changed = false;
+        live.forEach(function (t) {
+          if (!t.cap) return;
+          live.forEach(function (u) {
+            if (u === t || u.cap || !t.cap) return;
+            var room = Math.hypot(t.cap.c[0] - u.top[0], t.cap.c[1] - u.top[1]) - o.side * Math.SQRT1_2 - CAP_PART_MM;
+            if (t.cap.w / 2 > room + 1e-9) {
+              t.cap.w = Math.max(0, 2 * room); t.cap.why = t.capWhy = 'held short of a neighbour\'s column ' + Math.hypot(t.cap.c[0] - u.top[0], t.cap.c[1] - u.top[1]).toFixed(2) + ' mm away';
+              changed = true;
+              if (t.cap.w <= o.side + 1e-9) noCap(t, 'no room for a cap: the column\'s own top');
+            }
+          });
+        });
+        pending = pending.filter(function (t) { return t.cap; });
+        if (pending.length) {
+          var hulls = pending.map(function (t) { return capHull(t.cap); }), first = [], nT = 0;
+          hulls.forEach(function (hs) { first.push(nT); nT += hs.length / 9; });
+          var soupC = joinSoups(hulls), near = {};
+          obstacles.forEach(function (B) {
+            exactDistance(soupC, B, o.gap + 0.1, beat, o.gap - 1e-5).under.forEach(function (ai) {
+              var lo2 = 0, hi2 = first.length - 1;
+              while (lo2 < hi2) { var md = (lo2 + hi2 + 1) >> 1; if (first[md] <= ai) lo2 = md; else hi2 = md - 1; }
+              near[lo2] = true;
+            });
+          });
+          pending = pending.filter(function (t, k) {
+            if (!near[k]) return false;
+            changed = true;
+            t.cap.w = Math.max(o.side, t.cap.w - CAP_STEP_MM); t.cap.why = t.capWhy = 'narrowed off the piece (measured)';
+            if (t.cap.w <= o.side + 1e-9) { noCap(t, 'no room for a cap: the piece is in its way'); return false; }
+            return true;
+          });
+        }
+        if (!changed) break;
+      }
+      /* where a line lies across a cap (or, with no cap, the column's own top) */
+      function restsOn(rn, t) {
+        var half = t.cap ? t.cap.w / 2 - o.width / 2 : o.side / 2 - o.width / 2;
+        return crossesPoint(rn, t.cap ? t.cap.c : t.top, half) != null;
+      }
+
       /* runs of one layer at angle phi: [{ u, v0, v1, a:[x,y], b:[x,y] }] */
-      var hw = o.width / 2;
       function runsAt(phi) {
         var th = phi * Math.PI / 180, dx = Math.cos(th), dy = Math.sin(th), mx = -dy, my = dx;
         var cs = [[lo[0], lo[1]], [hi[0], lo[1]], [lo[0], hi[1]], [hi[0], hi[1]]];
@@ -874,116 +1096,30 @@
         var vb = X[0] * b.dir[0] + X[1] * b.dir[1];
         return vb >= b.v0 && vb <= b.v1;
       }
-      /* T1 at phi: its runs joined end to end into serpentines (a turn from
-         one run to the next line's run, at alternate ends, where the turn's
-         own path is footprint), the way the reference's transition is one
-         path; a serpentine that crosses no tip is dropped. */
-      function t1For(phi) {
-        var runs = runsAt(phi), total = 0, chains = [], open = [];
-        runs.forEach(function (rn) { rn.k = Math.round(rn.u / o.pitch); total += rn.v1 - rn.v0; });
-        runs.sort(function (a, b) { return (a.k - b.k) || (a.v0 - b.v0); });
-        var byK = {};
-        runs.forEach(function (rn) { (byK[rn.k] = byK[rn.k] || []).push(rn); });
-        function endOf(rn, side) { return side === 1 ? rn.b : rn.a; }
-        function at(rn, v) { return [rn.u * rn.nrm[0] + v * rn.dir[0], rn.u * rn.nrm[1] + v * rn.dir[1]]; }
-        function turnFree(p, q) {
-          var n = Math.max(1, Math.ceil(Math.hypot(q[0] - p[0], q[1] - p[1]) / SAMPLE_MM));
-          for (var i = 0; i <= n; i++) {
-            var x = p[0] + (q[0] - p[0]) * i / n, y = p[1] + (q[1] - p[1]) * i / n, ow = ownerAt(x, y);
-            if (!ow || ow.level !== L.id || !freeAt(x, y)) return false;
-          }
-          return true;
-        }
-        runs.forEach(function (B) {
-          var pick = null;
-          open.forEach(function (c) {
-            if (c.tail.k !== B.k - 1 || c.done) return;
-            var sides = c.free == null ? [1, 0] : [c.free];
-            sides.forEach(function (sd) {
-              /* the turn runs straight across, at the inner of the two ends:
-                 the longer run gives up the difference (at most TURN_SKEW_MM),
-                 so the turn is never a diagonal lying along a line */
-              var A = c.tail, va = sd === 1 ? A.v1 : A.v0, vb = sd === 1 ? B.v1 : B.v0, skew = Math.abs(va - vb);
-              var vt = sd === 1 ? Math.min(va, vb) : Math.max(va, vb);
-              if (skew > TURN_SKEW_MM) return;
-              if ((sd === 1 ? vt - A.v0 : A.v1 - vt) < MIN_RUN_MM / 2 || (sd === 1 ? vt - B.v0 : B.v1 - vt) < MIN_RUN_MM / 2) return;
-              if (pick && skew >= pick.skew) return;
-              /* a turn is a strip across the two lines: no other run on
-                 either line may end within a line width of it */
-              var clash = (byK[A.k] || []).concat(byK[B.k] || []).some(function (R) {
-                return R !== A && R !== B && vt >= R.v0 - o.width - 0.05 && vt <= R.v1 + o.width + 0.05;
-              });
-              if (clash || !turnFree(at(A, vt), at(B, vt))) return;
-              pick = { c: c, side: sd, skew: skew, vt: vt };
-            });
-          });
-          if (pick) {
-            var c = pick.c;
-            if (c.free == null) c.first = pick.side;
-            var A0 = c.tail;
-            if (pick.side === 1) { A0.v1 = pick.vt; B.v1 = pick.vt; } else { A0.v0 = pick.vt; B.v0 = pick.vt; }
-            A0.a = at(A0, A0.v0); A0.b = at(A0, A0.v1); B.a = at(B, B.v0); B.b = at(B, B.v1);
-            c.runs.push(B); c.sides.push(pick.side); c.tail = B; c.free = 1 - pick.side;
-            c.done = false;
-          } else {
-            c = { runs: [B], sides: [], tail: B, free: null };
-            chains.push(c); open.push(c);
-          }
-          /* a chain links once per line */
-          open = open.filter(function (x) { return x.tail.k >= B.k - 1; });
+      /* I1 at phi: the runs that lie across a cap */
+      function i1For(phi) {
+        var runs = runsAt(phi), total = 0, dropped = 0, kept = [], crossed = {};
+        runs.forEach(function (rn) {
+          var len = rn.v1 - rn.v0, on = false;
+          total += len;
+          live.forEach(function (t) { if (restsOn(rn, t)) { on = true; crossed[t.i] = true; } });
+          if (on) kept.push(rn); else dropped += len;
         });
-        var kept = [], keptRuns = [], dropped = 0, hung = 0, bridge = 0, cant = 0, crossed = {};
-        chains.forEach(function (c) {
-          var any = false, per = c.runs.map(function (rn) {
-            var vs = [];
-            live.forEach(function (t) {
-              var v = crossesPoint(rn, t.top, o.side / 2);
-              if (v != null) vs.push({ v: v, t: t });
-            });
-            if (vs.length) any = true;
-            return vs;
-          });
-          if (!any) { c.runs.forEach(function (rn) { dropped += rn.v1 - rn.v0; }); return; }
-          c.runs.forEach(function (rn, k) {
-            var vs = per[k].map(function (x) { crossed[x.t.i] = true; return x.v; }).sort(function (a, b) { return a - b; });
-            if (!vs.length) { hung += rn.v1 - rn.v0; return; }
-            for (var j = 0; j + 1 < vs.length; j++) bridge = Math.max(bridge, vs[j + 1] - vs[j] - o.side);
-            cant = Math.max(cant, vs[0] - rn.v0 - o.side / 2, rn.v1 - vs[vs.length - 1] - o.side / 2);
-          });
-          /* the serpentine as one path: each run walked toward the end its turn leaves from */
-          var path = [], s0 = c.runs.length > 1 ? c.sides[0] : 1;
-          path.push(endOf(c.runs[0], 1 - s0), endOf(c.runs[0], s0));
-          for (var k = 1; k < c.runs.length; k++) path.push(endOf(c.runs[k], c.sides[k - 1]), endOf(c.runs[k], 1 - c.sides[k - 1]));
-          kept.push(path);
-          keptRuns = keptRuns.concat(c.runs);
-        });
-        return { angleDeg: phi, runs: keptRuns, paths: kept, droppedMm: dropped, totalMm: total,
-                 droppedShare: total > 0 ? dropped / total : 1, hungShare: total > 0 ? hung / total : 1,
-                 maxBridgeMm: Math.max(0, bridge), maxCantileverMm: Math.max(0, cant), crossed: crossed };
+        var bare = live.filter(function (t) { return !crossed[t.i]; }).length;
+        return { angleDeg: phi, runs: kept, droppedMm: dropped, totalMm: total, droppedShare: total > 0 ? dropped / total : 1,
+                 bare: bare, crossed: crossed };
       }
-      var tried = (angleForced == null ? T1_ANGLES : [angleForced]).map(t1For);
-      /* least dropped (5 % bands), then least hung from turns alone (10 %
-         bands), then the axes first, then the shortest bridge - in bands, so
-         a near tie goes to the axes, as the reference's lines run, and does
-         not flip on a sample's rounding */
+      var tried = (angleForced == null ? LINE_ANGLES : [angleForced]).map(i1For);
+      /* least dropped (5 % bands), then the fewest caps with no line on
+         them, then the axes first - in bands, so a near tie goes to the axes
+         and does not flip on a sample's rounding */
       var best = tried.slice().sort(function (a, b) {
-        return (Math.floor(a.droppedShare * 20) - Math.floor(b.droppedShare * 20)) ||
-               (Math.floor(a.hungShare * 10) - Math.floor(b.hungShare * 10)) ||
-               (T1_ANGLES.indexOf(a.angleDeg) - T1_ANGLES.indexOf(b.angleDeg)) || (a.maxBridgeMm - b.maxBridgeMm);
+        return (Math.floor(a.droppedShare * 20) - Math.floor(b.droppedShare * 20)) || (a.bare - b.bare) ||
+               (LINE_ANGLES.indexOf(a.angleDeg) - LINE_ANGLES.indexOf(b.angleDeg));
       })[0];
-      /* where the footprint is narrow the turns are most of the line: the
-         layer is then built from its runs that cross a tip, open-ended */
-      best.turns = true;
-      if (CH.oneDirection(best.paths)) {
-        best.turns = false;
-        best.runs = best.runs.filter(function (rn) { return live.some(function (t) { return crossesPoint(rn, t.top, o.side / 2) != null; }); });
-        best.paths = null;
-        best.crossed = {};
-        best.runs.forEach(function (rn) { live.forEach(function (t) { if (crossesPoint(rn, t.top, o.side / 2) != null) best.crossed[t.i] = true; }); });
-      }
       var uncrossed = live.filter(function (t) { return !best.crossed[t.i]; });
-      if (live.length - uncrossed.length < 2) return { ok: false, reason: 'a sheet needs two tips its lines cross; ' + (live.length - uncrossed.length) + ' here' };
-      var layers = [{ runs: best.runs, paths: best.paths, angleDeg: best.angleDeg }];
+      if (live.length - uncrossed.length < 2) return { ok: false, reason: 'a sheet needs two caps its lines lie on; ' + (live.length - uncrossed.length) + ' here' };
+      var layers = [{ runs: best.runs, angleDeg: best.angleDeg }];
       for (var li = 1; li < NL; li++) {
         var phi = (best.angleDeg + (li % 2 ? 90 : 0)) % 180, below = layers[li - 1].runs;
         var rs = runsAt(phi).filter(function (rn) { return below.some(function (q) { return crossesRun(rn, q); }); });
@@ -992,7 +1128,8 @@
       var built = [];
       for (var lk = 0; lk < NL; lk++) {
         var Lk = layers[lk];
-        var paths = Lk.paths || Lk.runs.map(function (rn) { return [rn.a, rn.b]; });
+        /* one line, one box: each run is its two ends and nothing between */
+        var paths = Lk.runs.map(function (rn) { return [rn.a, rn.b]; });
         if (!paths.length) return { ok: false, reason: SHEET_ROLES[lk] + ' layer ' + (lk + 1) + ' has no line left', uncrossed: uncrossed };
         var bad = CH.oneDirection(paths);
         if (bad) return { ok: false, reason: 'layer ' + (lk + 1) + ': ' + bad };
@@ -1001,12 +1138,12 @@
         if (!ex.ok) return { ok: false, reason: 'layer ' + (lk + 1) + ' would not extrude: ' + ex.reason };
         built.push({ role: SHEET_ROLES[lk], angleDeg: Lk.angleDeg, z0: zb, z1: zb + o.layer, lines: Lk.runs.length,
                      lengthMm: Lk.runs.reduce(function (s, rn) { return s + rn.v1 - rn.v0; }, 0),
+                     shortestMm: Lk.runs.reduce(function (s, rn) { return Math.min(s, rn.v1 - rn.v0); }, Infinity),
                      paths: paths, soup: ex.tris });
       }
-      return { ok: true, zTop: zTop, zBase: zBase, layers: built, uncrossed: uncrossed,
-               t1: { angleDeg: best.angleDeg, maxBridgeMm: best.maxBridgeMm, maxCantileverMm: best.maxCantileverMm,
-                     droppedShare: best.droppedShare, hungShare: best.hungShare, serpentines: best.paths ? best.paths.length : 0, turns: best.turns,
-                     tried: tried.map(function (x) { return { angleDeg: x.angleDeg, droppedShare: x.droppedShare, hungShare: x.hungShare, maxBridgeMm: x.maxBridgeMm }; }) } };
+      return { ok: true, zTop: zTop, zBase: zBase, zCap: zCap, layers: built, uncrossed: uncrossed,
+               lines: { angleDeg: best.angleDeg, droppedShare: best.droppedShare, bare: best.bare,
+                        tried: tried.map(function (x) { return { angleDeg: x.angleDeg, droppedShare: x.droppedShare, bare: x.bare }; }) } };
     }
 
     rebucket();
@@ -1024,10 +1161,10 @@
         });
         if (dmin >= o.gap - 1e-5) {
           L.ok = true; L.res = res; L.minDistanceMm = dmin;
-          /* A TIP NO T1 LINE CROSSES (its top is beside a wall the sheet
-             keeps off, or at a narrow end): if any line of the sheet passes
-             over it, it stays cut under the sheet and carries nothing; if
-             none does, it is cut at the gap line instead and holds the
+          /* A TIP WHOSE CAP NO I1 LINE LIES ON (its top is beside a wall the
+             sheet keeps off, or at a narrow end): if any line of the sheet
+             passes over it, it stays cut under the sheet and carries nothing;
+             if none does, it is cut at the gap line instead and holds the
              ceiling itself (finish()'s last rung) - in neither case does a
              tip stand inside the sheet. */
           var reachTip = o.side * Math.SQRT1_2 + o.width / 2 + 0.05;
@@ -1049,8 +1186,8 @@
                 return false;
               });
             });
-            if (over) { t.carried = false; t.why = 'no transition line crosses it; cut under the sheet'; }
-            else { t.mode = 'gap'; t.level = -1; t.why = 'no line of the sheet reaches it'; }
+            if (over) { t.carried = false; t.why = 'no interface line lies on its cap; cut under the sheet'; }
+            else { t.mode = 'gap'; t.level = -1; t.cap = null; t.why = 'no line of the sheet reaches it'; }
           });
           break;
         }
@@ -1062,50 +1199,60 @@
         L.lastMinMm = dmin;
       }
       if (!L.ok && !L.reason) L.reason = 'the gap would not hold after 8 tries (closest ' + (L.lastMinMm || 0).toFixed(4) + ' mm)';
-      if (!L.ok) L.tips.forEach(function (t) { if (t.mode === 'sheet') { t.mode = 'gap'; t.level = -1; t.why = 'its level failed: ' + L.reason; } });
+      if (!L.ok) L.tips.forEach(function (t) { if (t.mode === 'sheet') { t.mode = 'gap'; t.level = -1; t.cap = null; t.why = 'its level failed: ' + L.reason; } });
       L.told = L.tips.length;
       told();
     });
 
-    /* the cut heights */
+    /* the cut heights: a capped tip along its own leg, inside its cap (rise
+       0: no upright run); an uncapped one flat, EPS_MM into I1; a gap tip
+       flat, the gap under the part */
     tips.forEach(function (t) {
       if (t.mode === 'sheet') {
         var L = levels[t.level];
-        t.zTop = L.res.zTop; t.zBase = L.res.zBase; t.cutZ = L.res.zBase + o.eps;
+        t.zTop = L.res.zTop; t.zBase = L.res.zBase;
+        t.cutZ = t.cap ? L.res.zCap - sink : L.res.zBase + o.eps;
+        t.rise = t.cap ? 0 : o.side;
       } else if (t.mode === 'gap') {
         if (t.zu == null) t.zu = t.contact[2];
-        t.cutZ = t.zu - o.gap;
+        t.cutZ = t.zu - o.gap; t.cap = null;
       }
     });
     var lv = levels.filter(function (L) { return L.ok; }).map(function (L) {
-      return { id: L.id, zTop: L.res.zTop, zBase: L.res.zBase, tips: L.tips.filter(function (t) { return t.mode === 'sheet'; }).map(function (t) { return t.i; }),
-               layers: L.res.layers, t1: L.res.t1, minDistanceMm: L.minDistanceMm, solvedDropMm: L.solvedDropMm || 0 };
+      var mineTips = L.tips.filter(function (t) { return t.mode === 'sheet'; });
+      return { id: L.id, zTop: L.res.zTop, zBase: L.res.zBase, zCap: L.res.zCap, tips: mineTips.map(function (t) { return t.i; }),
+               caps: mineTips.filter(function (t) { return t.cap; }).map(function (t) { return { tip: t.i, c: t.cap.c, w: t.cap.w, nnMm: t.cap.nnMm }; }),
+               layers: L.res.layers, lines: L.res.lines, minDistanceMm: L.minDistanceMm, solvedDropMm: L.solvedDropMm || 0 };
     });
-    var counts = { sheet: 0, gap: 0, side: 0 };
-    tips.forEach(function (t) { counts[t.mode]++; });
+    var counts = { sheet: 0, gap: 0, side: 0, caps: 0 };
+    tips.forEach(function (t) { counts[t.mode]++; if (t.mode === 'sheet' && t.cap) counts.caps++; });
     return {
       ok: true, gapMm: o.gap, layerMm: o.layer, widthMm: o.width, pitchMm: o.pitch, epsMm: o.eps, tipSpacingMm: spacing,
+      cap: { riseMm: o.capRise, minMm: o.capMin, maxMm: o.capMax, gapMaxMm: CAP_GAP_MAX_MM, tuckMm: CAP_TUCK_MM, foot: CAP_FOOT },
       levels: lv, failed: levels.filter(function (L) { return !L.ok; }).map(function (L) { return { id: L.id, zTop: L.first, reason: L.reason }; }),
       tips: tips.map(function (t) {
+        var cap = t.mode === 'sheet' && t.cap ? { c: t.cap.c, b: t.cap.b, w: t.cap.w, z0: t.cap.z0, z1: t.cap.z1, footD: t.cap.footD, why: t.cap.why } : null;
         return { i: t.i, label: t.label, beacon: t.beacon, col: t.col, mode: t.mode, level: t.level, carried: t.mode === 'sheet' ? t.carried !== false : null,
-                 zTop: t.zTop, zBase: t.zBase, cutZ: t.cutZ, why: t.why || null };
+                 zTop: t.zTop, zBase: t.zBase, cutZ: t.cutZ, rise: t.mode === 'sheet' ? t.rise : null, cap: cap,
+                 why: t.why || (t.mode === 'sheet' && !t.cap ? t.capWhy : null) || null };
       }),
       counts: counts,
-      reason: lv.length + ' sheet(s) of 2 transition + 2 interface layers at ' + o.pitch + ' mm over ' + counts.sheet +
+      reason: lv.length + ' sheet(s) of 2 interface layers at ' + o.pitch + ' mm on ' + counts.caps + ' cap(s) over ' + counts.sheet +
         ' tip(s); ' + counts.gap + ' tip(s) cut at the gap, ' + counts.side + ' side tip(s) held off the face',
       probe: { nearest: nearestMm }
     };
   }
 
-  /* A column (top first) cut flat at cutZ: from where its axis is one side
-     under the cut - or, on a leg shorter than that, halfway down it - straight
-     up to the cut, so the top is a level square on a leaning leg and never
-     leaves the column's own leg (two legs meeting at a merge node must not be
-     cut to one stub at the node). The path from there on is the column's. */
-  function cutPath(pts, cutZ, side) {
+  /* A column (top first) cut flat at cutZ: from where its axis is `rise`
+     (default: one side) under the cut - or, on a leg shorter than twice
+     that, halfway down it - straight up to the cut, so the top is a level
+     square on a leaning leg and never leaves the column's own leg (two legs
+     meeting at a merge node must not be cut to one stub at the node). The
+     path from there on is the column's. */
+  function cutPath(pts, cutZ, side, rise) {
     if (pts[0][2] <= cutZ + 1e-9) return pts.map(function (q) { return q.slice(); });
     var zEnd = pts[pts.length - 1][2];
-    var zq = cutZ - Math.min(side, Math.max(0, (cutZ - zEnd) / 2));
+    var zq = cutZ - Math.min(rise == null ? side : rise, Math.max(0, (cutZ - zEnd) / 2));
     for (var k = 0; k + 1 < pts.length; k++) {
       var a = pts[k], b = pts[k + 1];
       if (b[2] <= zq + 1e-12) {
@@ -1151,6 +1298,24 @@
     return P;
   }
 
+  /* A hull round a cap as gridpack builds it (a CAP_SIDES-gon frustum with
+     its corners on the foot's and the top's circles, turned any way): the
+     frustum of the two circles' circumscribed 32-gons, which holds every
+     such polygon - so a cap measured clear on it is clear as built. */
+  function capHull(cap) {
+    var n = 32, k = 1 / Math.cos(Math.PI / n), r0 = cap.footD / 2 * k, r1 = cap.w / 2 * k, out = new Float32Array(n * 36), w = 0;
+    function put(p) { out[w++] = p[0]; out[w++] = p[1]; out[w++] = p[2]; }
+    for (var i = 0; i < n; i++) {
+      var a0 = 2 * Math.PI * i / n, a1 = 2 * Math.PI * (i + 1) / n;
+      var p0 = [cap.b[0] + r0 * Math.cos(a0), cap.b[1] + r0 * Math.sin(a0), cap.z0], p1 = [cap.b[0] + r0 * Math.cos(a1), cap.b[1] + r0 * Math.sin(a1), cap.z0];
+      var q0 = [cap.c[0] + r1 * Math.cos(a0), cap.c[1] + r1 * Math.sin(a0), cap.z1], q1 = [cap.c[0] + r1 * Math.cos(a1), cap.c[1] + r1 * Math.sin(a1), cap.z1];
+      put([cap.b[0], cap.b[1], cap.z0]); put(p1); put(p0);
+      put([cap.c[0], cap.c[1], cap.z1]); put(q0); put(q1);
+      put(p0); put(p1); put(q1);
+      put(p0); put(q1); put(q0);
+    }
+    return out;
+  }
   function joinSoups(list) {
     var n = 0; list.forEach(function (s) { n += s.length; });
     var out = new Float32Array(n), w = 0;
@@ -1160,7 +1325,10 @@
 
   var api = {
     DEFAULTS: { gapMm: GAP_MM, layerMm: LAYER_MM, pitchMm: PITCH_MM, repeats: REPEATS, epsMm: EPS_MM },
-    SHEET: { pitchMm: SHEET_PITCH_MM, roles: SHEET_ROLES.slice(), cellMm: CELL_MM, sampleMm: SAMPLE_MM, t1Angles: T1_ANGLES.slice() },
+    SHEET: { pitchMm: SHEET_PITCH_MM, roles: SHEET_ROLES.slice(), overMm: SHEET_OVER_MM, minRunMm: MIN_RUN_MM, cellMm: CELL_MM,
+             sampleMm: SAMPLE_MM, lineAngles: LINE_ANGLES.slice() },
+    CAP: { riseMm: CAP_RISE_MM, minMm: CAP_MIN_MM, maxMm: CAP_MAX_MM, spaceMm: CAP_SPACE_MM, gapMaxMm: CAP_GAP_MAX_MM,
+           tuckMm: CAP_TUCK_MM, partMm: CAP_PART_MM, intoMm: CAP_INTO_MM, foot: CAP_FOOT },
     sheet: sheet,
     cutPath: cutPath,
     finish: finish,

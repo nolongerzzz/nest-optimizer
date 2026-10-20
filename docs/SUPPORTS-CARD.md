@@ -127,11 +127,19 @@ card therefore plans in a Web Worker that loads the same engine files
 `nso_support_tree`, `nso_support_gridpack`, and for the interface sheet
 `nso_raster_lines`, `nso_crosshatch`, `nso_support_interface`); the watchdog and
 Escape on the page call `terminate()` on it. The worker plans every area, then
-builds each (`NSO_SupportGridpack.parts` with `{ interface: true }`: every tip
-that meets the part is cut under a sheet of 2 transition + 2 interface layers,
-0.18 mm under the part - docs/SUPPORT-INTERFACE.md) and hands it back as
-**shells** (`NSO_SupportGridpack.shells`): every part its own closed shell, one
-plate piece per group of trunks whose feet touch, with the sheet over their tips.
+builds each (`NSO_SupportGridpack.parts` with `PARTS_OPTS`, `{ interface: true,
+foldSheets: false, footPads: 'shared' }`: every tip that meets the part widens
+to a flat cap under a sheet of 2 interface layers, 0.18 mm under the part, no
+transition layer - docs/SUPPORT-INTERFACE.md; every trunk on its own foot) and
+hands it back as **shells** (`NSO_SupportGridpack.shells`): every part its own
+closed shell, with the sheet over its tips. When the build is put on the
+plate (the generate's `commit()`), the page draws the feet once over every
+area (`shareFeet` in `app-supports-card.js`, calling
+`NSO_SupportGridpack.shareFeet`): one first-layer pad per cluster of feet within
+6 mm, and every support that stands on one pad is one plate piece, whatever
+area it holds (its keys, holds and regions unioned) - two supports' first
+layers never overlap, which Bambu Studio reported as a path conflict on the
+2026-10-20 print. A failure there refuses the commit with its reason.
 **Nothing is welded.** A slicer fills an object's overlapping shells as one
 (Bambu Studio; NSO's own `nso_slicer.js` fills every section with the Positive
 rule), and `support:shells` cuts both at every 0.2 mm layer and holds them to
@@ -287,12 +295,12 @@ reports forever is stopped at the ceiling.
   raise `NSO_SUPPORTS_CARD.watchdogMs()`, until then. No planner in this tree has
   a per-spot time-based give-up, so there is none to cap.
 - **No weld.** A card support is its parts as overlapping closed shells, one
-  plate piece per group of trunks that share a foot. Findings reads such a piece
+  plate piece per group of trunks that stand on one pad, across areas. Findings reads such a piece
   as overlapping shells (a slicer fills the overlap; Merge shells makes them one
   solid on the piece). The welded build was no cleaner: the clamp's area 1 was
   one shell with 6809 piercing pairs inside it.
 - The bar's cadence is the planner's: it beats every 200 ms between its units,
-  but not inside the first detect of a piece or `padGaps`. The kickoff asked for
+  but not inside the first detect of a piece or the feet's raster. The kickoff asked for
   250 ms or better; on the wedge all but a handful of the planning and building
   gaps meet it.
 - Each page turn costs a rendered frame of the 3D view, which is slow in software

@@ -105,16 +105,18 @@ var NSO_SUPPORTS_CARD = (function () {
   var ENGINE = ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.js', 'nso_path_sweep.js',
     'nso_support_tree.js', 'nso_support_gridpack.js', 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js'];
   /* What the build asks of NSO_SupportGridpack.parts: every tip that meets the
-     part carries the interface sheet (nso_support_interface.js, sheet():
-     2 transition + 2 interface layers at 0.84 mm, 0.18 mm under the part),
-     its four layers left as they are (foldSheets: false). Nothing is welded:
-     NSO_SupportGridpack.shells hands every part back as its own closed
-     shell, grouped into the supports weld() would have made. The weld was
-     16 of the clamp's 23 s and made no layer a slicer prints any different
-     (support:shells); nothing on the plate needs a support to be one shell
-     (the booleans merge a piece's shells for themselves: the overlap merge in
-     nso-helpers.js). */
-  var PARTS_OPTS = { interface: true, foldSheets: false };
+     part ends in a flat cap under the interface sheet (nso_support_interface.js,
+     sheet(): 2 interface layers at 0.84 mm on the caps, 0.18 mm under the
+     part), its layers left as they are (foldSheets: false), and every trunk
+     stands on its foot with no pad drawn (footPads: 'shared') - the pads are
+     drawn at the end over every area's feet at once (shareFeet, in commit).
+     Nothing is welded: NSO_SupportGridpack.shells hands every part back as its
+     own closed shell, grouped into the supports weld() would have made. The
+     weld was 16 of the clamp's 23 s and made no layer a slicer prints any
+     different (support:shells); nothing on the plate needs a support to be
+     one shell (the booleans merge a piece's shells for themselves: the
+     overlap merge in nso-helpers.js). */
+  var PARTS_OPTS = { interface: true, foldSheets: false, footPads: 'shared' };
   /* The card's state when the picked piece has no beacons at all. Detection
      only asks what hangs in air; a tall, thin piece that may sway as it
      prints is a different question, not asked yet, and the words say so. */
@@ -833,9 +835,40 @@ var NSO_SUPPORTS_CARD = (function () {
     var solids = u.solids.map(function (x) {
       var holds = {};
       x.beacons.forEach(function (id) { holds[a.keyOf(id)] = a.landingOf[id] === 'rest' ? 'rest' : 'held'; });
-      return { soup: x.soup, keys: x.beacons.map(a.keyOf), holds: holds, landing: x.landing, regionIds: x.regionIds };
+      return { soup: x.soup, keys: x.beacons.map(a.keyOf), holds: holds, landing: x.landing, regionIds: x.regionIds, feet: x.feet };
     });
-    return { ok: true, rid: a.rid, solids: solids, unreachable: a.unreach, sideMm: a.t.sideMm, reason: a.t.reason };
+    return { ok: true, rid: a.rid, solids: solids, unreachable: a.unreach, sideMm: a.t.sideMm, plateZ: a.t.plateZ, reason: a.t.reason };
+  }
+
+  /* THE FEET, over every area at once (nso_support_gridpack.js shareFeet,
+     docs/SUPPORT-GRIDPACK.md "Feet"): each area was built with its trunks on
+     their feet and no pad; here one pad is drawn under every group of feet,
+     whatever area they hold up, and the supports that stand on one pad
+     become ONE support - two supports whose first layers overlapped were the
+     path conflict Bambu Studio reported on the 2026-10-20 print. The joined
+     support is the first area's that holds it, and carries every spot it
+     holds. A result with no feet to share (a planner seam, a support resting
+     on the part) passes through as it was. */
+  function shareFeet(results, D) {
+    var GP = window.NSO_SupportGridpack, live = results.filter(function (r) { return r.ok && r.solids.length; });
+    if (!GP || typeof GP.shareFeet !== 'function' || !live.some(function (r) { return r.solids.some(function (x) { return x.feet && x.feet.length; }); })) return results;
+    var sf = GP.shareFeet(live.map(function (r) { return { solids: r.solids }; }), D.soup,
+      { plateZ: live[0].plateZ, occluders: (D.opts && D.opts.occluders) || [] });
+    if (!sf.ok) throw new Error(sf.reason);
+    var out = live.map(function (r) { return Object.assign({}, r, { solids: [] }); });
+    sf.objects.forEach(function (ob) {
+      var keys = [], holds = {}, lands = {}, rids = [];
+      ob.from.forEach(function (f) {
+        var x = live[f[0]].solids[f[1]];
+        keys = keys.concat(x.keys);
+        Object.keys(x.holds).forEach(function (k) { holds[k] = x.holds[k]; });
+        lands[x.landing] = true;
+        (x.regionIds || []).forEach(function (id) { if (rids.indexOf(id) < 0) rids.push(id); });
+      });
+      var ls = Object.keys(lands);
+      out[ob.from[0][0]].solids.push({ soup: ob.soup, keys: keys, holds: holds, landing: ls.length === 1 ? ls[0] : 'mixed', regionIds: rids });
+    });
+    return results.map(function (r) { var k = live.indexOf(r); return k < 0 ? r : out[k]; });
   }
 
   /* Take pieces off the plate and out of the model list, recorded the way
@@ -1057,6 +1090,7 @@ var NSO_SUPPORTS_CARD = (function () {
       });
       var failed = results.filter(function (r) { return !r.ok; });
       if (failed.length) return { ok: false, reason: failed[0].reason || 'the planner refused' };
+      try { results = shareFeet(results, D); } catch (err) { return { ok: false, reason: (err && err.message) || String(err) }; }
       var undo = snapshot(), removed = [], added = [], n = 0, mem = memOf(hostId);
       try {
         removed = removePieces(removeIds);

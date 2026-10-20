@@ -19,12 +19,13 @@
 //      out because its neighbours merged; trunks keep the 4x area cap.
 //   3. LEAN <= 30 deg, and the low edge: trunks run to the last beacon of the
 //      slope (the last 15 mm of it had none).
-//   4. THE FOOT. A one-first-layer pad under every landed trunk,
-//      r = max(3 mm, 2.5 x half-width), joined where pads touch; nothing below
-//      the plate, on a steered trunk too; clear of the piece. Pads that overlap
-//      in a ring merge into one solid slab - no handle in the first layer
-//      (supports-followups): lattices of trunks 5 mm apart (a gap between four
-//      pads) and 6 mm apart (pads that exactly touch) are built and validated.
+//   4. THE FOOT. A one-first-layer pad under every landed trunk: the trunks
+//      whose feet stand within 6 mm share ONE pad, the union of their
+//      footprints (the circle round each end square) grown by 4 mm, kept
+//      0.2 mm off the piece; the trunks on one pad are one solid; nothing
+//      below the plate, on a steered trunk too. A pad is one slab with no
+//      hole in it - no handle in the first layer: lattices of trunks 5 mm and
+//      6 mm apart are one pad each, solid in the middle of every four.
 //   5. OVERHANG OVER THE SAME PIECE (supports-followups). Detection is geometry
 //      only: a shelf over its own base, a bridge over its own foot and the
 //      underside of an arch all get beacons, whatever is under them; a sealed
@@ -362,9 +363,10 @@ fs.mkdirSync(OUT, { recursive: true });
     let padless = 0, shortRadius = 0;
     for (const tr of p.trunks) {
       const [x, y] = landing(p, tr), side = p.members[tr.root].side;
-      const r = Math.max(3, 2.5 * side / 2);
-      /* the pad is a slab one first layer thick: out to r everywhere that
-         nothing of the piece is within a gap of it. Probe 1 mm in from r. */
+      const r = side / Math.SQRT2 + 4;
+      /* the pad is a slab one first layer thick: out to the footprint grown
+         by 4 mm everywhere that nothing of the piece is within a gap of it.
+         Probe 1 mm in from there. */
       let hit = 0;
       for (let k = 0; k < 8; k++) {
         const a = Math.PI * k / 4;
@@ -380,17 +382,19 @@ fs.mkdirSync(OUT, { recursive: true });
     check('a pad under every landed trunk: a 0.2 mm slab at the plate', padless === 0, `${padless} of ${p.trunks.length} without`);
     check('...reaching r - 1 mm out on at least two of eight sides (the piece and neighbours may take the rest)',
       shortRadius === 0, `${shortRadius} short`);
-    check('pads are joined where they touch: fewer solids than trunks', built.solids.length < p.trunks.length,
-      `${p.trunks.length} trunks in ${built.solids.length} solid(s); bare trunks make ${bare.solids.length}`);
+    check('trunks on one pad are one solid: fewer solids than trunks, one solid per pad', built.solids.length < p.trunks.length &&
+      built.solids.length === built.pads.count,
+      `${p.trunks.length} trunks on ${built.pads.count} pad(s) in ${built.solids.length} solid(s); bare trunks make ${bare.solids.length}`);
     check('without feet the same plan is one solid per trunk and also stops at the plate',
       bare.solids.length === p.trunks.length && minZ(bare.soup) >= -1e-6, `${bare.solids.length}`);
-    /* The 98 pads overlap in rings round 14 small gaps and touch in 68 places
-       (the 6 mm lattice puts pads of r = 3 exactly edge to edge). Each gap is
-       filled and each touch bridged, so the pads are slabs with no hole in
-       them: not one handle in the first layer. */
-    check('the gaps between overlapping pads were found and all filled, none left (and the touches bridged)',
-      built.padGaps && built.padGaps.found > 0 && built.padGaps.filled === built.padGaps.found && built.padGaps.left === 0,
-      JSON.stringify(built.padGaps));
+    /* The feet stand 5 - 6 mm apart on the slope: every cluster of them
+       (6 mm) on one pad, and no pad with a hole in it - not one handle in
+       the first layer: air the pad closed round is filled, and where the pad
+       closes round the box's own low edge on the plate it is slotted open to
+       keep its gap (validSolid below holds the Euler count). */
+    check('every cluster of feet on one pad; no pad with a hole (air filled, the piece slotted round)',
+      built.pads && built.pads.clustersSplit === 0 && built.pads.count >= 1,
+      JSON.stringify(Object.assign({}, built.pads, { outlines: undefined, areasMm2: (built.pads.areasMm2 || []).map(a => +a.toFixed(1)) })));
     validSolid('closed30', built.soup, built.solids.length, false);
     validSolid('closed30_bare', bare.soup, bare.solids.length, false);
     /* The feet keep clear of the piece by the support gap. */
@@ -406,7 +410,7 @@ fs.mkdirSync(OUT, { recursive: true });
     check('the feet keep the support gap off the piece (0.18 mm and a hair)', md.mm >= 0.18 - 1e-3, `closest ${md.mm.toFixed(3)} mm over ${md.pairs} pairs`);
   }
 
-  console.log('\n--- the pad\'s radius law: max(3 mm, 2.5 x half-width) ---');
+  console.log('\n--- the pad\'s reach: the footprint (s / root 2) grown by 4 mm ---');
   /* A single strut under a 4 x 4 arm: one trunk, so nothing else's pad can be mistaken for its own. */
   const LONE = soupOf(box([0, 0, 0], [10, 10, 44]), box([10, 3, 40], [14, 7, 44]));
   for (const [label, fix, sideMm, pickWidest] of [['1.2 mm strut', LONE, 1.2, false], ['3 mm strut', LONE, 3, false],
@@ -417,8 +421,8 @@ fs.mkdirSync(OUT, { recursive: true });
     let tr = q.trunks[0];
     for (const t of q.trunks) if (q.members[t.root].side > q.members[tr.root].side) tr = t;
     const root = q.members[tr.root], [x, y] = landing(q, tr);
-    const r = Math.max(3, 2.5 * root.side / 2);
-    check(`${label}: the trunk is ${root.side.toFixed(2)} mm square, so the pad is ${r.toFixed(2)} mm`,
+    const r = root.side / Math.SQRT2 + 4;
+    check(`${label}: the trunk is ${root.side.toFixed(2)} mm square, so the pad reaches ${r.toFixed(2)} mm`,
       pickWidest ? root.side >= 5.99 : q.trunks.length === 1, `${q.trunks.length} trunk(s)`);
     /* some side where nothing else is near: the slab runs out to r and stops */
     let ok = false, at = 0;
@@ -482,38 +486,35 @@ fs.mkdirSync(OUT, { recursive: true });
   /* ===================================================================== */
   console.log('\n=== 4b. PADS THAT OVERLAP IN A RING: one slab ===');
   {
-    /* 3 x 3 straight struts under a slab, 5 mm apart (pads of r = 3 overlap
-       and leave a gap in the middle of every four) and 6 mm apart (the pads
-       touch edge to edge: a sealed sliver where two of them meet). The
-       strut style never merges, so nine trunks stand where they are put. */
-    const SLAB = soupOf(box([0, 0, 20], [22, 22, 24]));
-    for (const [label, pitch] of [['5 mm lattice', 5], ['6 mm lattice (pads touch)', 6]]) {
+    /* 3 x 3 straight struts under a slab: 5 mm and 6 mm apart (one cluster:
+       one pad, solid in the middle of every four, where discs round each
+       foot left a gap or met edge to edge), 9 mm apart (three clusters, but
+       their pads would touch: still one pad) and 12 mm apart (nine pads, nine
+       solids, none touching). The strut style never merges, so nine trunks
+       stand where they are put. */
+    const SLAB = soupOf(box([0, 0, 20], [40, 40, 24]));
+    for (const [label, pitch, pads] of [['5 mm lattice', 5, 1], ['6 mm lattice', 6, 1], ['9 mm lattice (pads that would touch)', 9, 1],
+                                        ['12 mm lattice (pads apart)', 12, 9]]) {
       const pts = [];
       for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) pts.push({ x: 3 + i * pitch, y: 3 + j * pitch, z: 20, normal: [0, 0, -1] });
       const q = GP.plan(SLAB, { skipList: [], beacons: pts, style: 'strut', plateZ: 0 });
       check(`${label}: nine trunks, all held`, q.ok && q.trunks.length === 9 && q.held === 9, q.reason);
-      const ring = await GP.solid(q, Object.assign({ padGaps: false }, K));
       const slab = await GP.solid(q, K);
-      if (!ring.ok || !slab.ok) { check(`${label}: builds`, false, ring.reason || slab.reason); continue; }
-      writeSTL(path.join(OUT, `lattice${pitch}_ring.stl`), ring.soup);
-      const vring = validate(path.join(OUT, `lattice${pitch}_ring.stl`), 1e-4);
-      /* what the fills and bridges are for: round gaps the pads alone are a
-         ring (5 mm: a handle in the first layer); edge to edge (6 mm) they do not
-         even join - nine solids, not one */
-      check(`${label}: without the fills and bridges the pads are NOT one slab (the case this guards)`,
-        pitch === 5 ? ring.solids.length === 1 && vring.euler_characteristic < 2 : ring.solids.length > 1,
-        `Euler ${vring.euler_characteristic} over ${ring.solids.length} solid(s)`);
-      check(`${label}: filled and bridged: ${JSON.stringify(slab.padGaps)}`, slab.padGaps.left === 0 &&
-        (pitch === 5 ? slab.padGaps.found > 0 && slab.padGaps.filled === slab.padGaps.found : slab.padGaps.bridged > 0));
-      check(`${label}: the nine pads merge into ONE solid`, slab.solids.length === 1, `${slab.solids.length} solid(s)`);
+      if (!slab.ok) { check(`${label}: builds`, false, slab.reason); continue; }
+      check(`${label}: ${pads === 1 ? 'ONE pad, ONE solid' : pads + ' pads, ' + pads + ' solids'}`,
+        slab.pads.count === pads && slab.solids.length === pads && slab.pads.clustersSplit === 0,
+        `${slab.pads.count} pad(s) under ${slab.pads.clusters} cluster(s), ${slab.solids.length} solid(s); pads ${(slab.pads.areasMm2 || []).map(a => a.toFixed(1)).join(', ')} mm2`);
       check(`${label}: nothing below the plate`, minZ(slab.soup) >= -1e-6, `lowest z ${minZ(slab.soup).toExponential(2)}`);
-      validSolid(`lattice${pitch}`, slab.soup, 1, false);
-      /* the first layer is one disc-shaped slab: a vertical line at the lattice's
-         middle (over a gap, if there were one) crosses exactly the slab's floor and top */
+      validSolid(`lattice${pitch}`, slab.soup, pads, false);
+      /* the first layer between four feet: one slab, floor to top, where the pad is one */
       const mid = 3 + pitch;
       const zc = zCrossings(slab.soup, mid + pitch / 2, mid + pitch / 2).filter(z => z < 0.25);
-      check(`${label}: the middle of four pads is solid slab, floor to top`, zc.length === 2 && near(zc[0], 0, 1e-4) && near(zc[1], 0.2, 1e-4),
-        zc.map(z => z.toFixed(3)).join(', '));
+      if (pads === 1) {
+        check(`${label}: the middle of four feet is solid slab, floor to top`, zc.length === 2 && near(zc[0], 0, 1e-4) && near(zc[1], 0.2, 1e-4),
+          zc.map(z => z.toFixed(3)).join(', '));
+      } else {
+        check(`${label}: no slab in the middle of four feet 12 mm apart (6 mm from each, past 4 mm and the foot)`, zc.length === 0, zc.map(z => z.toFixed(3)).join(', '));
+      }
     }
   }
 

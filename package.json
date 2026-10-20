@@ -33,6 +33,7 @@
     "support:interface": "node tools/nso_support_sheet_check.js",
     "support:shells": "node tools/nso_support_shells_check.js",
     "support:interface-export": "node tools/nso_support_sheet_check.js --export",
+    "support:print-export": "node tools/nso_supports_print_export.js",
     "tree:round-tall": "node tools/nso_support_tree_round_check.js --tall",
     "tree:round-tall-gecko": "node tools/nso_support_tree_round_check.js --tall-gecko",
     "wire:smooth": "node tools/nso_wire_smooth_test.js",

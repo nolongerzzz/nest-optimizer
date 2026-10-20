@@ -28,13 +28,14 @@ const OUT = path.join(ROOT, 'tools', 'support-aim-out');
 const { readSTL, writeSTL } = require('./nso_stl_io.js');
 
 const ctx = {
-  Math, Map, Set, console, Array, Object, Number, String, JSON, isFinite,
-  Float32Array, Float64Array, Int32Array, Uint32Array, Uint8Array, ArrayBuffer
+  Math, Map, Set, console, Array, Object, Number, String, JSON, isFinite, Promise, Date, WeakMap,
+  Float32Array, Float64Array, Int32Array, Uint32Array, Uint8Array, Uint16Array, Int8Array, ArrayBuffer
 };
 vm.createContext(ctx);
 for (const f of ['nso_thickness.js', 'nso_seat_surface.js', 'app-sculpt.js',
                  'app-extend.js', 'nso_support_beacons.js', 'nso_support_aim.js',
-                 'nso_path_sweep.js', 'nso_support_tree.js', 'nso_support_gridpack.js']) {
+                 'nso_path_sweep.js', 'nso_support_tree.js', 'nso_support_gridpack.js',
+                 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
 const SA = ctx.NSO_SupportAim;
@@ -518,5 +519,52 @@ console.log('\n=== 11. A sloped band is held along its length, not only at its e
   }
 }
 
-console.log('\n' + (fail ? `FAILED  ${fail} of ${pass + fail}` : `PASSED  all ${pass}`));
-if (fail) { console.log('  ' + FAILS.join('\n  ')); process.exit(1); }
+/* 12. THE 2026-10-20 COUPON (fixtures/supports/top_clip_x2_coupon.stl), as the
+   Supports card builds it: its two areas found and held, every tip under
+   the slab and the leg ending in a flat cap under two interface layers (no
+   transition), and one pad - one support - under both areas' trees, as
+   Bambu's own tree on it stands on one first layer (baselineV2). */
+async function coupon() {
+  console.log('\n=== 12. The top_clip_x2 coupon, as the card builds it ===');
+  const GP = ctx.NSO_SupportGridpack, SI = ctx.NSO_SupportInterface;
+  const piece = readSTL(path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_coupon.stl'));
+  const opts = { skipList: [], angleDeg: 60, occluders: [] };
+  const det = SA.detectOverhangs(piece, opts);
+  const regs = det.beaconRegions || [];
+  const zs = regs.map(r => [...new Set(r.beacons.map(b => +b.z.toFixed(3)))].join('/'));
+  check('two areas at the card\'s 60 deg: the slab\'s underside (40 spots, z 13.5) and the hanging leg\'s (9 spots, z 6.5)',
+    det.ok && regs.length === 2 && regs[0].beacons.length === 40 && zs[0] === '13.5' && regs[1].beacons.length === 9 && zs[1] === '6.5',
+    regs.map((r, k) => `${r.beacons.length} spots at z ${zs[k]}`).join('; '));
+  const builds = [];
+  let held = 0, plateZ = 0;
+  for (const rg of regs) {
+    const bs = rg.beacons.map(b => ({ x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: rg.id, key: 'c' }));
+    const t = ST.planTree(piece, Object.assign({}, opts, { beacons: bs, style: 'tree', restOnModel: false, sideMm: 1.2 }));
+    if (!t.ok) continue;
+    held += t.held; plateZ = t.plateZ;
+    const tp = await GP.parts(t, { interface: true, foldSheets: false, footPads: 'shared' });
+    if (tp.ok) builds.push({ tp, solids: GP.shells(t, tp).solids });
+  }
+  check('every spot held, on the plate', held === 49 && builds.length === 2, `${held} of 49`);
+  const sheets = builds.map(b => b.tp.sheet);
+  const tips = [].concat(...sheets.map(S => S.tips));
+  const caps = tips.filter(x => x.cap);
+  check('every tip under the slab and the leg ends in a flat cap (none cut at the gap, no side tips)',
+    tips.length === 49 && tips.every(x => x.mode === 'sheet' && x.cap),
+    `${caps.length} caps on ${tips.length} tips; ` + sheets.map(S => S.reason).join(' | '));
+  const slab = sheets[0].levels[0] ? sheets[0].levels[0].caps.map(c => c.w) : [];
+  check(`under the slab every cap is ${SI.CAP.minMm} - ${SI.CAP.maxMm} mm across, or held a hair short of a neighbour`,
+    slab.length === 40 && slab.every(w => w <= SI.CAP.maxMm + 1e-9 && w >= SI.CAP.minMm - 0.1),
+    `widths ${Math.min(...slab).toFixed(3)} - ${Math.max(...slab).toFixed(3)} mm`);
+  check('each sheet is two interface layers and no transition layer',
+    sheets.every(S => S.levels.length === 1 && S.levels[0].layers.map(x => x.role).join(',') === 'interface,interface'),
+    sheets.map(S => S.levels.map(L => L.layers.map(x => x.role).join(',')).join(';')).join(' | '));
+  const sf = GP.shareFeet(builds.map(b => ({ solids: b.solids })), piece, { plateZ });
+  check('one pad under the slab\'s and the leg\'s trees, and so ONE support (Bambu reported a layer-1 conflict between two)',
+    sf.ok && sf.pads === 1 && sf.objects.length === 1 && sf.clustersSplit === 0, sf.ok ? sf.reason : sf.reason);
+}
+
+coupon().catch(err => { check('the coupon builds', false, (err && err.stack) || String(err)); }).then(() => {
+  console.log('\n' + (fail ? `FAILED  ${fail} of ${pass + fail}` : `PASSED  all ${pass}`));
+  if (fail) { console.log('  ' + FAILS.join('\n  ')); process.exit(1); }
+});

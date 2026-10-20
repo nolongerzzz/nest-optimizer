@@ -5,7 +5,11 @@
 (`app-supports-card.js`, `PARTS_OPTS`). Gate: `npm run support:interface`
 (`tools/nso_support_sheet_check.js`); `npm run support:interface-export`
 also writes the clamp with its supports to
-`tools/support-interface-out/clamp_body_sheet.3mf` (git-ignored).
+`tools/support-interface-out/clamp_body_sheet.3mf`, and `npm run
+support:print-export` the 2026-10-20 coupon (`fixtures/supports/top_clip_x2_coupon.stl`)
+as the card builds it to `tools/supports-print-out/` (both git-ignored).
+`node tools/nso_slicer_audit.js --sheet sliced.gcode.3mf` reads a slicer's
+g-code of an export back: how each sheet line was printed (section 5).
 
 ## 1. The gap it closes
 
@@ -37,114 +41,137 @@ The same four layers and gap under the z 80 ceiling.
    z (clamp area 1)  what                                   slicer layer (0.2 mm) it lands in
    72.000            the part's underside
    71.820 - 72.000   air, 0.180 mm (true minimum distance)   71.8-72.0: empty
-   71.620 - 71.820   I2  interface, lines along x, 0.84 mm   71.6-71.8
-   71.422 - 71.622   I1  interface, lines along y, 0.84 mm   71.4-71.6
-   71.224 - 71.424   T2  transition, lines along x, 0.84 mm  71.2-71.4
-   71.026 - 71.226   T1  transition, lines along y, 0.84 mm  71.0-71.2
-                         serpentines resting on the tips
-   71.028            every tip under it cut flat here, straight up from its own leg
+   71.620 - 71.820   I2  interface, one direction, 0.84 mm   71.6-71.8
+   71.422 - 71.622   I1  interface, across I2, 0.84 mm       71.4-71.6
+                         lying directly on the caps
+   69.432 - 71.432   every tip's flat CAP, 2 mm of rise, its top 0.01 mm into I1
 ```
 
-Each layer is one 0.2 mm layer (the print's: `layerMm`, default 0.2), set
-0.002 mm into the one below (`finish()`'s joining overlap); T1 sits 0.002 mm
-into the cut tips. Lines are 0.42 mm (`NSO_Thickness.floorFor(0.4)`), the
-section `NSO_RasterLines.extrudeFlat` gives every crosshatch line, and each
-layer passes `NSO_Crosshatch.oneDirection`, the crosshatch's own guard.
+**supports-print-1 (the 2026-10-20 print).** The top_clip_x2 coupon printed
+with our supports: the part came out clean and the sheet released, but the
+trees wobbled when the sheet started, the two transition layers sagged between
+tips 3 mm apart, and half the interface welded to the part and had to be torn.
+Bambu's own tree on the same coupon (baselineV2, default style) has no
+transition layer: its branches widen into flat caps of 2-7 mm (35 under a 40 x
+20 ceiling) and the interface lies on them. So now:
+
+- **No transition layer.** The sheet is two interface layers, I1 and I2
+  (`SHEET_ROLES`), each one 0.2 mm layer (`layerMm`), I2 0.002 mm into I1.
+- **Caps** (`THE CAPS` in the file's header). Every tip under a sheet ends in
+  a round flat cap that follows its own leg: a frustum from where the leg's
+  axis crosses 2 mm (`CAP_RISE_MM`) under I1 - 0.9 of the column's side
+  across there, inside its square however it is turned - up to where it
+  crosses I1's underside, its top 0.01 mm (`CAP_INTO_MM`) into I1. The column
+  is cut along its own axis just under the cap's top, so its whole end is
+  inside the cap. A cap is as wide as its nearest neighbour allows less 0.5 mm
+  (`CAP_SPACE_MM`), held to 2.5-4 mm (`CAP_MIN_MM` - `CAP_MAX_MM`); where it
+  would come nearer the piece than the gap, or near another tree's column, it
+  is first slid off (no further than keeps the column's end inside it), then
+  narrowed by 0.25 mm steps, down to the column's side - where the tip has no
+  cap and is cut flat at I1's underside, said per tip. **Caps never overlap**:
+  two caps nearer than their widths allow are held 0.05 mm (`CAP_PART_MM`)
+  apart, the narrower keeping its width. Tips closer than 3 mm get caps under
+  2.5 mm (section 4): overlapping caps, or caps whose tops lie in one plane,
+  are what the kernel's union could not take (the clamp's area 2, tips 1.3-2.1
+  mm apart: 70 piercing pairs in its welded sheet with 2.5 mm caps
+  overlapping; 55 with their tops' heights staggered).
+- **One line, one box, at least 2 mm** (`MIN_RUN_MM`): every interface line
+  is a single straight run (`NSO_RasterLines.extrudeFlat`'s section) - no
+  turn, no joint, nothing cut into it. An I1 line is kept only where it lies
+  across a cap (its whole width on the cap where it crosses); I2 only where it
+  crosses a kept I1 line.
+- **The line width is 0.43** (one bead and `SHEET_OVER_MM` 0.01, at a 0.4
+  nozzle), section 5.
+- **The feet**: one shared first-layer pad per cluster of trunks, the trees on
+  one pad one support (docs/SUPPORT-GRIDPACK.md, *Feet*).
+- **The gap stays 0.18** (V2 uses 0.2; the weld came from the sag and the
+  bead, not the figure).
 
 **The level.** A tip's sheet top is 0.18 mm under the lowest ceiling over its
 cell (a point more than a layer below the tip is a lip or a wall, left to the
 footprint). Tips that agree within 0.01 mm are one level: one sheet, however
 many trunks they belong to. Weld joins it to every trunk carrying one of its
-tips, so the region's tree and its sheet export as one object.
+tips, and `shells()` groups it with them, so the region's tree and its sheet
+export as one object.
 
 **The footprint.** A sample along a line belongs to the nearest sheet tip
 within 0.6 tip spacings. It is kept where the stack's column, from 0.18 below
 its base to 0.18 above its top, meets nothing of the piece within 0.18 + half
-a line (x root 2 at a turn's mitred corner): vertical rays for ceilings and
-ledges, horizontal row rays for the inside of a wall, which a vertical ray runs
-parallel to and never sees. No other support's column passes through it (as
-planned, and as it will be cut). The gap is then measured on the stack with
-the exact triangle distance and the level lowered (a sloped ceiling) or cleared
-round the point (a wall) until it is 0.18.
+a line: vertical rays for ceilings and ledges, horizontal row rays for the
+inside of a wall, which a vertical ray runs parallel to and never sees. No
+other support's column passes through it (as planned, and as it will be cut).
+The gap is then measured on the stack with the exact triangle distance and the
+level lowered (a sloped ceiling) or cleared round the point (a wall) until it
+is 0.18.
 
-**Nothing floats.** T1's runs are joined end to end into serpentines (a turn
-straight across at the inner end of the two runs, never a diagonal along a
-line) and a serpentine is kept only if it crosses a cut tip; T2 runs only if
-they cross a kept T1 run; and so up. A sheet needs two tips its T1 crosses.
-
-**T1's angle is chosen.** The planner's tips stand on the beacon grid's square
-lattice, so a T1 line parallel to it and between two columns crosses no tip;
-the reference's tips are irregular and its axis lines meet them. Of the
-candidates (0, 90, and the 1:2 and 1:1 diagonals) the sheet takes the one that
-drops least of T1, then leaves least of it hung from turns alone (10 % bands),
-then the axes. On the clamp it is the reference's own: along y.
+**The angle is chosen.** The planner's tips stand on the beacon grid's square
+lattice, so a line parallel to it and between two columns crosses no tip. Of
+the candidates (0, 90, and the 1:2 and 1:1 diagonals) the sheet takes the one
+that drops least of I1 (no cap under it), then leaves fewest caps with no line
+on them, then the axes. With caps 2.5 mm across under tips 3 mm apart that is
+usually a 1:2 diagonal (26.57 deg): the clamp's area 1, the coupon's area 1.
 
 **The tips the sheet does not carry.**
 
 | tip | what it gets |
 | --- | --- |
-| under a sheet | cut flat 0.972 mm under the ceiling; T1 rests on it |
-| under a sheet but no T1 line crosses it (beside a wall) | cut under the sheet all the same; carries nothing |
+| under a sheet | its cap, I1 lying on it |
+| under a sheet, no room for a cap (the piece or another tree's column too near) | cut flat at I1's underside, 0.002 mm into it, as before |
+| under a sheet but no I1 line lies on its cap (beside a wall) | cut under the sheet all the same; carries nothing |
 | no line of any sheet reaches it, or its level has no sheet (one tip, a one-row band, no room above the foot) | cut at the gap line: its own flat top 0.18 mm under the part (finish()'s last rung), lowered until its own solid keeps the gap |
-| a side tip (a face more than 30 deg off level: its stub runs sideways into the face) | drawn back along the stub until its own solid keeps the gap, while the stub stays longer than its own mitre (a shorter leg folds the sweep over itself); past that the stub goes and the drop rises straight up from the elbow toward the face until it keeps the gap (the clamp's 45 deg chamfer) |
-| feet on the plate, pads resting on the part | unchanged |
+| a side tip (a face more than 30 deg off level) | drawn back along its stub until its own solid keeps the gap (unchanged) |
 
 `finish()` and its 1.2 mm per-tip patches are unchanged and keep
-`tree:interface`. Its pitch is 1.2 because its patches are boustrophedons and
-`nso_crosshatch.js` refuses end turns at 0.84 mm with a 0.42 mm line (clearance
-0, measured: a turn there welds along the layer above). That reason is about
-turns welding to a separate layer; the sheet's four layers are one support, so
-its T1 turns may weld to T2, and its other layers are open lines.
+`tree:interface`.
 
-## 4. Measured (`support:interface`, 52 checks)
+## 4. Measured (`support:interface`, 112 checks)
 
 The clamp at the card's defaults has four areas. Every flat ceiling carries a
 sheet:
 
-| area | ceiling | tips: under a sheet / cut at the gap / side | sheet | lines per layer (T1/T2/I1/I2), pitch |
-| --- | --- | --- | --- | --- |
-| 1 | z 72 flat (+ 45 deg chamfer 62-71, fillet 72-75) | 176 / 14 / 69 | top 71.820, T1 along y | 52 / 51 / 53 / 51, 0.840 |
-| 2 | z 80 flat | 45 / 0 / 0 | top 79.810, T1 along y | 25 / 27 / 25 / 28, 0.840 |
-| 3 | z 0.8-2.0 (the bottom fillet, over the plate) | 0 / 0 / 27 | none: every tip is a side tip | - |
-| 4 | z 86 ridge | 3 / 0 / 0 | top 85.820 | 4 / 11 / 4 / 11, 0.840 |
+| area | ceiling | tips: under a sheet / cut at the gap / side | caps (at 2.5-4 mm) | widths | lines per layer (I1 / I2), angle |
+| --- | --- | --- | --- | --- | --- |
+| 1 | z 72 flat (+ 45 deg chamfer 62-71, fillet 72-75) | 176 / 14 / 69 | 167 (127) | 1.95-2.50 | 92 / 96, 26.57 deg |
+| 2 | z 80 flat | 45 / 0 / 0 | 45 (1) | 1.24-2.50 | 53 / 64, 0 deg |
+| 3 | z 0.8-2.0 (the bottom fillet, over the plate) | 0 / 0 / 27 | none: every tip is a side tip | - | - |
+| 4 | z 86 ridge | 3 / 0 / 0 | 3 (3) | 2.50 | 6 / 10, 63.43 deg |
 
-Area 1's 14 gap tips are the fillet's one row at z 72.8: a level of its own
-whose band is one row wide, so T2 crosses no T1 line there and the sheet is
-refused ("a sheet needs two tips its lines cross"). Its 69 side tips hold the
-chamfer. A few tips on areas 1 and 2 stand beside a wall where no T1 line
-crosses them; lines of the sheet pass over them, so they are cut under it.
+The coupon (`top_clip_x2`): area 1, the slab at z 13.5, 40 tips, 40 caps of
+2.41-2.50 mm, 26 / 30 lines at 26.57 deg; area 2, the leg at z 6.5, 9 tips
+1.8 mm apart, 9 caps of 1.77 mm, 8 / 10 lines at 135 deg. One support (one
+pad under both areas' trees) built in about 1.5 s.
+
+**Caps under 2.5 mm**: where tips stand under 3 mm apart (the clamp's area 2,
+the coupon's leg, area 1's tips where trees meet) the caps are held 0.05 mm
+apart, so they come out narrower - every one of them says why ("held short of
+a neighbour", "narrowed off the piece"); nearest-neighbour gaps edge to edge
+0.05-0.66 mm, never over 2 mm. Area 1's 8 tips with no cap had no room for
+one (the piece, another tree or a neighbour too near): cut flat under I1 as
+before.
 
 - **Gap**, exact triangle-to-triangle distance over the whole interface zone
-  (the sheet, every tip, 3 mm under the lowest contact): **0.180000 mm** on
-  every sheet area, 0.183583 mm on area 3 (side tips only). The sampler
-  (`minDistance`, `finish()`'s) agrees wherever the zone is small enough for
-  it (areas 3 and 4, the fixtures); on areas 1 and 2 a flat top lying exactly
-  the gap under a ceiling costs it millions of refinements (150 s for area 1,
-  measured) and the exact distance stands alone.
-- **Directions**, read off a slice of the welded solid at each layer's middle:
-  90 / 0 / 90 / 0 deg on every clamp sheet; one direction carries 0.97-0.985 of
-  each layer's edge length on area 1 (the rest: T1's turns, line ends).
-- **Pitch**, the same slices: median 0.840 mm on every layer of every sheet,
-  no adjacent pair off a multiple of 0.84 by more than 0.05 (area 1: 52 / 51 /
-  53 / 51 lines).
-- **No tip above the sheet's underside** under any line, on every sheet.
-- **Below the zone** the trunks and pads are the planner's, no nearer the part
-  than without the sheet: area 1's nearest trunk is 0.1776 mm from the part
-  with and without it, its pads 0.1445 mm - both under 0.18 and both
-  pre-existing (rails and pads are kept 0.2 mm off on rays, not as a true
-  distance). A cut tip keeps its column's square turned as it was (the sweep's
-  frame is seeded so), or that trunk came 0.009 mm nearer.
+  (the sheet, the caps, every tip, 3 mm under the lowest contact):
+  **0.180000 mm** on every sheet area, 0.183583 mm on area 3 (side tips
+  only); the coupon too.
+- **Stack**: 2 interface layers and no transition layer on every sheet, the
+  top 0.18 mm under the ceiling; every cap's flat top 0.01 mm into I1, I1's
+  underside on it.
+- **Lines**: every line one box (8 corners) and none under 2 mm (the
+  shortest: 2.05 mm, area 2); one direction per layer, each across the one
+  below; pitch median 0.840 mm, no adjacent pair off a multiple of 0.84 by
+  more than 0.05.
+- **No tip above the sheet's underside** under any line, but a cap's 0.01 mm.
+- **Feet**: one pad per cluster, none split; area 1 stands on 6 pads (76-205
+  mm²) and is one support; pads 0.28 mm or more from the part. Below the zone
+  the trunks are the planner's: area 1's nearest is 0.1776 mm from the part,
+  with and without the sheet (pre-existing: rails are kept 0.2 mm off on rays).
 - **Solids** closed, manifold, no degenerate triangle, **no piercing pair in
-  any sheet** (NSO_Repair.js's count, which `selfint:equiv` holds to
-  `mesh_validate.py`). The trees and pads below carry their own: area 1 has
-  16152 piercing pairs without the sheet and 6809 with (the bare tips' tops
-  at the ceiling were most of the difference); area 2 4413 and 4421, 2923 of
-  them in the pads.
-- **One object per area**: each sheet is joined to every trunk that carries
-  one of its tips, so the clamp's build is 4 support pieces (11 without).
+  any sheet**. The trees and pads below carry their own (area 1: 466 piercing
+  pairs, 1036 without the sheet).
 
 **Build time, the card in Chromium** (`GENERATE`; detecting / planning /
-building in the worker). Before this PR the sheet's areas were welded in the
+building in the worker; measured with the four-layer sheet, before
+supports-print-1). Before shells the sheet's areas were welded in the
 worker and the rest on the page; now nothing is welded - every part is its own
 closed shell (`NSO_SupportGridpack.shells`, `support:shells`):
 
@@ -155,7 +182,7 @@ closed shell (`NSO_SupportGridpack.shells`, `support:shells`):
 | the wedge, `v9_mirror_factory` (25 areas) | welded | 23.6 s | 4.4 s | 4.7 s | 13.2 s |
 | | shells | **11.9 s** | not split | not split | - |
 
-**Where the clamp's weld went** (node, area 1: 126 trunks and its sheet, 19 s of
+**Where the clamp's weld went** (node, the four-layer sheet; area 1: 126 trunks and its sheet, 19 s of
 the 22 s over the four areas): 584 unions, 14.1 s - and two thirds of that
 (9.6 s) was not the boolean but what every union pays around it: the two soups
 pre-welded (`weldSoupVerts` 3.1 s, `NSO_weldEpsFor` 0.8 s), turned into
@@ -180,9 +207,55 @@ The sheet's tips are counted while the sheet is planned (`sheet()`'s
 through the sheet - 78 % of the clamp's building - and counted only the trunks.
 
 `support:interface` (`tools/nso_support_sheet_check.js`) still builds with the
-weld, as `solid()` does: its 52 checks and numbers are unchanged.
+weld, as `solid()` does, and holds the card's path beside it on the coupon
+(footPads 'shared', shells, shareFeet: under 10 s, one support, one pad).
+`support:shells` holds every layer of the shells to the weld's.
 
-## 5. Not done here
+## 5. The line as printed (supports-print-1, step 3)
+
+`slice_w_supports.gcode.3mf` (Bambu Studio slicing our 2026-10-20 export)
+printed each 0.84-pitch sheet line as ~0.2 mm segments at about twice the
+bead, and NSO's own slice of the export showed the lines in short pieces with
+holes between them. Both start in the geometry: the line was 0.42 mm, exactly
+one bead (`NSO_Thickness.floorFor(0.4)`), and a slicer insets a region by half
+a bead for its outer wall - a 0.42 line is a **zero-width wall**.
+
+- **NSO's slicer** (Clipper2, offset -w/2): keeps none of an isolated 0.42
+  line; on the export, 16-20 % of a line crossing tip columns survives, on the
+  corners the union left - the short pieces in the screenshot. From 0.4225 up
+  every line is one unbroken pass.
+- **Bambu Studio** (classic walls, thin walls off): a short 0.42 strip is
+  rescued as a 0.3785 loop round a sliver - out and back, two passes - and cut
+  into 0.02-0.35 mm pieces wherever its overhang speed grade changes; a strip
+  of 7.14 mm² or more (17 mm of line) is dropped altogether: the coupon's two
+  22 mm lines are missing from every sheet layer of that slice. With
+  `detect_thin_wall` on, a line is one medial-axis pass at its width + 0.043.
+
+So the line is **0.43 mm** (`SHEET_OVER_MM` 0.01 over the bead) and **one
+straight box** (8 corners) per line, at least 2 mm (`MIN_RUN_MM`). That is
+outside the kickoff's 0.40-0.42 - narrower is less than a zero-width wall - and
+is the owner's call (docs/HANDOFF.md). One pass per line in Bambu takes its
+thin-wall detection: `tools/supports-print-out/top_clip_x2_supports_thinwall.3mf`
+sets `detect_thin_wall = 1` on the support objects only, to slice beside the
+plain export; the card does not set it.
+
+**Reading a slice back**: `node tools/nso_slicer_audit.js --sheet
+sliced.gcode.3mf [--export the.3mf]` reports, per sheet layer of each support
+object, the segments, their mean and median length, the share of the toolpath
+in segments of 2 mm or more, E/mm and its ratio to the file's own outer wall,
+the passes per line (a loop round a sliver reads 2), the E per mm of LINE
+(ratio x passes), and with `--export` each sheet line of the export printed or
+missing. Target: E per mm of line 1.00 +- 0.15 of the outer wall's, 90 % of the
+toolpath in segments of 2 mm or more. `support:audit` holds it (section 5).
+
+| slice | layer | segments | mean | in >= 2 mm | E/mm vs wall | passes | per mm of line |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| our 2026-10-20 export | z 13.00 | 2644 | 0.22 mm | 1 % | 0.92 | 2.00 | 1.84 x |
+| | z 13.20 | 2873 | 0.21 mm | 1 % | 0.91 | 1.94 | 1.77 x |
+| | z 13.40 | 2850 | 0.20 mm | 1 % | 0.91 | 1.99 | 1.81 x |
+| Bambu's own interface (same file) | z 13.20 | 59 | 6.31 mm | 90 % | 1.00 | - | - |
+
+## 6. Not done here
 
 - MAX_SPAN_MM stays 3.29 (tips at 3 mm on the beacon grid). Opening the
   pitch to the reference's 3.8-5.7 is a follow-up once the sheet has printed.

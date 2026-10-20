@@ -45,6 +45,12 @@
 //      slicer takes about 4 min a mesh on the clamp's 41-trunk area 2 in node,
 //      and longer on its 126-trunk area 1, which 2. holds layer by layer.
 //   4. Every shell is closed (no open or non-manifold edge on its own).
+//   5. THE FEET ACROSS AREAS, as the card builds them (footPads 'shared',
+//      shells, shareFeet) on every piece of more than one area: every cluster
+//      of feet on one pad whatever area it holds, and no two supports' first
+//      layers within 0.1 mm of each other - the slicer's sections at the
+//      first layer, grown by half that, do not meet (the layer-1 path
+//      conflict Bambu Studio reported between two supports of the coupon).
 //
 // The timing line is the card's build without the weld beside it with one.
 
@@ -70,7 +76,11 @@ for (const f of ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.
 }
 const SA = ctx.NSO_SupportAim, ST = ctx.NSO_SupportTree, GP = ctx.NSO_SupportGridpack;
 const CARD = { skipList: [], angleDeg: 60, occluders: [], style: 'tree', restOnModel: false, sideMm: 1.2 };
-/* app-supports-card.js PARTS_OPTS */
+/* app-supports-card.js PARTS_OPTS, but for the feet: the card builds every
+   trunk on its foot with no pad (footPads 'shared') and draws the pads over
+   every area at once (shareFeet); here each area draws its own pads, so its
+   shells and its weld hold the same parts. The shared pads are held below
+   (5. THE FEET ACROSS AREAS). */
 const PARTS = { interface: true, foldSheets: false };
 const XOR_MM2 = 1e-3, XOR_WIDTH_MM = 2e-3, EXTRUDE_REL = 1e-3, EXTRUDE_TOTAL_REL = 1e-2, FULL_SLICE_TRIS = 30000;
 
@@ -109,6 +119,7 @@ function tilted() {
   return r;
 }
 const PIECES = [
+  ['top_clip_x2 (the coupon)', readSTL(path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_coupon.stl'))],
   ['clamp_body (standing)', standing(readSTL(path.join(ROOT, 'fixtures', 'supports', 'clamp_body.stl')))],
   /* support:workflow's: many trunks on feet that touch, and 25 areas */
   ['tilted box', tilted()],
@@ -177,10 +188,13 @@ function extruded(layer) {
   const T = { plan: 0, parts: 0, shells: 0, weld: 0 };
   let worstRel = 0, worstAt = '';
 
+  const shared = [];
   for (const [name, piece] of PIECES) {
     console.log('\n=== ' + name + ' ===');
     const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [] });
     if (!det.ok || !det.beaconRegions) { check(name + ': detects', false, det.reason); continue; }
+    const plans = [];
+    if (det.beaconRegions.length > 1) shared.push({ name, piece, plans });
     for (const rg of det.beaconRegions) {
       const label = name + ' area ' + (rg.id + 1);
       const bs = rg.beacons.map(b => ({ x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: rg.id, key: 'k' }));
@@ -188,6 +202,7 @@ function extruded(layer) {
       const p = ST.planTree(piece, Object.assign({}, CARD, { beacons: bs }));
       T.plan += Date.now() - t;
       if (!p.ok) { console.log('  --    ' + label + ': the planner holds nothing here (' + p.reason + ')'); continue; }
+      plans.push(p);
       t = Date.now();
       const tp = await GP.parts(p, PARTS);
       T.parts += Date.now() - t;
@@ -297,6 +312,35 @@ function extruded(layer) {
         flipS + ' layers differ by over ' + EXTRUDE_REL * 100 + ' % (worst ' + (worstE * 100).toFixed(2) + ' %) - ' + flipC +
         ' between the weld and itself with its parts unioned in another order (' + (Date.now() - tS) + ' ms)');
     }
+  }
+  /* 5. the feet across areas, as the card builds them */
+  for (const S of shared) {
+    console.log('\n=== ' + S.name + ': the feet across its ' + S.plans.length + ' areas ===');
+    const builds = [];
+    for (const p of S.plans) {
+      const tp = await GP.parts(p, Object.assign({}, PARTS, { footPads: 'shared' }));
+      if (!tp.ok) { check(S.name + ': builds with shared feet', false, tp.reason); continue; }
+      builds.push({ solids: GP.shells(p, tp).solids });
+    }
+    const sf = GP.shareFeet(builds, S.piece, { plateZ: S.plans[0].plateZ });
+    if (!sf.ok) { check(S.name + ': the shared feet', false, sf.reason); continue; }
+    const g = SL.geometry(wasm);
+    let touching = 0, pairs = 0;
+    try {
+      const plane = SL.slicePlanes(0, 0.4, o).slice(0, 1);
+      const firsts = sf.objects.map((ob) => {
+        const sm = SL.sliceMesh(ob.soup, plane, o);
+        return g.offset(g.of(sm.sections[0].loops, 'Positive'), 0.05, 'Miter');
+      });
+      for (let a = 0; a < firsts.length; a++) for (let b = a + 1; b < firsts.length; b++) {
+        pairs++;
+        if (g.area(g.inter(firsts[a], firsts[b])) > 1e-9) touching++;
+      }
+    } finally { g.free(); }
+    check(S.name + ': every cluster of feet on one pad, whatever area it holds; the supports on one pad are one support; no two supports\' first layers within 0.1 mm',
+      sf.clustersSplit === 0 && touching === 0,
+      sf.reason + '; ' + sf.objects.map((ob) => ob.from.length + ' part(s) of ' + new Set(ob.from.map((f) => f[0])).size + ' area(s)').join(', ') +
+      '; first layers within 0.1 mm: ' + touching + ' of ' + pairs + ' pair(s)');
   }
   console.log('\n  time  the card\'s build: plan ' + T.plan + ' ms, parts ' + T.parts + ' ms, then shells ' + T.shells + ' ms - where the weld was ' + T.weld + ' ms');
   console.log('  worst layer difference over its area: ' + worstRel.toExponential(2) + ' (' + worstAt + ')');
