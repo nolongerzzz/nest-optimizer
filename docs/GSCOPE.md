@@ -137,6 +137,78 @@ Every removed button's job, and where it went:
 **VIEW card order:** Normal · Slice view | Toolpath · Solid | Slice settings |
 Check all · Clear from view · Select shown.
 
+## 10. Speed (round 2a)
+
+**What the user sees.** G-scope keeps up with the hand on a real slice: an
+orbit runs at the screen's rate, a dragged piece follows the pointer on every
+move - across plate 1, over to plate 2, on plate 2 - and a hover or a press
+answers within a frame. Nothing is drawn differently for it.
+
+**The contract.**
+
+- **Nothing renders under G-scope.** The panel covers the window, so the main
+  viewport's loop (`app-core.js`, `animate`) skips its `render()` while
+  G-scope is open. Every other part of that loop still runs, and the plate is
+  drawn again on the first frame after CLOSE.
+- **A pick never walks a slice.** A feature's line mesh of 20,000 moves or more
+  (`LINE_INDEX_MIN`) gets a tree over its segments: `nso_bvh.js`'s tree, built in
+  its worker. Its `raycast` runs three.js's own segment test on just the
+  segments within reach of the ray, so it picks exactly the line the walk picked.
+  Until the tree is ready, it walks. Plate 2's pieces are meshes, so the viewer's
+  `Mesh.raycast` already asks the same file. A hover over a big piece whose tree
+  is not built yet outlines nothing until it is, as the main viewport's hover
+  does.
+- **A plate 2 piece is built once.** Its drawn geometry (a slice's beads as
+  12-triangle prisms coloured by line type, or a mesh's own triangles) is kept
+  with the piece (`pieceGeometry`). A redraw of plate 2 (a pull, a drop, a
+  click that activates it) hands the same geometry to the new mesh. A piece
+  moved on the bed keeps it too, and the mesh stands where the piece went
+  (`userData.base`). It is rebuilt only when what it is drawn from changes: a
+  seat that turns the piece, or a line type switched on or off. A pull's copy is
+  drawn from the prisms the pull already built (`seedPieceGeometry`), not from a
+  second build. The hover outline of a bead piece is each prism's 12 box edges,
+  read straight off its triangles, and is kept too.
+- **The prisms are built in typed arrays.** `buildLineGeometry` (nso-gcode-lines.js)
+  writes straight into a Float32Array, value for value what it wrote before
+  (`gcode:lines-build` holds the two equal on every move of both committed
+  slices). Plate 2's normals, bounding box and sphere are made in flat passes,
+  to the same values three.js would compute, and its line-type colours are
+  bytes.
+- **A pull's copy is grabbed where the ray enters its box** while it has no
+  tree, not by a walk of its triangles. Its tree is asked for when it is set
+  down, so the next press on it does not walk either.
+
+**Measured** (`gscope:speed`, 1280 x 800, `tabletop.gcode.3mf` standing in for
+the user's file - 202,877 moves; main-thread milliseconds, headless Chromium):
+
+| | 346bc38 (before round 1) | d7abbea (round 1) | round 2a |
+|---|---|---|---|
+| main viewport renders under G-scope | every frame | every frame | never |
+| orbit, main thread a frame | < 1 | < 1 | < 1 |
+| orbit on the small slice, frames a second | - | 14 | 49 |
+| pick - the selection pass (med / max) | 19 / 33 | 22 / 36 | 1.5 / 2.6 |
+| hover, a pointermove (max) | 51 | 61 | 17 |
+| click: select and isolate the piece | 177 | 92 | 60 |
+| the move that starts a pull (202,877 moves copied) | 2,765 | 2,919 | 972 |
+| mousedown to the copy's first frame | 2,438 | 2,308 | 927 |
+| let go over plate 2 | 1,815 | 2,067 | 380 |
+| press on a plate 2 piece | 275 | 267 | 11 |
+| a move with the piece in hand (max) | 1 | 6 | 0.5 |
+| moves that followed, of 60 (pull / plate 2) | 59 / 58 | 59 / 58 | 59 / 58 |
+
+Round 1 did not make G-scope slow: 346bc38 and d7abbea measure the same. The
+slowness was the full rebuilds and walks above, and they predate the two plates.
+The frame rate on tabletop in this box is SwiftShader's (a software GPU), about
+6 fps whatever the code does, so the gate holds the main thread's share of a
+frame there, and the frame rate itself on the small committed slice.
+
+**Checks.** `gscope:speed` (`tools/nso_gscope_speed_test.js`) measures and gates
+the items above. It uses `tools/fixtures-local/baseline.gcode.3mf` when that
+file is there (the user's, git-ignored), else tabletop; `NSO_GSCOPE_SPEED_ROOT`
+points it at another checkout for a before / after. `gcode:lines-build`
+(`tools/nso_gcode_lines_build_test.js`) checks the typed-array prisms against
+the old build, bit for bit.
+
 ## Checks
 
 | check | what it holds |
@@ -145,6 +217,8 @@ Check all · Clear from view · Select shown.
 | `gscope:shell` | the four-button column, the three cards (Select, View in its order, Export), the corner row (BACK · ◎ · CLEAR · EXPORT · CLOSE), the dock, the retired ids gone |
 | `gscope:select` | the Select card's five modes; item 4's checkbox contract (two rows checked - exactly those two types drawn; none - nothing; hover changes nothing; the text toggles; Check all; Export and a drag take only what is shown) |
 | the #205 set | the older G-scope drive checks (camera, zoom, slice, solid, watch, legend, ...) still hold; `gcode:gscope`'s Crop sections are its Take band section now; `gcode:gscope-support` and `support:ui` are retired (item 5) |
+| `gscope:speed` | item 10: a 60-move drag follows on plate 1, across and on plate 2; orbit (the main thread's share of a frame on the file, the frame rate on the small slice); the pick <= 16 ms; nothing renders under G-scope; no press or held move past a frame; a pull's first move per thousand moves copied |
+| `gcode:lines-build` | item 10: `buildLineGeometry`'s typed-array prisms are the old build's, bit for bit |
 | `page:manifest` | the page loads each script once |
 
 ## Not done here

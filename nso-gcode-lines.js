@@ -484,19 +484,48 @@
    * @returns {{positions: Float32Array, moveIds: Int32Array, trisPerMove: number}}
    */
   function buildLineGeometry(moves) {
-    var acc = [];
-    var ids = [];
+    // Written straight into a Float32Array sized for every move, then trimmed:
+    // the same corners, faces and float32 values extrudeFlatLine pushes, without
+    // a 12-triangles-a-move JS array to grow and copy (G-scope's pull of a
+    // 200,000-move piece spent 0.7 s here; tools/nso_gcode_lines_build_test.js
+    // holds the two equal, value for value).
+    var out = new Float32Array(moves.length * FLOATS_PER_MOVE);
+    var ids = new Int32Array(moves.length);
+    var w = 0, n = 0;
     for (var i = 0; i < moves.length; i++) {
-      var before = acc.length;
-      extrudeFlatLine(moves[i], acc);
-      if (acc.length > before) ids.push(moves[i].index);
+      var mv = moves[i];
+      var dx = mv.x1 - mv.x0, dy = mv.y1 - mv.y0;
+      var len = Math.sqrt(dx * dx + dy * dy);
+      if (!(len > 1e-9) || !(mv.width > 0) || !(mv.height > 0)) continue;
+      var ux = dx / len, uy = dy / len;
+      var px = -uy, py = ux;
+      var hw = mv.width / 2;
+      var zTop = mv.z, zBot = mv.z - mv.height;
+      var ax = mv.x0 - px * hw, ay = mv.y0 - py * hw;   // corner 0 / 4
+      var bx = mv.x0 + px * hw, by = mv.y0 + py * hw;   // corner 1 / 5
+      var cx = mv.x1 + px * hw, cy = mv.y1 + py * hw;   // corner 2 / 6
+      var ex = mv.x1 - px * hw, ey = mv.y1 - py * hw;   // corner 3 / 7
+      var C = BOX_CORNERS;
+      C[0] = ax; C[1] = ay; C[2] = zBot;  C[3] = bx; C[4] = by; C[5] = zBot;
+      C[6] = cx; C[7] = cy; C[8] = zBot;  C[9] = ex; C[10] = ey; C[11] = zBot;
+      C[12] = ax; C[13] = ay; C[14] = zTop; C[15] = bx; C[16] = by; C[17] = zTop;
+      C[18] = cx; C[19] = cy; C[20] = zTop; C[21] = ex; C[22] = ey; C[23] = zTop;
+      for (var f = 0; f < 36; f++) {
+        var k = BOX_FACES[f] * 3;
+        out[w++] = C[k]; out[w++] = C[k + 1]; out[w++] = C[k + 2];
+      }
+      ids[n++] = mv.index;
     }
     return {
-      positions: new Float32Array(acc),
-      moveIds: new Int32Array(ids),
+      positions: w === out.length ? out : out.slice(0, w),
+      moveIds: n === ids.length ? ids : ids.slice(0, n),
       trisPerMove: TRIS_PER_MOVE
     };
   }
+  // extrudeFlatLine's faces, flattened: the corner of each of the 36 vertices
+  var BOX_FACES = [0, 2, 3, 0, 1, 2, 4, 6, 5, 4, 7, 6, 0, 5, 1, 0, 4, 5,
+                   2, 7, 3, 2, 6, 7, 1, 6, 2, 1, 5, 6, 3, 4, 0, 3, 7, 4];
+  var BOX_CORNERS = new Float64Array(24);
 
   function moveOfTriangle(built, triIndex) {
     var k = Math.floor(triIndex / TRIS_PER_MOVE);

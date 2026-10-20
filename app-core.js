@@ -970,6 +970,9 @@ function animate() {
   if (state.controls) state.controls.update();
   updatePlateByView();
   applyPlateGridVisibility();
+  // G-scope covers the whole window (an opaque fixed panel): a frame drawn
+  // under it is never seen, and it halved G-scope's own frame rate.
+  if (window.NSO_MICROSCOPE && window.NSO_MICROSCOPE.isOpen()) return;
   if (state.renderer && state.scene && state.camera) {
     state.renderer.render(state.scene, state.camera);
   }
