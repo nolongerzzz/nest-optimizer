@@ -464,13 +464,20 @@ withApp(async (page, logs) => {
 
     // Slice view, from the View card
     await openCard(page, 'ms-card-view');
+    // every text the dock shows from the click on: a slice can be over before a read 70 ms after the click would see it
+    await page.evaluate(() => {
+      const el = document.getElementById('ms-slice-read');
+      window.__sliceTexts = [];
+      window.__sliceObs = new MutationObserver(() => window.__sliceTexts.push(el.textContent));
+      window.__sliceObs.observe(el, { childList: true, characterData: true, subtree: true });
+    });
     await clickFace(page, '#ms-cam-slice');
-    const sawBusy = await page.evaluate(() => document.getElementById('ms-slice-read').textContent);
     await page.waitForFunction(() => {
       const d = window.NSO_MICROSCOPE.getDoc();
       return !window.NSO_GSCOPE_SLICE.busy() && d && d.kind === 'toolpath' && !!d.nsoSlice;
     }, null, { timeout: 120000 });
     await frames(page);
+    const sawBusy = await page.evaluate(() => { window.__sliceObs.disconnect(); return window.__sliceTexts.find(t => /Slic/i.test(t)) || window.__sliceTexts.join(' | '); });
     check('slice progress text shows in the dock while it runs', /Slic/i.test(sawBusy), sawBusy.slice(0, 60));
     st = await cardState(page);
     const dis = Object.keys(CARDS).filter(c => st.shown[c].disabled).sort();

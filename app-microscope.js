@@ -853,6 +853,7 @@ var NSO_MICROSCOPE = (function () {
     }
     plateSaved.take = null;
     takeDoc = null;
+    Array.from(pieceGeoms.keys()).forEach(dropPieceGeometry);
   }
 
   /** One burst of coalesced redraws, run now so it lands on the plate that asked for it. */
@@ -974,7 +975,9 @@ var NSO_MICROSCOPE = (function () {
   /** Moves copied and shifted: a piece's beads travel with it, the slice's own are never touched. */
   function shiftedMoves(moves, dx, dy, dz) {
     return moves.map(function (m) {
-      return Object.assign({}, m, { x0: m.x0 + dx, x1: m.x1 + dx, y0: m.y0 + dy, y1: m.y1 + dy, z: m.z + dz });
+      var c = Object.assign({}, m);
+      c.x0 = m.x0 + dx; c.x1 = m.x1 + dx; c.y0 = m.y0 + dy; c.y1 = m.y1 + dy; c.z = m.z + dz;
+      return c;
     });
   }
 
@@ -987,8 +990,10 @@ var NSO_MICROSCOPE = (function () {
   /** A piece moved by (dx, dy, dz) mm in plate 2's own Z-up frame, baked into its triangles and beads. */
   function bakePiece(o, dx, dy, dz) {
     if (!dx && !dy && !dz) return o;
+    var p0 = o.positions, m0 = o.moves;
     o.positions = shiftedPositions(o.positions, dx, dy, dz);
     if (o.moves) o.moves = shiftedMoves(o.moves, dx, dy, dz);
+    movePieceGeometry(o, p0, m0, dx, dy, dz);         // drawn as it was, moved: nothing rebuilt
     return prepObject(o);
   }
 
@@ -1106,11 +1111,12 @@ var NSO_MICROSCOPE = (function () {
     return withSelection(items, source, function () {
       var geo = microscopeGeometry();
       if (!geo) return null;
-      var pos = new Float32Array(geo.attributes.position.array);
+      var pos = geo.attributes.position.array;       // the geometry's own, new - takeAddAt shifts it into a copy
       if (pos.length < 9) return null;
       return {
         name: exportLabel(), positions: pos, from: doc.name,
-        moves: doc.kind === 'toolpath' ? items.map(function (sg) { return sg.mv; }) : null
+        moves: doc.kind === 'toolpath' ? items.map(function (sg) { return sg.mv; }) : null,
+        moveIds: geo.userData.moveIds || null, trisPerMove: geo.userData.trisPerMove || 0
       };
     });
   }
@@ -1126,9 +1132,11 @@ var NSO_MICROSCOPE = (function () {
   /** A spec set down on plate 2's bed, its footprint centred on the Z-up point (x, y). Returns the piece. */
   function takeAddAt(spec, x, y) {
     var p = spec.positions, lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-    for (var i = 0; i < p.length; i += 3) for (var a = 0; a < 3; a++) {
-      if (p[i + a] < lo[a]) lo[a] = p[i + a];
-      if (p[i + a] > hi[a]) hi[a] = p[i + a];
+    for (var i = 0; i < p.length; i += 3) {
+      var px = p[i], py = p[i + 1], pz = p[i + 2];
+      if (px < lo[0]) lo[0] = px; if (px > hi[0]) hi[0] = px;
+      if (py < lo[1]) lo[1] = py; if (py > hi[1]) hi[1] = py;
+      if (pz < lo[2]) lo[2] = pz; if (pz > hi[2]) hi[2] = pz;
     }
     var dx = x - (lo[0] + hi[0]) / 2, dy = y - (lo[1] + hi[1]) / 2, dz = -lo[2];
     var o = prepObject({
@@ -1137,6 +1145,7 @@ var NSO_MICROSCOPE = (function () {
       moves: spec.moves ? shiftedMoves(spec.moves, dx, dy, dz) : null,
       take: { from: spec.from }
     });
+    seedPieceGeometry(o, spec.moveIds, spec.trisPerMove);
     takeDoc.objects.push(o);
     return o;
   }
@@ -1178,6 +1187,8 @@ var NSO_MICROSCOPE = (function () {
     return !drawn || fh.distance <= drawn.distance;
   }
 
+  var selSetOf = null;        // the selection as a Set, kept while it is the same selection (a hover asks per move)
+
   /** Is the selection what is drawn under the pointer? */
   function selectedHit(e) {
     var v = view, rc = rayAt(e), ray = rc.ray;
@@ -1190,7 +1201,10 @@ var NSO_MICROSCOPE = (function () {
       if (sc < bestScore) { bestScore = sc; best = h; }
     });
     if (!best) return false;
-    var sel = new Set(currentSelection);
+    if (!selSetOf || selSetOf.arr !== currentSelection || selSetOf.n !== currentSelection.length) {
+      selSetOf = { arr: currentSelection, n: currentSelection.length, set: new Set(currentSelection) };
+    }
+    var sel = selSetOf.set;
     var owns = function (h) {
       if (isolated) return true;
       for (var n = h.object; n; n = n.parent) if (n === v.highlightGroup) return true;
@@ -1202,6 +1216,101 @@ var NSO_MICROSCOPE = (function () {
     // A highlight is drawn over the thing it marks, to within a hair: the nearest of such a pair is the selection's.
     var eps = Math.max(1e-3, best.distance * 2e-3);
     return scored.some(function (r) { return r[0] <= bestScore + eps && owns(r[1]); });
+  }
+
+  // --- a line pick that does not walk every line --------------------------------
+  //
+  // three.js picks a line by walking every segment of the mesh, and a slice's
+  // feature mesh is all its moves of that type - tabletop's outer wall alone is
+  // tens of thousands, asked on every hover and every press. A mesh this big
+  // gets nso_bvh.js's tree over its segments (each as a flat triangle a, b, b),
+  // built in that file's worker, and its raycast asks the tree which segments'
+  // boxes - grown by the pick's reach - the ray passes through, then runs
+  // three's OWN test on those and on nothing else: the same distanceSqToSegment,
+  // the same reach, near and far, the same point and index, pushed in the same
+  // order. So a line it picks is the line the walk picked; only lines that
+  // could not be within reach are not asked. Until the tree is ready, the walk.
+
+  var LINE_INDEX_MIN = 20000;
+  var _lr = null, _lrCands = [], _lrStack = [];     // lineRaycast's scratch, made on its first use
+
+  /** A LineSegments mesh, given the indexed pick when it is big enough to need one. */
+  function indexLines(mesh) {
+    var B = window.NSO_BVH, g = mesh.geometry, pos = g.attributes.position;
+    if (!B || !B.ensure || g.index || !pos || pos.count / 2 < LINE_INDEX_MIN) return mesh;
+    var a = pos.array, n = pos.count / 2, soup = new Float32Array(n * 9);
+    for (var i = 0; i < n; i++) {
+      var s = i * 6, d = i * 9;
+      soup[d] = a[s]; soup[d + 1] = a[s + 1]; soup[d + 2] = a[s + 2];
+      soup[d + 3] = soup[d + 6] = a[s + 3]; soup[d + 4] = soup[d + 7] = a[s + 4]; soup[d + 5] = soup[d + 8] = a[s + 5];
+    }
+    mesh.userData.lineSoup = soup;
+    B.ensure(soup, 0);
+    mesh.raycast = lineRaycast;
+    return mesh;
+  }
+
+  /** Segments whose box, grown by `reach`, the (local) ray enters: ascending. */
+  function lineCandidates(ix, ray, reach, out) {
+    var o = ray.origin, d = ray.direction, box = ix.box;
+    var iX = Math.abs(d.x) < 1e-300 ? 1e300 : 1 / d.x, iY = Math.abs(d.y) < 1e-300 ? 1e300 : 1 / d.y, iZ = Math.abs(d.z) < 1e-300 ? 1e300 : 1 / d.z;
+    var enters = function (b) {
+      var p = (box[b] - reach - o.x) * iX, q = (box[b + 3] + reach - o.x) * iX;
+      var t0 = Math.min(p, q), t1 = Math.max(p, q);
+      p = (box[b + 1] - reach - o.y) * iY; q = (box[b + 4] + reach - o.y) * iY;
+      t0 = Math.max(t0, Math.min(p, q)); t1 = Math.min(t1, Math.max(p, q));
+      p = (box[b + 2] - reach - o.z) * iZ; q = (box[b + 5] + reach - o.z) * iZ;
+      t0 = Math.max(t0, Math.min(p, q)); t1 = Math.min(t1, Math.max(p, q));
+      return Math.max(t0, 0) <= t1;
+    };
+    out.length = 0;
+    if (!ix.nodes || !enters(0)) return out;
+    var st = _lrStack;
+    st.length = 0;
+    st.push(0);
+    while (st.length) {
+      var nd = st.pop();
+      if (ix.left[nd] < 0) {
+        for (var q2 = ix.start[nd], e = q2 + ix.count[nd]; q2 < e; q2++) out.push(ix.order[q2]);
+        continue;
+      }
+      if (enters(ix.left[nd] * 6)) st.push(ix.left[nd]);
+      if (enters(ix.right[nd] * 6)) st.push(ix.right[nd]);
+    }
+    out.sort(function (x, y) { return x - y; });
+    return out;
+  }
+
+  /** LineSegments.raycast (three r147), asked only about the tree's candidates. */
+  function lineRaycast(raycaster, intersects) {
+    var g = this.geometry, pos = g.attributes.position, soup = this.userData.lineSoup;
+    var ix = soup && window.NSO_BVH.peek(soup);
+    if (!ix || g.index || g.drawRange.start !== 0 || g.drawRange.count < pos.count || soup.length !== pos.count / 2 * 9) {
+      return THREE.LineSegments.prototype.raycast.call(this, raycaster, intersects);
+    }
+    if (!_lr) _lr = { sphere: new THREE.Sphere(), inv: new THREE.Matrix4(), ray: new THREE.Ray(), a: new THREE.Vector3(),
+                      b: new THREE.Vector3(), onRay: new THREE.Vector3(), onSeg: new THREE.Vector3() };
+    var _lrSphere = _lr.sphere, _lrInv = _lr.inv, _lrRay = _lr.ray, _lrA = _lr.a, _lrB = _lr.b, _lrOnRay = _lr.onRay, _lrOnSeg = _lr.onSeg;
+    var threshold = raycaster.params.Line.threshold, mw = this.matrixWorld;
+    if (g.boundingSphere === null) g.computeBoundingSphere();
+    _lrSphere.copy(g.boundingSphere);
+    _lrSphere.applyMatrix4(mw);
+    _lrSphere.radius += threshold;
+    if (raycaster.ray.intersectsSphere(_lrSphere) === false) return;
+    _lrInv.copy(mw).invert();
+    _lrRay.copy(raycaster.ray).applyMatrix4(_lrInv);
+    var reach = threshold / ((this.scale.x + this.scale.y + this.scale.z) / 3), reachSq = reach * reach;
+    var list = lineCandidates(ix, _lrRay, reach, _lrCands);
+    for (var k = 0; k < list.length; k++) {
+      var i = list[k] * 2;
+      _lrA.fromBufferAttribute(pos, i);
+      _lrB.fromBufferAttribute(pos, i + 1);
+      if (_lrRay.distanceSqToSegment(_lrA, _lrB, _lrOnRay, _lrOnSeg) > reachSq) continue;
+      _lrOnRay.applyMatrix4(mw);
+      var distance = raycaster.ray.origin.distanceTo(_lrOnRay);
+      if (distance < raycaster.near || distance > raycaster.far) continue;
+      intersects.push({ distance: distance, point: _lrOnSeg.clone().applyMatrix4(mw), index: i, face: null, faceIndex: null, object: this });
+    }
   }
 
   // --- what a click would take ------------------------------------------------
@@ -1251,12 +1360,14 @@ var NSO_MICROSCOPE = (function () {
     if (isPath) {
       var lh = lineHitAt(e);
       if (!lh) return null;
-      var sg = lh.seg, shown = shownSegments();
+      var sg = lh.seg;
       if (mode === 'line') return { items: [sg], source: 'line', seg: sg, point: lh.point, label: 'line' };
+      var shown = shownMemo();
       if (mode === 'piece') {
-        t = shown.filter(function (x) { return x.obj === sg.obj; });
-        return { items: t, source: 'pick', point: lh.point, label: 'piece' };
+        if (!shown.byObj.has(sg.obj)) shown.byObj.set(sg.obj, shown.list.filter(function (x) { return x.obj === sg.obj; }));
+        return { items: shown.byObj.get(sg.obj).slice(), source: 'pick', point: lh.point, label: 'piece' };
       }
+      shown = shown.list;
       if (mode === 'feature') {
         t = shown.filter(function (x) { return x.obj === sg.obj && x.feature === sg.feature; });
         return { items: t, source: 'feature', point: lh.point, label: sg.feature };
@@ -1342,13 +1453,8 @@ var NSO_MICROSCOPE = (function () {
         pm.renderOrder = 8;
         g.add(pm);
       } else {
-        var pos = new Float32Array(segs.length * 6);
-        segs.forEach(function (sg, i) {
-          var p0 = toThree(sg.x0 - doc.cx, sg.y0 - doc.cy, sg.z), p1 = toThree(sg.x1 - doc.cx, sg.y1 - doc.cy, sg.z);
-          pos.set([p0.x, p0.y, p0.z, p1.x, p1.y, p1.z], i * 6);
-        });
         var lg = new THREE.BufferGeometry();
-        lg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        lg.setAttribute('position', new THREE.BufferAttribute(segPositions(segs), 3));
         var ls = new THREE.LineSegments(lg, mat());
         ls.renderOrder = 8;
         g.add(ls);
@@ -1364,7 +1470,9 @@ var NSO_MICROSCOPE = (function () {
         h.renderOrder = 8;
         h.userData.sharedGeometry = true;
         g.add(h);
-        var edges = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry, 30), mat());
+        var kept = doc.source === 'take' && pieceEdges(o);
+        var edges = new THREE.LineSegments(kept || new THREE.EdgesGeometry(m.geometry, 30), mat());
+        if (kept) edges.userData.sharedGeometry = true;
         edges.position.copy(m.position);
         edges.renderOrder = 8;
         g.add(edges);
@@ -1406,7 +1514,11 @@ var NSO_MICROSCOPE = (function () {
   function hoverNow(e) {
     if (!view || !doc || !isOpen() || pull) return;
     var tgt = null;
+    // a hover over a big plate 2 piece whose tree (nso_bvh.js) is not built yet outlines nothing until it is,
+    // rather than walk every triangle - the main viewport's hover does the same
+    view.raycaster.nsoHover = true;
     try { tgt = (currentSelection.length && selectedHit(e)) ? null : targetAt(e); } catch (err) { tgt = null; }
+    finally { view.raycaster.nsoHover = false; }
     if (!tgt) { clearHover(); return; }
     drawHover(tgt);
   }
@@ -1478,7 +1590,18 @@ var NSO_MICROSCOPE = (function () {
     meshOf: takeMesh,
     boxOf: takeBox,
     posOf: function (o) { return takeMesh(o).position.clone(); },
-    hitOn: function (o, rc) { var m = takeMesh(o); m.updateMatrixWorld(true); return rc.intersectObject(m, false)[0]; },
+    hitOn: function (o, rc) {
+      var m = takeMesh(o);
+      m.updateMatrixWorld(true);
+      // where the grab holds it. A big piece with no tree yet (a pull's fresh copy:
+      // 2.4M triangles for a 200,000-move slice) is held where the ray enters its
+      // box - a walk of every triangle was 0.3 s before the copy could move
+      if (!treeReady(m.geometry)) {
+        var pt = rc.ray.intersectBox(takeBox(o), new THREE.Vector3());
+        return pt ? { point: pt, distance: pt.distanceTo(rc.ray.origin), object: m } : undefined;
+      }
+      return rc.intersectObject(m, false)[0];
+    },
     keyOf: function (o) { return o.name; },
     nameOf: function (o) { return '"' + (o && o.name || 'piece') + '"'; },
     isSupport: function () { return false; },
@@ -1541,16 +1664,28 @@ var NSO_MICROSCOPE = (function () {
     return { handled: true, mode: 'cancel', reason: 'over plate 1' };
   }
 
+  /** False only for a big geometry nso_bvh.js has no tree for yet (a pick on it would walk every triangle). */
+  function treeReady(geo) {
+    var B = window.NSO_BVH, pos = geo && geo.attributes.position;
+    return !B || !B.peek || !pos || !B.isBig(geo) || !!B.peek(pos.array);
+  }
+
+  /** A big piece just set down: its tree built now, off the main thread, not at the next press on it. */
+  function treeSoon(o) {
+    var m = takeMesh(o), B = window.NSO_BVH;
+    if (m && B && B.ensureGeometry && !treeReady(m.geometry)) setTimeout(function () { B.ensureGeometry(m.geometry); }, 0);
+  }
+
   /** The carried piece let go: its offset baked into its triangles and beads, selected, drawn. Returns its height over the bed. */
   function takeCommit(G) {
     var o = G.p, m = takeMesh(o);
-    var d = m.position.clone();
-    m.position.set(0, 0, 0);
+    var d = m.position.clone().sub(m.userData.base || new THREE.Vector3());
     bakePiece(o, d.x, -d.z, d.y);
     o.pulling = false;
     var h = Math.max(0, o.bounds.minZ);
     takeRefresh();
     setSelection([o], 'pick');
+    treeSoon(o);
     return h;
   }
 
@@ -1937,7 +2072,7 @@ var NSO_MICROSCOPE = (function () {
 
   function disposeTree(obj) {
     obj.traverse(function (n) {
-      if (n.geometry) n.geometry.dispose();
+      if (n.geometry && !n.geometry.userData.kept) n.geometry.dispose();     // a plate 2 piece's is kept (pieceGeometry)
       if (n.material) {
         (Array.isArray(n.material) ? n.material : [n.material]).forEach(function (m) { m.dispose(); });
       }
@@ -1974,15 +2109,8 @@ var NSO_MICROSCOPE = (function () {
       doc.groups = byFeature;
       Object.keys(byFeature).forEach(function (feature, gi) {
         var segs = byFeature[feature].filter(function (s) { return !CLEARED.has(s.id) && inZRange(s); });
-        var positions = new Float32Array(segs.length * 6);
-        segs.forEach(function (s, i) {
-          var p0 = toThree(s.x0 - doc.cx, s.y0 - doc.cy, s.z);
-          var p1 = toThree(s.x1 - doc.cx, s.y1 - doc.cy, s.z);
-          positions[i * 6 + 0] = p0.x; positions[i * 6 + 1] = p0.y; positions[i * 6 + 2] = p0.z;
-          positions[i * 6 + 3] = p1.x; positions[i * 6 + 4] = p1.y; positions[i * 6 + 5] = p1.z;
-        });
         var geo = new THREE.BufferGeometry();
-        geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        geo.setAttribute('position', new THREE.BufferAttribute(segPositions(segs), 3));
         var isTravel = feature === 'Travel';
         var mesh = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
           color: colorForGroup(feature, gi),
@@ -1992,6 +2120,7 @@ var NSO_MICROSCOPE = (function () {
         mesh.userData.feature = feature;
         // Line i of this mesh is segs[i] - how a picked line finds its move.
         mesh.userData.segs = segs;
+        indexLines(mesh);
         v.overviewMeshes[feature] = mesh;
         v.overviewGroup.add(mesh);
       });
@@ -2015,30 +2144,20 @@ var NSO_MICROSCOPE = (function () {
     // that is still a slice's beads is drawn bead by bead in its line types'
     // colours, minus the types Display has switched off.
     var byObject = {};
+    var sig = featureSig();
+    if (doc.source === 'take') prunePieceGeometry(doc.objects, sig);
     doc.objects.forEach(function (o, gi) {
       byObject[o.name] = o;
       var mesh = null;
-      var G = window.NSOGcodeLines;
-      if (doc.source === 'take' && o.moves && o.moves.length && G && G.buildLineGeometry) {
-        var shown = o.moves.filter(function (m) { return !FEATURE_OFF.has(m.feature); });
-        var built = G.buildLineGeometry(shown);
-        var pos = built.positions, colors = new Float32Array(pos.length), featOf = {};
-        shown.forEach(function (m) { featOf[m.index] = m.feature; });
-        var tc = new THREE.Color();
-        for (var t = 0; t < pos.length / 9; t++) {
-          tc.setHex(featureColor(featOf[built.moveIds[Math.floor(t / built.trisPerMove)]], 0));
-          for (var k = 0; k < 3; k++) { colors[t * 9 + k * 3] = tc.r; colors[t * 9 + k * 3 + 1] = tc.g; colors[t * 9 + k * 3 + 2] = tc.b; }
-        }
-        var bg = new THREE.BufferGeometry();
-        bg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-        bg.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-        bg.translate(-doc.cx, -doc.cy, 0);
-        bg.rotateX(-Math.PI / 2);
-        bg.computeVertexNormals();
-        mesh = new THREE.Mesh(bg, new THREE.MeshStandardMaterial({
-          color: 0xffffff, vertexColors: true, metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes()
-        }));
-        mesh.userData.empty = !pos.length;
+      if (doc.source === 'take') {
+        // plate 2: built once per piece and kept (pieceGeometry), sitting where the piece was moved to
+        var pg = pieceGeometry(o, sig);
+        mesh = new THREE.Mesh(pg.geo, pg.beads
+          ? new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes() })
+          : new THREE.MeshStandardMaterial({ color: colorForGroup(o.name, gi), metalness: 0.05, roughness: 0.4, clippingPlanes: clipPlanes() }));
+        mesh.position.copy(pg.base);
+        mesh.userData.base = pg.base.clone();
+        if (pg.beads) mesh.userData.empty = !pg.geo.attributes.position.count;
       } else {
         var geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(o.positions), 3));
@@ -2056,11 +2175,199 @@ var NSO_MICROSCOPE = (function () {
       v.overviewGroup.add(mesh);
     });
     doc.groups = byObject;
-    v.takeSig = featureSig();
+    v.takeSig = sig;
   }
 
   /** What Display has switched off, as one string: plate 2 is drawn from it, and is rebuilt when it changes. */
   function featureSig() { return Array.from(FEATURE_OFF).sort().join('|'); }
+
+  // --- plate 2's pieces, built once -------------------------------------------
+  //
+  // A plate 2 piece's drawn geometry - a slice's beads as their prisms (12
+  // triangles a move, coloured by line type), or a mesh's own triangles - is
+  // built ONCE and kept with the piece. A redraw of plate 2 (a pull, a drop, a
+  // click that activates it) hands the same geometry to a new mesh; a piece
+  // moved across the bed keeps it too, and the mesh stands where the piece was
+  // moved to (`base`, view space). It is rebuilt only when what it is drawn
+  // from changes: the piece turned by a seat (new triangles), or a line type
+  // switched on or off (the signature). Kept, it also keeps nso_bvh.js's tree,
+  // which every pick and hover on the piece asks.
+  //
+  // A pull builds the copy's prisms once (pullSpec) and they are handed in here
+  // as they are (seedPieceGeometry), not built a second time.
+
+  var pieceGeoms = new Map();     // piece -> { geo, sig, positions, moves, base, beads, edges }
+
+  function keptGeometry(geo) { geo.userData.kept = true; return geo; }
+
+  function dropPieceGeometry(o) {
+    var e = pieceGeoms.get(o);
+    if (!e) return;
+    pieceGeoms.delete(o);
+    e.geo.dispose();
+    if (e.edges) e.edges.dispose();
+  }
+
+  /** Throw away what no piece of `objects` draws any more (gone, or drawn from other data now). */
+  function prunePieceGeometry(objects, sig) {
+    var live = new Set(objects);
+    Array.from(pieceGeoms.keys()).forEach(function (o) {
+      var e = pieceGeoms.get(o);
+      if (!live.has(o) || e.positions !== o.positions || e.moves !== o.moves || (e.beads && e.sig !== sig)) dropPieceGeometry(o);
+    });
+  }
+
+  /** Z-up mm triangles into a view-space position attribute: (x, y, z) -> (x - cx, z, -(y - cy)), toThree's map. */
+  function viewPositions(p) {
+    var out = new Float32Array(p.length), cx = doc.cx, cy = doc.cy;
+    for (var i = 0; i < p.length; i += 3) { out[i] = p[i] - cx; out[i + 1] = p[i + 2]; out[i + 2] = -(p[i + 1] - cy); }
+    return out;
+  }
+
+  /**
+   * A soup's normals, as computeVertexNormals + normalizeNormals (three r147)
+   * leave them on a non-indexed geometry - (C - B) x (A - B), stored, read back
+   * and scaled by 1 / length - in one pass over the arrays instead of a Vector3
+   * round trip per vertex. The same float32 values, bit for bit.
+   */
+  function flatNormals(p) {
+    var n = new Float32Array(p.length), f = Math.fround;
+    for (var i = 0; i < p.length; i += 9) {
+      var bx = p[i + 3], by = p[i + 4], bz = p[i + 5];
+      var cbx = p[i + 6] - bx, cby = p[i + 7] - by, cbz = p[i + 8] - bz;
+      var abx = p[i] - bx, aby = p[i + 1] - by, abz = p[i + 2] - bz;
+      var x = f(cby * abz - cbz * aby), y = f(cbz * abx - cbx * abz), z = f(cbx * aby - cby * abx);
+      var s = 1 / (Math.sqrt(x * x + y * y + z * z) || 1);
+      x *= s; y *= s; z *= s;
+      n[i] = n[i + 3] = n[i + 6] = x; n[i + 1] = n[i + 4] = n[i + 7] = y; n[i + 2] = n[i + 5] = n[i + 8] = z;
+    }
+    return n;
+  }
+
+  /**
+   * A view-space soup as a geometry with its flat normals, and its bounding box
+   * and sphere as computeBoundingBox / computeBoundingSphere would make them
+   * (the box's centre, the farthest vertex) - made here in two flat passes,
+   * because the frustum cull and plateBox would otherwise make them on the
+   * first frame through a Vector3 per vertex, 0.3 s on a 200,000-move copy.
+   */
+  function soupGeometry(viewPos) {
+    var g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.BufferAttribute(viewPos, 3));
+    g.setAttribute('normal', new THREE.BufferAttribute(flatNormals(viewPos), 3));
+    if (viewPos.length) {
+      var x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity, i;
+      for (i = 0; i < viewPos.length; i += 3) {
+        var x = viewPos[i], y = viewPos[i + 1], z = viewPos[i + 2];
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+        if (z < z0) z0 = z; if (z > z1) z1 = z;
+      }
+      g.boundingBox = new THREE.Box3(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
+      var c = g.boundingBox.getCenter(new THREE.Vector3()), r2 = 0;
+      for (i = 0; i < viewPos.length; i += 3) {
+        var dx = c.x - viewPos[i], dy = c.y - viewPos[i + 1], dz = c.z - viewPos[i + 2], d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 > r2) r2 = d2;
+      }
+      g.boundingSphere = new THREE.Sphere(c, Math.sqrt(r2));
+    }
+    return g;
+  }
+
+  /**
+   * The beads' prisms, as drawn: flat normals and each move's line-type colour -
+   * held as bytes, which is what a line type's hex colour is (a quarter of the
+   * upload of floats, the same colour on screen).
+   */
+  function beadGeometry(pos, moveIds, trisPerMove, moves) {
+    var featOf = {}, rgb = {};
+    moves.forEach(function (m) { featOf[m.index] = m.feature; });
+    var colors = new Uint8Array(pos.length), per = trisPerMove * 9;
+    for (var mi = 0; mi < moveIds.length; mi++) {
+      var ft = featOf[moveIds[mi]], c = rgb[ft];
+      if (c == null) c = rgb[ft] = featureColor(ft, 0);
+      var r = (c >> 16) & 255, gr = (c >> 8) & 255, b = c & 255;
+      for (var k = mi * per, end = k + per; k < end; k += 3) { colors[k] = r; colors[k + 1] = gr; colors[k + 2] = b; }
+    }
+    var bg = soupGeometry(viewPositions(pos));
+    bg.setAttribute('color', new THREE.BufferAttribute(colors, 3, true));
+    return keptGeometry(bg);
+  }
+
+  /** The piece's kept geometry (built now if it has none that still fits). */
+  function pieceGeometry(o, sig) {
+    var e = pieceGeoms.get(o);
+    if (e && e.positions === o.positions && e.moves === o.moves && (!e.beads || e.sig === sig)) return e;
+    if (e) dropPieceGeometry(o);
+    var G = window.NSOGcodeLines, geo, beads = false;
+    if (o.moves && o.moves.length && G && G.buildLineGeometry) {
+      var shown = o.moves.filter(function (m) { return !FEATURE_OFF.has(m.feature); });
+      var built = G.buildLineGeometry(shown);
+      geo = beadGeometry(built.positions, built.moveIds, built.trisPerMove, shown);
+      beads = true;
+    } else {
+      geo = keptGeometry(soupGeometry(viewPositions(o.positions)));
+    }
+    e = { geo: geo, sig: sig, positions: o.positions, moves: o.moves, base: new THREE.Vector3(), beads: beads, edges: null };
+    pieceGeoms.set(o, e);
+    return e;
+  }
+
+  /**
+   * A new piece whose triangles ARE its shown beads' prisms (a pull: pullSpec
+   * built them from exactly the moves the Features list shows), kept as its
+   * drawn geometry so the redraw that follows builds nothing.
+   */
+  function seedPieceGeometry(o, moveIds, trisPerMove) {
+    if (!o.moves || !moveIds) return;
+    var shown = o.moves.filter(function (m) { return !FEATURE_OFF.has(m.feature); });
+    if (moveIds.length * trisPerMove * 9 !== o.positions.length) return;
+    dropPieceGeometry(o);
+    pieceGeoms.set(o, { geo: beadGeometry(o.positions, moveIds, trisPerMove, shown), sig: featureSig(), positions: o.positions,
+                        moves: o.moves, base: new THREE.Vector3(), beads: true, edges: null });
+  }
+
+  /**
+   * The piece moved by (dx, dy, dz) mm, Z-up: its kept geometry is not rebuilt -
+   * it follows the piece's new data and stands that much further along.
+   */
+  function movePieceGeometry(o, positions0, moves0, dx, dy, dz) {
+    var e = pieceGeoms.get(o);
+    if (!e || e.positions !== positions0 || e.moves !== moves0) return;
+    e.positions = o.positions; e.moves = o.moves;
+    e.base.add(new THREE.Vector3(dx, dz, -dy));
+  }
+
+  /**
+   * The piece's outline for the hover: its edges past 30 degrees. A bead piece's
+   * prisms are boxes, so those are each box's 12 edges, read straight off its
+   * triangles (EdgesGeometry hashes every triangle edge, seconds on a slice);
+   * a mesh piece's are EdgesGeometry's. Built on the first hover, kept.
+   */
+  function pieceEdges(o) {
+    var e = pieceGeoms.get(o);
+    if (!e) return null;
+    if (e.edges) return e.edges;
+    if (e.beads) {
+      // extrudeFlatLine's 12 triangles: corner k of the box is vertex V[k] of the move's 36
+      var V = [0, 4, 1, 2, 6, 8, 7, 10];
+      var EDGES = [0, 1, 1, 2, 2, 3, 3, 0, 4, 5, 5, 6, 6, 7, 7, 4, 0, 4, 1, 5, 2, 6, 3, 7];
+      var p = e.geo.attributes.position.array, n = p.length / 108, out = new Float32Array(n * 72);
+      for (var m = 0; m < n; m++) {
+        var b = m * 108, w = m * 72;
+        for (var j = 0; j < 24; j++) {
+          var s = b + V[EDGES[j]] * 3;
+          out[w + j * 3] = p[s]; out[w + j * 3 + 1] = p[s + 1]; out[w + j * 3 + 2] = p[s + 2];
+        }
+      }
+      e.edges = new THREE.BufferGeometry();
+      e.edges.setAttribute('position', new THREE.BufferAttribute(out, 3));
+    } else {
+      e.edges = new THREE.EdgesGeometry(e.geo, 30);
+    }
+    keptGeometry(e.edges);
+    return e.edges;
+  }
 
   // --- selection boxes ------------------------------------------------------
   // each is { point, rx, ry (horizontal half-extents along G-code X and Y),
@@ -2851,11 +3158,7 @@ var NSO_MICROSCOPE = (function () {
     }
     var okeys = Object.keys(doc.groups || {});
     currentSelection.forEach(function (o) {
-      var geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(o.positions), 3));
-      geo.translate(-doc.cx, -doc.cy, 0);
-      geo.rotateX(-Math.PI / 2);
-      geo.computeVertexNormals();
+      var geo = soupGeometry(viewPositions(o.positions));
       var mesh = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({
         color: colorForGroup(o.name, Math.max(0, okeys.indexOf(o.name))),
         metalness: 0.05, roughness: 0.4,
@@ -2866,21 +3169,31 @@ var NSO_MICROSCOPE = (function () {
     });
   }
 
+  /**
+   * Moves as line-segment positions in view space: toThree(x - cx, y - cy, z)
+   * for each end, written straight into the array (a hover, a highlight or an
+   * isolation of a whole slice is hundreds of thousands of them; a Vector3 per
+   * end was a tenth of a second).
+   */
+  function segPositions(segs) {
+    var out = new Float32Array(segs.length * 6), cx = doc.cx, cy = doc.cy;
+    for (var i = 0, w = 0; i < segs.length; i++, w += 6) {
+      var s = segs[i];
+      out[w] = s.x0 - cx; out[w + 1] = s.z; out[w + 2] = -(s.y0 - cy);
+      out[w + 3] = s.x1 - cx; out[w + 4] = s.z; out[w + 5] = -(s.y1 - cy);
+    }
+    return out;
+  }
+
   /** Moves as line segments, the overview's own way of drawing them. */
   function lineMesh(segs, color, faint) {
-    var positions = new Float32Array(segs.length * 6);
-    segs.forEach(function (s, i) {
-      var p0 = toThree(s.x0 - doc.cx, s.y0 - doc.cy, s.z);
-      var p1 = toThree(s.x1 - doc.cx, s.y1 - doc.cy, s.z);
-      positions.set([p0.x, p0.y, p0.z, p1.x, p1.y, p1.z], i * 6);
-    });
     var geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute('position', new THREE.BufferAttribute(segPositions(segs), 3));
     var mesh = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({
       color: color, transparent: !!faint, opacity: faint ? 0.35 : 1.0
     }));
     mesh.userData.segs = segs;
-    return mesh;
+    return indexLines(mesh);
   }
 
   /**
@@ -3084,6 +3397,21 @@ var NSO_MICROSCOPE = (function () {
   function shownSegments() {
     if (!doc || doc.kind !== 'toolpath') return [];
     return doc.segments.filter(segShown);
+  }
+
+  /**
+   * shownSegments() for the hover, which asks on every move: kept until what
+   * is drawn changes (the document, the Features list, what is cleared from
+   * view, the slider), with each piece's share kept as it is first asked for.
+   * Read only - a caller hands on a copy.
+   */
+  var shownKept = null;
+  function shownMemo() {
+    var key = [featureSig(), CLEARED.size, zr ? zr.lo + ':' + zr.hi : ''].join('/');
+    if (!shownKept || shownKept.doc !== doc || shownKept.cleared !== CLEARED || shownKept.key !== key) {
+      shownKept = { doc: doc, cleared: CLEARED, key: key, list: shownSegments(), byObj: new Map() };
+    }
+    return shownKept;
   }
 
   function clipPlanes() { return view ? view.clip : []; }
@@ -3356,14 +3684,9 @@ var NSO_MICROSCOPE = (function () {
         mesh.material.emissive = new THREE.Color(0x551010);
         g.add(mesh);
       } else {
-        var pos = new Float32Array(segs.length * 6);
-        segs.forEach(function (s, i) {
-          var p0 = toThree(s.x0 - doc.cx, s.y0 - doc.cy, s.z), p1 = toThree(s.x1 - doc.cx, s.y1 - doc.cy, s.z);
-          pos.set([p0.x, p0.y, p0.z, p1.x, p1.y, p1.z], i * 6);
-        });
         var lg = new THREE.BufferGeometry();
-        lg.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-        g.add(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: HIGHLIGHT_COLOR })));
+        lg.setAttribute('position', new THREE.BufferAttribute(segPositions(segs), 3));
+        g.add(indexLines(new THREE.LineSegments(lg, new THREE.LineBasicMaterial({ color: HIGHLIGHT_COLOR }))));
       }
       return;
     }
@@ -3707,7 +4030,7 @@ var NSO_MICROSCOPE = (function () {
 
   function microscopeGeometry(asSolid) {
     if (!doc || !currentSelection.length) return null;
-    var positions;
+    var positions, ids = null;
     if (asSolid) {
       var sb = solidOfSelection();
       if (!sb || !sb.positions.length) return null;
@@ -3722,6 +4045,7 @@ var NSO_MICROSCOPE = (function () {
       var built = window.NSOGcodeLines.buildLineGeometry(moves);
       if (!built.positions.length) return null;
       positions = built.positions;
+      ids = built;
     } else {
       var soups = currentSelection.map(shownPositions);
       var total = soups.reduce(function (a, p) { return a + p.length; }, 0);
@@ -3732,6 +4056,8 @@ var NSO_MICROSCOPE = (function () {
     }
     var geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    // which move each prism is (a pull keeps them: plate 2 draws the copy from these very prisms)
+    if (ids) { geo.userData.moveIds = ids.moveIds; geo.userData.trisPerMove = ids.trisPerMove; }
     return geo;
   }
 
@@ -4170,13 +4496,17 @@ var NSO_MICROSCOPE = (function () {
     if (!doc || !currentSelection.length) return null;
     var box = new THREE.Box3();
     if (doc.kind === 'toolpath') {
-      currentSelection.forEach(function (s) {
-        var w = (s.w || 0) / 2;
-        box.expandByPoint(toThree(s.x0 - doc.cx - w, s.y0 - doc.cy - w, s.z - w));
-        box.expandByPoint(toThree(s.x0 - doc.cx + w, s.y0 - doc.cy + w, s.z + w));
-        box.expandByPoint(toThree(s.x1 - doc.cx - w, s.y1 - doc.cy - w, s.z - w));
-        box.expandByPoint(toThree(s.x1 - doc.cx + w, s.y1 - doc.cy + w, s.z + w));
-      });
+      // each move's ends, its half width out on every axis, through toThree's
+      // (x, y, z) -> (x, z, -y): the box of those points, axis by axis
+      var x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+      for (var i = 0; i < currentSelection.length; i++) {
+        var s = currentSelection[i], w = (s.w || 0) / 2;
+        var ax = s.x0 - doc.cx, bx = s.x1 - doc.cx, ay = s.y0 - doc.cy, by = s.y1 - doc.cy;
+        x0 = Math.min(x0, ax - w, bx - w); x1 = Math.max(x1, ax + w, bx + w);
+        y0 = Math.min(y0, s.z - w); y1 = Math.max(y1, s.z + w);
+        z0 = Math.min(z0, -(ay + w), -(by + w)); z1 = Math.max(z1, -(ay - w), -(by - w));
+      }
+      if (x0 <= x1) box.set(new THREE.Vector3(x0, y0, z0), new THREE.Vector3(x1, y1, z1));
     } else {
       currentSelection.forEach(function (o) {
         var b = o.bounds;
