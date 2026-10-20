@@ -1401,9 +1401,10 @@ var NSO_MICROSCOPE = (function () {
     if (mode === 'select') {
       var tb2 = tempBoxAt(oh.point);
       t = selectByBox([gcodeBoxOf(tb2)]);
-      return t.length ? { items: t, source: 'box', point: oh.point, box: tb2, label: 'region' } : null;
+      return t.length ? { items: t, source: 'box', point: oh.point, box: tb2, label: 'region', stand: oh.box ? 'box' : null } : null;
     }
-    return { items: [oh.obj], source: 'pick', point: oh.point, label: 'piece' };
+    // stand: 'box' when the piece's box answered for its surface (a big piece, its tree still building)
+    return { items: [oh.obj], source: 'pick', point: oh.point, label: 'piece', stand: oh.box ? 'box' : null };
   }
 
   /** A press here: the selection when it is under the pointer, else what the mode takes. */
@@ -1812,7 +1813,7 @@ var NSO_MICROSCOPE = (function () {
 
   function onPressCapture(e) {
     var v = view;
-    hoverPending = null;                                    // a press is newer than any move still waiting for its hover
+    hoverPending = null;                                    // the press picks for itself (pressTarget); a move still waiting is not drawn after it
     if (pull && pull.touch) pull.cancelled = true;          // a second finger: the pinch's, not a click's
     if (v) v.platePress = null;
     if (!v || e.button !== 0 || pull) return;
@@ -5135,7 +5136,12 @@ var NSO_MICROSCOPE = (function () {
     openPicker: openPicker,
     setMode: function (m) { setMode(m); },
     /** What the outline under the pointer stands for: { source, count, label } or null. */
-    hoverInfo: function () { return hoverTgt ? { source: hoverTgt.source, count: hoverTgt.items.length, label: hoverTgt.label } : null; },
+    hoverInfo: function () {
+      if (!hoverTgt) return null;
+      var o = { source: hoverTgt.source, count: hoverTgt.items.length, label: hoverTgt.label };
+      if (hoverTgt.stand) o.stand = hoverTgt.stand;     // 'box': the piece's box stood in for its surface
+      return o;
+    },
     isIsolated: function () { return isolated; },
     pressTargetAt: function (x, y) { var t = pressTarget({ clientX: x, clientY: y }); return t ? { source: t.source, count: t.items.length, selected: !!t.selected } : null; },
     mode: function () { return mode; },

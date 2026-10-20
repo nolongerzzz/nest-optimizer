@@ -555,12 +555,19 @@ withApp(async (page, logs) => {
   console.log('\n=== 9. a big piece, its tree still building: the hover reports anyway ===');
   {
     for (const [m, source] of [['piece', 'pick'], ['select', 'box']]) {
-      // the pointer off the canvas first: a move still waiting for its hover is dropped
-      // there, and not answered over the new sheet - its raycast would ask for the tree
+      // the pointer off the canvas first, onto one of G-scope's own buttons (the canvas
+      // fills the window, so a corner is still the canvas): a move still waiting for its
+      // hover is dropped there, not answered over the new sheet - that ray would ask
+      // nso_bvh.js for the sheet's tree before the check does
       const off = await page.evaluate(() => { const c = NSO_MICROSCOPE.getView().renderer.domElement;
-        for (const [x, y] of [[5, 5], [5, 200], [200, 5], [5, innerHeight - 5]]) if (document.elementFromPoint(x, y) !== c) return [x, y];
+        for (const id of ['ms-btn-frame', 'ms-close', 'ms-btn-open', 'ms-hint-badge']) {
+          const el = document.getElementById(id), b = el && el.getBoundingClientRect();
+          if (!b || !b.width || !b.height) continue;
+          const x = b.left + b.width / 2, y = b.top + b.height / 2, hit = document.elementFromPoint(x, y);
+          if (hit && hit !== c && !c.contains(hit)) return { at: [x, y], id };
+        }
         return null; });
-      if (off) await page.mouse.move(off[0], off[1]);
+      if (off) await page.mouse.move(off.at[0], off.at[1]);
       await page.waitForTimeout(80);
       // a fresh sheet for each mode: a new geometry, so no tree for it yet
       // a flat 20 mm sheet of 400,000 triangles: big enough that nso_bvh.js's hover
@@ -580,12 +587,15 @@ withApp(async (page, logs) => {
       const at = await page.evaluate(() => { const M = NSO_MICROSCOPE, d = M.getDoc(), b = d.objects[0].bounds;
         return window.__t.pxOf ? window.__t.pxOf((b.minX + b.maxX) / 2 + 2, (b.minY + b.maxY) / 2 + 1, b.maxZ) : null; });
       const tree0 = await page.evaluate(() => { const m = NSO_MICROSCOPE.getView().overviewMeshes.Sheet; return !!NSO_BVH.peek(m.geometry.attributes.position.array); });
-      await page.mouse.move(at[0] - 30, at[1] - 20);
-      await page.mouse.move(at[0], at[1], { steps: 3 });
+      // ONE move, from the button straight onto the sheet: the first ray over the canvas
+      // since the sheet opened, answered at once (the last hover is long past) - so the
+      // tree is first asked for by this very ray, and cannot be there to answer it
+      await page.mouse.move(at[0], at[1]);
       const hv = await waitHover(page);
       const tree1 = await page.evaluate(() => { const m = NSO_MICROSCOPE.getView().overviewMeshes.Sheet; return !!NSO_BVH.peek(m.geometry.attributes.position.array); });
-      check((m === 'piece' ? 'Piece' : 'Region') + ': hover over the big piece reports while its tree is still building (none when the pointer came)',
-        !tree0 && !!hv.info && hv.info.source === source && hv.info.count >= 1, hoverSays(hv) + '; tree before / after: ' + tree0 + ' / ' + tree1);
+      check((m === 'piece' ? 'Piece' : 'Region') + ': hover over the big piece reports while its tree is still building (none when the pointer came) - its box answered',
+        !!off && !tree0 && !!hv.info && hv.info.source === source && hv.info.count >= 1 && hv.info.stand === 'box',
+        hoverSays(hv) + '; pointer off the canvas on #' + (off ? off.id : '(no button found)') + '; tree before / after: ' + tree0 + ' / ' + tree1);
       await page.mouse.move(at[0] - 200, at[1] - 200);
     }
   }

@@ -162,7 +162,10 @@ answers within a frame. Nothing is drawn differently for it.
   then takes where the ray enters the piece's bounding box (`objectHitAt`), as
   a drag holds such a piece, until the tree is ready. A press asks without
   the hover flag and gets the real surface. `gscope:select` holds it on a
-  400,000-triangle sheet with no tree when the pointer comes.
+  400,000-triangle sheet with no tree when the pointer comes: one move from a
+  G-scope button straight onto the sheet, so that ray is the first to ask for
+  the tree, and the outline must say the box answered (`hoverInfo().stand`
+  is `'box'`).
 - **The pointer's last move always gets its hover, and no older move after
   it.** G-scope hovers at most once per 40 ms (`HOVER_EVERY`). A move inside
   the window is kept as the one pending (a newer move replaces it), and ONE
