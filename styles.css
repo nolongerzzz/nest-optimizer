@@ -1261,6 +1261,14 @@ select:focus, input:focus {
 .cut-miter-steps { grid-column: 1; grid-row: 2; display: flex; justify-content: center; gap: 8px; margin-top: 2px; }
 .cut-miter-steps .btn { flex: 0 0 46px; width: 46px; padding: 7px 0; font-size: 16px; line-height: 1;
   touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+/* The bevel dial (app-cut.js, cutWireBevelDial): the Mitre wheel's grid, a
+   third row for Plumb under the dial. The piece is drawn side-on, a faint
+   arrow to its far end; the dot is the blade's top; the darts are #229's. */
+.cut-bevel .cut-plumb { grid-column: 1; grid-row: 3; }
+#edit-card .cut-bevel .cut-plumb { margin-top: 4px; }
+.cut-bevel-piece { fill: none; stroke: rgba(148, 163, 184, 0.6); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.cut-bevel-top { fill: #ffc83d; }
+.cut-bevel-dart { fill: #ffc83d; stroke: #1a1d21; stroke-width: 1; cursor: pointer; }
 
 .cut-readout {
   font-size: 12px;

@@ -243,12 +243,15 @@ withApp(async (page, logs) => {
       'btn-yaw-left', 'btn-yaw-right', 'btn-yaw-left-90', 'btn-yaw-right-90'].filter(id => document.getElementById(id)));
     check('no Open / Close, no Cut X / Cut Z, no yaw buttons', gone.length === 0, gone.join(', ') || 'none');
     // The card, top to bottom: the mitre dial (with its typed box and
-    // Square, and the − / + buttons under it), the slider, ← number →, Cut. (The right-side-out offer is
+    // Square, and the − / + buttons under it), the bevel dial (its box, − / +
+    // and Plumb), the slider, ← number →, Cut. (The right-side-out offer is
     // hidden until a Cut refuses an inside-out piece.)
     const order = await page.evaluate(() => [...document.querySelectorAll('#cutter-tools button, #cutter-tools input, #cutter-tools svg')]
       .filter(e => !e.hidden).map(e => e.id));
-    check('the Cut card is: mitre dial, − / +, slider, ← number →, Cut',
-      order.join(' ') === 'cut-miter-dial cut-miter-deg btn-cut-square btn-cut-miter-minus btn-cut-miter-plus cut-slider btn-cut-nudge-m cut-mm btn-cut-nudge-p btn-cut',
+    check('the Cut card is: mitre dial, − / +, bevel dial, − / +, Plumb, slider, ← number →, Cut',
+      order.join(' ') === 'cut-miter-dial cut-miter-deg btn-cut-square btn-cut-miter-minus btn-cut-miter-plus ' +
+        'cut-bevel-dial cut-bevel-deg btn-cut-bevel-minus btn-cut-bevel-plus btn-cut-plumb ' +
+        'cut-slider btn-cut-nudge-m cut-mm btn-cut-nudge-p btn-cut',
       order.join(' '));
     const cards = await page.evaluate(() => ({
       cut: !!document.querySelector('.vp-shell-col > #menu-cut'), crop: !!document.querySelector('.vp-shell-col > #menu-crop'),

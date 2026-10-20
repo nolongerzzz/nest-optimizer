@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Nest Optimizer – Smart Plate Packing for 3D Printing</title>
-  <link rel="stylesheet" href="styles.css?v=boolw1" />
+  <link rel="stylesheet" href="styles.css?v=bevel1" />
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/loaders/STLLoader.js"></script>
@@ -561,6 +561,39 @@
               <button id="btn-cut-miter-minus" class="btn btn-secondary" type="button" aria-label="Mitre 1 degree less" title="Mitre −1° (Shift: 0.1°, Alt: 5°). Hold to repeat.">−</button>
               <button id="btn-cut-miter-plus" class="btn btn-secondary" type="button" aria-label="Mitre 1 degree more" title="Mitre +1° (Shift: 0.1°, Alt: 5°). Hold to repeat.">+</button>
               </div>
+              </div>
+              <!-- Bevel: the blade's lean off plumb, about its own horizontal line
+                   (app-cut.js, cutWireBevelDial). Seen end-on, far end to the right. -->
+              <div class="cut-miter cut-bevel">
+              <svg id="cut-bevel-dial" class="cut-dial" viewBox="0 0 100 100" width="104" height="104"
+                   role="slider" tabindex="0" aria-label="Bevel, degrees" aria-valuemin="-90" aria-valuemax="90" aria-valuenow="0">
+                <title>Bevel: the blade's lean off plumb. Positive tips the top of the blade toward the piece's far end. Drag round the rail (it rests on the painted ticks), click a dart or press an arrow key for 1° (Shift: 0.1°).</title>
+                <circle class="cut-dial-rail" cx="50" cy="50" r="40"></circle>
+                <g class="cut-dial-ticks">
+                  <line x1="50" y1="6" x2="50" y2="14"></line><line x1="94" y1="50" x2="86" y2="50"></line>
+                  <line x1="6" y1="50" x2="14" y2="50"></line>
+                  <line x1="81.1" y1="18.9" x2="77.6" y2="22.4"></line><line x1="18.9" y1="18.9" x2="22.4" y2="22.4"></line>
+                </g>
+                <path class="cut-bevel-piece" d="M24 50 H74 M70 46 L75 50 L70 54"></path>
+                <g id="cut-bevel-turn" transform="rotate(0 50 50)">
+                  <line class="cut-dial-blade" x1="50" y1="22" x2="50" y2="78"></line>
+                  <circle class="cut-bevel-top" cx="50" cy="22" r="3"></circle>
+                </g>
+                <g id="cut-bevel-darts" transform="rotate(0 50 50)">
+                  <path class="cut-bevel-dart" data-dir="-1" d="M36 10 L45 4.5 L45 15.5 Z"></path>
+                  <path class="cut-bevel-dart" data-dir="1" d="M64 10 L55 4.5 L55 15.5 Z"></path>
+                </g>
+                <text id="cut-bevel-dial-deg" class="cut-dial-deg" x="50" y="40" text-anchor="middle">0°</text>
+              </svg>
+              <div class="cut-miter-side">
+              <span class="hint">Bevel</span>
+              <input type="number" id="cut-bevel-deg" class="cut-no-spin" min="-90" max="90" step="0.1" value="0" aria-label="Bevel, degrees" title="The blade's lean off plumb, -90 to 90. 0 = no lean; positive tips the top of the blade toward the piece's far end.">
+              </div>
+              <div class="cut-miter-steps" role="group" aria-label="Bevel, step">
+              <button id="btn-cut-bevel-minus" class="btn btn-secondary" type="button" aria-label="Bevel 1 degree less" title="Bevel −1°: the top of the blade toward the near end (Shift: 0.1°, Alt: 5°). Hold to repeat.">−</button>
+              <button id="btn-cut-bevel-plus" class="btn btn-secondary" type="button" aria-label="Bevel 1 degree more" title="Bevel +1°: the top of the blade toward the far end (Shift: 0.1°, Alt: 5°). Hold to repeat.">+</button>
+              </div>
+              <button id="btn-cut-plumb" class="btn btn-secondary cut-plumb" type="button" title="Set the bevel that stands the blade vertical on the plate, whatever pose the piece came with. The readout shows the bevel it applied.">Plumb</button>
               </div>
               <input type="range" id="cut-slider" min="1" max="99" step="0.1" value="50" aria-label="Blade position along the piece, mm" />
               <div class="edit-row cut-mm-row">
@@ -1689,7 +1722,7 @@
 
 
 
-  <script src="app-cut.js?v=bigmeshb10"></script>
+  <script src="app-cut.js?v=bevel1"></script>
   <script src="app-finish.js?v=boolw1"></script>
   <script src="app-sculpt.js?v=pose1"></script>
   <script src="app-extend.js?v=scale1"></script>

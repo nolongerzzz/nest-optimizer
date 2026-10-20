@@ -131,6 +131,16 @@ function resolveAxis(model) {
 // frame into the piece's own frame. Square, both are null and the cut frame
 // is the piece's own frame, bit for bit.
 //
+// THE BEVEL. state.cutBevelDeg leans the blade off plumb, -90..90; 0 = no
+// lean. After the mitre has turned it, the blade is leaned about its own
+// horizontal line (in the blade, square to the plate vertical), and a
+// positive bevel tips the top of the blade toward the piece's far end (the
+// high end of its travel axis). `turn` and `back` then hold the mitre and the
+// bevel together; at Bevel 0 the lean is not applied at all, so the cut
+// frame is the mitre's own, bit for bit. A blade lying flat (a piece stood
+// on end, square) has no horizontal line: it leans about the cut frame's
+// next axis, turned by the mitre, so the mitre picks the way it leans.
+//
 // `mm` is the plane's distance from its low end along the BLADE'S OWN TRAVEL
 // AXIS: the plane's normal, which is the long axis when square and the long
 // axis turned by the mitre otherwise. The low end is the piece's extreme
@@ -157,6 +167,17 @@ const CUT_MITER_STEP_SHIFT_DEG = 0.1;
 const CUT_MITER_STEP_ALT_DEG = 5;
 const CUT_MITER_HOLD_MS = 400;
 const CUT_MITER_REPEAT_MS = 100;
+// The bevel dial's drag (as the rotate rings' since #229): a press is a click
+// until the pointer has travelled CUT_BEVEL_CLICK_SLOP_PX, and while dragging
+// the bevel sits ON a painted tick (every CUT_BEVEL_DETENT_DEG) inside
+// CUT_BEVEL_SNAP_WITHIN_DEG of it. A click on a dart, or an arrow key, is
+// 1 degree, 0.1 with Shift.
+const CUT_BEVEL_MAX_DEG = 90;
+const CUT_BEVEL_DETENT_DEG = 45;
+const CUT_BEVEL_SNAP_WITHIN_DEG = 3;
+const CUT_BEVEL_CLICK_SLOP_PX = 4;
+const CUT_BEVEL_STEP_DEG = 1;
+const CUT_BEVEL_STEP_SHIFT_DEG = 0.1;
 
 function cutMeshOf(m) {
   const placed = (state.placed || []).find(function (p) { return p && p.sourceId === m.id && p.mesh; });
@@ -224,25 +245,55 @@ function cutFrame(model) {
   }
   const length = bbox.max[axis] - bbox.min[axis];
   if (!(length > 0)) return null;
-  const deg = cutMiterDeg();
+  const deg = cutMiterDeg(), bevel = cutBevelDeg();
   let turn = null, back = null;
   // The blade's travel axis in the piece's frame, and the piece's extent
   // along it: `origin` is its low end, `span` its length (the piece's own
   // when square).
   const normal = new THREE.Vector3(axis === 'x' ? 1 : 0, axis === 'y' ? 1 : 0, axis === 'z' ? 1 : 0);
   let origin = bbox.min[axis], span = length;
+  // The plate vertical, in the piece's own frame.
+  const up = toLocal ? new THREE.Vector3(0, 1, 0).transformDirection(toLocal) : new THREE.Vector3(0, 1, 0);
   if (deg) {
-    // The plate vertical, in the piece's own frame.
-    const up = toLocal ? new THREE.Vector3(0, 1, 0).transformDirection(toLocal) : new THREE.Vector3(0, 1, 0);
     turn = cutTurnMatrix(up, deg);
     back = cutTurnMatrix(up, -deg);
     normal.applyMatrix4(back);
+  }
+  if (bevel) {
+    const lean = cutLeanBasis(normal, up, axis, back);
+    const B = cutTurnMatrix(lean.a, bevel);
+    back = back ? B.clone().multiply(back) : B;
+    const unB = cutTurnMatrix(lean.a, -bevel);
+    turn = turn ? turn.clone().multiply(unB) : unB;
+    normal.applyMatrix4(B);
+  }
+  if (turn) {
     const ext = cutExtentAlong(m.geometry.attributes.position, normal);
     if (ext && ext.hi > ext.lo) { origin = ext.lo; span = ext.hi - ext.lo; }
   }
   const lim = cutEndLimits(span);
   return { plateAxis: plateAxis, axis: axis, bbox: bbox, span: span, origin: origin, normal: normal,
-           lo: lim.lo, hi: lim.hi, mesh: mesh, deg: deg, turn: turn, back: back };
+           lo: lim.lo, hi: lim.hi, mesh: mesh, deg: deg, bevel: bevel, up: up, turn: turn, back: back };
+}
+
+/** The blade's lean, for the travel axis `n` (piece frame, after the mitre)
+    and the plate vertical `up` there: `u`, the blade's top (the vertical
+    seen in the blade), and `a = u x n`, its horizontal line. A turn by +b
+    about `a` carries u toward n: the top toward the far end. `s` is n.up and
+    `c` is u.up, so a bevel of atan2(s, c) stands the blade plumb. Flat (n
+    along up), `u` is the cut frame's next axis turned by the mitre `back`. */
+function cutLeanBasis(n, up, axis, back) {
+  const s = n.dot(up);
+  const u = up.clone().addScaledVector(n, -s);
+  let c = u.length();
+  if (c > 1e-6) u.divideScalar(c);
+  else {
+    const k = ['x', 'y', 'z'].indexOf(axis), j = (k + 1) % 3;
+    u.set(j === 0 ? 1 : 0, j === 1 ? 1 : 0, j === 2 ? 1 : 0);
+    if (back) u.applyMatrix4(back);
+    c = 0;
+  }
+  return { u: u, a: new THREE.Vector3().crossVectors(u, n).normalize(), s: s, c: c };
 }
 
 /** The lowest and highest n.v over the position attribute's vertices: the
@@ -273,6 +324,15 @@ function cutExtentAlong(attr, n) {
 function cutMiterDeg() {
   const t = Math.round((Number(state.cutMiterDeg) || 0) * 10);
   return (((t % 3600) + 3600) % 3600) / 10;
+}
+
+/** The bevel in degrees on a 0.1 grid, -90..90; 0 = no lean (plumb on a
+    piece that lies as it was drawn). Clamped, not wrapped: past 90 the blade
+    would be the same plane again, upside down. */
+function cutBevelDeg() {
+  const t = Math.round((Number(state.cutBevelDeg) || 0) * 10);
+  const lim = CUT_BEVEL_MAX_DEG * 10;
+  return (Math.min(lim, Math.max(-lim, t)) / 10) || 0;
 }
 
 // The plane's distance from the low end for fraction t, on the grid and
@@ -313,7 +373,7 @@ function getCutPlaneLocal(model) {
   // n, that is the coordinate `origin + mm` (square: the piece's own).
   const out = { axis: f.axis, plateAxis: f.plateAxis, plane: f.origin + mm, mm: mm, bbox: f.bbox, span: f.span,
                 t: mm / f.span, origin: f.origin, lo: f.lo, hi: f.hi, localBox: f.bbox,
-                deg: f.deg, turn: f.turn, frame: f.back };
+                deg: f.deg, bevel: f.bevel, turn: f.turn, frame: f.back };
   if (f.turn) {
     const b = f.bbox, c = new THREE.Vector3(), box = new THREE.Box3();
     for (let i = 0; i < 8; i++) {
@@ -369,16 +429,66 @@ function cutPivotLocal(f, t) {
     is held unsnapped through the turn, so a run of 0.1 steps does not walk
     the plane off its pivot; the readout snaps it, as ever. */
 function setCutMiter(deg) {
+  cutTurnAboutPivot(function () {
+    state.cutMiterDeg = Number(deg) || 0;
+    state.cutMiterDeg = cutMiterDeg();
+  });
+}
+
+/** Set the bevel (degrees off plumb, -90..90; positive tips the top of the
+    blade toward the piece's far end), to the nearest 0.1. The blade leans
+    about the same pivot the mitre turns it about. */
+function setCutBevel(deg) {
+  cutTurnAboutPivot(function () {
+    state.cutBevelDeg = Number(deg) || 0;
+    state.cutBevelDeg = cutBevelDeg();
+  });
+}
+
+// Runs `change` (a new mitre or bevel) with the plane held on its pivot.
+function cutTurnAboutPivot(change) {
   const m = getActiveModel();
-  const was = cutMiterDeg();
+  const was = cutMiterDeg() + '|' + cutBevelDeg();
   const f0 = m ? cutFrame(m) : null;
   const pivot = f0 ? cutPivotLocal(f0, state.cutT == null ? 0.5 : state.cutT) : null;
-  state.cutMiterDeg = Number(deg) || 0;
-  state.cutMiterDeg = cutMiterDeg();
-  const f1 = pivot && cutMiterDeg() !== was ? cutFrame(m) : null;
+  change();
+  const f1 = pivot && cutMiterDeg() + '|' + cutBevelDeg() !== was ? cutFrame(m) : null;
   if (f1) state.cutT = Math.min(1, Math.max(0, (f1.normal.dot(pivot) - f1.origin) / f1.span));
   syncCutUI();
   updateCutHelper();
+}
+
+/** The bevel that stands the blade plumb - vertical on the plate - at the
+    present mitre, whatever pose or frame the piece came with; on the 0.1
+    grid. Null with no piece. */
+function cutPlumbBevelDeg(model) {
+  const m = model || getActiveModel();
+  const keep = state.cutBevelDeg;
+  state.cutBevelDeg = 0;
+  const f = m ? cutFrame(m) : null;
+  state.cutBevelDeg = keep;
+  if (!f) return null;
+  const lean = cutLeanBasis(f.normal, f.up, f.axis, f.back);
+  return (Math.round((Math.atan2(lean.s, lean.c) * 180) / Math.PI * 10) / 10) || 0;
+}
+
+/** PLUMB: the bevel that stands the blade vertical, applied, and said in the
+    readout until the blade is turned or leaned again. */
+function cutPlumb() {
+  const m = getActiveModel();
+  const deg = cutPlumbBevelDeg(m);
+  if (deg == null) return null;
+  setCutBevel(deg);
+  state.cutPlumb = { id: m.id, miter: cutMiterDeg(), bevel: cutBevelDeg() };
+  syncCutUI();
+  if (typeof setStatus === 'function') setStatus('Plumb: bevel ' + cutBevelDeg() + '° stands the blade vertical.');
+  return cutBevelDeg();
+}
+
+// Is the blade where PLUMB last put it, on the same piece?
+function cutIsPlumbed(m) {
+  const p = state.cutPlumb;
+  return !!(p && m && p.id === m.id && p.miter === cutMiterDeg() && p.bevel === cutBevelDeg());
 }
 
 function syncCutMiterUI() {
@@ -390,6 +500,28 @@ function syncCutMiterUI() {
   const dial = document.getElementById('cut-miter-dial');
   if (dial) dial.setAttribute('aria-valuenow', String(deg));
   const input = document.getElementById('cut-miter-deg');
+  if (input && document.activeElement !== input) input.value = String(deg);
+  syncCutBevelUI();
+}
+
+/* The bevel dial: the blade, seen end-on along its horizontal line with the
+   piece's far end to the right, turned by the bevel; the darts sit on the
+   painted tick nearest the blade's top, or ride the drag. */
+function syncCutBevelUI() {
+  const deg = cutBevelDeg();
+  const turn = document.getElementById('cut-bevel-turn');
+  if (turn) turn.setAttribute('transform', 'rotate(' + deg + ' 50 50)');
+  const darts = document.getElementById('cut-bevel-darts');
+  if (darts) {
+    const at = cutBevelDial.dragging ? deg : cutBevelTickNear(deg);
+    darts.setAttribute('transform', 'rotate(' + at + ' 50 50)');
+    darts.dataset.at = String(at);
+  }
+  const text = document.getElementById('cut-bevel-dial-deg');
+  if (text) text.textContent = deg + '°';
+  const dial = document.getElementById('cut-bevel-dial');
+  if (dial) dial.setAttribute('aria-valuenow', String(deg));
+  const input = document.getElementById('cut-bevel-deg');
   if (input && document.activeElement !== input) input.value = String(deg);
 }
 
@@ -426,7 +558,8 @@ function syncCutUI() {
     readout.textContent =
       'RED LINE @ ' + mm.toFixed(1) + ' mm (no kerf) -> ' +
       mm.toFixed(1) + ' mm | ' + (span - mm).toFixed(1) + ' mm  (' + axis.toUpperCase() + ')' +
-      (info.deg ? ', mitre ' + info.deg + '°' : '');
+      (info.deg ? ', mitre ' + info.deg + '°' : '') +
+      (info.bevel || cutIsPlumbed(m) ? ', bevel ' + info.bevel + '°' + (cutIsPlumbed(m) ? ' (plumb)' : '') : '');
   }
 }
 
@@ -508,6 +641,8 @@ function openCutter(tool) {
   state.editYawDragging = false;
   state.cutT = 0.5;
   state.cutMiterDeg = 0;
+  state.cutBevelDeg = 0;
+  state.cutPlumb = null;
   state.editId = null;
   state.selectedIndex = -1;
   if (state.controls) state.controls.enabled = true;
@@ -642,7 +777,98 @@ function cutWireMiterDial() {
   if (square) square.addEventListener('click', function () { setCutMiter(0); });
   cutWireMiterStep('btn-cut-miter-minus', -1);
   cutWireMiterStep('btn-cut-miter-plus', 1);
+  cutWireBevelDial();
   syncCutMiterUI();
+}
+
+/* The bevel dial, the rotate rings' widget (#229) on the card: a rail with a
+   painted tick every 45 degrees (-90..90), the blade's line through the
+   centre, and a pair of darts on the rail. At rest the darts sit on the tick
+   nearest the blade's top. A press on the rail is a click until the pointer
+   has travelled CUT_BEVEL_CLICK_SLOP_PX: released before that, a click on a
+   dart leans the blade 1 degree (0.1 with Shift) the way the dart points
+   and the darts stay on their tick. Past it, it is a dial: the bevel follows
+   the pointer's turn about the centre from where it was, the darts ride it,
+   and inside CUT_BEVEL_SNAP_WITHIN_DEG of a painted tick it sits on the
+   tick. The arrow keys step it as a dart does; the box, the − / + buttons
+   (1 degree, Shift 0.1, Alt 5) and Plumb are the other ways in. */
+const cutBevelDial = { dragging: false };
+
+function cutBevelTickNear(deg) {
+  return (Math.round(deg / CUT_BEVEL_DETENT_DEG) * CUT_BEVEL_DETENT_DEG) || 0;
+}
+
+/** A dragged bevel: on the tick inside the snap, else as the pointer says;
+    clamped to the range. */
+function cutBevelDetent(deg) {
+  const d = Math.min(CUT_BEVEL_MAX_DEG, Math.max(-CUT_BEVEL_MAX_DEG, deg));
+  const tick = cutBevelTickNear(d);
+  return Math.abs(d - tick) <= CUT_BEVEL_SNAP_WITHIN_DEG ? tick : d;
+}
+
+function cutWireBevelDial() {
+  const dial = document.getElementById('cut-bevel-dial');
+  if (!dial || dial.dataset.nsoWired === '1') return;
+  dial.dataset.nsoWired = '1';
+  let press = null;
+  function angleAt(ev) {
+    const r = dial.getBoundingClientRect();
+    const dx = ev.clientX - (r.left + r.width / 2), dy = ev.clientY - (r.top + r.height / 2);
+    return { a: (Math.atan2(dx, -dy) * 180) / Math.PI, centre: Math.hypot(dx, dy) < r.width * 0.18 };
+  }
+  dial.addEventListener('pointerdown', function (ev) {
+    if (ev.button !== 0) return;
+    const at = angleAt(ev);
+    if (at.centre) return;                                    // the centre is the readout, not the rail
+    const dart = ev.target && ev.target.closest ? ev.target.closest('[data-dir]') : null;
+    press = { x: ev.clientX, y: ev.clientY, lastA: at.a, raw: cutBevelDeg(), moved: false,
+              dir: dart ? Number(dart.getAttribute('data-dir')) : 0, fine: !!ev.shiftKey };
+    if (dial.setPointerCapture) { try { dial.setPointerCapture(ev.pointerId); } catch (e) { /* synthetic */ } }
+    if (dial.focus) dial.focus();
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
+  dial.addEventListener('pointermove', function (ev) {
+    if (!press) return;
+    if (!press.moved && Math.hypot(ev.clientX - press.x, ev.clientY - press.y) < CUT_BEVEL_CLICK_SLOP_PX) return;
+    press.moved = true;
+    cutBevelDial.dragging = true;
+    const at = angleAt(ev);
+    let d = at.a - press.lastA;
+    if (d > 180) d -= 360;
+    else if (d < -180) d += 360;
+    press.lastA = at.a;
+    press.raw = Math.min(CUT_BEVEL_MAX_DEG, Math.max(-CUT_BEVEL_MAX_DEG, press.raw + d));
+    setCutBevel(cutBevelDetent(press.raw));
+  });
+  const stop = function () {
+    const p = press;
+    press = null;
+    cutBevelDial.dragging = false;
+    if (p && !p.moved && p.dir) setCutBevel(cutBevelDeg() + p.dir * (p.fine ? CUT_BEVEL_STEP_SHIFT_DEG : CUT_BEVEL_STEP_DEG));
+    else syncCutBevelUI();                                     // the darts seat on a tick again
+  };
+  dial.addEventListener('pointerup', stop);
+  dial.addEventListener('pointercancel', stop);
+  dial.addEventListener('keydown', function (ev) {
+    const step = ev.shiftKey ? CUT_BEVEL_STEP_SHIFT_DEG : CUT_BEVEL_STEP_DEG;
+    if (ev.key === 'ArrowRight' || ev.key === 'ArrowUp') setCutBevel(cutBevelDeg() + step);
+    else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowDown') setCutBevel(cutBevelDeg() - step);
+    else if (ev.key === 'Home' || ev.key === '0') setCutBevel(0);
+    else return;
+    ev.preventDefault();
+    ev.stopPropagation();
+  });
+  const typed = document.getElementById('cut-bevel-deg');
+  if (typed) typed.addEventListener('change', function () {
+    const v = parseFloat(typed.value);
+    setCutBevel(isFinite(v) ? v : 0);
+  });
+  const plumb = document.getElementById('btn-cut-plumb');
+  if (plumb) plumb.addEventListener('click', function () { cutPlumb(); });
+  cutWireMiterStep('btn-cut-bevel-minus', -1, 'bevel');
+  cutWireMiterStep('btn-cut-bevel-plus', 1, 'bevel');
+  syncCutBevelUI();
 }
 
 /* One − / + button under the wheel. A press steps the mitre through
@@ -651,8 +877,10 @@ function cutWireMiterDial() {
    0.1, Alt 5. Held, it repeats at that size after CUT_MITER_HOLD_MS, every
    CUT_MITER_REPEAT_MS. A pointer press steps on pointerdown and the click that
    follows is ignored (detail > 0); a keyboard press (Enter / Space) and a
-   scripted .click() arrive as a click with detail 0 and step once. */
-function cutWireMiterStep(id, sign) {
+   scripted .click() arrive as a click with detail 0 and step once. With
+   `which` 'bevel' it steps the bevel the same way. */
+function cutWireMiterStep(id, sign, which) {
+  const bevel = which === 'bevel';
   const btn = document.getElementById(id);
   if (!btn) return;
   let wait = null, rep = null;
@@ -664,14 +892,17 @@ function cutWireMiterStep(id, sign) {
   const sizeOf = function (ev) {
     return ev.altKey ? CUT_MITER_STEP_ALT_DEG : ev.shiftKey ? CUT_MITER_STEP_SHIFT_DEG : CUT_MITER_STEP_DEG;
   };
-  const step = function (size) { setCutMiter(cutMiterDeg() + sign * size); };
+  const step = function (size) {
+    if (bevel) setCutBevel(cutBevelDeg() + sign * size);
+    else setCutMiter(cutMiterDeg() + sign * size);
+  };
   btn.addEventListener('pointerdown', function (ev) {
     if (ev.button !== 0) return;
     stop();
     // A number still being typed commits first. Its change event would
     // otherwise fire when this press takes the focus - after the step - and
     // put the typed angle back over it.
-    const typed = document.getElementById('cut-miter-deg');
+    const typed = document.getElementById(bevel ? 'cut-bevel-deg' : 'cut-miter-deg');
     if (typed && document.activeElement === typed) typed.blur();
     const size = sizeOf(ev);
     step(size);
@@ -971,6 +1202,7 @@ function updateCutHelper() {
   M.decompose(state.cutHelper.position, state.cutHelper.quaternion, state.cutHelper.scale);
   state.cutHelper.updateMatrixWorld(true);
   state.cutHelper.userData.cutDeg = info.deg || 0;
+  state.cutHelper.userData.cutBevel = info.bevel || 0;
   cutPlaceLine(state.cutHelper, info, mesh);
 }
 
