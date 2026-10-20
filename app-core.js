@@ -155,6 +155,7 @@ const UNDO_REPLACE_LABEL = {
   skinReplace: 'Undo: Skin reverted',
   textureReplace: 'Undo: Texture reverted',
   carveReplace: 'Undo: Carve reverted',
+  punchReplace: 'Undo: Punch reverted',
   scaleReplace: 'Undo: Scale reverted',
   deleteReplace: 'Undo: Delete reverted',
   brushReplace: 'Undo: Brush reverted',
