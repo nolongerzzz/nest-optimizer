@@ -1,4 +1,4 @@
-// ===================== Tube edge: Flare and Roll on the open end of a tube =====================
+// ===================== Tube edge: Reducer, Flare and Roll on the open end of a tube =====================
 // Headless: no DOM, no Three.js, no app state. Runs under node for the
 // self-test (tools/nso_tube_edge_test.js) and under a classic script tag in
 // the browser, where the Tube edge card (app-tube-edge.js) calls it.
@@ -67,6 +67,25 @@
 // run meets it at the trumpet's lip angle. A Roll has no lip direction to run
 // along and refuses a Run in words.
 //
+// REDUCER (NSO_TubeEdge.reducer, NSO_tubeEdgeReducer): the end defined by
+// its result. The end of the tube becomes a pipe of outside od2 and bore id2
+// after a transition of T mm (along the wall, as Flare's Length), then runs
+// straight on for R mm, parallel to the axis, and ends square and open. Each
+// face is built DIRECTLY from its own ring point to its own target - a cone
+// (Straight) or the ease-in tangent at the ring (Trumpet) - so the wall at the
+// run is (od2 - id2) / 2 exactly: nothing is carried, and there is no lip to
+// cut. Its wall square to the faces through the transition is measured and
+// held to nso_thickness.js's floor. od2 > Ø1 is an expander, < a reducer;
+// id2 at the tube's bore is Outside only, od2 at its Ø is Bore only.
+// FLARE is the reducer's wrapper: Way / Angle / Δr / Walls / Length / Run are
+// converted into od2 / id2 / T / R, the Ø each face's lip always had. One
+// face (Walls) was always two faces built directly, so it is the reducer's
+// direct section. Both is the reducer's carried section (Flare's only: the
+// moving face to its target, the other its offset a wall away, cut square to
+// the wall at T - the old lip cut, and the old run off it). The wrapper hands
+// the Δr over with the Ø it made, so the faces are built from the same
+// numbers to the bit: every Flare hash pinned before the reducer still holds.
+//
 // THE WELD. Every vertex of the two end loops keeps its own radial line: a
 // station of the new wall is that vertex moved by (Δr, Δh) along its own
 // radial direction and the axis. Station 0 IS the loop - the same float32
@@ -108,6 +127,7 @@ var NSO_TE_VOLUME_TOL = 5e-3;        // added volume vs Pappus
 var NSO_TE_MAX_TRIS = 2000000;
 var NSO_TE_CLEAR_EVALS = 4000000;    // clearance budget: distance evaluations
 var NSO_TE_CLEAR_RES_MM = 0.01;      // clearance: pieces this small (circumradius) are called on their centre
+var NSO_TE_SAME_MM = 1e-4;           // a reducer's new Ø this close to the tube's own is the tube's own (that face stays)
 
 var NSO_teF32 = (typeof Math.fround === 'function') ? Math.fround
   : function (x) { var a = new Float32Array(1); a[0] = x; return a[0]; };
@@ -580,6 +600,23 @@ function NSO_teFlareFaces(O, I, mid, t, u0, L, dr, th, prof) {
   return res;
 }
 
+/* One face of a reducer, built directly: from its ring point (v0, at the last
+   station pushed) dv across to v0 + dv at u0 + T. Straight: one cone line. Trumpet: the
+   ease-in v = v0 + dv (s / T)^2 along u = u0 + s, tangent to the wall at the
+   ring, stationed at equal turns of its tangent (Flare's trumpet, the same
+   sampling). A face with nowhere to go (dv under 1e-9 mm: its target is
+   where its own line already is) runs straight on along that line. */
+function NSO_teDirectFace(F, v0, dv, u0, T, prof) {
+  if (Math.abs(dv) <= 1e-9) { F.push([v0, u0 + T]); return; }
+  if (prof === 'straight') { F.push([v0 + dv, u0 + T]); return; }
+  var ad = Math.abs(dv), psE = Math.atan(2 * ad / T), pp = 2 * ad / T;
+  var rhoL = Math.pow(1 + pp * pp, 1.5) * T * T / (2 * ad), nst = Math.max(6, NSO_teArcSteps(rhoL, psE));
+  for (var k = 1; k <= nst; k++) {
+    var s = k === nst ? T : T * T * Math.tan(psE * k / nst) / (2 * ad);
+    F.push([v0 + dv * (s / T) * (s / T), u0 + s]);
+  }
+}
+
 /* opts as NSO_tubeEdgeRaw. Returns { ok, reason, O, I (local [v, u] lists,
    each from its own ring point), mid (local), ... }. */
 function NSO_teProfile(end, opts) {
@@ -589,64 +626,110 @@ function NSO_teProfile(end, opts) {
   if (u0 > 1e-9) O.push([0, u0]);
   if (u0 - ui > 1e-9) I.push([-t, u0]);
   var verb = opts.verb, run = NSO_teRun(opts);
-  if (!(run >= 0)) { res.reason = 'enter a run length in mm, 0 or more (0: no run past the lip)'; return res; }
+  if (!(run >= 0)) {
+    var rn = opts && opts.runMm;
+    res.reason = verb === 'reducer' && isFinite(+rn) && +rn < 0
+      ? 'a run of ' + NSO_teSignedDp(+rn, 1) + ' mm is refused - Run is a length along the axis, 0 or more (0: no run)'
+      : 'enter a run length in mm, 0 or more (0: no run past the lip)';
+    return res;
+  }
   res.runMm = run;
-  if (verb === 'flare') {
-    var L = +opts.length, prof = opts.profile === 'trumpet' ? 'trumpet' : 'straight', dr, walls = NSO_teWalls(opts);
-    if (!walls) { res.reason = 'Walls is Both, Outside only or Bore only'; return res; }
-    if (!(L > 0) || !isFinite(L)) { res.reason = 'enter a flare length in mm, more than 0'; return res; }
-    if (opts.dr != null && opts.dr !== '' && isFinite(+opts.dr)) dr = +opts.dr;
-    else if (opts.angle != null && opts.angle !== '' && isFinite(+opts.angle)) dr = L * Math.tan(NSO_teRad(+opts.angle));
-    else { res.reason = 'enter the flare\'s angle or its Δr'; return res; }
-    if (opts.direction === 'in' && dr > 0) dr = -dr;              // Way: In turns the same flare toward the axis
-    if (dr === 0) { res.reason = 'a 0° flare is no flare - give it an angle or a Δr: above 0 turns it out, below 0 in'; return res; }
-    var th = Math.atan2(Math.abs(dr), L);
-    if (NSO_teDeg(th) > NSO_TE_MAX_FLARE_DEG + 1e-9) {
-      res.reason = 'a ' + NSO_teFmt(NSO_teDeg(th), 1) + '° flare is past the ' + NSO_TE_MAX_FLARE_DEG + '° limit - the lip would stand out nearly flat. Use a Roll for a turned-over edge';
-      return res;
+  if (verb === 'reducer') {
+    // THE REDUCER (and Flare, its wrapper, which hands in opts._flare): the
+    // tube's end becomes a pipe of outside od2 and bore id2 after a transition
+    // of T mm along the wall, laid in the wall's own frame as Flare's Length
+    // always was. The run (Run mm on, parallel to the axis) is added by the
+    // treatment, from wherever the faces end.
+    var fl = opts._flare || null, prof = opts.profile === 'trumpet' ? 'trumpet' : 'straight', T;
+    if (fl) T = fl.lengthMm;
+    else {
+      var tv = opts.transitionMm;
+      if (tv == null || tv === '' || !isFinite(+tv)) { res.reason = 'enter a transition length in mm, 0 or more'; return res; }
+      T = +tv;
+      if (T < 0) { res.reason = 'a transition of ' + NSO_teSignedDp(T, 1) + ' mm is refused - Transition is a length along the tube, 0 or more'; return res; }
     }
-    res.flare = { lengthMm: L, drMm: dr, angleDeg: NSO_teDeg(th) * (dr < 0 ? -1 : 1), profile: prof, walls: walls, runMm: run };
-    if (walls !== 'both') {
-      // ONE FACE: the chosen face leaves its ring point (at u0) and stands dr
-      // off its own line at the lip, a cone or a trumpet; the other runs on
-      // along its own line, unmoved, to the same lip plane u0 + L. Nothing is
-      // carried, so there is no offset to cusp and no crease to go round.
-      var mv = walls === 'bore' ? I : O, keep = walls === 'bore' ? O : I, v0 = walls === 'bore' ? -t : 0;
-      var ow = NSO_teOneFaceWall(walls, t, dr, NSO_teNozzle(opts), ' at the lip');
-      res.oneFace = ow;
-      if (!ow.ok) { res.reason = ow.reason; return res; }
-      if (prof === 'straight') mv.push([v0 + dr, u0 + L]);
-      else {
-        var ad = Math.abs(dr), psE = Math.atan(2 * ad / L), pp = 2 * ad / L;
-        var rhoL = Math.pow(1 + pp * pp, 1.5) * L * L / (2 * ad), nst = Math.max(6, NSO_teArcSteps(rhoL, psE));
-        for (var k1 = 1; k1 <= nst; k1++) {
-          var s1 = k1 === nst ? L : L * L * Math.tan(psE * k1 / nst) / (2 * ad);
-          mv.push([v0 + dr * (s1 / L) * (s1 / L), u0 + s1]);
-        }
+    var cl = Math.cos(lean), sl = Math.sin(lean), Ro = end.Ro, Ri = end.Ri;
+    // a face's local v where it ends, u0 + T along the wall, for its radius there
+    var vAt = function (r) { return (r - Ro - (u0 + T) * sl) / cl; };
+    var num = function (x) { return (x == null || x === '' || !isFinite(+x)) ? null : +x; };
+    var od2 = num(opts.od2), id2 = num(opts.id2);
+    res.reducer = { od1Mm: 2 * Ro, id1Mm: 2 * Ri, transitionMm: T, runMm: run, profile: prof };
+    if (fl && opts.section === 'carried') {
+      // CARRIED (Flare's Both, from its wrapper only): the face on the bend's
+      // side - the outside turning out, the bore turning in - goes to its
+      // target by the profile, and the other is its offset a wall t away (round
+      // the cone's crease on an arc of radius t), cut square to the wall at
+      // u0 + T. That is the old path's lip cut, kept exactly: the other face
+      // ends where the offset meets that plane, not at a target of its own.
+      var dr = od2 != null ? opts._exact.dvO : opts._exact.dvI, th = Math.atan2(Math.abs(dr), T);
+      var off = od2 != null ? vAt(od2 / 2) - dr : vAt(id2 / 2) + t - dr;
+      if (!(Math.abs(off) <= 1e-6)) { res.reason = 'internal: Flare\'s lip Ø and its Δr disagree by ' + off + ' mm'; return res; }
+      res.flare = fl;
+      res.reducer.section = 'carried';
+      if (dr < 0) {
+        // INWARD, both faces: the outward construction mirrored across the
+        // mid-wall line, v -> -t - v. The bore is then the face on the bend's
+        // side (the cone's crease, the trumpet's reference curve) and stands
+        // |dr| in at the lip; the outside goes round it a wall away.
+        var Oo = [[0, u0]], Io = [[-t, u0]], Mo = [];
+        var mo = NSO_teFlareFaces(Oo, Io, Mo, t, u0, T, -dr, th, prof);
+        if (!mo.ok) { res.reason = mo.reason; return res; }
+        var mir = function (q) { return [-t - q[0], q[1]]; };
+        for (var q1 = 1; q1 < Io.length; q1++) O.push(mir(Io[q1]));
+        for (var q2 = 1; q2 < Oo.length; q2++) I.push(mir(Oo[q2]));
+        Mo.forEach(function (q) { mid.push(mir(q)); });
+        res.lipAngleDeg = mo.lipAngleDeg;
+        res.inward = true;
+      } else {
+        var mf = NSO_teFlareFaces(O, I, mid, t, u0, T, dr, th, prof);
+        if (!mf.ok) { res.reason = mf.reason; return res; }
+        res.lipAngleDeg = mf.lipAngleDeg;
       }
-      keep.push([keep[keep.length - 1][0], u0 + L]);
-      res.lipAngleDeg = NSO_teDeg(prof === 'straight' ? th : Math.atan(2 * Math.abs(dr) / L));
-      res.ok = true; res.O = O; res.I = I; res.mid = mid; res.u0 = u0; res.ui = ui; res.t = t; res.lean = lean; res.walls = walls;
-      return res;
-    }
-    if (dr < 0) {
-      // INWARD, both faces: the outward construction mirrored across the
-      // mid-wall line, v -> -t - v. The bore is then the face on the bend's
-      // side (the cone's crease, the trumpet's reference curve) and stands
-      // |dr| in at the lip; the outside goes round it a wall away.
-      var Oo = [[0, u0]], Io = [[-t, u0]], Mo = [];
-      var mo = NSO_teFlareFaces(Oo, Io, Mo, t, u0, L, -dr, th, prof);
-      if (!mo.ok) { res.reason = mo.reason; return res; }
-      var mir = function (q) { return [-t - q[0], q[1]]; };
-      for (var q1 = 1; q1 < Io.length; q1++) O.push(mir(Io[q1]));
-      for (var q2 = 1; q2 < Oo.length; q2++) I.push(mir(Oo[q2]));
-      Mo.forEach(function (q) { mid.push(mir(q)); });
-      res.lipAngleDeg = mo.lipAngleDeg;
-      res.inward = true;
     } else {
-      var mf = NSO_teFlareFaces(O, I, mid, t, u0, L, dr, th, prof);
-      if (!mf.ok) { res.reason = mf.reason; return res; }
-      res.lipAngleDeg = mf.lipAngleDeg;
+      // DIRECT: each face goes from its own ring point to its own target by the
+      // profile; nothing is carried, so there is no offset to cusp, no crease
+      // to go round and no lip to cut - the wall where they end is the targets'
+      // difference exactly. A face whose target is its own Ø stays on its line.
+      if (!(od2 > 0)) { res.reason = 'enter the new outside Ø in mm, more than 0'; return res; }
+      if (!(id2 > 0)) { res.reason = 'enter the new bore Ø in mm, more than 0'; return res; }
+      if (od2 === id2) {
+        res.reason = 'a new Ø' + NSO_teFmt(od2) + ' with a bore of Ø' + NSO_teFmt(id2) + ' leaves no wall - the outside must be larger than the bore';
+        return res;
+      }
+      if (od2 < id2) {
+        res.reason = 'the faces would cross - the new outside Ø' + NSO_teFmt(od2) + ' is inside the new bore Ø' + NSO_teFmt(id2) +
+          '; the outside must be larger than the bore';
+        return res;
+      }
+      var sameO = Math.abs(od2 - 2 * Ro) <= NSO_TE_SAME_MM, sameI = Math.abs(id2 - 2 * Ri) <= NSO_TE_SAME_MM;
+      if (T === 0 && !(sameO && sameI)) {
+        res.reason = 'transition 0: use Scale\'s ring rows for a step - Ø' + NSO_teFmt(2 * Ro) + ' / bore Ø' + NSO_teFmt(2 * Ri) + ' → Ø' + NSO_teFmt(od2) +
+          ' / bore Ø' + NSO_teFmt(id2) + ' with no length between them is a step, not a reducer. A reducer changes Ø over a transition longer than 0';
+        return res;
+      }
+      if (T === 0 && run === 0) { res.reason = 'nothing to make - no transition and no run, and the Ø and bore are the tube\'s own'; return res; }
+      // each face's move across the wall's frame, dv. From Flare, the Δr it was
+      // given, exactly (its Ø is that Δr laid off and read back as a radius,
+      // which may not give back the last bit), checked against the Ø
+      var dvO = vAt(sameO ? Ro : od2 / 2), dvI = vAt(sameI ? Ri : id2 / 2) + t;
+      if (fl) {
+        var oo = dvO - opts._exact.dvO, oi = dvI - opts._exact.dvI;
+        if (!(Math.abs(oo) <= 1e-6 && Math.abs(oi) <= 1e-6)) { res.reason = 'internal: Flare\'s lip Ø and its Δr disagree by ' + oo + ' / ' + oi + ' mm'; return res; }
+        dvO = opts._exact.dvO; dvI = opts._exact.dvI;
+      }
+      if (T > 0) { NSO_teDirectFace(O, 0, dvO, u0, T, prof); NSO_teDirectFace(I, -t, dvI, u0, T, prof); }
+      var ang = function (dv) { return T > 0 ? NSO_teDeg(prof === 'straight' ? Math.atan2(Math.abs(dv), T) : Math.atan(2 * Math.abs(dv) / T)) : 0; };
+      var aO = ang(dvO), aI = ang(dvI);
+      res.reducer.angleOuterDeg = aO; res.reducer.angleBoreDeg = aI; res.reducer.section = 'direct';
+      res.reducer.kind = !sameO ? (od2 < 2 * Ro ? 'reducer' : 'expander') : !sameI ? (id2 < 2 * Ri ? 'reducer' : 'expander') : 'straight';
+      res.reducer.faces = !sameO && !sameI ? 'both' : !sameO ? 'outside' : !sameI ? 'bore' : 'none';
+      if (fl) {
+        // Flare's Outside only / Bore only: today's one-face flare, which was
+        // always two faces built directly to the same lip plane
+        res.flare = fl; res.walls = fl.walls; res.oneFace = opts._oneFace;
+        res.lipAngleDeg = NSO_teDeg(prof === 'straight' ? Math.atan2(Math.abs(fl.drMm), T) : Math.atan(2 * Math.abs(fl.drMm) / T));
+      } else res.lipAngleDeg = Math.max(aO, aI);
+      res.direct = true;
     }
   } else if (verb === 'roll') {
     var rho = +opts.radius, Phi = +opts.angle;
@@ -677,7 +760,7 @@ function NSO_teProfile(end, opts) {
     res.beadCenterLocal = [rho, u0];
     res.lipAngleDeg = Phi;
   } else {
-    res.reason = 'choose Flare or Roll';
+    res.reason = 'choose Reducer, Flare or Roll';
     return res;
   }
   res.ok = true; res.O = O; res.I = I; res.mid = mid; res.u0 = u0; res.ui = ui; res.t = t; res.lean = lean;
@@ -741,6 +824,24 @@ function NSO_teOneFaceWallCheck(Om, Im) {
   }
   one(Om, Im); one(Im, Om);
   return { lo: lo, hi: hi, n: n };
+}
+
+/* A reducer's wall, square to its faces: every station of each face, the
+   ring points too, against the other face's whole polyline (the closest two
+   polylines come is at a station of one of them). at: where it is thinnest,
+   (r, h) in the meridian - h along the axis out from the end. */
+function NSO_teWallAlong(Om, Im) {
+  var lo = Infinity, hi = -Infinity, n = 0, at = null;
+  function one(A, B) {
+    for (var i = 0; i < A.length; i++) {
+      var best = Infinity;
+      for (var j = 0; j + 1 < B.length; j++) { var d = NSO_teSegDist(A[i], B[j], B[j + 1]).d; if (d < best) best = d; }
+      n++; if (best > hi) hi = best;
+      if (best < lo - 1e-9) { lo = best; at = { r: A[i][0], h: A[i][1] }; }
+    }
+  }
+  one(Om, Im); one(Im, Om);
+  return { lo: lo, hi: hi, n: n, at: at };
 }
 
 /* =====================================================================
@@ -867,7 +968,86 @@ function NSO_teSelfClearance(poly, t, gap) {
    ===================================================================== */
 function NSO_tubeEdgeRaw(soup, opts) {
   opts = opts || {};
-  var res = { ok: false, reason: '', tris: soup, verb: opts.verb };
+  if (opts.verb === 'flare') return NSO_tubeEdgeFlare(soup, opts);
+  if (opts.verb === 'reducer') return NSO_tubeEdgeReducer(soup, opts.read || null, opts);
+  return NSO_teTreat(soup, opts);
+}
+
+/* THE REDUCER. end: a reading from NSO_tubeEdgeRead (reused when it is this
+   soup's), a point [x, y, z] (the end nearest it), or null (the top end).
+   ro: { od2, id2 (mm, the new outside and bore Ø), transitionMm, runMm,
+   profile 'straight' | 'trumpet', nozzle }. Returns Flare's contract:
+   { ok, reason, tris, end, wall, run, meridian, reducer, ... }; on refusal
+   tris is the ORIGINAL soup. */
+function NSO_tubeEdgeReducer(soup, end, ro) {
+  var o = {}, k;
+  ro = ro || {};
+  for (k in ro) if (k !== 'read' && k !== 'point' && k !== '_flare' && k !== '_oneFace' && k !== '_exact' && k !== 'section') o[k] = ro[k];
+  o.verb = 'reducer';
+  if (end && end.ok !== undefined) o.read = end;
+  else if (end && end.length === 3) o.point = end;
+  else if (end && end.point) o.point = end.point;
+  return NSO_teTreat(soup, o);
+}
+
+/* FLARE, a thin wrapper round the reducer: Way / Angle / Δr / Walls / Length /
+   Run are converted into the reducer's od2 / id2 / transitionMm / runMm, and
+   the reducer builds it. Where each face lands is where Flare always put it:
+   the face that moves stood Δr off its own line at u0 + Length, in the wall's
+   own frame; the other face on its line (Walls: one face) or the moving face's
+   offset a wall away (Both - the reducer's carried section, cut square to the
+   wall at u0 + Length, the old lip cut). Flare's own refusals are made here,
+   before the reducer is called, in Flare's words. */
+function NSO_tubeEdgeFlare(soup, opts) {
+  opts = opts || {};
+  var res = { ok: false, reason: '', tris: soup, verb: 'flare' };
+  var f32in = (soup instanceof Float32Array) ? soup : new Float32Array(soup);
+  var rd = opts.read && opts.read.ok && opts.read.soup === soup ? opts.read : NSO_tubeEdgeRead(f32in, opts);
+  res.read = rd;
+  if (!rd.ok) { res.reason = rd.reason; return res; }
+  var end = rd.end, nozzle = NSO_teNozzle(opts);
+  res.end = end; res.nozzleMm = nozzle;
+  function no(why) { res.reason = why; return res; }
+  var run = NSO_teRun(opts);
+  if (!(run >= 0)) return no('enter a run length in mm, 0 or more (0: no run past the lip)');
+  var L = +opts.length, prof = opts.profile === 'trumpet' ? 'trumpet' : 'straight', dr, walls = NSO_teWalls(opts);
+  if (!walls) return no('Walls is Both, Outside only or Bore only');
+  if (!(L > 0) || !isFinite(L)) return no('enter a flare length in mm, more than 0');
+  if (opts.dr != null && opts.dr !== '' && isFinite(+opts.dr)) dr = +opts.dr;
+  else if (opts.angle != null && opts.angle !== '' && isFinite(+opts.angle)) dr = L * Math.tan(NSO_teRad(+opts.angle));
+  else return no('enter the flare\'s angle or its Δr');
+  if (opts.direction === 'in' && dr > 0) dr = -dr;              // Way: In turns the same flare toward the axis
+  if (dr === 0) return no('a 0° flare is no flare - give it an angle or a Δr: above 0 turns it out, below 0 in');
+  var th = Math.atan2(Math.abs(dr), L);
+  if (NSO_teDeg(th) > NSO_TE_MAX_FLARE_DEG + 1e-9) {
+    return no('a ' + NSO_teFmt(NSO_teDeg(th), 1) + '° flare is past the ' + NSO_TE_MAX_FLARE_DEG + '° limit - the lip would stand out nearly flat. Use a Roll for a turned-over edge');
+  }
+  var t = end.wallMm, lean = NSO_teRad(end.leanDeg), u0 = Math.max(0, -end.rimMm * Math.sin(lean));
+  var fl = { lengthMm: L, drMm: dr, angleDeg: NSO_teDeg(th) * (dr < 0 ? -1 : 1), profile: prof, walls: walls, runMm: run };
+  // a face's Ø at the lip, from its local v there
+  var lipD = function (v) { return 2 * NSO_teToMeridian(end, lean, [v, u0 + L])[0]; };
+  var spec = { verb: 'reducer', read: rd, nozzle: opts.nozzle, transitionMm: L, runMm: run, profile: prof, _flare: fl };
+  // the Ø are what the reducer is given; _exact carries the Δr they came
+  // from to the bit, so the faces are built from the very numbers Flare always
+  // built them from (the pinned hashes)
+  if (walls === 'both') {
+    spec.section = 'carried';
+    if (dr > 0) { spec.od2 = lipD(dr); spec._exact = { dvO: dr }; }
+    else { spec.id2 = lipD(-t + dr); spec._exact = { dvI: dr }; }
+  } else {
+    var ow = NSO_teOneFaceWall(walls, t, dr, nozzle, ' at the lip');
+    if (!ow.ok) { res.oneFace = ow; return no(ow.reason); }
+    spec._oneFace = ow;
+    spec.od2 = lipD(walls === 'outside' ? dr : 0);
+    spec.id2 = lipD(walls === 'bore' ? -t + dr : -t);
+    spec._exact = { dvO: walls === 'outside' ? dr : 0, dvI: walls === 'bore' ? dr : 0 };
+  }
+  return NSO_teTreat(soup, spec);
+}
+
+/* The treatment, every verb's: the reducer (Flare's too), the roll. */
+function NSO_teTreat(soup, opts) {
+  var res = { ok: false, reason: '', tris: soup, verb: opts._flare ? 'flare' : opts.verb };
   var f32in = (soup instanceof Float32Array) ? soup : new Float32Array(soup);
   var rd = opts.read && opts.read.ok && opts.read.soup === soup ? opts.read : NSO_tubeEdgeRead(f32in, opts);
   res.read = rd;
@@ -900,6 +1080,31 @@ function NSO_tubeEdgeRaw(soup, opts) {
                 joinDeg: Math.abs(pr.lipAngleDeg) };
   }
   var runWords = run > 0 ? ' and down its ' + NSO_teFmt(run, 1) + ' mm run' : '';
+  var own = pr.reducer && !pr.flare;          // the reducer's own, not Flare through it
+  if (own) {
+    // THE FLOOR, along the whole new wall - the transition and the run. The
+    // faces are built directly, so the wall square to them is not the targets'
+    // difference through the transition: two parallel cones a wall t apart
+    // across the axis are t cos(angle) apart square to their slope. Every
+    // station of each face against the other face's whole polyline - the
+    // closest two polylines come is at a station of one of them.
+    var lipOr = Om[nFO - 1][0], lipIr = Im[nFI - 1][0], tEnd = lipOr - lipIr, fr = NSO_teFloor(nozzle);
+    pr.reducer.od2Mm = 2 * lipOr; pr.reducer.id2Mm = 2 * lipIr; pr.reducer.wallEndMm = tEnd;
+    if (fr == null) { res.reason = 'nso_thickness.js must be loaded - a reducer\'s wall is held to its nozzle-safety floor, and carries no copy of it'; return res; }
+    var wa = NSO_teWallAlong(Om, Im);
+    res.wall = { minMm: wa.lo, maxMm: wa.hi, stations: wa.n, ringMm: t, endMm: tEnd, floorMm: fr, thinnestAt: wa.at };
+    var flo = '; the floor is ' + NSO_teFmt(fr) + ' mm (nso_thickness.js: one extrusion line at a ' + nozzle + ' mm nozzle)';
+    if (tEnd < fr - 1e-9) {
+      res.reason = 'the wall at the end would be ' + NSO_teFmt(tEnd) + ' mm (Ø' + NSO_teFmt(2 * lipOr) + ' outside, bore Ø' + NSO_teFmt(2 * lipIr) + ')' + (run > 0 ? ', and down its ' + NSO_teFmt(run, 1) + ' mm run' : '') + flo +
+        '. With this outside the bore may be Ø' + NSO_teFmt(Math.floor((2 * lipOr - 2 * fr) * 100) / 100) + ' at most';
+      return res;
+    }
+    if (wa.lo < fr - 1e-9) {
+      res.reason = 'the wall would thin to ' + NSO_teFmt(wa.lo) + ' mm in the transition, ' + NSO_teFmt(wa.at.h, 1) + ' mm out from the end (measured square to its faces, at ' +
+        NSO_teFmt(pr.reducer.angleOuterDeg, 1) + '° outside and ' + NSO_teFmt(pr.reducer.angleBoreDeg, 1) + '° bore)' + flo + '. Use a longer transition';
+      return res;
+    }
+  }
 
   // ---- the thin-wall rule ----
   var r0 = (end.Ro + end.Ri) / 2, rMax = r0;
@@ -925,6 +1130,11 @@ function NSO_tubeEdgeRaw(soup, opts) {
   Im.forEach(function (q) { if (q[0] < boreR) boreR = q[0]; });
   var boreMin = NSO_TE_BORE_NOZZLES * nozzle;
   res.lipBoreRadiusMm = Im[Im.length - 1][0];
+  if (own && 2 * boreR < boreMin - 1e-5) {
+    res.reason = 'that ' + (pr.reducer.kind === 'expander' ? 'expander' : 'reducer') + ' would close the bore - a new bore of Ø' + NSO_teFmt(2 * boreR) +
+      ' is under the bore limit of Ø' + NSO_teFmt(boreMin) + ' (' + NSO_TE_BORE_NOZZLES + ' nozzle widths at a ' + NSO_teFmt(nozzle, 1) + ' mm nozzle)';
+    return res;
+  }
   if (boreR < end.Ri - 1e-9 && 2 * boreR < boreMin - 1e-5) {                 // 1e-5: a float32 radius's last bit
     res.reason = 'that flare would close the bore - the Ø' + NSO_teFmt(2 * end.Ri) + ' bore would come to ' + (boreR > 0 ? 'Ø' + NSO_teFmt(2 * boreR) : 'nothing') +
       ' at the lip' + runWords + ', under the bore limit of Ø' + NSO_teFmt(boreMin) + ' (' + NSO_TE_BORE_NOZZLES + ' nozzle widths at a ' + NSO_teFmt(nozzle, 1) +
@@ -951,7 +1161,7 @@ function NSO_tubeEdgeRaw(soup, opts) {
   if (!cl.ok) {
     if (cl.unfinished) { res.reason = 'the piece is too large to prove the new wall clears it (' + cl.evals + ' distance checks) - nothing was changed'; return res; }
     var what = cl.hit.h < -1e-6 ? NSO_teFmt(-cl.hit.h, 1) + ' mm below the end' : NSO_teFmt(cl.hit.h, 1) + ' mm out from the end';
-    res.reason = (opts.verb === 'roll' ? 'rolling ' + NSO_teFmt(+opts.angle, 0) + '°' : run > 0 ? 'that flare and its run' : 'that flare') +
+    res.reason = (opts.verb === 'roll' ? 'rolling ' + NSO_teFmt(+opts.angle, 0) + '°' : 'that ' + (own ? (pr.reducer.kind === 'expander' ? 'expander' : 'reducer') : 'flare') + (run > 0 ? ' and its run' : '')) +
       (cl.hit.g <= 0 ? ' would run the new wall into the piece' : ' would bring the new wall within ' + NSO_teFmt(cl.hit.g) + ' mm of the piece') +
       ' (' + what + ', ' + NSO_teFmt(cl.hit.r, 1) + ' mm from the axis) - it may come no closer than ' + NSO_teFmt(gap) + ' mm (one nozzle width)';
     if (opts.verb === 'roll') {
@@ -967,7 +1177,8 @@ function NSO_tubeEdgeRaw(soup, opts) {
         if (ok2) lo = midA; else hi = midA;
       }
       if (lo >= 1) { res.maxAngleDeg = Math.floor(lo); res.reason += '. At this radius it rolls up to ' + Math.floor(lo) + '°'; }
-    } else res.reason += run > 0 ? '. Use a shorter run, or a shorter or shallower flare' : '. Use a shorter or a shallower flare';
+    } else if (own) res.reason += run > 0 ? '. Use a shorter run, or a smaller change of Ø' : '. Use a smaller change of Ø';
+    else res.reason += run > 0 ? '. Use a shorter run, or a shorter or shallower flare' : '. Use a shorter or a shallower flare';
     return res;
   }
 
@@ -985,7 +1196,7 @@ function NSO_tubeEdgeRaw(soup, opts) {
       return res;
     }
   }
-  var wall = pr.walls ? null : NSO_teWallCheck(fO, fI);
+  var wall = pr.walls || own ? null : NSO_teWallCheck(fO, fI);
   if (wall) res.wall = { minMm: wall.lo, maxMm: wall.hi, stations: wall.n, wantMm: t };
   if (wall && !(wall.lo >= t - NSO_TE_WALL_TOL_MM && wall.hi <= t + NSO_TE_WALL_TOL_MM)) {
     res.reason = 'internal: the new wall is ' + NSO_teFmt(wall.lo, 3) + '–' + NSO_teFmt(wall.hi, 3) + ' mm against a ' + NSO_teFmt(t, 3) + ' mm wall';
@@ -1037,6 +1248,10 @@ function NSO_tubeEdgeRaw(soup, opts) {
   if (pr.beadCenterLocal) res.beadCenter = NSO_teToMeridian(end, lean, pr.beadCenterLocal);
   if (pr.flare) res.flare = pr.flare;
   if (pr.roll) res.roll = pr.roll;
+  if (pr.reducer) {
+    res.reducer = pr.reducer;
+    if (!own) { pr.reducer.od2Mm = 2 * Om[nFO - 1][0]; pr.reducer.id2Mm = 2 * Im[nFI - 1][0]; pr.reducer.wallEndMm = Om[nFO - 1][0] - Im[nFI - 1][0]; }
+  }
   res.reason = NSO_tubeEdgeDescribe(res);
   return res;
 }
@@ -1142,6 +1357,7 @@ function NSO_teBuild(soup, W, end, Om, Im) {
 
 /* One line: what was done, the numbers that matter. */
 function NSO_tubeEdgeDescribe(r) {
+  if (r.reducer && !r.flare) return NSO_teReducerWords(r);
   var e = r.end, s = 'Ø' + NSO_teFmt(2 * e.Ro) + ' end, wall ' + NSO_teFmt(r.wallMm) + ' held (' + NSO_teFmt(r.wall.minMm, 3) + '–' +
     NSO_teFmt(r.wall.maxMm, 3) + ' mm through the new section)';
   var ru = r.run, tr = r.flare && r.flare.profile === 'trumpet';
@@ -1179,3 +1395,24 @@ function NSO_tubeEdgeDescribe(r) {
   return 'Roll ' + NSO_teFmt(r.roll.angleDeg, 0) + '° round a ' + NSO_teFmt(r.roll.radiusMm) + ' mm bead: Ø' + NSO_teFmt(2 * r.maxOuterRadiusMm) +
     ' across the bead · ' + s;
 }
+
+/* The reducer's line: "Reducer: Ø43.52 / bore Ø34.82 → Ø33.26 / bore Ø26.38
+   over 12.1 mm (23.0° outside, 19.2° bore), then 7.5 mm run · wall 4.35 →
+   3.44". The angles are each face's, derived (a Trumpet's where it ends). */
+function NSO_teReducerWords(r) {
+  var q = r.reducer, e = r.end, tr = q.profile === 'trumpet';
+  var head = q.kind === 'straight' ? 'Straight on' : (q.kind === 'expander' ? 'Expander' : 'Reducer') +
+    (q.faces === 'outside' ? ' (outside only)' : q.faces === 'bore' ? ' (bore only)' : '');
+  var s = head + ': Ø' + NSO_teFmt(q.od1Mm) + ' / bore Ø' + NSO_teFmt(q.id1Mm) + ' → Ø' + NSO_teFmt(q.od2Mm) + ' / bore Ø' + NSO_teFmt(q.id2Mm);
+  if (q.transitionMm > 0) {
+    s += ' over ' + NSO_teFmt(q.transitionMm, 1) + ' mm' + (tr ? ', trumpet' : '') + ' (' + NSO_teFmt(q.angleOuterDeg, 1) + '° outside, ' +
+      NSO_teFmt(q.angleBoreDeg, 1) + '° bore' + (tr ? ' where it ends' : '') + ')';
+  }
+  if (q.runMm > 0) s += (q.transitionMm > 0 ? ', then ' : ', ') + NSO_teFmt(q.runMm, 1) + ' mm run';
+  s += ' · wall ' + NSO_teFmt(r.wallMm) + ' → ' + NSO_teFmt(q.wallEndMm);
+  if (r.wall.minMm < Math.min(r.wallMm, q.wallEndMm) - 0.005) s += ' (' + NSO_teFmt(r.wall.minMm) + ' at the thinnest, square to the transition\'s faces)';
+  return s;
+}
+
+/* The verbs, by name, for the card. */
+var NSO_TubeEdge = { read: NSO_tubeEdgeRead, raw: NSO_tubeEdgeRaw, reducer: NSO_tubeEdgeReducer, flare: NSO_tubeEdgeFlare, describe: NSO_tubeEdgeDescribe };

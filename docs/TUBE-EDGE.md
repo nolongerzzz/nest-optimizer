@@ -628,3 +628,135 @@ the Stock tube Ø20 / 1.6, Flare 8 mm Δr +3:
 
 `styles.css` is unchanged: the END ring uses the resize cursors Neck's end
 rings already have.
+
+## Reducer — the tube defined by its result (tube-reducer, 2026-10-20)
+
+`nso_tube_edge.js?v=reducer1`. Engine only; the card is the next ticket.
+
+**`NSO_TubeEdge.reducer(soup, end, { od2, id2, transitionMm, runMm, profile })`**
+(also `NSO_tubeEdgeReducer`, and `NSO_tubeEdgeRaw` with `verb: 'reducer'`).
+`end` is a reading from `NSO_tubeEdgeRead` (reused when it is this soup's), a
+point `[x, y, z]` (the end nearest it), or `null` (the top end). It returns
+Flare's contract: `{ ok, reason, tris, end, wall, run, meridian, volume, … }`
+plus `reducer: { od1Mm, id1Mm, od2Mm, id2Mm, transitionMm, runMm, profile,
+angleOuterDeg, angleBoreDeg, wallEndMm, kind, faces }`. On a refusal `tris`
+is the original soup.
+
+The end of the tube becomes a pipe of outside **od2** and bore **id2**. A
+transition of **T** mm gets it there, then it runs straight on for **R** mm.
+- **Each face is built directly**, from its own ring point to its own target:
+  the outside from the tube's Ø1 to od2, the bore from its bore to id2.
+  **Straight** makes each a cone. **Trumpet** makes each the ease-in, tangent
+  to the tube at the ring, with Flare's trumpet sampling. Then both run
+  parallel to the axis for R and end square to it, open.
+- **The wall at the run is (od2 − id2) / 2 exactly.** Nothing is carried and
+  there is no square-cut lip, so #253's lip width cannot appear. The test
+  gates the ticket's case, Ø40/30 → Ø20/14 over 15, run 30: one cylinder,
+  Ø20.000 / Ø14.000. On #253's own tube (Ø40 / wall 2.54) a reducer to
+  Ø20 / Ø14.92 runs at Ø20.00 / Ø14.92 with a 2.54 wall, where Flare In −10
+  still reads Ø21.03 (see flag 1).
+- **The wall square to the faces is measured, not assumed.** Every station of
+  each face, the ring points too, is checked against the other face's whole
+  polyline. The thinnest is held to `nso_thickness.js`'s floor. Two faces
+  that keep their distance across the axis are closer than that square to
+  their slope: Ø40/30 → Ø60/50 over 10 is 5.00 across, 3.54 square to its
+  45° faces. The readout adds the thinnest when it is under both ends' walls.
+- **Kinds**: od2 > Ø1 is an **expander**, od2 < Ø1 a **reducer**. id2 at the
+  tube's bore is today's **Outside only**, and od2 at its Ø is **Bore only**.
+  A Ø within 1e-4 mm of the tube's own counts as unchanged: that face stays
+  on its line. T 0 with both Ø unchanged and a run is a plain straight tube
+  on (`Straight on: …`).
+- **The angles are derived**, never typed. A Straight face's is atan(Δr / T);
+  a Trumpet face's is where it ends, atan(2Δr / T).
+- **Readout**: `Reducer: Ø43.52 / bore Ø34.82 → Ø33.26 / bore Ø26.38 over
+  12.1 mm (23.0° outside, 19.2° bore), then 7.5 mm run · wall 4.35 → 3.44`
+  (then `(3.25 at the thinnest, square to the transition's faces)`). The
+  heading is `Expander`, or carries ` (outside only)` / ` (bore only)`.
+  Trumpet reads `over 12.0 mm, trumpet (39.8° outside, 33.7° bore where it
+  ends)`.
+
+**Flare is the reducer's wrapper.** `NSO_tubeEdgeRaw({ verb: 'flare', … })` is
+`NSO_tubeEdgeFlare`. It makes Flare's own refusals in Flare's words: Walls,
+Length, angle or Δr, the 0° and 75° limits, and the one-face floor. It then
+converts Way / Angle / Δr / Walls / Length / Run into od2 / id2 / T / R and
+calls the reducer. **The Ø are where each face's lip always was**: the
+face that moves stands Δr off its own line at u0 + Length in the wall's
+frame, read back as a radius.
+- **Walls: Outside only / Bore only** was always two faces built directly to
+  one lip plane: the reducer's direct section, unchanged.
+- **Walls: Both** is the reducer's **carried** section, which only Flare
+  asks for. The face on the bend's side goes to its target by the profile.
+  The other is its offset a wall away, going round the cone's crease on an
+  arc of radius t. Both are cut square to the wall at u0 + T: **this is the
+  old path's lip cut, reproduced exactly when R = 0**, and Flare's run comes
+  off it as before. The other face ends where the offset meets that plane,
+  not at a target of its own.
+- **Byte for byte.** The Ø → wall-frame round trip can lose a radius's last
+  bit: 3 of 34 hashes moved when the reducer read Δr back off the Ø. So the
+  wrapper hands over the Δr it was given (`_exact`) with the Ø it made. The
+  reducer checks that the two agree to 1e-6 mm and builds from the Δr, so
+  the faces come from the very numbers Flare always built them from.
+  **34 output SHA-1s from claude-wip `1c4a4b8`** are pinned: Both, Walls,
+  inward, Way In, Trumpet, Run, the Wheel vessel's leaning rim, the tube along
+  X, and four Rolls. Every one is unchanged. The test also shows that a typed
+  reducer equals Flare's Walls through it vertex for vertex, within 1e-5 mm.
+  That is not to the bit, because Ø36 typed is not the fitted bore's
+  15.000000x + 3.
+
+### Refusals, in words, the piece unchanged, nothing built
+
+| what | says |
+|---|---|
+| the wall at the end (the run's) under the floor | `the wall at the end would be 0.30 mm (Ø20.00 outside, bore Ø19.40), and down its 10.0 mm run; the floor is 0.42 mm (nso_thickness.js: one extrusion line at a 0.4 mm nozzle). With this outside the bore may be Ø19.16 at most` |
+| the wall under the floor in the transition (square to the faces) | `the wall would thin to 0.37 mm in the transition, 0.0 mm out from the end (measured square to its faces, at 68.2° outside and 68.2° bore); the floor is 0.42 mm (…). Use a longer transition` |
+| od2 < id2 | `the faces would cross - the new outside Ø20.00 is inside the new bore Ø22.00; the outside must be larger than the bore` |
+| od2 = id2 | `a new Ø20.00 with a bore of Ø20.00 leaves no wall - …` |
+| T negative / R negative | `a transition of −2.0 mm is refused - …` / `a run of −5.0 mm is refused - …` |
+| T 0 with a Ø changed (outside or bore) | `transition 0: use Scale's ring rows for a step - Ø40.00 / bore Ø30.00 → Ø20.00 / bore Ø14.00 with no length between them is a step, not a reducer. …` |
+| T 0, R 0, both Ø the tube's | `nothing to make - …` |
+| a bore under 2 nozzle widths | `that reducer would close the bore - a new bore of Ø0.60 is under the bore limit of Ø0.80 (2 nozzle widths at a 0.4 mm nozzle)` |
+| the new wall meeting the piece | the clearance's words, `that reducer and its run would …`, then `Use a shorter run, or a smaller change of Ø` |
+
+### Numbers
+
+From `tools/nso_tube_edge_test.js` section 11 (324 checks in the file, 82 of
+them new). Every output is closed, 2-manifold and consistently wound, with
+Euler unchanged. Each passes `mesh_validate --gate`, copies the rest of the
+piece bit for bit and adds Pappus's volume.
+
+| piece and treatment | in → out | measured on the output |
+|---|---|---|
+| Ø40 / 30 pipe, reducer → Ø20 / 14 over 15, run 30 | 768 → 1,536 | run one cylinder Ø20.000 / Ø14.000, wall 3.000; cones −33.69° / −28.07° off the mesh; thinnest 2.65 square to the faces |
+| …expander → Ø60 / 50 over 10, run 20 | 768 → 1,536 | Ø60.000 / Ø50.000, wall 5.00 (3.54 square to the 45° faces) |
+| …bore only → Ø40 / 36 over 10, run 10 | 768 → 1,536 | outside untouched bit for bit; = Flare Bore only +3, run 10 within 1e-5 |
+| …outside only, Trumpet → Ø34 / 30 | 768 → 3,264 | bore untouched; = Flare Outside only −3 Trumpet within 1e-5 |
+| …Trumpet both faces → Ø30 / 22 over 12, run 10 | 768 → 6,144 | both faces tangent at the ring, monotone curvature; Ø30.000 / Ø22.000 |
+| Ø43.52 / 34.82 → Ø33.26 / 26.38 over 12.1, run 7.5 | | the ticket's readout line (with 19.2°, flag 2) |
+| Wheel vessel (rim leaning −0.47°), Ø −6 / bore −6 over 8, run 5 | | both targets reached to 1e-9 |
+
+### Flags — not in the ticket, or not as the ticket said
+
+1. **Flare + Run still reads the lip's width (Ø21.03 on #253's tube).**
+   "Pinned hashes for every existing Flare case must still match with Run 0"
+   would allow Flare with Both and R > 0 to switch to direct faces. That would
+   make Flare's bore jump by `2t(1/cos θ − 1)` between Run 0 and Run 0.1, and
+   it would break `tube:neck`'s gate that the run's end ring has Run 0's lip
+   bore. So Flare's Both is carried at every Run, and the reducer is the fix:
+   gated on the ticket's Ø40/30 case, and on #253's tube as a reducer. The
+   card ticket replaces Flare on the card with the Reducer.
+2. **The readout example's bore angle.** Ø34.82 → Ø26.38 over 12.1 is
+   atan(4.22 / 12.1) = **19.2°**, not 21.4°. The outside's 23.0° and the walls
+   4.35 → 3.44 match the ticket. The test gates the line with 19.2°.
+3. **"Faces crossing" anywhere but the end cannot happen** once od2 > id2.
+   With od1 > id1, each face's distance across the axis goes linearly
+   (Straight) or with (s/T)² (Trumpet) from t1 > 0 to t2 > 0. So the crossing
+   refusal is od2 < id2 (gated), od2 = id2 is its own words, and the wall
+   square to the faces is held to the floor everywhere.
+4. **The thin-wall (stretch) rule is Flare's**, for sheet turned outward. A
+   reducer's walls are given, so it is held to the floor instead. Flare's 75°
+   limit stays Flare's too. A steep reducer is caught by the floor square to
+   its faces.
+5. **Lean**: T runs along the wall's direction at the ring, as Length always
+   did, and each face's target is a radius at the transition's end. On a
+   leaning rim the face given its own Ø turns very slightly back to the axis
+   rather than running on along the leaning wall.
