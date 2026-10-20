@@ -16,6 +16,7 @@
    on the canvas, the card's own Set - and read the same way after each step:
      Patch, Cap, Soften, Carve, Lift, Paint        (Add / Subtract / Surface)
      Close, Bridge, Connect                        (the cards with a Set)
+     Punch                                         (Subtract: a card that stays armed)
    Cap has no button on the page today (btn-cap is not in index.html); its
    arm is capSelectedModel(), the function the button was wired to.
 
@@ -335,7 +336,24 @@ const ROSTER = [
       await page.waitForFunction(d => state.undoStack.length > d || (state.connect && !state.connect.busy &&
         document.getElementById('connect-readout').classList.contains('is-bad')), d0, { timeout: 60000 });
     },
-    isArmed: page => page.evaluate(() => !!(state.connect && state.connect.open)) }
+    isArmed: page => page.evaluate(() => !!(state.connect && state.connect.open)) },
+
+  // Punch stays armed after PUNCH (the card waits for the next face), and its
+  // handles take a press only on a hole or its ring - never on bare plate.
+  { name: 'Punch', file: () => fx('box_hull_80x40x20-2.stl'),
+    arm: async page => {
+      await page.click('#btn-punch');
+      await page.waitForFunction(() => nsoPunchState().open, null, { timeout: 5000 });
+    },
+    verb: async (page, id) => {
+      await lookDown(page, id);
+      const d0 = await undoDepth(page);
+      await clickAt(page, await topOf(page, id));
+      await page.waitForFunction(() => nsoPunchState().ok, null, { timeout: 15000 });
+      await page.click('#btn-punch-go');
+      await page.waitForFunction(d => state.undoStack.length > d && !nsoPunchState().busy, d0, { timeout: 90000 });
+    },
+    isArmed: page => page.evaluate(() => nsoPunchState().open) }
 ];
 
 /* Two clicks, a sphere apiece, the camera free between them. */

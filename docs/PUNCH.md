@@ -1,9 +1,9 @@
 # Punch
 
 Click a face, get a round hole straight through it (or to a depth), and the
-same hole repeated in a grid or on a circle. **Engine only so far:**
-`nso_punch.js` (THREE-free, node-tested). No card, no button; `index.html`
-does not load it yet. Gate: `npm run punch:test`.
+same hole repeated in a grid or on a circle. The geometry is `nso_punch.js`
+(THREE-free, node-tested: `npm run punch:test`); the card is `app-punch.js`,
+SUBTRACT › Punch (driven: `npm run punch:drive`).
 
 ```js
 var pl = NSO_Punch.plan(soup, { point: [x, y, z], normal: [nx, ny, nz] }, opts);
@@ -101,8 +101,58 @@ The soup is read once (weld, edges, smooth surfaces, rims) and kept on its
 array: 2.3 s for 320,000 triangles, then ~0.3 s a re-plan of 60 holes. Rays use
 `NSO_BVH`'s index when it is loaded.
 
+## The card (app-punch.js)
+
+SUBTRACT › **Punch** arms it; a click on a face of a piece places the hole
+(a piece not selected is selected by the click). The card:
+
+| row | |
+|---|---|
+| Ø | default 3.0 |
+| Depth | Through ▾ or mm (a Deep field appears) |
+| Pattern | None · Grid · Radial |
+| Grid | Rows, Cols, Pitch (one field; × splits it into Pitch X and Pitch Y, Y starting at X), Anchor Corner \| Centre |
+| Radial | Count, Radius |
+| readout | what the plan says; a refusal in red |
+| PUNCH / Cancel | |
+
+**Ghost.** Every hole is drawn as the very cutter PUNCH subtracts (amber,
+through the piece) with its entry ring on the surface. A hole the pattern lays
+off the face is a grey ring where it would have been, and the readout counts
+them (`3 holes of 15 fall off the face and were dropped (5, 10, 15) ...`). A
+refusal draws the holes it would have made in red, says why, and PUNCH is off.
+A cross marks the anchor (the click).
+
+**Handles** (the neck's pattern, #241). The first hole's **ring** is Ø: drag it
+out or in. The **anchor** - the hole at the click (None, or a corner-anchored
+grid), else the cross - drags across the face, staying on it
+(`NSO_Punch.slide`). Grid: the **far-corner hole** is the pitch (one pitch: the
+drag's projection on the grid's diagonal; × split: each axis its own). Radial:
+**any hole** is the radius. Steps of 0.5 mm, 0.1 with Shift. Hover lights the
+handle and names its value in the readout. A press on a handle or on a piece is
+taken at the window, ahead of app-core and OrbitControls; a press on bare plate
+never is, so the view orbits while Punch is armed (`pick:release`).
+
+**Keys.** The arrows nudge the anchor 1 mm along the face (Shift 0.1), along
+whichever of ±u, ±v points the arrow's way on screen. Escape puts a drag back;
+with none it disarms. Text fields keep their own arrows and Escape.
+
+**PUNCH.** Every hole in ONE boolean: the cutters go to `NSO_subtractSoups` as
+one soup of separate shells (cutters that meet in air - through holes crossing a
+tube's bore - are unioned first), so a piece of 50,000 triangles or more goes to
+the boolean worker (docs/BOOLEAN-WORKER.md) under its bar. If PUNCH takes longer
+than 300 ms Punch puts the bar up itself too (`NSO_BoolBusy`, under the
+readout); Escape stops it. A piece of overlapping shells is merged for it first
+(`nsoOverlap.solid`, work-as-is). The commit is the sculpt commit, undo type
+`punchReplace`: one Undo puts the piece back. The card stays armed: the click
+goes, the numbers stay, the next face is a click away.
+
+The piece must be as it was loaded (`NSO_bendFrameMatches`): a click on a piece
+turned since is refused in words, as Bend's and Tube edge's ghosts are.
+
 ## Paint scope
 
-Not applicable to the engine: it reads a soup and returns new ones. The app's
-Punch will act on a sub-region (the faces the holes go through) and states its
-category when it lands (docs/HANDOFF.md).
+**WHOLE-PIECE** (app-punch.js header): a hole runs through every face it meets
+on its way, curved ones too, and paint names its faces by axis and side, so any
+paint stands Punch down, naming the count - `nsoMaskCount(m) > 0`. The engine
+itself reads a soup and returns new ones.

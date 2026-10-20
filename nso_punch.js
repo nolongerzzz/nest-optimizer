@@ -467,34 +467,49 @@
     return r;
   }
 
+  /* The click read off the soup: its triangle, the smooth surface it is on,
+     and the face's frame (header). { reason } when the click is not on it. */
+  function frameOf(soup, hit, o) {
+    var p0 = vec(hit && (hit.point || hit.p || hit)), nh = vec(hit && (hit.normal || hit.n));
+    if (!p0) return { reason: 'the click has no point on the piece' };
+    var M = meshOf(soup, o.smoothDeg);
+    var seed = clickedTri(M, p0, nh, hit && (hit.tri != null ? hit.tri : hit.faceIndex));
+    if (seed < 0) return { reason: 'the click is not on this piece' };
+    var n0 = smoothNormal(M, seed, p0), u = faceU(M, seed, n0, o.planarDeg);
+    return { M: M, seed: seed, p0: p0, n0: n0, R0: M.region[seed], u: u, v: cross(n0, u) };
+  }
+  /* A tangent-plane point's footprint: where the line through p along n0 meets
+     surface R0 on its front side, nearest p - { point, normal, tri }, or null. */
+  function footOf(M, R0, n0, p) {
+    var L = M.diag + 1, hs = rayHits(M, add(p, mul(n0, L)), mul(n0, -1), 2 * L), best = null;
+    for (var j = 0; j < hs.length; j++) {
+      var h = hs[j];
+      if (M.region[h.tri] !== R0 || dot(triN(M, h.tri), n0) <= 0.05) continue;
+      if (!best || Math.abs(h.t - L) < Math.abs(best.t - L)) best = h;
+    }
+    if (!best) return null;
+    var c = add(p, mul(n0, L - best.t));
+    return { point: c, normal: smoothNormal(M, best.tri, c), tri: best.tri };
+  }
+
   function plan(soup, hit, opts) {
     var o = optsOf(opts);
     var bad = badOpts(o);
     if (bad) return refuse(bad);
     if (!soup || soup.length < 36 || soup.length % 9) return refuse('there is no piece to punch');
-    var p0 = vec(hit && (hit.point || hit.p || hit)), nh = vec(hit && (hit.normal || hit.n));
-    if (!p0) return refuse('the click has no point on the piece');
-    var M = meshOf(soup, o.smoothDeg);
-    var seed = clickedTri(M, p0, nh, hit && (hit.tri != null ? hit.tri : hit.faceIndex));
-    if (seed < 0) return refuse('the click is not on this piece');
-    var n0 = smoothNormal(M, seed, p0), R0 = M.region[seed];
-    var u = faceU(M, seed, n0, o.planarDeg), v = cross(n0, u);
-    var r = o.diaMm / 2, floor = 2 * o.nozzle, L = M.diag + 1;
+    var F = frameOf(soup, hit, o);
+    if (F.reason) return refuse(F.reason);
+    var M = F.M, p0 = F.p0, n0 = F.n0, R0 = F.R0, u = F.u, v = F.v;
+    var r = o.diaMm / 2, floor = 2 * o.nozzle;
     var pts = patternOf(o);
 
     // footprints
-    var holes = [], dropped = [];
+    var holes = [], dropped = [], droppedAt = [];
     for (var i = 0; i < pts.length; i++) {
       var p = add(p0, add(mul(u, pts[i][0]), mul(v, pts[i][1])));
-      var hs = rayHits(M, add(p, mul(n0, L)), mul(n0, -1), 2 * L), best = null;
-      for (var j = 0; j < hs.length; j++) {
-        var h = hs[j];
-        if (M.region[h.tri] !== R0 || dot(triN(M, h.tri), n0) <= 0.05) continue;
-        if (!best || Math.abs(h.t - L) < Math.abs(best.t - L)) best = h;
-      }
-      if (!best) { dropped.push(i + 1); continue; }
-      var c = add(p, mul(n0, L - best.t));
-      var axis = smoothNormal(M, best.tri, c);
+      var ft = footOf(M, R0, n0, p);
+      if (!ft) { dropped.push(i + 1); droppedAt.push({ n: i + 1, point: p, axis: n0 }); continue; }
+      var c = ft.point, axis = ft.normal;
       var spans = spansFrom(M, c, axis);
       if (!spans) return refuse('hole ' + (i + 1) + ' goes in and never comes out - the piece is not closed there; Repair it first');
       holes.push({ n: i + 1, centre: c, axis: axis, dia: o.diaMm, depth: 0, lift: o.endMm, spans: spans });
@@ -502,7 +517,8 @@
     var total = pts.length;
     if (!holes.length) {
       return refuse(total === 1 ? 'the hole misses the piece' :
-        'all ' + total + ' holes fall off the face - nothing is left to punch', { dropped: dropped.length, droppedHoles: dropped });
+        'all ' + total + ' holes fall off the face - nothing is left to punch',
+        { dropped: dropped.length, droppedHoles: dropped, droppedAt: droppedAt, frame: { o: p0, u: u, v: v, n: n0 }, wouldBe: [] });
     }
 
     // depth, and the skin under a blind hole
@@ -557,19 +573,20 @@
         text: w < 0 ? 'holes ' + holes[x].n + ' and ' + holes[y].n + ' would run into each other' :
               'holes ' + holes[x].n + ' and ' + holes[y].n + ' would leave ' + fmt(w, floor) + ' mm between them' });
     }
-    var frame = { u: u, v: v, n: n0 };
+    var frame = { o: p0, u: u, v: v, n: n0 };
     if (viol.length) {
       viol.sort(function (a, b) { return a.wall - b.wall; });
       var more = viol.length - 1;
       return refuse(viol[0].text + '; the floor is ' + fmt(floor) + (more ? ' (' + plural(more, 'more place is', 'more places are') + ' under it too)' : ''),
-        { violations: viol, floor: floor, frame: frame, dropped: dropped.length, droppedHoles: dropped });
+        { violations: viol, floor: floor, frame: frame, dropped: dropped.length, droppedHoles: dropped, droppedAt: droppedAt, wouldBe: holes });
     }
     var what = plural(holes.length, 'hole', 'holes') + ' Ø' + fmt(o.diaMm) + ' ' +
                (o.depth === 'through' ? 'through' : fmt(+o.depth) + ' mm deep');
     var reason = dropped.length ?
       plural(dropped.length, 'hole', 'holes') + ' of ' + total + ' fall off the face and ' + (dropped.length === 1 ? 'was' : 'were') +
       ' dropped (' + dropped.join(', ') + '); punching ' + what : 'punching ' + what;
-    return { ok: true, holes: holes, reason: reason, dropped: dropped.length, droppedHoles: dropped, floor: floor, frame: frame };
+    return { ok: true, holes: holes, reason: reason, dropped: dropped.length, droppedHoles: dropped, droppedAt: droppedAt,
+             floor: floor, frame: frame };
   }
 
   /* ----------------------------------------------------------- cutters */
@@ -602,10 +619,39 @@
     });
   }
 
+  /* Slide the click dx along u and dy along v, on its own surface: the hit a
+     nudge or a drag of the anchor moves to - { ok, point, normal, tri } or
+     { ok: false, reason } (it would leave the face; the click stays). */
+  function slide(soup, hit, dx, dy, opts) {
+    var o = optsOf(opts);
+    if (!soup || soup.length < 36 || soup.length % 9) return { ok: false, reason: 'there is no piece to punch' };
+    var F = frameOf(soup, hit, o);
+    if (F.reason) return { ok: false, reason: F.reason };
+    var ft = footOf(F.M, F.R0, F.n0, add(F.p0, add(mul(F.u, dx), mul(F.v, dy))));
+    return ft ? { ok: true, point: ft.point, normal: ft.normal, tri: ft.tri } : { ok: false, reason: 'that is off the face' };
+  }
+
+  /* Do any two of the plan's cutters meet (in air, past the material - through
+     holes crossing a tube's bore)? Then they are unioned before the subtract;
+     otherwise they go to the kernel as one soup of separate shells. */
+  function cuttersOverlap(pl) {
+    var holes = (pl && pl.holes) || [];
+    var seg = holes.map(function (H) {
+      var m = sidesFor(H.dia), a = unit(H.axis), P0 = add(H.centre, mul(a, H.lift == null ? DEFAULTS.endMm : H.lift));
+      return { a: P0, b: sub(P0, mul(a, H.depth)), r: H.dia / 2 / Math.cos(Math.PI / m) };
+    });
+    for (var i = 0; i < seg.length; i++) for (var j = i + 1; j < seg.length; j++) {
+      if (segDist(seg[i].a, seg[i].b, seg[j].a, seg[j].b) < seg[i].r + seg[j].r + 1e-6) return true;
+    }
+    return false;
+  }
+
   var API = {
     DEFAULTS: DEFAULTS,
     plan: plan,
     cutters: cutters,
+    slide: slide,
+    cuttersOverlap: cuttersOverlap,
     sidesFor: sidesFor,
     _smoothNormal: function (soup, t, p, smoothDeg) { return smoothNormal(meshOf(soup, smoothDeg || DEFAULTS.smoothDeg), t, p); }
   };

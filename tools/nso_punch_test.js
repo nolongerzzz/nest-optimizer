@@ -245,6 +245,30 @@ const fingerprint = (s) => { let a = 0; for (let i = 0; i < s.length; i++) a += 
       near(volume(big), polyArea(8) * 5.4, 1e-3 * polyArea(8) * 5.4));
   }
 
+  /* 8 --------------------------------------------------------------- */
+  {
+    // what the card (app-punch.js) draws and drags with
+    const slab = box([0, 0, 0], [40, 40, 10]), hit = { point: [20, 20, 10], normal: [0, 0, 1] };
+    const s1 = P.slide(slab, hit, 3, -2), s2 = P.slide(slab, hit, 30, 0);
+    gate('8a slide moves the click along u and v on its face, and not off it', s1.ok && near(s1.point[0], 23, 1e-6) &&
+      near(s1.point[1], 18, 1e-6) && near(s1.point[2], 10, 1e-6) && !s2.ok, JSON.stringify(s1.point) + ' / ' + s2.reason);
+    const R = 15, T = tube(R, 11, 60, 64), a = 75 * Math.PI / 180;
+    const th = { point: [30, R * Math.cos(a), R * Math.sin(a)], normal: [0, Math.cos(a), Math.sin(a)] };
+    const s3 = P.slide(T, th, 0, 5);
+    gate('8b ...on a tube, round it: still on the outside, the normal radial', s3.ok &&
+      Math.abs(Math.hypot(s3.point[1], s3.point[2]) - R) < 0.02 && angDeg(s3.normal, [0, s3.point[1], s3.point[2]]) < 0.5,
+      'r ' + (s3.point ? Math.hypot(s3.point[1], s3.point[2]).toFixed(3) : '-'));
+    const grid = P.plan(slab, hit, { pattern: 'grid', rows: 2, cols: 2, pitchX: 8, pitchY: 8 });
+    const tubeGrid = P.plan(T, th, { pattern: 'grid', rows: 2, cols: 1, pitchY: 8, anchor: 'centre' });
+    gate('8c cutters meet only where they should: apart on a slab, crossing in a tube\'s bore',
+      grid.ok && !P.cuttersOverlap(grid) && tubeGrid.ok && P.cuttersOverlap(tubeGrid));
+    const bad = P.plan(slab, hit, { pattern: 'grid', rows: 1, cols: 2, pitchX: 3.5 });
+    const over = P.plan(slab, { point: [37, 20, 10], normal: [0, 0, 1] }, { pattern: 'grid', rows: 1, cols: 2, pitchX: 8 });
+    gate('8d a refusal still says where the holes would be; a dropped hole where it fell',
+      !bad.ok && bad.wouldBe.length === 2 && over.ok && over.droppedAt.length === 1 && near(over.droppedAt[0].point[0], 45, 1e-6) &&
+      near(over.frame.o[0], 37, 1e-6));
+  }
+
   console.log('\n' + rows.map(r => r[0] + '  ' + r[1]).join('\n'));
   console.log('\n' + (fails ? 'FAILED ' + fails + ' of ' + rows.length : 'PASSED all ' + rows.length + ' gates'));
   process.exit(fails ? 1 : 0);
