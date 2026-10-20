@@ -117,6 +117,9 @@ function NSO_teOpts() {
   if (verb === 'flare') {
     o.length = num('inp-te-length'); o.profile = val('sel-te-profile', 'straight'); o.walls = walls;
     if (B.lead === 'dr') o.dr = num('inp-te-dr'); else o.angle = num('inp-te-angle');
+    // Run, the straight tube on past the lip: the card's inp-te-run when it
+    // has one (blank is 0), no run when it does not
+    if (NSO_teEl('inp-te-run')) o.runMm = num('inp-te-run') || 0;
   } else {
     o.radius = num('inp-te-radius'); o.angle = num('inp-te-roll-angle');
   }

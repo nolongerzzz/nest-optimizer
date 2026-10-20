@@ -1741,6 +1741,14 @@ the same way. Before a later ticket touches it:
   Length. Arrows, Shift and Escape work as Neck's. Handles sit on the moving
   face (the mid-line for a Flare with Both), and hover names the face. Gates:
   sections 8-10 of `tools/nso_tube_neck_drag_check.js`.
+- **Run, the reducer and the expander** (2026-10-20, `?v=run1` on
+  `nso_tube_edge.js` and `app-tube-edge.js`): `opts.runMm` on Flare adds a
+  straight tube past the lip. Its outside and bore are exactly the lip's, it
+  runs parallel to the axis Run mm from the lip's plane, and its end is square
+  and open. It is one more station on each face, sharing the lip ring's edges.
+  Run 0 is byte-identical (SHA-1-pinned). Roll refuses a Run in words, and a
+  run's bore is held to the inward-flare bore limit. The card's `inp-te-run`
+  is read when present; the UI PR draws it. `docs/TUBE-EDGE.md`, "Run".
 
 `npm run tube:edges` (headless) and `npm run tube:edges-drive` (real app),
 both in `npm test`.
