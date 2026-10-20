@@ -9,21 +9,14 @@ not cover; where they disagree with this file, this file is right.
 
 Each item says what the user sees, then where it lives and what checks it.
 
-## 1. Two plates, side by side - no toggle (round 1a)
+## 1. Two plates, side by side - no toggle (round 1a; made the same in round 2b, item 6)
 
-**What it is.** Bambu Studio's multi-plate view. Both plates stand on one floor:
-
-- **plate 1**, the *loaded* plate, on the left - what was loaded: the plate read
-  (READ PLATE, or the rail button), or an imported file (IMPORT, or a sliced
-  `.gcode.3mf` dropped on the app). It is the only plate anything is loaded
-  *into*, and **nothing on it ever changes** by anything done on plate 2.
-- **plate 2**, the *second* plate, to its right - starts empty and holds
-  **copies** pulled off plate 1. It is a jump point and an export staging area,
-  nothing more.
-
-The same size (120 mm, or bigger if what is loaded spreads wider - both grow
-together), a plate and a gap apart, each with a small label lying on the floor
-in front of it ("Plate 1 - loaded", "Plate 2").
+**What it is.** Bambu Studio's multi-plate view. Both plates stand on one floor,
+**plate 1** on the left and **plate 2** to its right. They are the same size
+(120 mm, or bigger if what either holds spreads wider; both grow together), a
+plate and a gap apart. Each has a small label lying on the floor in front of
+it ("Plate 1", "Plate 2"). What each plate holds, and how every control acts on
+it, is item 6.
 
 **Active plate.** One plate is active. A **click on a plate** - its floor, its
 label, or anything standing on it - makes it active: its outline lights, the
@@ -32,25 +25,8 @@ nothing. **Every G-scope tool, the Features list, the slider, the readouts and
 EXPORT act on the active plate.** Nothing on screen moves when the active plate
 changes: the plates stay where they stand.
 
-**Copying across.** Press the isolated thing on plate 1 (a piece, a capture
-box's region, a line, a line type, a layer, the slider's range - whatever the
-Select mode isolates) and drag it over plate 2: past 3 px the copy is in hand,
-under the pointer, and it follows the pointer over plate 2's bed (or onto a
-piece there, seated at the Seat gap, or into the air). Let go over plate 2 and
-it lands there; plate 2 is then the active plate and the copy is selected.
-There is no view flip - both plates stay in view the whole time.
-
-- Let go **over plate 1**: nothing is copied ("Let go over plate 1 - nothing
-  copied"), plate 1 stays active.
-- **Escape** mid-drag: cancelled, nothing kept.
-- A press that never travels is a click (it isolates); a capture box's dots keep
-  their press; a press on bare floor orbits.
-- A piece **on plate 2** is grabbed and dropped as on the main plate
-  (`app-grab-drop.js`): on plate 2's bed, onto another piece, into the air.
-  Carried over plate 1 it is not put there - let go, it goes back where it was.
-
-What lands is what Export would write: a slice's beads as their prisms (the
-moves ride along, so "as solid" still works) or a mesh's own triangles.
+**Copying across** is item 11: press the thing on one plate, drag it over the
+other, let go - a copy lands there, where it was let go.
 
 **Removed.** The LENS | TAKE toggle, the names LENS and TAKE anywhere a user
 reads them, and the shown-plate switch (one plate drawn at a time). The corner
@@ -58,49 +34,50 @@ row is **BACK · ◎ · CLEAR · EXPORT · CLOSE**; ◎ (`#ms-btn-frame`) frames
 plates and everything on them, which is also the default view every open
 starts in.
 
-**Export follows the active plate.** Plate 1: the Selection (and Sliced piece
-while a slice made here is shown), as before. Plate 2: Selected piece (lines
-and solid) and **Whole plate** (to the main plate, each piece its own object,
-one Undo; or one STL, `Plate_2.stl`).
+**Export follows the active plate, the same on either.**
+- **Selection** (or **Selected piece**, on a plate of pieces), and **Sliced
+  piece** while a slice made here is shown.
+- **Whole plate**, on any plate that holds pieces or a mesh: every piece to the
+  main plate (each its own object, one Undo), or as one STL, `Plate_1.stl` or
+  `Plate_2.stl`.
+- The same content on either plate exports byte-identical files.
 
-**How it is built** (`app-microscope.js`, "Two plates, side by side"). The
-module variables (`doc`, the selection, boxes, layer range, ...) are the active
-plate's; the other plate's are stashed, with its own three scene groups, meshes
-and clip planes. **The active plate always stands at the world origin**, so
-every coordinate in the file - picks, boxes, clip planes, the grab world - is
-the active plate's own, exactly as when one plate was shown at a time; the
-other plate's groups and floor are drawn beside it (`placePlates`), and a change
-of active plate moves the camera by the same step (`shiftView`). Internally the
-plates keep their old keys, `'lens'` (plate 1) and `'take'` (plate 2):
-`NSO_MICROSCOPE.plate()`, `showPlate(name)` / `activatePlate(name)`,
-`plateOffset(name)`, `plateSide()`, `plateState(name)` (camera in that plate's
-own frame), `takePieces()`, `frame()`.
+**How it is built** (`app-microscope.js`, "Two plates, side by side").
+- The module variables (`doc`, the selection, boxes, layer range, ...) are the
+  active plate's. The other plate's are stashed, with its own three scene
+  groups, meshes and clip planes.
+- **The active plate always stands at the world origin**, so every coordinate
+  in the file (picks, boxes, clip planes, a drop) is the active plate's own,
+  exactly as when one plate was shown at a time. The other plate's groups and
+  floor are drawn beside it (`placePlates`), and a change of active plate moves
+  the camera by the same step (`shiftView`).
+- Internally the plates keep their old keys, `'lens'` (plate 1) and `'take'`
+  (plate 2): `NSO_MICROSCOPE.plate()`, `plateDoc(name)`, `showPlate(name)` /
+  `activatePlate(name)`, `plateOffset(name)`, `plateSide()`, `plateState(name)`
+  (camera in that plate's own frame), `takePieces(name)` (a plate's mesh
+  objects; plate 2's by default), `frame()`.
 
-## 2. CLEAR (round 1a)
+## 2. CLEAR (round 1a; round 2b, item 9)
 
-- **CLEAR** empties plate 2 and makes everything on plate 1 whole again:
-  nothing isolated, selected, boxed, cleared from view or switched off in the
-  Features list, the slider at All. Plate 1 keeps its document and becomes the
-  active plate.
-- **Shift-CLEAR** does that and also drops an imported file and reads the plate
-  again into plate 1.
-
-Both work from a fresh page (G-scope just opened) and mid-session.
+Item 9: CLEAR empties the active plate and nothing else. Shift-CLEAR is gone.
 
 ## 3. CLOSE and BACK end the visit (round 1a)
 
 CLOSE, BACK (a producer's way back, e.g. Picture), and every export that leaves
-G-scope end the visit **whole**. The next open starts from a fresh read of the
-plate - or of the imported file, if plate 1 was showing it (or a slice made
-from it) when G-scope closed - with nothing isolated, nothing selected, the
-slider at All, the Features list's defaults (Travel off), Toolpath render,
-Piece mode, no card open, plate 2 empty and the default view (◎'s framing of
-both plates). **Nothing from the previous visit survives except an imported
-file**; Shift-CLEAR drops that too.
+G-scope end the visit **whole**. The next open starts on plate 1 with:
+- a fresh read of the plate, or of the imported file if either plate was
+  showing it (or a slice made from it) when G-scope closed;
+- nothing isolated, nothing selected, the slider at All;
+- the Features list's defaults (Travel off), Toolpath render, Piece mode, no
+  card open;
+- plate 2 empty, and the default view (◎'s framing of both plates).
 
-`close()` throws plate 2 away (`dropTake`), empties plate 1 (`reset`) and keeps
-only `importedDoc`; the rail button reopens `importedDoc` with `open()` (which
-resets everything about it) or reads the plate.
+**Nothing from the previous visit survives except an imported file**, and a
+CLEAR of the plate that showed it drops that too (item 9).
+
+`close()` empties both plates (`reset`) and keeps only `importedDoc`; the rail
+button reopens a copy of `importedDoc` with `open()` (which resets everything
+about it) or reads the plate.
 
 ## 4. The Features list: checkboxes only (round 1b)
 
@@ -115,7 +92,7 @@ checkbox - and nothing but checkboxes:
   row-click isolate, no hover preview, no snap-back, and a row is not dragged.
 - **Whatever is shown is what Select, a drag and Export act on.** A selection
   keeps its moves, but only the checked line types' moves are exported, copied
-  onto plate 2 or swept as a solid (`actedOn()`); a press where an unchecked
+  across to the other plate or swept as a solid (`actedOn()`); a press where an unchecked
   type is drawn has nothing to take. Check it again and it is acted on again.
 - **Check all** (VIEW card, `#ms-btn-show-all`, the old Show all) checks every
   box - Travel too - and nothing else: an isolation stays, and what was cleared
@@ -136,6 +113,57 @@ Every removed button's job, and where it went:
 
 **VIEW card order:** Normal · Slice view | Toolpath · Solid | Slice settings |
 Check all · Clear from view · Select shown.
+
+## 6. The two plates are the same (round 2b)
+
+**What the user sees.** Plate 2 is a second plate 1: its own zone, not a
+staging area. Every control acts on the **active** plate and works identically
+on either:
+- **IMPORT** and **READ PLATE** load into the active plate, in place of what it
+  held. The other plate is not touched.
+- The **Features list**, the **slider**, **SELECT**, **VIEW** (Slice view
+  too) and **EXPORT** act on the active plate's document, whatever it is.
+- A drag copies across in **both** directions (item 11).
+- **CLEAR** empties the active plate (item 9).
+
+Nothing needs a drag to plate 2 just to export: each plate exports itself.
+
+**What a plate holds.** Nothing (an empty plate shows "Plate N is empty" and
+waits for Import, Read plate or a drag), or one document:
+- a plate read;
+- an imported file (STL, 3MF, sliced `.gcode.3mf`);
+- a slice made here;
+- or **pieces**: what drags set down on a plate that was empty, a mesh
+  document of pieces (source `'take'`).
+
+A piece copied off a slice keeps its moves, so it can join a slice or be
+exported "as solid".
+
+**How it is built.**
+- `plateDoc(name)` is either plate's document. Both plates start empty
+  (`freshPlate`).
+- `open(d)` loads into the active plate. The plate side is what either plate's
+  document needs (`sizePlates`).
+- The imported file is kept as a copy (`importCopy`), so whatever is set down
+  on the plate showing it never reaches the file itself.
+- Nothing is gated on which plate is active any more. The Slice card, the range
+  card's drag and every Export row read the active document. The checks that
+  used to read "plate 2" now read what the document is: `isPieces(doc)`, or
+  `hasBeads(doc)` (a mesh holding pieces still made of beads).
+
+## 9. CLEAR empties the active plate (round 2b)
+
+- **CLEAR** empties the **active** plate and nothing else: its document,
+  pieces, selection, boxes, isolation, clears and slider (`emptyPlate`). The
+  other plate is not touched, byte for byte. The active plate stays active,
+  empty, ready for **Import** or **Read plate** (or a drag). The same on either
+  plate, from a fresh page or mid-session.
+- **Shift-CLEAR is gone**: Shift changes nothing.
+- On a fresh open with only plate 1 loaded, CLEAR on plate 1 is the
+  start-over: plate 1 empty. If the plate cleared was showing the imported file
+  (and the other plate is not), the import is forgotten, so the next open reads
+  the plate again.
+- The Features set is shared by both plates, so CLEAR leaves it as it is.
 
 ## 10. Speed (round 2a)
 
@@ -181,14 +209,14 @@ answers within a frame. Nothing is drawn differently for it.
     (Region on one software-GL box, Feature and Line on another, Piece here on
     d7abbea). No GPU readback is involved: the hover is plain geometry.
   - `gscope:select` 1b drives both sequences on a fake clock.
-- **A plate 2 piece is built once.** Its drawn geometry (a slice's beads as
+- **A piece is built once.** A piece's drawn geometry (a slice's beads as
   12-triangle prisms coloured by line type, or a mesh's own triangles) is kept
-  with the piece (`pieceGeometry`). A redraw of plate 2 (a pull, a drop, a
+  with the piece (`pieceGeometry`). A redraw of its plate (a pull, a drop, a
   click that activates it) hands the same geometry to the new mesh. A piece
   moved on the bed keeps it too, and the mesh stands where the piece went
   (`userData.base`). It is rebuilt only when what it is drawn from changes: a
   seat that turns the piece, or a line type switched on or off. A pull's copy is
-  drawn from the prisms the pull already built (`seedPieceGeometry`), not from a
+  drawn from the prisms the pull already built (round 2b: the ghost, item 11), not from a
   second build. The hover outline of a bead piece is each prism's 12 box edges,
   read straight off its triangles, and is kept too.
 - **The prisms are built in typed arrays.** `buildLineGeometry` (nso-gcode-lines.js)
@@ -232,20 +260,69 @@ points it at another checkout for a before / after. `gcode:lines-build`
 (`tools/nso_gcode_lines_build_test.js`) checks the typed-array prisms against
 the old build, bit for bit.
 
+## 11. The drag: a ghost, both ways (round 2b)
+
+**What the user sees.** Press a thing on one plate (a piece, a capture box's
+region, a line, a line type, a layer, the slider's range) and drag. Past 3 px
+a copy of it is in hand, **drawn under the pointer on every frame of the
+way**: over the plate it came from, across the gap, over the other plate. It
+slides on whichever bed is under the pointer, seats onto a piece of the other
+plate, or floats in the air. Let go and it **lands exactly where it was let
+go** - no jump, no pop-in. The plate it came from is not changed. The other
+plate is then active, with the copy selected.
+
+- Let go **back over the plate it came from**: nothing is copied ("Let go
+  over plate N - nothing copied"), and that plate is active again. **Escape**
+  mid-drag: cancelled, nothing kept.
+- A **piece** on a plate (one a drag set down there) is grabbed instead: it
+  *moves* on its bed, onto another piece (seated at the Seat gap), into the
+  air - the main plate's grab (`app-grab-drop.js`). Carried over the **other**
+  plate's bed and let go, it is **copied** there, where it was let go, and it
+  stays where it was too. This is how a piece goes plate 2 → plate 1.
+- A press that never travels is a click (it isolates); a capture box's dots
+  keep their press; a press on bare floor orbits.
+
+**Where it lands.**
+- **An empty plate** becomes a plate of pieces.
+- **A plate holding a mesh** (pieces, a plate read, an imported STL / 3MF) gets
+  one more piece.
+- **A plate holding a slice** gets the piece's **moves**: they join the slice
+  as one more object, drawn as its lines, with new move numbers and runs of
+  their own, and the layers and slider steps are made again (`appendToSlice`).
+- A piece with no moves (a mesh, or one a seat turned) cannot join a slice:
+  refused, nothing copied.
+
+**How it is built.**
+- `pullSpec` reads the thing pressed: a slice's moves as their prisms, a
+  mesh's triangles, or bead pieces' shown moves.
+- `makeGhost` draws it once, as it will land (prisms in line-type colours,
+  or the piece colour), in the scene itself, its footprint centre and bottom
+  at the mesh's origin.
+- At the slop the other plate becomes active (nothing on screen moves) and
+  `ghostWorld` carries the ghost. `pieceWorld` carries a grabbed piece.
+- Both answer `underCarry`: the active plate's pieces to seat onto, then
+  **either plate's bed** (so the carried thing never leaves the pointer), then
+  the air.
+- On release `setDownOn` lands it at the ghost's position. On a mesh plate the
+  ghost's geometry *is* the piece's from then on (nothing rebuilt, so nothing
+  moves).
+- `copyAcross` does the same for a grabbed piece let go over the other plate.
+
 ## Checks
 
 | check | what it holds |
 |---|---|
-| `gscope:take` (`tools/nso_gscope_take_test.js`) | items 1-3: the two plates, click-to-activate, copying across (five kinds), the refusals, plate 2's grab and drop, Export on the active plate, CLEAR / Shift-CLEAR from a fresh page and mid-session, CLOSE / BACK then reopen clean, an import surviving a close |
+| `gscope:take` (`tools/nso_gscope_take_test.js`) | items 1-3, 6, 9, 11: the two plates and click-to-activate; drags 1 -> 2 (five kinds) with the ghost under the pointer on every move and the copy landing exactly where let go; drag 2 -> 1 onto a plate read and into a slice; the refusals; grab and drop on a plate; Import and Read plate onto plate 2; the same content exporting byte-identical files from either plate; CLEAR on each plate emptying only that plate, from a fresh page and mid-session; Shift-CLEAR = CLEAR; CLOSE / BACK then reopen clean; an import surviving a close |
 | `gscope:shell` | the four-button column, the three cards (Select, View in its order, Export), the corner row (BACK · ◎ · CLEAR · EXPORT · CLOSE), the dock, the retired ids gone |
 | `gscope:select` | the hover's clock on a fake clock (the last move always answered, never an older one after it); every hover waited for (up to 2 s, the failure says how long); a big piece's hover answering while its tree builds (item 10); the Select card's five modes; item 4's checkbox contract (two rows checked - exactly those two types drawn; none - nothing; hover changes nothing; the text toggles; Check all; Export and a drag take only what is shown) |
 | the #205 set | the older G-scope drive checks (camera, zoom, slice, solid, watch, legend, ...) still hold; `gcode:gscope`'s Crop sections are its Take band section now; `gcode:gscope-support` and `support:ui` are retired (item 5) |
-| `gscope:speed` | item 10: a 60-move drag follows on plate 1, across and on plate 2; orbit (the main thread's share of a frame on the file, the frame rate on the small slice); the pick <= 16 ms; nothing renders under G-scope; no press or held move past a frame; a pull's first move per thousand moves copied |
+| `gscope:speed` | items 10 and 11: a 60-move drag follows on plate 1, across and on plate 2; the ghost drawn on every frame of a pull; orbit (the main thread's share of a frame on the file, the frame rate on the small slice); the pick <= 16 ms; nothing renders under G-scope; no press or held move past a frame; a pull's first move per thousand moves copied |
 | `gcode:lines-build` | item 10: `buildLineGeometry`'s typed-array prisms are the old build's, bit for bit |
 | `page:manifest` | the page loads each script once |
 
 ## Not done here
 
-Plate 2 is not saved with the session and has no Undo of its own (CLEAR is the
-way to start over). Slice reads plate 1 only. A slice's pieces keep their beads
-only until a seat turns them.
+Neither plate is saved with the session, and a plate has no Undo of its own
+(CLEAR is the way to start over). A piece's beads last only until a seat turns
+it. A piece dragged INTO a slice stays part of that slice: it is not grabbed
+and moved afterwards, as a plate's pieces are.

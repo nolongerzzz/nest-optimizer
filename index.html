@@ -1310,9 +1310,9 @@
   <div id="microscope" class="ms-panel" tabindex="0" hidden>
     <div id="ms-sidebar" class="ms-col" role="toolbar" aria-label="G-scope" aria-orientation="vertical">
       <button id="ms-btn-open" type="button" class="vp-bar-btn"
-              title="Open a file instead of the plate. The rail button opens the plate. Import opens a file instead: STL and plain 3MF are not sliced, so they have no layers and no features and draw as whole parts.">Import</button>
+              title="Open a file onto the active plate (it replaces what that plate holds; the other plate is not touched). STL and plain 3MF are not sliced, so they have no layers and no features and draw as whole parts.">Import</button>
       <button id="ms-btn-plate" type="button" class="vp-bar-btn"
-              title="Read the pieces that are on the plate right now, as placed, onto plate 1. The plate itself is not changed.">Read plate</button>
+              title="Read the pieces that are on the plate right now, as placed, onto the active plate. The plate itself is not changed.">Read plate</button>
 
       <button id="ms-nav-select" type="button" class="vp-bar-btn ms-nav ms-group-start"
               data-card="ms-card-select" aria-controls="ms-card-select" aria-expanded="false">Select</button>
@@ -1335,7 +1335,7 @@
         <button id="ms-btn-frame" type="button" class="vp-bar-btn" aria-label="Frame the view"
                 title="Frame both plates and everything on them">&#9678;</button>
         <button id="ms-btn-take-clear" type="button" class="vp-bar-btn"
-                title="Empty plate 2 and make plate 1 whole again. With Shift, also drop an imported file and read the plate again">Clear</button>
+                title="Empty the active plate - the other plate is not touched. An emptied plate is ready for Import or Read plate">Clear</button>
         <button id="ms-nav-export" type="button" class="vp-bar-btn ms-nav"
                 data-card="ms-card-export" aria-controls="ms-card-export" aria-expanded="false">Export</button>
         <button id="ms-close" type="button" class="vp-bar-btn">Close</button>
@@ -1500,14 +1500,14 @@
                     title="Download the piece this slice was made from as an STL">Export piece as STL</button>
           </div>
         </div>
-        <!-- Plate 2 active only: the whole plate. The group above is then the selected piece. -->
+        <!-- A plate of pieces (either plate): the whole plate. -->
         <div class="ms-xgroup">
           <div class="ms-section-title">Whole plate</div>
           <div class="ms-btn-row" id="ms-take-export-row" data-flex="1" style="display:none;">
             <button id="ms-btn-take-export-plate" type="button"
-                    title="Put every piece on plate 2 onto the main plate, each as its own object (one Undo)">Export to plate</button>
+                    title="Put every piece on the active plate onto the main plate, each as its own object (one Undo)">Export to plate</button>
             <button id="ms-btn-take-export-stl" type="button"
-                    title="Download the whole of plate 2 as one STL, the pieces where they stand">Export as STL</button>
+                    title="Download the whole of the active plate as one STL, the pieces where they stand">Export as STL</button>
           </div>
         </div>
       </div>
@@ -1777,7 +1777,7 @@
   <!-- Handle, bracket, lid and hinge detection for G-scope's Parts list, one
        row each under the Flange row. Pure. docs/GSCOPE-FEATURES.md. -->
   <script src="nso_face_features.js?v=features1"></script>
-  <script src="app-microscope.js?v=speed3"></script>
+  <script src="app-microscope.js?v=plates4"></script>
   <!-- Detach / Reattach (Cut menu): cap a detected flange's hull on its own
        wall, lift the flange out as a piece, seat it elsewhere with Attach's
        seat. After nso_flange.js, app-crop.js, nso_assemble.js, app-assemble.js
@@ -1792,7 +1792,7 @@
   <!-- The Supports card on the main page: the same detection and planner,
        after app-core.js / app-join.js, whose ingest and soups it uses. -->
   <script src="app-supports-card.js?v=sheet1"></script>
-  <script src="app-gscope-slice.js?v=plates1"></script>
+  <script src="app-gscope-slice.js?v=plates2"></script>
   <!-- Lift: details off a face, the face left as it was round them. After
        nso_lift.js (Phase 1: a flat face), nso_lift_curved.js (Lift 3: the
        repair under a detail lifted off a curved base), nso_lift_auto.js

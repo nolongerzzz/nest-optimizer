@@ -109,7 +109,6 @@ var NSO_GSCOPE_SLICE = (function () {
     if (busy) return Promise.resolve({ ok: false, reason: 'already slicing' });
     var d = MS() && MS().getDoc();
     if (!d) return refuse('Open something first: Read the plate, or Import an STL / 3MF.');
-    if (d.source === 'take') return refuse('Slice works on plate 1. Plate 2 holds copies; click plate 1 to slice what you loaded.');
     if (d.kind !== 'mesh') return refuse('This is already a toolpath. Slice works on a mesh - the plate, an STL or a 3MF.');
     if (!SL()) return refuse('The slicer (nso_slicer.js) did not load - check console.');
     if (!window.NSOGcodeLines) return refuse('The toolpath reader did not load - check console.');
@@ -271,7 +270,7 @@ var NSO_GSCOPE_SLICE = (function () {
       c.setAttribute('aria-pressed', String(on));
       c.setAttribute('aria-busy', String(busy));
       // A mesh can be sliced; an imported .gcode.3mf is a slice already.
-      c.disabled = busy || !(d && d.source !== 'take' && (d.kind === 'mesh' || on));
+      c.disabled = busy || !(d && (d.kind === 'mesh' || on));
       c.textContent = busy ? 'Slicing...' : 'Slice view';
     }
   }
@@ -300,7 +299,7 @@ var NSO_GSCOPE_SLICE = (function () {
     var row = $('ms-slice-row');
     var d = MS() && MS().getDoc();
     var ours = !!(d && d.nsoSlice);
-    if (row) row.style.display = d && d.source !== 'take' && (d.kind === 'mesh' || ours) ? 'block' : 'none';
+    if (row) row.style.display = d && (d.kind === 'mesh' || ours) ? 'block' : 'none';
     syncToggle();
     var exp = $('ms-slice-export-row');
     if (exp) exp.style.display = ours ? 'flex' : 'none';

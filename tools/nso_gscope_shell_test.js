@@ -82,7 +82,7 @@ const CARDS = {
 };
 const EXPORT_GROUPS = { 'Selection': ['ms-btn-export-plate', 'ms-btn-export-stl', 'ms-btn-export-solid-plate', 'ms-btn-export-solid-stl'],
                         'Sliced piece': ['ms-btn-slice-export-plate', 'ms-btn-slice-export-stl'],
-                        'Whole plate': ['ms-btn-take-export-plate', 'ms-btn-take-export-stl'] };   // the last shows with plate 2 active only
+                        'Whole plate': ['ms-btn-take-export-plate', 'ms-btn-take-export-stl'] };   // the last shows on a plate of pieces or a mesh, either plate
 const DOCK = ['ms-legend-float', 'ms-legend-toggle', 'ms-legend', 'ms-title', 'ms-sub', 'ms-info-title', 'ms-info',
               'ms-slice-read', 'ms-hint-badge'];
 /* What round 1b took out of G-scope: no element keeps these ids. */
@@ -258,7 +258,7 @@ withApp(async (page, logs) => {
     check('...labelled BACK, ◎, CLEAR, EXPORT, CLOSE', JSON.stringify(r.cornerText.map(norm)) === JSON.stringify(CORNER.map(c => c[1])), r.cornerText.map(norm).join(' | '));
     Object.keys(CARDS).forEach(c => check(c + ' holds its controls, and is in the viewport (not the column)', r.cards[c].length === 0 && r.cardInVp[c],
       r.cards[c].join(', ') || CARDS[c][1].length + ' ids'));
-    check('Export: "Selection" holds the four, "Sliced piece" the two, "Whole plate" (plate 2 only) the two',
+    check('Export: "Selection" holds the four, "Sliced piece" the two, "Whole plate" (a plate of pieces or a mesh) the two',
       JSON.stringify(r.groups) === JSON.stringify(EXPORT_GROUPS), JSON.stringify(r.groups));
     check('the dock holds the legend, the file line, the info, Features, the Slice report and the hint', r.dock.length === 0, r.dock.join(', ') || DOCK.length + ' ids');
     check('...and none of it is in a card', r.dockInCard.length === 0, r.dockInCard.join(', '));
@@ -341,8 +341,8 @@ withApp(async (page, logs) => {
     let st = await cardState(page);
     check('no card is open to begin with', st.open.length === 0, st.open.join(','));
     const dis = Object.keys(CARDS).filter(c => st.shown[c].disabled);
-    check('on a plate piece, nothing selected: Export is disabled (its rows are hidden); Select and View are not',
-      JSON.stringify(dis.sort()) === JSON.stringify(['ms-card-export']), dis.join(','));
+    check('on a plate read, nothing selected: no button is disabled - Export offers the Whole plate (every plate exports itself, docs/GSCOPE.md item 6)',
+      dis.length === 0, dis.join(','));
     const openable = Object.keys(CARDS).filter(c => !st.shown[c].disabled);
     for (const card of openable) {
       await openCard(page, card);
@@ -368,11 +368,15 @@ withApp(async (page, logs) => {
     await openCard(page, 'ms-card-select');
     st = await cardState(page);
     check('its own button again shuts it', st.open.length === 0 && !st.shown['ms-card-select'].on && st.shown['ms-card-select'].aria === 'false', st.open.join(','));
-    // a disabled button does nothing
+    // a disabled button does nothing: on the empty plate 2 there is nothing to export
+    await page.evaluate(() => NSO_MICROSCOPE.showPlate('take'));
     const before = await cardState(page);
+    check('on an empty plate Export is disabled (its rows are hidden); Select and View are not',
+      JSON.stringify(Object.keys(CARDS).filter(c => before.shown[c].disabled)) === JSON.stringify(['ms-card-export']));
     await page.evaluate(() => document.getElementById('ms-nav-export').click());
     st = await cardState(page);
     check('a disabled button opens nothing', st.open.length === 0 && before.open.length === 0, st.open.join(','));
+    await page.evaluate(() => NSO_MICROSCOPE.showPlate('lens'));
     // Escape
     await openCard(page, 'ms-card-select');
     await page.focus('#ms-nav-select');
@@ -515,7 +519,7 @@ withApp(async (page, logs) => {
     const ex2 = await page.evaluate(() => Array.from(document.querySelectorAll('#ms-card-export .ms-xgroup')).map(g => ({
       t: g.querySelector('.ms-section-title').textContent.trim(), shown: getComputedStyle(g).display !== 'none' && g.getBoundingClientRect().height > 0,
       btns: Array.from(g.querySelectorAll('button')).filter(b => b.getBoundingClientRect().width > 0).map(b => b.id) })));
-    check('Export, a slice with a selection on plate 1: all six - "Selection" four, "Sliced piece" two; "Whole plate" waits for plate 2',
+    check('Export, a slice with a selection on plate 1: all six - "Selection" four, "Sliced piece" two; no "Whole plate" (a slice exports what is selected)',
       ex2.length === 3 && ex2[0].btns.length === 4 && ex2[1].btns.length === 2 && ex2[0].shown && ex2[1].shown && !ex2[2].shown, JSON.stringify(ex2));
     const rr2 = await reach(page, 'ms-card-export');
     check('...each hit-testable', rr2.blocked.length === 0 && rr2.hit.length === 6, JSON.stringify(rr2));
