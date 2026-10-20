@@ -173,7 +173,7 @@ tell it `{ phase, done, total }` as they go, once per unit finished:
 |---|---|---|
 | `detecting` | `plan()`: the plate and the spatial index | none (`null`, `null`) |
 | `planning` | `plan()`: beacons settled / beacons given (a beacon inside the piece is settled when it is refused) | `done` / `total` |
-| `building` | `parts()`: trunks swept / trunks | `done` / `total` |
+| `building` | `parts()`: units done / `buildUnits(plan, opts)` - with the interface sheet, its tips first (one per tip that is not a side tip, told off by `sheet()`'s `opts.progress` as the level's footprint raster is read and each level's gap holds), then one per trunk swept | `done` / `total` |
 | `welding` | `weld()`: the unions | none: how many joins there will be is not known until the last is done |
 
 A phase with no count says so with nulls; no total is ever guessed. `done` never
@@ -188,9 +188,19 @@ ignored.
 at a time, with `opts.yieldFn` given a turn between trunks) then
 `weld(plan, parts, opts)` (the unions, with `yieldFn` after each). `solid` with
 no callback and no `yieldFn` is the same bytes as before: it runs the sync
-`trunkParts`, which `parts()` shares with it, then `weld`. The Supports card calls
-`parts` (in its worker) and `weld` (on the page) itself, so it can run every area
-through one phase before the next and keep one bar.
+`trunkParts`, which `parts()` shares with it, then `weld`.
+
+**Shells, no weld.** `shells(plan, parts)` is `solid()`'s answer with no
+boolean: every part (column, foot, stub, pad bridge and fill, each layer of the
+interface sheet) is kept as its own closed shell, and the parts are grouped into
+the solids `weld()` would have made - trunks whose foot pads touch (a cluster of
+`padGaps`, `parts.padGroups`) and each sheet with every trunk carrying one of
+its tips. Synchronous, milliseconds. A slicer fills an object's overlapping
+shells as one, so the printed layers are the weld's: `support:shells` cuts both
+with `nso_slicer.js` at every 0.2 mm layer and holds them to two microns. The
+Supports card calls `parts` then `shells` in its worker; `weld` stays for
+`solid()` (G-scope's row, and `hollow`, whose bores are a subtraction from
+one solid).
 
 ## 3. Measured (`support:gridpack`, 80 checks; `support:exposed`, 114)
 

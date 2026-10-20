@@ -144,30 +144,43 @@ crosses them; lines of the sheet pass over them, so they are cut under it.
   one of its tips, so the clamp's build is 4 support pieces (11 without).
 
 **Build time, the card in Chromium** (`GENERATE`; detecting / planning /
-building in the worker, welding on the page - and, for an area with a sheet,
-in the worker at the same time):
+building in the worker). Before this PR the sheet's areas were welded in the
+worker and the rest on the page; now nothing is welded - every part is its own
+closed shell (`NSO_SupportGridpack.shells`, `support:shells`):
 
-| piece | | total | planning | building | welding | longest page stall |
-| --- | --- | --- | --- | --- | --- | --- |
-| clamp, standing (4 areas) | before | 20.0 s | 4.0 s | 0.3 s | 15.0 s | 489 ms |
-| | after | 26.1 s | 4.2 s | 3.3 s | 17.9 s | 439 ms |
-| the wedge, `v9_mirror_factory` (25 areas) | before | 16.3 s | 3.7 s | 2.2 s | 8.9 s | 707 ms |
-| | after | 23.6 s | 4.4 s | 4.7 s | 13.2 s | 695 ms |
+| piece | | total | planning | building | welding |
+| --- | --- | --- | --- | --- | --- |
+| clamp, standing (4 areas) | welded | 23-27 s | 3.4 s | 3.1 s | 16 s |
+| | shells | **7.6-8.9 s** | 3.5 s | 3.0 s | - |
+| the wedge, `v9_mirror_factory` (25 areas) | welded | 23.6 s | 4.4 s | 4.7 s | 13.2 s |
+| | shells | **11.9 s** | not split | not split | - |
 
-The sheet is planned and its tips are built in the worker (`building`). An
-area that carries a sheet is welded in the worker too (the card's worker
-loads `nso_csg.js` for it): the sheet's lattice is one union of about 200k
-triangles (25 per line crossing), then one union with every trunk it stands
-on, and `_finishUnion` over the result - on the page these held it for 1.2 s
-and went to the boolean worker, whose own bar and "Joining... N s" took the
-card's status line. In the worker they run while the page welds the areas
-without a sheet. The probe of the piece is prepared once per build, not once
-per area (0.6 s of the wedge's 49k triangles, 25 times over).
+**Where the clamp's weld went** (node, area 1: 126 trunks and its sheet, 19 s of
+the 22 s over the four areas): 584 unions, 14.1 s - and two thirds of that
+(9.6 s) was not the boolean but what every union pays around it: the two soups
+pre-welded (`weldSoupVerts` 3.1 s, `NSO_weldEpsFor` 0.8 s), turned into
+manifolds (4.1 s) and censused (`NSO_manifoldStats` 1.6 s), the growing trunk
+re-sent each time. By stage: the trunks' folds 5.4 s (446 unions), the rounds
+that join touching trunks 5.5 s (136), the sheet's four layers folded 0.9 s
+(the layers sit EPS into one another: 0.7 s of kernel for 6k triangles), the
+sheet joined to every trunk under it 2.3 s (130k + 56k triangles),
+`_finishUnion` 1.8 s. The exact-distance gap check is not in it: it runs in
+the sheet's planning (building), 0.18 s of that step's 3.3 s; the step is the
+gap solve rebuilding the level's footprint raster (2.45 s, three passes).
 
-`support:workflow` (147 checks, the card driven in Chromium) holds the wedge's
-build inside its 50 s budget: 24.2 s here. `tools/nso_support_sheet_check.js`
-in node: planning 41 s (node's vm context, not the page), parts 0.6 -> 8.9 s,
-weld 17.0 -> 22.7 s on the clamp.
+The weld bought nothing a slicer prints: `support:shells` cuts both at every
+0.2 mm layer with NSO's slicer and the sections are the same, island for
+island, to under two microns (1.42 um at worst, the wedge's foot layer: the weld's own pre-weld is the difference). And the
+welded solid was not one clean shell either: area 1's had 6809 piercing pairs
+inside it, where unions that closed a sliver of void read as "did not touch"
+and left trunks overlapping.
+
+The sheet's tips are counted while the sheet is planned (`sheet()`'s
+`opts.progress`), so building moves from its first second; before, it sat at 0
+through the sheet - 78 % of the clamp's building - and counted only the trunks.
+
+`support:interface` (`tools/nso_support_sheet_check.js`) still builds with the
+weld, as `solid()` does: its 52 checks and numbers are unchanged.
 
 ## 5. Not done here
 
