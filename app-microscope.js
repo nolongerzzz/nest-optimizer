@@ -1507,24 +1507,42 @@ var NSO_MICROSCOPE = (function () {
     if (view.renderer.domElement) view.renderer.domElement.style.cursor = 'pointer';
   }
 
-  var hoverPending = null, hoverAt = 0;
+  // One hover per HOVER_EVERY ms at most - and the LAST move always gets one. A
+  // move inside the window is kept as the one pending (a newer move replaces
+  // it), and ONE timer runs it when the window is up; a timer that finds the
+  // window not yet up waits out the rest instead of letting go of the move.
+  // (Each such move used to arm a timer of its own, and a stale one that fired
+  // within 40 ms of a hover took the newest move and dropped it: the pointer
+  // came to rest on a piece with no outline at all, in whichever mode lost the
+  // race on that machine. gscope:select drives that exact sequence on a fake
+  // clock.) The clock is performance.now(), which does not jump as the wall
+  // clock can, and a last hover stamped AHEAD of it (a clock swapped or set
+  // back) waits for nothing - it can never hold the hover off.
+  var hoverPending = null, hoverAt = -Infinity, hoverTimer = null, HOVER_EVERY = 40;
+  function hoverWait() {
+    var since = performance.now() - hoverAt;
+    return since < 0 || since >= HOVER_EVERY ? 0 : HOVER_EVERY - since;
+  }
   function onHoverMove(e) {
-    if (!view || !isOpen() || pull || e.buttons || view.dragState) { if (e.buttons) clearHover(); return; }
+    if (!view || !isOpen() || pull || e.buttons || view.dragState) { hoverPending = null; if (e.buttons) clearHover(); return; }
     if (e.target !== view.renderer.domElement) {
+      hoverPending = null;            // off the canvas: a move made on it is not answered late
       // the range card outlines what it would take; moving over it is not leaving it
       if (hoverKey && !(e.target.closest && e.target.closest('#ms-zr-card'))) clearHover();
       return;
     }
-    var now = Date.now();
-    if (now - hoverAt < 40) { hoverPending = e; setTimeout(flushHover, 45); return; }
-    hoverAt = now;
-    hoverNow(e);
+    hoverPending = e;
+    var wait = hoverWait();
+    if (!wait) flushHover();
+    else if (!hoverTimer) hoverTimer = setTimeout(flushHover, Math.ceil(wait));
   }
   function flushHover() {
+    hoverTimer = null;
     if (!hoverPending) return;
+    var wait = hoverWait();
+    if (wait) { hoverTimer = setTimeout(flushHover, Math.ceil(wait)); return; }
     var e = hoverPending; hoverPending = null;
-    if (Date.now() - hoverAt < 40) return;
-    hoverAt = Date.now();
+    hoverAt = performance.now();
     hoverNow(e);
   }
   function hoverNow(e) {
@@ -1794,6 +1812,7 @@ var NSO_MICROSCOPE = (function () {
 
   function onPressCapture(e) {
     var v = view;
+    hoverPending = null;                                    // a press is newer than any move still waiting for its hover
     if (pull && pull.touch) pull.cancelled = true;          // a second finger: the pinch's, not a click's
     if (v) v.platePress = null;
     if (!v || e.button !== 0 || pull) return;
@@ -3134,7 +3153,7 @@ var NSO_MICROSCOPE = (function () {
 
     // Hover: an outline of what a click would take.
     window.addEventListener('pointermove', onHoverMove);
-    el.addEventListener('pointerleave', function () { clearHover(); });
+    el.addEventListener('pointerleave', function () { hoverPending = null; clearHover(); });
   }
 
   // --- Isolate / Back -------------------------------------------------------

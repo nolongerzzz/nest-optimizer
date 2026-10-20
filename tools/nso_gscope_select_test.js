@@ -22,6 +22,8 @@
         Select layer buttons, no LINE / LAYER column buttons, the old ids that
         stay on the new controls; Feature / Line / Layer are a slice's. The
         column is IMPORT . READ PLATE | SELECT . VIEW.
+     1b. The hover's clock (one hover per 40 ms), on a fake clock: the last
+        move is always answered, and never an older one after it.
      2. Each mode isolates: hover outlines, click isolates (the rest out of the
         view), click again un-isolates, Escape un-isolates.
      3. Each mode pulls: a press on the hovered thing and a drag lands exactly
@@ -100,9 +102,9 @@ const PAGE_HELPERS = `
 const evalT = (page, fn, arg) => page.evaluate(fn, arg);
 const plate = page => page.evaluate(() => NSO_MICROSCOPE.plate());
 
-/* The hover, waited for. A hover is drawn on G-scope's own clock - one every 40 ms,
-   the last move of a burst on a 45 ms timer - and behind the box's frames, so a
-   fixed wait races it. Polled until it answers, up to `ms` (2 s): { info, kids,
+/* The hover, waited for. A hover is drawn on G-scope's own clock - at most one
+   every 40 ms, the last move of a burst on a timer when the 40 ms are up - and
+   behind the box's frames, so a fixed wait races it. Polled until it answers, up to `ms` (2 s): { info, kids,
    cursor, ms }, `info` null if nothing came in time - never read off a null. */
 async function waitHover(page, ms) {
   const limit = ms || 2000, t0 = Date.now();
@@ -179,6 +181,50 @@ withApp(async (page, logs) => {
     await page.click('#ms-nav-select'); await frames(page);
     await shot('01-select-card');
     await cards.closeCards(page);
+  }
+
+  /* ------------------------------------------------------------------ 1b */
+  console.log('\n=== 1b. the hover\'s clock: the last move is always answered, never an older one ===');
+  {
+    // G-scope hovers at most once per 40 ms. Driven here on a FAKE clock (performance.now,
+    // Date.now and setTimeout swapped for the drive), so these are exact times, not this box's:
+    //   a. moves at 0, 10, 34 ms off the piece, then the last one ON it at 65 ms - it
+    //      must be outlined (a stale timer used to take that move and drop it);
+    //   b. a move off it at 0, ON it at 38 ms, off it again at 41 ms - nothing may be
+    //      outlined (a stale timer used to paint the 38 ms move after the 41 ms one).
+    await showLens(page);
+    await page.evaluate(() => { const M = NSO_MICROSCOPE; M.clearBoxes(); M.checkAll(); M.setFeatureDisplay('Travel', false); if (M.isIsolated()) M.back();
+      M.setSelectionMoves([]); M.normalView(); M.setMode('piece'); });
+    await frames(page);
+    const runSeq = (seq) => page.evaluate((seq) => {
+      const M = NSO_MICROSCOPE, v = M.getView(), c = v.renderer.domElement, d = M.getDoc(), r = c.getBoundingClientRect();
+      const s = d.segments.find(g => g.feature === 'Outer wall' && g.layer === 1);
+      const p = new THREE.Vector3((s.x0 + s.x1) / 2 - d.cx, s.z, -((s.y0 + s.y1) / 2 - d.cy)).project(v.camera);
+      const at = { on: [r.left + (p.x + 1) / 2 * r.width, r.top + (1 - p.y) / 2 * r.height], off: [r.left + 30, r.top + 30] };
+      const realNow = performance.now, realDate = Date.now, realSet = window.setTimeout, q = [];
+      // each drive starts well past the last hover any earlier drive (or either real clock) stamped
+      let now = Math.max(window.__fakeHoverT || 0, realNow.call(performance), realDate.call(Date)) + 1e5;
+      const t0 = now;
+      performance.now = () => now;
+      Date.now = () => now;
+      window.setTimeout = (fn, ms) => { q.push({ at: now + (ms || 0), fn }); return q.length; };
+      const runTo = (t) => { for (;;) { q.sort((a, b) => a.at - b.at); const j = q[0]; if (!j || j.at > t) break; q.shift(); now = j.at; j.fn(); } now = t; };
+      try {
+        seq.forEach(([ms, where]) => {
+          runTo(t0 + ms);
+          c.dispatchEvent(new PointerEvent('pointermove', { clientX: at[where][0] + (ms % 7), clientY: at[where][1], bubbles: true, buttons: 0 }));
+        });
+        runTo(t0 + 1000);
+        const h = M.hoverInfo();
+        return { info: h, left: q.length };
+      } finally { window.__fakeHoverT = now; performance.now = realNow; Date.now = realDate; window.setTimeout = realSet; }
+    }, seq);
+    const a = await runSeq([[0, 'off'], [10, 'off'], [34, 'off'], [65, 'on']]);
+    check('a. the last move (onto the piece, 65 ms after a burst) is answered: the piece is outlined, no timer left', !!a.info && a.info.source === 'pick' && a.left === 0, J(a));
+    await page.mouse.move(5, 5);
+    const b = await runSeq([[0, 'off'], [38, 'on'], [41, 'off']]);
+    check('b. an older move is never answered after a newer one: off the piece at 41 ms, nothing outlined, no timer left', !b.info && b.left === 0, J(b));
+    await page.mouse.move(5, 5);
   }
 
   /* ------------------------------------------------------------------ 2 + 3 */
@@ -509,6 +555,13 @@ withApp(async (page, logs) => {
   console.log('\n=== 9. a big piece, its tree still building: the hover reports anyway ===');
   {
     for (const [m, source] of [['piece', 'pick'], ['select', 'box']]) {
+      // the pointer off the canvas first: a move still waiting for its hover is dropped
+      // there, and not answered over the new sheet - its raycast would ask for the tree
+      const off = await page.evaluate(() => { const c = NSO_MICROSCOPE.getView().renderer.domElement;
+        for (const [x, y] of [[5, 5], [5, 200], [200, 5], [5, innerHeight - 5]]) if (document.elementFromPoint(x, y) !== c) return [x, y];
+        return null; });
+      if (off) await page.mouse.move(off[0], off[1]);
+      await page.waitForTimeout(80);
       // a fresh sheet for each mode: a new geometry, so no tree for it yet
       // a flat 20 mm sheet of 400,000 triangles: big enough that nso_bvh.js's hover
       // rule answers nothing until its tree is built (in a worker, after the first ask)
