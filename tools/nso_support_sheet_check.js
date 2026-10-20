@@ -409,15 +409,23 @@ fs.mkdirSync(OUT, { recursive: true });
         const sheetPart = tp.trunks.find(tr => tr.sheet === L.id);
         let zI1 = Infinity;
         if (sheetPart) { const s0 = sheetPart.parts[0].soup; for (let i = 2; i < s0.length; i += 3) zI1 = Math.min(zI1, s0[i]); }
-        const builtCaps = [];
+        /* each cap found among the parts built by its own flat top: the
+           part whose top face's middle is the cap's centre */
+        const tops = [];
         tp.trunks.forEach(tr => { if (tr.sheet != null) return; tr.parts.forEach(pt => {
           if (pt.pad) return;
-          let lo = Infinity, hi = -Infinity; for (let i = 2; i < pt.soup.length; i += 3) { lo = Math.min(lo, pt.soup[i]); hi = Math.max(hi, pt.soup[i]); }
-          if (hi > zI1 + 5e-3 && hi < zI1 + 0.05 && hi - lo > 0.5) builtCaps.push(hi - zI1);
+          let hi = -Infinity; for (let i = 2; i < pt.soup.length; i += 3) hi = Math.max(hi, pt.soup[i]);
+          if (!(hi > zI1 - 0.05 && hi < zI1 + 0.05)) return;
+          let sx = 0, sy = 0, n = 0;
+          for (let i = 0; i < pt.soup.length; i += 3) if (Math.abs(pt.soup[i + 2] - hi) < 1e-5) { sx += pt.soup[i]; sy += pt.soup[i + 1]; n++; }
+          tops.push({ c: [sx / n, sy / n], into: hi - zI1 });
         }); });
+        const builtCaps = caps.map(c => { const m = tops.filter(q => Math.hypot(q.c[0] - c.c[0], q.c[1] - c.c[1]) < 0.02); return m.length === 1 ? m[0].into : null; });
+        const found = builtCaps.filter(d => d != null), others = tops.length - found.length;
         check(`${label}, sheet at ${f3(L.zTop)}: the interface's underside lies exactly on the caps (their flat tops ${SI.CAP.intoMm} mm into it), measured on the parts built`,
-          builtCaps.length === caps.length && builtCaps.every(d => Math.abs(d - SI.CAP.intoMm) < 2e-5),
-          `${builtCaps.length} cap part(s) for ${caps.length} cap(s), tops ${builtCaps.length ? f4(Math.min(...builtCaps)) + ' - ' + f4(Math.max(...builtCaps)) : '-'} mm into I1 (its underside at ${f4(zI1)})`);
+          found.length === caps.length && found.every(d => Math.abs(d - SI.CAP.intoMm) < 2e-5),
+          `${found.length} of ${caps.length} caps found by their tops, ${found.length ? f4(Math.min(...found)) + ' - ' + f4(Math.max(...found)) : '-'} mm into I1 (its underside at ${f4(zI1)}); ` +
+          `${others} other part(s) end within 0.05 mm of it (cut tips ${f4(SI.DEFAULTS.epsMm)} into it, and the like)`);
         /* 1c. one box a line, none under 2 mm - in the plan and in the parts built */
         const sheetEntry = tp.trunks.find(tr => tr.sheet === L.id);
         const boxCounts = sheetEntry ? sheetEntry.parts.map(pt => boxesIn(pt.soup)) : [];
