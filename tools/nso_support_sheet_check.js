@@ -404,9 +404,20 @@ fs.mkdirSync(OUT, { recursive: true });
         check(`${label}, sheet at ${f3(L.zTop)}: every cap's nearest neighbour ${CAP.gapMaxMm} mm or less away edge to edge, and none over another`,
           gs.length === 0 || (Math.max(...gs) <= CAP.gapMaxMm + 1e-9 && Math.min(...gs) >= SI.CAP.partMm - 1e-6),
           gs.length ? `nearest-neighbour gaps ${f3(Math.min(...gs))} - ${f3(Math.max(...gs))} mm` : 'one cap');
-        check(`${label}, sheet at ${f3(L.zTop)}: the interface's underside lies exactly on the caps (their flat tops ${SI.CAP.intoMm} mm into it)`,
-          caps.every(c => Math.abs(c.z1 - (L.zBase + SI.CAP.intoMm)) < 1e-9) && Math.abs(L.layers[0].z0 - L.zBase) < 1e-9,
-          `caps topped at ${[...new Set(caps.map(c => f4(c.z1)))].join(', ')}, I1 from ${f4(L.layers[0].z0)}`);
+        /* measured on the parts built, not read back off the plan: I1's
+           lowest point, and the top of every part that ends just above it */
+        const sheetPart = tp.trunks.find(tr => tr.sheet === L.id);
+        let zI1 = Infinity;
+        if (sheetPart) { const s0 = sheetPart.parts[0].soup; for (let i = 2; i < s0.length; i += 3) zI1 = Math.min(zI1, s0[i]); }
+        const builtCaps = [];
+        tp.trunks.forEach(tr => { if (tr.sheet != null) return; tr.parts.forEach(pt => {
+          if (pt.pad) return;
+          let lo = Infinity, hi = -Infinity; for (let i = 2; i < pt.soup.length; i += 3) { lo = Math.min(lo, pt.soup[i]); hi = Math.max(hi, pt.soup[i]); }
+          if (hi > zI1 + 5e-3 && hi < zI1 + 0.05 && hi - lo > 0.5) builtCaps.push(hi - zI1);
+        }); });
+        check(`${label}, sheet at ${f3(L.zTop)}: the interface's underside lies exactly on the caps (their flat tops ${SI.CAP.intoMm} mm into it), measured on the parts built`,
+          builtCaps.length === caps.length && builtCaps.every(d => Math.abs(d - SI.CAP.intoMm) < 2e-5),
+          `${builtCaps.length} cap part(s) for ${caps.length} cap(s), tops ${builtCaps.length ? f4(Math.min(...builtCaps)) + ' - ' + f4(Math.max(...builtCaps)) : '-'} mm into I1 (its underside at ${f4(zI1)})`);
         /* 1c. one box a line, none under 2 mm - in the plan and in the parts built */
         const sheetEntry = tp.trunks.find(tr => tr.sheet === L.id);
         const boxCounts = sheetEntry ? sheetEntry.parts.map(pt => boxesIn(pt.soup)) : [];
@@ -503,11 +514,60 @@ fs.mkdirSync(OUT, { recursive: true });
       }));
       const shl = GP.shells(p, tp), solidOf = {};
       shl.solids.forEach((x, k) => x.trunks.forEach(t => { solidOf[t] = k; }));
-      const groupsWhole = (tp.padGroups || []).every(g => g.every(t => solidOf[t] === solidOf[g[0]]));
+      /* RECOUNTED HERE, not read off the engine's counters: the clusters from
+         the feet (6 mm, single linkage), each foot on a built pad (its centre
+         inside the pad's top face) of a trunk in its own support, and every
+         cluster in one support - but for a foot the piece hems in, measured
+         here: no point on rings just outside its end square stands the gap
+         clear of the piece through the slab */
+      const feetL = tp.feet || [], par = feetL.map((f, i) => i), find = x => { while (par[x] !== x) x = par[x] = par[par[x]]; return x; };
+      for (let a = 0; a < feetL.length; a++) for (let b = a + 1; b < feetL.length; b++) if (Math.hypot(feetL[a].c[0] - feetL[b].c[0], feetL[a].c[1] - feetL[b].c[1]) <= 6 + 1e-9) par[find(a)] = find(b);
+      const padParts = [];
+      tp.trunks.forEach(tr => tr.parts.forEach(pt => { if (pt.pad) padParts.push({ owner: tr.trunk, soup: pt.soup }); }));
+      const onTop = (soup, x, y) => {
+        let zt = -Infinity; for (let i = 2; i < soup.length; i += 3) zt = Math.max(zt, soup[i]);
+        for (let t = 0; t < soup.length; t += 9) {
+          if (!(Math.abs(soup[t + 2] - zt) < 1e-5 && Math.abs(soup[t + 5] - zt) < 1e-5 && Math.abs(soup[t + 8] - zt) < 1e-5)) continue;
+          const ax = soup[t], ay = soup[t + 1], bx = soup[t + 3], by = soup[t + 4], cx = soup[t + 6], cy = soup[t + 7];
+          const d1 = (x - bx) * (ay - by) - (ax - bx) * (y - by), d2 = (x - cx) * (by - cy) - (bx - cx) * (y - cy), d3 = (x - ax) * (cy - ay) - (cx - ax) * (y - ay);
+          if (!((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0))) return true;
+        }
+        return false;
+      };
+      const PR = ctx.NSO_Thickness.prepare(piece, {}), plateZ0 = p.plateZ || 0;
+      const hemmedHere = f => {
+        const rIn = f.r * Math.SQRT1_2;
+        for (let dr = 0.05; dr <= GAP + 0.2 + 1e-9; dr += 0.05) for (let k = 0; k < 36; k++) {
+          const a = 2 * Math.PI * k / 36, x = f.c[0] + (rIn + dr) * Math.cos(a), y = f.c[1] + (rIn + dr) * Math.sin(a);
+          let clear = true;
+          for (let z = 0.02; z <= FOOT + GAP + 1e-9 && clear; z += 0.06) {
+            const q = [x, y, plateZ0 + z];
+            if (PR.inside(q)) { clear = false; break; }
+            const hit = PR.nearest(q, GAP); if (hit && hit.dist < GAP) clear = false;
+          }
+          if (clear) return false;
+        }
+        return true;
+      };
+      let offPad = 0, split = 0, hemmedN = 0;
+      feetL.forEach(f => {
+        const mine = padParts.filter(pd => onTop(pd.soup, f.c[0], f.c[1]));
+        if (!mine.some(pd => solidOf[pd.owner] === solidOf[f.trunk]) && !hemmedHere(f)) offPad++;
+      });
+      const groups = {};
+      feetL.forEach((f, i) => (groups[find(i)] || (groups[find(i)] = [])).push(f));
+      Object.values(groups).forEach(fs => {
+        const bySolid = {};
+        fs.forEach(f => (bySolid[solidOf[f.trunk]] || (bySolid[solidOf[f.trunk]] = [])).push(f));
+        const parts = Object.values(bySolid).sort((u, v) => v.length - u.length);
+        if (parts.length < 2) return;
+        if (parts.slice(1).every(pt => pt.every(hemmedHere))) hemmedN++; else split++;
+      });
       const onPads = p.trunks.filter(tr => tr.landing === 'plate').length;
-      check(`${label}: feet - ${tp.pads.count} pad(s) under ${onPads} trunk(s) on the plate, every cluster of feet (6 mm) on one pad, the pads ${GAP} mm or more off the piece (or no nearer than the trunk standing there), the trunks on one pad one support`,
-        tp.pads.count >= 1 && tp.pads.clustersSplit === 0 && padsUnder === 0 && groupsWhole && padSoups.length === tp.pads.count,
-        `${tp.pads.clusters} cluster(s), ${tp.pads.clustersSplit} split, ${tp.pads.hemmed || 0} hemmed in by the piece, pads ${(tp.pads.areasMm2 || []).map(a => a.toFixed(0) + ' mm2').join(', ')}; ` +
+      check(`${label}: feet - ${tp.pads.count} pad(s) under ${onPads} trunk(s) on the plate, every cluster of feet (6 mm) in one support and every foot on a pad of it (counted here), the pads ${GAP} mm or more off the piece (or no nearer than the trunk standing there)`,
+        tp.pads.count >= 1 && feetL.length === onPads && offPad === 0 && split === 0 && padsUnder === 0 && padSoups.length === tp.pads.count,
+        `${Object.keys(groups).length} cluster(s), ${split} split, ${hemmedN} with a foot the piece hems in, ${offPad} foot/feet on no pad of their support (engine: ${tp.pads.clustersSplit} split); ` +
+        `pads ${(tp.pads.areasMm2 || []).map(a => a.toFixed(0) + ' mm2').join(', ')}; ` +
         `closest pad to the piece ${fmt(padD)} (its own trunks ${fmt(colD)}), ${padsUnder} pad(s) nearer than the gap and their trunks; ${shl.solids.length} support(s)`);
       /* 5. solids: closed, manifold, no degenerate triangle (the canonical
          checker, tools/mesh_validate.py), and NO PIERCING PAIR IN THE SHEET:

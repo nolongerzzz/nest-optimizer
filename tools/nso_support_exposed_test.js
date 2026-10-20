@@ -513,7 +513,12 @@ fs.mkdirSync(OUT, { recursive: true });
         check(`${label}: the middle of four feet is solid slab, floor to top`, zc.length === 2 && near(zc[0], 0, 1e-4) && near(zc[1], 0.2, 1e-4),
           zc.map(z => z.toFixed(3)).join(', '));
       } else {
-        check(`${label}: no slab in the middle of four feet 12 mm apart (6 mm from each, past 4 mm and the foot)`, zc.length === 0, zc.map(z => z.toFixed(3)).join(', '));
+        /* half way between two feet side by side - 6 mm from each, past the
+           4 mm growth and the foot's 0.85: where a bridge between their pads
+           would be (the middle of four is 8.49 mm from each and sees none) */
+        const zb = zCrossings(slab.soup, mid + pitch / 2, mid).filter(z => z < 0.25);
+        check(`${label}: no slab half way between two feet 12 mm apart (6 mm from each, past 4 mm and the foot), nor in the middle of four`,
+          zb.length === 0 && zc.length === 0, `between two: ${zb.map(z => z.toFixed(3)).join(', ') || 'none'}; middle of four: ${zc.map(z => z.toFixed(3)).join(', ') || 'none'}`);
       }
     }
   }

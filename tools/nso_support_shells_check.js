@@ -337,9 +337,45 @@ function extruded(layer) {
         if (g.area(g.inter(firsts[a], firsts[b])) > 1e-9) touching++;
       }
     } finally { g.free(); }
-    check(S.name + ': every cluster of feet on one pad, whatever area it holds; the supports on one pad are one support; no two supports\' first layers within 0.1 mm',
-      sf.clustersSplit === 0 && touching === 0,
-      sf.reason + '; ' + sf.objects.map((ob) => ob.from.length + ' part(s) of ' + new Set(ob.from.map((f) => f[0])).size + ' area(s)').join(', ') +
+    /* recounted here, not read off shareFeet's counters: the clusters from
+       every area's feet (6 mm), and each in one support object - but for a
+       foot the piece hems in, measured here (no point on rings just outside
+       its end square stands 0.2 mm clear of the piece through the slab) */
+    const objOf = {};
+    sf.objects.forEach((ob, k) => ob.from.forEach((f) => { objOf[f[0] + ':' + f[1]] = k; }));
+    const feet = [];
+    builds.forEach((b, bi) => b.solids.forEach((sd, si) => (sd.feet || []).forEach((f) => feet.push({ obj: objOf[bi + ':' + si], c: f.c, r: f.r }))));
+    const par = feet.map((f, i) => i), find = (x) => { while (par[x] !== x) x = par[x] = par[par[x]]; return x; };
+    for (let a = 0; a < feet.length; a++) for (let b = a + 1; b < feet.length; b++) if (Math.hypot(feet[a].c[0] - feet[b].c[0], feet[a].c[1] - feet[b].c[1]) <= 6 + 1e-9) par[find(a)] = find(b);
+    const PR = ctx.NSO_Thickness.prepare(S.piece, {}), pz = S.plans[0].plateZ || 0;
+    const hemmedHere = (f) => {
+      const rIn = f.r * Math.SQRT1_2;
+      for (let dr = 0.05; dr <= 0.4 + 1e-9; dr += 0.05) for (let k = 0; k < 36; k++) {
+        const an = 2 * Math.PI * k / 36, x = f.c[0] + (rIn + dr) * Math.cos(an), y = f.c[1] + (rIn + dr) * Math.sin(an);
+        let clear = true;
+        for (let z = 0.02; z <= 0.4 + 1e-9 && clear; z += 0.06) {
+          const q = [x, y, pz + z];
+          if (PR.inside(q)) { clear = false; break; }
+          const hit = PR.nearest(q, 0.2); if (hit && hit.dist < 0.2) clear = false;
+        }
+        if (clear) return false;
+      }
+      return true;
+    };
+    const groups = {};
+    feet.forEach((f, i) => (groups[find(i)] || (groups[find(i)] = [])).push(f));
+    let split = 0, hemmedN = 0;
+    Object.values(groups).forEach((fs) => {
+      const byObj = {};
+      fs.forEach((f) => (byObj[f.obj] || (byObj[f.obj] = [])).push(f));
+      const parts = Object.values(byObj).sort((u, v) => v.length - u.length);
+      if (parts.length < 2) return;
+      if (parts.slice(1).every((pt) => pt.every(hemmedHere))) hemmedN++; else split++;
+    });
+    check(S.name + ': every cluster of feet in one support, whatever area it holds (counted here); the supports on one pad are one support; no two supports\' first layers within 0.1 mm',
+      split === 0 && touching === 0,
+      sf.reason + '; ' + Object.keys(groups).length + ' cluster(s), ' + split + ' split, ' + hemmedN + ' with a foot the piece hems in (engine: ' + sf.clustersSplit + ' split, ' + (sf.clustersHemmed || 0) + ' hemmed); ' +
+      sf.objects.map((ob) => ob.from.length + ' part(s) of ' + new Set(ob.from.map((f) => f[0])).size + ' area(s)').join(', ') +
       '; first layers within 0.1 mm: ' + touching + ' of ' + pairs + ' pair(s)');
   }
   console.log('\n  time  the card\'s build: plan ' + T.plan + ' ms, parts ' + T.parts + ' ms, then shells ' + T.shells + ' ms - where the weld was ' + T.weld + ' ms');

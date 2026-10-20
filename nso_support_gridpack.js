@@ -1094,7 +1094,9 @@
         for (var k2 = 0; k2 < 36; k2++) {
           var a = 2 * Math.PI * k2 / 36, x = f.c[0] + (rIn + dr) * Math.cos(a), y = f.c[1] + (rIn + dr) * Math.sin(a);
           var clear = zs.every(function (z) {
-            return probes.every(function (P) { return !(P.inside && P.inside([x, y, z])) && !P.nearest([x, y, z], FOOT_GAP_MM); });
+            /* nearest() answers with the nearest face at any distance inside
+               the probe's grid: the distance is read, not the answer's absence */
+            return probes.every(function (P) { if (P.inside && P.inside([x, y, z])) return false; var hit = P.nearest([x, y, z], FOOT_GAP_MM); return !hit || !(hit.dist < FOOT_GAP_MM); });
           });
           if (clear) return false;
         }
@@ -1701,8 +1703,10 @@
       };
     }
     /* A TIP UNDER THE SHEET ends in its cap (sheet()'s THE CAPS): a round
-       frustum on its upright run, its flat top EPS into I1; the column stops
-       CAP_TUCK inside it. Its own shell, the next part after the column. */
+       frustum following its leg from CAP_RISE down to I1's underside, its
+       flat top CAP_INTO_MM into I1 and its last CAP_BAND_MM upright; the
+       column, cut along its own axis (no upright run), ends inside the cap's
+       height. Its own shell, the next part after the column. */
     function capped(t, res, k) {
       if (!res || !res.ok || t.mode !== 'sheet' || !t.cap) return res;
       var c = t.cap, ph = ((GOLDEN_DEG * (k + 1)) % (360 / CAP_SIDES)) * Math.PI / 180;

@@ -238,12 +238,12 @@ Supports card calls `parts` then `shells` in its worker; `weld` stays for
 `solid()` (G-scope's row, and `hollow`, whose bores are a subtraction from
 one solid).
 
-## 3. Measured (`support:gridpack`, 80 checks; `support:exposed`, 114)
+## 3. Measured (`support:gridpack`, 80 checks; `support:exposed`, 129)
 
 | fixture | result |
 |---|---|
 | **tilted box 30°** (40 × 12 × 6 on its edge) | 44 of 44 held (the detector's beacons; the lattice gave 50), 26 trunks, all on the plate, no refusal; 12 pickups, 5 merges; every leg within 30°; mesh_validate clean, one shell per solid |
-| **closed hollow box, 30°** (`library/box_closed.stl`) | `support:exposed`: **1 area, 238 beacons, 238 held** on 98 trunks (62 merges, 78 pickups), none unreachable; worst leg 29.8°; no beacon on the cavity; 98 trunks on feet join into 10 solids with no handle (Euler 20; 6 before the pads' gaps were filled), nothing below z = 0, 0.256 mm from the piece |
+| **closed hollow box, 30°** (`library/box_closed.stl`) | `support:exposed`: **1 area, 238 beacons, 238 held** on 98 trunks (62 merges, 78 pickups), none unreachable; worst leg 29.8°; no beacon on the cavity; 98 trunks in 10 clusters of feet stand on ONE pad (2359 mm², supports-print-1: the footprints grown 4 mm meet) and are one solid with no handle (Euler 2; one hole of air filled, one round the piece slotted), nothing below z = 0, 0.296 mm from the piece |
 | **flat shelf, 3 × 3** | 12 beacons (9 face + 3 corner `edge` beside the post, which the lattice could not see); 3 first merges, each at the predicted level (within 0.1 mm); every merge 2 members except one of 3 |
 | **box with a through-hole** | 26 of 26 held (the arm's whole underside, since supports-followups; 9 of 9 before); 25 steered; 22 trunks, each in the hole or beyond the block's edge, none through the block; every last run upright |
 | **mushroom on a wide stem**, rest OFF | 12 of 12 cap points *unreachable from the plate*, nothing built, no refusal |
@@ -252,6 +252,8 @@ one solid).
 | **60 mm overhang** | 28 of 28 on **one trunk**, its section capped at 2.4 mm (4 × the strut area) |
 | **Generate twice** | identical bytes (2,936 triangles on the boss) |
 | strut style | no merges or pickups: 9 posts for 9 points |
+| **pads under a slab** (`support:exposed` 4b) | 3 × 3 struts 5, 6 and 9 mm apart: one pad, one solid; 12 mm apart: 9 pads of 74.1 mm², 9 solids, no slab half way between two feet |
+| **a post with feet all round it** (`support:exposed` 4c) | a 1 mm post ringed by 8 feet, two posts, an 11 × 11 grid round two posts: one pad each, slotted (1, 2, 2), one support, 0.26 mm off the piece |
 | gecko-hand | the tree's plan exactly; mesh clean, no handles on the boss |
 | point inside the piece | the one refusal, one plain line; beside a good point it is left out and counted |
 

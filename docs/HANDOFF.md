@@ -6090,7 +6090,7 @@ caps of 2-7 mm under its interface and 15-24 mm pads.
   last 2 mm of rise (never less rise than the column's own cut needs), the
   interface's underside on it. Caps never overlap (held 0.05 mm apart) -
   overlapping or coplanar cap tops are what the union could not take - so
-  tips under 3 mm apart get narrower caps (the coupon's leg: 1.77 mm). Every
+  tips under 2.55 mm apart get narrower caps (the coupon's leg: 1.77 mm). Every
   cap is measured against the piece with the exact distance.
 - **No transition layer**: the sheet is I1 + I2.
 - **Lines**: one straight box per line, at least 2 mm, 0.43 mm wide (a 0.42
@@ -6128,7 +6128,7 @@ OPEN, the owner's call (standing rule: ask first):
 1. Should the card's 3MF set `detect_thin_wall = 1` on each support object
    (Bambu then draws each 0.43 line as one centre pass, at its thin-wall
    width: about 1.14 x the outer wall's bead per mm)? Not done.
-2. Caps under 2.5 mm where tips stand under 3 mm apart, or overlapping 2.5 mm
+2. Caps under 2.5 mm where tips stand under 2.55 mm apart, or overlapping 2.5 mm
    caps (fine for the card's shells; the weld reference cannot take them)?
 3. The line is 0.43, outside the kickoff's 0.40-0.42: a line of 0.42 is a
    zero-width wall to both slicers and a narrower one is less than none

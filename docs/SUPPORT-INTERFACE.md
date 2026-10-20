@@ -80,7 +80,7 @@ transition layer: its branches widen into flat caps of 2-7 mm (35 under a 40 x
   0.05 mm (`CAP_PART_MM`) apart, the narrower keeping its width - and so are
   a cap and a neighbour's bare column top, and caps of neighbouring levels (a
   tilted ceiling makes each row of tips a level of its own). Tips closer than
-  3 mm get caps under 2.5 mm (section 4): overlapping caps, or caps whose
+  2.55 mm get caps under 2.5 mm (section 4): overlapping caps, or caps whose
   tops lie in one plane, are what the kernel's union could not take (the
   clamp's area 2, tips 1.3-2.1 mm apart: 70 piercing pairs in its welded
   sheet with 2.5 mm caps overlapping; 55 with their tops' heights staggered).
@@ -150,7 +150,8 @@ The coupon (`top_clip_x2`): area 1, the slab at z 13.5, 40 tips, 40 caps of
 1.8 mm apart, 9 caps of 1.77 mm, 8 / 10 lines at 135 deg. One support (one
 pad under both areas' trees) built in about 1.5 s.
 
-**Caps under 2.5 mm**: where tips stand under 3 mm apart (the clamp's area 2,
+**Caps under 2.5 mm**: where tips stand under 2.55 mm apart (2.5 mm and the
+0.05 mm the caps are held apart: the clamp's area 2,
 the coupon's leg, area 1's tips where trees meet) the caps are held 0.05 mm
 apart, so they come out narrower - every one of them says why ("held short of
 a neighbour", "narrowed off the piece"); nearest-neighbour gaps edge to edge
