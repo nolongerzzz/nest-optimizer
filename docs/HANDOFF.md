@@ -6151,36 +6151,44 @@ accident, and they released cleanly - the loop is load-bearing for release.
   Faces meet, no overlap; the layers above stand on each other the same way
   (T2 is T1: set 2 um into it, the walls stood in one plane and the union left
   2 piercing pairs on the clamp's area 1). For the weld only, T1's underside
-  goes 0.01 mm into the caps (`SHEET_SINK_MM`): on one plane the union left a
+  goes 0.015 mm into the caps (`SHEET_SINK_MM`): on one plane the union left a
   T-junction where a T1 wall met a cap's top (2 pairs, the clamp's area 2).
   The parts and the export keep z_cap exact.
-- **T1, T2, I1, I2** (`SHEET_ROLES`), each a closed rectangular loop round the
-  footprint and one serpentine inside it, its turns the loop's own sides
+- **T1, T2, I1, I2** (`SHEET_ROLES`), each a closed loop round each piece of
+  the footprint and one serpentine inside it, its turns the loop's own sides
   between line ends: T1 = T2 = I2 along A, I1 across, all in one loop. One
   graph per layer through `extrudeFlat`: one connected thin wall, its section
   one region (the channels its holes) whose outer boundary is the loop, one
   bead wide. The coupon's slab: a 21.84 x 14.28 loop, 25 lines of 14.28 mm
   (27 with the loop's sides; Bambu's 29 in 22.24 x 14.34), I1 16 of 21.84.
-- **The rectangle**: the cap field (caps dilated 1.25 mm, `FIELD_MM`) in the
-  free raster; consecutive scanlines and a span inside every one's run, the
-  short sides in the field; the one most caps lie under, then the largest; A
-  across its short side on a tie, as Bambu's. One rectangle a level: the
-  clamp's ring-shaped and L-shaped ceilings leave many tips outside it
-  (uncarried: cut at z_cap if a line passes over them, else at the gap,
-  standing beside the sheet). See OPEN below.
+- **The pieces**: the sheet lies on a grid at the pitch both ways; a cell is
+  the sheet's when its edges lie in the cap field (caps dilated 1.25 mm,
+  `FIELD_MM`, in the free raster); runs under 2 mm and corner-only contacts go;
+  each 4-connected set carrying two caps or more is a piece with ONE loop
+  round its outline (stepped, rectilinear, as Bambu's loops follow the region;
+  a ring's hole joined to it by a slit) and ONE serpentine inside, its turns
+  walked along the loop. A piece whose largest rectangle carries every cap it
+  does is that rectangle: the coupon's slab and leg are one rectangle each.
+  The clamp: area 1 one stepped piece (57 x 58 mm, its ring round the boss)
+  carrying 172 tips, area 2 one (22.7 x 20.2 mm) carrying all 45 - one
+  serpentine a level carried 161 and 34, one rectangle 84 and 14;
+  `support:interface` holds 161 / 34 as floors.
 - **Caps spread before they narrow**: z_cap is 0.4 mm lower than before, where
   the coupon's converging legs stand 2.16 mm apart; caps slide apart within
   their slack, checked where they land: the slab's are 2.50 mm again.
 - **A carrying tree's own members under z_cap no longer block the footprint**
   (the deeper stack's band had caught the coupon's 1.7 mm trunks' nodes).
-- **Gates** (`support:interface`): caps end at z_cap and T1 lies on it,
-  measured on the parts built; every layer a closed loop and one serpentine
-  inside it, line ends and turns on the loop, T2 and I2 T1's; each layer's
-  mid-layer section ONE region, its outer boundary a closed rectangle (+-0.1
-  mm) one bead wide; NSO's slicer prints every layer in closed paths none under
-  2 mm (it has no thin-wall mode: the outline's loop and one round each
-  channel, two passes over each line - NOT one pass); no geometry above z_cap
-  but the sheet under its paths. `support:audit`'s export reader reads these
+- **Gates** (`support:interface`, 131): caps end at z_cap and T1 lies on it,
+  measured on the parts built; every piece of every layer a closed loop and
+  one serpentine inside it, turns on the loop, T2 and I2 T1's; each layer's
+  mid-layer section one region a piece, its outer boundary the loop one bead
+  wide (a rectangle +-0.1 mm, or the stepped outline: edges on the axes, area
+  the loop's polygon grown half a bead); the coupon's slab ONE rectangle; the
+  clamp's coverage floors; NSO's slicer prints every layer in closed paths
+  none under 2 mm; no geometry above z_cap but the sheet under its paths.
+- **NSO's own slicer prints loops, not one pass** (it has no thin-wall mode:
+  the outline's loop and one round each channel, two passes over each line).
+  That is a slicer ticket (`nso_slicer.js`), not this one; not touched. `support:audit`'s export reader reads these
   layers (walls paired by their material side).
 - **Width matrix**: `support:print-export` also writes the coupon at 0.40 /
   0.36 / 0.30 mm lines with `detect_thin_wall = 1` on the supports
@@ -6188,9 +6196,8 @@ accident, and they released cleanly - the loop is load-bearing for release.
   prints nothing under a bead.
 - **Tags**: print1 -> print2 (`nso_support_gridpack.js`,
   `nso_support_interface.js`, `app-supports-card.js`).
-
-OPEN, the owner's call:
-4. A footprint one rectangle cannot cover (the clamp's ring round its boss,
-   an L): the loop could follow the field's outline on the pitch grid (a
-   staircase, still one loop), or a level could carry one rectangle per
-   piece of it (islands). Neither is done; the coupon is one rectangle.
+- **Fixture**: the coupon is `fixtures/supports/top_clip_x2_coupon.stl`
+  (#252's slicer:supports owns `top_clip_x2.stl`, a different piece).
+- **For this print, as the owner said**: the leg's caps stay 1.66-1.78 mm; the
+  card stays at 0.43 mm lines without thin walls until the width matrix says
+  otherwise.

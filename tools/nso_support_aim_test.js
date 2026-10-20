@@ -558,9 +558,9 @@ async function coupon() {
   check(`under the slab every cap is ${SI.CAP.minMm} - ${SI.CAP.maxMm} mm across, or held a hair short of a neighbour`,
     slab.length === 40 && slab.every(w => w <= SI.CAP.maxMm + 1e-9 && w >= SI.CAP.minMm - 0.1),
     `widths ${Math.min(...slab).toFixed(3)} - ${Math.max(...slab).toFixed(3)} mm`);
-  check('each sheet is T1, T2, I1, I2 on z_cap, each layer a closed loop and ONE serpentine inside it, T2 and I2 along T1, I1 across',
+  check('each sheet is T1, T2, I1, I2 on z_cap, each layer ONE rectangular loop and ONE serpentine inside it, T2 and I2 along T1, I1 across',
     sheets.every(S => S.levels.length === 1 && S.levels[0].layers.map(x => x.role).join(',') === 'transition,transition,interface,interface' &&
-      S.levels[0].layers.every(x => x.paths.length === 2 && x.paths[1].length === 2 * x.lines) && Math.abs(S.levels[0].layers[0].z0 - S.levels[0].zCap) < 1e-9 &&
+      S.levels[0].layers.every(x => x.pieces.length === 1 && x.pieces[0].kind === 'rectangle' && x.paths.length === 2) && Math.abs(S.levels[0].layers[0].z0 - S.levels[0].zCap) < 1e-9 &&
       S.levels[0].layers[1].angleDeg === S.levels[0].layers[0].angleDeg && S.levels[0].layers[3].angleDeg === S.levels[0].layers[0].angleDeg &&
       Math.abs(((S.levels[0].layers[2].angleDeg - S.levels[0].layers[0].angleDeg) % 180 + 180) % 180 - 90) < 1e-6),
     sheets.map(S => S.levels.map(L => `loop ${L.layers[0].loopMm.map(v => v.toFixed(2)).join(' x ')}: ` + L.layers.map(x => `${x.role[0].toUpperCase()} ${x.lines} lines ${+x.angleDeg.toFixed(2)} deg`).join(', ')).join(';')).join(' | '));

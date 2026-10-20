@@ -173,7 +173,7 @@
   var RAY_EPS = 1e-3;
   var PAD_LAYERS_MM = 0.4;     /* a resting foot: two 0.2 mm layers */
   var GAP_MM = 0.18;           /* nso_support_interface.js's easy-release gap */
-  var SHEET_SINK_MM = 0.01;    /* weld() only: T1's underside this far into the caps (joinSheets) */
+  var SHEET_SINK_MM = 0.015;   /* weld() only: T1's underside this far into the caps, inside their 0.02 mm upright band (joinSheets) */
   var TIP_LEVELS = [0.05, 0.3, 0.6, 1.0, 1.5];   /* mm below a tip where the tip zone is swept for walls */
   var TIP_RISE_SIDES = 2;     /* a pickup stub's vertical last run, x the strut side */
   var NUDGE_STEPS = [0.25, 0.5, 0.75, 1];   /* x the strut side: how far a tip may move off a wall */
@@ -1769,7 +1769,7 @@
           return { id: L.id, zTop: L.zTop, zBase: L.zBase, zCap: L.zCap, tips: L.tips, caps: L.caps, lines: L.lines,
                    minDistanceMm: L.minDistanceMm, solvedDropMm: L.solvedDropMm,
                    layers: L.layers.map(function (x) { return { role: x.role, angleDeg: x.angleDeg, z0: x.z0, z1: x.z1, lines: x.lines, lengthMm: x.lengthMm,
-                                                                linesMm: x.linesMm, turns: x.turns, loopMm: x.loopMm, shortestMm: x.shortestMm, paths: x.paths }; }) };
+                                                                linesMm: x.linesMm, loopMm: x.loopMm, pieces: (x.pieces || []).map(function (q) { return { kind: q.kind, sizeMm: q.sizeMm, areaMm2: q.areaMm2, perimMm: q.perimMm, holes: q.holes, caps: q.caps, lines: q.lines }; }), shortestMm: x.shortestMm, paths: x.paths }; }) };
         })
       };
     }
@@ -2127,9 +2127,11 @@
                plane, z_cap - and the kernel left that plane, where a T1 wall
                meets a cap's top, as a T-junction it reads as piercing (2 pairs
                on the clamp's area 2). Sunk, T1's underside cuts the caps'
-               upright top band instead, as I1's did when the caps stood
-               0.01 mm into it. The parts (and so the card's export, and every
-               slice) keep z_cap exact. */
+               0.02 mm upright top band instead, as I1's did when the caps
+               stood 0.01 mm into it (sunk 0.01 or 0.005, a T1 wall along the
+               clamp's area 1 ring left a sliver in the band; 0.015, none).
+               The parts (and so the card's export, and every slice) keep
+               z_cap exact. */
             if (L.length > 1) L[0] = sunkBottom(L[0], SHEET_SINK_MM);
             var folded = L.length === 1 ? Promise.resolve({ ok: true, soup: L[0], folded: true })
               : U(joinAll(L.filter(function (x, k) { return k % 2 === 0; })), joinAll(L.filter(function (x, k) { return k % 2 === 1; })));

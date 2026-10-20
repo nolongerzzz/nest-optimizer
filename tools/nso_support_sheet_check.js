@@ -134,10 +134,10 @@ function sliceAt(soup, z) {
   }
   return segs;
 }
-/* is (x, y) under one of the level's lines (any layer; which: only that path of each - 0 the loop)? a coarse grid of segments */
+/* is (x, y) under one of the level's lines (any layer; which 0: only its pieces' loops, 1: only their serpentines)? a coarse grid of segments */
 function lineIndex(level, which) {
   const cell = 2, g = new Map();
-  for (const Ly of level.layers) for (const p of (which == null ? Ly.paths : [Ly.paths[which]])) for (let k = 0; k + 1 < p.length; k++) {
+  for (const Ly of level.layers) for (const p of (which == null ? Ly.paths : Ly.paths.filter((q, i) => i % 2 === which))) for (let k = 0; k + 1 < p.length; k++) {
     const a = p[k], b = p[k + 1];
     for (let i = Math.floor(Math.min(a[0], b[0]) / cell) - 1; i <= Math.floor(Math.max(a[0], b[0]) / cell) + 1; i++)
       for (let j = Math.floor(Math.min(a[1], b[1]) / cell) - 1; j <= Math.floor(Math.max(a[1], b[1]) / cell) + 1; j++) {
@@ -180,25 +180,44 @@ function loopsOf(segs) {
   return { loops: polys.length, open, polys };
 }
 const areaOf = P => { let a = 0; for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
-/* a layer's section read in the sheet's frame (A at deg): ONE region - one
-   outer outline, its holes the channels between the lines - and the outer
-   outline a closed rectangle, size x size2 + a bead (+-0.1 mm), every hole
-   at least a bead in from it and on every side one exactly a bead in: the
-   loop, one bead wide */
-function rectRegion(sec, deg, size, width) {
+/* a layer's section read in the sheet's frame (A at deg), against its
+   pieces (loops: each piece's loop, in the plan): one outer outline a
+   piece, no chain left open, and each outline its piece's loop a bead
+   wide - a RECTANGLE piece's a closed rectangle, size x size2 + a bead
+   (+-0.1 mm), every hole at least a bead in from it and on every side one
+   exactly a bead in; an OUTLINE piece's rectilinear (every edge along A or
+   B), as wide and long as the loop and a bead (+-0.1 mm), and as large as
+   the loop's own rectilinear polygon grown half a bead all round
+   (area + perimeter x w/2 + w^2, within 0.05 mm x the perimeter) */
+function pieceRegions(sec, deg, pieces, loops, width) {
   const th = deg * Math.PI / 180, d = [Math.cos(th), Math.sin(th)], n = [-d[1], d[0]];
   const uv = P => P.map(p => [p[0] * n[0] + p[1] * n[1], p[0] * d[0] + p[1] * d[1]]);
   const box = Q => Q.reduce((b, q) => [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[0]), Math.max(b[3], q[1])], [Infinity, Infinity, -Infinity, -Infinity]);
   if (!sec.polys.length) return { ok: false, why: 'no section' };
-  const sorted = sec.polys.slice().sort((a, b) => Math.abs(areaOf(b)) - Math.abs(areaOf(a)));
-  const outer = uv(sorted[0]), holes = sorted.slice(1).map(uv), ob = box(outer);
-  const outers = sec.polys.filter(P => Math.sign(areaOf(P)) === Math.sign(areaOf(sorted[0]))).length;
-  const offRect = Math.max(...outer.map(q => Math.min(Math.abs(q[0] - ob[0]), Math.abs(q[0] - ob[2]), Math.abs(q[1] - ob[1]), Math.abs(q[1] - ob[3]))));
-  const dims = [ob[2] - ob[0], ob[3] - ob[1]];
-  const insets = [0, 1, 2, 3].map(k => Math.min(...holes.map(h => { const hb = box(h); return k < 2 ? hb[k] - ob[k] : ob[k] - hb[k]; })));
-  const ok = outers === 1 && sec.open === 0 && offRect <= 0.1 && Math.abs(dims[0] - size[0] - width) <= 0.1 && Math.abs(dims[1] - size[1] - width) <= 0.1 &&
-    holes.length > 0 && insets.every(x => Math.abs(x - width) <= 0.02);
-  return { ok, outers, holes: holes.length, offRect, dims, insets };
+  const big = sec.polys.reduce((a, b) => Math.abs(areaOf(b)) > Math.abs(areaOf(a)) ? b : a), sg = Math.sign(areaOf(big));
+  const outers = sec.polys.filter(P => Math.sign(areaOf(P)) === sg).map(uv), holes = sec.polys.filter(P => Math.sign(areaOf(P)) !== sg).map(uv);
+  const res = pieces.map((pc, i) => {
+    const lb = box(uv(loops[i])), cx = (lb[0] + lb[2]) / 2, cy = (lb[1] + lb[3]) / 2;
+    const outer = outers.find(O => { const b = box(O); return Math.abs((b[0] + b[2]) / 2 - cx) < 0.2 && Math.abs((b[1] + b[3]) / 2 - cy) < 0.2; });
+    if (!outer) return { ok: false, kind: pc.kind, why: 'no outline for it' };
+    const ob = box(outer), dims = [ob[2] - ob[0], ob[3] - ob[1]];
+    const dimsOk = Math.abs(dims[0] - pc.sizeMm[0] - width) <= 0.1 && Math.abs(dims[1] - pc.sizeMm[1] - width) <= 0.1;
+    if (pc.kind === 'rectangle') {
+      const offRect = Math.max(...outer.map(q => Math.min(Math.abs(q[0] - ob[0]), Math.abs(q[0] - ob[2]), Math.abs(q[1] - ob[1]), Math.abs(q[1] - ob[3]))));
+      const mine = holes.filter(h => { const hb = box(h); return hb[0] > ob[0] && hb[2] < ob[2] && hb[1] > ob[1] && hb[3] < ob[3]; });
+      const insets = [0, 1, 2, 3].map(k => Math.min(...mine.map(h => { const hb = box(h); return k < 2 ? hb[k] - ob[k] : ob[k] - hb[k]; })));
+      return { ok: dimsOk && offRect <= 0.1 && mine.length > 0 && insets.every(x => Math.abs(x - width) <= 0.02), kind: pc.kind, dims, offRect, insets, holes: mine.length };
+    }
+    let worst = 0;
+    for (let k = 0; k < outer.length; k++) {
+      const a = outer[k], b = outer[(k + 1) % outer.length], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+      if (l < 1e-3) continue;
+      worst = Math.max(worst, Math.min(Math.abs(b[0] - a[0]), Math.abs(b[1] - a[1])) / l);
+    }
+    const area = Math.abs(areaOf(outer)), want = pc.areaMm2 + pc.perimMm * width / 2 + width * width;
+    return { ok: dimsOk && worst < 1e-3 && Math.abs(area - want) <= 0.05 * pc.perimMm, kind: pc.kind, dims, offAxis: worst, area, want };
+  });
+  return { ok: outers.length === pieces.length && sec.open === 0 && res.every(r => r.ok), outers: outers.length, holes: holes.length, res };
 }
 /* one sheet layer's soup through NSO's own slicer: its slice layers, its
    extrusion paths, the shortest, and the passes over the layer's centreline */
@@ -423,6 +442,12 @@ fs.mkdirSync(OUT, { recursive: true });
       const why = {};
       sh.tips.filter(x => x.mode !== 'sheet' || x.carried === false).forEach(x => { const k = x.mode + ': ' + (x.why || 'held off its face'); why[k] = (why[k] || 0) + 1; });
       Object.keys(why).forEach(k => console.log('          ' + why[k] + ' x ' + k));
+      const CARRIED_MIN = { clamp: [161, 34] }[tag];
+      if (CARRIED_MIN && CARRIED_MIN[rg.id] != null) {
+        const carried = sh.tips.filter(x => x.mode === 'sheet' && x.carried !== false).length;
+        check(`${label}: ${CARRIED_MIN[rg.id]} tips or more carried by its sheet, as one serpentine a level carried them`,
+          carried >= CARRIED_MIN[rg.id], `${carried} of ${sh.tips.length} carried (${c.sheet} under a sheet, ${c.gap} cut at the gap, ${c.side} side)`);
+      }
 
       /* 1. the stack */
       const flatTips = sh.tips.filter(x => x.mode !== 'side').length;
@@ -481,27 +506,52 @@ fs.mkdirSync(OUT, { recursive: true });
           found.length === caps.length && found.every(d => Math.abs(d) < 2e-5) && Math.abs(zI1 - L.zCap) < 2e-5,
           `${found.length} of ${caps.length} caps found by their tops, ${found.length ? f4(Math.min(...found)) + ' - ' + f4(Math.max(...found)) : '-'} mm off T1's underside (z_cap ${f4(L.zCap)}, T1 from ${f4(zI1)}); ` +
           `${others} other part(s) end within 0.05 mm of it (capless tips, cut flat at z_cap)`);
-        /* 1c. A LOOP AND ONE SERPENTINE A LAYER: in the plan two paths - a
-           closed rectangle round the footprint, then the serpentine inside
-           it, every vertex of it (its line ends, its turns) on the loop;
-           no line under 2 mm; T2 and I2 T1's, I1's loop T1's; and in the
-           parts built, each layer's own cross-section at its middle ONE
-           connected region whose outer boundary is a closed rectangle
-           (+-0.1 mm) one bead wide */
+        /* 1c. A LOOP AND ONE SERPENTINE A PIECE: in the plan, each piece of
+           each layer two paths - its loop, closed, round the piece's outline,
+           then ONE serpentine whose every step runs along the layer's
+           direction (a line) or along the loop (a turn, the loop's own
+           segment); a rectangle's lines 2 mm or longer, an outline's one
+           pitch (a rung between two of its walls); T2 and I2 T1's, I1 in
+           T1's loops. In the parts built, each layer's own cross-section at
+           its middle one region a piece, its outer boundary the piece's
+           loop one bead wide - a closed rectangle (+-0.1 mm), or the
+           stepped outline (pieceRegions) */
         const sheetEntry = tp.trunks.find(tr => tr.sheet === L.id);
         const same = (a, b) => a.length === b.length && a.every((q, k) => Math.hypot(q[0] - b[k][0], q[1] - b[k][1]) < 1e-9);
-        const onLoop = (q, loop) => { for (let k = 0; k + 1 < loop.length; k++) { const a = loop[k], b = loop[k + 1], ex = b[0] - a[0], ey = b[1] - a[1], ll = ex * ex + ey * ey;
-          const f = Math.max(0, Math.min(1, ((q[0] - a[0]) * ex + (q[1] - a[1]) * ey) / ll)); if (Math.hypot(q[0] - a[0] - f * ex, q[1] - a[1] - f * ey) < 1e-6) return true; } return false; };
-        const shapeOk = x => x.paths.length === 2 && same([x.paths[0][0]], [x.paths[0][x.paths[0].length - 1]]) && x.paths[1].every(q => onLoop(q, x.paths[0])) &&
-          x.paths[1].length === 2 * x.lines && x.shortestMm >= SI.SHEET.minRunMm - 1e-9;
-        check(`${label}, sheet at ${f3(L.zTop)}: every layer a closed loop round the footprint and ONE serpentine inside it, its line ends and turns on the loop, no line under ${SI.SHEET.minRunMm} mm; T2 and I2 T1's, I1 in T1's loop`,
-          L.layers.every(shapeOk) && same(L.layers[1].paths[0], L.layers[0].paths[0]) && same(L.layers[2].paths[0], L.layers[0].paths[0]) &&
-          same(L.layers[3].paths[0], L.layers[0].paths[0]) && same(L.layers[1].paths[1], L.layers[0].paths[1]) && same(L.layers[3].paths[1], L.layers[0].paths[1]),
-          `loop ${L.layers[0].loopMm.map(f3).join(' x ')} mm; ` + L.layers.map(x => `${x.role[0].toUpperCase()}: ${x.lines} lines of ${f3(x.shortestMm)} mm, ${x.turns} turns on the loop`).join(' | '));
-        const regions = sheetEntry ? sheetEntry.parts.map((pt, k) => rectRegion(loopsOf(sliceAt(pt.soup, (L.layers[k].z0 + L.layers[k].z1) / 2)), L.lines.angleDeg, L.layers[0].loopMm, sh.widthMm)) : [];
-        check(`${label}, sheet at ${f3(L.zTop)}: each layer's cross-section at mid-layer is ONE connected region, its outer boundary a closed rectangle (+-0.1 mm) one bead wide`,
+        const segKey = (a, b) => [a, b].map(q => Math.round(q[0] * 1e5) + ',' + Math.round(q[1] * 1e5)).sort().join('|');
+        const dirOf = deg => [Math.cos(deg * Math.PI / 180), Math.sin(deg * Math.PI / 180)];
+        const pieceOk = (x, i) => {
+          const loop = x.paths[2 * i], snake = x.paths[2 * i + 1], dd = dirOf(x.angleDeg), onLoop = new Set();
+          if (!same([loop[0]], [loop[loop.length - 1]])) return false;
+          for (let k = 0; k + 1 < loop.length; k++) onLoop.add(segKey(loop[k], loop[k + 1]));
+          for (let k = 0; k + 1 < snake.length; k++) {
+            const a = snake[k], b = snake[k + 1], l = Math.hypot(b[0] - a[0], b[1] - a[1]);
+            if (l < 1e-9) continue;
+            const along = Math.abs(((b[0] - a[0]) * dd[1] - (b[1] - a[1]) * dd[0]) / l) < 1e-6;
+            if (!along && !onLoop.has(segKey(a, b))) return false;
+          }
+          return snake.length >= 2;
+        };
+        const allRect = L.layers[0].pieces.every(q => q.kind === 'rectangle');
+        const shapeOk = x => x.paths.length === 2 * x.pieces.length && x.pieces.every((q, i) => pieceOk(x, i)) &&
+          x.shortestMm >= (allRect ? SI.SHEET.minRunMm : PITCH) - 1e-9;
+        const loopsSame = k => L.layers[0].pieces.every((q, i) => same(L.layers[k].paths[2 * i], L.layers[0].paths[2 * i]));
+        check(`${label}, sheet at ${f3(L.zTop)}: every piece of every layer a closed loop round its outline and ONE serpentine inside it, its turns on the loop; T2 and I2 T1's, I1 in T1's loops`,
+          L.layers.every(shapeOk) && loopsSame(1) && loopsSame(2) && loopsSame(3) && same(L.layers[1].paths.flat(), L.layers[0].paths.flat()) && same(L.layers[3].paths.flat(), L.layers[0].paths.flat()),
+          L.layers[0].pieces.map(q => `${q.kind} ${q.sizeMm.map(f3).join(' x ')} mm (${q.holes} hole(s) joined by a slit, ${q.caps} caps)`).join('; ') + '; ' +
+          L.layers.map(x => `${x.role[0].toUpperCase()}: ${x.lines} lines, shortest ${f3(x.shortestMm)} mm`).join(' | '));
+        const regions = sheetEntry ? sheetEntry.parts.map((pt, k) => pieceRegions(loopsOf(sliceAt(pt.soup, (L.layers[k].z0 + L.layers[k].z1) / 2)), L.lines.angleDeg,
+          L.layers[k].pieces, L.layers[k].paths.filter((q, i) => i % 2 === 0), sh.widthMm)) : [];
+        check(`${label}, sheet at ${f3(L.zTop)}: each layer's cross-section at mid-layer is one connected region a piece, its outer boundary the piece's loop one bead wide (a rectangle +-0.1 mm, or the stepped outline)`,
           regions.length === L.layers.length && regions.every(r => r.ok),
-          regions.map((r, k) => r.dims ? `${L.layers[k].role[0].toUpperCase()}${k + 1}: ${r.outers} region, ${r.holes} holes, outline ${r.dims.map(f3).join(' x ')} (${f3(r.offRect)} off a rectangle), loop ${r.insets.map(f3).join('/')} wide` : r.why).join(' | '));
+          regions.map((r, k) => r.res ? `${L.layers[k].role[0].toUpperCase()}${k + 1}: ${r.outers} region(s), ${r.holes} holes; ` + r.res.map(q => q.why ? q.why :
+            q.kind === 'rectangle' ? `rectangle ${q.dims.map(f3).join(' x ')} (${f3(q.offRect)} off), loop ${q.insets.map(f3).join('/')} wide`
+              : `outline ${q.dims.map(f3).join(' x ')}, ${q.area.toFixed(2)} mm2 against ${q.want.toFixed(2)}, ${q.offAxis.toExponential(1)} off the axes`).join(', ') : r.why).join(' | '));
+        /* the coupon's slab stays ONE rectangle; the clamp's areas carry at
+           least what one serpentine a level carried (161 and 34 of 45) */
+        if (tag === 'coupon' && rg.id === 0)
+          check(`${label}, sheet at ${f3(L.zTop)}: the slab's sheet is ONE rectangle`, L.layers[0].pieces.length === 1 && allRect,
+            L.layers[0].pieces.map(q => q.kind + ' ' + q.sizeMm.map(f3).join(' x ')).join('; '));
         /* 1d. NSO's slicer: each layer's paths all closed, none under 2 mm.
            It has no thin-wall mode, so a wall a bead wide (and a hair) is
            drawn as a closed loop round its sliver: the outline's, and one

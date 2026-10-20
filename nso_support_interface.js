@@ -472,8 +472,8 @@
         I1       INTERFACE, direction B, across the rails
         I2       INTERFACE, direction A: the rails again
         gap      0.18 mm of air, then the part
-     EVERY LAYER IS A LOOP AND A SERPENTINE: one closed perimeter loop round
-     the sheet's footprint (Bambu's opens every layer: 22.24 x 14.34 mm),
+     EVERY LAYER IS A LOOP AND A SERPENTINE, a piece at a time: one closed
+     perimeter loop round each piece of the sheet's footprint (Bambu's opens every layer: 22.24 x 14.34 mm),
      then one serpentine inside it - line, U-turn, line, at 0.84 mm (Bambu's:
      13.6 mm lines, 0.84 mm turns, 29 / 29 / 21 / 29 lines a layer with the
      loop's two sides) - its turns joined to the loop. The loop is what the
@@ -487,37 +487,38 @@
      plane for 2 um, which the union left as slivers (2 piercing pairs on
      the clamp's area 1).
 
-     ONE CONNECTED THIN WALL A LAYER. The loop is a rectangle in the sheet's
-     frame (A along, B across), the serpentine's lines run from one of its
-     sides to the other - along A in T1, T2, I2, along B in I1 - and its
-     turns are the loop's own sides between two line ends (Bambu draws its
-     turns 0.36 mm in from its loop's middle, inside the bead: the same
-     solid). Both go through NSO_RasterLines.extrudeFlat as one graph - the
-     loop carries a node at every line end of either direction, so the
-     four layers' loops are one polygon, and the serpentine's turns, lying
-     on the loop, are the loop's own segments. The channels between lines
-     are closed at both ends: the section is ONE region, its holes the
-     channels, its outer boundary the loop, one bead wide.
+     ONE CONNECTED THIN WALL A PIECE. The sheet is laid on a grid at the
+     pitch both ways in its frame (A along, B across). Each PIECE of it has
+     one loop round its outline - a rectangle, or a stepped rectilinear
+     outline, as Bambu's loops follow the region - and the serpentine's
+     lines run along A (T1, T2, I2) or B (I1) from one side of the loop to
+     the other, its turns walked along the loop (the loop's own segments:
+     Bambu draws its turns 0.36 mm in from its loop's middle, inside the
+     bead, the same solid). A piece with a hole (a ring round a boss) has
+     the hole's outline joined to its loop by a slit along the piece's own
+     inner edges, so it is still ONE closed loop. Loop and serpentine go
+     through NSO_RasterLines.extrudeFlat as one graph, every point a grid
+     point, so the four layers' loops are one polygon and a turn on the
+     loop is the loop's own segment. The channels between lines are closed
+     at both ends: a piece's section is ONE region, its holes the channels
+     (and the ring's hole), its outer boundary the loop, one bead wide.
      NSO_Crosshatch.oneDirection is held on the lines of the layer's
-     direction (the serpentine's and the loop's two sides along it).
+     direction.
 
      THE FIELD: every cap of the level (a capless tip: its column's top)
      dilated by FIELD_MM, so caps CAP_GAP_MAX_MM apart meet in it; inside the
      free raster (THE FOOTPRINT, below); out of another level's cells and
      LEVEL_EDGE_MM short of them.
 
-     THE RECTANGLE. The field's runs on scanlines k * pitch, 2 mm or longer,
-     ends on whole pitches along the line; a rectangle is consecutive
-     scanlines k0..k1 (the loop's two sides along A, a serpentine line on
-     each between) and [V0, V1] inside every one's run, the loop's two short
-     sides in the field too (stepped in a pitch at a time where the field's
-     scalloped edge leaves them out between two lines). The sheet's is the
-     one most caps lie under (a line across the cap, its whole width on it),
-     then the largest. Its corners are on the pitch grid both ways, so every
-     line of I1 meets the loop where a T line does. LINES NEVER END IN
-     MID-AIR: every line ends on the loop. ONE RECTANGLE A LEVEL: a field it
-     cannot cover (a ring round a boss, an L) leaves the tips outside it
-     uncarried (below).
+     THE PIECES. A grid cell is the sheet's when its four edges lie in the
+     field; runs of cells shorter than MIN_RUN_MM either way go (every
+     channel is 2 mm or longer; a rung between two of an outline's walls
+     may be one pitch), and so does a cell that meets another only at a
+     corner; each 4-connected set left that carries two caps or more is a
+     piece. A piece whose largest rectangle carries every cap it does is
+     that rectangle (the coupon's slab: one, 21.84 x 14.28 mm); else its
+     outline is stepped (the clamp's rings). LINES NEVER END IN MID-AIR:
+     every line ends on its piece's loop.
 
      LINE WIDTH. One bead and SHEET_OVER_MM: 0.43 at a 0.4 nozzle. A line
      exactly one bead wide (0.42, NSO_Thickness.floorFor) is a ZERO-WIDTH
@@ -578,15 +579,16 @@
      known.
 
      A TIP NO T LINE LIES ON (its cap beside a wall the sheet keeps off, or
-     outside the rectangle) is cut at z_cap all the same if a line of the
+     on no piece) is cut at z_cap all the same if a line of the
      sheet passes over it, or else cut at the gap line ('gap', finish()'s last
      rung, no cap), standing beside the sheet, not under it.
 
      THE ANGLE is chosen, and reported. The planner's tips stand on the beacon
-     grid's square lattice; A is the candidate whose rectangle leaves the
-     fewest caps with no T line on them, then leaves the least of the field's
-     runs out (in 5 % bands), then has the shorter line (A across the
-     rectangle's short side, as Bambu's), then the axes first.
+     grid's square lattice; A is the candidate whose pieces leave the fewest
+     caps with no T line on them, then the one with the fewest pieces, then
+     the fewest that are not rectangles, then the most sheet (in 5 % bands),
+     then the shorter line (A across a rectangle's short side, as Bambu's),
+     then the axes first.
 
      THE GAP IS MEASURED, not trusted: each level's stack is measured with
      exactDistance against the piece (minDistance's sampler cannot prune a
@@ -615,9 +617,10 @@
              capMaxMm, thickness, crosshatch, rasterLines, beat, progress
        every sheet tip carries cutZ, rise (cutPath's) and cap ({ c, w, z0,
        z1, footD } or null); every level its caps, zCap and its four layers
-       ({ role, angleDeg, z0, z1, loopMm: [across A, along A], lines (the
-       serpentine's), turns, linesMm, lengthMm, shortestMm, paths: [the
-       loop, closed; the serpentine] })
+       ({ role, angleDeg, z0, z1, pieces: [{ kind: 'rectangle' | 'outline',
+       sizeMm, areaMm2, perimMm, holes, caps, lines, loop, snake }], loopMm
+       (the first piece's size), lines, linesMm, lengthMm, shortestMm,
+       paths: [each piece's loop, closed, then its serpentine] })
      =================================================================== */
   var SHEET_PITCH_MM = 0.84;   /* the reference's interface pitch (0.42 line + 0.42 channel) */
   var SHEET_ROLES = ['transition', 'transition', 'interface', 'interface'];
@@ -1189,157 +1192,308 @@
         return { phi: phi, dir: [dx, dy], nrm: [-dy, dx] };
       }
       function at(F, u, v) { return [u * F.nrm[0] + v * F.dir[0], u * F.nrm[1] + v * F.dir[1]]; }
-      /* the scanlines: the field's runs at each k * pitch, 2 mm or longer */
-      function fieldScan(F) {
-        var umin = Infinity, umax = -Infinity, vmin = Infinity, vmax = -Infinity;
+      /* THE PIECES at phi. The sheet's grid is the pitch both ways in the
+         frame (u = k * pitch across A, v = j * pitch along it); a cell is
+         the sheet's when its four edges lie in the field. Runs of cells
+         shorter than MIN_RUN_MM either way go (every channel the layers
+         close is 2 mm or longer), and so does a cell that meets another
+         piece only at a corner; each 4-connected set left is a PIECE. */
+      var MINC = Math.ceil(MIN_RUN_MM / o.pitch - 1e-9);
+      function gridFor(phi) {
+        var F = frameAt(phi), umin = Infinity, umax = -Infinity, vmin = Infinity, vmax = -Infinity;
         [[ox, oy], [ox + nx * CELL_MM, oy], [ox, oy + ny * CELL_MM], [ox + nx * CELL_MM, oy + ny * CELL_MM]].forEach(function (c) {
           var u = c[0] * F.nrm[0] + c[1] * F.nrm[1], v = c[0] * F.dir[0] + c[1] * F.dir[1];
           umin = Math.min(umin, u); umax = Math.max(umax, u); vmin = Math.min(vmin, v); vmax = Math.max(vmax, v);
         });
-        var out = [];
-        for (var k = Math.ceil(umin / o.pitch); k * o.pitch <= umax; k++) {
-          var u = k * o.pitch, runs = [], run = null;
-          /* ON THE GRID: a run's ends at whole pitches along it, where I1's
-             lines will meet the loop as T's do */
-          var keep = function (r) {
-            r.v0 = Math.ceil(r.v0 / o.pitch - 1e-9) * o.pitch; r.v1 = Math.floor(r.v1 / o.pitch + 1e-9) * o.pitch;
-            if (r.v1 - r.v0 >= MIN_RUN_MM - 1e-9) runs.push(r);
-          };
-          beat();
-          for (var v = Math.ceil(vmin / SAMPLE_MM) * SAMPLE_MM; v <= vmax + 1e-9; v += SAMPLE_MM) {
-            var p = at(F, u, v);
-            if (fieldAt(p[0], p[1])) { if (!run) run = { v0: v, v1: v }; else run.v1 = v; }
-            else if (run) { keep(run); run = null; }
-          }
-          if (run) keep(run);
-          out.push({ k: k, u: u, runs: runs });
-        }
-        return out;
-      }
-      /* THE FOOTPRINT RECTANGLE at phi: consecutive scanlines k0..k1 - the
-         loop's two sides along A, and the serpentine's lines between them -
-         and [V0, V1] inside every one's run, the loop's two short sides in
-         the field too (stepped in a pitch at a time where the field's
-         scalloped edge leaves them out between two lines); of those, the one most caps lie under (a cap is under
-         it when a line of it lies across the cap, its whole width on it),
-         then the largest */
-      function rectFor(phi) {
-        var F = frameAt(phi), scan = fieldScan(F), total = 0, best = null;
-        scan.forEach(function (sc) { sc.runs.forEach(function (r) { total += r.v1 - r.v0; }); });
-        var spans = live.map(function (t) {
-          var cr = carrierOf(t), cu = cr.c[0] * F.nrm[0] + cr.c[1] * F.nrm[1], cv = cr.c[0] * F.dir[0] + cr.c[1] * F.dir[1], h = cr.r - o.width / 2;
-          return { t: t, cv: cv, kl: Math.ceil((cu - h) / o.pitch - 1e-9), kh: Math.floor((cu + h) / o.pitch + 1e-9) };
-        });
-        function sideOk(u0, u1, v) {
-          for (var u = u0; u <= u1 + 1e-9; u += SAMPLE_MM) { var q = at(F, u, v); if (!fieldAt(q[0], q[1])) return false; }
+        var k0 = Math.floor(umin / o.pitch), j0 = Math.floor(vmin / o.pitch);
+        var K = Math.ceil(umax / o.pitch) - k0, J = Math.ceil(vmax / o.pitch) - j0;
+        function P(k, j) { return at(F, (k0 + k) * o.pitch, (j0 + j) * o.pitch); }
+        function edgeIn(a, b) {
+          for (var s = 0; s <= 6; s++) { var x = a[0] + (b[0] - a[0]) * s / 6, y = a[1] + (b[1] - a[1]) * s / 6; if (!fieldAt(x, y)) return false; }
           return true;
         }
-        for (var a = 0; a < scan.length; a++) {
-          var iv = scan[a].runs.map(function (r) { return [r.v0, r.v1]; });
-          for (var b = a; b < scan.length && iv.length; b++) {
-            if (b > a) {
-              var nxt = [];
-              iv.forEach(function (I) { scan[b].runs.forEach(function (r) {
-                var lo = Math.max(I[0], r.v0), hi = Math.min(I[1], r.v1);
-                if (hi - lo >= MIN_RUN_MM - 1e-9) nxt.push([lo, hi]);
-              }); });
-              iv = nxt;
-            }
-            /* the loop's two sides and one line of the serpentine at least */
-            if (b - a < 2) continue;
-            beat();
+        var eA = new Uint8Array((K + 1) * J), eB = new Uint8Array(K * (J + 1)), cell = new Uint8Array(K * J);
+        for (var k = 0; k <= K; k++) { beat(); for (var j = 0; j < J; j++) eA[k * J + j] = edgeIn(P(k, j), P(k, j + 1)) ? 1 : 0; }
+        for (var k2 = 0; k2 < K; k2++) for (var j2 = 0; j2 <= J; j2++) eB[k2 * (J + 1) + j2] = edgeIn(P(k2, j2), P(k2 + 1, j2)) ? 1 : 0;
+        for (var k3 = 0; k3 < K; k3++) for (var j3 = 0; j3 < J; j3++)
+          cell[k3 * J + j3] = eA[k3 * J + j3] && eA[(k3 + 1) * J + j3] && eB[k3 * (J + 1) + j3] && eB[k3 * (J + 1) + j3 + 1] ? 1 : 0;
+        var C = function (k, j) { return k >= 0 && k < K && j >= 0 && j < J && cell[k * J + j] === 1; };
+        for (var changed = true; changed;) {
+          changed = false;
+          /* short runs, along A (a column) and across it (a row) */
+          for (var kc = 0; kc < K; kc++) for (var jc = 0; jc < J;) {
+            if (!C(kc, jc)) { jc++; continue; }
+            var je = jc; while (C(kc, je)) je++;
+            if (je - jc < MINC) { for (var q = jc; q < je; q++) cell[kc * J + q] = 0; changed = true; }
+            jc = je;
+          }
+          for (var jr = 0; jr < J; jr++) for (var kr = 0; kr < K;) {
+            if (!C(kr, jr)) { kr++; continue; }
+            var ke = kr; while (C(ke, jr)) ke++;
+            if (ke - kr < MINC) { for (var q2 = kr; q2 < ke; q2++) cell[q2 * J + jr] = 0; changed = true; }
+            kr = ke;
+          }
+          /* two cells meeting at a corner only */
+          for (var kd = 0; kd + 1 < K; kd++) for (var jd = 0; jd + 1 < J; jd++) {
+            var a = C(kd, jd), b = C(kd + 1, jd), c = C(kd, jd + 1), d = C(kd + 1, jd + 1);
+            if (a && d && !b && !c) { cell[(kd + 1) * J + jd + 1] = 0; changed = true; }
+            else if (b && c && !a && !d) { cell[kd * J + jd + 1] = 0; changed = true; }
+          }
+        }
+        /* the pieces */
+        var comp = new Int32Array(K * J).fill(-1), comps = [];
+        for (var s0 = 0; s0 < K * J; s0++) {
+          if (!cell[s0] || comp[s0] >= 0) continue;
+          var id = comps.length, st = [s0], cells = [];
+          comp[s0] = id;
+          while (st.length) {
+            var q3 = st.pop(), qk = (q3 / J) | 0, qj = q3 - qk * J;
+            cells.push(q3);
+            [[qk - 1, qj], [qk + 1, qj], [qk, qj - 1], [qk, qj + 1]].forEach(function (nb) {
+              if (C(nb[0], nb[1])) { var w = nb[0] * J + nb[1]; if (comp[w] < 0) { comp[w] = id; st.push(w); } }
+            });
+          }
+          comps.push({ id: id, cells: cells });
+        }
+        /* where each cap's lines are: the columns of lines whose whole
+           width lies on it (kl..kh), and its row */
+        var spans = live.map(function (t) {
+          var cr = carrierOf(t), cu = cr.c[0] * F.nrm[0] + cr.c[1] * F.nrm[1], cv = cr.c[0] * F.dir[0] + cr.c[1] * F.dir[1], h = cr.r - o.width / 2;
+          return { t: t, kl: Math.ceil((cu - h) / o.pitch - 1e-9) - k0, kh: Math.floor((cu + h) / o.pitch + 1e-9) - k0, j: Math.floor(cv / o.pitch) - j0 };
+        });
+        return { F: F, K: K, J: J, k0: k0, j0: j0, P: P, cell: cell, comp: comp, comps: comps, spans: spans };
+      }
+      /* the caps a set of cells carries: a line along A of it - between two
+         of its cells or on its edge - across the cap */
+      function capsOf(G, has) {
+        var out = {};
+        G.spans.forEach(function (sp) {
+          if (sp.kl > sp.kh || sp.j < 0 || sp.j >= G.J) return;
+          for (var k = Math.max(0, sp.kl); k <= Math.min(G.K, sp.kh); k++) if (has(k - 1, sp.j) || has(k, sp.j)) { out[sp.t.i] = true; return; }
+        });
+        return out;
+      }
+      /* the largest rectangle of a piece that carries the most of its caps */
+      function bestRect(G, has, cellsOf) {
+        var ks = cellsOf.map(function (q) { return (q / G.J) | 0; }), js = cellsOf.map(function (q) { return q % G.J; });
+        var kmin = Math.min.apply(null, ks), kmax = Math.max.apply(null, ks), jmin = Math.min.apply(null, js), jmax = Math.max.apply(null, js), best = null;
+        for (var ca = kmin; ca <= kmax; ca++) {
+          var iv = null;
+          for (var cb = ca; cb <= kmax; cb++) {
+            var runs = [];
+            for (var j = jmin; j <= jmax;) { if (!has(cb, j)) { j++; continue; } var e = j; while (has(cb, e)) e++; runs.push([j, e]); j = e; }
+            if (iv === null) iv = runs;
+            else { var nx2 = []; iv.forEach(function (I) { runs.forEach(function (R) { var lo = Math.max(I[0], R[0]), hi = Math.min(I[1], R[1]); if (hi - lo >= MINC) nx2.push([lo, hi]); }); }); iv = nx2; }
+            iv = iv.filter(function (I) { return I[1] - I[0] >= MINC; });
+            if (!iv.length) break;
+            if (cb - ca + 1 < MINC) continue;
             iv.forEach(function (I) {
-              var k0 = scan[a].k, k1 = scan[b].k, ua = scan[a].u, ub = scan[b].u;
-              function count(v0, v1) {
-                var n = 0;
-                spans.forEach(function (sp2) { if (sp2.kl <= sp2.kh && sp2.cv >= v0 && sp2.cv <= v1 && sp2.kh >= k0 && sp2.kl <= k1) n++; });
-                return n;
-              }
-              function beats(n, v0, v1) { var ar = (ub - ua) * (v1 - v0); return !best || n > best.n || (n === best.n && ar > best.area + 1e-9); }
-              if (!beats(count(I[0], I[1]), I[0], I[1])) return;
-              /* a short side that leaves the field between two lines (the
-                 field's edge is scalloped) steps in a pitch at a time */
-              var V0 = I[0], V1 = I[1];
-              while (V1 - V0 >= MIN_RUN_MM - 1e-9 && !sideOk(ua, ub, V0)) V0 += o.pitch;
-              while (V1 - V0 >= MIN_RUN_MM - 1e-9 && !sideOk(ua, ub, V1)) V1 -= o.pitch;
-              if (V1 - V0 < MIN_RUN_MM - 1e-9) return;
-              V0 = Math.round(V0 / o.pitch) * o.pitch; V1 = Math.round(V1 / o.pitch) * o.pitch;
-              var n = count(V0, V1);
-              if (!beats(n, V0, V1)) return;
-              best = { n: n, area: (ub - ua) * (V1 - V0), k0: k0, k1: k1, V0: V0, V1: V1 };
+              var inR = function (k, j) { return k >= ca && k <= cb && j >= I[0] && j < I[1]; };
+              var n = Object.keys(capsOf(G, inR)).length, area = (cb - ca + 1) * (I[1] - I[0]);
+              if (!best || n > best.n || (n === best.n && area > best.area)) best = { n: n, area: area, ca: ca, cb: cb, ja: I[0], jb: I[1] };
             });
           }
         }
-        var crossed = {};
-        if (best) spans.forEach(function (sp2) {
-          if (sp2.kl <= sp2.kh && sp2.cv >= best.V0 && sp2.cv <= best.V1 && sp2.kh >= best.k0 && sp2.kl <= best.k1) crossed[sp2.t.i] = true;
-        });
-        var kept = best ? (best.k1 - best.k0 + 1) * (best.V1 - best.V0) : 0;
-        return { angleDeg: phi, F: F, R: best, crossed: crossed, bare: live.filter(function (t) { return !crossed[t.i]; }).length,
-                 droppedShare: total > 0 ? Math.max(0, 1 - kept / total) : 1 };
+        return best;
       }
-      /* ONE LAYER: the loop round the rectangle, then the serpentine inside
-         it - its lines along A (the transitions, I2) or along B (I1), at the
-         pitch, each ending on the loop, its turns the loop's own sides
-         between two line ends. The loop carries a node at every line end
-         of either direction, so all four layers' loops are the one polygon */
-      function layerPaths(F, R, alongA) {
-        var us = [], vs = [];
-        for (var k = R.k0; k <= R.k1; k++) us.push(k * o.pitch);
-        for (var j = Math.round(R.V0 / o.pitch); j <= Math.round(R.V1 / o.pitch); j++) vs.push(j * o.pitch);
-        var U0 = us[0], U1 = us[us.length - 1], V0 = vs[0], V1 = vs[vs.length - 1], loop = [];
-        vs.forEach(function (v) { loop.push(at(F, U0, v)); });
-        us.slice(1).forEach(function (u) { loop.push(at(F, u, V1)); });
-        vs.slice(0, -1).reverse().forEach(function (v) { loop.push(at(F, U1, v)); });
-        us.slice(0, -1).reverse().forEach(function (u) { loop.push(at(F, u, V0)); });
-        var snake = [], inner = alongA ? us.slice(1, -1) : vs.slice(1, -1);
-        inner.forEach(function (w, i) {
-          var a = alongA ? [at(F, w, V0), at(F, w, V1)] : [at(F, U0, w), at(F, U1, w)];
-          if (i % 2) a.reverse();
-          snake.push(a[0], a[1]);
+      /* ONE PIECE'S LAYERS: its outline as ONE closed loop - the boundary of
+         its cells; a hole's outline joined to it by a slit along lines the
+         piece already has - and the lines of each direction: runs of the
+         grid's edges with the piece's cells on both sides */
+      function pieceGeom(G, has) {
+        var key = function (k, j) { return k + ',' + j; }, nextOf = {}, cycles = [], vk = {};
+        for (var k = -1; k <= G.K; k++) for (var j = -1; j <= G.J; j++) {
+          if (!has(k, j)) continue;
+          /* the cell's edges counter-clockwise; one whose other side is not the piece's is the outline's */
+          if (!has(k, j - 1)) nextOf[key(k, j)] = [k + 1, j];
+          if (!has(k + 1, j)) nextOf[key(k + 1, j)] = [k + 1, j + 1];
+          if (!has(k, j + 1)) nextOf[key(k + 1, j + 1)] = [k, j + 1];
+          if (!has(k - 1, j)) nextOf[key(k, j + 1)] = [k, j];
+        }
+        Object.keys(nextOf).forEach(function (s) {
+          if (vk[s]) return;
+          var cyc = [], at0 = s;
+          while (!vk[at0]) { vk[at0] = true; var p = at0.split(',').map(Number); cyc.push(p); var nx3 = nextOf[at0]; at0 = key(nx3[0], nx3[1]); }
+          cyc.push(cyc[0]);
+          var ar = 0;
+          for (var i = 0; i + 1 < cyc.length; i++) ar += cyc[i][0] * cyc[i + 1][1] - cyc[i + 1][0] * cyc[i][1];
+          cycles.push({ pts: cyc, area: ar / 2 });
         });
-        var lines = inner.length, len = alongA ? V1 - V0 : U1 - U0, across = alongA ? U1 - U0 : V1 - V0;
-        /* the lines of the layer's direction: the serpentine's and the loop's two sides along it */
-        var segs = inner.map(function (w) { return alongA ? [at(F, w, V0), at(F, w, V1)] : [at(F, U0, w), at(F, U1, w)]; })
-          .concat(alongA ? [[at(F, U0, V0), at(F, U0, V1)], [at(F, U1, V0), at(F, U1, V1)]] : [[at(F, U0, V0), at(F, U1, V0)], [at(F, U0, V1), at(F, U1, V1)]]);
-        return { loop: loop, snake: snake, segs: segs, lines: lines, lineMm: len, acrossMm: across,
-                 loopMm: 2 * ((U1 - U0) + (V1 - V0)), sizeMm: [U1 - U0, V1 - V0] };
+        cycles.sort(function (a, b) { return b.area - a.area; });
+        var outer = cycles[0], loop = outer.pts.slice(), joined = {};
+        outer.pts.forEach(function (p) { joined[key(p[0], p[1])] = true; });
+        var interior = function (a, b) {
+          if (a[0] === b[0]) { var j = Math.min(a[1], b[1]); return has(a[0] - 1, j) && has(a[0], j); }
+          var k = Math.min(a[0], b[0]); return has(k, a[1] - 1) && has(k, a[1]);
+        };
+        cycles.slice(1).forEach(function (hole) {
+          /* the slit: the shortest way from the hole's outline to the loop along the piece's own inner edges */
+          var from = {}, q = [], hit = null;
+          hole.pts.forEach(function (p) { var s = key(p[0], p[1]); if (!(s in from)) { from[s] = null; q.push(p); } });
+          for (var h = 0; h < q.length && !hit; h++) {
+            var p = q[h];
+            [[1, 0], [-1, 0], [0, 1], [0, -1]].forEach(function (d) {
+              if (hit) return;
+              var n = [p[0] + d[0], p[1] + d[1]], s = key(n[0], n[1]);
+              if (s in from || !interior(p, n)) return;
+              from[s] = p; q.push(n);
+              if (joined[s]) hit = n;
+            });
+          }
+          if (!hit) return;
+          var slit = [hit];
+          for (var c = from[key(hit[0], hit[1])]; c; c = from[key(c[0], c[1])]) slit.push(c);
+          /* slit: loop's vertex ... the hole's; the hole's outline from there round to it */
+          var hv = slit[slit.length - 1], hi = hole.pts.findIndex(function (p) { return p[0] === hv[0] && p[1] === hv[1]; });
+          var ring = hole.pts.slice(hi, -1).concat(hole.pts.slice(0, hi + 1));
+          var li = loop.findIndex(function (p) { return p[0] === hit[0] && p[1] === hit[1]; });
+          loop = loop.slice(0, li + 1).concat(slit.slice(1), ring.slice(1), slit.slice(0, -1).reverse(), loop.slice(li + 1));
+          hole.pts.forEach(function (p) { joined[key(p[0], p[1])] = true; });
+          slit.forEach(function (p) { joined[key(p[0], p[1])] = true; });
+        });
+        /* lines: along A at each k, across it at each j */
+        var linesA = [], linesB = [];
+        for (var k2 = 0; k2 <= G.K; k2++) for (var j2 = 0; j2 < G.J;) {
+          if (!(has(k2 - 1, j2) && has(k2, j2))) { j2++; continue; }
+          var e = j2; while (has(k2 - 1, e) && has(k2, e)) e++;
+          linesA.push({ a: [k2, j2], b: [k2, e] }); j2 = e;
+        }
+        for (var j4 = 0; j4 <= G.J; j4++) for (var k4 = 0; k4 < G.K;) {
+          if (!(has(k4, j4 - 1) && has(k4, j4))) { k4++; continue; }
+          var e2 = k4; while (has(e2, j4 - 1) && has(e2, j4)) e2++;
+          linesB.push({ a: [k4, j4], b: [e2, j4] }); k4 = e2;
+        }
+        var per = 0;
+        for (var i2 = 0; i2 + 1 < outer.pts.length; i2++) per++;
+        return { loop: loop, linesA: linesA, linesB: linesB, holes: cycles.length - 1, areaCells: outer.area, perimCells: per };
       }
-      var tried = (angleForced == null ? LINE_ANGLES : [angleForced]).map(rectFor);
-      /* the fewest caps no line lies on, then the least of the field left
-         out (5 % bands), then the shorter line - A across the rectangle's
-         short side, as Bambu's tree (13.6 mm lines in its 14.3 x 22.2 loop) -
-         then the axes first; in bands, so a near tie goes to the axes and
-         does not flip on a sample's rounding */
-      var order = tried.filter(function (x) { return x.R; }).sort(function (a, b) {
-        return (a.bare - b.bare) || (Math.floor(a.droppedShare * 20) - Math.floor(b.droppedShare * 20)) ||
-               (Math.round(a.R.V1 - a.R.V0) - Math.round(b.R.V1 - b.R.V0)) ||
+      /* ONE SERPENTINE through a piece's lines of one direction: each line
+         in turn, the turn from one to the next walked along the loop (the
+         loop's own segments: the same solid), every point a grid point */
+      function serpentine(loop, lines) {
+        var pos = {}, N = loop.length - 1;
+        for (var i = 0; i < N; i++) { var s = loop[i][0] + ',' + loop[i][1]; (pos[s] = pos[s] || []).push(i); }
+        function along(a, b) {
+          var best = null;
+          (pos[a[0] + ',' + a[1]] || []).forEach(function (ia) { (pos[b[0] + ',' + b[1]] || []).forEach(function (ib) {
+            var f = (ib - ia + N) % N, r = (ia - ib + N) % N;
+            if (!best || Math.min(f, r) < best.d) best = { d: Math.min(f, r), ia: ia, dir: f <= r ? 1 : -1 };
+          }); });
+          if (!best) return null;
+          var out = [];
+          for (var s2 = 1; s2 <= best.d; s2++) out.push(loop[(best.ia + best.dir * s2 + N * (best.d + 1)) % N]);
+          return out;
+        }
+        function run(a, b) {
+          var out = [], dk = Math.sign(b[0] - a[0]), dj = Math.sign(b[1] - a[1]), n = Math.abs(b[0] - a[0]) + Math.abs(b[1] - a[1]);
+          for (var s3 = 0; s3 <= n; s3++) out.push([a[0] + dk * s3, a[1] + dj * s3]);
+          return out;
+        }
+        var path = [], cur = null;
+        lines.forEach(function (ln) {
+          var a = ln.a, b = ln.b;
+          if (cur) {
+            var wa = along(cur, a), wb = along(cur, b);
+            if (wb && (!wa || wb.length < wa.length)) { var t = a; a = b; b = t; wa = wb; }
+            if (!wa) return;
+            path = path.concat(wa);
+            path = path.concat(run(a, b).slice(1));
+          } else path = run(a, b);
+          cur = b;
+        });
+        return path;
+      }
+      /* the sheet at phi: its pieces, each a rectangle where the largest
+         rectangle in it carries every cap the piece does (the coupon's
+         slab), else its stepped outline; a piece carrying fewer than two
+         caps goes */
+      function sheetAt(phi) {
+        var G = gridFor(phi), pieces = [], crossed = {}, cellsTot = 0, lineLen = 0, lineN = 0;
+        G.comps.forEach(function (cp) {
+          var set = {};
+          cp.cells.forEach(function (q) { set[q] = true; });
+          var has = function (k, j) { return k >= 0 && k < G.K && j >= 0 && j < G.J && set[k * G.J + j] === true; };
+          var caps = capsOf(G, has), n = Object.keys(caps).length;
+          if (n < 2) return;
+          var R = bestRect(G, has, cp.cells), kind = 'outline';
+          if (R && R.n === n) {
+            kind = 'rectangle';
+            has = function (k, j) { return k >= R.ca && k <= R.cb && j >= R.ja && j < R.jb; };
+          }
+          var geo = pieceGeom(G, has);
+          geo.kind = kind; geo.caps = caps;
+          Object.keys(caps).forEach(function (i) { crossed[i] = true; });
+          cellsTot += geo.areaCells;
+          geo.linesA.forEach(function (l) { lineLen += l.b[1] - l.a[1]; lineN++; });
+          pieces.push(geo);
+        });
+        return { angleDeg: phi, G: G, pieces: pieces, crossed: crossed, areaCells: cellsTot,
+                 lineMm: lineN ? lineLen / lineN * o.pitch : 0, bare: live.filter(function (t) { return !crossed[t.i]; }).length };
+      }
+      var tried = (angleForced == null ? LINE_ANGLES : [angleForced]).map(sheetAt);
+      var maxArea = Math.max.apply(null, tried.map(function (x) { return x.areaCells; }).concat([1]));
+      tried.forEach(function (x) { x.droppedShare = 1 - x.areaCells / maxArea; });
+      /* the fewest caps no line lies on, then the fewest pieces, then the
+         fewest pieces that are not rectangles (the simplest loop that
+         carries as much: the coupon's slab is one rectangle), then the most
+         sheet (5 % bands), then the shorter line - A across a rectangle's short side, as
+         Bambu's tree (13.6 mm lines in its 14.3 x 22.2 loop) - then the
+         axes first; in bands, so a near tie goes to the axes and does not
+         flip on a sample's rounding */
+      var outlines = function (x) { return x.pieces.filter(function (q) { return q.kind !== 'rectangle'; }).length; };
+      var order = tried.filter(function (x) { return x.pieces.length; }).sort(function (a, b) {
+        return (a.bare - b.bare) || (a.pieces.length - b.pieces.length) || (outlines(a) - outlines(b)) ||
+               (Math.floor(a.droppedShare * 20) - Math.floor(b.droppedShare * 20)) ||
+               (Math.round(a.lineMm) - Math.round(b.lineMm)) ||
                (LINE_ANGLES.indexOf(a.angleDeg) - LINE_ANGLES.indexOf(b.angleDeg));
       });
       var best = order[0];
-      if (!best) return { ok: false, reason: 'no rectangle of 2 mm lines fits the caps of this level' };
+      if (!best) return { ok: false, reason: 'no piece of 2 mm lines carries two caps of this level' };
       var uncrossed = live.filter(function (t) { return !best.crossed[t.i]; });
       if (live.length - uncrossed.length < 2) return { ok: false, reason: 'a sheet needs two caps its lines lie on; ' + (live.length - uncrossed.length) + ' here' };
       /* THE STACK: T1 and T2 the one layer (rails over the caps), I1 across
-         them, I2 the rails again - every one in the same loop */
-      var built = [];
+         them, I2 the rails again - every one in the same loops */
+      var G = best.G, built = [];
+      var pts = function (vs) { return vs.map(function (p) { return G.P(p[0], p[1]); }); };
+      var plan = best.pieces.map(function (pc) {
+        var us = pc.loop.map(function (p) { return p[0]; }), vs = pc.loop.map(function (p) { return p[1]; });
+        return { kind: pc.kind, loop: pts(pc.loop), snakeA: pts(serpentine(pc.loop, pc.linesA)), snakeB: pts(serpentine(pc.loop, pc.linesB)),
+                 linesA: pc.linesA, linesB: pc.linesB, holes: pc.holes, caps: Object.keys(pc.caps).length,
+                 sizeMm: [(Math.max.apply(null, us) - Math.min.apply(null, us)) * o.pitch, (Math.max.apply(null, vs) - Math.min.apply(null, vs)) * o.pitch],
+                 areaMm2: pc.areaCells * o.pitch * o.pitch, perimMm: pc.perimCells * o.pitch };
+      });
       for (var lk = 0; lk < NL; lk++) {
-        var alongA = lk !== 2, Lp = layerPaths(best.F, best.R, alongA);
-        var bad = CH.oneDirection(Lp.segs);
+        var alongA = lk !== 2, paths = [], segs = [], soups = [], nLines = 0, lineMm = 0, shortest = Infinity, loopMm = 0, pieces = [];
+        for (var pi = 0; pi < plan.length; pi++) {
+          var pc = plan[pi], lines = alongA ? pc.linesA : pc.linesB, snake = alongA ? pc.snakeA : pc.snakeB;
+          lines.forEach(function (l) {
+            var len = (Math.abs(l.b[0] - l.a[0]) + Math.abs(l.b[1] - l.a[1])) * o.pitch;
+            nLines++; lineMm += len; shortest = Math.min(shortest, len);
+            segs.push([G.P(l.a[0], l.a[1]), G.P(l.b[0], l.b[1])]);
+          });
+          loopMm += pc.perimMm;
+          paths.push(pc.loop, snake);
+          pieces.push({ kind: pc.kind, sizeMm: pc.sizeMm, areaMm2: pc.areaMm2, perimMm: pc.perimMm, holes: pc.holes, caps: pc.caps,
+                        lines: lines.length, loop: pc.loop, snake: snake });
+        }
+        var bad = CH.oneDirection(segs);
         if (bad) return { ok: false, reason: 'layer ' + (lk + 1) + ': ' + bad };
         /* T1 sits on z_cap, each layer on the one below: faces meeting, no
            overlap (T2 is T1 again: an overlap would stand their walls in one
            plane for EPS_MM, which the union leaves as slivers) */
         var zb = zBase + lk * o.layer;
-        var ex = RL.extrudeFlat([Lp.loop.concat([Lp.loop[0]]), Lp.snake], { width: o.width, height: o.layer, baseZ: zb });
-        if (!ex.ok) return { ok: false, reason: 'layer ' + (lk + 1) + ' would not extrude: ' + ex.reason };
+        for (var pj = 0; pj < plan.length; pj++) {
+          /* one piece, one solid: its loop and its serpentine, one graph */
+          var ex = RL.extrudeFlat([pieces[pj].loop, pieces[pj].snake], { width: o.width, height: o.layer, baseZ: zb });
+          if (!ex.ok) return { ok: false, reason: 'layer ' + (lk + 1) + ', piece ' + (pj + 1) + ' would not extrude: ' + ex.reason };
+          soups.push(ex.tris);
+        }
         built.push({ role: SHEET_ROLES[lk], angleDeg: alongA ? best.angleDeg : (best.angleDeg + 90) % 180, z0: zb, z1: zb + o.layer,
-                     loopMm: Lp.sizeMm.slice(), lines: Lp.lines, turns: Lp.lines - 1, linesMm: Lp.lines * Lp.lineMm,
-                     lengthMm: Lp.loopMm + Lp.lines * Lp.lineMm, shortestMm: Lp.lineMm,
-                     paths: [Lp.loop.concat([Lp.loop[0]]), Lp.snake], soup: ex.tris });
+                     pieces: pieces, loopMm: pieces[0].sizeMm.slice(), lines: nLines, linesMm: lineMm, lengthMm: loopMm + lineMm,
+                     shortestMm: shortest, paths: paths, soup: joinSoups(soups) });
       }
       return { ok: true, zTop: zTop, zBase: zBase, zCap: zCap, layers: built, uncrossed: uncrossed,
-               lines: { angleDeg: best.angleDeg, droppedShare: best.droppedShare, bare: best.bare, rectMm: built[0].loopMm,
+               lines: { angleDeg: best.angleDeg, droppedShare: best.droppedShare, bare: best.bare, pieces: plan.length,
                         tried: tried.map(function (x) { return { angleDeg: x.angleDeg, droppedShare: x.droppedShare, bare: x.bare }; }) } };
     }
 
@@ -1359,7 +1513,7 @@
         if (dmin >= o.gap - 1e-5) {
           L.ok = true; L.res = res; L.minDistanceMm = dmin;
           /* A TIP WHOSE CAP NO T LINE LIES ON (its top is beside a wall the
-             sheet keeps off, or outside the rectangle): if any line of the
+             sheet keeps off, or on no piece): if any line of the
              sheet passes over it, it stays cut at z_cap and carries nothing;
              if none does, it is cut at the gap line instead and holds the
              ceiling itself (finish()'s last rung) - in neither case does a

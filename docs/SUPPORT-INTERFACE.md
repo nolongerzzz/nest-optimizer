@@ -77,30 +77,34 @@ printed in the same layers as the lines, and every line was an island. So now:
   0.002 mm into it their walls stood in one plane for 2 um, which the union
   left as slivers (2 piercing pairs on the clamp's area 1). For the weld
   alone (the reference path; the card does not weld), T1's underside goes
-  0.01 mm into the caps (`SHEET_SINK_MM`): on one plane, where a T1 wall met a
+  0.015 mm into the caps (`SHEET_SINK_MM`): on one plane, where a T1 wall met a
   cap's top, the union left a T-junction it read as piercing (2 pairs on the
   clamp's area 2); sunk, it cuts the caps' upright top band. The parts, and so
   the export and every slice, keep z_cap exact.
-- **A loop and a serpentine each layer.** The loop is a rectangle in the
-  sheet's frame (A along T's lines, B across); the serpentine's lines run from
-  one of its sides to the other, and its turns are the loop's own sides between
-  two line ends - Bambu draws its turns 0.36 mm in from its loop's middle,
-  inside the bead, which is the same solid. Loop and serpentine go through
-  `NSO_RasterLines.extrudeFlat` as one graph; the channels between the lines
-  are closed at both ends, so a layer's section is ONE region whose holes are
-  the channels and whose outer boundary is the loop, one bead wide
-  (`support:interface` 1c, measured on the parts built).
-- **The rectangle.** The sheet's field is every cap of the level dilated by
-  1.25 mm (`FIELD_MM`: caps 2 mm apart meet in it), inside the footprint
-  (below), out of another level's cells. Its runs on scanlines at 0.84 mm, 2 mm
-  or longer, ends on whole pitches; the rectangle is consecutive scanlines (the
-  loop's two sides along A and a serpentine line on each between) and a span
-  inside every one's run, the loop's short sides in the field too - the one
-  most caps lie under, then the largest. Its corners lie on the pitch grid both
-  ways, so I1's lines meet the loop where T's do. **No line ends in mid-air**:
-  every line ends on the loop.
-- **One rectangle a level.** A field one rectangle cannot cover - a ring round
-  a boss, an L - leaves the tips outside it uncarried (the clamp, section 4).
+- **A loop and a serpentine each piece, each layer.** The sheet lies on a grid
+  at the pitch both ways in its frame (A along T's lines, B across). Each
+  piece of it has ONE loop round its outline - a rectangle, or a stepped
+  rectilinear outline, as Bambu's loops follow the region, not a bounding box
+  - and ONE serpentine inside it whose lines run from one side of the loop to
+  the other and whose turns are walked along the loop (the loop's own segments:
+  Bambu draws its turns 0.36 mm in from its loop's middle, inside the bead -
+  the same solid). A piece with a hole (a ring round a boss) has the hole's
+  outline joined to its loop by a slit along its own inner edges: still one
+  closed loop. Loop and serpentine go through `NSO_RasterLines.extrudeFlat` as
+  one graph; the channels between the lines are closed at both ends, so a
+  piece's section is ONE region whose holes are the channels and whose outer
+  boundary is its loop, one bead wide (`support:interface` 1c, measured on the
+  parts built).
+- **The pieces.** The field is every cap of the level dilated by 1.25 mm
+  (`FIELD_MM`: caps 2 mm apart meet in it), inside the footprint (below), out
+  of another level's cells. A grid cell is the sheet's when its four edges lie
+  in the field; runs of cells shorter than 2 mm either way go (every channel is
+  2 mm or longer; a rung between two of an outline's walls may be one pitch),
+  and so does a cell meeting another only at a corner. Each 4-connected set
+  left that carries two caps or more is a piece. **A piece whose largest
+  rectangle carries every cap it does is that rectangle** - the coupon's slab:
+  one, 21.84 x 14.28 mm - else its outline is stepped (the clamp's rings).
+  **No line ends in mid-air**: every line ends on its piece's loop.
 - **Caps spread before they narrow**: legs that lean to one node cross z_cap
   closer than their tips stand (the coupon's slab: caps 2.11 mm wide where
   they crossed), so two caps nearer than their widths allow first slide apart,
@@ -153,10 +157,11 @@ level lowered (a sloped ceiling) or cleared round the point (a wall) until it
 is 0.18.
 
 **The angle is chosen.** Of the candidates (0, 90, and the 1:2 and 1:1
-diagonals) the sheet takes the direction A whose rectangle leaves the fewest
-caps with no T line on them, then leaves the least of the field out (in 5 %
-bands), then has the shorter line (A across the rectangle's short side, as
-Bambu's), then the axes. The coupon's area 1: 90 deg, as Bambu's.
+diagonals) the sheet takes the direction A whose pieces leave the fewest caps
+with no T line on them, then has the fewest pieces, then the fewest that are
+not rectangles, then the most sheet (in 5 % bands), then the shorter line (A
+across a rectangle's short side, as Bambu's), then the axes. The coupon's area
+1: 90 deg, as Bambu's.
 
 **The tips the sheet does not carry.**
 
@@ -164,37 +169,37 @@ Bambu's), then the axes. The coupon's area 1: 90 deg, as Bambu's.
 | --- | --- |
 | under a sheet | its cap, T1 lying on it, its top z_cap |
 | under a sheet, no room for a cap (the piece or another tree's column too near) | cut flat at z_cap |
-| under a sheet but no T line lies on its cap (beside a wall, outside the rectangle) | cut at z_cap all the same if a line passes over it; carries nothing |
+| under a sheet but no T line lies on its cap (beside a wall, on no piece) | cut at z_cap all the same if a line passes over it; carries nothing |
 | no line of any sheet reaches it, or its level has no sheet (one tip, a one-row band, no room above the foot) | cut at the gap line, standing beside the sheet, not under it: its own flat top 0.18 mm under the part (finish()'s last rung), lowered until its own solid keeps the gap |
 | a side tip (a face more than 30 deg off level) | drawn back along its stub until its own solid keeps the gap (unchanged) |
 
 `finish()` and its 1.2 mm per-tip patches are unchanged and keep
 `tree:interface`.
 
-## 4. Measured (`support:interface`, 128 checks)
+## 4. Measured (`support:interface`, 131 checks)
 
 The clamp at the card's defaults has four areas. Every flat ceiling carries a
-sheet - one rectangle a level:
+sheet, a piece at a time:
 
-| area | ceiling | tips: under a sheet / cut at the gap / side | loop (mm) | lines T / I1 (inside the loop), A | caps (at 2.5-4 mm), widths |
+| area | ceiling | tips carried / under a sheet / cut at the gap / side | pieces | lines T / I1 | caps (at 2.5-4 mm), widths |
 | --- | --- | --- | --- | --- | --- |
-| 1 | z 72 flat (+ 45 deg chamfer 62-71, fillet 72-75) | 84 / 106 / 69 | 15.12 x 42.84 | 17 / 50, 90 deg | 84 (80), 2.13-2.50 |
-| 2 | z 80 flat (a ring round the boss) | 14 / 31 / 0 | 3.36 x 13.44 | 3 / 15, 90 deg | 12 (0), 1.54-2.30 |
-| 3 | z 0.8-2.0 (the bottom fillet, over the plate) | 0 / 0 / 27 | - | - | none: every tip is a side tip |
-| 4 | z 86 ridge | 3 / 0 / 0 | 3.36 x 8.40 | 3 / 9, 90 deg | 3 (3), 2.50 |
+| 1 | z 72 flat (+ 45 deg chamfer 62-71, fillet 72-75) | 172 / 176 / 14 / 69 | one stepped outline, 57.12 x 57.96 mm, its ring round the boss joined by a slit | 95 / 96, 45 deg | 167 (142), 2.13-2.50 |
+| 2 | z 80 flat (a ring round the boss) | 45 / 45 / 0 / 0 | one stepped outline, 22.68 x 20.16 mm, its ring joined by a slit | 43 / 42, 63.43 deg | 37 (1), 1.29-2.50 |
+| 3 | z 0.8-2.0 (the bottom fillet, over the plate) | 0 / 0 / 0 / 27 | - | - | none: every tip is a side tip |
+| 4 | z 86 ridge | 3 / 3 / 0 / 0 | one rectangle, 8.40 x 3.36 mm | 9 / 3, 0 deg | 3 (3), 2.50 |
 
-**The clamp loses most of its tips to the rectangle**: its area 1 ceiling is a
-ring round a boss and an L under the chamfer, its area 2 a ring; one rectangle
-covers a part of each, and the tips outside it are cut at the gap (92 and 31),
-standing beside the sheet; 14 of area 1's sit on two small levels no
-rectangle of 2 mm lines fits. Before the loop (one serpentine a level), area 1
-carried 161 tips. That is the owner's call (docs/HANDOFF.md, OPEN 4).
+`support:interface` holds the clamp's coverage: area 1 at least 161 tips
+carried, area 2 at least 34 - what one serpentine a level carried; one
+rectangle a level carried 84 and 14. Area 1's 14 tips cut at the gap sit on
+two small levels (z 72.0) no piece of 2 mm lines fits.
 
 The coupon (`top_clip_x2`): area 1, the slab at z 13.5, 40 tips, 40 caps of
 2.50 mm, a 21.84 x 14.28 mm loop (Bambu's: 22.24 x 14.34) with 25 lines of
 14.28 mm at 90 deg in T1, T2 and I2 and 16 of 21.84 mm at 0 deg in I1; area 2,
-the leg at z 6.5, 9 tips 1.8 mm apart, 9 caps of 1.66-1.78 mm, a 2.52 x 13.44
-loop. One support (one pad under both areas' trees) built in about 1.5-2 s.
+the leg at z 6.5, 9 tips 1.8 mm apart, 9 caps of 1.66-1.78 mm (left as they
+are for this print), one rectangle, 13.44 x 2.52 mm, its T lines across the
+short side (15 of 2.52 mm). Each area one rectangle. One support (one pad
+under both areas' trees) built in about 1.5-2 s.
 
 **Caps under 2.5 mm**: where tips stand under 2.55 mm apart even after the
 caps spread (the clamp's area 2, the coupon's leg, the tab) the caps are held
@@ -208,14 +213,18 @@ gaps edge to edge 0.05-0.84 mm, never over 2 mm.
 - **Stack**: T1, T2, I1, I2, each one 0.2 mm layer, T1 on z_cap, the top 0.18
   mm under the ceiling; every cap's flat top exactly z_cap, measured on the
   parts built.
-- **Layers**: every one a closed loop and one serpentine inside it, line ends
-  and turns on the loop, no line under 2 mm, T2 and I2 T1's; every layer's
-  mid-layer section ONE region, its outline a rectangle (0.000 mm off) the
-  loop's size and a bead, the loop 0.430 mm wide on all four sides. One
+- **Layers**: every piece a closed loop and one serpentine inside it, turns on
+  the loop, T2 and I2 T1's; every layer's mid-layer section one region a piece:
+  a rectangle's outline 0.000 mm off a rectangle the loop's size and a bead,
+  the loop 0.430 mm wide on all four sides; a stepped outline's edges on the
+  axes (under 2e-5) and its area the loop's polygon grown half a bead all
+  round (the clamp's area 1: 1863.77 mm2 against 1863.77). Lines: a
+  rectangle's 2 mm or longer, an outline's rungs 1.68 mm at the least. One
   direction per layer (share 1.000 on the serpentine's lines), pitch 0.840.
-- **NSO's slicer**: every layer in closed paths, the shortest 6.7 mm (the
-  coupon's leg) - the outline's loop and one round each channel, two passes
-  over each line (no thin-wall mode).
+- **NSO's slicer**: every layer in closed paths, the shortest 3.3 mm (the
+  clamp's area 1) - the outline's loop and one round each channel, about two
+  passes over each line. It has no thin-wall mode; printing a layer in one
+  pass is a slicer ticket (`nso_slicer.js`), not this one.
 - **Nothing above z_cap but the sheet** under any of its paths.
 - **Feet**: one pad per cluster, none split; pads 0.28 mm or more from the
   part. Below the zone the trunks are the planner's: area 1's nearest is
@@ -303,8 +312,8 @@ the sheet's lines 0.40 / 0.36 / 0.30 mm wide (`sheetWidthMm`) and
 `detect_thin_wall = 1` on the support objects only:
 `top_clip_x2_supports_w040_thinwall.3mf`, `_w036_`, `_w030_`. The layers are
 the same (the slab: a 21.84 x 14.28 loop, 25 / 25 / 16 / 25 lines inside it,
-40 caps of 2.50 mm); the card
-exports 0.43 and does not set thin walls. In the owner's
+40 caps of 2.50 mm). The card exports 0.43 and does not set thin walls, and
+stays so until the width matrix says otherwise (the owner's call). In the owner's
 `thinwall_sideXside.gcode.3mf` (thin walls off in its settings) the 0.43
 lines of the earlier export printed as 2.00 passes, and Bambu's own tree's
 layers as one pass at 1.30 x the outer wall's E/mm.
