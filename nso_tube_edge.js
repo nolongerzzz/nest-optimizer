@@ -109,7 +109,8 @@ function NSO_teNozzle(opts) {
   var T = (typeof NSO_Thickness !== 'undefined') ? NSO_Thickness : null;
   return (T && T.NOZZLE_DEFAULT > 0) ? T.NOZZLE_DEFAULT : 0.4;
 }
-function NSO_teSigned(x, dp) { return (x > 0 ? '+' : x < 0 ? '−' : '') + NSO_teFmt(Math.abs(x), dp); }
+// (not NSO_teSigned: app-tube-edge.js has one of that name, loaded after this file)
+function NSO_teSignedDp(x, dp) { return (x > 0 ? '+' : x < 0 ? '−' : '') + NSO_teFmt(Math.abs(x), dp); }
 
 /* WALLS, Flare's and Neck's: which of the wall's faces the verb moves.
    'both' (the default, and what every verb did before Walls) carries the
@@ -146,12 +147,12 @@ function NSO_teOneFaceWall(walls, t, dr, nozzle, where) {
   var tail = most > 0 ? '. This wall lets its ' + face + ' move ' + (walls === 'bore' ? 'out' : 'in') + ' by ' + NSO_teFmt(Math.floor(most * 100) / 100) + ' mm at most'
                       : '. This ' + NSO_teFmt(t) + ' mm wall is at the floor already: its ' + face + ' may only move ' + (walls === 'bore' ? 'in' : 'out');
   if (!(left > 1e-9)) {
-    res.reason = face + ' ' + NSO_teSigned(dr) + ' mm would carry the ' + face + ' through the other face of a ' + NSO_teFmt(t) +
+    res.reason = face + ' ' + NSO_teSignedDp(dr) + ' mm would carry the ' + face + ' through the other face of a ' + NSO_teFmt(t) +
       ' mm wall - the faces would cross' + tail;
     return res;
   }
   if (left < floor - 1e-9) {
-    res.reason = face + ' ' + NSO_teSigned(dr) + ' mm would leave a ' + NSO_teFmt(left) + ' mm wall' + (where || '') + '; the floor is ' +
+    res.reason = face + ' ' + NSO_teSignedDp(dr) + ' mm would leave a ' + NSO_teFmt(left) + ' mm wall' + (where || '') + '; the floor is ' +
       NSO_teFmt(floor) + ' mm (nso_thickness.js: one extrusion line at a ' + nozzle + ' mm nozzle)' + tail;
     return res;
   }
@@ -1101,11 +1102,11 @@ function NSO_tubeEdgeDescribe(r) {
     return NSO_TE_WALLS_WORDS[r.flare.walls] + ': Ø' + NSO_teFmt(2 * mv[0][0]) + ' → Ø' + NSO_teFmt(2 * mv[mv.length - 1][0]) + ' at the lip, ' +
       (bo ? 'outside' : 'bore') + ' kept Ø' + NSO_teFmt(2 * kp[0][0]) + ', wall ' + NSO_teFmt(r.wall.ringMm) + ' → ' + NSO_teFmt(r.wall.lipMm) +
       ' · ' + (r.flare.profile === 'trumpet' ? 'Trumpet' : 'Straight') + ' flare ' + NSO_teFmt(r.flare.lengthMm, 1) + ' mm at ' +
-      (r.flare.angleDeg < 0 ? NSO_teSigned(r.flare.angleDeg, 1) : NSO_teFmt(r.flare.angleDeg, 1)) + '° (Δr ' + NSO_teSigned(r.flare.drMm) + ' mm) off the Ø' + NSO_teFmt(2 * e.Ro) + ' end';
+      (r.flare.angleDeg < 0 ? NSO_teSignedDp(r.flare.angleDeg, 1) : NSO_teFmt(r.flare.angleDeg, 1)) + '° (Δr ' + NSO_teSignedDp(r.flare.drMm) + ' mm) off the Ø' + NSO_teFmt(2 * e.Ro) + ' end';
   }
   if (r.flare && r.flare.drMm < 0) {
     return (r.flare.profile === 'trumpet' ? 'Trumpet flare ' : 'Straight flare ') + NSO_teFmt(r.flare.lengthMm, 1) + ' mm at ' +
-      NSO_teSigned(r.flare.angleDeg, 1) + '° (Δr ' + NSO_teSigned(r.flare.drMm) + ' mm), inward: lip bore Ø' + NSO_teFmt(2 * r.lipBoreRadiusMm) +
+      NSO_teSignedDp(r.flare.angleDeg, 1) + '° (Δr ' + NSO_teSignedDp(r.flare.drMm) + ' mm), inward: lip bore Ø' + NSO_teFmt(2 * r.lipBoreRadiusMm) +
       ', outside Ø' + NSO_teFmt(2 * r.lipOuterRadiusMm) + (r.flare.profile === 'trumpet' ? ', ' + NSO_teFmt(r.lipAngleDeg, 1) + '° at the lip' : '') + ' · ' + s;
   }
   if (r.flare) {

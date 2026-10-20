@@ -164,6 +164,10 @@ withApp(async (page, logs) => {
   console.log('   readout: ' + P.readout);
   check('In: the same 8 mm flare at 30° made inward - the bore at the lip 2·8·tan30 narrower', !P.bad && P.ghost && !P.goDisabled &&
         /Straight flare 8\.0 mm at −30\.0° \(Δr −4\.62 mm\), inward: lip bore Ø7\.56/.test(P.readout), P.readout);
+  await setField(page, 'inp-te-dr', '-4');
+  P = await cardState(page);
+  check('Δr typed −4 (Out): the same inward flare, read in the engine\'s own figures (Δr −4.00 mm, −26.6°)',
+    !P.bad && P.ghost && /Straight flare 8\.0 mm at −26\.6° \(Δr −4\.00 mm\), inward: lip bore Ø8\.80/.test(P.readout), P.readout);
   await setField(page, 'inp-te-angle', '60');
   P = await cardState(page);
   console.log('   readout: ' + P.readout);
