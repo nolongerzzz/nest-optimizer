@@ -54,7 +54,7 @@ const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: pa
 const ORDER = ['box', 'cylinder', 'sphere', 'capsule', 'ellipsoid', 'torus', 'tube', 'cone'];
 
 /* Every row the Scale card can show (the ids are 'scale-<row>-row'). */
-const ROWS = ['length', 'width', 'height', 'ring-outer', 'ring-wall', 'rod-diameter', 'offset',
+const ROWS = ['length', 'width', 'height', 'ring-outer', 'ring-bore', 'ring-wall', 'rod-diameter', 'offset',
               'cap-length', 'cap-diameter', 'ell-a', 'ell-b', 'ell-c', 'torus-ring', 'torus-tube', 'factor', 'longest'];
 
 /* What Scale offers a freshly dropped piece of each shape, and what its
@@ -68,7 +68,7 @@ const SCALE = {
   capsule:   { rows: ['cap-length', 'cap-diameter', 'factor'], lead: /^Capsule Ø.*\(Stock\)/ },
   ellipsoid: { rows: ['ell-a', 'ell-b', 'ell-c', 'factor'], lead: /^Ellipsoid .*\(Stock\)/ },
   torus:     { rows: ['torus-ring', 'torus-tube', 'factor', 'longest'], lead: /^Torus ring Ø.*\(Stock\)/ },
-  tube:      { rows: ['height', 'ring-outer', 'ring-wall', 'factor'], lead: /^Ring Ø/ },
+  tube:      { rows: ['height', 'ring-outer', 'ring-bore', 'ring-wall', 'factor'], lead: /^Ring Ø/ },
   cone:      { rows: ['offset', 'factor', 'longest'], lead: /curved or tapered all over/ }
 };
 

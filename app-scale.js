@@ -644,15 +644,19 @@ function NSO_scaleSelectedModel(spec) {
                        gets no row. A ring or rod shows its one axis under
                        the same names - Height when the axis is its Z - and
                        its readout, holds and done lines say the same word.
-     Outer Ø / Wall    a ring (nso_ring.js): outer and bore together (wall
-                       kept), or the bore alone (outer kept). Part 2's Bore Ø
-                       row is gone: Outer Ø and Wall between them reach every
-                       bore, and the third field only restated the other two.
+     Outer Ø / Bore Ø / Wall
+                       a ring (nso_ring.js), for pipe work: each moves ONE face
+                       and the done line reports the other two. Outer Ø the
+                       outside (bore kept), Bore Ø the bore (outer kept), Wall
+                       the bore by thickness (outer kept); the length is held
+                       by all three. Outer Ø's old move - the bore with it,
+                       wall kept - is Offset's, which a ring does not show
+                       (it moves the ends too); Outer Ø then Bore Ø does it.
      Diameter          a rod.
      Offset            Fatten and Shrink, folded in: the outside moves by the
                        mm entered and the inner faces follow (NSO_scaleOffsetRaw
-                       above). Shown on every piece but a ring or rod, where Outer Ø /
-                       Diameter and Length already do its job. The sentence
+                       above). Shown on every piece but a ring or rod, where Outer Ø,
+                       Bore Ø / Diameter and Length do its job. The sentence
                        under it says what wall kept means for a thin feature:
                        lid_strap's 0.6 mm strap stays 0.6 mm.
      Shape rows        a capsule's Length and Diameter, a sphere's or
@@ -856,8 +860,7 @@ function NSO_scaleSectionOfSoup(soup) {
 
 var NSO_SCALE_FACES_PAINT = ' moves faces all over one side of the piece and the rims they share. Clear paint to resize.';
 
-/* A ring or rod verb: 'outer' | 'wall' | 'diameter' (and 'bore', which
-   nso_ring.js still answers; the card no longer offers it), to `value` mm.
+/* A ring or rod verb: 'outer' | 'bore' | 'wall' | 'diameter', to `value` mm.
    nso_ring.js does the geometry and every refusal. */
 var NSO_SCALE_RING_LABEL = { outer: 'Outer Ø', bore: 'Bore Ø', wall: 'Wall', diameter: 'Diameter' };
 function NSO_scaleRingVerb(verb, value) {
@@ -866,8 +869,8 @@ function NSO_scaleRingVerb(verb, value) {
     label: label, undoType: 'ringReplace', paint: label + NSO_SCALE_FACES_PAINT,
     run: function (soup) { return NSO_ringApplyRaw(soup, verb, value); },
     describe: function (r) {
-      // Bare figures with mm shown, as nso_ring.js has always written them;
-      // each one carries "in" with inches shown.
+      // nso_ring.js's own figures with mm shown (a ring at the card's one
+      // display precision); each one carries "in" with inches shown.
       return NSO_ringDescribe(r, NSO_scaleIn() ? function (x) { return NSO_scaleLen(x) + ' in'; } : null);
     }
   };
@@ -975,6 +978,7 @@ if (typeof document !== 'undefined') {
       ['width', 'scale-width', 'scale-width-row'],
       ['height', 'scale-height', 'scale-height-row'],
       ['outer', 'scale-ring-outer', 'scale-ring-outer-row'],
+      ['bore', 'scale-ring-bore', 'scale-ring-bore-row'],
       ['wall', 'scale-ring-wall', 'scale-ring-wall-row'],
       ['diameter', 'scale-rod-diameter', 'scale-rod-diameter-row'],
       ['offset', 'scale-offset', 'scale-offset-row'],
@@ -988,7 +992,7 @@ if (typeof document !== 'undefined') {
       ['factor', 'scale-factor', 'scale-factor-row'],
       ['longest', 'scale-target', 'scale-longest-row']
     ];
-    var LABEL = { length: 'Length', width: 'Width', height: 'Height', outer: 'Outer Ø', wall: 'Wall',
+    var LABEL = { length: 'Length', width: 'Width', height: 'Height', outer: 'Outer Ø', bore: 'Bore Ø', wall: 'Wall',
                   diameter: 'Diameter', offset: 'Offset', factor: 'Whole ×', longest: 'Longest',
                   capLength: 'Length', capDiameter: 'Diameter', ellA: 'A', ellB: 'B', ellC: 'C',
                   ringDia: 'Ring Ø', tubeDia: 'Tube Ø' };
@@ -1039,7 +1043,7 @@ if (typeof document !== 'undefined') {
       }
       if (v) {
         ['length', 'width', 'height'].forEach(function (k) { if (v[k]) val[k] = f(v[k].mm); });
-        if (v.outer) { val.outer = f(s.outer.diameterMm); val.wall = f(s.wallMm); }
+        if (v.outer) { val.outer = f(s.outer.diameterMm); val.bore = f(s.bore.diameterMm); val.wall = f(s.wallMm); }
         if (v.diameter) val.diameter = f(s.outer.diameterMm);
         val.longest = f(v.longestMm);
       }
@@ -1060,12 +1064,12 @@ if (typeof document !== 'undefined') {
       var v = s ? s.verbs : null, sh = lastShape;
       var on = {
         length: !!(v && v.length), width: !!(v && v.width), height: !!(v && v.height),
-        outer: !!(v && v.outer), wall: !!(v && v.wall), diameter: !!(v && v.diameter),
+        outer: !!(v && v.outer), bore: !!(v && v.bore), wall: !!(v && v.wall), diameter: !!(v && v.diameter),
         offset: !!(v && v.offset), factor: true, longest: !v || v.longest
       };
       if (sh) {
         var rows = NSO_SHAPE_ROWS[sh.shape] || [], vals = NSO_shapeRowValues(sh);
-        ['length', 'width', 'height', 'outer', 'wall', 'diameter', 'offset'].forEach(function (k) { on[k] = false; });
+        ['length', 'width', 'height', 'outer', 'bore', 'wall', 'diameter', 'offset'].forEach(function (k) { on[k] = false; });
         rows.forEach(function (k) { on[k] = true; });
         var b = NSO_shapeExpectedSpan(sh), longest = Math.max(b[0], b[1], b[2]);
         on.longest = !rows.some(function (k) { return NSO_sectionShow(vals[k]) === NSO_sectionShow(longest); });
