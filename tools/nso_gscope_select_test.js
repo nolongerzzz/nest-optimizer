@@ -179,7 +179,14 @@ withApp(async (page, logs) => {
     await page.mouse.move(px[0] - 40, px[1] - 40);
     await page.mouse.move(px[0], px[1], { steps: 3 });
     await page.waitForTimeout(160);
-    const hv = await page.evaluate(() => ({ info: NSO_MICROSCOPE.hoverInfo(), kids: NSO_MICROSCOPE.getView().hoverGroup.children.length, cursor: NSO_MICROSCOPE.getView().renderer.domElement.style.cursor }));
+    let hv = await page.evaluate(() => ({ info: NSO_MICROSCOPE.hoverInfo(), kids: NSO_MICROSCOPE.getView().hoverGroup.children.length, cursor: NSO_MICROSCOPE.getView().renderer.domElement.style.cursor }));
+    // a big piece outlines nothing on hover until nso_bvh.js has built its tree (the first hover asks for it):
+    // nudge the pointer until it has, up to ~5 s
+    for (let k = 0; !hv.info && k < 30; k++) {
+      await page.mouse.move(px[0] + (k % 2 ? 1 : 0), px[1]);
+      await page.waitForTimeout(160);
+      hv = await page.evaluate(() => ({ info: NSO_MICROSCOPE.hoverInfo(), kids: NSO_MICROSCOPE.getView().hoverGroup.children.length, cursor: NSO_MICROSCOPE.getView().renderer.domElement.style.cursor }));
+    }
     const n = expect(want);
     check(label + ': hover outlines what a click would take (' + (n == null ? 'the box region' : n + ' move(s)') + ')', hv.info && hv.info.source === source && hv.kids > 0 && hv.cursor === 'pointer' && (n == null ? hv.info.count > 0 : hv.info.count === n), J(hv.info));
     if (id === 'piece') await shot('02-hover-piece');
