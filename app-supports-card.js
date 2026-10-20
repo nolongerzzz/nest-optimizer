@@ -112,7 +112,8 @@ var NSO_SUPPORTS_CARD = (function () {
      shell, grouped into the supports weld() would have made. The weld was
      16 of the clamp's 23 s and made no layer a slicer prints any different
      (support:shells); nothing on the plate needs a support to be one shell
-     (the booleans merge a piece's shells for themselves, nsoOverlap). */
+     (the booleans merge a piece's shells for themselves: the overlap merge in
+     nso-helpers.js). */
   var PARTS_OPTS = { interface: true, foldSheets: false };
   /* The card's state when the picked piece has no beacons at all. Detection
      only asks what hangs in air; a tall, thin piece that may sway as it
