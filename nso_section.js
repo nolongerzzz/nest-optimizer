@@ -461,21 +461,23 @@ function NSO_sectionAxisWord(s, k) {
 
      round, hollow   its axis (if it has a clean band), named the way a box's
                      would be as it lies - Height if the axis is its Z, else
-                     Length or Width by the rule below - then Outer Ø, Wall
+                     Length or Width by the rule below - then Outer Ø, Bore Ø,
+                     Wall: each moves one face (nso_ring.js)
      round, solid    its axis, named the same way, then Diameter
      anything else   Length / Width / Height for each of the piece's own axes
                      that has a clean band. Height is the piece's own Z, Length
                      the longer of its X and Y, Width the shorter.
 
    offset (Fatten / Shrink as one wall-kept offset) shows on every piece but a
-   ring or rod, where Outer Ø / Diameter and Length already do its job. On
-   anything else it is the only way to thicken a piece evenly: Length / Width
-   / Height insert material in one band each, which on a stepped piece (an L,
-   lid_strap's strap) moves the step's position rather than offsetting it.
+   ring or rod, where Outer Ø, Bore Ø (a rod's Diameter) and Length do its
+   job between them. On anything else it is the only way to thicken a piece
+   evenly: Length / Width / Height insert material in one band each, which on
+   a stepped piece (an L, lid_strap's strap) moves the step's position rather
+   than offsetting it.
    Longest shows only where it is not the same number as a named field
    already on the card. */
 function NSO_sectionVerbs(s) {
-  var v = { length: null, width: null, height: null, outer: false, wall: false, diameter: false,
+  var v = { length: null, width: null, height: null, outer: false, bore: false, wall: false, diameter: false,
             offset: true, longest: true, named: [] };
   if (!s || !s.axes) return v;
   function dim(a) { return { axisIdx: a.idx, axis: a.name, mm: a.extentMm, bandMm: a.bandMm }; }
@@ -483,7 +485,7 @@ function NSO_sectionVerbs(s) {
   if (s.shape === 'round') {
     var A = s.axes[s.axisIdx];
     if (A.ok) v[word(A)] = dim(A);
-    if (s.hollow) { v.outer = true; v.wall = true; } else v.diameter = true;
+    if (s.hollow) { v.outer = true; v.bore = true; v.wall = true; } else v.diameter = true;
     v.offset = false;
   } else {
     s.axes.forEach(function (a) { if (a.ok) v[word(a)] = dim(a); });
@@ -492,6 +494,7 @@ function NSO_sectionVerbs(s) {
   var namedMm = [];
   ['length', 'width', 'height'].forEach(function (n) { if (v[n]) { v.named.push(n); namedMm.push(v[n].mm); } });
   if (v.outer || v.diameter) { v.named.push(v.outer ? 'outer' : 'diameter'); namedMm.push(s.outer.diameterMm); }
+  if (v.bore) v.named.push('bore');
   if (v.wall) v.named.push('wall');
   v.longest = !namedMm.some(function (mm) { return NSO_sectionShow(mm) === NSO_sectionShow(longest); });
   v.longestMm = longest;

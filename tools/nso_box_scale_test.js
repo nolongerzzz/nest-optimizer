@@ -83,8 +83,8 @@ const STAND = BOX.bar(10, 20, 60), rS = NSO_sectionRead(STAND);
 check('a bar stood on end: Height Z 60, Length Y 20, Width X 10 - the piece\'s axes as it lies',
   rS.verbs.height.mm === 60 && rS.verbs.length.axisIdx === 1 && rS.verbs.width.axisIdx === 0, NSO_sectionReadout(rS));
 const TUBE = S.make({ shape: 'tube', height: 40 }).soup, rU = NSO_sectionRead(TUBE), vU = rU.verbs;
-check('ring stood up (axis Z): Height, Outer Ø and Wall; no Length / Width / Diameter / Offset; no Longest (it is the Height and the Ø)',
-  vU.height && vU.height.axisIdx === 2 && vU.outer && vU.wall && !vU.length && !vU.width && !vU.diameter && !vU.offset && !vU.longest,
+check('ring stood up (axis Z): Height, Outer Ø, Bore Ø and Wall; no Length / Width / Diameter / Offset; no Longest (it is the Height and the Ø)',
+  vU.height && vU.height.axisIdx === 2 && vU.outer && vU.bore && vU.wall && !vU.length && !vU.width && !vU.diameter && !vU.offset && !vU.longest,
   JSON.stringify(vU.named));
 // A ring's or rod's one axis is named the way a box's would be as it lies:
 // Height if it is the piece's Z, else Length or Width by which of X / Y is
@@ -109,11 +109,12 @@ check('ring stood up (axis Z): Height, Outer Ø and Wall; no Length / Width / Di
       const others = ['length', 'width', 'height'].filter(n => n !== name);
       check(kind + ' ' + what + ': its axis is the ' + name[0].toUpperCase() + name.slice(1) + ' row (' + AX[k] + ' ' + want + '), no other L / W / H',
         r.shape === 'round' && r.hollow === (kind === 'ring') && v[name] && v[name].axisIdx === k && Math.abs(v[name].mm - want) < 1e-4 &&
-        others.every(n => !v[n]) && (kind === 'ring' ? v.outer && v.wall : v.diameter), JSON.stringify(v.named));
+        others.every(n => !v[n]) && (kind === 'ring' ? v.outer && v.bore && v.wall : v.diameter && !v.bore), JSON.stringify(v.named));
       const done = NSO_ringApplyRaw(soup, verb, value);
       const line = done.ok ? NSO_ringDescribe(done) : 'refused: ' + done.reason;
       check('  ...the readout says "' + name + ' ' + want.toFixed(1) + '" and ' + verb + ' says "' + name + ' held"',
-        said.endsWith(' · ' + name + ' ' + want.toFixed(1)) && done.ok && line.endsWith(', ' + name + ' held'), said + ' | ' + line);
+        said.endsWith(' · ' + name + ' ' + want.toFixed(1)) && done.ok && line.endsWith((kind === 'ring' ? ' · ' : ', ') + name + ' held'),
+        said + ' | ' + line);
     }
   }
 }

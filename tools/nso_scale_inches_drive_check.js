@@ -66,7 +66,7 @@ const select = (page, id) => page.evaluate(i => {
   selectPlaced(idx);
 }, id);
 
-const ROWS = ['length', 'width', 'height', 'ring-outer', 'ring-wall', 'rod-diameter', 'offset', 'factor', 'longest'];
+const ROWS = ['length', 'width', 'height', 'ring-outer', 'ring-bore', 'ring-wall', 'rod-diameter', 'offset', 'factor', 'longest'];
 
 const card = async page => {
   await openMenuFor(page, '#scale-readout');
@@ -212,15 +212,16 @@ async function unitsHold(page, label, expect) {
   const held = expect.axisWord || 'length';
   check('(a) ' + label + ': unit labels "in" and "in, wall kept"; the holds without a unit unchanged but for the axis word (' + held + ')',
     ['length', 'width', 'height', 'longest'].every(r => c.unit[r] === 'in') && c.unit.offset === 'in, wall kept' &&
-    c.unit['ring-outer'] === 'wall kept' && c.unit['ring-wall'] === 'outer kept' && c.unit['rod-diameter'] === held + ' kept' &&
+    c.unit['ring-outer'] === 'bore kept' && c.unit['ring-bore'] === 'outer kept' && c.unit['ring-wall'] === 'outer kept' &&
+    c.unit['rod-diameter'] === held + ' kept' &&
     mm.unit['rod-diameter'] === held + ' kept',
     JSON.stringify(c.unit));
   const heldTitles = t => t.filter(x => /\b(length|height|width) is held\b/.test(x));
-  check('(a) ' + label + ': Outer Ø and Diameter say "the ' + held + ' is held", in mm and in inches',
-    heldTitles(c.sectionTitles).length === 2 && heldTitles(c.sectionTitles).every(x => x.indexOf('the ' + held + ' is held') >= 0) &&
+  check('(a) ' + label + ': Outer Ø, Bore Ø and Diameter say "the ' + held + ' is held", in mm and in inches',
+    heldTitles(c.sectionTitles).length === 3 && heldTitles(c.sectionTitles).every(x => x.indexOf('the ' + held + ' is held') >= 0) &&
     heldTitles(mm.sectionTitles).every(x => x.indexOf('the ' + held + ' is held') >= 0), heldTitles(c.sectionTitles).join(' | '));
   check('(a) ' + label + ': step 0.1 mm -> 0.005 in; limits converted onto that grid',
-    ['length', 'width', 'height', 'ring-outer', 'ring-wall', 'rod-diameter'].every(r => c.lim[r] === '0.005 / 78.74 / 0.005') &&
+    ['length', 'width', 'height', 'ring-outer', 'ring-bore', 'ring-wall', 'rod-diameter'].every(r => c.lim[r] === '0.005 / 78.74 / 0.005') &&
     c.lim.offset === '-0.785 / 0.785 / 0.005' && c.lim.longest === '0.005 / 39.37 / 0.005', JSON.stringify(c.lim));
   check('(a) ' + label + ': nothing the card says - text, aria-labels, titles - names mm', !/\bmm\b/.test(c.said),
     (c.said.match(/.{0,30}\bmm\b.{0,10}/g) || []).join(' | '));
@@ -335,7 +336,7 @@ withApp(async (page, logs) => {
   const t = await reading();
   await unitsHold(page, 'tube', {
     readout: 'Ring Ø' + inch(t.outer) + ' outer · Ø' + inch(t.bore) + ' bore · wall ' + inch(t.wallMm) + ' · height ' + inch(t.lengthMm) + ' · fits A1 Mini',
-    val: { height: inch(t.lengthMm), 'ring-outer': inch(t.outer), 'ring-wall': inch(t.wallMm) }, axisWord: 'height'
+    val: { height: inch(t.lengthMm), 'ring-outer': inch(t.outer), 'ring-bore': inch(t.bore), 'ring-wall': inch(t.wallMm) }, axisWord: 'height'
   });
   await shot(page, '02-tube-inches');
   // Stood up, the ring's axis is its own Z: the Height row, in inches.
@@ -352,7 +353,16 @@ withApp(async (page, logs) => {
   console.log('   Outer Ø 2 in: ' + st);
   eq = await sameAsEngine(page, 'NSO_ringApplyRaw(soup, "outer", 2 * 25.4)');
   check('(b) tube Outer Ø 2 in = NSO_ringApplyRaw(outer, 50.8 mm), float for float', eq.ok, eq.why || eq.floats + ' floats');
-  check('(b) ...and says so in inches', /→ Ø2\.000 in \/ Ø[\d.]+ in wall [\d.]+ in, wall kept, height held$/.test(st) && !/\bmm\b/.test(st), st);
+  check('(b) ...and says so in inches: the three figures after the move, the bore held',
+    st === 'Outer Ø done - Ø2.000 in / bore Ø' + inch(t.bore) + ' in · wall ' + inch((50.8 - t.bore) / 2) + ' in · height held', st);
+  await undo(page);
+  await keepSoup(page);
+  st = await typeAndLeave(page, 'scale-ring-bore', '1', 'Bore Ø (done|refused)|stood down');
+  console.log('   Bore Ø 1 in: ' + st);
+  eq = await sameAsEngine(page, 'NSO_ringApplyRaw(soup, "bore", 25.4)');
+  check('(b) tube Bore Ø 1 in = NSO_ringApplyRaw(bore, 25.4 mm), float for float', eq.ok, eq.why || eq.floats + ' floats');
+  check('(b) ...and says so in inches, the outer held',
+    st === 'Bore Ø done - Ø' + inch(t.outer) + ' in / bore Ø1.000 in · wall ' + inch((t.outer - 25.4) / 2) + ' in · height held', st);
   await undo(page);
   await keepSoup(page);
   st = await typeAndLeave(page, 'scale-ring-wall', '0.01', 'Wall (done|refused)|stood down');
@@ -361,7 +371,9 @@ withApp(async (page, logs) => {
     st === 'Wall refused - piece unchanged (wall would be 0.010 in, under the 0.017 in floor)' && await unchanged(page), st);
   st = await typeAndLeave(page, 'scale-ring-outer', '0.1', 'Outer Ø (done|refused)|stood down');
   console.log('   Outer Ø 0.1 in: ' + st);
-  check('(d) tube Outer Ø 0.1 in: the bore closes, its Ø named in inches', /^Outer Ø refused - piece unchanged \(bore would close up - Ø-[\d.]+ in is at or below zero\)$/.test(st) && await unchanged(page), st);
+  check('(d) tube Outer Ø 0.1 in: it would reach the held bore, both Ø named in inches',
+    st === 'Outer Ø refused - piece unchanged (outer would reach the bore - Ø0.100 outer against a Ø' + inch(t.bore) + ' bore)' &&
+    await unchanged(page), st);
 
   console.log('\n=== Rod (Stock cylinder) ===');
   await makeStock(page, 'cylinder');

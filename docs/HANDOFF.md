@@ -62,7 +62,7 @@ Current roster, by category:
 | Delete painted (`app-paint-delete.js`) | sub-region | the one TARGET face, `nsoMaskIsExcludedRaw(m, face.n, face.d, ...)` | `docs/PAINT-DELETE.md` §7 |
 | Stock shelf (`app-stock.js`, a tile click) | none — adds a piece, edits none | n/a | header comment + `docs/STOCK.md` |
 | Extract selection (`app-extract-sel.js`) | sub-region | the one TARGET face, `nsoMaskIsExcludedRaw(m, face.n, face.d, ...)` | header comment |
-| Scale (`app-scale.js`; Whole, Longest, Fit to plate, Length / Width / Height, the ring verbs Outer / Wall / Diameter, and Offset) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comments (`NSO_scaleSelectedModel`, `NSO_scaleCardApply`) |
+| Scale (`app-scale.js`; Whole, Longest, Fit to plate, Length / Width / Height, the ring verbs Outer / Bore / Wall / Diameter, and Offset) | whole-piece | `nsoMaskCount(m) > 0` | stand-down comments (`NSO_scaleSelectedModel`, `NSO_scaleCardApply`) |
 | Skin patch (`app-skin-patch.js`) | **none** | — it reads no existing geometry at all | header comment |
 | Texture (`app-texture.js`, the curved band) | sub-region | the band's own facets, `nsoMaskIsExcludedRaw(m, face.n, face.d)` per facet; the caps do not block it | `docs/CURVED-SKIN.md` §7 |
 | Brush (`app-brush.js`) | sub-region | every face the stroke **and its seam band** land on, `nsoMaskPlaneList(m)` | `docs/BRUSH.md` §paint scope |
@@ -6031,3 +6031,30 @@ PAINT SCOPE: **WHOLE-PIECE** (header comment + `docs/PUNCH.md`).
 - **The bar**: a big piece's boolean shows #233's bar from the start (that is
   `NSO_boolRun`'s); Punch adds its own after 300 ms, for the overlap merge and the
   cutters' union, which run before the subtract.
+
+## Scale ring rows - Outer Ø · Bore Ø · Wall, one face each (2026-10-20)
+
+`nso_ring.js` (Outer Ø holds the bore; the outer-onto-bore refusal; the done
+line), `nso_section.js` (`verbs.bore`), `app-scale.js` (the Bore Ø field),
+`index.html` (the Bore Ø row, the Outer Ø tooltip, holds). Checks:
+`ring:drive` §4 and §9 (the pipe gate, on a Stock tube; it no longer needs the
+Library for §7 and §9), `ring:test` §8 and §9, and the row lists in
+`scale:card`, `scale:inches`, `stock:shelf`, `box:test`. `?v=ringidod1` on
+`nso_section.js`, `nso_ring.js` and `app-scale.js`. Write-up: "Ring verbs" in
+`docs/SECTION.md`.
+
+PAINT SCOPE: unchanged, **WHOLE-PIECE** (the Scale card's).
+
+- **Each row moves one face.** Outer Ø the outside (bore kept), Bore Ø the bore
+  (outer kept), Wall the bore by thickness (outer kept); the length is held by
+  all three. The done line reports the three numbers after the move:
+  `Outer Ø done - Ø44.0 / bore Ø30.0 · wall 7.0 · height held`.
+- **Outer Ø's old move** (the bore with it, wall kept) is Offset's, and the
+  Outer Ø tooltip says so. Offset is still not shown on a ring: on a ring it
+  moves the ends too (length 8.0 → 7.8 at −0.1), so Outer Ø then Bore Ø is the
+  same move with the length held.
+- **Refusals in mm**, each from the face that moved: `wall would be 0.3 mm,
+  under the 0.42 mm floor`; `outer would reach the bore - Ø37 outer against a
+  Ø38 bore`; `bore would reach the outer - Ø45 bore against a Ø44 outer`.
+- **A shaped tube** (Flare, Run, Neck) reads as not round, so no ring row shows
+  and the engine refuses in the reader's words - unchanged, now pinned.

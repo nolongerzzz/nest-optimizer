@@ -14,8 +14,8 @@
    about pieces made the way a user makes them - and that its verbs do what
    their labels claim:
 
-     1  Stock tube        -> Ring; Height (its axis is its own Z), Outer Ø
-                             and Wall rows; no Bore, no Offset, no Longest
+     1  Stock tube        -> Ring; Height (its axis is its own Z), Outer Ø,
+                             Bore Ø and Wall rows; no Offset, no Longest
                              (it is the Height)
      2  Height shorter / taller, Undo; Whole x 2 and Whole x back to 1
      3  tape_on-edge-single (185 mm on an A1 Mini's 180) -> 5.0 mm too wide;
@@ -75,7 +75,7 @@ const select = (page, id) => page.evaluate(i => {
   selectPlaced(idx);
 }, id);
 
-const ROWS = ['length', 'width', 'height', 'ring-outer', 'ring-wall', 'rod-diameter', 'offset',
+const ROWS = ['length', 'width', 'height', 'ring-outer', 'ring-bore', 'ring-wall', 'rod-diameter', 'offset',
               'cap-length', 'cap-diameter', 'ell-a', 'ell-b', 'ell-c', 'torus-ring', 'torus-tube', 'factor', 'longest'];
 
 /* Reads the card the way a user does: open the Scale menu (the line is only
@@ -99,7 +99,6 @@ const readCard = page => page.evaluate(rows => {
   return {
     readout: document.getElementById('scale-readout').textContent,
     shown, val, rows: rows.filter(r => shown[r]).join(','),
-    bore: !!document.getElementById('scale-ring-bore'),
     size: m ? { x: m.size.x, y: m.size.y, z: m.size.z } : null,
     soup: m ? Array.from(m.rawTris).join(',') : '',
     layers: m ? [0, 1, 2].map(k => { const s = new Set(); for (let i = k; i < m.rawTris.length; i += 3) s.add(m.rawTris[i]); return Array.from(s).sort((a, b) => a - b); }) : null
@@ -190,11 +189,11 @@ withApp(async (page, logs) => {
   console.log('   readout:   ' + c0.readout);
   console.log('   rows:      ' + c0.rows + '   ' + JSON.stringify(c0.val));
   check('the readout is the Ring line, number for number, at one precision', c0.readout === want, 'want "' + want + '"');
-  check('rows: Height (its axis is its own Z), Outer Ø, Wall, Whole × - no Bore, no Offset, no Longest (it equals the Height)',
-    c0.rows === 'height,ring-outer,ring-wall,factor' && !c0.bore, c0.rows);
+  check('rows: Height (its axis is its own Z), Outer Ø, Bore Ø, Wall, Whole × - no Offset, no Longest (it equals the Height)',
+    c0.rows === 'height,ring-outer,ring-bore,ring-wall,factor', c0.rows);
   check('fields prefilled at the readout\'s precision',
-    c0.val.height === show(m.height) && c0.val['ring-outer'] === show(2 * m.radius) && c0.val['ring-wall'] === show(m.tube_wall) &&
-    c0.val.factor === '1', JSON.stringify(c0.val));
+    c0.val.height === show(m.height) && c0.val['ring-outer'] === show(2 * m.radius) && c0.val['ring-bore'] === show(2 * m.inner_radius) &&
+    c0.val['ring-wall'] === show(m.tube_wall) && c0.val.factor === '1', JSON.stringify(c0.val));
   await shot(page, '01-tube-ring');
   const before = c0;
 
@@ -309,7 +308,7 @@ withApp(async (page, logs) => {
   await select(page, tube.id);
   const r1 = await card(page);
   check('selecting the tube mid-edit: its own fields, Whole × 1', r1.val.factor === '1' && r1.val.height === show(m.height) &&
-    r1.rows === 'height,ring-outer,ring-wall,factor', JSON.stringify(r1.val));
+    r1.rows === 'height,ring-outer,ring-bore,ring-wall,factor', JSON.stringify(r1.val));
   await select(page, trayId);
   const r2 = await card(page);
   const undo5b = await page.evaluate(() => state.undoStack.length);

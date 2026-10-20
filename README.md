@@ -23,8 +23,9 @@ Smart build-plate packing for 3D printing.
   (`fits A1 Mini` / `5.0 mm too wide for A1 Mini`). Under it, one compact row
   per field that applies: **Length / Width / Height** - the piece's own axes
   as it lies - each inserting or removing material inside one straight run, so
-  walls, floor, holes and lips keep their size; a ring's **Outer Ø** (wall
-  kept) and **Wall** (outer kept), a rod's **Diameter**; **Offset** (the
+  walls, floor, holes and lips keep their size; a ring's **Outer Ø** (bore
+  kept), **Bore Ø** (outer kept) and **Wall** (outer kept) - each moves one
+  face, for pipe work - and a rod's **Diameter**; **Offset** (the
   outside in or out, inner faces following - Fatten / Shrink, folded in) on
   everything but a ring or rod; **Whole ×**, **Longest** and **Fit to plate**.
   See [docs/SECTION.md](docs/SECTION.md)

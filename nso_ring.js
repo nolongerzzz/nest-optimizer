@@ -4,15 +4,21 @@
 // browser, where the Scale card's ring fields call it.
 //
 // THE RULE, decided: a dimension edit MOVES BOUNDARY FACES, it never scales,
-// and on a ring the wall is preserved unless the wall is what is being edited.
-// Each verb is one sentence about which faces move and by how much:
+// and each ring verb moves ONE face - pipe work sets the outside and the bore
+// independently. Each verb is one sentence about which faces move and by how
+// much:
 //
-//   Outer Ø -> d   outer faces move out by dr = (d - outer)/2, and the bore
-//                  faces move by the same dr. Wall held, length held.
+//   Outer Ø -> d   outer faces move out by dr = (d - outer)/2. Bore held; the
+//                  wall changes by +dr. (Before scale-ring-id-od the bore moved
+//                  by the same dr and the wall was held: that both-faces move
+//                  is SCALE's Offset, which on a ring moves the ends too.)
 //   Bore Ø -> d    bore faces move by dr = (d - bore)/2. Outer held; the wall
 //                  changes by -dr.
 //   Wall -> w      bore faces move by -(w - wall). Outer held.
 //   Diameter -> d  (a rod: no bore) outer faces by dr, nothing else.
+//
+// The length is held by all of them. A ring verb is refused under the wall
+// floor (NSO_ringWallFloor) and where the two faces would cross, in mm.
 //
 // "dr" is in the reader's own terms: the circle the outline's vertices sit on
 // (nso_section.js), so the number the card shows after an apply is the number
@@ -203,7 +209,7 @@ function NSO_ringPlan(reading, verb, value, opts) {
     R2 = v / 2;
   } else if (verb === 'outer') {
     if (!(v > 0)) { out.reason = 'outer Ø would be ' + NSO_ringFmt(v) + ' mm - it needs more than zero'; return out; }
-    R2 = v / 2; r2 = r + (R2 - R);
+    R2 = v / 2;   // the bore is held
   } else if (verb === 'bore') {
     r2 = v / 2;
   } else if (verb === 'wall') {
@@ -214,8 +220,10 @@ function NSO_ringPlan(reading, verb, value, opts) {
 
   if (hollow) {
     if (r2 >= R2) {
-      out.reason = 'bore would reach the outer - Ø' + NSO_ringFmt(2 * r2) + ' bore against a Ø' +
-        NSO_ringFmt(2 * R2) + ' outer';
+      // said from the face that moved
+      out.reason = verb === 'outer'
+        ? 'outer would reach the bore - Ø' + NSO_ringFmt(2 * R2) + ' outer against a Ø' + NSO_ringFmt(2 * r2) + ' bore'
+        : 'bore would reach the outer - Ø' + NSO_ringFmt(2 * r2) + ' bore against a Ø' + NSO_ringFmt(2 * R2) + ' outer';
       return out;
     }
     if (!(r2 > 0)) {
@@ -299,9 +307,14 @@ function NSO_ringApplyRaw(soup, verb, value, opts) {
     if (plan.dBore !== 0 && dB !== 0) tB *= plan.dBore / dB;
   }
 
-  // Held faces really held: on Bore and Wall the outer wall does not move.
+  // Held faces really held: on Bore and Wall the outer wall does not move,
+  // and on Outer the bore does not.
   if (plan.dOuter === 0 && best.after.outer.diameterMm !== before.outer.diameterMm) {
     res.reason = 'the outer moved (' + before.outer.diameterMm + ' -> ' + best.after.outer.diameterMm + ')';
+    return res;
+  }
+  if (before.hollow && plan.dBore === 0 && best.after.bore.diameterMm !== before.bore.diameterMm) {
+    res.reason = 'the bore moved (' + before.bore.diameterMm + ' -> ' + best.after.bore.diameterMm + ')';
     return res;
   }
   res.ok = true;
@@ -315,15 +328,20 @@ function NSO_ringApplyRaw(soup, verb, value, opts) {
   return res;
 }
 
-/* One line for the status bar: the verb, before -> after, what was held.
+/* One line for the status bar. A ring: the three numbers after the move -
+   the face that moved and the two it reports - and the length held, at the
+   card's one display precision: "Ø21.84 / bore Ø15.56 · wall 3.14 · length
+   held". A rod: before -> after, in the bare millimetres it has always shown.
    fmt formats a length in mm for display (the Scale card's unit edge,
-   app-scale.js); it defaults to the bare millimetres this has always shown. */
+   app-scale.js) and replaces both defaults. */
 function NSO_ringDescribe(r, fmt) {
-  var a = r.before, b = r.after, f = fmt || function (x) { return (+x).toFixed(3); };
+  var a = r.before, b = r.after;
   // what is held is the axis, by the name its row has ("height held" stood up)
-  var held = ', ' + NSO_sectionAxisWord(a, a.axisIdx) + ' held';
-  if (!a.hollow) return 'Diameter Ø' + f(a.outer.diameterMm) + ' → Ø' + f(b.outer.diameterMm) + held;
-  return 'Ø' + f(a.outer.diameterMm) + ' / Ø' + f(a.bore.diameterMm) + ' wall ' + f(a.wallMm) + ' → Ø' +
-    f(b.outer.diameterMm) + ' / Ø' + f(b.bore.diameterMm) + ' wall ' + f(b.wallMm) +
-    (r.verb === 'outer' ? ', wall kept' : ', outer kept') + held;
+  var held = NSO_sectionAxisWord(a, a.axisIdx) + ' held';
+  if (!a.hollow) {
+    var f3 = fmt || function (x) { return (+x).toFixed(3); };
+    return 'Diameter Ø' + f3(a.outer.diameterMm) + ' → Ø' + f3(b.outer.diameterMm) + ', ' + held;
+  }
+  var f = fmt || NSO_sectionShow;
+  return 'Ø' + f(b.outer.diameterMm) + ' / bore Ø' + f(b.bore.diameterMm) + ' · wall ' + f(b.wallMm) + ' · ' + held;
 }

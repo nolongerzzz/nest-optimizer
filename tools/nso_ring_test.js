@@ -12,13 +12,17 @@
 //
 //   the numbers     the reader's reading of the result is what the verb asked
 //   the hold        what the verb says it keeps is kept - outer coordinates bit
-//                   for bit on Bore and Wall, the wall to within float32 on
+//                   for bit on Bore and Wall, bore coordinates bit for bit on
 //                   Outer, and the LENGTH bit for bit on every axial coordinate
 //   the mesh        tools/mesh_validate.py on the result: closed, manifold,
 //                   consistently wound, no degenerate triangles, no piercing
 //   the way back    Outer 20 -> 24 -> 20 returns the original within 1e-6 mm,
 //                   or one float32 ULP at the piece's coordinate magnitude
 //                   where that is coarser (see EPS below)
+//
+// Section 8 is pipe work: a tube's outside and bore set independently, each
+// verb moving one face, with the floor and crossing refusals in mm. Section 9
+// holds that a shaped tube (Flare, Neck) is refused in the reader's words.
 //
 // Prints the verb x fixture table at the end; the PR quotes it.
 
@@ -40,11 +44,15 @@ const ctx = {
 ctx.window = ctx; ctx.globalThis = ctx;
 vm.createContext(ctx);
 vm.runInContext('var state = {}; var THREE = {};', ctx);
-for (const f of ['nso_thickness.js', 'nso_stock.js', 'app-cut.js', 'app-sculpt.js', 'app-finish.js',
-                 'app-extend.js', 'app-fatten.js', 'nso_section.js', 'nso_ring.js']) {
+// Index.html's order; Repair, the path sweep and the two tube-edge files are
+// for section 8's shaped tubes.
+for (const f of ['NSO_Repair.js', 'nso_thickness.js', 'nso_stock.js', 'nso_path_sweep.js', 'app-cut.js', 'app-sculpt.js',
+                 'app-finish.js', 'app-extend.js', 'app-fatten.js', 'nso_section.js', 'nso_tube_edge.js', 'nso_tube_neck.js',
+                 'nso_ring.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
-const { NSO_ringApplyRaw, NSO_ringOffsetRaw, NSO_ringFaces, NSO_sectionRead, NSO_sectionReadout, NSO_Stock: S, NSO_Thickness } = ctx;
+const { NSO_ringApplyRaw, NSO_ringOffsetRaw, NSO_ringFaces, NSO_ringDescribe, NSO_sectionRead, NSO_sectionReadout, NSO_Stock: S,
+        NSO_Thickness, NSO_tubeEdgeRaw, NSO_tubeNeckRaw } = ctx;
 
 let pass = 0, fail = 0;
 const FAILS = [];
@@ -133,16 +141,19 @@ function holds(label, soup, r, expect, tol) {
   return c;
 }
 
-/* Outer coordinates bit for bit: every vertex of an outer-wall face is where it was. */
-function outerHeld(soup, out, before) {
+/* One wall bit for bit: every vertex of an outer-wall face (side 1) or a
+   bore-wall face (side -1) is where it was. */
+function sideHeld(soup, out, before, side) {
   const faces = NSO_ringFaces(soup, before.axisIdx, before.outer.center);
   let moved = 0;
   for (let t = 0; t < faces.side.length; t++) {
-    if (faces.side[t] !== 1) continue;
+    if (faces.side[t] !== side) continue;
     for (let i = t * 9; i < t * 9 + 9; i++) if (!Object.is(out[i], soup[i])) moved++;
   }
   return moved;
 }
+const outerHeld = (soup, out, before) => sideHeld(soup, out, before, 1);
+const boreHeld = (soup, out, before) => sideHeld(soup, out, before, -1);
 
 // MINI_TPU_TEST.stl lives in nolongerzzz/nest-library (Library -> Test
 // Fixtures), not in this repo. Read from the checkout nso_library_dir.js
@@ -198,10 +209,14 @@ for (const [name, soup] of RINGS) {
     near(b.outer.diameterMm, tpu0.outer.diameterMm, eps) && near(b.bore.diameterMm, tpu0.bore.diameterMm, eps),
     NSO_sectionReadout(b) + ' along ' + b.axis);
 
+  // Outer moves the outside alone: the bore is held and the wall takes the change.
   const r1 = NSO_ringApplyRaw(soup, 'outer', 24);
-  holds(name + ' Outer 20 -> 24', soup, r1, { outer: 24, bore: 22, wall: 1 }, TOL);
+  holds(name + ' Outer 20 -> 24', soup, r1, { outer: 24, bore: 18, wall: 3 }, TOL);
   if (r1.ok) {
-    check(name + ' Outer: the wall is kept (to float32)', near(r1.after.wallMm, b.wallMm, 2 * eps), f6(b.wallMm) + ' -> ' + f6(r1.after.wallMm));
+    check(name + ' Outer: the bore is kept bit for bit', boreHeld(soup, r1.tris, b) === 0 && r1.after.bore.diameterMm === b.bore.diameterMm,
+      f6(b.bore.diameterMm) + ' -> ' + f6(r1.after.bore.diameterMm));
+    check(name + ' Outer: the wall is (24 - bore) / 2, to float32', near(r1.after.wallMm, (24 - b.bore.diameterMm) / 2, 2 * eps),
+      f6(b.wallMm) + ' -> ' + f6(r1.after.wallMm));
     check(name + ' Outer: Ø24 exactly (the ask), within ' + eps.toExponential(1), near(r1.after.outer.diameterMm, 24, eps), f6(r1.after.outer.diameterMm));
     // The way back: to the original's own reading, so the lines return to
     // where they were. Asking "20" lands on 20.000000, which is 6e-5 off this
@@ -212,7 +227,7 @@ for (const [name, soup] of RINGS) {
     check(name + ' Outer 20 -> 24 -> 20 returns the original within ' + eps.toExponential(1) + ' mm', back.ok && md <= eps,
       'worst ' + md.toExponential(2) + ' mm');
   }
-  rowOf(name, 'Outer Ø', 24, r1, 'Ø24 / Ø22, wall 1, L 8');
+  rowOf(name, 'Outer Ø', 24, r1, 'Ø24 / Ø18, wall 3, L 8');
 
   const r2 = NSO_ringApplyRaw(soup, 'bore', 16);
   holds(name + ' Bore 18 -> 16', soup, r2, { outer: 20, bore: 16, wall: 2 }, TOL);
@@ -241,6 +256,19 @@ for (const [name, soup] of RINGS) {
   rowOf(name, 'Wall', 0.5, r7, 'allowed: 0.5 ≥ ' + floor + ' floor');
   const r7b = NSO_ringApplyRaw(soup, 'wall', 0.5, { nozzle: 0.6 });
   check(name + ' ...and refused on a 0.6 nozzle, whose floor is 0.63 mm', !r7b.ok && r7b.reason === 'wall would be 0.5 mm, under the 0.63 mm floor', r7b.reason);
+  // Outer shrinks onto a held bore: the floor first, then the crossing.
+  const bore = b.bore.diameterMm, w8 = (18.6 - bore) / 2;
+  const r8 = NSO_ringApplyRaw(soup, 'outer', 18.6);
+  check(name + ' Outer -> 18.6 refused by the floor: the bore is held, so the wall would be ' + f3(w8), !r8.ok && r8.tris === soup &&
+    r8.reason === 'wall would be ' + String(+w8.toFixed(3)) + ' mm, under the ' + floor + ' mm floor', r8.reason);
+  rowOf(name, 'Outer Ø', 18.6, r8, 'refused: wall ' + f3(w8) + ', under the ' + floor + ' mm floor');
+  const r9 = NSO_ringApplyRaw(soup, 'outer', 18);
+  check(name + ' Outer -> 18 refused: it would reach the bore, both Ø named', !r9.ok && r9.tris === soup &&
+    r9.reason === 'outer would reach the bore - Ø18 outer against a Ø' + String(+bore.toFixed(3)) + ' bore', r9.reason);
+  rowOf(name, 'Outer Ø', 18, r9, 'refused: reaches the bore');
+  const r10 = NSO_ringApplyRaw(soup, 'outer', 19.8);
+  holds(name + ' Outer 20 -> 19.8 (a shrink, over the floor)', soup, r10, { outer: 19.8, bore: 18, wall: 0.9 }, TOL);
+  if (r10.ok) check(name + ' Outer 19.8: the bore is kept bit for bit', boreHeld(soup, r10.tris, b) === 0);
 }
 
 console.log('\n=== 3. the inversion gate, under the plan ===');
@@ -263,8 +291,9 @@ console.log('\n=== 4. Stock tube, against nso_stock.js\'s parameters ===');
   console.log('     generator: Ø' + f6(D) + ' / Ø' + f6(d) + ', wall ' + f6(w) + ', height ' + f6(m.height));
   check('reads the generator\'s ring', near(b.outer.diameterMm, D, 1e-4) && near(b.bore.diameterMm, d, 1e-4) && near(b.wallMm, w, 1e-4));
   const t1 = NSO_ringApplyRaw(soup, 'outer', D + 4);
-  holds('tube Outer +4', soup, t1, { outer: D + 4, bore: d + 4, wall: w }, 1e-4);
-  rowOf('Stock tube', 'Outer Ø', f3(D + 4), t1, 'Ø' + f3(D + 4) + ' / Ø' + f3(d + 4) + ', wall ' + f3(w));
+  holds('tube Outer +4', soup, t1, { outer: D + 4, bore: d, wall: w + 2 }, 1e-4);
+  if (t1.ok) check('tube Outer: bore bit for bit', boreHeld(soup, t1.tris, b) === 0);
+  rowOf('Stock tube', 'Outer Ø', f3(D + 4), t1, 'Ø' + f3(D + 4) + ' / Ø' + f3(d) + ', wall ' + f3(w + 2));
   const t2 = NSO_ringApplyRaw(soup, 'bore', d - 4);
   holds('tube Bore -4', soup, t2, { outer: D, bore: d - 4, wall: w + 2 }, 1e-4);
   if (t2.ok) check('tube Bore: outer bit for bit', outerHeld(soup, t2.tris, b) === 0);
@@ -324,6 +353,79 @@ if (TPU) {
   check('Thicken with the face filter leans the walls: Z oblique 0% -> over 1%', obl(TPU) === 0 && obl(th.soup) > 0.01);
   check('...and the next reading is no longer a ring', NSO_sectionRead(th.soup).shape !== 'round', NSO_sectionRead(th.soup).reason);
   check('the section-plane solve keeps it 0%', obl(ours.tris) === 0);
+}
+
+console.log('\n=== 8. pipe work: the outside and the bore set independently ===');
+{
+  // A Stock tube brought to OD 40 / bore 30 by the two rows themselves, then
+  // the ticket's gate: each edit moves one face and reports the other two.
+  const G = [];
+  let soup = S.make({ shape: 'tube', height: 40 }).soup;
+  const L0 = NSO_sectionRead(soup).lengthMm;
+  const step = (verb, value) => {
+    const r = NSO_ringApplyRaw(soup, verb, value), was = soup;
+    if (r.ok) soup = r.tris;
+    G.push([verb, value, r.ok ? NSO_ringDescribe(r) : 'refused: ' + r.reason]);
+    return { r, was };
+  };
+  const a = step('outer', 40), c = step('bore', 30);
+  check('Stock tube -> Outer Ø 40, Bore Ø 30: OD 40.00 / bore 30.00, wall 5.00', a.r.ok && c.r.ok &&
+    near(c.r.after.outer.diameterMm, 40, 1e-6) && near(c.r.after.bore.diameterMm, 30, 1e-6) && near(c.r.after.wallMm, 5, 1e-6),
+    c.r.ok ? NSO_sectionReadout(c.r.after) : c.r.reason);
+  const cases = [
+    ['outer', 44, { outer: 44, bore: 30, wall: 7 }, 'bore', 'Ø44.0 / bore Ø30.0 · wall 7.0 · height held'],
+    ['bore', 34, { outer: 44, bore: 34, wall: 5 }, 'outer', 'Ø44.0 / bore Ø34.0 · wall 5.0 · height held'],
+    ['wall', 3, { outer: 44, bore: 38, wall: 3 }, 'outer', 'Ø44.0 / bore Ø38.0 · wall 3.0 · height held']
+  ];
+  for (const [verb, value, want, kept, line] of cases) {
+    const { r, was } = step(verb, value);
+    const b = NSO_sectionRead(was);
+    check(verb + ' ' + value + ': Ø' + want.outer.toFixed(2) + ' / bore Ø' + want.bore.toFixed(2) + ', wall ' + want.wall.toFixed(2) +
+      ', length held', r.ok && near(r.after.outer.diameterMm, want.outer, 1e-6) && near(r.after.bore.diameterMm, want.bore, 1e-6) &&
+      near(r.after.wallMm, want.wall, 1e-6) && r.after.lengthMm === L0, r.ok ? NSO_sectionReadout(r.after) : r.reason);
+    check('  ...the ' + kept + ' bit for bit', r.ok && (kept === 'bore' ? boreHeld : outerHeld)(was, r.tris, b) === 0);
+    check('  ...and the line reports all three: "' + line + '"', r.ok && NSO_ringDescribe(r) === line, r.ok ? NSO_ringDescribe(r) : '');
+  }
+  // At Ø44 / Ø38 (wall 3): each verb under the floor, and each face onto the other.
+  const floor = NSO_Thickness.floorFor();
+  const refuse = [
+    ['outer', 38.6, 'wall would be 0.3 mm, under the ' + floor + ' mm floor'],
+    ['bore', 43.4, 'wall would be 0.3 mm, under the ' + floor + ' mm floor'],
+    ['wall', 0.3, 'wall would be 0.3 mm, under the ' + floor + ' mm floor'],
+    ['outer', 37, 'outer would reach the bore - Ø37 outer against a Ø38 bore'],
+    ['bore', 45, 'bore would reach the outer - Ø45 bore against a Ø44 outer'],
+    ['wall', 23, 'bore would close up - Ø-2 mm is at or below zero']
+  ];
+  for (const [verb, value, why] of refuse) {
+    const was = soup, { r } = step(verb, value);
+    check(verb + ' ' + value + ' refused: "' + why + '", piece unchanged', !r.ok && r.reason === why && r.tris === was && soup === was, r.reason);
+  }
+  console.log('     | verb | ask | result |');
+  for (const [v, x, said] of G) console.log('     | ' + v + ' | ' + x + ' | ' + said + ' |');
+}
+
+console.log('\n=== 9. a shaped tube: Flare, Neck - refused in the reader\'s words ===');
+{
+  // The ring verbs need a straight tube; the reader decides that, as it
+  // decides it for every row. A Flare or a Neck leaves a tube whose section
+  // changes, and each verb is refused with the reader's own reason. The plan
+  // refuses on the reading before it looks at the verb, so the Neck - whose
+  // reading is a second and a half - is asked one verb; the Flare all three.
+  const tube = S.make({ shape: 'tube', height: 40 }).soup;
+  const flare = NSO_tubeEdgeRaw(tube, { verb: 'flare', length: 8, angle: 30, profile: 'straight' });
+  const neck = NSO_tubeNeckRaw(tube, { point: [10, 0, 20], length: 20, dr: -4, profile: 'smooth' });
+  for (const [what, made, verbs] of [['Flare 8 mm at 30°', flare, ['outer', 'bore', 'wall']], ['Neck −4 over 20 mm', neck, ['bore']]]) {
+    check(what + ' builds', made.ok, made.ok ? '' : made.reason);
+    if (!made.ok) continue;
+    const rd = NSO_sectionRead(made.tris);
+    console.log('     ' + what + ': ' + NSO_sectionReadout(rd));
+    check(what + ': the reader says it is not a straight ring, and offers no ring row', rd.shape !== 'round' && !rd.verbs.outer &&
+      !rd.verbs.bore && !rd.verbs.wall, NSO_sectionReadout(rd));
+    for (const verb of verbs) {
+      const r = NSO_ringApplyRaw(made.tris, verb, 30);
+      check('  ' + verb + ' refused in words, piece unchanged', !r.ok && r.tris === made.tris && r.reason === 'not round - ' + rd.reason, r.reason);
+    }
+  }
 }
 
 console.log('\n=== the verb x fixture table ===');

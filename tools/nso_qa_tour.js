@@ -220,6 +220,7 @@ function buildPlan() {
   V(COL, 'Scale', 'scale-factor', 'Whole × 1.5', { run: async x => { await x.fill('scale-factor', 1.5); } });
   V(COL, 'Scale', 'btn-scale-fit', 'Fit to plate', { run: press(['btn-scale-fit']) });
   V(COL, 'Scale', 'scale-ring-outer', 'Ring outer (Stock tube)', { setup: 'none', pre: async x => { await x.click('btn-stock-tube'); await x.wait(400); }, run: async x => { await x.fillNum('scale-ring-outer', 1.3); } });
+  V(COL, 'Scale', 'scale-ring-bore', 'Ring bore (Stock tube)', { setup: 'none', pre: async x => { await x.click('btn-stock-tube'); await x.wait(400); }, run: async x => { await x.fillNum('scale-ring-bore', 1.1); } });
   V(COL, 'Scale', 'scale-ring-wall', 'Ring wall (Stock tube)', { setup: 'none', pre: async x => { await x.click('btn-stock-tube'); await x.wait(400); }, run: async x => { await x.fillNum('scale-ring-wall', 1.3); } });
   V(COL, 'Scale', 'scale-rod-diameter', 'Rod diameter (Stock cylinder)', { setup: 'none', pre: async x => { await x.click('btn-stock-cylinder'); await x.wait(400); }, run: async x => { await x.fillNum('scale-rod-diameter', 1.3); } });
   V(COL, 'Scale', 'scale-ell-a', 'Ellipsoid a (Stock ellipsoid)', { setup: 'none', pre: async x => { await x.click('btn-stock-ellipsoid'); await x.wait(400); }, run: async x => { await x.fillNum('scale-ell-a', 1.3); } });

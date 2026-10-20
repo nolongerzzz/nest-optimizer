@@ -108,9 +108,9 @@ rows `NSO_sectionVerbs` says apply:
 | row | shown when | what it calls |
 |---|---|---|
 | **Length** / **Width** / **Height** `[ ] mm` | that axis has a clean constant-section band. A ring or rod: its one axis, under the same names (Height when it is its own Z) | `NSO_scaleAxisApply` → `NSO_extendRaw({ axis, length })`: material goes in or comes out inside the one band, every other coordinate untouched bit for bit, so walls, floor, holes, pockets and lips keep their size. Shorter shortens; past the band it refuses with `Shorten can remove up to N mm here` |
-| **Outer Ø** `[ ] wall kept` / **Wall** `[ ] outer kept` | a ring | `nso_ring.js`, below. Part 2's **Bore Ø** row is gone: Outer Ø and Wall reach every bore between them |
+| **Outer Ø** `[ ] bore kept` / **Bore Ø** `[ ] outer kept` / **Wall** `[ ] outer kept` | a ring | `nso_ring.js`, below. Pipe work: each row moves one face and its done line reports the other two (`Outer Ø done - Ø44.0 / bore Ø30.0 · wall 7.0 · height held`). Outer Ø's tooltip says where its old move went (below) |
 | **Diameter** `[ ] height kept` (the axis's own name) | a rod | `nso_ring.js` |
-| **Offset** `[ ] mm, wall kept` | every piece but a ring or rod, where Outer Ø / Diameter and Length already do its job. Elsewhere it is the only way to thicken a stepped piece evenly; see lid_strap below for where it is not even. A sentence under the row says so in the unit shown: `Thin features keep their thickness: a 0.6 mm lid strap stays 0.6 mm.` (`0.024 in` with inches shown) | `NSO_scaleOffsetRaw`, below — Fatten and Shrink, folded in |
+| **Offset** `[ ] mm, wall kept` | every piece but a ring or rod, where Outer Ø, Bore Ø / Diameter and Length do its job between them. Elsewhere it is the only way to thicken a stepped piece evenly; see lid_strap below for where it is not even. A sentence under the row says so in the unit shown: `Thin features keep their thickness: a 0.6 mm lid strap stays 0.6 mm.` (`0.024 in` with inches shown) | `NSO_scaleOffsetRaw`, below — Fatten and Shrink, folded in |
 | **Whole ×** `[ ]` | always; reset to 1 on every refresh | `NSO_scaleSelectedModel({ factor })` |
 | **Longest** `[ ] mm` | unless a named field already shows the same number | `NSO_scaleSelectedModel({ axis: 'longest', targetMm })`, prefilled with the longest edge. Its done line's before figure is the solver's own `spanBeforeMm`, the edge it solved on, whichever axis that is |
 | **Fit to plate** | always | `min(limit / size)` over the bed's three axes, from the same `nso_printer.js` fit the plate warning uses, applied as a uniform factor and stated. Already fits: says so, changes nothing |
@@ -177,19 +177,42 @@ ring verbs' done lines (`, height held`) say the same word.
 
 ```
 node tools/nso_ring_test.js            headless: every verb x fixture, against truth; canonical checker
-node tools/nso_ring_drive_check.js     the real app: MINI_TPU_TEST from the Library, the Shrink fix
+node tools/nso_ring_drive_check.js     the real app: MINI_TPU_TEST from the Library, the Shrink fix,
+                                       and pipe work on a Stock tube (OD 40 / bore 30 -> 44 / 30 -> 44 / 34 -> wall 3)
 node tools/nso_ring_drive_check.js --shots DIR    also writes DIR/*.png (scratch; nothing committed)
 ```
 
-The rule: a dimension edit moves boundary faces, never scales, and on a ring
-the wall is kept unless the wall is what is being edited.
+The rule: a dimension edit moves boundary faces, never scales, and each ring
+verb moves **one** face, so pipe work sets the outside and the bore directly and
+independently (scale-ring-id-od). The length is held by every verb.
 
 | field | faces that move | held |
 |---|---|---|
-| **Outer Ø** → d | outer walls by Δr = (d − outer)/2, bore walls by the same Δr | wall, length |
-| **Bore Ø** → d (headless only since part 3; the card has no Bore row) | bore walls by Δr = (d − bore)/2 | outer, length |
+| **Outer Ø** → d | outer walls by Δr = (d − outer)/2; the wall changes by +Δr | bore, length |
+| **Bore Ø** → d | bore walls by Δr = (d − bore)/2; the wall changes by −Δr | outer, length |
 | **Wall** → w | bore walls by −(w − wall) | outer, length |
 | **Diameter** → d (a rod) | outer walls by Δr | length |
+
+Before scale-ring-id-od, Outer Ø moved the bore by the same Δr and kept the
+wall, and the card had no Bore row (Outer Ø and Wall reached every bore between
+them). That both-faces move is SCALE's **Offset** row, and Outer Ø's tooltip
+says so - with the difference that Offset moves the ends too (`ring:drive` §2:
+Offset −0.1 takes the length 8.0 → 7.8), which is why a ring's card does not
+show it. On a ring, Outer Ø then Bore Ø is the both-faces move with the length
+held.
+
+The done line is the three numbers after the move at the card's one display
+precision, then the axis held: `Ø21.84 / bore Ø15.56 · wall 3.14 · length
+held` (`· height held` on a ring stood on its axis). A rod's stays `Diameter
+Ø… → Ø…, height held`.
+
+**Only a straight tube.** The ring verbs act on what `NSO_sectionRead` reads
+as a round, hollow, constant-section extrusion; that reading decides it, as it
+does for every row. A tube after Tube edge's Flare (with or without a Run) or
+Neck has a section that changes, so the ring rows are not shown and the engine
+refuses in the reader's words, e.g. `not round - only 40.62 of its 48.62 mm
+along Z keeps one section - the ends are shaped, so only height, an even offset
+and whole-piece scaling apply` (`ring:test` §9).
 
 Δr is in the reader's terms (the vertex circle), so the number the card shows
 after an apply is the number typed. Walls are the faces parallel to the axis
@@ -212,7 +235,8 @@ planar, and every axial coordinate is identical bit for bit — gated on every r
 
 | ask | refusal |
 |---|---|
-| wall under the floor | `wall would be 0.4 mm, under the 0.42 mm floor` |
+| wall under the floor (any of the three) | `wall would be 0.4 mm, under the 0.42 mm floor` |
+| outer at or inside the bore | `outer would reach the bore - Ø37 outer against a Ø38 bore` |
 | bore at or past the outer | `bore would reach the outer - Ø20 bore against a Ø20 outer` |
 | bore at or past zero | `bore would close up - Ø0 mm is at or below zero` |
 | a face driven inside out | `the move is more than the wall it crosses (N face(s) would turn inside out)` |
@@ -240,8 +264,8 @@ without one.
 **The Shrink bug, closed (part 3).** Fatten's Shrink applied with no floor
 check and un-rang `MINI_TPU_TEST` at 0.1 and 0.5 mm: its face filter plus
 Thicken's area-weighted solve leaned the walls. The Finish menu's Fatten /
-Shrink row is gone; the card shows no Offset on a ring, because Outer Ø and
-Length do that job; and the Offset itself, at −0.1 and −0.5 mm on the same
+Shrink row is gone; the card shows no Offset on a ring, because Outer Ø, Bore
+Ø and Length do that job; and the Offset itself, at −0.1 and −0.5 mm on the same
 ring, reads `Ring Ø19.8 / Ø17.8, wall 1.0, length 7.8` and `Ring Ø19.0 /
 Ø17.0, wall 1.0, length 7.0` (`ring:drive` §2).
 

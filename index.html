@@ -452,10 +452,17 @@
               <input id="scale-height" title="Make the piece taller or shorter along its own Z the same way: material goes in or comes out inside one straight run, so the floor and every wall keep their thickness." type="number" min="0.1" max="2000" step="0.1" aria-label="Height, mm" />
               <span class="hint">mm</span>
               </div>
+              <!-- A ring's three rows each move one face (nso_ring.js): Outer Ø the
+                   outside, Bore Ø and Wall the bore. -->
               <div class="edit-row scale-row" id="scale-ring-outer-row" hidden>
               <label for="scale-ring-outer">Outer &Oslash;</label>
-              <input id="scale-ring-outer" title="Move the outer wall to this diameter and the bore by the same amount, so the wall stays as it is. Faces move; nothing is scaled; the length is held." type="number" min="0.1" max="2000" step="0.1" aria-label="Outer &Oslash;, mm" />
-              <span class="hint">wall kept</span>
+              <input id="scale-ring-outer" title="Move the outer wall to this diameter. The bore stays where it is, so the wall changes. Faces move; nothing is scaled; the length is held. Refused under the nozzle-safety wall floor, or where it would reach the bore. Moving the bore with the outside to keep the wall, as this row used to, is SCALE's Offset row - on a ring that moves the ends too, so it is not offered here: set Outer &Oslash;, then Bore &Oslash;." type="number" min="0.1" max="2000" step="0.1" aria-label="Outer &Oslash;, mm" />
+              <span class="hint">bore kept</span>
+              </div>
+              <div class="edit-row scale-row" id="scale-ring-bore-row" hidden>
+              <label for="scale-ring-bore">Bore &Oslash;</label>
+              <input id="scale-ring-bore" title="Move the bore wall to this diameter. The outer stays where it is, so the wall changes. Faces move; nothing is scaled; the length is held. Refused under the nozzle-safety wall floor, or where it would reach the outer." type="number" min="0.1" max="2000" step="0.1" aria-label="Bore &Oslash;, mm" />
+              <span class="hint">outer kept</span>
               </div>
               <div class="edit-row scale-row" id="scale-ring-wall-row" hidden>
               <label for="scale-ring-wall">Wall</label>
@@ -1780,7 +1787,7 @@
   <script src="app-fatten.js?v=box2"></script>
   <!-- Section reader: Ring / Rod / Bar, or why not. Calls app-extend.js's
        axis detector and app-cut.js's loop walker at read time. -->
-  <script src="nso_section.js?v=box2"></script>
+  <script src="nso_section.js?v=ringidod1"></script>
   <!-- Shape rows: capsule, sphere / ellipsoid, torus - read and changed one
        thing at a time. Calls app-extend.js (a capsule's Length) at apply time. -->
   <script src="nso_shapes.js?v=shapes1"></script>
@@ -1812,8 +1819,8 @@
   <script src="app-connect.js?v=asis1"></script>
   <!-- Ring verbs: Outer / Bore / Wall, a rod's Diameter. Calls
        nso_section.js and app-fatten.js's face filter at apply time. -->
-  <script src="nso_ring.js?v=polish2"></script>
-  <script src="app-scale.js?v=shapeslive1"></script>
+  <script src="nso_ring.js?v=ringidod1"></script>
+  <script src="app-scale.js?v=ringidod1"></script>
   <script src="app-brush.js?v=pull1"></script>
   <!-- Pull: nso_densify.js is the shared subdivision (the gun will use it too), nso_pull.js the field and its guards, app-pull.js the pointer session. docs/PULL.md -->
   <script src="nso_densify.js?v=pull1"></script>
