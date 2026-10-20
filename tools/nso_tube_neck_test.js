@@ -541,6 +541,143 @@ console.log('\n=== 9. one tube to a printer: a scaled, Rolled export necks; a re
     nums.length === 2 && nums[0] !== nums[1], ro.reason);
 }
 
+console.log('\n=== 10. Walls: one face moved - socket, spigot, groove (tube-walls) ===');
+{
+  const crypto = require('crypto');
+  const sha = r => r.ok ? crypto.createHash('sha1').update(Buffer.from(r.tris.buffer, r.tris.byteOffset, r.tris.byteLength)).digest('hex') : 'refused';
+  // Both is today's behaviour: the output buffers' SHA-1s from claude-wip
+  // b0697c1, before Walls existed
+  const PINNED = [
+    ['pinch −4 over 12 smooth', { point: [10, 0, 20], length: 12, dr: -4 }, 'bb7f11106eef76e0cd4feac4f5e5f1bb8da98c54'],
+    ['bulge +4 over 12 smooth', { point: [10, 0, 20], length: 12, dr: 4 }, '12ad28e872c4cd0f07235f4c147f05e36a3b0b82'],
+    ['pinch −4 over 12 funnel', { point: [10, 0, 20], length: 12, dr: -4, profile: 'funnel' }, '7966e0e783a9fb59e19af97a5780833726662fd8'],
+    ['pinch −2 over 12 ending on the end ring', { point: [10, 0, 34], length: 12, dr: -2 }, '85b8a4f72e37075150a0dda18aae6cbad90b385d']];
+  for (const [name, o, want] of PINNED) {
+    const a = NSO_tubeNeckRaw(tube, o), b = NSO_tubeNeckRaw(tube, Object.assign({ walls: 'both' }, o));
+    check('Both is byte-identical to today: ' + name + ' (pinned SHA-1, and walls: \'both\' the same as no Walls)', sha(a) === want && sha(b) === want, sha(a));
+  }
+  const bpe = NSO_tubeNeckRaw(tube, { point: [10, 0, 37], length: 12, dr: -4, walls: 'both' });
+  check('...and Both still refuses a band past the end', !bpe.ok && /would run past the end of the tube/.test(bpe.reason), bpe.reason);
+
+  // A Ø40.62 / Ø30.47 pipe, wall 5.08 (5.076), 60 long
+  const pipe = stockTube(20.31, 5.076, 60), Ro = 20.31, Ri = 15.234, t = Ro - Ri;
+  // a face's triangles: those facing away from the axis (+1, the outside) or toward it (-1, the bore)
+  const faceTris = (s, sign) => {
+    const S = new Set();
+    for (let q = 0; q < s.length / 9; q++) {
+      const fn = faceNormal(s, q), o = q * 9, cx = (s[o] + s[o + 3] + s[o + 6]) / 3, cy = (s[o + 1] + s[o + 4] + s[o + 7]) / 3, L = Math.hypot(cx, cy);
+      if ((fn.n[0] * cx + fn.n[1] * cy) / L * sign > 0.5) S.add(Array.from(s.subarray(o, o + 9)).join(','));
+    }
+    return S;
+  };
+  const sameSet = (A, B) => A.size === B.size && [...A].every(k => B.has(k));
+  const keptFace = (tag, soup, r, sign) => {
+    const A = faceTris(soup, sign), B = faceTris(r.tris, sign);
+    check(tag + ': the ' + (sign > 0 ? 'outside' : 'bore') + ' buffer byte-identical - the same triangles, bit for bit, no more and no fewer', sameSet(A, B), A.size + ' in, ' + B.size + ' out');
+  };
+
+  // the SOCKET: Bore only +3 over 10 mm at the end, the band centred on the end ring
+  {
+    const tag = 'socket: Bore only +3 over 10 at the end';
+    const r = NSO_tubeNeckRaw(pipe, { point: [Ri, 0, 60], length: 10, dr: 3, walls: 'bore' });
+    console.log('   ' + r.reason);
+    if (common(tag, pipe, r)) {
+      keptFace(tag, pipe, r, 1);
+      const top = radiiAt(r.tris, 60), sh = radiiAt(r.tris, 50), low = radiiAt(r.tris, 0);
+      check(tag + ': the bore stepped - Ø' + f3(2 * (Ri + 3)) + ' at the end ring, back to Ø' + f3(2 * Ri) + ' square at 10 mm in, Ø' + f3(2 * Ri) + ' at the far end',
+        Math.abs(top.lo - (Ri + 3)) < 1e-4 && Math.abs(top.hi - Ro) < 1e-4 && Math.abs(sh.lo - Ri) < 1e-4 && Math.abs(sh.hi - (Ri + 3)) < 1e-4 && Math.abs(low.lo - Ri) < 1e-4,
+        'end ' + f3(top.lo) + ' / ' + f3(top.hi) + ', shoulder ' + f3(sh.lo) + '–' + f3(sh.hi));
+      check(tag + ': the wall reads ' + f3(t - 3) + ' through the step (5.08 → 2.08), measured off the output ring', Math.abs((top.hi - top.lo) - (t - 3)) < 1e-4 &&
+            /wall 5\.08 → 2\.08/.test(r.reason), f3(top.hi - top.lo));
+      row('Ø40.62/Ø30.47 pipe, socket: Bore only +3 over 10 at the end', pipe, r, null, 'bore Ø' + f3(2 * top.lo) + ', wall ' + f3(top.hi - top.lo));
+    }
+    // The ticket's readout line is for a bore Ø30.47 → Ø33.47: +1.5 on the
+    // radius. Δr is a change of RADIUS (Flare's, and Neck's since it shipped):
+    // +3 opens the bore Ø6, as above, and leaves 2.08.
+    const r15 = NSO_tubeNeckRaw(pipe, { point: [Ri, 0, 60], length: 10, dr: 1.5, walls: 'bore' });
+    console.log('   ' + r15.reason);
+    console.log('   NOTE: the ticket\'s gate wrote "bore only +3 ... wall reads 3.58" beside the readout "Ø30.47 → Ø33.47, wall 5.08 → 3.58".');
+    console.log('         That readout is a +1.5 RADIUS step (Ø +3); +3 on the radius, the convention Neck and Flare share, reads 2.08.');
+    check('the readout names the walls: "Bore only: Ø30.47 → Ø33.47, outside kept Ø40.62, wall 5.08 → 3.58"', r15.ok &&
+          r15.reason.indexOf('Bore only: Ø30.47 → Ø33.47, outside kept Ø40.62, wall 5.08 → 3.58') === 0, r15.reason);
+    const rb = NSO_tubeNeckRaw(pipe, { at: 60, length: 10, dr: 3, walls: 'bore' });
+    if (common('socket at the far end (centred on its ring)', pipe, rb)) {
+      const z0 = radiiAt(rb.tris, 0), z10 = radiiAt(rb.tris, 10), z60 = radiiAt(rb.tris, 60);
+      check('...the far end\'s bore stepped, the top end untouched', Math.abs(z0.lo - (Ri + 3)) < 1e-4 && Math.abs(z10.hi - (Ri + 3)) < 1e-4 && Math.abs(z60.lo - Ri) < 1e-4,
+        f3(z0.lo) + ' / ' + f3(z60.lo));
+      keptFace('socket at the far end', pipe, rb, 1);
+    }
+  }
+
+  // the SPIGOT: Outside only −3 over 10 at the end
+  {
+    const tag = 'spigot: Outside only −3 over 10 at the end';
+    const r = NSO_tubeNeckRaw(pipe, { point: [Ro, 0, 57], length: 10, dr: -3, walls: 'outside' });
+    console.log('   ' + r.reason);
+    if (common(tag, pipe, r)) {
+      keptFace(tag, pipe, r, -1);
+      const top = radiiAt(r.tris, 60), sh = radiiAt(r.tris, 50);
+      // at 10 mm in only the shoulder has vertices (the bore's are its long, kept triangles)
+      check(tag + ': the outside stepped in to Ø' + f3(2 * (Ro - 3)) + ' at the end, back to Ø' + f3(2 * Ro) + ' square at 10 mm in; bore Ø' + f3(2 * Ri) + ' at the end ring',
+        Math.abs(top.hi - (Ro - 3)) < 1e-4 && Math.abs(top.lo - Ri) < 1e-4 && Math.abs(sh.lo - (Ro - 3)) < 1e-4 && Math.abs(sh.hi - Ro) < 1e-4,
+        'end ' + f3(top.lo) + ' / ' + f3(top.hi) + ', shoulder ' + f3(sh.lo) + '–' + f3(sh.hi));
+      check(tag + ': readout "Outside only: Ø40.62 → Ø34.62, bore kept Ø30.47, wall 5.08 → 2.08"', r.reason.indexOf('Outside only: Ø40.62 → Ø34.62, bore kept Ø30.47, wall 5.08 → 2.08') === 0 &&
+            /a spigot/.test(r.reason), r.reason);
+      row('Ø40.62/Ø30.47 pipe, spigot: Outside only −3 over 10 at the end', pipe, r, null, 'outside Ø' + f3(2 * top.hi) + ', wall ' + f3(top.hi - top.lo));
+    }
+  }
+
+  // ONE FACE mid-tube: a groove in the bore, a waist on the outside
+  for (const [walls, dr, prof] of [['bore', 2, 'smooth'], ['outside', -2, 'funnel'], ['outside', 3, 'smooth'], ['bore', -2, 'funnel']]) {
+    const tag = (walls === 'bore' ? 'Bore only ' : 'Outside only ') + (dr > 0 ? '+' : '−') + Math.abs(dr) + ' over 12, ' + prof + ', mid-tube';
+    const r = NSO_tubeNeckRaw(pipe, { point: [Ro, 0, 30], length: 12, dr, profile: prof, walls });
+    console.log('   ' + r.reason);
+    if (!common(tag, pipe, r)) continue;
+    const bore = walls === 'bore';
+    keptFace(tag, pipe, r, bore ? 1 : -1);
+    // the waist's vertices are the moved face's alone: the other face is its long, kept triangles
+    const w = radiiAt(r.tris, 30), tw = bore ? t - dr : t + dr;
+    check(tag + ': at the waist the ' + walls + ' moved by ' + dr + ' (r ' + f3((bore ? Ri : Ro) + dr) + ')', Math.abs(w.lo - ((bore ? Ri : Ro) + dr)) <= 0.05 &&
+          Math.abs(w.hi - ((bore ? Ri : Ro) + dr)) <= 0.05, f3(w.lo) + ' / ' + f3(w.hi));
+    const RW = rayWall(graph(r.tris), 24, 36, 30);
+    check(tag + ': the wall in 3D between ' + f3(Math.min(t, tw)) + ' and ' + f3(Math.max(t, tw)) + ' (every new vertex on 12 meridians, to the other face)',
+      RW.n > 0 && RW.lo >= Math.min(t, tw) - 0.02 && RW.hi <= Math.max(t, tw) + 0.02 && Math.abs(Math.min(RW.lo, t) - Math.min(t, tw)) <= 0.05, f3(RW.lo) + '–' + f3(RW.hi) + ' from ' + RW.n);
+    row('Ø40.62/Ø30.47 pipe, ' + tag, pipe, r, null, 'waist ' + f3(w.lo) + ' / ' + f3(w.hi) + ', wall 3D ' + f3(RW.lo) + '–' + f3(RW.hi));
+  }
+
+  // refusals, the piece unchanged
+  const rf = NSO_tubeNeckRaw(pipe, { point: [Ri, 0, 60], length: 10, dr: 4.8, walls: 'bore' });
+  console.log('   ' + rf.reason);
+  check('Bore only +4.8 at the end refused under the floor, with the numbers: "bore +4.80 mm would leave a 0.28 mm wall at the end; the floor is 0.42 mm"',
+    !rf.ok && rf.tris === pipe && /^bore \+4\.80 mm would leave a 0\.28 mm wall at the end; the floor is 0\.42 mm \(nso_thickness\.js: one extrusion line at a 0\.4 mm nozzle\)\. This wall lets its bore move out by 4\.65 mm at most$/.test(rf.reason), rf.reason);
+  const rfo = NSO_tubeNeckRaw(pipe, { point: [Ro, 0, 30], length: 12, dr: -4.8, walls: 'outside' });
+  check('Outside only −4.8 mid-tube refused under the floor: "outside −4.80 mm would leave a 0.28 mm wall at the waist"', !rfo.ok && rfo.tris === pipe &&
+        /^outside −4\.80 mm would leave a 0\.28 mm wall at the waist; the floor is 0\.42 mm/.test(rfo.reason), rfo.reason);
+  const rc = NSO_tubeNeckRaw(pipe, { point: [Ri, 0, 30], length: 12, dr: 6, walls: 'bore' });
+  check('Bore only +6 refused: the faces would cross', !rc.ok && rc.tris === pipe && /^bore \+6\.00 mm would carry the bore through the other face of a 5\.08 mm wall - the faces would cross/.test(rc.reason), rc.reason);
+  const rfl = NSO_tubeNeckRaw(pipe, { point: [Ri, 0, 30], length: 12, dr: 5, walls: 'bore', nozzle: 0.2 });
+  check('...the floor follows the nozzle: +5 leaves 0.08, under 0.21 at a 0.2 mm nozzle', !rfl.ok && /leave a 0\.08 mm wall at the waist; the floor is 0\.21 mm/.test(rfl.reason), rfl.reason);
+  const rbl = NSO_tubeNeckRaw(tube, { point: [10, 0, 20], length: 30, dr: -8.3, walls: 'bore' });
+  check('Bore only −8.3 refused by the bore limit (Ø0.80)', !rbl.ok && /would close the bore/.test(rbl.reason) && /bore limit of Ø0\.80/.test(rbl.reason), rbl.reason);
+  const cup = wheelCup();
+  const rcup = NSO_tubeNeckRaw(cup, { at: 45, length: 8, dr: -1, walls: 'outside' });
+  check('a step at a closed end (the Wheel cup\'s base) refused in words', !rcup.ok && rcup.tris === cup && /^that end is closed - a flat face with no bore through it/.test(rcup.reason), rcup.reason);
+  const rcupT = NSO_tubeNeckRaw(cup, { point: [13, 0, 45], length: 8, dr: 1, walls: 'bore' });
+  if (common('Wheel cup: a counterbore at its open rim, Bore only +1 over 8', cup, rcupT)) keptFace('Wheel cup counterbore', cup, rcupT, 1);
+  const rlong = NSO_tubeNeckRaw(pipe, { point: [Ri, 0, 60], length: 60, dr: 1, walls: 'bore' });
+  check('a step as long as the tube is refused', !rlong.ok && /as long as the tube or longer/.test(rlong.reason), rlong.reason);
+  const rwx = NSO_tubeNeckRaw(pipe, { point: [Ri, 0, 30], length: 12, dr: 1, walls: 'inner' });
+  check('an unknown Walls is refused in words', !rwx.ok && /Walls is Both, Outside only or Bore only/.test(rwx.reason), rwx.reason);
+  // an imported tube along X (its own winding): a counterbore at each end
+  const tx = tubeAlongX(80, 48);
+  for (const [x, words] of [[80, 'end'], [0, 'far end']]) {
+    const r = NSO_tubeNeckRaw(tx, { point: [x, 26, 10], length: 10, dr: 1, walls: 'bore' });
+    if (common('imported tube along X: counterbore +1 over 10 at its ' + words, tx, r)) {
+      check('...stepped in from the ' + words, new RegExp('stepped 10\\.0 mm in from the ' + words + ', square shoulder - a counterbore').test(r.reason), r.reason);
+    }
+  }
+}
+
 console.log('\n| piece and neck | in → out triangles | ms | measured |');
 console.log('|---|---|---|---|');
 for (const t of TABLE) console.log('| ' + t.name + ' | ' + t.trisIn + ' → ' + t.trisOut + ' | ' + t.ms + ' | ' + t.extra + ' |');

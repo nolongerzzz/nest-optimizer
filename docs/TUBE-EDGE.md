@@ -123,7 +123,8 @@ every other triangle is copied bit for bit.
 | closed end (a rod, a capped face) | `that end is closed - a flat Ø12.00 face with no opening. Flare and Roll work on the open end of a tube (a ring with a bore through it)` |
 | a box | `that end is closed - a flat 4-sided face with no opening, not a circular ring. Flare and Roll work on the open, circular end of a tube.` |
 | a square tube | `that end is not circular - its outline is a 4-sided polygon and its bore a 4-sided polygon. …` |
-| inward | `an inward flare is not supported yet - Flare turns the wall outward only (toward the axis it would close the bore; that is a later ticket)` (and the same for Roll) |
+| an inward flare closing the bore | `that flare would close the bore - the Ø16.80 bore would come to nothing at the lip, under the bore limit of Ø0.80 (2 nozzle widths at a 0.4 mm nozzle). Use a shorter or a shallower flare` |
+| an inward roll | `an inward roll is not supported yet - Roll curls the wall outward only (into the bore is a later ticket)` |
 | the thin-wall rule | `the wall is too thin to roll that far - pushing a 0.80 mm wall out from Ø19.20 to Ø24.80 (mid-wall) stretches it 1.29× round its hoop, which would thin it to 0.62 mm, under 2 nozzle widths (0.80 mm at a 0.4 mm nozzle). The rule: wall × (ring radius ÷ largest radius) must stay at or above 2 nozzle widths - this wall is too thin to push out at all` |
 | touching | `rolling 330° would run the new wall into the piece (3.2 mm below the end, 10.0 mm from the axis) - it may come no closer than 0.40 mm (one nozzle width). At this radius it rolls up to 300°` |
 | a flare too short to turn its inside face round the crease; past 75°; a roll past 360°; the end wall leaning or tapering | each by name |
@@ -369,3 +370,113 @@ several Sets, each its own Undo. Paint stands it down, as Flare and Roll.
    simple. Funnel is 4 straight runs and the corners' arcs.
 6. **One test step**, `tube:neck`, as the ticket asked; the card is driven by
    `tube:neck-shots`, which is not in `npm test`.
+
+## Walls, and the inward flare (tube-walls, 2026-10-20)
+
+`nso_tube_edge.js` and `nso_tube_neck.js` at `?v=walls1`. The card reads a
+`sel-te-walls` select when it has one (`NSO_teOpts`, Both when it has not);
+the UI ticket draws it.
+
+**WALLS** (`opts.walls`) on Flare and Neck: **Both** (`'both'`, the default)
+is what every verb did before - the section carried, the wall's thickness
+kept, and its output is byte-identical to before Walls (pinned SHA-1s from
+claude-wip `b0697c1` in both tests). **Outside only** (`'outside'`) / **Bore
+only** (`'bore'`) moves that one face by Δr and leaves the other exactly as it
+was - its triangles bit for bit (gated as a set: no more, no fewer) - so the
+wall's thickness changes through the section. Δr is a change of radius, as
+everywhere in Tube edge.
+
+- **Neck, one face, mid-tube**: the moved face follows the Profile itself
+  (Smooth: the cosine; Funnel: straight to the waist and back). No section is
+  carried, so no bend can fold it; how steep it stands is held to 75°.
+- **Neck, one face, at an end - the socket and the spigot**: a band that
+  reaches an end (centred inside the tube or on the end ring itself; Both
+  still refuses it) is laid from that end, Length in, and the face is stepped
+  all the way out to the end ring and back square at Length in. Bore out is
+  a counterbore (a socket); outside in is a spigot. The end ring of the moved
+  face is moved along its own radial lines and the end's flat ring is laid
+  again between it and the end's other ring (whose vertices are kept bit for
+  bit). An end that is closed (the Wheel cup's base) refuses in words.
+- **Flare, one face**: the chosen face stands Δr off its own line at the lip
+  (a cone or a trumpet), the other runs on along its own line to the same lip;
+  the wall goes from t at the ring to t ∓ |Δr| at the lip. The lip rule is
+  unchanged: square to the wall at u = L.
+- **The floor**: a one-face move may not leave a wall under the nozzle-safety
+  floor, `NSO_Thickness.floorFor(nozzle)` (0.42 mm at a 0.4 mm nozzle), nor
+  carry one face through the other:
+  `bore +4.80 mm would leave a 0.28 mm wall at the end; the floor is 0.42 mm (nso_thickness.js: one extrusion line at a 0.4 mm nozzle). This wall lets its bore move out by 4.65 mm at most`,
+  `bore +6.00 mm would carry the bore through the other face of a 5.08 mm wall - the faces would cross. …`.
+  With nso_thickness.js not loaded a one-face move refuses rather than guess.
+- **Readout names the walls**:
+  `Bore only: Ø30.47 → Ø33.47, outside kept Ø40.62, wall 5.08 → 3.58 · stepped 10.0 mm in from the end, square shoulder - a counterbore (wall 3.576–5.076 mm through it, floor 0.42)`.
+
+**INWARD FLARE**: a negative Δr (or angle), or Way **In**, turns the flare
+toward the axis, Straight and Trumpet. Both faces: the outward construction
+mirrored across the mid-wall line, so the bore leads (the cone's crease, the
+trumpet's curve) and stands exactly |Δr| in at the lip, and the outside goes
+round it a wall away - wall held to 0.02 as outward. The bore at the lip may
+come to no less than 2 nozzle widths across (Neck's waist rule). Roll In is
+still refused.
+
+### Flags — not in the ticket, or not as the ticket said
+
+1. **"bore only +3 … wall reads 3.58"**: with Δr a radius (Flare's and Neck's
+   since they shipped, and the UI ticket's "drag out 3 → bore Ø +6"), +3 on a
+   5.08 wall leaves **2.08**; the ticket's readout line `Ø30.47 → Ø33.47, …
+   wall 5.08 → 3.58` is a **+1.5** step (Ø +3). The test gates both: +3 reads
+   2.08 measured off the output ring, +1.5 reproduces the ticket's line
+   character for character.
+2. **The floor is 0.42, not 0.8**: the ticket names nso_thickness.js's floor
+   and quotes 0.8 in its example. `floorFor(0.4)` is 0.42 (one extrusion line);
+   0.8 is 2 nozzle widths, Flare's hoop-stretch rule and the bore limit. The
+   code uses `floorFor`, as the ticket's words say.
+3. **At an end the shoulder is square, whatever the Profile**: "the result
+   is a counterbore", and a counterbore's floor is square. Mid-tube the
+   Profile shapes the moved face as before.
+4. **The hoop-stretch rule does not apply to one face**: it guards forming a
+   sheet of one thickness; a one-face move models the wall it leaves
+   explicitly, and that wall is held to the floor.
+
+## The card: Walls, and Flare's lip ring (tube-end-drag, 2026-10-20)
+
+`app-tube-edge.js?v=enddrag1`. The card gains a **Walls** select (Both ·
+Outside only · Bore only, `sel-te-walls`) under Way, shown for Flare and
+Neck and hidden for Roll. Δr and Angle take negative values now (below 0 is
+inward); Way In stays, and for a Flare it means the same as a negative Δr.
+
+**Flare's handle, the LIP ring** (orange, Neck's waist colour), where the
+moving face's lip will be, u = L out along the wall:
+- drag it toward or away from the axis: **Δr** (through 0 and inward);
+- drag it along the axis: **Length**; both at once, read on the plane through
+  the axis that faces the camera (Neck's waist plane);
+- 0.5 mm steps, 0.1 with Shift; **Left / Right** Δr ±1, **Up / Down** the
+  Length ±1 (Up the way the axis runs up the screen), Shift 0.1; Escape puts
+  a drag back, then shuts the card; no drag orbits the camera;
+- a drag writes **Length and Δr** (Angle follows, linked) and sets Way back to
+  Out: the sign is Δr's;
+- the live ghost follows, as typing does; the fields stay editable.
+
+**Where the handle sits**: with Bore only on the bore, with Outside only on
+the outside; with Both, Flare's lip ring on the wall's mid-line. Neck's rings
+follow Walls the same way: on the bore with Bore only. With Both they stay
+on the outside, as #241 drew them (see the flag below). A one-face neck that
+reaches an end is drawn where the engine lays it, from that end; its free
+end ring sets the depth, and the ring on the end stays put. **Hover names the
+face**: `Bore Δr +3.0 mm, Length 10.0 mm` (lip), `Wall Δr −5.0 mm` (a
+neck's waist with Both).
+
+Gates (`tools/nso_tube_neck_drag_check.js`, sections 8–10, in `tube:neck`):
+- the lip ring dragged 4 mm in reads **Δr −4.0**, and the ghost's lip bore is
+  **Ø8.80**, Ø 8 under the tube's Ø16.80;
+- 6 mm along the axis gives **Length 6 → 12**, with the ghost's lip at z 52;
+- Shift tenths, the arrows, and Escape mid-drag;
+- Bore only on a Ø40.62 / Ø30.47 pipe: the ring sits on the bore, and 3 mm
+  out makes the ghost's lip bore **Ø36.47** (Ø +6), its outside Ø40.62 at
+  every vertex;
+- Set commits the ghost's soup, and one Undo puts the pipe back;
+- Neck Bore only: its rings sit on the bore.
+
+Flag: the ticket says Both is "on the wall's mid-line (as Neck today)". Neck
+today draws its waist on the **outside** (Ro + Δr), and #241's gates grab it
+there. Neck with Both is left where it was; Flare with Both is on the
+mid-line, as the ticket asks.
