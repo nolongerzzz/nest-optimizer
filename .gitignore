@@ -9,6 +9,7 @@ tools/support-aim-out/
 tools/support-tree-out/
 tools/support-gridpack-out/
 tools/chamfer-band-out/
+tools/slicer-silent-out/
 tools/stock-out/
 tools/assemble-out/
 tools/integration-out/
