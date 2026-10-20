@@ -127,6 +127,14 @@
          optionally with regionId and key) planned instead of detecting.
    Every plan.trunks[i] carries regionIds; every solid(plan).solids[i]
    carries beacons (ids), regionIds and landing.
+   parts(plan, { interface: true }) (and solid()): every tip that meets the
+         part carries nso_support_interface.js's SHEET - cut flat under 2
+         transition + 2 interface layers at 0.84 mm, 0.18 mm under the part -
+         or is cut at the gap line, or (a side tip) drawn back off its face;
+         weld() joins each sheet to the trunks it stands on. Off by default:
+         solid(plan) is the same bytes as before. The Supports card turns it
+         on (docs/SUPPORT-INTERFACE.md). Gecko fingers are not grown under a
+         sheet. tp.sheet / weld().sheet: what was built, per tip and level.
 
    PROGRESS. opts.onProgress(msg), on plan(), parts() and weld(), is told
    { phase, done, total } as the work goes, once per unit finished:
@@ -182,6 +190,7 @@
   function ST(o) { return (o && o.supportTree) || (root && root.NSO_SupportTree) || null; }
   function SBM(o) { return (o && o.beaconsModule) || (root && root.NSO_SupportBeacons) || null; }
   function PS(o) { return (o && o.pathSweep) || (root && root.NSO_PathSweep) || null; }
+  function SIM(o) { return (o && o.supportInterface) || (root && root.NSO_SupportInterface) || null; }
 
   /* say(phase, done, total, force): tells opts.onProgress. A repeat of the
      last message is dropped unless HEARTBEAT_MS has passed since it was sent,
@@ -782,8 +791,8 @@
 
   /* One member, one sweep: its whole polyline, mitred at every bend. A member
      formed at a node or a pickup starts half its side above that point. */
-  function memberSolid(P, m, foot) {
-    var pts = m.path.slice();
+  function memberSolid(P, m, foot, path, seed) {
+    var pts = (path || m.path).slice();
     /* A trunk that lands on a foot pad ends half a first layer inside it, so
        its end cap is not coplanar with the pad's bottom (the boolean's one
        untrustworthy input) and the pad, not the cap, is what sits on the plate. */
@@ -814,7 +823,7 @@
       var nL = pts.length, lastU = unit(sub(pts[nL - 1], pts[nL - 2]));
       pts[nL - 1] = add(pts[nL - 1], mul(lastU, m.childSide / 4));
     }
-    var first = unit(sub(pts[1], pts[0])), up = Math.abs(first[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+    var first = unit(sub(pts[1], pts[0])), up = seed || (Math.abs(first[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0]);
     var sw = P.sweep({ points: pts, profile: squareProfile(m.side, phaseOf(m.id + 1)), up: up });
     if (sw.ok) return { ok: true, soups: [sw.tris], points: pts };
     /* A mitre the sweep refuses (a leg shorter than the corner needs - a
@@ -1193,9 +1202,245 @@
     for (var i = 0; i < soup.length; i++) { var k = i % 3; if (soup[i] < lo[k]) lo[k] = soup[i]; if (soup[i] > hi[k]) hi[k] = soup[i]; }
     return { lo: lo, hi: hi };
   }
+  function joinAll(list) {
+    var n = 0; list.forEach(function (x) { n += x.length; });
+    var out = new Float32Array(n), w = 0;
+    list.forEach(function (x) { out.set(x, w); w += x.length; });
+    return out;
+  }
+  /* A ZERO-AREA TRIANGLE whose three float32 corners are distinct but in
+     line: the kernel's output after the sheet's join with every trunk it
+     carries has one now and then (measured: one at z 41 in the clamp's area
+     1, in a trunk the sheet never touches - the join re-triangulates it all).
+     It is removed by splitting the neighbour across its long edge at the
+     middle corner: the same surface, still closed and manifold, no volume
+     moved - each kept only when the exact-vertex census says so. */
+  function flatSplit(soup) {
+    function key(i) { return soup[i] + ',' + soup[i + 1] + ',' + soup[i + 2]; }
+    var n = (soup.length / 9) | 0, flat = [];
+    for (var t = 0; t < n; t++) {
+      var o = t * 9, ux = soup[o + 3] - soup[o], uy = soup[o + 4] - soup[o + 1], uz = soup[o + 5] - soup[o + 2];
+      var vx = soup[o + 6] - soup[o], vy = soup[o + 7] - soup[o + 1], vz = soup[o + 8] - soup[o + 2];
+      var cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+      if (cx === 0 && cy === 0 && cz === 0) {
+        var k = [key(o), key(o + 3), key(o + 6)];
+        if (k[0] !== k[1] && k[1] !== k[2] && k[0] !== k[2]) flat.push(t);
+      }
+    }
+    if (!flat.length) return soup;
+    var edgeTris = new Map();
+    for (var e = 0; e < n; e++) for (var c = 0; c < 3; c++) {
+      var ka = key(e * 9 + c * 3), kb = key(e * 9 + ((c + 1) % 3) * 3), ek = ka < kb ? ka + '|' + kb : kb + '|' + ka;
+      if (!edgeTris.has(ek)) edgeTris.set(ek, []);
+      edgeTris.get(ek).push(e);
+    }
+    var out = Array.prototype.slice.call(soup), dead = {}, add2 = [];
+    flat.forEach(function (t) {
+      if (dead[t]) return;
+      var o = t * 9, P = [0, 1, 2].map(function (c) { return [soup[o + c * 3], soup[o + c * 3 + 1], soup[o + c * 3 + 2]]; });
+      /* the middle corner: the one inside the span of the other two */
+      var L = [0, 1, 2].map(function (c) { var a = P[(c + 1) % 3], b = P[(c + 2) % 3]; return len(sub(a, b)); });
+      var m = L.indexOf(Math.max(L[0], L[1], L[2])), A = P[(m + 1) % 3], B = P[(m + 2) % 3], M = P[m];
+      var ka = A.join(','), kb = B.join(','), ek = ka < kb ? ka + '|' + kb : kb + '|' + ka;
+      var nb = (edgeTris.get(ek) || []).filter(function (x) { return x !== t && !dead[x]; });
+      if (nb.length !== 1) return;
+      var q = nb[0], Q = [0, 1, 2].map(function (c) { return [soup[q * 9 + c * 3], soup[q * 9 + c * 3 + 1], soup[q * 9 + c * 3 + 2]]; });
+      var qa = -1, qb = -1;
+      Q.forEach(function (p, c) { if (p.join(',') === ka) qa = c; if (p.join(',') === kb) qb = c; });
+      if (qa < 0 || qb < 0) return;
+      var D = Q[3 - qa - qb];
+      /* keep the neighbour's winding: it runs A->B or B->A */
+      var fwd = (qb === (qa + 1) % 3);
+      var t1 = fwd ? [A, M, D] : [M, A, D], t2 = fwd ? [M, B, D] : [B, M, D];
+      dead[t] = dead[q] = true;
+      add2.push(t1, t2);
+    });
+    if (!add2.length) return soup;
+    var res = [];
+    for (var i = 0; i < n; i++) if (!dead[i]) for (var j = 0; j < 9; j++) res.push(out[i * 9 + j]);
+    add2.forEach(function (tri) { tri.forEach(function (p) { res.push(p[0], p[1], p[2]); }); });
+    var fixed = new Float32Array(res);
+    function census(S) {
+      var E = new Map(), bad = 0;
+      for (var i = 0; i < S.length; i += 9) for (var c = 0; c < 3; c++) {
+        var a = i + c * 3, b = i + ((c + 1) % 3) * 3;
+        var ka = S[a] + ',' + S[a + 1] + ',' + S[a + 2], kb = S[b] + ',' + S[b + 1] + ',' + S[b + 2];
+        var k = ka < kb ? ka + '|' + kb : kb + '|' + ka;
+        E.set(k, (E.get(k) || 0) + 1);
+      }
+      E.forEach(function (v) { if (v !== 2) bad++; });
+      return bad;
+    }
+    return census(fixed) <= census(soup) ? fixed : soup;
+  }
   function boxesTouch(a, b) {
     for (var k = 0; k < 3; k++) if (a.lo[k] > b.hi[k] + 1e-3 || b.lo[k] > a.hi[k] + 1e-3) return false;
     return true;
+  }
+
+  /* The sheet for a plan (opts.interface): nso_support_interface.js plans it
+     over the plan's stations; the tips are then built to it. Each tip's
+     closest approach to the piece is measured on its own swept solid, and a
+     tip cut at the gap line (or a side tip drawn back off its face) moves
+     until it is the gap - the same rule the sheet's own solve keeps. */
+  function sheetFor(p, opts, foot) {
+    var SI = SIM(opts), P = PS(opts);
+    if (!SI || typeof SI.sheet !== 'function') return { ok: false, reason: 'nso_support_interface.js is not loaded' };
+    var cols = [], colOf = {};
+    p.members.forEach(function (m) {
+      if (m.dead || !m.path || !m.path.length) return;
+      var pts = m.path.slice();
+      if (m.kind === 'merge' || m.kind === 'pickup') pts.unshift(add(pts[0], [0, 0, m.side / 2]));
+      cols.push({ pts: pts, side: m.side });
+      if (m.beacon != null) colOf[m.beacon] = cols.length - 1;
+    });
+    p.stubs.forEach(function (s) { cols.push({ pts: [s.to, s.via, s.from], side: s.side }); colOf[s.beacon] = cols.length - 1; });
+    var sts = p.stations.filter(function (st) { return colOf[st.beacon] != null; }).map(function (st) {
+      return { label: st.label, beacon: st.beacon, contact: st.contact, side: !!st.side, col: colOf[st.beacon] };
+    });
+    var plan = SI.sheet(opts.rawTris, sts, {
+      columns: cols, sideMm: p.sideMm, plateZ: p.plateZ, footMm: foot, occluders: opts.occluders,
+      layerMm: opts.layerMm, gapMm: opts.gapMm, pitchMm: opts.sheetPitchMm, angleDeg: opts.sheetAngleDeg,
+      thickness: opts.thickness, crosshatch: opts.crosshatch, rasterLines: opts.rasterLines, beat: opts.beat
+    });
+    if (!plan.ok) return plan;
+    /* a tip's clearance is read on its corners, edge middles and face
+       middles - a sample, so it is held a hair over the gap */
+    var gap = plan.gapMm, aim = gap + 0.003, byBeacon = {}, tipLog = [];
+    plan.tips.forEach(function (t) { byBeacon[t.beacon] = t; });
+    /* the tip's own solid against the piece, over its top R mm round the
+       contact (the rest of the column is the planner's, kept off by its rails) */
+    function clearance(soup, near) {
+      var best = Infinity, R = 2.5, seen = new Set();
+      function at(x, y, z) {
+        if (Math.abs(x - near[0]) > R || Math.abs(y - near[1]) > R || Math.abs(z - near[2]) > R) return;
+        var k = x + ',' + y + ',' + z;           /* a corner or an edge is shared: probed once */
+        if (seen.has(k)) return;
+        seen.add(k);
+        var d = plan.probe.nearest([x, y, z], gap + 0.5);
+        if (d < best) best = d;
+      }
+      for (var i = 0; i < soup.length; i += 9) {
+        var a = [soup[i], soup[i + 1], soup[i + 2]], b = [soup[i + 3], soup[i + 4], soup[i + 5]], c = [soup[i + 6], soup[i + 7], soup[i + 8]];
+        at(a[0], a[1], a[2]); at(b[0], b[1], b[2]); at(c[0], c[1], c[2]);
+        at((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2); at((b[0] + c[0]) / 2, (b[1] + c[1]) / 2, (b[2] + c[2]) / 2);
+        at((c[0] + a[0]) / 2, (c[1] + a[1]) / 2, (c[2] + a[2]) / 2); at((a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3);
+      }
+      return best;
+    }
+    function joined(ms) {
+      var n = 0; ms.soups.forEach(function (s) { n += s.length; });
+      var out = new Float32Array(n), w = 0; ms.soups.forEach(function (s) { out.set(s, w); w += s.length; });
+      return out;
+    }
+    /* lower a cut until the tip's own solid keeps the gap */
+    function settleCut(t, build, pts, side, near) {
+      var z = t.cutZ, res = null, d = Infinity;
+      for (var it = 0; it < 10; it++) {
+        res = build(cleanPath(SI.cutPath(pts, z, side)));
+        if (!res.ok) return res;
+        if (t.mode === 'sheet') { d = null; break; }
+        d = clearance(res.soup, near);
+        if (d >= aim) break;
+        z -= (aim - d) + 0.01;
+      }
+      tipLog.push({ beacon: t.beacon, mode: t.mode, cutZ: z, clearanceMm: d });
+      return res;
+    }
+    /* A CUT KEEPS THE COLUMN AS IT WAS. The sweep seeds its square's frame
+       on the first segment and carries it round every bend by the minimal
+       rotation (nso_path_sweep.js), so a path that now starts straight up
+       from lower down its leg would turn the whole column below by some
+       angle - measured: a square corner 0.009 mm nearer the clamp's wall,
+       20 mm under the cut. The seed is chosen so that, past the cut, the frame
+       is the one the uncut member had there. */
+    function rotMin(v, from, to) {
+      var ax = cross(from, to), sn = len(ax), c = dot(from, to);
+      if (sn <= 1e-14) return v.slice();
+      ax = mul(ax, 1 / sn);
+      var ang = Math.atan2(sn, c), ca = Math.cos(ang), sa = Math.sin(ang);
+      return add(add(mul(v, ca), mul(cross(ax, v), sa)), mul(ax, dot(ax, v) * (1 - ca)));
+    }
+    function framesOf(pts) {
+      var u = [];
+      for (var k = 0; k + 1 < pts.length; k++) u.push(unit(sub(pts[k + 1], pts[k])));
+      var up = Math.abs(u[0][1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+      var r = [unit(sub(up, mul(u[0], dot(up, u[0]))))];
+      for (var j = 1; j < u.length; j++) r.push(rotMin(r[j - 1], u[j - 1], u[j]));
+      return { u: u, r: r };
+    }
+    function memberBuild(m) {
+      var orig = memberSolid(P, m, foot), F = orig.ok && !orig.split ? framesOf(orig.points) : null;
+      return function (path) {
+        var seed = null;
+        if (F && path.length >= 2) {
+          /* the original segment the cut path rejoins: the one its second point lies on */
+          var np = cleanPath(path), Qp = path[1], k = 0, bd = Infinity;
+          for (var j = 0; j + 1 < orig.points.length; j++) {
+            var a = orig.points[j], b = orig.points[j + 1], ab = sub(b, a), t = Math.max(0, Math.min(1, dot(sub(Qp, a), ab) / Math.max(1e-18, dot(ab, ab))));
+            var d = len(sub(Qp, add(a, mul(ab, t))));
+            if (d < bd) { bd = d; k = j; }
+          }
+          if (bd < 1e-6 && np.length >= 2) seed = rotMin(F.r[k], F.u[k], unit(sub(np[1], np[0])));
+        }
+        var ms = memberSolid(P, m, foot, path, seed);
+        if (ms.ok) ms.soup = joined(ms);
+        return ms;
+      };
+    }
+    function member(m) {
+      var t = byBeacon[m.beacon], build = memberBuild(m), pts = m.path;
+      if (t.mode !== 'side') return settleCut(t, build, pts, m.side, pts[0]);
+      /* A SIDE TIP leaves its face sideways (a lateral stub along the face's
+         normal, then down). It is drawn back along that stub until its own
+         solid keeps the gap - while the stub stays longer than its own mitre
+         (R past the elbow): a leg shorter than that folds the sweep over
+         itself (measured: 3 non-manifold edges on the clamp's 45 deg
+         chamfer, where the gap wants 1.05 of a 1.4 mm stub). Past that the
+         stub goes and the DROP stands straight up from the elbow toward the
+         face, lowered until it keeps the gap. */
+      var dir = unit(sub(pts[1], pts[0])), L01 = len(sub(pts[1], pts[0])), n = p.beacons[m.beacon].n;
+      var nh = Math.hypot(n[0], n[1]), R = m.side / Math.SQRT2, room = L01 - R - 0.1;
+      var tr = nh > 1e-6 ? Math.min(room, (gap + R * Math.abs(n[2])) / nh * 0.8) : 0, res = null, d = 0;
+      for (var it = 0; it < 14 && tr >= 0 && tr <= room; it++) {
+        res = build([add(pts[0], mul(dir, tr))].concat(pts.slice(1)));
+        if (!res.ok) break;
+        d = clearance(res.soup, pts[0]);
+        if (d >= aim) { tipLog.push({ beacon: m.beacon, mode: 'side', retractMm: tr, clearanceMm: d }); return res; }
+        tr += Math.max(0.03, (aim - d) * 1.5);
+      }
+      var E = pts[1], rest = pts.slice(1), up = Math.abs(n[2]) > 1e-6 ? L01 * nh / Math.abs(n[2]) : 0;
+      for (var k2 = 0; k2 < 24 && up > 0.05; k2++) {
+        res = build(cleanPath([[E[0], E[1], E[2] + up]].concat(rest)));
+        if (res.ok) {
+          d = clearance(res.soup, pts[0]);
+          if (d >= aim) { tipLog.push({ beacon: m.beacon, mode: 'side-up', upMm: up, clearanceMm: d }); return res; }
+        }
+        up -= Math.max(0.03, (aim - (res.ok ? d : 0)) * 1.5);
+      }
+      var t2 = { beacon: m.beacon, mode: 'side-cut', cutZ: E[2] };
+      return settleCut(t2, build, rest, m.side, pts[0]);
+    }
+    function stub(s) {
+      var t = byBeacon[s.beacon];
+      var build = function (path) {
+        var r = P.sweep({ points: path.slice().reverse(), profile: squareProfile(s.side, phaseOf(p.members.length + s.beacon + 1)), up: [0, 1, 0] });
+        if (r.ok) r.soup = r.tris; else r.reason = 'stub ' + s.beacon + ' would not sweep: ' + r.reason;
+        return r;
+      };
+      return settleCut(t, build, [s.to, s.via, s.from], s.side, s.to);
+    }
+    function summary() {
+      return {
+        gapMm: plan.gapMm, layerMm: plan.layerMm, widthMm: plan.widthMm, pitchMm: plan.pitchMm, tipSpacingMm: plan.tipSpacingMm,
+        counts: plan.counts, reason: plan.reason, failed: plan.failed, tips: plan.tips, tipLog: tipLog,
+        levels: plan.levels.map(function (L) {
+          return { id: L.id, zTop: L.zTop, zBase: L.zBase, tips: L.tips, t1: L.t1, minDistanceMm: L.minDistanceMm, solvedDropMm: L.solvedDropMm,
+                   layers: L.layers.map(function (x) { return { role: x.role, angleDeg: x.angleDeg, z0: x.z0, z1: x.z1, lines: x.lines, lengthMm: x.lengthMm, paths: x.paths }; }) };
+        })
+      };
+    }
+    return { ok: true, plan: plan, byBeacon: byBeacon, member: member, stub: stub, summary: summary };
   }
 
   /* The parts of every trunk, in union order: the landing member, then up
@@ -1207,8 +1452,16 @@
     var probe = makeProbe(A, [opts.rawTris || []].concat(opts.occluders || []));
     var foot = opts.footPads === false ? 0 : (opts.firstLayerMm == null ? FOOT_LAYER_MM : +opts.firstLayerMm);
     var out = [], placed = [], droppedFingers = 0, shafts = [], padList = [];
+    /* THE SHEET (opts.interface): every tip that meets the part is cut flat
+       under nso_support_interface.js's sheet, or cut at the gap line, or (a
+       side tip) drawn back off its face until the gap holds. */
+    var sh = null;
+    if (opts.interface) {
+      sh = sheetFor(p, opts, foot);
+      if (!sh.ok) return { ok: false, reason: 'the interface sheet: ' + sh.reason };
+    }
     /* Every contact's shaft near its tip, for the fingers to keep clear of. */
-    if (p.style === 'gecko-hand') {
+    if (p.style === 'gecko-hand' && !sh) {
       p.members.forEach(function (m) {
         if (m.dead || m.beacon == null || m.path.length < 2) return;
         var d = unit(sub(m.path[1], m.path[0]));
@@ -1222,7 +1475,7 @@
       var tr = p.trunks[t], parts = [], fingers = [];
       for (var i = 0; i < tr.members.length; i++) {
         var m = p.members[tr.members[i]];
-        var ms = memberSolid(P, m, foot);
+        var ms = sh && m.beacon != null && sh.byBeacon[m.beacon] ? sh.member(m) : memberSolid(P, m, foot);
         if (!ms.ok) return { ok: false, reason: ms.reason };
         m.points = ms.points;
         parts = parts.concat(ms.soups.map(function (x) { return { soup: x }; }));
@@ -1246,10 +1499,11 @@
              either. Run back a quarter side instead, the stub's start landed
              within 0.2 mm of the parent column's run-on end, and the union
              pinched there (2 non-manifold edges on a box tilted 30 deg). */
-          var sw = P.sweep({ points: [s.from, s.via, s.to], profile: squareProfile(s.side, phaseOf(p.members.length + s.beacon + 1)), up: [0, 1, 0] });
+          var sw = sh && sh.byBeacon[s.beacon] ? sh.stub(s)
+            : P.sweep({ points: [s.from, s.via, s.to], profile: squareProfile(s.side, phaseOf(p.members.length + s.beacon + 1)), up: [0, 1, 0] });
           if (sw.ok) { parts.push({ soup: sw.tris, stub: true }); s.soup = sw.tris; }
         });
-        if (p.style === 'gecko-hand' && T && T._geckoHand) {
+        if (p.style === 'gecko-hand' && T && T._geckoHand && !sh) {
           var tips = [];
           if (m.beacon != null) {
             var pts = ms.points, dir = unit(sub(pts[0], pts[1]));
@@ -1304,7 +1558,21 @@
         });
       }
       out.forEach(function (o) { o.parts = o.parts.concat(o.fingerParts); delete o.fingerParts; });
-      return { ok: true, trunks: out, fingersDropped: droppedFingers, padGaps: { found: gaps.found, filled: gaps.filled || 0, bridged: gaps.bridged || 0, left: gaps.left } };
+      /* Each sheet is one more entry, its four layers in order: weld() folds
+         them into one solid and joins it to the trunks it stands on. */
+      if (sh) {
+        sh.plan.levels.forEach(function (L) {
+          /* the trunks that carry its tips: what it is joined to */
+          var carriers = [];
+          L.tips.forEach(function (ti) {
+            var b = sh.plan.tips[ti].beacon;
+            p.trunks.forEach(function (tr, k) { if (tr.beacons.indexOf(b) >= 0 && carriers.indexOf(k) < 0) carriers.push(k); });
+          });
+          out.push({ trunk: -1, sheet: L.id, carriers: carriers, parts: L.layers.map(function (x) { return { soup: x.soup, sheet: true }; }), fingers: 0 });
+        });
+      }
+      return { ok: true, trunks: out, fingersDropped: droppedFingers, padGaps: { found: gaps.found, filled: gaps.filled || 0, bridged: gaps.bridged || 0, left: gaps.left },
+               sheet: sh ? sh.summary() : null };
     }
     return { ok: true, n: p.trunks.length, step: step, finish: finish };
   }
@@ -1344,9 +1612,12 @@
     opts = opts || {};
     if (!p || !p.ok) return Promise.resolve({ ok: false, reason: (p && p.reason) || 'no plan' });
     if (!p.trunks.length) return Promise.resolve({ ok: true, trunks: [], fingersDropped: 0, padGaps: { found: 0, filled: 0, bridged: 0, left: 0 } });
-    var sp = trunkStepper(p, Object.assign({}, opts, { rawTris: opts.rawTris || p.rawTris, occluders: opts.occluders || p.occluders }));
+    /* the sheet is planned before the first trunk: 'building', none swept yet,
+       beat through it so the listener hears the work going on */
+    var say = progressOf(opts), t = 0, nT = p.trunks.length;
+    var sp = trunkStepper(p, Object.assign({}, opts, { rawTris: opts.rawTris || p.rawTris, occluders: opts.occluders || p.occluders,
+      beat: function () { say('building', 0, nT); } }));
     if (!sp.ok) return Promise.resolve(sp);
-    var say = progressOf(opts), t = 0;
     say('building', 0, sp.n, true);
     function run() {
       while (t < sp.n) {
@@ -1360,7 +1631,34 @@
       if (done.ok) say('building', sp.n, sp.n, true);
       return done;
     }
-    return new Promise(function (go) { go(run()); });
+    return new Promise(function (go) { go(run()); }).then(function (done) { return opts.foldSheets === false ? done : foldSheets(done, opts); });
+  }
+
+  /* A SHEET'S FOUR LAYERS, folded into one solid off the page - after parts()
+     (the default), or as the Supports card's build worker's own step once
+     every area is built (parts with foldSheets: false, then foldSheets; the
+     worker loads nso_csg.js for it) - and not in weld(), on the page: T1 with I1 and T2 with I2 never overlap (a
+     layer lies between), so each pair is one soup of disjoint shells, and the
+     two pairs overlap only where a layer sits EPS into the one below: ONE
+     union. Its inputs are under the boolean door's worker size, so on the page
+     it ran in the page's thread - measured, the longest stall of the clamp's
+     build (0.9 s). Without a union here (NSO_unionSoups not loaded) weld()
+     folds it, the same way. */
+  function foldSheets(done, opts) {
+    var U = (opts && opts.unionSoups) || (root && root.NSO_unionSoups), T = ST(opts);
+    if (!done || !done.ok || typeof U !== 'function' || !T) return done;
+    var chain = Promise.resolve();
+    done.trunks.forEach(function (tr) {
+      if (tr.sheet == null || tr.parts.length !== 4) return;
+      chain = chain.then(function () {
+        var L = tr.parts.map(function (x) { return x.soup; });
+        return U(joinAll([L[0], L[2]]), joinAll([L[1], L[3]])).then(function (r) {
+          if (!r || !r.ok) return;        /* weld() tries again, and says why */
+          tr.parts = [{ soup: T._finishUnion(r.soup).soup, sheet: true, folded: true }];
+        });
+      });
+    });
+    return chain.then(function () { return done; });
   }
 
   /* Promise of solid()'s result from the trunks' parts: the WELDING half. The
@@ -1380,7 +1678,9 @@
     say('welding', null, null, true);
     var solids = [], dropped = 0, detached = 0;
     var chain = Promise.resolve();
+    var sheets = tp.trunks.filter(function (tr) { return tr.sheet != null; });
     tp.trunks.forEach(function (tr) {
+      if (tr.sheet != null) return;
       var acc = null;
       tr.parts.forEach(function (part, k) {
         chain = chain.then(function () {
@@ -1395,7 +1695,7 @@
       });
       chain = chain.then(function () {
         var fin = T._finishUnion(acc);
-        solids.push({ soup: fin.soup, box: bounds(fin.soup), trunks: [tr.trunk] });
+        solids.push({ soup: fin.soup, box: bounds(fin.soup), trunks: [tr.trunk], sheets: [] });
       }).then(between);
     });
     /* Trunks whose boxes meet are offered to the union; it joins them only
@@ -1432,7 +1732,7 @@
             return U(A.soup.soup, B.soup.soup).then(function (r) {
               if (r && r.ok) {
                 var fin = T._finishUnion(r.soup);
-                A.soup = { soup: fin.soup, box: bounds(fin.soup), trunks: A.soup.trunks.concat(B.soup.trunks) };
+                A.soup = { soup: fin.soup, box: bounds(fin.soup), trunks: A.soup.trunks.concat(B.soup.trunks), sheets: A.soup.sheets.concat(B.soup.sheets) };
                 A.ids = A.ids.concat(B.ids);
                 dead[pr[1]] = true;
               } else {
@@ -1447,7 +1747,44 @@
         });
       }
       function rounds() { return round().then(function (again) { return again ? rounds() : null; }); }
-      return rounds().then(function () {
+      /* THE SHEETS, after the trunks: each in two unions, not one per round.
+         Its four layers in ONE union - T1 with I1 and T2 with I2 never
+         overlap (a layer lies between), so each pair is one soup of disjoint
+         shells and the two pairs overlap only where a layer sits EPS into
+         the one below. Then ONE union with every solid that carries one of
+         its tips (T1 sits EPS into each cut tip): offered to the trunks round
+         by round instead, the sheet - the biggest solid there - was
+         re-processed once per trunk it took in (64 s against 17 s for the
+         clamp's 126 trunks). */
+      function joinSheets() {
+        var c3 = Promise.resolve();
+        sheets.forEach(function (sh) {
+          c3 = c3.then(function () {
+            var L = sh.parts.map(function (x) { return x.soup; });
+            var folded = L.length === 1 ? Promise.resolve({ ok: true, soup: L[0], folded: true }) : U(joinAll([L[0], L[2]]), joinAll([L[1], L[3]]));
+            return folded.then(function (r) {
+              if (!r || !r.ok) throw new Error('sheet ' + sh.sheet + ': its layers would not join: ' + ((r && r.reason) || 'no result'));
+              /* the fold is cleaned with the join it goes into, once: the
+                 cleanup walks every triangle, and the lattice is ~200k of them */
+              var S = r.soup, carry = {};
+              (sh.carriers || []).forEach(function (t) { carry[t] = true; });
+              var mine = groups.filter(function (g) { return g.soup.trunks.some(function (t) { return carry[t]; }); });
+              if (!mine.length) { S = T._finishUnion(S).soup; groups.push({ ids: [], soup: { soup: S, box: bounds(S), trunks: [], sheets: [sh.sheet] } }); return null; }
+              return U(S, joinAll(mine.map(function (g) { return g.soup.soup; }))).then(function (u) {
+                /* a sheet that meets none of its own tips would be placed in
+                   mid-air: the build says so instead */
+                if (!u || !u.ok) throw new Error('sheet ' + sh.sheet + ' does not meet the tips it was built on: ' + ((u && u.reason) || 'no result'));
+                var fin = flatSplit(T._finishUnion(u.soup).soup), trunks = [], sh2 = [sh.sheet];
+                mine.forEach(function (g) { trunks = trunks.concat(g.soup.trunks); sh2 = sh2.concat(g.soup.sheets); });
+                groups = groups.filter(function (g) { return mine.indexOf(g) < 0; });
+                groups.push({ ids: [], soup: { soup: fin, box: bounds(fin), trunks: trunks, sheets: sh2 } });
+              });
+            }).then(between);
+          });
+        });
+        return c3;
+      }
+      return rounds().then(joinSheets).then(function () {
         var out = groups.map(function (g) { return g.soup; });
         /* Each solid carries what it holds: its trunks' beacon ids, their
            regions, and where it lands ('plate', 'rest', or 'mixed'). A
@@ -1474,7 +1811,9 @@
       return bore(p, soup, opts).then(function (h) { hollow = h; return h.soup; });
     }).then(function (soup) {
       return { ok: true, soup: soup, solids: solids, fingersDropped: dropped + tp.fingersDropped, detached: detached,
-               padGaps: tp.padGaps,
+               padGaps: tp.padGaps, sheet: tp.sheet || null,
+               /* a sheet that joined no trunk would stand in air: counted, never hidden */
+               sheetsAlone: solids.filter(function (x) { return x.sheets.length && !x.trunks.length; }).length,
                partSoups: [].concat.apply([], tp.trunks.map(function (t) { return t.parts.map(function (x) { return x.soup; }); })),
                hollow: hollow, solidSoup: hollow ? hollow.solidSoup : null,
                reason: p.reason + (hollow ? ' ' + hollow.reason : '') };
@@ -1580,6 +1919,7 @@
     _padGaps: padGaps,
     _memberSolid: function (m, foot, opts) { return memberSolid(PS(opts || {}), m, foot); },
     _phaseOf: phaseOf,
+    foldSheets: function (tp, opts) { return foldSheets(tp, opts || {}); },
     _makeProbe: makeProbe
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;

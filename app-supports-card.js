@@ -89,8 +89,19 @@ var NSO_SUPPORTS_CARD = (function () {
   var PHASE_WORD = { detecting: 'Detecting', planning: 'Planning', building: 'Building', welding: 'Welding' };
   var PHASE_RANK = { detecting: 0, planning: 1, building: 2, welding: 3 };
   /* The planner's files, in index.html's order: what the build worker loads. */
-  var ENGINE = ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.js', 'nso_path_sweep.js',
-    'nso_support_tree.js', 'nso_support_gridpack.js'];
+  var ENGINE = ['nso_thickness.js', 'nso_csg.js', 'nso_support_beacons.js', 'nso_support_aim.js', 'nso_path_sweep.js',
+    'nso_support_tree.js', 'nso_support_gridpack.js', 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js'];
+  /* What the build asks of NSO_SupportGridpack.parts: every tip that meets the
+     part carries the interface sheet (nso_support_interface.js, sheet():
+     2 transition + 2 interface layers at 0.84 mm, 0.18 mm under the part).
+     An area that carries a sheet is WELDED in the worker too (weldAway;
+     nso_csg.js is in the worker for it): its unions are big - the sheet's
+     four layers, then the sheet with every trunk it stands on - and on the
+     page they went to the boolean worker, whose own bar and "Joining… N s"
+     took the status line from the card, and whose cleanup held the page
+     (1.2 s on the clamp). The sheet's fold is left to that weld
+     (foldSheets: false), so it counts as welding, not as building. */
+  var PARTS_OPTS = { interface: true, foldSheets: false };
   /* The card's state when the picked piece has no beacons at all. Detection
      only asks what hangs in air; a tall, thin piece that may sway as it
      prints is a different question, not asked yet, and the words say so. */
@@ -700,6 +711,11 @@ var NSO_SUPPORTS_CARD = (function () {
       '  var d = e.data, plan;\n' +
       '  d.opts.onProgress = function (m) { self.postMessage({ id: d.id, progress: m, at: Date.now() }); };\n' +
       '  if (d.soup) self.soup = d.soup;\n' +     // the piece comes once per build: the same array is indexed once, not once an area
+      '  if (d.weld) {\n' +                       // an area that carries a sheet, welded (NSO_SupportGridpack.weld)
+      '    self.NSO_SupportGridpack.weld(d.weld.plan, d.weld.tp, d.opts).then(function (u) { self.postMessage({ id: d.id, weld: u }); },\n' +
+      '      function (err) { self.postMessage({ id: d.id, error: (err && err.message) || String(err) }); });\n' +
+      '    return;\n' +
+      '  }\n' +
       '  if (d.plan) {\n' +                       // the trunks of a plan, swept (NSO_SupportGridpack.parts)
       '    if (d.plan.rawTris === null) d.plan.rawTris = self.soup;\n' +
       '    self.NSO_SupportGridpack.parts(d.plan, d.opts).then(function (tp) { self.postMessage({ id: d.id, parts: tp }); },\n' +
@@ -755,7 +771,7 @@ var NSO_SUPPORTS_CARD = (function () {
      between (yieldFn). Progress comes back to onProgress as it is posted. */
   function partsAway(job, plan, onProgress, yieldFn) {
     if (job.worker === undefined) job.worker = startWorker();
-    if (!job.worker) return window.NSO_SupportGridpack.parts(plan, { onProgress: onProgress, yieldFn: yieldFn });
+    if (!job.worker) return window.NSO_SupportGridpack.parts(plan, Object.assign({ onProgress: onProgress, yieldFn: yieldFn }, PARTS_OPTS));
     return new Promise(function (resolve, reject) {
       var w = job.worker.w, id = ++job.seq;
       w.onmessage = function (e) {
@@ -765,7 +781,22 @@ var NSO_SUPPORTS_CARD = (function () {
       };
       w.onerror = function (e) { reject(new Error((e && e.message) || 'the planner stopped')); };
       /* A plan from the worker comes back without the piece (rawTris null), and the worker puts its own copy back. */
-      w.postMessage({ id: id, plan: plan, opts: {} });
+      w.postMessage({ id: id, plan: plan, opts: Object.assign({}, PARTS_OPTS) });
+    });
+  }
+
+  /* An area that carries a sheet, welded on the job's worker (see PARTS_OPTS).
+     Its 'welding' progress comes back to onProgress. */
+  function weldAway(job, plan, tp, onProgress) {
+    return new Promise(function (resolve, reject) {
+      var w = job.worker.w, id = ++job.seq;
+      w.onmessage = function (e) {
+        if (e.data.id !== id) return;
+        if (e.data.progress) { if (onProgress) onProgress(e.data.progress, e.data.at); return; }
+        if (e.data.error) reject(new Error(e.data.error)); else resolve(e.data.weld);
+      };
+      w.onerror = function (e) { reject(new Error((e && e.message) || 'the planner stopped')); };
+      w.postMessage({ id: id, weld: { plan: plan, tp: tp }, opts: {} });
     });
   }
 
@@ -985,21 +1016,30 @@ var NSO_SUPPORTS_CARD = (function () {
           }, pause).then(function (tp) { swept.push({ a: a, tp: tp }); });
         });
       });
-      return next.then(function () { stopWorker(job); });     // the worker's work is done; welding is the page's
+      return next;
     });
 
-    /* 3. WELDING: every area's unions, joined into solids. */
+    /* 3. WELDING: every area's unions, joined into solids - the areas that
+       carry a sheet in the worker (weldAway), one after another, and AT THE
+       SAME TIME the rest on the page, one after another. */
     chain = chain.then(function () {
       if (job.dead) return null;
-      var next = Promise.resolve();
+      var away = Promise.resolve(), here = Promise.resolve();
       swept.forEach(function (x) {
-        next = next.then(function () {
-          if (!x.tp.ok) { solidsOf.push({ a: x.a, u: { ok: false, reason: x.tp.reason } }); return null; }
-          return gp().weld(x.a.t, x.tp, { yieldFn: pause, onProgress: function (m) { note(job, m); } })
-            .then(function (u) { solidsOf.push({ a: x.a, u: u }); });
-        });
+        if (!x.tp.ok) { solidsOf.push({ a: x.a, u: { ok: false, reason: x.tp.reason } }); return; }
+        if (job.worker && x.tp.sheet && x.tp.sheet.levels && x.tp.sheet.levels.length) {
+          away = away.then(function () {
+            if (job.dead) return null;
+            return weldAway(job, x.a.t, x.tp, function (m, sent) { note(job, m, sent); }).then(function (u) { solidsOf.push({ a: x.a, u: u }); });
+          });
+        } else {
+          here = here.then(function () {
+            if (job.dead) return null;
+            return gp().weld(x.a.t, x.tp, { yieldFn: pause, onProgress: function (m) { note(job, m); } }).then(function (u) { solidsOf.push({ a: x.a, u: u }); });
+          });
+        }
       });
-      return next;
+      return Promise.all([away.then(function () { stopWorker(job); }), here]);     // the worker's work is done when its welds are
     });
 
     /* The one place the plate changes. Synchronous from the first removal to

@@ -112,9 +112,13 @@ still live, and everything is put back if anything in it throws.
 thread that is inside it cannot repaint, count seconds or fire a timer. The
 card therefore plans in a Web Worker that loads the same engine files
 (`nso_thickness`, `nso_support_beacons`, `nso_support_aim`, `nso_path_sweep`,
-`nso_support_tree`, `nso_support_gridpack`); the watchdog and Escape on the page
-call `terminate()` on it. The worker plans every area, then sweeps their trunks
-(`NSO_SupportGridpack.parts`), posting `{ phase, done, total }` as it goes, and
+`nso_support_tree`, `nso_support_gridpack`, and for the interface sheet
+`nso_raster_lines`, `nso_crosshatch`, `nso_support_interface`); the watchdog and
+Escape on the page call `terminate()` on it. The worker plans every area, then
+sweeps their trunks (`NSO_SupportGridpack.parts` with `{ interface: true }`:
+every tip that meets the part is cut under a sheet of 2 transition + 2
+interface layers, 0.18 mm under the part - docs/SUPPORT-INTERFACE.md), posting
+`{ phase, done, total }` as it goes, and
 is stopped when that is done. The piece's mesh is sent to it **once** per build:
 every area is planned against the same array, whose spatial index the planner
 then finds again (a fresh copy per area was indexed afresh each time, about 0.4 s
@@ -122,7 +126,12 @@ of the wedge's 49k triangles, 25 times over). The union (`NSO_SupportGridpack.we
 wasm) runs on the page - one union is one call that cannot be interrupted - and
 the page gives itself a turn every 250 ms (`SLICE_MS`: repaint, the clock,
 Escape; a turn costs a frame of the 3D view, so it is not made oftener), and
-reads the watchdog's clock there. A page that cannot start a worker does the
+reads the watchdog's clock there. An area that carries an interface sheet
+(docs/SUPPORT-INTERFACE.md) is welded in the worker instead (it loads
+`nso_csg.js` for it), at the same time as the page welds the rest: its unions
+are large (the sheet's lattice, then the sheet with every trunk it stands on),
+and on the page they went to the boolean worker, whose own bar and words took
+the status line from the card. A page that cannot start a worker does the
 same work in-thread and can only be held to the clock after the fact.
 `NSO_SUPPORTS_CARD.setPlanner(fn)` replaces the planner (a test seam; its
 `opts.onProgress` is the bar's).
@@ -257,7 +266,8 @@ real worker: terminated, nothing after it, the plate and Undo as before.
   the inside test in `nso_support_aim.js`), not here; leave the area out, or
   raise `NSO_SUPPORTS_CARD.watchdogMs()`, until then. No planner in this tree has
   a per-spot time-based give-up, so there is none to cap.
-- The union (`NSO_SupportGridpack.weld`) runs on the page and cannot be
+- The union (`NSO_SupportGridpack.weld`) runs on the page (an area with a sheet:
+  in the worker, which Escape and the watchdog terminate) and cannot be
   interrupted mid-step: the clock and Escape are read after every union, so one
   that runs long (up to about 0.8 s on the wedge) is only caught afterwards.
 - **Welding has no percent**, on purpose: how many joins a build will make is
