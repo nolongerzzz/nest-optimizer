@@ -106,7 +106,7 @@ const HOLDS = {
   'menu-seat': ['btn-seat-support', 'seat-gap', 'btn-seat-here', 'chk-oversize-washer', 'btn-seat-flush', 'btn-flip-port', 'btn-seat-grid'],
   'menu-supports': ['supports-card', 'sup-angle', 'btn-sup-all', 'btn-sup-none', 'sup-style', 'sup-size',
                     'sup-rest', 'btn-sup-remove'],
-  // SHAPE: Smooth · Bend · Flare · Roll · Neck (Tube edge's three verbs)
+  // SHAPE: Smooth · Bend · Reducer · Roll · Neck (Tube edge's three verbs)
   'menu-shape': ['btn-smooth', 'btn-bend', 'btn-tube-edge', 'bend-panel', 'te-panel', 'sel-te-verb'],
   // ADD: Fill/Densify · Foam · Thicken out · Thicken in (shared mm) · Extend · Bridge
   'menu-add': ['btn-fill', 'btn-foam', 'foam-panel', 'btn-thicken-out', 'inp-thicken-mm', 'btn-thicken-in',
@@ -124,8 +124,8 @@ const HOLDS = {
   'menu-repair': ['btn-check-defects', 'btn-cap-open', 'chk-seal-repair', 'btn-seal', 'chk-non-solid', 'btn-solidify']
 };
 const ORDERED = ['menu-shape', 'menu-add', 'menu-bit', 'menu-surface', 'menu-repair'];
-/* Edge treatment offers exactly these; Tube edge's verbs are Flare, Roll, Neck. */
-const OPTIONS = { 'sel-edge-treat': ['fillet', 'chamfer', 'corners', 'cornersedges'], 'sel-te-verb': ['flare', 'roll', 'neck'],
+/* Edge treatment offers exactly these; Tube edge's verbs are Reducer, Roll, Neck. */
+const OPTIONS = { 'sel-edge-treat': ['fillet', 'chamfer', 'corners', 'cornersedges'], 'sel-te-verb': ['reducer', 'roll', 'neck'],
                   'sel-brush-mode': ['carve', 'emboss', 'smooth'], 'sel-measure-mode': ['span', 'edge'],
                   'plate-grid-show': ['auto', 'on', 'off'] };
 
@@ -192,7 +192,11 @@ const RETIRED = {
   'sel-stock-shape': ['stock-shelf'], 'inp-stock-height': ['stock-shelf'], 'inp-stock-radius': ['stock-shelf'],
   'inp-stock-wall': ['stock-shelf'], 'inp-stock-nozzle': ['stock-shelf'], 'inp-stock-waste': ['stock-shelf'],
   'inp-stock-prop': ['stock-shelf'], 'chk-stock-match': ['stock-shelf'], 'chk-stock-oversize': ['stock-shelf'],
-  'btn-stock-make': ['stock-shelf']
+  'btn-stock-make': ['stock-shelf'],
+  // tube-reducer-card: Flare became the Reducer, defined by its result - its
+  // Length is the Transition, its Angle and Δr the New Ø and New bore (the
+  // angles derived, in the readout)
+  'inp-te-length': ['inp-te-trans'], 'inp-te-angle': ['inp-te-od2', 'inp-te-id2'], 'inp-te-dr': ['inp-te-od2', 'inp-te-id2']
 };
 /* Hidden by their own state, with a box piece selected and nothing armed:
    each shows when its own control asks for it. Anything else found hidden
@@ -211,8 +215,8 @@ const OWN_STATE = {
   'inp-foam-level': 'Foam on', 'btn-foam-all': 'Foam on', 'btn-foam-set': 'Foam on', 'btn-foam-cancel': 'Foam on',
   'inp-bend-where': 'Bend on', 'inp-bend-angle': 'Bend on', 'inp-bend-radius': 'Bend on', 'sel-bend-toward': 'Bend on',
   'inp-bend-roll': 'Bend on, a section that is not a rectangle', 'btn-bend-go': 'Bend on', 'btn-bend-cancel': 'Bend on',
-  'sel-te-verb': 'Tube edge on', 'sel-te-dir': 'Tube edge on', 'sel-te-walls': 'Tube edge on, Flare or Neck', 'inp-te-length': 'Tube edge on', 'inp-te-run': 'Tube edge on, Flare', 'inp-te-angle': 'Tube edge on',
-  'inp-te-dr': 'Tube edge on', 'sel-te-profile': 'Tube edge on', 'inp-te-radius': 'Tube edge on, Roll',
+  'sel-te-verb': 'Tube edge on', 'sel-te-dir': 'Tube edge on, Roll', 'sel-te-walls': 'Tube edge on, Neck', 'inp-te-run': 'Tube edge on, Reducer',
+  'inp-te-od2': 'Tube edge on, Reducer', 'inp-te-id2': 'Tube edge on, Reducer', 'inp-te-trans': 'Tube edge on, Reducer', 'sel-te-profile': 'Tube edge on, Reducer', 'inp-te-radius': 'Tube edge on, Roll',
   'inp-te-roll-angle': 'Tube edge on, Roll', 'inp-te-neck-length': 'Tube edge on, Neck', 'inp-te-neck-dr': 'Tube edge on, Neck',
   'sel-te-neck-profile': 'Tube edge on, Neck', 'btn-te-go': 'Tube edge on', 'btn-te-cancel': 'Tube edge on',
   'inp-bridge-dia': 'Bridge on, point to point', 'inp-bridge-thick': 'Bridge on, edge to edge',

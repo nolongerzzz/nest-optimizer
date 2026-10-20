@@ -3400,6 +3400,15 @@ button#ms-legend-toggle:hover { color: var(--text, #fff); border-color: var(--ac
    the verb's rows in a block that hides whole. */
 .te-rows { display: flex; flex-direction: column; gap: 3px; }
 .te-rows[hidden] { display: none; }
+/* two fields to a line (the Reducer's New Ø / New bore, Transition / Run):
+   the card is too narrow for two label-field-unit rows side by side, so each
+   label stands over its field, the unit after the field */
+.te-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 3px 6px; }
+.te-pair .vp-bend-field { grid-template-columns: minmax(0, 1fr) 18px; row-gap: 1px; }
+.te-pair .te-lbl { grid-column: 1 / -1; font-style: normal; }
+/* The Reducer's on-piece measurement while a handle is in hand: MEASURE's
+   chip (.measure-label), in the handles' amber rather than its green */
+.measure-label.te-callout { border-color: rgba(255, 200, 61, 0.85); color: #fef3c7; }
 /* Neck's handles on the canvas (app-tube-edge.js NSO_teCursor): an end ring
    resizes along the tube's axis as it lies on screen, the waist across it,
    the band is a hand. */

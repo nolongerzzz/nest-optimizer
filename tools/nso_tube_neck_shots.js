@@ -40,7 +40,7 @@ const cardState = page => page.evaluate(() => {
   const B = state.tubeEdge || {}, el = id => document.getElementById(id);
   return {
     open: !!B.open, verb: el('sel-te-verb').value,
-    neckShown: !el('te-neck-rows').hidden, flareShown: !el('te-flare-rows').hidden, dirShown: !el('te-dir-row').hidden,
+    neckShown: !el('te-neck-rows').hidden, reducerShown: !el('te-reducer-rows').hidden, dirShown: !el('te-dir-row').hidden,
     length: el('inp-te-neck-length').value, dr: el('inp-te-neck-dr').value, profile: el('sel-te-neck-profile').value,
     readout: el('te-readout').textContent, bad: el('te-readout').classList.contains('is-bad'), goDisabled: el('btn-te-go').disabled,
     ghost: !!(B.ghost && B.ghost.parent), ring: !!(B.ring && B.ring.parent), rings: B.ring ? B.ring.children.length : 0,
@@ -99,7 +99,7 @@ withApp(async (page, logs) => {
   await page.waitForFunction(() => state.tubeEdge.readVerb === 'neck' && state.tubeEdge.result, null, { timeout: 30000 });
   let P = await cardState(page);
   console.log('   readout: ' + P.readout);
-  check('Neck is the third verb: its rows shown, Flare\'s and Way hidden', P.verb === 'neck' && P.neckShown && !P.flareShown && !P.dirShown);
+  check('Neck is the third verb: its rows shown, the Reducer\'s and Way hidden', P.verb === 'neck' && P.neckShown && !P.reducerShown && !P.dirShown);
   check('defaults from the wall: Length 12 (7.5 walls), Δr −4 (2.5 walls), Smooth', P.length === '12' && P.dr === '-4' && P.profile === 'smooth',
     P.length + ' / ' + P.dr + ' / ' + P.profile);
   check('blank: the band centred at the middle of the tube, said in words', /Pinch −4\.00 mm over 12\.0 mm, smooth, centred 20\.00 mm in: bore Ø16\.80 → Ø8\.80/.test(P.readout) && !P.bad, P.readout);
@@ -180,13 +180,13 @@ withApp(async (page, logs) => {
   await page.waitForFunction(() => /Undo: Neck reverted/.test(document.getElementById('status').textContent), null, { timeout: 15000 });
   check('...and another, the first', (await soupOf(page)) === before);
 
-  console.log('\n=== 7. Flare still Flare ===');
+  console.log('\n=== 7. the Reducer still the Reducer ===');
   await page.click('#btn-tube-edge');
   await page.waitForFunction(() => state.tubeEdge.open && state.tubeEdge.result, null, { timeout: 30000 });
-  await setField(page, 'sel-te-verb', 'flare');
+  await setField(page, 'sel-te-verb', 'reducer');
   await page.waitForFunction(() => state.tubeEdge.readVerb === 'end' && state.tubeEdge.result, null, { timeout: 30000 });
   P = await cardState(page);
-  check('back to Flare: its rows and Way shown, the flare previewed', P.flareShown && !P.neckShown && P.dirShown && /flare/.test(P.readout) && P.ghost, P.readout);
+  check('back to the Reducer: its rows shown (Way is a Roll\'s), the reducer previewed', P.reducerShown && !P.neckShown && !P.dirShown && /^(Reducer|Expander)/.test(P.readout) && P.ghost, P.readout);
   await page.click('#btn-te-cancel');
 
   const errs = logs.filter(l => l.startsWith('[pageerror]'));

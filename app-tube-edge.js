@@ -3,15 +3,16 @@
 // this file is the card on it, in Finish -> Shape, beside Bend.
 // docs/TUBE-EDGE.md.
 //
-// Flare, Roll or Neck; Way Out or In for the first two (a Roll refuses In:
-// not yet); Walls (Both, Outside only, Bore only) for Flare and Neck; then
-// the verb's numbers:
-//   Flare  Length, Run (mm of straight tube on past the lip, 0 for none),
-//          Angle and Δr (linked: edit either, the other follows; below 0
-//          turns it in), Profile Straight or Trumpet
-//   Roll   Radius, Angle (90 / 180 / 270 offered, any typed up to 360)
-//   Neck   Length, Δr (below 0 pinches, above 0 bulges), Profile Smooth or
-//          Funnel - nso_tube_neck.js, a band anywhere along the tube
+// Reducer, Roll or Neck; Way Out for a Roll (In refuses: not yet); Walls
+// (Both, Outside only, Bore only) for Neck; then the verb's numbers:
+//   Reducer  New Ø and New bore (the new pipe's outside and bore, set apart:
+//            the same change to both keeps the wall), Transition (mm along
+//            the wall from the tube's Ø to the new), Run (mm of the new pipe
+//            straight on, 0 for none), Profile Straight or Trumpet -
+//            NSO_TubeEdge.reducer; the angles are derived, in the readout
+//   Roll     Radius, Angle (90 / 180 / 270 offered, any typed up to 360)
+//   Neck     Length, Δr (below 0 pinches, above 0 bulges), Profile Smooth or
+//            Funnel - nso_tube_neck.js, a band anywhere along the tube
 // and Set or Cancel.
 //
 // While the card is open:
@@ -41,22 +42,23 @@
 //     handles write them and the ghost follows, as typing does. A press on a
 //     handle is taken at the window, ahead of app-core and OrbitControls, so
 //     no drag here ever orbits the camera.
-//   - FLARE HANDLE: one LIP ring where the lip will be. Drag it toward or
-//     away from the axis and that is Δr (inward below 0); along the axis and
-//     that is the Length - both at once, each in the same steps as Neck's.
-//     Left / Right are Δr, Up / Down the Length (Up the way the axis goes up
-//     the screen); Escape and Shift as Neck's. A drag writes Length and Δr
-//     (Angle follows) and sets Way back to Out: the sign is Δr's.
-//   - RUN HANDLE: with a Run, a second ring, the END ring, at the run's far
-//     end, on the same face as the lip ring. Drag it along the axis and that
-//     is the Run (0 at the least; at 0 there is no run and no END ring -
-//     the field makes one). Steps as the others; while the END ring is the
-//     last handle under the pointer or in hand, Up / Down step the Run
-//     instead of the Length (Left / Right are still Δr).
-//   - WALLS moves the handles onto the face that moves: the bore with Bore
-//     only, the outside with Outside only; with Both, Flare's lip ring is on
-//     the wall's mid-line and Neck's rings on the outside, as they were.
-//     Hover names the face (Wall, Outside, Bore).
+//   - REDUCER HANDLES: four rings. At the transition's end, the OD ring on
+//     the new outside and the ID ring on the new bore: drag either toward or
+//     away from the axis and that is New Ø / New bore (the ring follows the
+//     pointer, so 2.5 mm in is Ø −5). The T ring, outside both in that same
+//     plane, drags along the axis: the Transition. The R ring at the run's
+//     far end drags along the axis: the Run - shown while Run > 0; with Run
+//     0, Shift + a press on the T ring pulls a run out of it (an R drag from
+//     the T plane). Up / Down step the length ring last touched (T before
+//     any), Left / Right the Ø ring last touched (OD before any); 1 mm, 0.1
+//     with Shift. While a handle is in hand the piece carries its MEASURE:
+//     a chip with the ring's Ø ("Ø33.26") or, for T and R, a dimension line
+//     along the axis between the two planes and its length ("12.1 mm"); both
+//     follow the handle and go on the release. Hover names the value in the
+//     readout.
+//   - WALLS moves Neck's handles onto the face that moves: the bore with
+//     Bore only, the outside with Outside only and with Both. Hover names
+//     the face (Wall, Outside, Bore).
 //
 // Set commits through the sculpt commit (undo type 'tubeEdgeReplace', or
 // 'tubeNeckReplace' for a neck), so one Undo puts the whole piece back, and
@@ -78,13 +80,15 @@ var TUBE_NECK_KEY_MM = 1;                  // an arrow key
 var TUBE_NECK_FINE_MM = 0.1;               // either, with Shift
 var TUBE_NECK_HIT_PX = 8;                  // how near a ring the pointer must be to take it
 var TUBE_NECK_SLOP_PX = 4;                 // a press on the band that travels less is a click
+var TUBE_EDGE_DIM_COLOR = 0xffc83d;        // the Reducer's dimension line while a length ring is in hand
 
 function NSO_teUI() {
   if (typeof state === 'undefined') return {};
   if (!state.tubeEdge) {
     state.tubeEdge = { open: false, modelId: null, soup: null, read: null, point: null, result: null, key: '',
-                       ghost: null, ring: null, raf: 0, lead: 'angle', readVerb: '', hidPiece: null,
-                       drag: null, hover: null, said: null, keyHandle: null };
+                       ghost: null, ring: null, raf: 0, readVerb: '', hidPiece: null,
+                       drag: null, hover: null, said: null, keyHandle: null, keyLen: null, keyDia: null,
+                       dim: null, callout: null, diaFor: '' };
   }
   return state.tubeEdge;
 }
@@ -112,42 +116,20 @@ function NSO_teDisplayToRaw(m, d) {
 function NSO_teOpts() {
   function num(id) { var el = NSO_teEl(id); return el && el.value !== '' ? +el.value : null; }
   function val(id, d) { var el = NSO_teEl(id); return el ? el.value : d; }
-  var B = NSO_teUI(), verb = val('sel-te-verb', 'flare');
-  // Walls (Both / Outside only / Bore only), Neck's and Flare's: the card's
+  var B = NSO_teUI(), verb = val('sel-te-verb', 'reducer');
+  // Walls (Both / Outside only / Bore only), Neck's: the card's
   // sel-te-walls when it has one, Both when it does not
   var walls = val('sel-te-walls', 'both');
   if (verb === 'neck') {
     return { verb: 'neck', point: B.point, length: num('inp-te-neck-length'), dr: num('inp-te-neck-dr'),
              profile: val('sel-te-neck-profile', 'smooth'), walls: walls };
   }
-  var o = { verb: verb, direction: val('sel-te-dir', 'out'), point: B.point };
-  if (verb === 'flare') {
-    o.length = num('inp-te-length'); o.profile = val('sel-te-profile', 'straight'); o.walls = walls;
-    if (B.lead === 'dr') o.dr = num('inp-te-dr'); else o.angle = num('inp-te-angle');
-    // Run, the straight tube on past the lip: the card's inp-te-run when it
-    // has one (blank is 0), no run when it does not
-    if (NSO_teEl('inp-te-run')) o.runMm = num('inp-te-run') || 0;
-  } else {
-    o.radius = num('inp-te-radius'); o.angle = num('inp-te-roll-angle');
+  if (verb === 'reducer') {
+    // Run: blank is 0 (no run); a blank Transition the engine asks for
+    return { verb: 'reducer', point: B.point, od2: num('inp-te-od2'), id2: num('inp-te-id2'), transitionMm: num('inp-te-trans'),
+             runMm: num('inp-te-run') || 0, profile: val('sel-te-profile', 'straight') };
   }
-  return o;
-}
-
-/* Angle and Δr are one number said two ways over the Length: edit either,
-   the other follows; a new Length keeps whichever was edited last. */
-function NSO_teLink(from) {
-  var B = NSO_teUI(), L = NSO_teEl('inp-te-length'), A = NSO_teEl('inp-te-angle'), D = NSO_teEl('inp-te-dr');
-  if (!L || !A || !D) return;
-  if (from === 'angle' || from === 'dr') B.lead = from;
-  var len = +L.value;
-  if (!(len > 0)) return;
-  if (B.lead === 'dr') {
-    if (D.value === '' || !isFinite(+D.value)) return;
-    A.value = String(Math.round(Math.atan2(+D.value, len) * 180 / Math.PI * 10) / 10);
-  } else {
-    if (A.value === '' || !isFinite(+A.value)) return;
-    D.value = String(Math.round(len * Math.tan(+A.value * Math.PI / 180) * 100) / 100);
-  }
+  return { verb: verb, direction: val('sel-te-dir', 'out'), point: B.point, radius: num('inp-te-radius'), angle: num('inp-te-roll-angle') };
 }
 
 /* ---------------------------------------------------------------- drawing */
@@ -171,7 +153,7 @@ function NSO_teRemoveRing() {
     B.ring = null;
   }
 }
-function NSO_teClear() { NSO_teRemoveGhost(); NSO_teRemoveRing(); }
+function NSO_teClear() { NSO_teRemoveGhost(); NSO_teRemoveRing(); NSO_teHideCallout(); }
 
 // hidePiece: a neck's ghost lies inside the piece wherever it pinches, so
 // while it is up the piece itself is hidden (the ghost is the whole result,
@@ -215,15 +197,13 @@ function NSO_teSetRing(m, end) {
     line.raycast = function () {}; line.frustumCulled = false;
     group.add(line);
   });
-  // Flare's handles: the lip ring, where the moving face's lip will be, and
-  // with a Run the END ring at the run's far end
-  var g = NSO_teFlareGeom(), B = NSO_teUI();
+  // the Reducer's handles: OD, ID and T at the transition's end, R at the run's
+  var g = NSO_teReducerGeom(), B = NSO_teUI();
   if (g) {
     var hot = B.drag ? B.drag.handle : B.hover;
-    group.add(NSO_teCircle(m, g, NSO_teAxisPoint(g, g.h0), g.Rl, hot === 'lip' ? TUBE_EDGE_HOT_COLOR : TUBE_EDGE_WAIST_COLOR, 'lip', TUBE_EDGE_WAIST_COLOR));
-    if (NSO_teRunShown(g)) {
-      group.add(NSO_teCircle(m, g, NSO_teAxisPoint(g, g.hRun), g.Rl, hot === 'end' ? TUBE_EDGE_HOT_COLOR : TUBE_EDGE_RING_COLOR, 'end', TUBE_EDGE_RING_COLOR));
-    }
+    NSO_teReducerRings(g).forEach(function (q) {
+      group.add(NSO_teCircle(m, g, NSO_teAxisPoint(g, q[1]), q[2], hot === q[0] ? TUBE_EDGE_HOT_COLOR : q[3], q[0], q[3]));
+    });
   }
   group.userData.center = NSO_teRawToDisplay(m, C);
   nsoHelpers.attach(state.scene, group, 'tube-edge');
@@ -278,41 +258,42 @@ function NSO_teNeckGeom() {
 }
 function NSO_teWallsVal() { var el = NSO_teEl('sel-te-walls'); return el && el.value ? el.value : 'both'; }
 
-/* Flare as its handles see it, from the read end and the card (so the lip
-   ring stays up through a refusal): the Length, the signed Δr (Way In turns
-   a positive one in, as the engine does), and the lip ring - the face that
-   moves (the mid-line with Both) stood Δr off its line at u = L, laid in the
-   wall's own frame (nso_tube_edge.js's NSO_teToMeridian). h0 is the lip's
-   height along the end's outward axis, Rl its radius. The Run (0 when blank)
-   and hRun, the run's far end: Run along the axis past the lip, where the
-   END ring sits at the lip ring's radius (the run is at the lip's outside
-   and bore). Null with no end read or no Length. */
-function NSO_teFlareGeom() {
+/* The Reducer as its handles see it, from the read end and the card (so the
+   rings stay up through a refusal): New Ø / New bore (the tube's own when
+   blank), the Transition T and the Run (0 when blank). Each face ends at u0 +
+   T along the wall at its target radius - the engine's construction
+   (nso_tube_edge.js, the reducer's direct section) - at heights hO / hI along
+   the end's outward axis; hT is the transition's end plane (the higher), hR
+   the run's far end. The length rings sit outside both the tube and the new
+   outside, at Rlen. Null with no end read. */
+function NSO_teReducerGeom() {
   var B = NSO_teUI(), m = NSO_teModel();
-  if (!m || !B.read || !B.read.ok || !B.read.end || B.readVerb !== 'end' || NSO_teVerb() !== 'flare') return null;
-  var end = B.read.end, EL = NSO_teEl('inp-te-length'), EA = NSO_teEl('inp-te-angle'), ED = NSO_teEl('inp-te-dr'), DIR = NSO_teEl('sel-te-dir');
-  var L = EL ? +EL.value : NaN, dr;
-  if (!(L > 0) || !isFinite(L)) return null;
-  if (B.lead === 'dr') dr = ED && ED.value !== '' ? +ED.value : 0;
-  else dr = EA && EA.value !== '' ? L * Math.tan(+EA.value * Math.PI / 180) : 0;
-  if (!isFinite(dr)) dr = 0;
-  if (DIR && DIR.value === 'in' && dr > 0) dr = -dr;
-  var walls = NSO_teWallsVal(), t = end.wallMm, lean = end.leanDeg * Math.PI / 180;
-  var u0 = Math.max(0, -end.rimMm * Math.sin(lean)), v0 = walls === 'bore' ? -t : walls === 'outside' ? 0 : -t / 2;
-  var lip = NSO_teToMeridian(end, lean, [v0 + dr, u0 + L]);
-  var ER = NSO_teEl('inp-te-run'), run = ER && ER.value !== '' ? +ER.value : 0;
-  if (!(run > 0) || !isFinite(run)) run = 0;
-  return { kind: 'flare', m: m, end: end, C: end.center, a: end.axis, e1: end.frame.e1, e2: end.frame.e2, L: L, dr: dr, walls: walls,
-           h0: lip[1], Rl: Math.max(0.05, lip[0]), run: run, hRun: lip[1] + run };
+  if (!m || !B.read || !B.read.ok || !B.read.end || B.readVerb !== 'end' || NSO_teVerb() !== 'reducer') return null;
+  var end = B.read.end;
+  function num(id, d) { var el = NSO_teEl(id), v = el && el.value !== '' ? +el.value : NaN; return isFinite(v) ? v : d; }
+  var od2 = num('inp-te-od2', 2 * end.Ro), id2 = num('inp-te-id2', 2 * end.Ri), T = Math.max(0, num('inp-te-trans', 0)), run = Math.max(0, num('inp-te-run', 0));
+  var lean = end.leanDeg * Math.PI / 180, c = Math.cos(lean), sn = Math.sin(lean), u0 = Math.max(0, -end.rimMm * sn);
+  function hAt(r) { var v = (r - end.Ro - (u0 + T) * sn) / c; return -v * sn + (u0 + T) * c; }
+  var rO = Math.max(0.05, od2 / 2), rI = Math.max(0.05, id2 / 2), hO = hAt(rO), hI = hAt(rI), hT = Math.max(hO, hI), rMax = Math.max(end.Ro, rO);
+  return { kind: 'reducer', m: m, end: end, C: end.center, a: end.axis, e1: end.frame.e1, e2: end.frame.e2,
+           od2: od2, id2: id2, T: T, run: run, rO: rO, rI: rI, hO: hO, hI: hI, hT: hT, hR: hT + run,
+           Rlen: rMax + Math.max(2, 0.12 * rMax) };
 }
-// The END ring is up while there is a run, or while it is in hand (a drag
+// The R ring is up while there is a run, or while it is in hand (a drag
 // down to 0 keeps hold of it until the release).
 function NSO_teRunShown(g) {
   var B = NSO_teUI();
-  return !!g && g.kind === 'flare' && (g.run > 0 || !!(B.drag && B.drag.handle === 'end'));
+  return !!g && g.kind === 'reducer' && (g.run > 0 || !!(B.drag && B.drag.handle === 'r'));
+}
+// The Reducer's rings: [handle, height, radius, colour] - the Ø rings in the
+// waist's orange, the length rings in the end ring's amber.
+function NSO_teReducerRings(g) {
+  var q = [['od', g.hO, g.rO, TUBE_EDGE_WAIST_COLOR], ['id', g.hI, g.rI, TUBE_EDGE_WAIST_COLOR], ['t', g.hT, g.Rlen, TUBE_EDGE_RING_COLOR]];
+  if (NSO_teRunShown(g)) q.push(['r', g.hR, g.Rlen, TUBE_EDGE_RING_COLOR]);
+  return q;
 }
 // The handles' geometry, whichever verb has them.
-function NSO_teGeom() { return NSO_teNeckGeom() || NSO_teFlareGeom(); }
+function NSO_teGeom() { return NSO_teNeckGeom() || NSO_teReducerGeom(); }
 function NSO_teAxisPoint(g, h) { return [g.C[0] + h * g.a[0], g.C[1] + h * g.a[1], g.C[2] + h * g.a[2]]; }
 
 // The neck's handles: the outside circle at each end of the band ('a' the
@@ -379,8 +360,8 @@ function NSO_teScreen(m, raw) {
 }
 
 /* What is under the pointer: the nearest ring within TUBE_NECK_HIT_PX on
-   screen (Neck's 'a', 'b', 'waist'; Flare's 'lip' and, with a Run, 'end' -
-   the lip wins a tie), else for a neck 'band'
+   screen (Neck's 'a', 'b', 'waist'; the Reducer's 'od', 'id', 't' and, with
+   a Run, 'r' - the first listed wins a tie), else for a neck 'band'
    when the ray meets the tube between the end rings, else null.
    NSO_teNeckHitAt also gives the raw point taken hold of (on the ring, or
    where the ray meets the tube). */
@@ -389,8 +370,7 @@ function NSO_teNeckHitAt(clientX, clientY) {
   var B = NSO_teUI(), g = NSO_teGeom();
   if (!g || !B.ring || !NSO_teMeshOf(g.m)) return null;
   var best = null, bd = TUBE_NECK_HIT_PX;
-  var rings = g.kind === 'flare' ? [['lip', g.h0, g.Rl]].concat(NSO_teRunShown(g) ? [['end', g.hRun, g.Rl]] : [])
-                                 : [['a', g.ha, g.Rf], ['b', g.hb, g.Rf], ['waist', g.h0, g.Rw]];
+  var rings = g.kind === 'reducer' ? NSO_teReducerRings(g) : [['a', g.ha, g.Rf], ['b', g.hb, g.Rf], ['waist', g.h0, g.Rw]];
   rings.forEach(function (q) {
     var O = NSO_teAxisPoint(g, q[1]), prev = null, prevRaw = null;
     for (var i = 0; i <= 48; i++) {
@@ -410,7 +390,7 @@ function NSO_teNeckHitAt(clientX, clientY) {
       prev = P; prevRaw = raw;
     }
   });
-  if (best || g.kind === 'flare') return best;
+  if (best || g.kind === 'reducer') return best;
   // the band: the ray against the cylinder the tube's outside makes there
   var ray = NSO_teRawRay(g.m, clientX, clientY);
   if (!ray) return null;
@@ -461,8 +441,10 @@ function NSO_teHandleText(handle) {
   if (!g) return '';
   // the face the handle moves, first: "Bore Δr +3.0 mm"
   var face = NSO_TE_FACE_WORDS[g.walls] || 'Wall';
-  if (handle === 'lip') return face + ' Δr ' + NSO_teSigned(g.dr) + ' mm, Length ' + NSO_teFmtMm(g.L) + ' mm';
-  if (handle === 'end') return 'Run ' + NSO_teFmtMm(g.run) + ' mm';
+  if (handle === 'od') return 'New Ø' + g.od2.toFixed(2) + ' mm';
+  if (handle === 'id') return 'New bore Ø' + g.id2.toFixed(2) + ' mm';
+  if (handle === 't') return 'Transition ' + NSO_teFmtMm(g.T) + ' mm';
+  if (handle === 'r') return 'Run ' + NSO_teFmtMm(g.run) + ' mm';
   if (handle === 'waist') return face + ' Δr ' + NSO_teSigned(g.dr) + ' mm';
   if (handle === 'band') return 'Centre ' + NSO_teFmtMm(Math.max(0, -g.h0)) + ' mm in';
   return 'Length ' + NSO_teFmtMm(g.L) + ' mm';
@@ -499,23 +481,17 @@ function NSO_teNeckSet(v) {
   NSO_tePreview();
   return true;
 }
-/* Set the flare to { L, dr, run } (any left out stays): the Length and a
-   signed Δr in the fields - the fields are the readouts; Angle follows - and
-   Way back to Out, the sign being Δr's now; the Run (0 at the least) in its
-   own field, the rest left alone. The preview runs, as for typing. */
-function NSO_teFlareSet(v) {
-  var g = NSO_teFlareGeom();
-  if (!g) return false;
-  var ER = NSO_teEl('inp-te-run');
-  if (v.run != null && ER) ER.value = NSO_teFmtMm(Math.max(0, v.run));
-  if (v.L != null || v.dr != null) {
-    var L = Math.max(TUBE_NECK_FINE_MM, v.L != null ? v.L : g.L), dr = v.dr != null ? v.dr : g.dr;
-    var EL = NSO_teEl('inp-te-length'), ED = NSO_teEl('inp-te-dr'), DIR = NSO_teEl('sel-te-dir');
-    if (EL) EL.value = NSO_teFmtMm(L);
-    if (ED) ED.value = NSO_teFmtMm(dr);
-    if (DIR) DIR.value = 'out';
-    NSO_teLink('dr');
-  }
+/* Set the Reducer to { od2, id2, T, run } (any left out stays): the numbers
+   in their fields - the fields are the readouts - Ø to the hundredth, the
+   lengths 0 at the least. The preview runs, as for typing. */
+function NSO_teReducerSet(v) {
+  if (!NSO_teReducerGeom()) return false;
+  [['od2', 'inp-te-od2'], ['id2', 'inp-te-id2'], ['T', 'inp-te-trans'], ['run', 'inp-te-run']].forEach(function (q) {
+    var el = NSO_teEl(q[1]);
+    if (v[q[0]] == null || !el) return;
+    var x = Math.round(v[q[0]] * 100) / 100;
+    el.value = q[0] === 'od2' || q[0] === 'id2' ? x.toFixed(2) : NSO_teFmtMm(Math.max(0, x));
+  });
   NSO_tePreview();
   return true;
 }
@@ -524,24 +500,29 @@ function NSO_teFlareSet(v) {
 function NSO_teSnap(d, fine) { var st = fine ? TUBE_NECK_FINE_MM : TUBE_NECK_STEP_MM; return Math.round(d / st) * st; }
 
 // Which way Up goes along the axis: +1 when the axis runs up the screen.
-function NSO_teUpSign(g) {
-  var p = NSO_teScreen(g.m, NSO_teAxisPoint(g, g.h0)), q = NSO_teScreen(g.m, NSO_teAxisPoint(g, g.h0 + 1));
+function NSO_teUpSign(g, h) {
+  if (h == null) h = g.h0;
+  var p = NSO_teScreen(g.m, NSO_teAxisPoint(g, h)), q = NSO_teScreen(g.m, NSO_teAxisPoint(g, h + 1));
   if (Math.abs(q.y - p.y) > 1e-3) return q.y < p.y ? 1 : -1;
   var up = NSO_teRawToDisplay(g.m, [g.C[0] + g.a[0], g.C[1] + g.a[1], g.C[2] + g.a[2]])[1] - NSO_teRawToDisplay(g.m, g.C)[1];
   return up >= 0 ? 1 : -1;
 }
-// One arrow key: 'up' / 'down' move the band (a flare: its Length, or its
-// Run while the END ring is the last handle under the pointer or in hand),
-// 'left' / 'right' Δr.
+// One arrow key: 'up' / 'down' move the band (the Reducer: the length ring
+// last under the pointer or in hand, T before any; R only while it is up),
+// 'left' / 'right' Δr (the Reducer: the Ø ring last touched, OD before any).
 function NSO_teNeckKey(key, fine) {
   var g = NSO_teGeom(), B = NSO_teUI();
   if (!g) return false;
   var st = fine ? TUBE_NECK_FINE_MM : TUBE_NECK_KEY_MM;
-  if (g.kind === 'flare') {
-    var up = (key === 'up' ? 1 : -1) * NSO_teUpSign(g) * st;
-    if (key === 'left' || key === 'right') { NSO_teFlareSet({ dr: Math.round((g.dr + (key === 'right' ? st : -st)) * 100) / 100 }); NSO_teSayHandle('lip'); }
-    else if (B.keyHandle === 'end' && NSO_teRunShown(g)) { NSO_teFlareSet({ run: Math.round((g.run + up) * 100) / 100 }); NSO_teSayHandle('end'); }
-    else { NSO_teFlareSet({ L: Math.round((g.L + up) * 100) / 100 }); NSO_teSayHandle('lip'); }
+  if (g.kind === 'reducer') {
+    var up = (key === 'up' ? 1 : -1) * NSO_teUpSign(g, g.hT) * st, v = {}, h;
+    if (key === 'left' || key === 'right') {
+      h = B.keyDia === 'id' ? 'id' : 'od';
+      v[h + '2'] = g[h + '2'] + (key === 'right' ? st : -st);
+    } else if (B.keyLen === 'r' && NSO_teRunShown(g)) { h = 'r'; v.run = g.run + up; }
+    else { h = 't'; v.T = g.T + up; }
+    NSO_teReducerSet(v);
+    NSO_teSayHandle(h);
     return true;
   }
   if (key === 'left' || key === 'right') {
@@ -563,9 +544,10 @@ function NSO_teCursor(handle, grabbing) {
   NSO_TE_CURSORS.forEach(function (c) { cv.classList.remove(c); });
   var g = handle ? NSO_teGeom() : null;
   if (!g) return;
-  if (handle === 'band' || handle === 'lip') { cv.classList.add(grabbing ? 'te-cur-grabbing' : 'te-cur-grab'); return; }
-  var p = NSO_teScreen(g.m, NSO_teAxisPoint(g, g.h0)), q = NSO_teScreen(g.m, NSO_teAxisPoint(g, g.h0 + 1));
-  var ang = Math.atan2(-(q.y - p.y), q.x - p.x) * 180 / Math.PI + (handle === 'waist' ? 90 : 0);
+  if (handle === 'band') { cv.classList.add(grabbing ? 'te-cur-grabbing' : 'te-cur-grab'); return; }
+  var h0 = g.kind === 'reducer' ? g.hT : g.h0;
+  var p = NSO_teScreen(g.m, NSO_teAxisPoint(g, h0)), q = NSO_teScreen(g.m, NSO_teAxisPoint(g, h0 + 1));
+  var ang = Math.atan2(-(q.y - p.y), q.x - p.x) * 180 / Math.PI + (handle === 'waist' || handle === 'od' || handle === 'id' ? 90 : 0);
   var k = ((Math.round(ang / 45) % 4) + 4) % 4;      // 0 ew, 1 nesw, 2 ns, 3 nwse (screen y up)
   cv.classList.add(['te-cur-ew', 'te-cur-nesw', 'te-cur-ns', 'te-cur-nwse'][k]);
 }
@@ -573,7 +555,7 @@ function NSO_teHover(handle) {
   var B = NSO_teUI();
   if (B.hover === handle) return;
   B.hover = handle;
-  if (handle) B.keyHandle = handle;          // what a flare's Up / Down step next
+  NSO_teTouch(handle);                       // what the arrows step next
   NSO_teLight(handle);
   NSO_teCursor(handle, false);
   if (handle) NSO_teSayHandle(handle);
@@ -584,22 +566,35 @@ function NSO_teHover(handle) {
    the press (the camera does not move during it). The band's press is a
    click until it travels TUBE_NECK_SLOP_PX. */
 // The fields a drag writes, so Escape can put them back as they were.
-var NSO_TE_DRAG_FIELDS = ['inp-te-neck-length', 'inp-te-neck-dr', 'inp-te-length', 'inp-te-angle', 'inp-te-dr', 'sel-te-dir', 'inp-te-run'];
+var NSO_TE_DRAG_FIELDS = ['inp-te-neck-length', 'inp-te-neck-dr', 'inp-te-od2', 'inp-te-id2', 'inp-te-trans', 'inp-te-run'];
+// The handle touched last, by kind: what Up / Down (a length ring) and Left /
+// Right (a Ø ring) step next.
+function NSO_teTouch(handle) {
+  var B = NSO_teUI();
+  if (!handle) return;
+  B.keyHandle = handle;
+  if (handle === 't' || handle === 'r') B.keyLen = handle;
+  if (handle === 'od' || handle === 'id') B.keyDia = handle;
+}
 function NSO_teDragBegin(hit, ev) {
   var B = NSO_teUI(), g = NSO_teGeom(), ray = g && NSO_teRawRay(g.m, ev.clientX, ev.clientY), handle = hit.handle;
-  // the waist and the lip are read on the plane through the axis ("toward the axis")
-  var pl = ray && NSO_teDragPlane(g, ray, handle === 'waist' || handle === 'lip' ? null : hit.at), at = pl && NSO_teOnPlane(pl, ray);
+  // with no run, Shift + the T ring pulls one out of it: an R drag from the T plane
+  if (handle === 't' && ev.shiftKey && g && g.kind === 'reducer' && !(g.run > 0)) handle = 'r';
+  // the waist and the Ø rings are read on the plane through the axis ("toward the axis")
+  var radial = handle === 'waist' || handle === 'od' || handle === 'id';
+  var pl = ray && NSO_teDragPlane(g, ray, radial ? null : hit.at), at = pl && NSO_teOnPlane(pl, ray);
   if (!at) return false;
   var fields = {};
   NSO_TE_DRAG_FIELDS.forEach(function (id) { var el = NSO_teEl(id); if (el) fields[id] = el.value; });
   B.drag = { handle: handle, x0: ev.clientX, y0: ev.clientY, moved: handle !== 'band', plane: pl, at0: at,
-             h0: g.h0, L: g.L, dr: g.dr, run: g.run,
-             undo: { point: B.point ? B.point.slice() : null, fields: fields, lead: B.lead } };
-  B.keyHandle = handle;
+             h0: g.h0, L: g.L, dr: g.dr, od2: g.od2, id2: g.id2, T: g.T, run: g.run, side: NSO_teSide(g, hit.at),
+             undo: { point: B.point ? B.point.slice() : null, fields: fields } };
+  NSO_teTouch(handle);
   if (state.controls) state.controls.enabled = false;
   NSO_teLight(handle);
   NSO_teCursor(handle, true);
   NSO_teSayHandle(handle);
+  NSO_teShowCallout();
   return true;
 }
 function NSO_teDragMove(ev) {
@@ -612,8 +607,11 @@ function NSO_teDragMove(ev) {
   var ray = NSO_teRawRay(g.m, ev.clientX, ev.clientY), at = ray && NSO_teOnPlane(D.plane, ray);
   if (!at) return;
   var fine = !!ev.shiftKey, dh = NSO_teSnap(at.h - D.at0.h, fine), v;
-  if (D.handle === 'lip') v = { L: Math.round((D.L + dh) * 100) / 100, dr: Math.round((D.dr + NSO_teSnap(at.s - D.at0.s, fine)) * 100) / 100 };
-  else if (D.handle === 'end') v = { run: Math.max(0, Math.round((D.run + dh) * 100) / 100) };   // the run's far end: along the axis only
+  // the Reducer's: a Ø ring follows the pointer, so its Ø moves twice the radius
+  if (D.handle === 'od') v = { od2: D.od2 + NSO_teSnap(2 * (at.s - D.at0.s), fine) };
+  else if (D.handle === 'id') v = { id2: D.id2 + NSO_teSnap(2 * (at.s - D.at0.s), fine) };
+  else if (D.handle === 't') v = { T: Math.max(0, D.T + dh) };
+  else if (D.handle === 'r') v = { run: Math.max(0, D.run + dh) };       // the run's far end: along the axis only
   else if (D.handle === 'band') v = { h0: D.h0 + dh };
   // a step at an end: the ring off the end moves its own end, the end's stays
   else if (g.atEnd && (D.handle === 'a' || D.handle === 'b')) {
@@ -624,8 +622,9 @@ function NSO_teDragMove(ev) {
   else if (D.handle === 'b') v = { L: D.L + 2 * dh };
   else v = { dr: Math.round((D.dr + NSO_teSnap(at.s - D.at0.s, fine)) * 100) / 100 };
   var key = JSON.stringify(v);
-  if (key !== D.last) { D.last = key; if (D.handle === 'lip' || D.handle === 'end') NSO_teFlareSet(v); else NSO_teNeckSet(v); }
+  if (key !== D.last) { D.last = key; if (g.kind === 'reducer') NSO_teReducerSet(v); else NSO_teNeckSet(v); }
   NSO_teSayHandle(D.handle);
+  NSO_teShowCallout();
 }
 // End a drag: kept (a release), or put back where it began (Escape, or the
 // card going away). A band press that never travelled is the placing click.
@@ -636,15 +635,15 @@ function NSO_teDragEnd(keep, ev) {
   if (state.controls) state.controls.enabled = true;
   if (!keep && D.moved) {
     B.point = D.undo.point;
-    B.lead = D.undo.lead;
     Object.keys(D.undo.fields).forEach(function (id) { var el = NSO_teEl(id); if (el) el.value = D.undo.fields[id]; });
     NSO_tePreview();
   } else if (keep && !D.moved && ev) {
     NSO_tePlaceAt(D.x0, D.y0);
   }
-  // the END ring let go of at Run 0 goes: there is no run's end to hold
+  // the measure goes with the release; the R ring let go of at Run 0 goes too
+  NSO_teHideCallout();
   var m = NSO_teModel();
-  if (D.handle === 'end' && m && B.read && B.read.ok && B.read.end) NSO_teSetRing(m, B.read.end);
+  if (D.handle === 'r' && m && B.read && B.read.ok && B.read.end) NSO_teSetRing(m, B.read.end);
   B.hover = null;
   NSO_teLight(null);
   NSO_teCursor(null);
@@ -671,11 +670,88 @@ function NSO_teFollow() {
   var B = NSO_teUI(), m = NSO_teModel(), mesh = m && NSO_teMeshOf(m);
   if (!mesh) return;
   mesh.updateMatrixWorld(true);
-  [B.ghost, B.ring].forEach(function (o) {
+  [B.ghost, B.ring, B.dim].forEach(function (o) {
     if (!o) return;
     o.matrix.copy(mesh.matrixWorld);
     o.matrixWorldNeedsUpdate = true;
   });
+  if (B.callout && !B.callout.hidden) NSO_tePlaceCallout();
+}
+
+/* ------------------------------------------- the Reducer's on-piece measure */
+
+// The unit radial direction (raw) at a point near the axis: which side of the
+// tube a handle was taken hold of, so its measure is drawn there.
+function NSO_teSide(g, p) {
+  if (!p) return g.e1;
+  var w = [p[0] - g.C[0], p[1] - g.C[1], p[2] - g.C[2]], h = w[0] * g.a[0] + w[1] * g.a[1] + w[2] * g.a[2];
+  var e = [w[0] - h * g.a[0], w[1] - h * g.a[1], w[2] - h * g.a[2]], L = Math.hypot(e[0], e[1], e[2]);
+  return L > 1e-9 ? [e[0] / L, e[1] / L, e[2] / L] : g.e1;
+}
+function NSO_teAt(g, h, r, dir) { var O = NSO_teAxisPoint(g, h); return [O[0] + r * dir[0], O[1] + r * dir[1], O[2] + r * dir[2]]; }
+/* While a Reducer handle is in hand: MEASURE's chip (.measure-label) on the
+   piece - the ring's Ø on the OD / ID ring where it was taken hold of, or for
+   T and R a dimension line along the axis between the two planes (the end's
+   and the transition's end; that and the run's end), ticked at both, its
+   length on the chip at its middle. Drawn from the handles' own geometry,
+   so it follows the handle; NSO_teHideCallout takes it away. */
+function NSO_teShowCallout() {
+  var B = NSO_teUI(), D = B.drag, g = NSO_teReducerGeom(), m = g && g.m;
+  if (!D || !g || typeof THREE === 'undefined' || !state.scene || typeof document === 'undefined') { NSO_teHideCallout(); return; }
+  var dir = D.side || g.e1, text, anchor, from = null, to = null, R = g.Rlen + Math.max(1, 0.06 * g.Rlen);
+  if (D.handle === 'od' || D.handle === 'id') {
+    var od = D.handle === 'od';
+    text = 'Ø' + (od ? g.od2 : g.id2).toFixed(2);
+    anchor = NSO_teAt(g, od ? g.hO : g.hI, od ? g.rO : g.rI, dir);
+  } else if (D.handle === 't' || D.handle === 'r') {
+    from = D.handle === 't' ? 0 : g.hT; to = D.handle === 't' ? g.hT : g.hR;
+    text = NSO_teFmtMm(D.handle === 't' ? g.T : g.run) + ' mm';
+    anchor = NSO_teAt(g, (from + to) / 2, R, dir);
+  } else { NSO_teHideCallout(); return; }
+  // the dimension line: along the axis at R, ticks reaching in to the length rings
+  if (B.dim) { if (B.dim.parent) B.dim.parent.remove(B.dim); B.dim.geometry.dispose(); B.dim.material.dispose(); B.dim = null; }
+  if (from != null) {
+    var tick = R - g.Rlen, pts = [NSO_teAt(g, from, R, dir), NSO_teAt(g, to, R, dir),
+                                  NSO_teAt(g, from, R - tick, dir), NSO_teAt(g, from, R + tick, dir),
+                                  NSO_teAt(g, to, R - tick, dir), NSO_teAt(g, to, R + tick, dir)].map(function (p) { return NSO_teRawToDisplay(m, p); });
+    var geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pts.flat()), 3));
+    var line = new THREE.LineSegments(geo, new THREE.LineBasicMaterial({ color: TUBE_EDGE_DIM_COLOR, transparent: true, depthTest: false, depthWrite: false }));
+    line.name = 'tubeEdgeDim'; line.renderOrder = TUBE_EDGE_RENDER_ORDER; line.userData.skipXray = true;
+    line.userData.teDim = D.handle; line.userData.from = from; line.userData.to = to;
+    line.raycast = function () {}; line.frustumCulled = false; line.matrixAutoUpdate = false;
+    nsoHelpers.attach(state.scene, line, 'tube-edge');
+    B.dim = line;
+  }
+  var chip = B.callout;
+  if (!chip || !chip.isConnected) {
+    var home = document.querySelector('.viewport-section') || document.body;
+    chip = document.createElement('div');
+    chip.id = 'te-callout';
+    chip.className = 'measure-label te-callout';
+    home.appendChild(chip);
+    B.callout = chip;
+  }
+  chip.textContent = text;
+  chip.dataset.handle = D.handle;
+  B.calloutAt = anchor;
+  chip.hidden = false;
+  NSO_teFollow();
+}
+// The chip at its anchor's place on the screen, in its host's coordinates.
+function NSO_tePlaceCallout() {
+  var B = NSO_teUI(), chip = B.callout, m = NSO_teModel();
+  if (!chip || !B.calloutAt || !m || !NSO_teMeshOf(m) || !state.renderer) return;
+  var P = NSO_teScreen(m, B.calloutAt), host = chip.offsetParent || chip.parentNode, h = host.getBoundingClientRect();
+  chip.style.left = Math.round(P.x - h.left) + 'px';
+  chip.style.top = Math.round(P.y - h.top) + 'px';
+  if (P.z > 1) chip.hidden = true;            // behind the camera
+}
+function NSO_teHideCallout() {
+  var B = NSO_teUI();
+  if (B.dim) { if (B.dim.parent) B.dim.parent.remove(B.dim); B.dim.geometry.dispose(); B.dim.material.dispose(); B.dim = null; }
+  if (B.callout) { B.callout.hidden = true; B.callout.textContent = ''; }
+  B.calloutAt = null;
 }
 
 /* ---------------------------------------------------------------- the card */
@@ -686,19 +762,19 @@ function NSO_teReadout(text, bad) {
   NSO_teUI().said = { text: text, bad: !!bad };     // what a handle's hover puts back
 }
 function NSO_teSyncRows() {
-  var verb = (NSO_teEl('sel-te-verb') || {}).value || 'flare';
-  ['te-flare-rows'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'flare'; });
+  var verb = (NSO_teEl('sel-te-verb') || {}).value || 'reducer';
+  ['te-reducer-rows'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'reducer'; });
   ['te-roll-rows'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'roll'; });
   ['te-neck-rows'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'neck'; });
-  ['te-dir-row'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb === 'neck'; });
-  ['te-walls-row'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb === 'roll'; });
+  ['te-dir-row'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'roll'; });
+  ['te-walls-row'].forEach(function (id) { var el = NSO_teEl(id); if (el) el.hidden = verb !== 'neck'; });
 }
 function NSO_teSyncButtons() {
   var B = NSO_teUI(), go = NSO_teEl('btn-te-go');
   if (go) go.disabled = !(B.result && B.result.ok);
 }
 
-function NSO_teVerb() { return (NSO_teEl('sel-te-verb') || {}).value || 'flare'; }
+function NSO_teVerb() { return (NSO_teEl('sel-te-verb') || {}).value || 'reducer'; }
 
 // Read the selected piece (the end nearest B.point, else the top end; for a
 // neck, the tube's axis) and fill the card's blank fields from the wall.
@@ -707,7 +783,7 @@ function NSO_teLoad() {
   if (!m || m.id !== B.modelId) B.point = null;
   B.modelId = m ? m.id : null; B.soup = m ? m.rawTris : null; B.result = null; B.key = '';
   B.readVerb = neck ? 'neck' : 'end';
-  if (!m) { B.read = null; NSO_teReadout('Select a tube to flare, roll or neck.', true); NSO_teClear(); NSO_teSyncButtons(); return; }
+  if (!m) { B.read = null; NSO_teReadout('Select a tube to reduce, expand, roll or neck.', true); NSO_teClear(); NSO_teSyncButtons(); return; }
   var rd;
   try { rd = neck ? NSO_tubeNeckRead(m.rawTris) : NSO_tubeEdgeRead(m.rawTris, { point: B.point }); }
   catch (err) { rd = { ok: false, reason: (err && err.message) || String(err) }; }
@@ -725,14 +801,20 @@ function NSO_teLoad() {
     return;
   }
   {
-    // blank fields take defaults from the wall; typed ones are kept
-    var t = rd.end.wallMm;
-    var L = NSO_teEl('inp-te-length'), A = NSO_teEl('inp-te-angle'), R = NSO_teEl('inp-te-radius'), RA = NSO_teEl('inp-te-roll-angle');
-    if (L && L.value === '') L.value = String(Math.max(3, Math.round(4 * t)));
-    if (A && A.value === '') A.value = '30';
+    // blank fields take defaults from the wall; typed ones are kept. The new
+    // Ø are the end's own + 4 (a wall-held 2 mm flare) whenever the end's Ø
+    // is not the one they were typed for - another tube, or this one after a
+    // Set - and kept otherwise
+    var t = rd.end.wallMm, e = rd.end, dfor = e.Ro.toFixed(4) + '/' + e.Ri.toFixed(4);
+    var OD = NSO_teEl('inp-te-od2'), ID = NSO_teEl('inp-te-id2'), TR = NSO_teEl('inp-te-trans'), RU = NSO_teEl('inp-te-run');
+    var R = NSO_teEl('inp-te-radius'), RA = NSO_teEl('inp-te-roll-angle');
+    if (OD && (OD.value === '' || B.diaFor !== dfor)) OD.value = (2 * e.Ro + 4).toFixed(2);
+    if (ID && (ID.value === '' || B.diaFor !== dfor)) ID.value = (2 * e.Ri + 4).toFixed(2);
+    B.diaFor = dfor;
+    if (TR && TR.value === '') TR.value = '10';
+    if (RU && RU.value === '') RU.value = '0';
     if (R && R.value === '') R.value = String(Math.max(1, Math.round(3 * t) / 2));
     if (RA && RA.value === '') RA.value = '180';
-    NSO_teLink();
   }
   NSO_teSetRing(m, rd.end);
   NSO_tePreview();
@@ -779,7 +861,7 @@ function NSO_teClose() {
   var B = NSO_teUI(), panel = NSO_teEl('te-panel'), btn = NSO_teEl('btn-tube-edge');
   if (B.drag) NSO_teDragEnd(false);
   NSO_teHover(null);
-  B.open = false; B.result = null; B.key = ''; B.keyHandle = null;
+  B.open = false; B.result = null; B.key = ''; B.keyHandle = null; B.keyLen = null; B.keyDia = null;
   if (panel) panel.hidden = true;
   if (btn) { btn.setAttribute('aria-expanded', 'false'); btn.classList.remove('is-on'); }
   NSO_teClear();
@@ -816,7 +898,7 @@ function NSO_teSelectedModel(opts) {
   var painted = (typeof nsoMaskCount === 'function') ? nsoMaskCount(m) : 0;
   if (painted > 0) {
     if (typeof setStatus === 'function') {
-      setStatus('Tube edge stood down - ' + painted + ' painted face(s); it rebuilds the wall and re-seats the piece. Clear paint to flare, roll or neck.', true);
+      setStatus('Tube edge stood down - ' + painted + ' painted face(s); it rebuilds the wall and re-seats the piece. Clear paint to reduce, roll or neck.', true);
     }
     return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
   }
@@ -873,7 +955,7 @@ if (typeof document !== 'undefined') {
       NSO_teDragEnd(ev.type === 'pointerup', ev);
       ev.stopImmediatePropagation();
     }
-    // Arrows and Escape while the card is open on Neck or Flare (Rotate's
+    // Arrows and Escape while the card is open on Neck or the Reducer (Rotate's
     // rails convention): text fields keep their own arrows and Escape.
     var NECK_KEYS = { ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' };
     function onKey(ev) {
@@ -922,17 +1004,13 @@ if (typeof document !== 'undefined') {
         // them starts from the default (the top end, the middle of the tube)
         var B = NSO_teUI();
         if (B.readVerb && B.readVerb !== (NSO_teVerb() === 'neck' ? 'neck' : 'end')) B.point = null;
-        B.keyHandle = null;
+        B.keyHandle = null; B.keyLen = null; B.keyDia = null;
         NSO_teSyncRows(); NSO_tePreview();
       });
-      ['sel-te-dir', 'sel-te-walls', 'sel-te-profile', 'inp-te-run', 'inp-te-radius', 'inp-te-roll-angle',
+      ['sel-te-dir', 'sel-te-walls', 'sel-te-profile', 'inp-te-od2', 'inp-te-id2', 'inp-te-trans', 'inp-te-run', 'inp-te-radius', 'inp-te-roll-angle',
        'inp-te-neck-length', 'inp-te-neck-dr', 'sel-te-neck-profile'].forEach(function (id) {
         var el = NSO_teEl(id);
         if (el) el.addEventListener('change', NSO_tePreview);
-      });
-      [['inp-te-length', null], ['inp-te-angle', 'angle'], ['inp-te-dr', 'dr']].forEach(function (p) {
-        var el = NSO_teEl(p[0]);
-        if (el) el.addEventListener('change', function () { NSO_teLink(p[1]); NSO_tePreview(); });
       });
       // Capture on window: ahead of app-core's canvas handler, so a click that
       // picks the end does not also start a drag or a selection.
