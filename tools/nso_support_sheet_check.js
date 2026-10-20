@@ -2,9 +2,10 @@
 // The interface SHEET under a support tree (nso_support_interface.js sheet(),
 // built by nso_support_gridpack.js parts({ interface: true }) - the Supports
 // card's build), held to the Bambu Studio references: clamp_body sliced with
-// tree supports, and the top_clip_x2 coupon (baselineV2, Bambu's tree in its
-// default style: tip caps, two interface layers on them, shared pads), 0.2 mm
-// layers (docs/SUPPORT-INTERFACE.md).
+// tree supports, and the top_clip_x2 coupon (baselineV2 and
+// thinwall_sideXside.gcode.3mf: Bambu's tree, tip caps, two transition and two
+// interface layers on them, each one serpentine, shared pads), 0.2 mm layers
+// (docs/SUPPORT-INTERFACE.md).
 //
 //   node tools/nso_support_sheet_check.js            exit 0 = every gate held
 //   node tools/nso_support_sheet_check.js --export   also writes the clamp with
@@ -16,25 +17,30 @@
 //
 // PER AREA
 //   1. THE STACK. Every area with a tip that meets a ceiling carries a sheet:
-//      2 interface layers and NO transition layer, each one 0.2 mm layer,
-//      its top GAP under the ceiling.
+//      T1, T2, I1, I2, each one 0.2 mm layer, T1 on z_cap, the top GAP under
+//      the ceiling.
 //   1b. THE CAPS. Every tip under the sheet ends in a flat cap 2.5 - 4 mm
 //      across (narrower only where the tips stand closer than that: a cap
 //      stops CAP_PART short of its neighbour, never over it), every cap's
-//      nearest neighbour at most 2 mm away edge to edge, the cap's flat top
-//      exactly the interface's underside (0.01 mm into it).
-//   1c. THE LINES' BOXES: every line of the sheet is one straight box (two
-//      ends, nothing between, 8 vertices on its own) and none is shorter than
-//      2 mm.
+//      nearest neighbour at most 2 mm away edge to edge, every cap's flat top
+//      exactly z_cap, T1's underside - measured on the parts built.
+//   1c. A LOOP AND ONE SERPENTINE A LAYER: a closed rectangle round the
+//      footprint, then the serpentine inside it, its line ends and turns on
+//      the loop (thinwall_sideXside: every layer opens with its 14.3 x 22.2
+//      loop), no line under 2 mm, T2 and I2 T1's; each layer's own
+//      cross-section at mid-layer ONE connected region whose outer boundary
+//      is a closed rectangle (+-0.1 mm) one bead wide.
+//   1d. NSO's slicer prints every layer in closed paths, none under 2 mm
+//      (its passes over the lines reported: it has no thin-wall mode).
 //   2. THE LINES, read off the welded support itself (a horizontal slice at
-//      each layer's middle): one direction per layer, each across the one
-//      below (90 deg), line pitch 0.84 +- 0.05 mm.
+//      each layer's middle): one direction per layer - T1, T2, I2 along one
+//      way, I1 across them (90 deg) - line pitch 0.84 +- 0.05 mm.
 //   3. THE GAP. The true minimum distance from the interface zone (the sheet,
 //      every tip, 3 mm under the lowest contact) to the piece is 0.18 mm -
 //      nso_support_interface.js's minDistance (the sampler finish() measures
 //      with) and the exact triangle-to-triangle distance beside it.
-//   4. NO TIP ABOVE THE SHEET'S UNDERSIDE: no part of the tree but the sheet
-//      stands above the sheet's underside under any of its lines.
+//   4. NOTHING BUT THE SHEET ABOVE z_cap: no part of the build but the sheet
+//      between z_cap and the sheet's top under any of its paths.
 //   5. Closed, manifold, no degenerate triangle (tools/mesh_validate.py), no
 //      piercing pair in the sheet (NSO_Repair.js's count, = the checker's);
 //      no sheet left standing alone. The trees and feet below are held to
@@ -57,6 +63,7 @@ const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'tools', 'support-interface-out');
 const { readSTL, writeSTL, loadRepairModule } = require('./nso_stl_io.js');
 const { csgContext } = require('./nso_csg_node.js');
+const SL = require('../nso_slicer.js');
 const EXPORT = process.argv.includes('--export');
 
 const ctx = {
@@ -71,7 +78,7 @@ for (const f of ['nso_thickness.js', 'nso_support_beacons.js', 'nso_support_aim.
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
 const SA = ctx.NSO_SupportAim, ST = ctx.NSO_SupportTree, GP = ctx.NSO_SupportGridpack, SI = ctx.NSO_SupportInterface;
-const GAP = SI.DEFAULTS.gapMm, LAYER = SI.DEFAULTS.layerMm, PITCH = SI.SHEET.pitchMm, EPS = SI.DEFAULTS.epsMm;
+const GAP = SI.DEFAULTS.gapMm, LAYER = SI.DEFAULTS.layerMm, PITCH = SI.SHEET.pitchMm;
 const CARD = { skipList: [], angleDeg: 60, occluders: [], style: 'tree', restOnModel: false, sideMm: 1.2 };
 
 let pass = 0, fail = 0;
@@ -127,10 +134,10 @@ function sliceAt(soup, z) {
   }
   return segs;
 }
-/* is (x, y) under one of the level's lines (any layer)? a coarse grid of segments */
-function lineIndex(level) {
+/* is (x, y) under one of the level's lines (any layer; which: only that path of each - 0 the loop)? a coarse grid of segments */
+function lineIndex(level, which) {
   const cell = 2, g = new Map();
-  for (const Ly of level.layers) for (const p of Ly.paths) for (let k = 0; k + 1 < p.length; k++) {
+  for (const Ly of level.layers) for (const p of (which == null ? Ly.paths : [Ly.paths[which]])) for (let k = 0; k + 1 < p.length; k++) {
     const a = p[k], b = p[k + 1];
     for (let i = Math.floor(Math.min(a[0], b[0]) / cell) - 1; i <= Math.floor(Math.max(a[0], b[0]) / cell) + 1; i++)
       for (let j = Math.floor(Math.min(a[1], b[1]) / cell) - 1; j <= Math.floor(Math.max(a[1], b[1]) / cell) + 1; j++) {
@@ -145,6 +152,70 @@ function lineIndex(level) {
     return t >= -1e-9 && t <= L + 1e-9 && Math.abs((p[0] - a[0]) * ey - (p[1] - a[1]) * ex) / L <= r;
   };
   return (x, y, r) => (g.get(Math.floor(x / cell) + ',' + Math.floor(y / cell)) || []).some(s => inStrip([x, y], s[0], s[1], r));
+}
+
+/* a slice's segments joined into loops: the closed outlines (their points),
+   and how many chains were left open */
+function loopsOf(segs) {
+  const key = p => Math.round(p[0] / 1e-5) + ',' + Math.round(p[1] / 1e-5), adj = new Map();
+  segs.forEach((sg, i) => [key(sg[0]), key(sg[1])].forEach(k => { if (!adj.has(k)) adj.set(k, []); adj.get(k).push(i); }));
+  const used = new Uint8Array(segs.length), polys = [];
+  let open = 0;
+  for (let i = 0; i < segs.length; i++) {
+    if (used[i]) continue;
+    used[i] = 1;
+    const start = key(segs[i][0]), pts = [segs[i][0]];
+    let at = key(segs[i][1]), pt = segs[i][1], closed = false;
+    for (;;) {
+      if (at === start) { closed = true; break; }
+      pts.push(pt);
+      const nx = (adj.get(at) || []).find(j => !used[j]);
+      if (nx == null) break;
+      used[nx] = 1;
+      const fwd = key(segs[nx][0]) === at;
+      pt = fwd ? segs[nx][1] : segs[nx][0]; at = key(pt);
+    }
+    if (closed) polys.push(pts); else open++;
+  }
+  return { loops: polys.length, open, polys };
+}
+const areaOf = P => { let a = 0; for (let i = 0; i < P.length; i++) { const p = P[i], q = P[(i + 1) % P.length]; a += p[0] * q[1] - q[0] * p[1]; } return a / 2; };
+/* a layer's section read in the sheet's frame (A at deg): ONE region - one
+   outer outline, its holes the channels between the lines - and the outer
+   outline a closed rectangle, size x size2 + a bead (+-0.1 mm), every hole
+   at least a bead in from it and on every side one exactly a bead in: the
+   loop, one bead wide */
+function rectRegion(sec, deg, size, width) {
+  const th = deg * Math.PI / 180, d = [Math.cos(th), Math.sin(th)], n = [-d[1], d[0]];
+  const uv = P => P.map(p => [p[0] * n[0] + p[1] * n[1], p[0] * d[0] + p[1] * d[1]]);
+  const box = Q => Q.reduce((b, q) => [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[0]), Math.max(b[3], q[1])], [Infinity, Infinity, -Infinity, -Infinity]);
+  if (!sec.polys.length) return { ok: false, why: 'no section' };
+  const sorted = sec.polys.slice().sort((a, b) => Math.abs(areaOf(b)) - Math.abs(areaOf(a)));
+  const outer = uv(sorted[0]), holes = sorted.slice(1).map(uv), ob = box(outer);
+  const outers = sec.polys.filter(P => Math.sign(areaOf(P)) === Math.sign(areaOf(sorted[0]))).length;
+  const offRect = Math.max(...outer.map(q => Math.min(Math.abs(q[0] - ob[0]), Math.abs(q[0] - ob[2]), Math.abs(q[1] - ob[1]), Math.abs(q[1] - ob[3]))));
+  const dims = [ob[2] - ob[0], ob[3] - ob[1]];
+  const insets = [0, 1, 2, 3].map(k => Math.min(...holes.map(h => { const hb = box(h); return k < 2 ? hb[k] - ob[k] : ob[k] - hb[k]; })));
+  const ok = outers === 1 && sec.open === 0 && offRect <= 0.1 && Math.abs(dims[0] - size[0] - width) <= 0.1 && Math.abs(dims[1] - size[1] - width) <= 0.1 &&
+    holes.length > 0 && insets.every(x => Math.abs(x - width) <= 0.02);
+  return { ok, outers, holes: holes.length, offRect, dims, insets };
+}
+/* one sheet layer's soup through NSO's own slicer: its slice layers, its
+   extrusion paths, the shortest, and the passes over the layer's centreline */
+let SLW = null;
+function nsoLayer(soup, centreMm) {
+  const o = Object.assign(SL.defaultsFor(0.4), { layerMm: LAYER, firstLayerMm: LAYER, dropToPlate: false });
+  const r = SL.sliceObjects([{ soup }], o, SLW);
+  const Ls = r.ok ? r.objects[0].layers : [];
+  let paths = 0, closed = 0, total = 0, shortest = Infinity;
+  Ls.forEach(ly => (ly.paths || []).forEach(pa => {
+    if (pa.closed) closed++;
+    const q = pa.pts; let l = 0;
+    for (let i = 0; i + 1 < q.length; i++) l += Math.hypot(q[i + 1][0] - q[i][0], q[i + 1][1] - q[i][1]);
+    if (pa.closed && q.length > 1) l += Math.hypot(q[0][0] - q[q.length - 1][0], q[0][1] - q[q.length - 1][1]);
+    paths++; total += l; shortest = Math.min(shortest, l);
+  }));
+  return { layers: Ls.length, paths, closed, totalMm: total, shortest, passes: centreMm > 0 ? total / centreMm : 0 };
 }
 
 /* the lines of one layer, read off a slice: direction, pitch */
@@ -282,23 +353,6 @@ function band(A, z0, z1) {
 /* the surface of A in the foot layer */
 function feetOf(A, z) { return band(A, -Infinity, z); }
 
-/* the connected pieces of a soup (shared corners), and how many of them are
-   one box: 8 distinct corners */
-function boxesIn(soup) {
-  const key = i => soup[i] + ',' + soup[i + 1] + ',' + soup[i + 2], par = new Map();
-  const find = x => { while (par.get(x) !== x) { par.set(x, par.get(par.get(x))); x = par.get(x); } return x; };
-  for (let t = 0; t < soup.length; t += 9) {
-    const ks = [key(t), key(t + 3), key(t + 6)];
-    ks.forEach(k => { if (!par.has(k)) par.set(k, k); });
-    const a = find(ks[0]); ks.slice(1).forEach(k => { const b = find(k); if (a !== b) par.set(b, a); });
-  }
-  const size = new Map();
-  for (const k of par.keys()) { const r = find(k); size.set(r, (size.get(r) || 0) + 1); }
-  let boxes = 0, other = 0;
-  size.forEach(n => { if (n === 8) boxes++; else other++; });
-  return { boxes, other };
-}
-
 const REPAIR = loadRepairModule(path.join(ROOT, 'NSO_Repair.js'));
 /* piercing / coplanar pairs (NSO_Repair.js, welded at 1e-6 as the checker
    below); inSheet: piercing pairs with a triangle reaching above zSheet;
@@ -324,6 +378,7 @@ fs.mkdirSync(OUT, { recursive: true });
 (async () => {
   const csg = csgContext();
   ctx.NSO_unionSoups = csg.NSO_unionSoups; ctx.NSO_subtractSoups = csg.NSO_subtractSoups;
+  SLW = await SL.loadKernel({});
   const exportObjects = [];
   const report = [];
 
@@ -379,9 +434,9 @@ fs.mkdirSync(OUT, { recursive: true });
         const roles = L.layers.map(x => x.role).join(',');
         const hs = L.layers.map(x => x.z1 - x.z0);
         const ceiling = Math.min(...L.tips.map(i => sh.tips[i].zTop)) + GAP;
-        check(`${label}, sheet at ${f3(L.zTop)}: 2 interface layers and no transition layer, each one ${LAYER} mm layer, the top ${GAP} mm under the ceiling`,
-          roles === 'interface,interface' && hs.every(h => Math.abs(h - LAYER) < 1e-9) &&
-          Math.abs(L.layers[1].z1 - L.zTop) < 1e-6 && Math.abs(L.layers[0].z0 - L.zBase) < 1e-6,
+        check(`${label}, sheet at ${f3(L.zTop)}: transition, transition, interface, interface - each one ${LAYER} mm layer, T1 on z_cap, the top ${GAP} mm under the ceiling`,
+          roles === 'transition,transition,interface,interface' && hs.every(h => Math.abs(h - LAYER) < 1e-9) &&
+          Math.abs(L.layers[3].z1 - L.zTop) < 1e-6 && Math.abs(L.layers[0].z0 - L.zBase) < 1e-6 && Math.abs(L.zCap - L.zBase) < 1e-9,
           `${L.tips.length} tips, layers ${L.layers.map(x => f3(x.z0) + '-' + f3(x.z1)).join(' | ')}, ceiling ${f3(ceiling)}`);
         /* 1b. the caps */
         const CAP = SI.CAP, tipsHere = L.tips.map(i => sh.tips[i]), carried = tipsHere.filter(t => t.carried !== false);
@@ -422,45 +477,75 @@ fs.mkdirSync(OUT, { recursive: true });
         }); });
         const builtCaps = caps.map(c => { const m = tops.filter(q => Math.hypot(q.c[0] - c.c[0], q.c[1] - c.c[1]) < 0.02); return m.length === 1 ? m[0].into : null; });
         const found = builtCaps.filter(d => d != null), others = tops.length - found.length;
-        check(`${label}, sheet at ${f3(L.zTop)}: the interface's underside lies exactly on the caps (their flat tops ${SI.CAP.intoMm} mm into it), measured on the parts built`,
-          found.length === caps.length && found.every(d => Math.abs(d - SI.CAP.intoMm) < 2e-5),
-          `${found.length} of ${caps.length} caps found by their tops, ${found.length ? f4(Math.min(...found)) + ' - ' + f4(Math.max(...found)) : '-'} mm into I1 (its underside at ${f4(zI1)}); ` +
-          `${others} other part(s) end within 0.05 mm of it (cut tips ${f4(SI.DEFAULTS.epsMm)} into it, and the like)`);
-        /* 1c. one box a line, none under 2 mm - in the plan and in the parts built */
+        check(`${label}, sheet at ${f3(L.zTop)}: every cap ends at z_cap, all at one level, and T1 lies on that level field - measured on the parts built`,
+          found.length === caps.length && found.every(d => Math.abs(d) < 2e-5) && Math.abs(zI1 - L.zCap) < 2e-5,
+          `${found.length} of ${caps.length} caps found by their tops, ${found.length ? f4(Math.min(...found)) + ' - ' + f4(Math.max(...found)) : '-'} mm off T1's underside (z_cap ${f4(L.zCap)}, T1 from ${f4(zI1)}); ` +
+          `${others} other part(s) end within 0.05 mm of it (capless tips, cut flat at z_cap)`);
+        /* 1c. A LOOP AND ONE SERPENTINE A LAYER: in the plan two paths - a
+           closed rectangle round the footprint, then the serpentine inside
+           it, every vertex of it (its line ends, its turns) on the loop;
+           no line under 2 mm; T2 and I2 T1's, I1's loop T1's; and in the
+           parts built, each layer's own cross-section at its middle ONE
+           connected region whose outer boundary is a closed rectangle
+           (+-0.1 mm) one bead wide */
         const sheetEntry = tp.trunks.find(tr => tr.sheet === L.id);
-        const boxCounts = sheetEntry ? sheetEntry.parts.map(pt => boxesIn(pt.soup)) : [];
-        check(`${label}, sheet at ${f3(L.zTop)}: every line one straight box (8 vertices, two ends), none shorter than ${SI.SHEET.minRunMm} mm`,
-          L.layers.every(x => x.paths.every(q => q.length === 2 && Math.hypot(q[1][0] - q[0][0], q[1][1] - q[0][1]) >= SI.SHEET.minRunMm - 1e-9)) &&
-          boxCounts.length === L.layers.length && boxCounts.every((b, k) => b.boxes === L.layers[k].lines && b.other === 0),
-          L.layers.map((x, k) => `${x.lines} lines, ${boxCounts[k] ? boxCounts[k].boxes : '-'} boxes, shortest ${f3(x.shortestMm)} mm`).join(' | '));
+        const same = (a, b) => a.length === b.length && a.every((q, k) => Math.hypot(q[0] - b[k][0], q[1] - b[k][1]) < 1e-9);
+        const onLoop = (q, loop) => { for (let k = 0; k + 1 < loop.length; k++) { const a = loop[k], b = loop[k + 1], ex = b[0] - a[0], ey = b[1] - a[1], ll = ex * ex + ey * ey;
+          const f = Math.max(0, Math.min(1, ((q[0] - a[0]) * ex + (q[1] - a[1]) * ey) / ll)); if (Math.hypot(q[0] - a[0] - f * ex, q[1] - a[1] - f * ey) < 1e-6) return true; } return false; };
+        const shapeOk = x => x.paths.length === 2 && same([x.paths[0][0]], [x.paths[0][x.paths[0].length - 1]]) && x.paths[1].every(q => onLoop(q, x.paths[0])) &&
+          x.paths[1].length === 2 * x.lines && x.shortestMm >= SI.SHEET.minRunMm - 1e-9;
+        check(`${label}, sheet at ${f3(L.zTop)}: every layer a closed loop round the footprint and ONE serpentine inside it, its line ends and turns on the loop, no line under ${SI.SHEET.minRunMm} mm; T2 and I2 T1's, I1 in T1's loop`,
+          L.layers.every(shapeOk) && same(L.layers[1].paths[0], L.layers[0].paths[0]) && same(L.layers[2].paths[0], L.layers[0].paths[0]) &&
+          same(L.layers[3].paths[0], L.layers[0].paths[0]) && same(L.layers[1].paths[1], L.layers[0].paths[1]) && same(L.layers[3].paths[1], L.layers[0].paths[1]),
+          `loop ${L.layers[0].loopMm.map(f3).join(' x ')} mm; ` + L.layers.map(x => `${x.role[0].toUpperCase()}: ${x.lines} lines of ${f3(x.shortestMm)} mm, ${x.turns} turns on the loop`).join(' | '));
+        const regions = sheetEntry ? sheetEntry.parts.map((pt, k) => rectRegion(loopsOf(sliceAt(pt.soup, (L.layers[k].z0 + L.layers[k].z1) / 2)), L.lines.angleDeg, L.layers[0].loopMm, sh.widthMm)) : [];
+        check(`${label}, sheet at ${f3(L.zTop)}: each layer's cross-section at mid-layer is ONE connected region, its outer boundary a closed rectangle (+-0.1 mm) one bead wide`,
+          regions.length === L.layers.length && regions.every(r => r.ok),
+          regions.map((r, k) => r.dims ? `${L.layers[k].role[0].toUpperCase()}${k + 1}: ${r.outers} region, ${r.holes} holes, outline ${r.dims.map(f3).join(' x ')} (${f3(r.offRect)} off a rectangle), loop ${r.insets.map(f3).join('/')} wide` : r.why).join(' | '));
+        /* 1d. NSO's slicer: each layer's paths all closed, none under 2 mm.
+           It has no thin-wall mode, so a wall a bead wide (and a hair) is
+           drawn as a closed loop round its sliver: the outline's, and one
+           round each channel - two passes over each line. Reported */
+        const nso = sheetEntry ? sheetEntry.parts.map((pt, k) => nsoLayer(pt.soup, L.layers[k].lengthMm)) : [];
+        check(`${label}, sheet at ${f3(L.zTop)}: NSO's slicer prints every layer in closed paths, none under 2 mm`,
+          nso.length === L.layers.length && nso.every(n => n.layers === 1 && n.paths >= 1 && n.paths === n.closed && n.shortest >= 2),
+          nso.map((n, k) => `${L.layers[k].role[0].toUpperCase()}${k + 1}: ${n.paths} closed path(s), shortest ${f3(n.shortest)} mm, ${n.passes.toFixed(2)} passes`).join(' | ') +
+          ' (no thin-wall mode: the outline\'s loop and one round each channel)');
         /* 2. the lines, off the welded solid */
-        const under = lineIndex(L);
-        const lines = L.layers.map(x => layerLines(sliceAt(w.soup, (x.z0 + x.z1) / 2), (px, py) => under(px, py, 0.3), sh.widthMm));
+        const under = lineIndex(L), loopAt = lineIndex(L, 0);
+        /* a layer's direction and pitch read on its serpentine's lines, off
+           the loop (whose short sides cross them in every layer) */
+        const lines = L.layers.map(x => layerLines(sliceAt(w.soup, (x.z0 + x.z1) / 2), (px, py) => under(px, py, 0.3) && !loopAt(px, py, sh.widthMm), sh.widthMm));
         const dirs = lines.map(l => l ? l.dir : NaN);
-        const alt = dirs.every((d, k) => k === 0 || Math.abs(Math.abs(d - dirs[k - 1]) - 90) <= 1);
-        check(`${label}, sheet at ${f3(L.zTop)}: one direction per layer, each across the one below`,
+        const ang = (a, b) => { const d = Math.abs(a - b) % 180; return Math.min(d, 180 - d); };
+        const alt = ang(dirs[1], dirs[0]) <= 1 && Math.abs(ang(dirs[2], dirs[1]) - 90) <= 1 && ang(dirs[3], dirs[0]) <= 1;
+        check(`${label}, sheet at ${f3(L.zTop)}: one direction per layer - T1, T2 and I2 along A, I1 across them`,
           lines.every(l => l && l.oneDirShare >= 0.75) && alt,
           `layers at ${dirs.map(d => d + ' deg').join(' / ')}, one-direction share ${lines.map(l => l ? l.oneDirShare.toFixed(3) : '-').join(' / ')}`);
         const pitchOk = lines.every(l => l && l.medianPitch != null && Math.abs(l.medianPitch - PITCH) <= 0.05 && l.offGrid === 0);
         check(`${label}, sheet at ${f3(L.zTop)}: line pitch ${PITCH} +- 0.05 mm, measured on the welded support`,
           pitchOk, lines.map(l => l ? `${l.lines} lines, median ${f3(l.medianPitch)}, ${l.adjacent} adjacent pairs at ${PITCH}+-0.05, ${l.offGrid} off the pitch` : '-').join(' | '));
         report.push({ label, zTop: L.zTop, tips: L.tips.length, angle: L.lines, caps: L.caps.length, lines });
-        /* 4. no tip above the sheet's underside */
-        let above = 0, worst = -Infinity;
+        /* 4. NOTHING BUT THE SHEET ABOVE z_cap: no vertex of any other part
+           of the build between z_cap and the sheet's top + the gap under the
+           sheet's paths (within half a line and 0.05 mm); and a tip cut at
+           the gap beside it, standing through those layers, is counted */
+        let above = 0, worst = -Infinity, beside = 0;
         tp.trunks.forEach(tr => {
           if (tr.sheet != null) return;
           tr.parts.forEach(pt => {
             const s = pt.soup;
             for (let i = 0; i < s.length; i += 3) {
               const z = s[i + 2];
-              if (z <= L.zBase + Math.max(EPS, SI.CAP.intoMm) + 1e-4 || z > L.zTop + GAP) continue;
-              if (!under(s[i], s[i + 1], 0.21 + 0.05)) continue;
-              above++; worst = Math.max(worst, z - L.zBase);
+              if (z <= L.zCap + 1e-6 || z > L.zTop + GAP) continue;
+              if (!under(s[i], s[i + 1], sh.widthMm / 2 + 0.05)) { beside++; continue; }
+              above++; worst = Math.max(worst, z - L.zCap);
             }
           });
         });
-        check(`${label}, sheet at ${f3(L.zTop)}: no tip reaches above the sheet's underside (${f3(L.zBase)}) under its lines, but a cap's ${SI.CAP.intoMm} mm into it`,
-          above === 0, above ? `${above} vertices, up to ${f3(worst)} mm above it` : 'every tip under it ends in its cap, or is cut flat at ' + f3(L.zBase + EPS));
+        check(`${label}, sheet at ${f3(L.zTop)}: no support geometry above z_cap (${f3(L.zCap)}) but the sheet, under any of its paths`,
+          above === 0, (above ? `${above} vertices, up to ${f3(worst)} mm above it` : 'every tip under it ends at z_cap') +
+          `; ${beside} vertex(es) of other parts in its layers beside it (tips cut at the gap, other supports' columns)`);
       }
       /* 3. THE GAP, in two parts.
          THE INTERFACE ZONE - the sheet, every tip, and everything within

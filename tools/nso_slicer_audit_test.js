@@ -313,6 +313,17 @@ console.log('\n=== 5. --sheet: how the sheet\'s lines printed ===');
   check('exportSheetBoxes: the two lines of the support (centreline, width), not the block, not the part',
     eb.length === 2 && eb.every(x => near(x.widthMm, 0.43, 1e-5) && near(Math.hypot(x.b[0] - x.a[0], x.b[1] - x.a[1]), 10, 1e-5) && near(x.z0, 5, 1e-6)),
     `${eb.length} line(s): ${eb.map(x => x.widthMm.toFixed(3) + ' x ' + Math.hypot(x.b[0] - x.a[0], x.b[1] - x.a[1]).toFixed(3)).join(', ')}`);
+  /* and a serpentine: 5 lines of 10 mm at 0.84, U-turns between - its lines
+     (the inner run between two turns), not its channels nor its turns */
+  const snakePts = [];
+  for (let k = 0; k < 5; k++) { const y = 0.84 * k; if (k % 2) snakePts.push([10, y], [0, y]); else snakePts.push([0, y], [10, y]); }
+  const sn = RL.extrudeFlat([snakePts], { width: 0.43, height: 0.2, baseZ: 5 });
+  const es = AU.exportSheetBoxes([{ name: 'p - support 1.1 (Tree)', soup: sn.tris }]);
+  const ys = es.map(x => (x.a[1] + x.b[1]) / 2).sort((u, v) => u - v);
+  check('exportSheetBoxes on a serpentine: its 5 lines at 0.84 mm (centreline, width), no channel, no turn',
+    sn.ok && es.length === 5 && es.every(x => near(x.widthMm, 0.43, 1e-5) && Math.abs(x.a[1] - x.b[1]) < 1e-6 && Math.hypot(x.b[0] - x.a[0], x.b[1] - x.a[1]) >= 9.5) &&
+    ys.every((y, k) => near(y, 0.84 * k, 1e-5)),
+    `${es.length} line(s): ${es.map(x => x.widthMm.toFixed(3) + ' x ' + Math.hypot(x.b[0] - x.a[0], x.b[1] - x.a[1]).toFixed(3) + ' at y ' + ((x.a[1] + x.b[1]) / 2).toFixed(2)).join(', ')}`);
 }
 
 console.log('\n' + (fail ? `FAILED  ${fail} of ${pass + fail}` : `PASSED  all ${pass}`));

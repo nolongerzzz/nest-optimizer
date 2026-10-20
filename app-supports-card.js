@@ -106,8 +106,9 @@ var NSO_SUPPORTS_CARD = (function () {
     'nso_support_tree.js', 'nso_support_gridpack.js', 'nso_raster_lines.js', 'nso_crosshatch.js', 'nso_support_interface.js'];
   /* What the build asks of NSO_SupportGridpack.parts: every tip that meets the
      part ends in a flat cap under the interface sheet (nso_support_interface.js,
-     sheet(): 2 interface layers at 0.84 mm on the caps, 0.18 mm under the
-     part), its layers left as they are (foldSheets: false), and every trunk
+     sheet(): 2 transition and 2 interface layers at 0.84 mm, each a loop
+     and a serpentine inside it, on the caps, 0.18 mm under the part), its
+     layers left as they are (foldSheets: false), and every trunk
      stands on its foot with no pad drawn (footPads: 'shared') - the pads are
      drawn at the end over every area's feet at once (shareFeet, in commit).
      Nothing is welded: NSO_SupportGridpack.shells hands every part back as its

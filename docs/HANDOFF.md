@@ -6133,3 +6133,64 @@ OPEN, the owner's call (standing rule: ask first):
 3. The line is 0.43, outside the kickoff's 0.40-0.42: a line of 0.42 is a
    zero-width wall to both slicers and a narrower one is less than none
    (measured, docs/SUPPORT-INTERFACE.md, LINE WIDTH).
+
+### Correction: four layers on z_cap, each a loop and a serpentine (2026-10-20, same branch)
+
+Two corrections from the owner, from the repo's own notes and their side-by-side
+slice (`thinwall_sideXside.gcode.3mf`: Bambu's tree slim on the coupon, z
+12.58 / 12.86 / 13.13 / 13.40). The first build of this branch was wrong: the
+caps rose 0.01 mm into I1, so their walls printed in the same layers as the
+lines; every line was its own box, an island; and the transition layers were
+gone. Bambu's: two transition layers and two interface layers, every one
+opening with a closed loop round the footprint (22.24 x 14.34 mm), then 13.6 mm
+lines with 0.84 mm turns inside it. The owner printed the loops alone, by
+accident, and they released cleanly - the loop is load-bearing for release.
+
+- **Nothing but the sheet occupies the sheet's layers.** Every cap's flat top,
+  and every capless tip's cut, is ONE level, z_cap; T1's underside is z_cap.
+  Faces meet, no overlap; the layers above stand on each other the same way
+  (T2 is T1: set 2 um into it, the walls stood in one plane and the union left
+  2 piercing pairs on the clamp's area 1). For the weld only, T1's underside
+  goes 0.01 mm into the caps (`SHEET_SINK_MM`): on one plane the union left a
+  T-junction where a T1 wall met a cap's top (2 pairs, the clamp's area 2).
+  The parts and the export keep z_cap exact.
+- **T1, T2, I1, I2** (`SHEET_ROLES`), each a closed rectangular loop round the
+  footprint and one serpentine inside it, its turns the loop's own sides
+  between line ends: T1 = T2 = I2 along A, I1 across, all in one loop. One
+  graph per layer through `extrudeFlat`: one connected thin wall, its section
+  one region (the channels its holes) whose outer boundary is the loop, one
+  bead wide. The coupon's slab: a 21.84 x 14.28 loop, 25 lines of 14.28 mm
+  (27 with the loop's sides; Bambu's 29 in 22.24 x 14.34), I1 16 of 21.84.
+- **The rectangle**: the cap field (caps dilated 1.25 mm, `FIELD_MM`) in the
+  free raster; consecutive scanlines and a span inside every one's run, the
+  short sides in the field; the one most caps lie under, then the largest; A
+  across its short side on a tie, as Bambu's. One rectangle a level: the
+  clamp's ring-shaped and L-shaped ceilings leave many tips outside it
+  (uncarried: cut at z_cap if a line passes over them, else at the gap,
+  standing beside the sheet). See OPEN below.
+- **Caps spread before they narrow**: z_cap is 0.4 mm lower than before, where
+  the coupon's converging legs stand 2.16 mm apart; caps slide apart within
+  their slack, checked where they land: the slab's are 2.50 mm again.
+- **A carrying tree's own members under z_cap no longer block the footprint**
+  (the deeper stack's band had caught the coupon's 1.7 mm trunks' nodes).
+- **Gates** (`support:interface`): caps end at z_cap and T1 lies on it,
+  measured on the parts built; every layer a closed loop and one serpentine
+  inside it, line ends and turns on the loop, T2 and I2 T1's; each layer's
+  mid-layer section ONE region, its outer boundary a closed rectangle (+-0.1
+  mm) one bead wide; NSO's slicer prints every layer in closed paths none under
+  2 mm (it has no thin-wall mode: the outline's loop and one round each
+  channel, two passes over each line - NOT one pass); no geometry above z_cap
+  but the sheet under its paths. `support:audit`'s export reader reads these
+  layers (walls paired by their material side).
+- **Width matrix**: `support:print-export` also writes the coupon at 0.40 /
+  0.36 / 0.30 mm lines with `detect_thin_wall = 1` on the supports
+  (`top_clip_x2_supports_w040_thinwall.3mf` ...), for Bambu; NSO's slicer
+  prints nothing under a bead.
+- **Tags**: print1 -> print2 (`nso_support_gridpack.js`,
+  `nso_support_interface.js`, `app-supports-card.js`).
+
+OPEN, the owner's call:
+4. A footprint one rectangle cannot cover (the clamp's ring round its boss,
+   an L): the loop could follow the field's outline on the pitch grid (a
+   staircase, still one loop), or a level could carry one rectangle per
+   piece of it (islands). Neither is done; the coupon is one rectangle.

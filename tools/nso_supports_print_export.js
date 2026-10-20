@@ -19,6 +19,12 @@
                                          a TEST of the thin-wall route
                                          (docs/SUPPORT-INTERFACE.md, LINE
                                          WIDTH), not what the card exports
+     top_clip_x2_supports_w040_thinwall.3mf  THE WIDTH MATRIX: the sheet's
+     top_clip_x2_supports_w036_thinwall.3mf  lines 0.40 / 0.36 / 0.30 mm wide
+     top_clip_x2_supports_w030_thinwall.3mf  (sheetWidthMm), detect_thin_wall
+                                         = 1 on the supports: under one bead,
+                                         for Bambu's thin-wall pass (NSO's
+                                         own slicer draws none of them)
 
    Slice either in Bambu Studio, save the .gcode.3mf, and read the sheet with
      node tools/nso_slicer_audit.js --sheet sliced.gcode.3mf --export tools/supports-print-out/top_clip_x2_supports.3mf
@@ -51,8 +57,8 @@ const CARD = { skipList: [], angleDeg: 60, occluders: [], style: 'tree', restOnM
 const PARTS = { interface: true, foldSheets: false, footPads: 'shared' };
 const NAME = 'top_clip_x2';
 
-(async () => {
-  const piece = readSTL(path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_coupon.stl'));
+/* the build at one sheet line width (null: the card's), its objects named as the card names them */
+async function build(piece, widthMm) {
   const t0 = Date.now();
   const det = SA.detectOverhangs(piece, { skipList: [], angleDeg: CARD.angleDeg, occluders: [] });
   if (!det.ok) throw new Error(det.reason);
@@ -63,27 +69,26 @@ const NAME = 'top_clip_x2';
     const p = ST.planTree(piece, Object.assign({}, CARD, { beacons: bs }));
     if (!p.ok) { console.log(`area ${rg.id + 1}: ${p.reason}`); continue; }
     plateZ = p.plateZ;
-    const tp = await GP.parts(p, PARTS);
+    const tp = await GP.parts(p, Object.assign({}, PARTS, widthMm == null ? {} : { sheetWidthMm: widthMm }));
     if (!tp.ok) throw new Error(`area ${rg.id + 1}: ${tp.reason}`);
     areas.push({ rid: rg.id, p, tp, sh: GP.shells(p, tp) });
   }
   const sf = GP.shareFeet(areas.map(a => ({ solids: a.sh.solids })), piece, { plateZ });
   if (!sf.ok) throw new Error(sf.reason);
   const ms = Date.now() - t0;
-
   /* the card's names: "<piece> - support <area>.<n> (Tree)", n counting on over the build */
   let n = 0;
   const objects = [{ name: NAME, soup: piece }];
   areas.forEach((a, ai) => sf.objects.filter(o => o.from[0][0] === ai).forEach(o => {
     objects.push({ name: `${NAME} - support ${a.rid + 1}.${++n} (Tree)`, soup: o.soup, support: true });
   }));
-  fs.mkdirSync(OUT, { recursive: true });
+  return { areas, sf, ms, objects };
+}
+/* the 3MF's bytes, with detect_thin_wall = 1 on the support objects when thin */
+async function write(file, objects, thin) {
   const indexed = objects.map(o => { const m = NSO3MF.indexTriangleSoup(Array.from(o.soup)); return { name: o.name, vertices: m.vertices, triangles: m.triangles }; });
   const built = await NSO3MF.build3MF({ objects: indexed, plateName: 'Bambu A1 Mini' });
-  const file = path.join(OUT, `${NAME}_supports.3mf`);
-  fs.writeFileSync(file, Buffer.from(built.bytes));
-
-  /* the A/B file: detect_thin_wall on the support objects only */
+  if (!thin) { fs.writeFileSync(file, Buffer.from(built.bytes)); return; }
   const zip = R.openZip(built.bytes), dec = new TextDecoder(), enc = new TextEncoder();
   const entries = [];
   for (const name of zip.names()) {
@@ -99,20 +104,34 @@ const NAME = 'top_clip_x2';
     }
     entries.push({ name, data });
   }
-  const fileTW = path.join(OUT, `${NAME}_supports_thinwall.3mf`);
-  fs.writeFileSync(fileTW, Buffer.from(await NSO3MF.buildZip(entries)));
+  fs.writeFileSync(file, Buffer.from(await NSO3MF.buildZip(entries)));
+}
 
-  console.log(`${NAME}: built in ${ms} ms - ${sf.reason}`);
-  areas.forEach(a => {
-    const S = a.tp.sheet;
-    console.log(`  area ${a.rid + 1}: ${a.p.reason} ${S ? S.reason : ''}`);
-    (S ? S.levels : []).forEach(L => {
-      const ws = L.caps.map(c => c.w);
-      console.log(`    sheet at ${L.zTop.toFixed(3)}: ${L.caps.length} caps ${Math.min(...ws).toFixed(2)} - ${Math.max(...ws).toFixed(2)} mm; ` +
-        L.layers.map(x => `${x.lines} lines at ${x.angleDeg.toFixed(1)} deg (shortest ${x.shortestMm.toFixed(2)} mm)`).join(', '));
+(async () => {
+  const piece = readSTL(path.join(ROOT, 'fixtures', 'supports', 'top_clip_x2_coupon.stl'));
+  fs.mkdirSync(OUT, { recursive: true });
+  const runs = [{ w: null, files: [['_supports.3mf', false], ['_supports_thinwall.3mf', true]] },
+                { w: 0.40, files: [['_supports_w040_thinwall.3mf', true]] },
+                { w: 0.36, files: [['_supports_w036_thinwall.3mf', true]] },
+                { w: 0.30, files: [['_supports_w030_thinwall.3mf', true]] }];
+  for (const run of runs) {
+    const b = await build(piece, run.w);
+    const S0 = b.areas[0] && b.areas[0].tp.sheet;
+    console.log(`${NAME}, sheet lines ${S0 ? S0.widthMm : '-'} mm: built in ${b.ms} ms - ${b.sf.reason}`);
+    b.areas.forEach(a => {
+      const S = a.tp.sheet;
+      console.log(`  area ${a.rid + 1}: ${a.p.reason} ${S ? S.reason : ''}`);
+      (S ? S.levels : []).forEach(L => {
+        const ws = L.caps.map(c => c.w);
+        console.log(`    sheet at ${L.zTop.toFixed(3)} (z_cap ${L.zCap.toFixed(3)}): ${L.caps.length} caps ${Math.min(...ws).toFixed(2)} - ${Math.max(...ws).toFixed(2)} mm; ` +
+          `loop ${L.layers[0].loopMm.map(v => v.toFixed(2)).join(' x ')} mm, ` +
+          L.layers.map(x => `${x.role[0].toUpperCase()} ${x.lines} lines of ${x.shortestMm.toFixed(2)} mm at ${x.angleDeg.toFixed(1)} deg`).join(', '));
+      });
     });
-  });
-  objects.forEach(o => console.log(`  object: ${o.name}`));
-  console.log('  wrote ' + path.relative(ROOT, file));
-  console.log('  wrote ' + path.relative(ROOT, fileTW) + '   (detect_thin_wall = 1 on the supports: the A/B test)');
+    for (const [suffix, thin] of run.files) {
+      const file = path.join(OUT, NAME + suffix);
+      await write(file, b.objects, thin);
+      console.log('  wrote ' + path.relative(ROOT, file) + (thin ? '   (detect_thin_wall = 1 on the supports)' : ''));
+    }
+  }
 })().catch(err => { console.error(err); process.exit(1); });

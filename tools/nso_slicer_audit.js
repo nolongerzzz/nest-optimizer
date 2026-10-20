@@ -690,36 +690,84 @@ function sheetAudit(gcode, opts) {
            target: { ratio: RATIO_TARGET, tol: RATIO_TOL, segmentMinMm: SEGMENT_MIN_MM, segmentShare: SEGMENT_SHARE } };
 }
 
-/* The export's sheet lines: every 8-vertex box of a support object (welded
-   at 1e-5) lying wholly above `zMin` - one box per line, the sheet's own
-   construction - as its centreline and its height span. */
+/* The export's sheet lines: every connected piece of a support object
+   (welded at 1e-5) no taller than 0.5 mm - a sheet layer: a serpentine of
+   lines and U-turns, or one box a line - read off its side walls: the bottom
+   edges of its walls, merged where collinear, paired with the parallel edge
+   a line width away; the middle of each pair's overlap, 4 widths long or
+   more, is a line (a U-turn's walls are shorter). Its centreline, width and
+   height span. */
 function exportSheetBoxes(objects) {
   const out = [];
   for (const o of objects) {
     if (!/ - support \d+\.\d+ \(/.test(o.name || '')) continue;
     const s = o.soup, key = i => Math.round(s[i] / 1e-5) + ',' + Math.round(s[i + 1] / 1e-5) + ',' + Math.round(s[i + 2] / 1e-5);
     const par = new Map(), find = x => { while (par.get(x) !== x) { par.set(x, par.get(par.get(x))); x = par.get(x); } return x; };
-    const pos = new Map();
     for (let t = 0; t < s.length; t += 9) {
       const ks = [key(t), key(t + 3), key(t + 6)];
-      ks.forEach((k, c) => { if (!par.has(k)) { par.set(k, k); pos.set(k, [s[t + c * 3], s[t + c * 3 + 1], s[t + c * 3 + 2]]); } });
+      ks.forEach(k => { if (!par.has(k)) par.set(k, k); });
       const a = find(ks[0]); [ks[1], ks[2]].forEach(k => { const b = find(k); if (a !== b) par.set(b, a); });
     }
     const comps = new Map();
-    for (const k of par.keys()) { const r = find(k); if (!comps.has(r)) comps.set(r, []); comps.get(r).push(pos.get(k)); }
-    for (const P of comps.values()) {
-      if (P.length !== 8) continue;
-      const z0 = Math.min(...P.map(p => p[2])), z1 = Math.max(...P.map(p => p[2]));
-      const bot = P.filter(p => Math.abs(p[2] - z0) < 1e-4);
-      if (bot.length !== 4 || z1 - z0 > 0.5) continue;
-      let best = null;
-      for (let i = 0; i < 4; i++) for (let j = i + 1; j < 4; j++) { const d = Math.hypot(bot[i][0] - bot[j][0], bot[i][1] - bot[j][1]); if (!best || d > best.d) best = { d, i, j }; }
-      const A = bot[best.i], B = bot[best.j], rest = [0, 1, 2, 3].filter(k => k !== best.i && k !== best.j).map(k => bot[k]);
-      const nA = Math.hypot(rest[0][0] - A[0], rest[0][1] - A[1]) < Math.hypot(rest[1][0] - A[0], rest[1][1] - A[1]) ? rest[0] : rest[1];
-      const nB = nA === rest[0] ? rest[1] : rest[0], width = Math.hypot(A[0] - nA[0], A[1] - nA[1]);
-      const a = [(A[0] + nA[0]) / 2, (A[1] + nA[1]) / 2], b = [(B[0] + nB[0]) / 2, (B[1] + nB[1]) / 2];
-      if (!(Math.hypot(b[0] - a[0], b[1] - a[1]) > 4 * width)) continue;           /* a line, not a block */
-      out.push({ obj: o.name, z0, z1, a, b, widthMm: width });
+    for (let t = 0; t < s.length; t += 9) {
+      const r = find(key(t));
+      if (!comps.has(r)) comps.set(r, []);
+      comps.get(r).push(t);
+    }
+    for (const tris of comps.values()) {
+      let z0 = Infinity, z1 = -Infinity;
+      for (const t of tris) for (let c = 0; c < 3; c++) { z0 = Math.min(z0, s[t + c * 3 + 2]); z1 = Math.max(z1, s[t + c * 3 + 2]); }
+      if (z1 - z0 > 0.5) continue;
+      /* the walls' bottom edges, each once */
+      const edges = new Map();
+      for (const t of tris) {
+        const P = [0, 1, 2].map(c => [s[t + c * 3], s[t + c * 3 + 1], s[t + c * 3 + 2]]);
+        const lo = P.filter(q => Math.abs(q[2] - z0) < 1e-4);
+        if (lo.length !== 2 || P.every(q => Math.abs(q[2] - z0) < 1e-4)) continue;
+        const a = lo[0], b = lo[1], k = [a, b].map(q => Math.round(q[0] / 1e-5) + ',' + Math.round(q[1] / 1e-5)).sort().join('|');
+        /* the wall's outward normal, off the triangle's winding */
+        const e1 = [P[1][0] - P[0][0], P[1][1] - P[0][1], P[1][2] - P[0][2]], e2 = [P[2][0] - P[0][0], P[2][1] - P[0][1], P[2][2] - P[0][2]];
+        const nrm = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2]];
+        if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 1e-6) edges.set(k, [[a[0], a[1]], [b[0], b[1]], nrm]);
+      }
+      /* collinear runs merged: by direction and offset, then along */
+      const fam = new Map();
+      for (const [a, b, nrm] of edges.values()) {
+        let th = Math.atan2(b[1] - a[1], b[0] - a[0]); if (th < 0) th += Math.PI; if (th >= Math.PI - 1e-9) th -= Math.PI;
+        const d = [Math.cos(th), Math.sin(th)], n = [-d[1], d[0]], u = a[0] * n[0] + a[1] * n[1];
+        /* in: the side of the wall its material is on, along n */
+        const inn = nrm[0] * n[0] + nrm[1] * n[1] > 0 ? -1 : 1;
+        const k = Math.round(th * 1e4) + ':' + Math.round(u / 1e-4) + ':' + inn;
+        if (!fam.has(k)) fam.set(k, { th, d, n, u, inn, iv: [] });
+        const va = a[0] * d[0] + a[1] * d[1], vb = b[0] * d[0] + b[1] * d[1];
+        fam.get(k).iv.push([Math.min(va, vb), Math.max(va, vb)]);
+      }
+      const segs = [];
+      for (const f of fam.values()) {
+        f.iv.sort((p, q) => p[0] - q[0]);
+        let cur = null;
+        for (const iv of f.iv) { if (cur && iv[0] <= cur[1] + 1e-5) cur[1] = Math.max(cur[1], iv[1]); else { if (cur) segs.push({ f, v0: cur[0], v1: cur[1] }); cur = iv.slice(); } }
+        if (cur) segs.push({ f, v0: cur[0], v1: cur[1] });
+      }
+      /* each wall with the nearest parallel wall 0.2 - 0.6 mm across on its
+         material's side, facing it: a line, not a channel between two */
+      const used = new Set();
+      segs.forEach((A, ia) => {
+        let best = null;
+        segs.forEach((B, ib) => {
+          if (ib === ia || Math.abs(A.f.th - B.f.th) > 1e-3 || B.f.inn !== -A.f.inn || (B.f.u - A.f.u) * A.f.inn <= 0) return;
+          const w = Math.abs(B.f.u - A.f.u), lo = Math.max(A.v0, B.v0), hi = Math.min(A.v1, B.v1);
+          if (w < 0.2 || w > 0.6 || hi - lo <= 0) return;
+          if (!best || w < best.w) best = { B, ib, w, lo, hi };
+        });
+        if (!best) return;
+        const pk = Math.min(ia, best.ib) + ':' + Math.max(ia, best.ib);
+        if (used.has(pk) || best.hi - best.lo <= 4 * best.w) return;
+        used.add(pk);
+        const um = (A.f.u + best.B.f.u) / 2, d = A.f.d, n = A.f.n;
+        const at = v => [um * n[0] + v * d[0], um * n[1] + v * d[1]];
+        out.push({ obj: o.name, z0, z1, a: at(best.lo), b: at(best.hi), widthMm: best.w });
+      });
     }
   }
   return out;

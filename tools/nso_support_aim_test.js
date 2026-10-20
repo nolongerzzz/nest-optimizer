@@ -521,9 +521,11 @@ console.log('\n=== 11. A sloped band is held along its length, not only at its e
 
 /* 12. THE 2026-10-20 COUPON (fixtures/supports/top_clip_x2_coupon.stl), as the
    Supports card builds it: its two areas found and held, every tip under
-   the slab and the leg ending in a flat cap under two interface layers (no
-   transition), and one pad - one support - under both areas' trees, as
-   Bambu's own tree on it stands on one first layer (baselineV2). */
+   the slab and the leg ending in a flat cap at z_cap under the sheet - two
+   transition and two interface layers, each a closed loop and ONE
+   serpentine inside it, as Bambu's own tree on it
+   (thinwall_sideXside.gcode.3mf) - and one pad - one support -
+   under both areas' trees, as Bambu's tree stands on one first layer. */
 async function coupon() {
   console.log('\n=== 12. The top_clip_x2 coupon, as the card builds it ===');
   const GP = ctx.NSO_SupportGridpack, SI = ctx.NSO_SupportInterface;
@@ -556,9 +558,12 @@ async function coupon() {
   check(`under the slab every cap is ${SI.CAP.minMm} - ${SI.CAP.maxMm} mm across, or held a hair short of a neighbour`,
     slab.length === 40 && slab.every(w => w <= SI.CAP.maxMm + 1e-9 && w >= SI.CAP.minMm - 0.1),
     `widths ${Math.min(...slab).toFixed(3)} - ${Math.max(...slab).toFixed(3)} mm`);
-  check('each sheet is two interface layers and no transition layer',
-    sheets.every(S => S.levels.length === 1 && S.levels[0].layers.map(x => x.role).join(',') === 'interface,interface'),
-    sheets.map(S => S.levels.map(L => L.layers.map(x => x.role).join(',')).join(';')).join(' | '));
+  check('each sheet is T1, T2, I1, I2 on z_cap, each layer a closed loop and ONE serpentine inside it, T2 and I2 along T1, I1 across',
+    sheets.every(S => S.levels.length === 1 && S.levels[0].layers.map(x => x.role).join(',') === 'transition,transition,interface,interface' &&
+      S.levels[0].layers.every(x => x.paths.length === 2 && x.paths[1].length === 2 * x.lines) && Math.abs(S.levels[0].layers[0].z0 - S.levels[0].zCap) < 1e-9 &&
+      S.levels[0].layers[1].angleDeg === S.levels[0].layers[0].angleDeg && S.levels[0].layers[3].angleDeg === S.levels[0].layers[0].angleDeg &&
+      Math.abs(((S.levels[0].layers[2].angleDeg - S.levels[0].layers[0].angleDeg) % 180 + 180) % 180 - 90) < 1e-6),
+    sheets.map(S => S.levels.map(L => `loop ${L.layers[0].loopMm.map(v => v.toFixed(2)).join(' x ')}: ` + L.layers.map(x => `${x.role[0].toUpperCase()} ${x.lines} lines ${+x.angleDeg.toFixed(2)} deg`).join(', ')).join(';')).join(' | '));
   const sf = GP.shareFeet(builds.map(b => ({ solids: b.solids })), piece, { plateZ });
   check('one pad under the slab\'s and the leg\'s trees, and so ONE support (Bambu reported a layer-1 conflict between two)',
     sf.ok && sf.pads === 1 && sf.objects.length === 1 && sf.clustersSplit === 0, sf.ok ? sf.reason : sf.reason);

@@ -127,8 +127,10 @@
    carries beacons (ids), regionIds and landing.
    parts(plan, { interface: true }) (and solid()): every tip that meets the
          part ends in a flat cap 2.5 - 4 mm across under
-         nso_support_interface.js's SHEET - 2 interface layers at 0.84 mm on
-         the caps, 0.18 mm under the part - or is cut at the gap line, or (a
+         nso_support_interface.js's SHEET - 2 transition and 2 interface
+         layers at 0.84 mm, each a loop and a serpentine inside it, on the
+         caps (all ending at z_cap), 0.18 mm under the part - or is cut at
+         the gap line, or (a
          side tip) drawn back off its face; weld() joins each sheet to the
          trunks it stands on. Off by default:
          solid(plan) is the same bytes as before. The Supports card turns it
@@ -171,6 +173,7 @@
   var RAY_EPS = 1e-3;
   var PAD_LAYERS_MM = 0.4;     /* a resting foot: two 0.2 mm layers */
   var GAP_MM = 0.18;           /* nso_support_interface.js's easy-release gap */
+  var SHEET_SINK_MM = 0.01;    /* weld() only: T1's underside this far into the caps (joinSheets) */
   var TIP_LEVELS = [0.05, 0.3, 0.6, 1.0, 1.5];   /* mm below a tip where the tip zone is swept for walls */
   var TIP_RISE_SIDES = 2;     /* a pickup stub's vertical last run, x the strut side */
   var NUDGE_STEPS = [0.25, 0.5, 0.75, 1];   /* x the strut side: how far a tip may move off a wall */
@@ -1766,7 +1769,7 @@
           return { id: L.id, zTop: L.zTop, zBase: L.zBase, zCap: L.zCap, tips: L.tips, caps: L.caps, lines: L.lines,
                    minDistanceMm: L.minDistanceMm, solvedDropMm: L.solvedDropMm,
                    layers: L.layers.map(function (x) { return { role: x.role, angleDeg: x.angleDeg, z0: x.z0, z1: x.z1, lines: x.lines, lengthMm: x.lengthMm,
-                                                                shortestMm: x.shortestMm, paths: x.paths }; }) };
+                                                                linesMm: x.linesMm, turns: x.turns, loopMm: x.loopMm, shortestMm: x.shortestMm, paths: x.paths }; }) };
         })
       };
     }
@@ -2107,11 +2110,27 @@
          NSO's slicer could not close (the wedge lost a cap's section the
          carriers-first way); the caps' upright top band (sheet()'s THE
          CAPS) keeps that cut off the flank, and the wedge's join is clean. */
+      /* a soup's lowest face moved down by d: every vertex at its lowest z */
+      function sunkBottom(soup, d) {
+        var lo = Infinity, out = new Float32Array(soup);
+        for (var i = 2; i < soup.length; i += 3) if (soup[i] < lo) lo = soup[i];
+        for (var j = 2; j < out.length; j += 3) if (out[j] === lo) out[j] = lo - d;
+        return out;
+      }
       function joinSheets() {
         var c3 = Promise.resolve();
         sheets.forEach(function (sh) {
           c3 = c3.then(function () {
             var L = sh.parts.map(function (x) { return x.soup; });
+            /* FOR THE UNION ONLY, T1's underside goes SHEET_SINK_MM into the
+               caps under it. Built, the caps' tops and T1's underside are one
+               plane, z_cap - and the kernel left that plane, where a T1 wall
+               meets a cap's top, as a T-junction it reads as piercing (2 pairs
+               on the clamp's area 2). Sunk, T1's underside cuts the caps'
+               upright top band instead, as I1's did when the caps stood
+               0.01 mm into it. The parts (and so the card's export, and every
+               slice) keep z_cap exact. */
+            if (L.length > 1) L[0] = sunkBottom(L[0], SHEET_SINK_MM);
             var folded = L.length === 1 ? Promise.resolve({ ok: true, soup: L[0], folded: true })
               : U(joinAll(L.filter(function (x, k) { return k % 2 === 0; })), joinAll(L.filter(function (x, k) { return k % 2 === 1; })));
             return folded.then(function (r) {
