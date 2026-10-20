@@ -762,6 +762,7 @@ async function main(argv) {
     const gname = zip.names().find(n => /plate_\d+\.gcode$/.test(n));
     const gcode = new TextDecoder().decode(await zip.read(gname));
     const shift = (opt('--shift') || '0,0').split(',').map(Number);
+    if (shift.length !== 2 || !shift.every(isFinite)) { console.log('--shift takes two numbers, dx,dy (g-code minus export), e.g. --shift -2.25,0'); return 2; }
     const bambu = bambuInterface(gcode, objs, { shift });
     out.bambu = bambu.counts;
     out.bambu.treeShare = bambu.counts.topTree / Math.max(1, bambu.counts.topTree + bambu.counts.topPart + bambu.counts.bottom + bambu.counts.none);

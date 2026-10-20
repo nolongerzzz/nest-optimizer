@@ -157,10 +157,14 @@ support 1.1 and 2.2. Bambu's own tree (baselineV2, the same coupon): pads of
   under 0.1 mm apart (`FOOT_TOUCH_MM`, plus the outlines' simplification)
   are linked: their trunks are one support (`groups`), whatever the gap. A
   cluster split is counted (`clustersSplit`) when a cluster's feet still
-  stand in more than one support - where the piece stands between them. A pad
-  that is nothing but a foot's own end is counted (`hemmed`), and a sliver of
-  that kind that will not triangulate is no pad (`padsDropped`): its trunk
-  stands on its own end, in its linked support.
+  stand in more than one support - unless every foot apart from the rest is
+  one the piece itself hems in, measured exactly (`clustersHemmed`: no point
+  on rings just outside its end square, out to the raster's slack, stands
+  0.2 mm clear of the piece through the slab - the wedge's trunk in a pocket
+  of `v9_mirror_factory` has none within 1 mm). A pad that is nothing but a
+  foot's own end is counted (`hemmed`), and a sliver of that kind that will
+  not triangulate is no pad (`padsDropped`): its trunk stands on its own end,
+  in its linked support.
 - **The card draws them across areas.** It builds each area with
   `footPads: 'shared'` (every trunk on its foot, no pad) and hands every area's
   `shells()` to `shareFeet(builds, piece, opts)`, which draws the pads once over

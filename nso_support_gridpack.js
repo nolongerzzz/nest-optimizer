@@ -982,7 +982,8 @@
      than FOOT_TOUCH_MM apart (and their outlines' simplification) cannot
      print apart either: they are LINKED, and their trunks one support too
      (groups). clustersSplit counts the clusters whose feet still stand in
-     more than one support; hemmed, the pads that are nothing but a foot's
+     more than one support - but for a foot the piece itself hems in,
+     measured exactly (clustersHemmed); hemmed, the pads that are nothing but a foot's
      own end (the piece all round it, or the raster's slack round a thin
      trunk beside a thin pin of the piece); a sliver of that kind that will
      not triangulate is no pad (padsDropped): the trunk stands on its own end.
@@ -1015,8 +1016,8 @@
      footPads(TH, obstacles, feet, plateZ, thick)
        feet: [{ key, c: [x, y], r }] - footprintOf's circles
        -> { pads: [{ keys, poly, soup, areaMm2, hemmed }], groups: [[keys]] (one
-            support each), clusters: [[keys]], clustersSplit, hemmed,
-            padsDropped, holesFilled, holesSlotted, cellMm, failed: [why] }
+            support each), clusters: [[keys]], clustersSplit, clustersHemmed,
+            hemmed, padsDropped, holesFilled, holesSlotted, cellMm, failed: [why] }
      ===================================================================== */
   var PROBES = typeof WeakMap === 'function' ? new WeakMap() : null;
   function probeOf(TH, soup) {
@@ -1079,11 +1080,38 @@
     var sup = {};
     for (i = 0; i < nF; i++) (sup[SUP.find(i)] || (sup[SUP.find(i)] = [])).push(feet[i].key);
     res.groups = Object.keys(sup).map(function (r0) { return sup[r0]; });
-    /* clusters, by key, and how many stand in more than one support */
+    /* A FOOT THE PIECE HEMS IN, measured, not read off the raster: no point
+       on rings just outside its end square (out to the raster's own slack)
+       stands FOOT_GAP_MM clear of the piece anywhere through the slab and
+       the gap above it - the wedge's trunk in a pocket of v9_mirror_factory
+       has none within 1 mm. A thin trunk the raster's slack rang round (a
+       thin pin of the piece beside it) has some, and stays a split. */
+    var probes = obstacles.map(function (sp) { return probeOf(TH, sp); }).filter(Boolean);
+    function hemmedExactly(f) {
+      var rIn = f.r * Math.SQRT1_2, zs = [];
+      for (var zz = 0.02; zz <= thick + FOOT_GAP_MM + 1e-9; zz += 0.06) zs.push(plateZ + zz);
+      for (var dr = 0.05; dr <= FOOT_GAP_MM + 3 * res.cellMm + 1e-9; dr += 0.05) {
+        for (var k2 = 0; k2 < 36; k2++) {
+          var a = 2 * Math.PI * k2 / 36, x = f.c[0] + (rIn + dr) * Math.cos(a), y = f.c[1] + (rIn + dr) * Math.sin(a);
+          var clear = zs.every(function (z) {
+            return probes.every(function (P) { return !(P.inside && P.inside([x, y, z])) && !P.nearest([x, y, z], FOOT_GAP_MM); });
+          });
+          if (clear) return false;
+        }
+      }
+      return true;
+    }
+    /* clusters, by key, and how many stand in more than one support - but
+       for feet the piece hems in (clustersHemmed) */
+    res.clustersHemmed = 0;
     Object.keys(cl).forEach(function (r0) {
-      var fs = cl[r0], ss = {};
-      fs.forEach(function (f) { ss[SUP.find(f)] = true; });
-      if (Object.keys(ss).length > 1) res.clustersSplit++;
+      var fs = cl[r0], bySup = {};
+      fs.forEach(function (f) { (bySup[SUP.find(f)] || (bySup[SUP.find(f)] = [])).push(f); });
+      var parts = Object.keys(bySup).map(function (k3) { return bySup[k3]; }).sort(function (a, b) { return b.length - a.length; });
+      if (parts.length > 1) {
+        if (parts.slice(1).every(function (pt) { return pt.every(function (f) { return hemmedExactly(feet[f]); }); })) res.clustersHemmed++;
+        else res.clustersSplit++;
+      }
       res.clusters.push(fs.map(function (f) { return feet[f].key; }));
     });
     return res;
@@ -1436,9 +1464,10 @@
       return { from: g.from, soup: joinAll(list), pads: g.pads.length };
     });
     return { ok: true, objects: objects, pads: fp.pads.length, clusters: fp.clusters.length, clustersSplit: fp.clustersSplit,
-             hemmed: fp.hemmed, padsDropped: fp.padsDropped, holesFilled: fp.holesFilled, holesSlotted: fp.holesSlotted,
+             clustersHemmed: fp.clustersHemmed, hemmed: fp.hemmed, padsDropped: fp.padsDropped, holesFilled: fp.holesFilled, holesSlotted: fp.holesSlotted,
              reason: fp.pads.length + ' pad(s) under ' + fp.clusters.length + ' cluster(s) of feet' +
-               (fp.padsDropped ? ' (' + fp.padsDropped + ' a trunk with no room for a pad, on its own end)' : '') + '; ' + objects.length + ' support(s)' };
+               (fp.padsDropped ? ' (' + fp.padsDropped + ' a trunk with no room for a pad, on its own end)' : '') +
+               (fp.clustersHemmed ? '; ' + fp.clustersHemmed + ' cluster(s) with a trunk the piece hems in, a support of its own' : '') + '; ' + objects.length + ' support(s)' };
   }
 
   function boxSoup(lo, hi) {
@@ -1854,7 +1883,7 @@
         });
         /* the trunks of one support: on one pad, or on pads too near to print apart */
         fp.groups.forEach(function (g) { if (g.length > 1) padGroups.push(g.slice().sort(function (a, b) { return a - b; })); });
-        pads = { count: fp.pads.length, clusters: fp.clusters.length, clustersSplit: fp.clustersSplit, hemmed: fp.hemmed, padsDropped: fp.padsDropped, holesFilled: fp.holesFilled,
+        pads = { count: fp.pads.length, clusters: fp.clusters.length, clustersSplit: fp.clustersSplit, clustersHemmed: fp.clustersHemmed, hemmed: fp.hemmed, padsDropped: fp.padsDropped, holesFilled: fp.holesFilled,
                  holesSlotted: fp.holesSlotted, cellMm: fp.cellMm, shared: false,
                  areasMm2: fp.pads.map(function (pd) { return pd.areaMm2; }), outlines: fp.pads.map(function (pd) { return pd.poly; }) };
       }
