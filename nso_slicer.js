@@ -1140,6 +1140,8 @@
         });
         if (!over.length) continue;
         var H = g.unionAll(over.map(function (x) { return x.cs; }));
+        // most layers reach under no host at all: one test, before the islands
+        if (!(g.area(g.inter(P.S[i], H)) > 1e-6)) continue;
         var isl = g.parts(P.S[i]).filter(function (p) { return g.area(g.inter(p, H)) > 1e-6; });
         if (!isl.length) continue;
         var t = g.offset(g.offset(g.unionAll(isl), R), -R);
