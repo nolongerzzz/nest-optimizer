@@ -33,11 +33,13 @@ const ctx = {
 };
 vm.createContext(ctx);
 for (const f of ['nso_thickness.js', 'nso_seat_surface.js', 'app-sculpt.js',
-                 'app-extend.js', 'nso_support_beacons.js', 'nso_support_aim.js']) {
+                 'app-extend.js', 'nso_support_beacons.js', 'nso_support_aim.js',
+                 'nso_path_sweep.js', 'nso_support_tree.js', 'nso_support_gridpack.js']) {
   vm.runInContext(fs.readFileSync(path.join(ROOT, f), 'utf8'), ctx, { filename: f });
 }
 const SA = ctx.NSO_SupportAim;
 const TH = ctx.NSO_Thickness;
+const ST = ctx.NSO_SupportTree;
 
 let pass = 0, fail = 0;
 const FAILS = [];
@@ -81,6 +83,25 @@ function rampUnder(deg, z0, rise) {
              [1, 5, 6], [1, 6, 2], [2, 6, 7], [2, 7, 3], [3, 7, 4], [3, 4, 0]];
   const out = [];
   for (const t of f) for (const i of t) out.push(...v[i]);
+  return new Float32Array(out);
+}
+
+/* A C-section run 40 mm along y: a floor (z 0-6), a wall (x 0-10) and a roof
+   (z 40-48) whose inside corner is a 45 deg chamfer from (10, 32) to
+   (18, 40) - a sloped band 8 mm tall x 40 mm long, the floor 26 mm under
+   it. The shape of the chamfer a 12-piece plate's part carries along its
+   whole length (x 65.6-74.4, z 64-72.2, y 70-110), at test size. One closed
+   mesh, the profile cut by hand into convex fans, so no face is doubled. */
+function chamferBand() {
+  const P = [[0, 0], [40, 0], [40, 6], [10, 6], [10, 32], [18, 40], [40, 40], [40, 48], [0, 48]];
+  const fans = [[0, 1, 2], [0, 2, 3], [0, 3, 4], [0, 4, 8], [8, 4, 5], [8, 5, 6], [8, 6, 7]];
+  const L = 40, out = [];
+  const v = (i, y) => [P[i][0], y, P[i][1]];
+  for (const [a, b, c] of fans) out.push(...v(a, 0), ...v(b, 0), ...v(c, 0), ...v(a, L), ...v(c, L), ...v(b, L));
+  for (let i = 0; i < P.length; i++) {
+    const j = (i + 1) % P.length;
+    out.push(...v(i, 0), ...v(j, L), ...v(j, 0), ...v(i, 0), ...v(i, L), ...v(j, L));
+  }
   return new Float32Array(out);
 }
 
@@ -445,6 +466,57 @@ for (const [name, p, host] of CASES) {
               `and ${name}_host.stl (${(host.length / 9) | 0} tris)`);
 }
 check('every planned case was written out', CASES.length === 3, `${CASES.length} case(s)`);
+
+console.log('\n=== 11. A sloped band is held along its length, not only at its ends ===');
+
+{
+  /* At the card's 60 deg the band's nz = -0.707 is inside the threshold
+     (nzMax = -0.5). The triangle pass gives it no region - the ray down from
+     each chamfer triangle meets the floor, so all of them count as self-
+     supported - and that is not what the card plans from: it plans the beacon
+     grid, which flags the band as 'gap' spots. Those spots go through
+     planTree the way the card sends one area (the card's own opts, the band's
+     beacons), at the card's default (may not rest on the part) and with rest
+     on. Held means a tip, and a pad, on the band. */
+  const host = chamferBand();
+  let vol = 0;
+  for (let i = 0; i < host.length; i += 9) {
+    const [ax, ay, az, bx, by, bz, cx, cy, cz] = host.subarray(i, i + 9);
+    vol += (ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)) / 6;
+  }
+  /* profile 240 floor + 260 wall + 112 corner (80 wall, 32 chamfer) + 320 roof = 932 mm^2, x 40 */
+  check('the chamfer-band part is one closed, outward mesh', near(vol, 932 * 40, 1e-2),
+    `volume ${vol.toFixed(2)} mm^3 (932 x 40 = 37280 expected)`);
+  const opts = { skipList: [], angleDeg: 60, occluders: [] };
+  const det = SA.detectOverhangs(host, opts);
+  const onBand = b => near(b.normal[0], Math.SQRT1_2, 0.05) && near(b.normal[2], -Math.SQRT1_2, 0.05);
+  const band = (det.beacons || []).filter(onBand);
+  check('the triangle pass gives the band no region: its rays down meet the floor',
+    det.ok && det.regions.length === 0 && det.trisSelfSupported > 0 && det.trisFlagged === 0,
+    `${det.regions.length} region(s), ${det.trisSelfSupported} self-supported, ${det.trisFlagged} flagged`);
+  check('the beacon grid flags the band along its whole length, as gap spots (some by a cell corner)',
+    band.length >= 12 && band.every(b => (b.need.kind === 'gap' || b.need.via === 'gap') && b.need.below === 'material') &&
+    Math.min(...band.map(b => b.y)) < 3 && Math.max(...band.map(b => b.y)) > 37,
+    `${band.length} spot(s), y ${Math.min(...band.map(b => b.y)).toFixed(1)}-${Math.max(...band.map(b => b.y)).toFixed(1)}`);
+
+  const bs = band.map((b, i) => ({ x: b.x, y: b.y, z: b.z, normal: b.normal, regionId: 0, key: 'b' + i }));
+  for (const rest of [false, true]) {
+    const t = ST.planTree(host, Object.assign({}, opts, { beacons: bs, style: 'tree', restOnModel: rest }));
+    const landing = {};
+    if (t.ok) t.trunks.forEach(tr => tr.beacons.forEach(id => { landing[id] = tr.landing; }));
+    const per10 = [0, 0, 0, 0];
+    bs.forEach((b, id) => { if (landing[id]) per10[Math.min(3, Math.floor(b.y / 10))]++; });
+    const held = Object.keys(landing).length;
+    const on = rest ? 'may rest on the part' : 'plate only (the card default)';
+    check(`${on}: at least one pad per 10 mm of the band`, t.ok && per10.every(n => n >= 1),
+      `held ${held} of ${bs.length}; per 10 mm ${per10.join(', ')}; unreachable ${t.ok ? t.unreachable.length : '-'}`);
+    if (rest) {
+      check('may rest on the part: every spot on the band is held, on the plate or the floor under it',
+        t.ok && held === bs.length && Object.values(landing).every(l => l === 'plate' || l === 'rest'),
+        Object.entries(Object.values(landing).reduce((m, l) => (m[l] = (m[l] || 0) + 1, m), {})).map(e => e.join(' ')).join(', '));
+    }
+  }
+}
 
 console.log('\n' + (fail ? `FAILED  ${fail} of ${pass + fail}` : `PASSED  all ${pass}`));
 if (fail) { console.log('  ' + FAILS.join('\n  ')); process.exit(1); }
