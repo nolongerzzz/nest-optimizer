@@ -89,15 +89,20 @@ withApp(async (page, logs) => {
     });
     await page.waitForTimeout(120);
   };
+  /* pose-bake: a pose action is baked into the geometry when it ends (a Tip
+     key at once, a Rotate key when its run settles), so home is nsoPoseHome
+     and the pose is read off the piece's body - the turn on the mesh after the
+     turns baked since it was loaded - as the XYZ Euler the fields spell. */
   const zero = () => page.evaluate(() => {
     const p = state.placed[0];
-    p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; p.tipX = 0; p.tipZ = 0; p.flipX = false; p.liftY = 0;
-    applyMeshRotation(p); refreshOutline(p);
+    if (window.nsoRotate && window.nsoRotate.seat) window.nsoRotate.seat();
+    p.liftY = 0;
+    nsoPoseHome(p); refreshOutline(p);
   });
   const pose = () => page.evaluate(() => {
-    const p = state.placed[0];
-    return { tiltX: +(p.tiltX || 0).toFixed(6), tiltZ: +(p.tiltZ || 0).toFixed(6),
-             rotY: +(p.rotY || 0).toFixed(6), liftY: +(p.liftY || 0).toFixed(6),
+    const p = state.placed[0], e = new THREE.Euler().setFromQuaternion(nsoPieceBodyQ(p), 'XYZ');
+    return { tiltX: +(e.x * 180 / Math.PI).toFixed(6), tiltZ: +(e.z * 180 / Math.PI).toFixed(6),
+             rotY: +e.y.toFixed(6), liftY: +(p.liftY || 0).toFixed(6),
              x: +(p.x || 0).toFixed(6), z: +(p.z || 0).toFixed(6) };
   });
   const same = (a, b) => Object.keys(a).every(k => Math.abs(a[k] - b[k]) < 1e-9);
@@ -159,13 +164,13 @@ withApp(async (page, logs) => {
     const d = await page.evaluate(() => {
       document.querySelectorAll('.viewport-overlay-topbar details').forEach(x => { x.open = false; });
       const p = state.placed[0];
-      p.tiltX = 0; p.tiltZ = 0; p.rotY = 0; p.tipX = 0; p.tipZ = 0; p.flipX = false;
-      applyMeshRotation(p);
+      nsoPoseHome(p);
       document.getElementById('menu-rotate').open = true;
       document.getElementById('menu-tip').open = true;
       document.dispatchEvent(new KeyboardEvent('keydown',
         { key: 'ArrowUp', bubbles: true, cancelable: true }));
-      return { tiltX: +p.tiltX.toFixed(6), rotYdeg: +(p.rotY * 180 / Math.PI).toFixed(6),
+      const e = new THREE.Euler().setFromQuaternion(nsoPieceBodyQ(p), 'XYZ');
+      return { tiltX: +(e.x * 180 / Math.PI).toFixed(6), rotYdeg: +(e.y * 180 / Math.PI).toFixed(6),
                openAfter: [...document.querySelectorAll('.viewport-overlay-topbar .vp-top-menu')]
                  .filter(x => x.open).map(x => x.id) };
     });

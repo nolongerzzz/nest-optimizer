@@ -120,70 +120,50 @@
 
   /* WHICH AXIS EACH RING IS. Turn is the plate's vertical, always: it stays
      level, and a turn is about the plate however the piece lies. The two
-     leans are the sides of the piece's footprint as it lies NOW (leanAxes):
-     at rest exactly #135's rings, plate X and plate Z; turned, the piece's
-     own length and width lines, so they turn with it; tipped, the two level
-     lines of the face it now rests on. Turn a bar 45 degrees and lean it
-     about its width line: its long axis rises at the same 45 degree heading,
-     with no twist. A lean about the PLATE's axis there would have swung it
-     sideways as it rose. Which of the two is CALLED front/back is leanMap's
-     business, not the axis's.
+     leans are the two level sides of the piece's footprint as it lies NOW -
+     pieceFrame (nso-bounds.js), the one frame every tool reads; this file
+     keeps no copy of its own. At rest on a piece lying as loaded they are
+     exactly #135's rings, plate X and plate Z; turned, the piece's own length
+     and width lines; tipped, the two level lines of the face it rests on.
+     Turn a bar 45 degrees and lean it about its width line: its long axis
+     rises at the same 45 degree heading, with no twist. Which of the two is
+     CALLED front/back is leanMap's business, not the axis's.
 
-     The footprint is the rectangle the piece's bounding box covers on the
-     plate, oriented the way that covers least: its sides are tried along the
-     shadow of each of the piece's own axes (an axis standing upright casts
-     none), and the narrowest rectangle wins - for a piece lying square, its
-     own two level axes exactly. 'fb' takes the side nearer own X's shadow,
-     'ss' the other, each signed to point with own X (Z) where it can, so on
-     an untipped piece they ARE own X and Z, sign and all, and every lean
-     there is the turn it always was. Ties go to own X, then the first
-     side found, so the answer never flickers on a piece balanced at 45.
+     Every pose action is baked when it ends (nsoBakePlacedPose, app-core.js):
+     the turn goes into the geometry and the mesh is back at identity, so the
+     piece's own axes say nothing about how it lies - only its vertices do,
+     and pieceFrame measures them. Which side is the 'fb' slot and which 'ss'
+     is presentation: 'fb' is the side nearer the piece's body X - its turn
+     since it was loaded, bakedQ, with the turn in hand - 'ss' the other, each
+     signed with body X (Z) where it can, so on a piece lying as loaded they
+     ARE plate X and Z, sign and all, and every lean is the turn it always
+     was. Ties go to body X, then the long side.
 
      frameOf gives a ring's axis A and the two vectors e1, e2 spanning its
-     plane (e1 x e2 = A), in world terms, for the orientation q. For a lean
-     ring e1 is the level line in the ring's plane, so the ring's scale reads
-     0 with the piece's end flat and 90 with it upright; A is level, so there
-     always is one. The ring in a drag keeps the frame it was pressed in
-     (drag.F): turning about A leaves A where it was, but the footprint it was
-     read off moves with the piece, and the axis in hand must not. */
+     plane (e1 x e2 = A), in world terms. For a lean ring e1 is the level line
+     in the ring's plane, so the ring's scale reads 0 with the piece's end
+     flat and 90 with it upright; A is level, so there always is one. A drag
+     holds its ring's frame (drag.F) and the piece's frame (nsoBounds
+     .holdFrame) from press to release. */
   function frameOf(ring, q) {
     var R = RINGS[ring];
     if (R.frame === 'plate') return { A: v3(R.axis), e1: v3(R.e1), e2: v3(R.e2) };
     if (drag && drag.ring === ring && drag.F) return drag.F;
-    var A = leanAxes(q)[ring];
+    var A = leanAxes()[ring];
     var e1 = v3(UP).cross(A).normalize();
     return { A: A, e1: e1, e2: A.clone().cross(e1).normalize() };
   }
   var LEVEL_EPS = 1e-9;
-  function leanAxes(q, p) {
+  function leanAxes(p) {
     p = p || piece();
-    var own = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(function (b) { return v3(b).applyQuaternion(q); });
-    var shadow = own.map(function (a) { return new THREE.Vector3(a.x, 0, a.z); });
-    var corners = [];
-    var g = p && p.mesh && p.mesh.geometry;
-    if (g && !g.boundingBox) g.computeBoundingBox();
-    var bb = g && g.boundingBox;
-    if (bb && !bb.isEmpty()) {
-      [bb.min.x, bb.max.x].forEach(function (x) {
-        [bb.min.y, bb.max.y].forEach(function (y) {
-          [bb.min.z, bb.max.z].forEach(function (z) { corners.push(new THREE.Vector3(x, y, z).applyQuaternion(q)); });
-        });
-      });
-    }
-    var span = function (d) {
-      var lo = Infinity, hi = -Infinity;
-      corners.forEach(function (c) { var t = c.dot(d); if (t < lo) lo = t; if (t > hi) hi = t; });
-      return corners.length ? hi - lo : 1;
-    };
-    var best = null;
-    shadow.forEach(function (s) {
-      if (s.lengthSq() < 1e-12) return;                    // upright: no shadow, no side
-      var d = s.clone().normalize(), n = new THREE.Vector3(d.z, 0, -d.x);
-      var area = span(d) * span(n);
-      if (!best || area < best.area * (1 - 1e-9)) best = { d: d, n: n, area: area };
+    var F = p && window.nsoBounds ? nsoBounds.pieceFrame(p) : null;
+    if (!F) return { fb: v3([1, 0, 0]), ss: v3([0, 0, 1]) };
+    var B = bodyQ(p);
+    var shadow = [[1, 0, 0], [0, 1, 0], [0, 0, 1]].map(function (b) {
+      var a = v3(b).applyQuaternion(B);
+      return new THREE.Vector3(a.x, 0, a.z);
     });
-    if (!best) best = { d: v3([1, 0, 0]), n: v3([0, 0, 1]) };
-    var u = [best.d, best.n];
+    var u = [F.long, F.short];
     var lean = function (v, k) { return Math.abs(v.dot(shadow[k])); };
     var score = function (v) { return lean(v, 0) - lean(v, 2); };
     var diff = score(u[0]) - score(u[1]);
@@ -200,50 +180,44 @@
     }
     return v;
   }
+  /* The turn on the mesh: the scratch state of a turn in hand, identity at rest. */
   function pieceQ() {
     var p = piece();
     if (!p) return new THREE.Quaternion();
     p.mesh.updateMatrixWorld(true);
     return p.mesh.quaternion.clone();
   }
+  /* The piece's body: the turn on the mesh after the turns baked since it was
+     loaded (nsoBakedQ). What the rings' painted scale is read on, so a detent
+     is the same tick of the ring before and after a bake (#229). */
+  function bodyQ(p) {
+    p = p || piece();
+    if (!p || !p.mesh) return new THREE.Quaternion();
+    p.mesh.updateMatrixWorld(true);
+    var b = typeof nsoBakedQ === 'function' ? nsoBakedQ(p) : new THREE.Quaternion();
+    return p.mesh.quaternion.clone().multiply(b);
+  }
   var ORDER = ['turn', 'fb', 'ss'];
 
   function v3(a) { return new THREE.Vector3(a[0], a[1], a[2]); }
 
   /* ---- what the leans are called -------------------------------------------
-     The piece's footprint as it lies: the width and depth of the box its mesh
-     takes on the plate - applyMeshRotation's p.width / p.depth, measured here
-     off the mesh so a bake or a Scale that rebuilt it is never out of date. */
-  function footprint(p) {
-    if (!p || !p.mesh || !p.mesh.geometry) return null;
-    var g = p.mesh.geometry;
-    if (!g.boundingBox) g.computeBoundingBox();
-    if (!g.boundingBox) return null;
-    p.mesh.updateMatrixWorld(true);
-    var b = g.boundingBox.clone().applyMatrix4(p.mesh.matrixWorld);
-    return { w: b.max.x - b.min.x, d: b.max.z - b.min.z };
-  }
-
-  /* Which of the two lean rings tips the piece ALONG the long dimension of its
-     footprint. Tipping about an axis lifts the points that lie across it, so
-     the along-length lean is about the horizontal line across the long side
-     (plate Z for a footprint longer in X, plate X for one longer in Z); the
-     ring whose axis lies the more nearly on that line is it. Returns
-     { along, across, square }: ring ids, with `square` set where there is no
-     long side to follow (within SQUARE_WITHIN of square, or no line to
-     choose by) and the old mapping - front/back is own X - stands. */
+     Which of the two lean rings tips the piece ALONG the long side of its
+     footprint (pieceFrame). Tipping about an axis lifts the points that lie
+     across it, so the along-length lean is about the level line across the
+     long side - the footprint's short side; the ring whose axis lies the more
+     nearly on it is it. Returns { along, across, square }: ring ids, with
+     `square` set where there is no long side to follow (within SQUARE_WITHIN
+     of square) and the old mapping - front/back is 'fb' - stands. */
   function leanMap(p) {
     if (drag && drag.map) return drag.map;       // held for the length of a drag
     var old = { along: 'fb', across: 'ss', square: true };
     p = p || piece();
-    var fp = footprint(p);
-    if (!fp) return old;
-    var big = Math.max(fp.w, fp.d);
-    if (!(big > 0) || Math.abs(fp.w - fp.d) <= SQUARE_WITHIN * big) return old;
-    var across = fp.w > fp.d ? v3([0, 0, 1]) : v3([1, 0, 0]);
-    var ax = leanAxes(p.mesh.quaternion, p);
-    var x = Math.abs(ax.fb.dot(across));
-    var z = Math.abs(ax.ss.dot(across));
+    var F = p && window.nsoBounds ? nsoBounds.pieceFrame(p) : null;
+    if (!F || F.square) return old;
+    var ax = leanAxes(p);
+    var x = Math.abs(ax.fb.dot(F.short));
+    var z = Math.abs(ax.ss.dot(F.short));
     if (Math.abs(x - z) < 1e-6) return old;
     return z > x ? { along: 'ss', across: 'fb', square: false }
                  : { along: 'fb', across: 'ss', square: false };
@@ -541,13 +515,14 @@
     startHold(p, ring, dir);
     if (hold.timer) { clearTimeout(hold.timer); hold.timer = 0; }   // held for as long as it is pressed
     p.mesh.updateMatrixWorld(true);
-    var q0 = p.mesh.quaternion.clone();
-    var b = refAxis(q0, ring);
+    var q0 = p.mesh.quaternion.clone(), B0 = bodyQ(p);
+    var b = refAxis(B0, ring);
     drag = { ring: ring, dir: dir, x0: x, y0: y, cx: cx, cy: cy,
              lastA: Math.atan2(y - cy, x - cx) * DEG, raw: 0, applied: 0,
              sign: dialSign(ring), q0: q0, b: b, F: frameOf(ring, q0), map: leanMap(p),
-             abs0: ringAngleDeg(q0, ring, b),
+             abs0: ringAngleDeg(B0, ring, b), p: p,
              arrow0: arrowAt[ring], moved: false, snapped: false, fine: !!fine };
+    if (window.nsoBounds) nsoBounds.holdFrame(p);    // the piece's frame, held to the release
     /* Starting inside a snap is not landing in one: no flash on the way out. */
     drag.snapped = inDetent(drag.abs0);
     lastTouched = ring;
@@ -586,6 +561,7 @@
     if (!drag) return;
     var d = drag;
     drag = null;
+    if (window.nsoBounds) nsoBounds.releaseFrame(d.p);
     if (typeof state !== 'undefined' && state && state.controls) state.controls.enabled = true;
     if (!d.moved && !abandon) {
       /* a click: a step about the held pivot (a degree, a tenth with Shift),
@@ -788,7 +764,10 @@
     hold = null;
   }
   /* Put the turn down: seat the piece on the plate, once, as
-     applyMeshRotation always has, and let the rings follow in one step. */
+     applyMeshRotation always has, BAKE it - the turn written into the
+     geometry, the mesh back at identity, the fields 0, one Undo for the
+     drag or the run (nsoBakePlacedPose, app-core.js) - and let the rings
+     follow in one step. The action is complete; the next starts from it. */
   function seat() {
     if (!hold) return;
     var h = hold;
@@ -796,6 +775,7 @@
     dropHold();
     if (!mine) return;          // something else has already re-placed it
     if (typeof applyMeshRotation === 'function') applyMeshRotation(h.p);
+    if (typeof nsoBakePlacedPose === 'function') nsoBakePlacedPose(h.p);
     if (typeof refreshOutline === 'function') refreshOutline(h.p);
     if (typeof updateExportButton === 'function') updateExportButton();
     refresh();
@@ -964,7 +944,7 @@
     m.userData.nsoRotateRing = ring;          // the track: drawn, never a handle
     g.add(m);
     addTicks(g, ring, F, r, w);
-    var lit = litTickOf(ring, pieceQ(), F);
+    var lit = litTickOf(ring, bodyQ(), F);
     if (lit != null) addLit(g, ring, F, r, lit);
 
     var t = arrowAt[ring], h = arrowSize(r), gap = arrowGap(r);
@@ -1114,10 +1094,11 @@
     activeRing: activeRing,
     step: function (ring, dir, fine) { return stepBy(ring, (dir < 0 ? -1 : 1) * (fine ? FINE_STEP_DEG : STEP_DEG)); },
     /* A programmatic turn of `deg` about a ring's axis - the plate's vertical
-       for Turn, a level side of the footprint for the leans - no Undo point and no
-       lock check: what a click does, without the click. The pose
-       buttons (app-core's rotateSelected / tiltSelected / bankSelected) call
-       this and keep their own Undo, lock and status around it.
+       for Turn, a level side of the footprint for the leans - no Undo point, no
+       lock check and NO BAKE: the turn is left on the mesh, as a drag leaves it
+       mid-drag. The pose buttons (app-core's rotateSelected / tiltSelected /
+       bankSelected, through turnSelectedAbout) call this and keep their own
+       Undo, lock, status and bake around it.
 
        opts.snap: land on a quarter turn if the turn ends within the hard
        snap of one - the drag's own snap, measured the drag's own way
@@ -1131,7 +1112,7 @@
       p.mesh.updateMatrixWorld(true);
       var q0 = p.mesh.quaternion.clone();
       if (opts && opts.snap) {
-        var abs0 = ringAngleDeg(q0, ring, refAxis(q0, ring));
+        var B0 = bodyQ(p), abs0 = ringAngleDeg(B0, ring, refAxis(B0, ring));
         deg = hardSnapDeg(abs0 + deg) - abs0;
       }
       writePose(p, turned(q0, ring, deg));
@@ -1157,8 +1138,7 @@
     ringAngle: function (ring) {
       var p = piece();
       if (!p) return null;
-      p.mesh.updateMatrixWorld(true);
-      var q = p.mesh.quaternion;
+      var q = bodyQ(p);
       return ringAngleDeg(q, ring, refAxis(q, ring));
     },
     /* What each lean is called now (see leanMap): the ring ids that hold the
@@ -1186,8 +1166,7 @@
     litTick: function (ring) {
       var p = piece();
       if (!p || !RINGS[ring]) return null;
-      p.mesh.updateMatrixWorld(true);
-      var q = p.mesh.quaternion.clone();
+      var q = bodyQ(p);
       return litTickOf(ring, q, drag && drag.ring === ring ? drag.F : frameOf(ring, q));
     },
     decompose: decompose,

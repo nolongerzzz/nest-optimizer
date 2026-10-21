@@ -10,7 +10,15 @@
    yaw buttons - the pose turning the display geometry and not the raw
    triangles Split cuts.
 
-   WHAT THIS TREE DOES (measured here, not assumed). The pose buttons do not
+   POSE-BAKE (2026-10-21). Every pose action is now baked into the geometry
+   when it ends (app-core.js nsoBakePlacedPose): m.rawTris and m.geometry are
+   turned together, the mesh goes back to identity and the fields to 0. So
+   "the pose is on the mesh" below is history; what this check holds is
+   unchanged and measured the same way - the raw triple still maps onto the
+   display geometry exactly, and the blade, the plate line, the cut and the
+   halves still agree in world space.
+
+   WHAT THIS TREE DID (measured here, not assumed). The pose buttons did not
    touch the piece's geometry at all. Tip on side, Stand, Flip and Tip on
    face write the placed record's pose (app-tip-orient.js setOrientFromQuat),
    the Tilts turn it through nsoRotate.turn, and applyMeshRotation puts that
@@ -117,10 +125,14 @@ window.__rawVsDisplay = function (id) {
   return worst;
 };
 window.__placedOf = id => state.placed.find(p => p && p.sourceId === id);
+/* The pose is read off the piece's BODY (nsoPieceBodyQ): every pose action is
+   baked into the geometry when it ends (pose-bake), so the mesh is back at
+   identity and the turn is in m.geometry and m.rawTris together. */
 window.__pose = function (id) {
   const p = __placedOf(id);
   p.mesh.updateMatrixWorld(true);
-  return { q: p.mesh.quaternion.toArray(), status: document.getElementById('status').textContent };
+  return { q: nsoPieceBodyQ(p).toArray(), meshQ: p.mesh.quaternion.toArray(),
+           status: document.getElementById('status').textContent };
 };
 /* Tip on face, through the function its armed click calls, on a real hit:
    a ray at the piece's world centre from above, leaned 'lean' degrees
@@ -288,8 +300,11 @@ withApp(async (page, logs) => {
     }
     const pose = await page.evaluate(id => __pose(id), id);
     const turned = 2 * Math.acos(Math.min(1, Math.abs(q0.reduce((s, v, i) => s + v * pose.q[i], 0)))) * 180 / Math.PI;
-    check(label + ': ' + (presses.length ? 'the pose is on the piece' : 'the piece is un-posed'),
-      presses.length ? turned > 1 : turned < 1e-6, 'turned ' + turned.toFixed(2) + ' deg; ' + pose.status);
+    /* re-pinned (pose-bake): was "the pose is on the piece" read off the MESH;
+       the pose is baked now - the body turned, the mesh back at identity */
+    check(label + ': ' + (presses.length ? 'the pose is baked into the piece - its body turned, its mesh at identity' : 'the piece is un-posed'),
+      (presses.length ? turned > 1 : turned < 1e-6) && Math.abs(Math.abs(pose.meshQ[3]) - 1) < 1e-12,
+      'turned ' + turned.toFixed(2) + ' deg, mesh w ' + pose.meshQ[3] + '; ' + pose.status);
     const d = await page.evaluate(id => __rawVsDisplay(id), id);
     check(label + ': the raw triangles Split cuts are the piece shown', d < 1e-4,
       'worst vertex ' + (d === Infinity ? 'count differs' : d.toExponential(1) + ' mm'));

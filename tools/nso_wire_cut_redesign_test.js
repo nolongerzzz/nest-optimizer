@@ -27,8 +27,12 @@
      2. a click on an un-posed piece (a post standing on end, and a bar lying
         along Z) drops a square blade at the click; Cut makes a face square
         to the piece in world space, sides adding back to the length.
-     3. the same on a TIPPED piece (Stand, then a tilt): the blade and the cut
-        face are square to the piece in world space; the halves keep its pose.
+     3. a TIPPED piece (Stand, then a tilt), its pose baked when each press
+        ended: the square blade travels the piece's frame (pieceFrame) - the
+        plate vertical for a piece standing taller than it is long - so it is
+        level, and the cut face is the leaned bar's oblique section; the
+        halves keep its pose. (It was square to the bar's own lean before
+        pose-bake.)
      4. the mitre wheel, dragged by its handle: the face is angled by the
         dial, on the raw and the display route; each half keeps the piece's
         orientation (every other face as it was), the halves meet exactly.
@@ -106,6 +110,20 @@ window.__screenAt = function (id, f) {
            onCanvas: document.elementFromPoint(sx, sy) === state.renderer.domElement };
 };
 /* The blade as it stands: its normal and centre in world space. */
+/* The bar's long axis in the world, off its BODY (nsoPieceBodyQ): every pose
+   is baked into the geometry when it ends, so the geometry's own box is the
+   box of the posed piece, and the load axes are where the body says. */
+window.__bodyLong = function (id) {
+  const p = state.placed.find(q => q && q.sourceId === id);
+  return new THREE.Vector3(1, 0, 0).applyQuaternion(nsoPieceBodyQ(p)).toArray();
+};
+/* Which way the square blade travels by the rule (pieceFrame): the plate
+   vertical for a piece standing taller than its footprint is long, else the
+   footprint's long side - level. */
+window.__travel = function (id) {
+  const f = pieceFrame(state.placed.find(q => q && q.sourceId === id));
+  return (f.lengths.height > f.lengths.long ? f.up : f.long).toArray();
+};
 window.__blade = function () {
   if (!state.cutHelper) return null;
   const b = state.cutHelper.children.find(c => c.userData.cutBlade);
@@ -318,42 +336,56 @@ withApp(async (page, logs) => {
   }
 
   /* ------------------------------------------------------------------ 3 */
-  console.log('\n=== 3. a TIPPED piece: square to the piece in world space ===');
+  console.log('\n=== 3. a TIPPED piece: the square blade is plumb or level, on the piece\'s frame ===');
+  /* re-pinned (pose-bake). This section used to stand the blade square to the
+     tipped bar's own long axis, in world space - the pose stayed on the mesh
+     and the cut frame was the geometry's box. Every pose action is baked when
+     it ends now, and the owner's rule is that the next tool acts about the
+     LEVEL axes of the piece as it lies (pieceFrame): the square blade
+     travels the plate vertical when the piece stands taller than its
+     footprint is long, else the footprint's long side. So on this bar - stood
+     on end, then leaned - the blade is level, and the cut face is the
+     oblique section of the leaned bar: 96 mm2 / |cos| of the bar's lean off
+     the travel line, not the square 12 x 8. */
   {
     await reload();
     const id = await loadSTL(page, stl('bar60.stl', box(60, 12, 8)));
-    // Stand it on end, then bank and tilt it: the pose the Tip menu writes,
-    // on the mesh, off every plate axis.
     await page.evaluate(id => selectPlaced(state.placed.findIndex(p => p && p.sourceId === id)), id);
     await page.click('#btn-tip');
     await page.click('#btn-bank-up');
     await page.click('#btn-bank-up');
     await page.click('#btn-tilt-up');
-    const L = await page.evaluate(id => __longWorld(id), id);
-    const tipped = Math.acos(Math.min(1, Math.abs(L.dir[1]))) * 180 / Math.PI;
+    const dir = await page.evaluate(id => __bodyLong(id), id);
+    const travel = await page.evaluate(id => __travel(id), id);
+    const tipped = Math.acos(Math.min(1, Math.abs(dir[1]))) * 180 / Math.PI;
     check('the bar is tipped off the plate axes (' + tipped.toFixed(1) + '° from vertical)',
-      tipped > 1 && tipped < 89 && L.axis === 'x',
-      JSON.stringify(L.dir.map(v => +v.toFixed(3))));
+      tipped > 1 && tipped < 89, JSON.stringify(dir.map(v => +v.toFixed(3))));
+    check('...and its pose is baked: the mesh is at identity, the fields 0', await page.evaluate(id => {
+      const p = state.placed.find(q => q && q.sourceId === id);
+      return Math.abs(p.mesh.quaternion.w) === 1 && !p.rotY && !p.tipX && !p.tipZ && !p.tiltX && !p.tiltZ && !p.flipX;
+    }, id));
+    const level = Math.abs(travel[1]) > 1 - 1e-12 || Math.abs(travel[1]) < 1e-12;
+    check('the travel line is the plate vertical or level (' + JSON.stringify(travel.map(v => +v.toFixed(3))) + ')', level);
     await ensureCut();
     const s = await clickPieceAt(id, 0.4);
     const b = await page.evaluate(() => __blade());
     check('the click dropped the blade on the tipped bar', !!b && s.onCanvas);
     if (b) {
-      check('the blade is square to the tipped bar in world space', angleDeg(b.n, L.dir) < 1e-4,
-        angleDeg(b.n, L.dir).toExponential(1) + '°');
-      const mm = await page.evaluate(() => getCutMm());
-      check('the blade is where the click landed (' + s.mmAlong.toFixed(2) + ' mm)', Math.abs(mm - s.mmAlong) <= 0.051, mm + ' mm');
+      check('the square blade travels the piece\'s frame - plumb or level, not the bar\'s lean', angleDeg(b.n, travel) < 1e-4,
+        angleDeg(b.n, travel).toExponential(1) + '°');
       const r = await page.evaluate(id => __cut(id), id);
       check('Cut made two pieces', !!r.got && r.models === 2, r.status);
       if (r.got) {
-        const lo = Math.min(...r.src.soup.filter((_, i) => i % 3 === 0));
-        const capA = capOf(r.got.left, [lo + r.got.mm, 0, 0], [1, 0, 0]);
-        const capB = capOf(r.got.right, [lo + r.got.mm, 0, 0], [1, 0, 0]);
+        const k = 'xyz'.indexOf(r.got.axis), e = [0, 0, 0]; e[k] = 1;
+        const lo = Math.min(...r.src.soup.filter((_, i) => i % 3 === k));
+        const plane = [0, 0, 0]; plane[k] = lo + r.got.mm;
+        const capA = capOf(r.got.left, plane, e), capB = capOf(r.got.right, plane, e);
         const nW = capA.n && applyD(r.src.Mw, capA.n);
-        check('the cut face is square to the tipped bar in world space, the whole 12 x 8 section',
-          !!nW && angleDeg(nW, L.dir) < 1e-4 && Math.abs(capA.area - 96) < 1e-3 && Math.abs(capB.area - 96) < 1e-3,
-          (nW ? angleDeg(nW, L.dir).toExponential(1) + '°, ' : 'no face, ') + capA.area.toFixed(3) + ' / ' + capB.area.toFixed(3) + ' mm²');
-        check('both halves keep the tipped pose', r.plate.length === 2 && r.plate.every(p => p.quat && quatSame(p.quat, r.src.quat)));
+        const want = 96 / Math.abs(V.dot(V.norm(dir), V.norm(travel)));
+        check('the cut face lies on the travel line\'s plane, the whole oblique section (' + want.toFixed(3) + ' mm²)',
+          !!nW && angleDeg(nW, travel) < 1e-4 && Math.abs(capA.area - want) < 1e-2 && Math.abs(capB.area - want) < 1e-2,
+          (nW ? angleDeg(nW, travel).toExponential(1) + '°, ' : 'no face, ') + capA.area.toFixed(3) + ' / ' + capB.area.toFixed(3) + ' mm²');
+        check('both halves keep the pose', r.plate.length === 2 && r.plate.every(p => p.quat && quatSame(p.quat, r.src.quat)));
       }
     }
   }

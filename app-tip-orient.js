@@ -45,29 +45,39 @@
   }
 
   /* Turn the piece by R about a WORLD axis: premultiply, so the axis means
-     the same thing however the piece is already lying. */
+     the same thing however the piece is already lying - then BAKE it: the
+     turn written into the geometry, the mesh at identity, the fields 0, one
+     Undo with the snapshot undo() took (nsoBakePlacedPose, app-core.js). */
   function turnBy(p, q) {
     var next = q.clone().multiply(p.mesh.quaternion.clone());
     setOrientFromQuat(p, next);
+    if (typeof nsoBakePlacedPose === 'function') nsoBakePlacedPose(p);
+    if (window.nsoRotate && window.nsoRotate.refresh) window.nsoRotate.refresh();
+  }
+  /* The piece's frame as it lies (pieceFrame, nso-bounds.js): its footprint's
+     level long and short sides and its height. Plate X / Z when nothing is
+     there to measure. */
+  function frameOf(p) {
+    var f = (window.nsoBounds && p) ? window.nsoBounds.pieceFrame(p) : null;
+    if (f) return f;
+    return { long: new THREE.Vector3(1, 0, 0), short: new THREE.Vector3(0, 0, 1),
+             lengths: { long: p.width || 0, short: p.depth || 0, height: p.height || 0 } };
   }
 
   /* ---- Tip on side ------------------------------------------------------
      Lay it down on its long horizontal edge: pivot a quarter turn about the
-     axis that edge RUNS ALONG, which is the longer of the two horizontal
-     dimensions the piece currently presents. A piece 80 long and 40 deep has
-     its long bottom edges running along X, so it tips about X and lands on
-     the side face; 40 by 80 tips about Z instead. Reading the dimensions
-     each time rather than assuming an axis is what makes this work on a
-     piece that has already been turned. */
+     line that edge RUNS ALONG - the long side of the piece's footprint as it
+     lies (pieceFrame). A piece 80 long and 40 deep lying along X tips about X
+     and lands on its side face; turned 45 degrees, it tips about its own
+     45-degree length and still lands on a face, not on an edge. */
   function tipOnSide() {
     var p = piece();
     if (!p) { say('Select a piece first', true); return false; }
     if (blocked(p, 'tip on side')) return false;
     undo();
-    var w = p.width || 0, d = p.depth || 0;
-    var axis = (w >= d) ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 0, 1);
-    turnBy(p, new THREE.Quaternion().setFromAxisAngle(axis, Math.PI / 2));
-    say('Tip on side - onto its long ' + (w >= d ? 'X' : 'Z') + ' edge');
+    var f = frameOf(p);
+    turnBy(p, new THREE.Quaternion().setFromAxisAngle(f.long, Math.PI / 2));
+    say('Tip on side - onto its long edge');
     return true;
   }
 
@@ -89,19 +99,22 @@
     if (!p) { say('Select a piece first', true); return false; }
     if (blocked(p, 'stand')) return false;
     undo();
-    var w = p.width || 0, d = p.depth || 0, h = p.height || 0;
+    /* the footprint's sides, not the plate's axes: a piece turned 30 degrees
+       stands on the end of its own length */
+    var f = frameOf(p), L = f.lengths.long, S = f.lengths.short, h = f.lengths.height;
     var q;
-    if (w >= d && w >= h) {
-      q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), Math.PI / 2);
-      say('Stand - on its end, the ' + w.toFixed(0) + ' mm axis upright');
-    } else if (d >= w && d >= h) {
-      q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
-      say('Stand - on its end, the ' + d.toFixed(0) + ' mm axis upright');
+    if (L >= h) {
+      /* about the short side, pointed +X / +Z as the plate's Z / X were */
+      var a = f.short.clone();
+      if (a.x + a.z < 0) a.negate();
+      q = new THREE.Quaternion().setFromAxisAngle(a, Math.PI / 2);
+      say('Stand - on its end, the ' + L.toFixed(0) + ' mm axis upright');
     } else {
       /* Already the tallest thing about it, so there is nothing to stand up.
-         Turn it a quarter about X instead, which is what this button did
-         before and keeps a second press from being a dead click. */
-      q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2);
+         Turn it a quarter about its long side instead, which is what this
+         button did before (about X, for a piece lying as loaded) and keeps a
+         second press from being a dead click. */
+      q = new THREE.Quaternion().setFromAxisAngle(f.long, Math.PI / 2);
       say('Stand - already upright, turned a quarter instead');
     }
     turnBy(p, q);
@@ -110,15 +123,16 @@
 
   /* ---- Flip -------------------------------------------------------------
      Upside-down from wherever it is now: half a turn about a HORIZONTAL
-     axis, so whatever face is against the plate ends up on top. About world
-     X, which is horizontal whatever the piece has been doing - a half turn
-     about the piece's own up-axis would only spin it where it stands. */
+     axis, so whatever face is against the plate ends up on top. About the
+     footprint's long side (pieceFrame), which is level whatever the piece has
+     been doing - a half turn about the piece's own up-axis would only spin it
+     where it stands - and leaves the footprint where it was. */
   function flipOver() {
     var p = piece();
     if (!p) { say('Select a piece first', true); return false; }
     if (blocked(p, 'flip')) return false;
     undo();
-    turnBy(p, new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI));
+    turnBy(p, new THREE.Quaternion().setFromAxisAngle(frameOf(p).long, Math.PI));
     say('Flip - upside down');
     return true;
   }
@@ -281,8 +295,9 @@
     orientation: function () {
       var p = piece();
       if (!p) return null;
-      p.mesh.updateMatrixWorld(true);
-      var q = p.mesh.quaternion;
+      /* its body: the turn on the mesh after the turns baked into it since it
+         was loaded - a Tip is baked when it ends, so the mesh alone is identity */
+      var q = typeof nsoPieceBodyQ === 'function' ? nsoPieceBodyQ(p) : p.mesh.quaternion;
       var up = new THREE.Vector3(0, 1, 0).applyQuaternion(q);       // the piece's own up
       return { up: { x: +up.x.toFixed(6), y: +up.y.toFixed(6), z: +up.z.toFixed(6) },
                size: { w: +(p.width || 0).toFixed(4), d: +(p.depth || 0).toFixed(4),

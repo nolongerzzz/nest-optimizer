@@ -73,7 +73,7 @@ const pose = (page, id) => page.evaluate(id => {
   p.mesh.updateMatrixWorld(true);
   const bb = new THREE.Box3().setFromObject(p.mesh);
   return { x: p.x, z: p.z, liftY: p.liftY || 0, pos: p.mesh.position.toArray(),
-           quat: p.mesh.quaternion.toArray(), bottom: bb.min.y,
+           quat: p.mesh.quaternion.toArray(), body: nsoPieceBodyQ(p).toArray(), bottom: bb.min.y,
            status: document.getElementById('status').textContent };
 }, id);
 const dragTo = (page, id, x, z) => page.evaluate(([id, x, z]) => {
@@ -212,7 +212,9 @@ withApp(async (page, logs) => {
     await select(page, idB);
     await page.evaluate(() => { tiltSelected(1); liftSelected(1); liftSelected(1); });
     const up = await pose(page, idB);
-    check('tilted and lifted clear of the bed', up.bottom > 4 && up.quat[0] !== 0, up.bottom);
+    /* re-pinned (pose-bake): the Tilt is baked into the geometry when it
+       ends, so the tilt is read off the body, not the mesh (was up.quat[0]) */
+    check('tilted and lifted clear of the bed', up.bottom > 4 && Math.abs(up.body[0]) > 0.1, up.bottom);
     await select(page, idB);
     await press(page, '#btn-to-plate');
     const down = await pose(page, idB);

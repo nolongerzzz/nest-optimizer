@@ -50,8 +50,9 @@
    2. Tilt the TARGET one press and two: plain status, no "from skin tips", the
       bit laid onto the slope at the target's own angle, and the TRUE minimum
       distance between the two shells is the 0.18 mm that was asked for.
-   3. Tilt the BIT the same way: the same, with the bit straightened onto the
-      face.
+   3. Tilt the BIT the same way: the same gap. Since pose-bake the Tilt is
+      baked into the bit's geometry, so the seat takes the tilted bit as it
+      lies and turns nothing (it used to straighten it onto the face).
    4. The probe's own number: ~0 on a tilted flat face, while the mean measure
       it replaced still reads 1.07 and 2.31 at the same poses.
    5. A real contact skin still takes the tips path and still reports its
@@ -121,7 +122,7 @@ const pose = (page, id) => page.evaluate(id => {
   p.mesh.updateMatrixWorld(true);
   const bb = new THREE.Box3().setFromObject(p.mesh);
   return { x: p.x, z: p.z, liftY: p.liftY || 0, pos: p.mesh.position.toArray(),
-           quat: p.mesh.quaternion.toArray(), min: bb.min.toArray(), max: bb.max.toArray(),
+           quat: p.mesh.quaternion.toArray(), body: nsoPieceBodyQ(p).toArray(), min: bb.min.toArray(), max: bb.max.toArray(),
            status: document.getElementById('status').textContent };
 }, id);
 const worldSoup = (page, id) => page.evaluate(id => {
@@ -222,9 +223,12 @@ withApp(async (page, logs) => {
     b = await pose(page, idB);
     const d = await trueGap(page, idA, idB);
     check(n * 15 + ' deg: seats on the corner-ray path, not as a skin', st === SEATED_18, st);
+    /* re-pinned (pose-bake): was the bit's MESH turn against the target's
+       mesh turn; the target's tilt is baked into its geometry now, so it is
+       the bit's body against the target's body */
     check(n * 15 + ' deg: the bit is laid onto the slope, at the target\'s own angle',
-      b.quat.every((v, i) => near(v, a.quat[i], 1e-6)),
-      JSON.stringify(b.quat) + ' vs target ' + JSON.stringify(a.quat));
+      b.body.every((v, i) => near(v, a.body[i], 1e-6)),
+      JSON.stringify(b.body) + ' vs target ' + JSON.stringify(a.body));
     check(n * 15 + ' deg: TRUE minimum distance is the 0.18 that was asked for', near(d, 0.18, 1e-4), f4(d));
     check(n * 15 + ' deg: the probe reads a flat face as flat, where the mean measure read a relief',
       Math.abs(r.rise) < 0.01 && r.meanRise > 1, 'rise ' + f4(r.rise) + ', mean measure ' + f4(r.meanRise));
@@ -240,8 +244,15 @@ withApp(async (page, logs) => {
     b = await pose(page, idB);
     const d = await trueGap(page, idA, idB);
     check(n * 15 + ' deg: seats on the corner-ray path, not as a skin', st === SEATED_18, st);
-    check(n * 15 + ' deg: the bit is straightened onto the flat face',
-      b.quat.every((v, i) => near(v, [0, 0, 0, 1][i], 1e-6)), JSON.stringify(b.quat));
+    /* re-pinned (pose-bake): was "the bit is straightened onto the flat face"
+       (its mesh turned back to identity). The bit's tilt is baked into its
+       geometry when the Tilt ends - it is a finished, tilted piece - and the
+       seat reads its frame off it as it lies (pieceFrame, NSO_plugBasis): it
+       seats the tilted bit as it is, at the gap asked for, and turns nothing */
+    const tilt = 2 * Math.acos(Math.min(1, Math.abs(b.body[3]))) * 180 / Math.PI;
+    check(n * 15 + ' deg: the bit keeps its baked tilt - no turn on its mesh, its body still ' + n * 15 + ' deg',
+      b.quat.every((v, i) => near(v, [0, 0, 0, 1][i], 1e-9)) && near(tilt, n * 15, 1e-6),
+      JSON.stringify(b.quat) + ', body ' + tilt.toFixed(6) + ' deg');
     check(n * 15 + ' deg: TRUE minimum distance is the 0.18 that was asked for', near(d, 0.18, 1e-4), f4(d));
   }
 

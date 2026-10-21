@@ -190,6 +190,7 @@
   function invalidate(target) {
     geometriesOf(target).forEach(function (g) {
       cache.delete(g);
+      frameCache.delete(g);
       if (window.NSO_BVH) window.NSO_BVH.touch(g);     // a big piece's tree is stale: ask for the next one now
       if (positionOf(g)) {
         g.computeBoundingBox();
@@ -229,7 +230,205 @@
     return box;
   }
 
+  /* ---- THE PIECE'S FRAME --------------------------------------------------
+     The one answer to "which way does this piece lie": its footprint - the
+     narrowest rectangle round the shadow its vertices cast on the plate - as
+     two LEVEL unit vectors, the long side and the short side, and the plate
+     vertical. Every tool that needs the piece's axes asks this (pieceFrame);
+     none keeps a copy of its own. It is measured on the vertices through the
+     mesh's matrix, so it says the same thing of a piece whose turn is baked
+     into its geometry (identity rotation, the pose fields 0) and of one still
+     carrying a turn on its mesh mid-drag.
+
+     The rectangle is found by rotating calipers: the narrowest rectangle round
+     a convex polygon has a side along one of its edges, so each edge of the
+     shadow's hull is tried. Exact ties (a regular polygon - a cylinder's
+     shadow - has one per edge) go to the side nearest the plate's X, so a
+     round piece reads square to the plate rather than at whatever edge came
+     first. Within SQUARE_WITHIN of square there is no long side (`square`).
+
+     Cached per geometry like the box above, keyed on the position attribute,
+     its version and size, and the 3 x 3 of the matrix: a drag that only
+     translates costs a lookup. HELD: while a pose drag is in hand the frame
+     taken at the press is what every caller gets (holdFrame / releaseFrame),
+     so the axes in hand do not swing under the pointer. */
+  var frameCache = new WeakMap();
+  var SQUARE_WITHIN = 0.05;
+  var TIE = 1e-6;
+
+  function hullOf(geometry, r) {
+    var pos = positionOf(geometry);
+    if (!pos || !pos.count) return [];
+    var arr = pos.array, n = pos.count, stride = pos.data ? pos.data.stride : 3, off = pos.offset || 0;
+    if (pos.data) arr = pos.data.array;
+    var r00 = r[0], r20 = r[2], r01 = r[3], r21 = r[5], r02 = r[6], r22 = r[8];
+    var X = new Float64Array(n), Z = new Float64Array(n), i, o;
+    /* Akl-Toussaint: the eight extreme points bound an octagon; nothing
+       strictly inside it can be on the hull. */
+    var ext = [[Infinity, -1], [-Infinity, -1], [Infinity, -1], [-Infinity, -1],
+               [Infinity, -1], [-Infinity, -1], [Infinity, -1], [-Infinity, -1]];
+    for (i = 0; i < n; i++) {
+      o = i * stride + off;
+      var x = arr[o], y = arr[o + 1], z = arr[o + 2];
+      var px = r00 * x + r01 * y + r02 * z, pz = r20 * x + r21 * y + r22 * z;
+      X[i] = px; Z[i] = pz;
+      var k = [px, px, pz, pz, px + pz, px + pz, px - pz, px - pz];
+      for (var j = 0; j < 8; j++) {
+        if (j % 2 === 0 ? k[j] < ext[j][0] : k[j] > ext[j][0]) { ext[j][0] = k[j]; ext[j][1] = i; }
+      }
+    }
+    var oct = [ext[0][1], ext[7][1], ext[2][1], ext[5][1], ext[1][1], ext[6][1], ext[3][1], ext[4][1]];
+    // order the octagon's corners round the centre of the box
+    var cx = 0, cz = 0;
+    oct.forEach(function (q) { cx += X[q]; cz += Z[q]; });
+    cx /= 8; cz /= 8;
+    oct = oct.filter(function (q, t) { return oct.indexOf(q) === t; })
+      .sort(function (a, b) { return Math.atan2(Z[a] - cz, X[a] - cx) - Math.atan2(Z[b] - cz, X[b] - cx); });
+    var inside = function (px, pz) {
+      if (oct.length < 3) return false;
+      for (var t = 0; t < oct.length; t++) {
+        var a = oct[t], b = oct[(t + 1) % oct.length];
+        if ((X[b] - X[a]) * (pz - Z[a]) - (Z[b] - Z[a]) * (px - X[a]) <= 1e-12) return false;
+      }
+      return true;
+    };
+    var pts = [];
+    for (i = 0; i < n; i++) if (!inside(X[i], Z[i])) pts.push([X[i], Z[i]]);
+    pts.sort(function (a, b) { return a[0] - b[0] || a[1] - b[1]; });
+    var cross = function (a, b, c) { return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]); };
+    var lower = [], upper = [];
+    for (i = 0; i < pts.length; i++) {
+      while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], pts[i]) <= 0) lower.pop();
+      lower.push(pts[i]);
+    }
+    for (i = pts.length - 1; i >= 0; i--) {
+      while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], pts[i]) <= 0) upper.pop();
+      upper.push(pts[i]);
+    }
+    lower.pop(); upper.pop();
+    return lower.concat(upper);
+  }
+
+  /* The narrowest rectangle round the hull: { d: [x, z] unit along one side,
+     ed, en: the extents along d and along its normal, mid: [x, z] its centre }. */
+  function narrowest(hull) {
+    if (!hull.length) return null;
+    var dirs = [];
+    for (var i = 0; i < hull.length; i++) {
+      var a = hull[i], b = hull[(i + 1) % hull.length], dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz);
+      if (l > 1e-9) dirs.push([dx / l, dz / l]);
+    }
+    if (!dirs.length) dirs.push([1, 0]);
+    var best = null, cands = [];
+    dirs.forEach(function (d) {
+      var lo0 = Infinity, hi0 = -Infinity, lo1 = Infinity, hi1 = -Infinity;
+      hull.forEach(function (p) {
+        var s = p[0] * d[0] + p[1] * d[1], t = -p[0] * d[1] + p[1] * d[0];
+        if (s < lo0) lo0 = s; if (s > hi0) hi0 = s;
+        if (t < lo1) lo1 = t; if (t > hi1) hi1 = t;
+      });
+      var c = { d: d, ed: hi0 - lo0, en: hi1 - lo1, area: (hi0 - lo0) * (hi1 - lo1),
+                mid: [((lo0 + hi0) / 2) * d[0] - ((lo1 + hi1) / 2) * d[1], ((lo0 + hi0) / 2) * d[1] + ((lo1 + hi1) / 2) * d[0]] };
+      cands.push(c);
+      if (!best || c.area < best.area) best = c;
+    });
+    /* exact ties: the one whose long side lies nearest the plate's X */
+    var nearX = function (c) { var L = c.ed >= c.en ? c.d : [-c.d[1], c.d[0]]; return Math.abs(L[0]); };
+    cands.forEach(function (c) {
+      if (c.area <= best.area * (1 + TIE) + 1e-12 && nearX(c) > nearX(best) + 1e-12) best = c;
+    });
+    return best;
+  }
+
+  function frameUnder(g, e) {
+    var pos = positionOf(g);
+    if (!pos) return null;
+    var r = rotOf(e);
+    var hit = frameCache.get(g);
+    if (hit && hit.pos === pos && hit.version === pos.version && hit.count === pos.count && sameRot(hit.rot, r)) return hit.f;
+    var rect = narrowest(hullOf(g, r));
+    if (!rect) return null;
+    var L = rect.ed >= rect.en ? rect.d : [-rect.d[1], rect.d[0]];
+    var lenL = Math.max(rect.ed, rect.en), lenS = Math.min(rect.ed, rect.en);
+    // canonical sense: the long side points +X (or +Z when square to X)
+    if (L[0] < -1e-12 || (Math.abs(L[0]) <= 1e-12 && L[1] < 0)) L = [-L[0], -L[1]];
+    var f = { long: [L[0], 0, L[1]], short: [-L[1], 0, L[0]], lengths: { long: lenL, short: lenS },
+              mid: rect.mid, square: !(lenL > 0) || (lenL - lenS) <= SQUARE_WITHIN * lenL };
+    frameCache.set(g, { pos: pos, version: pos.version, count: pos.count, rot: r, f: f });
+    return f;
+  }
+
+  var held = new WeakMap();      // placed entry -> the frame taken at the press
+  function vec(a) { var three = T(); return new three.Vector3(a[0], a[1], a[2]); }
+  /** The piece's frame as it lies now: { long, short, up } unit Vector3s (long
+      and short level, long x up = short), { lengths: { long, short } } in mm,
+      `centre` (the footprint's middle, at the piece's lowest point) and
+      `square` (no long side). `p` is a placed entry or a mesh. */
+  function pieceFrame(p) {
+    var three = T();
+    if (!three || !p) return null;
+    if (held.has(p)) return cloneFrame(held.get(p));
+    var mesh = p.mesh || (p.isMesh ? p : null);
+    if (!mesh || !mesh.geometry) return null;
+    mesh.updateMatrixWorld(true);
+    var e = mesh.matrixWorld.elements, f = frameUnder(mesh.geometry, e);
+    if (!f) return null;
+    var box = worldBox(mesh);
+    var L = exactSide(p.mesh ? p : null, mesh, f.long);
+    return {
+      long: L, short: new three.Vector3(-L.z, 0, L.x), up: new three.Vector3(0, 1, 0),
+      lengths: { long: f.lengths.long, short: f.lengths.short, height: box.max.y - box.min.y },
+      centre: new three.Vector3(f.mid[0] + e[12], box.min.y, f.mid[1] + e[14]),
+      square: f.square
+    };
+  }
+  /* A baked piece's vertices are Float32, so the side measured off them is
+     off its true line by up to ~1e-7 rad, and a run of actions each aimed by
+     it would walk. The piece's body axes (nsoPieceBodyQ, app-core.js: its
+     load axes where they point now) are exact: where one of their shadows lies
+     within SNAP_RAD of the measured side, modulo a quarter turn, the side IS
+     that line, taken exactly (canonical sense kept). Elsewhere the measured
+     side stands - nothing here can move the frame further than the noise. */
+  var SNAP_RAD = 1e-5;
+  function exactSide(p, mesh, L) {
+    var three = T(), out = vec(L);
+    if (!p || typeof window.nsoPieceBodyQ !== 'function') return out;
+    var q = window.nsoPieceBodyQ(p), best = null;
+    [[1, 0, 0], [0, 1, 0], [0, 0, 1]].forEach(function (b) {
+      var a = new three.Vector3(b[0], b[1], b[2]).applyQuaternion(q);
+      a.y = 0;
+      if (a.lengthSq() < 0.25) return;                 // a steep axis casts too short a shadow to aim by
+      a.normalize();
+      [a, new three.Vector3(-a.z, 0, a.x)].forEach(function (c) {
+        var ang = Math.atan2(Math.abs(c.x * out.z - c.z * out.x), Math.abs(c.x * out.x + c.z * out.z));
+        if (ang < SNAP_RAD && (!best || ang < best.ang)) best = { ang: ang, c: c };
+      });
+    });
+    if (!best) return out;
+    var c = best.c.clone();
+    if (c.dot(out) < 0) c.negate();
+    return c;
+  }
+  function cloneFrame(f) {
+    return { long: f.long.clone(), short: f.short.clone(), up: f.up.clone(),
+             lengths: { long: f.lengths.long, short: f.lengths.short, height: f.lengths.height },
+             centre: f.centre.clone(), square: f.square };
+  }
+  /** Hold the frame `p` has now until releaseFrame(p): a pose drag's press. */
+  function holdFrame(p) {
+    if (!p) return null;
+    held.delete(p);
+    var f = pieceFrame(p);
+    if (f) held.set(p, f);
+    return f;
+  }
+  function releaseFrame(p) { if (p) held.delete(p); }
+
   window.nsoBounds = {
+    pieceFrame: pieceFrame,
+    holdFrame: holdFrame,
+    releaseFrame: releaseFrame,
+    SQUARE_WITHIN: SQUARE_WITHIN,
     localBox: localBox,
     worldBox: worldBox,
     restOffsets: restOffsets,
@@ -240,4 +439,5 @@
     has: function (geometry) { return cache.has(geometry); }
   };
   window.nsoInvalidatePieceBounds = invalidate;
+  window.pieceFrame = pieceFrame;
 })();

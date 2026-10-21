@@ -169,6 +169,27 @@ async function partB1(page) {
      (it was +90 until the pose buttons moved onto nsoRotate.turn). */
   let found = await after(page, 'rotate', () => rotateSelected(1));
   ok(found.length === 0, 'a plain 90 yaw stays consistent', texts(found));
+  /* pose-bake: the 90 is baked into the geometry when it ends - the record
+     and the mesh are back at 0 and the piece's body is the -90. A pose can
+     still sit on a record a non-verb wrote (a 3MF scene's, the nest's); that
+     is what the rest of B1 is about, so it is written there straight. */
+  const baked = await page.evaluate(() => {
+    const pm = state.placed.find(p => p && p.mesh && p.sourceId === getActiveModel().id);
+    const body = new THREE.Euler().setFromQuaternion(nsoPieceBodyQ(pm), 'XYZ');
+    return { record: pm.rotY || 0, mesh: pm.mesh.rotation.y, body: body.y * 180 / Math.PI };
+  });
+  ok(baked.record === 0 && baked.mesh === 0 && Math.abs(baked.body + 90) < 1e-6,
+     'the 90 is baked: record and mesh at 0, the body at -90', JSON.stringify(baked));
+  await page.evaluate(() => {
+    const pm = state.placed.find(p => p && p.mesh && p.sourceId === getActiveModel().id);
+    nsoPoseHome(pm);
+    pm.rotY = -Math.PI / 2; applyMeshRotation(pm);
+  });
+  found = await after(page, 'a pose on the record', () => {});
+  ok(found.length === 0, 'a pose written to the record stays consistent', texts(found));
+  /* the rotate's own late checks (CHECK_DELAYS, to 2 s) run out first, so the
+     phantom below is named by the step that made it, as it was before */
+  await page.waitForTimeout(2100);
 
   /* FIXED in the app (2026-09-25) and retired here the way this file says a
      fixed case is. Seal rebuilt the mesh at identity and left the record at

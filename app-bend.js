@@ -88,6 +88,55 @@ function NSO_bendFrameMatches(m) {
          Math.abs((hi[1] - lo[1]) - (bb.max.z - bb.min.z)) < 1e-3;
 }
 
+/* THE PIECE'S FRAME. Bend finds the piece's length along a raw axis, and a
+   pose is baked into the geometry when it ends (app-core.js
+   nsoBakePlacedPose), so a bar turned 30 degrees has no raw axis along its
+   length any more. Bend works in the piece's frame instead - pieceFrame
+   (nso-bounds.js), the one every tool reads: when the footprint's long side
+   is not on a raw axis (taken modulo a quarter turn), Bend reads, previews,
+   marks and is clicked on the soup turned about the vertical to put that
+   side on raw X (`f`, a stand-in model), and its result is turned back
+   before it is committed. `T` carries f's display frame into the mesh's.
+   A piece lying square is its own frame: f is the model, T the identity. */
+function NSO_bendSpace(m) {
+  var mesh = NSO_bendMeshOf(m), B = NSO_bendUI();
+  var same = { f: m, T: null, toRaw: function (t) { return t; } };
+  if (typeof THREE === 'undefined' || !mesh || typeof nsoBounds === 'undefined' || !nsoBounds.pieceFrame || typeof nsoRawTurnRows !== 'function') return same;
+  mesh.updateMatrixWorld(true);
+  var fr = nsoBounds.pieceFrame(mesh);
+  if (!fr) return same;
+  var inv = new THREE.Matrix4().copy(mesh.matrixWorld).invert();
+  var L = fr.long.clone().transformDirection(inv);
+  var phi = Math.atan2(-L.z, L.x);                        // the long side's heading in the mesh's frame
+  phi -= Math.round(phi / (Math.PI / 2)) * (Math.PI / 2);  // a quarter turn is a raw axis already
+  if (Math.abs(phi) < 1e-6) return same;
+  var key = phi.toFixed(9);
+  if (B.space && B.space.m === m && B.space.raw === m.rawTris && B.space.key === key) return B.space;
+  var q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -phi);
+  var R = nsoRawTurnRows(q), Ri = nsoRawTurnRows(q.clone().invert());
+  var soup = nsoTurnRaw(m.rawTris, R);
+  var geo = rawResultToDisplayGeometry(soup);
+  var f = { id: m.id, name: m.name, rawTris: soup, rawAxis: 'zup', geometry: geo,
+            centerOffset: computeCenterOffsetFromRaw(soup) };
+  /* f-local x' = R (x + oM) - cF, so x = R^-1 (x' + cF) - oM */
+  if (!m.geometry.boundingBox) m.geometry.computeBoundingBox();
+  var off = m.centerOffset || { x: 0, y: 0, z: 0 };
+  var gc = m.geometry.boundingBox.getCenter(new THREE.Vector3());
+  var lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity], r = m.rawTris;
+  for (var i = 0; i < r.length; i += 3) {
+    var d = [r[i], r[i + 2], -r[i + 1]];
+    for (var k = 0; k < 3; k++) { if (d[k] < lo[k]) lo[k] = d[k]; if (d[k] > hi[k]) hi[k] = d[k]; }
+  }
+  var oM = new THREE.Vector3((lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2).sub(gc);
+  var cF = new THREE.Vector3(f.centerOffset.x, f.centerOffset.y, f.centerOffset.z);
+  var T = new THREE.Matrix4().makeTranslation(-oM.x, -oM.y, -oM.z)
+    .multiply(new THREE.Matrix4().makeRotationFromQuaternion(q.clone().invert()))
+    .multiply(new THREE.Matrix4().makeTranslation(cF.x, cF.y, cF.z));
+  B.space = { m: m, raw: m.rawTris, key: key, f: f, T: T,
+              toRaw: function (t) { return nsoTurnRaw(t, Ri); } };
+  return B.space;
+}
+
 /* ---------------------------------------------------------------- drawing */
 
 function NSO_bendRemoveGhost() {
@@ -168,9 +217,11 @@ function NSO_bendFollow() {
   var B = NSO_bendUI(), m = NSO_bendModel(), mesh = m && NSO_bendMeshOf(m);
   if (!mesh) return;
   mesh.updateMatrixWorld(true);
+  var T = NSO_bendSpace(m).T;
   [B.ghost, B.marker].forEach(function (o) {
     if (!o) return;
     o.matrix.copy(mesh.matrixWorld);
+    if (T) o.matrix.multiply(T);
     o.matrixWorldNeedsUpdate = true;
   });
 }
@@ -188,7 +239,7 @@ function NSO_bendLoad() {
   B.modelId = m ? m.id : null; B.soup = m ? m.rawTris : null; B.result = null; B.key = '';
   if (!m) { B.read = null; NSO_bendReadout('Select a piece to bend.', true); NSO_bendClear(); return; }
   var rd;
-  try { rd = NSO_bendRead(m.rawTris); } catch (err) { rd = { ok: false, reason: (err && err.message) || String(err) }; }
+  try { rd = NSO_bendRead(NSO_bendSpace(m).f.rawTris); } catch (err) { rd = { ok: false, reason: (err && err.message) || String(err) }; }
   B.read = rd;
   var sel = NSO_bendEl('sel-bend-toward'), rollRow = NSO_bendEl('bend-roll-row');
   if (!rd.ok) {
@@ -239,14 +290,14 @@ function NSO_bendPreview() {
   var o = NSO_bendOpts();
   var key = m.id + '|' + JSON.stringify(o);
   if (B.key === key && B.soup === m.rawTris && B.result) { NSO_bendSyncButtons(); return B.result; }
-  var r;
-  try { r = NSO_bendRaw(m.rawTris, o); } catch (err) { r = { ok: false, reason: (err && err.message) || String(err) }; }
+  var r, f = NSO_bendSpace(m).f;
+  try { r = NSO_bendRaw(f.rawTris, o); } catch (err) { r = { ok: false, reason: (err && err.message) || String(err) }; }
   B.result = r; B.key = key; B.soup = m.rawTris;
   var k = B.read.axisIdx, plane = B.read.min + (+o.where || 0);
-  var aligned = NSO_bendFrameMatches(m);
-  if (aligned && o.where != null) NSO_bendSetMarker(m, k, plane); else NSO_bendRemoveMarker();
+  var aligned = NSO_bendFrameMatches(f);
+  if (aligned && o.where != null) NSO_bendSetMarker(f, k, plane); else NSO_bendRemoveMarker();
   if (r.ok) {
-    if (aligned) NSO_bendSetGhost(m, r.tris); else NSO_bendRemoveGhost();
+    if (aligned) NSO_bendSetGhost(f, r.tris); else NSO_bendRemoveGhost();
     NSO_bendReadout(NSO_bendFmtDeg(r.angleDeg) + ' toward ' + r.toward + (r.roll ? ' rolled ' + r.roll + '°' : '') +
       ' at ' + r.whereMm.toFixed(1) + ' mm, radius ' + r.radius.toFixed(2) + ' mm · the arc runs ' + r.zone.fromMm.toFixed(1) +
       '–' + r.zone.toMm.toFixed(1) + ' mm · ' + r.counts.trisIn + ' → ' + r.counts.trisOut + ' faces' +
@@ -313,11 +364,11 @@ function NSO_bendSelectedModel(opts) {
     }
     return { ok: false, reason: 'painted faces: ' + painted, painted: painted };
   }
-  var B = NSO_bendUI(), r;
+  var B = NSO_bendUI(), r, space = NSO_bendSpace(m);
   var o = opts || NSO_bendOpts();
   var key = m.id + '|' + JSON.stringify(o);
   if (!opts && B.result && B.key === key && B.soup === m.rawTris) r = B.result;
-  else r = NSO_bendRaw(m.rawTris, o);
+  else r = NSO_bendRaw(space.f.rawTris, o);
   if (!r.ok) {
     if (typeof setStatus === 'function') setStatus('Bend refused - piece unchanged (' + r.reason + ')', true);
     return r;
@@ -326,7 +377,7 @@ function NSO_bendSelectedModel(opts) {
   var txt = 'Bend done - ' + NSO_bendFmtDeg(r.angleDeg) + ' toward ' + r.toward + (r.roll ? ' rolled ' + r.roll + '°' : '') + ' at ' +
     r.whereMm.toFixed(1) + ' mm, radius ' + r.radius.toFixed(2) + ' mm; ' + r.counts.trisIn + ' → ' + r.counts.trisOut +
     ' faces; section held to ' + r.sectionWorstMm.toExponential(1) + ' mm';
-  NSO_sculptCommitRaw(m, r.tris, 'bendReplace', txt);
+  NSO_sculptCommitRaw(m, space.toRaw(r.tris), 'bendReplace', txt);
   // The commit re-seats it on the plate. A bend that rises out of the plate's
   // plane leaves it standing up - say so, with the numbers.
   var hAfter = m.size ? m.size.y : null;
@@ -350,9 +401,12 @@ if (typeof document !== 'undefined') {
       var hits = state.raycaster.intersectObject(mesh, false);
       if (!hits.length) return;
       mesh.updateMatrixWorld(true);
-      var local = hits[0].point.clone().applyMatrix4(new THREE.Matrix4().copy(mesh.matrixWorld).invert());
+      var space = NSO_bendSpace(m);
+      var toF = new THREE.Matrix4().copy(mesh.matrixWorld);
+      if (space.T) toF.multiply(space.T);
+      var local = hits[0].point.clone().applyMatrix4(toF.invert());
       var k = B.read.axisIdx, ax = NSO_bendRawToDisplayAxis(k);
-      var raw = NSO_bendDisplayCoordToRaw(m, k, local[ax.a]);
+      var raw = NSO_bendDisplayCoordToRaw(space.f, k, local[ax.a]);
       var where = Math.round((raw - B.read.min) * 10) / 10;
       var w = NSO_bendEl('inp-bend-where');
       if (w) w.value = where.toFixed(1);
