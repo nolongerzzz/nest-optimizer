@@ -179,7 +179,7 @@
     },
     // --- a support object's own layers, read off its geometry ---------------
     supportSheet: {
-      interfaceLayers: 2, transitionLayers: 2, closeMm: 0.5,
+      interfaceLayers: 2, transitionLayers: 2, closeMm: 0.5, stairLayers: 1,
       source: 'nso_support_interface.js sheet(): SHEET_ROLES transition, transition, interface, ' +
               'interface - two one-direction transition layers under two interface layers, open ' +
               'lines at 0.84 mm (0.40 line + 0.44 channel since supports-print-1). closeMm is STATED, not measured: a ' +
@@ -1686,9 +1686,12 @@
    * under one of its hosts' sections within gap + one layer above (the host's
    * underside), with nothing of the support itself over it: the islands of
    * the layer that reach under the host, closed by closeMm so a layer of
-   * lines reads as the footprint it covers, less what is within closeMm of
-   * the support's own next layer, opened by half a line (a strip narrower
-   * than a line is an edge, not a top). From each top down the sheet is
+   * lines reads as the footprint it covers, less the support's own next
+   * layer grown by half a line (an edge the two share is not a top), opened
+   * by half a line (a strip narrower than a line is an edge, not a top). A
+   * stair (nso_support_interface.js, THE STAIR) is a top at every layer:
+   * each strip's down-slope pitch lies under the part, the next strip a
+   * pitch up the slope - grown by closeMm, the next strip hid it. From each top down the sheet is
    * followed island by island - a layer's islands that overlap the sheet's on
    * the layer above, as each layer's lines cross the ones above (the bottom
    * transition layer runs tip to tip, past the top's footprint): the top 2
@@ -1705,6 +1708,10 @@
     var C = CONSTANTS.supportSheet;
     var NI = C.interfaceLayers, NT = C.transitionLayers, R = C.closeMm;
     var gap = o.supportGapMm, w = o.outerWallWidthMm;
+    /* a top may lie a layer further under the host than a sheet does: a
+       stair's strips stand on the 0.84 grid, so the one a layer lands on is
+       up to a pitch's rise below it (C.stairLayers) */
+    var stairH = (C.stairLayers || 0) * (planes.length ? planes[planes.length - 1].h : 0.2);
     var parts = perObject.filter(function (Q) { return Q.role !== 'support'; });
     var n = planes.length;
     perObject.forEach(function (P) {
@@ -1719,23 +1726,53 @@
         return feet[i];
       };
       var tops = [], held = {};
+      /* a footprint with its holes filled: what lies OUTSIDE a layer, not in
+         a channel of it */
+      function filled(cs) {
+        return g.isEmpty(cs) ? cs : g.of(g.polys(cs).filter(function (Pl) {
+          var a2 = 0;
+          for (var q = 0; q < Pl.length; q++) { var u = Pl[q], v = Pl[(q + 1) % Pl.length]; a2 += u[0] * v[1] - v[0] * u[1]; }
+          return a2 > 0;
+        }), 'Positive');
+      }
+      /* the part of layer i under the host's sections `over` - closed, less
+         `cover` grown by half a line, opened by half a line */
+      function topUnder(i, over, cover) {
+        var H = g.unionAll(over.map(function (x) { return x.cs; }));
+        // most layers reach under no host at all: one test, before the islands
+        if (!(g.area(g.inter(P.S[i], H)) > 1e-6)) return null;
+        var isl = g.parts(P.S[i]).filter(function (p) { return g.area(g.inter(p, H)) > 1e-6; });
+        if (!isl.length) return null;
+        var t = g.offset(g.offset(g.unionAll(isl), R), -R);
+        t = g.diff(t, g.offset(cover, w / 2));
+        t = g.dropSmall(g.offset(g.offset(t, -w / 2), w / 2), minOver);
+        return g.isEmpty(t) ? null : t;
+      }
+      function overAt(i, d) {
+        var over = [];
+        layersOver(planes, i, d).forEach(function (k) {
+          hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) over.push({ Q: Q, cs: Q.S[k] }); });
+        });
+        return over;
+      }
       for (var i = 0; i < n; i++) {
         tops.push(null);
         if (g.isEmpty(P.S[i])) continue;
-        var over = [];
-        layersOver(planes, i, gap).forEach(function (k) {
-          hosts.forEach(function (Q) { if (!g.isEmpty(Q.S[k])) over.push({ Q: Q, cs: Q.S[k] }); });
-        });
-        if (!over.length) continue;
-        var H = g.unionAll(over.map(function (x) { return x.cs; }));
-        // most layers reach under no host at all: one test, before the islands
-        if (!(g.area(g.inter(P.S[i], H)) > 1e-6)) continue;
-        var isl = g.parts(P.S[i]).filter(function (p) { return g.area(g.inter(p, H)) > 1e-6; });
-        if (!isl.length) continue;
-        var t = g.offset(g.offset(g.unionAll(isl), R), -R);
-        t = g.diff(t, g.offset(P.footAt(i + 1), R));
-        t = g.dropSmall(g.offset(g.offset(t, -w / 2), w / 2), minOver);
-        if (g.isEmpty(t)) continue;
+        var over = overAt(i, gap);
+        var t = over.length ? topUnder(i, over, P.footAt(i + 1)) : null;
+        /* A STAIR'S STRIP (C.stairLayers): its strips stand on the 0.84 grid,
+           so the one a layer of the part lands on can lie a layer further
+           under it than a sheet does - a top there too, where it is OUTSIDE
+           the support's next layer (a flat sheet's I1 seen through a channel
+           of I2 is not) */
+        if (stairH > 0) {
+          var deep = overAt(i, gap + stairH);
+          if (deep.length > over.length) {
+            var t2 = topUnder(i, deep, filled(P.footAt(i + 1)));
+            if (t2) { t = t ? g.union(t, t2) : t2; over = deep; }
+          }
+        }
+        if (!t) continue;
         tops[i] = t;
         over.forEach(function (x) { if (!g.isEmpty(g.inter(x.cs, t))) held[x.Q.id] = x.Q; });
       }
@@ -1748,17 +1785,21 @@
       tops.forEach(function (t, i0) {
         if (!t) return;
         var lvl = g.parts(P.S[i0]).filter(function (p) { return !g.isEmpty(g.inter(p, t)); });
-        var lo = i0;
-        for (var m = 0; m < NI + NT && lvl.length; m++) {
-          var j = i0 - m;
-          (m < NI ? zones[j].i : zones[j].t).push(g.unionAll(lvl));
-          lo = j;
+        var lo = i0, m = 0, prevFoot = null;
+        /* past NI + NT the transition runs on while a layer repeats the
+           footprint of the one over it: a stair's strips stand several
+           layers alike where the slope is steep (the run under a top is the
+           same sheet, as T1 and T2 are) */
+        for (; lvl.length; m++) {
+          var j = i0 - m, U = g.unionAll(lvl), foot = g.offset(g.offset(U, R), -R);
+          if (m >= NI + NT && !(prevFoot && g.area(g.diff(foot, prevFoot)) + g.area(g.diff(prevFoot, foot)) <= w * w)) break;
+          (m < NI ? zones[j].i : zones[j].t).push(U);
+          lo = j; prevFoot = foot;
           if (j - 1 < 0) { lvl = []; break; }
-          var U = g.unionAll(lvl);
           lvl = g.parts(P.S[j - 1]).filter(function (p) { return g.area(g.inter(p, U)) > 1e-6; });
         }
         sheets.push({ topLayer: i0, zLo: planes[lo].printZ - planes[lo].h, zHi: planes[i0].printZ,
-                      areaMm2: g.area(t), tips: m === NI + NT ? lvl.length : 0 });
+                      areaMm2: g.area(t), tips: m >= NI + NT ? lvl.length : 0 });
       });
       var counts = { 'Support': 0, 'Support transition': 0, 'Support interface': 0 };
       P.layers.forEach(function (L, j) {

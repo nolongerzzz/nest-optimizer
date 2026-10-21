@@ -363,11 +363,22 @@ right over the sheet that holds it.
   A support's TOP is the part of a layer lying under its host's section
   within gap (0.18 mm) + one layer, with nothing of the support over it.
   The layer's islands that reach under the host are closed by 0.5 mm, so a
-  layer of 0.84 mm-pitch lines reads as the footprint it holds. From each top
+  layer of 0.84 mm-pitch lines reads as the footprint it holds, less its own
+  next layer grown by half a line. From each top
   the sheet is followed down island by island (each layer's lines cross the
   ones above): its top 2 layers are **Support interface**, the 2 under them
   **Support transition** (`nso_support_interface.js` SHEET_ROLES), and every
-  other line of the object is **Support**. No wall, infill or overhang wall
+  other line of the object is **Support**. A STAIR (docs/SUPPORT-INTERFACE.md
+  section 7) is read by the same rule, with two allowances: a top may lie a
+  layer deeper under the host (`supportSheet.stairLayers`) where it lies
+  outside its next layer's outline - a strip on the 0.84 grid lies up to a
+  pitch's rise under the part; a flat sheet's I1 seen through a channel of
+  I2 is inside it - and past its 2 + 2 layers the transition runs on while a
+  layer repeats the footprint of the one over it (a steep stair stands
+  several layers alike). The next layer was grown by 0.5 mm, which hid each
+  strip's exposed pitch under the next strip. The arc's stair: every one of
+  its 49 layers interface or transition; the clip coupon unchanged
+  (`slicer:supports` 26 of 26). No wall, infill or overhang wall
   comes out of a support object: the same beads, one type, as Bambu prints
   support.
 - **The host is credited.** Each of the host's overhang islands is cut,
