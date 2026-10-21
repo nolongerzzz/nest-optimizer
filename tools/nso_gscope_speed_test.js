@@ -381,7 +381,17 @@ withApp(async (page, logs) => {
     R.pull && R.plate2 && R.pull.followed >= R.pull.n - 1 && R.plate2.followed >= R.plate2.n - 1, R.pull && R.plate2 && (R.pull.followed + '/' + R.pull.n + ', ' + R.plate2.followed + '/' + R.plate2.n));
   check('2a. orbit: the main thread\'s work per frame <= 33 ms (30 fps) on ' + path.basename(FILE), R.orbit.cpuPerFrame <= 33,
     R.orbit.cpuPerFrame + ' ms; the frame rate here is the software GPU\'s, ' + R.orbit.fps + ' fps');
-  check('2b. orbit >= 30 fps where the software GPU is not the limit (' + R.small.file + ')', R.small.orbit.fps >= 30, R.small.orbit.fps + ' fps');
+  // 2b's absolute floor (>= 30 fps) is a logged finding, not a gate, for now: on a CI runner it reads the
+  // runner's speed (33.2 / 40.1 / 26.6 / 31.3 / 26.7 / 26.7 / 26.3 fps on unchanged G-scope code) while the
+  // main thread's work per frame and the small/big frame-rate ratio held on every run. Ticket ci-timing-gates
+  // replaces the floor with a frames-rendered measure.
+  const ratio = R.orbit.fps > 0 ? +(R.small.orbit.fps / R.orbit.fps).toFixed(1) : 0;
+  say('  finding 2b. orbit ' + R.small.orbit.fps + ' fps on ' + R.small.file + ' (' + (R.small.orbit.fps >= 30 ? 'at or above' : 'below') +
+    ' the 30 fps target; not a gate - ci-timing-gates)');
+  check('2b. orbit where the software GPU is not the limit (' + R.small.file + '): the main thread\'s work per frame <= 33 ms',
+    R.small.orbit.cpuPerFrame <= 33, R.small.orbit.cpuPerFrame + ' ms');
+  check('2b. ...and it orbits >= 4x as fast as ' + path.basename(FILE) + ' on the same renderer (the GPU, not the page, is what limits the big one)',
+    ratio >= 4, ratio + 'x (' + R.small.orbit.fps + ' / ' + R.orbit.fps + ' fps)');
   check('3. the selection pass (the pick under the pointer) <= 16 ms', R.pick && R.pick.max <= 16, JSON.stringify(R.pick));
   const renders = R.idle.mainRenders + R.orbit.mainRenders + R.small.orbit.mainRenders;
   check('4. the main viewport does not render while G-scope covers it', renders === 0, renders + ' renders');
